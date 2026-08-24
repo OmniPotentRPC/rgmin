@@ -1,7 +1,7 @@
 //! Persistent Session: one step is one outer iteration.
 
 use eindir_core::objectives::Rosenbrock;
-use ndarray::{array, Array1};
+use ndarray::{Array1, array};
 use rgmin::{Control, Method, Solver};
 
 fn control() -> Control {
@@ -738,6 +738,84 @@ fn complex_circle_session_stays_on_the_set() {
 }
 
 #[test]
+fn unitary_session_stays_on_the_set() {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::ArrayView1;
+    use rgmin::ManifoldKind;
+    use rgmin::manifold::is_unitary;
+
+    /// Minus Re(tr U) on packed U(2). Minimizer is the identity.
+    struct MinusReTrace;
+    impl Objective<f64> for MinusReTrace {
+        fn dim(&self) -> usize {
+            8
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            use std::sync::OnceLock;
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| {
+                Bounds::new(Array1::from_elem(8, -2.0), Array1::from_elem(8, 2.0), 0.0)
+            })
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            -(x[0] + x[6])
+        }
+    }
+    impl Gradient<f64> for MinusReTrace {
+        fn dim(&self) -> usize {
+            8
+        }
+        fn grad(&self, _x: ArrayView1<f64>) -> Array1<f64> {
+            let mut g = Array1::zeros(8);
+            g[0] = -1.0;
+            g[6] = -1.0;
+            g
+        }
+    }
+    impl DifferentiableObjective<f64> for MinusReTrace {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+
+    let obj = MinusReTrace;
+    let s = 0.5_f64.sqrt();
+    let mut x = array![s, 0.0, s, 0.0, 0.0, s, 0.0, -s];
+    let mut solver = Solver::new(
+        Method::Steepest,
+        Control {
+            maxiter: 20,
+            gtol: 1e-8,
+            istep: 0.2,
+            maxmove: None,
+        },
+        8,
+    );
+    solver.set_manifold(ManifoldKind::unitary(2));
+    solver.set_accept(rgmin::Accept::None);
+    for _ in 0..20 {
+        let _ = solver.step(&obj, &mut x).unwrap();
+        assert!(is_unitary(&x), "left U(2) {x:?}");
+    }
+}
+
+#[test]
+fn unitary_rejects_a_3n_cluster() {
+    let obj = Rosenbrock::<114>::new();
+    let mut x = Array1::from_elem(114, 0.1);
+    let mut solver = Solver::new(Method::Steepest, control(), 114);
+    solver.set_manifold(rgmin::ManifoldKind::unitary(2));
+    let err = solver.step(&obj, &mut x).unwrap_err();
+    match err {
+        rgmin::Error::ManifoldDim { kind, got } => {
+            assert_eq!(kind, "unitary");
+            assert_eq!(got, 114);
+        }
+        other => panic!("expected ManifoldDim, got {other:?}"),
+    }
+}
+
+#[test]
 fn complex_circle_rejects_a_3n_cluster() {
     let obj = Rosenbrock::<114>::new();
     let mut x = Array1::from_elem(114, 0.1);
@@ -757,8 +835,8 @@ fn complex_circle_rejects_a_3n_cluster() {
 fn symmetric_session_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::manifold::is_symmetric;
     use rgmin::ManifoldKind;
+    use rgmin::manifold::is_symmetric;
 
     struct FrobeniusI;
     impl Objective<f64> for FrobeniusI {
@@ -1067,11 +1145,7 @@ fn an_uphill_everywhere_oracle_is_refused_not_moved() {
         };
         (r, g)
     });
-    let mut solver = rgmin::Solver::new(
-        rgmin::Method::Steepest,
-        rgmin::Control::default(),
-        6,
-    );
+    let mut solver = rgmin::Solver::new(rgmin::Method::Steepest, rgmin::Control::default(), 6);
     solver.set_accept(rgmin::Accept::Energy);
     let mut x = Array1::from(vec![0.0; 6]);
     let rep = solver.step(&obj, &mut x).expect("step runs");

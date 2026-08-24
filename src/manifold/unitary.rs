@@ -10,11 +10,13 @@
 //! `qr_unique` of \(U + V\) (manopt `retr_qr`): Gram-Schmidt
 //! columns with a column phase so the diagonal of `R` is real
 //! and non-negative. Transport is projection at the arrival
-//! point. Isolated molecules use [`super::RigidQuotient`].
+//! point. Ambient add / column norms / Hermitian reductions go
+//! through [`crate::vecops`] so the `par` feature applies.
+//! Isolated molecules use [`super::RigidQuotient`].
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::vecops::nrm2;
+use crate::vecops::{self, Vector};
 
 use super::Manifold;
 
@@ -84,11 +86,7 @@ impl Default for Unitary {
 impl Unitary {
     /// \(\mathrm{U}(n)\) with \(n \ge 1\).
     pub fn new(n: usize) -> Result<Self, usize> {
-        if n >= 1 {
-            Ok(Self { n })
-        } else {
-            Err(n)
-        }
+        if n >= 1 { Ok(Self { n }) } else { Err(n) }
     }
 
     /// Packed length `2 n^2`, or `None` on overflow.
@@ -206,7 +204,7 @@ impl Unitary {
                 let r = herm_dot(&qk, &v);
                 caxpy(r, &qk, &mut v);
             }
-            let nrm = nrm2(ArrayView1::from(v.as_slice()));
+            let nrm = vecops::nrm2(ArrayView1::from(v.as_slice()));
             if nrm > 1e-16 {
                 for t in v.iter_mut() {
                     *t /= nrm;
@@ -225,18 +223,16 @@ impl Unitary {
 }
 
 /// Hermitian inner product of two interleaved columns: \(\sum_i \bar u_i v_i\).
+/// Real part is the ambient Euclidean inner product (vecops `dot`).
 fn herm_dot(u: &[f64], v: &[f64]) -> C64 {
-    let n = u.len() / 2;
-    let mut acc = C64::ZERO;
-    for k in 0..n {
-        let ur = u[2 * k];
-        let ui = u[2 * k + 1];
-        let vr = v[2 * k];
-        let vi = v[2 * k + 1];
-        acc.re += ur * vr + ui * vi;
-        acc.im += ur * vi - ui * vr;
+    let re = vecops::dot(ArrayView1::from(u), ArrayView1::from(v));
+    let mut w = vec![0.0; v.len()];
+    for k in 0..v.len() / 2 {
+        w[2 * k] = v[2 * k + 1];
+        w[2 * k + 1] = -v[2 * k];
     }
-    acc
+    let im = vecops::dot(ArrayView1::from(u), ArrayView1::from(w.as_slice()));
+    C64 { re, im }
 }
 
 /// `v -= r * q` with complex `r` on interleaved pairs.
@@ -336,18 +332,19 @@ impl Manifold for Unitary {
     }
 
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        let (Some(xv), Some(uv)) = (x.as_slice(), v.as_slice()) else {
-            return x + v;
-        };
-        if !self.fits(xv.len()) || xv.len() != uv.len() {
+        if !self.fits(x.len()) || x.len() != v.len() {
             return x + v;
         }
-        let mut y = xv.to_vec();
-        for (yi, ui) in y.iter_mut().zip(uv.iter()) {
-            *yi += *ui;
+        let mut y = Vector::from_host(x.clone());
+        vecops::vaxpy(1.0, &Vector::from_host(v.clone()), &mut y);
+        {
+            let ys = y.host_mut();
+            let Some(slice) = ys.as_slice_mut() else {
+                return x + v;
+            };
+            self.qr_unique(slice);
         }
-        self.qr_unique(&mut y);
-        pack(self.n, y)
+        y.into_host()
     }
 
     fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
@@ -548,5 +545,64 @@ mod tests {
         let y = m.retract(&x, &Array1::zeros(8));
         assert!((&y - &x).mapv(f64::abs).sum() < 1e-15);
         assert!(is_unitary(&y));
+    }
+
+    #[test]
+    fn retract_from_non_identity_stays_unitary() {
+        let m = Unitary::new(2).unwrap();
+        let s = 0.5_f64.sqrt();
+        let mut u = vec![0.0; 8];
+        m.put(&mut u, 0, 0, C64 { re: s, im: 0.0 });
+        m.put(&mut u, 0, 1, C64 { re: s, im: 0.0 });
+        m.put(&mut u, 1, 0, C64 { re: 0.0, im: s });
+        m.put(&mut u, 1, 1, C64 { re: 0.0, im: -s });
+        let x = pack(2, u);
+        assert!(is_unitary(&x));
+        let v = m.project(&x, &skewh_step(2, 0.4));
+        let y = m.retract(&x, &v);
+        assert!(is_unitary(&y), "left U(2) {y:?}");
+        let uh = m.hconj(y.as_slice().unwrap());
+        let g = m.mul(&uh, y.as_slice().unwrap());
+        for i in 0..2 {
+            for j in 0..2 {
+                let z = m.at(&g, i, j);
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (z.re - want).abs() < 1e-10 && z.im.abs() < 1e-10,
+                    "U^* U[{i},{j}] = {z:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn retract_u3_stays_unitary() {
+        let m = Unitary::new(3).unwrap();
+        let x = identity(3);
+        let v = m.project(&x, &skewh_step(3, 0.2));
+        let y = m.retract(&x, &v);
+        assert!(is_unitary(&y), "left U(3) {y:?}");
+        assert_eq!(y.len(), 18);
+        let uh = m.hconj(y.as_slice().unwrap());
+        let g = m.mul(&uh, y.as_slice().unwrap());
+        for i in 0..3 {
+            for j in 0..3 {
+                let z = m.at(&g, i, j);
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (z.re - want).abs() < 1e-10 && z.im.abs() < 1e-10,
+                    "U^* U[{i},{j}] = {z:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn projected_step_is_real_orthogonal_to_the_point() {
+        let m = Unitary::new(2).unwrap();
+        let x = identity(2);
+        let v = m.project(&x, &skewh_step(2, 0.3));
+        let s = vecops::dot(x.view(), v.view());
+        assert!(s.abs() < 1e-14, "Re <U, U Omega> must vanish {s}");
     }
 }

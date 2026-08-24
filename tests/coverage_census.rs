@@ -4,13 +4,13 @@
 //! contract the API promises and fails when the contract does.
 
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
-use ndarray::{array, Array1, ArrayView1};
-use rgmin::manifold::{
-    is_spd, is_symmetric, is_unitary, ComplexCircle, Manifold, Multinomial, MwRigid, Oblique, Spd,
-    Sphere, Stiefel, StiefelNp, Symmetric, Unitary,
-};
+use ndarray::{Array1, ArrayView1, array};
 use rgmin::IrcTrust;
-use rgmin::{minimize_scg_exact, Conjugacy, Control, DirectionalCurvature, Restart, ScgParams};
+use rgmin::manifold::{
+    ComplexCircle, Manifold, Multinomial, MwRigid, Oblique, Spd, Sphere, Stiefel, StiefelNp,
+    Symmetric, Unitary, is_spd, is_symmetric, is_unitary,
+};
+use rgmin::{Conjugacy, Control, DirectionalCurvature, Restart, ScgParams, minimize_scg_exact};
 
 /// Stiefel at p = 1 is the sphere, in all three operations, which is
 /// the whole content of the type: divergence in any one of them means
@@ -199,6 +199,10 @@ fn unitary_retract_stays_on_the_set() {
     let t = m.project(&x, &v);
     let y = m.retract(&x, &t);
     assert!(is_unitary(&y), "left U(2) {y:?}");
+    let uh_u00 = y[0] * y[0] + y[1] * y[1] + y[4] * y[4] + y[5] * y[5];
+    let uh_u11 = y[2] * y[2] + y[3] * y[3] + y[6] * y[6] + y[7] * y[7];
+    assert!((uh_u00 - 1.0).abs() < 1e-10, "U^* U[0,0] {uh_u00}");
+    assert!((uh_u11 - 1.0).abs() < 1e-10, "U^* U[1,1] {uh_u11}");
     let fro = y.iter().map(|a| a * a).sum::<f64>().sqrt();
     assert!((fro - 1.0).abs() > 0.3, "must not be the sphere {y:?}");
 }
