@@ -176,6 +176,16 @@ impl Solver {
         self.manifold = kind;
     }
 
+    /// Real Grassmann \(\mathrm{Gr}(n,p)\). Packed column-major, length `n*p`.
+    pub fn set_grassmann(&mut self, n: usize, p: usize) {
+        self.set_manifold(ManifoldKind::Grassmann { n, p });
+    }
+
+    /// Product of `n` unit-modulus complex numbers. Packed length `2 n`.
+    pub fn set_complex_circle(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::ComplexCircle { n });
+    }
+
     /// Per-atom masses for [`ManifoldKind::MwRigid`] (Page–McIver / Eckart).
     /// Empty clears them (unit mass).
     pub fn set_masses(&mut self, masses: Array1<f64>) {
@@ -257,7 +267,10 @@ impl Solver {
     }
 
     fn horizontal_grad(&self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
-        let mut g = self.project_vec(x, grad);
+        let mut g = match self.manifold {
+            ManifoldKind::MwRigid | ManifoldKind::RigidQuotient => self.project_vec(x, grad),
+            other => other.egrad2rgrad(x, grad),
+        };
         if self.project_rigid
             && !matches!(
                 self.manifold,

@@ -27,23 +27,29 @@ Tokens
 
 .. table::
 
-    +-------------------+---------------------------------------+-------------------------------------------+
-    | Token             | Packing                               | Retraction                                |
-    +===================+=======================================+===========================================+
-    | ``Euclidean``     | length ``n``                          | ``x + v``                                 |
-    +-------------------+---------------------------------------+-------------------------------------------+
-    | ``RigidQuotient`` | 3N Cartesians, N >= 2                 | horizontal lift ``x + v``                 |
-    +-------------------+---------------------------------------+-------------------------------------------+
-    | ``MwRigid``       | same; masses on the session           | same; Eckart inner product                |
-    +-------------------+---------------------------------------+-------------------------------------------+
-    | ``Sphere``        | unit vector, length ``n``             | ``(x+v)/norm(x+v)``                       |
-    +-------------------+---------------------------------------+-------------------------------------------+
-    | ``So3``           | row-major ``R``, length 9             | QR with positive diagonal                 |
-    +-------------------+---------------------------------------+-------------------------------------------+
-    | ``Stiefel``       | ``St(n,1)``: same as the sphere       | same as the sphere                        |
-    +-------------------+---------------------------------------+-------------------------------------------+
-    | ``Se3``           | row-major ``R`` then ``t``, length 12 | SO(3) on the rotation, Euclidean on ``t`` |
-    +-------------------+---------------------------------------+-------------------------------------------+
+    +------------------------+---------------------------------------------+-------------------------------------------+
+    | Token                  | Packing                                     | Retraction                                |
+    +========================+=============================================+===========================================+
+    | ``Euclidean``          | length ``n``                                | ``x + v``                                 |
+    +------------------------+---------------------------------------------+-------------------------------------------+
+    | ``RigidQuotient``      | 3N Cartesians, N >= 2                       | horizontal lift ``x + v``                 |
+    +------------------------+---------------------------------------------+-------------------------------------------+
+    | ``MwRigid``            | same; masses on the session                 | same; Eckart inner product                |
+    +------------------------+---------------------------------------------+-------------------------------------------+
+    | ``Sphere``             | unit vector, length ``n``                   | ``(x+v)/norm(x+v)``                       |
+    +------------------------+---------------------------------------------+-------------------------------------------+
+    | ``So3``                | row-major ``R``, length 9                   | QR with positive diagonal                 |
+    +------------------------+---------------------------------------------+-------------------------------------------+
+    | ``Stiefel``            | ``St(n,1)``: same as the sphere             | same as the sphere                        |
+    +------------------------+---------------------------------------------+-------------------------------------------+
+    | ``Se3``                | row-major ``R`` then ``t``, length 12       | SO(3) on the rotation, Euclidean on ``t`` |
+    +------------------------+---------------------------------------------+-------------------------------------------+
+    | ``Spd``                | row-major ``n x n`` SPD, length ``n^2``     | ``symm(X + U + (1/2) U X^{-1} U)``        |
+    +------------------------+---------------------------------------------+-------------------------------------------+
+    | ``Grassmann { n, p }`` | column-major ``n x p``, length ``n p``      | polar factor of ``X + U``                 |
+    +------------------------+---------------------------------------------+-------------------------------------------+
+    | ``Hyperbolic``         | Minkowski vector, length ``n`` (``n >= 2``) | hyperboloid exp (``cosh`` / ``sinh``)     |
+    +------------------------+---------------------------------------------+-------------------------------------------+
 
 An isolated molecule or cluster lives on ``RigidQuotient``
 (``R^{3N}/SE(3)``): Sella Cartesian ``fix_translation`` plus
@@ -54,9 +60,14 @@ gpr\ :sub:`optim`\ ``IRCDriver`` (https://doi.org/10.1063/1.454172,
 https://doi.org/10.1063/1.434152). Call ``set_masses`` with N atomic masses;
 unit mass makes ``MwRigid`` identical to ``RigidQuotient``.
 
-``Sphere``, ``So3``, ``Stiefel``, and ``Se3`` are matrix-manifold
-embeddings. ``So3`` rejects any length other than 9. ``Se3`` rejects
-any length other than 12. They do not pack or prefix-interpret a
+``Sphere``, ``So3``, ``Stiefel``, ``Se3``, ``Spd``, ``Grassmann``, and
+``Hyperbolic`` are matrix-manifold embeddings. ``So3`` rejects any
+length other than 9. ``Se3`` rejects any length other than 12. ``Spd``
+rejects any length that is not a positive perfect square.
+``Grassmann { n, p }`` rejects any length other than ``n p``.
+``Hyperbolic`` is the Lorentz hyperboloid (manopt
+``hyperbolicfactory``, :math:`m = 1`): length :math:`n` (:math:`n \ge 2`),
+Minkowski square :math:`-1`. They do not pack or prefix-interpret a
 3N cluster.
 
 Euclidean is the default. Existing eOn / rgpot / eindir paths do
@@ -92,6 +103,9 @@ C
     rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_SO3);
     rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_STIEFEL);
     rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_SE3);
+    rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_SPD);
+    rgmin_solver_set_grassmann(s, 5, 2);
+    rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_HYPERBOLIC);
     rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_EUCLIDEAN);
 
 Changing the manifold drops method memory (``forget``).
@@ -117,6 +131,22 @@ Packing notes
 
 - ``Stiefel`` is ``St(n,1)``. A frame with ``p > 1`` is not a length
   token: ``n p`` does not name ``p``.
+
+- ``Spd`` is manopt ``sympositivedefinitefactory``: the affine-invariant
+  SPD cone (Bhatia bi-invariant metric). The tangent is the
+  symmetric matrices. Length must be a square; a 3N cluster is
+  rejected.
+
+- ``Grassmann { n, p }`` is manopt ``grassmannfactory``. The point is
+  the column space of an orthonormal ``n x p`` frame, packed
+  column-major (``X(:)``). Projection is the horizontal lift
+  ``U - X (X^T U)``. Retraction is the polar factor of ``X + U``.
+  A 3N cluster is not this packing.
+
+- ``Hyperbolic`` is a length-:math:`n` Minkowski vector
+  (:math:`-x_0^2 + ||x_{\mathrm{sp}}||^2 = -1`, :math:`n \ge 2`). Pack with
+  ``pack_h`` / ``unpack_h`` (time-like then spatial). It is not the
+  sphere and not a 3N cluster.
 
 - ``set_project_rigid`` is the same horizontal projection as
   ``RigidQuotient`` and stays available on Euclidean.

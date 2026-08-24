@@ -23,10 +23,6 @@ through EigenExa=13, ``schema/eigen.capnp``) and ``EigenParams``
 ``rgmin_lowest_eigenpair`` plus ``rgmin_eigen_params_t``. Unlinked
 backends return ``RGMIN_UNAVAILABLE``.
 
-The gpr_optim
-consumer that writes ``RGMIN_CONJUGACY_LIU_STOREY`` is
-``RgminScg.inl``, not in-tree ``SCG.inl``.
-
 Molecular manifolds: ``rigid_quotient`` is Sella Cartesian
 ``R^{3N}/SE(3)`` (``fix_translation`` + ``fix_rotation``);
 ``mw_rigid`` is the Page–McIver / Sella IRC Eckart metric on the

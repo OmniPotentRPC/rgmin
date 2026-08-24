@@ -4,7 +4,10 @@
 //! contract the API promises and fails when the contract does.
 
 use ndarray::{array, Array1, ArrayView1};
-use rgmin::manifold::{is_spd, Manifold, MwRigid, Spd, Sphere, Stiefel};
+use rgmin::manifold::{
+    is_spd, minkowski, pack_h, ComplexCircle, Grassmann, Hyperbolic, Manifold, MwRigid, Spd,
+    Sphere, Stiefel,
+};
 use rgmin::IrcTrust;
 use rgmin::{
     minimize_scg_exact, Conjugacy, Control, DirectionalCurvature, Restart, ScgParams,
@@ -25,6 +28,36 @@ fn stiefel_p1_is_the_sphere_in_all_three_operations() {
         Stiefel.transport(&x, &y, &v),
         Sphere.transport(&x, &y, &v)
     );
+}
+
+/// Grassmann Gr(4, 2) is a 4x2 frame, not a unit sphere in R^8.
+#[test]
+fn grassmann_retract_stays_orthonormal_and_is_not_the_sphere() {
+    let gr = Grassmann::new(4, 2);
+    let x = array![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let v = array![0.0, 0.0, 0.1, -0.3, 0.0, 0.0, 0.2, 0.05];
+    let y = gr.retract(&x, &v);
+    let n0: f64 = y.iter().take(4).map(|a| a * a).sum();
+    let n1: f64 = y.iter().skip(4).map(|a| a * a).sum();
+    let d: f64 = y.iter().take(4).zip(y.iter().skip(4)).map(|(a, b)| a * b).sum();
+    assert!((n0 - 1.0).abs() < 1e-12);
+    assert!((n1 - 1.0).abs() < 1e-12);
+    assert!(d.abs() < 1e-12);
+    let nrm = y.iter().map(|a| a * a).sum::<f64>().sqrt();
+    assert!((nrm - 1.0).abs() > 1e-6);
+}
+
+/// A hyperbolic retraction stays on the Lorentz sheet. This is not the
+/// sphere: the quadratic form is Minkowski, and the first coordinate
+/// stays positive.
+#[test]
+fn hyperbolic_retract_stays_on_the_sheet() {
+    let x = pack_h(2.0_f64.sqrt(), array![1.0, 0.0].view());
+    let v = Hyperbolic.project(&x, &array![0.2, -0.1, 0.4]);
+    let y = Hyperbolic.retract(&x, &v);
+    assert!((minkowski(y.view(), y.view()) + 1.0).abs() < 1e-12);
+    assert!(y[0] > 0.0);
+    assert_eq!(y.len(), 3);
 }
 
 /// The Eckart quotient's projection removes every rigid-body component:
@@ -91,6 +124,22 @@ fn spd_retract_stays_on_the_set() {
     assert!((t[1] - t[2]).abs() < 1e-15);
     let w = Spd.transport(&x, &y, &v);
     assert!((w[1] - w[2]).abs() < 1e-15);
+}
+
+/// manopt complexcirclefactory: each (re, im) pair stays on S^1.
+/// The product is not the sphere in the ambient even dimension.
+#[test]
+fn complex_circle_retract_stays_on_the_set() {
+    let m = ComplexCircle::new(2);
+    let x = array![1.0, 0.0, 0.0, 1.0];
+    let v = m.project(&x, &array![0.2, -0.1, 0.3, 0.4]);
+    let y = m.retract(&x, &v);
+    let n0 = (y[0] * y[0] + y[1] * y[1]).sqrt();
+    let n1 = (y[2] * y[2] + y[3] * y[3]).sqrt();
+    assert!((n0 - 1.0).abs() < 1e-14, "left circle 0 {y:?}");
+    assert!((n1 - 1.0).abs() < 1e-14, "left circle 1 {y:?}");
+    let fro = y.iter().map(|a| a * a).sum::<f64>().sqrt();
+    assert!((fro - 1.0).abs() > 0.3, "must not be the sphere {y:?}");
 }
 
 /// A quadratic bowl carrying its exact directional curvature. SCG with

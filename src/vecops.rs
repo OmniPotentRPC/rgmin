@@ -75,6 +75,25 @@ pub fn axpy(a: f64, x: ArrayView1<f64>, y: &mut Array1<f64>) {
     }
 }
 
+/// `sum_i x_i`.
+#[cfg(not(feature = "par"))]
+pub fn sum(x: ArrayView1<f64>) -> f64 {
+    x.sum()
+}
+
+/// `sum_i x_i`, reduced in parallel chunks.
+#[cfg(feature = "par")]
+pub fn sum(x: ArrayView1<f64>) -> f64 {
+    use rayon::prelude::*;
+    if x.len() < PAR_MIN_LEN {
+        return x.sum();
+    }
+    match x.as_slice() {
+        Some(a) => a.par_chunks(4096).map(|c| c.iter().sum::<f64>()).sum(),
+        None => x.sum(),
+    }
+}
+
 /// `||x||_2`.
 pub fn nrm2(x: ArrayView1<f64>) -> f64 {
     dot(x, x).sqrt()
@@ -221,6 +240,7 @@ mod tests {
         assert!((d - x.dot(&y)).abs() < 1e-12 * d.abs().max(1.0));
         assert_eq!(z, reference);
         assert!((nrm2(x.view()) - x.dot(&x).sqrt()).abs() < 1e-12);
+        assert!((sum(x.view()) - x.sum()).abs() < 1e-12);
     }
 
     #[test]
