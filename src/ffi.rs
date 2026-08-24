@@ -1400,6 +1400,10 @@ pub enum rgmin_manifold_t {
     /// Real skew-symmetric n-by-n, row-major n², n >= 2.
     /// manopt `skewsymmetricfactory`.
     RGMIN_MANIFOLD_SKEWSYMMETRIC = 15,
+    /// Complex Euclidean C^n. Packed interleaved, length 2n.
+    /// Token defaults to n = 1; use rgmin_solver_set_euclidean_complex.
+    /// Reserved tokens 7-10 stay unused.
+    RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX = 17,
 }
 
 #[unsafe(no_mangle)]
@@ -1422,6 +1426,9 @@ pub unsafe extern "C" fn rgmin_solver_set_manifold(
         rgmin_manifold_t::RGMIN_MANIFOLD_COMPLEX_CIRCLE => ManifoldKind::ComplexCircle { n: 1 },
         rgmin_manifold_t::RGMIN_MANIFOLD_SYMMETRIC => ManifoldKind::Symmetric,
         rgmin_manifold_t::RGMIN_MANIFOLD_SKEWSYMMETRIC => ManifoldKind::SkewSymmetric,
+        rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX => {
+            ManifoldKind::EuclideanComplex { n: 1 }
+        }
         rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN => ManifoldKind::Euclidean,
     };
     unsafe { (*solver).solver.set_manifold(kind) };
@@ -1462,6 +1469,18 @@ pub unsafe extern "C" fn rgmin_solver_set_complex_circle(solver: *mut rgmin_solv
         return;
     }
     unsafe { (*solver).solver.set_complex_circle(n) };
+}
+
+/// `n` complex Euclidean entries. Packed interleaved, length `2 n`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_euclidean_complex(
+    solver: *mut rgmin_solver_t,
+    n: usize,
+) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_euclidean_complex(n) };
 }
 
 /// Per-atom masses for `RGMIN_MANIFOLD_MW_RIGID`. `n_atoms == 0` or a

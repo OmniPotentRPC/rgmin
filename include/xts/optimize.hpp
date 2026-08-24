@@ -213,6 +213,9 @@ public:
     void set_complex_circle(std::size_t n) {
         rgmin_solver_set_complex_circle(ptr_, n);
     }
+    void set_euclidean_complex(std::size_t n) {
+        rgmin_solver_set_euclidean_complex(ptr_, n);
+    }
 
     Report step(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
                 DLManagedTensorVersioned* x) {
