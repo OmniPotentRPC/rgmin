@@ -205,6 +205,11 @@ impl Solver {
         self.set_manifold(ManifoldKind::ComplexCircle { n });
     }
 
+    /// \(\mathbb{C}^n\). Packed interleaved, length `2 n`.
+    pub fn set_euclidean_complex(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::EuclideanComplex { n });
+    }
+
     /// Per-atom masses for [`ManifoldKind::MwRigid`] (Page–McIver / Eckart).
     /// Empty clears them (unit mass).
     pub fn set_masses(&mut self, masses: Array1<f64>) {

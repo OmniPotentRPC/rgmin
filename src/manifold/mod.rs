@@ -15,11 +15,13 @@
 //! [`ManifoldKind::Symmetric`] is manopt `symmetricfactory`.
 //! [`ManifoldKind::SkewSymmetric`] is manopt `skewsymmetricfactory`.
 //! [`ManifoldKind::ComplexCircle`] is manopt `complexcirclefactory`.
+//! [`ManifoldKind::EuclideanComplex`] is manopt `euclideancomplexfactory`.
 
 use ndarray::Array1;
 
 mod complex_circle;
 mod euclidean;
+mod euclidean_complex;
 mod multinomial;
 mod mw_rigid;
 mod oblique;
@@ -34,6 +36,10 @@ mod symmetric;
 
 pub use complex_circle::ComplexCircle;
 pub use euclidean::Euclidean;
+pub use euclidean_complex::{
+    inner as inner_eucplx, is_euclidean_complex, pack as pack_eucplx,
+    typical_dist as typical_dist_eucplx, unpack as unpack_eucplx, EuclideanComplex,
+};
 pub use multinomial::Multinomial;
 pub use mw_rigid::MwRigid;
 pub use oblique::Oblique;
@@ -108,6 +114,13 @@ pub enum ManifoldKind {
         /// Number of unit-modulus complex entries.
         n: usize,
     },
+    /// Complex Euclidean \(\mathbb{C}^n\). Packed interleaved
+    /// `(re, im)`, length `2 n`. manopt `euclideancomplexfactory`.
+    /// Not the sphere and not [`Self::ComplexCircle`].
+    EuclideanComplex {
+        /// Number of complex entries.
+        n: usize,
+    },
 }
 
 impl ManifoldKind {
@@ -138,6 +151,11 @@ impl ManifoldKind {
         Self::ComplexCircle { n }
     }
 
+    /// \(\mathbb{C}^n\). Packed interleaved, length `2 n`.
+    pub fn euclidean_complex(n: usize) -> Self {
+        Self::EuclideanComplex { n }
+    }
+
     /// C ABI / INI token.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -154,6 +172,7 @@ impl ManifoldKind {
             Self::Symmetric => "symmetric",
             Self::SkewSymmetric => "skewsymmetric",
             Self::ComplexCircle { .. } => "complex_circle",
+            Self::EuclideanComplex { .. } => "euclidean_complex",
         }
     }
 }
@@ -195,6 +214,7 @@ impl Manifold for ManifoldKind {
             Self::Symmetric => Symmetric.required_dim(n),
             Self::SkewSymmetric => SkewSymmetric.required_dim(n),
             Self::ComplexCircle { n: cn } => ComplexCircle { n: *cn }.required_dim(n),
+            Self::EuclideanComplex { n: en } => EuclideanComplex { n: *en }.required_dim(n),
         }
     }
 
@@ -214,6 +234,7 @@ impl Manifold for ManifoldKind {
             Self::Symmetric => Symmetric.project(x, v),
             Self::SkewSymmetric => SkewSymmetric.project(x, v),
             Self::ComplexCircle { n } => ComplexCircle { n: *n }.project(x, v),
+            Self::EuclideanComplex { n } => EuclideanComplex { n: *n }.project(x, v),
         }
     }
 
@@ -233,6 +254,7 @@ impl Manifold for ManifoldKind {
             Self::Symmetric => Symmetric.retract(x, v),
             Self::SkewSymmetric => SkewSymmetric.retract(x, v),
             Self::ComplexCircle { n } => ComplexCircle { n: *n }.retract(x, v),
+            Self::EuclideanComplex { n } => EuclideanComplex { n: *n }.retract(x, v),
         }
     }
 
@@ -252,6 +274,7 @@ impl Manifold for ManifoldKind {
             Self::Symmetric => Symmetric.transport(x_from, x_to, v),
             Self::SkewSymmetric => SkewSymmetric.transport(x_from, x_to, v),
             Self::ComplexCircle { n } => ComplexCircle { n: *n }.transport(x_from, x_to, v),
+            Self::EuclideanComplex { n } => EuclideanComplex { n: *n }.transport(x_from, x_to, v),
         }
     }
 }
