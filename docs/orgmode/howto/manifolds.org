@@ -38,6 +38,7 @@ vector: ~project~, ~retract~, ~transport~. Citations:
 | ~ComplexCircle { n }~ | interleaved ~(re, im)~, length ~2 n~ | ~sign(z+v)~ per pair |
 | ~Symmetric~ | row-major ~n x n~, length ~n^2~ | ~X + U~ then ~multisym~ |
 | ~SkewSymmetric~ | row-major ~n x n~, length ~n^2~, ~n >= 2~ | ~X + U~ then ~multiskew~ |
+| ~EuclideanComplex { n }~ | interleaved ~(re, im)~, length ~2 n~ | ~x + v~ |
 
 An isolated molecule or cluster lives on ~RigidQuotient~
 (~R^{3N}/SE(3)~): Sella Cartesian ~fix_translation~ plus
@@ -48,11 +49,12 @@ gpr_optim ~IRCDriver~ (doi:10.1063/1.454172,
 doi:10.1063/1.434152). Call ~set_masses~ with N atomic masses;
 unit mass makes ~MwRigid~ identical to ~RigidQuotient~.
 
-~Sphere~, ~So3~, ~Stiefel~, ~Se3~, and ~ComplexCircle~ are
-matrix-manifold embeddings. ~So3~ rejects any length other than 9.
-~Se3~ rejects any length other than 12. ~ComplexCircle { n }~
-rejects any length other than ~2 n~. They do not pack or
-prefix-interpret a 3N cluster.
+~Sphere~, ~So3~, ~Stiefel~, ~Se3~, ~ComplexCircle~, and
+~EuclideanComplex~ are matrix-manifold embeddings. ~So3~ rejects
+any length other than 9. ~Se3~ rejects any length other than 12.
+~ComplexCircle { n }~ and ~EuclideanComplex { n }~ reject any
+length other than ~2 n~. They do not pack or prefix-interpret a
+3N cluster.
 
 Euclidean is the default. Existing eOn / rgpot / eindir paths do
 not change until a host calls the setter.
@@ -90,6 +92,7 @@ rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_MULTINOMIAL);
 rgmin_solver_set_complex_circle(s, 4);
 rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_SYMMETRIC);
 rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_SKEWSYMMETRIC);
+rgmin_solver_set_euclidean_complex(s, 4);
 rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_EUCLIDEAN);
 #+end_src
 
@@ -132,5 +135,9 @@ Changing the manifold drops method memory (~forget~).
   Projection is ~multiskew~ (~0.5 (A - A^T)~). Retraction is
   ~X + U~. Transport is the identity. It is not the symmetric
   subspace and not a 3N cluster.
+- ~EuclideanComplex { n }~ is manopt ~euclideancomplexfactory~:
+  interleaved ~(re, im)~ pairs, length ~2 n~. Projection and
+  transport are the identity. Retraction is ~x + v~. It is not
+  the sphere, not ~ComplexCircle~, and not a 3N cluster.
 - ~set_project_rigid~ is the same horizontal projection as
   ~RigidQuotient~ and stays available on Euclidean.

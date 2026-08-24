@@ -6,6 +6,13 @@
 
 ** Unreleased
 
+Complex Euclidean (~euclidean_complex~ /
+~RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX~ = 17): manopt
+~euclideancomplexfactory~. Packed interleaved ~(re, im)~, length
+~2 n~. Projection and transport are the identity; retraction is
+~x + v~. Not the sphere and not ~ComplexCircle~. A 3N cluster
+is rejected. Reserved tokens 7-10 stay unused.
+
 Skew-symmetric matrices (~skewsymmetric~ /
 ~RGMIN_MANIFOLD_SKEWSYMMETRIC~ = 15): manopt ~skewsymmetricfactory~.
 Packed row-major ~n^2~, ~n >= 2~. Projection is ~multiskew~

@@ -46,6 +46,8 @@ Tokens
     +-------------------+---------------------------------------+-------------------------------------------+
     | ``ComplexCircle`` | interleaved ``(re,im)``, length 2n   | ``sign(z+v)`` per pair                    |
     +-------------------+---------------------------------------+-------------------------------------------+
+    | ``Euc. complex``  | interleaved ``(re,im)``, length 2n   | ``x + v``                                 |
+    +-------------------+---------------------------------------+-------------------------------------------+
 
 An isolated molecule or cluster lives on ``RigidQuotient``
 (``R^{3N}/SE(3)``): Sella Cartesian ``fix_translation`` plus
@@ -56,10 +58,11 @@ gpr\ :sub:`optim`\ ``IRCDriver`` (https://doi.org/10.1063/1.454172,
 https://doi.org/10.1063/1.434152). Call ``set_masses`` with N atomic masses;
 unit mass makes ``MwRigid`` identical to ``RigidQuotient``.
 
-``Sphere``, ``So3``, ``Stiefel``, ``Se3``, and ``ComplexCircle`` are
-matrix-manifold embeddings. ``So3`` rejects any length other than 9.
-``Se3`` rejects any length other than 12. ``ComplexCircle { n }``
-rejects any length other than ``2 n``. They do not pack or
+``Sphere``, ``So3``, ``Stiefel``, ``Se3``, ``ComplexCircle``, and
+``EuclideanComplex`` are matrix-manifold embeddings. ``So3``
+rejects any length other than 9. ``Se3`` rejects any length other
+than 12. ``ComplexCircle { n }`` and ``EuclideanComplex { n }``
+reject any length other than ``2 n``. They do not pack or
 prefix-interpret a 3N cluster.
 
 Euclidean is the default. Existing eOn / rgpot / eindir paths do
@@ -97,6 +100,7 @@ C
     rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_SE3);
     rgmin_solver_set_complex_circle(s, 4);
     rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_SYMMETRIC);
+    rgmin_solver_set_euclidean_complex(s, 4);
     rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_EUCLIDEAN);
 
 Changing the manifold drops method memory (``forget``).
@@ -127,6 +131,11 @@ Packing notes
   interleaved ``(re, im)`` pairs, length ``2 n``. Each pair is
   independently unit-modulus. It is not the sphere :math:`S^{2n-1}`
   and not a 3N cluster.
+
+- ``EuclideanComplex { n }`` is manopt ``euclideancomplexfactory``:
+  interleaved ``(re, im)`` pairs, length ``2 n``. Projection and
+  transport are the identity. Retraction is ``x + v``. It is not
+  the sphere, not ``ComplexCircle``, and not a 3N cluster.
 
 - ``Symmetric`` is manopt ``symmetricfactory``: an ``n x n`` real
   symmetric matrix packed row-major (``n^2``). Projection is

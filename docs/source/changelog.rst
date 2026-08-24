@@ -6,6 +6,14 @@ Changelog
 Unreleased
 ~~~~~~~~~~
 
+Complex Euclidean (``euclidean_complex`` /
+``RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX`` = 17): manopt
+``euclideancomplexfactory``. Packed interleaved ``(re, im)``,
+length ``2 n``. Projection and transport are the identity;
+retraction is ``x + v``. Not the sphere and not
+``ComplexCircle``. A 3N cluster is rejected. Reserved tokens
+7-10 stay unused.
+
 Symmetric matrices (``symmetric`` / ``RGMIN_MANIFOLD_SYMMETRIC`` = 14):
 manopt ``symmetricfactory``. Packed row-major ``n^2``. Projection is
 symmetrization, retraction is ``X + U``, transport is the identity.
