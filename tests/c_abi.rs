@@ -938,7 +938,39 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
     }
 }
 
-/// Minus the real trace on packed U(2): -(U_00 + U_11).
+/// Packed U(n): interleaved (re, im) row-major, length 2 n^2.
+/// U^* U [j,k] = sum_i conj(U[i,j]) U[i,k].
+fn unitary_gram(x: &[f64], n: usize, j: usize, k: usize) -> (f64, f64) {
+    let mut re = 0.0;
+    let mut im = 0.0;
+    for i in 0..n {
+        let uj = 2 * (i * n + j);
+        let uk = 2 * (i * n + k);
+        let a = x[uj];
+        let b = x[uj + 1];
+        let c = x[uk];
+        let d = x[uk + 1];
+        re += a * c + b * d;
+        im += a * d - b * c;
+    }
+    (re, im)
+}
+
+fn assert_u_star_u_is_identity(x: &[f64], n: usize) {
+    assert_eq!(x.len(), 2 * n * n);
+    for j in 0..n {
+        for k in 0..n {
+            let (re, im) = unitary_gram(x, n, j, k);
+            let want = if j == k { 1.0 } else { 0.0 };
+            assert!(
+                (re - want).abs() < 1e-10 && im.abs() < 1e-10,
+                "U^* U[{j},{k}] = {re}+{im}i, want {want}; x={x:?}"
+            );
+        }
+    }
+}
+
+/// Minus the real trace on U(2). Minimizer is the identity.
 unsafe extern "C" fn minus_re_tr_eval(
     _user: *mut c_void,
     x: *const DLManagedTensorVersioned,
@@ -969,14 +1001,12 @@ unsafe extern "C" fn minus_re_tr_grad(
     rgmin_status_t::RGMIN_SUCCESS
 }
 
-/// Token 16 / set_unitary must take a packed U(n) step that stays on
-/// the group. The setter-smoke above overwrites to Euclidean before
-/// the Rosenbrock step, so it never covers this path.
+/// Token 16 / `rgmin_solver_set_unitary` must take a step on a packed
+/// U(n) point and leave U^* U = I. The live-session setter smoke
+/// overwrites Unitary with Euclidean before the Rosenbrock step.
 #[test]
 fn c_abi_unitary_step_stays_on_the_set() {
-    use ndarray::Array1;
     use rgmin::ffi::{rgmin_manifold_t, rgmin_solver_set_manifold, rgmin_solver_set_unitary};
-    use rgmin::manifold::is_unitary;
 
     assert_eq!(rgmin_manifold_t::RGMIN_MANIFOLD_UNITARY as i32, 16);
 
@@ -987,12 +1017,10 @@ fn c_abi_unitary_step_stays_on_the_set() {
         memory: 8,
         maxmove: 0.0,
     };
-    // U(2) is packed interleaved (re, im) row-major, length 8.
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 8) };
     assert!(!session.is_null());
     unsafe {
-        // Token 16 alone defaults to n = 1. U(n) for n > 1 is
-        // rgmin_solver_set_unitary.
+        // Token 16 defaults to U(1); set_unitary selects U(2).
         rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_UNITARY);
         rgmin_solver_set_unitary(session, 2);
         rgmin_solver_set_accept(session, rgmin_accept_t::RGMIN_ACCEPT_NONE);
@@ -1001,33 +1029,28 @@ fn c_abi_unitary_step_stays_on_the_set() {
     // Hadamard-like unitary: 1/sqrt(2) * [1, 1; i, -i].
     let s = 0.5_f64.sqrt();
     let mut x = [s, 0.0, s, 0.0, 0.0, s, 0.0, -s];
-    assert!(
-        is_unitary(&Array1::from(x.to_vec())),
-        "fixture left U(2) {x:?}"
-    );
+    assert_u_star_u_is_identity(&x, 2);
 
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
     };
-    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 8) };
-    let st = unsafe {
-        rgmin_solver_step(
-            session,
-            Some(minus_re_tr_eval),
-            Some(minus_re_tr_grad),
-            std::ptr::null_mut(),
-            xt,
-            &mut out,
-        )
-    };
-    unsafe { rgmin_tensor_free(xt) };
-    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
-    assert!(out.value.is_finite());
-    assert!(
-        is_unitary(&Array1::from(x.to_vec())),
-        "C step left U(2) {x:?}"
-    );
+    for _ in 0..20 {
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 8) };
+        let st = unsafe {
+            rgmin_solver_step(
+                session,
+                Some(minus_re_tr_eval),
+                Some(minus_re_tr_grad),
+                std::ptr::null_mut(),
+                xt,
+                &mut out,
+            )
+        };
+        unsafe { rgmin_tensor_free(xt) };
+        assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+        assert_u_star_u_is_identity(&x, 2);
+    }
     unsafe { rgmin_solver_free(session) };
 }
