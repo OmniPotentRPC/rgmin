@@ -909,6 +909,86 @@ fn skewsymmetric_rejects_a_3n_cluster() {
 }
 
 #[test]
+fn euclidean_complex_session_stays_on_the_set() {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::ArrayView1;
+    use rgmin::manifold::is_euclidean_complex;
+    use rgmin::ManifoldKind;
+
+    // 0.5 ||z - (1+i, 0)||^2 on C^2, packed interleaved.
+    struct Target;
+    impl Objective<f64> for Target {
+        fn dim(&self) -> usize {
+            4
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            use std::sync::OnceLock;
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| {
+                Bounds::new(Array1::from_elem(4, -4.0), Array1::from_elem(4, 4.0), 0.0)
+            })
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            let t = [1.0, 1.0, 0.0, 0.0];
+            0.5 * x.iter().zip(t).map(|(a, b)| (a - b) * (a - b)).sum::<f64>()
+        }
+    }
+    impl Gradient<f64> for Target {
+        fn dim(&self) -> usize {
+            4
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            let t = [1.0, 1.0, 0.0, 0.0];
+            Array1::from_iter(x.iter().zip(t).map(|(a, b)| a - b))
+        }
+    }
+    impl DifferentiableObjective<f64> for Target {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+
+    let obj = Target;
+    let mut x = array![0.2, -0.4, 1.5, 0.8];
+    let mut solver = Solver::new(
+        Method::Steepest,
+        Control {
+            maxiter: 20,
+            gtol: 1e-8,
+            istep: 0.2,
+            maxmove: None,
+        },
+        4,
+    );
+    solver.set_manifold(ManifoldKind::euclidean_complex(2));
+    solver.set_accept(rgmin::Accept::None);
+    for _ in 0..20 {
+        let _ = solver.step(&obj, &mut x).unwrap();
+        assert!(is_euclidean_complex(&x), "left C^2 {x:?}");
+        assert_eq!(x.len(), 4);
+        assert!(x.iter().all(|a| a.is_finite()), "non-finite {x:?}");
+    }
+    let fro = x.iter().map(|a| a * a).sum::<f64>().sqrt();
+    assert!((fro - 1.0).abs() > 0.2, "must not land on the sphere {x:?}");
+}
+
+#[test]
+fn euclidean_complex_rejects_a_3n_cluster() {
+    let obj = Rosenbrock::<114>::new();
+    let mut x = Array1::from_elem(114, 0.1);
+    let mut solver = Solver::new(Method::Steepest, control(), 114);
+    solver.set_manifold(rgmin::ManifoldKind::euclidean_complex(2));
+    let err = solver.step(&obj, &mut x).unwrap_err();
+    match err {
+        rgmin::Error::ManifoldDim { kind, got } => {
+            assert_eq!(kind, "euclidean_complex");
+            assert_eq!(got, 114);
+        }
+        other => panic!("expected ManifoldDim, got {other:?}"),
+    }
+}
+
+#[test]
 fn rigid_quotient_drops_translation_and_keeps_3n() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;

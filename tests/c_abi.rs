@@ -841,10 +841,10 @@ fn c_abi_respects_maxmove_when_initial_step_is_larger() {
 fn c_abi_every_setter_survives_live_and_null_sessions() {
     use rgmin::ffi::{
         rgmin_manifold_t, rgmin_qn_step_t, rgmin_solver_forget, rgmin_solver_set_atom_maxmove,
-        rgmin_solver_set_cautious, rgmin_solver_set_extra_updates, rgmin_solver_set_manifold,
-        rgmin_solver_set_masses, rgmin_solver_set_maxmove, rgmin_solver_set_oblique,
-        rgmin_solver_set_periodic, rgmin_solver_set_project_rigid, rgmin_solver_set_qn_step,
-        rgmin_solver_set_stiefel,
+        rgmin_solver_set_cautious, rgmin_solver_set_euclidean_complex,
+        rgmin_solver_set_extra_updates, rgmin_solver_set_manifold, rgmin_solver_set_masses,
+        rgmin_solver_set_maxmove, rgmin_solver_set_oblique, rgmin_solver_set_periodic,
+        rgmin_solver_set_project_rigid, rgmin_solver_set_qn_step, rgmin_solver_set_stiefel,
     };
     let ctrl = rgmin_control_t {
         maxiter: 20,
@@ -869,6 +869,8 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_masses(session, std::ptr::null(), 0);
         rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_SYMMETRIC);
         rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_SKEWSYMMETRIC);
+        rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX);
+        rgmin_solver_set_euclidean_complex(session, 2);
         rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_MULTINOMIAL);
         rgmin_solver_set_oblique(session, 3, 2);
         rgmin_solver_set_stiefel(session, 4, 2);
@@ -912,6 +914,7 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_periodic(null, 0);
         rgmin_solver_set_manifold(null, rgmin_manifold_t::RGMIN_MANIFOLD_SPHERE);
         rgmin_solver_set_manifold(null, rgmin_manifold_t::RGMIN_MANIFOLD_MULTINOMIAL);
+        rgmin_solver_set_euclidean_complex(null, 2);
         rgmin_solver_set_oblique(null, 3, 2);
         rgmin_solver_set_stiefel(null, 4, 2);
         rgmin_solver_set_masses(null, masses.as_ptr(), masses.len());
