@@ -755,12 +755,19 @@ fn positive_session_stays_on_the_set() {
     );
     solver.set_positive(3);
     solver.set_accept(rgmin::Accept::None);
-    for _ in 0..8 {
+    let start = x.clone();
+    let _ = solver.step(&obj, &mut x).unwrap();
+    assert!(is_positive(&x), "left the positive orthant {x:?}");
+    let fro = x.iter().map(|xi| xi * xi).sum::<f64>().sqrt();
+    assert!((fro - 1.0).abs() > 0.5, "must not be the sphere {x:?}");
+    assert!(
+        (&x - &start).mapv(f64::abs).sum() > 1e-12,
+        "expected a retraction step {x:?}"
+    );
+    for _ in 0..7 {
         let _ = solver.step(&obj, &mut x).unwrap();
         assert!(is_positive(&x), "left the positive orthant {x:?}");
     }
-    let fro = x.iter().map(|xi| xi * xi).sum::<f64>().sqrt();
-    assert!((fro - 1.0).abs() > 0.5, "must not be the sphere {x:?}");
 }
 
 #[test]
