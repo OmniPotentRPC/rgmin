@@ -203,6 +203,17 @@ public:
         rgmin_solver_set_cautious(ptr_, eps, alpha);
     }
     int set_highs(bool on) { return rgmin_solver_set_highs(ptr_, on ? 1 : 0); }
+    int set_box(const double* lower, const double* upper, std::size_t n) {
+        return rgmin_solver_set_box(ptr_, lower, upper, n);
+    }
+    int set_highs_trust(double radius) {
+        return rgmin_solver_set_highs_trust(ptr_, radius);
+    }
+    int add_equality(const std::size_t* idx, const double* coeff, std::size_t nnz,
+                     double rhs) {
+        return rgmin_solver_add_equality(ptr_, idx, coeff, nnz, rhs);
+    }
+    int clear_equalities() { return rgmin_solver_clear_equalities(ptr_); }
     void set_manifold(rgmin_manifold_t m) { rgmin_solver_set_manifold(ptr_, m); }
     void set_oblique(std::size_t n, std::size_t m) {
         rgmin_solver_set_oblique(ptr_, n, m);

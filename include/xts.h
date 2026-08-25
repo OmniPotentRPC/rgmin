@@ -48,7 +48,7 @@ typedef struct xts_abi_stamp_t {
 } xts_abi_stamp_t;
 
 #define XTS_ABI_VERSION_MAJOR 1
-#define XTS_ABI_VERSION_MINOR 21
+#define XTS_ABI_VERSION_MINOR 22
 #define XTS_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c XTS_LBFGS is the production unconstrained method. */
@@ -193,6 +193,10 @@ typedef struct xts_solver_t xts_solver_t;
 #define xts_solver_set_extra_updates rgmin_solver_set_extra_updates
 #define xts_solver_set_cautious rgmin_solver_set_cautious
 #define xts_solver_set_highs rgmin_solver_set_highs
+#define xts_solver_set_box rgmin_solver_set_box
+#define xts_solver_set_highs_trust rgmin_solver_set_highs_trust
+#define xts_solver_add_equality rgmin_solver_add_equality
+#define xts_solver_clear_equalities rgmin_solver_clear_equalities
 #define xts_solver_set_manifold rgmin_solver_set_manifold
 #define xts_solver_set_oblique rgmin_solver_set_oblique
 #define xts_solver_set_stiefel rgmin_solver_set_stiefel
@@ -243,6 +247,19 @@ void xts_solver_set_cautious(xts_solver_t *solver, double eps, double alpha);
 /** HiGHS feasible-set step. Nonzero enables it. Returns 0, or 1 if this
  *  build has no highs feature. */
 int32_t xts_solver_set_highs(xts_solver_t *solver, int32_t enabled);
+/** Box on coordinates of x+p. A NULL side is unbounded on that side.
+ *  Same status convention as set_highs (0 ok, 1 no highs feature). */
+int32_t xts_solver_set_box(xts_solver_t *solver, const double *lower,
+                           const double *upper, size_t n);
+/** L_inf trust radius on the HiGHS step. radius <= 0 is unbounded.
+ *  Same status convention as set_highs. */
+int32_t xts_solver_set_highs_trust(xts_solver_t *solver, double radius);
+/** One linear equality a·p = rhs. idx/coeff have length nnz.
+ *  Same status convention as set_highs. */
+int32_t xts_solver_add_equality(xts_solver_t *solver, const size_t *idx,
+                                const double *coeff, size_t nnz, double rhs);
+/** Drop all linear equalities. Same status convention as set_highs. */
+int32_t xts_solver_clear_equalities(xts_solver_t *solver);
 /** Embedded manifold. Euclidean is the default.
  *  Molecular clusters use RIGID_QUOTIENT (Sella Cartesian T+R,
  *  R^{3N}/SE(3)) or MW_RIGID (Page-McIver / Sella IRC Eckart).
