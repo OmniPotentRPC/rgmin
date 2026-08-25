@@ -90,7 +90,8 @@ Sella IRC Eckart), ~SPHERE~, ~SO3~ (length 9), ~STIEFEL~
 row-major, ~n >= 2~), ~EUCLIDEAN_COMPLEX~ (token 16, interleaved
 ~(re, im)~, length ~2 n~; ~rgmin_solver_set_euclidean_complex~),
 ~CONSTANT~ (token 17, singleton of length ~n~;
-~rgmin_solver_set_constant~).
+~rgmin_solver_set_constant~), ~MULTINOMIAL_DS~ (token 18,
+n² doubly-stochastic; ~rgmin_solver_set_multinomial_ds~).
 Tokens 7-10 stay reserved. See
 [[file:manifolds.org][retract onto an embedded manifold]].
 ~rgmin_solver_set_masses~ supplies N atomic masses for ~MW_RIGID~.

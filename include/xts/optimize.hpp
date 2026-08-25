@@ -217,6 +217,9 @@ public:
         rgmin_solver_set_euclidean_complex(ptr_, n);
     }
     void set_constant(std::size_t n) { rgmin_solver_set_constant(ptr_, n); }
+    void set_multinomial_ds(std::size_t n) {
+        rgmin_solver_set_multinomial_ds(ptr_, n);
+    }
 
     Report step(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
                 DLManagedTensorVersioned* x) {

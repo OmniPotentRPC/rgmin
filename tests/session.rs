@@ -491,6 +491,85 @@ fn multinomial_rejects_a_point() {
 }
 
 #[test]
+fn multinomial_ds_session_stays_doubly_stochastic() {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::ArrayView1;
+
+    struct Frobenius;
+    impl Objective<f64> for Frobenius {
+        fn dim(&self) -> usize {
+            4
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            use std::sync::OnceLock;
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| {
+                Bounds::new(array![0.0, 0.0, 0.0, 0.0], array![1.0, 1.0, 1.0, 1.0], 0.0)
+            })
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            x.iter().map(|xi| xi * xi).sum()
+        }
+    }
+    impl Gradient<f64> for Frobenius {
+        fn dim(&self) -> usize {
+            4
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            Array1::from_iter(x.iter().map(|xi| 2.0 * xi))
+        }
+    }
+    impl DifferentiableObjective<f64> for Frobenius {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+
+    let obj = Frobenius;
+    let mut x = array![0.5, 0.5, 0.5, 0.5];
+    let mut solver = Solver::new(
+        Method::Steepest,
+        Control {
+            maxiter: 20,
+            gtol: 1e-10,
+            istep: 0.1,
+            maxmove: None,
+        },
+        4,
+    );
+    solver.set_multinomial_ds(2);
+    solver.set_accept(rgmin::Accept::None);
+    for _ in 0..20 {
+        let _ = solver.step(&obj, &mut x).unwrap();
+        assert!(x.iter().all(|&xi| xi > 0.0), "left the interior {x:?}");
+        let r0 = x[0] + x[1];
+        let r1 = x[2] + x[3];
+        let c0 = x[0] + x[2];
+        let c1 = x[1] + x[3];
+        assert!((r0 - 1.0).abs() < 1e-10, "row0 {r0} x={x:?}");
+        assert!((r1 - 1.0).abs() < 1e-10, "row1 {r1} x={x:?}");
+        assert!((c0 - 1.0).abs() < 1e-10, "col0 {c0} x={x:?}");
+        assert!((c1 - 1.0).abs() < 1e-10, "col1 {c1} x={x:?}");
+    }
+}
+
+#[test]
+fn multinomial_ds_rejects_a_wrong_length() {
+    let obj = Rosenbrock::<1>::new();
+    let mut x = array![1.0];
+    let mut solver = Solver::new(Method::Steepest, control(), 1);
+    solver.set_manifold(rgmin::ManifoldKind::multinomial_ds(2));
+    let err = solver.step(&obj, &mut x).unwrap_err();
+    match err {
+        rgmin::Error::ManifoldDim { kind, got } => {
+            assert_eq!(kind, "multinomialdoublystochastic");
+            assert_eq!(got, 1);
+        }
+        other => panic!("expected ManifoldDim, got {other:?}"),
+    }
+}
+
+#[test]
 fn so3_session_stays_orthogonal() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;

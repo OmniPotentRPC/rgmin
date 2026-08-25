@@ -63,7 +63,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 16;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 17;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1410,8 +1410,8 @@ pub enum rgmin_manifold_t {
     /// Singleton {A} of packed length n. manopt `constantfactory`.
     /// Token defaults to n = 1; use rgmin_solver_set_constant.
     RGMIN_MANIFOLD_CONSTANT = 17,
-    /// Doubly-stochastic n-by-n, packed n². Token defaults to n = 2.
-    /// Reserved 7-10 unused.
+    /// Doubly-stochastic n-by-n, packed n². Token defaults to n = 2;
+    /// use rgmin_solver_set_multinomial_ds. Reserved 7-10 unused.
     RGMIN_MANIFOLD_MULTINOMIAL_DS = 18,
     /// Symmetric doubly-stochastic n-by-n. Token defaults to n = 2.
     RGMIN_MANIFOLD_MULTINOMIAL_SYM = 19,
@@ -1500,6 +1500,16 @@ pub unsafe extern "C" fn rgmin_solver_set_constant(solver: *mut rgmin_solver_t, 
         return;
     }
     unsafe { (*solver).solver.set_constant(n) };
+}
+
+/// Doubly-stochastic n-by-n, packed `n^2`. manopt
+/// `multinomialdoublystochasticfactory`. Token 18 defaults to n = 2.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_multinomial_ds(solver: *mut rgmin_solver_t, n: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_multinomial_ds(n) };
 }
 
 /// Per-atom masses for `RGMIN_MANIFOLD_MW_RIGID`. `n_atoms == 0` or a

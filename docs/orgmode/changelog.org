@@ -6,6 +6,13 @@
 
 ** Unreleased
 
+Doubly-stochastic matrices (~multinomialdoublystochastic~ /
+~RGMIN_MANIFOLD_MULTINOMIAL_DS~ = 18): manopt
+~multinomialdoublystochasticfactory~. Packed row-major ~n^2~,
+~n >= 2~. Fisher projection, Sinkhorn retraction, transport at
+arrival. A 3N cluster is rejected. Tokens 7-10 stay reserved.
+~abi_minor~ 17.
+
 Constant singleton (~constant~ / ~RGMIN_MANIFOLD_CONSTANT~ = 17):
 manopt ~constantfactory~. Packed length ~n~. Projection and
 transport are the zero tangent, retraction is the fixed point.

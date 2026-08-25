@@ -53,7 +53,10 @@ pub use euclidean_complex::{
     EuclideanComplex, inner as inner_cplx, is_euclidean_complex, typical_dist as typical_dist_cplx,
 };
 pub use multinomial::Multinomial;
-pub use multinomial_ds::MultinomialDoublyStochastic;
+pub use multinomial_ds::{
+    MultinomialDoublyStochastic, inner as inner_ds, is_doubly_stochastic, pack as pack_ds,
+    side as side_ds, typical_dist as typical_dist_ds, unpack as unpack_ds,
+};
 pub use multinomial_sym::MultinomialSymmetric;
 pub use mw_rigid::MwRigid;
 pub use oblique::Oblique;
@@ -200,6 +203,12 @@ impl ManifoldKind {
     /// Singleton of packed length `n`. manopt `constantfactory`.
     pub fn constant(n: usize) -> Self {
         Self::Constant { n }
+    }
+
+    /// Doubly-stochastic n-by-n, packed length `n^2`.
+    /// manopt `multinomialdoublystochasticfactory`.
+    pub fn multinomial_ds(n: usize) -> Self {
+        Self::MultinomialDoublyStochastic { n }
     }
 
     /// C ABI / INI token.
@@ -353,6 +362,34 @@ impl Manifold for ManifoldKind {
                 MultinomialSymmetric { n: *n }.transport(x_from, x_to, v)
             }
             Self::SphereComplex { n } => SphereComplex { n: *n }.transport(x_from, x_to, v),
+        }
+    }
+
+    fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
+        match self {
+            Self::Euclidean => Euclidean.egrad2rgrad(x, egrad),
+            Self::Sphere => Sphere.egrad2rgrad(x, egrad),
+            Self::So3 => So3.egrad2rgrad(x, egrad),
+            Self::Stiefel => Stiefel.egrad2rgrad(x, egrad),
+            Self::Se3 => Se3.egrad2rgrad(x, egrad),
+            Self::RigidQuotient => RigidQuotient.egrad2rgrad(x, egrad),
+            Self::MwRigid => MwRigid.egrad2rgrad(x, egrad),
+            Self::Oblique { n, m } => Oblique { n: *n, m: *m }.egrad2rgrad(x, egrad),
+            Self::Multinomial => Multinomial.egrad2rgrad(x, egrad),
+            Self::StiefelP { n, p } => StiefelNp { n: *n, p: *p }.egrad2rgrad(x, egrad),
+            Self::Spd => Spd.egrad2rgrad(x, egrad),
+            Self::Symmetric => Symmetric.egrad2rgrad(x, egrad),
+            Self::SkewSymmetric => SkewSymmetric.egrad2rgrad(x, egrad),
+            Self::ComplexCircle { n } => ComplexCircle { n: *n }.egrad2rgrad(x, egrad),
+            Self::EuclideanComplex { n } => EuclideanComplex { n: *n }.egrad2rgrad(x, egrad),
+            Self::Constant { n } => Constant { n: *n }.egrad2rgrad(x, egrad),
+            Self::MultinomialDoublyStochastic { n } => {
+                MultinomialDoublyStochastic { n: *n }.egrad2rgrad(x, egrad)
+            }
+            Self::MultinomialSymmetric { n } => {
+                MultinomialSymmetric { n: *n }.egrad2rgrad(x, egrad)
+            }
+            Self::SphereComplex { n } => SphereComplex { n: *n }.egrad2rgrad(x, egrad),
         }
     }
 }

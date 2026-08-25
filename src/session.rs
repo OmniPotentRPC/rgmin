@@ -215,6 +215,12 @@ impl Solver {
         self.set_manifold(ManifoldKind::Constant { n });
     }
 
+    /// Doubly-stochastic n-by-n, packed length `n^2`.
+    /// manopt `multinomialdoublystochasticfactory`.
+    pub fn set_multinomial_ds(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::MultinomialDoublyStochastic { n });
+    }
+
     /// Per-atom masses for [`ManifoldKind::MwRigid`] (Page–McIver / Eckart).
     /// Empty clears them (unit mass).
     pub fn set_masses(&mut self, masses: Array1<f64>) {
@@ -296,7 +302,10 @@ impl Solver {
     }
 
     fn horizontal_grad(&self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
-        let mut g = self.project_vec(x, grad);
+        let mut g = match self.manifold {
+            ManifoldKind::MwRigid | ManifoldKind::RigidQuotient => self.project_vec(x, grad),
+            other => other.egrad2rgrad(x, grad),
+        };
         if self.project_rigid
             && !matches!(
                 self.manifold,
