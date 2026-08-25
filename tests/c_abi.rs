@@ -797,9 +797,81 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 21);
+    assert_eq!(stamp.abi_minor, 22);
     assert_eq!(stamp.layout_revision, 4);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
+}
+
+#[test]
+fn c_abi_set_box_status_matches_set_highs() {
+    use rgmin::ffi::{rgmin_solver_set_box, rgmin_solver_set_highs, rgmin_solver_set_highs_trust};
+    let ctrl = rgmin_control_t {
+        maxiter: 8,
+        gtol: 1e-8,
+        istep: 0.1,
+        memory: 4,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    let lo = [-1.0_f64, -2.0];
+    let hi = [1.0_f64, 2.0];
+    let highs = unsafe { rgmin_solver_set_highs(session, 1) };
+    let boxed = unsafe { rgmin_solver_set_box(session, lo.as_ptr(), hi.as_ptr(), 2) };
+    let one_side = unsafe { rgmin_solver_set_box(session, lo.as_ptr(), std::ptr::null(), 2) };
+    let trust = unsafe { rgmin_solver_set_highs_trust(session, 0.5) };
+    unsafe { rgmin_solver_free(session) };
+    assert_eq!(boxed, highs);
+    assert_eq!(one_side, highs);
+    assert_eq!(trust, highs);
+    #[cfg(feature = "highs")]
+    assert_eq!(highs, 0);
+    #[cfg(not(feature = "highs"))]
+    assert_eq!(highs, 1);
+}
+
+#[cfg(feature = "highs")]
+#[test]
+fn c_abi_set_box_clips_one_lbfgs_step() {
+    use rgmin::ffi::{rgmin_solver_set_box, rgmin_solver_set_highs};
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 1e-12,
+        istep: 1.0,
+        memory: 4,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    let lo = [0.0_f64, -0.4];
+    let hi = [0.4_f64, 0.0];
+    assert_eq!(unsafe { rgmin_solver_set_highs(session, 1) }, 0);
+    assert_eq!(
+        unsafe { rgmin_solver_set_box(session, lo.as_ptr(), hi.as_ptr(), 2) },
+        0
+    );
+    let mut x = [2.0_f64, -3.0];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+    };
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let st = unsafe {
+        rgmin_solver_step(
+            session,
+            Some(quad_eval),
+            Some(quad_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    unsafe { rgmin_solver_free(session) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(x[0] >= -1e-12 && x[0] <= 0.4 + 1e-9, "x0={}", x[0]);
+    assert!(x[1] >= -0.4 - 1e-9 && x[1] <= 1e-12, "x1={}", x[1]);
 }
 
 #[test]
@@ -856,9 +928,11 @@ fn c_abi_respects_maxmove_when_initial_step_is_larger() {
 #[test]
 fn c_abi_every_setter_survives_live_and_null_sessions() {
     use rgmin::ffi::{
-        rgmin_manifold_t, rgmin_qn_step_t, rgmin_solver_forget, rgmin_solver_set_atom_maxmove,
-        rgmin_solver_set_cautious, rgmin_solver_set_centered_matrix, rgmin_solver_set_constant,
-        rgmin_solver_set_euclidean_complex, rgmin_solver_set_extra_updates,
+        rgmin_manifold_t, rgmin_qn_step_t, rgmin_solver_add_equality,
+        rgmin_solver_clear_equalities, rgmin_solver_forget, rgmin_solver_set_atom_maxmove,
+        rgmin_solver_set_box, rgmin_solver_set_cautious, rgmin_solver_set_centered_matrix,
+        rgmin_solver_set_constant, rgmin_solver_set_euclidean_complex,
+        rgmin_solver_set_extra_updates, rgmin_solver_set_highs, rgmin_solver_set_highs_trust,
         rgmin_solver_set_manifold, rgmin_solver_set_masses, rgmin_solver_set_maxmove,
         rgmin_solver_set_multinomial_ds, rgmin_solver_set_multinomial_sym,
         rgmin_solver_set_oblique, rgmin_solver_set_periodic, rgmin_solver_set_positive,
@@ -875,9 +949,37 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
     let masses = [1.0_f64, 12.0, 16.0];
+    let lo = [0.0_f64, -1.0];
+    let hi = [1.0_f64, 2.0];
+    let eq_idx = [0_usize, 1];
+    let eq_c = [1.0_f64, -1.0];
     unsafe {
         rgmin_solver_set_maxmove(session, 0.5);
         rgmin_solver_set_atom_maxmove(session, 0.2);
+        let highs_st = rgmin_solver_set_highs(session, 1);
+        let box_st = rgmin_solver_set_box(session, lo.as_ptr(), hi.as_ptr(), 2);
+        let box_null_hi = rgmin_solver_set_box(session, lo.as_ptr(), std::ptr::null(), 2);
+        let trust_st = rgmin_solver_set_highs_trust(session, 0.25);
+        let eq_st = rgmin_solver_add_equality(session, eq_idx.as_ptr(), eq_c.as_ptr(), 2, 0.0);
+        let clr_st = rgmin_solver_clear_equalities(session);
+        #[cfg(feature = "highs")]
+        {
+            assert_eq!(highs_st, 0);
+            assert_eq!(box_st, 0);
+            assert_eq!(box_null_hi, 0);
+            assert_eq!(trust_st, 0);
+            assert_eq!(eq_st, 0);
+            assert_eq!(clr_st, 0);
+        }
+        #[cfg(not(feature = "highs"))]
+        {
+            assert_eq!(highs_st, 1);
+            assert_eq!(box_st, 1);
+            assert_eq!(box_null_hi, 1);
+            assert_eq!(trust_st, 1);
+            assert_eq!(eq_st, 1);
+            assert_eq!(clr_st, 1);
+        }
         rgmin_solver_set_qn_step(session, rgmin_qn_step_t::RGMIN_QN_LBFGS);
         rgmin_solver_set_extra_updates(session, 2);
         rgmin_solver_set_cautious(session, 1e-6, 0.01);
@@ -938,6 +1040,14 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
     unsafe {
         rgmin_solver_set_maxmove(null, 0.5);
         rgmin_solver_set_atom_maxmove(null, 0.2);
+        assert_eq!(rgmin_solver_set_highs(null, 1), 1);
+        assert_eq!(rgmin_solver_set_box(null, lo.as_ptr(), hi.as_ptr(), 2), 1);
+        assert_eq!(rgmin_solver_set_highs_trust(null, 0.25), 1);
+        assert_eq!(
+            rgmin_solver_add_equality(null, eq_idx.as_ptr(), eq_c.as_ptr(), 2, 0.0),
+            1
+        );
+        assert_eq!(rgmin_solver_clear_equalities(null), 1);
         rgmin_solver_set_qn_step(null, rgmin_qn_step_t::RGMIN_QN_NEWTON);
         rgmin_solver_set_extra_updates(null, 2);
         rgmin_solver_set_cautious(null, 1e-6, 0.01);
