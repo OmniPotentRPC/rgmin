@@ -6,6 +6,14 @@
 
 ** Unreleased
 
+HiGHS feasible-set box on the C ABI: ~rgmin_solver_set_box~ /
+~xts_solver_set_box~ takes per-coordinate lower and upper on
+~x + p~ (a NULL side is unbounded). ~set_highs_trust~,
+~add_equality~, and ~clear_equalities~ share the ~set_highs~
+status convention (0 ok, 1 without the ~highs~ feature).
+~HighsStep.lo~ / ~hi~ are per-coordinate vectors (length 1 is
+uniform). ~abi_minor~ 22.
+
 Centered matrices (~centeredmatrix~ /
 ~RGMIN_MANIFOLD_CENTERED_MATRIX~ = 22): manopt
 ~centeredmatrixfactory~. Packed row-major ~m n~. Projection is

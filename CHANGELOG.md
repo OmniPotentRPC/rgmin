@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- C ABI box for the HiGHS feasible set: `rgmin_solver_set_box` /
+  `xts_solver_set_box` takes per-coordinate lower and upper on
+  `x + p` (a NULL side is unbounded). Trust-region and equality
+  setters (`set_highs_trust`, `add_equality`, `clear_equalities`)
+  share the same status convention as `set_highs` (0 ok, 1 without
+  the `highs` feature). `HighsStep.lo` / `hi` are per-coordinate
+  vectors (length 1 is uniform). `abi_minor` 22.
 - `ManifoldKind::CenteredMatrix`: manopt `centeredmatrixfactory`.
   Packed row-major `m n`. Projection is the centering operator
   (zero column mean, or zero row mean), retraction is `X + U`

@@ -21,6 +21,8 @@ Session (eOn / ASE ``step``)
     while (!done) {
         rgmin_solver_set_maxmove(s, max_move);
         rgmin_solver_set_qn_step(s, RGMIN_QN_NEWTON); /* or RGMIN_QN_LBFGS + P as H0 */
+        rgmin_solver_set_highs(s, 1);
+        rgmin_solver_set_box(s, lower, upper, n); /* NULL side = unbounded */
         rgmin_solver_set_accept(s, RGMIN_ACCEPT_NONE);
         rgmin_solver_step_hess_fg(s, evalgrad, hess, user, x, &report);
     }

@@ -23,7 +23,9 @@ so a CUDA path does not change the ABI.
 The production unconstrained local method is [`Lbfgs`] with strong Wolfe
 (Nocedal-Wright 7.4 and algorithms 3.5 / 3.6). anneal `WarmLbfgs` holds
 that type so hopping does not ship a second two-loop. Feature `highs` keeps the two-loop direction and projects it with
-HiGHS (`Q = I`) onto a box, trust region, or equalities.
+HiGHS (`Q = I`) onto a box, trust region, or equalities. The C ABI
+carries that set: `xts_solver_set_box` (NULL side unbounded),
+`xts_solver_set_highs_trust`, and `xts_solver_add_equality`.
 
 A session can retract onto an embedded manifold (`set_manifold`):
 Euclidean (default), sphere, SO(3), Stiefel `St(n,1)`, SE(3),
