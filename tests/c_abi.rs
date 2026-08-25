@@ -850,7 +850,7 @@ fn c_abi_set_box_clips_one_lbfgs_step() {
         unsafe { rgmin_solver_set_box(session, lo.as_ptr(), hi.as_ptr(), 2) },
         0
     );
-    let mut x = [2.0_f64, -3.0];
+    let mut x = [0.35_f64, -0.35];
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
