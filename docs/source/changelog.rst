@@ -6,6 +6,14 @@ Changelog
 Unreleased
 ~~~~~~~~~~
 
+Centered matrices (``centered_matrix`` /
+``RGMIN_MANIFOLD_CENTERED_MATRIX`` = 21): manopt
+``centeredmatrixfactory``. Packed row-major ``m n``. Default
+``'cols'`` subtracts the mean column (``X 1_n = 0``); ``'rows'``
+subtracts the mean row. Projection is that centering, retraction
+is ``X + U`` then center, transport is the identity. A 3N
+cluster is rejected. Tokens 7-10 stay reserved. ``abi_minor`` 20.
+
 Complex unit sphere (``spherecomplex`` /
 ``RGMIN_MANIFOLD_SPHERE_COMPLEX`` = 20): manopt
 ``spherecomplexfactory``. Interleaved ``(re, im)``, length ``2 n``.

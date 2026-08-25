@@ -63,7 +63,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 19;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 20;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1419,6 +1419,10 @@ pub enum rgmin_manifold_t {
     /// Complex unit sphere C^n, packed 2n. Token defaults to n = 1;
     /// use rgmin_solver_set_sphere_complex. Reserved 7-10 unused.
     RGMIN_MANIFOLD_SPHERE_COMPLEX = 20,
+    /// Centered m-by-n matrices, packed row-major m*n.
+    /// Token defaults to m = 2, n = 2, cols; use
+    /// rgmin_solver_set_centered_matrix. Reserved 7-10 unused.
+    RGMIN_MANIFOLD_CENTERED_MATRIX = 21,
 }
 
 #[unsafe(no_mangle)]
@@ -1452,6 +1456,13 @@ pub unsafe extern "C" fn rgmin_solver_set_manifold(
             ManifoldKind::MultinomialSymmetric { n: 2 }
         }
         rgmin_manifold_t::RGMIN_MANIFOLD_SPHERE_COMPLEX => ManifoldKind::SphereComplex { n: 1 },
+        rgmin_manifold_t::RGMIN_MANIFOLD_CENTERED_MATRIX => {
+            ManifoldKind::CenteredMatrix {
+                m: 2,
+                n: 2,
+                rows: false,
+            }
+        }
         rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN => ManifoldKind::Euclidean,
     };
     unsafe { (*solver).solver.set_manifold(kind) };
@@ -1532,6 +1543,23 @@ pub unsafe extern "C" fn rgmin_solver_set_sphere_complex(solver: *mut rgmin_solv
         return;
     }
     unsafe { (*solver).solver.set_sphere_complex(n) };
+}
+
+/// Centered m-by-n matrices, packed row-major `m*n`. manopt
+/// `centeredmatrixfactory`. Nonzero `rows` is `'rows'`; zero is
+/// the default `'cols'`. Token 21 defaults to 2-by-2 cols.
+/// Reserved 7-10 unused.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_centered_matrix(
+    solver: *mut rgmin_solver_t,
+    m: usize,
+    n: usize,
+    rows: i32,
+) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_centered_matrix(m, n, rows != 0) };
 }
 
 /// Per-atom masses for `RGMIN_MANIFOLD_MW_RIGID`. `n_atoms == 0` or a

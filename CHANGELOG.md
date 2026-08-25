@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ManifoldKind::CenteredMatrix`: manopt `centeredmatrixfactory`.
+  Packed row-major `m n`. Default `'cols'` subtracts the mean
+  column (`X 1_n = 0`); `'rows'` subtracts the mean row
+  (`1_m^T X = 0`). Projection is that centering, retraction is
+  `X + U` then center, transport is the identity. C token 21.
+  Tokens 7-10 stay reserved. `abi_minor` 20.
 - `ManifoldKind::SphereComplex`: manopt `spherecomplexfactory`.
   Interleaved `(re, im)` pairs of length `2 n`. Projection is
   `v - Re(x^* v) x`, retraction is `(x+v)/||x+v||`, transport is

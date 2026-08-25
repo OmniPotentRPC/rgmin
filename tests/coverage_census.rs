@@ -7,9 +7,10 @@ use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::IrcTrust;
 use rgmin::manifold::{
-    ComplexCircle, Constant, EuclideanComplex, Manifold, Multinomial, MwRigid, Oblique,
-    SkewSymmetric, Spd, Sphere, SphereComplex, Stiefel, StiefelNp, Symmetric, is_constant,
-    is_euclidean_complex, is_skewsymmetric, is_spd, is_sphere_complex, is_symmetric,
+    CenterMode, CenteredMatrix, ComplexCircle, Constant, EuclideanComplex, Manifold, Multinomial,
+    MwRigid, Oblique, SkewSymmetric, Spd, Sphere, SphereComplex, Stiefel, StiefelNp, Symmetric,
+    is_centered, is_constant, is_euclidean_complex, is_skewsymmetric, is_spd, is_sphere_complex,
+    is_symmetric,
 };
 use rgmin::{Conjugacy, Control, DirectionalCurvature, Restart, ScgParams, minimize_scg_exact};
 
@@ -261,6 +262,27 @@ fn sphere_complex_retract_stays_on_the_set() {
     let w = m.transport(&x, &y, &v);
     let p = m.project(&y, &v);
     assert!((&w - &p).mapv(f64::abs).sum() < 1e-14);
+}
+
+/// manopt centeredmatrixfactory: retraction stays column-centered
+/// and is not sphere-normalized. Transport is the identity.
+#[test]
+fn centered_matrix_retract_stays_on_the_set() {
+    let m = CenteredMatrix::cols(2, 3);
+    let x = array![1.0, -0.5, -0.5, 2.0, -1.0, -1.0];
+    let v = array![0.3, 0.0, -0.1, -0.2, 0.4, 0.1];
+    let y = m.retract(&x, &v);
+    assert!(
+        is_centered(&y, 2, 3, CenterMode::Cols),
+        "left the centered-cols set {y:?}"
+    );
+    let t = m.project(&x, &v);
+    assert!((t[0] + t[1] + t[2]).abs() < 1e-14);
+    assert!((t[3] + t[4] + t[5]).abs() < 1e-14);
+    let w = m.transport(&x, &y, &v);
+    assert!((&w - &v).mapv(f64::abs).sum() < 1e-15);
+    let fro = y.iter().map(|a| a * a).sum::<f64>().sqrt();
+    assert!((fro - 1.0).abs() > 0.5, "must not be the sphere {y:?}");
 }
 
 /// A quadratic bowl carrying its exact directional curvature. SCG with

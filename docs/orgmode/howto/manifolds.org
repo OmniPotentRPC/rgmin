@@ -40,6 +40,7 @@ vector: ~project~, ~retract~, ~transport~. Citations:
 | ~SkewSymmetric~ | row-major ~n x n~, length ~n^2~, ~n >= 2~ | ~X + U~ then ~multiskew~ |
 | ~EuclideanComplex { n }~ | interleaved ~(re, im)~, length ~2 n~ | ~x + v~ |
 | ~Constant { n }~ | singleton of length ~n~ | the fixed point |
+| ~CenteredMatrix { m, n, rows }~ | row-major ~m x n~, length ~m n~ | ~X + U~ then center |
 
 An isolated molecule or cluster lives on ~RigidQuotient~
 (~R^{3N}/SE(3)~): Sella Cartesian ~fix_translation~ plus
@@ -97,6 +98,8 @@ rgmin_solver_set_constant(s, 4);
 rgmin_solver_set_multinomial_ds(s, 3);
 rgmin_solver_set_multinomial_sym(s, 3);
 rgmin_solver_set_sphere_complex(s, 3);
+rgmin_solver_set_centered_matrix(s, 2, 3, 0);
+rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_CENTERED_MATRIX);
 rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_SYMMETRIC);
 rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_SKEWSYMMETRIC);
 rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX);
@@ -178,5 +181,14 @@ Changing the manifold drops method memory (~forget~).
   not the real sphere token, not ~(S^1)^n~, and not a 3N
   cluster. C token 20 (~rgmin_solver_set_sphere_complex~).
   Tokens 7-10 stay reserved.
+- ~CenteredMatrix { m, n, rows }~ is manopt
+  ~centeredmatrixfactory(m, n)~: an ~m x n~ real matrix packed
+  row-major (~m n~). Default ~rows = false~ (~'cols'~) subtracts
+  the mean column so ~X 1_n = 0~. ~rows = true~ (~'rows'~)
+  subtracts the mean row so ~1_m^T X = 0~. Projection is that
+  centering. Retraction is ~X + U~ then center. Transport is
+  the identity. It is not the sphere and not a 3N cluster.
+  C token 21 (~rgmin_solver_set_centered_matrix~). Tokens 7-10
+  stay reserved.
 - ~set_project_rigid~ is the same horizontal projection as
   ~RigidQuotient~ and stays available on Euclidean.

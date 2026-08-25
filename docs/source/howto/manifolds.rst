@@ -163,5 +163,16 @@ Packing notes
   cluster. C token 20 (``rgmin_solver_set_sphere_complex``).
   Tokens 7-10 stay reserved.
 
+- ``CenteredMatrix { m, n, rows }`` is manopt
+  ``centeredmatrixfactory(m, n)``: an ``m x n`` real matrix packed
+  row-major (``m n``). Default ``rows = false`` (``'cols'``)
+  subtracts the mean column so ``X 1_n = 0``. ``rows = true``
+  (``'rows'``) subtracts the mean row so ``1_m^T X = 0``.
+  Projection is that centering. Retraction is ``X + U`` then
+  center. Transport is the identity. It is not the sphere and
+  not a 3N cluster. C token 21
+  (``rgmin_solver_set_centered_matrix``). Tokens 7-10 stay
+  reserved.
+
 - ``set_project_rigid`` is the same horizontal projection as
   ``RigidQuotient`` and stays available on Euclidean.

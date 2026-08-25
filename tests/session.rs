@@ -1287,6 +1287,85 @@ fn constant_rejects_a_3n_cluster() {
 }
 
 #[test]
+fn centered_matrix_session_stays_on_the_set() {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::ArrayView1;
+    use rgmin::manifold::{is_centered, CenterMode};
+    use rgmin::ManifoldKind;
+
+    struct Bowl;
+    impl Objective<f64> for Bowl {
+        fn dim(&self) -> usize {
+            6
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            use std::sync::OnceLock;
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| {
+                Bounds::new(Array1::from_elem(6, -8.0), Array1::from_elem(6, 8.0), 0.0)
+            })
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            0.5 * x.iter().map(|a| a * a).sum::<f64>()
+        }
+    }
+    impl Gradient<f64> for Bowl {
+        fn dim(&self) -> usize {
+            6
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            x.to_owned()
+        }
+    }
+    impl DifferentiableObjective<f64> for Bowl {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+
+    let obj = Bowl;
+    let mut x = array![1.0, -0.5, -0.5, 2.0, -1.0, -1.0];
+    let mut solver = Solver::new(
+        Method::Steepest,
+        Control {
+            maxiter: 20,
+            gtol: 1e-8,
+            istep: 0.1,
+            maxmove: None,
+        },
+        6,
+    );
+    solver.set_manifold(ManifoldKind::centered_matrix(2, 3, false));
+    solver.set_accept(rgmin::Accept::None);
+    for _ in 0..20 {
+        let _ = solver.step(&obj, &mut x).unwrap();
+        assert!(
+            is_centered(&x, 2, 3, CenterMode::Cols),
+            "left the centered-cols set {x:?}"
+        );
+        assert_eq!(x.len(), 6);
+    }
+    let fro = x.iter().map(|a| a * a).sum::<f64>().sqrt();
+    assert!((fro - 1.0).abs() > 0.2, "must not be the sphere {x:?}");
+}
+
+#[test]
+fn centered_matrix_rejects_a_3n_cluster() {
+    let obj = Rosenbrock::<114>::new();
+    let mut x = Array1::from_elem(114, 0.1);
+    let mut solver = Solver::new(Method::Steepest, control(), 114);
+    solver.set_manifold(rgmin::ManifoldKind::centered_matrix(2, 3, false));
+    let err = solver.step(&obj, &mut x).unwrap_err();
+    match err {
+        rgmin::Error::ManifoldDim { kind, got } => {
+            assert_eq!(kind, "centered_matrix");
+            assert_eq!(got, 114);
+        }
+        other => panic!("expected ManifoldDim, got {other:?}"),
+    }
+}
+
+#[test]
 fn skewsymmetric_rejects_a_3n_cluster() {
     let obj = Rosenbrock::<114>::new();
     let mut x = Array1::from_elem(114, 0.1);

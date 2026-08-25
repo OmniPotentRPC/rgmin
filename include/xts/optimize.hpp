@@ -226,6 +226,9 @@ public:
     void set_sphere_complex(std::size_t n) {
         rgmin_solver_set_sphere_complex(ptr_, n);
     }
+    void set_centered_matrix(std::size_t m, std::size_t n, bool rows) {
+        rgmin_solver_set_centered_matrix(ptr_, m, n, rows ? 1 : 0);
+    }
 
     Report step(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
                 DLManagedTensorVersioned* x) {
