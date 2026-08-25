@@ -200,6 +200,7 @@ typedef struct xts_solver_t xts_solver_t;
 #define xts_solver_set_euclidean_complex rgmin_solver_set_euclidean_complex
 #define xts_solver_set_constant rgmin_solver_set_constant
 #define xts_solver_set_multinomial_ds rgmin_solver_set_multinomial_ds
+#define xts_solver_set_sphere_complex rgmin_solver_set_sphere_complex
 #define xts_solver_set_masses rgmin_solver_set_masses
 #define xts_solver_set_periodic rgmin_solver_set_periodic
 #define xts_solver_step rgmin_solver_step
@@ -248,7 +249,9 @@ int32_t xts_solver_set_highs(xts_solver_t *solver, int32_t enabled);
  *  Token 15 is skew-symmetric n-by-n, n >= 2.
  *  Token 16 is complex Euclidean C^n, packed interleaved, length 2n.
  *  Token 17 is the singleton {A} of packed length n (constantfactory).
- *  Token 18 is doubly-stochastic n-by-n (multinomialdoublystochasticfactory). */
+ *  Token 18 is doubly-stochastic n-by-n (multinomialdoublystochasticfactory).
+ *  Token 20 is the complex unit sphere C^n, packed interleaved, length 2n.
+ *  Reserved: 7 SPD, 8 Grassmann, 9 Hyperbolic, 10 Poincare. */
 typedef enum xts_manifold_t {
     XTS_MANIFOLD_EUCLIDEAN = 0,
     XTS_MANIFOLD_SPHERE = 1,
@@ -264,7 +267,8 @@ typedef enum xts_manifold_t {
     XTS_MANIFOLD_SKEWSYMMETRIC = 15,
     XTS_MANIFOLD_EUCLIDEAN_COMPLEX = 16,
     XTS_MANIFOLD_CONSTANT = 17,
-    XTS_MANIFOLD_MULTINOMIAL_DS = 18
+    XTS_MANIFOLD_MULTINOMIAL_DS = 18,
+    XTS_MANIFOLD_SPHERE_COMPLEX = 20
 } xts_manifold_t;
 void xts_solver_set_manifold(xts_solver_t *solver, xts_manifold_t manifold);
 /** Oblique OB(n,m): product of m unit spheres in R^n, column-major. */
@@ -280,6 +284,9 @@ void xts_solver_set_constant(xts_solver_t *solver, size_t n);
 /** Doubly-stochastic n-by-n, packed n*n. manopt
  *  multinomialdoublystochasticfactory. Token 18 defaults to n = 2. */
 void xts_solver_set_multinomial_ds(xts_solver_t *solver, size_t n);
+/** Complex unit sphere in C^n. Packed interleaved, length 2n.
+ *  manopt spherecomplexfactory. Token 20 defaults to n = 1. */
+void xts_solver_set_sphere_complex(xts_solver_t *solver, size_t n);
 /** Per-atom masses for MW_RIGID. n_atoms == 0 or masses == NULL
  *  restores unit mass. */
 void xts_solver_set_masses(xts_solver_t *solver, const double *masses,

@@ -858,10 +858,10 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
     use rgmin::ffi::{
         rgmin_manifold_t, rgmin_qn_step_t, rgmin_solver_forget, rgmin_solver_set_atom_maxmove,
         rgmin_solver_set_cautious, rgmin_solver_set_constant, rgmin_solver_set_euclidean_complex,
-        rgmin_solver_set_multinomial_ds,
         rgmin_solver_set_extra_updates, rgmin_solver_set_manifold, rgmin_solver_set_masses,
-        rgmin_solver_set_maxmove, rgmin_solver_set_oblique, rgmin_solver_set_periodic,
-        rgmin_solver_set_project_rigid, rgmin_solver_set_qn_step, rgmin_solver_set_stiefel,
+        rgmin_solver_set_maxmove, rgmin_solver_set_multinomial_ds, rgmin_solver_set_oblique,
+        rgmin_solver_set_periodic, rgmin_solver_set_project_rigid, rgmin_solver_set_qn_step,
+        rgmin_solver_set_sphere_complex, rgmin_solver_set_stiefel,
     };
     let ctrl = rgmin_control_t {
         maxiter: 20,
@@ -892,6 +892,8 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_constant(session, 2);
         rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_MULTINOMIAL_DS);
         rgmin_solver_set_multinomial_ds(session, 2);
+        rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_SPHERE_COMPLEX);
+        rgmin_solver_set_sphere_complex(session, 1);
         rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_MULTINOMIAL);
         rgmin_solver_set_oblique(session, 3, 2);
         rgmin_solver_set_stiefel(session, 4, 2);
@@ -941,6 +943,8 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_constant(null, 2);
         rgmin_solver_set_manifold(null, rgmin_manifold_t::RGMIN_MANIFOLD_MULTINOMIAL_DS);
         rgmin_solver_set_multinomial_ds(null, 2);
+        rgmin_solver_set_manifold(null, rgmin_manifold_t::RGMIN_MANIFOLD_SPHERE_COMPLEX);
+        rgmin_solver_set_sphere_complex(null, 2);
         rgmin_solver_set_oblique(null, 3, 2);
         rgmin_solver_set_stiefel(null, 4, 2);
         rgmin_solver_set_masses(null, masses.as_ptr(), masses.len());
@@ -1198,5 +1202,79 @@ fn c_abi_multinomial_ds_stays_on_the_set() {
     assert_eq!(rgmin_manifold_t::RGMIN_MANIFOLD_MULTINOMIAL_DS as i32, 18);
     assert_eq!(rgmin_manifold_t::RGMIN_MANIFOLD_MW_RIGID as i32, 6);
     assert_eq!(rgmin_manifold_t::RGMIN_MANIFOLD_OBLIQUE as i32, 11);
+    unsafe { rgmin_solver_free(session) };
+}
+
+unsafe extern "C" fn scplx_linear_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 4);
+    unsafe { *value_out = *p.add(2) };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn scplx_linear_grad(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (_p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 4);
+    let (gp, gn) = unsafe { cpu_f64(g as *const _) };
+    assert_eq!(gn, 4);
+    unsafe {
+        *(gp as *mut f64) = 0.0;
+        *(gp as *mut f64).add(1) = 0.0;
+        *(gp as *mut f64).add(2) = 1.0;
+        *(gp as *mut f64).add(3) = 0.0;
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+/// Token 20 / set_sphere_complex stays on the complex unit sphere.
+/// Reserved tokens 7-10 unused.
+#[test]
+fn c_abi_sphere_complex_stays_on_the_set() {
+    use rgmin::ffi::{rgmin_manifold_t, rgmin_solver_set_sphere_complex};
+    let ctrl = rgmin_control_t {
+        maxiter: 20,
+        gtol: 1e-8,
+        istep: 0.1,
+        memory: 0,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
+    assert!(!session.is_null());
+    unsafe { rgmin_solver_set_sphere_complex(session, 2) };
+    let mut x = [1.0_f64, 0.0, 0.0, 0.0];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+    };
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
+    let st = unsafe {
+        rgmin_solver_step(
+            session,
+            Some(scplx_linear_eval),
+            Some(scplx_linear_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let fro = x.iter().map(|a| a * a).sum::<f64>().sqrt();
+    assert!((fro - 1.0).abs() < 1e-12, "left the complex sphere {x:?}");
+    assert!(
+        (x[0] - 1.0).abs() > 1e-8,
+        "expected a retraction step {x:?}"
+    );
+    assert_eq!(rgmin_manifold_t::RGMIN_MANIFOLD_SPHERE_COMPLEX as i32, 20);
+    assert_eq!(rgmin_manifold_t::RGMIN_MANIFOLD_SPHERE as i32, 1);
     unsafe { rgmin_solver_free(session) };
 }

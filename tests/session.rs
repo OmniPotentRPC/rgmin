@@ -570,6 +570,78 @@ fn multinomial_ds_rejects_a_wrong_length() {
 }
 
 #[test]
+fn sphere_complex_session_stays_on_the_set() {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::ArrayView1;
+
+    struct FirstImag;
+    impl Objective<f64> for FirstImag {
+        fn dim(&self) -> usize {
+            4
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            use std::sync::OnceLock;
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| {
+                Bounds::new(Array1::from_elem(4, -1e12), Array1::from_elem(4, 1e12), 0.0)
+            })
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            x[2]
+        }
+    }
+    impl Gradient<f64> for FirstImag {
+        fn dim(&self) -> usize {
+            4
+        }
+        fn grad(&self, _x: ArrayView1<f64>) -> Array1<f64> {
+            array![0.0, 0.0, 1.0, 0.0]
+        }
+    }
+    impl DifferentiableObjective<f64> for FirstImag {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+
+    let obj = FirstImag;
+    let mut x = array![1.0, 0.0, 0.0, 0.0];
+    let mut solver = Solver::new(
+        Method::Steepest,
+        Control {
+            maxiter: 20,
+            gtol: 1e-10,
+            istep: 0.1,
+            maxmove: None,
+        },
+        4,
+    );
+    solver.set_sphere_complex(2);
+    solver.set_accept(rgmin::Accept::None);
+    for _ in 0..8 {
+        let _ = solver.step(&obj, &mut x).unwrap();
+        let nrm = x.iter().map(|xi| xi * xi).sum::<f64>().sqrt();
+        assert!((nrm - 1.0).abs() < 1e-12, "left the complex sphere {x:?}");
+    }
+}
+
+#[test]
+fn sphere_complex_rejects_a_wrong_length() {
+    let obj = Rosenbrock::<1>::new();
+    let mut x = array![1.0];
+    let mut solver = Solver::new(Method::Steepest, control(), 1);
+    solver.set_manifold(rgmin::ManifoldKind::sphere_complex(2));
+    let err = solver.step(&obj, &mut x).unwrap_err();
+    match err {
+        rgmin::Error::ManifoldDim { kind, got } => {
+            assert_eq!(kind, "spherecomplex");
+            assert_eq!(got, 1);
+        }
+        other => panic!("expected ManifoldDim, got {other:?}"),
+    }
+}
+
+#[test]
 fn so3_session_stays_orthogonal() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;

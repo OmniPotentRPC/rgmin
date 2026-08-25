@@ -89,6 +89,8 @@ Tokens: ``RGMIN_MANIFOLD_EUCLIDEAN`` (default), ``RIGID_QUOTIENT``
 Sella IRC Eckart), ``SPHERE``, ``SO3`` (length 9), ``STIEFEL``
 (``St(n,1)``), ``SE3`` (length 12), ``SYMMETRIC`` (n² row-major),
 ``MULTINOMIAL_DS`` (token 18, n² doubly-stochastic;
-``rgmin_solver_set_multinomial_ds``). Tokens 7-10 stay reserved. See
+``rgmin_solver_set_multinomial_ds``), ``SPHERE_COMPLEX``
+(token 20, interleaved ``(re, im)``, length ``2 n``;
+``rgmin_solver_set_sphere_complex``). Tokens 7-10 stay reserved. See
 `retract onto an embedded manifold <manifolds.rst>`_.
 ``rgmin_solver_set_masses`` supplies N atomic masses for ``MW_RIGID``.

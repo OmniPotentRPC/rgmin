@@ -98,6 +98,7 @@ C
     rgmin_solver_set_complex_circle(s, 4);
     rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_SYMMETRIC);
     rgmin_solver_set_multinomial_ds(s, 3);
+    rgmin_solver_set_sphere_complex(s, 3);
     rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_EUCLIDEAN);
 
 Changing the manifold drops method memory (``forget``).
@@ -142,6 +143,14 @@ Packing notes
   projection at arrival. It is not the simplex, not the sphere,
   and not a 3N cluster. C token 18
   (``rgmin_solver_set_multinomial_ds``). Tokens 7-10 stay reserved.
+
+- ``SphereComplex { n }`` is manopt ``spherecomplexfactory``: the
+  unit sphere in ``C^n``, interleaved ``(re, im)``, length ``2 n``.
+  Projection is ``u - Re(x^* u) x``. Retraction is
+  ``(x+v)/||x+v||``. Transport is projection at arrival. It is
+  not the real sphere token, not ``(S^1)^n``, and not a 3N
+  cluster. C token 20 (``rgmin_solver_set_sphere_complex``).
+  Tokens 7-10 stay reserved.
 
 - ``set_project_rigid`` is the same horizontal projection as
   ``RigidQuotient`` and stays available on Euclidean.

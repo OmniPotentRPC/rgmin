@@ -1415,7 +1415,8 @@ pub enum rgmin_manifold_t {
     RGMIN_MANIFOLD_MULTINOMIAL_DS = 18,
     /// Symmetric doubly-stochastic n-by-n. Token defaults to n = 2.
     RGMIN_MANIFOLD_MULTINOMIAL_SYM = 19,
-    /// Complex unit sphere C^n, packed 2n. Token defaults to n = 1.
+    /// Complex unit sphere C^n, packed 2n. Token defaults to n = 1;
+    /// use rgmin_solver_set_sphere_complex. Reserved 7-10 unused.
     RGMIN_MANIFOLD_SPHERE_COMPLEX = 20,
 }
 
@@ -1510,6 +1511,16 @@ pub unsafe extern "C" fn rgmin_solver_set_multinomial_ds(solver: *mut rgmin_solv
         return;
     }
     unsafe { (*solver).solver.set_multinomial_ds(n) };
+}
+
+/// Complex unit sphere in \(\mathbb{C}^n\). Packed interleaved, length `2 n`.
+/// manopt `spherecomplexfactory`. Token 20 defaults to n = 1.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_sphere_complex(solver: *mut rgmin_solver_t, n: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_sphere_complex(n) };
 }
 
 /// Per-atom masses for `RGMIN_MANIFOLD_MW_RIGID`. `n_atoms == 0` or a
