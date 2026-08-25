@@ -202,6 +202,7 @@ typedef struct xts_solver_t xts_solver_t;
 #define xts_solver_set_multinomial_ds rgmin_solver_set_multinomial_ds
 #define xts_solver_set_multinomial_sym rgmin_solver_set_multinomial_sym
 #define xts_solver_set_sphere_complex rgmin_solver_set_sphere_complex
+#define xts_solver_set_positive rgmin_solver_set_positive
 #define xts_solver_set_masses rgmin_solver_set_masses
 #define xts_solver_set_periodic rgmin_solver_set_periodic
 #define xts_solver_step rgmin_solver_step
@@ -254,6 +255,7 @@ int32_t xts_solver_set_highs(xts_solver_t *solver, int32_t enabled);
  *  Token 19 is symmetric doubly-stochastic n-by-n
  *  (multinomialsymmetricfactory).
  *  Token 20 is the complex unit sphere C^n, packed interleaved, length 2n.
+ *  Token 21 is the positive orthant of packed length n (positivefactory).
  *  Reserved 7-10 unused. */
 typedef enum xts_manifold_t {
     XTS_MANIFOLD_EUCLIDEAN = 0,
@@ -272,7 +274,8 @@ typedef enum xts_manifold_t {
     XTS_MANIFOLD_CONSTANT = 17,
     XTS_MANIFOLD_MULTINOMIAL_DS = 18,
     XTS_MANIFOLD_MULTINOMIAL_SYM = 19,
-    XTS_MANIFOLD_SPHERE_COMPLEX = 20
+    XTS_MANIFOLD_SPHERE_COMPLEX = 20,
+    XTS_MANIFOLD_POSITIVE = 21
 } xts_manifold_t;
 void xts_solver_set_manifold(xts_solver_t *solver, xts_manifold_t manifold);
 /** Oblique OB(n,m): product of m unit spheres in R^n, column-major. */
@@ -294,6 +297,9 @@ void xts_solver_set_multinomial_sym(xts_solver_t *solver, size_t n);
 /** Complex unit sphere in C^n. Packed interleaved, length 2n.
  *  manopt spherecomplexfactory. Token 20 defaults to n = 1. */
 void xts_solver_set_sphere_complex(xts_solver_t *solver, size_t n);
+/** Positive orthant of packed length n. manopt positivefactory.
+ *  Token 21 defaults to n = 1. Reserved 7-10 unused. */
+void xts_solver_set_positive(xts_solver_t *solver, size_t n);
 /** Per-atom masses for MW_RIGID. n_atoms == 0 or masses == NULL
  *  restores unit mass. */
 void xts_solver_set_masses(xts_solver_t *solver, const double *masses,

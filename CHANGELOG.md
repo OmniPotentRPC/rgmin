@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ManifoldKind::Positive`: manopt `positivefactory`. Packed
+  length `n` (positive orthant / positive reals). Projection is
+  the identity, retraction is `x ⊙ exp(v ⊘ x)`, transport is
+  the identity. C token 21. Tokens 7-10 stay reserved.
+  `abi_minor` 20.
 - `ManifoldKind::SphereComplex`: manopt `spherecomplexfactory`.
   Interleaved `(re, im)` pairs of length `2 n`. Projection is
   `v - Re(x^* v) x`, retraction is `(x+v)/||x+v||`, transport is

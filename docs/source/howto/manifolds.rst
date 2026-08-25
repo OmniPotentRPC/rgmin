@@ -163,5 +163,12 @@ Packing notes
   cluster. C token 20 (``rgmin_solver_set_sphere_complex``).
   Tokens 7-10 stay reserved.
 
+- ``Positive { n }`` is manopt ``positivefactory``: the open
+  positive orthant of packed length ``n``. Projection is the
+  identity. Retraction is ``x ⊙ exp(v ⊘ x)``. Transport is
+  the identity. It is not the sphere, not the simplex, and
+  not a 3N cluster. C token 21 (``rgmin_solver_set_positive``).
+  Tokens 7-10 stay reserved.
+
 - ``set_project_rigid`` is the same horizontal projection as
   ``RigidQuotient`` and stays available on Euclidean.

@@ -4,22 +4,22 @@ use std::collections::VecDeque;
 
 use eindir_core::{DifferentiableObjective, Objective};
 use ndarray::{Array1, Array2};
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 
-use crate::accept::{Accept, accept_step};
+use crate::accept::{accept_step, Accept};
 use crate::adam::adam_direction;
 use crate::bb::bb_direction;
 use crate::control::Control;
 use crate::error::{Error, Result};
-use crate::fire::{FireState, fire_after_v1, fire_displacement};
+use crate::fire::{fire_after_v1, fire_displacement, FireState};
 use crate::lbfgs::{GradNorm, Lbfgs};
 use crate::linesearch::LineSearch;
 use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
-use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton};
+use crate::newton::{rfo_direction, shifted_newton, HessianObjective, NewtonKind};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
-use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
+use crate::pso::{random_velocity, update_swarm, Particle, RNG_SEED};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
 use crate::report::Report;
@@ -231,6 +231,11 @@ impl Solver {
     /// length `2 n`. manopt `spherecomplexfactory`.
     pub fn set_sphere_complex(&mut self, n: usize) {
         self.set_manifold(ManifoldKind::SphereComplex { n });
+    }
+
+    /// Positive orthant of packed length `n`. manopt `positivefactory`.
+    pub fn set_positive(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::Positive { n });
     }
 
     /// Per-atom masses for [`ManifoldKind::MwRigid`] (Page–McIver / Eckart).

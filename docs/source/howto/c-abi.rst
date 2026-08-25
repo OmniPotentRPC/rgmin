@@ -92,7 +92,8 @@ Sella IRC Eckart), ``SPHERE``, ``SO3`` (length 9), ``STIEFEL``
 ``rgmin_solver_set_multinomial_ds``), ``MULTINOMIAL_SYM`` (token 19,
 n² symmetric doubly-stochastic; ``rgmin_solver_set_multinomial_sym``),
 ``SPHERE_COMPLEX`` (token 20, interleaved ``(re, im)``, length ``2 n``;
-``rgmin_solver_set_sphere_complex``).
+``rgmin_solver_set_sphere_complex``), ``POSITIVE`` (token 21, packed
+length ``n``; ``rgmin_solver_set_positive``).
 Tokens 7-10 stay reserved. See
 `retract onto an embedded manifold <manifolds.rst>`_.
 ``rgmin_solver_set_masses`` supplies N atomic masses for ``MW_RIGID``.

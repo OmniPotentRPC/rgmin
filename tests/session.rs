@@ -1,7 +1,7 @@
 //! Persistent Session: one step is one outer iteration.
 
 use eindir_core::objectives::Rosenbrock;
-use ndarray::{Array1, array};
+use ndarray::{array, Array1};
 use rgmin::{Control, Method, Solver};
 
 fn control() -> Control {
@@ -706,6 +706,80 @@ fn sphere_complex_session_stays_on_the_set() {
 }
 
 #[test]
+fn positive_session_stays_on_the_set() {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::ArrayView1;
+    use rgmin::manifold::is_positive;
+
+    struct SumLin;
+    impl Objective<f64> for SumLin {
+        fn dim(&self) -> usize {
+            3
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            use std::sync::OnceLock;
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| {
+                Bounds::new(Array1::from_elem(3, 1e-12), Array1::from_elem(3, 1e12), 0.0)
+            })
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            x.iter().sum()
+        }
+    }
+    impl Gradient<f64> for SumLin {
+        fn dim(&self) -> usize {
+            3
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            Array1::ones(x.len())
+        }
+    }
+    impl DifferentiableObjective<f64> for SumLin {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+
+    let obj = SumLin;
+    let mut x = array![2.0, 0.5, 4.0];
+    let mut solver = Solver::new(
+        Method::Steepest,
+        Control {
+            maxiter: 20,
+            gtol: 1e-10,
+            istep: 0.1,
+            maxmove: None,
+        },
+        3,
+    );
+    solver.set_positive(3);
+    solver.set_accept(rgmin::Accept::None);
+    for _ in 0..8 {
+        let _ = solver.step(&obj, &mut x).unwrap();
+        assert!(is_positive(&x), "left the positive orthant {x:?}");
+    }
+    let fro = x.iter().map(|xi| xi * xi).sum::<f64>().sqrt();
+    assert!((fro - 1.0).abs() > 0.5, "must not be the sphere {x:?}");
+}
+
+#[test]
+fn positive_rejects_a_3n_cluster() {
+    let obj = Rosenbrock::<114>::new();
+    let mut x = Array1::from_elem(114, 0.1);
+    let mut solver = Solver::new(Method::Steepest, control(), 114);
+    solver.set_manifold(rgmin::ManifoldKind::positive(2));
+    let err = solver.step(&obj, &mut x).unwrap_err();
+    match err {
+        rgmin::Error::ManifoldDim { kind, got } => {
+            assert_eq!(kind, "positive");
+            assert_eq!(got, 114);
+        }
+        other => panic!("expected ManifoldDim, got {other:?}"),
+    }
+}
+
+#[test]
 fn sphere_complex_rejects_a_wrong_length() {
     let obj = Rosenbrock::<1>::new();
     let mut x = array![1.0];
@@ -988,8 +1062,8 @@ fn complex_circle_rejects_a_3n_cluster() {
 fn symmetric_session_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::ManifoldKind;
     use rgmin::manifold::is_symmetric;
+    use rgmin::ManifoldKind;
 
     struct FrobeniusI;
     impl Objective<f64> for FrobeniusI {
@@ -1064,8 +1138,8 @@ fn symmetric_rejects_a_3n_cluster() {
 fn skewsymmetric_session_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::ManifoldKind;
     use rgmin::manifold::is_skewsymmetric;
+    use rgmin::ManifoldKind;
 
     // Frobenius distance to J = [[0, 1], [-1, 0]]. Identity is not on the set.
     struct FrobeniusJ;
@@ -1127,8 +1201,8 @@ fn skewsymmetric_session_stays_on_the_set() {
 fn euclidean_complex_session_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::ManifoldKind;
     use rgmin::manifold::is_euclidean_complex;
+    use rgmin::ManifoldKind;
 
     struct CplxBowl;
     impl Objective<f64> for CplxBowl {
@@ -1210,8 +1284,8 @@ fn euclidean_complex_rejects_a_3n_cluster() {
 fn constant_session_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::ManifoldKind;
     use rgmin::manifold::is_constant;
+    use rgmin::ManifoldKind;
 
     struct Bowl;
     impl Objective<f64> for Bowl {

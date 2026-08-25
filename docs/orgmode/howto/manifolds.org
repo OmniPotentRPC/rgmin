@@ -40,6 +40,7 @@ vector: ~project~, ~retract~, ~transport~. Citations:
 | ~SkewSymmetric~ | row-major ~n x n~, length ~n^2~, ~n >= 2~ | ~X + U~ then ~multiskew~ |
 | ~EuclideanComplex { n }~ | interleaved ~(re, im)~, length ~2 n~ | ~x + v~ |
 | ~Constant { n }~ | singleton of length ~n~ | the fixed point |
+| ~Positive { n }~ | positive orthant, length ~n~ | ~x odot exp(v oslash x)~ |
 
 An isolated molecule or cluster lives on ~RigidQuotient~
 (~R^{3N}/SE(3)~): Sella Cartesian ~fix_translation~ plus
@@ -177,6 +178,12 @@ Changing the manifold drops method memory (~forget~).
   ~(x+v)/||x+v||~. Transport is projection at arrival. It is
   not the real sphere token, not ~(S^1)^n~, and not a 3N
   cluster. C token 20 (~rgmin_solver_set_sphere_complex~).
+  Tokens 7-10 stay reserved.
+- ~Positive { n }~ is manopt ~positivefactory~: the open
+  positive orthant of packed length ~n~. Projection is the
+  identity. Retraction is ~x odot exp(v oslash x)~. Transport
+  is the identity. It is not the sphere, not the simplex, and
+  not a 3N cluster. C token 21 (~rgmin_solver_set_positive~).
   Tokens 7-10 stay reserved.
 - ~set_project_rigid~ is the same horizontal projection as
   ~RigidQuotient~ and stays available on Euclidean.

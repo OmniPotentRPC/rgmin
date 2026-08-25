@@ -11,7 +11,7 @@
 //! \(R^{3N}/\mathrm{SE}(3)\)) or [`ManifoldKind::MwRigid`] (Page–McIver
 //! mass-weighted Eckart, the IRC metric). Sphere / SO(3)-9 / SE(3)-12
 //! / Symmetric-n² / SPD-n² / ComplexCircle-2n / EuclideanComplex-2n
-//! / Constant-n / Oblique-nm are matrix-manifold embeddings, not a 3N cluster.
+//! / Constant-n / Positive-n / Oblique-nm are matrix-manifold embeddings, not a 3N cluster.
 //! [`ManifoldKind::Symmetric`] is manopt `symmetricfactory`.
 //! [`ManifoldKind::SkewSymmetric`] is manopt `skewsymmetricfactory`.
 //! [`ManifoldKind::ComplexCircle`] is manopt `complexcirclefactory`.
@@ -22,6 +22,7 @@
 //! [`ManifoldKind::MultinomialSymmetric`] is manopt
 //! `multinomialsymmetricfactory`.
 //! [`ManifoldKind::SphereComplex`] is manopt `spherecomplexfactory`.
+//! [`ManifoldKind::Positive`] is manopt `positivefactory`.
 
 use ndarray::Array1;
 
@@ -34,6 +35,7 @@ mod multinomial_ds;
 mod multinomial_sym;
 mod mw_rigid;
 mod oblique;
+mod positive;
 mod rigid_quotient;
 mod se3;
 mod skewsymmetric;
@@ -46,39 +48,40 @@ mod symmetric;
 
 pub use complex_circle::ComplexCircle;
 pub use constant::{
-    Constant, inner as inner_const, is_constant, typical_dist as typical_dist_const,
+    inner as inner_const, is_constant, typical_dist as typical_dist_const, Constant,
 };
 pub use euclidean::Euclidean;
 pub use euclidean_complex::{
-    EuclideanComplex, inner as inner_cplx, is_euclidean_complex, typical_dist as typical_dist_cplx,
+    inner as inner_cplx, is_euclidean_complex, typical_dist as typical_dist_cplx, EuclideanComplex,
 };
 pub use multinomial::Multinomial;
 pub use multinomial_ds::{
-    MultinomialDoublyStochastic, inner as inner_ds, is_doubly_stochastic, pack as pack_ds,
-    side as side_ds, typical_dist as typical_dist_ds, unpack as unpack_ds,
+    inner as inner_ds, is_doubly_stochastic, pack as pack_ds, side as side_ds,
+    typical_dist as typical_dist_ds, unpack as unpack_ds, MultinomialDoublyStochastic,
 };
 pub use multinomial_sym::{
-    MultinomialSymmetric, inner as inner_msym, is_symmetric_doubly_stochastic, pack as pack_msym,
-    side as side_msym, typical_dist as typical_dist_msym, unpack as unpack_msym,
+    inner as inner_msym, is_symmetric_doubly_stochastic, pack as pack_msym, side as side_msym,
+    typical_dist as typical_dist_msym, unpack as unpack_msym, MultinomialSymmetric,
 };
 pub use mw_rigid::MwRigid;
 pub use oblique::Oblique;
+pub use positive::{inner as inner_pos, is_positive, typical_dist as typical_dist_pos, Positive};
 pub use rigid_quotient::RigidQuotient;
 pub use se3::Se3;
 pub use skewsymmetric::{
-    SkewSymmetric, inner as inner_skew, is_skewsymmetric, pack as pack_skew, side as side_skew,
-    typical_dist as typical_dist_skew, unpack as unpack_skew,
+    inner as inner_skew, is_skewsymmetric, pack as pack_skew, side as side_skew,
+    typical_dist as typical_dist_skew, unpack as unpack_skew, SkewSymmetric,
 };
 pub use so3::So3;
-pub use spd::{Spd, is_spd, pack as pack_spd, side as side_spd, unpack as unpack_spd};
+pub use spd::{is_spd, pack as pack_spd, side as side_spd, unpack as unpack_spd, Spd};
 pub use sphere::Sphere;
 pub use sphere_complex::{
-    SphereComplex, inner as inner_scplx, is_sphere_complex, typical_dist as typical_dist_scplx,
+    inner as inner_scplx, is_sphere_complex, typical_dist as typical_dist_scplx, SphereComplex,
 };
 pub use stiefel::{Stiefel, StiefelNp};
 pub use symmetric::{
-    Symmetric, inner as inner_sym, is_symmetric, pack as pack_sym, side as side_sym,
-    typical_dist as typical_dist_sym, unpack as unpack_sym,
+    inner as inner_sym, is_symmetric, pack as pack_sym, side as side_sym,
+    typical_dist as typical_dist_sym, unpack as unpack_sym, Symmetric,
 };
 
 /// Which embedded geometry a session retracts onto.
@@ -170,6 +173,12 @@ pub enum ManifoldKind {
         /// Complex dimension.
         n: usize,
     },
+    /// Strictly positive orthant of packed length `n`.
+    /// manopt `positivefactory`. Not the sphere and not a 3N cluster.
+    Positive {
+        /// Packed length. MATLAB `m*n` with default second size 1.
+        n: usize,
+    },
 }
 
 impl ManifoldKind {
@@ -228,6 +237,11 @@ impl ManifoldKind {
         Self::SphereComplex { n }
     }
 
+    /// Positive orthant of packed length `n`. manopt `positivefactory`.
+    pub fn positive(n: usize) -> Self {
+        Self::Positive { n }
+    }
+
     /// C ABI / INI token.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -249,6 +263,7 @@ impl ManifoldKind {
             Self::MultinomialDoublyStochastic { .. } => "multinomialdoublystochastic",
             Self::MultinomialSymmetric { .. } => "multinomialsymmetric",
             Self::SphereComplex { .. } => "spherecomplex",
+            Self::Positive { .. } => "positive",
         }
     }
 }
@@ -295,10 +310,9 @@ impl Manifold for ManifoldKind {
             Self::MultinomialDoublyStochastic { n: dn } => {
                 MultinomialDoublyStochastic { n: *dn }.required_dim(n)
             }
-            Self::MultinomialSymmetric { n: sn } => {
-                MultinomialSymmetric { n: *sn }.required_dim(n)
-            }
+            Self::MultinomialSymmetric { n: sn } => MultinomialSymmetric { n: *sn }.required_dim(n),
             Self::SphereComplex { n: cn } => SphereComplex { n: *cn }.required_dim(n),
+            Self::Positive { n: pn } => Positive { n: *pn }.required_dim(n),
         }
     }
 
@@ -325,6 +339,7 @@ impl Manifold for ManifoldKind {
             }
             Self::MultinomialSymmetric { n } => MultinomialSymmetric { n: *n }.project(x, v),
             Self::SphereComplex { n } => SphereComplex { n: *n }.project(x, v),
+            Self::Positive { n } => Positive { n: *n }.project(x, v),
         }
     }
 
@@ -351,6 +366,7 @@ impl Manifold for ManifoldKind {
             }
             Self::MultinomialSymmetric { n } => MultinomialSymmetric { n: *n }.retract(x, v),
             Self::SphereComplex { n } => SphereComplex { n: *n }.retract(x, v),
+            Self::Positive { n } => Positive { n: *n }.retract(x, v),
         }
     }
 
@@ -379,6 +395,7 @@ impl Manifold for ManifoldKind {
                 MultinomialSymmetric { n: *n }.transport(x_from, x_to, v)
             }
             Self::SphereComplex { n } => SphereComplex { n: *n }.transport(x_from, x_to, v),
+            Self::Positive { n } => Positive { n: *n }.transport(x_from, x_to, v),
         }
     }
 
@@ -407,6 +424,7 @@ impl Manifold for ManifoldKind {
                 MultinomialSymmetric { n: *n }.egrad2rgrad(x, egrad)
             }
             Self::SphereComplex { n } => SphereComplex { n: *n }.egrad2rgrad(x, egrad),
+            Self::Positive { n } => Positive { n: *n }.egrad2rgrad(x, egrad),
         }
     }
 }

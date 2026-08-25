@@ -226,6 +226,7 @@ public:
     void set_sphere_complex(std::size_t n) {
         rgmin_solver_set_sphere_complex(ptr_, n);
     }
+    void set_positive(std::size_t n) { rgmin_solver_set_positive(ptr_, n); }
 
     Report step(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
                 DLManagedTensorVersioned* x) {
