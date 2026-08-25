@@ -313,15 +313,15 @@ fn null_side_is_unbounded_on_that_side() {
         center_axes: None,
     });
     let x = Array1::from(vec![0.5, 0.5]);
-    let g = Array1::from(vec![-10.0, 10.0]);
+    let g = Array1::from(vec![-10.0, -1.0]);
     let d = opt.highs_step(x.view(), g.view()).unwrap();
     assert!(
-        x[0] + d[0] >= -1e-12,
-        "lower side must hold: {}",
-        x[0] + d[0]
+        x[0] + d[0] >= -1e-12 && x[1] + d[1] >= -1e-12,
+        "lower side must hold: {:?}",
+        (x[0] + d[0], x[1] + d[1])
     );
     assert!(
-        d[1] < -1.0,
-        "unbounded upper should not clip descent: {d:?}"
+        d[0] > 5.0 && d[1] > 0.5,
+        "unbounded upper must not clip ascent: {d:?}"
     );
 }
