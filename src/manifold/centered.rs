@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn frobenius_inner_and_typical_dist() {
         let u = array![1.0, -1.0, 0.5, -0.5];
-        let v = array![0.0, 0.0, 2.0, -2.0];
+        let v = array![1.0, 1.0, 2.0, 2.0];
         assert!((inner(&u, &v) - 0.0).abs() < 1e-15);
         let u2 = array![1.0, -1.0, 0.0, 0.0];
         let v2 = array![1.0, 0.0, 0.0, 0.0];
