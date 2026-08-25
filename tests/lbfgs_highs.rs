@@ -228,7 +228,7 @@ fn per_coord_box_is_not_uniform() {
         center_axes: None,
     });
     let x = Array1::from(vec![0.0, 0.0]);
-    let g = Array1::from(vec![10.0, 10.0]);
+    let g = Array1::from(vec![1.0, 100.0]);
     let d = opt.highs_step(x.view(), g.view()).unwrap();
     assert!(
         (x[0] + d[0]).abs() <= 0.05 + 1e-9,
@@ -236,8 +236,13 @@ fn per_coord_box_is_not_uniform() {
         x[0] + d[0]
     );
     assert!(
-        (x[1] + d[1]).abs() > 0.05,
+        (x[1] + d[1]).abs() > 0.5,
         "wide axis was clipped as if uniform: {}",
+        x[1] + d[1]
+    );
+    assert!(
+        (x[1] + d[1]).abs() <= 10.0 + 1e-9,
+        "wide axis left its own box: {}",
         x[1] + d[1]
     );
 }
