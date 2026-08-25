@@ -125,7 +125,7 @@ impl Lbfgs {
         }
     }
 
-    fn search_direction(&self, x: ArrayView1<f64>, g: ArrayView1<f64>) -> Array1<f64> {
+    pub(crate) fn search_direction(&self, x: ArrayView1<f64>, g: ArrayView1<f64>) -> Array1<f64> {
         #[cfg(feature = "highs")]
         if self.highs.is_some() {
             if let Ok(d) = self.highs_step(x, g) {
@@ -292,11 +292,7 @@ impl Lbfgs {
         // the direction is the raw negative gradient and needs a length.
         let mut a = if self.memory.is_empty() {
             let dnorm = d.iter().fold(0.0_f64, |acc, v| acc + v * v).sqrt();
-            if dnorm > 1.0 {
-                1.0 / dnorm
-            } else {
-                1.0
-            }
+            if dnorm > 1.0 { 1.0 / dnorm } else { 1.0 }
         } else {
             1.0
         };

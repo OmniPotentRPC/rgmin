@@ -10,10 +10,7 @@ fn rosenbrock(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     let a = 1.0 - x[0];
     let b = x[1] - x[0] * x[0];
     let f = a * a + 100.0 * b * b;
-    let g = Array1::from(vec![
-        -2.0 * a - 400.0 * x[0] * b,
-        200.0 * b,
-    ]);
+    let g = Array1::from(vec![-2.0 * a - 400.0 * x[0] * b, 200.0 * b]);
     (f, g)
 }
 
@@ -44,7 +41,14 @@ fn run(
     let xmax = x.iter().fold(f64::NEG_INFINITY, |a, v| a.max(*v));
     println!(
         "{:<22} f={:.6e} evals={} ginf={:.3e} ms={:.3} xmin={:.4} xmax={:.4} pairs={}",
-        label, f, evals, ginf, ms, xmin, xmax, opt.len()
+        label,
+        f,
+        evals,
+        ginf,
+        ms,
+        xmin,
+        xmax,
+        opt.len()
     );
 }
 
@@ -68,8 +72,8 @@ fn main() {
     let mut h = Lbfgs::default();
     h.highs = Some(HighsStep {
         trust: None,
-        lo: Some(0.0),
-        hi: Some(0.5),
+        lo: Some(vec![0.0]),
+        hi: Some(vec![0.5]),
         equalities: Vec::new(),
         center_axes: None,
     });

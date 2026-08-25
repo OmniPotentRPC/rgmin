@@ -48,6 +48,8 @@ pub struct Solver {
     masses: Option<Array1<f64>>,
     #[cfg(feature = "highs")]
     highs: bool,
+    #[cfg(feature = "highs")]
+    highs_opts: crate::HighsStep,
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
@@ -131,6 +133,8 @@ impl Solver {
             masses: None,
             #[cfg(feature = "highs")]
             highs: false,
+            #[cfg(feature = "highs")]
+            highs_opts: crate::HighsStep::default(),
             last_pos: None,
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
@@ -163,16 +167,22 @@ impl Solver {
     /// Euclidean cap applied on the next [`Self::step`].
     pub fn set_maxmove(&mut self, maxmove: f64) {
         self.control.maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };
+        #[cfg(feature = "highs")]
+        self.sync_highs();
     }
 
     /// eOn `maxAtomMotionAppliedV`. Preferred over the Euclidean cap.
     pub fn set_atom_maxmove(&mut self, maxmove: f64) {
         self.atom_maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };
+        #[cfg(feature = "highs")]
+        self.sync_highs();
     }
 
     /// eOn `lbfgs_project_rigid`. Isolated clusters only.
     pub fn set_project_rigid(&mut self, enabled: bool) {
         self.project_rigid = enabled;
+        #[cfg(feature = "highs")]
+        self.sync_highs();
     }
 
     /// Periodic cell. Sella leaves `proj_rot` off; the quotient is \(R^{3N}/T(3)\).
@@ -277,23 +287,59 @@ impl Solver {
         #[cfg(feature = "highs")]
         {
             self.highs = enabled;
-            if let Inner::Lbfgs(solver) = &mut self.inner {
-                solver.highs = if enabled {
-                    Some(crate::HighsStep {
-                        trust: self.atom_maxmove.or(self.control.maxmove),
-                        lo: None,
-                        hi: None,
-                        equalities: Vec::new(),
-                        center_axes: if self.project_rigid && self.dim % 3 == 0 {
-                            Some((self.dim / 3, 3))
-                        } else {
-                            None
-                        },
-                    })
-                } else {
-                    None
-                };
-            }
+            self.sync_highs();
+        }
+    }
+
+    /// Box on coordinates of `x + p`. `None` on a side is unbounded.
+    #[cfg(feature = "highs")]
+    pub fn set_box(&mut self, lower: Option<&[f64]>, upper: Option<&[f64]>) {
+        self.highs_opts.lo = lower.map(|v| v.to_vec());
+        self.highs_opts.hi = upper.map(|v| v.to_vec());
+        self.sync_highs();
+    }
+
+    /// L_inf trust radius on the HiGHS step. `radius <= 0` is unbounded.
+    #[cfg(feature = "highs")]
+    pub fn set_highs_trust(&mut self, radius: f64) {
+        self.highs_opts.trust = if radius > 0.0 { Some(radius) } else { None };
+        self.sync_highs();
+    }
+
+    /// One linear equality `a · p = rhs` on the HiGHS step.
+    #[cfg(feature = "highs")]
+    pub fn add_equality(&mut self, coeffs: Vec<(usize, f64)>, rhs: f64) {
+        self.highs_opts.equalities.push((coeffs, rhs));
+        self.sync_highs();
+    }
+
+    /// Drop all linear equalities on the HiGHS step.
+    #[cfg(feature = "highs")]
+    pub fn clear_equalities(&mut self) {
+        self.highs_opts.equalities.clear();
+        self.sync_highs();
+    }
+
+    #[cfg(feature = "highs")]
+    fn composed_highs_step(&self) -> crate::HighsStep {
+        let mut opts = self.highs_opts.clone();
+        if opts.trust.is_none() {
+            opts.trust = self.atom_maxmove.or(self.control.maxmove);
+        }
+        if opts.center_axes.is_none() && self.project_rigid && self.dim % 3 == 0 {
+            opts.center_axes = Some((self.dim / 3, 3));
+        }
+        opts
+    }
+
+    #[cfg(feature = "highs")]
+    fn sync_highs(&mut self) {
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.highs = if self.highs {
+                Some(self.composed_highs_step())
+            } else {
+                None
+            };
         }
     }
 
@@ -480,18 +526,12 @@ impl Solver {
         }
         #[cfg(feature = "highs")]
         if self.highs {
-            let center = if self.project_rigid && self.dim % 3 == 0 {
-                Some((self.dim / 3, 3))
-            } else {
-                None
-            };
             if let Ok(dir) = crate::lbfgs_qp::highs_feasible_step(
                 None,
                 Some(&hess),
                 &grad,
-                self.atom_maxmove,
-                self.control.maxmove,
-                center,
+                x.view(),
+                &self.composed_highs_step(),
             ) {
                 let old = x.clone();
                 let gold = grad.clone();
@@ -687,7 +727,7 @@ impl Solver {
         match &mut self.inner {
             Inner::Lbfgs(solver) => {
                 if self.accept == Accept::None {
-                    let dir = solver.direction(grad.view());
+                    let dir = solver.search_direction(x.view(), grad.view());
                     let old = x.clone();
                     let gold = grad.clone();
                     let (npos, nval, ngrad, moved) = accept_step(

@@ -36,15 +36,28 @@ fn serialise_openmp_once() {
     });
 }
 
+/// One side of a coordinate box. Length 1 is uniform; length `n` is
+/// per-coordinate. `None` on [`HighsStep::lo`] / [`HighsStep::hi`] is
+/// unbounded on that side.
+pub fn box_side_at(side: &Option<Vec<f64>>, k: usize) -> Option<f64> {
+    match side.as_ref() {
+        None => None,
+        Some(v) if v.len() == 1 => Some(v[0]),
+        Some(v) => v.get(k).copied(),
+    }
+}
+
 /// Bounds and equalities on one L-BFGS model step.
 #[derive(Clone, Debug, Default)]
 pub struct HighsStep {
     /// L_inf trust radius on the step. `None` is unbounded.
     pub trust: Option<f64>,
-    /// Uniform box lower bound on coordinates of `x + p`.
-    pub lo: Option<f64>,
-    /// Uniform box upper bound on coordinates of `x + p`.
-    pub hi: Option<f64>,
+    /// Box lower bound on coordinates of `x + p`.
+    /// Length 1 is uniform; length `n` is per-coordinate. `None` is unbounded.
+    pub lo: Option<Vec<f64>>,
+    /// Box upper bound on coordinates of `x + p`.
+    /// Length 1 is uniform; length `n` is per-coordinate. `None` is unbounded.
+    pub hi: Option<Vec<f64>>,
     /// Linear equalities `a · p = rhs`.
     pub equalities: Vec<(Vec<(usize, f64)>, f64)>,
     /// Packed `(n_atoms, dim)`: enforce `sum_i p[i * dim + h] = 0` per axis.
@@ -156,10 +169,10 @@ fn project_qp(d: &Array1<f64>, x: ArrayView1<f64>, opts: &HighsStep) -> Result<A
 fn column_bounds(k: usize, x: ArrayView1<f64>, opts: &HighsStep) -> (f64, f64) {
     let mut lo = opts.trust.map(|t| -t).unwrap_or(f64::NEG_INFINITY);
     let mut hi = opts.trust.map(|t| t).unwrap_or(f64::INFINITY);
-    if let Some(b0) = opts.lo {
+    if let Some(b0) = box_side_at(&opts.lo, k) {
         lo = lo.max(b0 - x[k]);
     }
-    if let Some(b1) = opts.hi {
+    if let Some(b1) = box_side_at(&opts.hi, k) {
         hi = hi.min(b1 - x[k]);
     }
     if lo > hi {
@@ -252,19 +265,24 @@ fn scale_to_bounds(d: &mut Array1<f64>, x: ArrayView1<f64>, opts: &HighsStep) {
 
 /// Newton QP on a PSD host Hessian, or `Q = I` projection of `d`.
 ///
-/// `min 1/2 p^T Q p + c^T p` with per-coordinate boxes from
-/// `atom_maxmove`. Unconstrained (no box, no centering) skips HiGHS.
+/// `min 1/2 p^T Q p + c^T p` with the box, trust, and equalities on
+/// `opts`. Unconstrained (no box, no centering, no equalities) skips
+/// HiGHS.
 pub fn highs_feasible_step(
     direction: Option<&Array1<f64>>,
     hess: Option<&Array2<f64>>,
     grad: &Array1<f64>,
-    atom_maxmove: Option<f64>,
-    trust: Option<f64>,
-    center_axes: Option<(usize, usize)>,
+    x: ArrayView1<f64>,
+    opts: &HighsStep,
 ) -> Result<Array1<f64>> {
     let n = grad.len();
-    let boxed = atom_maxmove.is_some_and(|c| c > 0.0) || trust.is_some_and(|c| c > 0.0);
-    if !boxed && center_axes.is_none() {
+    if x.len() != n {
+        return Err(Error::Dim {
+            got: x.len(),
+            dim: n,
+        });
+    }
+    if !opts.has_box() && !opts.needs_qp() && opts.center_axes.is_none() {
         if let Some(h) = hess {
             return Ok(crate::newton::shifted_newton(h, grad));
         }
@@ -291,15 +309,25 @@ pub fn highs_feasible_step(
     let mut pb = RowProblem::default();
     let mut cols = Vec::with_capacity(n);
     for k in 0..n {
-        let (lo, hi) = coord_bounds(k, atom_maxmove, trust);
+        let (lo, hi) = column_bounds(k, x, opts);
         cols.push(pb.add_column(c[k], lo..=hi));
     }
-    if let Some((n_atoms, dim)) = center_axes {
+    if let Some((n_atoms, dim)) = opts.center_axes {
         if n_atoms * dim == n && n_atoms > 0 {
             for h in 0..dim {
                 let row: Vec<_> = (0..n_atoms).map(|i| (cols[i * dim + h], 1.0)).collect();
                 pb.add_row(0.0..=0.0, &row);
             }
+        }
+    }
+    for (coeffs, rhs) in &opts.equalities {
+        let row: Vec<_> = coeffs
+            .iter()
+            .filter(|(i, _)| *i < n)
+            .map(|(i, a)| (cols[*i], *a))
+            .collect();
+        if !row.is_empty() {
+            pb.add_row(*rhs..=*rhs, &row);
         }
     }
 
@@ -342,28 +370,6 @@ pub fn highs_feasible_step(
         return Err(Error::Highs(format!("column count {} != {n}", p.len())));
     }
     Ok(Array1::from(p.to_vec()))
-}
-
-fn coord_bounds(k: usize, atom_maxmove: Option<f64>, trust: Option<f64>) -> (f64, f64) {
-    let _ = k;
-    let mut lo = f64::NEG_INFINITY;
-    let mut hi = f64::INFINITY;
-    if let Some(t) = trust {
-        if t > 0.0 {
-            lo = -t;
-            hi = t;
-        }
-    }
-    if let Some(a) = atom_maxmove {
-        if a > 0.0 {
-            lo = lo.max(-a);
-            hi = hi.min(a);
-        }
-    }
-    if lo > hi {
-        lo = hi;
-    }
-    (lo, hi)
 }
 
 fn dense_csc(h: &Array2<f64>) -> (Vec<HighsInt>, Vec<HighsInt>, Vec<f64>) {
