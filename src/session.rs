@@ -731,7 +731,7 @@ impl Solver {
         match &mut self.inner {
             Inner::Lbfgs(solver) => {
                 if self.accept == Accept::None {
-                    let dir = solver.search_direction(x.view(), grad.view());
+                    let dir = solver.direction(grad.view());
                     let old = x.clone();
                     let gold = grad.clone();
                     let (npos, nval, ngrad, moved) = accept_step(
