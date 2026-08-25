@@ -172,8 +172,8 @@ Packing notes
 
 - ``CenteredMatrix { m, n, rows }`` is manopt
   ``centeredmatrixfactory``: an ``m x n`` matrix packed
-  row-major (``m n``) with zero column means (``rows = false``,
-  default) or zero row means. Projection is the centering
+  row-major (``m n``) with ``X 1 = 0`` (``rows = false``,
+  default) or ``1^T X = 0`` (``rows = true``). Projection is the centering
   operator. Retraction is ``X + U`` then center. Transport is
   the identity. It is not the sphere and not a 3N cluster. C
   token 22 (``rgmin_solver_set_centered_matrix``). Tokens 7-10

@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `ManifoldKind::CenteredMatrix`: manopt `centeredmatrixfactory`.
   Packed row-major `m n`. Projection is the centering operator
-  (zero column mean, or zero row mean), retraction is `X + U`
+  (`X 1 = 0` by default, or `1^T X = 0`), retraction is `X + U`
   then center, transport is the identity. C token 22. Tokens
   7-10 stay reserved. `abi_minor` 21.
 - `ManifoldKind::Positive`: manopt `positivefactory`. Packed
