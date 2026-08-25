@@ -334,12 +334,16 @@ impl Solver {
 
     #[cfg(feature = "highs")]
     fn sync_highs(&mut self) {
+        if !matches!(&self.inner, Inner::Lbfgs(_)) {
+            return;
+        }
+        let step = if self.highs {
+            Some(self.composed_highs_step())
+        } else {
+            None
+        };
         if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.highs = if self.highs {
-                Some(self.composed_highs_step())
-            } else {
-                None
-            };
+            solver.highs = step;
         }
     }
 
