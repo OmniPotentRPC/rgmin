@@ -6,6 +6,12 @@
 
 ** Unreleased
 
+Feature ~slepc~: SLEPc EPS on the lowest-mode waist via MatShell
+and typed ~EPSSet*~ / ~STSet*~ only. No ~EPSSetFromOptions~ and
+no PETSc options database. A PETSc host may pass a Pmat through
+~SlepcParams~. Unbuilt (default, or the feature on without
+PETSc/SLEPc) stays ~Error::EigenUnavailable~.
+
 ~rgmin_solver_set_box~: per-coordinate HiGHS box on ~x + p~.
 A NULL side is unbounded. Same status as ~set_highs~ (0, or 1
 without the ~highs~ feature). ~rgmin_solver_set_trust~ is the

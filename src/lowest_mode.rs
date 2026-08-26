@@ -4,13 +4,15 @@
 //! not a full ELPA / SLATE spectrum. Dispatch is a closed
 //! [`EigensolverKind`]: Lanczos, Rayleigh-Ritz, Jacobi-Davidson,
 //! LOBPCG, and the Jónsson dimer with Heyden plane rotations run
-//! here; every other named backend fail-closes with
+//! here; SLEPc EPS runs when the `slepc` feature links PETSc/SLEPc;
+//! every other named backend fail-closes with
 //! [`Error::EigenUnavailable`]. Integers match `schema/eigen.capnp`.
 
 use ndarray::{Array1, ArrayView1};
 
 use crate::error::{Error, Result};
 use crate::hvp::HessianVector;
+use crate::slepc_kind::SlepcParams;
 use crate::vecops::{axpy, dot, nrm2};
 
 /// Cutoff used by gpr_optim `kMinDistributedSymmetricEigenOrder`.
@@ -32,7 +34,7 @@ pub enum EigensolverKind {
     Lobpcg = 3,
     /// PRIMME. Not linked.
     Primme = 4,
-    /// SLEPc EPS. Not linked.
+    /// SLEPc EPS. Linked with the `slepc` feature when PETSc/SLEPc are present.
     Slepc = 5,
     /// ChASE Chebyshev filter. Not linked.
     Chase = 6,
@@ -81,7 +83,7 @@ impl EigensolverKind {
         matches!(
             self,
             Self::Lanczos | Self::RayleighRitz | Self::JacobiDavidson | Self::Lobpcg | Self::Dimer
-        )
+        ) || (cfg!(rgmin_has_slepc) && matches!(self, Self::Slepc))
     }
 
     /// Works from Hessian actions, no assembled matrix.
@@ -236,7 +238,51 @@ pub fn lowest_mode<H: ApplyHessian + ?Sized>(
         EigensolverKind::JacobiDavidson => Ok(jacobi_davidson(h, x, seed, params)),
         EigensolverKind::Lobpcg => Ok(lobpcg(h, x, seed, params)),
         EigensolverKind::Dimer => Ok(dimer(h, x, seed, params)),
+        EigensolverKind::Slepc => lowest_mode_slepc(h, x, seed, params, &SlepcParams::default()),
         other => Err(Error::EigenUnavailable { kind: other.name() }),
+    }
+}
+
+/// SLEPc EPS arm of [`lowest_mode`]. `params.kind` is ignored.
+///
+/// Unbuilt `slepc` (or the feature on without PETSc/SLEPc) returns
+/// [`Error::EigenUnavailable`]. A host that already lives in PETSc
+/// passes a Pmat through [`SlepcParams`].
+pub fn lowest_mode_slepc<H: ApplyHessian + ?Sized>(
+    h: &H,
+    x: ArrayView1<f64>,
+    seed: ArrayView1<f64>,
+    params: &EigenParams,
+    slepc: &SlepcParams,
+) -> Result<LowestMode> {
+    if seed.is_empty() {
+        return Err(Error::Dim { got: 0, dim: 0 });
+    }
+    #[cfg(feature = "slepc")]
+    {
+        let n = seed.len();
+        let seed_owned = seed.to_owned();
+        let (vector, value, actions) = crate::slepc_eps::solve(
+            seed_owned.as_slice().unwrap(),
+            params.nev.max(1),
+            params.krylov_dim(n),
+            params.iterations(n),
+            params.tolerance(),
+            slepc,
+            |v| h.apply_hessian(x, ArrayView1::from(v)),
+        )?;
+        Ok(LowestMode {
+            vector,
+            value,
+            actions,
+        })
+    }
+    #[cfg(not(feature = "slepc"))]
+    {
+        let _ = (h, x, params, slepc);
+        Err(Error::EigenUnavailable {
+            kind: EigensolverKind::Slepc.name(),
+        })
     }
 }
 
@@ -1134,6 +1180,9 @@ mod tests {
         let seed = array![1.0, 0.0, 0.0, 0.0];
         for raw in 4u8..=13 {
             let kind = EigensolverKind::from_ordinal(raw).unwrap();
+            if kind.is_linked() {
+                continue;
+            }
             assert!(!kind.is_linked());
             let err = lowest_mode(
                 &h,
@@ -1150,5 +1199,91 @@ mod tests {
                 other => panic!("expected unavailable, got {other}"),
             }
         }
+    }
+
+    #[test]
+    fn slepc_unbuilt_is_unavailable() {
+        if EigensolverKind::Slepc.is_linked() {
+            return;
+        }
+        let h = gapped_diag(4);
+        let x = Array1::zeros(4);
+        let seed = array![1.0, 0.0, 0.0, 0.0];
+        let err = lowest_mode_slepc(
+            &h,
+            x.view(),
+            seed.view(),
+            &EigenParams {
+                kind: EigensolverKind::Slepc,
+                ..EigenParams::default()
+            },
+            &SlepcParams::default(),
+        )
+        .unwrap_err();
+        match err {
+            Error::EigenUnavailable { kind } => assert_eq!(kind, "slepc"),
+            other => panic!("expected unavailable, got {other}"),
+        }
+        assert_eq!(EigensolverKind::Slepc as u8, 5);
+        assert_eq!(EigensolverKind::Slepc.name(), "slepc");
+    }
+
+    #[test]
+    fn slepc_shim_typed_setters_only() {
+        let shim = include_str!("slepc_shim.c");
+        assert!(shim.contains("MatCreateShell"));
+        assert!(shim.contains("EPSSetOperators"));
+        assert!(shim.contains("EPSSetProblemType"));
+        assert!(shim.contains("EPSSetType"));
+        assert!(shim.contains("EPSSetWhichEigenpairs"));
+        assert!(shim.contains("EPSSetDimensions"));
+        assert!(shim.contains("EPSSetTolerances"));
+        assert!(shim.contains("STSetType"));
+        assert!(shim.contains("STSetPreconditionerMat"));
+        assert!(shim.contains("SlepcInitializeNoArguments"));
+        assert!(!shim.contains("EPSSetFromOptions"));
+        assert!(!shim.contains("STSetFromOptions"));
+        assert!(!shim.contains("PetscOptions"));
+        assert!(!shim.contains("PetscInitialize("));
+    }
+
+    #[test]
+    fn slepc_st_ordinals_are_closed() {
+        for raw in 0u8..=4 {
+            let kind = crate::SlepcStKind::from_ordinal(raw).expect("ordinal in range");
+            assert_eq!(kind as u8, raw);
+        }
+        assert!(crate::SlepcStKind::from_ordinal(5).is_none());
+        assert!(crate::SlepcStKind::Sinvert.needs_pmat());
+        assert!(crate::SlepcStKind::Cayley.needs_pmat());
+        assert!(!crate::SlepcStKind::Default.needs_pmat());
+    }
+
+    #[cfg(rgmin_has_slepc)]
+    #[test]
+    fn slepc_recovers_the_gapped_mode() {
+        let n = 32;
+        let h = gapped_diag(n);
+        let x = Array1::zeros(n);
+        let mut seed = Array1::zeros(n);
+        seed[0] = 0.3;
+        seed[3] = 0.7;
+        seed[11] = 0.2;
+        let mode = lowest_mode(
+            &h,
+            x.view(),
+            seed.view(),
+            &EigenParams {
+                kind: EigensolverKind::Slepc,
+                krylov: 8,
+                max_iter: 32,
+                tol: 1e-6,
+                nev: 1,
+            },
+        )
+        .unwrap();
+        assert!(mode.value < 0.0, "SLEPc curvature {}", mode.value);
+        assert!(mode.vector[0].abs() > 0.9, "SLEPc mode {:?}", mode.vector);
+        assert!(EigensolverKind::Slepc.is_linked());
     }
 }

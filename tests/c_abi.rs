@@ -7,6 +7,7 @@ use std::os::raw::c_void;
 use dlpk::sys::{DLDeviceType, DLManagedTensorVersioned};
 use eindir_core::ffi::eindir_core_abi_stamp;
 use eindir_core::ffi::{eindir_objective_t, eindir_status_t};
+use rgmin::EigensolverKind;
 use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_conjugacy_t, rgmin_control_t,
     rgmin_curv_fn, rgmin_eigen_kind_t, rgmin_eigen_params_t, rgmin_last_error,
@@ -769,6 +770,47 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     let mt = unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), 4) };
     let params = rgmin_eigen_params_t {
         kind: rgmin_eigen_kind_t::RGMIN_EIGEN_ELPA as i32,
+        nev: 1,
+        krylov: 0,
+        max_iter: 0,
+        tol: 0.0,
+    };
+    let mut out = rgmin_lowest_mode_t {
+        value: 0.0,
+        actions: 0,
+    };
+    let status = unsafe {
+        rgmin_lowest_eigenpair(
+            Some(gapped_hvp),
+            std::ptr::null_mut(),
+            xt,
+            st,
+            mt,
+            &params,
+            &mut out,
+        )
+    };
+    unsafe {
+        rgmin_tensor_free(xt);
+        rgmin_tensor_free(st);
+        rgmin_tensor_free(mt);
+    }
+    assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
+}
+
+#[test]
+fn lowest_eigenpair_slepc_unbuilt_is_unavailable() {
+    if EigensolverKind::Slepc.is_linked() {
+        return;
+    }
+    let mut x = [0.0_f64; 4];
+    let mut seed = [1.0, 0.0, 0.0, 0.0];
+    let mut mode = [0.0_f64; 4];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
+    let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 4) };
+    let mt = unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), 4) };
+    let params = rgmin_eigen_params_t {
+        kind: rgmin_eigen_kind_t::RGMIN_EIGEN_SLEPC as i32,
         nev: 1,
         krylov: 0,
         max_iter: 0,

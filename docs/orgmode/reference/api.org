@@ -18,6 +18,7 @@ Two published surfaces, one implementation.
 | ~ManifoldKind~ | ~project~ / ~retract~ / ~transport~. |
 | ~IrcTrust~ | GS2 / Sella MW-sphere equality. |
 | ~lowest_eigenpair~ / ~lowest_mode~ | Matrix-free lowest Hessian pair. |
+| ~lowest_mode_slepc~ / ~SlepcParams~ | Typed SLEPc EPS extras (Pmat / ST). |
 | ~EigensolverKind~ / ~EigenParams~ | Closed eigen waist. |
 | ~HessianVector~ / ~FdHvp~ | ~H v~ without forming ~H~. |
 

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Feature `slepc`: SLEPc EPS on the lowest-mode waist via MatShell
+  and typed `EPSSet*` / `STSet*` only. No `EPSSetFromOptions` and
+  no PETSc options database. A PETSc host may pass a Pmat through
+  `SlepcParams`. Unbuilt (default, or the feature on without
+  PETSc/SLEPc) stays `Error::EigenUnavailable`.
 - Lanczos two-pass full reorthogonalization of the built Q
   (SLEPc `EPS_ORTH_FULL`). Start-vector `||q0|| < eps` returns
   without a column (eOn). Residual `beta <= 1e-10 |alpha|` is

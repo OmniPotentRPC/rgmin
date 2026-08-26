@@ -55,6 +55,12 @@ pub enum Error {
         /// Closed-enum name (`elpa`, `primme`, ...).
         kind: &'static str,
     },
+    /// Linked SLEPc EPS rejected the typed configuration or the pair.
+    #[error("SLEPc: {what}")]
+    Slepc {
+        /// What the typed EPS/ST call failed to produce.
+        what: &'static str,
+    },
 }
 
 /// Result alias for this crate.
