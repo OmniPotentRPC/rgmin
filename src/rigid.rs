@@ -8,6 +8,8 @@
 
 use ndarray::{Array1, ArrayView1};
 
+use crate::vecops::{self, Vector};
+
 /// eOn `projectOutRotTrans`. Unit-mass Eckart. Isolated molecule (T+R).
 pub(crate) fn project_out_rot_trans(vec: &mut Array1<f64>, pos: ArrayView1<f64>) {
     project_horizontal(vec, pos, None, true);
@@ -82,43 +84,46 @@ pub(crate) fn project_horizontal(
         basis.push(rz);
     }
 
+    let mut mass3n = Array1::zeros(n);
+    for i in 0..nat {
+        let mi = m_at(i);
+        mass3n[3 * i] = mi;
+        mass3n[3 * i + 1] = mi;
+        mass3n[3 * i + 2] = mi;
+    }
+
     let mut ortho: Vec<Array1<f64>> = Vec::with_capacity(6);
     for v in basis {
         let mut u = v;
         for e in &ortho {
-            let d = mass_dot(&u, e, nat, &m_at);
+            let d = mass_inner(&u, e, &mass3n);
             // Subtract in the Euclidean chart; the coefficient used the
             // mass inner product so the result is M-orthogonal to e.
-            let ee = mass_dot(e, e, nat, &m_at);
+            let ee = mass_inner(e, e, &mass3n);
             if ee > 1.0e-18 {
-                u.scaled_add(-d / ee, e);
+                vecops::axpy(-d / ee, e.view(), &mut u);
             }
         }
-        let nrm2 = mass_dot(&u, &u, nat, &m_at);
+        let nrm2 = mass_inner(&u, &u, &mass3n);
         if nrm2 > 1.0e-18 {
-            u /= nrm2.sqrt();
+            vecops::scale(1.0 / nrm2.sqrt(), &mut u);
             ortho.push(u);
         }
     }
     for e in &ortho {
-        let d = mass_dot(vec, e, nat, &m_at);
-        let ee = mass_dot(e, e, nat, &m_at);
+        let d = mass_inner(vec, e, &mass3n);
+        let ee = mass_inner(e, e, &mass3n);
         if ee > 1.0e-18 {
-            vec.scaled_add(-d / ee, e);
+            vecops::axpy(-d / ee, e.view(), vec);
         }
     }
 }
 
-fn mass_dot<F>(a: &Array1<f64>, b: &Array1<f64>, nat: usize, m_at: &F) -> f64
-where
-    F: Fn(usize) -> f64,
-{
-    let mut s = 0.0;
-    for i in 0..nat {
-        let mi = m_at(i);
-        s += mi * (a[3 * i] * b[3 * i] + a[3 * i + 1] * b[3 * i + 1] + a[3 * i + 2] * b[3 * i + 2]);
-    }
-    s
+/// `sum_i m_i a_i · b_i` as a dest vecops reduction: `(m ⊙ a) · b`.
+fn mass_inner(a: &Array1<f64>, b: &Array1<f64>, mass3n: &Array1<f64>) -> f64 {
+    let mut wa = Vector::from_host(a.clone());
+    vecops::mul_assign(mass3n.view(), wa.host_mut());
+    vecops::vdot(&wa, &Vector::from_host(b.clone()))
 }
 
 #[cfg(test)]
@@ -168,5 +173,28 @@ mod tests {
         let mut t = array![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
         project_horizontal(&mut t, pos.view(), None, false);
         assert!(l2(&t) < 1e-12, "translation survived under PBC {t:?}");
+    }
+
+    #[test]
+    fn cluster_project_uses_vecops() {
+        let src = include_str!("rigid.rs");
+        let impl_only = src.split("#[cfg(test)]").next().expect("impl");
+        assert!(impl_only.contains("vecops::axpy"), "3N GS must axpy");
+        assert!(impl_only.contains("mul_assign"), "mass inner must mul");
+        assert!(impl_only.contains("vdot"), "mass inner must vdot");
+        assert!(impl_only.contains("Vector::from_host"), "dlpk CPU tensor");
+        for line in impl_only.lines() {
+            let t = line.trim();
+            if t.starts_with("//") || t.starts_with("///") {
+                continue;
+            }
+            assert!(!t.contains("scaled_add"), "ndarray-only 3N hot loop: {t}");
+        }
+    }
+
+    #[cfg(feature = "par")]
+    #[test]
+    fn par_drops_a_pure_translation() {
+        drops_a_pure_translation();
     }
 }

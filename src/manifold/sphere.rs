@@ -2,8 +2,11 @@
 //!
 //! Projection \(v - (x\cdot v)x\). Retraction \((x+v)/\|x+v\|\).
 //! Transport is projection at the arrival point.
+//! Reductions go through [`crate::vecops`].
 
 use ndarray::Array1;
+
+use crate::vecops::{self, Vector};
 
 use super::Manifold;
 
@@ -11,31 +14,29 @@ use super::Manifold;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Sphere;
 
-fn dot(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
-    a.iter().zip(b.iter()).map(|(u, v)| u * v).sum()
-}
-
-fn nrm(a: &Array1<f64>) -> f64 {
-    dot(a, a).sqrt()
-}
-
 impl Manifold for Sphere {
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        let s = dot(x, v);
-        Array1::from_iter(x.iter().zip(v.iter()).map(|(xi, vi)| vi - s * xi))
+        let s = vecops::dot(x.view(), v.view());
+        let mut out = Vector::from_host(v.clone());
+        vecops::vaxpy(-s, &Vector::from_host(x.clone()), &mut out);
+        out.into_host()
     }
 
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        let y = x + v;
-        let n = nrm(&y);
+        let mut y = Vector::from_host(x.clone());
+        vecops::vaxpy(1.0, &Vector::from_host(v.clone()), &mut y);
+        let n = vecops::vnrm2(&y);
         if n <= 1e-16 {
-            let n0 = nrm(x);
+            let n0 = vecops::nrm2(x.view());
             if n0 <= 1e-16 {
                 return x.clone();
             }
-            return x / n0;
+            let mut xn = Vector::from_host(x.clone());
+            vecops::scale(1.0 / n0, xn.host_mut());
+            return xn.into_host();
         }
-        y / n
+        vecops::scale(1.0 / n, y.host_mut());
+        y.into_host()
     }
 
     fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
@@ -53,7 +54,7 @@ mod tests {
         let x = array![1.0, 0.0, 0.0];
         let v = array![2.0, 3.0, 4.0];
         let t = Sphere.project(&x, &v);
-        assert!(dot(&x, &t).abs() < 1e-15);
+        assert!(vecops::dot(x.view(), t.view()).abs() < 1e-15);
         assert!((t[1] - 3.0).abs() < 1e-15);
     }
 
@@ -62,6 +63,12 @@ mod tests {
         let x = array![0.0, 1.0, 0.0];
         let v = array![0.1, 0.0, -0.2];
         let y = Sphere.retract(&x, &v);
-        assert!((nrm(&y) - 1.0).abs() < 1e-14);
+        assert!((vecops::nrm2(y.view()) - 1.0).abs() < 1e-14);
+    }
+
+    #[cfg(feature = "par")]
+    #[test]
+    fn par_retract_stays_on_the_sphere() {
+        retract_stays_on_the_sphere();
     }
 }

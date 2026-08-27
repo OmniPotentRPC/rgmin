@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Manifold kernels go through dest vecops (dlpk CPU `Vector`) and
+  the `par` / rayon feature. Sphere / Euclidean / RigidQuotient /
+  MwRigid proj/retr/transp use `vaxpy` / `dot` / `scale`. The 3N
+  Eckart project (`src/rigid.rs`) reduces through `mul_assign` +
+  `vdot` and updates through `axpy` / `scale`; no ndarray-only
+  hot loop on a 3N cluster. Stay-on-set unit tests plus a
+  `par`-feature rayon test (`par_dot_axpy_on_a_long_vector_uses_rayon`).
 - `IrcTrust::project` / `cons` go through vecops (`axpy`,
   `mul_assign`, `scale`, `div_assign_floor`, `nrm2`). The inner
   IRC MW project does not call ELPA. Feature `par` has a

@@ -1,6 +1,10 @@
 //! Ambient Euclidean space. Identity projection and retraction.
+//!
+//! Translation goes through [`crate::vecops`].
 
 use ndarray::Array1;
+
+use crate::vecops::{self, Vector};
 
 use super::Manifold;
 
@@ -14,7 +18,9 @@ impl Manifold for Euclidean {
     }
 
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        x + v
+        let mut y = Vector::from_host(x.clone());
+        vecops::vaxpy(1.0, &Vector::from_host(v.clone()), &mut y);
+        y.into_host()
     }
 
     fn transport(
@@ -39,5 +45,24 @@ mod tests {
         let y = Euclidean.retract(&x, &v);
         assert!((y[0] - 1.5).abs() < 1e-15);
         assert!((y[1] - 1.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn retract_stays_on_the_euclidean_set() {
+        let x = array![-2.0, 0.5, 3.0];
+        let v = array![0.25, -1.0, 0.0];
+        let y = Euclidean.retract(&x, &v);
+        assert_eq!(y.len(), 3);
+        assert!((y[0] + 1.75).abs() < 1e-15);
+        assert!((y[1] + 0.5).abs() < 1e-15);
+        assert!((y[2] - 3.0).abs() < 1e-15);
+        let t = Euclidean.transport(&x, &y, &v);
+        assert_eq!(t, v);
+    }
+
+    #[cfg(feature = "par")]
+    #[test]
+    fn par_retract_stays_on_the_euclidean_set() {
+        retract_stays_on_the_euclidean_set();
     }
 }

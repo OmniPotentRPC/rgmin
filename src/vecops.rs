@@ -376,4 +376,21 @@ mod tests {
         let err = Vector::try_on(cuda, Array1::zeros(4)).unwrap_err();
         assert_eq!(err.device_type, dlpk::sys::DLDeviceType::kDLCUDA as i32);
     }
+
+    #[cfg(feature = "par")]
+    #[test]
+    fn par_dot_axpy_on_a_long_vector_uses_rayon() {
+        let n = super::PAR_MIN_LEN;
+        let x = Array1::from_elem(n, 0.5);
+        let y = Array1::from_elem(n, 2.0);
+        let d = dot(x.view(), y.view());
+        assert!((d - n as f64).abs() < 1e-6, "par dot {d}");
+        let mut z = y.clone();
+        axpy(0.5, x.view(), &mut z);
+        assert!((z[0] - 2.25).abs() < 1e-15);
+        assert!((z[n - 1] - 2.25).abs() < 1e-15);
+        let mut s = x.clone();
+        scale(4.0, &mut s);
+        assert!((sum(s.view()) - 2.0 * n as f64).abs() < 1e-6);
+    }
 }

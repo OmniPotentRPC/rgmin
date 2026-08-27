@@ -7,10 +7,10 @@ use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::IrcTrust;
 use rgmin::manifold::{
-    CenteredMatrix, ComplexCircle, Constant, EuclideanComplex, Manifold, Multinomial, MwRigid,
-    Oblique, Positive, SkewSymmetric, Spd, Sphere, SphereComplex, Stiefel, StiefelNp, Symmetric,
-    is_centered, is_constant, is_euclidean_complex, is_positive, is_skewsymmetric, is_spd,
-    is_sphere_complex, is_symmetric,
+    CenteredMatrix, ComplexCircle, Constant, Euclidean, EuclideanComplex, Manifold, Multinomial,
+    MwRigid, Oblique, Positive, RigidQuotient, SkewSymmetric, Spd, Sphere, SphereComplex, Stiefel,
+    StiefelNp, Symmetric, is_centered, is_constant, is_euclidean_complex, is_positive,
+    is_skewsymmetric, is_spd, is_sphere_complex, is_symmetric,
 };
 use rgmin::{Conjugacy, Control, DirectionalCurvature, Restart, ScgParams, minimize_scg_exact};
 
@@ -116,6 +116,51 @@ fn mw_rigid_projects_out_translations_and_rotations() {
     let projected = MwRigid.project(&x, &breathe);
     let norm = projected.iter().map(|v| v * v).sum::<f64>().sqrt();
     assert!(norm > 1e-4, "an internal mode must survive, |p| = {norm}");
+}
+
+/// Horizontal retract stays in R^{3N}/SE(3): the increment is
+/// horizontal and a translation of the image is still vertical.
+#[test]
+fn rigid_quotient_retract_stays_on_the_set() {
+    let x = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    let v = array![0.0, 0.1, 0.0, 0.0, -0.05, 0.05, 0.0, -0.05, -0.05];
+    let t = RigidQuotient.project(&x, &v);
+    let y = RigidQuotient.retract(&x, &t);
+    assert_eq!(y.len(), 9);
+    let inc = &y - &x;
+    let re = RigidQuotient.project(&x, &inc);
+    for (a, b) in inc.iter().zip(re.iter()) {
+        assert!((a - b).abs() < 1e-12, "{inc:?} vs {re:?}");
+    }
+    let trans = array![0.2, 0.0, 0.0, 0.2, 0.0, 0.0, 0.2, 0.0, 0.0];
+    let p = RigidQuotient.project(&y, &trans);
+    let n = p.iter().map(|v| v * v).sum::<f64>().sqrt();
+    assert!(n < 1e-12, "translation of the image must vanish, |p| = {n}");
+}
+
+/// Mass-weighted Eckart retract stays on the same quotient.
+#[test]
+fn mw_rigid_retract_stays_on_the_set() {
+    let x = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    let v = array![0.0, 0.1, 0.0, 0.0, -0.05, 0.05, 0.0, -0.05, -0.05];
+    let t = MwRigid.project(&x, &v);
+    let y = MwRigid.retract(&x, &t);
+    assert_eq!(y.len(), 9);
+    let inc = &y - &x;
+    let re = MwRigid.project(&x, &inc);
+    for (a, b) in inc.iter().zip(re.iter()) {
+        assert!((a - b).abs() < 1e-12, "{inc:?} vs {re:?}");
+    }
+}
+
+/// Euclidean retract is the ambient translation through dest vecops.
+#[test]
+fn euclidean_retract_stays_on_the_set() {
+    let x = array![1.0, -2.0, 0.5];
+    let v = array![0.25, 1.0, -0.5];
+    let y = Euclidean.retract(&x, &v);
+    assert_eq!(y, &x + &v);
+    assert_eq!(Euclidean.project(&x, &v), v);
 }
 
 /// Gonzalez--Schlegel / Sella IRC is a sphere of radius dx about the
