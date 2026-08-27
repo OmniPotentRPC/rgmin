@@ -9,9 +9,9 @@
 //! This is not a 3N cluster. Isolated molecules use
 //! [`super::RigidQuotient`]. A single sphere uses [`super::Sphere`].
 
-use ndarray::{s, Array1, Array2};
 #[cfg(test)]
 use ndarray::ArrayView1;
+use ndarray::{s, Array1, Array2};
 
 use crate::vecops::{dot, nrm2};
 
