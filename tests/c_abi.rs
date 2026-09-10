@@ -1627,22 +1627,34 @@ fn c_abi_one_eval_search_direction_is_steepest_when_empty() {
 
 #[test]
 fn c_abi_pair_count_tracks_accepted_curvature_and_forget() {
-    use rgmin::ffi::{rgmin_solver_create, rgmin_solver_free, rgmin_solver_forget,
-        rgmin_solver_pair_count, rgmin_solver_push_pair};
+    use rgmin::ffi::{
+        rgmin_solver_create, rgmin_solver_forget, rgmin_solver_free, rgmin_solver_pair_count,
+        rgmin_solver_push_pair,
+    };
     let ctrl = rgmin_control_t {
-        maxiter: 1, gtol: 0.0, istep: 1.0, memory: 2, maxmove: 0.0,
+        maxiter: 1,
+        gtol: 0.0,
+        istep: 1.0,
+        memory: 2,
+        maxmove: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
     assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 0);
     let s = [1.0_f64, 0.0];
     for y in [[0.0_f64, 0.0], [-1.0, 0.0]] {
-        assert_eq!(unsafe { rgmin_solver_push_pair(session, s.as_ptr(), y.as_ptr(), 2) }, 0);
+        assert_eq!(
+            unsafe { rgmin_solver_push_pair(session, s.as_ptr(), y.as_ptr(), 2) },
+            0
+        );
         assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 0);
     }
     let positive = [2.0_f64, 0.0];
     for expected in [1, 2, 2] {
-        assert_eq!(unsafe { rgmin_solver_push_pair(session, s.as_ptr(), positive.as_ptr(), 2) }, 0);
+        assert_eq!(
+            unsafe { rgmin_solver_push_pair(session, s.as_ptr(), positive.as_ptr(), 2) },
+            0
+        );
         assert_eq!(unsafe { rgmin_solver_pair_count(session) }, expected);
     }
     unsafe { rgmin_solver_forget(session) };
