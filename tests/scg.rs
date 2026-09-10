@@ -89,6 +89,63 @@ fn zero_iteration_limit_runs_to_convergence() {
     assert!(report.steps > 1, "steps {}", report.steps);
 }
 
+struct OffsetBowl(f64);
+
+impl Objective<f64> for OffsetBowl {
+    fn dim(&self) -> usize {
+        2
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        free_bounds(2)
+    }
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.0 + 0.25 * x.dot(&x)
+    }
+}
+
+impl Gradient<f64> for OffsetBowl {
+    fn dim(&self) -> usize {
+        2
+    }
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        0.5 * &x
+    }
+}
+
+impl DifferentiableObjective<f64> for OffsetBowl {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        (self.eval(x), self.grad(x))
+    }
+}
+
+#[test]
+fn function_convergence_ignores_objective_offset() {
+    let ctrl = Control {
+        maxiter: 0,
+        gtol: 0.0,
+        ..control()
+    };
+    let params = ScgParams {
+        lambda: 100.0,
+        tol_sol: 1e-2,
+        tol_func: 1e-8,
+        ..ScgParams::default()
+    };
+    for offset in [0.0, 65536.0, -65536.0] {
+        let report = minimize_scg(
+            &OffsetBowl(offset),
+            array![0.5, 0.0],
+            &ctrl,
+            &params,
+            Conjugacy::LiuStorey,
+            Restart::Never,
+        )
+        .unwrap();
+        assert!(report.grad_norm < 1e-4, "offset {offset}: {report:?}");
+        assert!(report.coords.iter().all(|x| x.abs() < 1e-4));
+    }
+}
+
 #[test]
 fn rosenbrock_finds_the_banana_minimum() {
     let obj = Rosenbrock::<2>::new();
