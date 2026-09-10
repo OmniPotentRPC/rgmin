@@ -196,6 +196,7 @@ public:
     }
 
     void forget() { rgmin_solver_forget(ptr_); }
+    std::size_t pair_count() const noexcept { return rgmin_solver_pair_count(ptr_); }
     void set_maxmove(double m) { rgmin_solver_set_maxmove(ptr_, m); }
     void set_qn_step(rgmin_qn_step_t step) { rgmin_solver_set_qn_step(ptr_, step); }
     void set_accept(rgmin_accept_t accept) { rgmin_solver_set_accept(ptr_, accept); }

@@ -63,7 +63,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 25;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 26;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -2021,6 +2021,18 @@ pub unsafe extern "C" fn rgmin_solver_push_pair(
             .push_pair(ndarray::ArrayView1::from(sv), ndarray::ArrayView1::from(yv))
     };
     i32::from(!ok)
+}
+
+/// Number of accepted L-BFGS pairs. Null and other methods return zero.
+///
+/// # Safety
+/// A non-null `solver` must be a live session from `rgmin_solver_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_pair_count(solver: *const rgmin_solver_t) -> usize {
+    if solver.is_null() {
+        return 0;
+    }
+    unsafe { (*solver).solver.pair_count() }
 }
 
 /// Two-loop `d = -H g`. No evaluation and no push.

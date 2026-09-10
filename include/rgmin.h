@@ -49,7 +49,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 25
+#define RGMIN_ABI_VERSION_MINOR 26
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -367,6 +367,8 @@ rgmin_status_t rgmin_solver_step_hess_fg(rgmin_solver_t *solver,
  *  by the L-BFGS pair gate and still returns 0. */
 int32_t rgmin_solver_push_pair(rgmin_solver_t *solver, const double *s,
                              const double *y, size_t n);
+/** Number of accepted L-BFGS pairs. Null and other methods return zero. */
+size_t rgmin_solver_pair_count(const rgmin_solver_t *solver);
 /** Two-loop `d = -H g` with no evaluation and no push. Empty memory
  *  is steepest descent (`-g`). Writes \a n entries to \a dir. */
 rgmin_status_t rgmin_solver_search_direction(rgmin_solver_t *solver,

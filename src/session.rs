@@ -611,6 +611,14 @@ impl Solver {
         }
     }
 
+    /// Number of accepted L-BFGS curvature pairs retained by the session.
+    pub fn pair_count(&self) -> usize {
+        match &self.inner {
+            Inner::Lbfgs(solver) => solver.len(),
+            _ => 0,
+        }
+    }
+
     /// Two-loop direction `d = -H g` with no evaluation and no push.
     pub fn search_direction(&self, g: ArrayView1<f64>) -> Result<Array1<f64>> {
         if g.len() != self.dim {
