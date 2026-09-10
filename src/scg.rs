@@ -46,8 +46,8 @@ pub struct ScgParams {
     /// Solution tolerance: converged when `||alpha d||_inf` falls
     /// below this while the objective change also converges.
     pub tol_sol: f64,
-    /// Relative objective-change tolerance, scaled by `|f| + 1` so
-    /// the test is meaningful for objectives far from unit scale.
+    /// Relative objective-change tolerance, scaled by one plus the range
+    /// of accepted values, independently of an additive objective constant.
     pub tol_func: f64,
 }
 
@@ -174,6 +174,8 @@ where
             what: "start point has a non-finite objective",
         });
     }
+    let mut objective_min = f_old;
+    let mut objective_max = f_old;
     let mut grad_old = grad.clone();
     let mut dir = -grad.clone();
 
@@ -276,9 +278,12 @@ where
         success = ratio >= 0.0;
         if success {
             nsuccess += 1;
+            objective_min = objective_min.min(f_new);
+            objective_max = objective_max.max(f_new);
             let step_inf = alpha.abs() * crate::vecops::nrminf(dir.view());
             let solution_converged = step_inf < params.tol_sol;
-            let objective_converged = (f_new - f_old).abs() < params.tol_func * (f_old.abs() + 1.0);
+            let objective_converged =
+                (f_new - f_old).abs() < params.tol_func * (1.0 + (objective_max - objective_min));
             w = trial;
             if solution_converged && objective_converged {
                 return Ok(Report {
