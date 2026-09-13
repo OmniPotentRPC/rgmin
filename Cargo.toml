@@ -27,7 +27,7 @@ chase = ["dep:cc", "dep:pkg-config"]
 libkrylov = ["dep:cc", "dep:pkg-config"]
 
 [dependencies]
-eindir-core = { version = "0.6.0", git = "https://github.com/HaoZeke/eindir.git", rev = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9", features = ["capi"] }
+eindir-core = { version = "0.6.0", features = ["capi"] }
 dlpk = { version = "0.1.5", features = ["ndarray"] }
 ndarray = "0.17"
 thiserror = "2"
@@ -38,7 +38,7 @@ highs-sys = { version = "1.12", optional = true }
 
 [dev-dependencies]
 approx = "0.5"
-rgpot-core = { package = "rgpot-core", git = "https://github.com/OmniPotentRPC/rgpot.git", rev = "b19227f9197a4c927633f1225f1e7546794a6f1e" }
+rgpot-core = "3.1.2"
 
 [build-dependencies]
 cbindgen = "0.29"
