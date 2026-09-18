@@ -79,22 +79,20 @@ fn zoom_into<F>(
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
-    // Last evaluated pair. If the loop never interpolates, return `lo` with
-    // `φ(lo)` rather than a midpoint tagged with a different value.
+    // The low endpoint retains a measured Armijo decrease. An infeasible
+    // trial only contracts the other endpoint and cannot erase that evidence.
     let mut phi_lo = if lo == 0.0 {
         phi0
     } else {
         phi_pair(oracle, pos, dir, lo).0
     };
-    let mut alpha = lo;
-    let mut phi_a = phi_lo;
     for _ in 0..maxiter {
         if !lo.is_finite() || !hi.is_finite() || (hi - lo).abs() < 1e-16 {
             break;
         }
-        alpha = bisect(lo, hi);
+        let alpha = bisect(lo, hi);
         let pair = phi_pair(oracle, pos, dir, alpha);
-        phi_a = pair.0;
+        let phi_a = pair.0;
         let dphi_a = pair.1;
         if !phi_a.is_finite() {
             hi = alpha;
@@ -113,7 +111,7 @@ where
             phi_lo = phi_a;
         }
     }
-    (alpha, phi_a)
+    (lo, phi_lo)
 }
 
 /// Strong-Wolfe line search with Nocedal-Wright zoom (algorithm 3.5).
