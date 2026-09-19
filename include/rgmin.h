@@ -184,6 +184,12 @@ rgmin_solver_t *rgmin_solver_create(rgmin_method_t method, const rgmin_control_t
 void rgmin_solver_free(rgmin_solver_t *solver);
 /** Drop method memory. The next step is a cold start from the current \c x. */
 void rgmin_solver_forget(rgmin_solver_t *solver);
+
+/// Keep the method memory, drop the point: the next step evaluates the
+/// objective afresh at the current `x` with the initial step scale and an
+/// empty acceptance window, preconditioned by the retained curvature. The
+/// restart for a sequence of related objectives.
+void rgmin_solver_rebase(rgmin_solver_t *solver);
 /** Euclidean step cap for the next \ref rgmin_solver_step (saddle \c max_move). */
 void rgmin_solver_set_maxmove(rgmin_solver_t *solver, double maxmove);
 /** How an L-BFGS session uses a caller Hessian (eOn \c lbfgs_step). */

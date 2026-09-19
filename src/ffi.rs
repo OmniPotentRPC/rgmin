@@ -1276,6 +1276,18 @@ pub unsafe extern "C" fn rgmin_solver_forget(solver: *mut rgmin_solver_t) {
     unsafe { (*solver).solver.forget() };
 }
 
+/// Keep the method memory, drop the point: the next step evaluates the
+/// objective afresh at the current `x` (initial step scale, empty
+/// acceptance window) and the retained curvature preconditions it. The
+/// restart for a sequence of related objectives.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_rebase(solver: *mut rgmin_solver_t) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.rebase() };
+}
+
 /// Set the Euclidean step cap used by the next [`rgmin_solver_step`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_maxmove(solver: *mut rgmin_solver_t, maxmove: f64) {

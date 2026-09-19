@@ -643,6 +643,20 @@ impl Solver {
     }
 
     /// Drop method memory. The next step is a cold start from the current `x`.
+    /// Keep the method memory, drop the point. The next step evaluates
+    /// the objective afresh at the current `x` with the initial step
+    /// scale and an empty acceptance window, and the retained curvature
+    /// pairs (or dense approximation) precondition it. This is the
+    /// restart for a sequence of related objectives, such as a
+    /// marginal-likelihood fit refreshed as observations arrive: the
+    /// previous fit's optimum is the start, its curvature still applies,
+    /// but its value and gradient there belong to the previous objective.
+    pub fn rebase(&mut self) {
+        self.istep = self.control.istep;
+        self.e_hist.clear();
+        self.last_pos = None;
+    }
+
     pub fn forget(&mut self) {
         self.istep = self.control.istep;
         self.e_hist.clear();

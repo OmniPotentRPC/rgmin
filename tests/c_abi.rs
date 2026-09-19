@@ -1662,3 +1662,36 @@ fn c_abi_pair_count_tracks_accepted_curvature_and_forget() {
     unsafe { rgmin_solver_free(session) };
     assert_eq!(unsafe { rgmin_solver_pair_count(std::ptr::null()) }, 0);
 }
+
+#[test]
+fn c_abi_rebase_keeps_pairs_and_forget_drops_them() {
+    use rgmin::ffi::{
+        rgmin_solver_create, rgmin_solver_forget, rgmin_solver_free, rgmin_solver_pair_count,
+        rgmin_solver_push_pair, rgmin_solver_rebase,
+    };
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 0.0,
+        istep: 1.0,
+        memory: 2,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    let s = [1.0_f64, 0.0];
+    let y = [2.0_f64, 0.0];
+    for _ in 0..2 {
+        assert_eq!(
+            unsafe { rgmin_solver_push_pair(session, s.as_ptr(), y.as_ptr(), 2) },
+            0
+        );
+    }
+    assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 2);
+    unsafe { rgmin_solver_rebase(session) };
+    assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 2);
+    unsafe { rgmin_solver_forget(session) };
+    assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 0);
+    unsafe { rgmin_solver_free(session) };
+    unsafe { rgmin_solver_rebase(std::ptr::null_mut()) };
+}
+

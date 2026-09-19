@@ -91,6 +91,7 @@ typedef rgmin_hvp_fn xts_hvp_fn;
 #define xts_solver_create rgmin_solver_create
 #define xts_solver_free rgmin_solver_free
 #define xts_solver_forget rgmin_solver_forget
+#define xts_solver_rebase rgmin_solver_rebase
 #define xts_solver_set_maxmove rgmin_solver_set_maxmove
 #define xts_solver_set_qn_step rgmin_solver_set_qn_step
 #define xts_solver_set_accept rgmin_solver_set_accept
