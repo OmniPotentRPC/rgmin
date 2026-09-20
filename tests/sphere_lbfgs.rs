@@ -22,22 +22,31 @@ impl Rayleigh {
 }
 
 impl Objective<f64> for Rayleigh {
-    fn dim(&self) -> usize { self.diagonal.len() }
-    fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+    fn dim(&self) -> usize {
+        self.diagonal.len()
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         self.value_and_gradient(x).0
     }
 }
 
 impl Gradient<f64> for Rayleigh {
-    fn dim(&self) -> usize { self.diagonal.len() }
-    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> { &self.diagonal * &x }
+    fn dim(&self) -> usize {
+        self.diagonal.len()
+    }
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        &self.diagonal * &x
+    }
 }
 
 impl DifferentiableObjective<f64> for Rayleigh {
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         self.calls.fetch_add(1, Ordering::Relaxed);
-        self.largest_norm_error.fetch_max((x.dot(&x) - 1.0).abs().to_bits(), Ordering::Relaxed);
+        self.largest_norm_error
+            .fetch_max((x.dot(&x) - 1.0).abs().to_bits(), Ordering::Relaxed);
         let gradient = self.grad(x);
         (0.5 * x.dot(&gradient), gradient)
     }
@@ -46,27 +55,40 @@ impl DifferentiableObjective<f64> for Rayleigh {
 fn solve(retain: bool) -> (f64, f64, usize, f64) {
     let objective = Rayleigh::new();
     let n = objective.diagonal.len();
-    let mut solver = Solver::new(Method::Lbfgs { memory: n }, Control {
-        maxiter: n * n,
-        gtol: 1e-8,
-        istep: 1.0,
-        maxmove: None,
-    }, n);
+    let mut solver = Solver::new(
+        Method::Lbfgs { memory: n },
+        Control {
+            maxiter: n * n,
+            gtol: 1e-8,
+            istep: 1.0,
+            maxmove: None,
+        },
+        n,
+    );
     solver.set_manifold(ManifoldKind::Sphere);
     solver.set_accept(Accept::Energy);
     let mut direction = Array1::from_elem(n, 1.0 / (n as f64).sqrt());
     let mut residual = f64::INFINITY;
     let mut curvature = f64::NAN;
     for _ in 0..n * n {
-        if !retain { solver.forget(); }
+        if !retain {
+            solver.forget();
+        }
         solver.step(&objective, &mut direction).unwrap();
         let action = &objective.diagonal * &direction;
         curvature = direction.dot(&action);
         let r = action - curvature * &direction;
         residual = r.dot(&r).sqrt();
-        if residual < 1e-6 { break; }
+        if residual < 1e-6 {
+            break;
+        }
     }
-    (residual, curvature, objective.calls.load(Ordering::Relaxed), f64::from_bits(objective.largest_norm_error.load(Ordering::Relaxed)))
+    (
+        residual,
+        curvature,
+        objective.calls.load(Ordering::Relaxed),
+        f64::from_bits(objective.largest_norm_error.load(Ordering::Relaxed)),
+    )
 }
 
 #[test]

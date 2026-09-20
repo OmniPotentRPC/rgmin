@@ -1017,7 +1017,13 @@ impl Solver {
             }
             if let Inner::Lbfgs(solver) = &mut self.inner {
                 let (point, f, g) = crate::sphere_lbfgs::step(
-                    obj, x, value, &grad, solver, self.linesearch, &self.control,
+                    obj,
+                    x,
+                    value,
+                    &grad,
+                    solver,
+                    self.linesearch,
+                    &self.control,
                 );
                 *x = point;
                 value = f;

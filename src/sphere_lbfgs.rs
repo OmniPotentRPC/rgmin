@@ -24,12 +24,19 @@ pub(crate) fn step<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let mut direction = Sphere.project(origin, &solver.search_direction(origin.view(), gradient.view()));
+    let mut direction = Sphere.project(
+        origin,
+        &solver.search_direction(origin.view(), gradient.view()),
+    );
     if direction.dot(gradient) >= 0.0 {
         solver.forget();
         direction = -gradient;
     }
-    let mut trial_step = if solver.is_empty() { control.istep } else { 1.0 };
+    let mut trial_step = if solver.is_empty() {
+        control.istep
+    } else {
+        1.0
+    };
     loop {
         let mut last = (origin.clone(), origin.clone(), value, gradient.clone());
         let (raw, _, _) = linesearch.search(
@@ -43,7 +50,9 @@ where
                 }
                 let point = &z / norm;
                 let bounded = objective.bounds().clip(point.view());
-                let outside_step = control.maxmove.is_some_and(|cap| nrm2((&point - origin).view()) > cap);
+                let outside_step = control
+                    .maxmove
+                    .is_some_and(|cap| nrm2((&point - origin).view()) > cap);
                 if bounded != point || outside_step {
                     return (f64::INFINITY, Array1::from_elem(z.len(), f64::NAN));
                 }
@@ -52,7 +61,9 @@ where
                 last = (z.to_owned(), point, f, rg.clone());
                 (f, rg / norm)
             },
-            origin.view(), direction.view(), trial_step,
+            origin.view(),
+            direction.view(),
+            trial_step,
         );
         if raw == *origin {
             if solver.is_empty() {
