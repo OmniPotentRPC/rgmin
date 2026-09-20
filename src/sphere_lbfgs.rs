@@ -49,6 +49,13 @@ where
             return (origin.clone(), value, gradient.clone());
         }
         let unit = &direction / speed;
+        // With no curvature information, istep is an arc length. Scaling
+        // the objective must not change the first geometric trial.
+        let initial_parameter = if solver.is_empty() {
+            trial_step / speed
+        } else {
+            trial_step
+        };
         let geodesic = |alpha: f64| {
             let (sine, cosine) = (alpha * speed).sin_cos();
             (
@@ -84,7 +91,7 @@ where
             },
             array![0.0].view(),
             array![1.0].view(),
-            trial_step,
+            initial_parameter,
         );
         let alpha = parameter[0];
         if alpha == 0.0 {

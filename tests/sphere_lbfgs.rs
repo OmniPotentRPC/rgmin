@@ -107,6 +107,42 @@ fn sphere_lbfgs_retains_tangent_history_on_a_stiff_spectrum() {
 }
 
 #[test]
+fn sphere_lbfgs_initial_path_is_invariant_to_energy_units() {
+    let path = |scale: f64| {
+        let mut objective = Rayleigh::new();
+        objective.diagonal *= scale;
+        let n = objective.diagonal.len();
+        let mut solver = Solver::new(
+            Method::Lbfgs { memory: n },
+            Control {
+                maxiter: n,
+                gtol: 0.0,
+                istep: 1.0,
+                maxmove: None,
+            },
+            n,
+        );
+        solver.set_manifold(ManifoldKind::Sphere);
+        solver.set_accept(Accept::Energy);
+        let mut direction = Array1::from_elem(n, 1.0 / (n as f64).sqrt());
+        let mut points = Vec::new();
+        for _ in 0..n {
+            solver.step(&objective, &mut direction).unwrap();
+            points.push(direction.clone());
+        }
+        (points, objective.calls.load(Ordering::Relaxed))
+    };
+    let reference = path(1.0);
+    for scale in [0.001, 1000.0] {
+        let scaled = path(scale);
+        assert_eq!(reference.1, scaled.1);
+        for (a, b) in reference.0.iter().zip(&scaled.0) {
+            assert!((a - b).iter().all(|x| x.abs() < 1e-10));
+        }
+    }
+}
+
+#[test]
 fn sphere_lbfgs_resolves_a_stiff_ritz_initializer() {
     let objective = Rayleigh::new();
     let n = objective.diagonal.len();
