@@ -1005,6 +1005,7 @@ impl Solver {
 
         if matches!(self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
             && matches!(self.inner, Inner::Lbfgs(_))
+            && self.accept != Accept::None
         {
             if !cached {
                 if let Some(previous) = &self.last_pos {
