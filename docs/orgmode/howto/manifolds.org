@@ -107,6 +107,27 @@ rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_EUCLIDEAN);
 
 Changing the manifold drops method memory (~forget~).
 
+** L-BFGS on the unit sphere
+
+For ~Sphere~ (or ~Stiefel~ with one column), use ~Accept::Energy~
+to minimize the supplied scalar objective with L-BFGS. The line search
+evaluates the normalized extension
+\(F(z)=f(z/\lVert z\rVert)\), so every objective evaluation lies on
+the sphere. Its Euclidean gradient is
+\((I-uu^T)\nabla f(u)/\lVert z\rVert\), with
+\(u=z/\lVert z\rVert\). Omitting the denominator changes the
+directional derivative used by the Wolfe conditions.
+
+The session transports every retained curvature pair into the accepted
+point's tangent space and forms the new pair there. The caller keeps the
+session between steps. ~Accept::None~ requests the unfiltered step and
+does not select a line search.
+
+For a symmetric matrix \(H\), minimizing \(f(u)=u^T H u/2\) on
+this sphere gives a lowest eigenvector at a minimum. An arbitrary
+stationary point can be a higher eigenvector; a small projected gradient
+alone does not certify that the lowest eigenvalue has been found.
+
 ** Packing notes
 
 - ~RigidQuotient~ is 3N Cartesians. Isolated: kernel of three
