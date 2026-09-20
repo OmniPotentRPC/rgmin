@@ -1,13 +1,13 @@
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::{Accept, Control, ManifoldKind, Method, Solver};
-use std::cell::Cell;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 struct Rayleigh {
     diagonal: Array1<f64>,
     bounds: Bounds<f64>,
-    calls: Cell<usize>,
-    largest_norm_error: Cell<f64>,
+    calls: AtomicUsize,
+    largest_norm_error: AtomicU64,
 }
 
 impl Rayleigh {
@@ -15,8 +15,8 @@ impl Rayleigh {
         Self {
             diagonal: array![-0.02, 0.03, 0.4, 3.0, 30.0, 100.0],
             bounds: Bounds::new(Array1::from_elem(6, -2.0), Array1::from_elem(6, 2.0), 0.0),
-            calls: Cell::new(0),
-            largest_norm_error: Cell::new(0.0),
+            calls: AtomicUsize::new(0),
+            largest_norm_error: AtomicU64::new(0.0_f64.to_bits()),
         }
     }
 }
@@ -36,8 +36,8 @@ impl Gradient<f64> for Rayleigh {
 
 impl DifferentiableObjective<f64> for Rayleigh {
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        self.calls.set(self.calls.get() + 1);
-        self.largest_norm_error.set(self.largest_norm_error.get().max((x.dot(&x) - 1.0).abs()));
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        self.largest_norm_error.fetch_max((x.dot(&x) - 1.0).abs().to_bits(), Ordering::Relaxed);
         let gradient = self.grad(x);
         (0.5 * x.dot(&gradient), gradient)
     }
@@ -66,7 +66,7 @@ fn solve(retain: bool) -> (f64, f64, usize, f64) {
         residual = r.dot(&r).sqrt();
         if residual < 1e-6 { break; }
     }
-    (residual, curvature, objective.calls.get(), objective.largest_norm_error.get())
+    (residual, curvature, objective.calls.load(Ordering::Relaxed), f64::from_bits(objective.largest_norm_error.load(Ordering::Relaxed)))
 }
 
 #[test]
