@@ -128,7 +128,12 @@ fn sphere_lbfgs_resolves_a_stiff_ritz_initializer() {
     let change = gradient - &old_gradient + direction.dot(&old_gradient) * &direction;
     let mut solver = Solver::new(
         Method::Lbfgs { memory: n },
-        Control { maxiter: n * n, gtol: 0.0, istep: 1.0, maxmove: None },
+        Control {
+            maxiter: n * n,
+            gtol: 0.0,
+            istep: 1.0,
+            maxmove: None,
+        },
         n,
     );
     solver.set_manifold(ManifoldKind::Sphere);
@@ -142,7 +147,9 @@ fn sphere_lbfgs_resolves_a_stiff_ritz_initializer() {
         let error = action - curvature * &direction;
         residual = error.dot(&error).sqrt();
         println!("Ritz step {step}: residual {residual:.12e}");
-        if residual < 1e-6 { break; }
+        if residual < 1e-6 {
+            break;
+        }
     }
     assert!(residual < 1e-6, "residual {residual}");
 }
