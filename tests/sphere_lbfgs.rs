@@ -122,9 +122,9 @@ fn sphere_lbfgs_resolves_a_stiff_ritz_initializer() {
     direction /= direction.dot(&direction).sqrt();
     let old_gradient = residual;
     let mut gradient = objective.grad(direction.view());
-    gradient -= gradient.dot(&direction) * &direction;
+    gradient -= &(gradient.dot(&direction) * &direction);
     let mut displacement = &direction - &seed;
-    displacement -= displacement.dot(&direction) * &direction;
+    displacement -= &(displacement.dot(&direction) * &direction);
     let change = gradient - &old_gradient + direction.dot(&old_gradient) * &direction;
     let mut solver = Solver::new(
         Method::Lbfgs { memory: n },
