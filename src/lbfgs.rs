@@ -199,6 +199,17 @@ impl Lbfgs {
         self.direction(g)
     }
 
+    /// Move every retained pair to the tangent space of the next iterate.
+    pub(crate) fn transport<F>(&mut self, mut map: F)
+    where
+        F: FnMut(&Array1<f64>) -> Array1<f64>,
+    {
+        let pairs = std::mem::take(&mut self.memory);
+        for pair in pairs {
+            self.push_pair(map(&pair.s), map(&pair.y), None);
+        }
+    }
+
     pub(crate) fn push(&mut self, s: Array1<f64>, y: Array1<f64>) {
         self.push_pair(s, y, None);
     }

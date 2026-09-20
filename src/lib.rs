@@ -111,3 +111,5 @@ pub use report::Report;
 pub use scg::{DirectionalCurvature, ScgParams, minimize_scg, minimize_scg_exact};
 pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
 pub use session::Solver;
+
+mod sphere_lbfgs;

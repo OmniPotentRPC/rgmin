@@ -1003,6 +1003,36 @@ impl Solver {
             });
         }
 
+        if matches!(self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
+            && matches!(self.inner, Inner::Lbfgs(_))
+        {
+            if !cached {
+                if let Some(previous) = &self.last_pos {
+                    let (s, y) = self.lbfgs_sy(previous, x, &self.last_grad, &grad);
+                    if let Inner::Lbfgs(solver) = &mut self.inner {
+                        solver.transport(|v| crate::manifold::Sphere.transport(previous, x, v));
+                        solver.push_pair(s, y, Some(l2(&grad)));
+                    }
+                }
+            }
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                let (point, f, g) = crate::sphere_lbfgs::step(
+                    obj, x, value, &grad, solver, self.linesearch, &self.control,
+                );
+                *x = point;
+                value = f;
+                grad = g;
+            }
+            self.remember(x, value, &grad);
+            self.steps += 1;
+            return Ok(Report {
+                value,
+                coords: x.clone(),
+                steps: self.steps,
+                grad_norm: self.stationarity_norm(x, &grad),
+            });
+        }
+
         // An external displacement has a measured gradient at both ends.
         // Its secant updates the retained inverse Hessian at the supplied
         // point, using the same vector transport as accepted solver steps.
