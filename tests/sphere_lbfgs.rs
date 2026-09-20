@@ -105,3 +105,44 @@ fn sphere_lbfgs_retains_tangent_history_on_a_stiff_spectrum() {
     assert!((warm.1 + 0.02).abs() < 1e-8, "curvature {}", warm.1);
     assert!(warm.2 < cold.2, "warm {} calls, cold {}", warm.2, cold.2);
 }
+
+#[test]
+fn sphere_lbfgs_resolves_a_stiff_ritz_initializer() {
+    let objective = Rayleigh::new();
+    let n = objective.diagonal.len();
+    let seed = Array1::from_elem(n, 1.0 / (n as f64).sqrt());
+    let action = objective.grad(seed.view());
+    let a = seed.dot(&action);
+    let residual = &action - a * &seed;
+    let b = residual.dot(&residual).sqrt();
+    let tangent = &residual / b;
+    let c = tangent.dot(&objective.grad(tangent.view()));
+    let eigenvalue = 0.5 * (a + c - ((a - c).powi(2) + 4.0 * b * b).sqrt());
+    let mut direction = &seed - ((a - eigenvalue) / b) * &tangent;
+    direction /= direction.dot(&direction).sqrt();
+    let old_gradient = residual;
+    let mut gradient = objective.grad(direction.view());
+    gradient -= gradient.dot(&direction) * &direction;
+    let mut displacement = &direction - &seed;
+    displacement -= displacement.dot(&direction) * &direction;
+    let change = gradient - &old_gradient + direction.dot(&old_gradient) * &direction;
+    let mut solver = Solver::new(
+        Method::Lbfgs { memory: n },
+        Control { maxiter: n * n, gtol: 0.0, istep: 1.0, maxmove: None },
+        n,
+    );
+    solver.set_manifold(ManifoldKind::Sphere);
+    solver.set_accept(Accept::Energy);
+    assert!(solver.push_pair(displacement.view(), change.view()));
+    let mut residual = f64::INFINITY;
+    for step in 1..n * n {
+        solver.step(&objective, &mut direction).unwrap();
+        let action = objective.grad(direction.view());
+        let curvature = direction.dot(&action);
+        let error = action - curvature * &direction;
+        residual = error.dot(&error).sqrt();
+        println!("Ritz step {step}: residual {residual:.12e}");
+        if residual < 1e-6 { break; }
+    }
+    assert!(residual < 1e-6, "residual {residual}");
+}
