@@ -10,6 +10,7 @@ fn control() -> Control {
         gtol: 1e-8,
         istep: 0.1,
         maxmove: None,
+        ftol_rel: None,
     }
 }
 
@@ -174,6 +175,7 @@ fn sphere_rayleigh_stays_on_the_sphere() {
             gtol: 1e-8,
             istep: 0.2,
             maxmove: None,
+            ftol_rel: None,
         },
         3,
     );
@@ -243,6 +245,7 @@ fn so3_session_stays_orthogonal() {
             gtol: 1e-8,
             istep: 0.1,
             maxmove: None,
+            ftol_rel: None,
         },
         9,
     );
@@ -317,6 +320,7 @@ fn se3_session_keeps_rotation_and_moves_translation() {
             gtol: 1e-10,
             istep: 0.4,
             maxmove: None,
+            ftol_rel: None,
         },
         12,
     );
@@ -516,6 +520,7 @@ fn fire_and_bb_kill_a_sphere() {
                 gtol: 1e-8,
                 istep: 0.2,
                 maxmove: None,
+                ftol_rel: None,
             },
             2,
         );
@@ -586,6 +591,7 @@ fn dogleg_kills_a_quadratic() {
             gtol: 1e-10,
             istep: 4.0,
             maxmove: None,
+            ftol_rel: None,
         },
         2,
     );

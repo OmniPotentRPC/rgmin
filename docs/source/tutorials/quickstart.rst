@@ -25,7 +25,7 @@ Rust
     let report = minimize_method(
         &obj,
         array![-1.2, 1.0],
-        &Control { maxiter: 200, gtol: 1e-8, istep: 1.0, maxmove: None },
+        &Control { maxiter: 200, gtol: 1e-8, istep: 1.0, maxmove: None, ftol_rel: None },
         Method::lbfgs(),
         LineSearch::Wolfe { c1: 1e-4, c2: 0.9, maxiter: 20 },
     )

@@ -523,6 +523,7 @@ pub unsafe extern "C" fn rgmin_minimize(
             } else {
                 None
             },
+            ftol_rel: None,
         };
         match minimize_method(
             &obj,
@@ -620,6 +621,7 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
             } else {
                 None
             },
+            ftol_rel: None,
         };
         let rust_method = method_from_c(method, c.memory);
         match minimize_method_hess(
@@ -734,6 +736,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
             } else {
                 None
             },
+            ftol_rel: None,
         };
         match minimize_method(
             &obj,
@@ -803,6 +806,7 @@ pub unsafe extern "C" fn rgmin_solver_create(
         } else {
             None
         },
+        ftol_rel: None,
     };
     let solver = Solver::new(method_from_c(method, c.memory), control, dim).with_gtol(c.gtol);
     Box::into_raw(Box::new(rgmin_solver_t { solver }))

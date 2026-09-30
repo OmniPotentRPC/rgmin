@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Control::ftol_rel`: a relative slack on every energy-decrease test,
+  `ft - ref <= ftol_rel * (|ref| + 1)`. It covers the line-search
+  accept in the first-order methods and the `Accept::Energy` /
+  `Accept::Nonmonotone` backtracking. `None` keeps the strict test.
+
+### Fixed
+
+- `set_atom_maxmove` binds the line-searched session arms (L-BFGS,
+  steepest descent, NLCG, BFGS, SR1, SR2, Adam); they read only the
+  Euclidean `maxmove`.
+
 ## [0.2.1] - 2026-09-19
 
 ### Fixed

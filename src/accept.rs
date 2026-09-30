@@ -83,11 +83,14 @@ where
                     ref_e = m;
                 }
             }
+            // The strict policy tolerates a 1e-8 absolute rise; ftol_rel
+            // widens that to a slack relative to the reference energy.
+            let rise = ENERGY_RISE.max(control.ftol_slack(ref_e));
             let mut alpha = 1.0;
             for _ in 0..10 {
                 let trial = trial_point(obj, pos, dir, alpha, control, atom_maxmove, manifold);
                 let (ft, gt) = obj.value_and_gradient(trial.view());
-                if ft - ref_e <= ENERGY_RISE {
+                if ft - ref_e <= rise {
                     push_energy(e_hist, ft);
                     return (trial, ft, gt, true);
                 }
@@ -102,7 +105,7 @@ where
             let sd = grad.mapv(|g| -g);
             let trial = trial_point(obj, pos, &sd, 0.1, control, atom_maxmove, manifold);
             let (ft, gt) = obj.value_and_gradient(trial.view());
-            if ft - ref_e <= ENERGY_RISE {
+            if ft - ref_e <= rise {
                 push_energy(e_hist, ft);
                 return (trial, ft, gt, true);
             }
@@ -156,6 +159,7 @@ mod tests {
             gtol: 1e-12,
             istep: 1.0,
             maxmove: None,
+            ftol_rel: None,
         }
     }
 
@@ -209,5 +213,57 @@ mod tests {
         );
         // 10 rejected halvings + one short steepest fallback.
         assert_eq!(obj.evals.load(Ordering::Relaxed), 11);
+    }
+
+    #[test]
+    fn ftol_rel_admits_a_rise_inside_the_slack() {
+        // From x = 1 (f = 1) the unit step lands on x = 2 (f = 4), a rise
+        // of 3. A slack of 2 * (|1| + 1) = 4 covers it at the first trial.
+        let obj = CountQuad {
+            evals: AtomicUsize::new(0),
+        };
+        let pos = array![1.0];
+        let dir = array![1.0];
+        let g = array![2.0];
+        let mut hist = VecDeque::new();
+        let mut c = ctrl();
+        c.ftol_rel = Some(2.0);
+        let (x, f, _, moved) = accept_step(
+            &obj,
+            &pos,
+            1.0,
+            &g,
+            &dir,
+            &c,
+            Accept::Energy,
+            &mut hist,
+            None,
+            ManifoldKind::Euclidean,
+        );
+        assert!(moved);
+        assert!((x[0] - 2.0).abs() < 1e-15);
+        assert!((f - 4.0).abs() < 1e-15);
+        assert_eq!(obj.evals.load(Ordering::Relaxed), 1);
+        // A slack of 1 * (|1| + 1) = 2 refuses the rise of 3 and halves:
+        // x = 1.5 gives f = 2.25, a rise of 1.25, inside the slack.
+        let obj = CountQuad {
+            evals: AtomicUsize::new(0),
+        };
+        c.ftol_rel = Some(1.0);
+        let (x, _, _, moved) = accept_step(
+            &obj,
+            &pos,
+            1.0,
+            &g,
+            &dir,
+            &c,
+            Accept::Energy,
+            &mut hist,
+            None,
+            ManifoldKind::Euclidean,
+        );
+        assert!(moved);
+        assert!((x[0] - 1.5).abs() < 1e-15, "x {}", x[0]);
+        assert_eq!(obj.evals.load(Ordering::Relaxed), 2);
     }
 }

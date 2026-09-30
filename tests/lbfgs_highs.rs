@@ -198,6 +198,7 @@ fn highs_newton_qp_on_a_quadratic_respects_a_box() {
             gtol: 1e-10,
             istep: 1.0,
             maxmove: None,
+            ftol_rel: None,
         },
         2,
     );

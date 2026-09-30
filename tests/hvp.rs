@@ -15,6 +15,7 @@ fn ctrl(maxiter: usize, gtol: f64) -> Control {
         gtol,
         istep: 1.0,
         maxmove: None,
+        ftol_rel: None,
     }
 }
 

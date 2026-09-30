@@ -12,6 +12,7 @@ fn lbfgs_fewer_steps_than_steepest_on_rosenbrock() {
         gtol: 1e-8,
         istep: 0.1,
         maxmove: None,
+        ftol_rel: None,
     };
     let ls = LineSearch::Brent {
         maxiter: 40,

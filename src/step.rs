@@ -105,7 +105,14 @@ where
     } else if let Some(cap) = control.maxmove {
         scale_step(pos, &mut trial, cap);
     }
-    if nval < value {
+    // A search that found no lower point hands back the start with
+    // lsstep 0; ftol_rel admits a trial that rises within the slack, so
+    // the search has to have moved for the pair `s` to be nonzero.
+    let accepted = match control.ftol_rel {
+        Some(_) => lsstep > 0.0 && nval - value <= control.ftol_slack(value),
+        None => nval < value,
+    };
+    if accepted {
         (trial, nval, lsstep, true)
     } else {
         (pos.clone(), value, 0.0, false)

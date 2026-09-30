@@ -15,6 +15,7 @@ fn control() -> Control {
         gtol: 1e-8,
         istep: 1.0,
         maxmove: None,
+        ftol_rel: None,
     }
 }
 
