@@ -78,7 +78,12 @@ mod tests {
     }
 }
 
-/// Line search, clip to bounds, optional maxmove. Returns `(x, f, |α|, moved)`.
+/// Line search, clip to bounds, then cap the move. Returns `(x, f, |α|, moved)`.
+///
+/// `atom_maxmove` caps the largest per-atom displacement
+/// ([`scale_step_atom`]) and takes precedence over the Euclidean
+/// `control.maxmove` ([`scale_step`]), the same order the session's
+/// FIRE and BB arms apply.
 pub(crate) fn take_step<O>(
     obj: &O,
     pos: &Array1<f64>,
@@ -87,6 +92,7 @@ pub(crate) fn take_step<O>(
     istep: f64,
     linesearch: LineSearch,
     control: &Control,
+    atom_maxmove: Option<f64>,
 ) -> (Array1<f64>, f64, f64, bool)
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -94,7 +100,9 @@ where
     let (npos, nval, lsstep) =
         linesearch.search(|x| obj.value_and_gradient(x), pos.view(), dir, istep);
     let mut trial = obj.bounds().clip(npos.view());
-    if let Some(cap) = control.maxmove {
+    if let Some(cap) = atom_maxmove {
+        scale_step_atom(pos, &mut trial, cap);
+    } else if let Some(cap) = control.maxmove {
         scale_step(pos, &mut trial, cap);
     }
     if nval < value {

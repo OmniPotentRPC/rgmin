@@ -622,6 +622,7 @@ impl Solver {
                     &mut self.istep,
                     self.linesearch,
                     &self.control,
+                    self.atom_maxmove,
                 );
             }
             Inner::Steepest => {
@@ -634,6 +635,7 @@ impl Solver {
                     self.istep,
                     self.linesearch,
                     &self.control,
+                    self.atom_maxmove,
                 );
                 *x = npos;
                 let ev = obj.value_and_gradient(x.view());
@@ -663,6 +665,7 @@ impl Solver {
                     self.istep,
                     self.linesearch,
                     &self.control,
+                    self.atom_maxmove,
                 );
                 *x = npos;
                 let ev = obj.value_and_gradient(x.view());
@@ -694,6 +697,7 @@ impl Solver {
                     self.istep,
                     self.linesearch,
                     &self.control,
+                    self.atom_maxmove,
                 );
                 *x = npos;
                 let ev = obj.value_and_gradient(x.view());
@@ -716,6 +720,7 @@ impl Solver {
                     self.istep,
                     self.linesearch,
                     &self.control,
+                    self.atom_maxmove,
                 );
                 *x = npos;
                 let ev = obj.value_and_gradient(x.view());
@@ -739,6 +744,7 @@ impl Solver {
                     self.istep,
                     self.linesearch,
                     &self.control,
+                    self.atom_maxmove,
                 );
                 *x = npos;
                 let ev = obj.value_and_gradient(x.view());
@@ -767,6 +773,7 @@ impl Solver {
                     self.istep,
                     self.linesearch,
                     &self.control,
+                    self.atom_maxmove,
                 );
                 *x = npos;
                 let ev = obj.value_and_gradient(x.view());

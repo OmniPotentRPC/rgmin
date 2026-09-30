@@ -596,7 +596,7 @@ impl Lbfgs {
                 });
             }
             self.step_objective(
-                obj, &mut pos, &mut value, &mut grad, &mut istep, linesearch, control,
+                obj, &mut pos, &mut value, &mut grad, &mut istep, linesearch, control, None,
             );
         }
         Ok(Report {
@@ -608,6 +608,9 @@ impl Lbfgs {
     }
 
     /// One outer L-BFGS iteration: two-loop direction, line search, pair.
+    ///
+    /// `atom_maxmove` caps the largest per-atom displacement of the
+    /// accepted step; `None` leaves only `control.maxmove` in force.
     pub fn step_objective<O>(
         &mut self,
         obj: &O,
@@ -617,14 +620,23 @@ impl Lbfgs {
         istep: &mut f64,
         linesearch: LineSearch,
         control: &Control,
+        atom_maxmove: Option<f64>,
     ) where
         O: DifferentiableObjective<f64> + ?Sized,
     {
         let dir = self.direction(grad.view());
         let old = pos.clone();
         let gold = grad.clone();
-        let (npos, _, _lsstep, moved) =
-            take_step(obj, pos, *value, dir.view(), *istep, linesearch, control);
+        let (npos, _, _lsstep, moved) = take_step(
+            obj,
+            pos,
+            *value,
+            dir.view(),
+            *istep,
+            linesearch,
+            control,
+            atom_maxmove,
+        );
         *pos = npos;
         let ev = obj.value_and_gradient(pos.view());
         *value = ev.0;

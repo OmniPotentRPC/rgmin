@@ -635,3 +635,31 @@ fn an_uphill_everywhere_oracle_is_refused_not_moved() {
         "a refused step must leave the position where it stood"
     );
 }
+
+/// The per-atom cap set by `set_atom_maxmove` binds every line-searched
+/// arm, not only FIRE and BB. One atom sits far from its well; a
+/// steepest step toward it must move that atom by at most the cap.
+#[test]
+fn line_searched_arms_honour_the_per_atom_cap() {
+    use ndarray::ArrayView1;
+    let obj = rgmin::Oracle::unbounded(6, |x: ArrayView1<f64>| {
+        // Two atoms in a unit harmonic well; the second starts 3.0 out.
+        let f = 0.5 * x.iter().map(|v| v * v).sum::<f64>();
+        (f, x.to_owned())
+    });
+    for method in [Method::Steepest, Method::lbfgs(), Method::Bfgs] {
+        let mut solver = Solver::new(method.clone(), control(), 6);
+        solver.set_atom_maxmove(0.1);
+        let start = array![0.0, 0.0, 0.0, 3.0, 0.0, 0.0];
+        let mut x = start.clone();
+        let _ = solver.step(&obj, &mut x).unwrap();
+        let d = &x - &start;
+        let atom = |k: usize| (d[3 * k] * d[3 * k] + d[3 * k + 1] * d[3 * k + 1] + d[3 * k + 2] * d[3 * k + 2]).sqrt();
+        let moved = atom(0).max(atom(1));
+        assert!(moved > 1e-6, "{method:?} did not move");
+        assert!(
+            moved <= 0.1 + 1e-12,
+            "{method:?} moved an atom by {moved}, cap 0.1"
+        );
+    }
+}
