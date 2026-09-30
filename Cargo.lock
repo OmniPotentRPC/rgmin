@@ -242,22 +242,6 @@ dependencies = [
 
 [[package]]
 name = "eindir-core"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6fb7523dd5458e184ceb87773846ff91659efe891a91411c57eea029e31afbe"
-dependencies = [
- "cbindgen",
- "dlpk",
- "ndarray",
- "num-traits",
- "rand",
- "rand_distr",
- "rayon",
- "thiserror",
-]
-
-[[package]]
-name = "eindir-core"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e330e3abad9c1a597b144d40eb4b07ab3511d79f7d2cdbbcb37a44662f974db0"
@@ -694,7 +678,7 @@ dependencies = [
  "approx",
  "cbindgen",
  "dlpk",
- "eindir-core 0.6.0",
+ "eindir-core",
  "highs",
  "highs-sys",
  "ndarray",
@@ -706,12 +690,12 @@ dependencies = [
 
 [[package]]
 name = "rgpot-core"
-version = "3.2.0"
+version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d1ea4b000a0b138dabf4efaa78c8fc05ee92fda6084d76bd932fe45fcf3f477"
+checksum = "eff0c8f8e5b31716b40bf603bc30455a3f6b721199654e9aca2db9bebf9ad1aa"
 dependencies = [
  "dlpk",
- "eindir-core 0.5.2",
+ "eindir-core",
 ]
 
 [[package]]
