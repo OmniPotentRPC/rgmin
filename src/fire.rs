@@ -129,6 +129,26 @@ pub fn fire_displacement(state: &mut FireState, force: &Array1<f64>) -> Array1<f
     }
 }
 
+/// Keep the velocity consistent with the displacement the caller took.
+///
+/// `proposed` is the displacement [`fire_displacement`] returned, so
+/// `vel = proposed / dt`; `taken` is what survived the maxmove clamp
+/// and the bounds clip. When the clamp shortened the move, the velocity
+/// shrinks by the same norm ratio, so the power `F . v` that
+/// [`fire_after_v1`] and the next [`fire_displacement`] adapt on
+/// measures the motion that happened. Without this the integral keeps
+/// growing while the clamp fires every step, and `dt` grows with it.
+pub fn fire_rescale_velocity(state: &mut FireState, proposed: &Array1<f64>, taken: &Array1<f64>) {
+    let pn = l2(proposed);
+    if pn <= 0.0 {
+        return;
+    }
+    let factor = l2(taken) / pn;
+    if factor < 1.0 {
+        state.vel.mapv_inplace(|v| v * factor);
+    }
+}
+
 /// FIRE 1.0 mix and adapt after the MD step, using the new force.
 pub fn fire_after_v1(state: &mut FireState, force: &Array1<f64>) {
     if !matches!(state.kind, FireKind::V1) {
@@ -151,6 +171,31 @@ mod tests {
         let dx = fire_displacement(&mut state, &force);
         assert!(dx[0] > 0.0);
         assert!(dx[1].abs() < 1e-15);
+    }
+
+    #[test]
+    fn a_clamped_move_shrinks_the_velocity_by_the_same_ratio() {
+        let mut state = FireState::new(FireKind::V2, 2, 0.1);
+        let force = array![1000.0, 0.0];
+        let dx = fire_displacement(&mut state, &force);
+        // The clamp keeps 1% of the proposed move.
+        let taken = &dx * 0.01;
+        fire_rescale_velocity(&mut state, &dx, &taken);
+        // FIRE 2.0 takes dx = vel * dt with the dt it adapted to, so the
+        // velocity times that dt equals the clamped displacement.
+        for i in 0..2 {
+            assert!(
+                (state.vel[i] * state.dt - taken[i]).abs() <= 1e-12 * taken[i].abs().max(1.0),
+                "vel {} dt {} taken {}",
+                state.vel[i],
+                state.dt,
+                taken[i]
+            );
+        }
+        // An unclamped move leaves the velocity alone.
+        let before = state.vel.clone();
+        fire_rescale_velocity(&mut state, &taken, &taken);
+        assert_eq!(state.vel, before);
     }
 
     #[test]

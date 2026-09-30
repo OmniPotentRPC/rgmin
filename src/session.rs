@@ -12,7 +12,7 @@ use crate::adam::adam_direction;
 use crate::bb::bb_direction;
 use crate::control::Control;
 use crate::error::{Error, Result};
-use crate::fire::{FireState, fire_after_v1, fire_displacement};
+use crate::fire::{FireState, fire_after_v1, fire_displacement, fire_rescale_velocity};
 use crate::lbfgs::{GradNorm, Lbfgs};
 use crate::linesearch::LineSearch;
 use crate::manifold::{Manifold, ManifoldKind};
@@ -837,6 +837,10 @@ impl Solver {
                     scale_step(x, &mut trial, cap);
                 }
                 trial = obj.bounds().clip(trial.view());
+                // The clamp and clip shorten the move; the velocity has to
+                // describe the move taken, or the power adapt reads an
+                // integral of moves that never happened.
+                fire_rescale_velocity(state, &dx, &(&trial - &*x));
                 *x = trial;
                 let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
@@ -1063,5 +1067,91 @@ impl Solver {
             solver.gtol = gtol;
         }
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fire::FireKind;
+    use crate::oracle::Oracle;
+    use ndarray::{ArrayView1, array};
+
+    /// A steep well under a tiny Euclidean cap: every FIRE step is
+    /// clamped, and the velocity has to describe the clamped move.
+    fn steep() -> Oracle<impl Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync> {
+        Oracle::unbounded(2, |x: ArrayView1<f64>| {
+            (500.0 * x.iter().map(|v| v * v).sum::<f64>(), x.mapv(|v| 1000.0 * v))
+        })
+    }
+
+    fn fire_solver(kind: FireKind) -> Solver {
+        Solver::new(
+            Method::Fire { kind },
+            Control {
+                maxiter: 10,
+                gtol: 1e-8,
+                istep: 0.1,
+                maxmove: Some(0.01),
+                ftol_rel: None,
+            },
+            2,
+        )
+    }
+
+    fn fire_state(solver: &Solver) -> &FireState {
+        match &solver.inner {
+            Inner::Fire(state) => state,
+            _ => unreachable!("FIRE session"),
+        }
+    }
+
+    #[test]
+    fn fire_v2_velocity_times_dt_is_the_clamped_move() {
+        let obj = steep();
+        let mut solver = fire_solver(FireKind::V2);
+        let mut x = array![1.0, 1.0];
+        for _ in 0..5 {
+            let before = x.clone();
+            solver.step(&obj, &mut x).unwrap();
+            let dx = &x - &before;
+            let moved = l2(&dx);
+            assert!((moved - 0.01).abs() <= 1e-12, "clamp did not bind: {moved}");
+            // FIRE 2.0 adapts dt, then steps dx = vel * dt; nothing
+            // touches vel after the step, so vel * dt is the move taken.
+            let state = fire_state(&solver);
+            for i in 0..2 {
+                assert!(
+                    (state.vel[i] * state.dt - dx[i]).abs() <= 1e-12,
+                    "vel {} dt {} dx {}",
+                    state.vel[i],
+                    state.dt,
+                    dx[i]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fire_v1_velocity_is_bounded_by_the_clamped_move() {
+        let obj = steep();
+        let mut solver = fire_solver(FireKind::V1);
+        let mut x = array![1.0, 1.0];
+        for _ in 0..5 {
+            let dt = fire_state(&solver).dt;
+            let before = x.clone();
+            solver.step(&obj, &mut x).unwrap();
+            let moved = l2(&(&x - &before));
+            assert!((moved - 0.01).abs() <= 1e-12, "clamp did not bind: {moved}");
+            // FIRE 1.0 steps dx = vel * dt, then mixes: the mix keeps
+            // |vel| at most what it was, and a reset zeroes it. Either way
+            // |vel| cannot exceed the clamped move over the dt used.
+            let vnorm = l2(&fire_state(&solver).vel);
+            assert!(
+                vnorm <= moved / dt + 1e-12,
+                "vel {vnorm} exceeds {} for a move of {moved} over dt {dt}",
+                moved / dt
+            );
+        }
     }
 }

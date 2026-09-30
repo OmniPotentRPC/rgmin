@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the clipped step under `Accept::None`, no line search. A driver
   feeding a non-conservative projected force (NEB) gets a step every
   iteration. `Accept::Energy` keeps the line search.
+- FIRE rescales its velocity by the ratio the maxmove clamp (or the
+  bounds clip) applied to the trial move, so the power it adapts on
+  measures the motion taken. Under a clamp that bound every step the
+  velocity integral grew unbounded and `dt` grew with it.
 - `set_atom_maxmove` binds the line-searched session arms (L-BFGS,
   steepest descent, NLCG, BFGS, SR1, SR2, Adam); they read only the
   Euclidean `maxmove`.
