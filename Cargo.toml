@@ -34,7 +34,7 @@ highs-sys = { version = "1.12", optional = true }
 
 [dev-dependencies]
 approx = "0.5"
-rgpot-core = "3.3.0"
+rgpot-core = "3.4.0"
 
 [build-dependencies]
 cbindgen = "0.29"
