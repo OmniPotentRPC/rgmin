@@ -78,7 +78,7 @@ mod tests {
     }
 }
 
-/// Line search, clip to bounds, then cap the move. Returns `(x, f, |α|, moved)`.
+/// Line search, clip to bounds, then cap the move. Returns `(x, f, |alpha|, moved)`.
 ///
 /// `atom_maxmove` caps the largest per-atom displacement
 /// ([`scale_step_atom`]) and takes precedence over the Euclidean
