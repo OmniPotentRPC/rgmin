@@ -22,6 +22,11 @@ pub enum Accept {
     Energy,
     /// Grippo–Lampariello–Lucidi window of the last five accepted values.
     Nonmonotone,
+    /// Take the clipped quasi-Newton step with no line search: one oracle
+    /// at the new point, on every method. For a force that is not the
+    /// gradient of the reported value (a projected NEB force), where an
+    /// energy test says nothing.
+    Step,
 }
 
 fn trial_point<O>(
@@ -70,7 +75,7 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     match accept {
-        Accept::None => {
+        Accept::None | Accept::Step => {
             let trial = trial_point(obj, pos, dir, 1.0, control, atom_maxmove, manifold);
             let (ft, gt) = obj.value_and_gradient(trial.view());
             push_energy(e_hist, ft);

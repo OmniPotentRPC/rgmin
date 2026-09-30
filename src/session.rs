@@ -619,14 +619,14 @@ impl Solver {
 
         let start = x.clone();
         let gold = grad.clone();
-        // eOn `lbfgs_accept` none / nonmonotone: the two-loop direction goes
-        // through accept_step like the BB arm and the Hessian path in
-        // step_hess. Accept::None is one oracle call and the clipped step,
-        // with no energy test; the oracle value of a projected NEB force
-        // is not the potential of the gradient it returns, so a decrease
-        // test there is meaningless. Accept::Energy keeps the line search.
+        // Accept::Step: the two-loop direction goes through accept_step
+        // like the BB arm and the Hessian path in step_hess, one oracle
+        // call and the clipped step with no energy test. The oracle value
+        // of a projected NEB force is not the potential of the gradient it
+        // returns, so a decrease test there says nothing. Every other
+        // Accept keeps the line-searched step_objective path.
         let lbfgs_direct = match (&self.inner, self.accept) {
-            (Inner::Lbfgs(solver), accept) if accept != Accept::Energy => {
+            (Inner::Lbfgs(solver), Accept::Step) => {
                 Some(solver.direction(grad.view()))
             }
             _ => None,

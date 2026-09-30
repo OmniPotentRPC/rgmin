@@ -677,7 +677,7 @@ fn line_searched_arms_honour_the_per_atom_cap() {
 /// step with one oracle call per step and no line search. The count sits
 /// in an `AtomicUsize` because `Objective` requires `Sync`.
 #[test]
-fn lbfgs_accept_none_is_one_oracle_per_step() {
+fn lbfgs_accept_step_is_one_oracle_per_step() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -727,7 +727,7 @@ fn lbfgs_accept_none_is_one_oracle_per_step() {
         },
         2,
     );
-    solver.set_accept(rgmin::Accept::None);
+    solver.set_accept(rgmin::Accept::Step);
     let mut x = array![1.0, 1.0];
     let mut last = None;
     for step in 1..=100 {

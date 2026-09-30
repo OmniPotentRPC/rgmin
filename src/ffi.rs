@@ -877,6 +877,8 @@ pub enum rgmin_accept_t {
     RGMIN_ACCEPT_ENERGY = 1,
     /// Grippo window of the last five accepted values.
     RGMIN_ACCEPT_NONMONOTONE = 2,
+    /// Clipped quasi-Newton step, one oracle, no line search.
+    RGMIN_ACCEPT_STEP = 3,
 }
 
 /// eOn `lbfgs_accept`. Legal on any session.
@@ -892,6 +894,7 @@ pub unsafe extern "C" fn rgmin_solver_set_accept(
         rgmin_accept_t::RGMIN_ACCEPT_ENERGY => Accept::Energy,
         rgmin_accept_t::RGMIN_ACCEPT_NONMONOTONE => Accept::Nonmonotone,
         rgmin_accept_t::RGMIN_ACCEPT_NONE => Accept::None,
+        rgmin_accept_t::RGMIN_ACCEPT_STEP => Accept::Step,
     };
     unsafe { (*solver).solver.set_accept(a) };
 }
