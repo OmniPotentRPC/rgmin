@@ -626,9 +626,7 @@ impl Solver {
         // returns, so a decrease test there says nothing. Every other
         // Accept keeps the line-searched step_objective path.
         let lbfgs_direct = match (&self.inner, self.accept) {
-            (Inner::Lbfgs(solver), Accept::Step) => {
-                Some(solver.direction(grad.view()))
-            }
+            (Inner::Lbfgs(solver), Accept::Step) => Some(solver.direction(grad.view())),
             _ => None,
         };
         let lbfgs_line_searched = lbfgs_direct.is_none() && matches!(self.inner, Inner::Lbfgs(_));
@@ -1081,7 +1079,10 @@ mod tests {
     /// clamped, and the velocity has to describe the clamped move.
     fn steep() -> Oracle<impl Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync> {
         Oracle::unbounded(2, |x: ArrayView1<f64>| {
-            (500.0 * x.iter().map(|v| v * v).sum::<f64>(), x.mapv(|v| 1000.0 * v))
+            (
+                500.0 * x.iter().map(|v| v * v).sum::<f64>(),
+                x.mapv(|v| 1000.0 * v),
+            )
         })
     }
 

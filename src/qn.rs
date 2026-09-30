@@ -46,8 +46,16 @@ where
         let dir = -h.dot(&grad);
         let old = pos.clone();
         let gold = grad.clone();
-        let (npos, _, _lsstep, moved) =
-            take_step(obj, &pos, value, dir.view(), istep, linesearch, control, None);
+        let (npos, _, _lsstep, moved) = take_step(
+            obj,
+            &pos,
+            value,
+            dir.view(),
+            istep,
+            linesearch,
+            control,
+            None,
+        );
         pos = npos;
         let ev = obj.value_and_gradient(pos.view());
         value = ev.0;
@@ -119,8 +127,16 @@ where
         let dir = -h.dot(&grad);
         let old = pos.clone();
         let gold = grad.clone();
-        let (npos, _, _lsstep, moved) =
-            take_step(obj, &pos, value, dir.view(), istep, linesearch, control, None);
+        let (npos, _, _lsstep, moved) = take_step(
+            obj,
+            &pos,
+            value,
+            dir.view(),
+            istep,
+            linesearch,
+            control,
+            None,
+        );
         pos = npos;
         let ev = obj.value_and_gradient(pos.view());
         value = ev.0;
@@ -165,8 +181,16 @@ where
         let dir = solve_dense(&b, &rhs).unwrap_or_else(|| rhs);
         let old = pos.clone();
         let gold = grad.clone();
-        let (npos, _, _lsstep, moved) =
-            take_step(obj, &pos, value, dir.view(), istep, linesearch, control, None);
+        let (npos, _, _lsstep, moved) = take_step(
+            obj,
+            &pos,
+            value,
+            dir.view(),
+            istep,
+            linesearch,
+            control,
+            None,
+        );
         pos = npos;
         let ev = obj.value_and_gradient(pos.view());
         value = ev.0;
@@ -203,8 +227,16 @@ where
             return Ok(done(value, pos, step, gnorm));
         }
         let dir = grad.mapv(|g| -g);
-        let (npos, _, lsstep, _) =
-            take_step(obj, &pos, value, dir.view(), istep, linesearch, control, None);
+        let (npos, _, lsstep, _) = take_step(
+            obj,
+            &pos,
+            value,
+            dir.view(),
+            istep,
+            linesearch,
+            control,
+            None,
+        );
         pos = npos;
         let ev = obj.value_and_gradient(pos.view());
         value = ev.0;

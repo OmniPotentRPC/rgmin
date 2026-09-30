@@ -661,8 +661,7 @@ fn line_searched_arms_honour_the_per_atom_cap() {
         let _ = solver.step(&obj, &mut x).unwrap();
         let d = &x - &start;
         let atom = |k: usize| {
-            (d[3 * k] * d[3 * k] + d[3 * k + 1] * d[3 * k + 1] + d[3 * k + 2] * d[3 * k + 2])
-                .sqrt()
+            (d[3 * k] * d[3 * k] + d[3 * k + 1] * d[3 * k + 1] + d[3 * k + 2] * d[3 * k + 2]).sqrt()
         };
         let moved = atom(0).max(atom(1));
         assert!(moved > 1e-6, "{method:?} did not move");

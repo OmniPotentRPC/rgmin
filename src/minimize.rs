@@ -176,8 +176,16 @@ where
                 grad_norm: gnorm,
             });
         }
-        let (npos, _, lsstep, _) =
-            take_step(obj, &pos, value, dir.view(), istep, linesearch, control, None);
+        let (npos, _, lsstep, _) = take_step(
+            obj,
+            &pos,
+            value,
+            dir.view(),
+            istep,
+            linesearch,
+            control,
+            None,
+        );
         pos = npos;
         let ev = obj.value_and_gradient(pos.view());
         value = ev.0;
