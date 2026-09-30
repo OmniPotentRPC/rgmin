@@ -148,6 +148,13 @@ impl Solver {
         self.accept = accept;
     }
 
+    /// Line search for the line-searched arms (steepest descent, NLCG,
+    /// BFGS, SR1, SR2, Adam, and L-BFGS under [`Accept::Energy`]) on the
+    /// next [`Self::step`]. Default is [`LineSearch::default`] (Brent).
+    pub fn set_linesearch(&mut self, linesearch: LineSearch) {
+        self.linesearch = linesearch;
+    }
+
     /// Euclidean cap applied on the next [`Self::step`].
     pub fn set_maxmove(&mut self, maxmove: f64) {
         self.control.maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };

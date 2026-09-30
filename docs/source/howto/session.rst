@@ -66,6 +66,8 @@ Setters
     +-----------------------+---------------------------------------------------------+
     | ``set_accept``        | ``none`` / ``energy`` / ``nonmonotone``                 |
     +-----------------------+---------------------------------------------------------+
+    | ``set_linesearch``    | Line search for the line-searched arms (Rust API)       |
+    +-----------------------+---------------------------------------------------------+
     | ``set_atom_maxmove``  | Per-atom clip (preferred over a Euclidean cap)          |
     +-----------------------+---------------------------------------------------------+
     | ``set_project_rigid`` | Drop rigid modes on isolated clusters                   |
