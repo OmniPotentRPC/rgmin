@@ -669,3 +669,84 @@ fn line_searched_arms_honour_the_per_atom_cap() {
         );
     }
 }
+
+/// eOn `lbfgs_accept none`: an L-BFGS session takes the clipped two-loop
+/// step with one oracle call per step and no line search. The count sits
+/// in an `AtomicUsize` because `Objective` requires `Sync`.
+#[test]
+fn lbfgs_accept_none_is_one_oracle_per_step() {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::ArrayView1;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountQuad {
+        evals: AtomicUsize,
+    }
+    impl Objective<f64> for CountQuad {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            use std::sync::OnceLock;
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| Bounds::new(array![-1e6, -1e6], array![1e6, 1e6], 0.0))
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            0.5 * (x[0] * x[0] + 4.0 * x[1] * x[1])
+        }
+    }
+    impl Gradient<f64> for CountQuad {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            array![x[0], 4.0 * x[1]]
+        }
+    }
+    impl DifferentiableObjective<f64> for CountQuad {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            self.evals.fetch_add(1, Ordering::Relaxed);
+            (self.eval(x), self.grad(x))
+        }
+    }
+
+    let obj = CountQuad {
+        evals: AtomicUsize::new(0),
+    };
+    let mut solver = Solver::new(
+        Method::lbfgs(),
+        Control {
+            maxiter: 100,
+            gtol: 1e-8,
+            istep: 1.0,
+            maxmove: None,
+            ftol_rel: None,
+        },
+        2,
+    );
+    solver.set_accept(rgmin::Accept::None);
+    let mut x = array![1.0, 1.0];
+    let mut last = None;
+    for step in 1..=100 {
+        let before = x.clone();
+        let rep = solver.step(&obj, &mut x).unwrap();
+        // The first step evaluates the start; every step evaluates the
+        // one trial point it takes. Nothing else touches the oracle.
+        assert_eq!(
+            obj.evals.load(Ordering::Relaxed),
+            step + 1,
+            "step {step}: extra oracle calls"
+        );
+        assert!(
+            x.iter().zip(before.iter()).any(|(a, b)| a != b),
+            "step {step} did not move"
+        );
+        last = Some(rep);
+        if last.as_ref().unwrap().grad_norm < 1e-8 {
+            break;
+        }
+    }
+    let rep = last.unwrap();
+    assert!(rep.grad_norm < 1e-8, "gnorm {}", rep.grad_norm);
+    assert!(rep.value < 1e-14, "value {}", rep.value);
+}

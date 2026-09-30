@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An L-BFGS session honours `set_accept`. `Accept::None` and
+  `Accept::Nonmonotone` take the two-loop direction through the same
+  accept path as BB and the Hessian-preconditioned step: one oracle call
+  and the clipped step under `Accept::None`, no line search. A driver
+  feeding a non-conservative projected force (NEB) gets a step every
+  iteration. `Accept::Energy` keeps the line search.
 - `set_atom_maxmove` binds the line-searched session arms (L-BFGS,
   steepest descent, NLCG, BFGS, SR1, SR2, Adam); they read only the
   Euclidean `maxmove`.

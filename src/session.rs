@@ -619,7 +619,44 @@ impl Solver {
 
         let start = x.clone();
         let gold = grad.clone();
+        // eOn `lbfgs_accept` none / nonmonotone: the two-loop direction goes
+        // through accept_step like the BB arm and the Hessian path in
+        // step_hess. Accept::None is one oracle call and the clipped step,
+        // with no energy test; the oracle value of a projected NEB force
+        // is not the potential of the gradient it returns, so a decrease
+        // test there is meaningless. Accept::Energy keeps the line search.
+        let lbfgs_direct = match (&self.inner, self.accept) {
+            (Inner::Lbfgs(solver), accept) if accept != Accept::Energy => {
+                Some(solver.direction(grad.view()))
+            }
+            _ => None,
+        };
+        let lbfgs_line_searched = lbfgs_direct.is_none() && matches!(self.inner, Inner::Lbfgs(_));
+        if let Some(mut dir) = lbfgs_direct {
+            if self.project_rigid {
+                project_out_rot_trans(&mut dir, x.view());
+            }
+            dir = self.project_vec(x, &dir);
+            let (npos, nval, ngrad, moved) = accept_step(
+                obj,
+                x,
+                value,
+                &gold,
+                &dir,
+                &self.control,
+                self.accept,
+                &mut self.e_hist,
+                self.atom_maxmove,
+                self.manifold,
+            );
+            if moved {
+                *x = npos;
+                value = nval;
+                grad = ngrad;
+            }
+        }
         match &mut self.inner {
+            Inner::Lbfgs(_) if !lbfgs_line_searched => {}
             Inner::Lbfgs(solver) => {
                 solver.step_objective(
                     obj,
@@ -853,7 +890,13 @@ impl Solver {
             None
         };
         if let (Inner::Lbfgs(solver), Some((s, y, gn))) = (&mut self.inner, pair) {
-            solver.replace_newest(s, y, Some(gn));
+            if lbfgs_line_searched {
+                // step_objective pushes the Euclidean pair; the transported
+                // pair from the retracted point replaces it.
+                solver.replace_newest(s, y, Some(gn));
+            } else {
+                solver.push_pair(s, y, Some(gn));
+            }
         }
 
         self.remember(x, value, &grad);
