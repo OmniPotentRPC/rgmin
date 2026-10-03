@@ -42,6 +42,12 @@ pub enum Error {
         /// Outer iterations completed when the radius hit its floor.
         steps: usize,
     },
+    /// Named eigensolver is not linked in this build.
+    #[error("eigensolver {kind} is not linked in this build")]
+    EigenUnavailable {
+        /// Closed-enum name of the requested backend.
+        kind: &'static str,
+    },
 }
 
 /// Result alias for this crate.

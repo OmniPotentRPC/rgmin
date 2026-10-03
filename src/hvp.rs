@@ -442,7 +442,7 @@ impl Preconditioner for NystromPrecond {
 
 /// Cyclic Jacobi eigendecomposition of a small symmetric matrix.
 /// Returns eigenvalues and the column eigenvectors.
-fn sym_eig_jacobi(mut a: Array2<f64>) -> (Array1<f64>, Array2<f64>) {
+pub(crate) fn sym_eig_jacobi(mut a: Array2<f64>) -> (Array1<f64>, Array2<f64>) {
     let k = a.nrows();
     let mut v = Array2::<f64>::eye(k);
     for _ in 0..64 {

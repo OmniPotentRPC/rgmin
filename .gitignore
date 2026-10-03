@@ -36,3 +36,4 @@ docs/source/_build/
 .lake/
 .pixi/
 pixi.lock
+.cache/
