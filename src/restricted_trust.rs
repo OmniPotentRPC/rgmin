@@ -48,7 +48,7 @@ impl TrustRegion {
     /// Radius `delta`, minimum-mode QN (`order = 0`).
     pub fn new(delta: f64) -> Self {
         Self {
-            delta: delta.max(0.0),
+            delta: if delta.is_finite() { delta.max(0.0) } else { delta },
             order: 0,
             tol: 1e-10,
             maxiter: 1000,
@@ -70,6 +70,15 @@ impl TrustRegion {
         let n = grad.len();
         if hess.nrows() != n || hess.ncols() != n {
             return Err(Error::Dim { got: hess.nrows(), dim: n });
+        }
+        if !self.delta.is_finite() || self.delta < 0.0
+            || !self.tol.is_finite() || self.tol < 0.0
+            || hess.iter().chain(grad.iter()).any(|x| !x.is_finite())
+        {
+            return Err(Error::RestrictedStep);
+        }
+        if self.delta == 0.0 {
+            return Ok(RestrictedStep { step: Array1::zeros(n), cons: 0.0 });
         }
         let (values, vectors) = crate::hvp::sym_eig_jacobi(hess.clone());
         let mut indices: Vec<usize> = (0..n).collect();
@@ -99,6 +108,21 @@ impl TrustRegion {
                 maxiter: self.maxiter,
             },
         )?;
+        let mut step = step;
+        let norm = nrm2(step.view());
+        if !norm.is_finite() {
+            return Err(Error::RestrictedStep);
+        }
+        if norm > self.delta {
+            // Root tolerance does not relax the geometric radius. Rounding
+            // the projection scale inward leaves room for its final multiply.
+            let scale = (self.delta / norm).next_down().max(0.0);
+            step.mapv_inplace(|x| x * scale);
+        }
+        let norm = nrm2(step.view());
+        if !norm.is_finite() || norm > self.delta {
+            return Err(Error::RestrictedStep);
+        }
         Ok(RestrictedStep { step, cons })
     }
 }
