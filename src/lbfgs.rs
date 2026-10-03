@@ -236,12 +236,6 @@ impl Lbfgs {
         self.push_pair(s, y, None);
     }
 
-    /// Drop the newest pair, then push. Used after a manifold retract.
-    pub(crate) fn replace_newest(&mut self, s: Array1<f64>, y: Array1<f64>, gnorm: Option<f64>) {
-        let _ = self.memory.pop();
-        self.push_pair(s, y, gnorm);
-    }
-
     pub(crate) fn push_pair(&mut self, s: Array1<f64>, y: Array1<f64>, gnorm: Option<f64>) {
         let sy = s.dot(&y);
         let sn = s.iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -658,13 +652,14 @@ impl Lbfgs {
         O: DifferentiableObjective<f64> + ?Sized,
     {
         self.step_objective_with_direction(obj, pos, value, grad, istep,
-                                           linesearch, control, atom_maxmove, None);
+                                           linesearch, control, atom_maxmove, None, true);
     }
 
     pub(crate) fn step_objective_with_direction<O>(
         &mut self, obj: &O, pos: &mut Array1<f64>, value: &mut f64,
         grad: &mut Array1<f64>, istep: &mut f64, linesearch: LineSearch,
         control: &Control, atom_maxmove: Option<f64>, supplied_direction: Option<Array1<f64>>,
+        record_pair: bool,
     ) where O: DifferentiableObjective<f64> + ?Sized,
     {
         #[cfg(feature = "highs")]
@@ -708,7 +703,7 @@ impl Lbfgs {
         } else {
             t
         };
-        if t.moved {
+        if t.moved && record_pair {
             let s = &t.x - &*pos;
             let y = &t.g - &*grad;
             self.push(s, y);

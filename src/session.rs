@@ -1091,6 +1091,7 @@ impl Solver {
                     &self.control,
                     self.atom_maxmove,
                     constrained_direction,
+                    false,
                 );
             }
             Inner::Steepest => {
@@ -1345,13 +1346,9 @@ impl Solver {
             None
         };
         if let (Inner::Lbfgs(solver), Some((s, y, gn))) = (&mut self.inner, pair) {
-            if lbfgs_line_searched {
-                // step_objective pushes the Euclidean pair; the transported
-                // pair from the retracted point replaces it.
-                solver.replace_newest(s, y, Some(gn));
-            } else {
-                solver.push_pair(s, y, Some(gn));
-            }
+            // Only the final transported pair can enter the history. A
+            // refused pair leaves every retained pair in place.
+            solver.push_pair(s, y, Some(gn));
         }
 
         self.remember(x, value, &grad);
