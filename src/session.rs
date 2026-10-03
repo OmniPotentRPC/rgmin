@@ -59,6 +59,8 @@ pub struct Solver {
     manifold: ManifoldKind,
     /// Per-atom masses for [`ManifoldKind::MwRigid`]. Length N, not 3N.
     masses: Option<Array1<f64>>,
+    /// Optional Gr(n,p) shape for the Grassmann selector.
+    factor_shape: Option<(usize, usize)>,
     #[cfg(feature = "highs")]
     highs: bool,
     #[cfg(feature = "highs")]
@@ -151,6 +153,7 @@ impl Solver {
             periodic: false,
             manifold: ManifoldKind::Euclidean,
             masses: None,
+            factor_shape: None,
             #[cfg(feature = "highs")]
             highs: false,
             #[cfg(feature = "highs")]
@@ -218,10 +221,91 @@ impl Solver {
 
     /// Embedded manifold for project / retract / transport.
     pub fn set_manifold(&mut self, kind: ManifoldKind) {
+        let kind = match (kind, self.factor_shape) {
+            (ManifoldKind::Grassmann, Some((n, p))) => ManifoldKind::GrassmannP { n, p },
+            (other, _) => other,
+        };
         if kind != self.manifold {
             self.forget();
         }
         self.manifold = kind;
+    }
+
+    /// Stiefel \(\mathrm{St}(n,p)\). `p = 1` is the sphere packing.
+    /// `p > 1` is column-major, length `n*p`.
+    pub fn set_stiefel(&mut self, n: usize, p: usize) {
+        self.set_manifold(ManifoldKind::stiefel(n, p));
+    }
+
+    /// Oblique \(\mathrm{OB}(n,m)\): product of `m` unit spheres in `R^n`.
+    /// Packed column-major, length `n*m`.
+    pub fn set_oblique(&mut self, n: usize, m: usize) {
+        self.set_manifold(ManifoldKind::Oblique { n, m });
+    }
+
+    /// Product of `n` unit-modulus complex numbers. Packed length `2 n`.
+    pub fn set_complex_circle(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::ComplexCircle { n });
+    }
+
+    /// Complex Euclidean \(\mathbb{C}^n\). Packed interleaved, length `2 n`.
+    pub fn set_euclidean_complex(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::EuclideanComplex { n });
+    }
+
+    /// Singleton of packed length `n`. manopt `constantfactory`.
+    pub fn set_constant(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::Constant { n });
+    }
+
+    /// Doubly-stochastic n-by-n, packed length `n^2`.
+    /// manopt `multinomialdoublystochasticfactory`.
+    pub fn set_multinomial_ds(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::MultinomialDoublyStochastic { n });
+    }
+
+    /// Symmetric doubly-stochastic n-by-n, packed length `n^2`.
+    /// manopt `multinomialsymmetricfactory`.
+    pub fn set_multinomial_sym(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::MultinomialSymmetric { n });
+    }
+
+    /// Complex unit sphere in \(\mathbb{C}^n\). Packed interleaved,
+    /// length `2 n`. manopt `spherecomplexfactory`.
+    pub fn set_sphere_complex(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::SphereComplex { n });
+    }
+
+    /// Positive orthant of packed length `n`. manopt `positivefactory`.
+    pub fn set_positive(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::Positive { n });
+    }
+
+    /// Centered `m x n` matrices, packed row-major `m n`.
+    /// manopt `centeredmatrixfactory`. `rows = false` centers
+    /// columns (`X 1 = 0`).
+    pub fn set_centered_matrix(&mut self, m: usize, n: usize, rows: bool) {
+        self.set_manifold(ManifoldKind::CenteredMatrix { m, n, rows });
+    }
+
+    /// Set Gr(n,p); a zero dimension clears the optional factor shape.
+    pub fn set_factor_shape(&mut self, n: usize, p: usize) {
+        let next = if n == 0 || p == 0 { None } else { Some((n, p)) };
+        if next != self.factor_shape {
+            self.forget();
+        }
+        self.factor_shape = next;
+        if matches!(self.manifold, ManifoldKind::Grassmann | ManifoldKind::GrassmannP { .. }) {
+            self.manifold = match next {
+                Some((n, p)) => ManifoldKind::GrassmannP { n, p },
+                None => ManifoldKind::Grassmann,
+            };
+        }
+    }
+
+    /// Complex unitary U(n), packed interleaved row-major.
+    pub fn set_unitary(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::unitary(n));
     }
 
     /// Per-atom masses for [`ManifoldKind::MwRigid`] (Page–McIver / Eckart).
@@ -430,7 +514,10 @@ impl Solver {
     }
 
     fn horizontal_grad(&self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
-        let mut g = self.project_vec(x, grad);
+        let mut g = match self.manifold {
+            ManifoldKind::RigidQuotient | ManifoldKind::MwRigid => self.project_vec(x, grad),
+            other => other.egrad2rgrad(x, grad),
+        };
         if self.project_rigid
             && !matches!(
                 self.manifold,
