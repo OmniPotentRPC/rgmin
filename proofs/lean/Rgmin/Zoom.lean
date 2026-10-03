@@ -2,8 +2,8 @@ import Mathlib
 
 /-! # The zoom bracket
 
-`src/linesearch/zoom.rs` holds a bracket `[lo, hi]` around a strong-Wolfe
-point and proposes a cubic-Hermite trial inside it (Nocedal-Wright
+`src/linesearch/known.rs::zoom_trial` refines a bracket `[lo, hi]`
+and proposes a cubic-Hermite trial inside it (Nocedal-Wright
 eq. 3.59). The cubic can propose anything, so the code clamps every
 trial into the middle 80 percent of the bracket: no closer to either
 end than a tenth of the width. That guard is the entire termination
