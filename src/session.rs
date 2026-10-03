@@ -788,7 +788,9 @@ impl Solver {
             if let Ok(dir) = feasible {
                 let old = x.clone();
                 let gold = grad.clone();
-                let (npos, nval, ngrad, moved) = accept_step(
+                let allow_gradient_fallback = !self.has_coordinate_box()
+                    && self.highs_trust.is_none() && self.equalities.is_empty();
+                let (npos, nval, ngrad, moved) = crate::accept::accept_step_with_fallback(
                     obj,
                     x,
                     value,
@@ -799,6 +801,7 @@ impl Solver {
                     &mut self.e_hist,
                     None,
                     self.manifold,
+                    allow_gradient_fallback,
                 );
                 if moved {
                     *x = npos;
