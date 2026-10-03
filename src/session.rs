@@ -340,6 +340,29 @@ impl Solver {
         self.last_grad = grad.clone();
     }
 
+    /// Drop the cached evaluation and keep the method's memory.
+    ///
+    /// The next [`Self::step`] calls the oracle at its `x` even when `x`
+    /// is the iterate this session last evaluated. A host whose oracle
+    /// changes between steps calls this after the change: a min-mode
+    /// walker returning `g - 2 (g . tau) tau` after refreshing `tau`, or
+    /// a band after arming its climbing image. Without it the next step
+    /// starts from the gradient of the old objective at the same `x`.
+    ///
+    /// FIRE velocity, BB and NLCG history, the dense quasi-Newton
+    /// matrices and the L-BFGS pairs survive. Each stored pair is a
+    /// secant pair of one objective: its `s` and both gradients of its
+    /// `y` come from the same step, so the same `tau`, and this method
+    /// keeps that true for the next pair by re-evaluating the start under
+    /// the new oracle. What a pair no longer matches after the change is
+    /// the current curvature: with `R = I - 2 tau tau'` the effective
+    /// Hessian is `R H R`, which moves by `O(theta) ||H||` when `tau`
+    /// rotates by `theta`. Small rotations between steps keep the memory
+    /// useful; after a large one call [`Self::forget`].
+    pub fn forget_evaluation(&mut self) {
+        self.last_pos = None;
+    }
+
     /// Drop method memory. The next step is a cold start from the current `x`.
     pub fn forget(&mut self) {
         self.istep = self.control.istep;
@@ -1140,6 +1163,102 @@ mod tests {
         match &solver.inner {
             Inner::Fire(state) => state,
             _ => unreachable!("FIRE session"),
+        }
+    }
+
+    /// `f = |x|^2 / 2` whose oracle flips the sign of the gradient's
+    /// first component when `flip` is set: an objective that changes
+    /// between steps, like a min-mode effective gradient after `tau`
+    /// moves.
+    struct Flipping {
+        flip: std::sync::atomic::AtomicBool,
+        calls: std::sync::atomic::AtomicUsize,
+        bounds: eindir_core::Bounds<f64>,
+    }
+
+    impl Objective<f64> for Flipping {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.value_and_gradient(x).0
+        }
+    }
+
+    impl eindir_core::Gradient<f64> for Flipping {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.value_and_gradient(x).1
+        }
+    }
+
+    impl DifferentiableObjective<f64> for Flipping {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            use std::sync::atomic::Ordering;
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            let mut g = x.to_owned();
+            if self.flip.load(Ordering::Relaxed) {
+                g[0] = -g[0];
+            }
+            (0.5 * x.dot(&x), g)
+        }
+    }
+
+    #[test]
+    fn forget_evaluation_re_evaluates_and_keeps_memory() {
+        use std::sync::atomic::Ordering;
+        let obj = Flipping {
+            flip: false.into(),
+            calls: 0.into(),
+            bounds: eindir_core::Bounds::new(array![-1e6, -1e6], array![1e6, 1e6], 0.0),
+        };
+        for method in [
+            Method::Lbfgs { memory: 5 },
+            Method::Fire { kind: FireKind::V2 },
+        ] {
+            let mut solver = Solver::new(
+                method.clone(),
+                Control {
+                    maxiter: 10,
+                    gtol: 1e-12,
+                    istep: 0.1,
+                    maxmove: Some(0.05),
+                    ftol_rel: None,
+                },
+                2,
+            );
+            solver.set_accept(Accept::Step);
+            obj.flip.store(false, Ordering::Relaxed);
+            let mut x = array![1.0, 0.5];
+            solver.step(&obj, &mut x).unwrap();
+            solver.step(&obj, &mut x).unwrap();
+            let memory = |s: &Solver| match &s.inner {
+                Inner::Lbfgs(l) => l.len() as f64,
+                Inner::Fire(f) => l2(&f.vel),
+                _ => unreachable!(),
+            };
+            let kept = memory(&solver);
+            assert!(kept > 0.0, "{method:?} built no memory");
+            // The oracle changes; the cached gradient at x is stale.
+            obj.flip.store(true, Ordering::Relaxed);
+            solver.forget_evaluation();
+            assert_eq!(memory(&solver), kept, "{method:?} lost its memory");
+            let before = obj.calls.load(Ordering::Relaxed);
+            let start = x.clone();
+            solver.step(&obj, &mut x).unwrap();
+            // One call at the unchanged x (the re-evaluation) and one at
+            // the step's trial under Accept::Step.
+            assert_eq!(obj.calls.load(Ordering::Relaxed) - before, 2, "{method:?}");
+            // Without forget_evaluation the cached point is reused.
+            let before = obj.calls.load(Ordering::Relaxed);
+            solver.step(&obj, &mut x).unwrap();
+            assert_eq!(obj.calls.load(Ordering::Relaxed) - before, 1, "{method:?}");
+            assert!(x != start);
         }
     }
 

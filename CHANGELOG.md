@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `LineSearch::search_from`: a line search from a point whose value and
+  gradient are known, returning the accepted point with its value and
+  gradient (`LineOutcome`) and bounded by an `alpha_max`.
+- `Solver::forget_evaluation` drops the cached evaluation and keeps the
+  method memory, for a host whose oracle changes between steps (a
+  min-mode effective gradient after the mode moves, a band arming its
+  climbing image).
+- C ABI `rgmin_solver_set_linesearch` with `rgmin_linesearch_t`
+  (`abi_minor` 11).
+- `validation/`: sympy checks of the line-search interpolants and of
+  the L-BFGS two-loop map; `bench/atomistic`: rgmin on rgpot potentials
+  (LJ38, Pt7 on Pt(111), EAM Al slab) counting force calls.
+
+### Changed
+
+- A session's default line search is strong Wolfe (`c1 = 1e-4`,
+  `c2 = 0.9`, 20 trials) instead of Brent. Brent spent about 25 force
+  calls per L-BFGS iteration and, under a per-atom cap, stalled LJ38 at
+  `fmax` above 100. `LineSearch::default()` stays Brent.
+- Line-searched steps reuse the value and gradient at the start and
+  return the gradient at the accepted point: steepest descent, NLCG,
+  BFGS, SR1, SR2, Adam and line-searched L-BFGS make no evaluation
+  twice. L-BFGS under Wolfe goes from 3.2 to 1.1 force calls per
+  iteration (LJ38 476 to 168, Pt7 31 to 10, Al slab 42 to 14 calls).
+- The displacement cap bounds the line search (`alpha_max`) instead of
+  rescaling its result, so the accepted value belongs to the accepted
+  point.
+- The strong-Wolfe zoom interpolates with the safeguarded More-Thuente
+  cubic, then the quadratic, then the midpoint, and extrapolates within
+  1.1 to 4 increments.
+
+### Fixed
+
+- A session on a translation manifold (Euclidean, rigid quotients) no
+  longer re-evaluates the accepted point after a no-op retract round
+  trip.
+- The cached-point test is relative to the coordinate size, so a host's
+  ulp-level round trip of the iterate does not cost a force call.
+- `extra_updates` replays the newest pair, which leaves the BFGS map
+  unchanged; the two-loop map ignores it and says so.
+- The 0.3.0 entry below says `Accept::None` takes the two-loop direction
+  with one call; that path belongs to `Accept::Step`, and `Accept::None`
+  keeps the line search.
+
+### Added
+
 - `formal/`: Lean 4 and Mathlib contracts for the Armijo step, the BFGS
   and L-BFGS inverse updates, the per-atom max-move clamp and FIRE
   mixing, each mapped to its Rust function and precondition in
