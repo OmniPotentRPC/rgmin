@@ -3,3 +3,4 @@ import Rgmin.Steihaug
 import Rgmin.Precond
 import Rgmin.Trust
 import Rgmin.Spectral
+import Rgmin.QnDerivative
