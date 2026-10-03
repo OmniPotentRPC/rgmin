@@ -23,10 +23,10 @@ use dlpk::sys::{
 use eindir_core::ffi::{eindir_objective_eval, eindir_objective_grad, eindir_status_t};
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
-use rgmin::{
-    Accept, Conjugacy, Control, FireKind, Lbfgs, LineSearch, Method, Restart, Solver,
+use rgmin::{Accept, Conjugacy, Control, FireKind, Lbfgs, LineSearch, Method, Restart, Solver};
+use rgpot_core::eindir::{
+    rgpot_potential_free_eindir, rgpot_potential_new_eindir, rgpot_potential_t,
 };
-use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir, rgpot_potential_t};
 use rgpot_core::status::rgpot_status_t;
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 
@@ -397,8 +397,18 @@ fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
         "lbfgs-wolfe" => (lbfgs, Accept::None, wolfe(), 1.0),
         "lbfgs-backtrack" => (lbfgs, Accept::None, back, 1.0),
         "lbfgs-step" => (lbfgs, Accept::Step, wolfe(), 1.0),
-        "fire" => (Method::Fire { kind: FireKind::V1 }, Accept::None, wolfe(), 0.1),
-        "fire2" => (Method::Fire { kind: FireKind::V2 }, Accept::None, wolfe(), 0.1),
+        "fire" => (
+            Method::Fire { kind: FireKind::V1 },
+            Accept::None,
+            wolfe(),
+            0.1,
+        ),
+        "fire2" => (
+            Method::Fire { kind: FireKind::V2 },
+            Accept::None,
+            wolfe(),
+            0.1,
+        ),
         "bb" => (Method::Bb, Accept::None, wolfe(), 0.01),
         "bb-nm" => (Method::Bb, Accept::Nonmonotone, wolfe(), 0.01),
         "cg-wolfe" => (pr, Accept::None, wolfe(), 0.01),
