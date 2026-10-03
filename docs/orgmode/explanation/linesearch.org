@@ -22,12 +22,16 @@ The curvature condition demands abs(phi'(a)) <= c2 abs(phi'(0)) with
 c1 < c2 < 1: the slope must have flattened enough that the quasi-Newton
 update built from this step carries curvature information. Nocedal and
 Wright's algorithms 3.5 and 3.6 (the bracket and the zoom) find a point
-satisfying both, and ~src/linesearch/zoom.rs~ is a direct
-implementation.
+satisfying both. ~src/linesearch/known.rs~ implements them from a
+point whose value and gradient the caller already holds: the start is
+never re-evaluated, the accepted point comes back with its gradient,
+and a displacement cap bounds every trial (~alpha_max~).
+~src/linesearch/zoom.rs~ keeps a standalone bisection zoom.
 
 * The bracket and the zoom
 
-The outer loop (~wolfe_search~) expands a trial step until it either
+The outer loop (~known.rs::wolfe~) expands a trial step, within
+More-Thuente's bounds of 1.1 to 4 times the last increment, until it either
 satisfies both conditions, overshoots (value above the Armijo line, or
 above the previous trial), or the slope turns nonnegative. Overshoot
 and slope-reversal both certify that a Wolfe point lies between the
