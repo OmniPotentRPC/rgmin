@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `formal/`: Lean 4 and Mathlib contracts for the Armijo step, the BFGS
+  and L-BFGS inverse updates, the per-atom max-move clamp and FIRE
+  mixing, each mapped to its Rust function and precondition in
+  `formal/README.md`. `formal/check.sh` builds them and refuses a
+  `sorry`, an `axiom` or a non-foundational axiom dependency.
+
 ## [0.3.0] - 2026-09-30
 
 ### Added

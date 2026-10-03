@@ -7,6 +7,7 @@ license = "MIT"
 description = "Local first-order minimization over eindir differentiable objectives."
 repository = "https://github.com/OmniPotentRPC/rgmin"
 readme = "README.md"
+exclude = ["bench/"]
 keywords = ["optimization", "conjugate-gradient", "linesearch"]
 categories = ["science", "mathematics"]
 authors = ["Rohit Goswami <rgoswami@ieee.org>"]
