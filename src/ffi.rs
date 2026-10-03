@@ -427,6 +427,7 @@ fn eigen_params_from_c(raw: *const rgmin_eigen_params_t) -> Result<EigenParams, 
         krylov: p.krylov as usize,
         max_iter: p.max_iter as usize,
         tol: p.tol,
+        ..EigenParams::default()
     })
 }
 

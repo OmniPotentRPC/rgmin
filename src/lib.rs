@@ -51,6 +51,25 @@ pub mod lbfgs;
 pub mod lbfgs_qp;
 /// Matrix-free lowest Hessian eigenpair.
 pub mod lowest_mode;
+
+/// Closed options for optional lowest-mode backends.
+pub mod slepc_kind;
+/// Closed EigenExa algorithm selection.
+pub mod eigenexa_kind;
+/// DLA-Future partial-spectrum window.
+pub mod dlaf_kind;
+/// ELPA stage and spectrum settings.
+pub mod elpa_kind;
+/// Typed HiGHS solver and callback settings.
+pub mod highs_kind;
+#[cfg(feature = "slepc")]
+mod slepc_eps;
+#[cfg(feature = "primme")]
+mod primme_eps;
+#[cfg(feature = "libkrylov")]
+mod libkrylov_eps;
+mod chase_eps;
+
 /// Embedded Riemannian manifolds (manopt_cpp proj / retr / transp).
 pub mod manifold;
 mod minimize;
@@ -94,9 +113,16 @@ pub use lbfgs::{GradNorm, Lbfgs};
 pub use lbfgs_qp::HighsStep;
 pub use linesearch::LineSearch;
 pub use lowest_mode::{
-    ApplyHessian, DENSE_EIGEN_CUTOFF, EigenParams, EigensolverKind, LowestMode, lowest_eigenpair,
-    lowest_mode,
+    ApplyHessian, ApplyPreconditioner, Block3Jacobi, DiagonalJacobi, EigenParams, EigensolverKind,
+    LowestMode, PreconditionerKind, DENSE_EIGEN_CUTOFF, lowest_eigenpair, lowest_mode,
+    lowest_mode_precond, lowest_mode_slepc, lowest_mode_primme, lowest_mode_libkrylov,
+    lowest_mode_chase, lowest_mode_dense, lowest_mode_dlaf, lowest_mode_eigenexa,
 };
+pub use slepc_kind::{SlepcParams, SlepcPmat, SlepcStKind};
+pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};
+pub use dlaf_kind::DlaFutureParams;
+pub use elpa_kind::{ElpaParams, ElpaSpectrum, ElpaStage, elpa_config, elpa_spectrum};
+pub use highs_kind::{HighsCCallback, HighsCallbackKind, HighsCrossover, HighsSolverKind};
 pub use manifold::{
     CenteredMatrix, ComplexCircle, Constant, EuclideanComplex, Grassmann, Hyperbolic, Manifold,
     ManifoldKind, Multinomial, MultinomialDoublyStochastic, MultinomialSymmetric, Oblique,

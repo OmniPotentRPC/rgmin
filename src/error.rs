@@ -57,6 +57,59 @@ pub enum Error {
         /// Closed-enum name of the requested backend.
         kind: &'static str,
     },
+    /// Linked SLEPc EPS rejected the typed configuration or the pair.
+    #[error("SLEPc: {what}")]
+    Slepc {
+        /// What the typed EPS/ST call failed to produce.
+        what: &'static str,
+    },
+    /// Linked PRIMME `dprimme` rejected the typed configuration or the pair.
+    #[error("PRIMME: {what}")]
+    Primme {
+        /// What the typed `primme_params` / `dprimme` call failed to produce.
+        what: &'static str,
+    },
+    /// Linked ChASE `dchase` rejected the assembled dense pair.
+    #[error("ChASE: {what}")]
+    Chase {
+        /// What the typed `dchase_init_` / `dchase_` call failed to produce.
+        what: &'static str,
+    },
+    /// Linked libkrylov `ckrylov_solve_real_equation` rejected the pair.
+    #[error("libkrylov: {what}")]
+    Libkrylov {
+        /// What the typed ckrylov call failed to produce.
+        what: &'static str,
+    },
+    /// Partial-spectrum window must start at the lowest pair.
+    #[error("eigensolver {kind} begin must be 0, got {begin}")]
+    EigenBegin {
+        /// Closed-enum name (`dlaFuture`, ...).
+        kind: &'static str,
+        /// Requested first index.
+        begin: usize,
+    },
+    /// Dense assembled-H backend is gated on [`crate::DENSE_EIGEN_CUTOFF`].
+    #[error("eigensolver {kind} needs n >= {cutoff}, got {n}")]
+    EigenDenseCutoff {
+        /// Closed-enum name (`dlaFuture`, ...).
+        kind: &'static str,
+        /// Matrix order.
+        n: usize,
+        /// Cutoff (`DENSE_EIGEN_CUTOFF`).
+        cutoff: usize,
+    },
+    /// Named backend only computes the full spectrum. Partial `nev`
+    /// is refused rather than silently solved as `n` and trimmed.
+    #[error("eigensolver {kind} is full-spectrum only; nev {nev} < n {n}")]
+    EigenFullSpectrum {
+        /// Closed-enum name (`eigenExa`, ...).
+        kind: &'static str,
+        /// Requested pair count.
+        nev: usize,
+        /// Matrix order.
+        n: usize,
+    },
 }
 
 /// Result alias for this crate.

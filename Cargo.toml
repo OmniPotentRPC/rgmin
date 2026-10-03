@@ -22,6 +22,10 @@ default = []
 capi = []
 par = ["dep:rayon"]
 highs = ["dep:highs", "dep:highs-sys"]
+slepc = ["dep:cc", "dep:pkg-config"]
+primme = ["dep:cc", "dep:pkg-config"]
+chase = ["dep:cc", "dep:pkg-config"]
+libkrylov = ["dep:cc", "dep:pkg-config"]
 
 [dependencies]
 eindir-core = { version = "0.6.0", features = ["capi"] }
@@ -39,6 +43,8 @@ rgpot-core = "3.4.0"
 
 [build-dependencies]
 cbindgen = "0.29"
+cc = { version = "1.2", optional = true }
+pkg-config = { version = "0.3", optional = true }
 
 [package.metadata.capi]
 min_version = "0.10.17"
