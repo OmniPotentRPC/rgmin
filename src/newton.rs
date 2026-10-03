@@ -224,30 +224,9 @@ pub(crate) fn shifted_newton(h: &Array2<f64>, g: &Array1<f64>) -> Array1<f64> {
 }
 
 pub(crate) fn rfo_direction(h: &Array2<f64>, g: &Array1<f64>) -> Array1<f64> {
-    // Banerjee: [H g; g^T 0] [d; 1] = λ [d; 1]  =>  (H - λ I) d = -g, λ = g·d.
-    let n = g.len();
-    let mut lambda = -l2(g);
-    let mut dir = g.mapv(|v| -v);
-    for _ in 0..16 {
-        let mut a = h.clone();
-        for i in 0..n {
-            a[(i, i)] -= lambda;
-        }
-        match ldlt_solve(&a, g, true) {
-            Some(d) => {
-                dir = -d;
-                let next = g.dot(&dir);
-                if (next - lambda).abs() < 1.0e-10 * (1.0 + next.abs()) {
-                    break;
-                }
-                lambda = next;
-            }
-            None => {
-                lambda -= 1.0_f64.max(lambda.abs());
-            }
-        }
-    }
-    dir
+    // Minimization selects the lowest eigenpair of [H g; g^T 0].
+    // The stationary equation also has higher roots with uphill steps.
+    crate::sella_step::rfo_get_s(h, g, 0, 1.0)
 }
 
 /// LDLT solve `A x = b`. `allow_indefinite` keeps negative pivots (RFO).
