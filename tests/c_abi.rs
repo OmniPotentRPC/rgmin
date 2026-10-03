@@ -13,6 +13,11 @@ use rgmin::ffi::{
     rgmin_solver_set_accept, rgmin_solver_step, rgmin_solver_step_fg, rgmin_status_t,
     rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
+use rgmin::ffi::{
+    rgmin_conjugacy_t, rgmin_curv_fn, rgmin_eigen_kind_t, rgmin_eigen_params_t,
+    rgmin_last_error, rgmin_lowest_eigenpair, rgmin_lowest_mode_t,
+    rgmin_minimize_scg, rgmin_scg_params_t,
+};
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
 use rgpot_core::status::rgpot_status_t;
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
@@ -449,7 +454,7 @@ fn fused_evalgrad_is_one_callback_per_oracle() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 11);
+    assert_eq!(stamp.abi_minor, 27);
     assert_eq!(stamp.layout_revision, 2);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -611,5 +616,525 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
             ),
             rgmin_status_t::RGMIN_INVALID_PARAMETER
         );
+    }
+}
+
+
+unsafe extern "C" fn quad_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    let mut acc = 0.0;
+    for i in 0..n {
+        let xi = unsafe { *p.add(i) };
+        acc += xi * xi;
+    }
+    unsafe { *value_out = acc };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn quad_grad(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    let (gp, gn) = unsafe { cpu_f64(g as *const _) };
+    assert_eq!(n, gn);
+    for i in 0..n {
+        unsafe { *(gp as *mut f64).add(i) = 2.0 * *p.add(i) };
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn quadratic_curv(
+    _user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    d: *const DLManagedTensorVersioned,
+    curv_out: *mut f64,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(d) };
+    let mut acc = 0.0;
+    for i in 0..n {
+        let di = unsafe { *p.add(i) };
+        acc += 2.0 * di * di;
+    }
+    unsafe { *curv_out = acc };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn c_abi_scg_quadratic_bowl_with_exact_curvature() {
+    let mut x = [3.0, -4.0];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    assert!(!xt.is_null());
+    let ctrl = rgmin_control_t {
+        maxiter: 50,
+        gtol: 1e-10,
+        istep: 1.0,
+        memory: 0,
+        maxmove: 0.0,
+    };
+    let params = rgmin_scg_params_t {
+        sigma0: 1e-4,
+        lambda: 1.0,
+        lambda_limit: 1e60,
+        tol_sol: 1e-10,
+        tol_func: 1e-12,
+        conjugacy: rgmin_conjugacy_t::RGMIN_CONJUGACY_LIU_STOREY as i32,
+    };
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+    };
+    let st = unsafe {
+        rgmin_minimize_scg(
+            Some(quad_eval),
+            Some(quad_grad),
+            Some(quadratic_curv),
+            std::ptr::null_mut(),
+            xt,
+            &ctrl,
+            &params,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(out.value < 1e-8, "C ABI SCG value {}", out.value);
+    assert!(x[0].abs() < 1e-4);
+    assert!(x[1].abs() < 1e-4);
+}
+
+fn scg_bowl_ctrl() -> rgmin_control_t {
+    rgmin_control_t {
+        maxiter: 50,
+        gtol: 1e-10,
+        istep: 1.0,
+        memory: 0,
+        maxmove: 0.0,
+    }
+}
+
+fn scg_bowl_params(conjugacy: i32) -> rgmin_scg_params_t {
+    rgmin_scg_params_t {
+        sigma0: 1e-4,
+        lambda: 1.0,
+        lambda_limit: 1e60,
+        tol_sol: 1e-10,
+        tol_func: 1e-12,
+        conjugacy,
+    }
+}
+
+fn last_error_text() -> String {
+    unsafe { std::ffi::CStr::from_ptr(rgmin_last_error()) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[test]
+fn c_abi_scg_null_params_uses_netlab_polak_ribiere() {
+    let mut x = [3.0, -4.0];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let ctrl = scg_bowl_ctrl();
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+    };
+    let st = unsafe {
+        rgmin_minimize_scg(
+            Some(quad_eval),
+            Some(quad_grad),
+            Some(quadratic_curv),
+            std::ptr::null_mut(),
+            xt,
+            &ctrl,
+            std::ptr::null(),
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(out.value < 1e-8, "null-params SCG value {}", out.value);
+    assert!(x[0].abs() < 1e-4);
+    assert!(x[1].abs() < 1e-4);
+}
+
+#[test]
+fn c_abi_scg_zero_conjugacy_is_fletcher_reeves() {
+    let mut x = [3.0, -4.0];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let ctrl = scg_bowl_ctrl();
+    let params = scg_bowl_params(rgmin_conjugacy_t::RGMIN_CONJUGACY_FLETCHER_REEVES as i32);
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+    };
+    let st = unsafe {
+        rgmin_minimize_scg(
+            Some(quad_eval),
+            Some(quad_grad),
+            Some(quadratic_curv),
+            std::ptr::null_mut(),
+            xt,
+            &ctrl,
+            &params,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(out.value < 1e-8, "FR SCG value {}", out.value);
+    assert!(x[0].abs() < 1e-4);
+    assert!(x[1].abs() < 1e-4);
+}
+
+#[test]
+fn c_abi_scg_unknown_conjugacy_is_invalid() {
+    let mut x = [3.0, -4.0];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let ctrl = scg_bowl_ctrl();
+    let params = scg_bowl_params(99);
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+    };
+    let st = unsafe {
+        rgmin_minimize_scg(
+            Some(quad_eval),
+            Some(quad_grad),
+            Some(quadratic_curv),
+            std::ptr::null_mut(),
+            xt,
+            &ctrl,
+            &params,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    assert!(
+        last_error_text().contains("conjugacy"),
+        "last_error={}",
+        last_error_text()
+    );
+}
+
+#[test]
+fn c_abi_scg_method_t_codes_are_not_conjugacy() {
+    let ctrl = scg_bowl_ctrl();
+    for raw in [
+        rgmin_method_t::RGMIN_FIRE as i32,
+        rgmin_method_t::RGMIN_LIU_STOREY as i32,
+    ] {
+        let mut x = [3.0, -4.0];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+        let params = scg_bowl_params(raw);
+        let mut out = rgmin_report_t {
+            value: 0.0,
+            steps: 0,
+            grad_norm: 0.0,
+        };
+        let st = unsafe {
+            rgmin_minimize_scg(
+                Some(quad_eval),
+                Some(quad_grad),
+                Some(quadratic_curv),
+                std::ptr::null_mut(),
+                xt,
+                &ctrl,
+                &params,
+                &mut out,
+            )
+        };
+        unsafe { rgmin_tensor_free(xt) };
+        assert_eq!(
+            st,
+            rgmin_status_t::RGMIN_INVALID_PARAMETER,
+            "method_t {raw} accepted as conjugacy"
+        );
+        assert!(
+            last_error_text().contains("conjugacy"),
+            "last_error for {raw}: {}",
+            last_error_text()
+        );
+    }
+}
+
+unsafe extern "C" fn gapped_hvp(
+    _user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    v: *const DLManagedTensorVersioned,
+    hv_out: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (vp, n) = unsafe { cpu_f64(v) };
+    let (hp, hn) = unsafe { cpu_f64(hv_out as *const DLManagedTensorVersioned) };
+    assert_eq!(n, hn);
+    let hp = hp as *mut f64;
+    unsafe {
+        *hp = -8.0 * *vp;
+        for i in 1..n {
+            *hp.add(i) = 4.0 * *vp.add(i);
+        }
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn lowest_eigenpair_lanczos_recovers_gapped_mode() {
+    let mut x = [0.0_f64; 6];
+    let mut seed = [0.2, 0.7, 0.1, 0.0, 0.0, 0.0];
+    let mut mode = [0.0_f64; 6];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
+    let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 6) };
+    let mt = unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), 6) };
+    let params = rgmin_eigen_params_t {
+        kind: rgmin_eigen_kind_t::RGMIN_EIGEN_LANCZOS as i32,
+        nev: 1,
+        krylov: 6,
+        max_iter: 0,
+        tol: 0.0,
+    };
+    let mut out = rgmin_lowest_mode_t {
+        value: 0.0,
+        actions: 0,
+    };
+    let status = unsafe {
+        rgmin_lowest_eigenpair(
+            Some(gapped_hvp),
+            std::ptr::null_mut(),
+            xt,
+            st,
+            mt,
+            &params,
+            &mut out,
+        )
+    };
+    unsafe {
+        rgmin_tensor_free(xt);
+        rgmin_tensor_free(st);
+        rgmin_tensor_free(mt);
+    }
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(out.value < 0.0, "curvature {}", out.value);
+    assert!(mode[0].abs() > 0.9, "mode {mode:?}");
+    assert!(out.actions <= 6);
+}
+
+#[test]
+fn lowest_eigenpair_elpa_is_unavailable() {
+    let mut x = [0.0_f64; 4];
+    let mut seed = [1.0, 0.0, 0.0, 0.0];
+    let mut mode = [0.0_f64; 4];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
+    let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 4) };
+    let mt = unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), 4) };
+    let params = rgmin_eigen_params_t {
+        kind: rgmin_eigen_kind_t::RGMIN_EIGEN_ELPA as i32,
+        nev: 1,
+        krylov: 0,
+        max_iter: 0,
+        tol: 0.0,
+    };
+    let mut out = rgmin_lowest_mode_t {
+        value: 0.0,
+        actions: 0,
+    };
+    let status = unsafe {
+        rgmin_lowest_eigenpair(
+            Some(gapped_hvp),
+            std::ptr::null_mut(),
+            xt,
+            st,
+            mt,
+            &params,
+            &mut out,
+        )
+    };
+    unsafe {
+        rgmin_tensor_free(xt);
+        rgmin_tensor_free(st);
+        rgmin_tensor_free(mt);
+    }
+    assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
+}
+
+#[test]
+fn abi_stamp_ignores_minor() {
+    let mut stamp = rgmin_abi_stamp();
+    stamp.abi_minor = stamp.abi_minor.saturating_add(1);
+    assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
+}
+
+#[test]
+fn c_abi_one_eval_search_direction_is_steepest_when_empty() {
+    use rgmin::ffi::{
+        rgmin_solver_create, rgmin_solver_free, rgmin_solver_push_pair,
+        rgmin_solver_search_direction, rgmin_status_t,
+    };
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 0.0,
+        istep: 1.0,
+        memory: 4,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    let g = [2.0_f64, 0.0];
+    let mut dir = [0.0_f64, 0.0];
+    let st = unsafe { rgmin_solver_search_direction(session, g.as_ptr(), dir.as_mut_ptr(), 2) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(
+        (dir[0] + 2.0).abs() < 1e-12,
+        "empty two-loop is -g, got {dir:?}"
+    );
+    assert!(dir[1].abs() < 1e-12);
+    let s = [-0.02_f64, 0.0];
+    let y = [-0.04_f64, 0.0];
+    assert_eq!(
+        unsafe { rgmin_solver_push_pair(session, s.as_ptr(), y.as_ptr(), 2) },
+        0
+    );
+    unsafe { rgmin_solver_free(session) };
+}
+
+#[test]
+fn c_abi_pair_count_tracks_accepted_curvature_and_forget() {
+    use rgmin::ffi::{
+        rgmin_solver_create, rgmin_solver_forget, rgmin_solver_free, rgmin_solver_pair_count,
+        rgmin_solver_push_pair,
+    };
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 0.0,
+        istep: 1.0,
+        memory: 2,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 0);
+    let s = [1.0_f64, 0.0];
+    for y in [[0.0_f64, 0.0], [-1.0, 0.0]] {
+        assert_eq!(
+            unsafe { rgmin_solver_push_pair(session, s.as_ptr(), y.as_ptr(), 2) },
+            0
+        );
+        assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 0);
+    }
+    let positive = [2.0_f64, 0.0];
+    for expected in [1, 2, 2] {
+        assert_eq!(
+            unsafe { rgmin_solver_push_pair(session, s.as_ptr(), positive.as_ptr(), 2) },
+            0
+        );
+        assert_eq!(unsafe { rgmin_solver_pair_count(session) }, expected);
+    }
+    unsafe { rgmin_solver_forget(session) };
+    assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 0);
+    unsafe { rgmin_solver_free(session) };
+    assert_eq!(unsafe { rgmin_solver_pair_count(std::ptr::null()) }, 0);
+}
+
+#[test]
+fn c_abi_rebase_keeps_pairs_and_forget_drops_them() {
+    use rgmin::ffi::{
+        rgmin_solver_create, rgmin_solver_forget, rgmin_solver_free, rgmin_solver_pair_count,
+        rgmin_solver_push_pair, rgmin_solver_rebase,
+    };
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 0.0,
+        istep: 1.0,
+        memory: 2,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    let s = [1.0_f64, 0.0];
+    let y = [2.0_f64, 0.0];
+    for _ in 0..2 {
+        assert_eq!(
+            unsafe { rgmin_solver_push_pair(session, s.as_ptr(), y.as_ptr(), 2) },
+            0
+        );
+    }
+    assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 2);
+    unsafe { rgmin_solver_rebase(session) };
+    assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 2);
+    unsafe { rgmin_solver_forget(session) };
+    assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 0);
+    unsafe { rgmin_solver_free(session) };
+    unsafe { rgmin_solver_rebase(std::ptr::null_mut()) };
+}
+
+#[test]
+fn lowest_eigenpair_rejects_unknown_integer_without_wrapping() {
+    let mut x = [0.0_f64; 2];
+    let mut seed = [1.0, 0.0];
+    let mut mode = [42.0_f64; 2];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 2) };
+    let mt = unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), 2) };
+    for kind in [-1, 256, 270, i32::MAX] {
+        let params = rgmin_eigen_params_t {
+            kind,
+            nev: 1,
+            krylov: 2,
+            max_iter: 0,
+            tol: 0.0,
+        };
+        let mut out = rgmin_lowest_mode_t { value: 17.0, actions: 19 };
+        let status = unsafe {
+            rgmin_lowest_eigenpair(Some(gapped_hvp), std::ptr::null_mut(),
+                                  xt, st, mt, &params, &mut out)
+        };
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "kind {kind}");
+        assert_eq!(mode, [42.0, 42.0]);
+        assert_eq!(out.value, 17.0);
+        assert_eq!(out.actions, 19);
+    }
+    unsafe {
+        rgmin_tensor_free(xt);
+        rgmin_tensor_free(st);
+        rgmin_tensor_free(mt);
+    }
+}
+
+#[test]
+fn lowest_eigenpair_accepts_in_place_seed_and_point_storage() {
+    for output_is_seed in [true, false] {
+        let mut point = [0.0_f64; 6];
+        let mut seed = [0.2, 0.7, 0.1, 0.0, 0.0, 0.0];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), 6) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 6) };
+        let mt = if output_is_seed { st } else { xt };
+        let params = rgmin_eigen_params_t {
+            kind: rgmin_eigen_kind_t::RGMIN_EIGEN_LANCZOS as i32,
+            nev: 1, krylov: 6, max_iter: 0, tol: 0.0,
+        };
+        let mut out = rgmin_lowest_mode_t { value: 0.0, actions: 0 };
+        let status = unsafe {
+            rgmin_lowest_eigenpair(Some(gapped_hvp), std::ptr::null_mut(),
+                                  xt, st, mt, &params, &mut out)
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        assert!((out.value + 8.0).abs() < 1e-12);
+        let mode = if output_is_seed { &seed } else { &point };
+        assert!(mode[0].abs() > 0.99, "mode {mode:?}");
+        assert!((mode.iter().map(|v| v * v).sum::<f64>() - 1.0).abs() < 1e-12);
+        assert!(out.actions <= 6);
     }
 }

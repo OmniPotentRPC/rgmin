@@ -170,6 +170,16 @@ impl Solver {
         self.linesearch = linesearch;
     }
 
+    /// The configured line search.
+    pub fn linesearch(&self) -> LineSearch {
+        self.linesearch
+    }
+
+    /// Dimension of the session's coordinate vector.
+    pub fn dim(&self) -> usize {
+        self.dim
+    }
+
     /// Euclidean cap applied on the next [`Self::step`].
     pub fn set_maxmove(&mut self, maxmove: f64) {
         self.control.maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };

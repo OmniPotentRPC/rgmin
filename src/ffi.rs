@@ -15,9 +15,12 @@ use eindir_core::ffi::{
     eindir_abi_stamp_t, eindir_core_abi_compatible, eindir_objective_eval, eindir_objective_grad,
     eindir_objective_has_grad, eindir_objective_t, eindir_status_t,
 };
-use ndarray::{Array1, Array2};
+use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::{
+    ApplyHessian, Conjugacy, DirectionalCurvature, EigenParams, EigensolverKind,
+    Error, Restart, ScgParams, lowest_mode, minimize_scg, minimize_scg_exact,
     Accept, Control, HessianOracle, LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep,
     Solver, minimize_method, minimize_method_hess,
 };
@@ -34,6 +37,17 @@ pub enum rgmin_status_t {
     RGMIN_INTERNAL_ERROR = 2,
     /// Tensor is not on a device this build can evaluate (GPU later).
     RGMIN_UNSUPPORTED_DEVICE = 3,
+    /// Named eigensolver is not linked in this build.
+    RGMIN_UNAVAILABLE = 4,
+}
+
+fn status_from_error(e: &Error) -> rgmin_status_t {
+    set_last_error(&e.to_string());
+    match e {
+        Error::Oracle { .. } => rgmin_status_t::RGMIN_INTERNAL_ERROR,
+        Error::EigenUnavailable { .. } => rgmin_status_t::RGMIN_UNAVAILABLE,
+        _ => rgmin_status_t::RGMIN_INVALID_PARAMETER,
+    }
 }
 
 /// Compatibility identity for the rgmin C ABI.
@@ -49,7 +63,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 11;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 27;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 2;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -98,6 +112,21 @@ pub enum rgmin_method_t {
     RGMIN_DOGLEG = 19,
     /// FIRE 2.0 (Guénolé 2020).
     RGMIN_FIRE2 = 20,
+}
+
+/// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
+/// order. Not [`rgmin_method_t`] (that enum is the solver axis).
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_conjugacy_t {
+    RGMIN_CONJUGACY_FLETCHER_REEVES = 0,
+    RGMIN_CONJUGACY_POLAK_RIBIERE = 1,
+    RGMIN_CONJUGACY_HESTENES_STIEFEL = 2,
+    RGMIN_CONJUGACY_DAI_YUAN = 3,
+    RGMIN_CONJUGACY_CONJUGATE_DESCENT = 4,
+    RGMIN_CONJUGACY_HAGER_ZHANG = 5,
+    RGMIN_CONJUGACY_LIU_STOREY = 6,
+    RGMIN_CONJUGACY_FR_PR = 7,
 }
 
 /// Iteration controls. `memory` is used only by L-BFGS (0 means 10).
@@ -157,6 +186,93 @@ pub type rgmin_evalgrad_fn = unsafe extern "C" fn(
     grad_out: *mut DLManagedTensorVersioned,
 ) -> rgmin_status_t;
 
+/// Directional curvature `dᵀ ∇²f(x) d`. Return [`rgmin_status_t::RGMIN_SUCCESS`]
+/// and write the scalar, or any other status to fall back to the SCG probe.
+pub type rgmin_curv_fn = unsafe extern "C" fn(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    d: *const DLManagedTensorVersioned,
+    curv_out: *mut f64,
+) -> rgmin_status_t;
+
+/// Møller SCG damping / tolerances. Null at the C entry selects
+/// [`ScgParams::default`] plus [`Conjugacy::PolakRibiere`].
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_scg_params_t {
+    /// Base finite-difference curvature probe (`sigma_0`).
+    pub sigma0: f64,
+    /// Initial Levenberg-Marquardt damping.
+    pub lambda: f64,
+    /// Stall when `lambda` reaches this.
+    pub lambda_limit: f64,
+    /// `||α d||_∞` solution tolerance.
+    pub tol_sol: f64,
+    /// Relative objective-change tolerance.
+    pub tol_func: f64,
+    /// Leaf conjugacy as [`rgmin_conjugacy_t`]. Stored as `i32` so an
+    /// unknown C enumerant is not UB on a closed Rust enum.
+    pub conjugacy: i32,
+}
+
+/// Closed eigensolver tag. Integers match `schema/eigen.capnp`.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_eigen_kind_t {
+    RGMIN_EIGEN_LANCZOS = 0,
+    RGMIN_EIGEN_RAYLEIGH_RITZ = 1,
+    RGMIN_EIGEN_JACOBI_DAVIDSON = 2,
+    RGMIN_EIGEN_LOBPCG = 3,
+    RGMIN_EIGEN_PRIMME = 4,
+    RGMIN_EIGEN_SLEPC = 5,
+    RGMIN_EIGEN_CHASE = 6,
+    RGMIN_EIGEN_ELPA = 7,
+    RGMIN_EIGEN_ELPA2 = 8,
+    RGMIN_EIGEN_SLATE = 9,
+    RGMIN_EIGEN_MAGMA = 10,
+    RGMIN_EIGEN_CUSOLVER = 11,
+    RGMIN_EIGEN_DLA_FUTURE = 12,
+    RGMIN_EIGEN_EIGENEXA = 13,
+    RGMIN_EIGEN_DIMER = 14,
+}
+
+/// Typed lowest-mode parameters. No string fields. Null at the C
+/// entry selects Lanczos defaults (`nev = 1`, `krylov = 0`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_eigen_params_t {
+    /// [`rgmin_eigen_kind_t`] stored as `i32` so an unknown enumerant
+    /// is not UB on the closed Rust enum.
+    pub kind: i32,
+    /// Extremal pairs. IRC kick uses 1.
+    pub nev: u32,
+    /// Krylov / subspace cap. 0 selects `min(n, 12)`.
+    pub krylov: u32,
+    /// Outer iterations. 0 selects `n`.
+    pub max_iter: u32,
+    /// Residual tolerance. Non-positive selects `1e-8`.
+    pub tol: f64,
+}
+
+/// Result of [`rgmin_lowest_eigenpair`]. The vector is written to
+/// the caller tensor.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_lowest_mode_t {
+    /// Rayleigh quotient.
+    pub value: f64,
+    /// Hessian actions consumed.
+    pub actions: usize,
+}
+
+/// `H(x) v` callback. Writes into the pre-allocated `hv_out` tensor.
+pub type rgmin_hvp_fn = unsafe extern "C" fn(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    v: *const DLManagedTensorVersioned,
+    hv_out: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t;
+
 thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
 }
@@ -207,6 +323,23 @@ pub unsafe extern "C" fn rgmin_abi_compatible(stamp: *const rgmin_abi_stamp_t) -
         stamp.abi_major == RGMIN_ABI_VERSION_MAJOR
             && stamp.layout_revision == RGMIN_ABI_LAYOUT_REVISION,
     )
+}
+
+fn conjugacy_from_c(raw: i32) -> Result<Conjugacy, rgmin_status_t> {
+    match raw {
+        0 => Ok(Conjugacy::FletcherReeves),
+        1 => Ok(Conjugacy::PolakRibiere),
+        2 => Ok(Conjugacy::HestenesStiefel),
+        3 => Ok(Conjugacy::DaiYuan),
+        4 => Ok(Conjugacy::ConjugateDescent),
+        5 => Ok(Conjugacy::HagerZhang),
+        6 => Ok(Conjugacy::LiuStorey),
+        7 => Ok(Conjugacy::FrPr),
+        other => {
+            set_last_error(&format!("rgmin_minimize_scg: unknown conjugacy {other}"));
+            Err(rgmin_status_t::RGMIN_INVALID_PARAMETER)
+        }
+    }
 }
 
 fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
@@ -273,6 +406,114 @@ pub unsafe extern "C" fn rgmin_tensor_free(tensor: *mut DLManagedTensorVersioned
     }
     if let Some(deleter) = unsafe { (*tensor).deleter } {
         unsafe { deleter(tensor) };
+    }
+}
+
+fn eigen_params_from_c(raw: *const rgmin_eigen_params_t) -> Result<EigenParams, rgmin_status_t> {
+    if raw.is_null() {
+        return Ok(EigenParams::default());
+    }
+    let p = unsafe { *raw };
+    let kind = u8::try_from(p.kind).ok().and_then(EigensolverKind::from_ordinal).ok_or_else(|| {
+        set_last_error(&format!("rgmin_eigen_kind_t unknown ordinal {}", p.kind));
+        rgmin_status_t::RGMIN_INVALID_PARAMETER
+    })?;
+    Ok(EigenParams {
+        kind,
+        nev: p.nev as usize,
+        krylov: p.krylov as usize,
+        max_iter: p.max_iter as usize,
+        tol: p.tol,
+    })
+}
+
+struct CHvp {
+    hvp: rgmin_hvp_fn,
+    user: *mut c_void,
+}
+
+impl ApplyHessian for CHvp {
+    fn apply_hessian(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+        let n = x.len();
+        let mut xbuf = x.to_owned();
+        let mut vbuf = v.to_owned();
+        let mut hv = Array1::zeros(n);
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(xbuf.as_mut_ptr(), n) };
+        let vt = unsafe { rgmin_tensor_borrow_cpu_f64(vbuf.as_mut_ptr(), n) };
+        let ht = unsafe { rgmin_tensor_borrow_cpu_f64(hv.as_mut_ptr(), n) };
+        let st = unsafe { (self.hvp)(self.user, xt, vt, ht) };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(vt);
+            rgmin_tensor_free(ht);
+        }
+        if st != rgmin_status_t::RGMIN_SUCCESS {
+            return Array1::from_elem(n, f64::NAN);
+        }
+        hv
+    }
+}
+
+/// Matrix-free lowest Hessian eigenpair. `params == NULL` is Lanczos.
+/// Unlinked kinds return [`rgmin_status_t::RGMIN_UNAVAILABLE`].
+///
+/// # Safety
+/// `hvp` is callable for the lifetime of this call. `x`, `seed`, and
+/// `mode_out` are rank-1 f64 CPU tensors of equal length. The output may
+/// share storage with either input; both inputs are copied before writing.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_lowest_eigenpair(
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    seed: *const DLManagedTensorVersioned,
+    mode_out: *mut DLManagedTensorVersioned,
+    params: *const rgmin_eigen_params_t,
+    out: *mut rgmin_lowest_mode_t,
+) -> rgmin_status_t {
+    let Some(hvp) = hvp else {
+        set_last_error("rgmin_lowest_eigenpair: null hvp");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    };
+    if out.is_null() {
+        set_last_error("rgmin_lowest_eigenpair: null out");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let xs = match cpu_f64_slice(x, "x") {
+        Ok(s) => s,
+        Err(st) => return st,
+    };
+    let seed_s = match cpu_f64_slice(seed, "seed") {
+        Ok(s) => s,
+        Err(st) => return st,
+    };
+    let x_arr = Array1::from(xs.to_vec());
+    let seed_arr = Array1::from(seed_s.to_vec());
+    let mode_s = match cpu_f64_slice_mut(mode_out, "mode_out") {
+        Ok(s) => s,
+        Err(st) => return st,
+    };
+    if x_arr.len() != seed_arr.len() || x_arr.len() != mode_s.len() {
+        set_last_error("rgmin_lowest_eigenpair: x/seed/mode length mismatch");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let typed = match eigen_params_from_c(params) {
+        Ok(p) => p,
+        Err(st) => return st,
+    };
+    let apply = CHvp { hvp, user };
+    match lowest_mode(&apply, x_arr.view(), seed_arr.view(), &typed) {
+        Ok(mode) => {
+            mode_s.copy_from_slice(mode.vector.as_slice().unwrap_or(&[]));
+            unsafe {
+                *out = rgmin_lowest_mode_t {
+                    value: mode.value,
+                    actions: mode.actions,
+                };
+            }
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        Err(e) => status_from_error(&e),
     }
 }
 
@@ -419,6 +660,85 @@ impl Scratch {
     }
 }
 
+struct ScgFfiOracle<F>
+where
+    F: Fn(ndarray::ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync,
+{
+    inner: Oracle<F>,
+    curv: Option<usize>,
+    user: usize,
+    scratch: std::sync::Mutex<Scratch>,
+}
+
+impl<F> Objective<f64> for ScgFfiOracle<F>
+where
+    F: Fn(ndarray::ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync,
+{
+    fn dim(&self) -> usize {
+        Objective::dim(&self.inner)
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        self.inner.bounds()
+    }
+    fn eval(&self, x: ndarray::ArrayView1<f64>) -> f64 {
+        self.inner.eval(x)
+    }
+}
+
+impl<F> Gradient<f64> for ScgFfiOracle<F>
+where
+    F: Fn(ndarray::ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync,
+{
+    fn dim(&self) -> usize {
+        Gradient::dim(&self.inner)
+    }
+    fn grad(&self, x: ndarray::ArrayView1<f64>) -> Array1<f64> {
+        self.inner.grad(x)
+    }
+}
+
+impl<F> DifferentiableObjective<f64> for ScgFfiOracle<F>
+where
+    F: Fn(ndarray::ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync,
+{
+    fn value_and_gradient(&self, x: ndarray::ArrayView1<f64>) -> (f64, Array1<f64>) {
+        self.inner.value_and_gradient(x)
+    }
+}
+
+impl<F> DirectionalCurvature for ScgFfiOracle<F>
+where
+    F: Fn(ndarray::ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync,
+{
+    fn directional_curvature(
+        &self,
+        x: ndarray::ArrayView1<f64>,
+        d: ndarray::ArrayView1<f64>,
+    ) -> Option<f64> {
+        let curv_ptr = self.curv?;
+        let curv_fn: rgmin_curv_fn = unsafe { std::mem::transmute(curv_ptr) };
+        let user = self.user as *mut c_void;
+        let mut s = self.scratch.lock().expect("ffi scratch");
+        let xt = s.x_tensor(x);
+        let dt = match d.as_slice() {
+            Some(sl) => s.out.point_at(sl.as_ptr() as *mut f64, sl.len()),
+            None => {
+                // rare non-contiguous direction: reuse xbuf then retarget out
+                let mut tmp = d.to_owned();
+                let p = tmp.as_mut_ptr();
+                let n = tmp.len();
+                let dt = s.out.point_at(p, n);
+                let mut curv = 0.0;
+                let st = unsafe { curv_fn(user, xt, dt, &mut curv) };
+                return (st == rgmin_status_t::RGMIN_SUCCESS).then_some(curv);
+            }
+        };
+        let mut curv = 0.0;
+        let st = unsafe { curv_fn(user, xt, dt, &mut curv) };
+        (st == rgmin_status_t::RGMIN_SUCCESS).then_some(curv)
+    }
+}
+
 fn cpu_f64_slice<'a>(
     t: *const DLManagedTensorVersioned,
     name: &str,
@@ -562,6 +882,124 @@ pub unsafe extern "C" fn rgmin_minimize(
         Ok(s) => s,
         Err(_) => {
             set_last_error("rgmin_minimize: panic");
+            rgmin_status_t::RGMIN_INTERNAL_ERROR
+        }
+    }
+}
+
+/// Møller SCG. `curv` is optional: null uses the finite-difference probe;
+/// a callback that returns success supplies `dᵀ ∇²f(x) d`.
+///
+/// # Safety
+///
+/// Same as [`rgmin_minimize`]. `curv`, when non-null, must be callable
+/// for the lifetime of this call. `params` may be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_scg(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    curv: Option<rgmin_curv_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    params: *const rgmin_scg_params_t,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let eval = match eval {
+            Some(f) => f,
+            None => {
+                set_last_error("rgmin_minimize_scg: eval is NULL");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+        };
+        let grad = match grad {
+            Some(f) => f,
+            None => {
+                set_last_error("rgmin_minimize_scg: grad is NULL");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+        };
+        if ctrl.is_null() || out.is_null() {
+            set_last_error("rgmin_minimize_scg: ctrl/out null");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let init = match cpu_f64_slice_mut(x, "x") {
+            Ok(s) => s.to_vec(),
+            Err(st) => return st,
+        };
+        let n = init.len();
+        let c = unsafe { &*ctrl };
+        let control = Control {
+            ftol_rel: None,
+            maxiter: c.maxiter,
+            gtol: c.gtol,
+            istep: if c.istep > 0.0 { c.istep } else { 1.0 },
+            maxmove: if c.maxmove > 0.0 {
+                Some(c.maxmove)
+            } else {
+                None
+            },
+        };
+        let (scg, conjugacy) = if params.is_null() {
+            (ScgParams::default(), Conjugacy::PolakRibiere)
+        } else {
+            let p = unsafe { &*params };
+            match conjugacy_from_c(p.conjugacy) {
+                Ok(c) => (
+                    ScgParams {
+                        sigma0: p.sigma0,
+                        lambda: p.lambda,
+                        lambda_limit: p.lambda_limit,
+                        tol_sol: p.tol_sol,
+                        tol_func: p.tol_func,
+                    },
+                    c,
+                ),
+                Err(st) => return st,
+            }
+        };
+        let restart = Restart::Never;
+        let obj = ScgFfiOracle {
+            inner: c_oracle(eval, grad, user, n),
+            curv: curv.map(|f| f as usize),
+            user: user as usize,
+            scratch: Scratch::new(),
+        };
+        let report = if obj.curv.is_some() {
+            minimize_scg_exact(&obj, Array1::from(init), &control, &scg, conjugacy, restart)
+        } else {
+            minimize_scg(
+                &obj.inner,
+                Array1::from(init),
+                &control,
+                &scg,
+                conjugacy,
+                restart,
+            )
+        };
+        match report {
+            Ok(rep) => {
+                let dest = match cpu_f64_slice_mut(x, "x") {
+                    Ok(s) => s,
+                    Err(st) => return st,
+                };
+                dest.copy_from_slice(rep.coords.as_slice().expect("contiguous"));
+                unsafe {
+                    *out = rgmin_report_t {
+                        value: rep.value,
+                        steps: rep.steps,
+                        grad_norm: rep.grad_norm,
+                    };
+                }
+                rgmin_status_t::RGMIN_SUCCESS
+            }
+            Err(e) => status_from_error(&e),
+        }
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("rgmin_minimize_scg: panic");
             rgmin_status_t::RGMIN_INTERNAL_ERROR
         }
     }
@@ -1399,6 +1837,89 @@ pub unsafe extern "C" fn rgmin_solver_step_fg(
             set_last_error("rgmin_solver_step_fg: panic");
             rgmin_status_t::RGMIN_INTERNAL_ERROR
         }
+    }
+}
+
+/// Keep the method memory, drop the point: the next step evaluates the
+/// objective afresh at the current `x` (initial step scale, empty
+/// acceptance window) and the retained curvature preconditions it. The
+/// restart for a sequence of related objectives.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_rebase(solver: *mut rgmin_solver_t) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.rebase() };
+}
+
+/// Record `s`, `y` from the caller's previous outer. No evaluation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_push_pair(
+    solver: *mut rgmin_solver_t,
+    s: *const f64,
+    y: *const f64,
+    n: usize,
+) -> i32 {
+    if solver.is_null() || s.is_null() || y.is_null() {
+        set_last_error("rgmin_solver_push_pair: null argument");
+        return 1;
+    }
+    let dim = unsafe { (*solver).solver.dim() };
+    if n != dim {
+        set_last_error("rgmin_solver_push_pair: n does not match session dim");
+        return 1;
+    }
+    let sv = unsafe { std::slice::from_raw_parts(s, n) };
+    let yv = unsafe { std::slice::from_raw_parts(y, n) };
+    let ok = unsafe {
+        (*solver)
+            .solver
+            .push_pair(ndarray::ArrayView1::from(sv), ndarray::ArrayView1::from(yv))
+    };
+    i32::from(!ok)
+}
+
+/// Number of accepted L-BFGS pairs. Null and other methods return zero.
+///
+/// # Safety
+/// A non-null `solver` must be a live session from `rgmin_solver_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_pair_count(solver: *const rgmin_solver_t) -> usize {
+    if solver.is_null() {
+        return 0;
+    }
+    unsafe { (*solver).solver.pair_count() }
+}
+
+/// Two-loop `d = -H g`. No evaluation and no push.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_search_direction(
+    solver: *mut rgmin_solver_t,
+    grad: *const f64,
+    dir: *mut f64,
+    n: usize,
+) -> rgmin_status_t {
+    if solver.is_null() || grad.is_null() || dir.is_null() {
+        set_last_error("rgmin_solver_search_direction: null argument");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let dim = unsafe { (*solver).solver.dim() };
+    if n != dim {
+        set_last_error("rgmin_solver_search_direction: n does not match session dim");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let gv = unsafe { std::slice::from_raw_parts(grad, n) };
+    match unsafe {
+        (*solver)
+            .solver
+            .search_direction(ndarray::ArrayView1::from(gv))
+    } {
+        Ok(d) => {
+            let out = unsafe { std::slice::from_raw_parts_mut(dir, n) };
+            out.copy_from_slice(d.as_slice().unwrap());
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        Err(e) => status_from_error(&e),
     }
 }
 
