@@ -1,4 +1,4 @@
-use ndarray::{array, ArrayView1};
+use ndarray::{ArrayView1, array};
 use rgmin::{Control, Lbfgs, LineSearch, Method, Oracle, Solver};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -34,7 +34,10 @@ fn a_zero_curvature_step_keeps_the_retained_pair() {
     assert_eq!(report.steps, 1);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert_eq!(solver.pair_count(), 1);
-    assert_eq!(solver.search_direction(array![-1.0].view()).unwrap(), array![0.5]);
+    assert_eq!(
+        solver.search_direction(array![-1.0].view()).unwrap(),
+        array![0.5]
+    );
 }
 
 #[test]
@@ -53,7 +56,10 @@ fn a_cautiously_refused_pair_does_not_evict_full_history() {
     assert_eq!(report.steps, 1);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert_eq!(solver.pair_count(), 1);
-    assert_eq!(solver.search_direction(array![1.0].view()).unwrap(), array![-0.5]);
+    assert_eq!(
+        solver.search_direction(array![1.0].view()).unwrap(),
+        array![-0.5]
+    );
 }
 
 #[test]
@@ -75,8 +81,15 @@ fn a_standalone_step_records_its_accepted_pair() {
         &mut value,
         &mut gradient,
         &mut istep,
-        LineSearch::Wolfe { c1: 1e-4, c2: 0.9, maxiter: 20 },
-        &Control { maxmove: None, ..Control::default() },
+        LineSearch::Wolfe {
+            c1: 1e-4,
+            c2: 0.9,
+            maxiter: 20,
+        },
+        &Control {
+            maxmove: None,
+            ..Control::default()
+        },
         None,
     );
     assert_eq!(x, array![0.5]);

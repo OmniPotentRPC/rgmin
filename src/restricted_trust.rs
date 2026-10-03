@@ -48,7 +48,11 @@ impl TrustRegion {
     /// Radius `delta`, minimum-mode QN (`order = 0`).
     pub fn new(delta: f64) -> Self {
         Self {
-            delta: if delta.is_finite() { delta.max(0.0) } else { delta },
+            delta: if delta.is_finite() {
+                delta.max(0.0)
+            } else {
+                delta
+            },
             order: 0,
             tol: 1e-10,
             maxiter: 1000,
@@ -69,16 +73,24 @@ impl TrustRegion {
     pub fn restrict_qn(&self, hess: &Array2<f64>, grad: &Array1<f64>) -> Result<RestrictedStep> {
         let n = grad.len();
         if hess.nrows() != n || hess.ncols() != n {
-            return Err(Error::Dim { got: hess.nrows(), dim: n });
+            return Err(Error::Dim {
+                got: hess.nrows(),
+                dim: n,
+            });
         }
-        if !self.delta.is_finite() || self.delta < 0.0
-            || !self.tol.is_finite() || self.tol < 0.0
+        if !self.delta.is_finite()
+            || self.delta < 0.0
+            || !self.tol.is_finite()
+            || self.tol < 0.0
             || hess.iter().chain(grad.iter()).any(|x| !x.is_finite())
         {
             return Err(Error::RestrictedStep);
         }
         if self.delta == 0.0 {
-            return Ok(RestrictedStep { step: Array1::zeros(n), cons: 0.0 });
+            return Ok(RestrictedStep {
+                step: Array1::zeros(n),
+                cons: 0.0,
+            });
         }
         let (values, vectors) = crate::hvp::sym_eig_jacobi(hess.clone());
         let mut indices: Vec<usize> = (0..n).collect();
@@ -87,13 +99,14 @@ impl TrustRegion {
         let mut eigenvectors = Array2::zeros((n, n));
         for (column, &index) in indices.iter().enumerate() {
             eigenvalues[column] = values[index];
-            eigenvectors.column_mut(column).assign(&vectors.column(index));
+            eigenvectors
+                .column_mut(column)
+                .assign(&vectors.column(index));
         }
         let (step, cons) = restrict(
             |alpha| {
-                let (s, dsda) = crate::qn_get_s(
-                    &eigenvalues, &eigenvectors, grad, self.order, alpha,
-                );
+                let (s, dsda) =
+                    crate::qn_get_s(&eigenvalues, &eigenvectors, grad, self.order, alpha);
                 let (val, dval) = trust_cons(&s, &dsda);
                 (s, val, dval)
             },

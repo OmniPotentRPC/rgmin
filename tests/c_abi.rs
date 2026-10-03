@@ -14,9 +14,8 @@ use rgmin::ffi::{
     rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 use rgmin::ffi::{
-    rgmin_conjugacy_t, rgmin_curv_fn, rgmin_eigen_kind_t, rgmin_eigen_params_t,
-    rgmin_last_error, rgmin_lowest_eigenpair, rgmin_lowest_mode_t,
-    rgmin_minimize_scg, rgmin_scg_params_t,
+    rgmin_conjugacy_t, rgmin_curv_fn, rgmin_eigen_kind_t, rgmin_eigen_params_t, rgmin_last_error,
+    rgmin_lowest_eigenpair, rgmin_lowest_mode_t, rgmin_minimize_scg, rgmin_scg_params_t,
 };
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
 use rgpot_core::status::rgpot_status_t;
@@ -619,7 +618,6 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
     }
 }
 
-
 unsafe extern "C" fn quad_eval(
     _user: *mut c_void,
     x: *const DLManagedTensorVersioned,
@@ -1092,12 +1090,26 @@ fn lowest_eigenpair_rejects_unknown_integer_without_wrapping() {
             max_iter: 0,
             tol: 0.0,
         };
-        let mut out = rgmin_lowest_mode_t { value: 17.0, actions: 19 };
-        let status = unsafe {
-            rgmin_lowest_eigenpair(Some(gapped_hvp), std::ptr::null_mut(),
-                                  xt, st, mt, &params, &mut out)
+        let mut out = rgmin_lowest_mode_t {
+            value: 17.0,
+            actions: 19,
         };
-        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "kind {kind}");
+        let status = unsafe {
+            rgmin_lowest_eigenpair(
+                Some(gapped_hvp),
+                std::ptr::null_mut(),
+                xt,
+                st,
+                mt,
+                &params,
+                &mut out,
+            )
+        };
+        assert_eq!(
+            status,
+            rgmin_status_t::RGMIN_INVALID_PARAMETER,
+            "kind {kind}"
+        );
         assert_eq!(mode, [42.0, 42.0]);
         assert_eq!(out.value, 17.0);
         assert_eq!(out.actions, 19);
@@ -1119,12 +1131,25 @@ fn lowest_eigenpair_accepts_in_place_seed_and_point_storage() {
         let mt = if output_is_seed { st } else { xt };
         let params = rgmin_eigen_params_t {
             kind: rgmin_eigen_kind_t::RGMIN_EIGEN_LANCZOS as i32,
-            nev: 1, krylov: 6, max_iter: 0, tol: 0.0,
+            nev: 1,
+            krylov: 6,
+            max_iter: 0,
+            tol: 0.0,
         };
-        let mut out = rgmin_lowest_mode_t { value: 0.0, actions: 0 };
+        let mut out = rgmin_lowest_mode_t {
+            value: 0.0,
+            actions: 0,
+        };
         let status = unsafe {
-            rgmin_lowest_eigenpair(Some(gapped_hvp), std::ptr::null_mut(),
-                                  xt, st, mt, &params, &mut out)
+            rgmin_lowest_eigenpair(
+                Some(gapped_hvp),
+                std::ptr::null_mut(),
+                xt,
+                st,
+                mt,
+                &params,
+                &mut out,
+            )
         };
         unsafe {
             rgmin_tensor_free(xt);

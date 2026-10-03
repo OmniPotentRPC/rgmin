@@ -262,7 +262,16 @@ pub fn highs_feasible_step(
     trust: Option<f64>,
     center_axes: Option<(usize, usize)>,
 ) -> Result<Array1<f64>> {
-    highs_feasible_step_boxed(direction, hess, grad, atom_maxmove, trust, center_axes, None, &[])
+    highs_feasible_step_boxed(
+        direction,
+        hess,
+        grad,
+        atom_maxmove,
+        trust,
+        center_axes,
+        None,
+        &[],
+    )
 }
 
 pub(crate) const EQUALITY_FEASIBILITY_TOLERANCE: f64 = 1e-7;
@@ -342,7 +351,11 @@ pub(crate) fn highs_feasible_step_boxed(
     let _ = model.try_set_option("threads", 1_i32);
     let _ = model.try_set_option("time_limit", 1.0_f64);
     if !equalities.is_empty() {
-        model.try_set_option("primal_feasibility_tolerance", EQUALITY_FEASIBILITY_TOLERANCE)
+        model
+            .try_set_option(
+                "primal_feasibility_tolerance",
+                EQUALITY_FEASIBILITY_TOLERANCE,
+            )
             .map_err(|_| Error::Highs("cannot set equality feasibility tolerance".into()))?;
     }
 

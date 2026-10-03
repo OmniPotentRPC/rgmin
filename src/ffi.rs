@@ -19,10 +19,10 @@ use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::{
-    ApplyHessian, Conjugacy, DirectionalCurvature, EigenParams, EigensolverKind,
-    Error, Restart, ScgParams, lowest_mode, minimize_scg, minimize_scg_exact,
-    Accept, Control, HessianOracle, LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep,
-    Solver, minimize_method, minimize_method_hess,
+    Accept, ApplyHessian, Conjugacy, Control, DirectionalCurvature, EigenParams, EigensolverKind,
+    Error, HessianOracle, LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart,
+    ScgParams, Solver, lowest_mode, minimize_method, minimize_method_hess, minimize_scg,
+    minimize_scg_exact,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -414,10 +414,13 @@ fn eigen_params_from_c(raw: *const rgmin_eigen_params_t) -> Result<EigenParams, 
         return Ok(EigenParams::default());
     }
     let p = unsafe { *raw };
-    let kind = u8::try_from(p.kind).ok().and_then(EigensolverKind::from_ordinal).ok_or_else(|| {
-        set_last_error(&format!("rgmin_eigen_kind_t unknown ordinal {}", p.kind));
-        rgmin_status_t::RGMIN_INVALID_PARAMETER
-    })?;
+    let kind = u8::try_from(p.kind)
+        .ok()
+        .and_then(EigensolverKind::from_ordinal)
+        .ok_or_else(|| {
+            set_last_error(&format!("rgmin_eigen_kind_t unknown ordinal {}", p.kind));
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        })?;
     Ok(EigenParams {
         kind,
         nev: p.nev as usize,

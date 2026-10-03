@@ -44,13 +44,13 @@ pub mod fire;
 pub mod hvp;
 /// Sella IRCTrustRegion / Gonzalez--Schlegel mass-weighted sphere.
 pub mod irc_trust;
-/// Matrix-free lowest Hessian eigenpair.
-pub mod lowest_mode;
 /// Persistent L-BFGS (Nocedal-Wright 7.4) with strong Wolfe.
 pub mod lbfgs;
 /// L-BFGS quadratic model solved by HiGHS.
 #[cfg(feature = "highs")]
 pub mod lbfgs_qp;
+/// Matrix-free lowest Hessian eigenpair.
+pub mod lowest_mode;
 /// Embedded Riemannian manifolds (manopt_cpp proj / retr / transp).
 pub mod manifold;
 mod minimize;
@@ -61,16 +61,16 @@ mod pso;
 mod qn;
 /// Sella QuasiNewton / QuasiNewtonIRC restricted step.
 pub mod qn_irc;
-/// Tangent-space truncated conjugate gradients and trust-radius updates.
-pub mod rtr;
-/// Sella RFO, P-RFO, and restricted atomic step.
-pub mod sella_step;
 mod qn_step;
 mod report;
 mod restricted_trust;
 mod rigid;
+/// Tangent-space truncated conjugate gradients and trust-radius updates.
+pub mod rtr;
 /// Moller scaled conjugate gradient (damped-model step, no line search).
 pub mod scg;
+/// Sella RFO, P-RFO, and restricted atomic step.
+pub mod sella_step;
 mod session;
 mod sphere_lbfgs;
 mod step;
@@ -90,13 +90,13 @@ pub use hvp::{
 };
 pub use irc_trust::{IrcTrust, sqrt_masses_3n};
 pub use lbfgs::{GradNorm, Lbfgs};
+#[cfg(feature = "highs")]
+pub use lbfgs_qp::HighsStep;
+pub use linesearch::LineSearch;
 pub use lowest_mode::{
     ApplyHessian, DENSE_EIGEN_CUTOFF, EigenParams, EigensolverKind, LowestMode, lowest_eigenpair,
     lowest_mode,
 };
-#[cfg(feature = "highs")]
-pub use lbfgs_qp::HighsStep;
-pub use linesearch::LineSearch;
 pub use manifold::{Manifold, ManifoldKind};
 pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess};
@@ -110,9 +110,9 @@ pub use qn_irc::{
     qn_irc_restricted_identity, qn_restricted, to_mw,
 };
 pub use qn_step::QnStep;
-pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
 pub use report::Report;
 pub use scg::{DirectionalCurvature, ScgParams, minimize_scg, minimize_scg_exact};
+pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
 pub use session::Solver;
 
 pub use trust::{RestrictedStep, TrustRegion};

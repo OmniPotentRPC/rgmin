@@ -31,15 +31,24 @@ pub(crate) fn step<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let cap = atom_maxmove.filter(|c| *c > 0.0 && c.is_finite())
+    let cap = atom_maxmove
+        .filter(|c| *c > 0.0 && c.is_finite())
         .map(|c| (c, true))
-        .or_else(|| control.maxmove.filter(|c| *c > 0.0 && c.is_finite()).map(|c| (c, false)));
+        .or_else(|| {
+            control
+                .maxmove
+                .filter(|c| *c > 0.0 && c.is_finite())
+                .map(|c| (c, false))
+        });
     let allowed_step = |point: &Array1<f64>| match cap {
         None => true,
         Some((limit, atomwise)) => {
             let displacement = point - origin;
-            let length = if atomwise { crate::step::max_atom_norm(displacement.view()) }
-                         else { nrm2(displacement.view()) };
+            let length = if atomwise {
+                crate::step::max_atom_norm(displacement.view())
+            } else {
+                nrm2(displacement.view())
+            };
             length <= limit
         }
     };

@@ -120,7 +120,7 @@ fn sphere_lbfgs_initial_path_is_invariant_to_energy_units() {
                 gtol: 0.0,
                 istep: 1.0,
                 maxmove: None,
-            ftol_rel: None,
+                ftol_rel: None,
             },
             n,
         );
@@ -198,9 +198,15 @@ fn sphere_disabled_caps_preserve_the_unbounded_path() {
     let path = |cap| {
         let objective = Rayleigh::new();
         let n = objective.diagonal.len();
-        let mut solver = Solver::new(Method::Lbfgs { memory: n }, Control {
-            gtol: 0.0, maxmove: cap, ..Control::default()
-        }, n);
+        let mut solver = Solver::new(
+            Method::Lbfgs { memory: n },
+            Control {
+                gtol: 0.0,
+                maxmove: cap,
+                ..Control::default()
+            },
+            n,
+        );
         solver.set_manifold(ManifoldKind::Sphere);
         solver.set_accept(Accept::Energy);
         let mut point = Array1::from_elem(n, 1.0 / (n as f64).sqrt());
@@ -228,15 +234,24 @@ fn sphere_atom_cap_controls_every_oracle_trial_and_takes_precedence() {
         assert!((point.dot(&point) - 1.0).abs() < 1e-12);
         let displacement = &point - &origin;
         for atom in 0..2 {
-            let length = (0..3).map(|k| displacement[3 * atom + k].powi(2)).sum::<f64>().sqrt();
+            let length = (0..3)
+                .map(|k| displacement[3 * atom + k].powi(2))
+                .sum::<f64>()
+                .sqrt();
             assert!(length <= 0.05 + 1e-12, "atom displacement {length}");
         }
         let gradient = &array![-0.02, 0.03, 0.4, 3.0, 30.0, 100.0] * &point;
         (0.5 * point.dot(&gradient), gradient)
     });
-    let mut solver = Solver::new(Method::lbfgs(), Control {
-        gtol: 0.0, maxmove: Some(0.001), ..Control::default()
-    }, 6);
+    let mut solver = Solver::new(
+        Method::lbfgs(),
+        Control {
+            gtol: 0.0,
+            maxmove: Some(0.001),
+            ..Control::default()
+        },
+        6,
+    );
     solver.set_manifold(ManifoldKind::Sphere);
     solver.set_accept(Accept::Energy);
     solver.set_atom_maxmove(0.05);

@@ -145,7 +145,9 @@ pub(crate) fn side_at(side: Option<&[f64]>, k: usize) -> Option<f64> {
 
 /// Project a direction into the displacement box, retaining free coordinates.
 pub(crate) fn project_direction(
-    bounds: &Bounds<f64>, x: ArrayView1<f64>, grad: ArrayView1<f64>,
+    bounds: &Bounds<f64>,
+    x: ArrayView1<f64>,
+    grad: ArrayView1<f64>,
     mut direction: Array1<f64>,
 ) -> Array1<f64> {
     let project = |p: &mut Array1<f64>| {
@@ -164,9 +166,7 @@ pub(crate) fn project_direction(
 /// Remove outward wall reactions from a force or velocity.
 pub(crate) fn project_tangent(bounds: &Bounds<f64>, x: &Array1<f64>, v: &mut Array1<f64>) {
     for k in 0..v.len() {
-        if (x[k] <= bounds.low[k] && v[k] < 0.0)
-            || (x[k] >= bounds.high[k] && v[k] > 0.0)
-        {
+        if (x[k] <= bounds.low[k] && v[k] < 0.0) || (x[k] >= bounds.high[k] && v[k] > 0.0) {
             v[k] = 0.0;
         }
     }
@@ -180,7 +180,11 @@ mod tests {
 
     #[test]
     fn a_wall_preserves_the_free_direction_and_descent() {
-        let bounds = Bounds::new(array![f64::NEG_INFINITY, 0.0], array![f64::INFINITY, f64::INFINITY], 0.0);
+        let bounds = Bounds::new(
+            array![f64::NEG_INFINITY, 0.0],
+            array![f64::INFINITY, f64::INFINITY],
+            0.0,
+        );
         for distance in [1e-8, 1e-12] {
             let x = array![3.0, distance];
             let gradient = array![3.0, 1.0 + distance];
@@ -191,10 +195,19 @@ mod tests {
         }
         let mut model = crate::Lbfgs::default();
         model.record(array![1.0, 2.0], array![1.0, 0.0]);
-        let bounds = Bounds::new(array![f64::NEG_INFINITY, f64::NEG_INFINITY], array![f64::INFINITY, 0.0], 0.0);
+        let bounds = Bounds::new(
+            array![f64::NEG_INFINITY, f64::NEG_INFINITY],
+            array![f64::INFINITY, 0.0],
+            0.0,
+        );
         let x = array![0.0, 0.0];
         let gradient = array![1.0, -1.0];
-        let step = project_direction(&bounds, x.view(), gradient.view(), model.two_loop(gradient.view()));
+        let step = project_direction(
+            &bounds,
+            x.view(),
+            gradient.view(),
+            model.two_loop(gradient.view()),
+        );
         assert!(gradient.dot(&step) < 0.0);
         assert!((step[0] + 1.0).abs() < 1e-14);
         assert_eq!(step[1], 0.0);
@@ -207,7 +220,12 @@ mod tests {
             calls.fetch_add(1, Ordering::Relaxed);
             (x.dot(&x), 2.0 * &x)
         });
-        for lo in [vec![f64::NAN], vec![f64::INFINITY], vec![1.0, 2.0, 3.0], vec![1e13]] {
+        for lo in [
+            vec![f64::NAN],
+            vec![f64::INFINITY],
+            vec![1.0, 2.0, 3.0],
+            vec![1e13],
+        ] {
             assert!(BoxObjective::new(&objective, Some(lo), None).is_err());
         }
         let guarded = BoxObjective::new(&objective, Some(vec![0.0]), Some(vec![1.0])).unwrap();

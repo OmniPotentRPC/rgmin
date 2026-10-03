@@ -74,8 +74,19 @@ pub(crate) fn accept_step<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    accept_step_with_fallback(obj, pos, value, grad, dir, control, accept,
-                              e_hist, atom_maxmove, manifold, true)
+    accept_step_with_fallback(
+        obj,
+        pos,
+        value,
+        grad,
+        dir,
+        control,
+        accept,
+        e_hist,
+        atom_maxmove,
+        manifold,
+        true,
+    )
 }
 
 pub(crate) fn accept_step_with_fallback<O>(

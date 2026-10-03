@@ -651,24 +651,44 @@ impl Lbfgs {
     ) where
         O: DifferentiableObjective<f64> + ?Sized,
     {
-        self.step_objective_with_direction(obj, pos, value, grad, istep,
-                                           linesearch, control, atom_maxmove, None, true);
+        self.step_objective_with_direction(
+            obj,
+            pos,
+            value,
+            grad,
+            istep,
+            linesearch,
+            control,
+            atom_maxmove,
+            None,
+            true,
+        );
     }
 
     pub(crate) fn step_objective_with_direction<O>(
-        &mut self, obj: &O, pos: &mut Array1<f64>, value: &mut f64,
-        grad: &mut Array1<f64>, istep: &mut f64, linesearch: LineSearch,
-        control: &Control, atom_maxmove: Option<f64>, supplied_direction: Option<Array1<f64>>,
+        &mut self,
+        obj: &O,
+        pos: &mut Array1<f64>,
+        value: &mut f64,
+        grad: &mut Array1<f64>,
+        istep: &mut f64,
+        linesearch: LineSearch,
+        control: &Control,
+        atom_maxmove: Option<f64>,
+        supplied_direction: Option<Array1<f64>>,
         record_pair: bool,
-    ) where O: DifferentiableObjective<f64> + ?Sized,
+    ) where
+        O: DifferentiableObjective<f64> + ?Sized,
     {
         #[cfg(feature = "highs")]
         let allow_restart = supplied_direction.is_none();
         let dir = supplied_direction.unwrap_or_else(|| self.direction(grad.view()));
         #[cfg(feature = "highs")]
         let dir = if let Some(bounds) = &self.coordinate_box {
-            if !allow_restart { dir } else {
-            crate::box_objective::project_direction(bounds, pos.view(), grad.view(), dir)
+            if !allow_restart {
+                dir
+            } else {
+                crate::box_objective::project_direction(bounds, pos.view(), grad.view(), dir)
             }
         } else {
             dir
@@ -691,15 +711,30 @@ impl Lbfgs {
             atom_maxmove,
         );
         #[cfg(feature = "highs")]
-        let t = if allow_restart && !t.moved && !self.memory.is_empty() && self.coordinate_box.is_some() {
+        let t = if allow_restart
+            && !t.moved
+            && !self.memory.is_empty()
+            && self.coordinate_box.is_some()
+        {
             // A related objective may have a different curvature scale.
             self.forget();
             let direction = crate::box_objective::project_direction(
-                self.coordinate_box.as_ref().unwrap(), pos.view(), grad.view(),
+                self.coordinate_box.as_ref().unwrap(),
+                pos.view(),
+                grad.view(),
                 self.direction(grad.view()),
             );
-            take_step(obj, pos, *value, grad, direction.view(), control.istep,
-                      linesearch, control, atom_maxmove)
+            take_step(
+                obj,
+                pos,
+                *value,
+                grad,
+                direction.view(),
+                control.istep,
+                linesearch,
+                control,
+                atom_maxmove,
+            )
         } else {
             t
         };

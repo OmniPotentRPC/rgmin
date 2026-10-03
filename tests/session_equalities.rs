@@ -24,18 +24,37 @@ fn check_line_search_rollback(curvature: f64, minimum: f64, rhs: f64, expands: b
     assert!(matches!(result, Err(Error::Highs(_))), "{result:?}");
     assert_eq!(x, start);
     assert_eq!(solver.pair_count(), 0);
-    assert!(trials.lock().unwrap().iter().any(|v| (*v - rhs).abs() < 1e-7));
+    assert!(
+        trials
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|v| (*v - rhs).abs() < 1e-7)
+    );
     if expands {
         assert!(trials.lock().unwrap().iter().any(|v| *v > rhs + 1e-6));
     } else {
-        assert!(trials.lock().unwrap().iter().any(|v| *v > 0.0 && *v < rhs - 1e-6));
+        assert!(
+            trials
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|v| *v > 0.0 && *v < rhs - 1e-6)
+        );
     }
 
     assert!(solver.clear_equalities());
     trials.lock().unwrap().clear();
     let report = solver.step(&objective, &mut x).unwrap();
-    assert_eq!(trials.lock().unwrap()[0], 0.0, "rollback must discard the cached trial");
-    assert_eq!(report.steps, 1, "rejected displacements are not accepted iterations");
+    assert_eq!(
+        trials.lock().unwrap()[0],
+        0.0,
+        "rollback must discard the cached trial"
+    );
+    assert_eq!(
+        report.steps, 1,
+        "rejected displacements are not accepted iterations"
+    );
     assert_relative_eq!(x[0], minimum, epsilon = 1e-10);
     assert!(report.grad_norm < 1e-9, "{report:?}");
 }
@@ -70,7 +89,10 @@ fn equality_rejects_a_norm_cap_that_changes_the_qp_displacement() {
     assert_eq!(x, start);
     assert_eq!(solver.pair_count(), 0);
     let trials = trials.lock().unwrap();
-    assert!(trials.len() >= 2, "the feasible QP must reach the physical norm cap");
+    assert!(
+        trials.len() >= 2,
+        "the feasible QP must reach the physical norm cap"
+    );
     let trial = trials.last().unwrap();
     assert_relative_eq!(trial.dot(trial).sqrt(), 0.2, epsilon = 1e-10);
     assert!((trial[0] + trial[1] - 0.4).abs() > 0.1);

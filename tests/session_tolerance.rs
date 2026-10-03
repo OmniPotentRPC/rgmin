@@ -3,9 +3,7 @@ use rgmin::{Control, Method, Oracle, Solver};
 
 #[test]
 fn tightening_the_tolerance_reaches_the_requested_gradient() {
-    let objective = Oracle::unbounded(1, |x: ArrayView1<f64>| {
-        (x[0] * x[0], array![2.0 * x[0]])
-    });
+    let objective = Oracle::unbounded(1, |x: ArrayView1<f64>| (x[0] * x[0], array![2.0 * x[0]]));
     for method in [Method::lbfgs(), Method::Bfgs, Method::Steepest] {
         let mut solver = Solver::new(
             method,
@@ -29,9 +27,7 @@ fn tightening_the_tolerance_reaches_the_requested_gradient() {
 
 #[test]
 fn loosening_the_tolerance_leaves_a_stationary_point_in_place() {
-    let objective = Oracle::unbounded(1, |x: ArrayView1<f64>| {
-        (x[0] * x[0], array![2.0 * x[0]])
-    });
+    let objective = Oracle::unbounded(1, |x: ArrayView1<f64>| (x[0] * x[0], array![2.0 * x[0]]));
     for method in [Method::lbfgs(), Method::Bfgs, Method::Steepest] {
         let mut solver = Solver::new(
             method,
