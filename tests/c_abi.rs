@@ -86,11 +86,11 @@ unsafe extern "C" fn rosen_evalgrad(
 ) -> rgmin_status_t {
     let n = unsafe { &mut *(user as *mut usize) };
     *n += 1;
-    let ev = rosen_eval(std::ptr::null_mut(), x, value_out);
+    let ev = unsafe { rosen_eval(std::ptr::null_mut(), x, value_out) };
     if ev != rgmin_status_t::RGMIN_SUCCESS {
         return ev;
     }
-    rosen_grad(std::ptr::null_mut(), x, g)
+    unsafe { rosen_grad(std::ptr::null_mut(), x, g) }
 }
 
 unsafe extern "C" fn rosen_grad(
@@ -449,7 +449,7 @@ fn fused_evalgrad_is_one_callback_per_oracle() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 10);
+    assert_eq!(stamp.abi_minor, 11);
     assert_eq!(stamp.layout_revision, 2);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -500,6 +500,7 @@ fn c_abi_respects_maxmove_when_initial_step_is_larger() {
 /// while most of it has never been dialled from C.
 #[test]
 fn c_abi_every_setter_survives_live_and_null_sessions() {
+    use rgmin::ffi::{rgmin_linesearch_t, rgmin_solver_set_linesearch};
     use rgmin::ffi::{
         rgmin_manifold_t, rgmin_qn_step_t, rgmin_solver_forget, rgmin_solver_set_atom_maxmove,
         rgmin_solver_set_cautious, rgmin_solver_set_extra_updates, rgmin_solver_set_manifold,
@@ -529,6 +530,33 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_masses(session, std::ptr::null(), 0);
         rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN);
         rgmin_solver_forget(session);
+        use rgmin_linesearch_t::*;
+        // Out-of-range constants are refused and change nothing.
+        for (kind, c1, c2, it) in [
+            (RGMIN_LINESEARCH_WOLFE, 0.9, 1e-4, 20),
+            (RGMIN_LINESEARCH_WOLFE, 1e-4, 1.0, 20),
+            (RGMIN_LINESEARCH_WOLFE, 1e-4, 0.9, 0),
+            (RGMIN_LINESEARCH_GOLDSTEIN, 0.5, 0.5, 20),
+            (RGMIN_LINESEARCH_BACKTRACKING, 1e-4, 1.5, 20),
+            (RGMIN_LINESEARCH_BRENT, -1.0, 0.0, 20),
+        ] {
+            assert_eq!(
+                rgmin_solver_set_linesearch(session, kind, c1, c2, it),
+                rgmin_status_t::RGMIN_INVALID_PARAMETER,
+                "{kind:?} {c1} {c2} {it}"
+            );
+        }
+        for (kind, c1, c2) in [
+            (RGMIN_LINESEARCH_BRENT, 1e-10, 0.0),
+            (RGMIN_LINESEARCH_BACKTRACKING, 1e-4, 0.5),
+            (RGMIN_LINESEARCH_GOLDSTEIN, 0.25, 0.5),
+            (RGMIN_LINESEARCH_WOLFE, 1e-4, 0.9),
+        ] {
+            assert_eq!(
+                rgmin_solver_set_linesearch(session, kind, c1, c2, 20),
+                rgmin_status_t::RGMIN_SUCCESS
+            );
+        }
     }
     // The configured session still relaxes: setters must leave a
     // working solver behind, not only avoid crashing.
@@ -567,5 +595,15 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_manifold(null, rgmin_manifold_t::RGMIN_MANIFOLD_SPHERE);
         rgmin_solver_set_masses(null, masses.as_ptr(), masses.len());
         rgmin_solver_forget(null);
+        assert_eq!(
+            rgmin_solver_set_linesearch(
+                null,
+                rgmin_linesearch_t::RGMIN_LINESEARCH_WOLFE,
+                1e-4,
+                0.9,
+                20
+            ),
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        );
     }
 }

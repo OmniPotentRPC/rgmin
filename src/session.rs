@@ -29,6 +29,16 @@ use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
 };
 
+/// The session's line search until [`Solver::set_linesearch`]: strong
+/// Wolfe with `c1 = 1e-4`, `c2 = 0.9`. On the atomistic benchmark it
+/// takes the quasi-Newton unit step at about 1.1 oracle calls per
+/// iteration where Brent's exact search spends about 25.
+const SESSION_LINESEARCH: LineSearch = LineSearch::Wolfe {
+    c1: 1e-4,
+    c2: 0.9,
+    maxiter: 20,
+};
+
 /// Long-lived solver. Algorithm memory lives here; `x` stays with the caller.
 pub struct Solver {
     dim: usize,
@@ -54,6 +64,7 @@ pub struct Solver {
     inner: Inner,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum Inner {
     Lbfgs(Lbfgs),
     Nlcg {
@@ -118,7 +129,7 @@ impl Solver {
         Self {
             dim,
             control,
-            linesearch: LineSearch::default(),
+            linesearch: SESSION_LINESEARCH,
             istep,
             steps: 0,
             qn_step: QnStep::TwoLoop,
@@ -150,7 +161,8 @@ impl Solver {
 
     /// Line search for the line-searched arms (steepest descent, NLCG,
     /// BFGS, SR1, SR2, Adam, and L-BFGS under [`Accept::Energy`]) on the
-    /// next [`Self::step`]. Default is [`LineSearch::default`] (Brent).
+    /// next [`Self::step`]. Default is strong Wolfe (`c1 = 1e-4`,
+    /// `c2 = 0.9`, 20 trials), not [`LineSearch::default`] (Brent).
     pub fn set_linesearch(&mut self, linesearch: LineSearch) {
         self.linesearch = linesearch;
     }
@@ -224,7 +236,7 @@ impl Solver {
                         lo: None,
                         hi: None,
                         equalities: Vec::new(),
-                        center_axes: if self.project_rigid && self.dim % 3 == 0 {
+                        center_axes: if self.project_rigid && self.dim.is_multiple_of(3) {
                             Some((self.dim / 3, 3))
                         } else {
                             None
@@ -425,7 +437,7 @@ impl Solver {
         }
         #[cfg(feature = "highs")]
         if self.highs {
-            let center = if self.project_rigid && self.dim % 3 == 0 {
+            let center = if self.project_rigid && self.dim.is_multiple_of(3) {
                 Some((self.dim / 3, 3))
             } else {
                 None
@@ -788,7 +800,7 @@ impl Solver {
             }
             Inner::Sr2 { b } => {
                 let rhs = grad.mapv(|g| -g);
-                let direction = solve_dense(b, &rhs).unwrap_or_else(|| rhs);
+                let direction = solve_dense(b, &rhs).unwrap_or(rhs);
                 let old = x.clone();
                 let gold = grad.clone();
                 let t = take_step(

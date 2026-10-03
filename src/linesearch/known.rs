@@ -138,9 +138,10 @@ impl LineSearch {
     /// known, along the descent direction `dir`.
     ///
     /// Trials are `pos + alpha dir` with `0 < alpha <= alpha_max`; the
-    /// opening trial is `min(istep, alpha_max)`. Returns `None` when no
-    /// trial lowered `f` below `f0` (including a direction that is not
-    /// downhill), and otherwise the accepted point with `f` and `g` there.
+    /// opening trial is `min(istep, alpha_max)`. An uphill `dir`
+    /// (`g0 . dir > 0`) is searched as `-dir`. Returns `None` when no
+    /// trial lowered `f` below `f0` or `g0 . dir = 0`, and otherwise the
+    /// accepted point with `f` and `g` there.
     /// The start is never re-evaluated and no trial is evaluated twice.
     ///
     /// [`LineSearch::Wolfe`] brackets and zooms (Nocedal-Wright
@@ -169,8 +170,14 @@ impl LineSearch {
         } else {
             f64::INFINITY
         };
-        if !f0.is_finite() || !dphi0.is_finite() || amax.is_nan() {
+        if !f0.is_finite() || !dphi0.is_finite() || amax.is_nan() || dphi0 == 0.0 {
             return None;
+        }
+        if dphi0 > 0.0 {
+            // An uphill direction (an indefinite SR1 or SR2 model) is
+            // searched backwards: -dir descends and obeys the same cap.
+            let back = dir.mapv(|v| -v);
+            return self.search_from(oracle, pos, f0, g0, back.view(), istep, alpha_max);
         }
         let open = istep.abs().max(1e-16).min(amax);
         let mut line = Line {
@@ -183,9 +190,6 @@ impl LineSearch {
         };
         match *self {
             Self::Wolfe { c1, c2, maxiter } => {
-                if dphi0 >= 0.0 {
-                    return None;
-                }
                 let amax = amax.min(64.0_f64.max(64.0 * istep.abs()));
                 wolfe(&mut line, f0, dphi0, open.min(amax), amax, c1, c2, maxiter)
             }
@@ -270,7 +274,7 @@ where
 {
     for _ in 0..maxiter {
         let width = (hi.a - lo.a).abs();
-        if !(width > 4.0 * f64::EPSILON * lo.a.abs().max(hi.a.abs())) {
+        if width.is_nan() || width <= 4.0 * f64::EPSILON * lo.a.abs().max(hi.a.abs()) {
             break;
         }
         let alpha = zoom_trial(&lo, &hi);
@@ -608,7 +612,7 @@ mod tests {
     }
 
     #[test]
-    fn an_uphill_direction_is_refused_without_a_call() {
+    fn an_uphill_direction_is_searched_backwards() {
         let n = Cell::new(0);
         let oracle = |x: ArrayView1<'_, f64>| {
             n.set(n.get() + 1);
@@ -617,20 +621,32 @@ mod tests {
         let pos = array![0.0];
         let (f0, g0) = quad(pos.view());
         let dir = array![-1.0];
-        assert!(
-            wolfe()
-                .search_from(
-                    oracle,
-                    pos.view(),
-                    f0,
-                    g0.view(),
-                    dir.view(),
-                    1.0,
-                    f64::INFINITY
-                )
-                .is_none()
+        let out = wolfe()
+            .search_from(
+                oracle,
+                pos.view(),
+                f0,
+                g0.view(),
+                dir.view(),
+                1.0,
+                f64::INFINITY,
+            )
+            .unwrap();
+        assert!((out.x[0] - 1.0).abs() < 1e-15);
+        assert_eq!(n.get(), 1);
+        // A direction orthogonal to the gradient costs nothing.
+        let flat = array![0.0];
+        let none = wolfe().search_from(
+            oracle,
+            pos.view(),
+            f0,
+            g0.view(),
+            flat.view(),
+            1.0,
+            f64::INFINITY,
         );
-        assert_eq!(n.get(), 0);
+        assert!(none.is_none());
+        assert_eq!(n.get(), 1);
     }
 
     #[test]

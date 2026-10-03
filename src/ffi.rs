@@ -49,7 +49,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 10;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 11;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 2;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -191,6 +191,12 @@ pub extern "C" fn rgmin_abi_stamp() -> rgmin_abi_stamp_t {
 }
 
 /// Return nonzero when a caller's ABI identity is accepted by this build.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_abi_compatible(stamp: *const rgmin_abi_stamp_t) -> i32 {
     if stamp.is_null() {
@@ -780,6 +786,12 @@ pub struct rgmin_solver_t {
 }
 
 /// Allocate a session. `dim` is the length of `x`. Null on bad arguments.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_create(
     method: rgmin_method_t,
@@ -813,6 +825,12 @@ pub unsafe extern "C" fn rgmin_solver_create(
 }
 
 /// Release a session from [`rgmin_solver_create`].
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_free(solver: *mut rgmin_solver_t) {
     if !solver.is_null() {
@@ -821,6 +839,12 @@ pub unsafe extern "C" fn rgmin_solver_free(solver: *mut rgmin_solver_t) {
 }
 
 /// Drop method memory. The next step is a cold start from the current `x`.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_forget(solver: *mut rgmin_solver_t) {
     if solver.is_null() {
@@ -830,6 +854,12 @@ pub unsafe extern "C" fn rgmin_solver_forget(solver: *mut rgmin_solver_t) {
 }
 
 /// Set the Euclidean step cap used by the next [`rgmin_solver_step`].
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_maxmove(solver: *mut rgmin_solver_t, maxmove: f64) {
     if solver.is_null() {
@@ -851,6 +881,12 @@ pub enum rgmin_qn_step_t {
 }
 
 /// eOn `lbfgs_step`. Legal on an `RGMIN_LBFGS` session with [`rgmin_solver_step_hess`].
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_qn_step(
     solver: *mut rgmin_solver_t,
@@ -882,6 +918,12 @@ pub enum rgmin_accept_t {
 }
 
 /// eOn `lbfgs_accept`. Legal on any session.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_accept(
     solver: *mut rgmin_solver_t,
@@ -899,7 +941,86 @@ pub unsafe extern "C" fn rgmin_solver_set_accept(
     unsafe { (*solver).solver.set_accept(a) };
 }
 
+/// Line search for the line-searched session arms.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_linesearch_t {
+    /// Brent on a golden bracket; `c1`, `c2` unused.
+    RGMIN_LINESEARCH_BRENT = 0,
+    /// Armijo backtracking: `c1` is Armijo `c`, `c2` the shrink factor.
+    RGMIN_LINESEARCH_BACKTRACKING = 1,
+    /// Goldstein: `c1` is `c` in (0, 0.5), `c2` the shrink factor.
+    RGMIN_LINESEARCH_GOLDSTEIN = 2,
+    /// Strong Wolfe: `c1` Armijo, `c2` curvature, `0 < c1 < c2 < 1`.
+    RGMIN_LINESEARCH_WOLFE = 3,
+}
+
+/// Set the session's line search (see [`crate::Solver::set_linesearch`]).
+///
+/// Returns `RGMIN_INVALID_PARAMETER` and leaves the session unchanged
+/// when `maxiter` is zero or the constants leave their ranges: Wolfe
+/// needs `0 < c1 < c2 < 1`, backtracking `0 < c1 < 1` and
+/// `0 < c2 < 1`, Goldstein `0 < c1 < 0.5` and `0 < c2 < 1`, Brent a
+/// positive tolerance `c1`.
+///
+/// # Safety
+///
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_linesearch(
+    solver: *mut rgmin_solver_t,
+    kind: rgmin_linesearch_t,
+    c1: f64,
+    c2: f64,
+    maxiter: usize,
+) -> rgmin_status_t {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_linesearch: null solver");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let unit = |v: f64| v > 0.0 && v < 1.0;
+    let ls = match kind {
+        rgmin_linesearch_t::RGMIN_LINESEARCH_WOLFE if unit(c1) && unit(c2) && c1 < c2 => {
+            Some(LineSearch::Wolfe { c1, c2, maxiter })
+        }
+        rgmin_linesearch_t::RGMIN_LINESEARCH_BACKTRACKING if unit(c1) && unit(c2) => {
+            Some(LineSearch::Backtracking {
+                c: c1,
+                beta: c2,
+                maxiter,
+            })
+        }
+        rgmin_linesearch_t::RGMIN_LINESEARCH_GOLDSTEIN if c1 > 0.0 && c1 < 0.5 && unit(c2) => {
+            Some(LineSearch::Goldstein {
+                c: c1,
+                beta: c2,
+                maxiter,
+            })
+        }
+        rgmin_linesearch_t::RGMIN_LINESEARCH_BRENT if c1 > 0.0 && c1.is_finite() => {
+            Some(LineSearch::Brent { maxiter, tol: c1 })
+        }
+        _ => None,
+    };
+    match ls {
+        Some(ls) if maxiter > 0 => {
+            unsafe { (*solver).solver.set_linesearch(ls) };
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        _ => {
+            set_last_error("rgmin_solver_set_linesearch: constants out of range");
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        }
+    }
+}
+
 /// eOn `maxAtomMotionAppliedV`. Non-positive disables it.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_atom_maxmove(solver: *mut rgmin_solver_t, maxmove: f64) {
     if solver.is_null() {
@@ -909,6 +1030,12 @@ pub unsafe extern "C" fn rgmin_solver_set_atom_maxmove(solver: *mut rgmin_solver
 }
 
 /// eOn `lbfgs_project_rigid`.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_project_rigid(solver: *mut rgmin_solver_t, enabled: i32) {
     if solver.is_null() {
@@ -919,6 +1046,12 @@ pub unsafe extern "C" fn rgmin_solver_set_project_rigid(solver: *mut rgmin_solve
 
 /// Al-Baali extra-updates on the newest L-BFGS pair. Accepted and
 /// ignored: replaying the newest pair leaves the BFGS map unchanged.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_extra_updates(solver: *mut rgmin_solver_t, extra: usize) {
     if solver.is_null() {
@@ -928,6 +1061,12 @@ pub unsafe extern "C" fn rgmin_solver_set_extra_updates(solver: *mut rgmin_solve
 }
 
 /// Li-Fukushima cautious pair filter. `eps <= 0` disables it.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_cautious(
     solver: *mut rgmin_solver_t,
@@ -941,6 +1080,12 @@ pub unsafe extern "C" fn rgmin_solver_set_cautious(
 }
 
 /// HiGHS feasible-set step. Returns 1 when this build has no `highs` feature.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_highs(solver: *mut rgmin_solver_t, enabled: i32) -> i32 {
     if solver.is_null() {
@@ -975,6 +1120,12 @@ pub enum rgmin_manifold_t {
     RGMIN_MANIFOLD_MW_RIGID = 6,
 }
 
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_manifold(
     solver: *mut rgmin_solver_t,
@@ -997,6 +1148,12 @@ pub unsafe extern "C" fn rgmin_solver_set_manifold(
 
 /// Per-atom masses for `RGMIN_MANIFOLD_MW_RIGID`. `n_atoms == 0` or a
 /// null pointer clears them (unit mass).
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_masses(
     solver: *mut rgmin_solver_t,
@@ -1015,6 +1172,12 @@ pub unsafe extern "C" fn rgmin_solver_set_masses(
 }
 
 /// Periodic cell. Nonzero: Sella `proj_rot = false`, quotient is \(R^{3N}/T(3)\).
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_periodic(solver: *mut rgmin_solver_t, enabled: i32) {
     if solver.is_null() {
@@ -1024,6 +1187,12 @@ pub unsafe extern "C" fn rgmin_solver_set_periodic(solver: *mut rgmin_solver_t, 
 }
 
 /// One outer iteration. `x` is in/out. Callbacks live for this call only.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_step(
     solver: *mut rgmin_solver_t,
@@ -1080,6 +1249,12 @@ pub unsafe extern "C" fn rgmin_solver_step(
 }
 
 /// One Newton / RFO iteration. `hess` writes a length-`n*n` row-major Hessian.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_step_hess(
     solver: *mut rgmin_solver_t,
@@ -1144,6 +1319,12 @@ pub unsafe extern "C" fn rgmin_solver_step_hess(
 }
 
 /// One outer iteration with a fused `(f, g)` callback.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_step_fg(
     solver: *mut rgmin_solver_t,
@@ -1192,6 +1373,12 @@ pub unsafe extern "C" fn rgmin_solver_step_fg(
 }
 
 /// One Newton / RFO iteration with a fused `(f, g)` callback.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_step_hess_fg(
     solver: *mut rgmin_solver_t,
@@ -1279,6 +1466,7 @@ fn c_oracle(
     })
 }
 
+#[allow(clippy::type_complexity)]
 fn c_oracle_hess(
     eval: rgmin_eval_fn,
     grad: rgmin_grad_fn,
@@ -1360,6 +1548,7 @@ fn c_oracle_fg(
     })
 }
 
+#[allow(clippy::type_complexity)]
 fn c_oracle_hess_fg(
     evalgrad: rgmin_evalgrad_fn,
     hess: rgmin_hess_fn,

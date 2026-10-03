@@ -134,10 +134,10 @@ impl Lbfgs {
 
     fn search_direction(&self, x: ArrayView1<f64>, g: ArrayView1<f64>) -> Array1<f64> {
         #[cfg(feature = "highs")]
-        if self.highs.is_some() {
-            if let Ok(d) = self.highs_step(x, g) {
-                return d;
-            }
+        if self.highs.is_some()
+            && let Ok(d) = self.highs_step(x, g)
+        {
+            return d;
         }
         let _ = x;
         self.direction(g)
@@ -212,12 +212,12 @@ impl Lbfgs {
         let sn = s.iter().map(|v| v * v).sum::<f64>().sqrt();
         let yn = y.iter().map(|v| v * v).sum::<f64>().sqrt();
         let ss = sn * sn;
-        if self.cautious_eps > 0.0 {
-            if let Some(g) = gnorm {
-                let thresh = self.cautious_eps * ss * g.max(1.0e-30).powf(self.cautious_alpha);
-                if sy < thresh {
-                    return;
-                }
+        if self.cautious_eps > 0.0
+            && let Some(g) = gnorm
+        {
+            let thresh = self.cautious_eps * ss * g.max(1.0e-30).powf(self.cautious_alpha);
+            if sy < thresh {
+                return;
             }
         }
         // Relative curvature: a tiny accepted trust step makes the
@@ -623,13 +623,19 @@ impl Lbfgs {
         O: DifferentiableObjective<f64> + ?Sized,
     {
         let dir = self.direction(grad.view());
+        // With pairs the two-loop direction is gamma-scaled and carries
+        // the step length, so the search opens at the unit step
+        // (Nocedal-Wright 3.5); `istep` sizes only the first, steepest
+        // direction. Opening at a host's `istep` of 0.1 or 0.2 made strong
+        // Wolfe (c2 = 0.9) accept a tenth of the quasi-Newton step.
+        let open = if self.memory.is_empty() { *istep } else { 1.0 };
         let t = take_step(
             obj,
             pos,
             *value,
             grad,
             dir.view(),
-            *istep,
+            open,
             linesearch,
             control,
             atom_maxmove,

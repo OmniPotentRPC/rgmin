@@ -7,9 +7,10 @@ pub struct Control {
     pub maxiter: usize,
     /// Stop when `||g||_2 < gtol`.
     pub gtol: f64,
-    /// The opening step of a line search. Quasi-Newton methods (BFGS,
-    /// L-BFGS, SR1, SR2) open every line search here, since their direction
-    /// carries the scale and 1.0 is the natural trial; steepest descent,
+    /// The opening step of a line search. BFGS, SR1 and SR2 open every
+    /// line search here, since their direction carries the scale and 1.0
+    /// is the natural trial; L-BFGS opens here while it holds no pairs and
+    /// at 1.0 once it does, whatever this is set to; steepest descent,
     /// NLCG and Adam open here once and then at half the step last
     /// accepted.
     pub istep: f64,
