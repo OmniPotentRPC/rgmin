@@ -87,6 +87,11 @@ pub trait Manifold {
     }
     /// Tangent projection of an ambient vector at `x`. Same length as `v`.
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64>;
+    /// Convert an ambient Euclidean gradient to a Riemannian gradient.
+    /// Geometries with a Euclidean ambient metric use tangent projection.
+    fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
+        self.project(x, egrad)
+    }
     /// Retraction of the tangent step `v` at `x`. Same length as `x`.
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64>;
     /// Vector transport of `v` from `x_from` to `x_to`.
