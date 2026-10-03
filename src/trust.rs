@@ -11,6 +11,8 @@ use ndarray::{Array1, Array2};
 use crate::newton::shifted_newton;
 use crate::step::l2;
 
+pub use crate::restricted_trust::{RestrictedStep, TrustRegion};
+
 const RHO_BAD: f64 = 0.25;
 const RHO_GOOD: f64 = 0.75;
 const BOUNDARY: f64 = 0.8;

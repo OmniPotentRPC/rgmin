@@ -48,6 +48,9 @@ pub enum Error {
         /// What the host callback failed to produce.
         what: &'static str,
     },
+    /// The dense QN family cannot resolve the requested trust radius.
+    #[error("restricted QN step did not converge")]
+    RestrictedStep,
     /// Named eigensolver is not linked in this build.
     #[error("eigensolver {kind} is not linked in this build")]
     EigenUnavailable {

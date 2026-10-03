@@ -67,13 +67,15 @@ pub mod rtr;
 pub mod sella_step;
 mod qn_step;
 mod report;
+mod restricted_trust;
 mod rigid;
 /// Moller scaled conjugate gradient (damped-model step, no line search).
 pub mod scg;
 mod session;
 mod sphere_lbfgs;
 mod step;
-mod trust;
+/// Dense dogleg and Sella trust-region steps.
+pub mod trust;
 /// The vector seam: solver algebra behind one interface.
 pub mod vecops;
 
@@ -112,3 +114,5 @@ pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bf
 pub use report::Report;
 pub use scg::{DirectionalCurvature, ScgParams, minimize_scg, minimize_scg_exact};
 pub use session::Solver;
+
+pub use trust::{RestrictedStep, TrustRegion};
