@@ -304,9 +304,11 @@ mod tests {
         assert!((&x - &y).mapv(f64::abs).sum() < 1e-15);
         assert!(m.unpack(&array![1.0, 0.0]).is_none());
         assert!(unpack(&x, 3, 3).is_none());
-        assert!(CenteredMatrix::new(0, 2, false)
-            .unpack(&array![1.0, 2.0])
-            .is_none());
+        assert!(
+            CenteredMatrix::new(0, 2, false)
+                .unpack(&array![1.0, 2.0])
+                .is_none()
+        );
     }
 
     #[test]

@@ -49,11 +49,7 @@ fn onto_simplex(x: ArrayView1<f64>) -> Array1<f64> {
 
 impl Manifold for Multinomial {
     fn required_dim(&self, n: usize) -> Result<(), usize> {
-        if n >= 2 {
-            Ok(())
-        } else {
-            Err(2)
-        }
+        if n >= 2 { Ok(()) } else { Err(2) }
     }
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {

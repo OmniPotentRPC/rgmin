@@ -1,8 +1,8 @@
 #![cfg(feature = "capi")]
 
-use std::os::raw::c_void;
 use dlpk::sys::DLManagedTensorVersioned;
 use rgmin::ffi::*;
+use std::os::raw::c_void;
 
 unsafe fn cpu_f64(t: *const DLManagedTensorVersioned) -> (*const f64, usize) {
     let dl = unsafe { &(*t).dl_tensor };
@@ -570,12 +570,15 @@ fn canonical_manifold_tokens_preserve_main_and_resolve_the_unitary_collision() {
         rgmin_manifold_t::RGMIN_MANIFOLD_SPHERE_COMPLEX,
         rgmin_manifold_t::RGMIN_MANIFOLD_POSITIVE,
         rgmin_manifold_t::RGMIN_MANIFOLD_CENTERED_MATRIX,
-        rgmin_manifold_t::RGMIN_MANIFOLD_UNITARY
+        rgmin_manifold_t::RGMIN_MANIFOLD_UNITARY,
     ];
     for (value, token) in tokens.iter().enumerate() {
         assert_eq!(*token as usize, value);
     }
-    assert_eq!(rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX as i32, 16);
+    assert_eq!(
+        rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX as i32,
+        16
+    );
     assert_eq!(rgmin_manifold_t::RGMIN_MANIFOLD_UNITARY as i32, 23);
 }
 

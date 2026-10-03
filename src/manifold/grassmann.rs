@@ -63,7 +63,10 @@ impl Grassmann {
         }
         Some(
             (0..self.p)
-                .map(|j| x.slice(ndarray::s![j * self.n..(j + 1) * self.n]).to_owned())
+                .map(|j| {
+                    x.slice(ndarray::s![j * self.n..(j + 1) * self.n])
+                        .to_owned()
+                })
                 .collect(),
         )
     }
@@ -330,7 +333,10 @@ mod tests {
         // coordinates mixed so Y^T Y is not diagonal.
         let v2 = array![0.0, 0.0, 0.5, 0.3, 0.0, 0.0, 0.2, 0.4];
         let y2 = g.retract(&x, &v2);
-        assert!(yty_err(g, &y2) < 1e-12, "off-diag polar left Gr(4,2) {y2:?}");
+        assert!(
+            yty_err(g, &y2) < 1e-12,
+            "off-diag polar left Gr(4,2) {y2:?}"
+        );
     }
 
     #[test]
@@ -372,7 +378,10 @@ mod tests {
         let tq = g.transport(&xq, &yq, &uq);
         let t_q = Array1::from(g.mul_np_pp(t.as_slice().unwrap(), &q));
         let err = (&tq - &t_q).mapv(f64::abs).sum();
-        assert!(err < 1e-10, "polar transport not Q-equivariant {err} {tq:?} {t_q:?}");
+        assert!(
+            err < 1e-10,
+            "polar transport not Q-equivariant {err} {tq:?} {t_q:?}"
+        );
         assert!(yty_err(g, &y) < 1e-12);
         assert!(yty_err(g, &yq) < 1e-12);
     }
@@ -391,10 +400,7 @@ mod tests {
         assert!(g.required_dim(3).is_ok());
         assert_eq!(g.required_dim(114), Err(3));
         assert!(Grassmann::new(114, 1).unwrap().required_dim(114).is_ok());
-        assert_eq!(
-            Grassmann { n: 4, p: 2 }.required_dim(114),
-            Err(8)
-        );
+        assert_eq!(Grassmann { n: 4, p: 2 }.required_dim(114), Err(8));
     }
 
     #[test]
@@ -480,7 +486,10 @@ mod tests {
         let v = array![0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.1];
         let y = ManifoldKind::Grassmann.retract_shaped(Some((4, 2)), &x, &v);
         let y_rp = ManifoldKind::Grassmann.retract(&x, &v);
-        assert!(yty_err(Grassmann { n: 4, p: 2 }, &y) < 1e-12, "left Gr(4,2) {y:?}");
+        assert!(
+            yty_err(Grassmann { n: 4, p: 2 }, &y) < 1e-12,
+            "left Gr(4,2) {y:?}"
+        );
         assert!(
             (&y - &y_rp).mapv(f64::abs).sum() > 1e-6,
             "shaped Gr(4,2) must not be RP^7 of the packed vector"

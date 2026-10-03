@@ -166,11 +166,7 @@ fn is_spd_matrix(n: usize, a: &[f64]) -> bool {
 
 impl Manifold for Spd {
     fn required_dim(&self, n: usize) -> Result<(), usize> {
-        if side(n).is_some() {
-            Ok(())
-        } else {
-            Err(n)
-        }
+        if side(n).is_some() { Ok(()) } else { Err(n) }
     }
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {

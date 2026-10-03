@@ -295,7 +295,10 @@ impl Solver {
             self.forget();
         }
         self.factor_shape = next;
-        if matches!(self.manifold, ManifoldKind::Grassmann | ManifoldKind::GrassmannP { .. }) {
+        if matches!(
+            self.manifold,
+            ManifoldKind::Grassmann | ManifoldKind::GrassmannP { .. }
+        ) {
             self.manifold = match next {
                 Some((n, p)) => ManifoldKind::GrassmannP { n, p },
                 None => ManifoldKind::Grassmann,

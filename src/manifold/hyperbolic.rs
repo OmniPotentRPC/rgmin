@@ -12,7 +12,7 @@
 //! Transport is projection at the arrival point. Ambient reductions
 //! go through [`crate::vecops`] (dlpk / rayon under `par`).
 
-use ndarray::{s, Array1, ArrayView1};
+use ndarray::{Array1, ArrayView1, s};
 
 use crate::vecops;
 
@@ -67,11 +67,7 @@ fn onto_sheet(y: Array1<f64>) -> Array1<f64> {
 
 impl Manifold for Hyperbolic {
     fn required_dim(&self, n: usize) -> Result<(), usize> {
-        if n >= 2 {
-            Ok(())
-        } else {
-            Err(2)
-        }
+        if n >= 2 { Ok(()) } else { Err(2) }
     }
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {

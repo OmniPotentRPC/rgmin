@@ -84,11 +84,7 @@ fn multisym(n: usize, a: &[f64]) -> Vec<f64> {
 
 impl Manifold for Symmetric {
     fn required_dim(&self, n: usize) -> Result<(), usize> {
-        if side(n).is_some() {
-            Ok(())
-        } else {
-            Err(n)
-        }
+        if side(n).is_some() { Ok(()) } else { Err(n) }
     }
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {

@@ -31,16 +31,15 @@ mod centered;
 mod complex_circle;
 mod constant;
 mod euclidean;
+mod euclidean_complex;
 mod grassmann;
 mod hyperbolic;
-mod poincare;
-mod unitary;
-mod euclidean_complex;
 mod multinomial;
 mod multinomial_ds;
 mod multinomial_sym;
 mod mw_rigid;
 mod oblique;
+mod poincare;
 mod positive;
 mod rigid_quotient;
 mod se3;
@@ -51,6 +50,7 @@ mod sphere;
 mod sphere_complex;
 mod stiefel;
 mod symmetric;
+mod unitary;
 
 pub use centered::{
     CenteredMatrix, inner as inner_centered, is_centered, pack as pack_centered,
@@ -61,13 +61,11 @@ pub use constant::{
     Constant, inner as inner_const, is_constant, typical_dist as typical_dist_const,
 };
 pub use euclidean::Euclidean;
-pub use grassmann::Grassmann;
-pub use hyperbolic::{Hyperbolic, minkowski, pack, unpack};
-pub use poincare::PoincareBall;
-pub use unitary::{Unitary, is_unitary, pack as pack_unitary, side as side_unitary, unpack as unpack_unitary};
 pub use euclidean_complex::{
     EuclideanComplex, inner as inner_cplx, is_euclidean_complex, typical_dist as typical_dist_cplx,
 };
+pub use grassmann::Grassmann;
+pub use hyperbolic::{Hyperbolic, minkowski, pack, unpack};
 pub use multinomial::Multinomial;
 pub use multinomial_ds::{
     MultinomialDoublyStochastic, inner as inner_ds, is_doubly_stochastic, pack as pack_ds,
@@ -79,6 +77,7 @@ pub use multinomial_sym::{
 };
 pub use mw_rigid::MwRigid;
 pub use oblique::Oblique;
+pub use poincare::PoincareBall;
 pub use positive::{Positive, inner as inner_pos, is_positive, typical_dist as typical_dist_pos};
 pub use rigid_quotient::RigidQuotient;
 pub use se3::Se3;
@@ -96,6 +95,9 @@ pub use stiefel::{Stiefel, StiefelNp};
 pub use symmetric::{
     Symmetric, inner as inner_sym, is_symmetric, pack as pack_sym, side as side_sym,
     typical_dist as typical_dist_sym, unpack as unpack_sym,
+};
+pub use unitary::{
+    Unitary, is_unitary, pack as pack_unitary, side as side_unitary, unpack as unpack_unitary,
 };
 
 /// Which embedded geometry a session retracts onto.
@@ -238,12 +240,20 @@ impl ManifoldKind {
     pub fn grassmann(shape: Option<(usize, usize)>, len: usize) -> Grassmann {
         match shape {
             Some((n, p)) => Grassmann { n, p },
-            None => Grassmann { n: len.max(1), p: 1 },
+            None => Grassmann {
+                n: len.max(1),
+                p: 1,
+            },
         }
     }
 
     /// Retract with an optional Grassmann factor shape.
-    pub fn retract_shaped(self, shape: Option<(usize, usize)>, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+    pub fn retract_shaped(
+        self,
+        shape: Option<(usize, usize)>,
+        x: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> Array1<f64> {
         match self {
             Self::Grassmann => Self::grassmann(shape, x.len()).retract(x, v),
             other => other.retract(x, v),
@@ -251,7 +261,12 @@ impl ManifoldKind {
     }
 
     /// Project with an optional Grassmann factor shape.
-    pub fn project_shaped(self, shape: Option<(usize, usize)>, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+    pub fn project_shaped(
+        self,
+        shape: Option<(usize, usize)>,
+        x: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> Array1<f64> {
         match self {
             Self::Grassmann => Self::grassmann(shape, x.len()).project(x, v),
             other => other.project(x, v),
@@ -259,7 +274,13 @@ impl ManifoldKind {
     }
 
     /// Transport with an optional Grassmann factor shape.
-    pub fn transport_shaped(self, shape: Option<(usize, usize)>, x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+    pub fn transport_shaped(
+        self,
+        shape: Option<(usize, usize)>,
+        x_from: &Array1<f64>,
+        x_to: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> Array1<f64> {
         match self {
             Self::Grassmann => Self::grassmann(shape, x_to.len()).transport(x_from, x_to, v),
             other => other.transport(x_from, x_to, v),
@@ -393,7 +414,13 @@ impl Manifold for ManifoldKind {
             Self::Se3 => Se3.required_dim(n),
             Self::RigidQuotient => RigidQuotient.required_dim(n),
             Self::MwRigid => MwRigid.required_dim(n),
-            Self::Grassmann => if n >= 2 { Ok(()) } else { Err(n) },
+            Self::Grassmann => {
+                if n >= 2 {
+                    Ok(())
+                } else {
+                    Err(n)
+                }
+            }
             Self::GrassmannP { n: gn, p } => Grassmann { n: *gn, p: *p }.required_dim(n),
             Self::Hyperbolic => Hyperbolic.required_dim(n),
             Self::PoincareBall => PoincareBall.required_dim(n),
@@ -410,9 +437,7 @@ impl Manifold for ManifoldKind {
             Self::MultinomialDoublyStochastic { n: dn } => {
                 MultinomialDoublyStochastic { n: *dn }.required_dim(n)
             }
-            Self::MultinomialSymmetric { n: sn } => {
-                MultinomialSymmetric { n: *sn }.required_dim(n)
-            }
+            Self::MultinomialSymmetric { n: sn } => MultinomialSymmetric { n: *sn }.required_dim(n),
             Self::SphereComplex { n: cn } => SphereComplex { n: *cn }.required_dim(n),
             Self::Positive { n: pn } => Positive { n: *pn }.required_dim(n),
             Self::CenteredMatrix { m, n: cn, rows } => CenteredMatrix {

@@ -13,7 +13,7 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::vecops::{axpy, dot, nrm2};
 
-use super::{sphere::Sphere, Manifold};
+use super::{Manifold, sphere::Sphere};
 
 /// Stiefel with \(p=1\), packed as a length-\(n\) unit vector.
 #[derive(Clone, Copy, Debug, Default)]
@@ -197,10 +197,7 @@ mod tests {
         let y = array![0.0, 1.0, 0.0];
         assert_eq!(Stiefel.project(&x, &v), Sphere.project(&x, &v));
         assert_eq!(Stiefel.retract(&x, &v), Sphere.retract(&x, &v));
-        assert_eq!(
-            Stiefel.transport(&x, &y, &v),
-            Sphere.transport(&x, &y, &v)
-        );
+        assert_eq!(Stiefel.transport(&x, &y, &v), Sphere.transport(&x, &y, &v));
     }
 
     #[test]

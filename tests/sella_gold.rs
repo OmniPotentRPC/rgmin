@@ -40,7 +40,9 @@ fn json_nums(blob: &str, key: &str) -> Vec<f64> {
         .find(&pat)
         .unwrap_or_else(|| panic!("missing key {key}"));
     let after = &blob[start + pat.len()..];
-    let lb = after.find('[').unwrap_or_else(|| panic!("{key} is not an array"));
+    let lb = after
+        .find('[')
+        .unwrap_or_else(|| panic!("{key} is not an array"));
     let mut depth = 0;
     let mut rb = lb;
     for (i, c) in after[lb..].char_indices() {
@@ -59,7 +61,10 @@ fn json_nums(blob: &str, key: &str) -> Vec<f64> {
     after[lb + 1..rb]
         .split(|c: char| c == ',' || c == '[' || c == ']' || c.is_whitespace())
         .filter(|s| !s.is_empty())
-        .map(|s| s.parse::<f64>().unwrap_or_else(|e| panic!("{key} parse {s}: {e}")))
+        .map(|s| {
+            s.parse::<f64>()
+                .unwrap_or_else(|e| panic!("{key} parse {s}: {e}"))
+        })
         .collect()
 }
 
@@ -164,7 +169,13 @@ fn dest_prfo(h: &Array2<f64>, g: &Array1<f64>, order: usize, alpha: f64) -> Arra
 }
 
 fn assert_close(got: &Array1<f64>, gold: &[f64], name: &str) {
-    assert_eq!(got.len(), gold.len(), "{name} len dest={} gold={}", got.len(), gold.len());
+    assert_eq!(
+        got.len(),
+        gold.len(),
+        "{name} len dest={} gold={}",
+        got.len(),
+        gold.len()
+    );
     for i in 0..got.len() {
         let err = (got[i] - gold[i]).abs();
         assert!(
@@ -384,7 +395,11 @@ fn dest_symmetric_matches_manopt_symmetricfactory() {
     let (xr, vr, goldr) = factory_xv("symmetric_retr_plus");
     assert_close(&Symmetric.retract(&xr, &vr), &goldr, "symmetric_retr");
     let (xt, yt, vt, goldt) = factory_xyv("symmetric_transp_id");
-    assert_close(&Symmetric.transport(&xt, &yt, &vt), &goldt, "symmetric_transp");
+    assert_close(
+        &Symmetric.transport(&xt, &yt, &vt),
+        &goldt,
+        "symmetric_transp",
+    );
 }
 
 #[test]
@@ -405,7 +420,11 @@ fn dest_multinomial_matches_manopt_multinomialfactory() {
     let (xr, vr, goldr) = factory_xv("multinomial_retr_exp");
     assert_close(&Multinomial.retract(&xr, &vr), &goldr, "multinomial_retr");
     let (xt, yt, vt, goldt) = factory_xyv("multinomial_transp_arrive");
-    assert_close(&Multinomial.transport(&xt, &yt, &vt), &goldt, "multinomial_transp");
+    assert_close(
+        &Multinomial.transport(&xt, &yt, &vt),
+        &goldt,
+        "multinomial_transp",
+    );
 }
 
 #[test]

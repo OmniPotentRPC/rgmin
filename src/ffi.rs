@@ -1948,7 +1948,12 @@ pub unsafe extern "C" fn rgmin_solver_set_positive(solver: *mut rgmin_solver_t, 
 /// # Safety
 /// `solver` must be null or a live handle from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_solver_set_centered_matrix(solver: *mut rgmin_solver_t, m: usize, n: usize, center_rows: i32) {
+pub unsafe extern "C" fn rgmin_solver_set_centered_matrix(
+    solver: *mut rgmin_solver_t,
+    m: usize,
+    n: usize,
+    center_rows: i32,
+) {
     if solver.is_null() {
         return;
     }
@@ -1960,7 +1965,11 @@ pub unsafe extern "C" fn rgmin_solver_set_centered_matrix(solver: *mut rgmin_sol
 /// # Safety
 /// `solver` must be null or a live handle from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_solver_set_factor_shape(solver: *mut rgmin_solver_t, n: usize, p: usize) {
+pub unsafe extern "C" fn rgmin_solver_set_factor_shape(
+    solver: *mut rgmin_solver_t,
+    n: usize,
+    p: usize,
+) {
     if solver.is_null() {
         return;
     }

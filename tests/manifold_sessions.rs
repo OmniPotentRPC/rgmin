@@ -2,9 +2,14 @@ use ndarray::{Array1, array};
 use rgmin::{Control, Method, Solver};
 
 fn control() -> Control {
-    Control { maxiter: 80, gtol: 1e-8, istep: 0.1, maxmove: None, ftol_rel: None }
+    Control {
+        maxiter: 80,
+        gtol: 1e-8,
+        istep: 0.1,
+        maxmove: None,
+        ftol_rel: None,
+    }
 }
-
 
 #[test]
 fn stiefel_p2_retract_stays_orthonormal() {
@@ -682,8 +687,8 @@ fn complex_circle_rejects_a_3n_cluster() {
 fn symmetric_session_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::manifold::is_symmetric;
     use rgmin::ManifoldKind;
+    use rgmin::manifold::is_symmetric;
 
     struct FrobeniusI;
     impl Objective<f64> for FrobeniusI {
@@ -759,8 +764,8 @@ fn symmetric_rejects_a_3n_cluster() {
 fn skewsymmetric_session_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::manifold::is_skewsymmetric;
     use rgmin::ManifoldKind;
+    use rgmin::manifold::is_skewsymmetric;
 
     // Frobenius distance to J = [[0, 1], [-1, 0]]. Identity is not on the set.
     struct FrobeniusJ;
@@ -823,8 +828,8 @@ fn skewsymmetric_session_stays_on_the_set() {
 fn euclidean_complex_session_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::manifold::is_euclidean_complex;
     use rgmin::ManifoldKind;
+    use rgmin::manifold::is_euclidean_complex;
 
     struct CplxBowl;
     impl Objective<f64> for CplxBowl {
@@ -907,8 +912,8 @@ fn euclidean_complex_rejects_a_3n_cluster() {
 fn constant_session_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::manifold::is_constant;
     use rgmin::ManifoldKind;
+    use rgmin::manifold::is_constant;
 
     struct Bowl;
     impl Objective<f64> for Bowl {
@@ -1101,8 +1106,8 @@ fn grassmann_shape_rejects_a_3n_cluster() {
 fn hyperbolic_session_stays_on_the_hyperboloid() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::manifold::{minkowski, pack as pack_h};
     use rgmin::ManifoldKind;
+    use rgmin::manifold::{minkowski, pack as pack_h};
 
     // Spatial-radius squared on H^2. The origin (1, 0, 0) is the min.
     struct SpatialRadius;

@@ -1,7 +1,6 @@
 use ndarray::{Array1, array};
 use rgmin::manifold::*;
 
-
 #[test]
 fn oblique_retract_stays_on_product_of_spheres() {
     let m = Oblique::new(3, 2);
@@ -203,14 +202,18 @@ fn grassmann_p1_is_the_sphere_and_p2_rejects_3n() {
     let x = array![0.6, 0.8, 0.0];
     let v = array![0.1, -0.2, 0.5];
     let g = Grassmann { n: 3, p: 1 };
-    assert!((g.project(&x, &v) - Sphere.project(&x, &v))
-        .mapv(f64::abs)
-        .sum()
-        < 1e-14);
-    assert!((g.retract(&x, &v) - Sphere.retract(&x, &v))
-        .mapv(f64::abs)
-        .sum()
-        < 1e-14);
+    assert!(
+        (g.project(&x, &v) - Sphere.project(&x, &v))
+            .mapv(f64::abs)
+            .sum()
+            < 1e-14
+    );
+    assert!(
+        (g.retract(&x, &v) - Sphere.retract(&x, &v))
+            .mapv(f64::abs)
+            .sum()
+            < 1e-14
+    );
     assert_eq!(Grassmann { n: 4, p: 2 }.required_dim(114), Err(8));
 }
 
@@ -231,7 +234,10 @@ fn poincare_ball_is_not_the_sphere() {
     let yp = PoincareBall.retract(&x, &v);
     let ys = Sphere.retract(&x, &v);
     let n = yp.iter().map(|c| c * c).sum::<f64>().sqrt();
-    assert!(n < 1.0, "Poincare retract must stay in the open ball, |y| = {n}");
+    assert!(
+        n < 1.0,
+        "Poincare retract must stay in the open ball, |y| = {n}"
+    );
     assert!((ys.iter().map(|c| c * c).sum::<f64>().sqrt() - 1.0).abs() < 1e-12);
     assert_ne!(yp, ys);
     assert_ne!(PoincareBall.project(&x, &v), Sphere.project(&x, &v));
