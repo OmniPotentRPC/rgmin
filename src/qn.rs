@@ -317,6 +317,64 @@ pub(crate) fn sr2_hessian_update(b: &mut Array2<f64>, s: &Array1<f64>, y: &Array
     }
 }
 
+/// Cholesky solve of `A x = rhs` for a symmetric positive-definite `A`.
+///
+/// `None` when `A` is not square of the right size, not symmetric to
+/// `1e-10` relative, or a pivot `l_kk^2` is not above `1e-14` times the
+/// largest diagonal entry: the factorisation is the SPD test, so a
+/// matrix that would make `-A^{-1} g` an ascent direction never yields
+/// one.
+pub(crate) fn solve_spd(a: &Array2<f64>, rhs: &Array1<f64>) -> Option<Array1<f64>> {
+    let n = rhs.len();
+    if a.nrows() != n || a.ncols() != n {
+        return None;
+    }
+    let scale = (0..n).map(|i| a[(i, i)].abs()).fold(0.0_f64, f64::max);
+    if !(scale.is_finite() && scale > 0.0) {
+        return None;
+    }
+    for i in 0..n {
+        for j in 0..i {
+            if (a[(i, j)] - a[(j, i)]).abs() > 1e-10 * scale {
+                return None;
+            }
+        }
+    }
+    let mut l = Array2::<f64>::zeros((n, n));
+    for j in 0..n {
+        let mut d = a[(j, j)];
+        for k in 0..j {
+            d -= l[(j, k)] * l[(j, k)];
+        }
+        if d.is_nan() || d <= 1e-14 * scale {
+            return None;
+        }
+        let ljj = d.sqrt();
+        l[(j, j)] = ljj;
+        for i in (j + 1)..n {
+            let mut v = a[(i, j)];
+            for k in 0..j {
+                v -= l[(i, k)] * l[(j, k)];
+            }
+            l[(i, j)] = v / ljj;
+        }
+    }
+    let mut y = rhs.clone();
+    for i in 0..n {
+        for k in 0..i {
+            y[i] -= l[(i, k)] * y[k];
+        }
+        y[i] /= l[(i, i)];
+    }
+    for i in (0..n).rev() {
+        for k in (i + 1)..n {
+            y[i] -= l[(k, i)] * y[k];
+        }
+        y[i] /= l[(i, i)];
+    }
+    y.iter().all(|v| v.is_finite()).then_some(y)
+}
+
 /// Gaussian elimination with partial pivoting for `A x = rhs`.
 pub(crate) fn solve_dense(a: &Array2<f64>, rhs: &Array1<f64>) -> Option<Array1<f64>> {
     let n = rhs.len();

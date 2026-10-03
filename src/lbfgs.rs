@@ -20,7 +20,7 @@ use ndarray::{Array1, ArrayView1};
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
-use crate::qn::solve_dense;
+use crate::qn::solve_spd;
 use crate::report::Report;
 use crate::step::{l2, qn_istep, take_step};
 use eindir_core::{DifferentiableObjective, Objective};
@@ -49,6 +49,7 @@ struct Pair {
 /// to rediscover it.
 pub struct Lbfgs {
     memory: Vec<Pair>,
+    precon_fallbacks: std::sync::atomic::AtomicUsize,
     /// Pairs retained; the usual choice is between five and ten.
     pub max_pairs: usize,
     /// Gradient-norm threshold that ends a relaxation.
@@ -91,6 +92,7 @@ impl Lbfgs {
     pub fn with_capacity(max_pairs: usize) -> Self {
         Self {
             memory: Vec::new(),
+            precon_fallbacks: std::sync::atomic::AtomicUsize::new(0),
             max_pairs: max_pairs.max(1),
             gtol: 1e-6,
             armijo: 1e-4,
@@ -111,6 +113,15 @@ impl Lbfgs {
     /// the retained pairs describe a Hessian that no longer applies.
     pub fn forget(&mut self) {
         self.memory.clear();
+    }
+
+    /// Times a supplied `H0^{-1}` (a Hessian under the Newton-preconditioned
+    /// two-loop) was not symmetric positive definite and the two-loop fell
+    /// back to `gamma I`.
+    #[must_use]
+    pub fn precon_fallbacks(&self) -> usize {
+        self.precon_fallbacks
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Pairs currently held.
@@ -165,7 +176,17 @@ impl Lbfgs {
             crate::vecops::axpy(-a, p.y.view(), &mut q);
         }
         if let Some(pmat) = precon {
-            q = solve_dense(pmat, &q).unwrap_or_else(|| self.scale_gamma(q));
+            // H0 = P^{-1} keeps -H g a descent direction only for an SPD
+            // P; an indefinite Hessian falls back to gamma I and is
+            // counted.
+            q = match solve_spd(pmat, &q) {
+                Some(v) => v,
+                None => {
+                    self.precon_fallbacks
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    self.scale_gamma(q)
+                }
+            };
         } else {
             q = self.scale_gamma(q);
         }
@@ -649,5 +670,28 @@ impl Lbfgs {
         *value = t.f;
         *grad = t.g;
         *istep = qn_istep(control);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::{Array2, array};
+
+    #[test]
+    fn an_indefinite_hessian_falls_back_to_gamma() {
+        let mut l = Lbfgs::with_capacity(4);
+        l.push(array![1.0, 0.0], array![2.0, 0.0]);
+        let g = array![1.0, 1.0];
+        let spd = Array2::from_diag(&array![2.0, 4.0]);
+        let d = l.direction_with_precon(g.view(), Some(&spd));
+        assert!(d.dot(&g) < 0.0);
+        assert_eq!(l.precon_fallbacks(), 0);
+        // diag(1, -1): -P^{-1} g = (-1, 1) is not a descent direction.
+        let indefinite = Array2::from_diag(&array![1.0, -1.0]);
+        let d = l.direction_with_precon(g.view(), Some(&indefinite));
+        assert!(d.dot(&g) < 0.0, "ascent {d}");
+        assert_eq!(l.precon_fallbacks(), 1);
+        assert_eq!(d, l.direction(g.view()));
     }
 }

@@ -15,6 +15,8 @@ pub struct Control {
     /// accepted.
     pub istep: f64,
     /// Optional Euclidean cap on a proposed step (xtsci `maxmove`).
+    /// `Some(c)` with `c <= 0` or NaN is no cap, the same as `None`; a
+    /// non-positive cap never scales a step, so it cannot reverse one.
     pub maxmove: Option<f64>,
     /// Relative slack on every energy-decrease test. A trial at `ft`
     /// passes against the reference `ref_e` when

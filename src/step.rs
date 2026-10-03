@@ -10,7 +10,17 @@ pub(crate) fn l2(g: &Array1<f64>) -> f64 {
     crate::vecops::nrm2(g.view())
 }
 
+/// A cap that binds: positive and finite. Non-positive or NaN caps are
+/// "no cap", the meaning `set_maxmove` and `set_atom_maxmove` give 0.
+#[inline]
+fn binding(cap: f64) -> bool {
+    cap > 0.0 && cap.is_finite()
+}
+
 pub(crate) fn scale_step(origin: &Array1<f64>, trial: &mut Array1<f64>, cap: f64) {
+    if !binding(cap) {
+        return;
+    }
     let mut n2 = 0.0;
     for i in 0..trial.len() {
         let d = trial[i] - origin[i];
@@ -28,6 +38,9 @@ pub(crate) fn scale_step(origin: &Array1<f64>, trial: &mut Array1<f64>, cap: f64
 /// eOn `maxAtomMotionAppliedV`: scale the whole step so the largest
 /// per-atom displacement is at most `cap`.
 pub(crate) fn scale_step_atom(origin: &Array1<f64>, trial: &mut Array1<f64>, cap: f64) {
+    if !binding(cap) {
+        return;
+    }
     let n = trial.len();
     let mut max_atom = 0.0;
     let mut i = 0;
@@ -88,12 +101,10 @@ pub(crate) fn cap_alpha(
     control: &Control,
     atom_maxmove: Option<f64>,
 ) -> f64 {
-    let (cap, len) = if let Some(cap) = atom_maxmove {
-        (cap, max_atom_norm(dir))
-    } else if let Some(cap) = control.maxmove {
-        (cap, crate::vecops::nrm2(dir))
-    } else {
-        return f64::INFINITY;
+    let (cap, len) = match (atom_maxmove.filter(|c| binding(*c)), control.maxmove) {
+        (Some(cap), _) => (cap, max_atom_norm(dir)),
+        (None, Some(cap)) if binding(cap) => (cap, crate::vecops::nrm2(dir)),
+        _ => return f64::INFINITY,
     };
     if len > 0.0 && len.is_finite() {
         cap / len
@@ -244,5 +255,118 @@ mod tests {
             cap_alpha(array![0.0, 0.0].view(), &ctl, Some(0.2)),
             f64::INFINITY
         );
+    }
+
+    #[test]
+    fn a_non_positive_cap_never_reverses_a_step() {
+        let origin = array![0.0, 0.0, 0.0];
+        for cap in [0.0, -0.1, f64::NAN] {
+            let mut t = array![1.0, 0.0, 0.0];
+            scale_step(&origin, &mut t, cap);
+            assert_eq!(t[0], 1.0, "euclid cap {cap}");
+            scale_step_atom(&origin, &mut t, cap);
+            assert_eq!(t[0], 1.0, "atom cap {cap}");
+            let ctl = Control {
+                maxmove: Some(cap),
+                ..Control::default()
+            };
+            assert_eq!(cap_alpha(t.view(), &ctl, Some(cap)), f64::INFINITY);
+        }
+    }
+
+    type Log = std::sync::Arc<std::sync::Mutex<Vec<(Array1<f64>, f64)>>>;
+
+    /// `f = |x|^2 / 2` behind an evaluation log.
+    #[allow(clippy::type_complexity)]
+    fn logged() -> (
+        crate::Oracle<impl Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync>,
+        Log,
+    ) {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let l2 = log.clone();
+        let obj = crate::Oracle::unbounded(2, move |x: ArrayView1<f64>| {
+            let f = 0.5 * x.dot(&x);
+            l2.lock().unwrap().push((x.to_owned(), f));
+            (f, x.to_owned())
+        });
+        (obj, log)
+    }
+
+    #[test]
+    fn the_accepted_value_is_the_oracle_value_at_the_capped_point() {
+        // A long downhill step under a per-atom cap of 0.1 (a 2-vector is
+        // one partial atom). The returned f must be what the oracle said
+        // at the returned x, which the clamp-after-search order broke.
+        let (obj, log) = logged();
+        let pos = array![3.0, 4.0];
+        let (f0, g0) = (12.5, pos.clone());
+        let dir = array![-3.0, -4.0];
+        for ls in [
+            LineSearch::default(),
+            LineSearch::Backtracking {
+                c: 1e-4,
+                beta: 0.5,
+                maxiter: 20,
+            },
+            LineSearch::Wolfe {
+                c1: 1e-4,
+                c2: 0.9,
+                maxiter: 20,
+            },
+        ] {
+            log.lock().unwrap().clear();
+            let t = take_step(
+                &obj,
+                &pos,
+                f0,
+                &g0,
+                dir.view(),
+                1.0,
+                ls,
+                &Control::default(),
+                Some(0.1),
+            );
+            assert!(t.moved);
+            assert!(((&t.x - &pos).dot(&(&t.x - &pos)).sqrt() - 0.1).abs() < 1e-12);
+            let seen = log.lock().unwrap();
+            let hit = seen
+                .iter()
+                .find(|(x, _)| *x == t.x)
+                .expect("x never evaluated");
+            assert_eq!(hit.1, t.f, "{ls:?}");
+            assert_eq!(t.g, t.x, "{ls:?}");
+            assert!(
+                seen.iter()
+                    .all(|(x, _)| (x - &pos).dot(&(x - &pos)).sqrt() <= 0.1 + 1e-12)
+            );
+        }
+    }
+
+    #[test]
+    fn backtracking_on_an_uphill_direction_descends() {
+        // At f79dd98 backtracking took the Armijo test with a positive
+        // slope, which any rise smaller than c alpha slope passes.
+        let (obj, _) = logged();
+        let pos = array![1.0, 0.0];
+        let up = array![1.0, 0.0];
+        let ls = LineSearch::Backtracking {
+            c: 1e-4,
+            beta: 0.5,
+            maxiter: 20,
+        };
+        let t = take_step(
+            &obj,
+            &pos,
+            0.5,
+            &pos.clone(),
+            up.view(),
+            1.0,
+            ls,
+            &Control::default(),
+            None,
+        );
+        assert!(t.moved);
+        assert!(t.f < 0.5, "rose to {}", t.f);
+        assert!(t.x[0] < 1.0);
     }
 }
