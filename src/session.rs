@@ -66,6 +66,10 @@ pub struct Solver {
     box_lo: Option<Vec<f64>>,
     #[cfg(feature = "highs")]
     box_hi: Option<Vec<f64>>,
+    #[cfg(feature = "highs")]
+    highs_trust: Option<f64>,
+    #[cfg(feature = "highs")]
+    equalities: Vec<(Vec<(usize, f64)>, f64)>,
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
@@ -155,6 +159,10 @@ impl Solver {
             box_lo: None,
             #[cfg(feature = "highs")]
             box_hi: None,
+            #[cfg(feature = "highs")]
+            highs_trust: None,
+            #[cfg(feature = "highs")]
+            equalities: Vec::new(),
             last_pos: None,
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
@@ -255,10 +263,10 @@ impl Solver {
             if let Inner::Lbfgs(solver) = &mut self.inner {
                 solver.highs = if enabled {
                     Some(crate::HighsStep {
-                        trust: self.atom_maxmove.or(self.control.maxmove),
+                        trust: self.highs_trust.or(self.atom_maxmove).or(self.control.maxmove),
                         lo: None,
                         hi: None,
-                        equalities: Vec::new(),
+                        equalities: self.equalities.clone(),
                         center_axes: if self.project_rigid && self.dim.is_multiple_of(3) {
                             Some((self.dim / 3, 3))
                         } else {
@@ -288,6 +296,54 @@ impl Solver {
         }
     }
 
+    /// L-infinity trust radius on the constrained model step.
+    /// Non-positive or non-finite radii disable the radius.
+    pub fn set_trust(&mut self, radius: f64) -> bool {
+        #[cfg(not(feature = "highs"))]
+        { let _ = radius; false }
+        #[cfg(feature = "highs")]
+        {
+            self.highs_trust = (radius > 0.0 && radius.is_finite()).then_some(radius);
+            self.set_highs(self.highs);
+            true
+        }
+    }
+
+    /// Append a sparse linear equality on the model displacement.
+    /// Reject non-finite coefficients and indices outside the session dimension.
+    pub fn add_equality(&mut self, coefficients: Vec<(usize, f64)>, rhs: f64) -> bool {
+        #[cfg(not(feature = "highs"))]
+        { let _ = (coefficients, rhs); false }
+        #[cfg(feature = "highs")]
+        {
+            if !rhs.is_finite() || coefficients.iter().any(|(k, a)| *k >= self.dim || !a.is_finite()) {
+                return false;
+            }
+            self.equalities.push((coefficients, rhs));
+            self.set_highs(self.highs);
+            true
+        }
+    }
+
+    /// Remove every model-step equality.
+    pub fn clear_equalities(&mut self) -> bool {
+        #[cfg(not(feature = "highs"))]
+        { false }
+        #[cfg(feature = "highs")]
+        {
+            self.equalities.clear();
+            self.set_highs(self.highs);
+            true
+        }
+    }
+
+    fn has_equalities(&self) -> bool {
+        #[cfg(feature = "highs")]
+        { !self.equalities.is_empty() }
+        #[cfg(not(feature = "highs"))]
+        { false }
+    }
+
     fn has_coordinate_box(&self) -> bool {
         #[cfg(feature = "highs")]
         { self.highs && (self.box_lo.is_some() || self.box_hi.is_some()) }
@@ -296,7 +352,7 @@ impl Solver {
     }
 
     fn stationarity_norm(&self, bounds: &eindir_core::Bounds<f64>, x: &Array1<f64>, grad: &Array1<f64>) -> f64 {
-        if self.has_coordinate_box() && self.manifold == ManifoldKind::Euclidean && !self.project_rigid {
+        if self.has_coordinate_box() && self.manifold == ManifoldKind::Euclidean && !self.project_rigid && !self.has_equalities() {
             let mut norm = 0.0_f64;
             for k in 0..x.len() {
                 let lo = bounds.low[k];
@@ -661,7 +717,7 @@ impl Solver {
             } else {
                 None
             };
-            let feasible = if self.has_coordinate_box() {
+            let feasible = if self.has_coordinate_box() || self.highs_trust.is_some() || !self.equalities.is_empty() {
                 let mut model_hess = hess.clone();
                 if newton_kind == Some(NewtonKind::Rfo) {
                     let (_, shift) = crate::sella_step::rfo_step_and_shift(&hess, &grad, 0, 1.0);
@@ -669,7 +725,8 @@ impl Solver {
                 }
                 Ok(crate::lbfgs_qp::highs_feasible_step_boxed(
                     None, Some(&model_hess), &grad, self.atom_maxmove,
-                    self.control.maxmove, center, Some((x.view(), obj.bounds())),
+                    self.highs_trust.or(self.control.maxmove), center,
+                    self.has_coordinate_box().then(|| (x.view(), obj.bounds())), &self.equalities,
                 )?)
             } else {
                 crate::lbfgs_qp::highs_feasible_step(
@@ -912,12 +969,29 @@ impl Solver {
         // of a projected NEB force is not the potential of the gradient it
         // returns, so a decrease test there says nothing. Every other
         // Accept keeps the line-searched step_objective path.
+        #[cfg(feature = "highs")]
+        let constrained_direction = if self.highs && (self.highs_trust.is_some() || !self.equalities.is_empty()) {
+            if let Inner::Lbfgs(solver) = &self.inner {
+                let direction = solver.direction(grad.view());
+                let center = (self.project_rigid && self.dim.is_multiple_of(3)).then_some((self.dim / 3, 3));
+                Some(crate::lbfgs_qp::highs_feasible_step_boxed(
+                    Some(&direction), None, &grad, self.atom_maxmove,
+                    self.highs_trust.or(self.control.maxmove), center,
+                    self.has_coordinate_box().then(|| (x.view(), obj.bounds())), &self.equalities,
+                )?)
+            } else { None }
+        } else { None };
+        #[cfg(not(feature = "highs"))]
+        let constrained_direction: Option<Array1<f64>> = None;
         let lbfgs_direct = match (&self.inner, self.accept) {
             (Inner::Lbfgs(solver), Accept::Step) => {
-                let dir = solver.direction(grad.view());
+                let dir = constrained_direction.clone().unwrap_or_else(|| solver.direction(grad.view()));
                 #[cfg(feature = "highs")]
                 let dir = if let Some(bounds) = &solver.coordinate_box {
+                    // The model QP already enforces its box and equalities.
+                    if constrained_direction.is_some() { dir } else {
                     crate::box_objective::project_direction(bounds, x.view(), grad.view(), dir)
+                    }
                 } else { dir };
                 Some(dir)
             },
@@ -952,7 +1026,7 @@ impl Solver {
         match &mut self.inner {
             Inner::Lbfgs(_) if !lbfgs_line_searched => {}
             Inner::Lbfgs(solver) => {
-                solver.step_objective(
+                solver.step_objective_with_direction(
                     obj,
                     x,
                     &mut value,
@@ -961,6 +1035,7 @@ impl Solver {
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
+                    constrained_direction,
                 );
             }
             Inner::Steepest => {

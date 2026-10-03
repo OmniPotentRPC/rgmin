@@ -231,6 +231,13 @@ int32_t rgmin_solver_set_highs(rgmin_solver_t *solver, int32_t enabled);
  *  Returns zero on a supported build; malformed domains fail before evaluation. */
 int32_t rgmin_solver_set_box(rgmin_solver_t *solver, const double *lower,
                            const double *upper, size_t n);
+/** Model-step trust radius. Non-positive disables the radius. */
+int32_t rgmin_solver_set_trust(rgmin_solver_t *solver, double radius);
+/** Append a sparse equality a.p = rhs on the model step. */
+int32_t rgmin_solver_add_equality(rgmin_solver_t *solver, const size_t *idx,
+                                const double *coef, size_t nnz, double rhs);
+/** Remove every model-step equality. */
+int32_t rgmin_solver_clear_equalities(rgmin_solver_t *solver);
 /** Embedded manifold. Euclidean is the default.
  *  Molecular clusters use RIGID_QUOTIENT (Sella Cartesian T+R,
  *  R^{3N}/SE(3)) or MW_RIGID (Page-McIver / Sella IRC Eckart).

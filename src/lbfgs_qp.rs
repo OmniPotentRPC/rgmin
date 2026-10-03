@@ -262,7 +262,7 @@ pub fn highs_feasible_step(
     trust: Option<f64>,
     center_axes: Option<(usize, usize)>,
 ) -> Result<Array1<f64>> {
-    highs_feasible_step_boxed(direction, hess, grad, atom_maxmove, trust, center_axes, None)
+    highs_feasible_step_boxed(direction, hess, grad, atom_maxmove, trust, center_axes, None, &[])
 }
 
 pub(crate) fn highs_feasible_step_boxed(
@@ -273,10 +273,11 @@ pub(crate) fn highs_feasible_step_boxed(
     trust: Option<f64>,
     center_axes: Option<(usize, usize)>,
     coordinate_box: Option<(ArrayView1<'_, f64>, &eindir_core::Bounds<f64>)>,
+    equalities: &[(Vec<(usize, f64)>, f64)],
 ) -> Result<Array1<f64>> {
     let n = grad.len();
     let boxed = atom_maxmove.is_some_and(|c| c > 0.0) || trust.is_some_and(|c| c > 0.0);
-    if !boxed && center_axes.is_none() && coordinate_box.is_none() {
+    if !boxed && center_axes.is_none() && coordinate_box.is_none() && equalities.is_empty() {
         if let Some(h) = hess {
             return Ok(crate::newton::shifted_newton(h, grad));
         }
@@ -312,6 +313,13 @@ pub(crate) fn highs_feasible_step_boxed(
             }
         }
         cols.push(pb.add_column(c[k], lo..=hi));
+    }
+    for (coefficients, rhs) in equalities {
+        if !rhs.is_finite() || coefficients.iter().any(|(k, a)| *k >= n || !a.is_finite()) {
+            return Err(Error::Highs("invalid linear equality".into()));
+        }
+        let row: Vec<_> = coefficients.iter().map(|(k, a)| (cols[*k], *a)).collect();
+        pb.add_row(*rhs..=*rhs, &row);
     }
     if let Some((n_atoms, dim)) = center_axes
         && n_atoms * dim == n

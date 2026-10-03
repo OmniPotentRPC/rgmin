@@ -365,3 +365,95 @@ fn session_set_box_survives_set_highs_and_clips_newton() {
     assert!(x[0] >= -1e-12 && x[0] <= 0.4 + 1e-9, "x0={x:?}");
     assert!(x[1] >= -0.4 - 1e-9 && x[1] <= 1e-12, "x1={x:?}");
 }
+
+#[test]
+fn newton_qp_applies_session_equalities() {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::{ArrayView1, array};
+    use rgmin::{Control, HessianObjective, Method, QnStep, Solver};
+
+    struct Quad;
+    impl Objective<f64> for Quad {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            use std::sync::OnceLock;
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| Bounds::new(array![-1e6, -1e6], array![1e6, 1e6], 0.0))
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            5.0 * x[0] * x[0] + 0.5 * x[1] * x[1]
+        }
+    }
+    impl Gradient<f64> for Quad {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            array![10.0 * x[0], x[1]]
+        }
+    }
+    impl DifferentiableObjective<f64> for Quad {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+    impl HessianObjective for Quad {
+        fn hessian(&self, _x: ArrayView1<f64>) -> Array2<f64> {
+            Array2::from_shape_vec((2, 2), vec![10.0, 0.0, 0.0, 1.0]).unwrap()
+        }
+    }
+
+    let obj = Quad;
+    let x0 = array![1.0, -0.4];
+    let mut x = x0.clone();
+    let mut solver = Solver::new(
+        Method::lbfgs(),
+        Control {
+            maxiter: 1,
+            gtol: 1e-12,
+            istep: 1.0,
+            maxmove: None,
+            ftol_rel: None,
+        },
+        2,
+    );
+    solver.set_qn_step(QnStep::Newton);
+    solver.set_highs(true);
+    assert!(solver.add_equality(vec![(0, 1.0), (1, 1.0)], 0.0));
+    let first = solver.step_hess(&obj, &mut x).unwrap();
+    assert!(first.grad_norm.is_finite());
+    let dp0 = x[0] - x0[0];
+    let dp1 = x[1] - x0[1];
+    assert!(
+        (dp0 + dp1).abs() < 1e-8,
+        "Newton equality a·p=0 missed: p=({dp0}, {dp1})"
+    );
+}
+
+#[test]
+fn session_equality_and_trust_reach_the_constrained_model_solution() {
+    use ndarray::array;
+    use rgmin::{Control, Method, Oracle, Solver};
+    let objective = Oracle::unbounded(2, |x| {
+        let g = &x - &array![2.0, -1.0];
+        (0.5 * g.dot(&g), g)
+    });
+    let mut solver = Solver::new(Method::lbfgs(), Control::default(), 2);
+    solver.set_highs(true);
+    assert!(solver.set_trust(0.2));
+    assert!(solver.add_equality(vec![(0, 1.0), (1, 1.0)], 0.0));
+    let mut x = array![0.0, 0.0];
+    let report = solver.step(&objective, &mut x).unwrap();
+    assert_relative_eq!(x[0], 0.2, epsilon = 1e-7);
+    assert_relative_eq!(x[1], -0.2, epsilon = 1e-7);
+    assert_relative_eq!(report.value, 1.94, epsilon = 1e-7);
+    assert!(solver.clear_equalities());
+    assert!(solver.set_trust(0.0));
+    solver.forget();
+    let report = solver.step(&objective, &mut x).unwrap();
+    assert_relative_eq!(x[0], 2.0, epsilon = 1e-10);
+    assert_relative_eq!(x[1], -1.0, epsilon = 1e-10);
+    assert!(report.grad_norm < 1e-10);
+}

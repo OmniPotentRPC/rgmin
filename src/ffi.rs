@@ -1623,6 +1623,102 @@ pub unsafe extern "C" fn rgmin_solver_set_box(
     }
 }
 
+/// Set the feasible model step trust radius. Non-positive disables it.
+///
+/// # Safety
+/// `solver` is null or a live session from `rgmin_solver_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_trust(solver: *mut rgmin_solver_t, radius: f64) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_trust: null solver");
+        return 1;
+    }
+    #[cfg(feature = "highs")]
+    {
+        let _ = unsafe { (*solver).solver.set_trust(radius) };
+        0
+    }
+    #[cfg(not(feature = "highs"))]
+    {
+        let _ = radius;
+        set_last_error("rgmin_solver_set_trust: build has no highs feature");
+        1
+    }
+}
+
+/// Append a sparse linear equality on the model step.
+///
+/// # Safety
+/// `solver` is null or a live session from `rgmin_solver_create`. Non-null index and coefficient arrays have `nnz` readable elements.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_add_equality(
+    solver: *mut rgmin_solver_t,
+    idx: *const usize,
+    coef: *const f64,
+    nnz: usize,
+    rhs: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_add_equality: null solver");
+        return 1;
+    }
+    #[cfg(feature = "highs")]
+    {
+        if nnz == 0 {
+            return 0;
+        }
+        if idx.is_null() || coef.is_null() {
+            set_last_error("rgmin_solver_add_equality: null idx or coef");
+            return 1;
+        }
+        let dim = unsafe { (*solver).solver.dim() };
+        let i_src = unsafe { slice::from_raw_parts(idx, nnz) };
+        let a_src = unsafe { slice::from_raw_parts(coef, nnz) };
+        let mut dest = Vec::with_capacity(nnz);
+        for k in 0..nnz {
+            if i_src[k] >= dim {
+                set_last_error("rgmin_solver_add_equality: index out of range");
+                return 1;
+            }
+            dest.push((i_src[k], a_src[k]));
+        }
+        if unsafe { (*solver).solver.add_equality(dest, rhs) } {
+            0
+        } else {
+            set_last_error("rgmin_solver_add_equality: invalid row");
+            1
+        }
+    }
+    #[cfg(not(feature = "highs"))]
+    {
+        let _ = (idx, coef, nnz, rhs);
+        set_last_error("rgmin_solver_add_equality: build has no highs feature");
+        1
+    }
+}
+
+/// Remove every model-step equality.
+///
+/// # Safety
+/// `solver` is null or a live session from `rgmin_solver_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_clear_equalities(solver: *mut rgmin_solver_t) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_clear_equalities: null solver");
+        return 1;
+    }
+    #[cfg(feature = "highs")]
+    {
+        let _ = unsafe { (*solver).solver.clear_equalities() };
+        0
+    }
+    #[cfg(not(feature = "highs"))]
+    {
+        set_last_error("rgmin_solver_clear_equalities: build has no highs feature");
+        1
+    }
+}
+
 /// Embedded manifold.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
