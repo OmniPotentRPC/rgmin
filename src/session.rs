@@ -309,7 +309,10 @@ impl Solver {
         }
     }
 
-    /// Append a sparse linear equality on the model displacement.
+    /// Append a sparse linear equality on the model and accepted displacement.
+    /// A line search or retraction that violates a row returns `Error::Highs`,
+    /// restores the starting point, and clears method memory. The residual
+    /// tolerance is 1e-7 in row units plus floating-point summation error.
     /// Reject non-finite coefficients and indices outside the session dimension.
     pub fn add_equality(&mut self, coefficients: Vec<(usize, f64)>, rhs: f64) -> bool {
         #[cfg(not(feature = "highs"))]
@@ -616,6 +619,55 @@ impl Solver {
         }
     }
 
+    fn step_with_equalities<O, F>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        step: F,
+    ) -> Result<Report>
+    where
+        O: Objective<f64> + ?Sized,
+        F: FnOnce(&mut Self, &O, &mut Array1<f64>) -> Result<Report>,
+    {
+        #[cfg(feature = "highs")]
+        let checkpoint = if self.highs && !self.equalities.is_empty() {
+            if x.len() != self.dim || Objective::dim(obj) != self.dim {
+                return Err(Error::Dim { got: x.len(), dim: self.dim });
+            }
+            Some((obj.bounds().clip(x.view()), self.steps))
+        } else {
+            None
+        };
+        let result = step(self, obj, x);
+        #[cfg(feature = "highs")]
+        if let Some((start, steps)) = checkpoint {
+            if result.is_ok() {
+                for (row, (coefficients, rhs)) in self.equalities.iter().enumerate() {
+                    let mut residual = -*rhs;
+                    let mut magnitude = rhs.abs();
+                    for &(k, a) in coefficients {
+                        residual += a * (x[k] - start[k]);
+                        magnitude += a.abs() * (x[k].abs() + start[k].abs());
+                    }
+                    // The QP tolerance is in row units. The gamma bound also
+                    // covers subtraction at a large coordinate origin.
+                    let roundoff = (2.0 * coefficients.len() as f64 + 4.0) * f64::EPSILON;
+                    let tolerance = crate::lbfgs_qp::EQUALITY_FEASIBILITY_TOLERANCE
+                        + roundoff / (1.0 - roundoff) * magnitude;
+                    if !residual.is_finite() || !tolerance.is_finite() || residual.abs() > tolerance {
+                        *x = start;
+                        self.steps = steps;
+                        self.forget();
+                        return Err(Error::Highs(format!(
+                            "accepted displacement violates equality {row}: residual {residual} exceeds {tolerance}"
+                        )));
+                    }
+                }
+            }
+        }
+        result
+    }
+
     /// One outer iteration. `x` is the iterate and is overwritten in place.
     pub fn step<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
@@ -637,10 +689,10 @@ impl Solver {
                 if let Inner::Lbfgs(solver) = &mut self.inner {
                     solver.coordinate_box = Some(bounded.bounds().clone());
                 }
-                return self.step_first_order(&bounded, x);
+                return self.step_with_equalities(&bounded, x, Self::step_first_order);
             }
         }
-        self.step_first_order(obj, x)
+        self.step_with_equalities(obj, x, Self::step_first_order)
     }
 
     /// One Newton / RFO iteration. Hessian is rebuilt at the current `x`.
@@ -661,10 +713,10 @@ impl Solver {
                 if let Inner::Lbfgs(solver) = &mut self.inner {
                     solver.coordinate_box = Some(bounded.bounds().clone());
                 }
-                return self.step_hess_inner(&bounded, x);
+                return self.step_with_equalities(&bounded, x, Self::step_hess_inner);
             }
         }
-        self.step_hess_inner(obj, x)
+        self.step_with_equalities(obj, x, Self::step_hess_inner)
     }
 
     fn step_hess_inner<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
