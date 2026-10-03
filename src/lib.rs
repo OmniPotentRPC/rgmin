@@ -68,7 +68,7 @@ pub use accept::Accept;
 pub use adam::minimize_adam;
 pub use control::Control;
 pub use error::{Error, Result};
-pub use fire::FireKind;
+pub use fire::{FireKind, FireVariant};
 pub use hvp::{
     FdHvp, HessianVector, HvpOracle, IdentityPrecond, NystromPrecond, Preconditioner,
     minimize_newton_cg, steihaug_cg, steihaug_pcg,

@@ -941,6 +941,36 @@ pub unsafe extern "C" fn rgmin_solver_set_accept(
     unsafe { (*solver).solver.set_accept(a) };
 }
 
+/// FIRE schedule of a FIRE session (see [`crate::FireVariant`]).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_fire_variant_t {
+    /// The session's FIRE kind with rgmin's parameters.
+    RGMIN_FIRE_RGMIN = 0,
+    /// FIRE 2.0 as Guénolé et al. 2020 algorithm 2 publishes it.
+    RGMIN_FIRE_GUENOLE2020 = 1,
+}
+
+/// Select the FIRE schedule; a no-op on a non-FIRE session.
+///
+/// # Safety
+///
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_fire_variant(
+    solver: *mut rgmin_solver_t,
+    variant: rgmin_fire_variant_t,
+) {
+    if solver.is_null() {
+        return;
+    }
+    let v = match variant {
+        rgmin_fire_variant_t::RGMIN_FIRE_RGMIN => crate::FireVariant::Rgmin,
+        rgmin_fire_variant_t::RGMIN_FIRE_GUENOLE2020 => crate::FireVariant::Guenole2020,
+    };
+    unsafe { (*solver).solver.set_fire_variant(v) };
+}
+
 /// Line search for the line-searched session arms.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

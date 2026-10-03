@@ -503,7 +503,7 @@ fn fire_and_bb_kill_a_sphere() {
     }
 
     let obj = Sphere;
-    for method in [
+    for (i, method) in [
         Method::Fire {
             kind: rgmin::FireKind::V1,
         },
@@ -511,7 +511,14 @@ fn fire_and_bb_kill_a_sphere() {
             kind: rgmin::FireKind::V2,
         },
         Method::Bb,
-    ] {
+        // FIRE 2.0 as Guenole et al. 2020 publish it, selected below.
+        Method::Fire {
+            kind: rgmin::FireKind::V1,
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let mut x = array![1.5, -2.0];
         let mut solver = Solver::new(
             method.clone(),
@@ -525,6 +532,9 @@ fn fire_and_bb_kill_a_sphere() {
             2,
         );
         solver.set_accept(Accept::Nonmonotone);
+        if i == 3 {
+            solver.set_fire_variant(rgmin::FireVariant::Guenole2020);
+        }
         let mut last = None;
         for _ in 0..200 {
             let rep = solver.step(&obj, &mut x).unwrap();

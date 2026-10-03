@@ -500,7 +500,10 @@ fn c_abi_respects_maxmove_when_initial_step_is_larger() {
 /// while most of it has never been dialled from C.
 #[test]
 fn c_abi_every_setter_survives_live_and_null_sessions() {
-    use rgmin::ffi::{rgmin_linesearch_t, rgmin_solver_set_linesearch};
+    use rgmin::ffi::{
+        rgmin_fire_variant_t, rgmin_linesearch_t, rgmin_solver_set_fire_variant,
+        rgmin_solver_set_linesearch,
+    };
     use rgmin::ffi::{
         rgmin_manifold_t, rgmin_qn_step_t, rgmin_solver_forget, rgmin_solver_set_atom_maxmove,
         rgmin_solver_set_cautious, rgmin_solver_set_extra_updates, rgmin_solver_set_manifold,
@@ -530,6 +533,8 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_masses(session, std::ptr::null(), 0);
         rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN);
         rgmin_solver_forget(session);
+        // A no-op on an L-BFGS session.
+        rgmin_solver_set_fire_variant(session, rgmin_fire_variant_t::RGMIN_FIRE_GUENOLE2020);
         use rgmin_linesearch_t::*;
         // Out-of-range constants are refused and change nothing.
         for (kind, c1, c2, it) in [
@@ -595,6 +600,7 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_manifold(null, rgmin_manifold_t::RGMIN_MANIFOLD_SPHERE);
         rgmin_solver_set_masses(null, masses.as_ptr(), masses.len());
         rgmin_solver_forget(null);
+        rgmin_solver_set_fire_variant(null, rgmin_fire_variant_t::RGMIN_FIRE_GUENOLE2020);
         assert_eq!(
             rgmin_solver_set_linesearch(
                 null,

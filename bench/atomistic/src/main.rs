@@ -403,7 +403,7 @@ fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
             wolfe(),
             0.1,
         ),
-        "fire2" => (
+        "fire2" | "fire2g" => (
             Method::Fire { kind: FireKind::V2 },
             Accept::None,
             wolfe(),
@@ -444,6 +444,9 @@ fn run_session(
     solver.set_accept(accept);
     solver.set_linesearch(ls);
     solver.set_atom_maxmove(maxmove);
+    if name == "fire2g" {
+        solver.set_fire_variant(rgmin::FireVariant::Guenole2020);
+    }
     let mut out = Outcome {
         converged: false,
         iters: 0,

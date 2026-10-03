@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   climbing image).
 - C ABI `rgmin_solver_set_linesearch` with `rgmin_linesearch_t`
   (`abi_minor` 11).
+- `FireVariant` and `Solver::set_fire_variant` (C:
+  `rgmin_solver_set_fire_variant`): `FireVariant::Guenole2020` runs
+  FIRE 2.0 as Guénolé et al. 2020 algorithm 2 publishes it
+  (`fire::fire2_displacement`, `fire::guenole2020`, `Fire2Extras`):
+  half-step back and zeroed velocity on an uphill step, `dt_min`, the
+  initial delay, and the mix after the kick, with the paper's table 2
+  parameters. On rgpot surfaces (5 starts each, per-atom cap 0.2) it
+  takes 26.0 force calls on the Pt7 island against 57.8 for
+  `FireKind::V2`, 33.8 on the EAM Al slab against 67.4, and 871 on LJ38
+  from random packings against 437, so the default stays. `validation/fire2.py` checks the mix bounds and
+  the step's closed forms.
+- `Lbfgs::precon_fallbacks` counts Hessian preconditioners that were
+  not symmetric positive definite.
 - `validation/`: sympy checks of the line-search interpolants and of
   the L-BFGS two-loop map; `bench/atomistic`: rgmin on rgpot potentials
   (LJ38, Pt7 on Pt(111), EAM Al slab) counting force calls.
@@ -41,6 +54,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1.1 to 4 increments.
 
 ### Fixed
+
+- A `Control::maxmove` (or per-atom cap) that is not positive and finite
+  is no cap; `Some(-c)` reversed every capped step.
+- FIRE uses `alpha` clamped to `[0, 1]` in the mix, so an out-of-range
+  public field cannot lengthen the velocity.
+- The Hessian-preconditioned two-loop solves by Cholesky and falls back
+  to `gamma I` on a matrix that is not SPD; an indefinite Hessian that
+  passed the pivoted solve gave an ascent direction.
+- An uphill direction (indefinite SR1/SR2) is searched backwards by
+  every line search; backtracking took the Armijo test with a positive
+  slope.
 
 - A session on a translation manifold (Euclidean, rigid quotients) no
   longer re-evaluates the accepted point after a no-op retract round

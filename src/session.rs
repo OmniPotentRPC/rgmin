@@ -12,7 +12,10 @@ use crate::adam::adam_direction;
 use crate::bb::bb_direction;
 use crate::control::Control;
 use crate::error::{Error, Result};
-use crate::fire::{FireState, fire_after_v1, fire_displacement, fire_rescale_velocity};
+use crate::fire::{
+    Fire2Extras, FireState, FireVariant, fire_after_v1, fire_displacement, fire_rescale_velocity,
+    fire2_displacement, guenole2020,
+};
 use crate::lbfgs::{GradNorm, Lbfgs};
 use crate::linesearch::LineSearch;
 use crate::manifold::{Manifold, ManifoldKind};
@@ -104,7 +107,7 @@ enum Inner {
     Newton {
         kind: NewtonKind,
     },
-    Fire(FireState),
+    Fire(FireState, Option<Fire2Extras>),
     Bb {
         prev_s: Option<Array1<f64>>,
         prev_y: Option<Array1<f64>>,
@@ -340,6 +343,36 @@ impl Solver {
         self.last_grad = grad.clone();
     }
 
+    /// FIRE schedule for a FIRE session; a no-op on any other method.
+    ///
+    /// [`FireVariant::Guenole2020`] replaces the session's FIRE state with
+    /// the published FIRE 2.0 ([`crate::fire::fire2_displacement`]) and its
+    /// table 2 parameters, from `dt = Control::istep`;
+    /// [`FireVariant::Rgmin`] restores [`FireState::new`] for the kind the
+    /// session was built with. Either way the velocity starts at zero.
+    ///
+    /// On the rgpot benchmark (10 starts, per-atom cap 0.2) the published
+    /// schedule halves the force calls of the Pt7 island and the EAM Al
+    /// slab and costs 1.5 times as many on LJ38 from random packings,
+    /// which is why it is a choice and not the default.
+    pub fn set_fire_variant(&mut self, variant: FireVariant) {
+        let dim = self.dim;
+        let dt0 = self.control.istep;
+        if let Inner::Fire(state, ext) = &mut self.inner {
+            match variant {
+                FireVariant::Guenole2020 => {
+                    let (s, e) = guenole2020(dim, dt0);
+                    *state = s;
+                    *ext = Some(e);
+                }
+                _ => {
+                    *state = FireState::new(state.kind, dim, dt0);
+                    *ext = None;
+                }
+            }
+        }
+    }
+
     /// Drop the cached evaluation and keep the method's memory.
     ///
     /// The next [`Self::step`] calls the oracle at its `x` even when `x`
@@ -391,7 +424,12 @@ impl Solver {
             Inner::Steepest => {}
             Inner::Pso { swarm, .. } => *swarm = None,
             Inner::Newton { .. } => {}
-            Inner::Fire(state) => state.reset(),
+            Inner::Fire(state, ext) => {
+                state.reset();
+                if let Some(ext) = ext {
+                    ext.steps = 0;
+                }
+            }
             Inner::Bb { prev_s, prev_y } => {
                 *prev_s = None;
                 *prev_y = None;
@@ -876,9 +914,12 @@ impl Solver {
                 *b2p *= *beta2;
                 self.istep = next_istep(lsstep, &self.control);
             }
-            Inner::Fire(state) => {
+            Inner::Fire(state, ext) => {
                 let force = grad.mapv(|g| -g);
-                let dx = fire_displacement(state, &force);
+                let dx = match ext {
+                    Some(ext) => fire2_displacement(state, ext, &force),
+                    None => fire_displacement(state, &force),
+                };
                 let mut trial = &*x + &dx;
                 if let Some(cap) = self.atom_maxmove {
                     scale_step_atom(x, &mut trial, cap);
@@ -1105,7 +1146,7 @@ impl Inner {
                 swarm: None,
             },
             Method::Newton { kind } => Inner::Newton { kind: *kind },
-            Method::Fire { kind } => Inner::Fire(FireState::new(*kind, dim, istep)),
+            Method::Fire { kind } => Inner::Fire(FireState::new(*kind, dim, istep), None),
             Method::Bb => Inner::Bb {
                 prev_s: None,
                 prev_y: None,
@@ -1161,7 +1202,7 @@ mod tests {
 
     fn fire_state(solver: &Solver) -> &FireState {
         match &solver.inner {
-            Inner::Fire(state) => state,
+            Inner::Fire(state, _) => state,
             _ => unreachable!("FIRE session"),
         }
     }
@@ -1239,7 +1280,7 @@ mod tests {
             solver.step(&obj, &mut x).unwrap();
             let memory = |s: &Solver| match &s.inner {
                 Inner::Lbfgs(l) => l.len() as f64,
-                Inner::Fire(f) => l2(&f.vel),
+                Inner::Fire(f, _) => l2(&f.vel),
                 _ => unreachable!(),
             };
             let kept = memory(&solver);
