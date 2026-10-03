@@ -97,7 +97,12 @@ pub use lowest_mode::{
     ApplyHessian, DENSE_EIGEN_CUTOFF, EigenParams, EigensolverKind, LowestMode, lowest_eigenpair,
     lowest_mode,
 };
-pub use manifold::{Manifold, ManifoldKind};
+pub use manifold::{
+    CenteredMatrix, ComplexCircle, Constant, EuclideanComplex, Grassmann, Hyperbolic,
+    Manifold, ManifoldKind, Multinomial, MultinomialDoublyStochastic, MultinomialSymmetric,
+    Oblique, PoincareBall, Positive, SkewSymmetric, Spd, SphereComplex, StiefelNp, Symmetric,
+    Unitary,
+};
 pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess};
 pub use newton::{HessianObjective, HessianOracle, NewtonKind, minimize_newton};
