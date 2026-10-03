@@ -242,6 +242,18 @@ public:
     }
     int clear_equalities() { return rgmin_solver_clear_equalities(ptr_); }
     void set_manifold(rgmin_manifold_t m) { rgmin_solver_set_manifold(ptr_, m); }
+    void set_stiefel(std::size_t n, std::size_t p) { rgmin_solver_set_stiefel(ptr_, n, p); }
+    void set_oblique(std::size_t n, std::size_t m) { rgmin_solver_set_oblique(ptr_, n, m); }
+    void set_complex_circle(std::size_t n) { rgmin_solver_set_complex_circle(ptr_, n); }
+    void set_euclidean_complex(std::size_t n) { rgmin_solver_set_euclidean_complex(ptr_, n); }
+    void set_constant(std::size_t n) { rgmin_solver_set_constant(ptr_, n); }
+    void set_multinomial_ds(std::size_t n) { rgmin_solver_set_multinomial_ds(ptr_, n); }
+    void set_multinomial_sym(std::size_t n) { rgmin_solver_set_multinomial_sym(ptr_, n); }
+    void set_sphere_complex(std::size_t n) { rgmin_solver_set_sphere_complex(ptr_, n); }
+    void set_positive(std::size_t n) { rgmin_solver_set_positive(ptr_, n); }
+    void set_centered_matrix(std::size_t m, std::size_t n, bool center_rows) { rgmin_solver_set_centered_matrix(ptr_, m, n, center_rows); }
+    void set_factor_shape(std::size_t n, std::size_t p) { rgmin_solver_set_factor_shape(ptr_, n, p); }
+    void set_unitary(std::size_t n) { rgmin_solver_set_unitary(ptr_, n); }
 
     Report step(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
                 DLManagedTensorVersioned* x) {

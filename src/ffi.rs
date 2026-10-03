@@ -1735,6 +1735,51 @@ pub enum rgmin_manifold_t {
     RGMIN_MANIFOLD_RIGID_QUOTIENT = 5,
     /// Mass-weighted Eckart (Sella IRC / Page–McIver). 3N, N >= 2.
     RGMIN_MANIFOLD_MW_RIGID = 6,
+    /// Symmetric positive definite matrices in the affine-invariant metric.
+    RGMIN_MANIFOLD_SPD = 7,
+    /// Real Grassmann frames, configured by rgmin_solver_set_factor_shape.
+    RGMIN_MANIFOLD_GRASSMANN = 8,
+    /// Hyperboloid in the Minkowski metric.
+    RGMIN_MANIFOLD_HYPERBOLIC = 9,
+    /// Open ball in the Poincare metric.
+    RGMIN_MANIFOLD_POINCARE = 10,
+    /// Product of unit spheres. Shape from `rgmin_solver_set_oblique`.
+    RGMIN_MANIFOLD_OBLIQUE = 11,
+    /// Simplex with the Fisher metric. manopt `multinomialfactory` (m = 1).
+    RGMIN_MANIFOLD_MULTINOMIAL = 12,
+    /// Product of unit circles (S^1)^n. Packed length 2n.
+    /// Token defaults to n = 1; use rgmin_solver_set_complex_circle.
+    RGMIN_MANIFOLD_COMPLEX_CIRCLE = 13,
+    /// Real symmetric n-by-n, row-major n². manopt `symmetricfactory`.
+    RGMIN_MANIFOLD_SYMMETRIC = 14,
+    /// Real skew-symmetric n-by-n, row-major n², n >= 2.
+    /// manopt `skewsymmetricfactory`.
+    RGMIN_MANIFOLD_SKEWSYMMETRIC = 15,
+    /// Complex Euclidean C^n. Packed interleaved, length 2n.
+    /// Token defaults to n = 1; use rgmin_solver_set_euclidean_complex.
+    RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX = 16,
+    /// Singleton {A} of packed length n. manopt `constantfactory`.
+    /// Token defaults to n = 1; use rgmin_solver_set_constant.
+    RGMIN_MANIFOLD_CONSTANT = 17,
+    /// Doubly-stochastic n-by-n, packed n². Token defaults to n = 2;
+    /// use rgmin_solver_set_multinomial_ds.
+    RGMIN_MANIFOLD_MULTINOMIAL_DS = 18,
+    /// Symmetric doubly-stochastic n-by-n. Token defaults to n = 2;
+    /// use rgmin_solver_set_multinomial_sym.
+    RGMIN_MANIFOLD_MULTINOMIAL_SYM = 19,
+    /// Complex unit sphere C^n, packed 2n. Token defaults to n = 1;
+    /// use rgmin_solver_set_sphere_complex.
+    RGMIN_MANIFOLD_SPHERE_COMPLEX = 20,
+    /// Positive orthant of packed length n. manopt `positivefactory`.
+    /// Token defaults to n = 1; use rgmin_solver_set_positive.
+    ///
+    RGMIN_MANIFOLD_POSITIVE = 21,
+    /// Centered m-by-n matrices, packed m*n. Token defaults to
+    /// 2-by-2 centered columns; use rgmin_solver_set_centered_matrix.
+    ///
+    RGMIN_MANIFOLD_CENTERED_MATRIX = 22,
+    /// Complex unitary matrices, interleaved row-major; default U(1).
+    RGMIN_MANIFOLD_UNITARY = 23,
 }
 
 ///
@@ -1758,9 +1803,180 @@ pub unsafe extern "C" fn rgmin_solver_set_manifold(
         rgmin_manifold_t::RGMIN_MANIFOLD_SE3 => ManifoldKind::Se3,
         rgmin_manifold_t::RGMIN_MANIFOLD_RIGID_QUOTIENT => ManifoldKind::RigidQuotient,
         rgmin_manifold_t::RGMIN_MANIFOLD_MW_RIGID => ManifoldKind::MwRigid,
+        rgmin_manifold_t::RGMIN_MANIFOLD_SPD => ManifoldKind::Spd,
+        rgmin_manifold_t::RGMIN_MANIFOLD_GRASSMANN => ManifoldKind::Grassmann,
+        rgmin_manifold_t::RGMIN_MANIFOLD_HYPERBOLIC => ManifoldKind::Hyperbolic,
+        rgmin_manifold_t::RGMIN_MANIFOLD_POINCARE => ManifoldKind::PoincareBall,
+        rgmin_manifold_t::RGMIN_MANIFOLD_UNITARY => ManifoldKind::Unitary { n: 1 },
+        rgmin_manifold_t::RGMIN_MANIFOLD_OBLIQUE => ManifoldKind::Oblique { n: 0, m: 0 },
+        rgmin_manifold_t::RGMIN_MANIFOLD_MULTINOMIAL => ManifoldKind::Multinomial,
+        rgmin_manifold_t::RGMIN_MANIFOLD_COMPLEX_CIRCLE => ManifoldKind::ComplexCircle { n: 1 },
+        rgmin_manifold_t::RGMIN_MANIFOLD_SYMMETRIC => ManifoldKind::Symmetric,
+        rgmin_manifold_t::RGMIN_MANIFOLD_SKEWSYMMETRIC => ManifoldKind::SkewSymmetric,
+        rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX => {
+            ManifoldKind::EuclideanComplex { n: 1 }
+        }
+        rgmin_manifold_t::RGMIN_MANIFOLD_CONSTANT => ManifoldKind::Constant { n: 1 },
+        rgmin_manifold_t::RGMIN_MANIFOLD_MULTINOMIAL_DS => {
+            ManifoldKind::MultinomialDoublyStochastic { n: 2 }
+        }
+        rgmin_manifold_t::RGMIN_MANIFOLD_MULTINOMIAL_SYM => {
+            ManifoldKind::MultinomialSymmetric { n: 2 }
+        }
+        rgmin_manifold_t::RGMIN_MANIFOLD_SPHERE_COMPLEX => ManifoldKind::SphereComplex { n: 1 },
+        rgmin_manifold_t::RGMIN_MANIFOLD_POSITIVE => ManifoldKind::Positive { n: 1 },
+        rgmin_manifold_t::RGMIN_MANIFOLD_CENTERED_MATRIX => ManifoldKind::CenteredMatrix {
+            m: 2,
+            n: 2,
+            rows: false,
+        },
         rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN => ManifoldKind::Euclidean,
     };
     unsafe { (*solver).solver.set_manifold(kind) };
+}
+
+/// Configure the stiefel geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_stiefel(solver: *mut rgmin_solver_t, n: usize, p: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_stiefel(n, p) };
+}
+
+/// Configure the oblique geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_oblique(solver: *mut rgmin_solver_t, n: usize, m: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_oblique(n, m) };
+}
+
+/// Configure the complex circle geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_complex_circle(solver: *mut rgmin_solver_t, n: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_complex_circle(n) };
+}
+
+/// Configure the euclidean complex geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_euclidean_complex(solver: *mut rgmin_solver_t, n: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_euclidean_complex(n) };
+}
+
+/// Configure the constant geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_constant(solver: *mut rgmin_solver_t, n: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_constant(n) };
+}
+
+/// Configure the multinomial ds geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_multinomial_ds(solver: *mut rgmin_solver_t, n: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_multinomial_ds(n) };
+}
+
+/// Configure the multinomial sym geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_multinomial_sym(solver: *mut rgmin_solver_t, n: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_multinomial_sym(n) };
+}
+
+/// Configure the sphere complex geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_sphere_complex(solver: *mut rgmin_solver_t, n: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_sphere_complex(n) };
+}
+
+/// Configure the positive geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_positive(solver: *mut rgmin_solver_t, n: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_positive(n) };
+}
+
+/// Configure the centered matrix geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_centered_matrix(solver: *mut rgmin_solver_t, m: usize, n: usize, center_rows: i32) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_centered_matrix(m, n, center_rows != 0) };
+}
+
+/// Configure the factor shape geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_factor_shape(solver: *mut rgmin_solver_t, n: usize, p: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_factor_shape(n, p) };
+}
+
+/// Configure the unitary geometry.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_unitary(solver: *mut rgmin_solver_t, n: usize) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_unitary(n) };
 }
 
 /// Per-atom masses for `RGMIN_MANIFOLD_MW_RIGID`. `n_atoms == 0` or a

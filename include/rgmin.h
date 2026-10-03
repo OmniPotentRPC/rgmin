@@ -252,9 +252,39 @@ typedef enum rgmin_manifold_t {
     RGMIN_MANIFOLD_STIEFEL = 3,
     RGMIN_MANIFOLD_SE3 = 4,
     RGMIN_MANIFOLD_RIGID_QUOTIENT = 5,
-    RGMIN_MANIFOLD_MW_RIGID = 6
+    RGMIN_MANIFOLD_MW_RIGID = 6,
+    RGMIN_MANIFOLD_SPD = 7,
+    RGMIN_MANIFOLD_GRASSMANN = 8,
+    RGMIN_MANIFOLD_HYPERBOLIC = 9,
+    RGMIN_MANIFOLD_POINCARE = 10,
+    RGMIN_MANIFOLD_OBLIQUE = 11,
+    RGMIN_MANIFOLD_MULTINOMIAL = 12,
+    RGMIN_MANIFOLD_COMPLEX_CIRCLE = 13,
+    RGMIN_MANIFOLD_SYMMETRIC = 14,
+    RGMIN_MANIFOLD_SKEWSYMMETRIC = 15,
+    RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX = 16,
+    RGMIN_MANIFOLD_CONSTANT = 17,
+    RGMIN_MANIFOLD_MULTINOMIAL_DS = 18,
+    RGMIN_MANIFOLD_MULTINOMIAL_SYM = 19,
+    RGMIN_MANIFOLD_SPHERE_COMPLEX = 20,
+    RGMIN_MANIFOLD_POSITIVE = 21,
+    RGMIN_MANIFOLD_CENTERED_MATRIX = 22,
+    RGMIN_MANIFOLD_UNITARY = 23
 } rgmin_manifold_t;
 void rgmin_solver_set_manifold(rgmin_solver_t *solver, rgmin_manifold_t manifold);
+/** Geometry dimensions are checked by the next solver step. */
+void rgmin_solver_set_stiefel(rgmin_solver_t *solver, size_t n, size_t p);
+void rgmin_solver_set_oblique(rgmin_solver_t *solver, size_t n, size_t m);
+void rgmin_solver_set_complex_circle(rgmin_solver_t *solver, size_t n);
+void rgmin_solver_set_euclidean_complex(rgmin_solver_t *solver, size_t n);
+void rgmin_solver_set_constant(rgmin_solver_t *solver, size_t n);
+void rgmin_solver_set_multinomial_ds(rgmin_solver_t *solver, size_t n);
+void rgmin_solver_set_multinomial_sym(rgmin_solver_t *solver, size_t n);
+void rgmin_solver_set_sphere_complex(rgmin_solver_t *solver, size_t n);
+void rgmin_solver_set_positive(rgmin_solver_t *solver, size_t n);
+void rgmin_solver_set_centered_matrix(rgmin_solver_t *solver, size_t m, size_t n, int32_t center_rows);
+void rgmin_solver_set_factor_shape(rgmin_solver_t *solver, size_t n, size_t p);
+void rgmin_solver_set_unitary(rgmin_solver_t *solver, size_t n);
 /** Per-atom masses for MW_RIGID. n_atoms == 0 or masses == NULL
  *  restores unit mass. */
 void rgmin_solver_set_masses(rgmin_solver_t *solver, const double *masses,
