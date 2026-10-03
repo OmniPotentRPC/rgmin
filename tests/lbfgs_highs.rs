@@ -66,7 +66,7 @@ fn box_keeps_the_trial_inside() {
     let d = opt.highs_step(x.view(), g.view()).unwrap();
     for i in 0..x.len() {
         let t = x[i] + d[i];
-        assert!(t >= -0.3 - 1e-9 && t <= 0.3 + 1e-9, "left the box: {t}");
+        assert!((-0.3 - 1e-9..=0.3 + 1e-9).contains(&t), "left the box: {t}");
         assert!(d[i].abs() <= 0.25 + 1e-9, "left the trust: {}", d[i]);
     }
 }

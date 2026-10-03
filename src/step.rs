@@ -58,26 +58,6 @@ pub(crate) fn scale_step_atom(origin: &Array1<f64>, trial: &mut Array1<f64>, cap
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ndarray::array;
-
-    #[test]
-    fn atom_cap_does_not_crush_a_uniform_cluster_step() {
-        // 2 atoms each move 0.15. Per-atom cap 0.2 keeps the step.
-        // A Euclidean 0.2 cap would scale it down.
-        let origin = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
-        let mut trial = array![0.15, 0.0, 0.0, 1.15, 0.0, 0.0];
-        scale_step_atom(&origin, &mut trial, 0.2);
-        assert!((trial[0] - 0.15).abs() < 1e-15);
-        assert!((trial[3] - 1.15).abs() < 1e-15);
-        let mut eucl = array![0.15, 0.0, 0.0, 1.15, 0.0, 0.0];
-        scale_step(&origin, &mut eucl, 0.2);
-        assert!(eucl[0] < 0.15 - 1e-6);
-    }
-}
-
 /// Largest per-atom (xyz triple) norm of `v`; a trailing partial triple
 /// counts as one more atom, matching [`scale_step_atom`].
 pub(crate) fn max_atom_norm(v: ArrayView1<'_, f64>) -> f64 {
@@ -223,5 +203,46 @@ pub(crate) fn next_istep(lsstep: f64, control: &Control) -> f64 {
         control.istep
     } else {
         lsstep * 0.5
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    #[test]
+    fn atom_cap_does_not_crush_a_uniform_cluster_step() {
+        // 2 atoms each move 0.15. Per-atom cap 0.2 keeps the step.
+        // A Euclidean 0.2 cap would scale it down.
+        let origin = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let mut trial = array![0.15, 0.0, 0.0, 1.15, 0.0, 0.0];
+        scale_step_atom(&origin, &mut trial, 0.2);
+        assert!((trial[0] - 0.15).abs() < 1e-15);
+        assert!((trial[3] - 1.15).abs() < 1e-15);
+        let mut eucl = array![0.15, 0.0, 0.0, 1.15, 0.0, 0.0];
+        scale_step(&origin, &mut eucl, 0.2);
+        assert!(eucl[0] < 0.15 - 1e-6);
+    }
+
+    #[test]
+    fn cap_alpha_reaches_the_cap_exactly() {
+        // Atom 1 moves (3, 4, 0) per unit alpha: norm 5. Cap 0.2 -> 0.04.
+        let dir = array![3.0, 4.0, 0.0, 1.0, 0.0, 0.0];
+        let ctl = Control::default();
+        assert!((cap_alpha(dir.view(), &ctl, Some(0.2)) - 0.04).abs() < 1e-17);
+        let euclid = Control {
+            maxmove: Some(0.2),
+            ..Control::default()
+        };
+        let n = (26.0_f64).sqrt();
+        assert!((cap_alpha(dir.view(), &euclid, None) - 0.2 / n).abs() < 1e-17);
+        // The per-atom cap takes precedence; no cap is unbounded.
+        assert!((cap_alpha(dir.view(), &euclid, Some(0.2)) - 0.04).abs() < 1e-17);
+        assert_eq!(cap_alpha(dir.view(), &ctl, None), f64::INFINITY);
+        assert_eq!(
+            cap_alpha(array![0.0, 0.0].view(), &ctl, Some(0.2)),
+            f64::INFINITY
+        );
     }
 }

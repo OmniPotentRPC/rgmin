@@ -155,7 +155,7 @@ fn project_qp(d: &Array1<f64>, x: ArrayView1<f64>, opts: &HighsStep) -> Result<A
 
 fn column_bounds(k: usize, x: ArrayView1<f64>, opts: &HighsStep) -> (f64, f64) {
     let mut lo = opts.trust.map(|t| -t).unwrap_or(f64::NEG_INFINITY);
-    let mut hi = opts.trust.map(|t| t).unwrap_or(f64::INFINITY);
+    let mut hi = opts.trust.unwrap_or(f64::INFINITY);
     if let Some(b0) = opts.lo {
         lo = lo.max(b0 - x[k]);
     }
@@ -193,7 +193,7 @@ fn scale_site_motion(d: &mut Array1<f64>, n_atoms: usize, dim: usize, trust: Opt
     let Some(tmax) = trust else {
         return;
     };
-    if !(tmax > 0.0) {
+    if tmax.is_nan() || tmax <= 0.0 {
         return;
     }
     let mut max_mot = 0.0_f64;
@@ -294,12 +294,13 @@ pub fn highs_feasible_step(
         let (lo, hi) = coord_bounds(k, atom_maxmove, trust);
         cols.push(pb.add_column(c[k], lo..=hi));
     }
-    if let Some((n_atoms, dim)) = center_axes {
-        if n_atoms * dim == n && n_atoms > 0 {
-            for h in 0..dim {
-                let row: Vec<_> = (0..n_atoms).map(|i| (cols[i * dim + h], 1.0)).collect();
-                pb.add_row(0.0..=0.0, &row);
-            }
+    if let Some((n_atoms, dim)) = center_axes
+        && n_atoms * dim == n
+        && n_atoms > 0
+    {
+        for h in 0..dim {
+            let row: Vec<_> = (0..n_atoms).map(|i| (cols[i * dim + h], 1.0)).collect();
+            pb.add_row(0.0..=0.0, &row);
         }
     }
 
@@ -348,17 +349,17 @@ fn coord_bounds(k: usize, atom_maxmove: Option<f64>, trust: Option<f64>) -> (f64
     let _ = k;
     let mut lo = f64::NEG_INFINITY;
     let mut hi = f64::INFINITY;
-    if let Some(t) = trust {
-        if t > 0.0 {
-            lo = -t;
-            hi = t;
-        }
+    if let Some(t) = trust
+        && t > 0.0
+    {
+        lo = -t;
+        hi = t;
     }
-    if let Some(a) = atom_maxmove {
-        if a > 0.0 {
-            lo = lo.max(-a);
-            hi = hi.min(a);
-        }
+    if let Some(a) = atom_maxmove
+        && a > 0.0
+    {
+        lo = lo.max(-a);
+        hi = hi.min(a);
     }
     if lo > hi {
         lo = hi;

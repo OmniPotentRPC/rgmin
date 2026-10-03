@@ -22,7 +22,11 @@ pub struct MwRigid;
 
 impl Manifold for MwRigid {
     fn required_dim(&self, n: usize) -> Result<(), usize> {
-        if n >= 6 && n % 3 == 0 { Ok(()) } else { Err(n) }
+        if n >= 6 && n.is_multiple_of(3) {
+            Ok(())
+        } else {
+            Err(n)
+        }
     }
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {

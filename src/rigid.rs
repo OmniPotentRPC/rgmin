@@ -24,7 +24,7 @@ pub(crate) fn project_horizontal(
     rotate: bool,
 ) {
     let n = pos.len();
-    if n < 3 || n % 3 != 0 || vec.len() != n {
+    if n < 3 || !n.is_multiple_of(3) || vec.len() != n {
         return;
     }
     if rotate && n < 6 {

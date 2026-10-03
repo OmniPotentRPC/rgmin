@@ -16,6 +16,9 @@
 //! cold-start dispatch used by [`minimize_method`].
 
 #![warn(missing_docs)]
+// Numerical kernels take their state as explicit arguments, and the
+// small dense algebra indexes by position on purpose.
+#![allow(clippy::too_many_arguments, clippy::needless_range_loop)]
 
 /// Line-search strategies (Brent, Armijo, Goldstein, Wolfe/zoom).
 pub mod linesearch;

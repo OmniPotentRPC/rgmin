@@ -83,10 +83,10 @@ where
         }
         Accept::Energy | Accept::Nonmonotone => {
             let mut ref_e = value;
-            if accept == Accept::Nonmonotone {
-                if let Some(m) = e_hist.iter().copied().reduce(f64::max) {
-                    ref_e = m;
-                }
+            if accept == Accept::Nonmonotone
+                && let Some(m) = e_hist.iter().copied().reduce(f64::max)
+            {
+                ref_e = m;
             }
             // The strict policy tolerates a 1e-8 absolute rise; ftol_rel
             // widens that to a slack relative to the reference energy.

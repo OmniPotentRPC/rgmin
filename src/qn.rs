@@ -180,7 +180,7 @@ where
             return Ok(done(value, pos, step, gnorm));
         }
         let rhs = grad.mapv(|g| -g);
-        let dir = solve_dense(&b, &rhs).unwrap_or_else(|| rhs);
+        let dir = solve_dense(&b, &rhs).unwrap_or(rhs);
         let old = pos.clone();
         let gold = grad.clone();
         let t = take_step(

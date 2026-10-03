@@ -143,7 +143,7 @@ fn zoom_takes_a_single_fnmut_oracle() {
     };
     let alpha = zoom(&mut oracle, pos.view(), dir.view(), 0.0, 2.0, 1e-4, 0.9, 40);
     assert!(
-        alpha >= 0.0 && alpha <= 2.0,
+        (0.0..=2.0).contains(&alpha),
         "zoom left the bracket: {alpha}"
     );
     assert!(n > 0, "oracle was never called");

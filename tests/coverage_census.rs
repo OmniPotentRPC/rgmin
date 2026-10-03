@@ -33,7 +33,7 @@ fn mw_rigid_projects_out_translations_and_rotations() {
         0.0, 1.3, 0.0, //
         0.0, 0.0, 1.7
     ];
-    let translation = Array1::from(vec![1.0, 0.0, 0.0].repeat(4));
+    let translation = Array1::from([1.0, 0.0, 0.0].repeat(4));
     let projected = MwRigid.project(&x, &translation);
     let norm = projected.iter().map(|v| v * v).sum::<f64>().sqrt();
     assert!(norm < 1e-10, "a pure translation must vanish, |p| = {norm}");

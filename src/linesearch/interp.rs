@@ -44,11 +44,11 @@ pub(crate) fn cubic_min(a: f64, fa: f64, da: f64, b: f64, fb: f64, db: f64) -> O
     }
     let theta = 3.0 * (fa - fb) / w + da + db;
     let s = theta.abs().max(da.abs()).max(db.abs());
-    if !(s > 0.0) || !s.is_finite() {
+    if s.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) || !s.is_finite() {
         return None;
     }
     let disc = (theta / s) * (theta / s) - (da / s) * (db / s);
-    if !(disc >= 0.0) {
+    if disc.is_nan() || disc < 0.0 {
         return None;
     }
     let mut gamma = s * disc.sqrt();
@@ -74,7 +74,7 @@ pub(crate) fn quad_min(a: f64, fa: f64, da: f64, b: f64, fb: f64) -> Option<f64>
         return None;
     }
     let curv = fb - fa - da * w;
-    if !(curv > 0.0) {
+    if curv.is_nan() || curv <= 0.0 {
         return None;
     }
     let t = a - da * w * w / (2.0 * curv);
