@@ -1457,8 +1457,9 @@ impl Inner {
 }
 
 impl Solver {
-    /// Apply [`Control::gtol`] to a newly built L-BFGS session.
+    /// Set the gradient tolerance of the session and its internal solver.
     pub fn with_gtol(mut self, gtol: f64) -> Self {
+        self.control.gtol = gtol;
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.gtol = gtol;
         }
