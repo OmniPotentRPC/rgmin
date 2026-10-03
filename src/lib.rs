@@ -30,6 +30,8 @@ pub mod nlcg;
 mod accept;
 mod adam;
 mod bb;
+#[cfg(feature = "highs")]
+mod box_objective;
 mod control;
 mod error;
 /// C ABI, gated behind the `capi` feature.

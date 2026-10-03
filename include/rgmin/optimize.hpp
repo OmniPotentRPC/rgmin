@@ -226,6 +226,9 @@ public:
         rgmin_solver_set_cautious(ptr_, eps, alpha);
     }
     int set_highs(bool on) { return rgmin_solver_set_highs(ptr_, on ? 1 : 0); }
+    int set_box(double const* lower, double const* upper, std::size_t n) {
+        return rgmin_solver_set_box(ptr_, lower, upper, n);
+    }
     int push_pair(double const* s, double const* y, std::size_t n) {
         return rgmin_solver_push_pair(ptr_, s, y, n);
     }

@@ -121,6 +121,7 @@ typedef rgmin_status_t xts_status_t;
 #define xts_solver_set_extra_updates rgmin_solver_set_extra_updates
 #define xts_solver_set_fire_variant rgmin_solver_set_fire_variant
 #define xts_solver_set_highs rgmin_solver_set_highs
+#define xts_solver_set_box rgmin_solver_set_box
 #define xts_solver_set_linesearch rgmin_solver_set_linesearch
 #define xts_solver_set_manifold rgmin_solver_set_manifold
 #define xts_solver_set_masses rgmin_solver_set_masses

@@ -262,9 +262,21 @@ pub fn highs_feasible_step(
     trust: Option<f64>,
     center_axes: Option<(usize, usize)>,
 ) -> Result<Array1<f64>> {
+    highs_feasible_step_boxed(direction, hess, grad, atom_maxmove, trust, center_axes, None)
+}
+
+pub(crate) fn highs_feasible_step_boxed(
+    direction: Option<&Array1<f64>>,
+    hess: Option<&Array2<f64>>,
+    grad: &Array1<f64>,
+    atom_maxmove: Option<f64>,
+    trust: Option<f64>,
+    center_axes: Option<(usize, usize)>,
+    coordinate_box: Option<(ArrayView1<'_, f64>, &eindir_core::Bounds<f64>)>,
+) -> Result<Array1<f64>> {
     let n = grad.len();
     let boxed = atom_maxmove.is_some_and(|c| c > 0.0) || trust.is_some_and(|c| c > 0.0);
-    if !boxed && center_axes.is_none() {
+    if !boxed && center_axes.is_none() && coordinate_box.is_none() {
         if let Some(h) = hess {
             return Ok(crate::newton::shifted_newton(h, grad));
         }
@@ -291,7 +303,14 @@ pub fn highs_feasible_step(
     let mut pb = RowProblem::default();
     let mut cols = Vec::with_capacity(n);
     for k in 0..n {
-        let (lo, hi) = coord_bounds(k, atom_maxmove, trust);
+        let (mut lo, mut hi) = coord_bounds(k, atom_maxmove, trust);
+        if let Some((x, bounds)) = coordinate_box {
+            lo = lo.max(bounds.low[k] - x[k]);
+            hi = hi.min(bounds.high[k] - x[k]);
+            if !(lo <= hi) {
+                return Err(Error::Highs("invalid coordinate box".into()));
+            }
+        }
         cols.push(pb.add_column(c[k], lo..=hi));
     }
     if let Some((n_atoms, dim)) = center_axes
@@ -374,7 +393,7 @@ fn dense_csc(h: &Array2<f64>) -> (Vec<HighsInt>, Vec<HighsInt>, Vec<f64>) {
     let mut value = Vec::new();
     start.push(0);
     for j in 0..n {
-        for i in 0..n {
+        for i in j..n {
             let v = h[(i, j)];
             if v.abs() > 1e-16 {
                 index.push(i as HighsInt);

@@ -50,6 +50,8 @@ struct Pair {
 pub struct Lbfgs {
     memory: Vec<Pair>,
     precon_fallbacks: std::sync::atomic::AtomicUsize,
+    #[cfg(feature = "highs")]
+    pub(crate) coordinate_box: Option<eindir_core::Bounds<f64>>,
     /// Pairs retained; the usual choice is between five and ten.
     pub max_pairs: usize,
     /// Gradient-norm threshold that ends a relaxation.
@@ -92,6 +94,8 @@ impl Lbfgs {
     pub fn with_capacity(max_pairs: usize) -> Self {
         Self {
             memory: Vec::new(),
+            #[cfg(feature = "highs")]
+            coordinate_box: None,
             precon_fallbacks: std::sync::atomic::AtomicUsize::new(0),
             max_pairs: max_pairs.max(1),
             gtol: 1e-6,
@@ -644,6 +648,12 @@ impl Lbfgs {
         O: DifferentiableObjective<f64> + ?Sized,
     {
         let dir = self.direction(grad.view());
+        #[cfg(feature = "highs")]
+        let dir = if let Some(bounds) = &self.coordinate_box {
+            crate::box_objective::project_direction(bounds, pos.view(), grad.view(), dir)
+        } else {
+            dir
+        };
         // With pairs the two-loop direction is gamma-scaled and carries
         // the step length, so the search opens at the unit step
         // (Nocedal-Wright 3.5); `istep` sizes only the first, steepest
@@ -661,6 +671,19 @@ impl Lbfgs {
             control,
             atom_maxmove,
         );
+        #[cfg(feature = "highs")]
+        let t = if !t.moved && !self.memory.is_empty() && self.coordinate_box.is_some() {
+            // A related objective may have a different curvature scale.
+            self.forget();
+            let direction = crate::box_objective::project_direction(
+                self.coordinate_box.as_ref().unwrap(), pos.view(), grad.view(),
+                self.direction(grad.view()),
+            );
+            take_step(obj, pos, *value, grad, direction.view(), control.istep,
+                      linesearch, control, atom_maxmove)
+        } else {
+            t
+        };
         if t.moved {
             let s = &t.x - &*pos;
             let y = &t.g - &*grad;

@@ -1573,6 +1573,56 @@ pub unsafe extern "C" fn rgmin_solver_set_highs(solver: *mut rgmin_solver_t, ena
     }
 }
 
+/// Per-coordinate box on `x + p`. A NULL side is unbounded.
+/// `n` is the length of each non-NULL side and must match the session
+/// dimension. Returns 0, or 1 if this build has no `highs` feature.
+///
+/// # Safety
+/// `solver` is null or a live session. Each non-null side points to `n`
+/// initialized doubles and remains readable for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_box(
+    solver: *mut rgmin_solver_t,
+    lower: *const f64,
+    upper: *const f64,
+    n: usize,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_box: null solver");
+        return 1;
+    }
+    #[cfg(feature = "highs")]
+    {
+        let dim = unsafe { (*solver).solver.dim() };
+        if (!lower.is_null() || !upper.is_null()) && n != dim {
+            set_last_error("rgmin_solver_set_box: n does not match session dim");
+            return 1;
+        }
+        let lo = if lower.is_null() {
+            None
+        } else {
+            let mut dest = vec![0.0; n];
+            dest.copy_from_slice(unsafe { slice::from_raw_parts(lower, n) });
+            Some(dest)
+        };
+        let hi = if upper.is_null() {
+            None
+        } else {
+            let mut dest = vec![0.0; n];
+            dest.copy_from_slice(unsafe { slice::from_raw_parts(upper, n) });
+            Some(dest)
+        };
+        let _ = unsafe { (*solver).solver.set_box(lo, hi) };
+        0
+    }
+    #[cfg(not(feature = "highs"))]
+    {
+        let _ = (lower, upper, n);
+        set_last_error("rgmin_solver_set_box: build has no highs feature");
+        1
+    }
+}
+
 /// Embedded manifold.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

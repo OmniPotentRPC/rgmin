@@ -60,7 +60,12 @@ pub struct Solver {
     /// Per-atom masses for [`ManifoldKind::MwRigid`]. Length N, not 3N.
     masses: Option<Array1<f64>>,
     #[cfg(feature = "highs")]
+
     highs: bool,
+    #[cfg(feature = "highs")]
+    box_lo: Option<Vec<f64>>,
+    #[cfg(feature = "highs")]
+    box_hi: Option<Vec<f64>>,
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
@@ -144,7 +149,12 @@ impl Solver {
             manifold: ManifoldKind::Euclidean,
             masses: None,
             #[cfg(feature = "highs")]
+
             highs: false,
+            #[cfg(feature = "highs")]
+            box_lo: None,
+            #[cfg(feature = "highs")]
+            box_hi: None,
             last_pos: None,
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
@@ -260,6 +270,46 @@ impl Solver {
                 };
             }
         }
+    }
+
+    /// Per-coordinate box. Empty or missing sides are unbounded; length one broadcasts.
+    /// Bounds are enforced when HiGHS constraints are enabled.
+    pub fn set_box(&mut self, lo: Option<Vec<f64>>, hi: Option<Vec<f64>>) -> bool {
+        #[cfg(not(feature = "highs"))]
+        {
+            let _ = (lo, hi);
+            false
+        }
+        #[cfg(feature = "highs")]
+        {
+            self.box_lo = lo;
+            self.box_hi = hi;
+            true
+        }
+    }
+
+    fn has_coordinate_box(&self) -> bool {
+        #[cfg(feature = "highs")]
+        { self.highs && (self.box_lo.is_some() || self.box_hi.is_some()) }
+        #[cfg(not(feature = "highs"))]
+        { false }
+    }
+
+    fn stationarity_norm(&self, bounds: &eindir_core::Bounds<f64>, x: &Array1<f64>, grad: &Array1<f64>) -> f64 {
+        if self.has_coordinate_box() && self.manifold == ManifoldKind::Euclidean && !self.project_rigid {
+            let mut norm = 0.0_f64;
+            for k in 0..x.len() {
+                let lo = bounds.low[k];
+                let hi = bounds.high[k];
+                if !x[k].is_finite() || !grad[k].is_finite() || !(lo <= x[k] && x[k] <= hi) {
+                    return f64::INFINITY;
+                }
+                // Distance clipping retains gradients smaller than an ulp of x.
+                norm = norm.hypot(grad[k].clamp(x[k] - hi, x[k] - lo));
+            }
+            return norm;
+        }
+        l2(grad)
     }
 
     fn check_manifold(&self, n: usize) -> Result<()> {
@@ -518,6 +568,22 @@ impl Solver {
         if matches!(self.inner, Inner::Newton { .. } | Inner::Dogleg { .. }) {
             return Err(Error::NeedHessian);
         }
+        #[cfg(feature = "highs")]
+        {
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                solver.coordinate_box = None;
+            }
+            if self.has_coordinate_box() {
+                let bounded = crate::box_objective::BoxObjective::new(
+                    obj, self.box_lo.clone(), self.box_hi.clone(),
+                )?;
+                if bounded.clip_start(x)? { self.last_pos = None; }
+                if let Inner::Lbfgs(solver) = &mut self.inner {
+                    solver.coordinate_box = Some(bounded.bounds().clone());
+                }
+                return self.step_first_order(&bounded, x);
+            }
+        }
         self.step_first_order(obj, x)
     }
 
@@ -525,6 +591,28 @@ impl Solver {
     pub fn step_hess<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: HessianObjective + ?Sized,
+    {
+        #[cfg(feature = "highs")]
+        {
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                solver.coordinate_box = None;
+            }
+            if self.has_coordinate_box() {
+                let bounded = crate::box_objective::BoxObjective::new(
+                    obj, self.box_lo.clone(), self.box_hi.clone(),
+                )?;
+                if bounded.clip_start(x)? { self.last_pos = None; }
+                if let Inner::Lbfgs(solver) = &mut self.inner {
+                    solver.coordinate_box = Some(bounded.bounds().clone());
+                }
+                return self.step_hess_inner(&bounded, x);
+            }
+        }
+        self.step_hess_inner(obj, x)
+    }
+
+    fn step_hess_inner<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where O: HessianObjective + ?Sized,
     {
         if x.len() != self.dim || self.dim != Objective::dim(obj) {
             return Err(Error::Dim {
@@ -553,7 +641,7 @@ impl Solver {
             obj.value_and_gradient(x.view())
         };
         grad = self.horizontal_grad(x, &grad);
-        let gnorm = l2(&grad);
+        let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
         if gnorm < self.control.gtol {
             return Ok(Report {
                 value,
@@ -573,14 +661,22 @@ impl Solver {
             } else {
                 None
             };
-            if let Ok(dir) = crate::lbfgs_qp::highs_feasible_step(
-                None,
-                Some(&hess),
-                &grad,
-                self.atom_maxmove,
-                self.control.maxmove,
-                center,
-            ) {
+            let feasible = if self.has_coordinate_box() {
+                let mut model_hess = hess.clone();
+                if newton_kind == Some(NewtonKind::Rfo) {
+                    let (_, shift) = crate::sella_step::rfo_step_and_shift(&hess, &grad, 0, 1.0);
+                    for k in 0..self.dim { model_hess[(k, k)] -= shift; }
+                }
+                Ok(crate::lbfgs_qp::highs_feasible_step_boxed(
+                    None, Some(&model_hess), &grad, self.atom_maxmove,
+                    self.control.maxmove, center, Some((x.view(), obj.bounds())),
+                )?)
+            } else {
+                crate::lbfgs_qp::highs_feasible_step(
+                    None, Some(&hess), &grad, self.atom_maxmove, self.control.maxmove, center,
+                )
+            };
+            if let Ok(dir) = feasible {
                 let old = x.clone();
                 let gold = grad.clone();
                 let (npos, nval, ngrad, moved) = accept_step(
@@ -616,7 +712,7 @@ impl Solver {
                     value,
                     coords: x.clone(),
                     steps: self.steps,
-                    grad_norm: l2(&grad),
+                    grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
                 });
             }
         }
@@ -669,7 +765,7 @@ impl Solver {
             value,
             coords: x.clone(),
             steps: self.steps,
-            grad_norm: l2(&grad),
+            grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
         })
     }
 
@@ -720,7 +816,7 @@ impl Solver {
                 value: ft,
                 coords: x.clone(),
                 steps: self.steps,
-                grad_norm: l2(&gt),
+                grad_norm: self.stationarity_norm(obj.bounds(), x, &gt),
             })
         } else {
             self.remember(x, value, &grad);
@@ -729,7 +825,7 @@ impl Solver {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
-                grad_norm: l2(&grad),
+                grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
             })
         }
     }
@@ -760,7 +856,7 @@ impl Solver {
             obj.value_and_gradient(x.view())
         };
         grad = self.horizontal_grad(x, &grad);
-        let gnorm = l2(&grad);
+        let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
         if gnorm < self.control.gtol {
             return Ok(Report {
                 value,
@@ -779,7 +875,14 @@ impl Solver {
         // returns, so a decrease test there says nothing. Every other
         // Accept keeps the line-searched step_objective path.
         let lbfgs_direct = match (&self.inner, self.accept) {
-            (Inner::Lbfgs(solver), Accept::Step) => Some(solver.direction(grad.view())),
+            (Inner::Lbfgs(solver), Accept::Step) => {
+                let dir = solver.direction(grad.view());
+                #[cfg(feature = "highs")]
+                let dir = if let Some(bounds) = &solver.coordinate_box {
+                    crate::box_objective::project_direction(bounds, x.view(), grad.view(), dir)
+                } else { dir };
+                Some(dir)
+            },
             _ => None,
         };
         let lbfgs_line_searched = lbfgs_direct.is_none() && matches!(self.inner, Inner::Lbfgs(_));
@@ -806,6 +909,8 @@ impl Solver {
                 grad = ngrad;
             }
         }
+        #[cfg(feature = "highs")]
+        let boxed = self.has_coordinate_box();
         match &mut self.inner {
             Inner::Lbfgs(_) if !lbfgs_line_searched => {}
             Inner::Lbfgs(solver) => {
@@ -985,7 +1090,12 @@ impl Solver {
                 self.istep = next_istep(lsstep, &self.control);
             }
             Inner::Fire(state, ext) => {
-                let force = grad.mapv(|g| -g);
+                let mut force = grad.mapv(|g| -g);
+                #[cfg(feature = "highs")]
+                if boxed {
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                }
                 let dx = match ext {
                     Some(ext) => fire2_displacement(state, ext, &force),
                     None => fire_displacement(state, &force),
@@ -1005,7 +1115,12 @@ impl Solver {
                 let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
                 grad = ev.1;
-                let force_new = grad.mapv(|g| -g);
+                let mut force_new = grad.mapv(|g| -g);
+                #[cfg(feature = "highs")]
+                if boxed {
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut force_new);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                }
                 fire_after_v1(state, &force_new);
             }
             Inner::Bb { prev_s, prev_y } => {
@@ -1077,7 +1192,7 @@ impl Solver {
             value,
             coords: x.clone(),
             steps: self.steps,
-            grad_norm: l2(&grad),
+            grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
         })
     }
 
@@ -1161,7 +1276,7 @@ impl Solver {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
-                grad_norm: l2(&grad),
+                grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
             });
         }
         unreachable!("PSO slot populated above")

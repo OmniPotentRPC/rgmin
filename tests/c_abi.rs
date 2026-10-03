@@ -1138,3 +1138,58 @@ fn lowest_eigenpair_accepts_in_place_seed_and_point_storage() {
         assert!(out.actions <= 6);
     }
 }
+
+#[test]
+fn c_abi_set_box_status_matches_highs_feature() {
+    use rgmin::ffi::{
+        rgmin_solver_add_equality, rgmin_solver_clear_equalities, rgmin_solver_set_box,
+        rgmin_solver_set_highs, rgmin_solver_set_trust,
+    };
+    let ctrl = rgmin_control_t {
+        maxiter: 4,
+        gtol: 1e-8,
+        istep: 0.1,
+        memory: 4,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    let lo = [-1.0_f64, -2.0];
+    let hi = [1.0_f64, 2.0];
+    let idx = [0usize, 1];
+    let coef = [1.0_f64, -1.0];
+    let st_highs = unsafe { rgmin_solver_set_highs(session, 1) };
+    let st_box = unsafe { rgmin_solver_set_box(session, lo.as_ptr(), hi.as_ptr(), 2) };
+    let st_null_side = unsafe { rgmin_solver_set_box(session, std::ptr::null(), hi.as_ptr(), 2) };
+    let st_clear = unsafe { rgmin_solver_set_box(session, std::ptr::null(), std::ptr::null(), 0) };
+    let st_bad_n = unsafe { rgmin_solver_set_box(session, lo.as_ptr(), hi.as_ptr(), 3) };
+    let st_trust = unsafe { rgmin_solver_set_trust(session, 0.25) };
+    let st_eq = unsafe { rgmin_solver_add_equality(session, idx.as_ptr(), coef.as_ptr(), 2, 0.0) };
+    let st_eq_clear = unsafe { rgmin_solver_clear_equalities(session) };
+    unsafe { rgmin_solver_free(session) };
+    let null = std::ptr::null_mut();
+    let st_null = unsafe { rgmin_solver_set_box(null, lo.as_ptr(), hi.as_ptr(), 2) };
+    assert_eq!(st_null, 1);
+    #[cfg(feature = "highs")]
+    {
+        assert_eq!(st_highs, 0);
+        assert_eq!(st_box, 0);
+        assert_eq!(st_null_side, 0);
+        assert_eq!(st_clear, 0);
+        assert_eq!(st_bad_n, 1);
+        assert_eq!(st_trust, 0);
+        assert_eq!(st_eq, 0);
+        assert_eq!(st_eq_clear, 0);
+    }
+    #[cfg(not(feature = "highs"))]
+    {
+        assert_eq!(st_highs, 1);
+        assert_eq!(st_box, 1);
+        assert_eq!(st_null_side, 1);
+        assert_eq!(st_clear, 1);
+        assert_eq!(st_bad_n, 1);
+        assert_eq!(st_trust, 1);
+        assert_eq!(st_eq, 1);
+        assert_eq!(st_eq_clear, 1);
+    }
+}
