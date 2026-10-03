@@ -193,7 +193,9 @@ impl Solver {
         }
     }
 
-    /// Al-Baali extra-updates on the newest L-BFGS pair.
+    /// Al-Baali extra-updates on the newest L-BFGS pair. No effect: a
+    /// replayed newest pair leaves the BFGS map unchanged (see
+    /// [`Lbfgs::extra_updates`]).
     pub fn set_extra_updates(&mut self, extra: usize) {
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.extra_updates = extra;
@@ -302,12 +304,20 @@ impl Solver {
         (s, y)
     }
 
+    /// True when `x` is the iterate this session last evaluated, up to
+    /// a host's round trip of the coordinates.
+    ///
+    /// The test is relative, `|a - b| <= 4 eps max(|a|, |b|) + 1e-15`: a
+    /// host that copies positions through its own storage (eOn's
+    /// `Matter`, rgsaddle's band resync) can return a coordinate of
+    /// 30 Angstrom a few ulps (3.6e-15 each) away, which an absolute
+    /// 1e-15 test reads as a new geometry and pays a force call for.
     fn same_last_x(&self, x: &Array1<f64>) -> bool {
         match &self.last_pos {
             Some(p) if p.len() == x.len() => p
                 .iter()
                 .zip(x.iter())
-                .all(|(a, b)| (*a - *b).abs() <= 1e-15),
+                .all(|(a, b)| (*a - *b).abs() <= 4.0 * f64::EPSILON * a.abs().max(b.abs()) + 1e-15),
             _ => false,
         }
     }
@@ -669,20 +679,20 @@ impl Solver {
             }
             Inner::Steepest => {
                 let dir = grad.mapv(|g| -g);
-                let (npos, _, _lsstep, _) = take_step(
+                let t = take_step(
                     obj,
                     x,
                     value,
+                    &grad,
                     dir.view(),
                     self.istep,
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
                 );
-                *x = npos;
-                let ev = obj.value_and_gradient(x.view());
-                value = ev.0;
-                grad = ev.1;
+                *x = t.x;
+                value = t.f;
+                grad = t.g;
                 self.istep = qn_istep(&self.control);
             }
             Inner::Nlcg {
@@ -699,20 +709,20 @@ impl Solver {
                     *d_old = dir.clone();
                     *initialized = true;
                 }
-                let (npos, _, _lsstep, _) = take_step(
+                let t = take_step(
                     obj,
                     x,
                     value,
+                    &grad,
                     dir.view(),
                     self.istep,
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
                 );
-                *x = npos;
-                let ev = obj.value_and_gradient(x.view());
-                value = ev.0;
-                grad = ev.1;
+                *x = t.x;
+                value = t.f;
+                grad = t.g;
                 let ctx = ConjugacyContext {
                     current_gradient: grad.view(),
                     previous_gradient: g_old.view(),
@@ -731,20 +741,21 @@ impl Solver {
                 let direction = -h.dot(&grad);
                 let old = x.clone();
                 let gold = grad.clone();
-                let (npos, _, _lsstep, moved) = take_step(
+                let t = take_step(
                     obj,
                     x,
                     value,
+                    &grad,
                     direction.view(),
                     self.istep,
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
                 );
-                *x = npos;
-                let ev = obj.value_and_gradient(x.view());
-                value = ev.0;
-                grad = ev.1;
+                let moved = t.moved;
+                *x = t.x;
+                value = t.f;
+                grad = t.g;
                 if moved {
                     bfgs_inverse_update(h, &(&*x - &old), &(&grad - &gold));
                 }
@@ -754,20 +765,22 @@ impl Solver {
                 let direction = -h.dot(&grad);
                 let old = x.clone();
                 let gold = grad.clone();
-                let (npos, _, lsstep, moved) = take_step(
+                let t = take_step(
                     obj,
                     x,
                     value,
+                    &grad,
                     direction.view(),
                     self.istep,
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
                 );
-                *x = npos;
-                let ev = obj.value_and_gradient(x.view());
-                value = ev.0;
-                grad = ev.1;
+                let lsstep = t.alpha;
+                let moved = t.moved;
+                *x = t.x;
+                value = t.f;
+                grad = t.g;
                 if moved {
                     sr1_inverse_update(h, &(&*x - &old), &(&grad - &gold));
                 }
@@ -778,20 +791,22 @@ impl Solver {
                 let direction = solve_dense(b, &rhs).unwrap_or_else(|| rhs);
                 let old = x.clone();
                 let gold = grad.clone();
-                let (npos, _, lsstep, moved) = take_step(
+                let t = take_step(
                     obj,
                     x,
                     value,
+                    &grad,
                     direction.view(),
                     self.istep,
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
                 );
-                *x = npos;
-                let ev = obj.value_and_gradient(x.view());
-                value = ev.0;
-                grad = ev.1;
+                let lsstep = t.alpha;
+                let moved = t.moved;
+                *x = t.x;
+                value = t.f;
+                grad = t.g;
                 if moved {
                     sr2_hessian_update(b, &(&*x - &old), &(&grad - &gold));
                 }
@@ -807,20 +822,21 @@ impl Solver {
                 eps,
             } => {
                 let dir = adam_direction(m, v, &grad, *beta1, *beta2, *b1p, *b2p, *eps);
-                let (npos, _, lsstep, _) = take_step(
+                let t = take_step(
                     obj,
                     x,
                     value,
+                    &grad,
                     dir.view(),
                     self.istep,
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
                 );
-                *x = npos;
-                let ev = obj.value_and_gradient(x.view());
-                value = ev.0;
-                grad = ev.1;
+                let lsstep = t.alpha;
+                *x = t.x;
+                value = t.f;
+                grad = t.g;
                 *b1p *= *beta1;
                 *b2p *= *beta2;
                 self.istep = next_istep(lsstep, &self.control);
@@ -873,9 +889,17 @@ impl Solver {
             Inner::Pso { .. } | Inner::Newton { .. } | Inner::Dogleg { .. } => unreachable!(),
         }
 
-        let delta = &*x - &start;
-        let y = self.manifold.retract(&start, &delta);
-        if y.iter().zip(x.iter()).any(|(a, b)| (*a - *b).abs() > 1e-15) {
+        // A translation retract maps the accepted point to itself; the
+        // round trip start + (x - start) only adds rounding (one ulp of
+        // a 30 Angstrom coordinate is 3.6e-15) and would buy a second
+        // oracle call at the same geometry.
+        let y = if self.manifold.retract_is_translation() {
+            None
+        } else {
+            Some(self.manifold.retract(&start, &(&*x - &start)))
+        };
+        if let Some(y) = y.filter(|y| y.iter().zip(x.iter()).any(|(a, b)| (*a - *b).abs() > 1e-15))
+        {
             *x = y;
             let ev = obj.value_and_gradient(x.view());
             value = ev.0;

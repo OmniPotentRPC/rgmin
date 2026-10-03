@@ -53,6 +53,12 @@ pub enum ManifoldKind {
 }
 
 impl ManifoldKind {
+    /// True when the retraction is the translation `x + v`, so a point
+    /// reached by a Euclidean step is already on the manifold.
+    pub(crate) fn retract_is_translation(self) -> bool {
+        matches!(self, Self::Euclidean | Self::RigidQuotient | Self::MwRigid)
+    }
+
     /// Stiefel column count. `p = 1` is the sphere.
     pub fn stiefel_p(self) -> usize {
         1

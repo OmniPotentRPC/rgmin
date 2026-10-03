@@ -176,20 +176,21 @@ where
                 grad_norm: gnorm,
             });
         }
-        let (npos, _, lsstep, _) = take_step(
+        let t = take_step(
             obj,
             &pos,
             value,
+            &grad,
             dir.view(),
             istep,
             linesearch,
             control,
             None,
         );
-        pos = npos;
-        let ev = obj.value_and_gradient(pos.view());
-        value = ev.0;
-        grad = ev.1;
+        let lsstep = t.alpha;
+        pos = t.x;
+        value = t.f;
+        grad = t.g;
         let ctx = ConjugacyContext {
             current_gradient: grad.view(),
             previous_gradient: g_old.view(),

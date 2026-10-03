@@ -78,44 +78,128 @@ mod tests {
     }
 }
 
-/// Line search, clip to bounds, then cap the move. Returns `(x, f, |alpha|, moved)`.
+/// Largest per-atom (xyz triple) norm of `v`; a trailing partial triple
+/// counts as one more atom, matching [`scale_step_atom`].
+pub(crate) fn max_atom_norm(v: ArrayView1<'_, f64>) -> f64 {
+    let n = v.len();
+    let mut m: f64 = 0.0;
+    let mut i = 0;
+    while i + 3 <= n {
+        let r = (v[i] * v[i] + v[i + 1] * v[i + 1] + v[i + 2] * v[i + 2]).sqrt();
+        m = m.max(r);
+        i += 3;
+    }
+    if i < n {
+        let mut r2 = 0.0;
+        while i < n {
+            r2 += v[i] * v[i];
+            i += 1;
+        }
+        m = m.max(r2.sqrt());
+    }
+    m
+}
+
+/// Largest `alpha` for which the step `alpha dir` obeys the cap in force:
+/// the per-atom cap when set, else the Euclidean `control.maxmove`, else
+/// unbounded.
+pub(crate) fn cap_alpha(
+    dir: ArrayView1<'_, f64>,
+    control: &Control,
+    atom_maxmove: Option<f64>,
+) -> f64 {
+    let (cap, len) = if let Some(cap) = atom_maxmove {
+        (cap, max_atom_norm(dir))
+    } else if let Some(cap) = control.maxmove {
+        (cap, crate::vecops::nrm2(dir))
+    } else {
+        return f64::INFINITY;
+    };
+    if len > 0.0 && len.is_finite() {
+        cap / len
+    } else {
+        f64::INFINITY
+    }
+}
+
+/// One line-searched move, with the oracle answer at its end.
+pub(crate) struct Taken {
+    /// The accepted point, or the start when nothing was accepted.
+    pub x: Array1<f64>,
+    /// `f` at [`Self::x`].
+    pub f: f64,
+    /// `g` at [`Self::x`].
+    pub g: Array1<f64>,
+    /// Accepted step length; 0 when nothing was accepted.
+    pub alpha: f64,
+    /// Whether the move was accepted.
+    pub moved: bool,
+}
+
+/// Line search from the known `(value, grad)` at `pos`, inside the cap,
+/// then clip to bounds.
 ///
-/// `atom_maxmove` caps the largest per-atom displacement
-/// ([`scale_step_atom`]) and takes precedence over the Euclidean
-/// `control.maxmove` ([`scale_step`]), the same order the session's
-/// FIRE and BB arms apply.
+/// The cap is applied before the search, as the bound `alpha_max` on its
+/// trials ([`cap_alpha`]): every point the search evaluates obeys
+/// `atom_maxmove` (which takes precedence) or the Euclidean
+/// `control.maxmove`, and the accepted trial's value and gradient are the
+/// oracle's answer at the returned point. A clip to the objective's box
+/// that moves the accepted trial costs one more evaluation there.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn take_step<O>(
     obj: &O,
     pos: &Array1<f64>,
     value: f64,
+    grad: &Array1<f64>,
     dir: ArrayView1<'_, f64>,
     istep: f64,
     linesearch: LineSearch,
     control: &Control,
     atom_maxmove: Option<f64>,
-) -> (Array1<f64>, f64, f64, bool)
+) -> Taken
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let (npos, nval, lsstep) =
-        linesearch.search(|x| obj.value_and_gradient(x), pos.view(), dir, istep);
-    let mut trial = obj.bounds().clip(npos.view());
-    if let Some(cap) = atom_maxmove {
-        scale_step_atom(pos, &mut trial, cap);
-    } else if let Some(cap) = control.maxmove {
-        scale_step(pos, &mut trial, cap);
-    }
-    // A search that found no lower point hands back the start with
-    // lsstep 0; ftol_rel admits a trial that rises within the slack, so
-    // the search has to have moved for the pair `s` to be nonzero.
+    let amax = cap_alpha(dir, control, atom_maxmove);
+    let unmoved = || Taken {
+        x: pos.clone(),
+        f: value,
+        g: grad.clone(),
+        alpha: 0.0,
+        moved: false,
+    };
+    let Some(out) = linesearch.search_from(
+        |x| obj.value_and_gradient(x),
+        pos.view(),
+        value,
+        grad.view(),
+        dir,
+        istep,
+        amax,
+    ) else {
+        return unmoved();
+    };
+    let trial = obj.bounds().clip(out.x.view());
+    let (x, f, g) = if trial == out.x {
+        (out.x, out.f, out.g)
+    } else {
+        let (f, g) = obj.value_and_gradient(trial.view());
+        (trial, f, g)
+    };
     let accepted = match control.ftol_rel {
-        Some(_) => lsstep > 0.0 && nval - value <= control.ftol_slack(value),
-        None => nval < value,
+        Some(_) => f - value <= control.ftol_slack(value),
+        None => f < value,
     };
     if accepted {
-        (trial, nval, lsstep, true)
+        Taken {
+            x,
+            f,
+            g,
+            alpha: out.alpha,
+            moved: true,
+        }
     } else {
-        (pos.clone(), value, 0.0, false)
+        unmoved()
     }
 }
 

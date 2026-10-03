@@ -58,20 +58,21 @@ where
             });
         }
         let dir = adam_direction(&mut m, &mut v, &grad, beta1, beta2, b1p, b2p, eps);
-        let (npos, _, lsstep, _) = take_step(
+        let t = take_step(
             obj,
             &pos,
             value,
+            &grad,
             dir.view(),
             istep,
             linesearch,
             control,
             None,
         );
-        pos = npos;
-        let ev = obj.value_and_gradient(pos.view());
-        value = ev.0;
-        grad = ev.1;
+        let lsstep = t.alpha;
+        pos = t.x;
+        value = t.f;
+        grad = t.g;
         b1p *= beta1;
         b2p *= beta2;
         istep = next_istep(lsstep, control);

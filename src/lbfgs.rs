@@ -61,7 +61,14 @@ pub struct Lbfgs {
     pub max_line_evals: usize,
     /// Norm used against [`Lbfgs::gtol`].
     pub norm: GradNorm,
-    /// Al-Baali extra-updates: replay the newest pair this many extra times.
+    /// Al-Baali extra-updates as eOn's `lbfgs_extra_updates` names them:
+    /// replay the newest pair this many extra times.
+    ///
+    /// It has no effect, and the two-loop map ignores it: the BFGS update
+    /// with `(s, y)` maps any `H` that already satisfies `H y = s` to
+    /// itself, so a replayed newest pair leaves `H` unchanged in exact
+    /// arithmetic (`validation/lbfgs_two_loop.py`, check 3). The field
+    /// stays for source compatibility.
     pub extra_updates: usize,
     /// Li-Fukushima cautious `ε`. Zero disables the filter.
     pub cautious_eps: f64,
@@ -150,16 +157,9 @@ impl Lbfgs {
     ) -> Array1<f64> {
         let mut q = g.to_owned();
         let m = self.memory.len();
-        let mut idxs: Vec<usize> = (0..m).collect();
-        for _ in 0..self.extra_updates {
-            if m > 0 {
-                idxs.push(m - 1);
-            }
-        }
-        let mut alpha = vec![0.0; idxs.len()];
-        for k in (0..idxs.len()).rev() {
-            let i = idxs[k];
-            let p = &self.memory[i];
+        let mut alpha = vec![0.0; m];
+        for k in (0..m).rev() {
+            let p = &self.memory[k];
             let a = p.rho * crate::vecops::dot(p.s.view(), q.view());
             alpha[k] = a;
             crate::vecops::axpy(-a, p.y.view(), &mut q);
@@ -169,9 +169,7 @@ impl Lbfgs {
         } else {
             q = self.scale_gamma(q);
         }
-        for k in 0..idxs.len() {
-            let i = idxs[k];
-            let p = &self.memory[i];
+        for (k, p) in self.memory.iter().enumerate() {
             let b = p.rho * crate::vecops::dot(p.y.view(), q.view());
             crate::vecops::axpy(alpha[k] - b, p.s.view(), &mut q);
         }
@@ -625,25 +623,25 @@ impl Lbfgs {
         O: DifferentiableObjective<f64> + ?Sized,
     {
         let dir = self.direction(grad.view());
-        let old = pos.clone();
-        let gold = grad.clone();
-        let (npos, _, _lsstep, moved) = take_step(
+        let t = take_step(
             obj,
             pos,
             *value,
+            grad,
             dir.view(),
             *istep,
             linesearch,
             control,
             atom_maxmove,
         );
-        *pos = npos;
-        let ev = obj.value_and_gradient(pos.view());
-        *value = ev.0;
-        *grad = ev.1;
-        if moved {
-            self.push(&*pos - &old, &*grad - &gold);
+        if t.moved {
+            let s = &t.x - &*pos;
+            let y = &t.g - &*grad;
+            self.push(s, y);
         }
+        *pos = t.x;
+        *value = t.f;
+        *grad = t.g;
         *istep = qn_istep(control);
     }
 }

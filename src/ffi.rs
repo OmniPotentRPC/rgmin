@@ -917,7 +917,8 @@ pub unsafe extern "C" fn rgmin_solver_set_project_rigid(solver: *mut rgmin_solve
     unsafe { (*solver).solver.set_project_rigid(enabled != 0) };
 }
 
-/// Al-Baali extra-updates on the newest L-BFGS pair.
+/// Al-Baali extra-updates on the newest L-BFGS pair. Accepted and
+/// ignored: replaying the newest pair leaves the BFGS map unchanged.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_extra_updates(solver: *mut rgmin_solver_t, extra: usize) {
     if solver.is_null() {
