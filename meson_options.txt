@@ -1,0 +1,6 @@
+option(
+    'rgmin_features',
+    type: 'string',
+    value: 'capi,highs',
+    description: 'cargo features for this subproject. highs supplies the box and trust setters and needs a libclang new enough for the HiGHS headers; drop it to capi where that is absent.',
+)

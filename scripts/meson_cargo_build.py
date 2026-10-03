@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Build the rgmin C ABI via cargo rustc and copy artifacts."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) not in (9, 10):
+        print(
+            "usage: meson_cargo_build.py CARGO SRC_ROOT TARGET_DIR PROFILE "
+            "SHARED_NAME STATIC_NAME OUT_SHARED OUT_STATIC [FEATURES]",
+            file=sys.stderr,
+        )
+        return 2
+    (
+        cargo,
+        src_root,
+        target_dir,
+        profile,
+        shared_name,
+        static_name,
+        out_shared,
+        out_static,
+    ) = argv[1:9]
+    features = argv[9] if len(argv) == 10 else ""
+    src_root_p = Path(src_root)
+    native_toolchain = {
+        name: os.environ.get(name, "")
+        for name in (
+            "CC", "CXX", "AR", "CFLAGS", "CXXFLAGS", "CPPFLAGS",
+            "CMAKE_TOOLCHAIN_FILE", "RGMIN_NATIVE_TOOLCHAIN",
+        )
+    }
+    toolchain_key = hashlib.sha256(
+        json.dumps(native_toolchain, sort_keys=True).encode()
+    ).hexdigest()[:16]
+    # Native build scripts can cache CMake outputs without tracking CC/CXX.
+    target_dir = str(Path(target_dir) / toolchain_key)
+    cmd = [
+        cargo,
+        "rustc",
+        "--lib",
+        "--manifest-path",
+        str(src_root_p / "Cargo.toml"),
+        "--target-dir",
+        target_dir,
+    ]
+    if (src_root_p / "Cargo.lock").is_file():
+        cmd.append("--locked")
+    if (src_root_p / "vendor").is_dir():
+        cmd.append("--offline")
+    if profile == "release":
+        cmd.append("--release")
+    if features.strip():
+        cmd.extend(["--features", features.strip()])
+    rustc_args = ["--crate-type=cdylib", "--crate-type=staticlib"]
+    if sys.platform.startswith("linux"):
+        rustc_args.append(f"-Clink-arg=-Wl,-soname,{shared_name}")
+    elif sys.platform == "darwin":
+        rustc_args.append(f"-Clink-arg=-Wl,-install_name,@rpath/{shared_name}")
+    cmd.extend(["--", *rustc_args])
+    env = os.environ.copy()
+    subprocess.check_call(cmd, cwd=src_root, env=env)
+    built = Path(target_dir) / profile
+    shutil.copy2(built / shared_name, out_shared)
+    shutil.copy2(built / static_name, out_static)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
