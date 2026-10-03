@@ -42,6 +42,12 @@ pub enum Error {
         /// Outer iterations completed when the radius hit its floor.
         steps: usize,
     },
+    /// Host oracle returned a non-finite value or gradient.
+    #[error("oracle: {what}")]
+    Oracle {
+        /// What the host callback failed to produce.
+        what: &'static str,
+    },
     /// Named eigensolver is not linked in this build.
     #[error("eigensolver {kind} is not linked in this build")]
     EigenUnavailable {

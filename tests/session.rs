@@ -762,3 +762,121 @@ fn lbfgs_accept_step_is_one_oracle_per_step() {
     assert!(rep.grad_norm < 1e-8, "gnorm {}", rep.grad_norm);
     assert!(rep.value < 1e-14, "value {}", rep.value);
 }
+
+#[test]
+fn one_eval_outer_pairs_reach_the_quadratic_bowl() {
+    // Dimer translation supplies one gradient per outer and cannot
+    // answer a trial eval. The pair that belongs in memory is the one
+    // between successive outers.
+    let mut solver = Solver::new(Method::lbfgs(), control(), 2);
+    let mut x = array![1.0, 1.0];
+    let mut prev: Option<(Array1<f64>, Array1<f64>)> = None;
+    for _ in 0..40 {
+        let g = x.mapv(|v| 2.0 * v);
+        if g.iter().map(|v| v * v).sum::<f64>().sqrt() < 1e-8 {
+            break;
+        }
+        if let Some((px, pg)) = prev {
+            assert!(solver.push_pair((&x - &px).view(), (&g - &pg).view()));
+        }
+        let dir = solver.search_direction(g.view()).unwrap();
+        let mut step = dir;
+        let n = step.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if n > 0.2 {
+            step *= 0.2 / n;
+        }
+        prev = Some((x.clone(), g.clone()));
+        x = x + step;
+    }
+    assert!(
+        x.iter().all(|v| v.abs() < 1e-4),
+        "one-eval L-BFGS stalled at {x:?}"
+    );
+}
+
+#[test]
+fn rebase_keeps_curvature_and_drops_the_point() {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::ArrayView1;
+
+    // Two related objectives: one anisotropic quadratic, then the same
+    // quadratic with its minimum moved, the sequence a marginal-likelihood
+    // fit sees as observations arrive. Rebase keeps the curvature pairs and
+    // drops the previous point, so the second fit starts from a fresh
+    // evaluation of the second objective preconditioned by the first.
+    struct Shifted(f64);
+    impl Objective<f64> for Shifted {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            use std::sync::OnceLock;
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| Bounds::new(array![-1e6, -1e6], array![1e6, 1e6], 0.0))
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            5.0 * (x[0] - self.0) * (x[0] - self.0) + 0.5 * (x[1] + self.0) * (x[1] + self.0)
+        }
+    }
+    impl Gradient<f64> for Shifted {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            array![10.0 * (x[0] - self.0), x[1] + self.0]
+        }
+    }
+    impl DifferentiableObjective<f64> for Shifted {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+
+    let first = Shifted(0.0);
+    let second = Shifted(0.3);
+    let mut warm = Solver::new(Method::lbfgs(), control(), 2).with_gtol(1e-10);
+    let mut x = array![2.0, -3.0];
+    for _ in 0..80 {
+        let rep = warm.step(&first, &mut x).unwrap();
+        if rep.grad_norm < 1e-10 {
+            break;
+        }
+    }
+    let pairs = warm.pair_count();
+    assert!(pairs > 0, "the first quench must leave curvature pairs");
+    warm.rebase();
+    assert_eq!(warm.pair_count(), pairs, "rebase keeps the pairs");
+    let start = x.clone();
+    // The first step after the rebase is taken on the second objective at
+    // the retained point: its report carries that objective's value.
+    let rep = warm.step(&second, &mut x).unwrap();
+    assert!(rep.value < second.eval(start.view()), "rebased step descends the second objective");
+    let mut warm_steps = 1usize;
+    for _ in 0..80 {
+        if rep.grad_norm < 1e-10 {
+            break;
+        }
+        warm_steps += 1;
+        let rep = warm.step(&second, &mut x).unwrap();
+        if rep.grad_norm < 1e-10 {
+            break;
+        }
+    }
+    assert!((x[0] - 0.3).abs() < 1e-6 && (x[1] + 0.3).abs() < 1e-6);
+
+    let mut cold = Solver::new(Method::lbfgs(), control(), 2).with_gtol(1e-10);
+    let mut y = start.clone();
+    let mut cold_steps = 0usize;
+    for _ in 0..80 {
+        cold_steps += 1;
+        let rep = cold.step(&second, &mut y).unwrap();
+        if rep.grad_norm < 1e-10 {
+            break;
+        }
+    }
+    assert!(
+        warm_steps <= cold_steps,
+        "rebased {warm_steps} should not exceed cold {cold_steps}"
+    );
+}
+

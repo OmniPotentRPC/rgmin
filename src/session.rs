@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 
 use eindir_core::{DifferentiableObjective, Objective};
-use ndarray::{Array1, Array2};
+use ndarray::{Array1, Array2, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
@@ -393,6 +393,66 @@ impl Solver {
     /// rotates by `theta`. Small rotations between steps keep the memory
     /// useful; after a large one call [`Self::forget`].
     pub fn forget_evaluation(&mut self) {
+        self.last_pos = None;
+    }
+
+    /// Record `s = x+ - x`, `y = g+ - g` from the caller's previous outer.
+    ///
+    /// A dimer (or any one-oracle-per-outer walker) cannot answer the
+    /// second eval [`Self::step`] would take at the trial point. The
+    /// pair that belongs in L-BFGS memory is the one between successive
+    /// outers, not a frozen-gradient inner trial (that writes `y = 0`
+    /// and wrecks the two-loop).
+    pub fn push_pair(&mut self, s: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
+        if s.len() != self.dim || y.len() != self.dim {
+            return false;
+        }
+        match &mut self.inner {
+            Inner::Lbfgs(solver) => {
+                solver.push(s.to_owned(), y.to_owned());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Number of accepted L-BFGS curvature pairs retained by the session.
+    pub fn pair_count(&self) -> usize {
+        match &self.inner {
+            Inner::Lbfgs(solver) => solver.len(),
+            _ => 0,
+        }
+    }
+
+    /// Two-loop direction `d = -H g` with no evaluation and no push.
+    pub fn search_direction(&self, g: ArrayView1<f64>) -> Result<Array1<f64>> {
+        if g.len() != self.dim {
+            return Err(Error::Dim {
+                dim: self.dim,
+                got: g.len(),
+            });
+        }
+        let dir = match &self.inner {
+            // Two-loop only. search_direction would try HiGHS from
+            // whatever x the caller did not pass; the dimer waist is
+            // the Nocedal pair book, not a boxed QP.
+            Inner::Lbfgs(solver) => solver.direction(g),
+            _ => g.mapv(|v| -v),
+        };
+        if dir.iter().any(|v| !v.is_finite()) {
+            return Err(Error::Oracle {
+                what: "non-finite search direction",
+            });
+        }
+        Ok(dir)
+    }
+
+    /// Keep method memory and discard the cached point and acceptance window.
+    /// The next step evaluates the current objective at the supplied point
+    /// with the initial step scale and the retained curvature information.
+    pub fn rebase(&mut self) {
+        self.istep = self.control.istep;
+        self.e_hist.clear();
         self.last_pos = None;
     }
 
