@@ -147,7 +147,7 @@ impl Lbfgs {
         }
     }
 
-    fn search_direction(&self, x: ArrayView1<f64>, g: ArrayView1<f64>) -> Array1<f64> {
+    pub(crate) fn search_direction(&self, x: ArrayView1<f64>, g: ArrayView1<f64>) -> Array1<f64> {
         #[cfg(feature = "highs")]
         if self.highs.is_some()
             && let Ok(d) = self.highs_step(x, g)
@@ -220,6 +220,16 @@ impl Lbfgs {
     /// Two-loop direction `d = −H g` (Nocedal-Wright 7.4).
     pub fn two_loop(&self, g: ArrayView1<f64>) -> Array1<f64> {
         self.direction(g)
+    }
+
+    pub(crate) fn transport<F>(&mut self, mut map: F)
+    where
+        F: FnMut(&Array1<f64>) -> Array1<f64>,
+    {
+        let pairs = std::mem::take(&mut self.memory);
+        for pair in pairs {
+            self.push_pair(map(&pair.s), map(&pair.y), None);
+        }
     }
 
     pub(crate) fn push(&mut self, s: Array1<f64>, y: Array1<f64>) {

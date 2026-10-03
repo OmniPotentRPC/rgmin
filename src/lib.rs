@@ -71,6 +71,7 @@ mod rigid;
 /// Moller scaled conjugate gradient (damped-model step, no line search).
 pub mod scg;
 mod session;
+mod sphere_lbfgs;
 mod step;
 mod trust;
 /// The vector seam: solver algebra behind one interface.
