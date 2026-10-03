@@ -11,6 +11,7 @@ theorem signed_qn_hasDerivAt (curvature gradient sign alpha : ℝ)
       (gradient * sign / (curvature + alpha * sign) ^ 2) alpha := by
   have hd : HasDerivAt (fun a : ℝ => curvature + a * sign) sign alpha := by
     simpa using ((hasDerivAt_id alpha).mul_const sign).const_add curvature
-  convert (hasDerivAt_const alpha (-gradient)).div hd hne using 1 <;> ring
+  simpa only [zero_mul, zero_sub, neg_mul, neg_neg] using
+    (hasDerivAt_const alpha (-gradient)).div hd hne
 
 end Rgmin
