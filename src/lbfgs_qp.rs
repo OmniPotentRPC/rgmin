@@ -66,9 +66,15 @@ impl HighsStep {
 unsafe extern "C" {
     fn Highs_setCallback(
         highs: *mut std::os::raw::c_void,
-        callback: Option<unsafe extern "C" fn(
-            i32, *const std::os::raw::c_char, *const std::os::raw::c_void,
-            *mut std::os::raw::c_void, *mut std::os::raw::c_void)>,
+        callback: Option<
+            unsafe extern "C" fn(
+                i32,
+                *const std::os::raw::c_char,
+                *const std::os::raw::c_void,
+                *mut std::os::raw::c_void,
+                *mut std::os::raw::c_void,
+            ),
+        >,
         user: *mut std::os::raw::c_void,
     ) -> HighsInt;
     fn Highs_startCallback(highs: *mut std::os::raw::c_void, kind: i32) -> HighsInt;
@@ -96,11 +102,13 @@ unsafe extern "C" fn highs_callback(
 
 fn apply_engine(model: &mut highs::Model, options: &HighsOptions) -> Result<()> {
     if let Some(name) = options.solver.as_highs() {
-        model.try_set_option("solver", name)
+        model
+            .try_set_option("solver", name)
             .map_err(|_| Error::Highs(format!("cannot set solver={name}")))?;
     }
     if let Some(name) = options.crossover.as_highs() {
-        model.try_set_option("run_crossover", name)
+        model
+            .try_set_option("run_crossover", name)
             .map_err(|_| Error::Highs(format!("cannot set run_crossover={name}")))?;
     }
     Ok(())
@@ -111,7 +119,9 @@ fn bind_callback(
     options: &HighsOptions,
     owner: &mut Option<Box<HighsCallback>>,
 ) -> Result<()> {
-    let Some(binding) = options.callback else { return Ok(()); };
+    let Some(binding) = options.callback else {
+        return Ok(());
+    };
     *owner = Some(Box::new(binding));
     let ptr = model.as_mut_ptr();
     let context = owner.as_mut().unwrap().as_mut() as *mut HighsCallback;
@@ -122,7 +132,9 @@ fn bind_callback(
     for kind in [0, 1, 2] {
         let status = unsafe { Highs_startCallback(ptr, kind) };
         if status != STATUS_OK {
-            return Err(Error::Highs(format!("start callback {kind}: status {status}")));
+            return Err(Error::Highs(format!(
+                "start callback {kind}: status {status}"
+            )));
         }
     }
     Ok(())
@@ -172,7 +184,10 @@ pub fn highs_projected_step(
         let mut centered = constraints.clone();
         centered.center_axes = None;
         for axis in 0..dim {
-            centered.equalities.push(((0..atoms).map(|atom| (atom * dim + axis, 1.0)).collect(), 0.0));
+            centered.equalities.push((
+                (0..atoms).map(|atom| (atom * dim + axis, 1.0)).collect(),
+                0.0,
+            ));
         }
         project_qp(direction, point, &centered, options)
     } else {
@@ -180,22 +195,41 @@ pub fn highs_projected_step(
     }
 }
 
-fn project_qp(d: &Array1<f64>, x: ArrayView1<f64>, opts: &HighsStep, options: &HighsOptions) -> Result<Array1<f64>> {
+fn project_qp(
+    d: &Array1<f64>,
+    x: ArrayView1<f64>,
+    opts: &HighsStep,
+    options: &HighsOptions,
+) -> Result<Array1<f64>> {
     let n = d.len();
-    if x.len() != n { return Err(Error::Dim { got: x.len(), dim: n }); }
+    if x.len() != n {
+        return Err(Error::Dim {
+            got: x.len(),
+            dim: n,
+        });
+    }
     if d.iter().chain(x.iter()).any(|v| !v.is_finite())
         || opts.trust.is_some_and(|t| !t.is_finite() || t < 0.0)
-        || opts.lo.is_some_and(f64::is_nan) || opts.hi.is_some_and(f64::is_nan)
-        || opts.equalities.iter().any(|(row, rhs)| !rhs.is_finite()
-            || row.iter().any(|(i, a)| *i >= n || !a.is_finite())) {
+        || opts.lo.is_some_and(f64::is_nan)
+        || opts.hi.is_some_and(f64::is_nan)
+        || opts.equalities.iter().any(|(row, rhs)| {
+            !rhs.is_finite() || row.iter().any(|(i, a)| *i >= n || !a.is_finite())
+        })
+    {
         return Err(Error::Highs("invalid projection data".into()));
     }
     for k in 0..n {
-        let lo = opts.trust.map_or(f64::NEG_INFINITY, |t| -t)
+        let lo = opts
+            .trust
+            .map_or(f64::NEG_INFINITY, |t| -t)
             .max(opts.lo.map_or(f64::NEG_INFINITY, |v| v - x[k]));
-        let hi = opts.trust.unwrap_or(f64::INFINITY)
+        let hi = opts
+            .trust
+            .unwrap_or(f64::INFINITY)
             .min(opts.hi.map_or(f64::INFINITY, |v| v - x[k]));
-        if lo > hi { return Err(Error::Highs("infeasible projection box".into())); }
+        if lo > hi {
+            return Err(Error::Highs("infeasible projection box".into()));
+        }
     }
     let mut pb = RowProblem::default();
     let mut cols = Vec::with_capacity(n);
@@ -214,7 +248,9 @@ fn project_qp(d: &Array1<f64>, x: ArrayView1<f64>, opts: &HighsStep, options: &H
     let mut model = pb
         .try_optimise(Sense::Minimise)
         .map_err(|e| Error::Highs(format!("pass LP {e:?}")))?;
-    if options.callback.is_none() { model.make_quiet(); }
+    if options.callback.is_none() {
+        model.make_quiet();
+    }
     apply_engine(&mut model, options)?;
     serialise_openmp_once();
     model
@@ -367,7 +403,15 @@ pub fn highs_feasible_step(
     trust: Option<f64>,
     center_axes: Option<(usize, usize)>,
 ) -> Result<Array1<f64>> {
-    highs_feasible_step_with_options(direction, hess, grad, atom_maxmove, trust, center_axes, &HighsOptions::default())
+    highs_feasible_step_with_options(
+        direction,
+        hess,
+        grad,
+        atom_maxmove,
+        trust,
+        center_axes,
+        &HighsOptions::default(),
+    )
 }
 
 /// [`highs_feasible_step`] with explicit engine and callback policies.
@@ -467,7 +511,9 @@ pub(crate) fn highs_feasible_step_boxed(
     let mut model = pb
         .try_optimise(Sense::Minimise)
         .map_err(|e| Error::Highs(format!("pass LP {e:?}")))?;
-    if options.callback.is_none() { model.make_quiet(); }
+    if options.callback.is_none() {
+        model.make_quiet();
+    }
     apply_engine(&mut model, options)?;
     serialise_openmp_once();
     let _ = model.try_set_option("parallel", "off");

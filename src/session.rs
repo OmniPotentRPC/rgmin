@@ -382,7 +382,10 @@ impl Solver {
             true
         }
         #[cfg(not(feature = "highs"))]
-        { let _ = solver; false }
+        {
+            let _ = solver;
+            false
+        }
     }
 
     /// Select a HiGHS crossover policy. Returns false when the feature is absent.
@@ -394,7 +397,10 @@ impl Solver {
             true
         }
         #[cfg(not(feature = "highs"))]
-        { let _ = crossover; false }
+        {
+            let _ = crossover;
+            false
+        }
     }
 
     /// Set or clear a host callback. Returns false when HiGHS is absent.
@@ -406,7 +412,10 @@ impl Solver {
             true
         }
         #[cfg(not(feature = "highs"))]
-        { let _ = callback; false }
+        {
+            let _ = callback;
+            false
+        }
     }
 
     /// Per-coordinate box. Empty or missing sides are unbounded; length one broadcasts.
@@ -1232,7 +1241,7 @@ impl Solver {
                         center,
                         self.has_coordinate_box().then(|| (x.view(), obj.bounds())),
                         &self.equalities,
-                    &self.highs_options,
+                        &self.highs_options,
                     )?)
                 } else {
                     None

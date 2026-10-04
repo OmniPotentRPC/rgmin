@@ -1880,15 +1880,23 @@ pub unsafe extern "C" fn rgmin_solver_clear_equalities(solver: *mut rgmin_solver
 /// # Safety
 /// `solver` is null or a live handle from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_solver_set_highs_solver(solver: *mut rgmin_solver_t, kind: i32) -> i32 {
+pub unsafe extern "C" fn rgmin_solver_set_highs_solver(
+    solver: *mut rgmin_solver_t,
+    kind: i32,
+) -> i32 {
     let Some(solver) = (unsafe { solver.as_mut() }) else {
-        set_last_error("rgmin_solver_set_highs_solver: null solver"); return 1;
+        set_last_error("rgmin_solver_set_highs_solver: null solver");
+        return 1;
     };
     let Some(kind) = crate::HighsSolverKind::from_ordinal(kind) else {
-        set_last_error("rgmin_solver_set_highs_solver: unknown token"); return 1;
+        set_last_error("rgmin_solver_set_highs_solver: unknown token");
+        return 1;
     };
-    if solver.solver.set_highs_solver(kind) { 0 } else {
-        set_last_error("rgmin_solver_set_highs_solver: build has no highs feature"); 1
+    if solver.solver.set_highs_solver(kind) {
+        0
+    } else {
+        set_last_error("rgmin_solver_set_highs_solver: build has no highs feature");
+        1
     }
 }
 
@@ -1897,15 +1905,23 @@ pub unsafe extern "C" fn rgmin_solver_set_highs_solver(solver: *mut rgmin_solver
 /// # Safety
 /// `solver` is null or a live handle from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_solver_set_highs_crossover(solver: *mut rgmin_solver_t, kind: i32) -> i32 {
+pub unsafe extern "C" fn rgmin_solver_set_highs_crossover(
+    solver: *mut rgmin_solver_t,
+    kind: i32,
+) -> i32 {
     let Some(solver) = (unsafe { solver.as_mut() }) else {
-        set_last_error("rgmin_solver_set_highs_crossover: null solver"); return 1;
+        set_last_error("rgmin_solver_set_highs_crossover: null solver");
+        return 1;
     };
     let Some(kind) = crate::HighsCrossover::from_ordinal(kind) else {
-        set_last_error("rgmin_solver_set_highs_crossover: unknown token"); return 1;
+        set_last_error("rgmin_solver_set_highs_crossover: unknown token");
+        return 1;
     };
-    if solver.solver.set_highs_crossover(kind) { 0 } else {
-        set_last_error("rgmin_solver_set_highs_crossover: build has no highs feature"); 1
+    if solver.solver.set_highs_crossover(kind) {
+        0
+    } else {
+        set_last_error("rgmin_solver_set_highs_crossover: build has no highs feature");
+        1
     }
 }
 
@@ -1916,14 +1932,20 @@ pub unsafe extern "C" fn rgmin_solver_set_highs_crossover(solver: *mut rgmin_sol
 /// valid until cleared or the solver is freed; the callback must not unwind.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_highs_callback(
-    solver: *mut rgmin_solver_t, callback: Option<rgmin_highs_callback_t>, user: *mut c_void,
+    solver: *mut rgmin_solver_t,
+    callback: Option<rgmin_highs_callback_t>,
+    user: *mut c_void,
 ) -> i32 {
     let Some(solver) = (unsafe { solver.as_mut() }) else {
-        set_last_error("rgmin_solver_set_highs_callback: null solver"); return 1;
+        set_last_error("rgmin_solver_set_highs_callback: null solver");
+        return 1;
     };
     let binding = callback.map(|function| unsafe { crate::HighsCallback::new(function, user) });
-    if solver.solver.set_highs_callback(binding) { 0 } else {
-        set_last_error("rgmin_solver_set_highs_callback: build has no highs feature"); 1
+    if solver.solver.set_highs_callback(binding) {
+        0
+    } else {
+        set_last_error("rgmin_solver_set_highs_callback: build has no highs feature");
+        1
     }
 }
 

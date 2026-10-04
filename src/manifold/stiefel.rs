@@ -21,11 +21,17 @@ pub struct Stiefel;
 
 impl Stiefel {
     /// Length-inferred `St(n, 1)` geometry.
-    pub fn p1() -> Self { Self }
+    pub fn p1() -> Self {
+        Self
+    }
     /// Zero denotes the length-inferred row count.
-    pub fn rows(self) -> usize { 0 }
+    pub fn rows(self) -> usize {
+        0
+    }
     /// A single orthonormal column.
-    pub fn columns(self) -> usize { 1 }
+    pub fn columns(self) -> usize {
+        1
+    }
 }
 
 impl Manifold for Stiefel {
@@ -53,9 +59,13 @@ pub struct StiefelNp {
 
 impl StiefelNp {
     /// Ambient row count.
-    pub fn rows(self) -> usize { self.n }
+    pub fn rows(self) -> usize {
+        self.n
+    }
     /// Number of orthonormal columns.
-    pub fn columns(self) -> usize { self.p }
+    pub fn columns(self) -> usize {
+        self.p
+    }
 
     /// \(\mathrm{St}(n,p)\) with \(n \ge p \ge 2\).
     pub fn new(n: usize, p: usize) -> Result<Self, (usize, usize)> {

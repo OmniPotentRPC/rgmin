@@ -729,9 +729,7 @@ impl Lbfgs {
             let direction = self.direction(grad.view());
             #[cfg(feature = "highs")]
             let direction = if let Some(bounds) = &self.coordinate_box {
-                crate::box_objective::project_direction(
-                    bounds, pos.view(), grad.view(), direction,
-                )
+                crate::box_objective::project_direction(bounds, pos.view(), grad.view(), direction)
             } else {
                 direction
             };

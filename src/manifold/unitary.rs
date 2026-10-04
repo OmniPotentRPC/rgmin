@@ -622,7 +622,7 @@ mod retained_metric_tests {
     use super::*;
     use ndarray::array;
 
-fn identity(n: usize) -> Array1<f64> {
+    fn identity(n: usize) -> Array1<f64> {
         let mut a = vec![0.0; 2 * n * n];
         for i in 0..n {
             a[2 * (i * n + i)] = 1.0;
@@ -630,7 +630,7 @@ fn identity(n: usize) -> Array1<f64> {
         pack(n, a)
     }
 
-fn skewh_step(n: usize, scale: f64) -> Array1<f64> {
+    fn skewh_step(n: usize, scale: f64) -> Array1<f64> {
         let m = Unitary::new(n).unwrap();
         let mut a = vec![0.0; 2 * n * n];
         if n >= 1 {
@@ -660,7 +660,7 @@ fn skewh_step(n: usize, scale: f64) -> Array1<f64> {
         pack(n, a)
     }
 
-fn assert_gram_identity(m: &Unitary, y: &Array1<f64>, tol: f64) {
+    fn assert_gram_identity(m: &Unitary, y: &Array1<f64>, tol: f64) {
         let uh = m.hconj(y.as_slice().unwrap());
         let g = m.mul(&uh, y.as_slice().unwrap());
         for i in 0..m.n {
@@ -675,8 +675,8 @@ fn assert_gram_identity(m: &Unitary, y: &Array1<f64>, tol: f64) {
         }
     }
 
-#[test]
-fn retract_stays_on_u3() {
+    #[test]
+    fn retract_stays_on_u3() {
         let m = Unitary::new(3).unwrap();
         let x = identity(3);
         let v = m.project(&x, &skewh_step(3, 0.4));
@@ -688,8 +688,8 @@ fn retract_stays_on_u3() {
         assert!((fro - 1.0).abs() > 0.5, "must not be the sphere {y:?}");
     }
 
-#[test]
-fn project_pullback_is_skew_hermitian() {
+    #[test]
+    fn project_pullback_is_skew_hermitian() {
         let m = Unitary::new(2).unwrap();
         let s = 0.5_f64.sqrt();
         let mut u = vec![0.0; 8];
@@ -714,8 +714,8 @@ fn project_pullback_is_skew_hermitian() {
         }
     }
 
-#[test]
-fn inner_is_the_real_frobenius_product() {
+    #[test]
+    fn inner_is_the_real_frobenius_product() {
         let a = array![1.0, 0.5, 0.0, -0.25, 0.3, 0.1, -0.2, 0.4];
         let b = array![0.2, 0.1, 0.5, 0.0, -0.1, 0.3, 0.4, -0.2];
         let got = inner(&a, &b);

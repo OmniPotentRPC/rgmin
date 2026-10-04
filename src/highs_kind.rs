@@ -133,7 +133,10 @@ impl HighsCallback {
     /// binding clears or drops it. The callback must not unwind, and the
     /// context must support calls from any thread that uses such a solver.
     pub unsafe fn new(function: HighsCCallback, user: *mut std::os::raw::c_void) -> Self {
-        Self { function, user: user as usize }
+        Self {
+            function,
+            user: user as usize,
+        }
     }
 }
 
@@ -150,7 +153,11 @@ pub struct HighsOptions {
 
 impl Default for HighsOptions {
     fn default() -> Self {
-        Self { solver: HighsSolverKind::Choose, crossover: HighsCrossover::Choose, callback: None }
+        Self {
+            solver: HighsSolverKind::Choose,
+            crossover: HighsCrossover::Choose,
+            callback: None,
+        }
     }
 }
 

@@ -30,8 +30,11 @@ fn ipm_equality_projection_holds() {
         equalities: vec![(vec![(0, 1.0), (1, 1.0)], 0.0)],
         ..HighsStep::default()
     });
-    opt.highs_options = rgmin::HighsOptions { solver: rgmin::HighsSolverKind::Ipm,
-        crossover: rgmin::HighsCrossover::Off, ..rgmin::HighsOptions::default() };
+    opt.highs_options = rgmin::HighsOptions {
+        solver: rgmin::HighsSolverKind::Ipm,
+        crossover: rgmin::HighsCrossover::Off,
+        ..rgmin::HighsOptions::default()
+    };
     let x0 = Array1::from(vec![1.0, -0.5, 0.25, 0.0]);
     let g0 = quad(x0.view()).1;
     let p = opt.highs_step(x0.view(), g0.view()).unwrap();
@@ -138,8 +141,11 @@ fn dest_ipm_matches_scipy_trust_constr() {
         equalities: vec![(vec![(0, 1.0), (1, 1.0)], 0.0)],
         ..HighsStep::default()
     });
-    dest.highs_options = rgmin::HighsOptions { solver: rgmin::HighsSolverKind::Ipm,
-        crossover: rgmin::HighsCrossover::Off, ..rgmin::HighsOptions::default() };
+    dest.highs_options = rgmin::HighsOptions {
+        solver: rgmin::HighsSolverKind::Ipm,
+        crossover: rgmin::HighsCrossover::Off,
+        ..rgmin::HighsOptions::default()
+    };
     let p_dest = dest.highs_step(x0.view(), g0.view()).unwrap();
     let d = dest.two_loop(g0.view());
     let payload = format!(
@@ -169,10 +175,18 @@ fn dest_ipm_box_equality_matches_scipy() {
         equalities: vec![(vec![(0, 1.0), (1, 1.0), (2, 1.0)], 0.0)],
         ..HighsStep::default()
     });
-    dest.highs_options = rgmin::HighsOptions { solver: rgmin::HighsSolverKind::Ipm,
-        crossover: rgmin::HighsCrossover::Off, ..rgmin::HighsOptions::default() };
+    dest.highs_options = rgmin::HighsOptions {
+        solver: rgmin::HighsSolverKind::Ipm,
+        crossover: rgmin::HighsCrossover::Off,
+        ..rgmin::HighsOptions::default()
+    };
     let p_dest = rgmin::lbfgs_qp::highs_projected_step(
-        &dest.two_loop(g.view()), x.view(), dest.highs.as_ref().unwrap(), &dest.highs_options).unwrap();
+        &dest.two_loop(g.view()),
+        x.view(),
+        dest.highs.as_ref().unwrap(),
+        &dest.highs_options,
+    )
+    .unwrap();
     let d = dest.two_loop(g.view());
     let payload = format!(
         r#"{{"d":[{},{},{}],"lo":[-0.2,-0.2,-0.2],"hi":[0.2,0.2,0.2],"A":[[1,1,1]],"b":[0]}}"#,
@@ -221,10 +235,13 @@ fn highs_callback_fires_on_ipm_equality() {
     });
     let x0 = Array1::from(vec![1.0, -0.5, 0.25, 0.0]);
     let g0 = quad(x0.view()).1;
-    dest.highs_options = rgmin::HighsOptions { solver: rgmin::HighsSolverKind::Ipm,
+    dest.highs_options = rgmin::HighsOptions {
+        solver: rgmin::HighsSolverKind::Ipm,
         crossover: rgmin::HighsCrossover::Off,
-        callback: Some(unsafe { rgmin::HighsCallback::new(count_highs_cb,
-            (&hits as *const CbHits).cast_mut().cast()) }) };
+        callback: Some(unsafe {
+            rgmin::HighsCallback::new(count_highs_cb, (&hits as *const CbHits).cast_mut().cast())
+        }),
+    };
     let p = dest.highs_step(x0.view(), g0.view()).unwrap();
     assert!(p.iter().all(|v| v.is_finite()));
     assert!(
@@ -242,16 +259,24 @@ fn session_routes_and_clears_callback_for_first_and_second_order_steps() {
 
     struct Quad;
     impl Objective<f64> for Quad {
-        fn dim(&self) -> usize { 2 }
+        fn dim(&self) -> usize {
+            2
+        }
         fn bounds(&self) -> &Bounds<f64> {
             static BOUNDS: std::sync::OnceLock<Bounds<f64>> = std::sync::OnceLock::new();
             BOUNDS.get_or_init(|| Bounds::new(array![-10.0, -10.0], array![10.0, 10.0], 0.0))
         }
-        fn eval(&self, x: ArrayView1<f64>) -> f64 { 0.5 * x.dot(&x) }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            0.5 * x.dot(&x)
+        }
     }
     impl Gradient<f64> for Quad {
-        fn dim(&self) -> usize { 2 }
-        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> { x.to_owned() }
+        fn dim(&self) -> usize {
+            2
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            x.to_owned()
+        }
     }
     impl DifferentiableObjective<f64> for Quad {
         fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
@@ -259,10 +284,14 @@ fn session_routes_and_clears_callback_for_first_and_second_order_steps() {
         }
     }
     impl HessianObjective for Quad {
-        fn hessian(&self, _x: ArrayView1<f64>) -> Array2<f64> { Array2::eye(2) }
+        fn hessian(&self, _x: ArrayView1<f64>) -> Array2<f64> {
+            Array2::eye(2)
+        }
     }
     for second_order in [false, true] {
-        let hits = CbHits { n: std::sync::atomic::AtomicU32::new(0) };
+        let hits = CbHits {
+            n: std::sync::atomic::AtomicU32::new(0),
+        };
         let mut solver = Solver::new(Method::lbfgs(), Control::default(), 2);
         solver.set_accept(Accept::Step);
         assert!(solver.set_highs_solver(rgmin::HighsSolverKind::Ipm));
@@ -271,24 +300,38 @@ fn session_routes_and_clears_callback_for_first_and_second_order_steps() {
             rgmin::HighsCallback::new(count_highs_cb, (&hits as *const CbHits).cast_mut().cast())
         })));
         solver.set_highs(true);
-        if second_order { solver.set_qn_step(QnStep::Newton); }
+        if second_order {
+            solver.set_qn_step(QnStep::Newton);
+        }
         assert!(solver.add_equality(vec![(0, 1.0), (1, 1.0)], 0.0));
         let mut x = array![2.0, -1.0];
         let start = x.clone();
-        let report = if second_order { solver.step_hess(&Quad, &mut x) }
-            else { solver.step(&Quad, &mut x) }.unwrap();
+        let report = if second_order {
+            solver.step_hess(&Quad, &mut x)
+        } else {
+            solver.step(&Quad, &mut x)
+        }
+        .unwrap();
         let called = hits.n.load(Ordering::Relaxed);
         assert!(called > 0, "callback did not reach the session QP");
         assert_eq!(report.steps, 1);
-        assert!(((x[0]-start[0]) + (x[1]-start[1])).abs() < 1e-7);
+        assert!(((x[0] - start[0]) + (x[1] - start[1])).abs() < 1e-7);
         assert!(report.value < 0.5 * start.dot(&start));
 
         assert!(solver.set_highs_callback(None));
         x = start;
-        let report = if second_order { solver.step_hess(&Quad, &mut x) }
-            else { solver.step(&Quad, &mut x) }.unwrap();
+        let report = if second_order {
+            solver.step_hess(&Quad, &mut x)
+        } else {
+            solver.step(&Quad, &mut x)
+        }
+        .unwrap();
         assert_eq!(report.steps, 2);
-        assert_eq!(hits.n.load(Ordering::Relaxed), called, "cleared context was called");
+        assert_eq!(
+            hits.n.load(Ordering::Relaxed),
+            called,
+            "cleared context was called"
+        );
         assert!((x.sum() - 1.0).abs() < 1e-7);
     }
 }
@@ -299,9 +342,15 @@ fn exact_projection_respects_packed_center_and_zero_radius() {
     let d = array![1.0, 3.0];
     let x = array![0.0, 0.0];
     let options = rgmin::HighsOptions::default();
-    let mut constraints = HighsStep { center_axes: Some((2, 1)), ..HighsStep::default() };
+    let mut constraints = HighsStep {
+        center_axes: Some((2, 1)),
+        ..HighsStep::default()
+    };
     let p = rgmin::lbfgs_qp::highs_projected_step(&d, x.view(), &constraints, &options).unwrap();
-    assert!((p[0] + 1.0).abs() < 1e-7 && (p[1] - 1.0).abs() < 1e-7, "{p:?}");
+    assert!(
+        (p[0] + 1.0).abs() < 1e-7 && (p[1] - 1.0).abs() < 1e-7,
+        "{p:?}"
+    );
     constraints.trust = Some(0.0);
     let p = rgmin::lbfgs_qp::highs_projected_step(&d, x.view(), &constraints, &options).unwrap();
     assert_eq!(p, array![0.0, 0.0]);
@@ -317,16 +366,28 @@ fn interrupting_the_linear_model_keeps_the_accepted_point() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct Linear {
-        bounds: Bounds<f64>, gradient: Array1<f64>, calls: AtomicUsize,
+        bounds: Bounds<f64>,
+        gradient: Array1<f64>,
+        calls: AtomicUsize,
     }
     impl Objective<f64> for Linear {
-        fn dim(&self) -> usize { self.gradient.len() }
-        fn bounds(&self) -> &Bounds<f64> { &self.bounds }
-        fn eval(&self, x: ArrayView1<f64>) -> f64 { self.gradient.dot(&x) }
+        fn dim(&self) -> usize {
+            self.gradient.len()
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.gradient.dot(&x)
+        }
     }
     impl Gradient<f64> for Linear {
-        fn dim(&self) -> usize { self.gradient.len() }
-        fn grad(&self, _x: ArrayView1<f64>) -> Array1<f64> { self.gradient.clone() }
+        fn dim(&self) -> usize {
+            self.gradient.len()
+        }
+        fn grad(&self, _x: ArrayView1<f64>) -> Array1<f64> {
+            self.gradient.clone()
+        }
     }
     impl DifferentiableObjective<f64> for Linear {
         fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
@@ -340,8 +401,10 @@ fn interrupting_the_linear_model_keeps_the_accepted_point() {
         }
     }
     unsafe extern "C" fn interrupt_solver(
-        kind: i32, _message: *const std::os::raw::c_char,
-        interrupt: *mut i32, user: *mut std::os::raw::c_void,
+        kind: i32,
+        _message: *const std::os::raw::c_char,
+        interrupt: *mut i32,
+        user: *mut std::os::raw::c_void,
     ) {
         if kind == 1 || kind == 2 {
             unsafe {
@@ -353,7 +416,7 @@ fn interrupting_the_linear_model_keeps_the_accepted_point() {
     let n = 48;
     let objective = Linear {
         bounds: Bounds::new(Array1::from_elem(n, -1.0), Array1::from_elem(n, 1.0), 0.0),
-        gradient: Array1::from_iter((0..n).map(|j| ((j*13+1)%19) as f64 - 9.0)),
+        gradient: Array1::from_iter((0..n).map(|j| ((j * 13 + 1) % 19) as f64 - 9.0)),
         calls: AtomicUsize::new(0),
     };
     let hits = AtomicUsize::new(0);
@@ -364,22 +427,30 @@ fn interrupting_the_linear_model_keeps_the_accepted_point() {
     assert!(solver.set_highs_crossover(rgmin::HighsCrossover::Off));
     assert!(solver.set_trust(0.1));
     for row in 0..12 {
-        let coefficients = (0..n).map(|j| (j, (((row+1)*(j+3))%37) as f64 - 18.0)).collect();
+        let coefficients = (0..n)
+            .map(|j| (j, (((row + 1) * (j + 3)) % 37) as f64 - 18.0))
+            .collect();
         assert!(solver.add_equality(coefficients, 0.0));
     }
     assert!(solver.set_highs_callback(Some(unsafe {
-        rgmin::HighsCallback::new(interrupt_solver, (&hits as *const AtomicUsize).cast_mut().cast())
+        rgmin::HighsCallback::new(
+            interrupt_solver,
+            (&hits as *const AtomicUsize).cast_mut().cast(),
+        )
     })));
     let mut point = Array1::zeros(n);
     let start = point.clone();
     let result = solver.step_hess(&objective, &mut point);
     assert!(matches!(result, Err(Error::Highs(_))), "{result:?}");
-    assert!(hits.load(Ordering::Relaxed) > 0, "interrupt callback was not invoked");
+    assert!(
+        hits.load(Ordering::Relaxed) > 0,
+        "interrupt callback was not invoked"
+    );
     assert_eq!(point, start);
     assert_eq!(solver.pair_count(), 0);
     assert_eq!(objective.calls.load(Ordering::Relaxed), 1);
     assert!(solver.set_highs_callback(None));
     let report = solver.step_hess(&objective, &mut point).unwrap();
     assert!(report.value < 0.0, "{report:?}");
-    assert!(point.iter().all(|v| v.abs() <= 0.1+1e-7));
+    assert!(point.iter().all(|v| v.abs() <= 0.1 + 1e-7));
 }

@@ -56,12 +56,20 @@ impl CenteredMatrix {
         Self::new(m, n, mode == CenterMode::Rows)
     }
     /// Matrices whose mean column is zero.
-    pub fn cols(m: usize, n: usize) -> Self { Self::new(m, n, false) }
+    pub fn cols(m: usize, n: usize) -> Self {
+        Self::new(m, n, false)
+    }
     /// Matrices whose mean row is zero.
-    pub fn rows(m: usize, n: usize) -> Self { Self::new(m, n, true) }
+    pub fn rows(m: usize, n: usize) -> Self {
+        Self::new(m, n, true)
+    }
     /// Centering mode represented by this subspace.
     pub fn mode(self) -> CenterMode {
-        if self.rows { CenterMode::Rows } else { CenterMode::Cols }
+        if self.rows {
+            CenterMode::Rows
+        } else {
+            CenterMode::Cols
+        }
     }
     /// Flatten a matrix in row-major order.
     pub fn pack_matrix(matrix: &Array2<f64>) -> Array1<f64> {
@@ -141,7 +149,6 @@ pub fn is_centered(x: &Array1<f64>, m: usize, n: usize, rows: bool) -> bool {
     means_vanish(m, n, rows, x.as_slice().unwrap_or(&[]))
 }
 
-
 /// Typical distance with an explicit centering mode.
 pub fn typical_dist_mode(m: usize, n: usize, mode: CenterMode) -> f64 {
     typical_dist(m, n, mode == CenterMode::Rows)
@@ -159,7 +166,9 @@ pub fn max_mean_abs(m: usize, n: usize, a: &[f64], mode: CenterMode) -> f64 {
     }
     match mode {
         CenterMode::Cols => (0..m).map(|i| row_mean(a, i, n).abs()).fold(0.0, f64::max),
-        CenterMode::Rows => (0..n).map(|j| col_mean(a, j, m, n).abs()).fold(0.0, f64::max),
+        CenterMode::Rows => (0..n)
+            .map(|j| col_mean(a, j, m, n).abs())
+            .fold(0.0, f64::max),
     }
 }
 
@@ -564,9 +573,11 @@ mod retained_mode_tests {
         assert_eq!(m.project(&x, &v).len(), 114);
         assert_eq!(m.required_dim(114), Err(6));
         assert!(m.required_dim(6).is_ok());
-        assert!(CenteredMatrix::with_mode(0, 4, CenterMode::Cols)
-            .required_dim(0)
-            .is_err());
+        assert!(
+            CenteredMatrix::with_mode(0, 4, CenterMode::Cols)
+                .required_dim(0)
+                .is_err()
+        );
         assert!(CenteredMatrix::cols(3, 2).required_dim(6).is_ok());
         assert!(CenteredMatrix::cols(3, 2).required_dim(9).is_err());
     }
