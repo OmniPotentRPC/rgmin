@@ -27,7 +27,9 @@ use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessia
 use crate::qn_step::QnStep;
 use crate::report::Report;
 use crate::rigid::{project_horizontal, project_out_rot_trans};
-use crate::step::{Taken, l2, next_istep, qn_istep, scale_step, scale_step_atom, take_step_with_options};
+use crate::step::{
+    Taken, l2, next_istep, qn_istep, scale_step, scale_step_atom, take_step_with_options,
+};
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
 };
@@ -1254,11 +1256,12 @@ impl Solver {
             });
         }
 
-        let line_options = if self.accept == Accept::None && self.manifold == ManifoldKind::Euclidean {
-            self.line_options
-        } else {
-            LineSearchOptions::default()
-        };
+        let line_options =
+            if self.accept == Accept::None && self.manifold == ManifoldKind::Euclidean {
+                self.line_options
+            } else {
+                LineSearchOptions::default()
+            };
         let start = x.clone();
         let gold = grad.clone();
         // Accept::Step: the two-loop direction goes through accept_step

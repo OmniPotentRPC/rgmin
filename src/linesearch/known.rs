@@ -17,9 +17,9 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use super::{LineSearch, LineSearchOptions};
 use super::conditions::{armijo, goldstein_lower, strong_curvature};
 use super::interp::{clamp_between, cubic_min, quad_min};
+use super::{LineSearch, LineSearchOptions};
 
 /// Accepted point of a line search, with the oracle answer at it.
 #[derive(Clone, Debug)]
@@ -168,7 +168,14 @@ impl LineSearch {
         F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
     {
         self.search_from_with_options(
-            oracle, pos, f0, g0, dir, istep, alpha_max, LineSearchOptions::default(),
+            oracle,
+            pos,
+            f0,
+            g0,
+            dir,
+            istep,
+            alpha_max,
+            LineSearchOptions::default(),
         )
     }
 
@@ -201,7 +208,16 @@ impl LineSearch {
             // An uphill direction (an indefinite SR1 or SR2 model) is
             // searched backwards: -dir descends and obeys the same cap.
             let back = dir.mapv(|v| -v);
-            return self.search_from_with_options(oracle, pos, f0, g0, back.view(), istep, alpha_max, options);
+            return self.search_from_with_options(
+                oracle,
+                pos,
+                f0,
+                g0,
+                back.view(),
+                istep,
+                alpha_max,
+                options,
+            );
         }
         let open = istep.abs().max(1e-16).min(amax);
         let mut line = Line {
@@ -253,7 +269,10 @@ where
     for i in 0..maxiter.max(1) {
         let cur = End::of(line.probe(alpha));
         let (f, d) = (cur.f, cur.d);
-        if line.options.accepts_approximate_wolfe(f, f0, d, dphi0, c1, c2) {
+        if line
+            .options
+            .accepts_approximate_wolfe(f, f0, d, dphi0, c1, c2)
+        {
             return cur.p.and_then(|p| line.accept(p));
         }
         if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || (i > 0 && f >= prev.f) {
@@ -308,7 +327,10 @@ where
         let alpha = zoom_trial(&lo, &hi);
         let cur = End::of(line.probe(alpha));
         let (f, d) = (cur.f, cur.d);
-        if line.options.accepts_approximate_wolfe(f, f0, d, dphi0, c1, c2) {
+        if line
+            .options
+            .accepts_approximate_wolfe(f, f0, d, dphi0, c1, c2)
+        {
             return cur.p.and_then(|p| line.accept(p));
         }
         if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || f >= lo.f {

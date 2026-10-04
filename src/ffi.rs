@@ -1644,7 +1644,8 @@ pub unsafe extern "C" fn rgmin_solver_set_linesearch(
 /// `solver` must be null or a live handle from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_objective_roundoff(
-    solver: *mut rgmin_solver_t, relative: f64,
+    solver: *mut rgmin_solver_t,
+    relative: f64,
 ) -> rgmin_status_t {
     let Some(solver) = (unsafe { solver.as_mut() }) else {
         set_last_error("rgmin_solver_set_objective_roundoff: null solver");

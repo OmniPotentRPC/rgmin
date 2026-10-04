@@ -87,12 +87,18 @@ impl LineSearchOptions {
     }
 
     pub(crate) fn accepts_approximate_wolfe(
-        self, phi: f64, phi0: f64, dphi: f64, dphi0: f64, c1: f64, c2: f64,
+        self,
+        phi: f64,
+        phi0: f64,
+        dphi: f64,
+        dphi0: f64,
+        c1: f64,
+        c2: f64,
     ) -> bool {
         match self.relative_objective_error {
-            Some(relative) => conditions::approximate_strong_wolfe(
-                phi, phi0, dphi, dphi0, c1, c2, relative,
-            ),
+            Some(relative) => {
+                conditions::approximate_strong_wolfe(phi, phi0, dphi, dphi0, c1, c2, relative)
+            }
             None => conditions::roundoff_strong_wolfe(phi, phi0, dphi, dphi0, c1, c2),
         }
     }

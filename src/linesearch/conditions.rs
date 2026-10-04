@@ -95,8 +95,13 @@ pub(crate) fn roundoff_strong_wolfe(
 /// <https://doi.org/10.1137/030601880>, equations (4.1)--(4.3).
 #[inline]
 pub fn approximate_strong_wolfe(
-    phi: f64, phi0: f64, dphi: f64, dphi0: f64,
-    c1: f64, c2: f64, relative_error: f64,
+    phi: f64,
+    phi0: f64,
+    dphi: f64,
+    dphi0: f64,
+    c1: f64,
+    c2: f64,
+    relative_error: f64,
 ) -> bool {
     let window = relative_error * phi0.abs();
     phi.is_finite()

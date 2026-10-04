@@ -152,7 +152,15 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     take_step_with_options(
-        obj, pos, value, grad, dir, istep, linesearch, control, atom_maxmove,
+        obj,
+        pos,
+        value,
+        grad,
+        dir,
+        istep,
+        linesearch,
+        control,
+        atom_maxmove,
         LineSearchOptions::default(),
     )
 }
