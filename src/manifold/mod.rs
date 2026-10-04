@@ -25,6 +25,8 @@
 //! [`ManifoldKind::Positive`] is manopt `positivefactory`.
 //! [`ManifoldKind::CenteredMatrix`] is manopt `centeredmatrixfactory`.
 
+use std::sync::Arc;
+
 use ndarray::Array1;
 
 mod centered;
@@ -103,7 +105,7 @@ pub use unitary::{
 };
 
 /// Which embedded geometry a session retracts onto.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ManifoldKind {
     /// Ambient Euclidean. Today's path.
     #[default]
@@ -121,8 +123,12 @@ pub enum ManifoldKind {
     /// Sella Cartesian + `fix_translation` + `fix_rotation`.
     RigidQuotient,
     /// Mass-weighted Eckart: Sella IRC / Page–McIver metric on
-    /// the same quotient. Masses from [`crate::Solver::set_masses`].
-    MwRigid,
+    /// the same quotient. [`Self::mw_rigid`] stores one mass per atom.
+    /// `None` is unit mass and matches [`Self::RigidQuotient`].
+    MwRigid {
+        /// Per-atom masses. `None` is unit mass. Prefer [`Self::mw_rigid`].
+        masses: Option<Arc<[f64]>>,
+    },
     /// Real Grassmann Gr(n,1), or the session's configured factor shape.
     Grassmann,
     /// Real Grassmann Gr(n,p), packed column-major.
@@ -229,8 +235,22 @@ pub enum ManifoldKind {
 
 impl ManifoldKind {
     /// True when the retraction is the translation `x + v`.
-    pub(crate) fn retract_is_translation(self) -> bool {
-        matches!(self, Self::Euclidean | Self::RigidQuotient | Self::MwRigid)
+    pub(crate) fn retract_is_translation(&self) -> bool {
+        matches!(
+            self,
+            Self::Euclidean | Self::RigidQuotient | Self::MwRigid { .. }
+        )
+    }
+
+    /// Mass-weighted Eckart quotient. An empty slice is unit mass.
+    pub fn mw_rigid(masses: &[f64]) -> Self {
+        Self::MwRigid {
+            masses: if masses.is_empty() {
+                None
+            } else {
+                Some(Arc::from(masses))
+            },
+        }
     }
 
     /// Complex unitary U(n), interleaved row-major length 2*n*n.
@@ -251,7 +271,7 @@ impl ManifoldKind {
 
     /// Retract with an optional Grassmann factor shape.
     pub fn retract_shaped(
-        self,
+        &self,
         shape: Option<(usize, usize)>,
         x: &Array1<f64>,
         v: &Array1<f64>,
@@ -264,7 +284,7 @@ impl ManifoldKind {
 
     /// Project with an optional Grassmann factor shape.
     pub fn project_shaped(
-        self,
+        &self,
         shape: Option<(usize, usize)>,
         x: &Array1<f64>,
         v: &Array1<f64>,
@@ -277,7 +297,7 @@ impl ManifoldKind {
 
     /// Transport with an optional Grassmann factor shape.
     pub fn transport_shaped(
-        self,
+        &self,
         shape: Option<(usize, usize)>,
         x_from: &Array1<f64>,
         x_to: &Array1<f64>,
@@ -299,9 +319,9 @@ impl ManifoldKind {
     }
 
     /// Stiefel column count. `p = 1` is the sphere.
-    pub fn stiefel_p(self) -> usize {
+    pub fn stiefel_p(&self) -> usize {
         match self {
-            Self::StiefelP { p, .. } => p,
+            Self::StiefelP { p, .. } => *p,
             _ => 1,
         }
     }
@@ -356,7 +376,7 @@ impl ManifoldKind {
     }
 
     /// C ABI / INI token.
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Euclidean => "euclidean",
             Self::Sphere => "sphere",
@@ -364,7 +384,7 @@ impl ManifoldKind {
             Self::Stiefel | Self::StiefelP { .. } => "stiefel",
             Self::Se3 => "se3",
             Self::RigidQuotient => "rigid_quotient",
-            Self::MwRigid => "mw_rigid",
+            Self::MwRigid { .. } => "mw_rigid",
             Self::Grassmann | Self::GrassmannP { .. } => "grassmann",
             Self::Hyperbolic => "hyperbolic",
             Self::PoincareBall => "poincare_ball",
@@ -415,7 +435,7 @@ impl Manifold for ManifoldKind {
             Self::Stiefel => Stiefel.required_dim(n),
             Self::Se3 => Se3.required_dim(n),
             Self::RigidQuotient => RigidQuotient.required_dim(n),
-            Self::MwRigid => MwRigid.required_dim(n),
+            Self::MwRigid { .. } => MwRigid::default().required_dim(n),
             Self::Grassmann => {
                 if n >= 2 {
                     Ok(())
@@ -459,7 +479,10 @@ impl Manifold for ManifoldKind {
             Self::Stiefel => Stiefel.project(x, v),
             Self::Se3 => Se3.project(x, v),
             Self::RigidQuotient => RigidQuotient.project(x, v),
-            Self::MwRigid => MwRigid.project(x, v),
+            Self::MwRigid { masses } => MwRigid {
+                masses: masses.clone(),
+            }
+            .project(x, v),
             Self::Grassmann => Self::grassmann(None, x.len()).project(x, v),
             Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.project(x, v),
             Self::Hyperbolic => Hyperbolic.project(x, v),
@@ -497,7 +520,10 @@ impl Manifold for ManifoldKind {
             Self::Stiefel => Stiefel.retract(x, v),
             Self::Se3 => Se3.retract(x, v),
             Self::RigidQuotient => RigidQuotient.retract(x, v),
-            Self::MwRigid => MwRigid.retract(x, v),
+            Self::MwRigid { masses } => MwRigid {
+                masses: masses.clone(),
+            }
+            .retract(x, v),
             Self::Grassmann => Self::grassmann(None, x.len()).retract(x, v),
             Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.retract(x, v),
             Self::Hyperbolic => Hyperbolic.retract(x, v),
@@ -535,7 +561,10 @@ impl Manifold for ManifoldKind {
             Self::Stiefel => Stiefel.transport(x_from, x_to, v),
             Self::Se3 => Se3.transport(x_from, x_to, v),
             Self::RigidQuotient => RigidQuotient.transport(x_from, x_to, v),
-            Self::MwRigid => MwRigid.transport(x_from, x_to, v),
+            Self::MwRigid { masses } => MwRigid {
+                masses: masses.clone(),
+            }
+            .transport(x_from, x_to, v),
             Self::Grassmann => Self::grassmann(None, x_to.len()).transport(x_from, x_to, v),
             Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.transport(x_from, x_to, v),
             Self::Hyperbolic => Hyperbolic.transport(x_from, x_to, v),
@@ -575,7 +604,10 @@ impl Manifold for ManifoldKind {
             Self::Stiefel => Stiefel.egrad2rgrad(x, egrad),
             Self::Se3 => Se3.egrad2rgrad(x, egrad),
             Self::RigidQuotient => RigidQuotient.egrad2rgrad(x, egrad),
-            Self::MwRigid => MwRigid.egrad2rgrad(x, egrad),
+            Self::MwRigid { masses } => MwRigid {
+                masses: masses.clone(),
+            }
+            .egrad2rgrad(x, egrad),
             Self::Grassmann => Self::grassmann(None, x.len()).egrad2rgrad(x, egrad),
             Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.egrad2rgrad(x, egrad),
             Self::Hyperbolic => Hyperbolic.egrad2rgrad(x, egrad),

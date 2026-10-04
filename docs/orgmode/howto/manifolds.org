@@ -39,8 +39,10 @@ An isolated molecule or cluster lives on ~RigidQuotient~
 doi:10.1021/acs.jctc.2c00395). ~MwRigid~ is the same quotient
 with the Page–McIver mass-weighted metric used by Sella IRC and
 gpr_optim ~IRCDriver~ (doi:10.1063/1.454172,
-doi:10.1063/1.434152). Call ~set_masses~ with N atomic masses;
-unit mass makes ~MwRigid~ identical to ~RigidQuotient~.
+doi:10.1063/1.434152). Call ~set_masses~ with N atomic masses,
+or build ~MwRigid::with_masses~ / ~ManifoldKind::mw_rigid~. The
+trait projection uses those masses. Unit mass makes ~MwRigid~
+identical to ~RigidQuotient~.
 
 ~Sphere~, ~So3~, ~Stiefel~, and ~Se3~ are matrix-manifold
 embeddings. ~So3~ rejects any length other than 9. ~Se3~ rejects

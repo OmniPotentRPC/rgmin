@@ -34,7 +34,8 @@ fn mw_rigid_projects_out_translations_and_rotations() {
         0.0, 0.0, 1.7
     ];
     let translation = Array1::from([1.0, 0.0, 0.0].repeat(4));
-    let projected = MwRigid.project(&x, &translation);
+    let geom = MwRigid::default();
+    let projected = geom.project(&x, &translation);
     let norm = projected.iter().map(|v| v * v).sum::<f64>().sqrt();
     assert!(norm < 1e-10, "a pure translation must vanish, |p| = {norm}");
 
@@ -44,13 +45,13 @@ fn mw_rigid_projects_out_translations_and_rotations() {
         rot[3 * atom] = -x[3 * atom + 1];
         rot[3 * atom + 1] = x[3 * atom];
     }
-    let projected = MwRigid.project(&x, &rot);
+    let projected = geom.project(&x, &rot);
     let norm = projected.iter().map(|v| v * v).sum::<f64>().sqrt();
     assert!(norm < 1e-10, "a pure rotation must vanish, |p| = {norm}");
 
     // A breathing distortion is internal and must survive projection.
     let breathe = x.mapv(|c| 0.01 * c);
-    let projected = MwRigid.project(&x, &breathe);
+    let projected = geom.project(&x, &breathe);
     let norm = projected.iter().map(|v| v * v).sum::<f64>().sqrt();
     assert!(norm > 1e-4, "an internal mode must survive, |p| = {norm}");
 }

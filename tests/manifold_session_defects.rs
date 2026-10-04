@@ -1,6 +1,7 @@
 //! Session gaps in retraction, rigid projection, masses, and curvature pairs.
 
 use ndarray::{Array2, ArrayView1, array};
+use rgmin::manifold::{Manifold, MwRigid, RigidQuotient};
 use rgmin::{Control, HessianOracle, ManifoldKind, Method, Solver};
 
 fn control(istep: f64) -> Control {
@@ -91,5 +92,26 @@ fn periodic_project_rigid_keeps_rotation() {
         rep.grad_norm < 1e-8 && drift < 1e-8,
         "translation survived periodic project_rigid, grad {} drift {drift}",
         rep.grad_norm
+    );
+}
+
+/// The trait projection uses the masses stored on `MwRigid`.
+/// Unit mass matches `RigidQuotient`.
+#[test]
+fn mw_rigid_trait_uses_stored_masses() {
+    let x = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0];
+    let v = array![0.3, 0.1, 0.0, -0.2, 0.4, 0.0, 0.1, -0.2, 0.05];
+    let unit = RigidQuotient.project(&x, &v);
+    let bare = MwRigid::default().project(&x, &v);
+    let weighted = MwRigid::with_masses(&[12.0, 1.0, 1.0]).project(&x, &v);
+    let same = (&bare - &unit).mapv(|t| t * t).sum().sqrt();
+    assert!(
+        same < 1e-12,
+        "unit MwRigid left RigidQuotient by {same}"
+    );
+    let diff = (&weighted - &unit).mapv(|t| t * t).sum().sqrt();
+    assert!(
+        diff > 0.3,
+        "mass-weighted projection matched unit mass, diff {diff}"
     );
 }

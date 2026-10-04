@@ -8,7 +8,8 @@ fn long_translations_preserve_each_coordinate() {
     let n = 65_538;
     let x = Array1::from_iter((0..n).map(|i| (i % 8) as f64 / 8.0));
     let v = Array1::from_iter((0..n).map(|i| if i % 2 == 0 { 0.5 } else { -0.5 }));
-    for geometry in [&Euclidean as &dyn Manifold, &MwRigid, &RigidQuotient] {
+    let weighted = MwRigid::default();
+    for geometry in [&Euclidean as &dyn Manifold, &weighted, &RigidQuotient] {
         let y = geometry.retract(&x, &v);
         assert_eq!(y.len(), n);
         for i in 0..n {

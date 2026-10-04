@@ -110,6 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gradient. An ambient `x + dir` left the sphere.
 - `set_project_rigid` on a periodic cell drops translation and keeps
   rotation. An isolated cluster still drops both.
+- `MwRigid::project` and `ManifoldKind::mw_rigid` use the stored
+  per-atom masses. Unit mass still matches `RigidQuotient`.
+  `set_masses` and `set_manifold` keep the session on those masses.
 
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than

@@ -2063,7 +2063,7 @@ pub unsafe extern "C" fn rgmin_solver_set_manifold(
         rgmin_manifold_t::RGMIN_MANIFOLD_STIEFEL => ManifoldKind::Stiefel,
         rgmin_manifold_t::RGMIN_MANIFOLD_SE3 => ManifoldKind::Se3,
         rgmin_manifold_t::RGMIN_MANIFOLD_RIGID_QUOTIENT => ManifoldKind::RigidQuotient,
-        rgmin_manifold_t::RGMIN_MANIFOLD_MW_RIGID => ManifoldKind::MwRigid,
+        rgmin_manifold_t::RGMIN_MANIFOLD_MW_RIGID => ManifoldKind::mw_rigid(&[]),
         rgmin_manifold_t::RGMIN_MANIFOLD_SPD => ManifoldKind::Spd,
         rgmin_manifold_t::RGMIN_MANIFOLD_GRASSMANN => ManifoldKind::Grassmann,
         rgmin_manifold_t::RGMIN_MANIFOLD_HYPERBOLIC => ManifoldKind::Hyperbolic,

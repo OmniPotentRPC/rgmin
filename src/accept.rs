@@ -36,7 +36,7 @@ fn trial_point<O>(
     alpha: f64,
     control: &Control,
     atom_maxmove: Option<f64>,
-    manifold: ManifoldKind,
+    manifold: &ManifoldKind,
 ) -> Array1<f64>
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -69,7 +69,7 @@ pub(crate) fn accept_step<O>(
     accept: Accept,
     e_hist: &mut VecDeque<f64>,
     atom_maxmove: Option<f64>,
-    manifold: ManifoldKind,
+    manifold: &ManifoldKind,
 ) -> (Array1<f64>, f64, Array1<f64>, bool)
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -99,7 +99,7 @@ pub(crate) fn accept_step_with_fallback<O>(
     accept: Accept,
     e_hist: &mut VecDeque<f64>,
     atom_maxmove: Option<f64>,
-    manifold: ManifoldKind,
+    manifold: &ManifoldKind,
     allow_gradient_fallback: bool,
 ) -> (Array1<f64>, f64, Array1<f64>, bool)
 where
@@ -226,7 +226,7 @@ mod tests {
             Accept::None,
             &mut hist,
             None,
-            ManifoldKind::Euclidean,
+            &ManifoldKind::Euclidean,
         );
         assert!(moved);
         assert!((x[0] - 2.0).abs() < 1e-15);
@@ -253,7 +253,7 @@ mod tests {
             Accept::Energy,
             &mut hist,
             None,
-            ManifoldKind::Euclidean,
+            &ManifoldKind::Euclidean,
         );
         // 10 rejected halvings + one short steepest fallback.
         assert_eq!(obj.evals.load(Ordering::Relaxed), 11);
@@ -282,7 +282,7 @@ mod tests {
             Accept::Energy,
             &mut hist,
             None,
-            ManifoldKind::Euclidean,
+            &ManifoldKind::Euclidean,
         );
         assert!(moved);
         assert!((x[0] - 2.0).abs() < 1e-15);
@@ -304,7 +304,7 @@ mod tests {
             Accept::Energy,
             &mut hist,
             None,
-            ManifoldKind::Euclidean,
+            &ManifoldKind::Euclidean,
         );
         assert!(moved);
         assert!((x[0] - 1.5).abs() < 1e-15, "x {}", x[0]);
@@ -355,7 +355,7 @@ mod tests {
             Accept::None,
             &mut hist,
             None,
-            ManifoldKind::Euclidean,
+            &ManifoldKind::Euclidean,
         );
         assert!(!moved);
         assert!((x[0] - 1.0).abs() < 1e-15);

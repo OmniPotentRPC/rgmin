@@ -121,11 +121,12 @@ fn rigid_quotient_retract_stays_on_the_set() {
 fn mw_rigid_retract_stays_on_the_set() {
     let x = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
     let v = array![0.0, 0.1, 0.0, 0.0, -0.05, 0.05, 0.0, -0.05, -0.05];
-    let t = MwRigid.project(&x, &v);
-    let y = MwRigid.retract(&x, &t);
+    let geom = MwRigid::default();
+    let t = geom.project(&x, &v);
+    let y = geom.retract(&x, &t);
     assert_eq!(y.len(), 9);
     let inc = &y - &x;
-    let re = MwRigid.project(&x, &inc);
+    let re = geom.project(&x, &inc);
     for (a, b) in inc.iter().zip(re.iter()) {
         assert!((a - b).abs() < 1e-12, "{inc:?} vs {re:?}");
     }

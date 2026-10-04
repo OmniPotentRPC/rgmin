@@ -242,10 +242,21 @@ impl Solver {
 
     /// Embedded manifold for project / retract / transport.
     pub fn set_manifold(&mut self, kind: ManifoldKind) {
-        let kind = match (kind, self.factor_shape) {
+        let mut kind = match (kind, self.factor_shape) {
             (ManifoldKind::Grassmann, Some((n, p))) => ManifoldKind::GrassmannP { n, p },
             (other, _) => other,
         };
+        match &mut kind {
+            ManifoldKind::MwRigid { masses } if masses.is_none() => {
+                *masses = self.masses.as_ref().map(|m| {
+                    std::sync::Arc::<[f64]>::from(m.iter().copied().collect::<Vec<f64>>())
+                });
+            }
+            ManifoldKind::MwRigid { masses } => {
+                self.masses = masses.as_ref().map(|m| Array1::from(m.to_vec()));
+            }
+            _ => {}
+        }
         if kind != self.manifold {
             self.forget();
         }
@@ -322,7 +333,7 @@ impl Solver {
         }
         self.factor_shape = next;
         if matches!(
-            self.manifold,
+            &self.manifold,
             ManifoldKind::Grassmann | ManifoldKind::GrassmannP { .. }
         ) {
             self.manifold = match next {
@@ -344,6 +355,12 @@ impl Solver {
             self.masses = None;
         } else {
             self.masses = Some(masses);
+        }
+        let copied = self.masses.as_ref().map(|m| {
+            std::sync::Arc::<[f64]>::from(m.iter().copied().collect::<Vec<f64>>())
+        });
+        if let ManifoldKind::MwRigid { masses: slot } = &mut self.manifold {
+            *slot = copied;
         }
     }
 
@@ -597,8 +614,8 @@ impl Solver {
 
     /// Tangent projection. Periodic cells drop rotation (Sella `proj_rot`).
     fn project_vec(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        match self.manifold {
-            ManifoldKind::MwRigid => {
+        match &self.manifold {
+            ManifoldKind::MwRigid { .. } => {
                 let mut w = v.clone();
                 let masses = self.masses.as_ref().and_then(|m| m.as_slice());
                 project_horizontal(&mut w, x.view(), masses, !self.periodic);
@@ -614,14 +631,14 @@ impl Solver {
     }
 
     fn horizontal_grad(&self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
-        let mut g = match self.manifold {
-            ManifoldKind::RigidQuotient | ManifoldKind::MwRigid => self.project_vec(x, grad),
+        let mut g = match &self.manifold {
+            ManifoldKind::RigidQuotient | ManifoldKind::MwRigid { .. } => self.project_vec(x, grad),
             other => other.egrad2rgrad(x, grad),
         };
         if self.project_rigid
             && !matches!(
-                self.manifold,
-                ManifoldKind::RigidQuotient | ManifoldKind::MwRigid
+                &self.manifold,
+                ManifoldKind::RigidQuotient | ManifoldKind::MwRigid { .. }
             )
         {
             self.strip_rigid(&mut g, x);
@@ -636,8 +653,8 @@ impl Solver {
         x_to: &Array1<f64>,
         v: &Array1<f64>,
     ) -> Array1<f64> {
-        match self.manifold {
-            ManifoldKind::RigidQuotient | ManifoldKind::MwRigid => self.project_vec(x_to, v),
+        match &self.manifold {
+            ManifoldKind::RigidQuotient | ManifoldKind::MwRigid { .. } => self.project_vec(x_to, v),
             other => other.transport(x_from, x_to, v),
         }
     }
@@ -1048,7 +1065,7 @@ impl Solver {
                     self.accept,
                     &mut self.e_hist,
                     None,
-                    self.manifold,
+                    &self.manifold,
                     allow_gradient_fallback,
                 );
                 if moved {
@@ -1102,7 +1119,7 @@ impl Solver {
             self.accept,
             &mut self.e_hist,
             self.atom_maxmove,
-            self.manifold,
+            &self.manifold,
         );
         if moved {
             *x = npos;
@@ -1242,7 +1259,7 @@ impl Solver {
             });
         }
 
-        if matches!(self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
+        if matches!(&self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
             && matches!(self.inner, Inner::Lbfgs(_))
             && matches!(self.accept, Accept::Energy | Accept::Nonmonotone)
         {
@@ -1372,7 +1389,7 @@ impl Solver {
                 self.accept,
                 &mut self.e_hist,
                 self.atom_maxmove,
-                self.manifold,
+                &self.manifold,
             );
             if moved {
                 *x = npos;
@@ -1413,7 +1430,7 @@ impl Solver {
                     self.atom_maxmove,
                     self.accept,
                     &mut self.e_hist,
-                    self.manifold,
+                    &self.manifold,
                     self.istep,
                     line_options,
                 );
@@ -1454,7 +1471,7 @@ impl Solver {
                     self.atom_maxmove,
                     self.accept,
                     &mut self.e_hist,
-                    self.manifold,
+                    &self.manifold,
                     1.0,
                     line_options,
                 );
@@ -1503,7 +1520,7 @@ impl Solver {
                     self.atom_maxmove,
                     self.accept,
                     &mut self.e_hist,
-                    self.manifold,
+                    &self.manifold,
                     1.0,
                     line_options,
                 );
@@ -1534,7 +1551,7 @@ impl Solver {
                     self.atom_maxmove,
                     self.accept,
                     &mut self.e_hist,
-                    self.manifold,
+                    &self.manifold,
                     1.0,
                     line_options,
                 );
@@ -1567,7 +1584,7 @@ impl Solver {
                     self.atom_maxmove,
                     self.accept,
                     &mut self.e_hist,
-                    self.manifold,
+                    &self.manifold,
                     1.0,
                     line_options,
                 );
@@ -1605,7 +1622,7 @@ impl Solver {
                     self.atom_maxmove,
                     self.accept,
                     &mut self.e_hist,
-                    self.manifold,
+                    &self.manifold,
                     self.istep,
                     line_options,
                 );
@@ -1667,7 +1684,7 @@ impl Solver {
                     self.accept,
                     &mut self.e_hist,
                     self.atom_maxmove,
-                    self.manifold,
+                    &self.manifold,
                 );
                 *x = npos;
                 value = nval;
@@ -1838,7 +1855,7 @@ fn take_session_step<O>(
     atom_maxmove: Option<f64>,
     accept: Accept,
     e_hist: &mut VecDeque<f64>,
-    manifold: ManifoldKind,
+    manifold: &ManifoldKind,
     direct_scale: f64,
     options: LineSearchOptions,
 ) -> Taken
@@ -1962,6 +1979,48 @@ mod tests {
     use crate::fire::FireKind;
     use crate::oracle::Oracle;
     use ndarray::{ArrayView1, array};
+
+    fn l2_diff(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
+        (a - b).mapv(|t| t * t).sum().sqrt()
+    }
+
+    /// A kind that carries masses, and a unit kind adopted after
+    /// `set_masses`, both project in the Eckart metric.
+    #[test]
+    fn mw_rigid_session_projects_with_stored_masses() {
+        let x = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0];
+        let v = array![0.3, 0.1, 0.0, -0.2, 0.4, 0.0, 0.1, -0.2, 0.05];
+        let ctrl = Control {
+            maxiter: 1,
+            gtol: 1e-14,
+            istep: 0.1,
+            maxmove: None,
+            ftol_rel: None,
+        };
+        let carried = ManifoldKind::mw_rigid(&[12.0, 1.0, 1.0]);
+        let from_kind = carried.project(&x, &v);
+        let mut solver = Solver::new(Method::Steepest, ctrl.clone(), 9);
+        solver.set_manifold(carried);
+        let from_session = solver.project_vec(&x, &v);
+        assert!(
+            l2_diff(&from_kind, &from_session) < 1e-12,
+            "session projection left the kind {from_session:?}"
+        );
+        let mut bare = Solver::new(Method::Steepest, ctrl.clone(), 9);
+        bare.set_manifold(ManifoldKind::RigidQuotient);
+        let unit = bare.project_vec(&x, &v);
+        assert!(
+            l2_diff(&from_session, &unit) > 0.3,
+            "stored masses matched RigidQuotient"
+        );
+        let mut adopted = Solver::new(Method::Steepest, ctrl, 9);
+        adopted.set_masses(array![12.0, 1.0, 1.0]);
+        adopted.set_manifold(ManifoldKind::mw_rigid(&[]));
+        assert!(
+            l2_diff(&adopted.project_vec(&x, &v), &from_kind) < 1e-12,
+            "a unit kind did not adopt set_masses"
+        );
+    }
 
     /// A steep well under a tiny Euclidean cap: every FIRE step is
     /// clamped, and the velocity has to describe the clamped move.
