@@ -692,7 +692,6 @@ impl Lbfgs {
     ) where
         O: DifferentiableObjective<f64> + ?Sized,
     {
-        #[cfg(feature = "highs")]
         let allow_restart = supplied_direction.is_none();
         let dir = supplied_direction.unwrap_or_else(|| self.direction(grad.view()));
         #[cfg(feature = "highs")]
@@ -722,20 +721,20 @@ impl Lbfgs {
             control,
             atom_maxmove,
         );
-        #[cfg(feature = "highs")]
-        let t = if allow_restart
-            && !t.moved
-            && !self.memory.is_empty()
-            && self.coordinate_box.is_some()
-        {
-            // A related objective may have a different curvature scale.
+        let t = if allow_restart && !t.moved && !self.memory.is_empty() {
+            // A failed search can reflect a curvature scale that no longer
+            // describes the objective. Retry the gradient direction once;
+            // supplied feasible directions retain their own constraints.
             self.forget();
-            let direction = crate::box_objective::project_direction(
-                self.coordinate_box.as_ref().unwrap(),
-                pos.view(),
-                grad.view(),
-                self.direction(grad.view()),
-            );
+            let direction = self.direction(grad.view());
+            #[cfg(feature = "highs")]
+            let direction = if let Some(bounds) = &self.coordinate_box {
+                crate::box_objective::project_direction(
+                    bounds, pos.view(), grad.view(), direction,
+                )
+            } else {
+                direction
+            };
             take_step(
                 obj,
                 pos,
