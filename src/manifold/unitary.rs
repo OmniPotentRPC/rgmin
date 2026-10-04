@@ -193,19 +193,44 @@ impl Unitary {
         s
     }
 
+    fn orthogonalize(&self, q: &[f64], columns: usize, v: &mut [f64]) {
+        // Reorthogonalization removes the component exposed by subtracting
+        // a nearly parallel column in the first pass.
+        for _ in 0..2 {
+            for k in 0..columns {
+                let qk = self.col(q, k);
+                caxpy(herm_dot(&qk, v), &qk, v);
+            }
+        }
+    }
+
     /// Thin QR with real-positive diagonal (Gram-Schmidt + column phase).
     fn qr_unique(&self, y: &mut [f64]) {
         let n = self.n;
         let orig = y.to_vec();
         for j in 0..n {
             let mut v = self.col(y, j);
-            for k in 0..j {
-                let qk = self.col(y, k);
-                let r = herm_dot(&qk, &v);
-                caxpy(r, &qk, &mut v);
+            let original_norm = v.iter().fold(0.0_f64, |norm, value| norm.hypot(*value));
+            self.orthogonalize(y, j, &mut v);
+            let mut nrm = v.iter().fold(0.0_f64, |norm, value| norm.hypot(*value));
+            // A bounded ambient trial can have dependent columns. Complete
+            // its QR with the best resolved coordinate direction instead
+            // of normalizing the roundoff left by cancellation.
+            if nrm <= f64::EPSILON * (n as f64) * original_norm {
+                let mut best_norm = 0.0;
+                for axis in 0..n {
+                    let mut candidate = vec![0.0; 2 * n];
+                    candidate[2 * axis] = 1.0;
+                    self.orthogonalize(y, j, &mut candidate);
+                    let norm = candidate.iter().fold(0.0_f64, |acc, value| acc.hypot(*value));
+                    if norm > best_norm {
+                        best_norm = norm;
+                        v = candidate;
+                    }
+                }
+                nrm = best_norm;
             }
-            let nrm = vecops::nrm2(ArrayView1::from(v.as_slice()));
-            if nrm > 1e-16 {
+            if nrm > 0.0 {
                 for t in v.iter_mut() {
                     *t /= nrm;
                 }
@@ -304,6 +329,9 @@ pub fn is_unitary(x: &Array1<f64>) -> bool {
 }
 
 fn gram_is_identity(m: &Unitary, a: &[f64], tol: f64) -> bool {
+    if a.iter().any(|value| !value.is_finite()) {
+        return false;
+    }
     let uh = m.hconj(a);
     let g = m.mul(&uh, a);
     let n = m.n;
@@ -408,6 +436,30 @@ mod tests {
 
     fn max_abs(a: &Array1<f64>) -> f64 {
         a.iter().fold(0.0, |m, &t| m.max(t.abs()))
+    }
+
+    #[test]
+    fn dependent_ambient_columns_complete_an_orthonormal_basis() {
+        let m = Unitary::new(2).unwrap();
+        let x = identity(2);
+        let target = array![2.0, 0.5, -2.0, -0.5, -2.0, -0.5, 2.0, 0.5];
+        let y = m.retract(&x, &(&target - &x));
+        assert!(is_unitary(&y), "dependent completion {y:?}");
+        let norm = 8.5_f64.sqrt();
+        for k in [0, 1, 4, 5] {
+            assert!((y[k] - target[k] / norm).abs() < 1e-14);
+        }
+        let zero = m.retract(&x, &(-&x));
+        assert_eq!(zero, x);
+    }
+
+    #[test]
+    fn nonfinite_entries_do_not_satisfy_the_unitary_constraint() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut x = identity(2);
+            x[0] = value;
+            assert!(!is_unitary(&x));
+        }
     }
 
     #[test]
