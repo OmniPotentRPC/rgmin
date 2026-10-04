@@ -103,6 +103,10 @@ typedef rgmin_status_t xts_status_t;
 #define XTS_UNAVAILABLE RGMIN_UNAVAILABLE
 #define XTS_UNSUPPORTED_DEVICE RGMIN_UNSUPPORTED_DEVICE
 
+#define XTS_SCG_ABSOLUTE_INFINITY RGMIN_SCG_ABSOLUTE_INFINITY
+#define XTS_SCG_RELATIVE_EUCLIDEAN RGMIN_SCG_RELATIVE_EUCLIDEAN
+#define XTS_EIGEN_LIBKRYLOV RGMIN_EIGEN_LIBKRYLOV
+
 #define xts_abi_compatible rgmin_abi_compatible
 #define xts_abi_stamp rgmin_abi_stamp
 #define xts_last_error rgmin_last_error
