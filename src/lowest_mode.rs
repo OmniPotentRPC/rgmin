@@ -710,9 +710,6 @@ where
         EigensolverKind::Primme => lowest_mode_primme(h, x, seed, params, t),
         EigensolverKind::Libkrylov => lowest_mode_libkrylov(h, x, seed, params),
         EigensolverKind::Slepc => lowest_mode_slepc(h, x, seed, params, &SlepcParams::default()),
-        EigensolverKind::EigenExa => {
-            lowest_mode_eigenexa(h, x, seed, params, &EigenExaParams::default())
-        }
         other => Err(Error::EigenUnavailable { kind: other.name() }),
     }
 }
