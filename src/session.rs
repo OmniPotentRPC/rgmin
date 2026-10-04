@@ -1386,7 +1386,11 @@ impl Solver {
                 initialized,
             } => {
                 if !*initialized {
-                    *dir = if self.accept == Accept::Step { grad.mapv(|g| -g * self.istep) } else { grad.mapv(|g| -g) };
+                    *dir = if self.accept == Accept::Step {
+                        grad.mapv(|g| -g * self.istep)
+                    } else {
+                        grad.mapv(|g| -g)
+                    };
                     *g_old = grad.clone();
                     *d_old = dir.clone();
                     *initialized = true;
@@ -1419,7 +1423,15 @@ impl Solver {
                     if restart.should_restart(&ctx) {
                         beta = 0.0;
                     }
-                    *dir = if self.accept == Accept::Step { Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g * self.istep + beta * d)) } else { Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d)) };
+                    *dir = if self.accept == Accept::Step {
+                        Array1::from_iter(
+                            grad.iter()
+                                .zip(d_old.iter())
+                                .map(|(g, d)| -g * self.istep + beta * d),
+                        )
+                    } else {
+                        Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d))
+                    };
                     g_old.assign(&grad);
                     d_old.assign(dir);
                 }
@@ -1624,8 +1636,16 @@ impl Solver {
         // A nonlinear retraction applied to its chord is a different point.
         let already_retracted = matches!(&self.inner, Inner::Bb { .. })
             || (self.accept == Accept::Step
-                && matches!(&self.inner, Inner::Lbfgs(_) | Inner::Steepest | Inner::Nlcg { .. }
-                    | Inner::Bfgs { .. } | Inner::Sr1 { .. } | Inner::Sr2 { .. } | Inner::Adam { .. }));
+                && matches!(
+                    &self.inner,
+                    Inner::Lbfgs(_)
+                        | Inner::Steepest
+                        | Inner::Nlcg { .. }
+                        | Inner::Bfgs { .. }
+                        | Inner::Sr1 { .. }
+                        | Inner::Sr2 { .. }
+                        | Inner::Adam { .. }
+                ));
         let y = if already_retracted || self.manifold.retract_is_translation() {
             None
         } else {
@@ -1755,21 +1775,60 @@ impl Solver {
 // Other policies retain the configured line search and its initial step.
 #[allow(clippy::too_many_arguments)]
 fn take_session_step<O>(
-    obj: &O, pos: &Array1<f64>, value: f64, grad: &Array1<f64>,
-    dir: ArrayView1<'_, f64>, istep: f64, linesearch: LineSearch,
-    control: &Control, atom_maxmove: Option<f64>, accept: Accept,
-    e_hist: &mut VecDeque<f64>, manifold: ManifoldKind, direct_scale: f64,
+    obj: &O,
+    pos: &Array1<f64>,
+    value: f64,
+    grad: &Array1<f64>,
+    dir: ArrayView1<'_, f64>,
+    istep: f64,
+    linesearch: LineSearch,
+    control: &Control,
+    atom_maxmove: Option<f64>,
+    accept: Accept,
+    e_hist: &mut VecDeque<f64>,
+    manifold: ManifoldKind,
+    direct_scale: f64,
 ) -> Taken
-where O: DifferentiableObjective<f64> + ?Sized,
+where
+    O: DifferentiableObjective<f64> + ?Sized,
 {
     if accept != Accept::Step {
-        return take_step(obj, pos, value, grad, dir, istep, linesearch, control, atom_maxmove);
+        return take_step(
+            obj,
+            pos,
+            value,
+            grad,
+            dir,
+            istep,
+            linesearch,
+            control,
+            atom_maxmove,
+        );
     }
-    let direction = if direct_scale == 1.0 { dir.to_owned() } else { &dir * direct_scale };
+    let direction = if direct_scale == 1.0 {
+        dir.to_owned()
+    } else {
+        &dir * direct_scale
+    };
     let (x, f, g, moved) = accept_step(
-        obj, pos, value, grad, &direction, control, accept, e_hist, atom_maxmove, manifold,
+        obj,
+        pos,
+        value,
+        grad,
+        &direction,
+        control,
+        accept,
+        e_hist,
+        atom_maxmove,
+        manifold,
     );
-    Taken { x, f, g, alpha: if moved { direct_scale } else { 0.0 }, moved }
+    Taken {
+        x,
+        f,
+        g,
+        alpha: if moved { direct_scale } else { 0.0 },
+        moved,
+    }
 }
 
 impl Inner {
