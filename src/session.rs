@@ -351,7 +351,9 @@ impl Solver {
     /// Other methods ignore this setting. Disabling restores scale one.
     pub fn set_lbfgs_neb_guards(&mut self, enabled: bool) {
         if let Inner::Lbfgs(solver) = &mut self.inner {
-            if solver.curvature_reset != enabled { solver.forget(); }
+            if solver.curvature_reset != enabled {
+                solver.forget();
+            }
             solver.distance_reset = enabled;
             solver.angle_reset = enabled;
             solver.curvature_reset = enabled;
@@ -1249,17 +1251,23 @@ impl Solver {
         // Accept keeps the line-searched step_objective path.
         let guarded_direction = if self.accept == Accept::Step {
             match &mut self.inner {
-                Inner::Lbfgs(solver) if solver.distance_reset || solver.angle_reset || solver.curvature_reset => {
+                Inner::Lbfgs(solver)
+                    if solver.distance_reset || solver.angle_reset || solver.curvature_reset =>
+                {
                     Some(solver.guarded_direction(grad.view(), self.atom_maxmove))
                 }
                 _ => None,
             }
-        } else { None };
+        } else {
+            None
+        };
         #[cfg(feature = "highs")]
         let constrained_direction =
             if self.highs && (self.highs_trust.is_some() || !self.equalities.is_empty()) {
                 if let Inner::Lbfgs(solver) = &self.inner {
-                    let direction = guarded_direction.clone().unwrap_or_else(|| solver.direction(grad.view()));
+                    let direction = guarded_direction
+                        .clone()
+                        .unwrap_or_else(|| solver.direction(grad.view()));
                     let center = (self.project_rigid && self.dim.is_multiple_of(3))
                         .then_some((self.dim / 3, 3));
                     Some(crate::lbfgs_qp::highs_feasible_step_boxed(
@@ -1283,9 +1291,11 @@ impl Solver {
         let constrained_direction: Option<Array1<f64>> = None;
         let lbfgs_direct = match (&self.inner, self.accept) {
             (Inner::Lbfgs(solver), Accept::Step) => {
-                let dir = constrained_direction
-                    .clone()
-                    .unwrap_or_else(|| guarded_direction.clone().unwrap_or_else(|| solver.direction(grad.view())));
+                let dir = constrained_direction.clone().unwrap_or_else(|| {
+                    guarded_direction
+                        .clone()
+                        .unwrap_or_else(|| solver.direction(grad.view()))
+                });
                 #[cfg(feature = "highs")]
                 let dir = if let Some(bounds) = &solver.coordinate_box {
                     // The model QP already enforces its box and equalities.
