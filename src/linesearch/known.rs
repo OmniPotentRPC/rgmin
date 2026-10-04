@@ -18,7 +18,7 @@
 use ndarray::{Array1, ArrayView1};
 
 use super::LineSearch;
-use super::conditions::{armijo, goldstein_lower, strong_curvature};
+use super::conditions::{armijo, goldstein_lower, roundoff_strong_wolfe, strong_curvature};
 use super::interp::{clamp_between, cubic_min, quad_min};
 
 /// Accepted point of a line search, with the oracle answer at it.
@@ -140,8 +140,10 @@ impl LineSearch {
     /// Trials are `pos + alpha dir` with `0 < alpha <= alpha_max`; the
     /// opening trial is `min(istep, alpha_max)`. An uphill `dir`
     /// (`g0 . dir > 0`) is searched as `-dir`. Returns `None` when no
-    /// trial lowered `f` below `f0` or `g0 . dir = 0`, and otherwise the
-    /// accepted point with `f` and `g` there.
+    /// acceptable trial is found or `g0 . dir = 0`, and otherwise the
+    /// accepted point with `f` and `g` there. Wolfe searches also accept
+    /// approximate Wolfe slopes with strong curvature when the energy
+    /// change lies within four machine epsilons times `|f0|`.
     /// The start is never re-evaluated and no trial is evaluated twice.
     ///
     /// [`LineSearch::Wolfe`] brackets and zooms (Nocedal-Wright
@@ -228,6 +230,9 @@ where
     for i in 0..maxiter.max(1) {
         let cur = End::of(line.probe(alpha));
         let (f, d) = (cur.f, cur.d);
+        if roundoff_strong_wolfe(f, f0, d, dphi0, c1, c2) {
+            return cur.p.and_then(|p| line.accept(p));
+        }
         if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || (i > 0 && f >= prev.f) {
             return zoom(line, f0, dphi0, prev, cur, c1, c2, maxiter);
         }
@@ -280,6 +285,9 @@ where
         let alpha = zoom_trial(&lo, &hi);
         let cur = End::of(line.probe(alpha));
         let (f, d) = (cur.f, cur.d);
+        if roundoff_strong_wolfe(f, f0, d, dphi0, c1, c2) {
+            return cur.p.and_then(|p| line.accept(p));
+        }
         if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || f >= lo.f {
             hi = cur;
         } else {

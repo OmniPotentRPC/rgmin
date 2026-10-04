@@ -179,7 +179,22 @@ where
     };
     let accepted = match control.ftol_rel {
         Some(_) => f - value <= control.ftol_slack(value),
-        None => f < value,
+        None => {
+            f < value || match linesearch {
+                LineSearch::Wolfe { c1, c2, .. } => {
+                    // Bounds can change the line-search point. Check the
+                    // measured gradient along the actual displacement.
+                    let displacement = &x - pos;
+                    crate::linesearch::conditions::roundoff_strong_wolfe(
+                        f, value,
+                        crate::vecops::dot(g.view(), displacement.view()),
+                        crate::vecops::dot(grad.view(), displacement.view()),
+                        c1, c2,
+                    )
+                }
+                _ => false,
+            }
+        },
     };
     if accepted {
         Taken {

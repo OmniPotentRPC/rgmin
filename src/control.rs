@@ -24,8 +24,9 @@ pub struct Control {
     ///
     /// This covers the line-search accept in every first-order method and
     /// the [`crate::Accept::Energy`] / [`crate::Accept::Nonmonotone`]
-    /// backtracking. `None` keeps the strict test: a line search must
-    /// lower the value, and an accept policy tolerates a rise of at most
+    /// backtracking. With `None`, a line search must lower the value or
+    /// satisfy the Wolfe derivative check within its floating-point
+    /// energy window; an accept policy tolerates a rise of at most
     /// 1e-8 absolute. Set it when the oracle returns an energy that is
     /// noisy at the level of the requested decrease, so a flat step is
     /// taken rather than refused.

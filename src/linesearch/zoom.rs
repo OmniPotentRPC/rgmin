@@ -13,7 +13,7 @@
 use ndarray::{Array1, ArrayView1};
 
 use super::axpy;
-use super::conditions::{armijo, strong_curvature};
+use super::conditions::{armijo, roundoff_strong_wolfe, strong_curvature};
 
 /// Evaluate `φ(α) = f(x + α d)` and `φ'(α) = ∇f(x + α d) · d`.
 ///
@@ -100,7 +100,9 @@ where
             hi = alpha;
             continue;
         }
-        if armijo(phi_a, phi0, alpha, dphi0, c1) && strong_curvature(dphi_a, dphi0, c2) {
+        if (armijo(phi_a, phi0, alpha, dphi0, c1) && strong_curvature(dphi_a, dphi0, c2))
+            || roundoff_strong_wolfe(phi_a, phi0, dphi_a, dphi0, c1, c2)
+        {
             return (alpha, phi_a);
         }
         if !armijo(phi_a, phi0, alpha, dphi0, c1) || phi_a >= phi_lo {

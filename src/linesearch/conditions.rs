@@ -66,6 +66,39 @@ pub fn strong_wolfe(
     armijo(phi, phi0, alpha, dphi0, c1) && strong_curvature(dphi, dphi0, c2)
 }
 
+/// Strong curvature plus the approximate Wolfe slope bound within a
+/// relative floating-point energy window. The window is four machine
+/// epsilons times `|phi0|`; it is an acceptance policy, not a bound on the
+/// oracle's evaluation error. No additive energy scale is introduced.
+///
+/// For a quadratic restriction the slope bound is exactly Armijo. For a
+/// general nonlinear restriction it is a local approximation; endpoint
+/// derivatives alone do not prove exact decrease.
+/// Hager and Zhang, equations (4.1)-(4.2),
+/// <https://doi.org/10.1137/030601880>.
+#[inline]
+pub(crate) fn roundoff_strong_wolfe(
+    phi: f64,
+    phi0: f64,
+    dphi: f64,
+    dphi0: f64,
+    c1: f64,
+    c2: f64,
+) -> bool {
+    phi.is_finite()
+        && phi0.is_finite()
+        && dphi.is_finite()
+        && dphi0.is_finite()
+        && dphi0 < 0.0
+        && 0.0 < c1
+        && c1 < 0.5
+        && c1 < c2
+        && c2 < 1.0
+        && (phi - phi0).abs() <= (4.0 * f64::EPSILON) * phi0.abs()
+        && dphi <= (2.0 * c1 - 1.0) * dphi0
+        && strong_curvature(dphi, dphi0, c2)
+}
+
 /// xtsci `GoldsteinUpperBoundCondition`: `φ(α) <= φ(0) + (1 - c) α φ'(0)`.
 ///
 /// This is a looser sufficient-decrease test than Armijo. The Nocedal-Wright
