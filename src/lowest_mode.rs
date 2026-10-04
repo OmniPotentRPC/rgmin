@@ -179,11 +179,7 @@ impl EigenParams {
     }
 
     fn tolerance(self) -> f64 {
-        if self.tol > 0.0 {
-            self.tol
-        } else {
-            1e-8
-        }
+        if self.tol > 0.0 { self.tol } else { 1e-8 }
     }
 
     fn iterations(self, n: usize) -> usize {
@@ -196,11 +192,7 @@ impl EigenParams {
 
     /// ChASE initial degree. 0 selects 20.
     pub fn chase_degree(self) -> usize {
-        if self.degree == 0 {
-            20
-        } else {
-            self.degree
-        }
+        if self.degree == 0 { 20 } else { self.degree }
     }
 
     /// ChASE `nex`. 0 selects `max(8, ceil(0.2 * nev))`, never 0.2 at `nev = 1`.
@@ -302,11 +294,7 @@ impl DiagonalJacobi {
 
 impl ApplyPreconditioner for DiagonalJacobi {
     fn apply_preconditioner(&self, _x: ArrayView1<f64>, r: ArrayView1<f64>) -> Array1<f64> {
-        Array1::from_iter(
-            r.iter()
-                .zip(self.inv.iter())
-                .map(|(ri, ti)| ri * ti),
-        )
+        Array1::from_iter(r.iter().zip(self.inv.iter()).map(|(ri, ti)| ri * ti))
     }
     fn kind(&self) -> PreconditionerKind {
         PreconditionerKind::Diagonal
@@ -669,10 +657,7 @@ pub fn lowest_mode_chase(
 /// with `n` actions. `n` must be at least [`DENSE_EIGEN_CUTOFF`].
 /// Unlinked builds stay unavailable. The C `rgmin_lowest_eigenpair`
 /// waist is Hessian-vector only.
-pub fn lowest_mode_dense(
-    h: ArrayView2<f64>,
-    params: &EigenParams,
-) -> Result<LowestMode> {
+pub fn lowest_mode_dense(h: ArrayView2<f64>, params: &EigenParams) -> Result<LowestMode> {
     if h.nrows() != h.ncols() {
         return Err(Error::Dim {
             got: h.nrows(),
@@ -1296,8 +1281,8 @@ fn jacobi_eigen(a: &mut [Vec<f64>]) -> (Vec<f64>, Vec<Vec<f64>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hvp::HvpOracle;
     use crate::Error;
+    use crate::hvp::HvpOracle;
     use ndarray::array;
 
     fn gapped_diag(
@@ -1487,10 +1472,22 @@ mod tests {
 
     #[test]
     fn preconditioner_ordinals_are_closed() {
-        assert_eq!(PreconditionerKind::from_ordinal(0), Some(PreconditionerKind::None));
-        assert_eq!(PreconditionerKind::from_ordinal(1), Some(PreconditionerKind::Diagonal));
-        assert_eq!(PreconditionerKind::from_ordinal(2), Some(PreconditionerKind::Block3));
-        assert_eq!(PreconditionerKind::from_ordinal(3), Some(PreconditionerKind::User));
+        assert_eq!(
+            PreconditionerKind::from_ordinal(0),
+            Some(PreconditionerKind::None)
+        );
+        assert_eq!(
+            PreconditionerKind::from_ordinal(1),
+            Some(PreconditionerKind::Diagonal)
+        );
+        assert_eq!(
+            PreconditionerKind::from_ordinal(2),
+            Some(PreconditionerKind::Block3)
+        );
+        assert_eq!(
+            PreconditionerKind::from_ordinal(3),
+            Some(PreconditionerKind::User)
+        );
         assert!(PreconditionerKind::from_ordinal(4).is_none());
         assert_eq!(crate::hvp::IdentityPrecond.kind(), PreconditionerKind::None);
     }
@@ -1539,7 +1536,11 @@ mod tests {
         let t = DiagonalJacobi::from_diag(lam.view());
         let diag = lowest_mode_precond(&h, x.view(), seed.view(), &params, &t).unwrap();
         assert!((none.value - 1.0).abs() < 1e-4, "None Ritz {}", none.value);
-        assert!((diag.value - 1.0).abs() < 1e-4, "Diagonal Ritz {}", diag.value);
+        assert!(
+            (diag.value - 1.0).abs() < 1e-4,
+            "Diagonal Ritz {}",
+            diag.value
+        );
         assert!(none.vector[0].abs() > 0.9 && diag.vector[0].abs() > 0.9);
         assert!(
             diag.actions < none.actions,
@@ -1586,10 +1587,7 @@ mod tests {
         let seed = Array1::from_iter((0..n).map(|i| 1.0 + i as f64 / (n as f64 - 1.0)));
         let (q, _alpha, _beta, _actions) = lanczos_basis(&h, x.view(), seed.view(), 55);
         let err = gram_inf_error(&q);
-        assert!(
-            err < 1e-10,
-            "two-pass full reortho Gram inf-error {err}"
-        );
+        assert!(err < 1e-10, "two-pass full reortho Gram inf-error {err}");
     }
 
     #[test]
@@ -1819,8 +1817,8 @@ mod tests {
             );
             if kind.is_linked() && kind.is_matrix_free() {
                 let mode = result.unwrap();
-                let residual = h.apply_hessian(x.view(), mode.vector.view())
-                    - &mode.vector * mode.value;
+                let residual =
+                    h.apply_hessian(x.view(), mode.vector.view()) - &mode.vector * mode.value;
                 assert!(nrm2(residual.view()) < 1e-6, "{} residual", kind.name());
                 assert!(mode.value < 0.0, "{} lowest mode", kind.name());
                 continue;
@@ -2142,7 +2140,11 @@ mod tests {
             Err(other) => panic!("expected pair or unavailable, got {other}"),
         };
         assert!(mode.value < 0.0, "PRIMME+T curvature {}", mode.value);
-        assert!(mode.vector[0].abs() > 0.9, "PRIMME+T mode {:?}", mode.vector);
+        assert!(
+            mode.vector[0].abs() > 0.9,
+            "PRIMME+T mode {:?}",
+            mode.vector
+        );
     }
 
     #[test]
@@ -2201,7 +2203,11 @@ mod tests {
             Error::EigenUnavailable { kind } => assert_eq!(kind, "eigenExa"),
             other => panic!("expected unavailable, got {other}"),
         }
-        assert_eq!(actions.get(), 0, "EigenExa must not assemble H from actions");
+        assert_eq!(
+            actions.get(),
+            0,
+            "EigenExa must not assemble H from actions"
+        );
         assert!(!EigensolverKind::EigenExa.is_linked());
         assert_eq!(EigensolverKind::EigenExa as u8, 13);
     }
@@ -2290,7 +2296,11 @@ mod tests {
             Error::EigenUnavailable { kind } => assert_eq!(kind, "dlaFuture"),
             other => panic!("expected unavailable, got {other}"),
         }
-        assert_eq!(actions.get(), 0, "DLA-Future must not assemble H from actions");
+        assert_eq!(
+            actions.get(),
+            0,
+            "DLA-Future must not assemble H from actions"
+        );
         let err = lowest_mode_dlaf(
             DENSE_EIGEN_CUTOFF,
             &EigenParams {

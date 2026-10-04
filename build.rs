@@ -268,10 +268,7 @@ fn probe_chase() {
 #[cfg(feature = "chase")]
 fn discover_chase() -> Option<ChaseProbe> {
     for name in ["chase", "ChASE"] {
-        if let Ok(lib) = pkg_config::Config::new()
-            .cargo_metadata(false)
-            .probe(name)
-        {
+        if let Ok(lib) = pkg_config::Config::new().cargo_metadata(false).probe(name) {
             return Some(ChaseProbe {
                 includes: lib.include_paths,
                 link_paths: lib.link_paths,
@@ -365,10 +362,7 @@ fn probe_libkrylov() {
 #[cfg(feature = "libkrylov")]
 fn discover_libkrylov() -> Option<LibkrylovProbe> {
     for name in ["krylov", "libkrylov"] {
-        if let Ok(lib) = pkg_config::Config::new()
-            .cargo_metadata(false)
-            .probe(name)
-        {
+        if let Ok(lib) = pkg_config::Config::new().cargo_metadata(false).probe(name) {
             let mut link_paths = lib.link_paths;
             let mut link_libs = lib.libs;
             if !link_libs.iter().any(|n| n == "openblas" || n == "blas") {

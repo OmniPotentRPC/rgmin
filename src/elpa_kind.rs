@@ -63,11 +63,7 @@ impl Default for ElpaParams {
 impl ElpaParams {
     /// Block size after the 0 -> 16 default.
     pub const fn nblk_or_default(self) -> u32 {
-        if self.nblk == 0 {
-            16
-        } else {
-            self.nblk
-        }
+        if self.nblk == 0 { 16 } else { self.nblk }
     }
 }
 
@@ -113,8 +109,14 @@ mod tests {
 
     #[test]
     fn elpa_kind_maps_to_solver_integers() {
-        assert_eq!(ElpaStage::from_kind(EigensolverKind::Elpa), Some(ElpaStage::OneStage));
-        assert_eq!(ElpaStage::from_kind(EigensolverKind::Elpa2), Some(ElpaStage::TwoStage));
+        assert_eq!(
+            ElpaStage::from_kind(EigensolverKind::Elpa),
+            Some(ElpaStage::OneStage)
+        );
+        assert_eq!(
+            ElpaStage::from_kind(EigensolverKind::Elpa2),
+            Some(ElpaStage::TwoStage)
+        );
         assert_eq!(ElpaStage::OneStage.elpa_solver(), 1);
         assert_eq!(ElpaStage::TwoStage.elpa_solver(), 2);
         assert_eq!(ElpaStage::from_solver(1), Some(ElpaStage::OneStage));
@@ -122,14 +124,23 @@ mod tests {
         assert!(ElpaStage::from_solver(0).is_none());
         assert!(ElpaStage::from_kind(EigensolverKind::Slate).is_none());
         assert!(ElpaStage::from_kind(EigensolverKind::Lanczos).is_none());
-        assert_eq!(elpa_config(EigensolverKind::Elpa, &ElpaParams::default()), Some((1, 16)));
+        assert_eq!(
+            elpa_config(EigensolverKind::Elpa, &ElpaParams::default()),
+            Some((1, 16))
+        );
         assert_eq!(
             elpa_config(EigensolverKind::Elpa2, &ElpaParams { nblk: 32 }),
             Some((2, 32))
         );
         assert_eq!(ElpaParams::default().nblk_or_default(), 16);
-        assert_eq!(EigensolverKind::from_ordinal(7), Some(EigensolverKind::Elpa));
-        assert_eq!(EigensolverKind::from_ordinal(8), Some(EigensolverKind::Elpa2));
+        assert_eq!(
+            EigensolverKind::from_ordinal(7),
+            Some(EigensolverKind::Elpa)
+        );
+        assert_eq!(
+            EigensolverKind::from_ordinal(8),
+            Some(EigensolverKind::Elpa2)
+        );
         assert!(EigensolverKind::from_ordinal(16).is_none());
         assert!(!EigensolverKind::Elpa.is_linked());
         assert!(!EigensolverKind::Elpa2.is_linked());
@@ -159,7 +170,10 @@ mod tests {
             .filter(|l| !l.trim_start().starts_with('#'))
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(!schema_code.contains(": Text"), "schema must not declare a Text field");
+        assert!(
+            !schema_code.contains(": Text"),
+            "schema must not declare a Text field"
+        );
         assert!(!schema_code.contains("elpa_set"));
         let impl_src = include_str!("elpa_kind.rs");
         let impl_only = impl_src.split("#[cfg(test)]").next().expect("impl");

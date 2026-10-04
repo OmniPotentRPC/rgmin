@@ -51,13 +51,7 @@ unsafe extern "C" fn precond_cb(user: *mut c_void, n: i64, v: *const f64, hv: *m
 }
 
 #[cfg(rgmin_has_primme)]
-unsafe fn call_ctx(
-    user: *mut c_void,
-    n: i64,
-    v: *const f64,
-    hv: *mut f64,
-    precond: bool,
-) -> c_int {
+unsafe fn call_ctx(user: *mut c_void, n: i64, v: *const f64, hv: *mut f64, precond: bool) -> c_int {
     if user.is_null() || v.is_null() || hv.is_null() || n <= 0 {
         return 1;
     }

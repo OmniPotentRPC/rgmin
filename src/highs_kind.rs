@@ -127,7 +127,10 @@ mod tests {
     fn solver_tokens_are_closed() {
         assert_eq!(HighsSolverKind::from_ordinal(2), Some(HighsSolverKind::Ipm));
         assert_eq!(HighsSolverKind::from_ordinal(3), Some(HighsSolverKind::Ipx));
-        assert_eq!(HighsSolverKind::from_ordinal(4), Some(HighsSolverKind::Hipo));
+        assert_eq!(
+            HighsSolverKind::from_ordinal(4),
+            Some(HighsSolverKind::Hipo)
+        );
         assert!(HighsSolverKind::from_ordinal(8).is_none());
         assert_eq!(HighsSolverKind::Ipm.as_highs(), Some("ipm"));
         assert_eq!(HighsSolverKind::Choose.as_highs(), None);
