@@ -106,6 +106,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A first-order L-BFGS session pushes the secant of a displacement the
+  caller made between steps, transported like an accepted step, on
+  translation manifolds. `rebase` and `forget_evaluation` still drop it.
+
 - A `Control::maxmove` (or per-atom cap) that is not positive and finite
   is no cap; `Some(-c)` reversed every capped step.
 - FIRE uses `alpha` clamped to `[0, 1]` in the mix, so an out-of-range
