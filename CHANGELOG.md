@@ -106,13 +106,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The first line-search trial of an L-BFGS session with no pairs is
-  `min(istep, 1 / |d|)` along the raw negative gradient `d`, the rule
-  `Lbfgs::line_search` already used, so the first trial moves at most one
-  unit of coordinate distance. The session opened at `istep` regardless
-  of `|g|`, which put the first trial at an objective of `1e45` for a
-  gradient of norm 70.
-
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than
   `1e3 (1 + |f(lo)| + |phi'(lo)| (hi - lo))`. Cubic and quadratic

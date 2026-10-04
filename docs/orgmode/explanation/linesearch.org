@@ -106,15 +106,6 @@ rather than a point chosen by the objective. Bisection halves the
 bracket until the values become comparable, after which the
 interpolant resumes.
 
-With no curvature pairs the direction is the raw negative gradient
-$d = -g$, and its length is the gradient norm, not a step. The first
-trial is $\alpha = \min(\mathrm{istep},\, 1/\lVert d\rVert)$, a
-displacement of at most one unit of coordinate distance. With pairs the
-two-loop direction carries the length and the first trial is
-$\alpha = 1$. The same rule opens the session search
-(~Lbfgs::step_objective~) and the one-shot search
-(~Lbfgs::line_search~).
-
 * What the accept layer adds
 
 Above the line search, ~src/accept.rs~ offers three policies: take the

@@ -405,7 +405,15 @@ impl Lbfgs {
         let mut a_prev = 0.0;
         let mut f_prev = f0;
         let mut slope_prev = slope;
-        let mut a = self.opening_length(1.0, d.view());
+        // A quasi-Newton direction already carries the step length. Nocedal
+        // and Wright require that alpha = 1 is tried first. With no memory
+        // the direction is the raw negative gradient and needs a length.
+        let mut a = if self.memory.is_empty() {
+            let dnorm = d.iter().fold(0.0_f64, |acc, v| acc + v * v).sqrt();
+            if dnorm > 1.0 { 1.0 / dnorm } else { 1.0 }
+        } else {
+            1.0
+        };
         let mut lo = 0.0;
         let mut f_lo = f0;
         let mut slope_lo = slope;
@@ -722,27 +730,6 @@ impl Lbfgs {
         })
     }
 
-    /// Length of the first line-search trial along `dir`.
-    ///
-    /// With pairs the two-loop direction is gamma-scaled and carries the
-    /// step length, so the search opens at the unit step (Nocedal-Wright
-    /// 3.5). With no pairs the direction is the raw negative gradient and
-    /// needs a length: `min(istep, 1 / |dir|)`, so the first trial moves
-    /// at most one unit of coordinate distance instead of `|g|` units,
-    /// where an objective can be astronomically high. A host `istep`
-    /// below that bound opens shorter.
-    pub(crate) fn opening_length(&self, istep: f64, dir: ArrayView1<'_, f64>) -> f64 {
-        if !self.memory.is_empty() {
-            return 1.0;
-        }
-        let norm = dir.iter().fold(0.0_f64, |acc, v| acc + v * v).sqrt();
-        if norm.is_finite() && norm > 0.0 {
-            istep.min(1.0 / norm)
-        } else {
-            istep
-        }
-    }
-
     /// One outer L-BFGS iteration: two-loop direction, line search, pair.
     ///
     /// `atom_maxmove` caps the largest per-atom displacement of the
@@ -803,16 +790,12 @@ impl Lbfgs {
         } else {
             dir
         };
-        // A supplied direction (the box and trust QP step) is already a
-        // bounded displacement; only the raw two-loop direction needs its
-        // opening length bounded.
-        let open = if allow_restart {
-            self.opening_length(*istep, dir.view())
-        } else if self.memory.is_empty() {
-            *istep
-        } else {
-            1.0
-        };
+        // With pairs the two-loop direction is gamma-scaled and carries
+        // the step length, so the search opens at the unit step
+        // (Nocedal-Wright 3.5); `istep` sizes only the first, steepest
+        // direction. Opening at a host's `istep` of 0.1 or 0.2 made strong
+        // Wolfe (c2 = 0.9) accept a tenth of the quasi-Newton step.
+        let open = if self.memory.is_empty() { *istep } else { 1.0 };
         let t = take_step_with_options(
             obj,
             pos,

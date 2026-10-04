@@ -1,13 +1,12 @@
-//! First-trial length and zoom interpolation on objectives with huge or
+//! Zoom interpolation on objectives with huge or
 //! non-finite values, and their absence of effect on well-scaled ones.
 
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use eindir_core::objectives::Rosenbrock;
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::{Accept, Control, LineSearch, Method, Solver};
-use std::sync::OnceLock;
 
 fn control(istep: f64) -> Control {
     Control {
@@ -22,7 +21,7 @@ fn control(istep: f64) -> Control {
 /// `f(x) = x . x / 2 + exp(-100 x0 + 93)`: an exponential wall at
 /// `x0 = 0` worth `2.6e40`, flat to rounding at `x0 >= 2`.
 struct Wall {
-    values: Mutex<Vec<f64>>,
+    points: Mutex<Vec<f64>>,
 }
 
 impl Wall {
@@ -56,35 +55,29 @@ impl Gradient<f64> for Wall {
 
 impl DifferentiableObjective<f64> for Wall {
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let (f, g) = Self::raw(x);
-        self.values.lock().unwrap().push(f);
-        (f, g)
+        self.points.lock().unwrap().push(x[0]);
+        Self::raw(x)
     }
 }
 
 #[test]
-fn the_first_trial_of_a_fresh_session_moves_a_bounded_distance() {
+fn a_session_step_onto_an_exponential_wall_zooms_by_bisection() {
+    // The unit step along -g from (10, 0) lands on x0 = 0, where the
+    // objective is 2.6e40. The cubic through that value would put the
+    // next trial on the bracket clamp (x0 = 9); bisection tries x0 = 5.
     let obj = Wall {
-        values: Mutex::new(Vec::new()),
+        points: Mutex::new(Vec::new()),
     };
     let start = array![10.0, 0.0];
-    // The unit step along -g lands on the wall.
-    let (_, g) = Wall::raw(start.view());
-    let unit_step = &start - &g;
-    assert!(Wall::raw(unit_step.view()).0 > 1e40);
+    let (f_wall, _) = Wall::raw(array![0.0, 0.0].view());
+    assert!(f_wall > 1e40);
 
     let mut x = start.clone();
     let mut solver = Solver::new(Method::lbfgs(), control(1.0), 2);
     solver.set_accept(Accept::Energy);
     solver.step(&obj, &mut x).unwrap();
-    let worst = obj
-        .values
-        .lock()
-        .unwrap()
-        .iter()
-        .cloned()
-        .fold(f64::MIN, f64::max);
-    assert!(worst < 1e3, "largest trial value {worst}");
+    let points = obj.points.lock().unwrap().clone();
+    assert_eq!(points[..3], [10.0, 0.0, 5.0], "{points:?}");
     assert!(x[0] < start[0], "the step did not move: {x}");
 }
 
