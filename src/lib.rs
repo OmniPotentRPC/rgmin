@@ -117,7 +117,7 @@ pub use irc_trust::{IrcTrust, sqrt_masses_3n};
 pub use lbfgs::{GradNorm, Lbfgs};
 #[cfg(feature = "highs")]
 pub use lbfgs_qp::HighsStep;
-pub use linesearch::LineSearch;
+pub use linesearch::{LineSearch, LineSearchOptions};
 pub use lowest_mode::{
     ApplyHessian, ApplyPreconditioner, Block3Jacobi, DENSE_EIGEN_CUTOFF, DiagonalJacobi,
     EigenParams, EigensolverKind, LowestMode, PreconditionerKind, lowest_eigenpair, lowest_mode,

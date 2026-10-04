@@ -17,7 +17,7 @@ use crate::fire::{
     fire2_displacement, guenole2020,
 };
 use crate::lbfgs::{GradNorm, Lbfgs};
-use crate::linesearch::LineSearch;
+use crate::linesearch::{LineSearch, LineSearchOptions};
 use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
 use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton};
@@ -27,7 +27,7 @@ use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessia
 use crate::qn_step::QnStep;
 use crate::report::Report;
 use crate::rigid::{project_horizontal, project_out_rot_trans};
-use crate::step::{Taken, l2, next_istep, qn_istep, scale_step, scale_step_atom, take_step};
+use crate::step::{Taken, l2, next_istep, qn_istep, scale_step, scale_step_atom, take_step_with_options};
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
 };
@@ -47,6 +47,7 @@ pub struct Solver {
     dim: usize,
     control: Control,
     linesearch: LineSearch,
+    line_options: LineSearchOptions,
     istep: f64,
     steps: usize,
     qn_step: QnStep,
@@ -145,6 +146,7 @@ impl Solver {
             dim,
             control,
             linesearch: SESSION_LINESEARCH,
+            line_options: LineSearchOptions::default(),
             istep,
             steps: 0,
             qn_step: QnStep::TwoLoop,
@@ -191,6 +193,17 @@ impl Solver {
     /// `c2 = 0.9`, 20 trials), not [`LineSearch::default`] (Brent).
     pub fn set_linesearch(&mut self, linesearch: LineSearch) {
         self.linesearch = linesearch;
+    }
+
+    /// Set the relative value window for Euclidean line searches under `Accept::None`.
+    /// Physical energy policies and manifold searches retain their own acceptance.
+    /// Invalid values leave the session unchanged. Zero permits no objective rise.
+    pub fn set_objective_roundoff(&mut self, relative: f64) -> bool {
+        let Some(options) = LineSearchOptions::with_objective_roundoff(relative) else {
+            return false;
+        };
+        self.line_options = options;
+        true
     }
 
     /// The configured line search.
@@ -1241,6 +1254,11 @@ impl Solver {
             });
         }
 
+        let line_options = if self.accept == Accept::None && self.manifold == ManifoldKind::Euclidean {
+            self.line_options
+        } else {
+            LineSearchOptions::default()
+        };
         let start = x.clone();
         let gold = grad.clone();
         // Accept::Step: the two-loop direction goes through accept_step
@@ -1351,6 +1369,7 @@ impl Solver {
                     self.atom_maxmove,
                     constrained_direction,
                     false,
+                    line_options,
                 );
             }
             Inner::Steepest => {
@@ -1369,6 +1388,7 @@ impl Solver {
                     &mut self.e_hist,
                     self.manifold,
                     self.istep,
+                    line_options,
                 );
                 *x = t.x;
                 value = t.f;
@@ -1409,6 +1429,7 @@ impl Solver {
                     &mut self.e_hist,
                     self.manifold,
                     1.0,
+                    line_options,
                 );
                 *x = t.x;
                 value = t.f;
@@ -1457,6 +1478,7 @@ impl Solver {
                     &mut self.e_hist,
                     self.manifold,
                     1.0,
+                    line_options,
                 );
                 let moved = t.moved;
                 *x = t.x;
@@ -1487,6 +1509,7 @@ impl Solver {
                     &mut self.e_hist,
                     self.manifold,
                     1.0,
+                    line_options,
                 );
                 let lsstep = t.alpha;
                 let moved = t.moved;
@@ -1519,6 +1542,7 @@ impl Solver {
                     &mut self.e_hist,
                     self.manifold,
                     1.0,
+                    line_options,
                 );
                 let lsstep = t.alpha;
                 let moved = t.moved;
@@ -1556,6 +1580,7 @@ impl Solver {
                     &mut self.e_hist,
                     self.manifold,
                     self.istep,
+                    line_options,
                 );
                 let lsstep = t.alpha;
                 *x = t.x;
@@ -1788,12 +1813,13 @@ fn take_session_step<O>(
     e_hist: &mut VecDeque<f64>,
     manifold: ManifoldKind,
     direct_scale: f64,
+    options: LineSearchOptions,
 ) -> Taken
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     if accept != Accept::Step {
-        return take_step(
+        return take_step_with_options(
             obj,
             pos,
             value,
@@ -1803,6 +1829,7 @@ where
             linesearch,
             control,
             atom_maxmove,
+            options,
         );
     }
     let direction = if direct_scale == 1.0 {

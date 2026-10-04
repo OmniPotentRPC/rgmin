@@ -258,6 +258,9 @@ public:
                                  double c2, std::size_t maxiter) {
         return rgmin_solver_set_linesearch(ptr_, kind, c1, c2, maxiter);
     }
+    rgmin_status_t set_objective_roundoff(double relative) {
+        return rgmin_solver_set_objective_roundoff(ptr_, relative);
+    }
     void set_masses(double const* masses, std::size_t n_atoms) {
         rgmin_solver_set_masses(ptr_, masses, n_atoms);
     }

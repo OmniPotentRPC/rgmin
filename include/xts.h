@@ -157,6 +157,7 @@ typedef rgmin_status_t xts_status_t;
 #define xts_solver_set_highs_callback rgmin_solver_set_highs_callback
 #define xts_solver_set_box rgmin_solver_set_box
 #define xts_solver_set_linesearch rgmin_solver_set_linesearch
+#define xts_solver_set_objective_roundoff rgmin_solver_set_objective_roundoff
 #define xts_solver_set_manifold rgmin_solver_set_manifold
 #define xts_solver_set_masses rgmin_solver_set_masses
 #define xts_solver_set_maxmove rgmin_solver_set_maxmove

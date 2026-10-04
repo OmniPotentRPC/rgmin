@@ -85,16 +85,33 @@ pub(crate) fn roundoff_strong_wolfe(
     c1: f64,
     c2: f64,
 ) -> bool {
+    (phi - phi0).abs() <= (4.0 * f64::EPSILON) * phi0.abs()
+        && approximate_strong_wolfe(phi, phi0, dphi, dphi0, c1, c2, 4.0 * f64::EPSILON)
+}
+
+/// Hager--Zhang approximate Wolfe with an explicit relative value window.
+/// The slope inequalities imply Armijo for a quadratic restriction; for
+/// nonlinear objectives they are a local approximation, not a decrease proof.
+/// <https://doi.org/10.1137/030601880>, equations (4.1)--(4.3).
+#[inline]
+pub fn approximate_strong_wolfe(
+    phi: f64, phi0: f64, dphi: f64, dphi0: f64,
+    c1: f64, c2: f64, relative_error: f64,
+) -> bool {
+    let window = relative_error * phi0.abs();
     phi.is_finite()
         && phi0.is_finite()
         && dphi.is_finite()
         && dphi0.is_finite()
+        && relative_error.is_finite()
+        && relative_error >= 0.0
+        && window.is_finite()
         && dphi0 < 0.0
         && 0.0 < c1
         && c1 < 0.5
         && c1 < c2
         && c2 < 1.0
-        && (phi - phi0).abs() <= (4.0 * f64::EPSILON) * phi0.abs()
+        && phi - phi0 <= window
         && dphi <= (2.0 * c1 - 1.0) * dphi0
         && strong_curvature(dphi, dphi0, c2)
 }

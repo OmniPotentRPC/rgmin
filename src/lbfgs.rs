@@ -19,10 +19,10 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::control::Control;
 use crate::error::{Error, Result};
-use crate::linesearch::LineSearch;
+use crate::linesearch::{LineSearch, LineSearchOptions};
 use crate::qn::solve_spd;
 use crate::report::Report;
-use crate::step::{l2, qn_istep, take_step};
+use crate::step::{l2, qn_istep, take_step_with_options};
 use eindir_core::{DifferentiableObjective, Objective};
 
 /// How [`Lbfgs`] compares the gradient to [`Lbfgs::gtol`].
@@ -758,6 +758,7 @@ impl Lbfgs {
             atom_maxmove,
             None,
             true,
+            LineSearchOptions::default(),
         );
     }
 
@@ -773,6 +774,7 @@ impl Lbfgs {
         atom_maxmove: Option<f64>,
         supplied_direction: Option<Array1<f64>>,
         record_pair: bool,
+        options: LineSearchOptions,
     ) where
         O: DifferentiableObjective<f64> + ?Sized,
     {
@@ -794,7 +796,7 @@ impl Lbfgs {
         // direction. Opening at a host's `istep` of 0.1 or 0.2 made strong
         // Wolfe (c2 = 0.9) accept a tenth of the quasi-Newton step.
         let open = if self.memory.is_empty() { *istep } else { 1.0 };
-        let t = take_step(
+        let t = take_step_with_options(
             obj,
             pos,
             *value,
@@ -804,6 +806,7 @@ impl Lbfgs {
             linesearch,
             control,
             atom_maxmove,
+            options,
         );
         let t = if allow_restart && !t.moved && !self.memory.is_empty() {
             // A failed search can reflect a curvature scale that no longer
@@ -817,7 +820,7 @@ impl Lbfgs {
             } else {
                 direction
             };
-            take_step(
+            take_step_with_options(
                 obj,
                 pos,
                 *value,
@@ -827,6 +830,7 @@ impl Lbfgs {
                 linesearch,
                 control,
                 atom_maxmove,
+                options,
             )
         } else {
             t

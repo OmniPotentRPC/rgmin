@@ -4,7 +4,7 @@ use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
 
 use crate::control::Control;
-use crate::linesearch::LineSearch;
+use crate::linesearch::{LineSearch, LineSearchOptions};
 
 pub(crate) fn l2(g: &Array1<f64>) -> f64 {
     crate::vecops::nrm2(g.view())
@@ -151,6 +151,28 @@ pub(crate) fn take_step<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    take_step_with_options(
+        obj, pos, value, grad, dir, istep, linesearch, control, atom_maxmove,
+        LineSearchOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn take_step_with_options<O>(
+    obj: &O,
+    pos: &Array1<f64>,
+    value: f64,
+    grad: &Array1<f64>,
+    dir: ArrayView1<'_, f64>,
+    istep: f64,
+    linesearch: LineSearch,
+    control: &Control,
+    atom_maxmove: Option<f64>,
+    options: LineSearchOptions,
+) -> Taken
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let amax = cap_alpha(dir, control, atom_maxmove);
     let unmoved = || Taken {
         x: pos.clone(),
@@ -159,7 +181,7 @@ where
         alpha: 0.0,
         moved: false,
     };
-    let Some(out) = linesearch.search_from(
+    let Some(out) = linesearch.search_from_with_options(
         |x| obj.value_and_gradient(x),
         pos.view(),
         value,
@@ -167,6 +189,7 @@ where
         dir,
         istep,
         amax,
+        options,
     ) else {
         return unmoved();
     };
@@ -186,7 +209,7 @@ where
                         // Bounds can change the line-search point. Check the
                         // measured gradient along the actual displacement.
                         let displacement = &x - pos;
-                        crate::linesearch::conditions::roundoff_strong_wolfe(
+                        options.accepts_approximate_wolfe(
                             f,
                             value,
                             crate::vecops::dot(g.view(), displacement.view()),

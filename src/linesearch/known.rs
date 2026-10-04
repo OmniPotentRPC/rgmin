@@ -17,8 +17,8 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use super::LineSearch;
-use super::conditions::{armijo, goldstein_lower, roundoff_strong_wolfe, strong_curvature};
+use super::{LineSearch, LineSearchOptions};
+use super::conditions::{armijo, goldstein_lower, strong_curvature};
 use super::interp::{clamp_between, cubic_min, quad_min};
 
 /// Accepted point of a line search, with the oracle answer at it.
@@ -66,6 +66,7 @@ struct Line<'a, F> {
     f0: f64,
     evals: usize,
     best: Option<Probe>,
+    options: LineSearchOptions,
 }
 
 impl<'a, F> Line<'a, F>
@@ -155,6 +156,26 @@ impl LineSearch {
     /// exhausts `maxiter` the lowest Armijo point is returned.
     pub fn search_from<F>(
         &self,
+        oracle: F,
+        pos: ArrayView1<'_, f64>,
+        f0: f64,
+        g0: ArrayView1<'_, f64>,
+        dir: ArrayView1<'_, f64>,
+        istep: f64,
+        alpha_max: f64,
+    ) -> Option<LineOutcome>
+    where
+        F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    {
+        self.search_from_with_options(
+            oracle, pos, f0, g0, dir, istep, alpha_max, LineSearchOptions::default(),
+        )
+    }
+
+    /// Search from cached values with an explicit objective accuracy policy.
+    /// The option affects Wolfe acceptance only; all trial caps remain in force.
+    pub fn search_from_with_options<F>(
+        &self,
         mut oracle: F,
         pos: ArrayView1<'_, f64>,
         f0: f64,
@@ -162,6 +183,7 @@ impl LineSearch {
         dir: ArrayView1<'_, f64>,
         istep: f64,
         alpha_max: f64,
+        options: LineSearchOptions,
     ) -> Option<LineOutcome>
     where
         F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
@@ -179,7 +201,7 @@ impl LineSearch {
             // An uphill direction (an indefinite SR1 or SR2 model) is
             // searched backwards: -dir descends and obeys the same cap.
             let back = dir.mapv(|v| -v);
-            return self.search_from(oracle, pos, f0, g0, back.view(), istep, alpha_max);
+            return self.search_from_with_options(oracle, pos, f0, g0, back.view(), istep, alpha_max, options);
         }
         let open = istep.abs().max(1e-16).min(amax);
         let mut line = Line {
@@ -189,6 +211,7 @@ impl LineSearch {
             f0,
             evals: 0,
             best: None,
+            options,
         };
         match *self {
             Self::Wolfe { c1, c2, maxiter } => {
@@ -230,7 +253,7 @@ where
     for i in 0..maxiter.max(1) {
         let cur = End::of(line.probe(alpha));
         let (f, d) = (cur.f, cur.d);
-        if roundoff_strong_wolfe(f, f0, d, dphi0, c1, c2) {
+        if line.options.accepts_approximate_wolfe(f, f0, d, dphi0, c1, c2) {
             return cur.p.and_then(|p| line.accept(p));
         }
         if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || (i > 0 && f >= prev.f) {
@@ -285,7 +308,7 @@ where
         let alpha = zoom_trial(&lo, &hi);
         let cur = End::of(line.probe(alpha));
         let (f, d) = (cur.f, cur.d);
-        if roundoff_strong_wolfe(f, f0, d, dphi0, c1, c2) {
+        if line.options.accepts_approximate_wolfe(f, f0, d, dphi0, c1, c2) {
             return cur.p.and_then(|p| line.accept(p));
         }
         if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || f >= lo.f {

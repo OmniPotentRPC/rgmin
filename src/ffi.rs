@@ -1637,6 +1637,27 @@ pub unsafe extern "C" fn rgmin_solver_set_linesearch(
     }
 }
 
+/// Configure approximate Wolfe values for Euclidean `RGMIN_ACCEPT_NONE` sessions.
+/// Negative or nonfinite relative windows leave the session unchanged.
+///
+/// # Safety
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_objective_roundoff(
+    solver: *mut rgmin_solver_t, relative: f64,
+) -> rgmin_status_t {
+    let Some(solver) = (unsafe { solver.as_mut() }) else {
+        set_last_error("rgmin_solver_set_objective_roundoff: null solver");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    };
+    if solver.solver.set_objective_roundoff(relative) {
+        rgmin_status_t::RGMIN_SUCCESS
+    } else {
+        set_last_error("rgmin_solver_set_objective_roundoff: invalid relative window");
+        rgmin_status_t::RGMIN_INVALID_PARAMETER
+    }
+}
+
 /// eOn `maxAtomMotionAppliedV`. Non-positive disables it.
 ///
 /// # Safety

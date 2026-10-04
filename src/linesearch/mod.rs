@@ -67,6 +67,37 @@ pub enum LineSearch {
     },
 }
 
+/// Optional policy for objective values whose accuracy is lower than their gradients.
+/// Existing line-search entry points use the default four-epsilon window.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LineSearchOptions {
+    relative_objective_error: Option<f64>,
+}
+
+impl LineSearchOptions {
+    /// Permit approximate Wolfe acceptance up to `relative * |f0|` above `f0`.
+    ///
+    /// This is an acceptance policy, not a certified oracle error bound.
+    /// Both slope conditions still apply; gradient stopping is independent.
+    /// Negative and nonfinite values are rejected. Zero permits no rise.
+    pub fn with_objective_roundoff(relative: f64) -> Option<Self> {
+        (relative.is_finite() && relative >= 0.0).then_some(Self {
+            relative_objective_error: Some(relative),
+        })
+    }
+
+    pub(crate) fn accepts_approximate_wolfe(
+        self, phi: f64, phi0: f64, dphi: f64, dphi0: f64, c1: f64, c2: f64,
+    ) -> bool {
+        match self.relative_objective_error {
+            Some(relative) => conditions::approximate_strong_wolfe(
+                phi, phi0, dphi, dphi0, c1, c2, relative,
+            ),
+            None => conditions::roundoff_strong_wolfe(phi, phi0, dphi, dphi0, c1, c2),
+        }
+    }
+}
+
 impl Default for LineSearch {
     fn default() -> Self {
         Self::Brent {

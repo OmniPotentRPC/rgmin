@@ -222,6 +222,12 @@ typedef enum rgmin_linesearch_t {
 rgmin_status_t rgmin_solver_set_linesearch(rgmin_solver_t *solver,
                                          rgmin_linesearch_t kind,
                                          double c1, double c2, size_t maxiter);
+/** Approximate Wolfe value window for Euclidean RGMIN_ACCEPT_NONE sessions.
+ * Reject negative or nonfinite values without changing the session.
+ * Zero permits no rise. Gradient stopping and physical acceptance are unchanged.
+ */
+rgmin_status_t rgmin_solver_set_objective_roundoff(rgmin_solver_t *solver,
+                                                  double relative);
 void rgmin_solver_set_atom_maxmove(rgmin_solver_t *solver, double maxmove);
 void rgmin_solver_set_project_rigid(rgmin_solver_t *solver, int32_t enabled);
 void rgmin_solver_set_extra_updates(rgmin_solver_t *solver, size_t extra);
