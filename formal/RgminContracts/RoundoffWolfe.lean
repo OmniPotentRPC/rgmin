@@ -57,4 +57,27 @@ theorem quadratic_decrease_of_strong_curvature {c b a α c₂ : ℝ}
   have hid := quadratic_change c b a α
   linarith
 
+/-- Strong curvature makes the secant denominator positive along a descent line. -/
+theorem positive_secant_of_strong_curvature {b d α c₂ : ℝ}
+    (hα : 0 < α) (hb : b < 0) (hc₂ : c₂ < 1)
+    (hcurvature : |d| ≤ c₂ * |b|) : 0 < α * (d - b) := by
+  have hlower : c₂ * b ≤ d := by
+    have hd := neg_abs_le d
+    rw [abs_of_neg hb] at hcurvature
+    nlinarith
+  have hgap : 0 < (c₂ - 1) * b :=
+    mul_pos_of_neg_of_neg (sub_neg.mpr hc₂) hb
+  have hpositive : 0 < d - b := by nlinarith
+  exact mul_pos hα hpositive
+
+/-- A measured value window bounds exact increase only when oracle errors are bounded. -/
+theorem exact_increase_of_value_window {f₀ f₁ measured₀ measured₁ ε₀ ε₁ window : ℝ}
+    (h₀ : |measured₀ - f₀| ≤ ε₀)
+    (h₁ : |measured₁ - f₁| ≤ ε₁)
+    (hwindow : measured₁ - measured₀ ≤ window) :
+    f₁ - f₀ ≤ window + ε₀ + ε₁ := by
+  have h₀upper := (abs_le.mp h₀).2
+  have h₁lower := (abs_le.mp h₁).1
+  linarith
+
 end RgminContracts

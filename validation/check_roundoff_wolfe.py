@@ -32,7 +32,14 @@ cubic = -3 * t**3 + 5 * t**2 - t
 assert sp.diff(cubic, t).subs(t, 0) == -1
 assert sp.diff(cubic, t).subs(t, 1) == 0
 assert cubic.subs(t, 1) - cubic.subs(t, 0) == 1
-print("Exact quadratic identities and nonlinear limitation verified.")
+# The secant product has the sign of the endpoint derivative difference.
+assert sp.simplify(alpha * (end_slope - start_slope) - curvature * alpha**2) == 0
+
+# A value window bounds true increase only with bounded endpoint errors.
+f0, f1, e0, e1 = sp.symbols("f0 f1 e0 e1", real=True)
+m0, m1 = f0 + e0, f1 + e1
+assert sp.simplify((f1 - f0) - ((m1 - m0) + e0 - e1)) == 0
+print("Exact quadratic identities, secant algebra, and nonlinear limitation verified.")
 
 result = subprocess.run(
     ["sollya", str(Path(__file__).with_name("roundoff_wolfe.sollya"))],
@@ -50,6 +57,11 @@ expected = [
     "energy change is within the relative window: true",
     "approximate Wolfe upper slope holds: true",
     "strong curvature holds: true",
+    "cancelled objective is one hundred: true",
+    "configured witness exact decrease: true",
+    "configured witness exceeds four epsilons: true",
+    "configured witness fits requested window: true",
+    "configured witness satisfies both slope conditions: true",
 ]
 if result.stdout.splitlines() != expected or result.stderr:
-    raise SystemExit("The floating-point witness did not satisfy all six predicates.")
+    raise SystemExit("The floating-point witness did not satisfy all predicates.")
