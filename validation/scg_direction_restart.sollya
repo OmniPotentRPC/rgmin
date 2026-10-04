@@ -1,0 +1,20 @@
+// Binary64 exact-curvature SCG witness on f(x) = (x0^2 + x1^2)/2.
+prec = 200;
+damping = round(1e-5, D, RN);
+model_delta = round(25 + round(damping * 25, D, RN), D, RN);
+trial_alpha = round(25 / model_delta, D, RN);
+gx = round(3 + round(-3 * trial_alpha, D, RN), D, RN);
+gy = round(-4 + round(4 * trial_alpha, D, RN), D, RN);
+yx = round(gx - 3, D, RN);
+yy = round(gy + 4, D, RN);
+y_dot_g = round(round(yx * gx, D, RN) + round(yy * gy, D, RN), D, RN);
+liu_storey_beta = round(y_dot_g / 25, D, RN);
+px = round(round(-3 * liu_storey_beta, D, RN) - gx, D, RN);
+py = round(round(4 * liu_storey_beta, D, RN) - gy, D, RN);
+gradient_squared = round(round(gx * gx, D, RN) + round(gy * gy, D, RN), D, RN);
+direction_squared = round(round(px * px, D, RN) + round(py * py, D, RN), D, RN);
+directional_slope = round(round(px * gx, D, RN) + round(py * gy, D, RN), D, RN);
+print("conjugate direction remains descending:", directional_slope < 0);
+print("squared direction is below epsilon:", direction_squared < 2^(-52));
+print("squared gradient is above epsilon:", gradient_squared > 2^(-52));
+quit;
