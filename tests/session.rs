@@ -2,7 +2,7 @@
 
 use eindir_core::objectives::Rosenbrock;
 use ndarray::{Array1, array};
-use rgmin::{Control, Method, Solver};
+use rgmin::{Accept, Control, Method, Solver};
 
 fn control() -> Control {
     Control {
