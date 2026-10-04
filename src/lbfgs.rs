@@ -147,15 +147,13 @@ impl Lbfgs {
         }
     }
 
-    pub(crate) fn search_direction(&self, x: ArrayView1<f64>, g: ArrayView1<f64>) -> Array1<f64> {
+    pub(crate) fn search_direction(&self, x: ArrayView1<f64>, g: ArrayView1<f64>) -> Result<Array1<f64>> {
         #[cfg(feature = "highs")]
-        if self.highs.is_some()
-            && let Ok(d) = self.highs_step(x, g)
-        {
-            return d;
+        if self.highs.is_some() {
+            return self.highs_step(x, g);
         }
         let _ = x;
-        self.direction(g)
+        Ok(self.direction(g))
     }
 
     /// Two-loop recursion: applies the inverse-Hessian approximation to `g`.
@@ -462,7 +460,8 @@ impl Lbfgs {
     ///
     /// `fg` returns `None` when the caller's budget is spent, which ends the
     /// relaxation where it stands. Returns the value, the point, and the
-    /// number of evaluations used.
+    /// number of evaluations used. A failed feasible-direction solve ends
+    /// the relaxation at the accepted point without another objective call.
     pub fn minimize<F>(
         &mut self,
         x0: ArrayView1<f64>,
@@ -506,7 +505,9 @@ impl Lbfgs {
             if self.gnorm(&g) < self.gtol {
                 break;
             }
-            let d = self.search_direction(x.view(), g.view());
+            let Ok(d) = self.search_direction(x.view(), g.view()) else {
+                break;
+            };
             let slope = d.dot(&g);
             if slope >= 0.0 {
                 self.forget();
@@ -569,7 +570,9 @@ impl Lbfgs {
             if self.gnorm(&g) < self.gtol {
                 break;
             }
-            let d = self.search_direction(x.view(), g.view());
+            let Ok(d) = self.search_direction(x.view(), g.view()) else {
+                break;
+            };
             let slope = d.dot(&g);
             if slope >= 0.0 {
                 self.forget();

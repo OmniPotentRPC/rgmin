@@ -87,10 +87,7 @@ impl Lbfgs {
         if !opts.needs_qp() {
             return Ok(p);
         }
-        match project_qp(&p, x, opts) {
-            Ok(q) => Ok(q),
-            Err(_) => Ok(p),
-        }
+        project_qp(&p, x, opts)
     }
 }
 
