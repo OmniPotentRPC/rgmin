@@ -307,4 +307,57 @@ mod tests {
         assert!((x[0] - 1.5).abs() < 1e-15, "x {}", x[0]);
         assert_eq!(obj.evals.load(Ordering::Relaxed), 2);
     }
+    struct NanQuad;
+
+    impl Objective<f64> for NanQuad {
+        fn dim(&self) -> usize {
+            1
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            use std::sync::OnceLock;
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| Bounds::new(array![-1e6], array![1e6], 0.0))
+        }
+        fn eval(&self, _x: ArrayView1<f64>) -> f64 {
+            f64::INFINITY
+        }
+    }
+    impl Gradient<f64> for NanQuad {
+        fn dim(&self) -> usize {
+            1
+        }
+        fn grad(&self, _x: ArrayView1<f64>) -> Array1<f64> {
+            array![f64::NAN]
+        }
+    }
+    impl DifferentiableObjective<f64> for NanQuad {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+
+    #[test]
+    fn accept_none_refuses_a_non_finite_oracle() {
+        let pos = array![1.0];
+        let dir = array![1.0];
+        let g = array![2.0];
+        let mut hist = VecDeque::new();
+        let (x, f, _, moved) = accept_step(
+            &NanQuad,
+            &pos,
+            1.0,
+            &g,
+            &dir,
+            &ctrl(),
+            Accept::None,
+            &mut hist,
+            None,
+            ManifoldKind::Euclidean,
+        );
+        assert!(!moved);
+        assert!((x[0] - 1.0).abs() < 1e-15);
+        assert!((f - 1.0).abs() < 1e-15);
+    }
+
+
 }
