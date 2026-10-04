@@ -3,7 +3,7 @@ import Mathlib
 namespace Rgmin
 
 /-- Scalar restriction of the second-order SPD retraction. -/
-def spdScalarRetract (x u : ℝ) : ℝ := x + u + u ^ 2 / (2 * x)
+noncomputable def spdScalarRetract (x u : ℝ) : ℝ := x + u + u ^ 2 / (2 * x)
 
 theorem spd_scalar_square_form (x u : ℝ) (hx : x ≠ 0) :
     spdScalarRetract x u = ((x + u) ^ 2 + x ^ 2) / (2 * x) := by
