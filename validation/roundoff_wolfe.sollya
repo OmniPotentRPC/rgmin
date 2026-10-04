@@ -1,0 +1,24 @@
+// Binary64 witness for cancellation in a conservative quadratic energy.
+prec = 200;
+display = decimal;
+energy_offset = round(6 + 2^(-50), D, RN);
+opening = round(2e-8, D, RN);
+scale_term = round(10^8 * opening, D, RN);
+half_delta = round(0.5 * opening, D, RN);
+quadratic_term = round(half_delta * opening, D, RN);
+energy_opening = round(energy_offset + quadratic_term, D, RN);
+computed_opening = round(round(energy_opening + scale_term, D, RN) - scale_term, D, RN);
+computed_minimum = energy_offset;
+energy_window = round(round(4 * 2^(-52), D, RN) * abs(computed_opening), D, RN);
+initial_slope = round(-opening * opening, D, RN);
+terminal_slope = 0;
+armijo_coefficient = round(1e-4, D, RN);
+curvature_coefficient = round(0.9, D, RN);
+slope_limit = round(round(2 * armijo_coefficient - 1, D, RN) * initial_slope, D, RN);
+print("opening energy is six:", computed_opening == 6);
+print("computed energy rises one ulp:", computed_minimum - computed_opening == 2^(-50));
+print("exact quadratic energy decreases:", opening^2/2 > 0);
+print("energy change is within the relative window:", abs(computed_minimum - computed_opening) <= energy_window);
+print("approximate Wolfe upper slope holds:", initial_slope < 0 && terminal_slope <= slope_limit);
+print("strong curvature holds:", abs(terminal_slope) <= curvature_coefficient * abs(initial_slope));
+quit;
