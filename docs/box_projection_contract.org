@@ -18,7 +18,7 @@ g_i p_i <= -p_i^2.
 Summing over coordinates gives =g^T p <= -||p||_2^2= in exact arithmetic.
 A nonzero projected force therefore descends.
 The implementation uses this fallback when component projection removes
-all descent from the L-BFGS direction.
+all descent from the model direction.
 
 The proof applies to the branch with coordinate and trust bounds.
 A nonzero equality right-hand side can exclude the zero displacement.

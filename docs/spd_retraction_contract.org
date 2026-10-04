@@ -1,23 +1,25 @@
-#+title: SPD gradient and accepted-point contract
+#+title: Positive definite gradient and retraction contract
 
-The SPD metric at X is tr(X^{-1} U X^{-1} V). For a Euclidean gradient G,
-its Riemannian gradient is X sym(G) X. The symbolic check verifies this
-identity for a general nonsingular symmetric 2 by 2 matrix and a symmetric
-tangent. Positive definiteness is the metric domain.
+For a symmetric positive definite matrix X, the metric is =tr(X^{-1} U X^{-1} V)=.
+A Euclidean gradient G maps to the Riemannian gradient =X sym(G) X=.
+The symbolic check verifies this identity for a general nonsingular symmetric
+2 by 2 matrix and a symmetric tangent. Positive definiteness defines the metric domain.
 
-The retraction is X + U + U X^{-1} U / 2 when the Cholesky factorization
+The retraction gives =X + U + U X^{-1} U / 2= when the Cholesky factorization
 needs no ridge. On a positive scalar diagonal its value is
-((x+u)^2+x^2)/(2x), which is strictly positive. Lean proves that scalar
+=((x+u)^2+x^2)/(2x)=, which is strictly positive. Lean proves that scalar
 identity and positivity. Applying the retraction to the chord of its
-accepted point adds (R_x(u)-x)^2/(2x). Thus an accepted point and a tangent
+accepted point adds =(R_x(u)-x)^2/(2x)=. So an accepted point and a tangent
 cannot be interchanged.
 
-The retained diagonal fixture has x=2 and u=-2/5. One retraction gives
-41/25; retraction of its chord gives 4181/2500. The strict Sollya driver
+The diagonal fixture has =x=2= and =u=-2/5=. One retraction gives
+=41/25=; retraction of its chord gives =4181/2500=. The strict Sollya driver
 checks two binary64 scalar evaluations against those exact values. It does
 not establish an error bound for a general Cholesky solve, a ridge fallback,
 or an arbitrary-dimensional matrix product. The Rust tests check the
-actual implementation and the two-call initial/accepted-point contract.
+implementation and the two-call contract for initial and accepted points.
 
-Run validation/check_spd_retraction.py with SymPy and Sollya available.
-Run proofs/lean/Rgmin/SpdRetraction.lean in the retained Lean environment.
+The symbolic and floating checks run with =python3 validation/check_spd_retraction.py=,
+with SymPy and Sollya available.
+For Lean, run =lake env lean Rgmin/SpdRetraction.lean= from =proofs/lean=
+with the dependencies in its manifest.
