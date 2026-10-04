@@ -9,7 +9,7 @@
 //! This is not a 3N cluster. Isolated molecules use
 //! [`super::RigidQuotient`]. A single sphere uses [`super::Sphere`].
 
-#[cfg(test)]
+#[cfg(any(test, feature = "par"))]
 use ndarray::ArrayView1;
 use ndarray::{Array1, Array2, s};
 
@@ -80,6 +80,16 @@ impl Default for Oblique {
 }
 
 fn project_columns(n: usize, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+    #[cfg(feature = "par")]
+    {
+        if x.len() >= 65_536 {
+            return project_columns_par(n, x, v);
+        }
+    }
+    project_columns_serial(n, x, v)
+}
+
+fn project_columns_serial(n: usize, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
     let mut out = Array1::zeros(x.len());
     for j in 0..(x.len() / n) {
         let xs = x.slice(s![j * n..(j + 1) * n]);
@@ -91,6 +101,25 @@ fn project_columns(n: usize, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         }
     }
     out
+}
+
+#[cfg(feature = "par")]
+fn project_columns_par(n: usize, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+    use rayon::prelude::*;
+    let (Some(xs), Some(vs)) = (x.as_slice(), v.as_slice()) else {
+        return project_columns_serial(n, x, v);
+    };
+    let mut buf = vec![0.0; x.len()];
+    buf.par_chunks_mut(n)
+        .zip(xs.par_chunks(n))
+        .zip(vs.par_chunks(n))
+        .for_each(|((oc, xc), vc)| {
+            let s = dot(ArrayView1::from(xc), ArrayView1::from(vc));
+            for i in 0..n {
+                oc[i] = vc[i] - s * xc[i];
+            }
+        });
+    Array1::from(buf)
 }
 
 fn retract_columns(n: usize, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
@@ -239,5 +268,44 @@ mod tests {
             assert!((y[i] - (x[i] + v[i])).abs() < 1e-15);
         }
         assert_eq!(m.project(&x, &v).len(), 114);
+    }
+
+    #[cfg(feature = "par")]
+    #[test]
+    fn parallel_columns_match_the_explicit_tangent_projector() {
+        let columns = 21_846;
+        let x = Array1::from([0.6, 0.8, 0.0].repeat(columns));
+        let mut v = Array1::zeros(3 * columns);
+        for j in 0..columns {
+            v[3 * j] = 0.8 + j as f64 * 1e-5;
+            v[3 * j + 1] = 0.6 - j as f64 * 2e-6;
+            v[3 * j + 2] = (j % 7) as f64 - 3.0;
+        }
+        let projected = project_columns_par(3, &x, &v);
+        assert_eq!(projected, project_columns_serial(3, &x, &v));
+        assert_eq!(projected, Oblique::new(3, columns).project(&x, &v));
+        for j in 0..columns {
+            let expected = [
+                0.64 * v[3 * j] - 0.48 * v[3 * j + 1],
+                -0.48 * v[3 * j] + 0.36 * v[3 * j + 1],
+                v[3 * j + 2],
+            ];
+            for k in 0..3 {
+                assert!((projected[3 * j + k] - expected[k]).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[cfg(feature = "par")]
+    #[test]
+    fn parallel_columns_preserve_strided_input_order() {
+        let x = array![0.0, 0.8, 0.6].slice_move(s![..;-1]);
+        let v = array![1.0, 0.6, 0.8].slice_move(s![..;-1]);
+        assert!(x.as_slice().is_none());
+        assert!(v.as_slice().is_none());
+        let projected = project_columns_par(3, &x, &v);
+        let expected = array![0.224, -0.168, 1.0];
+        assert!((&projected - &expected).mapv(f64::abs).sum() < 1e-12);
+        assert_eq!(projected, project_columns_serial(3, &x, &v));
     }
 }
