@@ -4,7 +4,6 @@ use dlpk::sys::DLManagedTensorVersioned;
 use rgmin::ffi::*;
 use std::os::raw::c_void;
 
-
 unsafe fn cpu_f64(t: *const DLManagedTensorVersioned) -> (*const f64, usize) {
     let dl = unsafe { &(*t).dl_tensor };
     let n = unsafe { *dl.shape as usize };
