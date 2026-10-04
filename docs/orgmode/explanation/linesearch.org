@@ -85,6 +85,27 @@ requested tolerance regardless of what the cubic does. The Rust test
 ~tests/lbfgs_state.rs~ holds the crate to that budget on a quadratic
 bowl.
 
+* When the interpolant is not used
+
+The cubic and the quadratic model the objective on the bracket
+$[\ell, h]$ from $\varphi(\ell)$, $\varphi'(\ell)$, $\varphi(h)$ and
+$\varphi'(h)$. They carry information about the minimizer only when
+$\varphi(h)$ is on the scale of the data at $\ell$. The zoom
+interpolates when
+
+$$|\varphi(h) - \varphi(\ell)| \le 10^3 \left(1 + |\varphi(\ell)| + |\varphi'(\ell)|\,(h - \ell)\right),$$
+
+with $\varphi(h)$ finite, and takes the midpoint otherwise. The right
+side adds the value magnitude to the change a model with unit
+curvature predicts from the slope over the bracket; the factor
+$10^3$ admits curvature three orders above that. A first trial worth
+$4\cdot 10^{45}$ against $\varphi(\ell) = -24.6$ and
+$\varphi'(\ell) \approx -5\cdot 10^3$ fails the test by forty
+orders, and the fit through it returns the clamp of the bracket
+rather than a point chosen by the objective. Bisection halves the
+bracket until the values become comparable, after which the
+interpolant resumes.
+
 * What the accept layer adds
 
 Above the line search, ~src/accept.rs~ offers three policies: take the
