@@ -21,7 +21,9 @@ rotation. ~MwRigid~ projects with the per-atom masses stored on the
 value. A mass table that is not one mass per atom is an error in
 Rust and from ~rgmin_solver_set_masses~ (~abi_minor~ 29); empty or
 null still restores unit mass, and a rejected table leaves the
-stored masses in place.
+stored masses in place. The Barzilai-Borwein pair is the
+transported displacement and the horizontal gradient minus the
+transported previous gradient.
 
 Embedded manopt tokens: Euclidean (default), sphere, SO(3),
 Stiefel ~St(n,1)~, SE(3). Hourglass mark and the Diataxis book

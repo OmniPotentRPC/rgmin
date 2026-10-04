@@ -1408,6 +1408,8 @@ impl Solver {
         }
         #[cfg(feature = "highs")]
         let boxed = self.has_coordinate_box();
+        // The spectral pair is formed after the gradient is horizontal.
+        let mut bb_ends: Option<(Array1<f64>, Array1<f64>)> = None;
         match &mut self.inner {
             Inner::Lbfgs(_) if !lbfgs_line_searched => {}
             Inner::Lbfgs(solver) => {
@@ -1699,8 +1701,7 @@ impl Solver {
                 value = nval;
                 grad = ngrad;
                 if moved {
-                    *prev_s = Some(&*x - &old);
-                    *prev_y = Some(&grad - &gold);
+                    bb_ends = Some((old, gold));
                 }
             }
             Inner::Pso { .. } | Inner::Newton { .. } | Inner::Dogleg { .. } => unreachable!(),
@@ -1737,6 +1738,14 @@ impl Solver {
             grad = ev.1;
         }
         grad = self.horizontal_grad(x, &grad);
+
+        if let Some((old, gold_bb)) = bb_ends {
+            let (s, y_pair) = self.lbfgs_sy(&old, x, &gold_bb, &grad);
+            if let Inner::Bb { prev_s, prev_y } = &mut self.inner {
+                *prev_s = Some(s);
+                *prev_y = Some(y_pair);
+            }
+        }
 
         let pair = if matches!(self.inner, Inner::Lbfgs(_))
             && x.iter().zip(start.iter()).any(|(a, b)| a != b)
@@ -2058,6 +2067,61 @@ mod tests {
             "{err8:?}"
         );
         eight.set_masses(Array1::zeros(0)).unwrap();
+    }
+
+    /// The spectral pair lives in the tangent space at the new point.
+    /// An ambient chord `x - x_old` on the sphere has a normal part.
+    #[test]
+    fn bb_spectral_pair_is_transported_on_the_sphere() {
+        let x0 = array![0.0, 1.0, 0.0];
+        let obj = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+            let d = array![x[0] - 1.0, x[1], x[2]];
+            let f = 0.5 * d.iter().map(|v| v * v).sum::<f64>();
+            (f, d)
+        });
+        let mut solver = Solver::new(
+            Method::Bb,
+            Control {
+                maxiter: 1,
+                gtol: 1e-14,
+                istep: 0.3,
+                maxmove: None,
+                ftol_rel: None,
+            },
+            3,
+        );
+        solver.set_manifold(ManifoldKind::Sphere);
+        let mut x = x0.clone();
+        solver.step(&obj, &mut x).unwrap();
+        let (s, y) = match &solver.inner {
+            Inner::Bb { prev_s, prev_y } => (
+                prev_s.clone().expect("bb stored no displacement"),
+                prev_y.clone().expect("bb stored no gradient difference"),
+            ),
+            _ => unreachable!("BB session"),
+        };
+        let chord = &x - &x0;
+        assert!(
+            x.dot(&chord).abs() > 1e-3,
+            "ambient chord was already tangent, x·(x-x0) = {}",
+            x.dot(&chord)
+        );
+        assert!(
+            x.dot(&s).abs() < 1e-10,
+            "stored s left the tangent, x·s = {}",
+            x.dot(&s)
+        );
+        let g0 = ManifoldKind::Sphere.project(&x0, &array![-1.0, 1.0, 0.0]);
+        let ambient = array![x[0] - 1.0, x[1], x[2]];
+        let gx = ManifoldKind::Sphere.project(&x, &ambient);
+        let y_want = &gx - &ManifoldKind::Sphere.transport(&x0, &x, &g0);
+        let s_want = ManifoldKind::Sphere.transport(&x0, &x, &chord);
+        assert!(l2_diff(&s, &s_want) < 1e-10, "{s:?} vs {s_want:?}");
+        assert!(l2_diff(&y, &y_want) < 1e-10, "{y:?} vs {y_want:?}");
+        assert!(
+            l2_diff(&solver.last_grad, &gx) < 1e-10,
+            "stored gradient is not the horizontal gradient"
+        );
     }
 
     /// A steep well under a tiny Euclidean cap: every FIRE step is

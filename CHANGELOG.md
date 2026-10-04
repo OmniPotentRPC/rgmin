@@ -121,6 +121,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Error::MassCount`. The Eckart projection leaves the vector
   unchanged instead of using unit weight. `Solver::set_masses`
   refuses the table and keeps the masses already stored.
+- The Barzilai-Borwein pair is the transported displacement and
+  the horizontal gradient minus the transported previous gradient.
+  An ambient `x - x_old` on the sphere is not tangent.
 
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than
