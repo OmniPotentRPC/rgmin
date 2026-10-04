@@ -2,7 +2,7 @@
 
 use eindir_core::objectives::Rosenbrock;
 use ndarray::{Array1, array};
-use rgmin::{Control, Method, Solver};
+use rgmin::{Accept, Control, Method, Solver};
 
 fn control() -> Control {
     Control {
@@ -880,5 +880,55 @@ fn rebase_keeps_curvature_and_drops_the_point() {
     assert!(
         warm_steps <= cold_steps,
         "rebased {warm_steps} should not exceed cold {cold_steps}"
+    );
+}
+
+#[test]
+fn a_caller_displacement_between_steps_is_a_secant() {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::ArrayView1;
+    use std::sync::OnceLock;
+
+    struct Ellipse;
+    impl Objective<f64> for Ellipse {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| Bounds::new(array![-1e6, -1e6], array![1e6, 1e6], 0.0))
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            0.5 * (x[0] * x[0] + 10.0 * x[1] * x[1])
+        }
+    }
+    impl Gradient<f64> for Ellipse {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            array![x[0], 10.0 * x[1]]
+        }
+    }
+    impl DifferentiableObjective<f64> for Ellipse {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+
+    let pairs_after_two_steps = |displace: bool| {
+        let mut solver = Solver::new(Method::lbfgs(), control(), 2);
+        solver.set_accept(Accept::Energy);
+        let mut x = array![2.0, 1.0];
+        solver.step(&Ellipse, &mut x).unwrap();
+        if displace {
+            x = &x + &array![0.3, -0.2];
+        }
+        solver.step(&Ellipse, &mut x).unwrap();
+        solver.pair_count()
+    };
+    assert_eq!(
+        pairs_after_two_steps(true),
+        pairs_after_two_steps(false) + 1
     );
 }

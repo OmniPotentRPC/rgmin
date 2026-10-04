@@ -1209,6 +1209,17 @@ impl Solver {
         };
         grad = self.horizontal_grad(x, &grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
+        // A caller that moved the iterate between steps measured the
+        // gradient at both ends, so the displacement is a secant of the
+        // retained inverse Hessian.
+        if !cached && self.manifold.retract_is_translation() {
+            if let Some(previous) = self.last_pos.clone().filter(|p| p.len() == x.len()) {
+                let (s, y) = self.lbfgs_sy(&previous, x, &self.last_grad, &grad);
+                if let Inner::Lbfgs(solver) = &mut self.inner {
+                    solver.push_pair(s, y, Some(gnorm));
+                }
+            }
+        }
         if gnorm < self.control.gtol {
             return Ok(Report {
                 value,
