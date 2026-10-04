@@ -222,7 +222,9 @@ impl Unitary {
                     let mut candidate = vec![0.0; 2 * n];
                     candidate[2 * axis] = 1.0;
                     self.orthogonalize(y, j, &mut candidate);
-                    let norm = candidate.iter().fold(0.0_f64, |acc, value| acc.hypot(*value));
+                    let norm = candidate
+                        .iter()
+                        .fold(0.0_f64, |acc, value| acc.hypot(*value));
                     if norm > best_norm {
                         best_norm = norm;
                         v = candidate;

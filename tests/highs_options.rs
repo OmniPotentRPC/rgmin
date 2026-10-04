@@ -455,7 +455,6 @@ fn interrupting_the_linear_model_keeps_the_accepted_point() {
     assert!(point.iter().all(|v| v.abs() <= 0.1 + 1e-7));
 }
 
-
 #[test]
 fn a_zero_hessian_preserves_the_linear_model() {
     use ndarray::{Array2, array};
@@ -469,6 +468,7 @@ fn a_zero_hessian_preserves_the_linear_model() {
         Some(1.0),
         None,
         &rgmin::HighsOptions::default(),
-    ).unwrap();
+    )
+    .unwrap();
     assert!((step[0] - 1.0).abs() < 1e-7, "linear minimum {step:?}");
 }
