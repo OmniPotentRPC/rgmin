@@ -45,4 +45,8 @@ jobs:
         with:
           toolchain: 1.88.0
       - uses: Swatinem/rust-cache@v2
+      - name: Python reference dependencies
+        run: python -m pip install -q numpy scipy
+      - name: Build the libraries the C header tests link
+        run: cargo build --locked ${{ matrix.args }}
       - run: cargo test --locked ${{ matrix.args }}

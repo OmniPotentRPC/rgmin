@@ -453,7 +453,7 @@ fn fused_evalgrad_is_one_callback_per_oracle() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 27);
+    assert_eq!(stamp.abi_minor, 28);
     assert_eq!(stamp.layout_revision, 2);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -1216,5 +1216,106 @@ fn c_abi_set_box_status_matches_highs_feature() {
         assert_eq!(st_trust, 1);
         assert_eq!(st_eq, 1);
         assert_eq!(st_eq_clear, 1);
+    }
+}
+
+/// rgmin_solver_forget_evaluation drops only the cached point: the step
+/// after it evaluates its start once more and otherwise matches a session
+/// that kept the point, pairs and iterate included.
+#[test]
+fn c_abi_forget_evaluation_costs_one_call_and_keeps_memory() {
+    use rgmin::ffi::{rgmin_solver_forget_evaluation, rgmin_solver_pair_count};
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 1e-12,
+        istep: 0.1,
+        memory: 10,
+        maxmove: 0.2,
+    };
+    let run = |forget: bool| {
+        let mut x = [-1.2_f64, 1.0];
+        let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+        assert!(!session.is_null());
+        unsafe { rgmin_solver_set_accept(session, rgmin_accept_t::RGMIN_ACCEPT_NONE) };
+        let mut out = rgmin_report_t {
+            value: 0.0,
+            steps: 0,
+            grad_norm: 0.0,
+        };
+        let mut calls = Vec::new();
+        for step in 0..3 {
+            if forget && step == 2 {
+                unsafe { rgmin_solver_forget_evaluation(session) };
+            }
+            let mut n = 0usize;
+            let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+            let st = unsafe {
+                rgmin_solver_step_fg(
+                    session,
+                    Some(rosen_evalgrad),
+                    (&mut n as *mut usize).cast(),
+                    xt,
+                    &mut out,
+                )
+            };
+            unsafe { rgmin_tensor_free(xt) };
+            assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+            calls.push(n);
+        }
+        let pairs = unsafe { rgmin_solver_pair_count(session) };
+        unsafe { rgmin_solver_free(session) };
+        (x, calls, pairs)
+    };
+    let (kept_x, kept_calls, kept_pairs) = run(false);
+    let (forgot_x, forgot_calls, forgot_pairs) = run(true);
+    assert_eq!(forgot_calls[..2], kept_calls[..2]);
+    assert_eq!(
+        forgot_calls[2],
+        kept_calls[2] + 1,
+        "{kept_calls:?} {forgot_calls:?}"
+    );
+    assert_eq!(forgot_pairs, kept_pairs);
+    assert_eq!(forgot_x, kept_x);
+    unsafe { rgmin_solver_forget_evaluation(std::ptr::null_mut()) };
+}
+
+/// rgmin_solver_set_lbfgs_neb_guards survives live and null sessions and
+/// clears the pair memory when it toggles the guards.
+#[test]
+fn c_abi_lbfgs_neb_guards_toggle_resets_pairs() {
+    use rgmin::ffi::{
+        rgmin_solver_pair_count, rgmin_solver_push_pair, rgmin_solver_set_lbfgs_neb_guards,
+    };
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 0.0,
+        istep: 1.0,
+        memory: 2,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    let s = [1.0_f64, 0.0];
+    let y = [2.0_f64, 0.0];
+    assert_eq!(
+        unsafe { rgmin_solver_push_pair(session, s.as_ptr(), y.as_ptr(), 2) },
+        0
+    );
+    assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 1);
+    unsafe { rgmin_solver_set_lbfgs_neb_guards(session, 1) };
+    assert_eq!(unsafe { rgmin_solver_pair_count(session) }, 0);
+    assert_eq!(
+        unsafe { rgmin_solver_push_pair(session, s.as_ptr(), y.as_ptr(), 2) },
+        0
+    );
+    unsafe { rgmin_solver_set_lbfgs_neb_guards(session, 1) };
+    assert_eq!(
+        unsafe { rgmin_solver_pair_count(session) },
+        1,
+        "no toggle, no reset"
+    );
+    unsafe {
+        rgmin_solver_free(session);
+        rgmin_solver_set_lbfgs_neb_guards(std::ptr::null_mut(), 1);
     }
 }

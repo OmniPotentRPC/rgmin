@@ -21,4 +21,8 @@ shibuya = ">=2026.1.9, <2027"
 myst-parser = ">=4.0, <5"
 sphinxcontrib-bibtex = ">=2.6, <3"
 
+[feature.docs.tasks]
+docs-export = { cmd = "emacs --batch -l export.el", cwd = "docs" }
+docs-build = { cmd = "sphinx-build -b html -n docs/source docs/build", depends-on = ["docs-export"] }
+
 [tasks]

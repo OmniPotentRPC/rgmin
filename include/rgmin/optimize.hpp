@@ -247,6 +247,8 @@ public:
     void forget() { rgmin_solver_forget(ptr_); }
     /// Keep the method memory, drop the point (see rgmin_solver_rebase).
     void rebase() { rgmin_solver_rebase(ptr_); }
+    /// Drop only the cached evaluation (see rgmin_solver_forget_evaluation).
+    void forget_evaluation() { rgmin_solver_forget_evaluation(ptr_); }
     std::size_t pair_count() const noexcept { return rgmin_solver_pair_count(ptr_); }
     void set_maxmove(double m) { rgmin_solver_set_maxmove(ptr_, m); }
     void set_qn_step(rgmin_qn_step_t step) { rgmin_solver_set_qn_step(ptr_, step); }
@@ -268,6 +270,9 @@ public:
         rgmin_solver_set_periodic(ptr_, periodic ? 1 : 0);
     }
     void set_atom_maxmove(double m) { rgmin_solver_set_atom_maxmove(ptr_, m); }
+    void set_lbfgs_neb_guards(bool on) {
+        rgmin_solver_set_lbfgs_neb_guards(ptr_, on ? 1 : 0);
+    }
     void set_project_rigid(bool on) {
         rgmin_solver_set_project_rigid(ptr_, on ? 1 : 0);
     }
