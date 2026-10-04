@@ -100,6 +100,110 @@ pub fn nrm2(x: ArrayView1<f64>) -> f64 {
     dot(x, x).sqrt()
 }
 
+/// `y *= a`.
+#[cfg(not(feature = "par"))]
+pub fn scale(a: f64, y: &mut Array1<f64>) {
+    y.mapv_inplace(|v| v * a);
+}
+
+/// `y *= a`, updated in parallel chunks.
+#[cfg(feature = "par")]
+pub fn scale(a: f64, y: &mut Array1<f64>) {
+    use rayon::prelude::*;
+    if y.len() < PAR_MIN_LEN {
+        y.mapv_inplace(|v| v * a);
+        return;
+    }
+    match y.as_slice_mut() {
+        Some(ys) => ys.par_chunks_mut(4096).for_each(|cy| {
+            for p in cy.iter_mut() {
+                *p *= a;
+            }
+        }),
+        None => y.mapv_inplace(|v| v * a),
+    }
+}
+
+/// `y[i] *= x[i]`.
+#[cfg(not(feature = "par"))]
+pub fn mul_assign(x: ArrayView1<f64>, y: &mut Array1<f64>) {
+    let n = x.len().min(y.len());
+    for i in 0..n {
+        y[i] *= x[i];
+    }
+}
+
+/// `y[i] *= x[i]`, updated in parallel chunks.
+#[cfg(feature = "par")]
+pub fn mul_assign(x: ArrayView1<f64>, y: &mut Array1<f64>) {
+    use rayon::prelude::*;
+    let n = x.len().min(y.len());
+    if n < PAR_MIN_LEN {
+        for i in 0..n {
+            y[i] *= x[i];
+        }
+        return;
+    }
+    match (x.as_slice(), y.as_slice_mut()) {
+        (Some(xs), Some(ys)) => {
+            let ys = &mut ys[..n];
+            let xs = &xs[..n];
+            ys.par_chunks_mut(4096)
+                .zip(xs.par_chunks(4096))
+                .for_each(|(cy, cx)| {
+                    for (p, q) in cy.iter_mut().zip(cx) {
+                        *p *= *q;
+                    }
+                });
+        }
+        _ => {
+            for i in 0..n {
+                y[i] *= x[i];
+            }
+        }
+    }
+}
+
+/// `y[i] /= x[i].max(floor)`.
+#[cfg(not(feature = "par"))]
+pub fn div_assign_floor(x: ArrayView1<f64>, y: &mut Array1<f64>, floor: f64) {
+    let n = x.len().min(y.len());
+    for i in 0..n {
+        y[i] /= x[i].max(floor);
+    }
+}
+
+/// `y[i] /= x[i].max(floor)`, updated in parallel chunks.
+#[cfg(feature = "par")]
+pub fn div_assign_floor(x: ArrayView1<f64>, y: &mut Array1<f64>, floor: f64) {
+    use rayon::prelude::*;
+    let n = x.len().min(y.len());
+    if n < PAR_MIN_LEN {
+        for i in 0..n {
+            y[i] /= x[i].max(floor);
+        }
+        return;
+    }
+    match (x.as_slice(), y.as_slice_mut()) {
+        (Some(xs), Some(ys)) => {
+            let ys = &mut ys[..n];
+            let xs = &xs[..n];
+            ys.par_chunks_mut(4096)
+                .zip(xs.par_chunks(4096))
+                .for_each(|(cy, cx)| {
+                    for (p, q) in cy.iter_mut().zip(cx) {
+                        *p /= q.max(floor);
+                    }
+                });
+        }
+        _ => {
+            for i in 0..n {
+                y[i] /= x[i].max(floor);
+            }
+        }
+    }
+}
+
 /// `||x||_inf`, infinity on any non-finite component: a broken vector
 /// is never a small one.
 pub fn nrminf(x: ArrayView1<f64>) -> f64 {
@@ -222,6 +326,11 @@ pub fn vnrm2(x: &Vector) -> f64 {
 /// `||x||_inf` on the vector's device, infinity on non-finite.
 pub fn vnrminf(x: &Vector) -> f64 {
     nrminf(x.data.view())
+}
+
+/// `sum_i x_i` on the vector's device.
+pub fn vsum(x: &Vector) -> f64 {
+    sum(x.data.view())
 }
 
 #[cfg(test)]

@@ -282,6 +282,16 @@ pub fn pack(n: usize, a: Vec<f64>) -> Array1<f64> {
     Array1::from_shape_vec(2 * n * n, a).unwrap()
 }
 
+/// Real Frobenius product. manopt `M.inner = real(d1(:)'*d2(:))`.
+pub fn inner(u: &Array1<f64>, v: &Array1<f64>) -> f64 {
+    vecops::dot(u.view(), v.view())
+}
+
+/// manopt `M.typicaldist = pi*sqrt(n*k)` with `k = 1`.
+pub fn typical_dist(n: usize) -> f64 {
+    std::f64::consts::PI * (n as f64).sqrt()
+}
+
 /// `true` when the packed matrix satisfies \(U^* U = I\) to `1e-8`.
 pub fn is_unitary(x: &Array1<f64>) -> bool {
     let Some((n, a)) = unpack(x) else {
@@ -604,5 +614,113 @@ mod tests {
         let v = m.project(&x, &skewh_step(2, 0.3));
         let s = vecops::dot(x.view(), v.view());
         assert!(s.abs() < 1e-14, "Re <U, U Omega> must vanish {s}");
+    }
+}
+
+#[cfg(test)]
+mod retained_metric_tests {
+    use super::*;
+    use ndarray::array;
+
+fn identity(n: usize) -> Array1<f64> {
+        let mut a = vec![0.0; 2 * n * n];
+        for i in 0..n {
+            a[2 * (i * n + i)] = 1.0;
+        }
+        pack(n, a)
+    }
+
+fn skewh_step(n: usize, scale: f64) -> Array1<f64> {
+        let m = Unitary::new(n).unwrap();
+        let mut a = vec![0.0; 2 * n * n];
+        if n >= 1 {
+            // i * scale on the (0,0) diagonal: purely imaginary.
+            m.put(&mut a, 0, 0, C64 { re: 0.0, im: scale });
+        }
+        if n >= 2 {
+            m.put(
+                &mut a,
+                0,
+                1,
+                C64 {
+                    re: -scale,
+                    im: 0.5 * scale,
+                },
+            );
+            m.put(
+                &mut a,
+                1,
+                0,
+                C64 {
+                    re: scale,
+                    im: 0.5 * scale,
+                },
+            );
+        }
+        pack(n, a)
+    }
+
+fn assert_gram_identity(m: &Unitary, y: &Array1<f64>, tol: f64) {
+        let uh = m.hconj(y.as_slice().unwrap());
+        let g = m.mul(&uh, y.as_slice().unwrap());
+        for i in 0..m.n {
+            for j in 0..m.n {
+                let z = m.at(&g, i, j);
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (z.re - want).abs() < tol && z.im.abs() < tol,
+                    "U^* U[{i},{j}] = {z:?}"
+                );
+            }
+        }
+    }
+
+#[test]
+fn retract_stays_on_u3() {
+        let m = Unitary::new(3).unwrap();
+        let x = identity(3);
+        let v = m.project(&x, &skewh_step(3, 0.4));
+        let y = m.retract(&x, &v);
+        assert!(is_unitary(&y), "left U(3) {y:?}");
+        assert_gram_identity(&m, &y, 1e-10);
+        assert_eq!(y.len(), 18);
+        let fro = vecops::nrm2(y.view());
+        assert!((fro - 1.0).abs() > 0.5, "must not be the sphere {y:?}");
+    }
+
+#[test]
+fn project_pullback_is_skew_hermitian() {
+        let m = Unitary::new(2).unwrap();
+        let s = 0.5_f64.sqrt();
+        let mut u = vec![0.0; 8];
+        m.put(&mut u, 0, 0, C64 { re: s, im: 0.0 });
+        m.put(&mut u, 0, 1, C64 { re: s, im: 0.0 });
+        m.put(&mut u, 1, 0, C64 { re: 0.0, im: s });
+        m.put(&mut u, 1, 1, C64 { re: 0.0, im: -s });
+        let x = pack(2, u);
+        let v = m.project(&x, &skewh_step(2, 0.7));
+        let uh = m.hconj(x.as_slice().unwrap());
+        let omega = m.mul(&uh, v.as_slice().unwrap());
+        let omega_h = m.hconj(&omega);
+        for i in 0..2 {
+            for j in 0..2 {
+                let a = m.at(&omega, i, j);
+                let b = m.at(&omega_h, i, j);
+                assert!(
+                    (a.re + b.re).abs() < 1e-12 && (a.im + b.im).abs() < 1e-12,
+                    "U^* V not skew-Hermitian at [{i},{j}]"
+                );
+            }
+        }
+    }
+
+#[test]
+fn inner_is_the_real_frobenius_product() {
+        let a = array![1.0, 0.5, 0.0, -0.25, 0.3, 0.1, -0.2, 0.4];
+        let b = array![0.2, 0.1, 0.5, 0.0, -0.1, 0.3, 0.4, -0.2];
+        let got = inner(&a, &b);
+        let want: f64 = a.iter().zip(b.iter()).map(|(p, q)| p * q).sum();
+        assert!((got - want).abs() < 1e-15);
+        assert!((typical_dist(2) - std::f64::consts::PI * 2.0_f64.sqrt()).abs() < 1e-15);
     }
 }

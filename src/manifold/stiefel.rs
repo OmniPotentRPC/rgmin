@@ -19,6 +19,15 @@ use super::{Manifold, sphere::Sphere};
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Stiefel;
 
+impl Stiefel {
+    /// Length-inferred `St(n, 1)` geometry.
+    pub fn p1() -> Self { Self }
+    /// Zero denotes the length-inferred row count.
+    pub fn rows(self) -> usize { 0 }
+    /// A single orthonormal column.
+    pub fn columns(self) -> usize { 1 }
+}
+
 impl Manifold for Stiefel {
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         Sphere.project(x, v)
@@ -43,6 +52,11 @@ pub struct StiefelNp {
 }
 
 impl StiefelNp {
+    /// Ambient row count.
+    pub fn rows(self) -> usize { self.n }
+    /// Number of orthonormal columns.
+    pub fn columns(self) -> usize { self.p }
+
     /// \(\mathrm{St}(n,p)\) with \(n \ge p \ge 2\).
     pub fn new(n: usize, p: usize) -> Result<Self, (usize, usize)> {
         if n >= p && p >= 2 {

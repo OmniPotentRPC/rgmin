@@ -12,11 +12,21 @@
 //!
 //! Reductions go through [`crate::vecops`].
 
-use ndarray::{Array1, ArrayView1};
+use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::vecops::{self, Vector};
 
 use super::Manifold;
+
+/// Which mean is constrained to vanish.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CenterMode {
+    /// `X 1_n = 0`, the mean column is zero.
+    #[default]
+    Cols,
+    /// `1_m^T X = 0`, the mean row is zero.
+    Rows,
+}
 
 /// Centered `m x n` matrices. Packed row-major, length `m n`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +51,28 @@ impl Default for CenteredMatrix {
 }
 
 impl CenteredMatrix {
+    /// Construct the linear subspace from an explicit centering mode.
+    pub fn with_mode(m: usize, n: usize, mode: CenterMode) -> Self {
+        Self::new(m, n, mode == CenterMode::Rows)
+    }
+    /// Matrices whose mean column is zero.
+    pub fn cols(m: usize, n: usize) -> Self { Self::new(m, n, false) }
+    /// Matrices whose mean row is zero.
+    pub fn rows(m: usize, n: usize) -> Self { Self::new(m, n, true) }
+    /// Centering mode represented by this subspace.
+    pub fn mode(self) -> CenterMode {
+        if self.rows { CenterMode::Rows } else { CenterMode::Cols }
+    }
+    /// Flatten a matrix in row-major order.
+    pub fn pack_matrix(matrix: &Array2<f64>) -> Array1<f64> {
+        Array1::from_iter(matrix.iter().copied())
+    }
+    /// Recover a matrix with this subspace's shape.
+    pub fn unpack_matrix(self, x: &Array1<f64>) -> Option<Array2<f64>> {
+        let values = unpack(x, self.m, self.n)?;
+        Array2::from_shape_vec((self.m, self.n), values).ok()
+    }
+
     /// Centered `m x n` matrices. Illegal `m == 0` or `n == 0`
     /// fails [`Manifold::required_dim`].
     pub fn new(m: usize, n: usize, rows: bool) -> Self {
@@ -107,6 +139,28 @@ pub fn is_centered(x: &Array1<f64>, m: usize, n: usize, rows: bool) -> bool {
         return false;
     }
     means_vanish(m, n, rows, x.as_slice().unwrap_or(&[]))
+}
+
+
+/// Typical distance with an explicit centering mode.
+pub fn typical_dist_mode(m: usize, n: usize, mode: CenterMode) -> f64 {
+    typical_dist(m, n, mode == CenterMode::Rows)
+}
+
+/// Whether the matrix satisfies the requested centering constraints.
+pub fn is_centered_mode(x: &Array1<f64>, m: usize, n: usize, mode: CenterMode) -> bool {
+    max_mean_abs(m, n, x.as_slice().unwrap_or(&[]), mode) < 1e-10
+}
+
+/// Largest absolute constrained mean; infinity for invalid shape or data.
+pub fn max_mean_abs(m: usize, n: usize, a: &[f64], mode: CenterMode) -> f64 {
+    if m == 0 || n == 0 || m.checked_mul(n) != Some(a.len()) || a.iter().any(|v| !v.is_finite()) {
+        return f64::INFINITY;
+    }
+    match mode {
+        CenterMode::Cols => (0..m).map(|i| row_mean(a, i, n).abs()).fold(0.0, f64::max),
+        CenterMode::Rows => (0..n).map(|j| col_mean(a, j, m, n).abs()).fold(0.0, f64::max),
+    }
 }
 
 fn means_vanish(m: usize, n: usize, rows: bool, a: &[f64]) -> bool {
@@ -387,5 +441,168 @@ mod tests {
                 rows: true
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod retained_mode_tests {
+    use super::*;
+    use ndarray::array;
+    fn unpack(m: usize, n: usize, x: &Array1<f64>) -> Option<Vec<f64>> {
+        super::unpack(x, m, n)
+    }
+
+    #[test]
+    fn retract_stays_on_the_set() {
+        let m = CenteredMatrix::cols(2, 3);
+        let x = array![1.0, -0.5, -0.5, 2.0, -1.0, -1.0];
+        let v = array![0.3, 0.0, -0.1, -0.2, 0.4, 0.1];
+        let y = m.retract(&x, &v);
+        assert_eq!(y.len(), 6);
+        assert!(
+            is_centered_mode(&y, 2, 3, CenterMode::Cols),
+            "left the centered-cols set {y:?}"
+        );
+        let worst = max_mean_abs(2, 3, y.as_slice().unwrap(), CenterMode::Cols);
+        assert!(worst < 1e-14, "row means {worst} y={y:?}");
+        let fro = vecops::nrm2(y.view());
+        assert!((fro - 1.0).abs() > 0.5, "must not be the sphere {y:?}");
+    }
+
+    #[test]
+    fn retract_rows_stays_on_the_set() {
+        let m = CenteredMatrix::rows(2, 3);
+        let x = array![1.0, 2.0, 3.0, -1.0, -2.0, -3.0];
+        let v = array![0.1, -0.2, 0.3, 0.4, 0.0, -0.1];
+        let y = m.retract(&x, &v);
+        assert!(
+            is_centered_mode(&y, 2, 3, CenterMode::Rows),
+            "left the centered-rows set {y:?}"
+        );
+        let worst = max_mean_abs(2, 3, y.as_slice().unwrap(), CenterMode::Rows);
+        assert!(worst < 1e-14, "col means {worst} y={y:?}");
+    }
+
+    #[test]
+    fn project_cols_subtracts_the_mean_column() {
+        let m = CenteredMatrix::cols(2, 2);
+        let x = array![1.0, -1.0, 2.0, -2.0];
+        let v = array![1.0, 3.0, 2.0, 6.0];
+        let t = m.project(&x, &v);
+        // rows [1, 3] mean 2 -> [-1, 1]; [2, 6] mean 4 -> [-2, 2]
+        assert!((t[0] + 1.0).abs() < 1e-15, "{t:?}");
+        assert!((t[1] - 1.0).abs() < 1e-15, "{t:?}");
+        assert!((t[2] + 2.0).abs() < 1e-15, "{t:?}");
+        assert!((t[3] - 2.0).abs() < 1e-15, "{t:?}");
+        assert!((t[0] + t[1]).abs() < 1e-15);
+        assert!((t[2] + t[3]).abs() < 1e-15);
+    }
+
+    #[test]
+    fn project_rows_subtracts_the_mean_row() {
+        let m = CenteredMatrix::rows(2, 2);
+        let x = array![1.0, 2.0, -1.0, -2.0];
+        let v = array![1.0, 3.0, 5.0, 7.0];
+        let t = m.project(&x, &v);
+        // cols [1, 5] mean 3 -> [-2, 2]; [3, 7] mean 5 -> [-2, 2]
+        assert!((t[0] + 2.0).abs() < 1e-15, "{t:?}");
+        assert!((t[1] + 2.0).abs() < 1e-15, "{t:?}");
+        assert!((t[2] - 2.0).abs() < 1e-15, "{t:?}");
+        assert!((t[3] - 2.0).abs() < 1e-15, "{t:?}");
+        assert!((t[0] + t[2]).abs() < 1e-15);
+        assert!((t[1] + t[3]).abs() < 1e-15);
+    }
+
+    #[test]
+    fn transport_of_a_tangent_is_itself() {
+        let m = CenteredMatrix::cols(2, 2);
+        let x = array![1.0, -1.0, 2.0, -2.0];
+        let y = array![0.5, -0.5, -0.5, 0.5];
+        let v = array![0.2, -0.2, -0.1, 0.1];
+        let t = m.transport(&x, &y, &v);
+        for i in 0..4 {
+            assert!((t[i] - v[i]).abs() < 1e-15);
+        }
+    }
+
+    #[test]
+    fn frobenius_inner_and_typical_dist_mode() {
+        let u = array![1.0, -1.0, 0.5, -0.5];
+        let v = array![1.0, 1.0, 2.0, 2.0];
+        assert!((inner(&u, &v) - 0.0).abs() < 1e-15);
+        let u2 = array![1.0, -1.0, 0.0, 0.0];
+        let v2 = array![1.0, 0.0, 0.0, 0.0];
+        assert!((inner(&u2, &v2) - 1.0).abs() < 1e-15);
+        assert!((typical_dist_mode(2, 3, CenterMode::Cols) - 4.0_f64.sqrt()).abs() < 1e-15);
+        assert!((typical_dist_mode(2, 3, CenterMode::Rows) - 3.0_f64.sqrt()).abs() < 1e-15);
+        assert!((vecops::nrm2(u.view()) - inner(&u, &u).sqrt()).abs() < 1e-15);
+    }
+
+    #[test]
+    fn pack_unpack_round_trips() {
+        let mat = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
+        let x = CenteredMatrix::pack_matrix(&mat);
+        assert_eq!(x, array![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let back = CenteredMatrix::cols(2, 3).unpack_matrix(&x).unwrap();
+        assert_eq!(back, mat);
+        let (m, n) = (2, 3);
+        let y = pack(m, n, unpack(m, n, &x).unwrap());
+        for i in 0..6 {
+            assert!((x[i] - y[i]).abs() < 1e-15);
+        }
+        assert!(unpack(2, 3, &array![1.0]).is_none());
+        assert!(CenteredMatrix::cols(2, 2).unpack_matrix(&x).is_none());
+    }
+
+    #[test]
+    fn wrong_dim_rejects_a_3n_cluster() {
+        let m = CenteredMatrix::cols(2, 3);
+        let x = Array1::from_elem(114, 0.1);
+        let v = Array1::from_elem(114, 0.01);
+        let y = m.retract(&x, &v);
+        assert_eq!(y.len(), 114);
+        assert_eq!(m.project(&x, &v).len(), 114);
+        assert_eq!(m.required_dim(114), Err(6));
+        assert!(m.required_dim(6).is_ok());
+        assert!(CenteredMatrix::with_mode(0, 4, CenterMode::Cols)
+            .required_dim(0)
+            .is_err());
+        assert!(CenteredMatrix::cols(3, 2).required_dim(6).is_ok());
+        assert!(CenteredMatrix::cols(3, 2).required_dim(9).is_err());
+    }
+
+    #[test]
+    fn kind_is_not_sphere_or_stiefel() {
+        use crate::manifold::ManifoldKind;
+        assert_ne!(
+            ManifoldKind::centered_matrix(2, 3, false),
+            ManifoldKind::Sphere
+        );
+        assert_ne!(
+            ManifoldKind::centered_matrix(2, 3, false),
+            ManifoldKind::Stiefel
+        );
+        assert_ne!(
+            ManifoldKind::centered_matrix(2, 3, false),
+            ManifoldKind::Oblique { n: 2, m: 3 }
+        );
+        assert_ne!(
+            ManifoldKind::centered_matrix(2, 3, false),
+            ManifoldKind::centered_matrix(2, 3, true)
+        );
+        assert_eq!(
+            ManifoldKind::centered_matrix(2, 3, false).as_str(),
+            "centered_matrix"
+        );
+    }
+
+    #[test]
+    fn cols_and_rows_are_different_sets() {
+        let x = array![1.0, -1.0, 2.0, -2.0];
+        assert!(is_centered_mode(&x, 2, 2, CenterMode::Cols));
+        assert!(!is_centered_mode(&x, 2, 2, CenterMode::Rows));
+        let y = array![1.0, 2.0, -1.0, -2.0];
+        assert!(is_centered_mode(&y, 2, 2, CenterMode::Rows));
+        assert!(!is_centered_mode(&y, 2, 2, CenterMode::Cols));
     }
 }
