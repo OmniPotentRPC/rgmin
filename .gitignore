@@ -37,3 +37,13 @@ docs/source/_build/
 .pixi/
 pixi.lock
 .cache/
+
+# reStructuredText exported from docs/orgmode by docs/export.el
+docs/source/changelog.rst
+docs/source/index.rst
+docs/source/contributing/index.rst
+docs/source/explanation/*.rst
+docs/source/howto/*.rst
+docs/source/reference/*.rst
+docs/source/tutorials/*.rst
+docs/build/
