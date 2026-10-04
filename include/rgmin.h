@@ -75,7 +75,9 @@ typedef enum rgmin_method_t {
     RGMIN_FIRE = 17,
     RGMIN_BB = 18,
     RGMIN_DOGLEG = 19,
-    RGMIN_FIRE2 = 20
+    RGMIN_FIRE2 = 20,
+    /** Quick-min: project the velocity on the force, then an Euler step. */
+    RGMIN_QUICKMIN = 21
 } rgmin_method_t;
 
 /** Conjugacy coefficient β. Closed leaf subset of dest Conjugacy
@@ -215,6 +217,10 @@ typedef enum rgmin_fire_variant_t {
 } rgmin_fire_variant_t;
 void rgmin_solver_set_fire_variant(rgmin_solver_t *solver,
                                    rgmin_fire_variant_t variant);
+/** Split a quick-min session at `at`: atoms `[0, at)`, cell `[at, n)`.
+ *  Returns RGMIN_INVALID_PARAMETER when the session is not quick-min or
+ *  `at` is not an interior index. ABI minor 29. */
+rgmin_status_t rgmin_solver_set_quickmin_cell(rgmin_solver_t *solver, size_t at);
 /** Line search for the session arms that use one. */
 typedef enum rgmin_linesearch_t {
     RGMIN_LINESEARCH_BRENT = 0,

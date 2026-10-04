@@ -41,6 +41,7 @@ enum class Method {
     Bb = RGMIN_BB,
     Dogleg = RGMIN_DOGLEG,
     Fire2 = RGMIN_FIRE2,
+    QuickMin = RGMIN_QUICKMIN,
 };
 
 enum class EigenKind {
@@ -255,6 +256,9 @@ public:
     void set_accept(rgmin_accept_t accept) { rgmin_solver_set_accept(ptr_, accept); }
     void set_fire_variant(rgmin_fire_variant_t variant) {
         rgmin_solver_set_fire_variant(ptr_, variant);
+    }
+    rgmin_status_t set_quickmin_cell(std::size_t at) {
+        return rgmin_solver_set_quickmin_cell(ptr_, at);
     }
     rgmin_status_t set_linesearch(rgmin_linesearch_t kind, double c1,
                                  double c2, std::size_t maxiter) {

@@ -1,0 +1,53 @@
+#+TITLE: Quick-min
+#+OPTIONS: toc:nil num:nil
+
+Quick-min keeps a velocity and damps it by a projection before an
+explicit Euler step. Write ~F = -∇f~ and ~Δt~ for the time step. The
+reference update is
+
+: v ← (v · F / |F|²) F    when v · F ≥ 0 and |F| > 0
+: v ← 0                   otherwise
+: v ← v + Δt F
+: Δx = Δt v
+
+~quickmin_baseline~ is that update and nothing else. A negative
+projection takes the second branch, so the velocity that enters the
+Euler kick has no component opposing ~F~. A zero force has no
+direction and takes the same branch.
+
+The session adds three pieces that the other first-order methods
+already own.
+
+The displacement cap is ~Solver::set_atom_maxmove~ or
+~Control::maxmove~. When it shortens ~Δx~, the velocity is multiplied
+by ~|Δx taken| / |Δx proposed|~. That is the ratio FIRE uses after its
+own cap. The next projection then sees the motion that happened. On
+
+: E = ½ (y - 0.2 x)² + 0.02 x²
+
+from ~(2, 0)~ with ~Δt = 0.2~ and cap ~0.08~, eighty reference steps
+that keep the uncapped velocity stay above ~10⁻⁷~, and the same steps
+with the rescale fall below ~10⁻⁸~.
+
+The time step uses FIRE's factors: ~n_min = 5~, ~f_inc = 1.1~,
+~f_dec = 0.5~, ~Δt_max = 2.5 Δt₀~. More than ~n_min~ steps with
+~F · v > 0~ grow ~Δt~. ~F · v < 0~ shrinks it, down to ~10⁻¹²~; the
+velocity on that branch is already zero from the reference rule.
+~F · v = 0~ leaves ~Δt~ alone. A resting velocity is not an uphill
+step, and halving the caller's ~Δt~ before any motion only slows the
+opening. On ~E = ½ x²~ from ~x = 1~ with ~Δt₀ = 0.05~, the growing
+step reaches ~|x| < 10⁻³~ in fewer iterations than the fixed step.
+~Solver::set_quickmin_adapt(false)~ selects the fixed reference step.
+
+A cell block is an index ~at~. Coordinates ~[0, at)~ and ~[at, n)~
+each take the reference replacement on their own force, then the Euler
+kick uses the shared ~Δt~. A cell velocity that opposes the stress is
+zeroed even when the atomic alignment keeps ~v · F~ positive for the
+whole vector. One joint projection would replace both blocks by a
+single component along the joint force and spend atomic momentum on
+the opposing cell direction. On ~E = ½ (x² + c²)~ at ~(-1, 1)~ with
+~v = (3, 1)~, ~F = (1, -1)~ and ~Δt = 0.1~, the split step reaches a
+lower value than the joint projection, and the cell velocity after the
+replacement is only the Euler kick ~Δt F_c~.
+~Solver::set_quickmin_cell~ sets the index. The C entry is
+~RGMIN_QUICKMIN~ and ~rgmin_solver_set_quickmin_cell~ (ABI minor 29).

@@ -6,6 +6,15 @@
 
 ** Unreleased
 
+Quick-min (~Method::QuickMin~, C ~RGMIN_QUICKMIN~, ABI minor 29).
+The reference step projects the velocity onto the force when
+~v · F~ is non-negative and sets the velocity to zero otherwise,
+then adds ~Δt F~ and moves by ~Δt~ times the updated velocity.
+The session caps the displacement and rescales the velocity to
+the step taken, grows and shrinks ~Δt~ with FIRE's factors (a
+zero power does not shrink it), and splits an atomic block from
+a cell block through ~Solver::set_quickmin_cell~.
+
 Molecular manifolds: ~rigid_quotient~ is Sella Cartesian
 ~R^{3N}/SE(3)~ (~fix_translation~ + ~fix_rotation~);
 ~mw_rigid~ is the Page–McIver / Sella IRC Eckart metric on the

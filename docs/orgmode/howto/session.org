@@ -28,6 +28,12 @@ let report = solver.step(&obj, &mut x).unwrap();
 ~step~ is one outer iteration. ~step_hess~ / ~step_hess_fg~ take a
 host Hessian. ~forget~ drops pair history, conjugacy, and moments.
 ~set_atom_maxmove~ is the eOn per-atom clip.
+
+~Method::QuickMin~ is the projection-then-Euler step in
+[[file:../explanation/quickmin.org][quick-min]]. ~set_quickmin_adapt(false)~
+keeps the reference fixed time step. ~set_quickmin_cell(at)~ gives the
+atoms and the cell their own velocities. The displacement cap is the
+same ~set_atom_maxmove~ the other methods use.
 ~set_project_rigid~ projects translations and rotations on isolated
 clusters. A periodic cell drops translation only.
 

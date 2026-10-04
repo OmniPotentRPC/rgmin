@@ -112,6 +112,8 @@ pub enum rgmin_method_t {
     RGMIN_DOGLEG = 19,
     /// FIRE 2.0 (Guénolé 2020).
     RGMIN_FIRE2 = 20,
+    /// Quick-min: project the velocity on the force, then an Euler step.
+    RGMIN_QUICKMIN = 21,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -437,6 +439,7 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
         rgmin_method_t::RGMIN_FIRE2 => Method::Fire {
             kind: crate::FireKind::V2,
         },
+        rgmin_method_t::RGMIN_QUICKMIN => Method::QuickMin,
     }
 }
 
@@ -1562,6 +1565,25 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_variant(
         rgmin_fire_variant_t::RGMIN_FIRE_GUENOLE2020 => crate::FireVariant::Guenole2020,
     };
     unsafe { (*solver).solver.set_fire_variant(v) };
+}
+
+/// Split a quick-min session into atoms `[0, at)` and cell `[at, n)`.
+///
+/// # Safety
+///
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_quickmin_cell(
+    solver: *mut rgmin_solver_t,
+    at: usize,
+) -> rgmin_status_t {
+    if solver.is_null() {
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    match unsafe { (*solver).solver.set_quickmin_cell(at) } {
+        Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
+        Err(_) => rgmin_status_t::RGMIN_INVALID_PARAMETER,
+    }
 }
 
 /// Line search for the line-searched session arms.

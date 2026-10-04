@@ -103,6 +103,12 @@ pub enum Method {
     /// Barzilai and Borwein, <https://doi.org/10.1093/imanum/8.1.141>.
     /// Raydan, <https://doi.org/10.1137/S1052623494266365>.
     Bb,
+    /// Quick-min: project the velocity on the force, then an Euler step.
+    ///
+    /// The reference rule and the session departures (step cap, FIRE
+    /// time-step factors, per-block cell velocity) are in
+    /// [`crate::quickmin`].
+    QuickMin,
     /// Powell dogleg on a caller-supplied dense Hessian.
     ///
     /// Nocedal and Wright, algorithm 4.1,

@@ -107,6 +107,12 @@ pub enum Error {
         /// Cutoff (`DENSE_EIGEN_CUTOFF`).
         cutoff: usize,
     },
+    /// Quick-min was asked for something its session does not hold.
+    #[error("quick-min: {what}")]
+    QuickMin {
+        /// What the call refused.
+        what: &'static str,
+    },
     /// Named backend only computes the full spectrum. Partial `nev`
     /// is refused rather than silently solved as `n` and trimmed.
     #[error("eigensolver {kind} is full-spectrum only; nev {nev} < n {n}")]

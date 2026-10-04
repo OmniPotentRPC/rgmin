@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Quick-min (`Method::QuickMin`, C `RGMIN_QUICKMIN`, ABI minor 29).
+  The reference step projects the velocity onto the force when that
+  projection is non-negative and sets it to zero otherwise, then adds
+  the time step times the force and moves by the time step times the
+  updated velocity. The session also caps the displacement and rescales
+  the velocity to the step that was taken, grows and shrinks the time
+  step with FIRE's factors (a zero power does not shrink it), and can
+  split atoms and cell into separate velocities
+  (`Solver::set_quickmin_cell`, `rgmin_solver_set_quickmin_cell`).
 - `LineSearch::search_from`: a line search from a point whose value and
   gradient are known, returning the accepted point with its value and
   gradient (`LineOutcome`) and bounded by an `alpha_max`.
