@@ -2153,7 +2153,7 @@ mod tests {
         let h = gapped_diag(4);
         let x = Array1::zeros(4);
         let seed = array![1.0, 0.0, 0.0, 0.0];
-        let err = lowest_mode(
+        let err = lowest_mode_eigenexa(
             &h,
             x.view(),
             seed.view(),
@@ -2162,6 +2162,7 @@ mod tests {
                 nev: 1,
                 ..EigenParams::default()
             },
+            &EigenExaParams::default(),
         )
         .unwrap_err();
         match err {
