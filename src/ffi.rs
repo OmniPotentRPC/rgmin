@@ -1806,7 +1806,10 @@ pub unsafe extern "C" fn rgmin_solver_set_trust(solver: *mut rgmin_solver_t, rad
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_solver_set_highs_trust(solver: *mut rgmin_solver_t, radius: f64) -> i32 {
+pub unsafe extern "C" fn rgmin_solver_set_highs_trust(
+    solver: *mut rgmin_solver_t,
+    radius: f64,
+) -> i32 {
     unsafe { rgmin_solver_set_trust(solver, radius) }
 }
 
