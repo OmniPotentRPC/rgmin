@@ -57,7 +57,8 @@ impl Manifold for MwRigid {
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         let mut w = v.clone();
-        project_horizontal(&mut w, x.view(), self.masses(), true);
+        // A stored count that is not one mass per atom leaves `v` as it is.
+        let _ = project_horizontal(&mut w, x.view(), self.masses(), true);
         w
     }
 
@@ -100,6 +101,24 @@ mod tests {
         let trans = array![0.2, 0.0, 0.0, 0.2, 0.0, 0.0, 0.2, 0.0, 0.0];
         let p = geom.project(&y, &trans);
         assert!(vecops::nrm2(p.view()) < 1e-12, "{p:?}");
+    }
+
+    #[test]
+    fn wrong_mass_count_does_not_use_unit_mass() {
+        let x = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0];
+        let v = array![0.3, 0.1, 0.0, -0.2, 0.4, 0.0, 0.1, -0.2, 0.05];
+        let projected = MwRigid::with_masses(&[12.0, 1.0]).project(&x, &v);
+        for (a, b) in projected.iter().zip(v.iter()) {
+            assert!(
+                (a - b).abs() < 1e-15,
+                "a short mass table changed the vector"
+            );
+        }
+        let unit = MwRigid::new().project(&x, &v);
+        assert!(
+            vecops::nrm2((&unit - &v).view()) > 0.1,
+            "unit mass did not move this vector"
+        );
     }
 
     #[cfg(feature = "par")]

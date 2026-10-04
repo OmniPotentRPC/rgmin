@@ -453,7 +453,7 @@ fn fused_evalgrad_is_one_callback_per_oracle() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 28);
+    assert_eq!(stamp.abi_minor, 29);
     assert_eq!(stamp.layout_revision, 2);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -533,8 +533,15 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_project_rigid(session, 1);
         rgmin_solver_set_periodic(session, 1);
         rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_MW_RIGID);
-        rgmin_solver_set_masses(session, masses.as_ptr(), masses.len());
-        rgmin_solver_set_masses(session, std::ptr::null(), 0);
+        // Three masses on a dimension-2 session are not one mass per atom.
+        assert_eq!(
+            rgmin_solver_set_masses(session, masses.as_ptr(), masses.len()),
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        );
+        assert_eq!(
+            rgmin_solver_set_masses(session, std::ptr::null(), 0),
+            rgmin_status_t::RGMIN_SUCCESS
+        );
         rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN);
         rgmin_solver_forget(session);
         // A no-op on an L-BFGS session.
@@ -591,7 +598,8 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
     assert!(out.value.is_finite());
     unsafe { rgmin_solver_free(session) };
 
-    // The null contract: every setter is a no-op, never a crash.
+    // A null session does not crash. Setters that return a status
+    // report RGMIN_INVALID_PARAMETER; the others return.
     let null = std::ptr::null_mut();
     unsafe {
         rgmin_solver_set_maxmove(null, 0.5);
@@ -602,7 +610,10 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_project_rigid(null, 1);
         rgmin_solver_set_periodic(null, 0);
         rgmin_solver_set_manifold(null, rgmin_manifold_t::RGMIN_MANIFOLD_SPHERE);
-        rgmin_solver_set_masses(null, masses.as_ptr(), masses.len());
+        assert_eq!(
+            rgmin_solver_set_masses(null, masses.as_ptr(), masses.len()),
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        );
         rgmin_solver_forget(null);
         rgmin_solver_set_fire_variant(null, rgmin_fire_variant_t::RGMIN_FIRE_GUENOLE2020);
         assert_eq!(
@@ -615,6 +626,50 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
             ),
             rgmin_status_t::RGMIN_INVALID_PARAMETER
         );
+    }
+}
+
+/// One mass per atom on a 9-vector is three masses. Two masses, and
+/// two masses on a length that integer-divides to two, are refused.
+#[test]
+fn c_abi_set_masses_rejects_a_bad_count() {
+    use rgmin::ffi::{rgmin_manifold_t, rgmin_solver_set_manifold, rgmin_solver_set_masses};
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 1e-8,
+        istep: 0.1,
+        memory: 4,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 9) };
+    assert!(!session.is_null());
+    let good = [12.0_f64, 1.0, 1.0];
+    let bad = [12.0_f64, 1.0];
+    unsafe {
+        rgmin_solver_set_manifold(session, rgmin_manifold_t::RGMIN_MANIFOLD_MW_RIGID);
+        assert_eq!(
+            rgmin_solver_set_masses(session, good.as_ptr(), good.len()),
+            rgmin_status_t::RGMIN_SUCCESS
+        );
+        assert_eq!(
+            rgmin_solver_set_masses(session, bad.as_ptr(), bad.len()),
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        );
+        assert_eq!(
+            rgmin_solver_set_masses(session, std::ptr::null(), 0),
+            rgmin_status_t::RGMIN_SUCCESS
+        );
+        rgmin_solver_free(session);
+    }
+    let eight = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 8) };
+    assert!(!eight.is_null());
+    let two = [1.0_f64, 2.0];
+    unsafe {
+        assert_eq!(
+            rgmin_solver_set_masses(eight, two.as_ptr(), two.len()),
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        );
+        rgmin_solver_free(eight);
     }
 }
 

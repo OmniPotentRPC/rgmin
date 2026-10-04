@@ -70,3 +70,5 @@ Sella IRC Eckart), ~SPHERE~, ~SO3~ (length 9), ~STIEFEL~
 (~St(n,1)~), ~SE3~ (length 12). See
 [[file:manifolds.org][retract onto an embedded manifold]].
 ~rgmin_solver_set_masses~ supplies N atomic masses for ~MW_RIGID~.
+A length other than N returns ~RGMIN_INVALID_PARAMETER~ and leaves
+the stored masses. Empty or null restores unit mass.

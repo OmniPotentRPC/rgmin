@@ -27,6 +27,14 @@ pub enum Error {
         /// Length of the working vector.
         got: usize,
     },
+    /// Mass table length is not one mass per atom.
+    #[error("mass count {got} is not one mass per atom for dimension {dim}")]
+    MassCount {
+        /// Number of masses supplied.
+        got: usize,
+        /// Coordinate length. One mass covers three coordinates.
+        dim: usize,
+    },
     /// SCG cannot make progress (non-finite objective everywhere it
     /// can step, or damping at its limit).
     #[error("SCG stalled: {what}")]

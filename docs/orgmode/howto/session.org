@@ -69,11 +69,13 @@ together is not asked twice.
 | ~set_cautious~ | Li--Fukushima pair filter |
 | ~set_highs~ | Feasible-set QP; returns 1 without ~--features highs~ |
 | ~set_manifold~ | Embedded geometry; ~rigid_quotient~ for 3N clusters |
-| ~set_masses~ | Per-atom masses for ~mw_rigid~ (Page–McIver) |
+| ~set_masses~ | Per-atom masses for ~mw_rigid~. A count other than one per atom is an error; empty clears to unit mass |
 
 The C entry of each setter is ~rgmin_solver_<setter>~.
 ~rgmin_solver_forget_evaluation~ and ~rgmin_solver_set_lbfgs_neb_guards~
-need ~abi_minor~ 28.
+need ~abi_minor~ 28. ~rgmin_solver_set_masses~ returns a status at
+~abi_minor~ 29: a count other than one mass per atom is
+~RGMIN_INVALID_PARAMETER~ and the stored masses stay.
 
 ** When to use ~rgmin_minimize~ instead
 

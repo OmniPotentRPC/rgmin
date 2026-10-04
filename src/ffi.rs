@@ -63,7 +63,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 28;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 29;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 2;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -2250,7 +2250,9 @@ pub unsafe extern "C" fn rgmin_solver_set_unitary(solver: *mut rgmin_solver_t, n
 }
 
 /// Per-atom masses for `RGMIN_MANIFOLD_MW_RIGID`. `n_atoms == 0` or a
-/// null pointer clears them (unit mass).
+/// null pointer clears them (unit mass). A positive count must be one
+/// mass per atom (`3 * n_atoms` equals the session dimension);
+/// otherwise `RGMIN_INVALID_PARAMETER` and the stored table stays.
 ///
 /// # Safety
 ///
@@ -2262,16 +2264,24 @@ pub unsafe extern "C" fn rgmin_solver_set_masses(
     solver: *mut rgmin_solver_t,
     masses: *const f64,
     n_atoms: usize,
-) {
+) -> rgmin_status_t {
     if solver.is_null() {
-        return;
+        set_last_error("rgmin_solver_set_masses: null solver");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
-    if masses.is_null() || n_atoms == 0 {
-        unsafe { (*solver).solver.set_masses(Array1::zeros(0)) };
-        return;
+    let table = if masses.is_null() || n_atoms == 0 {
+        Array1::zeros(0)
+    } else {
+        let slice = unsafe { slice::from_raw_parts(masses, n_atoms) };
+        Array1::from(slice.to_vec())
+    };
+    match unsafe { (*solver).solver.set_masses(table) } {
+        Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
+        Err(e) => {
+            set_last_error(&e.to_string());
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        }
     }
-    let slice = unsafe { slice::from_raw_parts(masses, n_atoms) };
-    unsafe { (*solver).solver.set_masses(Array1::from(slice.to_vec())) };
 }
 
 /// Periodic cell. Nonzero: Sella `proj_rot = false`, quotient is \(R^{3N}/T(3)\).

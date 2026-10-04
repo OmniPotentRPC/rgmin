@@ -263,8 +263,8 @@ public:
     rgmin_status_t set_objective_roundoff(double relative) {
         return rgmin_solver_set_objective_roundoff(ptr_, relative);
     }
-    void set_masses(double const* masses, std::size_t n_atoms) {
-        rgmin_solver_set_masses(ptr_, masses, n_atoms);
+    rgmin_status_t set_masses(double const* masses, std::size_t n_atoms) {
+        return rgmin_solver_set_masses(ptr_, masses, n_atoms);
     }
     void set_periodic(bool periodic) {
         rgmin_solver_set_periodic(ptr_, periodic ? 1 : 0);

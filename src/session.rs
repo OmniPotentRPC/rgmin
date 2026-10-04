@@ -349,8 +349,16 @@ impl Solver {
     }
 
     /// Per-atom masses for [`ManifoldKind::MwRigid`] (Page–McIver / Eckart).
-    /// Empty clears them (unit mass).
-    pub fn set_masses(&mut self, masses: Array1<f64>) {
+    /// Empty clears them (unit mass). A non-empty table must hold one
+    /// mass per atom (`3 * len == dim`). Any other length is
+    /// [`Error::MassCount`] and the stored table stays as it was.
+    pub fn set_masses(&mut self, masses: Array1<f64>) -> Result<()> {
+        if !masses.is_empty() && masses.len().checked_mul(3) != Some(self.dim) {
+            return Err(Error::MassCount {
+                got: masses.len(),
+                dim: self.dim,
+            });
+        }
         if masses.is_empty() {
             self.masses = None;
         } else {
@@ -362,6 +370,7 @@ impl Solver {
         if let ManifoldKind::MwRigid { masses: slot } = &mut self.manifold {
             *slot = copied;
         }
+        Ok(())
     }
 
     /// Al-Baali extra-updates on the newest L-BFGS pair. No effect: a
@@ -609,7 +618,7 @@ impl Solver {
     /// Drop rigid modes. Unit mass: stored masses belong to [`ManifoldKind::MwRigid`].
     /// `rotate` is off when the cell is periodic.
     fn strip_rigid(&self, v: &mut Array1<f64>, x: &Array1<f64>) {
-        project_horizontal(v, x.view(), None, !self.periodic);
+        let _ = project_horizontal(v, x.view(), None, !self.periodic);
     }
 
     /// Tangent projection. Periodic cells drop rotation (Sella `proj_rot`).
@@ -618,12 +627,12 @@ impl Solver {
             ManifoldKind::MwRigid { .. } => {
                 let mut w = v.clone();
                 let masses = self.masses.as_ref().and_then(|m| m.as_slice());
-                project_horizontal(&mut w, x.view(), masses, !self.periodic);
+                let _ = project_horizontal(&mut w, x.view(), masses, !self.periodic);
                 w
             }
             ManifoldKind::RigidQuotient => {
                 let mut w = v.clone();
-                project_horizontal(&mut w, x.view(), None, !self.periodic);
+                let _ = project_horizontal(&mut w, x.view(), None, !self.periodic);
                 w
             }
             other => other.project(x, v),
@@ -2014,12 +2023,41 @@ mod tests {
             "stored masses matched RigidQuotient"
         );
         let mut adopted = Solver::new(Method::Steepest, ctrl, 9);
-        adopted.set_masses(array![12.0, 1.0, 1.0]);
+        adopted.set_masses(array![12.0, 1.0, 1.0]).unwrap();
         adopted.set_manifold(ManifoldKind::mw_rigid(&[]));
         assert!(
             l2_diff(&adopted.project_vec(&x, &v), &from_kind) < 1e-12,
             "a unit kind did not adopt set_masses"
         );
+    }
+
+    /// A table that is not one mass per atom is refused. `len == dim/3`
+    /// would accept two masses on a length-8 session.
+    #[test]
+    fn set_masses_rejects_a_bad_count() {
+        let x = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0];
+        let v = array![0.3, 0.1, 0.0, -0.2, 0.4, 0.0, 0.1, -0.2, 0.05];
+        let mut solver = Solver::new(Method::Steepest, Control::default(), 9);
+        solver.set_manifold(ManifoldKind::mw_rigid(&[]));
+        solver.set_masses(array![12.0, 1.0, 1.0]).unwrap();
+        let kept = solver.project_vec(&x, &v);
+        let err = solver.set_masses(array![12.0, 1.0]).unwrap_err();
+        assert!(
+            matches!(err, Error::MassCount { got: 2, dim: 9 }),
+            "{err:?}"
+        );
+        let after = solver.project_vec(&x, &v);
+        assert!(
+            l2_diff(&kept, &after) < 1e-12,
+            "a rejected table replaced the stored masses"
+        );
+        let mut eight = Solver::new(Method::Steepest, Control::default(), 8);
+        let err8 = eight.set_masses(array![1.0, 2.0]).unwrap_err();
+        assert!(
+            matches!(err8, Error::MassCount { got: 2, dim: 8 }),
+            "{err8:?}"
+        );
+        eight.set_masses(Array1::zeros(0)).unwrap();
     }
 
     /// A steep well under a tiny Euclidean cap: every FIRE step is

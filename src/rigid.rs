@@ -10,33 +10,38 @@ use ndarray::{Array1, ArrayView1};
 
 /// eOn `projectOutRotTrans`. Unit-mass Eckart. Isolated molecule (T+R).
 pub(crate) fn project_out_rot_trans(vec: &mut Array1<f64>, pos: ArrayView1<f64>) {
-    project_horizontal(vec, pos, None, true);
+    let _ = project_horizontal(vec, pos, None, true);
 }
 
 /// Horizontal space of \(R^{3N}/\mathrm{SE}(3)\) or \(R^{3N}/T(3)\).
 ///
 /// `rotate` is Sella `proj_rot`: false under PBC (the cell kills
-/// rotational invariance). Masses are per atom (length N).
+/// rotational invariance). Masses are per atom (length N). A table
+/// whose length is not N is [`crate::Error::MassCount`] and `vec` is
+/// left unchanged.
 pub(crate) fn project_horizontal(
     vec: &mut Array1<f64>,
     pos: ArrayView1<f64>,
     masses: Option<&[f64]>,
     rotate: bool,
-) {
+) -> Result<(), crate::Error> {
     let n = pos.len();
     if n < 3 || !n.is_multiple_of(3) || vec.len() != n {
-        return;
+        return Ok(());
+    }
+    if let Some(m) = masses {
+        if m.len().checked_mul(3) != Some(n) {
+            return Err(crate::Error::MassCount { got: m.len(), dim: n });
+        }
     }
     if rotate && n < 6 {
-        return;
+        return Ok(());
     }
     let nat = n / 3;
-    let mass_ok = masses.map(|m| m.len() == nat).unwrap_or(false);
     let m_at = |i: usize| -> f64 {
-        if mass_ok {
-            masses.unwrap()[i].max(0.0)
-        } else {
-            1.0
+        match masses {
+            Some(m) => m[i].max(0.0),
+            None => 1.0,
         }
     };
 
@@ -107,6 +112,7 @@ pub(crate) fn project_horizontal(
             vec.scaled_add(-d / ee, e);
         }
     }
+    Ok(())
 }
 
 fn mass_dot<F>(a: &Array1<f64>, b: &Array1<f64>, nat: usize, m_at: &F) -> f64
@@ -144,7 +150,7 @@ mod tests {
         let pos = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
         let mut v = array![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
         let masses = [16.0, 1.0, 1.0];
-        project_horizontal(&mut v, pos.view(), Some(&masses), true);
+        project_horizontal(&mut v, pos.view(), Some(&masses), true).unwrap();
         assert!(l2(&v) < 1e-12);
     }
 
@@ -154,7 +160,7 @@ mod tests {
         let pos = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0];
         let mut v = array![0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0];
         let masses = [12.0, 1.0, 1.0];
-        project_horizontal(&mut v, pos.view(), Some(&masses), true);
+        project_horizontal(&mut v, pos.view(), Some(&masses), true).unwrap();
         assert!(l2(&v) < 1e-10, "{v:?}");
     }
 
@@ -163,10 +169,34 @@ mod tests {
         let pos = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0];
         let rot = array![0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0];
         let mut v = rot.clone();
-        project_horizontal(&mut v, pos.view(), None, false);
+        project_horizontal(&mut v, pos.view(), None, false).unwrap();
         assert!(l2(&v) > 0.5, "rotation was removed under PBC {v:?}");
         let mut t = array![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
-        project_horizontal(&mut t, pos.view(), None, false);
+        project_horizontal(&mut t, pos.view(), None, false).unwrap();
         assert!(l2(&t) < 1e-12, "translation survived under PBC {t:?}");
+    }
+
+    /// Two masses on a 9-vector are not one mass per atom. The kernel
+    /// reports that and does not fall back to unit weight.
+    #[test]
+    fn wrong_mass_count_is_an_error_and_leaves_the_vector() {
+        let pos = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0];
+        let original = array![0.3, 0.1, 0.0, -0.2, 0.4, 0.0, 0.1, -0.2, 0.05];
+        let mut v = original.clone();
+        let masses = [12.0, 1.0];
+        let err = project_horizontal(&mut v, pos.view(), Some(&masses), true).unwrap_err();
+        assert!(
+            matches!(err, crate::Error::MassCount { got: 2, dim: 9 }),
+            "{err:?}"
+        );
+        for (a, b) in v.iter().zip(original.iter()) {
+            assert_eq!(a, b, "a bad mass count changed the vector");
+        }
+        let mut unit = original.clone();
+        project_horizontal(&mut unit, pos.view(), None, true).unwrap();
+        assert!(
+            l2(&(&unit - &original)) > 0.1,
+            "unit mass did not move this vector, so the fallback is invisible"
+        );
     }
 }

@@ -73,6 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the matrix-free lowest Hessian eigenpair on Lanczos or a linked
     backend (PRIMME, SLEPc, ChASE, libkrylov and the dense ones of
     `rgmin_eigen_kind_t`); an unlinked kind returns `RGMIN_UNAVAILABLE`.
+- C ABI minor 29: `rgmin_solver_set_masses` returns `rgmin_status_t`.
+  A count other than one mass per atom is `RGMIN_INVALID_PARAMETER`
+  and leaves the stored masses. Empty or null still restores unit
+  mass. The C++ wrapper returns that status.
 - C ABI minor 28: `rgmin_solver_forget_evaluation` (the C side of
   `Solver::forget_evaluation`; `rgmin_solver_rebase` also resets the
   step scale and the acceptance window) and
@@ -113,6 +117,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MwRigid::project` and `ManifoldKind::mw_rigid` use the stored
   per-atom masses. Unit mass still matches `RigidQuotient`.
   `set_masses` and `set_manifold` keep the session on those masses.
+- A mass table whose length is not one mass per atom is
+  `Error::MassCount`. The Eckart projection leaves the vector
+  unchanged instead of using unit weight. `Solver::set_masses`
+  refuses the table and keeps the masses already stored.
 
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than
