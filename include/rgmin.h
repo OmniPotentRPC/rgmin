@@ -50,7 +50,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 29
+#define RGMIN_ABI_VERSION_MINOR 30
 #define RGMIN_ABI_LAYOUT_REVISION 2
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -341,7 +341,7 @@ void rgmin_solver_set_unitary(rgmin_solver_t *solver, size_t n);
  *  restores unit mass and returns RGMIN_SUCCESS. A positive n_atoms
  *  must be one mass per atom (3 * n_atoms == session dimension);
  *  otherwise RGMIN_INVALID_PARAMETER and the stored masses stay.
- *  A null solver is RGMIN_INVALID_PARAMETER. */
+ *  A null solver is RGMIN_INVALID_PARAMETER. ABI minor 30. */
 rgmin_status_t rgmin_solver_set_masses(rgmin_solver_t *solver, const double *masses,
                            size_t n_atoms);
 /** Periodic cell. Nonzero drops rotation (Sella proj_rot): R^{3N}/T(3). */

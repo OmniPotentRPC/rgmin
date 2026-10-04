@@ -82,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the matrix-free lowest Hessian eigenpair on Lanczos or a linked
     backend (PRIMME, SLEPc, ChASE, libkrylov and the dense ones of
     `rgmin_eigen_kind_t`); an unlinked kind returns `RGMIN_UNAVAILABLE`.
-- C ABI minor 29: `rgmin_solver_set_masses` returns `rgmin_status_t`.
+- C ABI minor 30: `rgmin_solver_set_masses` returns `rgmin_status_t`.
   A count other than one mass per atom is `RGMIN_INVALID_PARAMETER`
   and leaves the stored masses. Empty or null still restores unit
   mass. The C++ wrapper returns that status.

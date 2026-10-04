@@ -80,7 +80,7 @@ together is not asked twice.
 The C entry of each setter is ~rgmin_solver_<setter>~.
 ~rgmin_solver_forget_evaluation~ and ~rgmin_solver_set_lbfgs_neb_guards~
 need ~abi_minor~ 28. ~rgmin_solver_set_masses~ returns a status at
-~abi_minor~ 29: a count other than one mass per atom is
+~abi_minor~ 30: a count other than one mass per atom is
 ~RGMIN_INVALID_PARAMETER~ and the stored masses stay.
 
 ** When to use ~rgmin_minimize~ instead
