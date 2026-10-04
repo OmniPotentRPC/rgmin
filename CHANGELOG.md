@@ -34,6 +34,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `validation/`: sympy checks of the line-search interpolants and of
   the L-BFGS two-loop map; `bench/atomistic`: rgmin on rgpot potentials
   (LJ38, Pt7 on Pt(111), EAM Al slab) counting force calls.
+- `formal/`: Lean 4 and Mathlib contracts for the Armijo step, the BFGS
+  and L-BFGS inverse updates, the per-atom max-move clamp and FIRE
+  mixing, each mapped to its Rust function and precondition in
+  `formal/README.md`. `formal/check.sh` builds them and refuses a
+  `sorry`, an `axiom` or a non-foundational axiom dependency.
+- `include/rgmin.h` is the C header under the `rgmin_*` names, with
+  `include/rgmin/optimize.hpp` as its C++ wrapper; `include/xts.h` and
+  `include/xts/optimize.hpp` stay as aliases. The repository carries the
+  DLPack header it includes (`include/dlpack/dlpack.h`).
+- C ABI minor 27 adds, beside `set_linesearch` and `set_fire_variant`:
+  - session reuse: `rgmin_solver_rebase` (keep the method memory, drop
+    the point and the acceptance window), `rgmin_solver_push_pair`,
+    `rgmin_solver_pair_count` and `rgmin_solver_search_direction` for a
+    host that owns its outer loop;
+  - `rgmin_solver_set_objective_roundoff`: the Hager-Zhang approximate
+    Wolfe test with an explicit relative value window for Euclidean
+    `RGMIN_ACCEPT_NONE` sessions (Rust: `LineSearch::search_from_with_options`);
+  - feasible steps under HiGHS: `rgmin_solver_set_box`,
+    `rgmin_solver_set_trust` (alias `rgmin_solver_set_highs_trust`),
+    `rgmin_solver_add_equality`, `rgmin_solver_clear_equalities`,
+    `rgmin_solver_set_highs_solver`, `rgmin_solver_set_highs_crossover`
+    and `rgmin_solver_set_highs_callback`; a malformed box fails before
+    the first objective call, and an accepted step that breaks an equality
+    returns `RGMIN_INVALID_PARAMETER`, restores the start and clears the
+    method memory;
+  - manifolds 7 to 23 of `rgmin_manifold_t` (SPD, Grassmann,
+    hyperbolic, Poincare, oblique, multinomial, complex circle,
+    symmetric, skew-symmetric, complex Euclidean, constant, doubly
+    stochastic and symmetric multinomial, complex sphere, positive,
+    centred matrix, unitary) with their shape setters
+    (`rgmin_solver_set_stiefel`, `_oblique`, `_factor_shape`,
+    `_unitary` and the rest);
+  - Moller scaled conjugate gradients, `rgmin_minimize_scg` and
+    `rgmin_minimize_scg_with_options` (`RGMIN_SCG_RELATIVE_EUCLIDEAN`
+    tests the accepted step against `1 + ||x||_2`);
+  - `rgmin_lowest_eigenpair` and `rgmin_lowest_eigenpair_with_options`,
+    the matrix-free lowest Hessian eigenpair on Lanczos or a linked
+    backend (PRIMME, SLEPc, ChASE, libkrylov and the dense ones of
+    `rgmin_eigen_kind_t`); an unlinked kind returns `RGMIN_UNAVAILABLE`.
+- C ABI minor 28: `rgmin_solver_forget_evaluation` (the C side of
+  `Solver::forget_evaluation`; `rgmin_solver_rebase` also resets the
+  step scale and the acceptance window) and
+  `rgmin_solver_set_lbfgs_neb_guards` (the C side of
+  `Solver::set_lbfgs_neb_guards`), with `forget_evaluation()` and
+  `set_lbfgs_neb_guards()` on the C++ `Solver` and `xts_` aliases.
+- `Solver::set_lbfgs_neb_guards`: opt-in distance, angle and curvature
+  resets of the L-BFGS memory and an empty-memory scale of 0.01, for a
+  band whose projected force is not a gradient.
+- L-BFGS model steps honour explicit coordinate bounds (`lbfgs_qp`), and
+  the sphere L-BFGS steps along geodesics and keeps its pairs in the
+  tangent space.
 
 ### Changed
 
@@ -76,14 +127,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The 0.3.0 entry below says `Accept::None` takes the two-loop direction
   with one call; that path belongs to `Accept::Step`, and `Accept::None`
   keeps the line search.
-
-### Added
-
-- `formal/`: Lean 4 and Mathlib contracts for the Armijo step, the BFGS
-  and L-BFGS inverse updates, the per-atom max-move clamp and FIRE
-  mixing, each mapped to its Rust function and precondition in
-  `formal/README.md`. `formal/check.sh` builds them and refuses a
-  `sorry`, an `axiom` or a non-foundational axiom dependency.
+- RFO selects the lowest augmented mode and keeps its model constraints
+  after a rejected trial. The dense Sella trust step returns inside its
+  radius, and quasi-Newton derivatives keep the shifted mode's sign.
+- Sessions apply the requested gradient tolerance to their stopping
+  test, honour an explicit step policy in the first-order methods, and
+  refuse a nonfinite gradient at the last step check.
+- The strong-Wolfe zoom keeps the feasible endpoint when it runs out of
+  trials, and resolves steps at the energy's precision limit.
+- L-BFGS records the last accepted pair of a session step alone. It
+  keeps the accepted point when a feasible solve fails, and retries a
+  stalled curvature with a bounded gradient step.
+- NLCG forms gradient differences before its scalar products. SCG keeps
+  convergence across limits and objective offsets, and restarts a
+  cancelled direction while the gradient is not stationary.
+- Manifold steps apply an accepted retraction once, keep the SPD metric
+  gradient, and complete dependent unitary columns. The sphere passes on
+  a failed constrained direction.
+- Krylov basis pruning follows the residual tolerance. The libkrylov
+  backend serializes ownership of its solver state, and linked
+  matrix-free eigen backends stay available.
 
 ## [0.3.0] - 2026-09-30
 

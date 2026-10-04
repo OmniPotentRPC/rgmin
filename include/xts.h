@@ -141,6 +141,7 @@ typedef rgmin_status_t xts_status_t;
 #define xts_solver_pair_count rgmin_solver_pair_count
 #define xts_solver_push_pair rgmin_solver_push_pair
 #define xts_solver_rebase rgmin_solver_rebase
+#define xts_solver_forget_evaluation rgmin_solver_forget_evaluation
 #define xts_solver_search_direction rgmin_solver_search_direction
 #define xts_solver_set_accept rgmin_solver_set_accept
 #define xts_solver_set_atom_maxmove rgmin_solver_set_atom_maxmove
@@ -163,6 +164,7 @@ typedef rgmin_status_t xts_status_t;
 #define xts_solver_set_maxmove rgmin_solver_set_maxmove
 #define xts_solver_set_periodic rgmin_solver_set_periodic
 #define xts_solver_set_project_rigid rgmin_solver_set_project_rigid
+#define xts_solver_set_lbfgs_neb_guards rgmin_solver_set_lbfgs_neb_guards
 #define xts_solver_set_qn_step rgmin_solver_set_qn_step
 #define xts_solver_step rgmin_solver_step
 #define xts_solver_step_fg rgmin_solver_step_fg

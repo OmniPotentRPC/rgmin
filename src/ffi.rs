@@ -63,7 +63,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 27;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 28;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 2;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -2485,6 +2485,43 @@ pub unsafe extern "C" fn rgmin_solver_rebase(solver: *mut rgmin_solver_t) {
         return;
     }
     unsafe { (*solver).solver.rebase() };
+}
+
+/// Drop only the cached evaluation (`Solver::forget_evaluation`): the
+/// next step evaluates the objective at the current `x`, and the method
+/// memory, the step scale and the acceptance window stay. For a host
+/// whose oracle changes between steps at the same point, such as a
+/// min-mode effective gradient after the mode moves or a band that arms
+/// its climbing image. ABI minor 28.
+///
+/// # Safety
+///
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_forget_evaluation(solver: *mut rgmin_solver_t) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.forget_evaluation() };
+}
+
+/// Opt-in L-BFGS NEB guards (`Solver::set_lbfgs_neb_guards`): distance,
+/// angle and curvature resets of the pair memory, and an empty-memory
+/// scale of 0.01. Nonzero enables them; zero restores scale one. Other
+/// methods ignore the setting. ABI minor 28.
+///
+/// # Safety
+///
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_lbfgs_neb_guards(
+    solver: *mut rgmin_solver_t,
+    enabled: i32,
+) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_lbfgs_neb_guards(enabled != 0) };
 }
 
 /// Record `s`, `y` from the caller's previous outer. No evaluation.

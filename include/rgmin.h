@@ -50,7 +50,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 27
+#define RGMIN_ABI_VERSION_MINOR 28
 #define RGMIN_ABI_LAYOUT_REVISION 2
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -186,6 +186,10 @@ void rgmin_solver_free(rgmin_solver_t *solver);
 void rgmin_solver_forget(rgmin_solver_t *solver);
 /** Retain method memory and reset the cached point and acceptance window. */
 void rgmin_solver_rebase(rgmin_solver_t *solver);
+/** Drop only the cached evaluation; method memory, step scale and acceptance
+ *  window stay. For an oracle that changes between steps at the same point.
+ *  ABI minor 28. */
+void rgmin_solver_forget_evaluation(rgmin_solver_t *solver);
 /** Euclidean step cap for the next \ref rgmin_solver_step (saddle \c max_move). */
 void rgmin_solver_set_maxmove(rgmin_solver_t *solver, double maxmove);
 /** How an L-BFGS session uses a caller Hessian (eOn \c lbfgs_step). */
@@ -232,6 +236,10 @@ void rgmin_solver_set_atom_maxmove(rgmin_solver_t *solver, double maxmove);
 void rgmin_solver_set_project_rigid(rgmin_solver_t *solver, int32_t enabled);
 void rgmin_solver_set_extra_updates(rgmin_solver_t *solver, size_t extra);
 void rgmin_solver_set_cautious(rgmin_solver_t *solver, double eps, double alpha);
+/** Opt-in L-BFGS NEB guards: distance, angle and curvature resets and an
+ *  empty-memory scale of 0.01. Nonzero enables; other methods ignore it.
+ *  ABI minor 28. */
+void rgmin_solver_set_lbfgs_neb_guards(rgmin_solver_t *solver, int32_t enabled);
 /** HiGHS feasible-set step. Nonzero enables it. Returns 0, or 1 if this
  *  build has no highs feature. */
 int32_t rgmin_solver_set_highs(rgmin_solver_t *solver, int32_t enabled);
