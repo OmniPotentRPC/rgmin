@@ -5,7 +5,7 @@ use rgmin::{Control, Method, Solver};
 fn spd_session_step_is_riemannian_and_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::manifold::{is_spd, Manifold, ManifoldKind, Spd};
+    use rgmin::manifold::{Manifold, ManifoldKind, Spd, is_spd};
 
     struct FrobeniusI;
     impl Objective<f64> for FrobeniusI {
@@ -145,11 +145,16 @@ fn lbfgs_first_step_is_the_riemannian_retract() {
     let xtg = {
         let cols = gman.unpack(&x).unwrap();
         let gs = gman.unpack(&rgrad).unwrap();
-        cols[0].dot(&gs[0]).abs() + cols[0].dot(&gs[1]).abs() + cols[1].dot(&gs[0]).abs()
+        cols[0].dot(&gs[0]).abs()
+            + cols[0].dot(&gs[1]).abs()
+            + cols[1].dot(&gs[0]).abs()
             + cols[1].dot(&gs[1]).abs()
     };
     assert!(xtg < 1e-12, "Riemannian gradient must be horizontal {xtg}");
-    assert!(rgrad.iter().map(|v| v * v).sum::<f64>().sqrt() > 1e-6, "need a non-critical start");
+    assert!(
+        rgrad.iter().map(|v| v * v).sum::<f64>().sqrt() > 1e-6,
+        "need a non-critical start"
+    );
     let want = gman.retract(&x, &rgrad.mapv(|v| -v));
 
     let mut solver = Solver::new(
@@ -169,21 +174,36 @@ fn lbfgs_first_step_is_the_riemannian_retract() {
     let f0 = Brockett.eval(x.view());
     let _ = solver.step(&Brockett, &mut x).unwrap();
     let cols = gman.unpack(&x).unwrap();
-    assert!((cols[0].dot(&cols[0]) - 1.0).abs() < 1e-10, "left Gr(4,2) {x:?}");
+    assert!(
+        (cols[0].dot(&cols[0]) - 1.0).abs() < 1e-10,
+        "left Gr(4,2) {x:?}"
+    );
     assert!(cols[0].dot(&cols[1]).abs() < 1e-10, "not orthogonal {x:?}");
-    assert!((cols[1].dot(&cols[1]) - 1.0).abs() < 1e-10, "left Gr(4,2) {x:?}");
+    assert!(
+        (cols[1].dot(&cols[1]) - 1.0).abs() < 1e-10,
+        "left Gr(4,2) {x:?}"
+    );
     assert!(
         (&x - &want).mapv(f64::abs).sum() < 1e-10,
         "first L-BFGS step must be Retr_x(-grad_R), got {x:?} want {want:?}"
     );
     let f1 = Brockett.eval(x.view());
-    assert!(f1 < f0, "Riemannian step must decrease Brockett, {f1} vs {f0}");
+    assert!(
+        f1 < f0,
+        "Riemannian step must decrease Brockett, {f1} vs {f0}"
+    );
     for _ in 0..12 {
         let _ = solver.step(&Brockett, &mut x).unwrap();
         let cols = gman.unpack(&x).unwrap();
-        assert!((cols[0].dot(&cols[0]) - 1.0).abs() < 1e-8, "left Gr(4,2) {x:?}");
+        assert!(
+            (cols[0].dot(&cols[0]) - 1.0).abs() < 1e-8,
+            "left Gr(4,2) {x:?}"
+        );
         assert!(cols[0].dot(&cols[1]).abs() < 1e-8, "not orthogonal {x:?}");
-        assert!((cols[1].dot(&cols[1]) - 1.0).abs() < 1e-8, "left Gr(4,2) {x:?}");
+        assert!(
+            (cols[1].dot(&cols[1]) - 1.0).abs() < 1e-8,
+            "left Gr(4,2) {x:?}"
+        );
     }
 }
 
@@ -272,7 +292,13 @@ fn set_factor_shape_drops_stale_lbfgs_pairs() {
         "changing p must forget L-BFGS pairs so the next step is Retr(-grad_R), got {x:?} want {want:?}"
     );
     let cols = gman.unpack(&x).unwrap();
-    assert!((cols[0].dot(&cols[0]) - 1.0).abs() < 1e-10, "left Gr(4,2) {x:?}");
+    assert!(
+        (cols[0].dot(&cols[0]) - 1.0).abs() < 1e-10,
+        "left Gr(4,2) {x:?}"
+    );
     assert!(cols[0].dot(&cols[1]).abs() < 1e-10, "not orthogonal {x:?}");
-    assert!((cols[1].dot(&cols[1]) - 1.0).abs() < 1e-10, "left Gr(4,2) {x:?}");
+    assert!(
+        (cols[1].dot(&cols[1]) - 1.0).abs() < 1e-10,
+        "left Gr(4,2) {x:?}"
+    );
 }
