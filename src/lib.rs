@@ -140,7 +140,8 @@ pub use qn_irc::{
 };
 pub use qn_step::QnStep;
 pub use report::Report;
-pub use scg::{DirectionalCurvature, ScgParams, minimize_scg, minimize_scg_exact};
+pub use scg::{DirectionalCurvature, ScgOptions, ScgParams, ScgStepTolerance,
+    minimize_scg, minimize_scg_exact, minimize_scg_with_options, minimize_scg_exact_with_options};
 pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
 pub use session::Solver;
 pub use slepc_kind::{SlepcParams, SlepcPmat, SlepcStKind};

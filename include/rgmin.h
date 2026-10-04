@@ -358,6 +358,27 @@ rgmin_status_t rgmin_minimize_scg(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_
                                 const rgmin_scg_params_t *params, rgmin_report_t *out);
 
 
+/** Accepted-step SCG convergence rule. Both require objective convergence. */
+typedef enum rgmin_scg_step_tolerance_t {
+    /** ||alpha d||_inf < tol_sol. */
+    RGMIN_SCG_ABSOLUTE_INFINITY = 0,
+    /** ||alpha d||_2 < tol_sol * (1 + ||accepted x||_2). */
+    RGMIN_SCG_RELATIVE_EUCLIDEAN = 1
+} rgmin_scg_step_tolerance_t;
+
+/** Optional SCG policies, separate from the stable parameter record. */
+typedef struct rgmin_scg_options_t {
+    /** Literal rgmin_scg_step_tolerance_t. Unknown integers are rejected. */
+    int32_t step_tolerance;
+} rgmin_scg_options_t;
+
+/** SCG with explicit convergence policy. NULL options selects the legacy rule. */
+rgmin_status_t rgmin_minimize_scg_with_options(
+    rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_curv_fn curv, void *user,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
+    const rgmin_scg_params_t *params, const rgmin_scg_options_t *options,
+    rgmin_report_t *out);
+
 /** Closed eigensolver tag. Integers match schema/eigen.capnp. */
 typedef enum rgmin_eigen_kind_t {
     RGMIN_EIGEN_LANCZOS = 0,

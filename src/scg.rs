@@ -63,6 +63,23 @@ impl Default for ScgParams {
     }
 }
 
+/// Norm and scaling used by the accepted-step convergence test.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ScgStepTolerance {
+    /// `||alpha d||_inf < tol_sol`.
+    #[default]
+    AbsoluteInfinity,
+    /// `||alpha d||_2 < tol_sol * (1 + ||accepted x||_2)`.
+    RelativeEuclidean,
+}
+
+/// Optional SCG policies. The default preserves [`minimize_scg`] semantics.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ScgOptions {
+    /// Accepted-step convergence rule, combined with the objective-change test.
+    pub step_tolerance: ScgStepTolerance,
+}
+
 const LAMBDA_MIN: f64 = 1.0e-15;
 const LAMBDA_MAX: f64 = 1.0e100;
 /// A trial that stays non-finite through this many damping increases
@@ -107,15 +124,23 @@ pub fn minimize_scg<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    run_scg(
-        obj,
-        init.into(),
-        control,
-        params,
-        conjugacy,
-        restart,
-        |_, _| None,
-    )
+    minimize_scg_with_options(obj, init, control, params, conjugacy, restart, &ScgOptions::default())
+}
+
+/// [`minimize_scg`] with an explicit accepted-step convergence rule.
+pub fn minimize_scg_with_options<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    params: &ScgParams,
+    conjugacy: Conjugacy,
+    restart: Restart,
+    options: &ScgOptions,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    run_scg(obj, init.into(), control, params, conjugacy, restart, options, |_, _| None)
 }
 
 /// [`minimize_scg`] with exact curvature: the probe (and its extra
@@ -134,15 +159,24 @@ pub fn minimize_scg_exact<O>(
 where
     O: DirectionalCurvature + ?Sized,
 {
-    run_scg(
-        obj,
-        init.into(),
-        control,
-        params,
-        conjugacy,
-        restart,
-        |x, d| obj.directional_curvature(x, d),
-    )
+    minimize_scg_exact_with_options(obj, init, control, params, conjugacy, restart, &ScgOptions::default())
+}
+
+/// [`minimize_scg_exact`] with an explicit accepted-step convergence rule.
+pub fn minimize_scg_exact_with_options<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    params: &ScgParams,
+    conjugacy: Conjugacy,
+    restart: Restart,
+    options: &ScgOptions,
+) -> Result<Report>
+where
+    O: DirectionalCurvature + ?Sized,
+{
+    run_scg(obj, init.into(), control, params, conjugacy, restart, options,
+            |x, d| obj.directional_curvature(x, d))
 }
 
 fn run_scg<O>(
@@ -152,6 +186,7 @@ fn run_scg<O>(
     params: &ScgParams,
     conjugacy: Conjugacy,
     restart: Restart,
+    options: &ScgOptions,
     curvature: impl Fn(ArrayView1<f64>, ArrayView1<f64>) -> Option<f64>,
 ) -> Result<Report>
 where
@@ -280,8 +315,14 @@ where
             nsuccess += 1;
             objective_min = objective_min.min(f_new);
             objective_max = objective_max.max(f_new);
-            let step_inf = alpha.abs() * crate::vecops::nrminf(dir.view());
-            let solution_converged = step_inf < params.tol_sol;
+            let solution_converged = match options.step_tolerance {
+                ScgStepTolerance::AbsoluteInfinity => {
+                    alpha.abs() * crate::vecops::nrminf(dir.view()) < params.tol_sol
+                }
+                ScgStepTolerance::RelativeEuclidean => {
+                    alpha.abs() * l2(&dir) < params.tol_sol * (1.0 + l2(&trial))
+                }
+            };
             let objective_converged =
                 (f_new - f_old).abs() < params.tol_func * (1.0 + (objective_max - objective_min));
             w = trial;

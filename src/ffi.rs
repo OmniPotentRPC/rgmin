@@ -21,8 +21,8 @@ use ndarray::{Array1, Array2, ArrayView1};
 use crate::{
     Accept, ApplyHessian, Conjugacy, Control, DirectionalCurvature, EigenParams, EigensolverKind,
     Error, HessianOracle, LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart,
-    ScgParams, Solver, lowest_mode, minimize_method, minimize_method_hess, minimize_scg,
-    minimize_scg_exact,
+    ScgOptions, ScgParams, ScgStepTolerance, Solver, lowest_mode, minimize_method, minimize_method_hess,
+    minimize_scg_with_options, minimize_scg_exact_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -213,6 +213,22 @@ pub struct rgmin_scg_params_t {
     /// Leaf conjugacy as [`rgmin_conjugacy_t`]. Stored as `i32` so an
     /// unknown C enumerant is not UB on a closed Rust enum.
     pub conjugacy: i32,
+}
+
+/// Accepted-step SCG convergence rule.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_scg_step_tolerance_t {
+    RGMIN_SCG_ABSOLUTE_INFINITY = 0,
+    RGMIN_SCG_RELATIVE_EUCLIDEAN = 1,
+}
+
+/// Optional SCG policies, separate from the stable parameter record.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct rgmin_scg_options_t {
+    /// Literal [`rgmin_scg_step_tolerance_t`]. Unknown values are rejected.
+    pub step_tolerance: i32,
 }
 
 /// Closed eigensolver tag. Integers match `schema/eigen.capnp`.
@@ -949,6 +965,31 @@ pub unsafe extern "C" fn rgmin_minimize_scg(
     params: *const rgmin_scg_params_t,
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
+    unsafe {
+        rgmin_minimize_scg_with_options(
+            eval, grad, curv, user, x, ctrl, params, std::ptr::null(), out,
+        )
+    }
+}
+
+/// Møller SCG with an explicit accepted-step convergence rule.
+/// A null options pointer selects the absolute infinity-norm rule.
+///
+/// # Safety
+/// The tensor and callback requirements are those of [`rgmin_minimize_scg`].
+/// A non-null options pointer refers to an initialized C options record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    curv: Option<rgmin_curv_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    params: *const rgmin_scg_params_t,
+    options: *const rgmin_scg_options_t,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let eval = match eval {
             Some(f) => f,
@@ -1003,6 +1044,15 @@ pub unsafe extern "C" fn rgmin_minimize_scg(
                 Err(st) => return st,
             }
         };
+        let step_tolerance = match unsafe { options.as_ref() }.map_or(0, |o| o.step_tolerance) {
+            0 => ScgStepTolerance::AbsoluteInfinity,
+            1 => ScgStepTolerance::RelativeEuclidean,
+            other => {
+                set_last_error(&format!("rgmin_minimize_scg: unknown step tolerance {other}"));
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+        };
+        let options = ScgOptions { step_tolerance };
         let restart = Restart::Never;
         let obj = ScgFfiOracle {
             inner: c_oracle(eval, grad, user, n),
@@ -1011,15 +1061,16 @@ pub unsafe extern "C" fn rgmin_minimize_scg(
             scratch: Scratch::new(),
         };
         let report = if obj.curv.is_some() {
-            minimize_scg_exact(&obj, Array1::from(init), &control, &scg, conjugacy, restart)
+            minimize_scg_exact_with_options(&obj, Array1::from(init), &control, &scg, conjugacy, restart, &options)
         } else {
-            minimize_scg(
+            minimize_scg_with_options(
                 &obj.inner,
                 Array1::from(init),
                 &control,
                 &scg,
                 conjugacy,
                 restart,
+                &options,
             )
         };
         match report {

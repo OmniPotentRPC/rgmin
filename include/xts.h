@@ -25,6 +25,8 @@ typedef rgmin_method_t xts_method_t;
 typedef rgmin_qn_step_t xts_qn_step_t;
 typedef rgmin_report_t xts_report_t;
 typedef rgmin_scg_params_t xts_scg_params_t;
+typedef rgmin_scg_options_t xts_scg_options_t;
+typedef rgmin_scg_step_tolerance_t xts_scg_step_tolerance_t;
 typedef rgmin_solver_t xts_solver_t;
 typedef rgmin_status_t xts_status_t;
 
@@ -110,6 +112,7 @@ typedef rgmin_status_t xts_status_t;
 #define xts_minimize_eindir rgmin_minimize_eindir
 #define xts_minimize_hess rgmin_minimize_hess
 #define xts_minimize_scg rgmin_minimize_scg
+#define xts_minimize_scg_with_options rgmin_minimize_scg_with_options
 #define xts_solver_create rgmin_solver_create
 #define xts_solver_forget rgmin_solver_forget
 #define xts_solver_free rgmin_solver_free
