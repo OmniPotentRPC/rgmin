@@ -11,8 +11,7 @@ use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_control_t, rgmin_method_t,
     rgmin_minimize, rgmin_minimize_eindir, rgmin_report_t, rgmin_solver_create, rgmin_solver_free,
     rgmin_solver_set_accept, rgmin_solver_set_quickmin_cell, rgmin_solver_step,
-    rgmin_solver_step_fg, rgmin_status_t,
-    rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+    rgmin_solver_step_fg, rgmin_status_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 use rgmin::ffi::{
     rgmin_conjugacy_t, rgmin_curv_fn, rgmin_eigen_kind_t, rgmin_eigen_params_t, rgmin_last_error,
