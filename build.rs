@@ -269,11 +269,20 @@ fn probe_chase() {
 fn discover_chase() -> Option<ChaseProbe> {
     for name in ["chase", "ChASE"] {
         if let Ok(lib) = pkg_config::Config::new().cargo_metadata(false).probe(name) {
-            return Some(ChaseProbe {
-                includes: lib.include_paths,
-                link_paths: lib.link_paths,
-                link_libs: lib.libs,
-            });
+            // ChASE's package can describe only its headers. The adapter
+            // needs the compiled C interface that exports dchase_init_.
+            let interface = lib.link_paths.iter().find_map(|path| chase_library_in(path));
+            if let Some(interface) = interface {
+                let mut link_libs = lib.libs;
+                if !link_libs.iter().any(|name| name == interface) {
+                    link_libs.push(interface.into());
+                }
+                return Some(ChaseProbe {
+                    includes: lib.include_paths,
+                    link_paths: lib.link_paths,
+                    link_libs,
+                });
+            }
         }
     }
     if let Ok(dir) = std::env::var("CHASE_DIR") {
@@ -290,28 +299,23 @@ fn discover_chase() -> Option<ChaseProbe> {
 }
 
 #[cfg(feature = "chase")]
-fn chase_header_in(dir: &std::path::Path) -> bool {
-    dir.join("chase_c_interface.h").is_file()
-        || dir.join("interface").join("chase_c_interface.h").is_file()
+fn chase_library_in(dir: &std::path::Path) -> Option<&'static str> {
+    ["chase_c", "chase", "ChASE"].into_iter().find(|name| {
+        ["so", "a", "dylib"].iter().any(|extension| {
+            dir.join(format!("lib{name}.{extension}")).is_file()
+        })
+    })
 }
 
 #[cfg(feature = "chase")]
 fn probe_chase_prefix(prefix: &std::path::Path) -> Option<ChaseProbe> {
     let include = prefix.join("include");
     let lib = prefix.join("lib");
-    let has_lib = lib.join("libchase.a").is_file()
-        || lib.join("libchase.so").is_file()
-        || lib.join("libChASE.so").is_file();
-    if !has_lib && !chase_header_in(&include) {
-        return None;
-    }
-    if !has_lib {
-        return None;
-    }
+    let library = chase_library_in(&lib)?;
     Some(ChaseProbe {
         includes: vec![include],
         link_paths: vec![lib],
-        link_libs: vec!["chase".into()],
+        link_libs: vec![library.into()],
     })
 }
 
