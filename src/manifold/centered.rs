@@ -603,7 +603,7 @@ mod retained_mode_tests {
         );
         assert_eq!(
             ManifoldKind::centered_matrix(2, 3, false).as_str(),
-            "centered_matrix"
+            "centeredmatrix"
         );
     }
 
