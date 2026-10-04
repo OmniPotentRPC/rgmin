@@ -77,6 +77,14 @@ pub struct Lbfgs {
     pub cautious_eps: f64,
     /// Li-Fukushima cautious `α`.
     pub cautious_alpha: f64,
+    /// Reset direct NEB-step history when its largest atom reaches the cap.
+    pub distance_reset: bool,
+    /// Reset a direct NEB direction that does not face the force.
+    pub angle_reset: bool,
+    /// Retain a negative newest pair for a direct NEB force-step reset.
+    pub curvature_reset: bool,
+    /// Empty-memory scale; a non-positive or non-finite value selects one.
+    pub inverse_curvature: f64,
     /// When set, each direction is the HiGHS QP on the compact Hessian
     /// rather than the two-loop recursion.
     #[cfg(feature = "highs")]
@@ -109,6 +117,10 @@ impl Lbfgs {
             extra_updates: 0,
             cautious_eps: 0.0,
             cautious_alpha: 0.01,
+            distance_reset: false,
+            angle_reset: false,
+            curvature_reset: false,
+            inverse_curvature: 1.0,
             #[cfg(feature = "highs")]
             highs: None,
             #[cfg(feature = "highs")]
@@ -215,8 +227,47 @@ impl Lbfgs {
             if yy > 0.0 {
                 q *= p.s.dot(&p.y) / yy;
             }
+        } else if self.inverse_curvature.is_finite() && self.inverse_curvature > 0.0 && self.inverse_curvature != 1.0 {
+            q *= self.inverse_curvature;
         }
         q
+    }
+
+    fn current_h0(&self) -> f64 {
+        if let Some(pair) = self.memory.last() {
+            let yy = pair.y.dot(&pair.y);
+            if yy > 0.0 {
+                return pair.s.dot(&pair.y) / yy;
+            }
+        }
+        self.inverse_curvature
+    }
+
+    fn positive_reset_scale(&self) -> f64 {
+        let h0 = self.current_h0();
+        if h0.is_finite() && h0 != 0.0 { return h0.abs(); }
+        if self.inverse_curvature.is_finite() && self.inverse_curvature > 0.0 {
+            self.inverse_curvature
+        } else { 1.0 }
+    }
+
+    /// Opt-in direct-step guards; the caller enforces the physical step cap.
+    pub(crate) fn guarded_direction(&mut self, gradient: ArrayView1<f64>, cap: Option<f64>) -> Array1<f64> {
+        if self.curvature_reset && self.memory.last().is_some_and(|pair| pair.s.dot(&pair.y) < 0.0) {
+            self.forget();
+            return gradient.mapv(|value| -1000.0 * value);
+        }
+        let scale = self.positive_reset_scale();
+        let direction = self.direction(gradient);
+        let too_far = self.distance_reset && cap.is_some_and(|limit| limit > 0.0 && crate::step::max_atom_norm(direction.view()) >= limit);
+        let slope = direction.dot(&gradient);
+        let wrong_angle = self.angle_reset && (!slope.is_finite() || slope >= 0.0);
+        let invalid = (self.distance_reset || self.angle_reset) && direction.iter().any(|value| !value.is_finite());
+        if too_far || wrong_angle || invalid {
+            self.forget();
+            return gradient.mapv(|value| -scale * value);
+        }
+        direction
     }
 
     /// Records an accepted curvature pair (`s = x+ - x`, `y = g+ - g`).
@@ -248,6 +299,15 @@ impl Lbfgs {
         let sn = s.iter().map(|v| v * v).sum::<f64>().sqrt();
         let yn = y.iter().map(|v| v * v).sum::<f64>().sqrt();
         let ss = sn * sn;
+        if self.curvature_reset {
+            if !sy.is_finite() || sy.abs() < 1e-30 {
+                self.forget();
+                return;
+            }
+            self.memory.push(Pair { s, y, rho: 1.0 / sy });
+            self.trim();
+            return;
+        }
         if self.cautious_eps > 0.0
             && let Some(g) = gnorm
         {
@@ -780,4 +840,90 @@ mod tests {
         assert_eq!(l.precon_fallbacks(), 1);
         assert_eq!(d, l.direction(g.view()));
     }
+}
+
+#[cfg(test)]
+mod neb_guard_tests {
+    use super::*;
+    use ndarray::array;
+
+#[test]
+fn empty_memory_scales_by_inverse_curvature() {
+        let mut solver = Lbfgs::with_capacity(4);
+        let g = array![-2.0, 0.0, 0.0];
+        let plain = solver.direction(g.view());
+        assert!((plain[0] - 2.0).abs() < 1e-15);
+        solver.inverse_curvature = 0.01;
+        let scaled = solver.direction(g.view());
+        assert!((scaled[0] - 0.02).abs() < 1e-15);
+    }
+
+#[test]
+fn distance_reset_forgets_and_steps_along_h0_force() {
+        // One pair: s=(1,0,0), y=(1,1,0), sy=1, yy=2, H0=1/2.
+        // g=(-4,0,0). The two-loop step is (6,-2,0). H0 times the
+        // force is (2,0,0). The cap is below the two-loop length.
+        let mut solver = Lbfgs::with_capacity(4);
+        solver.distance_reset = true;
+        solver.record(array![1.0, 0.0, 0.0], array![1.0, 1.0, 0.0]);
+        let g = array![-4.0, 0.0, 0.0];
+        let d = solver.guarded_direction(g.view(), Some(0.2));
+        assert_eq!(solver.len(), 0);
+        assert!((d[0] - 2.0).abs() < 1e-12, "d0 {d:?}");
+        assert!(d[1].abs() < 1e-12, "d1 {d:?}");
+        assert!(d[2].abs() < 1e-12);
+    }
+
+#[test]
+fn negative_curvature_takes_the_force_direction_and_forgets() {
+        let mut solver = Lbfgs::with_capacity(4);
+        solver.curvature_reset = true;
+        solver.record(array![1.0, 0.0, 0.0], array![-0.5, 0.0, 0.0]);
+        assert_eq!(solver.len(), 1);
+        let g = array![-1.0, 0.0, 0.0];
+        let d = solver.guarded_direction(g.view(), Some(0.2));
+        assert_eq!(solver.len(), 0);
+        assert!((d[0] - 1000.0).abs() < 1e-9, "d {d:?}");
+        assert!(d[1].abs() < 1e-12);
+    }
+
+#[test]
+fn angle_reset_drops_a_step_that_faces_away_from_the_force() {
+        let mut kept = Lbfgs::with_capacity(4);
+        kept.curvature_reset = true;
+        kept.record(array![1.0, 0.0, 0.0], array![-0.5, 0.0, 0.0]);
+        kept.curvature_reset = false;
+        kept.distance_reset = false;
+        kept.angle_reset = false;
+        kept.inverse_curvature = 0.01;
+        let g = array![-1.0, 0.0, 0.0];
+        let d_keep = kept.guarded_direction(g.view(), Some(10.0));
+        assert_eq!(kept.len(), 1);
+        assert!((d_keep[0] + 2.0).abs() < 1e-12, "keep {d_keep:?}");
+
+        let mut solver = Lbfgs::with_capacity(4);
+        solver.curvature_reset = true;
+        solver.record(array![1.0, 0.0, 0.0], array![-0.5, 0.0, 0.0]);
+        solver.curvature_reset = false;
+        solver.distance_reset = false;
+        solver.angle_reset = true;
+        solver.inverse_curvature = 0.01;
+        let d = solver.guarded_direction(g.view(), Some(10.0));
+        assert_eq!(solver.len(), 0);
+        assert_eq!(d, array![2.0, 0.0, 0.0]);
+        assert!(d.dot(&g) < 0.0);
+    }
+
+#[test]
+fn invalid_empty_memory_scales_select_a_finite_force_step() {
+    let gradient = array![-1.0, 2.0, 0.0];
+    for scale in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut solver = Lbfgs::default();
+        solver.angle_reset = true;
+        solver.inverse_curvature = scale;
+        let direction = solver.guarded_direction(gradient.view(), Some(1.0));
+        assert_eq!(direction, -&gradient);
+        assert!(direction.dot(&gradient) < 0.0);
+    }
+}
 }

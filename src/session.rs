@@ -347,6 +347,18 @@ impl Solver {
         }
     }
 
+    /// Enable the opt-in direct NEB guards and empty-memory scale 0.01.
+    /// Other methods ignore this setting. Disabling restores scale one.
+    pub fn set_lbfgs_neb_guards(&mut self, enabled: bool) {
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            if solver.curvature_reset != enabled { solver.forget(); }
+            solver.distance_reset = enabled;
+            solver.angle_reset = enabled;
+            solver.curvature_reset = enabled;
+            solver.inverse_curvature = if enabled { 0.01 } else { 1.0 };
+        }
+    }
+
     /// HiGHS feasible-set step. No-op unless this build has `highs`.
     pub fn set_highs(&mut self, enabled: bool) {
         #[cfg(not(feature = "highs"))]
@@ -1235,11 +1247,19 @@ impl Solver {
         // of a projected NEB force is not the potential of the gradient it
         // returns, so a decrease test there says nothing. Every other
         // Accept keeps the line-searched step_objective path.
+        let guarded_direction = if self.accept == Accept::Step {
+            match &mut self.inner {
+                Inner::Lbfgs(solver) if solver.distance_reset || solver.angle_reset || solver.curvature_reset => {
+                    Some(solver.guarded_direction(grad.view(), self.atom_maxmove))
+                }
+                _ => None,
+            }
+        } else { None };
         #[cfg(feature = "highs")]
         let constrained_direction =
             if self.highs && (self.highs_trust.is_some() || !self.equalities.is_empty()) {
                 if let Inner::Lbfgs(solver) = &self.inner {
-                    let direction = solver.direction(grad.view());
+                    let direction = guarded_direction.clone().unwrap_or_else(|| solver.direction(grad.view()));
                     let center = (self.project_rigid && self.dim.is_multiple_of(3))
                         .then_some((self.dim / 3, 3));
                     Some(crate::lbfgs_qp::highs_feasible_step_boxed(
@@ -1265,7 +1285,7 @@ impl Solver {
             (Inner::Lbfgs(solver), Accept::Step) => {
                 let dir = constrained_direction
                     .clone()
-                    .unwrap_or_else(|| solver.direction(grad.view()));
+                    .unwrap_or_else(|| guarded_direction.clone().unwrap_or_else(|| solver.direction(grad.view())));
                 #[cfg(feature = "highs")]
                 let dir = if let Some(bounds) = &solver.coordinate_box {
                     // The model QP already enforces its box and equalities.
@@ -1930,5 +1950,143 @@ mod tests {
                 moved / dt
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod retained_neb_guard_tests {
+    use super::*;
+    use eindir_core::{Bounds, Gradient};
+    use ndarray::{ArrayView1, array};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Scripted {
+        grads: Vec<Array1<f64>>,
+        n: AtomicUsize,
+    }
+
+    impl Objective<f64> for Scripted {
+        fn dim(&self) -> usize {
+            3
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            use std::sync::OnceLock;
+            static B: OnceLock<Bounds<f64>> = OnceLock::new();
+            B.get_or_init(|| {
+                Bounds::new(array![-10.0, -10.0, -10.0], array![10.0, 10.0, 10.0], 0.0)
+            })
+        }
+        fn eval(&self, _x: ArrayView1<f64>) -> f64 {
+            0.0
+        }
+    }
+
+    impl Gradient<f64> for Scripted {
+        fn dim(&self) -> usize {
+            3
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.value_and_gradient(x).1
+        }
+    }
+
+    impl DifferentiableObjective<f64> for Scripted {
+        fn value_and_gradient(&self, _x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let i = self.n.load(Ordering::Relaxed).min(self.grads.len() - 1);
+            let g = self.grads[i].clone();
+            self.n.fetch_add(1, Ordering::Relaxed);
+            (0.0, g)
+        }
+    }
+
+    #[test]
+    fn refused_step_keeps_the_previous_lbfgs_pair() {
+        let obj = Scripted {
+            grads: vec![
+                array![-1.0, 0.0, 0.0],
+                array![-0.5, 0.0, 0.0],
+                array![-1.0, 0.0, 0.0],
+            ],
+            n: AtomicUsize::new(0),
+        };
+        let mut x = array![0.0, 0.0, 0.0];
+        let mut solver = Solver::new(
+            Method::lbfgs(),
+            Control {
+                maxiter: 2,
+                gtol: 0.0,
+                istep: 1.0,
+                maxmove: None,
+                ftol_rel: None,
+            },
+            3,
+        );
+        solver.set_accept(Accept::Step);
+        solver.set_atom_maxmove(0.2);
+        solver.step(&obj, &mut x).unwrap();
+        solver.step(&obj, &mut x).unwrap();
+        let pairs = match &solver.inner {
+            Inner::Lbfgs(lbfgs) => lbfgs.len(),
+            _ => panic!("expected L-BFGS"),
+        };
+        assert_eq!(pairs, 1);
+        assert!((x[0] - 0.4).abs() < 1e-12, "x0 {}", x[0]);
+    }
+
+    fn guard_script() -> Scripted {
+        Scripted {
+            grads: vec![
+                array![-100.0, 0.0, 0.0],
+                array![-99.0, 1.0, 0.0],
+                array![-98.0, 1.0, 0.0],
+            ],
+            n: AtomicUsize::new(0),
+        }
+    }
+
+    fn guard_solver(guards: bool) -> Solver {
+        let mut solver = Solver::new(
+            Method::lbfgs(),
+            Control {
+                maxiter: 2,
+                gtol: 0.0,
+                istep: 1.0,
+                maxmove: None,
+                ftol_rel: None,
+            },
+            3,
+        );
+        solver.set_accept(Accept::Step);
+        solver.set_atom_maxmove(0.2);
+        solver.set_lbfgs_neb_guards(guards);
+        solver
+    }
+
+    #[test]
+    fn distance_reset_second_step_follows_h0_times_the_force() {
+        let obj = guard_script();
+        let mut x = array![0.0, 0.0, 0.0];
+        let mut solver = guard_solver(true);
+        solver.step(&obj, &mut x).unwrap();
+        solver.step(&obj, &mut x).unwrap();
+        assert!((x[0] - 0.39998979774019283).abs() < 1e-9, "x0 {}", x[0]);
+        assert!((x[1] - (-0.002020098967072655)).abs() < 1e-9, "x1 {}", x[1]);
+        assert!(x[2].abs() < 1e-12, "x2 {}", x[2]);
+        let pairs = match &solver.inner {
+            Inner::Lbfgs(lbfgs) => lbfgs.len(),
+            _ => panic!("expected L-BFGS"),
+        };
+        assert_eq!(pairs, 1);
+    }
+
+    #[test]
+    fn without_the_guard_the_two_loop_step_is_kept() {
+        let obj = guard_script();
+        let mut x = array![0.0, 0.0, 0.0];
+        let mut solver = guard_solver(false);
+        solver.step(&obj, &mut x).unwrap();
+        solver.step(&obj, &mut x).unwrap();
+        assert!((x[0] - 0.3896090211663347).abs() < 1e-8, "x0 {}", x[0]);
+        assert!((x[1] - (-0.06362718831085057)).abs() < 1e-8, "x1 {}", x[1]);
     }
 }
