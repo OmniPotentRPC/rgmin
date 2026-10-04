@@ -7,6 +7,39 @@ use std::cell::Cell;
 use std::ffi::c_void;
 #[cfg(rgmin_has_libkrylov)]
 use std::os::raw::c_int;
+#[cfg(rgmin_has_libkrylov)]
+use std::sync::Mutex;
+
+// The configuration and space list belong to the process. A solve owns the
+// complete initialization, callback, and finalization interval.
+#[cfg(rgmin_has_libkrylov)]
+static LIBKRYLOV_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(rgmin_has_libkrylov)]
+thread_local! {
+    static LIBKRYLOV_ACTIVE: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(rgmin_has_libkrylov)]
+struct ActiveCall;
+
+#[cfg(rgmin_has_libkrylov)]
+impl ActiveCall {
+    fn enter() -> Result<Self> {
+        if LIBKRYLOV_ACTIVE.with(|active| active.replace(true)) {
+            Err(Error::Libkrylov { what: "recursive eigensolver call" })
+        } else {
+            Ok(Self)
+        }
+    }
+}
+
+#[cfg(rgmin_has_libkrylov)]
+impl Drop for ActiveCall {
+    fn drop(&mut self) {
+        LIBKRYLOV_ACTIVE.with(|active| active.set(false));
+    }
+}
 
 use crate::error::{Error, Result};
 #[cfg(rgmin_has_libkrylov)]
@@ -100,6 +133,10 @@ where
     if n == 0 {
         return Err(Error::Dim { got: 0, dim: 0 });
     }
+    let _active = ActiveCall::enter()?;
+    let _lock = LIBKRYLOV_LOCK.lock().map_err(|_| Error::Libkrylov {
+        what: "eigensolver state is poisoned",
+    })?;
     let ctx = ApplyCtx {
         apply: &apply,
         n,
