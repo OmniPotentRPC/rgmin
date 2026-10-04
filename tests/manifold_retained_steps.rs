@@ -303,11 +303,13 @@ fn set_factor_shape_drops_stale_lbfgs_pairs() {
     );
 }
 
-
 #[test]
 fn direct_spd_steps_retract_once_and_evaluate_the_accepted_point_once() {
     use rgmin::{Accept, ManifoldKind, Oracle};
-    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
     for (method, scale) in [(Method::Bb, 0.1), (Method::lbfgs(), 1.0)] {
         let calls = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&calls);
@@ -318,13 +320,17 @@ fn direct_spd_steps_retract_once_and_evaluate_the_accepted_point_once() {
         });
         let initial = 1.1_f64;
         let mut x = array![initial, 0.0, 0.0, initial];
-        let mut solver = Solver::new(method.clone(), Control {
-            maxiter: 20,
-            gtol: 1e-12,
-            istep: 0.1,
-            maxmove: None,
-            ftol_rel: None,
-        }, 4);
+        let mut solver = Solver::new(
+            method.clone(),
+            Control {
+                maxiter: 20,
+                gtol: 1e-12,
+                istep: 0.1,
+                maxmove: None,
+                ftol_rel: None,
+            },
+            4,
+        );
         solver.set_manifold(ManifoldKind::Spd);
         solver.set_accept(Accept::Step);
         let tangent = -scale * initial * initial * (initial - 1.0);
