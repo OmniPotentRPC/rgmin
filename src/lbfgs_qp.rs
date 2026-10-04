@@ -168,17 +168,25 @@ impl Lbfgs {
         })?;
         let n = g.len();
         if x.len() != n {
-            return Err(Error::Dim { got: x.len(), dim: n });
+            return Err(Error::Dim {
+                got: x.len(),
+                dim: n,
+            });
         }
         for side in [lo, hi].into_iter().flatten() {
             if !side.is_empty() && side.len() != 1 && side.len() != n {
-                return Err(Error::Dim { got: side.len(), dim: n });
+                return Err(Error::Dim {
+                    got: side.len(),
+                    dim: n,
+                });
             }
         }
         if x.iter().chain(g.iter()).any(|value| !value.is_finite())
             || opts.lo.is_some_and(f64::is_nan)
             || opts.hi.is_some_and(f64::is_nan)
-            || opts.trust.is_some_and(|radius| !radius.is_finite() || radius < 0.0)
+            || opts
+                .trust
+                .is_some_and(|radius| !radius.is_finite() || radius < 0.0)
             || opts.center_axes.is_some_and(|(atoms, dim)| {
                 atoms == 0 || dim == 0 || atoms.checked_mul(dim) != Some(n)
             })
@@ -220,8 +228,15 @@ impl Lbfgs {
         }
         let bounds = eindir_core::Bounds::new(lower.clone(), upper.clone(), 0.0);
         let mut step = highs_feasible_step_boxed(
-            Some(&direction), None, &g.to_owned(), None, None, opts.center_axes,
-            Some((Array1::zeros(n).view(), &bounds)), &opts.equalities, &self.highs_options,
+            Some(&direction),
+            None,
+            &g.to_owned(),
+            None,
+            None,
+            opts.center_axes,
+            Some((Array1::zeros(n).view(), &bounds)),
+            &opts.equalities,
+            &self.highs_options,
         )?;
         if step.iter().any(|value| !value.is_finite()) {
             return Err(Error::Highs("non-finite bounded step".into()));
@@ -230,7 +245,9 @@ impl Lbfgs {
         for (row, rhs) in &opts.equalities {
             let residual = row.iter().map(|(k, a)| a * step[*k]).sum::<f64>() - rhs;
             if !residual.is_finite() || residual.abs() > EQUALITY_FEASIBILITY_TOLERANCE {
-                return Err(Error::Highs("bounded step violates a linear equality".into()));
+                return Err(Error::Highs(
+                    "bounded step violates a linear equality".into(),
+                ));
             }
         }
         if let Some((atoms, dim)) = opts.center_axes {

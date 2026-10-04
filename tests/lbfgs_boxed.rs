@@ -15,7 +15,14 @@ fn box_projection_keeps_free_components_near_a_wall() {
     for distance in [1e-8, 1e-12] {
         let x = array![3.0, distance];
         let gradient = array![3.0, 1.0 + distance];
-        let step = opt.highs_step_boxed(x.view(), gradient.view(), Some(&[f64::NEG_INFINITY, 0.0]), None).unwrap();
+        let step = opt
+            .highs_step_boxed(
+                x.view(),
+                gradient.view(),
+                Some(&[f64::NEG_INFINITY, 0.0]),
+                None,
+            )
+            .unwrap();
         assert_relative_eq!(step[0], -3.0, epsilon = 1e-14);
         assert_relative_eq!(step[1], -distance, epsilon = 1e-16);
         assert!(gradient.dot(&step) < 0.0);
@@ -33,7 +40,9 @@ fn box_projection_restarts_a_non_descent_curvature_direction() {
     });
     let x = array![0.0, 0.0];
     let gradient = array![1.0, -1.0];
-    let step = opt.highs_step_boxed(x.view(), gradient.view(), None, Some(&[f64::INFINITY, 0.0])).unwrap();
+    let step = opt
+        .highs_step_boxed(x.view(), gradient.view(), None, Some(&[f64::INFINITY, 0.0]))
+        .unwrap();
     assert!(gradient.dot(&step) < 0.0, "non-descent step: {step:?}");
     assert_relative_eq!(step[0], -1.0, epsilon = 1e-14);
     assert_eq!(step[1], 0.0);
@@ -50,7 +59,9 @@ fn per_coordinate_box_is_independent() {
     });
     let x = Array1::from(vec![0.0, 0.0]);
     let g = Array1::from(vec![10.0, 10.0]);
-    let d = opt.highs_step_boxed(x.view(), g.view(), Some(&[-0.1, -10.0]), Some(&[0.1, 10.0])).unwrap();
+    let d = opt
+        .highs_step_boxed(x.view(), g.view(), Some(&[-0.1, -10.0]), Some(&[0.1, 10.0]))
+        .unwrap();
     for i in 0..2 {
         let t = x[i] + d[i];
         let (lo, hi) = if i == 0 { (-0.1, 0.1) } else { (-10.0, 10.0) };
@@ -69,7 +80,14 @@ fn per_coord_box_is_not_uniform() {
     });
     let x = Array1::from(vec![0.0, 0.0]);
     let g = Array1::from(vec![1.0, 100.0]);
-    let d = opt.highs_step_boxed(x.view(), g.view(), Some(&[-0.05, -10.0]), Some(&[0.05, 10.0])).unwrap();
+    let d = opt
+        .highs_step_boxed(
+            x.view(),
+            g.view(),
+            Some(&[-0.05, -10.0]),
+            Some(&[0.05, 10.0]),
+        )
+        .unwrap();
     assert!(
         (x[0] + d[0]).abs() <= 0.05 + 1e-9,
         "tight axis left the box: {}",
@@ -98,7 +116,9 @@ fn null_side_is_unbounded_on_that_side() {
     });
     let x = Array1::from(vec![0.5, 0.5]);
     let g = Array1::from(vec![-10.0, -1.0]);
-    let d = opt.highs_step_boxed(x.view(), g.view(), Some(&[0.0]), None).unwrap();
+    let d = opt
+        .highs_step_boxed(x.view(), g.view(), Some(&[0.0]), None)
+        .unwrap();
     assert!(
         x[0] + d[0] >= -1e-12 && x[1] + d[1] >= -1e-12,
         "lower side must hold: {:?}",
@@ -114,18 +134,32 @@ fn null_side_is_unbounded_on_that_side() {
 fn boxed_step_intersects_uniform_bounds_and_preserves_equalities() {
     let mut opt = Lbfgs::default();
     opt.highs = Some(HighsStep {
-        trust: Some(0.8), lo: Some(-1.0), hi: Some(1.0),
-        equalities: vec![(vec![(0, 1.0), (1, 1.0)], 0.4)], center_axes: None,
+        trust: Some(0.8),
+        lo: Some(-1.0),
+        hi: Some(1.0),
+        equalities: vec![(vec![(0, 1.0), (1, 1.0)], 0.4)],
+        center_axes: None,
     });
     let x = array![0.0, 0.0];
-    let step = opt.highs_step_boxed(x.view(), array![1.0, 2.0].view(), Some(&[-0.5]), Some(&[0.5])).unwrap();
+    let step = opt
+        .highs_step_boxed(
+            x.view(),
+            array![1.0, 2.0].view(),
+            Some(&[-0.5]),
+            Some(&[0.5]),
+        )
+        .unwrap();
     assert_relative_eq!(step[0], 0.5, epsilon = 1e-7);
     assert_relative_eq!(step[1], -0.1, epsilon = 1e-7);
     assert!((step.sum() - 0.4).abs() <= 1e-7);
     assert!(step.iter().all(|p| (-0.5..=0.5).contains(p)));
     opt.highs.as_mut().unwrap().equalities.clear();
     opt.highs.as_mut().unwrap().trust = Some(0.0);
-    assert_eq!(opt.highs_step_boxed(x.view(), array![1.0, 2.0].view(), None, None).unwrap(), x);
+    assert_eq!(
+        opt.highs_step_boxed(x.view(), array![1.0, 2.0].view(), None, None)
+            .unwrap(),
+        x
+    );
 }
 
 #[test]
@@ -136,10 +170,19 @@ fn bounded_step_rejects_malformed_domains_without_changing_history() {
     let x = array![0.0, 0.0];
     let gradient = array![1.0, 2.0];
     for bounds in [vec![0.0, 0.0, 0.0], vec![f64::NAN], vec![1.0]] {
-        assert!(opt.highs_step_boxed(x.view(), gradient.view(), Some(&bounds), None).is_err());
+        assert!(
+            opt.highs_step_boxed(x.view(), gradient.view(), Some(&bounds), None)
+                .is_err()
+        );
         assert_eq!(opt.len(), 1);
     }
-    assert!(opt.highs_step_boxed(array![0.0].view(), gradient.view(), None, None).is_err());
-    assert!(opt.highs_step_boxed(x.view(), array![f64::NAN, 0.0].view(), None, None).is_err());
+    assert!(
+        opt.highs_step_boxed(array![0.0].view(), gradient.view(), None, None)
+            .is_err()
+    );
+    assert!(
+        opt.highs_step_boxed(x.view(), array![f64::NAN, 0.0].view(), None, None)
+            .is_err()
+    );
     assert_eq!(opt.len(), 1);
 }
