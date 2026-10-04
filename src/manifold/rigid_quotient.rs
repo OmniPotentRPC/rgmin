@@ -64,6 +64,23 @@ mod tests {
         assert!(n < 1e-12, "{t:?}");
     }
 
+    /// The retraction is the horizontal lift `x + v` on every component.
+    #[test]
+    fn retract_is_componentwise_translation() {
+        let x = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0];
+        let v = array![0.2, -0.1, 0.05, 0.0, 0.3, -0.2, 0.1, 0.0, -0.4];
+        let y = RigidQuotient.retract(&x, &v);
+        assert_eq!(y.len(), x.len());
+        for i in 0..x.len() {
+            assert!(
+                (y[i] - (x[i] + v[i])).abs() < 1e-15,
+                "component {i}: {} vs {}",
+                y[i],
+                x[i] + v[i]
+            );
+        }
+    }
+
     #[test]
     fn keeps_length() {
         let x = Array1::from_elem(114, 0.1);

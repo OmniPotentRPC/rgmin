@@ -2260,6 +2260,146 @@ mod tests {
         );
     }
 
+    /// A periodic cell is \(R^{3N}/T(3)\): rotation stays, translation goes.
+    /// An isolated quotient removes both.
+    #[test]
+    fn periodic_quotient_keeps_rotation_drops_translation() {
+        let x = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0];
+        let rot = array![0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0];
+        let trans = array![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let mut periodic = Solver::new(Method::Steepest, Control::default(), 9);
+        periodic.set_manifold(ManifoldKind::RigidQuotient);
+        periodic.set_periodic(true);
+        let kept = periodic.project_vec(&x, &rot);
+        assert!(
+            l2_diff(&kept, &Array1::zeros(9)) > 0.5,
+            "periodic quotient removed the rotation {kept:?}"
+        );
+        let mut com = [0.0; 3];
+        for i in 0..3 {
+            for k in 0..3 {
+                com[k] += kept[3 * i + k];
+            }
+        }
+        for c in com {
+            assert!(c.abs() < 1e-8, "translation survived in {kept:?}");
+        }
+        let killed = periodic.project_vec(&x, &trans);
+        assert!(
+            l2_diff(&killed, &Array1::zeros(9)) < 1e-8,
+            "periodic quotient kept a translation {killed:?}"
+        );
+        let mut isolated = Solver::new(Method::Steepest, Control::default(), 9);
+        isolated.set_manifold(ManifoldKind::RigidQuotient);
+        isolated.set_periodic(false);
+        let gone = isolated.project_vec(&x, &rot);
+        assert!(
+            l2_diff(&gone, &Array1::zeros(9)) < 1e-8,
+            "isolated quotient kept a rotation {gone:?}"
+        );
+    }
+
+    /// `gtol` compares the projected gradient. The ambient rotation has
+    /// norm 2. Isolated, that vector is vertical and the step stops.
+    /// Periodic, the rotation survives and the step moves.
+    #[test]
+    fn projected_gtol_stops_on_a_vertical_gradient() {
+        let pos = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0];
+        let rot = array![0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0];
+        let ambient_sq: f64 = rot.dot(&rot);
+        let ambient = ambient_sq.sqrt();
+        let gtol = 1e-8;
+        assert!(ambient > 1.0 && gtol < ambient);
+        let ctrl = Control {
+            maxiter: 1,
+            gtol,
+            istep: 0.2,
+            maxmove: None,
+            ftol_rel: None,
+        };
+        let run = |periodic: bool| {
+            let g = rot.clone();
+            let obj = Oracle::unbounded(9, move |x: ArrayView1<f64>| (g.dot(&x), g.clone()));
+            let mut x = pos.clone();
+            let mut solver = Solver::new(Method::Steepest, ctrl.clone(), 9);
+            solver.set_manifold(ManifoldKind::RigidQuotient);
+            solver.set_periodic(periodic);
+            solver.set_accept(Accept::Step);
+            let rep = solver.step(&obj, &mut x).unwrap();
+            (l2_diff(&x, &pos), rep.steps, rep.grad_norm)
+        };
+        let (disp, steps, gn) = run(false);
+        assert!(
+            disp < 1e-12 && steps == 0 && gn < gtol,
+            "vertical gradient took a step, disp {disp} steps {steps} grad {gn}"
+        );
+        let (disp, steps, gn) = run(true);
+        assert!(
+            disp > 0.1 && steps == 1 && gn > 0.5,
+            "periodic rotation stopped, disp {disp} steps {steps} grad {gn}"
+        );
+    }
+
+    /// The newest L-BFGS pair is `T(x - x_old)` and `g - T(g_old)`.
+    /// The ambient chord on the sphere is not that displacement.
+    /// The anchor has a component along the start, so the transported
+    /// gradient difference is not identically zero.
+    #[test]
+    fn lbfgs_newest_pair_is_the_transported_secant() {
+        let x0 = array![0.0, 1.0, 0.0];
+        let obj = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+            let d = array![x[0] - 1.0, x[1] - 0.2, x[2]];
+            let f = 0.5 * d.iter().map(|v| v * v).sum::<f64>();
+            (f, d)
+        });
+        let mut solver = Solver::new(
+            Method::lbfgs(),
+            Control {
+                maxiter: 1,
+                gtol: 1e-14,
+                istep: 0.3,
+                maxmove: None,
+                ftol_rel: None,
+            },
+            3,
+        );
+        solver.set_manifold(ManifoldKind::Sphere);
+        solver.set_accept(Accept::Step);
+        if let Inner::Lbfgs(inner) = &mut solver.inner {
+            inner.inverse_curvature = 0.3;
+        }
+        let mut x = x0.clone();
+        solver.step(&obj, &mut x).unwrap();
+        let pairs = match &solver.inner {
+            Inner::Lbfgs(inner) => inner.pairs_for_test(),
+            _ => unreachable!("L-BFGS session"),
+        };
+        assert_eq!(pairs.len(), 1, "the step stored no secant");
+        let (s, y) = &pairs[0];
+        let chord = &x - &x0;
+        assert!(
+            x.dot(&chord).abs() > 1e-3,
+            "ambient chord was already tangent, x·(x-x0) = {}",
+            x.dot(&chord)
+        );
+        let g0 = ManifoldKind::Sphere.project(&x0, &array![-1.0, 0.8, 0.0]);
+        let ambient = array![x[0] - 1.0, x[1] - 0.2, x[2]];
+        let gx = ManifoldKind::Sphere.project(&x, &ambient);
+        let s_want = ManifoldKind::Sphere.transport(&x0, &x, &chord);
+        let y_want = &gx - &ManifoldKind::Sphere.transport(&x0, &x, &g0);
+        assert!(
+            l2_diff(&y_want, &Array1::zeros(3)) > 1e-4,
+            "the transported gradient difference vanished"
+        );
+        assert!(
+            x.dot(s).abs() < 1e-10,
+            "stored s left the tangent, x·s = {}",
+            x.dot(s)
+        );
+        assert!(l2_diff(s, &s_want) < 1e-10, "{s:?} vs {s_want:?}");
+        assert!(l2_diff(y, &y_want) < 1e-10, "{y:?} vs {y_want:?}");
+    }
+
     /// A steep well under a tiny Euclidean cap: every FIRE step is
     /// clamped, and the velocity has to describe the clamped move.
     fn steep() -> Oracle<impl Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync> {

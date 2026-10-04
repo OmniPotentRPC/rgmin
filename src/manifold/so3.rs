@@ -163,4 +163,24 @@ mod tests {
         assert!(So3.required_dim(114).is_err());
         assert!(So3.required_dim(9).is_ok());
     }
+
+    /// A length other than 9 is the ambient map on every component.
+    /// The vector is not read as a 9-prefix of a longer packing.
+    #[test]
+    fn wrong_length_is_the_ambient_map() {
+        let x = Array1::from_elem(10, 0.2);
+        let v = Array1::from_elem(10, -0.05);
+        let y = So3.retract(&x, &v);
+        let p = So3.project(&x, &v);
+        assert_eq!(y.len(), 10);
+        assert_eq!(p.len(), 10);
+        for i in 0..10 {
+            assert!(
+                (y[i] - (x[i] + v[i])).abs() < 1e-15,
+                "retract component {i}"
+            );
+            assert!((p[i] - v[i]).abs() < 1e-15, "project component {i}");
+        }
+        assert_eq!(So3.required_dim(10), Err(9));
+    }
 }

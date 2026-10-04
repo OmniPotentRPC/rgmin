@@ -639,3 +639,86 @@ impl Manifold for ManifoldKind {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ManifoldKind;
+
+    /// Every packing token. A new variant has to join this match.
+    fn packing_name(kind: &ManifoldKind) -> &'static str {
+        match kind {
+            ManifoldKind::Euclidean
+            | ManifoldKind::Sphere
+            | ManifoldKind::So3
+            | ManifoldKind::Stiefel
+            | ManifoldKind::Se3
+            | ManifoldKind::RigidQuotient
+            | ManifoldKind::MwRigid { .. }
+            | ManifoldKind::Grassmann
+            | ManifoldKind::GrassmannP { .. }
+            | ManifoldKind::Hyperbolic
+            | ManifoldKind::PoincareBall
+            | ManifoldKind::Unitary { .. }
+            | ManifoldKind::Oblique { .. }
+            | ManifoldKind::Multinomial
+            | ManifoldKind::StiefelP { .. }
+            | ManifoldKind::Spd
+            | ManifoldKind::Symmetric
+            | ManifoldKind::SkewSymmetric
+            | ManifoldKind::ComplexCircle { .. }
+            | ManifoldKind::EuclideanComplex { .. }
+            | ManifoldKind::Constant { .. }
+            | ManifoldKind::MultinomialDoublyStochastic { .. }
+            | ManifoldKind::MultinomialSymmetric { .. }
+            | ManifoldKind::SphereComplex { .. }
+            | ManifoldKind::Positive { .. }
+            | ManifoldKind::CenteredMatrix { .. } => kind.as_str(),
+        }
+    }
+
+    /// Sella TRICs are a different chart, not a packing in this set.
+    #[test]
+    fn tric_is_not_a_packing() {
+        let kinds = [
+            ManifoldKind::Euclidean,
+            ManifoldKind::Sphere,
+            ManifoldKind::So3,
+            ManifoldKind::Stiefel,
+            ManifoldKind::Se3,
+            ManifoldKind::RigidQuotient,
+            ManifoldKind::mw_rigid(&[]),
+            ManifoldKind::Grassmann,
+            ManifoldKind::GrassmannP { n: 4, p: 2 },
+            ManifoldKind::Hyperbolic,
+            ManifoldKind::PoincareBall,
+            ManifoldKind::unitary(2),
+            ManifoldKind::Oblique { n: 3, m: 2 },
+            ManifoldKind::Multinomial,
+            ManifoldKind::stiefel(4, 2),
+            ManifoldKind::Spd,
+            ManifoldKind::Symmetric,
+            ManifoldKind::SkewSymmetric,
+            ManifoldKind::ComplexCircle { n: 2 },
+            ManifoldKind::EuclideanComplex { n: 2 },
+            ManifoldKind::Constant { n: 3 },
+            ManifoldKind::MultinomialDoublyStochastic { n: 2 },
+            ManifoldKind::MultinomialSymmetric { n: 2 },
+            ManifoldKind::SphereComplex { n: 2 },
+            ManifoldKind::Positive { n: 3 },
+            ManifoldKind::CenteredMatrix {
+                m: 2,
+                n: 3,
+                rows: false,
+            },
+        ];
+        for kind in &kinds {
+            let name = packing_name(kind);
+            assert_eq!(name, kind.as_str());
+            assert!(
+                !name.split('_').any(|part| part == "tric"),
+                "packing token {name} is a TRIC chart"
+            );
+        }
+        assert_eq!(ManifoldKind::RigidQuotient.as_str(), "rigid_quotient");
+    }
+}

@@ -52,6 +52,7 @@ impl Manifold for Se3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manifold::So3;
     use ndarray::array;
 
     fn eye_t(tx: f64, ty: f64, tz: f64) -> Array1<f64> {
@@ -120,5 +121,35 @@ mod tests {
         }
         assert!(Se3.required_dim(114).is_err());
         assert!(Se3.required_dim(12).is_ok());
+    }
+
+    /// Length 9 is an SO(3) packing. SE(3) leaves it as `x + v`
+    /// instead of retracting a rotation block.
+    #[test]
+    fn length_nine_is_not_an_so3_block() {
+        let x = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let v = array![0.0, -0.2, 0.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let y = Se3.retract(&x, &v);
+        let p = Se3.project(&x, &v);
+        for i in 0..9 {
+            assert!(
+                (y[i] - (x[i] + v[i])).abs() < 1e-15,
+                "retract component {i}"
+            );
+            assert!((p[i] - v[i]).abs() < 1e-15, "project component {i}");
+        }
+        let rotated = So3.retract(&x, &v);
+        let gap = (0..9)
+            .map(|i| {
+                let d = y[i] - rotated[i];
+                d * d
+            })
+            .sum::<f64>()
+            .sqrt();
+        assert!(
+            gap > 1e-3,
+            "length 9 followed the SO(3) retraction, gap {gap}"
+        );
+        assert_eq!(Se3.required_dim(9), Err(12));
     }
 }
