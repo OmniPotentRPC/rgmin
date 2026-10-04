@@ -124,7 +124,15 @@ pub fn minimize_scg<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    minimize_scg_with_options(obj, init, control, params, conjugacy, restart, &ScgOptions::default())
+    minimize_scg_with_options(
+        obj,
+        init,
+        control,
+        params,
+        conjugacy,
+        restart,
+        &ScgOptions::default(),
+    )
 }
 
 /// [`minimize_scg`] with an explicit accepted-step convergence rule.
@@ -140,7 +148,16 @@ pub fn minimize_scg_with_options<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    run_scg(obj, init.into(), control, params, conjugacy, restart, options, |_, _| None)
+    run_scg(
+        obj,
+        init.into(),
+        control,
+        params,
+        conjugacy,
+        restart,
+        options,
+        |_, _| None,
+    )
 }
 
 /// [`minimize_scg`] with exact curvature: the probe (and its extra
@@ -159,7 +176,15 @@ pub fn minimize_scg_exact<O>(
 where
     O: DirectionalCurvature + ?Sized,
 {
-    minimize_scg_exact_with_options(obj, init, control, params, conjugacy, restart, &ScgOptions::default())
+    minimize_scg_exact_with_options(
+        obj,
+        init,
+        control,
+        params,
+        conjugacy,
+        restart,
+        &ScgOptions::default(),
+    )
 }
 
 /// [`minimize_scg_exact`] with an explicit accepted-step convergence rule.
@@ -175,8 +200,16 @@ pub fn minimize_scg_exact_with_options<O>(
 where
     O: DirectionalCurvature + ?Sized,
 {
-    run_scg(obj, init.into(), control, params, conjugacy, restart, options,
-            |x, d| obj.directional_curvature(x, d))
+    run_scg(
+        obj,
+        init.into(),
+        control,
+        params,
+        conjugacy,
+        restart,
+        options,
+        |x, d| obj.directional_curvature(x, d),
+    )
 }
 
 fn run_scg<O>(

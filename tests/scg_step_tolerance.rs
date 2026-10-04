@@ -1,8 +1,10 @@
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::nlcg::{Conjugacy, Restart};
-use rgmin::{Control, DirectionalCurvature, Report, ScgOptions, ScgParams, ScgStepTolerance,
-    minimize_scg, minimize_scg_exact, minimize_scg_exact_with_options, minimize_scg_with_options};
+use rgmin::{
+    Control, DirectionalCurvature, Report, ScgOptions, ScgParams, ScgStepTolerance, minimize_scg,
+    minimize_scg_exact, minimize_scg_exact_with_options, minimize_scg_with_options,
+};
 use std::sync::Mutex;
 
 struct ShiftedBowl {
@@ -12,20 +14,31 @@ struct ShiftedBowl {
 }
 impl ShiftedBowl {
     fn new(center: f64) -> Self {
-        Self { center, bounds: Bounds::new(array![-1e6, -1e6], array![1e6, 1e6], 0.0),
-            visits: Mutex::new(Vec::new()) }
+        Self {
+            center,
+            bounds: Bounds::new(array![-1e6, -1e6], array![1e6, 1e6], 0.0),
+            visits: Mutex::new(Vec::new()),
+        }
     }
 }
 impl Objective<f64> for ShiftedBowl {
-    fn dim(&self) -> usize { 2 }
-    fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+    fn dim(&self) -> usize {
+        2
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         x.iter().map(|v| 0.5 * (v - self.center).powi(2)).sum()
     }
 }
 impl Gradient<f64> for ShiftedBowl {
-    fn dim(&self) -> usize { 2 }
-    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> { &x - self.center }
+    fn dim(&self) -> usize {
+        2
+    }
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        &x - self.center
+    }
 }
 impl DifferentiableObjective<f64> for ShiftedBowl {
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
@@ -38,20 +51,67 @@ impl DirectionalCurvature for ShiftedBowl {
         Some(d.dot(&d))
     }
 }
-fn control() -> Control { Control { maxiter: 2, gtol: 0.0, ..Control::default() } }
-fn params(tol: f64) -> ScgParams { ScgParams { tol_sol: tol, tol_func: 1.0, ..ScgParams::default() } }
+fn control() -> Control {
+    Control {
+        maxiter: 2,
+        gtol: 0.0,
+        ..Control::default()
+    }
+}
+fn params(tol: f64) -> ScgParams {
+    ScgParams {
+        tol_sol: tol,
+        tol_func: 1.0,
+        ..ScgParams::default()
+    }
+}
 fn run(center: f64, tol: f64, exact: bool, options: Option<ScgOptions>) -> (Report, Vec<Vec<f64>>) {
     let objective = ShiftedBowl::new(center);
     let x = array![center + 1.0, center + 1.0];
     let report = match (exact, options) {
-        (false, None) => minimize_scg(&objective, x, &control(), &params(tol), Conjugacy::LiuStorey, Restart::Never),
-        (true, None) => minimize_scg_exact(&objective, x, &control(), &params(tol), Conjugacy::LiuStorey, Restart::Never),
-        (false, Some(o)) => minimize_scg_with_options(&objective, x, &control(), &params(tol), Conjugacy::LiuStorey, Restart::Never, &o),
-        (true, Some(o)) => minimize_scg_exact_with_options(&objective, x, &control(), &params(tol), Conjugacy::LiuStorey, Restart::Never, &o),
-    }.unwrap();
+        (false, None) => minimize_scg(
+            &objective,
+            x,
+            &control(),
+            &params(tol),
+            Conjugacy::LiuStorey,
+            Restart::Never,
+        ),
+        (true, None) => minimize_scg_exact(
+            &objective,
+            x,
+            &control(),
+            &params(tol),
+            Conjugacy::LiuStorey,
+            Restart::Never,
+        ),
+        (false, Some(o)) => minimize_scg_with_options(
+            &objective,
+            x,
+            &control(),
+            &params(tol),
+            Conjugacy::LiuStorey,
+            Restart::Never,
+            &o,
+        ),
+        (true, Some(o)) => minimize_scg_exact_with_options(
+            &objective,
+            x,
+            &control(),
+            &params(tol),
+            Conjugacy::LiuStorey,
+            Restart::Never,
+            &o,
+        ),
+    }
+    .unwrap();
     (report, objective.visits.into_inner().unwrap())
 }
-fn relative() -> ScgOptions { ScgOptions { step_tolerance: ScgStepTolerance::RelativeEuclidean } }
+fn relative() -> ScgOptions {
+    ScgOptions {
+        step_tolerance: ScgStepTolerance::RelativeEuclidean,
+    }
+}
 
 #[test]
 fn default_options_preserve_coordinates_values_steps_and_every_visit() {
@@ -73,7 +133,9 @@ fn relative_rule_uses_the_accepted_point_and_stops_without_an_extra_probe() {
     for exact in [false, true] {
         let (report, visits) = run(100.0, 0.01, exact, Some(relative()));
         assert_eq!(report.steps, 1);
-        for x in report.coords { assert!((x - 100.5).abs() < 1e-7); }
+        for x in report.coords {
+            assert!((x - 100.5).abs() < 1e-7);
+        }
         assert_eq!(visits.len(), if exact { 2 } else { 3 });
         assert_eq!(visits.last().unwrap().len(), 2);
         assert!((visits.last().unwrap()[0] - 100.5).abs() < 1e-7);
@@ -89,7 +151,9 @@ fn relative_rule_uses_euclidean_step_norm_and_accepted_coordinate_scale() {
     assert_eq!(report.steps, 2);
     assert_eq!(visits.len(), 3);
     assert_eq!(visits[1], vec![0.5, 0.5]);
-    for x in report.coords { assert!((x - 1.0/6.0).abs() < 1e-14); }
+    for x in report.coords {
+        assert!((x - 1.0 / 6.0).abs() < 1e-14);
+    }
 }
 
 #[cfg(feature = "capi")]
@@ -100,38 +164,94 @@ mod capi {
     use std::ffi::c_void;
     use std::mem::{offset_of, size_of};
     #[derive(Default)]
-    struct Calls { eval: Vec<Vec<f64>>, grad: usize, curvature: usize }
+    struct Calls {
+        eval: Vec<Vec<f64>>,
+        grad: usize,
+        curvature: usize,
+    }
     unsafe fn point<'a>(x: *const DLManagedTensorVersioned) -> &'a [f64] {
         unsafe { std::slice::from_raw_parts((*x).dl_tensor.data.cast(), 2) }
     }
-    unsafe extern "C" fn eval(user: *mut c_void, x: *const DLManagedTensorVersioned, out: *mut f64) -> rgmin_status_t {
+    unsafe extern "C" fn eval(
+        user: *mut c_void,
+        x: *const DLManagedTensorVersioned,
+        out: *mut f64,
+    ) -> rgmin_status_t {
         let x = unsafe { point(x) };
-        unsafe { (&mut *user.cast::<Calls>()).eval.push(x.to_vec());
-            *out = x.iter().map(|v| 0.5 * (v - 100.0).powi(2)).sum(); }
+        unsafe {
+            (&mut *user.cast::<Calls>()).eval.push(x.to_vec());
+            *out = x.iter().map(|v| 0.5 * (v - 100.0).powi(2)).sum();
+        }
         rgmin_status_t::RGMIN_SUCCESS
     }
-    unsafe extern "C" fn grad(user: *mut c_void, x: *const DLManagedTensorVersioned, out: *mut DLManagedTensorVersioned) -> rgmin_status_t {
+    unsafe extern "C" fn grad(
+        user: *mut c_void,
+        x: *const DLManagedTensorVersioned,
+        out: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
         let x = unsafe { point(x) };
-        unsafe { (&mut *user.cast::<Calls>()).grad += 1;
+        unsafe {
+            (&mut *user.cast::<Calls>()).grad += 1;
             let dest = (*out).dl_tensor.data.cast::<f64>();
-            for i in 0..2 { *dest.add(i) = x[i] - 100.0; } }
+            for i in 0..2 {
+                *dest.add(i) = x[i] - 100.0;
+            }
+        }
         rgmin_status_t::RGMIN_SUCCESS
     }
-    unsafe extern "C" fn curvature(user: *mut c_void, _x: *const DLManagedTensorVersioned, d: *const DLManagedTensorVersioned, out: *mut f64) -> rgmin_status_t {
+    unsafe extern "C" fn curvature(
+        user: *mut c_void,
+        _x: *const DLManagedTensorVersioned,
+        d: *const DLManagedTensorVersioned,
+        out: *mut f64,
+    ) -> rgmin_status_t {
         let d = unsafe { point(d) };
-        unsafe { (&mut *user.cast::<Calls>()).curvature += 1; *out = d.iter().map(|v| v*v).sum(); }
+        unsafe {
+            (&mut *user.cast::<Calls>()).curvature += 1;
+            *out = d.iter().map(|v| v * v).sum();
+        }
         rgmin_status_t::RGMIN_SUCCESS
     }
     fn solve(kind: i32) -> (rgmin_status_t, [f64; 2], rgmin_report_t, Calls) {
         let mut x = [101.0; 2];
         let mut calls = Calls::default();
         let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
-        let control = rgmin_control_t { maxiter: 2, gtol: 0.0, istep: 1.0, memory: 5, maxmove: 0.0 };
-        let params = rgmin_scg_params_t { sigma0: 1e-4, lambda: 1.0, lambda_limit: 1e60, tol_sol: 0.01, tol_func: 1.0, conjugacy: rgmin_conjugacy_t::RGMIN_CONJUGACY_LIU_STOREY as i32 };
-        let options = rgmin_scg_options_t { step_tolerance: kind };
-        let mut report = rgmin_report_t { value: 42.0, steps: 43, grad_norm: 44.0 };
-        let status = unsafe { rgmin_minimize_scg_with_options(Some(eval), Some(grad), Some(curvature),
-            (&mut calls as *mut Calls).cast(), tensor, &control, &params, &options, &mut report) };
+        let control = rgmin_control_t {
+            maxiter: 2,
+            gtol: 0.0,
+            istep: 1.0,
+            memory: 5,
+            maxmove: 0.0,
+        };
+        let params = rgmin_scg_params_t {
+            sigma0: 1e-4,
+            lambda: 1.0,
+            lambda_limit: 1e60,
+            tol_sol: 0.01,
+            tol_func: 1.0,
+            conjugacy: rgmin_conjugacy_t::RGMIN_CONJUGACY_LIU_STOREY as i32,
+        };
+        let options = rgmin_scg_options_t {
+            step_tolerance: kind,
+        };
+        let mut report = rgmin_report_t {
+            value: 42.0,
+            steps: 43,
+            grad_norm: 44.0,
+        };
+        let status = unsafe {
+            rgmin_minimize_scg_with_options(
+                Some(eval),
+                Some(grad),
+                Some(curvature),
+                (&mut calls as *mut Calls).cast(),
+                tensor,
+                &control,
+                &params,
+                &options,
+                &mut report,
+            )
+        };
         unsafe { rgmin_tensor_free(tensor) };
         (status, x, report, calls)
     }

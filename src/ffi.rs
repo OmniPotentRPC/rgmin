@@ -21,8 +21,8 @@ use ndarray::{Array1, Array2, ArrayView1};
 use crate::{
     Accept, ApplyHessian, Conjugacy, Control, DirectionalCurvature, EigenParams, EigensolverKind,
     Error, HessianOracle, LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart,
-    ScgOptions, ScgParams, ScgStepTolerance, Solver, lowest_mode, minimize_method, minimize_method_hess,
-    minimize_scg_with_options, minimize_scg_exact_with_options,
+    ScgOptions, ScgParams, ScgStepTolerance, Solver, lowest_mode, minimize_method,
+    minimize_method_hess, minimize_scg_exact_with_options, minimize_scg_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -504,7 +504,14 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair(
 ) -> rgmin_status_t {
     unsafe {
         rgmin_lowest_eigenpair_with_options(
-            hvp, user, x, seed, mode_out, params, std::ptr::null(), out,
+            hvp,
+            user,
+            x,
+            seed,
+            mode_out,
+            params,
+            std::ptr::null(),
+            out,
         )
     }
 }
@@ -967,7 +974,15 @@ pub unsafe extern "C" fn rgmin_minimize_scg(
 ) -> rgmin_status_t {
     unsafe {
         rgmin_minimize_scg_with_options(
-            eval, grad, curv, user, x, ctrl, params, std::ptr::null(), out,
+            eval,
+            grad,
+            curv,
+            user,
+            x,
+            ctrl,
+            params,
+            std::ptr::null(),
+            out,
         )
     }
 }
@@ -1048,7 +1063,9 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
             0 => ScgStepTolerance::AbsoluteInfinity,
             1 => ScgStepTolerance::RelativeEuclidean,
             other => {
-                set_last_error(&format!("rgmin_minimize_scg: unknown step tolerance {other}"));
+                set_last_error(&format!(
+                    "rgmin_minimize_scg: unknown step tolerance {other}"
+                ));
                 return rgmin_status_t::RGMIN_INVALID_PARAMETER;
             }
         };
@@ -1061,7 +1078,15 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
             scratch: Scratch::new(),
         };
         let report = if obj.curv.is_some() {
-            minimize_scg_exact_with_options(&obj, Array1::from(init), &control, &scg, conjugacy, restart, &options)
+            minimize_scg_exact_with_options(
+                &obj,
+                Array1::from(init),
+                &control,
+                &scg,
+                conjugacy,
+                restart,
+                &options,
+            )
         } else {
             minimize_scg_with_options(
                 &obj.inner,
