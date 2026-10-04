@@ -1,0 +1,33 @@
+// Floating-point bound for src/quickmin.rs::project_on_force in binary64.
+// Run: sollya validation/quickmin.sollya
+//
+// The code computes p = fl(sum v_i f_i), q = fl(sum f_i^2) by recursive
+// summation over n terms, c = fl(p / q) and v'_i = fl(c f_i). With
+// u = 2^-53 and gamma_n = n u / (1 - n u) (Higham, Accuracy and Stability
+// of Numerical Algorithms, 2nd ed., eq. 3.4):
+//   |p| <= |v.f| + gamma_n sum |v_i f_i| <= (1 + gamma_n) |v| |f|,
+//   q >= (1 - gamma_n) |f|^2,
+//   |v'| <= |c| |f| (1 + u),  |c| <= |p| / q (1 + u),
+// so |v'| <= B(n) |v| with B(n) = (1 + gamma_n)(1 + u)^2 / (1 - gamma_n).
+// In exact arithmetic B = 1 (formal/RgminContracts/QuickMin.lean,
+// qmProject_norm_le); in binary64 the projection may lengthen v by at
+// most B(n) - 1 relative, which the unit test
+// projection_never_lengthens_and_never_opposes allows for n = 6.
+// The power v'.f = sum fl(c f_i) f_i has every term of the sign of c >= 0,
+// so the computed power is never negative.
+prec = 200;
+display = decimal;
+u = 2^(-53);
+eps = 2^(-52);
+procedure B(n) {
+  var g;
+  g = n * u / (1 - n * u);
+  return (1 + g) * (1 + u)^2 / (1 - g);
+};
+for n in [|6, 114, 1203, 3000000|] do {
+  print("n =", n, " B(n) - 1 =", round(B(n) - 1, 24, RU),
+        " in eps:", round((B(n) - 1) / eps, 24, RU));
+};
+// The unit test asserts |v'| <= |v| (1 + 8 eps) for n = 6.
+print("B(6) <= 1 + 8 eps:", B(6) <= 1 + 8 * eps);
+quit;
