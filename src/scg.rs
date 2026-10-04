@@ -275,12 +275,20 @@ where
             }
             kappa = crate::vecops::dot(dir.view(), dir.view());
             if kappa < f64::EPSILON {
-                return Ok(Report {
-                    value: f_old,
-                    coords: w,
-                    steps: step,
-                    grad_norm: gnorm,
-                });
+                if crate::vecops::dot(grad.view(), grad.view()) < f64::EPSILON {
+                    return Ok(Report {
+                        value: f_old,
+                        coords: w,
+                        steps: step,
+                        grad_norm: gnorm,
+                    });
+                }
+                // Conjugacy can cancel the direction while the gradient
+                // remains nonstationary. Price a steepest-descent step.
+                dir = -grad.clone();
+                mu = crate::vecops::dot(dir.view(), grad.view());
+                kappa = crate::vecops::dot(dir.view(), dir.view());
+                nsuccess = 0;
             }
 
             // Exact Hessian-vector curvature when the objective
