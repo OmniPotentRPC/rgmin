@@ -10,7 +10,8 @@ use eindir_core::ffi::{eindir_objective_t, eindir_status_t};
 use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_control_t, rgmin_method_t,
     rgmin_minimize, rgmin_minimize_eindir, rgmin_report_t, rgmin_solver_create, rgmin_solver_free,
-    rgmin_solver_set_accept, rgmin_solver_step, rgmin_solver_step_fg, rgmin_status_t,
+    rgmin_solver_set_accept, rgmin_solver_set_quickmin_cell, rgmin_solver_step,
+    rgmin_solver_step_fg, rgmin_status_t,
     rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 use rgmin::ffi::{
@@ -447,6 +448,57 @@ fn fused_evalgrad_is_one_callback_per_oracle() {
     }
     assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
     assert!(calls >= 1, "fused oracle never ran");
+}
+
+#[test]
+fn c_abi_quickmin_steps_and_splits_the_cell() {
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 0.0,
+        istep: 0.05,
+        memory: 0,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_QUICKMIN, &ctrl, 2) };
+    assert!(!session.is_null());
+    let lbfgs = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert_eq!(
+        unsafe { rgmin_solver_set_quickmin_cell(lbfgs, 1) },
+        rgmin_status_t::RGMIN_INVALID_PARAMETER
+    );
+    assert_eq!(
+        unsafe { rgmin_solver_set_quickmin_cell(session, 1) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    assert_eq!(
+        unsafe { rgmin_solver_set_quickmin_cell(session, 0) },
+        rgmin_status_t::RGMIN_INVALID_PARAMETER
+    );
+    let mut x = [-1.2, 1.0];
+    let start = x;
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+    };
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let st = unsafe {
+        rgmin_solver_step(
+            session,
+            Some(rosen_eval),
+            Some(rosen_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe {
+        rgmin_tensor_free(xt);
+        rgmin_solver_free(session);
+        rgmin_solver_free(lbfgs);
+    }
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(x != start, "quick-min left the start {x:?}");
 }
 
 #[test]
