@@ -142,7 +142,7 @@ fn euclidean_retract_stays_on_the_set() {
 
 #[test]
 fn grassmann_retract_stays_orthonormal_and_is_not_the_sphere() {
-    let gr = Grassmann::new(4, 2);
+    let gr = Grassmann::new(4, 2).unwrap();
     let x = array![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
     let v = array![0.0, 0.0, 0.1, -0.3, 0.0, 0.0, 0.2, 0.05];
     let y = gr.retract(&x, &v);

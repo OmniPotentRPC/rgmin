@@ -153,7 +153,7 @@ fn grassmann_session_stays_on_the_set() {
         },
         8,
     );
-    solver.set_manifold(ManifoldKind::grassmann(4, 2));
+    solver.set_grassmann(4, 2);
     solver.set_accept(rgmin::Accept::Step);
     for _ in 0..20 {
         let _ = solver.step(&obj, &mut x).unwrap();
@@ -173,7 +173,7 @@ fn grassmann_rejects_a_3n_cluster() {
     let obj = Rosenbrock::<114>::new();
     let mut x = Array1::from_elem(114, 0.1);
     let mut solver = Solver::new(Method::Steepest, control(), 114);
-    solver.set_manifold(rgmin::ManifoldKind::grassmann(5, 2));
+    solver.set_grassmann(5, 2);
     let err = solver.step(&obj, &mut x).unwrap_err();
     match err {
         rgmin::Error::ManifoldDim { kind, got } => {
