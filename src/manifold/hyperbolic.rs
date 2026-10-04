@@ -185,7 +185,7 @@ mod tests {
     fn a_3n_cluster_is_not_reinterpreted() {
         // Six numbers can sit on H^5. They are not a two-atom cluster.
         let mut x = Array1::from_elem(6, 0.2);
-        x[0] = (1.0 + 5.0 * 0.04).sqrt();
+        x[0] = (1.0_f64 + 5.0 * 0.04).sqrt();
         let v = Hyperbolic.project(&x, &Array1::from_elem(6, 0.05));
         let y = Hyperbolic.retract(&x, &v);
         assert_eq!(y.len(), 6);

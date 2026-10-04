@@ -300,7 +300,7 @@ mod tests {
 
     fn yty_err(g: Grassmann, y: &Array1<f64>) -> f64 {
         let yty = g.xtu(y.as_slice().unwrap(), y.as_slice().unwrap());
-        let mut e = 0.0;
+        let mut e: f64 = 0.0;
         for a in 0..g.p {
             for b in 0..g.p {
                 let want = if a == b { 1.0 } else { 0.0 };
