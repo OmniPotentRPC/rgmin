@@ -12,7 +12,7 @@ error or prove descent for a general nonlinear restriction.
 
 namespace RgminContracts
 
-def lineQuadratic (c b a t : ℝ) : ℝ := c + b * t + a * t ^ 2 / 2
+noncomputable def lineQuadratic (c b a t : ℝ) : ℝ := c + b * t + a * t ^ 2 / 2
 
 /-- The exact change equals the step times the mean endpoint slope. -/
 theorem quadratic_change (c b a α : ℝ) :
