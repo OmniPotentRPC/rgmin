@@ -124,6 +124,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Barzilai-Borwein pair is the transported displacement and
   the horizontal gradient minus the transported previous gradient.
   An ambient `x - x_old` on the sphere is not tangent.
+- Stored L-BFGS pairs are transported to the current point on every
+  manifold. Sphere and Stiefel under an energy accept keep their
+  geodesic update. The new pair is pushed after that transport.
 
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than

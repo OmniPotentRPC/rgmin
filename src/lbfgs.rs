@@ -150,6 +150,15 @@ impl Lbfgs {
         self.memory.len()
     }
 
+    /// Stored `(s, y)` pairs, oldest first.
+    #[cfg(test)]
+    pub(crate) fn pairs_for_test(&self) -> Vec<(Array1<f64>, Array1<f64>)> {
+        self.memory
+            .iter()
+            .map(|pair| (pair.s.clone(), pair.y.clone()))
+            .collect()
+    }
+
     /// True when no curvature is stored.
     pub fn is_empty(&self) -> bool {
         self.memory.is_empty()

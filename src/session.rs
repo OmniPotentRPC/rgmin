@@ -139,6 +139,33 @@ struct PsoState {
     rng: StdRng,
 }
 
+/// Tangent transport. Quotients project at the arrival point. `MwRigid`
+/// uses the session mass table and drops rotation only when the cell
+/// is not periodic.
+fn transport_tangent(
+    manifold: &ManifoldKind,
+    periodic: bool,
+    masses: Option<&Array1<f64>>,
+    x_from: &Array1<f64>,
+    x_to: &Array1<f64>,
+    v: &Array1<f64>,
+) -> Array1<f64> {
+    match manifold {
+        ManifoldKind::RigidQuotient => {
+            let mut w = v.clone();
+            let _ = project_horizontal(&mut w, x_to.view(), None, !periodic);
+            w
+        }
+        ManifoldKind::MwRigid { .. } => {
+            let mut w = v.clone();
+            let table = masses.and_then(|m| m.as_slice());
+            let _ = project_horizontal(&mut w, x_to.view(), table, !periodic);
+            w
+        }
+        other => other.transport(x_from, x_to, v),
+    }
+}
+
 impl Solver {
     /// Fresh session for `method` in dimension `dim`.
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
@@ -662,10 +689,43 @@ impl Solver {
         x_to: &Array1<f64>,
         v: &Array1<f64>,
     ) -> Array1<f64> {
-        match &self.manifold {
-            ManifoldKind::RigidQuotient | ManifoldKind::MwRigid { .. } => self.project_vec(x_to, v),
-            other => other.transport(x_from, x_to, v),
+        transport_tangent(
+            &self.manifold,
+            self.periodic,
+            self.masses.as_ref(),
+            x_from,
+            x_to,
+            v,
+        )
+    }
+
+    /// Sphere and Stiefel under an energy accept carry history inside
+    /// their own geodesic step. Every other L-BFGS step uses
+    /// [`Self::transport_stored_pairs`].
+    fn sphere_history_path(&self) -> bool {
+        matches!(&self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
+            && matches!(self.inner, Inner::Lbfgs(_))
+            && matches!(self.accept, Accept::Energy | Accept::Nonmonotone)
+    }
+
+    /// Move stored L-BFGS pairs from `x_from` to `x_to`. A pair formed
+    /// for this step is pushed after the call, so it is not moved twice.
+    fn transport_stored_pairs(&mut self, x_from: &Array1<f64>, x_to: &Array1<f64>) {
+        if !matches!(self.inner, Inner::Lbfgs(_)) {
+            return;
         }
+        if x_from.len() != x_to.len() || x_from.iter().zip(x_to.iter()).all(|(a, b)| a == b) {
+            return;
+        }
+        let manifold = self.manifold.clone();
+        let periodic = self.periodic;
+        let masses = self.masses.clone();
+        let Inner::Lbfgs(solver) = &mut self.inner else {
+            return;
+        };
+        solver.transport(|v| {
+            transport_tangent(&manifold, periodic, masses.as_ref(), x_from, x_to, v)
+        });
     }
 
     /// Riemannian L-BFGS pair at `x`: `s = T(x - old)`, `y = g - T(g_old)`.
@@ -1006,6 +1066,11 @@ impl Solver {
         };
         grad = self.horizontal_grad(x, &grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
+        if !cached {
+            if let Some(previous) = self.last_pos.clone().filter(|p| p.len() == x.len()) {
+                self.transport_stored_pairs(&previous, x);
+            }
+        }
         if gnorm < self.control.gtol {
             return Ok(Report {
                 value,
@@ -1085,6 +1150,7 @@ impl Solver {
                 grad = self.horizontal_grad(x, &grad);
                 self.remember(x, value, &grad);
                 let pair = if x.iter().zip(old.iter()).any(|(a, b)| a != b) {
+                    self.transport_stored_pairs(&old, x);
                     let (s, y) = self.lbfgs_sy(&old, x, &gold, &grad);
                     Some((s, y, l2(&grad)))
                 } else {
@@ -1138,6 +1204,7 @@ impl Solver {
         grad = self.horizontal_grad(x, &grad);
         self.remember(x, value, &grad);
         let pair = if x.iter().zip(old.iter()).any(|(a, b)| a != b) {
+            self.transport_stored_pairs(&old, x);
             let (s, y) = self.lbfgs_sy(&old, x, &gold, &grad);
             Some((s, y, l2(&grad)))
         } else {
@@ -1248,6 +1315,13 @@ impl Solver {
         };
         grad = self.horizontal_grad(x, &grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
+        // Pairs already in memory belong at this point before a new
+        // secant is formed. The sphere geodesic step transports on its own.
+        if !cached && !self.sphere_history_path() {
+            if let Some(previous) = self.last_pos.clone().filter(|p| p.len() == x.len()) {
+                self.transport_stored_pairs(&previous, x);
+            }
+        }
         // A caller that moved the iterate between steps measured the
         // gradient at both ends, so the displacement is a secant of the
         // retained inverse Hessian.
@@ -1268,10 +1342,7 @@ impl Solver {
             });
         }
 
-        if matches!(&self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
-            && matches!(self.inner, Inner::Lbfgs(_))
-            && matches!(self.accept, Accept::Energy | Accept::Nonmonotone)
-        {
+        if self.sphere_history_path() {
             if !cached {
                 if let Some(previous) = &self.last_pos {
                     let (s, y) = self.lbfgs_sy(previous, x, &self.last_grad, &grad);
@@ -1750,6 +1821,7 @@ impl Solver {
         let pair = if matches!(self.inner, Inner::Lbfgs(_))
             && x.iter().zip(start.iter()).any(|(a, b)| a != b)
         {
+            self.transport_stored_pairs(&start, x);
             let (s, y) = self.lbfgs_sy(&start, x, &gold, &grad);
             Some((s, y, l2(&grad)))
         } else {
@@ -2121,6 +2193,70 @@ mod tests {
         assert!(
             l2_diff(&solver.last_grad, &gx) < 1e-10,
             "stored gradient is not the horizontal gradient"
+        );
+    }
+
+    fn z_rotation(theta: f64) -> Array1<f64> {
+        let c = theta.cos();
+        let s = theta.sin();
+        array![c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0]
+    }
+
+    /// A pair stored at the start of an SO(3) step is tangent at the
+    /// point the step arrives on. SO(3) projection depends on that point.
+    #[test]
+    fn lbfgs_pair_is_transported_on_so3() {
+        let x0 = z_rotation(0.4);
+        let ambient = array![0.0, -0.3, 0.1, 0.3, 0.0, -0.05, -0.1, 0.05, 0.0];
+        let s0 = ManifoldKind::So3.project(&x0, &ambient);
+        let y0 = s0.clone();
+        let obj = Oracle::unbounded(9, |x: ArrayView1<f64>| {
+            let eye = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+            let mut f = 0.0;
+            let mut g = Array1::zeros(9);
+            for k in 0..9 {
+                let d = x[k] - eye[k];
+                f += 0.5 * d * d;
+                g[k] = d;
+            }
+            (f, g)
+        });
+        let mut solver = Solver::new(
+            Method::lbfgs(),
+            Control {
+                maxiter: 1,
+                gtol: 1e-14,
+                istep: 0.3,
+                maxmove: None,
+                ftol_rel: None,
+            },
+            9,
+        );
+        solver.set_manifold(ManifoldKind::So3);
+        solver.set_accept(Accept::Step);
+        assert!(solver.push_pair(s0.view(), y0.view()));
+        let mut x = x0.clone();
+        solver.step(&obj, &mut x).unwrap();
+        assert!(
+            l2_diff(&x, &x0) > 0.05,
+            "the step stayed at the start, so tangency cannot move"
+        );
+        let carried_s = ManifoldKind::So3.project(&x, &s0);
+        let carried_y = ManifoldKind::So3.project(&x, &y0);
+        assert!(
+            l2_diff(&carried_s, &s0) > 1e-3,
+            "projection at the new point left the seed unchanged"
+        );
+        let pairs = match &solver.inner {
+            Inner::Lbfgs(inner) => inner.pairs_for_test(),
+            _ => unreachable!("L-BFGS session"),
+        };
+        let hit = pairs.iter().any(|(s, y)| {
+            l2_diff(s, &carried_s) < 1e-8 && l2_diff(y, &carried_y) < 1e-8
+        });
+        assert!(
+            hit,
+            "no stored pair is the seed transported to the new point"
         );
     }
 

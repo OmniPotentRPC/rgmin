@@ -23,7 +23,9 @@ Rust and from ~rgmin_solver_set_masses~ (~abi_minor~ 29); empty or
 null still restores unit mass, and a rejected table leaves the
 stored masses in place. The Barzilai-Borwein pair is the
 transported displacement and the horizontal gradient minus the
-transported previous gradient.
+transported previous gradient. Stored L-BFGS pairs move to
+the current point on every manifold; sphere and Stiefel under an
+energy accept keep their geodesic update.
 
 Embedded manopt tokens: Euclidean (default), sphere, SO(3),
 Stiefel ~St(n,1)~, SE(3). Hourglass mark and the Diataxis book
