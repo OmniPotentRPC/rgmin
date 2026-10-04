@@ -28,6 +28,7 @@ ISBN). Do not invent DOIs.
 | Baker TS / RFO | 10.1002/jcc.540070402 | An algorithm for the location of transition states |
 | FIRE Bitzek 2006 | 10.1103/PhysRevLett.97.170201 | Structural Relaxation Made Simple |
 | FIRE 2.0 Guénolé 2020 | 10.1016/j.commatsci.2020.109584 | Assessment and optimization of the fast inertial relaxation engine (FIRE) for energy minimization in atomistic simulations and its implementation in LAMMPS |
+| QuickMin Sheppard-Terrell-Henkelman 2008 | 10.1063/1.2841941 | Optimization methods for finding minimum energy paths |
 | Barzilai–Borwein 1988 | 10.1093/imanum/8.1.141 | Two-Point Step Size Gradient Methods |
 | Raydan SPG 1997 | 10.1137/S1052623494266365 | The Barzilai and Borwein Gradient Method for the Large Scale Unconstrained Minimization Problem |
 | Dennis–Schnabel | 10.1137/1.9781611971200 | Numerical Methods for Unconstrained Optimization and Nonlinear Equations |
