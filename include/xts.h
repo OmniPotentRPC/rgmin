@@ -11,6 +11,7 @@ typedef rgmin_control_t xts_control_t;
 typedef rgmin_curv_fn xts_curv_fn;
 typedef rgmin_eigen_kind_t xts_eigen_kind_t;
 typedef rgmin_eigen_params_t xts_eigen_params_t;
+typedef rgmin_eigen_options_t xts_eigen_options_t;
 typedef rgmin_eval_fn xts_eval_fn;
 typedef rgmin_evalgrad_fn xts_evalgrad_fn;
 typedef rgmin_fire_variant_t xts_fire_variant_t;
@@ -104,6 +105,7 @@ typedef rgmin_status_t xts_status_t;
 #define xts_abi_stamp rgmin_abi_stamp
 #define xts_last_error rgmin_last_error
 #define xts_lowest_eigenpair rgmin_lowest_eigenpair
+#define xts_lowest_eigenpair_with_options rgmin_lowest_eigenpair_with_options
 #define xts_minimize rgmin_minimize
 #define xts_minimize_eindir rgmin_minimize_eindir
 #define xts_minimize_hess rgmin_minimize_hess

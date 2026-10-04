@@ -374,7 +374,8 @@ typedef enum rgmin_eigen_kind_t {
     RGMIN_EIGEN_CUSOLVER = 11,
     RGMIN_EIGEN_DLA_FUTURE = 12,
     RGMIN_EIGEN_EIGENEXA = 13,
-    RGMIN_EIGEN_DIMER = 14
+    RGMIN_EIGEN_DIMER = 14,
+    RGMIN_EIGEN_LIBKRYLOV = 15
 } rgmin_eigen_kind_t;
 
 typedef struct rgmin_eigen_params_t {
@@ -385,6 +386,14 @@ typedef struct rgmin_eigen_params_t {
     uint32_t max_iter;
     double tol;
 } rgmin_eigen_params_t;
+
+/** Separate backend settings; the base parameter record retains its layout. */
+typedef struct rgmin_eigen_options_t {
+    /** ChASE filter degree. Zero selects the backend default. */
+    uint32_t degree;
+    /** ChASE extra search dimensions. Zero selects the backend default. */
+    uint32_t extra;
+} rgmin_eigen_options_t;
 
 typedef struct rgmin_lowest_mode_t {
     double value;
@@ -406,6 +415,19 @@ rgmin_status_t rgmin_lowest_eigenpair(rgmin_hvp_fn hvp, void *user,
                                     DLManagedTensorVersioned *mode_out,
                                     const rgmin_eigen_params_t *params,
                                     rgmin_lowest_mode_t *out);
+
+
+/**
+ * Lowest Hessian eigenpair with separate optional backend settings.
+ * Matrix-free backends ignore the ChASE degree and extra dimensions.
+ * A null options pointer selects the backend defaults. The callback and
+ * tensor requirements match rgmin_lowest_eigenpair.
+ */
+rgmin_status_t rgmin_lowest_eigenpair_with_options(
+    rgmin_hvp_fn hvp, void *user, const DLManagedTensorVersioned *x,
+    const DLManagedTensorVersioned *seed, DLManagedTensorVersioned *mode_out,
+    const rgmin_eigen_params_t *params, const rgmin_eigen_options_t *options,
+    rgmin_lowest_mode_t *out);
 
 
 #ifdef __cplusplus

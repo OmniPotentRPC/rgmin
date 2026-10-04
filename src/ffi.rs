@@ -234,6 +234,7 @@ pub enum rgmin_eigen_kind_t {
     RGMIN_EIGEN_DLA_FUTURE = 12,
     RGMIN_EIGEN_EIGENEXA = 13,
     RGMIN_EIGEN_DIMER = 14,
+    RGMIN_EIGEN_LIBKRYLOV = 15,
 }
 
 /// Typed lowest-mode parameters. No string fields. Null at the C
@@ -252,6 +253,16 @@ pub struct rgmin_eigen_params_t {
     pub max_iter: u32,
     /// Residual tolerance. Non-positive selects `1e-8`.
     pub tol: f64,
+}
+
+/// Optional backend settings, separate from the stable base parameters.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct rgmin_eigen_options_t {
+    /// ChASE filter degree. Zero selects the backend default.
+    pub degree: u32,
+    /// ChASE extra search dimensions. Zero selects the backend default.
+    pub extra: u32,
 }
 
 /// Result of [`rgmin_lowest_eigenpair`]. The vector is written to
@@ -475,6 +486,31 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair(
     params: *const rgmin_eigen_params_t,
     out: *mut rgmin_lowest_mode_t,
 ) -> rgmin_status_t {
+    unsafe {
+        rgmin_lowest_eigenpair_with_options(
+            hvp, user, x, seed, mode_out, params, std::ptr::null(), out,
+        )
+    }
+}
+
+/// Lowest Hessian eigenpair with separate optional backend settings.
+/// Matrix-free backends ignore the ChASE degree and extra dimensions.
+/// A null options pointer selects the backend defaults.
+///
+/// # Safety
+/// The tensor and callback requirements are those of [`rgmin_lowest_eigenpair`].
+/// Non-null parameter and options pointers refer to their declared C records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_lowest_eigenpair_with_options(
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    seed: *const DLManagedTensorVersioned,
+    mode_out: *mut DLManagedTensorVersioned,
+    params: *const rgmin_eigen_params_t,
+    options: *const rgmin_eigen_options_t,
+    out: *mut rgmin_lowest_mode_t,
+) -> rgmin_status_t {
     let Some(hvp) = hvp else {
         set_last_error("rgmin_lowest_eigenpair: null hvp");
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
@@ -501,10 +537,14 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair(
         set_last_error("rgmin_lowest_eigenpair: x/seed/mode length mismatch");
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
-    let typed = match eigen_params_from_c(params) {
+    let mut typed = match eigen_params_from_c(params) {
         Ok(p) => p,
         Err(st) => return st,
     };
+    if let Some(options) = unsafe { options.as_ref() } {
+        typed.degree = options.degree as usize;
+        typed.extra = options.extra as usize;
+    }
     let apply = CHvp { hvp, user };
     match lowest_mode(&apply, x_arr.view(), seed_arr.view(), &typed) {
         Ok(mode) => {

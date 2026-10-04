@@ -13,6 +13,10 @@ namespace optimize {
 
 using rgmin::version;
 using rgmin::Method;
+using rgmin::EigenKind;
+using rgmin::EigenParams;
+using rgmin::EigenOptions;
+using rgmin::lowest_eigenpair;
 using rgmin::Control;
 using rgmin::Report;
 using rgmin::ScalarType;

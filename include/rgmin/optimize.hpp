@@ -43,6 +43,55 @@ enum class Method {
     Fire2 = RGMIN_FIRE2,
 };
 
+enum class EigenKind {
+    Lanczos = RGMIN_EIGEN_LANCZOS,
+    RayleighRitz = RGMIN_EIGEN_RAYLEIGH_RITZ,
+    JacobiDavidson = RGMIN_EIGEN_JACOBI_DAVIDSON,
+    Lobpcg = RGMIN_EIGEN_LOBPCG,
+    Primme = RGMIN_EIGEN_PRIMME,
+    Slepc = RGMIN_EIGEN_SLEPC,
+    Chase = RGMIN_EIGEN_CHASE,
+    Elpa = RGMIN_EIGEN_ELPA,
+    Elpa2 = RGMIN_EIGEN_ELPA2,
+    Slate = RGMIN_EIGEN_SLATE,
+    Magma = RGMIN_EIGEN_MAGMA,
+    Cusolver = RGMIN_EIGEN_CUSOLVER,
+    DlaFuture = RGMIN_EIGEN_DLA_FUTURE,
+    EigenExa = RGMIN_EIGEN_EIGENEXA,
+    Dimer = RGMIN_EIGEN_DIMER,
+    Libkrylov = RGMIN_EIGEN_LIBKRYLOV,
+};
+
+struct EigenParams {
+    EigenKind kind = EigenKind::Lanczos;
+    uint32_t nev = 1;
+    uint32_t krylov = 0;
+    uint32_t max_iter = 0;
+    double tol = 0.0;
+};
+
+struct EigenOptions {
+    uint32_t degree = 0;
+    uint32_t extra = 0;
+};
+
+inline rgmin_lowest_mode_t lowest_eigenpair(
+    rgmin_hvp_fn hvp, void* user, const DLManagedTensorVersioned* x,
+    const DLManagedTensorVersioned* seed, DLManagedTensorVersioned* mode,
+    EigenParams const& params = {}, EigenOptions const& options = {}) {
+    rgmin_eigen_params_t c{static_cast<int32_t>(params.kind), params.nev,
+                           params.krylov, params.max_iter, params.tol};
+    rgmin_eigen_options_t extra{options.degree, options.extra};
+    rgmin_lowest_mode_t result{};
+    rgmin_status_t st = rgmin_lowest_eigenpair_with_options(
+        hvp, user, x, seed, mode, &c, &extra, &result);
+    if (st != RGMIN_SUCCESS) {
+        char const* msg = rgmin_last_error();
+        throw std::runtime_error(msg ? msg : "rgmin_lowest_eigenpair failed");
+    }
+    return result;
+}
+
 struct Control {
     std::size_t maxiter = 100;
     double gtol = 1e-8;
