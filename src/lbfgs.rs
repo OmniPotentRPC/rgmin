@@ -803,7 +803,16 @@ impl Lbfgs {
         } else {
             dir
         };
-        let open = self.opening_length(*istep, dir.view());
+        // A supplied direction (the box and trust QP step) is already a
+        // bounded displacement; only the raw two-loop direction needs its
+        // opening length bounded.
+        let open = if allow_restart {
+            self.opening_length(*istep, dir.view())
+        } else if self.memory.is_empty() {
+            *istep
+        } else {
+            1.0
+        };
         let t = take_step_with_options(
             obj,
             pos,
@@ -834,7 +843,7 @@ impl Lbfgs {
                 *value,
                 grad,
                 direction.view(),
-                self.opening_length(control.istep, direction.view()),
+                control.istep,
                 linesearch,
                 control,
                 atom_maxmove,
