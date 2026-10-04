@@ -178,13 +178,15 @@ fn means_vanish(m: usize, n: usize, rows: bool, a: &[f64]) -> bool {
     }
     if rows {
         for j in 0..n {
-            if col_mean(a, j, m, n).abs() > 1e-10 {
+            let mean = col_mean(a, j, m, n);
+            if !mean.is_finite() || mean.abs() > 1e-10 {
                 return false;
             }
         }
     } else {
         for i in 0..m {
-            if row_mean(a, i, n).abs() > 1e-10 {
+            let mean = row_mean(a, i, n);
+            if !mean.is_finite() || mean.abs() > 1e-10 {
                 return false;
             }
         }

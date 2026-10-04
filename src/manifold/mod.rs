@@ -53,8 +53,9 @@ mod symmetric;
 mod unitary;
 
 pub use centered::{
-    CenterMode, CenteredMatrix, inner as inner_centered, is_centered, pack as pack_centered,
-    typical_dist as typical_dist_centered, unpack as unpack_centered,
+    CenterMode, CenteredMatrix, inner as inner_centered, is_centered, is_centered_mode,
+    pack as pack_centered, typical_dist as typical_dist_centered,
+    typical_dist_mode as typical_dist_centered_mode, unpack as unpack_centered,
 };
 pub use complex_circle::ComplexCircle;
 pub use constant::{
