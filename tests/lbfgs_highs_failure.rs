@@ -48,3 +48,26 @@ fn callback_minimizers_do_not_take_an_unconstrained_fallback_step() {
         assert_eq!(opt.len(), 1);
     }
 }
+
+#[test]
+fn sphere_session_propagates_an_infeasible_model_without_a_trial() {
+    use rgmin::{Control, Error, ManifoldKind, Method, Oracle, Solver};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = AtomicUsize::new(0);
+    let objective = Oracle::unbounded(3, |x| {
+        calls.fetch_add(1, Ordering::Relaxed);
+        (-x[1], ndarray::array![0.0, -1.0, 0.0])
+    });
+    let mut solver = Solver::new(Method::lbfgs(), Control::default(), 3);
+    solver.set_manifold(ManifoldKind::Sphere);
+    solver.set_highs(true);
+    assert!(solver.add_equality(vec![(0, 1.0)], 0.0));
+    assert!(solver.add_equality(vec![(0, 1.0)], 1.0));
+    let mut point = ndarray::array![1.0, 0.0, 0.0];
+    let start = point.clone();
+    let result = solver.step(&objective, &mut point);
+    assert!(matches!(result, Err(Error::Highs(_))), "{result:?}");
+    assert_eq!(point, start);
+    assert_eq!(solver.pair_count(), 0);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+}

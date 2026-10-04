@@ -27,7 +27,7 @@ pub(crate) fn step<O>(
     linesearch: LineSearch,
     control: &Control,
     atom_maxmove: Option<f64>,
-) -> (Array1<f64>, f64, Array1<f64>)
+) -> crate::Result<(Array1<f64>, f64, Array1<f64>)>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -52,10 +52,8 @@ where
             length <= limit
         }
     };
-    let mut direction = Sphere.project(
-        origin,
-        &solver.search_direction(origin.view(), gradient.view()),
-    );
+    let raw_direction = solver.search_direction(origin.view(), gradient.view())?;
+    let mut direction = Sphere.project(origin, &raw_direction);
     if direction.dot(gradient) >= 0.0 {
         solver.forget();
         direction = -gradient;
@@ -68,7 +66,7 @@ where
     loop {
         let speed = nrm2(direction.view());
         if !speed.is_finite() || speed <= f64::MIN_POSITIVE {
-            return (origin.clone(), value, gradient.clone());
+            return Ok((origin.clone(), value, gradient.clone()));
         }
         let unit = &direction / speed;
         // With no curvature information, istep is an arc length. Scaling
@@ -115,7 +113,7 @@ where
         let alpha = parameter[0];
         if alpha == 0.0 {
             if solver.is_empty() {
-                return (origin.clone(), value, gradient.clone());
+                return Ok((origin.clone(), value, gradient.clone()));
             }
             solver.forget();
             direction = -gradient;
@@ -124,11 +122,11 @@ where
         }
         let angle = alpha * speed;
         if !angle.is_finite() || angle.abs() >= std::f64::consts::PI {
-            return (origin.clone(), value, gradient.clone());
+            return Ok((origin.clone(), value, gradient.clone()));
         }
         let (candidate, velocity) = geodesic(alpha);
         if objective.bounds().clip(candidate.view()) != candidate || !allowed_step(&candidate) {
-            return (origin.clone(), value, gradient.clone());
+            return Ok((origin.clone(), value, gradient.clone()));
         }
         let (point, f, rg) = if alpha == last.0 {
             (last.1, last.2, last.3)
@@ -139,13 +137,13 @@ where
             (point, f, rg)
         };
         if !f.is_finite() || !rg.iter().all(|g| g.is_finite()) || f > value {
-            return (origin.clone(), value, gradient.clone());
+            return Ok((origin.clone(), value, gradient.clone()));
         }
         solver.transport(|vector| transport(&unit, &velocity, vector));
         let displacement = (alpha * speed) * &velocity;
         let change = &rg - &transport(&unit, &velocity, gradient);
         solver.push_pair(displacement, change, Some(nrm2(rg.view())));
-        return (point, f, rg);
+        return Ok((point, f, rg));
     }
 }
 

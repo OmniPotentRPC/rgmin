@@ -1212,7 +1212,7 @@ impl Solver {
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
-                );
+                )?;
                 *x = point;
                 value = f;
                 grad = g;
