@@ -63,6 +63,7 @@ int rgmin_libkrylov_lowest(int64_t n, const double *seed, int64_t nev,
   char ortho_val[] = "o";
   char maxit_key[] = "max_iterations";
   char tol_key[] = "max_residual_norm";
+  char basis_tol_key[] = "min_basis_vector_norm";
   rgmin_libkrylov_ctx ctx;
   rgmin_libkrylov_ctx *prev;
 
@@ -105,6 +106,12 @@ int rgmin_libkrylov_lowest(int64_t n, const double *seed, int64_t nev,
   if (error == CKRYLOV_OK && tol > 0.0) {
     error = ckrylov_set_real_option(tol_key, (int_t)strlen(tol_key),
                                     (real_t)tol);
+  }
+  if (error == CKRYLOV_OK && tol > 0.0) {
+    /* A residual above the requested tolerance must remain eligible to
+     * extend the basis. The library default is an absolute 1e-8 cutoff. */
+    error = ckrylov_set_real_option(basis_tol_key, (int_t)strlen(basis_tol_key),
+                                    (real_t)(0.1 * tol));
   }
   if (error != CKRYLOV_OK) {
     ckrylov_finalize();
