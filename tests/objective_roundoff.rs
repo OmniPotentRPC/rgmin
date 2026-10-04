@@ -226,3 +226,24 @@ fn c_setter_rejects_bad_inputs_without_replacing_the_session() {
         rgmin_solver_free(session);
     }
 }
+
+#[test]
+fn a_decreasing_value_cannot_accept_a_nonfinite_gradient() {
+    for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for configured in [false, true] {
+            for slack in [None, Some(0.0)] {
+                let objective = rgmin::Oracle::unbounded(1, move |x: ArrayView1<f64>| {
+                    if x[0] == 0.0 { (1.0, array![1.0]) } else { (0.0, array![invalid]) }
+                });
+                let mut s = solver(slack);
+                if configured { assert!(s.set_objective_roundoff(1e-8)); }
+                let mut x = array![0.0];
+                let result = s.step(&objective, &mut x).unwrap();
+                assert_eq!(x, array![0.0]);
+                assert_eq!(result.value, 1.0);
+                assert_eq!(result.grad_norm, 1.0);
+                assert_eq!(s.pair_count(), 0);
+            }
+        }
+    }
+}

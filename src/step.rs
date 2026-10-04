@@ -208,6 +208,9 @@ where
         let (f, g) = obj.value_and_gradient(trial.view());
         (trial, f, g)
     };
+    if !f.is_finite() || g.iter().any(|value| !value.is_finite()) {
+        return unmoved();
+    }
     let accepted = match control.ftol_rel {
         Some(_) => f - value <= control.ftol_slack(value),
         None => {
