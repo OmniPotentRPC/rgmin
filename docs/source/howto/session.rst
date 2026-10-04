@@ -59,39 +59,33 @@ Setters
 
 .. table::
 
-    +--------------------------+----------------------------------------------------------------------+
-    | Setter                   | Role                                                                 |
-    +==========================+======================================================================+
-    | ``set_qn_step``          | Two-loop, Newton, or RFO when a host Hessian is present              |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``set_accept``           | ``none`` / ``energy`` / ``nonmonotone`` / ``step``                   |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``set_linesearch``       | Line search for the line-searched arms; default strong Wolfe         |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``set_fire_variant``     | FIRE schedule; ``Guenole2020`` is FIRE 2.0 as published              |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``forget_evaluation``    | Re-evaluate the next start, keep the method memory                   |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``set_atom_maxmove``     | Per-atom clip (preferred over a Euclidean cap)                       |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``set_project_rigid``    | Drop rigid modes on isolated clusters                                |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``set_lbfgs_neb_guards`` | L-BFGS distance, angle and curvature resets; empty-memory scale 0.01 |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``set_extra_updates``    | Accepted, no effect: a replayed newest pair leaves BFGS unchanged    |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``set_cautious``         | Li--Fukushima pair filter                                            |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``set_highs``            | Feasible-set QP; returns 1 without ``--features highs``              |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``set_manifold``         | Embedded geometry; ``rigid_quotient`` for 3N clusters                |
-    +--------------------------+----------------------------------------------------------------------+
-    | ``set_masses``           | Per-atom masses for ``mw_rigid`` (Page–McIver)                       |
-    +--------------------------+----------------------------------------------------------------------+
-
-The C entry of each setter is ``rgmin_solver_<setter>``.
-``rgmin_solver_forget_evaluation`` and ``rgmin_solver_set_lbfgs_neb_guards``
-need ``abi_minor`` 28.
+    +-----------------------+-------------------------------------------------------------------+
+    | Setter                | Role                                                              |
+    +=======================+===================================================================+
+    | ``set_qn_step``       | Two-loop, Newton, or RFO when a host Hessian is present           |
+    +-----------------------+-------------------------------------------------------------------+
+    | ``set_accept``        | ``none`` / ``energy`` / ``nonmonotone`` / ``step``                |
+    +-----------------------+-------------------------------------------------------------------+
+    | ``set_linesearch``    | Line search for the line-searched arms; default strong Wolfe      |
+    +-----------------------+-------------------------------------------------------------------+
+    | ``set_fire_variant``  | FIRE schedule; ``Guenole2020`` is FIRE 2.0 as published           |
+    +-----------------------+-------------------------------------------------------------------+
+    | ``forget_evaluation`` | Re-evaluate the next start, keep the method memory                |
+    +-----------------------+-------------------------------------------------------------------+
+    | ``set_atom_maxmove``  | Per-atom clip (preferred over a Euclidean cap)                    |
+    +-----------------------+-------------------------------------------------------------------+
+    | ``set_project_rigid`` | Drop rigid modes on isolated clusters                             |
+    +-----------------------+-------------------------------------------------------------------+
+    | ``set_extra_updates`` | Accepted, no effect: a replayed newest pair leaves BFGS unchanged |
+    +-----------------------+-------------------------------------------------------------------+
+    | ``set_cautious``      | Li--Fukushima pair filter                                         |
+    +-----------------------+-------------------------------------------------------------------+
+    | ``set_highs``         | Feasible-set QP; returns 1 without ``--features highs``           |
+    +-----------------------+-------------------------------------------------------------------+
+    | ``set_manifold``      | Embedded geometry; ``rigid_quotient`` for 3N clusters             |
+    +-----------------------+-------------------------------------------------------------------+
+    | ``set_masses``        | Per-atom masses for ``mw_rigid`` (Page–McIver)                    |
+    +-----------------------+-------------------------------------------------------------------+
 
 When to use ``rgmin_minimize`` instead
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
