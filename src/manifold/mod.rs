@@ -53,7 +53,7 @@ mod symmetric;
 mod unitary;
 
 pub use centered::{
-    CenteredMatrix, inner as inner_centered, is_centered, pack as pack_centered,
+    CenterMode, CenteredMatrix, inner as inner_centered, is_centered, pack as pack_centered,
     typical_dist as typical_dist_centered, unpack as unpack_centered,
 };
 pub use complex_circle::ComplexCircle;
@@ -97,7 +97,8 @@ pub use symmetric::{
     typical_dist as typical_dist_sym, unpack as unpack_sym,
 };
 pub use unitary::{
-    Unitary, is_unitary, pack as pack_unitary, side as side_unitary, unpack as unpack_unitary,
+    Unitary, inner as inner_unitary, is_unitary, pack as pack_unitary, side as side_unitary,
+    typical_dist as typical_dist_unitary, unpack as unpack_unitary,
 };
 
 /// Which embedded geometry a session retracts onto.
