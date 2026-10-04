@@ -233,6 +233,8 @@ int32_t rgmin_solver_set_box(rgmin_solver_t *solver, const double *lower,
                            const double *upper, size_t n);
 /** Model-step trust radius. Non-positive disables the radius. */
 int32_t rgmin_solver_set_trust(rgmin_solver_t *solver, double radius);
+/** Alias with the same radius and feature contract. */
+int32_t rgmin_solver_set_highs_trust(rgmin_solver_t *solver, double radius);
 /** Append a sparse equality a.p = rhs on the model and accepted displacement.
  *  A violating accepted displacement returns RGMIN_INVALID_PARAMETER, restores the start,
  *  and clears method memory. Residual tolerance is 1e-7 in row units plus

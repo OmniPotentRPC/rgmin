@@ -241,6 +241,11 @@ impl Solver {
         self.set_manifold(ManifoldKind::stiefel(n, p));
     }
 
+    /// Real Grassmann `Gr(n,p)`, packed column-major.
+    pub fn set_grassmann(&mut self, n: usize, p: usize) {
+        self.set_manifold(ManifoldKind::GrassmannP { n, p });
+    }
+
     /// Oblique \(\mathrm{OB}(n,m)\): product of `m` unit spheres in `R^n`.
     /// Packed column-major, length `n*m`.
     pub fn set_oblique(&mut self, n: usize, m: usize) {
@@ -448,6 +453,11 @@ impl Solver {
             self.set_highs(self.highs);
             true
         }
+    }
+
+    /// Alias for [`Self::set_trust`], with the same radius and feature contract.
+    pub fn set_highs_trust(&mut self, radius: f64) -> bool {
+        self.set_trust(radius)
     }
 
     /// Append a sparse linear equality on the model and accepted displacement.

@@ -148,6 +148,7 @@ typedef rgmin_status_t xts_status_t;
 #define xts_solver_set_extra_updates rgmin_solver_set_extra_updates
 #define xts_solver_set_fire_variant rgmin_solver_set_fire_variant
 #define xts_solver_set_trust rgmin_solver_set_trust
+#define xts_solver_set_highs_trust rgmin_solver_set_highs_trust
 #define xts_solver_add_equality rgmin_solver_add_equality
 #define xts_solver_clear_equalities rgmin_solver_clear_equalities
 #define xts_solver_set_highs rgmin_solver_set_highs

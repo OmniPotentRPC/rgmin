@@ -294,6 +294,7 @@ public:
         return rgmin_solver_search_direction(ptr_, grad, dir, n);
     }
     int set_trust(double radius) { return rgmin_solver_set_trust(ptr_, radius); }
+    int set_highs_trust(double radius) { return rgmin_solver_set_highs_trust(ptr_, radius); }
     int add_equality(std::size_t const* idx, double const* coef, std::size_t nnz,
                      double rhs) {
         return rgmin_solver_add_equality(ptr_, idx, coef, nnz, rhs);

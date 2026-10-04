@@ -1801,6 +1801,15 @@ pub unsafe extern "C" fn rgmin_solver_set_trust(solver: *mut rgmin_solver_t, rad
     }
 }
 
+/// Alias for [`rgmin_solver_set_trust`].
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_highs_trust(solver: *mut rgmin_solver_t, radius: f64) -> i32 {
+    unsafe { rgmin_solver_set_trust(solver, radius) }
+}
+
 /// Append a sparse linear equality on the model step.
 ///
 /// # Safety
