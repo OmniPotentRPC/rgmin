@@ -51,8 +51,8 @@ impl Manifold for RigidQuotient {
 
 #[cfg(test)]
 mod tests {
-    use crate::vecops::{self, Vector};
     use super::*;
+    use crate::vecops::{self, Vector};
     use ndarray::array;
 
     #[test]
@@ -95,5 +95,4 @@ mod tests {
     fn par_retract_stays_on_the_set() {
         retract_stays_on_the_set();
     }
-
 }

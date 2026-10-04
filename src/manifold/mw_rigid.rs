@@ -53,8 +53,8 @@ impl Manifold for MwRigid {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::array;
     use crate::vecops::{self, Vector};
+    use ndarray::array;
 
     #[test]
     fn retract_stays_on_the_set() {

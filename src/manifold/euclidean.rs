@@ -64,5 +64,4 @@ mod tests {
     fn par_retract_stays_on_the_euclidean_set() {
         retract_stays_on_the_euclidean_set();
     }
-
 }

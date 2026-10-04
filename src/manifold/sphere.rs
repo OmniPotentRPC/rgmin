@@ -93,5 +93,4 @@ mod tests {
     fn par_retract_stays_on_the_sphere() {
         retract_stays_on_the_sphere();
     }
-
 }
