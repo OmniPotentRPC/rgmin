@@ -146,6 +146,104 @@ fn bind_callback(
 }
 
 impl Lbfgs {
+    /// L-BFGS direction with explicit coordinate bounds, intersected with
+    /// the uniform bounds and step trust radius in [`HighsStep`].
+    ///
+    /// A missing or empty side is unbounded; one entry broadcasts to every
+    /// coordinate. Other sides have the same length as `x`. The starting
+    /// point must be finite and inside the coordinate box. Without linear
+    /// constraints, component projection preserves free coordinates and
+    /// falls back to projected steepest descent for a non-descent step.
+    /// Linear equalities and centering use the configured HiGHS projection;
+    /// their residual tolerance is `1e-7` in the units of each row.
+    pub fn highs_step_boxed(
+        &self,
+        x: ArrayView1<f64>,
+        g: ArrayView1<f64>,
+        lo: Option<&[f64]>,
+        hi: Option<&[f64]>,
+    ) -> Result<Array1<f64>> {
+        let opts = self.highs.as_ref().ok_or_else(|| {
+            Error::Highs("Lbfgs.highs is None; set HighsStep before highs_step_boxed".into())
+        })?;
+        let n = g.len();
+        if x.len() != n {
+            return Err(Error::Dim { got: x.len(), dim: n });
+        }
+        for side in [lo, hi].into_iter().flatten() {
+            if !side.is_empty() && side.len() != 1 && side.len() != n {
+                return Err(Error::Dim { got: side.len(), dim: n });
+            }
+        }
+        if x.iter().chain(g.iter()).any(|value| !value.is_finite())
+            || opts.lo.is_some_and(f64::is_nan)
+            || opts.hi.is_some_and(f64::is_nan)
+            || opts.trust.is_some_and(|radius| !radius.is_finite() || radius < 0.0)
+            || opts.center_axes.is_some_and(|(atoms, dim)| {
+                atoms == 0 || dim == 0 || atoms.checked_mul(dim) != Some(n)
+            })
+        {
+            return Err(Error::Highs("invalid bounded-step data".into()));
+        }
+        let mut lower = Array1::zeros(n);
+        let mut upper = Array1::zeros(n);
+        for k in 0..n {
+            let requested_low = crate::box_objective::side_at(lo, k).unwrap_or(f64::NEG_INFINITY);
+            let requested_high = crate::box_objective::side_at(hi, k).unwrap_or(f64::INFINITY);
+            if requested_low.is_nan() || requested_high.is_nan() {
+                return Err(Error::Highs("invalid coordinate box".into()));
+            }
+            let low = requested_low.max(opts.lo.unwrap_or(f64::NEG_INFINITY));
+            let high = requested_high.min(opts.hi.unwrap_or(f64::INFINITY));
+            if !(low <= x[k] && x[k] <= high) {
+                return Err(Error::Highs("point outside coordinate box".into()));
+            }
+            lower[k] = (low - x[k]).max(opts.trust.map_or(f64::NEG_INFINITY, |r| -r));
+            upper[k] = (high - x[k]).min(opts.trust.unwrap_or(f64::INFINITY));
+        }
+        let project = |direction: &mut Array1<f64>| {
+            for k in 0..n {
+                direction[k] = direction[k].clamp(lower[k], upper[k]);
+            }
+        };
+        let mut direction = self.direction(g);
+        if direction.iter().any(|value| !value.is_finite()) {
+            return Err(Error::Highs("non-finite L-BFGS direction".into()));
+        }
+        if !opts.needs_qp() && opts.center_axes.is_none() {
+            project(&mut direction);
+            if g.dot(&direction) >= 0.0 {
+                direction = g.mapv(|value| -value);
+                project(&mut direction);
+            }
+            return Ok(direction);
+        }
+        let bounds = eindir_core::Bounds::new(lower.clone(), upper.clone(), 0.0);
+        let mut step = highs_feasible_step_boxed(
+            Some(&direction), None, &g.to_owned(), None, None, opts.center_axes,
+            Some((Array1::zeros(n).view(), &bounds)), &opts.equalities, &self.highs_options,
+        )?;
+        if step.iter().any(|value| !value.is_finite()) {
+            return Err(Error::Highs("non-finite bounded step".into()));
+        }
+        project(&mut step);
+        for (row, rhs) in &opts.equalities {
+            let residual = row.iter().map(|(k, a)| a * step[*k]).sum::<f64>() - rhs;
+            if !residual.is_finite() || residual.abs() > EQUALITY_FEASIBILITY_TOLERANCE {
+                return Err(Error::Highs("bounded step violates a linear equality".into()));
+            }
+        }
+        if let Some((atoms, dim)) = opts.center_axes {
+            for axis in 0..dim {
+                let residual = (0..atoms).map(|atom| step[atom * dim + axis]).sum::<f64>();
+                if !residual.is_finite() || residual.abs() > EQUALITY_FEASIBILITY_TOLERANCE {
+                    return Err(Error::Highs("bounded step violates centering".into()));
+                }
+            }
+        }
+        Ok(step)
+    }
+
     /// L-BFGS direction at `x` with gradient `g`, projected if needed.
     pub fn highs_step(&self, x: ArrayView1<f64>, g: ArrayView1<f64>) -> Result<Array1<f64>> {
         let opts = self.highs.as_ref().ok_or_else(|| {
