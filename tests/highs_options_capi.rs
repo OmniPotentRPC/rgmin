@@ -4,7 +4,14 @@ use rgmin::ffi::*;
 
 #[test]
 fn optional_highs_policy_setters_report_build_availability() {
-    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, std::ptr::null(), 2) };
+    let control = rgmin_control_t {
+        maxiter: 100,
+        gtol: 1e-8,
+        istep: 1.0,
+        maxmove: 0.0,
+        memory: 10,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &control, 2) };
     assert!(!session.is_null());
     let expected = if cfg!(feature = "highs") { 0 } else { 1 };
     assert_eq!(
