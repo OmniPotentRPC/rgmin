@@ -25,6 +25,7 @@ use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
+use crate::quickmin::{QuickMinState, quickmin_displacement, quickmin_rescale_velocity};
 use crate::report::Report;
 use crate::rigid::{project_horizontal, project_out_rot_trans};
 use crate::step::{
@@ -123,6 +124,7 @@ enum Inner {
         kind: NewtonKind,
     },
     Fire(FireState, Option<Fire2Extras>),
+    QuickMin(QuickMinState),
     Bb {
         prev_s: Option<Array1<f64>>,
         prev_y: Option<Array1<f64>>,
@@ -701,6 +703,36 @@ impl Solver {
         }
     }
 
+    /// Split quick-min into an atomic block `[0, at)` and a cell block
+    /// `[at, n)`. Each block takes the reference projection on its own
+    /// force, so a cell velocity that opposes the stress is zeroed even
+    /// when the atoms keep the total power positive.
+    pub fn set_quickmin_cell(&mut self, at: usize) -> Result<()> {
+        if at == 0 || at >= self.dim {
+            return Err(Error::QuickMin {
+                what: "cell block must start after the atomic coordinates and before the end",
+            });
+        }
+        match &mut self.inner {
+            Inner::QuickMin(state) => {
+                state.cell_at = Some(at);
+                Ok(())
+            }
+            _ => Err(Error::QuickMin {
+                what: "cell block requires a quick-min session",
+            }),
+        }
+    }
+
+    /// Turn the FIRE time-step controller on or off. The reference
+    /// update is a fixed `dt` ([`crate::quickmin::quickmin_baseline`]).
+    /// A session that is not quick-min ignores the call.
+    pub fn set_quickmin_adapt(&mut self, enabled: bool) {
+        if let Inner::QuickMin(state) = &mut self.inner {
+            state.adapt_dt = enabled;
+        }
+    }
+
     /// Drop the cached evaluation and keep the method's memory.
     ///
     /// The next [`Self::step`] calls the oracle at its `x` even when `x`
@@ -818,6 +850,7 @@ impl Solver {
                     ext.steps = 0;
                 }
             }
+            Inner::QuickMin(state) => state.reset(),
             Inner::Bb { prev_s, prev_y } => {
                 *prev_s = None;
                 *prev_y = None;
@@ -1640,6 +1673,32 @@ impl Solver {
                 }
                 fire_after_v1(state, &force_new);
             }
+            Inner::QuickMin(state) => {
+                #[allow(unused_mut)]
+                let mut force = grad.mapv(|g| -g);
+                #[cfg(feature = "highs")]
+                if boxed {
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                }
+                let dx = quickmin_displacement(state, &force);
+                let mut trial = &*x + &dx;
+                if let Some(cap) = self.atom_maxmove {
+                    scale_step_atom(x, &mut trial, cap);
+                } else if let Some(cap) = self.control.maxmove {
+                    scale_step(x, &mut trial, cap);
+                }
+                trial = obj.bounds().clip(trial.view());
+                quickmin_rescale_velocity(&mut state.vel, &dx, &(&trial - &*x));
+                *x = trial;
+                let ev = obj.value_and_gradient(x.view());
+                value = ev.0;
+                grad = ev.1;
+                #[cfg(feature = "highs")]
+                if boxed {
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                }
+            }
             Inner::Bb { prev_s, prev_y } => {
                 let dir = bb_direction(prev_s.as_ref(), prev_y.as_ref(), &grad, self.istep);
                 let old = x.clone();
@@ -1921,6 +1980,7 @@ impl Inner {
             },
             Method::Newton { kind } => Inner::Newton { kind: *kind },
             Method::Fire { kind } => Inner::Fire(FireState::new(*kind, dim, istep), None),
+            Method::QuickMin => Inner::QuickMin(QuickMinState::new(dim, istep)),
             Method::Bb => Inner::Bb {
                 prev_s: None,
                 prev_y: None,

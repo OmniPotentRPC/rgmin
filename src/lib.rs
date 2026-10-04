@@ -81,6 +81,8 @@ mod qn;
 /// Sella QuasiNewton / QuasiNewtonIRC restricted step.
 pub mod qn_irc;
 mod qn_step;
+/// Quick-min projection and Euler step.
+pub mod quickmin;
 mod report;
 mod restricted_trust;
 mod rigid;
@@ -141,6 +143,10 @@ pub use qn_irc::{
     qn_irc_restricted_identity, qn_restricted, to_mw,
 };
 pub use qn_step::QnStep;
+pub use quickmin::{
+    QuickMinState, quickmin_baseline, quickmin_displacement, quickmin_project,
+    quickmin_rescale_velocity,
+};
 pub use report::Report;
 pub use scg::{
     DirectionalCurvature, ScgOptions, ScgParams, ScgStepTolerance, minimize_scg,

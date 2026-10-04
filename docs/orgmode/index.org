@@ -82,6 +82,7 @@ cargo test --features capi
    :caption: Explanation
 
    explanation/linesearch
+   explanation/quickmin
    explanation/quasi-newton
    explanation/trust-region
    explanation/scg
