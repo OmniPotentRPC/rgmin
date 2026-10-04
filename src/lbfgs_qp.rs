@@ -122,6 +122,11 @@ fn bind_callback(
     let Some(binding) = options.callback else {
         return Ok(());
     };
+    // Model construction disables output, including the logging callback.
+    // Callback delivery needs output enabled; console logging stays off.
+    model
+        .try_set_option("output_flag", true)
+        .map_err(|_| Error::Highs("cannot enable callback output".into()))?;
     *owner = Some(Box::new(binding));
     let ptr = model.as_mut_ptr();
     let context = owner.as_mut().unwrap().as_mut() as *mut HighsCallback;
@@ -598,9 +603,6 @@ fn dense_csc(h: &Array2<f64>) -> (Vec<HighsInt>, Vec<HighsInt>, Vec<f64>) {
             }
         }
         start.push(value.len() as HighsInt);
-    }
-    if value.is_empty() {
-        return identity_csc(n);
     }
     (start, index, value)
 }

@@ -454,3 +454,21 @@ fn interrupting_the_linear_model_keeps_the_accepted_point() {
     assert!(report.value < 0.0, "{report:?}");
     assert!(point.iter().all(|v| v.abs() <= 0.1 + 1e-7));
 }
+
+
+#[test]
+fn a_zero_hessian_preserves_the_linear_model() {
+    use ndarray::{Array2, array};
+    let gradient = array![-0.2];
+    let hessian = Array2::zeros((1, 1));
+    let step = rgmin::lbfgs_qp::highs_feasible_step_with_options(
+        None,
+        Some(&hessian),
+        &gradient,
+        None,
+        Some(1.0),
+        None,
+        &rgmin::HighsOptions::default(),
+    ).unwrap();
+    assert!((step[0] - 1.0).abs() < 1e-7, "linear minimum {step:?}");
+}
