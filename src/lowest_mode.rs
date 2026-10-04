@@ -1282,6 +1282,47 @@ mod tests {
     use crate::hvp::HvpOracle;
     use ndarray::array;
 
+    #[cfg(rgmin_has_slepc)]
+    struct SlepcTestHost;
+
+    #[cfg(rgmin_has_slepc)]
+    #[link(name = "slepc")]
+    unsafe extern "C" {
+        fn SlepcInitializeNoArguments() -> std::ffi::c_int;
+        fn SlepcFinalize() -> std::ffi::c_int;
+    }
+
+    #[cfg(rgmin_has_slepc)]
+    impl Drop for SlepcTestHost {
+        fn drop(&mut self) {
+            assert_eq!(unsafe { SlepcFinalize() }, 0);
+        }
+    }
+
+    // Each host owns one initialization/finalization pair. Child processes
+    // keep MPI state independent of concurrently executing Rust tests.
+    #[cfg(rgmin_has_slepc)]
+    fn slepc_test_host(test: &str) -> Option<SlepcTestHost> {
+        const CASE: &str = "RGMIN_SLEPC_TEST_HOST";
+        if std::env::var(CASE).ok().as_deref() == Some(test) {
+            assert_eq!(unsafe { SlepcInitializeNoArguments() }, 0);
+            return Some(SlepcTestHost);
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test, "--test-threads=1", "--nocapture"])
+            .env(CASE, test)
+            .output()
+            .expect("run SLEPc host test");
+        assert!(
+            output.status.success(),
+            "SLEPc host failed: {}\n{}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        None
+    }
+
     fn gapped_diag(
         n: usize,
     ) -> HvpOracle<
@@ -1799,6 +1840,11 @@ mod tests {
 
     #[test]
     fn unlinked_kinds_fail_closed() {
+        #[cfg(rgmin_has_slepc)]
+        let _host = match slepc_test_host("lowest_mode::tests::unlinked_kinds_fail_closed") {
+            Some(host) => host,
+            None => return,
+        };
         let h = gapped_diag(4);
         let x = Array1::zeros(4);
         let seed = array![1.0, 0.0, 0.0, 0.0];
@@ -1892,6 +1938,11 @@ mod tests {
     #[cfg(rgmin_has_slepc)]
     #[test]
     fn slepc_recovers_the_gapped_mode() {
+        #[cfg(rgmin_has_slepc)]
+        let _host = match slepc_test_host("lowest_mode::tests::slepc_recovers_the_gapped_mode") {
+            Some(host) => host,
+            None => return,
+        };
         let n = 32;
         let h = gapped_diag(n);
         let x = Array1::zeros(n);
