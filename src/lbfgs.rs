@@ -147,7 +147,11 @@ impl Lbfgs {
         }
     }
 
-    pub(crate) fn search_direction(&self, x: ArrayView1<f64>, g: ArrayView1<f64>) -> Result<Array1<f64>> {
+    pub(crate) fn search_direction(
+        &self,
+        x: ArrayView1<f64>,
+        g: ArrayView1<f64>,
+    ) -> Result<Array1<f64>> {
         #[cfg(feature = "highs")]
         if self.highs.is_some() {
             return self.highs_step(x, g);

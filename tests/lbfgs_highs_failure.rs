@@ -34,7 +34,8 @@ fn callback_minimizers_do_not_take_an_unconstrained_fallback_step() {
             Some((0.5 * x.dot(&x), x.to_owned()))
         };
         let (value, x, count) = if recognized {
-            let (value, x, count, reused) = opt.minimize_recognized(initial.view(), 4, objective, |_, _, _| None);
+            let (value, x, count, reused) =
+                opt.minimize_recognized(initial.view(), 4, objective, |_, _, _| None);
             assert!(!reused);
             (value, x, count)
         } else {
