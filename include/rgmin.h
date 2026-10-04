@@ -9,6 +9,9 @@ extern "C" {
 #include <stdint.h>
 #include <dlpack/dlpack.h>
 
+/* DLPack exposes the versioned tensor through a struct tag in C. */
+typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
+
 /* The direct eindir entry point only needs opaque handles here. Consumers
  * that use eindir_core's constructors can include its full header first. */
 #if defined(__has_include)
