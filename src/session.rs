@@ -27,7 +27,7 @@ use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessia
 use crate::qn_step::QnStep;
 use crate::report::Report;
 use crate::rigid::{project_horizontal, project_out_rot_trans};
-use crate::step::{l2, next_istep, qn_istep, scale_step, scale_step_atom, take_step};
+use crate::step::{Taken, l2, next_istep, qn_istep, scale_step, scale_step_atom, take_step};
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
 };
@@ -1355,7 +1355,7 @@ impl Solver {
             }
             Inner::Steepest => {
                 let dir = grad.mapv(|g| -g);
-                let t = take_step(
+                let t = take_session_step(
                     obj,
                     x,
                     value,
@@ -1365,11 +1365,17 @@ impl Solver {
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
+                    self.accept,
+                    &mut self.e_hist,
+                    self.manifold,
+                    self.istep,
                 );
                 *x = t.x;
                 value = t.f;
                 grad = t.g;
-                self.istep = qn_istep(&self.control);
+                if self.accept != Accept::Step {
+                    self.istep = qn_istep(&self.control);
+                }
             }
             Inner::Nlcg {
                 conjugacy,
@@ -1380,12 +1386,12 @@ impl Solver {
                 initialized,
             } => {
                 if !*initialized {
-                    *dir = grad.mapv(|g| -g);
+                    *dir = if self.accept == Accept::Step { grad.mapv(|g| -g * self.istep) } else { grad.mapv(|g| -g) };
                     *g_old = grad.clone();
                     *d_old = dir.clone();
                     *initialized = true;
                 }
-                let t = take_step(
+                let t = take_session_step(
                     obj,
                     x,
                     value,
@@ -1395,29 +1401,37 @@ impl Solver {
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
+                    self.accept,
+                    &mut self.e_hist,
+                    self.manifold,
+                    1.0,
                 );
                 *x = t.x;
                 value = t.f;
                 grad = t.g;
-                let ctx = ConjugacyContext {
-                    current_gradient: grad.view(),
-                    previous_gradient: g_old.view(),
-                    previous_direction: d_old.view(),
-                };
-                let mut beta = conjugacy.beta(&ctx);
-                if restart.should_restart(&ctx) {
-                    beta = 0.0;
+                if t.moved || self.accept != Accept::Step {
+                    let ctx = ConjugacyContext {
+                        current_gradient: grad.view(),
+                        previous_gradient: g_old.view(),
+                        previous_direction: d_old.view(),
+                    };
+                    let mut beta = conjugacy.beta(&ctx);
+                    if restart.should_restart(&ctx) {
+                        beta = 0.0;
+                    }
+                    *dir = if self.accept == Accept::Step { Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g * self.istep + beta * d)) } else { Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d)) };
+                    g_old.assign(&grad);
+                    d_old.assign(dir);
                 }
-                *dir = Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d));
-                g_old.assign(&grad);
-                d_old.assign(dir);
-                self.istep = qn_istep(&self.control);
+                if self.accept != Accept::Step {
+                    self.istep = qn_istep(&self.control);
+                }
             }
             Inner::Bfgs { h } => {
                 let direction = -h.dot(&grad);
                 let old = x.clone();
                 let gold = grad.clone();
-                let t = take_step(
+                let t = take_session_step(
                     obj,
                     x,
                     value,
@@ -1427,6 +1441,10 @@ impl Solver {
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
+                    self.accept,
+                    &mut self.e_hist,
+                    self.manifold,
+                    1.0,
                 );
                 let moved = t.moved;
                 *x = t.x;
@@ -1435,13 +1453,15 @@ impl Solver {
                 if moved {
                     bfgs_inverse_update(h, &(&*x - &old), &(&grad - &gold));
                 }
-                self.istep = qn_istep(&self.control);
+                if self.accept != Accept::Step {
+                    self.istep = qn_istep(&self.control);
+                }
             }
             Inner::Sr1 { h } => {
                 let direction = -h.dot(&grad);
                 let old = x.clone();
                 let gold = grad.clone();
-                let t = take_step(
+                let t = take_session_step(
                     obj,
                     x,
                     value,
@@ -1451,6 +1471,10 @@ impl Solver {
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
+                    self.accept,
+                    &mut self.e_hist,
+                    self.manifold,
+                    1.0,
                 );
                 let lsstep = t.alpha;
                 let moved = t.moved;
@@ -1460,14 +1484,16 @@ impl Solver {
                 if moved {
                     sr1_inverse_update(h, &(&*x - &old), &(&grad - &gold));
                 }
-                self.istep = next_istep(lsstep, &self.control);
+                if self.accept != Accept::Step {
+                    self.istep = next_istep(lsstep, &self.control);
+                }
             }
             Inner::Sr2 { b } => {
                 let rhs = grad.mapv(|g| -g);
                 let direction = solve_dense(b, &rhs).unwrap_or(rhs);
                 let old = x.clone();
                 let gold = grad.clone();
-                let t = take_step(
+                let t = take_session_step(
                     obj,
                     x,
                     value,
@@ -1477,6 +1503,10 @@ impl Solver {
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
+                    self.accept,
+                    &mut self.e_hist,
+                    self.manifold,
+                    1.0,
                 );
                 let lsstep = t.alpha;
                 let moved = t.moved;
@@ -1486,7 +1516,9 @@ impl Solver {
                 if moved {
                     sr2_hessian_update(b, &(&*x - &old), &(&grad - &gold));
                 }
-                self.istep = next_istep(lsstep, &self.control);
+                if self.accept != Accept::Step {
+                    self.istep = next_istep(lsstep, &self.control);
+                }
             }
             Inner::Adam {
                 m,
@@ -1498,7 +1530,7 @@ impl Solver {
                 eps,
             } => {
                 let dir = adam_direction(m, v, &grad, *beta1, *beta2, *b1p, *b2p, *eps);
-                let t = take_step(
+                let t = take_session_step(
                     obj,
                     x,
                     value,
@@ -1508,6 +1540,10 @@ impl Solver {
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
+                    self.accept,
+                    &mut self.e_hist,
+                    self.manifold,
+                    self.istep,
                 );
                 let lsstep = t.alpha;
                 *x = t.x;
@@ -1515,7 +1551,9 @@ impl Solver {
                 grad = t.g;
                 *b1p *= *beta1;
                 *b2p *= *beta2;
-                self.istep = next_istep(lsstep, &self.control);
+                if self.accept != Accept::Step {
+                    self.istep = next_istep(lsstep, &self.control);
+                }
             }
             Inner::Fire(state, ext) => {
                 let mut force = grad.mapv(|g| -g);
@@ -1582,10 +1620,12 @@ impl Solver {
         // round trip start + (x - start) only adds rounding (one ulp of
         // a 30 Angstrom coordinate is 3.6e-15) and would buy a second
         // oracle call at the same geometry.
-        // BB and direct L-BFGS evaluate the retracted point in accept_step.
+        // BB and the direct first-order routes evaluate the retracted point.
         // A nonlinear retraction applied to its chord is a different point.
         let already_retracted = matches!(&self.inner, Inner::Bb { .. })
-            || (matches!(&self.inner, Inner::Lbfgs(_)) && self.accept == Accept::Step);
+            || (self.accept == Accept::Step
+                && matches!(&self.inner, Inner::Lbfgs(_) | Inner::Steepest | Inner::Nlcg { .. }
+                    | Inner::Bfgs { .. } | Inner::Sr1 { .. } | Inner::Sr2 { .. } | Inner::Adam { .. }));
         let y = if already_retracted || self.manifold.retract_is_translation() {
             None
         } else {
@@ -1709,6 +1749,27 @@ impl Solver {
         }
         unreachable!("PSO slot populated above")
     }
+}
+
+// The explicit step policy uses the method's direction and scale once.
+// Other policies retain the configured line search and its initial step.
+#[allow(clippy::too_many_arguments)]
+fn take_session_step<O>(
+    obj: &O, pos: &Array1<f64>, value: f64, grad: &Array1<f64>,
+    dir: ArrayView1<'_, f64>, istep: f64, linesearch: LineSearch,
+    control: &Control, atom_maxmove: Option<f64>, accept: Accept,
+    e_hist: &mut VecDeque<f64>, manifold: ManifoldKind, direct_scale: f64,
+) -> Taken
+where O: DifferentiableObjective<f64> + ?Sized,
+{
+    if accept != Accept::Step {
+        return take_step(obj, pos, value, grad, dir, istep, linesearch, control, atom_maxmove);
+    }
+    let direction = if direct_scale == 1.0 { dir.to_owned() } else { &dir * direct_scale };
+    let (x, f, g, moved) = accept_step(
+        obj, pos, value, grad, &direction, control, accept, e_hist, atom_maxmove, manifold,
+    );
+    Taken { x, f, g, alpha: if moved { direct_scale } else { 0.0 }, moved }
 }
 
 impl Inner {

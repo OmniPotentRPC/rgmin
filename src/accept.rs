@@ -109,6 +109,9 @@ where
         Accept::None | Accept::Step => {
             let trial = trial_point(obj, pos, dir, 1.0, control, atom_maxmove, manifold);
             let (ft, gt) = obj.value_and_gradient(trial.view());
+            if !ft.is_finite() || gt.iter().any(|g| !g.is_finite()) {
+                return (pos.clone(), value, grad.clone(), false);
+            }
             push_energy(e_hist, ft);
             (trial, ft, gt, true)
         }
@@ -126,7 +129,7 @@ where
             for _ in 0..10 {
                 let trial = trial_point(obj, pos, dir, alpha, control, atom_maxmove, manifold);
                 let (ft, gt) = obj.value_and_gradient(trial.view());
-                if ft - ref_e <= rise {
+                if ft.is_finite() && gt.iter().all(|g| g.is_finite()) && ft - ref_e <= rise {
                     push_energy(e_hist, ft);
                     return (trial, ft, gt, true);
                 }
@@ -146,7 +149,7 @@ where
             let sd = grad.mapv(|g| -g);
             let trial = trial_point(obj, pos, &sd, 0.1, control, atom_maxmove, manifold);
             let (ft, gt) = obj.value_and_gradient(trial.view());
-            if ft - ref_e <= rise {
+            if ft.is_finite() && gt.iter().all(|g| g.is_finite()) && ft - ref_e <= rise {
                 push_energy(e_hist, ft);
                 return (trial, ft, gt, true);
             }
