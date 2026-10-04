@@ -1,8 +1,10 @@
 use ndarray::{Array1, array};
-use rgmin::{IrcTrust, Manifold, Grassmann};
-use rgmin::manifold::{CenteredMatrix, Euclidean, EuclideanComplex, MwRigid, RigidQuotient,
-    Spd, Sphere, is_centered, is_spd, inner_cplx as inner, typical_dist_cplx as typical_dist};
+use rgmin::manifold::{
+    CenteredMatrix, Euclidean, EuclideanComplex, MwRigid, RigidQuotient, Spd, Sphere,
+    inner_cplx as inner, is_centered, is_spd, typical_dist_cplx as typical_dist,
+};
 use rgmin::vecops;
+use rgmin::{Grassmann, IrcTrust, Manifold};
 
 #[test]
 fn irc_trust_is_not_the_unit_sphere() {
@@ -52,50 +54,50 @@ fn centered_matrix_retract_stays_on_the_set() {
 
 #[test]
 fn project_and_transport_are_identity() {
-        let m = EuclideanComplex { n: 2 };
-        let x = array![1.0, 0.0, 0.0, 1.0];
-        let y = array![0.5, -0.5, 1.0, 0.0];
-        let v = array![0.2, 0.3, -0.1, 0.4];
-        let t = m.project(&x, &v);
-        assert!((&t - &v).mapv(f64::abs).sum() < 1e-15);
-        let w = m.transport(&x, &y, &v);
-        assert!((&w - &v).mapv(f64::abs).sum() < 1e-15);
-    }
+    let m = EuclideanComplex { n: 2 };
+    let x = array![1.0, 0.0, 0.0, 1.0];
+    let y = array![0.5, -0.5, 1.0, 0.0];
+    let v = array![0.2, 0.3, -0.1, 0.4];
+    let t = m.project(&x, &v);
+    assert!((&t - &v).mapv(f64::abs).sum() < 1e-15);
+    let w = m.transport(&x, &y, &v);
+    assert!((&w - &v).mapv(f64::abs).sum() < 1e-15);
+}
 
 #[test]
 fn inner_is_the_real_product() {
-        let u = array![1.0, 2.0, -0.5, 0.5];
-        let v = array![0.5, -1.0, 2.0, 4.0];
-        // 1*0.5 + 2*(-1) + (-0.5)*2 + 0.5*4 = 0.5 - 2 - 1 + 2 = -0.5
-        assert!((inner(&u, &v) + 0.5).abs() < 1e-15);
-        assert!((typical_dist(4) - 2.0).abs() < 1e-15);
-        assert!((vecops::nrm2(u.view()) - inner(&u, &u).sqrt()).abs() < 1e-15);
-    }
+    let u = array![1.0, 2.0, -0.5, 0.5];
+    let v = array![0.5, -1.0, 2.0, 4.0];
+    // 1*0.5 + 2*(-1) + (-0.5)*2 + 0.5*4 = 0.5 - 2 - 1 + 2 = -0.5
+    assert!((inner(&u, &v) + 0.5).abs() < 1e-15);
+    assert!((typical_dist(4) - 2.0).abs() < 1e-15);
+    assert!((vecops::nrm2(u.view()) - inner(&u, &u).sqrt()).abs() < 1e-15);
+}
 
 #[test]
 fn not_the_sphere_and_not_complex_circle() {
-        let m = EuclideanComplex { n: 2 };
-        let x = array![2.0, 0.0, 0.0, 2.0];
-        let y = m.retract(&x, &Array1::zeros(4));
-        let n0 = (y[0] * y[0] + y[1] * y[1]).sqrt();
-        let n1 = (y[2] * y[2] + y[3] * y[3]).sqrt();
-        assert!((n0 - 1.0).abs() > 0.5, "must not force S^1 {y:?}");
-        assert!((n1 - 1.0).abs() > 0.5, "must not force S^1 {y:?}");
-        let fro = vecops::nrm2(y.view());
-        assert!((fro - 1.0).abs() > 1.0, "must not be S^3 {y:?}");
-        assert_ne!(
-            rgmin::manifold::ManifoldKind::EuclideanComplex { n: 2 },
-            rgmin::manifold::ManifoldKind::Sphere
-        );
-        assert_ne!(
-            rgmin::manifold::ManifoldKind::EuclideanComplex { n: 2 },
-            rgmin::manifold::ManifoldKind::ComplexCircle { n: 2 }
-        );
-        assert_ne!(
-            rgmin::manifold::ManifoldKind::EuclideanComplex { n: 2 },
-            rgmin::manifold::ManifoldKind::Euclidean
-        );
-    }
+    let m = EuclideanComplex { n: 2 };
+    let x = array![2.0, 0.0, 0.0, 2.0];
+    let y = m.retract(&x, &Array1::zeros(4));
+    let n0 = (y[0] * y[0] + y[1] * y[1]).sqrt();
+    let n1 = (y[2] * y[2] + y[3] * y[3]).sqrt();
+    assert!((n0 - 1.0).abs() > 0.5, "must not force S^1 {y:?}");
+    assert!((n1 - 1.0).abs() > 0.5, "must not force S^1 {y:?}");
+    let fro = vecops::nrm2(y.view());
+    assert!((fro - 1.0).abs() > 1.0, "must not be S^3 {y:?}");
+    assert_ne!(
+        rgmin::manifold::ManifoldKind::EuclideanComplex { n: 2 },
+        rgmin::manifold::ManifoldKind::Sphere
+    );
+    assert_ne!(
+        rgmin::manifold::ManifoldKind::EuclideanComplex { n: 2 },
+        rgmin::manifold::ManifoldKind::ComplexCircle { n: 2 }
+    );
+    assert_ne!(
+        rgmin::manifold::ManifoldKind::EuclideanComplex { n: 2 },
+        rgmin::manifold::ManifoldKind::Euclidean
+    );
+}
 
 #[test]
 fn rigid_quotient_retract_stays_on_the_set() {
@@ -146,11 +148,15 @@ fn grassmann_retract_stays_orthonormal_and_is_not_the_sphere() {
     let y = gr.retract(&x, &v);
     let n0: f64 = y.iter().take(4).map(|a| a * a).sum();
     let n1: f64 = y.iter().skip(4).map(|a| a * a).sum();
-    let d: f64 = y.iter().take(4).zip(y.iter().skip(4)).map(|(a, b)| a * b).sum();
+    let d: f64 = y
+        .iter()
+        .take(4)
+        .zip(y.iter().skip(4))
+        .map(|(a, b)| a * b)
+        .sum();
     assert!((n0 - 1.0).abs() < 1e-12);
     assert!((n1 - 1.0).abs() < 1e-12);
     assert!(d.abs() < 1e-12);
     let nrm = y.iter().map(|a| a * a).sum::<f64>().sqrt();
     assert!((nrm - 1.0).abs() > 1e-6);
 }
-

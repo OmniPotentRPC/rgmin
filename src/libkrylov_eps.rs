@@ -27,7 +27,9 @@ struct ActiveCall;
 impl ActiveCall {
     fn enter() -> Result<Self> {
         if LIBKRYLOV_ACTIVE.with(|active| active.replace(true)) {
-            Err(Error::Libkrylov { what: "recursive eigensolver call" })
+            Err(Error::Libkrylov {
+                what: "recursive eigensolver call",
+            })
         } else {
             Ok(Self)
         }

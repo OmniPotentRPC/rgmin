@@ -2,15 +2,21 @@ use eindir_core::objectives::Rosenbrock;
 use ndarray::{Array1, array};
 use rgmin::{Control, Method, Solver};
 fn control() -> Control {
-    Control { maxiter: 80, gtol: 1e-8, istep: 0.1, maxmove: None, ftol_rel: None }
+    Control {
+        maxiter: 80,
+        gtol: 1e-8,
+        istep: 0.1,
+        maxmove: None,
+        ftol_rel: None,
+    }
 }
 
 #[test]
 fn spd_session_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::manifold::is_spd;
     use rgmin::ManifoldKind;
+    use rgmin::manifold::is_spd;
 
     struct FrobeniusI;
     impl Objective<f64> for FrobeniusI {
@@ -177,4 +183,3 @@ fn grassmann_rejects_a_3n_cluster() {
         other => panic!("expected ManifoldDim, got {other:?}"),
     }
 }
-
