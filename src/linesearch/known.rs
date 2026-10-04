@@ -124,13 +124,30 @@ impl End {
 
 /// Next zoom trial: the safeguarded cubic, then the quadratic, then the
 /// midpoint, clamped to the central 80 percent of the bracket.
+///
+/// Interpolation needs a model that holds across the bracket. A cubic
+/// through `(lo, hi)` is trusted when
+///
+/// `|f(hi) - f(lo)| <= 1e3 (1 + |f(lo)| + |phi'(lo)| (hi - lo))`.
+///
+/// The right side is the value scale of the bracket: the start's own
+/// magnitude plus the change a unit-curvature model predicts from the
+/// slope over the bracket width. When the far end is non-finite or above
+/// that scale by many orders, the fit carries no information about the
+/// minimizer, so the trial is the midpoint.
 fn zoom_trial(lo: &End, hi: &End) -> f64 {
     let w = hi.a - lo.a;
     let inner_lo = lo.a + 0.1 * w;
     let inner_hi = hi.a - 0.1 * w;
-    let t = cubic_min(lo.a, lo.f, lo.d, hi.a, hi.f, hi.d)
-        .or_else(|| quad_min(lo.a, lo.f, lo.d, hi.a, hi.f))
-        .unwrap_or(0.5 * (lo.a + hi.a));
+    let scale = 1.0 + lo.f.abs() + lo.d.abs() * w.abs();
+    let model_holds = hi.f.is_finite() && (hi.f - lo.f).abs() <= 1e3 * scale;
+    let t = if model_holds {
+        cubic_min(lo.a, lo.f, lo.d, hi.a, hi.f, hi.d)
+            .or_else(|| quad_min(lo.a, lo.f, lo.d, hi.a, hi.f))
+            .unwrap_or(0.5 * (lo.a + hi.a))
+    } else {
+        0.5 * (lo.a + hi.a)
+    };
     clamp_between(t, inner_lo, inner_hi)
 }
 
@@ -556,6 +573,49 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn zoom_bisects_when_the_far_value_carries_no_information() {
+        let lo = End {
+            a: 0.0,
+            f: -24.6,
+            d: -1.0e3,
+            p: None,
+        };
+        let hi = End {
+            a: 1.0,
+            f: 4.0e45,
+            d: 1.0e46,
+            p: None,
+        };
+        assert_eq!(zoom_trial(&lo, &hi), 0.5);
+        let hi = End {
+            a: 1.0,
+            f: f64::INFINITY,
+            d: f64::NAN,
+            p: None,
+        };
+        assert_eq!(zoom_trial(&lo, &hi), 0.5);
+    }
+
+    #[test]
+    fn zoom_interpolates_when_the_values_are_commensurate() {
+        // phi(a) = (a - 0.3)^2 has its minimum at 0.3; the cubic finds it.
+        let lo = End {
+            a: 0.0,
+            f: 0.09,
+            d: -0.6,
+            p: None,
+        };
+        let hi = End {
+            a: 1.0,
+            f: 0.49,
+            d: 1.4,
+            p: None,
+        };
+        let t = zoom_trial(&lo, &hi);
+        assert!((t - 0.3).abs() < 1e-12, "trial {t}");
+    }
+
     use super::*;
     use ndarray::array;
     use std::cell::Cell;

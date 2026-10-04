@@ -106,6 +106,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The line-search zoom bisects when the far end of the bracket has a
+  non-finite value or one more than `1e3 (1 + |f(lo)|)` above the near
+  end. Cubic and quadratic interpolation of such a value drove the trial
+  to the clamp of the bracket and accepted a different first step than
+  bisection, for an unscaled gradient step with a huge opening value.
+
 - A first-order L-BFGS session pushes the secant of a displacement the
   caller made between steps, transported like an accepted step, on
   translation manifolds. `rebase` and `forget_evaluation` still drop it.

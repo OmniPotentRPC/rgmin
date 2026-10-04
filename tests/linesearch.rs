@@ -190,3 +190,35 @@ fn goldstein_backtracking_descends() {
     .unwrap();
     assert!(report.value < f0, "Goldstein {} -> {}", f0, report.value);
 }
+
+#[test]
+fn a_huge_opening_value_zooms_by_bisection() {
+    // phi(a) = -a + 1e45 a^12: the unit opening trial is astronomically
+    // high, so the first zoom trials halve the bracket instead of
+    // interpolating a value that says nothing about the minimum.
+    let pos = array![0.0];
+    let dir = array![1.0];
+    let g0 = array![-1.0];
+    let mut alphas = Vec::new();
+    let out = LineSearch::Wolfe {
+        c1: 1e-4,
+        c2: 0.9,
+        maxiter: 40,
+    }
+    .search_from(
+        |x: ArrayView1<f64>| {
+            alphas.push(x[0]);
+            let a = x[0];
+            (-a + 1e45 * a.powi(12), array![-1.0 + 12e45 * a.powi(11)])
+        },
+        pos.view(),
+        0.0,
+        g0.view(),
+        dir.view(),
+        1.0,
+        f64::INFINITY,
+    )
+    .expect("a step");
+    assert_eq!(alphas[..3], [1.0, 0.5, 0.25]);
+    assert!(out.f < 0.0);
+}
