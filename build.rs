@@ -271,7 +271,10 @@ fn discover_chase() -> Option<ChaseProbe> {
         if let Ok(lib) = pkg_config::Config::new().cargo_metadata(false).probe(name) {
             // ChASE's package can describe only its headers. The adapter
             // needs the compiled C interface that exports dchase_init_.
-            let interface = lib.link_paths.iter().find_map(|path| chase_library_in(path));
+            let interface = lib
+                .link_paths
+                .iter()
+                .find_map(|path| chase_library_in(path));
             if let Some(interface) = interface {
                 let mut link_libs = lib.libs;
                 if !link_libs.iter().any(|name| name == interface) {
@@ -301,9 +304,9 @@ fn discover_chase() -> Option<ChaseProbe> {
 #[cfg(feature = "chase")]
 fn chase_library_in(dir: &std::path::Path) -> Option<&'static str> {
     ["chase_c", "chase", "ChASE"].into_iter().find(|name| {
-        ["so", "a", "dylib"].iter().any(|extension| {
-            dir.join(format!("lib{name}.{extension}")).is_file()
-        })
+        ["so", "a", "dylib"]
+            .iter()
+            .any(|extension| dir.join(format!("lib{name}.{extension}")).is_file())
     })
 }
 
