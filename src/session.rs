@@ -1582,7 +1582,11 @@ impl Solver {
         // round trip start + (x - start) only adds rounding (one ulp of
         // a 30 Angstrom coordinate is 3.6e-15) and would buy a second
         // oracle call at the same geometry.
-        let y = if self.manifold.retract_is_translation() {
+        // BB and direct L-BFGS evaluate the retracted point in accept_step.
+        // A nonlinear retraction applied to its chord is a different point.
+        let already_retracted = matches!(&self.inner, Inner::Bb { .. })
+            || (matches!(&self.inner, Inner::Lbfgs(_)) && self.accept == Accept::Step);
+        let y = if already_retracted || self.manifold.retract_is_translation() {
             None
         } else {
             Some(self.manifold.retract(&start, &(&*x - &start)))

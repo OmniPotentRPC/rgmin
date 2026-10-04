@@ -302,3 +302,39 @@ fn set_factor_shape_drops_stale_lbfgs_pairs() {
         "left Gr(4,2) {x:?}"
     );
 }
+
+
+#[test]
+fn direct_spd_steps_retract_once_and_evaluate_the_accepted_point_once() {
+    use rgmin::{Accept, ManifoldKind, Oracle};
+    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+    for (method, scale) in [(Method::Bb, 0.1), (Method::lbfgs(), 1.0)] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&calls);
+        let objective = Oracle::unbounded(4, move |x| {
+            observed.fetch_add(1, Ordering::Relaxed);
+            let gradient = &x - &array![1.0, 0.0, 0.0, 1.0];
+            (0.5 * gradient.dot(&gradient), gradient)
+        });
+        let initial = 1.1_f64;
+        let mut x = array![initial, 0.0, 0.0, initial];
+        let mut solver = Solver::new(method.clone(), Control {
+            maxiter: 20,
+            gtol: 1e-12,
+            istep: 0.1,
+            maxmove: None,
+            ftol_rel: None,
+        }, 4);
+        solver.set_manifold(ManifoldKind::Spd);
+        solver.set_accept(Accept::Step);
+        let tangent = -scale * initial * initial * (initial - 1.0);
+        let expected = initial + tangent + tangent * tangent / (2.0 * initial);
+        let report = solver.step(&objective, &mut x).unwrap();
+        assert!((x[0] - expected).abs() < 1e-12, "{method:?}: {x:?}");
+        assert!((x[3] - expected).abs() < 1e-12, "{method:?}: {x:?}");
+        assert_eq!(x[1], 0.0);
+        assert_eq!(x[2], 0.0);
+        assert!((report.value - (expected - 1.0).powi(2)).abs() < 1e-12);
+        assert_eq!(calls.load(Ordering::Relaxed), 2, "{method:?}");
+    }
+}
