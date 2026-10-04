@@ -1,6 +1,6 @@
 // Binary64 witness for cancellation in a conservative quadratic energy.
-prec = 200;
-display = decimal;
+prec = 200!;
+display = decimal!;
 energy_offset = round(6 + 2^(-50), D, RN);
 opening = round(2e-8, D, RN);
 scale_term = round(10^8 * opening, D, RN);

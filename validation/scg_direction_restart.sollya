@@ -1,5 +1,5 @@
 // Binary64 exact-curvature SCG witness on f(x) = (x0^2 + x1^2)/2.
-prec = 200;
+prec = 200!;
 damping = round(1e-5, D, RN);
 model_delta = round(25 + round(damping * 25, D, RN), D, RN);
 trial_alpha = round(25 / model_delta, D, RN);
