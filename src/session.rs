@@ -26,7 +26,7 @@ use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
 use crate::report::Report;
-use crate::rigid::{project_horizontal, project_out_rot_trans};
+use crate::rigid::project_horizontal;
 use crate::step::{
     Taken, l2, next_istep, qn_istep, scale_step, scale_step_atom, take_step_with_options,
 };
@@ -228,7 +228,9 @@ impl Solver {
         self.atom_maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };
     }
 
-    /// eOn `lbfgs_project_rigid`. Isolated clusters only.
+    /// eOn `lbfgs_project_rigid`. An isolated cluster drops translation
+    /// and rotation. A periodic cell ([`Self::set_periodic`]) drops
+    /// translation only.
     pub fn set_project_rigid(&mut self, enabled: bool) {
         self.project_rigid = enabled;
     }
@@ -587,6 +589,12 @@ impl Solver {
         })
     }
 
+    /// Drop rigid modes. Unit mass: stored masses belong to [`ManifoldKind::MwRigid`].
+    /// `rotate` is off when the cell is periodic.
+    fn strip_rigid(&self, v: &mut Array1<f64>, x: &Array1<f64>) {
+        project_horizontal(v, x.view(), None, !self.periodic);
+    }
+
     /// Tangent projection. Periodic cells drop rotation (Sella `proj_rot`).
     fn project_vec(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         match self.manifold {
@@ -616,7 +624,7 @@ impl Solver {
                 ManifoldKind::RigidQuotient | ManifoldKind::MwRigid
             )
         {
-            project_out_rot_trans(&mut g, x.view());
+            self.strip_rigid(&mut g, x);
         }
         g
     }
@@ -1079,7 +1087,7 @@ impl Solver {
             return self.step_first_order(obj, x);
         };
         if self.project_rigid {
-            project_out_rot_trans(&mut dir, x.view());
+            self.strip_rigid(&mut dir, x);
         }
         dir = self.project_vec(x, &dir);
         let old = x.clone();
@@ -1143,7 +1151,7 @@ impl Solver {
             .max(radius);
         let mut dir = dogleg_direction(hess, &grad, radius);
         if self.project_rigid {
-            project_out_rot_trans(&mut dir, x.view());
+            self.strip_rigid(&mut dir, x);
         }
         dir = self.project_vec(x, &dir);
         let mut trial = self.manifold.retract(x, &dir);
@@ -1351,7 +1359,7 @@ impl Solver {
         let lbfgs_line_searched = lbfgs_direct.is_none() && matches!(self.inner, Inner::Lbfgs(_));
         if let Some(mut dir) = lbfgs_direct {
             if self.project_rigid {
-                project_out_rot_trans(&mut dir, x.view());
+                self.strip_rigid(&mut dir, x);
             }
             dir = self.project_vec(x, &dir);
             let (npos, nval, ngrad, moved) = accept_step(

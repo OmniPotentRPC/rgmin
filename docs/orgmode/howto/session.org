@@ -29,7 +29,7 @@ let report = solver.step(&obj, &mut x).unwrap();
 host Hessian. ~forget~ drops pair history, conjugacy, and moments.
 ~set_atom_maxmove~ is the eOn per-atom clip.
 ~set_project_rigid~ projects translations and rotations on isolated
-clusters.
+clusters. A periodic cell drops translation only.
 
 ** C
 
@@ -63,7 +63,7 @@ together is not asked twice.
 | ~set_fire_variant~ | FIRE schedule; ~Guenole2020~ is FIRE 2.0 as published |
 | ~forget_evaluation~ | Re-evaluate the next start, keep the method memory |
 | ~set_atom_maxmove~ | Per-atom clip (preferred over a Euclidean cap) |
-| ~set_project_rigid~ | Drop rigid modes on isolated clusters |
+| ~set_project_rigid~ | Drop translation and rotation when isolated; translation only when periodic |
 | ~set_lbfgs_neb_guards~ | L-BFGS distance, angle and curvature resets; empty-memory scale 0.01 |
 | ~set_extra_updates~ | Accepted, no effect: a replayed newest pair leaves BFGS unchanged |
 | ~set_cautious~ | Li--Fukushima pair filter |

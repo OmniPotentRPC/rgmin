@@ -108,6 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Powell dogleg retracts the tangent step and reports the horizontal
   gradient. An ambient `x + dir` left the sphere.
+- `set_project_rigid` on a periodic cell drops translation and keeps
+  rotation. An isolated cluster still drops both.
 
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than

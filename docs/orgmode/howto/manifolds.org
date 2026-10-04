@@ -99,4 +99,5 @@ Changing the manifold drops method memory (~forget~).
 - ~Stiefel~ is ~St(n,1)~. A frame with ~p > 1~ is not a length
   token: ~n p~ does not name ~p~.
 - ~set_project_rigid~ is the same horizontal projection as
-  ~RigidQuotient~ and stays available on Euclidean.
+  ~RigidQuotient~ and stays available on Euclidean. With
+  ~set_periodic~ it drops translation and keeps rotation.

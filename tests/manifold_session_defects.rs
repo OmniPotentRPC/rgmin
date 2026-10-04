@@ -40,3 +40,56 @@ fn dogleg_on_the_sphere_retracts() {
         "dogleg accepted a zero step {x:?}"
     );
 }
+
+/// A periodic cell drops translation and keeps rotation. An isolated
+/// cluster still drops both.
+#[test]
+fn periodic_project_rigid_keeps_rotation() {
+    let pos = array![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0];
+    let rot = array![0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0];
+
+    let displace = |periodic: bool| {
+        let g = rot.clone();
+        let obj = HessianOracle::unbounded(
+            9,
+            move |x: ArrayView1<f64>| (g.dot(&x), g.clone()),
+            |_x: ArrayView1<f64>| Array2::<f64>::eye(9),
+        );
+        let mut x = pos.clone();
+        let mut solver = Solver::new(Method::Dogleg, control(4.0), 9);
+        solver.set_project_rigid(true);
+        solver.set_periodic(periodic);
+        let rep = solver.step_hess(&obj, &mut x).expect("dogleg step");
+        let disp = (&x - &pos).mapv(|v| v * v).sum().sqrt();
+        (disp, rep.grad_norm)
+    };
+
+    let (periodic, pnorm) = displace(true);
+    assert!(
+        periodic > 0.5,
+        "periodic project_rigid removed the rotation; displacement {periodic} grad_norm {pnorm}"
+    );
+    let (isolated, _) = displace(false);
+    assert!(
+        isolated < 1e-8,
+        "isolated project_rigid kept a rigid rotation; displacement {isolated}"
+    );
+
+    let trans = array![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let obj_t = HessianOracle::unbounded(
+        9,
+        move |x: ArrayView1<f64>| (trans.dot(&x), trans.clone()),
+        |_x: ArrayView1<f64>| Array2::<f64>::eye(9),
+    );
+    let mut y = pos.clone();
+    let mut solver = Solver::new(Method::Dogleg, control(4.0), 9);
+    solver.set_project_rigid(true);
+    solver.set_periodic(true);
+    let rep = solver.step_hess(&obj_t, &mut y).expect("translation step");
+    let drift = (&y - &pos).mapv(|v| v * v).sum().sqrt();
+    assert!(
+        rep.grad_norm < 1e-8 && drift < 1e-8,
+        "translation survived periodic project_rigid, grad {} drift {drift}",
+        rep.grad_norm
+    );
+}
