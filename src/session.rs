@@ -1145,16 +1145,19 @@ impl Solver {
         if self.project_rigid {
             project_out_rot_trans(&mut dir, x.view());
         }
-        let mut trial = &*x + &dir;
+        dir = self.project_vec(x, &dir);
+        let mut trial = self.manifold.retract(x, &dir);
         if let Some(cap) = self.atom_maxmove {
             scale_step_atom(x, &mut trial, cap);
         } else if let Some(cap) = self.control.maxmove {
             scale_step(x, &mut trial, cap);
         }
         trial = obj.bounds().clip(trial.view());
+        // Radius and the model ratio use the displacement that was
+        // evaluated. On a translation retraction that is `dir`.
         let p = &trial - &*x;
         let pnorm = l2(&p);
-        let (ft, gt) = obj.value_and_gradient(trial.view());
+        let (ft, gt_raw) = obj.value_and_gradient(trial.view());
         let pred = predicted_reduction(hess, &grad, &p);
         let rho = reduction_ratio(value - ft, pred);
         if let Inner::Dogleg { radius } = &mut self.inner {
@@ -1162,6 +1165,7 @@ impl Solver {
         }
         if accept_ratio(rho) {
             *x = trial;
+            let gt = self.horizontal_grad(x, &gt_raw);
             self.remember(x, ft, &gt);
             self.steps += 1;
             Ok(Report {
@@ -1171,6 +1175,7 @@ impl Solver {
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &gt),
             })
         } else {
+            let grad = self.horizontal_grad(x, &grad);
             self.remember(x, value, &grad);
             self.steps += 1;
             Ok(Report {
