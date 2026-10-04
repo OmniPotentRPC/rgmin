@@ -241,6 +241,33 @@ int32_t rgmin_solver_add_equality(rgmin_solver_t *solver, const size_t *idx,
                                 const double *coef, size_t nnz, double rhs);
 /** Remove every model-step equality. */
 int32_t rgmin_solver_clear_equalities(rgmin_solver_t *solver);
+
+/** Explicit HiGHS engine; CHOOSE retains the library default. */
+typedef enum rgmin_highs_solver_t {
+    RGMIN_HIGHS_CHOOSE = 0, RGMIN_HIGHS_SIMPLEX = 1,
+    RGMIN_HIGHS_IPM = 2, RGMIN_HIGHS_IPX = 3, RGMIN_HIGHS_HIPO = 4,
+    RGMIN_HIGHS_PDLP = 5, RGMIN_HIGHS_HIPDLP = 6, RGMIN_HIGHS_QPASM = 7
+} rgmin_highs_solver_t;
+/** Explicit crossover policy; CHOOSE retains the library default. */
+typedef enum rgmin_highs_crossover_t {
+    RGMIN_HIGHS_CROSSOVER_CHOOSE = 0, RGMIN_HIGHS_CROSSOVER_ON = 1,
+    RGMIN_HIGHS_CROSSOVER_OFF = 2
+} rgmin_highs_crossover_t;
+/** HiGHS callback events. */
+typedef enum rgmin_highs_cb_kind_t {
+    RGMIN_HIGHS_CB_LOGGING = 0, RGMIN_HIGHS_CB_SIMPLEX_INTERRUPT = 1,
+    RGMIN_HIGHS_CB_IPM_INTERRUPT = 2
+} rgmin_highs_cb_kind_t;
+/** Setting interrupt nonzero requests termination of the solve. */
+typedef void (*rgmin_highs_callback_t)(int32_t kind, const char *message,
+                                     int32_t *interrupt, void *user);
+/** Return 0 on success, 1 for an unknown token, null handle, or absent HiGHS. */
+int32_t rgmin_solver_set_highs_solver(rgmin_solver_t *solver, int32_t kind);
+int32_t rgmin_solver_set_highs_crossover(rgmin_solver_t *solver, int32_t kind);
+/** NULL callback clears it. The host retains context ownership through clear/free. */
+int32_t rgmin_solver_set_highs_callback(rgmin_solver_t *solver,
+                                      rgmin_highs_callback_t callback, void *user);
+
 /** Embedded manifold. Euclidean is the default.
  *  Molecular clusters use RIGID_QUOTIENT (Sella Cartesian T+R,
  *  R^{3N}/SE(3)) or MW_RIGID (Page-McIver / Sella IRC Eckart).

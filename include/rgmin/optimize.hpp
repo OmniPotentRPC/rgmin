@@ -275,6 +275,15 @@ public:
         rgmin_solver_set_cautious(ptr_, eps, alpha);
     }
     int set_highs(bool on) { return rgmin_solver_set_highs(ptr_, on ? 1 : 0); }
+    int set_highs_solver(rgmin_highs_solver_t kind) {
+        return rgmin_solver_set_highs_solver(ptr_, static_cast<int32_t>(kind));
+    }
+    int set_highs_crossover(rgmin_highs_crossover_t kind) {
+        return rgmin_solver_set_highs_crossover(ptr_, static_cast<int32_t>(kind));
+    }
+    int set_highs_callback(rgmin_highs_callback_t callback, void* user) {
+        return rgmin_solver_set_highs_callback(ptr_, callback, user);
+    }
     int set_box(double const* lower, double const* upper, std::size_t n) {
         return rgmin_solver_set_box(ptr_, lower, upper, n);
     }

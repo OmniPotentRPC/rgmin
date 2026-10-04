@@ -20,6 +20,7 @@ use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::error::{Error, Result};
 use crate::lbfgs::Lbfgs;
+use crate::{HighsCallback, HighsOptions};
 
 /// Pin OpenMP to one thread exactly once, before any HiGHS solve.
 ///
@@ -62,6 +63,71 @@ impl HighsStep {
     }
 }
 
+unsafe extern "C" {
+    fn Highs_setCallback(
+        highs: *mut std::os::raw::c_void,
+        callback: Option<unsafe extern "C" fn(
+            i32, *const std::os::raw::c_char, *const std::os::raw::c_void,
+            *mut std::os::raw::c_void, *mut std::os::raw::c_void)>,
+        user: *mut std::os::raw::c_void,
+    ) -> HighsInt;
+    fn Highs_startCallback(highs: *mut std::os::raw::c_void, kind: i32) -> HighsInt;
+}
+
+#[repr(C)]
+struct HighsCallbackDataIn {
+    user_interrupt: std::os::raw::c_int,
+}
+
+unsafe extern "C" fn highs_callback(
+    kind: i32,
+    message: *const std::os::raw::c_char,
+    _data_out: *const std::os::raw::c_void,
+    data_in: *mut std::os::raw::c_void,
+    user: *mut std::os::raw::c_void,
+) {
+    let binding = unsafe { &*user.cast::<HighsCallback>() };
+    let mut interrupt = 0;
+    unsafe { (binding.function)(kind, message, &mut interrupt, binding.user as *mut _) };
+    if !data_in.is_null() && interrupt != 0 {
+        unsafe { (*data_in.cast::<HighsCallbackDataIn>()).user_interrupt = 1 };
+    }
+}
+
+fn apply_engine(model: &mut highs::Model, options: &HighsOptions) -> Result<()> {
+    if let Some(name) = options.solver.as_highs() {
+        model.try_set_option("solver", name)
+            .map_err(|_| Error::Highs(format!("cannot set solver={name}")))?;
+    }
+    if let Some(name) = options.crossover.as_highs() {
+        model.try_set_option("run_crossover", name)
+            .map_err(|_| Error::Highs(format!("cannot set run_crossover={name}")))?;
+    }
+    Ok(())
+}
+
+fn bind_callback(
+    model: &mut highs::Model,
+    options: &HighsOptions,
+    owner: &mut Option<Box<HighsCallback>>,
+) -> Result<()> {
+    let Some(binding) = options.callback else { return Ok(()); };
+    *owner = Some(Box::new(binding));
+    let ptr = model.as_mut_ptr();
+    let context = owner.as_mut().unwrap().as_mut() as *mut HighsCallback;
+    let status = unsafe { Highs_setCallback(ptr, Some(highs_callback), context.cast()) };
+    if status != STATUS_OK {
+        return Err(Error::Highs(format!("set callback: status {status}")));
+    }
+    for kind in [0, 1, 2] {
+        let status = unsafe { Highs_startCallback(ptr, kind) };
+        if status != STATUS_OK {
+            return Err(Error::Highs(format!("start callback {kind}: status {status}")));
+        }
+    }
+    Ok(())
+}
+
 impl Lbfgs {
     /// L-BFGS direction at `x` with gradient `g`, projected if needed.
     pub fn highs_step(&self, x: ArrayView1<f64>, g: ArrayView1<f64>) -> Result<Array1<f64>> {
@@ -87,12 +153,50 @@ impl Lbfgs {
         if !opts.needs_qp() {
             return Ok(p);
         }
-        project_qp(&p, x, opts)
+        project_qp(&p, x, opts, &self.highs_options)
     }
 }
 
-fn project_qp(d: &Array1<f64>, x: ArrayView1<f64>, opts: &HighsStep) -> Result<Array1<f64>> {
+/// Project the supplied direction onto a feasible set by minimizing
+/// `||p - direction||²/2`, without scaling the direction first.
+pub fn highs_projected_step(
+    direction: &Array1<f64>,
+    point: ArrayView1<f64>,
+    constraints: &HighsStep,
+    options: &HighsOptions,
+) -> Result<Array1<f64>> {
+    if let Some((atoms, dim)) = constraints.center_axes {
+        if atoms == 0 || dim == 0 || atoms.checked_mul(dim) != Some(direction.len()) {
+            return Err(Error::Highs("invalid packed projection shape".into()));
+        }
+        let mut centered = constraints.clone();
+        centered.center_axes = None;
+        for axis in 0..dim {
+            centered.equalities.push(((0..atoms).map(|atom| (atom * dim + axis, 1.0)).collect(), 0.0));
+        }
+        project_qp(direction, point, &centered, options)
+    } else {
+        project_qp(direction, point, constraints, options)
+    }
+}
+
+fn project_qp(d: &Array1<f64>, x: ArrayView1<f64>, opts: &HighsStep, options: &HighsOptions) -> Result<Array1<f64>> {
     let n = d.len();
+    if x.len() != n { return Err(Error::Dim { got: x.len(), dim: n }); }
+    if d.iter().chain(x.iter()).any(|v| !v.is_finite())
+        || opts.trust.is_some_and(|t| !t.is_finite() || t < 0.0)
+        || opts.lo.is_some_and(f64::is_nan) || opts.hi.is_some_and(f64::is_nan)
+        || opts.equalities.iter().any(|(row, rhs)| !rhs.is_finite()
+            || row.iter().any(|(i, a)| *i >= n || !a.is_finite())) {
+        return Err(Error::Highs("invalid projection data".into()));
+    }
+    for k in 0..n {
+        let lo = opts.trust.map_or(f64::NEG_INFINITY, |t| -t)
+            .max(opts.lo.map_or(f64::NEG_INFINITY, |v| v - x[k]));
+        let hi = opts.trust.unwrap_or(f64::INFINITY)
+            .min(opts.hi.map_or(f64::INFINITY, |v| v - x[k]));
+        if lo > hi { return Err(Error::Highs("infeasible projection box".into())); }
+    }
     let mut pb = RowProblem::default();
     let mut cols = Vec::with_capacity(n);
     for k in 0..n {
@@ -105,10 +209,13 @@ fn project_qp(d: &Array1<f64>, x: ArrayView1<f64>, opts: &HighsStep) -> Result<A
         pb.add_row(*rhs..=*rhs, &row);
     }
 
+    // The model and solved model drop before their callback storage.
+    let mut callback_owner = None;
     let mut model = pb
         .try_optimise(Sense::Minimise)
         .map_err(|e| Error::Highs(format!("pass LP {e:?}")))?;
-    model.make_quiet();
+    if options.callback.is_none() { model.make_quiet(); }
+    apply_engine(&mut model, options)?;
     serialise_openmp_once();
     model
         .try_set_option("parallel", "off")
@@ -136,6 +243,7 @@ fn project_qp(d: &Array1<f64>, x: ArrayView1<f64>, opts: &HighsStep) -> Result<A
         return Err(Error::Highs(format!("pass Hessian status {st}")));
     }
 
+    bind_callback(&mut model, options, &mut callback_owner)?;
     let solved = model
         .try_solve()
         .map_err(|e| Error::Highs(format!("solve {e:?}")))?;
@@ -259,6 +367,19 @@ pub fn highs_feasible_step(
     trust: Option<f64>,
     center_axes: Option<(usize, usize)>,
 ) -> Result<Array1<f64>> {
+    highs_feasible_step_with_options(direction, hess, grad, atom_maxmove, trust, center_axes, &HighsOptions::default())
+}
+
+/// [`highs_feasible_step`] with explicit engine and callback policies.
+pub fn highs_feasible_step_with_options(
+    direction: Option<&Array1<f64>>,
+    hess: Option<&Array2<f64>>,
+    grad: &Array1<f64>,
+    atom_maxmove: Option<f64>,
+    trust: Option<f64>,
+    center_axes: Option<(usize, usize)>,
+    options: &HighsOptions,
+) -> Result<Array1<f64>> {
     highs_feasible_step_boxed(
         direction,
         hess,
@@ -268,6 +389,7 @@ pub fn highs_feasible_step(
         center_axes,
         None,
         &[],
+        options,
     )
 }
 
@@ -282,6 +404,7 @@ pub(crate) fn highs_feasible_step_boxed(
     center_axes: Option<(usize, usize)>,
     coordinate_box: Option<(ArrayView1<'_, f64>, &eindir_core::Bounds<f64>)>,
     equalities: &[(Vec<(usize, f64)>, f64)],
+    options: &HighsOptions,
 ) -> Result<Array1<f64>> {
     let n = grad.len();
     let boxed = atom_maxmove.is_some_and(|c| c > 0.0) || trust.is_some_and(|c| c > 0.0);
@@ -339,10 +462,13 @@ pub(crate) fn highs_feasible_step_boxed(
         }
     }
 
+    // The model and solved model drop before their callback storage.
+    let mut callback_owner = None;
     let mut model = pb
         .try_optimise(Sense::Minimise)
         .map_err(|e| Error::Highs(format!("pass LP {e:?}")))?;
-    model.make_quiet();
+    if options.callback.is_none() { model.make_quiet(); }
+    apply_engine(&mut model, options)?;
     serialise_openmp_once();
     let _ = model.try_set_option("parallel", "off");
     let _ = model.try_set_option("threads", 1_i32);
@@ -374,6 +500,7 @@ pub(crate) fn highs_feasible_step_boxed(
     if st != STATUS_OK {
         return Err(Error::Highs(format!("pass Hessian status {st}")));
     }
+    bind_callback(&mut model, options, &mut callback_owner)?;
     let solved = model
         .try_solve()
         .map_err(|e| Error::Highs(format!("solve {e:?}")))?;

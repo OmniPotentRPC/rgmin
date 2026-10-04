@@ -2,7 +2,7 @@
 //! so the C waist can refuse an unknown integer on every build.
 
 /// HiGHS `solver` option. Integers match `rgmin_highs_solver_t`.
-/// Constrained dest defaults to [`HighsSolverKind::Ipm`].
+/// The default leaves engine selection to HiGHS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HighsSolverKind {
     /// HiGHS `choose`.
@@ -54,8 +54,7 @@ impl HighsSolverKind {
     }
 }
 
-/// HiGHS `run_crossover`. Constrained dest defaults to
-/// [`HighsCrossover::Off`]: the step is the interior point, not a basis.
+/// HiGHS `run_crossover`. The default leaves crossover selection to HiGHS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HighsCrossover {
     /// HiGHS `choose`.
@@ -111,13 +110,49 @@ impl HighsCallbackKind {
     }
 }
 
-/// Dest HiGHS user callback. `interrupt` nonzero stops the solve.
+/// HiGHS user callback. `interrupt` nonzero stops the solve.
 pub type HighsCCallback = unsafe extern "C" fn(
     kind: i32,
     message: *const std::os::raw::c_char,
     interrupt: *mut i32,
     user: *mut std::os::raw::c_void,
 );
+
+/// A host callback and its context pointer.
+#[derive(Clone, Copy, Debug)]
+pub struct HighsCallback {
+    pub(crate) function: HighsCCallback,
+    pub(crate) user: usize,
+}
+
+impl HighsCallback {
+    /// Bind a host callback to its context.
+    ///
+    /// # Safety
+    /// The callback and context remain valid until every solver holding this
+    /// binding clears or drops it. The callback must not unwind, and the
+    /// context must support calls from any thread that uses such a solver.
+    pub unsafe fn new(function: HighsCCallback, user: *mut std::os::raw::c_void) -> Self {
+        Self { function, user: user as usize }
+    }
+}
+
+/// Engine and callback policies, independent of the feasible-set record.
+#[derive(Clone, Copy, Debug)]
+pub struct HighsOptions {
+    /// Automatic selection or an explicit HiGHS engine.
+    pub solver: HighsSolverKind,
+    /// Automatic selection or an explicit crossover policy.
+    pub crossover: HighsCrossover,
+    /// Optional host callback. Its context is borrowed from the host.
+    pub callback: Option<HighsCallback>,
+}
+
+impl Default for HighsOptions {
+    fn default() -> Self {
+        Self { solver: HighsSolverKind::Choose, crossover: HighsCrossover::Choose, callback: None }
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -106,7 +106,7 @@ pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};
 pub use elpa_kind::{ElpaParams, ElpaSpectrum, ElpaStage, elpa_config, elpa_spectrum};
 pub use error::{Error, Result};
 pub use fire::{FireKind, FireVariant};
-pub use highs_kind::{HighsCCallback, HighsCallbackKind, HighsCrossover, HighsSolverKind};
+pub use highs_kind::{HighsCCallback, HighsCallback, HighsCallbackKind, HighsCrossover, HighsOptions, HighsSolverKind};
 pub use hvp::{
     FdHvp, HessianVector, HvpOracle, IdentityPrecond, NystromPrecond, Preconditioner,
     minimize_newton_cg, steihaug_cg, steihaug_pcg,

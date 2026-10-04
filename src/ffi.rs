@@ -129,6 +129,41 @@ pub enum rgmin_conjugacy_t {
     RGMIN_CONJUGACY_FR_PR = 7,
 }
 
+/// HiGHS engine selection. Integers match [`crate::HighsSolverKind`].
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_highs_solver_t {
+    RGMIN_HIGHS_CHOOSE = 0,
+    RGMIN_HIGHS_SIMPLEX = 1,
+    RGMIN_HIGHS_IPM = 2,
+    RGMIN_HIGHS_IPX = 3,
+    RGMIN_HIGHS_HIPO = 4,
+    RGMIN_HIGHS_PDLP = 5,
+    RGMIN_HIGHS_HIPDLP = 6,
+    RGMIN_HIGHS_QPASM = 7,
+}
+
+/// HiGHS crossover selection.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_highs_crossover_t {
+    RGMIN_HIGHS_CROSSOVER_CHOOSE = 0,
+    RGMIN_HIGHS_CROSSOVER_ON = 1,
+    RGMIN_HIGHS_CROSSOVER_OFF = 2,
+}
+
+/// HiGHS callback event.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_highs_cb_kind_t {
+    RGMIN_HIGHS_CB_LOGGING = 0,
+    RGMIN_HIGHS_CB_SIMPLEX_INTERRUPT = 1,
+    RGMIN_HIGHS_CB_IPM_INTERRUPT = 2,
+}
+
+/// Host callback for HiGHS log and interrupt events.
+pub type rgmin_highs_callback_t = crate::HighsCCallback;
+
 /// Iteration controls. `memory` is used only by L-BFGS (0 means 10).
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -1836,6 +1871,59 @@ pub unsafe extern "C" fn rgmin_solver_clear_equalities(solver: *mut rgmin_solver
     {
         set_last_error("rgmin_solver_clear_equalities: build has no highs feature");
         1
+    }
+}
+
+/// Select the HiGHS engine. Returns 0 on success and 1 for an invalid
+/// handle, unknown token, or a build without HiGHS.
+///
+/// # Safety
+/// `solver` is null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_highs_solver(solver: *mut rgmin_solver_t, kind: i32) -> i32 {
+    let Some(solver) = (unsafe { solver.as_mut() }) else {
+        set_last_error("rgmin_solver_set_highs_solver: null solver"); return 1;
+    };
+    let Some(kind) = crate::HighsSolverKind::from_ordinal(kind) else {
+        set_last_error("rgmin_solver_set_highs_solver: unknown token"); return 1;
+    };
+    if solver.solver.set_highs_solver(kind) { 0 } else {
+        set_last_error("rgmin_solver_set_highs_solver: build has no highs feature"); 1
+    }
+}
+
+/// Select the HiGHS crossover policy. Statuses match the engine setter.
+///
+/// # Safety
+/// `solver` is null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_highs_crossover(solver: *mut rgmin_solver_t, kind: i32) -> i32 {
+    let Some(solver) = (unsafe { solver.as_mut() }) else {
+        set_last_error("rgmin_solver_set_highs_crossover: null solver"); return 1;
+    };
+    let Some(kind) = crate::HighsCrossover::from_ordinal(kind) else {
+        set_last_error("rgmin_solver_set_highs_crossover: unknown token"); return 1;
+    };
+    if solver.solver.set_highs_crossover(kind) { 0 } else {
+        set_last_error("rgmin_solver_set_highs_crossover: build has no highs feature"); 1
+    }
+}
+
+/// Set or clear a HiGHS callback. A null callback clears the binding.
+///
+/// # Safety
+/// `solver` is null or a live handle. The callback and its context remain
+/// valid until cleared or the solver is freed; the callback must not unwind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_highs_callback(
+    solver: *mut rgmin_solver_t, callback: Option<rgmin_highs_callback_t>, user: *mut c_void,
+) -> i32 {
+    let Some(solver) = (unsafe { solver.as_mut() }) else {
+        set_last_error("rgmin_solver_set_highs_callback: null solver"); return 1;
+    };
+    let binding = callback.map(|function| unsafe { crate::HighsCallback::new(function, user) });
+    if solver.solver.set_highs_callback(binding) { 0 } else {
+        set_last_error("rgmin_solver_set_highs_callback: build has no highs feature"); 1
     }
 }
 

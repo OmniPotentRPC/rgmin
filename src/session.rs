@@ -64,6 +64,8 @@ pub struct Solver {
     #[cfg(feature = "highs")]
     highs: bool,
     #[cfg(feature = "highs")]
+    highs_options: crate::HighsOptions,
+    #[cfg(feature = "highs")]
     box_lo: Option<Vec<f64>>,
     #[cfg(feature = "highs")]
     box_hi: Option<Vec<f64>>,
@@ -156,6 +158,8 @@ impl Solver {
             factor_shape: None,
             #[cfg(feature = "highs")]
             highs: false,
+            #[cfg(feature = "highs")]
+            highs_options: crate::HighsOptions::default(),
             #[cfg(feature = "highs")]
             box_lo: None,
             #[cfg(feature = "highs")]
@@ -346,6 +350,7 @@ impl Solver {
         {
             self.highs = enabled;
             if let Inner::Lbfgs(solver) = &mut self.inner {
+                solver.highs_options = self.highs_options;
                 solver.highs = if enabled {
                     Some(crate::HighsStep {
                         trust: self
@@ -366,6 +371,42 @@ impl Solver {
                 };
             }
         }
+    }
+
+    /// Select a HiGHS engine. Returns false when the feature is absent.
+    pub fn set_highs_solver(&mut self, solver: crate::HighsSolverKind) -> bool {
+        #[cfg(feature = "highs")]
+        {
+            self.highs_options.solver = solver;
+            self.set_highs(self.highs);
+            true
+        }
+        #[cfg(not(feature = "highs"))]
+        { let _ = solver; false }
+    }
+
+    /// Select a HiGHS crossover policy. Returns false when the feature is absent.
+    pub fn set_highs_crossover(&mut self, crossover: crate::HighsCrossover) -> bool {
+        #[cfg(feature = "highs")]
+        {
+            self.highs_options.crossover = crossover;
+            self.set_highs(self.highs);
+            true
+        }
+        #[cfg(not(feature = "highs"))]
+        { let _ = crossover; false }
+    }
+
+    /// Set or clear a host callback. Returns false when HiGHS is absent.
+    pub fn set_highs_callback(&mut self, callback: Option<crate::HighsCallback>) -> bool {
+        #[cfg(feature = "highs")]
+        {
+            self.highs_options.callback = callback;
+            self.set_highs(self.highs);
+            true
+        }
+        #[cfg(not(feature = "highs"))]
+        { let _ = callback; false }
     }
 
     /// Per-coordinate box. Empty or missing sides are unbounded; length one broadcasts.
@@ -922,15 +963,17 @@ impl Solver {
                     center,
                     self.has_coordinate_box().then(|| (x.view(), obj.bounds())),
                     &self.equalities,
+                    &self.highs_options,
                 )?)
             } else {
-                crate::lbfgs_qp::highs_feasible_step(
+                crate::lbfgs_qp::highs_feasible_step_with_options(
                     None,
                     Some(&hess),
                     &grad,
                     self.atom_maxmove,
                     self.control.maxmove,
                     center,
+                    &self.highs_options,
                 )
             };
             if let Ok(dir) = feasible {
@@ -1189,6 +1232,7 @@ impl Solver {
                         center,
                         self.has_coordinate_box().then(|| (x.view(), obj.bounds())),
                         &self.equalities,
+                    &self.highs_options,
                     )?)
                 } else {
                     None

@@ -81,6 +81,9 @@ pub struct Lbfgs {
     /// rather than the two-loop recursion.
     #[cfg(feature = "highs")]
     pub highs: Option<crate::lbfgs_qp::HighsStep>,
+    /// Engine and callback policies for constrained solves.
+    #[cfg(feature = "highs")]
+    pub highs_options: crate::HighsOptions,
 }
 
 impl Default for Lbfgs {
@@ -108,6 +111,8 @@ impl Lbfgs {
             cautious_alpha: 0.01,
             #[cfg(feature = "highs")]
             highs: None,
+            #[cfg(feature = "highs")]
+            highs_options: crate::HighsOptions::default(),
         }
     }
 
