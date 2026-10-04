@@ -2,7 +2,13 @@ use ndarray::{Array1, array};
 use rgmin::{Control, Method, Solver};
 
 fn control() -> Control {
-    Control { maxiter: 80, gtol: 1e-8, istep: 0.1, maxmove: None, ftol_rel: None }
+    Control {
+        maxiter: 80,
+        gtol: 1e-8,
+        istep: 0.1,
+        maxmove: None,
+        ftol_rel: None,
+    }
 }
 
 #[test]
@@ -111,4 +117,3 @@ fn first_order_accept_step_moves_a_nonconservative_force() {
         );
     }
 }
-
