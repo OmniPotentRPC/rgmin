@@ -29,7 +29,7 @@ pub fn dot(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
 /// serial at n = 20000 (thread coordination outweighs O(n) arithmetic),
 /// so parallel length-n algebra engages only where it has a chance.
 #[cfg(feature = "par")]
-const PAR_MIN_LEN: usize = 65_536;
+pub(crate) const PAR_MIN_LEN: usize = 65_536;
 
 /// `x . y`, reduced in parallel chunks.
 #[cfg(feature = "par")]

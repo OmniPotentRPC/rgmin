@@ -21,11 +21,35 @@ fn nrm(a: &Array1<f64>) -> f64 {
 
 impl Manifold for Sphere {
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        #[cfg(feature = "par")]
+        if x.len() >= crate::vecops::PAR_MIN_LEN && x.len() == v.len() {
+            let projection = crate::vecops::dot(x.view(), v.view());
+            let mut out = v.clone();
+            crate::vecops::axpy(-projection, x.view(), &mut out);
+            return out;
+        }
         let s = dot(x, v);
         Array1::from_iter(x.iter().zip(v.iter()).map(|(xi, vi)| vi - s * xi))
     }
 
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        #[cfg(feature = "par")]
+        if x.len() >= crate::vecops::PAR_MIN_LEN && x.len() == v.len() {
+            let mut y = x.clone();
+            crate::vecops::axpy(1.0, v.view(), &mut y);
+            let norm = crate::vecops::nrm2(y.view());
+            if norm <= 1e-16 {
+                let initial_norm = crate::vecops::nrm2(x.view());
+                if initial_norm <= 1e-16 {
+                    return x.clone();
+                }
+                let mut initial = x.clone();
+                crate::vecops::scale(1.0 / initial_norm, &mut initial);
+                return initial;
+            }
+            crate::vecops::scale(1.0 / norm, &mut y);
+            return y;
+        }
         let y = x + v;
         let n = nrm(&y);
         if n <= 1e-16 {
@@ -64,4 +88,10 @@ mod tests {
         let y = Sphere.retract(&x, &v);
         assert!((nrm(&y) - 1.0).abs() < 1e-14);
     }
+    #[cfg(feature = "par")]
+    #[test]
+    fn par_retract_stays_on_the_sphere() {
+        retract_stays_on_the_sphere();
+    }
+
 }
