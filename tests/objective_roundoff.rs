@@ -233,10 +233,16 @@ fn a_decreasing_value_cannot_accept_a_nonfinite_gradient() {
         for configured in [false, true] {
             for slack in [None, Some(0.0)] {
                 let objective = rgmin::Oracle::unbounded(1, move |x: ArrayView1<f64>| {
-                    if x[0] == 0.0 { (1.0, array![1.0]) } else { (0.0, array![invalid]) }
+                    if x[0] == 0.0 {
+                        (1.0, array![1.0])
+                    } else {
+                        (0.0, array![invalid])
+                    }
                 });
                 let mut s = solver(slack);
-                if configured { assert!(s.set_objective_roundoff(1e-8)); }
+                if configured {
+                    assert!(s.set_objective_roundoff(1e-8));
+                }
                 let mut x = array![0.0];
                 let result = s.step(&objective, &mut x).unwrap();
                 assert_eq!(x, array![0.0]);
