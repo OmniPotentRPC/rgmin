@@ -129,25 +129,26 @@ impl Conjugacy {
         let d = ctx.previous_direction;
         let gg = dot(g, g);
         let gg_old = dot(gold, gold);
-        let y_g = dot(g, g) - dot(g, gold); // g · (g - gold)
+        let y = &g - &gold;
+        let y_g = dot(g, y.view());
         match self {
             Self::FletcherReeves => div(gg, gg_old),
             Self::PolakRibiere => div(y_g, gg_old),
             Self::HestenesStiefel => {
-                let y_d = dot(g, d) - dot(gold, d);
+                let y_d = dot(y.view(), d);
                 div(y_g, y_d)
             }
             Self::DaiYuan => {
-                let y_d = dot(g, d) - dot(gold, d);
+                let y_d = dot(y.view(), d);
                 div(gg, y_d)
             }
             Self::ConjugateDescent => div(gg, -dot(d, gold)),
             Self::HagerZhang => {
-                let y_d = dot(g, d) - dot(gold, d);
+                let y_d = dot(y.view(), d);
                 if y_d.abs() <= f64::EPSILON {
                     return 0.0;
                 }
-                let yy = gg + gg_old - 2.0 * dot(g, gold);
+                let yy = dot(y.view(), y.view());
                 let d_g = dot(d, g);
                 y_g / y_d - 2.0 * yy * d_g / (y_d * y_d)
             }
@@ -290,6 +291,40 @@ mod tests {
         assert_eq!(take_min.beta(&ctx), -0.2);
         assert_ne!(take_max.beta(&ctx), Conjugacy::FrPr.beta(&ctx));
         assert_ne!(take_min.beta(&ctx), Conjugacy::FrPr.beta(&ctx));
+    }
+
+    #[test]
+    fn liu_storey_is_the_gpr_optim_scg_inl_beta() {
+        // SCG.inl: mu = p·r on the pre-step residual; after accept,
+        // beta = (r_old - r).dot(r) / mu. That is Liu-Storey
+        // -g·(g-g_old)/(d·g_old). Restart (d = -g_old) equals PR.
+        let g = array![2.0, 0.0];
+        let gold = array![1.0, 0.0];
+        let d = -&gold;
+        let ctx = ConjugacyContext {
+            current_gradient: g.view(),
+            previous_gradient: gold.view(),
+            previous_direction: d.view(),
+        };
+        assert_eq!(
+            Conjugacy::LiuStorey.beta(&ctx),
+            Conjugacy::PolakRibiere.beta(&ctx)
+        );
+        assert_eq!(Conjugacy::LiuStorey.beta(&ctx), 2.0);
+
+        let g2 = array![2.0, 1.0];
+        let gold2 = array![1.0, 0.0];
+        let d2 = array![-0.5, 1.0];
+        let ctx2 = ConjugacyContext {
+            current_gradient: g2.view(),
+            previous_gradient: gold2.view(),
+            previous_direction: d2.view(),
+        };
+        assert_eq!(Conjugacy::LiuStorey.beta(&ctx2), 6.0);
+        assert_ne!(
+            Conjugacy::LiuStorey.beta(&ctx2),
+            Conjugacy::PolakRibiere.beta(&ctx2)
+        );
     }
 
     #[test]
