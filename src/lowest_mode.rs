@@ -1772,6 +1772,7 @@ mod tests {
                 max_iter: 16,
                 tol: 1e-6,
                 nev: 1,
+                ..EigenParams::default()
             };
             let mode = lowest_mode(&h, x.view(), seed.view(), &params).unwrap();
             assert!(mode.value < 0.0, "{:?} curvature {}", kind, mode.value);
@@ -1911,6 +1912,7 @@ mod tests {
                 max_iter: 32,
                 tol: 1e-6,
                 nev: 1,
+                ..EigenParams::default()
             },
         );
         let mode = match mode {
@@ -2091,6 +2093,7 @@ mod tests {
                 max_iter: 64,
                 tol: 1e-6,
                 nev: 1,
+                ..EigenParams::default()
             },
         );
         let mode = match mode {
@@ -2128,6 +2131,7 @@ mod tests {
                 max_iter: 64,
                 tol: 1e-6,
                 nev: 1,
+                ..EigenParams::default()
             },
             &t,
         );
