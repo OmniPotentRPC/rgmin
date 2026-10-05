@@ -6,6 +6,13 @@
 
 ** Unreleased
 
+Pulay residual subspace (~Method::Diis~, C ~RGMIN_DIIS~, ABI minor 30).
+Coefficients on the stored gradients sum to one and minimize the
+combined residual. ~memory~ 0 keeps 6 pairs. The step never line
+searches on the oracle value: one pair takes a steepest kick of
+length ~istep~, and two or more pairs move to the combination.
+A kinetic preconditioner is not part of the step.
+
 Quick-min (~Method::QuickMin~, C ~RGMIN_QUICKMIN~, ABI minor 29).
 The reference step projects the velocity onto the force when
 ~v · F~ is non-negative and sets the velocity to zero otherwise,

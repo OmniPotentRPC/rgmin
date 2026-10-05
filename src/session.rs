@@ -1705,41 +1705,23 @@ impl Solver {
             Inner::Diis(state) => {
                 state.push(x.clone(), grad.clone());
                 let coeffs = pulay_coefficients(state.gradients());
-                if state.gradients().len() < 2 || coeffs.is_none() {
-                    let dir = grad.mapv(|g| -g);
-                    let t = take_session_step(
-                        obj,
-                        x,
-                        value,
-                        &grad,
-                        dir.view(),
-                        self.istep,
-                        self.linesearch,
-                        &self.control,
-                        self.atom_maxmove,
-                        self.accept,
-                        &mut self.e_hist,
-                        self.manifold,
-                        self.istep,
-                        line_options,
-                    );
-                    *x = t.x;
-                    value = t.f;
-                    grad = t.g;
+                // Neither branch consults the oracle value, so a projected
+                // or inverted force can drive the step.
+                let mut trial = if let Some(c) = coeffs.filter(|_| state.gradients().len() >= 2) {
+                    extrapolated(state.positions(), &c)
                 } else {
-                    let c = coeffs.expect("coefficients checked");
-                    let mut trial = extrapolated(state.positions(), &c);
-                    if let Some(cap) = self.atom_maxmove {
-                        scale_step_atom(x, &mut trial, cap);
-                    } else if let Some(cap) = self.control.maxmove {
-                        scale_step(x, &mut trial, cap);
-                    }
-                    trial = obj.bounds().clip(trial.view());
-                    *x = trial;
-                    let ev = obj.value_and_gradient(x.view());
-                    value = ev.0;
-                    grad = ev.1;
+                    &*x - &(self.istep * &grad)
+                };
+                if let Some(cap) = self.atom_maxmove {
+                    scale_step_atom(x, &mut trial, cap);
+                } else if let Some(cap) = self.control.maxmove {
+                    scale_step(x, &mut trial, cap);
                 }
+                trial = obj.bounds().clip(trial.view());
+                *x = trial;
+                let ev = obj.value_and_gradient(x.view());
+                value = ev.0;
+                grad = ev.1;
             }
             Inner::Bb { prev_s, prev_y } => {
                 let dir = bb_direction(prev_s.as_ref(), prev_y.as_ref(), &grad, self.istep);
