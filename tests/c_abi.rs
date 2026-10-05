@@ -500,11 +500,83 @@ fn c_abi_quickmin_steps_and_splits_the_cell() {
     assert!(x != start, "quick-min left the start {x:?}");
 }
 
+unsafe extern "C" fn bowl_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 2);
+    let x0 = unsafe { *p };
+    let x1 = unsafe { *p.add(1) };
+    unsafe {
+        *value_out = 0.5 * (x0 * x0 + x1 * x1);
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn bowl_grad(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 2);
+    let (gp, gn) = unsafe { cpu_f64(g as *const _) };
+    assert_eq!(gn, 2);
+    unsafe {
+        *(gp as *mut f64) = *p;
+        *(gp as *mut f64).add(1) = *p.add(1);
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn c_abi_diis_reduces_a_quadratic() {
+    let mut x = [1.0, -0.5];
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 1e-12,
+        istep: 0.4,
+        memory: 6,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_DIIS, &ctrl, 2) };
+    assert!(!session.is_null());
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+    };
+    let mut last = f64::INFINITY;
+    for _ in 0..20 {
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+        let st = unsafe {
+            rgmin_solver_step(
+                session,
+                Some(bowl_eval),
+                Some(bowl_grad),
+                std::ptr::null_mut(),
+                xt,
+                &mut out,
+            )
+        };
+        unsafe { rgmin_tensor_free(xt) };
+        assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+        last = out.grad_norm;
+        if last < 1e-6 {
+            break;
+        }
+    }
+    unsafe { rgmin_solver_free(session) };
+    assert!(last < 1e-6, "grad norm {last} at {x:?}");
+}
+
 #[test]
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 29);
+    assert_eq!(stamp.abi_minor, 30);
     assert_eq!(stamp.layout_revision, 2);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }

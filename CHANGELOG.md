@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Pulay residual subspace (`Method::Diis`, C `RGMIN_DIIS`, ABI minor 30).
+  Coefficients on the stored gradients sum to one and minimize the
+  combined residual. `memory` 0 keeps 6 pairs. A kinetic
+  preconditioner is not part of the step. Pulay, Chem. Phys. Lett.
+  73, 393 (1980), https://doi.org/10.1016/0009-2614(80)80396-4.
+  Wood and Zunger, J. Phys. A, 1343 (1985), has no DOI on this line.
 - Quick-min (`Method::QuickMin`, C `RGMIN_QUICKMIN`, ABI minor 29).
   The reference step projects the velocity onto the force when that
   projection is non-negative and sets it to zero otherwise, then adds

@@ -63,7 +63,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 29;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 30;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 2;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -114,6 +114,8 @@ pub enum rgmin_method_t {
     RGMIN_FIRE2 = 20,
     /// Quick-min: project the velocity on the force, then an Euler step.
     RGMIN_QUICKMIN = 21,
+    /// Pulay residual subspace. `memory` 0 means 6 stored pairs.
+    RGMIN_DIIS = 22,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -166,7 +168,8 @@ pub enum rgmin_highs_cb_kind_t {
 /// Host callback for HiGHS log and interrupt events.
 pub type rgmin_highs_callback_t = crate::HighsCCallback;
 
-/// Iteration controls. `memory` is used only by L-BFGS (0 means 10).
+/// Iteration controls. `memory` is the L-BFGS pair count (0 means 10)
+/// and the Pulay history length (0 means 6).
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct rgmin_control_t {
@@ -440,6 +443,9 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
             kind: crate::FireKind::V2,
         },
         rgmin_method_t::RGMIN_QUICKMIN => Method::QuickMin,
+        rgmin_method_t::RGMIN_DIIS => Method::Diis {
+            memory: if memory == 0 { 6 } else { memory },
+        },
     }
 }
 

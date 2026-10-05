@@ -50,7 +50,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 29
+#define RGMIN_ABI_VERSION_MINOR 30
 #define RGMIN_ABI_LAYOUT_REVISION 2
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -77,7 +77,9 @@ typedef enum rgmin_method_t {
     RGMIN_DOGLEG = 19,
     RGMIN_FIRE2 = 20,
     /** Quick-min: project the velocity on the force, then an Euler step. */
-    RGMIN_QUICKMIN = 21
+    RGMIN_QUICKMIN = 21,
+    /** Pulay residual subspace. `memory` 0 means 6 stored pairs. */
+    RGMIN_DIIS = 22
 } rgmin_method_t;
 
 /** Conjugacy coefficient β. Closed leaf subset of dest Conjugacy

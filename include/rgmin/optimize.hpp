@@ -42,6 +42,7 @@ enum class Method {
     Dogleg = RGMIN_DOGLEG,
     Fire2 = RGMIN_FIRE2,
     QuickMin = RGMIN_QUICKMIN,
+    Diis = RGMIN_DIIS,
 };
 
 enum class EigenKind {
