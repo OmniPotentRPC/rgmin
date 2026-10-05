@@ -11,6 +11,7 @@ use crate::accept::{Accept, accept_step};
 use crate::adam::adam_direction;
 use crate::bb::bb_direction;
 use crate::control::Control;
+use crate::diis::{DiisState, extrapolated, pulay_coefficients};
 use crate::error::{Error, Result};
 use crate::fire::{
     Fire2Extras, FireState, FireVariant, fire_after_v1, fire_displacement, fire_rescale_velocity,
@@ -125,6 +126,7 @@ enum Inner {
     },
     Fire(FireState, Option<Fire2Extras>),
     QuickMin(QuickMinState),
+    Diis(DiisState),
     Bb {
         prev_s: Option<Array1<f64>>,
         prev_y: Option<Array1<f64>>,
@@ -851,6 +853,7 @@ impl Solver {
                 }
             }
             Inner::QuickMin(state) => state.reset(),
+            Inner::Diis(state) => state.clear(),
             Inner::Bb { prev_s, prev_y } => {
                 *prev_s = None;
                 *prev_y = None;
@@ -1699,6 +1702,45 @@ impl Solver {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
             }
+            Inner::Diis(state) => {
+                state.push(x.clone(), grad.clone());
+                let coeffs = pulay_coefficients(state.gradients());
+                if state.gradients().len() < 2 || coeffs.is_none() {
+                    let dir = grad.mapv(|g| -g);
+                    let t = take_session_step(
+                        obj,
+                        x,
+                        value,
+                        &grad,
+                        dir.view(),
+                        self.istep,
+                        self.linesearch,
+                        &self.control,
+                        self.atom_maxmove,
+                        self.accept,
+                        &mut self.e_hist,
+                        self.manifold,
+                        self.istep,
+                        line_options,
+                    );
+                    *x = t.x;
+                    value = t.f;
+                    grad = t.g;
+                } else {
+                    let c = coeffs.expect("coefficients checked");
+                    let mut trial = extrapolated(state.positions(), &c);
+                    if let Some(cap) = self.atom_maxmove {
+                        scale_step_atom(x, &mut trial, cap);
+                    } else if let Some(cap) = self.control.maxmove {
+                        scale_step(x, &mut trial, cap);
+                    }
+                    trial = obj.bounds().clip(trial.view());
+                    *x = trial;
+                    let ev = obj.value_and_gradient(x.view());
+                    value = ev.0;
+                    grad = ev.1;
+                }
+            }
             Inner::Bb { prev_s, prev_y } => {
                 let dir = bb_direction(prev_s.as_ref(), prev_y.as_ref(), &grad, self.istep);
                 let old = x.clone();
@@ -1981,6 +2023,7 @@ impl Inner {
             Method::Newton { kind } => Inner::Newton { kind: *kind },
             Method::Fire { kind } => Inner::Fire(FireState::new(*kind, dim, istep), None),
             Method::QuickMin => Inner::QuickMin(QuickMinState::new(dim, istep)),
+            Method::Diis { memory } => Inner::Diis(DiisState::new(*memory)),
             Method::Bb => Inner::Bb {
                 prev_s: None,
                 prev_y: None,

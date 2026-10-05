@@ -67,7 +67,7 @@ where
             c2,
         } => minimize_pso(obj, init, control, n_particles, inertia, c1, c2),
         Method::Newton { kind: _ } | Method::Dogleg => Err(Error::NeedHessian),
-        Method::Fire { .. } | Method::Bb | Method::QuickMin => {
+        Method::Fire { .. } | Method::Bb | Method::QuickMin | Method::Diis { .. } => {
             run_session(obj, init, control, method)
         }
     }

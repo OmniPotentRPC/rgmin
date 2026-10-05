@@ -109,6 +109,18 @@ pub enum Method {
     /// time-step factors, per-block cell velocity) are in
     /// [`crate::quickmin`].
     QuickMin,
+    /// Pulay residual subspace extrapolation.
+    ///
+    /// Pulay, *Convergence acceleration of iterative sequences. The
+    /// case of SCF iteration*,
+    /// <https://doi.org/10.1016/0009-2614(80)80396-4>.
+    /// The residual is the objective gradient. Wood and Zunger,
+    /// J. Phys. A, 1343 (1985), name the residual form. No DOI is
+    /// attached for that line.
+    Diis {
+        /// Stored gradient and position pairs. At least 2.
+        memory: usize,
+    },
     /// Powell dogleg on a caller-supplied dense Hessian.
     ///
     /// Nocedal and Wright, algorithm 4.1,
@@ -123,6 +135,11 @@ impl Method {
             conjugacy: Conjugacy::PolakRibiere,
             restart: Restart::Never,
         }
+    }
+
+    /// Pulay subspace of 6 gradient and position pairs.
+    pub fn diis() -> Self {
+        Self::Diis { memory: 6 }
     }
 
     /// L-BFGS with `m = 10` correction pairs.

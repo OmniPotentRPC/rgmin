@@ -33,6 +33,7 @@ mod bb;
 #[cfg(feature = "highs")]
 mod box_objective;
 mod control;
+mod diis;
 mod error;
 /// C ABI, gated behind the `capi` feature.
 #[cfg(feature = "capi")]
