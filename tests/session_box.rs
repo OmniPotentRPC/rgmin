@@ -457,3 +457,39 @@ fn session_equality_and_trust_reach_the_constrained_model_solution() {
     assert_relative_eq!(x[1], -1.0, epsilon = 1e-10);
     assert!(report.grad_norm < 1e-10);
 }
+
+#[test]
+fn a_rounded_wall_does_not_halve_the_free_step() {
+    use ndarray::array;
+    use rgmin::{Control, Method, Oracle, Solver};
+
+    let wall = 0.02_f64.ln().next_up();
+    for sign in [-1.0, 1.0] {
+        for start in [0.32673629493102274, 0.32673630012041155] {
+            let target = array![sign * wall, 0.0];
+            let objective = Oracle::unbounded(2, |x| {
+                let gradient = &x - &target;
+                (0.5 * gradient.dot(&gradient), gradient)
+            });
+            let mut solver = Solver::new(
+                Method::lbfgs(),
+                Control {
+                    istep: 1.0,
+                    gtol: 1e-12,
+                    ..Control::default()
+                },
+                2,
+            );
+            solver.set_highs(true);
+            let lo = if sign > 0.0 { wall } else { f64::NEG_INFINITY };
+            let hi = if sign < 0.0 { -wall } else { f64::INFINITY };
+            assert!(solver.set_box(Some(vec![lo, -10.0]), Some(vec![hi, 10.0])));
+            let mut x = array![sign * start, 1.0];
+            let report = solver.step(&objective, &mut x).unwrap();
+            assert!(x[0] >= lo && x[0] <= hi, "outside wall: {x:?}");
+            assert_relative_eq!(x[0], target[0], epsilon = 1e-14);
+            assert_eq!(x[1], 0.0, "free step was shortened at start {start}");
+            assert!(report.grad_norm <= 1e-12, "{report:?}");
+        }
+    }
+}

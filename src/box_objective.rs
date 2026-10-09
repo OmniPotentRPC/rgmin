@@ -153,6 +153,14 @@ pub(crate) fn project_direction(
     let project = |p: &mut Array1<f64>| {
         for k in 0..p.len() {
             p[k] = p[k].clamp(bounds.low[k] - x[k], bounds.high[k] - x[k]);
+            // Subtracting the wall and adding the displacement round
+            // separately. Keep the reconstructed trial inside the box;
+            // the adjacent displacement toward zero bounds that error.
+            if x[k] + p[k] < bounds.low[k] {
+                p[k] = p[k].next_up();
+            } else if x[k] + p[k] > bounds.high[k] {
+                p[k] = p[k].next_down();
+            }
         }
     };
     project(&mut direction);
@@ -211,6 +219,24 @@ mod tests {
         assert!(gradient.dot(&step) < 0.0);
         assert!((step[0] + 1.0).abs() < 1e-14);
         assert_eq!(step[1], 0.0);
+    }
+
+    #[test]
+    fn projected_displacement_reconstructs_inside_a_rounded_wall() {
+        let wall = 0.02_f64.ln().next_up();
+        for sign in [-1.0, 1.0] {
+            let x = array![sign * 0.32673629493102274, 1.0];
+            let lo = if sign > 0.0 { wall } else { f64::NEG_INFINITY };
+            let hi = if sign < 0.0 { -wall } else { f64::INFINITY };
+            let bounds = Bounds::new(array![lo, -10.0], array![hi, 10.0], 0.0);
+            let gradient = array![sign * 10.0, 1.0];
+            let step = project_direction(&bounds, x.view(), gradient.view(), -&gradient);
+            let trial = &x + &step;
+            assert!(trial[0] >= lo && trial[0] <= hi, "outside wall: {trial:?}");
+            assert!((trial[0] - sign * wall).abs() <= 2.0 * f64::EPSILON);
+            assert_eq!(trial[1], 0.0);
+            assert!(gradient.dot(&step) < 0.0);
+        }
     }
 
     #[test]
