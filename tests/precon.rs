@@ -116,6 +116,71 @@ fn preconditioned_lbfgs_takes_fewer_iterations_on_a_chain() {
     assert!(estimated_steps <= 3, "estimated run took {estimated_steps}");
 }
 
+fn steps_of(method: Method, precon: bool, limit: usize, istep: f64) -> (usize, f64) {
+    let n = 12;
+    let (geom, neigh, params) = chain(n);
+    let metric = Exp::assemble(geom.view(), &neigh, &params, 1.0, 1.0).unwrap();
+    let obj = FixedMetric {
+        p: metric,
+        bounds: Bounds::new(
+            Array1::from_elem(3 * n, -1e6),
+            Array1::from_elem(3 * n, 1e6),
+            0.0,
+        ),
+    };
+    let mut x = geom.clone();
+    x[0] = 0.4;
+    x[7] = -0.25;
+    let control = Control {
+        maxiter: 1,
+        gtol: 1e-8,
+        istep,
+        maxmove: None,
+        ftol_rel: None,
+    };
+    let mut solver = Solver::new(method, control, x.len());
+    if precon {
+        solver.set_exp(geom.view(), &neigh, &params).unwrap();
+    }
+    let mut taken = 0;
+    let mut gnorm = 0.0;
+    for _ in 0..limit {
+        let g = obj.grad(x.view());
+        gnorm = g.dot(&g).sqrt();
+        if gnorm < 1e-8 {
+            break;
+        }
+        solver.step(&obj, &mut x).unwrap();
+        taken += 1;
+    }
+    (taken, gnorm)
+}
+
+#[test]
+fn preconditioned_fire_and_nlcg_take_fewer_iterations_on_a_chain() {
+    let fire = Method::Fire {
+        kind: rgmin::FireKind::V1,
+    };
+    let cg = Method::nlcg(rgmin::Conjugacy::PolakRibiere);
+    let fire_with = steps_of(fire.clone(), true, 250, 0.2);
+    let fire_without = steps_of(fire, false, 250, 0.2);
+    assert!(
+        fire_with.1 < 1e-8 && fire_without.1 < 1e-8,
+        "FIRE metric {fire_with:?}, plain {fire_without:?}"
+    );
+    assert!(
+        fire_with.0 < fire_without.0,
+        "FIRE metric {fire_with:?}, plain {fire_without:?}"
+    );
+    let cg_with = steps_of(cg.clone(), true, 40, 1.0);
+    let cg_without = steps_of(cg, false, 40, 1.0);
+    assert!(
+        cg_with.0 < cg_without.0,
+        "CG metric {cg_with:?}, plain {cg_without:?}"
+    );
+    assert!(cg_with.0 <= 4, "metric CG took {}", cg_with.0);
+}
+
 #[test]
 fn fire_and_nlcg_move_in_the_metric() {
     let n = 8;

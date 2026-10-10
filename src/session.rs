@@ -14,8 +14,8 @@ use crate::control::Control;
 use crate::diis::{DiisState, extrapolated, pulay_coefficients};
 use crate::error::{Error, Result};
 use crate::fire::{
-    Fire2Extras, FireState, FireVariant, fire_after_v1, fire_displacement, fire_rescale_velocity,
-    fire2_displacement, guenole2020,
+    Fire2Extras, FireMix, FireState, FireVariant, fire_after_v1_metric, fire_displacement,
+    fire_rescale_velocity, fire2_displacement_metric, guenole2020,
 };
 use crate::lbfgs::{GradNorm, Lbfgs};
 use crate::linesearch::{LineSearch, LineSearchOptions};
@@ -53,6 +53,23 @@ fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Array1<f64> {
         Some(p) => p.solve(v.view()).unwrap_or_else(|| v.clone()),
         None => v.clone(),
     }
+}
+
+/// P-norms for the FIRE mix: `sqrt(v^T P v)` and `sqrt(F · P^{-1} F)`.
+fn fire_mix(
+    exp: &Option<ExpState>,
+    vel: &Array1<f64>,
+    raw: &Array1<f64>,
+    steepest: &Array1<f64>,
+) -> Option<FireMix> {
+    let p = exp.as_ref().and_then(ExpState::matrix)?;
+    let pv = p.apply(vel.view());
+    let vel_n = vel.dot(&pv).max(0.0).sqrt();
+    let dir_n = raw.dot(steepest).max(0.0).sqrt();
+    Some(FireMix {
+        vel: vel_n,
+        direction: dir_n,
+    })
 }
 
 /// Long-lived solver. Algorithm memory lives here; `x` stays with the caller.
@@ -1600,6 +1617,18 @@ impl Solver {
                             z_new.iter().zip(d_old.iter()).map(|(z, d)| -z + beta * d),
                         )
                     };
+                    // A non-descent direction in the metric is not a valid
+                    // conjugate step. Fall back to the Riesz steepest direction.
+                    if self.exp.is_some() {
+                        let gd = crate::vecops::dot(grad.view(), dir.view());
+                        if !(gd < 0.0) {
+                            *dir = if self.accept == Accept::Step {
+                                z_new.mapv(|z| -z * self.istep)
+                            } else {
+                                z_new.mapv(|z| -z)
+                            };
+                        }
+                    }
                     g_old.assign(&grad);
                     z_old.assign(&z_new);
                     d_old.assign(dir);
@@ -1742,15 +1771,19 @@ impl Solver {
             }
             Inner::Fire(state, ext) => {
                 #[allow(unused_mut)]
-                let mut force = metric_vector(&self.exp, &grad.mapv(|g| -g));
+                let mut raw = grad.mapv(|g| -g);
+                #[allow(unused_mut)]
+                let mut steepest = metric_vector(&self.exp, &raw);
                 #[cfg(feature = "highs")]
                 if boxed {
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut raw);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
+                let mix = fire_mix(&self.exp, &state.vel, &raw, &steepest);
                 let dx = match ext {
-                    Some(ext) => fire2_displacement(state, ext, &force),
-                    None => fire_displacement(state, &force),
+                    Some(ext) => fire2_displacement_metric(state, ext, &raw, &steepest, mix),
+                    None => fire_displacement(state, &steepest),
                 };
                 let mut trial = &*x + &dx;
                 if let Some(cap) = self.atom_maxmove {
@@ -1768,13 +1801,17 @@ impl Solver {
                 value = ev.0;
                 grad = ev.1;
                 #[allow(unused_mut)]
-                let mut force_new = metric_vector(&self.exp, &grad.mapv(|g| -g));
+                let mut raw_new = grad.mapv(|g| -g);
+                #[allow(unused_mut)]
+                let mut steep_new = metric_vector(&self.exp, &raw_new);
                 #[cfg(feature = "highs")]
                 if boxed {
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut force_new);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut raw_new);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steep_new);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
-                fire_after_v1(state, &force_new);
+                let mix_new = fire_mix(&self.exp, &state.vel, &raw_new, &steep_new);
+                fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
             }
             Inner::QuickMin(state) => {
                 #[allow(unused_mut)]

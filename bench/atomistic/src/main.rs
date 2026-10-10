@@ -325,6 +325,129 @@ fn lj38(seed: u64) -> System {
     }
 }
 
+const DIAMOND: [[f64; 3]; 8] = [
+    [0.0, 0.0, 0.0],
+    [0.5, 0.5, 0.0],
+    [0.5, 0.0, 0.5],
+    [0.0, 0.5, 0.5],
+    [0.25, 0.25, 0.25],
+    [0.75, 0.75, 0.25],
+    [0.75, 0.25, 0.75],
+    [0.25, 0.75, 0.75],
+];
+
+fn diamond_cell(nx: usize, ny: usize, nz: usize, a: f64) -> Vec<f64> {
+    let mut pos = Vec::new();
+    for ix in 0..nx {
+        for iy in 0..ny {
+            for iz in 0..nz {
+                for b in DIAMOND {
+                    pos.push((ix as f64 + b[0]) * a);
+                    pos.push((iy as f64 + b[1]) * a);
+                    pos.push((iz as f64 + b[2]) * a);
+                }
+            }
+        }
+    }
+    pos
+}
+
+/// 160-atom Stillinger-Weber silicon slab, Packwood et al. section III.
+/// A 1x1x20 diamond cell, free along z, with the upper half shifted down
+/// by 0.5 Å.
+fn si_slab() -> System {
+    let a = 5.431;
+    let nz = 20;
+    let mut pos = diamond_cell(1, 1, nz, a);
+    let zmid = 0.5 * nz as f64 * a;
+    for z in pos.iter_mut().skip(2).step_by(3) {
+        if *z >= zmid {
+            *z -= 0.5;
+        }
+    }
+    let n = pos.len() / 3;
+    let vacuum = 12.0;
+    System {
+        kind: 3,
+        z: vec![14; n],
+        cell: [a, 0.0, 0.0, 0.0, a, 0.0, 0.0, 0.0, nz as f64 * a + vacuum],
+        pos,
+        fixed: vec![false; n],
+    }
+}
+
+/// 256-atom Stillinger-Weber wire: 32x1x1 diamond, 0.5% compression,
+/// plus a 0.1 Å random displacement. Packwood et al. section III.
+fn si_strain() -> System {
+    let a0 = 5.431;
+    let a = a0 * 0.995;
+    let nx = 32;
+    let mut pos = diamond_cell(nx, 1, 1, a);
+    let mut rng = Rng(17);
+    for p in &mut pos {
+        *p += 0.1 * rng.normal();
+    }
+    let n = pos.len() / 3;
+    System {
+        kind: 3,
+        z: vec![14; n],
+        cell: [nx as f64 * a, 0.0, 0.0, 0.0, a, 0.0, 0.0, 0.0, a],
+        pos,
+        fixed: vec![false; n],
+    }
+}
+
+/// FCC copper with one vacancy, Asap EMT. 5x5x5 conventional cells,
+/// 499 atoms. `a` is the energy minimum of this EMT build: a perfect
+/// crystal there has zero force and an energy near 0 eV/atom, because
+/// the potential subtracts E0.
+fn cu_vacancy() -> System {
+    let a = 3.595;
+    let ncell = 5;
+    let basis = [
+        [0.0, 0.0, 0.0],
+        [0.5, 0.5, 0.0],
+        [0.5, 0.0, 0.5],
+        [0.0, 0.5, 0.5],
+    ];
+    let mut pos = Vec::new();
+    for ix in 0..ncell {
+        for iy in 0..ncell {
+            for iz in 0..ncell {
+                for b in basis {
+                    pos.push((ix as f64 + b[0]) * a);
+                    pos.push((iy as f64 + b[1]) * a);
+                    pos.push((iz as f64 + b[2]) * a);
+                }
+            }
+        }
+    }
+    // Drop the atom nearest the cell centre.
+    let centre = 0.5 * ncell as f64 * a;
+    let mut drop = 0;
+    let mut best = f64::INFINITY;
+    for i in 0..pos.len() / 3 {
+        let d = (0..3)
+            .map(|k| pos[3 * i + k] - centre)
+            .map(|v| v * v)
+            .sum::<f64>();
+        if d < best {
+            best = d;
+            drop = i;
+        }
+    }
+    pos.drain(3 * drop..3 * drop + 3);
+    let n = pos.len() / 3;
+    let l = ncell as f64 * a;
+    System {
+        kind: 4,
+        z: vec![29; n],
+        cell: [l, 0.0, 0.0, 0.0, l, 0.0, 0.0, 0.0, l],
+        pos,
+        fixed: vec![false; n],
+    }
+}
+
 fn build(sys: &System, sigma: f64, seed: u64) -> (FreeObjective, Array1<f64>) {
     let n = sys.fixed.len();
     let kernel = Box::into_raw(Box::new(Kernel {
@@ -427,6 +550,18 @@ fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
     })
 }
 
+fn max_atom_move(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
+    a.as_slice()
+        .unwrap_or(&[])
+        .chunks(3)
+        .zip(b.as_slice().unwrap_or(&[]).chunks(3))
+        .map(|(u, v)| {
+            let s: f64 = (0..3).map(|k| (u[k] - v[k]).powi(2)).sum();
+            s.sqrt()
+        })
+        .fold(0.0, f64::max)
+}
+
 fn mic(dx: f64, length: f64) -> f64 {
     if !(length.is_finite() && length > 0.0) {
         return dx;
@@ -442,8 +577,8 @@ fn pair_distance(pos: &[f64], a: usize, b: usize, lx: f64, ly: f64, lz: f64) -> 
 }
 
 /// Neighbours of the free atoms, minimum image, cutoff `2 r_nn`.
-/// Bonds to frozen atoms are anchors.
-fn exp_neighbours(sys: &System, x: &Array1<f64>) -> Neighbours {
+/// Bonds to frozen atoms are anchors. The second value is `r_nn`.
+fn exp_neighbours(sys: &System, x: &Array1<f64>) -> (Neighbours, f64) {
     let free: Vec<usize> = (0..sys.fixed.len()).filter(|&a| !sys.fixed[a]).collect();
     let nall = sys.fixed.len();
     let mut pos = sys.pos.clone();
@@ -455,9 +590,11 @@ fn exp_neighbours(sys: &System, x: &Array1<f64>) -> Neighbours {
     let lx = sys.cell[0];
     let ly = sys.cell[4];
     let lz = sys.cell[8];
-    let search = lx.min(ly).min(lz) * 0.5;
-    let search = if search.is_finite() && search > 0.0 {
-        search.clamp(4.0, 12.0)
+    let half = lx.min(ly).min(lz) * 0.5;
+    // A = 3 keeps neighbours out to 2 r_nn. The search has to reach that
+    // shell. MIC stores one image of each pair.
+    let search = if half.is_finite() && half > 0.0 {
+        half.max(6.0).min(12.0)
     } else {
         8.0
     };
@@ -501,7 +638,7 @@ fn exp_neighbours(sys: &System, x: &Array1<f64>) -> Neighbours {
             }
         }
     }
-    neigh
+    (neigh, r_nn)
 }
 
 struct Outcome {
@@ -537,6 +674,8 @@ fn run_session(
     }
     let exp = name.ends_with("-exp");
     let mut mu = None;
+    let mut built_at: Option<Array1<f64>> = None;
+    let mut r_nn_gate = 1.0;
     let mut out = Outcome {
         converged: false,
         iters: 0,
@@ -545,18 +684,28 @@ fn run_session(
     };
     for it in 0..maxiter {
         if exp {
-            let neigh = exp_neighbours(sys, &x);
-            let mut params = ExpParams::default();
-            params.mu = mu;
-            // The cluster sits in a vacuum box, so the sine probe uses the
-            // span of the positions. The slab and the island are periodic:
-            // equation (15) takes the cell lengths.
-            if sys.kind != 0 {
-                params.lengths = Some([sys.cell[0], sys.cell[4], sys.cell[8]]);
-            }
-            if solver.set_exp(x.view(), &neigh, &params).is_err() {
-                eprintln!("{name}: exp assembly failed");
-                break;
+            // Packwood et al. rebuild P when the largest atomic move since
+            // the last assembly exceeds r_nn / 2. A fixed P keeps the CG
+            // metric and the FIRE velocity in one inner product.
+            let disp = built_at
+                .as_ref()
+                .map(|p| max_atom_move(p, &x))
+                .unwrap_or(f64::INFINITY);
+            if disp > 0.5 * r_nn_gate {
+                let (neigh, r_nn) = exp_neighbours(sys, &x);
+                r_nn_gate = r_nn;
+                let mut params = ExpParams::default();
+                params.mu = mu;
+                // The cluster sits in a vacuum box, so the sine probe uses
+                // the span of the positions. Periodic cells pass their lengths.
+                if sys.kind != 0 {
+                    params.lengths = Some([sys.cell[0], sys.cell[4], sys.cell[8]]);
+                }
+                if solver.set_exp(x.view(), &neigh, &params).is_err() {
+                    eprintln!("{name}: exp assembly failed");
+                    break;
+                }
+                built_at = Some(x.clone());
             }
         }
         let rep = match solver.step(obj, &mut x) {
@@ -642,9 +791,16 @@ fn main() {
             "lj38" => lj38(seed),
             "pt7" => read_con(&format!("{data}/pt_heptamer.con"), 78, 1),
             "al" => read_con(&format!("{data}/al_slab.con"), 13, 2),
+            "si-slab" => si_slab(),
+            "si-strain" => si_strain(),
+            "cu-vac" => cu_vacancy(),
             other => panic!("unknown system {other}"),
         };
-        let sig = if system == "lj38" { 0.0 } else { sigma };
+        let sig = if system == "lj38" || system.starts_with("si-") || system == "cu-vac" {
+            0.0
+        } else {
+            sigma
+        };
         for &m in &methods {
             let (obj, x0) = build(&sys, sig, seed);
             let t0 = Instant::now();
