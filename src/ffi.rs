@@ -20,9 +20,10 @@ use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::{
     Accept, ApplyHessian, Conjugacy, Control, DirectionalCurvature, EigenParams, EigensolverKind,
-    Error, HessianOracle, LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart,
-    ScgOptions, ScgParams, ScgStepTolerance, Solver, lowest_mode, minimize_method,
-    minimize_method_hess, minimize_scg_exact_with_options, minimize_scg_with_options,
+    Error, ExpParams, HessianOracle, LineSearch, ManifoldKind, Method, Neighbours, NewtonKind,
+    Oracle, QnStep, Restart, ScgOptions, ScgParams, ScgStepTolerance, Solver, lowest_mode,
+    minimize_method, minimize_method_hess, minimize_scg_exact_with_options,
+    minimize_scg_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -63,7 +64,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 30;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 31;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 2;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1503,6 +1504,183 @@ pub unsafe extern "C" fn rgmin_solver_set_qn_step(
         rgmin_qn_step_t::RGMIN_QN_LBFGS => QnStep::TwoLoop,
     };
     unsafe { (*solver).solver.set_qn_step(qn) };
+}
+
+/// Parameters of the exponential preconditioner. ABI minor 31.
+///
+/// `mu` and `r_nn` are NaN when the session should compute them.
+/// `a` and `c_stab` are NaN for the paper defaults (3 and 0.1).
+/// `length_*` are 0 to use the span of the current positions.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_exp_t {
+    /// Exponent A. NaN selects 3.
+    pub a: f64,
+    /// Diagonal stabilization. NaN selects 0.1. Must be positive otherwise.
+    pub c_stab: f64,
+    /// Energy scale. NaN estimates it on the next step.
+    pub mu: f64,
+    /// Nearest-neighbour distance. NaN or nonpositive selects the paper's rule.
+    pub r_nn: f64,
+    /// Cutoff. Nonpositive keeps every supplied pair.
+    pub r_cut: f64,
+    /// Lattice length along x. Nonpositive selects the position span.
+    pub length_x: f64,
+    /// Lattice length along y.
+    pub length_y: f64,
+    /// Lattice length along z.
+    pub length_z: f64,
+    /// Nonzero reestimates μ whenever the matrix is rebuilt.
+    pub recalc_mu: i32,
+}
+
+/// Install the exponential preconditioner on a session.
+///
+/// `pair_i` and `pair_j` have length `npair` and index atoms in the
+/// session vector (`dim = 3 N`, C order). `distance` is null to take
+/// Cartesian distances from the current point on each step, or length
+/// `npair` to keep those distances. `anchor_i` and `anchor_r` are bonds
+/// to atoms with no coordinate in the vector; both are null when
+/// `nanchor` is 0.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_exp(
+    solver: *mut rgmin_solver_t,
+    params: *const rgmin_exp_t,
+    pair_i: *const u32,
+    pair_j: *const u32,
+    distance: *const f64,
+    npair: usize,
+    anchor_i: *const u32,
+    anchor_r: *const f64,
+    nanchor: usize,
+) -> rgmin_status_t {
+    if solver.is_null() || params.is_null() {
+        set_last_error("rgmin_solver_set_exp: null solver or params");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    if npair > 0 && (pair_i.is_null() || pair_j.is_null()) {
+        set_last_error("rgmin_solver_set_exp: null pair list");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    if nanchor > 0 && (anchor_i.is_null() || anchor_r.is_null()) {
+        set_last_error("rgmin_solver_set_exp: null anchor list");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let p = unsafe { &*params };
+    let dim = unsafe { (*solver).solver.dim() };
+    if dim % 3 != 0 {
+        set_last_error("rgmin_solver_set_exp: dimension is not a multiple of 3");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let i = unsafe { slice::from_raw_parts(pair_i, npair) };
+    let j = unsafe { slice::from_raw_parts(pair_j, npair) };
+    let r = if distance.is_null() {
+        Vec::new()
+    } else {
+        unsafe { slice::from_raw_parts(distance, npair) }.to_vec()
+    };
+    let mut anchor = Vec::with_capacity(nanchor);
+    if nanchor > 0 {
+        let ai = unsafe { slice::from_raw_parts(anchor_i, nanchor) };
+        let ar = unsafe { slice::from_raw_parts(anchor_r, nanchor) };
+        for k in 0..nanchor {
+            anchor.push((ai[k] as usize, ar[k]));
+        }
+    }
+    let neighbours = Neighbours {
+        i: i.iter().map(|&v| v as usize).collect(),
+        j: j.iter().map(|&v| v as usize).collect(),
+        r,
+        anchor,
+    };
+    let finite_pos = |v: f64| v.is_finite() && v > 0.0;
+    let lengths = if finite_pos(p.length_x) || finite_pos(p.length_y) || finite_pos(p.length_z) {
+        Some([p.length_x, p.length_y, p.length_z])
+    } else {
+        None
+    };
+    let exp_params = ExpParams {
+        a: if p.a.is_finite() { p.a } else { 3.0 },
+        c_stab: if p.c_stab.is_finite() { p.c_stab } else { 0.1 },
+        mu: if p.mu.is_finite() { Some(p.mu) } else { None },
+        r_nn: if finite_pos(p.r_nn) {
+            Some(p.r_nn)
+        } else {
+            None
+        },
+        r_cut: if finite_pos(p.r_cut) {
+            Some(p.r_cut)
+        } else {
+            None
+        },
+        recalc_mu: p.recalc_mu != 0,
+        lengths,
+    };
+    // Supplied distances do not need the current geometry. A Cartesian
+    // list is placed on the next step, when the session holds `x`.
+    if neighbours.r.is_empty() {
+        match crate::precon::ExpState::deferred(neighbours, exp_params) {
+            Ok(state) => {
+                unsafe { (*solver).solver.set_exp_deferred(state) };
+                rgmin_status_t::RGMIN_SUCCESS
+            }
+            Err(e) => {
+                set_last_error(&e.to_string());
+                rgmin_status_t::RGMIN_INVALID_PARAMETER
+            }
+        }
+    } else {
+        let positions = vec![0.0; dim];
+        match unsafe {
+            (*solver).solver.set_exp(
+                ndarray::ArrayView1::from(&positions),
+                &neighbours,
+                &exp_params,
+            )
+        } {
+            Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
+            Err(e) => {
+                set_last_error(&e.to_string());
+                rgmin_status_t::RGMIN_INVALID_PARAMETER
+            }
+        }
+    }
+}
+
+/// Drop the exponential preconditioner installed by [`rgmin_solver_set_exp`].
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_clear_exp(solver: *mut rgmin_solver_t) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.clear_exp() };
+}
+
+/// Energy scale of the installed exponential preconditioner, or NaN.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_exp_mu(solver: *const rgmin_solver_t) -> f64 {
+    if solver.is_null() {
+        return f64::NAN;
+    }
+    unsafe { (*solver).solver.exp_mu().unwrap_or(f64::NAN) }
 }
 
 /// How a session takes a proposed step (eOn `lbfgs_accept`).

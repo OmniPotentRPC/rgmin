@@ -12,6 +12,7 @@ typedef rgmin_curv_fn xts_curv_fn;
 typedef rgmin_eigen_kind_t xts_eigen_kind_t;
 typedef rgmin_eigen_params_t xts_eigen_params_t;
 typedef rgmin_eigen_options_t xts_eigen_options_t;
+typedef rgmin_exp_t xts_exp_t;
 typedef rgmin_eval_fn xts_eval_fn;
 typedef rgmin_evalgrad_fn xts_evalgrad_fn;
 typedef rgmin_fire_variant_t xts_fire_variant_t;
@@ -168,6 +169,9 @@ typedef rgmin_status_t xts_status_t;
 #define xts_solver_set_project_rigid rgmin_solver_set_project_rigid
 #define xts_solver_set_lbfgs_neb_guards rgmin_solver_set_lbfgs_neb_guards
 #define xts_solver_set_qn_step rgmin_solver_set_qn_step
+#define xts_solver_set_exp rgmin_solver_set_exp
+#define xts_solver_clear_exp rgmin_solver_clear_exp
+#define xts_solver_exp_mu rgmin_solver_exp_mu
 #define xts_solver_step rgmin_solver_step
 #define xts_solver_step_fg rgmin_solver_step_fg
 #define xts_solver_step_hess rgmin_solver_step_hess
