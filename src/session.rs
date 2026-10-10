@@ -227,6 +227,7 @@ impl Solver {
     }
 
     /// Install a neighbour list whose geometry arrives on the next step.
+    #[cfg(feature = "capi")]
     pub(crate) fn set_exp_deferred(&mut self, state: ExpState) {
         self.exp = Some(state);
         if let Inner::Lbfgs(solver) = &mut self.inner {

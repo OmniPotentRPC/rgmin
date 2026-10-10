@@ -247,6 +247,7 @@ impl ExpState {
     /// Neighbour list without a geometry. The next refresh places `r_nn`
     /// and builds `P`. Used by the C ABI, whose coordinates arrive with
     /// the step.
+    #[cfg(feature = "capi")]
     pub(crate) fn deferred(neighbours: Neighbours, params: ExpParams) -> Result<Self> {
         if neighbours.i.len() != neighbours.j.len() {
             return Err(Error::Precon {
