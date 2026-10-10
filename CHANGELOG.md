@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Universal exponential preconditioner (`Exp`, `Solver::set_exp`,
+  C `rgmin_solver_set_exp`, ABI minor 31). A caller-supplied neighbour
+  list builds the stabilized Packwood matrix. L-BFGS uses it as
+  \(H_0 = P^{-1}\). FIRE and nonlinear CG use it as a metric. `μ` is
+  the paper's sine-probe Rayleigh quotient, estimated on the step when
+  it is not supplied. The solve is Jacobi-preconditioned conjugate
+  gradients. Packwood, Kermode, Mones, Bernstein, Woolley, Gould,
+  Ortner, and Csányi, J. Chem. Phys. 144, 164109 (2016),
+  https://doi.org/10.1063/1.4947024.
 - Pulay residual subspace (`Method::Diis`, C `RGMIN_DIIS`, ABI minor 30).
   Coefficients on the stored gradients sum to one and minimize the
   combined residual. `memory` 0 keeps 6 pairs. One pair takes a

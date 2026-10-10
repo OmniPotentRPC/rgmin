@@ -47,6 +47,9 @@ is `Solver::set_fire_variant(FireVariant::Guenole2020)`.
 two-loop map and FIRE 2.0 (`uv run --with sympy python validation/<file>.py`).
 Methods: NLCG, BFGS, L-BFGS, SR1, SR2, Newton, RFO, Adam, steepest
 descent, PSO, FIRE, FIRE 2.0, Barzilai-Borwein, Powell dogleg.
+`Solver::set_exp` installs the Packwood exponential preconditioner
+(J. Chem. Phys. 144, 164109, 2016) as the L-BFGS initial inverse
+Hessian and as the metric for FIRE and nonlinear CG.
 
 Narrative docs live in [`docs/orgmode/`](docs/orgmode/index.org)
 (Diataxis); the explanation quadrant derives the math behind each

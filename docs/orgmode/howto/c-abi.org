@@ -26,6 +26,11 @@ while (!done) {
 rgmin_solver_free(s);
 #+end_src
 
+~rgmin_solver_set_exp~ installs the exponential preconditioner from a
+caller neighbour list (~rgmin_exp_t~). NaN ~mu~ estimates the energy
+scale on the next step. L-BFGS uses the matrix as H0. FIRE and
+nonlinear CG use it as a metric. ~rgmin_solver_clear_exp~ removes it.
+
 ~rgmin_solver_forget~ drops pairs / conjugacy / moments. Newton and RFO
 use ~rgmin_solver_step_hess_fg~ (fused energy and gradient, one host
 potential call). Split ~eval~ / ~grad~ callbacks remain. ~accept~

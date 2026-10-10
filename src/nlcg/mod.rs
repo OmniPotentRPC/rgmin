@@ -98,14 +98,33 @@ impl Restart {
 
     /// True when the next step should reset to steepest descent.
     pub fn should_restart(&self, ctx: &ConjugacyContext<'_>) -> bool {
+        self.should_restart_metric(
+            ctx.current_gradient,
+            ctx.current_gradient,
+            ctx.previous_gradient,
+            ctx.previous_gradient,
+        )
+    }
+
+    /// [`Self::should_restart`] in the metric `<u, v>_P`, with `z = P^{-1} g`.
+    pub fn should_restart_metric(
+        &self,
+        g: ArrayView1<'_, f64>,
+        z: ArrayView1<'_, f64>,
+        g_old: ArrayView1<'_, f64>,
+        z_old: ArrayView1<'_, f64>,
+    ) -> bool {
+        if g.len() != z.len() || g_old.len() != z_old.len() {
+            return true;
+        }
         match *self {
             Self::Never => false,
             Self::Njws { threshold } => {
-                let gg = dot(ctx.current_gradient, ctx.current_gradient);
+                let gg = dot(g, z);
                 if gg <= 0.0 {
                     return true;
                 }
-                let dev = dot(ctx.current_gradient, ctx.previous_gradient).abs() / gg;
+                let dev = dot(g, z_old).abs() / gg;
                 dev >= threshold
             }
         }
@@ -171,6 +190,60 @@ impl Conjugacy {
             }
         }
     }
+
+    /// β in the metric whose Riesz gradient is `z = P^{-1} g`.
+    ///
+    /// Inner products of gradients use `<z_a, z_b>_P = g_a · z_b`.
+    /// Inner products of a gradient with a direction stay `g · d`.
+    /// Passing `z = g` and `z_old = g_old` reproduces [`Self::beta`].
+    pub fn beta_metric(
+        &self,
+        ctx: &ConjugacyContext<'_>,
+        z: ArrayView1<'_, f64>,
+        z_old: ArrayView1<'_, f64>,
+    ) -> f64 {
+        let g = ctx.current_gradient;
+        let gold = ctx.previous_gradient;
+        let d = ctx.previous_direction;
+        let gz = dot(g, z);
+        let gz_old = dot(gold, z_old);
+        let yz = &z.to_owned() - &z_old.to_owned();
+        let g_yz = dot(g, yz.view());
+        let y = &g.to_owned() - &gold.to_owned();
+        let y_d = dot(y.view(), d);
+        let yy = dot(y.view(), yz.view());
+        match self {
+            Self::FletcherReeves => div(gz, gz_old),
+            Self::PolakRibiere => div(g_yz, gz_old),
+            Self::HestenesStiefel => div(g_yz, y_d),
+            Self::DaiYuan => div(gz, y_d),
+            Self::ConjugateDescent => div(gz, -dot(d, gold)),
+            Self::HagerZhang => {
+                if y_d.abs() <= f64::EPSILON {
+                    return 0.0;
+                }
+                let d_g = dot(d, g);
+                g_yz / y_d - 2.0 * yy * d_g / (y_d * y_d)
+            }
+            Self::LiuStorey => div(-g_yz, dot(d, gold)),
+            Self::FrPr => {
+                let beta_pr = Self::PolakRibiere.beta_metric(ctx, z, z_old);
+                let beta_fr = Self::FletcherReeves.beta_metric(ctx, z, z_old);
+                if beta_pr < -beta_fr {
+                    -beta_fr
+                } else if beta_pr.abs() <= beta_fr {
+                    beta_pr
+                } else {
+                    beta_fr
+                }
+            }
+            Self::Hybrid { a, b, take_max } => {
+                let ba = a.beta_metric(ctx, z, z_old);
+                let bb = b.beta_metric(ctx, z, z_old);
+                if *take_max { ba.max(bb) } else { ba.min(bb) }
+            }
+        }
+    }
 }
 
 fn dot(a: ArrayView1<'_, f64>, b: ArrayView1<'_, f64>) -> f64 {
@@ -214,6 +287,36 @@ mod tests {
         assert_eq!(Conjugacy::HagerZhang.beta(&ctx), 3.0);
         // |β_PR| = |β_FR| = 1, so FR-PR returns β_PR
         assert_eq!(Conjugacy::FrPr.beta(&ctx), 1.0);
+    }
+
+    #[test]
+    fn the_metric_beta_is_the_euclidean_beta_when_p_is_the_identity() {
+        let g = array![1.0, -2.0, 0.5];
+        let gold = array![0.25, 0.5, -1.0];
+        let d = array![-0.5, 0.1, 0.2];
+        let ctx = ConjugacyContext {
+            current_gradient: g.view(),
+            previous_gradient: gold.view(),
+            previous_direction: d.view(),
+        };
+        for method in [
+            Conjugacy::FletcherReeves,
+            Conjugacy::PolakRibiere,
+            Conjugacy::HestenesStiefel,
+            Conjugacy::DaiYuan,
+            Conjugacy::ConjugateDescent,
+            Conjugacy::HagerZhang,
+            Conjugacy::LiuStorey,
+            Conjugacy::FrPr,
+        ] {
+            let plain = method.beta(&ctx);
+            let metric = method.beta_metric(&ctx, g.view(), gold.view());
+            assert_eq!(plain, metric, "{method:?}");
+        }
+        assert_eq!(
+            Restart::njws().should_restart(&ctx),
+            Restart::njws().should_restart_metric(g.view(), g.view(), gold.view(), gold.view())
+        );
     }
 
     #[test]

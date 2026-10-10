@@ -23,6 +23,7 @@ use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
 use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
+use crate::precon::{ExpParams, ExpState, Neighbours};
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
@@ -45,6 +46,14 @@ const SESSION_LINESEARCH: LineSearch = LineSearch::Wolfe {
     c2: 0.9,
     maxiter: 20,
 };
+
+/// `P^{-1} v` when an exponential metric is installed, otherwise `v`.
+fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Array1<f64> {
+    match exp.as_ref().and_then(ExpState::matrix) {
+        Some(p) => p.solve(v.view()).unwrap_or_else(|| v.clone()),
+        None => v.clone(),
+    }
+}
 
 /// Long-lived solver. Algorithm memory lives here; `x` stays with the caller.
 pub struct Solver {
@@ -81,6 +90,8 @@ pub struct Solver {
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
+    /// Packwood exponential metric. `None` leaves every method unchanged.
+    exp: Option<ExpState>,
     inner: Inner,
 }
 
@@ -92,6 +103,9 @@ enum Inner {
         restart: Restart,
         dir: Array1<f64>,
         g_old: Array1<f64>,
+        /// `P^{-1} g` at the previous accepted point. Equals `g_old` when
+        /// no exponential metric is installed.
+        z_old: Array1<f64>,
         d_old: Array1<f64>,
         initialized: bool,
     },
@@ -179,8 +193,77 @@ impl Solver {
             last_pos: None,
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
+            exp: None,
             inner,
         }
+    }
+
+    /// Install the exponential preconditioner at `positions`.
+    ///
+    /// `positions` has length [`Self::dim`] and is `3 N` coordinates in
+    /// C order. [`ExpParams::mu`] `None` defers the energy scale to the
+    /// next [`Self::step`], which estimates it from the objective.
+    /// L-BFGS then takes \(H_0 = P^{-1}\). FIRE and nonlinear CG take
+    /// `P` as the metric.
+    pub fn set_exp(
+        &mut self,
+        positions: ArrayView1<f64>,
+        neighbours: &Neighbours,
+        params: &ExpParams,
+    ) -> Result<()> {
+        if positions.len() != self.dim {
+            return Err(Error::Dim {
+                got: positions.len(),
+                dim: self.dim,
+            });
+        }
+        let state = ExpState::new(positions, neighbours, params)?;
+        let matrix = state.matrix().cloned();
+        self.exp = Some(state);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(matrix);
+        }
+        Ok(())
+    }
+
+    /// Install a neighbour list whose geometry arrives on the next step.
+    pub(crate) fn set_exp_deferred(&mut self, state: ExpState) {
+        self.exp = Some(state);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(None);
+        }
+    }
+
+    /// Drop the exponential preconditioner.
+    pub fn clear_exp(&mut self) {
+        self.exp = None;
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(None);
+        }
+    }
+
+    /// Energy scale of the installed preconditioner, after estimation.
+    #[must_use]
+    pub fn exp_mu(&self) -> Option<f64> {
+        self.exp.as_ref().and_then(ExpState::mu)
+    }
+
+    fn refresh_exp<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        if self.exp.is_none() {
+            return Ok(());
+        }
+        let grad_fn = |p: ArrayView1<f64>| obj.grad(p);
+        if let Some(state) = &mut self.exp {
+            state.refresh(x.view(), grad, grad_fn)?;
+        }
+        let matrix = self.exp.as_ref().and_then(|s| s.matrix().cloned());
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(matrix);
+        }
+        Ok(())
     }
 
     /// eOn `lbfgs_step`. Newton / RFO need a Hessian on [`Self::step_hess`].
@@ -1264,6 +1347,7 @@ impl Solver {
                 grad_norm: gnorm,
             });
         }
+        self.refresh_exp(obj, x, &grad)?;
 
         if matches!(self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
             && matches!(self.inner, Inner::Lbfgs(_))
@@ -1452,16 +1536,19 @@ impl Solver {
                 restart,
                 dir,
                 g_old,
+                z_old,
                 d_old,
                 initialized,
             } => {
+                let z_now = metric_vector(&self.exp, &grad);
                 if !*initialized {
                     *dir = if self.accept == Accept::Step {
-                        grad.mapv(|g| -g * self.istep)
+                        z_now.mapv(|z| -z * self.istep)
                     } else {
-                        grad.mapv(|g| -g)
+                        z_now.mapv(|z| -z)
                     };
                     *g_old = grad.clone();
+                    *z_old = z_now;
                     *d_old = dir.clone();
                     *initialized = true;
                 }
@@ -1485,25 +1572,35 @@ impl Solver {
                 value = t.f;
                 grad = t.g;
                 if t.moved || self.accept != Accept::Step {
+                    let z_new = metric_vector(&self.exp, &grad);
                     let ctx = ConjugacyContext {
                         current_gradient: grad.view(),
                         previous_gradient: g_old.view(),
                         previous_direction: d_old.view(),
                     };
-                    let mut beta = conjugacy.beta(&ctx);
-                    if restart.should_restart(&ctx) {
+                    let mut beta = conjugacy.beta_metric(&ctx, z_new.view(), z_old.view());
+                    if restart.should_restart_metric(
+                        grad.view(),
+                        z_new.view(),
+                        g_old.view(),
+                        z_old.view(),
+                    ) {
                         beta = 0.0;
                     }
                     *dir = if self.accept == Accept::Step {
                         Array1::from_iter(
-                            grad.iter()
+                            z_new
+                                .iter()
                                 .zip(d_old.iter())
-                                .map(|(g, d)| -g * self.istep + beta * d),
+                                .map(|(z, d)| -z * self.istep + beta * d),
                         )
                     } else {
-                        Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d))
+                        Array1::from_iter(
+                            z_new.iter().zip(d_old.iter()).map(|(z, d)| -z + beta * d),
+                        )
                     };
                     g_old.assign(&grad);
+                    z_old.assign(&z_new);
                     d_old.assign(dir);
                 }
                 if self.accept != Accept::Step {
@@ -1643,7 +1740,8 @@ impl Solver {
                 }
             }
             Inner::Fire(state, ext) => {
-                let mut force = grad.mapv(|g| -g);
+                #[allow(unused_mut)]
+                let mut force = metric_vector(&self.exp, &grad.mapv(|g| -g));
                 #[cfg(feature = "highs")]
                 if boxed {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
@@ -1668,7 +1766,8 @@ impl Solver {
                 let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
                 grad = ev.1;
-                let mut force_new = grad.mapv(|g| -g);
+                #[allow(unused_mut)]
+                let mut force_new = metric_vector(&self.exp, &grad.mapv(|g| -g));
                 #[cfg(feature = "highs")]
                 if boxed {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut force_new);
@@ -1968,6 +2067,7 @@ impl Inner {
                 restart: *restart,
                 dir: Array1::zeros(dim),
                 g_old: Array1::zeros(dim),
+                z_old: Array1::zeros(dim),
                 d_old: Array1::zeros(dim),
                 initialized: false,
             },

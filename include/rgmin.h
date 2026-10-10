@@ -50,7 +50,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 30
+#define RGMIN_ABI_VERSION_MINOR 31
 #define RGMIN_ABI_LAYOUT_REVISION 2
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -204,6 +204,31 @@ typedef enum rgmin_qn_step_t {
 } rgmin_qn_step_t;
 /** Two-loop + H0, or Newton/RFO on P. Legal with \ref rgmin_solver_step_hess. */
 void rgmin_solver_set_qn_step(rgmin_solver_t *solver, rgmin_qn_step_t step);
+/** Exponential preconditioner parameters. NaN selects a default or an estimate.
+ *  ABI minor 31. */
+typedef struct rgmin_exp_t {
+    double a;
+    double c_stab;
+    double mu;
+    double r_nn;
+    double r_cut;
+    double length_x;
+    double length_y;
+    double length_z;
+    int32_t recalc_mu;
+} rgmin_exp_t;
+/** Install the Packwood exponential preconditioner.
+ *  \a distance is null for Cartesian pairs. \a anchor_i is null when
+ *  \a nanchor is 0. \c mu NaN estimates the energy scale on the next step. */
+rgmin_status_t rgmin_solver_set_exp(rgmin_solver_t *solver, const rgmin_exp_t *params,
+                                    const uint32_t *pair_i, const uint32_t *pair_j,
+                                    const double *distance, size_t npair,
+                                    const uint32_t *anchor_i, const double *anchor_r,
+                                    size_t nanchor);
+/** Drop the preconditioner installed by \ref rgmin_solver_set_exp. */
+void rgmin_solver_clear_exp(rgmin_solver_t *solver);
+/** Energy scale, or NaN when none is installed. */
+double rgmin_solver_exp_mu(const rgmin_solver_t *solver);
 /** How a session takes a proposed step (eOn lbfgs_accept). */
 typedef enum rgmin_accept_t {
     RGMIN_ACCEPT_NONE = 0,

@@ -23,7 +23,10 @@ use dlpk::sys::{
 use eindir_core::ffi::{eindir_objective_eval, eindir_objective_grad, eindir_status_t};
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
-use rgmin::{Accept, Conjugacy, Control, FireKind, Lbfgs, LineSearch, Method, Restart, Solver};
+use rgmin::{
+    Accept, Conjugacy, Control, ExpParams, FireKind, Lbfgs, LineSearch, Method, Neighbours,
+    Restart, Solver,
+};
 use rgpot_core::eindir::{
     rgpot_potential_free_eindir, rgpot_potential_new_eindir, rgpot_potential_t,
 };
@@ -411,10 +414,94 @@ fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
         ),
         "bb" => (Method::Bb, Accept::None, wolfe(), 0.01),
         "bb-nm" => (Method::Bb, Accept::Nonmonotone, wolfe(), 0.01),
-        "cg-wolfe" => (pr, Accept::None, wolfe(), 0.01),
+        "cg-wolfe" | "cg-exp" => (pr, Accept::None, wolfe(), 0.01),
         "cg-brent" => (pr, Accept::None, LineSearch::default(), 0.01),
+        "lbfgs-exp" => (lbfgs, Accept::None, wolfe(), 1.0),
+        "fire-exp" => (
+            Method::Fire { kind: FireKind::V1 },
+            Accept::None,
+            wolfe(),
+            0.1,
+        ),
         _ => return None,
     })
+}
+
+fn mic(dx: f64, length: f64) -> f64 {
+    if !(length.is_finite() && length > 0.0) {
+        return dx;
+    }
+    dx - length * (dx / length).round()
+}
+
+fn pair_distance(pos: &[f64], a: usize, b: usize, lx: f64, ly: f64, lz: f64) -> f64 {
+    let dx = mic(pos[3 * a] - pos[3 * b], lx);
+    let dy = mic(pos[3 * a + 1] - pos[3 * b + 1], ly);
+    let dz = mic(pos[3 * a + 2] - pos[3 * b + 2], lz);
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+/// Neighbours of the free atoms, minimum image, cutoff `2 r_nn`.
+/// Bonds to frozen atoms are anchors.
+fn exp_neighbours(sys: &System, x: &Array1<f64>) -> Neighbours {
+    let free: Vec<usize> = (0..sys.fixed.len()).filter(|&a| !sys.fixed[a]).collect();
+    let nall = sys.fixed.len();
+    let mut pos = sys.pos.clone();
+    for (k, &atom) in free.iter().enumerate() {
+        for a in 0..3 {
+            pos[3 * atom + a] = x[3 * k + a];
+        }
+    }
+    let lx = sys.cell[0];
+    let ly = sys.cell[4];
+    let lz = sys.cell[8];
+    let search = lx.min(ly).min(lz) * 0.5;
+    let search = if search.is_finite() && search > 0.0 {
+        search.clamp(4.0, 12.0)
+    } else {
+        8.0
+    };
+    let mut min_d = vec![f64::INFINITY; nall];
+    for a in 0..nall {
+        for b in (a + 1)..nall {
+            let r = pair_distance(&pos, a, b, lx, ly, lz);
+            if r > 1e-8 && r < search {
+                min_d[a] = min_d[a].min(r);
+                min_d[b] = min_d[b].min(r);
+            }
+        }
+    }
+    let r_nn = min_d
+        .iter()
+        .copied()
+        .filter(|d| d.is_finite())
+        .fold(0.0_f64, f64::max);
+    let r_nn = if r_nn > 0.0 { r_nn } else { 1.0 };
+    let r_cut = 2.0 * r_nn;
+    let mut packed = vec![None; nall];
+    for (k, &atom) in free.iter().enumerate() {
+        packed[atom] = Some(k);
+    }
+    let mut neigh = Neighbours::default();
+    for a in 0..nall {
+        for b in (a + 1)..nall {
+            let r = pair_distance(&pos, a, b, lx, ly, lz);
+            if r <= 1e-8 || r >= r_cut {
+                continue;
+            }
+            match (packed[a], packed[b]) {
+                (Some(i), Some(j)) => {
+                    neigh.i.push(i);
+                    neigh.j.push(j);
+                    neigh.r.push(r);
+                }
+                (Some(i), None) => neigh.anchor.push((i, r)),
+                (None, Some(j)) => neigh.anchor.push((j, r)),
+                (None, None) => {}
+            }
+        }
+    }
+    neigh
 }
 
 struct Outcome {
@@ -427,6 +514,7 @@ struct Outcome {
 fn run_session(
     obj: &FreeObjective,
     mut x: Array1<f64>,
+    sys: &System,
     name: &str,
     tol: f64,
     maxiter: usize,
@@ -447,6 +535,8 @@ fn run_session(
     if name == "fire2g" {
         solver.set_fire_variant(rgmin::FireVariant::Guenole2020);
     }
+    let exp = name.ends_with("-exp");
+    let mut mu = None;
     let mut out = Outcome {
         converged: false,
         iters: 0,
@@ -454,6 +544,15 @@ fn run_session(
         fmax: f64::INFINITY,
     };
     for it in 0..maxiter {
+        if exp {
+            let neigh = exp_neighbours(sys, &x);
+            let mut params = ExpParams::default();
+            params.mu = mu;
+            if solver.set_exp(x.view(), &neigh, &params).is_err() {
+                eprintln!("{name}: exp assembly failed");
+                break;
+            }
+        }
         let rep = match solver.step(obj, &mut x) {
             Ok(r) => r,
             Err(e) => {
@@ -462,6 +561,9 @@ fn run_session(
             }
         };
         out.iters = it + 1;
+        if exp && mu.is_none() {
+            mu = solver.exp_mu();
+        }
         let (f, g) = obj.lookup(&x).unwrap_or_else(|| {
             // Not counted against the solver: the driver's own check.
             let calls = unsafe { &(*obj.kernel).calls };
@@ -543,7 +645,7 @@ fn main() {
             let out = if m == "lbfgs-hop" {
                 run_hop(&obj, x0, tol, maxiter)
             } else {
-                run_session(&obj, x0, m, tol, maxiter, maxmove)
+                run_session(&obj, x0, &sys, m, tol, maxiter, maxmove)
             };
             let wall = t0.elapsed().as_secs_f64();
             let pot = obj.pot_seconds();

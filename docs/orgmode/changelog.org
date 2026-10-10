@@ -6,6 +6,13 @@
 
 ** Unreleased
 
+Universal exponential preconditioner (~Exp~, ~Solver::set_exp~,
+C ~rgmin_solver_set_exp~, ABI minor 31). The neighbour list is the
+caller's. L-BFGS uses the matrix as H0. FIRE and nonlinear CG use it
+as a metric. μ is estimated on the step when it is not supplied.
+Packwood et al., J. Chem. Phys. 144, 164109 (2016),
+https://doi.org/10.1063/1.4947024.
+
 Pulay residual subspace (~Method::Diis~, C ~RGMIN_DIIS~, ABI minor 30).
 Coefficients on the stored gradients sum to one and minimize the
 combined residual. ~memory~ 0 keeps 6 pairs. The step never line
