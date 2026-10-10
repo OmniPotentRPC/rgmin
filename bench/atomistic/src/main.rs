@@ -376,12 +376,12 @@ fn si_slab() -> System {
     }
 }
 
-/// 256-atom Stillinger-Weber wire: 32x1x1 diamond, 0.5% compression,
-/// plus a 0.1 Å random displacement. Packwood et al. section III.
-fn si_strain() -> System {
+/// Stillinger-Weber wire: `nx` x 1 x 1 diamond, 0.5% compression, plus a
+/// 0.1 Å random displacement. Packwood et al. section III, the
+/// `N x 1 x 1` series (32 to 512 atoms).
+fn si_wire(nx: usize) -> System {
     let a0 = 5.431;
     let a = a0 * 0.995;
-    let nx = 32;
     let mut pos = diamond_cell(nx, 1, 1, a);
     let mut rng = Rng(17);
     for p in &mut pos {
@@ -397,13 +397,14 @@ fn si_strain() -> System {
     }
 }
 
-/// FCC copper with one vacancy, Asap EMT. 5x5x5 conventional cells,
-/// 499 atoms. `a` is the energy minimum of this EMT build: a perfect
+/// FCC copper with one vacancy, Asap EMT, plus a 0.1 Å random
+/// displacement. `a` is the energy minimum of this EMT build: a perfect
 /// crystal there has zero force and an energy near 0 eV/atom, because
-/// the potential subtracts E0.
+/// the potential subtracts E0. The ideal vacancy alone has a force below
+/// 0.11 eV/Å, under the benchmark tolerance, so the cell is displaced.
 fn cu_vacancy() -> System {
     let a = 3.595;
-    let ncell = 5;
+    let ncell = 8;
     let basis = [
         [0.0, 0.0, 0.0],
         [0.5, 0.5, 0.0],
@@ -437,6 +438,10 @@ fn cu_vacancy() -> System {
         }
     }
     pos.drain(3 * drop..3 * drop + 3);
+    let mut rng = Rng(17);
+    for p in &mut pos {
+        *p += 0.1 * rng.normal();
+    }
     let n = pos.len() / 3;
     let l = ncell as f64 * a;
     System {
@@ -770,7 +775,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "usage: {} <lj38|pt7|al> <method>[,<method>...] [seeds] [sigma] [data_dir]",
+            "usage: {} <lj38|pt7|al|si-slab|si-strain|si-wire|cu-vac> <method>[,<method>...] [seeds] [sigma] [data_dir]",
             args[0]
         );
         std::process::exit(2);
@@ -792,7 +797,8 @@ fn main() {
             "pt7" => read_con(&format!("{data}/pt_heptamer.con"), 78, 1),
             "al" => read_con(&format!("{data}/al_slab.con"), 13, 2),
             "si-slab" => si_slab(),
-            "si-strain" => si_strain(),
+            "si-strain" => si_wire(32),
+            "si-wire" => si_wire(64),
             "cu-vac" => cu_vacancy(),
             other => panic!("unknown system {other}"),
         };
