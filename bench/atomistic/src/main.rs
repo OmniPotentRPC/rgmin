@@ -548,6 +548,12 @@ fn run_session(
             let neigh = exp_neighbours(sys, &x);
             let mut params = ExpParams::default();
             params.mu = mu;
+            // The cluster sits in a vacuum box, so the sine probe uses the
+            // span of the positions. The slab and the island are periodic:
+            // equation (15) takes the cell lengths.
+            if sys.kind != 0 {
+                params.lengths = Some([sys.cell[0], sys.cell[4], sys.cell[8]]);
+            }
             if solver.set_exp(x.view(), &neigh, &params).is_err() {
                 eprintln!("{name}: exp assembly failed");
                 break;
