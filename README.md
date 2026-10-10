@@ -4,7 +4,7 @@
   <img src="branding/logo/rgmin-logo-light.svg" width="420" alt="rgmin">
 </p>
 
-Rust rewrite. `main` is this tree (current tag `v0.2.0`). The C++
+Rust rewrite. `main` is this tree (current tag `v0.4.0`). The C++
 xtensor history is `0.0.1` on the previous `main`.
 
 Saddle, band, and IRC sessions live in [rgsaddle](https://github.com/OmniPotentRPC/rgsaddle) (GitHub; not yet on crates.io).
