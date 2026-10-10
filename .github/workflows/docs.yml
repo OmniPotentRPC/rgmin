@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths: ["docs/**", ".github/workflows/docs.yml"]
+  pull_request:
+    paths: ["docs/**", ".github/workflows/docs.yml"]
   workflow_dispatch:
 
 permissions:
@@ -37,6 +39,9 @@ jobs:
           path: docs/build
   deploy:
     needs: build
+    # The github-pages environment accepts main and gh-pages only.
+    # A pull request still runs the export and the Sphinx build.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
