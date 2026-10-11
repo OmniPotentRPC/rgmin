@@ -5,9 +5,11 @@
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import pytest
 
 import rgmin
 
@@ -77,3 +79,54 @@ def test_hammered_solver_raises_in_use() -> None:
     for error in errors:
         assert isinstance(error, RuntimeError)
         assert "Solver is in use by another thread" in str(error)
+
+
+def test_shared_calculator_with_and_without_reentrant() -> None:
+    ase = pytest.importorskip("ase")
+    from ase import Atoms
+    from ase.calculators.calculator import Calculator
+
+    class Shared(Calculator):
+        implemented_properties = ["energy", "forces"]
+
+        def __init__(self, reentrant: bool) -> None:
+            super().__init__()
+            self.reentrant = reentrant
+            self.inside = 0
+            self.max_inside = 0
+            self._gate = threading.Lock()
+
+        def calculate(self, atoms=None, properties=None, system_changes=None):  # type: ignore[no-untyped-def]
+            with self._gate:
+                self.inside += 1
+                self.max_inside = max(self.max_inside, self.inside)
+            try:
+                time.sleep(0.05)
+                x = np.asarray(atoms.get_positions(), dtype=np.float64).reshape(-1)
+                self.results = {"energy": 0.5 * float(x @ x), "forces": -x.reshape(-1, 3)}
+            finally:
+                with self._gate:
+                    self.inside -= 1
+
+    def run(reentrant: bool) -> Shared:
+        calc = Shared(reentrant)
+        starts = [np.array([[0.2, 0.0, 0.0]]), np.array([[-0.3, 0.1, 0.0]])]
+        ready = threading.Barrier(2)
+
+        def once(pos: np.ndarray) -> None:
+            atoms = Atoms("H", positions=pos)
+            atoms.calc = calc
+            from rgmin.ase import SD
+
+            opt = SD(atoms, logfile=None, maxstep=0.05)
+            ready.wait(timeout=5)
+            opt.step()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(once, starts))
+        return calc
+
+    serial = run(False)
+    assert serial.max_inside == 1
+    overlapped = run(True)
+    assert overlapped.max_inside == 2
