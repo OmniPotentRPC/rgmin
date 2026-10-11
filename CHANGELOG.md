@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Python package `rgmin`: a free-threaded nanobind module `rgmin._core`
+  (`Method`, `SolverConfig`, `Solver`, `Report`, `minimize`) and
+  `rgmin.ase.Optimizer` with one rgmin iteration per `step`. ASE is an
+  extra. The wheel is built with scikit-build-core, Corrosion, and
+  `nanobind_add_module(_core FREE_THREADED ...)`.
 - Vector kernels (`dot`, `sum`, `nrm2`, `axpy`, `scale`, `mul_assign`,
   `div_assign_floor`) use the ndarray 0.17 eight-partial tree.
   The `simd` feature, now default, compiles that loop with
