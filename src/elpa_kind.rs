@@ -48,16 +48,10 @@ impl ElpaStage {
 }
 
 /// Typed ELPA extras. `nblk == 0` selects 16.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ElpaParams {
     /// ScaLAPACK block size. 0 selects 16.
     pub nblk: u32,
-}
-
-impl Default for ElpaParams {
-    fn default() -> Self {
-        Self { nblk: 0 }
-    }
 }
 
 impl ElpaParams {

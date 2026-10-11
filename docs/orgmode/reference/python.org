@@ -1,0 +1,61 @@
+#+TITLE: Python reference
+#+OPTIONS: toc:nil num:nil author:nil title:nil
+
+* Module =rgmin=
+
+=Method= is an =enum.IntEnum= of the C method ids. Members are
+UPPER_SNAKE, for example =LBFGS= and =POLAK_RIBIERE=. The older
+CamelCase spellings are aliases of the same values.
+=Stop= is why a step ended. Its members are =TOLERANCE=,
+=NOISE_FLOOR=, =STEP_TOLERANCE=, and =BUDGET=, again with CamelCase
+aliases.
+=Report= has =value=, =steps=, =grad_norm=, and =stop=.
+=NumericalError= is an =ArithmeticError=.
+=SolverConfig(method="lbfgs", **options)= validates options.
+=Solver(n, config)= is the session. =step(f_and_grad, x)= takes one
+iteration. =step_hess(f_and_grad, hessian, x)= is the same for Newton,
+RFO, and dogleg.
+=minimize(f_and_grad, x0, method="lbfgs", **options)= returns
+=(report, x)=. =x0= must already be a contiguous float64 vector.
+
+=__version__= is the version string of the extension.
+
+=c1=, =c2=, and =linesearch_maxiter= are the line-search constants.
+They are accepted only together with =linesearch=, one of =brent=,
+=backtracking=, =goldstein=, or =wolfe=. Passing a non-default
+constant alone raises =ValueError=.
+
+* Errors
+
+=ValueError= means an option name or an option value is invalid, or a
+coordinate array has the wrong shape. A count such as =memory= that
+does not fit in a signed 64-bit integer is a =ValueError=. A count
+passed as a float or a bool, for example =memory= set to =1.5=, is
+also a =ValueError= whose message says it must be an int.
+=TypeError= means an array has the wrong dtype or order, an option
+value is not a bool, an int, a float, or a str, =method= is not a
+string or a =Method=, or =f_and_grad= did not return
+=(value, gradient)=.
+=RuntimeError= means the solver is already in use on another thread,
+or the native step failed. The message is the text reported by the
+library. =Solver.step= on Newton, RFO, or dogleg, with no Hessian
+callback, raises =RuntimeError=.
+=NumericalError= is an =ArithmeticError=. It means the value or the
+gradient was not finite.
+An exception raised inside the objective is raised again on the
+calling thread.
+
+* Module =rgmin.ase=
+
+=Optimizer= subclasses =ase.optimize.optimize.Optimizer=.
+Named classes: =LBFGS=, =FIRE=, =FIRE2=, =QuickMin=, =BFGS=, =SD=,
+=Adam=, =Newton=, =RFO=, =SR1=, =SR2=, =BB=, =Dogleg=, =DIIS=, =PSO=,
+=FletcherReeves=, =HestenesStiefel=, =DaiYuan=, =ConjugateDescent=,
+=HagerZhang=, =LiuStorey=, =FrPr=, and =CG=.
+=CG= defaults to Polak-Ribiere. The C ABI has no separate
+Polak-Ribiere+ value.
+
+=run= returns a Python =bool=. =True= means the force criterion was
+met.
+=NotImplementedError= means =restart=, =read=, =dump=, or a Hessian
+optimizer called without =hessian=.

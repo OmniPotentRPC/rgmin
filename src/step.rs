@@ -5,6 +5,7 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::control::Control;
 use crate::linesearch::{LineSearch, LineSearchOptions};
+use crate::report::Report;
 
 pub(crate) fn l2(g: &Array1<f64>) -> f64 {
     crate::vecops::nrm2(g.view())
@@ -125,6 +126,23 @@ pub(crate) struct Taken {
     pub alpha: f64,
     /// Whether the move was accepted.
     pub moved: bool,
+    /// No trial decreased the energy by `c * eps_f`. The point is the start.
+    pub energy_noise: bool,
+}
+
+pub(crate) fn energy_noise_report(
+    value: f64,
+    coords: Array1<f64>,
+    steps: usize,
+    grad_norm: f64,
+) -> Report {
+    Report {
+        value,
+        coords,
+        steps,
+        grad_norm,
+        status: crate::report::Status::NoiseFloor,
+    }
 }
 
 /// Line search from the known `(value, grad)` at `pos`, inside the cap,
@@ -182,15 +200,30 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let amax = cap_alpha(dir, control, atom_maxmove);
-    let unmoved = || Taken {
+    let mut best_decrease = f64::NEG_INFINITY;
+    let mut saw_trial = false;
+    let stalled = |saw: bool, best: f64| {
+        saw && control
+            .noise_floor
+            .is_some_and(|floor| floor.stalled_on_energy(best))
+    };
+    let unmoved = |energy_noise: bool| Taken {
         x: pos.clone(),
         f: value,
         g: grad.clone(),
         alpha: 0.0,
         moved: false,
+        energy_noise,
     };
     let Some(out) = linesearch.search_from_with_options(
-        |x| obj.value_and_gradient(x),
+        |x| {
+            let (f, g) = obj.value_and_gradient(x);
+            if f.is_finite() {
+                saw_trial = true;
+                best_decrease = best_decrease.max(value - f);
+            }
+            (f, g)
+        },
         pos.view(),
         value,
         grad.view(),
@@ -199,17 +232,21 @@ where
         amax,
         options,
     ) else {
-        return unmoved();
+        return unmoved(stalled(saw_trial, best_decrease));
     };
     let trial = obj.bounds().clip(out.x.view());
     let (x, f, g) = if trial == out.x {
         (out.x, out.f, out.g)
     } else {
         let (f, g) = obj.value_and_gradient(trial.view());
+        if f.is_finite() {
+            saw_trial = true;
+            best_decrease = best_decrease.max(value - f);
+        }
         (trial, f, g)
     };
     if !f.is_finite() || g.iter().any(|value| !value.is_finite()) {
-        return unmoved();
+        return unmoved(stalled(saw_trial, best_decrease));
     }
     let accepted = match control.ftol_rel {
         Some(_) => f - value <= control.ftol_slack(value),
@@ -233,16 +270,20 @@ where
                 }
         }
     };
-    if accepted {
+    // No trial cleared `c * eps_f`. Keep the start, even if Wolfe would
+    // have accepted a decrease inside that band.
+    let energy_noise = stalled(saw_trial, best_decrease);
+    if accepted && !energy_noise {
         Taken {
             x,
             f,
             g,
             alpha: out.alpha,
             moved: true,
+            energy_noise: false,
         }
     } else {
-        unmoved()
+        unmoved(energy_noise)
     }
 }
 
@@ -259,14 +300,53 @@ pub(crate) fn qn_istep(control: &Control) -> f64 {
 }
 
 /// The opening step of the next line search when the direction is the
-/// gradient (steepest descent, NLCG, Adam): half the step last accepted,
+/// gradient (steepest descent, Adam): half the step last accepted,
 /// or `control.istep` again after a step that did not move.
+///
+/// Nonlinear CG does not use this. Its opening step is
+/// [`nlcg_opening_alpha`].
 pub(crate) fn next_istep(lsstep: f64, control: &Control) -> f64 {
     if lsstep <= 0.0 {
         control.istep
     } else {
         lsstep * 0.5
     }
+}
+
+/// Opening step for nonlinear CG, Nocedal-Wright equation 3.60.
+///
+/// `α0 = α_{k-1} (g_{k-1}·d_{k-1}) / (g_k·d_k)`, then clamped to `cap`.
+/// Both directional derivatives must be negative. Otherwise, or when the
+/// previous step did not move, the result is `fallback` clamped to `cap`.
+pub(crate) fn nlcg_opening_alpha(
+    prev_alpha: f64,
+    prev_gd: f64,
+    gd: f64,
+    cap: f64,
+    fallback: f64,
+) -> f64 {
+    let cap = if cap.is_finite() && cap > 0.0 {
+        cap
+    } else {
+        f64::INFINITY
+    };
+    let fb = if fallback.is_finite() && fallback > 0.0 {
+        fallback.min(cap)
+    } else {
+        1.0_f64.min(cap)
+    };
+    if !(prev_alpha > 0.0 && prev_gd < 0.0 && gd < 0.0) {
+        return fb;
+    }
+    let ratio = prev_gd / gd;
+    if !ratio.is_finite() || ratio <= 0.0 {
+        return fb;
+    }
+    let alpha = prev_alpha * ratio;
+    if !alpha.is_finite() || alpha <= 0.0 {
+        return fb;
+    }
+    alpha.min(cap)
 }
 
 #[cfg(test)]

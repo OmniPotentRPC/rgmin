@@ -3,6 +3,7 @@
 #include "xts.h"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <vector>
 
@@ -75,5 +76,50 @@ int main() {
     std::printf("optimize nit=%zu grad=%g pairs=%zu\n", r.nit,
                 r.grad_norm, solver.pair_count());
     rgmin_tensor_free(t);
+
+    std::vector<int32_t> z{1, 1};
+    auto precon = rgmin::Precon::lindh(z).cell(10.0, 10.0, 10.0);
+    rgmin::Solver geom(rgmin::Method::Lbfgs, rgmin::Control{}, 6);
+    if (geom.set_precon(precon) != RGMIN_SUCCESS) {
+        return 8;
+    }
+    if (sizeof(rgmin_precon_t) != precon.get()->struct_size) {
+        std::fprintf(stderr, "precon struct %zu rust %u\n", sizeof(rgmin_precon_t),
+                     precon.get()->struct_size);
+        return 12;
+    }
+    if (offsetof(rgmin_bond_t, i) != 0 || offsetof(rgmin_bond_t, j) != 4 ||
+        offsetof(rgmin_bond_t, k) != 8 || sizeof(rgmin_bond_t) != 16) {
+        return 13;
+    }
+    if (offsetof(rgmin_angle_t, i) != 0 || offsetof(rgmin_angle_t, vertex) != 4 ||
+        offsetof(rgmin_angle_t, k) != 8 || offsetof(rgmin_angle_t, k_theta) != 16 ||
+        sizeof(rgmin_angle_t) != 24) {
+        return 14;
+    }
+    if (offsetof(rgmin_precon_t, struct_size) != 0 || offsetof(rgmin_precon_t, kind) != 4 ||
+        offsetof(rgmin_precon_t, c_stab) != 8 || offsetof(rgmin_precon_t, mu) != 16 ||
+        offsetof(rgmin_precon_t, r_cut) != 24 || offsetof(rgmin_precon_t, cell) != 32 ||
+        offsetof(rgmin_precon_t, numbers) != 56 || offsetof(rgmin_precon_t, natoms) != 64 ||
+        offsetof(rgmin_precon_t, nbr_i) != 96 || offsetof(rgmin_precon_t, exp_a) != 152 ||
+        offsetof(rgmin_precon_t, bonds) != 160 || offsetof(rgmin_precon_t, angles) != 176 ||
+        offsetof(rgmin_precon_t, dihedrals) != 192 ||
+        offsetof(rgmin_precon_t, geometry_kind) != 196 || sizeof(rgmin_precon_t) != 200) {
+        std::fprintf(stderr, "precon layout kind=%zu size=%zu\n", offsetof(rgmin_precon_t, kind),
+                     sizeof(rgmin_precon_t));
+        return 15;
+    }
+    if (!std::isnan(geom.precon_scale())) {
+        return 9;
+    }
+    rgmin_bond_t bad{9, 0, 1.0};
+    auto ff = rgmin::Precon::ff({bad});
+    if (geom.set_precon(ff) != RGMIN_INVALID_PARAMETER) {
+        return 10;
+    }
+    geom.clear_precon();
+    if (!std::isnan(geom.precon_scale())) {
+        return 11;
+    }
     return 0;
 }

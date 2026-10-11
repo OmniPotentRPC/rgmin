@@ -603,7 +603,10 @@ pub(crate) fn highs_feasible_step_boxed(
         if let Some((x, bounds)) = coordinate_box {
             lo = lo.max(bounds.low[k] - x[k]);
             hi = hi.min(bounds.high[k] - x[k]);
-            if !(lo <= hi) {
+            if !matches!(
+                lo.partial_cmp(&hi),
+                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+            ) {
                 return Err(Error::Highs("invalid coordinate box".into()));
             }
         }

@@ -14,8 +14,8 @@ use crate::control::Control;
 use crate::diis::{DiisState, extrapolated, pulay_coefficients};
 use crate::error::{Error, Result};
 use crate::fire::{
-    Fire2Extras, FireState, FireVariant, fire_after_v1, fire_displacement, fire_rescale_velocity,
-    fire2_displacement, guenole2020,
+    Fire2Extras, FireMix, FireState, FireVariant, fire_after_v1_metric, fire_displacement,
+    fire_rescale_velocity, fire2_displacement_metric, guenole2020,
 };
 use crate::lbfgs::{GradNorm, Lbfgs};
 use crate::linesearch::{LineSearch, LineSearchOptions};
@@ -23,14 +23,18 @@ use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
 use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
+use crate::precon::{
+    ExpParams, FfParams, FfTerms, Ghost, LindhParams, Neighbours, PreconSpec, Slot,
+};
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
 use crate::quickmin::{QuickMinState, quickmin_displacement, quickmin_rescale_velocity};
-use crate::report::Report;
+use crate::report::{Report, Status};
 use crate::rigid::{project_horizontal, project_out_rot_trans};
 use crate::step::{
-    Taken, l2, next_istep, qn_istep, scale_step, scale_step_atom, take_step_with_options,
+    Taken, cap_alpha, l2, next_istep, nlcg_opening_alpha, qn_istep, scale_step, scale_step_atom,
+    take_step_with_options,
 };
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
@@ -45,6 +49,50 @@ const SESSION_LINESEARCH: LineSearch = LineSearch::Wolfe {
     c2: 0.9,
     maxiter: 20,
 };
+
+/// `P^{-1} v` when a geometry metric is installed, otherwise `v`.
+///
+/// A failed solve is an error. Substituting `v` would mix `P^{-1} g` and
+/// `g` inside one CG recurrence or one FIRE mix.
+fn metric_vector(precon: &Option<Slot>, v: &Array1<f64>) -> Result<Array1<f64>> {
+    match precon {
+        None => Ok(v.clone()),
+        Some(state) => {
+            let p = state.metric().ok_or(Error::Precon {
+                what: "metric is not assembled",
+            })?;
+            p.solve(v.view()).ok_or(Error::Precon {
+                what: "linear solve failed",
+            })
+        }
+    }
+}
+
+/// Steepest direction in the metric, `-z`, with the `Accept::Step` scale.
+fn nlcg_steepest(z: &Array1<f64>, accept: Accept, istep: f64) -> Array1<f64> {
+    if accept == Accept::Step {
+        z.mapv(|v| -v * istep)
+    } else {
+        z.mapv(|v| -v)
+    }
+}
+
+/// P-norms for the FIRE mix: `sqrt(v^T P v)` and `sqrt(F · P^{-1} F)`.
+fn fire_mix(
+    precon: &Option<Slot>,
+    vel: &Array1<f64>,
+    raw: &Array1<f64>,
+    steepest: &Array1<f64>,
+) -> Option<FireMix> {
+    let p = precon.as_ref().and_then(Slot::metric)?;
+    let pv = p.apply(vel.view());
+    let vel_n = vel.dot(&pv).max(0.0).sqrt();
+    let dir_n = raw.dot(steepest).max(0.0).sqrt();
+    Some(FireMix {
+        vel: vel_n,
+        direction: dir_n,
+    })
+}
 
 /// Long-lived solver. Algorithm memory lives here; `x` stays with the caller.
 pub struct Solver {
@@ -81,6 +129,12 @@ pub struct Solver {
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
+    /// Geometry metric. `None` leaves every method unchanged.
+    precon: Option<Slot>,
+    /// Bumped when `P` is installed, cleared, or rebuilt.
+    metric_epoch: u64,
+    /// Times NLCG replaced a non-descent direction with steepest descent.
+    nlcg_descent_fallbacks: u64,
     inner: Inner,
 }
 
@@ -92,8 +146,17 @@ enum Inner {
         restart: Restart,
         dir: Array1<f64>,
         g_old: Array1<f64>,
+        /// `P^{-1} g` at the previous accepted point. Equals `g_old` when
+        /// no geometry metric is installed.
+        z_old: Array1<f64>,
         d_old: Array1<f64>,
         initialized: bool,
+        /// `metric_epoch` at the moment `z_old` and `dir` were formed.
+        z_epoch: u64,
+        /// Accepted line-search step `α_{k-1}`. Zero before the first move.
+        prev_alpha: f64,
+        /// `g_{k-1} · d_{k-1}` for Nocedal-Wright equation 3.60.
+        prev_gd: f64,
     },
     Bfgs {
         h: Array2<f64>,
@@ -179,8 +242,201 @@ impl Solver {
             last_pos: None,
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
+            precon: None,
+            metric_epoch: 0,
+            nlcg_descent_fallbacks: 0,
             inner,
         }
+    }
+
+    /// Family used by [`crate::select_precon`] when the caller asks for auto.
+    ///
+    /// FIRE is the identity. Nonlinear CG is the metric rule. Every
+    /// other method is the quasi-Newton rule, which installs `P^{-1}`
+    /// as `H0` when the geometry asks for a matrix.
+    #[must_use]
+    pub fn optimizer_family(&self) -> crate::OptimizerFamily {
+        match &self.inner {
+            Inner::Fire(_, _) => crate::OptimizerFamily::Fire,
+            Inner::Nlcg { .. } => crate::OptimizerFamily::Cg,
+            _ => crate::OptimizerFamily::QuasiNewton,
+        }
+    }
+
+    /// Install one geometry preconditioner.
+    ///
+    /// L-BFGS takes \(H_0 = P^{-1}\). FIRE and nonlinear CG take `P`
+    /// as the metric. An index outside `0..dim/3` fails here.
+    /// [`ExpParams::mu`] `None`, and the same field on Lindh and FF,
+    /// defers the energy scale to the next [`Self::step`].
+    pub fn set_precon(&mut self, spec: PreconSpec<'_>) -> Result<()> {
+        let slot = match spec {
+            PreconSpec::Exp {
+                positions,
+                neighbours,
+                params,
+            } => {
+                self.require_precon_dim(positions.len())?;
+                Slot::Exp(crate::precon::ExpState::new(positions, neighbours, params)?)
+            }
+            PreconSpec::Lindh {
+                positions,
+                z,
+                ghosts,
+                params,
+            } => {
+                self.require_precon_dim(positions.len())?;
+                Slot::Lindh(crate::precon::LindhState::new(
+                    positions, z, ghosts, params,
+                )?)
+            }
+            PreconSpec::Ff {
+                positions,
+                terms,
+                params,
+            } => {
+                self.require_precon_dim(positions.len())?;
+                Slot::Ff(crate::precon::FfState::new(positions, terms, params)?)
+            }
+        };
+        self.install_slot(slot);
+        Ok(())
+    }
+
+    fn require_precon_dim(&self, got: usize) -> Result<()> {
+        if got != self.dim {
+            return Err(Error::Dim { got, dim: self.dim });
+        }
+        Ok(())
+    }
+
+    fn install_slot(&mut self, slot: Slot) {
+        let matrix = slot.metric().cloned();
+        self.precon = Some(slot);
+        self.metric_epoch = self.metric_epoch.wrapping_add(1);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(matrix);
+        }
+    }
+
+    /// Install the exponential preconditioner at `positions`.
+    ///
+    /// `positions` has length [`Self::dim`] and is `3 N` coordinates in
+    /// C order. See [`Self::set_precon`].
+    pub fn set_exp(
+        &mut self,
+        positions: ArrayView1<f64>,
+        neighbours: &Neighbours,
+        params: &ExpParams,
+    ) -> Result<()> {
+        self.set_precon(PreconSpec::Exp {
+            positions,
+            neighbours,
+            params,
+        })
+    }
+
+    /// Install the Lindh model Hessian at `positions`.
+    ///
+    /// `z` has one atomic number per free atom. `ghosts` are frozen
+    /// atoms. The matrix is held until the largest atomic move exceeds
+    /// half the nearest-neighbour distance, the same rule as
+    /// [`Self::set_exp`].
+    pub fn set_lindh(
+        &mut self,
+        positions: ArrayView1<f64>,
+        z: &[i32],
+        ghosts: &[Ghost],
+        params: &LindhParams,
+    ) -> Result<()> {
+        self.set_precon(PreconSpec::Lindh {
+            positions,
+            z,
+            ghosts,
+            params,
+        })
+    }
+
+    /// Install the bonded metric at `positions`.
+    ///
+    /// The terms are harmonic bonds and angles, Morse bonds, and
+    /// harmonic torsions. Unit force constants are a geometric metric.
+    /// The hold rule is the one used by [`Self::set_exp`].
+    pub fn set_ff(
+        &mut self,
+        positions: ArrayView1<f64>,
+        terms: FfTerms<'_>,
+        params: &FfParams,
+    ) -> Result<()> {
+        self.set_precon(PreconSpec::Ff {
+            positions,
+            terms,
+            params,
+        })
+    }
+
+    /// Install a neighbour list whose geometry arrives on the next step.
+    #[cfg(feature = "capi")]
+    pub(crate) fn set_exp_deferred(&mut self, state: crate::precon::ExpState) {
+        self.install_slot(Slot::Exp(state));
+    }
+
+    /// Install a Lindh list whose geometry arrives on the next step.
+    #[cfg(feature = "capi")]
+    pub(crate) fn set_lindh_deferred(&mut self, state: crate::precon::LindhState) {
+        self.install_slot(Slot::Lindh(state));
+    }
+
+    /// Install an FF list whose geometry arrives on the next step.
+    #[cfg(feature = "capi")]
+    pub(crate) fn set_ff_deferred(&mut self, state: crate::precon::FfState) {
+        self.install_slot(Slot::Ff(state));
+    }
+
+    /// Drop the installed geometry preconditioner.
+    pub fn clear_precon(&mut self) {
+        self.precon = None;
+        self.metric_epoch = self.metric_epoch.wrapping_add(1);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(None);
+        }
+    }
+
+    /// Times nonlinear CG replaced a non-descent direction with `-P^{-1} g`
+    /// (or `-g` when no metric is installed).
+    #[must_use]
+    pub fn nlcg_descent_fallbacks(&self) -> u64 {
+        self.nlcg_descent_fallbacks
+    }
+
+    /// Energy scale of the installed geometry preconditioner, after
+    /// estimation. `None` when no preconditioner is installed or the
+    /// scale has not been estimated yet.
+    #[must_use]
+    pub fn precon_scale(&self) -> Option<f64> {
+        self.precon.as_ref().and_then(Slot::scale)
+    }
+
+    fn refresh_exp<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        if self.precon.is_none() {
+            return Ok(());
+        }
+        let grad_fn = |p: ArrayView1<f64>| obj.grad(p);
+        let mut rebuilt = false;
+        if let Some(state) = &mut self.precon {
+            rebuilt = state.refresh(x.view(), grad, grad_fn)?;
+        }
+        if rebuilt {
+            self.metric_epoch = self.metric_epoch.wrapping_add(1);
+        }
+        let matrix = self.precon.as_ref().and_then(|s| s.metric().cloned());
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(matrix);
+        }
+        Ok(())
     }
 
     /// eOn `lbfgs_step`. Newton / RFO need a Hessian on [`Self::step_hess`].
@@ -570,7 +826,7 @@ impl Solver {
             for k in 0..x.len() {
                 let lo = bounds.low[k];
                 let hi = bounds.high[k];
-                if !x[k].is_finite() || !grad[k].is_finite() || !(lo <= x[k] && x[k] <= hi) {
+                if !(x[k].is_finite() && grad[k].is_finite() && lo <= x[k] && x[k] <= hi) {
                     return f64::INFINITY;
                 }
                 // Distance clipping retains gradients smaller than an ulp of x.
@@ -579,6 +835,23 @@ impl Solver {
             return norm;
         }
         l2(grad)
+    }
+
+    /// Coordinates the stationarity measure runs over.
+    ///
+    /// A coordinate box drops entries whose bounds have no width. Every
+    /// other path uses the length of the horizontal or projected gradient,
+    /// which is the session dimension.
+    pub(crate) fn free_len(&self, bounds: &eindir_core::Bounds<f64>) -> usize {
+        if self.has_coordinate_box()
+            && self.manifold == ManifoldKind::Euclidean
+            && !self.project_rigid
+            && !self.has_equalities()
+        {
+            let n = self.dim.min(bounds.low.len()).min(bounds.high.len());
+            return (0..n).filter(|&k| bounds.high[k] > bounds.low[k]).count();
+        }
+        self.dim
     }
 
     fn check_manifold(&self, n: usize) -> Result<()> {
@@ -825,7 +1098,16 @@ impl Solver {
         self.last_pos = None;
         match &mut self.inner {
             Inner::Lbfgs(solver) => solver.forget(),
-            Inner::Nlcg { initialized, .. } => *initialized = false,
+            Inner::Nlcg {
+                initialized,
+                prev_alpha,
+                prev_gd,
+                ..
+            } => {
+                *initialized = false;
+                *prev_alpha = 0.0;
+                *prev_gd = 0.0;
+            }
             Inner::Bfgs { h } => *h = Array2::<f64>::eye(self.dim),
             Inner::Sr1 { h } => *h = Array2::<f64>::eye(self.dim),
             Inner::Sr2 { b } => *b = Array2::<f64>::eye(self.dim),
@@ -1008,12 +1290,13 @@ impl Solver {
         };
         grad = self.horizontal_grad(x, &grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
-        if gnorm < self.control.gtol {
+        if let Some(status) = self.control.halt(gnorm, self.free_len(obj.bounds())) {
             return Ok(Report {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: gnorm,
+                status,
             });
         }
         let hess = obj.hessian(x.view());
@@ -1101,6 +1384,10 @@ impl Solver {
                     coords: x.clone(),
                     steps: self.steps,
                     grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+                    status: self.control.classify(
+                        self.stationarity_norm(obj.bounds(), x, &grad),
+                        self.free_len(obj.bounds()),
+                    ),
                 });
             }
         }
@@ -1154,6 +1441,10 @@ impl Solver {
             coords: x.clone(),
             steps: self.steps,
             grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+            status: self.control.classify(
+                self.stationarity_norm(obj.bounds(), x, &grad),
+                self.free_len(obj.bounds()),
+            ),
         })
     }
 
@@ -1205,6 +1496,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &gt),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &gt),
+                    self.free_len(obj.bounds()),
+                ),
             })
         } else {
             self.remember(x, value, &grad);
@@ -1214,6 +1509,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &grad),
+                    self.free_len(obj.bounds()),
+                ),
             })
         }
     }
@@ -1256,14 +1555,16 @@ impl Solver {
                 }
             }
         }
-        if gnorm < self.control.gtol {
+        if let Some(status) = self.control.halt(gnorm, self.free_len(obj.bounds())) {
             return Ok(Report {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: gnorm,
+                status,
             });
         }
+        self.refresh_exp(obj, x, &grad)?;
 
         if matches!(self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
             && matches!(self.inner, Inner::Lbfgs(_))
@@ -1300,6 +1601,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &grad),
+                    self.free_len(obj.bounds()),
+                ),
             });
         }
 
@@ -1405,10 +1710,11 @@ impl Solver {
         }
         #[cfg(feature = "highs")]
         let boxed = self.has_coordinate_box();
+        let mut energy_stall = false;
         match &mut self.inner {
             Inner::Lbfgs(_) if !lbfgs_line_searched => {}
             Inner::Lbfgs(solver) => {
-                solver.step_objective_with_direction(
+                energy_stall = solver.step_objective_with_direction(
                     obj,
                     x,
                     &mut value,
@@ -1440,6 +1746,7 @@ impl Solver {
                     self.istep,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 *x = t.x;
                 value = t.f;
                 grad = t.g;
@@ -1452,26 +1759,48 @@ impl Solver {
                 restart,
                 dir,
                 g_old,
+                z_old,
                 d_old,
                 initialized,
+                z_epoch,
+                prev_alpha,
+                prev_gd,
             } => {
-                if !*initialized {
-                    *dir = if self.accept == Accept::Step {
-                        grad.mapv(|g| -g * self.istep)
-                    } else {
-                        grad.mapv(|g| -g)
-                    };
+                let z_now = metric_vector(&self.precon, &grad)?;
+                if !*initialized || *z_epoch != self.metric_epoch {
+                    // A new or replaced P makes z_old belong to the old
+                    // matrix. This iteration is steepest descent in the
+                    // current metric, so the next β is formed with one P.
+                    if *initialized {
+                        *prev_alpha = 0.0;
+                        *prev_gd = 0.0;
+                    }
+                    *dir = nlcg_steepest(&z_now, self.accept, self.istep);
                     *g_old = grad.clone();
+                    *z_old = z_now;
                     *d_old = dir.clone();
+                    *z_epoch = self.metric_epoch;
                     *initialized = true;
                 }
+                let gd_used = crate::vecops::dot(grad.view(), dir.view());
+                let cap = cap_alpha(dir.view(), &self.control, self.atom_maxmove);
+                let first = if self.precon.is_some() {
+                    1.0
+                } else {
+                    self.control.istep
+                };
+                let alpha0 = if self.accept == Accept::Step {
+                    self.istep
+                } else {
+                    nlcg_opening_alpha(*prev_alpha, *prev_gd, gd_used, cap, first)
+                };
                 let t = take_session_step(
                     obj,
                     x,
                     value,
                     &grad,
                     dir.view(),
-                    self.istep,
+                    alpha0,
                     self.linesearch,
                     &self.control,
                     self.atom_maxmove,
@@ -1481,33 +1810,56 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 *x = t.x;
                 value = t.f;
                 grad = t.g;
                 if t.moved || self.accept != Accept::Step {
+                    let z_new = metric_vector(&self.precon, &grad)?;
                     let ctx = ConjugacyContext {
                         current_gradient: grad.view(),
                         previous_gradient: g_old.view(),
                         previous_direction: d_old.view(),
                     };
-                    let mut beta = conjugacy.beta(&ctx);
-                    if restart.should_restart(&ctx) {
+                    let mut beta = if *z_epoch != self.metric_epoch {
+                        0.0
+                    } else {
+                        conjugacy.beta_metric(&ctx, z_new.view(), z_old.view())
+                    };
+                    if restart.should_restart_metric(
+                        grad.view(),
+                        z_new.view(),
+                        g_old.view(),
+                        z_old.view(),
+                    ) {
                         beta = 0.0;
                     }
                     *dir = if self.accept == Accept::Step {
                         Array1::from_iter(
-                            grad.iter()
+                            z_new
+                                .iter()
                                 .zip(d_old.iter())
-                                .map(|(g, d)| -g * self.istep + beta * d),
+                                .map(|(z, d)| -z * self.istep + beta * d),
                         )
                     } else {
-                        Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d))
+                        Array1::from_iter(
+                            z_new.iter().zip(d_old.iter()).map(|(z, d)| -z + beta * d),
+                        )
                     };
+                    // A non-descent direction is not a valid conjugate step.
+                    let gd = crate::vecops::dot(grad.view(), dir.view());
+                    if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+                        self.nlcg_descent_fallbacks += 1;
+                        *dir = nlcg_steepest(&z_new, self.accept, self.istep);
+                    }
                     g_old.assign(&grad);
+                    z_old.assign(&z_new);
                     d_old.assign(dir);
+                    *z_epoch = self.metric_epoch;
                 }
                 if self.accept != Accept::Step {
-                    self.istep = qn_istep(&self.control);
+                    *prev_alpha = t.alpha;
+                    *prev_gd = gd_used;
                 }
             }
             Inner::Bfgs { h } => {
@@ -1530,6 +1882,7 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let moved = t.moved;
                 *x = t.x;
                 value = t.f;
@@ -1561,6 +1914,7 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let lsstep = t.alpha;
                 let moved = t.moved;
                 *x = t.x;
@@ -1594,6 +1948,7 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let lsstep = t.alpha;
                 let moved = t.moved;
                 *x = t.x;
@@ -1632,6 +1987,7 @@ impl Solver {
                     self.istep,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let lsstep = t.alpha;
                 *x = t.x;
                 value = t.f;
@@ -1643,15 +1999,20 @@ impl Solver {
                 }
             }
             Inner::Fire(state, ext) => {
-                let mut force = grad.mapv(|g| -g);
+                #[allow(unused_mut)]
+                let mut raw = grad.mapv(|g| -g);
+                #[allow(unused_mut)]
+                let mut steepest = metric_vector(&self.precon, &raw)?;
                 #[cfg(feature = "highs")]
                 if boxed {
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut raw);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
+                let mix = fire_mix(&self.precon, &state.vel, &raw, &steepest);
                 let dx = match ext {
-                    Some(ext) => fire2_displacement(state, ext, &force),
-                    None => fire_displacement(state, &force),
+                    Some(ext) => fire2_displacement_metric(state, ext, &raw, &steepest, mix),
+                    None => fire_displacement(state, &steepest),
                 };
                 let mut trial = &*x + &dx;
                 if let Some(cap) = self.atom_maxmove {
@@ -1668,13 +2029,18 @@ impl Solver {
                 let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
                 grad = ev.1;
-                let mut force_new = grad.mapv(|g| -g);
+                #[allow(unused_mut)]
+                let mut raw_new = grad.mapv(|g| -g);
+                #[allow(unused_mut)]
+                let mut steep_new = metric_vector(&self.precon, &raw_new)?;
                 #[cfg(feature = "highs")]
                 if boxed {
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut force_new);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut raw_new);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steep_new);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
-                fire_after_v1(state, &force_new);
+                let mix_new = fire_mix(&self.precon, &state.vel, &raw_new, &steep_new);
+                fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
             }
             Inner::QuickMin(state) => {
                 #[allow(unused_mut)]
@@ -1798,11 +2164,19 @@ impl Solver {
 
         self.remember(x, value, &grad);
         self.steps += 1;
+        let grad_norm = self.stationarity_norm(obj.bounds(), x, &grad);
+        let mut status = self
+            .control
+            .classify(grad_norm, self.free_len(obj.bounds()));
+        if energy_stall && status == Status::Iterating {
+            status = Status::NoiseFloor;
+        }
         Ok(Report {
             value,
             coords: x.clone(),
             steps: self.steps,
-            grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+            grad_norm,
+            status,
         })
     }
 
@@ -1887,6 +2261,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &grad),
+                    self.free_len(obj.bounds()),
+                ),
             });
         }
         unreachable!("PSO slot populated above")
@@ -1952,6 +2330,7 @@ where
         g,
         alpha: if moved { direct_scale } else { 0.0 },
         moved,
+        energy_noise: false,
     }
 }
 
@@ -1968,8 +2347,12 @@ impl Inner {
                 restart: *restart,
                 dir: Array1::zeros(dim),
                 g_old: Array1::zeros(dim),
+                z_old: Array1::zeros(dim),
                 d_old: Array1::zeros(dim),
                 initialized: false,
+                z_epoch: 0,
+                prev_alpha: 0.0,
+                prev_gd: 0.0,
             },
             Method::Bfgs => Inner::Bfgs {
                 h: Array2::<f64>::eye(dim),
@@ -2055,6 +2438,7 @@ mod tests {
                 istep: 0.1,
                 maxmove: Some(0.01),
                 ftol_rel: None,
+                noise_floor: None,
             },
             2,
         )
@@ -2130,6 +2514,7 @@ mod tests {
                     istep: 0.1,
                     maxmove: Some(0.05),
                     ftol_rel: None,
+                    noise_floor: None,
                 },
                 2,
             );
@@ -2278,6 +2663,7 @@ mod retained_neb_guard_tests {
                 istep: 1.0,
                 maxmove: None,
                 ftol_rel: None,
+                noise_floor: None,
             },
             3,
         );
@@ -2313,6 +2699,7 @@ mod retained_neb_guard_tests {
                 istep: 1.0,
                 maxmove: None,
                 ftol_rel: None,
+                noise_floor: None,
             },
             3,
         );
@@ -2348,5 +2735,105 @@ mod retained_neb_guard_tests {
         solver.step(&obj, &mut x).unwrap();
         assert!((x[0] - 0.3896090211663347).abs() < 1e-8, "x0 {}", x[0]);
         assert!((x[1] - (-0.06362718831085057)).abs() < 1e-8, "x1 {}", x[1]);
+    }
+
+    /// Ill-conditioned diagonal quadratic. `P` is the Hessian, so
+    /// `P^{-1} g` is the Newton step and CG finishes in at most `n` steps.
+    #[test]
+    fn preconditioned_cg_on_a_diagonal_quadratic_finishes_within_n_steps() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let lam = [1.0e-4, 1.0e-2, 1.0, 1.0e2, 1.0e4, 1.0e6];
+        let n = lam.len();
+        let calls = AtomicUsize::new(0);
+        struct Quad<'a> {
+            lam: &'a [f64],
+            calls: &'a AtomicUsize,
+            bounds: eindir_core::Bounds<f64>,
+        }
+        impl Objective<f64> for Quad<'_> {
+            fn dim(&self) -> usize {
+                self.lam.len()
+            }
+            fn bounds(&self) -> &eindir_core::Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.value_and_gradient(x).0
+            }
+        }
+        impl eindir_core::Gradient<f64> for Quad<'_> {
+            fn dim(&self) -> usize {
+                self.lam.len()
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.value_and_gradient(x).1
+            }
+        }
+        impl DifferentiableObjective<f64> for Quad<'_> {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                let mut f = 0.0;
+                let mut g = Array1::zeros(self.lam.len());
+                for i in 0..self.lam.len() {
+                    f += 0.5 * self.lam[i] * x[i] * x[i];
+                    g[i] = self.lam[i] * x[i];
+                }
+                (f, g)
+            }
+        }
+        let obj = Quad {
+            lam: &lam,
+            calls: &calls,
+            bounds: eindir_core::Bounds::new(
+                Array1::from_elem(n, -1e6),
+                Array1::from_elem(n, 1e6),
+                0.0,
+            ),
+        };
+        let mut x = Array1::ones(n);
+        let mut solver = Solver::new(
+            Method::Nlcg {
+                conjugacy: Conjugacy::PolakRibierePlus,
+                restart: Restart::njws(),
+            },
+            Control {
+                maxiter: 1,
+                gtol: 1e-10,
+                istep: 0.01,
+                maxmove: None,
+                ftol_rel: None,
+                noise_floor: None,
+            },
+            n,
+        );
+        solver.set_linesearch(LineSearch::Wolfe {
+            c1: 1e-4,
+            c2: 0.1,
+            maxiter: 20,
+        });
+        solver.precon = Some(Slot::Exp(crate::precon::ExpState::holding_diagonal(
+            &lam,
+            x.view(),
+        )));
+        solver.metric_epoch = 1;
+        let mut steps = 0usize;
+        let mut used = 0usize;
+        let mut gnorm = f64::INFINITY;
+        for _ in 0..n + 2 {
+            let before = calls.load(Ordering::Relaxed);
+            let rep = solver.step(&obj, &mut x).unwrap();
+            used += calls.load(Ordering::Relaxed) - before;
+            steps += 1;
+            gnorm = rep.grad_norm;
+            if gnorm < 1e-8 {
+                break;
+            }
+        }
+        assert!(gnorm < 1e-8, "not converged, |g| {gnorm}, x {x:?}");
+        assert!(steps <= n, "steps {steps} exceed n {n}");
+        assert!(
+            steps > 0 && used <= steps * 2,
+            "calls {used} over {steps} steps"
+        );
     }
 }

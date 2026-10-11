@@ -11,6 +11,7 @@ fn control() -> Control {
         istep: 0.1,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     }
 }
 
@@ -56,7 +57,6 @@ fn retained_pairs_beat_a_cold_start() {
     }
 
     let mut cold = Solver::new(Method::lbfgs(), control(), 2).with_gtol(1e-8);
-    let mut y = array![-1.2 + 0.05, 1.0 - 0.05];
     // Same start as the warm restart: first quench, then same perturbation.
     let mut z = array![-1.2, 1.0];
     for _ in 0..80 {
@@ -66,7 +66,7 @@ fn retained_pairs_beat_a_cold_start() {
         }
     }
     cold.forget();
-    y = z;
+    let mut y = z;
     y[0] += 0.05;
     y[1] -= 0.05;
     let mut cold_steps = 0usize;
@@ -176,6 +176,7 @@ fn sphere_rayleigh_stays_on_the_sphere() {
             istep: 0.2,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         3,
     );
@@ -246,6 +247,7 @@ fn so3_session_stays_orthogonal() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         9,
     );
@@ -321,6 +323,7 @@ fn se3_session_keeps_rotation_and_moves_translation() {
             istep: 0.4,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         12,
     );
@@ -528,6 +531,7 @@ fn fire_and_bb_kill_a_sphere() {
                 istep: 0.2,
                 maxmove: None,
                 ftol_rel: None,
+                noise_floor: None,
             },
             2,
         );
@@ -602,6 +606,7 @@ fn dogleg_kills_a_quadratic() {
             istep: 4.0,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         2,
     );
@@ -733,6 +738,7 @@ fn lbfgs_accept_step_is_one_oracle_per_step() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         2,
     );

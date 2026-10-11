@@ -11,6 +11,7 @@ fn seeded_session(maxmove: Option<f64>) -> Solver {
             istep: 0.1,
             maxmove,
             ftol_rel: None,
+            noise_floor: None,
         },
         1,
     );

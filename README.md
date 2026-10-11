@@ -42,11 +42,19 @@ session defaults to strong Wolfe, starts every search from the value and
 gradient it holds, and bounds trials by the displacement cap
 (`LineSearch::search_from`). FIRE 2.0 as Guénolé et al. 2020 publish it
 is `Solver::set_fire_variant(FireVariant::Guenole2020)`.
-`bench/atomistic` counts force calls on rgpot potentials, and
+`bench/atomistic` counts force calls on rgpot potentials.
+`bench/gate` (`python -m rggate`, pixi task `gate`) is the censored CSV
+gate: same stationary point, Kaplan-Meier, BCa, and a confidence sequence.
 `validation/` holds the sympy checks behind the interpolation, the
 two-loop map and FIRE 2.0 (`uv run --with sympy python validation/<file>.py`).
 Methods: NLCG, BFGS, L-BFGS, SR1, SR2, Newton, RFO, Adam, steepest
 descent, PSO, FIRE, FIRE 2.0, Barzilai-Borwein, Powell dogleg.
+`Solver::set_precon` installs Exp, Lindh, or the bonded metric.
+L-BFGS uses the matrix as the initial inverse Hessian. FIRE and
+nonlinear CG use it as the metric. `select_precon` picks Exp for a
+bulk or a surface of at least 100 atoms, Lindh for a molecule or a
+cluster whose elements are in the Lindh tables, the bonded metric
+when that caller has a force field, and the identity otherwise.
 
 Narrative docs live in [`docs/orgmode/`](docs/orgmode/index.org)
 (Diataxis); the explanation quadrant derives the math behind each

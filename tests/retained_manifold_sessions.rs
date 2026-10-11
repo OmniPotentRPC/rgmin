@@ -8,6 +8,7 @@ fn control() -> Control {
         istep: 0.1,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     }
 }
 
@@ -60,6 +61,7 @@ fn spd_session_stays_on_the_set() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         4,
     );
@@ -92,7 +94,6 @@ fn spd_rejects_a_3n_cluster() {
 fn grassmann_session_stays_on_the_set() {
     use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
     use ndarray::ArrayView1;
-    use rgmin::ManifoldKind;
 
     /// Brockett cost on Gr(4, 2): 1/2 trace(X^T A X), A = diag(1,2,3,4).
     struct Brockett;
@@ -150,6 +151,7 @@ fn grassmann_session_stays_on_the_set() {
             istep: 0.2,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         8,
     );

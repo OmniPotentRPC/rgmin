@@ -22,7 +22,7 @@ use crate::error::{Error, Result};
 use crate::linesearch::{LineSearch, LineSearchOptions};
 use crate::qn::solve_spd;
 use crate::report::Report;
-use crate::step::{l2, qn_istep, take_step_with_options};
+use crate::step::{energy_noise_report, l2, qn_istep, take_step_with_options};
 use eindir_core::{DifferentiableObjective, Objective};
 
 /// How [`Lbfgs`] compares the gradient to [`Lbfgs::gtol`].
@@ -92,6 +92,8 @@ pub struct Lbfgs {
     /// Engine and callback policies for constrained solves.
     #[cfg(feature = "highs")]
     pub highs_options: crate::HighsOptions,
+    /// \(H_0 = P^{-1}\) from an assembled geometry preconditioner.
+    h0: Option<crate::precon::Metric>,
 }
 
 impl Default for Lbfgs {
@@ -125,7 +127,13 @@ impl Lbfgs {
             highs: None,
             #[cfg(feature = "highs")]
             highs_options: crate::HighsOptions::default(),
+            h0: None,
         }
+    }
+
+    /// Install or clear \(H_0 = P^{-1}\).
+    pub(crate) fn set_h0(&mut self, h0: Option<crate::precon::Metric>) {
+        self.h0 = h0;
     }
 
     /// Discards the stored curvature.
@@ -178,16 +186,28 @@ impl Lbfgs {
     }
 
     /// Two-loop recursion: applies the inverse-Hessian approximation to `g`.
+    ///
+    /// An installed geometry preconditioner is \(H_0 = P^{-1}\).
     pub(crate) fn direction(&self, g: ArrayView1<f64>) -> Array1<f64> {
-        self.direction_with_precon(g, None)
+        self.direction_with_sources(g, None, self.h0.as_ref())
     }
 
     /// Two-loop with optional \(H_0 = P^{-1}\). `precon` is the pair / Lindh
     /// matrix \(P\); the middle product is `solve(P, q)`, not a scalar γ.
+    /// A dense `precon` wins over an installed exponential matrix.
     pub(crate) fn direction_with_precon(
         &self,
         g: ArrayView1<f64>,
         precon: Option<&ndarray::Array2<f64>>,
+    ) -> Array1<f64> {
+        self.direction_with_sources(g, precon, None)
+    }
+
+    fn direction_with_sources(
+        &self,
+        g: ArrayView1<f64>,
+        precon: Option<&ndarray::Array2<f64>>,
+        exp: Option<&crate::precon::Metric>,
     ) -> Array1<f64> {
         let mut q = g.to_owned();
         let m = self.memory.len();
@@ -203,6 +223,15 @@ impl Lbfgs {
             // P; an indefinite Hessian falls back to gamma I and is
             // counted.
             q = match solve_spd(pmat, &q) {
+                Some(v) => v,
+                None => {
+                    self.precon_fallbacks
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    self.scale_gamma(q)
+                }
+            };
+        } else if let Some(exp) = exp {
+            q = match exp.solve(q.view()) {
                 Some(v) => v,
                 None => {
                     self.precon_fallbacks
@@ -710,23 +739,28 @@ impl Lbfgs {
 
         for step in 0..control.maxiter {
             let gnorm = l2(&grad);
-            if gnorm < control.gtol {
+            if let Some(status) = control.halt(gnorm, grad.len()) {
                 return Ok(Report {
                     value,
                     coords: pos,
                     steps: step,
                     grad_norm: gnorm,
+                    status,
                 });
             }
-            self.step_objective(
+            let stall = self.step_objective(
                 obj, &mut pos, &mut value, &mut grad, &mut istep, linesearch, control, None,
             );
+            if stall {
+                return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+            }
         }
         Ok(Report {
             value,
             coords: pos,
             steps: control.maxiter,
             grad_norm: l2(&grad),
+            status: control.finish_status(l2(&grad), grad.len(), true),
         })
     }
 
@@ -734,6 +768,9 @@ impl Lbfgs {
     ///
     /// `atom_maxmove` caps the largest per-atom displacement of the
     /// accepted step; `None` leaves only `control.maxmove` in force.
+    ///
+    /// Returns whether every search in this iteration found no trial
+    /// whose decrease cleared `c * eps_f`. The point is then unchanged.
     pub fn step_objective<O>(
         &mut self,
         obj: &O,
@@ -744,7 +781,8 @@ impl Lbfgs {
         linesearch: LineSearch,
         control: &Control,
         atom_maxmove: Option<f64>,
-    ) where
+    ) -> bool
+    where
         O: DifferentiableObjective<f64> + ?Sized,
     {
         self.step_objective_with_direction(
@@ -759,7 +797,7 @@ impl Lbfgs {
             None,
             true,
             LineSearchOptions::default(),
-        );
+        )
     }
 
     pub(crate) fn step_objective_with_direction<O>(
@@ -775,7 +813,8 @@ impl Lbfgs {
         supplied_direction: Option<Array1<f64>>,
         record_pair: bool,
         options: LineSearchOptions,
-    ) where
+    ) -> bool
+    where
         O: DifferentiableObjective<f64> + ?Sized,
     {
         let allow_restart = supplied_direction.is_none();
@@ -808,10 +847,12 @@ impl Lbfgs {
             atom_maxmove,
             options,
         );
-        let t = if allow_restart && !t.moved && !self.memory.is_empty() {
-            // A failed search can reflect a curvature scale that no longer
-            // describes the objective. Retry the gradient direction once;
-            // supplied feasible directions retain their own constraints.
+        // A failed search can reflect a curvature scale that no longer
+        // describes the objective. Retry the gradient direction once.
+        // The energy floor fires only when both searches, or the only
+        // search, found no trial that cleared `c * eps_f`.
+        let (t, stall) = if allow_restart && !t.moved && !self.memory.is_empty() {
+            let first_noise = t.energy_noise;
             self.forget();
             let direction = self.direction(grad.view());
             #[cfg(feature = "highs")]
@@ -820,7 +861,7 @@ impl Lbfgs {
             } else {
                 direction
             };
-            take_step_with_options(
+            let retry = take_step_with_options(
                 obj,
                 pos,
                 *value,
@@ -831,9 +872,12 @@ impl Lbfgs {
                 control,
                 atom_maxmove,
                 options,
-            )
+            );
+            let stall = first_noise && retry.energy_noise;
+            (retry, stall)
         } else {
-            t
+            let stall = t.energy_noise;
+            (t, stall)
         };
         if t.moved && record_pair {
             let s = &t.x - &*pos;
@@ -844,6 +888,7 @@ impl Lbfgs {
         *value = t.f;
         *grad = t.g;
         *istep = qn_istep(control);
+        stall
     }
 }
 
@@ -946,9 +991,11 @@ mod neb_guard_tests {
     fn invalid_empty_memory_scales_select_a_finite_force_step() {
         let gradient = array![-1.0, 2.0, 0.0];
         for scale in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let mut solver = Lbfgs::default();
-            solver.angle_reset = true;
-            solver.inverse_curvature = scale;
+            let mut solver = Lbfgs {
+                angle_reset: true,
+                inverse_curvature: scale,
+                ..Lbfgs::default()
+            };
             let direction = solver.guarded_direction(gradient.view(), Some(1.0));
             assert_eq!(direction, -&gradient);
             assert!(direction.dot(&gradient) < 0.0);

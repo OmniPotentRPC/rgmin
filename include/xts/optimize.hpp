@@ -28,6 +28,7 @@ using rgmin::minimize_eindir;
 using rgmin::optimize;
 using rgmin::borrow_cpu_f64;
 using rgmin::Solver;
+using rgmin::Precon;
 
 namespace minimize = rgmin::minimize;
 namespace nlcg = rgmin::nlcg;

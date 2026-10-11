@@ -27,6 +27,12 @@ pub enum Conjugacy {
     /// Polak and Ribiere, *Note sur la convergence de methodes de directions
     /// conjuguees* (1969).
     PolakRibiere,
+    /// Polak-Ribiere+, NJWS 5.45: `max(β_PR, 0)`.
+    ///
+    /// The same clamp applies in the Euclidean product and in the metric
+    /// product. Nocedal and Wright, *Numerical Optimization*,
+    /// <https://doi.org/10.1007/978-0-387-40065-5>.
+    PolakRibierePlus,
     /// Hestenes-Stiefel, NJWS 5.46: `g·y / (y·d_old)`.
     ///
     /// Hestenes and Stiefel, *Methods of Conjugate Gradients for Solving
@@ -98,14 +104,33 @@ impl Restart {
 
     /// True when the next step should reset to steepest descent.
     pub fn should_restart(&self, ctx: &ConjugacyContext<'_>) -> bool {
+        self.should_restart_metric(
+            ctx.current_gradient,
+            ctx.current_gradient,
+            ctx.previous_gradient,
+            ctx.previous_gradient,
+        )
+    }
+
+    /// [`Self::should_restart`] in the metric `<u, v>_P`, with `z = P^{-1} g`.
+    pub fn should_restart_metric(
+        &self,
+        g: ArrayView1<'_, f64>,
+        z: ArrayView1<'_, f64>,
+        g_old: ArrayView1<'_, f64>,
+        z_old: ArrayView1<'_, f64>,
+    ) -> bool {
+        if g.len() != z.len() || g_old.len() != z_old.len() {
+            return true;
+        }
         match *self {
             Self::Never => false,
             Self::Njws { threshold } => {
-                let gg = dot(ctx.current_gradient, ctx.current_gradient);
+                let gg = dot(g, z);
                 if gg <= 0.0 {
                     return true;
                 }
-                let dev = dot(ctx.current_gradient, ctx.previous_gradient).abs() / gg;
+                let dev = dot(g, z_old).abs() / gg;
                 dev >= threshold
             }
         }
@@ -134,6 +159,7 @@ impl Conjugacy {
         match self {
             Self::FletcherReeves => div(gg, gg_old),
             Self::PolakRibiere => div(y_g, gg_old),
+            Self::PolakRibierePlus => Self::PolakRibiere.beta(ctx).max(0.0),
             Self::HestenesStiefel => {
                 let y_d = dot(y.view(), d);
                 div(y_g, y_d)
@@ -171,14 +197,83 @@ impl Conjugacy {
             }
         }
     }
+
+    /// β in the metric whose Riesz gradient is `z = P^{-1} g`.
+    ///
+    /// Gradient norms use `g · z`. The Polak-Ribiere numerator is
+    /// `z · (g - g_old)`, the preconditioned form. It equals
+    /// `g · (z - z_old)` when both maps use the same SPD matrix.
+    /// Inner products of a gradient with a direction stay `g · d`.
+    /// Passing `z = g` and `z_old = g_old` reproduces [`Self::beta`].
+    pub fn beta_metric(
+        &self,
+        ctx: &ConjugacyContext<'_>,
+        z: ArrayView1<'_, f64>,
+        z_old: ArrayView1<'_, f64>,
+    ) -> f64 {
+        let g = ctx.current_gradient;
+        let gold = ctx.previous_gradient;
+        let d = ctx.previous_direction;
+        let gz = dot(g, z);
+        let gz_old = dot(gold, z_old);
+        // y is the Euclidean gradient change. The numerator z · y is the
+        // preconditioned Polak-Ribiere product. It equals g · (z - z_old)
+        // when both Riesz maps use the same SPD P.
+        let y = &g.to_owned() - &gold.to_owned();
+        let zy = dot(z, y.view());
+        let yz = &z.to_owned() - &z_old.to_owned();
+        let y_d = dot(y.view(), d);
+        let yy = dot(y.view(), yz.view());
+        match self {
+            Self::FletcherReeves => div(gz, gz_old),
+            Self::PolakRibiere => div(zy, gz_old),
+            Self::PolakRibierePlus => Self::PolakRibiere.beta_metric(ctx, z, z_old).max(0.0),
+            Self::HestenesStiefel => div(zy, y_d),
+            Self::DaiYuan => div(gz, y_d),
+            Self::ConjugateDescent => div(gz, -dot(d, gold)),
+            Self::HagerZhang => {
+                if y_d.abs() <= f64::EPSILON {
+                    return 0.0;
+                }
+                let d_g = dot(d, g);
+                zy / y_d - 2.0 * yy * d_g / (y_d * y_d)
+            }
+            Self::LiuStorey => div(-zy, dot(d, gold)),
+            Self::FrPr => {
+                let beta_pr = Self::PolakRibiere.beta_metric(ctx, z, z_old);
+                let beta_fr = Self::FletcherReeves.beta_metric(ctx, z, z_old);
+                if beta_pr < -beta_fr {
+                    -beta_fr
+                } else if beta_pr.abs() <= beta_fr {
+                    beta_pr
+                } else {
+                    beta_fr
+                }
+            }
+            Self::Hybrid { a, b, take_max } => {
+                let ba = a.beta_metric(ctx, z, z_old);
+                let bb = b.beta_metric(ctx, z, z_old);
+                if *take_max { ba.max(bb) } else { ba.min(bb) }
+            }
+        }
+    }
 }
 
 fn dot(a: ArrayView1<'_, f64>, b: ArrayView1<'_, f64>) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
+/// `num/den`, or 0 when `den` is negligible beside `num`.
+///
+/// The test is `|den| <= eps (|num| + 1)`. The `+ 1` is an absolute
+/// floor, in the same units as `num`. A denominator smaller than `eps`
+/// is dropped even when `num` is zero, which keeps a vanishing inner
+/// product from returning a huge β. When `|num|` is large the `|num|`
+/// term dominates, so the test is relative and a genuine ratio is kept.
+/// β is already dimensionless, so the floor does not have to be scaled
+/// by a length unit.
 fn div(num: f64, den: f64) -> f64 {
-    if den.abs() <= f64::EPSILON {
+    if !num.is_finite() || !den.is_finite() || den.abs() <= f64::EPSILON * (num.abs() + 1.0) {
         0.0
     } else {
         num / den
@@ -214,6 +309,54 @@ mod tests {
         assert_eq!(Conjugacy::HagerZhang.beta(&ctx), 3.0);
         // |β_PR| = |β_FR| = 1, so FR-PR returns β_PR
         assert_eq!(Conjugacy::FrPr.beta(&ctx), 1.0);
+    }
+
+    #[test]
+    fn preconditioned_polak_ribiere_dots_z_with_the_gradient_change() {
+        let g = array![1.0, 1.0];
+        let gold = array![1.0, 0.0];
+        let z = array![4.0, 0.5];
+        let z_old = array![0.25, 2.0];
+        let d = array![-1.0, 0.0];
+        let ctx = ConjugacyContext {
+            current_gradient: g.view(),
+            previous_gradient: gold.view(),
+            previous_direction: d.view(),
+        };
+        // y = (0, 1), z · y = 0.5, g_old · z_old = 0.25, β = 2.
+        assert!(
+            (Conjugacy::PolakRibiere.beta_metric(&ctx, z.view(), z_old.view()) - 2.0).abs() < 1e-12
+        );
+    }
+
+    #[test]
+    fn the_metric_beta_is_the_euclidean_beta_when_p_is_the_identity() {
+        let g = array![1.0, -2.0, 0.5];
+        let gold = array![0.25, 0.5, -1.0];
+        let d = array![-0.5, 0.1, 0.2];
+        let ctx = ConjugacyContext {
+            current_gradient: g.view(),
+            previous_gradient: gold.view(),
+            previous_direction: d.view(),
+        };
+        for method in [
+            Conjugacy::FletcherReeves,
+            Conjugacy::PolakRibiere,
+            Conjugacy::HestenesStiefel,
+            Conjugacy::DaiYuan,
+            Conjugacy::ConjugateDescent,
+            Conjugacy::HagerZhang,
+            Conjugacy::LiuStorey,
+            Conjugacy::FrPr,
+        ] {
+            let plain = method.beta(&ctx);
+            let metric = method.beta_metric(&ctx, g.view(), gold.view());
+            assert_eq!(plain, metric, "{method:?}");
+        }
+        assert_eq!(
+            Restart::njws().should_restart(&ctx),
+            Restart::njws().should_restart_metric(g.view(), g.view(), gold.view(), gold.view())
+        );
     }
 
     #[test]
@@ -284,6 +427,7 @@ mod tests {
         // β_FR = 0.1, β_PR = -0.2; Gilbert-Nocedal 5.48 returns -β_FR
         assert_eq!(Conjugacy::FletcherReeves.beta(&ctx), 0.1);
         assert_eq!(Conjugacy::PolakRibiere.beta(&ctx), -0.2);
+        assert_eq!(Conjugacy::PolakRibierePlus.beta(&ctx), 0.0);
         assert_eq!(Conjugacy::FrPr.beta(&ctx), -0.1);
         let take_max = Conjugacy::hybrid(Conjugacy::PolakRibiere, Conjugacy::FletcherReeves, true);
         let take_min = Conjugacy::hybrid(Conjugacy::PolakRibiere, Conjugacy::FletcherReeves, false);

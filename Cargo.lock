@@ -689,6 +689,7 @@ dependencies = [
  "eindir-core",
  "highs",
  "highs-sys",
+ "libm",
  "ndarray",
  "pkg-config",
  "rand",

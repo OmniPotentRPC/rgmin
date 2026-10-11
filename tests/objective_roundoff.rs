@@ -208,6 +208,8 @@ fn c_setter_rejects_bad_inputs_without_replacing_the_session() {
             istep: 1.0,
             memory: 8,
             maxmove: 0.0,
+            noise_eps: 0.0,
+            noise_c: 0.0,
         };
         let session = rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &control, 1);
         assert!(!session.is_null());

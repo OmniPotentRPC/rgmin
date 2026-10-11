@@ -9,7 +9,7 @@
 //!
 //! `k > 1` (a product of blocks) is a different factory.
 
-use ndarray::{Array1, ArrayView1};
+use ndarray::Array1;
 
 use crate::vecops;
 
