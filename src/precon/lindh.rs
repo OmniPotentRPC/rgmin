@@ -29,8 +29,11 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use super::geom::{add_rank1, angle_grad, dihedral_grad, mic, norm3, pos_of, require_atoms};
-use super::{Metric, csr_from_coo, max_atom_displacement, needs_rebuild};
+use super::geom::{angle_grad, dihedral_grad, mic, norm3, pos_of, require_atoms};
+use super::{
+    BlockAccum, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, max_atom_displacement, needs_rebuild,
+    note_block,
+};
 use crate::error::{Error, Result};
 
 const BOHR: f64 = 0.529177210903;
@@ -252,6 +255,12 @@ impl Lindh {
         self.metric.solve(rhs)
     }
 
+    /// Jacobi PCG iterations for one solve.
+    #[must_use]
+    pub fn solve_iterations(&self, rhs: ArrayView1<f64>) -> Option<usize> {
+        self.metric.solve_counted(rhs).map(|(_, n)| n)
+    }
+
     /// Dense copy, for tests and for a dense Cholesky reference.
     #[must_use]
     pub fn to_dense(&self) -> ndarray::Array2<f64> {
@@ -444,10 +453,31 @@ fn assemble_metric(
         adj[b].push(Leg { site: a, rho: w });
     }
 
-    let n = 3 * n_free;
-    let mut trips = Vec::new();
+    let mut partners = vec![Vec::new(); n_free];
+    emit_terms(&sites, &pairs, &adj, params, |atoms, scale| {
+        note_block(&mut partners, atoms, scale);
+    });
+    let mut acc = BlockAccum::new(n_free, partners);
+    emit_terms(&sites, &pairs, &adj, params, |atoms, scale| {
+        acc.add_rank1(atoms, scale);
+    });
+    acc.add_stabilization(params.c_stab);
+    Ok((
+        Metric::from_csr(acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE)),
+        r_nn,
+    ))
+}
+
+/// Present each stretch, angle, and torsion in a fixed order.
+fn emit_terms(
+    sites: &[Site],
+    pairs: &[(usize, usize, f64, f64)],
+    adj: &[Vec<Leg>],
+    params: &LindhParams,
+    mut emit: impl FnMut(&[(Option<usize>, [f64; 3])], f64),
+) {
     let ks = k_stretch();
-    for &(a, b, _r, w) in &pairs {
+    for &(a, b, _r, w) in pairs {
         let d = mic(sites[a].pos, sites[b].pos, params.lengths);
         let r = norm3(d);
         if r < 1e-12 {
@@ -455,11 +485,7 @@ fn assemble_metric(
         }
         let e = [d[0] / r, d[1] / r, d[2] / r];
         let neg = [-e[0], -e[1], -e[2]];
-        add_rank1(
-            &mut trips,
-            &[(sites[a].free, e), (sites[b].free, neg)],
-            ks * w,
-        );
+        emit(&[(sites[a].free, e), (sites[b].free, neg)], ks * w);
     }
     if params.angles {
         let kb = k_bend();
@@ -474,8 +500,7 @@ fn assemble_metric(
                     else {
                         continue;
                     };
-                    add_rank1(
-                        &mut trips,
+                    emit(
                         &[
                             (sites[si].free, gi),
                             (sites[v].free, gj),
@@ -489,7 +514,7 @@ fn assemble_metric(
     }
     if params.dihedrals {
         let kt = k_torsion();
-        for &(j, k, _r, rho_jk) in &pairs {
+        for &(j, k, _r, rho_jk) in pairs {
             if j >= k {
                 continue;
             }
@@ -512,8 +537,7 @@ fn assemble_metric(
                     ) else {
                         continue;
                     };
-                    add_rank1(
-                        &mut trips,
+                    emit(
                         &[
                             (sites[i].free, g[0]),
                             (sites[j].free, g[1]),
@@ -526,10 +550,6 @@ fn assemble_metric(
             }
         }
     }
-    for i in 0..n {
-        trips.push((i, i, params.c_stab));
-    }
-    Ok((Metric::from_csr(csr_from_coo(n, trips)), r_nn))
 }
 
 #[cfg(test)]

@@ -1653,4 +1653,59 @@ fn c_abi_lindh_ff_and_auto_install_and_step() {
     assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
     assert!(unsafe { rgmin_solver_precon_scale(mol) }.is_nan());
     unsafe { rgmin_solver_free(mol) };
+
+    let fire = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE, &ctrl, 9) };
+    auto_p.numbers = water.as_ptr();
+    auto_p.geometry_kind = RGMIN_GEOM_MOLECULE;
+    let st = unsafe { rgmin_solver_set_precon(fire, &auto_p) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(unsafe { rgmin_solver_precon_scale(fire) }.is_nan());
+    let mut short = auto_p;
+    short.struct_size = (std::mem::size_of::<rgmin::ffi::rgmin_precon_t>() - 1) as u32;
+    let st = unsafe { rgmin_solver_set_precon(fire, &short) };
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    short.struct_size = 8;
+    let st = unsafe { rgmin_solver_set_precon(fire, &short) };
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    unsafe { rgmin_solver_free(fire) };
+}
+
+#[test]
+fn precon_struct_offsets_match_the_header() {
+    use rgmin::ffi::{rgmin_angle_t, rgmin_bond_t, rgmin_precon_t};
+    assert_eq!(std::mem::size_of::<rgmin_bond_t>(), 16);
+    assert_eq!(std::mem::offset_of!(rgmin_bond_t, i), 0);
+    assert_eq!(std::mem::offset_of!(rgmin_bond_t, j), 4);
+    assert_eq!(std::mem::offset_of!(rgmin_bond_t, k), 8);
+    assert_eq!(std::mem::size_of::<rgmin_angle_t>(), 24);
+    assert_eq!(std::mem::offset_of!(rgmin_angle_t, i), 0);
+    assert_eq!(std::mem::offset_of!(rgmin_angle_t, vertex), 4);
+    assert_eq!(std::mem::offset_of!(rgmin_angle_t, k), 8);
+    assert_eq!(std::mem::offset_of!(rgmin_angle_t, k_theta), 16);
+    assert_eq!(std::mem::size_of::<rgmin_precon_t>(), 200);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, struct_size), 0);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, kind), 4);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, c_stab), 8);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, mu), 16);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, r_cut), 24);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, cell), 32);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, numbers), 56);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, natoms), 64);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, ghost_z), 72);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, ghost_pos), 80);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nghost), 88);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nbr_i), 96);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nbr_j), 104);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nbr_r), 112);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, npairs), 120);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, anchor_i), 128);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, anchor_r), 136);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nanchor), 144);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, exp_a), 152);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, bonds), 160);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nbonds), 168);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, angles), 176);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nangles), 184);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, dihedrals), 192);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, geometry_kind), 196);
 }

@@ -25,8 +25,8 @@ use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rgmin::{
     Accept, Conjugacy, Control, ExpParams, FfParams, FfTerms, FireKind, GeometryKind, Ghost, Lbfgs,
-    LindhParams, LineSearch, Method, Neighbours, PreconChoice, Restart, Solver, bonded_terms,
-    select_precon,
+    LindhParams, LineSearch, Method, Neighbours, PreconChoice, Restart, Solver,
+    bonded_terms, select_precon,
 };
 use rgpot_core::eindir::{
     rgpot_potential_free_eindir, rgpot_potential_new_eindir, rgpot_potential_t,
@@ -729,6 +729,17 @@ fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
         "bb" => (Method::Bb, Accept::None, wolfe(), 0.01),
         "bb-nm" => (Method::Bb, Accept::Nonmonotone, wolfe(), 0.01),
         "cg-wolfe" | "cg" => (pr, Accept::None, cg_wolfe(), 0.01),
+        // Library change alone: signed Polak-Ribiere and the session
+        // Wolfe constant c2 = 0.9. The opening trial is still equation 3.60.
+        "cg-ablation" => (
+            Method::Nlcg {
+                conjugacy: Conjugacy::PolakRibiere,
+                restart: Restart::njws(),
+            },
+            Accept::None,
+            wolfe(),
+            0.01,
+        ),
         "cg-brent" => (pr, Accept::None, LineSearch::default(), 0.01),
         "lbfgs" => (lbfgs, Accept::None, wolfe(), 1.0),
         _ => return None,
@@ -867,6 +878,7 @@ struct Outcome {
     iters: usize,
     energy: f64,
     fmax: f64,
+    fallbacks: u64,
 }
 
 fn run_session(
@@ -897,7 +909,12 @@ fn run_session(
     let auto = if matches!(which, PreconKind::Auto) {
         let free = free_index(sys);
         let z: Vec<i32> = free.iter().map(|&a| sys.z[a]).collect();
-        Some(select_precon(geometry_of(sys), &z, false))
+        Some(select_precon(
+            geometry_of(sys),
+            &z,
+            false,
+            solver.optimizer_family(),
+        ))
     } else {
         None
     };
@@ -910,6 +927,7 @@ fn run_session(
         iters: 0,
         energy: f64::NAN,
         fmax: f64::INFINITY,
+        fallbacks: 0,
     };
     let want_lindh =
         matches!(which, PreconKind::Lindh) || matches!(auto, Some(PreconChoice::Lindh));
@@ -980,6 +998,7 @@ fn run_session(
             break;
         }
     }
+    out.fallbacks = solver.nlcg_descent_fallbacks();
     out
 }
 
@@ -1056,6 +1075,7 @@ fn run_hop(obj: &FreeObjective, x: Array1<f64>, tol: f64, maxiter: usize) -> Out
         iters,
         energy: f,
         fmax: fm,
+        fallbacks: 0,
     }
 }
 
@@ -1126,10 +1146,14 @@ fn main() {
     let maxiter = 2000;
     let maxmove = 0.2;
     println!(
-        "system,method,seed,converged,iters,calls,energy,fmax,wall_s,pot_s,overhead_us_per_iter,rep"
+        "system,method,seed,converged,iters,calls,energy,fmax,wall_s,pot_s,overhead_us_per_iter,rep,fallbacks"
     );
+    let seed0: u64 = args.get(7).map(|s| s.parse().unwrap()).unwrap_or(0);
+    let forced = std::env::var("RGMIN_BENCH_FORCE_SIGMA")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok());
     for rep in 0..repeats {
-        for seed in 0..seeds {
+        for seed in seed0..seed0 + seeds {
             let sys = match system {
                 "lj38" => lj38(seed),
                 "pt7" => read_con(&format!("{data}/pt_heptamer.con"), 78, 1),
@@ -1142,7 +1166,9 @@ fn main() {
                 "ch4" => ch4(),
                 other => panic!("unknown system {other}"),
             };
-            let sig = if system == "lj38"
+            let sig = if let Some(sigma) = forced {
+                sigma
+            } else if system == "lj38"
                 || system.starts_with("si-")
                 || system == "cu-vac"
                 || system == "h2o"
@@ -1164,7 +1190,7 @@ fn main() {
                 let pot = obj.pot_seconds();
                 let iters = out.iters.max(1);
                 println!(
-                    "{system},{m},{seed},{},{},{},{:.10},{:.3e},{:.6},{:.6},{:.3},{rep}",
+                    "{system},{m},{seed},{},{},{},{:.10},{:.3e},{:.6},{:.6},{:.3},{rep},{}",
                     out.converged as u8,
                     out.iters,
                     obj.calls(),
@@ -1172,7 +1198,8 @@ fn main() {
                     out.fmax,
                     wall,
                     pot,
-                    (wall - pot) / iters as f64 * 1e6
+                    (wall - pot) / iters as f64 * 1e6,
+                    out.fallbacks
                 );
             }
         }

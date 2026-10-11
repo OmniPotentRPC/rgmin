@@ -6,12 +6,10 @@
 //! cargo test --release --features par --test precon_scaling -- --ignored --nocapture
 //! ```
 //!
-//! Sizes are 160, 2,000, and 32,000 atoms. A 100,000-atom Lindh matrix
-//! reached about 20 GB and one repetition of the eight solves did not
-//! finish, so that size is not in the table. Threads are 1, 2, 4, and
-//! the machine maximum. Five repetitions
-//! are interleaved. Assembly, apply, and solve are timed separately.
-//! The parallel path inside the crate stays serial below [`rgmin::N_PAR`].
+//! Sizes are 160, 2,000, 8,000, 32,000, and 100,000 atoms. Threads are
+//! 1, 2, 4, and the machine maximum. Five repetitions are interleaved.
+//! Assembly, apply, and solve are timed separately. The run also prints
+//! the Jacobi PCG iteration count and the process RSS.
 
 #![cfg(feature = "par")]
 
@@ -185,6 +183,22 @@ struct Sample {
     assemble: f64,
     apply: f64,
     solve: f64,
+    rss_kib: u64,
+}
+
+fn vm_kib(key: &str) -> u64 {
+    let text = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix(key) {
+            return rest
+                .split_whitespace()
+                .next()
+                .unwrap_or("0")
+                .parse()
+                .unwrap_or(0);
+        }
+    }
+    0
 }
 
 fn once_lindh(threads: usize, crystal: &Crystal, rhs: &Array1<f64>) -> Sample {
@@ -211,10 +225,12 @@ fn once_lindh(threads: usize, crystal: &Crystal, rhs: &Array1<f64>) -> Sample {
             std::hint::black_box(&solved);
         }
         let solve = t2.elapsed().as_secs_f64();
+        let rss_kib = vm_kib("VmRSS:");
         Sample {
             assemble,
             apply,
             solve,
+            rss_kib,
         }
     })
 }
@@ -244,10 +260,12 @@ fn once_exp(threads: usize, crystal: &Crystal, rhs: &Array1<f64>) -> Sample {
             std::hint::black_box(&solved);
         }
         let solve = t2.elapsed().as_secs_f64();
+        let rss_kib = vm_kib("VmRSS:");
         Sample {
             assemble,
             apply,
             solve,
+            rss_kib,
         }
     })
 }
@@ -297,7 +315,29 @@ fn report(label: &str, natoms: usize, threads: &[usize], rows: &[Vec<Sample>]) {
             "{label},natoms={natoms},two_vs_one_assemble,median_gap_s={margin:.6},range_s={noise:.6},beats={}",
             margin > noise
         );
+        for (name, pick) in [
+            ("apply", (|s: &Sample| s.apply) as fn(&Sample) -> f64),
+            ("solve", (|s: &Sample| s.solve) as fn(&Sample) -> f64),
+        ] {
+            let a: Vec<f64> = rows[0].iter().map(pick).collect();
+            let b: Vec<f64> = rows[1].iter().map(pick).collect();
+            let a_med = median(&mut a.clone());
+            let b_med = median(&mut b.clone());
+            let a_range = a.iter().copied().fold(0.0, f64::max)
+                - a.iter().copied().fold(f64::INFINITY, f64::min);
+            let b_range = b.iter().copied().fold(0.0, f64::max)
+                - b.iter().copied().fold(f64::INFINITY, f64::min);
+            let margin = a_med - b_med;
+            let noise = a_range.max(b_range);
+            eprintln!(
+                "{label},natoms={natoms},two_vs_one_{name},median_gap_s={margin:.6},range_s={noise:.6},beats={}",
+                margin > noise
+            );
+        }
     }
+    let rss = rows.iter().flatten().map(|s| s.rss_kib).max().unwrap_or(0);
+    let hwm = vm_kib("VmHWM:");
+    eprintln!("{label},natoms={natoms},rss_kib={rss},hwm_kib={hwm}");
 }
 
 fn time_set(
@@ -342,13 +382,40 @@ fn strong_scaling_table() {
     let shapes = [
         (2usize, 2, 5, "160"),
         (5, 5, 10, "2000"),
+        (10, 10, 10, "8000"),
         (20, 20, 10, "32000"),
+        (25, 25, 20, "100000"),
     ];
     for (nx, ny, nz, name) in shapes {
         let natoms = 8 * nx * ny * nz;
         eprintln!("building {name} ({natoms} atoms)");
         let crystal = diamond(nx, ny, nz);
         let rhs = Array1::from_iter((0..crystal.pos.len()).map(|i| ((i % 7) as f64 - 3.0) * 0.05));
+        let mut lp = LindhParams::default();
+        lp.mu = Some(1.0);
+        lp.r_cut = Some(CUTOFF);
+        lp.lengths = Some(crystal.lengths);
+        let lindh_m = Lindh::assemble(crystal.pos.view(), &crystal.z, &[], &lp).unwrap();
+        let lindh_it = lindh_m.solve_iterations(rhs.view()).unwrap_or(0);
+        eprintln!(
+            "lindh-{name},natoms={natoms},pcg_iterations,{lindh_it},rss_kib,{},hwm_kib,{}",
+            vm_kib("VmRSS:"),
+            vm_kib("VmHWM:")
+        );
+        drop(lindh_m);
+        let mut ep = ExpParams::default();
+        ep.mu = Some(1.0);
+        ep.r_cut = Some(CUTOFF);
+        ep.r_nn = Some(2.35);
+        ep.lengths = Some(crystal.lengths);
+        let exp_m = Exp::assemble(crystal.pos.view(), &crystal.neigh, &ep, 1.0, 2.35).unwrap();
+        let exp_it = exp_m.solve_iterations(rhs.view()).unwrap_or(0);
+        eprintln!(
+            "exp-{name},natoms={natoms},pcg_iterations,{exp_it},rss_kib,{},hwm_kib,{}",
+            vm_kib("VmRSS:"),
+            vm_kib("VmHWM:")
+        );
+        drop(exp_m);
         let lindh = time_set(&threads, &crystal, &rhs, false);
         report(&format!("lindh-{name}"), natoms, &threads, &lindh);
         let exp = time_set(&threads, &crystal, &rhs, true);

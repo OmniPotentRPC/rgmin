@@ -249,6 +249,20 @@ impl Solver {
         }
     }
 
+    /// Family used by [`crate::select_precon`] when the caller asks for auto.
+    ///
+    /// FIRE is the identity. Nonlinear CG is the metric rule. Every
+    /// other method is the quasi-Newton rule, which installs `P^{-1}`
+    /// as `H0` when the geometry asks for a matrix.
+    #[must_use]
+    pub fn optimizer_family(&self) -> crate::OptimizerFamily {
+        match &self.inner {
+            Inner::Fire(_, _) => crate::OptimizerFamily::Fire,
+            Inner::Nlcg { .. } => crate::OptimizerFamily::Cg,
+            _ => crate::OptimizerFamily::QuasiNewton,
+        }
+    }
+
     /// Install one geometry preconditioner.
     ///
     /// L-BFGS takes \(H_0 = P^{-1}\). FIRE and nonlinear CG take `P`

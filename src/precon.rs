@@ -8,11 +8,13 @@
 //! [`select_precon`] documents which one applies.
 //!
 //! Pair assembly is a cell list. Occupied bins are visited in
-//! lexicographic order and the pairs are sorted by atom index. Under
-//! the `par` feature a matrix-vector product writes each row from that
-//! row's own sum, and a long dot product folds fixed chunks in chunk
-//! order. Neither result depends on the thread count. The parallel
-//! path is gated by [`N_PAR`] atoms, not by the thread count.
+//! lexicographic order and the pairs are sorted by atom index. A
+//! matrix-vector product writes each row from that row's own sum. Every
+//! dot product in the solve folds fixed chunks of 1024 in chunk order,
+//! starting from `0.0`, in every build and at every length. The `par`
+//! feature only decides whether those chunks run concurrently. Each
+//! kernel has its own atom-count gate, and the gate does not read the
+//! thread count.
 //!
 //! Packwood, Kermode, Mones, Bernstein, Woolley, Gould, Ortner, and
 //! Csányi, *A universal preconditioner for simulating condensed phase
@@ -40,7 +42,7 @@ pub(crate) use ff::FfState;
 pub use ff::{AngleTerm, BondTerm, DihedralTerm, Ff, FfParams, FfTerms, MorseTerm, bonded_terms};
 pub(crate) use lindh::LindhState;
 pub use lindh::{Ghost, Lindh, LindhParams};
-pub use select::{GeometryKind, PreconChoice, select_precon};
+pub use select::{GeometryKind, N_LINDH, OptimizerFamily, PreconChoice, select_precon};
 
 /// One geometry metric for [`crate::Solver::set_precon`].
 ///
@@ -153,6 +155,10 @@ struct Csr {
     col_idx: Vec<usize>,
     val: Vec<f64>,
     diag: Vec<f64>,
+    /// Atom count at which `apply` may use the `par` pool.
+    apply_gate: usize,
+    /// Atom count at which the solve's products may use the `par` pool.
+    solve_gate: usize,
 }
 
 /// Sparse SPD metric. `apply` is `P v`. `solve` is `P x = rhs`.
@@ -173,12 +179,21 @@ impl Metric {
     pub(crate) fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {
         let mut y = vec![0.0; self.csr.n];
         if v.len() == self.csr.n {
-            matvec(&self.csr, v.as_slice().unwrap_or(&v.to_vec()), &mut y);
+            matvec(
+                &self.csr,
+                v.as_slice().unwrap_or(&v.to_vec()),
+                &mut y,
+                self.csr.apply_gate,
+            );
         }
         Array1::from_vec(y)
     }
 
     pub(crate) fn solve(&self, rhs: ArrayView1<f64>) -> Option<Array1<f64>> {
+        self.solve_counted(rhs).map(|(x, _)| x)
+    }
+
+    pub(crate) fn solve_counted(&self, rhs: ArrayView1<f64>) -> Option<(Array1<f64>, usize)> {
         if rhs.len() != self.csr.n {
             return None;
         }
@@ -186,7 +201,7 @@ impl Metric {
             .as_slice()
             .map(<[f64]>::to_vec)
             .unwrap_or_else(|| rhs.to_vec());
-        solve_pcg(&self.csr, &rhs_vec).map(Array1::from_vec)
+        solve_pcg(&self.csr, &rhs_vec).map(|(x, iters)| (Array1::from_vec(x), iters))
     }
 
     pub(crate) fn to_dense(&self) -> Array2<f64> {
@@ -305,6 +320,8 @@ impl Exp {
                 col_idx,
                 val,
                 diag: diag.to_vec(),
+                apply_gate: N_PAR_EXP_APPLY,
+                solve_gate: N_PAR_EXP_SOLVE,
             }),
         }
     }
@@ -339,6 +356,13 @@ impl Exp {
     #[must_use]
     pub fn solve(&self, rhs: ArrayView1<f64>) -> Option<Array1<f64>> {
         self.metric.solve(rhs)
+    }
+
+    /// Jacobi PCG iterations for one solve. The count is the number of
+    /// matrix-vector products.
+    #[must_use]
+    pub fn solve_iterations(&self, rhs: ArrayView1<f64>) -> Option<usize> {
+        self.metric.solve_counted(rhs).map(|(_, n)| n)
     }
 
     /// Dense copy, for tests and for a dense Cholesky reference.
@@ -944,10 +968,15 @@ fn build_csr(
     for i in 0..n {
         trips.push((i, i, diag[i]));
     }
-    csr_from_coo(n, trips)
+    csr_from_coo(n, trips, N_PAR_EXP_APPLY, N_PAR_EXP_SOLVE)
 }
 
-fn csr_from_coo(n: usize, mut trips: Vec<(usize, usize, f64)>) -> Csr {
+fn csr_from_coo(
+    n: usize,
+    mut trips: Vec<(usize, usize, f64)>,
+    apply_gate: usize,
+    solve_gate: usize,
+) -> Csr {
     trips.sort_unstable_by(|p, q| (p.0, p.1).cmp(&(q.0, q.1)));
     let mut row_ptr = Vec::with_capacity(n + 1);
     let mut col_idx = Vec::with_capacity(trips.len());
@@ -981,39 +1010,191 @@ fn csr_from_coo(n: usize, mut trips: Vec<(usize, usize, f64)>) -> Csr {
         col_idx,
         val,
         diag,
+        apply_gate,
+        solve_gate,
     }
 }
 
-/// Smallest atom count sent to the `par` loops.
+/// Record which free atoms share a 3×3 block, then scatter into that
+/// pattern. Memory is the stored nonzeros. Each row is summed from the
+/// terms that touch it, in the order those terms are presented, so a
+/// later parallel fill of the rows does not change the sum.
+struct BlockAccum {
+    n_atoms: usize,
+    partners: Vec<Vec<usize>>,
+    row_ptr: Vec<usize>,
+    col_idx: Vec<usize>,
+    val: Vec<f64>,
+}
+
+impl BlockAccum {
+    /// `partners[i]` lists other free atoms. `i` itself is added here.
+    fn new(n_atoms: usize, mut partners: Vec<Vec<usize>>) -> Self {
+        for (i, p) in partners.iter_mut().enumerate() {
+            p.push(i);
+            p.sort_unstable();
+            p.dedup();
+        }
+        let mut row_ptr = Vec::with_capacity(3 * n_atoms + 1);
+        let mut col_idx = Vec::new();
+        row_ptr.push(0);
+        for atom in 0..n_atoms {
+            let cols: Vec<usize> = partners[atom]
+                .iter()
+                .flat_map(|&b| [3 * b, 3 * b + 1, 3 * b + 2])
+                .collect();
+            for _d in 0..3 {
+                col_idx.extend_from_slice(&cols);
+                row_ptr.push(col_idx.len());
+            }
+        }
+        let nnz = col_idx.len();
+        Self {
+            n_atoms,
+            partners,
+            row_ptr,
+            col_idx,
+            val: vec![0.0; nnz],
+        }
+    }
+
+    /// Add `scale * g g^T` on the free atoms. A `None` index is a ghost.
+    fn add_rank1(&mut self, atoms: &[(Option<usize>, [f64; 3])], scale: f64) {
+        if !(scale.is_finite() && scale != 0.0) {
+            return;
+        }
+        let free: Vec<(usize, [f64; 3])> = atoms
+            .iter()
+            .copied()
+            .filter_map(|(i, g)| i.map(|i| (i, g)))
+            .collect();
+        let partners = &self.partners;
+        let row_ptr = &self.row_ptr;
+        let val = &mut self.val;
+        for &(ia, ga) in &free {
+            let plist = &partners[ia];
+            for d in 0..3 {
+                let start = row_ptr[3 * ia + d];
+                for &(ib, gb) in &free {
+                    let p = plist
+                        .binary_search(&ib)
+                        .expect("rank-1 atom is missing from the sparsity pattern");
+                    let base = start + 3 * p;
+                    for e in 0..3 {
+                        val[base + e] += scale * ga[d] * gb[e];
+                    }
+                }
+            }
+        }
+    }
+
+    /// Add `c` to every diagonal after the rank-1 terms.
+    fn add_stabilization(&mut self, c: f64) {
+        for atom in 0..self.n_atoms {
+            let p = self.partners[atom]
+                .binary_search(&atom)
+                .expect("diagonal block");
+            for d in 0..3 {
+                let base = self.row_ptr[3 * atom + d] + 3 * p;
+                self.val[base + d] += c;
+            }
+        }
+    }
+
+    fn finish(self, apply_gate: usize, solve_gate: usize) -> Csr {
+        let n = 3 * self.n_atoms;
+        let mut diag = vec![0.0; n];
+        for i in 0..n {
+            let s = self.row_ptr[i];
+            let e = self.row_ptr[i + 1];
+            if let Ok(k) = self.col_idx[s..e].binary_search(&i) {
+                diag[i] = self.val[s + k];
+            }
+        }
+        Csr {
+            n,
+            row_ptr: self.row_ptr,
+            col_idx: self.col_idx,
+            val: self.val,
+            diag,
+            apply_gate,
+            solve_gate,
+        }
+    }
+}
+
+/// Push every free atom of a rank-1 term onto the partner lists.
+fn note_block(partners: &mut [Vec<usize>], atoms: &[(Option<usize>, [f64; 3])], scale: f64) {
+    if !(scale.is_finite() && scale != 0.0) {
+        return;
+    }
+    let ids: Vec<usize> = atoms.iter().filter_map(|a| a.0).collect();
+    for &i in &ids {
+        for &j in &ids {
+            partners[i].push(j);
+        }
+    }
+}
+
+/// Atom counts for the `par` loops. Each gate is an atom count.
+/// A kernel stays serial below its gate in every build.
 ///
-/// Below this, assembly, apply, and the dot product stay serial even
-/// when the crate is built with `par`. The gate is the atom count
-/// alone, so the arithmetic does not depend on the thread count.
+/// Measured on bulk diamond Si, 4 Å cutoff, release, five interleaved
+/// runs, threads 1/2/4/8 (`tests/precon_scaling.rs`). A gate is the
+/// smallest size in {160, 2_000, 8_000, 32_000, 100_000} where two
+/// threads beat one by more than the wider run-to-run range.
+/// `usize::MAX` means that bar was never cleared, so the kernel stays
+/// serial. The gate does not read the thread count.
 ///
-/// Bulk diamond Si, 4 Å cutoff, release build, five interleaved runs
-/// (`tests/precon_scaling.rs`, threads 1/2/4/8).
-///
-/// Two threads beat one by more than the run-to-run range on the Lindh
-/// solve at 160 atoms: median gap 0.016 s, range 0.009 s, and the
-/// two-thread samples sit entirely below the one-thread samples.
-/// That is the smallest size in the measured set (160, 2,000, 32,000).
-/// Exp's solve is slower with two threads at 160 and at 2,000, and
-/// beats one thread at 32,000 (gap 0.38 s, range 0.04 s). Assembly does
-/// not clear the noise at any of those sizes. The gate is this atom
-/// count alone, never the thread count.
-pub const N_PAR: usize = 160;
+/// Lindh and bonded-metric matvec, eight applies.
+/// 160 atoms: 1 thread 0.493 ms, 2 threads 0.361 ms, gap 0.132 ms,
+/// range 0.344 ms, no.
+/// 2,000 atoms: 1 thread 8.360 ms, 2 threads 4.751 ms, gap 3.609 ms,
+/// range 1.052 ms, yes.
+pub const N_PAR_LINDH_APPLY: usize = 2_000;
+/// Lindh and bonded-metric Jacobi PCG, eight solves.
+/// 160 atoms: 1 thread 31.355 ms, 2 threads 16.752 ms, gap 14.602 ms,
+/// range 17.571 ms, no.
+/// 2,000 atoms: 1 thread 0.914 s, 2 threads 0.467 s, gap 0.447 s,
+/// range 0.035 s, yes.
+pub const N_PAR_LINDH_SOLVE: usize = 2_000;
+/// Exp matvec, eight applies.
+/// 8,000 atoms: 1 thread 2.607 ms, 2 threads 1.939 ms, gap 0.668 ms,
+/// range 0.961 ms, no.
+/// 32,000 atoms: 1 thread 11.770 ms, 2 threads 7.745 ms, gap 4.025 ms,
+/// range 3.247 ms, yes.
+pub const N_PAR_EXP_APPLY: usize = 32_000;
+/// Exp Jacobi PCG, eight solves.
+/// 8,000 atoms: 1 thread 0.161 s, 2 threads 0.146 s, gap 0.015 s,
+/// range 0.059 s, no.
+/// 32,000 atoms: 1 thread 1.026 s, 2 threads 0.681 s, gap 0.345 s,
+/// range 0.144 s, yes.
+pub const N_PAR_EXP_SOLVE: usize = 32_000;
+/// Pair-list assembly. The value fill is a serial scatter into the
+/// stored nonzeros, so this gate covers only the cell-list search.
+/// Two threads never beat one by more than the run-to-run range.
+/// The closest row is Exp at 100,000 atoms: 1 thread 0.388 s,
+/// 2 threads 0.362 s, gap 0.026 s, range 0.027 s, no.
+/// Lindh at 100,000 atoms: 1 thread 6.339 s, 2 threads 6.401 s,
+/// gap -0.062 s, range 0.709 s, no.
+pub const N_PAR_ASSEMBLE: usize = usize::MAX;
+
+/// Fixed length of one dot-product chunk. The same chunks are used
+/// with and without the `par` feature.
+const DOT_CHUNK: usize = 1024;
 
 /// Map `0..n` and keep index order.
 ///
-/// With the `par` feature the chunks run on the current rayon pool.
-/// `collect` on an indexed iterator concatenates in index order, so the
-/// output does not depend on how many threads the pool has.
-fn ordered_map<T, F>(n: usize, atoms: usize, f: F) -> Vec<T>
+/// With the `par` feature and `atoms >= gate` the chunks run on the
+/// current rayon pool. `collect` on an indexed iterator concatenates
+/// in index order. Below the gate, and in a build without `par`, the
+/// map is a serial loop. The gate is an atom count.
+pub(super) fn ordered_map<T, F>(n: usize, atoms: usize, gate: usize, f: F) -> Vec<T>
 where
     T: Send,
     F: Fn(usize) -> T + Send + Sync,
 {
-    let parallel = atoms >= N_PAR && n >= 2;
+    let parallel = gate < usize::MAX && atoms >= gate && n >= 2;
     #[cfg(not(feature = "par"))]
     let _ = parallel;
     #[cfg(feature = "par")]
@@ -1026,69 +1207,71 @@ where
     (0..n).map(f).collect()
 }
 
-fn matvec(a: &Csr, x: &[f64], y: &mut [f64]) {
+fn row_dot(a: &Csr, x: &[f64], i: usize) -> f64 {
+    let mut s = 0.0;
+    for k in a.row_ptr[i]..a.row_ptr[i + 1] {
+        s += a.val[k] * x[a.col_idx[k]];
+    }
+    s
+}
+
+fn matvec(a: &Csr, x: &[f64], y: &mut [f64], gate: usize) {
+    let parallel = gate < usize::MAX && a.n / 3 >= gate && a.n >= 2;
+    #[cfg(not(feature = "par"))]
+    let _ = parallel;
     #[cfg(feature = "par")]
     {
         use rayon::prelude::*;
-        // Each row is an independent dot product. Writing `y[i]` from
-        // that row does not reorder any sum, so the vector matches the
+        // Each row is an independent product. Writing `y[i]` from that
+        // row does not reorder any sum, so the vector matches the
         // serial loop at every thread count.
-        if a.n / 3 >= N_PAR {
+        if parallel {
             y.par_iter_mut().enumerate().for_each(|(i, yi)| {
-                let mut s = 0.0;
-                for k in a.row_ptr[i]..a.row_ptr[i + 1] {
-                    s += a.val[k] * x[a.col_idx[k]];
-                }
-                *yi = s;
+                *yi = row_dot(a, x, i);
             });
             return;
         }
     }
     for i in 0..a.n {
-        let mut s = 0.0;
-        for k in a.row_ptr[i]..a.row_ptr[i + 1] {
-            s += a.val[k] * x[a.col_idx[k]];
-        }
-        y[i] = s;
+        y[i] = row_dot(a, x, i);
     }
 }
 
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    #[cfg(feature = "par")]
-    {
-        // Fixed chunks, then a left fold of those partials. The chunk
-        // bounds do not depend on the thread count, and the fold is in
-        // chunk-index order, so 1, 2, and N threads produce the same bits.
-        const CHUNK: usize = 1024;
-        if a.len() / 3 >= N_PAR {
-            let nchunks = a.len().div_ceil(CHUNK);
-            let partials = ordered_map(nchunks, a.len() / 3, |c| {
-                let start = c * CHUNK;
-                let end = (start + CHUNK).min(a.len());
-                let mut acc = 0.0;
-                for i in start..end {
-                    acc += a[i] * b[i];
-                }
-                acc
-            });
-            return partials.into_iter().fold(0.0, |acc, v| acc + v);
-        }
+/// Dot product. Chunks of [`DOT_CHUNK`] are summed left to right from
+/// `0.0` in every build. The `par` feature evaluates the chunks
+/// concurrently when `atoms >= gate`; the fold of the partials stays
+/// in chunk order.
+fn dot(a: &[f64], b: &[f64], gate: usize) -> f64 {
+    if a.is_empty() {
+        return 0.0;
     }
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+    let nchunks = a.len().div_ceil(DOT_CHUNK);
+    let atoms = a.len() / 3;
+    let partials = ordered_map(nchunks, atoms, gate, |c| {
+        let start = c * DOT_CHUNK;
+        let end = (start + DOT_CHUNK).min(a.len());
+        let mut acc = 0.0;
+        for i in start..end {
+            acc += a[i] * b[i];
+        }
+        acc
+    });
+    partials.into_iter().fold(0.0, |acc, v| acc + v)
 }
 
-fn nrm2(a: &[f64]) -> f64 {
-    dot(a, a).sqrt()
+fn nrm2(a: &[f64], gate: usize) -> f64 {
+    dot(a, a, gate).sqrt()
 }
 
-fn solve_pcg(a: &Csr, b: &[f64]) -> Option<Vec<f64>> {
+fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
     let n = a.n;
+    let gate = a.solve_gate;
     if b.len() != n {
         return None;
     }
-    let bnorm = nrm2(b);
+    let bnorm = nrm2(b, gate);
     if bnorm == 0.0 {
-        return Some(vec![0.0; n]);
+        return Some((vec![0.0; n], 0));
     }
     if a.diag.iter().any(|d| !(d.is_finite() && *d > 0.0)) {
         return None;
@@ -1100,18 +1283,20 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<Vec<f64>> {
     let mut ap = vec![0.0; n];
     jacobi(a, &r, &mut z);
     p.copy_from_slice(&z);
-    let mut rz = dot(&r, &z);
+    let mut rz = dot(&r, &z, gate);
     if !(rz.is_finite() && rz > 0.0) {
         return None;
     }
     let tol = 1e-12 * bnorm;
     let maxit = (8 * n).max(64);
+    let mut iters = 0usize;
     for _ in 0..maxit {
-        if nrm2(&r) <= tol {
-            return finite_vec(x);
+        if nrm2(&r, gate) <= tol {
+            return finite_vec(x).map(|v| (v, iters));
         }
-        matvec(a, &p, &mut ap);
-        let pap = dot(&p, &ap);
+        iters += 1;
+        matvec(a, &p, &mut ap, gate);
+        let pap = dot(&p, &ap, gate);
         if !(pap.is_finite() && pap > 0.0) {
             return None;
         }
@@ -1123,11 +1308,11 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<Vec<f64>> {
             x[i] += alpha * p[i];
             r[i] -= alpha * ap[i];
         }
-        if nrm2(&r) <= tol {
-            return finite_vec(x);
+        if nrm2(&r, gate) <= tol {
+            return finite_vec(x).map(|v| (v, iters));
         }
         jacobi(a, &r, &mut z);
-        let rz_new = dot(&r, &z);
+        let rz_new = dot(&r, &z, gate);
         if !(rz_new.is_finite() && rz_new > 0.0) {
             return None;
         }
@@ -1137,8 +1322,8 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<Vec<f64>> {
         }
         rz = rz_new;
     }
-    if nrm2(&r) <= 1e-8 * bnorm {
-        return finite_vec(x);
+    if nrm2(&r, gate) <= 1e-8 * bnorm {
+        return finite_vec(x).map(|v| (v, iters));
     }
     None
 }
@@ -1286,5 +1471,71 @@ mod tests {
         let num = (&g1 - &g0).dot(&v);
         let den = v.dot(&p1.apply(v.view()));
         assert!((mu - num / den).abs() < 1e-12, "formula drift");
+    }
+
+    /// FNV-1a over the little-endian bits of the solution. The same
+    /// digest is required with and without the `par` feature.
+    fn fnv1a(x: &[f64]) -> u64 {
+        let mut h = 0xcbf29ce484222325u64;
+        for v in x {
+            for b in v.to_le_bytes() {
+                h ^= u64::from(b);
+                h = h.wrapping_mul(0x100000001b3);
+            }
+        }
+        h
+    }
+
+    #[test]
+    fn pcg_solution_hash_is_the_same_in_every_build() {
+        // 512 atoms, several chunks of 1024, a banded SPD matrix.
+        let n = 1536;
+        let mut row_ptr = vec![0usize];
+        let mut col_idx = Vec::new();
+        let mut val = Vec::new();
+        let mut diag = vec![0.0; n];
+        for i in 0..n {
+            let mut cols = Vec::new();
+            if i >= 5 {
+                cols.push((i - 5, -0.25));
+            }
+            if i > 0 {
+                cols.push((i - 1, -1.0));
+            }
+            let d = 4.0 + (i % 7) as f64;
+            cols.push((i, d));
+            diag[i] = d;
+            if i + 1 < n {
+                cols.push((i + 1, -1.0));
+            }
+            if i + 5 < n {
+                cols.push((i + 5, -0.25));
+            }
+            for (c, v) in cols {
+                col_idx.push(c);
+                val.push(v);
+            }
+            row_ptr.push(col_idx.len());
+        }
+        let csr = Csr {
+            n,
+            row_ptr,
+            col_idx,
+            val,
+            diag,
+            apply_gate: usize::MAX,
+            solve_gate: usize::MAX,
+        };
+        let rhs: Vec<f64> = (0..n).map(|i| ((i * 17) % 11) as f64 - 5.0).collect();
+        let (sol, iters) = solve_pcg(&csr, &rhs).expect("pcg");
+        let hash = fnv1a(&sol);
+        assert!(
+            iters > 1 && iters <= n,
+            "iters {iters} should take more than one step and at most n"
+        );
+        assert_eq!(
+            hash, 0xf9a8d91302c9cb63,
+            "committed hash drifted: iters {iters} hash {hash:#x}"
+        );
     }
 }

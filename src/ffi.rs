@@ -1562,9 +1562,8 @@ pub const RGMIN_GEOM_CLUSTER: i32 = 3;
 
 /// One description of every geometry preconditioner. ABI minor 32.
 ///
-/// `struct_size` is `sizeof` on the caller side. Bytes past the fields
-/// this build knows are ignored, and a shorter prefix is filled with
-/// the defaults from [`rgmin_precon_init`].
+/// `struct_size` is `sizeof` on the caller side. A shorter value is
+/// rejected. Bytes past the fields this build knows are ignored.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct rgmin_precon_t {
@@ -1668,12 +1667,12 @@ fn load_precon(p: *const rgmin_precon_t) -> std::result::Result<rgmin_precon_t, 
         return Err("rgmin_solver_set_precon: null params");
     }
     let got = unsafe { (*p).struct_size } as usize;
-    let min = std::mem::offset_of!(rgmin_precon_t, kind) + std::mem::size_of::<u32>();
-    if got < min {
+    let full = std::mem::size_of::<rgmin_precon_t>();
+    if got < full {
         return Err("rgmin_solver_set_precon: struct_size is too small");
     }
     let mut local = precon_blank(RGMIN_PRECON_NONE);
-    let n = got.min(std::mem::size_of::<rgmin_precon_t>());
+    let n = full;
     unsafe {
         std::ptr::copy_nonoverlapping(
             p.cast::<u8>(),
@@ -1770,7 +1769,8 @@ fn install_auto(solver: *mut rgmin_solver_t, p: &rgmin_precon_t, atoms: usize) -
         }
     };
     let has_ff = p.nbonds > 0 || p.nangles > 0;
-    match crate::select_precon(kind, z, has_ff) {
+    let family = unsafe { (*solver).solver.optimizer_family() };
+    match crate::select_precon(kind, z, has_ff, family) {
         crate::PreconChoice::Identity => {
             unsafe { (*solver).solver.clear_precon() };
             rgmin_status_t::RGMIN_SUCCESS

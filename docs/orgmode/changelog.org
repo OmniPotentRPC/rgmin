@@ -6,8 +6,11 @@
 
 ** Unreleased
 
-Nonlinear CG opens its line search with Nocedal-Wright equation 3.60
-and restarts when the metric is replaced.
+Nonlinear CG, with or without a metric, opens its line search with
+Nocedal-Wright equation 3.60 instead of ~control.istep~ on every step.
+The descent fallback runs in both cases. ~Conjugacy::PolakRibierePlus~
+is a new variant of the exhaustive ~Conjugacy~ enum (~max(β_PR, 0)~).
+A replaced metric restarts the recurrence at steepest descent.
 
 Geometry preconditioners install through ~Solver::set_precon~ and
 C ~rgmin_solver_set_precon~ (ABI minor 32): Exp, Lindh, the bonded

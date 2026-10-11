@@ -265,9 +265,13 @@ fn dot(a: ArrayView1<'_, f64>, b: ArrayView1<'_, f64>) -> f64 {
 
 /// `num/den`, or 0 when `den` is negligible beside `num`.
 ///
-/// The test is `|den| <= eps (|num| + 1)`. The added 1 keeps a tiny
-/// denominator from producing a huge β when the numerator is moderate,
-/// and a large numerator still requires a proportionally larger denominator.
+/// The test is `|den| <= eps (|num| + 1)`. The `+ 1` is an absolute
+/// floor, in the same units as `num`. A denominator smaller than `eps`
+/// is dropped even when `num` is zero, which keeps a vanishing inner
+/// product from returning a huge β. When `|num|` is large the `|num|`
+/// term dominates, so the test is relative and a genuine ratio is kept.
+/// β is already dimensionless, so the floor does not have to be scaled
+/// by a length unit.
 fn div(num: f64, den: f64) -> f64 {
     if !num.is_finite() || !den.is_finite() || den.abs() <= f64::EPSILON * (num.abs() + 1.0) {
         0.0

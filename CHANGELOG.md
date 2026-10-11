@@ -108,6 +108,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Nonlinear CG, with or without a metric, opens the line search with
+  Nocedal-Wright equation 3.60 instead of resetting the trial to
+  `control.istep` after every step. The descent fallback runs in both
+  cases. `Conjugacy::PolakRibierePlus` is a new variant of the
+  exhaustive `Conjugacy` enum: `max(β_PR, 0)` in the Euclidean product
+  and in the metric product. A replaced metric restarts that recurrence
+  at steepest descent.
 - A session's default line search is strong Wolfe (`c1 = 1e-4`,
   `c2 = 0.9`, 20 trials) instead of Brent. Brent spent about 25 force
   calls per L-BFGS iteration and, under a per-atom cap, stalled LJ38 at
@@ -126,9 +133,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Nonlinear CG opens the line search with Nocedal-Wright equation 3.60,
-  at 1 on the first step when a metric is installed, and restarts with
-  β = 0 when that metric is replaced. Polak-Ribiere+ clamps a negative β.
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than
   `1e3 (1 + |f(lo)| + |phi'(lo)| (hi - lo))`. Cubic and quadratic

@@ -10,8 +10,10 @@
 //! parameters unless the caller supplies them. The atomistic bench
 //! uses unit constants and reports this as a bonded geometric metric.
 //!
-//! `P` is the sum of reduced internal terms
-//! `|∂²V/∂q²| (∂q/∂x)(∂q/∂x)^T`, plus `c_stab` on the diagonal. A
+//! `P` is the reduced (absolute-curvature) Hessian, the same matrix as
+//! ASE `FF` with `hessian='reduced'`. ASE's default is `spectral`.
+//! Each term is `|∂²V/∂q²| (∂q/∂x)(∂q/∂x)^T`, plus `c_stab` on the
+//! diagonal. A
 //! harmonic bond uses `k` as that curvature. A harmonic angle uses
 //! `k_θ`. A Morse bond uses the absolute second derivative
 //! `|2 D α² exp(-α(r-r0)) (2 exp(-α(r-r0)) - 1)|`, which is the ASE
@@ -29,10 +31,11 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use super::geom::{
-    add_rank1, angle_grad, dihedral_grad, mic, norm3, pos_of, require_atoms, scale3,
+use super::geom::{angle_grad, dihedral_grad, mic, norm3, pos_of, require_atoms, scale3};
+use super::{
+    BlockAccum, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, max_atom_displacement, needs_rebuild,
+    note_block,
 };
-use super::{Metric, csr_from_coo, max_atom_displacement, needs_rebuild};
 use crate::error::{Error, Result};
 
 /// Harmonic bond. `k` is the curvature, energy / Å².
@@ -221,6 +224,12 @@ impl Ff {
     #[must_use]
     pub fn solve(&self, rhs: ArrayView1<f64>) -> Option<Array1<f64>> {
         self.metric.solve(rhs)
+    }
+
+    /// Jacobi PCG iterations for one solve.
+    #[must_use]
+    pub fn solve_iterations(&self, rhs: ArrayView1<f64>) -> Option<usize> {
+        self.metric.solve_counted(rhs).map(|(_, n)| n)
     }
 
     /// Dense copy, for tests and for a dense Cholesky reference.
@@ -416,8 +425,29 @@ fn assemble_metric(
             });
         }
     }
+    let mut partners = vec![Vec::new(); natoms];
+    let r_nn = emit_ff(positions, terms, params, |atoms, scale| {
+        note_block(&mut partners, atoms, scale);
+    });
+    let mut acc = BlockAccum::new(natoms, partners);
+    let _ = emit_ff(positions, terms, params, |atoms, scale| {
+        acc.add_rank1(atoms, scale);
+    });
+    acc.add_stabilization(params.c_stab);
+    Ok((
+        Metric::from_csr(acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE)),
+        r_nn,
+    ))
+}
+
+fn emit_ff(
+    positions: &[f64],
+    terms: FfTerms<'_>,
+    params: &FfParams,
+    mut emit: impl FnMut(&[(Option<usize>, [f64; 3])], f64),
+) -> f64 {
+    let natoms = positions.len() / 3;
     let mut min_d = vec![f64::INFINITY; natoms];
-    let mut trips = Vec::new();
     let note = |min_d: &mut [f64], i: usize, j: usize, r: f64| {
         min_d[i] = min_d[i].min(r);
         min_d[j] = min_d[j].min(r);
@@ -432,7 +462,7 @@ fn assemble_metric(
         }
         let e = scale3(delta, 1.0 / r);
         let neg = scale3(e, -1.0);
-        add_rank1(&mut trips, &[(Some(b.i), e), (Some(b.j), neg)], b.k.abs());
+        emit(&[(Some(b.i), e), (Some(b.j), neg)], b.k.abs());
         note(&mut min_d, b.i, b.j, r);
     }
     for m in terms.morses {
@@ -447,7 +477,7 @@ fn assemble_metric(
         let curv = (2.0 * m.d * m.alpha * m.alpha * efold * (2.0 * efold - 1.0)).abs();
         let e = scale3(delta, 1.0 / r);
         let neg = scale3(e, -1.0);
-        add_rank1(&mut trips, &[(Some(m.i), e), (Some(m.j), neg)], curv);
+        emit(&[(Some(m.i), e), (Some(m.j), neg)], curv);
         note(&mut min_d, m.i, m.j, r);
     }
     for a in terms.angles {
@@ -462,8 +492,7 @@ fn assemble_metric(
         let Some((gi, gj, gk)) = angle_grad(pi, pv, pk, params.lengths) else {
             continue;
         };
-        add_rank1(
-            &mut trips,
+        emit(
             &[(Some(a.i), gi), (Some(a.vertex), gj), (Some(a.k), gk)],
             a.k_theta.abs(),
         );
@@ -484,8 +513,7 @@ fn assemble_metric(
         let Some(g) = dihedral_grad(pi, pj, pk, pl, params.lengths) else {
             continue;
         };
-        add_rank1(
-            &mut trips,
+        emit(
             &[
                 (Some(d.i), g[0]),
                 (Some(d.j), g[1]),
@@ -495,10 +523,6 @@ fn assemble_metric(
             d.k_phi.abs(),
         );
     }
-    let n = 3 * natoms;
-    for i in 0..n {
-        trips.push((i, i, params.c_stab));
-    }
     let mut r_nn = 0.0_f64;
     let mut any = false;
     for d in min_d {
@@ -507,10 +531,7 @@ fn assemble_metric(
             any = true;
         }
     }
-    if !any {
-        r_nn = 1.0;
-    }
-    Ok((Metric::from_csr(csr_from_coo(n, trips)), r_nn))
+    if !any { 1.0 } else { r_nn }
 }
 
 /// Bonds for every pair inside `r_cut`, and an angle at each atom for

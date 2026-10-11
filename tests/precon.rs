@@ -372,11 +372,21 @@ fn lindh_and_ff_shorten_lbfgs_on_a_molecule() {
     assert!(taken < without, "ff {taken}, plain {without}");
     assert!(taken <= 3, "ff took {taken}");
     assert_eq!(
-        select_precon(GeometryKind::Molecule, &[8, 1, 1], false),
+        select_precon(
+            GeometryKind::Molecule,
+            &[8, 1, 1],
+            false,
+            rgmin::OptimizerFamily::QuasiNewton
+        ),
         PreconChoice::Lindh
     );
     assert_eq!(
-        select_precon(GeometryKind::Molecule, &[8, 1, 1], true),
+        select_precon(
+            GeometryKind::Molecule,
+            &[8, 1, 1],
+            true,
+            rgmin::OptimizerFamily::Cg
+        ),
         PreconChoice::Ff
     );
 }
@@ -429,12 +439,90 @@ fn bits_of(v: &Array1<f64>) -> Vec<u64> {
     v.iter().map(|x| x.to_bits()).collect()
 }
 
-/// Assembly, apply, and solve above [`rgmin::N_PAR`], so the `par`
-/// path is taken. The thread pool is the only thing that changes.
+/// One past the gate, or 168 when the kernel stays serial.
+fn size_above(gate: usize) -> usize {
+    if gate >= usize::MAX / 2 {
+        168
+    } else {
+        gate.saturating_add(8).max(24)
+    }
+}
+
+fn neighbours_cutoff(pos: &Array1<f64>, cut: f64) -> Neighbours {
+    let n = pos.len() / 3;
+    let mut origin = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            origin[k] = origin[k].min(pos[3 * i + k]);
+            hi[k] = hi[k].max(pos[3 * i + k]);
+        }
+    }
+    let _ = hi;
+    let mut cells: std::collections::BTreeMap<(i32, i32, i32), Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for i in 0..n {
+        let key = (
+            ((pos[3 * i] - origin[0]) / cut).floor() as i32,
+            ((pos[3 * i + 1] - origin[1]) / cut).floor() as i32,
+            ((pos[3 * i + 2] - origin[2]) / cut).floor() as i32,
+        );
+        cells.entry(key).or_default().push(i);
+    }
+    let mut neigh = Neighbours::default();
+    for (&key, atoms) in &cells {
+        for dz in -1..=1 {
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let nb = (key.0 + dx, key.1 + dy, key.2 + dz);
+                    let Some(others) = cells.get(&nb) else {
+                        continue;
+                    };
+                    for &i in atoms {
+                        for &j in others {
+                            if j <= i {
+                                continue;
+                            }
+                            let dx = pos[3 * i] - pos[3 * j];
+                            let dy = pos[3 * i + 1] - pos[3 * j + 1];
+                            let dz = pos[3 * i + 2] - pos[3 * j + 2];
+                            let r = (dx * dx + dy * dy + dz * dz).sqrt();
+                            if r < cut {
+                                neigh.i.push(i);
+                                neigh.j.push(j);
+                                neigh.r.push(r);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut pairs: Vec<(usize, usize, f64)> = neigh
+        .i
+        .iter()
+        .zip(neigh.j.iter())
+        .zip(neigh.r.iter())
+        .map(|((i, j), r)| (*i, *j, *r))
+        .collect();
+    pairs.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    pairs.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+    Neighbours {
+        i: pairs.iter().map(|p| p.0).collect(),
+        j: pairs.iter().map(|p| p.1).collect(),
+        r: pairs.iter().map(|p| p.2).collect(),
+        anchor: Vec::new(),
+    }
+}
+
+/// Assembly, apply, and solve above each kernel's gate. The thread
+/// pool is the only thing that changes.
 fn precon_fingerprint() -> Vec<u64> {
     use rgmin::{Ff, FfParams, FfTerms, Lindh, LindhParams};
 
-    let n = rgmin::N_PAR + 8;
+    let n = size_above(rgmin::N_PAR_LINDH_SOLVE)
+        .max(size_above(rgmin::N_PAR_LINDH_APPLY))
+        .max(size_above(rgmin::N_PAR_ASSEMBLE));
     let (pos, z) = lattice(n);
     let mut lp = LindhParams::default();
     lp.mu = Some(1.0);
@@ -459,20 +547,10 @@ fn precon_fingerprint() -> Vec<u64> {
     out.extend(bits_of(&ff.apply(rhs.view())));
     out.extend(bits_of(&ff.solve(rhs.view()).unwrap()));
 
-    let mut neigh = Neighbours::default();
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let dx = pos[3 * i] - pos[3 * j];
-            let dy = pos[3 * i + 1] - pos[3 * j + 1];
-            let dz = pos[3 * i + 2] - pos[3 * j + 2];
-            let r = (dx * dx + dy * dy + dz * dz).sqrt();
-            if r < 2.6 {
-                neigh.i.push(i);
-                neigh.j.push(j);
-                neigh.r.push(r);
-            }
-        }
-    }
+    let exp_n = size_above(rgmin::N_PAR_EXP_SOLVE).max(size_above(rgmin::N_PAR_EXP_APPLY));
+    let (pos, _z) = if exp_n == n { (pos, z) } else { lattice(exp_n) };
+    let neigh = neighbours_cutoff(&pos, 2.6);
+    let rhs = Array1::from_iter((0..pos.len()).map(|i| ((i % 5) as f64 - 2.0) * 0.1));
     let mut ep = ExpParams::default();
     ep.mu = Some(1.0);
     ep.r_nn = Some(1.45);

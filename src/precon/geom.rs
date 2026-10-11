@@ -100,7 +100,7 @@ pub(super) fn pairs_in_range(
         cells.entry(key).or_default().push(i);
     }
     let keys: Vec<(i32, i32, i32)> = cells.keys().copied().collect();
-    let parts = super::ordered_map(keys.len().max(1), n, |c| {
+    let parts = super::ordered_map(keys.len().max(1), n, super::N_PAR_ASSEMBLE, |c| {
         if c >= keys.len() {
             return Vec::new();
         }
@@ -330,32 +330,6 @@ mod tests {
         for (a, b) in got.iter().zip(&expect) {
             assert_eq!((a.0, a.1), (b.0, b.1));
             assert!((a.2 - b.2).abs() < 1e-12);
-        }
-    }
-}
-
-/// Add `scale * g g^T` on the free atoms. A `None` index is a ghost
-/// and contributes no row.
-pub(super) fn add_rank1(
-    trips: &mut Vec<(usize, usize, f64)>,
-    atoms: &[(Option<usize>, [f64; 3])],
-    scale: f64,
-) {
-    if !(scale.is_finite() && scale != 0.0) {
-        return;
-    }
-    for (ia, ga) in atoms {
-        let Some(ia) = *ia else { continue };
-        for (ib, gb) in atoms {
-            let Some(ib) = *ib else { continue };
-            for d in 0..3 {
-                for e in 0..3 {
-                    let v = scale * ga[d] * gb[e];
-                    if v != 0.0 {
-                        trips.push((3 * ia + d, 3 * ib + e, v));
-                    }
-                }
-            }
         }
     }
 }
