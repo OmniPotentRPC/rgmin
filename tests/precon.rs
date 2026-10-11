@@ -49,9 +49,11 @@ fn chain(n: usize) -> (Array1<f64>, Neighbours, ExpParams) {
             neigh.r.push(1.0);
         }
     }
-    let mut params = ExpParams::default();
-    params.r_nn = Some(1.0);
-    params.mu = Some(1.0);
+    let params = ExpParams {
+        r_nn: Some(1.0),
+        mu: Some(1.0),
+        ..ExpParams::default()
+    };
     (pos, neigh, params)
 }
 
@@ -321,8 +323,10 @@ fn lindh_and_ff_shorten_lbfgs_on_a_molecule() {
 
     let geom = water();
     let z = [8, 1, 1];
-    let mut lindh_params = LindhParams::default();
-    lindh_params.mu = Some(1.0);
+    let lindh_params = LindhParams {
+        mu: Some(1.0),
+        ..LindhParams::default()
+    };
     let model = Lindh::assemble(geom.view(), &z, &[], &lindh_params).unwrap();
     let obj = ModelQuad {
         apply: |x: ArrayView1<f64>| model.apply(x),
@@ -349,8 +353,10 @@ fn lindh_and_ff_shorten_lbfgs_on_a_molecule() {
         BondTerm { i: 0, j: 1, k: 1.0 },
         BondTerm { i: 0, j: 2, k: 1.0 },
     ];
-    let mut ff_params = FfParams::default();
-    ff_params.mu = Some(1.0);
+    let ff_params = FfParams {
+        mu: Some(1.0),
+        ..FfParams::default()
+    };
     let terms = FfTerms {
         bonds: &bonds,
         ..FfTerms::default()
@@ -402,8 +408,10 @@ fn lindh_estimates_the_energy_scale() {
 
     let geom = water();
     let z = [8, 1, 1];
-    let mut params = LindhParams::default();
-    params.mu = Some(1.0);
+    let params = LindhParams {
+        mu: Some(1.0),
+        ..LindhParams::default()
+    };
     let model = rgmin::Lindh::assemble(geom.view(), &z, &[], &params).unwrap();
     let scale = 2.5;
     let obj = ModelQuad {
@@ -411,8 +419,10 @@ fn lindh_estimates_the_energy_scale() {
         dim: geom.len(),
         bounds: Bounds::new(Array1::from_elem(9, -1e6), Array1::from_elem(9, 1e6), 0.0),
     };
-    let mut estimated = LindhParams::default();
-    estimated.lengths = Some([4.0, 4.0, 4.0]);
+    let estimated = LindhParams {
+        lengths: Some([4.0, 4.0, 4.0]),
+        ..LindhParams::default()
+    };
     let control = Control {
         maxiter: 1,
         gtol: 1e-10,
@@ -530,9 +540,11 @@ fn precon_fingerprint() -> Vec<u64> {
         .max(size_above(rgmin::N_PAR_LINDH_APPLY))
         .max(size_above(rgmin::N_PAR_ASSEMBLE));
     let (pos, z) = lattice(n);
-    let mut lp = LindhParams::default();
-    lp.mu = Some(1.0);
-    lp.r_cut = Some(3.0);
+    let lp = LindhParams {
+        mu: Some(1.0),
+        r_cut: Some(3.0),
+        ..LindhParams::default()
+    };
     let lindh = Lindh::assemble(pos.view(), &z, &[], &lp).unwrap();
     let rhs = Array1::from_iter((0..pos.len()).map(|i| ((i % 5) as f64 - 2.0) * 0.1));
     let mut out = Vec::new();
@@ -540,10 +552,11 @@ fn precon_fingerprint() -> Vec<u64> {
     out.extend(bits_of(&lindh.solve(rhs.view()).unwrap()));
 
     let (bonds, angles) = rgmin::bonded_terms(pos.view(), 2.2, 1.0, 0.2, None).unwrap();
-    let bonds = bonds;
-    let mut fp = FfParams::default();
-    fp.mu = Some(1.0);
-    fp.r_cut = Some(3.0);
+    let fp = FfParams {
+        mu: Some(1.0),
+        r_cut: Some(3.0),
+        ..FfParams::default()
+    };
     let terms = FfTerms {
         bonds: &bonds,
         angles: &angles,
@@ -557,9 +570,11 @@ fn precon_fingerprint() -> Vec<u64> {
     let (pos, _z) = if exp_n == n { (pos, z) } else { lattice(exp_n) };
     let neigh = neighbours_cutoff(&pos, 2.6);
     let rhs = Array1::from_iter((0..pos.len()).map(|i| ((i % 5) as f64 - 2.0) * 0.1));
-    let mut ep = ExpParams::default();
-    ep.mu = Some(1.0);
-    ep.r_nn = Some(1.45);
+    let ep = ExpParams {
+        mu: Some(1.0),
+        r_nn: Some(1.45),
+        ..ExpParams::default()
+    };
     let exp = Exp::assemble(pos.view(), &neigh, &ep, 1.0, 1.45).unwrap();
     out.extend(bits_of(&exp.apply(rhs.view())));
     out.extend(bits_of(&exp.solve(rhs.view()).unwrap()));

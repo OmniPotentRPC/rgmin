@@ -423,7 +423,7 @@ impl ExpState {
                 what: "neighbour distances do not match the pair list",
             });
         }
-        if !params.a.is_finite() || !(params.c_stab.is_finite() && params.c_stab > 0.0) {
+        if !(params.a.is_finite() && params.c_stab.is_finite() && params.c_stab > 0.0) {
             return Err(Error::Precon {
                 what: "A or c_stab is not usable",
             });

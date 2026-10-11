@@ -84,7 +84,6 @@ fn neighbours(pos: &Array1<f64>, lengths: [f64; 3]) -> Neighbours {
 }
 
 fn cell_pairs(pos: &[[f64; 3]], cutoff: f64, lengths: [f64; 3]) -> Vec<(usize, usize, f64)> {
-    let n = pos.len();
     let origin = [0.0, 0.0, 0.0];
     let nbin = [
         (lengths[0] / cutoff).floor().max(1.0) as usize,
@@ -93,8 +92,8 @@ fn cell_pairs(pos: &[[f64; 3]], cutoff: f64, lengths: [f64; 3]) -> Vec<(usize, u
     ];
     let mut cells: std::collections::BTreeMap<(i32, i32, i32), Vec<usize>> =
         std::collections::BTreeMap::new();
-    for i in 0..n {
-        let key = bin_of(pos[i], origin, cutoff, nbin, lengths);
+    for (i, point) in pos.iter().enumerate() {
+        let key = bin_of(*point, origin, cutoff, nbin, lengths);
         cells.entry(key).or_default().push(i);
     }
     let mut pairs = Vec::new();
@@ -207,10 +206,12 @@ fn once_lindh(threads: usize, crystal: &Crystal, rhs: &Array1<f64>) -> Sample {
         .build()
         .unwrap();
     pool.install(|| {
-        let mut params = LindhParams::default();
-        params.mu = Some(1.0);
-        params.r_cut = Some(CUTOFF);
-        params.lengths = Some(crystal.lengths);
+        let params = LindhParams {
+            mu: Some(1.0),
+            r_cut: Some(CUTOFF),
+            lengths: Some(crystal.lengths),
+            ..LindhParams::default()
+        };
         let t0 = Instant::now();
         let metric = Lindh::assemble(crystal.pos.view(), &crystal.z, &[], &params).unwrap();
         let assemble = t0.elapsed().as_secs_f64();
@@ -241,11 +242,13 @@ fn once_exp(threads: usize, crystal: &Crystal, rhs: &Array1<f64>) -> Sample {
         .build()
         .unwrap();
     pool.install(|| {
-        let mut params = ExpParams::default();
-        params.mu = Some(1.0);
-        params.r_cut = Some(CUTOFF);
-        params.r_nn = Some(2.35);
-        params.lengths = Some(crystal.lengths);
+        let params = ExpParams {
+            mu: Some(1.0),
+            r_cut: Some(CUTOFF),
+            r_nn: Some(2.35),
+            lengths: Some(crystal.lengths),
+            ..ExpParams::default()
+        };
         let t0 = Instant::now();
         let metric = Exp::assemble(crystal.pos.view(), &crystal.neigh, &params, 1.0, 2.35).unwrap();
         let assemble = t0.elapsed().as_secs_f64();
@@ -391,10 +394,12 @@ fn strong_scaling_table() {
         eprintln!("building {name} ({natoms} atoms)");
         let crystal = diamond(nx, ny, nz);
         let rhs = Array1::from_iter((0..crystal.pos.len()).map(|i| ((i % 7) as f64 - 3.0) * 0.05));
-        let mut lp = LindhParams::default();
-        lp.mu = Some(1.0);
-        lp.r_cut = Some(CUTOFF);
-        lp.lengths = Some(crystal.lengths);
+        let lp = LindhParams {
+            mu: Some(1.0),
+            r_cut: Some(CUTOFF),
+            lengths: Some(crystal.lengths),
+            ..LindhParams::default()
+        };
         let lindh_m = Lindh::assemble(crystal.pos.view(), &crystal.z, &[], &lp).unwrap();
         let lindh_it = lindh_m.solve_iterations(rhs.view()).unwrap_or(0);
         eprintln!(
@@ -403,11 +408,13 @@ fn strong_scaling_table() {
             vm_kib("VmHWM:")
         );
         drop(lindh_m);
-        let mut ep = ExpParams::default();
-        ep.mu = Some(1.0);
-        ep.r_cut = Some(CUTOFF);
-        ep.r_nn = Some(2.35);
-        ep.lengths = Some(crystal.lengths);
+        let ep = ExpParams {
+            mu: Some(1.0),
+            r_cut: Some(CUTOFF),
+            r_nn: Some(2.35),
+            lengths: Some(crystal.lengths),
+            ..ExpParams::default()
+        };
         let exp_m = Exp::assemble(crystal.pos.view(), &crystal.neigh, &ep, 1.0, 2.35).unwrap();
         let exp_it = exp_m.solve_iterations(rhs.view()).unwrap_or(0);
         eprintln!(
