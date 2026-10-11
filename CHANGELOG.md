@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `rggate` (`bench/gate/`, pixi task `gate`) reads contract version 1
+  of the atomistic CSV. The reference for a start is explicit, otherwise
+  the baseline on that same start. `--reference lowest` opts into the
+  lowest converged energy. Per-method curves count a converged run as a
+  success. Inside a pair, Gehan scoring drops early censoring and basin
+  splits from the call comparison. The BCa interval resamples systems
+  and then starts. The walk is stratified by system. `dim` is the
+  free coordinate count, and the energy window uses it. A split with
+  unknown atom count is an upper bound. The cluster interval is printed
+  from `--min-clusters` systems (default 10). Each pair is walked at
+  `alpha` divided by the number of pairs. `decide_min` is the first
+  time an all-wins or all-losses walk can cross. `--boundary agrapa`
+  is one signed approximate-GRAPA stake, truncated at 3/4. Exit 0
+  passes, 1 fails, 2 is undecided, and 3 is a contract or argument
+  error. Goswami, AIP Adv. (2025),
+  https://doi.org/10.1063/5.0283639. Dolan and Moré, Math. Program. 91,
+  201 (2002), https://doi.org/10.1007/s101070100263. Moré and Wild,
+  SIAM J. Optim. 20, 172 (2009), https://doi.org/10.1137/080724083.
+  Gould and Scott, ACM TOMS 43 (2016),
+  https://doi.org/10.1145/2950048. Kaplan and Meier, JASA 53, 457
+  (1958), https://doi.org/10.1080/01621459.1958.10501452. Efron, JASA
+  82, 171 (1987), https://doi.org/10.1080/01621459.1987.10478410.
+  Howard, Ramdas, McAuliffe, and Sekhon, Ann. Stat. 49, 1055 (2021),
+  https://doi.org/10.1214/20-AOS1991. Wald, Ann. Math. Stat. 16, 117
+  (1945), https://doi.org/10.1214/aoms/1177731118. Waudby-Smith and
+  Ramdas, J. R. Stat. Soc. B (2024),
+  https://doi.org/10.1093/jrsssb/qkad009.
 - ECnoise (`ecnoise`, `sample_noise`, `sample_gradient_noise`,
   `sample_gradient_noise_k`). Moré and Wild, SIAM J. Sci. Comput. 33,
   1292 (2011), https://doi.org/10.1137/100786125. The difference table

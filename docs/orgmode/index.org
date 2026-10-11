@@ -77,6 +77,7 @@ cargo test --features capi
    howto/highs-qp
    howto/c-abi
    howto/doxygen
+   howto/bench-gate
 
 .. toctree::
    :maxdepth: 2

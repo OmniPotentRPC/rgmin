@@ -42,7 +42,9 @@ session defaults to strong Wolfe, starts every search from the value and
 gradient it holds, and bounds trials by the displacement cap
 (`LineSearch::search_from`). FIRE 2.0 as Guénolé et al. 2020 publish it
 is `Solver::set_fire_variant(FireVariant::Guenole2020)`.
-`bench/atomistic` counts force calls on rgpot potentials, and
+`bench/atomistic` counts force calls on rgpot potentials.
+`bench/gate` (`python -m rggate`, pixi task `gate`) is the censored CSV
+gate: same stationary point, Kaplan-Meier, BCa, and a confidence sequence.
 `validation/` holds the sympy checks behind the interpolation, the
 two-loop map and FIRE 2.0 (`uv run --with sympy python validation/<file>.py`).
 Methods: NLCG, BFGS, L-BFGS, SR1, SR2, Newton, RFO, Adam, steepest
