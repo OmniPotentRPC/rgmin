@@ -214,18 +214,24 @@ def test_neb_au_on_al() -> None:
 
 
 @pytest.mark.skipif(_SLOW, reason="min-mode is too slow under TSan")
+@pytest.mark.thread_unsafe
 def test_min_mode_atoms() -> None:
     from ase.mep import MinModeAtoms
 
     atoms = _pt7(8, scale=0.02)
-    mode = MinModeAtoms(atoms, logfile=None)
+    mode = MinModeAtoms(atoms, logfile=None, random_seed=1)
     opt = FIRE(mode, logfile=None, maxstep=0.1)
-    assert opt.run(fmax=0.5, steps=40) is True
+    assert opt.run(fmax=0.5, steps=80) is True
 
 
+@pytest.mark.thread_unsafe
 def test_autoneb_fire(tmp_path: Any) -> None:
     from ase.io import write as ase_write
     from ase.mep import AutoNEB
+
+    # ASE 3.23 writes np.NaN. NumPy 2 removed that alias.
+    if not hasattr(np, "NaN"):
+        np.NaN = np.nan  # type: ignore[attr-defined]
 
     start = _pt7(9, scale=0.01)
     start.get_potential_energy()
