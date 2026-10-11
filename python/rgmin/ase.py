@@ -4,12 +4,22 @@
 
 ASE is imported when this module is imported. ``import rgmin`` does not
 import ASE.
+
+Goswami, Gunde, and Jónsson, Front. Chem. (2026),
+https://doi.org/10.3389/fchem.2026.1807063.
+Goswami, AIP Adv. (2025), https://doi.org/10.1063/5.0283639.
+Hjorth Larsen et al., J. Phys.: Condens. Matter 29, 273002 (2017),
+https://doi.org/10.1088/1361-648X/aa680e.
 """
 
 from __future__ import annotations
 
+import importlib
 import inspect
+import threading
 import time
+import weakref
+from collections.abc import Callable
 from typing import Any, cast
 
 import numpy as np
@@ -18,16 +28,9 @@ from ase.optimize.optimize import Optimizer as _ASEOptimizer
 import rgmin
 
 _ASE_KEYS = frozenset({"master", "comm", "loginterval", "force_consistent"})
-
-_STEP_ACCEPT_TYPES = frozenset(
-    {
-        "NEB",
-        "DyNEB",
-        "NEBOptimizable",
-        "DimerOptimizable",
-        "MinModeAtoms",
-    }
-)
+_HESSIAN_METHODS = frozenset({"newton", "rfo", "dogleg"})
+_calc_guard = threading.Lock()
+_calc_locks: weakref.WeakKeyDictionary[Any, threading.Lock] = weakref.WeakKeyDictionary()
 
 
 def _ase_passthrough(options: dict[str, Any]) -> dict[str, Any]:
@@ -42,66 +45,140 @@ def _ase_passthrough(options: dict[str, Any]) -> dict[str, Any]:
     return passed
 
 
-def _positions(opt: Any) -> np.ndarray:
-    if hasattr(opt, "get_x"):
-        return np.asarray(opt.get_x(), dtype=np.float64).reshape(-1)
-    return np.asarray(opt.get_positions(), dtype=np.float64).reshape(-1)
+def _import_attr(module: str, name: str) -> Any | None:
+    try:
+        loaded = importlib.import_module(module)
+    except ImportError:
+        return None
+    return getattr(loaded, name, None)
 
 
-def _write_positions(opt: Any, x: np.ndarray) -> None:
-    if hasattr(opt, "set_x"):
-        opt.set_x(np.asarray(x, dtype=np.float64))
-        return
-    current = np.asarray(opt.get_positions(), dtype=np.float64)
-    opt.set_positions(np.asarray(x, dtype=np.float64).reshape(current.shape))
+def _nonconservative_types() -> tuple[type, ...]:
+    found: list[type] = []
+    for module, name in (
+        ("ase.mep", "NEB"),
+        ("ase.mep", "DyNEB"),
+        ("ase.mep.neb", "NEBOptimizable"),
+        ("ase.mep.dimer", "DimerOptimizable"),
+        ("ase.mep", "MinModeAtoms"),
+    ):
+        cls = _import_attr(module, name)
+        if isinstance(cls, type):
+            found.append(cls)
+    return tuple(found)
 
 
-def _value(opt: Any) -> float:
-    target = cast(Any, opt)
-    for name in ("get_value", "get_potential_energy"):
-        getter = getattr(target, name, None)
-        if getter is None:
-            continue
-        try:
-            return float(getter())
-        except TypeError:
-            break
-    return float(cast(Any, target.atoms).get_potential_energy())
-
-
-def _gradient(opt: Any) -> np.ndarray:
-    if hasattr(opt, "get_gradient"):
-        return np.asarray(opt.get_gradient(), dtype=np.float64).reshape(-1)
-    forces = np.asarray(opt.get_forces(), dtype=np.float64)
-    return -forces.reshape(-1)
-
-
-def _ndofs(opt: Any) -> int:
-    if hasattr(opt, "ndofs"):
-        return int(opt.ndofs())
-    return int(_positions(opt).shape[0])
-
-
-def _nonconservative(opt: Any) -> bool:
-    name = type(opt).__name__
-    if name in _STEP_ACCEPT_TYPES:
+def _is_nonconservative(obj: Any) -> bool:
+    if obj is None:
+        return False
+    kinds = _nonconservative_types()
+    if kinds and isinstance(obj, kinds):
         return True
-    lowered = name.lower()
-    return "neb" in lowered or "dimer" in lowered or "minmode" in lowered
+    probe = getattr(obj, "is_neb", None)
+    return bool(callable(probe) and probe())
+
+
+def _minmode(obj: Any) -> Any | None:
+    cls = _import_attr("ase.mep", "MinModeAtoms")
+    if not isinstance(cls, type):
+        return None
+    for candidate in (obj, getattr(obj, "atoms", None), getattr(obj, "dimeratoms", None)):
+        if isinstance(candidate, cls):
+            return candidate
+    return None
+
+
+class _Geometry:
+    """Positions, value, and gradient for one ASE optimizable.
+
+    ASE 3.29 exposes ``get_x``, ``get_gradient``, and ``get_value``.
+    ASE 3.23 exposes ``get_positions``, ``get_forces``, and
+    ``get_potential_energy``. A min-mode object reports its energy with
+    ``get_potential_energy()`` and no ``force_consistent`` argument.
+    """
+
+    def __init__(self, opt: Any) -> None:
+        self.opt = opt
+        self.mode = _minmode(opt)
+        self.modern = self.mode is None and all(
+            hasattr(opt, name) for name in ("get_x", "get_gradient", "get_value")
+        )
+
+    def positions(self) -> np.ndarray:
+        if self.modern:
+            return np.asarray(self.opt.get_x(), dtype=np.float64).reshape(-1)
+        source = self.mode if self.mode is not None else self.opt
+        return np.asarray(source.get_positions(), dtype=np.float64).reshape(-1)
+
+    def write(self, x: np.ndarray) -> None:
+        if self.modern and hasattr(self.opt, "set_x"):
+            self.opt.set_x(np.asarray(x, dtype=np.float64))
+            return
+        source = self.mode if self.mode is not None else self.opt
+        current = np.asarray(source.get_positions(), dtype=np.float64)
+        source.set_positions(np.asarray(x, dtype=np.float64).reshape(current.shape))
+
+    def value(self) -> float:
+        if self.mode is not None:
+            return float(self.mode.get_potential_energy())
+        if self.modern:
+            return float(self.opt.get_value())
+        return float(self.opt.get_potential_energy())
+
+    def gradient(self) -> np.ndarray:
+        if self.modern or hasattr(self.opt, "get_gradient"):
+            return np.asarray(self.opt.get_gradient(), dtype=np.float64).reshape(-1)
+        source = self.mode if self.mode is not None else self.opt
+        forces = np.asarray(source.get_forces(), dtype=np.float64)
+        return -forces.reshape(-1)
+
+    def ndofs(self) -> int:
+        if hasattr(self.opt, "ndofs"):
+            return int(self.opt.ndofs())
+        return int(self.positions().shape[0])
+
+
+def _calculator_of(opt: Any) -> Any:
+    atoms = getattr(opt, "atoms", None)
+    if atoms is None:
+        return None
+    calc = getattr(atoms, "calc", None)
+    if calc is not None:
+        return calc
+    inner = getattr(atoms, "atoms", None)
+    if inner is None:
+        return None
+    return getattr(inner, "calc", None)
+
+
+def _lock_for(calc: Any) -> threading.Lock | None:
+    if calc is None or bool(getattr(calc, "reentrant", False)):
+        return None
+    try:
+        with _calc_guard:
+            lock = _calc_locks.get(calc)
+            if lock is None:
+                lock = threading.Lock()
+                _calc_locks[calc] = lock
+            return lock
+    except TypeError:
+        return None
 
 
 class Optimizer(_ASEOptimizer):
     """One rgmin iteration per :meth:`step`.
 
     ``method`` selects the solver. ``maxstep`` is the per-atom cap in
-    angstroms (``rgmin_solver_set_atom_maxmove``). ``accept`` overrides
-    the acceptance rule. Remaining solver keywords are validated by
-    :class:`rgmin.SolverConfig`. ``master``, ``comm``, and ``loginterval``
-    are forwarded to the ASE base class.
+    angstroms. ``accept`` overrides the acceptance rule. Remaining
+    solver keywords are validated by :class:`rgmin.SolverConfig`.
+    ``master``, ``comm``, and ``loginterval`` are forwarded to the ASE
+    base class when that class accepts them.
 
     A non-conservative optimizable (NEB, dimer, min-mode) uses
-    ``accept="step"`` and the L-BFGS NEB guards. A plain atoms object or
-    cell filter keeps energy acceptance.
+    ``accept="step"`` and the L-BFGS NEB guards. A plain atoms object
+    or a cell filter keeps energy acceptance. ``accept=`` overrides
+    both. A shared calculator is called by one thread at a time unless
+    ``reentrant`` is true.
     """
 
     defaults = {"maxstep": 0.2}
@@ -116,10 +193,14 @@ class Optimizer(_ASEOptimizer):
         method: str = "lbfgs",
         maxstep: float | None = None,
         accept: str | None = None,
+        hessian: Callable[..., Any] | None = None,
         **options: Any,
     ) -> None:
+        if restart is not None:
+            raise NotImplementedError(f"{type(self).__name__}.read is not implemented")
         self._rgmin_method = method
         self._rgmin_accept = accept
+        self._hessian = hessian
         self._rgmin_options = dict(options)
         ase_options = _ase_passthrough(self._rgmin_options)
         if maxstep is None:
@@ -135,12 +216,15 @@ class Optimizer(_ASEOptimizer):
             **ase_options,
         )
 
+    def _needs_step_accept(self) -> bool:
+        return _is_nonconservative(self.optimizable) or _is_nonconservative(self.atoms)
+
     def _config_options(self) -> dict[str, Any]:
         opts = dict(self._rgmin_options)
         opts["maxstep"] = self.maxstep
         if self._rgmin_accept is not None:
             opts["accept"] = self._rgmin_accept
-        elif _nonconservative(self.optimizable):
+        elif self._needs_step_accept():
             opts["accept"] = "step"
             opts.setdefault("neb_guards", True)
         return opts
@@ -148,68 +232,76 @@ class Optimizer(_ASEOptimizer):
     def initialize(self) -> None:
         opts = self._config_options()
         config = rgmin.SolverConfig(self._rgmin_method, **opts)
-        self._solver = rgmin.Solver(_ndofs(self.optimizable), config)
+        self._solver = rgmin.Solver(_Geometry(self.optimizable).ndofs(), config)
 
     def _evaluate(self, x: np.ndarray) -> tuple[float, np.ndarray]:
-        current = _positions(self.optimizable)
-        if x.shape != current.shape or not np.array_equal(x, current):
-            _write_positions(self.optimizable, x)
-        value = _value(self.optimizable)
-        gradient = np.array(_gradient(self.optimizable), dtype=np.float64, copy=True)
-        return value, gradient
+        geom = _Geometry(self.optimizable)
+
+        def once() -> tuple[float, np.ndarray]:
+            current = geom.positions()
+            if x.shape != current.shape or not np.array_equal(x, current):
+                geom.write(x)
+            value = geom.value()
+            gradient = np.array(geom.gradient(), dtype=np.float64, copy=True)
+            return value, gradient
+
+        lock = _lock_for(_calculator_of(self.optimizable))
+        if lock is None:
+            return once()
+        with lock:
+            return once()
+
+    def _hessian_of(self, x: np.ndarray) -> np.ndarray:
+        if self._hessian is None:
+            raise NotImplementedError(f"{type(self).__name__}.step requires a hessian callable")
+        return np.asarray(self._hessian(x), dtype=np.float64)
 
     def step(self) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
-        if self._solver is None or self._solver.dim != _ndofs(self.optimizable):
+        geom = _Geometry(self.optimizable)
+        if self._solver is None or self._solver.dim != geom.ndofs():
             self.initialize()
         assert self._solver is not None
-        x = np.array(_positions(self.optimizable), dtype=np.float64, copy=True)
-        self._solver.step(self._evaluate, x)
-        if not np.array_equal(x, _positions(self.optimizable)):
-            _write_positions(self.optimizable, x)
+        if self._rgmin_method in _HESSIAN_METHODS and self._hessian is None:
+            raise NotImplementedError(f"{type(self).__name__}.step requires a hessian callable")
+        x = np.array(geom.positions(), dtype=np.float64, copy=True)
+        if self._rgmin_method in _HESSIAN_METHODS:
+            self._solver.step_hess(self._evaluate, self._hessian_of, x)
+        else:
+            self._solver.step(self._evaluate, x)
+        if not np.array_equal(x, geom.positions()):
+            geom.write(x)
 
-    def _log_energy(self) -> float:
-        opt = cast(Any, self.optimizable)
-        for name in ("get_value", "get_potential_energy"):
-            getter = getattr(opt, name, None)
-            if getter is None:
-                continue
-            try:
-                return float(getter())
-            except TypeError:
-                break
-        return float(cast(Any, self.atoms).get_potential_energy())
+    def run(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, fmax: float = 0.05, steps: int | None = None
+    ) -> bool:
+        if steps is None:
+            converged = cast(Any, super()).run(fmax=fmax)
+        else:
+            converged = cast(Any, super()).run(fmax=fmax, steps=steps)
+        return bool(converged)
 
     def _log_fmax(self, gradient: Any, forces: Any) -> float:
         if gradient is not None and hasattr(self.optimizable, "gradient_norm"):
             return float(self.optimizable.gradient_norm(gradient))
         vector = gradient if gradient is not None else forces
         if vector is None:
-            if hasattr(self.optimizable, "get_gradient"):
-                vector = self.optimizable.get_gradient()
-            else:
-                vector = cast(Any, self.optimizable).get_forces()
+            vector = _Geometry(self.optimizable).gradient()
         block = np.asarray(vector, dtype=np.float64).reshape(-1, 3)
         return float(np.sqrt((block * block).sum(axis=1).max()))
 
     def log(self, *args: Any, **kwargs: Any) -> None:
         """Write one ASE optimizer line.
 
-        The columns are ``Step``, ``Time``, ``Energy``, and ``fmax``, in the
-        format used by :class:`ase.optimize.optimize.Optimizer`. Energy is
-        read without ``force_consistent`` when the optimizable does not
-        accept that keyword (``MinModeAtoms``).
+        The columns are ``Step``, ``Time``, ``Energy``, and ``fmax``.
         """
         if self.logfile is None:
             return
         gradient = args[0] if args else kwargs.get("gradient")
         forces = kwargs.get("forces")
         if gradient is None and forces is None and not args:
-            if hasattr(self.optimizable, "get_gradient"):
-                gradient = self.optimizable.get_gradient()
-            elif hasattr(self.optimizable, "get_forces"):
-                forces = cast(Any, self.optimizable).get_forces()
+            gradient = _Geometry(self.optimizable).gradient()
         fmax = self._log_fmax(gradient, forces)
-        energy = self._log_energy()
+        energy = _Geometry(self.optimizable).value()
         now = time.localtime()
         name = type(self).__name__
         write = cast(Any, self.logfile).write
@@ -232,16 +324,13 @@ class Optimizer(_ASEOptimizer):
             fmax,
         )
         write(line)
+        cast(Any, self.logfile).flush()
 
     def read(self) -> None:
-        raise NotImplementedError(
-            f"{type(self).__name__} cannot restore {self._rgmin_method} solver state"
-        )
+        raise NotImplementedError(f"{type(self).__name__}.read is not implemented")
 
     def dump(self, data: Any) -> None:
-        raise NotImplementedError(
-            f"{type(self).__name__} cannot store {self._rgmin_method} solver state"
-        )
+        raise NotImplementedError(f"{type(self).__name__}.dump is not implemented")
 
     def todict(self) -> dict[str, Any]:
         description = dict(cast(Any, super()).todict())
@@ -252,34 +341,32 @@ class Optimizer(_ASEOptimizer):
         return description
 
 
-def _bind(name: str, method: str, doc: str) -> type[Optimizer]:
-    def __init__(
-        self: Optimizer,
-        atoms: Any,
-        restart: str | None = None,
-        logfile: Any = "-",
-        trajectory: Any = None,
-        append_trajectory: bool = False,
-        maxstep: float | None = None,
-        accept: str | None = None,
-        **options: Any,
-    ) -> None:
-        Optimizer.__init__(
-            self,
-            atoms,
-            restart=restart,
-            logfile=logfile,
-            trajectory=trajectory,
-            append_trajectory=append_trajectory,
-            method=method,
-            maxstep=maxstep,
-            accept=accept,
-            **options,
-        )
-
-    __init__.__doc__ = doc
-    cls = type(name, (Optimizer,), {"__init__": __init__, "__doc__": doc})
-    return cls
+def _start(
+    opt: Optimizer,
+    atoms: Any,
+    restart: str | None,
+    logfile: Any,
+    trajectory: Any,
+    append_trajectory: bool,
+    method: str,
+    maxstep: float | None,
+    accept: str | None,
+    options: dict[str, Any],
+    hessian: Callable[..., Any] | None = None,
+) -> None:
+    Optimizer.__init__(
+        opt,
+        atoms,
+        restart=restart,
+        logfile=logfile,
+        trajectory=trajectory,
+        append_trajectory=append_trajectory,
+        method=method,
+        maxstep=maxstep,
+        accept=accept,
+        hessian=hessian,
+        **options,
+    )
 
 
 class CG(Optimizer):
@@ -287,14 +374,12 @@ class CG(Optimizer):
 
     The default ``beta`` is Polak-Ribiere, the C ABI method
     ``RGMIN_POLAK_RIBIERE``. ``beta`` selects another conjugacy variant
-    exposed by that ABI (``fletcher_reeves``, ``hestenes_stiefel``,
-    ``dai_yuan``, ``conjugate_descent``, ``hager_zhang``, ``liu_storey``,
-    ``fr_pr``).
+    exposed by that ABI.
 
+    Polak and Ribiere, Rev. Fr. Inform. Rech. Oper. 3, 35 (1969),
+    https://doi.org/10.1051/m2an/196903R100351.
     Nocedal and Wright, *Numerical Optimization*,
     https://doi.org/10.1007/978-0-387-40065-5.
-    Polak and Ribiere, *Note sur la convergence de methodes de directions
-    conjuguees* (1969).
     """
 
     def __init__(
@@ -310,174 +395,625 @@ class CG(Optimizer):
         **options: Any,
     ) -> None:
         options["beta"] = beta
-        Optimizer.__init__(
+        _start(
             self,
             atoms,
-            restart=restart,
-            logfile=logfile,
-            trajectory=trajectory,
-            append_trajectory=append_trajectory,
-            method="cg",
-            maxstep=maxstep,
-            accept=accept,
-            **options,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "cg",
+            maxstep,
+            accept,
+            options,
         )
 
 
-LBFGS = _bind(
-    "LBFGS",
-    "lbfgs",
-    "Limited-memory BFGS (Nocedal-Wright 7.4).\n\n"
-    "Liu and Nocedal, Mathematical Programming 45, 503 (1989),\n"
-    "https://doi.org/10.1007/BF01589116.\n"
-    "Nocedal and Wright, *Numerical Optimization*,\n"
-    "https://doi.org/10.1007/978-0-387-40065-5.",
-)
-FIRE = _bind(
-    "FIRE",
-    "fire",
-    "FIRE inertial relaxation.\n\n"
-    "Bitzek, Koskinen, Gaehler, Moseler, and Gumbsch, Phys. Rev. Lett. 97,\n"
-    "170201 (2006), https://doi.org/10.1103/PhysRevLett.97.170201.",
-)
-FIRE2 = _bind(
-    "FIRE2",
-    "fire2",
-    "FIRE 2.0.\n\n"
-    "Guenole, Noehring, Vaid, Houlle, Xie, Prakash, and Bitzek, Comput.\n"
-    "Mater. Sci. 175, 109584 (2020),\n"
-    "https://doi.org/10.1016/j.commatsci.2020.109584.",
-)
-QuickMin = _bind(
-    "QuickMin",
-    "quickmin",
-    "Quick-min: project the velocity onto the force, then an Euler step.",
-)
-BFGS = _bind(
-    "BFGS",
-    "bfgs",
-    "Dense BFGS.\n\n"
-    "Nocedal and Wright, *Numerical Optimization*,\n"
-    "https://doi.org/10.1007/978-0-387-40065-5.",
-)
-SD = _bind(
-    "SD",
-    "sd",
-    "Steepest descent.\n\n"
-    "Nocedal and Wright, *Numerical Optimization*,\n"
-    "https://doi.org/10.1007/978-0-387-40065-5.",
-)
-Adam = _bind(
-    "Adam",
-    "adam",
-    "Adam.\n\nKingma and Ba, https://doi.org/10.48550/arXiv.1412.6980.",
-)
-Newton = _bind(
-    "Newton",
-    "newton",
-    "Newton on a caller Hessian. The ASE path has no Hessian callback,\n"
-    "so a step raises ``NotImplementedError`` until a Hessian is supplied\n"
-    "through the C API.\n\n"
-    "Nocedal and Wright, *Numerical Optimization*,\n"
-    "https://doi.org/10.1007/978-0-387-40065-5.",
-)
-RFO = _bind(
-    "RFO",
-    "rfo",
-    "Rational function optimization on a caller Hessian.\n\n"
-    "Banerjee, Adams, Simons, and Shepard, J. Phys. Chem. 89, 52 (1985),\n"
-    "https://doi.org/10.1021/j100247a015.",
-)
-SR1 = _bind(
-    "SR1",
-    "sr1",
-    "Symmetric-rank-one quasi-Newton.\n\n"
-    "Nocedal and Wright, *Numerical Optimization*,\n"
-    "https://doi.org/10.1007/978-0-387-40065-5.",
-)
-SR2 = _bind(
-    "SR2",
-    "sr2",
-    "SR2 quasi-Newton update.\n\n"
-    "Nocedal and Wright, *Numerical Optimization*,\n"
-    "https://doi.org/10.1007/978-0-387-40065-5.",
-)
-BB = _bind(
-    "BB",
-    "bb",
-    "Barzilai-Borwein spectral steepest descent.\n\n"
-    "Barzilai and Borwein, IMA J. Numer. Anal. 8, 141 (1988),\n"
-    "https://doi.org/10.1093/imanum/8.1.141.",
-)
-Dogleg = _bind(
-    "Dogleg",
-    "dogleg",
-    "Powell dogleg on a caller Hessian.\n\n"
-    "Nocedal and Wright, algorithm 4.1,\n"
-    "https://doi.org/10.1007/978-0-387-40065-5.",
-)
-DIIS = _bind(
-    "DIIS",
-    "diis",
-    "Pulay residual subspace extrapolation.\n\n"
-    "Pulay, Chem. Phys. Lett. 73, 393 (1980),\n"
-    "https://doi.org/10.1016/0009-2614(80)80396-4.",
-)
-PSO = _bind(
-    "PSO",
-    "pso",
-    "Particle swarm.\n\n"
-    "Kennedy and Eberhart, Proc. ICNN (1995),\n"
-    "https://doi.org/10.1109/ICNN.1995.488968.",
-)
-FletcherReeves = _bind(
-    "FletcherReeves",
-    "fletcher_reeves",
-    "Fletcher-Reeves conjugate gradient.\n\n"
-    "Fletcher and Reeves, Comput. J. 7, 149 (1964),\n"
-    "https://doi.org/10.1093/comjnl/7.2.149.",
-)
-HestenesStiefel = _bind(
-    "HestenesStiefel",
-    "hestenes_stiefel",
-    "Hestenes-Stiefel conjugate gradient.\n\n"
-    "Hestenes and Stiefel, J. Res. Natl. Bur. Stand. 49, 409 (1952).",
-)
-DaiYuan = _bind(
-    "DaiYuan",
-    "dai_yuan",
-    "Dai-Yuan conjugate gradient.\n\n"
-    "Dai and Yuan, SIAM J. Optim. 10, 177 (1999),\n"
-    "https://doi.org/10.1137/S1052623497318992.",
-)
-ConjugateDescent = _bind(
-    "ConjugateDescent",
-    "conjugate_descent",
-    "Fletcher conjugate descent.\n\n"
-    "Hager and Zhang, SIAM J. Optim. 16, 170 (2005),\n"
-    "https://doi.org/10.1137/030601880.",
-)
-HagerZhang = _bind(
-    "HagerZhang",
-    "hager_zhang",
-    "Hager-Zhang conjugate gradient.\n\n"
-    "Hager and Zhang, SIAM J. Optim. 16, 170 (2005),\n"
-    "https://doi.org/10.1137/030601880.",
-)
-LiuStorey = _bind(
-    "LiuStorey",
-    "liu_storey",
-    "Liu-Storey conjugate gradient.\n\n"
-    "Liu and Storey, J. Optim. Theory Appl. 69, 129 (1991),\n"
-    "https://doi.org/10.1007/BF00940464.",
-)
-FrPr = _bind(
-    "FrPr",
-    "fr_pr",
-    "Gilbert-Nocedal FR-PR hybrid.\n\n"
-    "Nocedal and Wright, *Numerical Optimization*,\n"
-    "https://doi.org/10.1007/978-0-387-40065-5.",
-)
+class LBFGS(Optimizer):
+    """Limited-memory BFGS.
+
+    Liu and Nocedal, Mathematical Programming 45, 503 (1989),
+    https://doi.org/10.1007/BF01589116.
+    Nocedal and Wright, *Numerical Optimization*,
+    https://doi.org/10.1007/978-0-387-40065-5.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self, atoms, restart, logfile, trajectory, append_trajectory, "lbfgs", maxstep, accept, options
+        )
+
+
+class FIRE(Optimizer):
+    """FIRE inertial relaxation.
+
+    Bitzek, Koskinen, Gaehler, Moseler, and Gumbsch, Phys. Rev. Lett. 97,
+    170201 (2006), https://doi.org/10.1103/PhysRevLett.97.170201.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self, atoms, restart, logfile, trajectory, append_trajectory, "fire", maxstep, accept, options
+        )
+
+
+class FIRE2(Optimizer):
+    """FIRE 2.0.
+
+    Guenole, Noehring, Vaid, Houlle, Xie, Prakash, and Bitzek, Comput.
+    Mater. Sci. 175, 109584 (2020),
+    https://doi.org/10.1016/j.commatsci.2020.109584.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self, atoms, restart, logfile, trajectory, append_trajectory, "fire2", maxstep, accept, options
+        )
+
+
+class QuickMin(Optimizer):
+    """Quick-min: project the velocity onto the force, then an Euler step.
+
+    https://doi.org/10.1142/9789812839664_0016.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "quickmin",
+            maxstep,
+            accept,
+            options,
+        )
+
+
+class BFGS(Optimizer):
+    """Dense BFGS.
+
+    Nocedal and Wright, *Numerical Optimization*,
+    https://doi.org/10.1007/978-0-387-40065-5.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self, atoms, restart, logfile, trajectory, append_trajectory, "bfgs", maxstep, accept, options
+        )
+
+
+class SD(Optimizer):
+    """Steepest descent.
+
+    Nocedal and Wright, *Numerical Optimization*,
+    https://doi.org/10.1007/978-0-387-40065-5.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(self, atoms, restart, logfile, trajectory, append_trajectory, "sd", maxstep, accept, options)
+
+
+class Adam(Optimizer):
+    """Adam.
+
+    Kingma and Ba, https://doi.org/10.48550/arXiv.1412.6980.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self, atoms, restart, logfile, trajectory, append_trajectory, "adam", maxstep, accept, options
+        )
+
+
+class Newton(Optimizer):
+    """Newton on ``hessian(x)``, an ``(n, n)`` matrix.
+
+    Nocedal and Wright, *Numerical Optimization*,
+    https://doi.org/10.1007/978-0-387-40065-5.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        hessian: Callable[..., Any] | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "newton",
+            maxstep,
+            accept,
+            options,
+            hessian,
+        )
+
+
+class RFO(Optimizer):
+    """Rational function optimization on ``hessian(x)``.
+
+    Banerjee, Adams, Simons, and Shepard, J. Phys. Chem. 89, 52 (1985),
+    https://doi.org/10.1021/j100247a015.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        hessian: Callable[..., Any] | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "rfo",
+            maxstep,
+            accept,
+            options,
+            hessian,
+        )
+
+
+class SR1(Optimizer):
+    """Symmetric-rank-one quasi-Newton.
+
+    Nocedal and Wright, *Numerical Optimization*,
+    https://doi.org/10.1007/978-0-387-40065-5.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self, atoms, restart, logfile, trajectory, append_trajectory, "sr1", maxstep, accept, options
+        )
+
+
+class SR2(Optimizer):
+    """SR2 quasi-Newton update.
+
+    Nocedal and Wright, *Numerical Optimization*,
+    https://doi.org/10.1007/978-0-387-40065-5.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self, atoms, restart, logfile, trajectory, append_trajectory, "sr2", maxstep, accept, options
+        )
+
+
+class BB(Optimizer):
+    """Barzilai-Borwein spectral steepest descent.
+
+    Barzilai and Borwein, IMA J. Numer. Anal. 8, 141 (1988),
+    https://doi.org/10.1093/imanum/8.1.141.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(self, atoms, restart, logfile, trajectory, append_trajectory, "bb", maxstep, accept, options)
+
+
+class Dogleg(Optimizer):
+    """Powell dogleg on ``hessian(x)``.
+
+    Nocedal and Wright, algorithm 4.1,
+    https://doi.org/10.1007/978-0-387-40065-5.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        hessian: Callable[..., Any] | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "dogleg",
+            maxstep,
+            accept,
+            options,
+            hessian,
+        )
+
+
+class DIIS(Optimizer):
+    """Pulay residual subspace extrapolation.
+
+    Pulay, Chem. Phys. Lett. 73, 393 (1980),
+    https://doi.org/10.1016/0009-2614(80)80396-4.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self, atoms, restart, logfile, trajectory, append_trajectory, "diis", maxstep, accept, options
+        )
+
+
+class PSO(Optimizer):
+    """Particle swarm.
+
+    The C ABI exposes this method, so this class takes one swarm step
+    per :meth:`Optimizer.step` and writes the same log columns as the
+    local optimizers. It is not a local force relaxation, and the
+    parity checks do not use it.
+
+    Kennedy and Eberhart, Proc. ICNN (1995),
+    https://doi.org/10.1109/ICNN.1995.488968.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self, atoms, restart, logfile, trajectory, append_trajectory, "pso", maxstep, accept, options
+        )
+
+
+class FletcherReeves(Optimizer):
+    """Fletcher-Reeves conjugate gradient.
+
+    Fletcher and Reeves, Comput. J. 7, 149 (1964),
+    https://doi.org/10.1093/comjnl/7.2.149.
+    Fletcher, *Practical Methods of Optimization*,
+    https://doi.org/10.1002/9781118723203.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "fletcher_reeves",
+            maxstep,
+            accept,
+            options,
+        )
+
+
+class HestenesStiefel(Optimizer):
+    """Hestenes-Stiefel conjugate gradient.
+
+    Hestenes and Stiefel, J. Res. Natl. Bur. Stand. 49, 409 (1952),
+    https://doi.org/10.6028/jres.049.044.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "hestenes_stiefel",
+            maxstep,
+            accept,
+            options,
+        )
+
+
+class DaiYuan(Optimizer):
+    """Dai-Yuan conjugate gradient.
+
+    Dai and Yuan, SIAM J. Optim. 10, 177 (1999),
+    https://doi.org/10.1137/S1052623497318992.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "dai_yuan",
+            maxstep,
+            accept,
+            options,
+        )
+
+
+class ConjugateDescent(Optimizer):
+    """Fletcher conjugate descent.
+
+    Hager and Zhang, SIAM J. Optim. 16, 170 (2005),
+    https://doi.org/10.1137/030601880.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "conjugate_descent",
+            maxstep,
+            accept,
+            options,
+        )
+
+
+class HagerZhang(Optimizer):
+    """Hager-Zhang conjugate gradient.
+
+    Hager and Zhang, SIAM J. Optim. 16, 170 (2005),
+    https://doi.org/10.1137/030601880.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "hager_zhang",
+            maxstep,
+            accept,
+            options,
+        )
+
+
+class LiuStorey(Optimizer):
+    """Liu-Storey conjugate gradient.
+
+    Liu and Storey, J. Optim. Theory Appl. 69, 129 (1991),
+    https://doi.org/10.1007/BF00940464.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "liu_storey",
+            maxstep,
+            accept,
+            options,
+        )
+
+
+class FrPr(Optimizer):
+    """Gilbert-Nocedal FR-PR hybrid.
+
+    Nocedal and Wright, *Numerical Optimization*,
+    https://doi.org/10.1007/978-0-387-40065-5.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        accept: str | None = None,
+        **options: Any,
+    ) -> None:
+        _start(
+            self, atoms, restart, logfile, trajectory, append_trajectory, "fr_pr", maxstep, accept, options
+        )
+
 
 __all__ = [
     "Adam",
