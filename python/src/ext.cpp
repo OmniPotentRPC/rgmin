@@ -1,10 +1,9 @@
 // Copyright (c) 2026 Rohit Goswami
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 //
-// Free-threaded contract (rgbind F1-F9): no process-global mutable
-// state, one atomic claim per solver, the GIL dropped around the native
-// step, callback exceptions captured and rethrown on the calling thread,
-// and strict float64 validation.
+// No process-global mutable state. One atomic claim per solver. The GIL
+// is dropped around the native step. Callback exceptions are captured
+// and rethrown on the calling thread. Arrays must be float64.
 
 #include <rgmin/optimize.hpp>
 #include <rgbind/rgbind.hpp>
@@ -161,11 +160,12 @@ Options parse_options(nb::kwargs const& kwargs) {
         if (nb::isinstance<nb::bool_>(value)) {
             out.flags.emplace_back(key, nb::cast<bool>(value));
         } else if (nb::isinstance<nb::int_>(value)) {
+            // nanobind 3.1 load_i64 returns false on overflow without
+            // setting a Python error, so cast throws cast_error.
             long long integer = 0;
             try {
                 integer = nb::cast<long long>(value);
-            } catch (nb::python_error& error) {
-                error.discard_as_unraisable(value);
+            } catch (nb::cast_error const&) {
                 throw nb::value_error((key + " is out of range").c_str());
             }
             out.integers.emplace_back(key, integer);
@@ -198,23 +198,8 @@ void raise_for_status(rgmin_status_t status, rgbind::CallContext* context) {
     }
     char const* raw = rgmin_last_error();
     std::string last = raw == nullptr || raw[0] == '\0' ? std::string("Solver step failed") : raw;
-    // Stopgap, not applied: rgmin_solver_step_fg returns
-    // RGMIN_INVALID_PARAMETER for every runtime failure, and that status
-    // maps to ValueError. The C ABI has no numerical or unavailable
-    // status for a failed step. Until it does, a non-callback failure is
-    // RuntimeError carrying rgmin_last_error().
-    //
-    // std::string lower = last;
-    // for (char& character : lower) {
-    //     character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-    // }
-    // if (lower.find("hessian") != std::string::npos || lower.find("not linked") != std::string::npos) {
-    //     unavailable -> NotImplementedError
-    // } else if (lower.find("non-finite") != std::string::npos ||
-    //            lower.find("singular") != std::string::npos ||
-    //            lower.find("oracle:") != std::string::npos) {
-    //     numerical -> NumericalError
-    // }
+    // The C API reports every runtime failure as RGMIN_INVALID_PARAMETER.
+    // The message is rgmin_last_error(), raised here as RuntimeError.
     throw std::runtime_error(last);
 }
 
@@ -373,7 +358,7 @@ rgmin::Report step_python(rgmin::Solver& solver, nb::callable function, Vector x
         nb::object point = owned_copy(tensor_f64(coordinates), n);
         nb::object result = function(point);
         if (!nb::isinstance<nb::tuple>(result) || nb::len(result) != 2) {
-            throw nb::value_error("f_and_grad must return (value, gradient)");
+            throw nb::type_error("f_and_grad must return (value, gradient)");
         }
         double scalar = nb::cast<double>(result[0]);
         if (!std::isfinite(scalar)) {
@@ -414,7 +399,7 @@ rgmin::Report step_hess_python(rgmin::Solver& solver, nb::callable function, nb:
         nb::object point = owned_copy(tensor_f64(coordinates), n);
         nb::object result = function(point);
         if (!nb::isinstance<nb::tuple>(result) || nb::len(result) != 2) {
-            throw nb::value_error("f_and_grad must return (value, gradient)");
+            throw nb::type_error("f_and_grad must return (value, gradient)");
         }
         double scalar = nb::cast<double>(result[0]);
         if (!std::isfinite(scalar)) {
@@ -464,8 +449,31 @@ NB_MODULE(_core, m) {
     rgbind::install_policy(m);
 
     nb::enum_<rgmin_method_t>(m, "Method", nb::is_arithmetic(),
-                              "Geometry-optimization method. An ``enum.IntEnum`` of "
-                              "``rgmin_method_t``.")
+                              "Geometry-optimization method. Members are UPPER_SNAKE. "
+                              "CamelCase names are aliases of the same values.")
+        .value("POLAK_RIBIERE", RGMIN_POLAK_RIBIERE)
+        .value("FLETCHER_REEVES", RGMIN_FLETCHER_REEVES)
+        .value("BFGS", RGMIN_BFGS)
+        .value("LBFGS", RGMIN_LBFGS)
+        .value("SR1", RGMIN_SR1)
+        .value("ADAM", RGMIN_ADAM)
+        .value("STEEPEST", RGMIN_STEEPEST)
+        .value("SR2", RGMIN_SR2)
+        .value("PSO", RGMIN_PSO)
+        .value("HESTENES_STIEFEL", RGMIN_HESTENES_STIEFEL)
+        .value("DAI_YUAN", RGMIN_DAI_YUAN)
+        .value("CONJUGATE_DESCENT", RGMIN_CONJUGATE_DESCENT)
+        .value("HAGER_ZHANG", RGMIN_HAGER_ZHANG)
+        .value("LIU_STOREY", RGMIN_LIU_STOREY)
+        .value("FR_PR", RGMIN_FR_PR)
+        .value("NEWTON", RGMIN_NEWTON)
+        .value("RFO", RGMIN_RFO)
+        .value("FIRE", RGMIN_FIRE)
+        .value("BB", RGMIN_BB)
+        .value("DOGLEG", RGMIN_DOGLEG)
+        .value("FIRE2", RGMIN_FIRE2)
+        .value("QUICK_MIN", RGMIN_QUICKMIN)
+        .value("DIIS", RGMIN_DIIS)
         .value("PolakRibiere", RGMIN_POLAK_RIBIERE)
         .value("FletcherReeves", RGMIN_FLETCHER_REEVES)
         .value("Bfgs", RGMIN_BFGS)
@@ -490,7 +498,13 @@ NB_MODULE(_core, m) {
         .value("QuickMin", RGMIN_QUICKMIN)
         .value("Diis", RGMIN_DIIS);
 
-    nb::enum_<rgmin_stop_t>(m, "Stop", nb::is_arithmetic(), "Why a step or a run ended.")
+    nb::enum_<rgmin_stop_t>(m, "Stop", nb::is_arithmetic(),
+                            "Why a step or a run ended. Members are UPPER_SNAKE. "
+                            "CamelCase names are aliases of the same values.")
+        .value("TOLERANCE", RGMIN_STOP_TOLERANCE)
+        .value("NOISE_FLOOR", RGMIN_STOP_NOISE_FLOOR)
+        .value("STEP_TOLERANCE", RGMIN_STOP_STEP_TOLERANCE)
+        .value("BUDGET", RGMIN_STOP_BUDGET)
         .value("Tolerance", RGMIN_STOP_TOLERANCE)
         .value("NoiseFloor", RGMIN_STOP_NOISE_FLOOR)
         .value("StepTolerance", RGMIN_STOP_STEP_TOLERANCE)

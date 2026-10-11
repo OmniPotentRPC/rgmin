@@ -12,8 +12,54 @@ class NumericalError(ArithmeticError):
 
 class Method(enum.IntEnum):
     """
-    Geometry-optimization method. An ``enum.IntEnum`` of ``rgmin_method_t``.
+    Geometry-optimization method. Members are UPPER_SNAKE. CamelCase names are aliases of the same values.
     """
+
+    POLAK_RIBIERE = 0
+
+    FLETCHER_REEVES = 1
+
+    BFGS = 2
+
+    LBFGS = 3
+
+    SR1 = 4
+
+    ADAM = 5
+
+    STEEPEST = 6
+
+    SR2 = 7
+
+    PSO = 8
+
+    HESTENES_STIEFEL = 9
+
+    DAI_YUAN = 10
+
+    CONJUGATE_DESCENT = 11
+
+    HAGER_ZHANG = 12
+
+    LIU_STOREY = 13
+
+    FR_PR = 14
+
+    NEWTON = 15
+
+    RFO = 16
+
+    FIRE = 17
+
+    BB = 18
+
+    DOGLEG = 19
+
+    FIRE2 = 20
+
+    QUICK_MIN = 21
+
+    DIIS = 22
 
     PolakRibiere = 0
 
@@ -62,7 +108,17 @@ class Method(enum.IntEnum):
     Diis = 22
 
 class Stop(enum.IntEnum):
-    """Why a step or a run ended."""
+    """
+    Why a step or a run ended. Members are UPPER_SNAKE. CamelCase names are aliases of the same values.
+    """
+
+    TOLERANCE = 0
+
+    NOISE_FLOOR = 1
+
+    STEP_TOLERANCE = 2
+
+    BUDGET = 3
 
     Tolerance = 0
 

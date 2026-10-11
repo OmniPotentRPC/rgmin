@@ -1,11 +1,10 @@
 # Copyright (c) 2026 Rohit Goswami
 # SPDX-License-Identifier: MIT
-"""F3 claim and independent solvers on several threads."""
+"""Independent solvers on several threads."""
 
 from __future__ import annotations
 
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -108,6 +107,8 @@ def test_shared_calculator_with_and_without_reentrant() -> None:
             self.inside = 0
             self.max_inside = 0
             self._gate = threading.Lock()
+            self._local = threading.local()
+            self._meet = threading.Barrier(2)
 
         def get_property(self, name, atoms=None, allow_calculation=True):  # type: ignore[no-untyped-def]
             if name not in self.implemented_properties:
@@ -118,7 +119,11 @@ def test_shared_calculator_with_and_without_reentrant() -> None:
                 self.inside += 1
                 self.max_inside = max(self.max_inside, self.inside)
             try:
-                time.sleep(0.05)
+                # One meeting per thread. A barrier on every call deadlocks
+                # when one step evaluates the calculator more than once.
+                if self.reentrant and not getattr(self._local, "met", False):
+                    self._local.met = True
+                    self._meet.wait(timeout=5)
                 x = np.asarray(atoms.get_positions(), dtype=np.float64).reshape(-1)
                 energy = 0.5 * float(x @ x)
                 forces = -x.reshape(-1, 3)
@@ -153,3 +158,48 @@ def test_shared_calculator_with_and_without_reentrant() -> None:
     assert serial.max_inside == 1
     overlapped = run(True)
     assert overlapped.max_inside == 2
+
+
+@pytest.mark.thread_unsafe
+def test_slots_calculator_is_locked_by_id() -> None:
+    """A calculator without weak-reference support still gets one lock."""
+    pytest.importorskip("ase")
+    import gc
+    import weakref
+
+    from ase import Atoms
+
+    from rgmin.ase import SD, _id_locks, _lock_for
+
+    class SlotCalc:
+        __slots__ = ("reentrant",)
+
+        def __init__(self) -> None:
+            self.reentrant = False
+
+        def get_potential_energy(self, atoms: Any, force_consistent: bool = False) -> float:
+            del atoms, force_consistent
+            return 0.0
+
+        def get_forces(self, atoms: Any) -> np.ndarray:
+            return np.zeros((len(atoms), 3))
+
+    with pytest.raises(TypeError):
+        weakref.ref(SlotCalc())
+
+    calc = SlotCalc()
+    first = _lock_for(calc)
+    assert first is _lock_for(calc)
+    atoms = Atoms("H", positions=[[0.2, 0.0, 0.0]])
+    atoms.calc = calc
+    SD(atoms, logfile=None, maxstep=0.05).step()
+    assert id(calc) in _id_locks
+
+    ident = id(calc)
+    del atoms
+    del calc
+    gc.collect()
+    leftover = SlotCalc()
+    assert _lock_for(leftover) is not None
+    assert ident not in _id_locks
+    assert id(leftover) in _id_locks

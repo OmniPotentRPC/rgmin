@@ -118,7 +118,14 @@ def test_callback_array_outlives_step() -> None:
 
 
 def test_count_options_require_ints() -> None:
-    rgmin.SolverConfig("lbfgs", memory=4, maxiter=3, linesearch_maxiter=8, extra_updates=1)
+    rgmin.SolverConfig(
+        "lbfgs",
+        memory=4,
+        maxiter=3,
+        linesearch="wolfe",
+        linesearch_maxiter=8,
+        extra_updates=1,
+    )
     with pytest.raises(ValueError, match="must be an int"):
         rgmin.SolverConfig("lbfgs", memory=1.5)
     with pytest.raises(ValueError, match="must be >= 0"):
@@ -132,6 +139,26 @@ def test_minimize_rejects_converted_inputs() -> None:
         rgmin.minimize(_quad, [1.0, 2.0], method="sd", maxiter=1)  # type: ignore[arg-type]
     with pytest.raises(TypeError):
         rgmin.minimize(_quad, np.ones(2, dtype=np.float32), method="sd", maxiter=1)
+
+
+def test_count_option_overflow_is_value_error() -> None:
+    with pytest.raises(ValueError, match="out of range"):
+        rgmin.SolverConfig("lbfgs", memory=2**70)
+
+
+def test_callback_must_return_a_pair() -> None:
+    def bad(x: np.ndarray) -> float:
+        return 0.0
+
+    x = np.zeros(2)
+    with pytest.raises(TypeError, match="f_and_grad"):
+        rgmin.Solver(2, rgmin.SolverConfig("sd", maxiter=1)).step(bad, x)  # type: ignore[arg-type]
+
+
+def test_linesearch_constants_require_a_kind() -> None:
+    with pytest.raises(ValueError, match="linesearch"):
+        rgmin.SolverConfig("lbfgs", c1=1e-3)
+    rgmin.SolverConfig("lbfgs", linesearch="wolfe", c1=1e-3, c2=0.5, linesearch_maxiter=4)
 
 
 def test_step_without_hessian_is_runtime_error() -> None:

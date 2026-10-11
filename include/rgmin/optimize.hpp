@@ -386,9 +386,8 @@ public:
 };
 
 /// RAII session. One step() is one outer iteration.
-/// F3: mutable. Python bindings claim \c busy() with \c rgbind::Claim
-/// at the start of every method. A second caller gets
-/// "Solver is in use by another thread".
+/// Mutable. Python bindings claim busy() for the duration of a step.
+/// A second caller gets "Solver is in use by another thread".
 class Solver {
     rgmin_solver_t* ptr_ = nullptr;
     std::size_t dim_ = 0;
@@ -425,7 +424,7 @@ public:
         return *this;
     }
 
-    /// F3 flag. Bindings claim it with rgbind::Claim. The flag starts clear.
+    /// Busy flag. Bindings claim it for the duration of a step. The flag starts clear.
     std::atomic<bool>& busy() noexcept { return busy_; }
     std::atomic<bool> const& busy() const noexcept { return busy_; }
     std::size_t dim() const noexcept { return dim_; }
@@ -918,6 +917,13 @@ inline SolverConfig SolverConfig::build(
     if (cfg.cautious_eps_.has_value() != cfg.cautious_alpha_.has_value()) {
         throw std::invalid_argument("cautious_eps and cautious_alpha must be set together");
     }
+    // c1, c2, and linesearch_maxiter apply only with an explicit linesearch.
+    if (!cfg.linesearch_.has_value() &&
+        (cfg.c1_ != 1e-4 || cfg.c2_ != 0.9 || cfg.linesearch_maxiter_ != 20)) {
+        throw std::invalid_argument(
+            "c1, c2, and linesearch_maxiter require linesearch "
+            "(brent, backtracking, goldstein, or wolfe)");
+    }
     return cfg;
 }
 
@@ -928,13 +934,6 @@ inline void SolverConfig::apply(Solver& solver) const {
     if (fire_variant_) solver.set_fire_variant(*fire_variant_);
     if (linesearch_) {
         rgmin_status_t st = solver.set_linesearch(*linesearch_, c1_, c2_, linesearch_maxiter_);
-        if (st != RGMIN_SUCCESS) {
-            char const* msg = rgmin_last_error();
-            throw std::invalid_argument(msg ? msg : "set_linesearch failed");
-        }
-    } else if (c1_ != 1e-4 || c2_ != 0.9 || linesearch_maxiter_ != 20) {
-        rgmin_status_t st =
-            solver.set_linesearch(RGMIN_LINESEARCH_WOLFE, c1_, c2_, linesearch_maxiter_);
         if (st != RGMIN_SUCCESS) {
             char const* msg = rgmin_last_error();
             throw std::invalid_argument(msg ? msg : "set_linesearch failed");

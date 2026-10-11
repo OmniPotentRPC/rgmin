@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import sys
 import threading
 import time
 import weakref
@@ -31,6 +32,9 @@ _ASE_KEYS = frozenset({"master", "comm", "loginterval", "force_consistent"})
 _HESSIAN_METHODS = frozenset({"newton", "rfo", "dogleg"})
 _calc_guard = threading.Lock()
 _calc_locks: weakref.WeakKeyDictionary[Any, threading.Lock] = weakref.WeakKeyDictionary()
+# Calculators that cannot be weakly referenced. The entry keeps the
+# calculator so its id cannot be reused while the lock is registered.
+_id_locks: dict[int, tuple[Any, threading.Lock]] = {}
 
 
 def _ase_passthrough(options: dict[str, Any]) -> dict[str, Any]:
@@ -162,7 +166,38 @@ def _lock_for(calc: Any) -> threading.Lock | None:
                 _calc_locks[calc] = lock
             return lock
     except TypeError:
-        return None
+        return _lock_by_id(calc)
+
+
+def _lock_by_id(calc: Any) -> threading.Lock:
+    """Lock a calculator that WeakKeyDictionary cannot store.
+
+    The map holds the calculator for as long as the entry exists, so a
+    new object cannot reuse the id. An entry whose calculator is
+    referenced only by this map is dropped on the next lookup.
+    """
+    key = id(calc)
+    with _calc_guard:
+        _drop_unreferenced_id_locks(calc)
+        stored = _id_locks.get(key)
+        if stored is None or stored[0] is not calc:
+            lock = threading.Lock()
+            _id_locks[key] = (calc, lock)
+            return lock
+        return stored[1]
+
+
+def _drop_unreferenced_id_locks(current: Any) -> None:
+    stale: list[int] = []
+    for key, (kept, _lock) in _id_locks.items():
+        if kept is current:
+            continue
+        # The dict tuple, this loop variable, and the getrefcount
+        # argument. Anything above that is another owner.
+        if sys.getrefcount(kept) <= 3:
+            stale.append(key)
+    for key in stale:
+        del _id_locks[key]
 
 
 class Optimizer(_ASEOptimizer):
@@ -185,8 +220,10 @@ class Optimizer(_ASEOptimizer):
     (a second call raises :class:`RuntimeError`), and that the
     objective receives an owned copy of the coordinates. The adapter
     lock stops calls on one calculator from overlapping unless that
-    calculator sets ``reentrant`` to true. The lock does not make a
-    shared calculator safe.
+    calculator sets ``reentrant`` to true. A calculator that cannot be
+    weakly referenced is locked by ``id``, and that entry is dropped
+    once the calculator is otherwise unreferenced. The lock does not
+    make a shared calculator safe.
     """
 
     defaults = {"maxstep": 0.2}
@@ -907,8 +944,8 @@ class DaiYuan(Optimizer):
 class ConjugateDescent(Optimizer):
     """Fletcher conjugate descent.
 
-    Hager and Zhang, SIAM J. Optim. 16, 170 (2005),
-    https://doi.org/10.1137/030601880.
+    Fletcher, Practical Methods of Optimization,
+    https://doi.org/10.1002/9781118723203.
     """
 
     def __init__(
