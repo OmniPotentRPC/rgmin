@@ -24,16 +24,21 @@ half-width of the stencil. ~sample_noise~ places
 ~x + (i - m/2) h u~ for ~i = 0, ..., m~, with ~u~ the unit vector
 along the supplied direction.
 
-The same table supplies ~|f''|~ and a third-derivative scale ~|T|~.
-The forward-difference step and the gradient probe that those scales
-imply are in Moré and Wild, ACM Trans. Math. Softw. 38, 19 (2012),
-https://doi.org/10.1145/2168773.2168777. Both steps are clamped to
-~[1e-16, 1]~.
+The table does not supply a derivative. Its high differences are the
+noise, of size ~O(eps / h^k)~. ~|f''|~ and the third-derivative scale
+~|T|~ are separate central differences, Moré and Wild, ACM Trans.
+Math. Softw. 38, 19 (2012), Algorithm 5.1,
+https://doi.org/10.1145/2168773.2168777. The forward step and the
+gradient probe that those scales imply are clamped to
+~[max(1e-16, 4 ulp(max |x_i|)), 1]~.
 
 Gradient noise is the table applied to ~g(x + i h u) · w~. One unit
 vector ~w~ is drawn from a counter keyed by ~(seed, component)~ and
-is reused at every stencil point, so the projection does not depend
-on the thread count.
+is reused at every stencil point. The normal variate uses pure-Rust
+~libm~, so the projection does not depend on the platform libm or on
+the thread count. For any covariance ~Σ~,
+~E[(g · w)²] = tr(Σ) / n~ because ~w~ is uniform on the sphere. The
+Euclidean noise is ~sqrt(n)~ times that projection noise.
 
 How to estimate the noise, choose the step, and stop on the floor is
 [[file:../howto/noise.org][in the how-to]].

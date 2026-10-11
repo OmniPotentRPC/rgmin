@@ -55,9 +55,7 @@ fn spd_session_step_is_riemannian_and_stays_on_the_set() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
-
-            noise_eps: None,
-            noise_c: 3.0,
+            noise_floor: None,
         },
         4,
     );
@@ -168,9 +166,7 @@ fn lbfgs_first_step_is_the_riemannian_retract() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
-
-            noise_eps: None,
-            noise_c: 3.0,
+            noise_floor: None,
         },
         8,
     );
@@ -279,9 +275,7 @@ fn set_factor_shape_drops_stale_lbfgs_pairs() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
-
-            noise_eps: None,
-            noise_c: 3.0,
+            noise_floor: None,
         },
         8,
     );
@@ -337,9 +331,7 @@ fn direct_spd_steps_retract_once_and_evaluate_the_accepted_point_once() {
                 istep: 0.1,
                 maxmove: None,
                 ftol_rel: None,
-
-                noise_eps: None,
-                noise_c: 3.0,
+                noise_floor: None,
             },
             4,
         );

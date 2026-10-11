@@ -581,6 +581,23 @@ impl Solver {
         l2(grad)
     }
 
+    /// Coordinates the stationarity measure runs over.
+    ///
+    /// A coordinate box drops entries whose bounds have no width. Every
+    /// other path uses the length of the horizontal or projected gradient,
+    /// which is the session dimension.
+    pub(crate) fn free_len(&self, bounds: &eindir_core::Bounds<f64>) -> usize {
+        if self.has_coordinate_box()
+            && self.manifold == ManifoldKind::Euclidean
+            && !self.project_rigid
+            && !self.has_equalities()
+        {
+            let n = self.dim.min(bounds.low.len()).min(bounds.high.len());
+            return (0..n).filter(|&k| bounds.high[k] > bounds.low[k]).count();
+        }
+        self.dim
+    }
+
     fn check_manifold(&self, n: usize) -> Result<()> {
         if self.manifold.required_dim(n).is_ok() {
             return Ok(());
@@ -1008,13 +1025,12 @@ impl Solver {
         };
         grad = self.horizontal_grad(x, &grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
-        if let Some(status) = self.control.halt(gnorm) {
+        if let Some(status) = self.control.halt(gnorm, self.free_len(obj.bounds())) {
             return Ok(Report {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: gnorm,
-
                 status,
             });
         }
@@ -1103,10 +1119,10 @@ impl Solver {
                     coords: x.clone(),
                     steps: self.steps,
                     grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-
-                    status: self
-                        .control
-                        .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
+                    status: self.control.classify(
+                        self.stationarity_norm(obj.bounds(), x, &grad),
+                        self.free_len(obj.bounds()),
+                    ),
                 });
             }
         }
@@ -1160,10 +1176,10 @@ impl Solver {
             coords: x.clone(),
             steps: self.steps,
             grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-
-            status: self
-                .control
-                .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
+            status: self.control.classify(
+                self.stationarity_norm(obj.bounds(), x, &grad),
+                self.free_len(obj.bounds()),
+            ),
         })
     }
 
@@ -1215,10 +1231,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &gt),
-
-                status: self
-                    .control
-                    .classify(self.stationarity_norm(obj.bounds(), x, &gt)),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &gt),
+                    self.free_len(obj.bounds()),
+                ),
             })
         } else {
             self.remember(x, value, &grad);
@@ -1228,10 +1244,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-
-                status: self
-                    .control
-                    .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &grad),
+                    self.free_len(obj.bounds()),
+                ),
             })
         }
     }
@@ -1274,13 +1290,12 @@ impl Solver {
                 }
             }
         }
-        if let Some(status) = self.control.halt(gnorm) {
+        if let Some(status) = self.control.halt(gnorm, self.free_len(obj.bounds())) {
             return Ok(Report {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: gnorm,
-
                 status,
             });
         }
@@ -1320,10 +1335,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-
-                status: self
-                    .control
-                    .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &grad),
+                    self.free_len(obj.bounds()),
+                ),
             });
         }
 
@@ -1827,10 +1842,10 @@ impl Solver {
             coords: x.clone(),
             steps: self.steps,
             grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-
-            status: self
-                .control
-                .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
+            status: self.control.classify(
+                self.stationarity_norm(obj.bounds(), x, &grad),
+                self.free_len(obj.bounds()),
+            ),
         })
     }
 
@@ -1915,10 +1930,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-
-                status: self
-                    .control
-                    .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &grad),
+                    self.free_len(obj.bounds()),
+                ),
             });
         }
         unreachable!("PSO slot populated above")
@@ -2087,8 +2102,7 @@ mod tests {
                 istep: 0.1,
                 maxmove: Some(0.01),
                 ftol_rel: None,
-                noise_eps: None,
-                noise_c: 3.0,
+                noise_floor: None,
             },
             2,
         )
@@ -2164,9 +2178,7 @@ mod tests {
                     istep: 0.1,
                     maxmove: Some(0.05),
                     ftol_rel: None,
-
-                    noise_eps: None,
-                    noise_c: 3.0,
+                    noise_floor: None,
                 },
                 2,
             );
@@ -2315,9 +2327,7 @@ mod retained_neb_guard_tests {
                 istep: 1.0,
                 maxmove: None,
                 ftol_rel: None,
-
-                noise_eps: None,
-                noise_c: 3.0,
+                noise_floor: None,
             },
             3,
         );
@@ -2353,9 +2363,7 @@ mod retained_neb_guard_tests {
                 istep: 1.0,
                 maxmove: None,
                 ftol_rel: None,
-
-                noise_eps: None,
-                noise_c: 3.0,
+                noise_floor: None,
             },
             3,
         );

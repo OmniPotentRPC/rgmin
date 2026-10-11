@@ -3,14 +3,23 @@
 use ndarray::Array1;
 
 /// Why a minimization stopped.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
     /// The gradient is still above `gtol` and above the noise floor.
     Iterating,
     /// `||g||` fell below [`crate::Control::gtol`].
     Tolerance,
-    /// `||g||` fell below `c * eps_g` and was still above `gtol`.
+    /// The stationarity measure fell below `c * sqrt(n_free) * eps_g`
+    /// and was still at or above `gtol`.
+    ///
+    /// One projection `g · w` with `w` uniform on the sphere has variance
+    /// `tr(Σ) / n`. The Euclidean noise is `sqrt(n)` times that, so the
+    /// comparison uses `sqrt(n_free)`.
     NoiseFloor,
+    /// SCG stopped on its step or objective test while `||g||` was still
+    /// at or above `gtol`.
+    StepTolerance,
     /// The iteration budget was spent above every stop.
     Budget,
 }

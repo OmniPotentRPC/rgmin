@@ -63,9 +63,7 @@ fn solve(retain: bool) -> (f64, f64, usize, f64) {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
-
-            noise_eps: None,
-            noise_c: 3.0,
+            noise_floor: None,
         },
         n,
     );
@@ -124,9 +122,7 @@ fn sphere_lbfgs_initial_path_is_invariant_to_energy_units() {
                 istep: 1.0,
                 maxmove: None,
                 ftol_rel: None,
-
-                noise_eps: None,
-                noise_c: 3.0,
+                noise_floor: None,
             },
             n,
         );
@@ -178,9 +174,7 @@ fn sphere_lbfgs_resolves_a_stiff_ritz_initializer() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
-
-            noise_eps: None,
-            noise_c: 3.0,
+            noise_floor: None,
         },
         n,
     );

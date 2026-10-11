@@ -70,9 +70,7 @@ fn solver(method: Method) -> Solver {
             istep: 0.1,
             maxmove: Some(0.05),
             ftol_rel: None,
-
-            noise_eps: None,
-            noise_c: 3.0,
+            noise_floor: None,
         },
         2,
     );

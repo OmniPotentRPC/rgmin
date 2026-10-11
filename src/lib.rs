@@ -105,7 +105,7 @@ pub mod vecops;
 
 pub use accept::Accept;
 pub use adam::minimize_adam;
-pub use control::Control;
+pub use control::{Control, NoiseFloor};
 pub use dlaf_kind::DlaFutureParams;
 pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};
 pub use elpa_kind::{ElpaParams, ElpaSpectrum, ElpaStage, elpa_config, elpa_spectrum};
@@ -139,8 +139,9 @@ pub use minimize::{minimize, minimize_method, minimize_method_hess};
 pub use newton::{HessianObjective, HessianOracle, NewtonKind, minimize_newton};
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
 pub use noise::{
-    DEFAULT_M, NoiseEstimate, NoiseFlag, ecnoise, forward_step, gradient_dr, line_values,
-    next_spacing, sample_gradient_noise, sample_noise,
+    DEFAULT_M, NoiseEstimate, NoiseFlag, ecnoise, estimate_second, estimate_third, forward_step,
+    gradient_dr, line_values, next_spacing, sample_gradient_noise, sample_gradient_noise_k,
+    sample_noise,
 };
 pub use oracle::Oracle;
 pub use pso::minimize_pso;

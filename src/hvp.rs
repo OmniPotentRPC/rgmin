@@ -529,7 +529,7 @@ where
         if !gnorm.is_finite() {
             return Err(Error::TrustCollapsed { steps: step });
         }
-        if let Some(status) = control.halt(gnorm) {
+        if let Some(status) = control.halt(gnorm, grad.len()) {
             return Ok(Report {
                 value,
                 coords: pos,
@@ -575,6 +575,6 @@ where
         coords: pos,
         steps: control.maxiter,
         grad_norm: gnorm,
-        status: control.finish_status(gnorm, true),
+        status: control.finish_status(gnorm, grad.len(), true),
     })
 }

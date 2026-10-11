@@ -256,13 +256,12 @@ where
     let mut step = 0;
     while control.maxiter == 0 || step < control.maxiter {
         let gnorm = l2(&grad);
-        if let Some(status) = control.halt(gnorm) {
+        if let Some(status) = control.halt(gnorm, grad.len()) {
             return Ok(Report {
                 value: f_old,
                 coords: w,
                 steps: step,
                 grad_norm: gnorm,
-
                 status,
             });
         }
@@ -283,7 +282,7 @@ where
                         coords: w,
                         steps: step,
                         grad_norm: gnorm,
-                        status: scg_stop(control, gnorm),
+                        status: scg_stop(control, gnorm, grad.len()),
                     });
                 }
                 // Conjugacy can cancel the direction while the gradient
@@ -377,7 +376,7 @@ where
                     coords: w,
                     steps: step + 1,
                     grad_norm,
-                    status: scg_stop(control, grad_norm),
+                    status: scg_stop(control, grad_norm, grad.len()),
                 });
             }
             f_old = f_new;
@@ -389,7 +388,7 @@ where
                     coords: w,
                     steps: step + 1,
                     grad_norm,
-                    status: scg_stop(control, grad_norm),
+                    status: scg_stop(control, grad_norm, grad.len()),
                 });
             }
         }
@@ -431,15 +430,18 @@ where
         grad_norm,
         coords: w,
         steps: control.maxiter,
-        status: control.finish_status(grad_norm, true),
+        status: control.finish_status(grad_norm, grad.len(), true),
     })
 }
 
-/// SCG's own step and objective tests are a tolerance stop. The noise
-/// floor still wins when the gradient is above `gtol` and below the floor.
-fn scg_stop(control: &Control, grad: f64) -> crate::report::Status {
-    match control.classify(grad) {
+/// SCG's step and objective tests are [`crate::Status::StepTolerance`]
+/// when `||g||` is still at or above `gtol`. A gradient below `gtol` stays
+/// [`crate::Status::Tolerance`]. The noise floor still wins when the
+/// measure is above `gtol` and below `c * sqrt(n_free) * eps_g`.
+fn scg_stop(control: &Control, grad: f64, n_free: usize) -> crate::report::Status {
+    match control.classify(grad, n_free) {
         crate::report::Status::NoiseFloor => crate::report::Status::NoiseFloor,
-        _ => crate::report::Status::Tolerance,
+        crate::report::Status::Tolerance => crate::report::Status::Tolerance,
+        _ => crate::report::Status::StepTolerance,
     }
 }

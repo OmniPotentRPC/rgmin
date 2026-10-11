@@ -145,13 +145,12 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if let Some(status) = control.halt(gnorm) {
+        if let Some(status) = control.halt(gnorm, grad.len()) {
             return Ok(Report {
                 value,
                 coords: pos,
                 steps: step,
                 grad_norm: gnorm,
-
                 status,
             });
         }
@@ -180,8 +179,7 @@ where
         coords: pos,
         steps: control.maxiter,
         grad_norm: l2(&grad),
-
-        status: control.finish_status(l2(&grad), true),
+        status: control.finish_status(l2(&grad), grad.len(), true),
     })
 }
 

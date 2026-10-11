@@ -178,9 +178,7 @@ mod tests {
                 istep: 0.4,
                 maxmove: None,
                 ftol_rel: None,
-
-                noise_eps: None,
-                noise_c: 3.0,
+                noise_floor: None,
             },
             1,
         );

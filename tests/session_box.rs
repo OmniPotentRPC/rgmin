@@ -212,9 +212,7 @@ fn session_set_box_holds_a_per_coordinate_wall() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
-
-            noise_eps: None,
-            noise_c: 3.0,
+            noise_floor: None,
         },
         2,
     );
@@ -233,7 +231,8 @@ fn c_abi_set_box_keeps_the_trial_inside() {
     use rgmin::ffi::{
         rgmin_accept_t, rgmin_control_t, rgmin_method_t, rgmin_report_t, rgmin_solver_create,
         rgmin_solver_free, rgmin_solver_set_accept, rgmin_solver_set_box, rgmin_solver_set_highs,
-        rgmin_solver_step, rgmin_status_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+        rgmin_solver_step, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
+        rgmin_tensor_free,
     };
     use std::os::raw::c_void;
 
@@ -273,6 +272,8 @@ fn c_abi_set_box_keeps_the_trial_inside() {
         istep: 1.0,
         memory: 4,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -290,6 +291,7 @@ fn c_abi_set_box_keeps_the_trial_inside() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_solver_step(
@@ -357,9 +359,7 @@ fn session_set_box_survives_set_highs_and_clips_newton() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
-
-            noise_eps: None,
-            noise_c: 3.0,
+            noise_floor: None,
         },
         2,
     );
@@ -422,9 +422,7 @@ fn newton_qp_applies_session_equalities() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
-
-            noise_eps: None,
-            noise_c: 3.0,
+            noise_floor: None,
         },
         2,
     );

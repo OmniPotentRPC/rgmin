@@ -42,40 +42,89 @@ already knows and skips the samples.
 
 ~sample_gradient_noise~ projects the force onto one unit vector ~w~.
 Component ~i~ of ~w~ comes from a counter-based stream keyed by
-~(seed, i)~, not from a thread-local generator. The dot product is
-taken in index order. With the ~par~ feature the ~m + 1~ evaluations
-run in parallel and are stored at the sample index, so the noise bits
-match a one-thread run.
+~(seed, i)~, not from a thread-local generator. The normal draw uses
+the pure-Rust ~libm~ logarithm and cosine, so the bits do not depend
+on the platform libm. The dot product is taken in index order. With
+the ~par~ feature the ~m + 1~ evaluations run in parallel and are
+stored at the sample index, so the noise bits match a one-thread run.
+
+~sample_gradient_noise_k~ repeats that projection on ~k~ directions
+keyed by ~(seed, j)~ and returns the root-mean-square of the detected
+~eps_g²~. ~k = 1~ is the single-direction estimate. For any noise
+covariance ~Σ~, one uniform direction has ~E[eps_g²] = tr(Σ) / n~,
+because the sphere average of ~w wᵀ~ is ~I / n~. The identity does
+not need ~Σ~ to be isotropic.
 
 ** Choose the step
 
-~table_derivative(values, h, 2)~ is ~|f''|~ along the line.
-~table_derivative(values, h, 3)~ is the third-derivative scale ~|T|~.
+An ECnoise table is accepted because its high differences are noise.
+Those differences are ~O(eps / h^k)~, so they are not a derivative.
+~|f''|~ and ~|T|~ come from Moré and Wild, ACM Trans. Math. Softw. 38,
+19 (2012), Algorithm 5.1, https://doi.org/10.1145/2168773.2168777.
+
+~estimate_second(oracle, x, p, eps_f)~ builds a central second
+difference at its own spacing. The first try is ~ha = eps_f^{1/4}~.
+It is accepted when ~|Δ²f| ≥ 100 eps_f~ and
+~|f(x±h) − f(x)| ≤ 0.1 max(|f(x)|, |f(x±h)|)~. One retry uses
+~hb = (eps_f / µa)^{1/4}~. That retry is kept when it meets the same
+two tests, and also when ~|µa − µb| ≤ µb / 2~. Otherwise the estimate
+is ~None~.
+
+~estimate_third~ applies the same algorithm to the directional
+derivative ~φ(t) = ∇f(x + t û) · û~, with ~eps_g~ in place of ~eps_f~.
+The second difference of ~φ~ is the third-derivative scale ~|T|~ of
+~f~ along ~û~. The two tests, the spacing, and the one retry are
+unchanged apart from that substitution.
 
 | Helper | Formula | Model it minimizes |
 |---+---|---|
-| ~forward_step(eps_f, second)~ | ~8^{1/4} sqrt(eps_f / |f''|)~ | ~(h/2)|f''| + sqrt(2) eps_f / h~ |
-| ~gradient_dr(eps_g, third)~ | ~2 sqrt(eps_g / |T|)~ | ~(dr/2)|T| + 2 eps_g / dr~ |
+| ~forward_step(eps_f, second, point_scale)~ | ~8^{1/4} sqrt(eps_f / |f''|)~ | ~(h/2)|f''| + sqrt(2) eps_f / h~ |
+| ~gradient_dr(eps_g, third, point_scale)~ | ~2 sqrt(eps_g / |T|)~ | ~(dr/2)|T| + 2 eps_g / dr~ |
 
-Both results lie in ~[1e-16, 1]~. A zero noise returns the lower end.
-A zero derivative scale with positive noise returns the upper end.
+~point_scale~ is ~max_i |x_i|~. The clamp is
+~[max(1e-16, 4 ulp(point_scale)), 1]~. A step below one ulp of a
+coordinate near 10 Å (~1.8e-15~) leaves ~x + h == x~, so the lower
+end follows the coordinate. A zero noise returns the lower end. A
+zero scale, and a missing estimate (~None~), with positive noise
+return the upper end.
 
 ** Stop on the floor
 
-The floor is off until ~noise_eps~ is set. ~gtol~ is tested first, so
-a noise-free quadratic that meets ~gtol~ reports ~Status::Tolerance~.
+The floor is off until ~Control::noise_floor~ is set. ~gtol~ is
+tested first, so a noise-free quadratic that meets ~gtol~ reports
+~Status::Tolerance~.
 
 #+begin_src rust
 let mut control = Control::default()
-    .with_noise_eps(grad.eps)
-    .noise_floor(3.0);
+    .with_noise_floor(NoiseFloor::new(grad.eps).with_c(3.0));
 control.gtol = 1e-12;
 #+end_src
 
-The iteration stops when the gradient measure is below ~c * eps_g~
-and still at or above ~gtol~. The default factor is ~c = 3~. That
-stop is ~Status::NoiseFloor~. Spending the iteration budget above
-both tests is ~Status::Budget~.
+~NoiseFloor::new~ sets ~c = 3~. The iteration stops when the
+stationarity measure is below ~c * sqrt(n_free) * eps_g~ and still
+at or above ~gtol~. ~n_free~ is the number of coordinates that
+measure runs over. Frozen or fixed coordinates are left out. On the
+session path it is the length of the horizontal or projected
+gradient, or the count of box coordinates with positive width.
 
-A fixed ~fmax~ set below the floor keeps iterating after the gradient
-is noise. The floor stop does not.
+One projection has variance ~tr(Σ) / n~, so the noise in ~||g||_2~
+is ~sqrt(n)~ times ~eps_g~. Comparing ~||g||_2~ with ~eps_g~ alone
+sits that factor too low. The stop is ~Status::NoiseFloor~. Spending
+the iteration budget above both tests is ~Status::Budget~. SCG's own
+step and objective tests, taken while ~||g||~ is still at or above
+~gtol~, are ~Status::StepTolerance~.
+
+A fixed ~gtol~ set under the floor keeps iterating after the gradient
+is noise. On LJ38 (~n = 114~) and on Lennard-Jones at the eOn
+heptamer coordinates (~lj-pt7-geom~, 7 free atoms, ~n = 21~) the
+scaled floor stops in tens of calls. The tight tolerance
+~0.1 sqrt(n) σ~ is censored at 2000 iterations on every Gaussian
+seed. At ~σ ≤ 3e-4~ the two endpoints agree to about ~1e-6~ eV. At
+~σ = 1e-2~ the early stop sits higher, near ~1e-3~ eV, while the
+budget-exhausted run is closer to the noise-free minimum. The
+baseline ~gtol = 0.01~ stops early at low noise and burns the same
+budget as the tight run once ~0.01~ is below the noisy gradient.
+f32-rounded forces on these geometries are smooth: the measured floor
+stays under the stalled gradient, and that run hits the budget. The
+geometry run is Lennard-Jones on those coordinates. It is not a Pt
+heptamer. rgpot is not linked.

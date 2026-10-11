@@ -31,6 +31,7 @@ libkrylov = ["dep:cc", "dep:pkg-config"]
 eindir-core = { version = "0.6.0", features = ["capi"] }
 dlpk = { version = "0.1.5", features = ["ndarray"] }
 ndarray = "0.17"
+libm = "0.2.16"
 thiserror = "2"
 rand = "0.9"
 rayon = { version = "1.10", optional = true }

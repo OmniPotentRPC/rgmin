@@ -40,8 +40,8 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if control.halt(gnorm).is_some() {
-            return Ok(done(value, pos, step, gnorm, control, false));
+        if control.halt(gnorm, grad.len()).is_some() {
+            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
         }
         let dir = -h.dot(&grad);
         let old = pos.clone();
@@ -68,7 +68,15 @@ where
         }
         istep = qn_istep(control);
     }
-    Ok(done(value, pos, control.maxiter, l2(&grad), control, true))
+    Ok(done(
+        value,
+        pos,
+        control.maxiter,
+        l2(&grad),
+        grad.len(),
+        control,
+        true,
+    ))
 }
 
 /// L-BFGS two-loop recursion (Nocedal-Wright 7.4), scaling 7.20.
@@ -122,8 +130,8 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if control.halt(gnorm).is_some() {
-            return Ok(done(value, pos, step, gnorm, control, false));
+        if control.halt(gnorm, grad.len()).is_some() {
+            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
         }
         let dir = -h.dot(&grad);
         let old = pos.clone();
@@ -150,7 +158,15 @@ where
         }
         istep = qn_istep(control);
     }
-    Ok(done(value, pos, control.maxiter, l2(&grad), control, true))
+    Ok(done(
+        value,
+        pos,
+        control.maxiter,
+        l2(&grad),
+        grad.len(),
+        control,
+        true,
+    ))
 }
 
 /// SR2 Hessian update from rgmin `sr2.hpp`.
@@ -176,8 +192,8 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if control.halt(gnorm).is_some() {
-            return Ok(done(value, pos, step, gnorm, control, false));
+        if control.halt(gnorm, grad.len()).is_some() {
+            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
         }
         let rhs = grad.mapv(|g| -g);
         let dir = solve_dense(&b, &rhs).unwrap_or(rhs);
@@ -205,7 +221,15 @@ where
         }
         istep = qn_istep(control);
     }
-    Ok(done(value, pos, control.maxiter, l2(&grad), control, true))
+    Ok(done(
+        value,
+        pos,
+        control.maxiter,
+        l2(&grad),
+        grad.len(),
+        control,
+        true,
+    ))
 }
 
 /// Steepest descent: `d = -g` every iteration.
@@ -226,8 +250,8 @@ where
     let mut istep = control.istep;
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if control.halt(gnorm).is_some() {
-            return Ok(done(value, pos, step, gnorm, control, false));
+        if control.halt(gnorm, grad.len()).is_some() {
+            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
         }
         let dir = grad.mapv(|g| -g);
         let t = take_step(
@@ -247,7 +271,15 @@ where
         grad = t.g;
         istep = next_istep(lsstep, control);
     }
-    Ok(done(value, pos, control.maxiter, l2(&grad), control, true))
+    Ok(done(
+        value,
+        pos,
+        control.maxiter,
+        l2(&grad),
+        grad.len(),
+        control,
+        true,
+    ))
 }
 
 fn start<O>(obj: &O, init: impl Into<Array1<f64>>) -> Result<Array1<f64>>
@@ -269,6 +301,7 @@ fn done(
     coords: Array1<f64>,
     steps: usize,
     grad_norm: f64,
+    n_free: usize,
     control: &Control,
     exhausted: bool,
 ) -> Report {
@@ -277,7 +310,7 @@ fn done(
         coords,
         steps,
         grad_norm,
-        status: control.finish_status(grad_norm, exhausted),
+        status: control.finish_status(grad_norm, n_free, exhausted),
     }
 }
 

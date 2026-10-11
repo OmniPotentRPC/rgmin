@@ -439,9 +439,7 @@ fn run_session(
         istep,
         maxmove: None,
         ftol_rel: None,
-    
-        noise_eps: None,
-        noise_c: 3.0,
+        noise_floor: None,
 };
     let mut solver = Solver::new(method, control, x.len());
     solver.set_accept(accept);

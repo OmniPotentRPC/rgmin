@@ -19,6 +19,13 @@
 //! `h` is that sample spacing, the same `h` as in `ECnoise.m`'s
 //! stencil `f(x - kh), ..., f(x + kh)`. It is the distance between
 //! consecutive samples, not the half-width of the stencil.
+//!
+//! One projection `g · w` with `w` uniform on the unit sphere has
+//! `E[eps_g²] = tr(Σ) / n` for any noise covariance `Σ`. The sphere
+//! average of `w wᵀ` is `I / n`, so the identity does not need `Σ` to
+//! be a multiple of `I`. The noise in `||g||_2` then has
+//! `E[||e||²] = tr(Σ) = n * eps_g²`, and the floor compares the
+//! stationarity measure with `c * sqrt(n_free) * eps_g`.
 
 use eindir_core::{Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
@@ -29,10 +36,19 @@ use crate::vecops::dot_ordered;
 /// Extra samples beyond the center. The table length is `m + 1`.
 pub const DEFAULT_M: usize = 8;
 
-/// Lower clamp on [`forward_step`] and [`gradient_dr`], in the caller's length unit.
+/// Absolute piece of the lower clamp on [`forward_step`] and [`gradient_dr`].
+///
+/// The clamp that is applied is `max(STEP_CLAMP_MIN, 4 * ulp(point_scale))`.
+/// `1e-16` is below one ulp of a coordinate near 10 Å (`ulp(10) ≈ 1.8e-15`),
+/// so a step that small leaves `x + h == x`.
 pub const STEP_CLAMP_MIN: f64 = 1e-16;
 /// Upper clamp on [`forward_step`] and [`gradient_dr`], in the caller's length unit.
 pub const STEP_CLAMP_MAX: f64 = 1.0;
+
+/// Signal-to-noise factor in Moré and Wild, ACM TOMS 38 (2012), (17a).
+const DERIV_TAU1: f64 = 100.0;
+/// Relative-variation factor in the same paper, (17b).
+const DERIV_TAU2: f64 = 0.1;
 
 /// Why [`ecnoise`] accepted or refused a noise level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -213,14 +229,75 @@ where
     .and_then(finite_values)
 }
 
-/// Noise of `g(x + i h u) · w`.
+/// Noise of `g(x + i h u) · w`, one counter-keyed direction.
 ///
-/// `w` is one unit vector. Component `i` is a standard normal from a
-/// counter-based stream keyed by `(seed, 2i)` and `(seed, 2i+1)`, then
-/// the vector is normalized with [`dot_ordered`]. The same `w` is used
-/// at every stencil point. The projection is also a [`dot_ordered`] sum.
-/// `h` is the sample spacing, as in [`sample_noise`].
+/// Equivalent to [`sample_gradient_noise_k`] with `k = 1`.
 pub fn sample_gradient_noise<O>(
+    objective: &O,
+    x: ArrayView1<f64>,
+    direction: ArrayView1<f64>,
+    h: f64,
+    m: usize,
+    seed: u64,
+) -> Result<NoiseEstimate>
+where
+    O: Gradient<f64> + Objective<f64> + Sync + ?Sized,
+{
+    sample_gradient_noise_k(objective, x, direction, h, m, seed, 1)
+}
+
+/// Average `eps_g²` over `k` directions.
+///
+/// Direction `j` is the unit vector from the counter stream
+/// `(direction_seed(seed, j), i)`. `k` of 0 is treated as 1. Each
+/// direction builds one ECnoise table on `g · w` with that same `w` at
+/// every stencil point. The returned `eps` is the root-mean-square of
+/// the detected values, which is `eps_g` for `k = 1` and a lower-variance
+/// estimate of the same projection noise for `k > 1`. For any covariance
+/// `Σ`, each projection has `E[eps_g²] = tr(Σ) / n` because `w` is
+/// uniform on the sphere. `level` is the table of the first direction
+/// that was accepted.
+pub fn sample_gradient_noise_k<O>(
+    objective: &O,
+    x: ArrayView1<f64>,
+    direction: ArrayView1<f64>,
+    h: f64,
+    m: usize,
+    seed: u64,
+    k: usize,
+) -> Result<NoiseEstimate>
+where
+    O: Gradient<f64> + Objective<f64> + Sync + ?Sized,
+{
+    let k = k.max(1);
+    let mut sum_sq = 0.0;
+    let mut n_ok = 0usize;
+    let mut level = Vec::new();
+    let mut last_fail = None;
+    for j in 0..k {
+        let est =
+            sample_gradient_noise_one(objective, x, direction, h, m, direction_seed(seed, j))?;
+        if est.ok == NoiseFlag::Detected {
+            sum_sq += est.eps * est.eps;
+            n_ok += 1;
+            if level.is_empty() {
+                level = est.level;
+            }
+        } else {
+            last_fail = Some(est);
+        }
+    }
+    if n_ok == 0 {
+        return Ok(last_fail.expect("k >= 1 produces a table"));
+    }
+    Ok(NoiseEstimate {
+        eps: (sum_sq / n_ok as f64).sqrt(),
+        level,
+        ok: NoiseFlag::Detected,
+    })
+}
+
+fn sample_gradient_noise_one<O>(
     objective: &O,
     x: ArrayView1<f64>,
     direction: ArrayView1<f64>,
@@ -244,6 +321,18 @@ where
     ecnoise(&values)
 }
 
+/// Stream key for direction `j`. Direction 0 keeps `seed`, so one
+/// direction matches the historical counter.
+fn direction_seed(seed: u64, j: usize) -> u64 {
+    if j == 0 {
+        return seed;
+    }
+    let mut z = seed ^ (j as u64).wrapping_mul(0x9E3779B97F4A7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+    z ^ (z >> 31)
+}
+
 /// Unit vector whose component `i` comes from the stream `(seed, i)`.
 pub fn counter_direction(seed: u64, n: usize) -> Array1<f64> {
     let mut w = Array1::zeros(n.max(1));
@@ -262,7 +351,8 @@ pub fn counter_direction(seed: u64, n: usize) -> Array1<f64> {
 fn normal(seed: u64, index: usize) -> f64 {
     let u1 = uniform(seed, (2 * index) as u64);
     let u2 = uniform(seed, (2 * index + 1) as u64);
-    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+    // libm, not the platform libm, so the bits do not depend on the target.
+    (-2.0 * libm::log(u1)).sqrt() * libm::cos(std::f64::consts::TAU * u2)
 }
 
 fn uniform(seed: u64, index: u64) -> f64 {
@@ -342,30 +432,178 @@ where
     }
 }
 
-/// Median absolute divided difference of `order` on samples spaced by `h`.
+/// `|f''|` along `p` by Moré and Wild, ACM TOMS 38 (2012), Algorithm 5.1.
 ///
-/// Order 2 is `|f''|` along the line. Order 3 is the third-derivative
-/// scale `|T|` used by [`gradient_dr`]. The column is the raw table, so
-/// a spacing that [`ecnoise`] already flags as noise-dominated does not
-/// yield a derivative.
-pub fn table_derivative(values: &[f64], h: f64, order: usize) -> Option<f64> {
-    if !(h.is_finite() && h > 0.0) || values.len() <= order || order == 0 || order > 3 {
+/// The central second difference uses its own spacing, not an ECnoise
+/// table. Those high differences are noise, of size `O(eps / h^k)`, so
+/// a derivative read off that table is far too large.
+///
+/// Set `ha = eps_f^{1/4}` and `Δ(h) = |f(x−h) − 2f(x) + f(x+h)|` along
+/// the unit direction of `p`. Accept `µ = Δ(h) / h²` when
+/// `Δ(h) ≥ τ1 * eps_f` and
+/// `|f(x±h) − f(x)| ≤ τ2 * max(|f(x)|, |f(x±h)|)`, with `τ1 = 100` and
+/// `τ2 = 0.1` (paper equations 17a and 17b). If `ha` fails, one retry
+/// uses `hb = (eps_f / µa)^{1/4}`. That retry is accepted when it meets
+/// (17), and also when `|µa − µb| ≤ µb / 2` even if (17) fails on `hb`.
+/// Otherwise the estimate is `None`.
+pub fn estimate_second<O>(
+    oracle: &O,
+    x: ArrayView1<f64>,
+    p: ArrayView1<f64>,
+    eps_f: f64,
+) -> Option<f64>
+where
+    O: Objective<f64> + ?Sized,
+{
+    if !(eps_f.is_finite() && eps_f > 0.0) {
         return None;
     }
-    let mut mags = Vec::with_capacity(values.len() - order);
-    for i in 0..=values.len() - order - 1 {
-        let d = match order {
-            1 => values[i + 1] - values[i],
-            2 => values[i] - 2.0 * values[i + 1] + values[i + 2],
-            _ => -values[i] + 3.0 * values[i + 1] - 3.0 * values[i + 2] + values[i + 3],
-        };
-        mags.push((d / h.powi(order as i32)).abs());
-    }
-    if mags.is_empty() {
+    let unit = unit_vector(p)?;
+    if unit.len() != x.len() {
         return None;
     }
-    mags.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    Some(mags[mags.len() / 2])
+    let f0 = oracle.eval(x);
+    if !f0.is_finite() {
+        return None;
+    }
+    let ha = eps_f.powf(0.25);
+    let (mu_a, ok_a) = second_mu(oracle, x, unit.view(), f0, ha, eps_f)?;
+    if ok_a {
+        return Some(mu_a);
+    }
+    if !(mu_a.is_finite() && mu_a > 0.0) {
+        return None;
+    }
+    let hb = (eps_f / mu_a).powf(0.25);
+    if !(hb.is_finite() && hb > 0.0) {
+        return None;
+    }
+    let (mu_b, ok_b) = second_mu(oracle, x, unit.view(), f0, hb, eps_f)?;
+    if ok_b || (mu_a - mu_b).abs() <= 0.5 * mu_b {
+        return Some(mu_b);
+    }
+    None
+}
+
+/// Third-derivative scale `|T|` along `u`, for [`gradient_dr`].
+///
+/// Algorithm 5.1 is applied to the directional derivative
+/// `φ(t) = ∇f(x + t û) · û` instead of to `f`, and `eps_g` replaces
+/// `eps_f`. The second difference of `φ` is a third derivative of `f`:
+/// `Δ(h) = |φ(h) − 2φ(0) + φ(−h)|` and `|T| ≈ Δ(h) / h²`.
+/// The two tests are the paper's, on `φ`:
+/// `Δ(h) ≥ τ1 * eps_g`, and
+/// `|φ(±h) − φ(0)| ≤ τ2 * max(|φ(0)|, |φ(±h)|)`,
+/// with the same `τ1 = 100`, `τ2 = 0.1`, the same `ha = eps_g^{1/4}`,
+/// and the same one retry `hb = (eps_g / µa)^{1/4}` including the
+/// agreement exit `|µa − µb| ≤ µb / 2`.
+pub fn estimate_third<O>(
+    oracle: &O,
+    x: ArrayView1<f64>,
+    u: ArrayView1<f64>,
+    eps_g: f64,
+) -> Option<f64>
+where
+    O: Gradient<f64> + ?Sized,
+{
+    if !(eps_g.is_finite() && eps_g > 0.0) {
+        return None;
+    }
+    let unit = unit_vector(u)?;
+    if unit.len() != x.len() {
+        return None;
+    }
+    let phi = |step: f64| -> Option<f64> {
+        let point = &x + &(step * &unit);
+        let g = oracle.grad(point.view());
+        if g.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
+        Some(dot_ordered(g.view(), unit.view()))
+    };
+    let p0 = phi(0.0)?;
+    let ha = eps_g.powf(0.25);
+    let (mu_a, ok_a) = third_mu(&phi, p0, ha, eps_g)?;
+    if ok_a {
+        return Some(mu_a);
+    }
+    if !(mu_a.is_finite() && mu_a > 0.0) {
+        return None;
+    }
+    let hb = (eps_g / mu_a).powf(0.25);
+    if !(hb.is_finite() && hb > 0.0) {
+        return None;
+    }
+    let (mu_b, ok_b) = third_mu(&phi, p0, hb, eps_g)?;
+    if ok_b || (mu_a - mu_b).abs() <= 0.5 * mu_b {
+        return Some(mu_b);
+    }
+    None
+}
+
+fn second_mu<O>(
+    oracle: &O,
+    x: ArrayView1<f64>,
+    unit: ArrayView1<f64>,
+    f0: f64,
+    h: f64,
+    eps: f64,
+) -> Option<(f64, bool)>
+where
+    O: Objective<f64> + ?Sized,
+{
+    if !(h.is_finite() && h > 0.0) {
+        return None;
+    }
+    let fp = oracle.eval((&x + &(h * &unit)).view());
+    let fm = oracle.eval((&x - &(h * &unit)).view());
+    if !fp.is_finite() || !fm.is_finite() {
+        return None;
+    }
+    let delta = (fm - 2.0 * f0 + fp).abs();
+    let mu = delta / (h * h);
+    if !mu.is_finite() {
+        return None;
+    }
+    Some((mu, difference_accepted(f0, fp, fm, delta, eps)))
+}
+
+fn third_mu<F>(phi: &F, p0: f64, h: f64, eps: f64) -> Option<(f64, bool)>
+where
+    F: Fn(f64) -> Option<f64>,
+{
+    if !(h.is_finite() && h > 0.0) {
+        return None;
+    }
+    let pp = phi(h)?;
+    let pm = phi(-h)?;
+    let delta = (pm - 2.0 * p0 + pp).abs();
+    let mu = delta / (h * h);
+    if !mu.is_finite() {
+        return None;
+    }
+    Some((mu, difference_accepted(p0, pp, pm, delta, eps)))
+}
+
+/// Paper (17a) and (17b): the second difference clears the noise, and
+/// each neighbor stays within a relative factor `τ2` of the center.
+fn difference_accepted(f0: f64, fp: f64, fm: f64, delta: f64, eps: f64) -> bool {
+    if !(delta.is_finite() && eps.is_finite()) || delta < DERIV_TAU1 * eps {
+        return false;
+    }
+    let near = |fa: f64| (fa - f0).abs() <= DERIV_TAU2 * f0.abs().max(fa.abs());
+    near(fp) && near(fm)
+}
+
+fn unit_vector(p: ArrayView1<f64>) -> Option<Array1<f64>> {
+    if p.is_empty() || p.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let nrm = dot_ordered(p, p).sqrt();
+    if nrm == 0.0 || !nrm.is_finite() {
+        return None;
+    }
+    Some(&p / nrm)
 }
 
 /// Forward-difference step `h* = 8^(1/4) sqrt(eps_f / |f''|)`.
@@ -374,47 +612,76 @@ pub fn table_derivative(values: &[f64], h: f64, order: usize) -> Option<f64> {
 /// `(h/2) |f''| + sqrt(2) eps_f / h`. That expression is smallest at
 /// this `h`, when `f''` is the second derivative at the expansion
 /// point and `eps_f` is the standard deviation of uncorrelated noise
-/// in `f`. The result is clamped to `[STEP_CLAMP_MIN, STEP_CLAMP_MAX]`.
-/// A zero `|f''|` with positive noise returns the upper clamp. A zero
-/// noise returns the lower clamp.
-pub fn forward_step(eps_f: f64, second: f64) -> f64 {
-    clamped_step(eps_f, second, 8.0_f64.powf(0.25))
+/// in `f`. `|f''|` comes from [`estimate_second`].
+///
+/// `point_scale` is `max_i |x_i|`. The result is clamped to
+/// `[max(STEP_CLAMP_MIN, 4 * ulp(point_scale)), STEP_CLAMP_MAX]`.
+/// The lower end is four ulps of the coordinate so `x + h` moves.
+/// A zero scale, and a missing estimate (`None`), with positive noise
+/// return the upper clamp. A zero noise returns the lower clamp.
+pub fn forward_step(eps_f: f64, second: Option<f64>, point_scale: f64) -> f64 {
+    clamped_step(eps_f, second, 8.0_f64.powf(0.25), point_scale)
 }
 
 /// Gradient-difference step `dr* = 2 sqrt(eps_g / |T|)`.
 ///
 /// The model is the curvature probe `(dr/2) |T| + 2 eps_g / dr`.
-/// `|T|` is a third-derivative scale, from [`table_derivative`] at
-/// order 3 on the same samples that produced `eps_g`. The clamp is
-/// the one documented on [`forward_step`].
-pub fn gradient_dr(eps_g: f64, third: f64) -> f64 {
-    clamped_step(eps_g, third, 2.0)
+/// `|T|` comes from [`estimate_third`]. A missing estimate uses the
+/// same clamp fallback as [`forward_step`].
+pub fn gradient_dr(eps_g: f64, third: Option<f64>, point_scale: f64) -> f64 {
+    clamped_step(eps_g, third, 2.0, point_scale)
 }
 
-fn clamped_step(eps: f64, scale: f64, factor: f64) -> f64 {
-    if !eps.is_finite() || eps < 0.0 || !scale.is_finite() {
-        return STEP_CLAMP_MIN;
+fn clamped_step(eps: f64, scale: Option<f64>, factor: f64, point_scale: f64) -> f64 {
+    let lo = lower_clamp(point_scale);
+    if !eps.is_finite() || eps < 0.0 {
+        return lo;
     }
     if eps == 0.0 {
-        return STEP_CLAMP_MIN;
+        return lo;
     }
+    let Some(scale) = scale.filter(|s| s.is_finite()) else {
+        return STEP_CLAMP_MAX;
+    };
     let denom = scale.abs();
     if denom == 0.0 {
         return STEP_CLAMP_MAX;
     }
-    (factor * (eps / denom).sqrt()).clamp(STEP_CLAMP_MIN, STEP_CLAMP_MAX)
+    (factor * (eps / denom).sqrt()).clamp(lo, STEP_CLAMP_MAX)
+}
+
+fn lower_clamp(point_scale: f64) -> f64 {
+    let scale = if point_scale.is_finite() {
+        point_scale.abs()
+    } else {
+        0.0
+    };
+    STEP_CLAMP_MIN.max(4.0 * ulp(scale))
+}
+
+fn ulp(x: f64) -> f64 {
+    let x = x.abs();
+    if x == 0.0 || !x.is_finite() {
+        return f64::from_bits(1);
+    }
+    let bits = x.to_bits();
+    if bits >= 0x7fefffffffffffff {
+        return f64::INFINITY;
+    }
+    f64::from_bits(bits + 1) - x
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control::Control;
+    use crate::control::{Control, NoiseFloor};
     use crate::linesearch::LineSearch;
     use crate::method::Method;
     use crate::minimize::minimize_method;
     use crate::oracle::Oracle;
     use crate::report::Status;
     use approx::assert_relative_eq;
+    use eindir_core::DifferentiableObjective;
     use ndarray::array;
 
     #[test]
@@ -537,30 +804,21 @@ mod tests {
     fn step_formulas_match_the_toms_minimizers() {
         let eps = 1e-8;
         let second = 4.0;
-        let h = forward_step(eps, second);
+        let h = forward_step(eps, Some(second), 0.0);
         let expect = 8.0_f64.powf(0.25) * (eps / second).sqrt();
         assert_relative_eq!(h, expect, epsilon = 1e-15);
         let third = 2.5;
-        let dr = gradient_dr(eps, third);
+        let dr = gradient_dr(eps, Some(third), 0.0);
         assert_relative_eq!(dr, 2.0 * (eps / third).sqrt(), epsilon = 1e-15);
-        assert_eq!(forward_step(0.0, 1.0), STEP_CLAMP_MIN);
-        assert_eq!(gradient_dr(1.0, 0.0), STEP_CLAMP_MAX);
-        assert_eq!(forward_step(1e6, 1e-18), STEP_CLAMP_MAX);
-    }
-
-    #[test]
-    fn table_derivative_of_a_cubic() {
-        let h = 1e-3;
-        let values: Vec<f64> = (0..9)
-            .map(|i| {
-                let t = (i as f64 - 4.0) * h;
-                t + 0.5 * t * t + (1.0 / 6.0) * t * t * t
-            })
-            .collect();
-        let second = table_derivative(&values, h, 2).unwrap();
-        let third = table_derivative(&values, h, 3).unwrap();
-        assert_relative_eq!(second, 1.0, epsilon = 1e-6);
-        assert_relative_eq!(third, 1.0, epsilon = 1e-6);
+        assert_eq!(forward_step(0.0, Some(1.0), 0.0), STEP_CLAMP_MIN);
+        assert_eq!(gradient_dr(1.0, Some(0.0), 0.0), STEP_CLAMP_MAX);
+        assert_eq!(forward_step(1e6, Some(1e-18), 0.0), STEP_CLAMP_MAX);
+        assert_eq!(forward_step(1e-8, None, 0.0), STEP_CLAMP_MAX);
+        assert_eq!(gradient_dr(0.0, None, 0.0), STEP_CLAMP_MIN);
+        let near_ten = forward_step(0.0, Some(1.0), 10.0);
+        let four_ulps = 4.0 * ulp(10.0);
+        assert!(four_ulps > STEP_CLAMP_MIN);
+        assert_eq!(near_ten, four_ulps);
     }
 
     #[test]
@@ -661,8 +919,7 @@ mod tests {
             istep: 0.5,
             maxmove: None,
             ftol_rel: None,
-            noise_eps: Some(eps),
-            noise_c: 3.0,
+            noise_floor: Some(NoiseFloor::new(eps)),
         };
         let report = minimize_method(
             &obj,
@@ -676,11 +933,12 @@ mod tests {
         assert_eq!(report.status, Status::Tolerance);
         assert!(report.grad_norm < control.gtol);
 
-        let mut loose = control.with_noise_eps(1e-2).noise_floor(3.0);
+        let mut loose = control.with_noise_floor(NoiseFloor::new(1e-2));
         loose.gtol = 1e-12;
         loose.istep = 0.99;
         // A full Newton step would land under gtol. Backtracking keeps
-        // the opening trial, which leaves the gradient inside c * eps_g.
+        // the opening trial, which leaves the gradient inside
+        // c * sqrt(n_free) * eps_g. Here n_free is 1.
         let early = minimize_method(
             &obj,
             array![1.5],
@@ -696,6 +954,158 @@ mod tests {
         assert_eq!(early.status, Status::NoiseFloor);
         assert!(early.grad_norm < 3.0 * 1e-2);
         assert!(early.grad_norm >= loose.gtol);
+    }
+
+    #[test]
+    fn floor_tracks_sqrt_n_for_isotropic_and_anisotropic_noise() {
+        for &n in &[3usize, 21, 114] {
+            let sigma = 1e-3;
+            let mut hits = 0usize;
+            for seed in 0..200u64 {
+                if floor_fires(&vec![sigma; n], seed, false).0 {
+                    hits += 1;
+                }
+            }
+            assert!(
+                hits * 10 >= 200 * 9,
+                "isotropic n={n}: {hits}/200 below 2 sqrt(n) sigma"
+            );
+            assert!(
+                !floor_fires(&vec![0.0; n], 1, true).0,
+                "noise-free quadratic n={n} reported the floor"
+            );
+        }
+        let n = 21usize;
+        let sigmas: Vec<f64> = (0..n)
+            .map(|i| 1e-4 * 100.0_f64.powf(i as f64 / (n - 1) as f64))
+            .collect();
+        let mut hits = 0usize;
+        for seed in 0..200u64 {
+            if floor_fires(&sigmas, seed, false).0 {
+                hits += 1;
+            }
+        }
+        assert!(
+            hits * 10 >= 200 * 9,
+            "anisotropic: {hits}/200 below 2 sqrt(tr Σ)"
+        );
+    }
+
+    fn floor_fires(sigmas: &[f64], seed: u64, noise_free_minimize: bool) -> (bool, f64, f64) {
+        let n = sigmas.len();
+        let obj = NoisyQuad::new(sigmas.to_vec(), seed);
+        if noise_free_minimize {
+            let x = Array1::ones(n);
+            let est =
+                sample_gradient_noise(&obj, x.view(), Array1::ones(n).view(), 1e-6, DEFAULT_M, 3)
+                    .unwrap();
+            let eps = if est.ok == NoiseFlag::Detected {
+                est.eps
+            } else {
+                0.0
+            };
+            let gnorm = (n as f64).sqrt();
+            let control = Control {
+                gtol: 1e-8,
+                maxiter: 40,
+                noise_floor: Some(NoiseFloor::new(eps)),
+                ..Control::default()
+            };
+            if control.classify(gnorm, n) == Status::NoiseFloor {
+                return (true, eps, gnorm);
+            }
+            let report =
+                minimize_method(&obj, x, &control, Method::Steepest, LineSearch::default())
+                    .unwrap();
+            return (report.status == Status::NoiseFloor, eps, gnorm);
+        }
+        let tr: f64 = sigmas.iter().map(|s| s * s).sum();
+        // "About 2": 1.7 leaves room for the chi-square tail of ||g||
+        // at n = 3, where that tail is widest.
+        let radius = 1.7 * tr.sqrt();
+        let mut x = Array1::zeros(n);
+        x[0] = radius;
+        // Measure where the projection is large compared with the noise.
+        // At the floor itself the samples differ in the leading digit and
+        // ECnoise refuses the table.
+        let anchor = Array1::from_elem(n, 0.5);
+        let est = sample_gradient_noise_k(
+            &obj,
+            anchor.view(),
+            Array1::ones(n).view(),
+            1e-5,
+            DEFAULT_M,
+            seed.wrapping_add(17),
+            8,
+        )
+        .unwrap();
+        let eps = est.eps;
+        let g = obj.grad(x.view());
+        let gnorm = dot_ordered(g.view(), g.view()).sqrt();
+        let control = Control {
+            gtol: 1e-18,
+            noise_floor: Some(NoiseFloor::new(eps)),
+            ..Control::default()
+        };
+        (control.classify(gnorm, n) == Status::NoiseFloor, eps, gnorm)
+    }
+
+    #[test]
+    fn second_derivative_and_forward_step_match_the_grid() {
+        let levels = [1e-6_f64, 1e-8, 1e-10];
+        let cases = [
+            (ScalarKind::Sin, 0.7_f64),
+            (ScalarKind::Exp, 0.3),
+            (ScalarKind::Quartic, 0.8),
+        ];
+        for &level in &levels {
+            for &(kind, x0) in &cases {
+                let truth = kind.second(x0).abs();
+                let grid: Vec<f64> = (0..=20)
+                    .map(|i| 10.0_f64.powf(-6.0 + i as f64 * 0.25))
+                    .collect();
+                let mut curv_hits = 0usize;
+                let mut star_sq = 0.0;
+                let mut grid_sq = vec![0.0; grid.len()];
+                let mut counted = 0usize;
+                for seed in 0..200u64 {
+                    let obj = NoisyScalar::new(seed, level, kind);
+                    let x = array![x0];
+                    let mu = estimate_second(&obj, x.view(), array![1.0].view(), level);
+                    let Some(mu) = mu else { continue };
+                    if (0.5..=2.0).contains(&(mu / truth)) {
+                        curv_hits += 1;
+                    }
+                    let h_star = forward_step(level, Some(mu), x0.abs());
+                    let err = forward_error(&obj, kind, x0, h_star);
+                    star_sq += err * err;
+                    for (i, &h) in grid.iter().enumerate() {
+                        let e = forward_error(&obj, kind, x0, h);
+                        grid_sq[i] += e * e;
+                    }
+                    counted += 1;
+                }
+                assert!(
+                    curv_hits * 10 >= 200 * 9,
+                    "{kind:?} level {level}: curvature {curv_hits}/200"
+                );
+                let rms_star = (star_sq / counted.max(1) as f64).sqrt();
+                let rms_best = grid_sq
+                    .iter()
+                    .map(|s| (s / counted.max(1) as f64).sqrt())
+                    .fold(f64::INFINITY, f64::min);
+                assert!(
+                    rms_star <= 2.0 * rms_best.max(1e-18),
+                    "{kind:?} level {level}: rms derivative error {rms_star} vs best grid {rms_best}"
+                );
+            }
+        }
+    }
+
+    fn forward_error(obj: &NoisyScalar, kind: ScalarKind, x0: f64, h: f64) -> f64 {
+        let fp = obj.eval(array![x0 + h].view());
+        let f0 = obj.eval(array![x0].view());
+        ((fp - f0) / h - kind.deriv(x0)).abs()
     }
 
     #[test]
@@ -861,5 +1271,128 @@ mod tests {
             }
         }
         (e, g)
+    }
+
+    struct NoisyQuad {
+        n: usize,
+        sigmas: Vec<f64>,
+        seed: u64,
+        bounds: eindir_core::Bounds<f64>,
+    }
+
+    impl NoisyQuad {
+        fn new(sigmas: Vec<f64>, seed: u64) -> Self {
+            let n = sigmas.len();
+            Self {
+                n,
+                sigmas,
+                seed,
+                bounds: eindir_core::Bounds::new(
+                    Array1::from_elem(n, -10.0),
+                    Array1::from_elem(n, 10.0),
+                    0.0,
+                ),
+            }
+        }
+    }
+
+    impl Objective<f64> for NoisyQuad {
+        fn dim(&self) -> usize {
+            self.n
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            0.5 * dot_ordered(x, x)
+        }
+    }
+
+    impl DifferentiableObjective<f64> for NoisyQuad {}
+
+    impl Gradient<f64> for NoisyQuad {
+        fn dim(&self) -> usize {
+            self.n
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            let key = quad_key(x);
+            let mut g = x.to_owned();
+            for i in 0..self.n {
+                if self.sigmas[i] != 0.0 {
+                    g[i] += self.sigmas[i] * normal(self.seed ^ key, i);
+                }
+            }
+            g
+        }
+    }
+
+    fn quad_key(x: ArrayView1<f64>) -> u64 {
+        let mut z = 0u64;
+        for v in x.iter() {
+            z = z.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(v.to_bits());
+        }
+        z
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum ScalarKind {
+        Sin,
+        Exp,
+        Quartic,
+    }
+
+    impl ScalarKind {
+        fn value(self, t: f64) -> f64 {
+            match self {
+                Self::Sin => t.sin(),
+                Self::Exp => t.exp(),
+                Self::Quartic => t.powi(4),
+            }
+        }
+        fn deriv(self, t: f64) -> f64 {
+            match self {
+                Self::Sin => t.cos(),
+                Self::Exp => t.exp(),
+                Self::Quartic => 4.0 * t.powi(3),
+            }
+        }
+        fn second(self, t: f64) -> f64 {
+            match self {
+                Self::Sin => -t.sin(),
+                Self::Exp => t.exp(),
+                Self::Quartic => 12.0 * t * t,
+            }
+        }
+    }
+
+    struct NoisyScalar {
+        seed: u64,
+        level: f64,
+        kind: ScalarKind,
+        bounds: eindir_core::Bounds<f64>,
+    }
+
+    impl NoisyScalar {
+        fn new(seed: u64, level: f64, kind: ScalarKind) -> Self {
+            Self {
+                seed,
+                level,
+                kind,
+                bounds: eindir_core::Bounds::new(array![-4.0], array![4.0], 0.0),
+            }
+        }
+    }
+
+    impl Objective<f64> for NoisyScalar {
+        fn dim(&self) -> usize {
+            1
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            let t = x[0];
+            self.kind.value(t) + self.level * normal(self.seed, t.to_bits() as usize)
+        }
     }
 }

@@ -118,7 +118,7 @@ where
         coords: gbest_position,
         steps: iteration,
         grad_norm,
-        status: control.finish_status(grad_norm, true),
+        status: control.finish_status(grad_norm, grad.len(), true),
     })
 }
 
@@ -194,9 +194,7 @@ mod tests {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
-
-            noise_eps: None,
-            noise_c: 3.0,
+            noise_floor: None,
         }
     }
 

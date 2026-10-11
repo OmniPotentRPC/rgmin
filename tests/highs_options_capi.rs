@@ -10,6 +10,8 @@ fn optional_highs_policy_setters_report_build_availability() {
         istep: 1.0,
         maxmove: 0.0,
         memory: 10,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &control, 2) };
     assert!(!session.is_null());

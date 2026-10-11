@@ -1,5 +1,34 @@
 //! Iteration limits and gradient tolerance.
 
+/// Opt-in stop for a gradient whose Euclidean noise is `sqrt(n_free) * eps_g`.
+///
+/// One projection `g · w` with `w` uniform on the unit sphere has
+/// `E[eps_g²] = tr(Σ) / n` for any noise covariance `Σ`, because the
+/// sphere average of `w wᵀ` is `I / n`. The noise vector itself has
+/// `E[||e||²] = tr(Σ) = n * eps_g²`, so a test of `||g||_2` against
+/// `eps_g` alone sits `sqrt(n)` too low. The stop uses
+/// `c * sqrt(n_free) * eps_g`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoiseFloor {
+    /// Noise of one projected component, `eps_g`.
+    pub eps_g: f64,
+    /// Factor in front of `sqrt(n_free) * eps_g`. The default is 3.
+    pub c: f64,
+}
+
+impl NoiseFloor {
+    /// Floor with `c = 3`.
+    pub fn new(eps_g: f64) -> Self {
+        Self { eps_g, c: 3.0 }
+    }
+
+    /// Replace the factor `c`.
+    pub fn with_c(mut self, c: f64) -> Self {
+        self.c = c;
+        self
+    }
+}
+
 /// Outer-loop controls for [`crate::minimize`].
 #[derive(Clone, Debug)]
 pub struct Control {
@@ -31,10 +60,8 @@ pub struct Control {
     /// noisy at the level of the requested decrease, so a flat step is
     /// taken rather than refused.
     pub ftol_rel: Option<f64>,
-    /// Gradient noise `eps_g`. `None` leaves the noise floor off.
-    pub noise_eps: Option<f64>,
-    /// Factor in the floor `c * eps_g`. The default is 3.
-    pub noise_c: f64,
+    /// Gradient noise floor. `None` leaves the test off.
+    pub noise_floor: Option<NoiseFloor>,
 }
 
 impl Default for Control {
@@ -45,40 +72,44 @@ impl Default for Control {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
-            noise_eps: None,
-            noise_c: 3.0,
+            noise_floor: None,
         }
     }
 }
 
 impl Control {
-    /// Set the noise-floor factor `c`. The floor stays off until
-    /// [`Self::noise_eps`] is `Some`.
-    pub fn noise_floor(mut self, c: f64) -> Self {
-        self.noise_c = c;
-        self
-    }
-
-    /// Opt in to the noise floor with gradient noise `eps_g`.
+    /// Opt in to the noise floor.
     ///
-    /// The iteration stops when the gradient measure is below
-    /// `noise_c * eps_g` and still above [`Self::gtol`]. The default
-    /// factor is 3. [`crate::Status::NoiseFloor`] is that stop.
+    /// The iteration stops when the stationarity measure is below
+    /// `c * sqrt(n_free) * eps_g` and still at or above [`Self::gtol`].
+    /// `n_free` is the number of coordinates that measure runs over.
+    /// [`crate::Status::NoiseFloor`] is that stop.
     /// [`crate::Status::Tolerance`] remains the `gtol` stop.
-    pub fn with_noise_eps(mut self, eps_g: f64) -> Self {
-        self.noise_eps = Some(eps_g);
+    pub fn with_noise_floor(mut self, floor: NoiseFloor) -> Self {
+        self.noise_floor = Some(floor);
         self
     }
 
     /// `Tolerance` when `grad` is below `gtol`, `NoiseFloor` when it is
-    /// below `c * eps_g` and still above `gtol`, otherwise `Iterating`.
-    pub fn classify(&self, grad: f64) -> crate::report::Status {
+    /// below `c * sqrt(n_free) * eps_g` and still at or above `gtol`,
+    /// otherwise `Iterating`.
+    ///
+    /// `n_free` is the length of the gradient the stationarity measure
+    /// uses, with frozen or fixed coordinates left out.
+    pub fn classify(&self, grad: f64, n_free: usize) -> crate::report::Status {
         use crate::report::Status;
         if grad < self.gtol {
             return Status::Tolerance;
         }
-        if let Some(eps) = self.noise_eps {
-            if eps.is_finite() && eps >= 0.0 && grad < self.noise_c * eps {
+        if let Some(floor) = self.noise_floor {
+            let eps = floor.eps_g;
+            let width = (n_free as f64).sqrt();
+            if eps.is_finite()
+                && eps >= 0.0
+                && floor.c.is_finite()
+                && width.is_finite()
+                && grad < floor.c * width * eps
+            {
                 return Status::NoiseFloor;
             }
         }
@@ -86,8 +117,8 @@ impl Control {
     }
 
     /// The stop to take now, when one is due.
-    pub fn halt(&self, grad: f64) -> Option<crate::report::Status> {
-        match self.classify(grad) {
+    pub fn halt(&self, grad: f64, n_free: usize) -> Option<crate::report::Status> {
+        match self.classify(grad, n_free) {
             status @ (crate::report::Status::Tolerance | crate::report::Status::NoiseFloor) => {
                 Some(status)
             }
@@ -98,8 +129,13 @@ impl Control {
     /// [`Self::classify`], with a spent budget reported as
     /// [`crate::report::Status::Budget`] when `exhausted` is set and the
     /// gradient is still above every stop.
-    pub(crate) fn finish_status(&self, grad: f64, exhausted: bool) -> crate::report::Status {
-        match self.classify(grad) {
+    pub(crate) fn finish_status(
+        &self,
+        grad: f64,
+        n_free: usize,
+        exhausted: bool,
+    ) -> crate::report::Status {
+        match self.classify(grad, n_free) {
             crate::report::Status::Iterating if exhausted => crate::report::Status::Budget,
             other => other,
         }
