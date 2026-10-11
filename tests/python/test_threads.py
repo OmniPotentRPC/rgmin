@@ -81,10 +81,11 @@ def test_hammered_solver_raises_in_use() -> None:
         assert "Solver is in use by another thread" in str(error)
 
 
+@pytest.mark.thread_unsafe
 def test_shared_calculator_with_and_without_reentrant() -> None:
     ase = pytest.importorskip("ase")
     from ase import Atoms
-    from ase.calculators.calculator import Calculator
+    from ase.calculators.calculator import Calculator, PropertyNotImplementedError
 
     class Shared(Calculator):
         implemented_properties = ["energy", "forces"]
@@ -96,17 +97,27 @@ def test_shared_calculator_with_and_without_reentrant() -> None:
             self.max_inside = 0
             self._gate = threading.Lock()
 
-        def calculate(self, atoms=None, properties=None, system_changes=None):  # type: ignore[no-untyped-def]
+        def get_property(self, name, atoms=None, allow_calculation=True):  # type: ignore[no-untyped-def]
+            if name not in self.implemented_properties:
+                raise PropertyNotImplementedError(f"{name} property not implemented")
+            if atoms is None:
+                atoms = self.atoms
             with self._gate:
                 self.inside += 1
                 self.max_inside = max(self.max_inside, self.inside)
             try:
                 time.sleep(0.05)
                 x = np.asarray(atoms.get_positions(), dtype=np.float64).reshape(-1)
-                self.results = {"energy": 0.5 * float(x @ x), "forces": -x.reshape(-1, 3)}
+                energy = 0.5 * float(x @ x)
+                forces = -x.reshape(-1, 3)
             finally:
                 with self._gate:
                     self.inside -= 1
+            if name == "energy":
+                return energy
+            if name == "forces":
+                return forces.copy()
+            raise PropertyNotImplementedError(f"{name} not present in this calculation")
 
     def run(reentrant: bool) -> Shared:
         calc = Shared(reentrant)
