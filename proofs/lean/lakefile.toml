@@ -1,9 +1,0 @@
-name = "Rgmin"
-defaultTargets = ["Rgmin"]
-
-[[require]]
-name = "mathlib"
-scope = "leanprover-community"
-
-[[lean_lib]]
-name = "Rgmin"

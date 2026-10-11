@@ -1,5 +1,7 @@
 import Mathlib
 
+/- Citation: Steihaug, SIAM J. Numer. Anal. 20, 626 (1983), doi:10.1137/0720042. Nocedal and Wright, Numerical Optimization, doi:10.1007/978-0-387-40065-5. -/
+
 /-! # The Steihaug boundary step
 
 `src/hvp.rs::steihaug_cg` follows a conjugate-gradient direction until
@@ -17,7 +19,7 @@ direction only lowers the model, so stopping at the boundary is the
 right amount of greed.
 -/
 
-namespace Rgmin
+namespace RgminContracts
 
 /-- The discriminant `boundary_tau` clamps to nonnegative before the
 square root. -/
@@ -84,4 +86,4 @@ theorem ray_further_is_lower (gd dHd t1 t2 : ℝ)
     mul_le_mul_of_nonpos_left hsq hc
   linarith
 
-end Rgmin
+end RgminContracts

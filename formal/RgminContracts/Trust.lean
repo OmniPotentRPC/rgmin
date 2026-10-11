@@ -1,5 +1,7 @@
 import Mathlib
 
+/- Citation: Conn, Gould, and Toint, Trust Region Methods, doi:10.1137/1.9780898719857. Nocedal and Wright, Numerical Optimization, doi:10.1007/978-0-387-40065-5. -/
+
 /-! # The trust radius cannot lie
 
 `src/trust.rs::update_radius` and the outer loop of
@@ -10,7 +12,7 @@ model failures drive it to the floor geometrically -- at which point
 the code reports `TrustCollapsed` instead of pretending convergence.
 -/
 
-namespace Rgmin
+namespace RgminContracts
 
 /-- The shrink branch of `update_radius`: a quarter of the radius,
 floored. -/
@@ -78,4 +80,4 @@ theorem rejection_propagates (ared pred eta : ℝ)
   have hle : ared / pred ≤ 0 := div_nonpos_of_nonpos_of_nonneg ha hp.le
   linarith
 
-end Rgmin
+end RgminContracts

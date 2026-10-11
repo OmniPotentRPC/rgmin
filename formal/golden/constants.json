@@ -1,0 +1,7 @@
+{
+  "linesearch.ZOOM_GUARD": 0.1,
+  "trust.RHO_BAD": 0.25,
+  "trust.SHRINK": 0.25,
+  "vecops.PAR_CHUNK": 4096,
+  "vecops.PAR_MIN_LEN": 65536
+}

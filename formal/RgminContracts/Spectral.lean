@@ -1,5 +1,7 @@
 import Mathlib
 
+/- Citation: Frangella, Tropp, and Udell, SIAM J. Matrix Anal. Appl. 44 (2023), doi:10.1137/21M1466244. -/
+
 /-! # The sketch cannot manufacture negative curvature
 
 `src/hvp.rs::NystromPrecond` builds its low-rank factor as `B` with
@@ -15,7 +17,7 @@ spectrum and a positive shift, every divisor is positive and every
 damping factor sits in `(0, 1]`.
 -/
 
-namespace Rgmin
+namespace RgminContracts
 
 open Matrix
 
@@ -64,4 +66,4 @@ theorem sumSq_nonneg {n : ℕ} (x : Fin n → ℝ) :
     0 ≤ ∑ i, x i ^ 2 :=
   Finset.sum_nonneg fun i _ => sq_nonneg (x i)
 
-end Rgmin
+end RgminContracts

@@ -1,6 +1,17 @@
 import RgminContracts.Armijo
 import RgminContracts.BFGS
+import RgminContracts.BoxProjection
 import RgminContracts.Clamp
 import RgminContracts.Fire
+import RgminContracts.NebReset
+import RgminContracts.Precond
+import RgminContracts.QnDerivative
+import RgminContracts.Reexport
 import RgminContracts.RoundoffWolfe
 import RgminContracts.ScgRestart
+import RgminContracts.SpdRetraction
+import RgminContracts.Spectral
+import RgminContracts.Steihaug
+import RgminContracts.Trust
+import RgminContracts.UnitaryCompletion
+import RgminContracts.Zoom

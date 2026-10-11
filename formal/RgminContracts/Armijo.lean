@@ -16,7 +16,7 @@ What the code needs from the mathematics: if `d` is a descent direction
 the test, so the geometric sequence enters the accepting interval after
 finitely many shrinks. Only differentiability of `f` at `x` is used; `C^1`
 is more than enough. `c > 0` is not needed for existence; it is what makes
-an accepted step strictly decrease the value (`proofs/lean/Rgmin/Zoom.lean`,
+an accepted step strictly decrease the value (`RgminContracts/Zoom.lean`,
 `armijo_strict`).
 -/
 

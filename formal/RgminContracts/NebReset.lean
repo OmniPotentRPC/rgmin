@@ -1,8 +1,10 @@
 import Mathlib
 
+/- Citation: Goswami, AIP Adv. 15 (2025), doi:10.1063/5.0283639. -/
+
 open scoped BigOperators
 
-namespace Rgmin
+namespace RgminContracts
 
 /-- A nonzero scalar curvature scale has a positive magnitude. -/
 theorem reset_scale_pos (h0 : ℝ) (hne : h0 ≠ 0) : 0 < |h0| :=
@@ -29,4 +31,4 @@ theorem capped_force_reset_descent (slope factor : ℝ)
     (hd : slope < 0) (hf : 0 < factor) : factor * slope < 0 :=
   mul_neg_of_pos_of_neg hf hd
 
-end Rgmin
+end RgminContracts

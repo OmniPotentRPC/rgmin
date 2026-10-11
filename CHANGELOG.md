@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Lean proofs from `proofs/lean/` are the one `RgminContracts` package
+  in `formal/`. The old declaration names are re-exported from `Rgmin`.
+  SymPy scripts from `proofs/sympy/` live in `validation/`.
+  `formal/check.sh` and `validation/` run in `.github/workflows/verify.yml`.
+
 ### Added
 
 - Python package `rgmin`: a free-threaded nanobind module `rgmin._core`

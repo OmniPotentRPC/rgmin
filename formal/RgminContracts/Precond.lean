@@ -1,5 +1,7 @@
 import Mathlib
 
+/- Citation: Nocedal and Wright, Numerical Optimization, doi:10.1007/978-0-387-40065-5. Steihaug, SIAM J. Numer. Anal. 20, 626 (1983), doi:10.1137/0720042. -/
+
 /-! # Preconditioning changes the clock, never the answer
 
 `src/hvp.rs::steihaug_pcg` accepts any symmetric positive definite
@@ -20,7 +22,7 @@ with the scaling applied to each quantity exactly as `M -> c M`
 induces: `z, d -> z/c, d/c`, `rz -> rz/c`, `dHd -> dHd/c^2`.
 -/
 
-namespace Rgmin
+namespace RgminContracts
 
 /-- **The CG step ignores the preconditioner's scale.** With
 `alpha = rz / dHd` and the scaled quantities `rz/c`, `dHd/c^2`,
@@ -49,4 +51,4 @@ theorem metric_update_scales (pMp pMd dMd alpha c : ℝ) :
       = c * (pMp + 2 * alpha * pMd + alpha ^ 2 * dMd) := by
   ring
 
-end Rgmin
+end RgminContracts

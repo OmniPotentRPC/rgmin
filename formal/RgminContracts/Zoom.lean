@@ -1,5 +1,7 @@
 import Mathlib
 
+/- Citation: Nocedal and Wright, Numerical Optimization, doi:10.1007/978-0-387-40065-5. Wolfe, SIAM Rev. 11, 226 (1969), doi:10.1137/1011036. -/
+
 /-! # The zoom bracket
 
 `src/linesearch/known.rs::zoom_trial` refines a bracket `[lo, hi]`
@@ -12,7 +14,7 @@ tenth of its width away, so the width falls geometrically and the
 search cannot stall on a degenerate cubic.
 -/
 
-namespace Rgmin
+namespace RgminContracts
 
 /-- One guarded zoom trial: `t` clamped into the middle 80 percent of
 the bracket `[lo, hi]`. -/
@@ -80,4 +82,4 @@ theorem armijo_strict (phi0 phia c1 a slope : ℝ)
   have h2 : c1 * a * slope < 0 := mul_neg_of_pos_of_neg h1 hs
   linarith
 
-end Rgmin
+end RgminContracts

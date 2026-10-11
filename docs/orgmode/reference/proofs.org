@@ -1,13 +1,13 @@
 #+TITLE: The proof ledger: theorems, code, tests
 
-The Lean development under ~proofs/lean/Rgmin/~ pins the exact
+The Lean development under ~formal/RgminContracts/~ pins the exact
 rational facts the solvers' termination and honesty arguments rest
 on. It builds on Mathlib, so the statements are the real ones: widths
 and radii over the reals, `Real.sqrt` in the boundary root rather
 than a named-root hypothesis, actual limits for the termination
 envelopes, and the Gram positive-semidefiniteness of the sketch as a
 matrix theorem. Check it with ~lake exe cache get && lake build~ in
-~proofs/lean/~; the cache makes Mathlib a download, not a compile.
+~formal/~; the cache makes Mathlib a download, not a compile.
 
 The division of labor is deliberate. The Lean side proves the exact
 algebra and the budget envelopes -- facts about the formulas, true in

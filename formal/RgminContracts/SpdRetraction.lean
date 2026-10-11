@@ -1,6 +1,8 @@
 import Mathlib
 
-namespace Rgmin
+/- Citation: Boumal, An Introduction to Optimization on Smooth Manifolds, doi:10.1017/9781009166164. -/
+
+namespace RgminContracts
 
 /-- Scalar restriction of the second-order SPD retraction. -/
 noncomputable def spdScalarRetract (x u : ℝ) : ℝ := x + u + u ^ 2 / (2 * x)
@@ -9,7 +11,7 @@ theorem spd_scalar_square_form (x u : ℝ) (hx : x ≠ 0) :
     spdScalarRetract x u = ((x + u) ^ 2 + x ^ 2) / (2 * x) := by
   unfold spdScalarRetract
   field_simp [hx]
-  <;> ring
+  ring
 
 theorem spd_scalar_retract_positive (x u : ℝ) (hx : 0 < x) :
     0 < spdScalarRetract x u := by
@@ -31,4 +33,4 @@ theorem spd_retained_first_step_witness :
       spdScalarRetract 2 (spdScalarRetract 2 (-2 / 5) - 2) = (4181 / 2500 : ℝ) := by
   norm_num [spdScalarRetract]
 
-end Rgmin
+end RgminContracts

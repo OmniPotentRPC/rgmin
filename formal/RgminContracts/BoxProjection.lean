@@ -1,6 +1,8 @@
 import Mathlib
 
-namespace Rgmin
+/- Citation: Byrd, Lu, Nocedal, and Zhu, SIAM J. Sci. Comput. 16, 1190 (1995), doi:10.1137/0916069. -/
+
+namespace RgminContracts
 
 /-- Scalar projection of the force into a displacement interval. -/
 noncomputable def projectedForce (g lower upper : ℝ) : ℝ :=
@@ -37,4 +39,4 @@ theorem projected_force_sum_descent {ι : Type*} [Fintype ι]
     Finset.sum_le_sum fun i _ => projected_force_descent (g i) (lower i) (upper i) (hl i) (hu i)
   simpa only [Finset.sum_neg_distrib] using hsum
 
-end Rgmin
+end RgminContracts

@@ -40,7 +40,7 @@ which damps each captured stiff mode by mu / (l_i + mu) and passes the
 orthogonal complement through untouched.
 
 Two Lean facts in
-[[file:../../../proofs/lean/Rgmin/Spectral.lean][Spectral.lean]] pin the
+[[file:../../../formal/RgminContracts/Spectral.lean][Spectral.lean]] pin the
 construction's legitimacy:
 
 - ~sumSq_nonneg~ (with ~sq_nonneg~): a Gram quadratic form is a sum of

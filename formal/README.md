@@ -6,10 +6,13 @@ the Rust code must establish for the guarantee to hold. The proofs are
 over the reals (exact arithmetic); the Rust tests hold the
 floating-point implementation to them at fixed tolerances.
 
-`proofs/lean/` holds the scalar algebra of the line search, the trust
-region and the Nystrom sketch. `formal/` holds the vector-space
-contracts: the Armijo existence argument, BFGS and L-BFGS positive
-definiteness, the per-atom clamp, and FIRE mixing.
+One package, `RgminContracts`, holds the vector-space contracts and the
+scalar algebra that used to live under `proofs/lean/`: the line search,
+the trust region, the Nystrom sketch, the NEB reset, unitary
+completion, the SPD retraction, box projection, and the quasi-Newton
+derivative. Declaration names are unchanged. `Rgmin.t` is
+`RgminContracts.t` (`RgminContracts/Reexport.lean`). SymPy checks from
+`proofs/sympy/` live in `validation/`.
 
 ## Check
 
@@ -25,9 +28,9 @@ or when `#print axioms` of any theorem names an axiom beyond
 `propext`, `Classical.choice` and `Quot.sound`. The toolchain is pinned
 in `lean-toolchain` (`leanprover/lean4:v4.34.0-rc2`) and Mathlib in
 `lakefile.toml` and `lake-manifest.json`
-(`f2916a54665af851fc9a4da901cfc242c47a8922`), the same pins as
-`proofs/lean/`, so one Mathlib cache serves both. Install the toolchain
-with [elan](https://github.com/leanprover/elan).
+(`f2916a54665af851fc9a4da901cfc242c47a8922`). Install the toolchain
+with [elan](https://github.com/leanprover/elan). Mathlib is the
+library of The mathlib Community, doi:10.1145/3372885.3373824.
 
 ## Theorem map
 
@@ -48,6 +51,21 @@ with [elan](https://github.com/leanprover/elan).
 | `fireMix_power_ge` | `src/fire.rs::mix_velocity` | `a >= 0`. Mixing never lowers `F.v`. |
 | `fireMix_not_norm_preserving`, `fireMix_norm_gt_of_two` | `src/fire.rs::mix_velocity` | Shows the limits: the mix does not preserve `|v|`, and `a = 2` breaks the bound. |
 | `fire_rescale_consistent` | `src/fire.rs::fire_rescale_velocity` | The move taken is a nonnegative multiple of the proposed one. Then `dt v'` equals the move taken. |
+| `guarded_above`, `guarded_below`, `zoom_shrinks` | `src/linesearch/known.rs` zoom guard | The trial stays in the middle 80 percent, and the bracket keeps at least a tenth of its width. Nocedal and Wright, doi:10.1007/978-0-387-40065-5. |
+| `width_envelope`, `width_envelope_nonneg`, `width_envelope_tendsto` | `src/linesearch/known.rs` | The guaranteed width is `(9/10)^k` times the old width and tends to 0. |
+| `armijo_strict` | `src/linesearch/conditions.rs::armijo` | `c1 > 0`, `a > 0` and a negative slope. An accepted Armijo point is a strict decrease. Wolfe, doi:10.1137/1011036. |
+| `boundary_on_sphere`, `boundary_tau_nonneg`, `ray_further_is_lower` | `src/hvp.rs::boundary_tau`, `steihaug_pcg` | The boundary root lands on the trust sphere, does not step backwards, and negative curvature makes the boundary the greedy model minimizer on the ray. Steihaug, doi:10.1137/0720042. |
+| `step_scale_invariant`, `beta_scale_invariant`, `metric_update_scales` | `src/hvp.rs::steihaug_pcg` | `c ≠ 0` and a nonzero denominator where the identity divides. Scaling the preconditioner does not change the step, the conjugacy weight, or the tracked metric comparison. |
+| `shrink_ge_floor`, `shrink_pos`, `shrink_strict`, `collapse_envelope`, `collapse_tendsto` | `src/trust.rs::update_radius` | The floor is positive. Rejections shrink by 1/4 down to that floor. Conn, Gould, and Toint, doi:10.1137/1.9780898719857. |
+| `grow_le_cap`, `grow_ge` | `src/trust.rs::update_radius` | Growth doubles and never exceeds the cap, and it does not shrink a step already under the cap. |
+| `rejection_propagates` | `src/trust.rs::reduction_ratio` | A step that fails to lower the objective is rejected when the predicted reduction is positive. |
+| `sketch_posSemidef`, `sketch_form_nonneg`, `sumSq_nonneg` | `src/hvp.rs::NystromPrecond` | The Gram factor is positive semidefinite. Frangella, Tropp, and Udell, doi:10.1137/21M1466244. |
+| `shifted_weight_pos`, `equalized_weight_bounds` | `src/hvp.rs::NystromPrecond::solve` | Kept eigenvalues are nonnegative and the shift is positive, so every weight lies in `(0, 1]`. |
+| `reset_scale_pos`, `force_reset_inner_product`, `force_reset_descent`, `capped_force_reset_descent` | `src/lbfgs.rs::Lbfgs::guarded_direction` | A positive scale and a nonzero gradient make `d = -scale g` a descent direction, and a positive cap preserves that sign. Goswami, doi:10.1063/5.0283639. |
+| `unitary_complement_real`, `unitary_complement_imag`, `unitary_complement_norm_pos`, `positive_residual_exists` | `src/manifold/unitary.rs` | The complement `(−c+id, a−ib)` is orthogonal to `(a+ib, c+id)` and nonzero when the source is. Absil, Mahony, and Sepulchre, doi:10.1515/9781400830244. |
+| `spd_scalar_square_form`, `spd_scalar_retract_positive`, `spd_retract_chord_gap`, `spd_retained_first_step_witness` | `src/manifold/spd.rs` retraction | `x > 0`. The scalar second-order retraction stays positive. Boumal, doi:10.1017/9781009166164. |
+| `projected_force_in_box`, `projected_force_descent`, `projected_force_sum_descent` | `src/lbfgs.rs` boxed model step | Each displacement interval contains 0. The projected force stays in the interval and is a descent direction. Byrd, Lu, Nocedal, and Zhu, doi:10.1137/0916069. |
+| `signed_qn_hasDerivAt` | `src/qn.rs` quasi-Newton family | The denominator `curvature + alpha * sign` is nonzero. The derivative of `-g / (curvature + alpha * sign)` is `g sign / (curvature + alpha * sign)^2`. Nocedal, doi:10.1090/s0025-5718-1980-0572855-7. |
 
 ## Where the Rust code establishes the preconditions
 

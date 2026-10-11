@@ -21,5 +21,5 @@ implementation and the two-call contract for initial and accepted points.
 
 The symbolic and floating checks run with =python3 validation/check_spd_retraction.py=,
 with SymPy and Sollya available.
-For Lean, run =lake env lean Rgmin/SpdRetraction.lean= from =proofs/lean=
+For Lean, run =lake env lean RgminContracts/SpdRetraction.lean= from =formal=
 with the dependencies in its manifest.

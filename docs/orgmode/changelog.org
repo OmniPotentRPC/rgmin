@@ -6,6 +6,12 @@
 
 ** Unreleased
 
+Lean proofs that lived under ~proofs/lean/~ are the one
+~RgminContracts~ package in ~formal/~. ~Rgmin.t~ is
+~RgminContracts.t~. SymPy scripts live in ~validation/~.
+~.github/workflows/verify.yml~ runs ~formal/check.sh~ and the
+validation scripts.
+
 Nonlinear CG, with or without a metric, opens its line search with
 Nocedal-Wright equation 3.60 instead of ~control.istep~ on every step.
 The descent fallback runs in both cases. ~Conjugacy::PolakRibierePlus~

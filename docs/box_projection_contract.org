@@ -27,7 +27,7 @@ bounded result against each equality, using an absolute row tolerance of =1e-7=.
 
 * Checks and scope
 
-=proofs/lean/Rgmin/BoxProjection.lean= states the scalar bounds, scalar
+=formal/RgminContracts/BoxProjection.lean= states the scalar bounds, scalar
 descent inequality, and its finite-dimensional sum.
 =validation/check_box_projection.py= checks the exact algebra and the
 retained two-coordinate history that needs a projected-force restart.

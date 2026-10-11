@@ -59,7 +59,7 @@ when that caller has a force field, and the identity otherwise.
 Narrative docs live in [`docs/orgmode/`](docs/orgmode/index.org)
 (Diataxis); the explanation quadrant derives the math behind each
 solver, and every derivation's exact algebra is pinned by the Lean
-(Mathlib) development under [`proofs/lean/`](proofs/lean/), indexed in
+(Mathlib) development under [`formal/`](formal/), indexed in
 [`docs/orgmode/reference/proofs.org`](docs/orgmode/reference/proofs.org).
 C ABI HTML is Doxygen plus
 [doxyYoda](https://github.com/HaoZeke/doxyYoda):

@@ -1,8 +1,10 @@
 import Mathlib
 
+/- Citation: Absil, Mahony, and Sepulchre, Optimization Algorithms on Matrix Manifolds, doi:10.1515/9781400830244. -/
+
 open scoped BigOperators
 
-namespace Rgmin
+namespace RgminContracts
 
 /-- The complex vectors (a+ib,c+id) and (-c+id,a-ib) are orthogonal. -/
 theorem unitary_complement_real (a b c d : ℝ) :
@@ -20,8 +22,8 @@ theorem unitary_complement_norm_pos (a b c d : ℝ)
 theorem positive_residual_exists {n : ℕ} (residual : Fin n → ℝ)
     (h : 0 < ∑ i, residual i) : ∃ i, 0 < residual i := by
   by_contra hnone
-  push_neg at hnone
+  push Not at hnone
   have hsum : (∑ i, residual i) ≤ 0 := Finset.sum_nonpos (fun i _ => hnone i)
   linarith
 
-end Rgmin
+end RgminContracts

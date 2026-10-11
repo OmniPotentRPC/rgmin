@@ -6,6 +6,7 @@ on:
       - main
       - "feat/**"
       - "ci/**"
+      - "verify/**"
   pull_request:
     branches: [main]
   workflow_dispatch:

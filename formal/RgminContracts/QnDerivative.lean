@@ -1,8 +1,10 @@
 import Mathlib
 
+/- Citation: Nocedal, Math. Comp. 35, 773 (1980), doi:10.1090/s0025-5718-1980-0572855-7. -/
+
 /-! The rational QN family away from its denominator floor. -/
 
-namespace Rgmin
+namespace RgminContracts
 
 /-- A flipped spectral mode changes the sign of the alpha derivative. -/
 theorem signed_qn_hasDerivAt (curvature gradient sign alpha : ℝ)
@@ -14,4 +16,4 @@ theorem signed_qn_hasDerivAt (curvature gradient sign alpha : ℝ)
   simpa only [zero_mul, zero_sub, neg_mul, neg_neg] using
     (hasDerivAt_const alpha (-gradient)).fun_div hd hne
 
-end Rgmin
+end RgminContracts
