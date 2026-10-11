@@ -10,6 +10,7 @@ with no environment variable. That check is the diagonal quadratic.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -26,12 +27,10 @@ PT7_EMT = "72081cdfbe07a773fbdf1c2218cb141ce0c51a35bfbf2741260c42d7406ad5dc"
 # rgmin Solver, pure-Python diagonal quadratic, no NumPy pin.
 RGMIN_QUADRATIC = "b5e8baa0803a9c0b1ed7de205a0dde882e042a6c299adab0dd042b6d408d7720"
 
-# Dispatch-target names. NPY_DISABLE_CPU_FEATURES ignores CPUID bit names
-# such as AVX512F, and it is read only when NumPy is first imported.
-_EMT_DISABLE = (
-    "X86_V3,X86_V4,AVX512_SKX,AVX512_CLX,AVX512_CNL,"
-    "AVX512_ICL,AVX512_SPR,AVX512_KNL,AVX512_KNM"
-)
+# NumPy 2.2 still dispatches AVX512F and AVX512_ICL by those names.
+# NumPy 2.5 dispatches X86_V3, X86_V4, and AVX512_ICL. A name that is
+# not in this build's dispatch list makes the import warn, so the pin
+# is the intersection, discovered before the golden process starts.
 _STEPS = 5
 _SCALES = (1.0, 4.0, 9.0, 16.0, 2.0, 3.0)
 _QUADRATIC_X0 = (0.4, -0.2, 0.7, 0.1, -0.3, 0.5)
@@ -55,6 +54,12 @@ print(trajectory_sha256("pt7"))
 _LJ38_ONCE = """
 from test_invariance import trajectory_sha256
 print(trajectory_sha256("lj38"))
+"""
+
+_DISPATCH_PROBE = """
+import json
+from numpy._core._multiarray_umath import __cpu_dispatch__
+print(json.dumps(list(__cpu_dispatch__)))
 """
 
 
@@ -155,28 +160,41 @@ def _diagonal(x: np.ndarray) -> tuple[float, np.ndarray]:
     return total, np.array(gradient, dtype=np.float64)
 
 
-def _child_env(pin_emt: bool, **extra: str) -> dict[str, str]:
+def _child_env(pin: str | None, **extra: str) -> dict[str, str]:
     env = os.environ.copy()
     root = os.path.dirname(__file__)
     env["PYTHONPATH"] = root + os.pathsep + env.get("PYTHONPATH", "")
-    if pin_emt:
-        env["NPY_DISABLE_CPU_FEATURES"] = _EMT_DISABLE
-    else:
-        env.pop("NPY_DISABLE_CPU_FEATURES", None)
+    env.pop("NPY_DISABLE_CPU_FEATURES", None)
+    env.pop("PYTHONWARNINGS", None)
+    if pin:
+        env["NPY_DISABLE_CPU_FEATURES"] = pin
     env.update(extra)
     return env
 
 
-def _run_child(code: str, *, pin_emt: bool, **extra: str) -> list[str]:
+def _run_child(code: str, *, pin: str | None, **extra: str) -> list[str]:
     completed = subprocess.run(
         [sys.executable, "-c", code],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
-        env=_child_env(pin_emt, **extra),
+        env=_child_env(pin, **extra),
         cwd=os.path.dirname(__file__),
     )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"child exited {completed.returncode}\n{completed.stdout}\n{completed.stderr}"
+        )
     return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+
+
+def _emt_pin() -> str | None:
+    """Dispatch names for the AVX-512 and X86_V3/V4 paths, if this build has them."""
+    names = json.loads(_run_child(_DISPATCH_PROBE, pin=None)[-1])
+    blocked = [name for name in names if _blocked(name)]
+    if not blocked:
+        return None
+    return ",".join(blocked)
 
 
 # Spawns a ThreadPoolExecutor. The marker keeps pytest-run-parallel from
@@ -196,7 +214,7 @@ def test_lj38_rayon_env_invariance() -> None:
     for threads in ("1", "2", "3", "8"):
         lines = _run_child(
             _LJ38_ONCE,
-            pin_emt=False,
+            pin=None,
             RAYON_NUM_THREADS=threads,
             OMP_NUM_THREADS=threads,
         )
@@ -208,16 +226,18 @@ def test_pt7_emt_golden_pins_numpy_not_rgmin() -> None:
 
     The variable is set on the child process, before NumPy is imported.
     A conftest assignment is too late once a plugin has imported NumPy.
-    The child asserts ``show_runtime`` and ``__cpu_features__``. This
+    Only names from this build's ``__cpu_dispatch__`` are listed, and
+    the child asserts ``show_runtime`` and ``__cpu_features__``. This
     pins ASE's EMT, which is NumPy-dispatched, and not rgmin.
     """
     pytest.importorskip("ase")
-    lines = _run_child(_PT7_THREADS, pin_emt=True)
+    pin = _emt_pin()
+    lines = _run_child(_PT7_THREADS, pin=pin)
     assert lines == [PT7_EMT, PT7_EMT, PT7_EMT]
     for threads in ("1", "2", "3", "8"):
         hashed = _run_child(
             _PT7_ONCE,
-            pin_emt=True,
+            pin=pin,
             RAYON_NUM_THREADS=threads,
             OMP_NUM_THREADS=threads,
         )
