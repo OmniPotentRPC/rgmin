@@ -1,0 +1,83 @@
+#+TITLE: Compare repeated runs
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Compare repeated runs
+
+~bench/gate~ reads the CSV written by ~bench/atomistic~ and decides
+whether a candidate used fewer force calls than a baseline on the same
+stationary point. The comparison sits beside Goswami, AIP Adv. (2025),
+doi:10.1063/5.0283639.
+
+Install and run it with the pixi environment ~gate~ (numpy 2.2.6, scipy
+1.15.3). Matplotlib is optional and is used only for ~--plot~.
+
+#+begin_src bash
+pixi run -e gate gate results.csv --pair lbfgs-exp=lbfgs-wolfe --pair fire-exp=fire --pair cg-exp=cg-wolfe
+#+end_src
+
+Exit 0 is a pass, 1 is a fail, 2 is undecided.
+
+** Contract
+
+A file with no version marker, or ~# rggate-csv 1~ (minor numbers
+allowed), is contract version 1. Any other major version is refused.
+
+Required columns:
+
+~system,method,seed,converged,iters,calls,energy,fmax,wall_s~
+
+Optional: ~pot_s~, ~overhead_us_per_iter~, ~endpoint~, ~reference~,
+~dim~, ~threads~. ~reference~ is an energy, or a path to an endpoint
+file. An endpoint file has optional ~energy~ and ~cell~ lines, then
+~x y z~. A zero cell is a free cluster.
+
+** Same stationary point
+
+A run succeeds only when it converged, its energy is within ~--e-tol~
+(default 1e-4 eV) of the per-system reference, and, when both
+geometries exist, the Kabsch RMSD after the minimum-image map is within
+~--rmsd-tol~ (default 0.05 Angstrom). The reference energy is the
+lowest converged energy on that system unless the row sets
+~reference~. A converged run outside that window is a different
+stationary point. An unconverged run is right-censored at its call
+count.
+
+** What the summary reports
+
+Per method: success rate, censored count, different-basin count, median
+and range of calls and wall time, and the Kaplan-Meier median with its
+Greenwood interval (Kaplan and Meier, JASA 53, 457, 1958,
+doi:10.1080/01621459.1958.10501452). Per system and method, the same
+counts, so a basin split is visible on its own row.
+
+Profiles: Dolan-Moré at tau 1 and 2 (Math. Program. 91, 201, 2002,
+doi:10.1007/s101070100263), Moré-Wild at alpha 100 and 1000 in
+force-call units, or ~alpha (n + 1)~ when ~dim~ is set (SIAM J. Optim.
+20, 172, 2009, doi:10.1137/080724083). Pairwise fractions when more
+than two methods are present (Gould and Scott, ACM TOMS 43, 2016,
+doi:10.1145/2950048).
+
+Each ~--pair candidate=baseline~ line is the BCa interval (Efron, JASA
+82, 171, 1987, doi:10.1080/01621459.1987.10478410) on the median and
+the geometric mean of ~calls_candidate / calls_baseline~, taken per
+~(system, seed)~ and including censored runs. The draw uses NumPy
+Philox with a fixed key.
+
+** Stopping
+
+Systems are shuffled with Philox and walked one at a time. The interval
+is the two-sided normal-mixture boundary of Howard, Ramdas, McAuliffe,
+and Sekhon, Ann. Stat. 49, 1055 (2021), doi:10.1214/20-AOS1991, with
+Hoeffding proxy ~V_t = t/4~ and mixing scale ~rho = 1~. It is not the
+betting boundary. The walk stops when the interval excludes
+~0.5 - --margin~. The summary prints ~systems_used~. The time-uniform
+guarantee is the sequential test of Wald, Ann. Math. Stat. 16, 117
+(1945), doi:10.1214/aoms/1177731118.
+
+~--jobs~ only splits the per-method Kaplan-Meier curves, then joins
+them in method-name order. The bootstrap stays serial, and the summary
+text is the same for ~--jobs 1~, ~2~, and ~N~.
+
+When the CSV carries ~threads~, rows that share ~(system, method, seed)~
+at different worker counts must agree. A mismatch fails the run.

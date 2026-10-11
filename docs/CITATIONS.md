@@ -52,6 +52,12 @@ ISBN). Do not invent DOIs.
 | Moré–Wild data profiles | 10.1137/080724083 | Benchmarking Derivative-Free Optimization Algorithms |
 | Wilcoxon signed-rank | 10.2307/3001968 | Individual Comparisons by Ranking Methods |
 | Efron bootstrap 1979 | 10.1214/aos/1176344552 | Bootstrap Methods: Another Look at the Jackknife |
+| Goswami saddle metrics 2025 | 10.1063/5.0283639 | Bayesian hierarchical models for quantitative estimates for performance metrics applied to saddle search algorithms |
+| Gould–Scott pairwise profiles | 10.1145/2950048 | A Note on Performance Profiles for Benchmarking Software |
+| Kaplan–Meier 1958 | 10.1080/01621459.1958.10501452 | Nonparametric Estimation from Incomplete Observations |
+| Efron BCa 1987 | 10.1080/01621459.1987.10478410 | Better Bootstrap Confidence Intervals |
+| Howard confidence sequences 2021 | 10.1214/20-AOS1991 | Time-uniform, nonparametric, nonasymptotic confidence sequences |
+| Wald sequential tests 1945 | 10.1214/aoms/1177731118 | Sequential Tests of Statistical Hypotheses |
 
 Polak-Ribiere 1969 and Hestenes-Stiefel 1952: cite the paper/book
 title in rustdoc if no DOI is on this list. Do not mint a DOI.

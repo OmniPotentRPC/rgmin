@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `rggate` (`bench/gate/`, pixi task `gate`) reads contract version 1
+  of the atomistic CSV. A run is a success only when it converged to
+  the reference stationary point. Unconverged runs and other basins are
+  right-censored. The summary reports Kaplan-Meier medians, performance,
+  data, and pairwise profiles, a BCa interval on the paired call ratio,
+  and a normal-mixture confidence sequence. Exit 0 passes, 1 fails, and
+  2 is undecided. Goswami, AIP Adv. (2025),
+  https://doi.org/10.1063/5.0283639. Dolan and Moré, Math. Program. 91,
+  201 (2002), https://doi.org/10.1007/s101070100263. Moré and Wild,
+  SIAM J. Optim. 20, 172 (2009), https://doi.org/10.1137/080724083.
+  Gould and Scott, ACM TOMS 43 (2016),
+  https://doi.org/10.1145/2950048. Kaplan and Meier, JASA 53, 457
+  (1958), https://doi.org/10.1080/01621459.1958.10501452. Efron, JASA
+  82, 171 (1987), https://doi.org/10.1080/01621459.1987.10478410.
+  Howard, Ramdas, McAuliffe, and Sekhon, Ann. Stat. 49, 1055 (2021),
+  https://doi.org/10.1214/20-AOS1991. Wald, Ann. Math. Stat. 16, 117
+  (1945), https://doi.org/10.1214/aoms/1177731118.
 - `bench_gate` compares repeated solver runs. A run is solved when the
   decrease meets the Moré and Wild test. Performance profiles and data
   profiles summarize solved runs. The paired gate reports fewer force

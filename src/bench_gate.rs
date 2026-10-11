@@ -21,6 +21,10 @@
 //! solved. The atomistic bench CSV
 //! (`system,method,seed,converged,iters,calls,...`) is the row format
 //! [`parse_bench_csv`] reads.
+//!
+//! Right-censored calls, the BCa interval, and the confidence sequence
+//! are the Python package `rggate` under `bench/gate/`. This module
+//! keeps the Wilcoxon comparison.
 
 use thiserror::Error;
 

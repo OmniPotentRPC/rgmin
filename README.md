@@ -45,6 +45,8 @@ is `Solver::set_fire_variant(FireVariant::Guenole2020)`.
 `bench/atomistic` counts force calls on rgpot potentials.
 `bench_gate` compares those repeated runs: the Moré-Wild solve test,
 performance and data profiles, and a paired call-count gate.
+`bench/gate` (`python -m rggate`, pixi task `gate`) is the censored CSV
+gate: same stationary point, Kaplan-Meier, BCa, and a confidence sequence.
 `validation/` holds the sympy checks behind the interpolation, the
 two-loop map and FIRE 2.0 (`uv run --with sympy python validation/<file>.py`).
 Methods: NLCG, BFGS, L-BFGS, SR1, SR2, Newton, RFO, Adam, steepest
