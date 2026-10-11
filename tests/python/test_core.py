@@ -162,7 +162,9 @@ def test_free_threaded_import_disables_the_gil() -> None:
     if not hasattr(sys, "_is_gil_enabled") or sys._is_gil_enabled():
         pytest.skip("this interpreter holds the GIL")
     code = (
-        "import sys, rgmin, rgmin.ase\n"
+        "import importlib.util, sys, rgmin\n"
+        "if importlib.util.find_spec('ase') is not None:\n"
+        "    import rgmin.ase\n"
         "assert sys._is_gil_enabled() is False\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
