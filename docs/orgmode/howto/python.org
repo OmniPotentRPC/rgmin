@@ -1,0 +1,37 @@
+#+TITLE: Call rgmin from Python
+#+OPTIONS: toc:nil num:nil author:nil title:nil
+
+* Build
+
+The wheel is built with scikit-build-core. CMake fetches Corrosion
+0.6.1 and compiles the =capi= static library. A C++17 compiler, CMake,
+Ninja, and Rust are required.
+
+=python -m pip install 'rgmin[ase,test]'= adds ASE and the test extras.
+
+* Options
+
+=SolverConfig= checks every keyword once. An unknown name raises
+=ValueError= and lists the names that are accepted. =memory=,
+=maxiter=, =linesearch_maxiter=, and =extra_updates= have to be Python
+integers. Other numeric options have to be finite.
+
+* ASE
+
+=rgmin.ase.FIRE=, =LBFGS=, =CG=, and the other method classes are ASE
+optimizers. Each =step= is one rgmin iteration. =maxstep= is the
+per-atom cap in angstroms.
+
+#+begin_src python
+from ase.calculators.emt import EMT
+from rgmin.ase import FIRE
+
+atoms.calc = EMT()
+FIRE(atoms, logfile=None).run(fmax=0.05)
+#+end_src
+
+Newton, RFO, and dogleg need =hessian(x)=, a callable that returns the
+=(n, n)= matrix. A band or a min-mode run accepts the step rather than
+the energy. Pass =accept== to choose the rule yourself.
+
+=restart= is refused. =read= and =dump= raise =NotImplementedError=.

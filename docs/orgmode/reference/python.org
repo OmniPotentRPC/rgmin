@@ -1,0 +1,30 @@
+#+TITLE: Python reference
+#+OPTIONS: toc:nil num:nil author:nil title:nil
+
+* Module =rgmin=
+
+=Method= is an =enum.IntEnum= of the C method ids.
+=Stop= is why a step ended.
+=Report= has =value=, =steps=, =grad_norm=, and =stop=.
+=NumericalError= is an =ArithmeticError=.
+=SolverConfig(method="lbfgs", **options)= validates options.
+=Solver(n, config)= is the session. =step(f_and_grad, x)= takes one
+iteration. =step_hess(f_and_grad, hessian, x)= is the same for Newton,
+RFO, and dogleg.
+=minimize(f_and_grad, x0, method="lbfgs", **options)= returns
+=(report, x)=. =x0= must already be a contiguous float64 vector.
+
+=__version__= is the version string of the extension.
+
+* Module =rgmin.ase=
+
+=Optimizer= subclasses =ase.optimize.optimize.Optimizer=.
+Named classes: =LBFGS=, =FIRE=, =FIRE2=, =QuickMin=, =BFGS=, =SD=,
+=Adam=, =Newton=, =RFO=, =SR1=, =SR2=, =BB=, =Dogleg=, =DIIS=, =PSO=,
+=FletcherReeves=, =HestenesStiefel=, =DaiYuan=, =ConjugateDescent=,
+=HagerZhang=, =LiuStorey=, =FrPr=, and =CG=.
+=CG= defaults to Polak-Ribiere. The C ABI has no separate
+Polak-Ribiere+ value.
+
+=run= returns a Python =bool=. =True= means the force criterion was
+met.
