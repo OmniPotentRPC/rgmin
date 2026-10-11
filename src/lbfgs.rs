@@ -991,9 +991,11 @@ mod neb_guard_tests {
     fn invalid_empty_memory_scales_select_a_finite_force_step() {
         let gradient = array![-1.0, 2.0, 0.0];
         for scale in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let mut solver = Lbfgs::default();
-            solver.angle_reset = true;
-            solver.inverse_curvature = scale;
+            let mut solver = Lbfgs {
+                angle_reset: true,
+                inverse_curvature: scale,
+                ..Lbfgs::default()
+            };
             let direction = solver.guarded_direction(gradient.view(), Some(1.0));
             assert_eq!(direction, -&gradient);
             assert!(direction.dot(&gradient) < 0.0);

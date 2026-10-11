@@ -826,7 +826,7 @@ impl Solver {
             for k in 0..x.len() {
                 let lo = bounds.low[k];
                 let hi = bounds.high[k];
-                if !x[k].is_finite() || !grad[k].is_finite() || !(lo <= x[k] && x[k] <= hi) {
+                if !(x[k].is_finite() && grad[k].is_finite() && lo <= x[k] && x[k] <= hi) {
                     return f64::INFINITY;
                 }
                 // Distance clipping retains gradients smaller than an ulp of x.

@@ -34,12 +34,23 @@ impl<'a, O: DifferentiableObjective<f64> + ?Sized> BoxObjective<'a, O> {
         for k in 0..dim {
             let requested_low = side_at(lo.as_deref(), k).unwrap_or(f64::NEG_INFINITY);
             let requested_high = side_at(hi.as_deref(), k).unwrap_or(f64::INFINITY);
-            if !(requested_low <= requested_high) || !(low[k] <= high[k]) {
+            if !matches!(
+                requested_low.partial_cmp(&requested_high),
+                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+            ) || !matches!(
+                low[k].partial_cmp(&high[k]),
+                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+            ) {
                 return Err(Error::Highs("invalid coordinate box".into()));
             }
             low[k] = low[k].max(requested_low);
             high[k] = high[k].min(requested_high);
-            if !(low[k] <= high[k]) || low[k] == f64::INFINITY || high[k] == f64::NEG_INFINITY {
+            if !matches!(
+                low[k].partial_cmp(&high[k]),
+                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+            ) || low[k] == f64::INFINITY
+                || high[k] == f64::NEG_INFINITY
+            {
                 return Err(Error::Highs("invalid coordinate box".into()));
             }
         }

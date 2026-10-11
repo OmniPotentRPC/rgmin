@@ -47,8 +47,6 @@ fn interiorize(x: &Array1<f64>) -> Array1<f64> {
     let n = nrm2(x.view());
     if n < 1.0 {
         x.clone()
-    } else if n <= 1e-16 {
-        x.clone()
     } else {
         x * ((1.0 - 1e-12) / n)
     }

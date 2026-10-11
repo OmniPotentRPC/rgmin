@@ -15,7 +15,7 @@ use rgmin::ffi::{
     rgmin_tensor_free,
 };
 use rgmin::ffi::{
-    rgmin_conjugacy_t, rgmin_curv_fn, rgmin_eigen_kind_t, rgmin_eigen_params_t, rgmin_last_error,
+    rgmin_conjugacy_t, rgmin_eigen_kind_t, rgmin_eigen_params_t, rgmin_last_error,
     rgmin_lowest_eigenpair, rgmin_lowest_mode_t, rgmin_minimize_scg, rgmin_scg_params_t,
 };
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};

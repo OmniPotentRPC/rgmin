@@ -3038,6 +3038,10 @@ pub unsafe extern "C" fn rgmin_solver_step_fg(
 /// objective afresh at the current `x` (initial step scale, empty
 /// acceptance window) and the retained curvature preconditions it. The
 /// restart for a sequence of related objectives.
+///
+/// # Safety
+///
+/// `solver` is null or a live session from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_rebase(solver: *mut rgmin_solver_t) {
     if solver.is_null() {
@@ -3084,6 +3088,11 @@ pub unsafe extern "C" fn rgmin_solver_set_lbfgs_neb_guards(
 }
 
 /// Record `s`, `y` from the caller's previous outer. No evaluation.
+///
+/// # Safety
+///
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+/// `s` and `y` are null or each addresses `n` `f64` values.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_push_pair(
     solver: *mut rgmin_solver_t,
@@ -3123,6 +3132,11 @@ pub unsafe extern "C" fn rgmin_solver_pair_count(solver: *const rgmin_solver_t) 
 }
 
 /// Two-loop `d = -H g`. No evaluation and no push.
+///
+/// # Safety
+///
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+/// `grad` and `dir` are null or each addresses `n` `f64` values.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_search_direction(
     solver: *mut rgmin_solver_t,

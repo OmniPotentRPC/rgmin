@@ -193,8 +193,8 @@ mod capi {
         unsafe {
             (&mut *user.cast::<Calls>()).grad += 1;
             let dest = (*out).dl_tensor.data.cast::<f64>();
-            for i in 0..2 {
-                *dest.add(i) = x[i] - 100.0;
+            for (i, value) in x.iter().enumerate() {
+                *dest.add(i) = value - 100.0;
             }
         }
         rgmin_status_t::RGMIN_SUCCESS
