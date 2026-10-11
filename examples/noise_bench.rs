@@ -1,20 +1,28 @@
-//! Noise-floor stop against a fixed force tolerance on two Lennard-Jones
-//! clusters.
+//! Gate the noise-floor stop on LJ38 and on Lennard-Jones at the eOn
+//! platinum-heptamer coordinates.
 //!
-//! rgpot is not linked in this build, so the eOn platinum heptamer is
-//! evaluated as Lennard-Jones on the published coordinates. The first
-//! seven atoms move. The rest stay fixed. LJ38 is an FCC fragment with
-//! σ = 1 Å and ε = 1 eV. Force noise is either f32 rounding or a
-//! Gaussian of standard deviation 1e-4 or 1e-3 eV/Å, keyed by the
-//! position so a repeated point returns the same force.
+//! rgpot is not linked. The second system is `lj-pt7-geom`: Lennard-Jones
+//! on those coordinates, 7 free atoms, the rest fixed. It is not a Pt
+//! heptamer. LJ38 is an FCC fragment with σ = 1 Å and ε = 1 eV. The
+//! heptamer geometry uses ε = 0.2 eV and σ = 2.45 Å so the pair minimum
+//! sits near the contact distance.
 //!
-//! Each seed runs every system and stop before the next seed. The
-//! baseline is the historical `gtol` stop with the floor left off.
-//! `floor` stops at `3 * eps_g`. `tight` asks for an fmax below that
-//! floor. A budget hit is `converged=0` and is kept.
+//! Noise is Gaussian force noise at 1e-4, 3e-4, 1e-3, 3e-3, and 1e-2 eV/Å,
+//! plus f32-rounded forces. A repeated point returns the same force.
+//! Variants are interleaved inside each seed: `floor` (eps_g measured
+//! once at the start, c = 3), `floor-declared` (`NoiseFloor::new` with
+//! the true component σ; for f32 that σ is the RMS gap between the f32
+//! and f64 forces at the start), `tight` (`gtol = 0.1 * sqrt(n) * σ`,
+//! below the floor), and `baseline` (main's stop, `gtol = 0.01`).
 //!
-//! With `--features par` the second table times the sampling phase at
-//! 1, 2, 4, and 8 threads. The work is the force evaluator.
+//! Thirty seeds, 2000 iterations. A budget hit stays in the table with
+//! `converged=0`. `abs_de` is `|E − E_ref|` against the noise-free
+//! minimum from the same start. `rmsd` is Kabsch-aligned for LJ38. For
+//! `lj-pt7-geom` the fixed atoms are the frame, so the RMSD is the free
+//! atoms in that frame.
+//!
+//! With `--features par` the second table times sampling at 1, 2, 4,
+//! and 8 threads.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -22,19 +30,27 @@ use std::time::Instant;
 use eindir_core::{DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rgmin::{
-    Control, LineSearch, Method, NoiseFlag, Status, minimize_method, next_spacing,
+    Control, LineSearch, Method, NoiseFlag, NoiseFloor, Status, minimize_method, next_spacing,
     sample_gradient_noise,
 };
 
-const SEEDS: u64 = 5;
+const SEEDS: u64 = 30;
+const SCALE_REPEATS: usize = 5;
 const BASE_GTOL: f64 = 0.01;
-const FLOOR_C: f64 = 3.0;
-const MAXITER: usize = 60;
+const MAXITER: usize = 2000;
 
 #[derive(Clone, Copy)]
 enum ForceNoise {
     F32,
     Gaussian(f64),
+}
+
+#[derive(Clone, Copy)]
+enum Variant {
+    Floor,
+    FloorDeclared,
+    Tight,
+    Baseline,
 }
 
 struct Cluster {
@@ -201,7 +217,7 @@ fn position_key(x: ArrayView1<f64>) -> u64 {
 fn normal(seed: u64, key: u64, index: u64) -> f64 {
     let u1 = uniform(seed ^ key, 2 * index);
     let u2 = uniform(seed ^ key, 2 * index + 1);
-    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+    (-2.0 * libm::log(u1)).sqrt() * libm::cos(std::f64::consts::TAU * u2)
 }
 
 fn uniform(seed: u64, index: u64) -> f64 {
@@ -253,7 +269,7 @@ fn lj38_start() -> Array1<f64> {
     x
 }
 
-fn pt_heptamer() -> (Array1<f64>, Array1<f64>) {
+fn pt_geometry() -> (Array1<f64>, Array1<f64>) {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/bench/atomistic/data/pt_heptamer.con"
@@ -281,25 +297,13 @@ fn pt_heptamer() -> (Array1<f64>, Array1<f64>) {
             _ => {}
         }
     }
-    assert_eq!(free.len(), 21, "expected 7 free Pt atoms");
-    assert_eq!(fixed.len(), 336 * 3, "expected 336 fixed Pt atoms");
+    assert_eq!(free.len(), 21, "expected 7 free atoms");
+    assert_eq!(fixed.len(), 336 * 3, "expected 336 fixed atoms");
     (Array1::from_vec(free), Array1::from_vec(fixed))
 }
 
 fn fmax(g: &Array1<f64>) -> f64 {
     g.iter().map(|v| v.abs()).fold(0.0, f64::max)
-}
-
-fn rmsd(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
-    let n = a.len() / 3;
-    let mut acc = 0.0;
-    for i in 0..n {
-        let dx = a[3 * i] - b[3 * i];
-        let dy = a[3 * i + 1] - b[3 * i + 1];
-        let dz = a[3 * i + 2] - b[3 * i + 2];
-        acc += dx * dx + dy * dy + dz * dz;
-    }
-    (acc / n as f64).sqrt()
 }
 
 fn linesearch() -> LineSearch {
@@ -310,15 +314,14 @@ fn linesearch() -> LineSearch {
     }
 }
 
-fn relax(cluster: &Cluster, x: Array1<f64>, gtol: f64) -> (Array1<f64>, f64) {
+fn relax(cluster: &Cluster, x: Array1<f64>) -> (Array1<f64>, f64) {
     let control = Control {
-        maxiter: 200,
-        gtol,
+        maxiter: 500,
+        gtol: 1e-8,
         istep: 1.0,
         maxmove: None,
         ftol_rel: None,
-        noise_eps: None,
-        noise_c: FLOOR_C,
+        noise_floor: None,
     };
     let report = minimize_method(
         cluster,
@@ -331,7 +334,7 @@ fn relax(cluster: &Cluster, x: Array1<f64>, gtol: f64) -> (Array1<f64>, f64) {
     (report.coords, report.value)
 }
 
-fn estimate_eps(cluster: &Cluster, x: ArrayView1<f64>) -> f64 {
+fn measure_eps(cluster: &Cluster, x: ArrayView1<f64>) -> f64 {
     let dir = Array1::ones(x.len());
     let mut h = 1e-4;
     for _ in 0..6 {
@@ -346,16 +349,39 @@ fn estimate_eps(cluster: &Cluster, x: ArrayView1<f64>) -> f64 {
             _ => break,
         }
     }
+    component_sigma(cluster, x)
+}
+
+fn component_sigma(cluster: &Cluster, x: ArrayView1<f64>) -> f64 {
     match cluster.noise {
         ForceNoise::Gaussian(sigma) if sigma > 0.0 => sigma,
-        ForceNoise::F32 => (f32::EPSILON as f64) * cluster.epsilon / cluster.sigma,
+        ForceNoise::F32 => f32_sigma(cluster, x),
         ForceNoise::Gaussian(_) => 1e-16,
     }
 }
 
+fn f32_sigma(cluster: &Cluster, x: ArrayView1<f64>) -> f64 {
+    let wide = cluster.with_noise(ForceNoise::Gaussian(0.0), 0);
+    let narrow = cluster.with_noise(ForceNoise::F32, 0);
+    let g64 = wide.grad(x);
+    let g32 = narrow.grad(x);
+    let mean_sq = g64
+        .iter()
+        .zip(g32.iter())
+        .map(|(a, b)| {
+            let d = a - b;
+            d * d
+        })
+        .sum::<f64>()
+        / g64.len().max(1) as f64;
+    mean_sq.sqrt()
+}
+
 struct Row {
     system: &'static str,
-    method: &'static str,
+    method: String,
+    noise: &'static str,
+    variant: &'static str,
     seed: u64,
     converged: u8,
     iters: usize,
@@ -364,24 +390,49 @@ struct Row {
     fmax: f64,
     wall_s: f64,
     endpoint: &'static str,
+    abs_de: f64,
+    rmsd: f64,
 }
 
-fn run_case(
+struct Case<'a> {
     system: &'static str,
-    method: &'static str,
+    noise_name: &'static str,
     seed: u64,
-    template: &Cluster,
-    start: &Array1<f64>,
-    reference: &Array1<f64>,
+    template: &'a Cluster,
+    start: &'a Array1<f64>,
+    reference: &'a Array1<f64>,
     ref_energy: f64,
     noise: ForceNoise,
-    stop: Stop,
-) -> Row {
+    variant: Variant,
+    aligned: bool,
+    declared: f64,
+}
+
+fn run_case(case: Case<'_>) -> Row {
+    let Case {
+        system,
+        noise_name,
+        seed,
+        template,
+        start,
+        reference,
+        ref_energy,
+        noise,
+        variant,
+        aligned,
+        declared,
+    } = case;
     let obj = template.with_noise(noise, seed);
-    let eps = if matches!(stop, Stop::Baseline) {
-        0.0
+    let n = start.len();
+    let sigma = if declared > 0.0 {
+        declared
     } else {
-        estimate_eps(&obj, start.view())
+        component_sigma(&obj, start.view())
+    };
+    let measured = if matches!(variant, Variant::Floor) {
+        measure_eps(&obj, start.view())
+    } else {
+        0.0
     };
     obj.calls.store(0, Ordering::SeqCst);
     let mut control = Control {
@@ -390,19 +441,25 @@ fn run_case(
         istep: 1.0,
         maxmove: None,
         ftol_rel: None,
-        noise_eps: None,
-        noise_c: FLOOR_C,
+        noise_floor: None,
     };
-    match stop {
-        Stop::Baseline => {}
-        Stop::Floor => {
+    let variant_name = match variant {
+        Variant::Baseline => "baseline",
+        Variant::Floor => {
             control.gtol = 1e-14;
-            control.noise_eps = Some(eps);
+            control.noise_floor = Some(NoiseFloor::new(measured));
+            "floor"
         }
-        Stop::Tight => {
-            control.gtol = (FLOOR_C * eps / 10.0).max(1e-14);
+        Variant::FloorDeclared => {
+            control.gtol = 1e-14;
+            control.noise_floor = Some(NoiseFloor::new(sigma));
+            "floor-declared"
         }
-    }
+        Variant::Tight => {
+            control.gtol = (0.1 * (n as f64).sqrt() * sigma).max(1e-14);
+            "tight"
+        }
+    };
     let t0 = Instant::now();
     let report = minimize_method(
         &obj,
@@ -419,20 +476,34 @@ fn run_case(
     };
     let g = obj.grad(coords.view());
     let fm = fmax(&g);
-    let same = (energy - ref_energy).abs() <= 1e-4 && rmsd(coords.view(), reference.view()) < 0.05;
     let converged = match status {
-        Status::Tolerance | Status::NoiseFloor if same => 1,
+        Status::Tolerance | Status::NoiseFloor | Status::StepTolerance => 1,
+        Status::Budget | Status::Iterating => 0,
         _ => 0,
     };
     let endpoint = match status {
         Status::Tolerance => "Tolerance",
         Status::NoiseFloor => "NoiseFloor",
+        Status::StepTolerance => "StepTolerance",
         Status::Budget => "Budget",
         Status::Iterating => "Iterating",
+        _ => "Other",
+    };
+    let dev = if energy.is_finite() {
+        (energy - ref_energy).abs()
+    } else {
+        f64::NAN
+    };
+    let rms = if aligned {
+        kabsch_rmsd(reference.as_slice().unwrap(), coords.as_slice().unwrap())
+    } else {
+        frame_rmsd(reference.view(), coords.view())
     };
     Row {
         system,
-        method,
+        method: format!("{noise_name}-{variant_name}"),
+        noise: noise_name,
+        variant: variant_name,
         seed,
         converged,
         iters,
@@ -441,109 +512,135 @@ fn run_case(
         fmax: fm,
         wall_s,
         endpoint,
+        abs_de: dev,
+        rmsd: rms,
     }
 }
 
-#[derive(Clone, Copy)]
-enum Stop {
-    Baseline,
-    Floor,
-    Tight,
+fn frame_rmsd(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+    let n = a.len() / 3;
+    let mut acc = 0.0;
+    for i in 0..n {
+        let dx = a[3 * i] - b[3 * i];
+        let dy = a[3 * i + 1] - b[3 * i + 1];
+        let dz = a[3 * i + 2] - b[3 * i + 2];
+        acc += dx * dx + dy * dy + dz * dz;
+    }
+    (acc / n.max(1) as f64).sqrt()
 }
 
-fn median_range(values: &mut [f64]) -> (f64, f64, f64) {
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let mid = values[values.len() / 2];
-    (mid, values[0], *values.last().unwrap())
-}
-
-fn main() {
-    let lj = Cluster::clean(lj38_start(), Array1::zeros(0), 1.0, 1.0);
-    let (free, fixed) = pt_heptamer();
-    let pt = Cluster::clean(free.clone(), fixed, 0.2, 2.45);
-    let (lj_ref, lj_e) = relax(&lj, lj38_start(), 1e-8);
-    let (pt_ref, pt_e) = relax(&pt, free, 1e-8);
-    let lj_start = kick(&lj_ref, 0.12);
-    let pt_start = kick(&pt_ref, 0.12);
-
-    let noises = [
-        ("f32", ForceNoise::F32),
-        ("g1e-4", ForceNoise::Gaussian(1e-4)),
-        ("g1e-3", ForceNoise::Gaussian(1e-3)),
-    ];
-    let stops = [
-        ("baseline", Stop::Baseline),
-        ("floor", Stop::Floor),
-        ("tight", Stop::Tight),
-    ];
-
-    println!("system,method,seed,converged,iters,calls,energy,fmax,wall_s,endpoint");
-    let mut rows = Vec::new();
-    for seed in 0..SEEDS {
-        for (system, template, start, reference, ref_e) in [
-            ("lj38", &lj, &lj_start, &lj_ref, lj_e),
-            ("pt7", &pt, &pt_start, &pt_ref, pt_e),
-        ] {
-            for (nname, noise) in noises {
-                for (sname, stop) in stops {
-                    let method = match (nname, sname) {
-                        ("f32", "baseline") => "f32-baseline",
-                        ("f32", "floor") => "f32-floor",
-                        ("f32", "tight") => "f32-tight",
-                        ("g1e-4", "baseline") => "g1e-4-baseline",
-                        ("g1e-4", "floor") => "g1e-4-floor",
-                        ("g1e-4", "tight") => "g1e-4-tight",
-                        ("g1e-3", "baseline") => "g1e-3-baseline",
-                        ("g1e-3", "floor") => "g1e-3-floor",
-                        ("g1e-3", "tight") => "g1e-3-tight",
-                        _ => unreachable!(),
-                    };
-                    let row = run_case(
-                        system, method, seed, template, start, reference, ref_e, noise, stop,
-                    );
-                    println!(
-                        "{system},{method},{},{},{},{},{:.8},{:.6e},{:.6},{endpoint}",
-                        row.seed,
-                        row.converged,
-                        row.iters,
-                        row.calls,
-                        row.energy,
-                        row.fmax,
-                        row.wall_s,
-                        endpoint = row.endpoint
-                    );
-                    rows.push(row);
-                }
+#[allow(clippy::needless_range_loop)]
+fn kabsch_rmsd(reference: &[f64], candidate: &[f64]) -> f64 {
+    let n = reference.len() / 3;
+    let mut cr = [0.0; 3];
+    let mut cc = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            cr[k] += reference[3 * i + k];
+            cc[k] += candidate[3 * i + k];
+        }
+    }
+    let scale = n.max(1) as f64;
+    for k in 0..3 {
+        cr[k] /= scale;
+        cc[k] /= scale;
+    }
+    let mut cov = [[0.0; 3]; 3];
+    for i in 0..n {
+        let p = [
+            reference[3 * i] - cr[0],
+            reference[3 * i + 1] - cr[1],
+            reference[3 * i + 2] - cr[2],
+        ];
+        let q = [
+            candidate[3 * i] - cc[0],
+            candidate[3 * i + 1] - cc[1],
+            candidate[3 * i + 2] - cc[2],
+        ];
+        for a in 0..3 {
+            for b in 0..3 {
+                cov[a][b] += q[a] * p[b];
             }
         }
     }
-
-    eprintln!("# median wall_s and range over {SEEDS} seeds");
-    let mut keys: Vec<(&str, &str)> = rows.iter().map(|r| (r.system, r.method)).collect();
-    keys.sort();
-    keys.dedup();
-    for (system, method) in keys {
-        let mut walls: Vec<f64> = rows
-            .iter()
-            .filter(|r| r.system == system && r.method == method)
-            .map(|r| r.wall_s)
-            .collect();
-        let calls: Vec<u64> = rows
-            .iter()
-            .filter(|r| r.system == system && r.method == method)
-            .map(|r| r.calls)
-            .collect();
-        let hits = rows
-            .iter()
-            .filter(|r| r.system == system && r.method == method && r.converged == 1)
-            .count();
-        let (med, lo, hi) = median_range(&mut walls);
-        eprintln!(
-            "# {system} {method}: median {med:.4}s range {lo:.4}..{hi:.4}s calls {calls:?} converged {hits}/{SEEDS}"
-        );
+    let quat = largest_quaternion(&cov);
+    let rot = quaternion_matrix(quat);
+    let mut acc = 0.0;
+    for i in 0..n {
+        let p = [
+            reference[3 * i] - cr[0],
+            reference[3 * i + 1] - cr[1],
+            reference[3 * i + 2] - cr[2],
+        ];
+        let q = [
+            candidate[3 * i] - cc[0],
+            candidate[3 * i + 1] - cc[1],
+            candidate[3 * i + 2] - cc[2],
+        ];
+        for r in 0..3 {
+            let mapped = rot[r][0] * q[0] + rot[r][1] * q[1] + rot[r][2] * q[2];
+            let d = mapped - p[r];
+            acc += d * d;
+        }
     }
+    (acc / scale).sqrt()
+}
 
-    scaling(&pt);
+#[allow(clippy::needless_range_loop)]
+fn largest_quaternion(cov: &[[f64; 3]; 3]) -> [f64; 4] {
+    let (h00, h01, h02) = (cov[0][0], cov[0][1], cov[0][2]);
+    let (h10, h11, h12) = (cov[1][0], cov[1][1], cov[1][2]);
+    let (h20, h21, h22) = (cov[2][0], cov[2][1], cov[2][2]);
+    let m = [
+        [h00 + h11 + h22, h12 - h21, h20 - h02, h01 - h10],
+        [h12 - h21, h00 - h11 - h22, h01 + h10, h20 + h02],
+        [h20 - h02, h01 + h10, -h00 + h11 - h22, h12 + h21],
+        [h01 - h10, h20 + h02, h12 + h21, -h00 - h11 + h22],
+    ];
+    let mut v = [1.0, 0.1, 0.2, 0.3];
+    for _ in 0..48 {
+        let mut w = [0.0; 4];
+        for i in 0..4 {
+            for j in 0..4 {
+                w[i] += m[i][j] * v[j];
+            }
+        }
+        let nrm = w.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if nrm == 0.0 {
+            return [1.0, 0.0, 0.0, 0.0];
+        }
+        for i in 0..4 {
+            v[i] = w[i] / nrm;
+        }
+    }
+    v
+}
+
+fn quaternion_matrix(q: [f64; 4]) -> [[f64; 3]; 3] {
+    let (w, x, y, z) = (q[0], q[1], q[2], q[3]);
+    [
+        [
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y - w * z),
+            2.0 * (x * z + w * y),
+        ],
+        [
+            2.0 * (x * y + w * z),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z - w * x),
+        ],
+        [
+            2.0 * (x * z - w * y),
+            2.0 * (y * z + w * x),
+            1.0 - 2.0 * (x * x + y * y),
+        ],
+    ]
+}
+
+fn median_range(values: &mut [f64]) -> (f64, f64, f64) {
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = values[values.len() / 2];
+    (mid, values[0], *values.last().unwrap())
 }
 
 fn kick(x: &Array1<f64>, delta: f64) -> Array1<f64> {
@@ -552,19 +649,145 @@ fn kick(x: &Array1<f64>, delta: f64) -> Array1<f64> {
     y
 }
 
-fn scaling(pt: &Cluster) {
+fn check_kabsch() {
+    let mut spun = lj38_start();
+    for i in 0..spun.len() / 3 {
+        let x = spun[3 * i];
+        let y = spun[3 * i + 1];
+        spun[3 * i] = -y;
+        spun[3 * i + 1] = x;
+    }
+    let err = kabsch_rmsd(lj38_start().as_slice().unwrap(), spun.as_slice().unwrap());
+    assert!(err < 1e-8, "Kabsch residual {err}");
+}
+
+fn main() {
+    check_kabsch();
+    let lj = Cluster::clean(lj38_start(), Array1::zeros(0), 1.0, 1.0);
+    let (free, fixed) = pt_geometry();
+    let geom = Cluster::clean(free.clone(), fixed, 0.2, 2.45);
+    let lj_start = kick(&lj38_start(), 0.12);
+    let geom_start = kick(&free, 0.12);
+    let (lj_ref, lj_e) = relax(&lj, lj_start.clone());
+    let (geom_ref, geom_e) = relax(&geom, geom_start.clone());
+    let lj_f32 = f32_sigma(&lj, lj_start.view());
+    let geom_f32 = f32_sigma(&geom, geom_start.view());
+
+    let noises = [
+        ("f32", ForceNoise::F32),
+        ("1e-4", ForceNoise::Gaussian(1e-4)),
+        ("3e-4", ForceNoise::Gaussian(3e-4)),
+        ("1e-3", ForceNoise::Gaussian(1e-3)),
+        ("3e-3", ForceNoise::Gaussian(3e-3)),
+        ("1e-2", ForceNoise::Gaussian(1e-2)),
+    ];
+    let variants = [
+        Variant::Floor,
+        Variant::FloorDeclared,
+        Variant::Tight,
+        Variant::Baseline,
+    ];
+
+    println!(
+        "system,method,seed,converged,iters,calls,energy,fmax,wall_s,endpoint,abs_de,rmsd,reference"
+    );
+    let mut rows = Vec::new();
+    for seed in 0..SEEDS {
+        for (system, template, start, reference, ref_e, aligned, f32_sig) in [
+            ("lj38", &lj, &lj_start, &lj_ref, lj_e, true, lj_f32),
+            (
+                "lj-pt7-geom",
+                &geom,
+                &geom_start,
+                &geom_ref,
+                geom_e,
+                false,
+                geom_f32,
+            ),
+        ] {
+            for (nname, noise) in noises {
+                let declared = match noise {
+                    ForceNoise::F32 => f32_sig,
+                    ForceNoise::Gaussian(sigma) => sigma,
+                };
+                for variant in variants {
+                    let row = run_case(Case {
+                        system,
+                        noise_name: nname,
+                        seed,
+                        template,
+                        start,
+                        reference,
+                        ref_energy: ref_e,
+                        noise,
+                        variant,
+                        aligned,
+                        declared,
+                    });
+                    println!(
+                        "{system},{method},{seed},{converged},{iters},{calls},{energy:.8},{fmax:.6e},{wall:.6},{endpoint},{abs_de:.6e},{rmsd:.6e},{ref_e:.8}",
+                        method = row.method,
+                        seed = row.seed,
+                        converged = row.converged,
+                        iters = row.iters,
+                        calls = row.calls,
+                        energy = row.energy,
+                        fmax = row.fmax,
+                        wall = row.wall_s,
+                        endpoint = row.endpoint,
+                        abs_de = row.abs_de,
+                        rmsd = row.rmsd,
+                        ref_e = ref_e,
+                    );
+                    rows.push(row);
+                }
+            }
+        }
+    }
+
+    eprintln!("# median calls, censoring, median abs_de and rmsd over {SEEDS} seeds");
+    eprintln!(
+        "# system noise variant calls_median calls_lo calls_hi censored abs_de_median rmsd_median"
+    );
+    let mut keys: Vec<(&str, &str, &str)> = rows
+        .iter()
+        .map(|r| (r.system, r.noise, r.variant))
+        .collect();
+    keys.sort();
+    keys.dedup();
+    for (system, noise, variant) in keys {
+        let group: Vec<&Row> = rows
+            .iter()
+            .filter(|r| r.system == system && r.noise == noise && r.variant == variant)
+            .collect();
+        let mut calls: Vec<f64> = group.iter().map(|r| r.calls as f64).collect();
+        let mut de: Vec<f64> = group.iter().map(|r| r.abs_de).collect();
+        let mut rms: Vec<f64> = group.iter().map(|r| r.rmsd).collect();
+        let censored = group.iter().filter(|r| r.converged == 0).count();
+        let (cmed, clo, chi) = median_range(&mut calls);
+        let (dmed, _, _) = median_range(&mut de);
+        let (rmed, _, _) = median_range(&mut rms);
+        eprintln!(
+            "# {system} {noise} {variant}: calls {cmed:.0} range {clo:.0}..{chi:.0} censored {censored}/{SEEDS} abs_de {dmed:.3e} rmsd {rmed:.3e}"
+        );
+    }
+
+    scaling(&geom);
+}
+
+fn scaling(geom: &Cluster) {
     #[cfg(not(feature = "par"))]
     {
-        let _ = pt;
+        let _ = geom;
         eprintln!("# sampling scale: build with --features par to time 1, 2, 4, and 8 threads");
     }
     #[cfg(feature = "par")]
     {
-        let x = pt_heptamer().0;
+        let x = pt_geometry().0;
         let dir = Array1::ones(x.len());
         let threads = [1usize, 2, 4, 8];
         let mut samples = vec![Vec::new(); threads.len()];
-        for _ in 0..SEEDS {
+        for _ in 0..SCALE_REPEATS {
             for (slot, &n) in threads.iter().enumerate() {
                 let pool = rayon::ThreadPoolBuilder::new()
                     .num_threads(n)
@@ -572,7 +795,7 @@ fn scaling(pt: &Cluster) {
                     .unwrap();
                 let dt = pool.install(|| {
                     let t0 = Instant::now();
-                    let values = rgmin::line_values(pt, x.view(), dir.view(), 1e-4, 31).unwrap();
+                    let values = rgmin::line_values(geom, x.view(), dir.view(), 1e-4, 31).unwrap();
                     assert_eq!(values.len(), 32);
                     t0.elapsed().as_secs_f64()
                 });
@@ -581,7 +804,7 @@ fn scaling(pt: &Cluster) {
         }
         let (t1, _, _) = median_range(&mut samples[0].clone());
         eprintln!(
-            "# sampling phase, Pt heptamer LJ, m=31 (32 force evaluations), {SEEDS} interleaved repeats"
+            "# sampling phase, lj-pt7-geom, m=31 (32 force evaluations), {SCALE_REPEATS} interleaved repeats"
         );
         eprintln!("# threads median_s lo_s hi_s speedup efficiency");
         for (slot, &n) in threads.iter().enumerate() {
