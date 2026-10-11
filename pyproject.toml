@@ -60,6 +60,11 @@ before-all = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s 
 before-all = "curl -sSf -o %TEMP%\\rustup-init.exe https://win.rustup.rs/x86_64 && %TEMP%\\rustup-init.exe -y --default-toolchain stable --profile minimal"
 environment = { PATH = "$USERPROFILE\\.cargo\\bin;$PATH" }
 
+[tool.pytest.ini_options]
+markers = [
+  "thread_unsafe: run single-threaded under pytest-run-parallel",
+]
+
 [tool.mypy]
 mypy_path = "python"
 strict = true

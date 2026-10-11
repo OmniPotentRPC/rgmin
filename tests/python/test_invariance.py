@@ -10,6 +10,12 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
+# Before NumPy. See conftest.py. The rayon subprocess starts from this file.
+os.environ.setdefault(
+    "NPY_DISABLE_CPU_FEATURES",
+    "X86_V3,X86_V4,AVX512_ICL,AVX512_SPR",
+)
+
 import numpy as np
 import pytest
 
@@ -23,7 +29,7 @@ from rgmin.ase import LBFGS
 # One hash per fixture. 3.14 and 3.14t both compare against these values.
 GOLDEN = {
     "lj38": "51e46a7c111203bb0a2f95894c33324039b6a8452bc118dbfa2c9026a4cf8e19",
-    "pt7": "7fa613ea5fb5d0393ca500d4885dc490dc248181c5750337a9662d616e9a9263",
+    "pt7": "72081cdfbe07a773fbdf1c2218cb141ce0c51a35bfbf2741260c42d7406ad5dc",
 }
 
 _STEPS = 5
@@ -67,6 +73,7 @@ def trajectory_sha256(kind: str) -> str:
     return hashlib.sha256(b"".join(frames)).hexdigest()
 
 
+@pytest.mark.thread_unsafe
 def test_python_thread_invariance() -> None:
     for kind in ("lj38", "pt7"):
         reference = GOLDEN[kind]
@@ -76,6 +83,7 @@ def test_python_thread_invariance() -> None:
             assert hashes == [reference] * workers
 
 
+@pytest.mark.thread_unsafe
 def test_rayon_env_invariance() -> None:
     code = (
         "from test_invariance import trajectory_sha256\n"
