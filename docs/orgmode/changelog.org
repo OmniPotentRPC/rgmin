@@ -6,6 +6,12 @@
 
 ** Unreleased
 
+The ~par~ feature reduces ~dot~ and ~sum~ (and therefore ~nrm2~) by a
+binary tree over fixed chunks of 4096. The bits no longer depend on
+the thread count. They can still differ from the serial fold by at
+most Higham's parenthesization bound (Accuracy and Stability of
+Numerical Algorithms, 2nd ed., ISBN 978-0-89871-802-7, Theorem 4.2).
+
 Lean proofs that lived under ~proofs/lean/~ are the one
 ~RgminContracts~ package in ~formal/~. ~Rgmin.t~ is
 ~RgminContracts.t~. SymPy scripts live in ~validation/~.

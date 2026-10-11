@@ -10,19 +10,21 @@
 //! functions; storage-specific execution lives behind them.
 //!
 //! The default implementation is the serial one the whole test suite
-//! pins bit-identically. The `par` feature swaps in rayon over slices
-//! for the length-`n` reductions and updates; results may differ from
-//! serial in the last bits because floating-point addition reorders,
-//! which is why it is a feature and not a default, and why no test of
-//! the serial path runs under it.
+//! pins bit-identically. The `par` feature keeps that fold below
+//! `PAR_MIN_LEN`. Longer `dot` and `sum` (and therefore `nrm2`) write
+//! one partial per fixed chunk, then add those partials on one binary
+//! tree. The tree is a function of the length, so the bits do not
+//! depend on the thread count. They can still differ from the serial
+//! fold; the bound is the one on `combine_tree`. Decisions stay on
+//! [`dot_ordered`].
 
 use ndarray::{Array1, ArrayView1};
 
 /// `x . y` summed from the first index upward.
 ///
-/// [`dot`] under `par` splits long vectors into chunks, so the bits can
-/// move with the thread count. Noise projections and any reduction that
-/// decides a step stay on this loop.
+/// Noise projections and any reduction that decides a step stay on this
+/// loop. [`dot`] under `par` matches it below `PAR_MIN_LEN` and, above
+/// that, matches `combine_tree` rather than this fold.
 pub fn dot_ordered(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
     debug_assert_eq!(x.len(), y.len());
     let mut acc = 0.0;
@@ -45,21 +47,104 @@ pub fn dot(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
 #[cfg(feature = "par")]
 pub(crate) const PAR_MIN_LEN: usize = 65_536;
 
-/// `x . y`, reduced in parallel chunks.
+/// Fixed `par` chunk length. Independent of the pool size.
+#[cfg(feature = "par")]
+pub(crate) const PAR_CHUNK: usize = 4096;
+
+/// Levels of [`combine_tree`]. Sixty-four covers every slice that fits
+/// in memory, and a level that does not shrink still stops.
+#[cfg(feature = "par")]
+const TREE_LEVELS: usize = 64;
+
+/// Pairwise sum of `partials`.
+///
+/// Level `k + 1` stores `partials[2i] + partials[2i + 1]`, and an odd
+/// tail is copied unchanged. The pairing depends only on
+/// `partials.len()`.
+///
+/// Any parenthesization of `m` finite terms differs from their exact sum
+/// by at most `γ_{m-1} Σ |p_i|`, with unit roundoff `u = 2^{-53}` and
+/// `γ_k = k u / (1 - k u)` when `k u < 1` (Higham, Accuracy and
+/// Stability of Numerical Algorithms, 2nd ed., ISBN 978-0-89871-802-7,
+/// Theorem 4.2). A `par` dot is this tree of chunk sums. Against
+/// ndarray's dot the absolute gap is at most twice that bound on the
+/// rounded products, because both folds are some parenthesization.
+#[cfg(feature = "par")]
+fn combine_tree(partials: &[f64]) -> f64 {
+    if partials.is_empty() {
+        return 0.0;
+    }
+    let mut level = partials.to_vec();
+    for _ in 0..TREE_LEVELS {
+        if level.len() <= 1 {
+            break;
+        }
+        let n = level.len();
+        let pairs = n / 2;
+        let mut next = Vec::with_capacity(pairs + (n % 2));
+        for i in 0..pairs {
+            next.push(level[2 * i] + level[2 * i + 1]);
+        }
+        if n % 2 == 1 {
+            next.push(level[n - 1]);
+        }
+        level = next;
+    }
+    level[0]
+}
+
+/// Left-to-right sum of `xs[start..end]`. One chain, so the lane width
+/// does not choose the parenthesization.
+#[cfg(feature = "par")]
+fn sum_range(xs: &[f64], start: usize, end: usize) -> f64 {
+    let mut acc = 0.0;
+    for value in &xs[start..end] {
+        acc += *value;
+    }
+    acc
+}
+
+/// Left-to-right sum of products `xs[i] * ys[i]`. The product is rounded
+/// before the add, so the chain does not contract into an fma.
+#[cfg(feature = "par")]
+fn dot_range(xs: &[f64], ys: &[f64], start: usize, end: usize) -> f64 {
+    let mut acc = 0.0;
+    for i in start..end {
+        let prod = xs[i] * ys[i];
+        acc += prod;
+    }
+    acc
+}
+
+/// One partial per chunk, written at the chunk index.
+#[cfg(feature = "par")]
+fn fill_partials(n: usize, body: impl Fn(usize, usize) -> f64 + Sync) -> Vec<f64> {
+    use rayon::prelude::*;
+    let nchunks = n.div_ceil(PAR_CHUNK);
+    let mut partials = vec![0.0; nchunks];
+    partials
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(chunk, slot)| {
+            let start = chunk * PAR_CHUNK;
+            let end = (start + PAR_CHUNK).min(n);
+            *slot = body(start, end);
+        });
+    partials
+}
+
+/// `x . y`, reduced by [`combine_tree`] over fixed chunks.
 #[cfg(feature = "par")]
 pub fn dot(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
-    use rayon::prelude::*;
-    if x.len() < PAR_MIN_LEN {
+    if x.len() != y.len() || x.len() < PAR_MIN_LEN {
         return x.dot(&y);
     }
-    match (x.as_slice(), y.as_slice()) {
-        (Some(a), Some(b)) => a
-            .par_chunks(4096)
-            .zip(b.par_chunks(4096))
-            .map(|(ca, cb)| ca.iter().zip(cb).map(|(p, q)| p * q).sum::<f64>())
-            .sum(),
-        _ => x.dot(&y),
-    }
+    let (Some(xs), Some(ys)) = (x.as_slice(), y.as_slice()) else {
+        return x.dot(&y);
+    };
+    combine_tree(&fill_partials(xs.len(), |start, end| {
+        dot_range(xs, ys, start, end)
+    }))
 }
 
 /// `y += a x`.
@@ -77,15 +162,14 @@ pub fn axpy(a: f64, x: ArrayView1<f64>, y: &mut Array1<f64>) {
         return;
     }
     match (x.as_slice(), y.as_slice_mut()) {
-        (Some(xs), Some(ys)) => {
-            ys.par_chunks_mut(4096)
-                .zip(xs.par_chunks(4096))
-                .for_each(|(cy, cx)| {
-                    for (p, q) in cy.iter_mut().zip(cx) {
-                        *p += a * q;
-                    }
-                })
-        }
+        (Some(xs), Some(ys)) => ys
+            .par_chunks_mut(PAR_CHUNK)
+            .zip(xs.par_chunks(PAR_CHUNK))
+            .for_each(|(cy, cx)| {
+                for (p, q) in cy.iter_mut().zip(cx) {
+                    *p += a * q;
+                }
+            }),
         _ => y.scaled_add(a, &x),
     }
 }
@@ -96,17 +180,18 @@ pub fn sum(x: ArrayView1<f64>) -> f64 {
     x.sum()
 }
 
-/// `sum_i x_i`, reduced in parallel chunks.
+/// `sum_i x_i`, reduced by [`combine_tree`] over fixed chunks.
 #[cfg(feature = "par")]
 pub fn sum(x: ArrayView1<f64>) -> f64 {
-    use rayon::prelude::*;
     if x.len() < PAR_MIN_LEN {
         return x.sum();
     }
-    match x.as_slice() {
-        Some(a) => a.par_chunks(4096).map(|c| c.iter().sum::<f64>()).sum(),
-        None => x.sum(),
-    }
+    let Some(xs) = x.as_slice() else {
+        return x.sum();
+    };
+    combine_tree(&fill_partials(xs.len(), |start, end| {
+        sum_range(xs, start, end)
+    }))
 }
 
 /// `||x||_2`.
@@ -129,7 +214,7 @@ pub fn scale(a: f64, y: &mut Array1<f64>) {
         return;
     }
     match y.as_slice_mut() {
-        Some(ys) => ys.par_chunks_mut(4096).for_each(|cy| {
+        Some(ys) => ys.par_chunks_mut(PAR_CHUNK).for_each(|cy| {
             for p in cy.iter_mut() {
                 *p *= a;
             }
@@ -162,8 +247,8 @@ pub fn mul_assign(x: ArrayView1<f64>, y: &mut Array1<f64>) {
         (Some(xs), Some(ys)) => {
             let ys = &mut ys[..n];
             let xs = &xs[..n];
-            ys.par_chunks_mut(4096)
-                .zip(xs.par_chunks(4096))
+            ys.par_chunks_mut(PAR_CHUNK)
+                .zip(xs.par_chunks(PAR_CHUNK))
                 .for_each(|(cy, cx)| {
                     for (p, q) in cy.iter_mut().zip(cx) {
                         *p *= *q;
@@ -202,8 +287,8 @@ pub fn div_assign_floor(x: ArrayView1<f64>, y: &mut Array1<f64>, floor: f64) {
         (Some(xs), Some(ys)) => {
             let ys = &mut ys[..n];
             let xs = &xs[..n];
-            ys.par_chunks_mut(4096)
-                .zip(xs.par_chunks(4096))
+            ys.par_chunks_mut(PAR_CHUNK)
+                .zip(xs.par_chunks(PAR_CHUNK))
                 .for_each(|(cy, cx)| {
                     for (p, q) in cy.iter_mut().zip(cx) {
                         *p /= q.max(floor);

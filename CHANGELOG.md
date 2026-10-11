@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The `par` feature reduces `dot` and `sum` (and therefore `nrm2`) by a
+  binary tree over fixed chunks of 4096. The bits no longer depend on
+  the thread count. They can still differ from the serial fold by at
+  most the parenthesization bound of Higham, Accuracy and Stability of
+  Numerical Algorithms, 2nd ed., ISBN 978-0-89871-802-7, Theorem 4.2.
 - Lean proofs from `proofs/lean/` are the one `RgminContracts` package
   in `formal/`. The old declaration names are re-exported from `Rgmin`.
   SymPy scripts from `proofs/sympy/` live in `validation/`.
