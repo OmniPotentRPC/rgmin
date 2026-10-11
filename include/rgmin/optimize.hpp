@@ -11,12 +11,15 @@
 
 #include "../rgmin.h"
 
+#include <array>
 #include <atomic>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <exception>
 #include <map>
 #include <optional>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -733,7 +736,7 @@ inline bool is_cg(Method method) {
 }
 
 inline bool known_option(std::string const& key) {
-    static char const* keys[] = {
+    static constexpr char const* const keys[] = {
         "accept", "atom_maxmove", "beta", "c1", "c2", "cautious_alpha",
         "cautious_eps", "extra_updates", "fire_variant", "gtol", "istep",
         "linesearch", "linesearch_maxiter", "maxiter", "maxmove", "maxstep",
@@ -754,7 +757,7 @@ inline void require_known(std::string const& key) {
 }
 
 inline void require_finite(std::string const& key, double value) {
-    if (!(value == value) || value > 1e300 || value < -1e300) {
+    if (!std::isfinite(value)) {
         throw std::invalid_argument(key + " must be finite");
     }
 }
