@@ -65,12 +65,14 @@ cargo test --features capi
    :caption: Tutorials
 
    tutorials/quickstart
+   tutorials/python
 
 .. toctree::
    :maxdepth: 2
    :caption: How-To Guides
 
    howto/session
+   howto/python
    howto/noise
    howto/manifolds
    howto/embed-anneal
@@ -85,6 +87,7 @@ cargo test --features capi
    :caption: Explanation
 
    explanation/linesearch
+   explanation/python-threads
    explanation/quickmin
    explanation/diis
    explanation/ecnoise
@@ -99,6 +102,7 @@ cargo test --features capi
    :caption: Reference
 
    reference/architecture
+   reference/python
    reference/sota
    reference/proofs
    reference/bibliography

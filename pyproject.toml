@@ -1,0 +1,112 @@
+[build-system]
+requires = ["scikit-build-core>=1.1", "nanobind>=3.1"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "rgmin"
+version = "0.3.0"
+description = "Free-threaded geometry optimizer: a nanobind wheel around the rgmin staticlib."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Rohit Goswami", email = "rgoswami@ieee.org" }]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: C++",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
+  "Programming Language :: Python :: Free Threading",
+  "Programming Language :: Python :: Free Threading :: 3 - Stable",
+  "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = ["numpy>=1.24"]
+
+[project.urls]
+Homepage = "https://github.com/OmniPotentRPC/rgmin"
+Repository = "https://github.com/OmniPotentRPC/rgmin"
+Issues = "https://github.com/OmniPotentRPC/rgmin/issues"
+
+[project.optional-dependencies]
+ase = ["ase>=3.23"]
+test = [
+  "pytest>=7",
+  "pytest-timeout>=2",
+  "pytest-run-parallel>=0.4",
+  "hypothesis>=6",
+  "numpy>=1.24",
+  "ase>=3.23",
+]
+
+[tool.scikit-build]
+minimum-version = "0.10"
+cmake.version = ">=3.15"
+# GIL builds: cp312-abi3 covers CPython 3.12 through 3.15.
+# Free-threaded interpreters ignore the classic abi3 tag and emit
+# cp314-cp314t or cp315-cp315t instead.
+wheel.py-api = "cp312"
+wheel.packages = ["python/rgmin"]
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp314t-* cp315t-*"
+skip = ["pp*", "*-musllinux*", "*_i686", "*-win32"]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+test-requires = ["pytest", "pytest-timeout", "numpy", "ase>=3.23", "hypothesis>=6"]
+test-command = "python -m pytest -q tests/python --timeout=180 -o faulthandler_timeout=120"
+test-sources = ["tests/python"]
+
+[tool.cibuildwheel.linux]
+before-all = """
+yum install -y git || dnf install -y git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+ln -sfn "$HOME/.cargo/bin/cargo" /usr/local/bin/cargo
+ln -sfn "$HOME/.cargo/bin/rustc" /usr/local/bin/rustc
+ln -sfn "$HOME/.cargo/bin/rustup" /usr/local/bin/rustup
+"""
+environment = { PATH = "/root/.cargo/bin:$PATH" }
+
+[tool.cibuildwheel.macos]
+archs = ["arm64"]
+environment = { MACOSX_DEPLOYMENT_TARGET = "14.0", PATH = "$HOME/.cargo/bin:$PATH" }
+before-all = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal"
+
+[tool.cibuildwheel.windows]
+before-all = "curl -sSf -o %TEMP%\\rustup-init.exe https://win.rustup.rs/x86_64 && %TEMP%\\rustup-init.exe -y --default-toolchain stable --profile minimal"
+environment = { PATH = "$USERPROFILE\\.cargo\\bin;$PATH" }
+
+[tool.pytest.ini_options]
+markers = [
+  "thread_unsafe: run single-threaded under pytest-run-parallel",
+]
+
+[tool.mypy]
+mypy_path = "python"
+strict = true
+python_version = "3.10"
+
+[[tool.mypy.overrides]]
+module = "rgmin._core"
+disallow_any_generics = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+module = ["ase", "ase.*"]
+ignore_missing_imports = true
+
+[tool.pyright]
+include = ["examples", "python/rgmin"]
+extraPaths = ["python"]
+typeCheckingMode = "standard"
+pythonVersion = "3.10"
+reportMissingModuleSource = "none"
+reportMissingImports = "none"

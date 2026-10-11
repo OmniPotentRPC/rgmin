@@ -1,0 +1,40 @@
+#+TITLE: Thread safety
+#+OPTIONS: toc:nil num:nil author:nil title:nil
+
+* What you can share
+
+A =SolverConfig= does not change after it is built. Any number of
+threads can read one config and build their own solvers from it.
+
+A =Solver= is used by one thread at a time. If a second thread calls
+=step= or =step_hess= while the first call is still running, that
+second call raises =RuntimeError= and says the solver is in use. Two
+different solvers can run at the same time, including when the
+interpreter is free-threaded and =sys._is_gil_enabled()= is false.
+
+The array you pass to =step= is updated in place. The objective
+receives its own copy of the coordinates, so keeping that array after
+=step= returns is safe. Do not let two threads call the same objective
+if the objective mutates a shared object.
+
+* Calculators
+
+ASE calculators are not thread-safe. Each thread needs its own
+calculator. Sharing one calculator across threads is not supported.
+
+rgmin guarantees three things. A =SolverConfig= can be shared. A
+=Solver= is entered by one thread, and a second call raises
+=RuntimeError=. The objective is handed its own copy of the
+coordinates.
+
+The optimizer keeps a lock around calls on one calculator unless that
+calculator sets =reentrant= to true. The lock only stops those calls
+from overlapping. It does not make the calculator safe to share.
+=import rgmin= does not import ASE. The ASE classes live in =rgmin.ase=.
+
+* Results
+
+The trajectory of one solver does not depend on how many Python
+threads or how many Rayon threads are running other solvers. The
+default build does not turn on the Rust parallel feature, so extra
+threads do not speed up a single solve.

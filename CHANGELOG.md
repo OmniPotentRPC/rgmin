@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Python package `rgmin`: a free-threaded nanobind module `rgmin._core`
+  (`Method`, `SolverConfig`, `Solver`, `Report`, `minimize`) and
+  `rgmin.ase.Optimizer` with one rgmin iteration per `step`. ASE is an
+  extra. The wheel is built with scikit-build-core, Corrosion, and
+  `nanobind_add_module(_core FREE_THREADED ...)`.
 - Geometry preconditioners install through `Solver::set_precon` and
   C `rgmin_solver_set_precon` (ABI minor 32): Exp, Lindh, the bonded
   metric, or `select_precon`.
