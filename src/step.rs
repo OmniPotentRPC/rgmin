@@ -300,14 +300,53 @@ pub(crate) fn qn_istep(control: &Control) -> f64 {
 }
 
 /// The opening step of the next line search when the direction is the
-/// gradient (steepest descent, NLCG, Adam): half the step last accepted,
+/// gradient (steepest descent, Adam): half the step last accepted,
 /// or `control.istep` again after a step that did not move.
+///
+/// Nonlinear CG does not use this. Its opening step is
+/// [`nlcg_opening_alpha`].
 pub(crate) fn next_istep(lsstep: f64, control: &Control) -> f64 {
     if lsstep <= 0.0 {
         control.istep
     } else {
         lsstep * 0.5
     }
+}
+
+/// Opening step for nonlinear CG, Nocedal-Wright equation 3.60.
+///
+/// `α0 = α_{k-1} (g_{k-1}·d_{k-1}) / (g_k·d_k)`, then clamped to `cap`.
+/// Both directional derivatives must be negative. Otherwise, or when the
+/// previous step did not move, the result is `fallback` clamped to `cap`.
+pub(crate) fn nlcg_opening_alpha(
+    prev_alpha: f64,
+    prev_gd: f64,
+    gd: f64,
+    cap: f64,
+    fallback: f64,
+) -> f64 {
+    let cap = if cap.is_finite() && cap > 0.0 {
+        cap
+    } else {
+        f64::INFINITY
+    };
+    let fb = if fallback.is_finite() && fallback > 0.0 {
+        fallback.min(cap)
+    } else {
+        1.0_f64.min(cap)
+    };
+    if !(prev_alpha > 0.0 && prev_gd < 0.0 && gd < 0.0) {
+        return fb;
+    }
+    let ratio = prev_gd / gd;
+    if !ratio.is_finite() || ratio <= 0.0 {
+        return fb;
+    }
+    let alpha = prev_alpha * ratio;
+    if !alpha.is_finite() || alpha <= 0.0 {
+        return fb;
+    }
+    alpha.min(cap)
 }
 
 #[cfg(test)]

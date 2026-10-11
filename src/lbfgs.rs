@@ -92,6 +92,8 @@ pub struct Lbfgs {
     /// Engine and callback policies for constrained solves.
     #[cfg(feature = "highs")]
     pub highs_options: crate::HighsOptions,
+    /// \(H_0 = P^{-1}\) from an assembled geometry preconditioner.
+    h0: Option<crate::precon::Metric>,
 }
 
 impl Default for Lbfgs {
@@ -125,7 +127,13 @@ impl Lbfgs {
             highs: None,
             #[cfg(feature = "highs")]
             highs_options: crate::HighsOptions::default(),
+            h0: None,
         }
+    }
+
+    /// Install or clear \(H_0 = P^{-1}\).
+    pub(crate) fn set_h0(&mut self, h0: Option<crate::precon::Metric>) {
+        self.h0 = h0;
     }
 
     /// Discards the stored curvature.
@@ -178,16 +186,28 @@ impl Lbfgs {
     }
 
     /// Two-loop recursion: applies the inverse-Hessian approximation to `g`.
+    ///
+    /// An installed geometry preconditioner is \(H_0 = P^{-1}\).
     pub(crate) fn direction(&self, g: ArrayView1<f64>) -> Array1<f64> {
-        self.direction_with_precon(g, None)
+        self.direction_with_sources(g, None, self.h0.as_ref())
     }
 
     /// Two-loop with optional \(H_0 = P^{-1}\). `precon` is the pair / Lindh
     /// matrix \(P\); the middle product is `solve(P, q)`, not a scalar γ.
+    /// A dense `precon` wins over an installed exponential matrix.
     pub(crate) fn direction_with_precon(
         &self,
         g: ArrayView1<f64>,
         precon: Option<&ndarray::Array2<f64>>,
+    ) -> Array1<f64> {
+        self.direction_with_sources(g, precon, None)
+    }
+
+    fn direction_with_sources(
+        &self,
+        g: ArrayView1<f64>,
+        precon: Option<&ndarray::Array2<f64>>,
+        exp: Option<&crate::precon::Metric>,
     ) -> Array1<f64> {
         let mut q = g.to_owned();
         let m = self.memory.len();
@@ -203,6 +223,15 @@ impl Lbfgs {
             // P; an indefinite Hessian falls back to gamma I and is
             // counted.
             q = match solve_spd(pmat, &q) {
+                Some(v) => v,
+                None => {
+                    self.precon_fallbacks
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    self.scale_gamma(q)
+                }
+            };
+        } else if let Some(exp) = exp {
+            q = match exp.solve(q.view()) {
                 Some(v) => v,
                 None => {
                     self.precon_fallbacks
@@ -962,9 +991,11 @@ mod neb_guard_tests {
     fn invalid_empty_memory_scales_select_a_finite_force_step() {
         let gradient = array![-1.0, 2.0, 0.0];
         for scale in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let mut solver = Lbfgs::default();
-            solver.angle_reset = true;
-            solver.inverse_curvature = scale;
+            let mut solver = Lbfgs {
+                angle_reset: true,
+                inverse_curvature: scale,
+                ..Lbfgs::default()
+            };
             let direction = solver.guarded_direction(gradient.view(), Some(1.0));
             assert_eq!(direction, -&gradient);
             assert!(direction.dot(&gradient) < 0.0);

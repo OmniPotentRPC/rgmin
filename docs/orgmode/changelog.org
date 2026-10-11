@@ -6,6 +6,16 @@
 
 ** Unreleased
 
+Nonlinear CG, with or without a metric, opens its line search with
+Nocedal-Wright equation 3.60 instead of ~control.istep~ on every step.
+The descent fallback runs in both cases. ~Conjugacy::PolakRibierePlus~
+is a new variant of the exhaustive ~Conjugacy~ enum (~max(β_PR, 0)~).
+A replaced metric restarts the recurrence at steepest descent.
+
+Geometry preconditioners install through ~Solver::set_precon~ and
+C ~rgmin_solver_set_precon~ (ABI minor 32): Exp, Lindh, the bonded
+metric, or ~select_precon~.
+
 ECnoise (~ecnoise~, ~sample_noise~, ~sample_gradient_noise~,
 ~sample_gradient_noise_k~). Moré and Wild, SIAM J. Sci. Comput. 33,
 1292 (2011), https://doi.org/10.1137/100786125. The table uses

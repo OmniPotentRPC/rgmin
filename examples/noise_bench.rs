@@ -53,6 +53,7 @@ use rgmin::{
 };
 
 const SEEDS: u64 = 30;
+#[cfg(feature = "par")]
 const SCALE_REPEATS: usize = 5;
 const BASE_GTOL: f64 = 0.01;
 const MAXITER: usize = 2000;

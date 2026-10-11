@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Geometry preconditioners install through `Solver::set_precon` and
+  C `rgmin_solver_set_precon` (ABI minor 32): Exp, Lindh, the bonded
+  metric, or `select_precon`.
 - `rggate` (`bench/gate/`, pixi task `gate`) reads contract version 1
   of the atomistic CSV. The reference for a start is explicit, otherwise
   the baseline on that same start. `--reference lowest` opts into the
@@ -172,6 +175,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Nonlinear CG, with or without a metric, opens the line search with
+  Nocedal-Wright equation 3.60 instead of resetting the trial to
+  `control.istep` after every step. The descent fallback runs in both
+  cases. `Conjugacy::PolakRibierePlus` is a new variant of the
+  exhaustive `Conjugacy` enum: `max(β_PR, 0)` in the Euclidean product
+  and in the metric product. A replaced metric restarts that recurrence
+  at steepest descent.
 - A session's default line search is strong Wolfe (`c1 = 1e-4`,
   `c2 = 0.9`, 20 trials) instead of Brent. Brent spent about 25 force
   calls per L-BFGS iteration and, under a per-atom cap, stalled LJ38 at

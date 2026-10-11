@@ -813,6 +813,7 @@ fn reorthogonalize(w: &mut Array1<f64>, q: &[Array1<f64>]) {
     }
 }
 
+#[cfg(test)]
 fn gram_inf_error(q: &[Array1<f64>]) -> f64 {
     let k = q.len();
     let mut worst: f64 = 0.0;
@@ -886,6 +887,8 @@ fn dimer<H: ApplyHessian + ?Sized>(
     }
 }
 
+type Ritz = (f64, Array1<f64>, Array1<f64>, Array1<f64>);
+
 struct Subspace {
     q: Vec<Array1<f64>>,
     aq: Vec<Array1<f64>>,
@@ -923,7 +926,7 @@ impl Subspace {
         true
     }
 
-    fn ritz(&self, n: usize) -> Option<(f64, Array1<f64>, Array1<f64>, Array1<f64>)> {
+    fn ritz(&self, n: usize) -> Option<Ritz> {
         let k = self.q.len();
         if k == 0 {
             return None;
@@ -1323,6 +1326,7 @@ mod tests {
         None
     }
 
+    #[allow(clippy::type_complexity)]
     fn gapped_diag(
         n: usize,
     ) -> HvpOracle<
@@ -1834,7 +1838,7 @@ mod tests {
                 .map(|(a, b)| a * b)
                 .sum::<f64>()
                 .abs();
-            assert!(cos > 0.9, "{:?} |cos| = {cos}", kind);
+            assert!(cos > 0.9, "{kind:?} |cos| = {cos}");
         }
     }
 

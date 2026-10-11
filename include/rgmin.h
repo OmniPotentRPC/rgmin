@@ -50,7 +50,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 31
+#define RGMIN_ABI_VERSION_MINOR 32
 #define RGMIN_ABI_LAYOUT_REVISION 3
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -221,6 +221,96 @@ typedef enum rgmin_qn_step_t {
 } rgmin_qn_step_t;
 /** Two-loop + H0, or Newton/RFO on P. Legal with \ref rgmin_solver_step_hess. */
 void rgmin_solver_set_qn_step(rgmin_solver_t *solver, rgmin_qn_step_t step);
+/** Which geometry preconditioner \ref rgmin_solver_set_precon installs.
+ *  ABI minor 32. */
+typedef enum rgmin_precon_kind_t {
+    RGMIN_PRECON_NONE = 0,
+    RGMIN_PRECON_EXP = 1,
+    RGMIN_PRECON_LINDH = 2,
+    RGMIN_PRECON_FF = 3,
+    RGMIN_PRECON_AUTO = 4
+} rgmin_precon_kind_t;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(rgmin_precon_kind_t) == sizeof(int32_t),
+               "rgmin_precon_kind_t is i32-wide; do not build this header with -fshort-enums");
+#endif
+/** \ref rgmin_precon_t::geometry_kind for \c RGMIN_PRECON_AUTO. */
+#define RGMIN_GEOM_BULK 0
+#define RGMIN_GEOM_SURFACE 1
+#define RGMIN_GEOM_MOLECULE 2
+#define RGMIN_GEOM_CLUSTER 3
+/** One harmonic bond. Indices are \c uint32_t free-atom numbers. */
+typedef struct rgmin_bond_t {
+    uint32_t i, j;
+    double k;
+} rgmin_bond_t;
+/** One harmonic angle at \c vertex. Indices are \c uint32_t. */
+typedef struct rgmin_angle_t {
+    uint32_t i, vertex, k;
+    double k_theta;
+} rgmin_angle_t;
+/** Parameters for every geometry preconditioner.
+ *
+ *  \c struct_size is \c sizeof(rgmin_precon_t). This revision rejects a
+ *  smaller value. A larger future struct is accepted; bytes past the
+ *  fields this build knows stay unread.
+ *  \c kind is \c uint32_t and holds a \c RGMIN_PRECON_* value.
+ *  \c c_stab, \c mu, \c r_cut, and \c exp_a are NaN or <= 0 for the
+ *  default or an estimate. \c exp_a is the Exp exponent A (default 3).
+ *  \c cell holds orthorhombic lengths; a component <= 0 leaves that
+ *  axis open. \c numbers and \c natoms are the free atoms (Lindh, AUTO).
+ *  Ghost pointers are null when \c nghost is 0. Neighbour indices
+ *  (\c nbr_i, \c nbr_j) and anchor indices (\c anchor_i) are
+ *  \c size_t. Bond and angle indices are \c uint32_t. \c nbr_r null
+ *  takes Cartesian distances on the next step. \c anchor_i bonds a
+ *  free atom to a frozen atom at distance \c anchor_r. \c dihedrals
+ *  nonzero adds the Lindh torsion term.
+ *
+ *  Morse bonds and FF harmonic torsions are Rust-only
+ *  (\c MorseTerm, \c DihedralTerm). They are not fields of this struct.
+ *  Every index is checked against \c dim/3 inside
+ *  \ref rgmin_solver_set_precon. */
+typedef struct rgmin_precon_t {
+    uint32_t struct_size;
+    uint32_t kind;
+    double c_stab, mu, r_cut;
+    double cell[3];
+    const int32_t *numbers;
+    size_t natoms;
+    const int32_t *ghost_z;
+    const double *ghost_pos;
+    size_t nghost;
+    const size_t *nbr_i;
+    const size_t *nbr_j;
+    const double *nbr_r;
+    size_t npairs;
+    const size_t *anchor_i;
+    const double *anchor_r;
+    size_t nanchor;
+    double exp_a;
+    const rgmin_bond_t *bonds;
+    size_t nbonds;
+    const rgmin_angle_t *angles;
+    size_t nangles;
+    int32_t dihedrals;
+    int32_t geometry_kind;
+} rgmin_precon_t;
+/** Zero \a p, set \c struct_size, and select \a kind. Optional doubles
+ *  are NaN so the defaults apply. */
+void rgmin_precon_init(rgmin_precon_t *p, rgmin_precon_kind_t kind);
+/** Install, replace, or clear the geometry preconditioner.
+ *  \c RGMIN_PRECON_NONE clears it. \c RGMIN_PRECON_AUTO calls Rust
+ *  \c select_precon with this session's method, so the caller does
+ *  not pass an optimiser family. FIRE resolves to the identity.
+ *  A force field is present when \c nbonds or \c nangles is nonzero,
+ *  and it is used only for a covalent molecule or cluster.
+ *  Indices are rejected here. */
+rgmin_status_t rgmin_solver_set_precon(rgmin_solver_t *s, const rgmin_precon_t *p);
+/** Drop whichever geometry preconditioner is installed. */
+void rgmin_solver_clear_precon(rgmin_solver_t *s);
+/** Energy scale of the installed geometry preconditioner.
+ *  NaN when none is installed or the scale is not estimated yet. */
+double rgmin_solver_precon_scale(const rgmin_solver_t *s);
 /** How a session takes a proposed step (eOn lbfgs_accept). */
 typedef enum rgmin_accept_t {
     RGMIN_ACCEPT_NONE = 0,

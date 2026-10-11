@@ -1,0 +1,113 @@
+#+TITLE: Exp, Lindh, and the bonded metric
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Exp, Lindh, and the bonded metric
+
+Three sparse symmetric positive definite matrices share one solve and
+one rebuild rule. The solve is Jacobi-preconditioned conjugate
+gradients. The matrix is held until the largest atomic move exceeds
+half the nearest-neighbour distance.
+
+** Exp
+
+Packwood, Kermode, Mones, Bernstein, Woolley, Gould, Ortner, and
+Csányi, J. Chem. Phys. 144, 164109 (2016),
+https://doi.org/10.1063/1.4947024.
+
+The caller supplies the neighbour list. The weight on a pair is
+~exp(-A (r / r_nn - 1))~ with ~A = 3~. Off-diagonal blocks are
+~-μ c_ij I_3~. The diagonal is ~μ (C_stab + sum_j c_ij) I_3~ with
+~C_stab = 0.1~. ~r_nn~ is the largest per-atom nearest-neighbour
+distance. ~μ~ is the Rayleigh quotient of a sine probe against this
+matrix at ~μ = 1~. The probe's shifted gradient is an extra force
+evaluation and is counted with the other force calls. ASE's
+~estimate_mu~ replaces a value below 1 with 1. rgmin keeps the
+quotient. That cap is in eV/Å², so it is not invariant under a
+change of energy or length unit.
+
+** Lindh
+
+Lindh, Bernhardsson, Karlström, and Malmqvist, Chem. Phys. Lett. 241,
+423 (1995), https://doi.org/10.1016/0009-2614(95)00646-L.
+
+The weights come from the paper's element tables for H, B, C, N, O, F,
+Si, P, S, and Cl. A metal or a noble gas is not in those tables. Pairs
+inside the cutoff come from a cell list: bins in lexicographic order,
+then the pairs sorted by atom index, so the matrix does not depend on
+the thread count.
+
+** Bonded metric
+
+Makri, Ortner, and Kermode, J. Chem. Phys. 150, 094109 (2019),
+https://doi.org/10.1063/1.5064465, when the curvatures are that
+field's. The matrix is the reduced (absolute-curvature) Hessian, which
+matches ASE ~FF~ with ~hessian='reduced'~. ASE's default is
+~spectral~. ~bonded_terms~ with caller-supplied constants is the same
+matrix and is a bonded geometric metric until those constants are the
+field's. Harmonic bonds and angles, Morse bonds, and harmonic torsions
+are the Rust terms. The C struct carries the harmonic bonds and angles.
+Morse and the FF torsion stay in Rust. The Lindh torsion is a separate
+flag.
+
+** Which one
+
+~select_precon~ reads the geometry, the atomic numbers, and the
+optimiser. ~RGMIN_PRECON_AUTO~ uses the session's own method, so C
+does not pass the family.
+
+| optimizer | geometry | atoms | elements | field | choice |
+|---+---|---:|---|---|---|
+| FIRE | any | any | any | any | identity |
+| L-BFGS, CG | bulk, surface | >= 100 | any | ignored | Exp |
+| L-BFGS, CG | bulk, surface | < 100 | any | ignored | identity |
+| L-BFGS, CG | molecule, cluster | <= N_LINDH | Lindh set | no | Lindh |
+| L-BFGS, CG | molecule, cluster | > N_LINDH | Lindh set | no | Exp at >= 100, else identity |
+| L-BFGS, CG | molecule, cluster | any | Lindh set | yes | bonded metric |
+| L-BFGS, CG | molecule, cluster | >= 100 | metal or noble gas | ignored | Exp |
+| L-BFGS, CG | molecule, cluster | < 100 | metal or noble gas | ignored | identity |
+
+The 100-atom line is ASE's ~PreconLBFGS~ rule. The bench has no bulk
+below 100 atoms and no Cu147. The copper vacancy, 2047 atoms, is the
+bulk row that uses Exp (L-BFGS 16 calls with none, 11 with Exp).
+Water is the Lindh molecule (L-BFGS 5 calls, the same as none). Ar38
+and Pt7 are the identity clusters. Lindh on lj38 ends at −164.88
+against −167.77. The bonded metric on pt7 takes 18, 29, and 78 calls
+against 10, 18, and 49, and on lj38 it ends at −166.65, so the field
+is taken only for the covalent set.
+
+~N_LINDH~ is 2,000. On bulk diamond Si with a 4 Å cutoff the Jacobi
+PCG iteration counts are Lindh 69, 124, 140 and Exp 21, 48, 85 at
+160, 2,000, and 32,000 atoms. Eight solves on one thread take Lindh
+0.031 s, 0.914 s, and 34.9 s against Exp 0.001 s, 0.031 s, and 1.03 s.
+The iteration count levels off near 140, and 2,000 atoms is the
+largest measured size at which eight Lindh solves still finish in
+about a second.
+
+Each kernel has its own atom-count gate, measured as the smallest
+size where two threads beat one by more than the run-to-run range.
+Lindh apply and Lindh solve gate at 2,000 atoms. Exp apply and Exp
+solve gate at 32,000 atoms (at 8,000 atoms the Exp gaps, 0.67 ms and
+0.015 s, sit inside ranges of 0.96 ms and 0.059 s). Assembly stays
+serial: at 100,000 atoms the Exp gap is 0.026 s inside a range of
+0.027 s. The gate does not read the thread count, so the result is
+the same at 1, 2, 3, and 8 threads. Peak RSS at 100,000 atoms is
+2.65 GB.
+
+** H0 and the metric
+
+L-BFGS multiplies its compact Hessian approximation by an initial
+scale. Installing ~P~ sets that scale to ~P^{-1}~, which is one
+application of the solve. The two-loop recurrence then runs in the
+Euclidean pair inner product, started from a Newton step in ~P~.
+
+Nonlinear CG and FIRE need the inner product that defines conjugacy
+and the velocity mix. Both use ~P~ itself: the search direction is
+~-P^{-1} g~, and the FIRE velocity is mixed with that direction. The
+same ~μ~ that scales ~P~ scales the direction, so the first trial step
+along it is order 1. Opening the line search at the control step
+(0.01 in the bench) spends several extrapolations climbing back to
+that step. The opening trial is Nocedal-Wright equation 3.60, and 1
+on the first iteration when a metric is installed. A rebuilt ~P~
+restarts the recurrence at steepest descent because the stored
+~P^{-1} g~ was formed with the old matrix.

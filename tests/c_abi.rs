@@ -15,7 +15,7 @@ use rgmin::ffi::{
     rgmin_tensor_free,
 };
 use rgmin::ffi::{
-    rgmin_conjugacy_t, rgmin_curv_fn, rgmin_eigen_kind_t, rgmin_eigen_params_t, rgmin_last_error,
+    rgmin_conjugacy_t, rgmin_eigen_kind_t, rgmin_eigen_params_t, rgmin_last_error,
     rgmin_lowest_eigenpair, rgmin_lowest_mode_t, rgmin_minimize_scg, rgmin_scg_params_t,
 };
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
@@ -604,7 +604,7 @@ fn c_abi_diis_reduces_a_quadratic() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 31);
+    assert_eq!(stamp.abi_minor, 32);
     assert_eq!(stamp.layout_revision, 3);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -1497,4 +1497,277 @@ fn c_abi_lbfgs_neb_guards_toggle_resets_pairs() {
         rgmin_solver_free(session);
         rgmin_solver_set_lbfgs_neb_guards(std::ptr::null_mut(), 1);
     }
+}
+
+unsafe extern "C" fn chain_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    let mut v = 0.0;
+    for i in 0..n {
+        let c = unsafe { *p.add(i) };
+        v += c * c;
+    }
+    unsafe { *value_out = 0.5 * v };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn chain_grad(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    let (gp, gn) = unsafe { cpu_f64(g as *const _) };
+    assert_eq!(gn, n);
+    for i in 0..n {
+        unsafe { *(gp as *mut f64).add(i) = *p.add(i) };
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+fn precon_blank(kind: u32) -> rgmin::ffi::rgmin_precon_t {
+    let mut p = unsafe { std::mem::zeroed() };
+    unsafe { rgmin::ffi::rgmin_precon_init(&mut p, kind) };
+    p
+}
+
+#[test]
+fn c_abi_exp_installs_and_steps() {
+    use rgmin::ffi::{
+        RGMIN_PRECON_EXP, rgmin_solver_clear_precon, rgmin_solver_precon_scale,
+        rgmin_solver_set_precon,
+    };
+
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 1e-12,
+        istep: 1.0,
+        memory: 4,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    };
+    let bad = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    let mut params = precon_blank(RGMIN_PRECON_EXP);
+    params.mu = 2.0;
+    let pair_i = [0usize];
+    let pair_j = [1usize];
+    let dist = [1.0f64];
+    params.nbr_i = pair_i.as_ptr();
+    params.nbr_j = pair_j.as_ptr();
+    params.nbr_r = dist.as_ptr();
+    params.npairs = 1;
+    let st = unsafe { rgmin_solver_set_precon(bad, &params) };
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    unsafe { rgmin_solver_free(bad) };
+
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 6) };
+    assert!(!session.is_null());
+    let st = unsafe { rgmin_solver_set_precon(session, &params) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let mu = unsafe { rgmin_solver_precon_scale(session) };
+    assert!((mu - 2.0).abs() < 1e-12, "mu {mu}");
+
+    let out_of_range = [9usize];
+    params.nbr_j = out_of_range.as_ptr();
+    let st = unsafe { rgmin_solver_set_precon(session, &params) };
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    params.nbr_j = pair_j.as_ptr();
+
+    let mut x = [0.4, 0.1, -0.2, -0.3, 0.2, 0.05];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+    };
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
+    let st = unsafe {
+        rgmin_solver_step(
+            session,
+            Some(chain_eval),
+            Some(chain_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(out.grad_norm < 1.0, "grad {}", out.grad_norm);
+    unsafe {
+        rgmin_solver_clear_precon(session);
+        assert!(rgmin_solver_precon_scale(session).is_nan());
+        rgmin_solver_free(session);
+    }
+}
+
+#[test]
+fn c_abi_lindh_ff_and_auto_install_and_step() {
+    use rgmin::ffi::{
+        RGMIN_GEOM_CLUSTER, RGMIN_GEOM_MOLECULE, RGMIN_PRECON_AUTO, RGMIN_PRECON_FF,
+        RGMIN_PRECON_LINDH, rgmin_bond_t, rgmin_solver_clear_precon, rgmin_solver_precon_scale,
+        rgmin_solver_set_precon,
+    };
+
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 1e-12,
+        istep: 1.0,
+        memory: 4,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    };
+    let numbers = [1i32, 1];
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 6) };
+    assert!(!session.is_null());
+    let mut bad_p = precon_blank(RGMIN_PRECON_LINDH);
+    let bad_z = [0i32, 1];
+    bad_p.numbers = bad_z.as_ptr();
+    bad_p.natoms = 2;
+    bad_p.mu = 1.0;
+    let bad = unsafe { rgmin_solver_set_precon(session, &bad_p) };
+    assert_eq!(bad, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    let mut lindh = precon_blank(RGMIN_PRECON_LINDH);
+    lindh.numbers = numbers.as_ptr();
+    lindh.natoms = 2;
+    lindh.mu = 1.0;
+    let st = unsafe { rgmin_solver_set_precon(session, &lindh) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let mut x = [0.74, 0.1, -0.05, 0.0, 0.02, 0.0];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+    };
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
+    let st = unsafe {
+        rgmin_solver_step(
+            session,
+            Some(chain_eval),
+            Some(chain_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let scale = unsafe { rgmin_solver_precon_scale(session) };
+    assert!((scale - 1.0).abs() < 1e-12, "lindh scale {scale}");
+    unsafe {
+        rgmin_solver_clear_precon(session);
+        assert!(rgmin_solver_precon_scale(session).is_nan());
+    }
+
+    let bonds = [rgmin_bond_t { i: 0, j: 1, k: 2.0 }];
+    let mut ff = precon_blank(RGMIN_PRECON_FF);
+    ff.bonds = bonds.as_ptr();
+    ff.nbonds = 1;
+    ff.mu = 2.0;
+    let st = unsafe { rgmin_solver_set_precon(session, &ff) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let mut x = [1.1, 0.0, 0.0, 0.0, 0.2, -0.1];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
+    let st = unsafe {
+        rgmin_solver_step(
+            session,
+            Some(chain_eval),
+            Some(chain_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let scale = unsafe { rgmin_solver_precon_scale(session) };
+    assert!((scale - 2.0).abs() < 1e-12, "ff scale {scale}");
+    let rejected_bond = [rgmin_bond_t { i: 0, j: 9, k: 1.0 }];
+    ff.bonds = rejected_bond.as_ptr();
+    let rejected = unsafe { rgmin_solver_set_precon(session, &ff) };
+    assert_eq!(rejected, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    unsafe {
+        rgmin_solver_clear_precon(std::ptr::null_mut());
+        rgmin_solver_free(session);
+    }
+    let null_call = unsafe { rgmin_solver_set_precon(std::ptr::null_mut(), &ff) };
+    assert_eq!(null_call, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+
+    let water = [8i32, 1, 1];
+    let mol = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 9) };
+    let mut auto_p = precon_blank(RGMIN_PRECON_AUTO);
+    auto_p.numbers = water.as_ptr();
+    auto_p.natoms = 3;
+    auto_p.geometry_kind = RGMIN_GEOM_MOLECULE;
+    auto_p.mu = 1.0;
+    let st = unsafe { rgmin_solver_set_precon(mol, &auto_p) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let argon = [18i32; 3];
+    auto_p.numbers = argon.as_ptr();
+    auto_p.geometry_kind = RGMIN_GEOM_CLUSTER;
+    let st = unsafe { rgmin_solver_set_precon(mol, &auto_p) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(unsafe { rgmin_solver_precon_scale(mol) }.is_nan());
+    unsafe { rgmin_solver_free(mol) };
+
+    let fire = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE, &ctrl, 9) };
+    auto_p.numbers = water.as_ptr();
+    auto_p.geometry_kind = RGMIN_GEOM_MOLECULE;
+    let st = unsafe { rgmin_solver_set_precon(fire, &auto_p) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(unsafe { rgmin_solver_precon_scale(fire) }.is_nan());
+    let mut short = auto_p;
+    short.struct_size = (std::mem::size_of::<rgmin::ffi::rgmin_precon_t>() - 1) as u32;
+    let st = unsafe { rgmin_solver_set_precon(fire, &short) };
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    short.struct_size = 8;
+    let st = unsafe { rgmin_solver_set_precon(fire, &short) };
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    unsafe { rgmin_solver_free(fire) };
+}
+
+#[test]
+fn precon_struct_offsets_match_the_header() {
+    use rgmin::ffi::{rgmin_angle_t, rgmin_bond_t, rgmin_precon_t};
+    assert_eq!(std::mem::size_of::<rgmin_bond_t>(), 16);
+    assert_eq!(std::mem::offset_of!(rgmin_bond_t, i), 0);
+    assert_eq!(std::mem::offset_of!(rgmin_bond_t, j), 4);
+    assert_eq!(std::mem::offset_of!(rgmin_bond_t, k), 8);
+    assert_eq!(std::mem::size_of::<rgmin_angle_t>(), 24);
+    assert_eq!(std::mem::offset_of!(rgmin_angle_t, i), 0);
+    assert_eq!(std::mem::offset_of!(rgmin_angle_t, vertex), 4);
+    assert_eq!(std::mem::offset_of!(rgmin_angle_t, k), 8);
+    assert_eq!(std::mem::offset_of!(rgmin_angle_t, k_theta), 16);
+    assert_eq!(std::mem::size_of::<rgmin_precon_t>(), 200);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, struct_size), 0);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, kind), 4);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, c_stab), 8);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, mu), 16);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, r_cut), 24);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, cell), 32);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, numbers), 56);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, natoms), 64);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, ghost_z), 72);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, ghost_pos), 80);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nghost), 88);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nbr_i), 96);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nbr_j), 104);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nbr_r), 112);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, npairs), 120);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, anchor_i), 128);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, anchor_r), 136);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nanchor), 144);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, exp_a), 152);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, bonds), 160);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nbonds), 168);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, angles), 176);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, nangles), 184);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, dihedrals), 192);
+    assert_eq!(std::mem::offset_of!(rgmin_precon_t, geometry_kind), 196);
 }

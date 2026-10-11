@@ -71,7 +71,7 @@ fn cholesky(n: usize, a: &[f64]) -> Option<Vec<f64>> {
                 s -= prefix_dot(&l[i * n..i * n + j], &l[j * n..j * n + j]);
             }
             if i == j {
-                if !(s > 1e-18) {
+                if s.partial_cmp(&1e-18) != Some(std::cmp::Ordering::Greater) {
                     return None;
                 }
                 l[i * n + i] = s.sqrt();

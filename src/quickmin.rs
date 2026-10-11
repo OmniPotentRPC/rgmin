@@ -120,7 +120,11 @@ fn project_range(vel: &mut Array1<f64>, force: &Array1<f64>, start: usize, end: 
         power += vel[i] * force[i];
         fn2 += force[i] * force[i];
     }
-    if !(power >= 0.0) || !(fn2 > 0.0) {
+    if !matches!(
+        power.partial_cmp(&0.0),
+        Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)
+    ) || fn2.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+    {
         for i in start..end {
             vel[i] = 0.0;
         }

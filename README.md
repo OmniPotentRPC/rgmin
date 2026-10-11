@@ -49,6 +49,12 @@ gate: same stationary point, Kaplan-Meier, BCa, and a confidence sequence.
 two-loop map and FIRE 2.0 (`uv run --with sympy python validation/<file>.py`).
 Methods: NLCG, BFGS, L-BFGS, SR1, SR2, Newton, RFO, Adam, steepest
 descent, PSO, FIRE, FIRE 2.0, Barzilai-Borwein, Powell dogleg.
+`Solver::set_precon` installs Exp, Lindh, or the bonded metric.
+L-BFGS uses the matrix as the initial inverse Hessian. FIRE and
+nonlinear CG use it as the metric. `select_precon` picks Exp for a
+bulk or a surface of at least 100 atoms, Lindh for a molecule or a
+cluster whose elements are in the Lindh tables, the bonded metric
+when that caller has a force field, and the identity otherwise.
 
 Narrative docs live in [`docs/orgmode/`](docs/orgmode/index.org)
 (Diataxis); the explanation quadrant derives the math behind each

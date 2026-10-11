@@ -121,7 +121,9 @@ pub type HighsCCallback = unsafe extern "C" fn(
 /// A host callback and its context pointer.
 #[derive(Clone, Copy, Debug)]
 pub struct HighsCallback {
+    #[cfg_attr(not(feature = "highs"), allow(dead_code))]
     pub(crate) function: HighsCCallback,
+    #[cfg_attr(not(feature = "highs"), allow(dead_code))]
     pub(crate) user: usize,
 }
 

@@ -48,6 +48,9 @@ ISBN). Do not invent DOIs.
 | Conn–Gould–Toint 2000 | 10.1137/1.9780898719857 | Trust Region Methods |
 | Li–Fukushima cautious BFGS 2001 | 10.1137/S1052623499354242 | On the Global Convergence of the BFGS Method for Nonconvex Unconstrained Optimization Problems |
 | Møller SCG 1993 | 10.1016/S0893-6080(05)80056-5 | A scaled conjugate gradient algorithm for fast supervised learning |
+| Packwood et al. 2016 Exp preconditioner | 10.1063/1.4947024 | A universal preconditioner for simulating condensed phase materials |
+| Lindh et al. 1995 model Hessian | 10.1016/0009-2614(95)00646-L | On the use of a Hessian model function in molecular geometry optimizations |
+| Makri, Ortner, Kermode 2019 FF preconditioner | 10.1063/1.5064465 | A preconditioning scheme for minimum energy path finding methods |
 | Goswami saddle metrics 2025 | 10.1063/5.0283639 | Bayesian hierarchical models for quantitative estimates for performance metrics applied to saddle search algorithms |
 | Dolan–Moré performance profiles | 10.1007/s101070100263 | Benchmarking optimization software with performance profiles |
 | Moré–Wild data profiles | 10.1137/080724083 | Benchmarking Derivative-Free Optimization Algorithms |

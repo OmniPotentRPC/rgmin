@@ -60,6 +60,22 @@ Rust, C sees a small ABI, C++ is a header wrapper.
 - =rgmin_minimize_hess= :: Newton / RFO C entry. Caller supplies a
   dense row-major Hessian. This is a different solver, not an
   L-BFGS option.
+- =Solver::set_precon= / =rgmin_solver_set_precon= :: Exp, Lindh, the
+  bonded metric, or =select_precon=. ABI minor 32.
+  =rgmin_solver_precon_scale= is =μ= after the sine probe.
+- =select_precon= :: L-BFGS and CG: Exp at 100 atoms for bulk,
+  surface, and a metal cluster (ASE ~PreconLBFGS~). Lindh for a
+  covalent molecule or cluster up to ~N_LINDH~. Bonded metric when
+  that caller has a force field and every element is covalent.
+  FIRE auto is the identity.
+
+| C kind | Rust | role |
+|---+---|---|
+| =RGMIN_PRECON_EXP= | =PreconSpec::Exp= | =H_0 = P^{-1}= for L-BFGS, metric for CG and FIRE |
+| =RGMIN_PRECON_LINDH= | =PreconSpec::Lindh= | model Hessian, same solve |
+| =RGMIN_PRECON_FF= | =PreconSpec::Ff= | bonded metric, harmonic terms on the C struct |
+| =RGMIN_PRECON_AUTO= | =select_precon= | the session method plus the how-to table |
+| =RGMIN_PRECON_NONE= | =clear_precon= | drop the metric |
 
 ** What does not live here
 

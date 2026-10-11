@@ -79,6 +79,8 @@ mod minimize;
 /// Shifted Newton and Banerjee RFO on a dense Hessian.
 pub mod newton;
 mod oracle;
+/// Geometry preconditioners: Exp, Lindh, and the bonded FF metric.
+pub mod precon;
 mod pso;
 mod qn;
 /// Sella QuasiNewton / QuasiNewtonIRC restricted step.
@@ -144,6 +146,13 @@ pub use noise::{
     sample_gradient_noise_k, sample_noise, sample_value_gradient_noise,
 };
 pub use oracle::Oracle;
+pub use precon::{
+    AngleTerm, BondTerm, DihedralTerm, Exp, ExpParams, Ff, FfParams, FfTerms, GeometryKind, Ghost,
+    Lindh, LindhParams, MorseTerm, N_LINDH, N_PAR_ASSEMBLE, N_PAR_EXP_APPLY, N_PAR_EXP_SOLVE,
+    N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, Neighbours, OptimizerFamily, PreconChoice, PreconSpec,
+    bonded_terms, estimate_mu, max_atom_displacement, nearest_neighbour_distance, needs_rebuild,
+    select_precon, sine_probe,
+};
 pub use pso::minimize_pso;
 pub use qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 pub use qn_irc::{

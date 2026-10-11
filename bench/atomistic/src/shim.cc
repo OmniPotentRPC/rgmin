@@ -2,10 +2,12 @@
 //
 // One C entry over the rgpot C++ potentials the atomistic benchmark
 // drives: the free-boundary Lennard-Jones cluster, the platinum Morse
-// pair potential, and the Fortran-backed embedded-atom aluminium.
+// pair potential, the Fortran-backed embedded-atom aluminium, the
+// Stillinger-Weber silicon potential, and Asap EMT copper.
 
 #include <cstddef>
 
+#include "rgpot/EMT/EMTPot.hpp"
 #include "rgpot/ForceStructs.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/Morse/MorsePot.hpp"
@@ -25,6 +27,16 @@ const rgpot::MorsePot &morse() {
 
 const rgpot::fortranpots::EAMAlPot &eam_al() {
   static const rgpot::fortranpots::EAMAlPot pot{};
+  return pot;
+}
+
+const rgpot::fortranpots::SWPot &sw() {
+  static const rgpot::fortranpots::SWPot pot{};
+  return pot;
+}
+
+const rgpot::EMTPot &emt() {
+  static const rgpot::EMTPot pot{};
   return pot;
 }
 
@@ -50,6 +62,12 @@ extern "C" int bench_force(int kind, std::size_t natoms, const double *pos,
       break;
     case 2:
       eam_al().forceImpl(in, &out);
+      break;
+    case 3:
+      sw().forceImpl(in, &out);
+      break;
+    case 4:
+      emt().forceImpl(in, &out);
       break;
     default:
       return 2;

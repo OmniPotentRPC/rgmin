@@ -9,6 +9,8 @@ use std::ffi::c_void;
 use std::os::raw::c_int;
 
 use crate::error::{Error, Result};
+
+type DynApply<'a> = &'a dyn Fn(&[f64]) -> Array1<f64>;
 #[cfg(rgmin_has_primme)]
 use crate::vecops::nrm2;
 
@@ -34,8 +36,8 @@ unsafe extern "C" {
 
 #[cfg(rgmin_has_primme)]
 struct ApplyCtx<'a> {
-    apply: &'a dyn Fn(&[f64]) -> Array1<f64>,
-    precond: Option<&'a dyn Fn(&[f64]) -> Array1<f64>>,
+    apply: DynApply<'a>,
+    precond: Option<DynApply<'a>>,
     n: usize,
     actions: Cell<usize>,
 }
@@ -86,7 +88,7 @@ pub(crate) fn solve<F>(
     maxit: usize,
     tol: f64,
     apply: F,
-    precond: Option<&dyn Fn(&[f64]) -> Array1<f64>>,
+    precond: Option<DynApply<'_>>,
 ) -> Result<(Array1<f64>, f64, usize)>
 where
     F: Fn(&[f64]) -> Array1<f64>,
@@ -109,7 +111,7 @@ fn linked_solve<F>(
     maxit: usize,
     tol: f64,
     apply: F,
-    precond: Option<&dyn Fn(&[f64]) -> Array1<f64>>,
+    precond: Option<DynApply<'_>>,
 ) -> Result<(Array1<f64>, f64, usize)>
 where
     F: Fn(&[f64]) -> Array1<f64>,

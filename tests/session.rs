@@ -57,7 +57,6 @@ fn retained_pairs_beat_a_cold_start() {
     }
 
     let mut cold = Solver::new(Method::lbfgs(), control(), 2).with_gtol(1e-8);
-    let mut y = array![-1.2 + 0.05, 1.0 - 0.05];
     // Same start as the warm restart: first quench, then same perturbation.
     let mut z = array![-1.2, 1.0];
     for _ in 0..80 {
@@ -67,7 +66,7 @@ fn retained_pairs_beat_a_cold_start() {
         }
     }
     cold.forget();
-    y = z;
+    let mut y = z;
     y[0] += 0.05;
     y[1] -= 0.05;
     let mut cold_steps = 0usize;
