@@ -77,7 +77,7 @@ mod minimize;
 /// Shifted Newton and Banerjee RFO on a dense Hessian.
 pub mod newton;
 mod oracle;
-/// Universal exponential preconditioner (Packwood et al. 2016).
+/// Geometry preconditioners: Exp, Lindh, and the bonded FF metric.
 pub mod precon;
 mod pso;
 mod qn;
@@ -139,7 +139,11 @@ pub use minimize::{minimize, minimize_method, minimize_method_hess};
 pub use newton::{HessianObjective, HessianOracle, NewtonKind, minimize_newton};
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
 pub use oracle::Oracle;
-pub use precon::{Exp, ExpParams, Neighbours, estimate_mu, nearest_neighbour_distance, sine_probe};
+pub use precon::{
+    AngleTerm, BondTerm, DihedralTerm, Exp, ExpParams, Ff, FfParams, FfTerms, GeometryKind, Ghost,
+    Lindh, LindhParams, MorseTerm, Neighbours, PreconChoice, bonded_terms, estimate_mu,
+    max_atom_displacement, nearest_neighbour_distance, needs_rebuild, select_precon, sine_probe,
+};
 pub use pso::minimize_pso;
 pub use qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 pub use qn_irc::{

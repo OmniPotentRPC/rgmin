@@ -1,4 +1,16 @@
-//! Universal exponential preconditioner.
+//! Geometry preconditioners for atomistic descent.
+//!
+//! [`Exp`] is the universal exponential metric. [`Lindh`] is the model
+//! Hessian of Lindh et al. 1995. [`Ff`] is the bonded reduced Hessian
+//! of Makri, Ortner, and Kermode 2019. All three are sparse symmetric
+//! positive definite matrices, solved by the same Jacobi-preconditioned
+//! conjugate gradients, and held between rebuilds by [`needs_rebuild`].
+//! [`select_precon`] documents which one applies.
+//!
+//! Pair assembly walks fixed site ranges and concatenates them in index
+//! order. Under the `par` feature a matrix-vector product writes each
+//! row from that row's own sum, and a long dot product folds fixed
+//! chunks in chunk order. Neither result depends on the thread count.
 //!
 //! Packwood, Kermode, Mones, Bernstein, Woolley, Gould, Ortner, and
 //! Csányi, *A universal preconditioner for simulating condensed phase
@@ -16,6 +28,17 @@
 //!
 //! `P` is symmetric positive definite for `μ > 0` and `C_stab > 0`.
 //! The linear solve is Jacobi-preconditioned conjugate gradients.
+
+mod ff;
+mod geom;
+mod lindh;
+mod select;
+
+pub(crate) use ff::FfState;
+pub use ff::{AngleTerm, BondTerm, DihedralTerm, Ff, FfParams, FfTerms, MorseTerm, bonded_terms};
+pub(crate) use lindh::LindhState;
+pub use lindh::{Ghost, Lindh, LindhParams};
+pub use select::{GeometryKind, PreconChoice, select_precon};
 
 use std::sync::Arc;
 
@@ -92,12 +115,72 @@ struct Csr {
     diag: Vec<f64>,
 }
 
+/// Sparse SPD metric. `apply` is `P v`. `solve` is `P x = rhs`.
+#[derive(Clone, Debug)]
+pub(crate) struct Metric {
+    csr: Arc<Csr>,
+}
+
+impl Metric {
+    fn from_csr(csr: Csr) -> Self {
+        Self { csr: Arc::new(csr) }
+    }
+
+    pub(crate) fn dim(&self) -> usize {
+        self.csr.n
+    }
+
+    pub(crate) fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {
+        let mut y = vec![0.0; self.csr.n];
+        if v.len() == self.csr.n {
+            matvec(&self.csr, v.as_slice().unwrap_or(&v.to_vec()), &mut y);
+        }
+        Array1::from_vec(y)
+    }
+
+    pub(crate) fn solve(&self, rhs: ArrayView1<f64>) -> Option<Array1<f64>> {
+        if rhs.len() != self.csr.n {
+            return None;
+        }
+        let rhs_vec = rhs
+            .as_slice()
+            .map(<[f64]>::to_vec)
+            .unwrap_or_else(|| rhs.to_vec());
+        solve_pcg(&self.csr, &rhs_vec).map(Array1::from_vec)
+    }
+
+    pub(crate) fn to_dense(&self) -> Array2<f64> {
+        let n = self.csr.n;
+        let mut a = Array2::zeros((n, n));
+        for i in 0..n {
+            for k in self.csr.row_ptr[i]..self.csr.row_ptr[i + 1] {
+                a[(i, self.csr.col_idx[k])] = self.csr.val[k];
+            }
+        }
+        a
+    }
+
+    /// `μ P`. Lindh and FF assemble the model at scale 1 and apply the
+    /// estimated energy scale here, the same place Exp folds `μ` into
+    /// the matrix.
+    pub(crate) fn scaled(&self, mu: f64) -> Self {
+        let mut csr = (*self.csr).clone();
+        for v in &mut csr.val {
+            *v *= mu;
+        }
+        for d in &mut csr.diag {
+            *d *= mu;
+        }
+        Self::from_csr(csr)
+    }
+}
+
 /// Assembled exponential preconditioner `P`.
 #[derive(Clone, Debug)]
 pub struct Exp {
     mu: f64,
     r_nn: f64,
-    csr: Arc<Csr>,
+    metric: Metric,
 }
 
 /// Session copy of the neighbour list and the current factor.
@@ -152,8 +235,12 @@ impl Exp {
         Ok(Self {
             mu,
             r_nn,
-            csr: Arc::new(csr),
+            metric: Metric::from_csr(csr),
         })
+    }
+
+    pub(crate) fn metric(&self) -> &Metric {
+        &self.metric
     }
 
     /// Diagonal SPD matrix. Jacobi PCG inverts it in one iteration.
@@ -172,7 +259,7 @@ impl Exp {
         Self {
             mu: 1.0,
             r_nn: 1.0e9,
-            csr: Arc::new(Csr {
+            metric: Metric::from_csr(Csr {
                 n,
                 row_ptr,
                 col_idx,
@@ -197,17 +284,13 @@ impl Exp {
     /// Matrix order, `3 N`.
     #[must_use]
     pub fn dim(&self) -> usize {
-        self.csr.n
+        self.metric.dim()
     }
 
     /// `P v`.
     #[must_use]
     pub fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {
-        let mut y = vec![0.0; self.csr.n];
-        if v.len() == self.csr.n {
-            matvec(&self.csr, v.as_slice().unwrap_or(&v.to_vec()), &mut y);
-        }
-        Array1::from_vec(y)
+        self.metric.apply(v)
     }
 
     /// Solve `P x = rhs`. `None` when the iterate is not a descent-quality
@@ -215,27 +298,13 @@ impl Exp {
     /// residual stalls).
     #[must_use]
     pub fn solve(&self, rhs: ArrayView1<f64>) -> Option<Array1<f64>> {
-        if rhs.len() != self.csr.n {
-            return None;
-        }
-        let rhs_vec = rhs
-            .as_slice()
-            .map(<[f64]>::to_vec)
-            .unwrap_or_else(|| rhs.to_vec());
-        solve_pcg(&self.csr, &rhs_vec).map(Array1::from_vec)
+        self.metric.solve(rhs)
     }
 
     /// Dense copy, for tests and for a dense Cholesky reference.
     #[must_use]
     pub fn to_dense(&self) -> Array2<f64> {
-        let n = self.csr.n;
-        let mut a = Array2::zeros((n, n));
-        for i in 0..n {
-            for k in self.csr.row_ptr[i]..self.csr.row_ptr[i + 1] {
-                a[(i, self.csr.col_idx[k])] = self.csr.val[k];
-            }
-        }
-        a
+        self.metric.to_dense()
     }
 }
 
@@ -414,16 +483,13 @@ impl ExpState {
 }
 
 /// Largest per-atom displacement between two `3 N` coordinate vectors.
-/// A length that is not a multiple of 3 is treated as one flat vector.
-fn max_atom_displacement(previous: ArrayView1<f64>, current: ArrayView1<f64>) -> f64 {
-    if previous.len() != current.len() {
+///
+/// A length mismatch returns infinity, so [`needs_rebuild`] treats it
+/// as a stale matrix.
+#[must_use]
+pub fn max_atom_displacement(previous: ArrayView1<f64>, current: ArrayView1<f64>) -> f64 {
+    if previous.len() != current.len() || previous.len() % 3 != 0 {
         return f64::INFINITY;
-    }
-    if previous.len() % 3 != 0 {
-        return (0..previous.len())
-            .map(|i| (previous[i] - current[i]).powi(2))
-            .sum::<f64>()
-            .sqrt();
     }
     let mut best = 0.0_f64;
     for i in (0..previous.len()).step_by(3) {
@@ -437,12 +503,67 @@ fn max_atom_displacement(previous: ArrayView1<f64>, current: ArrayView1<f64>) ->
     best
 }
 
-/// Rebuild when the largest atomic move exceeds half of `scale`.
-fn needs_rebuild(max_atom_displacement: f64, scale: f64) -> bool {
+/// Whether `P` should be reassembled.
+///
+/// Packwood et al. 2016 rebuild the exponential metric when the largest
+/// atomic move since the last assembly exceeds half the nearest-neighbour
+/// distance. Lindh and FF use the same rule. `scale` is that distance.
+/// A nonpositive or nonfinite scale, or a nonfinite displacement, rebuilds.
+#[must_use]
+pub fn needs_rebuild(max_atom_displacement: f64, scale: f64) -> bool {
     if !(scale.is_finite() && scale > 0.0) || !max_atom_displacement.is_finite() {
         return true;
     }
     max_atom_displacement > 0.5 * scale
+}
+
+/// Installed geometry metric. One slot, replaced by the next setter.
+pub(crate) enum Slot {
+    Exp(ExpState),
+    Lindh(lindh::LindhState),
+    Ff(ff::FfState),
+}
+
+impl Slot {
+    pub(crate) fn metric(&self) -> Option<&Metric> {
+        match self {
+            Self::Exp(state) => state.matrix().map(Exp::metric),
+            Self::Lindh(state) => state.metric(),
+            Self::Ff(state) => state.metric(),
+        }
+    }
+
+    pub(crate) fn mu(&self) -> Option<f64> {
+        match self {
+            Self::Exp(state) => state.mu(),
+            Self::Lindh(_) | Self::Ff(_) => None,
+        }
+    }
+
+    /// `Ok(true)` when the installed matrix was replaced.
+    pub(crate) fn refresh<G>(
+        &mut self,
+        positions: ArrayView1<f64>,
+        grad_here: &Array1<f64>,
+        grad: G,
+    ) -> Result<bool>
+    where
+        G: Fn(ArrayView1<f64>) -> Array1<f64>,
+    {
+        match self {
+            Self::Exp(state) => state.refresh(positions, grad_here, grad),
+            Self::Lindh(state) => state.refresh(positions, grad_here, grad),
+            Self::Ff(state) => state.refresh(positions, grad_here, grad),
+        }
+    }
+
+    pub(crate) fn scale(&self) -> Option<f64> {
+        match self {
+            Self::Exp(state) => state.mu(),
+            Self::Lindh(state) => state.mu(),
+            Self::Ff(state) => state.mu(),
+        }
+    }
 }
 
 /// Paper's `r_nn`: the maximum, over atoms that have a neighbour, of
@@ -579,6 +700,54 @@ where
     }
     let pv = p1.apply(v.view());
     let den = v.dot(&pv);
+    if !(den.is_finite() && den.abs() > 1e-30 && num.is_finite()) {
+        return Err(Error::Precon {
+            what: "mu estimate denominator vanished",
+        });
+    }
+    let mu = num / den;
+    if !(mu.is_finite() && mu > 0.0) {
+        return Err(Error::Precon {
+            what: "mu estimate is not positive",
+        });
+    }
+    Ok(mu)
+}
+
+/// `μ = vᵀ (∇E(x+v) - ∇E(x)) / vᵀ P v` for a model already at scale 1.
+///
+/// The probe is [`sine_probe`]. A nonpositive ratio is an error. The
+/// session then keeps the previous scale, or `1` if it has none.
+pub(crate) fn model_scale<G>(
+    metric: &Metric,
+    positions: ArrayView1<f64>,
+    r_nn: f64,
+    lengths: Option<[f64; 3]>,
+    grad_here: &Array1<f64>,
+    grad: G,
+) -> Result<f64>
+where
+    G: Fn(ArrayView1<f64>) -> Array1<f64>,
+{
+    if grad_here.len() != positions.len() {
+        return Err(Error::Precon {
+            what: "gradient length does not match positions",
+        });
+    }
+    let v = sine_probe(positions, r_nn, lengths);
+    let mut shifted = positions.to_owned();
+    shifted += &v;
+    let g1 = grad(shifted.view());
+    if g1.len() != positions.len() {
+        return Err(Error::Precon {
+            what: "gradient length does not match positions",
+        });
+    }
+    let mut num = 0.0;
+    for i in 0..positions.len() {
+        num += (g1[i] - grad_here[i]) * v[i];
+    }
+    let den = v.dot(&metric.apply(v.view()));
     if !(den.is_finite() && den.abs() > 1e-30 && num.is_finite()) {
         return Err(Error::Precon {
             what: "mu estimate denominator vanished",
@@ -742,10 +911,15 @@ fn build_csr(
     for i in 0..n {
         trips.push((i, i, diag[i]));
     }
+    csr_from_coo(n, trips)
+}
+
+fn csr_from_coo(n: usize, mut trips: Vec<(usize, usize, f64)>) -> Csr {
     trips.sort_unstable_by(|p, q| (p.0, p.1).cmp(&(q.0, q.1)));
     let mut row_ptr = Vec::with_capacity(n + 1);
     let mut col_idx = Vec::with_capacity(trips.len());
     let mut val = Vec::with_capacity(trips.len());
+    let mut diag = vec![0.0; n];
     row_ptr.push(0);
     let mut cursor = 0;
     while cursor < trips.len() {
@@ -761,6 +935,9 @@ fn build_csr(
         }
         col_idx.push(col);
         val.push(acc);
+        if row == col {
+            diag[row] = acc;
+        }
     }
     while row_ptr.len() <= n {
         row_ptr.push(col_idx.len());
@@ -774,7 +951,44 @@ fn build_csr(
     }
 }
 
+/// Map `0..n` and keep index order.
+///
+/// With the `par` feature the chunks run on the current rayon pool.
+/// `collect` on an indexed iterator concatenates in index order, so the
+/// output does not depend on how many threads the pool has.
+fn ordered_map<T, F>(n: usize, f: F) -> Vec<T>
+where
+    T: Send,
+    F: Fn(usize) -> T + Send + Sync,
+{
+    #[cfg(feature = "par")]
+    {
+        use rayon::prelude::*;
+        if n >= 2 {
+            return (0..n).into_par_iter().map(f).collect();
+        }
+    }
+    (0..n).map(f).collect()
+}
+
 fn matvec(a: &Csr, x: &[f64], y: &mut [f64]) {
+    #[cfg(feature = "par")]
+    {
+        use rayon::prelude::*;
+        // Each row is an independent dot product. Writing `y[i]` from
+        // that row does not reorder any sum, so the vector matches the
+        // serial loop at every thread count.
+        if a.n >= 64 {
+            y.par_iter_mut().enumerate().for_each(|(i, yi)| {
+                let mut s = 0.0;
+                for k in a.row_ptr[i]..a.row_ptr[i + 1] {
+                    s += a.val[k] * x[a.col_idx[k]];
+                }
+                *yi = s;
+            });
+            return;
+        }
+    }
     for i in 0..a.n {
         let mut s = 0.0;
         for k in a.row_ptr[i]..a.row_ptr[i + 1] {
@@ -785,6 +999,26 @@ fn matvec(a: &Csr, x: &[f64], y: &mut [f64]) {
 }
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
+    #[cfg(feature = "par")]
+    {
+        // Fixed chunks, then a left fold of those partials. The chunk
+        // bounds do not depend on the thread count, and the fold is in
+        // chunk-index order, so 1, 2, and N threads produce the same bits.
+        const CHUNK: usize = 1024;
+        if a.len() >= 4096 {
+            let nchunks = a.len().div_ceil(CHUNK);
+            let partials = ordered_map(nchunks, |c| {
+                let start = c * CHUNK;
+                let end = (start + CHUNK).min(a.len());
+                let mut acc = 0.0;
+                for i in start..end {
+                    acc += a[i] * b[i];
+                }
+                acc
+            });
+            return partials.into_iter().fold(0.0, |acc, v| acc + v);
+        }
+    }
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 

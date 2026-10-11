@@ -50,7 +50,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 31
+#define RGMIN_ABI_VERSION_MINOR 32
 #define RGMIN_ABI_LAYOUT_REVISION 2
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -227,8 +227,34 @@ rgmin_status_t rgmin_solver_set_exp(rgmin_solver_t *solver, const rgmin_exp_t *p
                                     size_t nanchor);
 /** Drop the preconditioner installed by \ref rgmin_solver_set_exp. */
 void rgmin_solver_clear_exp(rgmin_solver_t *solver);
-/** Energy scale, or NaN when none is installed. */
+/** Energy scale of an exponential preconditioner, or NaN when none is installed. */
 double rgmin_solver_exp_mu(const rgmin_solver_t *solver);
+/** Install the Lindh model Hessian. \a numbers has length \a natoms and
+ *  the session dimension is \c 3*natoms. Ghost pointers are null when
+ *  \a nghost is 0. \a c_stab and \a mu are NaN for the default
+ *  stabilization and an estimated scale. A nonpositive \a r_cut or
+ *  lattice length leaves that choice open. Nonzero \a dihedrals adds
+ *  the torsion term. The geometry arrives on the next step.
+ *  ABI minor 32. */
+rgmin_status_t rgmin_solver_set_lindh(rgmin_solver_t *solver, const int32_t *numbers,
+                                      size_t natoms, const int32_t *ghost_z,
+                                      const double *ghost_pos, size_t nghost, double c_stab,
+                                      double r_cut, double mu, double length_x, double length_y,
+                                      double length_z, int32_t dihedrals);
+/** Install the bonded FF metric. Bond pointers have length \a nbonds.
+ *  Angle pointers have length \a nangles, with the vertex in \a angle_v.
+ *  A zero count makes that pointer set null. \a c_stab and \a mu are NaN
+ *  for the default stabilization and an estimated scale. ABI minor 32. */
+rgmin_status_t rgmin_solver_set_ff(rgmin_solver_t *solver, const uint32_t *bond_i,
+                                   const uint32_t *bond_j, const double *bond_k, size_t nbonds,
+                                   const uint32_t *angle_i, const uint32_t *angle_v,
+                                   const uint32_t *angle_k, const double *angle_kt, size_t nangles,
+                                   double c_stab, double r_cut, double mu, double length_x,
+                                   double length_y, double length_z);
+/** Drop whichever geometry preconditioner is installed. */
+void rgmin_solver_clear_precon(rgmin_solver_t *solver);
+/** Energy scale of the installed geometry preconditioner, or NaN. */
+double rgmin_solver_precon_scale(const rgmin_solver_t *solver);
 /** How a session takes a proposed step (eOn lbfgs_accept). */
 typedef enum rgmin_accept_t {
     RGMIN_ACCEPT_NONE = 0,

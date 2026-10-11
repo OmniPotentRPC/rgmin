@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Lindh model Hessian (`Lindh`, `Solver::set_lindh`, C `rgmin_solver_set_lindh`)
+  and the bonded FF metric (`Ff`, `Solver::set_ff`, C `rgmin_solver_set_ff`),
+  ABI minor 32. Both are sparse SPD matrices solved by the same Jacobi
+  conjugate gradients as `Exp`, and both are held until the largest atomic
+  move exceeds half the nearest-neighbour distance. `select_precon` picks
+  `Exp` for a bulk or a surface of at least 100 atoms, `Lindh` or `Ff` for
+  a molecule or a cluster, and the identity otherwise. Pair ranges are
+  concatenated in index order, so the matrix does not depend on the thread
+  count. Lindh, Bernhardsson, Karlström, and Malmqvist, Chem. Phys. Lett.
+  241, 423 (1995), https://doi.org/10.1016/0009-2614(95)00646-L.
+  Makri, Ortner, and Kermode, J. Chem. Phys. 150, 094109 (2019),
+  https://doi.org/10.1063/1.5064465.
 - Universal exponential preconditioner (`Exp`, `Solver::set_exp`,
   C `rgmin_solver_set_exp`, ABI minor 31). A caller-supplied neighbour
   list builds the stabilized Packwood matrix. L-BFGS uses it as

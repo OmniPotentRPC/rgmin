@@ -23,7 +23,7 @@ use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
 use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
-use crate::precon::{ExpParams, ExpState, Neighbours};
+use crate::precon::{ExpParams, FfParams, FfTerms, Ghost, LindhParams, Neighbours, Slot};
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
@@ -48,15 +48,15 @@ const SESSION_LINESEARCH: LineSearch = LineSearch::Wolfe {
     maxiter: 20,
 };
 
-/// `P^{-1} v` when an exponential metric is installed, otherwise `v`.
+/// `P^{-1} v` when a geometry metric is installed, otherwise `v`.
 ///
 /// A failed solve is an error. Substituting `v` would mix `P^{-1} g` and
 /// `g` inside one CG recurrence or one FIRE mix.
-fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Result<Array1<f64>> {
-    match exp {
+fn metric_vector(precon: &Option<Slot>, v: &Array1<f64>) -> Result<Array1<f64>> {
+    match precon {
         None => Ok(v.clone()),
         Some(state) => {
-            let p = state.matrix().ok_or(Error::Precon {
+            let p = state.metric().ok_or(Error::Precon {
                 what: "metric is not assembled",
             })?;
             p.solve(v.view()).ok_or(Error::Precon {
@@ -77,12 +77,12 @@ fn nlcg_steepest(z: &Array1<f64>, accept: Accept, istep: f64) -> Array1<f64> {
 
 /// P-norms for the FIRE mix: `sqrt(v^T P v)` and `sqrt(F · P^{-1} F)`.
 fn fire_mix(
-    exp: &Option<ExpState>,
+    precon: &Option<Slot>,
     vel: &Array1<f64>,
     raw: &Array1<f64>,
     steepest: &Array1<f64>,
 ) -> Option<FireMix> {
-    let p = exp.as_ref().and_then(ExpState::matrix)?;
+    let p = precon.as_ref().and_then(Slot::metric)?;
     let pv = p.apply(vel.view());
     let vel_n = vel.dot(&pv).max(0.0).sqrt();
     let dir_n = raw.dot(steepest).max(0.0).sqrt();
@@ -127,8 +127,8 @@ pub struct Solver {
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
-    /// Packwood exponential metric. `None` leaves every method unchanged.
-    exp: Option<ExpState>,
+    /// Geometry metric. `None` leaves every method unchanged.
+    precon: Option<Slot>,
     /// Bumped when `P` is installed, cleared, or rebuilt.
     metric_epoch: u64,
     /// Times NLCG replaced a non-descent direction with steepest descent.
@@ -145,7 +145,7 @@ enum Inner {
         dir: Array1<f64>,
         g_old: Array1<f64>,
         /// `P^{-1} g` at the previous accepted point. Equals `g_old` when
-        /// no exponential metric is installed.
+        /// no geometry metric is installed.
         z_old: Array1<f64>,
         d_old: Array1<f64>,
         initialized: bool,
@@ -240,7 +240,7 @@ impl Solver {
             last_pos: None,
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
-            exp: None,
+            precon: None,
             metric_epoch: 0,
             nlcg_descent_fallbacks: 0,
             inner,
@@ -266,9 +266,66 @@ impl Solver {
                 dim: self.dim,
             });
         }
-        let state = ExpState::new(positions, neighbours, params)?;
-        let matrix = state.matrix().cloned();
-        self.exp = Some(state);
+        let state = crate::precon::ExpState::new(positions, neighbours, params)?;
+        let matrix = state.matrix().map(|m| m.metric().clone());
+        self.precon = Some(Slot::Exp(state));
+        self.metric_epoch = self.metric_epoch.wrapping_add(1);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(matrix);
+        }
+        Ok(())
+    }
+
+    /// Install the Lindh model Hessian at `positions`.
+    ///
+    /// `z` has one atomic number per free atom. `ghosts` are frozen
+    /// atoms. L-BFGS takes \(H_0 = P^{-1}\). FIRE and nonlinear CG take
+    /// `P` as the metric. The matrix is held until the largest atomic
+    /// move exceeds half the nearest-neighbour distance, the same rule
+    /// as [`Self::set_exp`].
+    pub fn set_lindh(
+        &mut self,
+        positions: ArrayView1<f64>,
+        z: &[i32],
+        ghosts: &[Ghost],
+        params: &LindhParams,
+    ) -> Result<()> {
+        if positions.len() != self.dim {
+            return Err(Error::Dim {
+                got: positions.len(),
+                dim: self.dim,
+            });
+        }
+        let state = crate::precon::LindhState::new(positions, z, ghosts, params)?;
+        let matrix = state.metric().cloned();
+        self.precon = Some(Slot::Lindh(state));
+        self.metric_epoch = self.metric_epoch.wrapping_add(1);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(matrix);
+        }
+        Ok(())
+    }
+
+    /// Install the bonded FF metric at `positions`.
+    ///
+    /// The terms are harmonic bonds and angles, Morse bonds, and
+    /// harmonic torsions. The hold rule is the one used by
+    /// [`Self::set_exp`].
+    pub fn set_ff(
+        &mut self,
+        positions: ArrayView1<f64>,
+        terms: FfTerms<'_>,
+        params: &FfParams,
+    ) -> Result<()> {
+        if positions.len() != self.dim {
+            return Err(Error::Dim {
+                got: positions.len(),
+                dim: self.dim,
+            });
+        }
+        let state = crate::precon::FfState::new(positions, terms, params)?;
+        let matrix = state.metric().cloned();
+        self.precon = Some(Slot::Ff(state));
         self.metric_epoch = self.metric_epoch.wrapping_add(1);
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_h0(matrix);
@@ -278,17 +335,37 @@ impl Solver {
 
     /// Install a neighbour list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
-    pub(crate) fn set_exp_deferred(&mut self, state: ExpState) {
-        self.exp = Some(state);
+    pub(crate) fn set_exp_deferred(&mut self, state: crate::precon::ExpState) {
+        self.precon = Some(Slot::Exp(state));
         self.metric_epoch = self.metric_epoch.wrapping_add(1);
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_h0(None);
         }
     }
 
-    /// Drop the exponential preconditioner.
+    /// Install a Lindh list whose geometry arrives on the next step.
+    #[cfg(feature = "capi")]
+    pub(crate) fn set_lindh_deferred(&mut self, state: crate::precon::LindhState) {
+        self.precon = Some(Slot::Lindh(state));
+        self.metric_epoch = self.metric_epoch.wrapping_add(1);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(None);
+        }
+    }
+
+    /// Install an FF list whose geometry arrives on the next step.
+    #[cfg(feature = "capi")]
+    pub(crate) fn set_ff_deferred(&mut self, state: crate::precon::FfState) {
+        self.precon = Some(Slot::Ff(state));
+        self.metric_epoch = self.metric_epoch.wrapping_add(1);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(None);
+        }
+    }
+
+    /// Drop the installed geometry preconditioner.
     pub fn clear_exp(&mut self) {
-        self.exp = None;
+        self.precon = None;
         self.metric_epoch = self.metric_epoch.wrapping_add(1);
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_h0(None);
@@ -302,28 +379,38 @@ impl Solver {
         self.nlcg_descent_fallbacks
     }
 
-    /// Energy scale of the installed preconditioner, after estimation.
+    /// Energy scale of an installed exponential preconditioner, after
+    /// estimation. Lindh and FF return `None` here; their scale is
+    /// [`Self::precon_scale`].
     #[must_use]
     pub fn exp_mu(&self) -> Option<f64> {
-        self.exp.as_ref().and_then(ExpState::mu)
+        self.precon.as_ref().and_then(Slot::mu)
+    }
+
+    /// Energy scale of the installed geometry preconditioner, after
+    /// estimation. `None` when no preconditioner is installed or the
+    /// scale has not been estimated yet.
+    #[must_use]
+    pub fn precon_scale(&self) -> Option<f64> {
+        self.precon.as_ref().and_then(Slot::scale)
     }
 
     fn refresh_exp<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
-        if self.exp.is_none() {
+        if self.precon.is_none() {
             return Ok(());
         }
         let grad_fn = |p: ArrayView1<f64>| obj.grad(p);
         let mut rebuilt = false;
-        if let Some(state) = &mut self.exp {
+        if let Some(state) = &mut self.precon {
             rebuilt = state.refresh(x.view(), grad, grad_fn)?;
         }
         if rebuilt {
             self.metric_epoch = self.metric_epoch.wrapping_add(1);
         }
-        let matrix = self.exp.as_ref().and_then(|s| s.matrix().cloned());
+        let matrix = self.precon.as_ref().and_then(|s| s.metric().cloned());
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_h0(matrix);
         }
@@ -1616,7 +1703,7 @@ impl Solver {
                 prev_alpha,
                 prev_gd,
             } => {
-                let z_now = metric_vector(&self.exp, &grad)?;
+                let z_now = metric_vector(&self.precon, &grad)?;
                 if !*initialized || *z_epoch != self.metric_epoch {
                     // A new or replaced P makes z_old belong to the old
                     // matrix. This iteration is steepest descent in the
@@ -1634,7 +1721,7 @@ impl Solver {
                 }
                 let gd_used = crate::vecops::dot(grad.view(), dir.view());
                 let cap = cap_alpha(dir.view(), &self.control, self.atom_maxmove);
-                let first = if self.exp.is_some() {
+                let first = if self.precon.is_some() {
                     1.0
                 } else {
                     self.control.istep
@@ -1664,7 +1751,7 @@ impl Solver {
                 value = t.f;
                 grad = t.g;
                 if t.moved || self.accept != Accept::Step {
-                    let z_new = metric_vector(&self.exp, &grad)?;
+                    let z_new = metric_vector(&self.precon, &grad)?;
                     let ctx = ConjugacyContext {
                         current_gradient: grad.view(),
                         previous_gradient: g_old.view(),
@@ -1847,14 +1934,14 @@ impl Solver {
                 #[allow(unused_mut)]
                 let mut raw = grad.mapv(|g| -g);
                 #[allow(unused_mut)]
-                let mut steepest = metric_vector(&self.exp, &raw)?;
+                let mut steepest = metric_vector(&self.precon, &raw)?;
                 #[cfg(feature = "highs")]
                 if boxed {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut raw);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
-                let mix = fire_mix(&self.exp, &state.vel, &raw, &steepest);
+                let mix = fire_mix(&self.precon, &state.vel, &raw, &steepest);
                 let dx = match ext {
                     Some(ext) => fire2_displacement_metric(state, ext, &raw, &steepest, mix),
                     None => fire_displacement(state, &steepest),
@@ -1877,14 +1964,14 @@ impl Solver {
                 #[allow(unused_mut)]
                 let mut raw_new = grad.mapv(|g| -g);
                 #[allow(unused_mut)]
-                let mut steep_new = metric_vector(&self.exp, &raw_new)?;
+                let mut steep_new = metric_vector(&self.precon, &raw_new)?;
                 #[cfg(feature = "highs")]
                 if boxed {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut raw_new);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut steep_new);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
-                let mix_new = fire_mix(&self.exp, &state.vel, &raw_new, &steep_new);
+                let mix_new = fire_mix(&self.precon, &state.vel, &raw_new, &steep_new);
                 fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
             }
             Inner::QuickMin(state) => {
@@ -2638,7 +2725,10 @@ mod retained_neb_guard_tests {
             c2: 0.1,
             maxiter: 20,
         });
-        solver.exp = Some(crate::precon::ExpState::holding_diagonal(&lam, x.view()));
+        solver.precon = Some(Slot::Exp(crate::precon::ExpState::holding_diagonal(
+            &lam,
+            x.view(),
+        )));
         solver.metric_epoch = 1;
         let mut steps = 0usize;
         let mut used = 0usize;

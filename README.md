@@ -50,6 +50,11 @@ descent, PSO, FIRE, FIRE 2.0, Barzilai-Borwein, Powell dogleg.
 `Solver::set_exp` installs the Packwood exponential preconditioner
 (J. Chem. Phys. 144, 164109, 2016) as the L-BFGS initial inverse
 Hessian and as the metric for FIRE and nonlinear CG.
+`Solver::set_lindh` installs the Lindh model Hessian
+(Chem. Phys. Lett. 241, 423, 1995) and `Solver::set_ff` the bonded
+FF metric (J. Chem. Phys. 150, 094109, 2019). `select_precon` picks
+Exp for a bulk or a surface of at least 100 atoms, Lindh or FF for
+a molecule or a cluster, and the identity otherwise.
 
 Narrative docs live in [`docs/orgmode/`](docs/orgmode/index.org)
 (Diataxis); the explanation quadrant derives the math behind each

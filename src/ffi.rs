@@ -64,7 +64,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 31;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 32;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 2;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1681,6 +1681,227 @@ pub unsafe extern "C" fn rgmin_solver_exp_mu(solver: *const rgmin_solver_t) -> f
         return f64::NAN;
     }
     unsafe { (*solver).solver.exp_mu().unwrap_or(f64::NAN) }
+}
+
+/// Install the Lindh model Hessian. ABI minor 32.
+///
+/// `numbers` has length `natoms` and `3 * natoms` is the session
+/// dimension. `ghost_z` and `ghost_pos` describe frozen atoms;
+/// `ghost_pos` is `3 * nghost` Cartesian coordinates. Both ghost
+/// pointers are null when `nghost` is 0. `c_stab` and `mu` are NaN for
+/// the default stabilization and an estimated scale. `r_cut` and a
+/// lattice length are nonpositive to leave that choice open.
+/// `dihedrals` nonzero adds the torsion term. The geometry arrives on
+/// the next step.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_lindh(
+    solver: *mut rgmin_solver_t,
+    numbers: *const i32,
+    natoms: usize,
+    ghost_z: *const i32,
+    ghost_pos: *const f64,
+    nghost: usize,
+    c_stab: f64,
+    r_cut: f64,
+    mu: f64,
+    length_x: f64,
+    length_y: f64,
+    length_z: f64,
+    dihedrals: i32,
+) -> rgmin_status_t {
+    if solver.is_null() || numbers.is_null() || natoms == 0 {
+        set_last_error("rgmin_solver_set_lindh: null solver or atomic numbers");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    if nghost > 0 && (ghost_z.is_null() || ghost_pos.is_null()) {
+        set_last_error("rgmin_solver_set_lindh: null ghost list");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let dim = unsafe { (*solver).solver.dim() };
+    if dim != 3 * natoms {
+        set_last_error("rgmin_solver_set_lindh: dimension is not 3 * natoms");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let z = unsafe { slice::from_raw_parts(numbers, natoms) }.to_vec();
+    let mut ghosts = Vec::with_capacity(nghost);
+    if nghost > 0 {
+        let gz = unsafe { slice::from_raw_parts(ghost_z, nghost) };
+        let gp = unsafe { slice::from_raw_parts(ghost_pos, 3 * nghost) };
+        for i in 0..nghost {
+            ghosts.push(crate::Ghost {
+                z: gz[i],
+                position: [gp[3 * i], gp[3 * i + 1], gp[3 * i + 2]],
+            });
+        }
+    }
+    let positive = |v: f64| v.is_finite() && v > 0.0;
+    let mut params = crate::LindhParams::default();
+    if c_stab.is_finite() {
+        params.c_stab = c_stab;
+    }
+    if positive(r_cut) {
+        params.r_cut = Some(r_cut);
+    }
+    if mu.is_finite() {
+        params.mu = Some(mu);
+    }
+    if positive(length_x) || positive(length_y) || positive(length_z) {
+        params.lengths = Some([length_x, length_y, length_z]);
+    }
+    params.dihedrals = dihedrals != 0;
+    match crate::precon::LindhState::deferred(z, ghosts, params) {
+        Ok(state) => {
+            unsafe { (*solver).solver.set_lindh_deferred(state) };
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        Err(e) => {
+            set_last_error(&e.to_string());
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        }
+    }
+}
+
+/// Install the bonded FF metric. ABI minor 32.
+///
+/// `bond_i`, `bond_j`, and `bond_k` have length `nbonds`. `angle_i`,
+/// `angle_v`, `angle_k`, and `angle_kt` have length `nangles`, with the
+/// angle at `angle_v`. A zero count makes that pointer set null. `c_stab`
+/// and `mu` are NaN for the default stabilization and an estimated
+/// scale. `r_cut` and a lattice length are nonpositive to leave that
+/// choice open. Morse and torsion terms are set from Rust. The geometry
+/// arrives on the next step.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_ff(
+    solver: *mut rgmin_solver_t,
+    bond_i: *const u32,
+    bond_j: *const u32,
+    bond_k: *const f64,
+    nbonds: usize,
+    angle_i: *const u32,
+    angle_v: *const u32,
+    angle_k: *const u32,
+    angle_kt: *const f64,
+    nangles: usize,
+    c_stab: f64,
+    r_cut: f64,
+    mu: f64,
+    length_x: f64,
+    length_y: f64,
+    length_z: f64,
+) -> rgmin_status_t {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_ff: null solver");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    if nbonds > 0 && (bond_i.is_null() || bond_j.is_null() || bond_k.is_null()) {
+        set_last_error("rgmin_solver_set_ff: null bond list");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    if nangles > 0
+        && (angle_i.is_null() || angle_v.is_null() || angle_k.is_null() || angle_kt.is_null())
+    {
+        set_last_error("rgmin_solver_set_ff: null angle list");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let dim = unsafe { (*solver).solver.dim() };
+    if dim % 3 != 0 {
+        set_last_error("rgmin_solver_set_ff: dimension is not a multiple of 3");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let mut bonds = Vec::with_capacity(nbonds);
+    if nbonds > 0 {
+        let bi = unsafe { slice::from_raw_parts(bond_i, nbonds) };
+        let bj = unsafe { slice::from_raw_parts(bond_j, nbonds) };
+        let bk = unsafe { slice::from_raw_parts(bond_k, nbonds) };
+        for n in 0..nbonds {
+            bonds.push(crate::BondTerm {
+                i: bi[n] as usize,
+                j: bj[n] as usize,
+                k: bk[n],
+            });
+        }
+    }
+    let mut angles = Vec::with_capacity(nangles);
+    if nangles > 0 {
+        let ai = unsafe { slice::from_raw_parts(angle_i, nangles) };
+        let av = unsafe { slice::from_raw_parts(angle_v, nangles) };
+        let ak = unsafe { slice::from_raw_parts(angle_k, nangles) };
+        let at = unsafe { slice::from_raw_parts(angle_kt, nangles) };
+        for n in 0..nangles {
+            angles.push(crate::AngleTerm {
+                i: ai[n] as usize,
+                vertex: av[n] as usize,
+                k: ak[n] as usize,
+                k_theta: at[n],
+            });
+        }
+    }
+    let positive = |v: f64| v.is_finite() && v > 0.0;
+    let mut params = crate::FfParams::default();
+    if c_stab.is_finite() {
+        params.c_stab = c_stab;
+    }
+    if positive(r_cut) {
+        params.r_cut = Some(r_cut);
+    }
+    if mu.is_finite() {
+        params.mu = Some(mu);
+    }
+    if positive(length_x) || positive(length_y) || positive(length_z) {
+        params.lengths = Some([length_x, length_y, length_z]);
+    }
+    match crate::precon::FfState::deferred(bonds, angles, params) {
+        Ok(state) => {
+            unsafe { (*solver).solver.set_ff_deferred(state) };
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        Err(e) => {
+            set_last_error(&e.to_string());
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        }
+    }
+}
+
+/// Drop whichever geometry preconditioner is installed.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_clear_precon(solver: *mut rgmin_solver_t) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.clear_exp() };
+}
+
+/// Energy scale of the installed geometry preconditioner, or NaN.
+///
+/// # Safety
+///
+/// Every pointer argument must be null or valid for the type and
+/// length documented above; a session handle must come from
+/// [`rgmin_solver_create`] and not yet be freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_precon_scale(solver: *const rgmin_solver_t) -> f64 {
+    if solver.is_null() {
+        return f64::NAN;
+    }
+    unsafe { (*solver).solver.precon_scale().unwrap_or(f64::NAN) }
 }
 
 /// How a session takes a proposed step (eOn `lbfgs_accept`).

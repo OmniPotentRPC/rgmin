@@ -49,6 +49,8 @@ ISBN). Do not invent DOIs.
 | Li–Fukushima cautious BFGS 2001 | 10.1137/S1052623499354242 | On the Global Convergence of the BFGS Method for Nonconvex Unconstrained Optimization Problems |
 | Møller SCG 1993 | 10.1016/S0893-6080(05)80056-5 | A scaled conjugate gradient algorithm for fast supervised learning |
 | Packwood et al. 2016 Exp preconditioner | 10.1063/1.4947024 | A universal preconditioner for simulating condensed phase materials |
+| Lindh et al. 1995 model Hessian | 10.1016/0009-2614(95)00646-L | On the use of a Hessian model function in molecular geometry optimizations |
+| Makri, Ortner, Kermode 2019 FF preconditioner | 10.1063/1.5064465 | A preconditioning scheme for minimum energy path finding methods |
 
 Polak-Ribiere 1969 and Hestenes-Stiefel 1952: cite the paper/book
 title in rustdoc if no DOI is on this list. Do not mint a DOI.

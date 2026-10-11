@@ -576,7 +576,7 @@ fn c_abi_diis_reduces_a_quadratic() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 31);
+    assert_eq!(stamp.abi_minor, 32);
     assert_eq!(stamp.layout_revision, 2);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -1560,4 +1560,150 @@ fn c_abi_exp_installs_and_steps() {
         assert!(rgmin_solver_exp_mu(session).is_nan());
         rgmin_solver_free(session);
     }
+}
+
+#[test]
+fn c_abi_lindh_and_ff_install_and_step() {
+    use rgmin::ffi::{
+        rgmin_solver_clear_precon, rgmin_solver_precon_scale, rgmin_solver_set_ff,
+        rgmin_solver_set_lindh,
+    };
+
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 1e-12,
+        istep: 1.0,
+        memory: 4,
+        maxmove: 0.0,
+    };
+    let numbers = [1i32, 1];
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 6) };
+    assert!(!session.is_null());
+    let bad = unsafe {
+        rgmin_solver_set_lindh(
+            session,
+            [0, 1].as_ptr(),
+            2,
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            f64::NAN,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0,
+        )
+    };
+    assert_eq!(bad, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    let st = unsafe {
+        rgmin_solver_set_lindh(
+            session,
+            numbers.as_ptr(),
+            2,
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            f64::NAN,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0,
+        )
+    };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let mut x = [0.74, 0.1, -0.05, 0.0, 0.02, 0.0];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+    };
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
+    let st = unsafe {
+        rgmin_solver_step(
+            session,
+            Some(chain_eval),
+            Some(chain_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let scale = unsafe { rgmin_solver_precon_scale(session) };
+    assert!((scale - 1.0).abs() < 1e-12, "lindh scale {scale}");
+    unsafe {
+        rgmin_solver_clear_precon(session);
+        assert!(rgmin_solver_precon_scale(session).is_nan());
+    }
+
+    let bond_i = [0u32];
+    let bond_j = [1u32];
+    let bond_k = [2.0f64];
+    let st = unsafe {
+        rgmin_solver_set_ff(
+            session,
+            bond_i.as_ptr(),
+            bond_j.as_ptr(),
+            bond_k.as_ptr(),
+            1,
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            f64::NAN,
+            0.0,
+            2.0,
+            0.0,
+            0.0,
+            0.0,
+        )
+    };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let mut x = [1.1, 0.0, 0.0, 0.0, 0.2, -0.1];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
+    let st = unsafe {
+        rgmin_solver_step(
+            session,
+            Some(chain_eval),
+            Some(chain_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let scale = unsafe { rgmin_solver_precon_scale(session) };
+    assert!((scale - 2.0).abs() < 1e-12, "ff scale {scale}");
+    unsafe {
+        rgmin_solver_clear_precon(std::ptr::null_mut());
+        rgmin_solver_free(session);
+    }
+    let rejected = unsafe {
+        rgmin_solver_set_ff(
+            std::ptr::null_mut(),
+            bond_i.as_ptr(),
+            bond_j.as_ptr(),
+            bond_k.as_ptr(),
+            1,
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            0.1,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+        )
+    };
+    assert_eq!(rejected, rgmin_status_t::RGMIN_INVALID_PARAMETER);
 }

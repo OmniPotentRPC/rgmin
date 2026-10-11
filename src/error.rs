@@ -105,8 +105,8 @@ pub enum Error {
         /// What the call refused.
         what: &'static str,
     },
-    /// The exponential preconditioner rejected its inputs or its μ estimate.
-    #[error("exp preconditioner: {what}")]
+    /// A geometry preconditioner rejected its inputs or its μ estimate.
+    #[error("preconditioner: {what}")]
     Precon {
         /// What the assembly or the estimate refused.
         what: &'static str,
