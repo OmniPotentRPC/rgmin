@@ -48,6 +48,15 @@ ISBN). Do not invent DOIs.
 | Conn–Gould–Toint 2000 | 10.1137/1.9780898719857 | Trust Region Methods |
 | Li–Fukushima cautious BFGS 2001 | 10.1137/S1052623499354242 | On the Global Convergence of the BFGS Method for Nonconvex Unconstrained Optimization Problems |
 | Møller SCG 1993 | 10.1016/S0893-6080(05)80056-5 | A scaled conjugate gradient algorithm for fast supervised learning |
+| Goswami saddle metrics 2025 | 10.1063/5.0283639 | Bayesian hierarchical models for quantitative estimates for performance metrics applied to saddle search algorithms |
+| Dolan–Moré performance profiles | 10.1007/s101070100263 | Benchmarking optimization software with performance profiles |
+| Moré–Wild data profiles | 10.1137/080724083 | Benchmarking Derivative-Free Optimization Algorithms |
+| Gould–Scott pairwise profiles | 10.1145/2950048 | A Note on Performance Profiles for Benchmarking Software |
+| Kaplan–Meier 1958 | 10.1080/01621459.1958.10501452 | Nonparametric Estimation from Incomplete Observations |
+| Efron BCa 1987 | 10.1080/01621459.1987.10478410 | Better Bootstrap Confidence Intervals |
+| Howard confidence sequences 2021 | 10.1214/20-AOS1991 | Time-uniform, nonparametric, nonasymptotic confidence sequences |
+| Waudby-Smith aGRAPA 2024 | 10.1093/jrsssb/qkad009 | Estimating means of bounded random variables by betting |
+| Wald sequential tests 1945 | 10.1214/aoms/1177731118 | Sequential Tests of Statistical Hypotheses |
 
 Polak-Ribiere 1969 and Hestenes-Stiefel 1952: cite the paper/book
 title in rustdoc if no DOI is on this list. Do not mint a DOI.
