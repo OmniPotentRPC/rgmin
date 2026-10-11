@@ -1,0 +1,126 @@
+name: Python binding CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "ci/**"
+    paths:
+      - "python/**"
+      - "include/rgbind/**"
+      - "include/rgmin/optimize.hpp"
+      - "CMakeLists.txt"
+      - "pyproject.toml"
+      - "tests/python/**"
+      - "examples/**"
+      - "ci/limit_pe_exports.py"
+      - ".github/workflows/py-ci.yml"
+  pull_request:
+    paths:
+      - "python/**"
+      - "include/rgbind/**"
+      - "include/rgmin/optimize.hpp"
+      - "CMakeLists.txt"
+      - "pyproject.toml"
+      - "tests/python/**"
+      - "examples/**"
+      - "ci/limit_pe_exports.py"
+      - ".github/workflows/py-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: py-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    uses: OmniPotentRPC/rgpot/.github/workflows/py-wheels.yml@bb82209d778dbe7fe55855abee5f783708bad893
+    with:
+      package-dir: .
+      import-names: rgmin._core
+      test-path: tests/python
+      extras: test
+
+  freethreading:
+    uses: OmniPotentRPC/rgpot/.github/workflows/py-freethreading.yml@bb82209d778dbe7fe55855abee5f783708bad893
+    with:
+      package-dir: .
+      import-names: rgmin._core
+      test-path: tests/python
+      extras: test
+      iterations: "20"
+      rust-crate-dir: .
+
+  tsan:
+    uses: OmniPotentRPC/rgpot/.github/workflows/py-tsan.yml@bb82209d778dbe7fe55855abee5f783708bad893
+    with:
+      package-dir: .
+      import-names: rgmin._core
+      test-path: tests/python
+      extras: test
+      rust-crate-dir: .
+      rust-toolchain: nightly-2026-01-20
+      tsan-cmake-args: -DRGMIN_TSAN=ON
+
+  typing:
+    uses: OmniPotentRPC/rgpot/.github/workflows/py-typing.yml@bb82209d778dbe7fe55855abee5f783708bad893
+    with:
+      package-dir: .
+      import-names: rgmin._core
+      stub-dir: python
+      typecheck-paths: python/rgmin examples
+      extras: test
+      rust-crate-dir: .
+
+  rgbind-sync:
+    uses: OmniPotentRPC/rgpot/.github/workflows/py-rgbind-sync.yml@bb82209d778dbe7fe55855abee5f783708bad893
+    with:
+      vendored-path: include/rgbind/rgbind.hpp
+      rgpot-ref: bb82209d778dbe7fe55855abee5f783708bad893
+
+  ase-contract:
+    name: ASE ${{ matrix.ase }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ase: "3.23.0"
+            spec: "ase==3.23.0"
+          - ase: "3.29.0"
+            spec: "ase==3.29.0"
+          - ase: "main"
+            spec: "ase @ git+https://gitlab.com/ase/ase.git@8d127bc9beff6fb4f3a38c7e439624d73904527c"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v rustc >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          fi
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+
+      - name: Install rgmin and this ASE
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install 'nanobind>=3.1' scikit-build-core cmake ninja pytest pytest-timeout hypothesis numpy
+          python -m pip install "${{ matrix.spec }}"
+          python -m pip install --no-build-isolation .
+
+      - name: ASE contract tests
+        shell: bash
+        run: python -m pytest -q tests/python/test_ase.py --timeout=180 -o faulthandler_timeout=120
