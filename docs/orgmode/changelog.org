@@ -6,6 +6,32 @@
 
 ** Unreleased
 
+ECnoise (~ecnoise~, ~sample_noise~, ~sample_gradient_noise~,
+~sample_gradient_noise_k~). Moré and Wild, SIAM J. Sci. Comput. 33,
+1292 (2011), https://doi.org/10.1137/100786125. The table uses
+~m + 1~ samples at spacing ~h~ (default ~m = 8~). ~h~ is the gap
+between samples, matching ~ECnoise.m~, not the half-width of the
+stencil. ~NoiseEstimate::declared~ skips sampling. Gradient noise is
+the table on one counter-based projection of ~g~. For any covariance
+~Σ~, ~E[eps_g²] = tr(Σ) / n~ because the direction is uniform on the
+sphere, so the noise in ~||g||_2~ is ~sqrt(n)~ times ~eps_g~.
+~|f''|~ and ~|T|~ follow Moré and Wild, ACM Trans. Math. Softw. 38,
+19 (2012), Algorithm 5.1,
+https://doi.org/10.1145/2168773.2168777, at their own spacing. The
+forward step and the gradient probe are clamped to
+~[max(1e-16, 4 ulp(max |x_i|)), 1]~. ~NoiseFloor~ stops at
+~c * sqrt(n_free) * eps_g~ (default ~c = 3~) with
+~Status::NoiseFloor~ after the ~gtol~ test. ~NoiseFloor~ also
+carries ~eps_f~. A line search that finds no trial whose decrease
+clears ~c * eps_f~ is the same stop and keeps the pre-step point.
+~sample_value_gradient_noise~ reads both from one stencil.
+~Status::StepTolerance~ is the SCG step and objective stop.
+
+~Report~ gains ~status~ and ~Control~ gains ~noise_floor~. Struct
+literals break. This ships with 0.4.0. The C ABI
+(~abi_minor~ 31, ~layout_revision~ 3) adds ~noise_eps~, ~noise_c~,
+and ~rgmin_stop_t stop~ on the report.
+
 Pulay residual subspace (~Method::Diis~, C ~RGMIN_DIIS~, ABI minor 30).
 Coefficients on the stored gradients sum to one and minimize the
 combined residual. ~memory~ 0 keeps 6 pairs. The step never line

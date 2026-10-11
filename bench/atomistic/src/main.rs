@@ -439,7 +439,8 @@ fn run_session(
         istep,
         maxmove: None,
         ftol_rel: None,
-    };
+        noise_floor: None,
+};
     let mut solver = Solver::new(method, control, x.len());
     solver.set_accept(accept);
     solver.set_linesearch(ls);

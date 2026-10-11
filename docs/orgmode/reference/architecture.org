@@ -41,6 +41,13 @@ Rust, C sees a small ABI, C++ is a header wrapper.
   choice for quasi-Newton directions.
 - =Oracle= :: Closure adapter that implements
   =DifferentiableObjective= for a fused =(f, g)= function.
+- =ecnoise= :: Moré–Wild difference table for the noise in an energy
+  or in one projection of the gradient, plus the 2012 forward and
+  gradient steps (Algorithm 5.1, not the noise table). One uniform
+  projection has variance =tr(Σ) / n=. =Control::noise_floor= stops at
+  =c * sqrt(n_free) * eps_g= with =Status::NoiseFloor=, after the
+  =gtol= test. The same stop fires when a line search finds no trial
+  whose decrease clears =c * eps_f=.
 - =rgmin_solver_create= / =rgmin_solver_step= / =rgmin_solver_free= ::
   Stateful C waist. Callbacks are per step. =abi_major= 1,
   =abi_minor= 9, =layout_revision= 2. Compatibility checks major

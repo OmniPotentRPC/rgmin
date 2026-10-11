@@ -15,6 +15,7 @@ fn control(istep: f64) -> Control {
         istep,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     }
 }
 

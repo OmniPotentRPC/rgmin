@@ -13,6 +13,7 @@ fn tightening_the_tolerance_reaches_the_requested_gradient() {
                 istep: 0.5,
                 maxmove: None,
                 ftol_rel: None,
+                noise_floor: None,
             },
             1,
         )
@@ -37,6 +38,7 @@ fn loosening_the_tolerance_leaves_a_stationary_point_in_place() {
                 istep: 0.5,
                 maxmove: None,
                 ftol_rel: None,
+                noise_floor: None,
             },
             1,
         )

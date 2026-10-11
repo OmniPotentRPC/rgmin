@@ -36,6 +36,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (1945), https://doi.org/10.1214/aoms/1177731118. Waudby-Smith and
   Ramdas, J. R. Stat. Soc. B (2024),
   https://doi.org/10.1093/jrsssb/qkad009.
+- ECnoise (`ecnoise`, `sample_noise`, `sample_gradient_noise`,
+  `sample_gradient_noise_k`). Moré and Wild, SIAM J. Sci. Comput. 33,
+  1292 (2011), https://doi.org/10.1137/100786125. The difference table
+  uses `m + 1` samples at spacing `h` (default `m = 8`). `h` is the
+  distance between samples, as in `ECnoise.m`, not the half-width of
+  the stencil. The noise is the lowest order whose three estimates
+  agree within a factor of 4 and whose column changes sign. A spacing
+  that is too small (`inform` 2) is retried at `100 h`, and one that
+  is too large (`inform` 3) at `h / 100`. `NoiseEstimate::declared`
+  records a backend value and skips the samples. Gradient noise is
+  the same table on `g(x + i h u) · w` with one counter-based unit
+  vector `w`. For any covariance `Σ`, that projection has
+  `E[eps_g²] = tr(Σ) / n` because `w` is uniform on the sphere, so
+  `E[||e||²] = n * eps_g²`. `sample_gradient_noise_k` averages
+  `eps_g²` over `k` directions. The normals use pure-Rust `libm`.
+  `|f''|` and `|T|` are Moré and Wild, ACM Trans. Math. Softw. 38, 19
+  (2012), Algorithm 5.1, https://doi.org/10.1145/2168773.2168777,
+  not divided differences of the noise table. The forward step
+  `8^{1/4} sqrt(eps_f / |f''|)` and the gradient probe
+  `2 sqrt(eps_g / |T|)` use those estimates. A missing estimate uses
+  the same clamp as a zero scale. The clamp is
+  `[max(1e-16, 4 * ulp(max |x_i|)), 1]`. `NoiseFloor` stops at
+  `c * sqrt(n_free) * eps_g` (`c = 3` by default) with
+  `Status::NoiseFloor` after the `gtol` test. `NoiseFloor` also
+  carries `eps_f`. A line search that finds no trial whose decrease
+  clears `c * eps_f` is the same stop and keeps the pre-step point.
+  `sample_value_gradient_noise` reads both from one stencil.
+  `Status::StepTolerance`
+  is SCG's step and objective stop while `||g||` is still above
+  `gtol`. `Status` is `non_exhaustive`. The `par` feature evaluates
+  the stencil by index.
+- `Report` gains `status` and `Control` gains `noise_floor`
+  (`NoiseFloor { eps_g, c, eps_f }`) in place of `noise_eps` and `noise_c`.
+  The C ABI does not gain `eps_f`.
+  Struct literals break. This ships with 0.4.0.
+- C ABI (`abi_minor` 31, `layout_revision` 3): `rgmin_control_t`
+  gains `noise_eps` and `noise_c` (`noise_eps <= 0` leaves the floor
+  off, `noise_c <= 0` selects 3). `rgmin_report_t` gains `stop`
+  (`RGMIN_STOP_TOLERANCE`, `RGMIN_STOP_NOISE_FLOOR`,
+  `RGMIN_STOP_STEP_TOLERANCE`, `RGMIN_STOP_BUDGET`).
 - Pulay residual subspace (`Method::Diis`, C `RGMIN_DIIS`, ABI minor 30).
   Coefficients on the stored gradients sum to one and minimize the
   combined residual. `memory` 0 keeps 6 pairs. One pair takes a

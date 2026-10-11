@@ -7,7 +7,7 @@ use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
-use crate::step::{l2, next_istep, take_step};
+use crate::step::{energy_noise_report, l2, next_istep, take_step};
 
 /// Adam plus a line search along the Kingma-Ba preconditioned step.
 ///
@@ -49,12 +49,13 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
+        if let Some(status) = control.halt(gnorm, grad.len()) {
             return Ok(Report {
                 value,
                 coords: pos,
                 steps: step,
                 grad_norm: gnorm,
+                status,
             });
         }
         let dir = adam_direction(&mut m, &mut v, &grad, beta1, beta2, b1p, b2p, eps);
@@ -69,6 +70,9 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let lsstep = t.alpha;
         pos = t.x;
         value = t.f;
@@ -82,6 +86,7 @@ where
         coords: pos,
         steps: control.maxiter,
         grad_norm: l2(&grad),
+        status: control.finish_status(l2(&grad), grad.len(), true),
     })
 }
 

@@ -55,6 +55,7 @@ fn accept_step_clips_an_uphill_step() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         3,
     );

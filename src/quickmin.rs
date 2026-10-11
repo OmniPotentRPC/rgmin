@@ -358,6 +358,7 @@ mod tests {
                 istep: 0.05,
                 maxmove: None,
                 ftol_rel: None,
+                noise_floor: None,
             },
             1,
         );

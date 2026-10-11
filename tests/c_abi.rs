@@ -11,7 +11,8 @@ use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_control_t, rgmin_method_t,
     rgmin_minimize, rgmin_minimize_eindir, rgmin_report_t, rgmin_solver_create, rgmin_solver_free,
     rgmin_solver_set_accept, rgmin_solver_set_quickmin_cell, rgmin_solver_step,
-    rgmin_solver_step_fg, rgmin_status_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+    rgmin_solver_step_fg, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
+    rgmin_tensor_free,
 };
 use rgmin::ffi::{
     rgmin_conjugacy_t, rgmin_curv_fn, rgmin_eigen_kind_t, rgmin_eigen_params_t, rgmin_last_error,
@@ -127,11 +128,14 @@ fn c_abi_lbfgs_rosenbrock() {
         istep: 0.1,
         memory: 10,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_minimize(
@@ -163,11 +167,14 @@ fn c_abi_eindir_objective_minimizes_without_taking_ownership() {
         istep: 0.1,
         memory: 10,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_minimize_eindir(
@@ -199,11 +206,14 @@ fn c_abi_eindir_rejects_incompatible_stamp_before_evaluation() {
         istep: 0.1,
         memory: 10,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_minimize_eindir(
@@ -274,11 +284,14 @@ fn c_abi_rgpot_potential_reaches_eindir_optimizer() {
         istep: 0.1,
         memory: 10,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let stamp = rgpot_core::eindir::rgpot_eindir_abi_stamp();
     let status = unsafe {
@@ -315,11 +328,14 @@ fn cuda_tagged_tensor_is_unsupported() {
         istep: 0.1,
         memory: 10,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_minimize(
@@ -346,6 +362,8 @@ fn c_abi_solver_step_keeps_lbfgs_history() {
         istep: 0.1,
         memory: 10,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -353,6 +371,7 @@ fn c_abi_solver_step_keeps_lbfgs_history() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     for _ in 0..80 {
         let xt = unsafe { rgmin_tensor_borrow_cpu_f64(warm.as_mut_ptr(), 2) };
@@ -422,6 +441,8 @@ fn fused_evalgrad_is_one_callback_per_oracle() {
         istep: 0.1,
         memory: 10,
         maxmove: 0.2,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -431,6 +452,7 @@ fn fused_evalgrad_is_one_callback_per_oracle() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_solver_step_fg(
@@ -457,6 +479,8 @@ fn c_abi_quickmin_steps_and_splits_the_cell() {
         istep: 0.05,
         memory: 0,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_QUICKMIN, &ctrl, 2) };
     assert!(!session.is_null());
@@ -479,6 +503,7 @@ fn c_abi_quickmin_steps_and_splits_the_cell() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
     let st = unsafe {
@@ -540,6 +565,8 @@ fn c_abi_diis_reduces_a_quadratic() {
         istep: 0.4,
         memory: 6,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_DIIS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -547,6 +574,7 @@ fn c_abi_diis_reduces_a_quadratic() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let mut last = f64::INFINITY;
     for _ in 0..20 {
@@ -576,8 +604,8 @@ fn c_abi_diis_reduces_a_quadratic() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 30);
-    assert_eq!(stamp.layout_revision, 2);
+    assert_eq!(stamp.abi_minor, 31);
+    assert_eq!(stamp.layout_revision, 3);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
 
@@ -598,11 +626,14 @@ fn c_abi_respects_maxmove_when_initial_step_is_larger() {
         istep: 10.0,
         memory: 10,
         maxmove: 0.1,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_minimize(
@@ -643,6 +674,8 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         istep: 0.1,
         memory: 8,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -697,6 +730,7 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
     let st = unsafe {
@@ -797,6 +831,8 @@ fn c_abi_scg_quadratic_bowl_with_exact_curvature() {
         istep: 1.0,
         memory: 0,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let params = rgmin_scg_params_t {
         sigma0: 1e-4,
@@ -810,6 +846,7 @@ fn c_abi_scg_quadratic_bowl_with_exact_curvature() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_minimize_scg(
@@ -837,6 +874,8 @@ fn scg_bowl_ctrl() -> rgmin_control_t {
         istep: 1.0,
         memory: 0,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     }
 }
 
@@ -866,6 +905,7 @@ fn c_abi_scg_null_params_uses_netlab_polak_ribiere() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_minimize_scg(
@@ -896,6 +936,7 @@ fn c_abi_scg_zero_conjugacy_is_fletcher_reeves() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_minimize_scg(
@@ -926,6 +967,7 @@ fn c_abi_scg_unknown_conjugacy_is_invalid() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_minimize_scg(
@@ -962,6 +1004,7 @@ fn c_abi_scg_method_t_codes_are_not_conjugacy() {
             value: 0.0,
             steps: 0,
             grad_norm: 0.0,
+            stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
         };
         let st = unsafe {
             rgmin_minimize_scg(
@@ -1106,6 +1149,8 @@ fn c_abi_one_eval_search_direction_is_steepest_when_empty() {
         istep: 1.0,
         memory: 4,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -1139,6 +1184,8 @@ fn c_abi_pair_count_tracks_accepted_curvature_and_forget() {
         istep: 1.0,
         memory: 2,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -1177,6 +1224,8 @@ fn c_abi_rebase_keeps_pairs_and_forget_drops_them() {
         istep: 1.0,
         memory: 2,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -1299,6 +1348,8 @@ fn c_abi_set_box_status_matches_highs_feature() {
         istep: 0.1,
         memory: 4,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -1354,6 +1405,8 @@ fn c_abi_forget_evaluation_costs_one_call_and_keeps_memory() {
         istep: 0.1,
         memory: 10,
         maxmove: 0.2,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let run = |forget: bool| {
         let mut x = [-1.2_f64, 1.0];
@@ -1364,6 +1417,7 @@ fn c_abi_forget_evaluation_costs_one_call_and_keeps_memory() {
             value: 0.0,
             steps: 0,
             grad_norm: 0.0,
+            stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
         };
         let mut calls = Vec::new();
         for step in 0..3 {
@@ -1415,6 +1469,8 @@ fn c_abi_lbfgs_neb_guards_toggle_resets_pairs() {
         istep: 1.0,
         memory: 2,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
