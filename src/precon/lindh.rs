@@ -377,13 +377,16 @@ fn usable_mu(mu: Option<f64>) -> Result<Option<f64>> {
     Ok(mu)
 }
 
+/// One free-atom pair with its distance and Lindh weight.
+type WeightedPair = (usize, usize, f64, f64);
+
 /// Pairs inside the cutoff, from a cell list, sorted by site index.
 fn gather_pairs(
     sites: &[Site],
     n_free: usize,
     search: f64,
     params: &LindhParams,
-) -> (Vec<(usize, usize, f64, f64)>, Vec<f64>) {
+) -> (Vec<WeightedPair>, Vec<f64>) {
     let coords: Vec<[f64; 3]> = sites.iter().map(|s| s.pos).collect();
     let found = super::geom::pairs_in_range(&coords, search, params.lengths);
     let mut pairs = Vec::new();

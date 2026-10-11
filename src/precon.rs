@@ -575,7 +575,7 @@ pub fn max_atom_displacement(previous: ArrayView1<f64>, current: ArrayView1<f64>
 /// A nonpositive or nonfinite scale, or a nonfinite displacement, rebuilds.
 #[must_use]
 pub fn needs_rebuild(max_atom_displacement: f64, scale: f64) -> bool {
-    if !(scale.is_finite() && scale > 0.0) || !max_atom_displacement.is_finite() {
+    if !(scale.is_finite() && scale > 0.0 && max_atom_displacement.is_finite()) {
         return true;
     }
     max_atom_displacement > 0.5 * scale
@@ -867,12 +867,15 @@ fn cartesian_distance(positions: ArrayView1<f64>, i: usize, j: usize) -> f64 {
     s.sqrt()
 }
 
+type BondRow = (usize, usize, f64);
+type AnchorRow = (usize, f64);
+
 fn bonds(
     natoms: usize,
     positions: ArrayView1<f64>,
     neighbours: &Neighbours,
     r_cut: Option<f64>,
-) -> Result<(Vec<(usize, usize, f64)>, Vec<(usize, f64)>)> {
+) -> Result<(Vec<BondRow>, Vec<AnchorRow>)> {
     if neighbours.i.len() != neighbours.j.len() {
         return Err(Error::Precon {
             what: "neighbour index arrays differ in length",
@@ -1357,9 +1360,7 @@ mod tests {
     #[test]
     fn the_quadratic_form_matches_the_paper() {
         let (pos, neigh) = two_atoms();
-        let mut params = ExpParams::default();
-        params.a = 3.0;
-        params.c_stab = 0.1;
+        let params = ExpParams::default();
         let p = Exp::assemble(pos.view(), &neigh, &params, 1.0, 1.5).unwrap();
         // c = exp(0) = 1. One bond: u^T P u = |u0 - u1|^2 + 0.1 |u|^2.
         let u = array![1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
@@ -1448,9 +1449,10 @@ mod tests {
     #[test]
     fn mu_matches_the_paper_on_a_quadratic_metric() {
         let (pos, neigh) = two_atoms();
-        let mut params = ExpParams::default();
-        params.c_stab = 0.1;
-        params.lengths = Some([4.0, 4.0, 4.0]);
+        let params = ExpParams {
+            lengths: Some([4.0, 4.0, 4.0]),
+            ..ExpParams::default()
+        };
         let mu_true = 4.2;
         let p1 = Exp::assemble(pos.view(), &neigh, &params, 1.0, 1.5).unwrap();
         let grad = |x: ArrayView1<f64>| mu_true * p1.apply(x);

@@ -93,7 +93,7 @@ pub struct DihedralTerm {
 }
 
 /// Borrowed bonded terms. Empty slices contribute nothing.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct FfTerms<'a> {
     /// Harmonic bonds.
     pub bonds: &'a [BondTerm],
@@ -103,17 +103,6 @@ pub struct FfTerms<'a> {
     pub morses: &'a [MorseTerm],
     /// Harmonic torsions.
     pub dihedrals: &'a [DihedralTerm],
-}
-
-impl Default for FfTerms<'static> {
-    fn default() -> Self {
-        Self {
-            bonds: &[],
-            angles: &[],
-            morses: &[],
-            dihedrals: &[],
-        }
-    }
 }
 
 /// Parameters of the FF preconditioner.
@@ -403,10 +392,7 @@ fn assemble_metric(
     for m in terms.morses {
         in_range(m.i, natoms)?;
         in_range(m.j, natoms)?;
-        if m.i == m.j
-            || !m.d.is_finite()
-            || !m.alpha.is_finite()
-            || !(m.r0.is_finite() && m.r0 > 0.0)
+        if !(m.i != m.j && m.d.is_finite() && m.alpha.is_finite() && m.r0.is_finite() && m.r0 > 0.0)
         {
             return Err(Error::Precon {
                 what: "a morse term is not usable",
@@ -544,7 +530,7 @@ pub fn bonded_terms(
     lengths: Option<[f64; 3]>,
 ) -> Result<(Vec<BondTerm>, Vec<AngleTerm>)> {
     let natoms = require_atoms(positions.len())?;
-    if !(r_cut.is_finite() && r_cut > 0.0) || !k_bond.is_finite() || !k_angle.is_finite() {
+    if !(r_cut.is_finite() && r_cut > 0.0 && k_bond.is_finite() && k_angle.is_finite()) {
         return Err(Error::Precon {
             what: "bonded cutoff or force constant is not usable",
         });
@@ -591,8 +577,7 @@ mod tests {
             bonds: &bonds,
             ..FfTerms::default()
         };
-        let mut params = FfParams::default();
-        params.c_stab = 0.1;
+        let params = FfParams::default();
         let p = Ff::assemble(pos.view(), terms, &params).unwrap();
         let u = array![1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let form = u.dot(&p.apply(u.view()));
@@ -617,8 +602,10 @@ mod tests {
             angles: &angles,
             ..FfTerms::default()
         };
-        let mut params = FfParams::default();
-        params.c_stab = 0.2;
+        let params = FfParams {
+            c_stab: 0.2,
+            ..FfParams::default()
+        };
         let p = Ff::assemble(pos.view(), terms, &params).unwrap();
         let (gi, gj, gk) =
             angle_grad([1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0], None).unwrap();

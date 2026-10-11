@@ -1848,7 +1848,7 @@ impl Solver {
                     };
                     // A non-descent direction is not a valid conjugate step.
                     let gd = crate::vecops::dot(grad.view(), dir.view());
-                    if !(gd < 0.0) {
+                    if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
                         self.nlcg_descent_fallbacks += 1;
                         *dir = nlcg_steepest(&z_new, self.accept, self.istep);
                     }
