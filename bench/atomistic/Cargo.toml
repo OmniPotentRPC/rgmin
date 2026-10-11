@@ -9,6 +9,9 @@ description = "rgmin on real rgpot potentials: oracle calls, iterations, and per
 # Standalone: not a member of any parent workspace.
 [workspace]
 
+[features]
+simd = ["rgmin/simd"]
+
 [dependencies]
 rgmin = { path = "../.." }
 rgpot-core = "3.4.0"

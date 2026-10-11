@@ -1,0 +1,52 @@
+#+TITLE: SIMD paths and dispatch
+#+OPTIONS: toc:nil num:nil
+
+Contiguous ~dot~, ~sum~, ~nrm2~ (via ~dot~), ~axpy~, ~scale~,
+~mul_assign~, and ~div_assign_floor~ use one reduction shape.
+Eight partials, ~p0~ through ~p7~, then ~(p0+p4)~, ~(p1+p5)~,
+~(p2+p6)~, ~(p3+p7)~, then the tail in element order. That is the
+order of ndarray 0.17 ~numeric_util::unrolled_dot~ and ~unrolled_fold~.
+Multiply and add stay separate. No kernel calls ~mul_add~, and no
+clone enables FMA. A value that reaches an output is not a fused
+multiply-add.
+
+The ~simd~ feature compiles those loops with multiversion 0.9.
+The clones are ~x86_64+avx512f~ (rustc >= 1.89, ~build.rs~ cfg
+~rgmin_avx512~), ~x86_64+avx2~, ~aarch64+sve~, ~aarch64+neon~, and the
+default clone. Code outside the clones stays on the compiler default,
+x86-64 and armv8-a. The build does not pass ~-C target-cpu~ or
+~-march~. Selection is runtime. A CPU without a clone runs the default
+clone. It does not execute that clone's instructions.
+
+~RGMIN_SIMD~ is read once, in the ~OnceLock~ that caches the override.
+Accepted names are ~scalar~, ~avx2~, ~avx512~, ~neon~, and ~sve~.
+An unknown name is ignored. A known name this CPU cannot run selects
+scalar. AVX2 is selected only when FMA is also present. FMA is a gate,
+not an enabled feature on the clone. A thread-local test override is
+read on the calling thread before a rayon fan-out. Workers receive
+the path that was chosen there. They do not call ~getenv~.
+
+The ~par~ feature keeps the same eight partials. The chunk length is
+4096, a multiple of 8, and does not depend on the pool size. Each lane
+is one left fold in index order. The eight lanes are combined by the
+same tree as the serial kernel. Element updates use the same chunk
+length. Lengths below 65536 stay serial, which is the threshold the
+serial tests already used. Thread count does not change a bit.
+~dot_ordered~ is a separate left fold for noise projections. It is not
+the eight-partial tree and it is not dispatched.
+
+The same input, including -0.0, subnormals, 1 ulp values, and NaN
+payloads, produces the same f64 bits on every clone and at 1, 2, 3,
+and 8 threads. The SHA-256 of those bytes is ~tests/golden/isa-hashes.toml~.
+A clone the machine cannot execute is reported as not exercised.
+The scalar path is always run by forcing it.
+
+Páll and Hess, Comput. Phys. Commun. 184, 2641 (2013),
+https://doi.org/10.1016/j.cpc.2013.06.003.
+Dröge et al., Softw. Pract. Exp. 53, 176 (2023),
+https://doi.org/10.1002/spe.3075.
+
+~simd~ is a default feature. The gate that decided that is in the
+changelog. Default-on required a Holm-corrected wall-time ratio
+interval below 1 on the atomistic bench or at n = 3e4, and no
+micro-bench size slower beyond its interval.

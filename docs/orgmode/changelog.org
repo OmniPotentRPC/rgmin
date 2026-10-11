@@ -6,6 +6,19 @@
 
 ** Unreleased
 
+Contiguous vector kernels use the ndarray 0.17 eight-partial tree.
+The ~simd~ feature is on by default and compiles that loop with
+multiversion 0.9 (~x86_64+avx512f~ on rustc >= 1.89, ~x86_64+avx2~,
+~aarch64+sve~, ~aarch64+neon~). ~RGMIN_SIMD~ selects a clone.
+The ~par~ feature uses the same tree and fixed chunks of 4096.
+On this host the axpy wall ratio at n = 30000 had a Holm upper bound
+below 1, and no auto size was slower beyond its interval, so the
+clones are default. The pooled atomistic wall interval contained 1.
+Páll and Hess, Comput. Phys. Commun. 184, 2641 (2013),
+https://doi.org/10.1016/j.cpc.2013.06.003.
+Dröge et al., Softw. Pract. Exp. 53, 176 (2023),
+https://doi.org/10.1002/spe.3075.
+
 Nonlinear CG, with or without a metric, opens its line search with
 Nocedal-Wright equation 3.60 instead of ~control.istep~ on every step.
 The descent fallback runs in both cases. ~Conjugacy::PolakRibierePlus~

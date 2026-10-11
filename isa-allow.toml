@@ -1,0 +1,33 @@
+# Dispatched vector kernels. Baseline outside these symbols stays
+# x86-64 (v1) and armv8-a. FMA is not listed: the clones do not enable it.
+# AVX-512 is avx512f only, and only on rustc >= 1.89.
+# TODO: the audit workflow is pinned to OmniPotentRPC/rgpot
+# ci/isa-audit @ 8957850fd15005ea460ba336781ed152f7ee3d92.
+# Repin that call to main once I0 merges.
+
+[[allow]]
+symbol = 'rgmin::vecops::.*avx2_version.*'
+features = ["avx", "avx2"]
+reason = "multiversion x86_64+avx2 clone and the direct avx2 shim"
+
+[[allow]]
+symbol = 'rgmin::vecops::.*avx512(f)?_version.*'
+features = ["avx", "avx2", "avx512f"]
+reason = "multiversion x86_64+avx512f clone and the direct avx512f shim"
+
+# hashbrown and the preconditioner lower trailing zeros to tzcnt.
+# These are not vecops clones. The feature list is bmi1 only.
+[[allow]]
+symbol = 'hashbrown::raw::.*'
+features = ["bmi1"]
+reason = "hashbrown trailing-zero scan"
+
+[[allow]]
+symbol = 'rgmin::precon::.*'
+features = ["bmi1"]
+reason = "trailing-zero scan in the preconditioner"
+
+[[allow]]
+symbol = 'rgmin::vecops::.*sve_version.*'
+features = ["sve"]
+reason = "multiversion aarch64+sve clone and the direct sve shim"
