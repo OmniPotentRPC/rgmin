@@ -13,6 +13,9 @@ fn control() -> Control {
         istep: 0.1,
         maxmove: None,
         ftol_rel: None,
+
+        noise_eps: None,
+        noise_c: 3.0,
     }
 }
 

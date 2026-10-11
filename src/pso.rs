@@ -112,11 +112,13 @@ where
     }
 
     let (value, grad) = obj.value_and_gradient(gbest_position.view());
+    let grad_norm = l2(&grad);
     Ok(Report {
         value,
         coords: gbest_position,
         steps: iteration,
-        grad_norm: l2(&grad),
+        grad_norm,
+        status: control.finish_status(grad_norm, true),
     })
 }
 
@@ -192,6 +194,9 @@ mod tests {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         }
     }
 

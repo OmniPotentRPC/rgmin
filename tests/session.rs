@@ -11,6 +11,9 @@ fn control() -> Control {
         istep: 0.1,
         maxmove: None,
         ftol_rel: None,
+
+        noise_eps: None,
+        noise_c: 3.0,
     }
 }
 
@@ -176,6 +179,9 @@ fn sphere_rayleigh_stays_on_the_sphere() {
             istep: 0.2,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         },
         3,
     );
@@ -246,6 +252,9 @@ fn so3_session_stays_orthogonal() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         },
         9,
     );
@@ -321,6 +330,9 @@ fn se3_session_keeps_rotation_and_moves_translation() {
             istep: 0.4,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         },
         12,
     );
@@ -528,6 +540,9 @@ fn fire_and_bb_kill_a_sphere() {
                 istep: 0.2,
                 maxmove: None,
                 ftol_rel: None,
+
+                noise_eps: None,
+                noise_c: 3.0,
             },
             2,
         );
@@ -602,6 +617,9 @@ fn dogleg_kills_a_quadratic() {
             istep: 4.0,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         },
         2,
     );
@@ -733,6 +751,9 @@ fn lbfgs_accept_step_is_one_oracle_per_step() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         },
         2,
     );

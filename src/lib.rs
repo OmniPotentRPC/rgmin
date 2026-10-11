@@ -34,8 +34,6 @@ mod bb;
 mod box_objective;
 mod control;
 mod diis;
-/// Moré and Wild ECnoise computational-noise estimate.
-pub mod ecnoise;
 mod error;
 /// C ABI, gated behind the `capi` feature.
 #[cfg(feature = "capi")]
@@ -54,6 +52,8 @@ pub mod lbfgs;
 pub mod lbfgs_qp;
 /// Matrix-free lowest Hessian eigenpair.
 pub mod lowest_mode;
+/// Moré and Wild computational-noise estimate and difference steps.
+pub mod noise;
 
 mod chase_eps;
 /// DLA-Future partial-spectrum window.
@@ -107,7 +107,6 @@ pub use accept::Accept;
 pub use adam::minimize_adam;
 pub use control::Control;
 pub use dlaf_kind::DlaFutureParams;
-pub use ecnoise::{EcNoiseEstimate, EcNoiseStatus, SampledNoise, ecnoise, sample_noise};
 pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};
 pub use elpa_kind::{ElpaParams, ElpaSpectrum, ElpaStage, elpa_config, elpa_spectrum};
 pub use error::{Error, Result};
@@ -139,6 +138,10 @@ pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess};
 pub use newton::{HessianObjective, HessianOracle, NewtonKind, minimize_newton};
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
+pub use noise::{
+    DEFAULT_M, NoiseEstimate, NoiseFlag, ecnoise, forward_step, gradient_dr, line_values,
+    next_spacing, sample_gradient_noise, sample_noise,
+};
 pub use oracle::Oracle;
 pub use pso::minimize_pso;
 pub use qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
@@ -151,7 +154,7 @@ pub use quickmin::{
     QuickMinState, quickmin_baseline, quickmin_displacement, quickmin_project,
     quickmin_rescale_velocity,
 };
-pub use report::Report;
+pub use report::{Report, Status};
 pub use scg::{
     DirectionalCurvature, ScgOptions, ScgParams, ScgStepTolerance, minimize_scg,
     minimize_scg_exact, minimize_scg_exact_with_options, minimize_scg_with_options,

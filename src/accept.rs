@@ -204,6 +204,9 @@ mod tests {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         }
     }
 

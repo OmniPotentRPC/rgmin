@@ -145,12 +145,14 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
+        if let Some(status) = control.halt(gnorm) {
             return Ok(Report {
                 value,
                 coords: pos,
                 steps: step,
                 grad_norm: gnorm,
+
+                status,
             });
         }
         let hess = obj.hessian(pos.view());
@@ -178,6 +180,8 @@ where
         coords: pos,
         steps: control.maxiter,
         grad_norm: l2(&grad),
+
+        status: control.finish_status(l2(&grad), true),
     })
 }
 

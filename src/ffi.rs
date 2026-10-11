@@ -961,6 +961,9 @@ pub unsafe extern "C" fn rgmin_minimize(
                 None
             },
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         };
         match minimize_method(
             &obj,
@@ -1084,6 +1087,9 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
             } else {
                 None
             },
+
+            noise_eps: None,
+            noise_c: 3.0,
         };
         let (scg, conjugacy) = if params.is_null() {
             (ScgParams::default(), Conjugacy::PolakRibiere)
@@ -1230,6 +1236,9 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
                 None
             },
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         };
         let rust_method = method_from_c(method, c.memory);
         match minimize_method_hess(
@@ -1345,6 +1354,9 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
                 None
             },
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         };
         match minimize_method(
             &obj,
@@ -1421,6 +1433,9 @@ pub unsafe extern "C" fn rgmin_solver_create(
             None
         },
         ftol_rel: None,
+
+        noise_eps: None,
+        noise_c: 3.0,
     };
     let solver = Solver::new(method_from_c(method, c.memory), control, dim).with_gtol(c.gtol);
     Box::into_raw(Box::new(rgmin_solver_t { solver }))

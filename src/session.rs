@@ -1008,12 +1008,14 @@ impl Solver {
         };
         grad = self.horizontal_grad(x, &grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
-        if gnorm < self.control.gtol {
+        if let Some(status) = self.control.halt(gnorm) {
             return Ok(Report {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: gnorm,
+
+                status,
             });
         }
         let hess = obj.hessian(x.view());
@@ -1101,6 +1103,10 @@ impl Solver {
                     coords: x.clone(),
                     steps: self.steps,
                     grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+
+                    status: self
+                        .control
+                        .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
                 });
             }
         }
@@ -1154,6 +1160,10 @@ impl Solver {
             coords: x.clone(),
             steps: self.steps,
             grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+
+            status: self
+                .control
+                .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
         })
     }
 
@@ -1205,6 +1215,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &gt),
+
+                status: self
+                    .control
+                    .classify(self.stationarity_norm(obj.bounds(), x, &gt)),
             })
         } else {
             self.remember(x, value, &grad);
@@ -1214,6 +1228,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+
+                status: self
+                    .control
+                    .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
             })
         }
     }
@@ -1256,12 +1274,14 @@ impl Solver {
                 }
             }
         }
-        if gnorm < self.control.gtol {
+        if let Some(status) = self.control.halt(gnorm) {
             return Ok(Report {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: gnorm,
+
+                status,
             });
         }
 
@@ -1300,6 +1320,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+
+                status: self
+                    .control
+                    .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
             });
         }
 
@@ -1803,6 +1827,10 @@ impl Solver {
             coords: x.clone(),
             steps: self.steps,
             grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+
+            status: self
+                .control
+                .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
         })
     }
 
@@ -1887,6 +1915,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+
+                status: self
+                    .control
+                    .classify(self.stationarity_norm(obj.bounds(), x, &grad)),
             });
         }
         unreachable!("PSO slot populated above")
@@ -2055,6 +2087,8 @@ mod tests {
                 istep: 0.1,
                 maxmove: Some(0.01),
                 ftol_rel: None,
+                noise_eps: None,
+                noise_c: 3.0,
             },
             2,
         )
@@ -2130,6 +2164,9 @@ mod tests {
                     istep: 0.1,
                     maxmove: Some(0.05),
                     ftol_rel: None,
+
+                    noise_eps: None,
+                    noise_c: 3.0,
                 },
                 2,
             );
@@ -2278,6 +2315,9 @@ mod retained_neb_guard_tests {
                 istep: 1.0,
                 maxmove: None,
                 ftol_rel: None,
+
+                noise_eps: None,
+                noise_c: 3.0,
             },
             3,
         );
@@ -2313,6 +2353,9 @@ mod retained_neb_guard_tests {
                 istep: 1.0,
                 maxmove: None,
                 ftol_rel: None,
+
+                noise_eps: None,
+                noise_c: 3.0,
             },
             3,
         );

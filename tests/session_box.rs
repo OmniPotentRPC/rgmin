@@ -212,6 +212,9 @@ fn session_set_box_holds_a_per_coordinate_wall() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         },
         2,
     );
@@ -354,6 +357,9 @@ fn session_set_box_survives_set_highs_and_clips_newton() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         },
         2,
     );
@@ -416,6 +422,9 @@ fn newton_qp_applies_session_equalities() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         },
         2,
     );

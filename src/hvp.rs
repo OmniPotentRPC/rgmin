@@ -529,12 +529,13 @@ where
         if !gnorm.is_finite() {
             return Err(Error::TrustCollapsed { steps: step });
         }
-        if gnorm < control.gtol {
+        if let Some(status) = control.halt(gnorm) {
             return Ok(Report {
                 value,
                 coords: pos,
                 steps: step,
                 grad_norm: gnorm,
+                status,
             });
         }
         // Inexact-Newton forcing keeps early CG cheap and the tail
@@ -568,10 +569,12 @@ where
             grad = gt;
         }
     }
+    let gnorm = nrm2(grad.view());
     Ok(Report {
         value,
         coords: pos,
         steps: control.maxiter,
-        grad_norm: nrm2(grad.view()),
+        grad_norm: gnorm,
+        status: control.finish_status(gnorm, true),
     })
 }

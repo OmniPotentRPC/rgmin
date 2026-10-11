@@ -710,12 +710,14 @@ impl Lbfgs {
 
         for step in 0..control.maxiter {
             let gnorm = l2(&grad);
-            if gnorm < control.gtol {
+            if let Some(status) = control.halt(gnorm) {
                 return Ok(Report {
                     value,
                     coords: pos,
                     steps: step,
                     grad_norm: gnorm,
+
+                    status,
                 });
             }
             self.step_objective(
@@ -727,6 +729,8 @@ impl Lbfgs {
             coords: pos,
             steps: control.maxiter,
             grad_norm: l2(&grad),
+
+            status: control.finish_status(l2(&grad), true),
         })
     }
 

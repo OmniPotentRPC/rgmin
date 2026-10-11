@@ -25,6 +25,9 @@ fn shifted_newton_kills_a_quadratic() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         },
         NewtonKind::Shifted,
     )
@@ -47,6 +50,9 @@ fn rfo_kills_a_quadratic() {
             istep: 1.0,
             maxmove: None,
             ftol_rel: None,
+
+            noise_eps: None,
+            noise_c: 3.0,
         },
         NewtonKind::Rfo,
     )

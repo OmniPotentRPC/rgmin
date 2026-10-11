@@ -18,6 +18,20 @@
 
 use ndarray::{Array1, ArrayView1};
 
+/// `x . y` summed from the first index upward.
+///
+/// [`dot`] under `par` splits long vectors into chunks, so the bits can
+/// move with the thread count. Noise projections and any reduction that
+/// decides a step stay on this loop.
+pub fn dot_ordered(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
+    debug_assert_eq!(x.len(), y.len());
+    let mut acc = 0.0;
+    for i in 0..x.len() {
+        acc += x[i] * y[i];
+    }
+    acc
+}
+
 /// `x . y`.
 #[cfg(not(feature = "par"))]
 pub fn dot(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {

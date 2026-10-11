@@ -49,12 +49,14 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
+        if let Some(status) = control.halt(gnorm) {
             return Ok(Report {
                 value,
                 coords: pos,
                 steps: step,
                 grad_norm: gnorm,
+
+                status,
             });
         }
         let dir = adam_direction(&mut m, &mut v, &grad, beta1, beta2, b1p, b2p, eps);
@@ -82,6 +84,8 @@ where
         coords: pos,
         steps: control.maxiter,
         grad_norm: l2(&grad),
+
+        status: control.finish_status(l2(&grad), true),
     })
 }
 

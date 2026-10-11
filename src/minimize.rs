@@ -89,12 +89,18 @@ where
         coords: pos.clone(),
         steps: 0,
         grad_norm: f64::INFINITY,
+
+        status: crate::report::Status::Iterating,
     };
     for _ in 0..control.maxiter {
         last = solver.step(obj, &mut pos)?;
-        if last.grad_norm < control.gtol {
+        if let Some(status) = control.halt(last.grad_norm) {
+            last.status = status;
             break;
         }
+    }
+    if last.status == crate::report::Status::Iterating {
+        last.status = crate::report::Status::Budget;
     }
     Ok(last)
 }
@@ -133,12 +139,18 @@ where
         coords: pos.clone(),
         steps: 0,
         grad_norm: f64::INFINITY,
+
+        status: crate::report::Status::Iterating,
     };
     for _ in 0..control.maxiter {
         last = solver.step_hess(obj, &mut pos)?;
-        if last.grad_norm < control.gtol {
+        if let Some(status) = control.halt(last.grad_norm) {
+            last.status = status;
             break;
         }
+    }
+    if last.status == crate::report::Status::Iterating {
+        last.status = crate::report::Status::Budget;
     }
     Ok(last)
 }
@@ -170,12 +182,14 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
+        if let Some(status) = control.halt(gnorm) {
             return Ok(Report {
                 value,
                 coords: pos,
                 steps: step,
                 grad_norm: gnorm,
+
+                status,
             });
         }
         let t = take_step(
@@ -212,5 +226,7 @@ where
         coords: pos,
         steps: control.maxiter,
         grad_norm: l2(&grad),
+
+        status: control.finish_status(l2(&grad), true),
     })
 }
