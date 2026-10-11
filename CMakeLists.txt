@@ -89,7 +89,7 @@ if(RGMIN_TSAN)
   add_custom_command(
     TARGET cargo-build_rgmin POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy
-            "${CMAKE_BINARY_DIR}/librgmin.a"
+            "$<TARGET_PROPERTY:rgmin-static,IMPORTED_LOCATION>"
             "${CMAKE_BINARY_DIR}/librust_core_demo.a"
     VERBATIM)
 endif()
