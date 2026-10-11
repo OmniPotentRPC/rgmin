@@ -81,13 +81,15 @@ corrosion_import_crate(
 if(RGMIN_TSAN)
   corrosion_set_cargo_flags(rgmin "-Zbuild-std=std,panic_abort")
   corrosion_add_target_rustflags(rgmin "-Zsanitizer=thread")
-  # py-tsan.yml at the pinned rgpot commit counts __tsan_func_entry in
-  # librust_core_demo.a. This package's staticlib is librgmin.a. The
-  # copy is that same archive, so the count is the instrumented rgmin
-  # staticlib.
+  # py-tsan.yml counts __tsan_func_entry in librust_core_demo.a.
+  # corrosion_import_crate exposes rgmin as an INTERFACE library, which
+  # cannot take a POST_BUILD rule. cargo-build_rgmin is the custom
+  # target that runs after Corrosion copies librgmin.a into the build
+  # tree, so the copy below is that same instrumented archive.
   add_custom_command(
-    TARGET rgmin POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:rgmin>"
+    TARGET cargo-build_rgmin POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy
+            "${CMAKE_BINARY_DIR}/librgmin.a"
             "${CMAKE_BINARY_DIR}/librust_core_demo.a"
     VERBATIM)
 endif()
