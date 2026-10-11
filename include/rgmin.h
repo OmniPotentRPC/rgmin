@@ -149,7 +149,9 @@ typedef rgmin_status_t (*rgmin_evalgrad_fn)(void *user,
 const char *rgmin_version(void);
 /** Return the C ABI compatibility identity for this build. */
 rgmin_abi_stamp_t rgmin_abi_stamp(void);
-/** Return nonzero when a stamp is compatible with this build. */
+/** Return nonzero when a stamp is compatible with this build.
+ *  Same major and layout, and the caller's minor is at most this minor.
+ */
 int32_t rgmin_abi_compatible(const rgmin_abi_stamp_t *stamp);
 /** Thread-local last error message after a non-success status. */
 const char *rgmin_last_error(void);

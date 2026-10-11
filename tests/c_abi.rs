@@ -617,6 +617,21 @@ fn abi_stamp_rejects_an_incompatible_layout() {
 }
 
 #[test]
+fn abi_stamp_accepts_an_older_caller_minor() {
+    let mut stamp = rgmin_abi_stamp();
+    assert!(stamp.abi_minor > 0);
+    stamp.abi_minor -= 1;
+    assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
+}
+
+#[test]
+fn abi_stamp_rejects_a_newer_caller_minor() {
+    let mut stamp = rgmin_abi_stamp();
+    stamp.abi_minor += 1;
+    assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 0);
+}
+
+#[test]
 fn c_abi_respects_maxmove_when_initial_step_is_larger() {
     let mut x = [1.0, 0.0];
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
@@ -1131,13 +1146,6 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 }
 
 #[test]
-fn abi_stamp_ignores_minor() {
-    let mut stamp = rgmin_abi_stamp();
-    stamp.abi_minor = stamp.abi_minor.saturating_add(1);
-    assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
-}
-
-#[test]
 fn c_abi_one_eval_search_direction_is_steepest_when_empty() {
     use rgmin::ffi::{
         rgmin_solver_create, rgmin_solver_free, rgmin_solver_push_pair,
@@ -1575,7 +1583,6 @@ fn c_abi_exp_installs_and_steps() {
     params.nbr_j = out_of_range.as_ptr();
     let st = unsafe { rgmin_solver_set_precon(session, &params) };
     assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
-    params.nbr_j = pair_j.as_ptr();
 
     let mut x = [0.4, 0.1, -0.2, -0.3, 0.2, 0.05];
     let mut out = rgmin_report_t {

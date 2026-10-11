@@ -406,8 +406,11 @@ pub unsafe extern "C" fn rgmin_abi_compatible(stamp: *const rgmin_abi_stamp_t) -
         return 0;
     }
     let stamp = unsafe { &*stamp };
+    // An older caller on this major and layout is served. A newer minor
+    // asks for symbols this build does not have.
     i32::from(
         stamp.abi_major == RGMIN_ABI_VERSION_MAJOR
+            && stamp.abi_minor <= RGMIN_ABI_VERSION_MINOR
             && stamp.layout_revision == RGMIN_ABI_LAYOUT_REVISION,
     )
 }

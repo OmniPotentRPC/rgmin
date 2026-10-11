@@ -205,6 +205,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `rgmin_abi_compatible` rejects a caller minor newer than this build.
+  An older caller minor, on the same major and layout, is accepted.
+
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than
   `1e3 (1 + |f(lo)| + |phi'(lo)| (hi - lo))`. Cubic and quadratic

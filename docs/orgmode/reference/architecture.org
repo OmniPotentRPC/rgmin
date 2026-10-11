@@ -50,8 +50,8 @@ Rust, C sees a small ABI, C++ is a header wrapper.
   whose decrease clears =c * eps_f=.
 - =rgmin_solver_create= / =rgmin_solver_step= / =rgmin_solver_free= ::
   Stateful C waist. Callbacks are per step. =abi_major= 1,
-  =abi_minor= 9, =layout_revision= 2. Compatibility checks major
-  and layout only.
+  =abi_minor= 9, =layout_revision= 2. Compatibility accepts an older
+  or equal minor on the same major and layout.
 - =ManifoldKind= :: Embedded geometry. Euclidean is the identity.
   Sphere, SO(3), Stiefel ~St(n,1)~, and SE(3) implement
   ~project~ / ~retract~ / ~transport~.
