@@ -132,6 +132,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Nonlinear CG opens the line search with Nocedal-Wright equation 3.60,
+  at 1 on the first step when a metric is installed, and restarts with
+  β = 0 when that metric is replaced. Polak-Ribiere+ clamps a negative β.
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than
   `1e3 (1 + |f(lo)| + |phi'(lo)| (hi - lo))`. Cubic and quadratic

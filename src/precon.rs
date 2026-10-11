@@ -110,6 +110,9 @@ pub(crate) struct ExpState {
     matrix: Option<Exp>,
     /// `r_nn` is filled from the first real geometry.
     r_nn_pending: bool,
+    /// Positions of the last assembly. The matrix is held while the
+    /// largest atomic move stays within `r_nn / 2`.
+    built_at: Option<Array1<f64>>,
 }
 
 impl Exp {
@@ -151,6 +154,32 @@ impl Exp {
             r_nn,
             csr: Arc::new(csr),
         })
+    }
+
+    /// Diagonal SPD matrix. Jacobi PCG inverts it in one iteration.
+    #[cfg(test)]
+    pub(crate) fn diagonal(diag: &[f64]) -> Self {
+        let n = diag.len();
+        let mut row_ptr = Vec::with_capacity(n + 1);
+        let mut col_idx = Vec::with_capacity(n);
+        let mut val = Vec::with_capacity(n);
+        row_ptr.push(0);
+        for (i, &d) in diag.iter().enumerate() {
+            col_idx.push(i);
+            val.push(d);
+            row_ptr.push(i + 1);
+        }
+        Self {
+            mu: 1.0,
+            r_nn: 1.0e9,
+            csr: Arc::new(Csr {
+                n,
+                row_ptr,
+                col_idx,
+                val,
+                diag: diag.to_vec(),
+            }),
+        }
     }
 
     /// Energy scale used to build this matrix.
@@ -236,10 +265,12 @@ impl ExpState {
             r_nn,
             matrix: None,
             r_nn_pending: false,
+            built_at: None,
         };
         if let Some(mu) = params.mu {
             state.matrix = Some(Exp::assemble(positions, neighbours, params, mu, r_nn)?);
             state.mu = Some(state.matrix.as_ref().unwrap().mu());
+            state.built_at = Some(positions.to_owned());
         }
         Ok(state)
     }
@@ -286,6 +317,7 @@ impl ExpState {
             r_nn,
             matrix: None,
             r_nn_pending,
+            built_at: None,
         })
     }
 
@@ -297,14 +329,17 @@ impl ExpState {
         self.matrix.as_ref()
     }
 
-    /// Rebuild `P` at `positions`. Estimates `μ` when it is unset or
-    /// [`ExpParams::recalc_mu`] is set. `grad_here` is `∇E(positions)`.
+    /// Rebuild `P` at `positions` when the hold has lapsed.
+    ///
+    /// Estimates `μ` when it is unset or [`ExpParams::recalc_mu`] is set.
+    /// `grad_here` is `∇E(positions)`. `Ok(true)` means the matrix was
+    /// replaced. `Ok(false)` means the previous matrix is still in use.
     pub(crate) fn refresh<G>(
         &mut self,
         positions: ArrayView1<f64>,
         grad_here: &Array1<f64>,
         grad: G,
-    ) -> Result<()>
+    ) -> Result<bool>
     where
         G: Fn(ArrayView1<f64>) -> Array1<f64>,
     {
@@ -313,6 +348,9 @@ impl ExpState {
                 self.r_nn = r;
                 self.r_nn_pending = false;
             }
+        }
+        if self.hold(positions) {
+            return Ok(false);
         }
         let need_mu = self.mu.is_none() || self.params.recalc_mu;
         if need_mu {
@@ -340,8 +378,71 @@ impl ExpState {
             mu,
             self.r_nn,
         )?);
-        Ok(())
+        self.built_at = Some(positions.to_owned());
+        Ok(true)
     }
+
+    fn hold(&self, positions: ArrayView1<f64>) -> bool {
+        if self.r_nn_pending || self.matrix.is_none() || self.mu.is_none() || self.params.recalc_mu
+        {
+            return false;
+        }
+        self.built_at.as_ref().is_some_and(|prev| {
+            !needs_rebuild(max_atom_displacement(prev.view(), positions), self.r_nn)
+        })
+    }
+
+    /// A diagonal metric that refresh will not replace. For the
+    /// preconditioned-CG unit test.
+    #[cfg(test)]
+    pub(crate) fn holding_diagonal(diag: &[f64], positions: ArrayView1<f64>) -> Self {
+        Self {
+            neighbours: Neighbours::default(),
+            params: ExpParams {
+                mu: Some(1.0),
+                r_nn: Some(1.0e9),
+                recalc_mu: false,
+                ..ExpParams::default()
+            },
+            mu: Some(1.0),
+            r_nn: 1.0e9,
+            matrix: Some(Exp::diagonal(diag)),
+            r_nn_pending: false,
+            built_at: Some(positions.to_owned()),
+        }
+    }
+}
+
+/// Largest per-atom displacement between two `3 N` coordinate vectors.
+/// A length that is not a multiple of 3 is treated as one flat vector.
+fn max_atom_displacement(previous: ArrayView1<f64>, current: ArrayView1<f64>) -> f64 {
+    if previous.len() != current.len() {
+        return f64::INFINITY;
+    }
+    if previous.len() % 3 != 0 {
+        return (0..previous.len())
+            .map(|i| (previous[i] - current[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+    }
+    let mut best = 0.0_f64;
+    for i in (0..previous.len()).step_by(3) {
+        let mut s = 0.0;
+        for k in 0..3 {
+            let d = previous[i + k] - current[i + k];
+            s += d * d;
+        }
+        best = best.max(s.sqrt());
+    }
+    best
+}
+
+/// Rebuild when the largest atomic move exceeds half of `scale`.
+fn needs_rebuild(max_atom_displacement: f64, scale: f64) -> bool {
+    if !(scale.is_finite() && scale > 0.0) || !max_atom_displacement.is_finite() {
+        return true;
+    }
+    max_atom_displacement > 0.5 * scale
 }
 
 /// Paper's `r_nn`: the maximum, over atoms that have a neighbour, of
@@ -732,6 +833,9 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<Vec<f64>> {
         for i in 0..n {
             x[i] += alpha * p[i];
             r[i] -= alpha * ap[i];
+        }
+        if nrm2(&r) <= tol {
+            return finite_vec(x);
         }
         jacobi(a, &r, &mut z);
         let rz_new = dot(&r, &z);

@@ -511,11 +511,21 @@ fn wolfe() -> LineSearch {
     }
 }
 
+/// Nocedal-Wright section 5.2: CG uses a tighter curvature constant than
+/// the quasi-Newton default. The same search is used with and without a metric.
+fn cg_wolfe() -> LineSearch {
+    LineSearch::Wolfe {
+        c1: 1e-4,
+        c2: 0.1,
+        maxiter: 20,
+    }
+}
+
 /// `(method, accept, linesearch, istep)` for a session name.
 fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
     let lbfgs = Method::Lbfgs { memory: 10 };
     let pr = Method::Nlcg {
-        conjugacy: Conjugacy::PolakRibiere,
+        conjugacy: Conjugacy::PolakRibierePlus,
         restart: Restart::njws(),
     };
     let back = LineSearch::Backtracking {
@@ -542,7 +552,7 @@ fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
         ),
         "bb" => (Method::Bb, Accept::None, wolfe(), 0.01),
         "bb-nm" => (Method::Bb, Accept::Nonmonotone, wolfe(), 0.01),
-        "cg-wolfe" | "cg-exp" => (pr, Accept::None, wolfe(), 0.01),
+        "cg-wolfe" | "cg-exp" => (pr, Accept::None, cg_wolfe(), 0.01),
         "cg-brent" => (pr, Accept::None, LineSearch::default(), 0.01),
         "lbfgs-exp" => (lbfgs, Accept::None, wolfe(), 1.0),
         "fire-exp" => (

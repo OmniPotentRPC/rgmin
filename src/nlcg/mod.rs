@@ -27,6 +27,12 @@ pub enum Conjugacy {
     /// Polak and Ribiere, *Note sur la convergence de methodes de directions
     /// conjuguees* (1969).
     PolakRibiere,
+    /// Polak-Ribiere+, NJWS 5.45: `max(β_PR, 0)`.
+    ///
+    /// The same clamp applies in the Euclidean product and in the metric
+    /// product. Nocedal and Wright, *Numerical Optimization*,
+    /// <https://doi.org/10.1007/978-0-387-40065-5>.
+    PolakRibierePlus,
     /// Hestenes-Stiefel, NJWS 5.46: `g·y / (y·d_old)`.
     ///
     /// Hestenes and Stiefel, *Methods of Conjugate Gradients for Solving
@@ -153,6 +159,7 @@ impl Conjugacy {
         match self {
             Self::FletcherReeves => div(gg, gg_old),
             Self::PolakRibiere => div(y_g, gg_old),
+            Self::PolakRibierePlus => Self::PolakRibiere.beta(ctx).max(0.0),
             Self::HestenesStiefel => {
                 let y_d = dot(y.view(), d);
                 div(y_g, y_d)
@@ -220,6 +227,7 @@ impl Conjugacy {
         match self {
             Self::FletcherReeves => div(gz, gz_old),
             Self::PolakRibiere => div(zy, gz_old),
+            Self::PolakRibierePlus => Self::PolakRibiere.beta_metric(ctx, z, z_old).max(0.0),
             Self::HestenesStiefel => div(zy, y_d),
             Self::DaiYuan => div(gz, y_d),
             Self::ConjugateDescent => div(gz, -dot(d, gold)),
@@ -255,8 +263,13 @@ fn dot(a: ArrayView1<'_, f64>, b: ArrayView1<'_, f64>) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
+/// `num/den`, or 0 when `den` is negligible beside `num`.
+///
+/// The test is `|den| <= eps (|num| + 1)`. The added 1 keeps a tiny
+/// denominator from producing a huge β when the numerator is moderate,
+/// and a large numerator still requires a proportionally larger denominator.
 fn div(num: f64, den: f64) -> f64 {
-    if den.abs() <= f64::EPSILON {
+    if !num.is_finite() || !den.is_finite() || den.abs() <= f64::EPSILON * (num.abs() + 1.0) {
         0.0
     } else {
         num / den
@@ -410,6 +423,7 @@ mod tests {
         // β_FR = 0.1, β_PR = -0.2; Gilbert-Nocedal 5.48 returns -β_FR
         assert_eq!(Conjugacy::FletcherReeves.beta(&ctx), 0.1);
         assert_eq!(Conjugacy::PolakRibiere.beta(&ctx), -0.2);
+        assert_eq!(Conjugacy::PolakRibierePlus.beta(&ctx), 0.0);
         assert_eq!(Conjugacy::FrPr.beta(&ctx), -0.1);
         let take_max = Conjugacy::hybrid(Conjugacy::PolakRibiere, Conjugacy::FletcherReeves, true);
         let take_min = Conjugacy::hybrid(Conjugacy::PolakRibiere, Conjugacy::FletcherReeves, false);
