@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Rohit Goswami
 # SPDX-License-Identifier: MIT
-"""T5: SHA-256 of trajectories at several thread counts.
+"""SHA-256 of trajectories at several thread counts.
 
 The Pt7 golden pins ASE's EMT, which is NumPy-dispatched. It is not a
 pin of rgmin. rgmin's own results must be bit-identical across ISAs

@@ -16,11 +16,11 @@ endif()
 find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 find_package(nanobind CONFIG REQUIRED)
 
-# T2: nightly rustc, an explicit target triple, and a std rebuilt with
-# the thread sanitizer. Rust_TOOLCHAIN and Rust_CARGO_TARGET are read
-# when Corrosion is included, so they are set first. The workflow passes
-# the dated nightly that matches the image clang.
-option(RGMIN_TSAN "Build the Rust staticlib with -Zsanitizer=thread (T2)." OFF)
+# Nightly rustc, an explicit target triple, and a std rebuilt with the
+# thread sanitizer. Rust_TOOLCHAIN and Rust_CARGO_TARGET are read when
+# Corrosion is included, so they are set first. The workflow passes the
+# dated nightly that matches the image clang.
+option(RGMIN_TSAN "Build the Rust staticlib with -Zsanitizer=thread." OFF)
 if(RGMIN_TSAN)
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
     set(_rgmin_tsan_target "aarch64-unknown-linux-gnu")
@@ -51,14 +51,13 @@ FetchContent_Declare(
 # Corrosion 0.6.1 names the cargo target directory by stripping the
 # crate's grandparent from its parent:
 #   string(REPLACE "${grandparent_path}/" "" cargo_folder_name "${parent_path}")
-# This tree is checked out at /workspace, so the grandparent is `/`.
-# The replace then leaves cargo_folder_name absolute (`/workspace`).
-# cmake_path(APPEND) treats an absolute component as a new root, and
-# cargo is asked to create `/workspace_<hash>` (locally
-# `/workspace_c4b44...`). That directory is not writable, so configure
-# fails with "Permission denied" while creating the cargo target dir.
-# When the spliced name is still absolute, keep only its last component.
-# A nested CI checkout has a relative name, and this splice does nothing.
+# When that grandparent is the filesystem root, the replace leaves an
+# absolute folder name. cmake_path(APPEND) treats an absolute component
+# as a new root, so cargo is asked to create a directory beside the
+# root. That directory is not writable, and configure fails while
+# creating the cargo target dir. When the spliced name is still
+# absolute, keep only its last component. A nested checkout has a
+# relative name, and this splice does nothing.
 FetchContent_GetProperties(corrosion)
 if(NOT corrosion_POPULATED)
   FetchContent_Populate(corrosion)
@@ -102,7 +101,7 @@ if(RGMIN_TSAN)
     VERBATIM)
 endif()
 
-# F1: FREE_THREADED sets Py_mod_gil = Py_MOD_GIL_NOT_USED on a
+# FREE_THREADED sets Py_mod_gil = Py_MOD_GIL_NOT_USED on a
 # free-threaded interpreter. On a GIL interpreter nanobind keeps
 # STABLE_ABI and ignores FREE_THREADED. cp312-abi3 covers 3.12+ GIL.
 # cp314t and cp315t are version-specific free-threaded wheels.
@@ -121,13 +120,13 @@ if(NOT MSVC)
   target_compile_options(_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# F9: Windows free-threaded builds define Py_GIL_DISABLED when the
+# Windows free-threaded builds define Py_GIL_DISABLED when the
 # Python headers did not.
 if(WIN32 AND NB_FREE_THREADED)
   target_compile_definitions(_core PRIVATE Py_GIL_DISABLED=1)
 endif()
 
-# F9: hidden visibility is the default above. --exclude-libs,ALL drops
+# Hidden visibility is the default above. --exclude-libs,ALL drops
 # the staticlib from the dynamic table. The version script (Linux) and
 # the export list (macOS) leave only PyInit__core.
 if(UNIX AND NOT APPLE)

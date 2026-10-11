@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Rohit Goswami
 # SPDX-License-Identifier: MIT
-"""T4: array validation, option parsing, and the F7 mapping."""
+"""Array validation, option parsing, and status mapping."""
 
 from __future__ import annotations
 
