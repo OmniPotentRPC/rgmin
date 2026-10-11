@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- ECnoise (`ecnoise`, `sample_noise`). Moré and Wild, SIAM J. Sci.
+  Comput. 33, 1292 (2011), https://doi.org/10.1137/100786125.
+  Equally spaced samples produce a difference table. The noise level
+  is the lowest order whose three estimates agree within a factor of
+  4 and whose column changes sign. `sample_noise` reads an eindir
+  objective on the segment from `x - h p` to `x + h p`. A spacing
+  that is too small (`inform` 2) is retried at `100 h` by the caller,
+  and one that is too large (`inform` 3) at `h / 100`.
 - Pulay residual subspace (`Method::Diis`, C `RGMIN_DIIS`, ABI minor 30).
   Coefficients on the stored gradients sum to one and minimize the
   combined residual. `memory` 0 keeps 6 pairs. One pair takes a

@@ -34,6 +34,8 @@ mod bb;
 mod box_objective;
 mod control;
 mod diis;
+/// Moré and Wild ECnoise computational-noise estimate.
+pub mod ecnoise;
 mod error;
 /// C ABI, gated behind the `capi` feature.
 #[cfg(feature = "capi")]
@@ -105,6 +107,7 @@ pub use accept::Accept;
 pub use adam::minimize_adam;
 pub use control::Control;
 pub use dlaf_kind::DlaFutureParams;
+pub use ecnoise::{EcNoiseEstimate, EcNoiseStatus, SampledNoise, ecnoise, sample_noise};
 pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};
 pub use elpa_kind::{ElpaParams, ElpaSpectrum, ElpaStage, elpa_config, elpa_spectrum};
 pub use error::{Error, Result};

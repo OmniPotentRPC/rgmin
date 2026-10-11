@@ -84,6 +84,7 @@ cargo test --features capi
    explanation/linesearch
    explanation/quickmin
    explanation/diis
+   explanation/ecnoise
    explanation/quasi-newton
    explanation/trust-region
    explanation/scg

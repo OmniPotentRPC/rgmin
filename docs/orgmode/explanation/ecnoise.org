@@ -1,0 +1,22 @@
+#+TITLE: ECnoise
+#+OPTIONS: toc:nil num:nil
+
+~ecnoise~ reads ~nf >= 4~ function values at equally spaced points
+and builds the forward-difference table. The level-~k~ estimate is
+
+: σ_k = sqrt( γ_k * mean_i (Δ^k f_i)^2 ),    γ_k = (k!)^2 / (2k)!
+
+The returned noise is the smallest ~k~ whose column changes sign and
+whose three estimates ~σ_k~, ~σ_{k+1}~, ~σ_{k+2}~ lie within a factor
+of 4. Seven samples are the count Moré and Wild recommend (SIAM J.
+Sci. Comput. 33, 1292 (2011), https://doi.org/10.1137/100786125).
+
+~inform~ 1 means that level was accepted. ~inform~ 2 means at least
+half of the first differences are zero; the reference code retries at
+~100 h~. ~inform~ 3 means the samples differ in the leading digit, or
+no column meets the test; the reference code retries at ~h / 100~.
+
+~sample_noise~ evaluates an eindir objective at ~m + 1~ points on the
+segment from ~x - h p~ to ~x + h p~, with ~p~ scaled to unit length
+and ~m >= 3~, then calls ~ecnoise~. The center sample is
+~values[m / 2]~.
