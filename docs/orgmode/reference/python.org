@@ -29,17 +29,18 @@ constant alone raises =ValueError=.
 
 =ValueError= means an option name or an option value is invalid, or a
 coordinate array has the wrong shape. A count such as =memory= that
-does not fit in a signed 64-bit integer is a =ValueError=.
+does not fit in a signed 64-bit integer is a =ValueError=. A count
+passed as a float or a bool, for example =memory= set to =1.5=, is
+also a =ValueError= whose message says it must be an int.
 =TypeError= means an array has the wrong dtype or order, an option
-has the wrong Python type, or =f_and_grad= did not return
-=(value, gradient)=.
+value is not a bool, an int, a float, or a str, or =f_and_grad= did
+not return =(value, gradient)=.
 =RuntimeError= means the solver is already in use on another thread,
 or the native step failed. The message is the text reported by the
-library.
+library. =Solver.step= on Newton, RFO, or dogleg, with no Hessian
+callback, raises =RuntimeError=.
 =NumericalError= is an =ArithmeticError=. It means the value or the
 gradient was not finite.
-=NotImplementedError= means =restart=, =read=, =dump=, or a Hessian
-method called without =hessian=.
 An exception raised inside the objective is raised again on the
 calling thread.
 
@@ -55,3 +56,5 @@ Polak-Ribiere+ value.
 
 =run= returns a Python =bool=. =True= means the force criterion was
 met.
+=NotImplementedError= means =restart=, =read=, =dump=, or a Hessian
+optimizer called without =hessian=.
