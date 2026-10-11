@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Rohit Goswami
 # SPDX-License-Identifier: MIT
-"""T5: thread-count invariance of a fixed-step trajectory."""
+"""T5: SHA-256 of rgmin.ase trajectories at several thread counts."""
 
 from __future__ import annotations
 
@@ -11,82 +11,90 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import pytest
 
-import rgmin
+ase = pytest.importorskip("ase")
+from ase import Atoms
+from ase.calculators.emt import EMT
+from ase.calculators.lj import LennardJones
+
+from rgmin.ase import LBFGS
+
+# One hash per fixture. 3.14 and 3.14t both compare against these values.
+GOLDEN = {
+    "lj38": "51e46a7c111203bb0a2f95894c33324039b6a8452bc118dbfa2c9026a4cf8e19",
+    "pt7": "7fa613ea5fb5d0393ca500d4885dc490dc248181c5750337a9662d616e9a9263",
+}
 
 _STEPS = 5
-_X0 = np.random.default_rng(38).normal(scale=0.8, size=38 * 3)
 
 
-def _lj(x: np.ndarray) -> tuple[float, np.ndarray]:
-    pos = np.asarray(x, dtype=np.float64).reshape(-1, 3)
-    energy = 0.0
-    grad = np.zeros_like(pos)
-    n = pos.shape[0]
-    for i in range(n):
-        for j in range(i + 1, n):
-            r = pos[i] - pos[j]
-            d2 = float(r @ r)
-            if d2 < 1e-24:
-                d2 = 1e-24
-            inv = 1.0 / d2
-            inv3 = inv * inv * inv
-            inv6 = inv3 * inv3
-            energy += 4.0 * (inv6 - inv3)
-            ded = 4.0 * (-6.0 * inv**7 + 3.0 * inv**4)
-            g = (ded * 2.0) * r
-            grad[i] += g
-            grad[j] -= g
-    return energy, grad.reshape(-1)
+def _lj38() -> Atoms:
+    positions = np.random.default_rng(38).normal(scale=0.8, size=(38, 3))
+    atoms = Atoms(numbers=[1] * 38, positions=positions)
+    atoms.calc = LennardJones()
+    return atoms
 
 
-def _run_lj() -> bytes:
-    x = np.array(_X0, dtype=np.float64, copy=True)
-    report = rgmin.minimize(_lj, x, method="lbfgs", memory=10, maxiter=_STEPS, gtol=0.0)
-    blob = x.tobytes() + np.array([report.value, report.grad_norm], dtype=np.float64).tobytes()
-    return hashlib.sha256(blob).digest()
+def _pt7() -> Atoms:
+    a = 2.7
+    base = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [a, 0.0, 0.0],
+            [-a, 0.0, 0.0],
+            [0.0, a, 0.0],
+            [0.0, -a, 0.0],
+            [0.0, 0.0, a],
+            [0.0, 0.0, -a],
+        ]
+    )
+    atoms = Atoms("Pt7", positions=base + np.random.default_rng(7).normal(scale=0.02, size=base.shape))
+    atoms.calc = EMT()
+    return atoms
+
+
+def trajectory_sha256(kind: str) -> str:
+    atoms = _lj38() if kind == "lj38" else _pt7()
+    frames: list[bytes] = []
+
+    def grab() -> None:
+        frames.append(np.array(atoms.get_positions(), dtype=np.float64).tobytes())
+
+    opt = LBFGS(atoms, logfile=None, maxstep=0.1)
+    opt.attach(grab, interval=1)
+    opt.run(fmax=0.0, steps=_STEPS)
+    return hashlib.sha256(b"".join(frames)).hexdigest()
 
 
 def test_python_thread_invariance() -> None:
-    reference = _run_lj()
-    for workers in (1, 2, 8):
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            hashes = list(pool.map(lambda _i: _run_lj(), range(workers)))
-        assert hashes == [reference] * workers
+    for kind in ("lj38", "pt7"):
+        reference = GOLDEN[kind]
+        for workers in (1, 2, 8):
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                hashes = list(pool.map(lambda _i: trajectory_sha256(kind), range(workers)))
+            assert hashes == [reference] * workers
 
 
 def test_rayon_env_invariance() -> None:
-    script = (
-        "import hashlib, numpy as np, rgmin\n"
-        "from tests.python.test_invariance import _run_lj\n"
-        "print(hashlib.sha256(_run_lj()).hexdigest())\n"
-    )
-    # Importing the helper needs the repo root on PYTHONPATH. The function
-    # itself only needs numpy and rgmin, so inline the call via -c after
-    # setting the path to this file's directory is unnecessary: spawn the
-    # same interpreter with the package already importable.
     code = (
-        "import hashlib, os, numpy as np\n"
-        "import rgmin\n"
-        "from test_invariance import _run_lj\n"
-        "print(_run_lj().hex())\n"
+        "from test_invariance import trajectory_sha256\n"
+        "import sys\n"
+        "print(trajectory_sha256(sys.argv[1]))\n"
     )
     env_base = os.environ.copy()
     env_base["PYTHONPATH"] = os.path.dirname(__file__) + os.pathsep + env_base.get("PYTHONPATH", "")
-    reference: str | None = None
-    for threads in ("1", "2", "3", "8"):
-        env = dict(env_base)
-        env["RAYON_NUM_THREADS"] = threads
-        env["OMP_NUM_THREADS"] = threads
-        completed = subprocess.run(
-            [sys.executable, "-c", code],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=env,
-            cwd=os.path.dirname(__file__),
-        )
-        digest = completed.stdout.strip()
-        if reference is None:
-            reference = digest
-        assert digest == reference
+    for kind in ("lj38", "pt7"):
+        for threads in ("1", "2", "3", "8"):
+            env = dict(env_base)
+            env["RAYON_NUM_THREADS"] = threads
+            env["OMP_NUM_THREADS"] = threads
+            completed = subprocess.run(
+                [sys.executable, "-c", code, kind],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=os.path.dirname(__file__),
+            )
+            assert completed.stdout.strip() == GOLDEN[kind]
