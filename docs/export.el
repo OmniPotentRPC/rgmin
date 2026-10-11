@@ -3,9 +3,17 @@
 (add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/") t)
 (package-initialize)
 
+(unless package-archive-contents
+  (package-refresh-contents))
+
+;; ox-rst calls org-element-type-p, which Org 9.7 added.
+;; Emacs 29 ships Org 9.6.15, and package-installed-p counts that built-in,
+;; so install the GNU ELPA package when the active Org is older than 9.7.
+(unless (package-installed-p 'org '(9 7))
+  (package-install (cadr (assq 'org package-archive-contents))))
+
 ;; Ensure ox-rst is present
 (unless (package-installed-p 'ox-rst)
-  (package-refresh-contents)
   (package-install 'ox-rst))
 
 (require 'ox-rst)
