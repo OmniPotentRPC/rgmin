@@ -207,6 +207,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `rgmin_abi_compatible` rejects a caller minor newer than this build.
   An older caller minor, on the same major and layout, is accepted.
+- `rggate` leaves `endpoint` unread when `reference` is numeric. That
+  column is a structure path only when `reference` is absent or is a
+  path. The ECnoise bench stores the stop status in `endpoint`.
 
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than

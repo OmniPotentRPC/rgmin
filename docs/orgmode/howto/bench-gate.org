@@ -33,7 +33,9 @@ Optional: ~pot_s~, ~overhead_us_per_iter~, ~endpoint~, ~reference~,
 ~dim~, ~threads~. ~dim~ is the free coordinate count, three times the
 number of moving atoms. Frozen atoms are excluded, because ~fmax~ and
 the energy bound cover only those atoms. ~reference~ is an energy, or
-a path to an endpoint file. An endpoint file has optional ~energy~ and
+a path to an endpoint file. When ~reference~ is an energy, ~endpoint~
+is not opened. When ~reference~ is absent or is a path, ~endpoint~ is
+a structure path. An endpoint file has optional ~energy~ and
 ~cell~ lines, then ~x y z~. A zero cell is a free cluster.
 
 ** Same stationary point

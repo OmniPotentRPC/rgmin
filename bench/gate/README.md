@@ -37,8 +37,11 @@ system,method,seed,converged,iters,calls,energy,fmax,wall_s
 ```
 
 Optional columns: `pot_s`, `overhead_us_per_iter`, `endpoint`,
-`reference`, `dim`, `threads`. `converged` is `0` or `1`. `endpoint` is
-a path. `reference` is either an energy or a path. `dim` is the
+`reference`, `dim`, `threads`. `converged` is `0` or `1`. `reference`
+is either an energy or a path. `endpoint` is a structure path when
+`reference` is absent or is a path. A numeric `reference` is an energy
+window, and `endpoint` is not opened (the ECnoise bench writes the
+stop status in that column). `dim` is the
 free coordinate count: three times the number of moving atoms, with
 frozen atoms excluded, because `fmax` and the energy bound cover only
 those atoms. The data profile uses that same count as `n`. `threads`

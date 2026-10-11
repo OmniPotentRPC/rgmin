@@ -65,6 +65,22 @@ def test_gehan_censoring_and_split():
     assert all(record.energy_only for record in records)
 
 
+def test_numeric_reference_leaves_the_endpoint_word_unread():
+    # ECnoise bench shape: endpoint is the stop status, reference is an energy.
+    text = "\n".join(
+        [
+            "system,method,seed,converged,iters,calls,sample_calls,energy,fmax,wall_s,endpoint,abs_de,rmsd,reference",
+            "lj38,f32-floor,0,1,40,500,12,-173.92800000,1.0e-2,0.8,NoiseFloor,4.270000e-4,1.0e-3,-173.92842700",
+            "lj38,f32-baseline,0,1,57,800,12,-173.92842700,1.0e-2,1.2,Tolerance,0.000000e+00,1.0e-4,-173.92842700",
+        ]
+    )
+    rows = parse_csv(text)
+    records = classify_pair(rows, "f32-floor", "f32-baseline", 1e-4, 0.05, "auto")
+    assert len(records) == 1
+    assert records[0].kind == "split"
+    assert records[0].energy_only
+
+
 def test_numeric_reference_overrides_the_pair():
     text = "\n".join(
         [

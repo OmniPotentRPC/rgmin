@@ -199,7 +199,14 @@ def _hit(row, other, target, e_tol, rmsd_tol, cache):
 
 
 def _positions(row, cache):
-    if not row.endpoint:
+    """Coordinates at ``endpoint`` when that field is a structure path.
+
+    A numeric ``reference`` is an energy window. The ECnoise bench writes
+    the stop status (``Tolerance``, ``NoiseFloor``) in ``endpoint``, and
+    that word is not a path. ``endpoint`` is opened only when ``reference``
+    is absent or is itself a path.
+    """
+    if not row.endpoint or _as_float(row.reference) is not None:
         return None
     _energy, cell, positions = _load(row.endpoint, cache)
     return positions, cell

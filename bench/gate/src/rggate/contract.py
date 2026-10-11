@@ -4,8 +4,11 @@ A file is major version 1 when it has no version marker or a marker
 ``# rggate-csv 1`` (a minor number is allowed: ``1.2``). Any other major
 version is refused. Columns ``pot_s``, ``overhead_us_per_iter``,
 ``endpoint``, ``reference``, ``dim``, and ``threads`` are optional.
-``endpoint`` and ``reference`` are paths, except that a numeric
-``reference`` is an energy. ``threads`` is the worker count of that
+``reference`` is a path, or a numeric energy. ``endpoint`` is a
+structure path when ``reference`` is absent or is a path. A numeric
+``reference`` is an energy window, and ``endpoint`` is left unread
+(the ECnoise bench stores the stop status there). ``threads`` is the
+worker count of that
 row, used only for the rank-invariance check.
 """
 
