@@ -9,14 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- ECnoise (`ecnoise`, `sample_noise`). Moré and Wild, SIAM J. Sci.
-  Comput. 33, 1292 (2011), https://doi.org/10.1137/100786125.
-  Equally spaced samples produce a difference table. The noise level
-  is the lowest order whose three estimates agree within a factor of
-  4 and whose column changes sign. `sample_noise` reads an eindir
-  objective on the segment from `x - h p` to `x + h p`. A spacing
-  that is too small (`inform` 2) is retried at `100 h` by the caller,
-  and one that is too large (`inform` 3) at `h / 100`.
+- ECnoise (`ecnoise`, `sample_noise`, `sample_gradient_noise`).
+  Moré and Wild, SIAM J. Sci. Comput. 33, 1292 (2011),
+  https://doi.org/10.1137/100786125. The difference table uses `m + 1`
+  samples at spacing `h` (default `m = 8`). `h` is the distance
+  between samples, as in `ECnoise.m`, not the half-width of the
+  stencil. The noise is the lowest order whose three estimates agree
+  within a factor of 4 and whose column changes sign. A spacing that
+  is too small (`inform` 2) is retried at `100 h`, and one that is
+  too large (`inform` 3) at `h / 100`. `NoiseEstimate::declared`
+  records a backend value and skips the samples. Gradient noise is
+  the same table on `g(x + i h u) · w` with one counter-based unit
+  vector `w`. The forward step `8^{1/4} sqrt(eps_f / |f''|)` and the
+  gradient probe `2 sqrt(eps_g / |T|)` follow Moré and Wild, ACM
+  Trans. Math. Softw. 38, 19 (2012),
+  https://doi.org/10.1145/2168773.2168777, and are clamped to
+  `[1e-16, 1]`. `Control::with_noise_eps` stops at `c * eps_g`
+  (`c = 3` by default) with `Status::NoiseFloor` after the `gtol`
+  test. The `par` feature evaluates the stencil by index.
 - Pulay residual subspace (`Method::Diis`, C `RGMIN_DIIS`, ABI minor 30).
   Coefficients on the stored gradients sum to one and minimize the
   combined residual. `memory` 0 keeps 6 pairs. One pair takes a

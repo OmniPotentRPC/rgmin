@@ -49,6 +49,7 @@ ISBN). Do not invent DOIs.
 | Li–Fukushima cautious BFGS 2001 | 10.1137/S1052623499354242 | On the Global Convergence of the BFGS Method for Nonconvex Unconstrained Optimization Problems |
 | Møller SCG 1993 | 10.1016/S0893-6080(05)80056-5 | A scaled conjugate gradient algorithm for fast supervised learning |
 | ECnoise Moré–Wild 2011 | 10.1137/100786125 | Estimating Computational Noise |
+| Noisy derivatives Moré–Wild 2012 | 10.1145/2168773.2168777 | Estimating Derivatives of Noisy Simulations |
 
 Polak-Ribiere 1969 and Hestenes-Stiefel 1952: cite the paper/book
 title in rustdoc if no DOI is on this list. Do not mint a DOI.

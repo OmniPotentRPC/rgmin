@@ -1,0 +1,81 @@
+#+TITLE: Estimate noise and stop on the floor
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Estimate noise and stop on the floor
+
+Computational noise sets the smallest finite-difference step that is
+worth taking, and the gradient size at which a tighter tolerance is
+no longer a stationary point. The estimator is Moré and Wild, SIAM J.
+Sci. Comput. 33, 1292 (2011),
+https://doi.org/10.1137/100786125. The steps are Moré and Wild, ACM
+Trans. Math. Softw. 38, 19 (2012),
+https://doi.org/10.1145/2168773.2168777. The difference table itself
+is [[file:../explanation/ecnoise.org][ECnoise]].
+
+** Estimate
+
+#+begin_src rust
+use ndarray::array;
+use rgmin::{ecnoise, sample_gradient_noise, sample_noise, NoiseFlag, DEFAULT_M};
+
+let values = [1.0, 1.01, 1.0, 1.01, 1.0, 1.01, 1.0];
+let table = ecnoise(&values).unwrap();
+assert_eq!(table.ok, NoiseFlag::Detected);
+
+let energy = sample_noise(&objective, x.view(), direction.view(), 1e-4, DEFAULT_M).unwrap();
+let grad = sample_gradient_noise(
+    &objective,
+    x.view(),
+    direction.view(),
+    1e-4,
+    DEFAULT_M,
+    seed,
+)
+.unwrap();
+#+end_src
+
+~h~ is the spacing between samples. ~m = 0~ selects ~DEFAULT_M~ (8).
+~inform~ 2 retries at ~100 h~ (~next_spacing~); ~inform~ 3 retries at
+~h / 100~. ~NoiseEstimate::declared(eps)~ records a value the backend
+already knows and skips the samples.
+
+~sample_gradient_noise~ projects the force onto one unit vector ~w~.
+Component ~i~ of ~w~ comes from a counter-based stream keyed by
+~(seed, i)~, not from a thread-local generator. The dot product is
+taken in index order. With the ~par~ feature the ~m + 1~ evaluations
+run in parallel and are stored at the sample index, so the noise bits
+match a one-thread run.
+
+** Choose the step
+
+~table_derivative(values, h, 2)~ is ~|f''|~ along the line.
+~table_derivative(values, h, 3)~ is the third-derivative scale ~|T|~.
+
+| Helper | Formula | Model it minimizes |
+|---+---|---|
+| ~forward_step(eps_f, second)~ | ~8^{1/4} sqrt(eps_f / |f''|)~ | ~(h/2)|f''| + sqrt(2) eps_f / h~ |
+| ~gradient_dr(eps_g, third)~ | ~2 sqrt(eps_g / |T|)~ | ~(dr/2)|T| + 2 eps_g / dr~ |
+
+Both results lie in ~[1e-16, 1]~. A zero noise returns the lower end.
+A zero derivative scale with positive noise returns the upper end.
+
+** Stop on the floor
+
+The floor is off until ~noise_eps~ is set. ~gtol~ is tested first, so
+a noise-free quadratic that meets ~gtol~ reports ~Status::Tolerance~.
+
+#+begin_src rust
+let mut control = Control::default()
+    .with_noise_eps(grad.eps)
+    .noise_floor(3.0);
+control.gtol = 1e-12;
+#+end_src
+
+The iteration stops when the gradient measure is below ~c * eps_g~
+and still at or above ~gtol~. The default factor is ~c = 3~. That
+stop is ~Status::NoiseFloor~. Spending the iteration budget above
+both tests is ~Status::Budget~.
+
+A fixed ~fmax~ set below the floor keeps iterating after the gradient
+is noise. The floor stop does not.
