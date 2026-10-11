@@ -9,8 +9,8 @@ floating-point implementation to them at fixed tolerances.
 One package, `RgminContracts`, holds the vector-space contracts and the
 scalar algebra that used to live under `proofs/lean/`: the line search,
 the trust region, the Nystrom sketch, the NEB reset, unitary
-completion, the SPD retraction, box projection, and the quasi-Newton
-derivative. Declaration names are unchanged. `Rgmin.t` is
+completion, the SPD retraction, box projection, the quasi-Newton
+derivative, the approximate Wolfe conditions, and the SCG restart. Declaration names are unchanged. `Rgmin.t` is
 `RgminContracts.t` (`RgminContracts/Reexport.lean`). SymPy checks from
 `proofs/sympy/` live in `validation/`.
 
@@ -66,6 +66,8 @@ library of The mathlib Community, doi:10.1145/3372885.3373824.
 | `spd_scalar_square_form`, `spd_scalar_retract_positive`, `spd_retract_chord_gap`, `spd_retained_first_step_witness` | `src/manifold/spd.rs` retraction | `x > 0`. The scalar second-order retraction stays positive. Boumal, doi:10.1017/9781009166164. |
 | `projected_force_in_box`, `projected_force_descent`, `projected_force_sum_descent` | `src/lbfgs.rs` boxed model step | Each displacement interval contains 0. The projected force stays in the interval and is a descent direction. Byrd, Lu, Nocedal, and Zhu, doi:10.1137/0916069. |
 | `signed_qn_hasDerivAt` | `src/qn.rs` quasi-Newton family | The denominator `curvature + alpha * sign` is nonzero. The derivative of `-g / (curvature + alpha * sign)` is `g sign / (curvature + alpha * sign)^2`. Nocedal, doi:10.1090/s0025-5718-1980-0572855-7. |
+| `quadratic_change`, `quadratic_armijo_of_slope`, `quadratic_decrease_of_slope`, `quadratic_decrease_of_strong_curvature`, `positive_secant_of_strong_curvature`, `exact_increase_of_value_window` | `src/linesearch/conditions.rs::roundoff_strong_wolfe` | On an exact quadratic the slope bound is Armijo, strong curvature gives decrease and a positive secant, and a measured window bounds exact increase only together with the oracle errors. Hager and Zhang, doi:10.1137/030601880. |
+| `liu_storey_scaled_direction`, `small_direction_with_nonstationary_gradient`, `gradient_restart_descent` | `src/nlcg/mod.rs::Conjugacy::LiuStorey`, `tests/scg_direction_restart.rs` | On an isotropic quadratic the Liu-Storey step scales the direction by `r^2`. A small direction does not certify a small gradient, and the restart `d = -g` descends. Liu and Storey, doi:10.1007/BF00940464. Møller, doi:10.1016/S0893-6080(05)80056-5. |
 
 ## Where the Rust code establishes the preconditions
 
