@@ -177,8 +177,16 @@ class Optimizer(_ASEOptimizer):
     A non-conservative optimizable (NEB, dimer, min-mode) uses
     ``accept="step"`` and the L-BFGS NEB guards. A plain atoms object
     or a cell filter keeps energy acceptance. ``accept=`` overrides
-    both. A shared calculator is called by one thread at a time unless
-    ``reentrant`` is true.
+    both.
+
+    ASE calculators are not thread-safe. Each thread needs its own
+    calculator. rgmin guarantees that a :class:`~rgmin.SolverConfig`
+    can be shared, that one :class:`~rgmin.Solver` runs on one thread
+    (a second call raises :class:`RuntimeError`), and that the
+    objective receives an owned copy of the coordinates. The adapter
+    lock stops calls on one calculator from overlapping unless that
+    calculator sets ``reentrant`` to true. The lock does not make a
+    shared calculator safe.
     """
 
     defaults = {"maxstep": 0.2}

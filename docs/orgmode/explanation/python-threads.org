@@ -19,11 +19,18 @@ if the objective mutates a shared object.
 
 * Calculators
 
-An ASE calculator is called by one thread at a time. That keeps
-=get_forces= from interleaving on one calculator. Set =reentrant =
-True= on a calculator that really can be entered by two threads, and
-the calls are allowed to overlap. =import rgmin= does not import ASE.
-The ASE classes live in =rgmin.ase=.
+ASE calculators are not thread-safe. Each thread needs its own
+calculator. Sharing one calculator across threads is not supported.
+
+rgmin guarantees three things. A =SolverConfig= can be shared. A
+=Solver= is entered by one thread, and a second call raises
+=RuntimeError=. The objective is handed its own copy of the
+coordinates.
+
+The optimizer keeps a lock around calls on one calculator unless that
+calculator sets =reentrant= to true. The lock only stops those calls
+from overlapping. It does not make the calculator safe to share.
+=import rgmin= does not import ASE. The ASE classes live in =rgmin.ase=.
 
 * Results
 

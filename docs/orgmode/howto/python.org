@@ -20,7 +20,10 @@ integers. Other numeric options have to be finite.
 
 =rgmin.ase.FIRE=, =LBFGS=, =CG=, and the other method classes are ASE
 optimizers. Each =step= is one rgmin iteration. =maxstep= is the
-per-atom cap in angstroms.
+per-atom cap in angstroms. ASE calculators are not thread-safe. Each
+thread that builds an optimizer needs its own calculator. rgmin still
+guarantees a shareable config, one solver per thread, and an owned
+copy of the coordinates. The thread-safety page records the details.
 
 #+begin_src python
 from ase.calculators.emt import EMT
