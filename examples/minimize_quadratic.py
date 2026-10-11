@@ -24,7 +24,7 @@ def main() -> rgmin.Report:
         if report.stop != rgmin.Stop.Budget:
             break
         report = solver.step(f_and_grad, x0)
-    direct = rgmin.minimize(f_and_grad, np.array(x0, copy=True), method="sd", maxiter=50, gtol=1e-12)
+    direct, _x = rgmin.minimize(f_and_grad, np.array(x0, copy=True), method="sd", maxiter=50, gtol=1e-12)
     assert report.grad_norm < 1e-8
     assert direct.grad_norm < 1e-6
     return report

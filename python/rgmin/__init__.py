@@ -16,7 +16,7 @@ import numpy as np
 import rgmin._core as _core
 from rgmin._core import Method, NumericalError, Report, Solver, Stop
 
-__version__ = "0.3.0"
+__version__ = _core.__version__  # type: ignore[attr-defined]  # pyright: ignore[reportAttributeAccessIssue]
 
 
 class SolverConfig(_core.SolverConfig):
@@ -34,9 +34,10 @@ def minimize(
     x0: np.ndarray,
     method: str | Method = "lbfgs",
     **options: Any,
-) -> Report:
-    """Minimize ``f_and_grad`` in place, starting at ``x0``."""
-    return _core.minimize(f_and_grad, x0, method, **options)
+) -> tuple[Report, np.ndarray]:
+    """Minimize ``f_and_grad`` in place and return ``(report, x)``."""
+    report, x = _core.minimize(f_and_grad, x0, method, **options)
+    return report, x
 
 
 __all__ = [
