@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import numpy as np
 import pytest
@@ -160,16 +161,8 @@ def test_shared_calculator_with_and_without_reentrant() -> None:
     assert overlapped.max_inside == 2
 
 
-@pytest.mark.thread_unsafe
-def test_slots_calculator_is_locked_by_id() -> None:
-    """A calculator without weak-reference support still gets one lock."""
-    pytest.importorskip("ase")
-    import gc
-    import weakref
-
-    from ase import Atoms
-
-    from rgmin.ase import SD, _id_locks, _lock_for
+def _unweak_calculator() -> Any:
+    """Calculator with no weak-reference support and a flat energy."""
 
     class SlotCalc:
         __slots__ = ("reentrant",)
@@ -184,22 +177,143 @@ def test_slots_calculator_is_locked_by_id() -> None:
         def get_forces(self, atoms: Any) -> np.ndarray:
             return np.zeros((len(atoms), 3))
 
+    return SlotCalc()
+
+
+@pytest.mark.thread_unsafe
+def test_live_id_locks_survive_interleaved_lookups() -> None:
+    """Two live non-weakrefable calculators keep their own locks."""
+    pytest.importorskip("ase")
+    import weakref
+
+    from ase import Atoms
+
+    from rgmin.ase import SD, _id_locks, _lock_for
+
     with pytest.raises(TypeError):
-        weakref.ref(SlotCalc())
+        weakref.ref(_unweak_calculator())
+
+    first = _unweak_calculator()
+    second = _unweak_calculator()
+    lock_first = _lock_for(first)
+    lock_second = _lock_for(second)
+    assert lock_first is not None and lock_second is not None
+    assert lock_first is not lock_second
+    assert _lock_for(first) is lock_first
+    assert _lock_for(second) is lock_second
+
+    atoms_first = Atoms("H", positions=[[0.2, 0.0, 0.0]])
+    atoms_first.calc = first
+    atoms_second = Atoms("H", positions=[[-0.2, 0.0, 0.0]])
+    atoms_second.calc = second
+    opt_first = SD(atoms_first, logfile=None, maxstep=0.05)
+    opt_second = SD(atoms_second, logfile=None, maxstep=0.05)
+    assert _lock_for(first) is lock_first
+    assert _lock_for(second) is lock_second
+    assert opt_first._id_entry is not None and opt_second._id_entry is not None
+    assert opt_first._id_entry.lock is lock_first
+    assert opt_second._id_entry.lock is lock_second
+
+    shared_atoms = Atoms("H", positions=[[0.1, 0.0, 0.0]])
+    shared_atoms.calc = first
+    opt_shared = SD(shared_atoms, logfile=None, maxstep=0.05)
+    assert opt_shared._id_entry is not None
+    assert opt_shared._id_entry.lock is lock_first
+    opt_shared.close()
+    assert id(first) in _id_locks
+    assert _lock_for(first) is lock_first
+    opt_first.close()
+    # first is still live. The entry is gone because no optimizer holds it.
+    assert id(first) not in _id_locks
+    assert id(second) in _id_locks
+    opt_second.close()
+    assert id(second) not in _id_locks
+
+
+@pytest.mark.thread_unsafe
+def test_id_locked_calculator_steps_do_not_overlap() -> None:
+    """Two optimizers on one non-weakrefable calculator take the same lock."""
+    pytest.importorskip("ase")
+    import weakref
+
+    from ase import Atoms
+
+    from rgmin.ase import SD, _lock_for
+
+    class SlotCalc:
+        __slots__ = ("reentrant", "inside", "max_inside", "gate", "held", "done", "paused")
+
+        def __init__(self) -> None:
+            self.reentrant = False
+            self.inside = 0
+            self.max_inside = 0
+            self.gate = threading.Lock()
+            self.held = threading.Event()
+            self.done = threading.Event()
+            self.paused = False
+
+        def get_potential_energy(self, atoms: Any, force_consistent: bool = False) -> float:
+            del atoms, force_consistent
+            with self.gate:
+                self.inside += 1
+                self.max_inside = max(self.max_inside, self.inside)
+                overlapped = self.inside >= 2
+            try:
+                if overlapped:
+                    self.done.set()
+                elif not self.paused:
+                    self.paused = True
+                    self.held.set()
+                    assert self.done.wait(timeout=5)
+            finally:
+                with self.gate:
+                    self.inside -= 1
+            return 0.0
+
+        def get_forces(self, atoms: Any) -> np.ndarray:
+            return np.zeros((len(atoms), 3))
 
     calc = SlotCalc()
-    first = _lock_for(calc)
-    assert first is _lock_for(calc)
-    atoms = Atoms("H", positions=[[0.2, 0.0, 0.0]])
-    atoms.calc = calc
-    SD(atoms, logfile=None, maxstep=0.05).step()
-    assert id(calc) in _id_locks
+    with pytest.raises(TypeError):
+        weakref.ref(calc)
+    atoms_a = Atoms("H", positions=[[0.2, 0.0, 0.0]])
+    atoms_a.calc = calc
+    atoms_b = Atoms("H", positions=[[-0.3, 0.1, 0.0]])
+    atoms_b.calc = calc
+    opt_a = SD(atoms_a, logfile=None, maxstep=0.05)
+    opt_b = SD(atoms_b, logfile=None, maxstep=0.05)
+    assert opt_a._id_entry is not None and opt_b._id_entry is not None
+    shared = opt_a._id_entry.lock
+    assert shared is opt_b._id_entry.lock
+    assert _lock_for(calc) is shared
 
-    ident = id(calc)
-    del atoms
-    del calc
-    gc.collect()
-    leftover = SlotCalc()
-    assert _lock_for(leftover) is not None
-    assert ident not in _id_locks
-    assert id(leftover) in _id_locks
+    start = threading.Barrier(2)
+    excluded = threading.Event()
+
+    def run_a() -> None:
+        start.wait(timeout=5)
+        opt_a.step()
+
+    def run_b() -> None:
+        start.wait(timeout=5)
+        assert calc.held.wait(timeout=5)
+        acquired = shared.acquire(blocking=False)
+        if acquired:
+            shared.release()
+            opt_b.step()
+        else:
+            excluded.set()
+            calc.done.set()
+            opt_b.step()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(run_a), pool.submit(run_b)]
+            for future in futures:
+                future.result(timeout=30)
+        assert excluded.is_set()
+        assert calc.max_inside == 1
+    finally:
+        calc.done.set()
+        opt_a.close()
+        opt_b.close()

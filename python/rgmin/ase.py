@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import importlib
 import inspect
-import sys
 import threading
 import time
 import weakref
@@ -30,11 +29,33 @@ import rgmin
 
 _ASE_KEYS = frozenset({"master", "comm", "loginterval", "force_consistent"})
 _HESSIAN_METHODS = frozenset({"newton", "rfo", "dogleg"})
+# Serialises _calc_locks and _id_locks. Both maps are mutated from
+# optimizer threads, including finalizers, so every read and write
+# takes this lock. The calculator lock itself is acquired only after
+# this one is released.
 _calc_guard = threading.Lock()
 _calc_locks: weakref.WeakKeyDictionary[Any, threading.Lock] = weakref.WeakKeyDictionary()
-# Calculators that cannot be weakly referenced. The entry keeps the
-# calculator so its id cannot be reused while the lock is registered.
-_id_locks: dict[int, tuple[Any, threading.Lock]] = {}
+
+
+class _IdEntry:
+    """Lock for one calculator that cannot be weakly referenced.
+
+    ``calc`` keeps the object alive so its id cannot be reused while
+    the entry is registered. ``holders`` counts optimizers that are
+    using it. The entry is removed when that count reaches zero.
+    """
+
+    __slots__ = ("calc", "lock", "holders")
+
+    def __init__(self, calc: Any) -> None:
+        self.calc = calc
+        self.lock = threading.Lock()
+        self.holders = 0
+
+
+# Keyed by id(calc). Presence means some lookup or optimizer still
+# owns the entry. holders is the number of live optimizers.
+_id_locks: dict[int, _IdEntry] = {}
 
 
 def _ase_passthrough(options: dict[str, Any]) -> dict[str, Any]:
@@ -155,7 +176,20 @@ def _calculator_of(opt: Any) -> Any:
     return getattr(inner, "calc", None)
 
 
+def _id_entry_for(calc: Any) -> _IdEntry | None:
+    """Return the id-keyed entry for this object. Caller holds ``_calc_guard``."""
+    entry = _id_locks.get(id(calc))
+    if entry is None or entry.calc is not calc:
+        return None
+    return entry
+
+
 def _lock_for(calc: Any) -> threading.Lock | None:
+    """Return the adapter lock for ``calc``, creating an id-keyed entry if needed.
+
+    A lookup does not drop any other entry. Lifetime of an id-keyed
+    entry is the optimizers that hold it, not a refcount guess.
+    """
     if calc is None or bool(getattr(calc, "reentrant", False)):
         return None
     try:
@@ -166,38 +200,25 @@ def _lock_for(calc: Any) -> threading.Lock | None:
                 _calc_locks[calc] = lock
             return lock
     except TypeError:
-        return _lock_by_id(calc)
+        with _calc_guard:
+            entry = _id_entry_for(calc)
+            if entry is None:
+                entry = _IdEntry(calc)
+                _id_locks[id(calc)] = entry
+            return entry.lock
 
 
-def _lock_by_id(calc: Any) -> threading.Lock:
-    """Lock a calculator that WeakKeyDictionary cannot store.
-
-    The map holds the calculator for as long as the entry exists, so a
-    new object cannot reuse the id. An entry whose calculator is
-    referenced only by this map is dropped on the next lookup.
-    """
-    key = id(calc)
+def _release_id_entry(entry: _IdEntry) -> None:
+    """Drop one optimizer hold. The finalizer calls this without ``self``."""
     with _calc_guard:
-        _drop_unreferenced_id_locks(calc)
-        stored = _id_locks.get(key)
-        if stored is None or stored[0] is not calc:
-            lock = threading.Lock()
-            _id_locks[key] = (calc, lock)
-            return lock
-        return stored[1]
-
-
-def _drop_unreferenced_id_locks(current: Any) -> None:
-    stale: list[int] = []
-    for key, (kept, _lock) in _id_locks.items():
-        if kept is current:
-            continue
-        # The dict tuple, this loop variable, and the getrefcount
-        # argument. Anything above that is another owner.
-        if sys.getrefcount(kept) <= 3:
-            stale.append(key)
-    for key in stale:
-        del _id_locks[key]
+        if entry.holders <= 0:
+            return
+        entry.holders -= 1
+        if entry.holders > 0:
+            return
+        key = id(entry.calc)
+        if _id_locks.get(key) is entry:
+            del _id_locks[key]
 
 
 class Optimizer(_ASEOptimizer):
@@ -221,9 +242,11 @@ class Optimizer(_ASEOptimizer):
     objective receives an owned copy of the coordinates. The adapter
     lock stops calls on one calculator from overlapping unless that
     calculator sets ``reentrant`` to true. A calculator that cannot be
-    weakly referenced is locked by ``id``, and that entry is dropped
-    once the calculator is otherwise unreferenced. The lock does not
-    make a shared calculator safe.
+    weakly referenced is locked by ``id``. Each optimizer holds that
+    entry, and ``close`` or collection releases the hold. The entry
+    stays while any optimizer still holds it, and it is removed when
+    the last hold is released. The lock does not make a shared
+    calculator safe.
     """
 
     defaults = {"maxstep": 0.2}
@@ -252,6 +275,8 @@ class Optimizer(_ASEOptimizer):
             maxstep = float(self.defaults["maxstep"])
         self.maxstep = float(maxstep)
         self._solver: rgmin.Solver | None = None
+        self._id_entry: _IdEntry | None = None
+        self._id_finalizer: weakref.finalize[[_IdEntry], Optimizer] | None = None
         super().__init__(
             atoms,
             restart=restart,
@@ -260,6 +285,50 @@ class Optimizer(_ASEOptimizer):
             append_trajectory=append_trajectory,
             **ase_options,
         )
+        self._calculator_lock()
+
+    def close(self) -> None:
+        """Release this optimizer's hold on an id-keyed calculator lock."""
+        self._release_id_hold()
+
+    def _release_id_hold(self) -> None:
+        finalizer = self._id_finalizer
+        self._id_finalizer = None
+        self._id_entry = None
+        if finalizer is not None:
+            finalizer()
+
+    def _hold_id_lock(self, calc: Any) -> threading.Lock:
+        if self._id_entry is not None and self._id_entry.calc is calc:
+            return self._id_entry.lock
+        self._release_id_hold()
+        with _calc_guard:
+            entry = _id_entry_for(calc)
+            if entry is None:
+                entry = _IdEntry(calc)
+                _id_locks[id(calc)] = entry
+            entry.holders += 1
+            lock = entry.lock
+        self._id_entry = entry
+        self._id_finalizer = weakref.finalize(self, _release_id_entry, entry)
+        return lock
+
+    def _calculator_lock(self) -> threading.Lock | None:
+        calc = _calculator_of(self.optimizable)
+        if calc is None or bool(getattr(calc, "reentrant", False)):
+            self._release_id_hold()
+            return None
+        try:
+            with _calc_guard:
+                lock = _calc_locks.get(calc)
+                if lock is None:
+                    lock = threading.Lock()
+                    _calc_locks[calc] = lock
+            if self._id_entry is not None:
+                self._release_id_hold()
+            return lock
+        except TypeError:
+            return self._hold_id_lock(calc)
 
     def _needs_step_accept(self) -> bool:
         return _is_nonconservative(self.optimizable) or _is_nonconservative(self.atoms)
@@ -290,7 +359,7 @@ class Optimizer(_ASEOptimizer):
             gradient = np.array(geom.gradient(), dtype=np.float64, copy=True)
             return value, gradient
 
-        lock = _lock_for(_calculator_of(self.optimizable))
+        lock = self._calculator_lock()
         if lock is None:
             return once()
         with lock:
