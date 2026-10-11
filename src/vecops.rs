@@ -20,9 +20,10 @@
 //! `scalar`, `avx2`, `avx512`, `neon`, or `sve`. An unknown name is
 //! ignored. A name this CPU cannot run selects scalar. AVX2 is taken
 //! only when FMA is also present; FMA is not enabled on the clone.
-//! The `par` feature keeps that same tree: eight lane folds, fixed
-//! chunks of 4096, combined in index order. Element updates use the
-//! same chunk size. Thread count does not change a bit.
+//! The `par` feature folds each contiguous chunk of 4096 with that
+//! same eight-partial tree, then adds the chunk totals from the first
+//! index upward. Element updates use the same chunk size. Thread
+//! count does not change a bit.
 
 use std::cell::Cell;
 use std::sync::OnceLock;
@@ -470,7 +471,7 @@ fn dot_contiguous(xs: &[f64], ys: &[f64]) -> f64 {
     let picked = choice();
     #[cfg(feature = "par")]
     if matches!(picked, Choice::Auto) && xs.len() >= PAR_MIN_LEN {
-        return dot_parallel(xs, ys);
+        return dot_parallel(picked, xs, ys);
     }
     dispatch_dot!(picked, xs, ys)
 }
@@ -513,79 +514,39 @@ fn sum_contiguous(xs: &[f64]) -> f64 {
     let picked = choice();
     #[cfg(feature = "par")]
     if matches!(picked, Choice::Auto) && xs.len() >= PAR_MIN_LEN {
-        return sum_parallel(xs);
+        return sum_parallel(picked, xs);
     }
     dispatch_sum!(picked, xs)
 }
 
 #[cfg(feature = "par")]
-fn combine8(p: [f64; W]) -> f64 {
+fn fold_in_index_order(parts: Vec<f64>) -> f64 {
     let mut acc = 0.0;
-    acc = acc + (p[0] + p[4]);
-    acc = acc + (p[1] + p[5]);
-    acc = acc + (p[2] + p[6]);
-    acc = acc + (p[3] + p[7]);
-    acc
-}
-
-#[cfg(feature = "par")]
-fn dot_parallel(xs: &[f64], ys: &[f64]) -> f64 {
-    use rayon::prelude::*;
-    let n8 = xs.len() & !7;
-    let partials: Vec<f64> = (0..W)
-        .into_par_iter()
-        .map(|lane| {
-            let mut acc = 0.0;
-            let mut base = 0;
-            while base < n8 {
-                let end = (base + PAR_CHUNK).min(n8);
-                let mut i = base + lane;
-                while i < end {
-                    acc = acc + xs[i] * ys[i];
-                    i += W;
-                }
-                base += PAR_CHUNK;
-            }
-            acc
-        })
-        .collect();
-    let mut acc = combine8(partials.try_into().unwrap());
-    let mut k = 0;
-    while n8 + k < xs.len() && k < W - 1 {
-        acc = acc + xs[n8 + k] * ys[n8 + k];
-        k += 1;
+    for part in parts {
+        acc = acc + part;
     }
     acc
 }
 
 #[cfg(feature = "par")]
-fn sum_parallel(xs: &[f64]) -> f64 {
+fn dot_parallel(picked: Choice, xs: &[f64], ys: &[f64]) -> f64 {
     use rayon::prelude::*;
-    let n8 = xs.len() & !7;
-    let partials: Vec<f64> = (0..W)
-        .into_par_iter()
-        .map(|lane| {
-            let mut acc = 0.0;
-            let mut base = 0;
-            while base < n8 {
-                let end = (base + PAR_CHUNK).min(n8);
-                let mut i = base + lane;
-                while i < end {
-                    acc = acc + xs[i];
-                    i += W;
-                }
-                base += PAR_CHUNK;
-            }
-            acc
-        })
+    let parts: Vec<f64> = xs
+        .par_chunks(PAR_CHUNK)
+        .zip(ys.par_chunks(PAR_CHUNK))
+        .map(move |(cx, cy)| dispatch_dot!(picked, cx, cy))
         .collect();
-    let mut acc = combine8(partials.try_into().unwrap());
-    let mut k = 0;
-    while n8 + k < xs.len() && k < W - 1 {
-        acc = acc + xs[n8 + k];
-        k += 1;
-    }
-    acc
+    fold_in_index_order(parts)
+}
+
+#[cfg(feature = "par")]
+fn sum_parallel(picked: Choice, xs: &[f64]) -> f64 {
+    use rayon::prelude::*;
+    let parts: Vec<f64> = xs
+        .par_chunks(PAR_CHUNK)
+        .map(move |cx| dispatch_sum!(picked, cx))
+        .collect();
+    fold_in_index_order(parts)
 }
 
 #[cfg(feature = "par")]

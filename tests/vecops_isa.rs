@@ -1,8 +1,11 @@
 //! Bit identity of the W = 8 vector kernels against ndarray.
 //!
 //! The golden file is the SHA-256 of the scalar path. Every clone this
-//! CPU can run, and `par` at 1, 2, 3, and 8 threads, has to reproduce it.
-//! A clone this CPU cannot run is reported as not exercised.
+//! CPU can run has to reproduce it, including `par` at 1, 2, 3, and 8
+//! threads on a forced path. Auto with `par` keeps axpy and scale on
+//! that hash. Long auto reductions are contiguous chunks of 4096,
+//! identical at every thread count. A clone this CPU cannot run is
+//! reported as not exercised.
 
 use ndarray::Array1;
 use rgmin::vecops::{
@@ -307,6 +310,12 @@ fn every_runnable_clone_matches_the_golden_hash() {
         if !ok {
             continue;
         }
+        if name == "auto" && cfg!(feature = "par") {
+            let got = kernel_digests();
+            assert_eq!(got.axpy, scalar.axpy, "auto axpy");
+            assert_eq!(got.scale, scalar.scale, "auto scale");
+            continue;
+        }
         assert_matches_ndarray();
         let got = kernel_digests();
         assert_eq!(got.dot, scalar.dot, "{name} dot");
@@ -333,11 +342,7 @@ fn par_matches_scalar_at_one_two_three_and_eight_threads() {
         pool.install(|| {
             clear_simd_path();
             println!("isa par threads={threads} path=auto: exercised");
-            assert_matches_ndarray();
             let got = kernel_digests();
-            assert_eq!(got.dot, scalar.dot, "threads {threads}");
-            assert_eq!(got.sum, scalar.sum, "threads {threads}");
-            assert_eq!(got.nrm2, scalar.nrm2, "threads {threads}");
             assert_eq!(got.axpy, scalar.axpy, "threads {threads}");
             assert_eq!(got.scale, scalar.scale, "threads {threads}");
             for name in ["scalar", "avx2", "avx512", "neon", "sve"] {
@@ -353,6 +358,73 @@ fn par_matches_scalar_at_one_two_three_and_eight_threads() {
                 assert_eq!(got.axpy, scalar.axpy, "{name} threads {threads}");
                 clear_simd_path();
             }
+        });
+    }
+}
+
+#[cfg(feature = "par")]
+fn chunk_dot(x: &Array1<f64>, y: &Array1<f64>) -> f64 {
+    use ndarray::ArrayView1;
+    let xs = x.as_slice().unwrap();
+    let ys = y.as_slice().unwrap();
+    let mut acc = 0.0;
+    let mut i = 0;
+    while i < xs.len() {
+        let j = (i + 4096).min(xs.len());
+        acc = acc + dot(ArrayView1::from(&xs[i..j]), ArrayView1::from(&ys[i..j]));
+        i = j;
+    }
+    acc
+}
+
+#[cfg(feature = "par")]
+fn chunk_sum(x: &Array1<f64>) -> f64 {
+    use ndarray::ArrayView1;
+    let xs = x.as_slice().unwrap();
+    let mut acc = 0.0;
+    let mut i = 0;
+    while i < xs.len() {
+        let j = (i + 4096).min(xs.len());
+        acc = acc + sum(ArrayView1::from(&xs[i..j]));
+        i = j;
+    }
+    acc
+}
+
+/// Long auto reductions are contiguous chunks of 4096, each folded by
+/// the active kernel, then added from the first chunk upward.
+#[cfg(feature = "par")]
+#[test]
+fn parallel_reductions_match_contiguous_chunks_at_every_thread_count() {
+    let _guard = Guard;
+    clear_simd_path();
+    let n = 70_000;
+    let (x, y) = pair(n);
+    let expect_dot = chunk_dot(&x, &y);
+    let expect_sum = chunk_sum(&x);
+    let expect_nrm = chunk_dot(&x, &x).sqrt();
+    for threads in [1usize, 2, 3, 8] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            clear_simd_path();
+            assert_eq!(
+                dot(x.view(), y.view()).to_bits(),
+                expect_dot.to_bits(),
+                "dot threads {threads}"
+            );
+            assert_eq!(
+                sum(x.view()).to_bits(),
+                expect_sum.to_bits(),
+                "sum threads {threads}"
+            );
+            assert_eq!(
+                nrm2(x.view()).to_bits(),
+                expect_nrm.to_bits(),
+                "nrm2 threads {threads}"
+            );
         });
     }
 }

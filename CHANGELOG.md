@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   multiversion 0.9 for `x86_64+avx512f` (rustc >= 1.89),
   `x86_64+avx2`, `aarch64+sve`, and `aarch64+neon`. `RGMIN_SIMD`
   selects a clone. Multiply and add stay separate. The `par` feature
-  keeps the same tree: fixed chunks of 4096, combined in index order.
+  folds each contiguous chunk of 4096 with that tree, then adds the
+  chunk totals from the first index upward.
   On this host (KVM, Intel Xeon family 6 model 207, AVX2 and AVX-512F)
   the auto path versus `main`, five interleaved process runs, had
   axpy geometric-mean wall ratios 0.940, 0.870, and 1.000 at
