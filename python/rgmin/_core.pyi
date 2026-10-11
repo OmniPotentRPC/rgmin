@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 import enum
-from typing import Annotated
 
 import numpy
 from numpy.typing import NDArray
@@ -97,7 +96,7 @@ class SolverConfig:
     Validated, immutable optimizer options. Unknown keywords raise ``ValueError`` listing the valid options.
     """
 
-    def __init__(self, arg0: object, /, **kwargs) -> None: ...
+    def __init__(self, method: str | Method = 'lbfgs', **kwargs) -> None: ...
 
     @property
     def method(self) -> Method: ...
@@ -122,8 +121,13 @@ class Solver:
     @property
     def method(self) -> Method: ...
 
-    def step(self, f_and_grad: Callable, x: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu')]) -> Report:
+    def step(self, f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], x: NDArray[numpy.float64]) -> Report:
         """Take one step. ``f_and_grad(x)`` returns ``(value, gradient)``."""
 
-def minimize(arg0: Callable, arg1: object, arg2: object, /, **kwargs) -> Report:
-    """Minimize ``f_and_grad`` in place, starting at ``x0``."""
+    def step_hess(self, f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], hessian: Callable[[NDArray[numpy.float64]], NDArray[numpy.float64]], x: NDArray[numpy.float64]) -> Report:
+        """
+        One Newton, RFO, or dogleg step. ``hessian(x)`` returns an ``(n, n)`` matrix.
+        """
+
+def minimize(f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], x0: NDArray[numpy.float64], method: object, **kwargs) -> tuple[Report, NDArray[numpy.float64]]:
+    """Minimize ``f_and_grad`` in place and return ``(report, x)``."""
