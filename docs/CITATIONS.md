@@ -50,8 +50,6 @@ ISBN). Do not invent DOIs.
 | Møller SCG 1993 | 10.1016/S0893-6080(05)80056-5 | A scaled conjugate gradient algorithm for fast supervised learning |
 | Dolan–Moré performance profiles | 10.1007/s101070100263 | Benchmarking optimization software with performance profiles |
 | Moré–Wild data profiles | 10.1137/080724083 | Benchmarking Derivative-Free Optimization Algorithms |
-| Wilcoxon signed-rank | 10.2307/3001968 | Individual Comparisons by Ranking Methods |
-| Efron bootstrap 1979 | 10.1214/aos/1176344552 | Bootstrap Methods: Another Look at the Jackknife |
 | Goswami saddle metrics 2025 | 10.1063/5.0283639 | Bayesian hierarchical models for quantitative estimates for performance metrics applied to saddle search algorithms |
 | Gould–Scott pairwise profiles | 10.1145/2950048 | A Note on Performance Profiles for Benchmarking Software |
 | Kaplan–Meier 1958 | 10.1080/01621459.1958.10501452 | Nonparametric Estimation from Incomplete Observations |
