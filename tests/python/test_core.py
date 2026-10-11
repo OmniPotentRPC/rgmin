@@ -16,7 +16,8 @@ def _quad(x: np.ndarray) -> tuple[float, np.ndarray]:
 
 def test_minimize_quadratic() -> None:
     x = np.array([1.0, -2.0, 0.5], dtype=np.float64)
-    report = rgmin.minimize(_quad, x, method="lbfgs", gtol=1e-12, maxiter=30)
+    report, out = rgmin.minimize(_quad, x, method="lbfgs", gtol=1e-12, maxiter=30)
+    assert out is x
     assert report.grad_norm < 1e-8
     assert abs(report.value) < 1e-12
     assert report.stop == rgmin.Stop.Tolerance
@@ -79,7 +80,7 @@ def test_nonfinite_objective() -> None:
 
     x = np.zeros(2)
     with pytest.raises(rgmin.NumericalError):
-        rgmin.minimize(bad, x, method="sd", maxiter=1)
+        rgmin.minimize(bad, x, method="sd", maxiter=1)  # noqa: the call must raise
 
 
 def test_callback_exception_is_reraised() -> None:
@@ -96,8 +97,75 @@ def test_negative_zero_and_subnormal_are_finite() -> None:
         return 0.5 * float(x @ x), np.array(x, dtype=np.float64, copy=True)
 
     x = np.array([-0.0, np.ldexp(1.0, -1074)], dtype=np.float64)
-    report = rgmin.minimize(fg, x, method="sd", maxiter=5, gtol=1e-16)
+    report, _out = rgmin.minimize(fg, x, method="sd", maxiter=5, gtol=1e-16)
     assert np.isfinite(report.value)
+
+
+def test_callback_array_outlives_step() -> None:
+    kept: dict[str, np.ndarray] = {}
+
+    def fg(x: np.ndarray) -> tuple[float, np.ndarray]:
+        kept["x"] = x
+        return 0.5 * float(x @ x), np.array(x, dtype=np.float64, copy=True)
+
+    x = np.array([1.0, -1.0])
+    rgmin.Solver(2, rgmin.SolverConfig("sd", maxiter=1)).step(fg, x)
+    stored = kept["x"]
+    assert not np.shares_memory(stored, x)
+    stored[0] = 42.0
+    assert x[0] != 42.0
+    assert np.isfinite(stored).all()
+
+
+def test_count_options_require_ints() -> None:
+    rgmin.SolverConfig("lbfgs", memory=4, maxiter=3, linesearch_maxiter=8, extra_updates=1)
+    with pytest.raises(ValueError, match="must be an int"):
+        rgmin.SolverConfig("lbfgs", memory=1.5)
+    with pytest.raises(ValueError, match="must be >= 0"):
+        rgmin.SolverConfig("lbfgs", maxiter=-1)
+    with pytest.raises(ValueError, match="must be >= 1"):
+        rgmin.SolverConfig("lbfgs", linesearch_maxiter=0)
+
+
+def test_minimize_rejects_converted_inputs() -> None:
+    with pytest.raises(TypeError):
+        rgmin.minimize(_quad, [1.0, 2.0], method="sd", maxiter=1)  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        rgmin.minimize(_quad, np.ones(2, dtype=np.float32), method="sd", maxiter=1)
+
+
+def test_step_without_hessian_is_runtime_error() -> None:
+    solver = rgmin.Solver(2, rgmin.SolverConfig("newton", maxiter=1))
+    with pytest.raises(RuntimeError, match="Hessian"):
+        solver.step(_quad, np.ones(2))
+
+
+def test_step_hess_quadratic() -> None:
+    def fg(x: np.ndarray) -> tuple[float, np.ndarray]:
+        gradient = np.array([x[0], 4.0 * x[1]])
+        return 0.5 * float(x[0] ** 2 + 4.0 * x[1] ** 2), gradient
+
+    def hessian(x: np.ndarray) -> np.ndarray:
+        return np.diag([1.0, 4.0])
+
+    x = np.array([1.0, 1.0])
+    solver = rgmin.Solver(2, rgmin.SolverConfig("newton", maxiter=5, gtol=1e-12))
+    report = solver.step_hess(fg, hessian, x)
+    assert report.grad_norm < 1e-8
+    assert np.allclose(x, 0.0)
+
+
+def test_free_threaded_import_disables_the_gil() -> None:
+    import subprocess
+    import sys
+
+    if not hasattr(sys, "_is_gil_enabled") or sys._is_gil_enabled():
+        pytest.skip("this interpreter holds the GIL")
+    code = (
+        "import sys, rgmin, rgmin.ase\n"
+        "assert sys._is_gil_enabled() is False\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
 
 
 def test_import_does_not_pull_ase() -> None:
