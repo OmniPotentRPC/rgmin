@@ -54,6 +54,7 @@ pub mod lbfgs_qp;
 pub mod lowest_mode;
 /// Moré and Wild computational-noise estimate and difference steps.
 pub mod noise;
+mod portable;
 
 mod chase_eps;
 /// DLA-Future partial-spectrum window.

@@ -696,7 +696,7 @@ pub fn sine_probe(positions: ArrayView1<f64>, r_nn: f64, lengths: Option<[f64; 3
             if !(len[a].is_finite() && len[a] > 0.0) {
                 continue;
             }
-            let s = (positions[3 * i + a] / len[a]).sin();
+            let s = crate::portable::sin(positions[3 * i + a] / len[a]);
             v[3 * i + a] = scale * s;
         }
     }
@@ -936,7 +936,7 @@ fn bonds(
 }
 
 fn weight(mu: f64, a: f64, r: f64, r_nn: f64) -> f64 {
-    mu * (-a * (r / r_nn - 1.0)).exp()
+    mu * crate::portable::exp(-a * (r / r_nn - 1.0))
 }
 
 fn build_csr(
@@ -1465,7 +1465,7 @@ mod tests {
         let mut v = Array1::zeros(pos.len());
         for i in 0..2 {
             for a in 0..3 {
-                v[3 * i + a] = scale * (pos[3 * i + a] / 4.0).sin();
+                v[3 * i + a] = scale * crate::portable::sin(pos[3 * i + a] / 4.0);
             }
         }
         let g0 = grad(pos.view());
@@ -1539,5 +1539,23 @@ mod tests {
             hash, 0xf9a8d91302c9cb63,
             "committed hash drifted: iters {iters} hash {hash:#x}"
         );
+    }
+
+    #[test]
+    fn exp_weight_and_sine_probe_hash_the_portable_libm() {
+        // Scalar libm. The digest does not depend on the thread count
+        // or on AVX2 versus AVX-512, because those kernels are not used.
+        let (pos, neigh) = two_atoms();
+        let params = ExpParams {
+            lengths: Some([4.0, 4.0, 4.0]),
+            ..ExpParams::default()
+        };
+        let matrix = Exp::assemble(pos.view(), &neigh, &params, 1.7, 1.5).unwrap();
+        let probe = sine_probe(pos.view(), 1.5, Some([4.0, 4.0, 4.0]));
+        let mut bits = matrix.apply(pos.view()).to_vec();
+        bits.extend(probe.iter().copied());
+        bits.push(weight(1.7, 3.0, 1.2, 1.5));
+        let hash = fnv1a(&bits);
+        assert_eq!(hash, 0x33a0_3fc0_17cf_ffab, "hash {hash:#x}");
     }
 }

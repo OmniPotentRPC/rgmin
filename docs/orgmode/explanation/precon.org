@@ -24,7 +24,8 @@ matrix at ~μ = 1~. The probe's shifted gradient is an extra force
 evaluation and is counted with the other force calls. ASE's
 ~estimate_mu~ replaces a value below 1 with 1. rgmin keeps the
 quotient. That cap is in eV/Å², so it is not invariant under a
-change of energy or length unit.
+change of energy or length unit. The pair weight and the sine probe
+use one portable libm, so those bits match on x86_64 and aarch64.
 
 ** Lindh
 
