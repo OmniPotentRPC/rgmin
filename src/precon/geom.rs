@@ -7,7 +7,7 @@
 use crate::error::{Error, Result};
 
 pub(super) fn require_atoms(positions_len: usize) -> Result<usize> {
-    if positions_len % 3 != 0 || positions_len == 0 {
+    if !positions_len.is_multiple_of(3) || positions_len == 0 {
         return Err(Error::Precon {
             what: "positions length is not a positive multiple of 3",
         });
@@ -144,7 +144,7 @@ pub(super) fn pairs_in_range(
     for part in parts {
         pairs.extend(part);
     }
-    pairs.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    pairs.sort_by_key(|a| (a.0, a.1));
     pairs
 }
 

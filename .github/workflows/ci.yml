@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "feat/**"
+      - "fix/**"
       - "ci/**"
   pull_request:
     branches: [main]
@@ -27,6 +28,18 @@ jobs:
           toolchain: 1.88.0
           components: rustfmt
       - run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --locked --features par,capi --all-targets -- -D warnings
 
   test:
     name: cargo test (${{ matrix.name }})

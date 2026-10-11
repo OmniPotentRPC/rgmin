@@ -340,12 +340,12 @@ impl FfState {
 }
 
 fn usable_mu(mu: Option<f64>) -> Result<Option<f64>> {
-    if let Some(mu) = mu {
-        if !(mu.is_finite() && mu > 0.0) {
-            return Err(Error::Precon {
-                what: "mu is not positive",
-            });
-        }
+    if let Some(mu) = mu
+        && !(mu.is_finite() && mu > 0.0)
+    {
+        return Err(Error::Precon {
+            what: "mu is not positive",
+        });
     }
     Ok(mu)
 }

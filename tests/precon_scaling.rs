@@ -133,7 +133,7 @@ fn cell_pairs(pos: &[[f64; 3]], cutoff: f64, lengths: [f64; 3]) -> Vec<(usize, u
             }
         }
     }
-    pairs.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    pairs.sort_by_key(|a| (a.0, a.1));
     pairs
 }
 

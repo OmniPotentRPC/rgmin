@@ -210,6 +210,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `rggate` leaves `endpoint` unread when `reference` is numeric. That
   column is a structure path only when `reference` is absent or is a
   path. The ECnoise bench stores the stop status in `endpoint`.
+- `cargo clippy --locked --features par,capi --all-targets -- -D warnings`
+  runs in CI on the 1.88.0 toolchain.
 
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than

@@ -1547,12 +1547,13 @@ impl Solver {
         // A caller that moved the iterate between steps measured the
         // gradient at both ends, so the displacement is a secant of the
         // retained inverse Hessian.
-        if !cached && self.manifold.retract_is_translation() {
-            if let Some(previous) = self.last_pos.clone().filter(|p| p.len() == x.len()) {
-                let (s, y) = self.lbfgs_sy(&previous, x, &self.last_grad, &grad);
-                if let Inner::Lbfgs(solver) = &mut self.inner {
-                    solver.push_pair(s, y, Some(gnorm));
-                }
+        if !cached
+            && self.manifold.retract_is_translation()
+            && let Some(previous) = self.last_pos.clone().filter(|p| p.len() == x.len())
+        {
+            let (s, y) = self.lbfgs_sy(&previous, x, &self.last_grad, &grad);
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                solver.push_pair(s, y, Some(gnorm));
             }
         }
         if let Some(status) = self.control.halt(gnorm, self.free_len(obj.bounds())) {
@@ -1570,13 +1571,11 @@ impl Solver {
             && matches!(self.inner, Inner::Lbfgs(_))
             && matches!(self.accept, Accept::Energy | Accept::Nonmonotone)
         {
-            if !cached {
-                if let Some(previous) = &self.last_pos {
-                    let (s, y) = self.lbfgs_sy(previous, x, &self.last_grad, &grad);
-                    if let Inner::Lbfgs(solver) = &mut self.inner {
-                        solver.transport(|v| crate::manifold::Sphere.transport(previous, x, v));
-                        solver.push_pair(s, y, Some(l2(&grad)));
-                    }
+            if !cached && let Some(previous) = &self.last_pos {
+                let (s, y) = self.lbfgs_sy(previous, x, &self.last_grad, &grad);
+                if let Inner::Lbfgs(solver) = &mut self.inner {
+                    solver.transport(|v| crate::manifold::Sphere.transport(previous, x, v));
+                    solver.push_pair(s, y, Some(l2(&grad)));
                 }
             }
             if let Inner::Lbfgs(solver) = &mut self.inner {

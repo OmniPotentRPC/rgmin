@@ -286,7 +286,7 @@ fn cmul_inplace(r: C64, v: &mut [f64]) {
 
 /// Side length if `len` is `2 n^2` for some \(n \ge 1\).
 pub fn side(len: usize) -> Option<usize> {
-    if len < 2 || len % 2 != 0 {
+    if len < 2 || !len.is_multiple_of(2) {
         return None;
     }
     let nn = len / 2;
