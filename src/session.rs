@@ -23,7 +23,9 @@ use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
 use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
-use crate::precon::{ExpParams, FfParams, FfTerms, Ghost, LindhParams, Neighbours, Slot};
+use crate::precon::{
+    ExpParams, FfParams, FfTerms, Ghost, LindhParams, Neighbours, PreconSpec, Slot,
+};
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
@@ -247,42 +249,85 @@ impl Solver {
         }
     }
 
+    /// Install one geometry preconditioner.
+    ///
+    /// L-BFGS takes \(H_0 = P^{-1}\). FIRE and nonlinear CG take `P`
+    /// as the metric. An index outside `0..dim/3` fails here.
+    /// [`ExpParams::mu`] `None`, and the same field on Lindh and FF,
+    /// defers the energy scale to the next [`Self::step`].
+    pub fn set_precon(&mut self, spec: PreconSpec<'_>) -> Result<()> {
+        let slot = match spec {
+            PreconSpec::Exp {
+                positions,
+                neighbours,
+                params,
+            } => {
+                self.require_precon_dim(positions.len())?;
+                Slot::Exp(crate::precon::ExpState::new(positions, neighbours, params)?)
+            }
+            PreconSpec::Lindh {
+                positions,
+                z,
+                ghosts,
+                params,
+            } => {
+                self.require_precon_dim(positions.len())?;
+                Slot::Lindh(crate::precon::LindhState::new(
+                    positions, z, ghosts, params,
+                )?)
+            }
+            PreconSpec::Ff {
+                positions,
+                terms,
+                params,
+            } => {
+                self.require_precon_dim(positions.len())?;
+                Slot::Ff(crate::precon::FfState::new(positions, terms, params)?)
+            }
+        };
+        self.install_slot(slot);
+        Ok(())
+    }
+
+    fn require_precon_dim(&self, got: usize) -> Result<()> {
+        if got != self.dim {
+            return Err(Error::Dim { got, dim: self.dim });
+        }
+        Ok(())
+    }
+
+    fn install_slot(&mut self, slot: Slot) {
+        let matrix = slot.metric().cloned();
+        self.precon = Some(slot);
+        self.metric_epoch = self.metric_epoch.wrapping_add(1);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(matrix);
+        }
+    }
+
     /// Install the exponential preconditioner at `positions`.
     ///
     /// `positions` has length [`Self::dim`] and is `3 N` coordinates in
-    /// C order. [`ExpParams::mu`] `None` defers the energy scale to the
-    /// next [`Self::step`], which estimates it from the objective.
-    /// L-BFGS then takes \(H_0 = P^{-1}\). FIRE and nonlinear CG take
-    /// `P` as the metric.
+    /// C order. See [`Self::set_precon`].
     pub fn set_exp(
         &mut self,
         positions: ArrayView1<f64>,
         neighbours: &Neighbours,
         params: &ExpParams,
     ) -> Result<()> {
-        if positions.len() != self.dim {
-            return Err(Error::Dim {
-                got: positions.len(),
-                dim: self.dim,
-            });
-        }
-        let state = crate::precon::ExpState::new(positions, neighbours, params)?;
-        let matrix = state.matrix().map(|m| m.metric().clone());
-        self.precon = Some(Slot::Exp(state));
-        self.metric_epoch = self.metric_epoch.wrapping_add(1);
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_h0(matrix);
-        }
-        Ok(())
+        self.set_precon(PreconSpec::Exp {
+            positions,
+            neighbours,
+            params,
+        })
     }
 
     /// Install the Lindh model Hessian at `positions`.
     ///
     /// `z` has one atomic number per free atom. `ghosts` are frozen
-    /// atoms. L-BFGS takes \(H_0 = P^{-1}\). FIRE and nonlinear CG take
-    /// `P` as the metric. The matrix is held until the largest atomic
-    /// move exceeds half the nearest-neighbour distance, the same rule
-    /// as [`Self::set_exp`].
+    /// atoms. The matrix is held until the largest atomic move exceeds
+    /// half the nearest-neighbour distance, the same rule as
+    /// [`Self::set_exp`].
     pub fn set_lindh(
         &mut self,
         positions: ArrayView1<f64>,
@@ -290,81 +335,52 @@ impl Solver {
         ghosts: &[Ghost],
         params: &LindhParams,
     ) -> Result<()> {
-        if positions.len() != self.dim {
-            return Err(Error::Dim {
-                got: positions.len(),
-                dim: self.dim,
-            });
-        }
-        let state = crate::precon::LindhState::new(positions, z, ghosts, params)?;
-        let matrix = state.metric().cloned();
-        self.precon = Some(Slot::Lindh(state));
-        self.metric_epoch = self.metric_epoch.wrapping_add(1);
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_h0(matrix);
-        }
-        Ok(())
+        self.set_precon(PreconSpec::Lindh {
+            positions,
+            z,
+            ghosts,
+            params,
+        })
     }
 
-    /// Install the bonded FF metric at `positions`.
+    /// Install the bonded metric at `positions`.
     ///
     /// The terms are harmonic bonds and angles, Morse bonds, and
-    /// harmonic torsions. The hold rule is the one used by
-    /// [`Self::set_exp`].
+    /// harmonic torsions. Unit force constants are a geometric metric.
+    /// The hold rule is the one used by [`Self::set_exp`].
     pub fn set_ff(
         &mut self,
         positions: ArrayView1<f64>,
         terms: FfTerms<'_>,
         params: &FfParams,
     ) -> Result<()> {
-        if positions.len() != self.dim {
-            return Err(Error::Dim {
-                got: positions.len(),
-                dim: self.dim,
-            });
-        }
-        let state = crate::precon::FfState::new(positions, terms, params)?;
-        let matrix = state.metric().cloned();
-        self.precon = Some(Slot::Ff(state));
-        self.metric_epoch = self.metric_epoch.wrapping_add(1);
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_h0(matrix);
-        }
-        Ok(())
+        self.set_precon(PreconSpec::Ff {
+            positions,
+            terms,
+            params,
+        })
     }
 
     /// Install a neighbour list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
     pub(crate) fn set_exp_deferred(&mut self, state: crate::precon::ExpState) {
-        self.precon = Some(Slot::Exp(state));
-        self.metric_epoch = self.metric_epoch.wrapping_add(1);
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_h0(None);
-        }
+        self.install_slot(Slot::Exp(state));
     }
 
     /// Install a Lindh list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
     pub(crate) fn set_lindh_deferred(&mut self, state: crate::precon::LindhState) {
-        self.precon = Some(Slot::Lindh(state));
-        self.metric_epoch = self.metric_epoch.wrapping_add(1);
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_h0(None);
-        }
+        self.install_slot(Slot::Lindh(state));
     }
 
     /// Install an FF list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
     pub(crate) fn set_ff_deferred(&mut self, state: crate::precon::FfState) {
-        self.precon = Some(Slot::Ff(state));
-        self.metric_epoch = self.metric_epoch.wrapping_add(1);
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_h0(None);
-        }
+        self.install_slot(Slot::Ff(state));
     }
 
     /// Drop the installed geometry preconditioner.
-    pub fn clear_exp(&mut self) {
+    pub fn clear_precon(&mut self) {
         self.precon = None;
         self.metric_epoch = self.metric_epoch.wrapping_add(1);
         if let Inner::Lbfgs(solver) = &mut self.inner {
@@ -377,14 +393,6 @@ impl Solver {
     #[must_use]
     pub fn nlcg_descent_fallbacks(&self) -> u64 {
         self.nlcg_descent_fallbacks
-    }
-
-    /// Energy scale of an installed exponential preconditioner, after
-    /// estimation. Lindh and FF return `None` here; their scale is
-    /// [`Self::precon_scale`].
-    #[must_use]
-    pub fn exp_mu(&self) -> Option<f64> {
-        self.precon.as_ref().and_then(Slot::mu)
     }
 
     /// Energy scale of the installed geometry preconditioner, after

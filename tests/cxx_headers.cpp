@@ -75,5 +75,29 @@ int main() {
     std::printf("optimize nit=%zu grad=%g pairs=%zu\n", r.nit,
                 r.grad_norm, solver.pair_count());
     rgmin_tensor_free(t);
+
+    std::vector<int32_t> z{1, 1};
+    auto precon = rgmin::Precon::lindh(z).cell(10.0, 10.0, 10.0);
+    rgmin::Solver geom(rgmin::Method::Lbfgs, rgmin::Control{}, 6);
+    if (geom.set_precon(precon) != RGMIN_SUCCESS) {
+        return 8;
+    }
+    if (sizeof(rgmin_precon_t) != precon.get()->struct_size) {
+        std::fprintf(stderr, "precon struct %zu rust %u\n", sizeof(rgmin_precon_t),
+                     precon.get()->struct_size);
+        return 12;
+    }
+    if (!std::isnan(geom.precon_scale())) {
+        return 9;
+    }
+    rgmin_bond_t bad{9, 0, 1.0};
+    auto ff = rgmin::Precon::ff({bad});
+    if (geom.set_precon(ff) != RGMIN_INVALID_PARAMETER) {
+        return 10;
+    }
+    geom.clear_precon();
+    if (!std::isnan(geom.precon_scale())) {
+        return 11;
+    }
     return 0;
 }

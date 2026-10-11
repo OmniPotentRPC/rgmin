@@ -20,10 +20,9 @@ use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::{
     Accept, ApplyHessian, Conjugacy, Control, DirectionalCurvature, EigenParams, EigensolverKind,
-    Error, ExpParams, HessianOracle, LineSearch, ManifoldKind, Method, Neighbours, NewtonKind,
-    Oracle, QnStep, Restart, ScgOptions, ScgParams, ScgStepTolerance, Solver, lowest_mode,
-    minimize_method, minimize_method_hess, minimize_scg_exact_with_options,
-    minimize_scg_with_options,
+    Error, ExpParams, HessianOracle, LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep,
+    Restart, ScgOptions, ScgParams, ScgStepTolerance, Solver, lowest_mode, minimize_method,
+    minimize_method_hess, minimize_scg_exact_with_options, minimize_scg_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -1506,126 +1505,349 @@ pub unsafe extern "C" fn rgmin_solver_set_qn_step(
     unsafe { (*solver).solver.set_qn_step(qn) };
 }
 
-/// Parameters of the exponential preconditioner. ABI minor 31.
+/// Geometry preconditioner. ABI minor 32.
 ///
-/// `mu` and `r_nn` are NaN when the session should compute them.
-/// `a` and `c_stab` are NaN for the paper defaults (3 and 0.1).
-/// `length_*` are 0 to use the span of the current positions.
+/// Field names that already existed on the old exponential parameters
+/// keep those names: `c_stab`, `mu`, `r_cut`. `exp_a` is the old `a`.
+/// `cell` replaces the three lattice lengths.
+///
+/// Morse bonds and FF harmonic torsions are not on this struct. They
+/// stay on [`crate::PreconSpec::Ff`]. Lindh's torsion term is
+/// `dihedrals`.
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct rgmin_exp_t {
-    /// Exponent A. NaN selects 3.
-    pub a: f64,
-    /// Diagonal stabilization. NaN selects 0.1. Must be positive otherwise.
-    pub c_stab: f64,
-    /// Energy scale. NaN estimates it on the next step.
-    pub mu: f64,
-    /// Nearest-neighbour distance. NaN or nonpositive selects the paper's rule.
-    pub r_nn: f64,
-    /// Cutoff. Nonpositive keeps every supplied pair.
-    pub r_cut: f64,
-    /// Lattice length along x. Nonpositive selects the position span.
-    pub length_x: f64,
-    /// Lattice length along y.
-    pub length_y: f64,
-    /// Lattice length along z.
-    pub length_z: f64,
-    /// Nonzero reestimates μ whenever the matrix is rebuilt.
-    pub recalc_mu: i32,
+#[derive(Clone, Copy)]
+pub struct rgmin_bond_t {
+    /// Free-atom index.
+    pub i: u32,
+    /// Free-atom index.
+    pub j: u32,
+    /// Harmonic curvature.
+    pub k: f64,
 }
 
-/// Install the exponential preconditioner on a session.
+/// One harmonic angle. `vertex` is the centre atom.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct rgmin_angle_t {
+    /// Free-atom index.
+    pub i: u32,
+    /// Free-atom index of the vertex.
+    pub vertex: u32,
+    /// Free-atom index.
+    pub k: u32,
+    /// Harmonic angle curvature.
+    pub k_theta: f64,
+}
+
+/// Kind stored as a `u32` so an unknown value is a rejected parameter
+/// and not an invalid enum.
+pub const RGMIN_PRECON_NONE: u32 = 0;
+/// Packwood exponential metric.
+pub const RGMIN_PRECON_EXP: u32 = 1;
+/// Lindh model Hessian.
+pub const RGMIN_PRECON_LINDH: u32 = 2;
+/// Bonded metric.
+pub const RGMIN_PRECON_FF: u32 = 3;
+/// [`crate::select_precon`].
+pub const RGMIN_PRECON_AUTO: u32 = 4;
+
+/// Periodic bulk, for [`rgmin_precon_t::geometry_kind`].
+pub const RGMIN_GEOM_BULK: i32 = 0;
+/// Slab or surface.
+pub const RGMIN_GEOM_SURFACE: i32 = 1;
+/// Isolated molecule.
+pub const RGMIN_GEOM_MOLECULE: i32 = 2;
+/// Finite cluster.
+pub const RGMIN_GEOM_CLUSTER: i32 = 3;
+
+/// One description of every geometry preconditioner. ABI minor 32.
 ///
-/// `pair_i` and `pair_j` have length `npair` and index atoms in the
-/// session vector (`dim = 3 N`, C order). `distance` is null to take
-/// Cartesian distances from the current point on each step, or length
-/// `npair` to keep those distances. `anchor_i` and `anchor_r` are bonds
-/// to atoms with no coordinate in the vector; both are null when
-/// `nanchor` is 0.
+/// `struct_size` is `sizeof` on the caller side. Bytes past the fields
+/// this build knows are ignored, and a shorter prefix is filled with
+/// the defaults from [`rgmin_precon_init`].
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct rgmin_precon_t {
+    /// `sizeof(rgmin_precon_t)` as the caller compiled it.
+    pub struct_size: u32,
+    /// [`RGMIN_PRECON_NONE`] through [`RGMIN_PRECON_AUTO`].
+    pub kind: u32,
+    /// Diagonal stabilization. NaN or <= 0 selects the default.
+    pub c_stab: f64,
+    /// Energy scale. NaN or <= 0 estimates it.
+    pub mu: f64,
+    /// Cutoff. NaN or <= 0 leaves the cutoff open.
+    pub r_cut: f64,
+    /// Orthorhombic lengths. A component <= 0 leaves that axis open.
+    pub cell: [f64; 3],
+    /// Atomic numbers, length `natoms`. Lindh and AUTO.
+    pub numbers: *const i32,
+    /// Free atoms. Lindh and AUTO require `3 * natoms == dim`.
+    pub natoms: usize,
+    /// Ghost atomic numbers, length `nghost`.
+    pub ghost_z: *const i32,
+    /// Ghost coordinates, length `3 * nghost`.
+    pub ghost_pos: *const f64,
+    /// Frozen atoms.
+    pub nghost: usize,
+    /// Exp neighbour index, length `npairs`.
+    pub nbr_i: *const usize,
+    /// Exp neighbour index, length `npairs`.
+    pub nbr_j: *const usize,
+    /// Exp pair distance. Null takes Cartesian distances on the next step.
+    pub nbr_r: *const f64,
+    /// Exp pairs.
+    pub npairs: usize,
+    /// Free atom bonded to a frozen atom.
+    pub anchor_i: *const usize,
+    /// Distance of that bond.
+    pub anchor_r: *const f64,
+    /// Anchor bonds.
+    pub nanchor: usize,
+    /// Exp exponent A. NaN or <= 0 selects 3.
+    pub exp_a: f64,
+    /// Harmonic bonds.
+    pub bonds: *const rgmin_bond_t,
+    /// Bond count.
+    pub nbonds: usize,
+    /// Harmonic angles.
+    pub angles: *const rgmin_angle_t,
+    /// Angle count.
+    pub nangles: usize,
+    /// Nonzero adds the Lindh torsion term.
+    pub dihedrals: i32,
+    /// [`RGMIN_GEOM_BULK`] and the three companions. AUTO only.
+    pub geometry_kind: i32,
+}
+
+fn precon_blank(kind: u32) -> rgmin_precon_t {
+    rgmin_precon_t {
+        struct_size: std::mem::size_of::<rgmin_precon_t>() as u32,
+        kind,
+        c_stab: f64::NAN,
+        mu: f64::NAN,
+        r_cut: f64::NAN,
+        cell: [0.0, 0.0, 0.0],
+        numbers: std::ptr::null(),
+        natoms: 0,
+        ghost_z: std::ptr::null(),
+        ghost_pos: std::ptr::null(),
+        nghost: 0,
+        nbr_i: std::ptr::null(),
+        nbr_j: std::ptr::null(),
+        nbr_r: std::ptr::null(),
+        npairs: 0,
+        anchor_i: std::ptr::null(),
+        anchor_r: std::ptr::null(),
+        nanchor: 0,
+        exp_a: f64::NAN,
+        bonds: std::ptr::null(),
+        nbonds: 0,
+        angles: std::ptr::null(),
+        nangles: 0,
+        dihedrals: 0,
+        geometry_kind: 0,
+    }
+}
+
+/// Fill `p` with defaults for `kind`.
 ///
 /// # Safety
 ///
-/// Every pointer argument must be null or valid for the type and
-/// length documented above; a session handle must come from
-/// [`rgmin_solver_create`] and not yet be freed.
+/// `p` is null or valid for a write of [`rgmin_precon_t`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_solver_set_exp(
-    solver: *mut rgmin_solver_t,
-    params: *const rgmin_exp_t,
-    pair_i: *const u32,
-    pair_j: *const u32,
-    distance: *const f64,
-    npair: usize,
-    anchor_i: *const u32,
-    anchor_r: *const f64,
-    nanchor: usize,
-) -> rgmin_status_t {
-    if solver.is_null() || params.is_null() {
-        set_last_error("rgmin_solver_set_exp: null solver or params");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+pub unsafe extern "C" fn rgmin_precon_init(p: *mut rgmin_precon_t, kind: u32) {
+    if p.is_null() {
+        return;
     }
-    if npair > 0 && (pair_i.is_null() || pair_j.is_null()) {
-        set_last_error("rgmin_solver_set_exp: null pair list");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    unsafe { p.write(precon_blank(kind)) };
+}
+
+fn load_precon(p: *const rgmin_precon_t) -> std::result::Result<rgmin_precon_t, &'static str> {
+    if p.is_null() {
+        return Err("rgmin_solver_set_precon: null params");
     }
-    if nanchor > 0 && (anchor_i.is_null() || anchor_r.is_null()) {
-        set_last_error("rgmin_solver_set_exp: null anchor list");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    let got = unsafe { (*p).struct_size } as usize;
+    let min = std::mem::offset_of!(rgmin_precon_t, kind) + std::mem::size_of::<u32>();
+    if got < min {
+        return Err("rgmin_solver_set_precon: struct_size is too small");
     }
-    let p = unsafe { &*params };
-    let dim = unsafe { (*solver).solver.dim() };
-    if dim % 3 != 0 {
-        set_last_error("rgmin_solver_set_exp: dimension is not a multiple of 3");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    let mut local = precon_blank(RGMIN_PRECON_NONE);
+    let n = got.min(std::mem::size_of::<rgmin_precon_t>());
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            p.cast::<u8>(),
+            (&mut local as *mut rgmin_precon_t).cast::<u8>(),
+            n,
+        );
     }
-    let i = unsafe { slice::from_raw_parts(pair_i, npair) };
-    let j = unsafe { slice::from_raw_parts(pair_j, npair) };
-    let r = if distance.is_null() {
-        Vec::new()
-    } else {
-        unsafe { slice::from_raw_parts(distance, npair) }.to_vec()
-    };
-    let mut anchor = Vec::with_capacity(nanchor);
-    if nanchor > 0 {
-        let ai = unsafe { slice::from_raw_parts(anchor_i, nanchor) };
-        let ar = unsafe { slice::from_raw_parts(anchor_r, nanchor) };
-        for k in 0..nanchor {
-            anchor.push((ai[k] as usize, ar[k]));
-        }
-    }
-    let neighbours = Neighbours {
-        i: i.iter().map(|&v| v as usize).collect(),
-        j: j.iter().map(|&v| v as usize).collect(),
-        r,
-        anchor,
-    };
-    let finite_pos = |v: f64| v.is_finite() && v > 0.0;
-    let lengths = if finite_pos(p.length_x) || finite_pos(p.length_y) || finite_pos(p.length_z) {
-        Some([p.length_x, p.length_y, p.length_z])
+    Ok(local)
+}
+
+fn optional_positive(v: f64) -> Option<f64> {
+    if v.is_finite() && v > 0.0 {
+        Some(v)
     } else {
         None
+    }
+}
+
+fn cell_of(cell: [f64; 3]) -> Option<[f64; 3]> {
+    if cell.iter().any(|v| v.is_finite() && *v > 0.0) {
+        Some(cell)
+    } else {
+        None
+    }
+}
+
+fn index_ok(i: usize, natoms: usize) -> bool {
+    i < natoms
+}
+
+/// Install the geometry preconditioner described by `params`.
+///
+/// Every neighbour, anchor, bond, and angle index is checked against
+/// `dim / 3` before the session stores the list. A bad index does not
+/// wait for the next step.
+///
+/// # Safety
+///
+/// `solver` is null or a live session. `params` is null or readable
+/// for `params->struct_size` bytes, and every pointer it holds is null
+/// or valid for the count beside it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_precon(
+    solver: *mut rgmin_solver_t,
+    params: *const rgmin_precon_t,
+) -> rgmin_status_t {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_precon: null solver");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let p = match load_precon(params) {
+        Ok(p) => p,
+        Err(e) => {
+            set_last_error(e);
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
     };
-    let exp_params = ExpParams {
-        a: if p.a.is_finite() { p.a } else { 3.0 },
-        c_stab: if p.c_stab.is_finite() { p.c_stab } else { 0.1 },
-        mu: if p.mu.is_finite() { Some(p.mu) } else { None },
-        r_nn: if finite_pos(p.r_nn) {
-            Some(p.r_nn)
-        } else {
-            None
-        },
-        r_cut: if finite_pos(p.r_cut) {
-            Some(p.r_cut)
-        } else {
-            None
-        },
-        recalc_mu: p.recalc_mu != 0,
-        lengths,
+    let dim = unsafe { (*solver).solver.dim() };
+    if dim % 3 != 0 || dim == 0 {
+        set_last_error("rgmin_solver_set_precon: dimension is not a positive multiple of 3");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let atoms = dim / 3;
+    match p.kind {
+        RGMIN_PRECON_NONE => {
+            unsafe { (*solver).solver.clear_precon() };
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        RGMIN_PRECON_EXP => install_exp(solver, &p, atoms),
+        RGMIN_PRECON_LINDH => install_lindh(solver, &p, atoms),
+        RGMIN_PRECON_FF => install_ff(solver, &p, atoms),
+        RGMIN_PRECON_AUTO => install_auto(solver, &p, atoms),
+        _ => {
+            set_last_error("rgmin_solver_set_precon: unknown kind");
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        }
+    }
+}
+
+fn install_auto(solver: *mut rgmin_solver_t, p: &rgmin_precon_t, atoms: usize) -> rgmin_status_t {
+    if p.numbers.is_null() || p.natoms != atoms {
+        set_last_error("rgmin_solver_set_precon: AUTO needs one atomic number per free atom");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let z = unsafe { slice::from_raw_parts(p.numbers, p.natoms) };
+    let kind = match p.geometry_kind {
+        RGMIN_GEOM_BULK => crate::GeometryKind::Bulk,
+        RGMIN_GEOM_SURFACE => crate::GeometryKind::Surface,
+        RGMIN_GEOM_MOLECULE => crate::GeometryKind::Molecule,
+        RGMIN_GEOM_CLUSTER => crate::GeometryKind::Cluster,
+        _ => {
+            set_last_error("rgmin_solver_set_precon: unknown geometry_kind");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
     };
-    // Supplied distances do not need the current geometry. A Cartesian
-    // list is placed on the next step, when the session holds `x`.
+    let has_ff = p.nbonds > 0 || p.nangles > 0;
+    match crate::select_precon(kind, z, has_ff) {
+        crate::PreconChoice::Identity => {
+            unsafe { (*solver).solver.clear_precon() };
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        crate::PreconChoice::Exp => {
+            if p.npairs == 0 && p.nanchor == 0 {
+                set_last_error(
+                    "rgmin_solver_set_precon: AUTO selected Exp and the neighbour list is empty",
+                );
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+            install_exp(solver, p, atoms)
+        }
+        crate::PreconChoice::Lindh => install_lindh(solver, p, atoms),
+        crate::PreconChoice::Ff => install_ff(solver, p, atoms),
+    }
+}
+
+fn install_exp(solver: *mut rgmin_solver_t, p: &rgmin_precon_t, atoms: usize) -> rgmin_status_t {
+    if p.npairs > 0 && (p.nbr_i.is_null() || p.nbr_j.is_null()) {
+        set_last_error("rgmin_solver_set_precon: null neighbour list");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    if p.nanchor > 0 && (p.anchor_i.is_null() || p.anchor_r.is_null()) {
+        set_last_error("rgmin_solver_set_precon: null anchor list");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    if p.natoms != 0 && p.natoms != atoms {
+        set_last_error("rgmin_solver_set_precon: natoms is not dim / 3");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let i = if p.npairs == 0 {
+        Vec::new()
+    } else {
+        unsafe { slice::from_raw_parts(p.nbr_i, p.npairs) }.to_vec()
+    };
+    let j = if p.npairs == 0 {
+        Vec::new()
+    } else {
+        unsafe { slice::from_raw_parts(p.nbr_j, p.npairs) }.to_vec()
+    };
+    for (&a, &b) in i.iter().zip(&j) {
+        if !index_ok(a, atoms) || !index_ok(b, atoms) {
+            set_last_error("rgmin_solver_set_precon: neighbour index is out of range");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+    }
+    let r = if p.nbr_r.is_null() || p.npairs == 0 {
+        Vec::new()
+    } else {
+        unsafe { slice::from_raw_parts(p.nbr_r, p.npairs) }.to_vec()
+    };
+    let mut anchor = Vec::with_capacity(p.nanchor);
+    if p.nanchor > 0 {
+        let ai = unsafe { slice::from_raw_parts(p.anchor_i, p.nanchor) };
+        let ar = unsafe { slice::from_raw_parts(p.anchor_r, p.nanchor) };
+        for k in 0..p.nanchor {
+            if !index_ok(ai[k], atoms) {
+                set_last_error("rgmin_solver_set_precon: anchor index is out of range");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+            anchor.push((ai[k], ar[k]));
+        }
+    }
+    let neighbours = crate::Neighbours { i, j, r, anchor };
+    let mut params = ExpParams::default();
+    if let Some(a) = optional_positive(p.exp_a) {
+        params.a = a;
+    }
+    if let Some(c) = optional_positive(p.c_stab) {
+        params.c_stab = c;
+    }
+    params.mu = optional_positive(p.mu);
+    params.r_cut = optional_positive(p.r_cut);
+    params.lengths = cell_of(p.cell);
     if neighbours.r.is_empty() {
-        match crate::precon::ExpState::deferred(neighbours, exp_params) {
+        match crate::precon::ExpState::deferred(neighbours, params) {
             Ok(state) => {
                 unsafe { (*solver).solver.set_exp_deferred(state) };
                 rgmin_status_t::RGMIN_SUCCESS
@@ -1636,13 +1858,11 @@ pub unsafe extern "C" fn rgmin_solver_set_exp(
             }
         }
     } else {
-        let positions = vec![0.0; dim];
+        let positions = vec![0.0; atoms * 3];
         match unsafe {
-            (*solver).solver.set_exp(
-                ndarray::ArrayView1::from(&positions),
-                &neighbours,
-                &exp_params,
-            )
+            (*solver)
+                .solver
+                .set_exp(ndarray::ArrayView1::from(&positions), &neighbours, &params)
         } {
             Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
             Err(e) => {
@@ -1653,108 +1873,39 @@ pub unsafe extern "C" fn rgmin_solver_set_exp(
     }
 }
 
-/// Drop the exponential preconditioner installed by [`rgmin_solver_set_exp`].
-///
-/// # Safety
-///
-/// Every pointer argument must be null or valid for the type and
-/// length documented above; a session handle must come from
-/// [`rgmin_solver_create`] and not yet be freed.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_solver_clear_exp(solver: *mut rgmin_solver_t) {
-    if solver.is_null() {
-        return;
-    }
-    unsafe { (*solver).solver.clear_exp() };
-}
-
-/// Energy scale of the installed exponential preconditioner, or NaN.
-///
-/// # Safety
-///
-/// Every pointer argument must be null or valid for the type and
-/// length documented above; a session handle must come from
-/// [`rgmin_solver_create`] and not yet be freed.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_solver_exp_mu(solver: *const rgmin_solver_t) -> f64 {
-    if solver.is_null() {
-        return f64::NAN;
-    }
-    unsafe { (*solver).solver.exp_mu().unwrap_or(f64::NAN) }
-}
-
-/// Install the Lindh model Hessian. ABI minor 32.
-///
-/// `numbers` has length `natoms` and `3 * natoms` is the session
-/// dimension. `ghost_z` and `ghost_pos` describe frozen atoms;
-/// `ghost_pos` is `3 * nghost` Cartesian coordinates. Both ghost
-/// pointers are null when `nghost` is 0. `c_stab` and `mu` are NaN for
-/// the default stabilization and an estimated scale. `r_cut` and a
-/// lattice length are nonpositive to leave that choice open.
-/// `dihedrals` nonzero adds the torsion term. The geometry arrives on
-/// the next step.
-///
-/// # Safety
-///
-/// Every pointer argument must be null or valid for the type and
-/// length documented above; a session handle must come from
-/// [`rgmin_solver_create`] and not yet be freed.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_solver_set_lindh(
-    solver: *mut rgmin_solver_t,
-    numbers: *const i32,
-    natoms: usize,
-    ghost_z: *const i32,
-    ghost_pos: *const f64,
-    nghost: usize,
-    c_stab: f64,
-    r_cut: f64,
-    mu: f64,
-    length_x: f64,
-    length_y: f64,
-    length_z: f64,
-    dihedrals: i32,
-) -> rgmin_status_t {
-    if solver.is_null() || numbers.is_null() || natoms == 0 {
-        set_last_error("rgmin_solver_set_lindh: null solver or atomic numbers");
+fn install_lindh(solver: *mut rgmin_solver_t, p: &rgmin_precon_t, atoms: usize) -> rgmin_status_t {
+    if p.numbers.is_null() || p.natoms == 0 {
+        set_last_error("rgmin_solver_set_precon: null atomic numbers");
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
-    if nghost > 0 && (ghost_z.is_null() || ghost_pos.is_null()) {
-        set_last_error("rgmin_solver_set_lindh: null ghost list");
+    if p.natoms != atoms {
+        set_last_error("rgmin_solver_set_precon: dimension is not 3 * natoms");
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
-    let dim = unsafe { (*solver).solver.dim() };
-    if dim != 3 * natoms {
-        set_last_error("rgmin_solver_set_lindh: dimension is not 3 * natoms");
+    if p.nghost > 0 && (p.ghost_z.is_null() || p.ghost_pos.is_null()) {
+        set_last_error("rgmin_solver_set_precon: null ghost list");
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
-    let z = unsafe { slice::from_raw_parts(numbers, natoms) }.to_vec();
-    let mut ghosts = Vec::with_capacity(nghost);
-    if nghost > 0 {
-        let gz = unsafe { slice::from_raw_parts(ghost_z, nghost) };
-        let gp = unsafe { slice::from_raw_parts(ghost_pos, 3 * nghost) };
-        for i in 0..nghost {
+    let z = unsafe { slice::from_raw_parts(p.numbers, p.natoms) }.to_vec();
+    let mut ghosts = Vec::with_capacity(p.nghost);
+    if p.nghost > 0 {
+        let gz = unsafe { slice::from_raw_parts(p.ghost_z, p.nghost) };
+        let gp = unsafe { slice::from_raw_parts(p.ghost_pos, 3 * p.nghost) };
+        for i in 0..p.nghost {
             ghosts.push(crate::Ghost {
                 z: gz[i],
                 position: [gp[3 * i], gp[3 * i + 1], gp[3 * i + 2]],
             });
         }
     }
-    let positive = |v: f64| v.is_finite() && v > 0.0;
     let mut params = crate::LindhParams::default();
-    if c_stab.is_finite() {
-        params.c_stab = c_stab;
+    if let Some(c) = optional_positive(p.c_stab) {
+        params.c_stab = c;
     }
-    if positive(r_cut) {
-        params.r_cut = Some(r_cut);
-    }
-    if mu.is_finite() {
-        params.mu = Some(mu);
-    }
-    if positive(length_x) || positive(length_y) || positive(length_z) {
-        params.lengths = Some([length_x, length_y, length_z]);
-    }
-    params.dihedrals = dihedrals != 0;
+    params.r_cut = optional_positive(p.r_cut);
+    params.mu = optional_positive(p.mu);
+    params.lengths = cell_of(p.cell);
+    params.dihedrals = p.dihedrals != 0;
     match crate::precon::LindhState::deferred(z, ghosts, params) {
         Ok(state) => {
             unsafe { (*solver).solver.set_lindh_deferred(state) };
@@ -1767,101 +1918,56 @@ pub unsafe extern "C" fn rgmin_solver_set_lindh(
     }
 }
 
-/// Install the bonded FF metric. ABI minor 32.
-///
-/// `bond_i`, `bond_j`, and `bond_k` have length `nbonds`. `angle_i`,
-/// `angle_v`, `angle_k`, and `angle_kt` have length `nangles`, with the
-/// angle at `angle_v`. A zero count makes that pointer set null. `c_stab`
-/// and `mu` are NaN for the default stabilization and an estimated
-/// scale. `r_cut` and a lattice length are nonpositive to leave that
-/// choice open. Morse and torsion terms are set from Rust. The geometry
-/// arrives on the next step.
-///
-/// # Safety
-///
-/// Every pointer argument must be null or valid for the type and
-/// length documented above; a session handle must come from
-/// [`rgmin_solver_create`] and not yet be freed.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_solver_set_ff(
-    solver: *mut rgmin_solver_t,
-    bond_i: *const u32,
-    bond_j: *const u32,
-    bond_k: *const f64,
-    nbonds: usize,
-    angle_i: *const u32,
-    angle_v: *const u32,
-    angle_k: *const u32,
-    angle_kt: *const f64,
-    nangles: usize,
-    c_stab: f64,
-    r_cut: f64,
-    mu: f64,
-    length_x: f64,
-    length_y: f64,
-    length_z: f64,
-) -> rgmin_status_t {
-    if solver.is_null() {
-        set_last_error("rgmin_solver_set_ff: null solver");
+fn install_ff(solver: *mut rgmin_solver_t, p: &rgmin_precon_t, atoms: usize) -> rgmin_status_t {
+    if p.nbonds > 0 && p.bonds.is_null() {
+        set_last_error("rgmin_solver_set_precon: null bond list");
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
-    if nbonds > 0 && (bond_i.is_null() || bond_j.is_null() || bond_k.is_null()) {
-        set_last_error("rgmin_solver_set_ff: null bond list");
+    if p.nangles > 0 && p.angles.is_null() {
+        set_last_error("rgmin_solver_set_precon: null angle list");
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
-    if nangles > 0
-        && (angle_i.is_null() || angle_v.is_null() || angle_k.is_null() || angle_kt.is_null())
-    {
-        set_last_error("rgmin_solver_set_ff: null angle list");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let dim = unsafe { (*solver).solver.dim() };
-    if dim % 3 != 0 {
-        set_last_error("rgmin_solver_set_ff: dimension is not a multiple of 3");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let mut bonds = Vec::with_capacity(nbonds);
-    if nbonds > 0 {
-        let bi = unsafe { slice::from_raw_parts(bond_i, nbonds) };
-        let bj = unsafe { slice::from_raw_parts(bond_j, nbonds) };
-        let bk = unsafe { slice::from_raw_parts(bond_k, nbonds) };
-        for n in 0..nbonds {
+    let mut bonds = Vec::with_capacity(p.nbonds);
+    if p.nbonds > 0 {
+        let raw = unsafe { slice::from_raw_parts(p.bonds, p.nbonds) };
+        for b in raw {
+            if !index_ok(b.i as usize, atoms) || !index_ok(b.j as usize, atoms) {
+                set_last_error("rgmin_solver_set_precon: bond index is out of range");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
             bonds.push(crate::BondTerm {
-                i: bi[n] as usize,
-                j: bj[n] as usize,
-                k: bk[n],
+                i: b.i as usize,
+                j: b.j as usize,
+                k: b.k,
             });
         }
     }
-    let mut angles = Vec::with_capacity(nangles);
-    if nangles > 0 {
-        let ai = unsafe { slice::from_raw_parts(angle_i, nangles) };
-        let av = unsafe { slice::from_raw_parts(angle_v, nangles) };
-        let ak = unsafe { slice::from_raw_parts(angle_k, nangles) };
-        let at = unsafe { slice::from_raw_parts(angle_kt, nangles) };
-        for n in 0..nangles {
+    let mut angles = Vec::with_capacity(p.nangles);
+    if p.nangles > 0 {
+        let raw = unsafe { slice::from_raw_parts(p.angles, p.nangles) };
+        for a in raw {
+            if !index_ok(a.i as usize, atoms)
+                || !index_ok(a.vertex as usize, atoms)
+                || !index_ok(a.k as usize, atoms)
+            {
+                set_last_error("rgmin_solver_set_precon: angle index is out of range");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
             angles.push(crate::AngleTerm {
-                i: ai[n] as usize,
-                vertex: av[n] as usize,
-                k: ak[n] as usize,
-                k_theta: at[n],
+                i: a.i as usize,
+                vertex: a.vertex as usize,
+                k: a.k as usize,
+                k_theta: a.k_theta,
             });
         }
     }
-    let positive = |v: f64| v.is_finite() && v > 0.0;
     let mut params = crate::FfParams::default();
-    if c_stab.is_finite() {
-        params.c_stab = c_stab;
+    if let Some(c) = optional_positive(p.c_stab) {
+        params.c_stab = c;
     }
-    if positive(r_cut) {
-        params.r_cut = Some(r_cut);
-    }
-    if mu.is_finite() {
-        params.mu = Some(mu);
-    }
-    if positive(length_x) || positive(length_y) || positive(length_z) {
-        params.lengths = Some([length_x, length_y, length_z]);
-    }
+    params.r_cut = optional_positive(p.r_cut);
+    params.mu = optional_positive(p.mu);
+    params.lengths = cell_of(p.cell);
     match crate::precon::FfState::deferred(bonds, angles, params) {
         Ok(state) => {
             unsafe { (*solver).solver.set_ff_deferred(state) };
@@ -1878,24 +1984,20 @@ pub unsafe extern "C" fn rgmin_solver_set_ff(
 ///
 /// # Safety
 ///
-/// Every pointer argument must be null or valid for the type and
-/// length documented above; a session handle must come from
-/// [`rgmin_solver_create`] and not yet be freed.
+/// `solver` is null or a live session.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_clear_precon(solver: *mut rgmin_solver_t) {
     if solver.is_null() {
         return;
     }
-    unsafe { (*solver).solver.clear_exp() };
+    unsafe { (*solver).solver.clear_precon() };
 }
 
 /// Energy scale of the installed geometry preconditioner, or NaN.
 ///
 /// # Safety
 ///
-/// Every pointer argument must be null or valid for the type and
-/// length documented above; a session handle must come from
-/// [`rgmin_solver_create`] and not yet be freed.
+/// `solver` is null or a live session.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_precon_scale(solver: *const rgmin_solver_t) -> f64 {
     if solver.is_null() {

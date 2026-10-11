@@ -75,6 +75,7 @@ cargo test --features capi
    howto/embed-anneal
    howto/highs-qp
    howto/c-abi
+   howto/precon
    howto/doxygen
 
 .. toctree::
@@ -88,6 +89,7 @@ cargo test --features capi
    explanation/trust-region
    explanation/scg
    explanation/randomized
+   explanation/precon
 
 .. toctree::
    :maxdepth: 2

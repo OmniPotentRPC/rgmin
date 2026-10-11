@@ -7,10 +7,12 @@
 //! conjugate gradients, and held between rebuilds by [`needs_rebuild`].
 //! [`select_precon`] documents which one applies.
 //!
-//! Pair assembly walks fixed site ranges and concatenates them in index
-//! order. Under the `par` feature a matrix-vector product writes each
-//! row from that row's own sum, and a long dot product folds fixed
-//! chunks in chunk order. Neither result depends on the thread count.
+//! Pair assembly is a cell list. Occupied bins are visited in
+//! lexicographic order and the pairs are sorted by atom index. Under
+//! the `par` feature a matrix-vector product writes each row from that
+//! row's own sum, and a long dot product folds fixed chunks in chunk
+//! order. Neither result depends on the thread count. The parallel
+//! path is gated by [`N_PAR`] atoms, not by the thread count.
 //!
 //! Packwood, Kermode, Mones, Bernstein, Woolley, Gould, Ortner, and
 //! Csányi, *A universal preconditioner for simulating condensed phase
@@ -39,6 +41,44 @@ pub use ff::{AngleTerm, BondTerm, DihedralTerm, Ff, FfParams, FfTerms, MorseTerm
 pub(crate) use lindh::LindhState;
 pub use lindh::{Ghost, Lindh, LindhParams};
 pub use select::{GeometryKind, PreconChoice, select_precon};
+
+/// One geometry metric for [`crate::Solver::set_precon`].
+///
+/// Morse bonds and harmonic torsions travel in [`PreconSpec::Ff`].
+/// The C structure carries harmonic bonds, harmonic angles, and the
+/// Lindh torsion flag. Morse and FF torsions stay on this enum.
+pub enum PreconSpec<'a> {
+    /// Packwood exponential metric.
+    Exp {
+        /// Coordinates, length `3 N`, C order.
+        positions: ArrayView1<'a, f64>,
+        /// Caller neighbour list. Indices lie in `0..N`.
+        neighbours: &'a Neighbours,
+        /// `μ` `None` estimates the scale on the next step.
+        params: &'a ExpParams,
+    },
+    /// Lindh model Hessian.
+    Lindh {
+        /// Coordinates, length `3 N`, C order.
+        positions: ArrayView1<'a, f64>,
+        /// One atomic number per free atom.
+        z: &'a [i32],
+        /// Frozen atoms. Their indices are not free-atom indices.
+        ghosts: &'a [Ghost],
+        /// `μ` `None` estimates the scale on the next step.
+        params: &'a LindhParams,
+    },
+    /// Bonded metric. Unit constants are a geometric metric. The
+    /// Makri field is this same matrix with that paper's curvatures.
+    Ff {
+        /// Coordinates, length `3 N`, C order.
+        positions: ArrayView1<'a, f64>,
+        /// Harmonic bonds and angles, Morse bonds, harmonic torsions.
+        terms: FfTerms<'a>,
+        /// `μ` `None` estimates the scale on the next step.
+        params: &'a FfParams,
+    },
+}
 
 use std::sync::Arc;
 
@@ -533,13 +573,6 @@ impl Slot {
         }
     }
 
-    pub(crate) fn mu(&self) -> Option<f64> {
-        match self {
-            Self::Exp(state) => state.mu(),
-            Self::Lindh(_) | Self::Ff(_) => None,
-        }
-    }
-
     /// `Ok(true)` when the installed matrix was replaced.
     pub(crate) fn refresh<G>(
         &mut self,
@@ -951,20 +984,42 @@ fn csr_from_coo(n: usize, mut trips: Vec<(usize, usize, f64)>) -> Csr {
     }
 }
 
+/// Smallest atom count sent to the `par` loops.
+///
+/// Below this, assembly, apply, and the dot product stay serial even
+/// when the crate is built with `par`. The gate is the atom count
+/// alone, so the arithmetic does not depend on the thread count.
+///
+/// Bulk diamond Si, 4 Å cutoff, release build, five interleaved runs
+/// (`tests/precon_scaling.rs`, threads 1/2/4/8).
+///
+/// Two threads beat one by more than the run-to-run range on the Lindh
+/// solve at 160 atoms: median gap 0.016 s, range 0.009 s, and the
+/// two-thread samples sit entirely below the one-thread samples.
+/// That is the smallest size in the measured set (160, 2,000, 32,000).
+/// Exp's solve is slower with two threads at 160 and at 2,000, and
+/// beats one thread at 32,000 (gap 0.38 s, range 0.04 s). Assembly does
+/// not clear the noise at any of those sizes. The gate is this atom
+/// count alone, never the thread count.
+pub const N_PAR: usize = 160;
+
 /// Map `0..n` and keep index order.
 ///
 /// With the `par` feature the chunks run on the current rayon pool.
 /// `collect` on an indexed iterator concatenates in index order, so the
 /// output does not depend on how many threads the pool has.
-fn ordered_map<T, F>(n: usize, f: F) -> Vec<T>
+fn ordered_map<T, F>(n: usize, atoms: usize, f: F) -> Vec<T>
 where
     T: Send,
     F: Fn(usize) -> T + Send + Sync,
 {
+    let parallel = atoms >= N_PAR && n >= 2;
+    #[cfg(not(feature = "par"))]
+    let _ = parallel;
     #[cfg(feature = "par")]
     {
         use rayon::prelude::*;
-        if n >= 2 {
+        if parallel {
             return (0..n).into_par_iter().map(f).collect();
         }
     }
@@ -978,7 +1033,7 @@ fn matvec(a: &Csr, x: &[f64], y: &mut [f64]) {
         // Each row is an independent dot product. Writing `y[i]` from
         // that row does not reorder any sum, so the vector matches the
         // serial loop at every thread count.
-        if a.n >= 64 {
+        if a.n / 3 >= N_PAR {
             y.par_iter_mut().enumerate().for_each(|(i, yi)| {
                 let mut s = 0.0;
                 for k in a.row_ptr[i]..a.row_ptr[i + 1] {
@@ -1005,9 +1060,9 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
         // bounds do not depend on the thread count, and the fold is in
         // chunk-index order, so 1, 2, and N threads produce the same bits.
         const CHUNK: usize = 1024;
-        if a.len() >= 4096 {
+        if a.len() / 3 >= N_PAR {
             let nchunks = a.len().div_ceil(CHUNK);
-            let partials = ordered_map(nchunks, |c| {
+            let partials = ordered_map(nchunks, a.len() / 3, |c| {
                 let start = c * CHUNK;
                 let end = (start + CHUNK).min(a.len());
                 let mut acc = 0.0;

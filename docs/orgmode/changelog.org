@@ -9,25 +9,9 @@
 Nonlinear CG opens its line search with Nocedal-Wright equation 3.60
 and restarts when the metric is replaced.
 
-Lindh model Hessian (~Lindh~, ~Solver::set_lindh~,
-C ~rgmin_solver_set_lindh~) and the bonded FF metric (~Ff~,
-~Solver::set_ff~, C ~rgmin_solver_set_ff~), ABI minor 32.
-Both use the Exp solve and the Exp rebuild rule.
-~select_precon~ picks Exp for a bulk or a surface of at least 100
-atoms, Lindh or FF for a molecule or a cluster, and the identity
-otherwise. Pair ranges are concatenated in index order, so the
-matrix does not depend on the thread count.
-Lindh, Bernhardsson, Karlström, and Malmqvist, Chem. Phys. Lett.
-241, 423 (1995), https://doi.org/10.1016/0009-2614(95)00646-L.
-Makri, Ortner, and Kermode, J. Chem. Phys. 150, 094109 (2019),
-https://doi.org/10.1063/1.5064465.
-
-Universal exponential preconditioner (~Exp~, ~Solver::set_exp~,
-C ~rgmin_solver_set_exp~, ABI minor 31). The neighbour list is the
-caller's. L-BFGS uses the matrix as H0. FIRE and nonlinear CG use it
-as a metric. μ is estimated on the step when it is not supplied.
-Packwood et al., J. Chem. Phys. 144, 164109 (2016),
-https://doi.org/10.1063/1.4947024.
+Geometry preconditioners install through ~Solver::set_precon~ and
+C ~rgmin_solver_set_precon~ (ABI minor 32): Exp, Lindh, the bonded
+metric, or ~select_precon~.
 
 Pulay residual subspace (~Method::Diis~, C ~RGMIN_DIIS~, ABI minor 30).
 Coefficients on the stored gradients sum to one and minimize the

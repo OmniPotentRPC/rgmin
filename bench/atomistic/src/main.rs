@@ -24,8 +24,9 @@ use eindir_core::ffi::{eindir_objective_eval, eindir_objective_grad, eindir_stat
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rgmin::{
-    Accept, Conjugacy, Control, ExpParams, FfParams, FfTerms, FireKind, Ghost, Lbfgs, LindhParams,
-    LineSearch, Method, Neighbours, Restart, Solver, bonded_terms,
+    Accept, Conjugacy, Control, ExpParams, FfParams, FfTerms, FireKind, GeometryKind, Ghost, Lbfgs,
+    LindhParams, LineSearch, Method, Neighbours, PreconChoice, Restart, Solver, bonded_terms,
+    select_precon,
 };
 use rgpot_core::eindir::{
     rgpot_potential_free_eindir, rgpot_potential_new_eindir, rgpot_potential_t,
@@ -739,11 +740,18 @@ enum PreconKind {
     Exp,
     Lindh,
     Ff,
+    Auto,
 }
 
 /// Split a `lbfgs-lindh` style name into the solver and the metric.
+///
+/// `auto` is [`select_precon`] with no force field. The `-ff` arm is the
+/// bonded geometric metric, which that rule picks only for a molecule
+/// or a cluster when the caller has a field.
 fn classify(name: &str) -> Option<(&str, PreconKind)> {
-    if let Some(base) = name.strip_suffix("-lindh") {
+    if let Some(base) = name.strip_suffix("-auto") {
+        Some((base, PreconKind::Auto))
+    } else if let Some(base) = name.strip_suffix("-lindh") {
         Some((base, PreconKind::Lindh))
     } else if let Some(base) = name.strip_suffix("-ff") {
         Some((base, PreconKind::Ff))
@@ -751,6 +759,15 @@ fn classify(name: &str) -> Option<(&str, PreconKind)> {
         Some((base, PreconKind::Exp))
     } else {
         Some((name, PreconKind::None))
+    }
+}
+
+fn geometry_of(sys: &System) -> GeometryKind {
+    match sys.kind {
+        2 | 3 => GeometryKind::Surface,
+        4 => GeometryKind::Bulk,
+        5 | 6 => GeometryKind::Molecule,
+        _ => GeometryKind::Cluster,
     }
 }
 
@@ -877,7 +894,14 @@ fn run_session(
     if name == "fire2g" {
         solver.set_fire_variant(rgmin::FireVariant::Guenole2020);
     }
-    let exp = matches!(which, PreconKind::Exp);
+    let auto = if matches!(which, PreconKind::Auto) {
+        let free = free_index(sys);
+        let z: Vec<i32> = free.iter().map(|&a| sys.z[a]).collect();
+        Some(select_precon(geometry_of(sys), &z, false))
+    } else {
+        None
+    };
+    let exp = matches!(which, PreconKind::Exp) || matches!(auto, Some(PreconChoice::Exp));
     let mut mu = None;
     let mut built_at: Option<Array1<f64>> = None;
     let mut r_nn_gate = 1.0;
@@ -887,11 +911,14 @@ fn run_session(
         energy: f64::NAN,
         fmax: f64::INFINITY,
     };
-    if matches!(which, PreconKind::Lindh) && !install_lindh(&mut solver, sys, &x) {
+    let want_lindh =
+        matches!(which, PreconKind::Lindh) || matches!(auto, Some(PreconChoice::Lindh));
+    let want_ff = matches!(which, PreconKind::Ff) || matches!(auto, Some(PreconChoice::Ff));
+    if want_lindh && !install_lindh(&mut solver, sys, &x) {
         eprintln!("{name}: lindh assembly failed");
         return out;
     }
-    if matches!(which, PreconKind::Ff) && !install_ff(&mut solver, sys, &x) {
+    if want_ff && !install_ff(&mut solver, sys, &x) {
         eprintln!("{name}: ff assembly failed");
         return out;
     }
@@ -930,7 +957,9 @@ fn run_session(
         };
         out.iters = it + 1;
         if exp && mu.is_none() {
-            mu = solver.exp_mu();
+            // The sine-probe gradient is an extra `grad` inside `step`.
+            // `calls` counts it. The fmax check below is refunded.
+            mu = solver.precon_scale();
         }
         let (f, g) = obj.lookup(&x).unwrap_or_else(|| {
             // Not counted against the solver: the driver's own check.
@@ -983,6 +1012,9 @@ fn install_lindh(solver: &mut Solver, sys: &System, x: &Array1<f64>) -> bool {
     solver.set_lindh(x.view(), &z, &ghosts, &params).is_ok()
 }
 
+/// Bonded geometric metric: pairs within 3.5 Å, unit bond curvature,
+/// angle curvature 0.1. These are not the Makri, Ortner, and Kermode
+/// 2019 parameters.
 fn install_ff(solver: &mut Solver, sys: &System, x: &Array1<f64>) -> bool {
     let lengths = cell_lengths(sys);
     let Ok((bonds, angles)) = bonded_terms(x.view(), 3.5, 1.0, 0.1, lengths) else {

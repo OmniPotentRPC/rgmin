@@ -23,9 +23,9 @@
 //! symmetric positive definite for `c_stab > 0` and `μ > 0`. The solve
 //! is the Jacobi conjugate gradient shared with [`super::Exp`]. The
 //! session holds `P` until the largest atomic move exceeds half the
-//! nearest-neighbour distance. Pair rows are gathered in fixed site
-//! ranges and concatenated in range order, so the matrix does not
-//! depend on the thread count.
+//! nearest-neighbour distance. Pairs come from a cell list whose bins
+//! are visited in lexicographic order and then sorted by atom index,
+//! so the matrix does not depend on the thread count.
 
 use ndarray::{Array1, ArrayView1};
 
@@ -368,60 +368,36 @@ fn usable_mu(mu: Option<f64>) -> Result<Option<f64>> {
     Ok(mu)
 }
 
-/// Pairs inside the cutoff, one contiguous site range at a time.
-///
-/// Ranges are concatenated in index order. A change in the thread count
-/// does not change that order, or the nearest-neighbour distances.
+/// Pairs inside the cutoff, from a cell list, sorted by site index.
 fn gather_pairs(
     sites: &[Site],
     n_free: usize,
     search: f64,
     params: &LindhParams,
 ) -> (Vec<(usize, usize, f64, f64)>, Vec<f64>) {
-    const CHUNK: usize = 8;
-    let ns = sites.len();
-    let nchunks = ns.div_ceil(CHUNK).max(1);
-    let parts = super::ordered_map(nchunks, |c| {
-        let a0 = c * CHUNK;
-        let a1 = (a0 + CHUNK).min(ns);
-        let mut pairs = Vec::new();
-        let mut min_d = vec![f64::INFINITY; n_free];
-        for a in a0..a1 {
-            for b in (a + 1)..ns {
-                if sites[a].free.is_none() && sites[b].free.is_none() {
-                    continue;
-                }
-                let d = mic(sites[a].pos, sites[b].pos, params.lengths);
-                let r = norm3(d);
-                if !(r.is_finite() && r > 1e-8 && r < search) {
-                    continue;
-                }
-                let w = rho(sites[a].z, sites[b].z, r);
-                let keep = match params.r_cut {
-                    Some(cut) => r < cut,
-                    None => w >= RHO_MIN,
-                };
-                if !keep || !w.is_finite() {
-                    continue;
-                }
-                if let Some(i) = sites[a].free {
-                    min_d[i] = min_d[i].min(r);
-                }
-                if let Some(j) = sites[b].free {
-                    min_d[j] = min_d[j].min(r);
-                }
-                pairs.push((a, b, r, w));
-            }
-        }
-        (pairs, min_d)
-    });
+    let coords: Vec<[f64; 3]> = sites.iter().map(|s| s.pos).collect();
+    let found = super::geom::pairs_in_range(&coords, search, params.lengths);
     let mut pairs = Vec::new();
     let mut min_d = vec![f64::INFINITY; n_free];
-    for (local, local_min) in parts {
-        pairs.extend(local);
-        for i in 0..n_free {
-            min_d[i] = min_d[i].min(local_min[i]);
+    for (a, b, r) in found {
+        if sites[a].free.is_none() && sites[b].free.is_none() {
+            continue;
         }
+        let w = rho(sites[a].z, sites[b].z, r);
+        let keep = match params.r_cut {
+            Some(cut) => r < cut,
+            None => w >= RHO_MIN,
+        };
+        if !keep || !w.is_finite() {
+            continue;
+        }
+        if let Some(i) = sites[a].free {
+            min_d[i] = min_d[i].min(r);
+        }
+        if let Some(j) = sites[b].free {
+            min_d[j] = min_d[j].min(r);
+        }
+        pairs.push((a, b, r, w));
     }
     (pairs, min_d)
 }

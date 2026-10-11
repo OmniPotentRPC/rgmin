@@ -44,6 +44,162 @@ pub(super) fn norm3(a: [f64; 3]) -> f64 {
     dot3(a, a).sqrt()
 }
 
+/// Pairs `i < j` whose distance is strictly below `cutoff`.
+///
+/// Atoms are dropped into bins of width `cutoff` and the occupied bins
+/// are visited in lexicographic order. The result is sorted by `(i, j)`,
+/// so a parallel bin walk and the serial walk build the same list.
+pub(super) fn pairs_in_range(
+    pos: &[[f64; 3]],
+    cutoff: f64,
+    lengths: Option<[f64; 3]>,
+) -> Vec<(usize, usize, f64)> {
+    let n = pos.len();
+    if n < 2 || !(cutoff.is_finite() && cutoff > 0.0) {
+        return Vec::new();
+    }
+    let periodic = match lengths {
+        Some(len) => [
+            len[0].is_finite() && len[0] > 0.0,
+            len[1].is_finite() && len[1] > 0.0,
+            len[2].is_finite() && len[2] > 0.0,
+        ],
+        None => [false, false, false],
+    };
+    let len = lengths.unwrap_or([0.0, 0.0, 0.0]);
+    let mut origin = [f64::INFINITY; 3];
+    let mut span = [0.0_f64; 3];
+    for p in pos {
+        for k in 0..3 {
+            if !periodic[k] {
+                origin[k] = origin[k].min(p[k]);
+            }
+        }
+    }
+    for k in 0..3 {
+        if periodic[k] {
+            origin[k] = 0.0;
+            span[k] = len[k];
+        } else {
+            let mut hi = f64::NEG_INFINITY;
+            for p in pos {
+                hi = hi.max(p[k]);
+            }
+            span[k] = (hi - origin[k]).max(cutoff);
+        }
+    }
+    let mut nbin = [1usize; 3];
+    for k in 0..3 {
+        let bins = (span[k] / cutoff).floor().max(1.0);
+        nbin[k] = bins as usize;
+    }
+    let mut cells: std::collections::BTreeMap<(i32, i32, i32), Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for i in 0..n {
+        let key = bin_of(pos[i], origin, cutoff, nbin, periodic, len);
+        cells.entry(key).or_default().push(i);
+    }
+    let keys: Vec<(i32, i32, i32)> = cells.keys().copied().collect();
+    let parts = super::ordered_map(keys.len().max(1), n, |c| {
+        if c >= keys.len() {
+            return Vec::new();
+        }
+        let key = keys[c];
+        let Some(atoms) = cells.get(&key) else {
+            return Vec::new();
+        };
+        let mut local = Vec::new();
+        let mut seen = Vec::with_capacity(27);
+        for dz in -1..=1 {
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let Some(nb) = neighbor_bin(key, [dx, dy, dz], nbin, periodic) else {
+                        continue;
+                    };
+                    if seen.contains(&nb) {
+                        continue;
+                    }
+                    seen.push(nb);
+                    let Some(others) = cells.get(&nb) else {
+                        continue;
+                    };
+                    for &i in atoms {
+                        for &j in others {
+                            if j <= i {
+                                continue;
+                            }
+                            let d = mic(pos[i], pos[j], lengths);
+                            let r = norm3(d);
+                            if r.is_finite() && r > 1e-8 && r < cutoff {
+                                local.push((i, j, r));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        local
+    });
+    let mut pairs = Vec::new();
+    for part in parts {
+        pairs.extend(part);
+    }
+    pairs.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    pairs
+}
+
+fn bin_of(
+    p: [f64; 3],
+    origin: [f64; 3],
+    cutoff: f64,
+    nbin: [usize; 3],
+    periodic: [bool; 3],
+    len: [f64; 3],
+) -> (i32, i32, i32) {
+    let mut key = [0i32; 3];
+    for k in 0..3 {
+        let n = nbin[k] as i32;
+        let idx = if periodic[k] {
+            let mut f = p[k] / len[k];
+            f -= f.floor();
+            if f >= 1.0 {
+                f = 0.0;
+            }
+            (f * n as f64).floor() as i32
+        } else {
+            ((p[k] - origin[k]) / cutoff).floor() as i32
+        };
+        key[k] = idx.clamp(0, n - 1);
+    }
+    (key[0], key[1], key[2])
+}
+
+fn neighbor_bin(
+    key: (i32, i32, i32),
+    delta: [i32; 3],
+    nbin: [usize; 3],
+    periodic: [bool; 3],
+) -> Option<(i32, i32, i32)> {
+    let cur = [key.0, key.1, key.2];
+    let mut out = [0i32; 3];
+    for k in 0..3 {
+        let n = nbin[k] as i32;
+        let v = cur[k] + delta[k];
+        if periodic[k] {
+            let mut w = v % n;
+            if w < 0 {
+                w += n;
+            }
+            out[k] = w;
+        } else if v < 0 || v >= n {
+            return None;
+        } else {
+            out[k] = v;
+        }
+    }
+    Some((out[0], out[1], out[2]))
+}
+
 pub(super) fn scale3(a: [f64; 3], s: f64) -> [f64; 3] {
     [a[0] * s, a[1] * s, a[2] * s]
 }
@@ -128,6 +284,54 @@ pub(super) fn dihedral_grad(
         scale3(dddri, -rijrkj / dkj2),
     );
     Some([dddri, gj, gk, dddrl])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pairs_in_range;
+
+    fn brute(pos: &[[f64; 3]], cutoff: f64, lengths: Option<[f64; 3]>) -> Vec<(usize, usize, f64)> {
+        let mut out = Vec::new();
+        for i in 0..pos.len() {
+            for j in (i + 1)..pos.len() {
+                let d = super::mic(pos[i], pos[j], lengths);
+                let r = super::norm3(d);
+                if r.is_finite() && r > 1e-8 && r < cutoff {
+                    out.push((i, j, r));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_cell_list_matches_all_pairs() {
+        let mut pos = Vec::new();
+        for i in 0..40 {
+            pos.push([
+                (i % 5) as f64 * 1.2,
+                (i / 5) as f64 * 1.35,
+                ((i * 3) % 7) as f64 * 0.4,
+            ]);
+        }
+        let cutoff = 2.5;
+        let got = pairs_in_range(&pos, cutoff, None);
+        let expect = brute(&pos, cutoff, None);
+        assert_eq!(got.len(), expect.len());
+        for (a, b) in got.iter().zip(&expect) {
+            assert_eq!(a.0, b.0);
+            assert_eq!(a.1, b.1);
+            assert!((a.2 - b.2).abs() < 1e-12);
+        }
+        let lengths = Some([6.0, 5.5, 4.0]);
+        let got = pairs_in_range(&pos, cutoff, lengths);
+        let expect = brute(&pos, cutoff, lengths);
+        assert_eq!(got.len(), expect.len());
+        for (a, b) in got.iter().zip(&expect) {
+            assert_eq!((a.0, a.1), (b.0, b.1));
+            assert!((a.2 - b.2).abs() < 1e-12);
+        }
+    }
 }
 
 /// Add `scale * g g^T` on the free atoms. A `None` index is a ghost

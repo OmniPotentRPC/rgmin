@@ -47,14 +47,12 @@ is `Solver::set_fire_variant(FireVariant::Guenole2020)`.
 two-loop map and FIRE 2.0 (`uv run --with sympy python validation/<file>.py`).
 Methods: NLCG, BFGS, L-BFGS, SR1, SR2, Newton, RFO, Adam, steepest
 descent, PSO, FIRE, FIRE 2.0, Barzilai-Borwein, Powell dogleg.
-`Solver::set_exp` installs the Packwood exponential preconditioner
-(J. Chem. Phys. 144, 164109, 2016) as the L-BFGS initial inverse
-Hessian and as the metric for FIRE and nonlinear CG.
-`Solver::set_lindh` installs the Lindh model Hessian
-(Chem. Phys. Lett. 241, 423, 1995) and `Solver::set_ff` the bonded
-FF metric (J. Chem. Phys. 150, 094109, 2019). `select_precon` picks
-Exp for a bulk or a surface of at least 100 atoms, Lindh or FF for
-a molecule or a cluster, and the identity otherwise.
+`Solver::set_precon` installs Exp, Lindh, or the bonded metric.
+L-BFGS uses the matrix as the initial inverse Hessian. FIRE and
+nonlinear CG use it as the metric. `select_precon` picks Exp for a
+bulk or a surface of at least 100 atoms, Lindh for a molecule or a
+cluster whose elements are in the Lindh tables, the bonded metric
+when that caller has a force field, and the identity otherwise.
 
 Narrative docs live in [`docs/orgmode/`](docs/orgmode/index.org)
 (Diataxis); the explanation quadrant derives the math behind each

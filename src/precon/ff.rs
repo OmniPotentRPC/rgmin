@@ -1,8 +1,14 @@
-//! Bonded force-field preconditioner.
+//! Bonded geometric metric, and the force-field metric when the
+//! curvatures come from a parameterised field.
 //!
 //! Makri, Ortner, and Kermode, *A preconditioning scheme for minimum
 //! energy path finding methods*, J. Chem. Phys. 150, 094109 (2019),
 //! <https://doi.org/10.1063/1.5064465>.
+//!
+//! [`bonded_terms`] builds bonds and angles from a cutoff and the
+//! caller's force constants. Those constants are not the Makri field
+//! parameters unless the caller supplies them. The atomistic bench
+//! uses unit constants and reports this as a bonded geometric metric.
 //!
 //! `P` is the sum of reduced internal terms
 //! `|∂²V/∂q²| (∂q/∂x)(∂q/∂x)^T`, plus `c_stab` on the diagonal. A
@@ -522,21 +528,18 @@ pub fn bonded_terms(
             what: "bonded cutoff or force constant is not usable",
         });
     }
-    let coords = positions
-        .as_slice()
-        .map(<[f64]>::to_vec)
-        .unwrap_or_else(|| positions.to_vec());
+    let owned = positions.to_vec();
+    let coords: Vec<[f64; 3]> = (0..natoms).map(|i| pos_of(&owned, i)).collect();
+    let found = super::geom::pairs_in_range(&coords, r_cut, lengths);
     let mut bonds = Vec::new();
     let mut adj = vec![Vec::new(); natoms];
-    for i in 0..natoms {
-        for j in (i + 1)..natoms {
-            let r = norm3(mic(pos_of(&coords, i), pos_of(&coords, j), lengths));
-            if r > 1e-8 && r < r_cut {
-                bonds.push(BondTerm { i, j, k: k_bond });
-                adj[i].push(j);
-                adj[j].push(i);
-            }
-        }
+    for (i, j, _) in found {
+        bonds.push(BondTerm { i, j, k: k_bond });
+        adj[i].push(j);
+        adj[j].push(i);
+    }
+    for row in &mut adj {
+        row.sort_unstable();
     }
     let mut angles = Vec::new();
     for v in 0..natoms {

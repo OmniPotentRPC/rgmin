@@ -1,0 +1,55 @@
+#+TITLE: Choose and install a preconditioner
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Choose and install a preconditioner
+
+~select_precon(kind, z, has_force_field)~ returns the metric. ~z~ is
+one atomic number per free atom.
+
+- Bulk or surface, at least 100 atoms: Exp. The copper vacancy bench
+  is that row (L-BFGS 16 / 11 / 16 calls for none / exp / lindh).
+  Below 100 atoms the same geometries stay at the identity.
+- Molecule or cluster, and the caller has a force field: the bonded
+  metric. Water with a field is that case.
+- Molecule or cluster, every element in {H, B, C, N, O, F, Si, P, S, Cl}:
+  Lindh. Water without a field is that case (L-BFGS, 5 calls, the same
+  as the unpreconditioned run).
+- Metal or noble-gas cluster of at least 100 atoms: Exp. Cu147 is that
+  size. Below 100 atoms the cluster stays at the identity. Ar38 is
+  that case: Lindh on lj38 stopped at −164.88 against −167.77, and CG
+  and FIRE did not converge. Pt7 is the metal cluster below 100 atoms.
+
+Install the choice with one call. L-BFGS stores ~P^{-1}~ as ~H_0~.
+FIRE and nonlinear CG use ~P~ as the metric of the direction.
+
+#+begin_src rust
+use rgmin::{ExpParams, Neighbours, PreconSpec, Solver};
+
+solver.set_precon(PreconSpec::Exp {
+    positions: x.view(),
+    neighbours: &neigh,
+    params: &ExpParams::default(),
+})?;
+#+end_src
+
+~set_exp~, ~set_lindh~, and ~set_ff~ are the same three arms.
+~clear_precon~ drops the metric. ~precon_scale~ is the estimated ~μ~,
+or ~None~ until the sine probe has run.
+
+From C, fill ~rgmin_precon_t~ and call ~rgmin_solver_set_precon~.
+~RGMIN_PRECON_AUTO~ uses the rule above. A nonzero bond or angle count
+is the force field. Every index is checked against ~dim / 3~ in that
+call. Morse bonds and FF torsions are Rust-only. The Lindh torsion
+term is the ~dihedrals~ flag.
+
+#+begin_src cpp
+auto p = rgmin::Precon::lindh(numbers).cell(a, b, c);
+solver.set_precon(p);
+#+end_src
+
+The neighbour list for Exp is the caller's. Lindh and the bonded
+metric build their own pairs with a cell list. The bench's ~-ff~ arm
+uses unit bond curvatures and an angle curvature of 0.1. That is a
+bonded geometric metric, not the parameterised field of Makri, Ortner,
+and Kermode 2019.

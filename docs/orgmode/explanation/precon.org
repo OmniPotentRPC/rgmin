@@ -1,0 +1,83 @@
+#+TITLE: Exp, Lindh, and the bonded metric
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Exp, Lindh, and the bonded metric
+
+Three sparse symmetric positive definite matrices share one solve and
+one rebuild rule. The solve is Jacobi-preconditioned conjugate
+gradients. The matrix is held until the largest atomic move exceeds
+half the nearest-neighbour distance.
+
+** Exp
+
+Packwood, Kermode, Mones, Bernstein, Woolley, Gould, Ortner, and
+Csányi, J. Chem. Phys. 144, 164109 (2016),
+https://doi.org/10.1063/1.4947024.
+
+The caller supplies the neighbour list. The weight on a pair is
+~exp(-A (r / r_nn - 1))~ with ~A = 3~. Off-diagonal blocks are
+~-μ c_ij I_3~. The diagonal is ~μ (C_stab + sum_j c_ij) I_3~ with
+~C_stab = 0.1~. ~r_nn~ is the largest per-atom nearest-neighbour
+distance. ~μ~ is the Rayleigh quotient of a sine probe against this
+matrix at ~μ = 1~. The probe's shifted gradient is an extra force
+evaluation and is counted with the other force calls.
+
+** Lindh
+
+Lindh, Bernhardsson, Karlström, and Malmqvist, Chem. Phys. Lett. 241,
+423 (1995), https://doi.org/10.1016/0009-2614(95)00646-L.
+
+The weights come from the paper's element tables for H, B, C, N, O, F,
+Si, P, S, and Cl. A metal or a noble gas is not in those tables. Pairs
+inside the cutoff come from a cell list: bins in lexicographic order,
+then the pairs sorted by atom index, so the matrix does not depend on
+the thread count.
+
+** Bonded metric
+
+Makri, Ortner, and Kermode, J. Chem. Phys. 150, 094109 (2019),
+https://doi.org/10.1063/1.5064465, when the curvatures are that
+field's. ~bonded_terms~ with caller-supplied constants is the same
+matrix and is a bonded geometric metric until those constants are the
+field's. Harmonic bonds and angles, Morse bonds, and harmonic torsions
+are the Rust terms. The C struct carries the harmonic bonds and angles.
+Morse and the FF torsion stay in Rust. The Lindh torsion is a separate
+flag.
+
+** Which one
+
+~select_precon~ reads the geometry and the atomic numbers.
+
+| geometry | atoms | elements | field | choice |
+|---+---:|---|---|---|
+| bulk, surface | >= 100 | any | ignored | Exp |
+| bulk, surface | < 100 | any | ignored | identity |
+| molecule, cluster | any | Lindh set | no | Lindh |
+| molecule, cluster | >= 100 | metal or noble gas | no | Exp |
+| molecule, cluster | < 100 | metal or noble gas | no | identity |
+| molecule, cluster | any | any | yes | bonded metric |
+
+The 100-atom bulk threshold is the copper vacancy row. Cu147 is the
+cluster of that size. Water is the Lindh molecule. Ar38 and Pt7 are
+the identity clusters. The parallel kernels stay serial below ~N_PAR~
+atoms. That threshold is an atom count, not a thread count, so the
+result is the same at 1, 2, 3, and 8 threads.
+
+** H0 and the metric
+
+L-BFGS multiplies its compact Hessian approximation by an initial
+scale. Installing ~P~ sets that scale to ~P^{-1}~, which is one
+application of the solve. The two-loop recurrence then runs in the
+Euclidean pair inner product, started from a Newton step in ~P~.
+
+Nonlinear CG and FIRE need the inner product that defines conjugacy
+and the velocity mix. Both use ~P~ itself: the search direction is
+~-P^{-1} g~, and the FIRE velocity is mixed with that direction. The
+same ~μ~ that scales ~P~ scales the direction, so the first trial step
+along it is order 1. Opening the line search at the control step
+(0.01 in the bench) spends several extrapolations climbing back to
+that step. The opening trial is Nocedal-Wright equation 3.60, and 1
+on the first iteration when a metric is installed. A rebuilt ~P~
+restarts the recurrence at steepest descent because the stored
+~P^{-1} g~ was formed with the old matrix.

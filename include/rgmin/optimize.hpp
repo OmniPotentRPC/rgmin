@@ -14,6 +14,8 @@
 #include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace rgmin {
 
@@ -219,6 +221,157 @@ inline constexpr Method PSOptim = Method::Pso;
 
 }  // namespace minimize
 
+/// Fills \c rgmin_precon_t. The owned arrays keep the pointers valid.
+/// Morse bonds and FF torsions are Rust-only.
+class Precon {
+    rgmin_precon_t raw_{};
+    std::vector<int32_t> numbers_;
+    std::vector<int32_t> ghost_z_;
+    std::vector<double> ghost_pos_;
+    std::vector<std::size_t> nbr_i_;
+    std::vector<std::size_t> nbr_j_;
+    std::vector<double> nbr_r_;
+    std::vector<std::size_t> anchor_i_;
+    std::vector<double> anchor_r_;
+    std::vector<rgmin_bond_t> bonds_;
+    std::vector<rgmin_angle_t> angles_;
+
+    void bind() noexcept {
+        raw_.numbers = numbers_.empty() ? nullptr : numbers_.data();
+        raw_.natoms = numbers_.size();
+        raw_.ghost_z = ghost_z_.empty() ? nullptr : ghost_z_.data();
+        raw_.ghost_pos = ghost_pos_.empty() ? nullptr : ghost_pos_.data();
+        raw_.nghost = ghost_z_.size();
+        raw_.nbr_i = nbr_i_.empty() ? nullptr : nbr_i_.data();
+        raw_.nbr_j = nbr_j_.empty() ? nullptr : nbr_j_.data();
+        raw_.nbr_r = nbr_r_.empty() ? nullptr : nbr_r_.data();
+        raw_.npairs = nbr_i_.size();
+        raw_.anchor_i = anchor_i_.empty() ? nullptr : anchor_i_.data();
+        raw_.anchor_r = anchor_r_.empty() ? nullptr : anchor_r_.data();
+        raw_.nanchor = anchor_i_.size();
+        raw_.bonds = bonds_.empty() ? nullptr : bonds_.data();
+        raw_.nbonds = bonds_.size();
+        raw_.angles = angles_.empty() ? nullptr : angles_.data();
+        raw_.nangles = angles_.size();
+    }
+
+    Precon() = default;
+
+public:
+    Precon(Precon const&) = delete;
+    Precon& operator=(Precon const&) = delete;
+    Precon(Precon&& o) noexcept
+        : raw_(o.raw_),
+          numbers_(std::move(o.numbers_)),
+          ghost_z_(std::move(o.ghost_z_)),
+          ghost_pos_(std::move(o.ghost_pos_)),
+          nbr_i_(std::move(o.nbr_i_)),
+          nbr_j_(std::move(o.nbr_j_)),
+          nbr_r_(std::move(o.nbr_r_)),
+          anchor_i_(std::move(o.anchor_i_)),
+          anchor_r_(std::move(o.anchor_r_)),
+          bonds_(std::move(o.bonds_)),
+          angles_(std::move(o.angles_)) {
+        bind();
+    }
+    Precon& operator=(Precon&& o) noexcept {
+        if (this != &o) {
+            raw_ = o.raw_;
+            numbers_ = std::move(o.numbers_);
+            ghost_z_ = std::move(o.ghost_z_);
+            ghost_pos_ = std::move(o.ghost_pos_);
+            nbr_i_ = std::move(o.nbr_i_);
+            nbr_j_ = std::move(o.nbr_j_);
+            nbr_r_ = std::move(o.nbr_r_);
+            anchor_i_ = std::move(o.anchor_i_);
+            anchor_r_ = std::move(o.anchor_r_);
+            bonds_ = std::move(o.bonds_);
+            angles_ = std::move(o.angles_);
+            bind();
+        }
+        return *this;
+    }
+
+    /// Lindh model Hessian. \c numbers has one atomic number per free atom.
+    static Precon lindh(std::vector<int32_t> numbers) {
+        Precon p;
+        rgmin_precon_init(&p.raw_, RGMIN_PRECON_LINDH);
+        p.numbers_ = std::move(numbers);
+        p.bind();
+        return p;
+    }
+    /// Exponential metric. Pass neighbours before \c Solver::set_precon.
+    static Precon exp() {
+        Precon p;
+        rgmin_precon_init(&p.raw_, RGMIN_PRECON_EXP);
+        return p;
+    }
+    /// Bonded metric. Harmonic bonds only. Morse and torsions are Rust-only.
+    static Precon ff(std::vector<rgmin_bond_t> bonds) {
+        Precon p;
+        rgmin_precon_init(&p.raw_, RGMIN_PRECON_FF);
+        p.bonds_ = std::move(bonds);
+        p.bind();
+        return p;
+    }
+    /// \c select_precon. \c geometry_kind is \c RGMIN_GEOM_BULK and companions.
+    static Precon automatic(std::vector<int32_t> numbers, int32_t geometry_kind) {
+        Precon p;
+        rgmin_precon_init(&p.raw_, RGMIN_PRECON_AUTO);
+        p.numbers_ = std::move(numbers);
+        p.raw_.geometry_kind = geometry_kind;
+        p.bind();
+        return p;
+    }
+
+    Precon& cell(double a, double b, double c) & {
+        raw_.cell[0] = a;
+        raw_.cell[1] = b;
+        raw_.cell[2] = c;
+        return *this;
+    }
+    Precon cell(double a, double b, double c) && {
+        raw_.cell[0] = a;
+        raw_.cell[1] = b;
+        raw_.cell[2] = c;
+        return std::move(*this);
+    }
+    Precon& mu(double v) {
+        raw_.mu = v;
+        return *this;
+    }
+    Precon& c_stab(double v) {
+        raw_.c_stab = v;
+        return *this;
+    }
+    Precon& r_cut(double v) {
+        raw_.r_cut = v;
+        return *this;
+    }
+    Precon& exp_a(double v) {
+        raw_.exp_a = v;
+        return *this;
+    }
+    Precon& dihedrals(bool on) {
+        raw_.dihedrals = on ? 1 : 0;
+        return *this;
+    }
+    Precon& neighbours(std::vector<std::size_t> i, std::vector<std::size_t> j,
+                       std::vector<double> r) {
+        nbr_i_ = std::move(i);
+        nbr_j_ = std::move(j);
+        nbr_r_ = std::move(r);
+        bind();
+        return *this;
+    }
+    Precon& angles(std::vector<rgmin_angle_t> angles) {
+        angles_ = std::move(angles);
+        bind();
+        return *this;
+    }
+    rgmin_precon_t const* get() const noexcept { return &raw_; }
+};
+
 /// RAII session. One step() is one outer iteration.
 class Solver {
     rgmin_solver_t* ptr_ = nullptr;
@@ -254,6 +407,11 @@ public:
     std::size_t pair_count() const noexcept { return rgmin_solver_pair_count(ptr_); }
     void set_maxmove(double m) { rgmin_solver_set_maxmove(ptr_, m); }
     void set_qn_step(rgmin_qn_step_t step) { rgmin_solver_set_qn_step(ptr_, step); }
+    rgmin_status_t set_precon(Precon const& p) {
+        return rgmin_solver_set_precon(ptr_, p.get());
+    }
+    void clear_precon() { rgmin_solver_clear_precon(ptr_); }
+    double precon_scale() const { return rgmin_solver_precon_scale(ptr_); }
     void set_accept(rgmin_accept_t accept) { rgmin_solver_set_accept(ptr_, accept); }
     void set_fire_variant(rgmin_fire_variant_t variant) {
         rgmin_solver_set_fire_variant(ptr_, variant);

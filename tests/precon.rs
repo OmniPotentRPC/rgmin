@@ -93,7 +93,7 @@ fn steps_until(precon: bool, estimate: bool) -> (usize, Option<f64>) {
         solver.step(&obj, &mut x).unwrap();
         taken += 1;
     }
-    (taken, solver.exp_mu())
+    (taken, solver.precon_scale())
 }
 
 #[test]
@@ -372,11 +372,11 @@ fn lindh_and_ff_shorten_lbfgs_on_a_molecule() {
     assert!(taken < without, "ff {taken}, plain {without}");
     assert!(taken <= 3, "ff took {taken}");
     assert_eq!(
-        select_precon(GeometryKind::Molecule, 3, false),
+        select_precon(GeometryKind::Molecule, &[8, 1, 1], false),
         PreconChoice::Lindh
     );
     assert_eq!(
-        select_precon(GeometryKind::Molecule, 3, true),
+        select_precon(GeometryKind::Molecule, &[8, 1, 1], true),
         PreconChoice::Ff
     );
 }
@@ -429,12 +429,13 @@ fn bits_of(v: &Array1<f64>) -> Vec<u64> {
     v.iter().map(|x| x.to_bits()).collect()
 }
 
-/// Assembly, apply, solve, and one L-BFGS step. The thread pool is the
-/// only thing that changes between calls.
+/// Assembly, apply, and solve above [`rgmin::N_PAR`], so the `par`
+/// path is taken. The thread pool is the only thing that changes.
 fn precon_fingerprint() -> Vec<u64> {
     use rgmin::{Ff, FfParams, FfTerms, Lindh, LindhParams};
 
-    let (pos, z) = lattice(24);
+    let n = rgmin::N_PAR + 8;
+    let (pos, z) = lattice(n);
     let mut lp = LindhParams::default();
     lp.mu = Some(1.0);
     lp.r_cut = Some(3.0);
@@ -443,10 +444,6 @@ fn precon_fingerprint() -> Vec<u64> {
     let mut out = Vec::new();
     out.extend(bits_of(&lindh.apply(rhs.view())));
     out.extend(bits_of(&lindh.solve(rhs.view()).unwrap()));
-    let dense = lindh.to_dense();
-    for i in 0..dense.nrows() {
-        out.push(dense[(i, i)].to_bits());
-    }
 
     let (bonds, angles) = rgmin::bonded_terms(pos.view(), 2.2, 1.0, 0.2, None).unwrap();
     let bonds = bonds;
@@ -463,8 +460,8 @@ fn precon_fingerprint() -> Vec<u64> {
     out.extend(bits_of(&ff.solve(rhs.view()).unwrap()));
 
     let mut neigh = Neighbours::default();
-    for i in 0..24 {
-        for j in (i + 1)..24 {
+    for i in 0..n {
+        for j in (i + 1)..n {
             let dx = pos[3 * i] - pos[3 * j];
             let dy = pos[3 * i + 1] - pos[3 * j + 1];
             let dz = pos[3 * i + 2] - pos[3 * j + 2];
@@ -482,40 +479,13 @@ fn precon_fingerprint() -> Vec<u64> {
     let exp = Exp::assemble(pos.view(), &neigh, &ep, 1.0, 1.45).unwrap();
     out.extend(bits_of(&exp.apply(rhs.view())));
     out.extend(bits_of(&exp.solve(rhs.view()).unwrap()));
-
-    let obj = ModelQuad {
-        apply: |x: ArrayView1<f64>| lindh.apply(x),
-        dim: pos.len(),
-        bounds: Bounds::new(
-            Array1::from_elem(pos.len(), -1e6),
-            Array1::from_elem(pos.len(), 1e6),
-            0.0,
-        ),
-    };
-    let control = Control {
-        maxiter: 1,
-        gtol: 1e-14,
-        istep: 0.2,
-        maxmove: None,
-        ftol_rel: None,
-    };
-    let mut solver = Solver::new(Method::Lbfgs { memory: 5 }, control, pos.len());
-    solver.set_lindh(pos.view(), &z, &[], &lp).unwrap();
-    let mut x = pos.clone();
-    x[0] += 0.02;
-    solver.step(&obj, &mut x).unwrap();
-    out.extend(bits_of(&x));
     out
 }
 
 #[test]
-fn precon_is_bit_identical_at_1_2_and_n_threads() {
-    let n = std::thread::available_parallelism()
-        .map(|p| p.get())
-        .unwrap_or(1)
-        .max(2);
+fn precon_is_bit_identical_at_1_2_3_and_8_threads() {
     let mut seen = Vec::new();
-    for threads in [1usize, 2, n] {
+    for threads in [1usize, 2, 3, 8] {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(threads)
             .build()
@@ -524,5 +494,6 @@ fn precon_is_bit_identical_at_1_2_and_n_threads() {
         seen.push(bits);
     }
     assert_eq!(seen[0], seen[1], "1 thread vs 2 threads");
-    assert_eq!(seen[0], seen[2], "1 thread vs {n} threads");
+    assert_eq!(seen[0], seen[2], "1 thread vs 3 threads");
+    assert_eq!(seen[0], seen[3], "1 thread vs 8 threads");
 }

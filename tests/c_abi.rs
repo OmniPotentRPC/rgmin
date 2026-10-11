@@ -1472,10 +1472,17 @@ unsafe extern "C" fn chain_grad(
     rgmin_status_t::RGMIN_SUCCESS
 }
 
+fn precon_blank(kind: u32) -> rgmin::ffi::rgmin_precon_t {
+    let mut p = unsafe { std::mem::zeroed() };
+    unsafe { rgmin::ffi::rgmin_precon_init(&mut p, kind) };
+    p
+}
+
 #[test]
 fn c_abi_exp_installs_and_steps() {
     use rgmin::ffi::{
-        rgmin_exp_t, rgmin_solver_clear_exp, rgmin_solver_exp_mu, rgmin_solver_set_exp,
+        RGMIN_PRECON_EXP, rgmin_solver_clear_precon, rgmin_solver_precon_scale,
+        rgmin_solver_set_precon,
     };
 
     let ctrl = rgmin_control_t {
@@ -1486,54 +1493,31 @@ fn c_abi_exp_installs_and_steps() {
         maxmove: 0.0,
     };
     let bad = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
-    let params = rgmin_exp_t {
-        a: f64::NAN,
-        c_stab: f64::NAN,
-        mu: 2.0,
-        r_nn: 1.0,
-        r_cut: 0.0,
-        length_x: 0.0,
-        length_y: 0.0,
-        length_z: 0.0,
-        recalc_mu: 0,
-    };
-    let pair_i = [0u32];
-    let pair_j = [1u32];
+    let mut params = precon_blank(RGMIN_PRECON_EXP);
+    params.mu = 2.0;
+    let pair_i = [0usize];
+    let pair_j = [1usize];
     let dist = [1.0f64];
-    let st = unsafe {
-        rgmin_solver_set_exp(
-            bad,
-            &params,
-            pair_i.as_ptr(),
-            pair_j.as_ptr(),
-            dist.as_ptr(),
-            1,
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-        )
-    };
+    params.nbr_i = pair_i.as_ptr();
+    params.nbr_j = pair_j.as_ptr();
+    params.nbr_r = dist.as_ptr();
+    params.npairs = 1;
+    let st = unsafe { rgmin_solver_set_precon(bad, &params) };
     assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
     unsafe { rgmin_solver_free(bad) };
 
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 6) };
     assert!(!session.is_null());
-    let st = unsafe {
-        rgmin_solver_set_exp(
-            session,
-            &params,
-            pair_i.as_ptr(),
-            pair_j.as_ptr(),
-            dist.as_ptr(),
-            1,
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-        )
-    };
+    let st = unsafe { rgmin_solver_set_precon(session, &params) };
     assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
-    let mu = unsafe { rgmin_solver_exp_mu(session) };
+    let mu = unsafe { rgmin_solver_precon_scale(session) };
     assert!((mu - 2.0).abs() < 1e-12, "mu {mu}");
+
+    let out_of_range = [9usize];
+    params.nbr_j = out_of_range.as_ptr();
+    let st = unsafe { rgmin_solver_set_precon(session, &params) };
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    params.nbr_j = pair_j.as_ptr();
 
     let mut x = [0.4, 0.1, -0.2, -0.3, 0.2, 0.05];
     let mut out = rgmin_report_t {
@@ -1556,17 +1540,18 @@ fn c_abi_exp_installs_and_steps() {
     assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
     assert!(out.grad_norm < 1.0, "grad {}", out.grad_norm);
     unsafe {
-        rgmin_solver_clear_exp(session);
-        assert!(rgmin_solver_exp_mu(session).is_nan());
+        rgmin_solver_clear_precon(session);
+        assert!(rgmin_solver_precon_scale(session).is_nan());
         rgmin_solver_free(session);
     }
 }
 
 #[test]
-fn c_abi_lindh_and_ff_install_and_step() {
+fn c_abi_lindh_ff_and_auto_install_and_step() {
     use rgmin::ffi::{
-        rgmin_solver_clear_precon, rgmin_solver_precon_scale, rgmin_solver_set_ff,
-        rgmin_solver_set_lindh,
+        RGMIN_GEOM_CLUSTER, RGMIN_GEOM_MOLECULE, RGMIN_PRECON_AUTO, RGMIN_PRECON_FF,
+        RGMIN_PRECON_LINDH, rgmin_bond_t, rgmin_solver_clear_precon, rgmin_solver_precon_scale,
+        rgmin_solver_set_precon,
     };
 
     let ctrl = rgmin_control_t {
@@ -1579,41 +1564,18 @@ fn c_abi_lindh_and_ff_install_and_step() {
     let numbers = [1i32, 1];
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 6) };
     assert!(!session.is_null());
-    let bad = unsafe {
-        rgmin_solver_set_lindh(
-            session,
-            [0, 1].as_ptr(),
-            2,
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            f64::NAN,
-            0.0,
-            1.0,
-            0.0,
-            0.0,
-            0.0,
-            0,
-        )
-    };
+    let mut bad_p = precon_blank(RGMIN_PRECON_LINDH);
+    let bad_z = [0i32, 1];
+    bad_p.numbers = bad_z.as_ptr();
+    bad_p.natoms = 2;
+    bad_p.mu = 1.0;
+    let bad = unsafe { rgmin_solver_set_precon(session, &bad_p) };
     assert_eq!(bad, rgmin_status_t::RGMIN_INVALID_PARAMETER);
-    let st = unsafe {
-        rgmin_solver_set_lindh(
-            session,
-            numbers.as_ptr(),
-            2,
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            f64::NAN,
-            0.0,
-            1.0,
-            0.0,
-            0.0,
-            0.0,
-            0,
-        )
-    };
+    let mut lindh = precon_blank(RGMIN_PRECON_LINDH);
+    lindh.numbers = numbers.as_ptr();
+    lindh.natoms = 2;
+    lindh.mu = 1.0;
+    let st = unsafe { rgmin_solver_set_precon(session, &lindh) };
     assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
     let mut x = [0.74, 0.1, -0.05, 0.0, 0.02, 0.0];
     let mut out = rgmin_report_t {
@@ -1641,29 +1603,12 @@ fn c_abi_lindh_and_ff_install_and_step() {
         assert!(rgmin_solver_precon_scale(session).is_nan());
     }
 
-    let bond_i = [0u32];
-    let bond_j = [1u32];
-    let bond_k = [2.0f64];
-    let st = unsafe {
-        rgmin_solver_set_ff(
-            session,
-            bond_i.as_ptr(),
-            bond_j.as_ptr(),
-            bond_k.as_ptr(),
-            1,
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            f64::NAN,
-            0.0,
-            2.0,
-            0.0,
-            0.0,
-            0.0,
-        )
-    };
+    let bonds = [rgmin_bond_t { i: 0, j: 1, k: 2.0 }];
+    let mut ff = precon_blank(RGMIN_PRECON_FF);
+    ff.bonds = bonds.as_ptr();
+    ff.nbonds = 1;
+    ff.mu = 2.0;
+    let st = unsafe { rgmin_solver_set_precon(session, &ff) };
     assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
     let mut x = [1.1, 0.0, 0.0, 0.0, 0.2, -0.1];
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
@@ -1681,29 +1626,31 @@ fn c_abi_lindh_and_ff_install_and_step() {
     assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
     let scale = unsafe { rgmin_solver_precon_scale(session) };
     assert!((scale - 2.0).abs() < 1e-12, "ff scale {scale}");
+    let rejected_bond = [rgmin_bond_t { i: 0, j: 9, k: 1.0 }];
+    ff.bonds = rejected_bond.as_ptr();
+    let rejected = unsafe { rgmin_solver_set_precon(session, &ff) };
+    assert_eq!(rejected, rgmin_status_t::RGMIN_INVALID_PARAMETER);
     unsafe {
         rgmin_solver_clear_precon(std::ptr::null_mut());
         rgmin_solver_free(session);
     }
-    let rejected = unsafe {
-        rgmin_solver_set_ff(
-            std::ptr::null_mut(),
-            bond_i.as_ptr(),
-            bond_j.as_ptr(),
-            bond_k.as_ptr(),
-            1,
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            0.1,
-            0.0,
-            1.0,
-            0.0,
-            0.0,
-            0.0,
-        )
-    };
-    assert_eq!(rejected, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    let null_call = unsafe { rgmin_solver_set_precon(std::ptr::null_mut(), &ff) };
+    assert_eq!(null_call, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+
+    let water = [8i32, 1, 1];
+    let mol = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 9) };
+    let mut auto_p = precon_blank(RGMIN_PRECON_AUTO);
+    auto_p.numbers = water.as_ptr();
+    auto_p.natoms = 3;
+    auto_p.geometry_kind = RGMIN_GEOM_MOLECULE;
+    auto_p.mu = 1.0;
+    let st = unsafe { rgmin_solver_set_precon(mol, &auto_p) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let argon = [18i32; 3];
+    auto_p.numbers = argon.as_ptr();
+    auto_p.geometry_kind = RGMIN_GEOM_CLUSTER;
+    let st = unsafe { rgmin_solver_set_precon(mol, &auto_p) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(unsafe { rgmin_solver_precon_scale(mol) }.is_nan());
+    unsafe { rgmin_solver_free(mol) };
 }
