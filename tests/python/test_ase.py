@@ -214,7 +214,6 @@ def test_neb_au_on_al() -> None:
 
 
 @pytest.mark.skipif(_SLOW, reason="min-mode is too slow under TSan")
-@pytest.mark.thread_unsafe
 def test_min_mode_atoms() -> None:
     from ase.mep import MinModeAtoms
 
@@ -224,7 +223,6 @@ def test_min_mode_atoms() -> None:
     assert opt.run(fmax=0.5, steps=80) is True
 
 
-@pytest.mark.thread_unsafe
 def test_autoneb_fire(tmp_path: Any) -> None:
     from ase.io import write as ase_write
     from ase.mep import AutoNEB
@@ -413,6 +411,9 @@ def test_hessian_methods_step() -> None:
         Newton(bare, logfile=None).step()
 
 
+# Spawns a ThreadPoolExecutor. The marker keeps pytest-run-parallel from
+# nesting another pool around this test.
+@pytest.mark.thread_unsafe
 def test_pt7_emt_thread_hash() -> None:
     """Independent EMT relaxations of one start share a trajectory hash."""
     from concurrent.futures import ThreadPoolExecutor

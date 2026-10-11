@@ -18,6 +18,9 @@ def _quad(x: np.ndarray) -> tuple[float, np.ndarray]:
     return 0.5 * float(x @ x), np.array(x, dtype=np.float64, copy=True)
 
 
+# Spawns a ThreadPoolExecutor. The marker keeps pytest-run-parallel from
+# nesting another pool around this test.
+@pytest.mark.thread_unsafe
 def test_independent_solvers_match() -> None:
     def once() -> bytes:
         x = np.array([0.4, -0.2, 0.7, 0.1], dtype=np.float64)
@@ -29,6 +32,9 @@ def test_independent_solvers_match() -> None:
     assert len(set(results)) == 1
 
 
+# Spawns a ThreadPoolExecutor. The marker keeps pytest-run-parallel from
+# nesting another pool around this test.
+@pytest.mark.thread_unsafe
 def test_shared_config_is_immutable() -> None:
     config = rgmin.SolverConfig("sd", maxiter=5, gtol=1e-10)
     barrier = threading.Barrier(8)
@@ -45,6 +51,9 @@ def test_shared_config_is_immutable() -> None:
     assert max(values) - min(values) == 0.0
 
 
+# Spawns threading.Thread. The marker keeps pytest-run-parallel from
+# nesting another pool around this test.
+@pytest.mark.thread_unsafe
 def test_hammered_solver_raises_in_use() -> None:
     config = rgmin.SolverConfig("sd", maxiter=1)
     solver = rgmin.Solver(2, config)
@@ -81,6 +90,9 @@ def test_hammered_solver_raises_in_use() -> None:
         assert "Solver is in use by another thread" in str(error)
 
 
+# Spawns a ThreadPoolExecutor. The marker keeps pytest-run-parallel from
+# nesting another pool around this test. The two atoms share one
+# calculator on purpose, to observe the adapter lock.
 @pytest.mark.thread_unsafe
 def test_shared_calculator_with_and_without_reentrant() -> None:
     ase = pytest.importorskip("ase")
