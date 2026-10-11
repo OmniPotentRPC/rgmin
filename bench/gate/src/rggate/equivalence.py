@@ -6,8 +6,12 @@ removed, because a rotation is a symmetry of an isolated cluster and
 not of a crystal.
 
 The energy window is ``e_tol`` when the atom count ``N`` is unknown.
-When ``N`` is known (``dim / 3``, or the number of sites in an endpoint
-file) it is
+``dim`` is the free coordinate count, so ``N = dim / 3`` (frozen atoms
+are excluded, because ``fmax`` covers only moving atoms). ``N`` is also
+the number of sites in an endpoint file. A split counted with unknown
+``N`` is an upper bound: the force-based window is wider, so some of
+those splits can be the same stationary point. When ``N`` is known the
+window is
 
     e_tol + N * max(fmax_candidate, fmax_baseline) * rmsd_tol
 

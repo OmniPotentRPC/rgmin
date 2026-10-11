@@ -15,10 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lowest converged energy. Per-method curves count a converged run as a
   success. Inside a pair, Gehan scoring drops early censoring and basin
   splits from the call comparison. The BCa interval resamples systems
-  and then starts. The walk is stratified by system. The energy
-  window widens with the atom count when that count is known.
-  `--boundary betting` is the hedged capital process. Exit 0 passes, 1
-  fails, and 2 is undecided. Goswami, AIP Adv. (2025),
+  and then starts. The walk is stratified by system. `dim` is the
+  free coordinate count, and the energy window uses it. A split with
+  unknown atom count is an upper bound. The cluster interval is printed
+  from `--min-clusters` systems (default 10). Each pair is walked at
+  `alpha` divided by the number of pairs. `decide_min` is the first
+  time an all-wins or all-losses walk can cross. `--boundary agrapa`
+  is one signed approximate-GRAPA stake, truncated at 3/4. Exit 0
+  passes, 1 fails, 2 is undecided, and 3 is a contract or argument
+  error. Goswami, AIP Adv. (2025),
   https://doi.org/10.1063/5.0283639. Dolan and Moré, Math. Program. 91,
   201 (2002), https://doi.org/10.1007/s101070100263. Moré and Wild,
   SIAM J. Optim. 20, 172 (2009), https://doi.org/10.1137/080724083.

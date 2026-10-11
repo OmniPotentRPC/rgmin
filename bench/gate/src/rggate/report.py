@@ -17,7 +17,7 @@ from rggate.bootstrap import paired_intervals
 from rggate.km import kaplan_meier
 from rggate.pairing import classify_pair, row_succeeded
 from rggate.profiles import data_profile, pairwise_profile, performance_profile
-from rggate.sequence import optimal_rho, stratified_labels, walk, walk_betting
+from rggate.sequence import decide_min, optimal_rho, pair_alpha, stratified_labels, walk, walk_agrapa
 
 PERF_TAUS = (1.0, 1.5, 2.0, 4.0, 8.0)
 DATA_ALPHAS = (10.0, 50.0, 100.0, 500.0, 1000.0)
@@ -95,6 +95,9 @@ class PairRow:
     split_high: float
     decision: str
     energy_only: bool
+    clusters: int
+    window_fallback: int
+    forced: bool
     systems: list
 
 
@@ -110,6 +113,9 @@ class Report:
     boundary: str
     plan_n: int
     rho: float
+    alpha_pair: float
+    decide_min: int
+    min_clusters: int
     match: str
     rank_invariance: str
     methods: list
@@ -231,17 +237,22 @@ def analyze(
     reference="auto",
     plan_n=50,
     boundary="normal-mixture",
+    min_clusters=10,
 ):
     """Run equivalence, censoring, profiles, BCa, and the stopping rule."""
     if jobs < 1:
         raise ValueError("jobs must be >= 1")
     if reference not in ("auto", "lowest"):
         raise ValueError("reference must be auto or lowest")
-    if boundary not in ("normal-mixture", "betting"):
-        raise ValueError("boundary must be normal-mixture or betting")
+    if boundary not in ("normal-mixture", "agrapa"):
+        raise ValueError("boundary must be normal-mixture or agrapa")
     if plan_n < 1:
         raise ValueError("plan_n must be positive")
-    rho = optimal_rho(plan_n, alpha)
+    if min_clusters < 1:
+        raise ValueError("min_clusters must be positive")
+    level = pair_alpha(alpha, len(pairs))
+    rho = optimal_rho(plan_n, level)
+    earliest = decide_min(level, margin, rho)
     lowest = _lowest(rows)
     cache = {}
     events = [
@@ -310,7 +321,21 @@ def analyze(
     for index, (candidate, baseline) in enumerate(pairs):
         records = classify_pair(flat_rows, candidate, baseline, e_tol, rmsd_tol, reference)
         pair_rows.append(
-            _pair_row(candidate, baseline, records, seed, index, resamples, alpha, margin, rho, boundary)
+            _pair_row(
+                candidate,
+                baseline,
+                records,
+                seed,
+                index,
+                resamples,
+                alpha,
+                level,
+                margin,
+                rho,
+                boundary,
+                min_clusters,
+                earliest,
+            )
         )
         if records and not all(record.energy_only for record in records):
             any_geometry = True
@@ -332,6 +357,9 @@ def analyze(
         boundary=boundary,
         plan_n=plan_n,
         rho=rho,
+        alpha_pair=level,
+        decide_min=earliest,
+        min_clusters=min_clusters,
         match="aligned" if any_geometry else "energy-only",
         rank_invariance=rank_flag,
         methods=method_rows,
@@ -349,7 +377,21 @@ def analyze(
     )
 
 
-def _pair_row(candidate, baseline, records, seed, index, resamples, alpha, margin, rho, boundary):
+def _pair_row(
+    candidate,
+    baseline,
+    records,
+    seed,
+    index,
+    resamples,
+    alpha,
+    alpha_pair,
+    margin,
+    rho,
+    boundary,
+    min_clusters,
+    earliest,
+):
     wins = [record for record in records if record.kind == "win"]
     losses = [record for record in records if record.kind == "loss"]
     indeterminate = [record for record in records if record.kind == "indeterminate"]
@@ -362,12 +404,18 @@ def _pair_row(candidate, baseline, records, seed, index, resamples, alpha, margi
             grouped[record.system].append(record.log_ratio)
     groups = [np.asarray(grouped[system], dtype=float) for system in sorted(grouped)]
     interval = paired_intervals(groups, seed, resamples, 1.0 - alpha, index)
+    clusters = int(interval["n_systems"])
+    if clusters < min_clusters:
+        interval["cluster_geomean_low"] = math.nan
+        interval["cluster_geomean_high"] = math.nan
+        interval["cluster_median_low"] = math.nan
+        interval["cluster_median_high"] = math.nan
     walk_records = [(record.system, 1 if record.kind == "win" else 0) for record in wins + losses]
     ordered = stratified_labels(walk_records, seed, index)
-    if boundary == "betting":
-        decision = walk_betting(ordered, alpha, margin)
+    if boundary == "agrapa":
+        decision = walk_agrapa(ordered, alpha_pair, margin)
     else:
-        decision = walk(ordered, alpha, margin, rho)
+        decision = walk(ordered, alpha_pair, margin, rho)
     by_system = defaultdict(lambda: {"wins": 0, "losses": 0, "indeterminate": 0, "splits": 0})
     for record in records:
         bucket = by_system[record.system]
@@ -384,6 +432,8 @@ def _pair_row(candidate, baseline, records, seed, index, resamples, alpha, margi
         for system, counts in sorted(by_system.items())
     ]
     energy_only = bool(records) and all(record.energy_only for record in records)
+    fallback = sum(1 for record in records if record.window_fallback)
+    forced = len(ordered) < earliest
     return PairRow(
         candidate,
         baseline,
@@ -412,6 +462,9 @@ def _pair_row(candidate, baseline, records, seed, index, resamples, alpha, margi
         split_high,
         decision["decision"],
         energy_only,
+        clusters,
+        fallback,
+        forced,
         system_rows,
     )
 
@@ -450,6 +503,9 @@ def render(report):
                 f"boundary={report.boundary}",
                 f"plan_n={report.plan_n}",
                 f"rho={_num(report.rho)}",
+                f"alpha_pair={_num(report.alpha_pair)}",
+                f"decide_min={report.decide_min}",
+                f"min_clusters={report.min_clusters}",
                 f"match={report.match}",
             ]
         ),
@@ -537,6 +593,7 @@ def render(report):
         "candidate",
         "baseline",
         "n",
+        "clusters",
         "geomean",
         "geomean_low",
         "geomean_high",
@@ -560,6 +617,8 @@ def render(report):
         "split_low",
         "split_high",
         "energy_only",
+        "window_fallback",
+        "forced",
         "decision",
     ]
     lines.append(" ".join(header))
@@ -571,6 +630,7 @@ def render(report):
                     row.candidate,
                     row.baseline,
                     str(row.n),
+                    str(row.clusters),
                     _num(row.geomean),
                     _num(row.geomean_low),
                     _num(row.geomean_high),
@@ -594,6 +654,8 @@ def render(report):
                     _num(row.split_low),
                     _num(row.split_high),
                     "yes" if row.energy_only else "no",
+                    str(row.window_fallback),
+                    "yes" if row.forced else "no",
                     row.decision,
                 ]
             )

@@ -14,9 +14,10 @@ Efron, JASA 82, 171 (1987), doi:10.1080/01621459.1987.10478410. The
 stopping rule is the normal-mixture confidence sequence of Howard,
 Ramdas, McAuliffe, and Sekhon, Ann. Stat. 49, 1055 (2021),
 doi:10.1214/20-AOS1991, the time-uniform form of Wald, Ann. Math. Stat.
-16, 117 (1945), doi:10.1214/aoms/1177731118. `--boundary betting` uses
-the hedged capital process of Waudby-Smith and Ramdas, J. R. Stat. Soc.
-B (2024), doi:10.1093/jrsssb/qkad009.
+16, 117 (1945), doi:10.1214/aoms/1177731118. `--boundary agrapa` uses
+the approximate GRAPA stake of Waudby-Smith and Ramdas, J. R. Stat.
+Soc. B (2024), doi:10.1093/jrsssb/qkad009, truncated at 3/4 of full
+Kelly. It is one signed capital process.
 
 ## Contract version 1
 
@@ -38,8 +39,10 @@ system,method,seed,converged,iters,calls,energy,fmax,wall_s
 Optional columns: `pot_s`, `overhead_us_per_iter`, `endpoint`,
 `reference`, `dim`, `threads`. `converged` is `0` or `1`. `endpoint` is
 a path. `reference` is either an energy or a path. `dim` is the
-coordinate count `n` used by the data profile. `threads` is a worker
-count. When the same `(system, method, seed)` is reported at more than
+free coordinate count: three times the number of moving atoms, with
+frozen atoms excluded, because `fmax` and the energy bound cover only
+those atoms. The data profile uses that same count as `n`. `threads`
+is a worker count. When the same `(system, method, seed)` is reported at more than
 one `threads` value, those rows must agree on `converged`, `calls`,
 `energy`, and `fmax`. The summary prints `rank_invariance=ok`, `fail`,
 or `na` when the column is absent.
@@ -71,9 +74,13 @@ The energy window is `--e-tol` (default `1e-4` eV) when the atom count
 `N` is unknown. When `N` is known (`dim / 3`, or the number of sites in
 an endpoint) it is `e_tol + N * max(fmax) * rmsd_tol`, from
 `|dE| <= ||grad E||_2 ||dx||_2` with `||grad E||_2 <= sqrt(N) fmax` and
-`||dx||_2 = sqrt(N) RMSD`. A free cluster is Kabsch-rotated. A periodic
-cell is not: after the minimum-image map only the mean displacement is
-removed. The RMSD limit is `--rmsd-tol` (default `0.05` Angstrom).
+`||dx||_2 = sqrt(N) RMSD`. A pair line prints `window_fallback`, the
+number of starts judged with the `e_tol` window. An energy-only split
+with unknown `N` is an upper bound on a real basin split: the
+force-based window is wider. A free cluster is Kabsch-rotated. A
+periodic cell is not: after the minimum-image map only the mean
+displacement is removed. The RMSD limit is `--rmsd-tol` (default
+`0.05` Angstrom).
 
 The median interval on a Kaplan-Meier curve is Brookmeyer-Crowley on
 the log-log Greenwood band. The median is the smallest `t` with
@@ -111,11 +118,19 @@ counted, and dropped from the walk. A fast unconverged candidate
 therefore does not win.
 
 The BCa median and geometric-mean ratio use only starts where both
-runs reached the same basin. The summary prints that `n`. The geometric
-mean is `exp(math.fsum(log ratios) / n)`. The cluster interval
-resamples systems, then starts within each drawn system, through
-`scipy.stats.bootstrap` with a statistic on the cluster indices. The
-i.i.d. interval is printed beside it as a diagnostic (`*_iid_*`).
+runs reached the same basin. The summary prints that `n` and the
+number of systems in the sample (`clusters`). The geometric mean is
+`exp(math.fsum(log ratios) / n)`. The cluster interval resamples
+systems, then starts within each drawn system, through
+`scipy.stats.bootstrap` with a statistic on the cluster indices. It is
+printed only when `clusters` is at least `--min-clusters` (default
+10). Below that the cluster bounds are `na` and the i.i.d. interval
+remains as a diagnostic (`*_iid_*`). A slow check, 300 replicates and
+999 resamples, five starts per system, system effect sd 0.5 and
+within-system sd 0.3, covered the ratio 1 at these rates. At 10
+systems the median coverage was 0.9400 and the geometric-mean coverage
+was 0.9167. At 20 systems the median coverage was 0.9633 and the
+geometric-mean coverage was 0.9233.
 
 The generator is NumPy Philox. The fixed key is
 `(0xA341316C4C2F6E9A, 0xC1B54A32B6C7E8D9)` with `--seed` XOR-ed into
@@ -125,24 +140,31 @@ by one block.
 
 Informative starts are walked in Philox order, stratified by system:
 systems are shuffled, starts are shuffled within a system, then a
-round robin takes one start from each system. The default boundary is
-the two-sided normal mixture with Hoeffding proxy `V_t = t/4`. `rho`
-minimises the width at `--plan-n` (default 50) and is printed.
-`--boundary betting` switches to the hedged capital process.
+round robin takes one start from each system. With `k` pairs each walk
+uses `alpha_pair = alpha / k` (Bonferroni). The header prints
+`alpha_pair`. The default boundary is the two-sided normal mixture
+with Hoeffding proxy `V_t = t/4`. `rho` minimises the width at
+`--plan-n` (default 50) for `alpha_pair` and is printed.
+`--boundary agrapa` uses one signed approximate-GRAPA stake, clipped
+at 3/4 of full Kelly.
 
 ```text
-half-width = sqrt((V_t + rho) * log((V_t + rho) / (rho * alpha^2))) / t
+half-width = sqrt((V_t + rho) * log((V_t + rho) / (rho * alpha_pair^2))) / t
 ```
 
-The walk stops when the interval excludes `0.5 - --margin` (default
-margin `0`): the lower end above that value passes, the upper end
-below it fails. The summary prints `starts_used` and the per-system
-win, loss, indeterminate and split counts. Several pairs fail the run
-if any pair fails, and leave it undecided if any pair is undecided. A
-rank-invariance mismatch also fails the run. No pairs is undecided.
+`decide_min` is the smallest number of informative starts at which an
+all-wins walk or an all-losses walk can cross. Before that count the
+pair is undecided, and the pair line says `forced=yes`. At
+`--plan-n 50` and one pair, `decide_min` is 11. The walk stops when
+the interval excludes `0.5 - --margin` (default margin `0`): the lower
+end above that value passes, the upper end below it fails. The summary
+prints `starts_used` and the per-system win, loss, indeterminate and
+split counts. Several pairs fail the run if any pair fails, and leave
+it undecided if any pair is undecided. A rank-invariance mismatch also
+fails the run. No pairs is undecided.
 
-Exit codes: `0` pass, `1` fail, `2` undecided. A contract error prints
-to stderr and exits `2`.
+Exit codes: `0` pass, `1` fail, `2` undecided. A contract error or an
+argument error prints to stderr and exits `3`.
 
 ## Jobs
 

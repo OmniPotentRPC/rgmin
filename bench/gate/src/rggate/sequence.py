@@ -17,11 +17,16 @@ exp(V/rho)``, so ``V/rho + 1 = -W_{-1}(-alpha^2 / e)``. At ``rho = 1``
 the interval needs 11 wins in a row to exclude 0.5 at alpha 0.05. The
 rho optimised for that same horizon excludes 0.5 after 10.
 
-``--boundary betting`` uses the hedged capital process of Waudby-Smith
+``--boundary agrapa`` uses the approximate GRAPA stake of Waudby-Smith
 and Ramdas, J. R. Stat. Soc. B (2024), doi:10.1093/jrsssb/qkad009.
-For each null mean ``m`` on a grid, a predictable stake ``lambda`` in
-``(-1/(1-m), 1/m)`` multiplies the capital by ``1 + lambda (X - m)``.
-The interval is the set of ``m`` whose capital stays below ``1/alpha``.
+For each null mean ``m`` on a grid, one predictable stake multiplies
+the capital by ``1 + lambda (X - m)``. The stake is the plug-in
+``(mu - m) / (var + (mu - m)^2)``, clipped to
+``[-c/(1-m), c/m]`` with ``c = 3/4``, the paper's truncation below
+full Kelly (``c = 1``). This is one signed process. It is not the
+hedged capital process, which runs two one-sided processes and mixes
+them. The interval is the smallest interval covering the grid points
+whose capital stays below ``1/alpha``.
 
 The interval is clipped to ``[0, 1]``. The walk stops when it excludes
 ``0.5 - margin``: the lower end above that value is a pass, the upper
@@ -87,8 +92,13 @@ def walk(labels, alpha, margin, rho):
     return _decision("undecided", len(labels), low, high, estimate)
 
 
-def walk_betting(labels, alpha, margin, grid=401):
-    """Walk wins with the hedged betting capital process."""
+# Waudby-Smith and Ramdas truncate the stake at c in {1/2, 3/4},
+# strictly below the full-Kelly edge c = 1.
+AGRAPA_C = 0.75
+
+
+def walk_agrapa(labels, alpha, margin, grid=401):
+    """Walk wins with one signed aGRAPA capital process."""
     if margin < 0.0:
         raise ValueError("margin must be non-negative")
     if not labels:
@@ -109,8 +119,8 @@ def walk_betting(labels, alpha, margin, grid=401):
             mu = total / (t - 1)
             var = max(total_sq / (t - 1) - mu * mu, 1e-4)
         stake = (mu - means) / (var + (mu - means) ** 2)
-        hi = (1.0 - 1e-8) / means
-        lo = -(1.0 - 1e-8) / (1.0 - means)
+        hi = AGRAPA_C / means
+        lo = -AGRAPA_C / (1.0 - means)
         stake = np.clip(stake, lo, hi)
         capital *= 1.0 + stake * (float(label) - means)
         np.maximum(capital, 0.0, out=capital)
@@ -129,6 +139,32 @@ def walk_betting(labels, alpha, margin, grid=401):
         if high < threshold:
             return _decision("fail", t, low, high, estimate)
     return _decision("undecided", len(labels), low, high, estimate)
+
+
+def decide_min(alpha, margin, rho, limit=100000):
+    """Smallest t at which an all-wins or all-losses walk can cross.
+
+    Before this t every sequence is undecided: the lower end is largest
+    on an all-wins path, and the upper end is smallest on an all-losses
+    path.
+    """
+    times = []
+    wins = walk([1] * limit, alpha, margin, rho)
+    losses = walk([0] * limit, alpha, margin, rho)
+    if wins["decision"] == "pass":
+        times.append(wins["starts_used"])
+    if losses["decision"] == "fail":
+        times.append(losses["starts_used"])
+    if not times:
+        return limit
+    return min(times)
+
+
+def pair_alpha(alpha, n_pairs):
+    """Bonferroni level for one pair in a run of ``n_pairs`` pairs."""
+    if n_pairs < 1:
+        return alpha
+    return alpha / n_pairs
 
 
 def stratified_labels(records, seed, pair_index):

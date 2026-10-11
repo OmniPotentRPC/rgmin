@@ -14,8 +14,9 @@ The accept/reject rule is a normal-mixture confidence sequence
 (Howard, Ramdas, McAuliffe, and Sekhon, Ann. Stat. 49, 1055, 2021,
 doi:10.1214/20-AOS1991), the time-uniform form of a sequential test
 (Wald, Ann. Math. Stat. 16, 117, 1945, doi:10.1214/aoms/1177731118).
-``--boundary betting`` uses Waudby-Smith and Ramdas, J. R. Stat. Soc. B
-(2024), doi:10.1093/jrsssb/qkad009.
+``--boundary agrapa`` uses the approximate GRAPA stake of Waudby-Smith
+and Ramdas, J. R. Stat. Soc. B (2024), doi:10.1093/jrsssb/qkad009,
+truncated at three quarters of full Kelly.
 
 The target is the win probability over the suite's start distribution.
 The reference for a start is explicit, otherwise the baseline on that

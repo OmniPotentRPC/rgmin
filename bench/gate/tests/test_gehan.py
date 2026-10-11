@@ -17,6 +17,9 @@ def test_fast_censoring_is_not_a_win():
     assert pair.indeterminate == 1
     assert pair.splits == 1
     assert pair.n == 0
+    assert pair.window_fallback == 1
+    assert pair.clusters < report.min_clusters
+    assert pair.geomean_low != pair.geomean_low
     by_seed = {row.system: row for row in pair.systems}
     mol = by_seed["mol"]
     assert mol.wins == 1

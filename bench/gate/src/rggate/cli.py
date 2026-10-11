@@ -7,6 +7,13 @@ from rggate.contract import ContractError, load_csv
 from rggate.report import analyze, render
 
 
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        sys.stderr.write(f"{self.prog}: error: {message}\n")
+        self.exit(3)
+
+
 def _pair(text):
     if "=" not in text:
         raise argparse.ArgumentTypeError("pair must be candidate=baseline")
@@ -19,7 +26,7 @@ def _pair(text):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(prog="rggate")
+    parser = _Parser(prog="rggate")
     parser.add_argument("csv", help="contract v1 results")
     parser.add_argument(
         "--pair",
@@ -37,10 +44,12 @@ def build_parser():
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--reference", choices=("auto", "lowest"), default="auto")
     parser.add_argument("--plan-n", type=int, default=50)
+    parser.add_argument("--min-clusters", type=int, default=10)
     parser.add_argument(
         "--boundary",
-        choices=("normal-mixture", "betting"),
+        choices=("normal-mixture", "agrapa"),
         default="normal-mixture",
+        help="normal-mixture, or agrapa (one signed stake, c=3/4)",
     )
     parser.add_argument("--plot", default=None, help="write an SVG figure")
     return parser
@@ -48,7 +57,12 @@ def build_parser():
 
 def main(argv=None):
     parser = build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        if exc.code in (0, None):
+            raise
+        return int(exc.code)
     try:
         rows = load_csv(args.csv)
         report = analyze(
@@ -64,13 +78,14 @@ def main(argv=None):
             reference=args.reference,
             plan_n=args.plan_n,
             boundary=args.boundary,
+            min_clusters=args.min_clusters,
         )
     except ContractError as exc:
         print(f"rggate: {exc}", file=sys.stderr)
-        return 2
+        return 3
     except ValueError as exc:
         print(f"rggate: {exc}", file=sys.stderr)
-        return 2
+        return 3
     sys.stdout.write(render(report))
     if args.plot:
         try:
@@ -79,5 +94,5 @@ def main(argv=None):
             write_svg(report, args.plot)
         except RuntimeError as exc:
             print(f"rggate: {exc}", file=sys.stderr)
-            return 2
+            return 3
     return report.exit_code

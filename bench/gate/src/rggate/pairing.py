@@ -32,6 +32,7 @@ class StartRecord:
     kind: str
     log_ratio: float | None
     energy_only: bool
+    window_fallback: bool
 
 
 def gehan(candidate_event, candidate_time, baseline_event, baseline_time):
@@ -92,54 +93,68 @@ def _one(cand, base, e_tol, rmsd_tol, mode, lowest_energy, cache):
     used_geometry = target["positions"] is not None and (
         cand.endpoint is not None or base.endpoint is not None
     )
+    fallback = _uses_fallback(cand, base, target, cache) or _uses_fallback(base, cand, target, cache)
     if _converged(cand) and _converged(base) and not (cand_hit and base_hit):
         if cand_hit != base_hit:
-            return _record(cand, "split", None, not used_geometry)
-        same, geom = _pairwise_same(cand, base, e_tol, rmsd_tol, cache)
+            return _record(cand, "split", None, not used_geometry, fallback)
+        same, geom, pair_fallback = _pairwise_same(cand, base, e_tol, rmsd_tol, cache)
         if not same:
-            return _record(cand, "split", None, not geom)
-        return _record(cand, "indeterminate", None, not geom)
+            return _record(cand, "split", None, not geom, fallback or pair_fallback)
+        return _record(cand, "indeterminate", None, not geom, fallback or pair_fallback)
     if cand_hit and base_hit:
         ratio = _ratio(cand, base)
         kind = gehan(True, cand.calls, True, base.calls)
-        return _record(cand, kind, ratio, not used_geometry and energy_only)
+        return _record(cand, kind, ratio, not used_geometry and energy_only, fallback)
     kind = gehan(cand_hit, cand.calls, base_hit, base.calls)
-    return _record(cand, kind, None, True)
+    return _record(cand, kind, None, True, fallback)
 
 
 def _pairwise(cand, base, e_tol, rmsd_tol, cache):
     cand_event = _converged(cand)
     base_event = _converged(base)
     if cand_event and base_event:
-        same, geom = _pairwise_same(cand, base, e_tol, rmsd_tol, cache)
+        same, geom, fallback = _pairwise_same(cand, base, e_tol, rmsd_tol, cache)
         if not same:
-            return _record(cand, "split", None, not geom)
+            return _record(cand, "split", None, not geom, fallback)
         return _record(
             cand,
             gehan(True, cand.calls, True, base.calls),
             _ratio(cand, base),
             not geom,
+            fallback,
         )
     return _record(
         cand,
         gehan(cand_event, cand.calls, base_event, base.calls),
         None,
         True,
+        False,
     )
 
 
 def _pairwise_same(cand, base, e_tol, rmsd_tol, cache):
     positions = _positions(cand, cache) or _positions(base, cache)
     n_atoms = atom_count((cand, base), positions[0] if positions else None)
+    fallback = n_atoms is None
     window = energy_window(e_tol, rmsd_tol, n_atoms, cand.fmax, base.fmax)
     if abs(cand.energy - base.energy) > window:
-        return False, False
+        return False, False, fallback
     cand_xyz = _positions(cand, cache)
     base_xyz = _positions(base, cache)
     if cand_xyz is None or base_xyz is None:
-        return True, False
+        return True, False, fallback
     rmsd = kabsch_rmsd(base_xyz[0], cand_xyz[0], cand_xyz[1] if cand_xyz[1] is not None else base_xyz[1])
-    return rmsd <= rmsd_tol, True
+    return rmsd <= rmsd_tol, True, fallback
+
+
+def _uses_fallback(row, other, target, cache):
+    """True when a converged run was judged with the ``e_tol`` window."""
+    if not _converged(row):
+        return False
+    own = _positions(row, cache)
+    positions = own[0] if own is not None else None
+    site = target["positions"] if target["positions"] is not None else positions
+    return atom_count((row, other), site) is None
 
 
 def _target(cand, base, mode, lowest_energy, cache, e_tol, rmsd_tol):
@@ -206,8 +221,8 @@ def _ratio(cand, base):
     return math.log(cand.calls / base.calls)
 
 
-def _record(row, kind, log_ratio, energy_only):
-    return StartRecord(row.system, row.seed, kind, log_ratio, energy_only)
+def _record(row, kind, log_ratio, energy_only, window_fallback):
+    return StartRecord(row.system, row.seed, kind, log_ratio, energy_only, window_fallback)
 
 
 def _as_float(text):

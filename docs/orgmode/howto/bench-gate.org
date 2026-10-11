@@ -16,9 +16,9 @@ Install and run it with the pixi environment ~gate~ (numpy 2.2.6, scipy
 pixi run -e gate gate results.csv --pair lbfgs-exp=lbfgs-wolfe --pair fire-exp=fire --pair cg-exp=cg-wolfe
 #+end_src
 
-Exit 0 is a pass, 1 is a fail, 2 is undecided. The target is the win
-probability over the suite's start distribution. A start is one
-~(system, seed)~.
+Exit 0 is a pass, 1 is a fail, 2 is undecided, and 3 is a contract or
+argument error. The target is the win probability over the suite's
+start distribution. A start is one ~(system, seed)~.
 
 ** Contract
 
@@ -30,9 +30,11 @@ Required columns:
 ~system,method,seed,converged,iters,calls,energy,fmax,wall_s~
 
 Optional: ~pot_s~, ~overhead_us_per_iter~, ~endpoint~, ~reference~,
-~dim~, ~threads~. ~reference~ is an energy, or a path to an endpoint
-file. An endpoint file has optional ~energy~ and ~cell~ lines, then
-~x y z~. A zero cell is a free cluster.
+~dim~, ~threads~. ~dim~ is the free coordinate count, three times the
+number of moving atoms. Frozen atoms are excluded, because ~fmax~ and
+the energy bound cover only those atoms. ~reference~ is an energy, or
+a path to an endpoint file. An endpoint file has optional ~energy~ and
+~cell~ lines, then ~x y z~. A zero cell is a free cluster.
 
 ** Same stationary point
 
@@ -45,8 +47,10 @@ A free cluster is Kabsch-rotated after centering. A periodic cell is
 not rotated: after the minimum-image map only the mean displacement is
 removed. The energy window is ~--e-tol~ (default 1e-4 eV) when the atom
 count ~N~ is unknown, and ~e_tol + N * max(fmax) * rmsd_tol~ when ~N~
-is known from ~dim / 3~ or the endpoint. Without endpoints the summary
-says ~energy-only~.
+is known from ~dim / 3~ or the endpoint. Each pair prints
+~window_fallback~, the number of starts judged with the ~e_tol~
+window. An energy-only split with unknown ~N~ is an upper bound on a
+real basin split. Without endpoints the summary says ~energy-only~.
 
 Per-method Kaplan-Meier curves and profiles count a converged run as a
 success unless an explicit reference or ~--reference lowest~ is in
@@ -68,9 +72,11 @@ doi:10.1145/2950048).
 
 Both runs in the same basin form the BCa sample (Efron, JASA 82, 171,
 1987, doi:10.1080/01621459.1987.10478410). The interval resamples
-systems, then starts within each drawn system. The i.i.d. interval is
-printed beside it. The geometric mean uses ~math.fsum~. ~n~ is the
-number of same-basin starts.
+systems, then starts within each drawn system. It is printed when the
+number of systems is at least ~--min-clusters~ (default 10). Below
+that the cluster bounds are ~na~ and the i.i.d. interval is the
+diagnostic. The geometric mean uses ~math.fsum~. ~n~ is the number of
+same-basin starts. ~clusters~ is the number of systems in that sample.
 
 A basin split (both converged, different basins) is counted with a
 Clopper-Pearson interval and is not a loss. Gehan scoring handles the
@@ -82,17 +88,24 @@ and a round robin visits one start from each system. The seed is mixed
 into Philox key word 1. Stream and pair index sit in counter words 2
 and 3.
 
-The default boundary is the normal mixture of Howard, Ramdas,
-McAuliffe, and Sekhon, Ann. Stat. 49, 1055 (2021),
+With ~k~ pairs each walk uses ~alpha / k~. The header prints
+~alpha_pair~. The default boundary is the normal mixture of Howard,
+Ramdas, McAuliffe, and Sekhon, Ann. Stat. 49, 1055 (2021),
 doi:10.1214/20-AOS1991, with ~V_t = t/4~. ~rho~ minimises the width at
-~--plan-n~ (default 50) and is printed. The walk stops when the
-interval excludes ~0.5 - --margin~. The summary prints ~starts_used~
-and the per-system win, loss, indeterminate and split counts.
+~--plan-n~ (default 50) for ~alpha_pair~ and is printed. ~decide_min~
+is the first number of informative starts at which an all-wins or
+all-losses walk can cross. Before that count the pair line says
+~forced=yes~. At the default horizon and one pair, ~decide_min~ is 11.
+The walk stops when the interval excludes ~0.5 - --margin~. The
+summary prints ~starts_used~ and the per-system win, loss,
+indeterminate and split counts.
 
-~--boundary betting~ uses the hedged capital process of Waudby-Smith
-and Ramdas, J. R. Stat. Soc. B (2024), doi:10.1093/jrsssb/qkad009.
-The time-uniform guarantee is the sequential test of Wald, Ann. Math.
-Stat. 16, 117 (1945), doi:10.1214/aoms/1177731118.
+~--boundary agrapa~ uses one signed approximate-GRAPA stake from
+Waudby-Smith and Ramdas, J. R. Stat. Soc. B (2024),
+doi:10.1093/jrsssb/qkad009, clipped at 3/4 of full Kelly. It is not the
+hedged capital process. The time-uniform guarantee is the sequential
+test of Wald, Ann. Math. Stat. 16, 117 (1945),
+doi:10.1214/aoms/1177731118.
 
 ~--jobs~ only splits the per-method Kaplan-Meier curves, then joins
 them in method-name order. The bootstrap stays serial, and the summary

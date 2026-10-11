@@ -9,8 +9,8 @@ nothing.
 
 More-Wild, adapted to force calls: ``d(alpha)`` is the fraction solved
 with cost at most ``alpha * (n + 1)``. Without a ``dim`` column, ``n + 1``
-is 1, so ``alpha`` is a force-call budget. With ``dim``, ``n`` is that
-coordinate count (the simplex-gradient unit).
+is 1, so ``alpha`` is a force-call budget. With ``dim``, ``n`` is the
+free coordinate count (frozen atoms excluded).
 
 Gould-Scott pairwise profiles are emitted only when more than two
 methods are present. For solvers A and B, the fraction of problems with
