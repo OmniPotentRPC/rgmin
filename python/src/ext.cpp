@@ -149,6 +149,7 @@ std::string method_name(nb::handle method) {
 struct Options {
     std::vector<std::pair<std::string, std::string>> text;
     std::vector<std::pair<std::string, double>> numbers;
+    std::vector<std::pair<std::string, long long>> integers;
     std::vector<std::pair<std::string, bool>> flags;
 };
 
@@ -159,7 +160,16 @@ Options parse_options(nb::kwargs const& kwargs) {
         nb::handle value = item.second;
         if (nb::isinstance<nb::bool_>(value)) {
             out.flags.emplace_back(key, nb::cast<bool>(value));
-        } else if (nb::isinstance<nb::int_>(value) || nb::isinstance<nb::float_>(value)) {
+        } else if (nb::isinstance<nb::int_>(value)) {
+            long long integer = 0;
+            try {
+                integer = nb::cast<long long>(value);
+            } catch (nb::python_error& error) {
+                error.discard_as_unraisable(value);
+                throw nb::value_error((key + " is out of range").c_str());
+            }
+            out.integers.emplace_back(key, integer);
+        } else if (nb::isinstance<nb::float_>(value)) {
             out.numbers.emplace_back(key, nb::cast<double>(value));
         } else if (nb::isinstance<nb::str>(value)) {
             out.text.emplace_back(key, nb::cast<std::string>(value));
@@ -172,7 +182,8 @@ Options parse_options(nb::kwargs const& kwargs) {
 
 rgmin::SolverConfig config_from(std::string const& method, Options const& options) {
     try {
-        return rgmin::SolverConfig::build(method, options.text, options.numbers, options.flags);
+        return rgmin::SolverConfig::build(method, options.text, options.numbers, options.integers,
+                                          options.flags);
     } catch (std::invalid_argument const& error) {
         throw nb::value_error(error.what());
     }
@@ -186,20 +197,25 @@ void raise_for_status(rgmin_status_t status, rgbind::CallContext* context) {
         return;
     }
     char const* raw = rgmin_last_error();
-    std::string last = raw == nullptr ? std::string{} : raw;
-    std::string lower = last;
-    for (char& character : lower) {
-        character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-    }
-    int code = rgbind::status_traits<rgmin_status_t>::code(status);
-    if (lower.find("hessian") != std::string::npos || lower.find("not linked") != std::string::npos) {
-        code = static_cast<int>(rgbind::Status::unavailable);
-    } else if (lower.find("non-finite") != std::string::npos ||
-               lower.find("singular") != std::string::npos ||
-               lower.find("oracle:") != std::string::npos) {
-        code = static_cast<int>(rgbind::Status::numerical);
-    }
-    rgbind::apply_status(rgbind::map_status_code(code, last, "Solver"), context);
+    std::string last = raw == nullptr || raw[0] == '\0' ? std::string("Solver step failed") : raw;
+    // Stopgap, not applied: rgmin_solver_step_fg returns
+    // RGMIN_INVALID_PARAMETER for every runtime failure, and that status
+    // maps to ValueError. The C ABI has no numerical or unavailable
+    // status for a failed step. Until it does, a non-callback failure is
+    // RuntimeError carrying rgmin_last_error().
+    //
+    // std::string lower = last;
+    // for (char& character : lower) {
+    //     character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+    // }
+    // if (lower.find("hessian") != std::string::npos || lower.find("not linked") != std::string::npos) {
+    //     unavailable -> NotImplementedError
+    // } else if (lower.find("non-finite") != std::string::npos ||
+    //            lower.find("singular") != std::string::npos ||
+    //            lower.find("oracle:") != std::string::npos) {
+    //     numerical -> NumericalError
+    // }
+    throw std::runtime_error(last);
 }
 
 void construct_solver(rgmin::Solver* self, rgmin::SolverConfig const& config, std::size_t n) {
@@ -215,6 +231,134 @@ void construct_solver(rgmin::Solver* self, rgmin::SolverConfig const& config, st
     }
 }
 
+nb::object owned_copy(double const* data, std::size_t n) {
+    auto* copy = new double[n == 0 ? 1 : n];
+    if (n != 0 && data != nullptr) {
+        std::memcpy(copy, data, n * sizeof(double));
+    }
+    nb::capsule owner(copy, [](void* pointer) noexcept { delete[] static_cast<double*>(pointer); });
+    nb::ndarray<nb::numpy, double, nb::ndim<1>, nb::c_contig> array(copy, {n}, owner);
+    return nb::cast(std::move(array));
+}
+
+double const* tensor_f64(DLManagedTensorVersioned const* tensor) {
+    return reinterpret_cast<double const*>(static_cast<char const*>(tensor->dl_tensor.data) +
+                                           tensor->dl_tensor.byte_offset);
+}
+
+double* tensor_f64_mut(DLManagedTensorVersioned* tensor) {
+    return reinterpret_cast<double*>(static_cast<char*>(tensor->dl_tensor.data) +
+                                     tensor->dl_tensor.byte_offset);
+}
+
+rgmin_status_t map_trampoline(int code) noexcept {
+    switch (static_cast<rgbind::TrampolineStatus>(code)) {
+    case rgbind::TrampolineStatus::ok:
+        return RGMIN_SUCCESS;
+    case rgbind::TrampolineStatus::stopped:
+    case rgbind::TrampolineStatus::python_error:
+    case rgbind::TrampolineStatus::cxx_error:
+    case rgbind::TrampolineStatus::bad_user:
+        return RGMIN_INVALID_PARAMETER;
+    case rgbind::TrampolineStatus::attach_failed:
+        return RGMIN_INTERNAL_ERROR;
+    }
+    return RGMIN_INTERNAL_ERROR;
+}
+
+using EvalEntry = int (*)(void*, DLManagedTensorVersioned const*, double*, DLManagedTensorVersioned*);
+using HessEntry = int (*)(void*, DLManagedTensorVersioned const*, DLManagedTensorVersioned*);
+
+struct FgSlot {
+    void* trampoline = nullptr;
+    EvalEntry entry = nullptr;
+};
+
+struct HessSlot {
+    FgSlot fg;
+    void* hess_trampoline = nullptr;
+    HessEntry hess_entry = nullptr;
+};
+
+extern "C" rgmin_status_t rgmin_py_evalgrad(void* user, DLManagedTensorVersioned const* coordinates,
+                                            double* value, DLManagedTensorVersioned* gradient) {
+    auto* slot = static_cast<FgSlot*>(user);
+    if (slot == nullptr || slot->entry == nullptr) {
+        return RGMIN_INVALID_PARAMETER;
+    }
+    return map_trampoline(slot->entry(slot->trampoline, coordinates, value, gradient));
+}
+
+extern "C" rgmin_status_t rgmin_py_evalgrad_hess(void* user, DLManagedTensorVersioned const* coordinates,
+                                                 double* value, DLManagedTensorVersioned* gradient) {
+    auto* slot = static_cast<HessSlot*>(user);
+    if (slot == nullptr) {
+        return RGMIN_INVALID_PARAMETER;
+    }
+    return rgmin_py_evalgrad(&slot->fg, coordinates, value, gradient);
+}
+
+extern "C" rgmin_status_t rgmin_py_hess(void* user, DLManagedTensorVersioned const* coordinates,
+                                        DLManagedTensorVersioned* hessian) {
+    auto* slot = static_cast<HessSlot*>(user);
+    if (slot == nullptr || slot->hess_entry == nullptr) {
+        return RGMIN_INVALID_PARAMETER;
+    }
+    return map_trampoline(slot->hess_entry(slot->hess_trampoline, coordinates, hessian));
+}
+
+void read_gradient(nb::handle gradient, std::size_t n, double* destination) {
+    ConstVector grad = nb::cast<ConstVector>(gradient);
+    check_vector(grad, n, "gradient");
+    double const* source = grad.data();
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!std::isfinite(source[i])) {
+            throw rgbind::NumericalError("f_and_grad returned a non-finite gradient");
+        }
+    }
+    std::memcpy(destination, source, n * sizeof(double));
+}
+
+void read_hessian(nb::handle value, std::size_t n, double* destination) {
+    ConstVector hess = nb::cast<ConstVector>(value);
+    std::size_t const nn = n * n;
+    if (hess.ndim() == 1) {
+        check_vector(hess, nn, "hessian");
+    } else if (hess.ndim() == 2 && static_cast<std::size_t>(hess.shape(0)) == n &&
+               static_cast<std::size_t>(hess.shape(1)) == n) {
+        // Row-major n by n.
+    } else {
+        std::ostringstream message;
+        message << "hessian: expected shape (" << n << ", " << n << ") or (" << nn
+                << ",), got " << shape_text(hess);
+        throw nb::value_error(message.str().c_str());
+    }
+    double const* source = hess.data();
+    for (std::size_t i = 0; i < nn; ++i) {
+        if (!std::isfinite(source[i])) {
+            throw rgbind::NumericalError("hessian returned a non-finite entry");
+        }
+    }
+    std::memcpy(destination, source, nn * sizeof(double));
+}
+
+rgmin::Report finish_step(rgmin_status_t status, rgmin_report_t const& out, rgbind::CallContext* context) {
+    raise_for_status(status, context);
+    if (!std::isfinite(out.value)) {
+        throw rgbind::NumericalError("Solver produced a non-finite value");
+    }
+    return rgmin::Report{out.value, out.steps, out.grad_norm, out.stop};
+}
+
+DLManagedTensorVersioned* borrow_x(Vector x, std::size_t n) {
+    DLManagedTensorVersioned* tensor = rgmin_tensor_borrow_cpu_f64(x.data(), n);
+    if (tensor == nullptr) {
+        char const* message = rgmin_last_error();
+        throw nb::value_error(message != nullptr ? message : "rgmin_tensor_borrow_cpu_f64 failed");
+    }
+    return tensor;
+}
+
 rgmin::Report step_python(rgmin::Solver& solver, nb::callable function, Vector x) {
     std::size_t const n = solver.dim();
     check_vector(x, n, "x");
@@ -226,11 +370,8 @@ rgmin::Report step_python(rgmin::Solver& solver, nb::callable function, Vector x
             coordinates->dl_tensor.data == nullptr || gradient->dl_tensor.data == nullptr) {
             throw std::invalid_argument("f_and_grad received a null tensor");
         }
-        auto* data = reinterpret_cast<double*>(
-            static_cast<char*>(const_cast<void*>(coordinates->dl_tensor.data)) +
-            coordinates->dl_tensor.byte_offset);
-        nb::ndarray<nb::numpy, double, nb::ndim<1>, nb::c_contig> view(data, {n}, nb::handle());
-        nb::object result = function(view);
+        nb::object point = owned_copy(tensor_f64(coordinates), n);
+        nb::object result = function(point);
         if (!nb::isinstance<nb::tuple>(result) || nb::len(result) != 2) {
             throw nb::value_error("f_and_grad must return (value, gradient)");
         }
@@ -238,42 +379,81 @@ rgmin::Report step_python(rgmin::Solver& solver, nb::callable function, Vector x
         if (!std::isfinite(scalar)) {
             throw rgbind::NumericalError("f_and_grad returned a non-finite value");
         }
-        ConstVector grad = nb::cast<ConstVector>(result[1]);
-        check_vector(grad, n, "gradient");
-        double const* source = grad.data();
-        for (std::size_t i = 0; i < n; ++i) {
-            if (!std::isfinite(source[i])) {
-                throw rgbind::NumericalError("f_and_grad returned a non-finite gradient");
-            }
-        }
         *value = scalar;
-        auto* destination = reinterpret_cast<double*>(
-            static_cast<char*>(gradient->dl_tensor.data) + gradient->dl_tensor.byte_offset);
-        std::memmove(destination, source, n * sizeof(double));
+        read_gradient(result[1], n, tensor_f64_mut(gradient));
     };
     using Callback = decltype(callback);
     rgbind::trampoline<Callback> tramp(std::move(callback), &context, true);
-    using Entry = int (*)(void*, DLManagedTensorVersioned const*, double*, DLManagedTensorVersioned*);
-    Entry entry = &rgbind::trampoline<Callback>::entry<DLManagedTensorVersioned const*, double*,
-                                                       DLManagedTensorVersioned*>;
-    DLManagedTensorVersioned* tensor = rgmin_tensor_borrow_cpu_f64(x.data(), n);
-    if (tensor == nullptr) {
-        char const* message = rgmin_last_error();
-        throw nb::value_error(message != nullptr ? message : "rgmin_tensor_borrow_cpu_f64 failed");
-    }
+    FgSlot slot;
+    slot.trampoline = &tramp;
+    slot.entry = &rgbind::trampoline<Callback>::entry<DLManagedTensorVersioned const*, double*,
+                                                      DLManagedTensorVersioned*>;
+    DLManagedTensorVersioned* tensor = borrow_x(x, n);
     rgmin_report_t out{};
     rgmin_status_t status = RGMIN_SUCCESS;
     {
         nb::gil_scoped_release release;
-        status = rgmin_solver_step_fg(solver.raw(), reinterpret_cast<rgmin_evalgrad_fn>(entry),
-                                      &tramp, tensor, &out);
+        status = rgmin_solver_step_fg(solver.raw(), &rgmin_py_evalgrad, &slot, tensor, &out);
     }
     rgmin_tensor_free(tensor);
-    raise_for_status(status, &context);
-    if (!std::isfinite(out.value)) {
-        throw rgbind::NumericalError("Solver produced a non-finite value");
+    return finish_step(status, out, &context);
+}
+
+rgmin::Report step_hess_python(rgmin::Solver& solver, nb::callable function, nb::callable hessian,
+                               Vector x) {
+    std::size_t const n = solver.dim();
+    check_vector(x, n, "x");
+    rgbind::Claim claim(solver.busy(), "Solver");
+    rgbind::CallContext context;
+    auto callback = [&](DLManagedTensorVersioned const* coordinates, double* value,
+                        DLManagedTensorVersioned* gradient) {
+        if (coordinates == nullptr || gradient == nullptr || value == nullptr ||
+            coordinates->dl_tensor.data == nullptr || gradient->dl_tensor.data == nullptr) {
+            throw std::invalid_argument("f_and_grad received a null tensor");
+        }
+        nb::object point = owned_copy(tensor_f64(coordinates), n);
+        nb::object result = function(point);
+        if (!nb::isinstance<nb::tuple>(result) || nb::len(result) != 2) {
+            throw nb::value_error("f_and_grad must return (value, gradient)");
+        }
+        double scalar = nb::cast<double>(result[0]);
+        if (!std::isfinite(scalar)) {
+            throw rgbind::NumericalError("f_and_grad returned a non-finite value");
+        }
+        *value = scalar;
+        read_gradient(result[1], n, tensor_f64_mut(gradient));
+    };
+    auto hess_callback = [&](DLManagedTensorVersioned const* coordinates,
+                             DLManagedTensorVersioned* hessian_out) {
+        if (coordinates == nullptr || hessian_out == nullptr ||
+            coordinates->dl_tensor.data == nullptr || hessian_out->dl_tensor.data == nullptr) {
+            throw std::invalid_argument("hessian received a null tensor");
+        }
+        nb::object point = owned_copy(tensor_f64(coordinates), n);
+        nb::object result = hessian(point);
+        read_hessian(result, n, tensor_f64_mut(hessian_out));
+    };
+    using Callback = decltype(callback);
+    using HessCallback = decltype(hess_callback);
+    rgbind::trampoline<Callback> tramp(std::move(callback), &context, true);
+    rgbind::trampoline<HessCallback> hess_tramp(std::move(hess_callback), &context, true);
+    HessSlot slot;
+    slot.fg.trampoline = &tramp;
+    slot.fg.entry = &rgbind::trampoline<Callback>::entry<DLManagedTensorVersioned const*, double*,
+                                                         DLManagedTensorVersioned*>;
+    slot.hess_trampoline = &hess_tramp;
+    slot.hess_entry = &rgbind::trampoline<HessCallback>::entry<DLManagedTensorVersioned const*,
+                                                               DLManagedTensorVersioned*>;
+    DLManagedTensorVersioned* tensor = borrow_x(x, n);
+    rgmin_report_t out{};
+    rgmin_status_t status = RGMIN_SUCCESS;
+    {
+        nb::gil_scoped_release release;
+        status = rgmin_solver_step_hess_fg(solver.raw(), &rgmin_py_evalgrad_hess, &rgmin_py_hess,
+                                           &slot, tensor, &out);
     }
-    return rgmin::Report{out.value, out.steps, out.grad_norm, out.stop};
+    rgmin_tensor_free(tensor);
+    return finish_step(status, out, &context);
 }
 
 }  // namespace
@@ -329,9 +509,12 @@ NB_MODULE(_core, m) {
     nb::class_<rgmin::SolverConfig>(m, "SolverConfig",
                                     "Validated, immutable optimizer options. Unknown keywords raise "
                                     "``ValueError`` listing the valid options.")
-        .def("__init__", [](rgmin::SolverConfig* self, nb::object method, nb::kwargs kwargs) {
-            new (self) rgmin::SolverConfig(config_from(method_name(method), parse_options(kwargs)));
-        })
+        .def(
+            "__init__",
+            [](rgmin::SolverConfig* self, nb::object method, nb::kwargs kwargs) {
+                new (self) rgmin::SolverConfig(config_from(method_name(method), parse_options(kwargs)));
+            },
+            nb::sig("def __init__(self, method: str | Method = 'lbfgs', **kwargs) -> None"))
         .def_prop_ro("method",
                      [](rgmin::SolverConfig const& config) {
                          return static_cast<rgmin_method_t>(config.method());
@@ -354,12 +537,26 @@ NB_MODULE(_core, m) {
                          return static_cast<rgmin_method_t>(solver.method());
                      })
         .def("step", &step_python, nb::arg("f_and_grad"), nb::arg("x").noconvert(),
-             "Take one step. ``f_and_grad(x)`` returns ``(value, gradient)``.");
+             nb::sig("def step(self, f_and_grad: collections.abc.Callable[[ndarray[dtype=float64]], "
+                     "tuple[float, ndarray[dtype=float64]]], x: ndarray[dtype=float64]) -> Report"),
+             "Take one step. ``f_and_grad(x)`` returns ``(value, gradient)``.")
+        .def("step_hess", &step_hess_python, nb::arg("f_and_grad"), nb::arg("hessian"),
+             nb::arg("x").noconvert(),
+             nb::sig("def step_hess(self, f_and_grad: collections.abc.Callable[[ndarray[dtype=float64]], "
+                     "tuple[float, ndarray[dtype=float64]]], hessian: collections.abc.Callable[["
+                     "ndarray[dtype=float64]], ndarray[dtype=float64]], "
+                     "x: ndarray[dtype=float64]) -> Report"),
+             "One Newton, RFO, or dogleg step. ``hessian(x)`` returns an ``(n, n)`` matrix.");
 
     m.def(
         "minimize",
         [](nb::callable function, nb::handle x0_obj, nb::handle method, nb::kwargs kwargs) {
-            Vector x0 = nb::cast<Vector>(x0_obj);
+            Vector x0;
+            try {
+                x0 = nb::cast<Vector>(x0_obj, false);
+            } catch (nb::cast_error const&) {
+                throw nb::type_error("x0 must be a contiguous float64 array");
+            }
             if (x0.ndim() != 1) {
                 std::ostringstream message;
                 message << "x0: expected shape rank 1, got rank " << x0.ndim() << " "
@@ -382,7 +579,10 @@ NB_MODULE(_core, m) {
                     break;
                 }
             }
-            return report;
+            return nb::make_tuple(report, x0);
         },
-        "Minimize ``f_and_grad`` in place, starting at ``x0``.");
+        nb::sig("def minimize(f_and_grad: collections.abc.Callable[[ndarray[dtype=float64]], "
+                "tuple[float, ndarray[dtype=float64]]], x0: ndarray[dtype=float64], "
+                "method: object, **kwargs) -> tuple[Report, ndarray[dtype=float64]]"),
+        "Minimize ``f_and_grad`` in place and return ``(report, x)``.");
 }
