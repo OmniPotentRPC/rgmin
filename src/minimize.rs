@@ -14,7 +14,7 @@ use crate::pso::minimize_pso;
 use crate::qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 use crate::report::Report;
 use crate::session::Solver;
-use crate::step::{l2, next_istep, take_step};
+use crate::step::{energy_noise_report, l2, next_istep, take_step};
 
 /// Minimize `obj` from `init` with the chosen conjugacy, restart, and line search.
 pub fn minimize<O>(
@@ -200,6 +200,9 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let lsstep = t.alpha;
         pos = t.x;
         value = t.f;

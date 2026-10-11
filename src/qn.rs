@@ -7,7 +7,7 @@ use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
-use crate::step::{l2, next_istep, qn_istep, take_step};
+use crate::step::{energy_noise_report, l2, next_istep, qn_istep, take_step};
 
 const CURVATURE: f64 = 1e-12;
 const SR1_SKIP: f64 = 1e-8;
@@ -57,6 +57,9 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let moved = t.moved;
         pos = t.x;
         value = t.f;
@@ -147,6 +150,9 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let moved = t.moved;
         pos = t.x;
         value = t.f;
@@ -210,6 +216,9 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let moved = t.moved;
         pos = t.x;
         value = t.f;
@@ -265,6 +274,9 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let lsstep = t.alpha;
         pos = t.x;
         value = t.f;

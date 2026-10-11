@@ -21,7 +21,10 @@ https://doi.org/10.1145/2168773.2168777, at their own spacing. The
 forward step and the gradient probe are clamped to
 ~[max(1e-16, 4 ulp(max |x_i|)), 1]~. ~NoiseFloor~ stops at
 ~c * sqrt(n_free) * eps_g~ (default ~c = 3~) with
-~Status::NoiseFloor~ after the ~gtol~ test.
+~Status::NoiseFloor~ after the ~gtol~ test. ~NoiseFloor~ also
+carries ~eps_f~. A line search that finds no trial whose decrease
+clears ~c * eps_f~ is the same stop and keeps the pre-step point.
+~sample_value_gradient_noise~ reads both from one stencil.
 ~Status::StepTolerance~ is the SCG step and objective stop.
 
 ~Report~ gains ~status~ and ~Control~ gains ~noise_floor~. Struct

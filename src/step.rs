@@ -5,6 +5,7 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::control::Control;
 use crate::linesearch::{LineSearch, LineSearchOptions};
+use crate::report::Report;
 
 pub(crate) fn l2(g: &Array1<f64>) -> f64 {
     crate::vecops::nrm2(g.view())
@@ -125,6 +126,23 @@ pub(crate) struct Taken {
     pub alpha: f64,
     /// Whether the move was accepted.
     pub moved: bool,
+    /// No trial decreased the energy by `c * eps_f`. The point is the start.
+    pub energy_noise: bool,
+}
+
+pub(crate) fn energy_noise_report(
+    value: f64,
+    coords: Array1<f64>,
+    steps: usize,
+    grad_norm: f64,
+) -> Report {
+    Report {
+        value,
+        coords,
+        steps,
+        grad_norm,
+        status: crate::report::Status::NoiseFloor,
+    }
 }
 
 /// Line search from the known `(value, grad)` at `pos`, inside the cap,
@@ -182,15 +200,30 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let amax = cap_alpha(dir, control, atom_maxmove);
-    let unmoved = || Taken {
+    let mut best_decrease = f64::NEG_INFINITY;
+    let mut saw_trial = false;
+    let stalled = |saw: bool, best: f64| {
+        saw && control
+            .noise_floor
+            .is_some_and(|floor| floor.stalled_on_energy(best))
+    };
+    let unmoved = |energy_noise: bool| Taken {
         x: pos.clone(),
         f: value,
         g: grad.clone(),
         alpha: 0.0,
         moved: false,
+        energy_noise,
     };
     let Some(out) = linesearch.search_from_with_options(
-        |x| obj.value_and_gradient(x),
+        |x| {
+            let (f, g) = obj.value_and_gradient(x);
+            if f.is_finite() {
+                saw_trial = true;
+                best_decrease = best_decrease.max(value - f);
+            }
+            (f, g)
+        },
         pos.view(),
         value,
         grad.view(),
@@ -199,17 +232,21 @@ where
         amax,
         options,
     ) else {
-        return unmoved();
+        return unmoved(stalled(saw_trial, best_decrease));
     };
     let trial = obj.bounds().clip(out.x.view());
     let (x, f, g) = if trial == out.x {
         (out.x, out.f, out.g)
     } else {
         let (f, g) = obj.value_and_gradient(trial.view());
+        if f.is_finite() {
+            saw_trial = true;
+            best_decrease = best_decrease.max(value - f);
+        }
         (trial, f, g)
     };
     if !f.is_finite() || g.iter().any(|value| !value.is_finite()) {
-        return unmoved();
+        return unmoved(stalled(saw_trial, best_decrease));
     }
     let accepted = match control.ftol_rel {
         Some(_) => f - value <= control.ftol_slack(value),
@@ -233,16 +270,20 @@ where
                 }
         }
     };
-    if accepted {
+    // No trial cleared `c * eps_f`. Keep the start, even if Wolfe would
+    // have accepted a decrease inside that band.
+    let energy_noise = stalled(saw_trial, best_decrease);
+    if accepted && !energy_noise {
         Taken {
             x,
             f,
             g,
             alpha: out.alpha,
             moved: true,
+            energy_noise: false,
         }
     } else {
-        unmoved()
+        unmoved(energy_noise)
     }
 }
 

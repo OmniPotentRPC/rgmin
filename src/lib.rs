@@ -139,9 +139,9 @@ pub use minimize::{minimize, minimize_method, minimize_method_hess};
 pub use newton::{HessianObjective, HessianOracle, NewtonKind, minimize_newton};
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
 pub use noise::{
-    DEFAULT_M, NoiseEstimate, NoiseFlag, ecnoise, estimate_second, estimate_third, forward_step,
-    gradient_dr, line_values, next_spacing, sample_gradient_noise, sample_gradient_noise_k,
-    sample_noise,
+    DEFAULT_M, NoiseEstimate, NoiseFlag, ValueGradientNoise, ecnoise, estimate_second,
+    estimate_third, forward_step, gradient_dr, line_values, next_spacing, sample_gradient_noise,
+    sample_gradient_noise_k, sample_noise, sample_value_gradient_noise,
 };
 pub use oracle::Oracle;
 pub use pso::minimize_pso;

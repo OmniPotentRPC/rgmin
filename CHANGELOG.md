@@ -32,12 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same clamp as a zero scale. The clamp is
   `[max(1e-16, 4 * ulp(max |x_i|)), 1]`. `NoiseFloor` stops at
   `c * sqrt(n_free) * eps_g` (`c = 3` by default) with
-  `Status::NoiseFloor` after the `gtol` test. `Status::StepTolerance`
+  `Status::NoiseFloor` after the `gtol` test. `NoiseFloor` also
+  carries `eps_f`. A line search that finds no trial whose decrease
+  clears `c * eps_f` is the same stop and keeps the pre-step point.
+  `sample_value_gradient_noise` reads both from one stencil.
+  `Status::StepTolerance`
   is SCG's step and objective stop while `||g||` is still above
   `gtol`. `Status` is `non_exhaustive`. The `par` feature evaluates
   the stencil by index.
 - `Report` gains `status` and `Control` gains `noise_floor`
-  (`NoiseFloor { eps_g, c }`) in place of `noise_eps` and `noise_c`.
+  (`NoiseFloor { eps_g, c, eps_f }`) in place of `noise_eps` and `noise_c`.
+  The C ABI does not gain `eps_f`.
   Struct literals break. This ships with 0.4.0.
 - C ABI (`abi_minor` 31, `layout_revision` 3): `rgmin_control_t`
   gains `noise_eps` and `noise_c` (`noise_eps <= 0` leaves the floor

@@ -27,7 +27,7 @@ use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
 use crate::quickmin::{QuickMinState, quickmin_displacement, quickmin_rescale_velocity};
-use crate::report::Report;
+use crate::report::{Report, Status};
 use crate::rigid::{project_horizontal, project_out_rot_trans};
 use crate::step::{
     Taken, l2, next_istep, qn_istep, scale_step, scale_step_atom, take_step_with_options,
@@ -1444,10 +1444,11 @@ impl Solver {
         }
         #[cfg(feature = "highs")]
         let boxed = self.has_coordinate_box();
+        let mut energy_stall = false;
         match &mut self.inner {
             Inner::Lbfgs(_) if !lbfgs_line_searched => {}
             Inner::Lbfgs(solver) => {
-                solver.step_objective_with_direction(
+                energy_stall = solver.step_objective_with_direction(
                     obj,
                     x,
                     &mut value,
@@ -1479,6 +1480,7 @@ impl Solver {
                     self.istep,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 *x = t.x;
                 value = t.f;
                 grad = t.g;
@@ -1520,6 +1522,7 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 *x = t.x;
                 value = t.f;
                 grad = t.g;
@@ -1569,6 +1572,7 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let moved = t.moved;
                 *x = t.x;
                 value = t.f;
@@ -1600,6 +1604,7 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let lsstep = t.alpha;
                 let moved = t.moved;
                 *x = t.x;
@@ -1633,6 +1638,7 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let lsstep = t.alpha;
                 let moved = t.moved;
                 *x = t.x;
@@ -1671,6 +1677,7 @@ impl Solver {
                     self.istep,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let lsstep = t.alpha;
                 *x = t.x;
                 value = t.f;
@@ -1837,15 +1844,19 @@ impl Solver {
 
         self.remember(x, value, &grad);
         self.steps += 1;
+        let grad_norm = self.stationarity_norm(obj.bounds(), x, &grad);
+        let mut status = self
+            .control
+            .classify(grad_norm, self.free_len(obj.bounds()));
+        if energy_stall && status == Status::Iterating {
+            status = Status::NoiseFloor;
+        }
         Ok(Report {
             value,
             coords: x.clone(),
             steps: self.steps,
-            grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-            status: self.control.classify(
-                self.stationarity_norm(obj.bounds(), x, &grad),
-                self.free_len(obj.bounds()),
-            ),
+            grad_norm,
+            status,
         })
     }
 
@@ -1999,6 +2010,7 @@ where
         g,
         alpha: if moved { direct_scale } else { 0.0 },
         moved,
+        energy_noise: false,
     }
 }
 

@@ -7,7 +7,7 @@ use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
-use crate::step::{l2, next_istep, take_step};
+use crate::step::{energy_noise_report, l2, next_istep, take_step};
 
 /// Adam plus a line search along the Kingma-Ba preconditioned step.
 ///
@@ -70,6 +70,9 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let lsstep = t.alpha;
         pos = t.x;
         value = t.f;

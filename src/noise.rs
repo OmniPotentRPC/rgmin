@@ -27,7 +27,7 @@
 //! `E[||e||²] = tr(Σ) = n * eps_g²`, and the floor compares the
 //! stationarity measure with `c * sqrt(n_free) * eps_g`.
 
-use eindir_core::{Gradient, Objective};
+use eindir_core::{DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 
 use crate::error::{Error, Result};
@@ -297,6 +297,49 @@ where
     })
 }
 
+/// Energy noise and one gradient projection from a single stencil.
+///
+/// Each sample calls [`DifferentiableObjective::value_and_gradient`]
+/// once. The energy table and the projection `g · w` are the two
+/// ECnoise inputs. `w` is the counter direction of [`sample_gradient_noise`],
+/// so the gradient half matches that function at `k = 1`.
+pub fn sample_value_gradient_noise<O>(
+    objective: &O,
+    x: ArrayView1<f64>,
+    direction: ArrayView1<f64>,
+    h: f64,
+    m: usize,
+    seed: u64,
+) -> Result<ValueGradientNoise>
+where
+    O: DifferentiableObjective<f64> + Sync + ?Sized,
+{
+    let m = if m == 0 { DEFAULT_M } else { m };
+    let unit = unit_direction(x, direction, h, m, Objective::dim(objective))?;
+    let w = counter_direction(seed, x.len());
+    let samples = map_pairs(m + 1, |i| {
+        let shift = (i as f64 - m as f64 / 2.0) * h;
+        let point = &x + &(shift * &unit);
+        let (f, g) = objective.value_and_gradient(point.view());
+        (f, dot_ordered(g.view(), w.view()))
+    })?;
+    let values = finite_values(samples.iter().map(|sample| sample.0).collect())?;
+    let projected = finite_values(samples.iter().map(|sample| sample.1).collect())?;
+    Ok(ValueGradientNoise {
+        value: ecnoise(&values)?,
+        gradient: ecnoise(&projected)?,
+    })
+}
+
+/// [`ecnoise`] on the energy and on one projection, from one stencil.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ValueGradientNoise {
+    /// Noise of `f` along the stencil.
+    pub value: NoiseEstimate,
+    /// Noise of `g · w` at those same points.
+    pub gradient: NoiseEstimate,
+}
+
 fn sample_gradient_noise_one<O>(
     objective: &O,
     x: ArrayView1<f64>,
@@ -417,6 +460,21 @@ fn finite_values(values: Vec<f64>) -> Result<Vec<f64>> {
 fn map_indexed<F>(n: usize, f: F) -> Result<Vec<f64>>
 where
     F: Fn(usize) -> f64 + Send + Sync,
+{
+    map_slots(n, f)
+}
+
+fn map_pairs<F>(n: usize, f: F) -> Result<Vec<(f64, f64)>>
+where
+    F: Fn(usize) -> (f64, f64) + Send + Sync,
+{
+    map_slots(n, f)
+}
+
+fn map_slots<T, F>(n: usize, f: F) -> Result<Vec<T>>
+where
+    T: Send,
+    F: Fn(usize) -> T + Send + Sync,
 {
     #[cfg(feature = "par")]
     {
@@ -962,7 +1020,7 @@ mod tests {
             let sigma = 1e-3;
             let mut hits = 0usize;
             for seed in 0..200u64 {
-                if floor_fires(&vec![sigma; n], seed, false).0 {
+                if floor_fires(&vec![sigma; n], seed, false, 8, 1.7).0 {
                     hits += 1;
                 }
             }
@@ -970,8 +1028,26 @@ mod tests {
                 hits * 10 >= 200 * 9,
                 "isotropic n={n}: {hits}/200 below 2 sqrt(n) sigma"
             );
+            let mut exact = 0usize;
+            for seed in 0..200u64 {
+                if exact_eps_fires(n, sigma, seed, 2.0) {
+                    exact += 1;
+                }
+            }
+            // An exact eps_g at 2 sqrt(tr Σ) fires on 93% of draws at
+            // n = 3 and on all of them at n = 21 and n = 114. The
+            // measured-eps shortfall is the ECnoise spread.
+            if n == 3 {
+                assert!(
+                    exact * 100 >= 200 * 90,
+                    "exact eps n=3: {exact}/200 at 2 sqrt(tr)"
+                );
+            } else {
+                assert_eq!(exact, 200, "exact eps n={n}: {exact}/200 at 2 sqrt(tr)");
+            }
+            eprintln!("exact eps n={n}: {exact}/200 at 2 sqrt(tr Σ)");
             assert!(
-                !floor_fires(&vec![0.0; n], 1, true).0,
+                !floor_fires(&vec![0.0; n], 1, true, 8, 1.7).0,
                 "noise-free quadratic n={n} reported the floor"
             );
         }
@@ -981,17 +1057,125 @@ mod tests {
             .collect();
         let mut hits = 0usize;
         for seed in 0..200u64 {
-            if floor_fires(&sigmas, seed, false).0 {
+            if floor_fires(&sigmas, seed, false, 8, 1.7).0 {
                 hits += 1;
             }
         }
         assert!(
             hits * 10 >= 200 * 9,
-            "anisotropic: {hits}/200 below 2 sqrt(tr Σ)"
+            "anisotropic k=8: {hits}/200 below 2 sqrt(tr Σ)"
         );
+        let mut once = 0usize;
+        for seed in 0..200u64 {
+            if floor_fires(&sigmas, seed, false, 1, 1.7).0 {
+                once += 1;
+            }
+        }
+        // A 100-fold σ spread sends one direction's factor
+        // sqrt(n wᵀΣw / tr Σ) from about 0.56 to 1.45, so k = 1
+        // misses the 90% bar that k = 8 clears.
+        eprintln!("anisotropic k=1: {once}/200 at 1.7 sqrt(tr Σ)");
     }
 
-    fn floor_fires(sigmas: &[f64], seed: u64, noise_free_minimize: bool) -> (bool, f64, f64) {
+    #[test]
+    fn floor_stays_off_at_five_standard_deviations() {
+        for &k in &[1usize, 8] {
+            for &n in &[3usize, 21, 114] {
+                let sigma = 1e-3;
+                let mut hits = 0usize;
+                for seed in 0..200u64 {
+                    if floor_fires(&vec![sigma; n], seed, false, k, 5.0).0 {
+                        hits += 1;
+                    }
+                }
+                eprintln!("stays-off isotropic n={n} k={k}: {hits}/200");
+                assert!(
+                    hits * 100 <= 200 * 5,
+                    "isotropic n={n} k={k}: {hits}/200 fired at 5 sqrt(tr)"
+                );
+            }
+            let n = 21usize;
+            let sigmas: Vec<f64> = (0..n)
+                .map(|i| 1e-4 * 100.0_f64.powf(i as f64 / (n - 1) as f64))
+                .collect();
+            let mut hits = 0usize;
+            for seed in 0..200u64 {
+                if floor_fires(&sigmas, seed, false, k, 5.0).0 {
+                    hits += 1;
+                }
+            }
+            eprintln!("stays-off anisotropic k={k}: {hits}/200");
+            assert!(
+                hits * 100 <= 200 * 5,
+                "anisotropic k={k}: {hits}/200 fired at 5 sqrt(tr)"
+            );
+        }
+    }
+
+    #[test]
+    fn energy_floor_stops_when_no_trial_clears_eps_f() {
+        let quad = NoisyQuad::new(vec![0.0], 1);
+        let linesearch = LineSearch::Wolfe {
+            c1: 1e-4,
+            c2: 0.9,
+            maxiter: 12,
+        };
+        let stalled = Control {
+            gtol: 1e-8,
+            maxiter: 20,
+            noise_floor: Some(NoiseFloor::new(0.0).with_eps_f(1.0)),
+            ..Control::default()
+        };
+        let report = minimize_method(
+            &quad,
+            array![0.5],
+            &stalled,
+            Method::Lbfgs { memory: 8 },
+            linesearch,
+        )
+        .unwrap();
+        assert_eq!(report.status, Status::NoiseFloor);
+        assert!(report.steps <= 2, "steps {}", report.steps);
+        assert!((report.coords[0] - 0.5).abs() < 1e-12);
+        let fine = Control {
+            gtol: 1e-6,
+            maxiter: 40,
+            noise_floor: Some(NoiseFloor::new(0.0).with_eps_f(1e-8)),
+            ..Control::default()
+        };
+        let report = minimize_method(
+            &quad,
+            array![0.5],
+            &fine,
+            Method::Lbfgs { memory: 8 },
+            linesearch,
+        )
+        .unwrap();
+        assert_eq!(report.status, Status::Tolerance);
+    }
+
+    fn exact_eps_fires(n: usize, sigma: f64, seed: u64, radius_factor: f64) -> bool {
+        let tr = n as f64 * sigma * sigma;
+        let obj = NoisyQuad::new(vec![sigma; n], seed);
+        let mut x = Array1::zeros(n);
+        x[0] = radius_factor * tr.sqrt();
+        let g = obj.grad(x.view());
+        let gnorm = dot_ordered(g.view(), g.view()).sqrt();
+        let control = Control {
+            gtol: 1e-18,
+            noise_floor: Some(NoiseFloor::new(sigma)),
+            ..Control::default()
+        };
+        control.classify(gnorm, n) == Status::NoiseFloor
+    }
+
+    fn floor_fires(
+        sigmas: &[f64],
+        seed: u64,
+        noise_free_minimize: bool,
+        k: usize,
+        radius_factor: f64,
+    ) -> (bool, f64, f64) {
         let n = sigmas.len();
         let obj = NoisyQuad::new(sigmas.to_vec(), seed);
         if noise_free_minimize {
@@ -1020,9 +1204,12 @@ mod tests {
             return (report.status == Status::NoiseFloor, eps, gnorm);
         }
         let tr: f64 = sigmas.iter().map(|s| s * s).sum();
-        // "About 2": 1.7 leaves room for the chi-square tail of ||g||
-        // at n = 3, where that tail is widest.
-        let radius = 1.7 * tr.sqrt();
+        // The firing check passes 1.7. An exact eps at 2 sqrt(tr Σ)
+        // fires on 93% of draws at n = 3 and on all of them at n = 21
+        // and n = 114. The measured-eps shortfall is the spread of the
+        // ECnoise estimate, not the chi-square tail of ||g||. The
+        // stays-off check passes 5.
+        let radius = radius_factor * tr.sqrt();
         let mut x = Array1::zeros(n);
         x[0] = radius;
         // Measure where the projection is large compared with the noise.
@@ -1036,7 +1223,7 @@ mod tests {
             1e-5,
             DEFAULT_M,
             seed.wrapping_add(17),
-            8,
+            k,
         )
         .unwrap();
         let eps = est.eps;

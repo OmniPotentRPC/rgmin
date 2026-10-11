@@ -11,11 +11,13 @@ pub enum Status {
     /// `||g||` fell below [`crate::Control::gtol`].
     Tolerance,
     /// The stationarity measure fell below `c * sqrt(n_free) * eps_g`
-    /// and was still at or above `gtol`.
+    /// and was still at or above `gtol`, or the line search found no
+    /// trial whose decrease cleared `c * eps_f`.
     ///
     /// One projection `g · w` with `w` uniform on the sphere has variance
     /// `tr(Σ) / n`. The Euclidean noise is `sqrt(n)` times that, so the
-    /// comparison uses `sqrt(n_free)`.
+    /// comparison uses `sqrt(n_free)`. The energy test keeps the point
+    /// from before that search.
     NoiseFloor,
     /// SCG stopped on its step or objective test while `||g||` was still
     /// at or above `gtol`.
