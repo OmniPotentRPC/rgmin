@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -161,6 +164,29 @@ def test_shared_calculator_with_and_without_reentrant() -> None:
     assert overlapped.max_inside == 2
 
 
+def _collect_and_drain_id_locks() -> None:
+    """Collect unreachable optimizers and apply queued id-lock releases."""
+    import gc
+
+    from rgmin.ase import _calc_table
+
+    gc.collect()
+    with _calc_table:
+        pass
+
+
+@pytest.fixture
+def empty_id_locks() -> Any:
+    """Each id-lock test starts from an empty table, whatever ran before it."""
+    pytest.importorskip("ase")
+    from rgmin.ase import _id_locks
+
+    _collect_and_drain_id_locks()
+    assert len(_id_locks) == 0
+    yield
+    _collect_and_drain_id_locks()
+
+
 def _unweak_calculator() -> Any:
     """Calculator with no weak-reference support and a flat energy."""
 
@@ -181,7 +207,7 @@ def _unweak_calculator() -> Any:
 
 
 @pytest.mark.thread_unsafe
-def test_live_id_locks_survive_interleaved_lookups() -> None:
+def test_live_id_locks_survive_interleaved_lookups(empty_id_locks: None) -> None:
     """Two live non-weakrefable calculators keep their own locks."""
     pytest.importorskip("ase")
     import weakref
@@ -239,7 +265,7 @@ def test_live_id_locks_survive_interleaved_lookups() -> None:
 
 
 @pytest.mark.thread_unsafe
-def test_id_locked_calculator_steps_do_not_overlap() -> None:
+def test_id_locked_calculator_steps_do_not_overlap(empty_id_locks: None) -> None:
     """Two optimizers on one non-weakrefable calculator take the same lock."""
     pytest.importorskip("ase")
     import weakref
@@ -348,22 +374,21 @@ def _build_trajectory_optimizers(tmp_path: Any, rounds: int) -> Any:
 
 @pytest.mark.thread_unsafe
 @pytest.mark.timeout(30)
-def test_trajectory_finalizer_does_not_deadlock(tmp_path: Any) -> None:
+def test_trajectory_finalizer_does_not_deadlock(tmp_path: Any, empty_id_locks: None) -> None:
     """Collecting a trajectory optimizer must not block on the table lock."""
     pytest.importorskip("ase")
-    import gc
 
     from rgmin.ase import _id_locks
 
     calc = _build_trajectory_optimizers(tmp_path, 40)
-    gc.collect()
+    _collect_and_drain_id_locks()
     assert id(calc) not in _id_locks
     assert len(_id_locks) == 0
 
 
 @pytest.mark.thread_unsafe
 @pytest.mark.timeout(30)
-def test_trajectory_finalizer_under_tight_gc(tmp_path: Any) -> None:
+def test_trajectory_finalizer_under_tight_gc(tmp_path: Any, empty_id_locks: None) -> None:
     """The same collection stays non-blocking when GC runs on every allocation."""
     pytest.importorskip("ase")
     import gc
@@ -374,8 +399,51 @@ def test_trajectory_finalizer_under_tight_gc(tmp_path: Any) -> None:
     gc.set_threshold(1, 1, 1)
     try:
         calc = _build_trajectory_optimizers(tmp_path, 20)
-        gc.collect()
+        _collect_and_drain_id_locks()
         assert id(calc) not in _id_locks
         assert len(_id_locks) == 0
     finally:
         gc.set_threshold(*thresholds)
+
+
+_HELD_GUARD_FINALIZER = textwrap.dedent(
+    """
+    import gc
+    import numpy as np
+    from ase import Atoms
+    import rgmin.ase as ra
+    class SlotCalc:
+        __slots__ = ("reentrant",)
+        def __init__(self):
+            self.reentrant = False
+        def get_potential_energy(self, atoms, force_consistent=False):
+            return 0.0
+        def get_forces(self, atoms):
+            return np.zeros((len(atoms), 3))
+    calc = SlotCalc()
+    atoms = Atoms("H")
+    atoms.calc = calc
+    opt = ra.SD(atoms, logfile=None)
+    opt._cycle = opt
+    del opt
+    with ra._calc_guard:
+        gc.collect()
+    ra._lock_for(calc)
+    assert id(calc) not in ra._id_locks
+    print("ok")
+    """
+)
+
+
+@pytest.mark.timeout(30)
+def test_finalizer_under_held_guard() -> None:
+    """GC while the table lock is held must release the entry without blocking."""
+    pytest.importorskip("ase")
+    completed = subprocess.run(
+        [sys.executable, "-c", _HELD_GUARD_FINALIZER],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0 and "ok" in completed.stdout, completed.stderr[-500:]
