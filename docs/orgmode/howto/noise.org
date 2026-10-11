@@ -76,10 +76,13 @@ The second difference of ~φ~ is the third-derivative scale ~|T|~ of
 ~f~ along ~û~. The two tests, the spacing, and the one retry are
 unchanged apart from that substitution.
 
-| Helper | Formula | Model it minimizes |
-|---+---|---|
-| ~forward_step(eps_f, second, point_scale)~ | ~8^{1/4} sqrt(eps_f / |f''|)~ | ~(h/2)|f''| + sqrt(2) eps_f / h~ |
-| ~gradient_dr(eps_g, third, point_scale)~ | ~2 sqrt(eps_g / |T|)~ | ~(dr/2)|T| + 2 eps_g / dr~ |
+~forward_step(eps_f, second, point_scale)~ returns
+~8^{1/4} sqrt(eps_f / |f''|)~. That step minimizes
+~(h/2)|f''| + sqrt(2) eps_f / h~.
+
+~gradient_dr(eps_g, third, point_scale)~ returns
+~2 sqrt(eps_g / |T|)~. That step minimizes
+~(dr/2)|T| + 2 eps_g / dr~.
 
 ~point_scale~ is ~max_i |x_i|~. The clamp is
 ~[max(1e-16, 4 ulp(point_scale)), 1]~. A step below one ulp of a
