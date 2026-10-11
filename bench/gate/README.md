@@ -14,7 +14,9 @@ Efron, JASA 82, 171 (1987), doi:10.1080/01621459.1987.10478410. The
 stopping rule is the normal-mixture confidence sequence of Howard,
 Ramdas, McAuliffe, and Sekhon, Ann. Stat. 49, 1055 (2021),
 doi:10.1214/20-AOS1991, the time-uniform form of Wald, Ann. Math. Stat.
-16, 117 (1945), doi:10.1214/aoms/1177731118.
+16, 117 (1945), doi:10.1214/aoms/1177731118. `--boundary betting` uses
+the hedged capital process of Waudby-Smith and Ramdas, J. R. Stat. Soc.
+B (2024), doi:10.1093/jrsssb/qkad009.
 
 ## Contract version 1
 
@@ -48,18 +50,34 @@ A zero cell is a free cluster. Remaining lines are `x y z`.
 
 ## Equivalence and censoring
 
-The per-system reference energy is the lowest converged energy on that
-system, unless a row sets `reference`. A run is a success only when it
-converged, `|E - E_ref| <= --e-tol` (default `1e-4` eV), and, when both
-geometries exist, the Kabsch RMSD after the minimum-image map is at
-most `--rmsd-tol` (default `0.05` Angstrom). Atoms are paired by index.
-A converged run that fails either test is a different stationary point.
-An unconverged run, or a non-finite energy, is right-censored at its
-call count and is not counted as a different stationary point.
+The reference is chosen per `(system, seed)`. An explicit `reference`
+comes first (an energy, or an endpoint path). Inside a `--pair`, the
+baseline endpoint from that same start is next, when the baseline
+converged. `--reference lowest` opts into the lowest converged energy
+on the system, for a global-search benchmark. Otherwise the two runs
+on that start are compared with each other.
 
-Kaplan-Meier is computed per method on that censored sample. The curve
-uses the Greenwood variance and a normal quantile, clipped to `[0, 1]`.
-The median is the smallest `t` with `S(t) <= 0.5`.
+Per-method Kaplan-Meier curves and profiles, when no explicit reference
+and no `--reference lowest` are in force, treat a converged run as a
+success. An unconverged run is right-censored at its call count.
+
+Inside a pair, both runs converging in the same basin is an informative
+start. Both converging in different basins is a basin split: the
+summary prints the count and a Clopper-Pearson interval, and the start
+is left out of the call comparison. It is not a loss. Without
+endpoints the match is labelled `energy-only`.
+
+The energy window is `--e-tol` (default `1e-4` eV) when the atom count
+`N` is unknown. When `N` is known (`dim / 3`, or the number of sites in
+an endpoint) it is `e_tol + N * max(fmax) * rmsd_tol`, from
+`|dE| <= ||grad E||_2 ||dx||_2` with `||grad E||_2 <= sqrt(N) fmax` and
+`||dx||_2 = sqrt(N) RMSD`. A free cluster is Kabsch-rotated. A periodic
+cell is not: after the minimum-image map only the mean displacement is
+removed. The RMSD limit is `--rmsd-tol` (default `0.05` Angstrom).
+
+The median interval on a Kaplan-Meier curve is Brookmeyer-Crowley on
+the log-log Greenwood band. The median is the smallest `t` with
+`S(t) <= 0.5`.
 
 ## Profiles
 
@@ -69,12 +87,12 @@ denominator.
 
 Dolan-Moré `rho(tau)` is the fraction of problems solved within `tau`
 times the best finite cost. `tau < 1` solves nothing. The summary
-prints `tau = 1` and `tau = 2`.
+prints `tau` of 1, 1.5, 2, 4 and 8.
 
 Moré-Wild `d(alpha)` is the fraction solved with cost at most
 `alpha * (n + 1)`. Without `dim`, `n + 1 = 1`, so `alpha` is a
-force-call budget. The summary prints `alpha = 100` and
-`alpha = 1000`.
+force-call budget. The summary prints `alpha` of 10, 50, 100, 500 and
+1000.
 
 Gould-Scott pairwise fractions are printed only when more than two
 methods are present. A finite cost beats an infinite one at every
@@ -82,29 +100,46 @@ methods are present. A finite cost beats an infinite one at every
 
 ## Paired ratio and stopping
 
-For each `--pair candidate=baseline` and each `(system, seed)` where
-both call counts are positive, the observation is
-`log(calls_candidate / calls_baseline)`, including censored runs.
-`scipy.stats.bootstrap` (`method='BCa'`) returns an interval for the
-median ratio and for the geometric-mean ratio. The generator is NumPy
-`Philox` with key `(0xA341316C4C2F6E9A, 0xC1B54A32B6C7E8D9)`. The
-counter is `(--seed, stream, pair index, 0)`. Stream 2 is the median,
-stream 3 is the geometric mean, stream 1 shuffles systems.
+The target is the win probability over the suite's start distribution.
+A start is one `(system, seed)`.
 
-A system is a win when the median log ratio over its seeds is negative.
-The wins are walked in that Philox order. The boundary is the two-sided
-normal mixture with Hoeffding proxy `V_t = t/4` and `rho = 1`:
+Gehan scoring: the candidate wins when it reached the basin in fewer
+calls than the baseline's observed count (a later baseline success or a
+later baseline censoring). A loss is the mirror image. Both unsolved,
+or a censoring earlier than the other side's success, is indeterminate,
+counted, and dropped from the walk. A fast unconverged candidate
+therefore does not win.
+
+The BCa median and geometric-mean ratio use only starts where both
+runs reached the same basin. The summary prints that `n`. The geometric
+mean is `exp(math.fsum(log ratios) / n)`. The cluster interval
+resamples systems, then starts within each drawn system, through
+`scipy.stats.bootstrap` with a statistic on the cluster indices. The
+i.i.d. interval is printed beside it as a diagnostic (`*_iid_*`).
+
+The generator is NumPy Philox. The fixed key is
+`(0xA341316C4C2F6E9A, 0xC1B54A32B6C7E8D9)` with `--seed` XOR-ed into
+key word 1. Stream and pair index sit in counter words 2 and 3. Words
+0 and 1 are left for draws, so seed `s + 1` is not seed `s` advanced
+by one block.
+
+Informative starts are walked in Philox order, stratified by system:
+systems are shuffled, starts are shuffled within a system, then a
+round robin takes one start from each system. The default boundary is
+the two-sided normal mixture with Hoeffding proxy `V_t = t/4`. `rho`
+minimises the width at `--plan-n` (default 50) and is printed.
+`--boundary betting` switches to the hedged capital process.
 
 ```text
 half-width = sqrt((V_t + rho) * log((V_t + rho) / (rho * alpha^2))) / t
 ```
 
-This is not the betting boundary. The walk stops when the interval
-excludes `0.5 - --margin` (default margin `0`): lower end above that
-value passes, upper end below it fails. The summary prints
-`systems_used`. Several pairs fail the run if any pair fails, and leave
-it undecided if any pair is undecided. A rank-invariance mismatch also
-fails the run. No pairs is undecided.
+The walk stops when the interval excludes `0.5 - --margin` (default
+margin `0`): the lower end above that value passes, the upper end
+below it fails. The summary prints `starts_used` and the per-system
+win, loss, indeterminate and split counts. Several pairs fail the run
+if any pair fails, and leave it undecided if any pair is undecided. A
+rank-invariance mismatch also fails the run. No pairs is undecided.
 
 Exit codes: `0` pass, `1` fail, `2` undecided. A contract error prints
 to stderr and exits `2`.

@@ -35,6 +35,13 @@ def build_parser():
     parser.add_argument("--resamples", type=int, default=9999)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--jobs", type=int, default=1)
+    parser.add_argument("--reference", choices=("auto", "lowest"), default="auto")
+    parser.add_argument("--plan-n", type=int, default=50)
+    parser.add_argument(
+        "--boundary",
+        choices=("normal-mixture", "betting"),
+        default="normal-mixture",
+    )
     parser.add_argument("--plot", default=None, help="write an SVG figure")
     return parser
 
@@ -54,6 +61,9 @@ def main(argv=None):
             resamples=args.resamples,
             seed=args.seed,
             jobs=args.jobs,
+            reference=args.reference,
+            plan_n=args.plan_n,
+            boundary=args.boundary,
         )
     except ContractError as exc:
         print(f"rggate: {exc}", file=sys.stderr)

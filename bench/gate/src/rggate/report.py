@@ -2,8 +2,7 @@
 
 Kaplan-Meier curves are per method. ``--jobs`` may compute those curves
 on a pool, then joins them in method-name order. The BCa resamples and
-the system permutation stay on one thread: scipy's generator is consumed
-in call order, and a pool would change that order.
+the stratified walk stay on one thread.
 """
 
 from collections import defaultdict
@@ -12,15 +11,17 @@ from dataclasses import dataclass, field
 import math
 
 import numpy as np
+from scipy.stats import beta
 
-from rggate.bootstrap import log_call_ratios, ratio_intervals
-from rggate.equivalence import attach_references
+from rggate.bootstrap import paired_intervals
 from rggate.km import kaplan_meier
+from rggate.pairing import classify_pair, row_succeeded
 from rggate.profiles import data_profile, pairwise_profile, performance_profile
-from rggate.sequence import ordered_labels, system_labels, walk
+from rggate.sequence import optimal_rho, stratified_labels, walk, walk_betting
 
-PERF_TAUS = (1.0, 2.0)
-DATA_ALPHAS = (100.0, 1000.0)
+PERF_TAUS = (1.0, 1.5, 2.0, 4.0, 8.0)
+DATA_ALPHAS = (10.0, 50.0, 100.0, 500.0, 1000.0)
+PAIR_TAUS = (1.0, 2.0)
 _EXIT = {"pass": 0, "fail": 1, "undecided": 2}
 
 
@@ -30,7 +31,6 @@ class MethodRow:
     n: int
     success: int
     censored: int
-    different: int
     call_median: float
     call_min: float
     call_max: float
@@ -49,13 +49,21 @@ class SystemRow:
     n: int
     success: int
     censored: int
-    different: int
     call_median: float
     call_min: float
     call_max: float
     wall_median: float
     wall_min: float
     wall_max: float
+
+
+@dataclass
+class SystemPair:
+    system: str
+    wins: int
+    losses: int
+    indeterminate: int
+    splits: int
 
 
 @dataclass
@@ -66,15 +74,28 @@ class PairRow:
     geomean: float
     geomean_low: float
     geomean_high: float
+    geomean_iid_low: float
+    geomean_iid_high: float
     median_ratio: float
     median_low: float
     median_high: float
+    median_iid_low: float
+    median_iid_high: float
     estimate: float
     low: float
     high: float
-    systems_used: int
-    systems: int
+    starts_used: int
+    starts: int
+    wins: int
+    losses: int
+    indeterminate: int
+    splits: int
+    split_n: int
+    split_low: float
+    split_high: float
     decision: str
+    energy_only: bool
+    systems: list
 
 
 @dataclass
@@ -85,7 +106,11 @@ class Report:
     margin: float
     resamples: int
     seed: int
-    different_stationary: int
+    reference: str
+    boundary: str
+    plan_n: int
+    rho: float
+    match: str
     rank_invariance: str
     methods: list
     systems: list
@@ -112,22 +137,22 @@ def _finite_stats(values):
     return mid, ordered[0], ordered[-1]
 
 
-def _collapse(rows, status):
+def _collapse(rows, events):
     """One row per (system, method, seed). Compare thread copies when present."""
     groups = defaultdict(list)
-    for row, label in zip(rows, status):
-        groups[(row.system, row.method, row.seed)].append((row, label))
+    for row, event in zip(rows, events):
+        groups[(row.system, row.method, row.seed)].append((row, event))
     saw_threads = False
     bad = []
     chosen = []
     for key in sorted(groups):
         items = groups[key]
-        group_threads = any(row.threads is not None for row, _label in items)
+        group_threads = any(row.threads is not None for row, _event in items)
         if group_threads:
             saw_threads = True
         if len(items) > 1 and group_threads:
             anchor = items[0][0]
-            for row, _label in items[1:]:
+            for row, _event in items[1:]:
                 same = (
                     row.converged == anchor.converged
                     and row.calls == anchor.calls
@@ -137,7 +162,10 @@ def _collapse(rows, status):
                 if not same:
                     bad.append(key)
                     break
-        items = sorted(items, key=lambda item: (item[0].threads is None, item[0].threads or 0, item[0].line))
+        items = sorted(
+            items,
+            key=lambda item: (item[0].threads is None, item[0].threads or 0, item[0].line),
+        )
         chosen.append(items[0])
     if not saw_threads:
         flag = "na"
@@ -152,8 +180,8 @@ def _km_map(by_method, alpha, jobs):
     names = sorted(by_method)
     payloads = []
     for name in names:
-        times = [row.calls for row, _label in by_method[name]]
-        events = [label == "success" for _row, label in by_method[name]]
+        times = [row.calls for row, _event in by_method[name]]
+        events = [bool(event) for _row, event in by_method[name]]
         payloads.append((times, events))
     if jobs <= 1 or len(names) <= 1:
         curves = [kaplan_meier(times, events, alpha) for times, events in payloads]
@@ -166,12 +194,28 @@ def _km_map(by_method, alpha, jobs):
     return {name: curve for name, curve in zip(names, curves)}
 
 
-def _counts(pairs):
-    n = len(pairs)
-    success = sum(label == "success" for _row, label in pairs)
-    censored = sum(label == "censored" for _row, label in pairs)
-    different = sum(label == "different" for _row, label in pairs)
-    return n, success, censored, different
+def _clopper(successes, trials, alpha):
+    if trials <= 0:
+        return math.nan, math.nan
+    if successes <= 0:
+        low = 0.0
+    else:
+        low = float(beta.ppf(alpha / 2.0, successes, trials - successes + 1))
+    if successes >= trials:
+        high = 1.0
+    else:
+        high = float(beta.ppf(1.0 - alpha / 2.0, successes + 1, trials - successes))
+    return low, high
+
+
+def _lowest(rows):
+    best = {}
+    for row in rows:
+        if row.converged and math.isfinite(row.energy):
+            current = best.get(row.system)
+            if current is None or row.energy < current:
+                best[row.system] = row.energy
+    return best
 
 
 def analyze(
@@ -184,111 +228,92 @@ def analyze(
     resamples=9999,
     seed=1,
     jobs=1,
+    reference="auto",
+    plan_n=50,
+    boundary="normal-mixture",
 ):
     """Run equivalence, censoring, profiles, BCa, and the stopping rule."""
     if jobs < 1:
         raise ValueError("jobs must be >= 1")
-    status = attach_references(rows, e_tol, rmsd_tol)
-    chosen, rank_flag = _collapse(rows, status)
+    if reference not in ("auto", "lowest"):
+        raise ValueError("reference must be auto or lowest")
+    if boundary not in ("normal-mixture", "betting"):
+        raise ValueError("boundary must be normal-mixture or betting")
+    if plan_n < 1:
+        raise ValueError("plan_n must be positive")
+    rho = optimal_rho(plan_n, alpha)
+    lowest = _lowest(rows)
+    cache = {}
+    events = [
+        row_succeeded(row, reference, lowest.get(row.system), cache, e_tol, rmsd_tol) for row in rows
+    ]
+    chosen, rank_flag = _collapse(rows, events)
     by_method = defaultdict(list)
     by_system = defaultdict(list)
-    for row, label in chosen:
-        by_method[row.method].append((row, label))
-        by_system[(row.system, row.method)].append((row, label))
+    for row, event in chosen:
+        by_method[row.method].append((row, event))
+        by_system[(row.system, row.method)].append((row, event))
 
     km = _km_map(by_method, alpha, jobs)
     method_rows = []
     for name in sorted(by_method):
         items = by_method[name]
-        n, success, censored, different = _counts(items)
-        call_mid, call_lo, call_hi = _finite_stats([row.calls for row, _label in items])
-        wall_mid, wall_lo, wall_hi = _finite_stats([row.wall_s for row, _label in items])
-        curve = km[name]
+        success = sum(bool(event) for _row, event in items)
         method_rows.append(
             MethodRow(
                 name,
-                n,
+                len(items),
                 success,
-                censored,
-                different,
-                call_mid,
-                call_lo,
-                call_hi,
-                wall_mid,
-                wall_lo,
-                wall_hi,
-                curve["median"],
-                curve["median_low"],
-                curve["median_high"],
+                len(items) - success,
+                *_finite_stats([row.calls for row, _event in items]),
+                *_finite_stats([row.wall_s for row, _event in items]),
+                km[name]["median"],
+                km[name]["median_low"],
+                km[name]["median_high"],
             )
         )
     system_rows = []
     for key in sorted(by_system):
         items = by_system[key]
-        n, success, censored, different = _counts(items)
-        call_mid, call_lo, call_hi = _finite_stats([row.calls for row, _label in items])
-        wall_mid, wall_lo, wall_hi = _finite_stats([row.wall_s for row, _label in items])
+        success = sum(bool(event) for _row, event in items)
         system_rows.append(
             SystemRow(
                 key[0],
                 key[1],
-                n,
+                len(items),
                 success,
-                censored,
-                different,
-                call_mid,
-                call_lo,
-                call_hi,
-                wall_mid,
-                wall_lo,
-                wall_hi,
+                len(items) - success,
+                *_finite_stats([row.calls for row, _event in items]),
+                *_finite_stats([row.wall_s for row, _event in items]),
             )
         )
 
-    problems = sorted({(row.system, row.seed) for row, _label in chosen})
-    methods = sorted({row.method for row, _label in chosen})
+    flat_rows = [row for row, _event in chosen]
+    problems = sorted({(row.system, row.seed) for row in flat_rows})
+    methods = sorted({row.method for row in flat_rows})
     solved = {}
     dims = {}
-    for row, label in chosen:
+    for row, event in chosen:
         problem = (row.system, row.seed)
         if row.dim is not None:
             dims.setdefault(problem, row.dim)
-        if label == "success":
+        if event:
             previous = solved.get((problem, row.method))
             if previous is None or row.calls < previous:
                 solved[(problem, row.method)] = row.calls
     perf = performance_profile(problems, methods, solved, PERF_TAUS)
     data = data_profile(problems, methods, solved, dims, DATA_ALPHAS)
-    pairwise = pairwise_profile(problems, methods, solved, PERF_TAUS)
+    pairwise = pairwise_profile(problems, methods, solved, PAIR_TAUS)
 
-    flat_rows = [row for row, _label in chosen]
     pair_rows = []
+    any_geometry = False
     for index, (candidate, baseline) in enumerate(pairs):
-        ratios = log_call_ratios(flat_rows, candidate, baseline)
-        logs = np.array([item[2] for item in ratios], dtype=float)
-        interval = ratio_intervals(logs, seed, resamples, 1.0 - alpha, index)
-        labels = system_labels(ratios)
-        ordered = ordered_labels(labels, seed, index)
-        decision = walk(ordered, alpha, margin)
+        records = classify_pair(flat_rows, candidate, baseline, e_tol, rmsd_tol, reference)
         pair_rows.append(
-            PairRow(
-                candidate,
-                baseline,
-                interval["n"],
-                interval["geomean"],
-                interval["geomean_low"],
-                interval["geomean_high"],
-                interval["median_ratio"],
-                interval["median_low"],
-                interval["median_high"],
-                decision["estimate"],
-                decision["low"],
-                decision["high"],
-                decision["systems_used"],
-                len(labels),
-                decision["decision"],
-            )
+            _pair_row(candidate, baseline, records, seed, index, resamples, alpha, margin, rho, boundary)
         )
+        if records and not all(record.energy_only for record in records):
+            any_geometry = True
 
     if any(row.decision == "fail" for row in pair_rows) or rank_flag == "fail":
         overall = "fail"
@@ -296,7 +321,6 @@ def analyze(
         overall = "undecided"
     else:
         overall = "pass"
-    different = sum(row.different for row in system_rows)
     return Report(
         e_tol=e_tol,
         rmsd_tol=rmsd_tol,
@@ -304,7 +328,11 @@ def analyze(
         margin=margin,
         resamples=resamples,
         seed=seed,
-        different_stationary=different,
+        reference=reference,
+        boundary=boundary,
+        plan_n=plan_n,
+        rho=rho,
+        match="aligned" if any_geometry else "energy-only",
         rank_invariance=rank_flag,
         methods=method_rows,
         systems=system_rows,
@@ -318,6 +346,73 @@ def analyze(
         km=km,
         decision=overall,
         exit_code=_EXIT[overall],
+    )
+
+
+def _pair_row(candidate, baseline, records, seed, index, resamples, alpha, margin, rho, boundary):
+    wins = [record for record in records if record.kind == "win"]
+    losses = [record for record in records if record.kind == "loss"]
+    indeterminate = [record for record in records if record.kind == "indeterminate"]
+    splits = [record for record in records if record.kind == "split"]
+    split_n = len(records)
+    split_low, split_high = _clopper(len(splits), split_n, alpha)
+    grouped = defaultdict(list)
+    for record in records:
+        if record.log_ratio is not None and math.isfinite(record.log_ratio):
+            grouped[record.system].append(record.log_ratio)
+    groups = [np.asarray(grouped[system], dtype=float) for system in sorted(grouped)]
+    interval = paired_intervals(groups, seed, resamples, 1.0 - alpha, index)
+    walk_records = [(record.system, 1 if record.kind == "win" else 0) for record in wins + losses]
+    ordered = stratified_labels(walk_records, seed, index)
+    if boundary == "betting":
+        decision = walk_betting(ordered, alpha, margin)
+    else:
+        decision = walk(ordered, alpha, margin, rho)
+    by_system = defaultdict(lambda: {"wins": 0, "losses": 0, "indeterminate": 0, "splits": 0})
+    for record in records:
+        bucket = by_system[record.system]
+        if record.kind == "win":
+            bucket["wins"] += 1
+        elif record.kind == "loss":
+            bucket["losses"] += 1
+        elif record.kind == "split":
+            bucket["splits"] += 1
+        else:
+            bucket["indeterminate"] += 1
+    system_rows = [
+        SystemPair(system, counts["wins"], counts["losses"], counts["indeterminate"], counts["splits"])
+        for system, counts in sorted(by_system.items())
+    ]
+    energy_only = bool(records) and all(record.energy_only for record in records)
+    return PairRow(
+        candidate,
+        baseline,
+        interval["n"],
+        interval["geomean"],
+        interval["cluster_geomean_low"],
+        interval["cluster_geomean_high"],
+        interval["geomean_low"],
+        interval["geomean_high"],
+        interval["median_ratio"],
+        interval["cluster_median_low"],
+        interval["cluster_median_high"],
+        interval["median_low"],
+        interval["median_high"],
+        decision["estimate"],
+        decision["low"],
+        decision["high"],
+        decision["starts_used"],
+        len(ordered),
+        len(wins),
+        len(losses),
+        len(indeterminate),
+        len(splits),
+        split_n,
+        split_low,
+        split_high,
+        decision["decision"],
+        energy_only,
+        system_rows,
     )
 
 
@@ -351,9 +446,13 @@ def render(report):
                 f"margin={_num(report.margin)}",
                 f"resamples={report.resamples}",
                 f"seed={report.seed}",
+                f"reference={report.reference}",
+                f"boundary={report.boundary}",
+                f"plan_n={report.plan_n}",
+                f"rho={_num(report.rho)}",
+                f"match={report.match}",
             ]
         ),
-        f"different_stationary={report.different_stationary}",
         f"rank_invariance={report.rank_invariance}",
         "",
         " ".join(
@@ -362,7 +461,6 @@ def render(report):
                 "n",
                 "success",
                 "censored",
-                "different",
                 "success_rate",
                 "call_median",
                 "call_min",
@@ -384,7 +482,6 @@ def render(report):
                     str(row.n),
                     str(row.success),
                     str(row.censored),
-                    str(row.different),
                     _rate(row.success, row.n),
                     _num(row.call_median),
                     _num(row.call_min),
@@ -407,7 +504,6 @@ def render(report):
                 "n",
                 "success",
                 "censored",
-                "different",
                 "call_median",
                 "call_min",
                 "call_max",
@@ -426,7 +522,6 @@ def render(report):
                     str(row.n),
                     str(row.success),
                     str(row.censored),
-                    str(row.different),
                     _num(row.call_median),
                     _num(row.call_min),
                     _num(row.call_max),
@@ -437,28 +532,37 @@ def render(report):
             )
         )
     lines.append("")
-    lines.append(
-        " ".join(
-            [
-                "pair",
-                "candidate",
-                "baseline",
-                "n",
-                "geomean",
-                "geomean_low",
-                "geomean_high",
-                "median_ratio",
-                "median_low",
-                "median_high",
-                "p_hat",
-                "cs_low",
-                "cs_high",
-                "systems_used",
-                "systems",
-                "decision",
-            ]
-        )
-    )
+    header = [
+        "pair",
+        "candidate",
+        "baseline",
+        "n",
+        "geomean",
+        "geomean_low",
+        "geomean_high",
+        "geomean_iid_low",
+        "geomean_iid_high",
+        "median_ratio",
+        "median_low",
+        "median_high",
+        "median_iid_low",
+        "median_iid_high",
+        "p_hat",
+        "cs_low",
+        "cs_high",
+        "starts_used",
+        "starts",
+        "wins",
+        "losses",
+        "indeterminate",
+        "splits",
+        "split_n",
+        "split_low",
+        "split_high",
+        "energy_only",
+        "decision",
+    ]
+    lines.append(" ".join(header))
     for row in report.pairs:
         lines.append(
             " ".join(
@@ -470,18 +574,45 @@ def render(report):
                     _num(row.geomean),
                     _num(row.geomean_low),
                     _num(row.geomean_high),
+                    _num(row.geomean_iid_low),
+                    _num(row.geomean_iid_high),
                     _num(row.median_ratio),
                     _num(row.median_low),
                     _num(row.median_high),
+                    _num(row.median_iid_low),
+                    _num(row.median_iid_high),
                     _num(row.estimate),
                     _num(row.low),
                     _num(row.high),
-                    str(row.systems_used),
-                    str(row.systems),
+                    str(row.starts_used),
+                    str(row.starts),
+                    str(row.wins),
+                    str(row.losses),
+                    str(row.indeterminate),
+                    str(row.splits),
+                    str(row.split_n),
+                    _num(row.split_low),
+                    _num(row.split_high),
+                    "yes" if row.energy_only else "no",
                     row.decision,
                 ]
             )
         )
+        for system in row.systems:
+            lines.append(
+                " ".join(
+                    [
+                        "start_system",
+                        system.system,
+                        row.candidate,
+                        row.baseline,
+                        f"wins={system.wins}",
+                        f"losses={system.losses}",
+                        f"indeterminate={system.indeterminate}",
+                        f"splits={system.splits}",
+                    ]
+                )
+            )
     lines.append("")
     for tau, values in zip(report.perf_taus, report.perf):
         for name, value in zip(report.method_names, values):
@@ -490,9 +621,7 @@ def render(report):
         for name, value in zip(report.method_names, values):
             lines.append(f"data alpha={_num(alpha)} {name} {_num(value)}")
     for left, right, tau, fraction in report.pairwise:
-        lines.append(
-            f"pairwise tau={_num(tau)} {left} {right} {_num(fraction)}"
-        )
+        lines.append(f"pairwise tau={_num(tau)} {left} {right} {_num(fraction)}")
     lines.append("")
     lines.append(f"decision={report.decision}")
     lines.append("")

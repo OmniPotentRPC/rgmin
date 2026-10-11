@@ -55,6 +55,7 @@ ISBN). Do not invent DOIs.
 | Kaplan–Meier 1958 | 10.1080/01621459.1958.10501452 | Nonparametric Estimation from Incomplete Observations |
 | Efron BCa 1987 | 10.1080/01621459.1987.10478410 | Better Bootstrap Confidence Intervals |
 | Howard confidence sequences 2021 | 10.1214/20-AOS1991 | Time-uniform, nonparametric, nonasymptotic confidence sequences |
+| Waudby-Smith betting CS 2024 | 10.1093/jrsssb/qkad009 | Estimating means of bounded random variables by betting |
 | Wald sequential tests 1945 | 10.1214/aoms/1177731118 | Sequential Tests of Statistical Hypotheses |
 
 Polak-Ribiere 1969 and Hestenes-Stiefel 1952: cite the paper/book

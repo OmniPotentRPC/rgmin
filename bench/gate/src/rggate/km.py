@@ -3,10 +3,10 @@
 Unconverged runs and runs at a different stationary point are
 right-censored at the call count they reached. Events at time ``t`` are
 removed before censorings at ``t``, so a tie stays in the risk set.
-Pointwise bands are the Greenwood variance with a normal quantile,
-clipped to ``[0, 1]``. The median is the smallest ``t`` with
-``S(t) <= 0.5``. Its interval is the set of times whose Greenwood band
-still covers 0.5.
+Pointwise bands use the log-log transform of the Greenwood variance.
+The median is the smallest ``t`` with ``S(t) <= 0.5``. Its interval is
+the Brookmeyer-Crowley set: the times whose log-log band still covers
+0.5.
 """
 
 import math
@@ -47,12 +47,7 @@ def kaplan_meier(times, events, alpha=0.05):
         elif d > 0 and n_risk == d:
             survival = 0.0
             greenwood = math.inf
-        var = (survival ** 2) * greenwood if math.isfinite(greenwood) else math.inf
-        se = math.sqrt(var) if math.isfinite(var) else math.inf
-        low = 0.0 if not math.isfinite(se) else max(0.0, survival - z * se)
-        high = 1.0 if not math.isfinite(se) else min(1.0, survival + z * se)
-        if not math.isfinite(survival):
-            low, high = 0.0, 1.0
+        low, high = _loglog_band(survival, greenwood, z)
         curve.append((float(t), float(survival), float(low), float(high), n_risk, d))
         at_risk_end = n_risk - int(np.count_nonzero(at))
     del at_risk_end
@@ -63,6 +58,22 @@ def kaplan_meier(times, events, alpha=0.05):
         "median_low": median_low,
         "median_high": median_high,
     }
+
+
+def _loglog_band(survival, greenwood, z):
+    """Brookmeyer-Crowley band for one survival value."""
+    if not math.isfinite(survival) or survival <= 0.0:
+        return 0.0, 0.0
+    if survival >= 1.0 or not math.isfinite(greenwood):
+        return (1.0, 1.0) if survival >= 1.0 and math.isfinite(greenwood) else (0.0, 1.0)
+    if greenwood == 0.0:
+        return float(survival), float(survival)
+    log_s = math.log(survival)
+    theta = math.log(-log_s)
+    se = math.sqrt(greenwood) / abs(log_s)
+    low = math.exp(-math.exp(theta + z * se))
+    high = math.exp(-math.exp(theta - z * se))
+    return float(low), float(high)
 
 
 def _median(curve):

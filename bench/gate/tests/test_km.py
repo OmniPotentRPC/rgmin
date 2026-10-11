@@ -3,8 +3,18 @@
 import math
 
 import pytest
+from scipy.stats import norm
 
 from rggate.km import kaplan_meier
+
+
+def _loglog(survival, greenwood, z):
+    log_s = math.log(survival)
+    theta = math.log(-log_s)
+    se = math.sqrt(greenwood) / abs(log_s)
+    low = math.exp(-math.exp(theta + z * se))
+    high = math.exp(-math.exp(theta - z * se))
+    return low, high
 
 
 def test_hand_example():
@@ -25,15 +35,16 @@ def test_hand_example():
     assert [point[5] for point in result["curve"]] == [1, 0, 1, 1, 0]
     assert [point[4] for point in result["curve"]] == [5, 4, 3, 2, 1]
     assert result["median"] == 4
-    greenwood = 1.0 / (5 * 4) + 1.0 / (3 * 2) + 1.0 / (2 * 1)
-    se = math.sqrt((expected[3] ** 2) * greenwood)
-    from scipy.stats import norm
-
+    greenwood = [1.0 / (5 * 4)]
+    greenwood.append(greenwood[-1])
+    greenwood.append(greenwood[-1] + 1.0 / (3 * 2))
+    greenwood.append(greenwood[-1] + 1.0 / (2 * 1))
+    greenwood.append(greenwood[-1])
     z = float(norm.ppf(0.975))
-    low = max(0.0, expected[3] - z * se)
-    high = min(1.0, expected[3] + z * se)
-    _t, _s, band_low, band_high, _n, _d = result["curve"][3]
-    assert band_low == pytest.approx(low)
-    assert band_high == pytest.approx(high)
-    assert result["median_low"] == 1
-    assert result["median_high"] == 5
+    bands = [_loglog(s, g, z) for s, g in zip(expected, greenwood)]
+    for point, band in zip(result["curve"], bands):
+        assert point[2] == pytest.approx(band[0])
+        assert point[3] == pytest.approx(band[1])
+    cover = [point[0] for point, band in zip(result["curve"], bands) if band[0] <= 0.5 <= band[1]]
+    assert result["median_low"] == cover[0]
+    assert result["median_high"] == cover[-1]
