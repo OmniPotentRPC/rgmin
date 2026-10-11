@@ -11,7 +11,6 @@
 
 #include "../rgmin.h"
 
-#include <array>
 #include <atomic>
 #include <cctype>
 #include <cmath>
@@ -630,6 +629,7 @@ public:
     static SolverConfig build(std::string_view method,
                               std::vector<std::pair<std::string, std::string>> const& text,
                               std::vector<std::pair<std::string, double>> const& numbers,
+                              std::vector<std::pair<std::string, long long>> const& integers,
                               std::vector<std::pair<std::string, bool>> const& flags);
 
     Method method() const noexcept { return method_; }
@@ -762,11 +762,28 @@ inline void require_finite(std::string const& key, double value) {
     }
 }
 
+inline bool is_count_option(std::string const& key) {
+    return key == "memory" || key == "maxiter" || key == "linesearch_maxiter" ||
+           key == "extra_updates";
+}
+
+inline std::size_t require_count(std::string const& key, long long value, long long min_value) {
+    if (value < min_value) {
+        throw std::invalid_argument(key + " must be >= " + std::to_string(min_value));
+    }
+    if (static_cast<unsigned long long>(value) >
+        static_cast<unsigned long long>(std::numeric_limits<std::size_t>::max())) {
+        throw std::invalid_argument(key + " is out of range");
+    }
+    return static_cast<std::size_t>(value);
+}
+
 }  // namespace detail
 
 inline SolverConfig SolverConfig::build(
     std::string_view method, std::vector<std::pair<std::string, std::string>> const& text,
     std::vector<std::pair<std::string, double>> const& numbers,
+    std::vector<std::pair<std::string, long long>> const& integers,
     std::vector<std::pair<std::string, bool>> const& flags) {
     SolverConfig cfg;
     cfg.control_.maxiter = 100;
@@ -827,26 +844,50 @@ inline SolverConfig SolverConfig::build(
         if (key == "neb_guards") cfg.neb_guards_ = item.second;
         else if (key == "periodic") cfg.periodic_ = item.second;
         else if (key == "project_rigid") cfg.project_rigid_ = item.second;
-        else {
+        else if (detail::is_count_option(key)) {
+            throw std::invalid_argument(key + " must be an int");
+        } else {
             throw std::invalid_argument(key + " must be a number or a string");
+        }
+    }
+    for (auto const& item : integers) {
+        std::string key = detail::canon_token(item.first);
+        detail::require_known(key);
+        if (key == "memory") {
+            cfg.control_.memory = detail::require_count(key, item.second, 0);
+        } else if (key == "maxiter") {
+            cfg.control_.maxiter = detail::require_count(key, item.second, 0);
+        } else if (key == "linesearch_maxiter") {
+            cfg.linesearch_maxiter_ = detail::require_count(key, item.second, 1);
+        } else if (key == "extra_updates") {
+            cfg.extra_updates_ = detail::require_count(key, item.second, 0);
+        } else if (key == "gtol" || key == "istep" || key == "maxmove" || key == "noise_eps" ||
+                   key == "noise_c" || key == "c1" || key == "c2" || key == "atom_maxmove" ||
+                   key == "maxstep" || key == "cautious_eps" || key == "cautious_alpha" ||
+                   key == "objective_roundoff") {
+            double value = static_cast<double>(item.second);
+            detail::require_finite(key, value);
+            if (key == "gtol") cfg.control_.gtol = value;
+            else if (key == "istep") cfg.control_.istep = value;
+            else if (key == "maxmove") cfg.control_.maxmove = value;
+            else if (key == "noise_eps") cfg.control_.noise_eps = value;
+            else if (key == "noise_c") cfg.control_.noise_c = value;
+            else if (key == "c1") cfg.c1_ = value;
+            else if (key == "c2") cfg.c2_ = value;
+            else if (key == "atom_maxmove" || key == "maxstep") cfg.atom_maxmove_ = value;
+            else if (key == "cautious_eps") cfg.cautious_eps_ = value;
+            else if (key == "cautious_alpha") cfg.cautious_alpha_ = value;
+            else cfg.objective_roundoff_ = value;
+        } else {
+            throw std::invalid_argument(key + " must be a string or a flag");
         }
     }
     for (auto const& item : numbers) {
         std::string key = detail::canon_token(item.first);
         detail::require_known(key);
         detail::require_finite(key, item.second);
-        if (key == "memory") {
-            if (item.second < 0.0) throw std::invalid_argument("memory must be >= 0");
-            cfg.control_.memory = static_cast<std::size_t>(item.second);
-        } else if (key == "maxiter") {
-            if (item.second < 0.0) throw std::invalid_argument("maxiter must be >= 0");
-            cfg.control_.maxiter = static_cast<std::size_t>(item.second);
-        } else if (key == "linesearch_maxiter") {
-            if (item.second < 1.0) throw std::invalid_argument("linesearch_maxiter must be >= 1");
-            cfg.linesearch_maxiter_ = static_cast<std::size_t>(item.second);
-        } else if (key == "extra_updates") {
-            if (item.second < 0.0) throw std::invalid_argument("extra_updates must be >= 0");
-            cfg.extra_updates_ = static_cast<std::size_t>(item.second);
+        if (detail::is_count_option(key)) {
+            throw std::invalid_argument(key + " must be an int");
         } else if (key == "gtol") cfg.control_.gtol = item.second;
         else if (key == "istep") cfg.control_.istep = item.second;
         else if (key == "maxmove") cfg.control_.maxmove = item.second;
