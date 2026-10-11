@@ -48,9 +48,17 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
   GIT_TAG v0.6.1
 )
-# Corrosion 0.6.1 names the cargo target directory from the crate path
-# relative to its grandparent. When that grandparent is the filesystem
-# root the name stays absolute and cargo is asked to write under `/`.
+# Corrosion 0.6.1 names the cargo target directory by stripping the
+# crate's grandparent from its parent:
+#   string(REPLACE "${grandparent_path}/" "" cargo_folder_name "${parent_path}")
+# This tree is checked out at /workspace, so the grandparent is `/`.
+# The replace then leaves cargo_folder_name absolute (`/workspace`).
+# cmake_path(APPEND) treats an absolute component as a new root, and
+# cargo is asked to create `/workspace_<hash>` (locally
+# `/workspace_c4b44...`). That directory is not writable, so configure
+# fails with "Permission denied" while creating the cargo target dir.
+# When the spliced name is still absolute, keep only its last component.
+# A nested CI checkout has a relative name, and this splice does nothing.
 FetchContent_GetProperties(corrosion)
 if(NOT corrosion_POPULATED)
   FetchContent_Populate(corrosion)
