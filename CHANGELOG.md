@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `bench_gate` compares repeated solver runs. A run is solved when the
+  decrease meets the Moré and Wild test. Performance profiles and data
+  profiles summarize solved runs. The paired gate reports fewer force
+  calls only when the one-sided Wilcoxon test and the bootstrap
+  interval agree, and it rejects a candidate that stops converging on
+  a trial the baseline solved. Moré and Wild, SIAM J. Optim. 20, 172
+  (2009), https://doi.org/10.1137/080724083. Dolan and Moré, Math.
+  Program. 91, 201 (2002), https://doi.org/10.1007/s101070100263.
+  Wilcoxon, Biometrics Bulletin 1, 80 (1945),
+  https://doi.org/10.2307/3001968. Efron, Ann. Statist. 7, 1 (1979),
+  https://doi.org/10.1214/aos/1176344552.
 - Pulay residual subspace (`Method::Diis`, C `RGMIN_DIIS`, ABI minor 30).
   Coefficients on the stored gradients sum to one and minimize the
   combined residual. `memory` 0 keeps 6 pairs. One pair takes a

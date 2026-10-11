@@ -30,6 +30,8 @@ pub mod nlcg;
 mod accept;
 mod adam;
 mod bb;
+/// Repeated-run comparison of solvers: solve test, profiles, paired gate.
+pub mod bench_gate;
 #[cfg(feature = "highs")]
 mod box_objective;
 mod control;
@@ -103,6 +105,10 @@ pub mod vecops;
 
 pub use accept::Accept;
 pub use adam::minimize_adam;
+pub use bench_gate::{
+    BenchRow, CallClaim, GateError, GateOpts, GateReport, Trial, data_profile, gate_bench,
+    more_wild_solved, paired_gate, parse_bench_csv, performance_profile, wilcoxon_tails,
+};
 pub use control::Control;
 pub use dlaf_kind::DlaFutureParams;
 pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};

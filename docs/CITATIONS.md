@@ -48,6 +48,10 @@ ISBN). Do not invent DOIs.
 | Conn–Gould–Toint 2000 | 10.1137/1.9780898719857 | Trust Region Methods |
 | Li–Fukushima cautious BFGS 2001 | 10.1137/S1052623499354242 | On the Global Convergence of the BFGS Method for Nonconvex Unconstrained Optimization Problems |
 | Møller SCG 1993 | 10.1016/S0893-6080(05)80056-5 | A scaled conjugate gradient algorithm for fast supervised learning |
+| Dolan–Moré performance profiles | 10.1007/s101070100263 | Benchmarking optimization software with performance profiles |
+| Moré–Wild data profiles | 10.1137/080724083 | Benchmarking Derivative-Free Optimization Algorithms |
+| Wilcoxon signed-rank | 10.2307/3001968 | Individual Comparisons by Ranking Methods |
+| Efron bootstrap 1979 | 10.1214/aos/1176344552 | Bootstrap Methods: Another Look at the Jackknife |
 
 Polak-Ribiere 1969 and Hestenes-Stiefel 1952: cite the paper/book
 title in rustdoc if no DOI is on this list. Do not mint a DOI.
