@@ -72,6 +72,8 @@ pub enum LineSearch {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LineSearchOptions {
     relative_objective_error: Option<f64>,
+    /// Added to the Armijo right-hand side. Zero keeps the exact test.
+    armijo_slack: f64,
 }
 
 impl LineSearchOptions {
@@ -83,7 +85,32 @@ impl LineSearchOptions {
     pub fn with_objective_roundoff(relative: f64) -> Option<Self> {
         (relative.is_finite() && relative >= 0.0).then_some(Self {
             relative_objective_error: Some(relative),
+            armijo_slack: 0.0,
         })
+    }
+
+    /// Relax Armijo by an absolute slack.
+    ///
+    /// Shi, Xie, Byrd and Nocedal add `2 eps_f` (Algorithm 1). A non-positive
+    /// or non-finite slack leaves the exact test in place.
+    ///
+    /// Shi, Xie, Byrd, and Nocedal, SIAM J. Optim. 32, 29 (2022),
+    /// <https://doi.org/10.1137/20M1373190>.
+    pub fn with_armijo_slack(mut self, slack: f64) -> Self {
+        self.armijo_slack = if slack.is_finite() && slack > 0.0 {
+            slack
+        } else {
+            0.0
+        };
+        self
+    }
+
+    pub(crate) fn holds_armijo(self, phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> bool {
+        if self.armijo_slack == 0.0 {
+            conditions::armijo(phi, phi0, alpha, dphi0, c)
+        } else {
+            phi <= phi0 + c * alpha * dphi0 + self.armijo_slack
+        }
     }
 
     pub(crate) fn accepts_approximate_wolfe(

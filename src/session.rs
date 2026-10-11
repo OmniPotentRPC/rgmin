@@ -622,6 +622,36 @@ impl Solver {
         }
     }
 
+    /// Absolute value and gradient noise for an L-BFGS session.
+    ///
+    /// Other methods ignore it. A zero model leaves the exact Armijo test
+    /// and the accepted pair unchanged.
+    ///
+    /// Shi, Xie, Byrd, and Nocedal, SIAM J. Optim. 32, 29 (2022),
+    /// <https://doi.org/10.1137/20M1373190>.
+    pub fn set_lbfgs_noise(&mut self, noise: crate::lbfgs::NoiseModel) {
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.noise = noise;
+        }
+    }
+
+    /// Consecutive failed L-BFGS line searches that report
+    /// [`Status::StepTolerance`]. Zero disables the stop. The default is
+    /// [`crate::lbfgs::DEFAULT_LINE_FAILURES`].
+    pub fn set_lbfgs_failure_limit(&mut self, limit: usize) {
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.max_line_failures = limit;
+        }
+    }
+
+    /// Extra gradients spent lengthening short L-BFGS pairs.
+    pub fn lbfgs_lengthened(&self) -> usize {
+        match &self.inner {
+            Inner::Lbfgs(solver) => solver.lengthened_evals(),
+            _ => 0,
+        }
+    }
+
     /// Enable the opt-in direct NEB guards and empty-memory scale 0.01.
     /// Other methods ignore this setting. Disabling restores scale one.
     pub fn set_lbfgs_neb_guards(&mut self, enabled: bool) {
@@ -2159,7 +2189,19 @@ impl Solver {
         if let (Inner::Lbfgs(solver), Some((s, y, gn))) = (&mut self.inner, pair) {
             // Only the final transported pair can enter the history. A
             // refused pair leaves every retained pair in place.
-            solver.push_pair(s, y, Some(gn));
+            // A positive eps_g lengthens a short Euclidean pair. The zero
+            // model skips that probe, so the stored pair is the one above.
+            let stored = if self.manifold == ManifoldKind::Euclidean && solver.noise.eps_g > 0.0 {
+                solver.lengthen_along(&start, &s, &gold, |point| {
+                    Some(obj.value_and_gradient(point).1)
+                })
+            } else {
+                None
+            };
+            match stored {
+                Some((s_long, y_long)) => solver.push_pair(s_long, y_long, Some(gn)),
+                None => solver.push_pair(s, y, Some(gn)),
+            }
         }
 
         self.remember(x, value, &grad);
@@ -2170,6 +2212,10 @@ impl Solver {
             .classify(grad_norm, self.free_len(obj.bounds()));
         if energy_stall && status == Status::Iterating {
             status = Status::NoiseFloor;
+        } else if status == Status::Iterating
+            && matches!(&self.inner, Inner::Lbfgs(solver) if solver.line_search_blocked())
+        {
+            status = Status::StepTolerance;
         }
         Ok(Report {
             value,

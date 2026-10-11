@@ -1,0 +1,58 @@
+#+TITLE: Noise-tolerant L-BFGS
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Noise-tolerant L-BFGS
+
+Noisy energies make the exact Armijo test reject a useful step, and a
+short step makes ~y~ smaller than the gradient noise. The session
+keeps the strong Wolfe curvature test and, when asked, relaxes only
+the decrease test. Shi, Xie, Byrd, and Nocedal, SIAM J. Optim. 32, 29
+(2022), https://doi.org/10.1137/20M1373190. The zero model is the
+default and does not change a noise-free run.
+
+** Set the noise
+
+#+begin_src rust
+use rgmin::{Control, Method, NoiseModel, Solver};
+
+let mut solver = Solver::new(Method::lbfgs(), Control::default(), n);
+solver.set_lbfgs_noise(NoiseModel::with_noise(eps_f, eps_g));
+#+end_src
+
+~eps_f~ is the noise of the value. ~eps_g~ is the noise of one
+gradient component. ~with_noise~ stores a non-finite or negative
+component as zero.
+
+The Armijo test becomes ~f(x + a p) <= f(x) + c1 a g·p + 2 eps_f~.
+The curvature test is unchanged. Xie, Byrd, and Nocedal, SIAM J.
+Optim. 30, 182 (2020), https://doi.org/10.1137/19M1240794, and
+Berahas, Byrd, and Nocedal, SIAM J. Optim. 29, 965 (2019),
+https://doi.org/10.1137/18M1177718, are the earlier noisy BFGS
+analyses this step follows.
+
+** Lengthen a short pair
+
+~mu_est~ is ~||y|| / ||s||~ of the newest stored pair. An empty
+memory uses 1, the curvature of ~H0 = I~. The noise-safe length is
+
+  l = 2 eps_g / mu_est.
+
+The factor 2 makes the true gradient change along that length twice
+the gradient noise. When the accepted step is shorter than ~l~, the
+session evaluates one extra gradient at ~x + l s / ||s||~ and stores
+that displacement. The iterate stays at the accepted step.
+~Solver::lbfgs_lengthened~ counts those extra gradients. A zero
+~eps_g~ does not evaluate them. The probe is Euclidean. A manifold
+session keeps the transported pair.
+
+** Stop
+
+~Solver::set_lbfgs_failure_limit~ sets how many failed line searches
+in a row end the run. The default is 5. The report is
+~Status::StepTolerance~. Zero disables the stop.
+
+A ~NoiseFloor~ with ~eps_f~ set ends the run as ~Status::NoiseFloor~
+when no trial decreases the value by ~c * eps_f~. The point stays
+where it was before that search. The gradient floor from the same
+control is unchanged. See [[file:noise.org][the noise how-to]].

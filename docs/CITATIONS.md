@@ -20,6 +20,9 @@ ISBN). Do not invent DOIs.
 | Fletcher 1970 (BFGS) | 10.1093/comjnl/13.3.317 | A new approach to variable metric algorithms |
 | Shanno 1970 | https://doi.org/10.1090/s0025-5718-1970-0274029-x | Conditioning of quasi-Newton methods for function minimization |
 | Wolfe 1969 | 10.1137/1011036 | Convergence Conditions for Ascent Methods |
+| Shi-Xie-Byrd-Nocedal 2022 | 10.1137/20M1373190 | A Noise-Tolerant Quasi-Newton Algorithm for Unconstrained Optimization |
+| Xie-Byrd-Nocedal 2020 | 10.1137/19M1240794 | Analysis of the BFGS Method with Errors |
+| Berahas-Byrd-Nocedal 2019 | 10.1137/18M1177718 | Derivative-Free Optimization of Noisy Functions via Quasi-Newton Methods |
 | Goldstein 1964 | 10.1007/BF00927673 | Multiplier and gradient methods |
 | Nocedal-Wright | 10.1007/978-0-387-40065-5 | Numerical Optimization |
 | Adam | 10.48550/arXiv.1412.6980 | Adam: A Method for Stochastic Optimization |

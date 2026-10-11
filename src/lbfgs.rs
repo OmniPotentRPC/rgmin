@@ -25,6 +25,60 @@ use crate::report::Report;
 use crate::step::{energy_noise_report, l2, qn_istep, take_step_with_options};
 use eindir_core::{DifferentiableObjective, Objective};
 
+/// Consecutive line-search failures that end an L-BFGS session.
+///
+/// A smooth problem accepts a step long before this bound. A run whose
+/// line search rejects every trial, as f32-rounded forces do, used to
+/// spend the iteration budget. Zero disables the stop.
+pub const DEFAULT_LINE_FAILURES: usize = 5;
+
+/// Absolute noise on the value and the gradient for one L-BFGS session.
+///
+/// Both fields default to zero. The zero pair does not change the Armijo
+/// test, does not lengthen a pair, and does not allocate.
+///
+/// Shi, Xie, Byrd, and Nocedal, SIAM J. Optim. 32, 29 (2022),
+/// <https://doi.org/10.1137/20M1373190>.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoiseModel {
+    /// Noise of the objective value, `eps_f`.
+    pub eps_f: f64,
+    /// Noise of one gradient component, `eps_g`.
+    pub eps_g: f64,
+}
+
+impl Default for NoiseModel {
+    fn default() -> Self {
+        Self {
+            eps_f: 0.0,
+            eps_g: 0.0,
+        }
+    }
+}
+
+impl NoiseModel {
+    /// Both components zero.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record `eps_f` and `eps_g`. Non-finite values are stored as zero.
+    pub fn with_noise(eps_f: f64, eps_g: f64) -> Self {
+        Self {
+            eps_f: if eps_f.is_finite() && eps_f > 0.0 {
+                eps_f
+            } else {
+                0.0
+            },
+            eps_g: if eps_g.is_finite() && eps_g > 0.0 {
+                eps_g
+            } else {
+                0.0
+            },
+        }
+    }
+}
+
 /// How [`Lbfgs`] compares the gradient to [`Lbfgs::gtol`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GradNorm {
@@ -94,6 +148,12 @@ pub struct Lbfgs {
     pub highs_options: crate::HighsOptions,
     /// \(H_0 = P^{-1}\) from an assembled geometry preconditioner.
     h0: Option<crate::precon::Metric>,
+    /// Value and gradient noise. Zero leaves the exact step.
+    pub noise: NoiseModel,
+    /// Failed line searches in a row that report [`crate::Status::StepTolerance`].
+    pub max_line_failures: usize,
+    line_failures: usize,
+    lengthened_evals: usize,
 }
 
 impl Default for Lbfgs {
@@ -128,6 +188,10 @@ impl Lbfgs {
             #[cfg(feature = "highs")]
             highs_options: crate::HighsOptions::default(),
             h0: None,
+            noise: NoiseModel::default(),
+            max_line_failures: DEFAULT_LINE_FAILURES,
+            line_failures: 0,
+            lengthened_evals: 0,
         }
     }
 
@@ -214,7 +278,7 @@ impl Lbfgs {
         let mut alpha = vec![0.0; m];
         for k in (0..m).rev() {
             let p = &self.memory[k];
-            let a = p.rho * crate::vecops::dot(p.s.view(), q.view());
+            let a = p.rho * crate::vecops::dot_reduce(p.s.view(), q.view());
             alpha[k] = a;
             crate::vecops::axpy(-a, p.y.view(), &mut q);
         }
@@ -243,7 +307,7 @@ impl Lbfgs {
             q = self.scale_gamma(q);
         }
         for (k, p) in self.memory.iter().enumerate() {
-            let b = p.rho * crate::vecops::dot(p.y.view(), q.view());
+            let b = p.rho * crate::vecops::dot_reduce(p.y.view(), q.view());
             crate::vecops::axpy(alpha[k] - b, p.s.view(), &mut q);
         }
         q.mapv_inplace(|v| -v);
@@ -252,9 +316,9 @@ impl Lbfgs {
 
     fn scale_gamma(&self, mut q: Array1<f64>) -> Array1<f64> {
         if let Some(p) = self.memory.last() {
-            let yy = p.y.dot(&p.y);
+            let yy = crate::vecops::dot_reduce(p.y.view(), p.y.view());
             if yy > 0.0 {
-                q *= p.s.dot(&p.y) / yy;
+                q *= crate::vecops::dot_reduce(p.s.view(), p.y.view()) / yy;
             }
         } else if self.inverse_curvature.is_finite()
             && self.inverse_curvature > 0.0
@@ -460,7 +524,7 @@ impl Lbfgs {
                 None => return (false, evals),
             };
             let slope_a = d.dot(&ga);
-            if fa > f0 + self.armijo * a * slope || (i > 0 && fa >= f_prev) {
+            if fa > self.armijo_bound(f0, a, slope) || (i > 0 && fa >= f_prev) {
                 lo = a_prev;
                 f_lo = f_prev;
                 slope_lo = slope_prev;
@@ -471,7 +535,7 @@ impl Lbfgs {
                 break;
             }
             if slope_a.abs() <= -self.curvature * slope {
-                self.accept(x, f, g, d, a, fa, ga);
+                self.commit(x, f, g, d, a, fa, ga, fg);
                 return (true, evals);
             }
             if slope_a >= 0.0 {
@@ -533,13 +597,13 @@ impl Lbfgs {
                 None => return (false, evals),
             };
             let slope_t = d.dot(&gt);
-            if ft > f0 + self.armijo * trial * slope || ft >= f_lo {
+            if ft > self.armijo_bound(f0, trial, slope) || ft >= f_lo {
                 hi = trial;
                 f_hi = ft;
                 slope_hi = slope_t;
             } else {
                 if slope_t.abs() <= -self.curvature * slope {
-                    self.accept(x, f, g, d, trial, ft, gt);
+                    self.commit(x, f, g, d, trial, ft, gt, fg);
                     return (true, evals);
                 }
                 if slope_t * (hi - lo) >= 0.0 {
@@ -558,6 +622,39 @@ impl Lbfgs {
         (false, evals)
     }
 
+    /// Armijo right-hand side. A zero `eps_f` returns the exact bound.
+    fn armijo_bound(&self, f0: f64, step: f64, slope: f64) -> f64 {
+        let bound = f0 + self.armijo * step * slope;
+        if self.noise.eps_f == 0.0 {
+            bound
+        } else {
+            bound + 2.0 * self.noise.eps_f
+        }
+    }
+
+    fn commit<F>(
+        &mut self,
+        x: &mut Array1<f64>,
+        f: &mut f64,
+        g: &mut Array1<f64>,
+        d: &Array1<f64>,
+        step: f64,
+        f_new: f64,
+        g_new: Array1<f64>,
+        fg: &mut F,
+    ) where
+        F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+    {
+        let pair = if self.noise.eps_g > 0.0 {
+            let mut s = d.clone();
+            s *= step;
+            self.lengthen_along(x, &s, g, |point| fg(point).map(|(_, grad)| grad))
+        } else {
+            None
+        };
+        self.accept(x, f, g, d, step, f_new, g_new, pair);
+    }
+
     fn accept(
         &mut self,
         x: &mut Array1<f64>,
@@ -567,15 +664,103 @@ impl Lbfgs {
         step: f64,
         f_new: f64,
         g_new: Array1<f64>,
+        pair: Option<(Array1<f64>, Array1<f64>)>,
     ) {
-        let mut s = d.clone();
-        s *= step;
-        let mut y = g_new.clone();
-        y -= &*g;
+        let (s, y) = match pair {
+            Some(pair) => pair,
+            None => {
+                let mut s = d.clone();
+                s *= step;
+                let mut y = g_new.clone();
+                y -= &*g;
+                (s, y)
+            }
+        };
         self.push(s, y);
         x.scaled_add(step, d);
         *f = f_new;
         *g = g_new;
+    }
+
+    /// Gradient Lipschitz estimate `||y|| / ||s||` from the newest pair.
+    ///
+    /// An empty memory, or a pair whose lengths are not positive and
+    /// finite, uses 1. That is the curvature of the initial `H0 = I`.
+    /// The noise-safe length is `l = 2 eps_g / mu_est`: the factor 2 is
+    /// the constant in Shi, Xie, Byrd and Nocedal, Algorithm 1, so the
+    /// true gradient change `mu * l` is twice the gradient noise.
+    fn mu_est(&self) -> f64 {
+        let Some(pair) = self.memory.last() else {
+            return 1.0;
+        };
+        let sn = crate::vecops::nrm2(pair.s.view());
+        let yn = crate::vecops::nrm2(pair.y.view());
+        if sn > 0.0 && yn.is_finite() && yn > 0.0 {
+            let mu = yn / sn;
+            if mu.is_finite() && mu > 0.0 {
+                return mu;
+            }
+        }
+        1.0
+    }
+
+    /// Replace a short `(s, y)` with a probe of length `l = 2 eps_g / mu_est`.
+    ///
+    /// The iterate stays at the accepted step. The stored displacement is
+    /// `l s / ||s||`, and `y` is the gradient difference from `x_old` out
+    /// to that point. `None` means the step is already long enough, or
+    /// `eps_g` is zero, in which case the caller stores the original pair
+    /// and no extra gradient is evaluated.
+    pub(crate) fn lengthen_along<F>(
+        &mut self,
+        x_old: &Array1<f64>,
+        s: &Array1<f64>,
+        g_old: &Array1<f64>,
+        mut grad_at: F,
+    ) -> Option<(Array1<f64>, Array1<f64>)>
+    where
+        F: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+    {
+        let eps_g = self.noise.eps_g;
+        if !(eps_g.is_finite() && eps_g > 0.0) {
+            return None;
+        }
+        let sn = crate::vecops::nrm2(s.view());
+        if !(sn.is_finite() && sn > 0.0) {
+            return None;
+        }
+        let length = 2.0 * eps_g / self.mu_est();
+        if !(length.is_finite() && length > sn) {
+            return None;
+        }
+        let scale = length / sn;
+        let mut probe = x_old.clone();
+        probe.scaled_add(scale, s);
+        let g_long = grad_at(probe.view())?;
+        self.lengthened_evals += 1;
+        if g_long.len() != g_old.len() || g_long.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
+        let s_long = s * scale;
+        let y_long = &g_long - g_old;
+        Some((s_long, y_long))
+    }
+
+    /// Gradients evaluated only to lengthen a short pair.
+    pub fn lengthened_evals(&self) -> usize {
+        self.lengthened_evals
+    }
+
+    pub(crate) fn line_search_blocked(&self) -> bool {
+        self.max_line_failures > 0 && self.line_failures >= self.max_line_failures
+    }
+
+    fn note_line_outcome(&mut self, moved: bool) {
+        if moved {
+            self.line_failures = 0;
+        } else if self.max_line_failures > 0 {
+            self.line_failures = self.line_failures.saturating_add(1);
+        }
     }
 
     /// Relaxes `x0`, calling `fg` for value and gradient.
@@ -637,8 +822,9 @@ impl Lbfgs {
             }
             let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &d, slope, &mut fg);
             evals += evals_used;
+            self.note_line_outcome(ok);
             if !ok {
-                if self.memory.is_empty() {
+                if self.line_search_blocked() || self.memory.is_empty() {
                     break;
                 }
                 self.forget();
@@ -702,8 +888,9 @@ impl Lbfgs {
             }
             let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &d, slope, &mut fg);
             evals += evals_used;
+            self.note_line_outcome(ok);
             if !ok {
-                if self.memory.is_empty() {
+                if self.line_search_blocked() || self.memory.is_empty() {
                     break;
                 }
                 self.forget();
@@ -753,6 +940,15 @@ impl Lbfgs {
             );
             if stall {
                 return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+            }
+            if self.line_search_blocked() {
+                return Ok(Report {
+                    value,
+                    coords: pos,
+                    steps: step + 1,
+                    grad_norm: gnorm,
+                    status: crate::report::Status::StepTolerance,
+                });
             }
         }
         Ok(Report {
@@ -818,6 +1014,11 @@ impl Lbfgs {
         O: DifferentiableObjective<f64> + ?Sized,
     {
         let allow_restart = supplied_direction.is_none();
+        let options = if self.noise.eps_f > 0.0 {
+            options.with_armijo_slack(2.0 * self.noise.eps_f)
+        } else {
+            options
+        };
         let dir = supplied_direction.unwrap_or_else(|| self.direction(grad.view()));
         #[cfg(feature = "highs")]
         let dir = if let Some(bounds) = &self.coordinate_box {
@@ -882,8 +1083,17 @@ impl Lbfgs {
         if t.moved && record_pair {
             let s = &t.x - &*pos;
             let y = &t.g - &*grad;
-            self.push(s, y);
+            let stored = if self.noise.eps_g > 0.0 {
+                self.lengthen_along(pos, &s, grad, |point| Some(obj.value_and_gradient(point).1))
+            } else {
+                None
+            };
+            match stored {
+                Some((s_long, y_long)) => self.push(s_long, y_long),
+                None => self.push(s, y),
+            }
         }
+        self.note_line_outcome(t.moved);
         *pos = t.x;
         *value = t.f;
         *grad = t.g;
@@ -896,6 +1106,39 @@ impl Lbfgs {
 mod tests {
     use super::*;
     use ndarray::{Array2, array};
+
+    #[test]
+    fn a_short_pair_is_probed_at_twice_eps_g_over_mu() {
+        let mut solver = Lbfgs::default();
+        solver.noise = NoiseModel::with_noise(0.0, 1.0);
+        let x = array![0.0, 0.0];
+        let g = array![0.1, 0.0];
+        let mut calls = 0usize;
+        assert!(
+            solver
+                .lengthen_along(&x, &array![3.0, 0.0], &g, |_| {
+                    calls += 1;
+                    Some(array![0.0, 0.0])
+                })
+                .is_none()
+        );
+        assert_eq!(calls, 0);
+        let (s, _) = solver
+            .lengthen_along(&x, &array![0.1, 0.0], &g, |point| {
+                calls += 1;
+                let reach = point.dot(&point).sqrt();
+                assert!((reach - 2.0).abs() < 1e-12, "probe {reach}");
+                Some(point.to_owned())
+            })
+            .unwrap();
+        assert_eq!(calls, 1);
+        assert!((s.dot(&s).sqrt() - 2.0).abs() < 1e-12);
+        assert!(
+            Lbfgs::default()
+                .lengthen_along(&x, &array![0.1, 0.0], &g, |_| { None })
+                .is_none()
+        );
+    }
 
     #[test]
     fn an_indefinite_hessian_falls_back_to_gamma() {

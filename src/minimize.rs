@@ -93,6 +93,9 @@ where
     };
     for _ in 0..control.maxiter {
         last = solver.step(obj, &mut pos)?;
+        if last.status != crate::report::Status::Iterating {
+            break;
+        }
         if let Some(status) = control.halt(last.grad_norm, solver.free_len(obj.bounds())) {
             last.status = status;
             break;
@@ -142,6 +145,9 @@ where
     };
     for _ in 0..control.maxiter {
         last = solver.step_hess(obj, &mut pos)?;
+        if last.status != crate::report::Status::Iterating {
+            break;
+        }
         if let Some(status) = control.halt(last.grad_norm, solver.free_len(obj.bounds())) {
             last.status = status;
             break;

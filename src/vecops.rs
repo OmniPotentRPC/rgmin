@@ -109,6 +109,51 @@ pub fn sum(x: ArrayView1<f64>) -> f64 {
     }
 }
 
+/// Dot product for the L-BFGS two-loop.
+///
+/// The serial path is [`dot`]. Under `par`, a long vector is split into
+/// fixed chunks of 4096. Each chunk is summed on its own, and those
+/// partials are added from the first chunk upward, so the bits do not
+/// depend on the thread count. An Ozaki-II or exact-accumulation backend
+/// replaces this function and nothing else in the two-loop.
+pub fn dot_reduce(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
+    #[cfg(feature = "par")]
+    {
+        if x.len() >= PAR_MIN_LEN {
+            return dot_reduce_chunks(x, y);
+        }
+    }
+    dot(x, y)
+}
+
+/// Chunk dots summed from the first index upward.
+#[cfg(feature = "par")]
+fn dot_reduce_chunks(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
+    use rayon::prelude::*;
+    const CHUNK: usize = 4096;
+    match (x.as_slice(), y.as_slice()) {
+        (Some(a), Some(b)) => {
+            let parts: Vec<f64> = a
+                .par_chunks(CHUNK)
+                .zip(b.par_chunks(CHUNK))
+                .map(|(ca, cb)| {
+                    let mut acc = 0.0;
+                    for (p, q) in ca.iter().zip(cb) {
+                        acc += p * q;
+                    }
+                    acc
+                })
+                .collect();
+            let mut acc = 0.0;
+            for part in parts {
+                acc += part;
+            }
+            acc
+        }
+        _ => dot_ordered(x, y),
+    }
+}
+
 /// `||x||_2`.
 pub fn nrm2(x: ArrayView1<f64>) -> f64 {
     dot(x, x).sqrt()
@@ -351,6 +396,31 @@ pub fn vsum(x: &Vector) -> f64 {
 mod tests {
     use super::*;
     use ndarray::Array1;
+
+    #[test]
+    fn dot_reduce_is_the_serial_dot_and_orders_long_chunks() {
+        let n = 70_000;
+        let x = Array1::from((0..n).map(|i| (i as f64).sin()).collect::<Vec<_>>());
+        let y = Array1::from((0..n).map(|i| (i as f64).cos()).collect::<Vec<_>>());
+        let reduced = dot_reduce(x.view(), y.view());
+        #[cfg(not(feature = "par"))]
+        assert_eq!(reduced.to_bits(), dot(x.view(), y.view()).to_bits());
+        #[cfg(feature = "par")]
+        {
+            let mut ordered = 0.0;
+            let mut i = 0;
+            while i < n {
+                let j = (i + 4096).min(n);
+                let mut chunk = 0.0;
+                for k in i..j {
+                    chunk += x[k] * y[k];
+                }
+                ordered += chunk;
+                i = j;
+            }
+            assert_eq!(reduced.to_bits(), ordered.to_bits());
+        }
+    }
 
     #[test]
     fn the_seam_matches_ndarray_on_the_serial_path() {

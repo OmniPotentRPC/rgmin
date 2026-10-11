@@ -74,6 +74,7 @@ cargo test --features capi
    howto/session
    howto/python
    howto/noise
+   howto/noise-lbfgs
    howto/manifolds
    howto/embed-anneal
    howto/highs-qp

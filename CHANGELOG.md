@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- L-BFGS `NoiseModel { eps_f, eps_g }`, zero by default. A positive
+  `eps_f` relaxes Armijo by `2 eps_f` and keeps the curvature test.
+  A step shorter than `l = 2 eps_g / mu_est` stores curvature from an
+  extra gradient at that length. `mu_est` is `||y|| / ||s||` of the
+  newest pair, or 1. Five failed line searches in a row stop as
+  `Status::StepTolerance`. A line search that clears no trial by
+  `c * eps_f` stops as `Status::NoiseFloor`. Shi, Xie, Byrd, and
+  Nocedal, SIAM J. Optim. 32, 29 (2022),
+  https://doi.org/10.1137/20M1373190.
 - Python package `rgmin`: a free-threaded nanobind module `rgmin._core`
   (`Method`, `SolverConfig`, `Solver`, `Report`, `minimize`) and
   `rgmin.ase.Optimizer` with one rgmin iteration per `step`. ASE is an

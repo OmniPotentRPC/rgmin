@@ -17,7 +17,7 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use super::conditions::{armijo, goldstein_lower, strong_curvature};
+use super::conditions::{goldstein_lower, strong_curvature};
 use super::interp::{clamp_between, cubic_min, quad_min};
 use super::{LineSearch, LineSearchOptions};
 
@@ -292,7 +292,10 @@ where
         {
             return cur.p.and_then(|p| line.accept(p));
         }
-        if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || (i > 0 && f >= prev.f) {
+        if !f.is_finite()
+            || !line.options.holds_armijo(f, f0, alpha, dphi0, c1)
+            || (i > 0 && f >= prev.f)
+        {
             return zoom(line, f0, dphi0, prev, cur, c1, c2, maxiter);
         }
         if strong_curvature(d, dphi0, c2) || (d < 0.0 && alpha >= amax) {
@@ -350,7 +353,7 @@ where
         {
             return cur.p.and_then(|p| line.accept(p));
         }
-        if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || f >= lo.f {
+        if !f.is_finite() || !line.options.holds_armijo(f, f0, alpha, dphi0, c1) || f >= lo.f {
             hi = cur;
         } else {
             if strong_curvature(d, dphi0, c2) {
@@ -390,7 +393,7 @@ where
     for _ in 0..maxiter {
         let p = line.probe(alpha);
         let f = p.f;
-        let arm = f.is_finite() && armijo(f, f0, alpha, dphi0, c);
+        let arm = f.is_finite() && line.options.holds_armijo(f, f0, alpha, dphi0, c);
         let accept = if goldstein {
             arm && goldstein_lower(f, f0, alpha, dphi0, c)
         } else {

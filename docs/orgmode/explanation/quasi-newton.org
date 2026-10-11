@@ -43,9 +43,26 @@ with the standard scalar seed H0 = (s . y) / (y . y) I from the most
 recent pair, a one-parameter fit of the average curvature along the
 last step; positivity of that scalar is again the pair condition.
 Every dot and axpy in the crate's two-loop routes through the
-~vecops~ seam, so the recursion is written once and the storage
-backend (serial, ~par~, and by design a later device backend) is a
-detail behind four functions.
+~vecops~ seam. The dots go through ~dot_reduce~, which on a long
+parallel vector sums fixed chunks from the first index upward. An
+Ozaki-II backend replaces that one function. The recursion is written
+once; serial, ~par~, and a later device backend stay behind the seam.
+
+* Noisy values and short steps
+
+~NoiseModel~ is off at zero. A positive ~eps_f~ adds ~2 eps_f~ to the
+Armijo bound and leaves the curvature test alone. A positive ~eps_g~
+replaces a step shorter than ~l = 2 eps_g / mu_est~ with a curvature
+pair of that length. ~mu_est~ is ~||y|| / ||s||~ of the newest stored
+pair, or 1 when the memory is empty. The iterate still moves by the
+accepted step. The extra gradient is counted and is not taken when
+~eps_g~ is zero.
+
+Five failed line searches in a row report ~StepTolerance~. A search
+that finds no trial whose decrease clears ~c * eps_f~ reports
+~NoiseFloor~ and keeps the pre-step point. Shi, Xie, Byrd, and
+Nocedal, SIAM J. Optim. 32, 29 (2022),
+https://doi.org/10.1137/20M1373190.
 
 * Stale pairs and the cautious update
 
