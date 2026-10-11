@@ -64,7 +64,7 @@ pub struct rgmin_abi_stamp_t {
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
 pub const RGMIN_ABI_VERSION_MINOR: u16 = 32;
-pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 2;
+pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 3;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
 #[repr(C)]
@@ -168,6 +168,20 @@ pub enum rgmin_highs_cb_kind_t {
 /// Host callback for HiGHS log and interrupt events.
 pub type rgmin_highs_callback_t = crate::HighsCCallback;
 
+/// Why a finished minimization stopped. `Iterating` is not a C result.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_stop_t {
+    /// `||g||` fell below `gtol`.
+    RGMIN_STOP_TOLERANCE = 0,
+    /// The stationarity measure fell below `c * sqrt(n_free) * noise_eps`.
+    RGMIN_STOP_NOISE_FLOOR = 1,
+    /// SCG stopped on its step or objective test with `||g||` still above `gtol`.
+    RGMIN_STOP_STEP_TOLERANCE = 2,
+    /// The iteration budget was spent above every stop.
+    RGMIN_STOP_BUDGET = 3,
+}
+
 /// Iteration controls. `memory` is the L-BFGS pair count (0 means 10)
 /// and the Pulay history length (0 means 6).
 #[repr(C)]
@@ -183,6 +197,10 @@ pub struct rgmin_control_t {
     pub memory: usize,
     /// Euclidean cap on each proposed step; non-positive disables the cap.
     pub maxmove: f64,
+    /// Gradient-projection noise. Non-positive leaves the floor off.
+    pub noise_eps: f64,
+    /// Floor factor. Non-positive selects 3.
+    pub noise_c: f64,
 }
 
 /// Result written by [`rgmin_minimize`].
@@ -195,6 +213,8 @@ pub struct rgmin_report_t {
     pub steps: usize,
     /// `||∇f||_2`.
     pub grad_norm: f64,
+    /// Which stop produced this report.
+    pub stop: rgmin_stop_t,
 }
 
 /// `f(x)` callback. `x` is a rank-1 f64 DLPack tensor.
@@ -961,6 +981,7 @@ pub unsafe extern "C" fn rgmin_minimize(
                 None
             },
             ftol_rel: None,
+            noise_floor: noise_floor_from_c(c),
         };
         match minimize_method(
             &obj,
@@ -980,6 +1001,7 @@ pub unsafe extern "C" fn rgmin_minimize(
                         value: rep.value,
                         steps: rep.steps,
                         grad_norm: rep.grad_norm,
+                        stop: stop_from_status(rep.status),
                     };
                 }
                 rgmin_status_t::RGMIN_SUCCESS
@@ -1084,6 +1106,8 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
             } else {
                 None
             },
+
+            noise_floor: noise_floor_from_c(c),
         };
         let (scg, conjugacy) = if params.is_null() {
             (ScgParams::default(), Conjugacy::PolakRibiere)
@@ -1154,6 +1178,7 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
                         value: rep.value,
                         steps: rep.steps,
                         grad_norm: rep.grad_norm,
+                        stop: stop_from_status(rep.status),
                     };
                 }
                 rgmin_status_t::RGMIN_SUCCESS
@@ -1230,6 +1255,7 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
                 None
             },
             ftol_rel: None,
+            noise_floor: noise_floor_from_c(c),
         };
         let rust_method = method_from_c(method, c.memory);
         match minimize_method_hess(
@@ -1250,6 +1276,7 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
                         value: rep.value,
                         steps: rep.steps,
                         grad_norm: rep.grad_norm,
+                        stop: stop_from_status(rep.status),
                     };
                 }
                 rgmin_status_t::RGMIN_SUCCESS
@@ -1345,6 +1372,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
                 None
             },
             ftol_rel: None,
+            noise_floor: noise_floor_from_c(c),
         };
         match minimize_method(
             &obj,
@@ -1364,6 +1392,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
                         value: rep.value,
                         steps: rep.steps,
                         grad_norm: rep.grad_norm,
+                        stop: stop_from_status(rep.status),
                     };
                 }
                 rgmin_status_t::RGMIN_SUCCESS
@@ -1421,6 +1450,7 @@ pub unsafe extern "C" fn rgmin_solver_create(
             None
         },
         ftol_rel: None,
+        noise_floor: noise_floor_from_c(c),
     };
     let solver = Solver::new(method_from_c(method, c.memory), control, dim).with_gtol(c.gtol);
     Box::into_raw(Box::new(rgmin_solver_t { solver }))
@@ -3350,6 +3380,26 @@ fn c_oracle_hess_fg(
     )
 }
 
+fn noise_floor_from_c(c: &rgmin_control_t) -> Option<crate::NoiseFloor> {
+    if !(c.noise_eps.is_finite() && c.noise_eps > 0.0) {
+        return None;
+    }
+    let mut floor = crate::NoiseFloor::new(c.noise_eps);
+    if c.noise_c.is_finite() && c.noise_c > 0.0 {
+        floor = floor.with_c(c.noise_c);
+    }
+    Some(floor)
+}
+
+fn stop_from_status(status: crate::Status) -> rgmin_stop_t {
+    match status {
+        crate::Status::Tolerance => rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        crate::Status::NoiseFloor => rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR,
+        crate::Status::StepTolerance => rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE,
+        crate::Status::Budget | crate::Status::Iterating => rgmin_stop_t::RGMIN_STOP_BUDGET,
+    }
+}
+
 fn write_report(
     x: *mut DLManagedTensorVersioned,
     out: *mut rgmin_report_t,
@@ -3365,6 +3415,7 @@ fn write_report(
             value: rep.value,
             steps: rep.steps,
             grad_norm: rep.grad_norm,
+            stop: stop_from_status(rep.status),
         };
     }
     rgmin_status_t::RGMIN_SUCCESS

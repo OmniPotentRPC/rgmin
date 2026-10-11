@@ -8,6 +8,7 @@ fn control() -> Control {
         istep: 0.1,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     }
 }
 
@@ -60,6 +61,7 @@ fn spd_session_stays_on_the_set() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         4,
     );
@@ -150,6 +152,7 @@ fn grassmann_session_stays_on_the_set() {
             istep: 0.2,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         8,
     );

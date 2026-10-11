@@ -76,6 +76,7 @@ fn steps_until(precon: bool, estimate: bool) -> (usize, Option<f64>) {
         istep: 1.0,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     };
     let mut solver = Solver::new(Method::Lbfgs { memory: 5 }, control, x.len());
     if precon {
@@ -137,6 +138,7 @@ fn steps_of(method: Method, precon: bool, limit: usize, istep: f64) -> (usize, f
         istep,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     };
     let mut solver = Solver::new(method, control, x.len());
     if precon {
@@ -200,6 +202,7 @@ fn fire_and_nlcg_move_in_the_metric() {
         istep: 0.05,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     };
     for method in [
         Method::Fire {
@@ -332,6 +335,7 @@ fn lindh_and_ff_shorten_lbfgs_on_a_molecule() {
         istep: 1.0,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     };
     let plain = Solver::new(Method::Lbfgs { memory: 5 }, control.clone(), geom.len());
     let mut with = Solver::new(Method::Lbfgs { memory: 5 }, control, geom.len());
@@ -363,6 +367,7 @@ fn lindh_and_ff_shorten_lbfgs_on_a_molecule() {
         istep: 1.0,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     };
     let plain = Solver::new(Method::Lbfgs { memory: 5 }, control.clone(), geom.len());
     let mut with = Solver::new(Method::Lbfgs { memory: 5 }, control, geom.len());
@@ -414,6 +419,7 @@ fn lindh_estimates_the_energy_scale() {
         istep: 1.0,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     };
     let mut solver = Solver::new(Method::Lbfgs { memory: 4 }, control, geom.len());
     solver.set_lindh(geom.view(), &z, &[], &estimated).unwrap();

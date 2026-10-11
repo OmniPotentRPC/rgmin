@@ -102,12 +102,15 @@ struct Control {
     double istep = 0.1;
     std::size_t memory = 10;
     double maxmove = 0.0;
+    double noise_eps = 0.0;
+    double noise_c = 0.0;
 };
 
 struct Report {
     double value = 0.0;
     std::size_t steps = 0;
     double grad_norm = 0.0;
+    rgmin_stop_t stop = RGMIN_STOP_BUDGET;
 };
 
 using ScalarType = double;
@@ -144,6 +147,7 @@ struct OptimizeResult {
         out.fun = r.value;
         out.nit = r.steps;
         out.grad_norm = r.grad_norm;
+        out.status = static_cast<int>(r.stop);
         return out;
     }
 };
@@ -152,7 +156,7 @@ inline Report minimize_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
                           DLManagedTensorVersioned* x, Control const& ctrl,
                           Method method) {
     rgmin_control_t c{ctrl.maxiter, ctrl.gtol, ctrl.istep, ctrl.memory,
-                      ctrl.maxmove};
+                      ctrl.maxmove, ctrl.noise_eps, ctrl.noise_c};
     rgmin_report_t out{};
     rgmin_status_t st =
         rgmin_minimize(eval, grad, user, x, &c, static_cast<rgmin_method_t>(method), &out);
@@ -160,14 +164,14 @@ inline Report minimize_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
         char const* msg = rgmin_last_error();
         throw std::runtime_error(msg ? msg : "rgmin_minimize failed");
     }
-    return Report{out.value, out.steps, out.grad_norm};
+    return Report{out.value, out.steps, out.grad_norm, out.stop};
 }
 
 inline Report minimize_hess_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hess_fn hess,
                                void* user, DLManagedTensorVersioned* x,
                                Control const& ctrl, Method method) {
     rgmin_control_t c{ctrl.maxiter, ctrl.gtol, ctrl.istep, ctrl.memory,
-                      ctrl.maxmove};
+                      ctrl.maxmove, ctrl.noise_eps, ctrl.noise_c};
     rgmin_report_t out{};
     rgmin_status_t st = rgmin_minimize_hess(
         eval, grad, hess, user, x, &c, static_cast<rgmin_method_t>(method), &out);
@@ -175,7 +179,7 @@ inline Report minimize_hess_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hes
         char const* msg = rgmin_last_error();
         throw std::runtime_error(msg ? msg : "rgmin_minimize_hess failed");
     }
-    return Report{out.value, out.steps, out.grad_norm};
+    return Report{out.value, out.steps, out.grad_norm, out.stop};
 }
 
 inline Report minimize_eindir(const eindir_objective_t* objective,
@@ -183,7 +187,7 @@ inline Report minimize_eindir(const eindir_objective_t* objective,
                               DLManagedTensorVersioned* x, Control const& ctrl,
                               Method method) {
     rgmin_control_t c{ctrl.maxiter, ctrl.gtol, ctrl.istep, ctrl.memory,
-                      ctrl.maxmove};
+                      ctrl.maxmove, ctrl.noise_eps, ctrl.noise_c};
     rgmin_report_t out{};
     rgmin_status_t st = rgmin_minimize_eindir(
         objective, stamp, x, &c, static_cast<rgmin_method_t>(method), &out);
@@ -191,7 +195,7 @@ inline Report minimize_eindir(const eindir_objective_t* objective,
         char const* msg = rgmin_last_error();
         throw std::runtime_error(msg ? msg : "rgmin_minimize_eindir failed");
     }
-    return Report{out.value, out.steps, out.grad_norm};
+    return Report{out.value, out.steps, out.grad_norm, out.stop};
 }
 
 /// One-shot solve. Named for the header rather than `minimize`, which
@@ -379,7 +383,7 @@ class Solver {
 public:
     Solver(Method method, Control const& ctrl, std::size_t dim) {
         rgmin_control_t c{ctrl.maxiter, ctrl.gtol, ctrl.istep, ctrl.memory,
-                          ctrl.maxmove};
+                          ctrl.maxmove, ctrl.noise_eps, ctrl.noise_c};
         ptr_ = rgmin_solver_create(static_cast<rgmin_method_t>(method), &c, dim);
         if (ptr_ == nullptr) {
             char const* msg = rgmin_last_error();
@@ -493,7 +497,7 @@ public:
             char const* msg = rgmin_last_error();
             throw std::runtime_error(msg ? msg : "rgmin_solver_step failed");
         }
-        return Report{out.value, out.steps, out.grad_norm};
+        return Report{out.value, out.steps, out.grad_norm, out.stop};
     }
 
     Report step_fg(rgmin_evalgrad_fn evalgrad, void* user,
@@ -505,7 +509,7 @@ public:
             char const* msg = rgmin_last_error();
             throw std::runtime_error(msg ? msg : "rgmin_solver_step_fg failed");
         }
-        return Report{out.value, out.steps, out.grad_norm};
+        return Report{out.value, out.steps, out.grad_norm, out.stop};
     }
 
     Report step_hess(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hess_fn hess,
@@ -517,7 +521,7 @@ public:
             char const* msg = rgmin_last_error();
             throw std::runtime_error(msg ? msg : "rgmin_solver_step_hess failed");
         }
-        return Report{out.value, out.steps, out.grad_norm};
+        return Report{out.value, out.steps, out.grad_norm, out.stop};
     }
 
     Report step_hess_fg(rgmin_evalgrad_fn evalgrad, rgmin_hess_fn hess,
@@ -529,7 +533,7 @@ public:
             char const* msg = rgmin_last_error();
             throw std::runtime_error(msg ? msg : "rgmin_solver_step_hess_fg failed");
         }
-        return Report{out.value, out.steps, out.grad_norm};
+        return Report{out.value, out.steps, out.grad_norm, out.stop};
     }
 };
 

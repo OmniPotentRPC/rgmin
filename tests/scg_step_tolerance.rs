@@ -222,6 +222,8 @@ mod capi {
             istep: 1.0,
             memory: 5,
             maxmove: 0.0,
+            noise_eps: 0.0,
+            noise_c: 0.0,
         };
         let params = rgmin_scg_params_t {
             sigma0: 1e-4,
@@ -238,6 +240,7 @@ mod capi {
             value: 42.0,
             steps: 43,
             grad_norm: 44.0,
+            stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
         };
         let status = unsafe {
             rgmin_minimize_scg_with_options(

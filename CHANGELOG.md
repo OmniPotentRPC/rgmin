@@ -12,6 +12,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Geometry preconditioners install through `Solver::set_precon` and
   C `rgmin_solver_set_precon` (ABI minor 32): Exp, Lindh, the bonded
   metric, or `select_precon`.
+- `rggate` (`bench/gate/`, pixi task `gate`) reads contract version 1
+  of the atomistic CSV. The reference for a start is explicit, otherwise
+  the baseline on that same start. `--reference lowest` opts into the
+  lowest converged energy. Per-method curves count a converged run as a
+  success. Inside a pair, Gehan scoring drops early censoring and basin
+  splits from the call comparison. The BCa interval resamples systems
+  and then starts. The walk is stratified by system. `dim` is the
+  free coordinate count, and the energy window uses it. A split with
+  unknown atom count is an upper bound. The cluster interval is printed
+  from `--min-clusters` systems (default 10). Each pair is walked at
+  `alpha` divided by the number of pairs. `decide_min` is the first
+  time an all-wins or all-losses walk can cross. `--boundary agrapa`
+  is one signed approximate-GRAPA stake, truncated at 3/4. Exit 0
+  passes, 1 fails, 2 is undecided, and 3 is a contract or argument
+  error. Goswami, AIP Adv. (2025),
+  https://doi.org/10.1063/5.0283639. Dolan and Moré, Math. Program. 91,
+  201 (2002), https://doi.org/10.1007/s101070100263. Moré and Wild,
+  SIAM J. Optim. 20, 172 (2009), https://doi.org/10.1137/080724083.
+  Gould and Scott, ACM TOMS 43 (2016),
+  https://doi.org/10.1145/2950048. Kaplan and Meier, JASA 53, 457
+  (1958), https://doi.org/10.1080/01621459.1958.10501452. Efron, JASA
+  82, 171 (1987), https://doi.org/10.1080/01621459.1987.10478410.
+  Howard, Ramdas, McAuliffe, and Sekhon, Ann. Stat. 49, 1055 (2021),
+  https://doi.org/10.1214/20-AOS1991. Wald, Ann. Math. Stat. 16, 117
+  (1945), https://doi.org/10.1214/aoms/1177731118. Waudby-Smith and
+  Ramdas, J. R. Stat. Soc. B (2024),
+  https://doi.org/10.1093/jrsssb/qkad009.
+- ECnoise (`ecnoise`, `sample_noise`, `sample_gradient_noise`,
+  `sample_gradient_noise_k`). Moré and Wild, SIAM J. Sci. Comput. 33,
+  1292 (2011), https://doi.org/10.1137/100786125. The difference table
+  uses `m + 1` samples at spacing `h` (default `m = 8`). `h` is the
+  distance between samples, as in `ECnoise.m`, not the half-width of
+  the stencil. The noise is the lowest order whose three estimates
+  agree within a factor of 4 and whose column changes sign. A spacing
+  that is too small (`inform` 2) is retried at `100 h`, and one that
+  is too large (`inform` 3) at `h / 100`. `NoiseEstimate::declared`
+  records a backend value and skips the samples. Gradient noise is
+  the same table on `g(x + i h u) · w` with one counter-based unit
+  vector `w`. For any covariance `Σ`, that projection has
+  `E[eps_g²] = tr(Σ) / n` because `w` is uniform on the sphere, so
+  `E[||e||²] = n * eps_g²`. `sample_gradient_noise_k` averages
+  `eps_g²` over `k` directions. The normals use pure-Rust `libm`.
+  `|f''|` and `|T|` are Moré and Wild, ACM Trans. Math. Softw. 38, 19
+  (2012), Algorithm 5.1, https://doi.org/10.1145/2168773.2168777,
+  not divided differences of the noise table. The forward step
+  `8^{1/4} sqrt(eps_f / |f''|)` and the gradient probe
+  `2 sqrt(eps_g / |T|)` use those estimates. A missing estimate uses
+  the same clamp as a zero scale. The clamp is
+  `[max(1e-16, 4 * ulp(max |x_i|)), 1]`. `NoiseFloor` stops at
+  `c * sqrt(n_free) * eps_g` (`c = 3` by default) with
+  `Status::NoiseFloor` after the `gtol` test. `NoiseFloor` also
+  carries `eps_f`. A line search that finds no trial whose decrease
+  clears `c * eps_f` is the same stop and keeps the pre-step point.
+  `sample_value_gradient_noise` reads both from one stencil.
+  `Status::StepTolerance`
+  is SCG's step and objective stop while `||g||` is still above
+  `gtol`. `Status` is `non_exhaustive`. The `par` feature evaluates
+  the stencil by index.
+- `Report` gains `status` and `Control` gains `noise_floor`
+  (`NoiseFloor { eps_g, c, eps_f }`) in place of `noise_eps` and `noise_c`.
+  The C ABI does not gain `eps_f`.
+  Struct literals break. This ships with 0.4.0.
+- C ABI (`abi_minor` 31, `layout_revision` 3): `rgmin_control_t`
+  gains `noise_eps` and `noise_c` (`noise_eps <= 0` leaves the floor
+  off, `noise_c <= 0` selects 3). `rgmin_report_t` gains `stop`
+  (`RGMIN_STOP_TOLERANCE`, `RGMIN_STOP_NOISE_FLOOR`,
+  `RGMIN_STOP_STEP_TOLERANCE`, `RGMIN_STOP_BUDGET`).
 - Pulay residual subspace (`Method::Diis`, C `RGMIN_DIIS`, ABI minor 30).
   Coefficients on the stored gradients sum to one and minimize the
   combined residual. `memory` 0 keeps 6 pairs. One pair takes a

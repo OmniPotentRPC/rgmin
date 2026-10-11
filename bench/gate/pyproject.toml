@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rggate"
+version = "1"
+description = "Censored benchmark gate for repeated rgmin runs"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy==2.2.6",
+    "scipy==1.15.3",
+]
+
+[project.optional-dependencies]
+plot = ["matplotlib==3.10.1"]
+test = ["pytest==8.3.5"]
+
+[project.scripts]
+rggate = "rggate.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = ["-m", "not slow"]
+markers = [
+    "slow: Monte Carlo checks excluded from the fast run",
+]

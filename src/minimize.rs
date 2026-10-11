@@ -14,7 +14,7 @@ use crate::pso::minimize_pso;
 use crate::qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 use crate::report::Report;
 use crate::session::Solver;
-use crate::step::{l2, next_istep, take_step};
+use crate::step::{energy_noise_report, l2, next_istep, take_step};
 
 /// Minimize `obj` from `init` with the chosen conjugacy, restart, and line search.
 pub fn minimize<O>(
@@ -89,12 +89,17 @@ where
         coords: pos.clone(),
         steps: 0,
         grad_norm: f64::INFINITY,
+        status: crate::report::Status::Iterating,
     };
     for _ in 0..control.maxiter {
         last = solver.step(obj, &mut pos)?;
-        if last.grad_norm < control.gtol {
+        if let Some(status) = control.halt(last.grad_norm, solver.free_len(obj.bounds())) {
+            last.status = status;
             break;
         }
+    }
+    if last.status == crate::report::Status::Iterating {
+        last.status = crate::report::Status::Budget;
     }
     Ok(last)
 }
@@ -133,12 +138,17 @@ where
         coords: pos.clone(),
         steps: 0,
         grad_norm: f64::INFINITY,
+        status: crate::report::Status::Iterating,
     };
     for _ in 0..control.maxiter {
         last = solver.step_hess(obj, &mut pos)?;
-        if last.grad_norm < control.gtol {
+        if let Some(status) = control.halt(last.grad_norm, solver.free_len(obj.bounds())) {
+            last.status = status;
             break;
         }
+    }
+    if last.status == crate::report::Status::Iterating {
+        last.status = crate::report::Status::Budget;
     }
     Ok(last)
 }
@@ -170,12 +180,13 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
+        if let Some(status) = control.halt(gnorm, grad.len()) {
             return Ok(Report {
                 value,
                 coords: pos,
                 steps: step,
                 grad_norm: gnorm,
+                status,
             });
         }
         let t = take_step(
@@ -189,6 +200,9 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let lsstep = t.alpha;
         pos = t.x;
         value = t.f;
@@ -212,5 +226,6 @@ where
         coords: pos,
         steps: control.maxiter,
         grad_norm: l2(&grad),
+        status: control.finish_status(l2(&grad), grad.len(), true),
     })
 }

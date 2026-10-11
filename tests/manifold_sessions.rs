@@ -9,6 +9,7 @@ fn control() -> Control {
         istep: 0.1,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     }
 }
 
@@ -119,6 +120,7 @@ fn oblique_session_stays_on_product_of_spheres() {
             istep: 0.2,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         6,
     );
@@ -177,6 +179,7 @@ fn multinomial_session_stays_on_the_simplex() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         3,
     );
@@ -251,6 +254,7 @@ fn multinomial_ds_session_stays_doubly_stochastic() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         4,
     );
@@ -331,6 +335,7 @@ fn multinomial_sym_session_stays_symmetric_doubly_stochastic() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         4,
     );
@@ -412,6 +417,7 @@ fn sphere_complex_session_stays_on_the_set() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         4,
     );
@@ -470,6 +476,7 @@ fn positive_session_stays_on_the_set() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         3,
     );
@@ -539,6 +546,7 @@ fn centered_matrix_session_stays_on_the_set() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         4,
     );
@@ -654,6 +662,7 @@ fn complex_circle_session_stays_on_the_set() {
             istep: 0.2,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         4,
     );
@@ -733,6 +742,7 @@ fn symmetric_session_stays_on_the_set() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         4,
     );
@@ -811,6 +821,7 @@ fn skewsymmetric_session_stays_on_the_set() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         4,
     );
@@ -872,6 +883,7 @@ fn euclidean_complex_session_stays_on_the_set() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         4,
     );
@@ -957,6 +969,7 @@ fn constant_session_stays_on_the_set() {
             istep: 0.1,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         3,
     );
@@ -1060,6 +1073,7 @@ fn grassmann_session_stays_on_gr_4_2() {
             istep: 0.15,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         8,
     );
@@ -1149,6 +1163,7 @@ fn hyperbolic_session_stays_on_the_hyperboloid() {
             istep: 0.2,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         3,
     );
@@ -1209,6 +1224,7 @@ fn poincare_session_stays_inside_the_open_ball() {
             istep: 0.4,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         3,
     );
@@ -1273,6 +1289,7 @@ fn unitary_session_stays_on_the_set() {
             istep: 0.2,
             maxmove: None,
             ftol_rel: None,
+            noise_floor: None,
         },
         8,
     );

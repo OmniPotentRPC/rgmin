@@ -256,12 +256,13 @@ where
     let mut step = 0;
     while control.maxiter == 0 || step < control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
+        if let Some(status) = control.halt(gnorm, grad.len()) {
             return Ok(Report {
                 value: f_old,
                 coords: w,
                 steps: step,
                 grad_norm: gnorm,
+                status,
             });
         }
 
@@ -281,6 +282,7 @@ where
                         coords: w,
                         steps: step,
                         grad_norm: gnorm,
+                        status: scg_stop(control, gnorm, grad.len()),
                     });
                 }
                 // Conjugacy can cancel the direction while the gradient
@@ -368,21 +370,25 @@ where
                 (f_new - f_old).abs() < params.tol_func * (1.0 + (objective_max - objective_min));
             w = trial;
             if solution_converged && objective_converged {
+                let grad_norm = l2(&grad_new);
                 return Ok(Report {
                     value: f_new,
                     coords: w,
                     steps: step + 1,
-                    grad_norm: l2(&grad_new),
+                    grad_norm,
+                    status: scg_stop(control, grad_norm, grad.len()),
                 });
             }
             f_old = f_new;
             grad_old = std::mem::replace(&mut grad, grad_new);
             if crate::vecops::dot(grad.view(), grad.view()) < f64::EPSILON {
+                let grad_norm = l2(&grad);
                 return Ok(Report {
                     value: f_old,
                     coords: w,
                     steps: step + 1,
-                    grad_norm: l2(&grad),
+                    grad_norm,
+                    status: scg_stop(control, grad_norm, grad.len()),
                 });
             }
         }
@@ -418,10 +424,24 @@ where
         step += 1;
     }
 
+    let grad_norm = l2(&grad);
     Ok(Report {
         value: f_old,
-        grad_norm: l2(&grad),
+        grad_norm,
         coords: w,
         steps: control.maxiter,
+        status: control.finish_status(grad_norm, grad.len(), true),
     })
+}
+
+/// SCG's step and objective tests are [`crate::Status::StepTolerance`]
+/// when `||g||` is still at or above `gtol`. A gradient below `gtol` stays
+/// [`crate::Status::Tolerance`]. The noise floor still wins when the
+/// measure is above `gtol` and below `c * sqrt(n_free) * eps_g`.
+fn scg_stop(control: &Control, grad: f64, n_free: usize) -> crate::report::Status {
+    match control.classify(grad, n_free) {
+        crate::report::Status::NoiseFloor => crate::report::Status::NoiseFloor,
+        crate::report::Status::Tolerance => crate::report::Status::Tolerance,
+        _ => crate::report::Status::StepTolerance,
+    }
 }

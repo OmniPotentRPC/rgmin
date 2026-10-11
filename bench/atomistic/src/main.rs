@@ -25,8 +25,8 @@ use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rgmin::{
     Accept, Conjugacy, Control, ExpParams, FfParams, FfTerms, FireKind, GeometryKind, Ghost, Lbfgs,
-    LindhParams, LineSearch, Method, Neighbours, PreconChoice, Restart, Solver,
-    bonded_terms, select_precon,
+    LindhParams, LineSearch, Method, Neighbours, PreconChoice, Restart, Solver, bonded_terms,
+    select_precon,
 };
 use rgpot_core::eindir::{
     rgpot_potential_free_eindir, rgpot_potential_new_eindir, rgpot_potential_t,
@@ -898,6 +898,7 @@ fn run_session(
         istep,
         maxmove: None,
         ftol_rel: None,
+        noise_floor: None,
     };
     let mut solver = Solver::new(method, control, x.len());
     solver.set_accept(accept);

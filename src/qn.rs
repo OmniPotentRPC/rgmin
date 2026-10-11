@@ -7,7 +7,7 @@ use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
-use crate::step::{l2, next_istep, qn_istep, take_step};
+use crate::step::{energy_noise_report, l2, next_istep, qn_istep, take_step};
 
 const CURVATURE: f64 = 1e-12;
 const SR1_SKIP: f64 = 1e-8;
@@ -40,8 +40,8 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
-            return Ok(done(value, pos, step, gnorm));
+        if control.halt(gnorm, grad.len()).is_some() {
+            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
         }
         let dir = -h.dot(&grad);
         let old = pos.clone();
@@ -57,6 +57,9 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let moved = t.moved;
         pos = t.x;
         value = t.f;
@@ -68,7 +71,15 @@ where
         }
         istep = qn_istep(control);
     }
-    Ok(done(value, pos, control.maxiter, l2(&grad)))
+    Ok(done(
+        value,
+        pos,
+        control.maxiter,
+        l2(&grad),
+        grad.len(),
+        control,
+        true,
+    ))
 }
 
 /// L-BFGS two-loop recursion (Nocedal-Wright 7.4), scaling 7.20.
@@ -122,8 +133,8 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
-            return Ok(done(value, pos, step, gnorm));
+        if control.halt(gnorm, grad.len()).is_some() {
+            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
         }
         let dir = -h.dot(&grad);
         let old = pos.clone();
@@ -139,6 +150,9 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let moved = t.moved;
         pos = t.x;
         value = t.f;
@@ -150,7 +164,15 @@ where
         }
         istep = qn_istep(control);
     }
-    Ok(done(value, pos, control.maxiter, l2(&grad)))
+    Ok(done(
+        value,
+        pos,
+        control.maxiter,
+        l2(&grad),
+        grad.len(),
+        control,
+        true,
+    ))
 }
 
 /// SR2 Hessian update from rgmin `sr2.hpp`.
@@ -176,8 +198,8 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
-            return Ok(done(value, pos, step, gnorm));
+        if control.halt(gnorm, grad.len()).is_some() {
+            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
         }
         let rhs = grad.mapv(|g| -g);
         let dir = solve_dense(&b, &rhs).unwrap_or(rhs);
@@ -194,6 +216,9 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let moved = t.moved;
         pos = t.x;
         value = t.f;
@@ -205,7 +230,15 @@ where
         }
         istep = qn_istep(control);
     }
-    Ok(done(value, pos, control.maxiter, l2(&grad)))
+    Ok(done(
+        value,
+        pos,
+        control.maxiter,
+        l2(&grad),
+        grad.len(),
+        control,
+        true,
+    ))
 }
 
 /// Steepest descent: `d = -g` every iteration.
@@ -226,8 +259,8 @@ where
     let mut istep = control.istep;
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
-            return Ok(done(value, pos, step, gnorm));
+        if control.halt(gnorm, grad.len()).is_some() {
+            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
         }
         let dir = grad.mapv(|g| -g);
         let t = take_step(
@@ -241,13 +274,24 @@ where
             control,
             None,
         );
+        if t.energy_noise {
+            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        }
         let lsstep = t.alpha;
         pos = t.x;
         value = t.f;
         grad = t.g;
         istep = next_istep(lsstep, control);
     }
-    Ok(done(value, pos, control.maxiter, l2(&grad)))
+    Ok(done(
+        value,
+        pos,
+        control.maxiter,
+        l2(&grad),
+        grad.len(),
+        control,
+        true,
+    ))
 }
 
 fn start<O>(obj: &O, init: impl Into<Array1<f64>>) -> Result<Array1<f64>>
@@ -264,12 +308,21 @@ where
     Ok(obj.bounds().clip(pos.view()))
 }
 
-fn done(value: f64, coords: Array1<f64>, steps: usize, grad_norm: f64) -> Report {
+fn done(
+    value: f64,
+    coords: Array1<f64>,
+    steps: usize,
+    grad_norm: f64,
+    n_free: usize,
+    control: &Control,
+    exhausted: bool,
+) -> Report {
     Report {
         value,
         coords,
         steps,
         grad_norm,
+        status: control.finish_status(grad_norm, n_free, exhausted),
     }
 }
 

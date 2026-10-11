@@ -22,7 +22,7 @@ use crate::error::{Error, Result};
 use crate::linesearch::{LineSearch, LineSearchOptions};
 use crate::qn::solve_spd;
 use crate::report::Report;
-use crate::step::{l2, qn_istep, take_step_with_options};
+use crate::step::{energy_noise_report, l2, qn_istep, take_step_with_options};
 use eindir_core::{DifferentiableObjective, Objective};
 
 /// How [`Lbfgs`] compares the gradient to [`Lbfgs::gtol`].
@@ -739,23 +739,28 @@ impl Lbfgs {
 
         for step in 0..control.maxiter {
             let gnorm = l2(&grad);
-            if gnorm < control.gtol {
+            if let Some(status) = control.halt(gnorm, grad.len()) {
                 return Ok(Report {
                     value,
                     coords: pos,
                     steps: step,
                     grad_norm: gnorm,
+                    status,
                 });
             }
-            self.step_objective(
+            let stall = self.step_objective(
                 obj, &mut pos, &mut value, &mut grad, &mut istep, linesearch, control, None,
             );
+            if stall {
+                return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+            }
         }
         Ok(Report {
             value,
             coords: pos,
             steps: control.maxiter,
             grad_norm: l2(&grad),
+            status: control.finish_status(l2(&grad), grad.len(), true),
         })
     }
 
@@ -763,6 +768,9 @@ impl Lbfgs {
     ///
     /// `atom_maxmove` caps the largest per-atom displacement of the
     /// accepted step; `None` leaves only `control.maxmove` in force.
+    ///
+    /// Returns whether every search in this iteration found no trial
+    /// whose decrease cleared `c * eps_f`. The point is then unchanged.
     pub fn step_objective<O>(
         &mut self,
         obj: &O,
@@ -773,7 +781,8 @@ impl Lbfgs {
         linesearch: LineSearch,
         control: &Control,
         atom_maxmove: Option<f64>,
-    ) where
+    ) -> bool
+    where
         O: DifferentiableObjective<f64> + ?Sized,
     {
         self.step_objective_with_direction(
@@ -788,7 +797,7 @@ impl Lbfgs {
             None,
             true,
             LineSearchOptions::default(),
-        );
+        )
     }
 
     pub(crate) fn step_objective_with_direction<O>(
@@ -804,7 +813,8 @@ impl Lbfgs {
         supplied_direction: Option<Array1<f64>>,
         record_pair: bool,
         options: LineSearchOptions,
-    ) where
+    ) -> bool
+    where
         O: DifferentiableObjective<f64> + ?Sized,
     {
         let allow_restart = supplied_direction.is_none();
@@ -837,10 +847,12 @@ impl Lbfgs {
             atom_maxmove,
             options,
         );
-        let t = if allow_restart && !t.moved && !self.memory.is_empty() {
-            // A failed search can reflect a curvature scale that no longer
-            // describes the objective. Retry the gradient direction once;
-            // supplied feasible directions retain their own constraints.
+        // A failed search can reflect a curvature scale that no longer
+        // describes the objective. Retry the gradient direction once.
+        // The energy floor fires only when both searches, or the only
+        // search, found no trial that cleared `c * eps_f`.
+        let (t, stall) = if allow_restart && !t.moved && !self.memory.is_empty() {
+            let first_noise = t.energy_noise;
             self.forget();
             let direction = self.direction(grad.view());
             #[cfg(feature = "highs")]
@@ -849,7 +861,7 @@ impl Lbfgs {
             } else {
                 direction
             };
-            take_step_with_options(
+            let retry = take_step_with_options(
                 obj,
                 pos,
                 *value,
@@ -860,9 +872,12 @@ impl Lbfgs {
                 control,
                 atom_maxmove,
                 options,
-            )
+            );
+            let stall = first_noise && retry.energy_noise;
+            (retry, stall)
         } else {
-            t
+            let stall = t.energy_noise;
+            (t, stall)
         };
         if t.moved && record_pair {
             let s = &t.x - &*pos;
@@ -873,6 +888,7 @@ impl Lbfgs {
         *value = t.f;
         *grad = t.g;
         *istep = qn_istep(control);
+        stall
     }
 }
 

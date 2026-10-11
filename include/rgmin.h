@@ -51,7 +51,7 @@ typedef struct rgmin_abi_stamp_t {
 
 #define RGMIN_ABI_VERSION_MAJOR 1
 #define RGMIN_ABI_VERSION_MINOR 32
-#define RGMIN_ABI_LAYOUT_REVISION 2
+#define RGMIN_ABI_LAYOUT_REVISION 3
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
@@ -100,13 +100,29 @@ _Static_assert(sizeof(rgmin_conjugacy_t) == sizeof(int32_t),
                "rgmin_conjugacy_t is i32-wide; do not build this header with -fshort-enums");
 #endif
 
-/** Outer-loop controls. \c memory is the L-BFGS pair cap. */
+/** Why a finished minimization stopped. */
+typedef enum rgmin_stop_t {
+    RGMIN_STOP_TOLERANCE = 0,
+    RGMIN_STOP_NOISE_FLOOR = 1,
+    RGMIN_STOP_STEP_TOLERANCE = 2,
+    RGMIN_STOP_BUDGET = 3
+} rgmin_stop_t;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),
+               "rgmin_stop_t is i32-wide; do not build this header with -fshort-enums");
+#endif
+
+/** Outer-loop controls. \c memory is the L-BFGS pair cap.
+ *  \c noise_eps <= 0 leaves the floor off. \c noise_c <= 0 selects 3.
+ */
 typedef struct rgmin_control_t {
     size_t maxiter;
     double gtol;
     double istep;
     size_t memory;
     double maxmove;
+    double noise_eps;
+    double noise_c;
 } rgmin_control_t;
 
 /** Result of \ref rgmin_minimize. */
@@ -114,6 +130,7 @@ typedef struct rgmin_report_t {
     double value;
     size_t steps;
     double grad_norm;
+    rgmin_stop_t stop;
 } rgmin_report_t;
 
 typedef rgmin_status_t (*rgmin_eval_fn)(void *user, const DLManagedTensorVersioned *x,

@@ -30,7 +30,7 @@ use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
 use crate::quickmin::{QuickMinState, quickmin_displacement, quickmin_rescale_velocity};
-use crate::report::Report;
+use crate::report::{Report, Status};
 use crate::rigid::{project_horizontal, project_out_rot_trans};
 use crate::step::{
     Taken, cap_alpha, l2, next_istep, nlcg_opening_alpha, qn_istep, scale_step, scale_step_atom,
@@ -837,6 +837,23 @@ impl Solver {
         l2(grad)
     }
 
+    /// Coordinates the stationarity measure runs over.
+    ///
+    /// A coordinate box drops entries whose bounds have no width. Every
+    /// other path uses the length of the horizontal or projected gradient,
+    /// which is the session dimension.
+    pub(crate) fn free_len(&self, bounds: &eindir_core::Bounds<f64>) -> usize {
+        if self.has_coordinate_box()
+            && self.manifold == ManifoldKind::Euclidean
+            && !self.project_rigid
+            && !self.has_equalities()
+        {
+            let n = self.dim.min(bounds.low.len()).min(bounds.high.len());
+            return (0..n).filter(|&k| bounds.high[k] > bounds.low[k]).count();
+        }
+        self.dim
+    }
+
     fn check_manifold(&self, n: usize) -> Result<()> {
         if self.manifold.required_dim(n).is_ok() {
             return Ok(());
@@ -1273,12 +1290,13 @@ impl Solver {
         };
         grad = self.horizontal_grad(x, &grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
-        if gnorm < self.control.gtol {
+        if let Some(status) = self.control.halt(gnorm, self.free_len(obj.bounds())) {
             return Ok(Report {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: gnorm,
+                status,
             });
         }
         let hess = obj.hessian(x.view());
@@ -1366,6 +1384,10 @@ impl Solver {
                     coords: x.clone(),
                     steps: self.steps,
                     grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+                    status: self.control.classify(
+                        self.stationarity_norm(obj.bounds(), x, &grad),
+                        self.free_len(obj.bounds()),
+                    ),
                 });
             }
         }
@@ -1419,6 +1441,10 @@ impl Solver {
             coords: x.clone(),
             steps: self.steps,
             grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+            status: self.control.classify(
+                self.stationarity_norm(obj.bounds(), x, &grad),
+                self.free_len(obj.bounds()),
+            ),
         })
     }
 
@@ -1470,6 +1496,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &gt),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &gt),
+                    self.free_len(obj.bounds()),
+                ),
             })
         } else {
             self.remember(x, value, &grad);
@@ -1479,6 +1509,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &grad),
+                    self.free_len(obj.bounds()),
+                ),
             })
         }
     }
@@ -1521,12 +1555,13 @@ impl Solver {
                 }
             }
         }
-        if gnorm < self.control.gtol {
+        if let Some(status) = self.control.halt(gnorm, self.free_len(obj.bounds())) {
             return Ok(Report {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: gnorm,
+                status,
             });
         }
         self.refresh_exp(obj, x, &grad)?;
@@ -1566,6 +1601,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &grad),
+                    self.free_len(obj.bounds()),
+                ),
             });
         }
 
@@ -1671,10 +1710,11 @@ impl Solver {
         }
         #[cfg(feature = "highs")]
         let boxed = self.has_coordinate_box();
+        let mut energy_stall = false;
         match &mut self.inner {
             Inner::Lbfgs(_) if !lbfgs_line_searched => {}
             Inner::Lbfgs(solver) => {
-                solver.step_objective_with_direction(
+                energy_stall = solver.step_objective_with_direction(
                     obj,
                     x,
                     &mut value,
@@ -1706,6 +1746,7 @@ impl Solver {
                     self.istep,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 *x = t.x;
                 value = t.f;
                 grad = t.g;
@@ -1769,6 +1810,7 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 *x = t.x;
                 value = t.f;
                 grad = t.g;
@@ -1840,6 +1882,7 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let moved = t.moved;
                 *x = t.x;
                 value = t.f;
@@ -1871,6 +1914,7 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let lsstep = t.alpha;
                 let moved = t.moved;
                 *x = t.x;
@@ -1904,6 +1948,7 @@ impl Solver {
                     1.0,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let lsstep = t.alpha;
                 let moved = t.moved;
                 *x = t.x;
@@ -1942,6 +1987,7 @@ impl Solver {
                     self.istep,
                     line_options,
                 );
+                energy_stall = t.energy_noise;
                 let lsstep = t.alpha;
                 *x = t.x;
                 value = t.f;
@@ -2118,11 +2164,19 @@ impl Solver {
 
         self.remember(x, value, &grad);
         self.steps += 1;
+        let grad_norm = self.stationarity_norm(obj.bounds(), x, &grad);
+        let mut status = self
+            .control
+            .classify(grad_norm, self.free_len(obj.bounds()));
+        if energy_stall && status == Status::Iterating {
+            status = Status::NoiseFloor;
+        }
         Ok(Report {
             value,
             coords: x.clone(),
             steps: self.steps,
-            grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+            grad_norm,
+            status,
         })
     }
 
@@ -2207,6 +2261,10 @@ impl Solver {
                 coords: x.clone(),
                 steps: self.steps,
                 grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
+                status: self.control.classify(
+                    self.stationarity_norm(obj.bounds(), x, &grad),
+                    self.free_len(obj.bounds()),
+                ),
             });
         }
         unreachable!("PSO slot populated above")
@@ -2272,6 +2330,7 @@ where
         g,
         alpha: if moved { direct_scale } else { 0.0 },
         moved,
+        energy_noise: false,
     }
 }
 
@@ -2379,6 +2438,7 @@ mod tests {
                 istep: 0.1,
                 maxmove: Some(0.01),
                 ftol_rel: None,
+                noise_floor: None,
             },
             2,
         )
@@ -2454,6 +2514,7 @@ mod tests {
                     istep: 0.1,
                     maxmove: Some(0.05),
                     ftol_rel: None,
+                    noise_floor: None,
                 },
                 2,
             );
@@ -2602,6 +2663,7 @@ mod retained_neb_guard_tests {
                 istep: 1.0,
                 maxmove: None,
                 ftol_rel: None,
+                noise_floor: None,
             },
             3,
         );
@@ -2637,6 +2699,7 @@ mod retained_neb_guard_tests {
                 istep: 1.0,
                 maxmove: None,
                 ftol_rel: None,
+                noise_floor: None,
             },
             3,
         );
@@ -2739,6 +2802,7 @@ mod retained_neb_guard_tests {
                 istep: 0.01,
                 maxmove: None,
                 ftol_rel: None,
+                noise_floor: None,
             },
             n,
         );

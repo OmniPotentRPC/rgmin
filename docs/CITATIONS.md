@@ -51,6 +51,17 @@ ISBN). Do not invent DOIs.
 | Packwood et al. 2016 Exp preconditioner | 10.1063/1.4947024 | A universal preconditioner for simulating condensed phase materials |
 | Lindh et al. 1995 model Hessian | 10.1016/0009-2614(95)00646-L | On the use of a Hessian model function in molecular geometry optimizations |
 | Makri, Ortner, Kermode 2019 FF preconditioner | 10.1063/1.5064465 | A preconditioning scheme for minimum energy path finding methods |
+| Goswami saddle metrics 2025 | 10.1063/5.0283639 | Bayesian hierarchical models for quantitative estimates for performance metrics applied to saddle search algorithms |
+| Dolan–Moré performance profiles | 10.1007/s101070100263 | Benchmarking optimization software with performance profiles |
+| Moré–Wild data profiles | 10.1137/080724083 | Benchmarking Derivative-Free Optimization Algorithms |
+| Gould–Scott pairwise profiles | 10.1145/2950048 | A Note on Performance Profiles for Benchmarking Software |
+| Kaplan–Meier 1958 | 10.1080/01621459.1958.10501452 | Nonparametric Estimation from Incomplete Observations |
+| Efron BCa 1987 | 10.1080/01621459.1987.10478410 | Better Bootstrap Confidence Intervals |
+| Howard confidence sequences 2021 | 10.1214/20-AOS1991 | Time-uniform, nonparametric, nonasymptotic confidence sequences |
+| Waudby-Smith aGRAPA 2024 | 10.1093/jrsssb/qkad009 | Estimating means of bounded random variables by betting |
+| Wald sequential tests 1945 | 10.1214/aoms/1177731118 | Sequential Tests of Statistical Hypotheses |
+| ECnoise Moré–Wild 2011 | 10.1137/100786125 | Estimating Computational Noise |
+| Noisy derivatives Moré–Wild 2012 | 10.1145/2168773.2168777 | Estimating Derivatives of Noisy Simulations |
 
 Polak-Ribiere 1969 and Hestenes-Stiefel 1952: cite the paper/book
 title in rustdoc if no DOI is on this list. Do not mint a DOI.

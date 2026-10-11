@@ -111,6 +111,12 @@ pub enum Error {
         /// What the assembly or the estimate refused.
         what: &'static str,
     },
+    /// ECnoise was given a sample or a line probe it cannot run.
+    #[error("ecnoise: {what}")]
+    EcNoise {
+        /// What the call refused.
+        what: &'static str,
+    },
     /// Named backend only computes the full spectrum. Partial `nev`
     /// is refused rather than silently solved as `n` and trimmed.
     #[error("eigensolver {kind} is full-spectrum only; nev {nev} < n {n}")]

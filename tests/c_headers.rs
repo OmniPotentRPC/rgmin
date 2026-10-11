@@ -18,8 +18,7 @@ fn library_dir(root: &Path) -> PathBuf {
         .join(profile)
 }
 
-#[test]
-fn public_c_header_compiles_and_checks_the_abi() {
+fn compile_and_run(source: &str, bin_name: &str) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let lib = library_dir(&root);
     let so = lib.join("librgmin.so");
@@ -32,11 +31,11 @@ fn public_c_header_compiles_and_checks_the_abi() {
     let output = env::var_os("CARGO_TARGET_TMPDIR")
         .map(PathBuf::from)
         .unwrap_or_else(env::temp_dir)
-        .join("rgmin_public_c_header");
+        .join(bin_name);
     let mut command = Command::new("cc");
     command
         .arg("-std=c11")
-        .arg(root.join("tests/ffi_smoke.c"))
+        .arg(root.join(source))
         .arg("-I")
         .arg(root.join("include"))
         .arg("-o")
@@ -72,4 +71,14 @@ fn public_c_header_compiles_and_checks_the_abi() {
         String::from_utf8_lossy(&ran.stdout),
         String::from_utf8_lossy(&ran.stderr)
     );
+}
+
+#[test]
+fn public_c_header_compiles_and_checks_the_abi() {
+    compile_and_run("tests/ffi_smoke.c", "rgmin_public_c_header");
+}
+
+#[test]
+fn c_header_reads_the_noise_floor_stop() {
+    compile_and_run("tests/c_noise_floor.c", "rgmin_c_noise_floor");
 }

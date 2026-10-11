@@ -1,0 +1,8 @@
+# rggate-csv 1
+system,method,seed,converged,iters,calls,energy,fmax,wall_s
+mol,cand,0,0,1,5,-1.0,1.0,0.01
+mol,base,0,1,10,40,-1.0,1e-3,0.02
+mol,cand,1,1,8,10,-1.0,1e-3,0.01
+mol,base,1,1,9,12,-2.0,1e-3,0.02
+mol,cand,2,1,4,6,-1.0,1e-3,0.01
+mol,base,2,0,20,30,-1.0,1.0,0.02

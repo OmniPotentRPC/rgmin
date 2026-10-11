@@ -52,6 +52,8 @@ pub mod lbfgs;
 pub mod lbfgs_qp;
 /// Matrix-free lowest Hessian eigenpair.
 pub mod lowest_mode;
+/// Moré and Wild computational-noise estimate and difference steps.
+pub mod noise;
 
 mod chase_eps;
 /// DLA-Future partial-spectrum window.
@@ -105,7 +107,7 @@ pub mod vecops;
 
 pub use accept::Accept;
 pub use adam::minimize_adam;
-pub use control::Control;
+pub use control::{Control, NoiseFloor};
 pub use dlaf_kind::DlaFutureParams;
 pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};
 pub use elpa_kind::{ElpaParams, ElpaSpectrum, ElpaStage, elpa_config, elpa_spectrum};
@@ -138,6 +140,11 @@ pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess};
 pub use newton::{HessianObjective, HessianOracle, NewtonKind, minimize_newton};
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
+pub use noise::{
+    DEFAULT_M, NoiseEstimate, NoiseFlag, ValueGradientNoise, ecnoise, estimate_second,
+    estimate_third, forward_step, gradient_dr, line_values, next_spacing, sample_gradient_noise,
+    sample_gradient_noise_k, sample_noise, sample_value_gradient_noise,
+};
 pub use oracle::Oracle;
 pub use precon::{
     AngleTerm, BondTerm, DihedralTerm, Exp, ExpParams, Ff, FfParams, FfTerms, GeometryKind, Ghost,
@@ -157,7 +164,7 @@ pub use quickmin::{
     QuickMinState, quickmin_baseline, quickmin_displacement, quickmin_project,
     quickmin_rescale_velocity,
 };
-pub use report::Report;
+pub use report::{Report, Status};
 pub use scg::{
     DirectionalCurvature, ScgOptions, ScgParams, ScgStepTolerance, minimize_scg,
     minimize_scg_exact, minimize_scg_exact_with_options, minimize_scg_with_options,

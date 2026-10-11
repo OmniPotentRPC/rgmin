@@ -71,12 +71,14 @@ cargo test --features capi
    :caption: How-To Guides
 
    howto/session
+   howto/noise
    howto/manifolds
    howto/embed-anneal
    howto/highs-qp
    howto/c-abi
    howto/precon
    howto/doxygen
+   howto/bench-gate
 
 .. toctree::
    :maxdepth: 2
@@ -85,6 +87,7 @@ cargo test --features capi
    explanation/linesearch
    explanation/quickmin
    explanation/diis
+   explanation/ecnoise
    explanation/quasi-newton
    explanation/trust-region
    explanation/scg
