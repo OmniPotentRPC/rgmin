@@ -19,7 +19,9 @@ import inspect
 import threading
 import time
 import weakref
+from collections import deque
 from collections.abc import Callable
+from types import TracebackType
 from typing import Any, cast
 
 import numpy as np
@@ -29,10 +31,10 @@ import rgmin
 
 _ASE_KEYS = frozenset({"master", "comm", "loginterval", "force_consistent"})
 _HESSIAN_METHODS = frozenset({"newton", "rfo", "dogleg"})
-# Serialises _calc_locks and _id_locks. Both maps are mutated from
-# optimizer threads, including finalizers, so every read and write
-# takes this lock. The calculator lock itself is acquired only after
-# this one is released.
+# Serialises _calc_locks and _id_locks. Finalizers must not block on
+# this lock: a collection can run while the creating thread already
+# holds it. They queue a release instead. The calculator lock is
+# acquired only after this one is released.
 _calc_guard = threading.Lock()
 _calc_locks: weakref.WeakKeyDictionary[Any, threading.Lock] = weakref.WeakKeyDictionary()
 
@@ -53,9 +55,41 @@ class _IdEntry:
         self.holders = 0
 
 
-# Keyed by id(calc). Presence means some lookup or optimizer still
-# owns the entry. holders is the number of live optimizers.
+# Keyed by id(calc). An entry is present while at least one optimizer
+# holds it. holders is that count.
 _id_locks: dict[int, _IdEntry] = {}
+_pending_release: deque[_IdEntry] = deque()
+
+
+class _CalcTable:
+    """Hold ``_calc_guard`` and apply queued finalizer releases.
+
+    Draining on entry picks up a release that lost the race to the
+    lock. Draining on exit applies a release queued by GC during the
+    critical section, including one caused by allocating an entry.
+    """
+
+    def __enter__(self) -> None:
+        _calc_guard.acquire()
+        try:
+            _drain_releases()
+        except BaseException:
+            _calc_guard.release()
+            raise
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        try:
+            _drain_releases()
+        finally:
+            _calc_guard.release()
+
+
+_calc_table = _CalcTable()
 
 
 def _ase_passthrough(options: dict[str, Any]) -> dict[str, Any]:
@@ -185,37 +219,51 @@ def _id_entry_for(calc: Any) -> _IdEntry | None:
 
 
 def _lock_for(calc: Any) -> threading.Lock | None:
-    """Return the adapter lock for ``calc``, creating an id-keyed entry if needed.
+    """Return the adapter lock for ``calc``.
 
-    A lookup does not drop any other entry. Lifetime of an id-keyed
-    entry is the optimizers that hold it, not a refcount guess.
+    A weak-referenceable calculator is stored in ``_calc_locks``. A
+    calculator that cannot be weakly referenced borrows the entry an
+    optimizer already holds, and a lookup does not create one.
     """
     if calc is None or bool(getattr(calc, "reentrant", False)):
         return None
     try:
-        with _calc_guard:
+        with _calc_table:
             lock = _calc_locks.get(calc)
             if lock is None:
                 lock = threading.Lock()
                 _calc_locks[calc] = lock
             return lock
     except TypeError:
-        with _calc_guard:
+        with _calc_table:
             entry = _id_entry_for(calc)
             if entry is None:
-                entry = _IdEntry(calc)
-                _id_locks[id(calc)] = entry
+                return None
             return entry.lock
 
 
 def _release_id_entry(entry: _IdEntry) -> None:
-    """Drop one optimizer hold. The finalizer calls this without ``self``."""
-    with _calc_guard:
-        if entry.holders <= 0:
+    """Queue one hold release. May run inside GC while ``_calc_guard`` is held."""
+    _pending_release.append(entry)
+    if _calc_guard.acquire(blocking=False):
+        try:
+            _drain_releases()
+        finally:
+            _calc_guard.release()
+
+
+def _drain_releases() -> None:
+    """Apply queued releases. Caller holds ``_calc_guard``."""
+    while True:
+        try:
+            entry = _pending_release.popleft()
+        except IndexError:
             return
+        if entry.holders <= 0:
+            continue
         entry.holders -= 1
         if entry.holders > 0:
-            return
+            continue
         key = id(entry.calc)
         if _id_locks.get(key) is entry:
             del _id_locks[key]
@@ -288,8 +336,11 @@ class Optimizer(_ASEOptimizer):
         self._calculator_lock()
 
     def close(self) -> None:
-        """Release this optimizer's hold on an id-keyed calculator lock."""
+        """Release the id-keyed hold, then close ASE's logfile and trajectory."""
         self._release_id_hold()
+        parent_close = getattr(super(), "close", None)
+        if callable(parent_close):
+            parent_close()
 
     def _release_id_hold(self) -> None:
         finalizer = self._id_finalizer
@@ -302,7 +353,7 @@ class Optimizer(_ASEOptimizer):
         if self._id_entry is not None and self._id_entry.calc is calc:
             return self._id_entry.lock
         self._release_id_hold()
-        with _calc_guard:
+        with _calc_table:
             entry = _id_entry_for(calc)
             if entry is None:
                 entry = _IdEntry(calc)
@@ -319,7 +370,7 @@ class Optimizer(_ASEOptimizer):
             self._release_id_hold()
             return None
         try:
-            with _calc_guard:
+            with _calc_table:
                 lock = _calc_locks.get(calc)
                 if lock is None:
                     lock = threading.Lock()

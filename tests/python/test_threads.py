@@ -195,12 +195,15 @@ def test_live_id_locks_survive_interleaved_lookups() -> None:
 
     first = _unweak_calculator()
     second = _unweak_calculator()
-    lock_first = _lock_for(first)
-    lock_second = _lock_for(second)
-    assert lock_first is not None and lock_second is not None
-    assert lock_first is not lock_second
-    assert _lock_for(first) is lock_first
-    assert _lock_for(second) is lock_second
+    # A lookup must not create a zero-holder entry. That entry would pin
+    # the calculator with nobody to release it.
+    assert _lock_for(first) is None
+    assert _lock_for(second) is None
+    for _ in range(256):
+        assert _lock_for(first) is None
+        assert _lock_for(second) is None
+    assert id(first) not in _id_locks
+    assert id(second) not in _id_locks
 
     atoms_first = Atoms("H", positions=[[0.2, 0.0, 0.0]])
     atoms_first.calc = first
@@ -208,8 +211,12 @@ def test_live_id_locks_survive_interleaved_lookups() -> None:
     atoms_second.calc = second
     opt_first = SD(atoms_first, logfile=None, maxstep=0.05)
     opt_second = SD(atoms_second, logfile=None, maxstep=0.05)
-    assert _lock_for(first) is lock_first
+    lock_first = _lock_for(first)
+    lock_second = _lock_for(second)
+    assert lock_first is not None and lock_second is not None
+    assert lock_first is not lock_second
     assert _lock_for(second) is lock_second
+    assert _lock_for(first) is lock_first
     assert opt_first._id_entry is not None and opt_second._id_entry is not None
     assert opt_first._id_entry.lock is lock_first
     assert opt_second._id_entry.lock is lock_second
@@ -225,6 +232,7 @@ def test_live_id_locks_survive_interleaved_lookups() -> None:
     opt_first.close()
     # first is still live. The entry is gone because no optimizer holds it.
     assert id(first) not in _id_locks
+    assert _lock_for(first) is None
     assert id(second) in _id_locks
     opt_second.close()
     assert id(second) not in _id_locks
@@ -317,3 +325,57 @@ def test_id_locked_calculator_steps_do_not_overlap() -> None:
         calc.done.set()
         opt_a.close()
         opt_b.close()
+
+
+def _build_trajectory_optimizers(tmp_path: Any, rounds: int) -> Any:
+    """Create and drop SD optimizers whose trajectory closes a cycle."""
+    from ase import Atoms
+
+    from rgmin.ase import SD
+
+    calc = _unweak_calculator()
+    for index in range(rounds):
+        atoms = Atoms("H", positions=[[0.2, 0.0, 0.0]])
+        atoms.calc = calc
+        SD(
+            atoms,
+            logfile=None,
+            trajectory=str(tmp_path / f"{index}.traj"),
+            maxstep=0.05,
+        )
+    return calc
+
+
+@pytest.mark.thread_unsafe
+@pytest.mark.timeout(30)
+def test_trajectory_finalizer_does_not_deadlock(tmp_path: Any) -> None:
+    """Collecting a trajectory optimizer must not block on the table lock."""
+    pytest.importorskip("ase")
+    import gc
+
+    from rgmin.ase import _id_locks
+
+    calc = _build_trajectory_optimizers(tmp_path, 40)
+    gc.collect()
+    assert id(calc) not in _id_locks
+    assert len(_id_locks) == 0
+
+
+@pytest.mark.thread_unsafe
+@pytest.mark.timeout(30)
+def test_trajectory_finalizer_under_tight_gc(tmp_path: Any) -> None:
+    """The same collection stays non-blocking when GC runs on every allocation."""
+    pytest.importorskip("ase")
+    import gc
+
+    from rgmin.ase import _id_locks
+
+    thresholds = gc.get_threshold()
+    gc.set_threshold(1, 1, 1)
+    try:
+        calc = _build_trajectory_optimizers(tmp_path, 20)
+        gc.collect()
+        assert id(calc) not in _id_locks
+        assert len(_id_locks) == 0
+    finally:
+        gc.set_threshold(*thresholds)

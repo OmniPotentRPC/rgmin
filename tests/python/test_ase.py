@@ -430,3 +430,51 @@ def test_pt7_emt_thread_hash() -> None:
     with ThreadPoolExecutor(max_workers=2) as pool:
         found = list(pool.map(lambda _i: once(), range(2)))
     assert found == [reference, reference]
+
+
+def _resource_closed(opt: Any) -> tuple[bool | None, bool | None]:
+    """Closed flags for the logfile and trajectory ASE opened, if it kept them."""
+    log_closed = getattr(opt.logfile, "closed", None)
+    trajectory = getattr(opt, "trajectory", None)
+    traj_closed = getattr(trajectory, "closed", None)
+    backend = getattr(trajectory, "backend", None)
+    traj_fd = getattr(backend, "fd", None)
+    if traj_closed is None and traj_fd is not None:
+        traj_closed = getattr(traj_fd, "closed", None)
+    return log_closed, traj_closed
+
+
+def test_close_closes_logfile_and_trajectory(tmp_path: Any) -> None:
+    """close() and the with-block close the files ASE opened."""
+    from ase.optimize import BFGS
+
+    def make(cls: type, name: str) -> Any:
+        sample = Atoms("H", positions=[[0.0, 0.0, 0.0]])
+        return cls(
+            sample,
+            logfile=str(tmp_path / f"{name}.log"),
+            trajectory=str(tmp_path / f"{name}.traj"),
+        )
+
+    def assert_closed_like_ase(opt: Any, stock: Any) -> None:
+        state = _resource_closed(opt)
+        assert state == _resource_closed(stock)
+        for flag in state:
+            if isinstance(flag, bool):
+                assert flag
+
+    sd = make(SD, "sd-close")
+    before = _resource_closed(sd)
+    sd.close()
+    stock = make(BFGS, "bfgs-close")
+    stock.close()
+    assert_closed_like_ase(sd, stock)
+    for was, now in zip(before, _resource_closed(sd), strict=True):
+        if was is False:
+            assert now is True
+
+    with make(SD, "sd-with") as sd_with:
+        pass
+    with make(BFGS, "bfgs-with") as stock_with:
+        pass
+    assert_closed_like_ase(sd_with, stock_with)
