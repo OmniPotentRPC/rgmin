@@ -109,22 +109,79 @@ gradient, or the count of box coordinates with positive width.
 
 One projection has variance ~tr(Σ) / n~, so the noise in ~||g||_2~
 is ~sqrt(n)~ times ~eps_g~. Comparing ~||g||_2~ with ~eps_g~ alone
-sits that factor too low. The stop is ~Status::NoiseFloor~. Spending
-the iteration budget above both tests is ~Status::Budget~. SCG's own
-step and objective tests, taken while ~||g||~ is still at or above
-~gtol~, are ~Status::StepTolerance~.
+sits that factor too low. The rms of a noisy gradient whose true
+norm is ~r~ is ~sqrt(r² + tr Σ)~. That equals the threshold
+~c sqrt(tr Σ)~ when ~r = sqrt(c² − 1) sqrt(tr Σ)~. At ~c = 3~ the
+50% firing radius is ~sqrt(c² − 1) sqrt(tr Σ) ≈ 2.83 sqrt(tr Σ)~.
+With an exact ~eps_g~, a radius of ~2 sqrt(tr Σ)~ already fires on
+93% of draws at ~n = 3~ and on all of them at ~n = 21~ and ~n = 114~.
+A measured ~eps_g~ sits lower. That spread, not the chi-square tail,
+is what a tighter radius is covering. On a 100-fold spread of
+component σ, one direction's factor ~sqrt(n wᵀΣw / tr Σ)~ runs from
+about 0.56 to 1.45. At ~k = 1~ the measured floor at
+~1.7 sqrt(tr Σ)~ fired on 112 of 200 seeds. At ~k = 8~ it cleared
+90%. At a true gradient of ~5 sqrt(tr Σ)~ the measured floor fired
+on at most 5 of 200 seeds, for ~k = 1~ and ~k = 8~, isotropic and
+anisotropic.
+
+~eps_f~ is the energy noise. ~sample_value_gradient_noise~ measures
+it on the same stencil as ~eps_g~, through one
+~value_and_gradient~ per sample. ~NoiseFloor::with_eps_f~ records
+it. The line search then stops with ~Status::NoiseFloor~, and keeps
+the pre-step point, when no trial decreases the energy by at least
+~c * eps_f~. A gradient floor does not see that stall: the gradient
+can sit far above ~3 sqrt(n) eps_g~ while every trial is inside the
+energy roundoff.
+
+The stop is ~Status::NoiseFloor~. Spending the iteration budget
+above both tests is ~Status::Budget~. SCG's own step and objective
+tests, taken while ~||g||~ is still at or above ~gtol~, are
+~Status::StepTolerance~.
+
+The bench noises the forces only on the Gaussian series, so a budget
+run there descends on an exact energy. A second series adds an
+independent energy draw of standard deviation ~σ · 1 Å~ at the same
+point. It is not the gradient of a potential. f32 rounds both the
+energy and the forces. ~calls~ includes the stencil. ~sample_calls~
+is that stencil alone, ~m + 1 = 9~ gradients for each spacing tried.
+
+The all-ones direction is a translation. LJ38's energy and forces do
+not change under it, so an f32 table is all zeros and ECnoise reports
+~StepTooSmall~. The measurement then uses the first coordinate axis,
+which changes a pair distance. On that axis at ~h = 1e-4~, LJ38 f32
+gives ~eps_g = 2.77e-6~ and ~eps_f = 5.32e-7~, both detected. Without
+~eps_f~ the line search first sticks at ~||g|| = 1.57e-2~, while
+~3 sqrt(114) eps_g = 8.9e-5~, and the run spends the budget (25590
+minimization calls, ~abs_de~ 1.0e-6). With ~eps_f~ the median f32
+floor stops in 63 calls, 18 of them the stencil, at ~abs_de~
+4.6e-6. The baseline ~gtol = 0.01~ stops in 57 calls at ~abs_de~
+2.3e-7. The call count is within twice baseline. The energy is not:
+the test stops on the first search whose best decrease misses
+~c * eps_f~, and the following search still clears it. The geometry
+is not translation invariant. Its f32 stencil on the all-ones
+direction detects ~eps_g = 3.17e-7~ and ~eps_f = 7.26e-8~. Without
+~eps_f~ the search first sticks at ~||g|| = 7.98e-5~ and spends the
+budget. With ~eps_f~ the median stop is 24 calls, 9 of them the
+stencil, at ~abs_de~ 1.3e-7. Baseline stops in 10 calls at ~abs_de~
+2.2e-6. The energy is closer. The calls are 2.4 times baseline.
+
+LJ38 ~1e-2-floor~ seed 27 is the censored Gaussian row. The measured
+~eps_g~ was ~2.47e-3~ against a true component σ of ~1e-2~, so
+~3 sqrt(114) eps_g = 0.079~ stayed under ~||g||~ (minimum 0.082,
+final 0.101, ~fmax~ 0.023). The energy is exact. The minimization
+used 22029 calls and the stencil another 18, 22047 in total,
+~abs_de~ 9.9e-6.
 
 A fixed ~gtol~ set under the floor keeps iterating after the gradient
 is noise. On LJ38 (~n = 114~) and on Lennard-Jones at the eOn
 heptamer coordinates (~lj-pt7-geom~, 7 free atoms, ~n = 21~) the
-scaled floor stops in tens of calls. The tight tolerance
-~0.1 sqrt(n) σ~ is censored at 2000 iterations on every Gaussian
-seed. At ~σ ≤ 3e-4~ the two endpoints agree to about ~1e-6~ eV. At
-~σ = 1e-2~ the early stop sits higher, near ~1e-3~ eV, while the
-budget-exhausted run is closer to the noise-free minimum. The
-baseline ~gtol = 0.01~ stops early at low noise and burns the same
-budget as the tight run once ~0.01~ is below the noisy gradient.
-f32-rounded forces on these geometries are smooth: the measured floor
-stays under the stalled gradient, and that run hits the budget. The
-geometry run is Lennard-Jones on those coordinates. It is not a Pt
-heptamer. rgpot is not linked.
+scaled floor stops in tens of calls once sampling is counted. The
+tight tolerance ~0.1 sqrt(n) σ~ is censored at 2000 iterations on
+every force-only Gaussian seed. At ~σ ≤ 3e-4~ the two endpoints
+agree to about ~1e-6~ eV. At ~σ = 1e-2~ the early stop sits higher,
+near ~1e-3~ eV, while the budget-exhausted run is closer to the
+noise-free minimum, because that run still sees an exact energy.
+The baseline ~gtol = 0.01~ stops early at low noise and burns the
+same budget as the tight run once ~0.01~ is below the noisy gradient.
+The geometry run is Lennard-Jones on those coordinates. It is not a
+Pt heptamer. rgpot is not linked.

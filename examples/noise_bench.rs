@@ -8,18 +8,36 @@
 //! sits near the contact distance.
 //!
 //! Noise is Gaussian force noise at 1e-4, 3e-4, 1e-3, 3e-3, and 1e-2 eV/Å,
-//! plus f32-rounded forces. A repeated point returns the same force.
-//! Variants are interleaved inside each seed: `floor` (eps_g measured
-//! once at the start, c = 3), `floor-declared` (`NoiseFloor::new` with
-//! the true component σ; for f32 that σ is the RMS gap between the f32
-//! and f64 forces at the start), `tight` (`gtol = 0.1 * sqrt(n) * σ`,
+//! plus f32-rounded forces. That Gaussian series perturbs the forces
+//! only, so a budget run still descends on an exact energy. The
+//! `*-energy` series adds an independent energy draw of standard
+//! deviation `σ · 1 Å` at the same point. It is not the gradient of a
+//! potential. A repeated point returns the same force and the same
+//! energy. f32 rounds both the energy and the forces.
+//!
+//! Variants are interleaved inside each seed: `floor` (`eps_g` and
+//! `eps_f` measured once at the start on one stencil, c = 3),
+//! `floor-declared` (`NoiseFloor::new` with the true component σ; for
+//! f32 that σ is the RMS gap between the f32 and f64 forces at the
+//! start, and `eps_f` is the absolute energy gap there; for the energy
+//! series `eps_f` is `σ · 1 Å`), `tight` (`gtol = 0.1 * sqrt(n) * σ`,
 //! below the floor), and `baseline` (main's stop, `gtol = 0.01`).
 //!
-//! Thirty seeds, 2000 iterations. A budget hit stays in the table with
-//! `converged=0`. `abs_de` is `|E − E_ref|` against the noise-free
-//! minimum from the same start. `rmsd` is Kabsch-aligned for LJ38. For
-//! `lj-pt7-geom` the fixed atoms are the frame, so the RMSD is the free
-//! atoms in that frame.
+//! `calls` counts minimization and the noise samples. `sample_calls`
+//! is the stencil (`m + 1 = 9` gradients per spacing tried, including
+//! retries). Thirty seeds, 2000 iterations. A budget hit stays in the
+//! table with `converged=0`. `abs_de` is `|E − E_ref|` against the
+//! noise-free minimum from the same start. `rmsd` is Kabsch-aligned
+//! for LJ38. For `lj-pt7-geom` the fixed atoms are the frame, so the
+//! RMSD is the free atoms in that frame.
+//!
+//! LJ38 `1e-2-floor` seed 27 is the censored Gaussian row. ECnoise
+//! returned `eps_g = 2.47e-3` where the true component σ is `1e-2`, so
+//! `3 sqrt(114) eps_g = 0.079` stayed under `||g||` for all 2000
+//! iterations (the minimum was 0.082, the final value 0.101). The
+//! energy on that series is exact, so the run kept descending.
+//! Minimization used 22029 calls and the stencil another 18
+//! (`calls` 22047), `abs_de` 9.9e-6.
 //!
 //! With `--features par` the second table times sampling at 1, 2, 4,
 //! and 8 threads.
@@ -31,7 +49,7 @@ use eindir_core::{DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rgmin::{
     Control, LineSearch, Method, NoiseFlag, NoiseFloor, Status, minimize_method, next_spacing,
-    sample_gradient_noise,
+    sample_value_gradient_noise,
 };
 
 const SEEDS: u64 = 30;
@@ -42,7 +60,10 @@ const MAXITER: usize = 2000;
 #[derive(Clone, Copy)]
 enum ForceNoise {
     F32,
+    /// Force noise only. The energy is exact.
     Gaussian(f64),
+    /// Force noise `sigma` and an independent energy noise of std `sigma * 1 Å`.
+    Consistent(f64),
 }
 
 #[derive(Clone, Copy)]
@@ -138,13 +159,18 @@ impl Cluster {
                 g[3 * i + 2] -= fz;
             }
         }
-        if let ForceNoise::Gaussian(sigma) = self.noise {
-            if sigma > 0.0 {
+        match self.noise {
+            ForceNoise::Gaussian(sigma) | ForceNoise::Consistent(sigma) if sigma > 0.0 => {
                 let key = position_key(x);
                 for (i, component) in g.iter_mut().enumerate() {
                     *component += sigma * normal(self.seed, key, i as u64);
                 }
+                if let ForceNoise::Consistent(sigma) = self.noise {
+                    // σ · 1 Å. The draw is not the derivative of a potential.
+                    energy += sigma * normal(self.seed, key, 1 << 20);
+                }
             }
+            _ => {}
         }
         (energy, Array1::from_vec(g))
     }
@@ -334,29 +360,78 @@ fn relax(cluster: &Cluster, x: Array1<f64>) -> (Array1<f64>, f64) {
     (report.coords, report.value)
 }
 
-fn measure_eps(cluster: &Cluster, x: ArrayView1<f64>) -> f64 {
-    let dir = Array1::ones(x.len());
+/// `(eps_g, eps_f)` from one stencil. `eps_f` is `None` when ECnoise
+/// refuses the energy table at the spacing that accepted `eps_g`.
+/// Retries follow the gradient flag, the same schedule as before.
+///
+/// The first try is the all-ones direction. On LJ38 that direction is a
+/// translation, so the energy and the forces are unchanged and an f32
+/// table is all zeros (`StepTooSmall`). The retry is the first coordinate
+/// axis, which changes a pair distance. A Gaussian series that already
+/// detects noise on the translation stays there.
+fn measure_noise(cluster: &Cluster, x: ArrayView1<f64>) -> (f64, Option<f64>) {
+    let mut dir = Array1::ones(x.len());
+    let mut broke_translation = false;
     let mut h = 1e-4;
+    let mut eps_f = None;
     for _ in 0..6 {
-        let est =
-            sample_gradient_noise(cluster, x, dir.view(), h, 0, cluster.seed.wrapping_add(17))
-                .expect("gradient noise sample");
-        if est.ok == NoiseFlag::Detected && est.eps > 0.0 {
-            return est.eps;
+        let est = sample_value_gradient_noise(
+            cluster,
+            x,
+            dir.view(),
+            h,
+            0,
+            cluster.seed.wrapping_add(17),
+        )
+        .expect("value and gradient noise");
+        if !broke_translation
+            && est.gradient.ok == NoiseFlag::StepTooSmall
+            && est.value.ok == NoiseFlag::StepTooSmall
+        {
+            dir.fill(0.0);
+            dir[0] = 1.0;
+            broke_translation = true;
+            h = 1e-4;
+            continue;
         }
-        match next_spacing(h, est.ok) {
+        eps_f = if est.value.ok == NoiseFlag::Detected && est.value.eps > 0.0 {
+            Some(est.value.eps)
+        } else {
+            None
+        };
+        if est.gradient.ok == NoiseFlag::Detected && est.gradient.eps > 0.0 {
+            return (est.gradient.eps, eps_f);
+        }
+        match next_spacing(h, est.gradient.ok) {
             Some(next) if next.is_finite() && next > 0.0 => h = next,
             _ => break,
         }
     }
-    component_sigma(cluster, x)
+    (component_sigma(cluster, x), eps_f)
 }
 
 fn component_sigma(cluster: &Cluster, x: ArrayView1<f64>) -> f64 {
     match cluster.noise {
-        ForceNoise::Gaussian(sigma) if sigma > 0.0 => sigma,
+        ForceNoise::Gaussian(sigma) | ForceNoise::Consistent(sigma) if sigma > 0.0 => sigma,
         ForceNoise::F32 => f32_sigma(cluster, x),
-        ForceNoise::Gaussian(_) => 1e-16,
+        ForceNoise::Gaussian(_) | ForceNoise::Consistent(_) => 1e-16,
+    }
+}
+
+fn f32_energy_gap(cluster: &Cluster, x: ArrayView1<f64>) -> f64 {
+    let wide = cluster.with_noise(ForceNoise::Gaussian(0.0), 0);
+    let narrow = cluster.with_noise(ForceNoise::F32, 0);
+    (wide.eval(x) - narrow.eval(x)).abs()
+}
+
+fn declared_eps_f(noise: ForceNoise, cluster: &Cluster, x: ArrayView1<f64>) -> Option<f64> {
+    match noise {
+        ForceNoise::F32 => {
+            let gap = f32_energy_gap(cluster, x);
+            (gap > 0.0).then_some(gap)
+        }
+        ForceNoise::Consistent(sigma) if sigma > 0.0 => Some(sigma),
+        _ => None,
     }
 }
 
@@ -386,6 +461,7 @@ struct Row {
     converged: u8,
     iters: usize,
     calls: u64,
+    sample_calls: u64,
     energy: f64,
     fmax: f64,
     wall_s: f64,
@@ -429,12 +505,14 @@ fn run_case(case: Case<'_>) -> Row {
     } else {
         component_sigma(&obj, start.view())
     };
-    let measured = if matches!(variant, Variant::Floor) {
-        measure_eps(&obj, start.view())
+    let (measured, measured_f, sample_calls) = if matches!(variant, Variant::Floor) {
+        let (eps_g, eps_f) = measure_noise(&obj, start.view());
+        let sample_calls = obj.calls.load(Ordering::SeqCst);
+        obj.calls.store(0, Ordering::SeqCst);
+        (eps_g, eps_f, sample_calls)
     } else {
-        0.0
+        (0.0, None, 0)
     };
-    obj.calls.store(0, Ordering::SeqCst);
     let mut control = Control {
         maxiter: MAXITER,
         gtol: BASE_GTOL,
@@ -447,12 +525,20 @@ fn run_case(case: Case<'_>) -> Row {
         Variant::Baseline => "baseline",
         Variant::Floor => {
             control.gtol = 1e-14;
-            control.noise_floor = Some(NoiseFloor::new(measured));
+            let mut floor = NoiseFloor::new(measured);
+            if let Some(eps_f) = measured_f {
+                floor = floor.with_eps_f(eps_f);
+            }
+            control.noise_floor = Some(floor);
             "floor"
         }
         Variant::FloorDeclared => {
             control.gtol = 1e-14;
-            control.noise_floor = Some(NoiseFloor::new(sigma));
+            let mut floor = NoiseFloor::new(sigma);
+            if let Some(eps_f) = declared_eps_f(noise, &obj, start.view()) {
+                floor = floor.with_eps_f(eps_f);
+            }
+            control.noise_floor = Some(floor);
             "floor-declared"
         }
         Variant::Tight => {
@@ -469,7 +555,7 @@ fn run_case(case: Case<'_>) -> Row {
         linesearch(),
     );
     let wall_s = t0.elapsed().as_secs_f64();
-    let calls = obj.calls.load(Ordering::SeqCst);
+    let calls = obj.calls.load(Ordering::SeqCst) + sample_calls;
     let (coords, energy, iters, status) = match report {
         Ok(report) => (report.coords, report.value, report.steps, report.status),
         Err(_) => (start.clone(), f64::NAN, MAXITER, Status::Budget),
@@ -508,6 +594,7 @@ fn run_case(case: Case<'_>) -> Row {
         converged,
         iters,
         calls,
+        sample_calls,
         energy,
         fmax: fm,
         wall_s,
@@ -680,6 +767,11 @@ fn main() {
         ("1e-3", ForceNoise::Gaussian(1e-3)),
         ("3e-3", ForceNoise::Gaussian(3e-3)),
         ("1e-2", ForceNoise::Gaussian(1e-2)),
+        ("1e-4-energy", ForceNoise::Consistent(1e-4)),
+        ("3e-4-energy", ForceNoise::Consistent(3e-4)),
+        ("1e-3-energy", ForceNoise::Consistent(1e-3)),
+        ("3e-3-energy", ForceNoise::Consistent(3e-3)),
+        ("1e-2-energy", ForceNoise::Consistent(1e-2)),
     ];
     let variants = [
         Variant::Floor,
@@ -689,7 +781,7 @@ fn main() {
     ];
 
     println!(
-        "system,method,seed,converged,iters,calls,energy,fmax,wall_s,endpoint,abs_de,rmsd,reference"
+        "system,method,seed,converged,iters,calls,sample_calls,energy,fmax,wall_s,endpoint,abs_de,rmsd,reference"
     );
     let mut rows = Vec::new();
     for seed in 0..SEEDS {
@@ -708,7 +800,7 @@ fn main() {
             for (nname, noise) in noises {
                 let declared = match noise {
                     ForceNoise::F32 => f32_sig,
-                    ForceNoise::Gaussian(sigma) => sigma,
+                    ForceNoise::Gaussian(sigma) | ForceNoise::Consistent(sigma) => sigma,
                 };
                 for variant in variants {
                     let row = run_case(Case {
@@ -725,12 +817,13 @@ fn main() {
                         declared,
                     });
                     println!(
-                        "{system},{method},{seed},{converged},{iters},{calls},{energy:.8},{fmax:.6e},{wall:.6},{endpoint},{abs_de:.6e},{rmsd:.6e},{ref_e:.8}",
+                        "{system},{method},{seed},{converged},{iters},{calls},{sample},{energy:.8},{fmax:.6e},{wall:.6},{endpoint},{abs_de:.6e},{rmsd:.6e},{ref_e:.8}",
                         method = row.method,
                         seed = row.seed,
                         converged = row.converged,
                         iters = row.iters,
                         calls = row.calls,
+                        sample = row.sample_calls,
                         energy = row.energy,
                         fmax = row.fmax,
                         wall = row.wall_s,
@@ -747,7 +840,7 @@ fn main() {
 
     eprintln!("# median calls, censoring, median abs_de and rmsd over {SEEDS} seeds");
     eprintln!(
-        "# system noise variant calls_median calls_lo calls_hi censored abs_de_median rmsd_median"
+        "# system noise variant calls_median calls_lo calls_hi sample_calls_median censored abs_de_median rmsd_median"
     );
     let mut keys: Vec<(&str, &str, &str)> = rows
         .iter()
@@ -761,14 +854,16 @@ fn main() {
             .filter(|r| r.system == system && r.noise == noise && r.variant == variant)
             .collect();
         let mut calls: Vec<f64> = group.iter().map(|r| r.calls as f64).collect();
+        let mut sample: Vec<f64> = group.iter().map(|r| r.sample_calls as f64).collect();
         let mut de: Vec<f64> = group.iter().map(|r| r.abs_de).collect();
         let mut rms: Vec<f64> = group.iter().map(|r| r.rmsd).collect();
         let censored = group.iter().filter(|r| r.converged == 0).count();
         let (cmed, clo, chi) = median_range(&mut calls);
+        let (smed, _, _) = median_range(&mut sample);
         let (dmed, _, _) = median_range(&mut de);
         let (rmed, _, _) = median_range(&mut rms);
         eprintln!(
-            "# {system} {noise} {variant}: calls {cmed:.0} range {clo:.0}..{chi:.0} censored {censored}/{SEEDS} abs_de {dmed:.3e} rmsd {rmed:.3e}"
+            "# {system} {noise} {variant}: calls {cmed:.0} range {clo:.0}..{chi:.0} sample_calls {smed:.0} censored {censored}/{SEEDS} abs_de {dmed:.3e} rmsd {rmed:.3e}"
         );
     }
 
