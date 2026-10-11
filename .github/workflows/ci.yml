@@ -135,16 +135,10 @@ jobs:
           name: unstripped-libs
           path: isa-staging/
 
-  # TODO: repin to OmniPotentRPC/rgpot/.github/workflows/isa-audit.yml@main
-  # once ci/isa-audit merges. Until then the caller is that branch at
-  # 8957850fd15005ea460ba336781ed152f7ee3d92.
   isa-audit:
     name: isa audit
     needs: isa-build
-    permissions:
-      contents: read
-      actions: write
-    uses: OmniPotentRPC/rgpot/.github/workflows/isa-audit.yml@8957850fd15005ea460ba336781ed152f7ee3d92
+    uses: OmniPotentRPC/rgpot/.github/workflows/isa-audit.yml@06638f2ece83b12731b387ba819b67dc2151556b
     with:
       artifact-name: unstripped-libs
       allow-file: isa-allow.toml
