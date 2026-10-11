@@ -33,8 +33,9 @@ does not fit in a signed 64-bit integer is a =ValueError=. A count
 passed as a float or a bool, for example =memory= set to =1.5=, is
 also a =ValueError= whose message says it must be an int.
 =TypeError= means an array has the wrong dtype or order, an option
-value is not a bool, an int, a float, or a str, or =f_and_grad= did
-not return =(value, gradient)=.
+value is not a bool, an int, a float, or a str, =method= is not a
+string or a =Method=, or =f_and_grad= did not return
+=(value, gradient)=.
 =RuntimeError= means the solver is already in use on another thread,
 or the native step failed. The message is the text reported by the
 library. =Solver.step= on Newton, RFO, or dogleg, with no Hessian
