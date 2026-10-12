@@ -3,7 +3,7 @@
 # not emit vfmadd. AVX-512 is avx512f plus fma, and only on rustc >= 1.89.
 
 [[allow]]
-symbol = 'rgmin::vecops::.*avx2_version.*'
+symbol = 'rgmin::vecops::.*avx2(_fma)?_version.*'
 features = ["avx", "avx2", "fma"]
 reason = "multiversion x86_64+avx2+fma clone and the direct avx2 shim"
 
