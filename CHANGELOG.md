@@ -15,13 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extra. The wheel is built with scikit-build-core, Corrosion, and
   `nanobind_add_module(_core FREE_THREADED ...)`.
 - Vector kernels (`dot`, `sum`, `nrm2`, `axpy`, `scale`, `mul_assign`,
-  `div_assign_floor`) use the ndarray 0.17 eight-partial tree.
-  The `simd` feature, now default, compiles that loop with
-  multiversion 0.9 for `x86_64+avx512f` (rustc >= 1.89),
-  `x86_64+avx2`, `aarch64+sve`, and `aarch64+neon`. `RGMIN_SIMD`
-  selects a clone. Multiply and add stay separate. The `par` feature
-  folds each contiguous chunk of 4096 with that tree, then adds the
-  chunk totals from the first index upward.
+  `div_assign_floor`) dispatch at runtime. `dot` and `axpy` accumulate
+  with `f64::mul_add`. `dot` keeps eight partials, adds those pairs
+  from `p0+p4` upward, then fuses the tail. The portable clone is that
+  same `mul_add` loop and is the bit reference for every ISA. The
+  `simd` feature, now default, compiles the loop with multiversion 0.9
+  for `x86_64+avx512f+fma` (rustc >= 1.89), `x86_64+avx2+fma`,
+  `aarch64+sve`, and `aarch64+neon`. `RGMIN_SIMD` selects a clone.
+  A CPU that cannot run the selected clone stays on the portable path.
+  The `par` feature folds each contiguous chunk of 4096 with that tree,
+  then adds the chunk totals from the first index upward.
+  The wall ratios below were measured on the unfused kernels.
   On this host (KVM, Intel Xeon family 6 model 207, AVX2 and AVX-512F)
   the auto path versus `main`, five interleaved process runs, had
   axpy geometric-mean wall ratios 0.940, 0.870, and 1.000 at

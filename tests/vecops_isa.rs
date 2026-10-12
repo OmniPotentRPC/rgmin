@@ -1,11 +1,12 @@
 //! Bit identity of the W = 8 vector kernels against ndarray.
 //!
-//! The golden file is the SHA-256 of the scalar path. Every clone this
-//! CPU can run has to reproduce it, including `par` at 1, 2, 3, and 8
-//! threads on a forced path. Auto with `par` keeps axpy and scale on
-//! that hash. Long auto reductions are contiguous chunks of 4096,
-//! identical at every thread count. A clone this CPU cannot run is
-//! reported as not exercised.
+//! The golden file is the SHA-256 of the portable `mul_add` path.
+//! Every clone this CPU can run has to reproduce it, including `par`
+//! at 1, 2, 3, and 8 threads on a forced path. Auto with `par` keeps
+//! axpy and scale on that hash. Long auto reductions are contiguous
+//! chunks of 4096, identical at every thread count. A clone this CPU
+//! cannot run is reported as not exercised. `dot` and `axpy` are fused,
+//! so they are not the ndarray product.
 
 use ndarray::Array1;
 use rgmin::vecops::{
@@ -152,7 +153,42 @@ fn bits(a: f64, b: f64) -> bool {
     a.to_bits() == b.to_bits()
 }
 
-fn assert_matches_ndarray() {
+/// Eight partials, each a `mul_add`, then the same pair tree as `dot`.
+fn portable_dot(xs: &[f64], ys: &[f64]) -> f64 {
+    let n = xs.len();
+    let mut i = 0;
+    let mut sum = 0.0;
+    let (mut p0, mut p1, mut p2, mut p3, mut p4, mut p5, mut p6, mut p7) =
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    while i + 8 <= n {
+        p0 = xs[i].mul_add(ys[i], p0);
+        p1 = xs[i + 1].mul_add(ys[i + 1], p1);
+        p2 = xs[i + 2].mul_add(ys[i + 2], p2);
+        p3 = xs[i + 3].mul_add(ys[i + 3], p3);
+        p4 = xs[i + 4].mul_add(ys[i + 4], p4);
+        p5 = xs[i + 5].mul_add(ys[i + 5], p5);
+        p6 = xs[i + 6].mul_add(ys[i + 6], p6);
+        p7 = xs[i + 7].mul_add(ys[i + 7], p7);
+        i += 8;
+    }
+    sum = sum + (p0 + p4);
+    sum = sum + (p1 + p5);
+    sum = sum + (p2 + p6);
+    sum = sum + (p3 + p7);
+    while i < n {
+        sum = xs[i].mul_add(ys[i], sum);
+        i += 1;
+    }
+    sum
+}
+
+fn portable_axpy(a: f64, xs: &[f64], ys: &mut [f64]) {
+    for i in 0..xs.len() {
+        ys[i] = a.mul_add(xs[i], ys[i]);
+    }
+}
+
+fn assert_matches_reference() {
     let mut cases: Vec<(usize, bool)> = lengths().into_iter().map(|n| (n, false)).collect();
     for n in [2usize, 8, 9, 17, 67] {
         cases.push((n, true));
@@ -164,10 +200,10 @@ fn assert_matches_ndarray() {
             y[1] = f64::from_bits(0x7ff8_0000_0000_0001);
         }
         let got = dot(x.view(), y.view());
-        let expect = x.dot(&y);
+        let expect = portable_dot(x.as_slice().unwrap(), y.as_slice().unwrap());
         assert!(
             bits(got, expect),
-            "dot n={n} got {got:?} ({:#x}) ndarray {expect:?} ({:#x})",
+            "dot n={n} got {got:?} ({:#x}) portable {expect:?} ({:#x})",
             got.to_bits(),
             expect.to_bits()
         );
@@ -180,17 +216,21 @@ fn assert_matches_ndarray() {
             expect.to_bits()
         );
         let got = nrm2(x.view());
-        let expect = x.dot(&x).sqrt();
+        let expect = portable_dot(x.as_slice().unwrap(), x.as_slice().unwrap()).sqrt();
         assert!(
             bits(got, expect),
-            "nrm2 n={n} got {got:?} ({:#x}) ndarray {expect:?} ({:#x})",
+            "nrm2 n={n} got {got:?} ({:#x}) portable {expect:?} ({:#x})",
             got.to_bits(),
             expect.to_bits()
         );
         let mut z = y.clone();
         axpy(AXPY_ALPHA, x.view(), &mut z);
         let mut reference = y.clone();
-        reference.scaled_add(AXPY_ALPHA, &x);
+        portable_axpy(
+            AXPY_ALPHA,
+            x.as_slice().unwrap(),
+            reference.as_slice_mut().unwrap(),
+        );
         for i in 0..n {
             assert_eq!(
                 z[i].to_bits(),
@@ -267,10 +307,10 @@ fn cpu_flags_and_clone_availability() {
 }
 
 #[test]
-fn scalar_matches_ndarray_and_golden() {
+fn scalar_matches_the_portable_path_and_golden() {
     let _guard = Guard;
     assert!(force_simd_path("scalar"));
-    assert_matches_ndarray();
+    assert_matches_reference();
     let got = kernel_digests();
     let expect_dot = golden("dot");
     if std::env::var_os("RGMIN_PRINT_GOLDEN").is_some() {
@@ -316,7 +356,7 @@ fn every_runnable_clone_matches_the_golden_hash() {
             assert_eq!(got.scale, scalar.scale, "auto scale");
             continue;
         }
-        assert_matches_ndarray();
+        assert_matches_reference();
         let got = kernel_digests();
         assert_eq!(got.dot, scalar.dot, "{name} dot");
         assert_eq!(got.sum, scalar.sum, "{name} sum");
@@ -352,7 +392,7 @@ fn par_matches_scalar_at_one_two_three_and_eight_threads() {
                 }
                 assert!(force_simd_path(name));
                 println!("isa par threads={threads} path={name}: exercised");
-                assert_matches_ndarray();
+                assert_matches_reference();
                 let got = kernel_digests();
                 assert_eq!(got.dot, scalar.dot, "{name} threads {threads}");
                 assert_eq!(got.axpy, scalar.axpy, "{name} threads {threads}");
@@ -429,6 +469,58 @@ fn parallel_reductions_match_contiguous_chunks_at_every_thread_count() {
     }
 }
 
+fn fma_probe() -> (Array1<f64>, Array1<f64>, f64, f64) {
+    // Index 0 fills partial p0. Index 8 is the tail, fused into that sum.
+    // (1+eps)*(1-eps) rounds to 1, so a split product cancels the -1.
+    // One mul_add keeps the -eps^2 term.
+    let eps = f64::EPSILON;
+    let mut x = Array1::zeros(9);
+    let mut y = Array1::zeros(9);
+    x[0] = -1.0;
+    y[0] = 1.0;
+    x[8] = 1.0 + eps;
+    y[8] = 1.0 - eps;
+    let split = (x[0] * y[0]) + (x[8] * y[8]);
+    let fused = x[8].mul_add(y[8], x[0].mul_add(y[0], 0.0));
+    (x, y, split, fused)
+}
+
+#[test]
+fn a_strided_view_uses_the_same_mul_add_tree() {
+    let _guard = Guard;
+    clear_simd_path();
+    let (x, y) = pair(32);
+    let x2 = x.view().into_shape_with_order((16, 2)).unwrap();
+    let y2 = y.view().into_shape_with_order((16, 2)).unwrap();
+    let colx = x2.column(0);
+    let coly = y2.column(0);
+    assert!(colx.as_slice().is_none());
+    let xs: Vec<f64> = colx.iter().copied().collect();
+    let ys: Vec<f64> = coly.iter().copied().collect();
+    assert_eq!(dot(colx, coly).to_bits(), portable_dot(&xs, &ys).to_bits());
+}
+
+#[test]
+fn dot_fuses_the_product_that_a_split_multiply_would_round_away() {
+    let _guard = Guard;
+    let (x, y, split, fused) = fma_probe();
+    assert_ne!(split.to_bits(), fused.to_bits());
+    for name in ["scalar", "auto", "avx2", "avx512", "neon", "sve"] {
+        let ran = if name == "auto" {
+            clear_simd_path();
+            true
+        } else {
+            force_simd_path(name)
+        };
+        if !ran {
+            continue;
+        }
+        let got = dot(x.view(), y.view());
+        assert_eq!(got.to_bits(), fused.to_bits(), "{name}");
+        assert_ne!(got.to_bits(), split.to_bits(), "{name}");
+    }
+}
+
 #[test]
 fn an_unusable_override_falls_back_to_scalar_bits() {
     let _guard = Guard;
@@ -441,7 +533,7 @@ fn an_unusable_override_falls_back_to_scalar_bits() {
     let _ran = force_simd_path("sve");
     let (x, y) = pair(32);
     let got = dot(x.view(), y.view());
-    let expect = x.dot(&y);
+    let expect = portable_dot(x.as_slice().unwrap(), y.as_slice().unwrap());
     assert!(bits(got, expect));
     if !simd_clone_usable("sve") {
         assert!(bits(got, scalar));

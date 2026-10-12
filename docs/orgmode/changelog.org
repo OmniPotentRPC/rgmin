@@ -6,11 +6,13 @@
 
 ** Unreleased
 
-Contiguous vector kernels use the ndarray 0.17 eight-partial tree.
-The ~simd~ feature is on by default and compiles that loop with
-multiversion 0.9 (~x86_64+avx512f~ on rustc >= 1.89, ~x86_64+avx2~,
-~aarch64+sve~, ~aarch64+neon~). ~RGMIN_SIMD~ selects a clone.
-The ~par~ feature uses the same tree and fixed chunks of 4096.
+Contiguous vector kernels dispatch at runtime.
+~dot~ and ~axpy~ accumulate with ~f64::mul_add~, and the portable
+clone is the bit reference. The ~simd~ feature is on by default and
+compiles that loop with multiversion 0.9 (~x86_64+avx512f+fma~ on
+rustc >= 1.89, ~x86_64+avx2+fma~, ~aarch64+sve~, ~aarch64+neon~).
+~RGMIN_SIMD~ selects a clone. The ~par~ feature folds contiguous
+chunks of 4096 and adds those totals from the first index upward.
 On this host the axpy wall ratio at n = 30000 had a Holm upper bound
 below 1, and no auto size was slower beyond its interval, so the
 clones are default. The pooled atomistic wall interval contained 1.

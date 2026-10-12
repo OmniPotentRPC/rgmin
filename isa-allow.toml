@@ -1,16 +1,16 @@
 # Dispatched vector kernels. Baseline outside these symbols stays
-# x86-64 (v1) and armv8-a. FMA is not listed: the clones do not enable it.
-# AVX-512 is avx512f only, and only on rustc >= 1.89.
+# x86-64 (v1) and armv8-a. The portable path calls f64 mul_add and does
+# not emit vfmadd. AVX-512 is avx512f plus fma, and only on rustc >= 1.89.
 
 [[allow]]
 symbol = 'rgmin::vecops::.*avx2_version.*'
-features = ["avx", "avx2"]
-reason = "multiversion x86_64+avx2 clone and the direct avx2 shim"
+features = ["avx", "avx2", "fma"]
+reason = "multiversion x86_64+avx2+fma clone and the direct avx2 shim"
 
 [[allow]]
-symbol = 'rgmin::vecops::.*avx512(f)?_version.*'
-features = ["avx", "avx2", "avx512f"]
-reason = "multiversion x86_64+avx512f clone and the direct avx512f shim"
+symbol = 'rgmin::vecops::.*avx512(f)?(_fma)?_version.*'
+features = ["avx", "avx2", "avx512f", "fma"]
+reason = "multiversion x86_64+avx512f+fma clone and the direct avx512f shim"
 
 [[allow]]
 symbol = 'rgmin::vecops::.*sve_version.*'

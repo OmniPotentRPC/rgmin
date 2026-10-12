@@ -10,20 +10,21 @@
 //! matching one for the solver's own algebra. Algorithms call these
 //! functions; storage-specific execution lives behind them.
 //!
-//! Contiguous `dot` and `sum` follow ndarray 0.17
-//! `numeric_util::unrolled_dot` and `unrolled_fold`: eight partials
-//! `p0`..`p7`, then `(p0+p4)`, `(p1+p5)`, `(p2+p6)`, `(p3+p7)`, then
-//! the tail in element order. Multiply and add stay separate.
+//! Contiguous `dot` keeps eight partials `p0`..`p7`. Each product is
+//! one `mul_add` into its partial. The partials then combine as
+//! `(p0+p4)`, `(p1+p5)`, `(p2+p6)`, `(p3+p7)`, and the tail is one
+//! `mul_add` per element. `sum` uses the same tree of plain adds.
 //! The `simd` feature compiles that loop with `multiversion` 0.9 for
-//! `x86_64+avx512f` (rustc >= 1.89), `x86_64+avx2`, `aarch64+sve`,
-//! and `aarch64+neon`, plus the default clone. `RGMIN_SIMD` is
-//! `scalar`, `avx2`, `avx512`, `neon`, or `sve`. An unknown name is
-//! ignored. A name this CPU cannot run selects scalar. AVX2 is taken
-//! only when FMA is also present; FMA is not enabled on the clone.
-//! The `par` feature folds each contiguous chunk of 4096 with that
-//! same eight-partial tree, then adds the chunk totals from the first
-//! index upward. Element updates use the same chunk size. Thread
-//! count does not change a bit.
+//! `x86_64+avx512f+fma` (rustc >= 1.89), `x86_64+avx2+fma`,
+//! `aarch64+sve`, and `aarch64+neon`, plus the default clone.
+//! `RGMIN_SIMD` is `scalar`, `avx2`, `avx512`, `neon`, or `sve`.
+//! An unknown name is ignored. A name this CPU cannot run selects
+//! the portable `mul_add` path. That path is the bit reference: a
+//! hardware FMA and `f64::mul_add` round once, so every clone matches
+//! it. The `par` feature folds each contiguous chunk of 4096 with
+//! that same tree, then adds the chunk totals from the first index
+//! upward. Element updates use the same chunk size. Thread count
+//! does not change a bit.
 
 use std::cell::Cell;
 use std::sync::OnceLock;
@@ -131,7 +132,7 @@ fn avx2_ready() -> bool {
 fn avx512_ready() -> bool {
     #[cfg(all(feature = "simd", target_arch = "x86_64", rgmin_avx512))]
     {
-        std::is_x86_feature_detected!("avx512f")
+        std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("fma")
     }
     #[cfg(not(all(feature = "simd", target_arch = "x86_64", rgmin_avx512)))]
     {
@@ -154,8 +155,8 @@ fn sve_ready() -> bool {
     }
 }
 
-/// AVX2 without FMA would be multiversion's pick on that CPU.
-/// The clone stays off; FMA is only a gate.
+/// The AVX2 clone enables FMA. A CPU with AVX2 and no FMA stays on
+/// the portable `mul_add` path, which has the same bits.
 fn scalar_gate() -> bool {
     #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
@@ -219,14 +220,14 @@ macro_rules! dot_w8 {
         while i + W <= n {
             // SAFETY: `i + 7 < n` because `i + W <= n`.
             unsafe {
-                p0 = p0 + *xs.get_unchecked(i) * *ys.get_unchecked(i);
-                p1 = p1 + *xs.get_unchecked(i + 1) * *ys.get_unchecked(i + 1);
-                p2 = p2 + *xs.get_unchecked(i + 2) * *ys.get_unchecked(i + 2);
-                p3 = p3 + *xs.get_unchecked(i + 3) * *ys.get_unchecked(i + 3);
-                p4 = p4 + *xs.get_unchecked(i + 4) * *ys.get_unchecked(i + 4);
-                p5 = p5 + *xs.get_unchecked(i + 5) * *ys.get_unchecked(i + 5);
-                p6 = p6 + *xs.get_unchecked(i + 6) * *ys.get_unchecked(i + 6);
-                p7 = p7 + *xs.get_unchecked(i + 7) * *ys.get_unchecked(i + 7);
+                p0 = (*xs.get_unchecked(i)).mul_add(*ys.get_unchecked(i), p0);
+                p1 = (*xs.get_unchecked(i + 1)).mul_add(*ys.get_unchecked(i + 1), p1);
+                p2 = (*xs.get_unchecked(i + 2)).mul_add(*ys.get_unchecked(i + 2), p2);
+                p3 = (*xs.get_unchecked(i + 3)).mul_add(*ys.get_unchecked(i + 3), p3);
+                p4 = (*xs.get_unchecked(i + 4)).mul_add(*ys.get_unchecked(i + 4), p4);
+                p5 = (*xs.get_unchecked(i + 5)).mul_add(*ys.get_unchecked(i + 5), p5);
+                p6 = (*xs.get_unchecked(i + 6)).mul_add(*ys.get_unchecked(i + 6), p6);
+                p7 = (*xs.get_unchecked(i + 7)).mul_add(*ys.get_unchecked(i + 7), p7);
             }
             i += W;
         }
@@ -237,7 +238,7 @@ macro_rules! dot_w8 {
         while i < n {
             // SAFETY: `i < n`.
             unsafe {
-                sum = sum + *xs.get_unchecked(i) * *ys.get_unchecked(i);
+                sum = (*xs.get_unchecked(i)).mul_add(*ys.get_unchecked(i), sum);
             }
             i += 1;
         }
@@ -288,7 +289,7 @@ macro_rules! axpy_body {
         let xs: &[f64] = $xs;
         let ys: &mut [f64] = $ys;
         for i in 0..xs.len() {
-            ys[i] = ys[i] + (a * xs[i]);
+            ys[i] = a.mul_add(xs[i], ys[i]);
         }
     }};
 }
@@ -338,8 +339,8 @@ macro_rules! define_kernels {
         #[cfg(all(feature = "simd", rgmin_avx512))]
         #[inline(never)]
         #[multiversion::multiversion(targets(
-            "x86_64+avx512f",
-            "x86_64+avx2",
+            "x86_64+avx512f+fma",
+            "x86_64+avx2+fma",
             "aarch64+sve",
             "aarch64+neon"
         ))]
@@ -349,20 +350,24 @@ macro_rules! define_kernels {
 
         #[cfg(all(feature = "simd", not(rgmin_avx512)))]
         #[inline(never)]
-        #[multiversion::multiversion(targets("x86_64+avx2", "aarch64+sve", "aarch64+neon"))]
+        #[multiversion::multiversion(targets(
+            "x86_64+avx2+fma",
+            "aarch64+sve",
+            "aarch64+neon"
+        ))]
         fn $mv($($arg: $ty),*) -> $ret {
             $body!($($arg),*)
         }
 
         #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-        #[target_feature(enable = "avx2")]
+        #[target_feature(enable = "avx2,fma")]
         #[inline(never)]
         unsafe fn $avx2($($arg: $ty),*) -> $ret {
             $body!($($arg),*)
         }
 
         #[cfg(all(feature = "simd", target_arch = "x86_64", rgmin_avx512))]
-        #[target_feature(enable = "avx512f")]
+        #[target_feature(enable = "avx512f,fma")]
         #[inline(never)]
         unsafe fn $avx512($($arg: $ty),*) -> $ret {
             $body!($($arg),*)
@@ -701,8 +706,9 @@ fn div_one(picked: Choice, xs: &[f64], ys: &mut [f64], floor: f64) {
 
 /// `x . y` summed from the first index upward.
 ///
-/// [`dot`] uses the eight-partial tree. Noise projections and any
-/// reduction that decides a step stay on this loop.
+/// [`dot`] fuses each product into an eight-partial tree. This loop
+/// keeps a separate multiply and add, in element order, for noise
+/// projections.
 pub fn dot_ordered(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
     debug_assert_eq!(x.len(), y.len());
     let mut acc = 0.0;
@@ -717,7 +723,13 @@ pub fn dot(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
     assert_eq!(x.len(), y.len());
     match (x.as_slice(), y.as_slice()) {
         (Some(xs), Some(ys)) => dot_contiguous(xs, ys),
-        _ => x.dot(&y),
+        // A strided view has the same element order. Copying into the
+        // contiguous kernel keeps the mul_add tree, including chunks.
+        _ => {
+            let xs: Vec<f64> = x.iter().copied().collect();
+            let ys: Vec<f64> = y.iter().copied().collect();
+            dot_contiguous(&xs, &ys)
+        }
     }
 }
 
@@ -736,7 +748,11 @@ pub fn axpy(a: f64, x: ArrayView1<f64>, y: &mut Array1<f64>) {
                 axpy_one(picked, a, xs, ys);
             }
         }
-        _ => y.scaled_add(a, &x),
+        _ => {
+            for i in 0..x.len() {
+                y[i] = a.mul_add(x[i], y[i]);
+            }
+        }
     }
 }
 
