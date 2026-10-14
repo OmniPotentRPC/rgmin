@@ -126,7 +126,7 @@ def eon_quickmin(H, x, dt, steps):
 
 
 H = sp.diag(1, 100)
-energies = eon_quickmin(H, sp.Matrix([1, sp.Rational(1, 100)]), sp.Rational(1, 8), 40)
+energies = eon_quickmin(H, sp.Matrix([1, sp.Rational(1, 100)]), sp.Rational(1, 8), 12)
 rises = [k for k in range(1, len(energies)) if energies[k] > energies[k - 1]]
 assert rises, "expected an energy rise in the eOn step"
 print(
