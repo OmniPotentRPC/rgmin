@@ -31,9 +31,11 @@ The step, with F = -g at the current point:
    once k >= log(dt0^2 lam / 2) / (2 log(1 / f_dec)); from then on every
    accepted anchor is lower than the one before (item 3).
 6. The curvature cap dt <= c / sqrt(lam_hat), lam_hat = |y| / |s|, gives
-   h = dt^2 lam <= c^2 lam / lam_hat; with lam_hat >= the Rayleigh
-   quotient along s, c = sqrt(2) puts the step from rest inside item 3
-   along s, and c = 2 at the stability edge of item 2.
+   h = dt^2 lam <= c^2 lam / lam_hat. When lam_hat equals the curvature
+   lam of the mode, c = sqrt(2) is the edge of item 3 (h = 2, the mode
+   flips sign and keeps its energy) and c = 2 the edge of item 2; descent
+   from rest needs c < sqrt(2). lam_hat >= the Rayleigh quotient along
+   s, so the bound is never looser than the Rayleigh estimate gives.
 """
 
 import math
