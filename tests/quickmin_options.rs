@@ -147,7 +147,11 @@ fn a_nonfinite_energy_steps_back() {
             B.get_or_init(|| Bounds::new(array![-1e6], array![1e6], 0.0))
         }
         fn eval(&self, x: ArrayView1<f64>) -> f64 {
-            if x[0] < -0.5 { f64::NAN } else { 0.5 * x[0] * x[0] }
+            if x[0] < -0.5 {
+                f64::NAN
+            } else {
+                0.5 * x[0] * x[0]
+            }
         }
     }
     impl Gradient<f64> for Wall {
@@ -155,7 +159,11 @@ fn a_nonfinite_energy_steps_back() {
             1
         }
         fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
-            if x[0] < -0.5 { array![f64::NAN] } else { array![x[0]] }
+            if x[0] < -0.5 {
+                array![f64::NAN]
+            } else {
+                array![x[0]]
+            }
         }
     }
     impl DifferentiableObjective<f64> for Wall {

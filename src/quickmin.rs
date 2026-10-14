@@ -340,7 +340,11 @@ pub(crate) struct QuickMinSession {
 
 impl QuickMinSession {
     pub(crate) fn new(dt0: f64) -> Self {
-        let dt0 = if dt0.is_finite() && dt0 > 0.0 { dt0 } else { 0.1 };
+        let dt0 = if dt0.is_finite() && dt0 > 0.0 {
+            dt0
+        } else {
+            0.1
+        };
         Self {
             options: QuickMinOptions::rgmin(),
             dt0,
