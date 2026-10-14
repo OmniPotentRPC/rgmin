@@ -9,9 +9,9 @@ use eindir_core::ffi::eindir_core_abi_stamp;
 use eindir_core::ffi::{eindir_objective_t, eindir_status_t};
 use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_control_t, rgmin_method_t,
-    rgmin_minimize, rgmin_minimize_eindir, rgmin_report_t, rgmin_solver_create, rgmin_solver_free,
-    rgmin_quickmin_variant_t, rgmin_solver_set_accept, rgmin_solver_set_quickmin_cell,
-    rgmin_solver_set_quickmin_variant, rgmin_solver_step,
+    rgmin_minimize, rgmin_minimize_eindir, rgmin_quickmin_variant_t, rgmin_report_t,
+    rgmin_solver_create, rgmin_solver_free, rgmin_solver_set_accept,
+    rgmin_solver_set_quickmin_cell, rgmin_solver_set_quickmin_variant, rgmin_solver_step,
     rgmin_solver_step_fg, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
     rgmin_tensor_free,
 };
@@ -1576,7 +1576,6 @@ fn c_abi_exp_installs_and_steps() {
     params.nbr_j = out_of_range.as_ptr();
     let st = unsafe { rgmin_solver_set_precon(session, &params) };
     assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
-    params.nbr_j = pair_j.as_ptr();
 
     let mut x = [0.4, 0.1, -0.2, -0.3, 0.2, 0.05];
     let mut out = rgmin_report_t {
@@ -1785,7 +1784,11 @@ fn c_abi_quickmin_variants_relax_the_bowl() {
         noise_eps: 0.0,
         noise_c: 0.0,
     };
-    for variant in [RGMIN_QUICKMIN_RGMIN, RGMIN_QUICKMIN_EON, RGMIN_QUICKMIN_PER_ATOM] {
+    for variant in [
+        RGMIN_QUICKMIN_RGMIN,
+        RGMIN_QUICKMIN_EON,
+        RGMIN_QUICKMIN_PER_ATOM,
+    ] {
         let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_QUICKMIN, &ctrl, 2) };
         assert!(!session.is_null());
         unsafe { rgmin_solver_set_quickmin_variant(session, variant) };
