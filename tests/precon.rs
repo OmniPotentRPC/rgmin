@@ -521,7 +521,7 @@ fn neighbours_cutoff(pos: &Array1<f64>, cut: f64) -> Neighbours {
         .zip(neigh.r.iter())
         .map(|((i, j), r)| (*i, *j, *r))
         .collect();
-    pairs.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    pairs.sort_by_key(|a| (a.0, a.1));
     pairs.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
     Neighbours {
         i: pairs.iter().map(|p| p.0).collect(),

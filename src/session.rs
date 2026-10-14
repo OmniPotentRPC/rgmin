@@ -1192,29 +1192,28 @@ impl Solver {
         };
         let result = step(self, obj, x);
         #[cfg(feature = "highs")]
-        if let Some((start, steps)) = checkpoint {
-            if result.is_ok() {
-                for (row, (coefficients, rhs)) in self.equalities.iter().enumerate() {
-                    let mut residual = -*rhs;
-                    let mut magnitude = rhs.abs();
-                    for &(k, a) in coefficients {
-                        residual += a * (x[k] - start[k]);
-                        magnitude += a.abs() * (x[k].abs() + start[k].abs());
-                    }
-                    // The QP tolerance is in row units. The gamma bound also
-                    // covers subtraction at a large coordinate origin.
-                    let roundoff = (2.0 * coefficients.len() as f64 + 4.0) * f64::EPSILON;
-                    let tolerance = crate::lbfgs_qp::EQUALITY_FEASIBILITY_TOLERANCE
-                        + roundoff / (1.0 - roundoff) * magnitude;
-                    if !residual.is_finite() || !tolerance.is_finite() || residual.abs() > tolerance
-                    {
-                        *x = start;
-                        self.steps = steps;
-                        self.forget();
-                        return Err(Error::Highs(format!(
-                            "accepted displacement violates equality {row}: residual {residual} exceeds {tolerance}"
-                        )));
-                    }
+        if let Some((start, steps)) = checkpoint
+            && result.is_ok()
+        {
+            for (row, (coefficients, rhs)) in self.equalities.iter().enumerate() {
+                let mut residual = -*rhs;
+                let mut magnitude = rhs.abs();
+                for &(k, a) in coefficients {
+                    residual += a * (x[k] - start[k]);
+                    magnitude += a.abs() * (x[k].abs() + start[k].abs());
+                }
+                // The QP tolerance is in row units. The gamma bound also
+                // covers subtraction at a large coordinate origin.
+                let roundoff = (2.0 * coefficients.len() as f64 + 4.0) * f64::EPSILON;
+                let tolerance = crate::lbfgs_qp::EQUALITY_FEASIBILITY_TOLERANCE
+                    + roundoff / (1.0 - roundoff) * magnitude;
+                if !residual.is_finite() || !tolerance.is_finite() || residual.abs() > tolerance {
+                    *x = start;
+                    self.steps = steps;
+                    self.forget();
+                    return Err(Error::Highs(format!(
+                        "accepted displacement violates equality {row}: residual {residual} exceeds {tolerance}"
+                    )));
                 }
             }
         }

@@ -171,10 +171,10 @@ fn portable_dot(xs: &[f64], ys: &[f64]) -> f64 {
         p7 = xs[i + 7].mul_add(ys[i + 7], p7);
         i += 8;
     }
-    sum = sum + (p0 + p4);
-    sum = sum + (p1 + p5);
-    sum = sum + (p2 + p6);
-    sum = sum + (p3 + p7);
+    sum += p0 + p4;
+    sum += p1 + p5;
+    sum += p2 + p6;
+    sum += p3 + p7;
     while i < n {
         sum = xs[i].mul_add(ys[i], sum);
         i += 1;
@@ -289,10 +289,10 @@ impl Drop for Guard {
 
 #[test]
 fn cpu_flags_and_clone_availability() {
-    if let Ok(text) = std::fs::read_to_string("/proc/cpuinfo") {
-        if let Some(line) = text.lines().find(|line| line.starts_with("flags")) {
-            println!("{line}");
-        }
+    if let Ok(text) = std::fs::read_to_string("/proc/cpuinfo")
+        && let Some(line) = text.lines().find(|line| line.starts_with("flags"))
+    {
+        println!("{line}");
     }
     for name in ["scalar", "avx2", "avx512", "neon", "sve"] {
         if name == "scalar" || simd_clone_usable(name) {
