@@ -101,7 +101,11 @@ fn both_options_move_at_the_cap_far_from_the_minimum() {
     // E = 25 |x|^2 from a far start: the per-atom cap binds every step,
     // with the eOn velocity left alone and with the default rescale.
     let obj = Quad::new(Array1::from_elem(3, 50.0));
-    for (options, rescaled) in [(QuickMinOptions::eon(), false), (QuickMinOptions::rgmin(), true)] {
+    let cases = [
+        (QuickMinOptions::eon(), false),
+        (QuickMinOptions::rgmin(), true),
+    ];
+    for (options, rescaled) in cases {
         let mut solver = session(options, 0.1, 3);
         solver.set_atom_maxmove(0.05);
         let mut x = array![10.0, 0.0, 0.0];
