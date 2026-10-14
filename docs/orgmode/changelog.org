@@ -4,6 +4,20 @@
 
 * Changelog
 
+** Unreleased
+
+Quick-min options (~QuickMinOptions~, ~Solver::set_quickmin_options~,
+C ~rgmin_solver_set_quickmin_variant~ with ~RGMIN_QUICKMIN_RGMIN~,
+~RGMIN_QUICKMIN_EON~, ~RGMIN_QUICKMIN_PER_ATOM~, ABI minor 33).
+~eon()~ is eOn's step: fixed ~Δt~ and no clamp rescale.
+~per_atom()~ projects each atom on its own force: 645 force calls on
+LJ38 against 1344 for the default, 32.0 against 19.6 on Pt7.
+~curvature_cap~ bounds ~Δt~ by ~c / sqrt(|y| / |s|)~.
+
+~Method~ is ~#[non_exhaustive]~: a match outside rgmin needs a
+wildcard arm. This break ships with the next minor release, after
+which a new method is additive.
+
 ** 0.4.0
 
 Python package ~rgmin~: a free-threaded nanobind module ~rgmin._core~
@@ -82,18 +96,6 @@ The session caps the displacement and rescales the velocity to
 the step taken, grows and shrinks ~Δt~ with FIRE's factors (a
 zero power does not shrink it), and splits an atomic block from
 a cell block through ~Solver::set_quickmin_cell~.
-
-Quick-min options (~QuickMinOptions~, ~Solver::set_quickmin_options~,
-C ~rgmin_solver_set_quickmin_variant~ with ~RGMIN_QUICKMIN_RGMIN~,
-~RGMIN_QUICKMIN_EON~, ~RGMIN_QUICKMIN_PER_ATOM~, ABI minor 33).
-~eon()~ is eOn's step: fixed ~Δt~ and no clamp rescale.
-~per_atom()~ projects each atom on its own force: 645 force calls on
-LJ38 against 1344 for the default, 32.0 against 19.6 on Pt7.
-~curvature_cap~ bounds ~Δt~ by ~c / sqrt(|y| / |s|)~.
-
-~Method~ is ~#[non_exhaustive]~: a match outside rgmin needs a
-wildcard arm. This is a break that ships with 0.4.0, after which a
-new method is additive.
 
 Molecular manifolds: ~rigid_quotient~ is Sella Cartesian
 ~R^{3N}/SE(3)~ (~fix_translation~ + ~fix_rotation~);
