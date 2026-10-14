@@ -25,7 +25,8 @@ The step, with F = -g at the current point:
    with tau = dt (c + dt). In one dimension the coefficient obeys
    c' = (c + dt) / (1 - tau lam) while the walker stays on the same
    side, so c grows and tau lam crosses 2: the eOn step can raise the
-   energy. A concrete two-dimensional run exhibits the rise.
+   energy. A two-dimensional binary64 run with dt^2 lam_max < 2
+   exhibits the rise.
 5. The backtracking variant restarts from the anchor at rest with
    dt <- f_dec dt. After k cuts tau lam = f_dec^(2k) dt0^2 lam, below 2
    once k >= log(dt0^2 lam / 2) / (2 log(1 / f_dec)); from then on every
@@ -111,27 +112,37 @@ c_new = sp.simplify(v_new * F_new / F_new**2)
 assert sp.simplify(c_new - (c + dt) / (1 - tau_c * lam)) == 0
 
 
-def eon_quickmin(H, x, dt, steps):
-    """Exact-arithmetic eOn QuickMin on E = x.Hx / 2; returns energies."""
-    vel = sp.zeros(len(x), 1)
-    out = [(x.T * H * x)[0] / 2]
+def eon_quickmin(k, x, dt, steps):
+    """eOn QuickMin in binary64 on E = sum k_i x_i^2 / 2; returns energies."""
+    n = len(k)
+    vel = [0.0] * n
+    energy = lambda x: 0.5 * sum(ki * xi * xi for ki, xi in zip(k, x))
+    out = [energy(x)]
     for _ in range(steps):
-        f = -H * x
-        p = vel.dot(f)
-        vel = (p / f.dot(f)) * f if p >= 0 else sp.zeros(len(x), 1)
-        vel = vel + dt * f
-        x = x + dt * vel
-        out.append((x.T * H * x)[0] / 2)
+        f = [-ki * xi for ki, xi in zip(k, x)]
+        p = sum(v * g for v, g in zip(vel, f))
+        ff = sum(g * g for g in f)
+        c = p / ff if p >= 0 and ff > 0 else 0.0
+        vel = [c * g + dt * g for g in f]
+        x = [xi + dt * v for xi, v in zip(x, vel)]
+        out.append(energy(x))
     return out
 
 
-H = sp.diag(1, 100)
-energies = eon_quickmin(H, sp.Matrix([1, sp.Rational(1, 100)]), sp.Rational(1, 8), 12)
-rises = [k for k in range(1, len(energies)) if energies[k] > energies[k - 1]]
-assert rises, "expected an energy rise in the eOn step"
+# Every dt below sqrt(2 / 100), the descent-from-rest limit of the stiff
+# mode, so each rise comes from the kept velocity, not from dt.
+found = []
+for dt in [0.02 * j for j in range(1, 8)]:
+    for x2 in (0.01, 0.1, 1.0):
+        e = eon_quickmin([1.0, 100.0], [1.0, x2], dt, 300)
+        r = [j for j in range(1, len(e)) if e[j] > e[j - 1] * (1 + 1e-12)]
+        if r:
+            found.append((dt, x2, r[0]))
+assert found, "expected an energy rise in the eOn step"
+assert all(dt * dt * 100 < 2 for dt, _, _ in found)
 print(
-    f"4. eOn step: tau = dt (c + dt), c' = (c + dt) / (1 - tau lam); "
-    f"energy rises at steps {rises[:3]} on diag(1, 100), dt = 1/8 [ok]"
+    "4. eOn step: tau = dt (c + dt), c' = (c + dt) / (1 - tau lam); energy "
+    f"rises on diag(1, 100) with dt^2 lam_max < 2, e.g. dt, x2, step = {found[0]} [ok]"
 )
 
 # 5. Cuts to reach descent from rest.
