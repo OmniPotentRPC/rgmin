@@ -7,6 +7,8 @@ authors:
     given-names: Rohit
     orcid: "https://orcid.org/0000-0002-2393-8056"
 repository-code: "https://github.com/OmniPotentRPC/rgmin"
+version: "0.4.0"
+date-released: 2026-10-11
 license: MIT
 keywords:
   - optimization

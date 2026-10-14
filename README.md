@@ -4,7 +4,7 @@
   <img src="branding/logo/rgmin-logo-light.svg" width="420" alt="rgmin">
 </p>
 
-Rust rewrite. `main` is this tree (current tag `v0.2.0`). The C++
+Rust rewrite. `main` is this tree (current tag `v0.4.0`). The C++
 xtensor history is `0.0.1` on the previous `main`.
 
 Saddle, band, and IRC sessions live in [rgsaddle](https://github.com/OmniPotentRPC/rgsaddle) (GitHub; not yet on crates.io).
@@ -55,6 +55,8 @@ nonlinear CG use it as the metric. `select_precon` picks Exp for a
 bulk or a surface of at least 100 atoms, Lindh for a molecule or a
 cluster whose elements are in the Lindh tables, the bonded metric
 when that caller has a force field, and the identity otherwise.
+The Python package `rgmin` is a free-threaded nanobind module
+(`rgmin._core`) plus `rgmin.ase.Optimizer`. ASE is an extra.
 
 Narrative docs live in [`docs/orgmode/`](docs/orgmode/index.org)
 (Diataxis); the explanation quadrant derives the math behind each

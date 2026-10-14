@@ -4,7 +4,17 @@
 
 * Changelog
 
-** Unreleased
+** 0.4.0
+
+Python package ~rgmin~: a free-threaded nanobind module ~rgmin._core~
+(~Method~, ~SolverConfig~, ~Solver~, ~Report~, ~minimize~) and
+~rgmin.ase.Optimizer~ with one rgmin iteration per ~step~. ASE is an
+extra. The wheel is built with scikit-build-core, Corrosion, and
+~nanobind_add_module(_core FREE_THREADED ...)~.
+
+~rggate~ (~bench/gate/~, pixi task ~gate~) compares minimisers on
+censored paired starts. The reference for a start is explicit,
+otherwise the baseline on that same start.
 
 Contiguous vector kernels dispatch at runtime.
 ~dot~ and ~axpy~ accumulate with ~f64::mul_add~, and the portable
