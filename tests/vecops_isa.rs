@@ -411,7 +411,7 @@ fn chunk_dot(x: &Array1<f64>, y: &Array1<f64>) -> f64 {
     let mut i = 0;
     while i < xs.len() {
         let j = (i + 4096).min(xs.len());
-        acc = acc + dot(ArrayView1::from(&xs[i..j]), ArrayView1::from(&ys[i..j]));
+        acc += dot(ArrayView1::from(&xs[i..j]), ArrayView1::from(&ys[i..j]));
         i = j;
     }
     acc
@@ -425,7 +425,7 @@ fn chunk_sum(x: &Array1<f64>) -> f64 {
     let mut i = 0;
     while i < xs.len() {
         let j = (i + 4096).min(xs.len());
-        acc = acc + sum(ArrayView1::from(&xs[i..j]));
+        acc += sum(ArrayView1::from(&xs[i..j]));
         i = j;
     }
     acc
