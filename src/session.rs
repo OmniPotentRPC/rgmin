@@ -29,7 +29,10 @@ use crate::precon::{
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
-use crate::quickmin::{QuickMinState, quickmin_displacement, quickmin_rescale_velocity};
+use crate::quickmin::{
+    QuickMinOptions, QuickMinSession, QuickMinState, quickmin_rescale_velocity,
+    quickmin_session_step,
+};
 use crate::report::{Report, Status};
 use crate::rigid::{project_horizontal, project_out_rot_trans};
 use crate::step::{
@@ -188,7 +191,7 @@ enum Inner {
         kind: NewtonKind,
     },
     Fire(FireState, Option<Fire2Extras>),
-    QuickMin(QuickMinState),
+    QuickMin(QuickMinState, QuickMinSession),
     Diis(DiisState),
     Bb {
         prev_s: Option<Array1<f64>>,
@@ -989,7 +992,7 @@ impl Solver {
             });
         }
         match &mut self.inner {
-            Inner::QuickMin(state) => {
+            Inner::QuickMin(state, _) => {
                 state.cell_at = Some(at);
                 Ok(())
             }
@@ -1003,8 +1006,18 @@ impl Solver {
     /// update is a fixed `dt` ([`crate::quickmin::quickmin_baseline`]).
     /// A session that is not quick-min ignores the call.
     pub fn set_quickmin_adapt(&mut self, enabled: bool) {
-        if let Inner::QuickMin(state) = &mut self.inner {
+        if let Inner::QuickMin(state, session) = &mut self.inner {
             state.adapt_dt = enabled;
+            session.options.adapt_dt = enabled;
+        }
+    }
+
+    /// Quick-min options ([`QuickMinOptions`]); a no-op on any other
+    /// method. The velocity, the energy anchor and `dt` restart from
+    /// [`Control::istep`]; the cell split stays.
+    pub fn set_quickmin_options(&mut self, options: QuickMinOptions) {
+        if let Inner::QuickMin(state, session) = &mut self.inner {
+            session.configure(state, options);
         }
     }
 
@@ -1029,6 +1042,9 @@ impl Solver {
     /// useful; after a large one call [`Self::forget`].
     pub fn forget_evaluation(&mut self) {
         self.last_pos = None;
+        if let Inner::QuickMin(_, session) = &mut self.inner {
+            session.forget_anchor();
+        }
     }
 
     /// Record `s = x+ - x`, `y = g+ - g` from the caller's previous outer.
@@ -1089,6 +1105,9 @@ impl Solver {
         self.istep = self.control.istep;
         self.e_hist.clear();
         self.last_pos = None;
+        if let Inner::QuickMin(_, session) = &mut self.inner {
+            session.forget_anchor();
+        }
     }
 
     /// Drop method memory. The next step is a cold start from the current `x`.
@@ -1134,7 +1153,10 @@ impl Solver {
                     ext.steps = 0;
                 }
             }
-            Inner::QuickMin(state) => state.reset(),
+            Inner::QuickMin(state, session) => {
+                state.reset();
+                session.forget_anchor();
+            }
             Inner::Diis(state) => state.clear(),
             Inner::Bb { prev_s, prev_y } => {
                 *prev_s = None;
@@ -2042,7 +2064,7 @@ impl Solver {
                 let mix_new = fire_mix(&self.precon, &state.vel, &raw_new, &steep_new);
                 fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
             }
-            Inner::QuickMin(state) => {
+            Inner::QuickMin(state, session) => {
                 #[allow(unused_mut)]
                 let mut force = grad.mapv(|g| -g);
                 #[cfg(feature = "highs")]
@@ -2050,15 +2072,19 @@ impl Solver {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
-                let dx = quickmin_displacement(state, &force);
-                let mut trial = &*x + &dx;
+                // The uphill test tolerates the rise the accept policies do.
+                let slack = crate::accept::ENERGY_RISE.max(self.control.ftol_slack(value));
+                let (origin, dx) = quickmin_session_step(state, session, x, value, &force, slack);
+                let mut trial = &origin + &dx;
                 if let Some(cap) = self.atom_maxmove {
-                    scale_step_atom(x, &mut trial, cap);
+                    scale_step_atom(&origin, &mut trial, cap);
                 } else if let Some(cap) = self.control.maxmove {
-                    scale_step(x, &mut trial, cap);
+                    scale_step(&origin, &mut trial, cap);
                 }
                 trial = obj.bounds().clip(trial.view());
-                quickmin_rescale_velocity(&mut state.vel, &dx, &(&trial - &*x));
+                if session.options.rescale_on_clamp {
+                    quickmin_rescale_velocity(&mut state.vel, &dx, &(&trial - &origin));
+                }
                 *x = trial;
                 let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
@@ -2387,7 +2413,9 @@ impl Inner {
             },
             Method::Newton { kind } => Inner::Newton { kind: *kind },
             Method::Fire { kind } => Inner::Fire(FireState::new(*kind, dim, istep), None),
-            Method::QuickMin => Inner::QuickMin(QuickMinState::new(dim, istep)),
+            Method::QuickMin => {
+                Inner::QuickMin(QuickMinState::new(dim, istep), QuickMinSession::new(istep))
+            }
             Method::Diis { memory } => Inner::Diis(DiisState::new(*memory)),
             Method::Bb => Inner::Bb {
                 prev_s: None,
