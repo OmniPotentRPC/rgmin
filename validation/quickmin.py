@@ -70,8 +70,8 @@ h, r = sp.symbols("h r", real=True)
 M = sp.Matrix([[1 - dt**2 * lam, dt], [-dt * lam, 1]])  # (x, v) -> (x', v')
 assert sp.simplify(M.det() - 1) == 0
 assert sp.simplify(M.trace() - (2 - dt**2 * lam)) == 0
-charpoly = M.charpoly(r).as_expr()
-assert sp.simplify(charpoly - (r**2 - (2 - dt**2 * lam) * r + 1)) == 0
+charpoly = sp.expand((r * sp.eye(2) - M).det())
+assert sp.expand(charpoly - (r**2 - (2 - dt**2 * lam) * r + 1)) == 0
 # Complex roots (|r| = 1) when the discriminant (2 - h)^2 - 4 <= 0.
 disc = sp.factor((2 - h) ** 2 - 4)
 assert sp.simplify(disc - h * (h - 4)) == 0
