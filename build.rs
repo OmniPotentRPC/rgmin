@@ -102,10 +102,10 @@ fn discover_slepc() -> Option<SlepcProbe> {
     if let Some(probe) = probe_petsc_dirs() {
         return Some(probe);
     }
-    if let Ok(prefix) = std::env::var("CONDA_PREFIX") {
-        if let Some(probe) = probe_prefix(std::path::Path::new(&prefix)) {
-            return Some(probe);
-        }
+    if let Ok(prefix) = std::env::var("CONDA_PREFIX")
+        && let Some(probe) = probe_prefix(std::path::Path::new(&prefix))
+    {
+        return Some(probe);
     }
     probe_prefix(std::path::Path::new("/usr"))
 }
@@ -212,15 +212,15 @@ fn discover_primme() -> Option<PrimmeProbe> {
             link_libs: lib.libs,
         });
     }
-    if let Ok(dir) = std::env::var("PRIMME_DIR") {
-        if let Some(probe) = probe_primme_prefix(std::path::Path::new(&dir)) {
-            return Some(probe);
-        }
+    if let Ok(dir) = std::env::var("PRIMME_DIR")
+        && let Some(probe) = probe_primme_prefix(std::path::Path::new(&dir))
+    {
+        return Some(probe);
     }
-    if let Ok(prefix) = std::env::var("CONDA_PREFIX") {
-        if let Some(probe) = probe_primme_prefix(std::path::Path::new(&prefix)) {
-            return Some(probe);
-        }
+    if let Ok(prefix) = std::env::var("CONDA_PREFIX")
+        && let Some(probe) = probe_primme_prefix(std::path::Path::new(&prefix))
+    {
+        return Some(probe);
     }
     probe_primme_prefix(std::path::Path::new("/usr"))
 }
@@ -311,15 +311,15 @@ fn discover_chase() -> Option<ChaseProbe> {
             }
         }
     }
-    if let Ok(dir) = std::env::var("CHASE_DIR") {
-        if let Some(probe) = probe_chase_prefix(std::path::Path::new(&dir)) {
-            return Some(probe);
-        }
+    if let Ok(dir) = std::env::var("CHASE_DIR")
+        && let Some(probe) = probe_chase_prefix(std::path::Path::new(&dir))
+    {
+        return Some(probe);
     }
-    if let Ok(prefix) = std::env::var("CONDA_PREFIX") {
-        if let Some(probe) = probe_chase_prefix(std::path::Path::new(&prefix)) {
-            return Some(probe);
-        }
+    if let Ok(prefix) = std::env::var("CONDA_PREFIX")
+        && let Some(probe) = probe_chase_prefix(std::path::Path::new(&prefix))
+    {
+        return Some(probe);
     }
     probe_chase_prefix(std::path::Path::new("/usr"))
 }
@@ -395,13 +395,13 @@ fn discover_libkrylov() -> Option<LibkrylovProbe> {
         if let Ok(lib) = pkg_config::Config::new().cargo_metadata(false).probe(name) {
             let mut link_paths = lib.link_paths;
             let mut link_libs = lib.libs;
-            if !link_libs.iter().any(|n| n == "openblas" || n == "blas") {
-                if let Some((path, name)) = discover_openblas() {
-                    if !link_paths.iter().any(|p| p == &path) {
-                        link_paths.push(path);
-                    }
-                    link_libs.push(name);
+            if !link_libs.iter().any(|n| n == "openblas" || n == "blas")
+                && let Some((path, name)) = discover_openblas()
+            {
+                if !link_paths.iter().any(|p| p == &path) {
+                    link_paths.push(path);
                 }
+                link_libs.push(name);
             }
             if !link_libs.iter().any(|n| n == "gfortran") {
                 link_libs.push("gfortran".into());
@@ -413,15 +413,15 @@ fn discover_libkrylov() -> Option<LibkrylovProbe> {
             });
         }
     }
-    if let Ok(dir) = std::env::var("LIBKRYLOV_DIR") {
-        if let Some(probe) = probe_libkrylov_prefix(std::path::Path::new(&dir)) {
-            return Some(probe);
-        }
+    if let Ok(dir) = std::env::var("LIBKRYLOV_DIR")
+        && let Some(probe) = probe_libkrylov_prefix(std::path::Path::new(&dir))
+    {
+        return Some(probe);
     }
-    if let Ok(prefix) = std::env::var("CONDA_PREFIX") {
-        if let Some(probe) = probe_libkrylov_prefix(std::path::Path::new(&prefix)) {
-            return Some(probe);
-        }
+    if let Ok(prefix) = std::env::var("CONDA_PREFIX")
+        && let Some(probe) = probe_libkrylov_prefix(std::path::Path::new(&prefix))
+    {
+        return Some(probe);
     }
     probe_libkrylov_prefix(std::path::Path::new("/usr"))
 }

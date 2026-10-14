@@ -428,12 +428,12 @@ impl ExpState {
                 what: "A or c_stab is not usable",
             });
         }
-        if let Some(mu) = params.mu {
-            if !(mu.is_finite() && mu > 0.0) {
-                return Err(Error::Precon {
-                    what: "mu is not positive",
-                });
-            }
+        if let Some(mu) = params.mu
+            && !(mu.is_finite() && mu > 0.0)
+        {
+            return Err(Error::Precon {
+                what: "mu is not positive",
+            });
         }
         let r_nn_pending = params.r_nn.is_none();
         let r_nn = params.r_nn.unwrap_or(1.0);
