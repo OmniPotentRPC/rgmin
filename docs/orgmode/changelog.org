@@ -16,6 +16,21 @@ extra. The wheel is built with scikit-build-core, Corrosion, and
 censored paired starts. The reference for a start is explicit,
 otherwise the baseline on that same start.
 
+Contiguous vector kernels dispatch at runtime.
+~dot~ and ~axpy~ accumulate with ~f64::mul_add~, and the portable
+clone is the bit reference. The ~simd~ feature is on by default and
+compiles that loop with multiversion 0.9 (~x86_64+avx512f+fma~ on
+rustc >= 1.89, ~x86_64+avx2+fma~, ~aarch64+sve~, ~aarch64+neon~).
+~RGMIN_SIMD~ selects a clone. The ~par~ feature folds contiguous
+chunks of 4096 and adds those totals from the first index upward.
+On this host the axpy wall ratio at n = 30000 had a Holm upper bound
+below 1, and no auto size was slower beyond its interval, so the
+clones are default. The pooled atomistic wall interval contained 1.
+Páll and Hess, Comput. Phys. Commun. 184, 2641 (2013),
+https://doi.org/10.1016/j.cpc.2013.06.003.
+Dröge et al., Softw. Pract. Exp. 53, 176 (2023),
+https://doi.org/10.1002/spe.3075.
+
 Nonlinear CG, with or without a metric, opens its line search with
 Nocedal-Wright equation 3.60 instead of ~control.istep~ on every step.
 The descent fallback runs in both cases. ~Conjugacy::PolakRibierePlus~

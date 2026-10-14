@@ -21,11 +21,13 @@ import pytest
 
 # One hash per fixture. 3.14 and 3.14t both compare against these values.
 # Lennard-Jones does not need a NumPy kernel pin.
-LJ38 = "51e46a7c111203bb0a2f95894c33324039b6a8452bc118dbfa2c9026a4cf8e19"
+LJ38 = "e40ce10a3ff8a9622188ac2e08e139c7afddfdbc0fb34221b0cf71f06ee6afba"
 # ASE EMT. Compared only in a process that was started with the pin below.
-PT7_EMT = "72081cdfbe07a773fbdf1c2218cb141ce0c51a35bfbf2741260c42d7406ad5dc"
+# Linux, macOS, and arm agree. Windows NumPy does not, on this trajectory.
+PT7_EMT = "c10b0f1f1d1a12fe4c667b2afc253b318020965a03cb07150e010384c7bd50a9"
+PT7_EMT_WINDOWS = "32ecfa5c86916033bd1b82dbd1059f3777ec6e386eb416f0b9c69b4df96074c8"
 # rgmin Solver, pure-Python diagonal quadratic, no NumPy pin.
-RGMIN_QUADRATIC = "b5e8baa0803a9c0b1ed7de205a0dde882e042a6c299adab0dd042b6d408d7720"
+RGMIN_QUADRATIC = "4089c6795cff087829ecbd384dcdb4b34c50b47dd9a7140eee0d5eaa946c8356"
 
 # NumPy 2.2 still dispatches AVX512F and AVX512_ICL by those names.
 # NumPy 2.5 dispatches X86_V3, X86_V4, and AVX512_ICL. A name that is
@@ -188,6 +190,12 @@ def _run_child(code: str, *, pin: str | None, **extra: str) -> list[str]:
     return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
 
 
+def _pt7_expect() -> str:
+    if sys.platform == "win32":
+        return PT7_EMT_WINDOWS
+    return PT7_EMT
+
+
 def _emt_pin() -> str | None:
     """Dispatch names for the AVX-512 and X86_V3/V4 paths, if this build has them."""
     names = json.loads(_run_child(_DISPATCH_PROBE, pin=None)[-1])
@@ -229,11 +237,13 @@ def test_pt7_emt_golden_pins_numpy_not_rgmin() -> None:
     Only names from this build's ``__cpu_dispatch__`` are listed, and
     the child asserts ``show_runtime`` and ``__cpu_features__``. This
     pins ASE's EMT, which is NumPy-dispatched, and not rgmin.
+    Windows NumPy takes a different value. The thread counts still agree.
     """
     pytest.importorskip("ase")
     pin = _emt_pin()
+    expect = _pt7_expect()
     lines = _run_child(_PT7_THREADS, pin=pin)
-    assert lines == [PT7_EMT, PT7_EMT, PT7_EMT]
+    assert lines == [expect, expect, expect]
     for threads in ("1", "2", "3", "8"):
         hashed = _run_child(
             _PT7_ONCE,
@@ -241,7 +251,7 @@ def test_pt7_emt_golden_pins_numpy_not_rgmin() -> None:
             RAYON_NUM_THREADS=threads,
             OMP_NUM_THREADS=threads,
         )
-        assert hashed == [PT7_EMT]
+        assert hashed == [expect]
 
 
 def test_rgmin_quadratic_golden() -> None:

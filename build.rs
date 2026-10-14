@@ -1,6 +1,10 @@
 fn main() {
     println!("cargo:rerun-if-changed=cbindgen.toml");
     println!("cargo:rerun-if-changed=include/");
+    println!("cargo:rustc-check-cfg=cfg(rgmin_avx512)");
+    if rustc_at_least(1, 89) {
+        println!("cargo:rustc-cfg=rgmin_avx512");
+    }
     println!("cargo:rustc-check-cfg=cfg(rgmin_has_slepc)");
     println!("cargo:rustc-check-cfg=cfg(rgmin_has_primme)");
     println!("cargo:rustc-check-cfg=cfg(rgmin_has_chase)");
@@ -13,6 +17,25 @@ fn main() {
     probe_chase();
     #[cfg(feature = "libkrylov")]
     probe_libkrylov();
+}
+
+fn rustc_at_least(major: u32, minor: u32) -> bool {
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
+    let Ok(out) = std::process::Command::new(rustc).arg("-V").output() else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let Some(version) = text.split_whitespace().nth(1) else {
+        return false;
+    };
+    let mut parts = version.split('.');
+    let Some(maj) = parts.next().and_then(|s| s.parse::<u32>().ok()) else {
+        return false;
+    };
+    let Some(min) = parts.next().and_then(|s| s.parse::<u32>().ok()) else {
+        return false;
+    };
+    (maj, min) >= (major, minor)
 }
 
 #[cfg(feature = "slepc")]

@@ -1,0 +1,36 @@
+# SHA-256 of the portable mul_add W = 8 kernels. Recipe version 1.
+# dot and axpy fuse each product. sum and scale do not.
+# Lengths are 0 through 67 inclusive, then 1000 and 1000000.
+# Each hash is updated with the length as a little-endian u64, then
+# the little-endian f64 bytes of that kernel's output.
+# axpy output is the whole vector. scale output is the whole vector.
+#
+# sample(n, i, salt), salts 0xA11CE5D0 for x and 0xB0B0F00D for y:
+#   i == 0, or i + 1 == n when n > 4: -0.0
+#   i == 1 and n > 1: f64 bits 0x8000000000000001
+# After those lengths, the same recipe is repeated at
+# n = 2, 8, 9, 17, 67 with x[1] and y[1] replaced by
+# f64 bits 0x7ff8000000000001. Each record starts with the
+# length and a 0 or 1 byte (1 marks that NaN pair).
+#   i == 2 and n > 2: f64 bits 0x1
+#   i == 3 and n > 3, or i == 4096 and n > 4096: 1.0 + epsilon
+#   i == 8 and n > 8: 1e16
+#   i == 16 and n > 16: -1e16
+#   i == 24 and n > 24: 1.0
+#   i == 65536 and n > 65536: f64 bits 0x8000000000000001
+#   otherwise mix(i, salt) in [-1, 1),
+#   z = (i * 0x9E3779B97F4A7C15) xor salt,
+#   z = (z xor (z >> 30)) * 0xBF58476D1CE4E5B9,
+#   z = (z xor (z >> 27)) * 0x94D049BB133111EB,
+#   z = z xor (z >> 31),
+#   magnitude = (z >> 12) / 2^52, negated when z is odd.
+# axpy alpha is -1.5. scale alpha is 0.5.
+# Páll and Hess, Comput. Phys. Commun. 184, 2641 (2013),
+# doi:10.1016/j.cpc.2013.06.003.
+# Dröge et al., Softw. Pract. Exp. 53, 176 (2023), doi:10.1002/spe.3075.
+
+dot = "b8031e370ab95f936bebb8e704a68d37a1bd3fb9ed171a7dc55b9035f906ec8f"
+sum = "5a699ed6d39122c2b913f77fbb23a08e35b5ebf88abcfe9a2013cef3a68e1f57"
+nrm2 = "d3057ffa645e85e2a2878237ac6371747efc7cc29e7dd9effd5a6347495a149e"
+axpy = "3cf646e308ed7008bbf934176a3559fe4cbb74c1e57bc1faf788a36927e514c3"
+scale = "fb9ad5e5f15eebaab26a91fddf4a52145d3024313efbc84f4d219eade13f9721"
