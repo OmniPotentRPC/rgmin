@@ -95,6 +95,7 @@ cargo test --features capi
    explanation/trust-region
    explanation/scg
    explanation/randomized
+   explanation/simd
    explanation/precon
 
 .. toctree::

@@ -1,0 +1,20 @@
+[package]
+name = "rgmin-vecops-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT"
+description = "Micro-bench of rgmin dot and axpy."
+
+[workspace]
+
+[features]
+simd = ["rgmin/simd"]
+
+[dependencies]
+rgmin = { path = "../.." }
+ndarray = "0.17"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

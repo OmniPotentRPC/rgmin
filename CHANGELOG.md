@@ -14,6 +14,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rgmin.ase.Optimizer` with one rgmin iteration per `step`. ASE is an
   extra. The wheel is built with scikit-build-core, Corrosion, and
   `nanobind_add_module(_core FREE_THREADED ...)`.
+- Vector kernels (`dot`, `sum`, `nrm2`, `axpy`, `scale`, `mul_assign`,
+  `div_assign_floor`) dispatch at runtime. `dot` and `axpy` accumulate
+  with `f64::mul_add`. `dot` keeps eight partials, adds those pairs
+  from `p0+p4` upward, then fuses the tail. The portable clone is that
+  same `mul_add` loop and is the bit reference for every ISA. The
+  `simd` feature, now default, compiles the loop with multiversion 0.9
+  for `x86_64+avx512f+fma` (rustc >= 1.89), `x86_64+avx2+fma`,
+  `aarch64+sve`, and `aarch64+neon`. `RGMIN_SIMD` selects a clone.
+  A CPU that cannot run the selected clone stays on the portable path.
+  The `par` feature folds each contiguous chunk of 4096 with that tree,
+  then adds the chunk totals from the first index upward.
+  The wall ratios below were measured on the unfused kernels.
+  On this host (KVM, Intel Xeon family 6 model 207, AVX2 and AVX-512F)
+  the auto path versus `main`, five interleaved process runs, had
+  axpy geometric-mean wall ratios 0.940, 0.870, and 1.000 at
+  n = 300, 30000, and 3000000. The n = 30000 Holm upper bound was
+  0.886. Dot ratios were 1.034, 0.993, and 1.025, and none of those
+  six auto comparisons was slower beyond its interval. The atomistic
+  wall interval on lj38, pt7, and al contained 1 (geometric mean
+  1.016). lj38 alone was above 1. Force counts matched. Páll and Hess,
+  Comput. Phys. Commun. 184, 2641 (2013),
+  https://doi.org/10.1016/j.cpc.2013.06.003. Dröge et al., Softw.
+  Pract. Exp. 53, 176 (2023), https://doi.org/10.1002/spe.3075.
+  Holm, Scand. J. Stat. 6, 65 (1979), https://doi.org/10.2307/4615733.
 - Geometry preconditioners install through `Solver::set_precon` and
   C `rgmin_solver_set_precon` (ABI minor 32): Exp, Lindh, the bonded
   metric, or `select_precon`.

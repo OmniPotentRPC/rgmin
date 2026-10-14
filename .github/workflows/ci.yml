@@ -6,6 +6,7 @@ on:
       - main
       - "feat/**"
       - "ci/**"
+      - "perf/**"
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -54,3 +55,90 @@ jobs:
       - name: Build the libraries the C header tests link
         run: cargo build --locked ${{ matrix.args }}
       - run: cargo test --locked ${{ matrix.args }}
+
+  # Forcing tests. A clone this runner cannot execute is "not exercised"
+  # in the test log. The scalar path is always forced.
+  isa:
+    name: isa forcing (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-x86_64-1.88
+            os: ubuntu-latest
+            toolchain: 1.88.0
+          - name: ubuntu-x86_64-1.89
+            os: ubuntu-latest
+            toolchain: 1.89.0
+          - name: ubuntu-arm64-1.88
+            os: ubuntu-24.04-arm
+            toolchain: 1.88.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+      - name: CPU flags
+        run: |
+          grep -m1 flags /proc/cpuinfo || true
+          lscpu || true
+          sysctl -n machdep.cpu.brand_string || true
+      - name: Force every compiled clone, serial
+        run: cargo test --locked --features simd --test vecops_isa -- --nocapture
+      - name: Force every compiled clone, par
+        run: cargo test --locked --features simd,par --test vecops_isa -- --nocapture
+
+  # Unstripped simd libraries for the static ISA audit.
+  # LTO is off so each multiversion clone keeps its own symbol.
+  # 1.89 emits the avx512f clone. That is not a target-cpu flag.
+  isa-build:
+    name: unstripped simd libs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.89.0
+          targets: aarch64-unknown-linux-gnu
+      - name: aarch64 linker
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: CPU flags
+        run: |
+          grep -m1 flags /proc/cpuinfo || true
+          lscpu || true
+      - name: x86_64 release library
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "off"
+          CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
+          CARGO_PROFILE_RELEASE_STRIP: none
+        run: cargo build --release --locked --features simd
+      - name: aarch64 release library
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "off"
+          CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
+          CARGO_PROFILE_RELEASE_STRIP: none
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --locked --features simd --target aarch64-unknown-linux-gnu
+      - name: Stage the rgmin object files
+        run: |
+          mkdir -p isa-staging/x86_64 isa-staging/aarch64
+          rm -rf /tmp/isa-x86 /tmp/isa-arm
+          mkdir -p /tmp/isa-x86 /tmp/isa-arm
+          (cd /tmp/isa-x86 && ar x "$GITHUB_WORKSPACE/target/release/librgmin.a")
+          (cd /tmp/isa-arm && ar x "$GITHUB_WORKSPACE/target/aarch64-unknown-linux-gnu/release/librgmin.a")
+          cp /tmp/isa-x86/rgmin*.o isa-staging/x86_64/
+          cp /tmp/isa-arm/rgmin*.o isa-staging/aarch64/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unstripped-libs
+          path: isa-staging/
+
+  isa-audit:
+    name: isa audit
+    needs: isa-build
+    uses: OmniPotentRPC/rgpot/.github/workflows/isa-audit.yml@06638f2ece83b12731b387ba819b67dc2151556b
+    with:
+      artifact-name: unstripped-libs
+      allow-file: isa-allow.toml

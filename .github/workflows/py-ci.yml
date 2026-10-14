@@ -6,6 +6,7 @@ on:
       - main
       - "feat/**"
       - "ci/**"
+      - "perf/**"
     paths:
       - "python/**"
       - "include/rgbind/**"
