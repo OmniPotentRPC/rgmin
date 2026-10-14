@@ -166,8 +166,8 @@ pub use qn_irc::{
 };
 pub use qn_step::QnStep;
 pub use quickmin::{
-    QuickMinOptions, QuickMinState, QuickMinUphill, quickmin_baseline, quickmin_displacement,
-    quickmin_project, quickmin_rescale_velocity,
+    QuickMinOptions, QuickMinState, quickmin_baseline, quickmin_displacement, quickmin_project,
+    quickmin_rescale_velocity,
 };
 pub use report::{Report, Status};
 pub use scg::{

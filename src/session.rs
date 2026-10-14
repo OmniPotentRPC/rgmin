@@ -1013,8 +1013,8 @@ impl Solver {
     }
 
     /// Quick-min options ([`QuickMinOptions`]); a no-op on any other
-    /// method. The velocity, the energy anchor and `dt` restart from
-    /// [`Control::istep`]; the cell split stays.
+    /// method. The velocity and `dt` restart from [`Control::istep`];
+    /// the cell split stays.
     pub fn set_quickmin_options(&mut self, options: QuickMinOptions) {
         if let Inner::QuickMin(state, session) = &mut self.inner {
             session.configure(state, options);
@@ -1043,7 +1043,7 @@ impl Solver {
     pub fn forget_evaluation(&mut self) {
         self.last_pos = None;
         if let Inner::QuickMin(_, session) = &mut self.inner {
-            session.forget_anchor();
+            session.forget_last();
         }
     }
 
@@ -1106,7 +1106,7 @@ impl Solver {
         self.e_hist.clear();
         self.last_pos = None;
         if let Inner::QuickMin(_, session) = &mut self.inner {
-            session.forget_anchor();
+            session.forget_last();
         }
     }
 
@@ -1155,7 +1155,7 @@ impl Solver {
             }
             Inner::QuickMin(state, session) => {
                 state.reset();
-                session.forget_anchor();
+                session.forget_last();
             }
             Inner::Diis(state) => state.clear(),
             Inner::Bb { prev_s, prev_y } => {
@@ -2071,18 +2071,16 @@ impl Solver {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
-                // The uphill test tolerates the rise the accept policies do.
-                let slack = crate::accept::ENERGY_RISE.max(self.control.ftol_slack(value));
-                let (origin, dx) = quickmin_session_step(state, session, x, value, &force, slack);
-                let mut trial = &origin + &dx;
+                let dx = quickmin_session_step(state, session, x, &force);
+                let mut trial = &*x + &dx;
                 if let Some(cap) = self.atom_maxmove {
-                    scale_step_atom(&origin, &mut trial, cap);
+                    scale_step_atom(x, &mut trial, cap);
                 } else if let Some(cap) = self.control.maxmove {
-                    scale_step(&origin, &mut trial, cap);
+                    scale_step(x, &mut trial, cap);
                 }
                 trial = obj.bounds().clip(trial.view());
                 if session.options.rescale_on_clamp {
-                    quickmin_rescale_velocity(&mut state.vel, &dx, &(&trial - &origin));
+                    quickmin_rescale_velocity(&mut state.vel, &dx, &(&trial - &*x));
                 }
                 *x = trial;
                 let ev = obj.value_and_gradient(x.view());

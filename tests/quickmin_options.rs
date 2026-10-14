@@ -1,11 +1,11 @@
-//! Quick-min session options: the eOn step, the uphill test, the
-//! curvature bound, and one oracle call per step.
+//! Quick-min session options: the eOn step, the per-atom projection,
+//! the curvature bound, and one oracle call per step.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Control, Method, QuickMinOptions, QuickMinUphill, Solver};
+use rgmin::{Control, Method, QuickMinOptions, Solver};
 
 /// `E = sum k_i x_i^2 / 2`, counting oracle calls.
 struct Quad {
@@ -79,12 +79,6 @@ fn run(solver: &mut Solver, obj: &Quad, x: &mut Array1<f64>, steps: usize) -> (f
     (gn, taken)
 }
 
-fn backtracking() -> QuickMinOptions {
-    let mut o = QuickMinOptions::rgmin();
-    o.uphill = QuickMinUphill::Backtrack;
-    o
-}
-
 #[test]
 fn the_eon_step_converges_with_one_call_per_step() {
     let obj = Quad::new(array![1.0, 4.0, 9.0]);
@@ -120,9 +114,10 @@ fn both_options_move_at_the_cap_far_from_the_minimum() {
 }
 
 #[test]
-fn backtracking_recovers_from_an_unstable_time_step() {
+fn the_curvature_bound_tames_an_unstable_time_step() {
     // dt = 1 is five times the stability limit 2 / sqrt(100) of the stiff
-    // mode. The eOn step diverges; backtracking cuts dt and converges.
+    // mode. The eOn step diverges; the curvature bound brings dt under
+    // the limit after one step and converges.
     let obj = Quad::new(array![1.0, 100.0]);
     let mut eon = session(QuickMinOptions::eon(), 1.0, 2);
     let mut y = array![1.0, 0.1];
@@ -136,71 +131,6 @@ fn backtracking_recovers_from_an_unstable_time_step() {
         obj.eval(y.view())
     );
 
-    let mut solver = session(backtracking(), 1.0, 2);
-    let mut x = array![1.0, 0.1];
-    let (gn, _) = run(&mut solver, &obj, &mut x, 5000);
-    assert!(gn < 1e-8, "gnorm {gn}");
-}
-
-#[test]
-fn a_nonfinite_energy_steps_back() {
-    struct Wall;
-    impl Objective<f64> for Wall {
-        fn dim(&self) -> usize {
-            1
-        }
-        fn bounds(&self) -> &Bounds<f64> {
-            use std::sync::OnceLock;
-            static B: OnceLock<Bounds<f64>> = OnceLock::new();
-            B.get_or_init(|| Bounds::new(array![-1e6], array![1e6], 0.0))
-        }
-        fn eval(&self, x: ArrayView1<f64>) -> f64 {
-            if x[0] < -0.5 {
-                f64::NAN
-            } else {
-                0.5 * x[0] * x[0]
-            }
-        }
-    }
-    impl Gradient<f64> for Wall {
-        fn dim(&self) -> usize {
-            1
-        }
-        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
-            if x[0] < -0.5 {
-                array![f64::NAN]
-            } else {
-                array![x[0]]
-            }
-        }
-    }
-    impl DifferentiableObjective<f64> for Wall {
-        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-            (self.eval(x), self.grad(x))
-        }
-    }
-    // dt^2 = 2.25 overshoots x = 1 to -1.25, where the energy is NaN.
-    let mut solver = Solver::new(
-        Method::QuickMin,
-        Control {
-            maxiter: 1,
-            gtol: 0.0,
-            istep: 1.5,
-            ..Control::default()
-        },
-        1,
-    );
-    solver.set_quickmin_options(backtracking());
-    let mut x = array![1.0];
-    for _ in 0..200 {
-        solver.step(&Wall, &mut x).unwrap();
-    }
-    assert!(x[0].is_finite() && x[0].abs() < 1e-6, "x {}", x[0]);
-}
-
-#[test]
-fn the_curvature_bound_tames_a_large_time_step() {
-    let obj = Quad::new(array![1.0, 100.0]);
     let mut o = QuickMinOptions::eon();
     o.curvature_cap = Some(1.0);
     let mut solver = session(o, 1.0, 2);
@@ -212,9 +142,7 @@ fn the_curvature_bound_tames_a_large_time_step() {
 #[test]
 fn per_atom_projection_converges() {
     let obj = Quad::new(array![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
-    let mut o = QuickMinOptions::rgmin();
-    o.per_atom = true;
-    let mut solver = session(o, 0.2, 6);
+    let mut solver = session(QuickMinOptions::per_atom(), 0.2, 6);
     let mut x = array![1.0, -1.0, 0.5, 0.2, -0.3, 0.7];
     let (gn, _) = run(&mut solver, &obj, &mut x, 3000);
     assert!(gn < 1e-8, "gnorm {gn}");

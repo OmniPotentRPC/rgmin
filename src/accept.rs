@@ -9,7 +9,7 @@ use crate::control::Control;
 use crate::manifold::{Manifold, ManifoldKind};
 use crate::step::{scale_step, scale_step_atom};
 
-pub(crate) const ENERGY_RISE: f64 = 1.0e-8;
+const ENERGY_RISE: f64 = 1.0e-8;
 const WINDOW: usize = 5;
 
 /// eOn `lbfgs_accept`. Default takes the clipped step (one oracle).

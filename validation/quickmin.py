@@ -27,19 +27,13 @@ The step, with F = -g at the current point:
    side, so c grows and tau lam crosses 2: the eOn step can raise the
    energy. A two-dimensional binary64 run with dt^2 lam_max < 2
    exhibits the rise.
-5. The backtracking variant restarts from the anchor at rest with
-   dt <- f_dec dt. After k cuts tau lam = f_dec^(2k) dt0^2 lam, below 2
-   once k >= log(dt0^2 lam / 2) / (2 log(1 / f_dec)); from then on every
-   accepted anchor is lower than the one before (item 3).
-6. The curvature cap dt <= c / sqrt(lam_hat), lam_hat = |y| / |s|, gives
+5. The curvature cap dt <= c / sqrt(lam_hat), lam_hat = |y| / |s|, gives
    h = dt^2 lam <= c^2 lam / lam_hat. When lam_hat equals the curvature
    lam of the mode, c = sqrt(2) is the edge of item 3 (h = 2, the mode
    flips sign and keeps its energy) and c = 2 the edge of item 2; descent
    from rest needs c < sqrt(2). lam_hat >= the Rayleigh quotient along
    s, so the bound is never looser than the Rayleigh estimate gives.
 """
-
-import math
 
 import sympy as sp
 
@@ -145,19 +139,7 @@ print(
     f"rises on diag(1, 100) with dt^2 lam_max < 2, e.g. dt, x2, step = {found[0]} [ok]"
 )
 
-# 5. Cuts to reach descent from rest.
-f_dec = sp.Rational(1, 2)
-dt0sq_lam = sp.symbols("D", positive=True)
-k = sp.symbols("k", nonnegative=True)
-cond = f_dec ** (2 * k) * dt0sq_lam
-k_min = sp.log(dt0sq_lam / 2) / (2 * sp.log(1 / f_dec))
-assert sp.simplify(cond.subs(k, k_min) - 2) == 0
-for D in (3, 10, 100, 1e4):
-    kk = math.ceil(math.log(D / 2) / (2 * math.log(2)))
-    assert 0.25**kk * D < 2 + 1e-12
-print("5. backtrack: k >= log(dt0^2 lam / 2) / (2 log(1/f_dec)) cuts restore descent [ok]")
-
-# 6. Curvature cap.
+# 5. Curvature cap.
 cc, lam_hat = sp.symbols("c lam_hat", positive=True)
 h_cap = (cc / sp.sqrt(lam_hat)) ** 2 * lam
 assert sp.simplify(h_cap - cc**2 * lam / lam_hat) == 0
@@ -170,5 +152,5 @@ s = sp.Matrix([s1, s2])
 y = Hs * s
 gap = sp.expand(y.dot(y) * s.dot(s) - s.dot(y) ** 2)
 assert sp.simplify(gap - sp.expand((y[0] * s[1] - y[1] * s[0]) ** 2)) == 0
-print("6. curvature cap: dt^2 lam = c^2 lam / lam_hat, |y|/|s| >= Rayleigh [ok]")
+print("5. curvature cap: dt^2 lam = c^2 lam / lam_hat, |y|/|s| >= Rayleigh [ok]")
 print("all QuickMin checks passed")

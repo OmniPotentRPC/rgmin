@@ -28,8 +28,9 @@ From rest the move is `dt^2 F`. On a quadratic whose curvature along `F`
 is at most `lam` (`F.HF <= lam |F|^2`) the energy change
 `-tau |F|^2 + tau^2 F.HF / 2` with `tau = dt^2` is negative whenever
 `0 < tau lam < 2` (`qm_rest_step_decrease`): a time step under
-`sqrt(2 / lam)` lowers the energy from rest, the bound
-`QuickMinUphill::Backtrack` restores by cutting `dt`.
+`sqrt(2 / lam)` lowers the energy from rest. `QuickMinOptions::curvature_cap`
+with `c < sqrt(2)` bounds `dt` below that limit for the curvature its
+secant estimate sees.
 -/
 
 open RealInnerProductSpace

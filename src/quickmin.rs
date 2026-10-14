@@ -249,58 +249,52 @@ pub fn quickmin_rescale_velocity(
     }
 }
 
-/// What a quick-min session does when the energy rose over its last step.
-#[non_exhaustive]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum QuickMinUphill {
-    /// No energy test: the reference rule.
-    #[default]
-    Ignore,
-    /// Zero the velocity and cut `dt` by `f_dec`.
-    Restart,
-    /// Zero the velocity, cut `dt` by `f_dec`, and step again from the
-    /// previous point with its force. At the `dt` floor the step goes on
-    /// from the current point.
-    Backtrack,
-}
-
 /// Quick-min session options, set with [`crate::Solver::set_quickmin_options`].
 ///
-/// Built through [`QuickMinOptions::rgmin`] or [`QuickMinOptions::eon`] so
-/// fields can be added without breaking callers.
+/// Built through [`QuickMinOptions::rgmin`], [`QuickMinOptions::eon`] or
+/// [`QuickMinOptions::per_atom`] so fields can be added without breaking
+/// callers. On the rgpot benchmark (LJ38 from random packings, the Pt7
+/// island on Pt(111), the EAM Al slab; 5 starts each, per-atom cap 0.2,
+/// `fmax < 0.01`), mean force calls:
+///
+/// | options | LJ38 | Pt7 | Al slab |
+/// |---|---|---|---|
+/// | [`Self::eon`] | 2001 (0 of 5 converge) | 18.6 | 24.6 |
+/// | [`Self::rgmin`] | 1348 (4 of 5) | 19.6 | 27.6 |
+/// | [`Self::per_atom`] | 649 | 32.0 | 28.2 |
+/// | `rgmin` with `curvature_cap = Some(0.7)` | 1162 | 20.0 | 27.6 |
+///
+/// A restart or a backtrack after an energy rise, a ten-fold `dt_max`,
+/// and dropping the clamp rescale moved the LJ38 mean by at most 9 of
+/// 1348 calls and the others by at most 0.4, and converged no further
+/// start, so they are not options.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuickMinOptions {
     /// Grow and shrink `dt` with FIRE's factors.
     pub adapt_dt: bool,
-    /// `dt_max` as a multiple of the starting `dt`.
-    pub dt_max_factor: f64,
-    /// Floor under an uphill cut of `dt`, as a multiple of the starting `dt`.
-    pub dt_min_factor: f64,
     /// Shrink the velocity to the capped step ([`quickmin_rescale_velocity`]).
     pub rescale_on_clamp: bool,
-    /// Project each xyz triple of the atomic block on its own force.
+    /// Project each xyz triple of the atomic block on its own force. The
+    /// cell block, when set, keeps one projection.
     pub per_atom: bool,
     /// With `Some(c)`, bound `dt <= c / sqrt(|y| / |s|)` from the force
-    /// difference `y` over the last step `s`.
+    /// difference `y` over the last step `s`. On a mode whose curvature
+    /// the estimate matches, `c < sqrt(2)` makes a step from rest lower
+    /// the energy (`validation/quickmin.py`).
     pub curvature_cap: Option<f64>,
-    /// Response to an energy rise.
-    pub uphill: QuickMinUphill,
 }
 
 impl QuickMinOptions {
-    /// The session default: FIRE time-step control (`dt_max = 2.5 dt0`),
-    /// the capped-step velocity rescale, no energy test.
+    /// The session default: FIRE time-step control, the capped-step
+    /// velocity rescale, one projection over the atoms.
     #[must_use]
     pub fn rgmin() -> Self {
         Self {
             adapt_dt: true,
-            dt_max_factor: 2.5,
-            dt_min_factor: 0.02,
             rescale_on_clamp: true,
             per_atom: false,
             curvature_cap: None,
-            uphill: QuickMinUphill::Ignore,
         }
     }
 
@@ -314,6 +308,18 @@ impl QuickMinOptions {
             ..Self::rgmin()
         }
     }
+
+    /// [`Self::rgmin`] with a projection per atom: an atom whose
+    /// velocity opposes its own force stops without stopping the rest.
+    /// It halves the LJ38 force calls and converges every start, and
+    /// costs 12 more calls on the seven-atom Pt7 island.
+    #[must_use]
+    pub fn per_atom() -> Self {
+        Self {
+            per_atom: true,
+            ..Self::rgmin()
+        }
+    }
 }
 
 impl Default for QuickMinOptions {
@@ -322,20 +328,13 @@ impl Default for QuickMinOptions {
     }
 }
 
-/// The point the last quick-min step started from.
-#[derive(Clone, Debug)]
-struct Anchor {
-    x: Array1<f64>,
-    value: f64,
-    force: Array1<f64>,
-}
-
-/// Session-side quick-min memory beyond [`QuickMinState`].
+/// Session-side quick-min memory beyond [`QuickMinState`]: the options
+/// and the last point and force, for the curvature bound.
 #[derive(Clone, Debug)]
 pub(crate) struct QuickMinSession {
     pub(crate) options: QuickMinOptions,
     dt0: f64,
-    anchor: Option<Anchor>,
+    last: Option<(Array1<f64>, Array1<f64>)>,
 }
 
 impl QuickMinSession {
@@ -348,99 +347,52 @@ impl QuickMinSession {
         Self {
             options: QuickMinOptions::rgmin(),
             dt0,
-            anchor: None,
+            last: None,
         }
     }
 
     /// Apply `options` to the state; the velocity and `dt` restart.
     pub(crate) fn configure(&mut self, state: &mut QuickMinState, options: QuickMinOptions) {
-        let factor = if options.dt_max_factor.is_finite() {
-            options.dt_max_factor.max(1.0)
-        } else {
-            1.0
-        };
         state.adapt_dt = options.adapt_dt;
         state.dt = self.dt0;
-        state.dt_max = self.dt0 * factor;
         state.reset();
         self.options = options;
-        self.anchor = None;
+        self.last = None;
     }
 
-    /// Forget the previous point: its energy and force may belong to an
-    /// objective that changed.
-    pub(crate) fn forget_anchor(&mut self) {
-        self.anchor = None;
-    }
-
-    fn dt_min(&self) -> f64 {
-        let f = self.options.dt_min_factor;
-        let f = if f.is_nan() { 0.0 } else { f.clamp(0.0, 1.0) };
-        (self.dt0 * f).max(1e-12)
+    /// Forget the last point: its force may belong to an objective that
+    /// changed.
+    pub(crate) fn forget_last(&mut self) {
+        self.last = None;
     }
 }
 
-/// One session step: `(origin, dx)`. The caller caps `dx` against
-/// `origin` and evaluates the new point. `slack` is the energy rise the
-/// uphill test tolerates.
+/// One session step from `x` with force `force`: the proposed
+/// displacement. The caller caps it and evaluates the new point.
 pub(crate) fn quickmin_session_step(
     state: &mut QuickMinState,
     session: &mut QuickMinSession,
     x: &Array1<f64>,
-    value: f64,
     force: &Array1<f64>,
-    slack: f64,
-) -> (Array1<f64>, Array1<f64>) {
-    let opts = session.options.clone();
-    let anchor = session.anchor.take();
-    let mut backtrack: Option<Anchor> = None;
-    if let Some(prev) = anchor {
-        let uphill = !value.is_finite() || value - prev.value > slack;
-        if uphill && opts.uphill != QuickMinUphill::Ignore {
-            state.vel.fill(0.0);
-            state.n_pos = 0;
-            let floor = session.dt_min();
-            let cut = state.dt > floor;
-            if cut {
-                state.dt = (state.dt * state.f_dec).max(floor);
-            }
-            if opts.uphill == QuickMinUphill::Backtrack && cut {
-                backtrack = Some(prev);
-            }
-        } else if let Some(c) = opts.curvature_cap.filter(|_| value.is_finite()) {
-            let s = x - &prev.x;
-            let y = &prev.force - force;
-            let ss = crate::vecops::dot(s.view(), s.view());
-            let yy = crate::vecops::dot(y.view(), y.view());
-            if ss > 0.0 && yy > 0.0 {
-                let bound = c / (yy / ss).sqrt().sqrt();
-                if bound.is_finite() && bound > 0.0 {
-                    state.dt = state.dt.min(bound).max(session.dt_min());
-                }
+) -> Array1<f64> {
+    if let (Some(c), Some((px, pf))) = (session.options.curvature_cap, &session.last) {
+        let s = x - px;
+        let y = pf - force;
+        let ss = crate::vecops::dot(s.view(), s.view());
+        let yy = crate::vecops::dot(y.view(), y.view());
+        if ss > 0.0 && yy > 0.0 {
+            let bound = c / (yy / ss).sqrt().sqrt();
+            // The floor is FIRE 2.0's dt_min = 0.02 dt0.
+            if bound.is_finite() && bound > 0.0 {
+                state.dt = state.dt.min(bound).max(0.02 * session.dt0);
             }
         }
     }
-    match backtrack {
-        Some(prev) => {
-            // From rest at the previous point: v = dt F, dx = dt^2 F.
-            let dt = state.dt;
-            state.vel.assign(&prev.force);
-            state.vel *= dt;
-            let dx = &state.vel * dt;
-            let origin = prev.x.clone();
-            session.anchor = Some(prev);
-            (origin, dx)
-        }
-        None => {
-            let dx = displacement_blocks(state, force, opts.per_atom);
-            session.anchor = Some(Anchor {
-                x: x.clone(),
-                value,
-                force: force.clone(),
-            });
-            (x.clone(), dx)
-        }
+    let dx = displacement_blocks(state, force, session.options.per_atom);
+    if session.options.curvature_cap.is_some() {
+        session.last = Some((x.clone(), force.clone()));
     }
+    dx
 }
 
 #[cfg(test)]

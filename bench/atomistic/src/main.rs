@@ -25,8 +25,8 @@ use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rgmin::{
     Accept, Conjugacy, Control, ExpParams, FfParams, FfTerms, FireKind, GeometryKind, Ghost, Lbfgs,
-    LindhParams, LineSearch, Method, Neighbours, PreconChoice, QuickMinOptions, QuickMinUphill,
-    Restart, Solver, bonded_terms, select_precon,
+    LindhParams, LineSearch, Method, Neighbours, PreconChoice, QuickMinOptions, Restart, Solver,
+    bonded_terms, select_precon,
 };
 use rgpot_core::eindir::{
     rgpot_potential_free_eindir, rgpot_potential_new_eindir, rgpot_potential_t,
@@ -699,8 +699,7 @@ fn cg_wolfe() -> LineSearch {
 
 /// Quick-min options from `QM_X`, a comma list over
 /// [`QuickMinOptions::rgmin`]: `eon` (start from the eOn options),
-/// `fixed`, `norescale`, `peratom`, `restart`, `backtrack`, `curv=<c>`,
-/// `dtmax=<factor>`.
+/// `fixed`, `norescale`, `peratom`, `curv=<c>`.
 fn quickmin_from_env() -> QuickMinOptions {
     let mut o = QuickMinOptions::rgmin();
     let spec = std::env::var("QM_X").unwrap_or_default();
@@ -711,10 +710,7 @@ fn quickmin_from_env() -> QuickMinOptions {
             "fixed" => o.adapt_dt = false,
             "norescale" => o.rescale_on_clamp = false,
             "peratom" => o.per_atom = true,
-            "restart" => o.uphill = QuickMinUphill::Restart,
-            "backtrack" => o.uphill = QuickMinUphill::Backtrack,
             "curv" => o.curvature_cap = Some(val.parse().expect("curv=<c>")),
-            "dtmax" => o.dt_max_factor = val.parse().expect("dtmax=<f>"),
             other => panic!("QM_X: unknown option {other}"),
         }
     }
@@ -766,7 +762,7 @@ fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
         ),
         "cg-brent" => (pr, Accept::None, LineSearch::default(), 0.01),
         "lbfgs" => (lbfgs, Accept::None, wolfe(), 1.0),
-        "qm" | "qm-eon" | "qmx" => (Method::QuickMin, Accept::None, wolfe(), 0.1),
+        "qm" | "qm-eon" | "qm-pa" | "qmx" => (Method::QuickMin, Accept::None, wolfe(), 0.1),
         _ => return None,
     })
 }
@@ -931,6 +927,7 @@ fn run_session(
     solver.set_atom_maxmove(maxmove);
     match name {
         "qm-eon" => solver.set_quickmin_options(QuickMinOptions::eon()),
+        "qm-pa" => solver.set_quickmin_options(QuickMinOptions::per_atom()),
         "qmx" => solver.set_quickmin_options(quickmin_from_env()),
         _ => {}
     }
