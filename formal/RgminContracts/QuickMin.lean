@@ -77,7 +77,8 @@ theorem qmProject_power_eq {v F : E} (hF : F ≠ 0) (h : 0 ≤ ⟪v, F⟫) :
     ⟪qmProject v F, F⟫ = ⟪v, F⟫ := by
   have hn : ‖F‖ ^ 2 ≠ 0 := pow_ne_zero 2 (norm_ne_zero_iff.mpr hF)
   unfold qmProject
-  rw [if_pos h, real_inner_smul_left, real_inner_self_eq_norm_sq]
+  simp only [h, ↓reduceIte]
+  rw [real_inner_smul_left, real_inner_self_eq_norm_sq]
   exact div_mul_cancel₀ _ hn
 
 /-- **The projection never lengthens the velocity**: `|v'| <= |v|`. -/
