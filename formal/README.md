@@ -9,7 +9,8 @@ floating-point implementation to them at fixed tolerances.
 `proofs/lean/` holds the scalar algebra of the line search, the trust
 region and the Nystrom sketch. `formal/` holds the vector-space
 contracts: the Armijo existence argument, BFGS and L-BFGS positive
-definiteness, the per-atom clamp, and FIRE mixing.
+definiteness, the per-atom clamp, FIRE mixing, and the quick-min
+projection.
 
 ## Check
 
@@ -48,6 +49,11 @@ with [elan](https://github.com/leanprover/elan).
 | `fireMix_power_ge` | `src/fire.rs::mix_velocity` | `a >= 0`. Mixing never lowers `F.v`. |
 | `fireMix_not_norm_preserving`, `fireMix_norm_gt_of_two` | `src/fire.rs::mix_velocity` | Shows the limits: the mix does not preserve `|v|`, and `a = 2` breaks the bound. |
 | `fire_rescale_consistent` | `src/fire.rs::fire_rescale_velocity` | The move taken is a nonnegative multiple of the proposed one. Then `dt v'` equals the move taken. |
+| `qmProject_parallel`, `qmProject_eq_coeff`, `qmCoeff_nonneg` | `src/quickmin.rs::project_range`, `quickmin_project` | None. The projected velocity is `c F` with `c >= 0`; a negative or NaN power, or a zero force, gives `c = 0`. |
+| `qmProject_power_nonneg`, `qmProject_against_force_nonpos`, `qmProject_power_eq` | `src/quickmin.rs::project_range` | None. `v'.F >= 0`, so no component along `-F`; `v'.F = v.F` when `v.F >= 0` and `F /= 0`. |
+| `qmProject_norm_le`, `qmProject_kinetic_le` | `src/quickmin.rs::project_range`, per block | None. `|v'| <= |v|` on each block (whole vector, atoms and cell, or each atom). In binary64 the bound holds to `B(n) - 1` relative (`validation/quickmin.sollya`). |
+| `qm_step_parallel`, `qm_step_descent`, `qm_step_direction` | `src/quickmin.rs::quickmin_displacement`, the session clamp | `dt > 0` (`QuickMinState::new` replaces a nonpositive `dt`; every cut has a positive floor) and `cap > 0`. One projection block: the clamped move is a positive multiple of `F`. |
+| `qm_rest_step_decrease` | `src/quickmin.rs::quickmin_session_step` (`QuickMinUphill::Backtrack`) | Curvature along `F` at most `lam` and `0 < dt^2 lam < 2`. A step from rest then lowers a quadratic energy; the backtrack cuts `dt` toward it. |
 
 ## Where the Rust code establishes the preconditions
 

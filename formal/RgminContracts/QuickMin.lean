@@ -3,17 +3,19 @@ import RgminContracts.Clamp
 
 /-! # QuickMin velocity projection
 
-Contract for `src/quickmin.rs::project_on_force` and the step
-`quickmin_step` builds from it.
+Contract for the projection in `src/quickmin.rs` (`project_range`,
+public as `quickmin_project`) and the step `quickmin_displacement` and
+the session build from it.
 
-`project_on_force` sets `v <- (v.F / |F|^2) F` when `v.F >= 0` and
+`project_range` sets `v <- (v.F / |F|^2) F` when `v.F >= 0` and
 `v <- 0` otherwise. It is the orthogonal projection of `v` on the closed
 ray `{c F : c >= 0}`. The projected velocity is a nonnegative multiple
 of `F` (`qmProject_parallel`), so its power is nonnegative and it has no
 component along `-F` (`qmProject_power_nonneg`); the power is kept when
 it was nonnegative (`qmProject_power_eq`); and it is never longer than
 `v` (`qmProject_norm_le`), so the projection never adds kinetic energy.
-The cell block and the per-atom blocks apply the same map to their own
+The cell block (`QuickMinState::cell_at`) and the per-atom blocks
+(`QuickMinOptions::per_atom`) apply the same map to their own
 coordinates, so each block satisfies these statements.
 
 The step then kicks, `v' = P v + dt F`, and the session clamps the move
@@ -26,8 +28,8 @@ From rest the move is `dt^2 F`. On a quadratic whose curvature along `F`
 is at most `lam` (`F.HF <= lam |F|^2`) the energy change
 `-tau |F|^2 + tau^2 F.HF / 2` with `tau = dt^2` is negative whenever
 `0 < tau lam < 2` (`qm_rest_step_decrease`): a time step under
-`sqrt(2 / lam)` lowers the energy from rest, the bound the backtracking
-variant restores by cutting `dt`.
+`sqrt(2 / lam)` lowers the energy from rest, the bound
+`QuickMinUphill::Backtrack` restores by cutting `dt`.
 -/
 
 open RealInnerProductSpace

@@ -466,6 +466,23 @@ mod tests {
     }
 
     #[test]
+    fn the_projection_never_lengthens_and_never_opposes() {
+        let mut seed = 12345_u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((seed >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+        };
+        for _ in 0..1000 {
+            let v = Array1::from_iter((0..6).map(|_| next()));
+            let f = Array1::from_iter((0..6).map(|_| next()));
+            let p = quickmin_project(&v, &f);
+            // validation/quickmin.sollya: B(6) - 1 is 7 eps.
+            assert!(crate::step::l2(&p) <= crate::step::l2(&v) * (1.0 + 8.0 * f64::EPSILON));
+            assert!(p.dot(&f) >= 0.0);
+        }
+    }
+
+    #[test]
     fn a_skew_velocity_keeps_only_the_force_direction() {
         let projected = quickmin_project(&array![3.0, 4.0], &array![1.0, 0.0]);
         assert_abs_diff_eq!(projected[0], 3.0, epsilon = 1e-12);

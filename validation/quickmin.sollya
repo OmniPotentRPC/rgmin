@@ -1,10 +1,11 @@
-// Floating-point bound for src/quickmin.rs::project_on_force in binary64.
+// Floating-point bound for the projection in src/quickmin.rs
+// (project_range, quickmin_project) in binary64.
 // Run: sollya validation/quickmin.sollya
 //
 // The code computes p = fl(sum v_i f_i), q = fl(sum f_i^2) by recursive
 // summation over n terms, c = fl(p / q) and v'_i = fl(c f_i). With
 // u = 2^-53 and gamma_n = n u / (1 - n u) (Higham, Accuracy and Stability
-// of Numerical Algorithms, 2nd ed., eq. 3.4):
+// of Numerical Algorithms, 2nd ed., chapter 3):
 //   |p| <= |v.f| + gamma_n sum |v_i f_i| <= (1 + gamma_n) |v| |f|,
 //   q >= (1 - gamma_n) |f|^2,
 //   |v'| <= |c| |f| (1 + u),  |c| <= |p| / q (1 + u),
@@ -12,7 +13,7 @@
 // In exact arithmetic B = 1 (formal/RgminContracts/QuickMin.lean,
 // qmProject_norm_le); in binary64 the projection may lengthen v by at
 // most B(n) - 1 relative, which the unit test
-// projection_never_lengthens_and_never_opposes allows for n = 6.
+// the_projection_never_lengthens_and_never_opposes allows for n = 6.
 // The power v'.f = sum fl(c f_i) f_i has every term of the sign of c >= 0,
 // so the computed power is never negative.
 prec = 200;
