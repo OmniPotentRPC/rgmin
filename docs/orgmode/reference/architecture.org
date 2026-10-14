@@ -62,6 +62,9 @@ Rust, C sees a small ABI, C++ is a header wrapper.
   L-BFGS option.
 - =Solver::set_precon= / =rgmin_solver_set_precon= :: Exp, Lindh, the
   bonded metric, or =select_precon=. ABI minor 32.
+- =rgmin_solver_set_quickmin_variant= :: Quick-min options from C:
+  =RGMIN_QUICKMIN_RGMIN=, =RGMIN_QUICKMIN_EON=,
+  =RGMIN_QUICKMIN_PER_ATOM=. ABI minor 33.
   =rgmin_solver_precon_scale= is =μ= after the sine probe.
 - =select_precon= :: L-BFGS and CG: Exp at 100 atoms for bulk,
   surface, and a metal cluster (ASE ~PreconLBFGS~). Lindh for a

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- `Method` is `#[non_exhaustive]`: a match on it outside rgmin needs a
+  wildcard arm. It ships with the next minor release; a method added
+  after it is an additive change.
+
 ### Added
 
 - Optional `readcon` feature, not in `default`. `write_checkpoint` and
@@ -21,6 +27,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a fully specified fixture with `cmp`, checks the restored f64 bits,
   and checks that a minimization started from `read_checkpoint`
   matches one started from the same in-memory vector.
+- Quick-min options: `QuickMinOptions` and `Solver::set_quickmin_options`,
+  C `rgmin_solver_set_quickmin_variant` with `rgmin_quickmin_variant_t`
+  (`RGMIN_QUICKMIN_RGMIN`, `RGMIN_QUICKMIN_EON`,
+  `RGMIN_QUICKMIN_PER_ATOM`), ABI minor 33. `QuickMinOptions::eon` is
+  the eOn `Quickmin::step`: fixed time step and a capped step that
+  leaves the velocity alone. `QuickMinOptions::per_atom` projects each
+  atom's velocity on its own force. On rgpot surfaces (5 starts each,
+  per-atom cap 0.2) it takes 649 force calls on LJ38 from random
+  packings against 1348 for the default (which converges 4 of 5) and
+  2001 for the eOn options (none converge), 32.0 against 19.6 on the
+  Pt7 island, and 28.2 against 27.6 on the EAM Al slab.
+  `curvature_cap` bounds the time step by `c / sqrt(|y| / |s|)` from the
+  last force difference. `validation/quickmin.py` (sympy) derives the
+  stability limit `dt^2 lam < 4`, the descent-from-rest condition
+  `dt^2 lam < 2` and an energy rise of the eOn step below both;
+  `validation/quickmin.sollya` bounds the binary64 lengthening of the
+  projected velocity; `formal/RgminContracts/QuickMin.lean` proves the
+  projection keeps `v` a nonnegative multiple of `F`, never lengthens
+  it, and that the capped move is a positive multiple of `F`.
 
 ## [0.4.0] - 2026-10-11
 

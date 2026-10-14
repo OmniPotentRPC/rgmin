@@ -34,6 +34,23 @@ host Hessian. ~forget~ drops pair history, conjugacy, and moments.
 keeps the reference fixed time step. ~set_quickmin_cell(at)~ gives the
 atoms and the cell their own velocities. The displacement cap is the
 same ~set_atom_maxmove~ the other methods use.
+
+To run eOn's quick-min, or the per-atom variant, set the options after
+building the session:
+
+#+begin_src rust
+use rgmin::{Control, Method, QuickMinOptions, Solver};
+
+let control = Control { istep: 0.1, ..Control::default() };
+let mut solver = Solver::new(Method::QuickMin, control, x.len());
+solver.set_atom_maxmove(0.2);
+solver.set_quickmin_options(QuickMinOptions::per_atom()); // or ::eon()
+let report = solver.step(&obj, &mut x).unwrap();
+#+end_src
+
+From C, ~rgmin_solver_set_quickmin_variant(s, RGMIN_QUICKMIN_PER_ATOM)~
+(or ~RGMIN_QUICKMIN_EON~, ~RGMIN_QUICKMIN_RGMIN~) on a session created
+with ~RGMIN_QUICKMIN~.
 ~set_project_rigid~ projects translations and rotations on isolated
 clusters.
 
