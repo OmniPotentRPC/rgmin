@@ -1,7 +1,7 @@
 //! Quick-min session options: the eOn step, the uphill test, the
 //! curvature bound, and one oracle call per step.
 
-use std::cell::Cell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
@@ -11,7 +11,7 @@ use rgmin::{Control, Method, QuickMinOptions, QuickMinUphill, Solver};
 struct Quad {
     k: Array1<f64>,
     bounds: Bounds<f64>,
-    calls: Cell<usize>,
+    calls: AtomicUsize,
 }
 
 impl Quad {
@@ -20,7 +20,7 @@ impl Quad {
         Self {
             k,
             bounds: Bounds::new(Array1::from_elem(n, -1e6), Array1::from_elem(n, 1e6), 0.0),
-            calls: Cell::new(0),
+            calls: AtomicUsize::new(0),
         }
     }
 }
@@ -48,7 +48,7 @@ impl Gradient<f64> for Quad {
 
 impl DifferentiableObjective<f64> for Quad {
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        self.calls.set(self.calls.get() + 1);
+        self.calls.fetch_add(1, Ordering::Relaxed);
         (self.eval(x), self.grad(x))
     }
 }
@@ -93,7 +93,7 @@ fn the_eon_step_converges_with_one_call_per_step() {
     let (gn, steps) = run(&mut solver, &obj, &mut x, 2000);
     assert!(gn < 1e-8, "gnorm {gn}");
     // The first step evaluates the start; each step after that one point.
-    assert_eq!(obj.calls.get(), steps + 1);
+    assert_eq!(obj.calls.load(Ordering::Relaxed), steps + 1);
 }
 
 #[test]
@@ -130,7 +130,11 @@ fn backtracking_recovers_from_an_unstable_time_step() {
     for _ in 0..20 {
         eon.step(&obj, &mut y).unwrap();
     }
-    assert!(obj.eval(y.view()) > 1e3 * e0, "eOn energy {}", obj.eval(y.view()));
+    assert!(
+        obj.eval(y.view()) > 1e3 * e0,
+        "eOn energy {}",
+        obj.eval(y.view())
+    );
 
     let mut solver = session(backtracking(), 1.0, 2);
     let mut x = array![1.0, 0.1];
