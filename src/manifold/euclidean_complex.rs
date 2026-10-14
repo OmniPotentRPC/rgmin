@@ -59,7 +59,7 @@ impl EuclideanComplex {
 
     /// Split a packed vector into `(re, im)`. `None` if the length is odd.
     pub fn unpack(x: &Array1<f64>) -> Option<(Array1<f64>, Array1<f64>)> {
-        if x.len() % 2 != 0 {
+        if !x.len().is_multiple_of(2) {
             return None;
         }
         let n = x.len() / 2;
@@ -85,7 +85,7 @@ pub fn typical_dist(n: usize) -> f64 {
 
 /// `true` when `x` is a legal interleaved packing (`length = 2 n`, `n >= 1`).
 pub fn is_euclidean_complex(x: &Array1<f64>) -> bool {
-    x.len() >= 2 && x.len() % 2 == 0
+    x.len() >= 2 && x.len().is_multiple_of(2)
 }
 
 impl Manifold for EuclideanComplex {

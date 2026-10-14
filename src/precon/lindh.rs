@@ -202,12 +202,12 @@ impl Lindh {
                 what: "c_stab is not positive",
             });
         }
-        if let Some(cut) = params.r_cut {
-            if !(cut.is_finite() && cut > 0.0) {
-                return Err(Error::Precon {
-                    what: "r_cut is not positive",
-                });
-            }
+        if let Some(cut) = params.r_cut
+            && !(cut.is_finite() && cut > 0.0)
+        {
+            return Err(Error::Precon {
+                what: "r_cut is not positive",
+            });
         }
         if z.iter().any(|a| *a <= 0) || ghosts.iter().any(|g| g.z <= 0) {
             return Err(Error::Precon {
@@ -367,12 +367,12 @@ impl LindhState {
 }
 
 fn usable_mu(mu: Option<f64>) -> Result<Option<f64>> {
-    if let Some(mu) = mu {
-        if !(mu.is_finite() && mu > 0.0) {
-            return Err(Error::Precon {
-                what: "mu is not positive",
-            });
-        }
+    if let Some(mu) = mu
+        && !(mu.is_finite() && mu > 0.0)
+    {
+        return Err(Error::Precon {
+            what: "mu is not positive",
+        });
     }
     Ok(mu)
 }
