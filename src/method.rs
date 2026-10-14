@@ -3,6 +3,10 @@
 use crate::nlcg::{Conjugacy, Restart};
 
 /// Local first-order, quasi-Newton, or swarm method over an eindir objective.
+///
+/// Non-exhaustive: a match outside this crate needs a wildcard arm, so a
+/// later method is an additive change.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Method {
     /// Nonlinear CG (Nocedal-Wright algorithm 5.4).
