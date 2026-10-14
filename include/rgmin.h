@@ -50,7 +50,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 32
+#define RGMIN_ABI_VERSION_MINOR 33
 #define RGMIN_ABI_LAYOUT_REVISION 3
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -330,6 +330,16 @@ void rgmin_solver_set_fire_variant(rgmin_solver_t *solver,
  *  Returns RGMIN_INVALID_PARAMETER when the session is not quick-min or
  *  `at` is not an interior index. ABI minor 29. */
 rgmin_status_t rgmin_solver_set_quickmin_cell(rgmin_solver_t *solver, size_t at);
+/** Quick-min options: the rgmin default, the eOn step (fixed time step,
+ *  no clamp rescale), or one projection per atom. A no-op on other
+ *  sessions. ABI minor 33. */
+typedef enum rgmin_quickmin_variant_t {
+    RGMIN_QUICKMIN_RGMIN = 0,
+    RGMIN_QUICKMIN_EON = 1,
+    RGMIN_QUICKMIN_PER_ATOM = 2
+} rgmin_quickmin_variant_t;
+void rgmin_solver_set_quickmin_variant(rgmin_solver_t *solver,
+                                       rgmin_quickmin_variant_t variant);
 /** Line search for the session arms that use one. */
 typedef enum rgmin_linesearch_t {
     RGMIN_LINESEARCH_BRENT = 0,

@@ -10,7 +10,8 @@ use eindir_core::ffi::{eindir_objective_t, eindir_status_t};
 use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_control_t, rgmin_method_t,
     rgmin_minimize, rgmin_minimize_eindir, rgmin_report_t, rgmin_solver_create, rgmin_solver_free,
-    rgmin_solver_set_accept, rgmin_solver_set_quickmin_cell, rgmin_solver_step,
+    rgmin_quickmin_variant_t, rgmin_solver_set_accept, rgmin_solver_set_quickmin_cell,
+    rgmin_solver_set_quickmin_variant, rgmin_solver_step,
     rgmin_solver_step_fg, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
     rgmin_tensor_free,
 };
@@ -604,7 +605,7 @@ fn c_abi_diis_reduces_a_quadratic() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 32);
+    assert_eq!(stamp.abi_minor, 33);
     assert_eq!(stamp.layout_revision, 3);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -1770,4 +1771,57 @@ fn precon_struct_offsets_match_the_header() {
     assert_eq!(std::mem::offset_of!(rgmin_precon_t, nangles), 184);
     assert_eq!(std::mem::offset_of!(rgmin_precon_t, dihedrals), 192);
     assert_eq!(std::mem::offset_of!(rgmin_precon_t, geometry_kind), 196);
+}
+
+#[test]
+fn c_abi_quickmin_variants_relax_the_bowl() {
+    use rgmin_quickmin_variant_t::*;
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 0.0,
+        istep: 0.2,
+        memory: 0,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    };
+    for variant in [RGMIN_QUICKMIN_RGMIN, RGMIN_QUICKMIN_EON, RGMIN_QUICKMIN_PER_ATOM] {
+        let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_QUICKMIN, &ctrl, 2) };
+        assert!(!session.is_null());
+        unsafe { rgmin_solver_set_quickmin_variant(session, variant) };
+        let mut x = [1.0_f64, -0.5];
+        let mut out = rgmin_report_t {
+            value: 0.0,
+            steps: 0,
+            grad_norm: 0.0,
+            stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        };
+        for _ in 0..2000 {
+            let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+            let st = unsafe {
+                rgmin_solver_step(
+                    session,
+                    Some(bowl_eval),
+                    Some(bowl_grad),
+                    std::ptr::null_mut(),
+                    xt,
+                    &mut out,
+                )
+            };
+            unsafe { rgmin_tensor_free(xt) };
+            assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+            if out.grad_norm < 1e-8 {
+                break;
+            }
+        }
+        unsafe { rgmin_solver_free(session) };
+        assert!(out.grad_norm < 1e-8, "{variant:?}: gnorm {}", out.grad_norm);
+    }
+    // A null session and a session of another method are no-ops.
+    unsafe { rgmin_solver_set_quickmin_variant(std::ptr::null_mut(), RGMIN_QUICKMIN_EON) };
+    let lbfgs = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    unsafe {
+        rgmin_solver_set_quickmin_variant(lbfgs, RGMIN_QUICKMIN_PER_ATOM);
+        rgmin_solver_free(lbfgs);
+    }
 }

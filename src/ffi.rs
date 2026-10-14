@@ -63,7 +63,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 32;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 33;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 3;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -2121,6 +2121,40 @@ pub unsafe extern "C" fn rgmin_solver_set_quickmin_cell(
         Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
         Err(_) => rgmin_status_t::RGMIN_INVALID_PARAMETER,
     }
+}
+
+/// Quick-min options of a quick-min session (see [`crate::QuickMinOptions`]).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_quickmin_variant_t {
+    /// [`crate::QuickMinOptions::rgmin`]: FIRE time step, clamp rescale.
+    RGMIN_QUICKMIN_RGMIN = 0,
+    /// [`crate::QuickMinOptions::eon`]: fixed time step, no rescale.
+    RGMIN_QUICKMIN_EON = 1,
+    /// [`crate::QuickMinOptions::per_atom`]: one projection per atom.
+    RGMIN_QUICKMIN_PER_ATOM = 2,
+}
+
+/// Select the quick-min options; a no-op on any other session. The
+/// velocity and the time step restart; the cell split stays.
+///
+/// # Safety
+///
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_quickmin_variant(
+    solver: *mut rgmin_solver_t,
+    variant: rgmin_quickmin_variant_t,
+) {
+    if solver.is_null() {
+        return;
+    }
+    let options = match variant {
+        rgmin_quickmin_variant_t::RGMIN_QUICKMIN_RGMIN => crate::QuickMinOptions::rgmin(),
+        rgmin_quickmin_variant_t::RGMIN_QUICKMIN_EON => crate::QuickMinOptions::eon(),
+        rgmin_quickmin_variant_t::RGMIN_QUICKMIN_PER_ATOM => crate::QuickMinOptions::per_atom(),
+    };
+    unsafe { (*solver).solver.set_quickmin_options(options) };
 }
 
 /// Line search for the line-searched session arms.

@@ -451,6 +451,9 @@ public:
     rgmin_status_t set_quickmin_cell(std::size_t at) {
         return rgmin_solver_set_quickmin_cell(ptr_, at);
     }
+    void set_quickmin_variant(rgmin_quickmin_variant_t variant) {
+        rgmin_solver_set_quickmin_variant(ptr_, variant);
+    }
     rgmin_status_t set_linesearch(rgmin_linesearch_t kind, double c1,
                                  double c2, std::size_t maxiter) {
         return rgmin_solver_set_linesearch(ptr_, kind, c1, c2, maxiter);
