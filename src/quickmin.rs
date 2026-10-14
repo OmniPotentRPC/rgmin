@@ -260,14 +260,14 @@ pub fn quickmin_rescale_velocity(
 /// | options | LJ38 | Pt7 | Al slab |
 /// |---|---|---|---|
 /// | [`Self::eon`] | 2001 (0 of 5 converge) | 18.6 | 24.6 |
-/// | [`Self::rgmin`] | 1348 (4 of 5) | 19.6 | 27.6 |
-/// | [`Self::per_atom`] | 649 | 32.0 | 28.2 |
-/// | `rgmin` with `curvature_cap = Some(0.7)` | 1162 | 20.0 | 27.6 |
+/// | [`Self::rgmin`] | 1344 (4 of 5) | 19.6 | 27.6 |
+/// | [`Self::per_atom`] | 645 | 32.0 | 28.2 |
+/// | `rgmin` with `curvature_cap = Some(0.7)` | 1167 | 20.0 | 27.6 |
 ///
 /// A restart or a backtrack after an energy rise, a ten-fold `dt_max`,
-/// and dropping the clamp rescale moved the LJ38 mean by at most 9 of
-/// 1348 calls and the others by at most 0.4, and converged no further
-/// start, so they are not options.
+/// and dropping the clamp rescale moved the LJ38 mean by at most 9
+/// calls and the others by at most 0.4, and converged no further start,
+/// so they are not options.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuickMinOptions {

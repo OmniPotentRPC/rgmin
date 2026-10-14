@@ -84,12 +84,12 @@ the eOn step can raise the energy even under ~Δt² λ_max < 2~
 | options                    | LJ38          | Pt7 island | Al slab |
 |----------------------------+---------------+------------+---------|
 | ~eon()~                    | 2001 (0 of 5) |       18.6 |    24.6 |
-| ~rgmin()~                  | 1348 (4 of 5) |       19.6 |    27.6 |
-| ~per_atom()~               | 649 (5 of 5)  |       32.0 |    28.2 |
-| ~rgmin()~, ~cap Some(0.7)~ | 1162 (5 of 5) |       20.0 |    27.6 |
+| ~rgmin()~                  | 1344 (4 of 5) |       19.6 |    27.6 |
+| ~per_atom()~               | 645 (5 of 5)  |       32.0 |    28.2 |
+| ~rgmin()~, ~cap Some(0.7)~ | 1167 (5 of 5) |       20.0 |    27.6 |
 | FIRE                       | 411           |       50.6 |    60.2 |
 | FIRE 2.0 (Guénolé 2020)    | 871           |       26.0 |    33.8 |
-| L-BFGS                     | 168           |       10.0 |    14.0 |
+| L-BFGS                     | 169           |       10.0 |    14.0 |
 
 The eOn options never converge LJ38 from random packings in 2000
 steps; the FIRE time step is what converges it. The per-atom

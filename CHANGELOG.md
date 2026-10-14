@@ -34,8 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the eOn `Quickmin::step`: fixed time step and a capped step that
   leaves the velocity alone. `QuickMinOptions::per_atom` projects each
   atom's velocity on its own force. On rgpot surfaces (5 starts each,
-  per-atom cap 0.2) it takes 649 force calls on LJ38 from random
-  packings against 1348 for the default (which converges 4 of 5) and
+  per-atom cap 0.2) it takes 645 force calls on LJ38 from random
+  packings against 1344 for the default (which converges 4 of 5) and
   2001 for the eOn options (none converge), 32.0 against 19.6 on the
   Pt7 island, and 28.2 against 27.6 on the EAM Al slab.
   `curvature_cap` bounds the time step by `c / sqrt(|y| / |s|)` from the
