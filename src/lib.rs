@@ -32,6 +32,9 @@ mod adam;
 mod bb;
 #[cfg(feature = "highs")]
 mod box_objective;
+/// CON checkpoint of an accepted point. Compiled only with `readcon`.
+#[cfg(feature = "readcon")]
+pub mod con_checkpoint;
 mod control;
 mod diis;
 mod error;
@@ -107,6 +110,8 @@ pub mod vecops;
 
 pub use accept::Accept;
 pub use adam::minimize_adam;
+#[cfg(feature = "readcon")]
+pub use con_checkpoint::{read_checkpoint, write_checkpoint};
 pub use control::{Control, NoiseFloor};
 pub use dlaf_kind::DlaFutureParams;
 pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional `readcon` feature, not in `default`. `write_checkpoint` and
+  `read_checkpoint` in `src/con_checkpoint.rs` depend on readcon-core
+  `=0.17.1` from git `694e808` (main) until that version is on
+  crates.io. The writer is `ConFrameWriter::new`: RoundTrip, canonical
+  off, precision omitted. A finite `Report.value` calls `set_energy`.
+  A non-finite value omits the energy key. `Report` gains no path
+  field. `minimize` and `Solver::step` do not open a path. The
+  `default`, `capi`, `highs`, and `all-features` CI rows do not link
+  the crate. A separate `cargo test --features readcon` row compares
+  a fully specified fixture with `cmp`, checks the restored f64 bits,
+  and checks that a minimization started from `read_checkpoint`
+  matches one started from the same in-memory vector.
+
 ## [0.4.0] - 2026-10-11
 
 ### Added

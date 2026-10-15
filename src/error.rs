@@ -128,6 +128,9 @@ pub enum Error {
         /// Matrix order.
         n: usize,
     },
+    /// A CON checkpoint could not be written or read.
+    #[error("checkpoint: {0}")]
+    Checkpoint(String),
 }
 
 /// Result alias for this crate.

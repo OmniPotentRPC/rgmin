@@ -27,6 +27,10 @@ slepc = ["dep:cc", "dep:pkg-config"]
 primme = ["dep:cc", "dep:pkg-config"]
 chase = ["dep:cc", "dep:pkg-config"]
 libkrylov = ["dep:cc", "dep:pkg-config"]
+# Off the default link line. The CI row named all-features lists every
+# other feature by name, so `--all-features` is not that row: this
+# dependency would otherwise be linked into the staticlib.
+readcon = ["dep:readcon-core"]
 
 [dependencies]
 eindir-core = { version = "0.6.0", features = ["capi"] }
@@ -39,6 +43,10 @@ rayon = { version = "1.10", optional = true }
 multiversion = { version = "=0.9.0", optional = true }
 highs = { version = "2.1", optional = true }
 highs-sys = { version = "1.12", optional = true }
+# crates.io has no 0.17.1. 694e808 is main, and its Cargo.toml version
+# is already 0.17.1. When tag v0.17.1 is published, drop the git pin
+# and keep version = "=0.17.1".
+readcon-core = { version = "=0.17.1", git = "https://github.com/lode-org/readcon-core", rev = "694e808080c49979ee3099afcfa18e5420c40433", optional = true }
 
 [dev-dependencies]
 approx = "0.5"
@@ -67,6 +75,10 @@ description = "Local first-order minimization C ABI"
 
 [package.metadata.capi.library]
 name = "rgmin"
+
+[[test]]
+name = "con_checkpoint"
+required-features = ["readcon"]
 
 [[example]]
 name = "compare_highs"
