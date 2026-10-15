@@ -44,6 +44,7 @@ typedef rgmin_status_t xts_status_t;
 #define XTS_ACCEPT_ENERGY RGMIN_ACCEPT_ENERGY
 #define XTS_ACCEPT_NONE RGMIN_ACCEPT_NONE
 #define XTS_ACCEPT_NONMONOTONE RGMIN_ACCEPT_NONMONOTONE
+#define XTS_ACCEPT_PREDICTED RGMIN_ACCEPT_PREDICTED
 #define XTS_ACCEPT_STEP RGMIN_ACCEPT_STEP
 #define XTS_ADAM RGMIN_ADAM
 #define XTS_BB RGMIN_BB
@@ -171,6 +172,7 @@ typedef rgmin_status_t xts_status_t;
 #define xts_solver_set_periodic rgmin_solver_set_periodic
 #define xts_solver_set_project_rigid rgmin_solver_set_project_rigid
 #define xts_solver_set_lbfgs_neb_guards rgmin_solver_set_lbfgs_neb_guards
+#define xts_solver_set_lbfgs_scale rgmin_solver_set_lbfgs_scale
 #define xts_solver_set_qn_step rgmin_solver_set_qn_step
 #define xts_precon_init rgmin_precon_init
 #define xts_solver_set_precon rgmin_solver_set_precon

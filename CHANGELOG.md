@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Accept::Predicted` accepts a trial when the energy is at most the
+  best of the last five values plus `1e-4` times the predicted drop
+  `g·Δx` plus the energy noise. The noise is the larger of
+  `4 ε (|E|+1)`, the `ftol_rel` slack, and a declared energy noise.
+  The search halves at most eight times and does not test curvature.
+  `Solver::set_lbfgs_scale` and `rgmin_solver_set_lbfgs_scale` set the
+  empty-memory scale `h0` and, when asked, multiply it by
+  `min(||g||, 1/||g||)` until a pair is stored (ABI minor 33).
+  `accept = "predicted"`, `h0`, and `cautious_first` are `SolverConfig`
+  options.
+
 ## [0.4.0] - 2026-10-11
 
 ### Added

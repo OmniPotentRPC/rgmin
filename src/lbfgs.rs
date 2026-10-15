@@ -85,6 +85,11 @@ pub struct Lbfgs {
     pub curvature_reset: bool,
     /// Empty-memory scale; a non-positive or non-finite value selects one.
     pub inverse_curvature: f64,
+    /// Empty-memory cautious scale. With no pairs stored, the two-loop
+    /// multiplies [`Self::inverse_curvature`] by `min(||g||, 1/||g||)`,
+    /// so the first step has length `inverse_curvature` when `||g|| > 1`.
+    /// Off leaves the empty-memory scale unchanged.
+    pub cautious_first: bool,
     /// When set, each direction is the HiGHS QP on the compact Hessian
     /// rather than the two-loop recursion.
     #[cfg(feature = "highs")]
@@ -123,6 +128,7 @@ impl Lbfgs {
             angle_reset: false,
             curvature_reset: false,
             inverse_curvature: 1.0,
+            cautious_first: false,
             #[cfg(feature = "highs")]
             highs: None,
             #[cfg(feature = "highs")]
@@ -256,6 +262,19 @@ impl Lbfgs {
             if yy > 0.0 {
                 q *= p.s.dot(&p.y) / yy;
             }
+        } else if self.cautious_first {
+            // q is g while the memory is empty. The factor uses that
+            // norm, before the scale, so ||step|| = h0 when ||g|| > 1.
+            let mut scale = if self.inverse_curvature.is_finite() && self.inverse_curvature > 0.0 {
+                self.inverse_curvature
+            } else {
+                1.0
+            };
+            let gn = l2(&q);
+            if gn > 0.0 {
+                scale *= gn.min(1.0 / gn);
+            }
+            q *= scale;
         } else if self.inverse_curvature.is_finite()
             && self.inverse_curvature > 0.0
             && self.inverse_curvature != 1.0
@@ -929,6 +948,23 @@ mod neb_guard_tests {
         solver.inverse_curvature = 0.01;
         let scaled = solver.direction(g.view());
         assert!((scaled[0] - 0.02).abs() < 1e-15);
+    }
+
+    #[test]
+    fn cautious_first_limits_an_empty_memory_step_to_h0() {
+        let mut solver = Lbfgs::with_capacity(4);
+        solver.inverse_curvature = 0.08;
+        solver.cautious_first = true;
+        let g = array![2.0, 0.0, 0.0];
+        let d = solver.direction(g.view());
+        assert!((d[0] + 0.08).abs() < 1e-12, "{d:?}");
+        assert!(d[1].abs() < 1e-15 && d[2].abs() < 1e-15);
+        let small = array![0.5, 0.0, 0.0];
+        let ds = solver.direction(small.view());
+        assert!((ds[0] + 0.02).abs() < 1e-12, "{ds:?}");
+        solver.record(array![1.0, 0.0, 0.0], array![1.0, 0.0, 0.0]);
+        let kept = solver.direction(g.view());
+        assert!((kept[0] + 2.0).abs() < 1e-12, "pair scale {kept:?}");
     }
 
     #[test]
