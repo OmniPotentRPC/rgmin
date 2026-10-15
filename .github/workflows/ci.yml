@@ -38,12 +38,21 @@ jobs:
         include:
           - name: default
             args: ""
+            readcon: "0"
           - name: capi
             args: --features capi
+            readcon: "0"
           - name: highs
             args: --features highs
+            readcon: "0"
+          # Named features, not `--all-features`. The `readcon` feature
+          # is a separate row so this staticlib does not link it.
           - name: all-features
-            args: --all-features
+            args: --features capi,par,highs,slepc,primme,chase,libkrylov
+            readcon: "0"
+          - name: readcon
+            args: --features readcon
+            readcon: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -54,6 +63,17 @@ jobs:
         run: python -m pip install -q numpy scipy
       - name: Build the libraries the C header tests link
         run: cargo build --locked ${{ matrix.args }}
+      - name: Staticlib readcon link
+        run: |
+          lib=target/debug/librgmin.a
+          # `readcon_core` is the crate. A bare `readcon` match also hits
+          # `ThreadConfig` inside matrixmultiply.
+          if [ "${{ matrix.readcon }}" = "1" ]; then
+            nm -a "$lib" | grep -q readcon_core
+          elif nm -a "$lib" | grep -E 'readcon_core|readcon-core'; then
+            echo "this row links readcon"
+            exit 1
+          fi
       - run: cargo test --locked ${{ matrix.args }}
 
   # Forcing tests. A clone this runner cannot execute is "not exercised"

@@ -104,6 +104,14 @@ impl Default for Lbfgs {
 
 impl Lbfgs {
     /// Fresh solver with room for `max_pairs` curvature pairs.
+    ///
+    /// The process that owns the positions writes them. This type
+    /// returns the accepted point through [`Lbfgs::minimize`] and
+    /// [`crate::Solver::step`], and it does not open a path. Curvature
+    /// pairs stay in this value. A host that resumes loads the
+    /// coordinates it wrote and calls that same entry point again.
+    /// The new solver starts with an empty pair list, which is the
+    /// resume this library ships.
     pub fn with_capacity(max_pairs: usize) -> Self {
         Self {
             memory: Vec::new(),
