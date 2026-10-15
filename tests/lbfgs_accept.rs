@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Accept, Control, Method, Solver};
+use rgmin::{Accept, Control, Method, Oracle, Solver};
 
 struct Uphill {
     evals: AtomicUsize,
@@ -68,4 +68,23 @@ fn accept_step_clips_an_uphill_step() {
     assert!((rep.value - 0.2).abs() < 1e-12, "value {}", rep.value);
     // Opening gradient plus one trial. A line search would evaluate more.
     assert_eq!(obj.evals.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn predicted_cautious_step_is_one_oracle_of_length_h0() {
+    let calls = AtomicUsize::new(0);
+    let objective = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+        calls.fetch_add(1, Ordering::Relaxed);
+        (0.5 * x.dot(&x), x.to_owned())
+    });
+    let mut x = array![2.0, 0.0, 0.0];
+    let mut solver = Solver::new(Method::Lbfgs { memory: 150 }, Control::default(), 3);
+    solver.set_accept(Accept::Predicted);
+    solver.set_maxmove(0.25);
+    assert!(solver.set_lbfgs_scale(0.08, true));
+    let rep = solver.step(&objective, &mut x).unwrap();
+    // ||g|| = 2, so the cautious step has length h0 = 0.08 along -g.
+    assert!((x[0] - 1.92).abs() < 1e-12, "x {}", x[0]);
+    assert!(rep.grad_norm > 0.01);
+    assert_eq!(calls.load(Ordering::Relaxed), 2);
 }

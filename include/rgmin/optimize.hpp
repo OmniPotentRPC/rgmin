@@ -468,6 +468,9 @@ public:
     void set_lbfgs_neb_guards(bool on) {
         rgmin_solver_set_lbfgs_neb_guards(ptr_, on ? 1 : 0);
     }
+    rgmin_status_t set_lbfgs_scale(double h0, bool cautious_first) {
+        return rgmin_solver_set_lbfgs_scale(ptr_, h0, cautious_first ? 1 : 0);
+    }
     void set_project_rigid(bool on) {
         rgmin_solver_set_project_rigid(ptr_, on ? 1 : 0);
     }
@@ -655,11 +658,13 @@ private:
     std::optional<double> cautious_eps_;
     std::optional<double> cautious_alpha_;
     std::optional<double> objective_roundoff_;
+    std::optional<double> h0_;
+    std::optional<bool> cautious_first_;
 };
 
 inline std::string SolverConfig::valid_options() {
     return "accept, atom_maxmove, beta, c1, c2, cautious_alpha, cautious_eps, "
-           "extra_updates, fire_variant, gtol, istep, linesearch, "
+           "cautious_first, extra_updates, fire_variant, gtol, h0, istep, linesearch, "
            "linesearch_maxiter, maxiter, maxmove, maxstep, memory, neb_guards, "
            "noise_c, noise_eps, objective_roundoff, periodic, project_rigid, qn_step";
 }
@@ -737,8 +742,8 @@ inline bool is_cg(Method method) {
 inline bool known_option(std::string const& key) {
     static constexpr char const* const keys[] = {
         "accept", "atom_maxmove", "beta", "c1", "c2", "cautious_alpha",
-        "cautious_eps", "extra_updates", "fire_variant", "gtol", "istep",
-        "linesearch", "linesearch_maxiter", "maxiter", "maxmove", "maxstep",
+        "cautious_eps", "cautious_first", "extra_updates", "fire_variant", "gtol", "h0",
+        "istep", "linesearch", "linesearch_maxiter", "maxiter", "maxmove", "maxstep",
         "memory", "neb_guards", "noise_c", "noise_eps", "objective_roundoff",
         "periodic", "project_rigid", "qn_step"};
     for (char const* item : keys) {
@@ -805,9 +810,10 @@ inline SolverConfig SolverConfig::build(
             else if (value == "energy") cfg.accept_ = RGMIN_ACCEPT_ENERGY;
             else if (value == "nonmonotone") cfg.accept_ = RGMIN_ACCEPT_NONMONOTONE;
             else if (value == "step") cfg.accept_ = RGMIN_ACCEPT_STEP;
+            else if (value == "predicted") cfg.accept_ = RGMIN_ACCEPT_PREDICTED;
             else {
                 throw std::invalid_argument(
-                    "accept must be none, energy, nonmonotone, or step");
+                    "accept must be none, energy, nonmonotone, step, or predicted");
             }
         } else if (key == "linesearch") {
             if (value == "brent") cfg.linesearch_ = RGMIN_LINESEARCH_BRENT;
@@ -841,6 +847,7 @@ inline SolverConfig SolverConfig::build(
         std::string key = detail::canon_token(item.first);
         detail::require_known(key);
         if (key == "neb_guards") cfg.neb_guards_ = item.second;
+        else if (key == "cautious_first") cfg.cautious_first_ = item.second;
         else if (key == "periodic") cfg.periodic_ = item.second;
         else if (key == "project_rigid") cfg.project_rigid_ = item.second;
         else if (detail::is_count_option(key)) {
@@ -863,7 +870,7 @@ inline SolverConfig SolverConfig::build(
         } else if (key == "gtol" || key == "istep" || key == "maxmove" || key == "noise_eps" ||
                    key == "noise_c" || key == "c1" || key == "c2" || key == "atom_maxmove" ||
                    key == "maxstep" || key == "cautious_eps" || key == "cautious_alpha" ||
-                   key == "objective_roundoff") {
+                   key == "objective_roundoff" || key == "h0") {
             double value = static_cast<double>(item.second);
             detail::require_finite(key, value);
             if (key == "gtol") cfg.control_.gtol = value;
@@ -876,6 +883,7 @@ inline SolverConfig SolverConfig::build(
             else if (key == "atom_maxmove" || key == "maxstep") cfg.atom_maxmove_ = value;
             else if (key == "cautious_eps") cfg.cautious_eps_ = value;
             else if (key == "cautious_alpha") cfg.cautious_alpha_ = value;
+            else if (key == "h0") cfg.h0_ = value;
             else cfg.objective_roundoff_ = value;
         } else {
             throw std::invalid_argument(key + " must be a string or a flag");
@@ -897,6 +905,7 @@ inline SolverConfig SolverConfig::build(
         else if (key == "atom_maxmove" || key == "maxstep") cfg.atom_maxmove_ = item.second;
         else if (key == "cautious_eps") cfg.cautious_eps_ = item.second;
         else if (key == "cautious_alpha") cfg.cautious_alpha_ = item.second;
+        else if (key == "h0") cfg.h0_ = item.second;
         else if (key == "objective_roundoff") cfg.objective_roundoff_ = item.second;
         else {
             throw std::invalid_argument(key + " must be a string or a flag");
@@ -944,6 +953,18 @@ inline void SolverConfig::apply(Solver& solver) const {
     if (project_rigid_) solver.set_project_rigid(*project_rigid_);
     if (extra_updates_) solver.set_extra_updates(*extra_updates_);
     if (cautious_eps_ && cautious_alpha_) solver.set_cautious(*cautious_eps_, *cautious_alpha_);
+    if (h0_ || cautious_first_) {
+        // neb_guards, applied above, sets the empty-memory scale to 0.01.
+        // An explicit h0 replaces it. cautious_first alone keeps that scale.
+        double h0 = 1.0;
+        if (h0_) h0 = *h0_;
+        else if (neb_guards_ && *neb_guards_) h0 = 0.01;
+        rgmin_status_t st = solver.set_lbfgs_scale(h0, cautious_first_.value_or(false));
+        if (st != RGMIN_SUCCESS) {
+            char const* msg = rgmin_last_error();
+            throw std::invalid_argument(msg ? msg : "set_lbfgs_scale failed");
+        }
+    }
     if (objective_roundoff_) {
         rgmin_status_t st = solver.set_objective_roundoff(*objective_roundoff_);
         if (st != RGMIN_SUCCESS) {

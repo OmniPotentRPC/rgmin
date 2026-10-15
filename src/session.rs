@@ -7,7 +7,7 @@ use ndarray::{Array1, Array2, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-use crate::accept::{Accept, accept_step};
+use crate::accept::{Accept, accept_step, predicted_trials, push_energy};
 use crate::adam::adam_direction;
 use crate::bb::bb_direction;
 use crate::control::Control;
@@ -634,6 +634,25 @@ impl Solver {
             solver.curvature_reset = enabled;
             solver.inverse_curvature = if enabled { 0.01 } else { 1.0 };
         }
+    }
+
+    /// Empty-memory inverse-Hessian scale and the cautious first step.
+    ///
+    /// `h0` must be finite and positive. `cautious_first` multiplies that
+    /// scale by `min(||g||, 1/||g||)` while no pairs are stored, so the
+    /// first step has length `h0` when `||g|| > 1`. A non-L-BFGS session
+    /// is left unchanged and reports false. Stored pairs still scale by
+    /// `s·y / y·y`.
+    pub fn set_lbfgs_scale(&mut self, h0: f64, cautious_first: bool) -> bool {
+        if !(h0.is_finite() && h0 > 0.0) {
+            return false;
+        }
+        let Inner::Lbfgs(solver) = &mut self.inner else {
+            return false;
+        };
+        solver.inverse_curvature = h0;
+        solver.cautious_first = cautious_first;
+        true
     }
 
     /// HiGHS feasible-set step. No-op unless this build has `highs`.
@@ -1620,8 +1639,10 @@ impl Solver {
         // like the BB arm and the Hessian path in step_hess, one oracle
         // call and the clipped step with no energy test. The oracle value
         // of a projected NEB force is not the potential of the gradient it
-        // returns, so a decrease test there says nothing. Every other
-        // Accept keeps the line-searched step_objective path.
+        // returns, so a decrease test there says nothing.
+        // Accept::Predicted is the same direct step, with the predicted
+        // drop `g·Δx` plus energy noise as the only acceptance test.
+        // Every other Accept keeps the line-searched step_objective path.
         let guarded_direction = if self.accept == Accept::Step {
             match &mut self.inner {
                 Inner::Lbfgs(solver)
@@ -1682,6 +1703,7 @@ impl Solver {
                 };
                 Some(dir)
             }
+            (Inner::Lbfgs(solver), Accept::Predicted) => Some(solver.direction(grad.view())),
             _ => None,
         };
         let lbfgs_line_searched = lbfgs_direct.is_none() && matches!(self.inner, Inner::Lbfgs(_));
@@ -1690,22 +1712,62 @@ impl Solver {
                 project_out_rot_trans(&mut dir, x.view());
             }
             dir = self.project_vec(x, &dir);
-            let (npos, nval, ngrad, moved) = accept_step(
-                obj,
-                x,
-                value,
-                &gold,
-                &dir,
-                &self.control,
-                self.accept,
-                &mut self.e_hist,
-                self.atom_maxmove,
-                self.manifold,
-            );
-            if moved {
-                *x = npos;
-                value = nval;
-                grad = ngrad;
+            if self.accept == Accept::Predicted {
+                let slope = crate::vecops::dot(dir.view(), gold.view());
+                if slope >= 0.0 {
+                    dir.mapv_inplace(|component| -component);
+                }
+                let (npos, nval, ngrad, moved) = predicted_trials(
+                    obj,
+                    x,
+                    value,
+                    &gold,
+                    &dir,
+                    &self.control,
+                    &mut self.e_hist,
+                    self.atom_maxmove,
+                    self.manifold,
+                );
+                if moved {
+                    *x = npos;
+                    value = nval;
+                    grad = ngrad;
+                } else if let Inner::Lbfgs(solver) = &mut self.inner {
+                    // The search found no acceptable point. Drop the pairs
+                    // and take one short steepest step, which is recorded
+                    // below as the new memory.
+                    solver.forget();
+                    let mut trial = &*x + &gold.mapv(|component| -0.1 * component);
+                    if let Some(cap) = self.atom_maxmove {
+                        scale_step_atom(x, &mut trial, cap);
+                    }
+                    trial = obj.bounds().clip(trial.view());
+                    let (ft, gt) = obj.value_and_gradient(trial.view());
+                    if ft.is_finite() && gt.iter().all(|component| component.is_finite()) {
+                        *x = trial;
+                        value = ft;
+                        grad = gt;
+                        push_energy(&mut self.e_hist, ft);
+                    }
+                }
+            } else {
+                let (npos, nval, ngrad, moved) = accept_step(
+                    obj,
+                    x,
+                    value,
+                    &gold,
+                    &dir,
+                    &self.control,
+                    self.accept,
+                    &mut self.e_hist,
+                    self.atom_maxmove,
+                    self.manifold,
+                );
+                if moved {
+                    *x = npos;
+                    value = nval;
+                    grad = ngrad;
+                }
             }
         }
         #[cfg(feature = "highs")]
@@ -2123,7 +2185,7 @@ impl Solver {
         // BB and the direct first-order routes evaluate the retracted point.
         // A nonlinear retraction applied to its chord is a different point.
         let already_retracted = matches!(&self.inner, Inner::Bb { .. })
-            || (self.accept == Accept::Step
+            || ((self.accept == Accept::Step || self.accept == Accept::Predicted)
                 && matches!(
                     &self.inner,
                     Inner::Lbfgs(_)
@@ -2293,6 +2355,28 @@ fn take_session_step<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    if accept == Accept::Predicted {
+        let (x, f, g, moved) = accept_step(
+            obj,
+            pos,
+            value,
+            grad,
+            &dir.to_owned(),
+            control,
+            accept,
+            e_hist,
+            atom_maxmove,
+            manifold,
+        );
+        return Taken {
+            x,
+            f,
+            g,
+            alpha: if moved { 1.0 } else { 0.0 },
+            moved,
+            energy_noise: false,
+        };
+    }
     if accept != Accept::Step {
         return take_step_with_options(
             obj,

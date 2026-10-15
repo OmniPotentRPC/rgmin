@@ -11,6 +11,9 @@ use crate::step::{scale_step, scale_step_atom};
 
 const ENERGY_RISE: f64 = 1.0e-8;
 const WINDOW: usize = 5;
+/// Armijo fraction of the predicted drop `g·Δx`.
+const PREDICTED_ARMIJO: f64 = 1.0e-4;
+const PREDICTED_TRIALS: usize = 8;
 
 /// eOn `lbfgs_accept`. Default takes the clipped step (one oracle).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -27,6 +30,14 @@ pub enum Accept {
     /// gradient of the reported value (a projected NEB force), where an
     /// energy test says nothing.
     Step,
+    /// Nonmonotone Armijo on the predicted drop. A trial at `x + Δx` is
+    /// accepted when
+    /// `E_new <= max(window) + c1 (g·Δx) + noise`,
+    /// with `c1 = 1e-4`, a window of five energies, and
+    /// `noise = max(4 ε (|E|+1), ftol slack, declared energy noise)`.
+    /// Up to eight halvings. No curvature condition, so a step costs one
+    /// potential call when the full step is accepted.
+    Predicted,
 }
 
 fn trial_point<O>(
@@ -51,11 +62,65 @@ where
     obj.bounds().clip(trial.view())
 }
 
-fn push_energy(hist: &mut VecDeque<f64>, energy: f64) {
+pub(crate) fn push_energy(hist: &mut VecDeque<f64>, energy: f64) {
     hist.push_back(energy);
     while hist.len() > WINDOW {
         hist.pop_front();
     }
+}
+
+fn predicted_noise(control: &Control, energy: f64) -> f64 {
+    let estimated = 4.0 * f64::EPSILON * (energy.abs() + 1.0);
+    let mut noise = estimated.max(control.ftol_slack(energy));
+    if let Some(floor) = control.noise_floor
+        && let Some(eps) = floor.eps_f
+        && eps.is_finite()
+        && eps > 0.0
+    {
+        noise = noise.max(eps);
+    }
+    noise
+}
+
+/// Backtrack `dir` on the predicted-drop test. `dir` is the proposed
+/// step at `α = 1`; the first trial is that step after the session cap,
+/// and each miss halves it. Returns unmoved after [`PREDICTED_TRIALS`].
+pub(crate) fn predicted_trials<O>(
+    obj: &O,
+    pos: &Array1<f64>,
+    value: f64,
+    grad: &Array1<f64>,
+    dir: &Array1<f64>,
+    control: &Control,
+    e_hist: &mut VecDeque<f64>,
+    atom_maxmove: Option<f64>,
+    manifold: ManifoldKind,
+) -> (Array1<f64>, f64, Array1<f64>, bool)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    if e_hist.is_empty() {
+        push_energy(e_hist, value);
+    }
+    let reference = e_hist.iter().copied().fold(value, f64::max);
+    let noise = predicted_noise(control, value);
+    let full = trial_point(obj, pos, dir, 1.0, control, atom_maxmove, manifold);
+    let clipped = &full - pos;
+    let mut alpha = 1.0;
+    for _ in 0..PREDICTED_TRIALS {
+        let step = &clipped * alpha;
+        let mut trial = manifold.retract(pos, &step);
+        trial = obj.bounds().clip(trial.view());
+        let (ft, gt) = obj.value_and_gradient(trial.view());
+        let finite = ft.is_finite() && gt.iter().all(|component| component.is_finite());
+        let gdot = crate::vecops::dot(grad.view(), (&trial - pos).view());
+        if finite && ft <= reference + PREDICTED_ARMIJO * gdot + noise {
+            push_energy(e_hist, ft);
+            return (trial, ft, gt, true);
+        }
+        alpha *= 0.5;
+    }
+    (pos.clone(), value, grad.clone(), false)
 }
 
 /// Apply `dir` under `accept`. Each trial is one `value_and_gradient`.
@@ -150,6 +215,33 @@ where
             let trial = trial_point(obj, pos, &sd, 0.1, control, atom_maxmove, manifold);
             let (ft, gt) = obj.value_and_gradient(trial.view());
             if ft.is_finite() && gt.iter().all(|g| g.is_finite()) && ft - ref_e <= rise {
+                push_energy(e_hist, ft);
+                return (trial, ft, gt, true);
+            }
+            (pos.clone(), value, grad.clone(), false)
+        }
+        Accept::Predicted => {
+            let (trial, ft, gt, moved) = predicted_trials(
+                obj,
+                pos,
+                value,
+                grad,
+                dir,
+                control,
+                e_hist,
+                atom_maxmove,
+                manifold,
+            );
+            if moved {
+                return (trial, ft, gt, true);
+            }
+            if !allow_gradient_fallback {
+                return (pos.clone(), value, grad.clone(), false);
+            }
+            let sd = grad.mapv(|component| -component);
+            let trial = trial_point(obj, pos, &sd, 0.1, control, atom_maxmove, manifold);
+            let (ft, gt) = obj.value_and_gradient(trial.view());
+            if ft.is_finite() && gt.iter().all(|component| component.is_finite()) {
                 push_energy(e_hist, ft);
                 return (trial, ft, gt, true);
             }
@@ -361,5 +453,59 @@ mod tests {
         assert!(!moved);
         assert!((x[0] - 1.0).abs() < 1e-15);
         assert!((f - 1.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn predicted_accepts_a_descent_in_one_oracle() {
+        let obj = CountQuad {
+            evals: AtomicUsize::new(0),
+        };
+        let pos = array![1.0];
+        let dir = array![-0.5];
+        let g = array![2.0];
+        let mut hist = VecDeque::new();
+        let (x, f, _, moved) = accept_step(
+            &obj,
+            &pos,
+            1.0,
+            &g,
+            &dir,
+            &ctrl(),
+            Accept::Predicted,
+            &mut hist,
+            None,
+            ManifoldKind::Euclidean,
+        );
+        assert!(moved);
+        assert!((x[0] - 0.5).abs() < 1e-15);
+        assert!((f - 0.25).abs() < 1e-15);
+        assert_eq!(obj.evals.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn predicted_refuses_eight_rises_then_takes_steepest() {
+        let obj = CountQuad {
+            evals: AtomicUsize::new(0),
+        };
+        let pos = array![1.0];
+        let dir = array![1.0];
+        let g = array![2.0];
+        let mut hist = VecDeque::new();
+        let (x, _, _, moved) = accept_step(
+            &obj,
+            &pos,
+            1.0,
+            &g,
+            &dir,
+            &ctrl(),
+            Accept::Predicted,
+            &mut hist,
+            None,
+            ManifoldKind::Euclidean,
+        );
+        assert!(moved);
+        // 8 rejected halvings, then 0.1 * (-g) = -0.2.
+        assert!((x[0] - 0.8).abs() < 1e-12, "x {}", x[0]);
+        assert_eq!(obj.evals.load(Ordering::Relaxed), 9);
     }
 }

@@ -50,7 +50,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 32
+#define RGMIN_ABI_VERSION_MINOR 33
 #define RGMIN_ABI_LAYOUT_REVISION 3
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -316,7 +316,10 @@ typedef enum rgmin_accept_t {
     RGMIN_ACCEPT_NONE = 0,
     RGMIN_ACCEPT_ENERGY = 1,
     RGMIN_ACCEPT_NONMONOTONE = 2,
-    RGMIN_ACCEPT_STEP = 3
+    RGMIN_ACCEPT_STEP = 3,
+    /** Nonmonotone Armijo on the predicted drop g·dx plus energy noise.
+     *  Up to eight halvings. No curvature condition. ABI minor 33. */
+    RGMIN_ACCEPT_PREDICTED = 4
 } rgmin_accept_t;
 void rgmin_solver_set_accept(rgmin_solver_t *solver, rgmin_accept_t accept);
 /** FIRE schedule. */
@@ -355,6 +358,12 @@ void rgmin_solver_set_cautious(rgmin_solver_t *solver, double eps, double alpha)
  *  empty-memory scale of 0.01. Nonzero enables; other methods ignore it.
  *  ABI minor 28. */
 void rgmin_solver_set_lbfgs_neb_guards(rgmin_solver_t *solver, int32_t enabled);
+/** Empty-memory inverse-Hessian scale and the cautious first step.
+ *  h0 must be finite and positive. Nonzero cautious_first multiplies
+ *  that scale by min(||g||, 1/||g||) while no pairs are stored.
+ *  Other methods return RGMIN_INVALID_PARAMETER. ABI minor 33. */
+rgmin_status_t rgmin_solver_set_lbfgs_scale(rgmin_solver_t *solver, double h0,
+                                           int32_t cautious_first);
 /** HiGHS feasible-set step. Nonzero enables it. Returns 0, or 1 if this
  *  build has no highs feature. */
 int32_t rgmin_solver_set_highs(rgmin_solver_t *solver, int32_t enabled);

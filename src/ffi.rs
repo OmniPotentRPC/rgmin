@@ -63,7 +63,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 32;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 33;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 3;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -2048,6 +2048,9 @@ pub enum rgmin_accept_t {
     RGMIN_ACCEPT_NONMONOTONE = 2,
     /// Clipped quasi-Newton step, one oracle, no line search.
     RGMIN_ACCEPT_STEP = 3,
+    /// Nonmonotone Armijo on `g·Δx` plus energy noise. Up to eight
+    /// halvings, and no curvature condition.
+    RGMIN_ACCEPT_PREDICTED = 4,
 }
 
 /// eOn `lbfgs_accept`. Legal on any session.
@@ -2069,6 +2072,7 @@ pub unsafe extern "C" fn rgmin_solver_set_accept(
         rgmin_accept_t::RGMIN_ACCEPT_ENERGY => Accept::Energy,
         rgmin_accept_t::RGMIN_ACCEPT_NONMONOTONE => Accept::Nonmonotone,
         rgmin_accept_t::RGMIN_ACCEPT_NONE => Accept::None,
+        rgmin_accept_t::RGMIN_ACCEPT_PREDICTED => Accept::Predicted,
         rgmin_accept_t::RGMIN_ACCEPT_STEP => Accept::Step,
     };
     unsafe { (*solver).solver.set_accept(a) };
@@ -3085,6 +3089,36 @@ pub unsafe extern "C" fn rgmin_solver_set_lbfgs_neb_guards(
         return;
     }
     unsafe { (*solver).solver.set_lbfgs_neb_guards(enabled != 0) };
+}
+
+/// Empty-memory inverse-Hessian scale and the cautious first step
+/// (`Solver::set_lbfgs_scale`). `h0` must be finite and positive.
+/// Nonzero `cautious_first` multiplies that scale by
+/// `min(||g||, 1/||g||)` while no pairs are stored. Other methods
+/// return [`rgmin_status_t::RGMIN_INVALID_PARAMETER`]. ABI minor 33.
+///
+/// # Safety
+///
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_lbfgs_scale(
+    solver: *mut rgmin_solver_t,
+    h0: f64,
+    cautious_first: i32,
+) -> rgmin_status_t {
+    if solver.is_null() {
+        set_last_error("solver is null");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    if !h0.is_finite() || h0 <= 0.0 {
+        set_last_error("h0 must be finite and positive");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    if !unsafe { (*solver).solver.set_lbfgs_scale(h0, cautious_first != 0) } {
+        set_last_error("lbfgs scale applies only to an L-BFGS session");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    rgmin_status_t::RGMIN_SUCCESS
 }
 
 /// Record `s`, `y` from the caller's previous outer. No evaluation.
