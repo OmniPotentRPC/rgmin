@@ -2,8 +2,9 @@
 //!
 //! The start is the seed-1 packing from `bench/atomistic` `lj38`, scaled
 //! by one half. Without a cap the first quasi-Newton step leaves the
-//! cluster. The default cap keeps it bound. An explicit cap replaces
-//! the default.
+//! cluster. L-BFGS keeps the default cap. BFGS, dogleg, and FIRE 2.0
+//! leave it off, because each already limits the step. An explicit cap
+//! replaces either choice.
 
 use std::sync::OnceLock;
 
@@ -182,23 +183,23 @@ fn relax(method: Method) -> (Status, f64, f64, f64) {
 }
 
 #[test]
-fn default_cap_keeps_lj38_bound_for_lbfgs_and_bfgs() {
+fn default_cap_keeps_lj38_bound_for_lbfgs() {
     let start = compressed_lj38();
     let start_pair = max_pair(&start);
     assert!(
         start_pair < BOUND_PAIR,
         "the compressed start is still one cluster, pair {start_pair}"
     );
-    for method in [Method::lbfgs(), Method::Bfgs] {
-        let (status, energy, pair, peak_step) = relax(method.clone());
-        assert_eq!(status, Status::Tolerance, "{method:?}");
-        assert!(energy < -160.0, "{method:?} energy {energy}");
-        assert!(pair <= BOUND_PAIR, "{method:?} pair {pair}");
-        assert!(
-            peak_step <= CAP + 1e-9,
-            "{method:?} peak atom step {peak_step}"
-        );
-    }
+    let (status, energy, pair, peak_step) = relax(Method::lbfgs());
+    assert_eq!(status, Status::Tolerance);
+    assert!(energy < -160.0, "energy {energy}");
+    assert!(pair <= BOUND_PAIR, "pair {pair}");
+    assert!(peak_step <= CAP + 1e-9, "peak atom step {peak_step}");
+    let bfgs = first_move(Method::Bfgs, None);
+    assert!(
+        bfgs > 1.0,
+        "BFGS default still carried the per-atom cap, step {bfgs}"
+    );
 }
 
 #[test]
@@ -228,13 +229,21 @@ fn one_shot_minimizers_use_the_same_default() {
         c2: 0.9,
         maxiter: 20,
     };
-    for method in [Method::lbfgs(), Method::Bfgs] {
-        let report =
-            minimize_method(&Lj38, start.clone(), &control, method.clone(), linesearch).unwrap();
-        assert_eq!(report.status, Status::Tolerance, "{method:?}");
-        assert!(report.value < -160.0, "{method:?} {}", report.value);
-        assert!(max_pair(&report.coords) <= BOUND_PAIR, "{method:?}");
-    }
+    let report =
+        minimize_method(&Lj38, start.clone(), &control, Method::lbfgs(), linesearch).unwrap();
+    assert_eq!(report.status, Status::Tolerance);
+    assert!(report.value < -160.0, "{}", report.value);
+    assert!(max_pair(&report.coords) <= BOUND_PAIR);
+    let one = Control {
+        maxiter: 1,
+        ..control
+    };
+    let bfgs = minimize_method(&Lj38, start.clone(), &one, Method::Bfgs, linesearch).unwrap();
+    let bfgs_step = max_atom_step(&start, &bfgs.coords);
+    assert!(
+        bfgs_step > 1.0,
+        "one-shot BFGS default stayed at {bfgs_step}"
+    );
     let open = Control {
         maxmove: Some(1000.0),
         ..control
@@ -303,13 +312,11 @@ impl DifferentiableObjective<f64> for ConstantForce {
 fn default_cap_bounds_the_first_step_of_every_cartesian_arm() {
     let methods = [
         Method::lbfgs(),
-        Method::Bfgs,
         Method::Sr1,
         Method::Sr2,
         Method::diis(),
         Method::polak_ribiere(),
         Method::Fire { kind: FireKind::V1 },
-        Method::Fire { kind: FireKind::V2 },
         Method::QuickMin,
         Method::Steepest,
         Method::adam(),
@@ -318,6 +325,13 @@ fn default_cap_bounds_the_first_step_of_every_cartesian_arm() {
         let step = first_move(method.clone(), None);
         assert!(step <= CAP + 1e-9, "{method:?} default atom step {step}");
         assert!(step > 0.05, "{method:?} default atom step {step}");
+    }
+    for method in [Method::Bfgs, Method::Fire { kind: FireKind::V2 }] {
+        let step = first_move(method.clone(), None);
+        assert!(
+            step > CAP,
+            "{method:?} default still clipped the first atom step to {step}"
+        );
     }
 }
 
@@ -359,6 +373,10 @@ impl HessianObjective for Bowl {
 }
 
 fn bowl_move(method: Method, clear: bool) -> f64 {
+    bowl_move_cap(method, clear.then_some(0.0))
+}
+
+fn bowl_move_cap(method: Method, cap: Option<f64>) -> f64 {
     let mut solver = Solver::new(
         method,
         Control {
@@ -369,8 +387,8 @@ fn bowl_move(method: Method, clear: bool) -> f64 {
         },
         3,
     );
-    if clear {
-        solver.set_atom_maxmove(0.0);
+    if let Some(value) = cap {
+        solver.set_atom_maxmove(value);
     }
     let mut x = array![1.0, 1.0, 1.0];
     let before = x.clone();
@@ -379,19 +397,27 @@ fn bowl_move(method: Method, clear: bool) -> f64 {
 }
 
 #[test]
-fn default_cap_clips_newton_and_dogleg() {
-    for method in [
-        Method::Newton {
-            kind: NewtonKind::Shifted,
-        },
-        Method::Dogleg,
-    ] {
-        let capped = bowl_move(method.clone(), false);
-        assert!(capped <= CAP + 1e-9, "{method:?} moved {capped}");
-        assert!(capped > 0.05, "{method:?} moved {capped}");
-        let open = bowl_move(method.clone(), true);
-        assert!(open > 0.5, "{method:?} cleared cap moved {open}");
-    }
+fn default_cap_clips_newton_and_leaves_dogleg_open() {
+    let newton = Method::Newton {
+        kind: NewtonKind::Shifted,
+    };
+    let capped = bowl_move(newton.clone(), false);
+    assert!(capped <= CAP + 1e-9, "Newton moved {capped}");
+    assert!(capped > 0.05, "Newton moved {capped}");
+    let open = bowl_move(newton, true);
+    assert!(open > 0.5, "Newton cleared cap moved {open}");
+    let dogleg = bowl_move(Method::Dogleg, false);
+    let dogleg_open = bowl_move(Method::Dogleg, true);
+    assert!(
+        (dogleg - dogleg_open).abs() <= 1e-12,
+        "dogleg default {dogleg} left the cleared step {dogleg_open}"
+    );
+    assert!(dogleg > 0.5, "dogleg default moved {dogleg}");
+    let dogleg_held = bowl_move_cap(Method::Dogleg, Some(0.2));
+    assert!(
+        dogleg_held <= CAP + 1e-9,
+        "explicit dogleg cap moved {dogleg_held}"
+    );
     let control = Control {
         maxiter: 1,
         gtol: 1e-14,
@@ -520,6 +546,235 @@ fn one_shot_sr_honours_the_default_atom_cap() {
         );
         assert!(tight > 0.0, "{method:?} tight cap vanished");
     }
+}
+
+fn needs_hessian(method: &Method) -> bool {
+    matches!(method, Method::Newton { .. } | Method::Dogleg)
+}
+
+fn bowl_first(method: Method, cap: Option<f64>) -> f64 {
+    let mut solver = Solver::new(
+        method.clone(),
+        Control {
+            maxiter: 4,
+            gtol: 1e-14,
+            istep: 1.0,
+            ..Control::default()
+        },
+        3,
+    );
+    if let Some(value) = cap {
+        solver.set_atom_maxmove(value);
+    }
+    let mut x = array![1.0, 1.0, 1.0];
+    let before = x.clone();
+    if needs_hessian(&method) {
+        solver.step_hess(&Bowl, &mut x).unwrap();
+    } else {
+        solver.step(&Bowl, &mut x).unwrap();
+    }
+    ((&x - &before).dot(&(&x - &before))).sqrt()
+}
+
+#[test]
+fn each_method_installs_the_cap_its_step_control_needs() {
+    let capped = [
+        Method::lbfgs(),
+        Method::polak_ribiere(),
+        Method::Sr1,
+        Method::Sr2,
+        Method::adam(),
+        Method::Steepest,
+        Method::Newton {
+            kind: NewtonKind::Shifted,
+        },
+        Method::Newton {
+            kind: NewtonKind::Rfo,
+        },
+        Method::Fire { kind: FireKind::V1 },
+        Method::Bb,
+        Method::QuickMin,
+        Method::diis(),
+    ];
+    for method in capped {
+        let step = bowl_first(method.clone(), None);
+        assert!(step <= CAP + 1e-9, "{method:?} default atom step {step}");
+        assert!(step > 0.05, "{method:?} default atom step {step}");
+        let open = bowl_first(method.clone(), Some(0.0));
+        assert!(open > CAP, "{method:?} cleared cap stayed at {open}");
+    }
+    let open = [
+        Method::Bfgs,
+        Method::Dogleg,
+        Method::Fire { kind: FireKind::V2 },
+    ];
+    for method in open {
+        let step = bowl_first(method.clone(), None);
+        let cleared = bowl_first(method.clone(), Some(0.0));
+        assert!(
+            (step - cleared).abs() <= 1e-12,
+            "{method:?} default {step} left the cleared step {cleared}"
+        );
+        assert!(step > CAP, "{method:?} default stayed at {step}");
+        let held = bowl_first(method.clone(), Some(CAP));
+        assert!(held <= CAP + 1e-9, "{method:?} explicit cap moved {held}");
+        assert!(held > 0.05, "{method:?} explicit cap moved {held}");
+    }
+}
+
+#[test]
+fn a_published_fire2_schedule_drops_the_implicit_cap() {
+    let mut solver = Solver::new(
+        Method::Fire { kind: FireKind::V1 },
+        Control {
+            maxiter: 2,
+            gtol: 1e-14,
+            istep: 1.0,
+            ..Control::default()
+        },
+        3,
+    );
+    solver.set_fire_variant(rgmin::FireVariant::Guenole2020);
+    let mut x = array![1.0, 1.0, 1.0];
+    let before = x.clone();
+    solver.step(&Bowl, &mut x).unwrap();
+    let step = ((&x - &before).dot(&(&x - &before))).sqrt();
+    assert!(step > CAP, "Guénolé schedule stayed at {step}");
+
+    let mut held = Solver::new(
+        Method::Fire { kind: FireKind::V1 },
+        Control {
+            maxiter: 2,
+            gtol: 1e-14,
+            istep: 1.0,
+            ..Control::default()
+        },
+        3,
+    );
+    held.set_atom_maxmove(CAP);
+    held.set_fire_variant(rgmin::FireVariant::Guenole2020);
+    let mut y = array![1.0, 1.0, 1.0];
+    let before = y.clone();
+    held.step(&Bowl, &mut y).unwrap();
+    let clipped = ((&y - &before).dot(&(&y - &before))).sqrt();
+    assert!(clipped <= CAP + 1e-9, "explicit cap moved {clipped}");
+}
+
+/// `f = (κ/2) ||x||²`, `κ = 40`. The Newton step is `-x`.
+struct Stiff;
+
+impl Objective<f64> for Stiff {
+    fn dim(&self) -> usize {
+        3
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        static B: OnceLock<Bounds<f64>> = OnceLock::new();
+        B.get_or_init(|| Bounds::new(array![-10.0, -10.0, -10.0], array![10.0, 10.0, 10.0], 0.0))
+    }
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        20.0 * x.dot(&x)
+    }
+}
+
+impl Gradient<f64> for Stiff {
+    fn dim(&self) -> usize {
+        3
+    }
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        x.mapv(|v| 40.0 * v)
+    }
+}
+
+impl DifferentiableObjective<f64> for Stiff {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        (self.eval(x), self.grad(x))
+    }
+}
+
+impl HessianObjective for Stiff {
+    fn hessian(&self, _x: ArrayView1<f64>) -> ndarray::Array2<f64> {
+        ndarray::Array2::eye(3) * 40.0
+    }
+}
+
+fn dogleg_path(cap: Option<f64>) -> Vec<Array1<f64>> {
+    let mut solver = Solver::new(
+        Method::Dogleg,
+        Control {
+            maxiter: 8,
+            gtol: 1e-14,
+            istep: 0.4,
+            ..Control::default()
+        },
+        3,
+    );
+    if let Some(value) = cap {
+        solver.set_atom_maxmove(value);
+    }
+    let mut x = array![1.0, 1.0, 1.0];
+    let mut path = vec![x.clone()];
+    for _ in 0..6 {
+        solver.step_hess(&Stiff, &mut x).unwrap();
+        path.push(x.clone());
+    }
+    path
+}
+
+#[test]
+fn dogleg_on_a_stiff_quadratic_matches_the_uncapped_path() {
+    let open = dogleg_path(None);
+    let cleared = dogleg_path(Some(0.0));
+    assert_eq!(open.len(), cleared.len());
+    for (i, (left, right)) in open.iter().zip(cleared.iter()).enumerate() {
+        for k in 0..left.len() {
+            assert_eq!(
+                left[k], right[k],
+                "step {i} coordinate {k}: default {} cleared {}",
+                left[k], right[k]
+            );
+        }
+    }
+    let first = &open[1] - &open[0];
+    let first_len = first.dot(&first).sqrt();
+    assert!(
+        first_len > CAP,
+        "the trust step was already inside the old cap, length {first_len}"
+    );
+    let capped = dogleg_path(Some(CAP));
+    let clipped = &capped[1] - &capped[0];
+    let clipped_len = clipped.dot(&clipped).sqrt();
+    assert!(
+        clipped_len <= CAP + 1e-9,
+        "explicit cap left a step of {clipped_len}"
+    );
+    assert!(
+        (open[1][0] - capped[1][0]).abs() > 1e-6,
+        "explicit cap reproduced the default path"
+    );
+}
+
+#[test]
+fn pso_ignores_the_per_atom_cap() {
+    fn once(cap: Option<f64>) -> Array1<f64> {
+        let mut solver = Solver::new(
+            Method::pso(),
+            Control {
+                maxiter: 2,
+                gtol: 1e-14,
+                ..Control::default()
+            },
+            3,
+        );
+        if let Some(value) = cap {
+            solver.set_atom_maxmove(value);
+        }
+        let mut x = array![1.0, 1.0, 1.0];
+        solver.step(&Bowl, &mut x).unwrap();
+        x
+    }
+    let left = once(None);
+    let right = once(Some(0.0));
+    assert_eq!(left, right);
 }
 
 #[cfg(feature = "capi")]
@@ -651,14 +906,19 @@ mod c_abi {
 
     #[test]
     fn c_abi_default_caps_and_an_explicit_cap_overrides() {
+        let lbfgs = session_step(rgmin_method_t::RGMIN_LBFGS, None);
+        assert!(lbfgs <= CAP + 1e-9, "L-BFGS default moved {lbfgs}");
+        let bfgs = session_step(rgmin_method_t::RGMIN_BFGS, None);
+        assert!(bfgs > 1.0, "BFGS default stayed at {bfgs}");
         for method in [rgmin_method_t::RGMIN_LBFGS, rgmin_method_t::RGMIN_BFGS] {
-            let capped = session_step(method, None);
-            assert!(capped <= CAP + 1e-9, "{method:?} default moved {capped}");
             let cleared = session_step(method, Some(0.0));
             assert!(cleared > 1.0, "{method:?} cleared cap moved {cleared}");
             let wider = session_step(method, Some(0.5));
             assert!(wider > CAP, "{method:?} wider cap stayed at {wider}");
             assert!(wider <= 0.5 + 1e-9, "{method:?} wider cap moved {wider}");
+            let held = session_step(method, Some(CAP));
+            assert!(held <= CAP + 1e-9, "{method:?} explicit cap moved {held}");
+            assert!(held > 0.05, "{method:?} explicit cap moved {held}");
         }
         let capped = one_shot(0.0);
         assert!(capped <= CAP + 1e-9, "one-shot default moved {capped}");

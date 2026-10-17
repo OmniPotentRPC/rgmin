@@ -104,25 +104,29 @@ def test_default_cap_keeps_lj38_bound_and_maxstep_overrides() -> None:
     start = _compressed_lj38()
     assert _lj(start)[0] > 1.0e5
     assert _max_pair(start) < BOUND_PAIR
+    x = start.copy()
+    solver = rgmin.Solver(x.size, rgmin.SolverConfig("lbfgs", maxiter=800, gtol=1e-2))
+    report = None
+    peak = 0.0
+    for _ in range(800):
+        before = x.copy()
+        report = solver.step(_lj, x)
+        peak = max(peak, _max_atom_step(before, x))
+        if report.grad_norm < 1e-2:
+            break
+    assert report is not None
+    assert report.stop == rgmin.Stop.Tolerance
+    assert report.value < -160.0, report.value
+    assert _max_pair(x) <= BOUND_PAIR
+    assert peak <= CAP + 1e-9, peak
+    bfgs = _first_move("bfgs")
+    assert bfgs > 1.0, bfgs
     for method in ("lbfgs", "bfgs"):
-        x = start.copy()
-        solver = rgmin.Solver(x.size, rgmin.SolverConfig(method, maxiter=800, gtol=1e-2))
-        report = None
-        peak = 0.0
-        for _ in range(800):
-            before = x.copy()
-            report = solver.step(_lj, x)
-            peak = max(peak, _max_atom_step(before, x))
-            if report.grad_norm < 1e-2:
-                break
-        assert report is not None
-        assert report.stop == rgmin.Stop.Tolerance, method
-        assert report.value < -160.0, (method, report.value)
-        assert _max_pair(x) <= BOUND_PAIR, method
-        assert peak <= CAP + 1e-9, (method, peak)
         cleared = _first_move(method, maxstep=0.0)
         assert cleared > 1.0, (method, cleared)
         wider = _first_move(method, maxstep=0.5)
         assert CAP < wider <= 0.5 + 1e-9, (method, wider)
         named = _first_move(method, atom_maxmove=0.5)
         assert CAP < named <= 0.5 + 1e-9, (method, named)
+        held = _first_move(method, maxstep=CAP)
+        assert 0.05 < held <= CAP + 1e-9, (method, held)

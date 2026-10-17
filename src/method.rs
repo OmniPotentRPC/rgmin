@@ -196,10 +196,80 @@ impl Method {
             restart: Restart::Never,
         }
     }
+
+    /// Whether a fresh Cartesian session installs [`crate::DEFAULT_ATOM_MAXMOVE`].
+    ///
+    /// BFGS takes its length from a strong Wolfe line search. Dogleg
+    /// keeps the step inside a Euclidean trust region and accepts it
+    /// from the model-agreement ratio. FIRE 2.0 sizes the move with
+    /// its own `dt`. Those three leave the per-atom default off. Every
+    /// other method installs 0.2.
+    ///
+    /// Nocedal and Wright, *Numerical Optimization*, algorithms 3.5,
+    /// 3.6, and 4.1, <https://doi.org/10.1007/978-0-387-40065-5>.
+    /// ASE `Optimizer.defaults` is `{"maxstep": 0.2}` in
+    /// `ase/optimize/optimize.py` at tag 3.29.0,
+    /// <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/optimize.py>.
+    /// eOn `OptimizerOptions.maxMove` is `0.2` in `schema/eon_params.capnp`
+    /// at `4be157d4`,
+    /// <https://github.com/TheochemUI/eOn/blob/4be157d43265af6b1140aaac0e52e42add62693f/schema/eon_params.capnp>.
+    /// Guénolé et al., *Assessment and optimization of the fast inertial
+    /// relaxation engine (FIRE)*,
+    /// <https://doi.org/10.1016/j.commatsci.2020.109584>.
+    ///
+    /// An explicit cap still applies to every method. A non-positive
+    /// value still clears it.
+    pub(crate) fn installs_default_atom_cap(&self) -> bool {
+        !matches!(
+            self,
+            Self::Bfgs
+                | Self::Dogleg
+                | Self::Fire {
+                    kind: crate::fire::FireKind::V2
+                }
+        )
+    }
 }
 
 impl Default for Method {
     fn default() -> Self {
         Self::polak_ribiere()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fire::FireKind;
+    use crate::newton::NewtonKind;
+
+    #[test]
+    fn the_default_atom_cap_follows_the_step_control() {
+        assert!(!Method::Bfgs.installs_default_atom_cap());
+        assert!(!Method::Dogleg.installs_default_atom_cap());
+        assert!(!Method::Fire { kind: FireKind::V2 }.installs_default_atom_cap());
+        let capped = [
+            Method::lbfgs(),
+            Method::polak_ribiere(),
+            Method::nlcg(crate::nlcg::Conjugacy::FletcherReeves),
+            Method::Sr1,
+            Method::Sr2,
+            Method::adam(),
+            Method::Steepest,
+            Method::Newton {
+                kind: NewtonKind::Shifted,
+            },
+            Method::Newton {
+                kind: NewtonKind::Rfo,
+            },
+            Method::Fire { kind: FireKind::V1 },
+            Method::Bb,
+            Method::QuickMin,
+            Method::diis(),
+            Method::pso(),
+        ];
+        for method in capped {
+            assert!(method.installs_default_atom_cap(), "{method:?}");
+        }
     }
 }

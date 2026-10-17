@@ -349,17 +349,37 @@ impl Solver {
         solver
     }
 
-    /// Install [`crate::DEFAULT_ATOM_MAXMOVE`] on a Cartesian session that
-    /// has neither an explicit per-atom cap nor a positive Euclidean cap.
+    /// [`Method::installs_default_atom_cap`] for the arm this session runs.
+    fn installs_default_atom_cap(&self) -> bool {
+        match &self.inner {
+            Inner::Bfgs { .. } => Method::Bfgs.installs_default_atom_cap(),
+            Inner::Dogleg { .. } => Method::Dogleg.installs_default_atom_cap(),
+            Inner::Fire(state, _) => Method::Fire { kind: state.kind }.installs_default_atom_cap(),
+            // The remaining arms install the cap. A method added to the
+            // exception list in [`Method::installs_default_atom_cap`]
+            // needs an arm here.
+            _ => true,
+        }
+    }
+
+    /// Install [`crate::DEFAULT_ATOM_MAXMOVE`] on a Cartesian session whose
+    /// method has no step control of its own, when the caller has set
+    /// neither a per-atom cap nor a positive Euclidean cap.
+    ///
+    /// BFGS, dogleg, and FIRE 2.0 leave the default off. Dogleg would
+    /// otherwise clip the trust step and feed that shorter length to
+    /// the radius update, so a step on the trust boundary looks
+    /// interior and the radius stays put.
     fn apply_default_atom_cap(&mut self) {
         if self.atom_maxmove_set {
             return;
         }
-        self.atom_maxmove = if self.manifold.retract_is_translation() {
-            crate::step::implicit_atom_cap(&self.control)
-        } else {
-            None
-        };
+        self.atom_maxmove =
+            if self.installs_default_atom_cap() && self.manifold.retract_is_translation() {
+                crate::step::implicit_atom_cap(&self.control)
+            } else {
+                None
+            };
         if self.steps == 0 {
             self.reset_sr_radius();
         }
@@ -605,9 +625,10 @@ impl Solver {
 
     /// eOn `maxAtomMotionAppliedV`. Preferred over the Euclidean cap.
     ///
-    /// A fresh Cartesian session already holds [`crate::DEFAULT_ATOM_MAXMOVE`].
-    /// A positive `maxmove` replaces that default. A non-positive value
-    /// clears the cap.
+    /// A fresh Cartesian session holds [`crate::DEFAULT_ATOM_MAXMOVE`]
+    /// when [`Method::installs_default_atom_cap`] is set. BFGS, dogleg,
+    /// and FIRE 2.0 start without that cap. A positive `maxmove`
+    /// replaces the value in force. A non-positive value clears the cap.
     pub fn set_atom_maxmove(&mut self, maxmove: f64) {
         self.atom_maxmove_set = true;
         self.atom_maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };
@@ -1244,6 +1265,7 @@ impl Solver {
     pub fn set_fire_variant(&mut self, variant: FireVariant) {
         let dim = self.dim;
         let dt0 = self.control.istep;
+        let fire = matches!(self.inner, Inner::Fire(_, _));
         if let Inner::Fire(state, ext) = &mut self.inner {
             match variant {
                 FireVariant::Guenole2020 => {
@@ -1256,6 +1278,11 @@ impl Solver {
                     *ext = None;
                 }
             }
+        }
+        // FIRE 2.0 leaves the implicit cap off. Switching the schedule
+        // updates that choice unless the caller already set a cap.
+        if fire {
+            self.apply_default_atom_cap();
         }
     }
 
@@ -1759,6 +1786,11 @@ impl Solver {
             Inner::Dogleg { radius } => *radius,
             _ => self.control.istep.max(1e-8),
         };
+        // An explicit per-atom cap is a second limit on the trust step
+        // and the ceiling on the radius. The radius update then sees
+        // the clipped length, so a boundary step looks interior.
+        // Nocedal and Wright, algorithm 4.1. The default leaves the
+        // cap unset and the ceiling is eight times the current radius.
         let rmax = self
             .atom_maxmove
             .or(self.control.maxmove)

@@ -132,8 +132,9 @@ struct OptimizeControl {
     ScalarType istep = 0.1;
     std::size_t memory = 10;
     bool verbose = false;
-    // 0 leaves the per-atom default of 0.2 in force. A positive value
-    // is the Euclidean step limit and turns that default off.
+    // 0 leaves the method's per-atom default in force. BFGS, dogleg,
+    // and FIRE 2.0 have none. A positive value is the Euclidean step
+    // limit and turns that default off.
     ScalarType maxmove = 0;
     ScalarType xtol = 1e-6;
     ScalarType ftol = 1e-6;

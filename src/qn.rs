@@ -53,6 +53,9 @@ where
         let dir = -h.dot(&grad);
         let old = pos.clone();
         let gold = grad.clone();
+        // The Wolfe search is the step control. A per-atom default
+        // would cut alpha_max and refuse the longer accepted steps.
+        // A positive Euclidean maxmove still bounds the trial.
         let t = take_step(
             obj,
             &pos,
@@ -62,7 +65,7 @@ where
             istep,
             linesearch,
             control,
-            implicit_atom_cap(control),
+            None,
         );
         if t.energy_noise {
             return Ok(energy_noise_report(value, pos, step + 1, gnorm));
