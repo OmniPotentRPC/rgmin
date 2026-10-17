@@ -8,7 +8,8 @@ use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
 use crate::step::{
-    energy_noise_report, implicit_atom_cap, l2, next_istep, qn_istep, scale_step, take_step,
+    energy_noise_report, implicit_atom_cap, l2, next_istep, qn_istep, scale_step, scale_step_atom,
+    take_step,
 };
 use crate::trust::{
     accept_ratio, cauchy_point, dogleg_direction, predicted_reduction, reduction_ratio,
@@ -174,7 +175,8 @@ where
     let n = pos.len();
     let (mut value, mut grad) = obj.value_and_gradient(pos.view());
     let mut b = Array2::<f64>::eye(n);
-    let (mut radius, rmax) = sr_trust_limits(control.istep, n, None, control.maxmove);
+    let atom_cap = implicit_atom_cap(control);
+    let (mut radius, rmax) = sr_trust_limits(control.istep, n, atom_cap, control.maxmove);
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
@@ -183,7 +185,9 @@ where
         }
         let dir = sr_trust_direction(&b, &grad, radius);
         let mut trial = &pos + &dir;
-        if let Some(cap) = control.maxmove {
+        if let Some(cap) = atom_cap {
+            scale_step_atom(&pos, &mut trial, cap);
+        } else if let Some(cap) = control.maxmove {
             scale_step(&pos, &mut trial, cap);
         }
         trial = obj.bounds().clip(trial.view());
@@ -452,56 +456,6 @@ pub(crate) fn solve_spd(a: &Array2<f64>, rhs: &Array1<f64>) -> Option<Array1<f64
     y.iter().all(|v| v.is_finite()).then_some(y)
 }
 
-#[cfg(test)]
-mod update_tests {
-    use super::*;
-    use ndarray::array;
-
-    /// Powell's symmetric Broyden update satisfies `B+ s = y` and stays
-    /// symmetric. The historical `sr2.hpp` rank-1 map does neither.
-    #[test]
-    fn sr2_update_meets_the_secant_condition_and_stays_symmetric() {
-        let mut b = Array2::<f64>::eye(2);
-        let s = array![1.0, 0.5];
-        let y = array![2.0, -0.25];
-        sr2_hessian_update(&mut b, &s, &y);
-        let bs = b.dot(&s);
-        assert!(
-            (bs[0] - y[0]).abs() < 1e-10 && (bs[1] - y[1]).abs() < 1e-10,
-            "secant failed: Bs = {bs:?}, y = {y:?}, B = {b:?}"
-        );
-        assert!(
-            (b[(0, 1)] - b[(1, 0)]).abs() < 1e-12,
-            "symmetry failed: B = {b:?}"
-        );
-    }
-
-    #[test]
-    fn sr1_update_meets_the_secant_condition() {
-        let mut b = Array2::<f64>::eye(2);
-        let s = array![1.0, 0.5];
-        let y = array![2.0, -0.25];
-        sr1_hessian_update(&mut b, &s, &y);
-        let bs = b.dot(&s);
-        assert!(
-            (bs[0] - y[0]).abs() < 1e-10 && (bs[1] - y[1]).abs() < 1e-10,
-            "secant failed: Bs = {bs:?}"
-        );
-        assert!((b[(0, 1)] - b[(1, 0)]).abs() < 1e-12);
-    }
-
-    /// `-B^{-1} g` is uphill when the curvature along `g` is negative.
-    /// The Cauchy point of that model is downhill.
-    #[test]
-    fn indefinite_model_steps_downhill() {
-        let b = ndarray::array![[1.0, 0.0], [0.0, -4.0]];
-        let g = array![0.0, 1.0];
-        let p = sr_trust_direction(&b, &g, 0.5);
-        assert!(g.dot(&p) < -1e-12, "g·p = {}, p = {p:?}", g.dot(&p));
-        assert!((l2(&p) - 0.5).abs() < 1e-12);
-    }
-}
-
 /// Gaussian elimination with partial pivoting for `A x = rhs`.
 #[allow(dead_code)]
 pub(crate) fn solve_dense(a: &Array2<f64>, rhs: &Array1<f64>) -> Option<Array1<f64>> {
@@ -572,5 +526,55 @@ pub(crate) fn sr1_hessian_update(b: &mut Array2<f64>, s: &Array1<f64>, y: &Array
         for j in 0..n {
             b[(i, j)] += delta[i] * delta[j] / ds;
         }
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+    use ndarray::array;
+
+    /// Powell's symmetric Broyden update satisfies `B+ s = y` and stays
+    /// symmetric. The historical `sr2.hpp` rank-1 map does neither.
+    #[test]
+    fn sr2_update_meets_the_secant_condition_and_stays_symmetric() {
+        let mut b = Array2::<f64>::eye(2);
+        let s = array![1.0, 0.5];
+        let y = array![2.0, -0.25];
+        sr2_hessian_update(&mut b, &s, &y);
+        let bs = b.dot(&s);
+        assert!(
+            (bs[0] - y[0]).abs() < 1e-10 && (bs[1] - y[1]).abs() < 1e-10,
+            "secant failed: Bs = {bs:?}, y = {y:?}, B = {b:?}"
+        );
+        assert!(
+            (b[(0, 1)] - b[(1, 0)]).abs() < 1e-12,
+            "symmetry failed: B = {b:?}"
+        );
+    }
+
+    #[test]
+    fn sr1_update_meets_the_secant_condition() {
+        let mut b = Array2::<f64>::eye(2);
+        let s = array![1.0, 0.5];
+        let y = array![2.0, -0.25];
+        sr1_hessian_update(&mut b, &s, &y);
+        let bs = b.dot(&s);
+        assert!(
+            (bs[0] - y[0]).abs() < 1e-10 && (bs[1] - y[1]).abs() < 1e-10,
+            "secant failed: Bs = {bs:?}"
+        );
+        assert!((b[(0, 1)] - b[(1, 0)]).abs() < 1e-12);
+    }
+
+    /// `-B^{-1} g` is uphill when the curvature along `g` is negative.
+    /// The Cauchy point of that model is downhill.
+    #[test]
+    fn indefinite_model_steps_downhill() {
+        let b = ndarray::array![[1.0, 0.0], [0.0, -4.0]];
+        let g = array![0.0, 1.0];
+        let p = sr_trust_direction(&b, &g, 0.5);
+        assert!(g.dot(&p) < -1e-12, "g·p = {}, p = {p:?}", g.dot(&p));
+        assert!((l2(&p) - 0.5).abs() < 1e-12);
     }
 }

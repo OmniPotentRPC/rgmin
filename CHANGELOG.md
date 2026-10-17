@@ -10,9 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A Cartesian `Solver` and the one-shot minimizers (L-BFGS, BFGS,
-  steepest descent, nonlinear CG, Adam, Newton, and the session arms
-  FIRE, FIRE 2.0, quick-min, DIIS, SR1, SR2, Barzilai-Borwein, and
-  dogleg) start with a per-atom cap of 0.2. `scale_step_atom` limits
+  SR1, SR2, steepest descent, nonlinear CG, Adam, Newton, and the
+  session arms FIRE, FIRE 2.0, quick-min, DIIS, Barzilai-Borwein, and
+  dogleg) start with a per-atom cap of 0.2. One-shot SR1 and SR2 pass
+  that cap into `sr_trust_limits` and then clip the trial with
+  `scale_step_atom`. `scale_step_atom` limits
   the largest per-atom displacement. It does not limit the Euclidean
   norm of the whole step. `set_atom_maxmove` replaces the default,
   including a value above 0.2. A non-positive value clears the cap,
