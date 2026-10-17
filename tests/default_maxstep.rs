@@ -435,6 +435,93 @@ fn default_cap_clips_newton_and_dogleg() {
     );
 }
 
+/// Two atoms, `f = ½‖x‖²`, started at `(1,1,1, 0,0,0)`.
+/// The gradient sits on the first atom, so the Newton step has length √3
+/// and a Euclidean ball of `0.2 * √2` still moves that atom past 0.2.
+struct TwoAtomBowl;
+
+impl Objective<f64> for TwoAtomBowl {
+    fn dim(&self) -> usize {
+        6
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        static B: OnceLock<Bounds<f64>> = OnceLock::new();
+        B.get_or_init(|| Bounds::new(Array1::from_elem(6, -10.0), Array1::from_elem(6, 10.0), 0.0))
+    }
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        0.5 * x.dot(&x)
+    }
+}
+
+impl Gradient<f64> for TwoAtomBowl {
+    fn dim(&self) -> usize {
+        6
+    }
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        x.to_owned()
+    }
+}
+
+impl DifferentiableObjective<f64> for TwoAtomBowl {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        (self.eval(x), self.grad(x))
+    }
+}
+
+fn largest_atom_move(before: &Array1<f64>, after: &Array1<f64>) -> f64 {
+    let mut peak = 0.0_f64;
+    for i in 0..before.len() / 3 {
+        let dx = after[3 * i] - before[3 * i];
+        let dy = after[3 * i + 1] - before[3 * i + 1];
+        let dz = after[3 * i + 2] - before[3 * i + 2];
+        peak = peak.max((dx * dx + dy * dy + dz * dz).sqrt());
+    }
+    peak
+}
+
+fn one_shot_sr_atom_step(method: Method, maxmove: Option<f64>) -> f64 {
+    let start = array![1.0, 1.0, 1.0, 0.0, 0.0, 0.0];
+    let control = Control {
+        maxiter: 1,
+        gtol: 1e-14,
+        istep: 1.0,
+        maxmove,
+        ..Control::default()
+    };
+    let report = minimize_method(
+        &TwoAtomBowl,
+        start.clone(),
+        &control,
+        method,
+        LineSearch::default(),
+    )
+    .unwrap();
+    largest_atom_move(&start, &report.coords)
+}
+
+#[test]
+fn one_shot_sr_honours_the_default_atom_cap() {
+    for method in [Method::Sr1, Method::Sr2] {
+        let capped = one_shot_sr_atom_step(method.clone(), None);
+        assert!(
+            capped <= CAP + 1e-9,
+            "{method:?} default atom step {capped}"
+        );
+        assert!(capped > 0.05, "{method:?} default atom step {capped}");
+        let open = one_shot_sr_atom_step(method.clone(), Some(1000.0));
+        assert!(
+            open > CAP,
+            "{method:?} Euclidean maxmove 1000 stayed at {open}"
+        );
+        let tight = one_shot_sr_atom_step(method.clone(), Some(0.05));
+        assert!(
+            tight <= 0.05 + 1e-9,
+            "{method:?} Euclidean maxmove 0.05 moved {tight}"
+        );
+        assert!(tight > 0.0, "{method:?} tight cap vanished");
+    }
+}
+
 #[cfg(feature = "capi")]
 mod c_abi {
     use std::os::raw::c_void;

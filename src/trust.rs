@@ -61,7 +61,7 @@ pub fn dogleg_direction(hess: &Array2<f64>, grad: &Array1<f64>, delta: f64) -> A
 pub fn cauchy_point(hess: &Array2<f64>, grad: &Array1<f64>, delta: f64) -> Array1<f64> {
     let radius = delta.max(0.0);
     let gg = grad.dot(grad);
-    if !(gg.is_finite() && gg > 0.0) || !(radius.is_finite() && radius > 0.0) {
+    if !(gg.is_finite() && gg > 0.0 && radius.is_finite() && radius > 0.0) {
         return Array1::zeros(grad.len());
     }
     let ng = gg.sqrt();

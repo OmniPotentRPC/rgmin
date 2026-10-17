@@ -360,6 +360,9 @@ impl Solver {
         } else {
             None
         };
+        if self.steps == 0 {
+            self.reset_sr_radius();
+        }
     }
 
     /// Family used by [`crate::select_precon`] when the caller asks for auto.

@@ -189,7 +189,10 @@ mod tests {
             maxiter: 30,
             gtol: 1e-8,
             istep: 1.0,
-            maxmove: None,
+            // The per-atom default would clip every trial to 0.2 and leave
+            // this start at 2 after 30 steps. The Euclidean cap is the
+            // explicit override and does not bind a unit-atom step.
+            maxmove: Some(100.0),
             ftol_rel: None,
             noise_floor: None,
         };
