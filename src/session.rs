@@ -8,10 +8,10 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 
 use crate::accept::{Accept, accept_step};
-use crate::adam::adam_direction;
+use crate::adam::{adam_direction, scale_to_unit_atom};
 use crate::bb::bb_direction;
 use crate::control::Control;
-use crate::diis::{DiisState, extrapolated, pulay_coefficients};
+use crate::diis::{DiisState, gdiis_point};
 use crate::error::{Error, Result};
 use crate::fire::{
     Fire2Extras, FireMix, FireState, FireVariant, fire_after_v1_metric, fire_displacement,
@@ -27,7 +27,10 @@ use crate::precon::{
     ExpParams, FfParams, FfTerms, Ghost, LindhParams, Neighbours, PreconSpec, Slot,
 };
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
-use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
+use crate::qn::{
+    bfgs_inverse_update, sr_trust_direction, sr_trust_limits, sr1_hessian_update,
+    sr2_hessian_update,
+};
 use crate::qn_step::QnStep;
 use crate::quickmin::{
     QuickMinOptions, QuickMinSession, QuickMinState, quickmin_rescale_velocity,
@@ -36,7 +39,7 @@ use crate::quickmin::{
 use crate::report::{Report, Status};
 use crate::rigid::{RigidMode, RigidWorkspace};
 use crate::step::{
-    Taken, cap_alpha, l2, next_istep, nlcg_opening_alpha, qn_istep, scale_step, scale_step_atom,
+    Taken, cap_alpha, l2, nlcg_opening_alpha, qn_istep, scale_step, scale_step_atom,
     take_step_with_options,
 };
 use crate::trust::{
@@ -243,10 +246,12 @@ enum Inner {
         h: Array2<f64>,
     },
     Sr1 {
-        h: Array2<f64>,
+        b: Array2<f64>,
+        radius: f64,
     },
     Sr2 {
         b: Array2<f64>,
+        radius: f64,
     },
     Adam {
         m: Array1<f64>,
@@ -603,6 +608,9 @@ impl Solver {
     pub fn set_atom_maxmove(&mut self, maxmove: f64) {
         self.atom_maxmove_set = true;
         self.atom_maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };
+        if self.steps == 0 {
+            self.reset_sr_radius();
+        }
     }
 
     /// eOn `lbfgs_project_rigid`.
@@ -1382,6 +1390,7 @@ impl Solver {
         self.istep = self.control.istep;
         self.e_hist.clear();
         self.last_pos = None;
+        let sr_radius = self.sr_opening_radius();
         match &mut self.inner {
             Inner::Lbfgs(solver) => solver.forget(),
             Inner::Nlcg {
@@ -1395,8 +1404,10 @@ impl Solver {
                 *prev_gd = 0.0;
             }
             Inner::Bfgs { h } => *h = Array2::<f64>::eye(self.dim),
-            Inner::Sr1 { h } => *h = Array2::<f64>::eye(self.dim),
-            Inner::Sr2 { b } => *b = Array2::<f64>::eye(self.dim),
+            Inner::Sr1 { b, radius } | Inner::Sr2 { b, radius } => {
+                *b = Array2::<f64>::eye(self.dim);
+                *radius = sr_radius;
+            }
             Inner::Adam {
                 m,
                 v,
@@ -1988,6 +1999,13 @@ impl Solver {
         #[cfg(feature = "highs")]
         let boxed = self.has_coordinate_box();
         let mut energy_stall = false;
+        let mut sr_secant: Option<(Array1<f64>, Array1<f64>)> = None;
+        let diis_alpha = self.istep;
+        let diis_atom_cap = self.atom_maxmove;
+        let diis_euclidean_cap = self.control.maxmove;
+        if matches!(&self.inner, Inner::Sr1 { .. } | Inner::Sr2 { .. }) {
+            self.sr_trust_attempt(obj, x, &mut value, &mut grad, &start, &gold, &mut sr_secant);
+        }
         // The rigid projector for the trial directions: the workspace is
         // taken out of the session for the step so that the closure and
         // the stepper borrow disjoint fields, and returns when the hold
@@ -2205,73 +2223,7 @@ impl Solver {
                     self.istep = qn_istep(&self.control);
                 }
             }
-            Inner::Sr1 { h } => {
-                let direction = -h.dot(&grad);
-                let old = x.clone();
-                let gold = grad.clone();
-                let t = take_session_step(
-                    obj,
-                    x,
-                    value,
-                    &grad,
-                    direction.view(),
-                    self.istep,
-                    self.linesearch,
-                    &self.control,
-                    self.atom_maxmove,
-                    self.accept,
-                    &mut self.e_hist,
-                    self.manifold,
-                    1.0,
-                    line_options,
-                );
-                energy_stall = t.energy_noise;
-                let lsstep = t.alpha;
-                let moved = t.moved;
-                *x = t.x;
-                value = t.f;
-                grad = t.g;
-                if moved {
-                    sr1_inverse_update(h, &(&*x - &old), &(&grad - &gold));
-                }
-                if self.accept != Accept::Step {
-                    self.istep = next_istep(lsstep, &self.control);
-                }
-            }
-            Inner::Sr2 { b } => {
-                let rhs = grad.mapv(|g| -g);
-                let direction = solve_dense(b, &rhs).unwrap_or(rhs);
-                let old = x.clone();
-                let gold = grad.clone();
-                let t = take_session_step(
-                    obj,
-                    x,
-                    value,
-                    &grad,
-                    direction.view(),
-                    self.istep,
-                    self.linesearch,
-                    &self.control,
-                    self.atom_maxmove,
-                    self.accept,
-                    &mut self.e_hist,
-                    self.manifold,
-                    1.0,
-                    line_options,
-                );
-                energy_stall = t.energy_noise;
-                let lsstep = t.alpha;
-                let moved = t.moved;
-                *x = t.x;
-                value = t.f;
-                grad = t.g;
-                if moved {
-                    sr2_hessian_update(b, &(&*x - &old), &(&grad - &gold));
-                }
-                if self.accept != Accept::Step {
-                    self.istep = next_istep(lsstep, &self.control);
-                }
-            }
+            Inner::Sr1 { .. } | Inner::Sr2 { .. } => {}
             Inner::Adam {
                 m,
                 v,
@@ -2281,7 +2233,10 @@ impl Solver {
                 beta2,
                 eps,
             } => {
-                let dir = adam_direction(m, v, &grad, *beta1, *beta2, *b1p, *b2p, *eps);
+                let m_old = m.clone();
+                let v_old = v.clone();
+                let raw = adam_direction(m, v, &grad, *beta1, *beta2, *b1p, *b2p, *eps);
+                let dir = scale_to_unit_atom(&raw);
                 let t = take_session_step(
                     obj,
                     x,
@@ -2299,14 +2254,18 @@ impl Solver {
                     line_options,
                 );
                 energy_stall = t.energy_noise;
-                let lsstep = t.alpha;
-                *x = t.x;
-                value = t.f;
-                grad = t.g;
-                *b1p *= *beta1;
-                *b2p *= *beta2;
-                if self.accept != Accept::Step {
-                    self.istep = next_istep(lsstep, &self.control);
+                if t.moved {
+                    *x = t.x;
+                    value = t.f;
+                    grad = t.g;
+                    *b1p *= *beta1;
+                    *b2p *= *beta2;
+                    if self.accept != Accept::Step && t.alpha.is_finite() && t.alpha > 0.0 {
+                        self.istep = t.alpha;
+                    }
+                } else {
+                    m.assign(&m_old);
+                    v.assign(&v_old);
                 }
             }
             Inner::Fire(state, ext) => {
@@ -2521,25 +2480,52 @@ impl Solver {
                 }
             }
             Inner::Diis(state) => {
+                let alpha = diis_alpha;
+                let cap = diis_atom_cap.or(diis_euclidean_cap);
+                let gnorm_now = l2(&grad);
                 state.push(x.clone(), grad.clone());
-                let coeffs = pulay_coefficients(state.gradients());
-                // Neither branch consults the oracle value, so a projected
-                // or inverted force can drive the step.
-                let mut trial = if let Some(c) = coeffs.filter(|_| state.gradients().len() >= 2) {
-                    extrapolated(state.positions(), &c)
+                let image = gdiis_point(state.positions(), state.gradients(), alpha, cap);
+                let built = state.gradients().len() >= 2;
+                let gdiis_dir = image.and_then(|y| {
+                    let d = &y - &*x;
+                    (d.dot(&grad) < 0.0 && l2(&d) > 1e-16).then_some(d)
+                });
+                let tried_gdiis = gdiis_dir.is_some();
+                let (dir, open, direct) = if let Some(d) = gdiis_dir {
+                    (d, 1.0, 1.0)
                 } else {
-                    &*x - &(self.istep * &grad)
+                    if built {
+                        state.clear();
+                    }
+                    (grad.mapv(|g| -g), self.istep, self.istep)
                 };
-                if let Some(cap) = self.atom_maxmove {
-                    scale_step_atom(x, &mut trial, cap);
-                } else if let Some(cap) = self.control.maxmove {
-                    scale_step(x, &mut trial, cap);
+                let t = take_session_step(
+                    obj,
+                    x,
+                    value,
+                    &grad,
+                    dir.view(),
+                    open,
+                    self.linesearch,
+                    &self.control,
+                    self.atom_maxmove,
+                    self.accept,
+                    &mut self.e_hist,
+                    self.manifold,
+                    direct,
+                    line_options,
+                );
+                energy_stall = t.energy_noise;
+                let force_fell = l2(&t.g) < gnorm_now;
+                if tried_gdiis && !(t.moved && force_fell) {
+                    state.clear();
                 }
-                trial = obj.bounds().clip(trial.view());
-                *x = trial;
-                let ev = obj.value_and_gradient(x.view());
-                value = ev.0;
-                grad = ev.1;
+                *x = t.x;
+                value = t.f;
+                grad = t.g;
+                if self.accept != Accept::Step {
+                    self.istep = qn_istep(&self.control);
+                }
             }
             Inner::Bb { prev_s, prev_y } => {
                 let dir = bb_direction(prev_s.as_ref(), prev_y.as_ref(), &grad, self.istep);
@@ -2601,6 +2587,17 @@ impl Solver {
             grad = ev.1;
         }
         grad = self.horizontal_grad(x, &grad);
+        if let Some((old_x, old_g)) = sr_secant
+            && x.iter().zip(old_x.iter()).any(|(a, b)| a != b)
+        {
+            let s = &*x - &old_x;
+            let y = &grad - &old_g;
+            match &mut self.inner {
+                Inner::Sr1 { b, .. } => sr1_hessian_update(b, &s, &y),
+                Inner::Sr2 { b, .. } => sr2_hessian_update(b, &s, &y),
+                _ => {}
+            }
+        }
 
         let pair = if matches!(self.inner, Inner::Lbfgs(_))
             && x.iter().zip(start.iter()).any(|(a, b)| a != b)
@@ -2723,6 +2720,93 @@ impl Solver {
         }
         unreachable!("PSO slot populated above")
     }
+
+    fn sr_opening_radius(&self) -> f64 {
+        sr_trust_limits(
+            self.control.istep,
+            self.dim,
+            self.atom_maxmove,
+            self.control.maxmove,
+        )
+        .0
+    }
+
+    fn reset_sr_radius(&mut self) {
+        let radius = self.sr_opening_radius();
+        match &mut self.inner {
+            Inner::Sr1 { radius: slot, .. } | Inner::Sr2 { radius: slot, .. } => *slot = radius,
+            _ => {}
+        }
+    }
+
+    fn clip_trial(&self, origin: &Array1<f64>, trial: &mut Array1<f64>) {
+        if let Some(cap) = self.atom_maxmove {
+            scale_step_atom(origin, trial, cap);
+        } else if let Some(cap) = self.control.maxmove {
+            scale_step(origin, trial, cap);
+        }
+    }
+
+    /// One SR1/SR2 trust-region trial. The Hessian update waits until the
+    /// accepted point has been retracted.
+    fn sr_trust_attempt<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        value: &mut f64,
+        grad: &mut Array1<f64>,
+        start: &Array1<f64>,
+        gold: &Array1<f64>,
+        secant: &mut Option<(Array1<f64>, Array1<f64>)>,
+    ) where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let (model, radius) = match &self.inner {
+            Inner::Sr1 { b, radius } | Inner::Sr2 { b, radius } => (b.clone(), *radius),
+            _ => return,
+        };
+        let (_, rmax) = sr_trust_limits(
+            self.control.istep,
+            self.dim,
+            self.atom_maxmove,
+            self.control.maxmove,
+        );
+        let mut dir = sr_trust_direction(&model, grad, radius);
+        if self.project_rigid {
+            project_out_rot_trans(&mut dir, x.view());
+        }
+        dir = self.project_vec(x, &dir);
+        let mut trial = &*x + &dir;
+        self.clip_trial(x, &mut trial);
+        trial = obj.bounds().clip(trial.view());
+        let p = &trial - &*x;
+        let pnorm = l2(&p);
+        let mut rho = -1.0;
+        let mut finite = false;
+        let mut ft = *value;
+        let mut gt = grad.clone();
+        if pnorm.is_finite() && pnorm > 1e-16 {
+            let ev = obj.value_and_gradient(trial.view());
+            ft = ev.0;
+            gt = ev.1;
+            finite = ft.is_finite() && gt.iter().all(|v| v.is_finite());
+            if finite {
+                rho = reduction_ratio(*value - ft, predicted_reduction(&model, grad, &p));
+            }
+        }
+        let new_radius = update_radius(radius, rho, pnorm, rmax);
+        match &mut self.inner {
+            Inner::Sr1 { radius, .. } | Inner::Sr2 { radius, .. } => *radius = new_radius,
+            _ => {}
+        }
+        let take = finite && (self.accept == Accept::Step || accept_ratio(rho));
+        if take {
+            *secant = Some((start.clone(), gold.clone()));
+            *x = trial;
+            *value = ft;
+            *grad = gt;
+        }
+    }
 }
 
 // The explicit step policy uses the method's direction and scale once.
@@ -2812,10 +2896,12 @@ impl Inner {
                 h: Array2::<f64>::eye(dim),
             },
             Method::Sr1 => Inner::Sr1 {
-                h: Array2::<f64>::eye(dim),
+                b: Array2::<f64>::eye(dim),
+                radius: sr_trust_limits(istep, dim, None, None).0,
             },
             Method::Sr2 => Inner::Sr2 {
                 b: Array2::<f64>::eye(dim),
+                radius: sr_trust_limits(istep, dim, None, None).0,
             },
             Method::Adam { beta1, beta2, eps } => Inner::Adam {
                 m: Array1::zeros(dim),

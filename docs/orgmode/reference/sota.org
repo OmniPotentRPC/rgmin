@@ -147,15 +147,16 @@ tokens do not converge on these cluster / bulk geometries.
 | Stiefel | 12/12 alias | ~St(n,1)~ = sphere | ~stiefel.rs:11-23~; ~stiefel_p~ is always 1 |
 | HiGHS | 9/12 wrong QP | ~step_hess~ solves dense Newton QP | ~session.rs:322-336~; Morse ~n=768~ times out |
 | PSO | 10/12 wrong tool | swarm on ~[-1e12,1e12]~ | ~oracle.rs~ unbounded; ~230021 = 10000 x ~23~ |
-| SR2 | 8/12 bad update | non-secant rank-1 | ~qn.rs:265-281~ ~B += δ(y+Bs)^T / (δ·s)~ |
+| SR2 | fixed | Powell symmetric Broyden in the SR1 trust region | ~qn.rs~ ~sr2_hessian_update~ |
 | model Hessians | 11/12 wrong chemistry | covalent ~B^T k B~ vs pair | pair is the rematch ~P~ |
 
 SO(3) and SE(3) reject a 3N cluster. Sphere/Stiefel on 3N stay
 on ~S^{3N-1}~ and die on maxiter. Isolated molecules use
 ~rigid_quotient~ or ~mw_rigid~. PSO force
 counts match ~max_iterations~ (10000 LJ38 / 1000 Morse) times
-swarm work, not a 230x230 product. SR2 has a denom skip; the
-update still fails the secant condition.
+swarm work, not a 230x230 product. SR2 is Powell's symmetric Broyden
+update in the SR1 trust region; the old rank-1 map failed the secant
+condition.
 
 ** FIRE, Barzilai–Borwein, and dogleg
 

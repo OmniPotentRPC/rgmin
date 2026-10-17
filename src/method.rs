@@ -41,17 +41,22 @@ pub enum Method {
         /// Correction pairs kept (`m`). Typical 5 to 20.
         memory: usize,
     },
-    /// Inverse SR1 (Nocedal-Wright 6.24).
+    /// SR1 in a trust region (Nocedal-Wright 6.24, algorithm 4.1).
+    ///
+    /// The model Hessian starts at `I`. A positive-definite model takes
+    /// a dogleg step; an indefinite model takes the Cauchy point.
     ///
     /// Nocedal and Wright, *Numerical Optimization*,
     /// <https://doi.org/10.1007/978-0-387-40065-5>.
     Sr1,
-    /// SR2 Hessian update (`rgmin` `sr2.hpp`).
+    /// Powell symmetric Broyden in the SR1 trust region.
     ///
-    /// Nocedal and Wright, *Numerical Optimization*,
-    /// <https://doi.org/10.1007/978-0-387-40065-5>.
+    /// The update is symmetric and satisfies the secant condition.
+    /// Powell, *A new algorithm for unconstrained optimization*, in
+    /// *Nonlinear Programming*, Academic Press, 1970.
     Sr2,
-    /// Kingma and Ba Adam, with a line search along the preconditioned step.
+    /// Kingma and Ba Adam. The preconditioned direction is scaled to
+    /// unit per-atom length and a line search sets the step.
     ///
     /// Kingma and Ba, *Adam: A Method for Stochastic Optimization*,
     /// <https://doi.org/10.48550/arXiv.1412.6980>.
@@ -120,16 +125,21 @@ pub enum Method {
     /// energy path finding methods*,
     /// <https://doi.org/10.1063/1.5064465>. The rule and the session
     /// clamps are in [`crate::ode12r`]; an installed geometry
-    /// preconditioner is the metric.
+    /// preconditioner is the metric. A Cartesian session keeps the
+    /// default per-atom cap, and the stepper judges a capped move at
+    /// the length it took.
     Ode12r,
-    /// Pulay residual subspace extrapolation.
+    /// GDIIS geometry step.
     ///
     /// Pulay, *Convergence acceleration of iterative sequences. The
     /// case of SCF iteration*,
     /// <https://doi.org/10.1016/0009-2614(80)80396-4>.
-    /// The residual is the objective gradient. Wood and Zunger,
-    /// J. Phys. A, 1343 (1985), name the residual form. No DOI is
-    /// attached for that line.
+    /// Császár and Pulay, J. Mol. Struct. 114, 31 (1984),
+    /// <https://doi.org/10.1016/0022-2860(84)87198-7>.
+    /// The image is `sum c_i (x_i - α g_i)`. A step past eight caps,
+    /// an uphill image, or a step that does not lower the force drops
+    /// the history and takes one steepest step. The line search chooses
+    /// the length.
     Diis {
         /// Stored gradient and position pairs. At least 2.
         memory: usize,

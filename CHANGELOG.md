@@ -9,15 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A Cartesian `Solver` and the one-shot minimizers (L-BFGS, BFGS, SR1,
-  SR2, steepest descent, nonlinear CG, Adam, Newton, and the session
-  arms FIRE, FIRE 2.0, quick-min, DIIS, Barzilai-Borwein, and dogleg)
-  start with a per-atom cap of 0.2. `scale_step_atom` limits the
-  largest per-atom displacement. It does not limit the Euclidean norm
-  of the whole step. `set_atom_maxmove` replaces the default, including
-  a value above 0.2. A non-positive value clears the cap, and that
-  choice stays if `set_maxmove` or `set_manifold` runs later. A
-  positive `Control.maxmove`, with no call to `set_atom_maxmove`, is
+- A Cartesian `Solver` and the one-shot minimizers (L-BFGS, BFGS,
+  steepest descent, nonlinear CG, Adam, Newton, and the session arms
+  FIRE, FIRE 2.0, quick-min, DIIS, SR1, SR2, Barzilai-Borwein, and
+  dogleg) start with a per-atom cap of 0.2. `scale_step_atom` limits
+  the largest per-atom displacement. It does not limit the Euclidean
+  norm of the whole step. `set_atom_maxmove` replaces the default,
+  including a value above 0.2. A non-positive value clears the cap,
+  and that choice stays if `set_maxmove` or `set_manifold` runs later.
+  A positive `Control.maxmove`, with no call to `set_atom_maxmove`, is
   the Euclidean step limit and leaves the per-atom default off. A
   non-Cartesian manifold has no default. The C setter is
   `rgmin_solver_set_atom_maxmove`. Python `maxstep` and `atom_maxmove`
@@ -39,6 +39,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pair 3.895343497108207, BFGS in 540 steps at -166.8029675390938
   with maximum pair 4.185205749883185. The peak per-atom step was
   0.2 for L-BFGS and 0.20000000000000015 for BFGS.
+- SR1 stores the direct Hessian and steps with dogleg when that model
+  is positive definite, otherwise with the Cauchy point, inside a
+  Nocedal-Wright trust region. A line search on the inverse SR1 Hessian
+  flips the sign of an uphill direction and then skips the update.
+- SR2 is Powell's symmetric Broyden update in that same trust region.
+  The old rank-1 map was neither symmetric nor secant.
+- DIIS searches along the GDIIS image `sum c_i (x_i - α g_i)` when that
+  direction is downhill. A displacement past eight caps, an uphill
+  image, or a step that does not lower the force drops the history and
+  takes a steepest step. The line search chooses the length.
+- Adam scales the Kingma-Ba direction to unit max-atom length and opens
+  the next line search at the accepted step.
 
 ### Breaking
 
