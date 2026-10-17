@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- SR1 stores the direct Hessian and steps with dogleg when that model
+  is positive definite, otherwise with the Cauchy point, inside a
+  Nocedal-Wright trust region. A line search on the inverse SR1 Hessian
+  flips the sign of an uphill direction and then skips the update.
+- SR2 is Powell's symmetric Broyden update in that same trust region.
+  The old rank-1 map was neither symmetric nor secant.
+- DIIS searches along the GDIIS image `sum c_i (x_i - α g_i)` when that
+  direction is downhill. A displacement past eight caps, an uphill
+  image, or a step that does not lower the force drops the history and
+  takes a steepest step. The line search chooses the length.
+- Adam scales the Kingma-Ba direction to unit max-atom length and opens
+  the next line search at the accepted step.
+
 ### Breaking
 
 - `Method` is `#[non_exhaustive]`: a match on it outside rgmin needs a

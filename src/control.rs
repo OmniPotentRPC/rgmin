@@ -63,12 +63,14 @@ pub struct Control {
     pub maxiter: usize,
     /// Stop when `||g||_2 < gtol`.
     pub gtol: f64,
-    /// The opening step of a line search. BFGS, SR1 and SR2 open every
-    /// line search here, since their direction carries the scale and 1.0
-    /// is the natural trial; L-BFGS opens here while it holds no pairs and
-    /// at 1.0 once it does, whatever this is set to; steepest descent,
-    /// NLCG and Adam open here once and then at half the step last
-    /// accepted.
+    /// The opening step of a line search, and the initial SR trust radius
+    /// when no per-atom cap is set (`max(istep, 1)`). BFGS and the session
+    /// steepest-descent search open every line search here. L-BFGS opens
+    /// here while it holds no pairs and at 1.0 once it does. `minimize_sd`
+    /// opens here once and then at half the step last accepted. Nonlinear
+    /// CG opens from Nocedal-Wright equation 3.60. Adam opens here once
+    /// and then at the step last accepted, along a direction scaled to
+    /// unit per-atom length. SR1 and SR2 do not line search.
     pub istep: f64,
     /// Optional Euclidean cap on a proposed step (xtsci `maxmove`).
     /// `Some(c)` with `c <= 0` or NaN is no cap, the same as `None`; a

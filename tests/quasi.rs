@@ -56,16 +56,16 @@ fn bfgs_and_sr1_reach_the_minimum() {
 }
 
 #[test]
-fn sr2_descends_from_the_classic_start() {
+fn sr2_reaches_the_minimum() {
     let obj = Rosenbrock::<2>::new();
-    let start_f = f0();
     let report =
         minimize_method(&obj, array![-1.2, 1.0], &control(), Method::Sr2, brent()).unwrap();
     assert!(
-        report.value < start_f,
-        "SR2 {} -> {}",
-        start_f,
-        report.value
+        report.value < 1e-8,
+        "SR2 value {} after {} steps, ||g|| {}",
+        report.value,
+        report.steps,
+        report.grad_norm
     );
 }
 
