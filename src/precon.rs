@@ -679,7 +679,8 @@ pub fn nearest_neighbour_distance(
 pub fn sine_probe(positions: ArrayView1<f64>, r_nn: f64, lengths: Option<[f64; 3]>) -> Array1<f64> {
     let n = positions.len();
     let mut v = Array1::zeros(n);
-    if !n.is_multiple_of(3) || !(r_nn.is_finite() && r_nn > 0.0) {
+    let usable = n.is_multiple_of(3) && r_nn.is_finite() && r_nn > 0.0;
+    if !usable {
         return v;
     }
     let span = position_span(positions);
