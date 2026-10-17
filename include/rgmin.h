@@ -358,9 +358,11 @@ rgmin_status_t rgmin_solver_set_linesearch(rgmin_solver_t *solver,
 rgmin_status_t rgmin_solver_set_objective_roundoff(rgmin_solver_t *solver,
                                                   double relative);
 /** Per-atom displacement cap (eOn max_move, ASE maxstep).
- *  A Cartesian session starts at 0.2. A positive value replaces it.
- *  A non-positive value clears it. A positive \c maxmove on the
- *  control, with no call here, is the Euclidean step limit instead. */
+ *  A Cartesian session installs 0.2 unless the method already limits
+ *  the step. BFGS, dogleg, and FIRE 2.0 start without that cap.
+ *  A positive value replaces the cap in force. A non-positive value
+ *  clears it. A positive \c maxmove on the control, with no call here,
+ *  is the Euclidean step limit and leaves the per-atom default off. */
 void rgmin_solver_set_atom_maxmove(rgmin_solver_t *solver, double maxmove);
 void rgmin_solver_set_project_rigid(rgmin_solver_t *solver, int32_t enabled);
 void rgmin_solver_set_extra_updates(rgmin_solver_t *solver, size_t extra);

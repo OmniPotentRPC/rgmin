@@ -616,9 +616,9 @@ fn dogleg_kills_a_quadratic() {
         },
         2,
     );
-    // Eight steps of the default 0.2 cap cannot cross this bowl.
-    // The test checks the dogleg step, so the cap is cleared.
-    solver.set_atom_maxmove(0.0);
+    // The opening radius is istep 4, which contains the Newton step.
+    // The default leaves the per-atom cap off, so the trust step is
+    // the one that is taken.
     let mut last = None;
     for _ in 0..8 {
         let rep = solver.step_hess(&obj, &mut x).unwrap();
