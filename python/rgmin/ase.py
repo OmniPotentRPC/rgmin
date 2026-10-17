@@ -273,7 +273,9 @@ class Optimizer(_ASEOptimizer):
     """One rgmin iteration per :meth:`step`.
 
     ``method`` selects the solver. ``maxstep`` is the per-atom cap in
-    angstroms. ``accept`` overrides the acceptance rule. Remaining
+    angstroms. The default is 0.2, the same value as ASE
+    ``Optimizer.defaults`` and as the core session. ``accept`` overrides
+    the acceptance rule. Remaining
     solver keywords are validated by :class:`rgmin.SolverConfig`.
     ``master``, ``comm``, and ``loginterval`` are forwarded to the ASE
     base class when that class accepts them.

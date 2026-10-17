@@ -23,6 +23,8 @@ class SolverConfig(_core.SolverConfig):
     """Validated optimizer options.
 
     Unknown keywords raise ``ValueError`` and name the valid options.
+    A Cartesian solver starts with a per-atom cap of 0.2. ``maxstep``
+    or ``atom_maxmove`` replaces it, and a non-positive value clears it.
     """
 
     def __init__(self, method: str | Method = "lbfgs", **options: Any) -> None:

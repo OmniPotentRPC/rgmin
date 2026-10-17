@@ -7,7 +7,7 @@ use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
-use crate::step::{energy_noise_report, l2, next_istep, qn_istep, take_step};
+use crate::step::{energy_noise_report, implicit_atom_cap, l2, next_istep, qn_istep, take_step};
 
 const CURVATURE: f64 = 1e-12;
 const SR1_SKIP: f64 = 1e-8;
@@ -55,7 +55,7 @@ where
             istep,
             linesearch,
             control,
-            None,
+            implicit_atom_cap(control),
         );
         if t.energy_noise {
             return Ok(energy_noise_report(value, pos, step + 1, gnorm));
@@ -148,7 +148,7 @@ where
             istep,
             linesearch,
             control,
-            None,
+            implicit_atom_cap(control),
         );
         if t.energy_noise {
             return Ok(energy_noise_report(value, pos, step + 1, gnorm));
@@ -214,7 +214,7 @@ where
             istep,
             linesearch,
             control,
-            None,
+            implicit_atom_cap(control),
         );
         if t.energy_noise {
             return Ok(energy_noise_report(value, pos, step + 1, gnorm));
@@ -272,7 +272,7 @@ where
             istep,
             linesearch,
             control,
-            None,
+            implicit_atom_cap(control),
         );
         if t.energy_noise {
             return Ok(energy_noise_report(value, pos, step + 1, gnorm));

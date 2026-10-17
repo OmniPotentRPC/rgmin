@@ -359,6 +359,10 @@ rgmin_status_t rgmin_solver_set_linesearch(rgmin_solver_t *solver,
  */
 rgmin_status_t rgmin_solver_set_objective_roundoff(rgmin_solver_t *solver,
                                                   double relative);
+/** Per-atom displacement cap (eOn max_move, ASE maxstep).
+ *  A Cartesian session starts at 0.2. A positive value replaces it.
+ *  A non-positive value clears it. A positive \c maxmove on the
+ *  control, with no call here, is the Euclidean step limit instead. */
 void rgmin_solver_set_atom_maxmove(rgmin_solver_t *solver, double maxmove);
 void rgmin_solver_set_project_rigid(rgmin_solver_t *solver, int32_t enabled);
 /** 0 off, 1 auto, 2 translation, 3 translation and rotation.

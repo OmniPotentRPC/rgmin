@@ -16,11 +16,18 @@ Ninja, and Rust are required.
 =maxiter=, =linesearch_maxiter=, and =extra_updates= have to be Python
 integers. Other numeric options have to be finite.
 
+A Cartesian solver starts with a per-atom cap of 0.2 (ASE ~maxstep~,
+eOn ~max_move~). =maxstep= or =atom_maxmove= replaces it. A
+non-positive value clears it. A positive =maxmove= is the Euclidean
+step limit and leaves the per-atom default off. The cap is the largest
+per-atom displacement, not the norm of the whole step.
+
 * ASE
 
 =rgmin.ase.FIRE=, =LBFGS=, =CG=, and the other method classes are ASE
 optimizers. Each =step= is one rgmin iteration. =maxstep= is the
-per-atom cap in angstroms. ASE calculators are not thread-safe. Each
+per-atom cap in angstroms. The ASE classes pass it explicitly, and
+their default is 0.2. ASE calculators are not thread-safe. Each
 thread that builds an optimizer needs its own calculator. rgmin still
 guarantees a shareable config, one solver per thread, and an owned
 copy of the coordinates. The thread-safety page records the details.
