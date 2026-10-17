@@ -1,4 +1,4 @@
-//! Dense BFGS, L-BFGS, inverse SR1, and SR2.
+//! Dense BFGS, L-BFGS, SR1, and Powell symmetric Broyden (SR2).
 
 use eindir_core::{DifferentiableObjective, Objective};
 use ndarray::{Array1, Array2};
@@ -7,7 +7,13 @@ use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
-use crate::step::{energy_noise_report, implicit_atom_cap, l2, next_istep, qn_istep, take_step};
+use crate::step::{
+    energy_noise_report, implicit_atom_cap, l2, next_istep, qn_istep, scale_step, take_step,
+};
+use crate::trust::{
+    accept_ratio, cauchy_point, dogleg_direction, predicted_reduction, reduction_ratio,
+    update_radius,
+};
 
 const CURVATURE: f64 = 1e-12;
 const SR1_SKIP: f64 = 1e-8;
@@ -107,12 +113,15 @@ where
     solver.minimize_objective(obj, init, control, linesearch)
 }
 
-/// Inverse SR1 (Nocedal-Wright 6.24 / 6.25).
+/// SR1 in a trust region (Nocedal-Wright 6.24 and algorithm 4.1).
 ///
-/// Maintains `H ≈ B^{-1}` with `H += uu^T / (u·y)`, `u = s - Hy`.
-/// The C++ `sr1.hpp` updates the Hessian `B` and inverts each step;
-/// the inverse update is the same map on `H`. Skip when
-/// `|u·y| < 1e-8 ||u|| ||y||` (Nocedal-Wright 6.26).
+/// The model Hessian starts at `I` and updates
+/// `B+ = B + δδᵀ / (δᵀ s)`, `δ = y - Bs`, skipping
+/// `|δᵀ s| < 1e-8 ||δ|| ||s||` (Nocedal-Wright 6.26). A positive-definite
+/// model takes a dogleg step; an indefinite model takes the Cauchy point,
+/// which stays downhill for the model when `-B^{-1} g` does not. `linesearch`
+/// is accepted and ignored: a line search on the inverse SR1 Hessian is the
+/// defect this replaces.
 ///
 /// Nocedal and Wright, *Numerical Optimization*,
 /// <https://doi.org/10.1007/978-0-387-40065-5>.
@@ -125,62 +134,20 @@ pub fn minimize_sr1<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let mut pos = start(obj, init)?;
-    let n = pos.len();
-    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
-    let mut h = Array2::<f64>::eye(n);
-    let mut istep = control.istep;
-
-    for step in 0..control.maxiter {
-        let gnorm = l2(&grad);
-        if control.halt(gnorm, grad.len()).is_some() {
-            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
-        }
-        let dir = -h.dot(&grad);
-        let old = pos.clone();
-        let gold = grad.clone();
-        let t = take_step(
-            obj,
-            &pos,
-            value,
-            &grad,
-            dir.view(),
-            istep,
-            linesearch,
-            control,
-            implicit_atom_cap(control),
-        );
-        if t.energy_noise {
-            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
-        }
-        let moved = t.moved;
-        pos = t.x;
-        value = t.f;
-        grad = t.g;
-        if moved {
-            let s = &pos - &old;
-            let y = &grad - &gold;
-            sr1_inverse_update(&mut h, &s, &y);
-        }
-        istep = qn_istep(control);
-    }
-    Ok(done(
-        value,
-        pos,
-        control.maxiter,
-        l2(&grad),
-        grad.len(),
-        control,
-        true,
-    ))
+    let _ = linesearch;
+    minimize_sr_trust(obj, init, control, sr1_hessian_update)
 }
 
-/// SR2 Hessian update from rgmin `sr2.hpp`.
+/// Powell symmetric Broyden in the same trust region as SR1.
 ///
-/// Maintains a dense Hessian `B` (starts as `I`). The search direction is
-/// `-B^{-1} g`. After a move, `B += δ(y + Bs)^T / (δ^T s)` with `δ = y - Bs`.
-/// This rank-1 map is the C++ `sr2.hpp` formula; it is not a Nocedal-Wright
-/// numbered update.
+/// `B+ = B + (δ sᵀ + s δᵀ) / (sᵀ s) - (δᵀ s) s sᵀ / (sᵀ s)²`
+/// with `δ = y - Bs`. This is the symmetric rank-2 least-change update:
+/// `B+` is symmetric when `B` is, and `B+ s = y`. The historical
+/// `sr2.hpp` map `B += δ (y + Bs)ᵀ / (δᵀ s)` is neither symmetric nor
+/// secant. `linesearch` is ignored for the same reason as [`minimize_sr1`].
+///
+/// Powell, *A new algorithm for unconstrained optimization*, in
+/// *Nonlinear Programming*, Academic Press, 1970.
 pub fn minimize_sr2<O>(
     obj: &O,
     init: impl Into<Array1<f64>>,
@@ -190,45 +157,58 @@ pub fn minimize_sr2<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let _ = linesearch;
+    minimize_sr_trust(obj, init, control, sr2_hessian_update)
+}
+
+fn minimize_sr_trust<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    update: fn(&mut Array2<f64>, &Array1<f64>, &Array1<f64>),
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let mut pos = start(obj, init)?;
     let n = pos.len();
     let (mut value, mut grad) = obj.value_and_gradient(pos.view());
     let mut b = Array2::<f64>::eye(n);
-    let mut istep = control.istep;
+    let (mut radius, rmax) = sr_trust_limits(control.istep, n, None, control.maxmove);
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if control.halt(gnorm, grad.len()).is_some() {
             return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
         }
-        let rhs = grad.mapv(|g| -g);
-        let dir = solve_dense(&b, &rhs).unwrap_or(rhs);
-        let old = pos.clone();
-        let gold = grad.clone();
-        let t = take_step(
-            obj,
-            &pos,
-            value,
-            &grad,
-            dir.view(),
-            istep,
-            linesearch,
-            control,
-            implicit_atom_cap(control),
-        );
-        if t.energy_noise {
-            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+        let dir = sr_trust_direction(&b, &grad, radius);
+        let mut trial = &pos + &dir;
+        if let Some(cap) = control.maxmove {
+            scale_step(&pos, &mut trial, cap);
         }
-        let moved = t.moved;
-        pos = t.x;
-        value = t.f;
-        grad = t.g;
-        if moved {
-            let s = &pos - &old;
-            let y = &grad - &gold;
-            sr2_hessian_update(&mut b, &s, &y);
+        trial = obj.bounds().clip(trial.view());
+        let p = &trial - &pos;
+        let pnorm = l2(&p);
+        if !(pnorm.is_finite() && pnorm > 1e-16) {
+            radius = update_radius(radius, -1.0, 0.0, rmax);
+            continue;
         }
-        istep = qn_istep(control);
+        let (ft, gt) = obj.value_and_gradient(trial.view());
+        if !ft.is_finite() || gt.iter().any(|v| !v.is_finite()) {
+            radius = update_radius(radius, -1.0, pnorm, rmax);
+            continue;
+        }
+        let pred = predicted_reduction(&b, &grad, &p);
+        let rho = reduction_ratio(value - ft, pred);
+        radius = update_radius(radius, rho, pnorm, rmax);
+        if accept_ratio(rho) {
+            let s = &trial - &pos;
+            let y = &gt - &grad;
+            update(&mut b, &s, &y);
+            pos = trial;
+            value = ft;
+            grad = gt;
+        }
     }
     Ok(done(
         value,
@@ -351,22 +331,66 @@ pub(crate) fn bfgs_inverse_update(h: &mut Array2<f64>, s: &Array1<f64>, y: &Arra
     *h = hp;
 }
 
-/// `B += δ (y + Bs)^T / (δ·s)`, `δ = y - Bs` (`sr2.hpp`).
+/// Powell symmetric Broyden: `B+ s = y` and `B+` stays symmetric.
 pub(crate) fn sr2_hessian_update(b: &mut Array2<f64>, s: &Array1<f64>, y: &Array1<f64>) {
-    let bs = b.dot(s);
-    let delta = y - &bs;
-    let ybs = y + &bs;
-    let denom = delta.dot(s);
-    let dn = l2(&delta);
-    let sn = l2(s);
-    if denom.abs() < SR1_SKIP * dn * sn || denom.abs() <= CURVATURE {
+    if s.iter().any(|v| !v.is_finite()) || y.iter().any(|v| !v.is_finite()) {
+        return;
+    }
+    let ss = s.dot(s);
+    if !(ss.is_finite() && ss > CURVATURE) {
+        return;
+    }
+    let delta = y - &b.dot(s);
+    let ds = delta.dot(s);
+    if !ds.is_finite() {
         return;
     }
     let n = s.len();
+    let inv_ss = 1.0 / ss;
+    let inv_ss2 = inv_ss * inv_ss;
     for i in 0..n {
         for j in 0..n {
-            b[(i, j)] += delta[i] * ybs[j] / denom;
+            b[(i, j)] += (delta[i] * s[j] + s[i] * delta[j]) * inv_ss - ds * s[i] * s[j] * inv_ss2;
         }
+    }
+}
+
+/// Initial trust radius and its cap.
+///
+/// An atom cap builds a Euclidean ball that can realize one capped
+/// per-atom step (`cap * sqrt(n_atoms)`). Without one, the radius opens
+/// at `max(istep, 1)` and may grow by a factor of eight.
+pub(crate) fn sr_trust_limits(
+    istep: f64,
+    dim: usize,
+    atom_maxmove: Option<f64>,
+    maxmove: Option<f64>,
+) -> (f64, f64) {
+    let step = if istep.is_finite() && istep > 0.0 {
+        istep
+    } else {
+        1e-8
+    };
+    if let Some(cap) = atom_maxmove.filter(|c| c.is_finite() && *c > 0.0) {
+        let n_atoms = (dim / 3).max(1) as f64;
+        let ball = (cap * n_atoms.sqrt()).max(step);
+        return (ball, ball);
+    }
+    let radius = step.max(1.0);
+    let rmax = maxmove
+        .filter(|c| c.is_finite() && *c > 0.0)
+        .map(|c| c.max(radius))
+        .unwrap_or_else(|| (8.0 * radius).max(radius));
+    (radius, rmax)
+}
+
+/// Dogleg when `B` is positive definite, otherwise the Cauchy point.
+pub(crate) fn sr_trust_direction(b: &Array2<f64>, grad: &Array1<f64>, radius: f64) -> Array1<f64> {
+    let rhs = grad.mapv(|g| -g);
+    if solve_spd(b, &rhs).is_some() {
+        dogleg_direction(b, grad, radius)
+    } else {
+        cauchy_point(b, grad, radius)
     }
 }
 
@@ -428,7 +452,58 @@ pub(crate) fn solve_spd(a: &Array2<f64>, rhs: &Array1<f64>) -> Option<Array1<f64
     y.iter().all(|v| v.is_finite()).then_some(y)
 }
 
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+    use ndarray::array;
+
+    /// Powell's symmetric Broyden update satisfies `B+ s = y` and stays
+    /// symmetric. The historical `sr2.hpp` rank-1 map does neither.
+    #[test]
+    fn sr2_update_meets_the_secant_condition_and_stays_symmetric() {
+        let mut b = Array2::<f64>::eye(2);
+        let s = array![1.0, 0.5];
+        let y = array![2.0, -0.25];
+        sr2_hessian_update(&mut b, &s, &y);
+        let bs = b.dot(&s);
+        assert!(
+            (bs[0] - y[0]).abs() < 1e-10 && (bs[1] - y[1]).abs() < 1e-10,
+            "secant failed: Bs = {bs:?}, y = {y:?}, B = {b:?}"
+        );
+        assert!(
+            (b[(0, 1)] - b[(1, 0)]).abs() < 1e-12,
+            "symmetry failed: B = {b:?}"
+        );
+    }
+
+    #[test]
+    fn sr1_update_meets_the_secant_condition() {
+        let mut b = Array2::<f64>::eye(2);
+        let s = array![1.0, 0.5];
+        let y = array![2.0, -0.25];
+        sr1_hessian_update(&mut b, &s, &y);
+        let bs = b.dot(&s);
+        assert!(
+            (bs[0] - y[0]).abs() < 1e-10 && (bs[1] - y[1]).abs() < 1e-10,
+            "secant failed: Bs = {bs:?}"
+        );
+        assert!((b[(0, 1)] - b[(1, 0)]).abs() < 1e-12);
+    }
+
+    /// `-B^{-1} g` is uphill when the curvature along `g` is negative.
+    /// The Cauchy point of that model is downhill.
+    #[test]
+    fn indefinite_model_steps_downhill() {
+        let b = ndarray::array![[1.0, 0.0], [0.0, -4.0]];
+        let g = array![0.0, 1.0];
+        let p = sr_trust_direction(&b, &g, 0.5);
+        assert!(g.dot(&p) < -1e-12, "g·p = {}, p = {p:?}", g.dot(&p));
+        assert!((l2(&p) - 0.5).abs() < 1e-12);
+    }
+}
+
 /// Gaussian elimination with partial pivoting for `A x = rhs`.
+#[allow(dead_code)]
 pub(crate) fn solve_dense(a: &Array2<f64>, rhs: &Array1<f64>) -> Option<Array1<f64>> {
     let n = rhs.len();
     let mut m = a.clone();
@@ -480,20 +555,22 @@ pub(crate) fn solve_dense(a: &Array2<f64>, rhs: &Array1<f64>) -> Option<Array1<f
     Some(x)
 }
 
-/// Inverse SR1: `H += u u^T / (u·y)`, `u = s - Hy` (Nocedal-Wright 6.25).
-pub(crate) fn sr1_inverse_update(h: &mut Array2<f64>, s: &Array1<f64>, y: &Array1<f64>) {
-    let hy = h.dot(y);
-    let u = s - &hy;
-    let uy = u.dot(y);
-    let un = l2(&u);
-    let yn = l2(y);
-    if uy.abs() < SR1_SKIP * un * yn || uy.abs() <= CURVATURE {
+/// Direct SR1: `B += δ δᵀ / (δᵀ s)`, `δ = y - Bs` (Nocedal-Wright 6.24).
+pub(crate) fn sr1_hessian_update(b: &mut Array2<f64>, s: &Array1<f64>, y: &Array1<f64>) {
+    if s.iter().any(|v| !v.is_finite()) || y.iter().any(|v| !v.is_finite()) {
+        return;
+    }
+    let delta = y - &b.dot(s);
+    let ds = delta.dot(s);
+    let dn = l2(&delta);
+    let sn = l2(s);
+    if !ds.is_finite() || ds.abs() <= CURVATURE || ds.abs() < SR1_SKIP * dn * sn {
         return;
     }
     let n = s.len();
     for i in 0..n {
         for j in 0..n {
-            h[(i, j)] += u[i] * u[j] / uy;
+            b[(i, j)] += delta[i] * delta[j] / ds;
         }
     }
 }

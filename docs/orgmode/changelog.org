@@ -16,6 +16,13 @@ first L-BFGS atom 256.0348909921298; the default reaches tolerance
 in 199 L-BFGS steps at -169.49430900932856 (pair 3.895343497108207)
 and 540 BFGS steps at -166.8029675390938 (pair 4.185205749883185).
 
+SR1 stores the direct Hessian and steps with dogleg, or the Cauchy
+point when that model is indefinite, inside a Nocedal-Wright trust
+region. SR2 is Powell's symmetric Broyden update in the same region.
+DIIS searches along the GDIIS image ~sum c_i (x_i - α g_i)~ when that
+direction is downhill. Adam scales the Kingma-Ba direction to unit
+max-atom length.
+
 Quick-min options (~QuickMinOptions~, ~Solver::set_quickmin_options~,
 C ~rgmin_solver_set_quickmin_variant~ with ~RGMIN_QUICKMIN_RGMIN~,
 ~RGMIN_QUICKMIN_EON~, ~RGMIN_QUICKMIN_PER_ATOM~, ABI minor 33).

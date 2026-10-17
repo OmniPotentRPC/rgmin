@@ -53,6 +53,27 @@ pub fn dogleg_direction(hess: &Array2<f64>, grad: &Array1<f64>, delta: f64) -> A
     &p_u + &(&diff * tau)
 }
 
+/// Cauchy point inside the Euclidean ball of radius `delta`.
+///
+/// Nocedal and Wright, equations 4.11–4.12. `τ = 1` when `gᵀ B g ≤ 0`
+/// (the quadratic model is unbounded below along `-g`); otherwise
+/// `τ = min(1, ||g||³ / (Δ gᵀ B g))`. The step is `-τ Δ g / ||g||`.
+pub fn cauchy_point(hess: &Array2<f64>, grad: &Array1<f64>, delta: f64) -> Array1<f64> {
+    let radius = delta.max(0.0);
+    let gg = grad.dot(grad);
+    if !(gg.is_finite() && gg > 0.0) || !(radius.is_finite() && radius > 0.0) {
+        return Array1::zeros(grad.len());
+    }
+    let ng = gg.sqrt();
+    let ghg = grad.dot(&hess.dot(grad));
+    let tau = if !ghg.is_finite() || ghg <= 0.0 {
+        1.0
+    } else {
+        (gg * ng / (radius * ghg)).min(1.0)
+    };
+    grad.mapv(|v| -tau * radius * v / ng)
+}
+
 /// Predicted reduction `-g·p - 1/2 p·H p`.
 pub fn predicted_reduction(hess: &Array2<f64>, grad: &Array1<f64>, p: &Array1<f64>) -> f64 {
     let hp = hess.dot(p);
@@ -107,5 +128,15 @@ mod tests {
         let n = l2(&p);
         assert!((n - 0.1).abs() < 1e-12);
         assert!(p[0] < 0.0);
+    }
+
+    #[test]
+    fn cauchy_point_runs_to_the_boundary_on_negative_curvature() {
+        let h = array![[1.0, 0.0], [0.0, -4.0]];
+        let g = array![0.0, 1.0];
+        let p = cauchy_point(&h, &g, 0.5);
+        assert!((p[1] + 0.5).abs() < 1e-12);
+        assert!(p[0].abs() < 1e-12);
+        assert!(g.dot(&p) < 0.0);
     }
 }
