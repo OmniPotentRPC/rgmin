@@ -108,7 +108,10 @@ pub struct Solver {
     qn_step: QnStep,
     accept: Accept,
     e_hist: VecDeque<f64>,
+    /// Per-atom cap in force. `None` is no per-atom cap.
     atom_maxmove: Option<f64>,
+    /// `set_atom_maxmove` has been called. The default cap is then left alone.
+    atom_maxmove_set: bool,
     project_rigid: bool,
     /// Sella `proj_rot`: false under PBC. Rotation is not a symmetry of the cell.
     periodic: bool,
@@ -214,7 +217,7 @@ impl Solver {
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
         let istep = control.istep;
         let inner = Inner::from_method(&method, dim, istep);
-        Self {
+        let mut solver = Self {
             dim,
             control,
             linesearch: SESSION_LINESEARCH,
@@ -225,6 +228,7 @@ impl Solver {
             accept: Accept::None,
             e_hist: VecDeque::new(),
             atom_maxmove: None,
+            atom_maxmove_set: false,
             project_rigid: false,
             periodic: false,
             manifold: ManifoldKind::Euclidean,
@@ -249,7 +253,22 @@ impl Solver {
             metric_epoch: 0,
             nlcg_descent_fallbacks: 0,
             inner,
+        };
+        solver.apply_default_atom_cap();
+        solver
+    }
+
+    /// Install [`crate::DEFAULT_ATOM_MAXMOVE`] on a Cartesian session that
+    /// has neither an explicit per-atom cap nor a positive Euclidean cap.
+    fn apply_default_atom_cap(&mut self) {
+        if self.atom_maxmove_set {
+            return;
         }
+        self.atom_maxmove = if self.manifold.retract_is_translation() {
+            crate::step::implicit_atom_cap(&self.control)
+        } else {
+            None
+        };
     }
 
     /// Family used by [`crate::select_precon`] when the caller asks for auto.
@@ -482,12 +501,21 @@ impl Solver {
     }
 
     /// Euclidean cap applied on the next [`Self::step`].
+    ///
+    /// A positive value is the step limit and the per-atom default stays
+    /// off, unless [`Self::set_atom_maxmove`] was called.
     pub fn set_maxmove(&mut self, maxmove: f64) {
         self.control.maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };
+        self.apply_default_atom_cap();
     }
 
     /// eOn `maxAtomMotionAppliedV`. Preferred over the Euclidean cap.
+    ///
+    /// A fresh Cartesian session already holds [`crate::DEFAULT_ATOM_MAXMOVE`].
+    /// A positive `maxmove` replaces that default. A non-positive value
+    /// clears the cap.
     pub fn set_atom_maxmove(&mut self, maxmove: f64) {
+        self.atom_maxmove_set = true;
         self.atom_maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };
     }
 
@@ -511,6 +539,7 @@ impl Solver {
             self.forget();
         }
         self.manifold = kind;
+        self.apply_default_atom_cap();
     }
 
     /// Stiefel \(\mathrm{St}(n,p)\). `p = 1` is the sphere packing.
@@ -2830,6 +2859,9 @@ mod retained_neb_guard_tests {
             },
             n,
         );
+        // P^{-1} g is a Newton step longer than the default per-atom cap.
+        // Finite termination needs that step.
+        solver.set_atom_maxmove(0.0);
         solver.set_linesearch(LineSearch::Wolfe {
             c1: 1e-4,
             c2: 0.1,

@@ -38,6 +38,19 @@ potential call). Split ~eval~ / ~grad~ callbacks remain. ~accept~
 is ~none~ (take the clipped step), ~energy~, or ~nonmonotone~.
 Callbacks are arguments of each step, not stored on the handle.
 
+A Cartesian session starts with a per-atom cap of 0.2.
+~rgmin_solver_set_atom_maxmove~ replaces it. A non-positive argument
+clears it. A positive ~maxmove~ on ~rgmin_control_t~, with no call to
+that setter, is the Euclidean step limit and leaves the per-atom
+default off. The cap is the largest per-atom displacement. The C++
+~OptimizeControl.maxmove~ is 0, so ~optimize~ keeps the per-atom
+default. ASE ~Optimizer.defaults~ ~maxstep~ is 0.2 at tag 3.29.0
+(https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/optimize.py).
+eOn ~max_move~ is 0.2 Å
+(https://henkelmanlab.org/eon/optimizer.html); the schema field
+~OptimizerOptions.maxMove~ is 0.2 at ~4be157d4~
+(https://github.com/TheochemUI/eOn/blob/4be157d43265af6b1140aaac0e52e42add62693f/schema/eon_params.capnp).
+
 ** One-shot
 
 #+begin_src c

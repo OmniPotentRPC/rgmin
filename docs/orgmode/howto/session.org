@@ -27,7 +27,23 @@ let report = solver.step(&obj, &mut x).unwrap();
 
 ~step~ is one outer iteration. ~step_hess~ / ~step_hess_fg~ take a
 host Hessian. ~forget~ drops pair history, conjugacy, and moments.
-~set_atom_maxmove~ is the eOn per-atom clip.
+~set_atom_maxmove~ is the eOn per-atom clip. A fresh Cartesian
+session starts with that clip at 0.2, which is ASE
+~Optimizer.defaults~ ~maxstep~ at tag 3.29.0
+(https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/optimize.py)
+and eOn ~max_move~
+(https://henkelmanlab.org/eon/optimizer.html; ~OptimizerOptions.maxMove~
+in ~schema/eon_params.capnp~ at ~4be157d4~,
+https://github.com/TheochemUI/eOn/blob/4be157d43265af6b1140aaac0e52e42add62693f/schema/eon_params.capnp).
+The number is in the coordinate unit, so a geometry stored in
+angstroms is capped at 0.2 Å. ~scale_step_atom~ limits the largest
+per-atom displacement. It does not limit the Euclidean norm of the
+whole step. A positive argument replaces the default. A non-positive
+argument clears the cap, and that choice stays in force if
+~set_maxmove~ or ~set_manifold~ is called later. A positive
+~Control.maxmove~, with no call to ~set_atom_maxmove~, is the
+Euclidean step limit and leaves the per-atom default off. A
+non-Cartesian manifold has no default.
 
 ~Method::QuickMin~ is the projection-then-Euler step in
 [[file:../explanation/quickmin.org][quick-min]]. ~set_quickmin_adapt(false)~
@@ -85,7 +101,7 @@ together is not asked twice.
 | ~set_linesearch~ | Line search for the line-searched arms; default strong Wolfe |
 | ~set_fire_variant~ | FIRE schedule; ~Guenole2020~ is FIRE 2.0 as published |
 | ~forget_evaluation~ | Re-evaluate the next start, keep the method memory |
-| ~set_atom_maxmove~ | Per-atom clip (preferred over a Euclidean cap) |
+| ~set_atom_maxmove~ | Per-atom clip; Cartesian default 0.2, preferred over a Euclidean cap |
 | ~set_project_rigid~ | Drop rigid modes on isolated clusters |
 | ~set_lbfgs_neb_guards~ | L-BFGS distance, angle and curvature resets; empty-memory scale 0.01 |
 | ~set_extra_updates~ | Accepted, no effect: a replayed newest pair leaves BFGS unchanged |

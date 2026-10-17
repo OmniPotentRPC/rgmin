@@ -18,6 +18,31 @@ fn binding(cap: f64) -> bool {
     cap > 0.0 && cap.is_finite()
 }
 
+/// Default per-atom displacement cap.
+///
+/// ASE `Optimizer.defaults` is `{"maxstep": 0.2}` in
+/// `ase/optimize/optimize.py` at tag 3.29.0
+/// (<https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/optimize.py>).
+/// eOn `OptimizerOptions.maxMove` is `0.2` in `schema/eon_params.capnp`
+/// at `4be157d4`
+/// (<https://github.com/TheochemUI/eOn/blob/4be157d43265af6b1140aaac0e52e42add62693f/schema/eon_params.capnp>).
+/// The number is in the coordinate unit. A geometry stored in angstroms
+/// is capped at 0.2 Å. [`scale_step_atom`] limits the largest per-atom
+/// displacement. It does not limit the Euclidean norm of the whole step.
+pub const DEFAULT_ATOM_MAXMOVE: f64 = 0.2;
+
+/// Cap used when the caller has not set a per-atom value.
+///
+/// A positive finite Euclidean [`Control::maxmove`] is that caller's
+/// step limit, so this returns `None` and the Euclidean cap stays in
+/// force. Otherwise the cap is [`DEFAULT_ATOM_MAXMOVE`].
+pub(crate) fn implicit_atom_cap(control: &Control) -> Option<f64> {
+    match control.maxmove {
+        Some(cap) if binding(cap) => None,
+        _ => Some(DEFAULT_ATOM_MAXMOVE),
+    }
+}
+
 pub(crate) fn scale_step(origin: &Array1<f64>, trial: &mut Array1<f64>, cap: f64) {
     if !binding(cap) {
         return;

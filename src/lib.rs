@@ -177,5 +177,6 @@ pub use scg::{
 pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
 pub use session::Solver;
 pub use slepc_kind::{SlepcParams, SlepcPmat, SlepcStKind};
+pub use step::DEFAULT_ATOM_MAXMOVE;
 
 pub use trust::{RestrictedStep, TrustRegion};

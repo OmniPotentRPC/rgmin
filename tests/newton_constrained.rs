@@ -30,6 +30,8 @@ fn constrained_newton_preserves_cross_curvature() {
         2,
     );
     solver.set_highs(true);
+    // The Newton point sits past the default per-atom cap.
+    solver.set_atom_maxmove(0.0);
     assert!(solver.set_box(Some(vec![0.0, -1.0]), Some(vec![1.0, 1.0])));
     let report = solver.step_hess(&objective, &mut array![0.0, 0.0]).unwrap();
     assert!(

@@ -150,6 +150,8 @@ class Report:
 class SolverConfig:
     """
     Validated, immutable optimizer options. Unknown keywords raise ``ValueError`` listing the valid options.
+
+    A Cartesian solver starts with a per-atom cap of 0.2 (ASE ``maxstep``, eOn ``max_move``). ``maxstep`` or ``atom_maxmove`` replaces it. A non-positive value clears it. A positive ``maxmove`` is the Euclidean step limit and leaves the per-atom default off.
     """
 
     def __init__(self, method: str | Method = 'lbfgs', **kwargs) -> None: ...

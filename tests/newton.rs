@@ -23,7 +23,9 @@ fn shifted_newton_kills_a_quadratic() {
             maxiter: 10,
             gtol: 1e-10,
             istep: 1.0,
-            maxmove: None,
+            // The Newton step has length 5. A Euclidean cap above it
+            // turns the default per-atom cap off and leaves the step alone.
+            maxmove: Some(20.0),
             ftol_rel: None,
             noise_floor: None,
         },
@@ -46,7 +48,9 @@ fn rfo_kills_a_quadratic() {
             maxiter: 20,
             gtol: 1e-8,
             istep: 1.0,
-            maxmove: None,
+            // Same step as the shifted Newton test: length 5, above the
+            // default per-atom cap.
+            maxmove: Some(20.0),
             ftol_rel: None,
             noise_floor: None,
         },

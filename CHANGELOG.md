@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A Cartesian `Solver` and the one-shot minimizers (L-BFGS, BFGS, SR1,
+  SR2, steepest descent, nonlinear CG, Adam, Newton, and the session
+  arms FIRE, FIRE 2.0, quick-min, DIIS, Barzilai-Borwein, and dogleg)
+  start with a per-atom cap of 0.2. `scale_step_atom` limits the
+  largest per-atom displacement. It does not limit the Euclidean norm
+  of the whole step. `set_atom_maxmove` replaces the default, including
+  a value above 0.2. A non-positive value clears the cap, and that
+  choice stays if `set_maxmove` or `set_manifold` runs later. A
+  positive `Control.maxmove`, with no call to `set_atom_maxmove`, is
+  the Euclidean step limit and leaves the per-atom default off. A
+  non-Cartesian manifold has no default. The C setter is
+  `rgmin_solver_set_atom_maxmove`. Python `maxstep` and `atom_maxmove`
+  are that setter. `OptimizeControl.maxmove` is 0, so the C++
+  `optimize` helper keeps the per-atom default. ASE
+  `Optimizer.defaults` is `{"maxstep": 0.2}` in
+  `ase/optimize/optimize.py` at tag 3.29.0,
+  https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/optimize.py.
+  eOn documents `max_move` as 0.2 Å,
+  https://henkelmanlab.org/eon/optimizer.html. `OptimizerOptions.maxMove`
+  is `0.2` in `schema/eon_params.capnp` at `4be157d4`,
+  https://github.com/TheochemUI/eOn/blob/4be157d43265af6b1140aaac0e52e42add62693f/schema/eon_params.capnp.
+  On the half-scaled seed-1 packing from `bench/atomistic` `lj38`,
+  clearing the cap lets the first L-BFGS and BFGS atom move
+  256.0348909921298. The same start with Euclidean `maxmove` 1000
+  finishes in one L-BFGS step at energy -0.0000007684753483636236
+  with a pair of 715.2615061441937. The default cap reaches
+  tolerance: L-BFGS in 199 steps at -169.49430900932856 with maximum
+  pair 3.895343497108207, BFGS in 540 steps at -166.8029675390938
+  with maximum pair 4.185205749883185. The peak per-atom step was
+  0.2 for L-BFGS and 0.20000000000000015 for BFGS.
+
 ### Breaking
 
 - `Method` is `#[non_exhaustive]`: a match on it outside rgmin needs a

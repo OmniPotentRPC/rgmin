@@ -996,7 +996,10 @@ mod tests {
         loose.istep = 0.99;
         // A full Newton step would land under gtol. Backtracking keeps
         // the opening trial, which leaves the gradient inside
-        // c * sqrt(n_free) * eps_g. Here n_free is 1.
+        // c * sqrt(n_free) * eps_g. Here n_free is 1. That trial is
+        // longer than the default per-atom cap, so a Euclidean cap above
+        // it turns the per-atom default off and leaves the trial alone.
+        loose.maxmove = Some(10.0);
         let early = minimize_method(
             &obj,
             array![1.5],

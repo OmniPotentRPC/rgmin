@@ -61,6 +61,9 @@ with [elan](https://github.com/leanprover/elan).
   `scale_step_atom` and `cap_alpha` (`src/step.rs`) treat a cap that is
   not positive and finite as no cap, so `clampScale_neg` cannot occur;
   `Solver::set_maxmove` and `set_atom_maxmove` store only positive caps.
+  A Cartesian session that has not called `set_atom_maxmove`, and whose
+  `Control::maxmove` is not a positive finite value, stores
+  `DEFAULT_ATOM_MAXMOVE` (0.2) instead.
 * `FireState::alpha` is public; `mix_velocity` uses it clamped to
   `[0, 1]` (NaN as 0), the range `fireMix_norm_le` needs.
 * `direction_with_precon` solves `P q = r` by Cholesky (`qn.rs::solve_spd`),

@@ -75,6 +75,9 @@ fn a_session_step_onto_an_exponential_wall_zooms_by_bisection() {
 
     let mut x = start.clone();
     let mut solver = Solver::new(Method::lbfgs(), control(1.0), 2);
+    // The unit trial is the point of the test. The default per-atom cap
+    // would stop it short of the wall.
+    solver.set_atom_maxmove(0.0);
     solver.set_accept(Accept::Energy);
     solver.step(&obj, &mut x).unwrap();
     let points = obj.points.lock().unwrap().clone();

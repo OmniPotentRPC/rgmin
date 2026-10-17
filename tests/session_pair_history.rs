@@ -49,6 +49,8 @@ fn a_cautiously_refused_pair_does_not_evict_full_history() {
         (0.5 * x[0] * x[0], array![x[0]])
     });
     let mut solver = seeded_session(None);
+    // The accepted step is 0.5, past the default per-atom cap.
+    solver.set_atom_maxmove(0.0);
     solver.set_cautious(2.0, 0.0);
     let mut x = array![1.0];
     let report = solver.step(&objective, &mut x).unwrap();

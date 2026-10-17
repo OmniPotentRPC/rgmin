@@ -120,6 +120,8 @@ fn the_curvature_bound_tames_an_unstable_time_step() {
     // the limit after one step and converges.
     let obj = Quad::new(array![1.0, 100.0]);
     let mut eon = session(QuickMinOptions::eon(), 1.0, 2);
+    // The default per-atom cap would hide the unstable step.
+    eon.set_atom_maxmove(0.0);
     let mut y = array![1.0, 0.1];
     let e0 = obj.eval(y.view());
     for _ in 0..20 {

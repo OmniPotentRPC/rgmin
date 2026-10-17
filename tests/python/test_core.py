@@ -176,7 +176,8 @@ def test_step_hess_quadratic() -> None:
         return np.diag([1.0, 4.0])
 
     x = np.array([1.0, 1.0])
-    solver = rgmin.Solver(2, rgmin.SolverConfig("newton", maxiter=5, gtol=1e-12))
+    # The Newton step has length sqrt(2), past the default per-atom cap.
+    solver = rgmin.Solver(2, rgmin.SolverConfig("newton", maxiter=5, gtol=1e-12, maxstep=0))
     report = solver.step_hess(fg, hessian, x)
     assert report.grad_norm < 1e-8
     assert np.allclose(x, 0.0)

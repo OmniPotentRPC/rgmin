@@ -112,6 +112,8 @@ fn inactive_constraints_preserve_the_rfo_model() {
         1,
     );
     solver.set_highs(true);
+    // The augmented step is (sqrt(5) - 1) / 2, past the default cap.
+    solver.set_atom_maxmove(0.0);
     assert!(solver.set_box(Some(vec![-2.0]), Some(vec![2.0])));
     let report = solver.step_hess(&objective, &mut array![0.0]).unwrap();
     let expected = (5.0_f64.sqrt() - 1.0) / 2.0;
