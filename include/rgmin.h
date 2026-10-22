@@ -260,6 +260,24 @@ void rgmin_solver_set_accept(rgmin_solver_t *solver, rgmin_accept_t accept);
  *  kick to this length. Non-positive clears it. */
 void rgmin_solver_set_atom_maxmove(rgmin_solver_t *solver, double maxmove);
 void rgmin_solver_set_project_rigid(rgmin_solver_t *solver, int32_t enabled);
+/** 0 off, 1 auto, 2 translation, 3 translation and rotation.
+ *  Nonzero on \ref rgmin_solver_set_project_rigid is auto. */
+typedef enum rgmin_rigid_mode_t {
+    RGMIN_RIGID_OFF = 0,
+    RGMIN_RIGID_AUTO = 1,
+    RGMIN_RIGID_TRANSLATION = 2,
+    RGMIN_RIGID_TRANSLATION_ROTATION = 3
+} rgmin_rigid_mode_t;
+void rgmin_solver_set_rigid_mode(rgmin_solver_t *solver, int32_t mode);
+void rgmin_solver_set_rigid_mass_metric(rgmin_solver_t *solver, int32_t enabled);
+void rgmin_solver_set_rigid_mass_weighted(rgmin_solver_t *solver, int32_t enabled);
+/** Periodic axes. A slab is (1, 1, 0). */
+void rgmin_solver_set_pbc_axes(rgmin_solver_t *solver, int32_t x, int32_t y, int32_t z);
+/** Length 3N. A nonzero byte freezes that coordinate. NULL clears the mask. */
+void rgmin_solver_set_frozen(rgmin_solver_t *solver, const uint8_t *frozen, size_t len);
+/** Broken translations, then broken rotations. The host sets both. */
+void rgmin_solver_set_broken_axes(rgmin_solver_t *solver, int32_t tx, int32_t ty,
+                                int32_t tz, int32_t rx, int32_t ry, int32_t rz);
 void rgmin_solver_set_extra_updates(rgmin_solver_t *solver, size_t extra);
 void rgmin_solver_set_cautious(rgmin_solver_t *solver, double eps, double alpha);
 /** HiGHS feasible-set step. Nonzero enables it. Returns 0, or 1 if this
@@ -396,7 +414,8 @@ void rgmin_solver_set_centered_matrix(rgmin_solver_t *solver, size_t m, size_t n
  *  restores unit mass. */
 void rgmin_solver_set_masses(rgmin_solver_t *solver, const double *masses,
                            size_t n_atoms);
-/** Periodic cell. Nonzero drops rotation (Sella proj_rot): R^{3N}/T(3). */
+/** Periodic cell. Nonzero is pbc = [1, 1, 1]. A slab uses
+ *  \ref rgmin_solver_set_pbc_axes. */
 void rgmin_solver_set_periodic(rgmin_solver_t *solver, int32_t enabled);
 /**
  * One outer iteration: direction, line search, curvature update.
@@ -534,6 +553,29 @@ rgmin_status_t rgmin_solver_step_hvp(rgmin_solver_t *solver, rgmin_eval_fn eval,
                                  rgmin_grad_fn grad, rgmin_hvp_fn hvp, void *user,
                                  DLManagedTensorVersioned *x, rgmin_report_t *out);
 
+/** Caller-owned Eckart buffers. One per image. */
+typedef struct rgmin_rigid_workspace rgmin_rigid_workspace_t;
+rgmin_rigid_workspace_t *rgmin_rigid_workspace_new(void);
+void rgmin_rigid_workspace_free(rgmin_rigid_workspace_t *ws);
+size_t rgmin_rigid_workspace_rank(const rgmin_rigid_workspace_t *ws);
+/** P v in place. n_mass == 0 is unit mass. frozen == NULL is no freeze. */
+rgmin_status_t rgmin_rigid_project(
+    rgmin_rigid_workspace_t *ws, double *v, size_t n, const double *pos,
+    const double *masses, size_t n_mass, int32_t mode,
+    int32_t mass_weighted_coords, int32_t mass_metric, int32_t pbc_x, int32_t pbc_y,
+    int32_t pbc_z, const uint8_t *frozen, int32_t broken_tx, int32_t broken_ty,
+    int32_t broken_tz, int32_t broken_rx, int32_t broken_ry, int32_t broken_rz);
+/** Row-major H of length n*n becomes P H P. */
+rgmin_status_t rgmin_rigid_project_hessian(
+    rgmin_rigid_workspace_t *ws, double *h, size_t n, const double *pos,
+    const double *masses, size_t n_mass, int32_t mode,
+    int32_t mass_weighted_coords, int32_t mass_metric, int32_t pbc_x, int32_t pbc_y,
+    int32_t pbc_z, const uint8_t *frozen, int32_t broken_tx, int32_t broken_ty,
+    int32_t broken_tz, int32_t broken_rx, int32_t broken_ry, int32_t broken_rz);
+/** Horn / Coutsias. Any periodic axis skips the rotation. */
+rgmin_status_t rgmin_rigid_align(double *mobile, const double *reference, size_t n,
+                             const double *masses, size_t n_mass, int32_t pbc_x,
+                             int32_t pbc_y, int32_t pbc_z, double *rmsd);
 
 #ifdef __cplusplus
 }

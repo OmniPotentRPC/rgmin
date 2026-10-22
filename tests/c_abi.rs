@@ -1969,3 +1969,64 @@ fn c_abi_exp_installs_and_steps() {
         rgmin_solver_free(session);
     }
 }
+
+#[test]
+fn c_abi_rigid_project_drops_a_translation_and_reports_rank() {
+    use rgmin::ffi::{
+        rgmin_rigid_align, rgmin_rigid_project, rgmin_rigid_workspace_free,
+        rgmin_rigid_workspace_new, rgmin_rigid_workspace_rank,
+    };
+    let pos = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 1.1, 0.3];
+    let mut v = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let ws = unsafe { rgmin_rigid_workspace_new() };
+    assert!(!ws.is_null());
+    let st = unsafe {
+        rgmin_rigid_project(
+            ws,
+            v.as_mut_ptr(),
+            v.len(),
+            pos.as_ptr(),
+            std::ptr::null(),
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            std::ptr::null(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+    };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(unsafe { rgmin_rigid_workspace_rank(ws) }, 6);
+    assert!(v.iter().map(|x| x * x).sum::<f64>().sqrt() < 1e-8);
+    let mut mobile = pos;
+    for i in 0..3 {
+        mobile[3 * i] += 0.4;
+        mobile[3 * i + 2] += 0.5;
+    }
+    let mut rmsd = -1.0;
+    let st = unsafe {
+        rgmin_rigid_align(
+            mobile.as_mut_ptr(),
+            pos.as_ptr(),
+            pos.len(),
+            std::ptr::null(),
+            0,
+            1,
+            1,
+            0,
+            &mut rmsd,
+        )
+    };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(rmsd < 1e-8, "rmsd {rmsd}");
+    assert!((mobile[3] - mobile[0] - 1.0).abs() < 1e-12, "slab rotated");
+    unsafe { rgmin_rigid_workspace_free(ws) };
+}

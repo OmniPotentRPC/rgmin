@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `rgmin.h` declares the rigid workspace, projectors, alignment,
+  and solver setters. `xts.h` aliases them. The C++ session wraps
+  the setters. `abi_minor` 35.
 - The C ABI exports the rigid workspace, `rgmin_rigid_project`,
   `rgmin_rigid_project_hessian`, and `rgmin_rigid_align`. A nonzero
   `set_project_rigid` is Auto. `abi_minor` 35.
