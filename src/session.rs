@@ -1197,6 +1197,7 @@ impl Solver {
                 atom_cap: self.atom_maxmove,
                 euclid_cap: self.control.maxmove,
                 project_rigid: self.project_rigid,
+                purify: None,
                 precondition,
                 seed: self.steps as u64,
             },

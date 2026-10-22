@@ -524,8 +524,11 @@ where
     }
 }
 
+/// `P` on a probe or on `H v`. Shared so Newton-CG can call it from `&self`.
+pub(crate) type VectorPurify<'a> = dyn Fn(&mut Array1<f64>) + Sync + 'a;
+
 /// One Steihaug outer step. The radius ceiling is Euclidean.
-pub(crate) struct NewtonCgRequest {
+pub(crate) struct NewtonCgRequest<'a> {
     /// Current trust radius.
     pub radius: f64,
     /// Euclidean ceiling. The helper also refuses to shrink below `radius`.
@@ -534,8 +537,10 @@ pub(crate) struct NewtonCgRequest {
     pub atom_cap: Option<f64>,
     /// Euclidean clip on the trial when no per-atom cap is set.
     pub euclid_cap: Option<f64>,
-    /// Project the step out of rigid translation and rotation.
+    /// Unit-mass translation and rotation when `purify` is absent.
     pub project_rigid: bool,
+    /// Session projector. Wins over `project_rigid`.
+    pub purify: Option<&'a VectorPurify<'a>>,
     /// Nyström-preconditioned CG. The trust ceiling stays Euclidean.
     pub precondition: bool,
     /// Rademacher seed for the sketch. Rebuilt every outer step.
@@ -574,6 +579,8 @@ struct SessionAction<'a, O: ?Sized, A> {
     fd_grad: &'a Array1<f64>,
     hvps: &'a AtomicUsize,
     action: &'a A,
+    /// `P` applied to the probe and to `H v`. `None` leaves `H` raw.
+    purify: Option<&'a VectorPurify<'a>>,
 }
 
 impl<'a, O, A> eindir_core::Objective<f64> for SessionAction<'a, O, A>
@@ -621,16 +628,25 @@ where
     A: OptionalAction + Send + Sync,
 {
     fn hessian_vector(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
-        if let Some(hv) = self.action.apply(x, v) {
+        let mut probe = v.to_owned();
+        if let Some(purify) = self.purify {
+            purify(&mut probe);
+        }
+        let mut hv = if let Some(hv) = self.action.apply(x, probe.view()) {
             self.hvps.fetch_add(1, Ordering::Relaxed);
-            return hv;
+            hv
+        } else {
+            let vn = nrm2(probe.view());
+            if vn <= 0.0 {
+                return Array1::zeros(v.len());
+            }
+            self.hvps.fetch_add(1, Ordering::Relaxed);
+            forward_difference(self.obj, self.fd_grad, x, probe.view())
+        };
+        if let Some(purify) = self.purify {
+            purify(&mut hv);
         }
-        let vn = nrm2(v);
-        if vn <= 0.0 {
-            return Array1::zeros(v.len());
-        }
-        self.hvps.fetch_add(1, Ordering::Relaxed);
-        forward_difference(self.obj, self.fd_grad, x, v)
+        hv
     }
 }
 
@@ -675,7 +691,7 @@ pub(crate) fn newton_cg_step<O, A>(
     value: f64,
     grad: &Array1<f64>,
     fd_grad: &Array1<f64>,
-    req: &NewtonCgRequest,
+    req: &NewtonCgRequest<'_>,
     action: &A,
 ) -> NewtonCgTaken
 where
@@ -688,6 +704,7 @@ where
         fd_grad,
         hvps: &hvps,
         action,
+        purify: req.purify,
     };
     let n = x.len();
     let gnorm = nrm2(grad.view());
@@ -703,7 +720,9 @@ where
     // PCG stops on the preconditioner sphere. Pull a long step back
     // onto the Euclidean trust sphere before the displacement cap.
     let mut p = p_cg.clone();
-    if req.project_rigid {
+    if let Some(purify) = req.purify {
+        purify(&mut p);
+    } else if req.project_rigid {
         project_out_rot_trans(&mut p, x.view());
     }
     let pnorm = nrm2(p.view());
@@ -839,6 +858,7 @@ where
                 atom_cap: None,
                 euclid_cap: control.maxmove,
                 project_rigid: false,
+                purify: None,
                 precondition: false,
                 seed: step as u64,
             },
