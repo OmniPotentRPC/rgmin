@@ -223,11 +223,30 @@ pub fn lowest_mode<H: ApplyHessian + ?Sized>(
     seed: ArrayView1<f64>,
     params: &EigenParams,
 ) -> Result<LowestMode> {
+    lowest_mode_with(h, x, seed, params, &mut |_| {})
+}
+
+/// [`lowest_mode`], projecting each Lanczos vector with `project`.
+///
+/// The callback is `P` from one shared [`crate::rigid::RigidWorkspace`]:
+/// project `v`, apply `H`, project `H v`, then reorthogonalise. Other
+/// linked kinds ignore `project`.
+pub fn lowest_mode_with<H, F>(
+    h: &H,
+    x: ArrayView1<f64>,
+    seed: ArrayView1<f64>,
+    params: &EigenParams,
+    project: &mut F,
+) -> Result<LowestMode>
+where
+    H: ApplyHessian + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
     if seed.is_empty() {
         return Err(Error::Dim { got: 0, dim: 0 });
     }
     match params.kind {
-        EigensolverKind::Lanczos => Ok(lanczos(h, x, seed, params.krylov_dim(seed.len()))),
+        EigensolverKind::Lanczos => Ok(lanczos(h, x, seed, params.krylov_dim(seed.len()), project)),
         EigensolverKind::RayleighRitz => Ok(rayleigh_ritz(h, x, seed, params)),
         EigensolverKind::JacobiDavidson => Ok(jacobi_davidson(h, x, seed, params)),
         EigensolverKind::Lobpcg => Ok(lobpcg(h, x, seed, params)),
@@ -236,22 +255,30 @@ pub fn lowest_mode<H: ApplyHessian + ?Sized>(
     }
 }
 
-fn lanczos<H: ApplyHessian + ?Sized>(
+fn lanczos<H, F>(
     h: &H,
     x: ArrayView1<f64>,
     seed: ArrayView1<f64>,
     krylov: usize,
-) -> LowestMode {
+    project: &mut F,
+) -> LowestMode
+where
+    H: ApplyHessian + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
     let n = seed.len();
     let m = krylov.min(n).max(1);
     let mut q: Vec<Array1<f64>> = Vec::with_capacity(m);
     let mut alpha = Vec::with_capacity(m);
     let mut beta: Vec<f64> = Vec::with_capacity(m);
-    q.push(normalize(seed.to_owned()));
+    let mut q0 = seed.to_owned();
+    project(&mut q0);
+    q.push(normalize(q0));
 
     let mut actions = 0;
     for j in 0..m {
-        let hv = h.apply_hessian(x, q[j].view());
+        let mut hv = h.apply_hessian(x, q[j].view());
+        project(&mut hv);
         actions += 1;
         let a = dot(hv.view(), q[j].view());
         alpha.push(a);

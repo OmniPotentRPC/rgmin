@@ -64,7 +64,8 @@ mod qn;
 pub mod qn_irc;
 mod qn_step;
 mod report;
-mod rigid;
+/// Eckart projector and Horn / Coutsias alignment.
+pub mod rigid;
 /// Tangent-space truncated conjugate gradients and trust-radius updates.
 pub mod rtr;
 /// Moller scaled conjugate gradient (damped-model step, no line search).
@@ -94,7 +95,7 @@ pub use lbfgs_qp::HighsStep;
 pub use linesearch::LineSearch;
 pub use lowest_mode::{
     ApplyHessian, DENSE_EIGEN_CUTOFF, EigenParams, EigensolverKind, LowestMode, lowest_eigenpair,
-    lowest_mode,
+    lowest_mode, lowest_mode_with,
 };
 pub use manifold::{Manifold, ManifoldKind};
 pub use method::Method;
@@ -111,6 +112,7 @@ pub use qn_irc::{
 };
 pub use qn_step::QnStep;
 pub use report::Report;
+pub use rigid::{RigidMode, RigidRequest, RigidWorkspace, align_rigid};
 pub use scg::{DirectionalCurvature, ScgParams, minimize_scg, minimize_scg_exact};
 pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
 pub use session::Solver;
