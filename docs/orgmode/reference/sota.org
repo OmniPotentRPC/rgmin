@@ -176,7 +176,8 @@ These four tokens share ~rgmin_solver_t~ and a fused =(f, g)=.
   non-positive-power steps terminate as a stalled solve. An installed
   exponential preconditioner leaves that order in place and uses ~P~
   as the metric: power is ~F · v~, and the kick and the mix use
-  ~P^{-1} F~.
+  ~P^{-1} F~. ~P~ is held until the largest atomic move exceeds
+  ~r_nn / 2~.
 - Barzilai–Borwein (1988,
   [[https://doi.org/10.1093/imanum/8.1.141][10.1093/imanum/8.1.141]]) with Raydan's nonmonotone globalization
   ([[https://doi.org/10.1137/S1052623494266365][10.1137/S1052623494266365]]) is a two-point spectral step.

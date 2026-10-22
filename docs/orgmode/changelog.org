@@ -16,11 +16,12 @@ The exponential preconditioner of Packwood et al., J. Chem. Phys.
 ([[https://doi.org/10.1063/1.4947024][10.1063/1.4947024]])
 is ~Solver::set_exp~. The caller supplies the neighbour list.
 L-BFGS uses ~H0 = P^{-1}~. FIRE and nonlinear CG use ~P~ as the
-metric. A dense pair or Lindh matrix passed into the two-loop
-still wins. C: ~rgmin_exp_t~, ~rgmin_solver_set_exp~,
-~rgmin_solver_clear_exp~, ~rgmin_solver_exp_mu~. The C++ session
-wraps those three as ~set_exp~, ~clear_exp~, and ~exp_mu~.
-~abi_minor~ 28.
+metric. The matrix is held until the largest atomic move since the
+last assembly exceeds ~r_nn / 2~. A dense pair or Lindh matrix
+passed into the two-loop still wins. C: ~rgmin_exp_t~,
+~rgmin_solver_set_exp~, ~rgmin_solver_clear_exp~,
+~rgmin_solver_exp_mu~. The C++ session wraps those three as
+~set_exp~, ~clear_exp~, and ~exp_mu~. ~abi_minor~ 28.
 
 Newton and dogleg leave a first-order saddle. When the force is
 already under ~gtol~, the report reads the analytic Hessian. The

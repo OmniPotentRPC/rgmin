@@ -50,7 +50,9 @@ is ~none~ (take the clipped step), ~energy~, or ~nonmonotone~.
 Callbacks are arguments of each step, not stored on the handle.
 
 ~rgmin_solver_set_exp~ installs the exponential preconditioner.
-~mu~ NaN estimates the energy scale on the next step.
+~mu~ NaN estimates the energy scale on the next step. The matrix
+is held until the largest atomic move since that assembly exceeds
+~r_nn / 2~.
 ~rgmin_solver_exp_mu~ returns that scale, or NaN when none is
 installed. L-BFGS uses the factor as ~H0~. FIRE and nonlinear CG
 use it as the metric. ~rgmin_solver_clear_exp~ drops it.

@@ -16,6 +16,10 @@
 //!
 //! `P` is symmetric positive definite for `μ > 0` and `C_stab > 0`.
 //! The linear solve is Jacobi-preconditioned conjugate gradients.
+//! The session holds one assembly until the largest atomic move since
+//! that assembly exceeds `r_nn / 2` (Packwood et al., the neighbour
+//! cutoff used by their exponential factor). A rebuild estimates `μ`
+//! again only when the caller asked for it.
 
 use std::sync::Arc;
 
@@ -110,6 +114,9 @@ pub(crate) struct ExpState {
     matrix: Option<Exp>,
     /// `r_nn` is filled from the first real geometry.
     r_nn_pending: bool,
+    /// Positions of the assembly currently held. `None` until the first
+    /// matrix this session will reuse.
+    built_at: Option<Array1<f64>>,
 }
 
 impl Exp {
@@ -244,11 +251,13 @@ impl ExpState {
             r_nn,
             matrix: None,
             r_nn_pending: false,
+            built_at: None,
         };
         if let Some(mu) = params.mu {
             let matrix = Exp::assemble(positions, neighbours, params, mu, r_nn)?;
             state.mu = Some(matrix.mu());
             state.matrix = Some(matrix);
+            state.built_at = Some(positions.to_owned());
         }
         Ok(state)
     }
@@ -295,6 +304,7 @@ impl ExpState {
             r_nn,
             matrix: None,
             r_nn_pending,
+            built_at: None,
         })
     }
 
@@ -306,14 +316,17 @@ impl ExpState {
         self.matrix.as_ref()
     }
 
-    /// Rebuild `P` at `positions`. Estimates `μ` when it is unset or
-    /// [`ExpParams::recalc_mu`] is set. `grad_here` is `∇E(positions)`.
+    /// Rebuild `P` at `positions` when the hold has lapsed.
+    ///
+    /// Estimates `μ` when it is unset or [`ExpParams::recalc_mu`] is set.
+    /// `grad_here` is `∇E(positions)`. `Ok(true)` means the matrix was
+    /// replaced. `Ok(false)` means the previous matrix is still in use.
     pub(crate) fn refresh<G>(
         &mut self,
         positions: ArrayView1<f64>,
         grad_here: &Array1<f64>,
         grad: G,
-    ) -> Result<()>
+    ) -> Result<bool>
     where
         G: Fn(ArrayView1<f64>) -> Array1<f64>,
     {
@@ -322,6 +335,9 @@ impl ExpState {
                 self.r_nn = r;
                 self.r_nn_pending = false;
             }
+        }
+        if self.held(positions) {
+            return Ok(false);
         }
         let need_mu = self.mu.is_none() || self.params.recalc_mu;
         if need_mu {
@@ -349,7 +365,25 @@ impl ExpState {
             mu,
             self.r_nn,
         )?);
-        Ok(())
+        self.built_at = Some(positions.to_owned());
+        Ok(true)
+    }
+
+    /// True when the assembly at [`Self::built_at`] is still the one to use.
+    fn held(&self, positions: ArrayView1<f64>) -> bool {
+        if self.r_nn_pending || self.matrix.is_none() || self.mu.is_none() || self.params.recalc_mu
+        {
+            return false;
+        }
+        let Some(prev) = &self.built_at else {
+            return false;
+        };
+        if prev.len() != positions.len() || !(self.r_nn.is_finite() && self.r_nn > 0.0) {
+            return false;
+        }
+        let delta = &positions.to_owned() - prev;
+        let disp = crate::step::max_atom_displacement(&delta);
+        disp.is_finite() && disp <= 0.5 * self.r_nn
     }
 }
 
@@ -948,5 +982,46 @@ mod tests {
         let num = (&g1 - &g0).dot(&v);
         let den = v.dot(&p1.apply(v.view()));
         assert!((mu - num / den).abs() < 1e-12, "formula drift");
+    }
+
+    #[test]
+    fn the_matrix_is_held_until_an_atom_moves_half_of_r_nn() {
+        let mut pos = array![0.0, 0.0, 0.0, 1.5, 0.0, 0.0];
+        let neigh = Neighbours {
+            i: vec![0],
+            j: vec![1],
+            r: vec![],
+            anchor: vec![],
+        };
+        let params = ExpParams {
+            mu: Some(1.0),
+            r_nn: Some(1.5),
+            ..ExpParams::default()
+        };
+        let mut state = ExpState::new(pos.view(), &neigh, &params).unwrap();
+        let grad = Array1::zeros(pos.len());
+        let grad_fn = |p: ArrayView1<f64>| Array1::zeros(p.len());
+        assert!(
+            !state.refresh(pos.view(), &grad, grad_fn).unwrap(),
+            "the install assembly should be reused"
+        );
+        let held = state.matrix().unwrap().to_dense();
+        pos[3] += 0.1;
+        assert!(
+            !state.refresh(pos.view(), &grad, grad_fn).unwrap(),
+            "0.1 is under r_nn / 2"
+        );
+        let still = state.matrix().unwrap().to_dense();
+        assert_eq!(held, still);
+        pos[3] += 1.0;
+        assert!(
+            state.refresh(pos.view(), &grad, grad_fn).unwrap(),
+            "the atom has moved past r_nn / 2"
+        );
+        let rebuilt = state.matrix().unwrap().to_dense();
+        assert!(
+            (rebuilt[(0, 3)] - held[(0, 3)]).abs() > 1e-3,
+            "distance changed, weight did not"
+        );
     }
 }

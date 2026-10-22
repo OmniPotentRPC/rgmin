@@ -300,16 +300,16 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
-        if self.exp.is_none() {
+        let Some(state) = self.exp.as_mut() else {
             return Ok(());
-        }
+        };
         let grad_fn = |p: ArrayView1<f64>| obj.grad(p);
-        if let Some(state) = &mut self.exp {
-            state.refresh(x.view(), grad, grad_fn)?;
-        }
-        let matrix = self.exp.as_ref().and_then(|s| s.matrix().cloned());
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_h0(matrix);
+        let rebuilt = state.refresh(x.view(), grad, grad_fn)?;
+        if rebuilt {
+            let matrix = self.exp.as_ref().and_then(|s| s.matrix().cloned());
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                solver.set_h0(matrix);
+            }
         }
         Ok(())
     }

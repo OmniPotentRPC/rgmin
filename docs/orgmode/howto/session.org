@@ -69,7 +69,7 @@ together is not asked twice.
 | Setter | Role |
 |---+---|
 | ~set_qn_step~ | Two-loop, Newton, or RFO when a host Hessian is present |
-| ~set_exp~ | Packwood preconditioner from a caller neighbour list. L-BFGS takes ~H0 = P^{-1}~, including the geometry step |
+| ~set_exp~ | Packwood preconditioner from a caller neighbour list. L-BFGS takes ~H0 = P^{-1}~, including the geometry step. Held until an atom moves more than ~r_nn / 2~ |
 | ~clear_exp~ | Drop that preconditioner |
 | ~exp_mu~ | Its energy scale after estimation, or none when it is not installed |
 | ~set_accept~ | ~none~ / ~energy~ / ~nonmonotone~ |

@@ -46,8 +46,9 @@ Steihaug-Toint Newton-CG (`newton-cg`, `newton-pcg`).
 `Solver::set_exp` installs the exponential preconditioner of
 Packwood et al., J. Chem. Phys. 144, 164109 (2016), from a caller
 neighbour list. L-BFGS uses it as `H0`. FIRE and nonlinear CG use
-it as the metric. A dense pair or Lindh matrix supplied to the
-two-loop still wins.
+it as the metric. The matrix is held until the largest atomic move
+since the last assembly exceeds `r_nn / 2`. A dense pair or Lindh
+matrix supplied to the two-loop still wins.
 
 Narrative docs live in [`docs/orgmode/`](docs/orgmode/index.org)
 (Diataxis); the explanation quadrant derives the math behind each

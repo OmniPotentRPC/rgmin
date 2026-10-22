@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An installed exponential preconditioner is held until the largest
+  atomic move since the last assembly exceeds `r_nn / 2`. Packwood
+  et al., J. Chem. Phys. 144, 164109 (2016). FIRE and nonlinear CG
+  share that matrix. L-BFGS keeps it as `H0` until the rebuild.
 - Newton and dogleg leave a first-order saddle. When the force is
   already under `gtol`, the report reads the analytic Hessian. The
   floor is `max(|gtol|, 1e-6, 1e-8 ||H||_F)`. A lowest eigenvalue

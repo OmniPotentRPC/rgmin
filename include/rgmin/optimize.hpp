@@ -222,7 +222,8 @@ public:
     void set_qn_step(rgmin_qn_step_t step) { rgmin_solver_set_qn_step(ptr_, step); }
     /// Install the Packwood exponential preconditioner.
     /// A null distance pointer means Cartesian pairs. mu NaN estimates
-    /// the energy scale on the next step.
+    /// the energy scale on the next step. The matrix is held until the
+    /// largest atomic move exceeds r_nn / 2.
     rgmin_status_t set_exp(rgmin_exp_t const* params, std::uint32_t const* pair_i,
                            std::uint32_t const* pair_j, double const* distance,
                            std::size_t npair, std::uint32_t const* anchor_i,
