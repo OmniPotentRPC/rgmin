@@ -64,7 +64,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 28;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 35;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1731,13 +1731,103 @@ pub unsafe extern "C" fn rgmin_solver_set_atom_maxmove(solver: *mut rgmin_solver
     unsafe { (*solver).solver.set_atom_maxmove(maxmove) };
 }
 
-/// eOn `lbfgs_project_rigid`.
+/// eOn `lbfgs_project_rigid`. Nonzero is [`crate::RigidMode::Auto`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_project_rigid(solver: *mut rgmin_solver_t, enabled: i32) {
     if solver.is_null() {
         return;
     }
     unsafe { (*solver).solver.set_project_rigid(enabled != 0) };
+}
+
+/// `0` off, `1` auto, `2` translation, `3` translation and rotation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_rigid_mode(solver: *mut rgmin_solver_t, mode: i32) {
+    if solver.is_null() {
+        return;
+    }
+    let Some(mode) = crate::RigidMode::from_i32(mode) else {
+        set_last_error("rgmin_solver_set_rigid_mode: mode is not 0, 1, 2, or 3");
+        return;
+    };
+    unsafe { (*solver).solver.set_rigid_mode(mode) };
+}
+
+/// Cartesian mass inner product. A raw force leaves this at zero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_rigid_mass_metric(
+    solver: *mut rgmin_solver_t,
+    enabled: i32,
+) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_rigid_mass_metric(enabled != 0) };
+}
+
+/// Coordinates store `q_i = sqrt(m_i) x_i`. Not both this and the mass metric.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_rigid_mass_weighted(
+    solver: *mut rgmin_solver_t,
+    enabled: i32,
+) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_rigid_mass_weighted(enabled != 0) };
+}
+
+/// Periodic axes. A slab is `(1, 1, 0)`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_pbc_axes(
+    solver: *mut rgmin_solver_t,
+    x: i32,
+    y: i32,
+    z: i32,
+) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_pbc_axes(x != 0, y != 0, z != 0) };
+}
+
+/// Length `3N`. A nonzero byte freezes that coordinate. Null or `len == 0` clears it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_frozen(
+    solver: *mut rgmin_solver_t,
+    frozen: *const u8,
+    len: usize,
+) {
+    if solver.is_null() {
+        return;
+    }
+    if frozen.is_null() || len == 0 {
+        unsafe { (*solver).solver.set_frozen(&[]) };
+        return;
+    }
+    let slice = unsafe { slice::from_raw_parts(frozen, len) };
+    unsafe { (*solver).solver.set_frozen(slice) };
+}
+
+/// Broken translations, then broken rotations. The host sets both.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_broken_axes(
+    solver: *mut rgmin_solver_t,
+    tx: i32,
+    ty: i32,
+    tz: i32,
+    rx: i32,
+    ry: i32,
+    rz: i32,
+) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe {
+        (*solver)
+            .solver
+            .set_broken_axes(tx != 0, ty != 0, tz != 0, rx != 0, ry != 0, rz != 0);
+    }
 }
 
 /// Al-Baali extra-updates on the newest L-BFGS pair.
@@ -2207,13 +2297,203 @@ pub unsafe extern "C" fn rgmin_solver_set_masses(
     unsafe { (*solver).solver.set_masses(Array1::from(slice.to_vec())) };
 }
 
-/// Periodic cell. Nonzero: Sella `proj_rot = false`, quotient is \(R^{3N}/T(3)\).
+/// Periodic cell. Nonzero is `pbc = [1, 1, 1]`. A slab uses [`rgmin_solver_set_pbc_axes`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_periodic(solver: *mut rgmin_solver_t, enabled: i32) {
     if solver.is_null() {
         return;
     }
     unsafe { (*solver).solver.set_periodic(enabled != 0) };
+}
+
+/// Caller-owned Eckart buffers. One per image. Not thread-local.
+pub struct rgmin_rigid_workspace_t {
+    inner: crate::RigidWorkspace,
+}
+
+/// Empty workspace.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_rigid_workspace_new() -> *mut rgmin_rigid_workspace_t {
+    Box::into_raw(Box::new(rgmin_rigid_workspace_t {
+        inner: crate::RigidWorkspace::new(),
+    }))
+}
+
+/// Free a workspace from [`rgmin_rigid_workspace_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_rigid_workspace_free(ws: *mut rgmin_rigid_workspace_t) {
+    if !ws.is_null() {
+        drop(unsafe { Box::from_raw(ws) });
+    }
+}
+
+/// Rank of the last project or project-hessian on this workspace.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_rigid_workspace_rank(ws: *const rgmin_rigid_workspace_t) -> usize {
+    if ws.is_null() {
+        0
+    } else {
+        unsafe { (*ws).inner.rank() }
+    }
+}
+
+fn rigid_masses<'a>(
+    masses: *const f64,
+    n_mass: usize,
+    n: usize,
+) -> Result<&'a [f64], rgmin_status_t> {
+    if masses.is_null() || n_mass == 0 {
+        Ok(&[])
+    } else if n_mass != n / 3 {
+        Err(rgmin_status_t::RGMIN_INVALID_PARAMETER)
+    } else {
+        Ok(unsafe { slice::from_raw_parts(masses, n_mass) })
+    }
+}
+
+/// `P v` in place. `n_mass == 0` is unit mass. A null `frozen` is no freeze.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_rigid_project(
+    ws: *mut rgmin_rigid_workspace_t,
+    v: *mut f64,
+    n: usize,
+    pos: *const f64,
+    masses: *const f64,
+    n_mass: usize,
+    mode: i32,
+    mass_weighted_coords: i32,
+    mass_metric: i32,
+    pbc_x: i32,
+    pbc_y: i32,
+    pbc_z: i32,
+    frozen: *const u8,
+    broken_tx: i32,
+    broken_ty: i32,
+    broken_tz: i32,
+    broken_rx: i32,
+    broken_ry: i32,
+    broken_rz: i32,
+) -> rgmin_status_t {
+    if ws.is_null() || v.is_null() || pos.is_null() || n == 0 || n % 3 != 0 {
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let Some(mode) = crate::RigidMode::from_i32(mode) else {
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    };
+    let mass = match rigid_masses(masses, n_mass, n) {
+        Ok(m) => m,
+        Err(st) => return st,
+    };
+    let v = unsafe { slice::from_raw_parts_mut(v, n) };
+    let pos = unsafe { slice::from_raw_parts(pos, n) };
+    let frozen = if frozen.is_null() {
+        None
+    } else {
+        Some(unsafe { slice::from_raw_parts(frozen, n) })
+    };
+    let req = crate::RigidRequest {
+        pos,
+        masses: if mass.is_empty() { None } else { Some(mass) },
+        mass_weighted_coords: mass_weighted_coords != 0,
+        mass_metric: mass_metric != 0 && mass_weighted_coords == 0,
+        mode,
+        pbc: [pbc_x != 0, pbc_y != 0, pbc_z != 0],
+        frozen,
+        broken_translation: [broken_tx != 0, broken_ty != 0, broken_tz != 0],
+        broken_rotation: [broken_rx != 0, broken_ry != 0, broken_rz != 0],
+    };
+    unsafe { (*ws).inner.project(v, &req) };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+/// Replace row-major `H` (`n * n`) with `P H P`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_rigid_project_hessian(
+    ws: *mut rgmin_rigid_workspace_t,
+    h: *mut f64,
+    n: usize,
+    pos: *const f64,
+    masses: *const f64,
+    n_mass: usize,
+    mode: i32,
+    mass_weighted_coords: i32,
+    mass_metric: i32,
+    pbc_x: i32,
+    pbc_y: i32,
+    pbc_z: i32,
+    frozen: *const u8,
+    broken_tx: i32,
+    broken_ty: i32,
+    broken_tz: i32,
+    broken_rx: i32,
+    broken_ry: i32,
+    broken_rz: i32,
+) -> rgmin_status_t {
+    if ws.is_null() || h.is_null() || pos.is_null() || n == 0 || n % 3 != 0 {
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let Some(mode) = crate::RigidMode::from_i32(mode) else {
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    };
+    let mass = match rigid_masses(masses, n_mass, n) {
+        Ok(m) => m,
+        Err(st) => return st,
+    };
+    let h = unsafe { slice::from_raw_parts_mut(h, n * n) };
+    let pos = unsafe { slice::from_raw_parts(pos, n) };
+    let frozen = if frozen.is_null() {
+        None
+    } else {
+        Some(unsafe { slice::from_raw_parts(frozen, n) })
+    };
+    let req = crate::RigidRequest {
+        pos,
+        masses: if mass.is_empty() { None } else { Some(mass) },
+        mass_weighted_coords: mass_weighted_coords != 0,
+        mass_metric: mass_metric != 0 && mass_weighted_coords == 0,
+        mode,
+        pbc: [pbc_x != 0, pbc_y != 0, pbc_z != 0],
+        frozen,
+        broken_translation: [broken_tx != 0, broken_ty != 0, broken_tz != 0],
+        broken_rotation: [broken_rx != 0, broken_ry != 0, broken_rz != 0],
+    };
+    unsafe { (*ws).inner.project_hessian(h, &req) };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+/// Horn / Coutsias alignment. Any periodic axis skips the rotation.
+/// Writes the RMSD when `rmsd` is non-null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_rigid_align(
+    mobile: *mut f64,
+    reference: *const f64,
+    n: usize,
+    masses: *const f64,
+    n_mass: usize,
+    pbc_x: i32,
+    pbc_y: i32,
+    pbc_z: i32,
+    rmsd: *mut f64,
+) -> rgmin_status_t {
+    if mobile.is_null() || reference.is_null() || n == 0 || n % 3 != 0 {
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let mass = match rigid_masses(masses, n_mass, n) {
+        Ok(m) => m,
+        Err(st) => return st,
+    };
+    let mobile = unsafe { slice::from_raw_parts_mut(mobile, n) };
+    let reference = unsafe { slice::from_raw_parts(reference, n) };
+    let value = crate::align_rigid(
+        mobile,
+        reference,
+        if mass.is_empty() { None } else { Some(mass) },
+        [pbc_x != 0, pbc_y != 0, pbc_z != 0],
+    );
+    if !rmsd.is_null() {
+        unsafe { *rmsd = value };
+    }
+    rgmin_status_t::RGMIN_SUCCESS
 }
 
 /// One outer iteration. `x` is in/out. Callbacks live for this call only.
