@@ -84,8 +84,9 @@ An installed exponential preconditioner replaces that scalar seed.
 The same assembly is held until the largest atomic move exceeds
 ~r_nn / 2~. The two-loop applies ~P^{-1}~ in place of the scalar.
 A reset that would have stepped along ~h0~ times the force steps
-along ~P^{-1}~ times the force. The negative-curvature step and the short fallback after
-ten halvings keep the coefficients 1000 and one tenth, applied to
+along ~P^{-1}~ times the force. The negative-curvature step and the
+short fallback after ten halvings keep the coefficients 1000 and one
+tenth, applied to
 ~P^{-1}~ times the force. A failed solve with ~P~ falls back to the
 scalar seed. The per-atom cap still limits the displacement.
 

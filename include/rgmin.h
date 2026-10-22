@@ -234,7 +234,9 @@ typedef struct rgmin_exp_t {
 /** Install the Packwood exponential preconditioner.
  *  \a distance is null for Cartesian pairs. \a anchor_i is null when
  *  \a nanchor is 0. \c mu NaN estimates the energy scale on the next step.
- *  The matrix is held until the largest atomic move exceeds \c r_nn / 2. */
+ *  The matrix is held until the largest atomic move exceeds \c r_nn / 2.
+ *  FIRE and nonlinear CG return an error if the solve fails, and
+ *  nonlinear CG restarts when the matrix is replaced. */
 rgmin_status_t rgmin_solver_set_exp(rgmin_solver_t *solver, const rgmin_exp_t *params,
                                     const uint32_t *pair_i, const uint32_t *pair_j,
                                     const double *distance, size_t npair,

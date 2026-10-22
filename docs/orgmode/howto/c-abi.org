@@ -55,7 +55,9 @@ is held until the largest atomic move since that assembly exceeds
 ~r_nn / 2~.
 ~rgmin_solver_exp_mu~ returns that scale, or NaN when none is
 installed. L-BFGS uses the factor as ~H0~. FIRE and nonlinear CG
-use it as the metric. ~rgmin_solver_clear_exp~ drops it.
+use it as the metric. A failed solve on those two methods is an
+error, and nonlinear CG restarts when the matrix is replaced.
+~rgmin_solver_clear_exp~ drops it.
 ~abi_minor~ 28.
 
 A HiGHS feasible set is ~rgmin_solver_set_highs~ plus

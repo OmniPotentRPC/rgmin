@@ -200,7 +200,10 @@ derivative-free methods waste force calls on an analytic PES.
 
 Hager and Zhang 2005 (~CG_DESCENT~)
 ([[https://doi.org/10.1137/030601880][10.1137/030601880]]) is the cheapest NLCG on this protocol
-(13859 / 5336) and does not beat rematch L-BFGS.
+(13859 / 5336) and does not beat rematch L-BFGS. With the
+exponential metric, a replaced ~P~ restarts the recurrence at
+steepest descent so the next conjugate step uses one matrix.
+Packwood et al., J. Chem. Phys. 144, 164109 (2016).
 
 ** Embedded manifolds
 

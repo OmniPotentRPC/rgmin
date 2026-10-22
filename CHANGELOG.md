@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- FIRE and nonlinear CG report an error when the exponential metric
+  does not solve. Nonlinear CG restarts at steepest descent in the
+  metric that was just installed or rebuilt, so one conjugate step
+  uses a single `P`. L-BFGS still falls back to its scalar seed.
 - `cargo cinstall` installs the hand-written `include/rgmin.h` and
   `dlpack/dlpack.h`. The header compiles as C and as C++. Version
   macros are `RGMIN_H_MAJOR`, `RGMIN_H_MINOR`, and `RGMIN_H_PATCH`.

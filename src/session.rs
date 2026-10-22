@@ -44,10 +44,20 @@ use crate::trust::{
 };
 
 /// `P^{-1} v` when an exponential metric is installed, otherwise `v`.
-fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Array1<f64> {
-    match exp.as_ref().and_then(ExpState::matrix) {
-        Some(p) => p.solve(v.view()).unwrap_or_else(|| v.clone()),
-        None => v.clone(),
+///
+/// A failed solve is an error. Substituting `v` would mix the metric
+/// and the Euclidean gradient inside one CG recurrence or one FIRE mix.
+fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Result<Array1<f64>> {
+    match exp {
+        None => Ok(v.clone()),
+        Some(state) => {
+            let p = state.matrix().ok_or(Error::Precon {
+                what: "metric is not assembled",
+            })?;
+            p.solve(v.view()).ok_or(Error::Precon {
+                what: "linear solve failed",
+            })
+        }
     }
 }
 
@@ -113,6 +123,8 @@ pub struct Solver {
     gradient_calls: usize,
     /// Packwood exponential metric. `None` leaves every method unchanged.
     exp: Option<ExpState>,
+    /// Bumped when that metric is installed, cleared, or rebuilt.
+    metric_epoch: u64,
     /// Analytic or finite-difference Hessian-vector products.
     hvp_calls: usize,
     /// Negative-curvature kicks already taken in this solve.
@@ -132,6 +144,8 @@ enum Inner {
         z_old: Array1<f64>,
         d_old: Array1<f64>,
         initialized: bool,
+        /// [`Solver::metric_epoch`] when `z_old` and `dir` were formed.
+        z_epoch: u64,
     },
     Bfgs {
         h: Array2<f64>,
@@ -238,6 +252,7 @@ impl Solver {
             gradient_calls: 0,
             hvp_calls: 0,
             exp: None,
+            metric_epoch: 0,
             saddle_kicks: 0,
             inner,
         }
@@ -250,7 +265,9 @@ impl Solver {
     /// next [`Self::step`], which estimates it from the objective.
     /// L-BFGS then takes \(H_0 = P^{-1}\), including the capped geometry
     /// step selected by [`Self::set_atom_maxmove`]. FIRE and nonlinear CG
-    /// take `P` as the metric. A dense pair or Lindh matrix supplied to the
+    /// take `P` as the metric. A failed solve there is an error, and
+    /// nonlinear CG restarts at steepest descent when the matrix is
+    /// replaced. A dense pair or Lindh matrix supplied to the
     /// two-loop still wins over this factor.
     pub fn set_exp(
         &mut self,
@@ -267,6 +284,7 @@ impl Solver {
         let state = ExpState::new(positions, neighbours, params)?;
         let matrix = state.matrix().cloned();
         self.exp = Some(state);
+        self.metric_epoch = self.metric_epoch.wrapping_add(1);
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_h0(matrix);
         }
@@ -277,6 +295,7 @@ impl Solver {
     #[cfg(feature = "capi")]
     pub(crate) fn set_exp_deferred(&mut self, state: ExpState) {
         self.exp = Some(state);
+        self.metric_epoch = self.metric_epoch.wrapping_add(1);
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_h0(None);
         }
@@ -285,6 +304,7 @@ impl Solver {
     /// Drop the exponential preconditioner.
     pub fn clear_exp(&mut self) {
         self.exp = None;
+        self.metric_epoch = self.metric_epoch.wrapping_add(1);
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_h0(None);
         }
@@ -306,6 +326,7 @@ impl Solver {
         let grad_fn = |p: ArrayView1<f64>| obj.grad(p);
         let rebuilt = state.refresh(x.view(), grad, grad_fn)?;
         if rebuilt {
+            self.metric_epoch = self.metric_epoch.wrapping_add(1);
             let matrix = self.exp.as_ref().and_then(|s| s.matrix().cloned());
             if let Inner::Lbfgs(solver) = &mut self.inner {
                 solver.set_h0(matrix);
@@ -1762,14 +1783,16 @@ impl Solver {
                 z_old,
                 d_old,
                 initialized,
+                z_epoch,
             } => {
                 let metric = self.exp.is_some();
                 let z_now = if metric {
-                    metric_vector(&self.exp, &grad)
+                    metric_vector(&self.exp, &grad)?
                 } else {
                     grad.clone()
                 };
-                if !*initialized {
+                // A new P makes the stored direction belong to the old matrix.
+                if !*initialized || *z_epoch != self.metric_epoch {
                     *dir = if metric {
                         z_now.mapv(|z| -z * self.istep)
                     } else {
@@ -1778,6 +1801,7 @@ impl Solver {
                     *g_old = grad.clone();
                     *z_old = z_now;
                     *d_old = dir.clone();
+                    *z_epoch = self.metric_epoch;
                     *initialized = true;
                 }
                 let step_dir = dir.clone();
@@ -1803,7 +1827,7 @@ impl Solver {
                         previous_direction: d_old.view(),
                     };
                     if metric {
-                        let z_new = metric_vector(&self.exp, &grad);
+                        let z_new = metric_vector(&self.exp, &grad)?;
                         let mut beta = conjugacy.beta_metric(&ctx, z_new.view(), z_old.view());
                         if restart.should_restart_metric(
                             grad.view(),
@@ -1960,7 +1984,7 @@ impl Solver {
                 }
                 let forward_start = x.clone();
                 let dx = if self.exp.is_some() {
-                    let mut steepest = metric_vector(&self.exp, &raw);
+                    let mut steepest = metric_vector(&self.exp, &raw)?;
                     project_box_tangent(obj.bounds(), x, &mut steepest);
                     fire_displacement_metric(state, &raw, &steepest, |vel| {
                         fire_mix(&self.exp, vel, &raw, &steepest)
@@ -1986,7 +2010,7 @@ impl Solver {
                 project_box_tangent(obj.bounds(), x, &mut raw_new);
                 project_box_tangent(obj.bounds(), x, &mut state.vel);
                 if self.exp.is_some() {
-                    let mut steep_new = metric_vector(&self.exp, &raw_new);
+                    let mut steep_new = metric_vector(&self.exp, &raw_new)?;
                     project_box_tangent(obj.bounds(), x, &mut steep_new);
                     let mix_new = fire_mix(&self.exp, &state.vel, &raw_new, &steep_new);
                     fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
@@ -2160,6 +2184,7 @@ impl Inner {
                 z_old: Array1::zeros(dim),
                 d_old: Array1::zeros(dim),
                 initialized: false,
+                z_epoch: 0,
             },
             Method::Bfgs => Inner::Bfgs {
                 h: Array2::<f64>::eye(dim),
@@ -2218,5 +2243,91 @@ impl Solver {
             solver.gtol = gtol;
         }
         self
+    }
+}
+
+#[cfg(test)]
+mod exp_metric_tests {
+    use super::*;
+    use crate::precon::ExpState;
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::{ArrayView1, array};
+
+    struct Bowl {
+        bounds: Bounds<f64>,
+    }
+
+    impl Objective<f64> for Bowl {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            0.5 * x.dot(&x)
+        }
+    }
+
+    impl Gradient<f64> for Bowl {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            x.to_owned()
+        }
+    }
+
+    impl DifferentiableObjective<f64> for Bowl {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (0.5 * x.dot(&x), x.to_owned())
+        }
+    }
+
+    fn bowl() -> Bowl {
+        Bowl {
+            bounds: Bounds::new(array![-1e6, -1e6], array![1e6, 1e6], 0.0),
+        }
+    }
+
+    fn cg() -> Solver {
+        Solver::new(
+            Method::nlcg(Conjugacy::PolakRibiere),
+            Control {
+                maxiter: 1,
+                gtol: 1e-14,
+                istep: 1.0,
+                maxmove: None,
+            },
+            2,
+        )
+    }
+
+    #[test]
+    fn a_failed_metric_solve_is_an_error() {
+        let obj = bowl();
+        let mut x = array![1.0, 1.0];
+        let mut solver = cg();
+        solver.exp = Some(ExpState::holding_diagonal(&[1.0, 0.0], x.view()));
+        solver.metric_epoch = 1;
+        let err = solver.step(&obj, &mut x).unwrap_err();
+        assert!(matches!(err, Error::Precon { .. }), "{err}");
+    }
+
+    #[test]
+    fn a_replaced_metric_restarts_nlcg_at_steepest_descent() {
+        let obj = bowl();
+        let mut x = array![1.0, 4.0];
+        let mut solver = cg();
+        solver.exp = Some(ExpState::holding_diagonal(&[1.0, 4.0], x.view()));
+        solver.metric_epoch = 1;
+        solver.step(&obj, &mut x).unwrap();
+        solver.exp = Some(ExpState::holding_diagonal(&[1.0, 1.0], x.view()));
+        solver.metric_epoch = 2;
+        solver.step(&obj, &mut x).unwrap();
+        assert!(
+            x[0].abs() < 1e-12 && x[1].abs() < 1e-12,
+            "restart should land on the origin, got {x:?}"
+        );
     }
 }

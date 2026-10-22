@@ -168,6 +168,32 @@ impl Exp {
         })
     }
 
+    /// Diagonal matrix. Jacobi PCG inverts a positive diagonal in one pass.
+    #[cfg(test)]
+    pub(crate) fn diagonal(diag: &[f64]) -> Self {
+        let n = diag.len();
+        let mut row_ptr = Vec::with_capacity(n + 1);
+        let mut col_idx = Vec::with_capacity(n);
+        let mut val = Vec::with_capacity(n);
+        row_ptr.push(0);
+        for (i, &d) in diag.iter().enumerate() {
+            col_idx.push(i);
+            val.push(d);
+            row_ptr.push(i + 1);
+        }
+        Self {
+            mu: 1.0,
+            r_nn: 1.0e9,
+            csr: Arc::new(Csr {
+                n,
+                row_ptr,
+                col_idx,
+                val,
+                diag: diag.to_vec(),
+            }),
+        }
+    }
+
     /// Energy scale used to build this matrix.
     #[must_use]
     pub fn mu(&self) -> f64 {
@@ -384,6 +410,24 @@ impl ExpState {
         let delta = &positions.to_owned() - prev;
         let disp = crate::step::max_atom_displacement(&delta);
         disp.is_finite() && disp <= 0.5 * self.r_nn
+    }
+
+    /// A diagonal metric that [`Self::refresh`] will not replace.
+    #[cfg(test)]
+    pub(crate) fn holding_diagonal(diag: &[f64], positions: ArrayView1<f64>) -> Self {
+        Self {
+            neighbours: Neighbours::default(),
+            params: ExpParams {
+                mu: Some(1.0),
+                r_nn: Some(1.0e9),
+                ..ExpParams::default()
+            },
+            mu: Some(1.0),
+            r_nn: 1.0e9,
+            matrix: Some(Exp::diagonal(diag)),
+            r_nn_pending: false,
+            built_at: Some(positions.to_owned()),
+        }
     }
 }
 
@@ -780,6 +824,9 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<Vec<f64>> {
         for i in 0..n {
             x[i] += alpha * p[i];
             r[i] -= alpha * ap[i];
+        }
+        if nrm2(&r) <= tol {
+            return finite_vec(x);
         }
         jacobi(a, &r, &mut z);
         let rz_new = dot(&r, &z);
