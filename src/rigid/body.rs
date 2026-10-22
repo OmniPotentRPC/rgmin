@@ -7,3 +7,4 @@ include!("helpers.rs");
 include!("cpqr.rs");
 include!("jacobi6.rs");
 include!("rebuild.rs");
+include!("project.rs");
