@@ -24,7 +24,7 @@ use crate::hvp::{
 };
 use crate::lbfgs::{GradNorm, Lbfgs};
 use crate::linesearch::LineSearch;
-use crate::lowest_mode::{ApplyHessian, lowest_eigenpair};
+use crate::lowest_mode::{ApplyHessian, EigenParams, lowest_mode_with};
 use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
 use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton};
@@ -34,7 +34,7 @@ use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
 use crate::report::Report;
-use crate::rigid::{RigidMode, RigidWorkspace, project_horizontal, project_out_rot_trans};
+use crate::rigid::{RigidMode, RigidWorkspace};
 use crate::step::{
     cap_displacement_atom, l2, max_atom_displacement, scale_displacement_to_atom_cap, scale_step,
     scale_step_atom,
@@ -51,6 +51,52 @@ fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Array1<f64> {
     }
 }
 
+/// Remove rigid motion at the anchor stored on `ws`.
+#[allow(clippy::too_many_arguments)]
+fn eckart(
+    ws: &mut RigidWorkspace,
+    mode: RigidMode,
+    masses: Option<&[f64]>,
+    frozen: Option<&[u8]>,
+    weighted: bool,
+    metric: bool,
+    pbc: [bool; 3],
+    broken_translation: [bool; 3],
+    broken_rotation: [bool; 3],
+    v: &mut Array1<f64>,
+) {
+    if mode == RigidMode::Off {
+        return;
+    }
+    let Some(vs) = v.as_slice_mut() else {
+        return;
+    };
+    ws.project_at_anchor(
+        vs,
+        masses,
+        frozen,
+        weighted,
+        metric,
+        mode,
+        pbc,
+        broken_translation,
+        broken_rotation,
+    );
+}
+
+/// Puts a taken [`RigidWorkspace`] back if a stepper returns early.
+struct WsHold<'a> {
+    slot: &'a mut RigidWorkspace,
+    ws: RigidWorkspace,
+}
+
+impl Drop for WsHold<'_> {
+    fn drop(&mut self) {
+        std::mem::swap(self.slot, &mut self.ws);
+    }
+}
+
+/// P-norms for the FIRE mix: `sqrt(v^T P v)` and `sqrt(F · P^{-1} F)`.
 fn fire_mix(
     exp: &Option<ExpState>,
     vel: &Array1<f64>,
@@ -837,36 +883,21 @@ impl Solver {
     }
 
     /// Tangent projection. Periodic cells drop rotation (Sella `proj_rot`).
-    fn project_vec(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        match self.manifold {
-            ManifoldKind::MwRigid => {
-                let mut w = v.clone();
-                let masses = self.masses.as_ref().and_then(|m| m.as_slice());
-                project_horizontal(&mut w, x.view(), masses, !self.periodic);
-                w
-            }
-            ManifoldKind::RigidQuotient => {
-                let mut w = v.clone();
-                project_horizontal(&mut w, x.view(), None, !self.periodic);
-                w
-            }
+    fn project_vec(&mut self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        let mut w = match self.manifold {
+            ManifoldKind::MwRigid | ManifoldKind::RigidQuotient => v.clone(),
             other => other.project(x, v),
-        }
+        };
+        self.kill_at(x, &mut w);
+        w
     }
 
-    fn horizontal_grad(&self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
+    fn horizontal_grad(&mut self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
         let mut g = match self.manifold {
-            ManifoldKind::MwRigid | ManifoldKind::RigidQuotient => self.project_vec(x, grad),
+            ManifoldKind::MwRigid | ManifoldKind::RigidQuotient => grad.clone(),
             other => other.egrad2rgrad(x, grad),
         };
-        if self.project_rigid
-            && !matches!(
-                self.manifold,
-                ManifoldKind::RigidQuotient | ManifoldKind::MwRigid
-            )
-        {
-            project_out_rot_trans(&mut g, x.view());
-        }
+        self.kill_at(x, &mut g);
         g
     }
 
@@ -896,7 +927,7 @@ impl Solver {
 
     /// Vector transport. Quotient manifolds project at the arrival point.
     fn transport_vec(
-        &self,
+        &mut self,
         x_from: &Array1<f64>,
         x_to: &Array1<f64>,
         v: &Array1<f64>,
@@ -909,14 +940,16 @@ impl Solver {
 
     /// Riemannian L-BFGS pair at `x`: `s = T(x - old)`, `y = g - T(g_old)`.
     fn lbfgs_sy(
-        &self,
+        &mut self,
         old: &Array1<f64>,
         x: &Array1<f64>,
         gold: &Array1<f64>,
         grad: &Array1<f64>,
     ) -> (Array1<f64>, Array1<f64>) {
-        let s = self.transport_vec(old, x, &(x - old));
-        let y = grad - &self.transport_vec(old, x, gold);
+        let mut s = self.transport_vec(old, x, &(x - old));
+        let mut y = grad - &self.transport_vec(old, x, gold);
+        self.kill_at(x, &mut s);
+        self.kill_at(x, &mut y);
         (s, y)
     }
 
@@ -1185,6 +1218,35 @@ impl Solver {
         // Same ceiling as dogleg: Euclidean `maxmove` when one is set,
         // otherwise eight times the current radius, and never below it.
         let rmax = self.control.maxmove.unwrap_or(radius * 8.0).max(radius);
+        let mode = self.removal_mode();
+        let pbc = self.pbc;
+        let broken_t = self.broken_translation;
+        let broken_r = self.broken_rotation;
+        let weighted = self.chart_weighted();
+        let metric = self.force_metric();
+        let masses = self.masses.clone();
+        let frozen = self.frozen.clone();
+        if let Some(xs) = x.as_slice() {
+            self.rigid_ws.set_anchor(xs);
+        }
+        let held = std::sync::Mutex::new(std::mem::take(&mut self.rigid_ws));
+        let purify = |p: &mut Array1<f64>| {
+            let Some(vs) = p.as_slice_mut() else {
+                return;
+            };
+            let mut ws = held.lock().unwrap_or_else(|e| e.into_inner());
+            ws.project_at_anchor(
+                vs,
+                masses.as_ref().and_then(|m| m.as_slice()),
+                frozen.as_deref(),
+                weighted,
+                metric,
+                mode,
+                pbc,
+                broken_t,
+                broken_r,
+            );
+        };
         let taken = newton_cg_step(
             obj,
             x,
@@ -1196,13 +1258,18 @@ impl Solver {
                 rmax,
                 atom_cap: self.atom_maxmove,
                 euclid_cap: self.control.maxmove,
-                project_rigid: self.project_rigid,
-                purify: None,
+                project_rigid: false,
+                purify: if mode == RigidMode::Off {
+                    None
+                } else {
+                    Some(&purify)
+                },
                 precondition,
                 seed: self.steps as u64,
             },
             action,
         );
+        self.rigid_ws = held.into_inner().unwrap_or_else(|e| e.into_inner());
         self.hvp_calls += taken.hvps;
         self.gradient_calls += taken.trial_gradients;
         if let Inner::NewtonCg { radius } | Inner::NewtonPcg { radius } = &mut self.inner {
@@ -1489,7 +1556,11 @@ impl Solver {
     }
 
     /// Lowest eigenpair of `hess` when it lies below the stationarity tolerance.
-    fn unstable_mode(&self, hess: &Array2<f64>) -> Option<Array1<f64>> {
+    ///
+    /// Lanczos projects with the session workspace: `P v`, then `H`, then
+    /// `P (H v)`, then reorthogonalisation. The anchor is the geometry
+    /// [`Self::purify_hessian`] stored.
+    fn unstable_mode(&mut self, hess: &Array2<f64>) -> Option<Array1<f64>> {
         let n = hess.nrows();
         if n == 0 || hess.ncols() != n || hess.iter().any(|v| !v.is_finite()) {
             return None;
@@ -1525,7 +1596,33 @@ impl Solver {
             for i in 0..n {
                 seed[i] = ((i % 11) as f64) - 5.0;
             }
-            let found = lowest_eigenpair(&Mat(hess), seed.view(), seed.view(), 48.min(n));
+            let mode = self.removal_mode();
+            let weighted = self.chart_weighted();
+            let metric = self.force_metric();
+            let pbc = self.pbc;
+            let broken_t = self.broken_translation;
+            let broken_r = self.broken_rotation;
+            let masses = self.masses.clone();
+            let frozen = self.frozen.clone();
+            let params = EigenParams {
+                krylov: 48.min(n),
+                ..EigenParams::default()
+            };
+            let found = lowest_mode_with(&Mat(hess), seed.view(), seed.view(), &params, &mut |v| {
+                eckart(
+                    &mut self.rigid_ws,
+                    mode,
+                    masses.as_ref().and_then(|m| m.as_slice()),
+                    frozen.as_deref(),
+                    weighted,
+                    metric,
+                    pbc,
+                    broken_t,
+                    broken_r,
+                    v,
+                );
+            })
+            .expect("Lanczos is linked");
             (found.value, found.vector)
         };
         if value < -tol { Some(vector) } else { None }
@@ -1860,10 +1957,11 @@ impl Solver {
             && self.accept != Accept::None
         {
             if !cached {
-                if let Some(previous) = &self.last_pos {
-                    let (s, y) = self.lbfgs_sy(previous, x, &self.last_grad, &grad);
+                if let Some(previous) = self.last_pos.clone() {
+                    let gold = self.last_grad.clone();
+                    let (s, y) = self.lbfgs_sy(&previous, x, &gold, &grad);
                     if let Inner::Lbfgs(solver) = &mut self.inner {
-                        solver.transport(|v| crate::manifold::Sphere.transport(previous, x, v));
+                        solver.transport(|v| crate::manifold::Sphere.transport(&previous, x, v));
                         solver.push_pair(s, y, Some(l2(&grad)));
                     }
                 }
@@ -1900,8 +1998,9 @@ impl Solver {
         // Its secant updates the retained inverse Hessian at the supplied
         // point, using the same vector transport as accepted solver steps.
         if !cached {
-            if let Some(previous) = &self.last_pos {
-                let (s, y) = self.lbfgs_sy(previous, x, &self.last_grad, &grad);
+            if let Some(previous) = self.last_pos.clone() {
+                let gold_prev = self.last_grad.clone();
+                let (s, y) = self.lbfgs_sy(&previous, x, &gold_prev, &grad);
                 if let Inner::Lbfgs(solver) = &mut self.inner {
                     solver.push_pair(s, y, Some(l2(&grad)));
                 }
@@ -1910,6 +2009,28 @@ impl Solver {
 
         let start = x.clone();
         let gold = grad.clone();
+        let mode = self.removal_mode();
+        let weighted = self.chart_weighted();
+        let fmetric = self.force_metric();
+        let vmetric = self.velocity_metric();
+        let pbc = self.pbc;
+        let broken_t = self.broken_translation;
+        let broken_r = self.broken_rotation;
+        let masses = if mode == RigidMode::Off {
+            None
+        } else {
+            self.masses.clone()
+        };
+        let frozen = if mode == RigidMode::Off {
+            None
+        } else {
+            self.frozen.clone()
+        };
+        let held = std::mem::take(&mut self.rigid_ws);
+        let mut hold = WsHold {
+            slot: &mut self.rigid_ws,
+            ws: held,
+        };
         match &mut self.inner {
             Inner::Lbfgs(solver) => {
                 // Accept::None: take the clipped two-loop step. The NEB
@@ -1917,7 +2038,19 @@ impl Solver {
                 // step_objective (nval < value) never moves.
                 // Accept::Energy: Wolfe line search in step_objective.
                 if self.accept == Accept::None {
-                    let dir = solver.search_direction(x.view(), grad.view());
+                    let mut dir = solver.search_direction(x.view(), grad.view());
+                    eckart(
+                        &mut hold.ws,
+                        mode,
+                        masses.as_ref().and_then(|m| m.as_slice()),
+                        frozen.as_deref(),
+                        weighted,
+                        fmetric,
+                        pbc,
+                        broken_t,
+                        broken_r,
+                        &mut dir,
+                    );
                     let old = x.clone();
                     let gold = grad.clone();
                     let (npos, nval, ngrad, moved) = accept_step(
@@ -1942,7 +2075,9 @@ impl Solver {
                     grad = ngrad;
                     solver.push(&*x - &old, &grad - &gold);
                 } else {
-                    solver.step_objective(
+                    let masses_ls = masses.clone();
+                    let frozen_ls = frozen.clone();
+                    solver.step_objective_proj(
                         obj,
                         x,
                         &mut value,
@@ -1950,6 +2085,20 @@ impl Solver {
                         &mut self.istep,
                         self.linesearch,
                         &self.control,
+                        &mut |d| {
+                            eckart(
+                                &mut hold.ws,
+                                mode,
+                                masses_ls.as_ref().and_then(|m| m.as_slice()),
+                                frozen_ls.as_deref(),
+                                weighted,
+                                fmetric,
+                                pbc,
+                                broken_t,
+                                broken_r,
+                                d,
+                            );
+                        },
                     );
                 }
             }
@@ -2162,6 +2311,30 @@ impl Solver {
                 let mut raw = grad.mapv(|g| -g);
                 project_box_tangent(obj.bounds(), x, &mut raw);
                 project_box_tangent(obj.bounds(), x, &mut state.vel);
+                eckart(
+                    &mut hold.ws,
+                    mode,
+                    masses.as_ref().and_then(|m| m.as_slice()),
+                    frozen.as_deref(),
+                    weighted,
+                    fmetric,
+                    pbc,
+                    broken_t,
+                    broken_r,
+                    &mut raw,
+                );
+                eckart(
+                    &mut hold.ws,
+                    mode,
+                    masses.as_ref().and_then(|m| m.as_slice()),
+                    frozen.as_deref(),
+                    weighted,
+                    vmetric,
+                    pbc,
+                    broken_t,
+                    broken_r,
+                    &mut state.vel,
+                );
                 match fire_prepare_v2(state, &raw) {
                     FirePreparation::Ready => {}
                     FirePreparation::Rollback(correction) => {
@@ -2170,13 +2343,28 @@ impl Solver {
                         grad = ev.1;
                         raw = grad.mapv(|g| -g);
                         project_box_tangent(obj.bounds(), x, &mut raw);
+                        if let Some(xs) = x.as_slice() {
+                            hold.ws.set_anchor(xs);
+                        }
+                        eckart(
+                            &mut hold.ws,
+                            mode,
+                            masses.as_ref().and_then(|m| m.as_slice()),
+                            frozen.as_deref(),
+                            weighted,
+                            fmetric,
+                            pbc,
+                            broken_t,
+                            broken_r,
+                            &mut raw,
+                        );
                     }
                     FirePreparation::Stalled => {
                         return Err(Error::FireStalled { steps: self.steps });
                     }
                 }
                 let forward_start = x.clone();
-                let dx = if self.exp.is_some() {
+                let mut dx = if self.exp.is_some() {
                     let mut steepest = metric_vector(&self.exp, &raw);
                     project_box_tangent(obj.bounds(), x, &mut steepest);
                     fire_displacement_metric(state, &raw, &steepest, |vel| {
@@ -2185,6 +2373,18 @@ impl Solver {
                 } else {
                     fire_displacement(state, &raw)
                 };
+                eckart(
+                    &mut hold.ws,
+                    mode,
+                    masses.as_ref().and_then(|m| m.as_slice()),
+                    frozen.as_deref(),
+                    weighted,
+                    fmetric,
+                    pbc,
+                    broken_t,
+                    broken_r,
+                    &mut dx,
+                );
                 let mut trial = &*x + &dx;
                 if let Some(cap) = self.atom_maxmove {
                     scale_step_atom(x, &mut trial, cap);
@@ -2196,6 +2396,21 @@ impl Solver {
                     state.vel = (&trial - &forward_start) / state.dt;
                 }
                 *x = trial;
+                if let Some(xs) = x.as_slice() {
+                    hold.ws.set_anchor(xs);
+                }
+                eckart(
+                    &mut hold.ws,
+                    mode,
+                    masses.as_ref().and_then(|m| m.as_slice()),
+                    frozen.as_deref(),
+                    weighted,
+                    vmetric,
+                    pbc,
+                    broken_t,
+                    broken_r,
+                    &mut state.vel,
+                );
                 let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
                 grad = ev.1;
@@ -2241,6 +2456,7 @@ impl Solver {
             | Inner::NewtonCg { .. }
             | Inner::NewtonPcg { .. } => unreachable!(),
         }
+        drop(hold);
 
         let delta = &*x - &start;
         let y = self.manifold.retract(&start, &delta);
