@@ -8,3 +8,4 @@ include!("cpqr.rs");
 include!("jacobi6.rs");
 include!("rebuild.rs");
 include!("project.rs");
+include!("horizontal.rs");
