@@ -10,3 +10,7 @@ include!("rebuild.rs");
 include!("project.rs");
 include!("horizontal.rs");
 include!("align.rs");
+#[cfg(test)]
+include!("tests_util.rs");
+#[cfg(test)]
+include!("tests_mod.rs");
