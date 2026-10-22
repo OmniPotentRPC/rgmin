@@ -736,7 +736,34 @@ impl Lbfgs {
     ) where
         O: DifferentiableObjective<f64> + ?Sized,
     {
-        let dir = self.search_direction(pos.view(), grad.view());
+        self.step_objective_proj(
+            obj,
+            pos,
+            value,
+            grad,
+            istep,
+            linesearch,
+            control,
+            &mut |_| {},
+        );
+    }
+
+    /// [`Self::step_objective`] with a projector on each trial direction.
+    pub(crate) fn step_objective_proj<O>(
+        &mut self,
+        obj: &O,
+        pos: &mut Array1<f64>,
+        value: &mut f64,
+        grad: &mut Array1<f64>,
+        istep: &mut f64,
+        linesearch: LineSearch,
+        control: &Control,
+        project: &mut dyn FnMut(&mut Array1<f64>),
+    ) where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let mut dir = self.search_direction(pos.view(), grad.view());
+        project(&mut dir);
         let old = pos.clone();
         let gold = grad.clone();
         // Curvature history supplies the quasi-Newton step length. Wolfe
@@ -756,7 +783,8 @@ impl Lbfgs {
             // Retained curvature can describe a different objective scale.
             // Retry with an empty history before reporting a stalled step.
             self.forget();
-            let restart_direction = self.search_direction(pos.view(), grad.view());
+            let mut restart_direction = self.search_direction(pos.view(), grad.view());
+            project(&mut restart_direction);
             let restart = take_step(
                 obj,
                 pos,
