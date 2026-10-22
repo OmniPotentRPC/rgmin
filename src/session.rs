@@ -34,7 +34,7 @@ use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{bfgs_inverse_update, solve_dense, sr1_inverse_update, sr2_hessian_update};
 use crate::qn_step::QnStep;
 use crate::report::Report;
-use crate::rigid::{project_horizontal, project_out_rot_trans};
+use crate::rigid::{RigidMode, RigidWorkspace, project_horizontal, project_out_rot_trans};
 use crate::step::{
     cap_displacement_atom, l2, max_atom_displacement, scale_displacement_to_atom_cap, scale_step,
     scale_step_atom,
@@ -51,7 +51,6 @@ fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Array1<f64> {
     }
 }
 
-/// P-norms for the FIRE mix: `sqrt(v^T P v)` and `sqrt(F · P^{-1} F)`.
 fn fire_mix(
     exp: &Option<ExpState>,
     vel: &Array1<f64>,
@@ -82,6 +81,25 @@ pub struct Solver {
     /// Whether geometry L-BFGS needs a finite-difference stiffness probe.
     geometry_lbfgs_stiff: Option<bool>,
     project_rigid: bool,
+    /// `Auto` until a host declares a molecule. See [`Self::removal_mode`].
+    rigid_mode: RigidMode,
+    /// Periodic axes, masses, a freeze, a field, or an explicit mode.
+    rigid_declared: bool,
+    /// `set_project_rigid(false)` / `set_rigid_mode(Off)` on a Euclidean session.
+    rigid_forced_off: bool,
+    /// Periodic axes. Any true axis drops rotations under Auto.
+    pbc: [bool; 3],
+    /// Translations the host says are not symmetries.
+    broken_translation: [bool; 3],
+    /// Rotations the host says are not symmetries.
+    broken_rotation: [bool; 3],
+    /// Length `3N`. Nonzero freezes that coordinate.
+    frozen: Option<Vec<u8>>,
+    /// Cartesian mass inner product. Not the `MwRigid` chart.
+    mass_metric: bool,
+    /// `x` stores `q_i = sqrt(m_i) x_i`.
+    mass_weighted_coords: bool,
+    rigid_ws: RigidWorkspace,
     /// Sella `proj_rot`: false under PBC. Rotation is not a symmetry of the cell.
     periodic: bool,
     manifold: ManifoldKind,
@@ -211,6 +229,16 @@ impl Solver {
             atom_maxmove: None,
             geometry_lbfgs_stiff: None,
             project_rigid: false,
+            rigid_mode: RigidMode::Auto,
+            rigid_declared: false,
+            rigid_forced_off: false,
+            pbc: [false; 3],
+            broken_translation: [false; 3],
+            broken_rotation: [false; 3],
+            frozen: None,
+            mass_metric: false,
+            mass_weighted_coords: false,
+            rigid_ws: RigidWorkspace::new(),
             periodic: false,
             manifold: ManifoldKind::Euclidean,
             masses: None,
@@ -375,16 +403,123 @@ impl Solver {
         self.apply_highs_opts();
     }
 
-    /// eOn `lbfgs_project_rigid`. Isolated clusters only.
+    /// eOn `lbfgs_project_rigid`.
+    ///
+    /// Nonzero selects [`RigidMode::Auto`] and declares a molecule, so a
+    /// host that also set the axis mask drops rotations on a cell. Zero
+    /// forces the Euclidean path off. A quotient manifold still projects.
     pub fn set_project_rigid(&mut self, enabled: bool) {
-        self.project_rigid = enabled;
+        self.set_rigid_mode(if enabled {
+            RigidMode::Auto
+        } else {
+            RigidMode::Off
+        });
+    }
+
+    /// `Off`, `Auto`, `Translation`, or `TranslationRotation`.
+    ///
+    /// `Auto` declares a molecule: translation and rotation when no axis is
+    /// periodic, translation on the periodic axes otherwise. Frozen
+    /// coordinates keep the combinations that do not move them. Broken
+    /// axes are a host mask, not a field vector.
+    /// A bare Euclidean session stays off until something declares it.
+    pub fn set_rigid_mode(&mut self, mode: RigidMode) {
+        self.rigid_mode = mode;
+        self.project_rigid = mode != RigidMode::Off;
+        if mode == RigidMode::Off {
+            self.rigid_forced_off = true;
+            self.rigid_declared = false;
+        } else {
+            self.rigid_forced_off = false;
+            self.rigid_declared = true;
+        }
+        #[cfg(feature = "highs")]
+        self.apply_highs_opts();
+    }
+
+    /// Cartesian mass inner product `sum m_i u_i · v_i`.
+    ///
+    /// Turns the mass-weighted chart off. A raw force should leave this false.
+    pub fn set_rigid_mass_metric(&mut self, enabled: bool) {
+        self.mass_metric = enabled;
+        if enabled {
+            self.mass_weighted_coords = false;
+        }
+    }
+
+    /// Coordinates are `q_i = sqrt(m_i) x_i`. The metric is Euclidean.
+    ///
+    /// Turns the Cartesian mass metric off. The two switches are not both on.
+    pub fn set_rigid_mass_weighted(&mut self, enabled: bool) {
+        self.mass_weighted_coords = enabled;
+        if enabled {
+            self.mass_metric = false;
+            self.declare_molecule();
+        }
+    }
+
+    /// Periodic axes. Any true axis drops rotations and keeps only those
+    /// translations. This replaces the single bit from [`Self::set_periodic`].
+    pub fn set_pbc_axes(&mut self, x: bool, y: bool, z: bool) {
+        self.pbc = [x, y, z];
+        self.periodic = x || y || z;
+        if self.periodic {
+            self.declare_molecule();
+        }
+    }
+
+    /// Length `3N`. A nonzero byte freezes that coordinate. The basis is
+    /// the rigid combinations that are already zero there. Empty clears
+    /// the mask.
+    pub fn set_frozen(&mut self, frozen: &[u8]) {
+        if frozen.is_empty() {
+            self.frozen = None;
+            return;
+        }
+        self.frozen = Some(frozen.to_vec());
+        self.declare_molecule();
+    }
+
+    /// Axes that are not symmetries. The library does not infer them
+    /// from a force or a field. Any set bit declares a molecule.
+    pub fn set_broken_axes(
+        &mut self,
+        trans_x: bool,
+        trans_y: bool,
+        trans_z: bool,
+        rot_x: bool,
+        rot_y: bool,
+        rot_z: bool,
+    ) {
+        self.broken_translation = [trans_x, trans_y, trans_z];
+        self.broken_rotation = [rot_x, rot_y, rot_z];
+        if trans_x || trans_y || trans_z || rot_x || rot_y || rot_z {
+            self.declare_molecule();
+        }
+    }
+
+    fn declare_molecule(&mut self) {
+        self.rigid_declared = true;
+        self.rigid_forced_off = false;
+        if self.rigid_mode == RigidMode::Off {
+            self.rigid_mode = RigidMode::Auto;
+        }
+        self.project_rigid = true;
         #[cfg(feature = "highs")]
         self.apply_highs_opts();
     }
 
     /// Periodic cell. Sella leaves `proj_rot` off; the quotient is \(R^{3N}/T(3)\).
+    ///
+    /// Nonzero is [`Self::set_pbc_axes`]`(true, true, true)` and declares
+    /// the molecule. Zero clears the three axes.
     pub fn set_periodic(&mut self, periodic: bool) {
-        self.periodic = periodic;
+        if periodic {
+            self.set_pbc_axes(true, true, true);
+        } else {
+            self.pbc = [false; 3];
+            self.periodic = false;
+        }
     }
 
     /// Embedded manifold for project / retract / transport.
@@ -617,11 +752,7 @@ impl Solver {
             lo: self.box_lo.clone(),
             hi: self.box_hi.clone(),
             equalities: self.equalities.clone(),
-            center_axes: if self.project_rigid && self.dim % 3 == 0 {
-                Some((self.dim / 3, 3))
-            } else {
-                None
-            },
+            center_axes: None,
             solver: self.highs_solver,
             crossover: self.highs_crossover,
             callback: self.highs_callback,
@@ -640,6 +771,69 @@ impl Solver {
             kind: self.manifold.as_str(),
             got: n,
         })
+    }
+
+    /// Active Eckart mode. Quotient manifolds project even when the
+    /// Euclidean flag is off. A bare Euclidean session does not.
+    fn removal_mode(&self) -> RigidMode {
+        let quotient = matches!(
+            self.manifold,
+            ManifoldKind::RigidQuotient | ManifoldKind::MwRigid
+        );
+        if quotient {
+            if self.rigid_mode == RigidMode::Off {
+                RigidMode::Auto
+            } else {
+                self.rigid_mode
+            }
+        } else if self.rigid_forced_off || !self.rigid_declared {
+            RigidMode::Off
+        } else {
+            self.rigid_mode
+        }
+    }
+
+    /// `MwRigid` stores `q = sqrt(m) x`. That chart uses the Euclidean product.
+    fn chart_weighted(&self) -> bool {
+        self.mass_weighted_coords || matches!(self.manifold, ManifoldKind::MwRigid)
+    }
+
+    /// Cartesian force. The mass metric is not this switch.
+    fn force_metric(&self) -> bool {
+        self.mass_metric && !self.chart_weighted()
+    }
+
+    /// FIRE velocity. Momentum is `m v` on raw Cartesians.
+    fn velocity_metric(&self) -> bool {
+        !self.chart_weighted() && (self.mass_metric || self.masses.is_some())
+    }
+
+    fn anchor_and_project(&mut self, x: &[f64], v: &mut [f64]) {
+        let mode = self.removal_mode();
+        if mode == RigidMode::Off || v.len() != x.len() {
+            return;
+        }
+        let metric = self.force_metric();
+        let weighted = self.chart_weighted();
+        let pbc = self.pbc;
+        let broken_t = self.broken_translation;
+        let broken_r = self.broken_rotation;
+        self.rigid_ws.set_anchor(x);
+        let masses = self.masses.as_ref().and_then(|m| m.as_slice());
+        let frozen = self.frozen.as_deref();
+        self.rigid_ws.project_at_anchor(
+            v, masses, frozen, weighted, metric, mode, pbc, broken_t, broken_r,
+        );
+    }
+
+    fn kill_at(&mut self, x: &Array1<f64>, v: &mut Array1<f64>) {
+        let Some(xs) = x.as_slice() else {
+            return;
+        };
+        let Some(vs) = v.as_slice_mut() else {
+            return;
+        };
+        self.anchor_and_project(xs, vs);
     }
 
     /// Tangent projection. Periodic cells drop rotation (Sella `proj_rot`).
@@ -674,6 +868,30 @@ impl Solver {
             project_out_rot_trans(&mut g, x.view());
         }
         g
+    }
+
+    fn purify_hessian(&mut self, x: &Array1<f64>, hess: &mut ndarray::Array2<f64>) {
+        let mode = self.removal_mode();
+        if mode == RigidMode::Off {
+            return;
+        }
+        let Some(xs) = x.as_slice() else {
+            return;
+        };
+        let Some(h) = hess.as_slice_mut() else {
+            return;
+        };
+        let metric = self.force_metric();
+        let weighted = self.chart_weighted();
+        let pbc = self.pbc;
+        let broken_t = self.broken_translation;
+        let broken_r = self.broken_rotation;
+        self.rigid_ws.set_anchor(xs);
+        let masses = self.masses.as_ref().and_then(|m| m.as_slice());
+        let frozen = self.frozen.as_deref();
+        self.rigid_ws.project_hessian_at_anchor(
+            h, masses, frozen, weighted, metric, mode, pbc, broken_t, broken_r,
+        );
     }
 
     /// Vector transport. Quotient manifolds project at the arrival point.
@@ -723,7 +941,7 @@ impl Solver {
         if self.highs
             && (self.box_lo.is_some() || self.box_hi.is_some())
             && matches!(self.manifold, ManifoldKind::Euclidean)
-            && !self.project_rigid
+            && self.removal_mode() == RigidMode::Off
             && self.equalities.is_empty()
         {
             use crate::lbfgs_qp::side_at;
@@ -1113,8 +1331,10 @@ impl Solver {
         let cached = self.same_last_x(x);
         if !cached {
             if let Some(previous) = self.last_pos.clone() {
-                let s = &*x - &previous;
-                let y = &grad - &self.last_grad;
+                let mut s = &*x - &previous;
+                let mut y = &grad - &self.last_grad;
+                self.kill_at(x, &mut s);
+                self.kill_at(x, &mut y);
                 let sy = s.dot(&y);
                 let yy = y.dot(&y);
                 self.apply_geometry_curvature(sy, yy, &mut h0, &force, cap, &mut forced);
@@ -1167,9 +1387,6 @@ impl Solver {
                 Inner::Lbfgs(solver) => solver.direction_h0(grad.view(), h0),
                 _ => h0 * &force,
             };
-            if self.project_rigid {
-                project_out_rot_trans(&mut direction, x.view());
-            }
             direction = self.project_vec(x, &direction);
             let motion = max_atom_displacement(&direction);
             if motion >= cap {
@@ -1237,8 +1454,10 @@ impl Solver {
         let gold = grad.clone();
         *x = trial;
         grad = self.horizontal_grad(x, &tgrad);
-        let s = &*x - &old;
-        let y = &grad - &gold;
+        let mut s = &*x - &old;
+        let mut y = &grad - &gold;
+        self.kill_at(x, &mut s);
+        self.kill_at(x, &mut y);
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.note_curvature(&s, &y);
             if solver.have_curvature {
@@ -1327,10 +1546,12 @@ impl Solver {
             if gnorm > self.control.gtol || self.saddle_kicks >= 4 {
                 return;
             }
-            let hess = obj.hessian(x.view());
-            let Some(mode) = self.unstable_mode(&hess) else {
+            let mut hess = obj.hessian(x.view());
+            self.purify_hessian(x, &mut hess);
+            let Some(mut mode) = self.unstable_mode(&hess) else {
                 return;
             };
+            self.kill_at(x, &mut mode);
             let cap = self
                 .atom_maxmove
                 .unwrap_or_else(|| self.control.istep.max(1.0e-8));
@@ -1411,17 +1632,16 @@ impl Solver {
         if gnorm < self.control.gtol {
             return self.report_or_escape(obj, x, value, grad);
         }
-        let hess = obj.hessian(x.view());
+        let mut hess = obj.hessian(x.view());
+        self.purify_hessian(x, &mut hess);
         if matches!(self.inner, Inner::Dogleg { .. }) {
             return self.step_dogleg(obj, x, value, grad, &hess);
         }
         #[cfg(feature = "highs")]
         if self.highs {
-            let center = if self.project_rigid && self.dim % 3 == 0 {
-                Some((self.dim / 3, 3))
-            } else {
-                None
-            };
+            // The Eckart workspace projects this step. A coordinate mean
+            // would be a second projector.
+            let center = None;
             let mut model_hess = hess.clone();
             if newton_kind == Some(NewtonKind::Rfo) {
                 // The lowest augmented eigenvalue makes H - lambda I
@@ -1431,7 +1651,7 @@ impl Solver {
                     model_hess[(k, k)] -= shift;
                 }
             }
-            let dir = crate::lbfgs_qp::highs_feasible_step(
+            let mut dir = crate::lbfgs_qp::highs_feasible_step(
                 None,
                 Some(&model_hess),
                 &grad,
@@ -1447,6 +1667,7 @@ impl Solver {
                 self.highs_callback,
                 self.highs_callback_user,
             )?;
+            self.kill_at(x, &mut dir);
             let old = x.clone();
             let gold = grad.clone();
             let (npos, nval, ngrad, moved) = accept_step_with_fallback(
@@ -1496,9 +1717,6 @@ impl Solver {
         } else {
             return self.step_first_order(obj, x);
         };
-        if self.project_rigid {
-            project_out_rot_trans(&mut dir, x.view());
-        }
         dir = self.project_vec(x, &dir);
         let old = x.clone();
         let gold = grad.clone();
@@ -1562,9 +1780,7 @@ impl Solver {
         // eight times the current radius. The cap still limits the trial.
         let rmax = self.control.maxmove.unwrap_or(radius * 8.0).max(radius);
         let mut dir = dogleg_direction(hess, &grad, radius);
-        if self.project_rigid {
-            project_out_rot_trans(&mut dir, x.view());
-        }
+        self.kill_at(x, &mut dir);
         let trust_norm = l2(&dir);
         let mut trial = &*x + &dir;
         if let Some(cap) = self.atom_maxmove {
