@@ -9,3 +9,4 @@ include!("jacobi6.rs");
 include!("rebuild.rs");
 include!("project.rs");
 include!("horizontal.rs");
+include!("align.rs");
