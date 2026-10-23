@@ -61,6 +61,8 @@ class Method(enum.IntEnum):
 
     DIIS = 22
 
+    ODE12R = 23
+
     PolakRibiere = 0
 
     FletcherReeves = 1
@@ -106,6 +108,8 @@ class Method(enum.IntEnum):
     QuickMin = 21
 
     Diis = 22
+
+    Ode12r = 23
 
 class Stop(enum.IntEnum):
     """
