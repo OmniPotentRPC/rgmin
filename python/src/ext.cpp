@@ -127,6 +127,8 @@ std::string method_name_from_code(int code) {
         return "quickmin";
     case RGMIN_DIIS:
         return "diis";
+    case RGMIN_ODE12R:
+        return "ode12r";
     default:
         throw nb::value_error("unknown method");
     }
@@ -474,6 +476,7 @@ NB_MODULE(_core, m) {
         .value("FIRE2", RGMIN_FIRE2)
         .value("QUICK_MIN", RGMIN_QUICKMIN)
         .value("DIIS", RGMIN_DIIS)
+        .value("ODE12R", RGMIN_ODE12R)
         .value("PolakRibiere", RGMIN_POLAK_RIBIERE)
         .value("FletcherReeves", RGMIN_FLETCHER_REEVES)
         .value("Bfgs", RGMIN_BFGS)
@@ -496,7 +499,8 @@ NB_MODULE(_core, m) {
         .value("Dogleg", RGMIN_DOGLEG)
         .value("Fire2", RGMIN_FIRE2)
         .value("QuickMin", RGMIN_QUICKMIN)
-        .value("Diis", RGMIN_DIIS);
+        .value("Diis", RGMIN_DIIS)
+        .value("Ode12r", RGMIN_ODE12R);
 
     nb::enum_<rgmin_stop_t>(m, "Stop", nb::is_arithmetic(),
                             "Why a step or a run ended. Members are UPPER_SNAKE. "

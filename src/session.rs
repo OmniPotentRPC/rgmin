@@ -192,6 +192,7 @@ enum Inner {
     },
     Fire(FireState, Option<Fire2Extras>),
     QuickMin(QuickMinState, QuickMinSession),
+    Ode12r(crate::ode12r::Ode12rState),
     Diis(DiisState),
     Bb {
         prev_s: Option<Array1<f64>>,
@@ -260,7 +261,7 @@ impl Solver {
     #[must_use]
     pub fn optimizer_family(&self) -> crate::OptimizerFamily {
         match &self.inner {
-            Inner::Fire(_, _) => crate::OptimizerFamily::Fire,
+            Inner::Fire(_, _) | Inner::Ode12r(_) => crate::OptimizerFamily::Fire,
             Inner::Nlcg { .. } => crate::OptimizerFamily::Cg,
             _ => crate::OptimizerFamily::QuasiNewton,
         }
@@ -1157,6 +1158,7 @@ impl Solver {
                 state.reset();
                 session.forget_last();
             }
+            Inner::Ode12r(state) => state.reset(),
             Inner::Diis(state) => state.clear(),
             Inner::Bb { prev_s, prev_y } => {
                 *prev_s = None;
@@ -2090,6 +2092,54 @@ impl Solver {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
             }
+            Inner::Ode12r(state) => {
+                // Forward Euler on P^{-1} F with the ODE12r acceptance test.
+                // A rejected trial keeps x, value and grad; the next call
+                // reads them from the cache and retries with a shorter h.
+                #[allow(unused_mut)]
+                let mut force = grad.mapv(|g| -g);
+                #[allow(unused_mut)]
+                let mut steepest = metric_vector(&self.precon, &force)?;
+                #[cfg(feature = "highs")]
+                if boxed {
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
+                }
+                let residual = crate::ode12r::metric_norm(&force, &steepest);
+                let h = state.open();
+                let dx = steepest.mapv(|v| h * v);
+                let mut trial = &*x + &dx;
+                if let Some(cap) = self.atom_maxmove {
+                    scale_step_atom(x, &mut trial, cap);
+                } else if let Some(cap) = self.control.maxmove {
+                    scale_step(x, &mut trial, cap);
+                }
+                trial = obj.bounds().clip(trial.view());
+                let h_taken = crate::ode12r::taken_step(h, &dx, &(&trial - &*x));
+                let (trial_value, trial_grad) = obj.value_and_gradient(trial.view());
+                #[allow(unused_mut)]
+                let mut force_new = trial_grad.mapv(|g| -g);
+                #[allow(unused_mut)]
+                let mut steepest_new = metric_vector(&self.precon, &force_new)?;
+                #[cfg(feature = "highs")]
+                if boxed {
+                    crate::box_objective::project_tangent(obj.bounds(), &trial, &mut force_new);
+                    crate::box_objective::project_tangent(obj.bounds(), &trial, &mut steepest_new);
+                }
+                let verdict = state.judge(
+                    residual,
+                    &force,
+                    &steepest,
+                    &force_new,
+                    &steepest_new,
+                    h_taken,
+                );
+                if verdict.accepted {
+                    *x = trial;
+                    value = trial_value;
+                    grad = trial_grad;
+                }
+            }
             Inner::Diis(state) => {
                 state.push(x.clone(), grad.clone());
                 let coeffs = pulay_coefficients(state.gradients());
@@ -2412,6 +2462,7 @@ impl Inner {
             Method::QuickMin => {
                 Inner::QuickMin(QuickMinState::new(dim, istep), QuickMinSession::new(istep))
             }
+            Method::Ode12r => Inner::Ode12r(crate::ode12r::Ode12rState::new(istep)),
             Method::Diis { memory } => Inner::Diis(DiisState::new(*memory)),
             Method::Bb => Inner::Bb {
                 prev_s: None,

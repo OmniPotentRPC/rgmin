@@ -81,6 +81,8 @@ pub mod manifold;
 mod minimize;
 /// Shifted Newton and Banerjee RFO on a dense Hessian.
 pub mod newton;
+/// ODE12r: adaptive first-order integration of the force.
+pub mod ode12r;
 mod oracle;
 /// Geometry preconditioners: Exp, Lindh, and the bonded FF metric.
 pub mod precon;
@@ -149,6 +151,9 @@ pub use noise::{
     DEFAULT_M, NoiseEstimate, NoiseFlag, ValueGradientNoise, ecnoise, estimate_second,
     estimate_third, forward_step, gradient_dr, line_values, next_spacing, sample_gradient_noise,
     sample_gradient_noise_k, sample_noise, sample_value_gradient_noise,
+};
+pub use ode12r::{
+    Ode12rState, Ode12rVerdict, metric_norm as ode12r_metric_norm, taken_step as ode12r_taken_step,
 };
 pub use oracle::Oracle;
 pub use precon::{

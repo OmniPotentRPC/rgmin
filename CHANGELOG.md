@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Method::Ode12r` (C `RGMIN_ODE12R`, ABI minor 34): forward Euler on
+  `P^{-1} F` with the embedded second-order error estimate, the
+  residual-controlled acceptance and the adaptive step of Makri, Ortner
+  and Kermode (J. Chem. Phys. 150, 094109, 2019). `src/ode12r.rs` holds
+  the rule (`Ode12rState::judge`), the session owns the clamps: a capped
+  move is judged at the length it took, a rejected trial keeps the
+  iterate and the next call retries from the cache with a shorter step,
+  one oracle call per trial either way. An installed geometry
+  preconditioner is the metric, so `set_exp` gives the ODE12r-Exp
+  variant. `tests/ode12r_session.rs` counts the calls, checks the
+  rejection, the cap and the chain with the Exp metric.
 - Optional `readcon` feature, not in `default`. `write_checkpoint` and
   `read_checkpoint` in `src/con_checkpoint.rs` depend on readcon-core
   `=0.17.1` from git `694e808` (main) until that version is on

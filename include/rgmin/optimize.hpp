@@ -54,6 +54,7 @@ enum class Method {
     Fire2 = RGMIN_FIRE2,
     QuickMin = RGMIN_QUICKMIN,
     Diis = RGMIN_DIIS,
+    Ode12r = RGMIN_ODE12R,
 };
 
 enum class EigenKind {
@@ -696,6 +697,7 @@ inline Method method_from_name(std::string const& name) {
     if (name == "fire") return Method::Fire;
     if (name == "fire2") return Method::Fire2;
     if (name == "quickmin") return Method::QuickMin;
+    if (name == "ode12r") return Method::Ode12r;
     if (name == "sd" || name == "steepest" || name == "steepest_descent") return Method::Steepest;
     if (name == "cg" || name == "pr" || name == "pr+" || name == "polak_ribiere") {
         return Method::PolakRibiere;

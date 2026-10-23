@@ -63,7 +63,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 33;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 34;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 3;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -116,6 +116,8 @@ pub enum rgmin_method_t {
     RGMIN_QUICKMIN = 21,
     /// Pulay residual subspace. `memory` 0 means 6 stored pairs.
     RGMIN_DIIS = 22,
+    /// ODE12r: adaptive Euler on the (preconditioned) force, Makri 2019.
+    RGMIN_ODE12R = 23,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -463,6 +465,7 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
             kind: crate::FireKind::V2,
         },
         rgmin_method_t::RGMIN_QUICKMIN => Method::QuickMin,
+        rgmin_method_t::RGMIN_ODE12R => Method::Ode12r,
         rgmin_method_t::RGMIN_DIIS => Method::Diis {
             memory: if memory == 0 { 6 } else { memory },
         },

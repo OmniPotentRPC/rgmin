@@ -113,6 +113,15 @@ pub enum Method {
     /// time-step factors, per-block cell velocity) are in
     /// [`crate::quickmin`].
     QuickMin,
+    /// ODE12r: forward Euler on `P^{-1} F` with an embedded second-order
+    /// error estimate, residual-controlled acceptance and an adaptive step.
+    ///
+    /// Makri, Ortner, Kermode, *A preconditioning scheme for minimum
+    /// energy path finding methods*,
+    /// <https://doi.org/10.1063/1.5064465>. The rule and the session
+    /// clamps are in [`crate::ode12r`]; an installed geometry
+    /// preconditioner is the metric.
+    Ode12r,
     /// Pulay residual subspace extrapolation.
     ///
     /// Pulay, *Convergence acceleration of iterative sequences. The
