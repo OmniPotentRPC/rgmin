@@ -6,6 +6,11 @@
 
 ** Unreleased
 
+Eckart helpers live in ~rgmin::rigid~. ~RigidMode~ names Off, Auto,
+Translation, and TranslationRotation. Auto is the integer
+~set_project_rigid(1)~ will mean. Eckart vectors are weighted in
+the active metric.
+
 ~cargo cinstall~ installs the hand-written ~include/rgmin.h~ and
 ~dlpack/dlpack.h~. The header compiles as C and as C++. Version
 macros are ~RGMIN_H_MAJOR~, ~RGMIN_H_MINOR~, and ~RGMIN_H_PATCH~.

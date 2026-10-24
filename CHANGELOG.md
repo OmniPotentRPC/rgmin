@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Eckart helpers live in `rgmin::rigid`. `RigidMode` names Off, Auto,
+  Translation, and TranslationRotation. Auto is the integer
+  `set_project_rigid(1)` will mean. Eckart vectors are weighted in
+  the active metric.
 - Exponential preconditioner (Packwood, Kermode, Mones, Bernstein,
   Woolley, Gould, Ortner, and Csányi, J. Chem. Phys. 144, 164109
   (2016), <https://doi.org/10.1063/1.4947024>).
