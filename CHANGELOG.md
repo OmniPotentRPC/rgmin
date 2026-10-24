@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `project_out_rot_trans` borrows one shared workspace. It no
+  longer builds a private Gram-Schmidt basis.
 - `RigidWorkspace` projects a vector and replaces `H` with `P H P`.
   The caller owns the buffers. The workspace is reused after the
   first call at a given size.
