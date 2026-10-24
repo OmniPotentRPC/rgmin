@@ -6,6 +6,10 @@
 
 ** Unreleased
 
+~align_rigid~ is Horn / Coutsias. Any periodic axis leaves the
+rotation at identity and shifts the mobile cloud onto the
+reference centroid.
+
 ~project_out_rot_trans~ borrows one shared workspace. It no
 longer builds a private Gram-Schmidt basis.
 
