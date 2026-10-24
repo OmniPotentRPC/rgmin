@@ -376,6 +376,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collapse geometrically and L-BFGS stalled far from `gtol` on a smooth
   convex energy. Steepest descent, NLCG and Adam keep the halving.
   `Control::istep` is documented as the opening step.
+- `RigidWorkspace` projects a vector and replaces `H` with `P H P`.
+  The caller owns the buffers. The workspace is reused after the
+  first call at a given size.
 - Frozen coordinates are zeroed before the Eckart rank. One pin
   keeps three rotations, two pins keep one axis, and three
   non-collinear pins give rank 0.
