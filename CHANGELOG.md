@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `MwRigid` stores `q = sqrt(m) x`. The chart metric is Euclidean
+  in `q`. One atom is a quotient with three translations.
 - The session projects the step, the FIRE velocity in the mass
   metric, L-BFGS pairs, and the Lanczos and Newton-CG products
   through one workspace. A Cartesian force is not run through that
