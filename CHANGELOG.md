@@ -376,6 +376,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collapse geometrically and L-BFGS stalled far from `gtol` on a smooth
   convex energy. Steepest descent, NLCG and Adam keep the halving.
   `Control::istep` is documented as the opening step.
+- The Eckart basis is ranked with column-pivoted QR. The tolerance
+  is relative to the leading R diagonal. The six-by-six frozen
+  overlap is diagonalized.
 - Eckart helpers live in `rgmin::rigid`. `RigidMode` names Off, Auto,
   Translation, and TranslationRotation. Auto is the integer
   `set_project_rigid(1)` will mean. Eckart vectors are weighted in

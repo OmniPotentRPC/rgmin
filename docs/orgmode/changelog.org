@@ -96,6 +96,10 @@ The session caps the displacement and rescales the velocity to
 the step taken, grows and shrinks ~Δt~ with FIRE's factors (a
 zero power does not shrink it), and splits an atomic block from
 a cell block through ~Solver::set_quickmin_cell~.
+The Eckart basis is ranked with column-pivoted QR. The tolerance
+is relative to the leading R diagonal. The six-by-six frozen
+overlap is diagonalized.
+
 Eckart helpers live in ~rgmin::rigid~. ~RigidMode~ names Off, Auto,
 Translation, and TranslationRotation. Auto is the integer
 ~set_project_rigid(1)~ will mean. Eckart vectors are weighted in
