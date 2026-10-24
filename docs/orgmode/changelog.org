@@ -96,6 +96,10 @@ The session caps the displacement and rescales the velocity to
 the step taken, grows and shrinks ~Δt~ with FIRE's factors (a
 zero power does not shrink it), and splits an atomic block from
 a cell block through ~Solver::set_quickmin_cell~.
+~align_rigid~ is Horn / Coutsias. Any periodic axis leaves the
+rotation at identity and shifts the mobile cloud onto the
+reference centroid.
+
 ~project_out_rot_trans~ borrows one shared workspace. It no
 longer builds a private Gram-Schmidt basis.
 
