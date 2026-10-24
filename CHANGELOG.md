@@ -376,6 +376,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collapse geometrically and L-BFGS stalled far from `gtol` on a smooth
   convex energy. Steepest descent, NLCG and Adam keep the halving.
   `Control::istep` is documented as the opening step.
+- Eckart helpers live in `rgmin::rigid`. `RigidMode` names Off, Auto,
+  Translation, and TranslationRotation. Auto is the integer
+  `set_project_rigid(1)` will mean. Eckart vectors are weighted in
+  the active metric.
+- Exponential preconditioner (Packwood, Kermode, Mones, Bernstein,
+  Woolley, Gould, Ortner, and Csányi, J. Chem. Phys. 144, 164109
+  (2016), <https://doi.org/10.1063/1.4947024>).
+  `Solver::set_exp` builds `P` from a caller neighbour list.
+  L-BFGS uses `H0 = P^{-1}`. FIRE and nonlinear CG use `P` as the
+  metric. A dense pair or Lindh matrix passed into the two-loop
+  still wins. C: `rgmin_exp_t`, `rgmin_solver_set_exp`,
+  `rgmin_solver_clear_exp`, `rgmin_solver_exp_mu`. The C++ session
+  wraps those three as `set_exp`, `clear_exp`, and `exp_mu`.
+  `abi_minor` 28.
+- Steihaug-Toint Newton-CG as `Method::NewtonCg` (`newton-cg`) and
+  `Method::NewtonPcg` (`newton-pcg`). `Method::from_name` parses the
+  token. The session uses Hessian-vector products only: analytic via
+  `Solver::step_hvp` / `minimize_method_hvp`, otherwise one forward
+  difference of the known gradient. `control.maxmove` is the Euclidean
+  trust-radius ceiling; a per-atom cap clips the accepted trial, and
+  the boundary test uses the pre-clip length. `Solver::gradient_calls`
+  and `Solver::hvp_calls` count the two separately.
+  C: `RGMIN_NEWTON_CG`, `RGMIN_NEWTON_PCG`, `rgmin_method_from_name`,
+  `rgmin_solver_step_hvp`, `rgmin_minimize_hvp`,
+  `rgmin_solver_gradient_calls`, `rgmin_solver_hvp_calls`.
+  `abi_minor` 27.
+  Steihaug, SIAM J. Numer. Anal. 20 (1983),
+  <https://doi.org/10.1137/0720042>.
+  Nocedal and Wright, *Numerical Optimization*, chapter 7.
+- HiGHS user callback (`rgmin_solver_set_highs_callback`) for
+  logging and IPM interrupt. Constrained dest QPs are checked
+  against SciPy `trust-constr` (and `linprog` `highs-ipm` on LPs).
+  `abi_minor` 25.
+- Closed HiGHS engine waist: `rgmin_highs_solver_t` (choose / simplex /
+  ipm / ipx / hipo / pdlp / hipdlp / qpasm) and
+  `rgmin_highs_crossover_t`. Constrained dest defaults to IPM with
+  crossover off. `rgmin_solver_set_highs_solver` /
+  `rgmin_solver_set_highs_crossover`. Unknown tokens return 1.
+  `abi_minor` 24.
+- `rgmin_solver_push_pair` and `rgmin_solver_search_direction` for a
+  one-oracle-per-outer L-BFGS waist. `abi_minor` 23.
 
 ### Changed
 

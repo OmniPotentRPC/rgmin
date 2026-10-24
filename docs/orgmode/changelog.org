@@ -96,6 +96,155 @@ The session caps the displacement and rescales the velocity to
 the step taken, grows and shrinks ~Δt~ with FIRE's factors (a
 zero power does not shrink it), and splits an atomic block from
 a cell block through ~Solver::set_quickmin_cell~.
+Eckart helpers live in ~rgmin::rigid~. ~RigidMode~ names Off, Auto,
+Translation, and TranslationRotation. Auto is the integer
+~set_project_rigid(1)~ will mean. Eckart vectors are weighted in
+the active metric.
+
+~cargo cinstall~ installs the hand-written ~include/rgmin.h~ and
+~dlpack/dlpack.h~. The header compiles as C and as C++. Version
+macros are ~RGMIN_H_MAJOR~, ~RGMIN_H_MINOR~, and ~RGMIN_H_PATCH~.
+~HighsInt~ stays out of the public header.
+
+The exponential preconditioner of Packwood et al., J. Chem. Phys.
+144, 164109 (2016)
+([[https://doi.org/10.1063/1.4947024][10.1063/1.4947024]])
+is ~Solver::set_exp~. The caller supplies the neighbour list.
+L-BFGS uses ~H0 = P^{-1}~. FIRE and nonlinear CG use ~P~ as the
+metric. A dense pair or Lindh matrix passed into the two-loop
+still wins. C: ~rgmin_exp_t~, ~rgmin_solver_set_exp~,
+~rgmin_solver_clear_exp~, ~rgmin_solver_exp_mu~. The C++ session
+wraps those three as ~set_exp~, ~clear_exp~, and ~exp_mu~.
+~abi_minor~ 28.
+
+Newton and dogleg leave a first-order saddle. When the force is
+already under ~gtol~, the report reads the analytic Hessian. The
+floor is max(abs(gtol), 1e-6, 1e-8 times the Frobenius norm of H).
+A lowest eigenvalue below minus that floor steps along the mode,
+scaled to the per-atom cap, at most four times. The dogleg radius
+restarts from the initial step. A converged report costs one extra
+Hessian.
+
+The docs export installs Org 9.7 or newer from GNU ELPA before
+ox-rst. Pull requests run the Org export and the Sphinx build.
+The Pages deploy stays on a push to ~main~ or ~workflow_dispatch~.
+A pull request has its own concurrency group, so it does not
+cancel a deploy. ~pages: write~ and ~id-token: write~ belong to
+the deploy job; the workflow token stays read-only.
+
+CI runs on pushes and pull requests to ~develop~ as well as ~main~,
+and installs numpy and scipy for the HiGHS reference tests.
+
+Capped Cartesian L-BFGS reserves the directional-curvature probe for a
+nominal step at least 64 times larger than the cap.  Ordinary starts
+use ~H0 = 0.1 I~ and five-value nonmonotone acceptance. An installed
+exponential preconditioner replaces that scalar seed, including those
+steepest fallbacks. Uncapped L-BFGS keeps the two-loop step and the
+Wolfe search. A HiGHS feasible set and a non-Euclidean manifold stay
+on that path.
+
+FIRE 2.0 follows Guénolé et al.'s semi-implicit update order,
+half-step-back uphill correction with a fresh corrected-point force,
+initial time-step delay, 2,000-step non-positive-power limit, and
+cap-consistent velocity. An installed exponential preconditioner uses
+~P~ as the metric: power is ~F · v~, and the kick and the mix use
+~P^{-1} F~.
+
+Steihaug-Toint Newton-CG is a session method: tokens ~newton-cg~
+and ~newton-pcg~ (~RGMIN_NEWTON_CG~ = 21, ~RGMIN_NEWTON_PCG~ = 22).
+Hessian access is a product, analytic from ~rgmin_solver_step_hvp~
+/ ~rgmin_minimize_hvp~ and a one-gradient forward difference from
+~rgmin_solver_step~. ~maxmove~ caps the Euclidean trust radius; a
+per-atom cap clips the trial and the boundary test sees the
+pre-clip length. ~rgmin_solver_gradient_calls~ and
+~rgmin_solver_hvp_calls~ count the two. ~rgmin_method_from_name~
+parses the token. ~abi_minor~ 27. Steihaug 1983
+([[https://doi.org/10.1137/0720042][10.1137/0720042]]);
+Nocedal and Wright, chapter 7.
+
+~rgmin_solver_set_box~: per-coordinate HiGHS box on ~x + p~.
+A NULL side is unbounded. Same status as ~set_highs~ (0, or 1
+without the ~highs~ feature). ~rgmin_solver_set_trust~ is the
+L_inf radius; ~rgmin_solver_add_equality~ /
+~rgmin_solver_clear_equalities~ carry ~a · p = rhs~.
+~HighsStep.lo~ / ~hi~ are per-coordinate vectors (length 1 is
+uniform). ~abi_minor~ 22.
+
+Centered matrices (~centeredmatrix~ /
+~RGMIN_MANIFOLD_CENTERED_MATRIX~ = 22): manopt
+~centeredmatrixfactory~. Packed row-major ~m n~. Projection is
+the centering operator (~X 1 = 0~ by default, or
+~1^T X = 0~), retraction is ~X + U~ then center, transport is
+the identity. Not the sphere and not a 3N cluster. Tokens 7-10
+stay reserved. ~abi_minor~ 21.
+
+Positive orthant (~positive~ / ~RGMIN_MANIFOLD_POSITIVE~ = 21):
+manopt ~positivefactory~. Packed length ~n~. Projection is the
+identity, retraction is ~x odot exp(v oslash x)~, transport is
+the identity. Not the sphere and not a 3N cluster. Tokens 7-10
+stay reserved. ~abi_minor~ 20.
+
+Complex unit sphere (~spherecomplex~ /
+~RGMIN_MANIFOLD_SPHERE_COMPLEX~ = 20): manopt
+~spherecomplexfactory~. Interleaved ~(re, im)~, length ~2 n~.
+Projection is ~v - Re(x^* v) x~, retraction is ~(x+v)/||x+v||~,
+transport is projection at arrival. Not the real sphere and not
+~(S^1)^n~. Tokens 7-10 stay reserved. ~abi_minor~ 19.
+
+Symmetric doubly-stochastic matrices (~multinomialsymmetric~ /
+~RGMIN_MANIFOLD_MULTINOMIAL_SYM~ = 19): manopt
+~multinomialsymmetricfactory~. Packed row-major ~n^2~,
+~n >= 2~. Fisher projection, Sinkhorn+symm retraction, transport at
+arrival. A 3N cluster is rejected. Tokens 7-10 stay reserved.
+~abi_minor~ 18.
+
+Doubly-stochastic matrices (~multinomialdoublystochastic~ /
+~RGMIN_MANIFOLD_MULTINOMIAL_DS~ = 18): manopt
+~multinomialdoublystochasticfactory~. Packed row-major ~n^2~,
+~n >= 2~. Fisher projection, Sinkhorn retraction, transport at
+arrival. A 3N cluster is rejected. Tokens 7-10 stay reserved.
+~abi_minor~ 17.
+
+Constant singleton (~constant~ / ~RGMIN_MANIFOLD_CONSTANT~ = 17):
+manopt ~constantfactory~. Packed length ~n~. Projection and
+transport are the zero tangent, retraction is the fixed point.
+A 3N cluster is rejected. Tokens 7-10 stay reserved.
+~abi_minor~ 16.
+
+Complex Euclidean (~euclidean_complex~ /
+~RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX~ = 16): manopt
+~euclideancomplexfactory~. Interleaved ~(re, im)~, length ~2 n~.
+Projection is the identity, retraction is ~x + v~, transport is
+the identity. A 3N cluster is rejected. Tokens 7-10 stay reserved.
+~abi_minor~ 15.
+
+Skew-symmetric matrices (~skewsymmetric~ /
+~RGMIN_MANIFOLD_SKEWSYMMETRIC~ = 15): manopt ~skewsymmetricfactory~.
+Packed row-major ~n^2~, ~n >= 2~. Projection is ~multiskew~
+(~0.5 (A - A^T)~), retraction is ~X + U~, transport is the identity.
+A 3N cluster is rejected.
+
+Symmetric matrices (~symmetric~ / ~RGMIN_MANIFOLD_SYMMETRIC~ = 14):
+manopt ~symmetricfactory~. Packed row-major ~n^2~. Projection is
+symmetrization, retraction is ~X + U~, transport is the identity.
+A 3N cluster is rejected. Stamp layout 4.
+
+~xts.h~ declares the exported ~rgmin_minimize~ / ~rgmin_solver_*~
+symbols; ~xts_minimize~ and ~xts_solver_*~ are macro aliases.
+
+L-BFGS session ~Accept::None~ takes the clipped two-loop
+direction. Wolfe line search stays on Energy / Nonmonotone.
+
+SCG C waist: closed ~xts_conjugacy_t~ on ~xts_scg_params_t~
+(FR=0 .. FrPr=7, dest leaf order). ~params==NULL~ is Netlab
+Polak-Ribiere. Unknown codes are ~RGMIN_INVALID_PARAMETER~.
+Stamp 1.13.3. Hybrid and Restart stay Rust-only.
+
+Typed lowest-mode waist: closed ~EigensolverKind~ (Lanczos=0
+through EigenExa=13, ~schema/eigen.capnp~) and ~EigenParams~
+(~nev~, ~krylov~, ~max_iter~, ~tol~). No Text. C
+~rgmin_lowest_eigenpair~ plus ~rgmin_eigen_params_t~. Unlinked
+backends return ~RGMIN_UNAVAILABLE~.
 
 Molecular manifolds: ~rigid_quotient~ is Sella Cartesian
 ~R^{3N}/SE(3)~ (~fix_translation~ + ~fix_rotation~);
