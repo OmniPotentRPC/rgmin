@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The session projects the step, the FIRE velocity in the mass
+  metric, L-BFGS pairs, and the Lanczos and Newton-CG products
+  through one workspace. A Cartesian force is not run through that
+  metric.
 - L-BFGS projects each trial direction. Lanczos can project inside
   the product. Newton-CG accepts a session projector on `H v`.
 - The session stores the rigid mode, periodic axes, frozen mask,
