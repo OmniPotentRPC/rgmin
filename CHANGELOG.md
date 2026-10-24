@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The C ABI exports the rigid workspace, `rgmin_rigid_project`,
+  `rgmin_rigid_project_hessian`, and `rgmin_rigid_align`. A nonzero
+  `set_project_rigid` is Auto. `abi_minor` 35.
 - `MwRigid` stores `q = sqrt(m) x`. The chart metric is Euclidean
   in `q`. One atom is a quotient with three translations.
 - The session projects the step, the FIRE velocity in the mass
