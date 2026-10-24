@@ -96,6 +96,9 @@ The session caps the displacement and rescales the velocity to
 the step taken, grows and shrinks ~Δt~ with FIRE's factors (a
 zero power does not shrink it), and splits an atomic block from
 a cell block through ~Solver::set_quickmin_cell~.
+~project_out_rot_trans~ borrows one shared workspace. It no
+longer builds a private Gram-Schmidt basis.
+
 ~RigidWorkspace~ projects a vector and replaces ~H~ with ~P H P~.
 The caller owns the buffers. The workspace is reused after the
 first call at a given size.
