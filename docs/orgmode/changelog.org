@@ -96,6 +96,9 @@ The session caps the displacement and rescales the velocity to
 the step taken, grows and shrinks ~Δt~ with FIRE's factors (a
 zero power does not shrink it), and splits an atomic block from
 a cell block through ~Solver::set_quickmin_cell~.
+Tests cover frozen ranks, a slab, and quaternion alignment. The
+crate root exports ~RigidWorkspace~ and ~align_rigid~.
+
 Tests check that the projector is idempotent and symmetric in
 the active metric, and that a rigid motion of the geometry moves
 the projected vector.
