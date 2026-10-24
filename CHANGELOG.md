@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- L-BFGS projects each trial direction. Lanczos can project inside
+  the product. Newton-CG accepts a session projector on `H v`.
 - The session stores the rigid mode, periodic axes, frozen mask,
   and broken axes. `set_project_rigid(true)` is Auto. Steppers are
   unchanged.
