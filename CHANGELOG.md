@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Frozen coordinates are zeroed before the Eckart rank. One pin
+  keeps three rotations, two pins keep one axis, and three
+  non-collinear pins give rank 0.
 - The Eckart basis is ranked with column-pivoted QR. The tolerance
   is relative to the leading R diagonal. The six-by-six frozen
   overlap is diagonalized.
