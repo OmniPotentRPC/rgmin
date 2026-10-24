@@ -376,6 +376,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collapse geometrically and L-BFGS stalled far from `gtol` on a smooth
   convex energy. Steepest descent, NLCG and Adam keep the halving.
   `Control::istep` is documented as the opening step.
+- Frozen coordinates are zeroed before the Eckart rank. One pin
+  keeps three rotations, two pins keep one axis, and three
+  non-collinear pins give rank 0.
 - The Eckart basis is ranked with column-pivoted QR. The tolerance
   is relative to the leading R diagonal. The six-by-six frozen
   overlap is diagonalized.

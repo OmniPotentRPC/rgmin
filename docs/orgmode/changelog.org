@@ -96,6 +96,10 @@ The session caps the displacement and rescales the velocity to
 the step taken, grows and shrinks ~Δt~ with FIRE's factors (a
 zero power does not shrink it), and splits an atomic block from
 a cell block through ~Solver::set_quickmin_cell~.
+Frozen coordinates are zeroed before the Eckart rank. One pin
+keeps three rotations, two pins keep one axis, and three
+non-collinear pins give rank 0.
+
 The Eckart basis is ranked with column-pivoted QR. The tolerance
 is relative to the leading R diagonal. The six-by-six frozen
 overlap is diagonalized.
