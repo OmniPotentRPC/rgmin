@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The session stores the rigid mode, periodic axes, frozen mask,
+  and broken axes. `set_project_rigid(true)` is Auto. Steppers are
+  unchanged.
 - Tests cover frozen ranks, a slab, and quaternion alignment. The
   crate root exports `RigidWorkspace` and `align_rigid`.
 - Tests check that the projector is idempotent and symmetric in
