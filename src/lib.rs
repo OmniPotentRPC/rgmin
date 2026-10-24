@@ -153,7 +153,8 @@ pub use noise::{
     sample_gradient_noise_k, sample_noise, sample_value_gradient_noise,
 };
 pub use ode12r::{
-    Ode12rState, Ode12rVerdict, metric_norm as ode12r_metric_norm, taken_step as ode12r_taken_step,
+    Ode12rState, Ode12rVerdict, inf_norm as ode12r_inf_norm, local_error as ode12r_local_error,
+    taken_step as ode12r_taken_step,
 };
 pub use oracle::Oracle;
 pub use precon::{

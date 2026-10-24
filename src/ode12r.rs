@@ -2,35 +2,40 @@
 //!
 //! Makri, Ortner and Kermode, *A preconditioning scheme for minimum
 //! energy path finding methods*, J. Chem. Phys. 150, 094109 (2019),
-//! <https://doi.org/10.1063/1.5064465>, relax a band by integrating
-//! `dx/dt = P^{-1} F(x)` with forward Euler and an embedded second-order
-//! error estimate. `F = -∇E` (or a projected band force) and `P` is a
-//! metric; the identity when none is installed. One step of length `h`
-//! from `x` with `F = F(x)` and `s = P^{-1} F`:
+//! <https://doi.org/10.1063/1.5064465>, Sec. II C, relax a band by
+//! integrating `dx/dt = P^{-1} F(x)` with forward Euler and the error
+//! estimate of the embedded second-order (trapezoidal) solution. `F =
+//! -∇E` (or a projected band force) and `P` is the metric, the identity
+//! when none is installed. One trial of length `h` from `x` with `F =
+//! F(x)`, `s = P^{-1} F` and the same quantities primed at `x' = x + h s`:
 //!
 //! ```text
-//! x' = x + h s
-//! s' = P^{-1} F(x')
-//! e  = (h / 2) ||s - s'||_P = (h / 2) sqrt((F - F') · (s - s'))
-//! R  = ||F||_{P^{-1}} = sqrt(F · s),    R' = sqrt(F' · s')
+//! R  = ||F||_inf                       residual, Eq. (11): ||P s||_inf = ||F||_inf
+//! E  = (h / 2) ||s - s'||_inf          Euler against the trapezoidal solution
+//! accept when R' <= R (1 - c1 h), or R' <= c2 R and E <= rtol
+//! h_ode12 = (h / 2) sqrt(rtol / E)
+//! h_ls    = h (F . (s - s')) / ((F - F') . (s - s'))
+//! accepted: h <- max(h / 4,  min(extrapolate h, h_ls, h_ode12))
+//! rejected: h <- max(h / 10, min(h / 4,         h_ls, h_ode12))
 //! ```
 //!
-//! `e` is the difference between the Euler update and the trapezoidal
-//! update over the same step, the local truncation error of the
-//! first-order rule. The trial is accepted when the residual falls by
-//! the sufficient-decrease margin, `R' <= R (1 - c1 h)`, or when it stays
-//! within the growth bound `R' <= c2 R` while the relative error `e / R`
-//! is below `rtol`. An accepted step sets the next length to the smaller
-//! of the error estimate `(h / 2) sqrt(rtol R / e)` and the secant
-//! estimate `h (s · (s - s')) / ||s - s'||²`, kept within `[h / 4,
-//! extrapolate h]`. A rejected trial keeps `x` and takes `h` to the error
-//! estimate clamped to `[h / 10, h / 4]`.
+//! `E` is the local error of the Euler step against the trapezoidal one,
+//! `x + (h/2)(s + s') - x' = (h/2)(s' - s)`, in the infinity norm, as the
+//! authors' ODE12r implementation in ASE (`ase.optimize.ode`) computes it
+//! with `rtol` in force units; the paper's Eq. for `E` writes the same
+//! difference scaled by the coordinate magnitude. `h_ls` is the length at
+//! which the linear interpolant `(1 - θ) f + θ f'` of the preconditioned
+//! force is shortest in the `P`-norm, `||g||_P^2 = g . P g`, which in terms
+//! of `F` and `s` is the ratio above; on a quadratic surface with `P` the
+//! Hessian it is the Newton length. `extrapolate` is 4, `rtol` 0.1, and
+//! the contraction and growth constants `c1 = 1e-2`, `c2 = 2`.
 //!
 //! The session owns the clamps: the displacement cap shortens the move,
 //! and the step length that enters the error estimate is the one the
 //! move actually took, `h |Δx_taken| / |Δx_proposed|`, so a capped step
 //! is judged as the step it was. The next trial starts from the length
-//! the controller chose, not from the capped one.
+//! the controller chose, floored at an accepted capped move's length so
+//! that a cap the move already sits on cannot shrink the step further.
 
 use ndarray::Array1;
 
@@ -38,11 +43,11 @@ use ndarray::Array1;
 #[derive(Clone, Debug)]
 pub struct Ode12rState {
     /// Step length `h` for the next trial. Zero until the first step,
-    /// which opens at `istep`.
+    /// which opens at `h0`.
     pub h: f64,
     /// Opening step length.
     pub h0: f64,
-    /// Relative local error accepted with the growth bound.
+    /// Local error accepted with the growth bound, in force units.
     pub rtol: f64,
     /// Sufficient-decrease coefficient of the residual test.
     pub c1: f64,
@@ -63,9 +68,9 @@ pub struct Ode12rState {
 pub struct Ode12rVerdict {
     /// The trial geometry is kept.
     pub accepted: bool,
-    /// Relative local error `e / R` of the trial.
-    pub relative_error: f64,
-    /// Residual at the trial geometry.
+    /// Local error `E` of the trial.
+    pub error: f64,
+    /// Residual `||F'||_inf` at the trial geometry.
     pub residual_new: f64,
     /// Step length for the next trial.
     pub h_next: f64,
@@ -73,7 +78,7 @@ pub struct Ode12rVerdict {
 
 impl Ode12rState {
     /// Paper parameters: `rtol = 0.1`, `c1 = 1e-2`, `c2 = 2`, growth at
-    /// most threefold. `istep` opens the integration.
+    /// most fourfold. `istep` opens the integration.
     #[must_use]
     pub fn new(istep: f64) -> Self {
         let h0 = if istep.is_finite() && istep > 0.0 {
@@ -87,7 +92,7 @@ impl Ode12rState {
             rtol: 0.1,
             c1: 1e-2,
             c2: 2.0,
-            extrapolate: 3.0,
+            extrapolate: 4.0,
             h_min: 1e-10,
             accepted: 0,
             rejected: 0,
@@ -114,48 +119,44 @@ impl Ode12rState {
     ///
     /// `force` and `steepest` are `F` and `s = P^{-1} F` at `x`,
     /// `force_new` and `steepest_new` the same at `x'`, `h` the length
-    /// the move actually took, `residual` is `||F||_{P^{-1}}` at `x`.
+    /// the move actually took.
     pub fn judge(
         &mut self,
-        residual: f64,
         force: &Array1<f64>,
         steepest: &Array1<f64>,
         force_new: &Array1<f64>,
         steepest_new: &Array1<f64>,
         h: f64,
     ) -> Ode12rVerdict {
-        let residual_new = metric_norm(force_new, steepest_new);
+        let residual = inf_norm(force);
+        let residual_new = inf_norm(force_new);
         let y = steepest - steepest_new;
-        let df = force - force_new;
-        let error = 0.5 * h * crate::vecops::dot(df.view(), y.view()).max(0.0).sqrt();
-        let relative = if residual > 0.0 {
-            error / residual
-        } else {
-            0.0
-        };
+        let error = local_error(h, &y);
         let accepted = residual_new <= residual * (1.0 - self.c1 * h)
-            || (residual_new <= self.c2 * residual && relative <= self.rtol);
-        let h_error = if relative > f64::EPSILON {
-            0.5 * h * (self.rtol / relative).sqrt()
+            || (residual_new <= self.c2 * residual && error <= self.rtol);
+        let h_ode12 = if error > f64::EPSILON {
+            0.5 * h * (self.rtol / error).sqrt()
         } else {
-            self.extrapolate * h
+            f64::INFINITY
+        };
+        let df = force - force_new;
+        let denominator = crate::vecops::dot(df.view(), y.view());
+        let h_ls = if denominator > f64::EPSILON {
+            h * crate::vecops::dot(force.view(), y.view()) / denominator
+        } else {
+            f64::INFINITY
+        };
+        let h_ls = if h_ls.is_finite() && h_ls > 0.0 {
+            h_ls
+        } else {
+            f64::INFINITY
         };
         let h_next = if accepted {
-            let yy = crate::vecops::dot(y.view(), y.view());
-            let h_secant = if yy > f64::EPSILON {
-                h * crate::vecops::dot(steepest.view(), y.view()) / yy
-            } else {
-                self.extrapolate * h
-            };
-            let bounded = h_error
-                .min(h_secant)
-                .min(self.extrapolate * h)
-                .max(0.25 * h);
             self.accepted += 1;
-            bounded
+            (self.extrapolate * h).min(h_ls).min(h_ode12).max(0.25 * h)
         } else {
             self.rejected += 1;
-            h_error.clamp(0.1 * h, 0.25 * h)
+            (0.25 * h).min(h_ls).min(h_ode12).max(0.1 * h)
         };
         let h_next = if h_next.is_finite() {
             h_next.max(self.h_min)
@@ -165,20 +166,24 @@ impl Ode12rState {
         self.h = h_next;
         Ode12rVerdict {
             accepted,
-            relative_error: relative,
+            error,
             residual_new,
             h_next,
         }
     }
 }
 
-/// `||F||_{P^{-1}} = sqrt(F · P^{-1} F)` from the force and its
-/// preconditioned image.
+/// `||v||_inf`.
 #[must_use]
-pub fn metric_norm(force: &Array1<f64>, steepest: &Array1<f64>) -> f64 {
-    crate::vecops::dot(force.view(), steepest.view())
-        .max(0.0)
-        .sqrt()
+pub fn inf_norm(v: &Array1<f64>) -> f64 {
+    v.iter().fold(0.0_f64, |m, a| m.max(a.abs()))
+}
+
+/// Local error of the Euler step against the trapezoidal one,
+/// `(h / 2) ||s - s'||_inf`, from the difference `y = s - s'`.
+#[must_use]
+pub fn local_error(h: f64, y: &Array1<f64>) -> f64 {
+    0.5 * h * inf_norm(y)
 }
 
 /// Step length the move actually took when a cap or clip shortened the
@@ -204,16 +209,13 @@ mod tests {
     }
 
     #[test]
-    fn an_exact_euler_step_on_a_linear_force_has_no_error_only_when_the_force_is_constant() {
-        // Constant force: Euler and trapezoid agree, so the relative
-        // error is zero and the step grows by the extrapolation bound.
+    fn a_constant_force_has_no_error_and_grows_the_step_fourfold() {
         let mut state = Ode12rState::new(0.5);
         let f = array![1.0, -2.0];
-        let residual = metric_norm(&f, &f);
-        let verdict = state.judge(residual, &f, &f, &f, &f, 0.5);
+        let verdict = state.judge(&f, &f, &f, &f, 0.5);
         assert!(verdict.accepted);
-        assert_eq!(verdict.relative_error, 0.0);
-        assert!((verdict.h_next - 1.5).abs() < 1e-12);
+        assert_eq!(verdict.error, 0.0);
+        assert!((verdict.h_next - 2.0).abs() < 1e-12);
     }
 
     #[test]
@@ -225,33 +227,45 @@ mod tests {
         let h = state.open();
         let x_new = &x + &f.mapv(|v| h * v); // Euler with h k = 40: overshoot
         let f_new = quad_force(&k, &x_new);
-        let residual = metric_norm(&f, &f);
-        let verdict = state.judge(residual, &f, &f, &f_new, &f_new, h);
+        let verdict = state.judge(&f, &f, &f_new, &f_new, h);
         assert!(!verdict.accepted);
-        assert!(verdict.h_next < 0.25 * h + 1e-15);
+        assert!(verdict.h_next <= 0.25 * h + 1e-15);
         assert!(verdict.h_next >= 0.1 * h - 1e-15);
         assert_eq!(state.rejected, 1);
     }
 
     #[test]
-    fn the_secant_estimate_lands_on_the_minimum_of_a_quadratic() {
-        // On E = k x^2 / 2 the secant step h (s.y)/(y.y) is 1/k, the exact
-        // Newton length, whichever h was tried (short of the error bound).
+    fn the_line_search_candidate_is_the_newton_length_on_a_quadratic() {
+        // On E = k x^2 / 2 the interpolant of the force vanishes at
+        // theta h = 1 / k whichever h was tried; with a loose rtol the
+        // extrapolation bound 4 h = 0.4 wins over 1 / k = 0.5.
         let k = array![2.0, 2.0];
         let x = array![1.0, -1.0];
         let f = quad_force(&k, &x);
         let mut state = Ode12rState::new(0.1);
-        state.rtol = 10.0; // leave the choice to the secant
+        state.rtol = 1e3;
         let h = state.open();
         let x_new = &x + &f.mapv(|v| h * v);
         let f_new = quad_force(&k, &x_new);
-        let residual = metric_norm(&f, &f);
-        let verdict = state.judge(residual, &f, &f, &f_new, &f_new, h);
+        let verdict = state.judge(&f, &f, &f_new, &f_new, h);
         assert!(verdict.accepted);
-        assert!(
-            (verdict.h_next - 0.3).abs() < 1e-12,
-            "secant 1/k = 0.5 is capped at 3 h = 0.3"
-        );
+        assert!((verdict.h_next - 0.4).abs() < 1e-12, "{}", verdict.h_next);
+        // A looser growth bound exposes the line-search length.
+        let mut state = Ode12rState::new(0.2);
+        state.rtol = 1e3;
+        state.extrapolate = 10.0;
+        let h = state.open();
+        let x_new = &x + &f.mapv(|v| h * v);
+        let f_new = quad_force(&k, &x_new);
+        let verdict = state.judge(&f, &f, &f_new, &f_new, h);
+        assert!((verdict.h_next - 0.5).abs() < 1e-12, "{}", verdict.h_next);
+    }
+
+    #[test]
+    fn the_local_error_is_half_the_step_times_the_largest_force_change() {
+        let y = array![0.2, -0.6, 0.1];
+        assert!((local_error(0.5, &y) - 0.15).abs() < 1e-15);
+        assert_eq!(local_error(0.5, &array![0.0, 0.0]), 0.0);
     }
 
     #[test]

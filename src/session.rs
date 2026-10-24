@@ -2105,7 +2105,6 @@ impl Solver {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
                 }
-                let residual = crate::ode12r::metric_norm(&force, &steepest);
                 let h = state.open();
                 let dx = steepest.mapv(|v| h * v);
                 let mut trial = &*x + &dx;
@@ -2126,14 +2125,14 @@ impl Solver {
                     crate::box_objective::project_tangent(obj.bounds(), &trial, &mut force_new);
                     crate::box_objective::project_tangent(obj.bounds(), &trial, &mut steepest_new);
                 }
-                let verdict = state.judge(
-                    residual,
-                    &force,
-                    &steepest,
-                    &force_new,
-                    &steepest_new,
-                    h_taken,
-                );
+                let verdict = state.judge(&force, &steepest, &force_new, &steepest_new, h_taken);
+                // An accepted move that the cap shortened is a length the
+                // surface took; the next trial starts no shorter, so the
+                // error estimate of a cap-bound move cannot shrink the
+                // step below the cap it is already held at.
+                if verdict.accepted && h_taken < h {
+                    state.h = state.h.max(h_taken);
+                }
                 if verdict.accepted {
                     *x = trial;
                     value = trial_value;

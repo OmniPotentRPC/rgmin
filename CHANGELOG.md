@@ -18,7 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Method::Ode12r` (C `RGMIN_ODE12R`, ABI minor 34): forward Euler on
   `P^{-1} F` with the embedded second-order error estimate, the
   residual-controlled acceptance and the adaptive step of Makri, Ortner
-  and Kermode (J. Chem. Phys. 150, 094109, 2019). `src/ode12r.rs` holds
+  and Kermode (J. Chem. Phys. 150, 094109, 2019), Sec. II C as written:
+  the residual is the infinity norm of the force, the local error is
+  half the step times the infinity norm of the preconditioned force
+  difference (the authors' ASE `ode12r`), the line-search candidate is
+  the length at which the force interpolant is shortest in the `P`-norm,
+  and the step grows at most fourfold (`rtol = 0.1`, `c1 = 1e-2`,
+  `c2 = 2`). `src/ode12r.rs` holds
   the rule (`Ode12rState::judge`), the session owns the clamps: a capped
   move is judged at the length it took, a rejected trial keeps the
   iterate and the next call retries from the cache with a shorter step,

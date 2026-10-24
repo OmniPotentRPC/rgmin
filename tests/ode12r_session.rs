@@ -1,6 +1,7 @@
 //! ODE12r through the session: one oracle call per trial, a rejected
 //! trial that leaves the iterate alone, the displacement cap, and the
-//! Exp metric on a chain whose Hessian is that metric.
+//! Exp metric on a chain whose Hessian is that metric, where the
+//! integration takes Newton steps.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -144,9 +145,11 @@ fn forget_reopens_at_the_initial_step() {
     );
 }
 
-/// Quadratic whose Hessian is the Exp metric of a chain.
+/// Quadratic `E = (x - x0) . P (x - x0) / 2` whose Hessian is the Exp
+/// metric of a chain and whose minimum is the chain itself.
 struct FixedMetric {
     p: Exp,
+    centre: Array1<f64>,
     bounds: Bounds<f64>,
 }
 
@@ -158,7 +161,8 @@ impl Objective<f64> for FixedMetric {
         &self.bounds
     }
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
-        0.5 * x.dot(&self.p.apply(x))
+        let d = &x - &self.centre;
+        0.5 * d.dot(&self.p.apply(d.view()))
     }
 }
 
@@ -167,14 +171,16 @@ impl Gradient<f64> for FixedMetric {
         self.p.dim()
     }
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
-        self.p.apply(x)
+        let d = &x - &self.centre;
+        self.p.apply(d.view())
     }
 }
 
 impl DifferentiableObjective<f64> for FixedMetric {
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let g = self.p.apply(x);
-        (0.5 * x.dot(&g), g)
+        let d = &x - &self.centre;
+        let g = self.p.apply(d.view());
+        (0.5 * d.dot(&g), g)
     }
 }
 
@@ -203,6 +209,7 @@ fn chain_steps(precon: bool) -> usize {
     let metric = Exp::assemble(geom.view(), &neigh, &params, 1.0, 1.0).unwrap();
     let obj = FixedMetric {
         p: metric,
+        centre: geom.clone(),
         bounds: Bounds::new(
             Array1::from_elem(3 * n, -1e6),
             Array1::from_elem(3 * n, 1e6),
@@ -226,35 +233,33 @@ fn chain_steps(precon: bool) -> usize {
     }
     let mut taken = 0;
     for _ in 0..400 {
-        let gnorm = obj.grad(x.view()).dot(&obj.grad(x.view())).sqrt();
+        let g = obj.grad(x.view());
+        let gnorm = g.dot(&g).sqrt();
         if gnorm < 1e-8 {
             break;
         }
         solver.step(&obj, &mut x).unwrap();
         taken += 1;
     }
+    eprintln!("chain with exp metric {precon}: {taken} trials");
     taken
 }
 
 #[test]
-fn the_exp_metric_converges_the_chain_where_the_plain_integration_does_not() {
-    // With P equal to the Hessian, P^{-1} F points at the minimum, but
-    // ODE12r integrates dx/dt = -x rather than taking the Newton step:
-    // the local error of Euler on that flow is h^2 / 2 relative to the
-    // residual, so the controller holds h at sqrt(2 rtol) / 2 = 0.2236
-    // and the residual contracts by 0.776 per trial. From |g| ~ 0.6 to
-    // 1e-8 that is about 70 trials plus the ones spent while the metric
-    // is rebuilt at the moved atoms. The plain integration is limited
-    // by the stiff bond modes and does not reach gtol in 400 trials.
+fn the_exp_metric_takes_the_newton_steps_on_the_chain() {
+    // With P equal to the Hessian, P^{-1} F points at the minimum and the
+    // force interpolant of the paper's line search vanishes at the Newton
+    // length: h_ls = h (F . y) / (dF . y) = 1 for every tried h. The error
+    // control h_ode12 = (1/2) sqrt(2 rtol / ||x - x0||_inf) grows as the
+    // chain closes on the minimum, and once it passes 1 the step is the
+    // Newton step: 0.1, 0.4, 0.53, 0.68, 0.99, 1, converged. Measured:
+    // six trials with the metric, 93 without, where the stiff bond modes
+    // bound the Euler step.
     let with = chain_steps(true);
     let without = chain_steps(false);
+    assert!(with <= 8, "expected the Newton steps, took {with} trials");
     assert!(
-        with < without,
-        "preconditioned {with} steps, plain {without}"
+        without >= 10 * with,
+        "preconditioned {with} trials, plain {without}"
     );
-    assert!(
-        (60..=95).contains(&with),
-        "expected about 80 trials, took {with}"
-    );
-    assert_eq!(without, 400, "plain run converged in {without} trials");
 }
