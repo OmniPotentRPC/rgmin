@@ -578,7 +578,8 @@ fn c_abi_diis_reduces_a_quadratic() {
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let mut last = f64::INFINITY;
-    for _ in 0..20 {
+    // The default per-atom cap of 0.2 shortens the early DIIS steps.
+    for _ in 0..80 {
         let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
         let st = unsafe {
             rgmin_solver_step(

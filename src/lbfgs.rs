@@ -757,7 +757,14 @@ impl Lbfgs {
                 });
             }
             let stall = self.step_objective(
-                obj, &mut pos, &mut value, &mut grad, &mut istep, linesearch, control, None,
+                obj,
+                &mut pos,
+                &mut value,
+                &mut grad,
+                &mut istep,
+                linesearch,
+                control,
+                crate::step::implicit_atom_cap(control),
             );
             if stall {
                 return Ok(energy_noise_report(value, pos, step + 1, gnorm));

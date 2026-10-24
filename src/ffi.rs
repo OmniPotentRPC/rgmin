@@ -2255,7 +2255,12 @@ pub unsafe extern "C" fn rgmin_solver_set_objective_roundoff(
     }
 }
 
-/// eOn `maxAtomMotionAppliedV`. Non-positive disables it.
+/// eOn `maxAtomMotionAppliedV`.
+///
+/// A new Cartesian session starts at 0.2. A positive value replaces
+/// that default. A non-positive value clears the cap. A positive
+/// Euclidean `maxmove` on the control, with no call here, is the step
+/// limit instead.
 ///
 /// # Safety
 ///

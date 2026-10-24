@@ -37,6 +37,8 @@ fn session_box_reaches_the_constrained_quadratic_minimum() {
     });
     let mut solver = Solver::new(Method::lbfgs(), Control::default(), 2).with_gtol(1e-10);
     solver.set_highs(true);
+    // The free step from 3 to 0 is longer than the default per-atom cap.
+    solver.set_atom_maxmove(0.0);
     assert!(solver.set_box(Some(vec![f64::NEG_INFINITY, 0.0]), None));
     let mut x = array![3.0, 1e-8];
     let report = solver.step(&obj, &mut x).unwrap();
@@ -83,6 +85,8 @@ fn session_box_normal_does_not_hide_a_free_gradient() {
     let mut x = array![1.0, 2.0];
     let mut solver = Solver::new(Method::lbfgs(), Control::default(), 2).with_gtol(1e-10);
     solver.set_highs(true);
+    // The free coordinate moves by 2, past the default per-atom cap.
+    solver.set_atom_maxmove(0.0);
     assert!(solver.set_box(Some(vec![1.0, -10.0]), Some(vec![10.0, 10.0])));
     let report = solver.step(&obj, &mut x).unwrap();
     assert!(report.steps > 0);
@@ -449,6 +453,8 @@ fn session_equality_and_trust_reach_the_constrained_model_solution() {
     });
     let mut solver = Solver::new(Method::lbfgs(), Control::default(), 2);
     solver.set_highs(true);
+    // The trust box and the later free step are the limits under test.
+    solver.set_atom_maxmove(0.0);
     assert!(solver.set_trust(0.2));
     assert!(solver.add_equality(vec![(0, 1.0), (1, 1.0)], 0.0));
     let mut x = array![0.0, 0.0];
@@ -488,6 +494,8 @@ fn a_rounded_wall_does_not_halve_the_free_step() {
                 2,
             );
             solver.set_highs(true);
+            // The wall sits several units from the start.
+            solver.set_atom_maxmove(0.0);
             let lo = if sign > 0.0 { wall } else { f64::NEG_INFINITY };
             let hi = if sign < 0.0 { -wall } else { f64::INFINITY };
             assert!(solver.set_box(Some(vec![lo, -10.0]), Some(vec![hi, 10.0])));

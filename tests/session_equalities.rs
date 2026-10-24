@@ -17,6 +17,8 @@ fn check_line_search_rollback(curvature: f64, minimum: f64, rhs: f64, expands: b
     });
     let mut solver = Solver::new(Method::lbfgs(), Control::default(), 1);
     solver.set_highs(true);
+    // The equality and the later free step are longer than the default cap.
+    solver.set_atom_maxmove(0.0);
     assert!(solver.add_equality(vec![(0, 1.0)], rhs));
     let start = array![0.0];
     let mut x = start.clone();
@@ -123,6 +125,8 @@ fn equality_accepts_a_feasible_unscaled_displacement() {
     let mut solver = Solver::new(Method::lbfgs(), Control::default(), 1);
     solver.set_accept(Accept::Step);
     solver.set_highs(true);
+    // The equality asks for a step of 0.25, past the default cap.
+    solver.set_atom_maxmove(0.0);
     assert!(solver.add_equality(vec![(0, 1.0)], 0.25));
     let mut x = array![0.0];
     let report = solver.step(&objective, &mut x).unwrap();

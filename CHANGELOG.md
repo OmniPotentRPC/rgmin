@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The default per-atom cap is chosen per method. A Cartesian
+  session installs 0.2 for steepest descent, nonlinear CG, L-BFGS,
+  SR1, SR2, Newton, RFO, FIRE 1.0, quick-min, DIIS,
+  Barzilai-Borwein, Adam, and PSO. BFGS, dogleg, and FIRE 2.0 leave
+  that default off. BFGS takes the length from a strong Wolfe line
+  search (Nocedal and Wright, algorithms 3.5 and 3.6,
+  https://doi.org/10.1007/978-0-387-40065-5). Dogleg keeps the step
+  in a Euclidean trust region and updates the radius from the
+  model-agreement ratio on that step (Nocedal and Wright, algorithm
+  4.1). A per-atom clip after the dogleg point shortens a boundary
+  step, the ratio update reads an interior length, and the radius
+  stays put. The same clip also becomes the radius ceiling.
+  FIRE 2.0 sizes the move with its own `dt` (Guénolé et al. 2020,
+  https://doi.org/10.1016/j.commatsci.2020.109584, when that
+  schedule is selected, and the FIRE 2.0 integrator otherwise).
+  Newton keeps the cap: the session takes the shifted step under
+  `Accept::None`, with no trust radius of its own. One-shot SR1
+  and SR2 pass the cap into `sr_trust_limits` and then clip the
+  trial with `scale_step_atom`. One-shot BFGS passes no atom cap
+  into the line search. `scale_step_atom` limits the largest
+  per-atom displacement. It does not limit the Euclidean norm of
+  the whole step. `set_atom_maxmove` still applies to every method,
+  including a value above 0.2. A non-positive value clears the cap,
+  and that choice stays if `set_maxmove` or `set_manifold` runs later.
+  A positive `Control.maxmove`, with no call to `set_atom_maxmove`, is
+  the Euclidean step limit and leaves the per-atom default off. A
+  non-Cartesian manifold has no default. Switching a FIRE session to
+  the Guénolé schedule drops the implicit cap. Switching it back
+  follows the kind then in force. The C setter is
+  `rgmin_solver_set_atom_maxmove`. Python `maxstep` and `atom_maxmove`
+  are that setter. `OptimizeControl.maxmove` is 0, so the C++
+  `optimize` helper keeps the method's per-atom default. ASE
+  `Optimizer.defaults` is `{"maxstep": 0.2}` in
+  `ase/optimize/optimize.py` at tag 3.29.0,
+  https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/optimize.py.
+  eOn documents `max_move` as 0.2 Å,
+  https://henkelmanlab.org/eon/optimizer.html. `OptimizerOptions.maxMove`
+  is `0.2` in `schema/eon_params.capnp` at `4be157d4`,
+  https://github.com/TheochemUI/eOn/blob/4be157d43265af6b1140aaac0e52e42add62693f/schema/eon_params.capnp.
+  On the half-scaled seed-1 packing from `bench/atomistic` `lj38`,
+  clearing the cap lets the first L-BFGS and BFGS atom move
+  256.0348909921298. That cleared step is the BFGS default. The
+  same start with Euclidean `maxmove` 1000 finishes in one L-BFGS
+  step at energy -0.0000007684753483636236 with a pair of
+  715.2615061441937. The L-BFGS default cap reaches tolerance in
+  199 steps at -169.49430900932856 with maximum pair
+  3.895343497108207. With the cap set to 0.2, BFGS on that start
+  finishes in 540 steps at -166.8029675390938 with maximum pair
+  4.185205749883185. The peak per-atom step was 0.2 for L-BFGS and
+  0.20000000000000015 for that capped BFGS run.
+- SR1 stores the direct Hessian and steps with dogleg when that model
+  is positive definite, otherwise with the Cauchy point, inside a
+  Nocedal-Wright trust region. A line search on the inverse SR1 Hessian
+  flips the sign of an uphill direction and then skips the update.
+- SR2 is Powell's symmetric Broyden update in that same trust region.
+  The old rank-1 map was neither symmetric nor secant.
+- DIIS searches along the GDIIS image `sum c_i (x_i - α g_i)` when that
+  direction is downhill. A displacement past eight caps, an uphill
+  image, or a step that does not lower the force drops the history and
+  takes a steepest step. The line search chooses the length.
+- Adam scales the Kingma-Ba direction to unit max-atom length and opens
+  the next line search at the accepted step.
+
 ### Breaking
 
 - `Method` is `#[non_exhaustive]`: a match on it outside rgmin needs a

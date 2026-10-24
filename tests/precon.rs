@@ -81,6 +81,8 @@ fn steps_until(precon: bool, estimate: bool) -> (usize, Option<f64>) {
         noise_floor: None,
     };
     let mut solver = Solver::new(Method::Lbfgs { memory: 5 }, control, x.len());
+    // The metric's Newton step is longer than the default per-atom cap.
+    solver.set_atom_maxmove(0.0);
     if precon {
         if estimate {
             params.mu = None;
@@ -143,6 +145,8 @@ fn steps_of(method: Method, precon: bool, limit: usize, istep: f64) -> (usize, f
         noise_floor: None,
     };
     let mut solver = Solver::new(method, control, x.len());
+    // Iteration counts here are the metric's, not the default cap's.
+    solver.set_atom_maxmove(0.0);
     if precon {
         solver.set_exp(geom.view(), &neigh, &params).unwrap();
     }
@@ -303,6 +307,8 @@ fn steps_on(
     obj: &impl DifferentiableObjective<f64>,
     x0: &Array1<f64>,
 ) -> usize {
+    // Bond lengths in the start sit past the default per-atom cap.
+    solver.set_atom_maxmove(0.0);
     let mut x = x0.clone();
     let mut taken = 0;
     for _ in 0..40 {

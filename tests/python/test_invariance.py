@@ -27,7 +27,8 @@ LJ38 = "e40ce10a3ff8a9622188ac2e08e139c7afddfdbc0fb34221b0cf71f06ee6afba"
 PT7_EMT = "c10b0f1f1d1a12fe4c667b2afc253b318020965a03cb07150e010384c7bd50a9"
 PT7_EMT_WINDOWS = "32ecfa5c86916033bd1b82dbd1059f3777ec6e386eb416f0b9c69b4df96074c8"
 # rgmin Solver, pure-Python diagonal quadratic, no NumPy pin.
-RGMIN_QUADRATIC = "4089c6795cff087829ecbd384dcdb4b34c50b47dd9a7140eee0d5eaa946c8356"
+# The solver uses the default per-atom cap of 0.2.
+RGMIN_QUADRATIC = "c133a0ce135758cf1c34cadfd8249b1351369c5886655f15b705784d4671964e"
 
 # NumPy 2.2 still dispatches AVX512F and AVX512_ICL by those names.
 # NumPy 2.5 dispatches X86_V3, X86_V4, and AVX512_ICL. A name that is
@@ -258,7 +259,8 @@ def test_rgmin_quadratic_golden() -> None:
     """rgmin's own potential matches on every runner with no kernel pin.
 
     Eight L-BFGS steps on a diagonal quadratic. The objective uses
-    Python arithmetic. The start frame is part of the hash.
+    Python arithmetic. The start frame is part of the hash. The
+    solver takes the default per-atom cap.
     """
     import rgmin
 

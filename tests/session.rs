@@ -125,6 +125,9 @@ fn lbfgs_newton_on_a_supplied_hessian_kills_a_quadratic() {
     let obj = Quad;
     let mut x = array![2.0, -3.0];
     let mut solver = Solver::new(Method::lbfgs(), control(), 2).with_gtol(1e-10);
+    // The Newton step from this start is longer than the default
+    // per-atom cap. The test checks that exact step.
+    solver.set_atom_maxmove(0.0);
     solver.set_qn_step(QnStep::Newton);
     let rep = solver.step_hess(&obj, &mut x).unwrap();
     assert!(rep.value < 1e-12, "newton-on-P value {}", rep.value);
@@ -460,6 +463,9 @@ fn nlcg_second_step_is_not_steepest() {
     let mut b = array![-1.2, 1.0];
     let mut pr = Solver::new(Method::polak_ribiere(), control(), 2);
     let mut sd = Solver::new(Method::Steepest, control(), 2);
+    // The default per-atom cap clips both second steps onto one point.
+    pr.set_atom_maxmove(0.0);
+    sd.set_atom_maxmove(0.0);
     let _ = pr.step(&obj, &mut a).unwrap();
     let _ = sd.step(&obj, &mut b).unwrap();
     let _ = pr.step(&obj, &mut a).unwrap();
@@ -610,6 +616,9 @@ fn dogleg_kills_a_quadratic() {
         },
         2,
     );
+    // The opening radius is istep 4, which contains the Newton step.
+    // The default leaves the per-atom cap off, so the trust step is
+    // the one that is taken.
     let mut last = None;
     for _ in 0..8 {
         let rep = solver.step_hess(&obj, &mut x).unwrap();

@@ -221,6 +221,10 @@ fn chain_steps(precon: bool) -> usize {
         noise_floor: None,
     };
     let mut solver = Solver::new(Method::Ode12r, control, x.len());
+    // The comparison is metric against none; the Cartesian session's
+    // default per-atom cap would bind on the first trials and count
+    // against both runs, so it is cleared here.
+    solver.set_atom_maxmove(0.0);
     if precon {
         solver.set_exp(geom.view(), &neigh, &params).unwrap();
     }
