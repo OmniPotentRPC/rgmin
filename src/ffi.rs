@@ -2488,6 +2488,10 @@ pub unsafe extern "C" fn rgmin_solver_set_project_rigid(solver: *mut rgmin_solve
 }
 
 /// `0` off, `1` auto, `2` translation, `3` translation and rotation.
+///
+/// # Safety
+///
+/// A non-null `solver` must be a live session from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_rigid_mode(solver: *mut rgmin_solver_t, mode: i32) {
     if solver.is_null() {
@@ -2501,6 +2505,10 @@ pub unsafe extern "C" fn rgmin_solver_set_rigid_mode(solver: *mut rgmin_solver_t
 }
 
 /// Cartesian mass inner product. A raw force leaves this at zero.
+///
+/// # Safety
+///
+/// A non-null `solver` must be a live session from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_rigid_mass_metric(
     solver: *mut rgmin_solver_t,
@@ -2513,6 +2521,10 @@ pub unsafe extern "C" fn rgmin_solver_set_rigid_mass_metric(
 }
 
 /// Coordinates store `q_i = sqrt(m_i) x_i`. Not both this and the mass metric.
+///
+/// # Safety
+///
+/// A non-null `solver` must be a live session from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_rigid_mass_weighted(
     solver: *mut rgmin_solver_t,
@@ -2525,6 +2537,10 @@ pub unsafe extern "C" fn rgmin_solver_set_rigid_mass_weighted(
 }
 
 /// Periodic axes. A slab is `(1, 1, 0)`.
+///
+/// # Safety
+///
+/// A non-null `solver` must be a live session from [`rgmin_solver_create`]; pointer arguments are null or valid for the documented length.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_pbc_axes(
     solver: *mut rgmin_solver_t,
@@ -2539,6 +2555,10 @@ pub unsafe extern "C" fn rgmin_solver_set_pbc_axes(
 }
 
 /// Length `3N`. A nonzero byte freezes that coordinate. Null or `len == 0` clears it.
+///
+/// # Safety
+///
+/// A non-null `solver` must be a live session from [`rgmin_solver_create`]; pointer arguments are null or valid for the documented length.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_frozen(
     solver: *mut rgmin_solver_t,
@@ -2557,6 +2577,10 @@ pub unsafe extern "C" fn rgmin_solver_set_frozen(
 }
 
 /// Broken translations, then broken rotations. The host sets both.
+///
+/// # Safety
+///
+/// A non-null `solver` must be a live session from [`rgmin_solver_create`]; pointer arguments are null or valid for the documented length.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_broken_axes(
     solver: *mut rgmin_solver_t,
@@ -3184,6 +3208,10 @@ pub struct rgmin_rigid_workspace_t {
 }
 
 /// Empty workspace.
+///
+/// # Safety
+///
+/// The returned workspace is owned by the caller and released with [`rgmin_rigid_workspace_free`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_rigid_workspace_new() -> *mut rgmin_rigid_workspace_t {
     Box::into_raw(Box::new(rgmin_rigid_workspace_t {
@@ -3192,6 +3220,10 @@ pub unsafe extern "C" fn rgmin_rigid_workspace_new() -> *mut rgmin_rigid_workspa
 }
 
 /// Free a workspace from [`rgmin_rigid_workspace_new`].
+///
+/// # Safety
+///
+/// `ws` is null or a workspace from [`rgmin_rigid_workspace_new`] that has not been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_rigid_workspace_free(ws: *mut rgmin_rigid_workspace_t) {
     if !ws.is_null() {
@@ -3200,6 +3232,10 @@ pub unsafe extern "C" fn rgmin_rigid_workspace_free(ws: *mut rgmin_rigid_workspa
 }
 
 /// Rank of the last project or project-hessian on this workspace.
+///
+/// # Safety
+///
+/// `ws` is null or a live workspace from [`rgmin_rigid_workspace_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_rigid_workspace_rank(ws: *const rgmin_rigid_workspace_t) -> usize {
     if ws.is_null() {
@@ -3224,6 +3260,10 @@ fn rigid_masses<'a>(
 }
 
 /// `P v` in place. `n_mass == 0` is unit mass. A null `frozen` is no freeze.
+///
+/// # Safety
+///
+/// `ws` is a live workspace from [`rgmin_rigid_workspace_new`]; every pointer argument is null or valid for the documented length.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_rigid_project(
     ws: *mut rgmin_rigid_workspace_t,
@@ -3279,6 +3319,10 @@ pub unsafe extern "C" fn rgmin_rigid_project(
 }
 
 /// Replace row-major `H` (`n * n`) with `P H P`.
+///
+/// # Safety
+///
+/// `ws` is a live workspace from [`rgmin_rigid_workspace_new`]; every pointer argument is null or valid for the documented length.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_rigid_project_hessian(
     ws: *mut rgmin_rigid_workspace_t,
@@ -3335,6 +3379,10 @@ pub unsafe extern "C" fn rgmin_rigid_project_hessian(
 
 /// Horn / Coutsias alignment. Any periodic axis skips the rotation.
 /// Writes the RMSD when `rmsd` is non-null.
+///
+/// # Safety
+///
+/// Every pointer argument is null or valid for the documented length.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_rigid_align(
     mobile: *mut f64,
