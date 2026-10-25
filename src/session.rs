@@ -34,7 +34,7 @@ use crate::quickmin::{
     quickmin_session_step,
 };
 use crate::report::{Report, Status};
-use crate::rigid::{project_horizontal, project_out_rot_trans};
+use crate::rigid::{RigidMode, RigidWorkspace};
 use crate::step::{
     Taken, cap_alpha, l2, next_istep, nlcg_opening_alpha, qn_istep, scale_step, scale_step_atom,
     take_step_with_options,
@@ -68,6 +68,62 @@ fn metric_vector(precon: &Option<Slot>, v: &Array1<f64>) -> Result<Array1<f64>> 
                 what: "linear solve failed",
             })
         }
+    }
+}
+
+/// Remove rigid motion at the anchor stored on `ws`.
+#[allow(clippy::too_many_arguments)]
+fn eckart(
+    ws: &mut RigidWorkspace,
+    mode: RigidMode,
+    masses: Option<&[f64]>,
+    frozen: Option<&[u8]>,
+    weighted: bool,
+    metric: bool,
+    pbc: [bool; 3],
+    broken_translation: [bool; 3],
+    broken_rotation: [bool; 3],
+    v: &mut Array1<f64>,
+) {
+    if mode == RigidMode::Off {
+        return;
+    }
+    let Some(vs) = v.as_slice_mut() else {
+        return;
+    };
+    ws.project_at_anchor(
+        vs,
+        masses,
+        frozen,
+        weighted,
+        metric,
+        mode,
+        pbc,
+        broken_translation,
+        broken_rotation,
+    );
+}
+
+/// Puts a taken [`RigidWorkspace`] back if a stepper returns early.
+struct WsHold<'a> {
+    slot: &'a mut RigidWorkspace,
+    ws: RigidWorkspace,
+}
+
+impl<'a> WsHold<'a> {
+    fn take(slot: &'a mut RigidWorkspace) -> Self {
+        let mut hold = WsHold {
+            slot,
+            ws: RigidWorkspace::new(),
+        };
+        std::mem::swap(hold.slot, &mut hold.ws);
+        hold
+    }
+}
+
+impl Drop for WsHold<'_> {
+    fn drop(&mut self) {
+        std::mem::swap(self.slot, &mut self.ws);
     }
 }
 
@@ -110,6 +166,25 @@ pub struct Solver {
     e_hist: VecDeque<f64>,
     atom_maxmove: Option<f64>,
     project_rigid: bool,
+    /// `Auto` until a host declares a molecule. See [`Self::removal_mode`].
+    rigid_mode: RigidMode,
+    /// Periodic axes, masses, a freeze, a field, or an explicit mode.
+    rigid_declared: bool,
+    /// `set_project_rigid(false)` / `set_rigid_mode(Off)` on a Euclidean session.
+    rigid_forced_off: bool,
+    /// Periodic axes. Any true axis drops rotations under Auto.
+    pbc: [bool; 3],
+    /// Translations the host says are not symmetries.
+    broken_translation: [bool; 3],
+    /// Rotations the host says are not symmetries.
+    broken_rotation: [bool; 3],
+    /// Length `3N`. Nonzero freezes that coordinate.
+    frozen: Option<Vec<u8>>,
+    /// Cartesian mass inner product. Not the `MwRigid` chart.
+    mass_metric: bool,
+    /// `x` stores `q_i = sqrt(m_i) x_i`.
+    mass_weighted_coords: bool,
+    rigid_ws: RigidWorkspace,
     /// Sella `proj_rot`: false under PBC. Rotation is not a symmetry of the cell.
     periodic: bool,
     manifold: ManifoldKind,
@@ -227,6 +302,16 @@ impl Solver {
             e_hist: VecDeque::new(),
             atom_maxmove: None,
             project_rigid: false,
+            rigid_mode: RigidMode::Auto,
+            rigid_declared: false,
+            rigid_forced_off: false,
+            pbc: [false; 3],
+            broken_translation: [false; 3],
+            broken_rotation: [false; 3],
+            frozen: None,
+            mass_metric: false,
+            mass_weighted_coords: false,
+            rigid_ws: RigidWorkspace::new(),
             periodic: false,
             manifold: ManifoldKind::Euclidean,
             masses: None,
@@ -492,14 +577,119 @@ impl Solver {
         self.atom_maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };
     }
 
-    /// eOn `lbfgs_project_rigid`. Isolated clusters only.
+    /// eOn `lbfgs_project_rigid`.
+    ///
+    /// Nonzero selects [`RigidMode::Auto`] and declares a molecule, so a
+    /// host that also set the axis mask drops rotations on a cell. Zero
+    /// forces the Euclidean path off. A quotient manifold still projects.
     pub fn set_project_rigid(&mut self, enabled: bool) {
-        self.project_rigid = enabled;
+        self.set_rigid_mode(if enabled {
+            RigidMode::Auto
+        } else {
+            RigidMode::Off
+        });
+    }
+
+    /// `Off`, `Auto`, `Translation`, or `TranslationRotation`.
+    ///
+    /// `Auto` declares a molecule: translation and rotation when no axis is
+    /// periodic, translation on the periodic axes otherwise. Frozen
+    /// coordinates keep the combinations that do not move them. Broken
+    /// axes are a host mask, not a field vector.
+    /// A bare Euclidean session stays off until something declares it.
+    pub fn set_rigid_mode(&mut self, mode: RigidMode) {
+        self.rigid_mode = mode;
+        self.project_rigid = mode != RigidMode::Off;
+        if mode == RigidMode::Off {
+            self.rigid_forced_off = true;
+            self.rigid_declared = false;
+        } else {
+            self.rigid_forced_off = false;
+            self.rigid_declared = true;
+        }
+    }
+
+    /// Cartesian mass inner product `sum m_i u_i · v_i`.
+    ///
+    /// Turns the mass-weighted chart off. A raw force should leave this false.
+    pub fn set_rigid_mass_metric(&mut self, enabled: bool) {
+        self.mass_metric = enabled;
+        if enabled {
+            self.mass_weighted_coords = false;
+        }
+    }
+
+    /// Coordinates are `q_i = sqrt(m_i) x_i`. The metric is Euclidean.
+    ///
+    /// Turns the Cartesian mass metric off. The two switches are not both on.
+    pub fn set_rigid_mass_weighted(&mut self, enabled: bool) {
+        self.mass_weighted_coords = enabled;
+        if enabled {
+            self.mass_metric = false;
+            self.declare_molecule();
+        }
+    }
+
+    /// Periodic axes. Any true axis drops rotations and keeps only those
+    /// translations. This replaces the single bit from [`Self::set_periodic`].
+    pub fn set_pbc_axes(&mut self, x: bool, y: bool, z: bool) {
+        self.pbc = [x, y, z];
+        self.periodic = x || y || z;
+        if self.periodic {
+            self.declare_molecule();
+        }
+    }
+
+    /// Length `3N`. A nonzero byte freezes that coordinate. The basis is
+    /// the rigid combinations that are already zero there. Empty clears
+    /// the mask.
+    pub fn set_frozen(&mut self, frozen: &[u8]) {
+        if frozen.is_empty() {
+            self.frozen = None;
+            return;
+        }
+        self.frozen = Some(frozen.to_vec());
+        self.declare_molecule();
+    }
+
+    /// Axes that are not symmetries. The library does not infer them
+    /// from a force or a field. Any set bit declares a molecule.
+    pub fn set_broken_axes(
+        &mut self,
+        trans_x: bool,
+        trans_y: bool,
+        trans_z: bool,
+        rot_x: bool,
+        rot_y: bool,
+        rot_z: bool,
+    ) {
+        self.broken_translation = [trans_x, trans_y, trans_z];
+        self.broken_rotation = [rot_x, rot_y, rot_z];
+        if trans_x || trans_y || trans_z || rot_x || rot_y || rot_z {
+            self.declare_molecule();
+        }
+    }
+
+    fn declare_molecule(&mut self) {
+        self.rigid_declared = true;
+        self.rigid_forced_off = false;
+        if self.rigid_mode == RigidMode::Off {
+            self.rigid_mode = RigidMode::Auto;
+        }
+        self.project_rigid = true;
     }
 
     /// Periodic cell. Sella leaves `proj_rot` off; the quotient is \(R^{3N}/T(3)\).
+    ///
+    /// Nonzero is [`Self::set_pbc_axes`]`(true, true, true)` and declares
+    /// the molecule. Zero clears the three axes.
     pub fn set_periodic(&mut self, periodic: bool) {
-        self.periodic = periodic;
+        if periodic {
+            self.set_pbc_axes(true, true, true);
+        } else {
+            self.pbc = [false; 3];
+            self.periodic = false;
+        }
     }
 
     /// Embedded manifold for project / retract / transport.
@@ -658,11 +848,7 @@ impl Solver {
                         lo: None,
                         hi: None,
                         equalities: self.equalities.clone(),
-                        center_axes: if self.project_rigid && self.dim.is_multiple_of(3) {
-                            Some((self.dim / 3, 3))
-                        } else {
-                            None
-                        },
+                        center_axes: None,
                     })
                 } else {
                     None
@@ -823,7 +1009,7 @@ impl Solver {
     ) -> f64 {
         if self.has_coordinate_box()
             && self.manifold == ManifoldKind::Euclidean
-            && !self.project_rigid
+            && self.removal_mode() == RigidMode::Off
             && !self.has_equalities()
         {
             let mut norm = 0.0_f64;
@@ -849,13 +1035,77 @@ impl Solver {
     pub(crate) fn free_len(&self, bounds: &eindir_core::Bounds<f64>) -> usize {
         if self.has_coordinate_box()
             && self.manifold == ManifoldKind::Euclidean
-            && !self.project_rigid
+            && self.removal_mode() == RigidMode::Off
             && !self.has_equalities()
         {
             let n = self.dim.min(bounds.low.len()).min(bounds.high.len());
             return (0..n).filter(|&k| bounds.high[k] > bounds.low[k]).count();
         }
         self.dim
+    }
+
+    /// Active Eckart mode. Quotient manifolds project even when the
+    /// Euclidean flag is off. A bare Euclidean session does not.
+    fn removal_mode(&self) -> RigidMode {
+        let quotient = matches!(
+            self.manifold,
+            ManifoldKind::RigidQuotient | ManifoldKind::MwRigid
+        );
+        if quotient {
+            if self.rigid_mode == RigidMode::Off {
+                RigidMode::Auto
+            } else {
+                self.rigid_mode
+            }
+        } else if self.rigid_forced_off || !self.rigid_declared {
+            RigidMode::Off
+        } else {
+            self.rigid_mode
+        }
+    }
+
+    /// `MwRigid` stores `q = sqrt(m) x`. That chart uses the Euclidean product.
+    fn chart_weighted(&self) -> bool {
+        self.mass_weighted_coords || matches!(self.manifold, ManifoldKind::MwRigid)
+    }
+
+    /// Cartesian force. The mass metric is not this switch.
+    fn force_metric(&self) -> bool {
+        self.mass_metric && !self.chart_weighted()
+    }
+
+    /// FIRE velocity. Momentum is `m v` on raw Cartesians.
+    fn velocity_metric(&self) -> bool {
+        !self.chart_weighted() && (self.mass_metric || self.masses.is_some())
+    }
+
+    fn anchor_and_project(&mut self, x: &[f64], v: &mut [f64]) {
+        let mode = self.removal_mode();
+        if mode == RigidMode::Off || v.len() != x.len() {
+            return;
+        }
+        let metric = self.force_metric();
+        let weighted = self.chart_weighted();
+        let pbc = self.pbc;
+        let broken_t = self.broken_translation;
+        let broken_r = self.broken_rotation;
+        self.rigid_ws.set_anchor(x);
+        let masses = self.masses.as_ref().and_then(|m| m.as_slice());
+        let frozen = self.frozen.as_deref();
+        self.rigid_ws.project_at_anchor(
+            v, masses, frozen, weighted, metric, mode, pbc, broken_t, broken_r,
+        );
+    }
+
+    /// Remove the rigid motion of `v` at the geometry `x`.
+    fn kill_at(&mut self, x: &Array1<f64>, v: &mut Array1<f64>) {
+        let Some(xs) = x.as_slice() else {
+            return;
+        };
+        let Some(vs) = v.as_slice_mut() else {
+            return;
+        };
+        self.anchor_and_project(xs, vs);
     }
 
     fn check_manifold(&self, n: usize) -> Result<()> {
@@ -869,42 +1119,27 @@ impl Solver {
     }
 
     /// Tangent projection. Periodic cells drop rotation (Sella `proj_rot`).
-    fn project_vec(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        match self.manifold {
-            ManifoldKind::MwRigid => {
-                let mut w = v.clone();
-                let masses = self.masses.as_ref().and_then(|m| m.as_slice());
-                project_horizontal(&mut w, x.view(), masses, !self.periodic);
-                w
-            }
-            ManifoldKind::RigidQuotient => {
-                let mut w = v.clone();
-                project_horizontal(&mut w, x.view(), None, !self.periodic);
-                w
-            }
+    fn project_vec(&mut self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        let mut w = match self.manifold {
+            ManifoldKind::MwRigid | ManifoldKind::RigidQuotient => v.clone(),
             other => other.project(x, v),
-        }
+        };
+        self.kill_at(x, &mut w);
+        w
     }
 
-    fn horizontal_grad(&self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
+    fn horizontal_grad(&mut self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
         let mut g = match self.manifold {
-            ManifoldKind::RigidQuotient | ManifoldKind::MwRigid => self.project_vec(x, grad),
+            ManifoldKind::MwRigid | ManifoldKind::RigidQuotient => grad.clone(),
             other => other.egrad2rgrad(x, grad),
         };
-        if self.project_rigid
-            && !matches!(
-                self.manifold,
-                ManifoldKind::RigidQuotient | ManifoldKind::MwRigid
-            )
-        {
-            project_out_rot_trans(&mut g, x.view());
-        }
+        self.kill_at(x, &mut g);
         g
     }
 
     /// Vector transport. Quotient manifolds project at the arrival point.
     fn transport_vec(
-        &self,
+        &mut self,
         x_from: &Array1<f64>,
         x_to: &Array1<f64>,
         v: &Array1<f64>,
@@ -917,14 +1152,16 @@ impl Solver {
 
     /// Riemannian L-BFGS pair at `x`: `s = T(x - old)`, `y = g - T(g_old)`.
     fn lbfgs_sy(
-        &self,
+        &mut self,
         old: &Array1<f64>,
         x: &Array1<f64>,
         gold: &Array1<f64>,
         grad: &Array1<f64>,
     ) -> (Array1<f64>, Array1<f64>) {
-        let s = self.transport_vec(old, x, &(x - old));
-        let y = grad - &self.transport_vec(old, x, gold);
+        let mut s = self.transport_vec(old, x, &(x - old));
+        let mut y = grad - &self.transport_vec(old, x, gold);
+        self.kill_at(x, &mut s);
+        self.kill_at(x, &mut y);
         (s, y)
     }
 
@@ -1328,11 +1565,7 @@ impl Solver {
         }
         #[cfg(feature = "highs")]
         if self.highs {
-            let center = if self.project_rigid && self.dim.is_multiple_of(3) {
-                Some((self.dim / 3, 3))
-            } else {
-                None
-            };
+            let center: Option<(usize, usize)> = None;
             let feasible = if self.has_coordinate_box()
                 || self.highs_trust.is_some()
                 || !self.equalities.is_empty()
@@ -1424,9 +1657,6 @@ impl Solver {
         } else {
             return self.step_first_order(obj, x);
         };
-        if self.project_rigid {
-            project_out_rot_trans(&mut dir, x.view());
-        }
         dir = self.project_vec(x, &dir);
         let old = x.clone();
         let gold = grad.clone();
@@ -1492,9 +1722,7 @@ impl Solver {
             .unwrap_or(radius * 8.0)
             .max(radius);
         let mut dir = dogleg_direction(hess, &grad, radius);
-        if self.project_rigid {
-            project_out_rot_trans(&mut dir, x.view());
-        }
+        self.kill_at(x, &mut dir);
         let mut trial = &*x + &dir;
         if let Some(cap) = self.atom_maxmove {
             scale_step_atom(x, &mut trial, cap);
@@ -1574,7 +1802,8 @@ impl Solver {
             && self.manifold.retract_is_translation()
             && let Some(previous) = self.last_pos.clone().filter(|p| p.len() == x.len())
         {
-            let (s, y) = self.lbfgs_sy(&previous, x, &self.last_grad, &grad);
+            let last_grad = self.last_grad.clone();
+            let (s, y) = self.lbfgs_sy(&previous, x, &last_grad, &grad);
             if let Inner::Lbfgs(solver) = &mut self.inner {
                 solver.push_pair(s, y, Some(gnorm));
             }
@@ -1594,10 +1823,11 @@ impl Solver {
             && matches!(self.inner, Inner::Lbfgs(_))
             && matches!(self.accept, Accept::Energy | Accept::Nonmonotone)
         {
-            if !cached && let Some(previous) = &self.last_pos {
-                let (s, y) = self.lbfgs_sy(previous, x, &self.last_grad, &grad);
+            if !cached && let Some(previous) = self.last_pos.clone() {
+                let last_grad = self.last_grad.clone();
+                let (s, y) = self.lbfgs_sy(&previous, x, &last_grad, &grad);
                 if let Inner::Lbfgs(solver) = &mut self.inner {
-                    solver.transport(|v| crate::manifold::Sphere.transport(previous, x, v));
+                    solver.transport(|v| crate::manifold::Sphere.transport(&previous, x, v));
                     solver.push_pair(s, y, Some(l2(&grad)));
                 }
             }
@@ -1663,8 +1893,7 @@ impl Solver {
                     let direction = guarded_direction
                         .clone()
                         .unwrap_or_else(|| solver.direction(grad.view()));
-                    let center = (self.project_rigid && self.dim.is_multiple_of(3))
-                        .then_some((self.dim / 3, 3));
+                    let center: Option<(usize, usize)> = None;
                     Some(crate::lbfgs_qp::highs_feasible_step_boxed(
                         Some(&direction),
                         None,
@@ -1708,9 +1937,6 @@ impl Solver {
         };
         let lbfgs_line_searched = lbfgs_direct.is_none() && matches!(self.inner, Inner::Lbfgs(_));
         if let Some(mut dir) = lbfgs_direct {
-            if self.project_rigid {
-                project_out_rot_trans(&mut dir, x.view());
-            }
             dir = self.project_vec(x, &dir);
             let (npos, nval, ngrad, moved) = accept_step(
                 obj,
@@ -1733,9 +1959,42 @@ impl Solver {
         #[cfg(feature = "highs")]
         let boxed = self.has_coordinate_box();
         let mut energy_stall = false;
+        // The rigid projector for the trial directions: the workspace is
+        // taken out of the session for the step so that the closure and
+        // the stepper borrow disjoint fields, and returns when the hold
+        // drops.
+        let rigid_mode = self.removal_mode();
+        let rigid_metric = self.force_metric();
+        let rigid_vmetric = self.velocity_metric();
+        let rigid_weighted = self.chart_weighted();
+        let rigid_pbc = self.pbc;
+        let rigid_broken_t = self.broken_translation;
+        let rigid_broken_r = self.broken_rotation;
+        let mut hold = WsHold::take(&mut self.rigid_ws);
+        if rigid_mode != RigidMode::Off
+            && let Some(xs) = x.as_slice()
+        {
+            hold.ws.set_anchor(xs);
+        }
         match &mut self.inner {
             Inner::Lbfgs(_) if !lbfgs_line_searched => {}
             Inner::Lbfgs(solver) => {
+                let masses = self.masses.as_ref().and_then(|m| m.as_slice());
+                let frozen = self.frozen.as_deref();
+                let mut project = |d: &mut Array1<f64>| {
+                    eckart(
+                        &mut hold.ws,
+                        rigid_mode,
+                        masses,
+                        frozen,
+                        rigid_weighted,
+                        rigid_metric,
+                        rigid_pbc,
+                        rigid_broken_t,
+                        rigid_broken_r,
+                        d,
+                    );
+                };
                 energy_stall = solver.step_objective_with_direction(
                     obj,
                     x,
@@ -1748,6 +2007,7 @@ impl Solver {
                     constrained_direction,
                     false,
                     line_options,
+                    &mut project,
                 );
             }
             Inner::Steepest => {
@@ -2021,10 +2281,50 @@ impl Solver {
                 }
             }
             Inner::Fire(state, ext) => {
-                #[allow(unused_mut)]
+                // The force, its metric image and the velocity leave the
+                // rigid subspace at the start geometry; the velocity in the
+                // momentum metric, the force in the force metric.
+                let masses = self.masses.as_ref().and_then(|m| m.as_slice());
+                let frozen = self.frozen.as_deref();
                 let mut raw = grad.mapv(|g| -g);
+                eckart(
+                    &mut hold.ws,
+                    rigid_mode,
+                    masses,
+                    frozen,
+                    rigid_weighted,
+                    rigid_metric,
+                    rigid_pbc,
+                    rigid_broken_t,
+                    rigid_broken_r,
+                    &mut raw,
+                );
                 #[allow(unused_mut)]
                 let mut steepest = metric_vector(&self.precon, &raw)?;
+                eckart(
+                    &mut hold.ws,
+                    rigid_mode,
+                    masses,
+                    frozen,
+                    rigid_weighted,
+                    rigid_metric,
+                    rigid_pbc,
+                    rigid_broken_t,
+                    rigid_broken_r,
+                    &mut steepest,
+                );
+                eckart(
+                    &mut hold.ws,
+                    rigid_mode,
+                    masses,
+                    frozen,
+                    rigid_weighted,
+                    rigid_vmetric,
+                    rigid_pbc,
+                    rigid_broken_t,
+                    rigid_broken_r,
+                    &mut state.vel,
+                );
                 #[cfg(feature = "highs")]
                 if boxed {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut raw);
@@ -2032,10 +2332,22 @@ impl Solver {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
                 let mix = fire_mix(&self.precon, &state.vel, &raw, &steepest);
-                let dx = match ext {
+                let mut dx = match ext {
                     Some(ext) => fire2_displacement_metric(state, ext, &raw, &steepest, mix),
                     None => fire_displacement(state, &steepest),
                 };
+                eckart(
+                    &mut hold.ws,
+                    rigid_mode,
+                    masses,
+                    frozen,
+                    rigid_weighted,
+                    rigid_metric,
+                    rigid_pbc,
+                    rigid_broken_t,
+                    rigid_broken_r,
+                    &mut dx,
+                );
                 let mut trial = &*x + &dx;
                 if let Some(cap) = self.atom_maxmove {
                     scale_step_atom(x, &mut trial, cap);
@@ -2048,13 +2360,53 @@ impl Solver {
                 // integral of moves that never happened.
                 fire_rescale_velocity(state, &dx, &(&trial - &*x));
                 *x = trial;
+                if rigid_mode != RigidMode::Off
+                    && let Some(xs) = x.as_slice()
+                {
+                    hold.ws.set_anchor(xs);
+                }
                 let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
                 grad = ev.1;
-                #[allow(unused_mut)]
                 let mut raw_new = grad.mapv(|g| -g);
+                eckart(
+                    &mut hold.ws,
+                    rigid_mode,
+                    masses,
+                    frozen,
+                    rigid_weighted,
+                    rigid_metric,
+                    rigid_pbc,
+                    rigid_broken_t,
+                    rigid_broken_r,
+                    &mut raw_new,
+                );
                 #[allow(unused_mut)]
                 let mut steep_new = metric_vector(&self.precon, &raw_new)?;
+                eckart(
+                    &mut hold.ws,
+                    rigid_mode,
+                    masses,
+                    frozen,
+                    rigid_weighted,
+                    rigid_metric,
+                    rigid_pbc,
+                    rigid_broken_t,
+                    rigid_broken_r,
+                    &mut steep_new,
+                );
+                eckart(
+                    &mut hold.ws,
+                    rigid_mode,
+                    masses,
+                    frozen,
+                    rigid_weighted,
+                    rigid_vmetric,
+                    rigid_pbc,
+                    rigid_broken_t,
+                    rigid_broken_r,
+                    &mut state.vel,
+                );
                 #[cfg(feature = "highs")]
                 if boxed {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut raw_new);
@@ -2193,6 +2545,8 @@ impl Solver {
         // oracle call at the same geometry.
         // BB and the direct first-order routes evaluate the retracted point.
         // A nonlinear retraction applied to its chord is a different point.
+        // The stepper is done with the workspace; the hold puts it back.
+        drop(hold);
         let already_retracted = matches!(&self.inner, Inner::Bb { .. })
             || (self.accept == Accept::Step
                 && matches!(

@@ -95,7 +95,8 @@ mod qn_step;
 pub mod quickmin;
 mod report;
 mod restricted_trust;
-mod rigid;
+/// Eckart projector and Horn / Coutsias alignment.
+pub mod rigid;
 /// Tangent-space truncated conjugate gradients and trust-radius updates.
 pub mod rtr;
 /// Moller scaled conjugate gradient (damped-model step, no line search).
@@ -136,7 +137,8 @@ pub use lowest_mode::{
     ApplyHessian, ApplyPreconditioner, Block3Jacobi, DENSE_EIGEN_CUTOFF, DiagonalJacobi,
     EigenParams, EigensolverKind, LowestMode, PreconditionerKind, lowest_eigenpair, lowest_mode,
     lowest_mode_chase, lowest_mode_dense, lowest_mode_dlaf, lowest_mode_eigenexa,
-    lowest_mode_libkrylov, lowest_mode_precond, lowest_mode_primme, lowest_mode_slepc,
+    lowest_mode_libkrylov, lowest_mode_precond, lowest_mode_precond_with, lowest_mode_primme,
+    lowest_mode_slepc, lowest_mode_with,
 };
 pub use manifold::{
     CenteredMatrix, ComplexCircle, Constant, EuclideanComplex, Grassmann, Hyperbolic, Manifold,
@@ -176,6 +178,7 @@ pub use quickmin::{
     quickmin_rescale_velocity,
 };
 pub use report::{Report, Status};
+pub use rigid::{RigidMode, RigidRequest, RigidWorkspace, align_rigid};
 pub use scg::{
     DirectionalCurvature, ScgOptions, ScgParams, ScgStepTolerance, minimize_scg,
     minimize_scg_exact, minimize_scg_exact_with_options, minimize_scg_with_options,

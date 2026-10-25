@@ -382,10 +382,29 @@ pub fn lowest_mode<H: ApplyHessian + ?Sized>(
     seed: ArrayView1<f64>,
     params: &EigenParams,
 ) -> Result<LowestMode> {
+    lowest_mode_with(h, x, seed, params, &mut |_| {})
+}
+
+/// [`lowest_mode`], projecting each Lanczos vector with `project`.
+///
+/// The callback is `P` from one shared [`crate::rigid::RigidWorkspace`]:
+/// project `v`, apply `H`, project `H v`, then reorthogonalise. Other
+/// linked kinds ignore `project`.
+pub fn lowest_mode_with<H, F>(
+    h: &H,
+    x: ArrayView1<f64>,
+    seed: ArrayView1<f64>,
+    params: &EigenParams,
+    project: &mut F,
+) -> Result<LowestMode>
+where
+    H: ApplyHessian + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
     if seed.is_empty() {
         return Err(Error::Dim { got: 0, dim: 0 });
     }
-    lowest_mode_precond(h, x, seed, params, &crate::hvp::IdentityPrecond)
+    lowest_mode_precond_with(h, x, seed, params, &crate::hvp::IdentityPrecond, project)
 }
 
 /// SLEPc EPS arm of [`lowest_mode`]. `params.kind` is ignored.
@@ -698,11 +717,28 @@ where
     H: ApplyHessian + ?Sized,
     P: ApplyPreconditioner + ?Sized,
 {
+    lowest_mode_precond_with(h, x, seed, params, t, &mut |_| {})
+}
+
+/// [`lowest_mode_precond`] with the Lanczos projector of [`lowest_mode_with`].
+pub fn lowest_mode_precond_with<H, P, F>(
+    h: &H,
+    x: ArrayView1<f64>,
+    seed: ArrayView1<f64>,
+    params: &EigenParams,
+    t: &P,
+    project: &mut F,
+) -> Result<LowestMode>
+where
+    H: ApplyHessian + ?Sized,
+    P: ApplyPreconditioner + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
     if seed.is_empty() {
         return Err(Error::Dim { got: 0, dim: 0 });
     }
     match params.kind {
-        EigensolverKind::Lanczos => Ok(lanczos(h, x, seed, params.krylov_dim(seed.len()))),
+        EigensolverKind::Lanczos => Ok(lanczos(h, x, seed, params.krylov_dim(seed.len()), project)),
         EigensolverKind::RayleighRitz => Ok(rayleigh_ritz(h, x, seed, params)),
         EigensolverKind::JacobiDavidson => Ok(jacobi_davidson(h, x, seed, params, t)),
         EigensolverKind::Lobpcg => Ok(lobpcg(h, x, seed, params, t)),
@@ -719,13 +755,18 @@ const LANCZOS_START_EPS: f64 = f64::EPSILON;
 /// eOn `client/Lanczos.cpp`: `beta <= 1e-10 * |alpha|` is linear dependence.
 const LANCZOS_LINDEP: f64 = 1e-10;
 
-fn lanczos<H: ApplyHessian + ?Sized>(
+fn lanczos<H, F>(
     h: &H,
     x: ArrayView1<f64>,
     seed: ArrayView1<f64>,
     krylov: usize,
-) -> LowestMode {
-    let (q, alpha, beta, actions) = lanczos_basis(h, x, seed, krylov);
+    project: &mut F,
+) -> LowestMode
+where
+    H: ApplyHessian + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
+    let (q, alpha, beta, actions) = lanczos_basis(h, x, seed, krylov, project);
     let n = seed.len();
     if q.is_empty() || alpha.is_empty() {
         return LowestMode {
@@ -762,14 +803,23 @@ fn lanczos<H: ApplyHessian + ?Sized>(
 /// linear dependence when `beta <= 1e-10 |alpha|` without emitting
 /// another column. SLEPc likewise tests breakdown before the
 /// residual divide and shortens the factorization.
-fn lanczos_basis<H: ApplyHessian + ?Sized>(
+fn lanczos_basis<H, F>(
     h: &H,
     x: ArrayView1<f64>,
     seed: ArrayView1<f64>,
     krylov: usize,
-) -> (Vec<Array1<f64>>, Vec<f64>, Vec<f64>, usize) {
+    project: &mut F,
+) -> (Vec<Array1<f64>>, Vec<f64>, Vec<f64>, usize)
+where
+    H: ApplyHessian + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
     let n = seed.len();
-    let start = nrm2(seed);
+    // The projector acts on the start vector and on every `H v`, so the
+    // basis stays in the projected subspace.
+    let mut q0 = seed.to_owned();
+    project(&mut q0);
+    let start = nrm2(q0.view());
     if !start.is_finite() || start < LANCZOS_START_EPS {
         return (Vec::new(), Vec::new(), Vec::new(), 0);
     }
@@ -777,11 +827,12 @@ fn lanczos_basis<H: ApplyHessian + ?Sized>(
     let mut q: Vec<Array1<f64>> = Vec::with_capacity(m);
     let mut alpha = Vec::with_capacity(m);
     let mut beta: Vec<f64> = Vec::with_capacity(m);
-    q.push(seed.to_owned() / start);
+    q.push(q0 / start);
 
     let mut actions = 0;
     for j in 0..m {
-        let hv = h.apply_hessian(x, q[j].view());
+        let mut hv = h.apply_hessian(x, q[j].view());
+        project(&mut hv);
         actions += 1;
         let a = dot(hv.view(), q[j].view());
         alpha.push(a);
@@ -1597,7 +1648,7 @@ mod tests {
         let h = DiagH(Array1::ones(4));
         let x = Array1::zeros(4);
         let seed = array![1.0, 0.0, 0.0, 0.0];
-        let (q, alpha, beta, actions) = lanczos_basis(&h, x.view(), seed.view(), 4);
+        let (q, alpha, beta, actions) = lanczos_basis(&h, x.view(), seed.view(), 4, &mut |_| {});
         assert_eq!(q.len(), 1);
         assert_eq!(alpha.len(), 1);
         assert!(beta.is_empty());
@@ -1627,7 +1678,8 @@ mod tests {
         let h = hdr_diag(n);
         let x = Array1::zeros(n);
         let seed = Array1::from_iter((0..n).map(|i| 1.0 + i as f64 / (n as f64 - 1.0)));
-        let (q, _alpha, _beta, _actions) = lanczos_basis(&h, x.view(), seed.view(), 55);
+        let (q, _alpha, _beta, _actions) =
+            lanczos_basis(&h, x.view(), seed.view(), 55, &mut |_| {});
         let err = gram_inf_error(&q);
         assert!(err < 1e-10, "two-pass full reortho Gram inf-error {err}");
     }
@@ -1654,7 +1706,7 @@ mod tests {
         let h = DiagH(Array1::ones(4));
         let x = Array1::zeros(4);
         let seed = Array1::zeros(4);
-        let (q, alpha, beta, actions) = lanczos_basis(&h, x.view(), seed.view(), 4);
+        let (q, alpha, beta, actions) = lanczos_basis(&h, x.view(), seed.view(), 4, &mut |_| {});
         assert!(q.is_empty());
         assert!(alpha.is_empty());
         assert!(beta.is_empty());
@@ -1669,7 +1721,7 @@ mod tests {
         let h = DiagH(Array1::ones(3));
         let x = Array1::zeros(3);
         let seed = array![1.0, 0.0, 0.0];
-        let (q, alpha, beta, _) = lanczos_basis(&h, x.view(), seed.view(), 3);
+        let (q, alpha, beta, _) = lanczos_basis(&h, x.view(), seed.view(), 3, &mut |_| {});
         assert_eq!(q.len(), 1);
         assert!((alpha[0] - 1.0).abs() < 1e-14);
         assert!(beta.is_empty());

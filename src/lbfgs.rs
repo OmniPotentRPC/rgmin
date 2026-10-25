@@ -805,9 +805,13 @@ impl Lbfgs {
             None,
             true,
             LineSearchOptions::default(),
+            &mut |_| {},
         )
     }
 
+    /// `project` acts on every trial direction before its line search:
+    /// the session's rigid-motion projector, or a no-op.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn step_objective_with_direction<O>(
         &mut self,
         obj: &O,
@@ -821,6 +825,7 @@ impl Lbfgs {
         supplied_direction: Option<Array1<f64>>,
         record_pair: bool,
         options: LineSearchOptions,
+        project: &mut dyn FnMut(&mut Array1<f64>),
     ) -> bool
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -837,6 +842,8 @@ impl Lbfgs {
         } else {
             dir
         };
+        let mut dir = dir;
+        project(&mut dir);
         // With pairs the two-loop direction is gamma-scaled and carries
         // the step length, so the search opens at the unit step
         // (Nocedal-Wright 3.5); `istep` sizes only the first, steepest
@@ -869,6 +876,8 @@ impl Lbfgs {
             } else {
                 direction
             };
+            let mut direction = direction;
+            project(&mut direction);
             let retry = take_step_with_options(
                 obj,
                 pos,
