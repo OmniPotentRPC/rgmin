@@ -1773,10 +1773,10 @@ impl Solver {
     /// `P^{-1} force` when an exponential preconditioner is installed.
     /// Otherwise `h0 * force`, the scalar geometry seed.
     fn geometry_seed_force(&self, force: &Array1<f64>, h0: f64) -> Array1<f64> {
-        if let Inner::Lbfgs(solver) = &self.inner {
-            if let Some(pre) = solver.exp_apply(force.view()) {
-                return pre;
-            }
+        if let Inner::Lbfgs(solver) = &self.inner
+            && let Some(pre) = solver.exp_apply(force.view())
+        {
+            return pre;
         }
         h0 * force
     }
@@ -1784,10 +1784,10 @@ impl Solver {
     /// `scale * P^{-1} force` when an exponential preconditioner is installed.
     /// Otherwise `scale * force`.
     fn geometry_scaled_force(&self, force: &Array1<f64>, scale: f64) -> Array1<f64> {
-        if let Inner::Lbfgs(solver) = &self.inner {
-            if let Some(pre) = solver.exp_apply(force.view()) {
-                return scale * &pre;
-            }
+        if let Inner::Lbfgs(solver) = &self.inner
+            && let Some(pre) = solver.exp_apply(force.view())
+        {
+            return scale * &pre;
         }
         scale * force
     }
