@@ -6,6 +6,41 @@
 
 ** Unreleased
 
+Steihaug-Toint Newton-CG is ~Method::NewtonCg~ (~newton-cg~), and
+~Method::NewtonPcg~ (~newton-pcg~) adds a rank-16 Nyström
+preconditioner rebuilt at the current point. ~Solver::step~ and
+~step_hess~ run it with a forward-difference product; ~Solver::step_hvp~
+and ~minimize_method_hvp~ take an analytic ~H v~. The session counts
+~gradient_calls~ and ~hvp_calls~ separately. The C ABI adds
+~RGMIN_NEWTON_CG~, ~RGMIN_NEWTON_PCG~, ~rgmin_method_from_name~,
+~rgmin_minimize_hvp~, ~rgmin_solver_step_hvp~ and the two counters;
+~Method::from_name~ parses every method token. ~abi_minor~ 36.
+
+~Solver::set_geometry_step~ (~rgmin_solver_set_geometry_step~) selects
+the capped Cartesian L-BFGS geometry step: eOn's L-BFGS with a
+finite-difference inverse curvature on a severely clipped start and
+~0.1 I~ otherwise, ~s·y / y·y~ after that, a reset when curvature is
+negative, the step exceeds the per-atom cap or opposes the force, the
+probe clipped to the objective bounds, and an energy test with at most
+ten halvings before a short steepest step. An installed exponential
+preconditioner is that step's initial inverse Hessian and the metric of
+its fallbacks. The step is an explicit opt-in because every Cartesian
+session already carries the default per-atom cap.
+
+Newton and dogleg leave a first-order saddle: under the force tolerance,
+an analytic Hessian eigenvalue below the stationarity floor steps the
+geometry along that mode, scaled to the per-atom cap, at most four times
+per solve, and the dogleg radius restarts from the initial step. Dogleg
+grows its trust radius past a per-atom cap: Δ_max is the Euclidean
+~maxmove~ or eight times the current radius, and the boundary test uses
+the dogleg length before the cap.
+
+~cargo cinstall --features capi~ installs the hand-written ~rgmin.h~, the
+C++ wrappers and ~dlpack/dlpack.h~ with the ~rgmin~ pkg-config file. The
+header carries ~RGMIN_H_MAJOR~, ~RGMIN_H_MINOR~ and ~RGMIN_H_PATCH~,
+checked by ~build.rs~ against the crate version; ~tests/cinstall/smoke.sh~
+compiles a C and a C++ program against an installed prefix.
+
 A Cartesian session and the one-shot minimizers start with a per-atom
 cap of 0.2. ~set_atom_maxmove~ replaces it; a non-positive value
 clears it. A positive Euclidean ~maxmove~, with no per-atom call,

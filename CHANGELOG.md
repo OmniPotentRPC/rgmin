@@ -7,8 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Steihaug-Toint Newton-CG as `Method::NewtonCg` (`newton-cg`) and
+  `Method::NewtonPcg` (`newton-pcg`, a rank-16 Nyström preconditioner
+  rebuilt at the current point). `Solver::step` and `step_hess` run it
+  with a forward-difference product; `Solver::step_hvp` and
+  `minimize_method_hvp` take an analytic `H v`. The session counts
+  `gradient_calls` and `hvp_calls` separately, so a harness can charge
+  `gradient_calls + hvp_calls` force evaluations on this path. The C
+  ABI adds `RGMIN_NEWTON_CG`, `RGMIN_NEWTON_PCG`,
+  `rgmin_method_from_name`, `rgmin_minimize_hvp`,
+  `rgmin_solver_step_hvp`, `rgmin_solver_gradient_calls` and
+  `rgmin_solver_hvp_calls`; `Method::from_name` / `as_str` parse and
+  print every method token (`newton-cg` and `newton_cg` are the same).
+  `abi_minor` 36.
+- The capped Cartesian L-BFGS geometry step, `Solver::set_geometry_step`
+  (`rgmin_solver_set_geometry_step`): eOn's L-BFGS with a
+  finite-difference inverse curvature on a severely clipped start and
+  `0.1 I` otherwise, `s·y / y·y` after that, a reset when curvature is
+  negative, the step exceeds the per-atom cap or opposes the force, the
+  probe clipped to the objective bounds, and an energy test with at
+  most ten halvings before a short steepest step. An installed
+  exponential preconditioner is that step's initial inverse Hessian and
+  the metric of its fallbacks. The step is an explicit opt-in because
+  every Cartesian session already carries the default per-atom cap; off,
+  the cap only clips the two-loop trial and the NEB guards apply.
+- `cargo cinstall --features capi` installs the hand-written
+  `include/rgmin.h`, the C++ wrappers and `dlpack/dlpack.h`, with the
+  `rgmin` pkg-config file. The header carries `RGMIN_H_MAJOR`,
+  `RGMIN_H_MINOR` and `RGMIN_H_PATCH`, which `build.rs` checks against
+  the crate version, and stays plain C (no `HighsInt`, no namespace).
+  `tests/cinstall/smoke.sh` installs into a prefix and compiles a C and
+  a C++ program against it; CI runs it.
+
+### Changed
+
+- Newton and dogleg leave a first-order saddle. When the force is under
+  the tolerance and the analytic Hessian has an eigenvalue below the
+  stationarity floor, the session steps along that mode, scaled to the
+  per-atom cap (or the initial step), at most four times per solve. The
+  dogleg radius restarts from the initial step.
+
 ### Fixed
 
+- Dogleg grows its trust radius past a per-atom cap. Nocedal and
+  Wright, algorithm 4.1, grows Δ only when the trust step meets the
+  boundary, and the clipped length made a boundary step look interior,
+  so Δ froze at the cap and Morse bulk rebuilt the Hessian about 30
+  times per start. Δ_max is now the Euclidean `maxmove` (or eight
+  times the current radius) and the boundary test uses the dogleg
+  length before the cap; the cap still limits the trial. Newton-CG
+  follows the same rule.
 - The default per-atom cap is chosen per method. A Cartesian
   session installs 0.2 for steepest descent, nonlinear CG, L-BFGS,
   SR1, SR2, Newton, RFO, FIRE 1.0, quick-min, DIIS,
