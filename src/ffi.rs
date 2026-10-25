@@ -3286,7 +3286,7 @@ pub unsafe extern "C" fn rgmin_rigid_project(
     broken_ry: i32,
     broken_rz: i32,
 ) -> rgmin_status_t {
-    if ws.is_null() || v.is_null() || pos.is_null() || n == 0 || n % 3 != 0 {
+    if ws.is_null() || v.is_null() || pos.is_null() || n == 0 || !n.is_multiple_of(3) {
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
     let Some(mode) = crate::RigidMode::from_i32(mode) else {
@@ -3345,7 +3345,7 @@ pub unsafe extern "C" fn rgmin_rigid_project_hessian(
     broken_ry: i32,
     broken_rz: i32,
 ) -> rgmin_status_t {
-    if ws.is_null() || h.is_null() || pos.is_null() || n == 0 || n % 3 != 0 {
+    if ws.is_null() || h.is_null() || pos.is_null() || n == 0 || !n.is_multiple_of(3) {
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
     let Some(mode) = crate::RigidMode::from_i32(mode) else {
@@ -3395,7 +3395,7 @@ pub unsafe extern "C" fn rgmin_rigid_align(
     pbc_z: i32,
     rmsd: *mut f64,
 ) -> rgmin_status_t {
-    if mobile.is_null() || reference.is_null() || n == 0 || n % 3 != 0 {
+    if mobile.is_null() || reference.is_null() || n == 0 || !n.is_multiple_of(3) {
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
     let mass = match rigid_masses(masses, n_mass, n) {
@@ -3978,6 +3978,7 @@ fn c_oracle_hess(
     )
 }
 
+#[allow(clippy::type_complexity)]
 fn c_oracle_hvp(
     eval: rgmin_eval_fn,
     grad: rgmin_grad_fn,
