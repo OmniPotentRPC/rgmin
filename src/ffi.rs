@@ -1062,11 +1062,7 @@ pub unsafe extern "C" fn rgmin_minimize(
             maxiter: c.maxiter,
             gtol: c.gtol,
             istep: if c.istep > 0.0 { c.istep } else { 1.0 },
-            maxmove: if c.maxmove > 0.0 {
-                Some(c.maxmove)
-            } else {
-                None
-            },
+            maxmove: maxmove_from_c(c.maxmove),
             ftol_rel: None,
             noise_floor: noise_floor_from_c(c),
         };
@@ -1188,11 +1184,7 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
             maxiter: c.maxiter,
             gtol: c.gtol,
             istep: if c.istep > 0.0 { c.istep } else { 1.0 },
-            maxmove: if c.maxmove > 0.0 {
-                Some(c.maxmove)
-            } else {
-                None
-            },
+            maxmove: maxmove_from_c(c.maxmove),
 
             noise_floor: noise_floor_from_c(c),
         };
@@ -1336,11 +1328,7 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
             maxiter: c.maxiter,
             gtol: c.gtol,
             istep: if c.istep > 0.0 { c.istep } else { 1.0 },
-            maxmove: if c.maxmove > 0.0 {
-                Some(c.maxmove)
-            } else {
-                None
-            },
+            maxmove: maxmove_from_c(c.maxmove),
             ftol_rel: None,
             noise_floor: noise_floor_from_c(c),
         };
@@ -1437,11 +1425,7 @@ pub unsafe extern "C" fn rgmin_minimize_hvp(
             maxiter: c.maxiter,
             gtol: c.gtol,
             istep: if c.istep > 0.0 { c.istep } else { 1.0 },
-            maxmove: if c.maxmove > 0.0 {
-                Some(c.maxmove)
-            } else {
-                None
-            },
+            maxmove: maxmove_from_c(c.maxmove),
             ftol_rel: None,
             noise_floor: noise_floor_from_c(c),
         };
@@ -1550,11 +1534,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
             maxiter: c.maxiter,
             gtol: c.gtol,
             istep: if c.istep > 0.0 { c.istep } else { 1.0 },
-            maxmove: if c.maxmove > 0.0 {
-                Some(c.maxmove)
-            } else {
-                None
-            },
+            maxmove: maxmove_from_c(c.maxmove),
             ftol_rel: None,
             noise_floor: noise_floor_from_c(c),
         };
@@ -1628,11 +1608,7 @@ pub unsafe extern "C" fn rgmin_solver_create(
         maxiter: c.maxiter,
         gtol: c.gtol,
         istep: if c.istep > 0.0 { c.istep } else { 1.0 },
-        maxmove: if c.maxmove > 0.0 {
-            Some(c.maxmove)
-        } else {
-            None
-        },
+        maxmove: maxmove_from_c(c.maxmove),
         ftol_rel: None,
         noise_floor: noise_floor_from_c(c),
     };
@@ -4106,6 +4082,19 @@ fn c_oracle_hess_fg(
             h
         },
     )
+}
+
+/// `rgmin_control_t.maxmove`: positive is the Euclidean cap, zero leaves
+/// the caps at their defaults, and negative leaves both the Euclidean cap
+/// and the default per-atom cap off (an infinite cap inside).
+fn maxmove_from_c(maxmove: f64) -> Option<f64> {
+    if maxmove > 0.0 {
+        Some(maxmove)
+    } else if maxmove < 0.0 {
+        Some(f64::INFINITY)
+    } else {
+        None
+    }
 }
 
 fn noise_floor_from_c(c: &rgmin_control_t) -> Option<crate::NoiseFloor> {

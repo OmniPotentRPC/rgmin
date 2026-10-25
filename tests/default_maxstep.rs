@@ -548,6 +548,14 @@ fn one_shot_sr_honours_the_default_atom_cap() {
     }
 }
 
+#[test]
+fn one_shot_sr_leaves_every_cap_off_for_an_infinite_maxmove() {
+    for method in [Method::Sr1, Method::Sr2] {
+        let open = one_shot_sr_atom_step(method.clone(), Some(f64::INFINITY));
+        assert!(open > CAP, "{method:?} infinite maxmove stayed at {open}");
+    }
+}
+
 fn needs_hessian(method: &Method) -> bool {
     matches!(method, Method::Newton { .. } | Method::Dogleg)
 }

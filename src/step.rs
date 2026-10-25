@@ -45,6 +45,10 @@ pub const DEFAULT_ATOM_MAXMOVE: f64 = 0.2;
 pub(crate) fn implicit_atom_cap(control: &Control) -> Option<f64> {
     match control.maxmove {
         Some(cap) if binding(cap) => None,
+        // An infinite Euclidean cap is the caller's explicit request for
+        // no cap at all: the coordinates are not atoms (hyperparameters,
+        // a model's weights), so the default per-atom cap would be wrong.
+        Some(cap) if cap.is_infinite() && cap > 0.0 => None,
         _ => Some(DEFAULT_ATOM_MAXMOVE),
     }
 }
@@ -406,6 +410,17 @@ pub(crate) fn nlcg_opening_alpha(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_infinite_euclidean_cap_leaves_the_default_atom_cap_off() {
+        use super::*;
+        let mut control = Control::default();
+        assert_eq!(implicit_atom_cap(&control), Some(DEFAULT_ATOM_MAXMOVE));
+        control.maxmove = Some(f64::INFINITY);
+        assert_eq!(implicit_atom_cap(&control), None);
+        control.maxmove = Some(0.3);
+        assert_eq!(implicit_atom_cap(&control), None);
+    }
+
     use super::*;
     use ndarray::array;
 

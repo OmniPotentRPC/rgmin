@@ -6,6 +6,13 @@
 
 ** Unreleased
 
+** 0.5.1 (2026-10-25)
+
+A negative ~maxmove~ on ~rgmin_control_t~ leaves every step cap off,
+the default per-atom cap included, so a one-shot minimizer or a session
+over hyperparameters or weights opts out without a session call. Zero
+keeps the defaults and a positive value is the Euclidean cap.
+
 ** 0.5.0 (2026-10-25)
 
 Steihaug-Toint Newton-CG is ~Method::NewtonCg~ (~newton-cg~), and

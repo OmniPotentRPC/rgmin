@@ -4,7 +4,7 @@
 /* Crate version. cargo cinstall ships this header. */
 #define RGMIN_H_MAJOR 0
 #define RGMIN_H_MINOR 5
-#define RGMIN_H_PATCH 0
+#define RGMIN_H_PATCH 1
 
 #ifdef __cplusplus
 extern "C" {
@@ -129,6 +129,11 @@ _Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),
 #endif
 
 /** Outer-loop controls. \c memory is the L-BFGS pair cap.
+ *  \c maxmove > 0 is the Euclidean step limit; 0 leaves the caps at their
+ *  defaults (the 0.2 per-atom cap on a Cartesian session or minimizer
+ *  whose method has no step control of its own); a negative value leaves
+ *  every cap off, for coordinates that are not atoms (hyperparameters,
+ *  weights).
  *  \c noise_eps <= 0 leaves the floor off. \c noise_c <= 0 selects 3.
  */
 typedef struct rgmin_control_t {
@@ -378,7 +383,8 @@ rgmin_status_t rgmin_solver_set_objective_roundoff(rgmin_solver_t *solver,
  *  the step. BFGS, dogleg, and FIRE 2.0 start without that cap.
  *  A positive value replaces the cap in force. A non-positive value
  *  clears it. A positive \c maxmove on the control, with no call here,
- *  is the Euclidean step limit and leaves the per-atom default off. */
+ *  is the Euclidean step limit and leaves the per-atom default off; a
+ *  negative \c maxmove on the control leaves every cap off. */
 void rgmin_solver_set_atom_maxmove(rgmin_solver_t *solver, double maxmove);
 /** Capped Cartesian L-BFGS takes the geometry step: eOn's L-BFGS with a
  *  finite-difference or sy/yy initial curvature, resets on negative

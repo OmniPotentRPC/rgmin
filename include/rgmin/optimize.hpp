@@ -123,6 +123,9 @@ struct Control {
     double gtol = 1e-8;
     double istep = 0.1;
     std::size_t memory = 10;
+    /// Positive: Euclidean step cap. Zero: default caps (0.2 per atom on
+    /// a Cartesian session). Negative: no cap at all, for coordinates
+    /// that are not atoms.
     double maxmove = 0.0;
     double noise_eps = 0.0;
     double noise_c = 0.0;

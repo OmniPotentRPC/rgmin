@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-25
+
+### Changed
+
+- A negative `maxmove` on `rgmin_control_t` leaves every step cap off,
+  including the default per-atom cap, so a one-shot minimizer or a session
+  over hyperparameters or weights can opt out without a session call.
+  Zero keeps the defaults and a positive value is the Euclidean cap, as
+  before.
+
 ## [0.5.0] - 2026-10-25
 
 ### Added
