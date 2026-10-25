@@ -376,6 +376,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collapse geometrically and L-BFGS stalled far from `gtol` on a smooth
   convex energy. Steepest descent, NLCG and Adam keep the halving.
   `Control::istep` is documented as the opening step.
+- Rigid-motion removal runs through one Eckart workspace per session
+  (`rigid` module): the basis is ranked by column-pivoted QR, frozen
+  coordinates keep the combinations that do not move them, a periodic
+  axis drops the rotations, and the host can mark broken translations
+  and rotations. `Solver::set_rigid_mode` selects `Off`, `Auto`,
+  `Translation` or `TranslationRotation`; `set_project_rigid(true)` is
+  `Auto`; `set_pbc_axes`, `set_frozen`, `set_broken_axes`,
+  `set_rigid_mass_metric` and `set_rigid_mass_weighted` declare the
+  molecule. The session projects the step, the L-BFGS pairs and each
+  L-BFGS trial direction, the FIRE force and the FIRE velocity (the
+  velocity in the momentum metric), and the dogleg direction; Lanczos
+  can project inside the product (`lowest_mode_with`). A Cartesian
+  force is not run through the mass metric.
+- `align_rigid` aligns two geometries by the Horn / Coutsias
+  quaternion; a periodic axis skips the rotation.
+- `MwRigid` stores `q = sqrt(m) x`. The chart metric is Euclidean in
+  `q`. One atom is a quotient with three translations.
+- The C ABI exports the rigid workspace, `rgmin_rigid_project`,
+  `rgmin_rigid_project_hessian`, `rgmin_rigid_align`, and the solver
+  setters; `rgmin.h` declares them, `xts.h` aliases them, and the C++
+  session wraps the setters. `abi_minor` 35.
 - Tests cover frozen ranks, a slab, and quaternion alignment. The
   crate root exports `RigidWorkspace` and `align_rigid`.
 - Tests check that the projector is idempotent and symmetric in
