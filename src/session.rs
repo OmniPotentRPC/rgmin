@@ -37,7 +37,7 @@ use crate::quickmin::{
     quickmin_session_step,
 };
 use crate::report::{Report, Status};
-use crate::rigid::{RigidMode, RigidWorkspace};
+use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
     Taken, cap_alpha, l2, nlcg_opening_alpha, qn_istep, scale_step, scale_step_atom,
     take_step_with_options,
