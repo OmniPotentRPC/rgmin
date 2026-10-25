@@ -4,6 +4,8 @@
 //! the comparison, not the implementation. Each product is one force
 //! call; each dense Hessian is `n` force calls.
 
+#![allow(clippy::needless_range_loop)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
