@@ -4,7 +4,7 @@
 /* Crate version. cargo cinstall ships this header. */
 #define RGMIN_H_MAJOR 0
 #define RGMIN_H_MINOR 5
-#define RGMIN_H_PATCH 1
+#define RGMIN_H_PATCH 2
 
 #ifdef __cplusplus
 extern "C" {

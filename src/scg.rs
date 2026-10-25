@@ -16,8 +16,15 @@ use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
 use crate::report::Report;
-use crate::step::l2;
+use crate::vecops::dot_ordered;
 use ndarray::ArrayView1;
+
+/// Sequential Euclidean norm. SCG reproduces the reference C++ trajectory
+/// of gpridge to its parity tolerance, so its reductions keep the plain
+/// left-to-right order of that code instead of the fused SIMD kernels.
+fn l2_ordered(g: &Array1<f64>) -> f64 {
+    dot_ordered(g.view(), g.view()).sqrt()
+}
 
 /// Exact directional curvature `d . grad^2 f(x) . d` for SCG's step
 /// pricing. gpr_optim supplies this from its analytic marginal-likelihood
@@ -255,7 +262,7 @@ where
 
     let mut step = 0;
     while control.maxiter == 0 || step < control.maxiter {
-        let gnorm = l2(&grad);
+        let gnorm = l2_ordered(&grad);
         if let Some(status) = control.halt(gnorm, grad.len()) {
             return Ok(Report {
                 value: f_old,
@@ -267,16 +274,16 @@ where
         }
 
         if success {
-            mu = crate::vecops::dot(dir.view(), grad.view());
+            mu = crate::vecops::dot_ordered(dir.view(), grad.view());
             if mu >= 0.0 {
                 // Descent safeguard (Møller step 2): a non-descent
                 // direction resets to steepest descent.
                 dir = -grad.clone();
-                mu = crate::vecops::dot(dir.view(), grad.view());
+                mu = crate::vecops::dot_ordered(dir.view(), grad.view());
             }
-            kappa = crate::vecops::dot(dir.view(), dir.view());
+            kappa = crate::vecops::dot_ordered(dir.view(), dir.view());
             if kappa < f64::EPSILON {
-                if crate::vecops::dot(grad.view(), grad.view()) < f64::EPSILON {
+                if crate::vecops::dot_ordered(grad.view(), grad.view()) < f64::EPSILON {
                     return Ok(Report {
                         value: f_old,
                         coords: w,
@@ -288,8 +295,8 @@ where
                 // Conjugacy can cancel the direction while the gradient
                 // remains nonstationary. Price a steepest-descent step.
                 dir = -grad.clone();
-                mu = crate::vecops::dot(dir.view(), grad.view());
-                kappa = crate::vecops::dot(dir.view(), dir.view());
+                mu = crate::vecops::dot_ordered(dir.view(), grad.view());
+                kappa = crate::vecops::dot_ordered(dir.view(), dir.view());
                 nsuccess = 0;
             }
 
@@ -315,7 +322,7 @@ where
                     });
                 }
                 let dg = &probed.1 - &grad;
-                gamma = crate::vecops::dot(dg.view(), dir.view()) / sigma;
+                gamma = crate::vecops::dot_ordered(dg.view(), dir.view()) / sigma;
             }
         }
 
@@ -363,14 +370,14 @@ where
                     alpha.abs() * crate::vecops::nrminf(dir.view()) < params.tol_sol
                 }
                 ScgStepTolerance::RelativeEuclidean => {
-                    alpha.abs() * l2(&dir) < params.tol_sol * (1.0 + l2(&trial))
+                    alpha.abs() * l2_ordered(&dir) < params.tol_sol * (1.0 + l2_ordered(&trial))
                 }
             };
             let objective_converged =
                 (f_new - f_old).abs() < params.tol_func * (1.0 + (objective_max - objective_min));
             w = trial;
             if solution_converged && objective_converged {
-                let grad_norm = l2(&grad_new);
+                let grad_norm = l2_ordered(&grad_new);
                 return Ok(Report {
                     value: f_new,
                     coords: w,
@@ -381,8 +388,8 @@ where
             }
             f_old = f_new;
             grad_old = std::mem::replace(&mut grad, grad_new);
-            if crate::vecops::dot(grad.view(), grad.view()) < f64::EPSILON {
-                let grad_norm = l2(&grad);
+            if crate::vecops::dot_ordered(grad.view(), grad.view()) < f64::EPSILON {
+                let grad_norm = l2_ordered(&grad);
                 return Ok(Report {
                     value: f_old,
                     coords: w,
@@ -424,7 +431,7 @@ where
         step += 1;
     }
 
-    let grad_norm = l2(&grad);
+    let grad_norm = l2_ordered(&grad);
     Ok(Report {
         value: f_old,
         grad_norm,

@@ -2,7 +2,7 @@ project(
     'rgmin',
     'c',
     'cpp',
-    version: '0.5.1',
+    version: '0.5.2',
     meson_version: '>=1.3.0',
     default_options: ['buildtype=debugoptimized', 'warning_level=3'],
     license: 'MIT',

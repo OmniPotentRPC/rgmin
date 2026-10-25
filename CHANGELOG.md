@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-25
+
+### Fixed
+
+- SCG reduces its dot products and norms in plain left-to-right order
+  again, so its trajectory reproduces the reference C++ implementation to
+  the parity tolerance; the fused SIMD kernels of 0.5.0 had moved the
+  iterates by roundoff that grew along the trajectory.
+
 ## [0.5.1] - 2026-10-25
 
 ### Changed
