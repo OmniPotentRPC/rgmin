@@ -92,6 +92,12 @@ pub struct Lbfgs {
     /// Engine and callback policies for constrained solves.
     #[cfg(feature = "highs")]
     pub highs_options: crate::HighsOptions,
+    /// `s·y` of the latest geometry step, stored even when the pair is dropped.
+    pub(crate) last_sy: f64,
+    /// `y·y` of the latest geometry step.
+    pub(crate) last_yy: f64,
+    /// [`Self::last_sy`] and [`Self::last_yy`] belong to a real step.
+    pub(crate) have_curvature: bool,
     /// \(H_0 = P^{-1}\) from an assembled geometry preconditioner.
     h0: Option<crate::precon::Metric>,
 }
@@ -136,6 +142,9 @@ impl Lbfgs {
             #[cfg(feature = "highs")]
             highs_options: crate::HighsOptions::default(),
             h0: None,
+            last_sy: 0.0,
+            last_yy: 0.0,
+            have_curvature: false,
         }
     }
 
@@ -149,6 +158,9 @@ impl Lbfgs {
     /// Called when the chain moves somewhere structurally different, where
     /// the retained pairs describe a Hessian that no longer applies.
     pub fn forget(&mut self) {
+        self.last_sy = 0.0;
+        self.last_yy = 0.0;
+        self.have_curvature = false;
         self.memory.clear();
     }
 
@@ -325,6 +337,75 @@ impl Lbfgs {
             return gradient.mapv(|value| -scale * value);
         }
         direction
+    }
+
+    /// `P^{-1} v` when a geometry metric is installed and the solve succeeds.
+    pub(crate) fn exp_apply(&self, v: ArrayView1<f64>) -> Option<Array1<f64>> {
+        self.h0.as_ref().and_then(|metric| metric.solve(v))
+    }
+
+    /// Two-loop with a caller-supplied initial inverse curvature `h0`.
+    /// Empty memory returns `-h0 g`. An installed geometry metric
+    /// replaces that scalar: the middle product is `P^{-1} q`, and a
+    /// failed solve falls back to `h0`.
+    pub(crate) fn direction_h0(&self, g: ArrayView1<f64>, h0: f64) -> Array1<f64> {
+        let mut q = g.to_owned();
+        let m = self.memory.len();
+        let mut idxs: Vec<usize> = (0..m).collect();
+        for _ in 0..self.extra_updates {
+            if m > 0 {
+                idxs.push(m - 1);
+            }
+        }
+        let mut alpha = vec![0.0; idxs.len()];
+        for k in (0..idxs.len()).rev() {
+            let i = idxs[k];
+            let p = &self.memory[i];
+            let a = p.rho * crate::vecops::dot(p.s.view(), q.view());
+            alpha[k] = a;
+            crate::vecops::axpy(-a, p.y.view(), &mut q);
+        }
+        if let Some(solved) = self.exp_apply(q.view()) {
+            q = solved;
+        } else {
+            q *= h0;
+        }
+        for k in 0..idxs.len() {
+            let i = idxs[k];
+            let p = &self.memory[i];
+            let b = p.rho * crate::vecops::dot(p.y.view(), q.view());
+            crate::vecops::axpy(alpha[k] - b, p.s.view(), &mut q);
+        }
+        q.mapv_inplace(|v| -v);
+        q
+    }
+
+    /// Remember `s·y` and `y·y` from the step just taken.
+    pub(crate) fn note_curvature(&mut self, s: &Array1<f64>, y: &Array1<f64>) {
+        let sy = s.dot(y);
+        let yy = y.dot(y);
+        if sy.is_finite() && yy.is_finite() {
+            self.last_sy = sy;
+            self.last_yy = yy;
+            self.have_curvature = true;
+        } else {
+            self.have_curvature = false;
+        }
+    }
+
+    /// Store a geometry-step pair. Negative or vanishing curvature is dropped
+    /// here; the caller resets memory from [`Self::note_curvature`].
+    pub(crate) fn push_geometry(&mut self, s: Array1<f64>, y: Array1<f64>) {
+        let sy = s.dot(&y);
+        if !sy.is_finite() || sy.abs() < 1e-30 || sy <= 0.0 {
+            return;
+        }
+        self.memory.push(Pair {
+            s,
+            y,
+            rho: 1.0 / sy,
+        });
+        self.trim();
     }
 
     /// Records an accepted curvature pair (`s = x+ - x`, `y = g+ - g`).

@@ -149,6 +149,25 @@ pub enum Method {
     /// Nocedal and Wright, algorithm 4.1,
     /// <https://doi.org/10.1007/978-0-387-40065-5>.
     Dogleg,
+    /// Steihaug-Toint Newton-CG. Hessian access is a product `H v`,
+    /// never a dense matrix.
+    ///
+    /// Steihaug, *The Conjugate Gradient Method and Trust Regions in
+    /// Large Scale Optimization*,
+    /// <https://doi.org/10.1137/0720042>.
+    /// Nocedal and Wright, *Numerical Optimization*, chapter 7,
+    /// <https://doi.org/10.1007/978-0-387-40065-5>.
+    NewtonCg,
+    /// Steihaug-Toint Newton-CG with a Nyström preconditioner
+    /// ([`crate::NystromPrecond`], rank 16) rebuilt at the current point.
+    /// The trust ceiling stays Euclidean.
+    ///
+    /// Steihaug, <https://doi.org/10.1137/0720042>.
+    /// Nocedal and Wright, chapter 7,
+    /// <https://doi.org/10.1007/978-0-387-40065-5>.
+    /// Frangella, Tropp, Udell,
+    /// <https://doi.org/10.1137/21M1466244>.
+    NewtonPcg,
 }
 
 impl Method {
@@ -224,10 +243,154 @@ impl Method {
             self,
             Self::Bfgs
                 | Self::Dogleg
+                | Self::NewtonCg
+                | Self::NewtonPcg
                 | Self::Fire {
                     kind: crate::fire::FireKind::V2
                 }
         )
+    }
+
+    /// Canonical method token. Hyphens, as in `newton-cg`.
+    ///
+    /// Parameterized variants report the family name (`lbfgs`, `adam`,
+    /// `pso`, `cg`). [`Self::from_name`] rebuilds that family at its
+    /// default parameters and with no NLCG restart.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Nlcg { conjugacy, .. } => match conjugacy {
+                Conjugacy::FletcherReeves => "fletcher-reeves",
+                Conjugacy::PolakRibiere => "cg",
+                Conjugacy::HestenesStiefel => "hestenes-stiefel",
+                Conjugacy::DaiYuan => "dai-yuan",
+                Conjugacy::ConjugateDescent => "conjugate-descent",
+                Conjugacy::HagerZhang => "hager-zhang",
+                Conjugacy::LiuStorey => "liu-storey",
+                Conjugacy::FrPr => "fr-pr",
+                Conjugacy::PolakRibierePlus => "pr-plus",
+                Conjugacy::Hybrid { .. } => "hybrid",
+            },
+            Self::Bfgs => "bfgs",
+            Self::Lbfgs { .. } => "lbfgs",
+            Self::Sr1 => "sr1",
+            Self::Sr2 => "sr2",
+            Self::Adam { .. } => "adam",
+            Self::Steepest => "steepest",
+            Self::Newton { kind } => match kind {
+                crate::newton::NewtonKind::Shifted => "newton",
+                crate::newton::NewtonKind::Rfo => "rfo",
+            },
+            Self::Pso { .. } => "pso",
+            Self::Fire { kind } => match kind {
+                crate::fire::FireKind::V1 => "fire",
+                crate::fire::FireKind::V2 => "fire2",
+            },
+            Self::Bb => "bb",
+            Self::Dogleg => "dogleg",
+            Self::QuickMin => "quickmin",
+            Self::Ode12r => "ode12r",
+            Self::Diis { .. } => "diis",
+            Self::NewtonCg => "newton-cg",
+            Self::NewtonPcg => "newton-pcg",
+        }
+    }
+
+    /// Parse a method token. Case is ignored. Hyphens and spaces are
+    /// underscores, so `newton-cg` and `newton_cg` are the same method.
+    ///
+    /// `cg` is Polak-Ribiere. `newton` is shifted Newton. `sd` is
+    /// steepest descent. L-BFGS memory, Adam, and PSO use the same
+    /// defaults as [`Self::lbfgs`], [`Self::adam`], and [`Self::pso`].
+    pub fn from_name(name: &str) -> crate::Result<Self> {
+        let token = canon_method(name);
+        let method = match token.as_str() {
+            "lbfgs" => Self::lbfgs(),
+            "bfgs" => Self::Bfgs,
+            "sr1" => Self::Sr1,
+            "sr2" => Self::Sr2,
+            "adam" => Self::adam(),
+            "sd" | "steepest" | "steepest_descent" => Self::Steepest,
+            "cg" | "pr" | "polak_ribiere" => Self::polak_ribiere(),
+            "fletcher_reeves" | "fr" => Self::nlcg(Conjugacy::FletcherReeves),
+            "hestenes_stiefel" | "hs" => Self::nlcg(Conjugacy::HestenesStiefel),
+            "dai_yuan" | "dy" => Self::nlcg(Conjugacy::DaiYuan),
+            "conjugate_descent" | "cd" => Self::nlcg(Conjugacy::ConjugateDescent),
+            "hager_zhang" | "hz" => Self::nlcg(Conjugacy::HagerZhang),
+            "liu_storey" | "ls" => Self::nlcg(Conjugacy::LiuStorey),
+            "fr_pr" => Self::nlcg(Conjugacy::FrPr),
+            "pr_plus" | "polak_ribiere_plus" => Self::nlcg(Conjugacy::PolakRibierePlus),
+            "newton" => Self::Newton {
+                kind: crate::newton::NewtonKind::Shifted,
+            },
+            "rfo" => Self::Newton {
+                kind: crate::newton::NewtonKind::Rfo,
+            },
+            "pso" => Self::pso(),
+            "fire" => Self::Fire {
+                kind: crate::fire::FireKind::V1,
+            },
+            "fire2" => Self::Fire {
+                kind: crate::fire::FireKind::V2,
+            },
+            "bb" | "barzilai_borwein" => Self::Bb,
+            "dogleg" => Self::Dogleg,
+            "quickmin" | "quick_min" => Self::QuickMin,
+            "ode12r" => Self::Ode12r,
+            "diis" | "gdiis" => Self::diis(),
+            "newton_cg" => Self::NewtonCg,
+            "newton_pcg" => Self::NewtonPcg,
+            _ => {
+                return Err(crate::Error::UnknownMethod {
+                    name: name.to_string(),
+                });
+            }
+        };
+        Ok(method)
+    }
+}
+
+fn canon_method(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        let ch = if ch == '-' || ch == ' ' { '_' } else { ch };
+        for lower in ch.to_lowercase() {
+            out.push(lower);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn method_strings_cover_newton_cg_dogleg_and_dense_newton() {
+        assert_eq!(Method::from_name("newton-cg").unwrap(), Method::NewtonCg);
+        assert_eq!(Method::from_name("Newton-CG").unwrap(), Method::NewtonCg);
+        assert_eq!(Method::from_name("newton_cg").unwrap(), Method::NewtonCg);
+        assert_eq!(Method::from_name("newton-pcg").unwrap(), Method::NewtonPcg);
+        assert_eq!(Method::NewtonCg.as_str(), "newton-cg");
+        assert_eq!(Method::NewtonPcg.as_str(), "newton-pcg");
+        assert_eq!(
+            Method::from_name("newton").unwrap(),
+            Method::Newton {
+                kind: crate::newton::NewtonKind::Shifted,
+            }
+        );
+        assert_eq!(
+            Method::from_name("rfo").unwrap(),
+            Method::Newton {
+                kind: crate::newton::NewtonKind::Rfo,
+            }
+        );
+        assert_eq!(Method::from_name("dogleg").unwrap(), Method::Dogleg);
+        assert_eq!(Method::from_name("lbfgs").unwrap(), Method::lbfgs());
+        assert_eq!(Method::from_name("CG").unwrap(), Method::polak_ribiere());
+        assert_eq!(Method::from_name("sd").unwrap(), Method::Steepest);
+        assert_eq!(Method::from_name("fire2").unwrap().as_str(), "fire2");
+        let err = Method::from_name("not-a-solver").unwrap_err();
+        assert!(err.to_string().contains("not-a-solver"), "{err}");
     }
 }
 

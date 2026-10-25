@@ -12,13 +12,17 @@
 //! Steihaug, *The Conjugate Gradient Method and Trust Regions in Large
 //! Scale Optimization*, <https://doi.org/10.1137/0720042>.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::report::Report;
+use crate::rigid::project_out_rot_trans;
 use crate::scg::DirectionalCurvature;
+use crate::step::{scale_step, scale_step_atom};
 use crate::trust::{reduction_ratio, update_radius};
 use crate::vecops::{axpy, dot, nrm2};
 
@@ -493,6 +497,288 @@ pub(crate) fn sym_eig_jacobi(mut a: Array2<f64>) -> (Array1<f64>, Array2<f64>) {
 
 const ETA_ACCEPT: f64 = 0.1;
 const RADIUS_FLOOR: f64 = 1e-14;
+/// Nyström sketch width for [`crate::Method::NewtonPcg`].
+const NYSTROM_RANK: usize = 16;
+
+/// No analytic action: the session builds a forward-difference product.
+pub(crate) struct FiniteDifference;
+
+/// Analytic `H v` when the caller has one. [`FiniteDifference`] has none.
+pub(crate) trait OptionalAction {
+    /// `Some(Hv)` from an analytic action, or `None` to finite-difference.
+    fn apply(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Option<Array1<f64>>;
+}
+
+impl OptionalAction for FiniteDifference {
+    fn apply(&self, _x: ArrayView1<f64>, _v: ArrayView1<f64>) -> Option<Array1<f64>> {
+        None
+    }
+}
+
+impl<F> OptionalAction for F
+where
+    F: Fn(ArrayView1<f64>, ArrayView1<f64>) -> Array1<f64>,
+{
+    fn apply(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Option<Array1<f64>> {
+        Some(self(x, v))
+    }
+}
+
+/// One Steihaug outer step. The radius ceiling is Euclidean.
+pub(crate) struct NewtonCgRequest {
+    /// Current trust radius.
+    pub radius: f64,
+    /// Euclidean ceiling. The helper also refuses to shrink below `radius`.
+    pub rmax: f64,
+    /// Per-atom clip on the trial, after the trust step is chosen.
+    pub atom_cap: Option<f64>,
+    /// Euclidean clip on the trial when no per-atom cap is set.
+    pub euclid_cap: Option<f64>,
+    /// Project the step out of rigid translation and rotation.
+    pub project_rigid: bool,
+    /// Nyström-preconditioned CG. The trust ceiling stays Euclidean.
+    pub precondition: bool,
+    /// Rademacher seed for the sketch. Rebuilt every outer step.
+    pub seed: u64,
+}
+
+/// Point, radius, and the products this attempt spent.
+pub(crate) struct NewtonCgTaken {
+    /// Accepted point, or the incoming point when the trial is refused.
+    pub pos: Array1<f64>,
+    /// Value at [`Self::pos`].
+    pub value: f64,
+    /// Raw gradient at [`Self::pos`].
+    pub grad: Array1<f64>,
+    /// Updated trust radius.
+    pub radius: f64,
+    /// The trial replaced the current point.
+    pub moved: bool,
+    /// Trial `(f, g)` evaluations. Zero when the model step is refused
+    /// before the objective is touched.
+    pub trial_gradients: usize,
+    /// Hessian-vector products, including a Nyström sketch and a
+    /// reprice of a clipped step. A forward-difference product counts
+    /// here, not as a gradient.
+    pub hvps: usize,
+    /// The radius hit [`RADIUS_FLOOR`].
+    pub collapsed: bool,
+}
+
+/// Counts products and serves either an analytic action or one
+/// forward difference of the known gradient.
+struct SessionAction<'a, O: ?Sized, A> {
+    obj: &'a O,
+    /// Raw `g(x)` at the point CG is linearizing. The forward
+    /// difference reuses it, so a product costs one gradient.
+    fd_grad: &'a Array1<f64>,
+    hvps: &'a AtomicUsize,
+    action: &'a A,
+}
+
+impl<'a, O, A> eindir_core::Objective<f64> for SessionAction<'a, O, A>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+    A: OptionalAction + Send + Sync,
+{
+    fn dim(&self) -> usize {
+        eindir_core::Objective::dim(self.obj)
+    }
+    fn bounds(&self) -> &eindir_core::Bounds<f64> {
+        self.obj.bounds()
+    }
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.obj.eval(x)
+    }
+}
+
+impl<'a, O, A> eindir_core::Gradient<f64> for SessionAction<'a, O, A>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+    A: OptionalAction + Send + Sync,
+{
+    fn dim(&self) -> usize {
+        eindir_core::Objective::dim(self.obj)
+    }
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        self.obj.value_and_gradient(x).1
+    }
+}
+
+impl<'a, O, A> DifferentiableObjective<f64> for SessionAction<'a, O, A>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+    A: OptionalAction + Send + Sync,
+{
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        self.obj.value_and_gradient(x)
+    }
+}
+
+impl<'a, O, A> HessianVector for SessionAction<'a, O, A>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+    A: OptionalAction + Send + Sync,
+{
+    fn hessian_vector(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+        if let Some(hv) = self.action.apply(x, v) {
+            self.hvps.fetch_add(1, Ordering::Relaxed);
+            return hv;
+        }
+        let vn = nrm2(v);
+        if vn <= 0.0 {
+            return Array1::zeros(v.len());
+        }
+        self.hvps.fetch_add(1, Ordering::Relaxed);
+        forward_difference(self.obj, self.fd_grad, x, v)
+    }
+}
+
+/// `Hv ≈ (g(x + h v) - g(x)) / h` with `h = 1e-8 / ||v||`.
+/// One gradient. The known `g(x)` is not evaluated again.
+fn forward_difference<O>(
+    obj: &O,
+    grad: &Array1<f64>,
+    x: ArrayView1<f64>,
+    v: ArrayView1<f64>,
+) -> Array1<f64>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let vn = nrm2(v);
+    let h = 1e-8 / vn;
+    let mut xp = x.to_owned();
+    axpy(h, v, &mut xp);
+    let gp = obj.value_and_gradient(xp.view()).1;
+    (gp - grad) / h
+}
+
+fn steps_differ(a: ArrayView1<f64>, b: ArrayView1<f64>) -> bool {
+    a.len() != b.len()
+        || a.iter().zip(b.iter()).any(|(u, v)| {
+            let scale = 1.0 + u.abs().max(v.abs());
+            (u - v).abs() > 1e-12 * scale
+        })
+}
+
+/// One Steihaug-Toint attempt. Hessian access is only `H v`.
+///
+/// `maxmove` is the Euclidean ceiling on the radius. A per-atom cap
+/// clips the trial after the direction is chosen; the boundary test
+/// uses the pre-clip length, matching [`crate::Solver`]'s dogleg step.
+/// Steihaug, <https://doi.org/10.1137/0720042>.
+/// Nocedal and Wright, chapter 7 and algorithm 4.1,
+/// <https://doi.org/10.1007/978-0-387-40065-5>.
+pub(crate) fn newton_cg_step<O, A>(
+    obj: &O,
+    x: &Array1<f64>,
+    value: f64,
+    grad: &Array1<f64>,
+    fd_grad: &Array1<f64>,
+    req: &NewtonCgRequest,
+    action: &A,
+) -> NewtonCgTaken
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+    A: OptionalAction + Send + Sync,
+{
+    let hvps = AtomicUsize::new(0);
+    let adapter = SessionAction {
+        obj,
+        fd_grad,
+        hvps: &hvps,
+        action,
+    };
+    let n = x.len();
+    let gnorm = nrm2(grad.view());
+    let rtol = gnorm.sqrt().min(0.5);
+    let radius = req.radius;
+    let rmax = req.rmax.max(radius);
+    let (p_cg, mut pred) = if req.precondition {
+        let pre = NystromPrecond::build(&adapter, x.view(), NYSTROM_RANK, req.seed);
+        steihaug_pcg(&adapter, x.view(), grad, radius, rtol, 2 * n, &pre)
+    } else {
+        steihaug_cg(&adapter, x.view(), grad, radius, rtol, 2 * n)
+    };
+    // PCG stops on the preconditioner sphere. Pull a long step back
+    // onto the Euclidean trust sphere before the displacement cap.
+    let mut p = p_cg.clone();
+    if req.project_rigid {
+        project_out_rot_trans(&mut p, x.view());
+    }
+    let pnorm = nrm2(p.view());
+    if radius.is_finite() && pnorm > radius * (1.0 + 1e-10) && pnorm > 0.0 {
+        let scale = radius / pnorm;
+        p.mapv_inplace(|v| v * scale);
+    }
+    let trust_norm = nrm2(p.view());
+    let mut trial = x.clone();
+    axpy(1.0, p.view(), &mut trial);
+    if let Some(cap) = req.atom_cap {
+        scale_step_atom(x, &mut trial, cap);
+    } else if let Some(cap) = req.euclid_cap {
+        scale_step(x, &mut trial, cap);
+    }
+    trial = obj.bounds().clip(trial.view());
+    let step = &trial - x;
+    if steps_differ(step.view(), p_cg.view()) {
+        let hp = adapter.hessian_vector(x.view(), step.view());
+        pred = -(dot(grad.view(), step.view()) + 0.5 * dot(step.view(), hp.view()));
+    }
+    let taken = nrm2(step.view());
+    let boundary_norm = if req.atom_cap.is_some() || req.euclid_cap.is_some() {
+        trust_norm
+    } else {
+        taken
+    };
+    let refuse = || NewtonCgTaken {
+        pos: x.clone(),
+        value,
+        grad: grad.clone(),
+        radius: update_radius(radius, -1.0, 0.0, rmax),
+        moved: false,
+        trial_gradients: 0,
+        hvps: hvps.load(Ordering::Relaxed),
+        collapsed: false,
+    };
+    if trust_norm <= 0.0 || !(pred.is_finite() && pred > 0.0) {
+        let mut out = refuse();
+        out.collapsed = out.radius < RADIUS_FLOOR;
+        return out;
+    }
+    let (ft, gt) = obj.value_and_gradient(trial.view());
+    let rho = if ft.is_finite() {
+        reduction_ratio(value - ft, pred)
+    } else {
+        -1.0
+    };
+    let radius = update_radius(radius, rho, boundary_norm, rmax);
+    let moved = rho > ETA_ACCEPT && ft.is_finite();
+    let collapsed = radius < RADIUS_FLOOR;
+    if moved {
+        NewtonCgTaken {
+            pos: trial,
+            value: ft,
+            grad: gt,
+            radius,
+            moved: true,
+            trial_gradients: 1,
+            hvps: hvps.load(Ordering::Relaxed),
+            collapsed,
+        }
+    } else {
+        NewtonCgTaken {
+            pos: x.clone(),
+            value,
+            grad: grad.clone(),
+            radius,
+            moved: false,
+            trial_gradients: 1,
+            hvps: hvps.load(Ordering::Relaxed),
+            collapsed,
+        }
+    }
+}
 
 /// Matrix-free Newton: Steihaug-Toint CG inside a Nocedal-Wright trust
 /// region. `control.maxmove` caps the trust radius, so the region
@@ -515,7 +801,6 @@ where
     }
     pos = obj.bounds().clip(pos.view());
     let (mut value, mut grad) = obj.value_and_gradient(pos.view());
-    let n = pos.len();
 
     let rmax = control.maxmove.unwrap_or(f64::INFINITY).max(RADIUS_FLOOR);
     let mut radius = if control.istep > 0.0 {
@@ -523,6 +808,7 @@ where
     } else {
         1.0_f64.min(rmax)
     };
+    let action = |xv: ArrayView1<f64>, v: ArrayView1<f64>| obj.hessian_vector(xv, v);
 
     for step in 0..control.maxiter {
         let gnorm = nrm2(grad.view());
@@ -539,34 +825,34 @@ where
             });
         }
         // Inexact-Newton forcing keeps early CG cheap and the tail
-        // superlinear (Nocedal-Wright eq 7.3).
-        let rtol = gnorm.sqrt().min(0.5);
-        let (p, pred) = steihaug_cg(obj, pos.view(), &grad, radius, rtol, 2 * n);
-        let pnorm = nrm2(p.view());
-        if pnorm <= 0.0 || pred <= 0.0 {
-            radius *= 0.25;
-            if radius < RADIUS_FLOOR {
-                return Err(Error::TrustCollapsed { steps: step });
-            }
-            continue;
-        }
-        let mut trial = pos.clone();
-        axpy(1.0, p.view(), &mut trial);
-        let trial = obj.bounds().clip(trial.view());
-        let (ft, gt) = obj.value_and_gradient(trial.view());
-        let rho = if ft.is_finite() {
-            reduction_ratio(value - ft, pred)
-        } else {
-            -1.0
-        };
-        radius = update_radius(radius, rho, pnorm, rmax);
-        if radius < RADIUS_FLOOR {
+        // superlinear (Nocedal-Wright eq 7.3). The shared step also
+        // applies `maxmove` as a Euclidean clip; with the radius
+        // already inside that ceiling the clip does not move `p`.
+        let taken = newton_cg_step(
+            obj,
+            &pos,
+            value,
+            &grad,
+            &grad,
+            &NewtonCgRequest {
+                radius,
+                rmax,
+                atom_cap: None,
+                euclid_cap: control.maxmove,
+                project_rigid: false,
+                precondition: false,
+                seed: step as u64,
+            },
+            &action,
+        );
+        radius = taken.radius;
+        if taken.collapsed {
             return Err(Error::TrustCollapsed { steps: step });
         }
-        if rho > ETA_ACCEPT {
-            pos = trial;
-            value = ft;
-            grad = gt;
+        if taken.moved {
+            pos = taken.pos;
+            value = taken.value;
+            grad = taken.grad;
         }
     }
     let gnorm = nrm2(grad.view());

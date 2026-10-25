@@ -146,7 +146,7 @@ pub use manifold::{
     PoincareBall, Positive, SkewSymmetric, Spd, SphereComplex, StiefelNp, Symmetric, Unitary,
 };
 pub use method::Method;
-pub use minimize::{minimize, minimize_method, minimize_method_hess};
+pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
 pub use newton::{HessianObjective, HessianOracle, NewtonKind, minimize_newton};
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
 pub use noise::{

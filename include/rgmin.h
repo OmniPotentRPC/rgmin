@@ -1,6 +1,11 @@
 #ifndef RGMIN_H
 #define RGMIN_H
 
+/* Crate version. cargo cinstall ships this header. */
+#define RGMIN_H_MAJOR 0
+#define RGMIN_H_MINOR 4
+#define RGMIN_H_PATCH 1
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -50,7 +55,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 35
+#define RGMIN_ABI_VERSION_MINOR 36
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -81,8 +86,17 @@ typedef enum rgmin_method_t {
     /** Pulay residual subspace. `memory` 0 means 6 stored pairs. */
     RGMIN_DIIS = 22,
     /** ODE12r: adaptive Euler on the (preconditioned) force, Makri 2019. */
-    RGMIN_ODE12R = 23
+    RGMIN_ODE12R = 23,
+    /** Steihaug-Toint Newton-CG. Products only; no dense Hessian. */
+    RGMIN_NEWTON_CG = 24,
+    /** Newton-CG with a Nyström preconditioner. The trust ceiling stays Euclidean. */
+    RGMIN_NEWTON_PCG = 25
 } rgmin_method_t;
+
+/** Parse a method token. Case is ignored; hyphens and spaces match underscores.
+ *  \c newton-cg and \c newton_cg are the same method. Returns
+ *  \c RGMIN_INVALID_PARAMETER on an unknown or non-UTF-8 name. */
+rgmin_status_t rgmin_method_from_name(const char *name, rgmin_method_t *out);
 
 /** Conjugacy coefficient β. Closed leaf subset of dest Conjugacy
  *  (src/nlcg). Integers are dest declaration order. Hybrid stays
@@ -366,6 +380,11 @@ rgmin_status_t rgmin_solver_set_objective_roundoff(rgmin_solver_t *solver,
  *  clears it. A positive \c maxmove on the control, with no call here,
  *  is the Euclidean step limit and leaves the per-atom default off. */
 void rgmin_solver_set_atom_maxmove(rgmin_solver_t *solver, double maxmove);
+/** Capped Cartesian L-BFGS takes the geometry step: eOn's L-BFGS with a
+ *  finite-difference or sy/yy initial curvature, resets on negative
+ *  curvature, and an energy test with halvings. Nonzero turns it on; off,
+ *  the per-atom cap only clips the two-loop trial. Needs a per-atom cap. */
+void rgmin_solver_set_geometry_step(rgmin_solver_t *solver, int32_t enabled);
 void rgmin_solver_set_project_rigid(rgmin_solver_t *solver, int32_t enabled);
 /** 0 off, 1 auto, 2 translation, 3 translation and rotation.
  *  Nonzero on \ref rgmin_solver_set_project_rigid is auto. */
@@ -516,6 +535,12 @@ rgmin_status_t rgmin_solver_step_hess_fg(rgmin_solver_t *solver,
  *  by the L-BFGS pair gate and still returns 0. */
 int32_t rgmin_solver_push_pair(rgmin_solver_t *solver, const double *s,
                              const double *y, size_t n);
+/** Gradient evaluations on this session. Null returns zero.
+ *  A finite-difference product is \ref rgmin_solver_hvp_calls, not a gradient. */
+size_t rgmin_solver_gradient_calls(const rgmin_solver_t *solver);
+/** Hessian-vector products on this session. Null returns zero.
+ *  Analytic and forward-difference products each count as one. */
+size_t rgmin_solver_hvp_calls(const rgmin_solver_t *solver);
 /** Number of accepted L-BFGS pairs. Null and other methods return zero. */
 size_t rgmin_solver_pair_count(const rgmin_solver_t *solver);
 /** Two-loop `d = -H g` with no evaluation and no push. Empty memory
@@ -634,6 +659,19 @@ rgmin_status_t rgmin_lowest_eigenpair(rgmin_hvp_fn hvp, void *user,
                                     DLManagedTensorVersioned *mode_out,
                                     const rgmin_eigen_params_t *params,
                                     rgmin_lowest_mode_t *out);
+
+/** Steihaug-Toint Newton-CG. \a hvp writes \c H(x) v. \c method is
+ *  \c RGMIN_NEWTON_CG or \c RGMIN_NEWTON_PCG. No dense Hessian is formed. */
+rgmin_status_t rgmin_minimize_hvp(rgmin_eval_fn eval, rgmin_grad_fn grad,
+                              rgmin_hvp_fn hvp, void *user,
+                              DLManagedTensorVersioned *x,
+                              const rgmin_control_t *ctrl, rgmin_method_t method,
+                              rgmin_report_t *out);
+/** One Steihaug-Toint iteration. Legal on \c RGMIN_NEWTON_CG and
+ *  \c RGMIN_NEWTON_PCG. \a hvp is a product, not a matrix. */
+rgmin_status_t rgmin_solver_step_hvp(rgmin_solver_t *solver, rgmin_eval_fn eval,
+                                 rgmin_grad_fn grad, rgmin_hvp_fn hvp, void *user,
+                                 DLManagedTensorVersioned *x, rgmin_report_t *out);
 
 
 /**

@@ -131,6 +131,16 @@ pub enum Error {
     /// A CON checkpoint could not be written or read.
     #[error("checkpoint: {0}")]
     Checkpoint(String),
+    /// [`crate::Method::from_name`] did not recognize the token.
+    #[error("unknown method '{name}'")]
+    UnknownMethod {
+        /// The text the caller passed.
+        name: String,
+    },
+    /// [`crate::Solver::step_hvp`] was used on a session that is not
+    /// Newton-CG or Newton-PCG.
+    #[error("hessian-vector step requires newton-cg or newton-pcg")]
+    NeedHvp,
 }
 
 /// Result alias for this crate.

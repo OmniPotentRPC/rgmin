@@ -128,6 +128,30 @@ pub(crate) fn max_atom_norm(v: ArrayView1<'_, f64>) -> f64 {
 /// Largest `alpha` for which the step `alpha dir` obeys the cap in force:
 /// the per-atom cap when set, else the Euclidean `control.maxmove`, else
 /// unbounded.
+/// Largest per-atom length of a displacement.
+pub(crate) fn max_atom_displacement(step: &Array1<f64>) -> f64 {
+    max_atom_norm(step.view())
+}
+
+/// Scale `step` so its largest per-atom displacement equals `cap`.
+pub(crate) fn scale_displacement_to_atom_cap(step: &Array1<f64>, cap: f64) -> Array1<f64> {
+    let motion = max_atom_displacement(step);
+    if !cap.is_finite() || !motion.is_finite() || cap <= 0.0 || motion <= 0.0 {
+        return Array1::zeros(step.len());
+    }
+    step * (cap / motion)
+}
+
+/// Shrink `step` so its largest per-atom displacement is at most `cap`.
+pub(crate) fn cap_displacement_atom(step: &Array1<f64>, cap: f64) -> Array1<f64> {
+    let motion = max_atom_displacement(step);
+    if motion > cap && motion > 0.0 && cap > 0.0 {
+        step * (cap / motion)
+    } else {
+        step.clone()
+    }
+}
+
 pub(crate) fn cap_alpha(
     dir: ArrayView1<'_, f64>,
     control: &Control,

@@ -602,3 +602,104 @@ fn precon_is_bit_identical_at_1_2_3_and_8_threads() {
     assert_eq!(seen[0], seen[2], "1 thread vs 3 threads");
     assert_eq!(seen[0], seen[3], "1 thread vs 8 threads");
 }
+
+fn wide_bounds(n: usize) -> Bounds<f64> {
+    Bounds::new(Array1::from_elem(n, -1e6), Array1::from_elem(n, 1e6), 0.0)
+}
+fn geometry_position(precon: bool, cap: f64) -> Array1<f64> {
+    let n = 4;
+    let (geom, neigh, params) = chain(n);
+    let metric = Exp::assemble(geom.view(), &neigh, &params, 1.0, 1.0).unwrap();
+    let obj = FixedMetric {
+        p: metric,
+        bounds: wide_bounds(3 * n),
+    };
+    let mut x = geom;
+    let control = Control {
+        maxiter: 1,
+        gtol: 1e-12,
+        istep: 1.0,
+        maxmove: None,
+        ftol_rel: None,
+        noise_floor: None,
+    };
+    let mut solver = Solver::new(Method::Lbfgs { memory: 5 }, control, x.len());
+    solver.set_atom_maxmove(cap);
+    solver.set_geometry_step(true);
+    if precon {
+        solver
+            .set_exp(x.view(), &neigh, &params)
+            .expect("install exp");
+    }
+    solver.step(&obj, &mut x).unwrap();
+    x
+}
+
+#[test]
+fn geometry_lbfgs_uses_the_exp_preconditioner_as_h0() {
+    // g = P x, so one uncapped geometry step with H0 = P^{-1} is the Newton step to 0.
+    let landed = geometry_position(true, 10.0);
+    let plain = geometry_position(false, 10.0);
+    let landed_n = landed.dot(&landed).sqrt();
+    let plain_n = plain.dot(&plain).sqrt();
+    assert!(
+        landed_n < 1e-6,
+        "preconditioned geometry step left norm {landed_n}"
+    );
+    assert!(
+        plain_n > 1e-2,
+        "scalar geometry step collapsed to norm {plain_n}"
+    );
+}
+
+#[test]
+fn geometry_lbfgs_caps_along_the_preconditioned_force() {
+    let n = 4;
+    let (geom, neigh, params) = chain(n);
+    let metric = Exp::assemble(geom.view(), &neigh, &params, 1.0, 1.0).unwrap();
+    let obj = FixedMetric {
+        p: metric,
+        bounds: wide_bounds(3 * n),
+    };
+    let cap = 0.05;
+    let mut x = geom.clone();
+    let control = Control {
+        maxiter: 1,
+        gtol: 1e-12,
+        istep: 1.0,
+        maxmove: None,
+        ftol_rel: None,
+        noise_floor: None,
+    };
+    let mut solver = Solver::new(Method::Lbfgs { memory: 5 }, control, x.len());
+    solver.set_atom_maxmove(cap);
+    solver.set_geometry_step(true);
+    solver
+        .set_exp(geom.view(), &neigh, &params)
+        .expect("install exp");
+    let start = x.clone();
+    solver.step(&obj, &mut x).unwrap();
+    let mut motion = 0.0_f64;
+    let mut i = 0;
+    while i + 3 <= start.len() {
+        let r = (start[i] * start[i] + start[i + 1] * start[i + 1] + start[i + 2] * start[i + 2])
+            .sqrt();
+        motion = motion.max(r);
+        i += 3;
+    }
+    let scale = cap / motion;
+    let mut err = 0.0_f64;
+    for k in 0..start.len() {
+        err = err.max((x[k] - start[k] * (1.0 - scale)).abs());
+    }
+    assert!(
+        err < 1e-6,
+        "capped step is not cap(P^{{-1}} force), err {err}"
+    );
+    let plain = geometry_position(false, cap);
+    let gap: f64 = plain.iter().zip(x.iter()).map(|(a, b)| (a - b).abs()).sum();
+    assert!(
+        gap > 1e-3,
+        "scalar geometry step matched the preconditioned cap ({gap})"
+    );
+}

@@ -55,7 +55,19 @@ enum class Method {
     QuickMin = RGMIN_QUICKMIN,
     Diis = RGMIN_DIIS,
     Ode12r = RGMIN_ODE12R,
+    NewtonCg = RGMIN_NEWTON_CG,
+    NewtonPcg = RGMIN_NEWTON_PCG,
 };
+
+/** Parse a method token. \c newton-cg and \c newton_cg are the same method. */
+inline Method method_from_name(std::string const& name) {
+    rgmin_method_t tag{};
+    if (rgmin_method_from_name(name.c_str(), &tag) != RGMIN_SUCCESS) {
+        char const* msg = rgmin_last_error();
+        throw std::invalid_argument(msg ? msg : "unknown method");
+    }
+    return static_cast<Method>(static_cast<int>(tag));
+}
 
 enum class EigenKind {
     Lanczos = RGMIN_EIGEN_LANCZOS,
@@ -441,6 +453,12 @@ public:
     /// Drop only the cached evaluation (see rgmin_solver_forget_evaluation).
     void forget_evaluation() { rgmin_solver_forget_evaluation(ptr_); }
     std::size_t pair_count() const noexcept { return rgmin_solver_pair_count(ptr_); }
+    /** Gradient evaluations. Finite-difference products are hvp_calls(). */
+    std::size_t gradient_calls() const noexcept {
+        return rgmin_solver_gradient_calls(ptr_);
+    }
+    /** Hessian-vector products, analytic or forward-difference. */
+    std::size_t hvp_calls() const noexcept { return rgmin_solver_hvp_calls(ptr_); }
     void set_maxmove(double m) { rgmin_solver_set_maxmove(ptr_, m); }
     void set_qn_step(rgmin_qn_step_t step) { rgmin_solver_set_qn_step(ptr_, step); }
     rgmin_status_t set_precon(Precon const& p) {
@@ -472,6 +490,8 @@ public:
         rgmin_solver_set_periodic(ptr_, periodic ? 1 : 0);
     }
     void set_atom_maxmove(double m) { rgmin_solver_set_atom_maxmove(ptr_, m); }
+    /// Capped Cartesian L-BFGS takes the geometry step. Needs a per-atom cap.
+    void set_geometry_step(bool on) { rgmin_solver_set_geometry_step(ptr_, on ? 1 : 0); }
     void set_lbfgs_neb_guards(bool on) {
         rgmin_solver_set_lbfgs_neb_guards(ptr_, on ? 1 : 0);
     }
@@ -563,6 +583,18 @@ public:
             throw std::runtime_error(msg ? msg : "rgmin_solver_step_fg failed");
         }
         return Report{out.value, out.steps, out.grad_norm, out.stop};
+    }
+
+    Report step_hvp(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hvp_fn hvp,
+                    void* user, DLManagedTensorVersioned* x) {
+        rgmin_report_t out{};
+        rgmin_status_t st =
+            rgmin_solver_step_hvp(ptr_, eval, grad, hvp, user, x, &out);
+        if (st != RGMIN_SUCCESS) {
+            char const* msg = rgmin_last_error();
+            throw std::runtime_error(msg ? msg : "rgmin_solver_step_hvp failed");
+        }
+        return Report{out.value, out.steps, out.grad_norm};
     }
 
     Report step_hess(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hess_fn hess,

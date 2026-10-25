@@ -17,6 +17,7 @@ using rgmin::EigenKind;
 using rgmin::EigenParams;
 using rgmin::EigenOptions;
 using rgmin::lowest_eigenpair;
+using rgmin::method_from_name;
 using rgmin::Control;
 using rgmin::Report;
 using rgmin::ScalarType;

@@ -3,7 +3,7 @@
 //! does not change the ABI.
 
 use std::cell::RefCell;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use std::slice;
 
@@ -20,9 +20,10 @@ use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::{
     Accept, ApplyHessian, Conjugacy, Control, DirectionalCurvature, EigenParams, EigensolverKind,
-    Error, ExpParams, HessianOracle, LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep,
-    Restart, ScgOptions, ScgParams, ScgStepTolerance, Solver, lowest_mode, minimize_method,
-    minimize_method_hess, minimize_scg_exact_with_options, minimize_scg_with_options,
+    Error, ExpParams, HessianOracle, HvpOracle, LineSearch, ManifoldKind, Method, NewtonKind,
+    Oracle, QnStep, Restart, ScgOptions, ScgParams, ScgStepTolerance, Solver, lowest_mode,
+    minimize_method, minimize_method_hess, minimize_method_hvp, minimize_scg_exact_with_options,
+    minimize_scg_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -63,7 +64,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 35;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 36;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -118,6 +119,10 @@ pub enum rgmin_method_t {
     RGMIN_DIIS = 22,
     /// ODE12r: adaptive Euler on the (preconditioned) force, Makri 2019.
     RGMIN_ODE12R = 23,
+    /// Steihaug-Toint Newton-CG. Hessian access is a product, not a matrix.
+    RGMIN_NEWTON_CG = 24,
+    /// Steihaug-Toint Newton-CG with a Nyström preconditioner.
+    RGMIN_NEWTON_PCG = 25,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -469,6 +474,85 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
         rgmin_method_t::RGMIN_DIIS => Method::Diis {
             memory: if memory == 0 { 6 } else { memory },
         },
+        rgmin_method_t::RGMIN_NEWTON_CG => Method::NewtonCg,
+        rgmin_method_t::RGMIN_NEWTON_PCG => Method::NewtonPcg,
+    }
+}
+
+fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
+    let tag = match method {
+        Method::Nlcg { conjugacy, .. } => match conjugacy {
+            Conjugacy::FletcherReeves => rgmin_method_t::RGMIN_FLETCHER_REEVES,
+            Conjugacy::PolakRibiere => rgmin_method_t::RGMIN_POLAK_RIBIERE,
+            Conjugacy::HestenesStiefel => rgmin_method_t::RGMIN_HESTENES_STIEFEL,
+            Conjugacy::DaiYuan => rgmin_method_t::RGMIN_DAI_YUAN,
+            Conjugacy::ConjugateDescent => rgmin_method_t::RGMIN_CONJUGATE_DESCENT,
+            Conjugacy::HagerZhang => rgmin_method_t::RGMIN_HAGER_ZHANG,
+            Conjugacy::LiuStorey => rgmin_method_t::RGMIN_LIU_STOREY,
+            Conjugacy::FrPr => rgmin_method_t::RGMIN_FR_PR,
+            Conjugacy::PolakRibierePlus | Conjugacy::Hybrid { .. } => return Err(()),
+        },
+        Method::Bfgs => rgmin_method_t::RGMIN_BFGS,
+        Method::Lbfgs { .. } => rgmin_method_t::RGMIN_LBFGS,
+        Method::Sr1 => rgmin_method_t::RGMIN_SR1,
+        Method::Adam { .. } => rgmin_method_t::RGMIN_ADAM,
+        Method::Steepest => rgmin_method_t::RGMIN_STEEPEST,
+        Method::Sr2 => rgmin_method_t::RGMIN_SR2,
+        Method::Pso { .. } => rgmin_method_t::RGMIN_PSO,
+        Method::Newton { kind } => match kind {
+            NewtonKind::Shifted => rgmin_method_t::RGMIN_NEWTON,
+            NewtonKind::Rfo => rgmin_method_t::RGMIN_RFO,
+        },
+        Method::Fire { kind } => match kind {
+            crate::FireKind::V1 => rgmin_method_t::RGMIN_FIRE,
+            crate::FireKind::V2 => rgmin_method_t::RGMIN_FIRE2,
+        },
+        Method::Bb => rgmin_method_t::RGMIN_BB,
+        Method::Dogleg => rgmin_method_t::RGMIN_DOGLEG,
+        Method::QuickMin => rgmin_method_t::RGMIN_QUICKMIN,
+        Method::Ode12r => rgmin_method_t::RGMIN_ODE12R,
+        Method::Diis { .. } => rgmin_method_t::RGMIN_DIIS,
+        Method::NewtonCg => rgmin_method_t::RGMIN_NEWTON_CG,
+        Method::NewtonPcg => rgmin_method_t::RGMIN_NEWTON_PCG,
+    };
+    Ok(tag)
+}
+
+/// Parse a method token into [`rgmin_method_t`]. Case is ignored.
+/// Hyphens and spaces match underscores, so `newton-cg` and `newton_cg`
+/// are the same method.
+///
+/// # Safety
+/// `name` is a NUL-terminated UTF-8 string. `out` is writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_method_from_name(
+    name: *const c_char,
+    out: *mut rgmin_method_t,
+) -> rgmin_status_t {
+    if name.is_null() || out.is_null() {
+        set_last_error("rgmin_method_from_name: null");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let text = unsafe { CStr::from_ptr(name) };
+    let text = match text.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("rgmin_method_from_name: name is not utf-8");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+    };
+    match Method::from_name(text) {
+        Ok(method) => match method_to_c(&method) {
+            Ok(tag) => {
+                unsafe { *out = tag };
+                rgmin_status_t::RGMIN_SUCCESS
+            }
+            Err(()) => {
+                set_last_error("rgmin_method_from_name: method has no C token");
+                rgmin_status_t::RGMIN_INVALID_PARAMETER
+            }
+        },
+        Err(e) => status_from_error(&e),
     }
 }
 
@@ -1293,6 +1377,103 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
         Ok(s) => s,
         Err(_) => {
             set_last_error("rgmin_minimize_hess: panic");
+            rgmin_status_t::RGMIN_INTERNAL_ERROR
+        }
+    }
+}
+
+/// Steihaug-Toint Newton-CG from an analytic Hessian-vector product.
+/// `method` is [`rgmin_method_t::RGMIN_NEWTON_CG`] or
+/// [`rgmin_method_t::RGMIN_NEWTON_PCG`]. The product is never expanded
+/// into a dense Hessian.
+///
+/// # Safety
+/// Same as [`rgmin_minimize`]. `hvp` must be callable for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_hvp(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    method: rgmin_method_t,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let eval = match eval {
+            Some(f) => f,
+            None => {
+                set_last_error("rgmin_minimize_hvp: eval is NULL");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+        };
+        let grad = match grad {
+            Some(f) => f,
+            None => {
+                set_last_error("rgmin_minimize_hvp: grad is NULL");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+        };
+        let hvp = match hvp {
+            Some(f) => f,
+            None => {
+                set_last_error("rgmin_minimize_hvp: hvp is NULL");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+        };
+        if ctrl.is_null() || out.is_null() {
+            set_last_error("rgmin_minimize_hvp: ctrl/out null");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let init = match cpu_f64_slice_mut(x, "x") {
+            Ok(s) => s.to_vec(),
+            Err(st) => return st,
+        };
+        let n = init.len();
+        let obj = c_oracle_hvp(eval, grad, hvp, user, n);
+        let c = unsafe { &*ctrl };
+        let control = Control {
+            maxiter: c.maxiter,
+            gtol: c.gtol,
+            istep: if c.istep > 0.0 { c.istep } else { 1.0 },
+            maxmove: if c.maxmove > 0.0 {
+                Some(c.maxmove)
+            } else {
+                None
+            },
+            ftol_rel: None,
+            noise_floor: noise_floor_from_c(c),
+        };
+        match minimize_method_hvp(
+            &obj,
+            Array1::from(init),
+            &control,
+            method_from_c(method, c.memory),
+            LineSearch::default(),
+        ) {
+            Ok(rep) => {
+                let dest = match cpu_f64_slice_mut(x, "x") {
+                    Ok(s) => s,
+                    Err(st) => return st,
+                };
+                dest.copy_from_slice(rep.coords.as_slice().expect("contiguous"));
+                unsafe {
+                    *out = rgmin_report_t {
+                        value: rep.value,
+                        steps: rep.steps,
+                        grad_norm: rep.grad_norm,
+                        stop: stop_from_status(rep.status),
+                    };
+                }
+                rgmin_status_t::RGMIN_SUCCESS
+            }
+            Err(e) => status_from_error(&e),
+        }
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("rgmin_minimize_hvp: panic");
             rgmin_status_t::RGMIN_INTERNAL_ERROR
         }
     }
@@ -2273,6 +2454,22 @@ pub unsafe extern "C" fn rgmin_solver_set_atom_maxmove(solver: *mut rgmin_solver
         return;
     }
     unsafe { (*solver).solver.set_atom_maxmove(maxmove) };
+}
+
+/// Capped Cartesian L-BFGS takes the geometry step (eOn's L-BFGS with a
+/// finite-difference or `sy/yy` initial curvature, resets, and an energy
+/// test). Nonzero turns it on. Off, the per-atom cap only clips the
+/// two-loop trial. Needs a per-atom cap.
+///
+/// # Safety
+///
+/// A non-null `solver` must be a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_geometry_step(solver: *mut rgmin_solver_t, enabled: i32) {
+    if solver.is_null() {
+        return;
+    }
+    unsafe { (*solver).solver.set_geometry_step(enabled != 0) };
 }
 
 /// eOn `lbfgs_project_rigid`. Nonzero is [`crate::RigidMode::Auto`].
@@ -3303,6 +3500,71 @@ pub unsafe extern "C" fn rgmin_solver_step_hess(
     }
 }
 
+/// One Steihaug-Toint iteration. `hvp` writes `H(x) v` and is not asked
+/// for a dense matrix. Legal on `RGMIN_NEWTON_CG` and `RGMIN_NEWTON_PCG`.
+///
+/// # Safety
+/// Callbacks live for this call only. `x` is a writable rank-1 CPU f64 tensor.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_step_hvp(
+    solver: *mut rgmin_solver_t,
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if solver.is_null() {
+            set_last_error("rgmin_solver_step_hvp: null solver");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let eval = match eval {
+            Some(f) => f,
+            None => {
+                set_last_error("rgmin_solver_step_hvp: eval is NULL");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+        };
+        let grad = match grad {
+            Some(f) => f,
+            None => {
+                set_last_error("rgmin_solver_step_hvp: grad is NULL");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+        };
+        let hvp = match hvp {
+            Some(f) => f,
+            None => {
+                set_last_error("rgmin_solver_step_hvp: hvp is NULL");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+        };
+        if out.is_null() {
+            set_last_error("rgmin_solver_step_hvp: out is NULL");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let init = match cpu_f64_slice_mut(x, "x") {
+            Ok(s) => s.to_vec(),
+            Err(st) => return st,
+        };
+        let n = init.len();
+        let obj = c_oracle_hvp(eval, grad, hvp, user, n);
+        let mut pos = Array1::from(init);
+        match unsafe { (*solver).solver.step_hvp(&obj, &mut pos) } {
+            Ok(rep) => write_report(x, out, &rep),
+            Err(e) => status_from_error(&e),
+        }
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("rgmin_solver_step_hvp: panic");
+            rgmin_status_t::RGMIN_INTERNAL_ERROR
+        }
+    }
+}
+
 /// One outer iteration with a fused `(f, g)` callback.
 ///
 /// # Safety
@@ -3440,6 +3702,32 @@ pub unsafe extern "C" fn rgmin_solver_push_pair(
             .push_pair(ndarray::ArrayView1::from(sv), ndarray::ArrayView1::from(yv))
     };
     i32::from(!ok)
+}
+
+/// Gradient evaluations on this session. A null solver returns zero.
+/// Finite-difference products are [`rgmin_solver_hvp_calls`], not gradients.
+///
+/// # Safety
+/// A non-null `solver` must be a live session from `rgmin_solver_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_gradient_calls(solver: *const rgmin_solver_t) -> usize {
+    if solver.is_null() {
+        return 0;
+    }
+    unsafe { (*solver).solver.gradient_calls() }
+}
+
+/// Hessian-vector products on this session. A null solver returns zero.
+/// Each product, analytic or forward-difference, counts as one.
+///
+/// # Safety
+/// A non-null `solver` must be a live session from `rgmin_solver_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_hvp_calls(solver: *const rgmin_solver_t) -> usize {
+    if solver.is_null() {
+        return 0;
+    }
+    unsafe { (*solver).solver.hvp_calls() }
 }
 
 /// Number of accepted L-BFGS pairs. Null and other methods return zero.
@@ -3638,6 +3926,60 @@ fn c_oracle_hess(
                 return Array2::from_elem((n, n), f64::NAN);
             }
             h
+        },
+    )
+}
+
+fn c_oracle_hvp(
+    eval: rgmin_eval_fn,
+    grad: rgmin_grad_fn,
+    hvp: rgmin_hvp_fn,
+    user: *mut c_void,
+    n: usize,
+) -> HvpOracle<
+    impl Fn(ndarray::ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync,
+    impl Fn(ndarray::ArrayView1<f64>, ndarray::ArrayView1<f64>) -> Array1<f64> + Send + Sync,
+> {
+    let eval_ptr = eval as usize;
+    let grad_ptr = grad as usize;
+    let hvp_ptr = hvp as usize;
+    let user_addr = user as usize;
+    let fg_scratch = Scratch::new();
+    let hvp_x = Scratch::new();
+    let hvp_v = Scratch::new();
+    HvpOracle::unbounded(
+        n,
+        move |xv| {
+            let eval_fn: rgmin_eval_fn = unsafe { std::mem::transmute(eval_ptr) };
+            let grad_fn: rgmin_grad_fn = unsafe { std::mem::transmute(grad_ptr) };
+            let user = user_addr as *mut c_void;
+            let m = xv.len();
+            let mut s = fg_scratch.lock().expect("ffi scratch");
+            let xt = s.x_tensor(xv);
+            let mut value = 0.0;
+            let ev_st = unsafe { eval_fn(user, xt, &mut value) };
+            let mut g = Array1::zeros(m);
+            let gt = s.out.point_at(g.as_mut_ptr(), m);
+            let gr_st = unsafe { grad_fn(user, xt, gt) };
+            if ev_st != rgmin_status_t::RGMIN_SUCCESS || gr_st != rgmin_status_t::RGMIN_SUCCESS {
+                return (f64::INFINITY, Array1::from_elem(m, f64::NAN));
+            }
+            (value, g)
+        },
+        move |xv, vv| {
+            let hvp_fn: rgmin_hvp_fn = unsafe { std::mem::transmute(hvp_ptr) };
+            let user = user_addr as *mut c_void;
+            let mut s = hvp_x.lock().expect("ffi scratch");
+            let xt = s.x_tensor(xv);
+            let mut vs = hvp_v.lock().expect("ffi scratch");
+            let vt = vs.x_tensor(vv);
+            let mut hv = Array1::zeros(vv.len());
+            let ht = vs.out.point_at(hv.as_mut_ptr(), hv.len());
+            let st = unsafe { hvp_fn(user, xt, vt, ht) };
+            if st != rgmin_status_t::RGMIN_SUCCESS {
+                return Array1::from_elem(hv.len(), f64::NAN);
+            }
+            hv
         },
     )
 }

@@ -3,6 +3,7 @@
 #![cfg(feature = "capi")]
 
 use std::os::raw::c_void;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dlpk::sys::{DLDeviceType, DLManagedTensorVersioned};
 use eindir_core::ffi::eindir_core_abi_stamp;
@@ -18,6 +19,10 @@ use rgmin::ffi::{
 use rgmin::ffi::{
     rgmin_conjugacy_t, rgmin_eigen_kind_t, rgmin_eigen_params_t, rgmin_last_error,
     rgmin_lowest_eigenpair, rgmin_lowest_mode_t, rgmin_minimize_scg, rgmin_scg_params_t,
+};
+use rgmin::ffi::{
+    rgmin_method_from_name, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
+    rgmin_solver_step_hvp,
 };
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
 use rgpot_core::status::rgpot_status_t;
@@ -606,7 +611,7 @@ fn c_abi_diis_reduces_a_quadratic() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 35);
+    assert_eq!(stamp.abi_minor, 36);
     assert_eq!(stamp.layout_revision, 4);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -1889,4 +1894,164 @@ fn c_abi_rigid_project_drops_a_translation_and_reports_rank() {
     assert!(rmsd < 1e-8, "rmsd {rmsd}");
     assert!((mobile[3] - mobile[0] - 1.0).abs() < 1e-12, "slab rotated");
     unsafe { rgmin_rigid_workspace_free(ws) };
+}
+
+struct BowlCount {
+    grads: AtomicUsize,
+    hvps: AtomicUsize,
+}
+
+unsafe extern "C" fn ncg_bowl_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    let mut f = 0.0;
+    for i in 0..n {
+        let v = unsafe { *p.add(i) };
+        f += 0.5 * v * v;
+    }
+    unsafe { *value_out = f };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn ncg_bowl_grad(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let count = unsafe { &*(user as *const BowlCount) };
+    count.grads.fetch_add(1, Ordering::Relaxed);
+    let (p, n) = unsafe { cpu_f64(x) };
+    let (gp, gn) = unsafe { cpu_f64(g) };
+    assert_eq!(n, gn);
+    for i in 0..n {
+        unsafe { *(gp as *mut f64).add(i) = *p.add(i) };
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn ncg_bowl_hvp(
+    user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    v: *const DLManagedTensorVersioned,
+    hv: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let count = unsafe { &*(user as *const BowlCount) };
+    count.hvps.fetch_add(1, Ordering::Relaxed);
+    let (vp, n) = unsafe { cpu_f64(v) };
+    let (hp, hn) = unsafe { cpu_f64(hv) };
+    assert_eq!(n, hn);
+    for i in 0..n {
+        unsafe { *(hp as *mut f64).add(i) = *vp.add(i) };
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn newton_cg_method_string_and_counters_cross_the_c_abi() {
+    let mut tag = rgmin_method_t::RGMIN_STEEPEST;
+    let cg = std::ffi::CString::new("newton-cg").unwrap();
+    assert_eq!(
+        unsafe { rgmin_method_from_name(cg.as_ptr(), &mut tag) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    assert_eq!(tag, rgmin_method_t::RGMIN_NEWTON_CG);
+    let pcg = std::ffi::CString::new("Newton-PCG").unwrap();
+    assert_eq!(
+        unsafe { rgmin_method_from_name(pcg.as_ptr(), &mut tag) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    assert_eq!(tag, rgmin_method_t::RGMIN_NEWTON_PCG);
+    let bad = std::ffi::CString::new("not-a-solver").unwrap();
+    assert_eq!(
+        unsafe { rgmin_method_from_name(bad.as_ptr(), &mut tag) },
+        rgmin_status_t::RGMIN_INVALID_PARAMETER
+    );
+    assert_eq!(
+        unsafe { rgmin_method_from_name(std::ptr::null(), &mut tag) },
+        rgmin_status_t::RGMIN_INVALID_PARAMETER
+    );
+    assert_eq!(unsafe { rgmin_solver_gradient_calls(std::ptr::null()) }, 0);
+    assert_eq!(unsafe { rgmin_solver_hvp_calls(std::ptr::null()) }, 0);
+
+    let count = BowlCount {
+        grads: AtomicUsize::new(0),
+        hvps: AtomicUsize::new(0),
+    };
+    let ctrl = rgmin_control_t {
+        maxiter: 20,
+        gtol: 1e-10,
+        istep: 0.1,
+        memory: 0,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    };
+    let user = &count as *const BowlCount as *mut c_void;
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_NEWTON_CG, &ctrl, 4) };
+    assert!(!session.is_null());
+    let mut x = [1.0_f64, -0.5, 0.25, 0.1];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+    };
+    for _ in 0..20 {
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
+        let st = unsafe {
+            rgmin_solver_step(
+                session,
+                Some(ncg_bowl_eval),
+                Some(ncg_bowl_grad),
+                user,
+                xt,
+                &mut out,
+            )
+        };
+        unsafe { rgmin_tensor_free(xt) };
+        assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+        if out.grad_norm < 1e-8 {
+            break;
+        }
+    }
+    assert!(out.grad_norm < 1e-8, "|g| {}", out.grad_norm);
+    let grads = unsafe { rgmin_solver_gradient_calls(session) };
+    let hvps = unsafe { rgmin_solver_hvp_calls(session) };
+    assert!(grads > 0 && hvps > 0, "grads {grads} hvps {hvps}");
+    assert_eq!(count.grads.load(Ordering::Relaxed), grads + hvps);
+    unsafe { rgmin_solver_free(session) };
+
+    count.grads.store(0, Ordering::Relaxed);
+    count.hvps.store(0, Ordering::Relaxed);
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_NEWTON_CG, &ctrl, 4) };
+    let mut x = [1.0_f64, -0.5, 0.25, 0.1];
+    for _ in 0..20 {
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
+        let st = unsafe {
+            rgmin_solver_step_hvp(
+                session,
+                Some(ncg_bowl_eval),
+                Some(ncg_bowl_grad),
+                Some(ncg_bowl_hvp),
+                user,
+                xt,
+                &mut out,
+            )
+        };
+        unsafe { rgmin_tensor_free(xt) };
+        assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+        if out.grad_norm < 1e-8 {
+            break;
+        }
+    }
+    assert!(out.grad_norm < 1e-8, "|g| {}", out.grad_norm);
+    let grads = unsafe { rgmin_solver_gradient_calls(session) };
+    let hvps = unsafe { rgmin_solver_hvp_calls(session) };
+    assert_eq!(count.grads.load(Ordering::Relaxed), grads);
+    assert_eq!(count.hvps.load(Ordering::Relaxed), hvps);
+    assert!(hvps > 0, "analytic products were not counted");
+    unsafe { rgmin_solver_free(session) };
 }

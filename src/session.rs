@@ -17,8 +17,13 @@ use crate::fire::{
     Fire2Extras, FireMix, FireState, FireVariant, fire_after_v1_metric, fire_displacement,
     fire_rescale_velocity, fire2_displacement_metric, guenole2020,
 };
+use crate::hvp::{
+    FiniteDifference, HessianVector, NewtonCgRequest, OptionalAction, newton_cg_step,
+    sym_eig_jacobi,
+};
 use crate::lbfgs::{GradNorm, Lbfgs};
 use crate::linesearch::{LineSearch, LineSearchOptions};
+use crate::lowest_mode::{ApplyHessian, lowest_eigenpair};
 use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
 use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton};
@@ -39,8 +44,8 @@ use crate::quickmin::{
 use crate::report::{Report, Status};
 use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
-    Taken, cap_alpha, l2, nlcg_opening_alpha, qn_istep, scale_step, scale_step_atom,
-    take_step_with_options,
+    Taken, cap_alpha, cap_displacement_atom, l2, max_atom_displacement, nlcg_opening_alpha,
+    qn_istep, scale_displacement_to_atom_cap, scale_step, scale_step_atom, take_step_with_options,
 };
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
@@ -213,6 +218,17 @@ pub struct Solver {
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
+    /// Objective gradients. A finite-difference product is an
+    /// [`Self::hvp_calls`] entry, not a gradient.
+    gradient_calls: usize,
+    /// Analytic or finite-difference Hessian-vector products.
+    hvp_calls: usize,
+    /// Negative-curvature kicks already taken in this solve.
+    saddle_kicks: u8,
+    /// Whether geometry L-BFGS needs a finite-difference stiffness probe.
+    geometry_lbfgs_stiff: Option<bool>,
+    /// Capped Cartesian L-BFGS takes the geometry step.
+    geometry_step: bool,
     /// Geometry metric. `None` leaves every method unchanged.
     precon: Option<Slot>,
     /// Bumped when `P` is installed, cleared, or rebuilt.
@@ -284,6 +300,12 @@ enum Inner {
     Dogleg {
         radius: f64,
     },
+    NewtonCg {
+        radius: f64,
+    },
+    NewtonPcg {
+        radius: f64,
+    },
 }
 
 struct PsoState {
@@ -340,6 +362,11 @@ impl Solver {
             last_pos: None,
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
+            gradient_calls: 0,
+            hvp_calls: 0,
+            saddle_kicks: 0,
+            geometry_lbfgs_stiff: None,
+            geometry_step: false,
             precon: None,
             metric_epoch: 0,
             nlcg_descent_fallbacks: 0,
@@ -614,6 +641,26 @@ impl Solver {
         self.dim
     }
 
+    /// Gradient evaluations charged to this session.
+    ///
+    /// A forward-difference Hessian-vector product costs one gradient
+    /// inside the product and is counted by [`Self::hvp_calls`], not
+    /// here. Both counters accumulate for the life of the session.
+    /// [`Self::forget`] does not clear them.
+    pub fn gradient_calls(&self) -> usize {
+        self.gradient_calls
+    }
+
+    /// Hessian-vector products charged to this session.
+    ///
+    /// An analytic product is one call. A finite-difference product is
+    /// one extra gradient and is still one product here, so a harness
+    /// can charge `gradient_calls + hvp_calls` force evaluations on
+    /// this path and `n` force evaluations per dense Hessian elsewhere.
+    pub fn hvp_calls(&self) -> usize {
+        self.hvp_calls
+    }
+
     /// Euclidean cap applied on the next [`Self::step`].
     ///
     /// A positive value is the step limit and the per-atom default stays
@@ -635,6 +682,16 @@ impl Solver {
         if self.steps == 0 {
             self.reset_sr_radius();
         }
+    }
+
+    /// Capped Cartesian L-BFGS takes the geometry step: eOn's L-BFGS
+    /// with a finite-difference or `sy/yy` initial inverse curvature, a
+    /// reset on negative curvature, on a step past the per-atom cap or
+    /// against the force, and an energy test with at most ten halvings.
+    /// Off, the per-atom cap only clips the two-loop trial and the NEB
+    /// guards of [`Self::set_neb_guards`] apply. Needs [`Self::set_atom_maxmove`].
+    pub fn set_geometry_step(&mut self, on: bool) {
+        self.geometry_step = on;
     }
 
     /// eOn `lbfgs_project_rigid`.
@@ -1346,6 +1403,7 @@ impl Solver {
     /// rotates by `theta`. Small rotations between steps keep the memory
     /// useful; after a large one call [`Self::forget`].
     pub fn forget_evaluation(&mut self) {
+        self.geometry_lbfgs_stiff = None;
         self.last_pos = None;
         if let Inner::QuickMin(_, session) = &mut self.inner {
             session.forget_last();
@@ -1417,6 +1475,8 @@ impl Solver {
 
     /// Drop method memory. The next step is a cold start from the current `x`.
     pub fn forget(&mut self) {
+        self.saddle_kicks = 0;
+        self.geometry_lbfgs_stiff = None;
         self.istep = self.control.istep;
         self.e_hist.clear();
         self.last_pos = None;
@@ -1471,7 +1531,7 @@ impl Solver {
                 *prev_s = None;
                 *prev_y = None;
             }
-            Inner::Dogleg { radius } => {
+            Inner::Dogleg { radius } | Inner::NewtonCg { radius } | Inner::NewtonPcg { radius } => {
                 *radius = self.control.istep.max(1e-8);
             }
         }
@@ -1534,6 +1594,9 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        if matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. }) {
+            return self.step_newton_cg(obj, x, &FiniteDifference);
+        }
         if matches!(self.inner, Inner::Newton { .. } | Inner::Dogleg { .. }) {
             return Err(Error::NeedHessian);
         }
@@ -1565,6 +1628,12 @@ impl Solver {
     where
         O: HessianObjective + ?Sized,
     {
+        // Newton-CG never forms `obj.hessian`, even when the caller
+        // handed a dense oracle to this verb. The product is a forward
+        // difference of gradients.
+        if matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. }) {
+            return self.step_newton_cg(obj, x, &FiniteDifference);
+        }
         #[cfg(feature = "highs")]
         {
             if let Inner::Lbfgs(solver) = &mut self.inner {
@@ -1588,6 +1657,484 @@ impl Solver {
         self.step_with_equalities(obj, x, Self::step_hess_inner)
     }
 
+    /// One Steihaug-Toint iteration. `obj` supplies analytic products;
+    /// this verb does not build a dense Hessian.
+    ///
+    /// [`Self::step`] and [`Self::step_hess`] on the same methods use a
+    /// forward difference (one gradient per product) instead.
+    pub fn step_hvp<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: HessianVector + ?Sized,
+    {
+        if !matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. }) {
+            return Err(Error::NeedHvp);
+        }
+        let action = |xv: ArrayView1<f64>, v: ArrayView1<f64>| obj.hessian_vector(xv, v);
+        self.step_newton_cg(obj, x, &action)
+    }
+
+    fn step_newton_cg<O, A>(&mut self, obj: &O, x: &mut Array1<f64>, action: &A) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+        A: OptionalAction + Send + Sync,
+    {
+        if x.len() != self.dim || self.dim != Objective::dim(obj) {
+            return Err(Error::Dim {
+                got: x.len(),
+                dim: self.dim,
+            });
+        }
+        self.check_manifold(x.len())?;
+        let cached = self.same_last_x(x);
+        if !cached {
+            *x = obj.bounds().clip(x.view());
+        }
+        let (value, raw_grad) = if cached {
+            (self.last_value, self.last_grad.clone())
+        } else {
+            self.gradient_calls += 1;
+            obj.value_and_gradient(x.view())
+        };
+        // CG sees the horizontal gradient. The forward difference
+        // needs the raw gradient, which is what `remember` stores on
+        // this path.
+        let grad = self.horizontal_grad(x, &raw_grad);
+        let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
+        if !gnorm.is_finite() {
+            return Err(Error::TrustCollapsed { steps: self.steps });
+        }
+        if gnorm < self.control.gtol {
+            self.remember(x, value, &raw_grad);
+            return Ok(Report {
+                value,
+                coords: x.clone(),
+                steps: self.steps,
+                grad_norm: gnorm,
+                status: self.control.classify(gnorm, self.free_len(obj.bounds())),
+            });
+        }
+        let (radius, precondition) = match &self.inner {
+            Inner::NewtonCg { radius } => (*radius, false),
+            Inner::NewtonPcg { radius } => (*radius, true),
+            _ => return Err(Error::NeedHvp),
+        };
+        // Same ceiling as dogleg: Euclidean `maxmove` when one is set,
+        // otherwise eight times the current radius, and never below it.
+        let rmax = self.control.maxmove.unwrap_or(radius * 8.0).max(radius);
+        let project_rigid = self.removal_mode() != RigidMode::Off;
+        let taken = newton_cg_step(
+            obj,
+            x,
+            value,
+            &grad,
+            &raw_grad,
+            &NewtonCgRequest {
+                radius,
+                rmax,
+                atom_cap: self.atom_maxmove,
+                euclid_cap: self.control.maxmove,
+                project_rigid,
+                precondition,
+                seed: self.steps as u64,
+            },
+            action,
+        );
+        self.hvp_calls += taken.hvps;
+        self.gradient_calls += taken.trial_gradients;
+        if let Inner::NewtonCg { radius } | Inner::NewtonPcg { radius } = &mut self.inner {
+            *radius = taken.radius;
+        }
+        if taken.collapsed {
+            // The free-function loop reports the attempt and keeps the
+            // previous point when the radius hits the floor.
+            self.remember(x, value, &raw_grad);
+            self.steps += 1;
+            return Err(Error::TrustCollapsed { steps: self.steps });
+        }
+        let (raw_out, report_grad) = if taken.moved {
+            *x = taken.pos;
+            let horizontal = self.horizontal_grad(x, &taken.grad);
+            (taken.grad, horizontal)
+        } else {
+            (raw_grad, grad)
+        };
+        self.remember(x, taken.value, &raw_out);
+        self.steps += 1;
+        let gnorm = self.stationarity_norm(obj.bounds(), x, &report_grad);
+        Ok(Report {
+            value: taken.value,
+            coords: x.clone(),
+            steps: self.steps,
+            grad_norm: gnorm,
+            status: self.control.classify(gnorm, self.free_len(obj.bounds())),
+        })
+    }
+
+    /// `P^{-1} force` when an exponential preconditioner is installed.
+    /// Otherwise `h0 * force`, the scalar geometry seed.
+    fn geometry_seed_force(&self, force: &Array1<f64>, h0: f64) -> Array1<f64> {
+        if let Inner::Lbfgs(solver) = &self.inner {
+            if let Some(pre) = solver.exp_apply(force.view()) {
+                return pre;
+            }
+        }
+        h0 * force
+    }
+
+    /// `scale * P^{-1} force` when an exponential preconditioner is installed.
+    /// Otherwise `scale * force`.
+    fn geometry_scaled_force(&self, force: &Array1<f64>, scale: f64) -> Array1<f64> {
+        if let Inner::Lbfgs(solver) = &self.inner {
+            if let Some(pre) = solver.exp_apply(force.view()) {
+                return scale * &pre;
+            }
+        }
+        scale * force
+    }
+
+    /// Per-atom cap selects the geometry L-BFGS step. Uncapped sessions keep
+    /// the one-oracle two-loop (and Wolfe when acceptance is not [`Accept::None`]).
+    fn use_geometry_lbfgs(&self) -> bool {
+        if !self.geometry_step {
+            return false;
+        }
+        if self.atom_maxmove.is_none() || !matches!(self.manifold, ManifoldKind::Euclidean) {
+            return false;
+        }
+        if !matches!(self.inner, Inner::Lbfgs(_)) {
+            return false;
+        }
+        #[cfg(feature = "highs")]
+        if self.highs {
+            return false;
+        }
+        true
+    }
+
+    fn apply_geometry_curvature(
+        &mut self,
+        sy: f64,
+        yy: f64,
+        h0: &mut f64,
+        force: &Array1<f64>,
+        cap: f64,
+        forced: &mut Option<Array1<f64>>,
+    ) {
+        let curvature = if sy.is_finite() && yy.is_finite() && sy != 0.0 {
+            yy / sy
+        } else {
+            -1.0
+        };
+        if curvature < 0.0 {
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                solver.forget();
+            }
+            *forced = Some(cap_displacement_atom(
+                &self.geometry_scaled_force(force, 1000.0),
+                cap,
+            ));
+        } else if sy > 0.0 && yy > 0.0 {
+            *h0 = sy / yy;
+        }
+    }
+
+    /// Capped Cartesian L-BFGS step: severely clipped starts estimate inverse
+    /// curvature by finite difference; ordinary starts use `0.1 I`. Later
+    /// iterations use `sy/yy`. The finite-difference probe is clipped to the
+    /// objective bounds, and the quotient uses the displacement that remains
+    /// inside the box. Curvature pairs are reset when curvature is negative,
+    /// the uncapped step exceeds the per-atom cap, or the step opposes the
+    /// force. Trials use monotone acceptance after a stiffness probe and a
+    /// five-value nonmonotone window otherwise, with at most ten halvings
+    /// before a short steepest step.
+    /// An installed exponential preconditioner replaces that scalar seed:
+    /// the two-loop applies `P^{-1}`, and a reset that would have stepped
+    /// along `h0` times the force steps along `P^{-1}` times the force.
+    /// Those steepest fallbacks use `P^{-1}` as well. A failed solve falls
+    /// back to the scalar seed. The cap still limits the displacement.
+    fn geometry_lbfgs_step<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        value: f64,
+        mut grad: Array1<f64>,
+    ) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let cap = self.atom_maxmove.unwrap_or(0.2);
+        let nominal_motion = max_atom_displacement(&(self.istep * grad.mapv(|g| -g)));
+        let stiff = *self
+            .geometry_lbfgs_stiff
+            .get_or_insert(nominal_motion >= 64.0 * cap);
+        let mut h0 = if stiff { 0.01 } else { 0.1 };
+        let mut forced: Option<Array1<f64>> = None;
+        let force = grad.mapv(|g| -g);
+        let cached = self.same_last_x(x);
+        if !cached {
+            if let Some(previous) = self.last_pos.clone() {
+                let s = &*x - &previous;
+                let y = &grad - &self.last_grad;
+                let sy = s.dot(&y);
+                let yy = y.dot(&y);
+                self.apply_geometry_curvature(sy, yy, &mut h0, &force, cap, &mut forced);
+                if forced.is_none()
+                    && let Inner::Lbfgs(solver) = &mut self.inner
+                {
+                    solver.push_geometry(s, y);
+                }
+            }
+        } else {
+            let (have, sy, yy) = match &self.inner {
+                Inner::Lbfgs(solver) => (solver.have_curvature, solver.last_sy, solver.last_yy),
+                _ => (false, 0.0, 0.0),
+            };
+            if have {
+                self.apply_geometry_curvature(sy, yy, &mut h0, &force, cap, &mut forced);
+            }
+        }
+        if stiff && forced.is_none() && self.steps == 0 {
+            let fnorm = l2(&force);
+            if fnorm > 0.0 {
+                let unit = &force / fnorm;
+                // 0.01 is the eOn probe length. Clip before the evaluation:
+                // the raw point can lie outside the objective box.
+                let raw = &*x + &(0.01 * &unit);
+                let probe = obj.bounds().clip(raw.view());
+                let along = (&probe - &*x).dot(&unit);
+                let curvature = if along > 0.0 && along.is_finite() {
+                    let (_efd, gfd) = obj.value_and_gradient(probe.view());
+                    let delta = &gfd - &grad;
+                    delta.dot(&unit) / along
+                } else {
+                    -1.0
+                };
+                if curvature > 0.0 && curvature.is_finite() {
+                    h0 = 1.0 / curvature;
+                } else if let Inner::Lbfgs(solver) = &mut self.inner {
+                    solver.forget();
+                    forced = Some(cap_displacement_atom(
+                        &self.geometry_scaled_force(&force, 1000.0),
+                        cap,
+                    ));
+                }
+            }
+        }
+        let direction = if let Some(dir) = forced {
+            dir
+        } else {
+            let mut direction = match &self.inner {
+                Inner::Lbfgs(solver) => solver.direction_h0(grad.view(), h0),
+                _ => h0 * &force,
+            };
+            direction = self.project_vec(x, &direction);
+            let motion = max_atom_displacement(&direction);
+            if motion >= cap {
+                if let Inner::Lbfgs(solver) = &mut self.inner {
+                    solver.forget();
+                }
+                cap_displacement_atom(&self.geometry_seed_force(&force, h0), cap)
+            } else {
+                let dn = l2(&direction);
+                let fnorm = l2(&force);
+                if dn > 0.0 && fnorm > 0.0 {
+                    let cosine = (direction.dot(&force) / (dn * fnorm)).clamp(-1.0, 1.0);
+                    if cosine < 0.0 {
+                        if let Inner::Lbfgs(solver) = &mut self.inner {
+                            solver.forget();
+                        }
+                        direction =
+                            cap_displacement_atom(&self.geometry_seed_force(&force, h0), cap);
+                    }
+                }
+                cap_displacement_atom(&direction, cap)
+            }
+        };
+        let reference = if stiff {
+            value
+        } else {
+            self.e_hist
+                .iter()
+                .copied()
+                .fold(value, |largest, candidate| largest.max(candidate))
+        };
+        let mut alpha = 1.0;
+        let mut accepted = false;
+        let mut trial = x.clone();
+        let mut tval = value;
+        let mut tgrad = grad.clone();
+        for _ in 0..10 {
+            trial = obj.bounds().clip((&*x + alpha * &direction).view());
+            let ev = obj.value_and_gradient(trial.view());
+            tval = ev.0;
+            tgrad = ev.1;
+            if tval.is_finite() && tval - reference <= 1.0e-8 {
+                accepted = true;
+                break;
+            }
+            alpha *= 0.5;
+        }
+        if !accepted {
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                solver.forget();
+            }
+            let sd = cap_displacement_atom(&self.geometry_scaled_force(&force, 0.1), cap);
+            trial = obj.bounds().clip((&*x + &sd).view());
+            let ev = obj.value_and_gradient(trial.view());
+            tval = ev.0;
+            tgrad = ev.1;
+        }
+        if !stiff {
+            self.e_hist.push_back(tval);
+            if self.e_hist.len() > 5 {
+                self.e_hist.pop_front();
+            }
+        }
+        let old = x.clone();
+        let gold = grad.clone();
+        *x = trial;
+        grad = self.horizontal_grad(x, &tgrad);
+        let s = &*x - &old;
+        let y = &grad - &gold;
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.note_curvature(&s, &y);
+            if solver.have_curvature {
+                let sy = solver.last_sy;
+                let yy = solver.last_yy;
+                let curvature = if sy != 0.0 { yy / sy } else { -1.0 };
+                if curvature >= 0.0 {
+                    solver.push_geometry(s, y);
+                }
+            }
+        }
+        self.remember(x, tval, &grad);
+        self.steps += 1;
+        let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
+        Ok(Report {
+            value: tval,
+            coords: x.clone(),
+            steps: self.steps,
+            grad_norm: gnorm,
+            status: self.control.classify(gnorm, self.free_len(obj.bounds())),
+        })
+    }
+
+    fn saddle_escape_enabled(&self) -> bool {
+        #[cfg(feature = "highs")]
+        if self.highs {
+            return false;
+        }
+        matches!(self.inner, Inner::Newton { .. } | Inner::Dogleg { .. })
+    }
+
+    /// Lowest eigenpair of `hess` when it lies below the stationarity tolerance.
+    fn unstable_mode(&self, hess: &ndarray::Array2<f64>) -> Option<Array1<f64>> {
+        let n = hess.nrows();
+        if n == 0 || hess.ncols() != n || hess.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
+        let mut fro2 = 0.0;
+        for v in hess.iter() {
+            fro2 += v * v;
+        }
+        let fro = fro2.sqrt();
+        let tol = self.control.gtol.abs().max(1.0e-6).max(1.0e-8 * fro);
+        let (value, vector) = if n <= 160 {
+            let (evals, evecs) = sym_eig_jacobi(hess.clone());
+            let mut k = 0usize;
+            let mut best = f64::INFINITY;
+            for (i, lam) in evals.iter().enumerate() {
+                if *lam < best {
+                    best = *lam;
+                    k = i;
+                }
+            }
+            if !best.is_finite() {
+                return None;
+            }
+            (best, evecs.column(k).to_owned())
+        } else {
+            struct Mat<'a>(&'a ndarray::Array2<f64>);
+            impl ApplyHessian for Mat<'_> {
+                fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+                    self.0.dot(&v)
+                }
+            }
+            let mut seed = Array1::zeros(n);
+            for i in 0..n {
+                seed[i] = ((i % 11) as f64) - 5.0;
+            }
+            let found = lowest_eigenpair(&Mat(hess), seed.view(), seed.view(), 48.min(n));
+            (found.value, found.vector)
+        };
+        if value < -tol { Some(vector) } else { None }
+    }
+
+    /// Move off a converged saddle along the lowest Hessian mode, scaled to
+    /// the per-atom cap. Analytic Hessian only; at most four kicks per solve.
+    fn leave_saddle<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        value: &mut f64,
+        grad: &mut Array1<f64>,
+    ) where
+        O: HessianObjective + ?Sized,
+    {
+        loop {
+            let gnorm = self.stationarity_norm(obj.bounds(), x, grad);
+            if gnorm > self.control.gtol || self.saddle_kicks >= 4 {
+                return;
+            }
+            let hess = obj.hessian(x.view());
+            let Some(mode) = self.unstable_mode(&hess) else {
+                return;
+            };
+            let cap = self
+                .atom_maxmove
+                .unwrap_or_else(|| self.control.istep.max(1.0e-8));
+            let step = scale_displacement_to_atom_cap(&mode, cap);
+            let trial = obj.bounds().clip((&*x + &step).view());
+            let (v, g) = obj.value_and_gradient(trial.view());
+            if !v.is_finite() || g.iter().any(|c| !c.is_finite()) {
+                return;
+            }
+            *x = trial;
+            *value = v;
+            *grad = self.horizontal_grad(x, &g);
+            self.saddle_kicks = self.saddle_kicks.saturating_add(1);
+            if let Inner::Dogleg { radius } = &mut self.inner {
+                *radius = self.control.istep.max(1.0e-8);
+            }
+            self.remember(x, *value, grad);
+        }
+    }
+
+    fn report_or_escape<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        mut value: f64,
+        mut grad: Array1<f64>,
+    ) -> Result<Report>
+    where
+        O: HessianObjective + ?Sized,
+    {
+        if self.saddle_escape_enabled()
+            && self.stationarity_norm(obj.bounds(), x, &grad) <= self.control.gtol
+        {
+            self.leave_saddle(obj, x, &mut value, &mut grad);
+        }
+        let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
+        Ok(Report {
+            value,
+            coords: x.clone(),
+            steps: self.steps,
+            grad_norm: gnorm,
+            status: self.control.classify(gnorm, self.free_len(obj.bounds())),
+        })
+    }
+
     fn step_hess_inner<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: HessianObjective + ?Sized,
@@ -1607,6 +2154,10 @@ impl Solver {
                 QnStep::TwoLoop => None,
             },
             Inner::Dogleg { .. } => None,
+            // A missed early return must not fall through to `obj.hessian`.
+            Inner::NewtonCg { .. } | Inner::NewtonPcg { .. } => {
+                return self.step_newton_cg(obj, x, &FiniteDifference);
+            }
             _ => return self.step_first_order(obj, x),
         };
         let cached = self.same_last_x(x);
@@ -1620,14 +2171,12 @@ impl Solver {
         };
         grad = self.horizontal_grad(x, &grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
-        if let Some(status) = self.control.halt(gnorm, self.free_len(obj.bounds())) {
-            return Ok(Report {
-                value,
-                coords: x.clone(),
-                steps: self.steps,
-                grad_norm: gnorm,
-                status,
-            });
+        if self
+            .control
+            .halt(gnorm, self.free_len(obj.bounds()))
+            .is_some()
+        {
+            return self.report_or_escape(obj, x, value, grad);
         }
         let hess = obj.hessian(x.view());
         if matches!(self.inner, Inner::Dogleg { .. }) {
@@ -1705,16 +2254,7 @@ impl Solver {
                     solver.push_pair(s, y, Some(gn));
                 }
                 self.steps += 1;
-                return Ok(Report {
-                    value,
-                    coords: x.clone(),
-                    steps: self.steps,
-                    grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-                    status: self.control.classify(
-                        self.stationarity_norm(obj.bounds(), x, &grad),
-                        self.free_len(obj.bounds()),
-                    ),
-                });
+                return self.report_or_escape(obj, x, value, grad);
             }
         }
         let mut dir = if let Some(kind) = newton_kind {
@@ -1759,16 +2299,7 @@ impl Solver {
             solver.push_pair(s, y, Some(gn));
         }
         self.steps += 1;
-        Ok(Report {
-            value,
-            coords: x.clone(),
-            steps: self.steps,
-            grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-            status: self.control.classify(
-                self.stationarity_norm(obj.bounds(), x, &grad),
-                self.free_len(obj.bounds()),
-            ),
-        })
+        self.report_or_escape(obj, x, value, grad)
     }
 
     fn step_dogleg<O>(
@@ -1780,24 +2311,27 @@ impl Solver {
         hess: &ndarray::Array2<f64>,
     ) -> Result<Report>
     where
-        O: DifferentiableObjective<f64> + ?Sized,
+        O: HessianObjective + ?Sized,
     {
         let radius = match &self.inner {
             Inner::Dogleg { radius } => *radius,
             _ => self.control.istep.max(1e-8),
         };
-        // An explicit per-atom cap is a second limit on the trust step
-        // and the ceiling on the radius. The radius update then sees
-        // the clipped length, so a boundary step looks interior.
-        // Nocedal and Wright, algorithm 4.1. The default leaves the
-        // cap unset and the ceiling is eight times the current radius.
-        let rmax = self
-            .atom_maxmove
-            .or(self.control.maxmove)
-            .unwrap_or(radius * 8.0)
-            .max(radius);
+        // Nocedal and Wright, algorithm 4.1: grow Δ only when the trust
+        // step meets the boundary, and only up to a Euclidean Δ_max.
+        // A per-atom cap is a different norm. Using it as Δ_max (the
+        // 0.4.1 default of 0.2, and every tuned Morse row) lets Δ climb
+        // from the initial radius to that cap and then stop, so a
+        // 768-coordinate step stays inside a Euclidean ball of radius
+        // 0.2. Feeding the clipped length to the boundary test does the
+        // same once the cap binds: the trust step is on the sphere, but
+        // the shorter trial looks interior, so Δ does not grow.
+        // Δ_max is the Euclidean `maxmove` when one is set, otherwise
+        // eight times the current radius. The cap still limits the trial.
+        let rmax = self.control.maxmove.unwrap_or(radius * 8.0).max(radius);
         let mut dir = dogleg_direction(hess, &grad, radius);
         self.kill_at(x, &mut dir);
+        let trust_norm = l2(&dir);
         let mut trial = &*x + &dir;
         if let Some(cap) = self.atom_maxmove {
             scale_step_atom(x, &mut trial, cap);
@@ -1806,40 +2340,30 @@ impl Solver {
         }
         trial = obj.bounds().clip(trial.view());
         let p = &trial - &*x;
-        let pnorm = l2(&p);
+        let taken = l2(&p);
         let (ft, gt) = obj.value_and_gradient(trial.view());
         let pred = predicted_reduction(hess, &grad, &p);
         let rho = reduction_ratio(value - ft, pred);
+        // No displacement cap: the boundary length is the step after the
+        // box clip, as before. With a cap, the dogleg length is the one
+        // algorithm 4.1 tests against Δ.
+        let boundary_norm = if self.atom_maxmove.is_some() || self.control.maxmove.is_some() {
+            trust_norm
+        } else {
+            taken
+        };
         if let Inner::Dogleg { radius } = &mut self.inner {
-            *radius = update_radius(*radius, rho, pnorm, rmax);
+            *radius = update_radius(*radius, rho, boundary_norm, rmax);
         }
         if accept_ratio(rho) {
             *x = trial;
             self.remember(x, ft, &gt);
             self.steps += 1;
-            Ok(Report {
-                value: ft,
-                coords: x.clone(),
-                steps: self.steps,
-                grad_norm: self.stationarity_norm(obj.bounds(), x, &gt),
-                status: self.control.classify(
-                    self.stationarity_norm(obj.bounds(), x, &gt),
-                    self.free_len(obj.bounds()),
-                ),
-            })
+            self.report_or_escape(obj, x, ft, gt)
         } else {
             self.remember(x, value, &grad);
             self.steps += 1;
-            Ok(Report {
-                value,
-                coords: x.clone(),
-                steps: self.steps,
-                grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-                status: self.control.classify(
-                    self.stationarity_norm(obj.bounds(), x, &grad),
-                    self.free_len(obj.bounds()),
-                ),
-            })
+            self.report_or_escape(obj, x, value, grad)
         }
     }
 
@@ -1893,6 +2417,10 @@ impl Solver {
             });
         }
         self.refresh_exp(obj, x, &grad)?;
+
+        if self.use_geometry_lbfgs() {
+            return self.geometry_lbfgs_step(obj, x, value, grad);
+        }
 
         if matches!(self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
             && matches!(self.inner, Inner::Lbfgs(_))
@@ -2586,7 +3114,11 @@ impl Solver {
                     *prev_y = Some(&grad - &gold);
                 }
             }
-            Inner::Pso { .. } | Inner::Newton { .. } | Inner::Dogleg { .. } => unreachable!(),
+            Inner::Pso { .. }
+            | Inner::Newton { .. }
+            | Inner::Dogleg { .. }
+            | Inner::NewtonCg { .. }
+            | Inner::NewtonPcg { .. } => unreachable!(),
         }
 
         // A translation retract maps the accepted point to itself; the
@@ -2972,6 +3504,12 @@ impl Inner {
                 prev_y: None,
             },
             Method::Dogleg => Inner::Dogleg {
+                radius: istep.max(1e-8),
+            },
+            Method::NewtonCg => Inner::NewtonCg {
+                radius: istep.max(1e-8),
+            },
+            Method::NewtonPcg => Inner::NewtonPcg {
                 radius: istep.max(1e-8),
             },
         }
