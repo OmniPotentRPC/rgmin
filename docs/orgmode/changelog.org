@@ -6,6 +6,8 @@
 
 ** Unreleased
 
+** 0.5.0 (2026-10-25)
+
 Steihaug-Toint Newton-CG is ~Method::NewtonCg~ (~newton-cg~), and
 ~Method::NewtonPcg~ (~newton-pcg~) adds a rank-16 Nyström
 preconditioner rebuilt at the current point. ~Solver::step~ and
