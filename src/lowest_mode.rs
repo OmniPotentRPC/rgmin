@@ -1655,7 +1655,7 @@ mod tests {
         assert!((alpha[0] - 1.0).abs() < 1e-14);
         assert!(q[0].iter().all(|v| v.is_finite()));
         assert_eq!(actions, 1);
-        let mode = lanczos(&h, x.view(), seed.view(), 4);
+        let mode = lanczos(&h, x.view(), seed.view(), 4, &mut |_| {});
         assert!(mode.value.is_finite());
         assert!((mode.value - 1.0).abs() < 1e-12);
         assert!(mode.vector.iter().all(|v| v.is_finite()));
@@ -1691,7 +1691,7 @@ mod tests {
         let x = Array1::zeros(n);
         let mut seed = Array1::from_elem(n, 1e-6);
         seed[0] = 1.0;
-        let mode = lanczos(&h, x.view(), seed.view(), 16);
+        let mode = lanczos(&h, x.view(), seed.view(), 16, &mut |_| {});
         assert!(mode.vector.iter().all(|v| v.is_finite()));
         assert!(
             (mode.value - 1.0).abs() < 2e-3,
@@ -1711,7 +1711,7 @@ mod tests {
         assert!(alpha.is_empty());
         assert!(beta.is_empty());
         assert_eq!(actions, 0);
-        let mode = lanczos(&h, x.view(), seed.view(), 4);
+        let mode = lanczos(&h, x.view(), seed.view(), 4, &mut |_| {});
         assert_eq!(mode.value, 0.0);
         assert!(mode.vector.iter().all(|v| *v == 0.0));
     }
