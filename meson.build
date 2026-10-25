@@ -10,7 +10,7 @@ project(
 
 fs = import('fs')
 _msproot = meson.project_source_root()
-_incdir = include_directories('include', 'tests/support')
+_incdir = include_directories('include')
 if not fs.is_file(_msproot / 'include' / 'xts.h')
     error('missing shipped header include/xts.h')
 endif

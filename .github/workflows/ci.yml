@@ -162,3 +162,21 @@ jobs:
     with:
       artifact-name: unstripped-libs
       allow-file: isa-allow.toml
+
+  cinstall:
+    name: cargo cinstall
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-c
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+          rustup toolchain install 1.89.0 --profile minimal
+          cargo +1.89.0 install cargo-c --locked --version 0.10.17+cargo-0.92.0
+      - name: Install into a prefix and compile C and C++
+        run: tests/cinstall/smoke.sh

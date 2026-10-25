@@ -3,8 +3,33 @@
 #![cfg(feature = "capi")]
 
 use std::env;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+
+fn cxx_compiler() -> &'static str {
+    for bin in ["c++", "g++", "clang++"] {
+        let mut child = match Command::new(bin)
+            .args(["-std=c++17", "-x", "c++", "-", "-c", "-o", "/dev/null"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(_) => continue,
+        };
+        let wrote = child.stdin.take().is_some_and(|mut stdin| {
+            stdin
+                .write_all(b"#include <cstdio>\nint main(){return 0;}\n")
+                .is_ok()
+        });
+        if wrote && child.wait().map(|status| status.success()).unwrap_or(false) {
+            return bin;
+        }
+    }
+    "c++"
+}
 
 fn profile() -> &'static str {
     if cfg!(debug_assertions) {
@@ -14,48 +39,61 @@ fn profile() -> &'static str {
     }
 }
 
-fn lib_dir(root: &Path) -> PathBuf {
-    if let Ok(td) = env::var("CARGO_TARGET_DIR") {
-        return PathBuf::from(td).join(profile());
-    }
-    root.join("target").join(profile())
+fn search_dirs(root: &Path) -> [PathBuf; 2] {
+    let base = if let Ok(td) = env::var("CARGO_TARGET_DIR") {
+        PathBuf::from(td).join(profile())
+    } else {
+        root.join("target").join(profile())
+    };
+    let deps = base.join("deps");
+    [base, deps]
+}
+
+fn newest_file(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    paths
+        .into_iter()
+        .filter(|path| path.is_file())
+        .max_by_key(|path| path.metadata().and_then(|meta| meta.modified()).ok())
 }
 
 #[test]
 fn cxx_headers_compile_link_and_reuse() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let src = root.join("tests/cxx_headers.cpp");
-    let lib = lib_dir(&root);
-    let so = lib.join("librgmin.so");
-    let a = lib.join("librgmin.a");
+    let dirs = search_dirs(&root);
+    let so = newest_file(dirs.iter().map(|dir| dir.join("librgmin.so")));
+    let a = newest_file(dirs.iter().map(|dir| dir.join("librgmin.a")));
     assert!(
-        so.is_file() || a.is_file(),
-        "librgmin missing under {} (so={} a={})",
-        lib.display(),
-        so.is_file(),
-        a.is_file()
+        so.is_some() || a.is_some(),
+        "librgmin missing under {} or {} (so={} a={})",
+        dirs[0].display(),
+        dirs[1].display(),
+        so.is_some(),
+        a.is_some()
     );
     let out_dir = env::var_os("CARGO_TARGET_TMPDIR")
         .map(PathBuf::from)
         .unwrap_or_else(env::temp_dir);
     let bin = out_dir.join("rgmin_cxx_headers");
-    let mut cmd = Command::new("c++");
+    let mut cmd = Command::new(cxx_compiler());
     cmd.arg("-std=c++17")
         .arg("-O0")
         .arg(src)
         .arg("-I")
         .arg(root.join("include"))
-        .arg("-I")
-        .arg(root.join("tests/support"))
         .arg("-o")
         .arg(&bin);
-    if so.is_file() {
+    if let Some(so) = so.as_ref() {
+        let lib = so.parent().expect("librgmin.so parent");
         cmd.arg("-L")
-            .arg(&lib)
+            .arg(lib)
             .arg("-lrgmin")
             .arg(format!("-Wl,-rpath,{}", lib.display()));
     } else {
-        cmd.arg(&a).arg("-lpthread").arg("-ldl").arg("-lm");
+        cmd.arg(a.expect("static librgmin"))
+            .arg("-lpthread")
+            .arg("-ldl")
+            .arg("-lm");
     }
     let compiled = cmd.output().expect("spawn c++");
     assert!(

@@ -65,8 +65,18 @@ min_version = "0.10.17"
 [package.metadata.capi.header]
 name = "rgmin.h"
 subdirectory = ""
-generation = true
+# cbindgen output is not the installed header. It exports the internal
+# HiGHS imports (undefined HighsInt), wraps callbacks as Option_ structs,
+# and cargo-c turns the filename rgmin.h into the token RGMIN.H_MAJOR.
+generation = false
 enabled = true
+emit_version_constants = false
+
+[package.metadata.capi.install.include]
+asset = [
+    { from = "include/**/*.h", to = "" },
+    { from = "include/**/*.hpp", to = "" },
+]
 
 [package.metadata.capi.pkg_config]
 name = "rgmin"
