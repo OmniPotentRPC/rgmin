@@ -475,6 +475,24 @@ public:
     void set_project_rigid(bool on) {
         rgmin_solver_set_project_rigid(ptr_, on ? 1 : 0);
     }
+    /// 0 off, 1 auto, 2 translation, 3 translation and rotation.
+    void set_rigid_mode(int32_t mode) { rgmin_solver_set_rigid_mode(ptr_, mode); }
+    void set_rigid_mass_metric(bool on) {
+        rgmin_solver_set_rigid_mass_metric(ptr_, on ? 1 : 0);
+    }
+    void set_rigid_mass_weighted(bool on) {
+        rgmin_solver_set_rigid_mass_weighted(ptr_, on ? 1 : 0);
+    }
+    void set_pbc_axes(bool x, bool y, bool z) {
+        rgmin_solver_set_pbc_axes(ptr_, x ? 1 : 0, y ? 1 : 0, z ? 1 : 0);
+    }
+    void set_frozen(uint8_t const* frozen, std::size_t len) {
+        rgmin_solver_set_frozen(ptr_, frozen, len);
+    }
+    void set_broken_axes(bool tx, bool ty, bool tz, bool rx, bool ry, bool rz) {
+        rgmin_solver_set_broken_axes(ptr_, tx ? 1 : 0, ty ? 1 : 0, tz ? 1 : 0, rx ? 1 : 0,
+                                     ry ? 1 : 0, rz ? 1 : 0);
+    }
     void set_extra_updates(std::size_t n) {
         rgmin_solver_set_extra_updates(ptr_, n);
     }
