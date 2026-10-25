@@ -493,6 +493,8 @@ fn check_public_header() {
     let header_path = root.join("include/rgmin.h");
     let header = std::fs::read_to_string(&header_path)
         .unwrap_or_else(|err| panic!("read {}: {err}", header_path.display()));
+    // A Windows checkout may carry CRLF line endings.
+    let header = header.replace("\r\n", "\n");
     let dlpack = root.join("include/dlpack/dlpack.h");
     if !dlpack.is_file() {
         panic!(
