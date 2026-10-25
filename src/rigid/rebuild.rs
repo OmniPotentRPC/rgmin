@@ -19,7 +19,7 @@ impl RigidWorkspace {
     fn rebuild(&mut self, req: &RigidRequest<'_>) {
         let n = req.pos.len();
         self.rank = 0;
-        if req.mode == RigidMode::Off || n < 3 || n % 3 != 0 {
+        if req.mode == RigidMode::Off || n < 3 || !n.is_multiple_of(3) {
             self.n = n;
             return;
         }
@@ -111,13 +111,13 @@ impl RigidWorkspace {
         if metric {
             scale_cols(&mut self.basis, n, rank, &req, false);
         }
-        if let Some(frozen) = req.frozen {
-            if frozen.len() == n {
-                for k in 0..rank {
-                    for i in 0..n {
-                        if frozen[i] != 0 {
-                            self.basis[k * n + i] = 0.0;
-                        }
+        if let Some(frozen) = req.frozen
+            && frozen.len() == n
+        {
+            for k in 0..rank {
+                for i in 0..n {
+                    if frozen[i] != 0 {
+                        self.basis[k * n + i] = 0.0;
                     }
                 }
             }
