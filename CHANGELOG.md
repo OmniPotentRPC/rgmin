@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Exp pair weight and the μ sine probe call `libm` `exp` and
+  `sin`. The host math library does not agree between x86_64 and
+  aarch64. A hash of those `f64` bits is locked in the test.
+
 ## [0.5.2] - 2026-10-25
 
 ### Fixed
@@ -423,10 +429,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1.1 to 4 increments.
 
 ### Fixed
-
-- The Exp pair weight and the μ sine probe call `libm` `exp` and
-  `sin`. The host math library does not agree between x86_64 and
-  aarch64. A hash of those `f64` bits is locked in the test.
 
 - The line-search zoom bisects when the far end of the bracket is not
   finite or differs from the near end by more than
