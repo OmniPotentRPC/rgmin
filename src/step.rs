@@ -4,10 +4,35 @@ use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
 
 use crate::control::Control;
+use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 
 pub(crate) fn l2(g: &Array1<f64>) -> f64 {
     crate::vecops::nrm2(g.view())
+}
+
+/// An answer a decrease test may compare: value and gradient finite.
+pub(crate) fn finite(f: f64, g: ArrayView1<'_, f64>) -> bool {
+    f.is_finite() && g.iter().all(|v| v.is_finite())
+}
+
+pub(crate) fn non_finite() -> Error {
+    Error::Oracle {
+        what: "non-finite value or gradient",
+    }
+}
+
+/// Value and gradient at the start of a relaxation. A non-finite answer
+/// there defines no direction to search, so it is refused.
+pub(crate) fn start_answer<O>(obj: &O, pos: &Array1<f64>) -> Result<(f64, Array1<f64>)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let (value, grad) = obj.value_and_gradient(pos.view());
+    if !finite(value, grad.view()) {
+        return Err(non_finite());
+    }
+    Ok((value, grad))
 }
 
 pub(crate) fn scale_step(origin: &Array1<f64>, trial: &mut Array1<f64>, cap: f64) {

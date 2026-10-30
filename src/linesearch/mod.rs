@@ -75,6 +75,10 @@ impl Default for LineSearch {
 
 impl LineSearch {
     /// Returns `(x_new, f_new, |α|)` if the trial beat `f0`, else the start.
+    ///
+    /// A trial answered with a non-finite value or gradient fails every
+    /// decrease test. A non-finite start or `dir` returns the start
+    /// without probing.
     pub fn search<F>(
         &self,
         mut oracle: F,
@@ -108,6 +112,22 @@ pub(crate) fn axpy(pos: ArrayView1<'_, f64>, t: f64, dir: ArrayView1<'_, f64>) -
     trial
 }
 
+/// `f`, or `+inf` when the value or gradient is non-finite. NaN fails no
+/// comparison and `-inf` passes every decrease test, so either would read
+/// a refused answer as a decrease.
+pub(crate) fn scored(f: f64, g: ArrayView1<'_, f64>) -> f64 {
+    if crate::step::finite(f, g) {
+        f
+    } else {
+        f64::INFINITY
+    }
+}
+
+/// No line leaves a start whose value, gradient or direction is non-finite.
+fn unusable(f0: f64, g0: &Array1<f64>, dir: ArrayView1<'_, f64>) -> bool {
+    !crate::step::finite(f0, g0.view()) || dir.iter().any(|v| !v.is_finite())
+}
+
 fn brent_search<F>(
     oracle: &mut F,
     pos: ArrayView1<'_, f64>,
@@ -119,8 +139,14 @@ fn brent_search<F>(
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
-    let f0 = oracle(pos).0;
-    let mut phi = |t: f64| oracle(axpy(pos, t, dir).view()).0;
+    let (f0, g0) = oracle(pos);
+    if unusable(f0, &g0, dir) {
+        return (pos.to_owned(), f0, 0.0);
+    }
+    let mut phi = |t: f64| {
+        let (f, g) = oracle(axpy(pos, t, dir).view());
+        scored(f, g.view())
+    };
     let (a, b) = bracket(&mut phi, 0.0, istep.max(1e-12), maxiter);
     let (t, ft) = brent(&mut phi, a, b, tol, maxiter.max(20));
     if ft < f0 {
@@ -144,13 +170,17 @@ where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
     let (f0, g0) = oracle(pos);
+    if unusable(f0, &g0, dir) {
+        return (pos.to_owned(), f0, 0.0);
+    }
     let slope: f64 = g0.iter().zip(dir.iter()).map(|(g, d)| g * d).sum();
     let mut alpha = istep.max(1e-16);
     let mut best_x = pos.to_owned();
     let mut best_f = f0;
     for _ in 0..maxiter {
         let x = axpy(pos, alpha, dir);
-        let f = oracle(x.view()).0;
+        let (f, g) = oracle(x.view());
+        let f = scored(f, g.view());
         if f < best_f {
             best_f = f;
             best_x = x.clone();

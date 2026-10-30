@@ -35,6 +35,7 @@ pub enum FireKind {
 }
 
 /// Session memory for one FIRE or FIRE 2.0 solve.
+#[derive(Clone)]
 pub struct FireState {
     /// Integrator.
     pub kind: FireKind,

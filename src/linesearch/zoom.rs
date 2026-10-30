@@ -10,8 +10,8 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use super::axpy;
 use super::conditions::{armijo, strong_curvature};
+use super::{axpy, scored, unusable};
 
 /// Evaluate `φ(α) = f(x + α d)` and `φ'(α) = ∇f(x + α d) · d`.
 ///
@@ -29,7 +29,7 @@ where
     let x = axpy(pos, alpha, dir);
     let (f, g) = oracle(x.view());
     let dphi = g.iter().zip(dir.iter()).map(|(gi, di)| gi * di).sum();
-    (f, dphi)
+    (scored(f, g.view()), dphi)
 }
 
 /// Midpoint of `[lo, hi]`. Independent of endpoint order.
@@ -137,7 +137,7 @@ where
 {
     let (f0, g0) = oracle(pos);
     let dphi0: f64 = g0.iter().zip(dir.iter()).map(|(g, d)| g * d).sum();
-    if !f0.is_finite() || !dphi0.is_finite() || dphi0 >= 0.0 {
+    if unusable(f0, &g0, dir) || !dphi0.is_finite() || dphi0 >= 0.0 {
         return (pos.to_owned(), f0, 0.0);
     }
 
@@ -152,6 +152,7 @@ where
     for i in 0..maxiter {
         let x = axpy(pos, alpha, dir);
         let (phi, g) = oracle(x.view());
+        let phi = scored(phi, g.view());
         let dphi: f64 = g.iter().zip(dir.iter()).map(|(gi, di)| gi * di).sum();
         if phi.is_finite() && phi < best_f {
             best_f = phi;
@@ -211,7 +212,7 @@ where
     let (t, mut ft) = zoomed;
     if t.is_finite() && t.abs() > 0.0 {
         if !ft.is_finite() {
-            ft = oracle(axpy(pos, t, dir).view()).0;
+            ft = phi_pair(oracle, pos, dir, t).0;
         }
         let tied_wolfe = ft == f0
             && armijo(ft, f0, t, dphi0, c1)

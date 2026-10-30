@@ -7,7 +7,7 @@ use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
-use crate::step::{l2, next_istep, take_step};
+use crate::step::{l2, next_istep, start_answer, take_step};
 
 /// Adam plus a line search along the Kingma-Ba preconditioned step.
 ///
@@ -39,7 +39,7 @@ where
         });
     }
     pos = obj.bounds().clip(pos.view());
-    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    let (mut value, mut grad) = start_answer(obj, &pos)?;
     let mut m = Array1::<f64>::zeros(pos.len());
     let mut v = Array1::<f64>::zeros(pos.len());
     // beta1^t and beta2^t at t = 1, then multiplied by beta after each step.

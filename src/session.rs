@@ -38,8 +38,8 @@ use crate::qn_step::QnStep;
 use crate::report::Report;
 use crate::rigid::{project_horizontal, project_out_rot_trans};
 use crate::step::{
-    cap_displacement_atom, l2, max_atom_displacement, scale_displacement_to_atom_cap, scale_step,
-    scale_step_atom,
+    cap_displacement_atom, finite, l2, max_atom_displacement, non_finite,
+    scale_displacement_to_atom_cap, scale_step, scale_step_atom,
 };
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
@@ -906,6 +906,10 @@ impl Solver {
     }
 
     /// One outer iteration. `x` is the iterate and is overwritten in place.
+    /// A first-order step whose start, or whose FIRE or geometry fallback
+    /// trial, answers with a non-finite value or gradient returns
+    /// [`Error::Oracle`] with `x` and the solver as they were, so a retry
+    /// probes the same trial.
     pub fn step<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -1145,6 +1149,10 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        let saved = match &self.inner {
+            Inner::Lbfgs(solver) => Some((solver.curvature(), self.geometry_lbfgs_stiff)),
+            _ => None,
+        };
         let cap = self.atom_maxmove.unwrap_or(0.2);
         let nominal_motion = max_atom_displacement(&(self.istep * grad.mapv(|g| -g)));
         let stiff = *self
@@ -1254,7 +1262,7 @@ impl Solver {
             let ev = obj.value_and_gradient(trial.view());
             tval = ev.0;
             tgrad = ev.1;
-            if tval.is_finite() && tval - reference <= 1.0e-8 {
+            if finite(tval, tgrad.view()) && tval - reference <= 1.0e-8 {
                 accepted = true;
                 break;
             }
@@ -1269,6 +1277,13 @@ impl Solver {
             let ev = obj.value_and_gradient(trial.view());
             tval = ev.0;
             tgrad = ev.1;
+            if !finite(tval, tgrad.view()) {
+                if let (Inner::Lbfgs(solver), Some((curvature, stiff))) = (&mut self.inner, saved) {
+                    solver.restore(curvature);
+                    self.geometry_lbfgs_stiff = stiff;
+                }
+                return Err(non_finite());
+            }
         }
         if !stiff {
             self.e_hist.push_back(tval);
@@ -1655,6 +1670,9 @@ impl Solver {
             obj.value_and_gradient(x.view())
         };
         grad = self.horizontal_grad(x, &grad);
+        if !finite(value, grad.view()) {
+            return Err(non_finite());
+        }
         let gnorm = self.stationarity_norm(x, &grad);
         if gnorm < self.control.gtol {
             return Ok(self.report(value, x, &grad));
@@ -2040,6 +2058,9 @@ impl Solver {
                 *b2p *= *beta2;
             }
             Inner::Fire(state) => {
+                // A refused trial returns with the integrator as it was, so a
+                // retry probes the same point instead of one further along.
+                let saved = state.clone();
                 let mut raw = grad.mapv(|g| -g);
                 project_box_tangent(obj.bounds(), x, &mut raw);
                 project_box_tangent(obj.bounds(), x, &mut state.vel);
@@ -2048,6 +2069,11 @@ impl Solver {
                     FirePreparation::Rollback(correction) => {
                         *x = obj.bounds().clip((&*x + &correction).view());
                         let ev = obj.value_and_gradient(x.view());
+                        if !finite(ev.0, ev.1.view()) {
+                            *state = saved;
+                            *x = start;
+                            return Err(non_finite());
+                        }
                         grad = ev.1;
                         raw = grad.mapv(|g| -g);
                         project_box_tangent(obj.bounds(), x, &mut raw);
@@ -2076,8 +2102,13 @@ impl Solver {
                 if matches!(state.kind, FireKind::V2) && state.dt > 0.0 {
                     state.vel = (&trial - &forward_start) / state.dt;
                 }
+                let ev = obj.value_and_gradient(trial.view());
+                if !finite(ev.0, ev.1.view()) {
+                    *state = saved;
+                    *x = start;
+                    return Err(non_finite());
+                }
                 *x = trial;
-                let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
                 grad = ev.1;
                 let mut raw_new = grad.mapv(|g| -g);

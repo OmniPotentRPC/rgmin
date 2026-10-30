@@ -7,7 +7,7 @@ use ndarray::Array1;
 
 use crate::control::Control;
 use crate::manifold::{Manifold, ManifoldKind};
-use crate::step::{scale_step, scale_step_atom};
+use crate::step::{finite, scale_step, scale_step_atom};
 
 const ENERGY_RISE: f64 = 1.0e-8;
 const WINDOW: usize = 5;
@@ -124,7 +124,7 @@ where
             for _ in 0..10 {
                 let trial = trial_point(obj, pos, dir, alpha, control, atom_maxmove, manifold);
                 let (ft, gt) = obj.value_and_gradient(trial.view());
-                if ft - ref_e <= ENERGY_RISE {
+                if finite(ft, gt.view()) && ft - ref_e <= ENERGY_RISE {
                     push_energy(e_hist, ft);
                     return (trial, ft, gt, true);
                 }
@@ -142,7 +142,7 @@ where
             let sd = grad.mapv(|g| -g);
             let trial = trial_point(obj, pos, &sd, 0.1, control, atom_maxmove, manifold);
             let (ft, gt) = obj.value_and_gradient(trial.view());
-            if ft - ref_e <= ENERGY_RISE {
+            if finite(ft, gt.view()) && ft - ref_e <= ENERGY_RISE {
                 push_energy(e_hist, ft);
                 return (trial, ft, gt, true);
             }

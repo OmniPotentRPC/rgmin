@@ -15,7 +15,7 @@ use crate::pso::minimize_pso;
 use crate::qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 use crate::report::Report;
 use crate::session::Solver;
-use crate::step::{l2, next_istep, take_step};
+use crate::step::{l2, next_istep, start_answer, take_step};
 
 /// Minimize `obj` from `init` with the chosen conjugacy, restart, and line search.
 pub fn minimize<O>(
@@ -39,6 +39,9 @@ where
 }
 
 /// Minimize with any [`Method`].
+///
+/// The line-search and first-order methods return [`Error::Oracle`] when
+/// `init` answers with a non-finite value or gradient.
 pub fn minimize_method<O>(
     obj: &O,
     init: impl Into<Array1<f64>>,
@@ -211,7 +214,7 @@ where
         });
     }
     pos = obj.bounds().clip(pos.view());
-    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    let (mut value, mut grad) = start_answer(obj, &pos)?;
     let mut dir = grad.mapv(|g| -g);
     let mut g_old = grad.clone();
     let mut d_old = dir.clone();

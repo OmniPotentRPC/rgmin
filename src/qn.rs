@@ -7,7 +7,7 @@ use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
-use crate::step::{l2, next_istep, take_step};
+use crate::step::{l2, next_istep, start_answer, take_step};
 
 const CURVATURE: f64 = 1e-12;
 const SR1_SKIP: f64 = 1e-8;
@@ -34,7 +34,7 @@ where
 {
     let mut pos = start(obj, init)?;
     let n = pos.len();
-    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    let (mut value, mut grad) = start_answer(obj, &pos)?;
     let mut h = Array2::<f64>::eye(n);
     let mut istep = control.istep;
 
@@ -107,7 +107,7 @@ where
 {
     let mut pos = start(obj, init)?;
     let n = pos.len();
-    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    let (mut value, mut grad) = start_answer(obj, &pos)?;
     let mut h = Array2::<f64>::eye(n);
     let mut istep = control.istep;
 
@@ -160,7 +160,7 @@ where
 {
     let mut pos = start(obj, init)?;
     let n = pos.len();
-    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    let (mut value, mut grad) = start_answer(obj, &pos)?;
     let mut b = Array2::<f64>::eye(n);
     let mut istep = control.istep;
 
@@ -203,7 +203,7 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let mut pos = start(obj, init)?;
-    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    let (mut value, mut grad) = start_answer(obj, &pos)?;
     let mut istep = control.istep;
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
