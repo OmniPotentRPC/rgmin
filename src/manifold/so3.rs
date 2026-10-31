@@ -24,16 +24,7 @@ fn unpack(x: &Array1<f64>) -> [[f64; 3]; 3] {
 }
 
 fn pack(r: [[f64; 3]; 3]) -> Array1<f64> {
-    Array1::from_shape_vec(9, {
-        let mut v = Vec::with_capacity(9);
-        for i in 0..3 {
-            for j in 0..3 {
-                v.push(r[i][j]);
-            }
-        }
-        v
-    })
-    .unwrap()
+    Array1::from_iter(r.into_iter().flatten())
 }
 
 fn mul(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
@@ -90,8 +81,8 @@ fn qr_pos(a: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
         - q[0][1] * (q[1][0] * q[2][2] - q[1][2] * q[2][0])
         + q[0][2] * (q[1][0] * q[2][1] - q[1][1] * q[2][0]);
     if det < 0.0 {
-        for i in 0..3 {
-            q[i][2] = -q[i][2];
+        for row in &mut q {
+            row[2] = -row[2];
         }
     }
     q

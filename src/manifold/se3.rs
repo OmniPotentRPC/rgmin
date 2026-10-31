@@ -77,10 +77,10 @@ mod tests {
         assert!((y[10] - 1.9).abs() < 1e-15);
         assert!((y[11] - 3.2).abs() < 1e-15);
         let r = rot_block(&y);
-        for i in 0..3 {
-            for j in 0..3 {
+        for (i, row) in r.iter().enumerate() {
+            for (j, &rij) in row.iter().enumerate() {
                 let want = if i == j { 1.0 } else { 0.0 };
-                assert!((r[i][j] - want).abs() < 1e-14);
+                assert!((rij - want).abs() < 1e-14);
             }
         }
     }
@@ -95,9 +95,9 @@ mod tests {
         let y = Se3.retract(&x, &v);
         let r = rot_block(&y);
         let mut rtr = [[0.0; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                rtr[i][j] = r[0][i] * r[0][j] + r[1][i] * r[1][j] + r[2][i] * r[2][j];
+        for (i, row) in rtr.iter_mut().enumerate() {
+            for (j, rtr_ij) in row.iter_mut().enumerate() {
+                *rtr_ij = r[0][i] * r[0][j] + r[1][i] * r[1][j] + r[2][i] * r[2][j];
             }
         }
         for i in 0..3 {

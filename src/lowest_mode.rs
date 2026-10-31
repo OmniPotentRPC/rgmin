@@ -357,6 +357,9 @@ fn dimer<H: ApplyHessian + ?Sized>(
     }
 }
 
+/// Ritz value, unit Ritz vector, residual, and the operator applied to the vector.
+type RitzPair = (f64, Array1<f64>, Array1<f64>, Array1<f64>);
+
 struct Subspace {
     q: Vec<Array1<f64>>,
     aq: Vec<Array1<f64>>,
@@ -394,7 +397,7 @@ impl Subspace {
         true
     }
 
-    fn ritz(&self, n: usize) -> Option<(f64, Array1<f64>, Array1<f64>, Array1<f64>)> {
+    fn ritz(&self, n: usize) -> Option<RitzPair> {
         let k = self.q.len();
         if k == 0 {
             return None;
@@ -411,9 +414,9 @@ impl Subspace {
         let lowest = argmin(&evals);
         let mut mode = Array1::zeros(n);
         let mut amode = Array1::zeros(n);
-        for i in 0..k {
-            axpy(evecs[i][lowest], self.q[i].view(), &mut mode);
-            axpy(evecs[i][lowest], self.aq[i].view(), &mut amode);
+        for ((evec, qi), aqi) in evecs.iter().zip(&self.q).zip(&self.aq) {
+            axpy(evec[lowest], qi.view(), &mut mode);
+            axpy(evec[lowest], aqi.view(), &mut amode);
         }
         let nrm = nrm2(mode.view());
         if nrm <= 1e-14 {
@@ -728,6 +731,10 @@ mod tests {
     use crate::hvp::HvpOracle;
     use ndarray::array;
 
+    #[allow(
+        clippy::type_complexity,
+        reason = "impl Trait return types cannot be named in a type alias on stable"
+    )]
     fn gapped_diag(
         n: usize,
     ) -> HvpOracle<
@@ -980,7 +987,7 @@ mod tests {
                 .map(|(a, b)| a * b)
                 .sum::<f64>()
                 .abs();
-            assert!(cos > 0.9, "{:?} |cos| = {cos}", kind);
+            assert!(cos > 0.9, "{kind:?} |cos| = {cos}");
         }
     }
 

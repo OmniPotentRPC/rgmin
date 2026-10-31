@@ -2000,7 +2000,7 @@ impl Solver {
             Inner::Sr2 { b, fresh } => {
                 let seed = *fresh && self.accept != Accept::None;
                 let rhs = grad.mapv(|g| -g);
-                let mut direction = solve_dense(b, &rhs).unwrap_or_else(|| rhs);
+                let mut direction = solve_dense(b, &rhs).unwrap_or(rhs);
                 if seed {
                     direction *= self.istep;
                 }

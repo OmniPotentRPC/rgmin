@@ -70,7 +70,7 @@ fn cholesky(n: usize, a: &[f64]) -> Option<Vec<f64>> {
                 s -= prefix_dot(&l[i * n..i * n + j], &l[j * n..j * n + j]);
             }
             if i == j {
-                if !(s > 1e-18) {
+                if s.is_nan() || s <= 1e-18 {
                     return None;
                 }
                 l[i * n + i] = s.sqrt();

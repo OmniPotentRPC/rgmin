@@ -106,7 +106,7 @@ where
     let mut r = g.clone();
     let mut delta = -&r;
     let r0 = nrm2(r.view());
-    if !(r0 > 0.0) {
+    if r0.is_nan() || r0 <= 0.0 {
         return TcgResult {
             eta,
             model_decrease: 0.0,
