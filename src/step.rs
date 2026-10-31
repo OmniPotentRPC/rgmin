@@ -131,26 +131,6 @@ pub(crate) fn scale_step_atom(origin: &Array1<f64>, trial: &mut Array1<f64>, cap
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ndarray::array;
-
-    #[test]
-    fn atom_cap_does_not_crush_a_uniform_cluster_step() {
-        // 2 atoms each move 0.15. Per-atom cap 0.2 keeps the step.
-        // A Euclidean 0.2 cap would scale it down.
-        let origin = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
-        let mut trial = array![0.15, 0.0, 0.0, 1.15, 0.0, 0.0];
-        scale_step_atom(&origin, &mut trial, 0.2);
-        assert!((trial[0] - 0.15).abs() < 1e-15);
-        assert!((trial[3] - 1.15).abs() < 1e-15);
-        let mut eucl = array![0.15, 0.0, 0.0, 1.15, 0.0, 0.0];
-        scale_step(&origin, &mut eucl, 0.2);
-        assert!(eucl[0] < 0.15 - 1e-6);
-    }
-}
-
 /// Line search, clip to bounds, optional maxmove. Returns `(x, f, |α|, moved)`.
 pub(crate) fn take_step<O>(
     obj: &O,
@@ -199,5 +179,25 @@ pub(crate) fn next_istep(lsstep: f64, control: &Control) -> f64 {
         control.istep
     } else {
         lsstep * 0.5
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    #[test]
+    fn atom_cap_does_not_crush_a_uniform_cluster_step() {
+        // 2 atoms each move 0.15. Per-atom cap 0.2 keeps the step.
+        // A Euclidean 0.2 cap would scale it down.
+        let origin = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let mut trial = array![0.15, 0.0, 0.0, 1.15, 0.0, 0.0];
+        scale_step_atom(&origin, &mut trial, 0.2);
+        assert!((trial[0] - 0.15).abs() < 1e-15);
+        assert!((trial[3] - 1.15).abs() < 1e-15);
+        let mut eucl = array![0.15, 0.0, 0.0, 1.15, 0.0, 0.0];
+        scale_step(&origin, &mut eucl, 0.2);
+        assert!(eucl[0] < 0.15 - 1e-6);
     }
 }

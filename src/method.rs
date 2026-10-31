@@ -279,6 +279,12 @@ fn canon_method(name: &str) -> String {
     out
 }
 
+impl Default for Method {
+    fn default() -> Self {
+        Self::polak_ribiere()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,11 +316,5 @@ mod tests {
         assert_eq!(Method::from_name("fire2").unwrap().as_str(), "fire2");
         let err = Method::from_name("not-a-solver").unwrap_err();
         assert!(err.to_string().contains("not-a-solver"), "{err}");
-    }
-}
-
-impl Default for Method {
-    fn default() -> Self {
-        Self::polak_ribiere()
     }
 }
