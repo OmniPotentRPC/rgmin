@@ -94,10 +94,22 @@ impl LineSearch {
                 brent_search(&mut oracle, pos, dir, istep, maxiter, tol)
             }
             Self::Backtracking { c, beta, maxiter } => {
-                backtrack_search(&mut oracle, pos, dir, istep, c, beta, maxiter, false)
+                let rule = Backtrack {
+                    c,
+                    beta,
+                    maxiter,
+                    goldstein: false,
+                };
+                backtrack_search(&mut oracle, pos, dir, istep, rule)
             }
             Self::Goldstein { c, beta, maxiter } => {
-                backtrack_search(&mut oracle, pos, dir, istep, c, beta, maxiter, true)
+                let rule = Backtrack {
+                    c,
+                    beta,
+                    maxiter,
+                    goldstein: true,
+                };
+                backtrack_search(&mut oracle, pos, dir, istep, rule)
             }
             Self::Wolfe { c1, c2, maxiter } => {
                 zoom::wolfe_search(&mut oracle, pos, dir, istep, c1, c2, maxiter)
@@ -156,19 +168,31 @@ where
     }
 }
 
+/// Constants of a backtracking search. `goldstein` adds the lower bound.
+#[derive(Clone, Copy)]
+struct Backtrack {
+    c: f64,
+    beta: f64,
+    maxiter: usize,
+    goldstein: bool,
+}
+
 fn backtrack_search<F>(
     oracle: &mut F,
     pos: ArrayView1<'_, f64>,
     dir: ArrayView1<'_, f64>,
     istep: f64,
-    c: f64,
-    beta: f64,
-    maxiter: usize,
-    goldstein: bool,
+    rule: Backtrack,
 ) -> (Array1<f64>, f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
+    let Backtrack {
+        c,
+        beta,
+        maxiter,
+        goldstein,
+    } = rule;
     let (f0, g0) = oracle(pos);
     if unusable(f0, &g0, dir) {
         return (pos.to_owned(), f0, 0.0);

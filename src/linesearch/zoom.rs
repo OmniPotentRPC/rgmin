@@ -32,6 +32,15 @@ where
     (scored(f, g.view()), dphi)
 }
 
+/// Strong Wolfe constants with `(φ(0), φ'(0))` at the start of the line.
+#[derive(Clone, Copy)]
+struct Wolfe {
+    c1: f64,
+    c2: f64,
+    phi0: f64,
+    dphi0: f64,
+}
+
 /// Midpoint of `[lo, hi]`. Independent of endpoint order.
 #[inline]
 fn bisect(lo: f64, hi: f64) -> f64 {
@@ -46,6 +55,10 @@ fn bisect(lo: f64, hi: f64) -> f64 {
 ///
 /// Nocedal and Wright, *Numerical Optimization*,
 /// <https://doi.org/10.1007/978-0-387-40065-5>.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "public signature; bundling the arguments would break callers"
+)]
 pub fn zoom<F>(
     oracle: &mut F,
     pos: ArrayView1<'_, f64>,
@@ -60,7 +73,13 @@ where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
     let (phi0, dphi0) = phi_pair(oracle, pos, dir, 0.0);
-    zoom_into(oracle, pos, dir, lo, hi, c1, c2, maxiter, phi0, dphi0).0
+    let wolfe = Wolfe {
+        c1,
+        c2,
+        phi0,
+        dphi0,
+    };
+    zoom_into(oracle, pos, dir, lo, hi, maxiter, wolfe).0
 }
 
 /// Zoom with a precomputed `(φ(0), φ'(0))`.
@@ -70,15 +89,18 @@ fn zoom_into<F>(
     dir: ArrayView1<'_, f64>,
     mut lo: f64,
     mut hi: f64,
-    c1: f64,
-    c2: f64,
     maxiter: usize,
-    phi0: f64,
-    dphi0: f64,
+    wolfe: Wolfe,
 ) -> (f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
+    let Wolfe {
+        c1,
+        c2,
+        phi0,
+        dphi0,
+    } = wolfe;
     // The low endpoint retains a measured Armijo decrease. An infeasible
     // trial only contracts the other endpoint and cannot erase that evidence.
     let mut phi_lo = if lo == 0.0 {
@@ -140,6 +162,12 @@ where
     if unusable(f0, &g0, dir) || !dphi0.is_finite() || dphi0 >= 0.0 {
         return (pos.to_owned(), f0, 0.0);
     }
+    let wolfe = Wolfe {
+        c1,
+        c2,
+        phi0: f0,
+        dphi0,
+    };
 
     let alpha_max = 64.0_f64.max(istep.abs() * 64.0);
     let mut alpha_prev = 0.0;
@@ -164,20 +192,12 @@ where
             return (x, phi, alpha.abs());
         }
         if fail_armijo || (i > 0 && phi >= phi_prev) {
-            let zoomed = zoom_into(
-                oracle, pos, dir, alpha_prev, alpha, c1, c2, maxiter, f0, dphi0,
-            );
-            return finish(
-                oracle, pos, dir, zoomed, f0, dphi0, c1, c2, best_x, best_f, best_a,
-            );
+            let zoomed = zoom_into(oracle, pos, dir, alpha_prev, alpha, maxiter, wolfe);
+            return finish(oracle, pos, dir, zoomed, wolfe, (best_x, best_f, best_a));
         }
         if dphi >= 0.0 {
-            let zoomed = zoom_into(
-                oracle, pos, dir, alpha, alpha_prev, c1, c2, maxiter, f0, dphi0,
-            );
-            return finish(
-                oracle, pos, dir, zoomed, f0, dphi0, c1, c2, best_x, best_f, best_a,
-            );
+            let zoomed = zoom_into(oracle, pos, dir, alpha, alpha_prev, maxiter, wolfe);
+            return finish(oracle, pos, dir, zoomed, wolfe, (best_x, best_f, best_a));
         }
         if (alpha - alpha_max).abs() < 1e-16 {
             break;
@@ -198,17 +218,19 @@ fn finish<F>(
     pos: ArrayView1<'_, f64>,
     dir: ArrayView1<'_, f64>,
     zoomed: (f64, f64),
-    f0: f64,
-    dphi0: f64,
-    c1: f64,
-    c2: f64,
-    best_x: Array1<f64>,
-    best_f: f64,
-    best_a: f64,
+    wolfe: Wolfe,
+    best: (Array1<f64>, f64, f64),
 ) -> (Array1<f64>, f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
+    let Wolfe {
+        c1,
+        c2,
+        phi0: f0,
+        dphi0,
+    } = wolfe;
+    let (best_x, best_f, best_a) = best;
     let (t, mut ft) = zoomed;
     if t.is_finite() && t.abs() > 0.0 {
         if !ft.is_finite() {
