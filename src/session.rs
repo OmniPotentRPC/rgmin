@@ -2046,7 +2046,7 @@ impl Solver {
                 beta2,
                 eps,
             } => {
-                let dir = adam_direction(m, v, &grad, *beta1, *beta2, *b1p, *b2p, *eps);
+                let dir = adam_direction(m, v, &grad, *beta1, *beta2, (*b1p, *b2p), *eps);
                 let dir = dir.mapv(|d| d * self.istep);
                 let (npos, nval, ngrad, _) = accept_step(
                     obj,
@@ -2271,9 +2271,7 @@ impl Solver {
                 &mut state.swarm,
                 &mut state.gbest_position,
                 &mut state.gbest_value,
-                *inertia,
-                *c1,
-                *c2,
+                (*inertia, *c1, *c2),
                 &mut state.rng,
             );
             *x = state.gbest_position.clone();

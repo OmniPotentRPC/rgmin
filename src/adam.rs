@@ -58,7 +58,7 @@ where
                 grad: None,
             });
         }
-        let dir = adam_direction(&mut m, &mut v, &grad, beta1, beta2, b1p, b2p, eps);
+        let dir = adam_direction(&mut m, &mut v, &grad, beta1, beta2, (b1p, b2p), eps);
         let (npos, _, lsstep, _) =
             take_step(obj, &pos, value, dir.view(), istep, linesearch, control);
         pos = npos;
@@ -79,16 +79,17 @@ where
 }
 
 /// Kingma-Ba moment update and bias-corrected direction (Algorithm 1).
+/// `pows` holds `(beta1^t, beta2^t)` for the bias correction.
 pub(crate) fn adam_direction(
     m: &mut Array1<f64>,
     v: &mut Array1<f64>,
     grad: &Array1<f64>,
     beta1: f64,
     beta2: f64,
-    beta1_pow: f64,
-    beta2_pow: f64,
+    pows: (f64, f64),
     eps: f64,
 ) -> Array1<f64> {
+    let (beta1_pow, beta2_pow) = pows;
     let n = grad.len();
     let mut dir = Array1::<f64>::zeros(n);
     for i in 0..n {
@@ -111,7 +112,7 @@ mod tests {
         let mut m = array![0.0, 0.0];
         let mut v = array![0.0, 0.0];
         let g = array![1.0, 2.0];
-        let dir = adam_direction(&mut m, &mut v, &g, 0.9, 0.999, 0.9, 0.999, 1e-8);
+        let dir = adam_direction(&mut m, &mut v, &g, 0.9, 0.999, (0.9, 0.999), 1e-8);
         assert!((m[0] - 0.1).abs() < 1e-15);
         assert!((m[1] - 0.2).abs() < 1e-15);
         assert!((v[0] - 0.001).abs() < 1e-15);
@@ -126,9 +127,9 @@ mod tests {
         let mut m = array![0.0];
         let mut v = array![0.0];
         let g1 = array![1.0];
-        let _ = adam_direction(&mut m, &mut v, &g1, 0.9, 0.999, 0.9, 0.999, 0.0);
+        let _ = adam_direction(&mut m, &mut v, &g1, 0.9, 0.999, (0.9, 0.999), 0.0);
         let g2 = array![3.0];
-        let dir = adam_direction(&mut m, &mut v, &g2, 0.9, 0.999, 0.81, 0.998001, 0.0);
+        let dir = adam_direction(&mut m, &mut v, &g2, 0.9, 0.999, (0.81, 0.998001), 0.0);
         // m = 0.9*0.1 + 0.1*3 = 0.39; mhat = 0.39 / (1-0.81) = 2.052631...
         // v = 0.999*0.001 + 0.001*9 = 0.009999; vhat = 0.009999 / (1-0.998001)
         let mhat: f64 = 0.39 / (1.0 - 0.81);

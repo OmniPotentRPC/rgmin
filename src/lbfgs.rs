@@ -474,7 +474,7 @@ impl Lbfgs {
                 break;
             }
             if slope_a.abs() <= -self.curvature * slope {
-                self.accept(x, f, g, d, a, fa, ga);
+                self.accept(x, f, g, d, a, (fa, ga));
                 return (true, evals);
             }
             if slope_a >= 0.0 {
@@ -542,7 +542,7 @@ impl Lbfgs {
                 slope_hi = slope_t;
             } else {
                 if slope_t.abs() <= -self.curvature * slope {
-                    self.accept(x, f, g, d, trial, ft, gt);
+                    self.accept(x, f, g, d, trial, (ft, gt));
                     return (true, evals);
                 }
                 if slope_t * (hi - lo) >= 0.0 {
@@ -568,9 +568,9 @@ impl Lbfgs {
         g: &mut Array1<f64>,
         d: &Array1<f64>,
         step: f64,
-        f_new: f64,
-        g_new: Array1<f64>,
+        fg_new: (f64, Array1<f64>),
     ) {
+        let (f_new, g_new) = fg_new;
         let mut s = d.clone();
         s *= step;
         let mut y = g_new.clone();
@@ -774,6 +774,10 @@ impl Lbfgs {
     }
 
     /// One outer L-BFGS iteration: two-loop direction, line search, pair.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "public signature; bundling the arguments would break callers"
+    )]
     pub fn step_objective<O>(
         &mut self,
         obj: &O,

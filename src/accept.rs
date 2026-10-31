@@ -54,6 +54,10 @@ fn push_energy(hist: &mut VecDeque<f64>, energy: f64) {
 }
 
 /// Apply `dir` under `accept`. Each trial is one `value_and_gradient`.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "session callers pass separate fields; a bundling helper would borrow the whole session"
+)]
 pub(crate) fn accept_step<O>(
     obj: &O,
     pos: &Array1<f64>,
@@ -87,6 +91,10 @@ where
 /// Accept a direction with an optional steepest-descent fallback.
 /// A constrained direction must keep the fallback disabled because it
 /// cannot inherit the proposed direction's feasible set.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "session callers pass separate fields; a bundling helper would borrow the whole session"
+)]
 pub(crate) fn accept_step_with_fallback<O>(
     obj: &O,
     pos: &Array1<f64>,

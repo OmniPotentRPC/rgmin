@@ -93,9 +93,7 @@ where
             &mut swarm,
             &mut gbest_position,
             &mut gbest_value,
-            inertia,
-            c1,
-            c2,
+            (inertia, c1, c2),
             &mut rng,
         );
         let avg_velocity = average_velocity(&swarm);
@@ -121,19 +119,19 @@ where
     })
 }
 
+/// One swarm pass. `weights` holds `(inertia, c1, c2)` of the velocity update.
 pub(crate) fn update_swarm<O>(
     obj: &O,
     bounds: &Bounds<f64>,
     swarm: &mut [Particle],
     gbest_position: &mut Array1<f64>,
     gbest_value: &mut f64,
-    inertia: f64,
-    c1: f64,
-    c2: f64,
+    weights: (f64, f64, f64),
     rng: &mut StdRng,
 ) where
     O: Objective<f64> + ?Sized,
 {
+    let (inertia, c1, c2) = weights;
     let span = &bounds.high - &bounds.low;
     let vmax = 0.5 * l2(&span);
     let n = bounds.dims;
@@ -226,9 +224,7 @@ mod tests {
             &mut swarm,
             &mut gbest_position,
             &mut gbest_value,
-            0.5,
-            0.0,
-            0.0,
+            (0.5, 0.0, 0.0),
             &mut rng,
         );
         // v = 0.5 * 0.4 = 0.2; x = 0.5 + 0.2 = 0.7
