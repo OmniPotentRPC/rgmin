@@ -86,13 +86,12 @@ fn pair_block(diff: [f64; 3], r2: f64, first: f64, second: f64) -> [[f64; 3]; 3]
 }
 
 fn scatter_block(hessian: &mut Array2<f64>, i: usize, j: usize, block: [[f64; 3]; 3]) {
-    for a in 0..3 {
-        for b in 0..3 {
+    for (a, row) in block.iter().enumerate() {
+        for (b, &value) in row.iter().enumerate() {
             let ia = 3 * i + a;
             let ib = 3 * i + b;
             let ja = 3 * j + a;
             let jb = 3 * j + b;
-            let value = block[a][b];
             hessian[(ia, jb)] += value;
             hessian[(jb, ia)] += value;
             hessian[(ia, ib)] -= value;
@@ -107,9 +106,9 @@ fn apply_block(hv: &mut Array1<f64>, v: ArrayView1<f64>, i: usize, j: usize, blo
         dv[a] = v[3 * j + a] - v[3 * i + a];
     }
     let mut bdv = [0.0; 3];
-    for a in 0..3 {
-        for b in 0..3 {
-            bdv[a] += block[a][b] * dv[b];
+    for (a, row) in block.iter().enumerate() {
+        for (b, &dvb) in dv.iter().enumerate() {
+            bdv[a] += row[b] * dvb;
         }
     }
     for a in 0..3 {
@@ -371,6 +370,10 @@ fn run_dense(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test driver; each argument is a solver knob that the cases vary"
+)]
 fn run_newton_cg(
     method: Method,
     start: &Array1<f64>,
@@ -810,7 +813,7 @@ fn benchmark_morse_newton_cg_campaign() {
                                 },
                             ),
                         ] {
-                            let run = run_dense(method, coords, cap, gtol, 60, &fg, &hs);
+                            let run = run_dense(method, coords, cap, gtol, 60, fg, hs);
                             let force = run.grad_calls + dim * run.products;
                             let ok = run.grad_norm <= gtol && force < 10_000;
                             if !ok {

@@ -428,8 +428,8 @@ fn morse_pos_0000_dogleg_clears_the_force_stop_with_the_cap() {
     let fg = move |x: ArrayView1<f64>| morse_value_grad(x, cell);
     let hs = move |x: ArrayView1<f64>| morse_hessian(x, cell);
     let gtol = 1e-3;
-    let uncapped = run_method(Method::Dogleg, &start, None, gtol, 40, &fg, &hs);
-    let capped = run_method(Method::Dogleg, &start, Some(0.2), gtol, 40, &fg, &hs);
+    let uncapped = run_method(Method::Dogleg, &start, None, gtol, 40, fg, hs);
+    let capped = run_method(Method::Dogleg, &start, Some(0.2), gtol, 40, fg, hs);
     let newton = run_method(
         Method::Newton {
             kind: NewtonKind::Shifted,
@@ -438,8 +438,8 @@ fn morse_pos_0000_dogleg_clears_the_force_stop_with_the_cap() {
         Some(0.2),
         gtol,
         40,
-        &fg,
-        &hs,
+        fg,
+        hs,
     );
     let dim = start.len();
     for (label, run) in [
@@ -502,8 +502,8 @@ fn morse_pos_0008_capped_dogleg_stays_inside_the_force_budget() {
     let fg = move |x: ArrayView1<f64>| morse_value_grad(x, cell);
     let hs = move |x: ArrayView1<f64>| morse_hessian(x, cell);
     let gtol = 1e-3;
-    let uncapped = run_method(Method::Dogleg, &start, None, gtol, 40, &fg, &hs);
-    let capped = run_method(Method::Dogleg, &start, Some(0.2), gtol, 40, &fg, &hs);
+    let uncapped = run_method(Method::Dogleg, &start, None, gtol, 40, fg, hs);
+    let capped = run_method(Method::Dogleg, &start, Some(0.2), gtol, 40, fg, hs);
     let dim = start.len();
     for (label, run) in [("uncapped", &uncapped), ("capped", &capped)] {
         let force = run.grad_calls + dim * run.hess_calls;
@@ -642,7 +642,7 @@ fn benchmark_morse_bulk_dogleg_campaign() {
                             Some(0.2),
                         ),
                     ] {
-                        let run = run_method(method, coords, cap, gtol, 60, &fg, &hs);
+                        let run = run_method(method, coords, cap, gtol, 60, fg, hs);
                         let force = run.grad_calls + dim * run.hess_calls;
                         let at_force = run.grad_norm <= gtol && force < 10_000;
                         triple.push((at_force, run.grad_calls, run.hess_calls, !at_force));
