@@ -22,6 +22,9 @@ The C samples include ~rgmin.h~.
 It gives the dependencies and features of each route, the C library through cargo-c, and the SciPy the HiGHS tests need.
 The README, the index and the quickstart point to it.
 
+The README opens with what rgmin does.
+It spells out each method name on first use, along with IRC and the C application binary interface (ABI) terms.
+
 The tutorial @@rst::doc:`Relax a platinum crystal <tutorials/relax-morse>`@@ relaxes the Pt256 Morse fixture with L-BFGS, FIRE and FIRE 2.0 through a ~Solver~ session.
 ~examples/relax_morse.rs~ is the program it runs, and ~docs/figures/relax-morse/~ holds the force-trace plot and the session diagram with the scripts that draw them.
 

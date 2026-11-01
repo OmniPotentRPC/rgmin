@@ -112,6 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The README opens with what rgmin does.
+  It spells out each method name on first use, along with IRC and the C application binary interface (ABI) terms.
 - `Report` gains `grad: Option<Array1<f64>>`, the gradient that
   `grad_norm` measures. Sessions fill it and one-shot drivers leave it
   `None`. Code that builds a `Report` literal must set the field.
