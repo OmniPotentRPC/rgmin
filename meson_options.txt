@@ -1,4 +1,10 @@
 option(
+    'with_asv_helper',
+    type: 'boolean',
+    value: false,
+    description: 'Build and install the quadratic timing helper that calls librgmin.',
+)
+option(
     'rgmin_features',
     type: 'string',
     value: 'capi,highs',
