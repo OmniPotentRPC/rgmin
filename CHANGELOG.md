@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- How-to `docs/orgmode/howto/install.org` shows how to install the 0.5.2 release from crates.io or the `develop` branch.
+  It gives the dependencies and features of each route, the C library through cargo-c, and the SciPy the HiGHS tests need.
+  The README, the index and the quickstart point to it.
 - Tutorial `docs/orgmode/tutorials/relax-morse.org`: relax the
   Pt256 Morse fixture with L-BFGS, FIRE and FIRE 2.0 through a
   `Solver` session. `examples/relax_morse.rs` is the program it runs,

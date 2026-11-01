@@ -25,8 +25,9 @@ appends ``a · p = rhs``. That is the path eOn / rgpot / any eindir
 objective share. Without the ``highs`` cargo feature every setter
 returns 1.
 
-Enable the feature (HiGHS is compiled by ``highs-sys``; do that on the
-remote builder):
+Enable the feature.
+Its ``highs-sys`` crate builds HiGHS from source with CMake and a C++ compiler.
+The tests also need SciPy (:doc:`install`):
 
 .. code:: bash
 
@@ -44,5 +45,8 @@ remote builder):
         equalities: Vec::new(),
         center_axes: None,
     });
+
+On ``develop``, ``lo`` and ``hi`` give one bound per coordinate.
+The 0.5.2 release takes one ``f64`` for all coordinates (:doc:`install`).
 
 landfold ``--highs`` is this step on chi, not sequential LP.

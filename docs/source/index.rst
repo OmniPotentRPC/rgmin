@@ -46,10 +46,11 @@ crate's ``Solver``; they do not grow a second optimizer.
 
 .. code:: bash
 
-    git clone https://github.com/OmniPotentRPC/rgmin.git
-    cd rgmin
-    # Build and test on the remote builder, not a laptop.
-    cargo test --features capi
+    cargo add rgmin ndarray@0.17
+
+That installs the 0.5.2 release.
+:doc:`howto/install` covers the ``develop`` branch and how it differs from the release.
+It also covers the features of each route, the C library and a checkout.
 
 .. toctree::
    :maxdepth: 2
@@ -62,6 +63,7 @@ crate's ``Solver``; they do not grow a second optimizer.
    :maxdepth: 2
    :caption: How-To Guides
 
+   howto/install
    howto/session
    howto/manifolds
    howto/irc

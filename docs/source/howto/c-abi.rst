@@ -15,6 +15,7 @@ Install
 
     cargo cinstall --prefix=/usr/local --features capi
 
+``cargo cinstall`` comes from cargo-c (:doc:`install`).
 That installs the hand-written ``include/rgmin.h``, the C++ wrappers
 under ``include/rgmin/`` and ``include/xts/``, and ``dlpack/dlpack.h``.
 The pkg-config file is ``rgmin``. A C or C++ file includes ``rgmin.h``

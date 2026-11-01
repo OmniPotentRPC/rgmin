@@ -8,8 +8,9 @@ Two published surfaces, one implementation.
 
 ** Rust
 
-~cargo doc --no-deps~ on the remote builder. The crate root is
-~rgmin~. The types a host actually holds:
+~cargo doc --no-deps~ in a checkout.
+The crate root is ~rgmin~.
+The types a host works with:
 
 | Type | Role |
 |---+---|

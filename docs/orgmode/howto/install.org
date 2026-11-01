@@ -1,0 +1,145 @@
+#+TITLE: Install rgmin
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Install rgmin
+
+rgmin is a Rust crate.
+It needs Rust 1.88 or newer, the ~rust-version~ in ~Cargo.toml~.
+
+** Pick a route
+
+There are two routes, and they give different code.
+
+- The release on crates.io is 0.5.2, built from the ~main~ branch.
+- The ~develop~ branch is where these pages are written.
+
+The two branches split in August 2026 and have not been merged since.
+Each one has commits that the other lacks.
+The release has features that ~develop~ does not have, and ~develop~ has fixes and docs that are not in a release.
+The ~Cargo.toml~ on ~develop~ still says version 0.2.0.
+That number was not raised when releases were cut from ~main~, so it does not show how the two branches compare.
+
+Both branches build the quickstart, the manifold sample and the intrinsic reaction coordinate (IRC) sample.
+The HiGHS sample builds only on ~develop~.
+There, ~HighsStep~ takes one box bound per coordinate, and in 0.5.2 it takes one bound for all of them.
+
+** From crates.io
+
+Add the release, the ~ndarray~ it takes, and ~eindir-core~ for the objective traits:
+
+#+begin_src bash
+cargo add rgmin ndarray@0.17 eindir-core@0.6
+#+end_src
+
+rgmin 0.5.2 takes ~eindir-core~ 0.6 from crates.io too, so Cargo builds one copy of it.
+
+*** Features of the release
+
+~simd~ is on by default.
+The others are off until you name them.
+
+| Feature     | Adds                                                                                          | Needs                                                                       |
+|-------------+-----------------------------------------------------------------------------------------------+-----------------------------------------------------------------------------|
+| ~simd~      | single instruction, multiple data (SIMD) versions of the vector loops, chosen for the CPU at run time | nothing more                                                                |
+| ~capi~      | the C symbols behind ~include/rgmin.h~                                                        | nothing more                                                                |
+| ~par~       | rayon threads for long dot products and vector updates                                        | nothing more                                                                |
+| ~highs~     | the HiGHS step of @@rst::doc:`highs-qp`@@                                                     | CMake and a C++ compiler, since ~highs-sys~ builds HiGHS from source        |
+| ~slepc~     | ~EigensolverKind::Slepc~                                                                      | PETSc and SLEPc, and a C compiler                                           |
+| ~primme~    | ~EigensolverKind::Primme~                                                                     | PRIMME 3.0 or newer, and a C compiler                                       |
+| ~chase~     | ~EigensolverKind::Chase~                                                                      | the compiled ChASE C interface, and a C compiler                            |
+| ~libkrylov~ | ~EigensolverKind::Libkrylov~                                                                  | libkrylov, the gfortran runtime, a Basic Linear Algebra Subprograms (BLAS) library, and a C compiler |
+| ~readcon~   | ~read_checkpoint~ and ~write_checkpoint~ for CON geometry files                               | nothing more, since it pulls in ~readcon-core~                              |
+
+For example:
+
+#+begin_src bash
+cargo add rgmin --features highs
+#+end_src
+
+The ~slepc~, ~primme~, ~chase~ and ~libkrylov~ features each look for a library.
+They try pkg-config first.
+Next they try a directory variable.
+That is ~PETSC_DIR~ and ~SLEPC_DIR~, ~PRIMME_DIR~, ~CHASE_DIR~ or ~LIBKRYLOV_DIR~.
+Last they try ~CONDA_PREFIX~ and then ~/usr~.
+If the library is missing, the build still passes.
+That eigensolver kind then returns ~Error::EigenUnavailable~ at run time.
+Cargo prints the build warning for a dependency only with ~cargo build -vv~.
+
+** From the develop branch
+
+Depend on the branch.
+Take ~eindir-core~ from the same git commit that ~develop~ pins:
+
+#+begin_src bash
+cargo add rgmin --git https://github.com/OmniPotentRPC/rgmin --branch develop
+cargo add ndarray@0.17
+cargo add eindir-core --git https://github.com/HaoZeke/eindir.git --rev f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9
+#+end_src
+
+Do not add ~eindir-core@0.6~ from crates.io on this route.
+Cargo would build two copies of ~eindir-core~.
+An objective from the crates.io copy lacks the traits that ~rgmin~ takes from git.
+Then ~Solver::step~ does not compile.
+If ~develop~ moves to a new ~eindir-core~ commit, the ~eindir-core~ line in its ~Cargo.toml~ shows the new ~rev~.
+
+*** Features of develop
+
+No feature is on by default.
+
+| Feature | Adds                                                   | Needs                                                                |
+|---------+--------------------------------------------------------+----------------------------------------------------------------------|
+| ~capi~  | the C symbols behind ~include/rgmin.h~                 | nothing more                                                         |
+| ~par~   | rayon threads for long dot products and vector updates | nothing more                                                         |
+| ~highs~ | the HiGHS step of @@rst::doc:`highs-qp`@@              | CMake and a C++ compiler, since ~highs-sys~ builds HiGHS from source |
+
+For example:
+
+#+begin_src bash
+cargo add rgmin --git https://github.com/OmniPotentRPC/rgmin --branch develop --features highs
+#+end_src
+
+** Check the install
+
+#+begin_src bash
+cargo build
+#+end_src
+
+@@rst::doc:`../tutorials/quickstart`@@ is a first program that runs on either route.
+
+** For C and C++
+
+cargo-c builds and installs the C library and headers from a checkout.
+cargo-c needs a newer Rust than rgmin does: cargo-c 0.10.26 needs Rust 1.97.
+On Linux it also needs the OpenSSL headers, such as ~libssl-dev~ on Debian and Ubuntu.
+
+#+begin_src bash
+cargo install cargo-c --locked
+git clone https://github.com/OmniPotentRPC/rgmin.git
+cd rgmin
+git switch develop
+cargo cinstall --prefix=/usr/local --features capi
+#+end_src
+
+That installs the library, ~rgmin.h~, the C++ headers, ~dlpack/dlpack.h~ and the ~rgmin~ pkg-config file.
+To install the release instead, run ~git switch --detach v0.5.2~ in place of ~git switch develop~.
+@@rst::doc:`c-abi`@@ compiles against the installed headers.
+
+** From a checkout
+
+A clone starts on ~main~.
+Switch to ~develop~ to test the code these pages describe:
+
+#+begin_src bash
+git clone https://github.com/OmniPotentRPC/rgmin.git
+cd rgmin
+git switch develop
+cargo test --features capi
+#+end_src
+
+With ~--features highs~, some tests check HiGHS steps against SciPy through ~tests/highs_scipy_gold.py~.
+They run ~python3~, or the interpreter named in ~PYTHON~, and that interpreter needs SciPy:
+
+#+begin_src bash
+PYTHON=python3.12 cargo test --features highs
+#+end_src

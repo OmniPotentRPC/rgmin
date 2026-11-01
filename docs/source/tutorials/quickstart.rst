@@ -8,8 +8,20 @@ This tutorial minimizes the 2-D Rosenbrock banana from the classic start ``(-1.2
 What you will need
 ~~~~~~~~~~~~~~~~~~
 
-A checkout of ``rgmin``.
-Build on the remote builder, not a laptop.
+Rust 1.88 or newer, and a new Cargo project with the release from crates.io:
+
+.. code:: bash
+
+    cargo new rosenbrock
+    cd rosenbrock
+    cargo add rgmin ndarray@0.17 eindir-core@0.6
+
+Each sample below goes inside ``fn main`` in ``src/main.rs``.
+Run it with ``cargo run``.
+
+To follow the ``develop`` branch instead, use its dependency set in :doc:`../howto/install`.
+There, ``eindir-core`` comes from git.
+Adding ``eindir-core@0.6`` from crates.io on top gives a second copy, and the session sample below then fails to compile.
 
 Rust
 ~~~~

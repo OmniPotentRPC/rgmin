@@ -26,8 +26,9 @@ L_inf radius on the step; =rgmin_solver_add_equality= appends
 objective share. Without the =highs= cargo feature every setter
 returns 1.
 
-Enable the feature (HiGHS is compiled by =highs-sys=; do that on the
-remote builder):
+Enable the feature.
+Its =highs-sys= crate builds HiGHS from source with CMake and a C++ compiler.
+The tests also need SciPy (@@rst::doc:`install`@@):
 
 #+begin_src bash
 cargo test --features highs
@@ -45,5 +46,8 @@ opt.highs = Some(HighsStep {
     center_axes: None,
 });
 #+end_src
+
+On ~develop~, ~lo~ and ~hi~ give one bound per coordinate.
+The 0.5.2 release takes one ~f64~ for all coordinates (@@rst::doc:`install`@@).
 
 landfold =--highs= is this step on chi, not sequential LP.

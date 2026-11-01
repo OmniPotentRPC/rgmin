@@ -15,6 +15,7 @@ solve still call ~rgmin_minimize~. Every vector is a dlpk
 cargo cinstall --prefix=/usr/local --features capi
 #+end_src
 
+~cargo cinstall~ comes from cargo-c (@@rst::doc:`install`@@).
 That installs the hand-written ~include/rgmin.h~, the C++ wrappers
 under ~include/rgmin/~ and ~include/xts/~, and ~dlpack/dlpack.h~.
 The pkg-config file is ~rgmin~. A C or C++ file includes ~rgmin.h~

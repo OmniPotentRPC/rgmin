@@ -74,4 +74,8 @@ let (_f, x, _) = opt.minimize(array![-1.2, 1.0].view(), 200, |x| {
 });
 ```
 
-MIT. Build and test on the remote builder, not a laptop.
+Install the 0.5.2 release from crates.io with `cargo add rgmin ndarray@0.17` on Rust 1.88 or newer.
+[`docs/orgmode/howto/install.org`](docs/orgmode/howto/install.org) covers the `develop` branch and how it differs from the release.
+It also covers the features of each route and the C library.
+
+MIT.
