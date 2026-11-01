@@ -45,9 +45,10 @@ pub enum rgmin_status_t {
 fn status_from_error(e: &Error) -> rgmin_status_t {
     set_last_error(&e.to_string());
     match e {
-        Error::Oracle { .. } | Error::FireStalled { .. } | Error::AcceptStalled { .. } => {
-            rgmin_status_t::RGMIN_INTERNAL_ERROR
-        }
+        Error::Oracle { .. }
+        | Error::FireStalled { .. }
+        | Error::AcceptStalled { .. }
+        | Error::NoDescent { .. } => rgmin_status_t::RGMIN_INTERNAL_ERROR,
         Error::EigenUnavailable { .. } => rgmin_status_t::RGMIN_UNAVAILABLE,
         _ => rgmin_status_t::RGMIN_INVALID_PARAMETER,
     }
@@ -66,7 +67,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 29;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 37;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1804,6 +1805,47 @@ pub unsafe extern "C" fn rgmin_solver_set_cautious(
         return;
     }
     unsafe { (*solver).solver.set_cautious(eps, alpha) };
+}
+
+/// Adaptive trust radius for limited-memory
+/// Broyden-Fletcher-Goldfarb-Shanno (L-BFGS), starting at
+/// `radius`. A non-positive, NaN or infinite radius is not an error: it
+/// turns the radius off, the default, and returns 0. The radius update
+/// is Algorithm 1 of Burdakov, Gong, Zikrin, and Yuan 2017. The step is
+/// a ray truncation along the quasi-Newton direction; see
+/// [`Solver::set_lbfgs_trust`]. On Euclidean L-BFGS without HiGHS it
+/// replaces [`rgmin_solver_set_accept`] and the geometry step of
+/// [`rgmin_solver_set_atom_maxmove`]. A step whose direction is not
+/// downhill or not finite returns `RGMIN_INTERNAL_ERROR`. Application binary
+/// interface (ABI) minor 37. Returns 0, or 1 on a null session.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_lbfgs_trust(
+    solver: *mut rgmin_solver_t,
+    radius: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_lbfgs_trust: null solver");
+        return 1;
+    }
+    unsafe { (*solver).solver.set_lbfgs_trust(radius) };
+    0
+}
+
+/// Current L-BFGS trust radius, or 0 when it is off or the session is
+/// null. A method, manifold or HiGHS step that ignores the radius still
+/// reports the stored value. ABI minor 37.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_lbfgs_trust_radius(solver: *const rgmin_solver_t) -> f64 {
+    if solver.is_null() {
+        return 0.0;
+    }
+    unsafe { (*solver).solver.lbfgs_trust_radius().unwrap_or(0.0) }
 }
 
 /// HiGHS feasible-set step. Returns 1 when this build has no `highs` feature.

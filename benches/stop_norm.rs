@@ -5,16 +5,26 @@
 //! and on the two Pt256 Morse fixtures. Each run stops when the report
 //! clears the tolerance. Every oracle call counts. The final forces are
 //! evaluated again outside the session.
+//!
+//! A second table runs five L-BFGS step rules on those problems and on
+//! boxed Rosenbrock 2D. With the cap, the radius-on arm takes the trust
+//! step in place of geometry L-BFGS. The two capped rows compare two
+//! step rules, not one rule with the radius toggled. Without the cap,
+//! the radius-off arms are the raw two-loop under `Accept::None` and
+//! the strong Wolfe search under `Accept::Energy`. Budget hits are runs
+//! still unconverged after the call or step budget. Errors are runs
+//! that stopped on a session error.
 //! `cargo bench --bench stop_norm`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
+use eindir_core::objectives::Rosenbrock;
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use rgmin::{Control, FireKind, Method, Oracle, Solver, StopNorm};
+use rgmin::{Accept, Control, FireKind, Method, Oracle, Solver, StopNorm};
 
 const BUDGET: usize = 10_000;
 const REPEATS: usize = 3;
@@ -160,22 +170,23 @@ struct Arm {
     method: fn() -> Method,
     istep: f64,
     stop: Option<StopNorm>,
+    cap: Option<f64>,
+    accept: Accept,
+    radius: f64,
 }
 
 struct Run {
     converged: bool,
+    error: bool,
     calls: usize,
     energy: f64,
     fmax: f64,
     gnorm: f64,
 }
 
-fn solve<F>(f: F, x0: &Array1<f64>, arm: Arm, tol: f64) -> Run
-where
-    F: Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync + Copy,
-{
+fn solve<O: DifferentiableObjective<f64>>(inner: O, x0: &Array1<f64>, arm: Arm, tol: f64) -> Run {
     let obj = Counted {
-        inner: Oracle::unbounded(x0.len(), f),
+        inner,
         calls: AtomicUsize::new(0),
     };
     let control = Control {
@@ -185,12 +196,17 @@ where
         maxmove: None,
     };
     let mut solver = Solver::new((arm.method)(), control, x0.len());
-    solver.set_atom_maxmove(0.2);
+    if let Some(cap) = arm.cap {
+        solver.set_atom_maxmove(cap);
+    }
+    solver.set_accept(arm.accept);
+    solver.set_lbfgs_trust(arm.radius);
     if let Some(norm) = arm.stop {
         solver.set_stop_norm(norm);
     }
     let mut x = x0.clone();
     let mut converged = false;
+    let mut error = false;
     for _ in 0..BUDGET {
         match solver.step(&obj, &mut x) {
             Ok(rep) if rep.grad_norm < tol => {
@@ -198,16 +214,20 @@ where
                 break;
             }
             Ok(_) => {}
-            Err(_) => break,
+            Err(_) => {
+                error = true;
+                break;
+            }
         }
         if obj.calls.load(Ordering::Relaxed) > BUDGET {
             break;
         }
     }
     let calls = obj.calls.load(Ordering::Relaxed);
-    let (energy, g) = f(x.view());
+    let (energy, g) = obj.inner.value_and_gradient(x.view());
     Run {
         converged,
+        error,
         calls,
         energy,
         fmax: max_atom(&g),
@@ -215,7 +235,8 @@ where
     }
 }
 
-fn run_case<F>(label: &str, arms: &[Arm], tols: &[f64], starts: usize, mut one: F)
+/// `outcomes` adds the budget-hit and error counts after `converged`.
+fn run_case<F>(label: &str, arms: &[Arm], tols: &[f64], starts: usize, outcomes: bool, mut one: F)
 where
     F: FnMut(usize, Arm, f64) -> Run,
 {
@@ -239,14 +260,20 @@ where
             calls.sort_unstable();
             let mean = |v: fn(&Run) -> f64| runs.iter().map(v).sum::<f64>() / k;
             let worst = runs.iter().map(|r| r.fmax).fold(0.0, f64::max);
+            let converged = runs.iter().filter(|r| r.converged).count();
+            let mut done = format!("{converged}/{starts}");
+            if outcomes {
+                let errors = runs.iter().filter(|r| r.error).count();
+                let budget = starts - converged - errors;
+                done = format!("{done} | {budget} | {errors}");
+            }
             println!(
-                "| {label} | {} | {} | {tol} | {}/{starts} | {:.1} | {} | {} | {:.6} | {:.6} | {:.6} | {:.6} | {:.2} |",
+                "| {label} | {} | {} | {tol} | {done} | {:.1} | {} | {} | {:.6} | {:.6} | {:.6} | {:.6} | {:.2} |",
                 arm.name,
                 match arm.stop {
                     Some(norm) => format!("{norm:?}"),
                     None => "default".into(),
                 },
-                runs.iter().filter(|r| r.converged).count(),
                 mean(|r| r.calls as f64),
                 calls[starts / 2],
                 calls[starts - 1],
@@ -274,6 +301,9 @@ fn main() {
                 method,
                 istep,
                 stop,
+                cap: Some(0.2),
+                accept: Accept::None,
+                radius: 0.0,
             });
         }
     }
@@ -284,16 +314,77 @@ fn main() {
     println!("|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|");
     let starts = 20;
     let x0: Vec<_> = (0..starts).map(|s| lj_start(38, s as u64)).collect();
-    run_case("LJ38", &arms, &tols, starts, |s, arm, tol| {
+    run_case("LJ38", &arms, &tols, starts, false, |s, arm, tol| {
         let f = |x: ArrayView1<f64>| pairwise(x, None, f64::INFINITY, lj);
-        solve(f, &x0[s], arm, tol)
+        solve(Oracle::unbounded(3 * 38, f), &x0[s], arm, tol)
     });
     let fixtures = ["morse_pos_0000.con", "morse_pos_0008.con"];
     let morse_x: Vec<_> = fixtures.iter().map(|f| read_con(f)).collect();
-    run_case("Morse Pt256", &arms, &tols, 2, |s, arm, tol| {
+    run_case("Morse Pt256", &arms, &tols, 2, false, |s, arm, tol| {
         let (x0, cell) = &morse_x[s];
         let cell = *cell;
         let f = move |x: ArrayView1<f64>| pairwise(x, Some(cell), 7.0, morse);
-        solve(f, x0, arm, tol)
+        solve(Oracle::unbounded(x0.len(), f), x0, arm, tol)
+    });
+
+    let arm = |name, cap, accept, radius| Arm {
+        name,
+        method: lbfgs as fn() -> Method,
+        istep: 0.2,
+        stop: None,
+        cap,
+        accept,
+        radius,
+    };
+    let trust = [
+        arm(
+            "lbfgs m=20, cap 0.2, geometry step",
+            Some(0.2),
+            Accept::None,
+            0.0,
+        ),
+        arm(
+            "lbfgs m=20, cap 0.2, trust step at radius 0.2 in place of the geometry step",
+            Some(0.2),
+            Accept::None,
+            0.2,
+        ),
+        arm(
+            "lbfgs m=20, no cap, raw two-loop, accept none",
+            None,
+            Accept::None,
+            0.0,
+        ),
+        arm(
+            "lbfgs m=20, no cap, strong Wolfe, accept energy",
+            None,
+            Accept::Energy,
+            0.0,
+        ),
+        arm(
+            "lbfgs m=20, no cap, trust step at radius 0.2",
+            None,
+            Accept::None,
+            0.2,
+        ),
+    ];
+    println!();
+    println!(
+        "| case | method | stop | tol | converged | budget hits | errors | mean calls | median | max | mean final max-atom | worst final max-atom | mean final two-norm | mean E | batch ms (median of 3) |"
+    );
+    println!("|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+    run_case("LJ38", &trust, &tols, starts, true, |s, arm, tol| {
+        let f = |x: ArrayView1<f64>| pairwise(x, None, f64::INFINITY, lj);
+        solve(Oracle::unbounded(3 * 38, f), &x0[s], arm, tol)
+    });
+    run_case("Morse Pt256", &trust, &tols, 2, true, |s, arm, tol| {
+        let (x0, cell) = &morse_x[s];
+        let cell = *cell;
+        let f = move |x: ArrayView1<f64>| pairwise(x, Some(cell), 7.0, morse);
+        solve(Oracle::unbounded(x0.len(), f), x0, arm, tol)
+    });
+    let rosen = Array1::from(vec![-1.2, 1.0]);
+    run_case("Rosenbrock 2D", &trust, &[1e-6], 1, true, |_, arm, tol| {
+        solve(Rosenbrock::<2>::new(), &rosen, arm, tol)
     });
 }

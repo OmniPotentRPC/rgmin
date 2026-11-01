@@ -55,6 +55,27 @@ CI runs on pushes and pull requests to ~develop~ as well as ~main~, and installs
 C: ~rgmin_solver_set_stop_norm~ and ~rgmin_solver_report_gradient~.
 ~abi_minor~ 29.
 
+~Solver::set_lbfgs_trust~ turns on an adaptive trust radius for session limited-memory Broyden-Fletcher-Goldfarb-Shanno (L-BFGS), and ~Solver::lbfgs_trust_radius~ reads it.
+The radius update is Algorithm 1 of Burdakov, Gong, Zikrin, and Yuan, Math. Program. Comput. 9, 101-134 (2017), [[https://doi.org/10.1007/s12532-016-0109-7]].
+The step truncates the two-loop quasi-Newton direction at the radius, as in the third L-BFGS variant of their comparison, without solving their trust-region subproblem.
+The per-atom or Euclidean cap applies after the radius.
+With ~set_project_rigid~, the rigid modes leave the direction first.
+A change within ~1e-11 |f|~ counts as full agreement (their equation 64), so the step accepts a rise that small.
+A larger rise is refused.
+A non-finite trial shrinks the radius and the step reports ~x~, while other first-order ~Solver~ steps return ~Error::Oracle~ for such a trial.
+A radius below ~1e-15~ returns ~Error::TrustCollapsed~, even after an accepted ratio.
+A finite slope ~g^T d~ that is not negative after the pairs are dropped returns the new ~Error::NoDescent~, and a NaN or infinite slope returns the non-finite direction error.
+On Euclidean L-BFGS without HiGHS the radius replaces the acceptance test and the geometry step.
+It is off by default.
+In the C application binary interface (ABI), ~rgmin_solver_set_lbfgs_trust~ sets the radius.
+A non-positive, NaN or infinite radius turns it off.
+~rgmin_solver_lbfgs_trust_radius~ reads it.
+A step whose direction is not downhill or not finite returns ~RGMIN_INTERNAL_ERROR~.
+The C++ session wraps them as ~set_lbfgs_trust~ and ~lbfgs_trust_radius~.
+~abi_minor~ 37.
+~benches/stop_norm.rs~ prints a second table of five L-BFGS step rules, with budget hits and errors per arm.
+With the cap, the radius-on arm runs the trust step in place of geometry L-BFGS, so the two capped arms compare two step rules.
+
 The exponential preconditioner of Packwood et al., J. Chem. Phys. 144, 164109 (2016) ([[https://doi.org/10.1063/1.4947024][10.1063/1.4947024]]) is ~Solver::set_exp~.
 The caller supplies the neighbour list.
 L-BFGS uses ~H0 = P^{-1}~.

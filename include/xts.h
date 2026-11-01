@@ -118,6 +118,8 @@ typedef rgmin_hvp_fn xts_hvp_fn;
 #define xts_solver_set_project_rigid rgmin_solver_set_project_rigid
 #define xts_solver_set_extra_updates rgmin_solver_set_extra_updates
 #define xts_solver_set_cautious rgmin_solver_set_cautious
+#define xts_solver_set_lbfgs_trust rgmin_solver_set_lbfgs_trust
+#define xts_solver_lbfgs_trust_radius rgmin_solver_lbfgs_trust_radius
 #define xts_solver_set_highs rgmin_solver_set_highs
 #define xts_solver_set_box rgmin_solver_set_box
 #define xts_solver_set_trust rgmin_solver_set_trust

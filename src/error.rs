@@ -49,12 +49,26 @@ pub enum Error {
         /// Outer iterations completed before the second refusal.
         steps: usize,
     },
-    /// The trust region collapsed without an acceptable step: a
-    /// non-finite gradient, a broken curvature action, or an
-    /// objective that rejects every trial the model proposes.
+    /// The trust radius fell below its floor. Newton-CG reaches it
+    /// without an acceptable step: a non-finite gradient, a broken
+    /// curvature action, or an objective that rejects every trial the
+    /// model proposes. Session L-BFGS under
+    /// [`crate::Solver::set_lbfgs_trust`] also returns it when an
+    /// accepted ratio leaves the radius below `1e-15`, and discards that
+    /// trial.
     #[error("trust region collapsed after {steps} steps")]
     TrustCollapsed {
         /// Outer iterations completed when the radius hit its floor.
+        steps: usize,
+    },
+    /// Session L-BFGS under [`crate::Solver::set_lbfgs_trust`] found no
+    /// downhill direction: the slope `g^T d` was finite and not negative
+    /// even after the curvature pairs were dropped. An exactly zero
+    /// gradient with `gtol <= 0` does this. A NaN or infinite slope is
+    /// [`Error::Oracle`] instead.
+    #[error("no descent direction after {steps} steps")]
+    NoDescent {
+        /// Outer iterations completed before the refusal.
         steps: usize,
     },
     /// Host oracle returned a non-finite value or gradient.

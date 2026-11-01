@@ -258,6 +258,13 @@ public:
     void set_cautious(double eps, double alpha) {
         rgmin_solver_set_cautious(ptr_, eps, alpha);
     }
+    /// Adaptive trust radius for limited-memory
+    /// Broyden-Fletcher-Goldfarb-Shanno (L-BFGS), as a ray
+    /// truncation along the quasi-Newton direction. A non-positive, NaN
+    /// or infinite radius turns it off and returns 0.
+    int set_lbfgs_trust(double radius) { return rgmin_solver_set_lbfgs_trust(ptr_, radius); }
+    /// Current L-BFGS trust radius, or 0 when it is off.
+    double lbfgs_trust_radius() const noexcept { return rgmin_solver_lbfgs_trust_radius(ptr_); }
     int set_highs(bool on) { return rgmin_solver_set_highs(ptr_, on ? 1 : 0); }
     int set_box(double const* lower, double const* upper, std::size_t n) {
         return rgmin_solver_set_box(ptr_, lower, upper, n);

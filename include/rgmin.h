@@ -58,7 +58,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 29
+#define RGMIN_ABI_VERSION_MINOR 37
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -282,6 +282,22 @@ void rgmin_solver_set_atom_maxmove(rgmin_solver_t *solver, double maxmove);
 void rgmin_solver_set_project_rigid(rgmin_solver_t *solver, int32_t enabled);
 void rgmin_solver_set_extra_updates(rgmin_solver_t *solver, size_t extra);
 void rgmin_solver_set_cautious(rgmin_solver_t *solver, double eps, double alpha);
+/** Adaptive trust radius for limited-memory
+ *  Broyden-Fletcher-Goldfarb-Shanno (L-BFGS), starting at
+ *  \a radius. A non-positive, NaN or infinite radius is not an error: it
+ *  turns the radius off, the default, and returns 0. The radius update
+ *  is Algorithm 1 of Burdakov, Gong, Zikrin, and Yuan 2017. The step is
+ *  a ray truncation along the quasi-Newton direction. On Euclidean
+ *  L-BFGS without HiGHS it replaces \ref rgmin_solver_set_accept and the
+ *  geometry step of \ref rgmin_solver_set_atom_maxmove. A step whose
+ *  direction is not downhill or not finite returns RGMIN_INTERNAL_ERROR.
+ *  Returns 0,
+ *  or 1 on a null session. Application binary interface (ABI) minor 37. */
+int32_t rgmin_solver_set_lbfgs_trust(rgmin_solver_t *solver, double radius);
+/** Current L-BFGS trust radius, or 0 when it is off or the session is
+ *  null. A method, manifold or HiGHS step that ignores the radius still
+ *  reports the stored value. ABI minor 37. */
+double rgmin_solver_lbfgs_trust_radius(const rgmin_solver_t *solver);
 /** HiGHS feasible-set step. Nonzero enables it. Returns 0, or 1 if this
  *  build has no highs feature. */
 int32_t rgmin_solver_set_highs(rgmin_solver_t *solver, int32_t enabled);

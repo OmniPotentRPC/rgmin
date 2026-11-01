@@ -57,6 +57,15 @@ installed. L-BFGS uses the factor as ~H0~. FIRE and nonlinear CG
 use it as the metric. ~rgmin_solver_clear_exp~ drops it.
 ~abi_minor~ 28.
 
+~rgmin_solver_set_lbfgs_trust~ turns on an adaptive trust radius for limited-memory Broyden-Fletcher-Goldfarb-Shanno (L-BFGS).
+A non-positive, NaN or infinite radius turns it off, the default, and the call still returns 0.
+The step is a ray truncation along the quasi-Newton direction.
+The radius follows Algorithm 1 of Burdakov, Gong, Zikrin, and Yuan (2017).
+On Euclidean L-BFGS without HiGHS it replaces ~accept~ and the geometry step of ~rgmin_solver_set_atom_maxmove~.
+~rgmin_solver_lbfgs_trust_radius~ reads the current radius, or 0 when it is off.
+A step whose direction is not downhill or not finite returns ~RGMIN_INTERNAL_ERROR~.
+~abi_minor~ 37.
+
 A HiGHS feasible set is ~rgmin_solver_set_highs~ plus
 ~rgmin_solver_set_box~ (NULL side unbounded), optional
 ~rgmin_solver_set_trust~, and ~rgmin_solver_add_equality~. Each

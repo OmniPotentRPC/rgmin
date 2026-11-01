@@ -42,7 +42,8 @@ use crate::step::{
     scale_displacement_to_atom_cap, scale_step, scale_step_atom,
 };
 use crate::trust::{
-    accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
+    accept_ratio, burdakov_radius, dogleg_direction, predicted_reduction, reduction_ratio,
+    update_radius,
 };
 
 /// `P^{-1} v` when an exponential metric is installed, otherwise `v`.
@@ -51,6 +52,14 @@ fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Array1<f64> {
         Some(p) => p.solve(v.view()).unwrap_or_else(|| v.clone()),
         None => v.clone(),
     }
+}
+
+/// Projects the rigid modes out of `dir` at `x`. True when more than
+/// rounding left the direction.
+fn strip_rigid(dir: &mut Array1<f64>, x: &Array1<f64>) -> bool {
+    let before = dir.clone();
+    project_out_rot_trans(dir, x.view());
+    l2(&(&before - &*dir)) > 1e-12 * l2(&before)
 }
 
 /// P-norms for the FIRE mix: `sqrt(v^T P v)` and `sqrt(F · P^{-1} F)`.
@@ -125,6 +134,9 @@ pub struct Solver {
     /// Negative-curvature kicks already taken in this solve.
     saddle_kicks: u8,
     stop_norm: StopNorm,
+    /// Starting L-BFGS trust radius. Zero leaves the radius off.
+    lbfgs_trust_init: f64,
+    lbfgs_trust: f64,
     inner: Inner,
 }
 
@@ -255,6 +267,8 @@ impl Solver {
             exp: None,
             saddle_kicks: 0,
             stop_norm: StopNorm::Two,
+            lbfgs_trust_init: 0.0,
+            lbfgs_trust: 0.0,
             inner,
         }
     }
@@ -359,6 +373,49 @@ impl Solver {
     /// Norm selected by [`Self::set_stop_norm`].
     pub fn stop_norm(&self) -> StopNorm {
         self.stop_norm
+    }
+
+    /// Adaptive trust radius for limited-memory
+    /// Broyden-Fletcher-Goldfarb-Shanno (L-BFGS), starting at `radius`. A
+    /// non-positive or non-finite `radius` turns it off, the default.
+    ///
+    /// The radius follows Algorithm 1 of Burdakov, Gong, Zikrin, and
+    /// Yuan, Math. Program. Comput. 9, 101-134 (2017),
+    /// <https://doi.org/10.1007/s12532-016-0109-7>, with their Section 9
+    /// constants. The step is a ray truncation along the two-loop
+    /// quasi-Newton direction, as in the third L-BFGS variant of their
+    /// comparison. It does not solve their trust-region subproblem.
+    ///
+    /// With [`Self::set_project_rigid`] the rigid modes leave the
+    /// direction first. The ray stops at the Euclidean radius, then at
+    /// the per-atom or Euclidean cap. `rho` is the actual over the
+    /// predicted energy drop. `rho = 1` when the energy changes by at most
+    /// `1e-11 |f|`, so a rise that small is accepted. `rho < 0` refuses
+    /// the step: `x` and the pairs stay. `rho < 0.25` sets the radius to
+    /// `min(r/4, |s|/2)`. `rho >= 0.75` with `|s| >= 0.8 r` doubles it.
+    /// A trial moved by the box or by the rigid projection is predicted
+    /// from `-g^T s`. Whenever the radius falls below `1e-15`, the step
+    /// keeps the previous point and returns [`Error::TrustCollapsed`].
+    /// When the slope `g^T d` is still NaN or infinite after the pairs are
+    /// dropped, the step returns [`Error::Oracle`]. When it is finite and
+    /// not negative, the step returns [`Error::NoDescent`]. Neither moves.
+    ///
+    /// On Euclidean L-BFGS without HiGHS this replaces
+    /// [`Self::set_accept`] and the geometry step of
+    /// [`Self::set_atom_maxmove`]. Other methods and manifolds, and the
+    /// HiGHS step, ignore the radius. `forget` and `rebase` restore
+    /// `radius`.
+    pub fn set_lbfgs_trust(&mut self, radius: f64) {
+        let on = radius > 0.0 && radius.is_finite();
+        self.lbfgs_trust_init = if on { radius } else { 0.0 };
+        self.lbfgs_trust = self.lbfgs_trust_init;
+    }
+
+    /// Current L-BFGS trust radius, or `None` when it is off. A session
+    /// whose method, manifold or HiGHS step ignores the radius still
+    /// reports the stored value.
+    pub fn lbfgs_trust_radius(&self) -> Option<f64> {
+        (self.lbfgs_trust_init > 0.0).then_some(self.lbfgs_trust)
     }
 
     /// Line search stored on the session. First-order `step` uses
@@ -858,6 +915,7 @@ impl Solver {
     /// but its value and gradient there belong to the previous objective.
     pub fn rebase(&mut self) {
         self.istep = self.control.istep;
+        self.lbfgs_trust = self.lbfgs_trust_init;
         self.e_hist.clear();
         self.last_pos = None;
         self.geometry_lbfgs_stiff = None;
@@ -866,6 +924,7 @@ impl Solver {
     /// Drop method memory. The next step is a cold start from the current `x`.
     pub fn forget(&mut self) {
         self.istep = self.control.istep;
+        self.lbfgs_trust = self.lbfgs_trust_init;
         self.e_hist.clear();
         self.last_pos = None;
         self.geometry_lbfgs_stiff = None;
@@ -909,7 +968,10 @@ impl Solver {
     /// A first-order step whose start, or whose FIRE, geometry fallback or
     /// L-BFGS [`Accept::None`] trial, answers with a non-finite value or
     /// gradient returns [`Error::Oracle`] with `x` and the solver as they
-    /// were, so a retry probes the same trial.
+    /// were, so a retry probes the same trial. Under
+    /// [`Self::set_lbfgs_trust`] the step scores a non-finite trial as
+    /// `rho < 0` instead. The radius shrinks, `x` and the pairs stay, and the
+    /// step returns a report at `x`.
     pub fn step<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -1085,7 +1147,10 @@ impl Solver {
     /// Per-atom cap selects the geometry L-BFGS step. Uncapped sessions keep
     /// the one-oracle two-loop (and Wolfe when acceptance is not [`Accept::None`]).
     fn use_geometry_lbfgs(&self) -> bool {
-        if self.atom_maxmove.is_none() || !matches!(self.manifold, ManifoldKind::Euclidean) {
+        if self.atom_maxmove.is_none()
+            || !matches!(self.manifold, ManifoldKind::Euclidean)
+            || self.use_lbfgs_trust()
+        {
             return false;
         }
         if !matches!(self.inner, Inner::Lbfgs(_)) {
@@ -1096,6 +1161,98 @@ impl Solver {
             return false;
         }
         true
+    }
+
+    fn use_lbfgs_trust(&self) -> bool {
+        if self.lbfgs_trust_init <= 0.0
+            || !matches!(self.inner, Inner::Lbfgs(_))
+            || !matches!(self.manifold, ManifoldKind::Euclidean)
+        {
+            return false;
+        }
+        #[cfg(feature = "highs")]
+        if self.highs {
+            return false;
+        }
+        true
+    }
+
+    /// One step under [`Self::set_lbfgs_trust`]. One oracle call.
+    fn lbfgs_trust_step<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        value: f64,
+        grad: Array1<f64>,
+    ) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let rigid = self.project_rigid;
+        let Inner::Lbfgs(solver) = &mut self.inner else {
+            unreachable!()
+        };
+        let mut dir = solver.direction(grad.view());
+        let mut projected = rigid && strip_rigid(&mut dir, x);
+        let mut gd = grad.dot(&dir);
+        if !gd.is_finite() || gd >= 0.0 {
+            solver.forget();
+            dir = solver.direction(grad.view());
+            projected = rigid && strip_rigid(&mut dir, x);
+            gd = grad.dot(&dir);
+        }
+        // An infinite slope also overflows |d|, so tau = 0 would accept x itself.
+        if !gd.is_finite() {
+            return Err(Error::Oracle {
+                what: "non-finite search direction",
+            });
+        }
+        if gd >= 0.0 {
+            return Err(Error::NoDescent { steps: self.steps });
+        }
+        let mut tau = (self.lbfgs_trust / l2(&dir)).min(1.0);
+        if let Some(cap) = self.atom_maxmove {
+            tau = tau.min(cap / max_atom_displacement(&dir));
+        } else if let Some(cap) = self.control.maxmove {
+            tau = tau.min(cap / l2(&dir));
+        }
+        let raw = &*x + &(tau * &dir);
+        let trial = obj.bounds().clip(raw.view());
+        let s = &trial - &*x;
+        // q(tau d) = tau g^T d + tau^2/2 d^T B d, and d^T B d = -g^T d only for d = -Hg.
+        let pred = if trial == raw && !projected {
+            -gd * (tau - 0.5 * tau * tau)
+        } else {
+            -grad.dot(&s)
+        };
+        let (tval, tgrad) = obj.value_and_gradient(trial.view());
+        let ared = value - tval;
+        let rho = if !tval.is_finite() || tgrad.iter().any(|g| !g.is_finite()) {
+            f64::NEG_INFINITY
+        } else if ared.abs() <= 1e-11 * value.abs() {
+            1.0
+        } else if pred > 0.0 {
+            ared / pred
+        } else {
+            f64::NEG_INFINITY
+        };
+        self.lbfgs_trust = burdakov_radius(self.lbfgs_trust, rho, l2(&s));
+        self.steps += 1;
+        if self.lbfgs_trust < 1e-15 {
+            self.remember(x, value, &grad);
+            return Err(Error::TrustCollapsed { steps: self.steps });
+        }
+        if rho < 0.0 {
+            self.remember(x, value, &grad);
+            return Ok(self.report(value, x, &grad));
+        }
+        *x = trial;
+        let new_grad = self.horizontal_grad(x, &tgrad);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.push_pair(s, &new_grad - &grad, Some(l2(&new_grad)));
+        }
+        self.remember(x, tval, &new_grad);
+        Ok(self.report(tval, x, &new_grad))
     }
 
     fn apply_geometry_curvature(
@@ -1731,6 +1888,9 @@ impl Solver {
                     solver.push_pair(s, y, Some(l2(&grad)));
                 }
             }
+        }
+        if self.use_lbfgs_trust() {
+            return self.lbfgs_trust_step(obj, x, value, grad);
         }
 
         let raw_gradient = match self.inner {

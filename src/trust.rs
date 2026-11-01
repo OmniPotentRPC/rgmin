@@ -78,6 +78,20 @@ pub fn update_radius(radius: f64, rho: f64, pnorm: f64, rmax: f64) -> f64 {
     }
 }
 
+/// Burdakov, Gong, Zikrin, and Yuan, Math. Program. Comput. 9, 101-134
+/// (2017), <https://doi.org/10.1007/s12532-016-0109-7>, Algorithm 1 with
+/// the Section 9 constants: `tau2 = 0.25`, `tau3 = 0.75`, `eta1 = 0.25`,
+/// `eta2 = 0.5`, `eta3 = 0.8`, `eta4 = 2`. `snorm` is the step taken or refused.
+pub(crate) fn burdakov_radius(radius: f64, rho: f64, snorm: f64) -> f64 {
+    if rho < RHO_BAD {
+        (0.25 * radius).min(0.5 * snorm)
+    } else if rho >= RHO_GOOD && snorm >= BOUNDARY * radius {
+        2.0 * radius
+    } else {
+        radius
+    }
+}
+
 /// True when the trial point is accepted (`ρ > 0`).
 pub fn accept_ratio(rho: f64) -> bool {
     rho > 0.0

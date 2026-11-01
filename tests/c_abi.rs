@@ -865,9 +865,177 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 29);
+    assert_eq!(stamp.abi_minor, 37);
     assert_eq!(stamp.layout_revision, 4);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
+}
+
+/// The C session reaches the Rosenbrock minimum with the radius on and
+/// reports the radius it ends with.
+#[test]
+fn c_abi_lbfgs_trust_radius() {
+    use rgmin::ffi::{rgmin_solver_lbfgs_trust_radius, rgmin_solver_set_lbfgs_trust};
+    assert_eq!(
+        unsafe { rgmin_solver_set_lbfgs_trust(std::ptr::null_mut(), 0.2) },
+        1
+    );
+    assert_eq!(
+        unsafe { rgmin_solver_lbfgs_trust_radius(std::ptr::null()) },
+        0.0
+    );
+    let ctrl = rgmin_control_t {
+        maxiter: 200,
+        gtol: 1e-6,
+        istep: 0.2,
+        memory: 20,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    assert_eq!(unsafe { rgmin_solver_lbfgs_trust_radius(session) }, 0.0);
+    assert_eq!(unsafe { rgmin_solver_set_lbfgs_trust(session, 0.2) }, 0);
+    assert_eq!(unsafe { rgmin_solver_lbfgs_trust_radius(session) }, 0.2);
+    let mut x = [-1.2, 1.0];
+    let mut calls = 0usize;
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: f64::INFINITY,
+    };
+    for _ in 0..200 {
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+        let st = unsafe {
+            rgmin_solver_step_fg(
+                session,
+                Some(rosen_evalgrad),
+                (&mut calls as *mut usize).cast(),
+                xt,
+                &mut out,
+            )
+        };
+        unsafe { rgmin_tensor_free(xt) };
+        assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+        if out.grad_norm < 1e-6 {
+            break;
+        }
+    }
+    assert!(out.grad_norm < 1e-6, "{} {x:?}", out.grad_norm);
+    assert!((x[0] - 1.0).abs() < 1e-5 && (x[1] - 1.0).abs() < 1e-5);
+    assert!(unsafe { rgmin_solver_lbfgs_trust_radius(session) } > 0.0);
+    unsafe { rgmin_solver_free(session) };
+}
+
+unsafe extern "C" fn flat_evalgrad(
+    _user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (gp, gn) = unsafe { cpu_f64(g as *const _) };
+    unsafe {
+        *value_out = 1.0;
+        for i in 0..gn {
+            *(gp as *mut f64).add(i) = 0.0;
+        }
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+/// NaN and infinite radii turn the radius off and return 0. A zero
+/// gradient at `gtol = 0` has slope 0 and is no descent.
+#[test]
+fn c_abi_lbfgs_trust_non_finite_radius_and_no_descent() {
+    use rgmin::ffi::{rgmin_solver_lbfgs_trust_radius, rgmin_solver_set_lbfgs_trust};
+    let ctrl = rgmin_control_t {
+        maxiter: 10,
+        gtol: 0.0,
+        istep: 0.2,
+        memory: 20,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    for radius in [f64::NAN, f64::INFINITY, -1.0] {
+        assert_eq!(unsafe { rgmin_solver_set_lbfgs_trust(session, 0.5) }, 0);
+        assert_eq!(unsafe { rgmin_solver_set_lbfgs_trust(session, radius) }, 0);
+        assert_eq!(unsafe { rgmin_solver_lbfgs_trust_radius(session) }, 0.0);
+    }
+    assert_eq!(unsafe { rgmin_solver_set_lbfgs_trust(session, 0.5) }, 0);
+    let mut x = [3.0, -1.0];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: f64::INFINITY,
+    };
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let st = unsafe {
+        rgmin_solver_step_fg(
+            session,
+            Some(flat_evalgrad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+    assert!(last_error_text().contains("no descent direction"));
+    assert_eq!(x, [3.0, -1.0]);
+    unsafe { rgmin_solver_free(session) };
+}
+
+unsafe extern "C" fn steep_evalgrad(
+    _user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (gp, gn) = unsafe { cpu_f64(g as *const _) };
+    unsafe {
+        *value_out = 1.0;
+        for i in 0..gn {
+            *(gp as *mut f64).add(i) = 1e200;
+        }
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+/// A gradient of `1e200` overflows the slope to `-inf`. The step reports a
+/// non-finite direction and leaves `x` where it was.
+#[test]
+fn c_abi_lbfgs_trust_infinite_slope_is_an_error() {
+    use rgmin::ffi::rgmin_solver_set_lbfgs_trust;
+    let ctrl = rgmin_control_t {
+        maxiter: 10,
+        gtol: 1e-6,
+        istep: 0.2,
+        memory: 20,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    assert_eq!(unsafe { rgmin_solver_set_lbfgs_trust(session, 0.5) }, 0);
+    let mut x = [3.0, -1.0];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: f64::INFINITY,
+    };
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let st = unsafe {
+        rgmin_solver_step_fg(
+            session,
+            Some(steep_evalgrad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+    assert!(last_error_text().contains("non-finite search direction"));
+    assert_eq!(x, [3.0, -1.0]);
+    unsafe { rgmin_solver_free(session) };
 }
 
 /// Two atoms at force 0.9 each: max-atom 0.9, two-norm 1.27. At gtol 1

@@ -54,6 +54,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `docs/figures/relax-morse/` has the force-trace plot, the session diagram and the scripts that draw them.
 - `CONTRIBUTING.md` names the issue tracker, the `develop` branch and the checks that CI runs.
   It points to the contributing page for the rest.
+- Opt-in adaptive trust radius for session limited-memory Broyden-Fletcher-Goldfarb-Shanno (L-BFGS).
+  `Solver::set_lbfgs_trust` sets the starting radius and `Solver::lbfgs_trust_radius` reads the current one.
+  The radius update is Algorithm 1 of Burdakov, Gong, Zikrin, and Yuan, Math. Program. Comput. 9, 101-134 (2017), <https://doi.org/10.1007/s12532-016-0109-7>.
+  The step truncates the two-loop quasi-Newton direction at the radius, as in the third L-BFGS variant of their comparison, without solving their trust-region subproblem.
+  The per-atom or Euclidean cap applies after the radius.
+  With `set_project_rigid`, the rigid modes leave the direction first.
+  Good agreement between the predicted and actual energy drop at the boundary doubles the radius.
+  Poor agreement shrinks it.
+  Their equation 64 counts a change within `1e-11 |f|` as full agreement, so the step accepts a rise that small.
+  A larger rise is refused.
+  A non-finite trial shrinks the radius and the step reports `x`, while other first-order `Solver` steps return `Error::Oracle` for such a trial.
+  A radius below `1e-15` returns `Error::TrustCollapsed`, even after an accepted ratio.
+  A finite slope `g^T d` that is not negative after the pairs are dropped returns the new `Error::NoDescent`, and a NaN or infinite slope returns the non-finite direction error.
+  On Euclidean L-BFGS without HiGHS the radius replaces the acceptance test and the geometry step.
+  It is off by default.
+  In the C application binary interface (ABI), `rgmin_solver_set_lbfgs_trust` sets the radius.
+  A non-positive, NaN or infinite radius turns it off, and a null session returns 1.
+  `rgmin_solver_lbfgs_trust_radius` reads it, or 0 when off.
+  A step whose direction is not downhill or not finite returns `RGMIN_INTERNAL_ERROR`.
+  The C++ session wraps them as `set_lbfgs_trust` and `lbfgs_trust_radius`.
+  xts aliases follow.
+  `abi_minor` 37.
+  `benches/stop_norm.rs` prints a second table of five L-BFGS step rules, with budget hits and errors per arm.
+  With the cap, the radius-on arm runs the trust step in place of geometry L-BFGS, so the two capped arms compare two step rules.
 - Opt-in session stop norm.
   `Solver::set_stop_norm` takes a `StopNorm`: `Two` (the default, `||g||_2`), `MaxAtom` (the largest norm over `(x, y, z)` triples: ASE `fmax`, eOn `max_atom`, LAMMPS `max`), or `Inf` (the largest absolute component: eOn `max_component`, LAMMPS `inf`).
   Every session stop test and `Report::grad_norm` use it.
