@@ -25,16 +25,18 @@ rgmin
 Overview
 --------
 
-``rgmin`` is the local-minimization crate of the OmniPotentRPC family,
-beside `rgpot <https://github.com/OmniPotentRPC/rgpot>`_ and `rgsaddle <https://github.com/OmniPotentRPC/rgsaddle>`_. Algorithms live only in Rust. A session
-takes one stepper step on an embedded manifold (``Euclidean``,
-``MwRigid``, ``Sphere``, and the rest) and reports. Hosts own the loop.
+``rgmin`` finds a local minimum of a smooth function from its value and gradient.
+A host program owns the loop, and a ``Solver`` session takes one step each time the host calls it.
+The step can stay on an embedded manifold (``Euclidean``, ``MwRigid``, ``Sphere``, and the rest).
+It is the local-minimization crate of the OmniPotentRPC family, beside `rgpot <https://github.com/OmniPotentRPC/rgpot>`_ and `rgsaddle <https://github.com/OmniPotentRPC/rgsaddle>`_.
 
-C and C++ keep the old ``xts::optimize`` names through an hourglass C ABI
-(``rgmin_solver_t`` / ``rgmin_minimize``) that carries **dlpk**
-``DLManagedTensorVersioned`` tensors.
-``include/xts/optimize.hpp`` is the C++ wrapper; ``include/xts/xtensor.hpp``
-adapts ``xt::xarray``. There is no second solver implementation in C++.
+The solvers are written only in Rust.
+C and C++ call them through one small C application binary interface (ABI), ``include/rgmin.h`` (``rgmin_solver_t`` / ``rgmin_minimize``).
+Vectors cross it as DLPack ``DLManagedTensorVersioned`` tensors from the **dlpk** crate.
+``include/rgmin/optimize.hpp`` is the C++ wrapper and ``include/xts/xtensor.hpp`` adapts ``xt::xarray``.
+``include/xts.h`` and ``include/xts/optimize.hpp`` keep the old ``xts`` names for existing hosts.
+There is no second solver implementation in C++.
+:doc:`reference/architecture` draws these layers.
 
 The production unconstrained local method is limited-memory BFGS with
 the strong Wolfe conditions (Nocedal and Wright 7.4 and algorithms

@@ -3,32 +3,32 @@
 Architecture
 ------------
 
-``rgmin`` follows a metatensor-style hourglass: solvers live in
-Rust, C sees a small ABI, C++ is a header wrapper.
+``rgmin`` has an hourglass interface, the design in `Stefanus Du Toit's "Hourglass Interfaces for C++ APIs" (CppCon 2014) <https://github.com/CppCon/CppCon2014/tree/master/Presentations/Hourglass%20Interfaces%20for%20C%2B%2B%20APIs>`_.
+The core of `metatensor <https://docs.metatensor.org/latest/devdoc/architecture.html>`_ has the same layout: Rust behind a C interface, with a header-only C++ wrapper on top.
+The wide top is the code that calls the solvers, the wide bottom is the Rust code that implements them, and the narrow middle, the *waist*, is one small C application binary interface (ABI) between them.
+The waist is the only way from C and C++ to the solvers.
+No solver is written a second time above it.
+Rust hosts such as rgsaddle use the crate directly and never cross the waist.
 
 Layer diagram
 ~~~~~~~~~~~~~
 
-::
+.. figure:: ../../figures/architecture/hourglass.png
 
-    +-----------------------------------------------+
-    |  C++ wrapper                                  |
-    |  include/xts/optimize.hpp                     |
-    |  include/xts/xtensor.hpp                      |
-    +-----------------------------------------------+
-    |  C ABI (hand-written include/rgmin.h)         |
-    |  include/xts.h                                |
-    |  rgmin_solver_t create/step/free                |
-    |  rgmin_minimize over dlpk tensors               |
-    |  set_qn_step / set_accept / set_manifold      |
-    +-----------------------------------------------+
-    |  Rust core                                    |
-    |  Solver / Lbfgs / NLCG / BFGS / Newton        |
-    |  Manifold (Euclidean, RigidQuotient, MwRigid) |
-    |  Sphere / SO3 / Stiefel / SE3 / Symmetric / S^1 |
-    |  LineSearch (Brent, Armijo, Goldstein, Wolfe) |
-    |  eindir DifferentiableObjective               |
-    +-----------------------------------------------+
+    C and C++ headers at the top, the C ABI in the middle, and the Rust modules it calls at the bottom.
+
+The top row is the public headers under ``include/`` and the ``#include`` edges between them.
+``include/rgmin.h`` declares the functions of the waist and ``src/ffi.rs`` defines the same ones.
+The bottom box lists the modules ``src/ffi.rs`` takes types and functions from.
+Every vector that crosses the waist is a DLPack ``DLManagedTensorVersioned`` from the **dlpk** crate, so a later device path keeps the same functions.
+
+``docs/figures/architecture/draw_hourglass.py`` draws the figure from the headers and ``src/`` with Graphviz ``dot``.
+It stops if the header and the Rust source name different functions.
+Redraw the figure after changing a header or the C ABI:
+
+.. code:: bash
+
+    python3 docs/figures/architecture/draw_hourglass.py
 
 Objects
 ~~~~~~~
@@ -53,15 +53,16 @@ Objects
     ``DifferentiableObjective`` for a fused ``(f, g)`` function.
 
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
-    Stateful C waist. Callbacks are per step. ``abi_major`` 1,
-    ``abi_minor`` 9, ``layout_revision`` 2. Compatibility checks major
-    and layout only.
+    The session half of the waist.
+    Callbacks are arguments of each step, not stored on the handle.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 29 and ``layout_revision`` 4.
+    ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``ManifoldKind``
     Embedded geometry. Euclidean is the identity.
-    Sphere, SO(3), Stiefel ``St(n,1)``, SE(3), Symmetric, and
-    ComplexCircle ``(S^1)^n`` implement
-    ``project`` / ``retract`` / ``transport``.
+    Sphere, SO(3), Stiefel ``St(n,1)``, SE(3), Symmetric,
+    SkewSymmetric, ComplexCircle ``(S^1)^n``, and EuclideanComplex
+    ``C^n`` implement ``project`` / ``retract`` / ``transport``.
 
 ``rgmin_minimize``
     First-order / quasi-Newton C entry. CPU f64

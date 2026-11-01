@@ -25,6 +25,9 @@ still wins. C: ``rgmin_exp_t``, ``rgmin_solver_set_exp``,
 wraps those three as ``set_exp``, ``clear_exp``, and ``exp_mu``.
 ``abi_minor`` 28.
 
+The index and :doc:`reference/architecture` define the hourglass and its waist, the C ABI that C and C++ callers go through.
+``docs/figures/architecture/draw_hourglass.py`` draws the layer figure from the headers and ``src/ffi.rs``.
+
 ``rgmin_solver_set_box``: per-coordinate HiGHS box on ``x + p``.
 A NULL side is unbounded. Same status as ``set_highs`` (0, or 1
 without the ``highs`` feature). ``rgmin_solver_set_trust`` is the

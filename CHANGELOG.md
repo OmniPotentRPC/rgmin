@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HighsInt` stays out of the public header. CI installs into a
   prefix and compiles a C program and a C++ program against that
   header and the `rgmin` pkg-config file.
+- The docs index and `reference/architecture` define the hourglass and its waist, the C ABI that C and C++ callers go through.
+  A figure that `docs/figures/architecture/draw_hourglass.py` draws from the headers and `src/ffi.rs` replaces the old text diagram.
+  The page gives the ABI version from `include/rgmin.h`, 1.29 with layout revision 4, instead of 1.9 with revision 2.
 - A non-finite value or gradient is a refused answer in every line
   search and acceptance test. It never counts as a decrease. Every
   comparison against NaN is false, and `-inf` passes Armijo. Before
