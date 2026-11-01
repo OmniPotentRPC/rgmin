@@ -42,8 +42,7 @@ The tests also need SciPy (:doc:`install`):
         trust: Some(0.5),
         lo: Some(vec![-1.0]),
         hi: Some(vec![1.0]),
-        equalities: Vec::new(),
-        center_axes: None,
+        ..Default::default()
     });
 
 On ``develop``, ``lo`` and ``hi`` give one bound per coordinate.

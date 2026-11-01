@@ -32,7 +32,7 @@ Session (eOn / ASE ``step``)
 
 .. code:: c
 
-    #include "xts.h"
+    #include "rgmin.h"
 
     rgmin_control_t ctrl = { .maxiter = 200, .gtol = 1e-8, .istep = 1.0, .memory = 8 };
     rgmin_solver_t *s = rgmin_solver_create(RGMIN_LBFGS, &ctrl, n);
@@ -69,7 +69,7 @@ One-shot
 
 .. code:: c
 
-    #include "xts.h"
+    #include "rgmin.h"
 
     rgmin_control_t ctrl = { .maxiter = 200, .gtol = 1e-8, .istep = 1.0, .memory = 8 };
     rgmin_report_t report;
@@ -100,12 +100,13 @@ C++
 
 .. code:: cpp
 
-    #include <xts/optimize.hpp>
+    #include <rgmin/optimize.hpp>
 
-    xts::optimize::Control ctrl;
-    auto report = xts::optimize::minimize(eval, grad, user, x, ctrl,
-                                          xts::optimize::Method::Lbfgs);
+    rgmin::Control ctrl;
+    auto report = rgmin::minimize_fn(eval, grad, user, x, ctrl,
+                                     rgmin::Method::Lbfgs);
 
+``<xts/optimize.hpp>`` keeps the same names under ``xts::optimize`` for old hosts.
 xtensor callers include ``xts/xtensor.hpp``, which adapts ``xt::xarray`` to
 the same ``rgmin_minimize`` entry. There is no solver in the header.
 

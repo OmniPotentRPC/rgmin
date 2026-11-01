@@ -65,14 +65,17 @@ not change until a host calls the setter.
 ** Rust
 
 #+begin_src rust
+use eindir_core::objectives::Rosenbrock;
 use ndarray::array;
 use rgmin::{Control, ManifoldKind, Method, Solver};
 
+let obj = Rosenbrock::<3>::new();
 let n = (3.0_f64).sqrt();
 let mut x = array![1.0 / n, 1.0 / n, 1.0 / n];
 let mut solver = Solver::new(Method::Steepest, Control::default(), 3);
 solver.set_manifold(ManifoldKind::Sphere);
 let _ = solver.step(&obj, &mut x).unwrap();
+assert!((x.dot(&x) - 1.0).abs() < 1e-12);
 #+end_src
 
 First-order steps retract the taken increment. Quasi-Newton

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- How-to samples that did not compile now do.
+  The manifold sample defines its objective.
+  The HiGHS sample fills the rest of `HighsStep` from `Default`.
+  The intrinsic reaction coordinate (IRC) sample imports only what it uses.
+  The C++ sample calls `rgmin::minimize_fn` from `rgmin/optimize.hpp`.
+  The C samples include `rgmin.h`.
 - `cargo cinstall` installs the hand-written `include/rgmin.h` and
   `dlpack/dlpack.h`. The header compiles as C and as C++. Version
   macros are `RGMIN_H_MAJOR`, `RGMIN_H_MINOR`, and `RGMIN_H_PATCH`.

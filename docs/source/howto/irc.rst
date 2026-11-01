@@ -33,7 +33,7 @@ Rust
 .. code:: rust
 
     use ndarray::array;
-    use rgmin::{lowest_eigenpair, lowest_mode, EigenParams, EigensolverKind, IrcTrust};
+    use rgmin::IrcTrust;
 
     let masses = [1.0, 16.0];
     let d1 = array![0.1, 0.0, 0.0, 0.0, 0.0, 0.0];

@@ -47,7 +47,7 @@ C
 
 .. code:: c
 
-    #include "xts.h"
+    #include "rgmin.h"
 
     rgmin_control_t ctrl = { .maxiter = 200, .gtol = 1e-8, .istep = 1.0, .memory = 8 };
     rgmin_solver_t *s = rgmin_solver_create(RGMIN_LBFGS, &ctrl, n);

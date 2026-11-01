@@ -42,8 +42,7 @@ opt.highs = Some(HighsStep {
     trust: Some(0.5),
     lo: Some(vec![-1.0]),
     hi: Some(vec![1.0]),
-    equalities: Vec::new(),
-    center_axes: None,
+    ..Default::default()
 });
 #+end_src
 
