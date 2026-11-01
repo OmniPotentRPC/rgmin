@@ -7,14 +7,14 @@
 | Latest `main` / newest `vX.Y.Z` tag | Yes (fixes land on `main` first) |
 | Older minor lines | Best-effort only; please upgrade to the latest tag |
 
-rgmin is consumed from git tags and, once published, from crates.io.
+rgmin is published on crates.io and tagged `vX.Y.Z` on `main`.
 Security fixes are released via normal semver bumps and a `v*` tag.
 
 ## Reporting a vulnerability
 
 Please do not open a public GitHub issue for unfixed vulnerabilities.
 
-1. Email the maintainers privately (see repository owner / `CODEOWNERS`), or
+1. Email the maintainer, Rohit Goswami, at rgoswami@ieee.org, or
 2. Use GitHub Security Advisories / private vulnerability reporting if
    enabled for this repository.
 

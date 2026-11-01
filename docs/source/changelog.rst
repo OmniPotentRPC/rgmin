@@ -27,6 +27,7 @@ wraps those three as ``set_exp``, ``clear_exp``, and ``exp_mu``.
 
 The index and :doc:`reference/architecture` define the hourglass and its waist, the C ABI that C and C++ callers go through.
 ``docs/figures/architecture/draw_hourglass.py`` draws the layer figure from the headers and ``src/ffi.rs``.
+The code of conduct, the security policy and the index name a contact, and the index links the issue tracker.
 
 ``rgmin_solver_set_box``: per-coordinate HiGHS box on ``x + p``.
 A NULL side is unbounded. Same status as ``set_highs`` (0, or 1

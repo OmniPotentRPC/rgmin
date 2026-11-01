@@ -107,5 +107,11 @@ cargo test --features capi
    contributing/index
 #+end_export
 
+* Contact
+
+Ask questions and report bugs on the [[https://github.com/OmniPotentRPC/rgmin/issues][issue tracker]].
+Report a security problem privately by email to the maintainer, Rohit Goswami, at [[mailto:rgoswami@ieee.org][rgoswami@ieee.org]], as [[https://github.com/OmniPotentRPC/rgmin/blob/main/SECURITY.md][SECURITY.md]] describes.
+The same address takes reports under the [[https://github.com/OmniPotentRPC/rgmin/blob/main/CODE_OF_CONDUCT.md][code of conduct]].
+
 * License
 MIT.
