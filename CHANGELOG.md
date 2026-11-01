@@ -43,6 +43,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   Before, each retry from the moved point recorded the same pair again.
 - The contributing page now gives the docs export command that the workflow runs, `cd docs && emacs --batch -l export.el`.
   Of the two commands it gave before, one failed and the other wrote nothing.
+- The cyclic Jacobi eigensolver no longer squares a rotation parameter `theta` above `1 / eps`, with eps the machine epsilon.
+  Above that bound, the solver takes the tangent `t = 1 / (2 theta)`, the limit of the full formula.
+  The Linear Algebra Package (LAPACK) takes the same branch in its one-sided Jacobi routines.
+  The transition-state Broyden-Fletcher-Goldfarb-Shanno (TS-BFGS) update and the rational function optimization (RFO) step call this solver.
+  An off-diagonal entry below about 3.7e-155 times its diagonal gap made `theta^2` overflow.
+  With overflow trapped, the host stopped with the floating-point exception signal (SIGFPE); with the trap masked, the solver skipped the rotation.
+  Every result that was finite before is unchanged.
 
 ### Added
 

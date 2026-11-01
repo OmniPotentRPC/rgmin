@@ -444,8 +444,45 @@ impl Preconditioner for NystromPrecond {
     }
 }
 
+/// Above this `|theta|` the Jacobi tangent is `1 / (2 theta)`.
+///
+/// Here `theta^2 + 1` rounds to `theta^2`, so `1 / (2 theta)` is the
+/// value the full formula returns, and the branch changes no result
+/// that was finite before. The Linear Algebra Package (LAPACK) starts
+/// the same branch at `1 / sqrt(eps)` = `2^26`. Between `2^26` and
+/// `2^27` the two can still differ by one or two units in the last
+/// place.
+const JACOBI_BIG_THETA: f64 = 1.0 / f64::EPSILON;
+
+/// Tangent of the Jacobi rotation that zeroes `a_pq`, with
+/// `theta = (a_qq - a_pp) / (2 a_pq)`.
+///
+/// The full formula `t = sign(theta) / (|theta| + sqrt(theta^2 + 1))`
+/// is the 2-by-2 symmetric Schur decomposition of Golub and Van Loan,
+/// *Matrix Computations*, 4th ed., algorithm 8.5.1,
+/// <https://doi.org/10.56021/9781421407944>. When `|a_pq|` falls below
+/// about 3.7e-155 times the gap `|a_qq - a_pp|`, `|theta|` passes
+/// 1.3e154 and `theta^2` overflows. With overflow trapped, the host
+/// stops there; with the trap masked, `t` is 0 and the solver skips
+/// the rotation. Above
+/// [`JACOBI_BIG_THETA`] the tangent is `1 / (2 theta)`, the limit of
+/// the full formula, as in LAPACK's one-sided Jacobi routines `dgesvj`
+/// and `dgsvj0` (Drmac and Veselic, *New Fast and Accurate Jacobi SVD
+/// Algorithm. I*, <https://doi.org/10.1137/050639193>).
+fn jacobi_tangent(theta: f64) -> f64 {
+    if theta.abs() > JACOBI_BIG_THETA {
+        return 0.5 / theta;
+    }
+    let sign = if theta >= 0.0 { 1.0 } else { -1.0 };
+    sign / (theta.abs() + (theta * theta + 1.0).sqrt())
+}
+
 /// Cyclic Jacobi eigendecomposition of a small symmetric matrix.
 /// Returns eigenvalues and the column eigenvectors.
+///
+/// Each rotation is the 2-by-2 symmetric Schur decomposition of Golub
+/// and Van Loan, *Matrix Computations*, 4th ed., algorithm 8.5.1, with
+/// the tangent from `jacobi_tangent`.
 pub(crate) fn sym_eig_jacobi(mut a: Array2<f64>) -> (Array1<f64>, Array2<f64>) {
     let k = a.nrows();
     let mut v = Array2::<f64>::eye(k);
@@ -467,8 +504,7 @@ pub(crate) fn sym_eig_jacobi(mut a: Array2<f64>) -> (Array1<f64>, Array2<f64>) {
                     continue;
                 }
                 let theta = (a[(q, q)] - a[(p, p)]) / (2.0 * apq);
-                let sign = if theta >= 0.0 { 1.0 } else { -1.0 };
-                let t = sign / (theta.abs() + (theta * theta + 1.0).sqrt());
+                let t = jacobi_tangent(theta);
                 let c = 1.0 / (t * t + 1.0).sqrt();
                 let s = t * c;
                 for i in 0..k {
@@ -862,4 +898,48 @@ where
         grad_norm: nrm2(grad.view()),
         grad: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+    use rand::{Rng, SeedableRng, rngs::StdRng};
+
+    fn full_tangent(theta: f64) -> f64 {
+        let sign = if theta >= 0.0 { 1.0 } else { -1.0 };
+        sign / (theta.abs() + (theta * theta + 1.0).sqrt())
+    }
+
+    #[test]
+    fn jacobi_tangent_matches_the_full_formula_above_the_threshold() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let (lo, hi) = (JACOBI_BIG_THETA.log2(), 1.3e154_f64.log2());
+        for _ in 0..100_000 {
+            let mut theta = 2f64.powf(rng.random_range(lo..hi)).max(JACOBI_BIG_THETA);
+            if rng.random::<bool>() {
+                theta = -theta;
+            }
+            assert_eq!(
+                jacobi_tangent(theta).to_bits(),
+                full_tangent(theta).to_bits(),
+                "theta = {theta:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn jacobi_rotates_a_1e_160_coupling_next_to_a_unit_gap() {
+        // theta for the (0, 1) pair is (2 - 1) / 2e-160 = 5e159.
+        let a = array![[1.0, 1e-160, 0.0], [1e-160, 2.0, 0.5], [0.0, 0.5, 3.0]];
+        let (evals, evecs) = sym_eig_jacobi(a);
+        let r = 0.5_f64.sqrt();
+        for (got, want) in evals.iter().zip([1.0, 2.5 - r, 2.5 + r]) {
+            assert!((got - want).abs() <= 1e-15, "eigenvalues {evals:?}");
+        }
+        // The first rotation tilts the unit eigenvector by -1e-160,
+        // against a first-order tilt of -8/7 * 1e-160.
+        let tilt = evecs[(1, 0)] / evecs[(0, 0)];
+        assert!(tilt < -5e-161 && tilt > -2e-160, "tilt = {tilt:e}");
+    }
 }
