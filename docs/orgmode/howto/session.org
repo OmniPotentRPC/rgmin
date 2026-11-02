@@ -84,6 +84,7 @@ together is not asked twice.
 | ~set_manifold~ | Embedded geometry; ~rigid_quotient~ for 3N clusters |
 | ~set_masses~ | Per-atom masses for ~mw_rigid~ (Page–McIver) |
 | ~set_fire_preset~ | ~fire2~ only: Guenole 2020 Table 1 parameters; restarts the integrator |
+| ~set_fire_abc~ | ~fire2~ only: ABC-FIRE bias correction with a per-component cap |
 
 ** When to use ~rgmin_minimize~ instead
 

@@ -5,6 +5,9 @@
 //! Guénolé, Nöhring, Vaid, Houllé, Xie, Prakash, Bitzek, *Assessment
 //! and optimization of the fast inertial relaxation engine (FIRE)*,
 //! <https://doi.org/10.1016/j.commatsci.2020.109584>.
+//! Echeverri Restrepo, Andric, *ABC-FIRE: Accelerated Bias-Corrected
+//! Fast Inertial Relaxation Engine*,
+//! <https://doi.org/10.1016/j.commatsci.2022.111978>.
 
 use ndarray::Array1;
 
@@ -49,6 +52,10 @@ pub enum FirePreset {
     Guenole2020,
 }
 
+/// ASE `ase/optimize/fire2.py` and LAMMPS `src/min_fire.cpp` floor
+/// `alpha` here so the bias correction stays finite.
+const ABC_ALPHA_FLOOR: f64 = 1e-10;
+
 /// Session memory for one FIRE or FIRE 2.0 solve.
 #[derive(Clone)]
 pub struct FireState {
@@ -85,6 +92,9 @@ pub struct FireState {
     /// `alpha` decay.
     pub f_alpha: f64,
     preset: FirePreset,
+    /// FIRE 2.0 only: divide the mixed velocity by
+    /// `1 - (1 - alpha)^(n_pos + 1)` (ABC-FIRE).
+    pub abc: bool,
 }
 
 impl FireState {
@@ -112,13 +122,16 @@ impl FireState {
             f_dec: 0.5,
             f_alpha: 0.99,
             preset: FirePreset::Default,
+            abc: false,
         }
     }
 
     /// Replace the parameter set and cold-start the integrator. The
-    /// start step is kept.
+    /// start step and [`Self::abc`] are kept.
     pub fn set_preset(&mut self, preset: FirePreset) {
+        let abc = self.abc;
         *self = Self::new(self.kind, self.vel.len(), self.dt_start);
+        self.abc = abc;
         self.preset = preset;
         if preset == FirePreset::Guenole2020 {
             self.dt_max = 10.0 * self.dt_start;
@@ -193,6 +206,23 @@ fn mix_toward(state: &mut FireState, direction: &Array1<f64>, mix: Option<FireMi
     for i in 0..state.vel.len() {
         state.vel[i] = (1.0 - alpha) * state.vel[i] + scale * direction[i];
     }
+}
+
+fn abc_floor(state: &mut FireState) {
+    if state.abc {
+        state.alpha = state.alpha.max(ABC_ALPHA_FLOOR);
+    }
+}
+
+/// ABC-FIRE bias correction of the velocity just mixed, in the form of
+/// ASE `FIRE2(use_abc=True)`: `n_pos + 1` mixes since the last reset.
+fn abc_correct(state: &mut FireState) {
+    if !state.abc {
+        return;
+    }
+    let mixes = (state.n_pos + 1) as f64;
+    let scale = 1.0 / (1.0 - (1.0 - state.alpha).powf(mixes));
+    state.vel.mapv_inplace(|v| v * scale);
 }
 
 fn adapt(state: &mut FireState, power: f64) {
@@ -278,7 +308,9 @@ pub fn fire_displacement(state: &mut FireState, force: &Array1<f64>) -> Array1<f
             for i in 0..state.vel.len() {
                 state.vel[i] += force[i] * state.dt;
             }
+            abc_floor(state);
             mix_velocity(state, force);
+            abc_correct(state);
             state.steps += 1;
             &state.vel * state.dt
         }
@@ -289,6 +321,14 @@ pub fn fire_displacement(state: &mut FireState, force: &Array1<f64>) -> Array1<f
             &state.vel * state.dt
         }
     }
+}
+
+/// ABC-FIRE cap: clip each velocity component to `cap / dt` and return
+/// the displacement `dt v`, as ASE `FIRE2` does with `use_abc`.
+pub(crate) fn fire_clip_components(state: &mut FireState, cap: f64) -> Array1<f64> {
+    let vmax = cap / state.dt;
+    state.vel.mapv_inplace(|v| v.max(-vmax).min(vmax));
+    &state.vel * state.dt
 }
 
 /// FIRE 1.0 mix and adapt after the MD step, using the new force.
@@ -326,7 +366,9 @@ where
                 state.vel[i] += steepest[i] * state.dt;
             }
             let mix = mix_at(&state.vel);
+            abc_floor(state);
             mix_toward(state, steepest, mix);
+            abc_correct(state);
             state.steps += 1;
             &state.vel * state.dt
         }
@@ -447,6 +489,28 @@ mod tests {
         ));
     }
 
+    /// Higham, *Accuracy and Stability of Numerical Algorithms* (2002),
+    /// Lemma 3.1: `m` rounded operations, `u` the unit roundoff.
+    fn gamma(m: f64) -> f64 {
+        let u = f64::EPSILON / 2.0;
+        m * u / (1.0 - m * u)
+    }
+
+    /// Largest gap between two roundings of one FIRE 2.0 velocity whose
+    /// kick has norm `kick`. 14 operations reach the mixed velocity. ABC
+    /// adds `(c - 1)(k + 2) + 3` from `(1 - alpha)^k`, its cancellation,
+    /// the division and the scaling.
+    fn vel_tol(state: &FireState, kick: f64) -> f64 {
+        let k = (state.n_pos + 1) as f64;
+        let c = 1.0 / (1.0 - (1.0 - state.alpha).powf(k));
+        let (c, bias) = if state.abc {
+            (c, gamma((c - 1.0) * (k + 2.0) + 3.0))
+        } else {
+            (1.0, 0.0)
+        };
+        2.0 * (gamma(14.0) + bias) * c * kick
+    }
+
     #[test]
     fn guenole_preset_carries_table_1_and_skips_a_shrink_past_dt_min() {
         let mut state = FireState::new(FireKind::V2, 1, 1.0);
@@ -467,5 +531,29 @@ mod tests {
             let _ = fire_prepare_v2(&mut state, &array![-1.0]);
             assert_eq!(state.dt, dt, "{preset:?}");
         }
+    }
+
+    /// `v = (1, 0)` under `F = (1, 1)` and `dt = 0.1` kicks to
+    /// `(1.1, 0.1)` with `|v| / |F| = sqrt(0.61)`. The second mix since
+    /// the reset is divided by `1 - 0.75^2`.
+    #[test]
+    fn abc_divides_the_mix_by_its_bias() {
+        let mut state = FireState::new(FireKind::V2, 2, 0.1);
+        state.set_preset(FirePreset::Guenole2020);
+        state.abc = true;
+        state.vel = array![1.0, 0.0];
+        let force = array![1.0, 1.0];
+        let ready = fire_prepare_v2(&mut state, &force);
+        assert!(matches!(ready, FirePreparation::Ready) && state.n_pos == 1);
+        let dx = fire_displacement(&mut state, &force);
+        let (mix, scale) = (0.25 * 0.61_f64.sqrt(), 1.0 / (1.0 - 0.75 * 0.75));
+        let want = [(0.75 * 1.1 + mix) * scale, (0.75 * 0.1 + mix) * scale];
+        let tol = vel_tol(&state, 1.22_f64.sqrt());
+        for k in 0..2 {
+            assert!((state.vel[k] - want[k]).abs() <= tol, "{}", state.vel);
+            assert!((dx[k] - 0.1 * want[k]).abs() <= 0.1 * tol + gamma(1.0) * dx[k]);
+        }
+        let dx = fire_clip_components(&mut state, 0.2);
+        assert_eq!((state.vel[0], dx[0]), (2.0, 0.2));
     }
 }

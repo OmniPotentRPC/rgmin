@@ -870,11 +870,13 @@ fn abi_stamp_identifies_this_optimizer_layout() {
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
 
-/// On `f = x . x` from rest the first FIRE 2.0 move is `-2 dt^2 x`,
-/// so `dt = 0.1` moves `-0.02 x`.
+/// On `f = x . x` from rest the first FIRE 2.0 move is `-2 dt^2 x`.
+/// ABC divides it by `1 - (1 - 0.25)^1`, so `dt = 0.1` moves `-0.08 x`.
 #[test]
-fn c_abi_fire_preset() {
-    use rgmin::ffi::{rgmin_fire_preset_t, rgmin_solver_set_fire_preset};
+fn c_abi_fire_preset_and_abc() {
+    use rgmin::ffi::{
+        rgmin_fire_preset_t, rgmin_solver_set_fire_abc, rgmin_solver_set_fire_preset,
+    };
     let ctrl = rgmin_control_t {
         maxiter: 10,
         gtol: 1e-12,
@@ -885,42 +887,46 @@ fn c_abi_fire_preset() {
     let guenole = rgmin_fire_preset_t::RGMIN_FIRE_PRESET_GUENOLE2020 as i32;
     let null = std::ptr::null_mut();
     assert_eq!(unsafe { rgmin_solver_set_fire_preset(null, guenole) }, 1);
+    assert_eq!(unsafe { rgmin_solver_set_fire_abc(null, 1) }, 1);
     let v1 = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE, &ctrl, 2) };
     assert_eq!(unsafe { rgmin_solver_set_fire_preset(v1, guenole) }, 1);
+    assert_eq!(unsafe { rgmin_solver_set_fire_abc(v1, 1) }, 1);
     unsafe { rgmin_solver_free(v1) };
-    let shrink = 0.98;
-    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE2, &ctrl, 2) };
-    assert_eq!(unsafe { rgmin_solver_set_fire_preset(session, 2) }, 1);
-    assert_eq!(unsafe { rgmin_solver_set_fire_preset(session, guenole) }, 0);
-    let mut x = [0.5, -0.25];
-    let mut out = rgmin_report_t {
-        value: 0.0,
-        steps: 0,
-        grad_norm: 0.0,
-    };
-    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
-    let st = unsafe {
-        rgmin_solver_step(
-            session,
-            Some(quad_eval),
-            Some(quad_grad),
-            std::ptr::null_mut(),
-            xt,
-            &mut out,
-        )
-    };
-    unsafe {
-        rgmin_tensor_free(xt);
-        rgmin_solver_free(session);
+    for (abc, shrink) in [(0, 0.98), (1, 0.92)] {
+        let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE2, &ctrl, 2) };
+        assert_eq!(unsafe { rgmin_solver_set_fire_preset(session, 2) }, 1);
+        assert_eq!(unsafe { rgmin_solver_set_fire_preset(session, guenole) }, 0);
+        assert_eq!(unsafe { rgmin_solver_set_fire_abc(session, abc) }, 0);
+        let mut x = [0.5, -0.25];
+        let mut out = rgmin_report_t {
+            value: 0.0,
+            steps: 0,
+            grad_norm: 0.0,
+        };
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+        let st = unsafe {
+            rgmin_solver_step(
+                session,
+                Some(quad_eval),
+                Some(quad_grad),
+                std::ptr::null_mut(),
+                xt,
+                &mut out,
+            )
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_solver_free(session);
+        }
+        // Higham (2002) Lemma 3.1, gamma_m = m u / (1 - m u), on |x0| = 0.5:
+        // 14 roundings reach the mixed velocity, two make dt v and x + dx,
+        // and two the expected value.
+        let m = 18.0 * f64::EPSILON / 2.0;
+        let tol = m / (1.0 - m) * 0.5;
+        assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+        assert!((x[0] - 0.5 * shrink).abs() <= tol, "abc={abc} x={x:?}");
+        assert!((x[1] + 0.25 * shrink).abs() <= tol, "abc={abc} x={x:?}");
     }
-    // Higham (2002) Lemma 3.1, gamma_m = m u / (1 - m u), on |x0| = 0.5:
-    // 14 roundings reach the mixed velocity, two make dt v and x + dx,
-    // and two the expected value.
-    let m = 18.0 * f64::EPSILON / 2.0;
-    let tol = m / (1.0 - m) * 0.5;
-    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
-    assert!((x[0] - 0.5 * shrink).abs() <= tol, "x={x:?}");
-    assert!((x[1] + 0.25 * shrink).abs() <= tol, "x={x:?}");
 }
 
 /// Two atoms at force 0.9 each: max-atom 0.9, two-norm 1.27. At gtol 1

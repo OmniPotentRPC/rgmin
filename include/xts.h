@@ -112,6 +112,7 @@ typedef rgmin_hvp_fn xts_hvp_fn;
 #define xts_solver_set_accept rgmin_solver_set_accept
 #define xts_solver_set_stop_norm rgmin_solver_set_stop_norm
 #define xts_solver_set_fire_preset rgmin_solver_set_fire_preset
+#define xts_solver_set_fire_abc rgmin_solver_set_fire_abc
 #define xts_solver_report_gradient rgmin_solver_report_gradient
 #define xts_solver_push_pair rgmin_solver_push_pair
 #define xts_solver_search_direction rgmin_solver_search_direction

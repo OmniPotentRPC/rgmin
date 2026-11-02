@@ -264,9 +264,22 @@ These four tokens share ``rgmin_solver_t`` and a fused ``(f, g)``.
   keeps ``dt`` (Algorithm 2, line 23). The default set has
   ``dt_max = 2.5 istep``, ``dt_min = 1e-12``, ``N_delay = 5`` and
   ``alpha_start = 0.1``, and clamps the shrink at ``dt_min``.
-  Under the preset the session keeps its velocity unless a
+  Under the preset or ABC the session keeps its velocity unless a
   cap or a bound moved the trial, since ``(x + dx - x) / dt`` rounds
   ``v`` by about ``u |x| / |dx|``.
+
+- ABC-FIRE is the accelerated bias-corrected (ABC) update of
+  Echeverri Restrepo and Andric 2023
+  (`10.1016/j.commatsci.2022.111978 <https://doi.org/10.1016/j.commatsci.2022.111978>`_).
+  The opt-in setter ``set_fire_abc`` turns it on for ``fire2`` only.
+  The update sets ``alpha`` to at least ``1e-10`` before the mix. It then
+  divides the mixed velocity by ``1 - (1 - alpha)^(N+1)``, where ``N`` is
+  the count of consecutive positive-power steps. Each velocity
+  component is then clipped to the cap over ``dt``, and the cap
+  bounds each displacement component. This follows ASE 3.30.0b1
+  ``ase/optimize/fire2.py`` (``use_abc``). LAMMPS ``src/min_fire.cpp``
+  (commit ``9ce13d52``) uses the same floor and clip, with exponent
+  ``ntimestep - last_negative``, one less than ASE.
 
 - Barzilai–Borwein (1988,
   `10.1093/imanum/8.1.141 <https://doi.org/10.1093/imanum/8.1.141>`_) with Raydan's nonmonotone globalization

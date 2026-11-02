@@ -241,6 +241,8 @@ public:
     int set_fire_preset(rgmin_fire_preset_t preset) {
         return rgmin_solver_set_fire_preset(ptr_, preset);
     }
+    /// ABC-FIRE on a FIRE 2.0 session. Returns 0, or 1 on a non-FIRE 2.0 session.
+    int set_fire_abc(bool on) { return rgmin_solver_set_fire_abc(ptr_, on ? 1 : 0); }
     /// Copy the gradient behind the last step report. n is the session dimension.
     rgmin_status_t report_gradient(double* out, std::size_t n) const {
         return rgmin_solver_report_gradient(ptr_, out, n);

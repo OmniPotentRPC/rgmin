@@ -286,6 +286,11 @@ _Static_assert(sizeof(rgmin_fire_preset_t) == sizeof(int32_t),
  *  \c istep. Returns 0, or 1 on a null session, an unknown integer or
  *  a session that is not RGMIN_FIRE2. ABI minor 30. */
 int32_t rgmin_solver_set_fire_preset(rgmin_solver_t *solver, rgmin_fire_preset_t preset);
+/** ABC-FIRE (Echeverri Restrepo and Andric, Comput. Mater. Sci. 218,
+ *  111978 (2023)) on when \c on is nonzero. The per-atom cap, else
+ *  \c maxmove, bounds each displacement component. Returns 0, or 1 on
+ *  a null session or a session that is not RGMIN_FIRE2. ABI minor 30. */
+int32_t rgmin_solver_set_fire_abc(rgmin_solver_t *solver, int32_t on);
 /** Per-atom cap (eOn \c maxAtomMotionAppliedV). On Euclidean L-BFGS
  *  this selects the geometry step and ignores \ref rgmin_solver_set_accept.
  *  A nominal steepest trial at least 64 times the cap takes one

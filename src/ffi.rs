@@ -1801,6 +1801,27 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_preset(
     }
 }
 
+/// ABC-FIRE on (`on != 0`) or off for a FIRE 2.0 session. ABI minor 30.
+/// Returns 0, or 1 on a null session or a session that is not
+/// `RGMIN_FIRE2`.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_fire_abc(solver: *mut rgmin_solver_t, on: i32) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_fire_abc: null solver");
+        return 1;
+    }
+    match unsafe { (*solver).solver.set_fire_abc(on != 0) } {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(&e.to_string());
+            1
+        }
+    }
+}
+
 /// Per-atom cap (eOn `maxAtomMotionAppliedV`). On Euclidean L-BFGS this
 /// selects the geometry step and ignores [`rgmin_solver_set_accept`].
 /// A nominal steepest trial at least 64 times the cap takes one
