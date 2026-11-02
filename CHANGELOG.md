@@ -53,6 +53,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   C: `rgmin_fire_preset_t`, `rgmin_solver_set_fire_preset` and `rgmin_solver_set_fire_abc`; the C++ session and xts aliases follow.
   `abi_minor` 30.
   How-to `docs/orgmode/howto/fire.org` shows both.
+  `benches/stop_norm.rs` adds the two settings and a mean step count.
 - How-to `docs/orgmode/howto/install.org` shows how to install the 0.5.2 release from crates.io or the `develop` branch.
   It gives the dependencies and features of each route, the C library through cargo-c, and the SciPy the HiGHS tests need.
   The README, the index and the quickstart point to it.

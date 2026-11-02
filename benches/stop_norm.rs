@@ -1,10 +1,12 @@
 //! Session stop points under the two-norm and the max-atom criterion.
 //!
-//! Geometry L-BFGS (memory 20, `istep = 0.2`) and FIRE (`dt = 0.1`),
-//! both with the per-atom cap 0.2, on LJ38 from seeded random starts
-//! and on the two Pt256 Morse fixtures. Each run stops when the report
-//! clears the tolerance. Every oracle call counts. The final forces are
-//! evaluated again outside the session.
+//! Geometry L-BFGS (memory 20, `istep = 0.2`), FIRE and FIRE 2.0
+//! (`dt = 0.1`; FIRE 2.0 also on the Guénolé 2020 preset, with and
+//! without ABC), all with the per-atom cap 0.2, on LJ38 from seeded
+//! random starts and on the two Pt256 Morse fixtures. Each run stops
+//! when the report clears the tolerance. Steps are `Solver::step`
+//! calls. Every oracle call counts. The final forces are evaluated
+//! again outside the session.
 //! `cargo bench --bench stop_norm`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -14,7 +16,7 @@ use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use rgmin::{Control, FireKind, Method, Oracle, Solver, StopNorm};
+use rgmin::{Control, FireKind, FirePreset, Method, Oracle, Solver, StopNorm};
 
 const BUDGET: usize = 10_000;
 const REPEATS: usize = 3;
@@ -160,10 +162,12 @@ struct Arm {
     method: fn() -> Method,
     istep: f64,
     stop: Option<StopNorm>,
+    fire: Option<(FirePreset, bool)>,
 }
 
 struct Run {
     converged: bool,
+    steps: usize,
     calls: usize,
     energy: f64,
     fmax: f64,
@@ -189,9 +193,15 @@ where
     if let Some(norm) = arm.stop {
         solver.set_stop_norm(norm);
     }
+    if let Some((preset, abc)) = arm.fire {
+        solver.set_fire_preset(preset).unwrap();
+        solver.set_fire_abc(abc).unwrap();
+    }
     let mut x = x0.clone();
     let mut converged = false;
+    let mut steps = 0;
     for _ in 0..BUDGET {
+        steps += 1;
         match solver.step(&obj, &mut x) {
             Ok(rep) if rep.grad_norm < tol => {
                 converged = true;
@@ -208,6 +218,7 @@ where
     let (energy, g) = f(x.view());
     Run {
         converged,
+        steps,
         calls,
         energy,
         fmax: max_atom(&g),
@@ -240,13 +251,14 @@ where
             let mean = |v: fn(&Run) -> f64| runs.iter().map(v).sum::<f64>() / k;
             let worst = runs.iter().map(|r| r.fmax).fold(0.0, f64::max);
             println!(
-                "| {label} | {} | {} | {tol} | {}/{starts} | {:.1} | {} | {} | {:.6} | {:.6} | {:.6} | {:.6} | {:.2} |",
+                "| {label} | {} | {} | {tol} | {}/{starts} | {:.1} | {:.1} | {} | {} | {:.6} | {:.6} | {:.6} | {:.6} | {:.2} |",
                 arm.name,
                 match arm.stop {
                     Some(norm) => format!("{norm:?}"),
                     None => "default".into(),
                 },
                 runs.iter().filter(|r| r.converged).count(),
+                mean(|r| r.steps as f64),
                 mean(|r| r.calls as f64),
                 calls[starts / 2],
                 calls[starts - 1],
@@ -263,10 +275,16 @@ where
 fn main() {
     let lbfgs = || Method::Lbfgs { memory: 20 };
     let fire = || Method::Fire { kind: FireKind::V1 };
+    let fire2 = || Method::Fire { kind: FireKind::V2 };
+    let guenole = Some((FirePreset::Guenole2020, false));
+    let abc = Some((FirePreset::Guenole2020, true));
     let mut arms = Vec::new();
-    for (name, method, istep) in [
-        ("lbfgs m=20", lbfgs as fn() -> Method, 0.2),
-        ("fire", fire, 0.1),
+    for (name, method, istep, fire) in [
+        ("lbfgs m=20", lbfgs as fn() -> Method, 0.2, None),
+        ("fire", fire, 0.1, None),
+        ("fire2", fire2, 0.1, None),
+        ("fire2 guenole2020", fire2, 0.1, guenole),
+        ("fire2 guenole2020 abc", fire2, 0.1, abc),
     ] {
         for stop in [None, Some(StopNorm::MaxAtom)] {
             arms.push(Arm {
@@ -274,14 +292,15 @@ fn main() {
                 method,
                 istep,
                 stop,
+                fire,
             });
         }
     }
     let tols = [0.05, 0.01];
     println!(
-        "| case | method | stop | tol | converged | mean calls | median | max | mean final max-atom | worst final max-atom | mean final two-norm | mean E | batch ms (median of 3) |"
+        "| case | method | stop | tol | converged | mean steps | mean calls | median | max | mean final max-atom | worst final max-atom | mean final two-norm | mean E | batch ms (median of 3) |"
     );
-    println!("|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|");
+    println!("|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
     let starts = 20;
     let x0: Vec<_> = (0..starts).map(|s| lj_start(38, s as u64)).collect();
     run_case("LJ38", &arms, &tols, starts, |s, arm, tol| {
