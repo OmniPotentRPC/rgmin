@@ -281,6 +281,12 @@ These four tokens share ``rgmin_solver_t`` and a fused ``(f, g)``.
   (commit ``9ce13d52``) uses the same floor and clip, with exponent
   ``ntimestep - last_negative``, one less than ASE.
 
+- ``src/fire.rs`` replays ASE ``FIRE2`` on the extended Rosenbrock
+  function (``tests/ase_fire2_gold.py``) one step at a time, with and
+  without ABC. ASE has neither the initial delay nor ``vdfmax`` and
+  clamps the shrink, so the script checks that power stays positive
+  for the first 20 steps and that no shrink reaches ``dt_min``.
+
 - Barzilai–Borwein (1988,
   `10.1093/imanum/8.1.141 <https://doi.org/10.1093/imanum/8.1.141>`_) with Raydan's nonmonotone globalization
   (`10.1137/S1052623494266365 <https://doi.org/10.1137/S1052623494266365>`_) is a two-point spectral step.

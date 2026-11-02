@@ -404,7 +404,7 @@ pub fn fire_after_v1_metric(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::array;
+    use ndarray::{ArrayView1, array};
 
     #[test]
     fn v1_first_step_follows_the_force() {
@@ -555,5 +555,104 @@ mod tests {
         }
         let dx = fire_clip_components(&mut state, 0.2);
         assert_eq!((state.vel[0], dx[0]), (2.0, 0.2));
+    }
+
+    fn rosenbrock(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let (mut e, mut g) = (0.0, Array1::zeros(x.len()));
+        for i in 0..x.len() - 1 {
+            let t = x[i + 1] - x[i] * x[i];
+            let u = 1.0 - x[i];
+            e += 100.0 * t * t + u * u;
+            g[i] += -400.0 * x[i] * t - 2.0 * u;
+            g[i + 1] += 200.0 * t;
+        }
+        (e, g)
+    }
+
+    /// One unbounded FIRE 2.0 step as ASE `FIRE2` takes it. `x` takes the
+    /// half-step back. Returns the kick norm and the move.
+    fn ase_step(state: &mut FireState, x: &mut Array1<f64>, cap: f64) -> (f64, Array1<f64>) {
+        let mut force = -rosenbrock(x.view()).1;
+        if let FirePreparation::Rollback(c) = fire_prepare_v2(state, &force) {
+            *x += &c;
+            force = -rosenbrock(x.view()).1;
+        }
+        let kick = l2(&(&state.vel + &(&force * state.dt)));
+        let dx = fire_displacement(state, &force);
+        let dx = if state.abc {
+            fire_clip_components(state, cap)
+        } else {
+            dx
+        };
+        (kick, dx)
+    }
+
+    /// Each step of ASE `FIRE2` on the extended Rosenbrock function
+    /// (`tests/ase_fire2_gold.py`), taken from the ASE state. `dt`,
+    /// `alpha` and `n_pos` follow the same operations and must match
+    /// exactly. Velocity may differ by [`vel_tol`]; the move adds two
+    /// roundings to the position. A `Solver` on the same settings runs
+    /// the same operations, so it must match the free-running update
+    /// bit for bit until it stops.
+    #[test]
+    fn guenole_steps_reproduce_ase_fire2_from_its_state() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/ase_fire2_rosenbrock.txt"
+        );
+        let text = std::fs::read_to_string(path).unwrap();
+        let mut rows = text.lines().filter(|l| !l.starts_with('#')).map(|l| {
+            let row = l.split_whitespace().filter_map(|t| t.parse().ok());
+            row.collect::<Vec<f64>>()
+        });
+        let head = rows.next().unwrap();
+        let (dt, fmax, cap) = (head[0], head[1], head[2]);
+        while let Some(run) = rows.next() {
+            let (abc, steps) = (run[0] == 1.0, run[1] as usize);
+            let mut state = FireState::new(FireKind::V2, 3, dt);
+            state.set_preset(FirePreset::Guenole2020);
+            state.abc = abc;
+            let mut free = state.clone();
+            let control = crate::Control {
+                maxiter: steps,
+                gtol: fmax,
+                istep: dt,
+                maxmove: abc.then_some(cap),
+            };
+            let mut solver =
+                crate::Solver::new(crate::Method::Fire { kind: FireKind::V2 }, control, 3);
+            solver.set_fire_preset(FirePreset::Guenole2020).unwrap();
+            solver.set_fire_abc(abc).unwrap();
+            let obj = crate::Oracle::unbounded(3, rosenbrock);
+            let mut x = array![-1.2, 1.0, -1.2];
+            let (mut y, mut z) = (x.clone(), x.clone());
+            let mut norm = f64::INFINITY;
+            for step in 0..steps {
+                let want = rows.next().unwrap();
+                let (kick, dx) = ase_step(&mut state, &mut x, cap);
+                let same = (state.dt, state.alpha, state.n_pos as f64);
+                assert_eq!(same, (want[6], want[7], want[8]), "abc={abc} step {step}");
+                let tol_v = vel_tol(&state, kick);
+                for i in 0..3 {
+                    let tol_x = state.dt * tol_v + 2.0 * gamma(2.0) * (x[i].abs() + dx[i].abs());
+                    assert!(
+                        (state.vel[i] - want[3 + i]).abs() <= tol_v,
+                        "abc={abc} step {step}"
+                    );
+                    assert!(
+                        (x[i] + dx[i] - want[i]).abs() <= tol_x,
+                        "abc={abc} step {step}"
+                    );
+                    x[i] = want[i];
+                    state.vel[i] = want[3 + i];
+                }
+                if norm >= fmax {
+                    let (_, d) = ase_step(&mut free, &mut y, cap);
+                    y += &d;
+                    norm = solver.step(&obj, &mut z).unwrap().grad_norm;
+                    assert_eq!(y, z, "abc={abc} step {step}");
+                }
+            }
+        }
     }
 }
