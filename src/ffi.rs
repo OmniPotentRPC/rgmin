@@ -66,7 +66,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 29;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 30;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1757,6 +1757,48 @@ pub unsafe extern "C" fn rgmin_solver_set_stop_norm(solver: *mut rgmin_solver_t,
     };
     unsafe { (*solver).solver.set_stop_norm(norm) };
     0
+}
+
+/// FIRE 2.0 parameter set. Integers match [`crate::FirePreset`].
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_fire_preset_t {
+    /// What a new `RGMIN_FIRE2` session runs.
+    RGMIN_FIRE_PRESET_DEFAULT = 0,
+    /// Guénolé 2020 Table 1.
+    RGMIN_FIRE_PRESET_GUENOLE2020 = 1,
+}
+
+/// Select the FIRE 2.0 parameter set and restart the integrator.
+/// ABI minor 30. Returns 0, or 1 on a null session, an unknown integer
+/// or a session that is not `RGMIN_FIRE2`.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_fire_preset(
+    solver: *mut rgmin_solver_t,
+    preset: i32,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_fire_preset: null solver");
+        return 1;
+    }
+    let preset = match preset {
+        0 => crate::FirePreset::Default,
+        1 => crate::FirePreset::Guenole2020,
+        _ => {
+            set_last_error("rgmin_solver_set_fire_preset: unknown preset");
+            return 1;
+        }
+    };
+    match unsafe { (*solver).solver.set_fire_preset(preset) } {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(&e.to_string());
+            1
+        }
+    }
 }
 
 /// Per-atom cap (eOn `maxAtomMotionAppliedV`). On Euclidean L-BFGS this

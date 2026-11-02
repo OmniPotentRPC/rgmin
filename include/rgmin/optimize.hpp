@@ -237,6 +237,10 @@ public:
     void set_accept(rgmin_accept_t accept) { rgmin_solver_set_accept(ptr_, accept); }
     /// Stop norm for gtol and Report::grad_norm. Returns 0, or 1 on an unknown norm.
     int set_stop_norm(rgmin_stop_norm_t norm) { return rgmin_solver_set_stop_norm(ptr_, norm); }
+    /// FIRE 2.0 parameter set. Returns 0, or 1 on an unknown preset or a non-FIRE 2.0 session.
+    int set_fire_preset(rgmin_fire_preset_t preset) {
+        return rgmin_solver_set_fire_preset(ptr_, preset);
+    }
     /// Copy the gradient behind the last step report. n is the session dimension.
     rgmin_status_t report_gradient(double* out, std::size_t n) const {
         return rgmin_solver_report_gradient(ptr_, out, n);

@@ -58,7 +58,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 29
+#define RGMIN_ABI_VERSION_MINOR 30
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -270,6 +270,22 @@ _Static_assert(sizeof(rgmin_stop_norm_t) == sizeof(int32_t),
 /** Select the stop norm. TWO is the default. Returns 0, or 1 on a null
  *  session or an unknown integer. ABI minor 29. */
 int32_t rgmin_solver_set_stop_norm(rgmin_solver_t *solver, rgmin_stop_norm_t norm);
+/** FIRE 2.0 parameter set. GUENOLE2020 is Table 1 of Guenole et al.,
+ *  Comput. Mater. Sci. 175, 109584 (2020): dt_max 10 dt, dt_min
+ *  0.02 dt, N_delay 20, alpha_start 0.25, f_inc 1.1, f_dec 0.5,
+ *  f_alpha 0.99, 2000 non-positive-power steps. */
+typedef enum rgmin_fire_preset_t {
+    RGMIN_FIRE_PRESET_DEFAULT = 0,
+    RGMIN_FIRE_PRESET_GUENOLE2020 = 1
+} rgmin_fire_preset_t;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(rgmin_fire_preset_t) == sizeof(int32_t),
+               "rgmin_fire_preset_t is i32-wide; do not build this header with -fshort-enums");
+#endif
+/** Select the FIRE 2.0 parameter set and restart the integrator from
+ *  \c istep. Returns 0, or 1 on a null session, an unknown integer or
+ *  a session that is not RGMIN_FIRE2. ABI minor 30. */
+int32_t rgmin_solver_set_fire_preset(rgmin_solver_t *solver, rgmin_fire_preset_t preset);
 /** Per-atom cap (eOn \c maxAtomMotionAppliedV). On Euclidean L-BFGS
  *  this selects the geometry step and ignores \ref rgmin_solver_set_accept.
  *  A nominal steepest trial at least 64 times the cap takes one

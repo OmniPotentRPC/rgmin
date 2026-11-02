@@ -81,7 +81,7 @@ pub use accept::Accept;
 pub use adam::minimize_adam;
 pub use control::{Control, StopNorm};
 pub use error::{Error, Result};
-pub use fire::FireKind;
+pub use fire::{FireKind, FirePreset};
 pub use highs_kind::{HighsCCallback, HighsCallbackKind, HighsCrossover, HighsSolverKind};
 pub use hvp::{
     FdHvp, HessianVector, HvpOracle, IdentityPrecond, NystromPrecond, Preconditioner,

@@ -34,6 +34,21 @@ pub enum FireKind {
     V2,
 }
 
+/// Parameter set of a FIRE 2.0 session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FirePreset {
+    /// The values [`FireState::new`] gives both integrators.
+    #[default]
+    Default,
+    /// Guénolé 2020 Table 1, the LAMMPS `min_style fire` defaults:
+    /// `dt_max = 10 dt`, `dt_min = 0.02 dt`, `N_delay = 20`,
+    /// `alpha_start = 0.25`, `f_inc = 1.1`, `f_dec = 0.5`,
+    /// `f_alpha = 0.99`, 2,000 non-positive-power steps. `dt` is the
+    /// start step. A shrink that would pass `dt_min` keeps `dt`
+    /// (Algorithm 2, line 23).
+    Guenole2020,
+}
+
 /// Session memory for one FIRE or FIRE 2.0 solve.
 #[derive(Clone)]
 pub struct FireState {
@@ -69,6 +84,7 @@ pub struct FireState {
     pub f_dec: f64,
     /// `alpha` decay.
     pub f_alpha: f64,
+    preset: FirePreset,
 }
 
 impl FireState {
@@ -95,7 +111,31 @@ impl FireState {
             f_inc: 1.1,
             f_dec: 0.5,
             f_alpha: 0.99,
+            preset: FirePreset::Default,
         }
+    }
+
+    /// Replace the parameter set and cold-start the integrator. The
+    /// start step is kept.
+    pub fn set_preset(&mut self, preset: FirePreset) {
+        *self = Self::new(self.kind, self.vel.len(), self.dt_start);
+        self.preset = preset;
+        if preset == FirePreset::Guenole2020 {
+            self.dt_max = 10.0 * self.dt_start;
+            self.dt_min = 0.02 * self.dt_start;
+            self.n_min = 20;
+            self.f_inc = 1.1;
+            self.f_dec = 0.5;
+            self.alpha_start = 0.25;
+            self.alpha = self.alpha_start;
+            self.f_alpha = 0.99;
+            self.n_neg_max = 2_000;
+        }
+    }
+
+    /// Parameter set selected by [`Self::set_preset`].
+    pub fn preset(&self) -> FirePreset {
+        self.preset
     }
 
     /// Drop velocity and mixing; keep the current `dt`.
@@ -207,7 +247,12 @@ pub(crate) fn fire_prepare_v2(state: &mut FireState, force: &Array1<f64>) -> Fir
             return FirePreparation::Stalled;
         }
         if state.steps + 1 >= state.n_min {
-            state.dt = (state.dt * state.f_dec).max(state.dt_min);
+            let shrunk = state.dt * state.f_dec;
+            state.dt = match state.preset {
+                FirePreset::Default => shrunk.max(state.dt_min),
+                FirePreset::Guenole2020 if shrunk >= state.dt_min => shrunk,
+                FirePreset::Guenole2020 => state.dt,
+            };
         }
         let correction = -0.5 * state.dt * &state.vel;
         let moved = correction.iter().any(|v| *v != 0.0);
@@ -400,5 +445,27 @@ mod tests {
             fire_prepare_v2(&mut state, &array![-1.0]),
             FirePreparation::Stalled
         ));
+    }
+
+    #[test]
+    fn guenole_preset_carries_table_1_and_skips_a_shrink_past_dt_min() {
+        let mut state = FireState::new(FireKind::V2, 1, 1.0);
+        state.set_preset(FirePreset::Guenole2020);
+        assert_eq!((state.dt_max, state.dt_min, state.n_min), (10.0, 0.02, 20));
+        assert_eq!((state.alpha, state.f_inc, state.f_dec), (0.25, 1.1, 0.5));
+        assert_eq!((state.f_alpha, state.n_neg_max), (0.99, 2_000));
+        // Past the delay, 0.03 * 0.5 < 0.02: Algorithm 2 keeps 0.03 and
+        // the default clamps nothing above its 1e-12 floor.
+        for (preset, dt) in [
+            (FirePreset::Guenole2020, 0.03),
+            (FirePreset::Default, 0.015),
+        ] {
+            state.set_preset(preset);
+            state.steps = state.n_min;
+            state.dt = 0.03;
+            state.vel[0] = 1.0;
+            let _ = fire_prepare_v2(&mut state, &array![-1.0]);
+            assert_eq!(state.dt, dt, "{preset:?}");
+        }
     }
 }

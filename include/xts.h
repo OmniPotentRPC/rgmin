@@ -32,6 +32,7 @@ typedef rgmin_solver_t xts_solver_t;
 typedef rgmin_qn_step_t xts_qn_step_t;
 typedef rgmin_accept_t xts_accept_t;
 typedef rgmin_stop_norm_t xts_stop_norm_t;
+typedef rgmin_fire_preset_t xts_fire_preset_t;
 typedef rgmin_manifold_t xts_manifold_t;
 typedef rgmin_curv_fn xts_curv_fn;
 typedef rgmin_scg_params_t xts_scg_params_t;
@@ -85,6 +86,8 @@ typedef rgmin_hvp_fn xts_hvp_fn;
 #define XTS_STOP_NORM_TWO RGMIN_STOP_NORM_TWO
 #define XTS_STOP_NORM_MAX_ATOM RGMIN_STOP_NORM_MAX_ATOM
 #define XTS_STOP_NORM_INF RGMIN_STOP_NORM_INF
+#define XTS_FIRE_PRESET_DEFAULT RGMIN_FIRE_PRESET_DEFAULT
+#define XTS_FIRE_PRESET_GUENOLE2020 RGMIN_FIRE_PRESET_GUENOLE2020
 
 #define xts_version rgmin_version
 #define xts_abi_stamp rgmin_abi_stamp
@@ -108,6 +111,7 @@ typedef rgmin_hvp_fn xts_hvp_fn;
 #define xts_solver_exp_mu rgmin_solver_exp_mu
 #define xts_solver_set_accept rgmin_solver_set_accept
 #define xts_solver_set_stop_norm rgmin_solver_set_stop_norm
+#define xts_solver_set_fire_preset rgmin_solver_set_fire_preset
 #define xts_solver_report_gradient rgmin_solver_report_gradient
 #define xts_solver_push_pair rgmin_solver_push_pair
 #define xts_solver_search_direction rgmin_solver_search_direction

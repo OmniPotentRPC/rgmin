@@ -86,6 +86,9 @@ pub enum Error {
     /// Newton-CG or Newton-PCG.
     #[error("hessian-vector step requires newton-cg or newton-pcg")]
     NeedHvp,
+    /// A FIRE 2.0 preset was set on a session that is not `fire2`.
+    #[error("FIRE 2.0 preset requires fire2")]
+    NeedFire2,
 }
 
 /// Result alias for this crate.

@@ -185,6 +185,18 @@ These four tokens share ~rgmin_solver_t~ and a fused =(f, g)=.
   exponential preconditioner leaves that order in place and uses ~P~
   as the metric: power is ~F · v~, and the kick and the mix use
   ~P^{-1} F~.
+- ~FirePreset::Guenole2020~ (~set_fire_preset~, opt-in) takes
+  Guenole 2020 Table 1 (arXiv:1908.02038v4, page 7), the LAMMPS
+  ~min_modify~ defaults: ~tmax~ 10 and ~tmin~ 0.02 times the start
+  step, ~delaystep~ 20, ~dtgrow~ 1.1, ~dtshrink~ 0.5, ~alpha0~ 0.25,
+  ~alphashrink~ 0.99, ~vdfmax~ 2000, half step back and initial
+  delay on, semi-implicit Euler. A shrink that would pass ~dt_min~
+  keeps ~dt~ (Algorithm 2, line 23). The default set has
+  ~dt_max = 2.5 istep~, ~dt_min = 1e-12~, ~N_delay = 5~ and
+  ~alpha_start = 0.1~, and clamps the shrink at ~dt_min~.
+  Under the preset the session keeps its velocity unless a
+  cap or a bound moved the trial, since ~(x + dx - x) / dt~ rounds
+  ~v~ by about ~u |x| / |dx|~.
 - Barzilai–Borwein (1988,
   [[https://doi.org/10.1093/imanum/8.1.141][10.1093/imanum/8.1.141]]) with Raydan's nonmonotone globalization
   ([[https://doi.org/10.1137/S1052623494266365][10.1137/S1052623494266365]]) is a two-point spectral step.
