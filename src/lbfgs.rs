@@ -25,6 +25,8 @@ use crate::report::Report;
 use crate::step::{finite, l2, next_istep, start_answer, take_step};
 use eindir_core::{DifferentiableObjective, Objective};
 
+mod cauchy;
+
 /// How [`Lbfgs`] compares the gradient to [`Lbfgs::gtol`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GradNorm {
@@ -51,6 +53,14 @@ struct Pair {
     s: Array1<f64>,
     y: Array1<f64>,
     rho: f64,
+}
+
+/// The line along which [`Lbfgs::line_search`] steps: direction `d`,
+/// slope `d·g` at the start, and the largest step `a_max`.
+struct Ray<'a> {
+    d: &'a Array1<f64>,
+    slope: f64,
+    a_max: f64,
 }
 
 /// Curvature saved by [`Lbfgs::curvature`].
@@ -409,18 +419,20 @@ impl Lbfgs {
     /// was accepted and how many evaluations it cost. A probe answered with
     /// a non-finite value or gradient fails the decrease test, so it caps
     /// the bracket and the zoom bisects back toward the accepted end.
+    /// No trial exceeds `a_max`; a decrease at `a_max` that has not
+    /// bracketed is accepted there, as `dcsrch` does at `stpmax`.
     fn line_search<F>(
         &mut self,
         x: &mut Array1<f64>,
         f: &mut f64,
         g: &mut Array1<f64>,
-        d: &Array1<f64>,
-        slope: f64,
+        ray: Ray<'_>,
         fg: &mut F,
     ) -> (bool, usize)
     where
         F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
     {
+        let Ray { d, slope, a_max } = ray;
         let f0 = *f;
         let mut evals = 0usize;
         let mut scratch = x.clone();
@@ -445,7 +457,8 @@ impl Lbfgs {
             if dnorm > 1.0 { 1.0 / dnorm } else { 1.0 }
         } else {
             1.0
-        };
+        }
+        .min(a_max);
         let mut lo = 0.0;
         let mut f_lo = f0;
         let mut slope_lo = slope;
@@ -487,10 +500,14 @@ impl Lbfgs {
                 bracketed = true;
                 break;
             }
+            if a >= a_max {
+                self.accept(x, f, g, d, a, fa, ga);
+                return (true, evals);
+            }
             a_prev = a;
             f_prev = fa;
             slope_prev = slope_a;
-            a *= 2.0;
+            a = (2.0 * a).min(a_max);
         }
 
         if !bracketed {
@@ -643,7 +660,12 @@ impl Lbfgs {
                 self.forget();
                 continue;
             }
-            let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &d, slope, &mut fg);
+            let ray = Ray {
+                d: &d,
+                slope,
+                a_max: f64::INFINITY,
+            };
+            let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, ray, &mut fg);
             evals += evals_used;
             if !ok {
                 if self.memory.is_empty() {
@@ -712,7 +734,12 @@ impl Lbfgs {
                 self.forget();
                 continue;
             }
-            let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &d, slope, &mut fg);
+            let ray = Ray {
+                d: &d,
+                slope,
+                a_max: f64::INFINITY,
+            };
+            let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, ray, &mut fg);
             evals += evals_used;
             if !ok {
                 if self.memory.is_empty() {
@@ -722,6 +749,132 @@ impl Lbfgs {
             }
         }
         (f, x, evals, false)
+    }
+
+    /// Relaxes `x0` inside the box `lower <= x <= upper` with the
+    /// generalized Cauchy point and the subspace minimization of L-BFGS-B.
+    ///
+    /// Opt-in: [`Self::minimize`] keeps the two-loop direction. Each
+    /// direction ends at the subspace minimizer from the Cauchy point
+    /// (Byrd, Lu, Nocedal and Zhu 1995, algorithm CP and section 5.1), and
+    /// the strong Wolfe search along it stops at the box. A bound may be
+    /// infinite; with no finite bound the direction is the two-loop
+    /// direction up to rounding. [`Self::gtol`] is compared with the
+    /// projected gradient `x - clip(x - g)`. `fg` only sees points in the
+    /// box, and the result is the point, value and evaluation count of
+    /// [`Self::minimize`].
+    ///
+    /// ```
+    /// use ndarray::{ArrayView1, array};
+    /// use rgmin::Lbfgs;
+    ///
+    /// // The minimum (2, -1) is outside the box, which stops x[0] at 1.
+    /// let fg = |x: ArrayView1<f64>| {
+    ///     let f = (x[0] - 2.0).powi(2) + (x[1] + 1.0).powi(2);
+    ///     Some((f, array![2.0 * (x[0] - 2.0), 2.0 * (x[1] + 1.0)]))
+    /// };
+    /// let lower = array![f64::NEG_INFINITY, f64::NEG_INFINITY];
+    /// let upper = array![1.0, f64::INFINITY];
+    /// let mut opt = Lbfgs::default();
+    /// let (f, x, _) = opt.minimize_box(array![0.0, 0.0].view(), lower.view(), upper.view(), 100, fg);
+    /// assert_eq!(x[0], 1.0);
+    /// assert!((x[1] + 1.0).abs() < 1e-6 && (f - 1.0).abs() < 1e-12);
+    /// ```
+    pub fn minimize_box<F>(
+        &mut self,
+        x0: ArrayView1<f64>,
+        lower: ArrayView1<f64>,
+        upper: ArrayView1<f64>,
+        max_iter: usize,
+        fg: F,
+    ) -> (f64, Array1<f64>, usize)
+    where
+        F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+    {
+        self.minimize_box_watched(x0, lower, upper, max_iter, fg, |_, _| true)
+    }
+
+    /// [`Self::minimize_box`], offering each accepted iterate to `watch` as
+    /// [`Self::minimize_watched`] does.
+    pub fn minimize_box_watched<F, W>(
+        &mut self,
+        x0: ArrayView1<f64>,
+        lower: ArrayView1<f64>,
+        upper: ArrayView1<f64>,
+        max_iter: usize,
+        mut fg: F,
+        mut watch: W,
+    ) -> (f64, Array1<f64>, usize)
+    where
+        F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+        W: FnMut(usize, f64) -> bool,
+    {
+        self.trim();
+        let clip = |v: ArrayView1<f64>| {
+            Array1::from_shape_fn(v.len(), |i| v[i].max(lower[i]).min(upper[i]))
+        };
+        let mut box_fg = |v: ArrayView1<f64>| fg(clip(v).view());
+        let mut x = clip(x0);
+        let mut evals = 0usize;
+        let (mut f, mut g) = match box_fg(x.view()) {
+            Some(v) => v,
+            None => return (f64::INFINITY, x, evals),
+        };
+        evals += 1;
+        if !finite(f, g.view()) {
+            return (f64::INFINITY, x, evals);
+        }
+
+        for it in 0..max_iter {
+            if !watch(it, f) {
+                break;
+            }
+            let pg =
+                Array1::from_shape_fn(x.len(), |i| g[i].max(x[i] - upper[i]).min(x[i] - lower[i]));
+            if self.gnorm(&pg) < self.gtol {
+                break;
+            }
+            let b = cauchy::Compact::new(x.len(), &self.memory);
+            let xbar = cauchy::cauchy(x.view(), g.view(), lower, upper, &b).and_then(|(xcp, c)| {
+                cauchy::subspace(x.view(), g.view(), lower, upper, &b, xcp, &c)
+            });
+            let d = match xbar {
+                Some(xbar) => xbar - &x,
+                None if self.memory.is_empty() => break,
+                None => {
+                    self.forget();
+                    continue;
+                }
+            };
+            let slope = d.dot(&g);
+            if slope >= 0.0 || !slope.is_finite() {
+                if self.memory.is_empty() {
+                    break;
+                }
+                self.forget();
+                continue;
+            }
+            let a_max = (0..x.len()).fold(f64::INFINITY, |a, i| match d[i] {
+                di if di < 0.0 => a.min((lower[i] - x[i]) / di),
+                di if di > 0.0 => a.min((upper[i] - x[i]) / di),
+                _ => a,
+            });
+            let ray = Ray {
+                d: &d,
+                slope,
+                a_max,
+            };
+            let (ok, used) = self.line_search(&mut x, &mut f, &mut g, ray, &mut box_fg);
+            evals += used;
+            x = clip(x.view());
+            if !ok {
+                if self.memory.is_empty() {
+                    break;
+                }
+                self.forget();
+            }
+        }
+        (f, x, evals)
     }
 
     /// Cold-start L-BFGS over an eindir objective, any [`LineSearch`].

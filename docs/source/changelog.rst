@@ -7,6 +7,14 @@ Unreleased
 
 ~~~~~~~~~~
 
+Opt-in ``Lbfgs::minimize_box`` and ``Lbfgs::minimize_box_watched`` relax inside a box ``lower <= x <= upper`` with the generalized Cauchy point and the subspace minimization of limited-memory Broyden-Fletcher-Goldfarb-Shanno with bounds (L-BFGS-B; Byrd, Lu, Nocedal and Zhu 1995).
+Each direction ends at the subspace minimizer from the Cauchy point, kept in the box by the Morales and Nocedal 2011 projection test, and the strong Wolfe search stops at the box.
+``Lbfgs::minimize`` and the other default paths compute the same bits as before.
+On the bound-constrained ``driver1`` problem of the L-BFGS-B 3.0 distribution, from 20 starts, the new mode needs 38.2 evaluations per run and SciPy 1.18.1 needs 37.9 with the same memory and tolerance and no relative-decrease stop.
+On the 75-atom Lennard-Jones (LJ75) protocol, which has no bounds, it needs 371.0 evaluations per relaxation against 371.2 for ``Lbfgs::minimize``, so it does not close the gap to SciPy that :doc:`reference/sota` records.
+That gap comes from the end of each relaxation, where line searches fail at the rounding floor of the energy.
+``examples/lbfgsb_bench.rs`` and ``docs/figures/lbfgsb/`` contain the benchmark, its SciPy counterpart and the plot.
+
 ``cargo cinstall`` installs the hand-written ``include/rgmin.h`` and ``dlpack/dlpack.h``.
 The header compiles as C and as C++.
 Version macros are ``RGMIN_H_MAJOR``, ``RGMIN_H_MINOR``, and ``RGMIN_H_PATCH``.

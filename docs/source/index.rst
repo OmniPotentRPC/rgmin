@@ -71,6 +71,7 @@ It also covers the features of each route, the C library and a checkout.
    howto/irc
    howto/embed-anneal
    howto/highs-qp
+   howto/lbfgs-box
    howto/c-abi
    howto/doxygen
 
