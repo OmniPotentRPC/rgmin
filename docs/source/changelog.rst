@@ -7,6 +7,16 @@ Unreleased
 
 ~~~~~~~~~~
 
+``Solver::set_distance_constraints`` keeps atom pairs at fixed distances on every session method except particle swarm, under every ``Accept`` rule.
+``DistanceConstraints::at`` takes the lengths from a geometry, and ``DistanceConstraints::new`` takes them as given.
+Each trial returns to the set through the Gauss-Seidel bond solver (SHAKE) or the linear constraint solver (LINCS).
+Masses from ``with_masses`` weight the corrections.
+An analytic SETTLE solves a rigid triangle such as three-site water.
+Tolerances default to the rounding floor, and the coupling of each block sets the LINCS order and the iteration budgets.
+A failure is a typed ``ConstraintError`` and leaves ``x`` as it was.
+The C ABI (minor 31), the C++ wrapper and the xts aliases carry the set.
+:doc:`howto/constraints` shows how to use it, and :doc:`reference/constraints` gives the equations.
+
 A backtracking or Goldstein line search that runs out of trials now reports the step that produced the point it returns.
 An L-BFGS session step that drops its own curvature pair now keeps the pair before it.
 

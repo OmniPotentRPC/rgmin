@@ -28,6 +28,7 @@ Overview
 ``rgmin`` finds a local minimum of a smooth function from its value and gradient.
 A host program owns the loop, and a ``Solver`` session takes one step each time the host calls it.
 The step can stay on an embedded manifold (``Euclidean``, ``MwRigid``, ``Sphere``, and the rest).
+A session can also keep atom pairs at fixed distances, with the SHAKE, LINCS and SETTLE solvers of molecular dynamics.
 It is the local-minimization crate of the OmniPotentRPC family, beside `rgpot <https://github.com/OmniPotentRPC/rgpot>`_ and `rgsaddle <https://github.com/OmniPotentRPC/rgsaddle>`_.
 
 The solvers are written only in Rust.
@@ -68,6 +69,7 @@ It also covers the features of each route, the C library and a checkout.
    howto/install
    howto/session
    howto/fire
+   howto/constraints
    howto/manifolds
    howto/irc
    howto/embed-anneal
@@ -91,6 +93,7 @@ It also covers the features of each route, the C library and a checkout.
 
    reference/architecture
    reference/api
+   reference/constraints
    reference/sota
    reference/proofs
    reference/bibliography
