@@ -172,6 +172,24 @@ fn goldstein_expands_a_too_short_step() {
 }
 
 #[test]
+fn goldstein_out_of_trials_reports_the_step_of_its_point() {
+    // With c = 0.45 the bounds on (alpha - 1)^2 leave alpha in [0.9, 1.1].
+    // From 0.8 the search doubles past the window and halves back, so it
+    // runs out of trials and returns its best point, at alpha = 0.8.
+    let pos = array![0.0];
+    let dir = array![1.0];
+    let ls = LineSearch::Goldstein {
+        c: 0.45,
+        beta: 0.5,
+        maxiter: 41,
+    };
+    let (x, f, a) = ls.search(quadratic, pos.view(), dir.view(), 0.8);
+    assert_eq!(x[0], 0.8);
+    assert_eq!(a, x[0], "step {a} of point {}", x[0]);
+    assert!(f < 1.0);
+}
+
+#[test]
 fn zoom_takes_a_single_fnmut_oracle() {
     let pos = array![0.0];
     let dir = array![1.0];

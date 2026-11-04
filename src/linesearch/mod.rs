@@ -201,6 +201,7 @@ where
     let mut alpha = istep.max(1e-16);
     let mut best_x = pos.to_owned();
     let mut best_f = f0;
+    let mut best_alpha = 0.0;
     for _ in 0..maxiter {
         let x = axpy(pos, alpha, dir);
         let (f, g) = oracle(x.view());
@@ -208,6 +209,7 @@ where
         if f < best_f {
             best_f = f;
             best_x = x.clone();
+            best_alpha = alpha;
         }
         let accept = if goldstein {
             conditions::goldstein(f, f0, alpha, slope, c)
@@ -229,7 +231,7 @@ where
         }
     }
     if best_f < f0 {
-        (best_x, best_f, alpha.abs())
+        (best_x, best_f, best_alpha.abs())
     } else {
         (pos.to_owned(), f0, 0.0)
     }
