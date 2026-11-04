@@ -45,8 +45,8 @@ use crate::report::{Report, Status};
 use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
     Taken, bound_step, cap_alpha, cap_displacement_atom, finite, l2, max_atom_displacement,
-    nlcg_opening_alpha, non_finite, project_box_tangent, qn_istep, scale_displacement_to_atom_cap, scale_step, scale_step_atom,
-    take_step_with_options,
+    nlcg_opening_alpha, non_finite, project_box_tangent, qn_istep, scale_displacement_to_atom_cap,
+    scale_step, scale_step_atom, take_step_with_options,
 };
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,

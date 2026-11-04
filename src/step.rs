@@ -36,14 +36,9 @@ where
 }
 
 /// Remove the outward components at active box walls.
-pub(crate) fn project_box_tangent(
-    bounds: &Bounds<f64>,
-    x: &Array1<f64>,
-    vector: &mut Array1<f64>,
-) {
+pub(crate) fn project_box_tangent(bounds: &Bounds<f64>, x: &Array1<f64>, vector: &mut Array1<f64>) {
     for k in 0..vector.len() {
-        if (x[k] <= bounds.low[k] && vector[k] < 0.0)
-            || (x[k] >= bounds.high[k] && vector[k] > 0.0)
+        if (x[k] <= bounds.low[k] && vector[k] < 0.0) || (x[k] >= bounds.high[k] && vector[k] > 0.0)
         {
             vector[k] = 0.0;
         }
@@ -57,9 +52,7 @@ pub(crate) fn bound_step(bounds: &Bounds<f64>, x: &Array1<f64>, trial: &mut Arra
     let mut alpha = 1.0_f64;
     for k in 0..trial.len() {
         let delta = trial[k] - x[k];
-        if (x[k] <= bounds.low[k] && delta < 0.0)
-            || (x[k] >= bounds.high[k] && delta > 0.0)
-        {
+        if (x[k] <= bounds.low[k] && delta < 0.0) || (x[k] >= bounds.high[k] && delta > 0.0) {
             trial[k] = x[k];
         } else if delta > 0.0 {
             alpha = alpha.min((bounds.high[k] - x[k]) / delta);
