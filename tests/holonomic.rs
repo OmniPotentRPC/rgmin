@@ -8,7 +8,7 @@ use ndarray::{Array1, Array2, ArrayView1, array};
 use rgmin::{
     Accept, ConstraintError, ConstraintSolver, Control, DistanceConstraints, Error, ExpParams,
     FireKind, FirePreset, HessianObjective, HessianOracle, LineSearch, ManifoldKind, Method,
-    Neighbours, NewtonKind, QnStep, Report, Solver,
+    Neighbours, NewtonKind, QnStep, Report, Solver, StopNorm,
 };
 
 const U: f64 = f64::EPSILON / 2.0;
@@ -1043,5 +1043,169 @@ fn the_session_how_to_describes_the_cap_with_a_set() {
         assert!(
             !text.contains("Per-atom cap. Euclidean L-BFGS takes the geometry step and ignores")
         );
+    }
+}
+
+struct AseRun {
+    label: String,
+    steps: usize,
+    calls: usize,
+    grad: f64,
+    end: Array1<f64>,
+}
+
+struct AseSystem {
+    name: String,
+    k_min: f64,
+    start: Array1<f64>,
+    pairs: Vec<(usize, usize)>,
+    /// `(i, j, r0)` of unit springs, or none for Lennard-Jones.
+    springs: Vec<(usize, usize, f64)>,
+    /// Real masses where they differ from one another.
+    masses: Option<Vec<f64>>,
+    runs: Vec<AseRun>,
+}
+
+/// `E = sum (r_ij - r0)^2 / 2` over `springs`.
+fn springs(x: ArrayView1<f64>, springs: &[(usize, usize, f64)]) -> (f64, Array1<f64>) {
+    let mut e = 0.0;
+    let mut g = Array1::zeros(x.len());
+    for &(i, j, r0) in springs {
+        let d = [0, 1, 2].map(|c| x[3 * i + c] - x[3 * j + c]);
+        let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        e += 0.5 * (r - r0) * (r - r0);
+        for c in 0..3 {
+            g[3 * i + c] += (r - r0) * d[c] / r;
+            g[3 * j + c] -= (r - r0) * d[c] / r;
+        }
+    }
+    (e, g)
+}
+
+/// `tests/data/ase_fix_bond_lengths.txt`, written by
+/// `tests/ase_fix_bond_lengths.py`.
+fn ase_systems() -> (f64, Vec<AseSystem>) {
+    let text = include_str!("data/ase_fix_bond_lengths.txt");
+    let floats = |w: &[&str]| -> Array1<f64> { w.iter().map(|v| v.parse().unwrap()).collect() };
+    let mut fmax = f64::NAN;
+    let mut systems: Vec<AseSystem> = Vec::new();
+    for line in text.lines().filter(|l| !l.starts_with('#')) {
+        let w: Vec<&str> = line.split_whitespace().collect();
+        let last = systems.last_mut();
+        match (w[0], last) {
+            ("fmax", _) => fmax = w[1].parse().unwrap(),
+            ("system", _) => systems.push(AseSystem {
+                name: w[1].to_string(),
+                k_min: w[4].parse().unwrap(),
+                start: Array1::zeros(0),
+                pairs: Vec::new(),
+                springs: Vec::new(),
+                masses: None,
+                runs: Vec::new(),
+            }),
+            ("start", Some(s)) => s.start = floats(&w[1..]),
+            ("pairs", Some(s)) => {
+                let ids: Vec<usize> = w[1..].iter().map(|v| v.parse().unwrap()).collect();
+                s.pairs = ids.chunks(2).map(|p| (p[0], p[1])).collect();
+            }
+            ("springs", Some(s)) => {
+                let t = &w[1..];
+                let parse = |k: usize| t[k].parse::<usize>().unwrap();
+                s.springs = (0..t.len() / 3)
+                    .map(|k| {
+                        (
+                            parse(3 * k),
+                            parse(3 * k + 1),
+                            t[3 * k + 2].parse().unwrap(),
+                        )
+                    })
+                    .collect();
+            }
+            ("lj", Some(_)) => {}
+            ("masses", Some(s)) => s.masses = Some(floats(&w[1..]).to_vec()),
+            ("run", Some(s)) => s.runs.push(AseRun {
+                label: w[1].to_string(),
+                steps: w[2].parse().unwrap(),
+                calls: w[3].parse().unwrap(),
+                grad: w[4].parse().unwrap(),
+                end: Array1::zeros(0),
+            }),
+            ("end", Some(s)) => s.runs.last_mut().unwrap().end = floats(&w[1..]),
+            _ => panic!("unexpected line {line}"),
+        }
+    }
+    (fmax, systems)
+}
+
+fn pair_distances(x: &Array1<f64>) -> Vec<f64> {
+    let n = x.len() / 3;
+    let mut out = Vec::new();
+    for i in 0..n {
+        for j in i + 1..n {
+            let d = [0, 1, 2].map(|c| x[3 * i + c] - x[3 * j + c]);
+            out.push((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt());
+        }
+    }
+    out
+}
+
+/// Each rgmin run, with unit and with real masses, against the ASE FIRE
+/// minimum, both stopped below `fmax` in the largest per-atom norm. To
+/// first order a stop at unit-mass projected gradient `g` lies within
+/// `|g|_2 / k_min` of the orbit of minima under rigid motion, with
+/// `k_min` the smallest Lagrangian curvature off the rigid motions. A
+/// pair distance is invariant on the orbit and moves at most `sqrt(2)`
+/// times as far as the point. The factor 2 lets `k_min` halve between
+/// the two ends.
+#[test]
+fn minima_match_ase_fix_bond_lengths() {
+    let (fmax, systems) = ase_systems();
+    assert_eq!(fmax, gtol());
+    for sys in &systems {
+        let reference = sys.runs.iter().find(|r| r.label == "fire-matched").unwrap();
+        assert!(sys.k_min > 0.0);
+        let want = pair_distances(&reference.end);
+        let unit = DistanceConstraints::at(sys.pairs.clone(), sys.start.view()).unwrap();
+        let dim = sys.start.len();
+        let toy = sys.springs.clone();
+        let f = move |x: ArrayView1<f64>| {
+            if toy.is_empty() {
+                lj(x)
+            } else {
+                springs(x, &toy)
+            }
+        };
+        let obj = HessianOracle::unbounded(dim, f.clone(), move |_| Array2::zeros((dim, dim)));
+        let first_order = || {
+            let mut out: Vec<Case> = cases(dim).into_iter().filter(|c| !c.hessian).collect();
+            out.iter_mut()
+                .for_each(|c| c.solver.set_stop_norm(StopNorm::MaxAtom));
+            out
+        };
+        let mut sets = vec![("unit", unit.clone())];
+        if let Some(m) = &sys.masses {
+            sets.push(("real", unit.clone().with_masses(m.clone()).unwrap()));
+        }
+        for (masses, set) in &sets {
+            for (c, rep, x) in run_where_free_stops(first_order, &obj, set, &sys.start) {
+                let mut g = f(x.view()).1;
+                unit.project_gradient(x.view(), &mut g).unwrap();
+                let tol = 2.0 * 2_f64.sqrt() * (l2(&g) + reference.grad) / sys.k_min;
+                let off = pair_distances(&x)
+                    .iter()
+                    .zip(&want)
+                    .fold(0.0_f64, |m, (a, b)| m.max((a - b).abs()));
+                assert!(
+                    off <= tol,
+                    "{} {} {masses}: pair distances off by {off} > {tol}",
+                    sys.name,
+                    c.name
+                );
+                println!(
+                    "{:7} {:28} {masses} {:5} | fire-matched {:5} steps {:5} calls",
+                    sys.name, c.name, rep.steps, reference.steps, reference.calls
+                );
+            }
+        }
     }
 }
