@@ -36,3 +36,13 @@ docs/source/_build/
 .lake/
 .pixi/
 pixi.lock
+
+# asv results and the local machine file
+.asv/
+benchflow/out/
+.asv-run-*.conf.json
+
+.snakemake/
+__pycache__/
+*.pyc
+/build/

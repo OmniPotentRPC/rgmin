@@ -1,0 +1,36 @@
+{
+    "version": 1,
+    "project": "rgmin",
+    "project_url": "https://github.com/OmniPotentRPC/rgmin",
+    "repo": ".",
+    "branches": ["develop"],
+    "show_commit_url": "https://github.com/OmniPotentRPC/rgmin/commit/",
+    "environment_type": "virtualenv",
+    "pythons": ["3.12"],
+    "launch_method": "spawn",
+    "install_timeout": 3600,
+    "default_benchmark_timeout": 600,
+    "build_cache_size": 4,
+    "benchmark_dir": "benchmarks",
+    "results_dir": ".asv/results",
+    "html_dir": ".asv/html",
+    "matrix": {
+        "req": {
+            "numpy": ["2.5.4"],
+            "asv_bench_memray": ["0.1.2"],
+            "memray": ["1.20.0"]
+        }
+    },
+    "build_command": [
+        "python -m pip install asv-runner==0.3.2 meson==1.12.1 ninja==1.13.2",
+        "CC=gcc CXX=g++ meson setup {build_cache_dir}/meson --prefix={env_dir} --libdir=lib --buildtype=release -Drgmin_features=capi -Dwith_asv_helper=true",
+        "meson compile -C {build_cache_dir}/meson",
+        "python {conf_dir}/benchflow/record_options.py {build_cache_dir}/meson {build_cache_dir}/buildoptions.json"
+    ],
+    "install_command": [
+        "meson install -C {build_cache_dir}/meson"
+    ],
+    "uninstall_command": [
+        "python {conf_dir}/benchflow/record_options.py uninstall {env_dir}"
+    ]
+}

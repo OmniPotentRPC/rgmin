@@ -98,6 +98,8 @@ else
     error('missing rgmin include headers')
 endif
 
+# The shared library is the C ABI users link. Install it from this
+# build. The static archive stays a link input and is not installed.
 rgmin_cargo = custom_target(
     'rgmin-cargo',
     input: files('Cargo.toml', 'src/lib.rs'),
@@ -118,7 +120,23 @@ rgmin_cargo = custom_target(
     ],
     env: _cargo_env,
     console: true,
+    install: not meson.is_subproject(),
+    install_dir: [get_option('libdir'), false],
 )
+
+# The timing helper is a thin caller of rgmin_minimize. It is not part
+# of a default install. The shared library above is what the call runs.
+if get_option('with_asv_helper')
+    shared_library(
+        'rgmin_asv',
+        files('benchmarks/asv_quadratic.c'),
+        include_directories: _incdir,
+        link_with: rgmin_cargo[0],
+        install: not meson.is_subproject(),
+        install_rpath: '$ORIGIN',
+        build_rpath: '$ORIGIN',
+    )
+endif
 
 rgmin_dep = declare_dependency(
     include_directories: _incdir,
