@@ -44,8 +44,8 @@ use crate::quickmin::{
 use crate::report::{Report, Status};
 use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
-    Taken, cap_alpha, cap_displacement_atom, finite, l2, max_atom_displacement, nlcg_opening_alpha,
-    non_finite, qn_istep, scale_displacement_to_atom_cap, scale_step, scale_step_atom,
+    Taken, bound_step, cap_alpha, cap_displacement_atom, finite, l2, max_atom_displacement,
+    nlcg_opening_alpha, non_finite, project_box_tangent, qn_istep, scale_displacement_to_atom_cap, scale_step, scale_step_atom,
     take_step_with_options,
 };
 use crate::trust::{
@@ -2917,12 +2917,9 @@ impl Solver {
                     rigid_broken_r,
                     &mut state.vel,
                 );
-                #[cfg(feature = "highs")]
-                if boxed {
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut raw);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
-                }
+                project_box_tangent(obj.bounds(), x, &mut raw);
+                project_box_tangent(obj.bounds(), x, &mut steepest);
+                project_box_tangent(obj.bounds(), x, &mut state.vel);
                 let mix = fire_mix(&self.precon, &state.vel, &raw, &steepest);
                 let mut dx = match ext {
                     Some(ext) => fire2_displacement_metric(state, ext, &raw, &steepest, mix),
@@ -2946,7 +2943,7 @@ impl Solver {
                 } else if let Some(cap) = self.control.maxmove {
                     scale_step(x, &mut trial, cap);
                 }
-                trial = obj.bounds().clip(trial.view());
+                bound_step(obj.bounds(), x, &mut trial);
                 let ev = obj.value_and_gradient(trial.view());
                 if !finite(ev.0, ev.1.view()) {
                     *state = saved;
@@ -3004,12 +3001,9 @@ impl Solver {
                     rigid_broken_r,
                     &mut state.vel,
                 );
-                #[cfg(feature = "highs")]
-                if boxed {
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut raw_new);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steep_new);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
-                }
+                project_box_tangent(obj.bounds(), x, &mut raw_new);
+                project_box_tangent(obj.bounds(), x, &mut steep_new);
+                project_box_tangent(obj.bounds(), x, &mut state.vel);
                 let mix_new = fire_mix(&self.precon, &state.vel, &raw_new, &steep_new);
                 fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
             }

@@ -1,6 +1,6 @@
 //! Shared accept / clip / scale for one line-search move.
 
-use eindir_core::DifferentiableObjective;
+use eindir_core::{Bounds, DifferentiableObjective};
 use ndarray::{Array1, ArrayView1};
 
 use crate::control::Control;
@@ -33,6 +33,46 @@ where
         return Err(non_finite());
     }
     Ok((value, gradient))
+}
+
+/// Remove the outward components at active box walls.
+pub(crate) fn project_box_tangent(
+    bounds: &Bounds<f64>,
+    x: &Array1<f64>,
+    vector: &mut Array1<f64>,
+) {
+    for k in 0..vector.len() {
+        if (x[k] <= bounds.low[k] && vector[k] < 0.0)
+            || (x[k] >= bounds.high[k] && vector[k] > 0.0)
+        {
+            vector[k] = 0.0;
+        }
+    }
+}
+
+/// Keep a displacement's direction until its first box intersection.
+/// An outward component at an active wall stays fixed while free
+/// coordinates advance. The final clip only corrects roundoff.
+pub(crate) fn bound_step(bounds: &Bounds<f64>, x: &Array1<f64>, trial: &mut Array1<f64>) {
+    let mut alpha = 1.0_f64;
+    for k in 0..trial.len() {
+        let delta = trial[k] - x[k];
+        if (x[k] <= bounds.low[k] && delta < 0.0)
+            || (x[k] >= bounds.high[k] && delta > 0.0)
+        {
+            trial[k] = x[k];
+        } else if delta > 0.0 {
+            alpha = alpha.min((bounds.high[k] - x[k]) / delta);
+        } else if delta < 0.0 {
+            alpha = alpha.min((bounds.low[k] - x[k]) / delta);
+        }
+    }
+    if alpha < 1.0 {
+        for k in 0..trial.len() {
+            trial[k] = x[k] + alpha * (trial[k] - x[k]);
+        }
+    }
+    *trial = bounds.clip(trial.view());
 }
 
 /// A cap that binds: positive and finite. Non-positive or NaN caps are
