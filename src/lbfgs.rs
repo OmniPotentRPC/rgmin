@@ -22,7 +22,7 @@ use crate::error::{Error, Result};
 use crate::linesearch::{LineSearch, LineSearchOptions};
 use crate::qn::solve_spd;
 use crate::report::Report;
-use crate::step::{energy_noise_report, l2, qn_istep, take_step_with_options};
+use crate::step::{energy_noise_report, finite, l2, qn_istep, start_answer, take_step_with_options};
 use eindir_core::{DifferentiableObjective, Objective};
 
 /// How [`Lbfgs`] compares the gradient to [`Lbfgs::gtol`].
@@ -35,10 +35,16 @@ pub enum GradNorm {
 }
 
 /// Stored curvature pair from one accepted step.
+#[derive(Clone)]
 struct Pair {
     s: Array1<f64>,
     y: Array1<f64>,
     rho: f64,
+}
+
+pub(crate) struct Curvature {
+    memory: Vec<Pair>,
+    last: (f64, f64, bool),
 }
 
 /// L-BFGS whose curvature pairs survive between calls.
@@ -162,6 +168,18 @@ impl Lbfgs {
         self.last_yy = 0.0;
         self.have_curvature = false;
         self.memory.clear();
+    }
+
+    pub(crate) fn curvature(&self) -> Curvature {
+        Curvature {
+            memory: self.memory.clone(),
+            last: (self.last_sy, self.last_yy, self.have_curvature),
+        }
+    }
+
+    pub(crate) fn restore(&mut self, saved: Curvature) {
+        self.memory = saved.memory;
+        (self.last_sy, self.last_yy, self.have_curvature) = saved.last;
     }
 
     /// Times a supplied `H0^{-1}` (a Hessian under the Newton-preconditioned
@@ -548,7 +566,11 @@ impl Lbfgs {
                 Some(v) => v,
                 None => return (false, evals),
             };
-            let slope_a = d.dot(&ga);
+            let (fa, slope_a) = if finite(fa, ga.view()) {
+                (fa, d.dot(&ga))
+            } else {
+                (f64::INFINITY, f64::NAN)
+            };
             if fa > f0 + self.armijo * a * slope || (i > 0 && fa >= f_prev) {
                 lo = a_prev;
                 f_lo = f_prev;
@@ -621,7 +643,11 @@ impl Lbfgs {
                 Some(v) => v,
                 None => return (false, evals),
             };
-            let slope_t = d.dot(&gt);
+            let (ft, slope_t) = if finite(ft, gt.view()) {
+                (ft, d.dot(&gt))
+            } else {
+                (f64::INFINITY, f64::NAN)
+            };
             if ft > f0 + self.armijo * trial * slope || ft >= f_lo {
                 hi = trial;
                 f_hi = ft;
@@ -709,6 +735,10 @@ impl Lbfgs {
         };
         evals += 1;
 
+        if !finite(f, g.view()) {
+            return (f64::INFINITY, x, evals);
+        }
+
         for it in 0..max_iter {
             if !watch(it, f) {
                 break;
@@ -720,7 +750,10 @@ impl Lbfgs {
                 break;
             };
             let slope = d.dot(&g);
-            if slope >= 0.0 {
+            if !slope.is_finite() && self.memory.is_empty() {
+                break;
+            }
+            if slope >= 0.0 || !slope.is_finite() {
                 self.forget();
                 continue;
             }
@@ -774,6 +807,10 @@ impl Lbfgs {
         };
         evals += 1;
 
+        if !finite(f, g.view()) {
+            return (f64::INFINITY, x, evals, false);
+        }
+
         for it in 0..max_iter {
             if let Some((f_known, x_known)) = recognise(it, f, x.view()) {
                 return (f_known, x_known, evals, true);
@@ -785,7 +822,10 @@ impl Lbfgs {
                 break;
             };
             let slope = d.dot(&g);
-            if slope >= 0.0 {
+            if !slope.is_finite() && self.memory.is_empty() {
+                break;
+            }
+            if slope >= 0.0 || !slope.is_finite() {
                 self.forget();
                 continue;
             }
@@ -823,7 +863,7 @@ impl Lbfgs {
             });
         }
         pos = obj.bounds().clip(pos.view());
-        let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+        let (mut value, mut grad) = start_answer(obj, &pos)?;
         let mut istep = control.istep;
 
         for step in 0..control.maxiter {

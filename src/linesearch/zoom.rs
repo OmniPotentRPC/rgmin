@@ -30,6 +30,9 @@ where
 {
     let x = axpy(pos, alpha, dir);
     let (f, g) = oracle(x.view());
+    if !crate::step::finite(f, g.view()) {
+        return (f64::INFINITY, f64::NAN);
+    }
     let dphi = g.iter().zip(dir.iter()).map(|(gi, di)| gi * di).sum();
     (f, dphi)
 }

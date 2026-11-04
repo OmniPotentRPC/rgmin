@@ -4,11 +4,35 @@ use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
 
 use crate::control::Control;
+use crate::error::{Error, Result};
 use crate::linesearch::{LineSearch, LineSearchOptions};
 use crate::report::Report;
 
 pub(crate) fn l2(g: &Array1<f64>) -> f64 {
     crate::vecops::nrm2(g.view())
+}
+
+/// An objective answer whose value and every gradient component are finite.
+pub(crate) fn finite(value: f64, gradient: ArrayView1<'_, f64>) -> bool {
+    value.is_finite() && gradient.iter().all(|value| value.is_finite())
+}
+
+pub(crate) fn non_finite() -> Error {
+    Error::Oracle {
+        what: "non-finite value or gradient",
+    }
+}
+
+/// A finite starting answer is required to define a search direction.
+pub(crate) fn start_answer<O>(obj: &O, pos: &Array1<f64>) -> Result<(f64, Array1<f64>)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let (value, gradient) = obj.value_and_gradient(pos.view());
+    if !finite(value, gradient.view()) {
+        return Err(non_finite());
+    }
+    Ok((value, gradient))
 }
 
 /// A cap that binds: positive and finite. Non-positive or NaN caps are

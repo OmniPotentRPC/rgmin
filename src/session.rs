@@ -44,8 +44,8 @@ use crate::quickmin::{
 use crate::report::{Report, Status};
 use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
-    Taken, cap_alpha, cap_displacement_atom, l2, max_atom_displacement, nlcg_opening_alpha,
-    qn_istep, scale_displacement_to_atom_cap, scale_step, scale_step_atom, take_step_with_options,
+    Taken, cap_alpha, cap_displacement_atom, finite, l2, max_atom_displacement, nlcg_opening_alpha,
+    non_finite, qn_istep, scale_displacement_to_atom_cap, scale_step, scale_step_atom, take_step_with_options,
 };
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
@@ -1590,6 +1590,9 @@ impl Solver {
     }
 
     /// One outer iteration. `x` is the iterate and is overwritten in place.
+    /// A non-finite first-order starting answer, FIRE trial, geometry
+    /// fallback or direct L-BFGS trial returns [`Error::Oracle`]. A refused
+    /// trial retains the iterate and the solver memory for a retry.
     pub fn step<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -1862,6 +1865,11 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        let saved = match &self.inner {
+            Inner::Lbfgs(solver) => Some(solver.curvature()),
+            _ => None,
+        };
+        let saved_stiff = self.geometry_lbfgs_stiff;
         let cap = self.atom_maxmove.unwrap_or(0.2);
         let nominal_motion = max_atom_displacement(&(self.istep * grad.mapv(|g| -g)));
         let stiff = *self
@@ -1968,7 +1976,7 @@ impl Solver {
             let ev = obj.value_and_gradient(trial.view());
             tval = ev.0;
             tgrad = ev.1;
-            if tval.is_finite() && tval - reference <= 1.0e-8 {
+            if finite(tval, tgrad.view()) && tval - reference <= 1.0e-8 {
                 accepted = true;
                 break;
             }
@@ -1983,6 +1991,13 @@ impl Solver {
             let ev = obj.value_and_gradient(trial.view());
             tval = ev.0;
             tgrad = ev.1;
+        }
+        if !finite(tval, tgrad.view()) {
+            if let (Inner::Lbfgs(solver), Some(saved)) = (&mut self.inner, saved) {
+                solver.restore(saved);
+            }
+            self.geometry_lbfgs_stiff = saved_stiff;
+            return Err(non_finite());
         }
         if !stiff {
             self.e_hist.push_back(tval);
@@ -2392,11 +2407,23 @@ impl Solver {
         } else {
             obj.value_and_gradient(x.view())
         };
+        if !finite(value, grad.view()) {
+            return Err(non_finite());
+        }
         grad = self.horizontal_grad(x, &grad);
+        if !finite(value, grad.view()) {
+            return Err(non_finite());
+        }
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
         // A caller that moved the iterate between steps measured the
         // gradient at both ends, so the displacement is a secant of the
         // retained inverse Hessian.
+        let before_move = match &self.inner {
+            Inner::Lbfgs(solver) if self.accept == Accept::Step || self.use_geometry_lbfgs() => {
+                Some(solver.curvature())
+            }
+            _ => None,
+        };
         if !cached
             && self.manifold.retract_is_translation()
             && let Some(previous) = self.last_pos.clone().filter(|p| p.len() == x.len())
@@ -2419,7 +2446,13 @@ impl Solver {
         self.refresh_exp(obj, x, &grad)?;
 
         if self.use_geometry_lbfgs() {
-            return self.geometry_lbfgs_step(obj, x, value, grad);
+            let result = self.geometry_lbfgs_step(obj, x, value, grad);
+            if result.is_err()
+                && let (Inner::Lbfgs(solver), Some(saved)) = (&mut self.inner, before_move)
+            {
+                solver.restore(saved);
+            }
+            return result;
         }
 
         if matches!(self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
@@ -2557,6 +2590,11 @@ impl Solver {
                 *x = npos;
                 value = nval;
                 grad = ngrad;
+            } else {
+                if let (Inner::Lbfgs(solver), Some(saved)) = (&mut self.inner, before_move) {
+                    solver.restore(saved);
+                }
+                return Err(non_finite());
             }
         }
         #[cfg(feature = "highs")]
@@ -2832,6 +2870,8 @@ impl Solver {
                 }
             }
             Inner::Fire(state, ext) => {
+                let saved = state.clone();
+                let saved_ext = ext.clone();
                 // The force, its metric image and the velocity leave the
                 // rigid subspace at the start geometry; the velocity in the
                 // momentum metric, the force in the force metric.
@@ -2906,6 +2946,12 @@ impl Solver {
                     scale_step(x, &mut trial, cap);
                 }
                 trial = obj.bounds().clip(trial.view());
+                let ev = obj.value_and_gradient(trial.view());
+                if !finite(ev.0, ev.1.view()) {
+                    *state = saved;
+                    *ext = saved_ext;
+                    return Err(non_finite());
+                }
                 // The clamp and clip shorten the move; the velocity has to
                 // describe the move taken, or the power adapt reads an
                 // integral of moves that never happened.
@@ -2916,7 +2962,6 @@ impl Solver {
                 {
                     hold.ws.set_anchor(xs);
                 }
-                let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
                 grad = ev.1;
                 let mut raw_new = grad.mapv(|g| -g);
