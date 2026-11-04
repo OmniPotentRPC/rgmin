@@ -1591,9 +1591,10 @@ impl Solver {
     }
 
     /// One outer iteration. `x` is the iterate and is overwritten in place.
-    /// A non-finite first-order starting answer, FIRE trial, geometry
-    /// fallback or direct L-BFGS trial returns [`Error::Oracle`]. A refused
-    /// trial retains the iterate and the solver memory for a retry.
+    /// A non-finite first-order starting answer, FIRE trial or geometry
+    /// fallback returns [`Error::Oracle`], retaining the iterate and the
+    /// solver memory for a retry. A refused [`Accept::Step`] trial returns
+    /// the finite measured start with its gradient cached.
     pub fn step<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -2420,7 +2421,7 @@ impl Solver {
         // gradient at both ends, so the displacement is a secant of the
         // retained inverse Hessian.
         let before_move = match &self.inner {
-            Inner::Lbfgs(solver) if self.accept == Accept::Step || self.use_geometry_lbfgs() => {
+            Inner::Lbfgs(solver) if self.use_geometry_lbfgs() => {
                 Some(solver.curvature())
             }
             _ => None,
@@ -2511,6 +2512,12 @@ impl Solver {
         // of a projected NEB force is not the potential of the gradient it
         // returns, so a decrease test there says nothing. Every other
         // Accept keeps the line-searched step_objective path.
+        // The measured start and its secant survive a refused Step trial;
+        // proposal guards may discard curvature only for an accepted move.
+        let before_trial = match &self.inner {
+            Inner::Lbfgs(solver) if self.accept == Accept::Step => Some(solver.curvature()),
+            _ => None,
+        };
         let guarded_direction = if self.accept == Accept::Step {
             match &mut self.inner {
                 Inner::Lbfgs(solver)
@@ -2592,10 +2599,9 @@ impl Solver {
                 value = nval;
                 grad = ngrad;
             } else {
-                if let (Inner::Lbfgs(solver), Some(saved)) = (&mut self.inner, before_move) {
+                if let (Inner::Lbfgs(solver), Some(saved)) = (&mut self.inner, before_trial) {
                     solver.restore(saved);
                 }
-                return Err(non_finite());
             }
         }
         #[cfg(feature = "highs")]
