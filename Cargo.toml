@@ -78,6 +78,10 @@ required-features = ["capi"]
 name = "stop_norm"
 harness = false
 
+[[bench]]
+name = "holonomic"
+harness = false
+
 
 [profile.release]
 lto = "thin"
