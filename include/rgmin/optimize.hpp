@@ -168,6 +168,114 @@ inline DLManagedTensorVersioned* borrow_cpu_f64(double* data, std::size_t n) {
     return rgmin_tensor_borrow_cpu_f64(data, n);
 }
 
+/// Thrown when a distance constraint set is refused or cannot be met.
+/// kind() names why; the message is rgmin_last_error.
+class ConstraintError : public std::runtime_error {
+    rgmin_constraint_error_t kind_;
+
+public:
+    ConstraintError(char const* msg, rgmin_constraint_error_t kind)
+        : std::runtime_error(msg), kind_(kind) {}
+    rgmin_constraint_error_t kind() const noexcept { return kind_; }
+};
+
+namespace detail {
+
+/// ConstraintError for RGMIN_CONSTRAINT_ERROR, std::runtime_error otherwise.
+[[noreturn]] inline void raise(rgmin_status_t st, char const* fallback) {
+    char const* msg = rgmin_last_error();
+    msg = (msg != nullptr && msg[0] != '\0') ? msg : fallback;
+    if (st == RGMIN_CONSTRAINT_ERROR) {
+        throw ConstraintError(msg, rgmin_last_constraint_error());
+    }
+    throw std::runtime_error(msg);
+}
+
+}  // namespace detail
+
+enum class ConstraintSolver {
+    Auto = RGMIN_CONSTRAINT_SOLVER_AUTO,
+    Shake = RGMIN_CONSTRAINT_SOLVER_SHAKE,
+    Lincs = RGMIN_CONSTRAINT_SOLVER_LINCS,
+};
+
+/// RAII set of distances |x_i - x_j| = d over packed 3 N coordinates.
+/// The with_* setters throw ConstraintError on a refused value.
+class DistanceConstraints {
+    rgmin_constraints_t* ptr_ = nullptr;
+
+    explicit DistanceConstraints(rgmin_constraints_t* ptr) : ptr_(ptr) {
+        if (ptr_ == nullptr) {
+            detail::raise(rgmin_last_constraint_error() == RGMIN_CONSTRAINT_NONE
+                              ? RGMIN_INVALID_PARAMETER
+                              : RGMIN_CONSTRAINT_ERROR,
+                          "rgmin_constraints_create failed");
+        }
+    }
+    DistanceConstraints& check(rgmin_status_t st, char const* what) {
+        if (st != RGMIN_SUCCESS) {
+            detail::raise(st, what);
+        }
+        return *this;
+    }
+
+public:
+    /// Fix pair (pair_i[k], pair_j[k]) at lengths[k].
+    DistanceConstraints(std::uint32_t const* pair_i, std::uint32_t const* pair_j,
+                        double const* lengths, std::size_t npair)
+        : DistanceConstraints(rgmin_constraints_create(pair_i, pair_j, lengths, npair)) {}
+    /// Fix each pair at its distance in x of length n.
+    static DistanceConstraints at(std::uint32_t const* pair_i, std::uint32_t const* pair_j,
+                                  std::size_t npair, double const* x, std::size_t n) {
+        return DistanceConstraints(rgmin_constraints_create_at(pair_i, pair_j, npair, x, n));
+    }
+    ~DistanceConstraints() { rgmin_constraints_free(ptr_); }
+    DistanceConstraints(DistanceConstraints const&) = delete;
+    DistanceConstraints& operator=(DistanceConstraints const&) = delete;
+    DistanceConstraints(DistanceConstraints&& o) noexcept : ptr_(o.ptr_) { o.ptr_ = nullptr; }
+    DistanceConstraints& operator=(DistanceConstraints&& o) noexcept {
+        if (this != &o) {
+            rgmin_constraints_free(ptr_);
+            ptr_ = o.ptr_;
+            o.ptr_ = nullptr;
+        }
+        return *this;
+    }
+
+    /// One mass per atom; corrections and projections use M^-1.
+    DistanceConstraints& with_masses(double const* masses, std::size_t n_atoms) {
+        return check(rgmin_constraints_set_masses(ptr_, masses, n_atoms), "set_masses failed");
+    }
+    DistanceConstraints& with_solver(ConstraintSolver solver) {
+        return check(rgmin_constraints_set_solver(
+                         ptr_, static_cast<rgmin_constraint_solver_t>(solver)),
+                     "set_solver failed");
+    }
+    DistanceConstraints& with_settle(bool on) {
+        return check(rgmin_constraints_set_settle(ptr_, on ? 1 : 0), "set_settle failed");
+    }
+    /// GROMACS shake-tol measure; zero is the rounding floor.
+    DistanceConstraints& with_tolerance(double tolerance) {
+        return check(rgmin_constraints_set_tolerance(ptr_, tolerance), "set_tolerance failed");
+    }
+    /// GROMACS lincs-order; zero derives it.
+    DistanceConstraints& with_lincs_order(std::size_t order) {
+        return check(rgmin_constraints_set_lincs_order(ptr_, order), "set_lincs_order failed");
+    }
+    /// At most one when every constraint is met at x.
+    double excess(double const* x, std::size_t n) const noexcept {
+        return rgmin_constraints_excess(ptr_, x, n);
+    }
+    /// Return x to the set from anchor. Throws ConstraintError and leaves x on failure.
+    void constrain(double const* anchor, double* x, std::size_t n) const {
+        rgmin_status_t st = rgmin_constraints_constrain(ptr_, anchor, x, n);
+        if (st != RGMIN_SUCCESS) {
+            detail::raise(st, "rgmin_constraints_constrain failed");
+        }
+    }
+    rgmin_constraints_t const* get() const noexcept { return ptr_; }
+};
+
 namespace minimize {
 
 inline constexpr Method BFGSOptimizer = Method::Bfgs;
@@ -247,13 +355,16 @@ public:
     rgmin_status_t report_gradient(double* out, std::size_t n) const {
         return rgmin_solver_report_gradient(ptr_, out, n);
     }
-    /// Per-atom cap. Euclidean L-BFGS selects the geometry step and
-    /// ignores set_accept. A nominal steepest trial at least 64 times
-    /// the cap takes one finite-difference curvature probe, clipped to
-    /// the objective bounds. Ordinary starts use 0.1 I and a five-value
-    /// nonmonotone window. An installed exponential preconditioner
-    /// replaces that scalar seed, including the steepest fallbacks.
-    /// Non-positive clears it.
+    /// Per-atom cap. Euclidean L-BFGS without a distance constraint set
+    /// selects the geometry step and ignores set_accept. With a set,
+    /// L-BFGS keeps its two-loop step under set_accept and the cap
+    /// scales each trial before it returns to the set. A nominal
+    /// steepest trial at least 64 times the cap takes one
+    /// finite-difference curvature probe, clipped to the objective
+    /// bounds. Ordinary starts use 0.1 I and a five-value nonmonotone
+    /// window. An installed exponential preconditioner replaces that
+    /// scalar seed, including the steepest fallbacks. Non-positive
+    /// clears it.
     void set_atom_maxmove(double m) { rgmin_solver_set_atom_maxmove(ptr_, m); }
     void set_project_rigid(bool on) {
         rgmin_solver_set_project_rigid(ptr_, on ? 1 : 0);
@@ -316,14 +427,21 @@ public:
     void set_centered_matrix(std::size_t m, std::size_t n, bool center_rows) {
         rgmin_solver_set_centered_matrix(ptr_, m, n, center_rows ? 1 : 0);
     }
+    /// Copy set into the session. Throws ConstraintError on a refused setting.
+    void set_distance_constraints(DistanceConstraints const& set) {
+        rgmin_status_t st = rgmin_solver_set_distance_constraints(ptr_, set.get());
+        if (st != RGMIN_SUCCESS) {
+            detail::raise(st, "rgmin_solver_set_distance_constraints failed");
+        }
+    }
+    void clear_distance_constraints() { rgmin_solver_clear_distance_constraints(ptr_); }
 
     Report step(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
                 DLManagedTensorVersioned* x) {
         rgmin_report_t out{};
         rgmin_status_t st = rgmin_solver_step(ptr_, eval, grad, user, x, &out);
         if (st != RGMIN_SUCCESS) {
-            char const* msg = rgmin_last_error();
-            throw std::runtime_error(msg ? msg : "rgmin_solver_step failed");
+            detail::raise(st, "rgmin_solver_step failed");
         }
         return Report{out.value, out.steps, out.grad_norm};
     }
@@ -334,8 +452,7 @@ public:
         rgmin_status_t st =
             rgmin_solver_step_fg(ptr_, evalgrad, user, x, &out);
         if (st != RGMIN_SUCCESS) {
-            char const* msg = rgmin_last_error();
-            throw std::runtime_error(msg ? msg : "rgmin_solver_step_fg failed");
+            detail::raise(st, "rgmin_solver_step_fg failed");
         }
         return Report{out.value, out.steps, out.grad_norm};
     }
@@ -346,8 +463,7 @@ public:
         rgmin_status_t st =
             rgmin_solver_step_hvp(ptr_, eval, grad, hvp, user, x, &out);
         if (st != RGMIN_SUCCESS) {
-            char const* msg = rgmin_last_error();
-            throw std::runtime_error(msg ? msg : "rgmin_solver_step_hvp failed");
+            detail::raise(st, "rgmin_solver_step_hvp failed");
         }
         return Report{out.value, out.steps, out.grad_norm};
     }
@@ -358,8 +474,7 @@ public:
         rgmin_status_t st =
             rgmin_solver_step_hess(ptr_, eval, grad, hess, user, x, &out);
         if (st != RGMIN_SUCCESS) {
-            char const* msg = rgmin_last_error();
-            throw std::runtime_error(msg ? msg : "rgmin_solver_step_hess failed");
+            detail::raise(st, "rgmin_solver_step_hess failed");
         }
         return Report{out.value, out.steps, out.grad_norm};
     }
@@ -370,8 +485,7 @@ public:
         rgmin_status_t st =
             rgmin_solver_step_hess_fg(ptr_, evalgrad, hess, user, x, &out);
         if (st != RGMIN_SUCCESS) {
-            char const* msg = rgmin_last_error();
-            throw std::runtime_error(msg ? msg : "rgmin_solver_step_hess_fg failed");
+            detail::raise(st, "rgmin_solver_step_hess_fg failed");
         }
         return Report{out.value, out.steps, out.grad_norm};
     }

@@ -47,7 +47,10 @@ typedef enum rgmin_status_t {
     /** Tensor device is not CPU. The ABI stays stable for a later CUDA path. */
     RGMIN_UNSUPPORTED_DEVICE = 3,
     /** Named eigensolver is not linked in this build. */
-    RGMIN_UNAVAILABLE = 4
+    RGMIN_UNAVAILABLE = 4,
+    /** A distance constraint set was refused or could not be met.
+     *  \ref rgmin_last_constraint_error names the kind. ABI minor 31. */
+    RGMIN_CONSTRAINT_ERROR = 5
 } rgmin_status_t;
 
 /** Compatibility identity for this C ABI. */
@@ -58,7 +61,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 30
+#define RGMIN_ABI_VERSION_MINOR 31
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -292,8 +295,10 @@ int32_t rgmin_solver_set_fire_preset(rgmin_solver_t *solver, rgmin_fire_preset_t
  *  a null session or a session that is not RGMIN_FIRE2. ABI minor 30. */
 int32_t rgmin_solver_set_fire_abc(rgmin_solver_t *solver, int32_t on);
 /** Per-atom cap (eOn \c maxAtomMotionAppliedV). On Euclidean L-BFGS
- *  this selects the geometry step and ignores \ref rgmin_solver_set_accept.
- *  A nominal steepest trial at least 64 times the cap takes one
+ *  without a distance constraint set this selects the geometry step and
+ *  ignores \ref rgmin_solver_set_accept. With a set, L-BFGS keeps its
+ *  two-loop step under the acceptance mode and the cap scales each trial
+ *  before it returns to the set. A nominal steepest trial at least 64 times the cap takes one
  *  finite-difference curvature probe, clipped to the objective bounds.
  *  Ordinary starts use 0.1 I and a five-value nonmonotone window.
  *  An installed exponential preconditioner replaces that scalar seed,
@@ -439,6 +444,105 @@ void rgmin_solver_set_masses(rgmin_solver_t *solver, const double *masses,
                            size_t n_atoms);
 /** Periodic cell. Nonzero drops rotation (Sella proj_rot): R^{3N}/T(3). */
 void rgmin_solver_set_periodic(rgmin_solver_t *solver, int32_t enabled);
+
+/** Why a distance constraint set was refused or could not be met.
+ *  Integers follow the Rust ConstraintError variants. ABI minor 31. */
+typedef enum rgmin_constraint_error_t {
+    /** The last error on this thread was not a constraint error. */
+    RGMIN_CONSTRAINT_NONE = 0,
+    /** Pairs, lengths or options that describe no set. */
+    RGMIN_CONSTRAINT_MALFORMED = 1,
+    /** A pair names an atom past the end of the coordinates. */
+    RGMIN_CONSTRAINT_OUT_OF_RANGE = 2,
+    /** A mass that is not positive and finite. */
+    RGMIN_CONSTRAINT_MASS = 3,
+    /** A session setting the set cannot run with: a manifold other than
+     *  Euclidean, the exponential preconditioner, the HiGHS step, a
+     *  periodic cell, PSO, or rigid projection at an active bound. */
+    RGMIN_CONSTRAINT_UNSUPPORTED = 4,
+    /** SHAKE, LINCS or the tangent solve spent its derived budget. */
+    RGMIN_CONSTRAINT_NOT_CONVERGED = 5,
+    /** A bond turned too far from its anchor direction. */
+    RGMIN_CONSTRAINT_REVERSED = 6,
+    /** The constraints of a block are linearly dependent. */
+    RGMIN_CONSTRAINT_DEPENDENT = 7,
+    /** LINCS was requested on a block where its expansion diverges. */
+    RGMIN_CONSTRAINT_LINCS_UNSAFE = 8,
+    /** SETTLE has no solution for a rigid triangle. */
+    RGMIN_CONSTRAINT_SETTLE_DEGENERATE = 9,
+    /** A constrained atom reached its coordinate bounds. */
+    RGMIN_CONSTRAINT_BOUND = 10,
+    /** A coordinate, mass or residual is not finite. */
+    RGMIN_CONSTRAINT_NON_FINITE = 11
+} rgmin_constraint_error_t;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(rgmin_constraint_error_t) == sizeof(int32_t),
+               "rgmin_constraint_error_t is i32-wide; do not build this header with -fshort-enums");
+#endif
+/** Kind of the last error on this thread when it was a constraint error,
+ *  else RGMIN_CONSTRAINT_NONE. ABI minor 31. */
+rgmin_constraint_error_t rgmin_last_constraint_error(void);
+/** Solver for the blocks SETTLE does not take. ABI minor 31. */
+typedef enum rgmin_constraint_solver_t {
+    /** LINCS where its expansion converges at least as fast per pass as
+     *  the Gauss-Seidel bound of SHAKE, SHAKE elsewhere. */
+    RGMIN_CONSTRAINT_SOLVER_AUTO = 0,
+    /** Gauss-Seidel SHAKE on every block. */
+    RGMIN_CONSTRAINT_SOLVER_SHAKE = 1,
+    /** LINCS on every block. A diverging block is RGMIN_CONSTRAINT_LINCS_UNSAFE. */
+    RGMIN_CONSTRAINT_SOLVER_LINCS = 2
+} rgmin_constraint_solver_t;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(rgmin_constraint_solver_t) == sizeof(int32_t),
+               "rgmin_constraint_solver_t is i32-wide; do not build this header with -fshort-enums");
+#endif
+/** Opaque set of distances |x_i - x_j| = d over packed 3 N coordinates.
+ *  A session copies it, so the caller frees it whenever it likes. */
+typedef struct rgmin_constraints_t rgmin_constraints_t;
+/** Fix |x_i - x_j| = lengths[k] for pairs (pair_i[k], pair_j[k]), with unit
+ *  masses, the automatic solver, SETTLE on rigid triangles and the
+ *  rounding floor as tolerance. Null on bad arguments, with
+ *  rgmin_last_error and rgmin_last_constraint_error set. ABI minor 31. */
+rgmin_constraints_t *rgmin_constraints_create(const uint32_t *pair_i, const uint32_t *pair_j,
+                                              const double *lengths, size_t npair);
+/** Fix each pair at its distance in \a x of length \a n. ABI minor 31. */
+rgmin_constraints_t *rgmin_constraints_create_at(const uint32_t *pair_i,
+                                                 const uint32_t *pair_j, size_t npair,
+                                                 const double *x, size_t n);
+/** Release a set. Null is a no-op. */
+void rgmin_constraints_free(rgmin_constraints_t *set);
+/** One mass per atom; corrections and projections use the metric M^-1. */
+rgmin_status_t rgmin_constraints_set_masses(rgmin_constraints_t *set, const double *masses,
+                                            size_t n_atoms);
+/** Solver for the blocks SETTLE does not take. An unknown integer is
+ *  RGMIN_INVALID_PARAMETER. */
+rgmin_status_t rgmin_constraints_set_solver(rgmin_constraints_t *set,
+                                            rgmin_constraint_solver_t solver);
+/** SETTLE on rigid triangles when \a on is nonzero (the default). */
+rgmin_status_t rgmin_constraints_set_settle(rgmin_constraints_t *set, int32_t on);
+/** Relative tolerance on |d^2 - r^2| / (2 d^2), the GROMACS shake-tol
+ *  measure. Zero (the default) is the rounding floor of each constraint,
+ *  and a smaller tolerance is raised to it. */
+rgmin_status_t rgmin_constraints_set_tolerance(rgmin_constraints_t *set, double tolerance);
+/** Fix the LINCS expansion order (GROMACS lincs-order). Zero derives it. */
+rgmin_status_t rgmin_constraints_set_lincs_order(rgmin_constraints_t *set, size_t order);
+/** Largest ratio of a relative residual to its tolerance at \a x: at most
+ *  one when every constraint is met. NaN on a null argument, a length the
+ *  set does not fit, or a non-finite residual. */
+double rgmin_constraints_excess(const rgmin_constraints_t *set, const double *x, size_t n);
+/** Return \a x to the set by corrections along the bonds of \a anchor, the
+ *  point \a x was stepped from. On an error \a x is unchanged. */
+rgmin_status_t rgmin_constraints_constrain(const rgmin_constraints_t *set,
+                                           const double *anchor, double *x, size_t n);
+/** Copy \a set into the session. Every later step keeps each constraint to
+ *  its tolerance. Methods and Accept modes all run on the set; a setting
+ *  the set cannot run with is RGMIN_CONSTRAINT_ERROR here or at the next
+ *  step, and a step that cannot meet the set leaves \a x unchanged.
+ *  ABI minor 31. */
+rgmin_status_t rgmin_solver_set_distance_constraints(rgmin_solver_t *solver,
+                                                     const rgmin_constraints_t *set);
+/** Drop the session's set and its method memory. ABI minor 31. */
+void rgmin_solver_clear_distance_constraints(rgmin_solver_t *solver);
 /**
  * One outer iteration: direction, line search, curvature update.
  * \a eval and \a grad are valid for this call only. \a x is in/out.

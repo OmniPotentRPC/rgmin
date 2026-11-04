@@ -2,7 +2,7 @@
 //! the same contract as eindir_objective_t, so a later device kernel
 //! does not change the ABI.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use std::slice;
@@ -18,6 +18,7 @@ use eindir_core::ffi::{
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, Array2, ArrayView1};
 
+use crate::holonomic::{ConstraintError, ConstraintSolver, DistanceConstraints};
 use crate::precon::{ExpParams, ExpState, Neighbours};
 use crate::{
     Accept, ApplyHessian, Conjugacy, Control, DirectionalCurvature, EigenParams, EigensolverKind,
@@ -40,6 +41,9 @@ pub enum rgmin_status_t {
     RGMIN_UNSUPPORTED_DEVICE = 3,
     /// Named eigensolver is not linked in this build.
     RGMIN_UNAVAILABLE = 4,
+    /// A distance constraint set was refused or could not be met.
+    /// [`rgmin_last_constraint_error`] names the kind. ABI minor 31.
+    RGMIN_CONSTRAINT_ERROR = 5,
 }
 
 fn status_from_error(e: &Error) -> rgmin_status_t {
@@ -49,6 +53,10 @@ fn status_from_error(e: &Error) -> rgmin_status_t {
             rgmin_status_t::RGMIN_INTERNAL_ERROR
         }
         Error::EigenUnavailable { .. } => rgmin_status_t::RGMIN_UNAVAILABLE,
+        Error::Constraint(c) => {
+            LAST_CONSTRAINT.with(|kind| kind.set(constraint_kind(c)));
+            rgmin_status_t::RGMIN_CONSTRAINT_ERROR
+        }
         _ => rgmin_status_t::RGMIN_INVALID_PARAMETER,
     }
 }
@@ -66,7 +74,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 30;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 31;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -308,6 +316,8 @@ pub type rgmin_hvp_fn = unsafe extern "C" fn(
 
 thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
+    static LAST_CONSTRAINT: Cell<rgmin_constraint_error_t> =
+        const { Cell::new(rgmin_constraint_error_t::RGMIN_CONSTRAINT_NONE) };
 }
 
 fn set_last_error(msg: &str) {
@@ -315,6 +325,7 @@ fn set_last_error(msg: &str) {
         let c = CString::new(msg).unwrap_or_else(|_| CString::new("(interior NUL)").unwrap());
         *cell.borrow_mut() = c;
     });
+    LAST_CONSTRAINT.with(|kind| kind.set(rgmin_constraint_error_t::RGMIN_CONSTRAINT_NONE));
 }
 
 /// Last error on this thread. Valid until the next rgmin C call.
@@ -1850,8 +1861,11 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_abc(solver: *mut rgmin_solver_t, 
     }
 }
 
-/// Per-atom cap (eOn `maxAtomMotionAppliedV`). On Euclidean L-BFGS this
-/// selects the geometry step and ignores [`rgmin_solver_set_accept`].
+/// Per-atom cap (eOn `maxAtomMotionAppliedV`). On Euclidean L-BFGS
+/// without a distance constraint set this selects the geometry step and
+/// ignores [`rgmin_solver_set_accept`]. With a set, L-BFGS keeps its
+/// two-loop step under the acceptance mode and the cap scales each trial
+/// before it returns to the set.
 /// A nominal steepest trial at least 64 times the cap takes one
 /// finite-difference curvature probe, clipped to the objective bounds.
 /// Ordinary starts use `0.1 I` and a five-value nonmonotone window.
@@ -2430,6 +2444,392 @@ pub unsafe extern "C" fn rgmin_solver_set_periodic(solver: *mut rgmin_solver_t, 
         return;
     }
     unsafe { (*solver).solver.set_periodic(enabled != 0) };
+}
+
+/// Why a distance constraint set was refused or could not be met.
+/// Integers follow the variants of [`ConstraintError`].
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_constraint_error_t {
+    /// The last error on this thread was not a constraint error.
+    RGMIN_CONSTRAINT_NONE = 0,
+    /// [`ConstraintError::Malformed`].
+    RGMIN_CONSTRAINT_MALFORMED = 1,
+    /// [`ConstraintError::OutOfRange`].
+    RGMIN_CONSTRAINT_OUT_OF_RANGE = 2,
+    /// [`ConstraintError::Mass`].
+    RGMIN_CONSTRAINT_MASS = 3,
+    /// [`ConstraintError::Unsupported`].
+    RGMIN_CONSTRAINT_UNSUPPORTED = 4,
+    /// [`ConstraintError::NotConverged`].
+    RGMIN_CONSTRAINT_NOT_CONVERGED = 5,
+    /// [`ConstraintError::Reversed`].
+    RGMIN_CONSTRAINT_REVERSED = 6,
+    /// [`ConstraintError::Dependent`].
+    RGMIN_CONSTRAINT_DEPENDENT = 7,
+    /// [`ConstraintError::LincsUnsafe`].
+    RGMIN_CONSTRAINT_LINCS_UNSAFE = 8,
+    /// [`ConstraintError::SettleDegenerate`].
+    RGMIN_CONSTRAINT_SETTLE_DEGENERATE = 9,
+    /// [`ConstraintError::Bound`].
+    RGMIN_CONSTRAINT_BOUND = 10,
+    /// [`ConstraintError::NonFinite`].
+    RGMIN_CONSTRAINT_NON_FINITE = 11,
+}
+
+fn constraint_kind(e: &ConstraintError) -> rgmin_constraint_error_t {
+    use rgmin_constraint_error_t::*;
+    match e {
+        ConstraintError::Malformed { .. } => RGMIN_CONSTRAINT_MALFORMED,
+        ConstraintError::OutOfRange { .. } => RGMIN_CONSTRAINT_OUT_OF_RANGE,
+        ConstraintError::Mass { .. } => RGMIN_CONSTRAINT_MASS,
+        ConstraintError::Unsupported { .. } => RGMIN_CONSTRAINT_UNSUPPORTED,
+        ConstraintError::NotConverged { .. } => RGMIN_CONSTRAINT_NOT_CONVERGED,
+        ConstraintError::Reversed { .. } => RGMIN_CONSTRAINT_REVERSED,
+        ConstraintError::Dependent { .. } => RGMIN_CONSTRAINT_DEPENDENT,
+        ConstraintError::LincsUnsafe { .. } => RGMIN_CONSTRAINT_LINCS_UNSAFE,
+        ConstraintError::SettleDegenerate { .. } => RGMIN_CONSTRAINT_SETTLE_DEGENERATE,
+        ConstraintError::Bound { .. } => RGMIN_CONSTRAINT_BOUND,
+        ConstraintError::NonFinite => RGMIN_CONSTRAINT_NON_FINITE,
+    }
+}
+
+/// Kind of the last error on this thread when it was a constraint
+/// error, else `RGMIN_CONSTRAINT_NONE`. ABI minor 31.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_last_constraint_error() -> rgmin_constraint_error_t {
+    LAST_CONSTRAINT.with(Cell::get)
+}
+
+/// Solver for the blocks SETTLE does not take. Integers match
+/// [`ConstraintSolver`].
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_constraint_solver_t {
+    /// LINCS where its expansion converges at least as fast per pass as
+    /// the Gauss-Seidel bound of SHAKE, SHAKE elsewhere.
+    RGMIN_CONSTRAINT_SOLVER_AUTO = 0,
+    /// Gauss-Seidel SHAKE on every block.
+    RGMIN_CONSTRAINT_SOLVER_SHAKE = 1,
+    /// LINCS on every block.
+    RGMIN_CONSTRAINT_SOLVER_LINCS = 2,
+}
+
+/// Opaque distance constraint set. A session copies it.
+pub struct rgmin_constraints_t {
+    set: DistanceConstraints,
+}
+
+/// `(pair_i[k], pair_j[k])` for `k < npair`, null when a side is null
+/// or an index does not fit.
+unsafe fn read_pairs(
+    pair_i: *const u32,
+    pair_j: *const u32,
+    npair: usize,
+) -> Option<Vec<(usize, usize)>> {
+    if npair == 0 {
+        return Some(Vec::new());
+    }
+    if pair_i.is_null() || pair_j.is_null() {
+        return None;
+    }
+    let (i, j) = unsafe {
+        (
+            slice::from_raw_parts(pair_i, npair),
+            slice::from_raw_parts(pair_j, npair),
+        )
+    };
+    let pairs = i
+        .iter()
+        .zip(j)
+        .map(|(&a, &b)| Some((usize::try_from(a).ok()?, usize::try_from(b).ok()?)));
+    pairs.collect()
+}
+
+fn boxed_constraints(made: crate::Result<DistanceConstraints>) -> *mut rgmin_constraints_t {
+    match made {
+        Ok(set) => Box::into_raw(Box::new(rgmin_constraints_t { set })),
+        Err(e) => {
+            status_from_error(&e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Fix `|x_i - x_j| = length[k]` for each pair `k`, with unit masses,
+/// the automatic solver, SETTLE on rigid triangles and the rounding
+/// floor as tolerance. Null on bad arguments, with
+/// [`rgmin_last_error`] and [`rgmin_last_constraint_error`] set.
+/// ABI minor 31.
+///
+/// # Safety
+/// Each non-null pointer is valid for `npair` reads.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_constraints_create(
+    pair_i: *const u32,
+    pair_j: *const u32,
+    lengths: *const f64,
+    npair: usize,
+) -> *mut rgmin_constraints_t {
+    let Some(pairs) = (unsafe { read_pairs(pair_i, pair_j, npair) }) else {
+        set_last_error("rgmin_constraints_create: null pair array");
+        return std::ptr::null_mut();
+    };
+    if lengths.is_null() && npair > 0 {
+        set_last_error("rgmin_constraints_create: null lengths");
+        return std::ptr::null_mut();
+    }
+    let lengths = if npair == 0 {
+        Vec::new()
+    } else {
+        unsafe { slice::from_raw_parts(lengths, npair) }.to_vec()
+    };
+    boxed_constraints(DistanceConstraints::new(pairs, lengths))
+}
+
+/// Fix each pair at its distance in `x`, packed `3 N` of length `n`.
+/// Null on bad arguments. ABI minor 31.
+///
+/// # Safety
+/// The pair arrays are valid for `npair` reads and `x` for `n`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_constraints_create_at(
+    pair_i: *const u32,
+    pair_j: *const u32,
+    npair: usize,
+    x: *const f64,
+    n: usize,
+) -> *mut rgmin_constraints_t {
+    let Some(pairs) = (unsafe { read_pairs(pair_i, pair_j, npair) }) else {
+        set_last_error("rgmin_constraints_create_at: null pair array");
+        return std::ptr::null_mut();
+    };
+    if x.is_null() {
+        set_last_error("rgmin_constraints_create_at: null x");
+        return std::ptr::null_mut();
+    }
+    let x = unsafe { slice::from_raw_parts(x, n) };
+    boxed_constraints(DistanceConstraints::at(pairs, ArrayView1::from(x)))
+}
+
+/// Release a set from [`rgmin_constraints_create`] or
+/// [`rgmin_constraints_create_at`]. Null is a no-op.
+///
+/// # Safety
+/// `set` is null or a live set from this ABI.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_constraints_free(set: *mut rgmin_constraints_t) {
+    if !set.is_null() {
+        drop(unsafe { Box::from_raw(set) });
+    }
+}
+
+/// Apply `change` to the set behind `set`, or report a null handle.
+unsafe fn update_constraints(
+    set: *mut rgmin_constraints_t,
+    what: &str,
+    change: impl FnOnce(DistanceConstraints) -> crate::Result<DistanceConstraints>,
+) -> rgmin_status_t {
+    if set.is_null() {
+        set_last_error(&format!("{what}: null set"));
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let handle = unsafe { &mut *set };
+    match change(handle.set.clone()) {
+        Ok(next) => {
+            handle.set = next;
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        Err(e) => status_from_error(&e),
+    }
+}
+
+/// One mass per atom of the coordinates the set is used with; the
+/// corrections and projections then use the metric `M^-1`. ABI minor 31.
+///
+/// # Safety
+/// `set` is null or live, and `masses` is null or valid for `n_atoms`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_constraints_set_masses(
+    set: *mut rgmin_constraints_t,
+    masses: *const f64,
+    n_atoms: usize,
+) -> rgmin_status_t {
+    if masses.is_null() {
+        set_last_error("rgmin_constraints_set_masses: null masses");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let masses = unsafe { slice::from_raw_parts(masses, n_atoms) }.to_vec();
+    unsafe {
+        update_constraints(set, "rgmin_constraints_set_masses", |c| {
+            c.with_masses(masses)
+        })
+    }
+}
+
+/// Solver for the blocks SETTLE does not take. An unknown integer is
+/// `RGMIN_INVALID_PARAMETER`. ABI minor 31.
+///
+/// # Safety
+/// `set` is null or a live set from this ABI.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_constraints_set_solver(
+    set: *mut rgmin_constraints_t,
+    solver: i32,
+) -> rgmin_status_t {
+    let solver = match solver {
+        0 => ConstraintSolver::Auto,
+        1 => ConstraintSolver::Shake,
+        2 => ConstraintSolver::Lincs,
+        _ => {
+            set_last_error("rgmin_constraints_set_solver: unknown solver");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+    };
+    unsafe {
+        update_constraints(set, "rgmin_constraints_set_solver", |c| {
+            Ok(c.with_solver(solver))
+        })
+    }
+}
+
+/// SETTLE on rigid triangles when `on` is nonzero (the default), else
+/// the solver takes them. ABI minor 31.
+///
+/// # Safety
+/// `set` is null or a live set from this ABI.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_constraints_set_settle(
+    set: *mut rgmin_constraints_t,
+    on: i32,
+) -> rgmin_status_t {
+    unsafe {
+        update_constraints(set, "rgmin_constraints_set_settle", |c| {
+            Ok(c.with_settle(on != 0))
+        })
+    }
+}
+
+/// Relative tolerance on `|d^2 - r^2| / (2 d^2)`, the GROMACS
+/// `shake-tol` measure. Zero asks for the rounding floor of each
+/// constraint, and a smaller tolerance is raised to it. ABI minor 31.
+///
+/// # Safety
+/// `set` is null or a live set from this ABI.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_constraints_set_tolerance(
+    set: *mut rgmin_constraints_t,
+    tolerance: f64,
+) -> rgmin_status_t {
+    unsafe {
+        update_constraints(set, "rgmin_constraints_set_tolerance", |c| {
+            c.with_tolerance(tolerance)
+        })
+    }
+}
+
+/// Fix the LINCS expansion order (GROMACS `lincs-order`). Zero derives
+/// it per block from the coupling and the tolerance. ABI minor 31.
+///
+/// # Safety
+/// `set` is null or a live set from this ABI.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_constraints_set_lincs_order(
+    set: *mut rgmin_constraints_t,
+    order: usize,
+) -> rgmin_status_t {
+    let order = (order > 0).then_some(order);
+    unsafe {
+        update_constraints(set, "rgmin_constraints_set_lincs_order", |c| {
+            Ok(c.with_lincs_order(order))
+        })
+    }
+}
+
+/// Largest ratio of a relative residual to its tolerance at `x`: at
+/// most one when every constraint is met. NaN on a null argument, a
+/// length the set does not fit, or a non-finite residual. ABI minor 31.
+///
+/// # Safety
+/// `set` is null or live, and `x` is null or valid for `n` reads.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_constraints_excess(
+    set: *const rgmin_constraints_t,
+    x: *const f64,
+    n: usize,
+) -> f64 {
+    if set.is_null() || x.is_null() {
+        return f64::NAN;
+    }
+    let set = unsafe { &(*set).set };
+    if set.fits(n).is_err() {
+        return f64::NAN;
+    }
+    set.excess(ArrayView1::from(unsafe { slice::from_raw_parts(x, n) }))
+}
+
+/// Return `x` to the set by corrections along the bonds of `anchor`,
+/// the point `x` was stepped from. Both have length `n`. On an error
+/// `x` is unchanged. ABI minor 31.
+///
+/// # Safety
+/// `set` is null or live; `anchor` and `x` are null or valid for `n`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_constraints_constrain(
+    set: *const rgmin_constraints_t,
+    anchor: *const f64,
+    x: *mut f64,
+    n: usize,
+) -> rgmin_status_t {
+    if set.is_null() || anchor.is_null() || x.is_null() {
+        set_last_error("rgmin_constraints_constrain: null argument");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let set = unsafe { &(*set).set };
+    let anchor = ArrayView1::from(unsafe { slice::from_raw_parts(anchor, n) });
+    let out = unsafe { slice::from_raw_parts_mut(x, n) };
+    let mut moved = Array1::from(out.to_vec());
+    match set.constrain(anchor, &mut moved) {
+        Ok(_) => {
+            out.copy_from_slice(moved.as_slice().expect("contiguous"));
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        Err(e) => status_from_error(&e),
+    }
+}
+
+/// Copy `set` into the session. Every later step keeps each constraint
+/// to its tolerance; a setting the set cannot run with is
+/// `RGMIN_CONSTRAINT_ERROR` here or at the next step. ABI minor 31.
+///
+/// # Safety
+/// `solver` and `set` are null or live handles from this ABI.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_distance_constraints(
+    solver: *mut rgmin_solver_t,
+    set: *const rgmin_constraints_t,
+) -> rgmin_status_t {
+    if solver.is_null() || set.is_null() {
+        set_last_error("rgmin_solver_set_distance_constraints: null argument");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let set = unsafe { (*set).set.clone() };
+    match unsafe { (*solver).solver.set_distance_constraints(set) } {
+        Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
+        Err(e) => status_from_error(&e),
+    }
+}
+
+/// Drop the session's constraint set and its method memory. Null and a
+/// session without a set are no-ops. ABI minor 31.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_clear_distance_constraints(solver: *mut rgmin_solver_t) {
+    if !solver.is_null() {
+        unsafe { (*solver).solver.clear_distance_constraints() };
+    }
 }
 
 /// One outer iteration. `x` is in/out. Callbacks live for this call only.

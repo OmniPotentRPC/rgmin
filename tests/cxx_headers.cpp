@@ -1,7 +1,9 @@
 #include "rgmin/optimize.hpp"
+#include "xts.h"
 #include "xts/optimize.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <vector>
 
@@ -23,6 +25,156 @@ rgmin_status_t quad_grad(void* /*user*/, DLManagedTensorVersioned const* x,
     gp[0] = 2.0 * p[0];
     gp[1] = 2.0 * p[1];
     return RGMIN_SUCCESS;
+}
+
+double const* data(DLManagedTensorVersioned const* t) {
+    return reinterpret_cast<double const*>(static_cast<char const*>(t->dl_tensor.data) +
+                                           t->dl_tensor.byte_offset);
+}
+
+double* data(DLManagedTensorVersioned* t) {
+    return reinterpret_cast<double*>(static_cast<char*>(t->dl_tensor.data) +
+                                     t->dl_tensor.byte_offset);
+}
+
+// f = sum_k (x_k - t_k)^2 over two atoms, tethers t in user.
+rgmin_status_t tether_eval(void* user, DLManagedTensorVersioned const* x, double* value) {
+    auto const* t = static_cast<double const*>(user);
+    double const* p = data(x);
+    double acc = 0.0;
+    for (int k = 0; k < 6; ++k) {
+        acc += (p[k] - t[k]) * (p[k] - t[k]);
+    }
+    *value = acc;
+    return RGMIN_SUCCESS;
+}
+
+rgmin_status_t tether_grad(void* user, DLManagedTensorVersioned const* x,
+                           DLManagedTensorVersioned* g) {
+    auto const* t = static_cast<double const*>(user);
+    double const* p = data(x);
+    double* gp = data(g);
+    for (int k = 0; k < 6; ++k) {
+        gp[k] = 2.0 * (p[k] - t[k]);
+    }
+    return RGMIN_SUCCESS;
+}
+
+// Bond of length 1.2 between atoms of mass 1 and 7 tethered at t: the
+// minimum is the midpoint of t plus or minus 0.6 along t_0 - t_1.
+int constrained() {
+    double tethers[6] = {0.3, -0.1, 0.2, -0.1, 0.2, -0.05};
+    double const c = std::cos(0.5), s = std::sin(0.5);
+    std::vector<double> start{0.5 + 0.6 * c, 0.4 + 0.6 * s, 0.1,
+                              0.5 - 0.6 * c, 0.4 - 0.6 * s, 0.1};
+    std::uint32_t const pi[1] = {0};
+    std::uint32_t const pj[1] = {1};
+    double const masses[2] = {1.0, 7.0};
+    auto set = xts::optimize::DistanceConstraints::at(pi, pj, 1, start.data(), 6);
+    set.with_masses(masses, 2).with_solver(rgmin::ConstraintSolver::Shake);
+    double ab[3], dist = 0.0;
+    for (int k = 0; k < 3; ++k) {
+        ab[k] = tethers[k] - tethers[3 + k];
+        dist += ab[k] * ab[k];
+    }
+    dist = std::sqrt(dist);
+    rgmin::Control ctrl;
+    ctrl.maxiter = 500;
+    ctrl.gtol = std::cbrt(2.220446049250313e-16);
+    ctrl.maxmove = 0.2;
+    rgmin::Method const methods[] = {rgmin::Method::Lbfgs, rgmin::Method::Fire2,
+                                     rgmin::Method::NewtonCg};
+    for (rgmin::Method method : methods) {
+        rgmin::Solver solver(method, ctrl, 6);
+        solver.set_accept(RGMIN_ACCEPT_ENERGY);
+        solver.set_distance_constraints(set);
+        std::vector<double> x = start;
+        rgmin::Report r{};
+        for (std::size_t it = 0; it < ctrl.maxiter && !(r.grad_norm < ctrl.gtol && it > 0);
+             ++it) {
+            DLManagedTensorVersioned* t = rgmin::borrow_cpu_f64(x.data(), 6);
+            r = solver.step(tether_eval, tether_grad, tethers, t);
+            rgmin_tensor_free(t);
+            if (!(set.excess(x.data(), 6) <= 1.0)) {
+                std::fprintf(stderr, "method %d left the set\n", static_cast<int>(method));
+                return 10;
+            }
+        }
+        double off = 0.0;
+        for (int k = 0; k < 6; ++k) {
+            double const mid = 0.5 * (tethers[k % 3] + tethers[3 + k % 3]);
+            double const want = mid + (k < 3 ? 0.6 : -0.6) * ab[k % 3] / dist;
+            off += (x[k] - want) * (x[k] - want);
+        }
+        // k = 2 and k_min = min(k, k D / L) bound |x - x*| by
+        // sqrt(2) |g| / k_min; forming x and x - x* rounds each
+        // coordinate at most 9.5 times at the largest |x|.
+        double const k_min = std::fmin(2.0, 2.0 * dist / 1.2);
+        double scale = 0.0;
+        for (double v : x) {
+            scale = std::fmax(scale, std::fabs(v));
+        }
+        double const m = 5.0 * 2.220446049250313e-16;
+        double const tol =
+            std::sqrt(2.0) * r.grad_norm / k_min + std::sqrt(6.0) * m / (1.0 - m) * scale;
+        if (!(r.grad_norm < ctrl.gtol) || std::sqrt(off) > tol) {
+            std::fprintf(stderr, "method %d: grad=%g off=%g\n", static_cast<int>(method),
+                         r.grad_norm, std::sqrt(off));
+            return 11;
+        }
+    }
+
+    std::uint32_t const same[1] = {0};
+    double const one[1] = {1.0};
+    try {
+        rgmin::DistanceConstraints bad(same, same, one, 1);
+        return 12;
+    } catch (rgmin::ConstraintError const& e) {
+        if (e.kind() != RGMIN_CONSTRAINT_MALFORMED) {
+            return 13;
+        }
+    }
+    double const negative[2] = {1.0, -1.0};
+    try {
+        set.with_masses(negative, 2);
+        return 14;
+    } catch (xts::optimize::ConstraintError const& e) {
+        if (e.kind() != XTS_CONSTRAINT_MASS) {
+            return 15;
+        }
+    }
+    // A sideways pull of 3 per atom under a unit step: the old bond
+    // cannot close the gap, so the step throws and leaves x.
+    double const flat[6] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
+    auto bond = rgmin::DistanceConstraints::at(pi, pj, 1, flat, 6);
+    double pull[6] = {0.0, 3.0, 0.0, 0.0, -3.0, 0.0};
+    rgmin::Control unit;
+    unit.istep = 1.0;
+    rgmin::Solver steepest(rgmin::Method::Steepest, unit, 6);
+    steepest.set_accept(RGMIN_ACCEPT_NONE);
+    steepest.set_distance_constraints(bond);
+    std::vector<double> y(flat, flat + 6);
+    for (int k = 0; k < 6; ++k) {
+        pull[k] = flat[k] + pull[k] / 2.0;
+    }
+    DLManagedTensorVersioned* ty = rgmin::borrow_cpu_f64(y.data(), 6);
+    try {
+        steepest.step(tether_eval, tether_grad, pull, ty);
+        rgmin_tensor_free(ty);
+        return 16;
+    } catch (rgmin::ConstraintError const& e) {
+        rgmin_tensor_free(ty);
+        if (e.kind() != RGMIN_CONSTRAINT_REVERSED && e.kind() != RGMIN_CONSTRAINT_NOT_CONVERGED) {
+            return 17;
+        }
+    }
+    for (int k = 0; k < 6; ++k) {
+        if (y[k] != flat[k]) {
+            return 18;
+        }
+    }
+    std::printf("constraints ok\n");
+    return 0;
 }
 
 }  // namespace
@@ -82,5 +234,5 @@ int main() {
         std::fprintf(stderr, "fire preset setup failed\n");
         return 5;
     }
-    return 0;
+    return constrained();
 }

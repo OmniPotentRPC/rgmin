@@ -117,4 +117,8 @@ fn cxx_headers_compile_link_and_set_box() {
         stdout.contains("set_box="),
         "cxx smoke did not report set_box: {stdout}"
     );
+    assert!(
+        stdout.contains("constraints ok"),
+        "cxx smoke did not run the distance constraints: {stdout}"
+    );
 }

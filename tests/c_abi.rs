@@ -865,7 +865,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 30);
+    assert_eq!(stamp.abi_minor, 31);
     assert_eq!(stamp.layout_revision, 4);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -2241,5 +2241,413 @@ fn c_abi_a_refused_start_gradient_sends_no_nan_coordinate() {
         };
         assert_eq!(st, [rgmin_status_t::RGMIN_INTERNAL_ERROR; 2], "{method:?}");
         assert_eq!((sent, x), ((2, false), [1.0, 1.0]), "{method:?}");
+    }
+}
+
+/// `f = |x_0 - a|^2 + |x_1 - b|^2` over two atoms, tethers in `user`.
+unsafe extern "C" fn tether_eval(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let t = unsafe { &*(user as *const [f64; 6]) };
+    let (p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 6);
+    let mut acc = 0.0;
+    for (i, ti) in t.iter().enumerate() {
+        let d = unsafe { *p.add(i) } - ti;
+        acc += d * d;
+    }
+    unsafe { *value_out = acc };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn tether_grad(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let t = unsafe { &*(user as *const [f64; 6]) };
+    let (p, n) = unsafe { cpu_f64(x) };
+    let (gp, gn) = unsafe { cpu_f64(g as *const _) };
+    assert_eq!((n, gn), (6, 6));
+    for (i, ti) in t.iter().enumerate() {
+        unsafe { *(gp as *mut f64).add(i) = 2.0 * (*p.add(i) - ti) };
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn tether_hess(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    h: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (_, n) = unsafe { cpu_f64(x) };
+    let (hp, hn) = unsafe { cpu_f64(h as *const _) };
+    assert_eq!(hn, n * n);
+    for i in 0..n {
+        for j in 0..n {
+            unsafe { *(hp as *mut f64).add(i * n + j) = if i == j { 2.0 } else { 0.0 } };
+        }
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+/// `f = -force . x` with the force in `user`.
+unsafe extern "C" fn pull_eval(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let force = unsafe { &*(user as *const [f64; 6]) };
+    let (p, _) = unsafe { cpu_f64(x) };
+    let dot: f64 = force
+        .iter()
+        .enumerate()
+        .map(|(i, f)| f * unsafe { *p.add(i) })
+        .sum();
+    unsafe { *value_out = -dot };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn pull_grad(
+    user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let force = unsafe { &*(user as *const [f64; 6]) };
+    let (gp, _) = unsafe { cpu_f64(g as *const _) };
+    for (i, f) in force.iter().enumerate() {
+        unsafe { *(gp as *mut f64).add(i) = -f };
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+fn constrained_report() -> rgmin_report_t {
+    rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+    }
+}
+
+/// Every C method on a bond of length 1.2 between two atoms tethered to
+/// `a` and `b`, masses 1 and 7. The minimum is `c + L u / 2` and
+/// `c - L u / 2` with `u` along `a - b` and `c` their midpoint, and each
+/// step ends on the set.
+#[test]
+fn c_abi_every_method_reaches_the_constrained_minimum() {
+    use rgmin::ffi::{
+        rgmin_constraints_create_at, rgmin_constraints_excess, rgmin_constraints_free,
+        rgmin_constraints_set_masses, rgmin_solver_set_distance_constraints,
+        rgmin_solver_step_hess,
+    };
+    let mut tethers = [0.3, -0.1, 0.2, -0.1, 0.2, -0.05];
+    let user = tethers.as_mut_ptr() as *mut c_void;
+    let tilt = 30_f64.to_radians();
+    let start = [
+        0.5 + 0.6 * tilt.cos(),
+        0.4 + 0.6 * tilt.sin(),
+        0.1,
+        0.5 - 0.6 * tilt.cos(),
+        0.4 - 0.6 * tilt.sin(),
+        0.1,
+    ];
+    let (pi, pj) = ([0_u32], [1_u32]);
+    let set =
+        unsafe { rgmin_constraints_create_at(pi.as_ptr(), pj.as_ptr(), 1, start.as_ptr(), 6) };
+    assert!(!set.is_null());
+    let masses = [1.0, 7.0];
+    assert_eq!(
+        unsafe { rgmin_constraints_set_masses(set, masses.as_ptr(), 2) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    let ab: Vec<f64> = (0..3).map(|c| tethers[c] - tethers[3 + c]).collect();
+    let dist = ab.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let want: Vec<f64> = (0..6)
+        .map(|k| {
+            let c = k % 3;
+            let mid = (tethers[c] + tethers[3 + c]) / 2.0;
+            let sign = if k < 3 { 1.0 } else { -1.0 };
+            mid + sign * 0.6 * ab[c] / dist
+        })
+        .collect();
+    let gtol = f64::EPSILON.powf(1.0 / 3.0);
+    let ctrl = rgmin_control_t {
+        maxiter: 2000,
+        gtol,
+        istep: 0.1,
+        memory: 8,
+        maxmove: 0.2,
+    };
+    use rgmin_method_t::*;
+    let methods = [
+        (RGMIN_LBFGS, false),
+        (RGMIN_BFGS, false),
+        (RGMIN_SR1, false),
+        (RGMIN_SR2, false),
+        (RGMIN_BB, false),
+        (RGMIN_STEEPEST, false),
+        (RGMIN_POLAK_RIBIERE, false),
+        (RGMIN_FLETCHER_REEVES, false),
+        (RGMIN_HAGER_ZHANG, false),
+        (RGMIN_FIRE, false),
+        (RGMIN_FIRE2, false),
+        (RGMIN_NEWTON_CG, false),
+        (RGMIN_NEWTON_PCG, false),
+        (RGMIN_NEWTON, true),
+        (RGMIN_RFO, true),
+        (RGMIN_DOGLEG, true),
+    ];
+    for accept in [
+        rgmin_accept_t::RGMIN_ACCEPT_NONE,
+        rgmin_accept_t::RGMIN_ACCEPT_ENERGY,
+        rgmin_accept_t::RGMIN_ACCEPT_NONMONOTONE,
+    ] {
+        for (method, hess) in methods {
+            let session = unsafe { rgmin_solver_create(method, &ctrl, 6) };
+            assert!(!session.is_null());
+            unsafe { rgmin_solver_set_accept(session, accept) };
+            assert_eq!(
+                unsafe { rgmin_solver_set_distance_constraints(session, set) },
+                rgmin_status_t::RGMIN_SUCCESS
+            );
+            let mut x = start;
+            let mut out = constrained_report();
+            let mut stopped = false;
+            for _ in 0..ctrl.maxiter {
+                let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
+                let st = unsafe {
+                    if hess {
+                        rgmin_solver_step_hess(
+                            session,
+                            Some(tether_eval),
+                            Some(tether_grad),
+                            Some(tether_hess),
+                            user,
+                            xt,
+                            &mut out,
+                        )
+                    } else {
+                        rgmin_solver_step(
+                            session,
+                            Some(tether_eval),
+                            Some(tether_grad),
+                            user,
+                            xt,
+                            &mut out,
+                        )
+                    }
+                };
+                unsafe { rgmin_tensor_free(xt) };
+                assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS, "{method:?} {accept:?}");
+                let excess = unsafe { rgmin_constraints_excess(set, x.as_ptr(), 6) };
+                assert!(excess <= 1.0, "{method:?} {accept:?}: excess {excess}");
+                if out.grad_norm < gtol {
+                    stopped = true;
+                    break;
+                }
+            }
+            unsafe { rgmin_solver_free(session) };
+            assert!(stopped, "{method:?} {accept:?}: no stop");
+            // k = 2, k_min = min(k, k D / L); forming x and x - x* rounds
+            // each coordinate at most 9.5 times at the largest |x|.
+            let k_min = 2.0_f64.min(2.0 * dist / 1.2);
+            let scale = x.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+            let m = 10.0 * f64::EPSILON / 2.0;
+            let tol = 2_f64.sqrt() * out.grad_norm / k_min + 6_f64.sqrt() * m / (1.0 - m) * scale;
+            let off = x
+                .iter()
+                .zip(&want)
+                .map(|(a, b)| (a - b).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            assert!(off <= tol, "{method:?} {accept:?}: |x - x*| {off} > {tol}");
+        }
+    }
+    unsafe { rgmin_constraints_free(set) };
+}
+
+/// A set that does not describe one, a refused setting and a step the
+/// set cannot be met at each give `RGMIN_CONSTRAINT_ERROR` with the kind,
+/// and leave `x` where it was.
+#[test]
+fn c_abi_constraint_failures_are_typed_and_leave_x() {
+    use rgmin::ffi::{
+        rgmin_constraint_error_t, rgmin_constraints_constrain, rgmin_constraints_create,
+        rgmin_constraints_create_at, rgmin_constraints_excess, rgmin_constraints_free,
+        rgmin_constraints_set_lincs_order, rgmin_constraints_set_masses,
+        rgmin_constraints_set_settle, rgmin_constraints_set_solver,
+        rgmin_constraints_set_tolerance, rgmin_last_constraint_error,
+        rgmin_solver_clear_distance_constraints, rgmin_solver_set_distance_constraints,
+        rgmin_solver_set_periodic,
+    };
+    use rgmin_constraint_error_t::*;
+    let kind = rgmin_last_constraint_error;
+    let null = std::ptr::null::<u32>();
+    let same = [0_u32];
+    let one = [1.0_f64];
+    let made = unsafe { rgmin_constraints_create(null, null, one.as_ptr(), 1) };
+    assert!(made.is_null());
+    assert_eq!(kind(), RGMIN_CONSTRAINT_NONE);
+    assert!(!last_error_text().is_empty());
+    let made = unsafe { rgmin_constraints_create(same.as_ptr(), same.as_ptr(), one.as_ptr(), 1) };
+    assert!(made.is_null());
+    assert_eq!(kind(), RGMIN_CONSTRAINT_MALFORMED);
+    let x = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let (pi, pj, far) = ([0_u32], [1_u32], [2_u32]);
+    let made = unsafe { rgmin_constraints_create_at(pi.as_ptr(), far.as_ptr(), 1, x.as_ptr(), 6) };
+    assert!(made.is_null());
+    assert_eq!(kind(), RGMIN_CONSTRAINT_OUT_OF_RANGE);
+
+    let set = unsafe { rgmin_constraints_create_at(pi.as_ptr(), pj.as_ptr(), 1, x.as_ptr(), 6) };
+    assert!(!set.is_null());
+    let bad = [1.0, -2.0];
+    let st = unsafe { rgmin_constraints_set_masses(set, bad.as_ptr(), 2) };
+    assert_eq!(st, rgmin_status_t::RGMIN_CONSTRAINT_ERROR);
+    assert_eq!(kind(), RGMIN_CONSTRAINT_MASS);
+    let st = unsafe { rgmin_constraints_set_tolerance(set, -1.0) };
+    assert_eq!(st, rgmin_status_t::RGMIN_CONSTRAINT_ERROR);
+    assert_eq!(kind(), RGMIN_CONSTRAINT_MALFORMED);
+    let st = unsafe { rgmin_constraints_set_solver(set, 7) };
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    assert_eq!(kind(), RGMIN_CONSTRAINT_NONE);
+    for (st, name) in [
+        (unsafe { rgmin_constraints_set_solver(set, 1) }, "solver"),
+        (unsafe { rgmin_constraints_set_settle(set, 0) }, "settle"),
+        (
+            unsafe { rgmin_constraints_set_lincs_order(set, 4) },
+            "order",
+        ),
+        (
+            unsafe { rgmin_constraints_set_lincs_order(set, 0) },
+            "derived order",
+        ),
+        (
+            unsafe { rgmin_constraints_set_tolerance(set, 0.0) },
+            "tolerance",
+        ),
+    ] {
+        assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS, "{name}");
+    }
+    assert!(unsafe { rgmin_constraints_excess(set, std::ptr::null(), 6) }.is_nan());
+    assert!(unsafe { rgmin_constraints_excess(set, x.as_ptr(), 5) }.is_nan());
+    assert!(unsafe { rgmin_constraints_excess(set, x.as_ptr(), 6) } <= 1.0);
+
+    // Sideways ends 1.2 apart: no correction along the old bond closes it.
+    let mut wide = [0.0, 0.6, 0.0, 1.0, -0.6, 0.0];
+    let before = wide;
+    let st = unsafe { rgmin_constraints_constrain(set, x.as_ptr(), wide.as_mut_ptr(), 6) };
+    assert_eq!(st, rgmin_status_t::RGMIN_CONSTRAINT_ERROR);
+    assert!(matches!(
+        kind(),
+        RGMIN_CONSTRAINT_REVERSED | RGMIN_CONSTRAINT_NOT_CONVERGED
+    ));
+    assert_eq!(wide, before);
+    let mut near = [0.0, 0.01, 0.0, 1.02, -0.01, 0.0];
+    let st = unsafe { rgmin_constraints_constrain(set, x.as_ptr(), near.as_mut_ptr(), 6) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(unsafe { rgmin_constraints_excess(set, near.as_ptr(), 6) } <= 1.0);
+
+    let ctrl = rgmin_control_t {
+        maxiter: 10,
+        gtol: 1e-12,
+        istep: 1.0,
+        memory: 4,
+        maxmove: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 6) };
+    unsafe {
+        rgmin_solver_set_accept(session, rgmin_accept_t::RGMIN_ACCEPT_NONE);
+        rgmin_solver_set_periodic(session, 1);
+    }
+    let st = unsafe { rgmin_solver_set_distance_constraints(session, set) };
+    assert_eq!(st, rgmin_status_t::RGMIN_CONSTRAINT_ERROR);
+    assert_eq!(kind(), RGMIN_CONSTRAINT_UNSUPPORTED);
+    unsafe { rgmin_solver_set_periodic(session, 0) };
+    let st = unsafe { rgmin_solver_set_distance_constraints(session, set) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let mut force = [0.0, 3.0, 0.0, 0.0, -3.0, 0.0];
+    // Under an accept rule the first step is scaled to unit length, which
+    // the old bond can close; `RGMIN_ACCEPT_NONE` takes `istep * g`.
+    let user = force.as_mut_ptr() as *mut c_void;
+    let mut y = x;
+    let mut out = constrained_report();
+    let step = |session, y: &mut [f64; 6], out: &mut rgmin_report_t| {
+        let yt = unsafe { rgmin_tensor_borrow_cpu_f64(y.as_mut_ptr(), 6) };
+        let st =
+            unsafe { rgmin_solver_step(session, Some(pull_eval), Some(pull_grad), user, yt, out) };
+        unsafe { rgmin_tensor_free(yt) };
+        st
+    };
+    assert_eq!(
+        step(session, &mut y, &mut out),
+        rgmin_status_t::RGMIN_CONSTRAINT_ERROR
+    );
+    assert!(matches!(
+        kind(),
+        RGMIN_CONSTRAINT_REVERSED | RGMIN_CONSTRAINT_NOT_CONVERGED
+    ));
+    assert_eq!(y, x);
+    unsafe { rgmin_solver_set_periodic(session, 1) };
+    assert_eq!(
+        step(session, &mut y, &mut out),
+        rgmin_status_t::RGMIN_CONSTRAINT_ERROR
+    );
+    assert_eq!(kind(), RGMIN_CONSTRAINT_UNSUPPORTED);
+    assert_eq!(y, x);
+    unsafe { rgmin_solver_clear_distance_constraints(session) };
+    assert_eq!(
+        step(session, &mut y, &mut out),
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    unsafe {
+        rgmin_solver_free(session);
+        rgmin_constraints_free(set);
+    }
+
+    // A heavy cone on a light apex: the LINCS expansion diverges.
+    let cone = 30_f64.to_radians();
+    let mut z = [0.0; 12];
+    for k in 0..3 {
+        let phi = 2.0 * std::f64::consts::PI * k as f64 / 3.0;
+        z[3 + 3 * k] = cone.sin() * phi.cos();
+        z[4 + 3 * k] = cone.sin() * phi.sin();
+        z[5 + 3 * k] = cone.cos();
+    }
+    let (ci, cj) = ([0_u32, 0, 0], [1_u32, 2, 3]);
+    let set = unsafe { rgmin_constraints_create_at(ci.as_ptr(), cj.as_ptr(), 3, z.as_ptr(), 12) };
+    let heavy = [1.0, 100.0, 100.0, 100.0];
+    unsafe {
+        assert_eq!(
+            rgmin_constraints_set_masses(set, heavy.as_ptr(), 4),
+            rgmin_status_t::RGMIN_SUCCESS
+        );
+        assert_eq!(
+            rgmin_constraints_set_solver(set, 2),
+            rgmin_status_t::RGMIN_SUCCESS
+        );
+    }
+    let mut moved = z.map(|v| v + 0.01);
+    let before = moved;
+    let st = unsafe { rgmin_constraints_constrain(set, z.as_ptr(), moved.as_mut_ptr(), 12) };
+    assert_eq!(st, rgmin_status_t::RGMIN_CONSTRAINT_ERROR);
+    assert_eq!(kind(), RGMIN_CONSTRAINT_LINCS_UNSAFE);
+    assert_eq!(moved, before);
+    unsafe { rgmin_constraints_free(set) };
+
+    // The null contract.
+    unsafe {
+        rgmin_constraints_free(std::ptr::null_mut());
+        rgmin_solver_clear_distance_constraints(std::ptr::null_mut());
+        assert_eq!(
+            rgmin_solver_set_distance_constraints(std::ptr::null_mut(), std::ptr::null()),
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        );
+        assert_eq!(
+            rgmin_constraints_set_settle(std::ptr::null_mut(), 1),
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        );
+        assert!(rgmin_constraints_excess(std::ptr::null(), x.as_ptr(), 6).is_nan());
     }
 }

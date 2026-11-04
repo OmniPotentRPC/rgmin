@@ -25,6 +25,9 @@ using rgmin::minimize_eindir;
 using rgmin::optimize;
 using rgmin::borrow_cpu_f64;
 using rgmin::Solver;
+using rgmin::ConstraintError;
+using rgmin::ConstraintSolver;
+using rgmin::DistanceConstraints;
 
 namespace minimize = rgmin::minimize;
 namespace nlcg = rgmin::nlcg;
