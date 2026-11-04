@@ -77,7 +77,12 @@ where
             let out = rgmin::minimize_method(&obj, x0.clone(), &CONTROL, method.clone(), ls);
             check(format!("{token} {ls:?}"), out, probes.take());
         }
-        for accept in [Accept::None, Accept::Step, Accept::Energy, Accept::Nonmonotone] {
+        for accept in [
+            Accept::None,
+            Accept::Step,
+            Accept::Energy,
+            Accept::Nonmonotone,
+        ] {
             let mut solver = Solver::new(method.clone(), CONTROL.clone(), 2);
             solver.set_accept(accept);
             let mut x = x0.clone();

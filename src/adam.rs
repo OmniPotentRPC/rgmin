@@ -7,7 +7,9 @@ use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
-use crate::step::{energy_noise_report, implicit_atom_cap, l2, max_atom_norm, start_answer, take_step};
+use crate::step::{
+    energy_noise_report, implicit_atom_cap, l2, max_atom_norm, start_answer, take_step,
+};
 
 /// Adam plus a line search along the Kingma-Ba preconditioned step.
 ///

@@ -47,8 +47,15 @@ fn a_refused_start_gradient_sends_no_nan_coordinate() {
         noise_c: 0.0,
     };
     for method in [
-        RGMIN_STEEPEST, RGMIN_POLAK_RIBIERE, RGMIN_BB, RGMIN_BFGS, RGMIN_LBFGS,
-        RGMIN_SR1, RGMIN_SR2, RGMIN_FIRE, RGMIN_FIRE2,
+        RGMIN_STEEPEST,
+        RGMIN_POLAK_RIBIERE,
+        RGMIN_BB,
+        RGMIN_BFGS,
+        RGMIN_LBFGS,
+        RGMIN_SR1,
+        RGMIN_SR2,
+        RGMIN_FIRE,
+        RGMIN_FIRE2,
     ] {
         let mut x = [1.0, 1.0];
         let mut sent = (0usize, false);
@@ -63,8 +70,23 @@ fn a_refused_start_gradient_sends_no_nan_coordinate() {
         let st = unsafe {
             let session = rgmin_solver_create(method, &ctrl, 2);
             let st = [
-                rgmin_minimize(Some(sent_eval), Some(refused_grad), user, xt, &ctrl, method, &mut out),
-                rgmin_solver_step(session, Some(sent_eval), Some(refused_grad), user, xt, &mut out),
+                rgmin_minimize(
+                    Some(sent_eval),
+                    Some(refused_grad),
+                    user,
+                    xt,
+                    &ctrl,
+                    method,
+                    &mut out,
+                ),
+                rgmin_solver_step(
+                    session,
+                    Some(sent_eval),
+                    Some(refused_grad),
+                    user,
+                    xt,
+                    &mut out,
+                ),
             ];
             rgmin_solver_free(session);
             rgmin_tensor_free(xt);

@@ -22,7 +22,9 @@ use crate::error::{Error, Result};
 use crate::linesearch::{LineSearch, LineSearchOptions};
 use crate::qn::solve_spd;
 use crate::report::Report;
-use crate::step::{energy_noise_report, finite, l2, qn_istep, start_answer, take_step_with_options};
+use crate::step::{
+    energy_noise_report, finite, l2, qn_istep, start_answer, take_step_with_options,
+};
 use eindir_core::{DifferentiableObjective, Objective};
 
 /// How [`Lbfgs`] compares the gradient to [`Lbfgs::gtol`].
