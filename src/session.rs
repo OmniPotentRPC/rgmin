@@ -2943,6 +2943,11 @@ impl Solver {
                 } else if let Some(cap) = self.control.maxmove {
                     scale_step(x, &mut trial, cap);
                 }
+                if trial.iter().any(|coordinate| !coordinate.is_finite()) {
+                    *state = saved;
+                    *ext = saved_ext;
+                    return Err(non_finite());
+                }
                 bound_step(obj.bounds(), x, &mut trial);
                 let ev = obj.value_and_gradient(trial.view());
                 if !finite(ev.0, ev.1.view()) {
