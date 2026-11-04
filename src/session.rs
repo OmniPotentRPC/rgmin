@@ -2421,9 +2421,7 @@ impl Solver {
         // gradient at both ends, so the displacement is a secant of the
         // retained inverse Hessian.
         let before_move = match &self.inner {
-            Inner::Lbfgs(solver) if self.use_geometry_lbfgs() => {
-                Some(solver.curvature())
-            }
+            Inner::Lbfgs(solver) if self.use_geometry_lbfgs() => Some(solver.curvature()),
             _ => None,
         };
         if !cached
