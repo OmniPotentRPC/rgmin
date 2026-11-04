@@ -19,9 +19,11 @@ fn control() -> Control {
 }
 
 fn free_bounds(dim: usize) -> &'static Bounds<f64> {
+    static B1: OnceLock<Bounds<f64>> = OnceLock::new();
     static B2: OnceLock<Bounds<f64>> = OnceLock::new();
     static B4: OnceLock<Bounds<f64>> = OnceLock::new();
     let (cell, n) = match dim {
+        1 => (&B1, 1),
         2 => (&B2, 2),
         _ => (&B4, 4),
     };
@@ -211,4 +213,156 @@ fn barrier_wall_raises_damping_instead_of_dying() {
     .unwrap();
     assert!(report.coords[0] < 1.0, "stayed interior");
     assert!(report.value < 1e-3, "value {}", report.value);
+}
+
+fn distance(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
+    (a - b).mapv(|v| v * v).sum().sqrt()
+}
+
+/// Accepted points after each of the first `iters` iterations. SCG is
+/// deterministic, so a run stopped after `k` iterations is the start of
+/// any longer run from the same point.
+fn scg_path<O: DifferentiableObjective<f64>>(
+    obj: &O,
+    init: &Array1<f64>,
+    ctrl: &Control,
+    iters: usize,
+) -> Vec<Array1<f64>> {
+    let mut path = vec![init.clone()];
+    for k in 1..=iters {
+        let limited = Control {
+            maxiter: k,
+            ..ctrl.clone()
+        };
+        let report = minimize_scg(
+            obj,
+            init.clone(),
+            &limited,
+            &ScgParams::default(),
+            Conjugacy::PolakRibiere,
+            Restart::Never,
+        )
+        .unwrap();
+        path.push(report.coords);
+    }
+    path
+}
+
+fn assert_steps_within(path: &[Array1<f64>], cap: f64) {
+    for (k, pair) in path.windows(2).enumerate() {
+        let step = distance(&pair[1], &pair[0]);
+        assert!(
+            step <= cap * (1.0 + 1e-12),
+            "iteration {k}: step {step} > {cap}"
+        );
+    }
+}
+
+#[test]
+fn positive_maxmove_bounds_every_step() {
+    let start = array![1.0, -2.0, 3.0, -4.0];
+    let cap = 0.5;
+    let free = scg_path(&Bowl, &start, &control(), 1);
+    let first = distance(&free[1], &free[0]);
+    assert!(
+        first > cap,
+        "unbounded first step {first} must exceed the cap"
+    );
+
+    let ctrl = Control {
+        maxmove: Some(cap),
+        ..control()
+    };
+    assert_steps_within(&scg_path(&Bowl, &start, &ctrl, 40), cap);
+
+    let report = minimize_scg(
+        &Bowl,
+        start,
+        &Control { maxiter: 0, ..ctrl },
+        &ScgParams::default(),
+        Conjugacy::PolakRibiere,
+        Restart::Never,
+    )
+    .unwrap();
+    assert!(report.value < 1e-10, "value {}", report.value);
+}
+
+#[test]
+fn maxmove_that_is_not_positive_and_finite_leaves_scg_unbounded() {
+    let obj = Rosenbrock::<2>::new();
+    let run = |maxmove| {
+        minimize_scg(
+            &obj,
+            array![-1.2, 1.0],
+            &Control {
+                maxmove,
+                ..control()
+            },
+            &ScgParams::default(),
+            Conjugacy::PolakRibiere,
+            Restart::njws(),
+        )
+        .unwrap()
+    };
+    let free = run(None);
+    for m in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+        let report = run(Some(m));
+        assert_eq!(report.coords, free.coords, "maxmove {m}");
+        assert_eq!(report.value.to_bits(), free.value.to_bits(), "maxmove {m}");
+        assert_eq!(report.steps, free.steps, "maxmove {m}");
+    }
+}
+
+/// `x^2 / 2`, non-finite on the band `(8.95, 9.05)`.
+struct Holed;
+impl Objective<f64> for Holed {
+    fn dim(&self) -> usize {
+        1
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        free_bounds(1)
+    }
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        if x[0] > 8.95 && x[0] < 9.05 {
+            return f64::NAN;
+        }
+        0.5 * x[0] * x[0]
+    }
+}
+impl Gradient<f64> for Holed {
+    fn dim(&self) -> usize {
+        1
+    }
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        if x[0] > 8.95 && x[0] < 9.05 {
+            return array![f64::NAN];
+        }
+        array![x[0]]
+    }
+}
+impl DifferentiableObjective<f64> for Holed {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        (self.eval(x), self.grad(x))
+    }
+}
+
+#[test]
+fn nonfinite_retry_stays_within_maxmove() {
+    // From 10 the bounded step of length 1 reaches 9.0, inside the band.
+    // The first retry asks for a step of length 2, which the bound must
+    // shorten back to 1; the second retry steps 0.588 to a finite point.
+    let start = array![10.0];
+    let cap = 1.0;
+    let ctrl = Control {
+        maxmove: Some(cap),
+        ..control()
+    };
+    let path = scg_path(&Holed, &start, &ctrl, 30);
+    assert_steps_within(&path, cap);
+    assert!(
+        path[1][0] > 9.05 && path[1][0] < 10.0,
+        "first point {}",
+        path[1][0]
+    );
+    assert!(path[30][0].abs() < 1e-6, "end {}", path[30][0]);
 }

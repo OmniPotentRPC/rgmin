@@ -96,6 +96,10 @@ const MAX_PROBE_RETRIES: usize = 2000;
 /// interior-point barriers therefore composes with no optimizer hook.
 /// A zero `control.maxiter` leaves termination to convergence and the
 /// numerical failure checks.
+///
+/// A positive finite `control.maxmove` bounds the Euclidean length of
+/// every trial step, retries included, as [`Control::maxmove`] states.
+/// Zero, negative, infinite and NaN values leave the step unbounded.
 pub fn minimize_scg<O>(
     obj: &O,
     init: impl Into<Array1<f64>>,
@@ -143,6 +147,20 @@ where
         restart,
         |x, d| obj.directional_curvature(x, d),
     )
+}
+
+/// `alpha` shortened so that `||alpha d||_2` is at most a positive finite
+/// `control.maxmove`, with `kappa = d . d`.
+fn bound_step(alpha: f64, kappa: f64, control: &Control) -> f64 {
+    let Some(cap) = control.maxmove.filter(|c| c.is_finite() && *c > 0.0) else {
+        return alpha;
+    };
+    let length = alpha.abs() * kappa.sqrt();
+    if length > cap {
+        alpha * (cap / length)
+    } else {
+        alpha
+    }
 }
 
 fn run_scg<O>(
@@ -248,7 +266,7 @@ where
             delta = lambda * kappa;
             lambda -= gamma / kappa;
         }
-        let mut alpha = -mu / delta;
+        let mut alpha = bound_step(-mu / delta, kappa, control);
 
         let mut trial = &w + &(alpha * &dir);
         let (mut f_new, mut grad_new) = obj.value_and_gradient(trial.view());
@@ -260,7 +278,7 @@ where
                 delta = lambda * kappa;
                 lambda -= gamma / kappa;
             }
-            alpha = -mu / delta;
+            alpha = bound_step(-mu / delta, kappa, control);
             trial = &w + &(alpha * &dir);
             let ev = obj.value_and_gradient(trial.view());
             f_new = ev.0;
