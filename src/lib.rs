@@ -39,6 +39,8 @@ pub mod ffi;
 pub mod fire;
 /// Closed HiGHS solver and crossover tokens.
 pub mod highs_kind;
+/// Holonomic distance constraints (SHAKE, LINCS, SETTLE and RATTLE).
+pub mod holonomic;
 /// Matrix-free Newton: Hessian actions and Steihaug-Toint CG.
 pub mod hvp;
 /// Sella IRCTrustRegion / Gonzalez--Schlegel mass-weighted sphere.
@@ -83,6 +85,9 @@ pub use control::{Control, StopNorm};
 pub use error::{Error, Result};
 pub use fire::{FireKind, FirePreset};
 pub use highs_kind::{HighsCCallback, HighsCallbackKind, HighsCrossover, HighsSolverKind};
+pub use holonomic::{
+    ConstraintAlgorithm, ConstraintError, ConstraintReport, ConstraintSolver, DistanceConstraints,
+};
 pub use hvp::{
     FdHvp, HessianVector, HvpOracle, IdentityPrecond, NystromPrecond, Preconditioner,
     minimize_newton_cg, steihaug_cg, steihaug_pcg,

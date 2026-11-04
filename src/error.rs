@@ -98,6 +98,10 @@ pub enum Error {
         /// Manifold token.
         kind: &'static str,
     },
+    /// A distance constraint set was malformed, refused by the session,
+    /// or could not be met.
+    #[error("distance constraints: {0}")]
+    Constraint(#[from] crate::holonomic::ConstraintError),
 }
 
 /// Result alias for this crate.
