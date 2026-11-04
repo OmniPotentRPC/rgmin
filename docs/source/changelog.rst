@@ -8,6 +8,7 @@ Unreleased
 ~~~~~~~~~~
 
 A backtracking or Goldstein line search that runs out of trials now reports the step that produced the point it returns.
+An L-BFGS session step that drops its own curvature pair now keeps the pair before it.
 
 A default ``meson install`` of rgmin as the top-level project installs ``librgmin.so`` into ``libdir``.
 ``-Dwith_asv_helper=true`` also builds and installs ``librgmin_asv``, the timing helper that the asv suite loads.

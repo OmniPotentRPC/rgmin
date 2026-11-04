@@ -2105,3 +2105,20 @@ fn rebase_keeps_curvature_and_drops_the_point() {
         "rebased {warm_steps} should not exceed cold {cold_steps}"
     );
 }
+
+/// A step whose own pair fails the curvature test keeps the pair before
+/// it.
+#[test]
+fn a_step_that_drops_its_pair_keeps_the_previous_one() {
+    use ndarray::ArrayView1;
+    // cos(x[0]) is concave on [0.5, 1]: the step's pair has s . y < 0.
+    let obj = rgmin::Oracle::unbounded(2, |x: ArrayView1<f64>| {
+        (x[0].cos(), array![-x[0].sin(), 0.0])
+    });
+    let mut solver = Solver::new(Method::lbfgs(), control(), 2);
+    assert!(solver.push_pair(array![1.0, 0.0].view(), array![1.0, 0.0].view()));
+    let mut x = array![0.5, 0.0];
+    solver.step(&obj, &mut x).unwrap();
+    assert!(x[0] > 0.5, "no move");
+    assert_eq!(solver.pair_count(), 1);
+}

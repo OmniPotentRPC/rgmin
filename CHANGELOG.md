@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - A backtracking or Goldstein `LineSearch` that ran out of trials returned its best point with the step length of its last trial.
   It now reports the step that produced that point.
+- An L-BFGS session step whose own pair failed the curvature test also dropped the pair before it.
+  It now keeps that pair.
 - How-to samples that did not compile now do.
   The manifold sample defines its objective.
   The HiGHS sample fills the rest of `HighsStep` from `Default`.
