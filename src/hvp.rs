@@ -533,10 +533,10 @@ pub(crate) fn sym_eig_jacobi(mut a: Array2<f64>) -> (Array1<f64>, Array2<f64>) {
     (a.diag().to_owned(), v)
 }
 
-const ETA_ACCEPT: f64 = 0.1;
-const RADIUS_FLOOR: f64 = 1e-14;
+pub(crate) const ETA_ACCEPT: f64 = 0.1;
+pub(crate) const RADIUS_FLOOR: f64 = 1e-14;
 /// Nyström sketch width for [`crate::Method::NewtonPcg`].
-const NYSTROM_RANK: usize = 16;
+pub(crate) const NYSTROM_RANK: usize = 16;
 
 /// No analytic action: the session builds a forward-difference product.
 pub(crate) struct FiniteDifference;
@@ -717,7 +717,7 @@ where
 
 /// `Hv ≈ (g(x + h v) - g(x)) / h` with `h = 1e-8 / ||v||`.
 /// One gradient. The known `g(x)` is not evaluated again.
-fn forward_difference<O>(
+pub(crate) fn forward_difference<O>(
     obj: &O,
     grad: &Array1<f64>,
     x: ArrayView1<f64>,
@@ -734,7 +734,7 @@ where
     (gp - grad) / h
 }
 
-fn steps_differ(a: ArrayView1<f64>, b: ArrayView1<f64>) -> bool {
+pub(crate) fn steps_differ(a: ArrayView1<f64>, b: ArrayView1<f64>) -> bool {
     a.len() != b.len()
         || a.iter().zip(b.iter()).any(|(u, v)| {
             let scale = 1.0 + u.abs().max(v.abs());

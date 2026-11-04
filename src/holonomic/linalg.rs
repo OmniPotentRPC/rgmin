@@ -108,6 +108,27 @@ pub(super) fn cholesky_solve(l: &[f64], n: usize, b: &mut [f64]) {
     }
 }
 
+/// Gaussian elimination with partial pivoting on the row-major `a`.
+/// A zero pivot leaves a non-finite solution, returned as `None`.
+pub(super) fn lu_solve(mut a: Vec<f64>, mut b: Vec<f64>) -> Option<Vec<f64>> {
+    let n = b.len();
+    for k in 0..n {
+        let p = (k..n).max_by(|&i, &j| a[i * n + k].abs().total_cmp(&a[j * n + k].abs()))?;
+        (0..n).for_each(|c| a.swap(k * n + c, p * n + c));
+        b.swap(k, p);
+        for i in k + 1..n {
+            let f = a[i * n + k] / a[k * n + k];
+            (k..n).for_each(|c| a[i * n + c] -= f * a[k * n + c]);
+            b[i] -= f * b[k];
+        }
+    }
+    for k in (0..n).rev() {
+        let s: f64 = (k + 1..n).map(|c| a[k * n + c] * b[c]).sum();
+        b[k] = (b[k] - s) / a[k * n + k];
+    }
+    b.iter().all(|v| v.is_finite()).then_some(b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +159,12 @@ mod tests {
         assert!((4.0 * b[0] + 2.0 * b[1] - 2.0).abs() <= 8.0 * U);
         assert!((2.0 * b[0] + 3.0 * b[1] - 1.0).abs() <= 8.0 * U);
         assert!(cholesky(&[1.0, 2.0, 2.0, 1.0], 2).is_none());
+    }
+
+    #[test]
+    fn lu_reports_a_singular_matrix() {
+        assert!(lu_solve(vec![1.0, 2.0, 2.0, 4.0], vec![1.0, 1.0]).is_none());
+        let x = lu_solve(vec![0.0, 1.0, 1.0, 0.0], vec![2.0, 3.0]).unwrap();
+        assert_eq!(x, vec![3.0, 2.0]);
     }
 }

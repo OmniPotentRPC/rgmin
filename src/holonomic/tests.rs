@@ -208,6 +208,25 @@ fn projector_removes_bond_combinations_and_keeps_rotations() {
 }
 
 #[test]
+fn curve_velocity_matches_central_differences() {
+    let x = water();
+    let set = water_set().with_settle(false);
+    let tangent = Tangent::new(&set, x.view()).unwrap();
+    let mut d = kick(9, 1.0, 17);
+    tangent.vector(&mut d).unwrap();
+    let at = |t: f64| {
+        let mut r = &x + &(t * &d);
+        tangent.constrain(&mut r).unwrap();
+        r
+    };
+    let (t, h) = (0.05, 1e-5);
+    let fd = (at(t + h) - at(t - h)) / (2.0 * h);
+    let v = tangent.curve_velocity(at(t).view(), &d).unwrap();
+    let gap = (&fd - &v).iter().fold(0.0_f64, |m, e| m.max(e.abs()));
+    assert!(gap <= 1e-8, "{gap:e}");
+}
+
+#[test]
 fn malformed_sets_are_refused() {
     let dup = DistanceConstraints::new(vec![(0, 1), (1, 0)], vec![1.0, 1.0]);
     assert!(matches!(err(dup), ConstraintError::Malformed { .. }));

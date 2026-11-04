@@ -228,6 +228,10 @@ fn malformed(what: &'static str) -> Error {
     ConstraintError::Malformed { what }.into()
 }
 
+pub(crate) fn unsupported(what: &'static str) -> Error {
+    ConstraintError::Unsupported { what }.into()
+}
+
 pub(crate) fn bond(x: ArrayView1<f64>, (i, j): (usize, usize)) -> [f64; 3] {
     [0, 1, 2].map(|c| x[3 * i + c] - x[3 * j + c])
 }
@@ -381,6 +385,14 @@ impl DistanceConstraints {
             Some(m) if m.len() != atoms => Err(malformed("one mass per atom")),
             _ => Ok(()),
         }
+    }
+
+    /// Atoms that appear in a pair.
+    pub(crate) fn constrained_atoms(&self) -> Vec<usize> {
+        let mut atoms: Vec<_> = self.pairs.iter().flat_map(|&(i, j)| [i, j]).collect();
+        atoms.sort_unstable();
+        atoms.dedup();
+        atoms
     }
 
     fn inverse_mass(&self, atom: usize) -> f64 {
@@ -630,6 +642,10 @@ impl<'a> Tangent<'a> {
         }
     }
 
+    pub(crate) fn point(&self) -> &Array1<f64> {
+        &self.at
+    }
+
     /// Project `v` with `Pi` (a vector) or `g` with `Pi^T` (a covector).
     /// Each pass solves `J W J^T lambda = J u` for `u = v` or `u = W g`
     /// and subtracts `W J^T lambda` or `J^T lambda`. A pass leaves a
@@ -806,6 +822,49 @@ impl<'a> Tangent<'a> {
             iterations,
         }
         .into()
+    }
+
+    /// Velocity of the curve `R(t) = constrain(x + t d)` at the trial
+    /// `r = R(t)`: `R' = d - W J_x^T mu` with `J_r R' = 0`, an oblique
+    /// block solve `(J_r W J_x^T) mu = J_r d`.
+    pub(crate) fn curve_velocity(
+        &self,
+        r: ArrayView1<f64>,
+        d: &Array1<f64>,
+    ) -> Result<Array1<f64>> {
+        let set = self.set;
+        let mut out = d.clone();
+        for block in &set.blocks {
+            let m = &block.members;
+            let b = m.len();
+            let rb: Vec<_> = m.iter().map(|&k| bond(r, set.pairs[k])).collect();
+            let mut c = vec![0.0; b * b];
+            for (row, &k) in m.iter().enumerate() {
+                for (col, &l) in m.iter().enumerate() {
+                    c[row * b + col] =
+                        Tangent::coupling(set, k, l) * dot3(&rb[row], &self.bonds[l]);
+                }
+            }
+            let rhs = m
+                .iter()
+                .zip(&rb)
+                .map(|(&k, r)| dot3(&bond(d.view(), set.pairs[k]), r))
+                .collect();
+            let reversed = || ConstraintError::Reversed {
+                algorithm: ConstraintAlgorithm::Rattle,
+                pair: set.pairs[m[0]],
+            };
+            let mu = linalg::lu_solve(c, rhs).ok_or_else(reversed)?;
+            for (&k, mu) in m.iter().zip(&mu) {
+                let (i, j) = set.pairs[k];
+                let (wi, wj) = (set.inverse_mass(i), set.inverse_mass(j));
+                for c in 0..3 {
+                    out[3 * i + c] -= wi * mu * self.bonds[k][c];
+                    out[3 * j + c] += wj * mu * self.bonds[k][c];
+                }
+            }
+        }
+        Ok(out)
     }
 }
 

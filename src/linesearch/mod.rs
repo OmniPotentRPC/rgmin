@@ -81,7 +81,7 @@ impl LineSearch {
     /// without probing.
     pub fn search<F>(
         &self,
-        mut oracle: F,
+        oracle: F,
         pos: ArrayView1<'_, f64>,
         dir: ArrayView1<'_, f64>,
         istep: f64,
@@ -89,10 +89,23 @@ impl LineSearch {
     where
         F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
     {
+        self.search_path(oracle, &mut Line { pos, dir }, istep)
+    }
+
+    /// [`Self::search`] along any [`Path`]. A point the path cannot
+    /// produce scores as a non-finite value.
+    pub(crate) fn search_path<F, P>(
+        &self,
+        mut oracle: F,
+        path: &mut P,
+        istep: f64,
+    ) -> (Array1<f64>, f64, f64)
+    where
+        F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+        P: Path + ?Sized,
+    {
         match *self {
-            Self::Brent { maxiter, tol } => {
-                brent_search(&mut oracle, pos, dir, istep, maxiter, tol)
-            }
+            Self::Brent { maxiter, tol } => brent_search(&mut oracle, path, istep, maxiter, tol),
             Self::Backtracking { c, beta, maxiter } => {
                 let rule = Backtrack {
                     c,
@@ -100,7 +113,7 @@ impl LineSearch {
                     maxiter,
                     goldstein: false,
                 };
-                backtrack_search(&mut oracle, pos, dir, istep, rule)
+                backtrack_search(&mut oracle, path, istep, rule)
             }
             Self::Goldstein { c, beta, maxiter } => {
                 let rule = Backtrack {
@@ -109,12 +122,45 @@ impl LineSearch {
                     maxiter,
                     goldstein: true,
                 };
-                backtrack_search(&mut oracle, pos, dir, istep, rule)
+                backtrack_search(&mut oracle, path, istep, rule)
             }
             Self::Wolfe { c1, c2, maxiter } => {
-                zoom::wolfe_search(&mut oracle, pos, dir, istep, c1, c2, maxiter)
+                zoom::wolfe_search(&mut oracle, path, istep, c1, c2, maxiter)
             }
         }
+    }
+}
+
+/// The curve a line search probes: `x(t)` and the slope of `f` along it.
+pub(crate) trait Path {
+    /// `x(0)`.
+    fn start(&self) -> Array1<f64>;
+    /// `x'(0)`.
+    fn direction(&self) -> ArrayView1<'_, f64>;
+    /// `x(t)`, `None` where the curve is not defined.
+    fn point(&mut self, t: f64) -> Option<Array1<f64>>;
+    /// `g . x'(t)` for the gradient `g` at `at = x(t)`.
+    fn slope(&mut self, t: f64, at: ArrayView1<'_, f64>, g: ArrayView1<'_, f64>) -> f64;
+}
+
+/// The straight line `pos + t dir`.
+pub(crate) struct Line<'a> {
+    pub(crate) pos: ArrayView1<'a, f64>,
+    pub(crate) dir: ArrayView1<'a, f64>,
+}
+
+impl Path for Line<'_> {
+    fn start(&self) -> Array1<f64> {
+        self.pos.to_owned()
+    }
+    fn direction(&self) -> ArrayView1<'_, f64> {
+        self.dir.view()
+    }
+    fn point(&mut self, t: f64) -> Option<Array1<f64>> {
+        Some(axpy(self.pos, t, self.dir))
+    }
+    fn slope(&mut self, _t: f64, _at: ArrayView1<'_, f64>, g: ArrayView1<'_, f64>) -> f64 {
+        g.iter().zip(self.dir.iter()).map(|(g, d)| g * d).sum()
     }
 }
 
@@ -140,31 +186,40 @@ fn unusable(f0: f64, g0: &Array1<f64>, dir: ArrayView1<'_, f64>) -> bool {
     !crate::step::finite(f0, g0.view()) || dir.iter().any(|v| !v.is_finite())
 }
 
-fn brent_search<F>(
+/// `(x(t), f, g)` with `f` scored, `None` where the path is undefined.
+fn probe<F, P>(oracle: &mut F, path: &mut P, t: f64) -> Option<(Array1<f64>, f64, Array1<f64>)>
+where
+    F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    P: Path + ?Sized,
+{
+    let x = path.point(t)?;
+    let (f, g) = oracle(x.view());
+    let f = scored(f, g.view());
+    Some((x, f, g))
+}
+
+fn brent_search<F, P>(
     oracle: &mut F,
-    pos: ArrayView1<'_, f64>,
-    dir: ArrayView1<'_, f64>,
+    path: &mut P,
     istep: f64,
     maxiter: usize,
     tol: f64,
 ) -> (Array1<f64>, f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    P: Path + ?Sized,
 {
-    let (f0, g0) = oracle(pos);
-    if unusable(f0, &g0, dir) {
-        return (pos.to_owned(), f0, 0.0);
+    let pos = path.start();
+    let (f0, g0) = oracle(pos.view());
+    if unusable(f0, &g0, path.direction()) {
+        return (pos, f0, 0.0);
     }
-    let mut phi = |t: f64| {
-        let (f, g) = oracle(axpy(pos, t, dir).view());
-        scored(f, g.view())
-    };
+    let mut phi = |t: f64| probe(oracle, path, t).map_or(f64::INFINITY, |(_, f, _)| f);
     let (a, b) = bracket(&mut phi, 0.0, istep.max(1e-12), maxiter);
     let (t, ft) = brent(&mut phi, a, b, tol, maxiter.max(20));
-    if ft < f0 {
-        (axpy(pos, t, dir), ft, t.abs())
-    } else {
-        (pos.to_owned(), f0, 0.0)
+    match path.point(t) {
+        Some(x) if ft < f0 => (x, ft, t.abs()),
+        _ => (pos, f0, 0.0),
     }
 }
 
@@ -177,15 +232,15 @@ struct Backtrack {
     goldstein: bool,
 }
 
-fn backtrack_search<F>(
+fn backtrack_search<F, P>(
     oracle: &mut F,
-    pos: ArrayView1<'_, f64>,
-    dir: ArrayView1<'_, f64>,
+    path: &mut P,
     istep: f64,
     rule: Backtrack,
 ) -> (Array1<f64>, f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    P: Path + ?Sized,
 {
     let Backtrack {
         c,
@@ -193,20 +248,22 @@ where
         maxiter,
         goldstein,
     } = rule;
-    let (f0, g0) = oracle(pos);
-    if unusable(f0, &g0, dir) {
-        return (pos.to_owned(), f0, 0.0);
+    let pos = path.start();
+    let (f0, g0) = oracle(pos.view());
+    if unusable(f0, &g0, path.direction()) {
+        return (pos, f0, 0.0);
     }
-    let slope: f64 = g0.iter().zip(dir.iter()).map(|(g, d)| g * d).sum();
+    let slope: f64 = path.slope(0.0, pos.view(), g0.view());
     let mut alpha = istep.max(1e-16);
-    let mut best_x = pos.to_owned();
+    let mut best_x = pos.clone();
     let mut best_f = f0;
     let mut best_alpha = 0.0;
     for _ in 0..maxiter {
-        let x = axpy(pos, alpha, dir);
-        let (f, g) = oracle(x.view());
-        let f = scored(f, g.view());
-        if f < best_f {
+        let (x, f) = match probe(oracle, path, alpha) {
+            Some((x, f, _)) => (Some(x), f),
+            None => (None, f64::INFINITY),
+        };
+        if let (true, Some(x)) = (f < best_f, &x) {
             best_f = f;
             best_x = x.clone();
             best_alpha = alpha;
@@ -216,7 +273,7 @@ where
         } else {
             conditions::armijo(f, f0, alpha, slope, c)
         };
-        if accept {
+        if let (true, Some(x)) = (accept, x) {
             return (x, f, alpha.abs());
         }
         if goldstein && conditions::armijo(f, f0, alpha, slope, c) {
@@ -233,7 +290,7 @@ where
     if best_f < f0 {
         (best_x, best_f, best_alpha.abs())
     } else {
-        (pos.to_owned(), f0, 0.0)
+        (pos, f0, 0.0)
     }
 }
 

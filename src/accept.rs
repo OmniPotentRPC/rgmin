@@ -12,10 +12,14 @@ use crate::step::{
     cap_displacement_atom, finite, l2, max_atom_motion, scale_step, scale_step_atom,
 };
 
-const ENERGY_RISE: f64 = 1.0e-8;
+pub(crate) const ENERGY_RISE: f64 = 1.0e-8;
 const WINDOW: usize = 5;
 /// Shrink passes after the first retraction. Each must cut the overshoot.
 const SHRINK_PASSES: usize = 8;
+/// Halvings of the proposed step before the steepest-descent fallback.
+pub(crate) const HALVINGS: usize = 10;
+/// Length of the steepest-descent fallback relative to the gradient.
+pub(crate) const FALLBACK_STEP: f64 = 0.1;
 
 /// eOn `lbfgs_accept`. Default takes the clipped step (one oracle).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -122,7 +126,7 @@ where
     Some(obj.bounds().clip(trial.view()))
 }
 
-fn push_energy(hist: &mut VecDeque<f64>, energy: f64) {
+pub(crate) fn push_energy(hist: &mut VecDeque<f64>, energy: f64) {
     hist.push_back(energy);
     while hist.len() > WINDOW {
         hist.pop_front();
@@ -226,7 +230,7 @@ where
                 ref_e = m;
             }
             let mut alpha = 1.0;
-            for _ in 0..10 {
+            for _ in 0..HALVINGS {
                 if let Some(trial) =
                     trial_point(obj, pos, dir, alpha, control, atom_maxmove, manifold)
                 {
@@ -248,8 +252,15 @@ where
             // caller chose. A fallback that also fails reports unmoved,
             // and the caller's stall machinery owns what happens next.
             let sd = grad.mapv(|g| -g);
-            let Some(trial) = trial_point(obj, pos, &sd, 0.1, control, atom_maxmove, manifold)
-            else {
+            let Some(trial) = trial_point(
+                obj,
+                pos,
+                &sd,
+                FALLBACK_STEP,
+                control,
+                atom_maxmove,
+                manifold,
+            ) else {
                 return (pos.clone(), value, grad.clone(), false);
             };
             let (ft, gt) = obj.value_and_gradient(trial.view());

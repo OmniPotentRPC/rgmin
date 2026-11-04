@@ -41,6 +41,10 @@ still limits the displacement. A HiGHS feasible set and a
 non-Euclidean manifold keep the two-loop step.
 ~set_project_rigid~ projects translations and rotations on isolated
 clusters.
+~set_distance_constraints~ keeps atom pairs at fixed distances on
+every later step; see @@rst::doc:`constraints`@@.
+With a set, L-BFGS keeps its two-loop step under ~set_accept~, and
+the per-atom cap scales each trial before it returns to the set.
 
 ** C
 
@@ -73,7 +77,7 @@ together is not asked twice.
 | ~clear_exp~ | Drop that preconditioner |
 | ~exp_mu~ | Its energy scale after estimation, or none when it is not installed |
 | ~set_accept~ | ~none~ / ~energy~ / ~nonmonotone~ |
-| ~set_atom_maxmove~ | Per-atom cap. Euclidean L-BFGS takes the geometry step and ignores ~set_accept~. ~set_exp~ supplies its initial inverse Hessian |
+| ~set_atom_maxmove~ | Per-atom cap. Without a distance set, Euclidean L-BFGS takes the geometry step and ignores ~set_accept~, and ~set_exp~ supplies its initial inverse Hessian. With a set, every method scales its trial to the cap and keeps ~set_accept~ |
 | ~set_project_rigid~ | Drop rigid modes on isolated clusters |
 | ~set_extra_updates~ | Al-Baali extra L-BFGS pairs |
 | ~set_cautious~ | Li--Fukushima pair filter |
@@ -85,6 +89,8 @@ together is not asked twice.
 | ~set_masses~ | Per-atom masses for ~mw_rigid~ (Page–McIver) |
 | ~set_fire_preset~ | ~fire2~ only: Guenole 2020 Table 1 parameters; restarts the integrator |
 | ~set_fire_abc~ | ~fire2~ only: ABC-FIRE bias correction with a per-component cap |
+| ~set_distance_constraints~ | Keep atom pairs at fixed distances with SHAKE, LINCS or SETTLE; a setting the set cannot run with is a typed error |
+| ~clear_distance_constraints~ | Drop the set and the method memory |
 
 ** When to use ~rgmin_minimize~ instead
 

@@ -1,6 +1,9 @@
 //! Persistent solver session. One [`Solver::step`] is one outer iteration.
 
+mod constrained;
+
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use eindir_core::{DifferentiableObjective, Objective};
 use ndarray::{Array1, Array2, ArrayView1};
@@ -19,6 +22,7 @@ use crate::fire::{
     fire_clip_components, fire_displacement, fire_displacement_metric, fire_prepare_v2,
     project_box_tangent,
 };
+use crate::holonomic::DistanceConstraints;
 use crate::hvp::{
     FiniteDifference, HessianVector, NewtonCgRequest, OptionalAction, newton_cg_step,
     sym_eig_jacobi,
@@ -45,6 +49,14 @@ use crate::step::{
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
 };
+
+/// The smallest initial trust radius, taken when `istep` is smaller.
+const RADIUS_START: f64 = 1e-8;
+/// The largest trust radius, in units of the current one, when no
+/// `maxmove` caps it.
+const RADIUS_GROWTH: f64 = 8.0;
+/// Saddle-escape kicks from one stationary point.
+const SADDLE_KICKS: u8 = 4;
 
 /// `P^{-1} v` when an exponential metric is installed, otherwise `v`.
 fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Array1<f64> {
@@ -138,6 +150,9 @@ pub struct Solver {
     /// Negative-curvature kicks already taken in this solve.
     saddle_kicks: u8,
     stop_norm: StopNorm,
+    /// Holonomic distance constraints. With a set, `last_grad` is the
+    /// raw gradient, whose multipliers the Hessian steps need.
+    constraints: Option<Arc<DistanceConstraints>>,
     inner: Inner,
 }
 
@@ -269,6 +284,7 @@ impl Solver {
             exp: None,
             saddle_kicks: 0,
             stop_norm: StopNorm::Two,
+            constraints: None,
             inner,
         }
     }
@@ -447,6 +463,10 @@ impl Solver {
     }
 
     /// eOn `maxAtomMotionAppliedV`. Preferred over the Euclidean cap.
+    /// Without a distance constraint set, Euclidean L-BFGS then takes the
+    /// geometry step and ignores [`Self::set_accept`]; with a set it keeps
+    /// the two-loop step under the acceptance mode, and the cap scales
+    /// each trial before it returns to the set.
     pub fn set_atom_maxmove(&mut self, maxmove: f64) {
         self.atom_maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };
         #[cfg(feature = "highs")]
@@ -463,6 +483,33 @@ impl Solver {
     /// Periodic cell. Sella leaves `proj_rot` off; the quotient is \(R^{3N}/T(3)\).
     pub fn set_periodic(&mut self, periodic: bool) {
         self.periodic = periodic;
+    }
+
+    /// Keep every pair of `set` at its length on every later step, with
+    /// the set's masses as the metric of every method. The memory of the
+    /// method restarts. A step under a setting the set cannot honour
+    /// returns [`crate::ConstraintError::Unsupported`]: a manifold other
+    /// than Euclidean coordinates, the exponential preconditioner, the
+    /// HiGHS step, a periodic cell, particle swarm, or rigid projection
+    /// at an active coordinate bound. A trial that takes a constrained
+    /// atom to its coordinate bound is [`crate::ConstraintError::Bound`].
+    pub fn set_distance_constraints(&mut self, set: DistanceConstraints) -> Result<()> {
+        self.refuse_constraint_settings(&set)?;
+        self.constraints = Some(Arc::new(set));
+        self.forget();
+        Ok(())
+    }
+
+    /// Drop the constraint set. The memory of the method restarts.
+    pub fn clear_distance_constraints(&mut self) {
+        if self.constraints.take().is_some() {
+            self.forget();
+        }
+    }
+
+    /// The constraint set, if any.
+    pub fn distance_constraints(&self) -> Option<&DistanceConstraints> {
+        self.constraints.as_deref()
     }
 
     /// Embedded manifold for project / retract / transport.
@@ -1007,6 +1054,15 @@ impl Solver {
         if s.len() != self.dim || y.len() != self.dim {
             return false;
         }
+        if self.constraints.is_some() {
+            let Ok((s, y)) = self.constrained_pair(s, y) else {
+                return false;
+            };
+            return match &mut self.inner {
+                Inner::Lbfgs(solver) => solver.push(s, y),
+                _ => false,
+            };
+        }
         match &mut self.inner {
             Inner::Lbfgs(solver) => {
                 solver.push(s.to_owned(), y.to_owned());
@@ -1031,6 +1087,9 @@ impl Solver {
                 dim: self.dim,
                 got: g.len(),
             });
+        }
+        if self.constraints.is_some() {
+            return self.constrained_direction(g);
         }
         let dir = match &self.inner {
             // Two-loop only. search_direction would try HiGHS from
@@ -1100,7 +1159,7 @@ impl Solver {
                 *prev_y = None;
             }
             Inner::Dogleg { radius } | Inner::NewtonCg { radius } | Inner::NewtonPcg { radius } => {
-                *radius = self.control.istep.max(1e-8);
+                *radius = self.control.istep.max(RADIUS_START);
             }
         }
     }
@@ -1114,6 +1173,9 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        if self.constraints.is_some() {
+            return self.constrained_step(x, |s, x| s.step_constrained(obj, x));
+        }
         if matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. }) {
             return self.step_newton_cg(obj, x, &FiniteDifference);
         }
@@ -1140,6 +1202,9 @@ impl Solver {
     where
         O: HessianObjective + ?Sized,
     {
+        if self.constraints.is_some() {
+            return self.constrained_step(x, |s, x| s.step_constrained_hess(obj, x));
+        }
         // Newton-CG never forms `obj.hessian`, even when the caller
         // handed a dense oracle to this verb. The product is a forward
         // difference of gradients.
@@ -1174,6 +1239,9 @@ impl Solver {
             return Err(Error::NeedHvp);
         }
         let action = |xv: ArrayView1<f64>, v: ArrayView1<f64>| obj.hessian_vector(xv, v);
+        if self.constraints.is_some() {
+            return self.constrained_step(x, |s, x| s.step_constrained_newton_cg(obj, x, &action));
+        }
         self.step_newton_cg(obj, x, &action)
     }
 
@@ -1218,7 +1286,11 @@ impl Solver {
         };
         // Same ceiling as dogleg: Euclidean `maxmove` when one is set,
         // otherwise eight times the current radius, and never below it.
-        let rmax = self.control.maxmove.unwrap_or(radius * 8.0).max(radius);
+        let rmax = self
+            .control
+            .maxmove
+            .unwrap_or(radius * RADIUS_GROWTH)
+            .max(radius);
         let taken = newton_cg_step(
             obj,
             x,
@@ -1578,7 +1650,7 @@ impl Solver {
     {
         loop {
             let gnorm = self.stationarity_norm(x, grad);
-            if gnorm > self.control.gtol || self.saddle_kicks >= 4 {
+            if gnorm > self.control.gtol || self.saddle_kicks >= SADDLE_KICKS {
                 return;
             }
             let hess = obj.hessian(x.view());
@@ -1587,7 +1659,7 @@ impl Solver {
             };
             let cap = self
                 .atom_maxmove
-                .unwrap_or_else(|| self.control.istep.max(1.0e-8));
+                .unwrap_or_else(|| self.control.istep.max(RADIUS_START));
             let step = scale_displacement_to_atom_cap(&mode, cap);
             let trial = obj.bounds().clip((&*x + &step).view());
             let (v, g) = obj.value_and_gradient(trial.view());
@@ -1599,7 +1671,7 @@ impl Solver {
             *grad = self.horizontal_grad(x, &g);
             self.saddle_kicks = self.saddle_kicks.saturating_add(1);
             if let Inner::Dogleg { radius } = &mut self.inner {
-                *radius = self.control.istep.max(1.0e-8);
+                *radius = self.control.istep.max(RADIUS_START);
             }
             self.remember(x, *value, grad);
         }
@@ -1795,7 +1867,7 @@ impl Solver {
     {
         let radius = match &self.inner {
             Inner::Dogleg { radius } => *radius,
-            _ => self.control.istep.max(1e-8),
+            _ => self.control.istep.max(RADIUS_START),
         };
         // Nocedal and Wright, algorithm 4.1: grow Δ only when the trust
         // step meets the boundary, and only up to a Euclidean Δ_max.
@@ -1808,7 +1880,11 @@ impl Solver {
         // the shorter trial looks interior, so Δ does not grow.
         // Δ_max is the Euclidean `maxmove` when one is set, otherwise
         // eight times the current radius. The cap still limits the trial.
-        let rmax = self.control.maxmove.unwrap_or(radius * 8.0).max(radius);
+        let rmax = self
+            .control
+            .maxmove
+            .unwrap_or(radius * RADIUS_GROWTH)
+            .max(radius);
         // A curved kind steps in the tangent space. The dogleg point is
         // tangent, the trial is the retracted tangent step, and the ratio
         // compares the energy there with the tangent model.
@@ -2650,13 +2726,13 @@ impl Inner {
                 prev_y: None,
             },
             Method::Dogleg => Inner::Dogleg {
-                radius: istep.max(1e-8),
+                radius: istep.max(RADIUS_START),
             },
             Method::NewtonCg => Inner::NewtonCg {
-                radius: istep.max(1e-8),
+                radius: istep.max(RADIUS_START),
             },
             Method::NewtonPcg => Inner::NewtonPcg {
-                radius: istep.max(1e-8),
+                radius: istep.max(RADIUS_START),
             },
         }
     }

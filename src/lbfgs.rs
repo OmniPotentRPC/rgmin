@@ -358,6 +358,33 @@ impl Lbfgs {
         self.stored = stored && kept;
     }
 
+    /// [`Self::transport`] with a map that can fail. Every pair is mapped
+    /// before any is replaced, so a failure leaves the memory as it was.
+    pub(crate) fn try_transport<F, E>(&mut self, mut map: F) -> std::result::Result<(), E>
+    where
+        F: FnMut(&Array1<f64>) -> std::result::Result<Array1<f64>, E>,
+    {
+        let moved = self
+            .memory
+            .iter()
+            .map(|pair| Ok((map(&pair.s)?, map(&pair.y)?)))
+            .collect::<std::result::Result<Vec<_>, E>>()?;
+        let stored = self.stored;
+        self.memory.clear();
+        let mut kept = false;
+        for (s, y) in moved {
+            kept = self.push_pair(s, y, None);
+        }
+        self.stored = stored && kept;
+        Ok(())
+    }
+
+    /// Stored pairs, oldest first.
+    #[cfg(test)]
+    pub(crate) fn pairs(&self) -> impl Iterator<Item = (&Array1<f64>, &Array1<f64>)> {
+        self.memory.iter().map(|p| (&p.s, &p.y))
+    }
+
     pub(crate) fn push(&mut self, s: Array1<f64>, y: Array1<f64>) -> bool {
         self.push_pair(s, y, None)
     }
@@ -863,11 +890,7 @@ mod tests {
     use super::Lbfgs;
 
     fn held(lbfgs: &Lbfgs) -> Vec<(Array1<f64>, Array1<f64>)> {
-        lbfgs
-            .memory
-            .iter()
-            .map(|p| (p.s.clone(), p.y.clone()))
-            .collect()
+        lbfgs.pairs().map(|(s, y)| (s.clone(), y.clone())).collect()
     }
 
     /// A transport that drops the newest pair leaves no pair of the latest
@@ -879,6 +902,41 @@ mod tests {
         assert!(lbfgs.push(array![1.0, 1.0], array![-1.0, 3.0]));
         // On the first coordinate alone the newer pair has s.y = -1.
         lbfgs.transport(|v| array![v[0], 0.0]);
+        let older = (array![1.0, 0.0], array![2.0, 0.0]);
+        assert_eq!(held(&lbfgs), vec![older.clone()]);
+        lbfgs.replace_newest(array![0.0, 1.0], array![0.0, 3.0], None);
+        assert_eq!(
+            held(&lbfgs),
+            vec![older, (array![0.0, 1.0], array![0.0, 3.0])]
+        );
+    }
+
+    /// A map that fails on the second pair, after the first has moved,
+    /// leaves both pairs as they were.
+    #[test]
+    fn a_failed_transport_keeps_every_pair() {
+        let mut lbfgs = Lbfgs::with_capacity(4);
+        assert!(lbfgs.push(array![1.0, 0.0], array![2.0, 0.0]));
+        assert!(lbfgs.push(array![0.0, 1.0], array![0.0, 3.0]));
+        let before = held(&lbfgs);
+        let mut calls = 0;
+        let moved = lbfgs.try_transport(|v| {
+            calls += 1;
+            if calls < 3 { Ok(v * 0.5) } else { Err(calls) }
+        });
+        assert_eq!(moved, Err(3));
+        assert_eq!(held(&lbfgs), before);
+        assert!(lbfgs.stored);
+    }
+    /// A fallible transport that succeeds but drops the newest pair also
+    /// leaves the older pair to the next replacement.
+    #[test]
+    fn a_fallible_transport_that_drops_the_newest_pair_keeps_the_older_one() {
+        let mut lbfgs = Lbfgs::with_capacity(4);
+        assert!(lbfgs.push(array![1.0, 0.0], array![2.0, 0.0]));
+        assert!(lbfgs.push(array![1.0, 1.0], array![-1.0, 3.0]));
+        let moved: Result<(), ()> = lbfgs.try_transport(|v| Ok(array![v[0], 0.0]));
+        assert_eq!(moved, Ok(()));
         let older = (array![1.0, 0.0], array![2.0, 0.0]);
         assert_eq!(held(&lbfgs), vec![older.clone()]);
         lbfgs.replace_newest(array![0.0, 1.0], array![0.0, 3.0], None);
