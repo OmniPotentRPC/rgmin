@@ -95,9 +95,9 @@ where
 }
 
 /// From inside the answered box every path must stay inside it, probe no
-/// runaway or NaN coordinate, and report a finite value. FIRE and
-/// `Accept::Step` take one step with no line search to shorten it, so they
-/// may refuse with [`Error::Oracle`] instead.
+/// runaway or NaN coordinate, and report a finite value. FIRE may refuse
+/// with [`Error::Oracle`]. A refused Accept::Step trial returns the finite
+/// measured start and caches its gradient.
 fn refused_outside(value: f64, grad: Option<f64>) {
     let x0 = array![0.0, 0.0];
     let inside = |x: &Array1<f64>| x.iter().all(|v| v.abs() <= 2.0);
@@ -119,8 +119,7 @@ fn refused_outside(value: f64, grad: Option<f64>) {
             match out {
                 Ok(r) => assert!(r.value.is_finite() && inside(&r.coords), "{what}: {r:?}"),
                 Err(e) => assert!(
-                    matches!(e, Error::Oracle { .. })
-                        && (what.contains("fire") || what.ends_with("Step")),
+                    matches!(e, Error::Oracle { .. }) && what.contains("fire"),
                     "{what}: {e}"
                 ),
             }
@@ -189,14 +188,10 @@ fn a_refused_step_leaves_the_session_as_it_was() {
         ("fire", None, false),
         ("fire2", None, false),
         ("lbfgs", Some(0.1), true),
-        ("lbfgs", None, false),
     ] {
         let run = |refuse: bool| {
             let mut solver = Solver::new(Method::from_name(token).unwrap(), CONTROL.clone(), 3);
             solver.set_geometry_step(geometry);
-            if token == "lbfgs" && !geometry {
-                solver.set_accept(Accept::Step);
-            }
             if let Some(cap) = cap {
                 solver.set_atom_maxmove(cap);
             }
@@ -249,14 +244,10 @@ fn a_refused_first_step_leaves_the_session_new() {
         ("fire", None, false),
         ("fire2", None, false),
         ("lbfgs", Some(0.1), true),
-        ("lbfgs", None, false),
     ] {
         let run = |refuse: bool| {
             let mut solver = Solver::new(Method::from_name(token).unwrap(), CONTROL.clone(), 3);
             solver.set_geometry_step(geometry);
-            if token == "lbfgs" && !geometry {
-                solver.set_accept(Accept::Step);
-            }
             if let Some(cap) = cap {
                 solver.set_atom_maxmove(cap);
             }
@@ -286,37 +277,210 @@ fn a_refused_first_step_leaves_the_session_new() {
     }
 }
 
-/// An L-BFGS session under [`Accept::Step`] records the caller's move as a
-/// curvature pair before its one trial. A refused trial must take that
-/// pair back, or each retry from the moved point records it again.
+fn weighted_quadratic(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+    let weights = array![0.1, 0.2, 0.3];
+    let displacement = x.mapv(|v| v - 1.0);
+    (
+        (&weights * &displacement.mapv(|v| v * v)).sum(),
+        2.0 * &weights * &displacement,
+    )
+}
+
+/// A refused direct Step reports the cached measured start. Its curvature
+/// and next trial match a run without refusals, including proposal guards.
+#[test]
+fn a_refused_direct_step_keeps_its_measured_start_and_history() {
+    let open = AtomicBool::new(true);
+    let probed = Mutex::new(Vec::new());
+    let fg = |x: ArrayView1<f64>| {
+        probed.lock().unwrap().push(x.to_owned());
+        let (value, gradient) = weighted_quadratic(x);
+        (if open.load(SeqCst) { value } else { f64::NAN }, gradient)
+    };
+    let obj = Oracle::unbounded(3, &fg);
+    for guarded in [false, true] {
+        let run = |refuse: bool| {
+            open.store(true, SeqCst);
+            let mut solver = Solver::new(Method::lbfgs(), CONTROL.clone(), 3);
+            solver.set_accept(Accept::Step);
+            solver.set_lbfgs_neb_guards(guarded);
+            let mut x = Array1::zeros(3);
+            solver.step(&obj, &mut x).unwrap();
+            let start_report = solver.step(&obj, &mut x).unwrap();
+            let start = x.clone();
+            let pairs = solver.pair_count();
+            assert!(pairs > 0);
+            let gradient = weighted_quadratic(start.view()).1;
+            let direction = solver.search_direction(gradient.view()).unwrap();
+            let mut trials = Vec::new();
+            open.store(!refuse, SeqCst);
+            for iteration in 0..2 * usize::from(refuse) {
+                probed.lock().unwrap().clear();
+                let report = solver.step(&obj, &mut x).unwrap();
+                assert_eq!(x, start);
+                assert_eq!(report.coords, start);
+                assert_eq!(report.value, start_report.value);
+                assert_eq!(report.grad_norm, start_report.grad_norm);
+                assert_eq!(report.steps, start_report.steps + iteration + 1);
+                assert_eq!(solver.pair_count(), pairs);
+                assert_eq!(solver.search_direction(gradient.view()).unwrap(), direction);
+                let seen = std::mem::take(&mut *probed.lock().unwrap());
+                assert_eq!(seen.len(), 1, "cached start must not be evaluated again");
+                assert!(seen[0].iter().all(|v| v.is_finite()));
+                trials.push(seen[0].clone());
+            }
+            if refuse {
+                assert_eq!(trials[0], trials[1]);
+            }
+            open.store(true, SeqCst);
+            probed.lock().unwrap().clear();
+            let report = solver.step(&obj, &mut x).unwrap();
+            let seen = std::mem::take(&mut *probed.lock().unwrap());
+            assert_eq!(seen.len(), 1);
+            if refuse {
+                assert_eq!(seen[0], trials[0]);
+            }
+            (
+                report.value,
+                report.coords,
+                report.grad_norm,
+                solver.pair_count(),
+                seen,
+            )
+        };
+        assert_eq!(run(true), run(false), "guards {guarded}");
+    }
+}
+
+/// The finite start of a refused first Step is adopted and cached. A
+/// caller move then records its measured secant, matching explicit history.
+#[test]
+fn a_refused_first_direct_step_adopts_only_its_finite_start() {
+    let open = AtomicBool::new(false);
+    let probed = Mutex::new(Vec::new());
+    let start = Array1::<f64>::zeros(3);
+    let fg = |x: ArrayView1<f64>| {
+        probed.lock().unwrap().push(x.to_owned());
+        let value = 50.0 * x.mapv(|v| (v - 1.0) * (v - 1.0)).sum();
+        let answered = open.load(SeqCst) || x == start;
+        (
+            if answered { value } else { f64::NAN },
+            x.mapv(|v| 100.0 * (v - 1.0)),
+        )
+    };
+    let obj = Oracle::unbounded(3, &fg);
+    let mut solver = Solver::new(Method::lbfgs(), CONTROL.clone(), 3);
+    solver.set_accept(Accept::Step);
+    let mut x = start.clone();
+    let mut trials = Vec::new();
+    for iteration in 0..2 {
+        probed.lock().unwrap().clear();
+        let report = solver.step(&obj, &mut x).unwrap();
+        assert_eq!(x, start);
+        assert_eq!(report.coords, start);
+        assert_eq!(report.value, 150.0);
+        assert!((report.grad_norm - 100.0 * 3.0_f64.sqrt()).abs() < 1e-12);
+        assert_eq!(report.steps, iteration + 1);
+        assert_eq!(solver.pair_count(), 0);
+        let seen = std::mem::take(&mut *probed.lock().unwrap());
+        assert_eq!(seen.len(), if iteration == 0 { 2 } else { 1 });
+        if iteration == 0 {
+            assert_eq!(seen[0], start);
+        }
+        assert!(seen.last().unwrap().iter().all(|v| v.is_finite()));
+        trials.push(seen.last().unwrap().clone());
+    }
+    assert_eq!(trials[0], trials[1]);
+    open.store(true, SeqCst);
+    x.fill(0.99);
+    let moved = x.clone();
+    let secant = &moved - &start;
+    let gradient_change = moved.mapv(|v| 100.0 * (v - 1.0)) - start.mapv(|v| 100.0 * (v - 1.0));
+    probed.lock().unwrap().clear();
+    let report = solver.step(&obj, &mut x).unwrap();
+    assert_eq!(probed.lock().unwrap().len(), 2);
+    assert_eq!(report.steps, 3);
+    assert_eq!(solver.pair_count(), 2);
+    let mut reference = Solver::new(Method::lbfgs(), CONTROL.clone(), 3);
+    reference.set_accept(Accept::Step);
+    assert!(reference.push_pair(secant.view(), gradient_change.view()));
+    let mut reference_x = moved;
+    let expected = reference.step(&obj, &mut reference_x).unwrap();
+    assert_eq!(x, reference_x);
+    assert_eq!(report.value, expected.value);
+    assert_eq!(report.grad_norm, expected.grad_norm);
+    assert_eq!(solver.pair_count(), reference.pair_count());
+}
+
+/// A caller move has a measured secant even when the following Step is
+/// refused. Adopting that start records the pair once and caches its answer.
 #[test]
 fn a_refused_trial_after_a_move_records_the_move_once() {
     let open = AtomicBool::new(true);
+    let probed = Mutex::new(Vec::new());
     let moved = array![0.25, 0.38, 0.63];
     let fg = |x: ArrayView1<f64>| {
-        let w = array![0.1, 0.2, 0.3];
-        let f = (&w * &x.mapv(|v| (v - 1.0) * (v - 1.0))).sum();
+        probed.lock().unwrap().push(x.to_owned());
+        let (value, gradient) = weighted_quadratic(x);
         let answered = open.load(SeqCst) || x == moved;
-        let f = if answered { f } else { f64::NAN };
-        (f, 2.0 * &w * &x.mapv(|v| v - 1.0))
+        (if answered { value } else { f64::NAN }, gradient)
     };
     let obj = Oracle::unbounded(3, &fg);
     let run = |refuse: bool| {
+        open.store(true, SeqCst);
         let mut solver = Solver::new(Method::lbfgs(), CONTROL.clone(), 3);
         solver.set_accept(Accept::Step);
         let mut x = Array1::zeros(3);
-        solver.step(&obj, &mut x).unwrap();
+        let previous = solver.step(&obj, &mut x).unwrap();
         let pairs = solver.pair_count();
         x.assign(&moved);
+        let (value, gradient) = weighted_quadratic(moved.view());
+        let mut trials = Vec::new();
+        let mut retained_direction = None;
         open.store(!refuse, SeqCst);
-        for _ in 0..2 * usize::from(refuse) {
-            let out = solver.step(&obj, &mut x);
-            assert!(matches!(out, Err(Error::Oracle { .. })), "{out:?}");
-            assert_eq!((solver.pair_count(), &x), (pairs, &moved));
+        for iteration in 0..2 * usize::from(refuse) {
+            probed.lock().unwrap().clear();
+            let report = solver.step(&obj, &mut x).unwrap();
+            assert_eq!(x, moved);
+            assert_eq!(report.coords, moved);
+            assert_eq!(report.value, value);
+            assert!((report.grad_norm - gradient.dot(&gradient).sqrt()).abs() < 1e-14);
+            assert_eq!(report.steps, previous.steps + iteration + 1);
+            assert_eq!(solver.pair_count(), pairs + 1);
+            let direction = solver.search_direction(gradient.view()).unwrap();
+            if let Some(expected) = &retained_direction {
+                assert_eq!(&direction, expected);
+            }
+            retained_direction = Some(direction);
+            let seen = std::mem::take(&mut *probed.lock().unwrap());
+            assert_eq!(seen.len(), if iteration == 0 { 2 } else { 1 });
+            if iteration == 0 {
+                assert_eq!(seen[0], moved);
+            }
+            assert!(seen.last().unwrap().iter().all(|v| v.is_finite()));
+            trials.push(seen.last().unwrap().clone());
+        }
+        if refuse {
+            assert_eq!(trials[0], trials[1]);
         }
         open.store(true, SeqCst);
-        let r = solver.step(&obj, &mut x).unwrap();
-        (r.value, r.coords, solver.pair_count())
+        probed.lock().unwrap().clear();
+        let report = solver.step(&obj, &mut x).unwrap();
+        let seen = std::mem::take(&mut *probed.lock().unwrap());
+        assert_eq!(seen.len(), if refuse { 1 } else { 2 });
+        if refuse {
+            assert_eq!(seen[0], trials[0]);
+        } else {
+            assert_eq!(seen[0], moved);
+        }
+        assert_eq!(report.steps, previous.steps + 2 * usize::from(refuse) + 1);
+        (
+            report.value,
+            report.coords,
+            report.grad_norm,
+            solver.pair_count(),
+            seen.last().unwrap().clone(),
+        )
     };
     assert_eq!(run(true), run(false));
 }

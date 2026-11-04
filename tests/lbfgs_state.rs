@@ -150,7 +150,9 @@ fn a_recognised_descent_returns_the_stand_in_and_refunds_the_rest() {
 /// other operand against NaN, so an infinity-norm fold over an all-NaN
 /// gradient is zero, which passes any tolerance: measured before the
 /// guard, this test terminated in one iteration reporting success at a
-/// garbage point.
+/// garbage point. No direction from such a start is defined, so the
+/// relaxation ends there at `+inf`, the value no caller reads as a minimum,
+/// without probing along the NaN direction.
 #[test]
 fn a_nan_gradient_is_not_convergence() {
     for norm in [rgmin::GradNorm::Infinity, rgmin::GradNorm::Euclidean] {
@@ -159,16 +161,21 @@ fn a_nan_gradient_is_not_convergence() {
         opt.norm = norm;
         opt.gtol = 1e-6;
         let mut calls = 0usize;
-        let (f, _, evals) = opt.minimize(x0.view(), 5, |v| {
+        let mut probed_nan = false;
+        let (f, x, evals) = opt.minimize(x0.view(), 5, |v| {
             calls += 1;
+            probed_nan |= v.iter().any(|c| !c.is_finite());
             let g = Array1::from(vec![f64::NAN; v.len()]);
             Some((1.0, g))
         });
-        assert!(
-            calls > 1,
-            "an all-NaN gradient must not satisfy the convergence test on \
-             the first evaluation (norm {norm:?}, f {f}, evals {evals})"
+        assert_eq!(
+            f,
+            f64::INFINITY,
+            "an all-NaN gradient must not read as a minimum of value 1 \
+             (norm {norm:?}, evals {evals})"
         );
+        assert!(!probed_nan, "a NaN direction was probed (norm {norm:?})");
+        assert_eq!((calls, evals, x), (1, 1, x0));
     }
 }
 
