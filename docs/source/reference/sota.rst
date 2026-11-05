@@ -73,6 +73,56 @@ Both arms converge. The remaining gap is bound handling and the
 L-BFGS-B Cauchy / subspace machinery, not a different unconstrained
 update.
 
+Relative-decrease stop
+~~~~~~~~~~~~~~~~~~~~~~
+
+The L-BFGS-B code also stops when one iteration lowers the value by
+little relative to the value.
+After a line search from ``f_k`` to ``f_{k+1}``, ``mainlb`` in the 3.0
+``lbfgsb.f`` stops on this test
+(`10.1145/2049662.2049669 <https://doi.org/10.1145/2049662.2049669>`_).
+
+::
+
+    f_k - f_{k+1} <= factr * eps * max(|f_k|, |f_{k+1}|, 1)
+
+Its comments give ``factr = 1e7`` for moderate accuracy, and SciPy's
+default ``ftol`` is that ``factr`` times the machine epsilon, about 2.22e-9.
+``Lbfgs::ftol`` is the same test, and its default of zero turns it off.
+``LBFGSB_FTOL`` is the SciPy value.
+SciPy with ``ftol = 0`` still stops on a step that leaves the value
+unchanged, while ``Lbfgs`` with ``ftol = 0`` skips the test.
+
+``cargo run --release --example lbfgs_ftol`` runs the default ``Lbfgs`` with
+each setting.
+The extended Rosenbrock runs start from ``(-1.2, 1, -1.2, 1, ...)``, and
+the Lennard-Jones (LJ) runs start from a cubic grid of spacing 1.1 with
+a small jitter.
+
+.. table::
+
+    +-----------------+---------------------+------------------------+---------------------------------+
+    | problem         | evals, ``ftol = 0`` | evals, ``LBFGSB_FTOL`` | final ``gmax``, ``LBFGSB_FTOL`` |
+    +=================+=====================+========================+=================================+
+    | Rosenbrock, 2   |                  49 |                     48 |                         1.96e-5 |
+    +-----------------+---------------------+------------------------+---------------------------------+
+    | Rosenbrock, 10  |                  92 |                     87 |                         1.33e-4 |
+    +-----------------+---------------------+------------------------+---------------------------------+
+    | Rosenbrock, 100 |                 635 |                    620 |                         1.31e-4 |
+    +-----------------+---------------------+------------------------+---------------------------------+
+    | LJ7             |                  58 |                     45 |                         2.33e-4 |
+    +-----------------+---------------------+------------------------+---------------------------------+
+    | LJ13            |                 135 |                    101 |                         1.23e-3 |
+    +-----------------+---------------------+------------------------+---------------------------------+
+    | LJ38            |                 415 |                    316 |                         3.42e-3 |
+    +-----------------+---------------------+------------------------+---------------------------------+
+
+Every ``ftol = 0`` run ends with ``norminf(g) < 1e-6``.
+The test saves the most on the clusters, where ``|f|`` is well above one.
+On LJ38 it saves 99 evaluations and ends 7.7e-6 above the energy of the
+``ftol = 0`` run.
+A caller that needs the gradient below ``gtol`` keeps ``ftol`` at zero.
+
 Newton and RFO when the Hessian is cheap
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -347,6 +397,9 @@ Defaults in this crate
 
 - First trial step: ``1`` when the memory is occupied (the Newton step);
   ``1 / norm(d)`` when the memory is empty (raw steepest descent)
+
+- Relative-decrease stop: off on ``Lbfgs`` (``ftol: 0.0``);
+  ``LBFGSB_FTOL`` is the SciPy L-BFGS-B default
 
 - Gradient stop: ``norminf(g) < 1e-6`` on ``Lbfgs``, ``norm2(g)`` on
   ``minimize_lbfgs`` so existing cold-start reports stay comparable
