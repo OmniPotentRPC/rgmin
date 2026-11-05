@@ -12,7 +12,7 @@
 use eindir_core::{DifferentiableObjective, Objective};
 use ndarray::Array1;
 
-use crate::control::Control;
+use crate::control::{Control, StopNorm};
 use crate::error::{Error, Result};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
 use crate::report::Report;
@@ -194,6 +194,7 @@ where
                 coords: w,
                 steps: step,
                 grad_norm: gnorm,
+                stop_norm: StopNorm::Two,
                 grad: None,
             });
         }
@@ -213,6 +214,7 @@ where
                     coords: w,
                     steps: step,
                     grad_norm: gnorm,
+                    stop_norm: StopNorm::Two,
                     grad: None,
                 });
             }
@@ -293,6 +295,7 @@ where
                     coords: w,
                     steps: step + 1,
                     grad_norm: l2(&grad_new),
+                    stop_norm: StopNorm::Two,
                     grad: None,
                 });
             }
@@ -304,6 +307,7 @@ where
                     coords: w,
                     steps: step + 1,
                     grad_norm: l2(&grad),
+                    stop_norm: StopNorm::Two,
                     grad: None,
                 });
             }
@@ -343,6 +347,7 @@ where
     Ok(Report {
         value: f_old,
         grad_norm: l2(&grad),
+        stop_norm: StopNorm::Two,
         coords: w,
         steps: control.maxiter,
         grad: None,

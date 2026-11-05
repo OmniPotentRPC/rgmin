@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Control, FireKind, Method, Oracle, Solver, StopNorm};
+use rgmin::{Control, FireKind, LineSearch, Method, Oracle, Solver, StopNorm};
 
 fn lj_cluster(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
@@ -138,7 +138,12 @@ fn max_atom_session_stops_where_the_two_norm_session_moves() {
 #[test]
 fn report_carries_the_gradient_its_norm_measures() {
     for method in [lbfgs, fire] {
-        for norm in [None, Some(StopNorm::MaxAtom), Some(StopNorm::Inf)] {
+        for norm in [
+            None,
+            Some(StopNorm::MaxAtom),
+            Some(StopNorm::Inf),
+            Some(StopNorm::Rms),
+        ] {
             let mut s = session(method(), 1e-8, norm);
             let obj = Oracle::unbounded(21, lj_cluster);
             let mut x = lj7_start();
@@ -147,6 +152,7 @@ fn report_carries_the_gradient_its_norm_measures() {
                 let grad = rep.grad.expect("session report has a gradient");
                 assert_eq!(grad, lj_cluster(rep.coords.view()).1);
                 assert_eq!(rep.grad_norm, norm.unwrap_or_default().of(grad.view()));
+                assert_eq!(rep.stop_norm, norm.unwrap_or_default());
             }
         }
     }
@@ -237,4 +243,31 @@ fn every_control_norm_stops_before_the_two_norm() {
             );
         }
     }
+}
+
+/// `minimize_method` runs FIRE as a session, which takes the norm from
+/// `Control` and names it in the report. One-shot L-BFGS runs no session
+/// and reports the two-norm under the same `Control`.
+#[test]
+fn report_names_the_norm_of_grad_norm() {
+    let control = Control {
+        maxiter: 2000,
+        gtol: 0.01,
+        istep: 0.1,
+        maxmove: Some(0.2),
+        stop_norm: StopNorm::MaxAtom,
+    };
+    let obj = Oracle::unbounded(21, lj_cluster);
+    let rep =
+        rgmin::minimize_method(&obj, lj7_start(), &control, fire(), LineSearch::default()).unwrap();
+    let g = lj_cluster(rep.coords.view()).1;
+    assert_eq!(rep.stop_norm, StopNorm::MaxAtom);
+    assert_eq!(rep.grad_norm, StopNorm::MaxAtom.of(g.view()));
+    assert!(rep.grad_norm < control.gtol);
+    let rep =
+        rgmin::minimize_lbfgs(&obj, lj7_start(), &control, LineSearch::default(), 20).unwrap();
+    let g = lj_cluster(rep.coords.view()).1;
+    assert_eq!(rep.stop_norm, StopNorm::Two);
+    assert_eq!(rep.grad_norm, StopNorm::Two.of(g.view()));
+    assert!(rep.grad_norm < control.gtol);
 }

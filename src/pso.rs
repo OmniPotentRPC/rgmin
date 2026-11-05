@@ -6,7 +6,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-use crate::control::Control;
+use crate::control::{Control, StopNorm};
 use crate::error::{Error, Result};
 use crate::report::Report;
 use crate::step::l2;
@@ -115,6 +115,7 @@ where
         coords: gbest_position,
         steps: iteration,
         grad_norm: l2(&grad),
+        stop_norm: StopNorm::Two,
         grad: None,
     })
 }

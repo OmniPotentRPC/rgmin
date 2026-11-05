@@ -18,7 +18,7 @@ use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, Array2, ArrayView1, Zip};
 
 use crate::accept::retract_within_cap;
-use crate::control::Control;
+use crate::control::{Control, StopNorm};
 use crate::error::{Error, Result};
 use crate::manifold::ManifoldKind;
 use crate::report::Report;
@@ -914,6 +914,7 @@ where
                 coords: pos,
                 steps: step,
                 grad_norm: gnorm,
+                stop_norm: StopNorm::Two,
                 grad: None,
             });
         }
@@ -954,6 +955,7 @@ where
         coords: pos,
         steps: control.maxiter,
         grad_norm: nrm2(grad.view()),
+        stop_norm: StopNorm::Two,
         grad: None,
     })
 }

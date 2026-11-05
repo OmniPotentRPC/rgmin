@@ -1040,6 +1040,7 @@ impl Solver {
             coords: x.clone(),
             steps: self.steps,
             grad_norm: self.stationarity_norm(x, grad),
+            stop_norm: self.stop_norm,
             grad: Some(grad.clone()),
         }
     }

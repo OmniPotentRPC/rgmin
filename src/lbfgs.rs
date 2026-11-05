@@ -17,7 +17,7 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::control::Control;
+use crate::control::{Control, StopNorm};
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::qn::solve_dense;
@@ -805,6 +805,7 @@ impl Lbfgs {
                     coords: pos,
                     steps: step,
                     grad_norm: gnorm,
+                    stop_norm: StopNorm::Two,
                     grad: None,
                 });
             }
@@ -817,6 +818,7 @@ impl Lbfgs {
             coords: pos,
             steps: control.maxiter,
             grad_norm: l2(&grad),
+            stop_norm: StopNorm::Two,
             grad: None,
         })
     }

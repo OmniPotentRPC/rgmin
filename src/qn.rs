@@ -3,7 +3,7 @@
 use eindir_core::{DifferentiableObjective, Objective};
 use ndarray::{Array1, Array2};
 
-use crate::control::Control;
+use crate::control::{Control, StopNorm};
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
@@ -242,6 +242,7 @@ fn done(value: f64, coords: Array1<f64>, steps: usize, grad_norm: f64) -> Report
         coords,
         steps,
         grad_norm,
+        stop_norm: StopNorm::Two,
         grad: None,
     }
 }

@@ -15,7 +15,7 @@
 use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, Array2, ArrayView1};
 
-use crate::control::Control;
+use crate::control::{Control, StopNorm};
 use crate::error::{Error, Result};
 use crate::report::Report;
 use crate::step::{l2, scale_step};
@@ -151,6 +151,7 @@ where
                 coords: pos,
                 steps: step,
                 grad_norm: gnorm,
+                stop_norm: StopNorm::Two,
                 grad: None,
             });
         }
@@ -179,6 +180,7 @@ where
         coords: pos,
         steps: control.maxiter,
         grad_norm: l2(&grad),
+        stop_norm: StopNorm::Two,
         grad: None,
     })
 }

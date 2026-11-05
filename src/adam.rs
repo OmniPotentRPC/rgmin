@@ -3,7 +3,7 @@
 use eindir_core::{DifferentiableObjective, Objective};
 use ndarray::Array1;
 
-use crate::control::Control;
+use crate::control::{Control, StopNorm};
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
@@ -55,6 +55,7 @@ where
                 coords: pos,
                 steps: step,
                 grad_norm: gnorm,
+                stop_norm: StopNorm::Two,
                 grad: None,
             });
         }
@@ -74,6 +75,7 @@ where
         coords: pos,
         steps: control.maxiter,
         grad_norm: l2(&grad),
+        stop_norm: StopNorm::Two,
         grad: None,
     })
 }
