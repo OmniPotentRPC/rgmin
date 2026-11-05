@@ -93,7 +93,7 @@ pub use hvp::{
     minimize_newton_cg, steihaug_cg, steihaug_pcg,
 };
 pub use irc_trust::{IrcTrust, sqrt_masses_3n};
-pub use lbfgs::{GradNorm, Lbfgs};
+pub use lbfgs::{GradNorm, LBFGSB_FACTR, LBFGSB_FTOL, Lbfgs};
 #[cfg(feature = "highs")]
 pub use lbfgs_qp::HighsStep;
 pub use linesearch::LineSearch;

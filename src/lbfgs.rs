@@ -34,6 +34,15 @@ pub enum GradNorm {
     Infinity,
 }
 
+/// `factr` that the L-BFGS-B 3.0 `setulb` comments give for moderate
+/// accuracy (`lbfgsb.f`, Morales and Nocedal 2011,
+/// <https://doi.org/10.1145/2049662.2049669>).
+pub const LBFGSB_FACTR: f64 = 1.0e7;
+
+/// The relative-decrease tolerance `factr * eps` of L-BFGS-B, SciPy's
+/// default `ftol` for `method="L-BFGS-B"`, about 2.22e-9.
+pub const LBFGSB_FTOL: f64 = LBFGSB_FACTR * f64::EPSILON;
+
 /// The value and slope of a line-search probe, `(+inf, NaN)` when the
 /// objective answered with a non-finite value or gradient. Every comparison
 /// against NaN is false, so a raw NaN would fail no decrease test.
@@ -80,6 +89,15 @@ pub struct Lbfgs {
     pub max_line_evals: usize,
     /// Norm used against [`Lbfgs::gtol`].
     pub norm: GradNorm,
+    /// Relative-decrease stop of the L-BFGS-B code (Zhu, Byrd, Lu and
+    /// Nocedal, Algorithm 778, <https://doi.org/10.1145/279232.279236>).
+    /// A line-search step from `f_k`
+    /// to `f_{k+1}` ends [`Lbfgs::minimize`], [`Lbfgs::minimize_watched`]
+    /// and [`Lbfgs::minimize_recognized`] at the new iterate when
+    /// `f_k - f_{k+1} <= ftol * max(|f_k|, |f_{k+1}|, 1)`.
+    /// Zero, the default, turns the test off, as does any value that is
+    /// not positive. [`LBFGSB_FTOL`] is the SciPy default.
+    pub ftol: f64,
     /// Al-Baali extra-updates: replay the newest pair this many extra times.
     pub extra_updates: usize,
     /// Li-Fukushima cautious `ε`. Zero disables the filter.
@@ -121,6 +139,7 @@ impl Lbfgs {
             curvature: 0.9,
             max_line_evals: 20,
             norm: GradNorm::Infinity,
+            ftol: 0.0,
             extra_updates: 0,
             cautious_eps: 0.0,
             cautious_alpha: 0.01,
@@ -451,6 +470,12 @@ impl Lbfgs {
         }
     }
 
+    /// The step from `f_old` to `f_new` passes the [`Lbfgs::ftol`] test
+    /// (`lbfgsb.f`, `mainlb`).
+    fn stalled(&self, f_old: f64, f_new: f64) -> bool {
+        self.ftol > 0.0 && f_old - f_new <= self.ftol * f_old.abs().max(f_new.abs()).max(1.0)
+    }
+
     /// Strong Wolfe line search by bracketing then cubic-interpolated zoom.
     ///
     /// Nocedal and Wright algorithms 3.5 and 3.6. Returns whether a step
@@ -675,11 +700,12 @@ impl Lbfgs {
             return (f64::INFINITY, x, evals);
         }
 
+        let mut stalled = false;
         for it in 0..max_iter {
             if !watch(it, f) {
                 break;
             }
-            if self.gnorm(&g) < self.gtol {
+            if stalled || self.gnorm(&g) < self.gtol {
                 break;
             }
             let d = self.search_direction(x.view(), g.view());
@@ -691,8 +717,10 @@ impl Lbfgs {
                 self.forget();
                 continue;
             }
+            let f_old = f;
             let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &d, slope, &mut fg);
             evals += evals_used;
+            stalled = ok && self.stalled(f_old, f);
             if !ok {
                 if self.memory.is_empty() {
                     break;
@@ -744,11 +772,12 @@ impl Lbfgs {
             return (f64::INFINITY, x, evals, false);
         }
 
+        let mut stalled = false;
         for it in 0..max_iter {
             if let Some((f_known, x_known)) = recognise(it, f, x.view()) {
                 return (f_known, x_known, evals, true);
             }
-            if self.gnorm(&g) < self.gtol {
+            if stalled || self.gnorm(&g) < self.gtol {
                 break;
             }
             let d = self.search_direction(x.view(), g.view());
@@ -760,8 +789,10 @@ impl Lbfgs {
                 self.forget();
                 continue;
             }
+            let f_old = f;
             let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &d, slope, &mut fg);
             evals += evals_used;
+            stalled = ok && self.stalled(f_old, f);
             if !ok {
                 if self.memory.is_empty() {
                     break;
@@ -887,7 +918,27 @@ impl Lbfgs {
 mod tests {
     use ndarray::{Array1, array};
 
-    use super::Lbfgs;
+    use super::{LBFGSB_FTOL, Lbfgs};
+
+    /// Above `|f| = 1` the threshold scales with `|f|`; below, it is
+    /// `ftol` itself. A value that is not positive passes no step.
+    #[test]
+    fn the_decrease_test_is_relative_above_one_and_absolute_below() {
+        let mut lbfgs = Lbfgs {
+            ftol: LBFGSB_FTOL,
+            ..Lbfgs::default()
+        };
+        let big = 1.0 / LBFGSB_FTOL;
+        assert!(lbfgs.stalled(big, big - 0.5));
+        assert!(!lbfgs.stalled(big, big - 2.0));
+        let small = LBFGSB_FTOL;
+        assert!(lbfgs.stalled(small, 0.5 * small));
+        assert!(!lbfgs.stalled(small, -small));
+        for ftol in [0.0, -LBFGSB_FTOL, f64::NAN] {
+            lbfgs.ftol = ftol;
+            assert!(!lbfgs.stalled(1.0, 1.0), "ftol {ftol}");
+        }
+    }
 
     fn held(lbfgs: &Lbfgs) -> Vec<(Array1<f64>, Array1<f64>)> {
         lbfgs.pairs().map(|(s, y)| (s.clone(), y.clone())).collect()
