@@ -46,6 +46,37 @@ every later step; see @@rst::doc:`constraints`@@.
 With a set, L-BFGS keeps its two-loop step under ~set_accept~, and
 the per-atom cap scales each trial before it returns to the set.
 
+** Stop norm
+
+#+begin_src rust
+use rgmin::{Control, Method, Solver, StopNorm};
+
+let n_atoms = 7;
+let control = Control {
+    gtol: 0.01,
+    stop_norm: StopNorm::MaxAtom,
+    ..Default::default()
+};
+let solver = Solver::new(Method::lbfgs(), control, 3 * n_atoms);
+#+end_src
+
+~Control::stop_norm~ is the norm a session compares to ~gtol~ and writes to ~Report::grad_norm~.
+~Report::stop_norm~ names it, and ~set_stop_norm~ replaces it on a live session.
+The default is ~StopNorm::Two~, so a default ~Control~ stops where it did before the field existed.
+Only the step at which the session stops changes: every norm takes the same steps up to that point.
+The one-shot drivers that run no session, such as ~minimize_lbfgs~, keep ~norm2(g)~ and report ~StopNorm::Two~.
+
+| ~StopNorm~ | Value | ASE | eOn ~convergence_metric~ | LAMMPS ~min_modify norm~ |
+|---+---+---+---+---|
+| ~Two~ (default) | ~norm2(g)~ | | ~norm~ (default) | ~two~ (default) |
+| ~MaxAtom~ | largest ~norm2~ over ~(x, y, z)~ triples | ~fmax~ | ~max_atom~ | ~max~ |
+| ~Inf~ | largest ~abs(g_k)~ | | ~max_component~ | ~inf~ |
+| ~Rms~ | ~norm2(g) / sqrt(n)~ | | ~rms~ | |
+
+eOn takes ~n~ in ~rms~ as the number of free coordinates, so a host that passes only the free atoms gets the same value.
+C sessions select the norm with ~rgmin_solver_set_stop_norm~.
+~RGMIN_STOP_NORM_RMS~ is 3.
+
 ** C
 
 #+begin_src c
@@ -77,6 +108,7 @@ together is not asked twice.
 | ~clear_exp~ | Drop that preconditioner |
 | ~exp_mu~ | Its energy scale after estimation, or none when it is not installed |
 | ~set_accept~ | ~none~ / ~energy~ / ~nonmonotone~ |
+| ~set_stop_norm~ | Replace ~Control::stop_norm~: ~two~ / ~max_atom~ / ~inf~ / ~rms~ |
 | ~set_atom_maxmove~ | Per-atom cap. Without a distance set, Euclidean L-BFGS takes the geometry step and ignores ~set_accept~, and ~set_exp~ supplies its initial inverse Hessian. With a set, every method scales its trial to the cap and keeps ~set_accept~ |
 | ~set_project_rigid~ | Drop rigid modes on isolated clusters |
 | ~set_extra_updates~ | Al-Baali extra L-BFGS pairs |
