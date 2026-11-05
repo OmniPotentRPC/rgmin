@@ -38,15 +38,21 @@ pub enum StopNorm {
     MaxAtom,
     /// Largest absolute component: eOn `max_component`, LAMMPS `inf`.
     Inf,
+    /// `||g||_2 / sqrt(n)`, zero for an empty `g`: eOn `rms`.
+    Rms,
 }
 
 impl StopNorm {
     /// This norm of `g`. A non-finite entry gives infinity under
-    /// [`Self::MaxAtom`] and [`Self::Inf`], so no tolerance accepts it.
+    /// [`Self::MaxAtom`], [`Self::Inf`] and [`Self::Rms`], so no
+    /// tolerance accepts it.
     pub fn of(self, g: ArrayView1<f64>) -> f64 {
         match self {
             Self::Two => crate::vecops::nrm2(g),
             Self::Inf => crate::vecops::nrminf(g),
+            Self::Rms if g.is_empty() => 0.0,
+            Self::Rms if crate::vecops::nrminf(g).is_infinite() => f64::INFINITY,
+            Self::Rms => crate::vecops::nrm2(g) / (g.len() as f64).sqrt(),
             Self::MaxAtom => {
                 let mut worst = 0.0_f64;
                 let mut i = 0;

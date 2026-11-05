@@ -61,7 +61,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 31
+#define RGMIN_ABI_VERSION_MINOR 32
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -260,11 +260,13 @@ void rgmin_solver_set_accept(rgmin_solver_t *solver, rgmin_accept_t accept);
 /** Gradient norm a session compares to \c gtol and writes to
  *  \c rgmin_report_t.grad_norm. MAX_ATOM is the largest norm over
  *  (x, y, z) triples (ASE fmax, eOn max_atom, LAMMPS max). INF is the
- *  largest absolute component (eOn max_component, LAMMPS inf). */
+ *  largest absolute component (eOn max_component, LAMMPS inf). RMS is
+ *  the two-norm over sqrt(n) (eOn rms), ABI minor 32. */
 typedef enum rgmin_stop_norm_t {
     RGMIN_STOP_NORM_TWO = 0,
     RGMIN_STOP_NORM_MAX_ATOM = 1,
-    RGMIN_STOP_NORM_INF = 2
+    RGMIN_STOP_NORM_INF = 2,
+    RGMIN_STOP_NORM_RMS = 3
 } rgmin_stop_norm_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(rgmin_stop_norm_t) == sizeof(int32_t),

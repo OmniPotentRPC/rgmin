@@ -865,7 +865,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 31);
+    assert_eq!(stamp.abi_minor, 32);
     assert_eq!(stamp.layout_revision, 4);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -929,9 +929,9 @@ fn c_abi_fire_preset_and_abc() {
     }
 }
 
-/// Two atoms at force 0.9 each: max-atom 0.9, two-norm 1.27. At gtol 1
-/// the max-atom session stops at the start and the default session
-/// moves. Both hand back the gradient their report measured.
+/// Two atoms at force 0.9 each: max-atom 0.9, RMS 0.52, two-norm 1.27.
+/// At gtol 1 the max-atom and RMS sessions stop at the start and the
+/// default session moves. Both hand back the gradient their report measured.
 #[test]
 fn c_abi_stop_norm_and_report_gradient() {
     use rgmin::ffi::{rgmin_solver_report_gradient, rgmin_solver_set_stop_norm, rgmin_stop_norm_t};
@@ -950,13 +950,15 @@ fn c_abi_stop_norm_and_report_gradient() {
     let mut probe = [0.0; 6];
     let st = unsafe { rgmin_solver_report_gradient(std::ptr::null(), probe.as_mut_ptr(), 6) };
     assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
-    for norm in [Some(max_atom), None] {
+    let rms = rgmin_stop_norm_t::RGMIN_STOP_NORM_RMS as i32;
+    let rms_norm = (2.0 * 0.9_f64 * 0.9).sqrt() / 6.0_f64.sqrt();
+    for (norm, stop) in [(Some(max_atom), 0.9), (Some(rms), rms_norm), (None, 0.0)] {
         let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 6) };
         assert!(!session.is_null());
         let mut g = [f64::NAN; 6];
         let st = unsafe { rgmin_solver_report_gradient(session, g.as_mut_ptr(), 6) };
         assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
-        assert_eq!(unsafe { rgmin_solver_set_stop_norm(session, 3) }, 1);
+        assert_eq!(unsafe { rgmin_solver_set_stop_norm(session, 4) }, 1);
         if let Some(norm) = norm {
             assert_eq!(unsafe { rgmin_solver_set_stop_norm(session, norm) }, 0);
         }
@@ -990,7 +992,7 @@ fn c_abi_stop_norm_and_report_gradient() {
         if norm.is_some() {
             assert_eq!(x, start);
             assert_eq!(out.steps, 0);
-            assert_eq!(out.grad_norm, 0.9);
+            assert_eq!(out.grad_norm, stop);
         } else {
             assert_ne!(x, start);
             assert_eq!(out.steps, 1);

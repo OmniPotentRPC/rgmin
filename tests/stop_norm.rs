@@ -86,10 +86,16 @@ fn stop_norms_match_the_reference_definitions() {
     assert_eq!(StopNorm::Two.of(g.view()), 33.0_f64.sqrt());
     assert_eq!(StopNorm::MaxAtom.of(g.view()), 5.0);
     assert_eq!(StopNorm::Inf.of(g.view()), 4.0);
+    assert_eq!(
+        StopNorm::Rms.of(g.view()),
+        33.0_f64.sqrt() / 10.0_f64.sqrt()
+    );
+    assert_eq!(StopNorm::Rms.of(Array1::zeros(0).view()), 0.0);
     assert_eq!(StopNorm::default(), StopNorm::Two);
     let bad = array![0.0, f64::NAN, 0.0, 9.0, 0.0, 0.0];
     assert_eq!(StopNorm::MaxAtom.of(bad.view()), f64::INFINITY);
     assert_eq!(StopNorm::Inf.of(bad.view()), f64::INFINITY);
+    assert_eq!(StopNorm::Rms.of(bad.view()), f64::INFINITY);
 }
 
 /// Four atoms each at force 0.9: max-atom 0.9, two-norm 1.8. At

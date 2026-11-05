@@ -74,7 +74,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 31;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 32;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1772,6 +1772,8 @@ pub enum rgmin_stop_norm_t {
     RGMIN_STOP_NORM_MAX_ATOM = 1,
     /// Largest absolute component: eOn `max_component`, LAMMPS `inf`.
     RGMIN_STOP_NORM_INF = 2,
+    /// `||g||_2 / sqrt(n)`: eOn `rms`. ABI minor 32.
+    RGMIN_STOP_NORM_RMS = 3,
 }
 
 /// Select the session stop norm. ABI minor 29. Returns 0, or 1 on a
@@ -1789,6 +1791,7 @@ pub unsafe extern "C" fn rgmin_solver_set_stop_norm(solver: *mut rgmin_solver_t,
         0 => StopNorm::Two,
         1 => StopNorm::MaxAtom,
         2 => StopNorm::Inf,
+        3 => StopNorm::Rms,
         _ => {
             set_last_error("rgmin_solver_set_stop_norm: unknown norm");
             return 1;
