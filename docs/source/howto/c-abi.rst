@@ -130,5 +130,5 @@ length ``n``; ``rgmin_solver_set_positive``), ``CENTERED_MATRIX``
 (token 22, packed ``m n`` row-major;
 ``rgmin_solver_set_centered_matrix``).
 Tokens 7-10 stay reserved. See
-`retract onto an embedded manifold <manifolds.rst>`_.
+:doc:`retract onto an embedded manifold <manifolds>`.
 ``rgmin_solver_set_masses`` supplies N atomic masses for ``MW_RIGID``.

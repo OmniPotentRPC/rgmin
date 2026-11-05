@@ -22,7 +22,7 @@ decrease the initial slope promised. Because phi'(0) < 0 and a > 0,
 the right-hand side sits strictly below phi(0), so an accepted point is
 a real improvement, not a rounding story. That one-line consequence is
 the Lean theorem ``Rgmin.armijo_strict`` in
-`proofs/lean/Rgmin/Zoom.lean <../../../proofs/lean/Rgmin/Zoom.lean>`_.
+`proofs/lean/Rgmin/Zoom.lean <https://github.com/OmniPotentRPC/rgmin/blob/develop/proofs/lean/Rgmin/Zoom.lean>`_.
 
 The curvature condition demands abs(phi'(a)) <= c2 abs(phi'(0)) with
 c1 < c2 < 1: the slope must have flattened enough that the quasi-Newton
@@ -75,7 +75,7 @@ either end, and a zoom that accepts such proposals can stall. The code
 clamps every proposal into the middle eighty percent of the bracket:
 no closer to an end than a tenth of the width. Two exact rational
 facts follow, proved in
-`Zoom.lean <../../../proofs/lean/Rgmin/Zoom.lean>`_:
+`Zoom.lean <https://github.com/OmniPotentRPC/rgmin/blob/develop/proofs/lean/Rgmin/Zoom.lean>`_:
 
 - ``Rgmin.guarded_above`` / ``Rgmin.guarded_below``: the clamp really does
   land in the interior band.

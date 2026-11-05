@@ -127,4 +127,4 @@ When to use ``rgmin_minimize`` instead
 Scripts that want a cold-start solve to ``gtol`` still call
 ``rgmin_minimize`` / ``minimize_method``. Hopping chains that own the
 pair history hold ``Lbfgs`` directly (see
-`embed in anneal <embed-anneal.rst>`_).
+:doc:`embed in anneal <embed-anneal>`).

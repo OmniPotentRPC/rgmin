@@ -47,7 +47,7 @@ which damps each captured stiff mode by mu / (l\ :sub:`i`\ + mu) and passes the
 orthogonal complement through untouched.
 
 Two Lean facts in
-`Spectral.lean <../../../proofs/lean/Rgmin/Spectral.lean>`_ pin the
+`Spectral.lean <https://github.com/OmniPotentRPC/rgmin/blob/develop/proofs/lean/Rgmin/Spectral.lean>`_ pin the
 construction's legitimacy:
 
 - ``sumSq_nonneg`` (with ``sq_nonneg``): a Gram quadratic form is a sum of

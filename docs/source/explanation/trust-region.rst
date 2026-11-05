@@ -29,7 +29,7 @@ The radius update (Nocedal-Wright algorithm 4.1, ``update_radius``)
 shrinks by four when rho < 1/4, doubles (capped) when rho > 3/4 and
 the step pressed the boundary, and otherwise holds. Three properties
 make this loop honest, each proved in
-`proofs/lean/Rgmin/Trust.lean <../../../proofs/lean/Rgmin/Trust.lean>`_:
+`proofs/lean/Rgmin/Trust.lean <https://github.com/OmniPotentRPC/rgmin/blob/develop/proofs/lean/Rgmin/Trust.lean>`_:
 
 - ``shrink_ge_floor`` / ``shrink_pos``: the radius never leaves the
   positive floor, so no division or comparison downstream degenerates.
@@ -61,7 +61,7 @@ on any of three events.
 2. Negative curvature: if d . H d <= 0 the model is unbounded along
    ``d``, and the right amount of greed is to walk the ray to the trust
    boundary. ``Rgmin.ray_further_is_lower`` in
-   `Steihaug.lean <../../../proofs/lean/Rgmin/Steihaug.lean>`_
+   `Steihaug.lean <https://github.com/OmniPotentRPC/rgmin/blob/develop/proofs/lean/Rgmin/Steihaug.lean>`_
    proves the model is nonincreasing along such a ray, so the boundary
    point minimizes the model on it.
 
@@ -96,7 +96,7 @@ trust boundary lives in the M-norm. The Conn-Gould-Toint recurrences
 track p.Mp, p.Md, d.Md from quantities already on hand (with M z = r,
 every needed product reduces to Euclidean dots), so norms cost no
 extra applications of ``M``. ``Rgmin.metric_update_scales`` in
-`Precond.lean <../../../proofs/lean/Rgmin/Precond.lean>`_ pins the
+`Precond.lean <https://github.com/OmniPotentRPC/rgmin/blob/develop/proofs/lean/Rgmin/Precond.lean>`_ pins the
 linearity that makes the tracked comparison scale-consistent, and the
 Rust test ``the_preconditioned_boundary_lives_in_the_sketch_metric``
 holds the identity-preconditioner run bit-equal to the plain one.

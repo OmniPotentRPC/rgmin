@@ -5,7 +5,7 @@
 * State of the art
 
 Every DOI on this page is in the ~rgmin-docs~ ookcite collection
-and on [[file:bibliography.org][reference/bibliography]] after
+and on @@rst::doc:`reference/bibliography <bibliography>`@@ after
 ~verify_references~.
 
 ** Unconstrained local minimization

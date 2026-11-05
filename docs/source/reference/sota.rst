@@ -4,7 +4,7 @@ State of the art
 ----------------
 
 Every DOI on this page is in the ``rgmin-docs`` ookcite collection
-and on `reference/bibliography <bibliography.rst>`_ after
+and on :doc:`reference/bibliography <bibliography>` after
 ``verify_references``.
 
 Unconstrained local minimization

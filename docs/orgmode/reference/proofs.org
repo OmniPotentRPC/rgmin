@@ -35,8 +35,8 @@ a row in both columns is an opinion.
 | ~shifted_weight_pos~, ~equalized_weight_bounds~ | the solve's weights are positive, damping only | ~hvp.rs::NystromPrecond::solve~ | (same)                                        |
 
 The narrative behind each block lives in the explanation pages:
-[[file:../explanation/linesearch.org][the line search]],
-[[file:../explanation/quasi-newton.org][the secant family]],
-[[file:../explanation/trust-region.org][trust regions and Steihaug]],
-[[file:../explanation/randomized.org][the Nystrom preconditioner]],
-[[file:../explanation/scg.org][scaled conjugate gradients]].
+@@rst::doc:`the line search <../explanation/linesearch>`@@,
+@@rst::doc:`the secant family <../explanation/quasi-newton>`@@,
+@@rst::doc:`trust regions and Steihaug <../explanation/trust-region>`@@,
+@@rst::doc:`the Nystrom preconditioner <../explanation/randomized>`@@,
+@@rst::doc:`scaled conjugate gradients <../explanation/scg>`@@.

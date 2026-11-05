@@ -97,4 +97,4 @@ together is not asked twice.
 Scripts that want a cold-start solve to ~gtol~ still call
 ~rgmin_minimize~ / ~minimize_method~. Hopping chains that own the
 pair history hold ~Lbfgs~ directly (see
-[[file:embed-anneal.org][embed in anneal]]).
+@@rst::doc:`embed in anneal <embed-anneal>`@@).

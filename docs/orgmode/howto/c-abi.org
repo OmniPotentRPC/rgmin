@@ -131,5 +131,5 @@ interleaved ~(re, im)~, length ~2 n~; ~rgmin_solver_set_sphere_complex~),
 ~CENTERED_MATRIX~ (token 22, packed ~m n~ row-major;
 ~rgmin_solver_set_centered_matrix~).
 Tokens 7-10 stay reserved. See
-[[file:manifolds.org][retract onto an embedded manifold]].
+@@rst::doc:`retract onto an embedded manifold <manifolds>`@@.
 ~rgmin_solver_set_masses~ supplies N atomic masses for ~MW_RIGID~.

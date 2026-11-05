@@ -59,8 +59,8 @@ a row in both columns is an opinion.
     +-----------------------------------------------------------------+------------------------------------------------+-----------------------------------+------------------------------------------------------------+
 
 The narrative behind each block lives in the explanation pages:
-`the line search <../explanation/linesearch.rst>`_,
-`the secant family <../explanation/quasi-newton.rst>`_,
-`trust regions and Steihaug <../explanation/trust-region.rst>`_,
-`the Nystrom preconditioner <../explanation/randomized.rst>`_,
-`scaled conjugate gradients <../explanation/scg.rst>`_.
+:doc:`the line search <../explanation/linesearch>`,
+:doc:`the secant family <../explanation/quasi-newton>`,
+:doc:`trust regions and Steihaug <../explanation/trust-region>`,
+:doc:`the Nystrom preconditioner <../explanation/randomized>`,
+:doc:`scaled conjugate gradients <../explanation/scg>`.
