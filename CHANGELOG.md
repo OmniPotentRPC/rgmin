@@ -320,6 +320,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The `par` feature keeps vectors under 65536 elements on the serial path.
   At those sizes the rayon reductions measured slower than serial.
 
+<!-- towncrier release notes start -->
+
 ## [0.2.0]
 
 Rust rewrite of the C++ xtsci-optimize: solvers over eindir `DifferentiableObjective`, session C ABI, manifolds, HiGHS-projected steps.
