@@ -49,29 +49,39 @@ assert!(x[0] > 0.9);
 
 ** Session
 
-Hosts that already own an outer loop hold a ~Solver~ and call ~step~ once per iteration:
+Hosts that already own an outer loop hold a ~Solver~ and call ~step~ once per iteration.
+The host also decides when to stop, here when the gradient norm drops below 1e-4:
 
 #+begin_src rust
 use eindir_core::objectives::Rosenbrock;
 use ndarray::array;
-use rgmin::{Control, Method, Solver};
+use rgmin::{Accept, Control, Method, Solver};
 
 let obj = Rosenbrock::<2>::new();
 let mut x = array![-1.2, 1.0];
 let mut solver = Solver::new(Method::lbfgs(), Control::default(), 2);
-let rep = solver.step(&obj, &mut x).unwrap();
-assert!(rep.value.is_finite());
+solver.set_accept(Accept::Energy);
+let mut steps = 0;
+loop {
+    let rep = solver.step(&obj, &mut x).unwrap();
+    steps += 1;
+    if rep.grad_norm < 1e-4 || steps == 200 {
+        break;
+    }
+}
+assert!((x[0] - 1.0).abs() < 1e-3 && (x[1] - 1.0).abs() < 1e-3);
 #+end_src
+
+~Accept::Energy~ makes each step refuse a rise in the energy.
+The default, ~Accept::None~, takes every step without that check, for hosts that have forces but no energy.
+With the 0.5.2 release the loop stops after 35 steps.
 
 @@rst::doc:`Relax a platinum crystal <relax-morse>`@@ runs that loop to convergence on a 256-atom system.
 
-~set_manifold~ retracts that step.
-Isolated molecules use ~RigidQuotient~ (~R^{3N}/SE(3)~) or ~MwRigid~ (mass-weighted Eckart).
-Sphere, SO(3), Stiefel, and SE(3) are matrix-manifold embeddings.
-Euclidean is the default.
+@@rst::doc:`Retract onto an embedded manifold <../howto/manifolds>`@@ shows how ~set_manifold~ keeps each step on a sphere, a rigid-body quotient or another set.
 
 ** What just happened
 
 1. ~Lbfgs::minimize~ ran the two-loop recursion on the Rosenbrock banana from ~(-1.2, 1.0)~.
 2. The closure returned ~(f, g)~; the crate never needed a named potential type.
-3. A host that already owns an outer loop uses ~Solver::step~ instead, and ~set_manifold~ if the geometry is not Euclidean.
+3. The ~Solver~ session took one step per call, refused any step that raised the energy, and left the stop test to the caller.
