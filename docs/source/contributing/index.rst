@@ -9,7 +9,23 @@ Everyone who takes part follows the `code of conduct <https://github.com/OmniPot
 
 Pull requests go to the ``develop`` branch.
 Commit subjects take the form ``type(scope): summary``, as in ``fix(session): report a stall when the energy test refuses a restart``.
-A change that users can see adds an entry under ``[Unreleased]`` in ``CHANGELOG.md``, in the section that fits it.
+A change that users can see adds a fragment to ``docs/newsfragments/`` and a line under Unreleased in ``docs/orgmode/changelog.org``.
+Name the fragment ``<issue>.<type>.md``, or ``+<name>.<type>.md`` for a change with no issue.
+The type is ``added``, ``changed``, ``deprecated``, ``removed``, ``fixed`` or ``security``, the sections of ``CHANGELOG.md``.
+Write it as one sentence per line, the way ``CHANGELOG.md`` reads.
+``towncrier build`` moves the fragments into ``CHANGELOG.md`` when a release is cut, with the settings in ``towncrier.toml``.
+To see the notes that the fragments give without changing a file:
+
+..
+   #skip_lint_start
+
+.. code:: bash
+
+    python3 -m pip install towncrier
+    towncrier build --draft --version 0.0.0
+
+..
+   #skip_lint_end
 
 Build
 ~~~~~
@@ -32,6 +48,24 @@ Run them before you open a pull request.
 
 ..
    #skip_lint_end
+
+CI also runs clippy with warnings denied, on Rust 1.88.0 and on the latest stable, for the same four feature sets:
+
+..
+   #skip_lint_start
+
+.. code:: bash
+
+    rustup component add clippy --toolchain 1.88.0
+    cargo +1.88.0 clippy --locked --all-targets -- -D warnings
+    cargo +1.88.0 clippy --locked --all-targets --features capi -- -D warnings
+    cargo +1.88.0 clippy --locked --all-targets --features highs -- -D warnings
+    cargo +1.88.0 clippy --locked --all-targets --all-features -- -D warnings
+
+..
+   #skip_lint_end
+
+Run the same four commands with ``+stable`` for the second toolchain.
 
 These checks need network access on their first run, since cargo fetches two git dependencies pinned to a commit: ``eindir-core`` and, for the tests, ``rgpot-core``.
 The ``highs`` tests check against SciPy through ``python3``, or through the interpreter that ``PYTHON`` names.
