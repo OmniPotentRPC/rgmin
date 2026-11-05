@@ -1,0 +1,139 @@
+=======================================
+Step bounds for log-hyperparameter fits
+=======================================
+
+
+.. contents::
+
+A Gaussian process (GP) fit by maximum a posteriori (MAP) often runs ``minimize_scg`` on log-hyperparameters.
+This page states what a step bound does to scaled conjugate gradients (SCG), what the literature gives for its size, and which parts of a bound can be derived for those coordinates.
+
+1 What ``maxmove`` does in SCG
+------------------------------
+
+A positive finite ``Control::maxmove`` bounds the Euclidean length of every SCG trial step.
+SCG computes ``alpha = -mu / delta`` along the direction ``d``, with ``mu = d . g``, ``kappa = d . d`` and the damped curvature ``delta`` of :doc:`scg <scg>`.
+If ``|alpha| sqrt(kappa)`` exceeds the bound, ``alpha`` is scaled down so that the step has the bound as its length.
+The same scaling applies at every retry after a non-finite trial.
+A retry raises the damping from the same ``mu``, and it can still ask for a long step.
+Zero, negative, infinite and NaN values leave SCG unbounded.
+Through the C ABI, zero and negative ``maxmove`` arrive as no bound.
+
+2 The comparison ratio for a bounded step
+-----------------------------------------
+
+The damped model along ``d`` predicts the change ``m(alpha) = alpha mu + alpha^2 delta / 2``.
+Its minimizer ``alpha* = -mu / delta`` predicts ``alpha* mu / 2``.
+Moller's comparison ratio :cite:`mllerScaledConjugateGradient1993` divides the measured change by that value.
+
+::
+
+    Delta = 2 (f(x + alpha d) - f(x)) / (alpha mu)
+
+A bounded step is ``alpha = t alpha*`` with ``0 < t < 1``.
+Its model change is ``alpha mu (1 - t / 2)``, so the formula above gives ``2 - t`` times the measured over predicted ratio.
+With a tight bound the overstatement approaches a factor of 2.
+The damping would then fall on an agreement as low as 0.375, where the 3/4 level calls for a fall only above 0.75.
+SCG therefore divides a bounded step's measured change by ``m(alpha)``, the ratio of Nocedal and Wright :cite:`nocedalNumericalOptimization2006` eq. 4.4.
+An unbounded step keeps the formula above.
+Both forms give the ratio the same sign, so acceptance does not change.
+
+3 Why the per-atom 0.2 does not carry over
+------------------------------------------
+
+The default per-atom cap of 0.2 in rgmin 0.5.x cites the ASE ``maxstep`` and the eOn ``maxMove``.
+Both are atomic displacements, in the length unit of the geometry.
+A log-hyperparameter has no unit, and a step of 0.2 in ``log l`` multiplies ``l`` by ``exp(0.2) = 1.2214``.
+The citation fixes a length, so it does not fix a step in these coordinates.
+
+The cap also has the wrong shape there.
+It bounds the largest Euclidean norm over consecutive ``(x, y, z)`` triples, so on five log-hyperparameters it bounds ``||(d0, d1, d2)||_2`` and ``||(d3, d4)||_2``.
+Which hyperparameters share a triple depends on the order in which the caller packs them, and no property of the fit fixes that grouping.
+
+4 What the literature gives
+---------------------------
+
+None of these sources sets a fixed per-step bound on log-hyperparameters.
+
+- In the Gaussian Processes for Machine Learning (GPML) toolbox, ``minimize.m`` starts along ``-g`` with a step of length ``red |g| / (1 + |g|^2)``, at most 1/2 for the default ``red = 1``.
+  After that, the start of each line search may grow by up to a factor of 10 and its extrapolation by up to a factor of 3, with no fixed bound on the length.
+
+- On a problem that is not fully boxed, L-BFGS-B :cite:`byrdLimitedMemoryAlgorithm1995` takes a first step of length at most 1.
+  After that, only the box limits the step.
+
+- scikit-learn ``GaussianProcessRegressor`` runs L-BFGS-B on log-transformed parameters inside a box, ``+-ln(1e5) = +-11.513`` for the default length-scale bounds.
+
+- GPstuff ``fminscg`` takes ``alpha = -mu / delta`` with no clip, from ``sigma0 = 1e-4`` and ``lambda = 10``.
+
+- The GP-NEB and GP-dimer papers of Koistinen et al. (2017, 2019) and Goswami et al. (2025) fit the hyperparameters by SCG with no step bound on them.
+  Goswami and Jonsson (2025) write in their optimal-transport GP paper that the hyperparameters have no direct physical reading.
+
+- Nocedal and Wright :cite:`nocedalNumericalOptimization2006` Algorithm 4.1 takes the overall bound as an input, and Theorems 4.5 and 4.6 converge for every positive value.
+  Section 4.5 asks for a norm matched to how sensitive the model is to each variable.
+
+So the theory leaves the value of the bound free.
+The hyperparameters have no physical reading that could fix it.
+The kernel still fixes the norm of the bound, and the likelihood fixes a unit for each variable.
+
+5 The shape from the kernel
+---------------------------
+
+Take the value block of the inverse-distance squared-exponential kernel of Koistinen et al. (2019), with ``u_p = ln l_p`` for pair type ``p``:
+
+::
+
+    k = sigma_c^2 + sigma_m^2 c,   c = exp(-S / 2),   S = sum_p s_p,   s_p = Q_p exp(-2 u_p)
+
+Here ``Q_p >= 0`` sums the squared differences of inverse distances of pair type ``p``.
+
+Lemma 1
+    ``dc / du_p = c s_p``.
+
+Lemma 2
+    ``S exp(-S / 2) <= 2 / e = 0.735759`` for ``S >= 0``, with equality at ``S = 2``.
+
+Theorem 1
+    A step ``du`` changes ``c`` to first order by at most ``(2 / e) ||du||_inf``.
+    The bound is sharp over all pairs of configurations.
+
+The change is ``c S sum_p (s_p / S) du_p``, a convex combination of the ``du_p`` times ``S exp(-S / 2)``.
+The bound is reached when all of ``S`` sits in the pair type with the largest ``|du_p|`` and ``S = 2``.
+So the steps whose worst first-order change of a correlation is at most ``(2 / e) rho`` form exactly the ball ``||du||_inf <= rho``.
+A Euclidean ball of radius ``rho`` lies inside it, and limits a step that moves all ``m`` coordinates alike to ``rho / sqrt(m)`` each.
+
+Theorem 2
+    For ``||du||_inf <= rho``, the exact change of a correlation is at most ``G(rho) = (1 - exp(-2 rho)) exp(-2 rho / (exp(2 rho) - 1))``, and the bound is reached.
+
+``S`` moves within ``[S exp(-2 rho), S exp(2 rho)]``, and ``exp(-S / 2)`` is monotone, so the worst case is at an end of that range.
+Maximizing over ``S`` gives ``G``, which agrees with ``2 rho / e`` to first order and stays below it.
+
+So ``G`` gives the worst case for each radius, and the kernel fixes the shape of the bound, the infinity norm.
+It does not fix the radius.
+Turning ``G`` into a radius needs a tolerance on the change of a correlation.
+The problem does not supply one.
+
+6 A unit from the likelihood
+----------------------------
+
+The likelihood gives the Fisher information ``F_ij = tr(K^-1 dK_i K^-1 dK_j) / 2`` for ``y ~ N(0, K(theta))`` with ``n`` rows.
+
+Theorem 3
+    If ``K = exp(v) C + B`` with ``C`` and ``B`` positive semidefinite and free of ``v = ln sigma_m^2``, then ``F_vv <= n / 2``, with equality when ``B = 0``.
+
+``K^-1/2 exp(v) C K^-1/2`` has its eigenvalues in ``[0, 1]``, so ``F_vv`` is half a sum of ``n`` squares of numbers in that range.
+The Cramer-Rao standard deviation of ``ln sigma_m^2`` is therefore at least ``sqrt(2 / n)`` for every kernel of that form and every system.
+The constant term and the jitter make up ``B`` and only raise that floor.
+For a length scale, ``F_jj`` depends on the data, and ``1 / sqrt(F_jj)`` is its Cramer-Rao standard deviation, with the other parameters known, once the fit computes it.
+
+One standard deviation is the step at which the expected Kullback-Leibler divergence between the old and new models is about 1/2 nat.
+That gives a candidate bound in the infinity norm: move each log-hyperparameter by at most its own standard deviation.
+Without the data, only the signal variance has a known bound, ``sqrt(2 / n)``, and using that radius for every coordinate is a further choice.
+The choice of one standard deviation, rather than another multiple, is a choice of unit and not a theorem.
+
+7 Status
+--------
+
+``minimize_scg`` has no default bound, and the per-atom default of rgmin 0.5.x is not derived for log-hyperparameters.
+The candidate above is not implemented and has not been tested on a GP-NEB run.
+rgmin's step bounds are Euclidean or per triple, so a caller can only approach the infinity-norm shape from inside, with a Euclidean bound of the same radius.
+Whether any of these radii gives a converged and certified path on a given system is an empirical question for the caller.

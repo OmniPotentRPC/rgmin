@@ -31,7 +31,15 @@ lowered when the model earned trust (Delta large) and raised
 fourfold when it did not -- the same shrink-grow policy as
 ``update_radius``, acting on stiffness instead of length.
 
-2 Where the curvature comes from
+2 A bound on the step
+---------------------
+
+A positive finite ``Control::maxmove`` bounds the Euclidean length of every trial step, retries included.
+A bounded step is a fraction ``t`` of the model minimizer, and its ratio divides the measured change by the model change ``alpha mu + alpha^2 delta / 2`` instead of ``alpha mu / 2``.
+The formula above would overstate the agreement of such a step by the factor ``2 - t``.
+:doc:`Step bounds for log-hyperparameter fits <step-bounds>` derives this and asks what fixes the size of the bound.
+
+3 Where the curvature comes from
 --------------------------------
 
 The reference algorithm prices gamma with a one-sided finite
@@ -43,7 +51,7 @@ d . H(x) d, the same Newton-Krylov pricing TAO's ``nls`` obtains from
 user Hessian-vector callbacks. One trait method turns the probe cost
 into an action cost; nothing else in the algorithm changes.
 
-3 Safeguards
+4 Safeguards
 ------------
 
 A non-descent direction (mu >= 0) resets to steepest descent before

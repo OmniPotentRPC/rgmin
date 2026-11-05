@@ -96,6 +96,10 @@ const MAX_PROBE_RETRIES: usize = 2000;
 /// interior-point barriers therefore composes with no optimizer hook.
 /// A zero `control.maxiter` leaves termination to convergence and the
 /// numerical failure checks.
+///
+/// A positive finite `control.maxmove` bounds the Euclidean length of
+/// every trial step, retries included, as [`Control::maxmove`] states.
+/// Zero, negative, infinite and NaN values leave the step unbounded.
 pub fn minimize_scg<O>(
     obj: &O,
     init: impl Into<Array1<f64>>,
@@ -143,6 +147,37 @@ where
         restart,
         |x, d| obj.directional_curvature(x, d),
     )
+}
+
+/// `alpha` shortened so that `||alpha d||_2` is at most a positive finite
+/// `control.maxmove`, with `kappa = d . d`, and whether it was shortened.
+fn bound_step(alpha: f64, kappa: f64, control: &Control) -> (f64, bool) {
+    let Some(cap) = control.maxmove.filter(|c| c.is_finite() && *c > 0.0) else {
+        return (alpha, false);
+    };
+    let length = alpha.abs() * kappa.sqrt();
+    if length > cap {
+        (alpha * (cap / length), true)
+    } else {
+        (alpha, false)
+    }
+}
+
+/// Measured over predicted objective change for the damped model
+/// `alpha mu + alpha^2 delta / 2`.
+///
+/// At the model minimizer `alpha = -mu / delta` the prediction is
+/// `alpha mu / 2`, which gives the 1993 form
+/// `2 (f_new - f_old) / (alpha mu)`.
+/// A step shortened to `t` times that length predicts
+/// `alpha mu (1 - t / 2)`, and the 1993 form would overstate the
+/// agreement by the factor `2 - t`.
+fn comparison_ratio(change: f64, alpha: f64, mu: f64, delta: f64, bounded: bool) -> f64 {
+    if bounded {
+        change / (alpha * mu + 0.5 * alpha * alpha * delta)
+    } else {
+        2.0 * change / (alpha * mu)
+    }
 }
 
 fn run_scg<O>(
@@ -248,7 +283,7 @@ where
             delta = lambda * kappa;
             lambda -= gamma / kappa;
         }
-        let mut alpha = -mu / delta;
+        let (mut alpha, mut bounded) = bound_step(-mu / delta, kappa, control);
 
         let mut trial = &w + &(alpha * &dir);
         let (mut f_new, mut grad_new) = obj.value_and_gradient(trial.view());
@@ -260,7 +295,7 @@ where
                 delta = lambda * kappa;
                 lambda -= gamma / kappa;
             }
-            alpha = -mu / delta;
+            (alpha, bounded) = bound_step(-mu / delta, kappa, control);
             trial = &w + &(alpha * &dir);
             let ev = obj.value_and_gradient(trial.view());
             f_new = ev.0;
@@ -275,7 +310,7 @@ where
 
         // Møller's comparison ratio between the measured and the
         // model-predicted objective change.
-        let ratio = 2.0 * (f_new - f_old) / (alpha * mu);
+        let ratio = comparison_ratio(f_new - f_old, alpha, mu, delta, bounded);
 
         success = ratio >= 0.0;
         if success {
@@ -347,4 +382,41 @@ where
         steps: control.maxiter,
         grad: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn capped(maxmove: Option<f64>) -> Control {
+        Control {
+            maxmove,
+            ..Control::default()
+        }
+    }
+
+    #[test]
+    fn bounded_step_is_compared_with_its_own_model_decrease() {
+        // mu = -4, delta = 2 and d . d = 1 put the model minimizer at
+        // alpha = 2; the cap 0.5 keeps t = 1/4 of it.
+        let (mu, delta) = (-4.0, 2.0);
+        let (alpha, bounded) = bound_step(-mu / delta, 1.0, &capped(Some(0.5)));
+        assert_eq!((alpha, bounded), (0.5, true));
+        let model_change = alpha * mu + 0.5 * alpha * alpha * delta;
+        assert_eq!(model_change, -1.75);
+        assert_eq!(comparison_ratio(model_change, alpha, mu, delta, true), 1.0);
+        assert_eq!(2.0 * model_change / (alpha * mu), 2.0 - 0.25);
+    }
+
+    #[test]
+    fn unbounded_step_keeps_the_1993_ratio() {
+        let (mu, delta) = (-4.0, 2.0);
+        for maxmove in [None, Some(5.0), Some(0.0), Some(f64::NAN)] {
+            let (alpha, bounded) = bound_step(-mu / delta, 1.0, &capped(maxmove));
+            assert_eq!((alpha, bounded), (2.0, false), "maxmove {maxmove:?}");
+        }
+        let change = -3.3;
+        let ratio = comparison_ratio(change, 2.0, mu, delta, false);
+        assert_eq!(ratio.to_bits(), (2.0 * change / (2.0 * mu)).to_bits());
+    }
 }

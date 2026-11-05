@@ -511,6 +511,10 @@ typedef struct rgmin_scg_params_t {
  * passes Never. Møller n-success reset stays inside the Rust loop.
  * gpr_optim RgminScg.inl writes \c RGMIN_CONJUGACY_LIU_STOREY. In-tree
  * SCG.inl does not call this entry.
+ *
+ * A positive finite \c ctrl->maxmove bounds the Euclidean length of
+ * every SCG trial step, retries included; zero or negative leaves the
+ * step unbounded.
  */
 rgmin_status_t rgmin_minimize_scg(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_curv_fn curv,
                                 void *user, DLManagedTensorVersioned *x,

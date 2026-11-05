@@ -297,6 +297,48 @@ fn c_abi_scg_null_params_uses_netlab_polak_ribiere() {
     assert!(x[1].abs() < 1e-4);
 }
 
+fn scg_one_step_length(maxmove: f64) -> f64 {
+    let start = [3.0, -4.0];
+    let mut x = start;
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        maxmove,
+        ..scg_bowl_ctrl()
+    };
+    let params = scg_bowl_params(rgmin_conjugacy_t::RGMIN_CONJUGACY_POLAK_RIBIERE as i32);
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+    };
+    let st = unsafe {
+        rgmin_minimize_scg(
+            Some(quad_eval),
+            Some(quad_grad),
+            Some(quadratic_curv),
+            std::ptr::null_mut(),
+            xt,
+            &ctrl,
+            &params,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    ((x[0] - start[0]).powi(2) + (x[1] - start[1]).powi(2)).sqrt()
+}
+
+#[test]
+fn c_abi_scg_positive_maxmove_bounds_the_step() {
+    // Exact curvature 200 and damping 1 x 100 give alpha = 1/3 along
+    // (-6, 8), a step of length 10/3.
+    let free = scg_one_step_length(0.0);
+    assert!((free - 10.0 / 3.0).abs() < 1e-12, "free step {free}");
+    let bounded = scg_one_step_length(0.5);
+    assert!((bounded - 0.5).abs() < 1e-12, "bounded step {bounded}");
+}
+
 #[test]
 fn c_abi_scg_zero_conjugacy_is_fletcher_reeves() {
     let mut x = [3.0, -4.0];
