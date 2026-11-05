@@ -708,6 +708,7 @@ impl Lbfgs {
             if stalled || self.gnorm(&g) < self.gtol {
                 break;
             }
+            let f_old = f;
             let d = self.search_direction(x.view(), g.view());
             let slope = d.dot(&g);
             if !slope.is_finite() && self.memory.is_empty() {
@@ -717,7 +718,6 @@ impl Lbfgs {
                 self.forget();
                 continue;
             }
-            let f_old = f;
             let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &d, slope, &mut fg);
             evals += evals_used;
             stalled = ok && self.stalled(f_old, f);
@@ -780,6 +780,7 @@ impl Lbfgs {
             if stalled || self.gnorm(&g) < self.gtol {
                 break;
             }
+            let f_old = f;
             let d = self.search_direction(x.view(), g.view());
             let slope = d.dot(&g);
             if !slope.is_finite() && self.memory.is_empty() {
@@ -789,7 +790,6 @@ impl Lbfgs {
                 self.forget();
                 continue;
             }
-            let f_old = f;
             let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &d, slope, &mut fg);
             evals += evals_used;
             stalled = ok && self.stalled(f_old, f);
