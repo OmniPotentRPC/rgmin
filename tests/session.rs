@@ -10,6 +10,7 @@ fn control() -> Control {
         gtol: 1e-8,
         istep: 0.1,
         maxmove: None,
+        ..Default::default()
     }
 }
 
@@ -281,6 +282,7 @@ fn sphere_rayleigh_stays_on_the_sphere() {
             gtol: 1e-8,
             istep: 0.2,
             maxmove: None,
+            ..Default::default()
         },
         3,
     );
@@ -411,6 +413,7 @@ fn oblique_session_stays_on_product_of_spheres() {
             gtol: 1e-8,
             istep: 0.2,
             maxmove: None,
+            ..Default::default()
         },
         6,
     );
@@ -468,6 +471,7 @@ fn multinomial_session_stays_on_the_simplex() {
             gtol: 1e-10,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         },
         3,
     );
@@ -541,6 +545,7 @@ fn multinomial_ds_session_stays_doubly_stochastic() {
             gtol: 1e-10,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         },
         4,
     );
@@ -620,6 +625,7 @@ fn multinomial_sym_session_stays_symmetric_doubly_stochastic() {
             gtol: 1e-10,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         },
         4,
     );
@@ -700,6 +706,7 @@ fn sphere_complex_session_stays_on_the_set() {
             gtol: 1e-10,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         },
         4,
     );
@@ -757,6 +764,7 @@ fn positive_session_stays_on_the_set() {
             gtol: 1e-10,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         },
         3,
     );
@@ -825,6 +833,7 @@ fn centered_matrix_session_stays_on_the_set() {
             gtol: 1e-10,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         },
         4,
     );
@@ -940,6 +949,7 @@ fn so3_session_stays_orthogonal() {
             gtol: 1e-8,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         },
         9,
     );
@@ -1014,6 +1024,7 @@ fn se3_session_keeps_rotation_and_moves_translation() {
             gtol: 1e-10,
             istep: 0.4,
             maxmove: None,
+            ..Default::default()
         },
         12,
     );
@@ -1126,6 +1137,7 @@ fn complex_circle_session_stays_on_the_set() {
             gtol: 1e-8,
             istep: 0.2,
             maxmove: None,
+            ..Default::default()
         },
         4,
     );
@@ -1204,6 +1216,7 @@ fn symmetric_session_stays_on_the_set() {
             gtol: 1e-8,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         },
         4,
     );
@@ -1281,6 +1294,7 @@ fn skewsymmetric_session_stays_on_the_set() {
             gtol: 1e-8,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         },
         4,
     );
@@ -1341,6 +1355,7 @@ fn euclidean_complex_session_stays_on_the_set() {
             gtol: 1e-8,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         },
         4,
     );
@@ -1425,6 +1440,7 @@ fn constant_session_stays_on_the_set() {
             gtol: 1e-8,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         },
         3,
     );
@@ -1747,6 +1763,7 @@ fn fire_and_bb_kill_a_sphere() {
                 gtol: 1e-8,
                 istep: 0.2,
                 maxmove: None,
+                ..Default::default()
             },
             2,
         );
@@ -1817,6 +1834,7 @@ fn dogleg_kills_a_quadratic() {
             gtol: 1e-10,
             istep: 4.0,
             maxmove: None,
+            ..Default::default()
         },
         2,
     );

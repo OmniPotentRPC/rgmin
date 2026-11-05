@@ -31,6 +31,7 @@ fn control(gtol: f64) -> Control {
         gtol,
         istep: 0.2,
         maxmove: None,
+        ..Default::default()
     }
 }
 

@@ -24,6 +24,7 @@ fn constrained_newton_preserves_cross_curvature() {
             gtol: 1e-12,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         },
         2,
     );

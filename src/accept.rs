@@ -318,6 +318,7 @@ mod tests {
             gtol: 1e-12,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         }
     }
 

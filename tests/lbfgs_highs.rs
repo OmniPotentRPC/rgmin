@@ -396,6 +396,7 @@ fn highs_newton_qp_on_a_quadratic_respects_a_box() {
             gtol: 1e-10,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         },
         2,
     );
@@ -515,6 +516,7 @@ fn session_set_box_holds_a_per_coordinate_wall() {
             gtol: 1e-10,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         },
         2,
     );
@@ -681,6 +683,7 @@ fn session_set_box_survives_set_highs_and_clips_newton() {
             gtol: 1e-10,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         },
         2,
     );
@@ -742,6 +745,7 @@ fn newton_qp_applies_session_equalities() {
             gtol: 1e-12,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         },
         2,
     );

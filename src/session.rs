@@ -230,6 +230,7 @@ impl Solver {
     /// Fresh session for `method` in dimension `dim`.
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
         let istep = control.istep;
+        let stop_norm = control.stop_norm;
         let inner = Inner::from_method(&method, dim, istep);
         let linesearch = if matches!(&inner, Inner::Lbfgs(_)) {
             LineSearch::Wolfe {
@@ -283,7 +284,7 @@ impl Solver {
             hvp_calls: 0,
             exp: None,
             saddle_kicks: 0,
-            stop_norm: StopNorm::Two,
+            stop_norm,
             constraints: None,
             inner,
         }
@@ -381,7 +382,7 @@ impl Solver {
     }
 
     /// Norm that every stop test and [`Report::grad_norm`] apply to the
-    /// gradient. [`StopNorm::Two`] is the default.
+    /// gradient. The session starts with [`Control::stop_norm`].
     pub fn set_stop_norm(&mut self, norm: StopNorm) {
         self.stop_norm = norm;
     }
@@ -2901,6 +2902,7 @@ mod tests {
             gtol: 1e-12,
             istep: 1.0,
             maxmove: Some(0.1),
+            ..Default::default()
         };
         let lift = Lift(Bounds::new(
             Array1::from_elem(3, -1e6),

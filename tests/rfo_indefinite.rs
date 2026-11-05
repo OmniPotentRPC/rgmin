@@ -22,6 +22,7 @@ fn rfo_minimization_selects_the_lowest_augmented_mode() {
             gtol: 1e-12,
             istep: 1.0,
             maxmove: Some(0.2),
+            ..Default::default()
         },
         NewtonKind::Rfo,
     )
@@ -65,6 +66,7 @@ fn constrained_rfo_keeps_every_trial_inside_the_trust_and_box() {
             gtol: 1e-12,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         },
         1,
     );
@@ -102,6 +104,7 @@ fn inactive_constraints_preserve_the_rfo_model() {
             gtol: 1e-12,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         },
         1,
     );
@@ -141,6 +144,7 @@ fn constrained_rfo_rejects_without_an_unconstrained_fallback() {
             gtol: 1e-12,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         },
         1,
     );

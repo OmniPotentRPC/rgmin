@@ -47,6 +47,7 @@ fn lbfgs_energy_acceptance_converges_below_energy_resolution() {
             gtol: 1e-12,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         };
         let mut solver = Solver::new(Method::lbfgs(), ctrl, 2);
         solver.set_accept(Accept::Energy);

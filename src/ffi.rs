@@ -965,6 +965,7 @@ pub unsafe extern "C" fn rgmin_minimize(
             } else {
                 None
             },
+            stop_norm: StopNorm::Two,
         };
         match minimize_method(
             &obj,
@@ -1051,6 +1052,7 @@ pub unsafe extern "C" fn rgmin_minimize_scg(
             } else {
                 None
             },
+            stop_norm: StopNorm::Two,
         };
         let (scg, conjugacy) = if params.is_null() {
             (ScgParams::default(), Conjugacy::PolakRibiere)
@@ -1176,6 +1178,7 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
             } else {
                 None
             },
+            stop_norm: StopNorm::Two,
         };
         let rust_method = method_from_c(method, c.memory);
         match minimize_method_hess(
@@ -1271,6 +1274,7 @@ pub unsafe extern "C" fn rgmin_minimize_hvp(
             } else {
                 None
             },
+            stop_norm: StopNorm::Two,
         };
         match minimize_method_hvp(
             &obj,
@@ -1381,6 +1385,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
             } else {
                 None
             },
+            stop_norm: StopNorm::Two,
         };
         match minimize_method(
             &obj,
@@ -1452,6 +1457,7 @@ pub unsafe extern "C" fn rgmin_solver_create(
         } else {
             None
         },
+        stop_norm: StopNorm::Two,
     };
     let mut solver = Solver::new(method_from_c(method, c.memory), control, dim).with_gtol(c.gtol);
     solver.set_accept(Accept::Energy);

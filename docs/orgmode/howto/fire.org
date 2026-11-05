@@ -26,6 +26,7 @@ let control = Control {
     gtol: 1e-5,
     istep: 1e-3,
     maxmove: Some(0.2),
+    ..Default::default()
 };
 let mut solver = Solver::new(Method::Fire { kind: FireKind::V2 }, control, 2);
 solver.set_fire_preset(FirePreset::Guenole2020).unwrap();

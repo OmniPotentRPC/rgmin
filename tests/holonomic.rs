@@ -40,6 +40,7 @@ fn control() -> Control {
         gtol: gtol(),
         istep: 0.1,
         maxmove: Some(0.2),
+        ..Default::default()
     }
 }
 

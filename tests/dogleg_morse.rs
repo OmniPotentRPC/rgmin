@@ -285,6 +285,7 @@ fn control(gtol: f64, maxiter: usize) -> Control {
         gtol,
         istep: 0.1,
         maxmove: None,
+        ..Default::default()
     }
 }
 

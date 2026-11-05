@@ -77,6 +77,7 @@ fn steps_until(precon: bool, estimate: bool) -> (usize, Option<f64>) {
         gtol: 1e-8,
         istep: 1.0,
         maxmove: None,
+        ..Default::default()
     };
     let mut solver = Solver::new(Method::Lbfgs { memory: 5 }, control, x.len());
     if precon {
@@ -133,6 +134,7 @@ fn steps_of(method: Method, precon: bool, limit: usize, istep: f64) -> (usize, f
         gtol: 1e-8,
         istep,
         maxmove: None,
+        ..Default::default()
     };
     let mut solver = Solver::new(method, control, x.len());
     if precon {
@@ -191,6 +193,7 @@ fn fire_and_nlcg_move_in_the_metric() {
         gtol: 1e-10,
         istep: 0.05,
         maxmove: None,
+        ..Default::default()
     };
     for method in [
         Method::Fire {
@@ -240,6 +243,7 @@ fn geometry_position(precon: bool, cap: f64) -> Array1<f64> {
         gtol: 1e-12,
         istep: 1.0,
         maxmove: None,
+        ..Default::default()
     };
     let mut solver = Solver::new(Method::Lbfgs { memory: 5 }, control, x.len());
     solver.set_atom_maxmove(cap);
@@ -285,6 +289,7 @@ fn geometry_lbfgs_caps_along_the_preconditioned_force() {
         gtol: 1e-12,
         istep: 1.0,
         maxmove: None,
+        ..Default::default()
     };
     let mut solver = Solver::new(Method::Lbfgs { memory: 5 }, control, x.len());
     solver.set_atom_maxmove(cap);

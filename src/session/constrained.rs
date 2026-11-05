@@ -1619,6 +1619,7 @@ mod tests {
             gtol: 0.0,
             istep: 0.1,
             maxmove: Some(0.2),
+            ..Default::default()
         };
         for accept in [Accept::None, Accept::Energy, Accept::Nonmonotone] {
             let mut solver = Solver::new(Method::lbfgs(), control.clone(), 9);

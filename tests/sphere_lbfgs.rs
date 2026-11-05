@@ -62,6 +62,7 @@ fn solve(retain: bool) -> (f64, f64, usize, f64) {
             gtol: 1e-8,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         },
         n,
     );
@@ -119,6 +120,7 @@ fn sphere_lbfgs_initial_path_is_invariant_to_energy_units() {
                 gtol: 0.0,
                 istep: 1.0,
                 maxmove: None,
+                ..Default::default()
             },
             n,
         );
@@ -169,6 +171,7 @@ fn sphere_lbfgs_resolves_a_stiff_ritz_initializer() {
             gtol: 0.0,
             istep: 1.0,
             maxmove: None,
+            ..Default::default()
         },
         n,
     );

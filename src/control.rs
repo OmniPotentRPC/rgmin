@@ -7,12 +7,17 @@ use ndarray::ArrayView1;
 pub struct Control {
     /// Maximum CG iterations.
     pub maxiter: usize,
-    /// Stop when `||g||_2 < gtol`.
+    /// Stop when the gradient norm is below `gtol`: [`Self::stop_norm`]
+    /// in a session, `||g||_2` elsewhere.
     pub gtol: f64,
     /// Initial line-search step guess.
     pub istep: f64,
     /// Optional Euclidean cap on a proposed step (xtsci `maxmove`).
     pub maxmove: Option<f64>,
+    /// Norm a [`crate::Solver`] built from this control compares to
+    /// [`Self::gtol`]. [`crate::Solver::set_stop_norm`] replaces it.
+    /// Drivers that run no session keep `||g||_2`.
+    pub stop_norm: StopNorm,
 }
 
 impl Default for Control {
@@ -22,6 +27,7 @@ impl Default for Control {
             gtol: 1e-5,
             istep: 1.0,
             maxmove: None,
+            stop_norm: StopNorm::Two,
         }
     }
 }

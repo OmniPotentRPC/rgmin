@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Accept, Control, Error, Lbfgs, LineSearch, Method, Oracle, Report, Solver};
+use rgmin::{Accept, Control, Error, Lbfgs, LineSearch, Method, Oracle, Report, Solver, StopNorm};
 
 /// `(calls, largest |x_i| probed)`, NaN counting as infinite.
 #[derive(Default)]
@@ -45,6 +45,7 @@ const CONTROL: Control = Control {
     gtol: 1e-8,
     istep: 1.0,
     maxmove: None,
+    stop_norm: StopNorm::Two,
 };
 
 /// Every method under every line search, then as a session under every

@@ -106,6 +106,7 @@ fn main() {
             gtol: FMAX,
             istep,
             maxmove: None,
+            ..Default::default()
         };
         let mut solver = Solver::new(method, control, x0.len());
         solver.set_atom_maxmove(0.2);

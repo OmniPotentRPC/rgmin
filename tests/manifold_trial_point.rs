@@ -19,6 +19,7 @@ fn control() -> Control {
         gtol: 1e-12,
         istep: 1.0,
         maxmove: Some(CAP),
+        ..Default::default()
     }
 }
 

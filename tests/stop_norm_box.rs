@@ -22,6 +22,7 @@ fn box_stop_measures_the_projected_gradient() {
             gtol: 0.55,
             istep: 0.1,
             maxmove: None,
+            ..Default::default()
         };
         let mut s = Solver::new(Method::Lbfgs { memory: 5 }, control, 9);
         s.set_highs(true);

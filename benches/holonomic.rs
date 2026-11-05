@@ -746,6 +746,7 @@ fn main() {
                 gtol: stops[0],
                 istep,
                 maxmove: None,
+                ..Default::default()
             };
             let free = ["steepest", "cg-pr", "lbfgs"];
             for arm in arms(false)
@@ -771,6 +772,7 @@ fn main() {
                 gtol: stop,
                 istep,
                 maxmove: None,
+                ..Default::default()
             };
             for (masses, set) in &sets {
                 for arm in arms(spce) {

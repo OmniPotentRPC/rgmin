@@ -618,6 +618,7 @@ mod tests {
                 gtol: fmax,
                 istep: dt,
                 maxmove: abc.then_some(cap),
+                ..Default::default()
             };
             let mut solver =
                 crate::Solver::new(crate::Method::Fire { kind: FireKind::V2 }, control, 3);

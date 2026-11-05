@@ -187,6 +187,7 @@ where
         gtol: tol,
         istep: arm.istep,
         maxmove: None,
+        ..Default::default()
     };
     let mut solver = Solver::new((arm.method)(), control, x0.len());
     solver.set_atom_maxmove(0.2);
