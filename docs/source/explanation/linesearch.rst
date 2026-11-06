@@ -103,3 +103,34 @@ also fails reports the position unmoved, and the caller's stall
 machinery owns what happens next. The test
 ``accept_energy_uphill_does_not_take_ten_steepest_retries`` pins the
 oracle count of that path.
+
+6 At the rounding floor
+-----------------------
+
+The decrease test compares two values of f.
+Near a minimum they differ by less than the rounding error of f, and the test then passes or fails on rounding alone.
+On the 75-atom Lennard-Jones cluster of :doc:`../reference/sota`, with the energy near -380, the last ten values that the strict strong Wolfe search tries after its last accepted iterate differ from the value there by up to 1.6e-12, or 4.2e-15 relative.
+The slope phi'(a) is still accurate there.
+Nocedal and Wright end the search after about ten trials that fail to lower f.
+This caps the cost, and x stays at the last point the search accepted (*Numerical Optimization*, 2nd edition, `Springer 2006 <https://doi.org/10.1007/978-0-387-40065-5>`_, section 3.5; :cite:`nocedalNumericalOptimization2006`).
+Hager and Zhang instead accept a trial with phi(a) <= phi(0) + eps abs(f) that meets the approximate Wolfe conditions (2 c1 - 1) phi'(0) >= phi'(a) >= c2 phi'(0).
+These conditions use only the slope.
+They report that a Wolfe search reaches an accuracy near the square root of the machine epsilon, and one with the approximate conditions an accuracy near the machine epsilon itself.
+Their paper is *A new conjugate gradient method with guaranteed descent and an efficient line search*, Society for Industrial and Applied Mathematics (SIAM) Journal on Optimization 16, 170 (2005), section 4 (`10.1137/030601880 <https://doi.org/10.1137/030601880>`_; :cite:`hagerNewConjugateGradient2005`).
+
+With a positive ``approx_wolfe``, ``Lbfgs::minimize`` and ``Lbfgs::minimize_box`` use that stop in strong form.
+The value error is ``approx_wolfe`` times abs(f), and a trial at most that far above the start is within it.
+Such a trial is accepted when abs(phi'(a)) <= c2 abs(phi'(0)).
+Since c2 = 0.9 is below 1 - 2 c1, both approximate Wolfe inequalities follow, and the new pair keeps y\ :sup:`T`\ s >= (1 - c2) a abs(phi'(0)) > 0.
+A trial within the error that fails the curvature test is placed by the sign of its slope, as in their interval update: the bracket grows while phi'(a) < 0, and the zoom moves its low end to a trial whose slope still points down toward the high end.
+On that cluster ``approx_wolfe = 1e-12`` brings rgmin level with SciPy.
+
+The default, ``approx_wolfe = 0``, keeps the strict search, because of what a relaxation leaves for the next call.
+On that cluster 394 of the 400 strict runs end with a failed search from steepest descent and no pairs left.
+So the next call starts cold, with a first trial step of length at most 1.
+With the test on, all 400 end on the ``gtol`` test and keep their pairs.
+On the next call the first trial is a full step along the direction they give.
+After a large perturbation of a cluster that step can throw the atoms apart.
+The search accepts it there, since the energy falls and the slope is near zero.
+Call ``Lbfgs::forget`` before reusing a solver after a large change.
+``LineSearch::Wolfe``, the search of the ``Solver`` sessions, does not change.

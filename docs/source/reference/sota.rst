@@ -55,23 +55,91 @@ Fortran 778 code (`10.1145/2049662.2049669 <https://doi.org/10.1145/2049662.2049
 Its ``gtol`` is an infinity-norm on the projected gradient.
 ``Lbfgs`` defaults to that same infinity-norm so a hopping polish is
 comparable to L-BFGS-B.
+``Lbfgs::minimize_box`` is that algorithm in this crate: the generalized Cauchy point, the subspace step and the projection test (:doc:`../howto/lbfgs-box`).
 
-On the anneal 75-point Lennard-Jones protocol (400 relaxations from
-perturbed minima, overlaps repaired first):
+Lennard-Jones, 75 atoms
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The 75-atom Lennard-Jones (LJ75) protocol is anneal's ``examples/warm_quench_lj.rs``: 400 relaxations from perturbed minima, overlaps repaired first, no bounds.
+``examples/lbfgsb_bench.rs`` rebuilds the same starts and traces rgmin.
+``docs/figures/lbfgsb/bench_lbfgsb.py`` runs SciPy 1.18.1 on those starts.
+rgmin is ``develop`` at d27b2387 with ``minimize_box`` and ``approx_wolfe`` added; the ``minimize`` arm computes the same bits as ``develop``.
+The two ``approx_wolfe = 1e-12`` arms turn on the approximate Wolfe test (:doc:`../explanation/linesearch`).
 
 .. table::
 
-    +-----------+----------------------+----------------------+
-    | arm       | evals per relaxation | worst final ``gmax`` |
-    +===========+======================+======================+
-    | WarmLbfgs |                386.1 |              1.45e-5 |
-    +-----------+----------------------+----------------------+
-    | L-BFGS-B  |                  273 |              1.43e-5 |
-    +-----------+----------------------+----------------------+
+    +---------------------------------------------------+----------------------------+---------------------+-------+----------------------+
+    | arm                                               | evaluations per relaxation | to ``gmax <= 1e-5`` | after | worst final ``gmax`` |
+    +===================================================+============================+=====================+=======+======================+
+    | ``Lbfgs::minimize``                               |                      371.2 |               252.3 | 118.8 |              2.11e-5 |
+    +---------------------------------------------------+----------------------------+---------------------+-------+----------------------+
+    | ``Lbfgs::minimize_box``                           |                      371.0 |               251.8 | 119.2 |              2.67e-5 |
+    +---------------------------------------------------+----------------------------+---------------------+-------+----------------------+
+    | ``Lbfgs::minimize``, ``approx_wolfe = 1e-12``     |                      278.6 |               252.3 |  26.3 |              9.99e-7 |
+    +---------------------------------------------------+----------------------------+---------------------+-------+----------------------+
+    | ``Lbfgs::minimize_box``, ``approx_wolfe = 1e-12`` |                      278.3 |               251.7 |  26.6 |              9.99e-7 |
+    +---------------------------------------------------+----------------------------+---------------------+-------+----------------------+
+    | L-BFGS-B, ``maxcor 8``, ``gtol 1e-6``, ``ftol 0`` |                      278.5 |               252.6 |  25.9 |              1.29e-5 |
+    +---------------------------------------------------+----------------------------+---------------------+-------+----------------------+
+    | L-BFGS-B, SciPy defaults                          |                      181.2 |         not reached | \     |              5.63e-2 |
+    +---------------------------------------------------+----------------------------+---------------------+-------+----------------------+
 
-Both arms converge. The remaining gap is bound handling and the
-L-BFGS-B Cauchy / subspace machinery, not a different unconstrained
-update.
+``gmax`` is the largest absolute gradient component at the last accepted iterate.
+The "to" column counts evaluations up to the first accepted iterate with ``gmax <= 1e-5``; every run of the first five arms gets there.
+The "after" column is the mean of what each of those runs spends past that point.
+The four rgmin arms end in the same minimum on all 400 starts.
+rgmin and SciPy agree on 382 starts.
+Of the other 18, SciPy finds the lower minimum on 9 and rgmin on 9.
+
+This page used to give 386.1 against 273.
+Those runs used anneal's pinned rgmin, and the SciPy options were not recorded.
+The re-measured gap is 371.2 against 278.5, 1.33 times.
+
+Bound handling is not the cause.
+LJ75 has no bounds.
+SciPy skips its Cauchy point when a problem has none (``mainlb`` in ``scipy/optimize/src/lbfgsb.c``, SciPy 1.18.1, commit e4e854ea), and ``minimize_box`` costs what ``minimize`` costs.
+Every arm that converges reaches ``gmax <= 1e-5`` after about 252 evaluations.
+The difference is the end of the run.
+Near ``gmax = 1e-6`` the energy, about -380, changes only in its last bits.
+The last ten values that the default, strict search tries after its last accepted iterate differ from the value there by up to 1.6e-12, so its decrease test passes or fails on rounding.
+It spends up to 40 evaluations, drops the pairs, and spends up to 40 more from steepest descent before it stops.
+On average 68.3 evaluations per relaxation come after the last accepted iterate, and 394 of the 400 runs end with ``gmax`` at or above the ``gtol`` of 1e-6.
+
+With ``approx_wolfe = 1e-12`` the search accepts a trial at most 1e-12 times abs(f) above the start when it meets the strong curvature test, and places such trials by the sign of their slope.
+Every run then ends on the ``gtol`` test, and no run spends an evaluation after its last accepted iterate.
+The test is off by default, since a solver reused after a large perturbation can then take a much too long first step (:doc:`../explanation/linesearch`).
+SciPy's More-Thuente search (``dcsrch``) returns a warning once rounding blocks progress, and ``lnsrlb`` takes that point as the step.
+With ``ftol = 0`` the run then stops at the first step that does not lower f (115 of 400 runs), on the gradient test (284), or on a failed line search (1).
+It spends 0.1 evaluations per relaxation after its last accepted iterate, about as few, but 116 of its runs end with ``gmax`` at or above 1e-6.
+With SciPy's default ``ftol`` the run stops much earlier, at a median ``gmax`` of 5.7e-3, which is not a converged relaxation by this page's test.
+
+.. image:: ../../figures/lbfgsb/lj75_tail.png
+
+Left: the median over the 400 starts of the best accepted ``gmax`` so far, against evaluations; a dot marks the median run length.
+Right: mean evaluations before and after ``gmax <= 1e-5``.
+``docs/figures/lbfgsb/plot_lbfgsb.py`` draws it from the two traces and prints the table above.
+
+A bounded problem
+^^^^^^^^^^^^^^^^^
+
+``driver1`` of the L-BFGS-B 3.0 distribution is an extended Rosenbrock function on 25 variables.
+The odd variables lie in [1, 100] and the even ones in [-100, 100].
+The runs start from its own start, x = 3, and from 19 seeded starts in the box, with 5 pairs and a projected ``gtol`` of 1e-5.
+
+.. table::
+
+    +----------------------------+---------------------+--------------------------------+
+    | arm                        | evaluations per run | worst final projected ``gmax`` |
+    +============================+=====================+================================+
+    | ``Lbfgs::minimize_box``    |                38.2 |                        9.87e-6 |
+    +----------------------------+---------------------+--------------------------------+
+    | L-BFGS-B, ``ftol 0``       |                37.9 |                        9.78e-6 |
+    +----------------------------+---------------------+--------------------------------+
+    | L-BFGS-B, default ``ftol`` |                34.0 |                        2.42e-4 |
+    +----------------------------+---------------------+--------------------------------+
+
+All 20 runs of the first two arms meet the tolerance.
+With its default ``ftol``, SciPy stops first and none of its 20 runs meets it.
 
 Relative-decrease stop
 ~~~~~~~~~~~~~~~~~~~~~~

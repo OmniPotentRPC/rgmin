@@ -15,6 +15,7 @@ The types a host works with:
 | Type | Role |
 |---+---|
 | ~Solver~ | One stepper step. Hosts own the loop. |
+| ~Lbfgs~ | Persistent limited-memory quasi-Newton; ~minimize_box~ keeps iterates in bounds. |
 | ~Method~ / ~Control~ / ~LineSearch~ | Which step, and how far. |
 | ~ManifoldKind~ | ~project~ / ~retract~ / ~transport~. |
 | ~IrcTrust~ | GS2 / Sella MW-sphere equality. |

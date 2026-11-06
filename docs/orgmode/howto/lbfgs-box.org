@@ -1,0 +1,54 @@
+#+TITLE: Minimize inside a box
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Minimize inside a box
+
+Use ~Lbfgs::minimize_box~ when some coordinates have bounds and the minimum may sit on one of them.
+It is limited-memory Broyden-Fletcher-Goldfarb-Shanno with bounds (L-BFGS-B), the method behind SciPy's ~method="L-BFGS-B"~.
+@@rst::doc:`../explanation/quasi-newton`@@ explains the step.
+
+You need ~rgmin~ from the ~develop~ branch (@@rst::doc:`install`@@) and ~ndarray~.
+No cargo feature is needed.
+
+** Relax inside the box
+
+Give one lower and one upper bound per coordinate.
+A side with no bound is ~f64::NEG_INFINITY~ or ~f64::INFINITY~.
+The objective returns the value and the gradient, or ~None~ to stop.
+
+#+begin_src rust
+use ndarray::{ArrayView1, array};
+use rgmin::Lbfgs;
+
+// The minimum (2, -1) is outside the box, which stops x[0] at 1.
+let fg = |x: ArrayView1<f64>| {
+    let f = (x[0] - 2.0).powi(2) + (x[1] + 1.0).powi(2);
+    Some((f, array![2.0 * (x[0] - 2.0), 2.0 * (x[1] + 1.0)]))
+};
+let lower = array![f64::NEG_INFINITY, f64::NEG_INFINITY];
+let upper = array![1.0, f64::INFINITY];
+let mut opt = Lbfgs::default();
+let (f, x, _) = opt.minimize_box(array![0.0, 0.0].view(), lower.view(), upper.view(), 100, fg);
+assert_eq!(x[0], 1.0);
+assert!((x[1] + 1.0).abs() < 1e-6 && (f - 1.0).abs() < 1e-12);
+#+end_src
+
+~minimize_box~ returns the value, the point and the evaluation count, as ~Lbfgs::minimize~ does.
+The same sample is the doctest of ~minimize_box~, so ~cargo test --doc~ runs it.
+
+** What the call does with the bounds
+
+- A start outside the box is clipped into it, and ~fg~ never sees a point outside.
+- The run stops when the projected gradient ~x - clip(x - g, lower, upper)~ is below ~opt.gtol~ in ~opt.norm~.
+  The run can end while the gradient presses a coordinate against its bound.
+- The pairs stay in ~opt~ after the call, as with ~minimize~, and ~opt.forget()~ drops them.
+- ~minimize_box_watched~ takes a second closure that sees each accepted iterate and can stop the run.
+
+** When to use something else
+
+- With no finite bound, use ~Lbfgs::minimize~.
+  ~minimize_box~ then computes the same direction up to rounding and costs the same: 371.0 against 371.2 evaluations per relaxation on the LJ75 set of @@rst::doc:`../reference/sota`@@.
+- Use ~Lbfgs.highs~ to keep the two-loop direction and project it onto a box, a trust region or linear equalities (@@rst::doc:`highs-qp`@@).
+  That route needs the ~highs~ feature.
+- A ~Solver~ session does not take this mode yet.

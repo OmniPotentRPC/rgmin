@@ -113,7 +113,41 @@ keeps far-from-quadratic steps from polluting the memory. Skipping is
 always sound: the two-loop over any subset of valid pairs is the BFGS
 inverse built from exactly those pairs.
 
-5 Session hooks: forget, watched, recognized
+5 Bounds: the generalized Cauchy point
+--------------------------------------
+
+``Lbfgs::minimize_box`` keeps the same pairs and replaces the two-loop direction with the step of limited-memory Broyden-Fletcher-Goldfarb-Shanno with bounds (L-BFGS-B).
+Byrd, Lu, Nocedal and Zhu, *A limited memory algorithm for bound constrained optimization*, Society for Industrial and Applied Mathematics (SIAM) Journal on Scientific Computing 16, 1190 (1995) (`10.1137/0916069 <https://doi.org/10.1137/0916069>`_; :cite:`byrdLimitedMemoryAlgorithm1995`).
+The step needs ``B`` rather than ``H``, so it uses the compact form of Byrd, Nocedal and Schnabel, Mathematical Programming 63, 129 (1994) (`10.1007/BF01582063 <https://doi.org/10.1007/BF01582063>`_; :cite:`byrdRepresentationsQuasinewtonMatrices1994`):
+
+::
+
+    B = theta I - W M W^T,   W = [Y, theta S],
+    M^-1 = [[-D, L^T], [L, theta S^T S]],
+
+with theta = (y\ :sup:`T`\ y) / (s\ :sup:`T`\ y) from the newest pair, ``D`` the diagonal of ``s_i^T y_i``, and ``L`` the strictly lower triangle of S\ :sup:`T`\ Y.
+Both forms describe the same matrix when the two-loop recursion seeds with 1/theta.
+
+The bounded step built on this matrix has two parts.
+The generalized Cauchy point is the first local minimizer of the quadratic model along the projected steepest-descent path clip(x - t g, lo, hi).
+That path is piecewise linear and bends where a coordinate meets its bound.
+The search visits the bends in order of t and updates the slope and curvature of the model in O(m\ :sup:`2`\) work per bend (algorithm CP of the paper).
+The coordinates that the Cauchy point leaves on a bound stay there.
+One reduced Newton step moves the other coordinates.
+It costs a 2m by 2m solve (section 5.1).
+If that point leaves the box, it is projected back.
+The projection is kept when it is still a descent direction; otherwise the step is cut back to the box.
+That test is the remark of Morales and Nocedal, Association for Computing Machinery (ACM) Transactions on Mathematical Software 38, 1 (2011) (`10.1145/2049662.2049669 <https://doi.org/10.1145/2049662.2049669>`_; :cite:`moralesRemarkAlgorithm7782011`).
+The strong Wolfe search runs along the segment from x to that point and never steps outside the box.
+The Fortran 77 code of Zhu, Byrd, Lu and Nocedal, ACM Transactions on Mathematical Software 23, 550 (1997) (`10.1145/279232.279236 <https://doi.org/10.1145/279232.279236>`_; :cite:`zhuAlgorithm778Lbfgsb1997`), as translated to C in SciPy 1.18.1 (commit e4e854ea, ``scipy/optimize/src/lbfgsb.c``, routines ``cauchy`` and ``subsm``), is the reference for the details.
+
+With no finite bound the Cauchy point meets no bend and the reduced step covers every coordinate.
+The end point is then x - H g, the two-loop direction up to rounding, and the unit test ``unbounded_direction_is_the_two_loop_direction`` checks that to 1e-12.
+SciPy skips the Cauchy point when no bound is finite.
+The method then differs from ``Lbfgs::minimize`` only in rounding.
+:doc:`../reference/sota` measures that cost on a 75-atom Lennard-Jones cluster.
+
+6 Session hooks: forget, watched, recognized
 --------------------------------------------
 
 ``Solver`` (and anneal's ``WarmLbfgs`` face over it) exposes three
@@ -134,7 +168,7 @@ lifecycle hooks whose safety arguments are one sentence each:
   the knowledge is. The identity and refund tests in
   ``tests/lbfgs_state.rs`` pin both behaviors.
 
-6 Non-finite input is not convergence
+7 Non-finite input is not convergence
 -------------------------------------
 
 A gradient with a NaN component has no norm worth trusting; the crate
