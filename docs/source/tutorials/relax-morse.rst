@@ -96,3 +96,4 @@ Try next
 - Read :doc:`hold a stateful solver <../howto/session>` for the setters a host can call, and :doc:`the secant family <../explanation/quasi-newton>` for why a capped L-BFGS step behaves as it does.
 
 If you use ``rgmin`` in published work, cite it with the repository's ``CITATION.cff``.
+:doc:`../howto/cite` shows how to add the version you ran.

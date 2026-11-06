@@ -92,6 +92,10 @@ It points to the contributing page for the rest.
 :doc:`Contributing <contributing/index>` now gives the docs export command that the workflow runs, ``cd docs && emacs --batch -l export.el``.
 Of the two commands it gave before, one failed and the other wrote nothing.
 
+:doc:`Cite rgmin <howto/cite>` gives a BibTeX entry from ``CITATION.cff`` through cffconvert.
+It takes the version from ``cargo tree``, since the record names no version on ``develop`` and an older one on ``main``.
+The README, the index and the Pt256 tutorial point to it.
+
 L-BFGS session ``Accept::None`` takes the clipped two-loop direction.
 Wolfe line search stays on Energy / Nonmonotone.
 

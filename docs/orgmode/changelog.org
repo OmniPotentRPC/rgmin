@@ -91,6 +91,10 @@ It points to the contributing page for the rest.
 @@rst::doc:`Contributing <contributing/index>`@@ now gives the docs export command that the workflow runs, ~cd docs && emacs --batch -l export.el~.
 Of the two commands it gave before, one failed and the other wrote nothing.
 
+@@rst::doc:`Cite rgmin <howto/cite>`@@ gives a BibTeX entry from ~CITATION.cff~ through cffconvert.
+It takes the version from ~cargo tree~, since the record names no version on ~develop~ and an older one on ~main~.
+The README, the index and the Pt256 tutorial point to it.
+
 The docs export installs Org 9.7 or newer from the Emacs Lisp Package Archive (ELPA) of the GNU's Not Unix (GNU) project before ox-rst.
 Pull requests run the Org export and the Sphinx build.
 The Pages deploy stays on a push to ~main~ or ~workflow_dispatch~.

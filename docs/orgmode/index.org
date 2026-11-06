@@ -84,6 +84,7 @@ It also covers the features of each route, the C library and a checkout.
    howto/highs-qp
    howto/c-abi
    howto/doxygen
+   howto/cite
 
 .. toctree::
    :maxdepth: 2
@@ -120,6 +121,11 @@ It also covers the features of each route, the C library and a checkout.
 Ask questions and report bugs on the [[https://github.com/OmniPotentRPC/rgmin/issues][issue tracker]].
 Report a security problem privately by email to the maintainer, Rohit Goswami, at [[mailto:rgoswami@ieee.org][rgoswami@ieee.org]], as [[https://github.com/OmniPotentRPC/rgmin/blob/main/SECURITY.md][SECURITY.md]] describes.
 The same address takes reports under the [[https://github.com/OmniPotentRPC/rgmin/blob/main/CODE_OF_CONDUCT.md][code of conduct]].
+
+* Citation
+
+If you use rgmin in published work, cite it with ~CITATION.cff~ and add the version or commit you ran.
+@@rst::doc:`howto/cite`@@ gives a BibTeX entry and shows where to find the version.
 
 * License
 MIT.

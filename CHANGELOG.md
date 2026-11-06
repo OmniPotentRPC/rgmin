@@ -123,6 +123,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - How-to `docs/orgmode/howto/install.org` shows how to install the 0.5.2 release from crates.io or the `develop` branch.
   It gives the dependencies and features of each route, the C library through cargo-c, and the SciPy the HiGHS tests need.
   The README, the index and the quickstart point to it.
+- How-to `docs/orgmode/howto/cite.org` gives a BibTeX entry from `CITATION.cff` through cffconvert.
+  It takes the version from `cargo tree`, since the record names no version on `develop` and an older one on `main`.
+  The README, the index and the Pt256 tutorial point to it.
 - Tutorial `docs/orgmode/tutorials/relax-morse.org`: relax the Pt256 Morse fixture with L-BFGS, FIRE and FIRE 2.0 through a `Solver` session.
   `examples/relax_morse.rs` is the program it runs.
   `docs/figures/relax-morse/` has the force-trace plot, the session diagram and the scripts that draw them.

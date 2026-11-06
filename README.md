@@ -79,4 +79,11 @@ Install the 0.5.2 release from crates.io with `cargo add rgmin ndarray@0.17` on 
 [`docs/orgmode/howto/install.org`](docs/orgmode/howto/install.org) covers the `develop` branch and how it differs from the release.
 It also covers the features of each route and the C library.
 
+## Citation
+
+If you use rgmin in published work, cite it with [`CITATION.cff`](CITATION.cff) and add the version or commit you ran.
+[`docs/orgmode/howto/cite.org`](docs/orgmode/howto/cite.org) gives a BibTeX entry and shows where to find the version.
+
+## License
+
 MIT.
