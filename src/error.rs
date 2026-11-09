@@ -102,6 +102,12 @@ pub enum Error {
     /// or could not be met.
     #[error("distance constraints: {0}")]
     Constraint(#[from] crate::holonomic::ConstraintError),
+    /// Quick-min was asked for something its session does not hold.
+    #[error("quick-min: {what}")]
+    QuickMin {
+        /// What the call refused.
+        what: &'static str,
+    },
 }
 
 /// Result alias for this crate.

@@ -65,6 +65,8 @@ mod qn;
 /// Sella QuasiNewton / QuasiNewtonIRC restricted step.
 pub mod qn_irc;
 mod qn_step;
+/// Quick-min inertial step.
+pub mod quickmin;
 mod report;
 mod rigid;
 /// Tangent-space truncated conjugate gradients and trust-radius updates.
@@ -120,6 +122,10 @@ pub use qn_irc::{
     qn_irc_restricted_identity, qn_restricted, to_mw,
 };
 pub use qn_step::QnStep;
+pub use quickmin::{
+    QuickMinOptions, QuickMinState, quickmin_baseline, quickmin_displacement, quickmin_project,
+    quickmin_rescale_velocity,
+};
 pub use report::Report;
 pub use scg::{DirectionalCurvature, ScgParams, minimize_scg, minimize_scg_exact};
 pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};

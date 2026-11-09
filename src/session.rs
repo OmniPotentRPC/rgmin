@@ -43,6 +43,10 @@ use crate::qn::{
     bfgs_inverse_update, secant_scale, solve_dense, sr1_inverse_update, sr2_hessian_update,
 };
 use crate::qn_step::QnStep;
+use crate::quickmin::{
+    QuickMinOptions, QuickMinSession, QuickMinState, quickmin_rescale_velocity,
+    quickmin_session_step,
+};
 use crate::report::Report;
 use crate::rigid::{project_horizontal, project_out_rot_trans};
 use crate::step::{
@@ -223,6 +227,7 @@ enum Inner {
     NewtonPcg {
         radius: f64,
     },
+    QuickMin(QuickMinState, QuickMinSession),
 }
 
 struct PsoState {
@@ -587,6 +592,43 @@ impl Solver {
                 Ok(())
             }
             _ => Err(Error::NeedFire2),
+        }
+    }
+
+    /// Split quick-min into atoms `[0, at)` and a cell `[at, n)`.
+    /// A session that is not quick-min, or a split on the boundary,
+    /// returns [`Error::QuickMin`].
+    pub fn set_quickmin_cell(&mut self, at: usize) -> Result<()> {
+        if at == 0 || at >= self.dim {
+            return Err(Error::QuickMin {
+                what: "cell block must start after the atomic coordinates and before the end",
+            });
+        }
+        match &mut self.inner {
+            Inner::QuickMin(state, _) => {
+                state.cell_at = Some(at);
+                Ok(())
+            }
+            _ => Err(Error::QuickMin {
+                what: "cell block requires a quick-min session",
+            }),
+        }
+    }
+
+    /// Turn the quick-min time-step controller on or off.
+    /// A session that is not quick-min ignores the call.
+    pub fn set_quickmin_adapt(&mut self, enabled: bool) {
+        if let Inner::QuickMin(state, session) = &mut self.inner {
+            state.adapt_dt = enabled;
+            session.options.adapt_dt = enabled;
+        }
+    }
+
+    /// Quick-min options. A no-op on any other method. The velocity
+    /// and `dt` restart from [`Control::istep`]. The cell split stays.
+    pub fn set_quickmin_options(&mut self, options: QuickMinOptions) {
+        if let Inner::QuickMin(state, session) = &mut self.inner {
+            session.configure(state, options);
         }
     }
 
@@ -1338,6 +1380,10 @@ impl Solver {
             Inner::Pso { swarm, .. } => *swarm = None,
             Inner::Newton { .. } => {}
             Inner::Fire(state) => state.reset(),
+            Inner::QuickMin(state, session) => {
+                state.reset();
+                session.forget_last();
+            }
             Inner::Bb { prev_s, prev_y } => {
                 *prev_s = None;
                 *prev_y = None;
@@ -2708,6 +2754,36 @@ impl Solver {
                     fire_after_v1(state, &raw_new);
                 }
             }
+            Inner::QuickMin(state, session) => {
+                // One trial, one oracle. Accept::None is that step. A
+                // non-finite trial puts the velocity back and leaves x.
+                let saved_state = state.clone();
+                let saved_last = session.last.clone();
+                let mut force = grad.mapv(|g| -g);
+                project_box_tangent(obj.bounds(), x, &mut force);
+                project_box_tangent(obj.bounds(), x, &mut state.vel);
+                let dx = quickmin_session_step(state, session, x, &force);
+                let mut trial = &*x + &dx;
+                if let Some(cap) = self.atom_maxmove {
+                    scale_step_atom(x, &mut trial, cap);
+                } else if let Some(cap) = self.control.maxmove {
+                    scale_step(x, &mut trial, cap);
+                }
+                trial = obj.bounds().clip(trial.view());
+                if session.options.rescale_on_clamp {
+                    quickmin_rescale_velocity(&mut state.vel, &dx, &(&trial - &*x));
+                }
+                let ev = obj.value_and_gradient(trial.view());
+                if !finite(ev.0, ev.1.view()) {
+                    *state = saved_state;
+                    session.last = saved_last;
+                    return Err(non_finite());
+                }
+                *x = trial;
+                value = ev.0;
+                grad = ev.1;
+                project_box_tangent(obj.bounds(), x, &mut state.vel);
+            }
             Inner::Bb { prev_s, prev_y } => {
                 let dir = bb_direction(prev_s.as_ref(), prev_y.as_ref(), &grad, self.istep);
                 let old = x.clone();
@@ -2933,6 +3009,9 @@ impl Inner {
             Method::NewtonPcg => Inner::NewtonPcg {
                 radius: istep.max(RADIUS_START),
             },
+            Method::QuickMin => {
+                Inner::QuickMin(QuickMinState::new(dim, istep), QuickMinSession::new(istep))
+            }
         }
     }
 }

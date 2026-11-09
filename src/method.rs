@@ -135,6 +135,11 @@ pub enum Method {
     /// Frangella, Tropp, Udell,
     /// <https://doi.org/10.1137/21M1466244>.
     NewtonPcg,
+    /// Quick-min: project the velocity onto the force, then take an Euler step.
+    ///
+    /// The session takes one oracle call per accepted move. A zero
+    /// gradient stops when it falls under [`crate::Control::gtol`].
+    QuickMin,
 }
 
 impl Method {
@@ -215,6 +220,7 @@ impl Method {
             Self::Dogleg => "dogleg",
             Self::NewtonCg => "newton-cg",
             Self::NewtonPcg => "newton-pcg",
+            Self::QuickMin => "quickmin",
         }
     }
 
@@ -258,6 +264,7 @@ impl Method {
             "dogleg" => Self::Dogleg,
             "newton_cg" => Self::NewtonCg,
             "newton_pcg" => Self::NewtonPcg,
+            "quickmin" | "quick_min" => Self::QuickMin,
             _ => {
                 return Err(crate::Error::UnknownMethod {
                     name: name.to_string(),

@@ -42,6 +42,7 @@ use crate::qn::{
     bfgs_inverse_update, secant_scale, solve_dense, sr1_inverse_update, sr2_hessian_update,
 };
 use crate::qn_step::QnStep;
+use crate::quickmin::quickmin_session_step;
 use crate::report::Report;
 use crate::rigid::project_horizontal;
 use crate::step::{
@@ -414,6 +415,10 @@ enum Memory {
     Matrix(Array2<f64>, bool),
     Adam(Array1<f64>, Array1<f64>, f64, f64),
     Fire(FireState),
+    QuickMin(
+        crate::quickmin::QuickMinState,
+        crate::quickmin::QuickMinSession,
+    ),
     Bb(Option<Array1<f64>>, Option<Array1<f64>>),
     Radius(f64),
     Stateless,
@@ -436,6 +441,7 @@ impl Inner {
             }
             Inner::Adam { m, v, b1p, b2p, .. } => Memory::Adam(m.clone(), v.clone(), *b1p, *b2p),
             Inner::Fire(state) => Memory::Fire(state.clone()),
+            Inner::QuickMin(state, session) => Memory::QuickMin(state.clone(), session.clone()),
             Inner::Bb { prev_s, prev_y } => Memory::Bb(prev_s.clone(), prev_y.clone()),
             Inner::Dogleg { radius } | Inner::NewtonCg { radius } | Inner::NewtonPcg { radius } => {
                 Memory::Radius(*radius)
@@ -466,6 +472,10 @@ impl Inner {
                 (*m, *v, *b1p, *b2p) = (sm, sv, p1, p2);
             }
             (Inner::Fire(state), Memory::Fire(saved)) => *state = saved,
+            (Inner::QuickMin(state, session), Memory::QuickMin(saved_state, saved_session)) => {
+                *state = saved_state;
+                *session = saved_session;
+            }
             (Inner::Bb { prev_s, prev_y }, Memory::Bb(s, y)) => (*prev_s, *prev_y) = (s, y),
             (
                 Inner::Dogleg { radius } | Inner::NewtonCg { radius } | Inner::NewtonPcg { radius },
@@ -721,6 +731,7 @@ impl Solver {
                 *d_old = project(d_old)?;
             }
             Inner::Fire(state) => state.vel = project(&state.vel)?,
+            Inner::QuickMin(state, _) => state.vel = project(&state.vel)?,
             Inner::Bb { prev_s, prev_y } => {
                 if let (Some(s), Some(y)) = (prev_s.as_mut(), prev_y.as_mut()) {
                     *s = project(s)?;
@@ -986,6 +997,10 @@ impl Solver {
             }
             Inner::Bb { prev_s, prev_y } => {
                 bb_direction(prev_s.as_ref(), prev_y.as_ref(), gq, istep)
+            }
+            Inner::QuickMin(state, session) => {
+                let force = gq.mapv(|g| -g);
+                quickmin_session_step(state, session, x, &force)
             }
             Inner::Fire(_)
             | Inner::Pso { .. }

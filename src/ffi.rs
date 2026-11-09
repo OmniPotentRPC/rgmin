@@ -453,6 +453,8 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
         Method::Dogleg => rgmin_method_t::RGMIN_DOGLEG,
         Method::NewtonCg => rgmin_method_t::RGMIN_NEWTON_CG,
         Method::NewtonPcg => rgmin_method_t::RGMIN_NEWTON_PCG,
+        // No C token. Adding one would change the public ABI.
+        Method::QuickMin => return Err(()),
     };
     Ok(tag)
 }
