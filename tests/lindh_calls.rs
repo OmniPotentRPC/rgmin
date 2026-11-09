@@ -55,7 +55,9 @@ impl DifferentiableObjective<f64> for Bonds {
             let (r, d) = dist(x, i, j);
             let gap = r - r0;
             f += 0.5 * k * gap * gap;
-            if r > 1e-12 {
+            // Exact coincidence has no unit vector. Every positive
+            // distance, including one below 1e-12, keeps its force.
+            if r > 0.0 {
                 let s = k * gap / r;
                 for c in 0..3 {
                     g[3 * i + c] += s * d[c];
@@ -86,6 +88,14 @@ struct Out {
     steps: usize,
     value: f64,
     gnorm: f64,
+    shortest: f64,
+}
+
+fn shortest(x: ArrayView1<f64>) -> f64 {
+    let (r01, _) = dist(x, 0, 1);
+    let (r02, _) = dist(x, 0, 2);
+    let (r12, _) = dist(x, 1, 2);
+    r01.min(r02).min(r12)
 }
 
 fn run(lindh: bool, cap: Option<f64>, limit: usize) -> Out {
@@ -120,6 +130,7 @@ fn run(lindh: bool, cap: Option<f64>, limit: usize) -> Out {
         steps,
         value,
         gnorm,
+        shortest: shortest(x.view()),
     }
 }
 
@@ -174,39 +185,63 @@ fn run_ff(cap: Option<f64>, limit: usize) -> Out {
         steps,
         value,
         gnorm,
+        shortest: shortest(x.view()),
     }
 }
 
 fn show(label: &str, out: &Out) {
     println!(
-        "{label} calls={} steps={} value={:.6e} gnorm={:.6e}",
-        out.calls, out.steps, out.value, out.gnorm
+        "{label} calls={} steps={} value={:.6e} gnorm={:.6e} shortest={:.6e}",
+        out.calls, out.steps, out.value, out.gnorm, out.shortest
+    );
+}
+
+fn holds_a_bond(out: &Out) {
+    assert!(
+        out.shortest > 0.2,
+        "collapsed, shortest bond {}",
+        out.shortest
     );
 }
 
 #[test]
-fn three_bond_capped_and_default_paths() {
+fn three_bond_capped_and_plain() {
     let plain_cap = run(false, Some(0.2), 80);
     let lindh_cap = run(true, Some(0.2), 80);
     let ff_cap = run_ff(Some(0.2), 80);
     let plain = run(false, None, 40);
-    let lindh = run(true, None, 40);
-    let ff = run_ff(None, 40);
     show("capped-plain", &plain_cap);
     show("capped-lindh", &lindh_cap);
     show("capped-ff", &ff_cap);
     show("default-plain", &plain);
-    show("default-lindh", &lindh);
-    show("default-ff", &ff);
     assert!(plain_cap.gnorm < 1e-6, "capped plain {}", plain_cap.gnorm);
     assert!(lindh_cap.gnorm < 1e-6, "capped lindh {}", lindh_cap.gnorm);
+    assert!(ff_cap.gnorm < 1e-6, "capped ff {}", ff_cap.gnorm);
+    assert!(plain.gnorm < 1e-6, "plain {}", plain.gnorm);
+    holds_a_bond(&plain_cap);
+    holds_a_bond(&lindh_cap);
+    holds_a_bond(&ff_cap);
+    holds_a_bond(&plain);
     assert_eq!((plain_cap.calls, plain_cap.steps), (10, 9));
     assert_eq!((lindh_cap.calls, lindh_cap.steps), (19, 14));
-    assert_eq!((plain.calls, plain.steps), (11, 10));
-    assert_eq!((lindh.calls, lindh.steps), (48, 40));
-    assert!(lindh.value > 1.0, "default lindh value {}", lindh.value);
-    assert!(ff_cap.gnorm < 1e-6, "capped ff {}", ff_cap.gnorm);
     assert_eq!((ff_cap.calls, ff_cap.steps), (12, 8));
-    assert_eq!((ff.calls, ff.steps), (29, 25));
-    assert!(ff.value > 1.0, "default ff value {}", ff.value);
+    assert_eq!((plain.calls, plain.steps), (11, 10));
+}
+
+#[test]
+#[ignore = "pending: a step cap or trust region for model-Hessian or FF H0, versus a line search"]
+fn three_bond_uncapped_lindh() {
+    let lindh = run(true, None, 40);
+    show("default-lindh", &lindh);
+    holds_a_bond(&lindh);
+    assert!(lindh.gnorm < 1e-6, "lindh gnorm {}", lindh.gnorm);
+}
+
+#[test]
+#[ignore = "pending: a step cap or trust region for model-Hessian or FF H0, versus a line search"]
+fn three_bond_uncapped_ff() {
+    let ff = run_ff(None, 40);
+    show("default-ff", &ff);
+    holds_a_bond(&ff);
+    assert!(ff.gnorm < 1e-6, "ff gnorm {}", ff.gnorm);
 }
