@@ -18,9 +18,9 @@ use crate::bb::bb_direction;
 use crate::control::{Control, StopNorm};
 use crate::error::{Error, Result};
 use crate::fire::{
-    FireKind, FireMix, FirePreparation, FirePreset, FireState, fire_after_v1, fire_after_v1_metric,
-    fire_clip_components, fire_displacement, fire_displacement_metric, fire_prepare_v2,
-    project_box_tangent,
+    FireKind, FireMix, FirePreparation, FirePreset, FireState, FireVariant, fire_after_v1,
+    fire_after_v1_metric, fire_clip_components, fire_displacement, fire_displacement_metric,
+    fire_prepare_v2, project_box_tangent,
 };
 use crate::holonomic::DistanceConstraints;
 use crate::hvp::{
@@ -578,6 +578,26 @@ impl Solver {
                 Ok(())
             }
             _ => Err(Error::NeedFire2),
+        }
+    }
+
+    /// Select the FIRE schedule. [`FireVariant::Rgmin`] rebuilds the
+    /// integrator the session was given. [`FireVariant::Guenole2020`]
+    /// switches it to FIRE 2.0 and the Guénolé table. Any other method
+    /// ignores the call. This does not install a displacement cap.
+    pub fn set_fire_variant(&mut self, variant: FireVariant) {
+        let Inner::Fire(state) = &mut self.inner else {
+            return;
+        };
+        match variant {
+            FireVariant::Rgmin => {
+                let kind = state.kind;
+                *state = FireState::new(kind, self.dim, self.control.istep);
+            }
+            FireVariant::Guenole2020 => {
+                state.kind = FireKind::V2;
+                state.set_preset(FirePreset::Guenole2020);
+            }
         }
     }
 

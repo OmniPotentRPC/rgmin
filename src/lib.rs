@@ -85,7 +85,7 @@ pub use accept::Accept;
 pub use adam::minimize_adam;
 pub use control::{Control, StopNorm};
 pub use error::{Error, Result};
-pub use fire::{FireKind, FirePreset};
+pub use fire::{FireKind, FirePreset, FireVariant};
 pub use highs_kind::{HighsCCallback, HighsCallbackKind, HighsCrossover, HighsSolverKind};
 pub use holonomic::{
     ConstraintAlgorithm, ConstraintError, ConstraintReport, ConstraintSolver, DistanceConstraints,

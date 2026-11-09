@@ -52,6 +52,23 @@ pub enum FirePreset {
     Guenole2020,
 }
 
+/// Which FIRE schedule a session runs.
+///
+/// Selected with [`crate::Solver::set_fire_variant`]. The default keeps
+/// the [`FireKind`] the session was built with and the parameters of
+/// [`FireState::new`]. [`Self::Guenole2020`] switches the integrator to
+/// [`FireKind::V2`] and installs [`FirePreset::Guenole2020`].
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FireVariant {
+    /// [`FireKind::V1`] or [`FireKind::V2`] with [`FireState::new`].
+    #[default]
+    Rgmin,
+    /// FIRE 2.0 with the Guénolé 2020 table: `alpha_start = 0.25`,
+    /// `N_delay = 20`, `dt_max = 10 dt`, `dt_min = 0.02 dt`.
+    Guenole2020,
+}
+
 /// ASE `ase/optimize/fire2.py` and LAMMPS `src/min_fire.cpp` floor
 /// `alpha` here so the bias correction stays finite.
 const ABC_ALPHA_FLOOR: f64 = 1e-10;
