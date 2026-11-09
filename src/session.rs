@@ -172,6 +172,8 @@ pub struct Solver {
     precon: Option<Slot>,
     /// Analytic or finite-difference Hessian-vector products.
     hvp_calls: usize,
+    /// Times a metric NLCG step replaced a non-descent direction.
+    nlcg_descent_fallbacks: u64,
     /// Negative-curvature kicks already taken in this solve.
     saddle_kicks: u8,
     stop_norm: StopNorm,
@@ -316,6 +318,7 @@ impl Solver {
             last_grad: Array1::zeros(dim),
             gradient_calls: 0,
             hvp_calls: 0,
+            nlcg_descent_fallbacks: 0,
             precon: None,
             saddle_kicks: 0,
             stop_norm,
@@ -689,6 +692,14 @@ impl Solver {
     /// Packed length of `x` this session was created with.
     pub fn dim(&self) -> usize {
         self.dim
+    }
+
+    /// Times a metric NLCG step replaced a non-descent direction
+    /// with the steepest direction in that metric. The Euclidean
+    /// path is unchanged, and a new session reports zero.
+    #[must_use]
+    pub fn nlcg_descent_fallbacks(&self) -> u64 {
+        self.nlcg_descent_fallbacks
     }
 
     /// Gradient evaluations charged to this session.
@@ -2633,6 +2644,7 @@ impl Solver {
                         // conjugate step. Fall back to the Riesz steepest direction.
                         let gd = crate::vecops::dot(grad.view(), dir.view());
                         if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+                            self.nlcg_descent_fallbacks += 1;
                             *dir = z_new.mapv(|z| -z * self.istep);
                         }
                         z_old.assign(&z_new);
