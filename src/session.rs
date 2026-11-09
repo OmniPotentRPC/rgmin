@@ -1022,6 +1022,11 @@ impl Solver {
         }
     }
 
+    /// The same radius as [`Self::set_trust`], stored on the HiGHS step.
+    pub fn set_highs_trust(&mut self, radius: f64) -> bool {
+        self.set_trust(radius)
+    }
+
     /// Append one linear equality `a · p = rhs`. Returns `true` with `highs`.
     pub fn add_equality(&mut self, coeffs: Vec<(usize, f64)>, rhs: f64) -> bool {
         #[cfg(not(feature = "highs"))]
