@@ -600,13 +600,17 @@ impl Solver {
         if self.manifold != ManifoldKind::Euclidean {
             return Err(unsupported("a manifold other than Euclidean coordinates"));
         }
-        if self.exp.is_some() {
+        if self.exp_state().is_some() {
             return Err(unsupported("the exponential preconditioner"));
         }
-        if self.lindh.is_some() {
+        if self
+            .precon
+            .as_ref()
+            .is_some_and(crate::precon::Slot::is_lindh)
+        {
             return Err(unsupported("the Lindh preconditioner"));
         }
-        if self.ff.is_some() {
+        if self.precon.as_ref().is_some_and(crate::precon::Slot::is_ff) {
             return Err(unsupported("the bonded preconditioner"));
         }
         #[cfg(feature = "highs")]

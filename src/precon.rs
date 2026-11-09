@@ -38,6 +38,117 @@ pub use lindh::{Ghost, Lindh, LindhParams};
 pub(crate) use metric::Metric;
 pub use select::{GeometryKind, N_LINDH, OptimizerFamily, PreconChoice, select_precon};
 
+/// One geometry metric for [`crate::Solver::set_precon`].
+///
+/// The three arms are the existing exponential, Lindh, and bonded
+/// assemblies. A session holds one of them.
+pub enum PreconSpec<'a> {
+    /// Packwood exponential metric.
+    Exp {
+        /// Coordinates, length `3 N`, C order.
+        positions: ArrayView1<'a, f64>,
+        /// Caller neighbour list.
+        neighbours: &'a Neighbours,
+        /// `μ` `None` estimates the scale on the next step.
+        params: &'a ExpParams,
+    },
+    /// Lindh model Hessian.
+    Lindh {
+        /// Coordinates, length `3 N`, C order.
+        positions: ArrayView1<'a, f64>,
+        /// One atomic number per free atom.
+        z: &'a [i32],
+        /// Frozen atoms.
+        ghosts: &'a [Ghost],
+        /// `μ` `None` estimates the scale on the next step.
+        params: &'a LindhParams,
+    },
+    /// Bonded metric.
+    Ff {
+        /// Coordinates, length `3 N`, C order.
+        positions: ArrayView1<'a, f64>,
+        /// Harmonic bonds and angles, Morse bonds, harmonic torsions.
+        terms: FfTerms<'a>,
+        /// `μ` `None` estimates the scale on the next step.
+        params: &'a FfParams,
+    },
+}
+
+/// Installed geometry metric. The next setter replaces the slot.
+pub(crate) enum Slot {
+    /// Exponential metric.
+    Exp(ExpState),
+    /// Lindh model.
+    Lindh(LindhState),
+    /// Bonded metric.
+    Ff(FfState),
+}
+
+impl Slot {
+    /// Assembled exponential matrix, when this slot is Exp.
+    pub(crate) fn exp_matrix(&self) -> Option<&Exp> {
+        match self {
+            Self::Exp(state) => state.matrix(),
+            Self::Lindh(_) | Self::Ff(_) => None,
+        }
+    }
+
+    /// Sparse Lindh or bonded matrix. Exp keeps its own solver.
+    pub(crate) fn model_metric(&self) -> Option<&Metric> {
+        match self {
+            Self::Lindh(state) => state.metric(),
+            Self::Ff(state) => state.metric(),
+            Self::Exp(_) => None,
+        }
+    }
+
+    /// Estimated or supplied energy scale.
+    pub(crate) fn scale(&self) -> Option<f64> {
+        match self {
+            Self::Exp(state) => state.mu(),
+            Self::Lindh(state) => state.mu(),
+            Self::Ff(state) => state.mu(),
+        }
+    }
+
+    /// Borrow the exponential state.
+    pub(crate) fn exp_state(&self) -> Option<&ExpState> {
+        match self {
+            Self::Exp(state) => Some(state),
+            Self::Lindh(_) | Self::Ff(_) => None,
+        }
+    }
+
+    pub(crate) fn is_exp(&self) -> bool {
+        matches!(self, Self::Exp(_))
+    }
+
+    pub(crate) fn is_lindh(&self) -> bool {
+        matches!(self, Self::Lindh(_))
+    }
+
+    pub(crate) fn is_ff(&self) -> bool {
+        matches!(self, Self::Ff(_))
+    }
+
+    /// Rebuild the installed matrix at `positions`.
+    pub(crate) fn refresh<G>(
+        &mut self,
+        positions: ArrayView1<f64>,
+        grad_here: &Array1<f64>,
+        grad: G,
+    ) -> Result<()>
+    where
+        G: Fn(ArrayView1<f64>) -> Array1<f64>,
+    {
+        match self {
+            Self::Exp(state) => state.refresh(positions, grad_here, grad),
+            Self::Lindh(state) => state.refresh(positions, grad_here, grad).map(|_| ()),
+            Self::Ff(state) => state.refresh(positions, grad_here, grad).map(|_| ()),
+        }
+    }
+}
+
 /// Pair assembly stays on one thread.
 ///
 /// `ordered_map` treats a gate of `usize::MAX` as serial. The cell

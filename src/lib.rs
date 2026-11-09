@@ -109,7 +109,7 @@ pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
 pub use oracle::Oracle;
 pub use precon::{
     AngleTerm, BondTerm, DihedralTerm, Exp, ExpParams, Ff, FfParams, FfTerms, GeometryKind, Ghost,
-    Lindh, LindhParams, MorseTerm, N_LINDH, Neighbours, OptimizerFamily, PreconChoice,
+    Lindh, LindhParams, MorseTerm, N_LINDH, Neighbours, OptimizerFamily, PreconChoice, PreconSpec,
     bonded_terms, estimate_mu, nearest_neighbour_distance, select_precon, sine_probe,
 };
 pub use pso::minimize_pso;

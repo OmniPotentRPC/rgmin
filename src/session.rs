@@ -36,6 +36,7 @@ use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton}
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
 use crate::precon::{
     ExpParams, ExpState, FfParams, FfState, FfTerms, Ghost, LindhParams, LindhState, Neighbours,
+    OptimizerFamily, PreconSpec, Slot,
 };
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{
@@ -61,8 +62,8 @@ const RADIUS_GROWTH: f64 = 8.0;
 const SADDLE_KICKS: u8 = 4;
 
 /// `P^{-1} v` when an exponential metric is installed, otherwise `v`.
-fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Array1<f64> {
-    match exp.as_ref().and_then(ExpState::matrix) {
+fn metric_vector(matrix: Option<&crate::precon::Exp>, v: &Array1<f64>) -> Array1<f64> {
+    match matrix {
         Some(p) => p.solve(v.view()).unwrap_or_else(|| v.clone()),
         None => v.clone(),
     }
@@ -70,12 +71,12 @@ fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Array1<f64> {
 
 /// P-norms for the FIRE mix: `sqrt(v^T P v)` and `sqrt(F · P^{-1} F)`.
 fn fire_mix(
-    exp: &Option<ExpState>,
+    matrix: Option<&crate::precon::Exp>,
     vel: &Array1<f64>,
     raw: &Array1<f64>,
     steepest: &Array1<f64>,
 ) -> Option<FireMix> {
-    let p = exp.as_ref().and_then(ExpState::matrix)?;
+    let p = matrix?;
     let pv = p.apply(vel.view());
     let vel_n = vel.dot(&pv).max(0.0).sqrt();
     let dir_n = raw.dot(steepest).max(0.0).sqrt();
@@ -113,6 +114,9 @@ pub struct Solver {
     /// Dogleg model on a curved kind, rewritten in place at each step.
     tangent: TangentModel,
     atom_maxmove: Option<f64>,
+    /// Geometry L-BFGS stays available. The atom cap still selects it.
+    /// [`Self::set_geometry_step`]`(false)` turns that selection off.
+    geometry_step: bool,
     /// Whether geometry L-BFGS needs a finite-difference stiffness probe.
     geometry_lbfgs_stiff: Option<bool>,
     project_rigid: bool,
@@ -145,12 +149,8 @@ pub struct Solver {
     /// Objective gradients. A finite-difference product is an
     /// [`Self::hvp_calls`] entry, not a gradient.
     gradient_calls: usize,
-    /// Packwood exponential metric. `None` leaves every method unchanged.
-    exp: Option<ExpState>,
-    /// Lindh model. `None` leaves every method unchanged.
-    lindh: Option<LindhState>,
-    /// Bonded FF model. `None` leaves every method unchanged.
-    ff: Option<FfState>,
+    /// One geometry metric. `None` leaves every method unchanged.
+    precon: Option<Slot>,
     /// Analytic or finite-difference Hessian-vector products.
     hvp_calls: usize,
     /// Negative-curvature kicks already taken in this solve.
@@ -260,6 +260,7 @@ impl Solver {
             refused: false,
             tangent: TangentModel::default(),
             atom_maxmove: None,
+            geometry_step: true,
             geometry_lbfgs_stiff: None,
             project_rigid: false,
             periodic: false,
@@ -288,9 +289,7 @@ impl Solver {
             last_grad: Array1::zeros(dim),
             gradient_calls: 0,
             hvp_calls: 0,
-            exp: None,
-            lindh: None,
-            ff: None,
+            precon: None,
             saddle_kicks: 0,
             stop_norm,
             constraints: None,
@@ -298,74 +297,125 @@ impl Solver {
         }
     }
 
+    /// Family [`crate::select_precon`] should see for this session.
+    ///
+    /// FIRE is the identity rule. Nonlinear CG is the metric rule.
+    /// Every other method is quasi-Newton.
+    #[must_use]
+    pub fn optimizer_family(&self) -> OptimizerFamily {
+        match &self.inner {
+            Inner::Fire(_) => OptimizerFamily::Fire,
+            Inner::Nlcg { .. } => OptimizerFamily::Cg,
+            _ => OptimizerFamily::QuasiNewton,
+        }
+    }
+
+    /// Install one geometry preconditioner, replacing any previous one.
+    ///
+    /// L-BFGS takes \(H_0 = P^{-1}\). FIRE and nonlinear CG take an
+    /// exponential `P` as the metric. [`Accept::None`] stays the
+    /// one-oracle step. A session that never calls this, [`Self::set_exp`],
+    /// [`Self::set_lindh`], or [`Self::set_ff`] keeps its previous steps.
+    pub fn set_precon(&mut self, spec: PreconSpec<'_>) -> Result<()> {
+        let slot = match spec {
+            PreconSpec::Exp {
+                positions,
+                neighbours,
+                params,
+            } => {
+                self.require_precon_dim(positions.len())?;
+                Slot::Exp(ExpState::new(positions, neighbours, params)?)
+            }
+            PreconSpec::Lindh {
+                positions,
+                z,
+                ghosts,
+                params,
+            } => {
+                self.require_precon_dim(positions.len())?;
+                Slot::Lindh(LindhState::new(positions, z, ghosts, params)?)
+            }
+            PreconSpec::Ff {
+                positions,
+                terms,
+                params,
+            } => {
+                self.require_precon_dim(positions.len())?;
+                Slot::Ff(FfState::new(positions, terms, params)?)
+            }
+        };
+        self.install_slot(slot);
+        Ok(())
+    }
+
+    fn require_precon_dim(&self, got: usize) -> Result<()> {
+        if got != self.dim {
+            return Err(Error::Dim { got, dim: self.dim });
+        }
+        Ok(())
+    }
+
+    fn install_slot(&mut self, slot: Slot) {
+        let exp_h0 = slot.exp_matrix().cloned();
+        let lindh = if slot.is_lindh() {
+            slot.model_metric().cloned()
+        } else {
+            None
+        };
+        let ff = if slot.is_ff() {
+            slot.model_metric().cloned()
+        } else {
+            None
+        };
+        self.precon = Some(slot);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(exp_h0);
+            solver.set_lindh_metric(lindh);
+            solver.set_ff_metric(ff);
+        }
+    }
+
     /// Install the exponential preconditioner at `positions`.
     ///
-    /// `positions` has length [`Self::dim`] and is `3 N` coordinates in
-    /// C order. [`ExpParams::mu`] `None` defers the energy scale to the
-    /// next [`Self::step`], which estimates it from the objective.
-    /// L-BFGS then takes \(H_0 = P^{-1}\), including the capped geometry
-    /// step selected by [`Self::set_atom_maxmove`]. FIRE and nonlinear CG
-    /// take `P` as the metric. A dense pair or Lindh matrix supplied to the
-    /// two-loop still wins over this factor.
+    /// See [`Self::set_precon`].
     pub fn set_exp(
         &mut self,
         positions: ArrayView1<f64>,
         neighbours: &Neighbours,
         params: &ExpParams,
     ) -> Result<()> {
-        if positions.len() != self.dim {
-            return Err(Error::Dim {
-                got: positions.len(),
-                dim: self.dim,
-            });
-        }
-        let state = ExpState::new(positions, neighbours, params)?;
-        let matrix = state.matrix().cloned();
-        self.lindh = None;
-        self.ff = None;
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_lindh_metric(None);
-            solver.set_ff_metric(None);
-        }
-        self.exp = Some(state);
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_h0(matrix);
-        }
-        Ok(())
+        self.set_precon(PreconSpec::Exp {
+            positions,
+            neighbours,
+            params,
+        })
     }
 
     /// Install a neighbour list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
     pub(crate) fn set_exp_deferred(&mut self, state: ExpState) {
-        self.exp = Some(state);
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_h0(None);
-        }
+        self.install_slot(Slot::Exp(state));
     }
 
     /// Drop the exponential preconditioner.
     pub fn clear_exp(&mut self) {
-        self.exp = None;
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_h0(None);
+        if self.precon.as_ref().is_some_and(Slot::is_exp) {
+            self.clear_precon();
         }
     }
 
-    /// Energy scale of the installed preconditioner, after estimation.
+    /// Energy scale of the installed exponential metric, after estimation.
     #[must_use]
     pub fn exp_mu(&self) -> Option<f64> {
-        self.exp.as_ref().and_then(ExpState::mu)
+        self.precon
+            .as_ref()
+            .and_then(Slot::exp_state)
+            .and_then(ExpState::mu)
     }
 
     /// Install the Lindh model at `positions`.
     ///
-    /// `positions` has length [`Self::dim`] and is `3 N` coordinates in
-    /// Angstrom, C order. `z` has one atomic number per free atom.
-    /// `ghosts` are frozen atoms. L-BFGS then takes \(H_0 = P^{-1}\),
-    /// including the capped geometry step from [`Self::set_atom_maxmove`].
-    /// [`Accept::None`] stays the one-oracle step. The call clears an
-    /// installed exponential metric. A session that never calls this
-    /// keeps that metric's steps.
+    /// See [`Self::set_precon`]. [`Accept::None`] stays the one-oracle step.
     pub fn set_lindh(
         &mut self,
         positions: ArrayView1<f64>,
@@ -373,133 +423,111 @@ impl Solver {
         ghosts: &[Ghost],
         params: &LindhParams,
     ) -> Result<()> {
-        if positions.len() != self.dim {
-            return Err(Error::Dim {
-                got: positions.len(),
-                dim: self.dim,
-            });
-        }
-        let state = LindhState::new(positions, z, ghosts, params)?;
-        let metric = state.metric().cloned();
-        self.clear_exp();
-        self.clear_ff();
-        self.lindh = Some(state);
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_lindh_metric(metric);
-        }
-        Ok(())
+        self.set_precon(PreconSpec::Lindh {
+            positions,
+            z,
+            ghosts,
+            params,
+        })
     }
 
     /// Scale of the installed Lindh model, after estimation.
     #[must_use]
     pub fn lindh_mu(&self) -> Option<f64> {
-        self.lindh.as_ref().and_then(LindhState::mu)
+        self.precon.as_ref().and_then(|slot| match slot {
+            Slot::Lindh(state) => state.mu(),
+            _ => None,
+        })
     }
 
     /// Drop the Lindh model.
     pub fn clear_lindh(&mut self) {
-        self.lindh = None;
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_lindh_metric(None);
+        if self.precon.as_ref().is_some_and(Slot::is_lindh) {
+            self.clear_precon();
         }
     }
 
     /// Install the bonded metric at `positions`.
     ///
-    /// `positions` has length [`Self::dim`] and is `3 N` coordinates in
-    /// Angstrom, C order. `terms` are the harmonic and Morse bonds, the
-    /// angles, and the torsions. L-BFGS then takes \(H_0 = P^{-1}\),
-    /// including the capped geometry step from [`Self::set_atom_maxmove`].
-    /// [`Accept::None`] stays the one-oracle step. The call clears an
-    /// installed exponential metric and an installed Lindh model. A
-    /// session that never calls this keeps the steps it took before.
+    /// See [`Self::set_precon`]. [`Accept::None`] stays the one-oracle step.
     pub fn set_ff(
         &mut self,
         positions: ArrayView1<f64>,
         terms: FfTerms<'_>,
         params: &FfParams,
     ) -> Result<()> {
-        if positions.len() != self.dim {
-            return Err(Error::Dim {
-                got: positions.len(),
-                dim: self.dim,
-            });
-        }
-        let state = FfState::new(positions, terms, params)?;
-        let metric = state.metric().cloned();
-        self.clear_exp();
-        self.clear_lindh();
-        self.ff = Some(state);
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_ff_metric(metric);
-        }
-        Ok(())
+        self.set_precon(PreconSpec::Ff {
+            positions,
+            terms,
+            params,
+        })
     }
 
     /// Scale of the installed bonded model, after estimation.
     #[must_use]
     pub fn ff_mu(&self) -> Option<f64> {
-        self.ff.as_ref().and_then(FfState::mu)
+        self.precon.as_ref().and_then(|slot| match slot {
+            Slot::Ff(state) => state.mu(),
+            _ => None,
+        })
     }
 
     /// Drop the bonded model.
     pub fn clear_ff(&mut self) {
-        self.ff = None;
+        if self.precon.as_ref().is_some_and(Slot::is_ff) {
+            self.clear_precon();
+        }
+    }
+
+    /// Drop whichever geometry metric is installed.
+    pub fn clear_precon(&mut self) {
+        self.precon = None;
         if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_h0(None);
+            solver.set_lindh_metric(None);
             solver.set_ff_metric(None);
         }
     }
 
-    fn refresh_exp<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
-    where
-        O: DifferentiableObjective<f64> + ?Sized,
-    {
-        if self.exp.is_none() {
-            return Ok(());
-        }
-        let grad_fn = |p: ArrayView1<f64>| obj.grad(p);
-        if let Some(state) = &mut self.exp {
-            state.refresh(x.view(), grad, grad_fn)?;
-        }
-        let matrix = self.exp.as_ref().and_then(|s| s.matrix().cloned());
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_h0(matrix);
-        }
-        Ok(())
+    /// Scale of the installed geometry metric, after estimation.
+    #[must_use]
+    pub fn precon_scale(&self) -> Option<f64> {
+        self.precon.as_ref().and_then(Slot::scale)
     }
 
-    fn refresh_lindh<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
-    where
-        O: DifferentiableObjective<f64> + ?Sized,
-    {
-        if self.lindh.is_none() {
-            return Ok(());
-        }
-        let grad_fn = |p: ArrayView1<f64>| obj.grad(p);
-        if let Some(state) = &mut self.lindh {
-            state.refresh(x.view(), grad, grad_fn)?;
-        }
-        let metric = self.lindh.as_ref().and_then(|s| s.metric().cloned());
-        if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_lindh_metric(metric);
-        }
-        Ok(())
+    fn exp_state(&self) -> Option<&ExpState> {
+        self.precon.as_ref().and_then(Slot::exp_state)
     }
 
-    fn refresh_ff<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
+    fn refresh_precon<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
-        if self.ff.is_none() {
+        if self.precon.is_none() {
             return Ok(());
         }
         let grad_fn = |p: ArrayView1<f64>| obj.grad(p);
-        if let Some(state) = &mut self.ff {
+        if let Some(state) = &mut self.precon {
             state.refresh(x.view(), grad, grad_fn)?;
         }
-        let metric = self.ff.as_ref().and_then(|s| s.metric().cloned());
+        let Some(slot) = &self.precon else {
+            return Ok(());
+        };
+        let exp_h0 = slot.exp_matrix().cloned();
+        let lindh = if slot.is_lindh() {
+            slot.model_metric().cloned()
+        } else {
+            None
+        };
+        let ff = if slot.is_ff() {
+            slot.model_metric().cloned()
+        } else {
+            None
+        };
         if let Inner::Lbfgs(solver) = &mut self.inner {
-            solver.set_ff_metric(metric);
+            solver.set_h0(exp_h0);
+            solver.set_lindh_metric(lindh);
+            solver.set_ff_metric(ff);
         }
         Ok(())
     }
@@ -615,6 +643,15 @@ impl Solver {
         self.atom_maxmove = if maxmove > 0.0 { Some(maxmove) } else { None };
         #[cfg(feature = "highs")]
         self.apply_highs_opts();
+    }
+
+    /// Turn the capped geometry L-BFGS step on or off.
+    ///
+    /// The session starts with this on, so a positive atom cap still
+    /// selects that step. `false` leaves the cap as a clip on the
+    /// ordinary two-loop. An uncapped session never takes the geometry step.
+    pub fn set_geometry_step(&mut self, on: bool) {
+        self.geometry_step = on;
     }
 
     /// eOn `lbfgs_project_rigid`. Isolated clusters only.
@@ -1511,9 +1548,13 @@ impl Solver {
         scale * force
     }
 
-    /// Per-atom cap selects the geometry L-BFGS step. Uncapped sessions keep
-    /// the one-oracle two-loop (and Wolfe when acceptance is not [`Accept::None`]).
+    /// Per-atom cap selects the geometry L-BFGS step, unless
+    /// [`Self::set_geometry_step`] turned that selection off. Uncapped
+    /// sessions keep the one-oracle two-loop.
     fn use_geometry_lbfgs(&self) -> bool {
+        if !self.geometry_step {
+            return false;
+        }
         if self.atom_maxmove.is_none() || !matches!(self.manifold, ManifoldKind::Euclidean) {
             return false;
         }
@@ -2143,9 +2184,7 @@ impl Solver {
         if gnorm < self.control.gtol {
             return Ok(self.report(value, x, &grad));
         }
-        self.refresh_exp(obj, x, &grad)?;
-        self.refresh_lindh(obj, x, &grad)?;
-        self.refresh_ff(obj, x, &grad)?;
+        self.refresh_precon(obj, x, &grad)?;
 
         if matches!(self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
             && matches!(self.inner, Inner::Lbfgs(_))
@@ -2197,13 +2236,15 @@ impl Solver {
             }
         }
 
-        let raw_gradient = match self.inner {
+        let exp_on = self.exp_state().is_some();
+        let exp_matrix = self.exp_state().and_then(ExpState::matrix).cloned();
+        let raw_gradient = match &self.inner {
             Inner::Steepest
             | Inner::Bfgs { .. }
             | Inner::Sr1 { .. }
             | Inner::Sr2 { .. }
             | Inner::Bb { .. } => true,
-            Inner::Nlcg { .. } => self.exp.is_none(),
+            Inner::Nlcg { .. } => !exp_on,
             _ => false,
         };
         if self.unit_first_step
@@ -2301,9 +2342,9 @@ impl Solver {
                 d_old,
                 initialized,
             } => {
-                let metric = self.exp.is_some();
+                let metric = exp_matrix.is_some();
                 let z_now = if metric {
-                    metric_vector(&self.exp, &grad)
+                    metric_vector(exp_matrix.as_ref(), &grad)
                 } else {
                     grad.clone()
                 };
@@ -2343,7 +2384,7 @@ impl Solver {
                         previous_direction: d_old.view(),
                     };
                     if metric {
-                        let z_new = metric_vector(&self.exp, &grad);
+                        let z_new = metric_vector(exp_matrix.as_ref(), &grad);
                         let mut beta = conjugacy.beta_metric(&ctx, z_new.view(), z_old.view());
                         if restart.should_restart_metric(
                             grad.view(),
@@ -2592,11 +2633,11 @@ impl Solver {
                     }
                 }
                 let forward_start = x.clone();
-                let dx = if self.exp.is_some() {
-                    let mut steepest = metric_vector(&self.exp, &raw);
+                let dx = if exp_matrix.is_some() {
+                    let mut steepest = metric_vector(exp_matrix.as_ref(), &raw);
                     project_box_tangent(obj.bounds(), x, &mut steepest);
                     fire_displacement_metric(state, &raw, &steepest, |vel| {
-                        fire_mix(&self.exp, vel, &raw, &steepest)
+                        fire_mix(exp_matrix.as_ref(), vel, &raw, &steepest)
                     })
                 } else {
                     fire_displacement(state, &raw)
@@ -2658,10 +2699,10 @@ impl Solver {
                 let mut raw_new = grad.mapv(|g| -g);
                 project_box_tangent(obj.bounds(), x, &mut raw_new);
                 project_box_tangent(obj.bounds(), x, &mut state.vel);
-                if self.exp.is_some() {
-                    let mut steep_new = metric_vector(&self.exp, &raw_new);
+                if exp_matrix.is_some() {
+                    let mut steep_new = metric_vector(exp_matrix.as_ref(), &raw_new);
                     project_box_tangent(obj.bounds(), x, &mut steep_new);
-                    let mix_new = fire_mix(&self.exp, &state.vel, &raw_new, &steep_new);
+                    let mix_new = fire_mix(exp_matrix.as_ref(), &state.vel, &raw_new, &steep_new);
                     fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
                 } else {
                     fire_after_v1(state, &raw_new);
