@@ -36,6 +36,7 @@ pub use ff::{AngleTerm, BondTerm, DihedralTerm, Ff, FfParams, FfTerms, MorseTerm
 pub(crate) use lindh::LindhState;
 pub use lindh::{Ghost, Lindh, LindhParams};
 pub(crate) use metric::Metric;
+pub use metric::{N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE};
 pub use select::{GeometryKind, N_LINDH, OptimizerFamily, PreconChoice, select_precon};
 
 /// One geometry metric for [`crate::Solver::set_precon`].
@@ -149,12 +150,18 @@ impl Slot {
     }
 }
 
+/// Exp matvec may use the pool from this atom count up.
+/// Below the gate, and in a build without `par`, the product is serial.
+pub const N_PAR_EXP_APPLY: usize = 32_000;
+/// Exp Jacobi PCG matvecs may use the pool from this atom count up.
+/// Dot products stay one left-to-right sum, so the parallel product
+/// does not change the bits.
+pub const N_PAR_EXP_SOLVE: usize = 32_000;
 /// Pair assembly stays on one thread.
 ///
 /// `ordered_map` treats a gate of `usize::MAX` as serial. The cell
 /// list passes this gate so its pairs do not depend on the thread count.
-#[allow(dead_code)]
-pub(super) const N_PAR_ASSEMBLE: usize = usize::MAX;
+pub const N_PAR_ASSEMBLE: usize = usize::MAX;
 
 /// One undirected neighbour list over atoms, plus bonds to atoms that
 /// are not degrees of freedom.
@@ -223,6 +230,10 @@ struct Csr {
     col_idx: Vec<usize>,
     val: Vec<f64>,
     diag: Vec<f64>,
+    /// Atom count at which `apply` may use the `par` pool.
+    apply_gate: usize,
+    /// Atom count at which the solve's products may use the `par` pool.
+    solve_gate: usize,
 }
 
 /// Assembled exponential preconditioner `P`.
@@ -317,7 +328,12 @@ impl Exp {
     pub fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {
         let mut y = vec![0.0; self.csr.n];
         if v.len() == self.csr.n {
-            matvec(&self.csr, v.as_slice().unwrap_or(&v.to_vec()), &mut y);
+            matvec(
+                &self.csr,
+                v.as_slice().unwrap_or(&v.to_vec()),
+                &mut y,
+                self.csr.apply_gate,
+            );
         }
         Array1::from_vec(y)
     }
@@ -327,6 +343,17 @@ impl Exp {
     /// residual stalls).
     #[must_use]
     pub fn solve(&self, rhs: ArrayView1<f64>) -> Option<Array1<f64>> {
+        self.solve_counted(rhs).map(|(x, _)| x)
+    }
+
+    /// Jacobi PCG iterations for one solve. The count is the number of
+    /// matrix-vector products.
+    #[must_use]
+    pub fn solve_iterations(&self, rhs: ArrayView1<f64>) -> Option<usize> {
+        self.solve_counted(rhs).map(|(_, n)| n)
+    }
+
+    fn solve_counted(&self, rhs: ArrayView1<f64>) -> Option<(Array1<f64>, usize)> {
         if rhs.len() != self.csr.n {
             return None;
         }
@@ -334,7 +361,7 @@ impl Exp {
             .as_slice()
             .map(<[f64]>::to_vec)
             .unwrap_or_else(|| rhs.to_vec());
-        solve_pcg(&self.csr, &rhs_vec).map(Array1::from_vec)
+        solve_pcg(&self.csr, &rhs_vec).map(|(x, n)| (Array1::from_vec(x), n))
     }
 
     /// Dense copy, for tests and for a dense Cholesky reference.
@@ -817,16 +844,38 @@ fn build_csr(
         col_idx,
         val,
         diag,
+        apply_gate: N_PAR_EXP_APPLY,
+        solve_gate: N_PAR_EXP_SOLVE,
     }
 }
 
-fn matvec(a: &Csr, x: &[f64], y: &mut [f64]) {
-    for (i, slot) in y.iter_mut().enumerate() {
-        let mut s = 0.0;
-        for k in a.row_ptr[i]..a.row_ptr[i + 1] {
-            s += a.val[k] * x[a.col_idx[k]];
+fn row_dot(a: &Csr, x: &[f64], i: usize) -> f64 {
+    let mut s = 0.0;
+    for k in a.row_ptr[i]..a.row_ptr[i + 1] {
+        s += a.val[k] * x[a.col_idx[k]];
+    }
+    s
+}
+
+fn matvec(a: &Csr, x: &[f64], y: &mut [f64], gate: usize) {
+    let atoms = a.n / 3;
+    let parallel = gate < usize::MAX && atoms >= gate && a.n >= 2;
+    #[cfg(not(feature = "par"))]
+    let _ = parallel;
+    #[cfg(feature = "par")]
+    {
+        use rayon::prelude::*;
+        // Each row is its own sum, in the same order as the serial loop.
+        // The writes do not depend on the thread count.
+        if parallel {
+            y.par_iter_mut().enumerate().for_each(|(i, slot)| {
+                *slot = row_dot(a, x, i);
+            });
+            return;
         }
-        *slot = s;
+    }
+    for (i, slot) in y.iter_mut().enumerate() {
+        *slot = row_dot(a, x, i);
     }
 }
 
@@ -838,14 +887,14 @@ fn nrm2(a: &[f64]) -> f64 {
     dot(a, a).sqrt()
 }
 
-fn solve_pcg(a: &Csr, b: &[f64]) -> Option<Vec<f64>> {
+fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
     let n = a.n;
     if b.len() != n {
         return None;
     }
     let bnorm = nrm2(b);
     if bnorm == 0.0 {
-        return Some(vec![0.0; n]);
+        return Some((vec![0.0; n], 0));
     }
     if a.diag.iter().any(|d| !(d.is_finite() && *d > 0.0)) {
         return None;
@@ -863,11 +912,13 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<Vec<f64>> {
     }
     let tol = 1e-12 * bnorm;
     let maxit = (8 * n).max(64);
+    let mut iters = 0usize;
     for _ in 0..maxit {
         if nrm2(&r) <= tol {
-            return finite_vec(x);
+            return finite_vec(x).map(|v| (v, iters));
         }
-        matvec(a, &p, &mut ap);
+        iters += 1;
+        matvec(a, &p, &mut ap, a.solve_gate);
         let pap = dot(&p, &ap);
         if !(pap.is_finite() && pap > 0.0) {
             return None;
@@ -892,7 +943,7 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<Vec<f64>> {
         rz = rz_new;
     }
     if nrm2(&r) <= 1e-8 * bnorm {
-        return finite_vec(x);
+        return finite_vec(x).map(|v| (v, iters));
     }
     None
 }

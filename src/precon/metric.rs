@@ -25,13 +25,13 @@ use crate::error::{Error, Result};
 /// range 0.344 ms, no.
 /// 2,000 atoms: 1 thread 8.360 ms, 2 threads 4.751 ms, gap 3.609 ms,
 /// range 1.052 ms, yes.
-pub(crate) const N_PAR_LINDH_APPLY: usize = 2_000;
+pub const N_PAR_LINDH_APPLY: usize = 2_000;
 /// Lindh and bonded-metric Jacobi PCG, eight solves.
 /// 160 atoms: 1 thread 31.355 ms, 2 threads 16.752 ms, gap 14.602 ms,
 /// range 17.571 ms, no.
 /// 2,000 atoms: 1 thread 0.914 s, 2 threads 0.467 s, gap 0.447 s,
 /// range 0.035 s, yes.
-pub(crate) const N_PAR_LINDH_SOLVE: usize = 2_000;
+pub const N_PAR_LINDH_SOLVE: usize = 2_000;
 
 /// Fixed length of one dot-product chunk. The same chunks are used
 /// with and without the `par` feature.

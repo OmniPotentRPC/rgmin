@@ -19,7 +19,7 @@
 use std::time::Instant;
 
 use ndarray::Array1;
-use rgmin::{Lindh, LindhParams, Neighbours};
+use rgmin::{Exp, ExpParams, Lindh, LindhParams, Neighbours};
 
 const A_SI: f64 = 5.431;
 const CUTOFF: f64 = 4.0;
@@ -239,6 +239,43 @@ fn once_lindh(threads: usize, crystal: &Crystal, rhs: &Array1<f64>) -> Sample {
     })
 }
 
+fn once_exp(threads: usize, crystal: &Crystal, rhs: &Array1<f64>) -> Sample {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .unwrap();
+    pool.install(|| {
+        let params = ExpParams {
+            mu: Some(1.0),
+            r_cut: Some(CUTOFF),
+            r_nn: Some(2.35),
+            lengths: Some(crystal.lengths),
+            ..ExpParams::default()
+        };
+        let t0 = Instant::now();
+        let metric = Exp::assemble(crystal.pos.view(), &crystal.neigh, &params, 1.0, 2.35).unwrap();
+        let assemble = t0.elapsed().as_secs_f64();
+        let t1 = Instant::now();
+        for _ in 0..APPLIES {
+            std::hint::black_box(metric.apply(rhs.view()));
+        }
+        let apply = t1.elapsed().as_secs_f64();
+        let t2 = Instant::now();
+        for _ in 0..SOLVES {
+            let solved = metric.solve(rhs.view()).expect("exp pcg");
+            std::hint::black_box(&solved);
+        }
+        let solve = t2.elapsed().as_secs_f64();
+        let rss_kib = vm_kib("VmRSS:");
+        Sample {
+            assemble,
+            apply,
+            solve,
+            rss_kib,
+        }
+    })
+}
+
 fn report(label: &str, natoms: usize, threads: &[usize], rows: &[Vec<Sample>]) {
     eprintln!(
         "{label},natoms={natoms},threads,assemble_median_s,assemble_min_s,assemble_max_s,assemble_eff,apply_median_s,apply_min_s,apply_max_s,apply_eff,solve_median_s,solve_min_s,solve_max_s,solve_eff"
@@ -309,12 +346,26 @@ fn report(label: &str, natoms: usize, threads: &[usize], rows: &[Vec<Sample>]) {
     eprintln!("{label},natoms={natoms},rss_kib={rss},hwm_kib={hwm}");
 }
 
-fn time_set(threads: &[usize], crystal: &Crystal, rhs: &Array1<f64>) -> Vec<Vec<Sample>> {
-    let _ = once_lindh(1, crystal, rhs);
+fn time_set(
+    threads: &[usize],
+    crystal: &Crystal,
+    rhs: &Array1<f64>,
+    exp: bool,
+) -> Vec<Vec<Sample>> {
+    let _ = if exp {
+        once_exp(1, crystal, rhs)
+    } else {
+        once_lindh(1, crystal, rhs)
+    };
     let mut rows = (0..threads.len()).map(|_| Vec::new()).collect::<Vec<_>>();
     for _rep in 0..REPS {
         for (k, &n) in threads.iter().enumerate() {
-            rows[k].push(once_lindh(n, crystal, rhs));
+            let sample = if exp {
+                once_exp(n, crystal, rhs)
+            } else {
+                once_lindh(n, crystal, rhs)
+            };
+            rows[k].push(sample);
         }
     }
     rows
@@ -360,8 +411,24 @@ fn strong_scaling_table() {
             vm_kib("VmHWM:")
         );
         drop(lindh_m);
-        std::hint::black_box(crystal.neigh.i.len());
-        let lindh = time_set(&threads, &crystal, &rhs);
+        let ep = ExpParams {
+            mu: Some(1.0),
+            r_cut: Some(CUTOFF),
+            r_nn: Some(2.35),
+            lengths: Some(crystal.lengths),
+            ..ExpParams::default()
+        };
+        let exp_m = Exp::assemble(crystal.pos.view(), &crystal.neigh, &ep, 1.0, 2.35).unwrap();
+        let exp_it = exp_m.solve_iterations(rhs.view()).unwrap_or(0);
+        eprintln!(
+            "exp-{name},natoms={natoms},pcg_iterations,{exp_it},rss_kib,{},hwm_kib,{}",
+            vm_kib("VmRSS:"),
+            vm_kib("VmHWM:")
+        );
+        drop(exp_m);
+        let lindh = time_set(&threads, &crystal, &rhs, false);
         report(&format!("lindh-{name}"), natoms, &threads, &lindh);
+        let exp = time_set(&threads, &crystal, &rhs, true);
+        report(&format!("exp-{name}"), natoms, &threads, &exp);
     }
 }
