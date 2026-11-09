@@ -603,6 +603,9 @@ impl Solver {
         if self.exp.is_some() {
             return Err(unsupported("the exponential preconditioner"));
         }
+        if self.lindh.is_some() {
+            return Err(unsupported("the Lindh preconditioner"));
+        }
         #[cfg(feature = "highs")]
         if self.highs {
             return Err(unsupported("the HiGHS feasible-set step"));

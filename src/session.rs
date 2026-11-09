@@ -34,7 +34,7 @@ use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
 use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
-use crate::precon::{ExpParams, ExpState, Neighbours};
+use crate::precon::{ExpParams, ExpState, Ghost, LindhParams, LindhState, Neighbours};
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{
     bfgs_inverse_update, secant_scale, solve_dense, sr1_inverse_update, sr2_hessian_update,
@@ -145,6 +145,8 @@ pub struct Solver {
     gradient_calls: usize,
     /// Packwood exponential metric. `None` leaves every method unchanged.
     exp: Option<ExpState>,
+    /// Lindh model. `None` leaves every method unchanged.
+    lindh: Option<LindhState>,
     /// Analytic or finite-difference Hessian-vector products.
     hvp_calls: usize,
     /// Negative-curvature kicks already taken in this solve.
@@ -283,6 +285,7 @@ impl Solver {
             gradient_calls: 0,
             hvp_calls: 0,
             exp: None,
+            lindh: None,
             saddle_kicks: 0,
             stop_norm,
             constraints: None,
@@ -313,6 +316,10 @@ impl Solver {
         }
         let state = ExpState::new(positions, neighbours, params)?;
         let matrix = state.matrix().cloned();
+        self.lindh = None;
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_lindh_metric(None);
+        }
         self.exp = Some(state);
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_h0(matrix);
@@ -343,6 +350,52 @@ impl Solver {
         self.exp.as_ref().and_then(ExpState::mu)
     }
 
+    /// Install the Lindh model at `positions`.
+    ///
+    /// `positions` has length [`Self::dim`] and is `3 N` coordinates in
+    /// Angstrom, C order. `z` has one atomic number per free atom.
+    /// `ghosts` are frozen atoms. L-BFGS then takes \(H_0 = P^{-1}\),
+    /// including the capped geometry step from [`Self::set_atom_maxmove`].
+    /// [`Accept::None`] stays the one-oracle step. The call clears an
+    /// installed exponential metric. A session that never calls this
+    /// keeps that metric's steps.
+    pub fn set_lindh(
+        &mut self,
+        positions: ArrayView1<f64>,
+        z: &[i32],
+        ghosts: &[Ghost],
+        params: &LindhParams,
+    ) -> Result<()> {
+        if positions.len() != self.dim {
+            return Err(Error::Dim {
+                got: positions.len(),
+                dim: self.dim,
+            });
+        }
+        let state = LindhState::new(positions, z, ghosts, params)?;
+        let metric = state.metric().cloned();
+        self.clear_exp();
+        self.lindh = Some(state);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_lindh_metric(metric);
+        }
+        Ok(())
+    }
+
+    /// Scale of the installed Lindh model, after estimation.
+    #[must_use]
+    pub fn lindh_mu(&self) -> Option<f64> {
+        self.lindh.as_ref().and_then(LindhState::mu)
+    }
+
+    /// Drop the Lindh model.
+    pub fn clear_lindh(&mut self) {
+        self.lindh = None;
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_lindh_metric(None);
+        }
+    }
+
     fn refresh_exp<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -357,6 +410,24 @@ impl Solver {
         let matrix = self.exp.as_ref().and_then(|s| s.matrix().cloned());
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_h0(matrix);
+        }
+        Ok(())
+    }
+
+    fn refresh_lindh<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        if self.lindh.is_none() {
+            return Ok(());
+        }
+        let grad_fn = |p: ArrayView1<f64>| obj.grad(p);
+        if let Some(state) = &mut self.lindh {
+            state.refresh(x.view(), grad, grad_fn)?;
+        }
+        let metric = self.lindh.as_ref().and_then(|s| s.metric().cloned());
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_lindh_metric(metric);
         }
         Ok(())
     }
@@ -491,7 +562,8 @@ impl Solver {
     /// method restarts. A step under a setting the set cannot honour
     /// returns [`crate::ConstraintError::Unsupported`]: a manifold other
     /// than Euclidean coordinates, the exponential preconditioner, the
-    /// HiGHS step, a periodic cell, particle swarm, or rigid projection
+    /// Lindh preconditioner, the HiGHS step, a periodic cell, particle
+    /// swarm, or rigid projection
     /// at an active coordinate bound. A trial that takes a constrained
     /// atom to its coordinate bound is [`crate::ConstraintError::Bound`].
     pub fn set_distance_constraints(&mut self, set: DistanceConstraints) -> Result<()> {
@@ -1336,23 +1408,31 @@ impl Solver {
     }
 
     /// `P^{-1} force` when an exponential preconditioner is installed.
-    /// Otherwise `h0 * force`, the scalar geometry seed.
+    /// A Lindh metric supplies the same product when the exponential
+    /// matrix is absent. Otherwise `h0 * force`, the scalar geometry seed.
     fn geometry_seed_force(&self, force: &Array1<f64>, h0: f64) -> Array1<f64> {
-        if let Inner::Lbfgs(solver) = &self.inner
-            && let Some(pre) = solver.exp_apply(force.view())
-        {
-            return pre;
+        if let Inner::Lbfgs(solver) = &self.inner {
+            if let Some(pre) = solver.exp_apply(force.view()) {
+                return pre;
+            }
+            if let Some(pre) = solver.lindh_apply(force.view()) {
+                return pre;
+            }
         }
         h0 * force
     }
 
     /// `scale * P^{-1} force` when an exponential preconditioner is installed.
-    /// Otherwise `scale * force`.
+    /// A Lindh metric supplies the same product when the exponential
+    /// matrix is absent. Otherwise `scale * force`.
     fn geometry_scaled_force(&self, force: &Array1<f64>, scale: f64) -> Array1<f64> {
-        if let Inner::Lbfgs(solver) = &self.inner
-            && let Some(pre) = solver.exp_apply(force.view())
-        {
-            return scale * &pre;
+        if let Inner::Lbfgs(solver) = &self.inner {
+            if let Some(pre) = solver.exp_apply(force.view()) {
+                return scale * &pre;
+            }
+            if let Some(pre) = solver.lindh_apply(force.view()) {
+                return scale * &pre;
+            }
         }
         scale * force
     }
@@ -1990,6 +2070,7 @@ impl Solver {
             return Ok(self.report(value, x, &grad));
         }
         self.refresh_exp(obj, x, &grad)?;
+        self.refresh_lindh(obj, x, &grad)?;
 
         if matches!(self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
             && matches!(self.inner, Inner::Lbfgs(_))

@@ -112,6 +112,8 @@ pub struct Lbfgs {
     /// A dense matrix passed to [`Self::direction_with_precon`] is the
     /// pair / Lindh hook and wins over this factor.
     h0: Option<crate::precon::Exp>,
+    /// Sparse Lindh metric used as \(H_0 = P^{-1}\) when `h0` is empty.
+    lindh: Option<crate::precon::Metric>,
     /// `s·y` of the latest geometry step, stored even when the pair is dropped.
     pub(crate) last_sy: f64,
     /// `y·y` of the latest geometry step.
@@ -146,6 +148,7 @@ impl Lbfgs {
             #[cfg(feature = "highs")]
             highs: None,
             h0: None,
+            lindh: None,
             last_sy: 0.0,
             last_yy: 0.0,
             have_curvature: false,
@@ -156,6 +159,16 @@ impl Lbfgs {
     /// Install or clear the exponential \(H_0 = P^{-1}\).
     pub(crate) fn set_h0(&mut self, h0: Option<crate::precon::Exp>) {
         self.h0 = h0;
+    }
+
+    /// Install or clear the Lindh \(H_0 = P^{-1}\).
+    pub(crate) fn set_lindh_metric(&mut self, metric: Option<crate::precon::Metric>) {
+        self.lindh = metric;
+    }
+
+    /// `P^{-1} v` when a Lindh metric is installed and the solve succeeds.
+    pub(crate) fn lindh_apply(&self, v: ArrayView1<f64>) -> Option<Array1<f64>> {
+        self.lindh.as_ref()?.solve(v)
     }
 
     /// Discards the stored curvature.
@@ -260,6 +273,8 @@ impl Lbfgs {
             q = solve_dense(pmat, &q).unwrap_or_else(|| self.scale_gamma(q));
         } else if let Some(exp) = exp {
             q = exp.solve(q.view()).unwrap_or_else(|| self.scale_gamma(q));
+        } else if let Some(solved) = self.lindh_apply(q.view()) {
+            q = solved;
         } else {
             q = self.scale_gamma(q);
         }
@@ -300,6 +315,8 @@ impl Lbfgs {
             crate::vecops::axpy(-a, p.y.view(), &mut q);
         }
         if let Some(solved) = self.exp_apply(q.view()) {
+            q = solved;
+        } else if let Some(solved) = self.lindh_apply(q.view()) {
             q = solved;
         } else {
             q *= h0;

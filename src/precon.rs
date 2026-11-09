@@ -25,8 +25,13 @@ use crate::error::{Error, Result};
 
 #[allow(dead_code)]
 mod geom;
+mod lindh;
 #[allow(dead_code)]
 mod metric;
+
+pub(crate) use lindh::LindhState;
+pub use lindh::{Ghost, Lindh, LindhParams};
+pub(crate) use metric::Metric;
 
 /// Pair assembly stays on one thread.
 ///
