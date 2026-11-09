@@ -6,8 +6,10 @@ step from the ASE state on the Guenole 2020 preset.
 
 The start (-1.2, 1, -1.2) is the extended Rosenbrock start of More,
 Garbow and Hillstrom, ACM TOMS 7, 17 (1981). dtmax and dtmin are
-Guenole 2020 Table 1 (10 and 0.02 times dt); Nmin, finc, fdec, astart
-and fa are the ASE defaults, which equal Table 1. dt is the largest
+Table 1 of Comput. Mater. Sci. 175 (2020) 109584,
+DOI 10.1016/j.commatsci.2020.109584 (10 and 0.02 times dt); Nmin,
+finc, fdec, astart and fa are the ASE defaults, which equal Table 1.
+dt is the largest
 power of ten that keeps the preset ceiling 10 dt below
 2 / sqrt(lambda_max) of the Hessian at the minimum, the semi-implicit
 Euler stability limit. fmax is the UNCMIN gradient tolerance

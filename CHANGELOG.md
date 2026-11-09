@@ -113,7 +113,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `snakemake -c 1` calibrates an upper bound for each benchmark from repeated runs of `develop`.
   `snakemake -c 1 pr_gate` exits non-zero when a benchmark is slower than that bound, and `benchflow/README.md` describes the workflow.
 - Opt-in FIRE 2.0 parameter set and accelerated bias-corrected (ABC) FIRE on `fire2` sessions.
-  `Solver::set_fire_preset(FirePreset::Guenole2020)` takes Guenole et al. 2020 Table 1 and keeps `dt` when a shrink would pass `dt_min` (Algorithm 2).
+  `Solver::set_fire_preset(FirePreset::Guenole2020)` takes Table 1 of Comput. Mater. Sci. 175 (2020) 109584, DOI 10.1016/j.commatsci.2020.109584, and keeps `dt` when a shrink would pass `dt_min` (Algorithm 2).
   `Solver::set_fire_abc` divides the mixed velocity by `1 - (1 - alpha)^(N+1)` (Echeverri Restrepo and Andric, Comput. Mater. Sci. 218, 111978 (2023)), as ASE `FIRE2(use_abc=True)` does.
   Under ABC the cap bounds each displacement component.
   C: `rgmin_fire_preset_t`, `rgmin_solver_set_fire_preset` and `rgmin_solver_set_fire_abc`; the C++ session and xts aliases follow.

@@ -226,8 +226,9 @@ These four tokens share ~rgmin_solver_t~ and a fused =(f, g)=.
   as the metric: power is ~F · v~, and the kick and the mix use
   ~P^{-1} F~.
 - ~FirePreset::Guenole2020~ (~set_fire_preset~, opt-in) takes
-  Guenole 2020 Table 1 (arXiv:1908.02038v4, page 7), the LAMMPS
-  ~min_modify~ defaults: ~tmax~ 10 and ~tmin~ 0.02 times the start
+  Table 1 of Comput. Mater. Sci. 175 (2020) 109584,
+  DOI 10.1016/j.commatsci.2020.109584 (arXiv:1908.02038v4, page 7),
+  the LAMMPS ~min_modify~ defaults: ~tmax~ 10 and ~tmin~ 0.02 times the start
   step, ~delaystep~ 20, ~dtgrow~ 1.1, ~dtshrink~ 0.5, ~alpha0~ 0.25,
   ~alphashrink~ 0.99, ~vdfmax~ 2000, half step back and initial
   delay on, semi-implicit Euler. A shrink that would pass ~dt_min~

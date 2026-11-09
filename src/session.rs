@@ -614,7 +614,8 @@ impl Solver {
 
     /// Select the FIRE schedule. [`FireVariant::Rgmin`] rebuilds the
     /// integrator the session was given. [`FireVariant::Guenole2020`]
-    /// switches it to FIRE 2.0 and the Guénolé table. Any other method
+    /// switches it to FIRE 2.0 and Table 1 of Comput. Mater. Sci. 175
+    /// (2020) 109584, DOI 10.1016/j.commatsci.2020.109584. Any other method
     /// ignores the call. This does not install a displacement cap.
     pub fn set_fire_variant(&mut self, variant: FireVariant) {
         let Inner::Fire(state) = &mut self.inner else {

@@ -1815,7 +1815,8 @@ pub unsafe extern "C" fn rgmin_solver_set_stop_norm(solver: *mut rgmin_solver_t,
 pub enum rgmin_fire_preset_t {
     /// What a new `RGMIN_FIRE2` session runs.
     RGMIN_FIRE_PRESET_DEFAULT = 0,
-    /// Guénolé 2020 Table 1.
+    /// Table 1 of Guénolé et al., Comput. Mater. Sci. 175 (2020) 109584,
+    /// DOI 10.1016/j.commatsci.2020.109584.
     RGMIN_FIRE_PRESET_GUENOLE2020 = 1,
 }
 

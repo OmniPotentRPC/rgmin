@@ -8,7 +8,9 @@ A ~fire2~ session runs the Fast Inertial Relaxation Engine (FIRE)
 2.0 on the crate's own parameters.
 Two opt-in settings change that.
 ~set_fire_preset~ selects the parameters of
-Guenole et al. @@rst::cite:`guenoleAssessmentOptimizationFast2020`@@ Table 1.
+Table 1 of Comput. Mater. Sci. 175 (2020) 109584,
+DOI 10.1016/j.commatsci.2020.109584
+(@@rst::cite:`guenoleAssessmentOptimizationFast2020`@@).
 ~set_fire_abc~ turns on the accelerated bias-corrected (ABC) FIRE
 update @@rst::cite:`echeverrirestrepoABCFIREAcceleratedBiascorrected2023`@@.
 Both return an error on any method other than ~fire2~.

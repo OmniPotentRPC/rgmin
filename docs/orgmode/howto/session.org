@@ -119,7 +119,7 @@ together is not asked twice.
 | ~add_equality~ / ~clear_equalities~ | Sparse ~a · p = rhs~ on the HiGHS set |
 | ~set_manifold~ | Embedded geometry; ~rigid_quotient~ for 3N clusters |
 | ~set_masses~ | Per-atom masses for ~mw_rigid~ (Page–McIver) |
-| ~set_fire_preset~ | ~fire2~ only: Guenole 2020 Table 1 parameters; restarts the integrator |
+| ~set_fire_preset~ | ~fire2~ only: Table 1 of Comput. Mater. Sci. 175 (2020) 109584, DOI 10.1016/j.commatsci.2020.109584; restarts the integrator |
 | ~set_fire_abc~ | ~fire2~ only: ABC-FIRE bias correction with a per-component cap |
 | ~set_distance_constraints~ | Keep atom pairs at fixed distances with SHAKE, LINCS or SETTLE; a setting the set cannot run with is a typed error |
 | ~clear_distance_constraints~ | Drop the set and the method memory |

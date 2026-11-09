@@ -43,7 +43,9 @@ pub enum FirePreset {
     /// The values [`FireState::new`] gives both integrators.
     #[default]
     Default,
-    /// Guénolé 2020 Table 1, the LAMMPS `min_style fire` defaults:
+    /// Table 1 of Guénolé et al., Comput. Mater. Sci. 175 (2020) 109584,
+    /// DOI 10.1016/j.commatsci.2020.109584, the LAMMPS `min_style fire`
+    /// defaults:
     /// `dt_max = 10 dt`, `dt_min = 0.02 dt`, `N_delay = 20`,
     /// `alpha_start = 0.25`, `f_inc = 1.1`, `f_dec = 0.5`,
     /// `f_alpha = 0.99`, 2,000 non-positive-power steps. `dt` is the
@@ -64,8 +66,10 @@ pub enum FireVariant {
     /// [`FireKind::V1`] or [`FireKind::V2`] with [`FireState::new`].
     #[default]
     Rgmin,
-    /// FIRE 2.0 with the Guénolé 2020 table: `alpha_start = 0.25`,
-    /// `N_delay = 20`, `dt_max = 10 dt`, `dt_min = 0.02 dt`.
+    /// FIRE 2.0 with Table 1 of Guénolé et al., Comput. Mater. Sci. 175
+    /// (2020) 109584, DOI 10.1016/j.commatsci.2020.109584:
+    /// `alpha_start = 0.25`, `N_delay = 20`, `dt_max = 10 dt`,
+    /// `dt_min = 0.02 dt`.
     Guenole2020,
 }
 
