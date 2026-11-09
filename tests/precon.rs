@@ -322,3 +322,200 @@ fn geometry_lbfgs_caps_along_the_preconditioned_force() {
         "scalar geometry step matched the preconditioned cap ({gap})"
     );
 }
+
+struct ModelQuad<P> {
+    apply: P,
+    dim: usize,
+    bounds: Bounds<f64>,
+}
+
+impl<P> Objective<f64> for ModelQuad<P>
+where
+    P: Fn(ArrayView1<f64>) -> Array1<f64> + Send + Sync,
+{
+    fn dim(&self) -> usize {
+        self.dim
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        0.5 * x.dot(&(self.apply)(x))
+    }
+}
+
+impl<P> Gradient<f64> for ModelQuad<P>
+where
+    P: Fn(ArrayView1<f64>) -> Array1<f64> + Send + Sync,
+{
+    fn dim(&self) -> usize {
+        self.dim
+    }
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        (self.apply)(x)
+    }
+}
+
+impl<P> DifferentiableObjective<f64> for ModelQuad<P>
+where
+    P: Fn(ArrayView1<f64>) -> Array1<f64> + Send + Sync,
+{
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let g = (self.apply)(x);
+        (0.5 * x.dot(&g), g)
+    }
+}
+
+fn water() -> Array1<f64> {
+    let ang = 104.5_f64.to_radians();
+    ndarray::array![
+        0.0,
+        0.0,
+        0.0,
+        0.96,
+        0.0,
+        0.0,
+        0.96 * ang.cos(),
+        0.96 * ang.sin(),
+        0.0
+    ]
+}
+
+fn steps_on(
+    mut solver: Solver,
+    obj: &impl DifferentiableObjective<f64>,
+    x0: &Array1<f64>,
+) -> usize {
+    solver.set_atom_maxmove(0.0);
+    let mut x = x0.clone();
+    let mut taken = 0;
+    for _ in 0..40 {
+        let g = obj.grad(x.view());
+        if g.dot(&g).sqrt() < 1e-8 {
+            break;
+        }
+        solver.step(obj, &mut x).unwrap();
+        taken += 1;
+    }
+    taken
+}
+
+fn quad_control() -> Control {
+    Control {
+        maxiter: 1,
+        gtol: 1e-8,
+        istep: 1.0,
+        maxmove: None,
+        ..Control::default()
+    }
+}
+
+#[test]
+fn lindh_and_ff_shorten_lbfgs_on_a_molecule() {
+    use rgmin::{
+        BondTerm, FfParams, FfTerms, GeometryKind, Lindh, LindhParams, OptimizerFamily,
+        PreconChoice, select_precon,
+    };
+
+    let geom = water();
+    let z = [8, 1, 1];
+    let lindh_params = LindhParams {
+        mu: Some(1.0),
+        ..LindhParams::default()
+    };
+    let model = Lindh::assemble(geom.view(), &z, &[], &lindh_params).unwrap();
+    let obj = ModelQuad {
+        apply: |x: ArrayView1<f64>| model.apply(x),
+        dim: geom.len(),
+        bounds: Bounds::new(Array1::from_elem(9, -1e6), Array1::from_elem(9, 1e6), 0.0),
+    };
+    let control = quad_control();
+    let plain = Solver::new(Method::Lbfgs { memory: 5 }, control.clone(), geom.len());
+    let mut with = Solver::new(Method::Lbfgs { memory: 5 }, control, geom.len());
+    with.set_lindh(geom.view(), &z, &[], &lindh_params).unwrap();
+    let without = steps_on(plain, &obj, &geom);
+    let taken = steps_on(with, &obj, &geom);
+    assert!(taken < without, "lindh {taken}, plain {without}");
+    assert!(taken <= 3, "lindh took {taken}");
+
+    let bonds = [
+        BondTerm { i: 0, j: 1, k: 1.0 },
+        BondTerm { i: 0, j: 2, k: 1.0 },
+    ];
+    let ff_params = FfParams {
+        mu: Some(1.0),
+        ..FfParams::default()
+    };
+    let terms = FfTerms {
+        bonds: &bonds,
+        ..FfTerms::default()
+    };
+    let ff = rgmin::Ff::assemble(geom.view(), terms, &ff_params).unwrap();
+    let ff_obj = ModelQuad {
+        apply: |x: ArrayView1<f64>| ff.apply(x),
+        dim: geom.len(),
+        bounds: Bounds::new(Array1::from_elem(9, -1e6), Array1::from_elem(9, 1e6), 0.0),
+    };
+    let control = quad_control();
+    let plain = Solver::new(Method::Lbfgs { memory: 5 }, control.clone(), geom.len());
+    let mut with = Solver::new(Method::Lbfgs { memory: 5 }, control, geom.len());
+    with.set_ff(geom.view(), terms, &ff_params).unwrap();
+    let without = steps_on(plain, &ff_obj, &geom);
+    let taken = steps_on(with, &ff_obj, &geom);
+    assert!(taken < without, "ff {taken}, plain {without}");
+    assert!(taken <= 3, "ff took {taken}");
+    assert_eq!(
+        select_precon(
+            GeometryKind::Molecule,
+            &[8, 1, 1],
+            false,
+            OptimizerFamily::QuasiNewton
+        ),
+        PreconChoice::Lindh
+    );
+    assert_eq!(
+        select_precon(
+            GeometryKind::Molecule,
+            &[8, 1, 1],
+            true,
+            OptimizerFamily::Cg
+        ),
+        PreconChoice::Ff
+    );
+}
+
+#[test]
+fn lindh_estimates_the_energy_scale() {
+    use rgmin::LindhParams;
+
+    let geom = water();
+    let z = [8, 1, 1];
+    let params = LindhParams {
+        mu: Some(1.0),
+        ..LindhParams::default()
+    };
+    let model = rgmin::Lindh::assemble(geom.view(), &z, &[], &params).unwrap();
+    let scale = 2.5;
+    let obj = ModelQuad {
+        apply: move |x: ArrayView1<f64>| scale * model.apply(x),
+        dim: geom.len(),
+        bounds: Bounds::new(Array1::from_elem(9, -1e6), Array1::from_elem(9, 1e6), 0.0),
+    };
+    let estimated = LindhParams {
+        lengths: Some([4.0, 4.0, 4.0]),
+        ..LindhParams::default()
+    };
+    let control = Control {
+        maxiter: 1,
+        gtol: 1e-10,
+        istep: 1.0,
+        maxmove: None,
+        ..Control::default()
+    };
+    let mut solver = Solver::new(Method::Lbfgs { memory: 4 }, control, geom.len());
+    solver.set_lindh(geom.view(), &z, &[], &estimated).unwrap();
+    let mut x = geom.clone();
+    solver.step(&obj, &mut x).unwrap();
+    let mu = solver.precon_scale().unwrap();
+    assert!((mu - scale).abs() < 1e-4, "mu {mu}");
+}
