@@ -1022,6 +1022,22 @@ impl Solver {
         }
     }
 
+    /// Opt-in L-BFGS guards: a long step, a step that faces the
+    /// gradient, and a pair with negative curvature each drop the
+    /// memory. Off unless set, so a default session keeps the
+    /// two-loop step. Other methods ignore the call.
+    pub fn set_lbfgs_neb_guards(&mut self, enabled: bool) {
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            if solver.curvature_reset != enabled {
+                solver.forget();
+            }
+            solver.distance_reset = enabled;
+            solver.angle_reset = enabled;
+            solver.curvature_reset = enabled;
+            solver.inverse_curvature = if enabled { 0.01 } else { 1.0 };
+        }
+    }
+
     /// The same radius as [`Self::set_trust`], stored on the HiGHS step.
     pub fn set_highs_trust(&mut self, radius: f64) -> bool {
         self.set_trust(radius)
@@ -2525,7 +2541,13 @@ impl Solver {
                 // step_objective (nval < value) never moves.
                 // Accept::Energy: Wolfe line search in step_objective.
                 if self.accept == Accept::None {
-                    let dir = solver.search_direction(x.view(), grad.view());
+                    let guards =
+                        solver.distance_reset || solver.angle_reset || solver.curvature_reset;
+                    let dir = if guards {
+                        solver.guarded_direction(grad.view(), self.atom_maxmove)
+                    } else {
+                        solver.search_direction(x.view(), grad.view())
+                    };
                     let old = x.clone();
                     let gold = grad.clone();
                     let trial = single_trial(
