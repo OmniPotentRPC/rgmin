@@ -1523,6 +1523,20 @@ impl Solver {
         self.geometry_lbfgs_stiff = None;
     }
 
+    /// Drop the cached point and keep the method's memory.
+    ///
+    /// The next [`Self::step`] calls the oracle at its `x` even when `x`
+    /// is the iterate this session last evaluated. FIRE velocity, the
+    /// L-BFGS pairs, and the other method memory stay. A zero gradient
+    /// still stops when its norm is under [`Control::gtol`].
+    pub fn forget_evaluation(&mut self) {
+        self.geometry_lbfgs_stiff = None;
+        self.last_pos = None;
+        if let Inner::QuickMin(_, session) = &mut self.inner {
+            session.forget_last();
+        }
+    }
+
     /// Drop method memory. The next step is a cold start from the current `x`.
     pub fn forget(&mut self) {
         self.istep = self.control.istep;
