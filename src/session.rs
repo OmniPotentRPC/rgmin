@@ -48,7 +48,7 @@ use crate::quickmin::{
     quickmin_session_step,
 };
 use crate::report::Report;
-use crate::rigid::{project_horizontal, project_out_rot_trans};
+use crate::rigid::{RigidMode, project_axes, project_horizontal, project_out_rot_trans};
 use crate::step::{
     cap_displacement_atom, finite, l2, max_atom_displacement, non_finite,
     scale_displacement_to_atom_cap, scale_step, scale_step_atom,
@@ -126,6 +126,21 @@ pub struct Solver {
     project_rigid: bool,
     /// Sella `proj_rot`: false under PBC. Rotation is not a symmetry of the cell.
     periodic: bool,
+    /// Rigid motions removed on top of [`Self::project_rigid`].
+    /// [`RigidMode::Auto`] with empty masks is the existing projection.
+    rigid_mode: RigidMode,
+    /// Cartesian mass inner product. Off on a new session.
+    mass_metric: bool,
+    /// Coordinates already store `sqrt(m) x`. Off on a new session.
+    mass_weighted_coords: bool,
+    /// Periodic axes. All false leaves [`Self::periodic`] in charge of the cell flag only.
+    pbc: [bool; 3],
+    /// Nonzero bytes freeze those coordinates.
+    frozen: Option<Vec<u8>>,
+    /// Translations that are not symmetries.
+    broken_translation: [bool; 3],
+    /// Rotations that are not symmetries.
+    broken_rotation: [bool; 3],
     manifold: ManifoldKind,
     /// Per-atom masses for [`ManifoldKind::MwRigid`]. Length N, not 3N.
     masses: Option<Array1<f64>>,
@@ -269,6 +284,13 @@ impl Solver {
             geometry_lbfgs_stiff: None,
             project_rigid: false,
             periodic: false,
+            rigid_mode: RigidMode::Off,
+            mass_metric: false,
+            mass_weighted_coords: false,
+            pbc: [false; 3],
+            frozen: None,
+            broken_translation: [false; 3],
+            broken_rotation: [false; 3],
             manifold: ManifoldKind::Euclidean,
             masses: None,
             #[cfg(feature = "highs")]
@@ -719,6 +741,88 @@ impl Solver {
     /// eOn `lbfgs_project_rigid`. Isolated clusters only.
     pub fn set_project_rigid(&mut self, enabled: bool) {
         self.project_rigid = enabled;
+        self.rigid_mode = if enabled {
+            RigidMode::Auto
+        } else {
+            RigidMode::Off
+        };
+        #[cfg(feature = "highs")]
+        self.apply_highs_opts();
+    }
+
+    /// `Off`, `Auto`, `Translation`, or `TranslationRotation`.
+    ///
+    /// `Auto` with no axis mask is the projection [`Self::set_project_rigid`]
+    /// already runs. `Off` clears that projection.
+    pub fn set_rigid_mode(&mut self, mode: RigidMode) {
+        self.rigid_mode = mode;
+        self.project_rigid = mode != RigidMode::Off;
+        #[cfg(feature = "highs")]
+        self.apply_highs_opts();
+    }
+
+    /// Cartesian mass inner product. Turns the mass-weighted chart off.
+    pub fn set_rigid_mass_metric(&mut self, enabled: bool) {
+        self.mass_metric = enabled;
+        if enabled {
+            self.mass_weighted_coords = false;
+        }
+    }
+
+    /// Coordinates are `sqrt(m) x`. The metric stays Euclidean, and the
+    /// Cartesian mass metric turns off.
+    pub fn set_rigid_mass_weighted(&mut self, enabled: bool) {
+        self.mass_weighted_coords = enabled;
+        if enabled {
+            self.mass_metric = false;
+            self.declare_molecule();
+        }
+    }
+
+    /// Periodic axes. A true axis drops rotations and keeps only those
+    /// translations, and turns the projection on. This does not change
+    /// [`Self::set_periodic`], which still only sets the cell flag.
+    pub fn set_pbc_axes(&mut self, x: bool, y: bool, z: bool) {
+        self.pbc = [x, y, z];
+        self.periodic = x || y || z;
+        if self.periodic {
+            self.declare_molecule();
+        }
+    }
+
+    /// Length `3N`. A nonzero byte freezes that coordinate. Empty clears
+    /// the mask. A nonempty mask turns the projection on.
+    pub fn set_frozen(&mut self, frozen: &[u8]) {
+        if frozen.is_empty() {
+            self.frozen = None;
+            return;
+        }
+        self.frozen = Some(frozen.to_vec());
+        self.declare_molecule();
+    }
+
+    /// Axes that are not symmetries. A set bit turns the projection on.
+    pub fn set_broken_axes(
+        &mut self,
+        trans_x: bool,
+        trans_y: bool,
+        trans_z: bool,
+        rot_x: bool,
+        rot_y: bool,
+        rot_z: bool,
+    ) {
+        self.broken_translation = [trans_x, trans_y, trans_z];
+        self.broken_rotation = [rot_x, rot_y, rot_z];
+        if trans_x || trans_y || trans_z || rot_x || rot_y || rot_z {
+            self.declare_molecule();
+        }
+    }
+
+    fn declare_molecule(&mut self) {
+        if self.rigid_mode == RigidMode::Off {
+            self.rigid_mode = RigidMode::Auto;
+        }
+        self.project_rigid = true;
         #[cfg(feature = "highs")]
         self.apply_highs_opts();
     }
@@ -1189,18 +1293,69 @@ impl Solver {
         p.t().dot(hess).dot(&p) + normal.t().dot(&normal)
     }
 
+    /// Rigid projection. Empty masks and [`RigidMode::Auto`] call
+    /// [`project_out_rot_trans`], the projection a session already used.
+    fn project_configured(&self, x: &Array1<f64>, v: &mut Array1<f64>) {
+        if !self.project_rigid {
+            return;
+        }
+        let masked = self.pbc != [false; 3]
+            || self.broken_translation != [false; 3]
+            || self.broken_rotation != [false; 3]
+            || self.frozen.as_ref().is_some_and(|f| !f.is_empty())
+            || self.mass_metric
+            || self.mass_weighted_coords
+            || matches!(
+                self.rigid_mode,
+                RigidMode::Translation | RigidMode::TranslationRotation
+            );
+        if !masked {
+            project_out_rot_trans(v, x.view());
+            return;
+        }
+        let any_pbc = self.pbc.iter().any(|on| *on);
+        let (mut trans, mut rot) = match self.rigid_mode {
+            RigidMode::Off => ([false; 3], [false; 3]),
+            RigidMode::Translation => ([true; 3], [false; 3]),
+            RigidMode::TranslationRotation => ([true; 3], [true; 3]),
+            RigidMode::Auto => {
+                if any_pbc {
+                    (self.pbc, [false; 3])
+                } else {
+                    ([true; 3], [true; 3])
+                }
+            }
+        };
+        if any_pbc {
+            trans = self.pbc;
+            rot = [false; 3];
+        }
+        for i in 0..3 {
+            if self.broken_translation[i] {
+                trans[i] = false;
+            }
+            if self.broken_rotation[i] {
+                rot[i] = false;
+            }
+        }
+        let masses = if self.mass_metric && !self.mass_weighted_coords {
+            self.masses.as_ref().and_then(|m| m.as_slice())
+        } else {
+            None
+        };
+        project_axes(v, x.view(), masses, trans, rot, self.frozen.as_deref());
+    }
+
     fn horizontal_grad(&self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
         let mut g = match self.manifold {
             ManifoldKind::MwRigid | ManifoldKind::RigidQuotient => self.project_vec(x, grad),
             other => other.egrad2rgrad(x, grad),
         };
-        if self.project_rigid
-            && !matches!(
-                self.manifold,
-                ManifoldKind::RigidQuotient | ManifoldKind::MwRigid
-            )
-        {
-            project_out_rot_trans(&mut g, x.view());
+        if !matches!(
+            self.manifold,
+            ManifoldKind::RigidQuotient | ManifoldKind::MwRigid
+        ) {
+            self.project_configured(x, &mut g);
         }
         g
     }
@@ -1754,9 +1909,7 @@ impl Solver {
                 Inner::Lbfgs(solver) => solver.direction_h0(grad.view(), h0),
                 _ => h0 * &force,
             };
-            if self.project_rigid {
-                project_out_rot_trans(&mut direction, x.view());
-            }
+            self.project_configured(x, &mut direction);
             direction = self.project_vec(x, &direction);
             let motion = max_atom_displacement(&direction);
             if motion >= cap {
@@ -2077,9 +2230,7 @@ impl Solver {
         } else {
             return self.step_first_order(obj, x);
         };
-        if self.project_rigid {
-            project_out_rot_trans(&mut dir, x.view());
-        }
+        self.project_configured(x, &mut dir);
         dir = self.project_vec(x, &dir);
         let old = x.clone();
         let gold = grad.clone();
@@ -2153,9 +2304,7 @@ impl Solver {
         // compares the energy there with the tangent model.
         let curved = !self.manifold.is_flat();
         let mut dir = self.dogleg_point(x, hess, &grad, radius);
-        if self.project_rigid {
-            project_out_rot_trans(&mut dir, x.view());
-        }
+        self.project_configured(x, &mut dir);
         if curved {
             self.manifold.project_in_place(x, &mut dir);
         }

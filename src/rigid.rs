@@ -8,6 +8,21 @@
 
 use ndarray::{Array1, ArrayView1};
 
+/// Which rigid motions a session removes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RigidMode {
+    /// No rigid projection.
+    #[default]
+    Off,
+    /// Translation and rotation when no axis is periodic, otherwise
+    /// translation on the periodic axes.
+    Auto,
+    /// Translations only.
+    Translation,
+    /// Translations and rotations.
+    TranslationRotation,
+}
+
 /// eOn `projectOutRotTrans`. Unit-mass Eckart. Isolated molecule (T+R).
 pub(crate) fn project_out_rot_trans(vec: &mut Array1<f64>, pos: ArrayView1<f64>) {
     project_horizontal(vec, pos, None, true);
@@ -109,6 +124,122 @@ pub(crate) fn project_horizontal(
     }
 }
 
+/// Remove selected translations and rotations.
+///
+/// A frozen coordinate (nonzero byte) drops any basis vector that moves
+/// it, then the vector itself is zeroed there. `masses` is the Cartesian
+/// mass metric. `None` is the Euclidean product, including a chart that
+/// already stores `sqrt(m) x`.
+pub(crate) fn project_axes(
+    vec: &mut Array1<f64>,
+    pos: ArrayView1<f64>,
+    masses: Option<&[f64]>,
+    trans: [bool; 3],
+    rot: [bool; 3],
+    frozen: Option<&[u8]>,
+) {
+    let n = pos.len();
+    if n < 3 || !n.is_multiple_of(3) || vec.len() != n {
+        return;
+    }
+    let nat = n / 3;
+    let mass_ok = masses.map(|m| m.len() == nat).unwrap_or(false);
+    let m_at = |i: usize| -> f64 {
+        if mass_ok {
+            masses.unwrap()[i].max(0.0)
+        } else {
+            1.0
+        }
+    };
+    let frozen_ok = frozen.map(|f| f.len() == n).unwrap_or(false);
+    let held = |i: usize| frozen_ok && frozen.unwrap()[i] != 0;
+
+    let mut basis = Vec::with_capacity(6);
+    for d in 0..3 {
+        if !trans[d] {
+            continue;
+        }
+        let mut t = Array1::zeros(n);
+        for j in 0..nat {
+            t[3 * j + d] = 1.0;
+        }
+        basis.push(t);
+    }
+    if rot.iter().any(|on| *on) {
+        let mut com = [0.0; 3];
+        let mut mtot = 0.0;
+        for i in 0..nat {
+            let mi = m_at(i);
+            mtot += mi;
+            com[0] += mi * pos[3 * i];
+            com[1] += mi * pos[3 * i + 1];
+            com[2] += mi * pos[3 * i + 2];
+        }
+        if mtot > 0.0 {
+            com[0] /= mtot;
+            com[1] /= mtot;
+            com[2] /= mtot;
+        }
+        let mut rx = Array1::zeros(n);
+        let mut ry = Array1::zeros(n);
+        let mut rz = Array1::zeros(n);
+        for i in 0..nat {
+            let x = pos[3 * i] - com[0];
+            let y = pos[3 * i + 1] - com[1];
+            let z = pos[3 * i + 2] - com[2];
+            rx[3 * i + 1] = -z;
+            rx[3 * i + 2] = y;
+            ry[3 * i] = z;
+            ry[3 * i + 2] = -x;
+            rz[3 * i] = -y;
+            rz[3 * i + 1] = x;
+        }
+        if rot[0] {
+            basis.push(rx);
+        }
+        if rot[1] {
+            basis.push(ry);
+        }
+        if rot[2] {
+            basis.push(rz);
+        }
+    }
+    if frozen_ok {
+        basis.retain(|v| (0..n).all(|i| !held(i) || v[i].abs() <= 1e-12));
+    }
+
+    let mut ortho: Vec<Array1<f64>> = Vec::with_capacity(basis.len());
+    for v in basis {
+        let mut u = v;
+        for e in &ortho {
+            let d = mass_dot(&u, e, nat, &m_at);
+            let ee = mass_dot(e, e, nat, &m_at);
+            if ee > 1.0e-18 {
+                u.scaled_add(-d / ee, e);
+            }
+        }
+        let nrm2 = mass_dot(&u, &u, nat, &m_at);
+        if nrm2 > 1.0e-18 {
+            u /= nrm2.sqrt();
+            ortho.push(u);
+        }
+    }
+    for e in &ortho {
+        let d = mass_dot(vec, e, nat, &m_at);
+        let ee = mass_dot(e, e, nat, &m_at);
+        if ee > 1.0e-18 {
+            vec.scaled_add(-d / ee, e);
+        }
+    }
+    if frozen_ok {
+        for i in 0..n {
+            if held(i) {
+                vec[i] = 0.0;
+            }
+        }
+    }
+}
+
 fn mass_dot<F>(a: &Array1<f64>, b: &Array1<f64>, nat: usize, m_at: &F) -> f64
 where
     F: Fn(usize) -> f64,
@@ -168,5 +299,45 @@ mod tests {
         let mut t = array![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
         project_horizontal(&mut t, pos.view(), None, false);
         assert!(l2(&t) < 1e-12, "translation survived under PBC {t:?}");
+    }
+
+    #[test]
+    fn a_periodic_x_axis_removes_only_that_translation() {
+        let pos = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let mut along_x = array![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        project_axes(
+            &mut along_x,
+            pos.view(),
+            None,
+            [true, false, false],
+            [false; 3],
+            None,
+        );
+        assert!(l2(&along_x) < 1e-12, "{along_x:?}");
+        let mut along_y = array![0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0];
+        project_axes(
+            &mut along_y,
+            pos.view(),
+            None,
+            [true, false, false],
+            [false; 3],
+            None,
+        );
+        assert!(l2(&along_y) > 0.5, "{along_y:?}");
+    }
+
+    #[test]
+    fn a_broken_translation_is_left_in_the_vector() {
+        let pos = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let mut along_z = array![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        project_axes(
+            &mut along_z,
+            pos.view(),
+            None,
+            [true, true, false],
+            [false; 3],
+            None,
+        );
+        assert!(l2(&along_z) > 0.5, "{along_z:?}");
     }
 }
