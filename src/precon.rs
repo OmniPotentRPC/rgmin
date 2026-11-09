@@ -23,6 +23,16 @@ use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::error::{Error, Result};
 
+#[allow(dead_code)]
+mod geom;
+
+/// Pair assembly stays on one thread.
+///
+/// `ordered_map` treats a gate of `usize::MAX` as serial. The cell
+/// list passes this gate so its pairs do not depend on the thread count.
+#[allow(dead_code)]
+pub(super) const N_PAR_ASSEMBLE: usize = usize::MAX;
+
 /// One undirected neighbour list over atoms, plus bonds to atoms that
 /// are not degrees of freedom.
 ///
@@ -774,6 +784,68 @@ fn finite_vec(x: Vec<f64>) -> Option<Vec<f64>> {
     x.iter().all(|v| v.is_finite()).then_some(x)
 }
 
+#[allow(dead_code)]
+/// Map `0..n` and keep index order.
+///
+/// With the `par` feature and `atoms >= gate` the chunks run on the
+/// current rayon pool. `collect` on an indexed iterator concatenates
+/// in index order. Below the gate, and in a build without `par`, the
+/// map is a serial loop. The gate is an atom count.
+pub(super) fn ordered_map<T, F>(n: usize, atoms: usize, gate: usize, f: F) -> Vec<T>
+where
+    T: Send,
+    F: Fn(usize) -> T + Send + Sync,
+{
+    let parallel = gate < usize::MAX && atoms >= gate && n >= 2;
+    #[cfg(not(feature = "par"))]
+    let _ = parallel;
+    #[cfg(feature = "par")]
+    {
+        use rayon::prelude::*;
+        if parallel {
+            return (0..n).into_par_iter().map(f).collect();
+        }
+    }
+    (0..n).map(f).collect()
+}
+
+#[allow(dead_code)]
+/// Largest per-atom displacement between two `3 N` coordinate vectors.
+///
+/// A length mismatch returns infinity, so [`needs_rebuild`] treats it
+/// as a stale matrix.
+#[must_use]
+pub(crate) fn max_atom_displacement(previous: ArrayView1<f64>, current: ArrayView1<f64>) -> f64 {
+    if previous.len() != current.len() || !previous.len().is_multiple_of(3) {
+        return f64::INFINITY;
+    }
+    let mut best = 0.0_f64;
+    for i in (0..previous.len()).step_by(3) {
+        let mut s = 0.0;
+        for k in 0..3 {
+            let d = previous[i + k] - current[i + k];
+            s += d * d;
+        }
+        best = best.max(s.sqrt());
+    }
+    best
+}
+
+#[allow(dead_code)]
+/// Whether `P` should be reassembled.
+///
+/// Packwood et al. 2016 rebuild the exponential metric when the largest
+/// atomic move since the last assembly exceeds half the nearest-neighbour
+/// distance. Lindh and FF use the same rule. `scale` is that distance.
+/// A nonpositive or nonfinite scale, or a nonfinite displacement, rebuilds.
+#[must_use]
+pub(crate) fn needs_rebuild(max_atom_displacement: f64, scale: f64) -> bool {
+    if !(scale.is_finite() && scale > 0.0 && max_atom_displacement.is_finite()) {
+        return true;
+    }
+    max_atom_displacement > 0.5 * scale
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -948,5 +1020,23 @@ mod tests {
         let num = (&g1 - &g0).dot(&v);
         let den = v.dot(&p1.apply(v.view()));
         assert!((mu - num / den).abs() < 1e-12, "formula drift");
+    }
+
+    #[test]
+    fn the_hold_boundary_is_half_the_scale() {
+        let prev = array![0.0, 0.0, 0.0];
+        let same = prev.clone();
+        let still = max_atom_displacement(prev.view(), same.view());
+        assert!(still == 0.0, "still {still}");
+        assert!(!needs_rebuild(0.5, 1.0));
+        assert!(needs_rebuild(0.5 + 1e-12, 1.0));
+        let next = array![0.4, 0.0, 0.0];
+        let moved = max_atom_displacement(prev.view(), next.view());
+        assert!((moved - 0.4).abs() < 1e-12, "moved {moved}");
+        assert!(!needs_rebuild(moved, 1.0));
+        let bad = array![0.0, 0.0];
+        assert!(max_atom_displacement(prev.view(), bad.view()).is_infinite());
+        assert!(needs_rebuild(f64::NAN, 1.0));
+        assert!(needs_rebuild(0.1, 0.0));
     }
 }
