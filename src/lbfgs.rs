@@ -114,6 +114,8 @@ pub struct Lbfgs {
     h0: Option<crate::precon::Exp>,
     /// Sparse Lindh metric used as \(H_0 = P^{-1}\) when `h0` is empty.
     lindh: Option<crate::precon::Metric>,
+    /// Sparse bonded metric used as \(H_0 = P^{-1}\) when `h0` and Lindh are empty.
+    ff: Option<crate::precon::Metric>,
     /// `s·y` of the latest geometry step, stored even when the pair is dropped.
     pub(crate) last_sy: f64,
     /// `y·y` of the latest geometry step.
@@ -149,6 +151,7 @@ impl Lbfgs {
             highs: None,
             h0: None,
             lindh: None,
+            ff: None,
             last_sy: 0.0,
             last_yy: 0.0,
             have_curvature: false,
@@ -166,9 +169,17 @@ impl Lbfgs {
         self.lindh = metric;
     }
 
-    /// `P^{-1} v` when a Lindh metric is installed and the solve succeeds.
-    pub(crate) fn lindh_apply(&self, v: ArrayView1<f64>) -> Option<Array1<f64>> {
-        self.lindh.as_ref()?.solve(v)
+    /// Install or clear the bonded \(H_0 = P^{-1}\).
+    pub(crate) fn set_ff_metric(&mut self, metric: Option<crate::precon::Metric>) {
+        self.ff = metric;
+    }
+
+    /// `P^{-1} v` from the Lindh metric, or the bonded metric when Lindh is absent.
+    pub(crate) fn model_apply(&self, v: ArrayView1<f64>) -> Option<Array1<f64>> {
+        if let Some(metric) = &self.lindh {
+            return metric.solve(v);
+        }
+        self.ff.as_ref().and_then(|metric| metric.solve(v))
     }
 
     /// Discards the stored curvature.
@@ -273,7 +284,7 @@ impl Lbfgs {
             q = solve_dense(pmat, &q).unwrap_or_else(|| self.scale_gamma(q));
         } else if let Some(exp) = exp {
             q = exp.solve(q.view()).unwrap_or_else(|| self.scale_gamma(q));
-        } else if let Some(solved) = self.lindh_apply(q.view()) {
+        } else if let Some(solved) = self.model_apply(q.view()) {
             q = solved;
         } else {
             q = self.scale_gamma(q);
@@ -316,7 +327,7 @@ impl Lbfgs {
         }
         if let Some(solved) = self.exp_apply(q.view()) {
             q = solved;
-        } else if let Some(solved) = self.lindh_apply(q.view()) {
+        } else if let Some(solved) = self.model_apply(q.view()) {
             q = solved;
         } else {
             q *= h0;

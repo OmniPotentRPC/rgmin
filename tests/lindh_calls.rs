@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
-use rgmin::{Control, LindhParams, Method, Solver};
+use rgmin::{BondTerm, Control, FfParams, FfTerms, LindhParams, Method, Solver};
 
 struct Bonds {
     bounds: Bounds<f64>,
@@ -123,6 +123,60 @@ fn run(lindh: bool, cap: Option<f64>, limit: usize) -> Out {
     }
 }
 
+fn run_ff(cap: Option<f64>, limit: usize) -> Out {
+    let obj = Bonds {
+        bounds: Bounds::new(Array1::from_elem(9, -1e3), Array1::from_elem(9, 1e3), 0.0),
+        calls: AtomicUsize::new(0),
+    };
+    let mut solver = Solver::new(Method::Lbfgs { memory: 8 }, control(), 9);
+    if let Some(c) = cap {
+        solver.set_atom_maxmove(c);
+    }
+    let mut x = start();
+    let bonds = [
+        BondTerm {
+            i: 0,
+            j: 1,
+            k: 25.0,
+        },
+        BondTerm {
+            i: 0,
+            j: 2,
+            k: 25.0,
+        },
+        BondTerm {
+            i: 1,
+            j: 2,
+            k: 25.0,
+        },
+    ];
+    let terms = FfTerms {
+        bonds: &bonds,
+        ..FfTerms::default()
+    };
+    solver
+        .set_ff(x.view(), terms, &FfParams::default())
+        .unwrap();
+    let mut steps = 0;
+    let mut value = 0.0;
+    let mut gnorm = f64::INFINITY;
+    for _ in 0..limit {
+        let report = solver.step(&obj, &mut x).unwrap();
+        steps = report.steps;
+        value = report.value;
+        gnorm = report.grad_norm;
+        if gnorm < 1e-6 {
+            break;
+        }
+    }
+    Out {
+        calls: obj.calls.load(Ordering::Relaxed),
+        steps,
+        value,
+        gnorm,
+    }
+}
+
 fn show(label: &str, out: &Out) {
     println!(
         "{label} calls={} steps={} value={:.6e} gnorm={:.6e}",
@@ -134,12 +188,16 @@ fn show(label: &str, out: &Out) {
 fn three_bond_capped_and_default_paths() {
     let plain_cap = run(false, Some(0.2), 80);
     let lindh_cap = run(true, Some(0.2), 80);
+    let ff_cap = run_ff(Some(0.2), 80);
     let plain = run(false, None, 40);
     let lindh = run(true, None, 40);
+    let ff = run_ff(None, 40);
     show("capped-plain", &plain_cap);
     show("capped-lindh", &lindh_cap);
+    show("capped-ff", &ff_cap);
     show("default-plain", &plain);
     show("default-lindh", &lindh);
+    show("default-ff", &ff);
     assert!(plain_cap.gnorm < 1e-6, "capped plain {}", plain_cap.gnorm);
     assert!(lindh_cap.gnorm < 1e-6, "capped lindh {}", lindh_cap.gnorm);
     assert_eq!((plain_cap.calls, plain_cap.steps), (10, 9));
@@ -147,4 +205,8 @@ fn three_bond_capped_and_default_paths() {
     assert_eq!((plain.calls, plain.steps), (11, 10));
     assert_eq!((lindh.calls, lindh.steps), (48, 40));
     assert!(lindh.value > 1.0, "default lindh value {}", lindh.value);
+    assert!(ff_cap.gnorm < 1e-6, "capped ff {}", ff_cap.gnorm);
+    assert_eq!((ff_cap.calls, ff_cap.steps), (12, 8));
+    assert_eq!((ff.calls, ff.steps), (29, 25));
+    assert!(ff.value > 1.0, "default ff value {}", ff.value);
 }

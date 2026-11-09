@@ -34,7 +34,9 @@ use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
 use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
-use crate::precon::{ExpParams, ExpState, Ghost, LindhParams, LindhState, Neighbours};
+use crate::precon::{
+    ExpParams, ExpState, FfParams, FfState, FfTerms, Ghost, LindhParams, LindhState, Neighbours,
+};
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{
     bfgs_inverse_update, secant_scale, solve_dense, sr1_inverse_update, sr2_hessian_update,
@@ -147,6 +149,8 @@ pub struct Solver {
     exp: Option<ExpState>,
     /// Lindh model. `None` leaves every method unchanged.
     lindh: Option<LindhState>,
+    /// Bonded FF model. `None` leaves every method unchanged.
+    ff: Option<FfState>,
     /// Analytic or finite-difference Hessian-vector products.
     hvp_calls: usize,
     /// Negative-curvature kicks already taken in this solve.
@@ -286,6 +290,7 @@ impl Solver {
             hvp_calls: 0,
             exp: None,
             lindh: None,
+            ff: None,
             saddle_kicks: 0,
             stop_norm,
             constraints: None,
@@ -317,8 +322,10 @@ impl Solver {
         let state = ExpState::new(positions, neighbours, params)?;
         let matrix = state.matrix().cloned();
         self.lindh = None;
+        self.ff = None;
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_lindh_metric(None);
+            solver.set_ff_metric(None);
         }
         self.exp = Some(state);
         if let Inner::Lbfgs(solver) = &mut self.inner {
@@ -375,6 +382,7 @@ impl Solver {
         let state = LindhState::new(positions, z, ghosts, params)?;
         let metric = state.metric().cloned();
         self.clear_exp();
+        self.clear_ff();
         self.lindh = Some(state);
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_lindh_metric(metric);
@@ -393,6 +401,52 @@ impl Solver {
         self.lindh = None;
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_lindh_metric(None);
+        }
+    }
+
+    /// Install the bonded metric at `positions`.
+    ///
+    /// `positions` has length [`Self::dim`] and is `3 N` coordinates in
+    /// Angstrom, C order. `terms` are the harmonic and Morse bonds, the
+    /// angles, and the torsions. L-BFGS then takes \(H_0 = P^{-1}\),
+    /// including the capped geometry step from [`Self::set_atom_maxmove`].
+    /// [`Accept::None`] stays the one-oracle step. The call clears an
+    /// installed exponential metric and an installed Lindh model. A
+    /// session that never calls this keeps the steps it took before.
+    pub fn set_ff(
+        &mut self,
+        positions: ArrayView1<f64>,
+        terms: FfTerms<'_>,
+        params: &FfParams,
+    ) -> Result<()> {
+        if positions.len() != self.dim {
+            return Err(Error::Dim {
+                got: positions.len(),
+                dim: self.dim,
+            });
+        }
+        let state = FfState::new(positions, terms, params)?;
+        let metric = state.metric().cloned();
+        self.clear_exp();
+        self.clear_lindh();
+        self.ff = Some(state);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_ff_metric(metric);
+        }
+        Ok(())
+    }
+
+    /// Scale of the installed bonded model, after estimation.
+    #[must_use]
+    pub fn ff_mu(&self) -> Option<f64> {
+        self.ff.as_ref().and_then(FfState::mu)
+    }
+
+    /// Drop the bonded model.
+    pub fn clear_ff(&mut self) {
+        self.ff = None;
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_ff_metric(None);
         }
     }
 
@@ -428,6 +482,24 @@ impl Solver {
         let metric = self.lindh.as_ref().and_then(|s| s.metric().cloned());
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.set_lindh_metric(metric);
+        }
+        Ok(())
+    }
+
+    fn refresh_ff<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        if self.ff.is_none() {
+            return Ok(());
+        }
+        let grad_fn = |p: ArrayView1<f64>| obj.grad(p);
+        if let Some(state) = &mut self.ff {
+            state.refresh(x.view(), grad, grad_fn)?;
+        }
+        let metric = self.ff.as_ref().and_then(|s| s.metric().cloned());
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.set_ff_metric(metric);
         }
         Ok(())
     }
@@ -562,7 +634,8 @@ impl Solver {
     /// method restarts. A step under a setting the set cannot honour
     /// returns [`crate::ConstraintError::Unsupported`]: a manifold other
     /// than Euclidean coordinates, the exponential preconditioner, the
-    /// Lindh preconditioner, the HiGHS step, a periodic cell, particle
+    /// Lindh preconditioner, the bonded preconditioner, the HiGHS step,
+    /// a periodic cell, particle
     /// swarm, or rigid projection
     /// at an active coordinate bound. A trial that takes a constrained
     /// atom to its coordinate bound is [`crate::ConstraintError::Bound`].
@@ -1408,14 +1481,15 @@ impl Solver {
     }
 
     /// `P^{-1} force` when an exponential preconditioner is installed.
-    /// A Lindh metric supplies the same product when the exponential
-    /// matrix is absent. Otherwise `h0 * force`, the scalar geometry seed.
+    /// A Lindh or bonded metric supplies the same product when the
+    /// exponential matrix is absent. Otherwise `h0 * force`, the scalar
+    /// geometry seed.
     fn geometry_seed_force(&self, force: &Array1<f64>, h0: f64) -> Array1<f64> {
         if let Inner::Lbfgs(solver) = &self.inner {
             if let Some(pre) = solver.exp_apply(force.view()) {
                 return pre;
             }
-            if let Some(pre) = solver.lindh_apply(force.view()) {
+            if let Some(pre) = solver.model_apply(force.view()) {
                 return pre;
             }
         }
@@ -1423,14 +1497,14 @@ impl Solver {
     }
 
     /// `scale * P^{-1} force` when an exponential preconditioner is installed.
-    /// A Lindh metric supplies the same product when the exponential
-    /// matrix is absent. Otherwise `scale * force`.
+    /// A Lindh or bonded metric supplies the same product when the
+    /// exponential matrix is absent. Otherwise `scale * force`.
     fn geometry_scaled_force(&self, force: &Array1<f64>, scale: f64) -> Array1<f64> {
         if let Inner::Lbfgs(solver) = &self.inner {
             if let Some(pre) = solver.exp_apply(force.view()) {
                 return scale * &pre;
             }
-            if let Some(pre) = solver.lindh_apply(force.view()) {
+            if let Some(pre) = solver.model_apply(force.view()) {
                 return scale * &pre;
             }
         }
@@ -2071,6 +2145,7 @@ impl Solver {
         }
         self.refresh_exp(obj, x, &grad)?;
         self.refresh_lindh(obj, x, &grad)?;
+        self.refresh_ff(obj, x, &grad)?;
 
         if matches!(self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
             && matches!(self.inner, Inner::Lbfgs(_))

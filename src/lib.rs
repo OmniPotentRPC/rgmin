@@ -108,7 +108,8 @@ pub use newton::{HessianObjective, HessianOracle, NewtonKind, minimize_newton};
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
 pub use oracle::Oracle;
 pub use precon::{
-    Exp, ExpParams, Ghost, Lindh, LindhParams, Neighbours, estimate_mu, nearest_neighbour_distance,
+    AngleTerm, BondTerm, DihedralTerm, Exp, ExpParams, Ff, FfParams, FfTerms, Ghost, Lindh,
+    LindhParams, MorseTerm, Neighbours, bonded_terms, estimate_mu, nearest_neighbour_distance,
     sine_probe,
 };
 pub use pso::minimize_pso;

@@ -23,12 +23,15 @@ use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::error::{Error, Result};
 
+mod ff;
 #[allow(dead_code)]
 mod geom;
 mod lindh;
 #[allow(dead_code)]
 mod metric;
 
+pub(crate) use ff::FfState;
+pub use ff::{AngleTerm, BondTerm, DihedralTerm, Ff, FfParams, FfTerms, MorseTerm, bonded_terms};
 pub(crate) use lindh::LindhState;
 pub use lindh::{Ghost, Lindh, LindhParams};
 pub(crate) use metric::Metric;
