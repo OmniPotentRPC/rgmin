@@ -98,7 +98,7 @@ pub use irc_trust::{IrcTrust, sqrt_masses_3n};
 pub use lbfgs::{GradNorm, LBFGSB_FACTR, LBFGSB_FTOL, Lbfgs};
 #[cfg(feature = "highs")]
 pub use lbfgs_qp::HighsStep;
-pub use linesearch::LineSearch;
+pub use linesearch::{LineSearch, LineSearchOptions, LineSearchStep};
 pub use lowest_mode::{
     ApplyHessian, DENSE_EIGEN_CUTOFF, EigenParams, EigensolverKind, LowestMode, lowest_eigenpair,
     lowest_mode,

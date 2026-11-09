@@ -64,6 +64,39 @@ pub enum LineSearch {
     },
 }
 
+/// Optional value window for a Wolfe search.
+///
+/// The default is no window. [`LineSearch::search`] does not read it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LineSearchOptions {
+    relative_objective_error: Option<f64>,
+}
+
+impl LineSearchOptions {
+    /// Permit a rise of `relative * |f0|`. Negative and non-finite
+    /// values are refused. Zero permits no rise.
+    #[must_use]
+    pub fn with_objective_roundoff(relative: f64) -> Option<Self> {
+        (relative.is_finite() && relative >= 0.0).then_some(Self {
+            relative_objective_error: Some(relative),
+        })
+    }
+}
+
+/// One probe of [`LineSearch::search_from_with_options`].
+pub struct LineSearchStep {
+    /// Trial point.
+    pub x: Array1<f64>,
+    /// Value at [`Self::x`].
+    pub f: f64,
+    /// Gradient at [`Self::x`].
+    pub g: Array1<f64>,
+    /// Accepted step length.
+    pub alpha: f64,
+    /// Oracle calls made by the search, not counting a caller-held start.
+    pub evals: usize,
+}
+
 impl Default for LineSearch {
     fn default() -> Self {
         Self::Brent {
@@ -128,6 +161,77 @@ impl LineSearch {
                 zoom::wolfe_search(&mut oracle, path, istep, c1, c2, maxiter)
             }
         }
+    }
+
+    /// Wolfe search that may accept a rise inside `options`.
+    ///
+    /// Other line searches call [`Self::search`]. `None` when no trial
+    /// meets the window and the curvature test.
+    pub fn search_from_with_options<F>(
+        &self,
+        mut oracle: F,
+        pos: ArrayView1<'_, f64>,
+        f0: f64,
+        g0: ArrayView1<'_, f64>,
+        dir: ArrayView1<'_, f64>,
+        istep: f64,
+        alpha_max: f64,
+        options: LineSearchOptions,
+    ) -> Option<LineSearchStep>
+    where
+        F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    {
+        let Self::Wolfe { c1, c2, maxiter } = *self else {
+            return None;
+        };
+        let Some(relative) = options.relative_objective_error else {
+            return None;
+        };
+        let slope: f64 = g0.iter().zip(dir.iter()).map(|(g, d)| g * d).sum();
+        if !slope.is_finite() || slope == 0.0 {
+            return None;
+        }
+        // An uphill direction is searched backwards, under the same cap.
+        let flipped;
+        let (dir, dphi0) = if slope > 0.0 {
+            flipped = dir.mapv(|v| -v);
+            (flipped.view(), -slope)
+        } else {
+            (dir, slope)
+        };
+        let cap = if alpha_max > 0.0 {
+            alpha_max
+        } else {
+            f64::INFINITY
+        };
+        let mut alpha = istep.abs().max(1e-16).min(cap);
+        let mut evals = 0usize;
+        for _ in 0..maxiter {
+            let x = axpy(pos, alpha, dir);
+            let (f, g) = oracle(x.view());
+            evals += 1;
+            let dphi: f64 = g.iter().zip(dir.iter()).map(|(gi, d)| gi * d).sum();
+            if conditions::approximate_strong_wolfe(f, f0, dphi, dphi0, c1, c2, relative) {
+                return Some(LineSearchStep {
+                    x,
+                    f,
+                    g,
+                    alpha,
+                    evals,
+                });
+            }
+            if dphi >= 0.0 || !f.is_finite() {
+                alpha *= 0.5;
+            } else if alpha < cap {
+                alpha = (2.0 * alpha).min(cap);
+            } else {
+                break;
+            }
+            if alpha < 1e-16 {
+                break;
+            }
+        }
+        None
     }
 }
 

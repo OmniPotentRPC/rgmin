@@ -28,7 +28,7 @@ use crate::hvp::{
     sym_eig_jacobi,
 };
 use crate::lbfgs::{GradNorm, Lbfgs};
-use crate::linesearch::LineSearch;
+use crate::linesearch::{LineSearch, LineSearchOptions};
 use crate::lowest_mode::{ApplyHessian, lowest_eigenpair};
 use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
@@ -105,6 +105,8 @@ pub struct Solver {
     dim: usize,
     control: Control,
     linesearch: LineSearch,
+    /// Value window for an explicit Wolfe search. Unused by Accept::None.
+    line_options: LineSearchOptions,
     istep: f64,
     /// Scale raw gradient steps to unit length at the first step after
     /// construction, `forget`, or `rebase`. The C default.
@@ -273,6 +275,7 @@ impl Solver {
             dim,
             control,
             linesearch,
+            line_options: LineSearchOptions::default(),
             istep,
             unit_first_step: false,
             steps: 0,
@@ -682,6 +685,18 @@ impl Solver {
     /// read this.
     pub fn set_linesearch(&mut self, linesearch: LineSearch) {
         self.linesearch = linesearch;
+    }
+
+    /// Relative value window for an explicit Wolfe search.
+    ///
+    /// Accept::None does not read it: that step stays one oracle.
+    /// A negative or non-finite value leaves the stored window as it was.
+    pub fn set_objective_roundoff(&mut self, relative: f64) -> bool {
+        let Some(options) = LineSearchOptions::with_objective_roundoff(relative) else {
+            return false;
+        };
+        self.line_options = options;
+        true
     }
 
     /// Current line-search policy.
