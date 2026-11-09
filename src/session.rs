@@ -144,6 +144,8 @@ pub struct Solver {
     /// Rotations that are not symmetries.
     broken_rotation: [bool; 3],
     manifold: ManifoldKind,
+    /// Optional `(n, p)` for a Grassmann session. Empty leaves the kind alone.
+    factor_shape: Option<(usize, usize)>,
     /// Per-atom masses for [`ManifoldKind::MwRigid`]. Length N, not 3N.
     masses: Option<Array1<f64>>,
     #[cfg(feature = "highs")]
@@ -297,6 +299,7 @@ impl Solver {
             broken_translation: [false; 3],
             broken_rotation: [false; 3],
             manifold: ManifoldKind::Euclidean,
+            factor_shape: None,
             masses: None,
             #[cfg(feature = "highs")]
             highs: false,
@@ -906,6 +909,37 @@ impl Solver {
     /// `p > 1` is column-major, length `n*p`.
     pub fn set_stiefel(&mut self, n: usize, p: usize) {
         self.set_manifold(ManifoldKind::stiefel(n, p));
+    }
+
+    /// Real Grassmann `Gr(n,p)`, packed column-major.
+    pub fn set_grassmann(&mut self, n: usize, p: usize) {
+        self.factor_shape = Some((n, p));
+        self.set_manifold(ManifoldKind::grassmann(n, p));
+    }
+
+    /// Complex unitary `U(n)`, packed interleaved.
+    pub fn set_unitary(&mut self, n: usize) {
+        self.set_manifold(ManifoldKind::unitary(n));
+    }
+
+    /// Set `Gr(n,p)`. A zero dimension clears the factor shape.
+    /// A Grassmann session takes the new shape. Any other kind
+    /// keeps its geometry and only stores the shape.
+    pub fn set_factor_shape(&mut self, n: usize, p: usize) {
+        let next = if n == 0 || p == 0 { None } else { Some((n, p)) };
+        if next != self.factor_shape {
+            self.forget();
+        }
+        self.factor_shape = next;
+        if matches!(
+            self.manifold,
+            ManifoldKind::Grassmann | ManifoldKind::GrassmannP { .. }
+        ) {
+            self.manifold = match next {
+                Some((n, p)) => ManifoldKind::GrassmannP { n, p },
+                None => ManifoldKind::Grassmann,
+            };
+        }
     }
 
     /// Product of `n` unit-modulus complex numbers. Packed length `2 n`.

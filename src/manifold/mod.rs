@@ -32,6 +32,7 @@ mod complex_circle;
 mod constant;
 mod euclidean;
 mod euclidean_complex;
+mod grassmann;
 mod multinomial;
 mod multinomial_ds;
 mod multinomial_sym;
@@ -47,6 +48,8 @@ mod sphere;
 mod sphere_complex;
 mod stiefel;
 mod symmetric;
+#[allow(dead_code)]
+mod unitary;
 
 pub use centered::{
     CenteredMatrix, inner as inner_centered, is_centered, pack as pack_centered,
@@ -60,6 +63,7 @@ pub use euclidean::Euclidean;
 pub use euclidean_complex::{
     EuclideanComplex, inner as inner_cplx, is_euclidean_complex, typical_dist as typical_dist_cplx,
 };
+pub use grassmann::Grassmann;
 pub use multinomial::Multinomial;
 pub use multinomial_ds::{
     MultinomialDoublyStochastic, inner as inner_ds, is_doubly_stochastic, pack as pack_ds,
@@ -89,6 +93,7 @@ pub use symmetric::{
     Symmetric, inner as inner_sym, is_symmetric, pack as pack_sym, side as side_sym,
     typical_dist as typical_dist_sym, unpack as unpack_sym,
 };
+pub use unitary::Unitary;
 
 /// Which embedded geometry a session retracts onto.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -197,6 +202,21 @@ pub enum ManifoldKind {
         /// (manopt default).
         rows: bool,
     },
+    /// Real Grassmann without a factor shape. [`Self::GrassmannP`] is
+    /// the packed frame a session steps on.
+    Grassmann,
+    /// Real Grassmann `Gr(n,p)`, packed column-major, length `n*p`.
+    GrassmannP {
+        /// Ambient dimension.
+        n: usize,
+        /// Subspace dimension.
+        p: usize,
+    },
+    /// Complex unitary `U(n)`, packed interleaved, length `2 n^2`.
+    Unitary {
+        /// Matrix order.
+        n: usize,
+    },
 }
 
 impl ManifoldKind {
@@ -266,6 +286,43 @@ impl ManifoldKind {
         Self::CenteredMatrix { m, n, rows }
     }
 
+    /// Complex unitary `U(n)`.
+    pub fn unitary(n: usize) -> Self {
+        Self::Unitary { n }
+    }
+
+    /// Real Grassmann `Gr(n,p)`.
+    pub fn grassmann(n: usize, p: usize) -> Self {
+        Self::GrassmannP { n, p }
+    }
+
+    /// Retract. A bare Grassmann uses `shape` when it is set.
+    pub fn retract_shaped(
+        self,
+        shape: Option<(usize, usize)>,
+        x: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> Array1<f64> {
+        match (self, shape) {
+            (Self::Grassmann, Some((n, p))) => Grassmann { n, p }.retract(x, v),
+            _ => self.retract(x, v),
+        }
+    }
+
+    /// Transport. A bare Grassmann uses `shape` when it is set.
+    pub fn transport_shaped(
+        self,
+        shape: Option<(usize, usize)>,
+        x_from: &Array1<f64>,
+        x_to: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> Array1<f64> {
+        match (self, shape) {
+            (Self::Grassmann, Some((n, p))) => Grassmann { n, p }.transport(x_from, x_to, v),
+            _ => self.transport(x_from, x_to, v),
+        }
+    }
+
     /// [`Manifold::project`] written back into `v`. The sphere does it
     /// without allocating, with the arithmetic of `Sphere::project`.
     pub(crate) fn project_in_place(self, x: &Array1<f64>, v: &mut Array1<f64>) {
@@ -302,7 +359,10 @@ impl ManifoldKind {
             | Self::MultinomialDoublyStochastic { .. }
             | Self::MultinomialSymmetric { .. }
             | Self::SphereComplex { .. }
-            | Self::Positive { .. } => false,
+            | Self::Positive { .. }
+            | Self::Grassmann
+            | Self::GrassmannP { .. }
+            | Self::Unitary { .. } => false,
         }
     }
 
@@ -329,6 +389,8 @@ impl ManifoldKind {
             Self::SphereComplex { .. } => "spherecomplex",
             Self::Positive { .. } => "positive",
             Self::CenteredMatrix { .. } => "centeredmatrix",
+            Self::Grassmann | Self::GrassmannP { .. } => "grassmann",
+            Self::Unitary { .. } => "unitary",
         }
     }
 }
@@ -384,6 +446,9 @@ impl Manifold for ManifoldKind {
                 rows: *rows,
             }
             .required_dim(n),
+            Self::Grassmann => Err(n),
+            Self::GrassmannP { n: gn, p } => Grassmann { n: *gn, p: *p }.required_dim(n),
+            Self::Unitary { n: un } => Unitary { n: *un }.required_dim(n),
         }
     }
 
@@ -417,6 +482,9 @@ impl Manifold for ManifoldKind {
                 rows: *rows,
             }
             .project(x, v),
+            Self::Grassmann => v.clone(),
+            Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.project(x, v),
+            Self::Unitary { n } => Unitary { n: *n }.project(x, v),
         }
     }
 
@@ -450,6 +518,9 @@ impl Manifold for ManifoldKind {
                 rows: *rows,
             }
             .retract(x, v),
+            Self::Grassmann => x + v,
+            Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.retract(x, v),
+            Self::Unitary { n } => Unitary { n: *n }.retract(x, v),
         }
     }
 
@@ -485,6 +556,9 @@ impl Manifold for ManifoldKind {
                 rows: *rows,
             }
             .transport(x_from, x_to, v),
+            Self::Grassmann => v.clone(),
+            Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.transport(x_from, x_to, v),
+            Self::Unitary { n } => Unitary { n: *n }.transport(x_from, x_to, v),
         }
     }
 
@@ -520,6 +594,9 @@ impl Manifold for ManifoldKind {
                 rows: *rows,
             }
             .egrad2rgrad(x, egrad),
+            Self::Grassmann => egrad.clone(),
+            Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.egrad2rgrad(x, egrad),
+            Self::Unitary { n } => Unitary { n: *n }.egrad2rgrad(x, egrad),
         }
     }
 }
