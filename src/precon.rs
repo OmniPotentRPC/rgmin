@@ -25,6 +25,8 @@ use crate::error::{Error, Result};
 
 #[allow(dead_code)]
 mod geom;
+#[allow(dead_code)]
+mod metric;
 
 /// Pair assembly stays on one thread.
 ///
