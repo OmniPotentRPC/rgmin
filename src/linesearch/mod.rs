@@ -167,6 +167,10 @@ impl LineSearch {
     ///
     /// Other line searches call [`Self::search`]. `None` when no trial
     /// meets the window and the curvature test.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the cached start, the cap, and the window are one search"
+    )]
     pub fn search_from_with_options<F>(
         &self,
         mut oracle: F,
@@ -184,9 +188,7 @@ impl LineSearch {
         let Self::Wolfe { c1, c2, maxiter } = *self else {
             return None;
         };
-        let Some(relative) = options.relative_objective_error else {
-            return None;
-        };
+        let relative = options.relative_objective_error?;
         let slope: f64 = g0.iter().zip(dir.iter()).map(|(g, d)| g * d).sum();
         if !slope.is_finite() || slope == 0.0 {
             return None;
@@ -205,11 +207,10 @@ impl LineSearch {
             f64::INFINITY
         };
         let mut alpha = istep.abs().max(1e-16).min(cap);
-        let mut evals = 0usize;
-        for _ in 0..maxiter {
+        for (evals, _) in (0..maxiter).enumerate() {
+            let evals = evals + 1;
             let x = axpy(pos, alpha, dir);
             let (f, g) = oracle(x.view());
-            evals += 1;
             let dphi: f64 = g.iter().zip(dir.iter()).map(|(gi, d)| gi * d).sum();
             if conditions::approximate_strong_wolfe(f, f0, dphi, dphi0, c1, c2, relative) {
                 return Some(LineSearchStep {
