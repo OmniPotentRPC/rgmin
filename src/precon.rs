@@ -29,12 +29,14 @@ mod geom;
 mod lindh;
 #[allow(dead_code)]
 mod metric;
+mod select;
 
 pub(crate) use ff::FfState;
 pub use ff::{AngleTerm, BondTerm, DihedralTerm, Ff, FfParams, FfTerms, MorseTerm, bonded_terms};
 pub(crate) use lindh::LindhState;
 pub use lindh::{Ghost, Lindh, LindhParams};
 pub(crate) use metric::Metric;
+pub use select::{GeometryKind, N_LINDH, OptimizerFamily, PreconChoice, select_precon};
 
 /// Pair assembly stays on one thread.
 ///
