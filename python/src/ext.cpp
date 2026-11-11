@@ -8,6 +8,8 @@
 #include <rgmin/optimize.hpp>
 #include <rgbind/rgbind.hpp>
 
+#include <dlpack/dlpack.h>
+
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/string.h>
@@ -228,6 +230,67 @@ nb::object owned_copy(double const* data, std::size_t n) {
     return nb::cast(std::move(array));
 }
 
+// One coordinate array per step. A callback that keeps the array
+// bumps the refcount, and the next evaluation allocates a new one.
+struct CoordPool {
+    nb::object held;
+
+    nb::object get(double const* data, std::size_t n) {
+        if (held.is_valid() && Py_REFCNT(held.ptr()) == 1) {
+            try {
+                auto view = nb::cast<nb::ndarray<double, nb::ndim<1>, nb::c_contig>>(held, false);
+                if (static_cast<std::size_t>(view.shape(0)) == n && view.data() != nullptr) {
+                    if (n != 0 && data != nullptr) {
+                        std::memcpy(const_cast<double*>(view.data()), data, n * sizeof(double));
+                    }
+                    return held;
+                }
+            } catch (nb::cast_error const&) {
+            }
+        }
+        held = owned_copy(data, n);
+        return held;
+    }
+};
+
+// Rank-1 f64 tensor around a caller-owned buffer. Null strides mean
+// unit stride. The shape slot must outlive the solver call.
+struct StackTensor {
+    DLManagedTensorVersioned managed{};
+    int64_t shape = 0;
+
+    DLManagedTensorVersioned* bind(double* data, std::size_t n) {
+        shape = static_cast<int64_t>(n);
+        managed.version.major = DLPACK_MAJOR_VERSION;
+        managed.version.minor = DLPACK_MINOR_VERSION;
+        managed.manager_ctx = nullptr;
+        managed.deleter = nullptr;
+        managed.flags = 0;
+        managed.dl_tensor.data = data;
+        managed.dl_tensor.device.device_type = kDLCPU;
+        managed.dl_tensor.device.device_id = 0;
+        managed.dl_tensor.ndim = 1;
+        managed.dl_tensor.dtype.code = kDLFloat;
+        managed.dl_tensor.dtype.bits = 64;
+        managed.dl_tensor.dtype.lanes = 1;
+        managed.dl_tensor.shape = &shape;
+        managed.dl_tensor.strides = nullptr;
+        managed.dl_tensor.byte_offset = 0;
+        return &managed;
+    }
+};
+
+bool all_finite_f64(double const* data, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, data + i, sizeof(bits));
+        if ((bits & 0x7ff0000000000000ull) == 0x7ff0000000000000ull) {
+            return false;
+        }
+    }
+    return true;
+}
+
 double const* tensor_f64(DLManagedTensorVersioned const* tensor) {
     return reinterpret_cast<double const*>(static_cast<char const*>(tensor->dl_tensor.data) +
                                            tensor->dl_tensor.byte_offset);
@@ -298,10 +361,8 @@ void read_gradient(nb::handle gradient, std::size_t n, double* destination) {
     ConstVector grad = nb::cast<ConstVector>(gradient);
     check_vector(grad, n, "gradient");
     double const* source = grad.data();
-    for (std::size_t i = 0; i < n; ++i) {
-        if (!std::isfinite(source[i])) {
-            throw rgbind::NumericalError("f_and_grad returned a non-finite gradient");
-        }
+    if (!all_finite_f64(source, n)) {
+        throw rgbind::NumericalError("f_and_grad returned a non-finite gradient");
     }
     std::memcpy(destination, source, n * sizeof(double));
 }
@@ -321,10 +382,8 @@ void read_hessian(nb::handle value, std::size_t n, double* destination) {
         throw nb::value_error(message.str().c_str());
     }
     double const* source = hess.data();
-    for (std::size_t i = 0; i < nn; ++i) {
-        if (!std::isfinite(source[i])) {
-            throw rgbind::NumericalError("hessian returned a non-finite entry");
-        }
+    if (!all_finite_f64(source, nn)) {
+        throw rgbind::NumericalError("hessian returned a non-finite entry");
     }
     std::memcpy(destination, source, nn * sizeof(double));
 }
@@ -337,27 +396,19 @@ rgmin::Report finish_step(rgmin_status_t status, rgmin_report_t const& out, rgbi
     return rgmin::Report{out.value, out.steps, out.grad_norm, out.stop};
 }
 
-DLManagedTensorVersioned* borrow_x(Vector x, std::size_t n) {
-    DLManagedTensorVersioned* tensor = rgmin_tensor_borrow_cpu_f64(x.data(), n);
-    if (tensor == nullptr) {
-        char const* message = rgmin_last_error();
-        throw nb::value_error(message != nullptr ? message : "rgmin_tensor_borrow_cpu_f64 failed");
-    }
-    return tensor;
-}
-
 rgmin::Report step_python(rgmin::Solver& solver, nb::callable function, Vector x) {
     std::size_t const n = solver.dim();
     check_vector(x, n, "x");
     rgbind::Claim claim(solver.busy(), "Solver");
     rgbind::CallContext context;
+    CoordPool pool;
     auto callback = [&](DLManagedTensorVersioned const* coordinates, double* value,
                         DLManagedTensorVersioned* gradient) {
         if (coordinates == nullptr || gradient == nullptr || value == nullptr ||
             coordinates->dl_tensor.data == nullptr || gradient->dl_tensor.data == nullptr) {
             throw std::invalid_argument("f_and_grad received a null tensor");
         }
-        nb::object point = owned_copy(tensor_f64(coordinates), n);
+        nb::object point = pool.get(tensor_f64(coordinates), n);
         nb::object result = function(point);
         if (!nb::isinstance<nb::tuple>(result) || nb::len(result) != 2) {
             throw nb::type_error("f_and_grad must return (value, gradient)");
@@ -370,19 +421,18 @@ rgmin::Report step_python(rgmin::Solver& solver, nb::callable function, Vector x
         read_gradient(result[1], n, tensor_f64_mut(gradient));
     };
     using Callback = decltype(callback);
-    rgbind::trampoline<Callback> tramp(std::move(callback), &context, true);
+    // The calling thread already holds the GIL. Releasing it for the
+    // native update and taking it back on every evaluation is a round
+    // trip, and the callback is Python on this same thread.
+    rgbind::trampoline<Callback> tramp(std::move(callback), &context, true, false);
     FgSlot slot;
     slot.trampoline = &tramp;
     slot.entry = &rgbind::trampoline<Callback>::entry<DLManagedTensorVersioned const*, double*,
                                                       DLManagedTensorVersioned*>;
-    DLManagedTensorVersioned* tensor = borrow_x(x, n);
+    StackTensor borrowed;
+    DLManagedTensorVersioned* tensor = borrowed.bind(x.data(), n);
     rgmin_report_t out{};
-    rgmin_status_t status = RGMIN_SUCCESS;
-    {
-        nb::gil_scoped_release release;
-        status = rgmin_solver_step_fg(solver.raw(), &rgmin_py_evalgrad, &slot, tensor, &out);
-    }
-    rgmin_tensor_free(tensor);
+    rgmin_status_t status = rgmin_solver_step_fg(solver.raw(), &rgmin_py_evalgrad, &slot, tensor, &out);
     return finish_step(status, out, &context);
 }
 
@@ -392,13 +442,14 @@ rgmin::Report step_hess_python(rgmin::Solver& solver, nb::callable function, nb:
     check_vector(x, n, "x");
     rgbind::Claim claim(solver.busy(), "Solver");
     rgbind::CallContext context;
+    CoordPool pool;
     auto callback = [&](DLManagedTensorVersioned const* coordinates, double* value,
                         DLManagedTensorVersioned* gradient) {
         if (coordinates == nullptr || gradient == nullptr || value == nullptr ||
             coordinates->dl_tensor.data == nullptr || gradient->dl_tensor.data == nullptr) {
             throw std::invalid_argument("f_and_grad received a null tensor");
         }
-        nb::object point = owned_copy(tensor_f64(coordinates), n);
+        nb::object point = pool.get(tensor_f64(coordinates), n);
         nb::object result = function(point);
         if (!nb::isinstance<nb::tuple>(result) || nb::len(result) != 2) {
             throw nb::type_error("f_and_grad must return (value, gradient)");
@@ -416,14 +467,14 @@ rgmin::Report step_hess_python(rgmin::Solver& solver, nb::callable function, nb:
             coordinates->dl_tensor.data == nullptr || hessian_out->dl_tensor.data == nullptr) {
             throw std::invalid_argument("hessian received a null tensor");
         }
-        nb::object point = owned_copy(tensor_f64(coordinates), n);
+        nb::object point = pool.get(tensor_f64(coordinates), n);
         nb::object result = hessian(point);
         read_hessian(result, n, tensor_f64_mut(hessian_out));
     };
     using Callback = decltype(callback);
     using HessCallback = decltype(hess_callback);
-    rgbind::trampoline<Callback> tramp(std::move(callback), &context, true);
-    rgbind::trampoline<HessCallback> hess_tramp(std::move(hess_callback), &context, true);
+    rgbind::trampoline<Callback> tramp(std::move(callback), &context, true, false);
+    rgbind::trampoline<HessCallback> hess_tramp(std::move(hess_callback), &context, true, false);
     HessSlot slot;
     slot.fg.trampoline = &tramp;
     slot.fg.entry = &rgbind::trampoline<Callback>::entry<DLManagedTensorVersioned const*, double*,
@@ -431,15 +482,11 @@ rgmin::Report step_hess_python(rgmin::Solver& solver, nb::callable function, nb:
     slot.hess_trampoline = &hess_tramp;
     slot.hess_entry = &rgbind::trampoline<HessCallback>::entry<DLManagedTensorVersioned const*,
                                                                DLManagedTensorVersioned*>;
-    DLManagedTensorVersioned* tensor = borrow_x(x, n);
+    StackTensor borrowed;
+    DLManagedTensorVersioned* tensor = borrowed.bind(x.data(), n);
     rgmin_report_t out{};
-    rgmin_status_t status = RGMIN_SUCCESS;
-    {
-        nb::gil_scoped_release release;
-        status = rgmin_solver_step_hess_fg(solver.raw(), &rgmin_py_evalgrad_hess, &rgmin_py_hess,
-                                           &slot, tensor, &out);
-    }
-    rgmin_tensor_free(tensor);
+    rgmin_status_t status = rgmin_solver_step_hess_fg(solver.raw(), &rgmin_py_evalgrad_hess, &rgmin_py_hess,
+                                                     &slot, tensor, &out);
     return finish_step(status, out, &context);
 }
 

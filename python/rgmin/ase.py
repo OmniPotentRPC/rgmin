@@ -112,7 +112,16 @@ def _import_attr(module: str, name: str) -> Any | None:
     return getattr(loaded, name, None)
 
 
+_NONCONSERVATIVE: tuple[type, ...] | None = None
+_MINMODE_CLASS: type | None = None
+_MINMODE_READY = False
+
+
 def _nonconservative_types() -> tuple[type, ...]:
+    global _NONCONSERVATIVE
+    cached = _NONCONSERVATIVE
+    if cached is not None:
+        return cached
     found: list[type] = []
     for module, name in (
         ("ase.mep", "NEB"),
@@ -124,7 +133,9 @@ def _nonconservative_types() -> tuple[type, ...]:
         cls = _import_attr(module, name)
         if isinstance(cls, type):
             found.append(cls)
-    return tuple(found)
+    cached = tuple(found)
+    _NONCONSERVATIVE = cached
+    return cached
 
 
 def _is_nonconservative(obj: Any) -> bool:
@@ -137,14 +148,31 @@ def _is_nonconservative(obj: Any) -> bool:
     return bool(callable(probe) and probe())
 
 
+def _minmode_class() -> type | None:
+    global _MINMODE_CLASS, _MINMODE_READY
+    if not _MINMODE_READY:
+        cls = _import_attr("ase.mep", "MinModeAtoms")
+        _MINMODE_CLASS = cls if isinstance(cls, type) else None
+        _MINMODE_READY = True
+    return _MINMODE_CLASS
+
+
 def _minmode(obj: Any) -> Any | None:
-    cls = _import_attr("ase.mep", "MinModeAtoms")
-    if not isinstance(cls, type):
+    cls = _minmode_class()
+    if cls is None:
         return None
     for candidate in (obj, getattr(obj, "atoms", None), getattr(obj, "dimeratoms", None)):
         if isinstance(candidate, cls):
             return candidate
     return None
+
+
+def _as_gradient(raw: Any) -> np.ndarray:
+    """Contiguous float64 gradient without a second copy of that buffer."""
+    grad = np.asarray(raw, dtype=np.float64).reshape(-1)
+    if grad.dtype != np.float64 or not grad.flags.c_contiguous:
+        return np.ascontiguousarray(grad, dtype=np.float64)
+    return grad
 
 
 class _Geometry:
@@ -154,6 +182,10 @@ class _Geometry:
     ASE 3.23 exposes ``get_positions``, ``get_forces``, and
     ``get_potential_energy``. A min-mode object reports its energy with
     ``get_potential_energy()`` and no ``force_consistent`` argument.
+
+    A plain Cartesian atoms object is read and written through its
+    position buffer. Constraints and filters keep ``set_positions`` /
+    ``set_x``, which apply the constraint adjustment.
     """
 
     def __init__(self, opt: Any) -> None:
@@ -162,6 +194,43 @@ class _Geometry:
         self.modern = self.mode is None and all(
             hasattr(opt, name) for name in ("get_x", "get_gradient", "get_value")
         )
+        self._atoms: Any = None
+        self._plain: np.ndarray | None = None
+        self._bind_plain()
+
+    def _bind_plain(self) -> None:
+        if self.mode is not None:
+            return
+        atoms = self.opt if hasattr(self.opt, "arrays") else getattr(self.opt, "atoms", None)
+        if atoms is None or not hasattr(atoms, "arrays"):
+            return
+        if getattr(atoms, "constraints", None):
+            return
+        pos = atoms.arrays.get("positions")
+        if (
+            not isinstance(pos, np.ndarray)
+            or pos.dtype != np.float64
+            or pos.ndim != 2
+            or pos.shape[1] != 3
+            or not pos.flags.c_contiguous
+        ):
+            return
+        n = int(self.opt.ndofs()) if hasattr(self.opt, "ndofs") else int(pos.size)
+        if int(pos.size) != n:
+            return
+        self._atoms = atoms
+        self._plain = pos
+
+    def _plain_alive(self) -> np.ndarray | None:
+        pos = self._plain
+        atoms = self._atoms
+        if pos is None or atoms is None:
+            return None
+        if atoms.arrays.get("positions") is not pos:
+            self._plain = None
+            self._atoms = None
+            return None
+        return pos
 
     def positions(self) -> np.ndarray:
         if self.modern:
@@ -169,7 +238,22 @@ class _Geometry:
         source = self.mode if self.mode is not None else self.opt
         return np.asarray(source.get_positions(), dtype=np.float64).reshape(-1)
 
+    def flat_positions(self) -> np.ndarray:
+        pos = self._plain_alive()
+        if pos is not None:
+            return pos.ravel()
+        return self.positions()
+
     def write(self, x: np.ndarray) -> None:
+        pos = self._plain_alive()
+        if pos is not None:
+            flat = pos.ravel()
+            if flat.shape == x.shape:
+                if flat.ctypes.data != x.ctypes.data:
+                    flat[:] = x
+                return
+            self._plain = None
+            self._atoms = None
         if self.modern and hasattr(self.opt, "set_x"):
             self.opt.set_x(np.asarray(x, dtype=np.float64))
             return
@@ -186,15 +270,15 @@ class _Geometry:
 
     def gradient(self) -> np.ndarray:
         if self.modern or hasattr(self.opt, "get_gradient"):
-            return np.asarray(self.opt.get_gradient(), dtype=np.float64).reshape(-1)
+            return _as_gradient(self.opt.get_gradient())
         source = self.mode if self.mode is not None else self.opt
         forces = np.asarray(source.get_forces(), dtype=np.float64)
-        return -forces.reshape(-1)
+        return _as_gradient(-forces)
 
     def ndofs(self) -> int:
         if hasattr(self.opt, "ndofs"):
             return int(self.opt.ndofs())
-        return int(self.positions().shape[0])
+        return int(self.flat_positions().shape[0])
 
 
 def _calculator_of(opt: Any) -> Any:
@@ -325,6 +409,9 @@ class Optimizer(_ASEOptimizer):
             maxstep = float(self.defaults["maxstep"])
         self.maxstep = float(maxstep)
         self._solver: rgmin.Solver | None = None
+        self._geom: _Geometry | None = None
+        self._x: np.ndarray | None = None
+        self._lock_cache: tuple[Any, threading.Lock | None] | None = None
         self._id_entry: _IdEntry | None = None
         self._id_finalizer: weakref.finalize[[_IdEntry], Optimizer] | None = None
         super().__init__(
@@ -366,8 +453,31 @@ class Optimizer(_ASEOptimizer):
         self._id_finalizer = weakref.finalize(self, _release_id_entry, entry)
         return lock
 
+    def _geometry(self) -> _Geometry:
+        geom = self._geom
+        if geom is None or geom.opt is not self.optimizable:
+            geom = _Geometry(self.optimizable)
+            self._geom = geom
+            self._x = None
+        return geom
+
+    def _coordinate_buffer(self, n: int) -> np.ndarray:
+        x = self._x
+        if x is None or int(x.shape[0]) != n:
+            x = np.empty(n, dtype=np.float64)
+            self._x = x
+        return x
+
     def _calculator_lock(self) -> threading.Lock | None:
         calc = _calculator_of(self.optimizable)
+        cached = self._lock_cache
+        if cached is not None and cached[0] is calc:
+            return cached[1]
+        lock = self._bind_calculator_lock(calc)
+        self._lock_cache = (calc, lock)
+        return lock
+
+    def _bind_calculator_lock(self, calc: Any) -> threading.Lock | None:
         if calc is None or bool(getattr(calc, "reentrant", False)):
             self._release_id_hold()
             return None
@@ -399,24 +509,21 @@ class Optimizer(_ASEOptimizer):
     def initialize(self) -> None:
         opts = self._config_options()
         config = rgmin.SolverConfig(self._rgmin_method, **opts)
-        self._solver = rgmin.Solver(_Geometry(self.optimizable).ndofs(), config)
+        self._solver = rgmin.Solver(self._geometry().ndofs(), config)
+
+    def _read_objective(self, geom: _Geometry, x: np.ndarray) -> tuple[float, np.ndarray]:
+        current = geom.flat_positions()
+        if x.shape != current.shape or not np.array_equal(x, current):
+            geom.write(x)
+        return geom.value(), geom.gradient()
 
     def _evaluate(self, x: np.ndarray) -> tuple[float, np.ndarray]:
-        geom = _Geometry(self.optimizable)
-
-        def once() -> tuple[float, np.ndarray]:
-            current = geom.positions()
-            if x.shape != current.shape or not np.array_equal(x, current):
-                geom.write(x)
-            value = geom.value()
-            gradient = np.array(geom.gradient(), dtype=np.float64, copy=True)
-            return value, gradient
-
+        geom = self._geometry()
         lock = self._calculator_lock()
         if lock is None:
-            return once()
+            return self._read_objective(geom, x)
         with lock:
-            return once()
+            return self._read_objective(geom, x)
 
     def _hessian_of(self, x: np.ndarray) -> np.ndarray:
         if self._hessian is None:
@@ -424,18 +531,21 @@ class Optimizer(_ASEOptimizer):
         return np.asarray(self._hessian(x), dtype=np.float64)
 
     def step(self) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
-        geom = _Geometry(self.optimizable)
-        if self._solver is None or self._solver.dim != geom.ndofs():
+        geom = self._geometry()
+        n = geom.ndofs()
+        if self._solver is None or self._solver.dim != n:
             self.initialize()
         assert self._solver is not None
         if self._rgmin_method in _HESSIAN_METHODS and self._hessian is None:
             raise NotImplementedError(f"{type(self).__name__}.step requires a hessian callable")
-        x = np.array(geom.positions(), dtype=np.float64, copy=True)
+        x = self._coordinate_buffer(n)
+        x[:] = geom.flat_positions()
         if self._rgmin_method in _HESSIAN_METHODS:
             self._solver.step_hess(self._evaluate, self._hessian_of, x)
         else:
             self._solver.step(self._evaluate, x)
-        if not np.array_equal(x, geom.positions()):
+        current = geom.flat_positions()
+        if current.shape != x.shape or not np.array_equal(x, current):
             geom.write(x)
 
     def run(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -452,23 +562,33 @@ class Optimizer(_ASEOptimizer):
             return float(self.optimizable.gradient_norm(gradient))
         vector = gradient if gradient is not None else forces
         if vector is None:
-            vector = _Geometry(self.optimizable).gradient()
+            vector = self._geometry().gradient()
         block = np.asarray(vector, dtype=np.float64).reshape(-1, 3)
         return float(np.sqrt((block * block).sum(axis=1).max()))
+
+    def _log_is_silent(self) -> bool:
+        log = self.logfile
+        if log is None:
+            return True
+        # ASE wraps the file in Log. A missing file writes nothing, and
+        # the base class still calls log on every step.
+        if hasattr(log, "_logfile"):
+            return getattr(log, "_logfile") is None
+        return False
 
     def log(self, *args: Any, **kwargs: Any) -> None:
         """Write one ASE optimizer line.
 
         The columns are ``Step``, ``Time``, ``Energy``, and ``fmax``.
         """
-        if self.logfile is None:
+        if self._log_is_silent():
             return
         gradient = args[0] if args else kwargs.get("gradient")
         forces = kwargs.get("forces")
         if gradient is None and forces is None and not args:
-            gradient = _Geometry(self.optimizable).gradient()
+            gradient = self._geometry().gradient()
         fmax = self._log_fmax(gradient, forces)
-        energy = _Geometry(self.optimizable).value()
+        energy = self._geometry().value()
         now = time.localtime()
         name = type(self).__name__
         write = cast(Any, self.logfile).write
@@ -491,7 +611,6 @@ class Optimizer(_ASEOptimizer):
             fmax,
         )
         write(line)
-        cast(Any, self.logfile).flush()
 
     def read(self) -> None:
         raise NotImplementedError(f"{type(self).__name__}.read is not implemented")

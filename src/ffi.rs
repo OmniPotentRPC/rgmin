@@ -1578,6 +1578,8 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
 /// Opaque session. Algorithm memory lives here; `x` stays a DLPack tensor.
 pub struct rgmin_solver_t {
     solver: Solver,
+    /// Reused coordinate buffer for `rgmin_solver_step_fg`.
+    scratch_x: Vec<f64>,
 }
 
 /// Allocate a session. `dim` is the length of `x`. Null on bad arguments.
@@ -1613,7 +1615,32 @@ pub unsafe extern "C" fn rgmin_solver_create(
         noise_floor: noise_floor_from_c(c),
     };
     let solver = Solver::new(method_from_c(method, c.memory), control, dim).with_gtol(c.gtol);
-    Box::into_raw(Box::new(rgmin_solver_t { solver }))
+    Box::into_raw(Box::new(rgmin_solver_t {
+        solver,
+        scratch_x: Vec::new(),
+    }))
+}
+
+fn take_coords(solver: *mut rgmin_solver_t, slice: &[f64]) -> Array1<f64> {
+    let scratch = unsafe { &mut (*solver).scratch_x };
+    scratch.clear();
+    scratch.extend_from_slice(slice);
+    Array1::from_vec(std::mem::take(scratch))
+}
+
+fn recycle_coords(solver: *mut rgmin_solver_t, pos: Array1<f64>) {
+    let (buf, _) = pos.into_raw_vec_and_offset();
+    unsafe { (*solver).scratch_x = buf };
+}
+
+/// Gradient storage the callback fills completely before a success status.
+#[allow(clippy::uninit_vec)]
+fn gradient_slots(n: usize) -> Vec<f64> {
+    let mut g = Vec::with_capacity(n);
+    // f64 has no drop glue. The callback writes every lane before the
+    // success path reads the buffer; the error path discards it.
+    unsafe { g.set_len(n) };
+    g
 }
 
 /// Release a session from [`rgmin_solver_create`].
@@ -3620,20 +3647,23 @@ pub unsafe extern "C" fn rgmin_solver_step_fg(
             set_last_error("rgmin_solver_step_fg: out is NULL");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
-        let init = match cpu_f64_slice_mut(x, "x") {
-            Ok(s) => s.to_vec(),
-            Err(st) => return st,
+        let (n, mut pos) = {
+            let slice = match cpu_f64_slice_mut(x, "x") {
+                Ok(s) => s,
+                Err(st) => return st,
+            };
+            (slice.len(), take_coords(solver, slice))
         };
-        let n = init.len();
         let obj = c_oracle_fg(evalgrad, user, n);
-        let mut pos = Array1::from(init);
-        match unsafe { (*solver).solver.step(&obj, &mut pos) } {
+        let status = match unsafe { (*solver).solver.step(&obj, &mut pos) } {
             Ok(rep) => write_report(x, out, &rep),
             Err(e) => {
                 set_last_error(&e.to_string());
                 rgmin_status_t::RGMIN_INVALID_PARAMETER
             }
-        }
+        };
+        recycle_coords(solver, pos);
+        status
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -3842,20 +3872,23 @@ pub unsafe extern "C" fn rgmin_solver_step_hess_fg(
             set_last_error("rgmin_solver_step_hess_fg: out is NULL");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
-        let init = match cpu_f64_slice_mut(x, "x") {
-            Ok(s) => s.to_vec(),
-            Err(st) => return st,
+        let (n, mut pos) = {
+            let slice = match cpu_f64_slice_mut(x, "x") {
+                Ok(s) => s,
+                Err(st) => return st,
+            };
+            (slice.len(), take_coords(solver, slice))
         };
-        let n = init.len();
         let obj = c_oracle_hess_fg(evalgrad, hess, user, n);
-        let mut pos = Array1::from(init);
-        match unsafe { (*solver).solver.step_hess(&obj, &mut pos) } {
+        let status = match unsafe { (*solver).solver.step_hess(&obj, &mut pos) } {
             Ok(rep) => write_report(x, out, &rep),
             Err(e) => {
                 set_last_error(&e.to_string());
                 rgmin_status_t::RGMIN_INVALID_PARAMETER
             }
-        }
+        };
+        recycle_coords(solver, pos);
+        status
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -4024,13 +4057,13 @@ fn c_oracle_fg(
         let mut s = scratch.lock().expect("ffi scratch");
         let xt = s.x_tensor(xv);
         let mut value = 0.0;
-        let mut g = Array1::zeros(m);
+        let mut g = gradient_slots(m);
         let gt = s.out.point_at(g.as_mut_ptr(), m);
         let st = unsafe { fg_fn(user, xt, &mut value, gt) };
         if st != rgmin_status_t::RGMIN_SUCCESS {
             return (f64::INFINITY, Array1::from_elem(m, f64::NAN));
         }
-        (value, g)
+        (value, Array1::from_vec(g))
     })
 }
 
@@ -4058,13 +4091,13 @@ fn c_oracle_hess_fg(
             let mut s = scratch.lock().expect("ffi scratch");
             let xt = s.x_tensor(xv);
             let mut value = 0.0;
-            let mut g = Array1::zeros(m);
+            let mut g = gradient_slots(m);
             let gt = s.out.point_at(g.as_mut_ptr(), m);
             let st = unsafe { fg_fn(user, xt, &mut value, gt) };
             if st != rgmin_status_t::RGMIN_SUCCESS {
                 return (f64::INFINITY, Array1::from_elem(m, f64::NAN));
             }
-            (value, g)
+            (value, Array1::from_vec(g))
         },
         move |xv| {
             let hess_fn: rgmin_hess_fn = unsafe { std::mem::transmute(hess_ptr) };

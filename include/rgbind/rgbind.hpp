@@ -663,6 +663,10 @@ public:
   F fn;
   CallContext *ctx = nullptr;
   bool check_signals = false;
+  // When false, entry calls F on a thread that already holds the GIL
+  // and does not drop it. The Python step path uses that so a force
+  // evaluation is not a GIL release plus acquire.
+  bool attach = true;
 
   /**
    * @brief Bind a callable to a per-call context.
@@ -670,9 +674,43 @@ public:
    * @param context Slot for the first error. May be null.
    * @param signals When true, call PyErr_CheckSignals after a
    *        successful call (main thread, F5).
+   * @param attach_gil When false, the caller already holds the GIL
+   *        and entry does not take or drop it.
    */
-  trampoline(F function, CallContext *context, bool signals)
-      : fn(std::move(function)), ctx(context), check_signals(signals) {}
+  trampoline(F function, CallContext *context, bool signals,
+             bool attach_gil = true)
+      : fn(std::move(function)), ctx(context), check_signals(signals),
+        attach(attach_gil) {}
+
+  /**
+   * @brief Invoke F and translate exceptions. The GIL is already held.
+   */
+  template <typename... Args>
+  static int invoke(trampoline *self, Args... args) {
+    try {
+      (void)self->fn(args...);
+      if (self->check_signals) {
+        if (PyErr_CheckSignals() < 0) {
+          nb::python_error err;
+          if (self->ctx != nullptr) {
+            self->ctx->capture(err);
+          }
+          return static_cast<int>(TrampolineStatus::python_error);
+        }
+      }
+      return static_cast<int>(TrampolineStatus::ok);
+    } catch (nb::python_error &err) {
+      if (self->ctx != nullptr) {
+        self->ctx->capture(err);
+      }
+      return static_cast<int>(TrampolineStatus::python_error);
+    } catch (...) {
+      if (self->ctx != nullptr) {
+        self->ctx->capture(std::current_exception());
+      }
+      return static_cast<int>(TrampolineStatus::cxx_error);
+    }
+  }
 
   /**
    * @brief C callback. @a user is a trampoline<F>*.
@@ -690,6 +728,9 @@ public:
         self->ctx->stop.load(std::memory_order_acquire)) {
       return static_cast<int>(TrampolineStatus::stopped);
     }
+    if (!self->attach) {
+      return invoke(self, args...);
+    }
     try {
       nb::gil_scoped_acquire gil;
       if (!gil.is_valid()) {
@@ -698,29 +739,7 @@ public:
         }
         return static_cast<int>(TrampolineStatus::attach_failed);
       }
-      try {
-        (void)self->fn(args...);
-        if (self->check_signals) {
-          if (PyErr_CheckSignals() < 0) {
-            nb::python_error err;
-            if (self->ctx != nullptr) {
-              self->ctx->capture(err);
-            }
-            return static_cast<int>(TrampolineStatus::python_error);
-          }
-        }
-        return static_cast<int>(TrampolineStatus::ok);
-      } catch (nb::python_error &err) {
-        if (self->ctx != nullptr) {
-          self->ctx->capture(err);
-        }
-        return static_cast<int>(TrampolineStatus::python_error);
-      } catch (...) {
-        if (self->ctx != nullptr) {
-          self->ctx->capture(std::current_exception());
-        }
-        return static_cast<int>(TrampolineStatus::cxx_error);
-      }
+      return invoke(self, args...);
     } catch (...) {
       if (self->ctx != nullptr) {
         self->ctx->stop.store(true, std::memory_order_release);
