@@ -177,6 +177,26 @@ pub fn fire_rescale_velocity(state: &mut FireState, proposed: &Array1<f64>, take
     }
 }
 
+/// [`fire_rescale_velocity`] with `taken = trial - origin` formed in the norm.
+///
+/// The factor is `|trial - origin| / |proposed|`. The difference is not
+/// stored; its 2-norm is the norm [`l2`] would report for that vector.
+pub(crate) fn fire_rescale_between(
+    state: &mut FireState,
+    proposed: &Array1<f64>,
+    origin: &Array1<f64>,
+    trial: &Array1<f64>,
+) {
+    let pn = l2(proposed);
+    if pn <= 0.0 {
+        return;
+    }
+    let factor = crate::vecops::nrm2_diff(trial.view(), origin.view()) / pn;
+    if factor < 1.0 {
+        state.vel.mapv_inplace(|v| v * factor);
+    }
+}
+
 /// FIRE 1.0 mix and adapt after the MD step, using the new force.
 pub fn fire_after_v1(state: &mut FireState, force: &Array1<f64>) {
     fire_after_v1_metric(state, force, force, None);

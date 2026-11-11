@@ -249,6 +249,23 @@ pub fn quickmin_rescale_velocity(
     }
 }
 
+/// [`quickmin_rescale_velocity`] with `taken = trial - origin` formed in the norm.
+pub(crate) fn quickmin_rescale_between(
+    vel: &mut Array1<f64>,
+    proposed: &Array1<f64>,
+    origin: &Array1<f64>,
+    trial: &Array1<f64>,
+) {
+    let proposed_norm = crate::step::l2(proposed);
+    if proposed_norm <= 0.0 {
+        return;
+    }
+    let factor = crate::vecops::nrm2_diff(trial.view(), origin.view()) / proposed_norm;
+    if factor < 1.0 {
+        vel.mapv_inplace(|v| v * factor);
+    }
+}
+
 /// Quick-min session options, set with [`crate::Solver::set_quickmin_options`].
 ///
 /// Built through [`QuickMinOptions::rgmin`], [`QuickMinOptions::eon`] or

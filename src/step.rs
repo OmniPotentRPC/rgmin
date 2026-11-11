@@ -11,6 +11,52 @@ pub(crate) fn l2(g: &Array1<f64>) -> f64 {
     crate::vecops::nrm2(g.view())
 }
 
+/// `bounds.clip`, returning `x` itself when every coordinate is strictly
+/// inside the box.
+///
+/// `f64::max` / `f64::min` return the original bits of a finite value
+/// that is strictly between `low` and `high`, so the clipped vector is
+/// that value. The boundary, NaN, and a non-contiguous view still go
+/// through [`eindir_core::Bounds::clip`].
+pub(crate) fn clip_owned(bounds: &eindir_core::Bounds<f64>, x: Array1<f64>) -> Array1<f64> {
+    if point_strictly_inside(bounds, x.view()) {
+        x
+    } else {
+        bounds.clip(x.view())
+    }
+}
+
+/// [`clip_owned`] for a vector the caller already owns in a mutable slot.
+pub(crate) fn clip_mut(bounds: &eindir_core::Bounds<f64>, x: &mut Array1<f64>) {
+    if point_strictly_inside(bounds, x.view()) {
+        return;
+    }
+    let clipped = bounds.clip(x.view());
+    if x.len() == clipped.len()
+        && x.iter()
+            .zip(clipped.iter())
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+    {
+        return;
+    }
+    *x = clipped;
+}
+
+fn point_strictly_inside(bounds: &eindir_core::Bounds<f64>, x: ArrayView1<'_, f64>) -> bool {
+    let (Some(xs), Some(lo), Some(hi)) =
+        (x.as_slice(), bounds.low.as_slice(), bounds.high.as_slice())
+    else {
+        return false;
+    };
+    xs.len() == lo.len()
+        && xs.len() == hi.len()
+        && xs
+            .iter()
+            .zip(lo.iter())
+            .zip(hi.iter())
+            .all(|((v, l), h)| *v > *l && *v < *h)
+}
+
 /// A cap that binds: positive and finite. Non-positive or NaN caps are
 /// "no cap", the meaning `set_maxmove` and `set_atom_maxmove` give 0.
 #[inline]
@@ -293,16 +339,25 @@ where
     ) else {
         return unmoved(stalled(saw_trial, best_decrease));
     };
-    let trial = obj.bounds().clip(out.x.view());
-    let (x, f, g) = if trial == out.x {
+    // A strictly interior point is unchanged by max/min clipping, including
+    // its signed zeros, so the line-search oracle answer stays the answer.
+    // On the boundary the comparison is the original one: equal values keep
+    // the unclipped bits, and a moved point is evaluated again.
+    let interior = point_strictly_inside(obj.bounds(), out.x.view());
+    let (x, f, g) = if interior {
         (out.x, out.f, out.g)
     } else {
-        let (f, g) = obj.value_and_gradient(trial.view());
-        if f.is_finite() {
-            saw_trial = true;
-            best_decrease = best_decrease.max(value - f);
+        let trial = obj.bounds().clip(out.x.view());
+        if trial == out.x {
+            (out.x, out.f, out.g)
+        } else {
+            let (f, g) = obj.value_and_gradient(trial.view());
+            if f.is_finite() {
+                saw_trial = true;
+                best_decrease = best_decrease.max(value - f);
+            }
+            (trial, f, g)
         }
-        (trial, f, g)
     };
     if !f.is_finite() || g.iter().any(|value| !value.is_finite()) {
         return unmoved(stalled(saw_trial, best_decrease));
@@ -410,6 +465,34 @@ pub(crate) fn nlcg_opening_alpha(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_interior_point_keeps_the_bits_clip_would_write() {
+        use eindir_core::Bounds;
+        let bounds = Bounds::new(
+            ndarray::Array1::from_elem(4, -2.0),
+            ndarray::Array1::from_elem(4, 2.0),
+            0.0,
+        );
+        let interior = ndarray::array![-0.0, 1.0, -1.5, 0.25];
+        let kept = clip_owned(&bounds, interior.clone());
+        let via = bounds.clip(interior.view());
+        assert_eq!(kept, interior);
+        for (a, b) in kept.iter().zip(via.iter()) {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        let outside = ndarray::array![3.0, -3.0, 0.0, f64::NAN];
+        let owned = clip_owned(&bounds, outside.clone());
+        let clipped = bounds.clip(outside.view());
+        for (a, b) in owned.iter().zip(clipped.iter()) {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        let mut slot = outside;
+        clip_mut(&bounds, &mut slot);
+        for (a, b) in slot.iter().zip(clipped.iter()) {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+    }
+
     #[test]
     fn an_infinite_euclidean_cap_leaves_the_default_atom_cap_off() {
         use super::*;

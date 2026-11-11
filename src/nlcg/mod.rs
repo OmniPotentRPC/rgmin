@@ -152,33 +152,33 @@ impl Conjugacy {
         let g = ctx.current_gradient;
         let gold = ctx.previous_gradient;
         let d = ctx.previous_direction;
-        let gg = dot(g, g);
-        let gg_old = dot(gold, gold);
-        let y = &g - &gold;
-        let y_g = dot(g, y.view());
         match self {
-            Self::FletcherReeves => div(gg, gg_old),
-            Self::PolakRibiere => div(y_g, gg_old),
+            Self::FletcherReeves => div(dot(g, g), dot(gold, gold)),
+            // g · (g - g_old) without storing the difference. The product
+            // is the left fold of `g_i * (g_i - g_old_i)`.
+            Self::PolakRibiere => div(dot_diff(g, g, gold), dot(gold, gold)),
             Self::PolakRibierePlus => Self::PolakRibiere.beta(ctx).max(0.0),
             Self::HestenesStiefel => {
-                let y_d = dot(y.view(), d);
-                div(y_g, y_d)
+                let y = &g - &gold;
+                div(dot(g, y.view()), dot(y.view(), d))
             }
             Self::DaiYuan => {
-                let y_d = dot(y.view(), d);
-                div(gg, y_d)
+                let y = &g - &gold;
+                div(dot(g, g), dot(y.view(), d))
             }
-            Self::ConjugateDescent => div(gg, -dot(d, gold)),
+            Self::ConjugateDescent => div(dot(g, g), -dot(d, gold)),
             Self::HagerZhang => {
+                let y = &g - &gold;
                 let y_d = dot(y.view(), d);
                 if y_d.abs() <= f64::EPSILON {
                     return 0.0;
                 }
+                let y_g = dot(g, y.view());
                 let yy = dot(y.view(), y.view());
                 let d_g = dot(d, g);
                 y_g / y_d - 2.0 * yy * d_g / (y_d * y_d)
             }
-            Self::LiuStorey => div(-y_g, dot(d, gold)),
+            Self::LiuStorey => div(-dot_diff(g, g, gold), dot(d, gold)),
             Self::FrPr => {
                 let beta_pr = Self::PolakRibiere.beta(ctx);
                 let beta_fr = Self::FletcherReeves.beta(ctx);
@@ -218,23 +218,30 @@ impl Conjugacy {
         let gz_old = dot(gold, z_old);
         // y is the Euclidean gradient change. The numerator z · y is the
         // preconditioned Polak-Ribiere product. It equals g · (z - z_old)
-        // when both Riesz maps use the same SPD P.
-        let y = &g.to_owned() - &gold.to_owned();
-        let zy = dot(z, y.view());
-        let yz = &z.to_owned() - &z_old.to_owned();
-        let y_d = dot(y.view(), d);
-        let yy = dot(y.view(), yz.view());
+        // when both Riesz maps use the same SPD P. Polak-Ribiere forms
+        // that one product in place; the other formulas store y.
+        let zy = dot_diff(z, g, gold);
         match self {
             Self::FletcherReeves => div(gz, gz_old),
             Self::PolakRibiere => div(zy, gz_old),
             Self::PolakRibierePlus => Self::PolakRibiere.beta_metric(ctx, z, z_old).max(0.0),
-            Self::HestenesStiefel => div(zy, y_d),
-            Self::DaiYuan => div(gz, y_d),
+            Self::HestenesStiefel => {
+                let y = &g - &gold;
+                div(zy, dot(y.view(), d))
+            }
+            Self::DaiYuan => {
+                let y = &g - &gold;
+                div(gz, dot(y.view(), d))
+            }
             Self::ConjugateDescent => div(gz, -dot(d, gold)),
             Self::HagerZhang => {
+                let y = &g - &gold;
+                let y_d = dot(y.view(), d);
                 if y_d.abs() <= f64::EPSILON {
                     return 0.0;
                 }
+                let yz = &z - &z_old;
+                let yy = dot(y.view(), yz.view());
                 let d_g = dot(d, g);
                 zy / y_d - 2.0 * yy * d_g / (y_d * y_d)
             }
@@ -260,7 +267,23 @@ impl Conjugacy {
 }
 
 fn dot(a: ArrayView1<'_, f64>, b: ArrayView1<'_, f64>) -> f64 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+    // The same left fold as `a.iter().zip(b).map(|(x, y)| x * y).sum()`.
+    crate::vecops::dot_ordered(a, b)
+}
+
+/// `a · (b - c)` as a left fold of `a_i * (b_i - c_i)`.
+///
+/// That is [`dot`] of `a` with the stored difference: each subtraction is
+/// one rounding, then a separate multiply-add in index order.
+fn dot_diff(a: ArrayView1<'_, f64>, b: ArrayView1<'_, f64>, c: ArrayView1<'_, f64>) -> f64 {
+    debug_assert_eq!(a.len(), b.len());
+    debug_assert_eq!(a.len(), c.len());
+    let mut acc = 0.0;
+    for i in 0..a.len() {
+        let y = b[i] - c[i];
+        acc += a[i] * y;
+    }
+    acc
 }
 
 /// `num/den`, or 0 when `den` is negligible beside `num`.
@@ -283,7 +306,42 @@ fn div(num: f64, den: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::array;
+    use ndarray::{Array1, array};
+
+    #[test]
+    fn polak_ribiere_matches_the_stored_difference_fold() {
+        let n = 64;
+        let g = Array1::from((0..n).map(|i| (i as f64 * 0.17).sin()).collect::<Vec<_>>());
+        let gold = Array1::from((0..n).map(|i| (i as f64 * 0.11).cos()).collect::<Vec<_>>());
+        let d = Array1::from((0..n).map(|i| (i as f64 * 0.05).sin()).collect::<Vec<_>>());
+        let y = &g - &gold;
+        let y_g: f64 = g.iter().zip(y.iter()).map(|(a, b)| a * b).sum();
+        assert_eq!(
+            dot_diff(g.view(), g.view(), gold.view()).to_bits(),
+            y_g.to_bits()
+        );
+        let ctx = ConjugacyContext {
+            current_gradient: g.view(),
+            previous_gradient: gold.view(),
+            previous_direction: d.view(),
+        };
+        let gg_old: f64 = gold.iter().map(|v| v * v).sum();
+        let reference = y_g / gg_old;
+        assert_eq!(
+            Conjugacy::PolakRibiere.beta(&ctx).to_bits(),
+            reference.to_bits()
+        );
+        let z = g.mapv(|v| v * 0.5);
+        let z_old = gold.mapv(|v| v * 0.5);
+        let zy: f64 = z.iter().zip(y.iter()).map(|(a, b)| a * b).sum();
+        let gz_old: f64 = gold.iter().zip(z_old.iter()).map(|(a, b)| a * b).sum();
+        assert_eq!(
+            Conjugacy::PolakRibiere
+                .beta_metric(&ctx, z.view(), z_old.view())
+                .to_bits(),
+            (zy / gz_old).to_bits()
+        );
+    }
 
     #[test]
     fn textbook_betas_on_orthogonal_gradients() {

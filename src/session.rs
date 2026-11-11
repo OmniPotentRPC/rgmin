@@ -15,7 +15,7 @@ use crate::diis::{DiisState, gdiis_point};
 use crate::error::{Error, Result};
 use crate::fire::{
     Fire2Extras, FireMix, FireState, FireVariant, fire_after_v1_metric, fire_displacement,
-    fire_rescale_velocity, fire2_displacement_metric, guenole2020,
+    fire_rescale_between, fire2_displacement_metric, guenole2020,
 };
 use crate::hvp::{
     FiniteDifference, HessianVector, NewtonCgRequest, OptionalAction, newton_cg_step,
@@ -38,14 +38,15 @@ use crate::qn::{
 };
 use crate::qn_step::QnStep;
 use crate::quickmin::{
-    QuickMinOptions, QuickMinSession, QuickMinState, quickmin_rescale_velocity,
+    QuickMinOptions, QuickMinSession, QuickMinState, quickmin_rescale_between,
     quickmin_session_step,
 };
 use crate::report::{Report, Status};
 use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
-    Taken, cap_alpha, cap_displacement_atom, l2, max_atom_displacement, nlcg_opening_alpha,
-    qn_istep, scale_displacement_to_atom_cap, scale_step, scale_step_atom, take_step_with_options,
+    Taken, cap_alpha, cap_displacement_atom, clip_mut, clip_owned, l2, max_atom_displacement,
+    nlcg_opening_alpha, qn_istep, scale_displacement_to_atom_cap, scale_step, scale_step_atom,
+    take_step_with_options,
 };
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
@@ -1255,6 +1256,19 @@ impl Solver {
         g
     }
 
+    /// [`Self::horizontal_grad`] without the identity copy.
+    ///
+    /// On a Euclidean session with rigid motion left in, the projection
+    /// is the identity and `kill_at` does not write, so the owned gradient
+    /// is already the horizontal one.
+    fn orient_grad(&mut self, x: &Array1<f64>, grad: Array1<f64>) -> Array1<f64> {
+        if self.removal_mode() == RigidMode::Off && self.manifold == ManifoldKind::Euclidean {
+            grad
+        } else {
+            self.horizontal_grad(x, &grad)
+        }
+    }
+
     /// Vector transport. Quotient manifolds project at the arrival point.
     fn transport_vec(
         &mut self,
@@ -1276,6 +1290,12 @@ impl Solver {
         gold: &Array1<f64>,
         grad: &Array1<f64>,
     ) -> (Array1<f64>, Array1<f64>) {
+        // Euclidean transport is a copy, and with rigid motion left in
+        // nothing is removed afterwards. `s = x - old` and `y = g - g_old`
+        // are those copies.
+        if self.removal_mode() == RigidMode::Off && self.manifold == ManifoldKind::Euclidean {
+            return (x - old, grad - gold);
+        }
         let mut s = self.transport_vec(old, x, &(x - old));
         let mut y = grad - &self.transport_vec(old, x, gold);
         self.kill_at(x, &mut s);
@@ -1701,7 +1721,7 @@ impl Solver {
         self.check_manifold(x.len())?;
         let cached = self.same_last_x(x);
         if !cached {
-            *x = obj.bounds().clip(x.view());
+            clip_mut(obj.bounds(), x);
         }
         let (value, raw_grad) = if cached {
             (self.last_value, self.last_grad.clone())
@@ -1914,7 +1934,7 @@ impl Solver {
                 // 0.01 is the eOn probe length. Clip before the evaluation:
                 // the raw point can lie outside the objective box.
                 let raw = &*x + &(0.01 * &unit);
-                let probe = obj.bounds().clip(raw.view());
+                let probe = clip_owned(obj.bounds(), raw);
                 let along = (&probe - &*x).dot(&unit);
                 let curvature = if along > 0.0 && along.is_finite() {
                     let (_efd, gfd) = obj.value_and_gradient(probe.view());
@@ -1978,7 +1998,7 @@ impl Solver {
         let mut tval = value;
         let mut tgrad = grad.clone();
         for _ in 0..10 {
-            trial = obj.bounds().clip((&*x + alpha * &direction).view());
+            trial = clip_owned(obj.bounds(), &*x + alpha * &direction);
             let ev = obj.value_and_gradient(trial.view());
             tval = ev.0;
             tgrad = ev.1;
@@ -1993,7 +2013,7 @@ impl Solver {
                 solver.forget();
             }
             let sd = cap_displacement_atom(&self.geometry_scaled_force(&force, 0.1), cap);
-            trial = obj.bounds().clip((&*x + &sd).view());
+            trial = clip_owned(obj.bounds(), &*x + &sd);
             let ev = obj.value_and_gradient(trial.view());
             tval = ev.0;
             tgrad = ev.1;
@@ -2108,7 +2128,7 @@ impl Solver {
                 .atom_maxmove
                 .unwrap_or_else(|| self.control.istep.max(1.0e-8));
             let step = scale_displacement_to_atom_cap(&mode, cap);
-            let trial = obj.bounds().clip((&*x + &step).view());
+            let trial = clip_owned(obj.bounds(), &*x + &step);
             let (v, g) = obj.value_and_gradient(trial.view());
             if !v.is_finite() || g.iter().any(|c| !c.is_finite()) {
                 return;
@@ -2176,14 +2196,14 @@ impl Solver {
         };
         let cached = self.same_last_x(x);
         if !cached {
-            *x = obj.bounds().clip(x.view());
+            clip_mut(obj.bounds(), x);
         }
         let (mut value, mut grad) = if cached {
             (self.last_value, self.last_grad.clone())
         } else {
             obj.value_and_gradient(x.view())
         };
-        grad = self.horizontal_grad(x, &grad);
+        grad = self.orient_grad(x, grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
         if self
             .control
@@ -2256,7 +2276,7 @@ impl Solver {
                     value = nval;
                     grad = ngrad;
                 }
-                grad = self.horizontal_grad(x, &grad);
+                grad = self.orient_grad(x, grad);
                 self.remember(x, value, &grad);
                 let pair = if x.iter().zip(old.iter()).any(|(a, b)| a != b) {
                     let (s, y) = self.lbfgs_sy(&old, x, &gold, &grad);
@@ -2301,7 +2321,7 @@ impl Solver {
             value = nval;
             grad = ngrad;
         }
-        grad = self.horizontal_grad(x, &grad);
+        grad = self.orient_grad(x, grad);
         self.remember(x, value, &grad);
         let pair = if x.iter().zip(old.iter()).any(|(a, b)| a != b) {
             let (s, y) = self.lbfgs_sy(&old, x, &gold, &grad);
@@ -2352,7 +2372,7 @@ impl Solver {
         } else if let Some(cap) = self.control.maxmove {
             scale_step(x, &mut trial, cap);
         }
-        trial = obj.bounds().clip(trial.view());
+        trial = clip_owned(obj.bounds(), trial);
         let p = &trial - &*x;
         let taken = l2(&p);
         let (ft, gt) = obj.value_and_gradient(trial.view());
@@ -2394,7 +2414,7 @@ impl Solver {
         self.check_manifold(x.len())?;
         let cached = self.same_last_x(x);
         if !cached {
-            *x = obj.bounds().clip(x.view());
+            clip_mut(obj.bounds(), x);
         }
 
         if let Inner::Pso { .. } = &self.inner {
@@ -2406,7 +2426,7 @@ impl Solver {
         } else {
             obj.value_and_gradient(x.view())
         };
-        grad = self.horizontal_grad(x, &grad);
+        grad = self.orient_grad(x, grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
         // A caller that moved the iterate between steps measured the
         // gradient at both ends, so the displacement is a secant of the
@@ -2483,8 +2503,20 @@ impl Solver {
             } else {
                 LineSearchOptions::default()
             };
-        let start = x.clone();
-        let gold = grad.clone();
+        // The origin is the secant of an L-BFGS or SR step, and the base
+        // of a non-translation retraction. Other Euclidean steps do not
+        // read it.
+        let keep_origin = !self.manifold.retract_is_translation()
+            || matches!(
+                self.inner,
+                Inner::Lbfgs(_) | Inner::Sr1 { .. } | Inner::Sr2 { .. }
+            );
+        let origin = if keep_origin { Some(x.clone()) } else { None };
+        let origin_g = if keep_origin {
+            Some(grad.clone())
+        } else {
+            None
+        };
         // Accept::Step: the two-loop direction goes through accept_step
         // like the BB arm and the Hessian path in step_hess, one oracle
         // call and the clipped step with no energy test. The oracle value
@@ -2559,7 +2591,7 @@ impl Solver {
                 obj,
                 x,
                 value,
-                &gold,
+                origin_g.as_ref().expect("L-BFGS keeps the gradient"),
                 &dir,
                 &self.control,
                 self.accept,
@@ -2581,7 +2613,15 @@ impl Solver {
         let diis_atom_cap = self.atom_maxmove;
         let diis_euclidean_cap = self.control.maxmove;
         if matches!(&self.inner, Inner::Sr1 { .. } | Inner::Sr2 { .. }) {
-            self.sr_trust_attempt(obj, x, &mut value, &mut grad, &start, &gold, &mut sr_secant);
+            self.sr_trust_attempt(
+                obj,
+                x,
+                &mut value,
+                &mut grad,
+                origin.as_ref().expect("SR keeps the origin"),
+                origin_g.as_ref().expect("SR keeps the gradient"),
+                &mut sr_secant,
+            );
         }
         // The rigid projector for the trial directions: the workspace is
         // taken out of the session for the step so that the closure and
@@ -2864,20 +2904,29 @@ impl Solver {
                     rigid_broken_r,
                     &mut raw,
                 );
-                #[allow(unused_mut)]
-                let mut steepest = metric_vector(&self.precon, &raw)?;
-                eckart(
-                    &mut hold.ws,
-                    rigid_mode,
-                    masses,
-                    frozen,
-                    rigid_weighted,
-                    rigid_metric,
-                    rigid_pbc,
-                    rigid_broken_t,
-                    rigid_broken_r,
-                    &mut steepest,
-                );
+                // No metric and no projector: the steepest direction is the
+                // force. Copying it and projecting the copy does nothing.
+                let plain_force = self.precon.is_none() && rigid_mode == RigidMode::Off;
+                #[cfg(feature = "highs")]
+                let plain_force = plain_force && !boxed;
+                let steepest_owned = if plain_force {
+                    None
+                } else {
+                    let mut steepest = metric_vector(&self.precon, &raw)?;
+                    eckart(
+                        &mut hold.ws,
+                        rigid_mode,
+                        masses,
+                        frozen,
+                        rigid_weighted,
+                        rigid_metric,
+                        rigid_pbc,
+                        rigid_broken_t,
+                        rigid_broken_r,
+                        &mut steepest,
+                    );
+                    Some(steepest)
+                };
                 eckart(
                     &mut hold.ws,
                     rigid_mode,
@@ -2893,10 +2942,13 @@ impl Solver {
                 #[cfg(feature = "highs")]
                 if boxed {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut raw);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
+                    if let Some(steepest) = steepest_owned.as_mut() {
+                        crate::box_objective::project_tangent(obj.bounds(), x, steepest);
+                    }
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
-                let mix = fire_mix(&self.precon, &state.vel, &raw, &steepest);
+                let steepest = steepest_owned.as_ref().unwrap_or(&raw);
+                let mix = fire_mix(&self.precon, &state.vel, &raw, steepest);
                 let mut dx = match ext {
                     Some(ext) => {
                         match fire2_displacement_metric(state, ext, &raw, &steepest, mix) {
@@ -2924,11 +2976,11 @@ impl Solver {
                 } else if let Some(cap) = self.control.maxmove {
                     scale_step(x, &mut trial, cap);
                 }
-                trial = obj.bounds().clip(trial.view());
+                trial = clip_owned(obj.bounds(), trial);
                 // The clamp and clip shorten the move; the velocity has to
                 // describe the move taken, or the power adapt reads an
                 // integral of moves that never happened.
-                fire_rescale_velocity(state, &dx, &(&trial - &*x));
+                fire_rescale_between(state, &dx, x, &trial);
                 *x = trial;
                 if rigid_mode != RigidMode::Off
                     && let Some(xs) = x.as_slice()
@@ -2938,53 +2990,63 @@ impl Solver {
                 let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
                 grad = ev.1;
-                let mut raw_new = grad.mapv(|g| -g);
-                eckart(
-                    &mut hold.ws,
-                    rigid_mode,
-                    masses,
-                    frozen,
-                    rigid_weighted,
-                    rigid_metric,
-                    rigid_pbc,
-                    rigid_broken_t,
-                    rigid_broken_r,
-                    &mut raw_new,
-                );
-                #[allow(unused_mut)]
-                let mut steep_new = metric_vector(&self.precon, &raw_new)?;
-                eckart(
-                    &mut hold.ws,
-                    rigid_mode,
-                    masses,
-                    frozen,
-                    rigid_weighted,
-                    rigid_metric,
-                    rigid_pbc,
-                    rigid_broken_t,
-                    rigid_broken_r,
-                    &mut steep_new,
-                );
-                eckart(
-                    &mut hold.ws,
-                    rigid_mode,
-                    masses,
-                    frozen,
-                    rigid_weighted,
-                    rigid_vmetric,
-                    rigid_pbc,
-                    rigid_broken_t,
-                    rigid_broken_r,
-                    &mut state.vel,
-                );
-                #[cfg(feature = "highs")]
-                if boxed {
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut raw_new);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steep_new);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                // FIRE 2.0 mixes before the step. With nothing to project,
+                // the post-step copy of the force is not read. FIRE 1.0
+                // still mixes, and the unprojected force is that direction.
+                if plain_force {
+                    if matches!(state.kind, crate::fire::FireKind::V1) {
+                        let raw_new = grad.mapv(|g| -g);
+                        fire_after_v1_metric(state, &raw_new, &raw_new, None);
+                    }
+                } else {
+                    let mut raw_new = grad.mapv(|g| -g);
+                    eckart(
+                        &mut hold.ws,
+                        rigid_mode,
+                        masses,
+                        frozen,
+                        rigid_weighted,
+                        rigid_metric,
+                        rigid_pbc,
+                        rigid_broken_t,
+                        rigid_broken_r,
+                        &mut raw_new,
+                    );
+                    #[allow(unused_mut)]
+                    let mut steep_new = metric_vector(&self.precon, &raw_new)?;
+                    eckart(
+                        &mut hold.ws,
+                        rigid_mode,
+                        masses,
+                        frozen,
+                        rigid_weighted,
+                        rigid_metric,
+                        rigid_pbc,
+                        rigid_broken_t,
+                        rigid_broken_r,
+                        &mut steep_new,
+                    );
+                    eckart(
+                        &mut hold.ws,
+                        rigid_mode,
+                        masses,
+                        frozen,
+                        rigid_weighted,
+                        rigid_vmetric,
+                        rigid_pbc,
+                        rigid_broken_t,
+                        rigid_broken_r,
+                        &mut state.vel,
+                    );
+                    #[cfg(feature = "highs")]
+                    if boxed {
+                        crate::box_objective::project_tangent(obj.bounds(), x, &mut raw_new);
+                        crate::box_objective::project_tangent(obj.bounds(), x, &mut steep_new);
+                        crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                    }
+                    let mix_new = fire_mix(&self.precon, &state.vel, &raw_new, &steep_new);
+                    fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
                 }
-                let mix_new = fire_mix(&self.precon, &state.vel, &raw_new, &steep_new);
-                fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
             }
             Inner::QuickMin(state, session) => {
                 #[allow(unused_mut)]
@@ -3001,9 +3063,9 @@ impl Solver {
                 } else if let Some(cap) = self.control.maxmove {
                     scale_step(x, &mut trial, cap);
                 }
-                trial = obj.bounds().clip(trial.view());
+                trial = clip_owned(obj.bounds(), trial);
                 if session.options.rescale_on_clamp {
-                    quickmin_rescale_velocity(&mut state.vel, &dx, &(&trial - &*x));
+                    quickmin_rescale_between(&mut state.vel, &dx, x, &trial);
                 }
                 *x = trial;
                 let ev = obj.value_and_gradient(x.view());
@@ -3035,7 +3097,7 @@ impl Solver {
                 } else if let Some(cap) = self.control.maxmove {
                     scale_step(x, &mut trial, cap);
                 }
-                trial = obj.bounds().clip(trial.view());
+                trial = clip_owned(obj.bounds(), trial);
                 let h_taken = crate::ode12r::taken_step(h, &dx, &(&trial - &*x));
                 let (trial_value, trial_grad) = obj.value_and_gradient(trial.view());
                 #[allow(unused_mut)]
@@ -3163,7 +3225,10 @@ impl Solver {
         let y = if already_retracted || self.manifold.retract_is_translation() {
             None
         } else {
-            Some(self.manifold.retract(&start, &(&*x - &start)))
+            let start = origin
+                .as_ref()
+                .expect("a curved retraction keeps the origin");
+            Some(self.manifold.retract(start, &(&*x - start)))
         };
         if let Some(y) = y.filter(|y| y.iter().zip(x.iter()).any(|(a, b)| (*a - *b).abs() > 1e-15))
         {
@@ -3172,7 +3237,7 @@ impl Solver {
             value = ev.0;
             grad = ev.1;
         }
-        grad = self.horizontal_grad(x, &grad);
+        grad = self.orient_grad(x, grad);
         if let Some((old_x, old_g)) = sr_secant
             && x.iter().zip(old_x.iter()).any(|(a, b)| a != b)
         {
@@ -3185,11 +3250,15 @@ impl Solver {
             }
         }
 
-        let pair = if matches!(self.inner, Inner::Lbfgs(_))
-            && x.iter().zip(start.iter()).any(|(a, b)| a != b)
-        {
-            let (s, y) = self.lbfgs_sy(&start, x, &gold, &grad);
-            Some((s, y, l2(&grad)))
+        let pair = if matches!(self.inner, Inner::Lbfgs(_)) {
+            let start = origin.as_ref().expect("L-BFGS keeps the origin");
+            let gold = origin_g.as_ref().expect("L-BFGS keeps the gradient");
+            if x.iter().zip(start.iter()).any(|(a, b)| a != b) {
+                let (s, y) = self.lbfgs_sy(start, x, gold, &grad);
+                Some((s, y, l2(&grad)))
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -3364,7 +3433,7 @@ impl Solver {
         dir = self.project_vec(x, &dir);
         let mut trial = &*x + &dir;
         self.clip_trial(x, &mut trial);
-        trial = obj.bounds().clip(trial.view());
+        trial = clip_owned(obj.bounds(), trial);
         let p = &trial - &*x;
         let pnorm = l2(&p);
         let mut rho = -1.0;
@@ -3637,10 +3706,9 @@ mod tests {
             calls: 0.into(),
             bounds: eindir_core::Bounds::new(array![-1e6, -1e6], array![1e6, 1e6], 0.0),
         };
-        for method in [
-            Method::Lbfgs { memory: 5 },
-            Method::Fire { kind: FireKind::V2 },
-        ] {
+        for method in [Method::Lbfgs { memory: 5 }, Method::Fire {
+            kind: FireKind::V2,
+        }] {
             let mut solver = Solver::new(
                 method.clone(),
                 Control {
@@ -3782,11 +3850,9 @@ mod retained_neb_guard_tests {
     #[test]
     fn refused_step_keeps_the_previous_lbfgs_pair() {
         let obj = Scripted {
-            grads: vec![
-                array![-1.0, 0.0, 0.0],
-                array![-0.5, 0.0, 0.0],
-                array![-1.0, 0.0, 0.0],
-            ],
+            grads: vec![array![-1.0, 0.0, 0.0], array![-0.5, 0.0, 0.0], array![
+                -1.0, 0.0, 0.0
+            ]],
             n: AtomicUsize::new(0),
         };
         let mut x = array![0.0, 0.0, 0.0];
@@ -3816,11 +3882,9 @@ mod retained_neb_guard_tests {
 
     fn guard_script() -> Scripted {
         Scripted {
-            grads: vec![
-                array![-100.0, 0.0, 0.0],
-                array![-99.0, 1.0, 0.0],
-                array![-98.0, 1.0, 0.0],
-            ],
+            grads: vec![array![-100.0, 0.0, 0.0], array![-99.0, 1.0, 0.0], array![
+                -98.0, 1.0, 0.0
+            ]],
             n: AtomicUsize::new(0),
         }
     }

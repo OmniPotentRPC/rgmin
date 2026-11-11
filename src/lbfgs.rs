@@ -39,6 +39,10 @@ struct Pair {
     s: Array1<f64>,
     y: Array1<f64>,
     rho: f64,
+    /// `s · y` at the moment the pair was stored.
+    sy: f64,
+    /// `y · y` at the moment the pair was stored.
+    yy: f64,
 }
 
 /// L-BFGS whose curvature pairs survive between calls.
@@ -272,9 +276,9 @@ impl Lbfgs {
 
     fn scale_gamma(&self, mut q: Array1<f64>) -> Array1<f64> {
         if let Some(p) = self.memory.last() {
-            let yy = p.y.dot(&p.y);
-            if yy > 0.0 {
-                q *= p.s.dot(&p.y) / yy;
+            // `sy` and `yy` are the dots taken when the pair was stored.
+            if p.yy > 0.0 {
+                q *= p.sy / p.yy;
             }
         } else if self.inverse_curvature.is_finite()
             && self.inverse_curvature > 0.0
@@ -286,13 +290,24 @@ impl Lbfgs {
     }
 
     fn current_h0(&self) -> f64 {
-        if let Some(pair) = self.memory.last() {
-            let yy = pair.y.dot(&pair.y);
-            if yy > 0.0 {
-                return pair.s.dot(&pair.y) / yy;
-            }
+        if let Some(pair) = self.memory.last()
+            && pair.yy > 0.0
+        {
+            return pair.sy / pair.yy;
         }
         self.inverse_curvature
+    }
+
+    fn remember_pair(&mut self, s: Array1<f64>, y: Array1<f64>, sy: f64) {
+        let yy = y.dot(&y);
+        self.memory.push(Pair {
+            s,
+            y,
+            rho: 1.0 / sy,
+            sy,
+            yy,
+        });
+        self.trim();
     }
 
     fn positive_reset_scale(&self) -> f64 {
@@ -400,12 +415,7 @@ impl Lbfgs {
         if !sy.is_finite() || sy.abs() < 1e-30 || sy <= 0.0 {
             return;
         }
-        self.memory.push(Pair {
-            s,
-            y,
-            rho: 1.0 / sy,
-        });
-        self.trim();
+        self.remember_pair(s, y, sy);
     }
 
     /// Records an accepted curvature pair (`s = x+ - x`, `y = g+ - g`).
@@ -442,12 +452,7 @@ impl Lbfgs {
                 self.forget();
                 return;
             }
-            self.memory.push(Pair {
-                s,
-                y,
-                rho: 1.0 / sy,
-            });
-            self.trim();
+            self.remember_pair(s, y, sy);
             return;
         }
         if self.cautious_eps > 0.0
@@ -463,12 +468,7 @@ impl Lbfgs {
         if !sy.is_finite() || sy <= 1e-8 * sn * yn {
             return;
         }
-        self.memory.push(Pair {
-            s,
-            y,
-            rho: 1.0 / sy,
-        });
-        self.trim();
+        self.remember_pair(s, y, sy);
     }
 
     fn gnorm(&self, g: &Array1<f64>) -> f64 {

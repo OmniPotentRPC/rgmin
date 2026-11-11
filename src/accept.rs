@@ -48,7 +48,7 @@ where
     } else if let Some(cap) = control.maxmove {
         scale_step(pos, &mut trial, cap);
     }
-    obj.bounds().clip(trial.view())
+    crate::step::clip_owned(obj.bounds(), trial)
 }
 
 fn push_energy(hist: &mut VecDeque<f64>, energy: f64) {

@@ -283,6 +283,53 @@ macro_rules! sum_w8 {
     }};
 }
 
+macro_rules! diff_sq_w8 {
+    ($xs:expr, $ys:expr) => {{
+        let xs: &[f64] = $xs;
+        let ys: &[f64] = $ys;
+        let n = xs.len();
+        let mut i = 0;
+        let mut sum = 0.0f64;
+        let (mut p0, mut p1, mut p2, mut p3, mut p4, mut p5, mut p6, mut p7) =
+            (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        while i + W <= n {
+            // SAFETY: `i + 7 < n` because `i + W <= n`.
+            unsafe {
+                let d0 = *xs.get_unchecked(i) - *ys.get_unchecked(i);
+                let d1 = *xs.get_unchecked(i + 1) - *ys.get_unchecked(i + 1);
+                let d2 = *xs.get_unchecked(i + 2) - *ys.get_unchecked(i + 2);
+                let d3 = *xs.get_unchecked(i + 3) - *ys.get_unchecked(i + 3);
+                let d4 = *xs.get_unchecked(i + 4) - *ys.get_unchecked(i + 4);
+                let d5 = *xs.get_unchecked(i + 5) - *ys.get_unchecked(i + 5);
+                let d6 = *xs.get_unchecked(i + 6) - *ys.get_unchecked(i + 6);
+                let d7 = *xs.get_unchecked(i + 7) - *ys.get_unchecked(i + 7);
+                p0 = d0.mul_add(d0, p0);
+                p1 = d1.mul_add(d1, p1);
+                p2 = d2.mul_add(d2, p2);
+                p3 = d3.mul_add(d3, p3);
+                p4 = d4.mul_add(d4, p4);
+                p5 = d5.mul_add(d5, p5);
+                p6 = d6.mul_add(d6, p6);
+                p7 = d7.mul_add(d7, p7);
+            }
+            i += W;
+        }
+        sum = sum + (p0 + p4);
+        sum = sum + (p1 + p5);
+        sum = sum + (p2 + p6);
+        sum = sum + (p3 + p7);
+        while i < n {
+            // SAFETY: `i < n`.
+            unsafe {
+                let d = *xs.get_unchecked(i) - *ys.get_unchecked(i);
+                sum = d.mul_add(d, sum);
+            }
+            i += 1;
+        }
+        sum
+    }};
+}
+
 macro_rules! axpy_body {
     ($a:expr, $xs:expr, $ys:expr) => {{
         let a: f64 = $a;
@@ -437,6 +484,14 @@ define_kernels!(
     sve div_sve_version,
     div_body
 );
+define_kernels!(
+    fn diff_sq_mv(xs: &[f64], ys: &[f64]) -> f64,
+    avx2 diff_sq_avx2_version,
+    avx512 diff_sq_avx512_version,
+    neon diff_sq_neon_version,
+    sve diff_sq_sve_version,
+    diff_sq_w8
+);
 
 macro_rules! dispatch_dot {
     ($choice:expr, $xs:expr, $ys:expr) => {{
@@ -479,6 +534,44 @@ fn dot_contiguous(xs: &[f64], ys: &[f64]) -> f64 {
         return dot_parallel(picked, xs, ys);
     }
     dispatch_dot!(picked, xs, ys)
+}
+
+macro_rules! dispatch_diff_sq {
+    ($choice:expr, $xs:expr, $ys:expr) => {{
+        match $choice {
+            Choice::Forced(Path::Scalar) => diff_sq_w8!($xs, $ys),
+            #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+            Choice::Forced(Path::Avx2) => unsafe { diff_sq_avx2_version($xs, $ys) },
+            #[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+            Choice::Forced(Path::Avx2) => diff_sq_w8!($xs, $ys),
+            #[cfg(all(feature = "simd", target_arch = "x86_64", rgmin_avx512))]
+            Choice::Forced(Path::Avx512) => unsafe { diff_sq_avx512_version($xs, $ys) },
+            #[cfg(not(all(feature = "simd", target_arch = "x86_64", rgmin_avx512)))]
+            Choice::Forced(Path::Avx512) => diff_sq_w8!($xs, $ys),
+            #[cfg(all(feature = "simd", target_arch = "aarch64"))]
+            Choice::Forced(Path::Neon) => unsafe { diff_sq_neon_version($xs, $ys) },
+            #[cfg(not(all(feature = "simd", target_arch = "aarch64")))]
+            Choice::Forced(Path::Neon) => diff_sq_w8!($xs, $ys),
+            #[cfg(all(feature = "simd", target_arch = "aarch64"))]
+            Choice::Forced(Path::Sve) => unsafe { diff_sq_sve_version($xs, $ys) },
+            #[cfg(not(all(feature = "simd", target_arch = "aarch64")))]
+            Choice::Forced(Path::Sve) => diff_sq_w8!($xs, $ys),
+            #[cfg(feature = "simd")]
+            Choice::Auto => {
+                if scalar_gate() {
+                    diff_sq_w8!($xs, $ys)
+                } else {
+                    diff_sq_mv($xs, $ys)
+                }
+            }
+            #[cfg(not(feature = "simd"))]
+            Choice::Auto => diff_sq_w8!($xs, $ys),
+        }
+    }};
+}
+
+fn diff_sq_contiguous(xs: &[f64], ys: &[f64]) -> f64 {
+    dispatch_diff_sq!(choice(), xs, ys)
 }
 
 macro_rules! dispatch_sum {
@@ -770,6 +863,28 @@ pub fn nrm2(x: ArrayView1<f64>) -> f64 {
     dot(x, x).sqrt()
 }
 
+/// `||x - y||_2`, the same bits as [`nrm2`] of the stored difference.
+///
+/// Each element is subtracted once, then squared into the eight-partial
+/// tree [`dot`] uses for `d · d`. Above the parallel cutoff the difference
+/// is stored and [`nrm2`] runs, so the chunk fold stays the one `d · d` uses.
+pub fn nrm2_diff(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
+    assert_eq!(x.len(), y.len());
+    #[cfg(feature = "par")]
+    if matches!(choice(), Choice::Auto) && x.len() >= PAR_MIN_LEN {
+        let diff = &x - &y;
+        return nrm2(diff.view());
+    }
+    let sum = match (x.as_slice(), y.as_slice()) {
+        (Some(xs), Some(ys)) => diff_sq_contiguous(xs, ys),
+        _ => {
+            let diff: Vec<f64> = x.iter().zip(y.iter()).map(|(a, b)| a - b).collect();
+            dot_contiguous(&diff, &diff)
+        }
+    };
+    sum.sqrt()
+}
+
 /// `y *= a`.
 pub fn scale(a: f64, y: &mut Array1<f64>) {
     let picked = choice();
@@ -1011,6 +1126,27 @@ mod tests {
         assert_eq!(z, reference);
         assert!((nrm2(x.view()) - x.dot(&x).sqrt()).abs() < 1e-12);
         assert!((sum(x.view()) - x.sum()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_difference_norm_matches_the_stored_vector() {
+        for n in [0usize, 1, 7, 8, 9, 64, 3000] {
+            let x = Array1::from((0..n).map(|i| (i as f64 * 0.17).sin()).collect::<Vec<_>>());
+            let y = Array1::from((0..n).map(|i| (i as f64 * 0.09).cos()).collect::<Vec<_>>());
+            let stored = &x - &y;
+            assert_eq!(
+                nrm2_diff(x.view(), y.view()).to_bits(),
+                nrm2(stored.view()).to_bits(),
+                "n={n}"
+            );
+        }
+        let x = Array1::from(vec![-0.0, 1.0, f64::MIN_POSITIVE]);
+        let y = Array1::from(vec![0.0, -1.0, 0.0]);
+        let stored = &x - &y;
+        assert_eq!(
+            nrm2_diff(x.view(), y.view()).to_bits(),
+            nrm2(stored.view()).to_bits()
+        );
     }
 
     #[test]

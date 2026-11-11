@@ -193,7 +193,7 @@ where
         } else if let Some(cap) = control.maxmove {
             scale_step(&pos, &mut trial, cap);
         }
-        trial = obj.bounds().clip(trial.view());
+        trial = crate::step::clip_owned(obj.bounds(), trial);
         let p = &trial - &pos;
         let pnorm = l2(&p);
         if !(pnorm.is_finite() && pnorm > 1e-16) {

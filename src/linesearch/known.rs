@@ -37,7 +37,6 @@ pub struct LineOutcome {
 }
 
 /// One evaluated trial on the line.
-#[derive(Clone)]
 struct Probe {
     alpha: f64,
     f: f64,
@@ -58,14 +57,16 @@ impl Probe {
     }
 }
 
-/// Counts evaluations and keeps a copy of the lowest decreasing trial.
+/// Counts evaluations and keeps every trial. The lowest decreasing one is
+/// an index into that list, so a fallback does not copy the vectors.
 struct Line<'a, F> {
     oracle: &'a mut F,
     pos: ArrayView1<'a, f64>,
     dir: ArrayView1<'a, f64>,
     f0: f64,
     evals: usize,
-    best: Option<Probe>,
+    trials: Vec<Option<Probe>>,
+    best_at: Option<usize>,
     options: LineSearchOptions,
 }
 
@@ -73,51 +74,81 @@ impl<'a, F> Line<'a, F>
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
-    fn probe(&mut self, alpha: f64) -> Probe {
+    fn probe(&mut self, alpha: f64) -> usize {
         let mut x = self.pos.to_owned();
         crate::vecops::axpy(alpha, self.dir, &mut x);
         let (f, g) = (self.oracle)(x.view());
         self.evals += 1;
         let dphi = crate::vecops::dot(g.view(), self.dir);
-        let p = Probe {
+        let idx = self.trials.len();
+        if f.is_finite()
+            && f < self
+                .best_at
+                .map_or(self.f0, |i| self.trials[i].as_ref().unwrap().f)
+        {
+            self.best_at = Some(idx);
+        }
+        self.trials.push(Some(Probe {
             alpha,
             f,
             dphi,
             x,
             g,
-        };
-        if f.is_finite() && f < self.best.as_ref().map_or(self.f0, |b| b.f) {
-            self.best = Some(p.clone());
-        }
-        p
+        }));
+        idx
     }
 
-    fn accept(&self, p: Probe) -> Option<LineOutcome> {
-        Some(p.into_outcome(self.evals))
+    /// Drop a trial the search no longer holds, unless it is the fallback.
+    ///
+    /// The buffers are then free for the next probe. Keeping every trial
+    /// until the search returns stops that reuse, which is slower than the
+    /// copy it avoids while the vectors are small.
+    fn release(&mut self, idx: Option<usize>) {
+        let Some(idx) = idx else {
+            return;
+        };
+        if self.best_at == Some(idx) {
+            return;
+        }
+        self.trials[idx] = None;
+    }
+
+    fn accept_at(&mut self, idx: usize) -> Option<LineOutcome> {
+        let evals = self.evals;
+        Some(self.take_probe(idx).into_outcome(evals))
     }
 
     fn take_best(&mut self) -> Option<LineOutcome> {
         let evals = self.evals;
-        self.best.take().map(|b| b.into_outcome(evals))
+        self.best_at
+            .take()
+            .map(|idx| self.take_probe(idx).into_outcome(evals))
+    }
+
+    fn take_probe(&mut self, idx: usize) -> Probe {
+        self.trials[idx].take().expect("line-search trial")
     }
 }
 
 /// One end of a zoom bracket; `p` is `None` only at `alpha = 0`.
-#[derive(Clone)]
+///
+/// `p` indexes [`Line::trials`]. Copying an end copies the index.
+#[derive(Clone, Copy)]
 struct End {
     a: f64,
     f: f64,
     d: f64,
-    p: Option<Probe>,
+    p: Option<usize>,
 }
 
 impl End {
-    fn of(p: Probe) -> Self {
+    fn of(idx: usize, probe: &Option<Probe>) -> Self {
+        let probe = probe.as_ref().expect("line-search trial");
         Self {
-            a: p.alpha,
-            f: p.f,
-            d: p.dphi,
-            p: Some(p),
+            a: probe.alpha,
+            f: probe.f,
+            d: probe.dphi,
+            p: Some(idx),
         }
     }
 }
@@ -243,7 +274,8 @@ impl LineSearch {
             dir,
             f0,
             evals: 0,
-            best: None,
+            trials: Vec::new(),
+            best_at: None,
             options,
         };
         match *self {
@@ -284,13 +316,14 @@ where
     };
     let mut alpha = open;
     for i in 0..maxiter.max(1) {
-        let cur = End::of(line.probe(alpha));
+        let idx = line.probe(alpha);
+        let cur = End::of(idx, &line.trials[idx]);
         let (f, d) = (cur.f, cur.d);
         if line
             .options
             .accepts_approximate_wolfe(f, f0, d, dphi0, c1, c2)
         {
-            return cur.p.and_then(|p| line.accept(p));
+            return cur.p.and_then(|idx| line.accept_at(idx));
         }
         if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || (i > 0 && f >= prev.f) {
             return zoom(line, f0, dphi0, prev, cur, c1, c2, maxiter);
@@ -298,7 +331,7 @@ where
         if strong_curvature(d, dphi0, c2) || (d < 0.0 && alpha >= amax) {
             // A strong-Wolfe point, or an Armijo point still descending
             // at the cap: the cap, not the curvature, ends the step.
-            return cur.p.and_then(|p| line.accept(p));
+            return cur.p.and_then(|idx| line.accept_at(idx));
         }
         if d >= 0.0 {
             return zoom(line, f0, dphi0, cur, prev, c1, c2, maxiter);
@@ -311,13 +344,14 @@ where
         let t = cubic_min(prev.a, prev.f, prev.d, alpha, f, d)
             .filter(|t| *t > alpha)
             .unwrap_or(hi_ext);
+        line.release(prev.p);
         prev = cur;
         alpha = clamp_between(t, lo_ext, hi_ext).min(amax);
     }
     // Expansion budget spent while still descending: `prev` is the
     // furthest Armijo point.
     match prev.p {
-        Some(p) => line.accept(p),
+        Some(idx) => line.accept_at(idx),
         None => line.take_best(),
     }
 }
@@ -342,22 +376,29 @@ where
             break;
         }
         let alpha = zoom_trial(&lo, &hi);
-        let cur = End::of(line.probe(alpha));
+        let idx = line.probe(alpha);
+        let cur = End::of(idx, &line.trials[idx]);
         let (f, d) = (cur.f, cur.d);
         if line
             .options
             .accepts_approximate_wolfe(f, f0, d, dphi0, c1, c2)
         {
-            return cur.p.and_then(|p| line.accept(p));
+            return cur.p.and_then(|idx| line.accept_at(idx));
         }
         if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || f >= lo.f {
+            line.release(hi.p);
             hi = cur;
         } else {
             if strong_curvature(d, dphi0, c2) {
-                return cur.p.and_then(|p| line.accept(p));
+                return cur.p.and_then(|idx| line.accept_at(idx));
             }
             if d * (hi.a - lo.a) >= 0.0 {
+                if hi.p != lo.p {
+                    line.release(hi.p);
+                }
                 hi = lo;
+            } else if lo.p != hi.p {
+                line.release(lo.p);
             }
             lo = cur;
         }
@@ -365,7 +406,7 @@ where
     // The zoom ran out: `lo` is the lowest Armijo point found. With
     // `lo` still at the origin, fall back to the lowest trial.
     match lo.p {
-        Some(p) => line.accept(p),
+        Some(idx) => line.accept_at(idx),
         None => line.take_best(),
     }
 }
@@ -389,7 +430,7 @@ where
     let grow_cap = amax.min(64.0_f64.max(64.0 * open));
     for _ in 0..maxiter {
         let p = line.probe(alpha);
-        let f = p.f;
+        let f = line.trials[p].as_ref().expect("line-search trial").f;
         let arm = f.is_finite() && armijo(f, f0, alpha, dphi0, c);
         let accept = if goldstein {
             arm && goldstein_lower(f, f0, alpha, dphi0, c)
@@ -397,8 +438,9 @@ where
             arm
         };
         if accept || (goldstein && arm && alpha >= grow_cap) {
-            return line.accept(p);
+            return line.accept_at(p);
         }
+        line.release(Some(p));
         if goldstein && arm {
             // Lower bound failed: the step is too short (Nocedal-Wright 3.11).
             alpha = (alpha / beta).min(grow_cap);
@@ -429,7 +471,9 @@ where
     const GOLD: f64 = 1.618_034;
     const CGOLD: f64 = 0.381_966;
     let phi = |line: &mut Line<'_, F>, t: f64| {
-        let f = line.probe(t).f;
+        let idx = line.probe(t);
+        let f = line.trials[idx].as_ref().expect("line-search trial").f;
+        line.release(Some(idx));
         if f.is_finite() { f } else { f64::INFINITY }
     };
     // Bracket a minimum of phi on [0, c] with phi(b) < phi(0), phi(c).
@@ -536,7 +580,9 @@ where
             x + if d >= 0.0 { tol1 } else { -tol1 }
         };
         let fu = {
-            let f = line.probe(u).f;
+            let idx = line.probe(u);
+            let f = line.trials[idx].as_ref().expect("line-search trial").f;
+            line.release(Some(idx));
             if f.is_finite() { f } else { f64::INFINITY }
         };
         if fu <= fx {
