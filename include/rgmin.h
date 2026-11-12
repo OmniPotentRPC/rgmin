@@ -434,7 +434,8 @@ typedef enum rgmin_manifold_t {
     RGMIN_MANIFOLD_MULTINOMIAL_SYM = 19,
     RGMIN_MANIFOLD_SPHERE_COMPLEX = 20,
     RGMIN_MANIFOLD_POSITIVE = 21,
-    RGMIN_MANIFOLD_CENTERED_MATRIX = 22
+    RGMIN_MANIFOLD_CENTERED_MATRIX = 22,
+    RGMIN_MANIFOLD_POWER = 23
 } rgmin_manifold_t;
 void rgmin_solver_set_manifold(rgmin_solver_t *solver, rgmin_manifold_t manifold);
 /** Oblique OB(n,m): product of m unit spheres in R^n, column-major. */
@@ -464,6 +465,11 @@ void rgmin_solver_set_positive(rgmin_solver_t *solver, size_t n);
  *  centers rows. Reserved 7-10 unused. */
 void rgmin_solver_set_centered_matrix(rgmin_solver_t *solver, size_t m, size_t n,
                                     int32_t center_rows);
+/** Cartesian power of one factor. factor is 0 Euclidean, 1 sphere,
+ *  2 MwRigid, 3 rigid quotient. Returns 0, or 1 on a null solver or
+ *  an unknown factor. manopt powermanifold. */
+int32_t rgmin_solver_set_power(rgmin_solver_t *solver, int32_t factor, size_t block,
+                            size_t count);
 /** Per-atom masses for MW_RIGID. n_atoms == 0 or masses == NULL
  *  restores unit mass. */
 void rgmin_solver_set_masses(rgmin_solver_t *solver, const double *masses,

@@ -27,6 +27,21 @@
 
 use ndarray::Array1;
 
+macro_rules! on_power {
+    ($block:expr, $count:expr, $factor:expr, $method:ident ($($arg:expr),* $(,)?)) => {
+        match $factor {
+            PowerFactor::Euclidean => {
+                Power::new(Euclidean, $block, $count).$method($($arg),*)
+            }
+            PowerFactor::Sphere => Power::new(Sphere, $block, $count).$method($($arg),*),
+            PowerFactor::MwRigid => Power::new(MwRigid, $block, $count).$method($($arg),*),
+            PowerFactor::RigidQuotient => {
+                Power::new(RigidQuotient, $block, $count).$method($($arg),*)
+            }
+        }
+    };
+}
+
 mod centered;
 mod complex_circle;
 mod constant;
@@ -38,6 +53,7 @@ mod multinomial_sym;
 mod mw_rigid;
 mod oblique;
 mod positive;
+mod power;
 mod rigid_quotient;
 mod se3;
 mod skewsymmetric;
@@ -72,6 +88,7 @@ pub use multinomial_sym::{
 pub use mw_rigid::MwRigid;
 pub use oblique::Oblique;
 pub use positive::{Positive, inner as inner_pos, is_positive, typical_dist as typical_dist_pos};
+pub use power::Power;
 pub use rigid_quotient::RigidQuotient;
 pub use se3::Se3;
 pub use skewsymmetric::{
@@ -89,6 +106,22 @@ pub use symmetric::{
     Symmetric, inner as inner_sym, is_symmetric, pack as pack_sym, side as side_sym,
     typical_dist as typical_dist_sym, unpack as unpack_sym,
 };
+
+/// Which factor a [`ManifoldKind::Power`] repeats.
+///
+/// The four geometries whose product is not already another kind.
+/// A product of spheres stays [`ManifoldKind::Oblique`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PowerFactor {
+    /// Ambient Euclidean block.
+    Euclidean,
+    /// Unit sphere in the block.
+    Sphere,
+    /// Mass-weighted Eckart frame on the block. A ring of molecules.
+    MwRigid,
+    /// Unit-mass rigid quotient on the block.
+    RigidQuotient,
+}
 
 /// Which embedded geometry a session retracts onto.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -197,6 +230,16 @@ pub enum ManifoldKind {
         /// (manopt default).
         rows: bool,
     },
+    /// Cartesian power of one [`PowerFactor`]. manopt `powermanifold`.
+    /// Packed as `count` contiguous blocks of length `block`.
+    Power {
+        /// Packed length of one factor.
+        block: usize,
+        /// Number of copies.
+        count: usize,
+        /// Geometry of each block.
+        factor: PowerFactor,
+    },
 }
 
 impl ManifoldKind {
@@ -266,6 +309,26 @@ impl ManifoldKind {
         Self::CenteredMatrix { m, n, rows }
     }
 
+    /// Cartesian power of one factor. manopt `powermanifold`.
+    ///
+    /// `block` is the packed length of one copy and `count` is the
+    /// number of copies. A power of a power is rejected: flatten it
+    /// first. Oblique remains the product of spheres.
+    pub fn power(factor: Self, block: usize, count: usize) -> Option<Self> {
+        let factor = match factor {
+            Self::Euclidean => PowerFactor::Euclidean,
+            Self::Sphere => PowerFactor::Sphere,
+            Self::MwRigid => PowerFactor::MwRigid,
+            Self::RigidQuotient => PowerFactor::RigidQuotient,
+            _ => return None,
+        };
+        Some(Self::Power {
+            block,
+            count,
+            factor,
+        })
+    }
+
     /// [`Manifold::project`] written back into `v`. The sphere does it
     /// without allocating, with the arithmetic of `Sphere::project`.
     pub(crate) fn project_in_place(self, x: &Array1<f64>, v: &mut Array1<f64>) {
@@ -303,6 +366,10 @@ impl ManifoldKind {
             | Self::MultinomialSymmetric { .. }
             | Self::SphereComplex { .. }
             | Self::Positive { .. } => false,
+            Self::Power { factor, .. } => matches!(
+                factor,
+                PowerFactor::Euclidean | PowerFactor::MwRigid | PowerFactor::RigidQuotient
+            ),
         }
     }
 
@@ -329,6 +396,7 @@ impl ManifoldKind {
             Self::SphereComplex { .. } => "spherecomplex",
             Self::Positive { .. } => "positive",
             Self::CenteredMatrix { .. } => "centeredmatrix",
+            Self::Power { .. } => "power",
         }
     }
 }
@@ -384,6 +452,9 @@ impl Manifold for ManifoldKind {
                 rows: *rows,
             }
             .required_dim(n),
+            Self::Power { block, count, factor } => {
+                on_power!(*block, *count, *factor, required_dim(n))
+            }
         }
     }
 
@@ -417,6 +488,9 @@ impl Manifold for ManifoldKind {
                 rows: *rows,
             }
             .project(x, v),
+            Self::Power { block, count, factor } => {
+                on_power!(*block, *count, *factor, project(x, v))
+            }
         }
     }
 
@@ -450,6 +524,9 @@ impl Manifold for ManifoldKind {
                 rows: *rows,
             }
             .retract(x, v),
+            Self::Power { block, count, factor } => {
+                on_power!(*block, *count, *factor, retract(x, v))
+            }
         }
     }
 
@@ -485,6 +562,9 @@ impl Manifold for ManifoldKind {
                 rows: *rows,
             }
             .transport(x_from, x_to, v),
+            Self::Power { block, count, factor } => {
+                on_power!(*block, *count, *factor, transport(x_from, x_to, v))
+            }
         }
     }
 
@@ -520,6 +600,9 @@ impl Manifold for ManifoldKind {
                 rows: *rows,
             }
             .egrad2rgrad(x, egrad),
+            Self::Power { block, count, factor } => {
+                on_power!(*block, *count, *factor, egrad2rgrad(x, egrad))
+            }
         }
     }
 }

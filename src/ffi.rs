@@ -2339,6 +2339,9 @@ pub enum rgmin_manifold_t {
     /// 2-by-2 centered columns; use rgmin_solver_set_centered_matrix.
     /// Reserved 7-10 unused.
     RGMIN_MANIFOLD_CENTERED_MATRIX = 22,
+    /// Cartesian power. Shape from `rgmin_solver_set_power`.
+    /// Token alone is two Euclidean blocks of length 1.
+    RGMIN_MANIFOLD_POWER = 23,
 }
 
 /// Select the session manifold by token.
@@ -2383,6 +2386,11 @@ pub unsafe extern "C" fn rgmin_solver_set_manifold(
             rows: false,
         },
         rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN => ManifoldKind::Euclidean,
+        rgmin_manifold_t::RGMIN_MANIFOLD_POWER => ManifoldKind::Power {
+            block: 1,
+            count: 2,
+            factor: crate::manifold::PowerFactor::Euclidean,
+        },
     };
     unsafe { (*solver).solver.set_manifold(kind) };
 }
@@ -2519,6 +2527,36 @@ pub unsafe extern "C" fn rgmin_solver_set_centered_matrix(
         return;
     }
     unsafe { (*solver).solver.set_centered_matrix(m, n, center_rows != 0) };
+}
+
+/// Cartesian power. `factor` is 0 Euclidean, 1 sphere, 2 MwRigid,
+/// 3 rigid quotient. Returns 0 on success and 1 on a null solver or
+/// an unknown factor. manopt `powermanifold`.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_power(
+    solver: *mut rgmin_solver_t,
+    factor: i32,
+    block: usize,
+    count: usize,
+) -> i32 {
+    if solver.is_null() {
+        return 1;
+    }
+    let kind = match factor {
+        0 => ManifoldKind::Euclidean,
+        1 => ManifoldKind::Sphere,
+        2 => ManifoldKind::MwRigid,
+        3 => ManifoldKind::RigidQuotient,
+        _ => return 1,
+    };
+    if unsafe { (*solver).solver.set_power(kind, block, count) } {
+        0
+    } else {
+        1
+    }
 }
 
 /// Per-atom masses for `RGMIN_MANIFOLD_MW_RIGID`. `n_atoms == 0` or a

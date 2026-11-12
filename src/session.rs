@@ -32,7 +32,7 @@ use crate::lbfgs::{GradNorm, Lbfgs, LbfgsStep};
 use crate::lindh::LindhSpec;
 use crate::linesearch::LineSearch;
 use crate::lowest_mode::{ApplyHessian, lowest_eigenpair};
-use crate::manifold::{Manifold, ManifoldKind};
+use crate::manifold::{Manifold, ManifoldKind, PowerFactor};
 use crate::method::Method;
 use crate::newton::{HessianObjective, NewtonKind, rfo_direction, shifted_newton};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
@@ -909,6 +909,21 @@ impl Solver {
         self.set_manifold(ManifoldKind::CenteredMatrix { m, n, rows });
     }
 
+    /// Cartesian power of one factor. manopt `powermanifold`.
+    ///
+    /// `block` is the packed length of one copy. Returns false when
+    /// `factor` is not Euclidean, Sphere, MwRigid, or RigidQuotient.
+    /// A product of MwRigid uses [`Self::set_masses`]: one molecule's
+    /// masses are reused on every block, or a concatenated list is
+    /// split per block.
+    pub fn set_power(&mut self, factor: ManifoldKind, block: usize, count: usize) -> bool {
+        let Some(kind) = ManifoldKind::power(factor, block, count) else {
+            return false;
+        };
+        self.set_manifold(kind);
+        true
+    }
+
     /// Per-atom masses for [`ManifoldKind::MwRigid`] (Page–McIver / Eckart).
     /// Empty clears them (unit mass).
     pub fn set_masses(&mut self, masses: Array1<f64>) {
@@ -1113,8 +1128,60 @@ impl Solver {
                 project_horizontal(&mut w, x.view(), None, !self.periodic);
                 w
             }
+            ManifoldKind::Power {
+                block,
+                count,
+                factor: PowerFactor::MwRigid | PowerFactor::RigidQuotient,
+            } => self.project_power_blocks(x, v, block, count),
             other => other.project(x, v),
         }
+    }
+
+    /// Per-block Eckart projection for a power of rigid quotients.
+    ///
+    /// Masses, when set, are one molecule (reused) or the concatenation
+    /// of every block. Unit mass is the fallback, matching [`MwRigid`].
+    fn project_power_blocks(
+        &self,
+        x: &Array1<f64>,
+        v: &Array1<f64>,
+        block: usize,
+        count: usize,
+    ) -> Array1<f64> {
+        if block == 0 || count == 0 || x.len() != block.saturating_mul(count) || v.len() != x.len()
+        {
+            return v.clone();
+        }
+        let mut w = v.clone();
+        let stored = self.masses.as_ref().and_then(|m| m.as_slice());
+        let nat = block / 3;
+        let with_mass = matches!(
+            self.manifold,
+            ManifoldKind::Power {
+                factor: PowerFactor::MwRigid,
+                ..
+            }
+        );
+        for i in 0..count {
+            let a = i * block;
+            let b = a + block;
+            let mut block_v = w.slice(ndarray::s![a..b]).to_owned();
+            let block_x = x.slice(ndarray::s![a..b]);
+            let mass_arg = if with_mass {
+                match stored {
+                    Some(m) if nat > 0 && m.len() == nat => Some(m),
+                    Some(m) if nat > 0 && m.len() == count * nat => {
+                        Some(&m[i * nat..(i + 1) * nat])
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            project_horizontal(&mut block_v, block_x, mass_arg, !self.periodic);
+            w.slice_mut(ndarray::s![a..b]).assign(&block_v);
+        }
+        w
     }
 
     /// Dogleg model on a curved kind, for the tangent projection `P` at `x`.
@@ -1286,6 +1353,10 @@ impl Solver {
     fn horizontal_grad(&self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
         let mut g = match self.manifold {
             ManifoldKind::MwRigid | ManifoldKind::RigidQuotient => self.project_vec(x, grad),
+            ManifoldKind::Power {
+                factor: PowerFactor::MwRigid | PowerFactor::RigidQuotient,
+                ..
+            } => self.project_vec(x, grad),
             other => other.egrad2rgrad(x, grad),
         };
         if self.project_rigid
@@ -1308,6 +1379,10 @@ impl Solver {
     ) -> Array1<f64> {
         match self.manifold {
             ManifoldKind::RigidQuotient | ManifoldKind::MwRigid => self.project_vec(x_to, v),
+            ManifoldKind::Power {
+                factor: PowerFactor::MwRigid | PowerFactor::RigidQuotient,
+                ..
+            } => self.project_vec(x_to, v),
             other => other.transport(x_from, x_to, v),
         }
     }

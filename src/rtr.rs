@@ -227,6 +227,109 @@ where
     )
 }
 
+/// Absil–Baker–Gallivan trust-region loop on any embedded manifold.
+///
+/// Each iteration minimises the quadratic model in the tangent space
+/// with [`truncated_cg`] and accepts the retracted step when the
+/// reduction ratio exceeds one tenth. `grad` and `hvp` are ambient;
+/// the truncated CG projects them. The Hessian action is whatever the
+/// caller supplies: an analytic product, or the central difference in
+/// [`crate::hvp::FdHvp`].
+pub struct RtrMin {
+    /// Point on the manifold.
+    pub x: Array1<f64>,
+    /// Objective value at `x`.
+    pub value: f64,
+    /// Norm of the projected gradient.
+    pub grad_norm: f64,
+    /// Outer iterations performed.
+    pub iterations: usize,
+    /// Steps the radius update accepted.
+    pub accepted: usize,
+}
+
+/// Options for [`minimize_rtr`]. The radius constants are the ones in
+/// [`RtrRadius`]; nothing here is fit to a problem.
+pub struct RtrOptions {
+    /// Upper bound on the trust radius. The first radius is one eighth of this.
+    pub radius_max: f64,
+    /// Stop when the projected gradient is at most this large.
+    pub grad_tol: f64,
+    /// Outer iteration budget.
+    pub max_iter: usize,
+    /// Inner CG iteration budget.
+    pub cg_max: usize,
+}
+
+impl Default for RtrOptions {
+    fn default() -> Self {
+        Self {
+            radius_max: 1.0,
+            grad_tol: 1e-8,
+            max_iter: 100,
+            cg_max: 50,
+        }
+    }
+}
+
+/// Minimise `value` on `manifold` by Riemannian trust region.
+pub fn minimize_rtr<M, FV, GG, HH>(
+    manifold: &M,
+    x0: Array1<f64>,
+    mut value: FV,
+    mut grad: GG,
+    mut hvp: HH,
+    opts: RtrOptions,
+) -> RtrMin
+where
+    M: Manifold + ?Sized,
+    FV: FnMut(&Array1<f64>) -> f64,
+    GG: FnMut(&Array1<f64>) -> Array1<f64>,
+    HH: FnMut(&Array1<f64>, &Array1<f64>) -> Array1<f64>,
+{
+    let mut x = x0;
+    let mut radius = RtrRadius::new(opts.radius_max);
+    let mut accepted = 0usize;
+    let mut iterations = 0usize;
+    let mut f = value(&x);
+    let mut gnorm = 0.0;
+    for _ in 0..opts.max_iter {
+        iterations += 1;
+        let g = grad(&x);
+        let pg = manifold.project(&x, &g);
+        gnorm = nrm2(pg.view());
+        if !gnorm.is_finite() || gnorm <= opts.grad_tol {
+            break;
+        }
+        let anchor = x.clone();
+        let step = truncated_cg(
+            manifold,
+            anchor.view(),
+            g.view(),
+            |v| hvp(&anchor, v),
+            radius.radius,
+            1.0,
+            0.1,
+            opts.cg_max.max(1),
+        );
+        let x_try = manifold.retract(&x, &step.eta);
+        let f_try = value(&x_try);
+        let actual = f - f_try;
+        if radius.update(actual, step.model_decrease, nrm2(step.eta.view())) && f_try.is_finite() {
+            x = x_try;
+            f = f_try;
+            accepted += 1;
+        }
+    }
+    RtrMin {
+        x,
+        value: f,
+        grad_norm: gnorm,
+        iterations,
+        accepted,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,6 +421,29 @@ mod tests {
         }
         assert!((f(&x) - 1.0).abs() < 1e-8, "f = {}", f(&x));
         assert!(x[1].abs() > 1.0 - 1e-6);
+    }
+
+    #[test]
+    fn minimize_rtr_finds_the_smallest_eigenvector() {
+        let a = Array2::from_diag(&array![3.0, 1.0, 2.0]);
+        let mut x = array![0.6, 0.48, 0.64];
+        x /= nrm2(x.view());
+        let out = minimize_rtr(
+            &Sphere,
+            x,
+            |z| z.dot(&a.dot(z)),
+            |z| &a.dot(z) * 2.0,
+            |_z, v| &a.dot(v) * 2.0,
+            RtrOptions {
+                radius_max: 1.0,
+                grad_tol: 1e-10,
+                max_iter: 100,
+                cg_max: 20,
+            },
+        );
+        assert!((out.value - 1.0).abs() < 1e-8, "f = {}", out.value);
+        assert!(out.x[1].abs() > 1.0 - 1e-6);
+        assert!(out.accepted > 0);
     }
 
     #[test]
