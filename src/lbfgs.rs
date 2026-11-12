@@ -15,6 +15,8 @@
 //! Wolfe, *Convergence Conditions for Ascent Methods*,
 //! <https://doi.org/10.1137/1011036>.
 
+use std::collections::VecDeque;
+
 use ndarray::{Array1, ArrayView1};
 
 use crate::control::Control;
@@ -32,6 +34,78 @@ pub enum GradNorm {
     Euclidean,
     /// Infinity `||g||_∞`. Matches SciPy L-BFGS-B and hopping polish.
     Infinity,
+}
+
+const CYCLE_MEMORY: usize = 8;
+
+fn nrm(v: ArrayView1<f64>) -> f64 {
+    v.dot(&v).sqrt()
+}
+
+fn unit_mode(mode: &Array1<f64>) -> Option<Array1<f64>> {
+    let norm = nrm(mode.view());
+    if norm > 0.0 && norm.is_finite() && mode.iter().all(|value| value.is_finite()) {
+        Some(mode / norm)
+    } else {
+        None
+    }
+}
+
+fn project_off(v: ArrayView1<f64>, direction: &Array1<f64>) -> Array1<f64> {
+    let denom = direction.dot(direction);
+    if !(denom > 0.0 && denom.is_finite()) {
+        return v.to_owned();
+    }
+    let coeff = v.dot(direction) / denom;
+    if !coeff.is_finite() {
+        return v.to_owned();
+    }
+    &v.to_owned() - &(direction * coeff)
+}
+
+fn positions_coincide(stored: &Array1<f64>, current: ArrayView1<f64>) -> bool {
+    if stored.len() != current.len() {
+        return false;
+    }
+    let mut sum = 0.0;
+    for (left, right) in stored.iter().zip(current.iter()) {
+        let delta = left - right;
+        sum += delta * delta;
+    }
+    let scale = nrm(stored.view()).max(nrm(current)).max(1.0);
+    sum.sqrt() <= 1e-8 * scale
+}
+
+fn directions_coincide(stored: &Array1<f64>, current: &Array1<f64>) -> bool {
+    let left = nrm(stored.view());
+    let right = nrm(current.view());
+    if !(left > 0.0 && right > 0.0) {
+        return false;
+    }
+    stored.dot(current) / (left * right) >= 1.0 - 1e-6
+}
+
+fn restart_direction(proposed: &Array1<f64>, mode: Option<&Array1<f64>>) -> Array1<f64> {
+    let length = nrm(proposed.view());
+    let mut best_norm = 0.0;
+    let mut best: Option<Array1<f64>> = None;
+    for axis_index in 0..proposed.len() {
+        let mut axis = Array1::zeros(proposed.len());
+        axis[axis_index] = 1.0;
+        if let Some(mode) = mode {
+            axis = project_off(axis.view(), mode);
+        }
+        axis = project_off(axis.view(), proposed);
+        let norm = nrm(axis.view());
+        if norm > best_norm {
+            best_norm = norm;
+            best = Some(axis);
+        }
+    }
+    if let Some(axis) = best.filter(|_| best_norm > 1e-8 && length > 0.0) {
+        return axis * (length / best_norm);
+    }
+    proposed * -1.0
 }
 
 /// Stored curvature pair from one accepted step.
@@ -100,6 +174,13 @@ pub struct Lbfgs {
     pub(crate) have_curvature: bool,
     /// \(H_0 = P^{-1}\) from an assembled geometry preconditioner.
     h0: Option<crate::precon::Metric>,
+    /// Unit mode removed from pairs and from the two-loop direction.
+    /// `None` leaves minimization unchanged.
+    complement: Option<Array1<f64>>,
+    /// Recent `(position, search direction)` pairs. A repeat restarts
+    /// the direction (Levitt and Ortner, SIAM J. Numer. Anal. 55, 2204
+    /// (2017), doi:10.1137/16M1087199).
+    cycle: VecDeque<(Array1<f64>, Array1<f64>)>,
 }
 
 impl Default for Lbfgs {
@@ -145,6 +226,8 @@ impl Lbfgs {
             last_sy: 0.0,
             last_yy: 0.0,
             have_curvature: false,
+            complement: None,
+            cycle: VecDeque::new(),
         }
     }
 
@@ -162,6 +245,79 @@ impl Lbfgs {
         self.last_yy = 0.0;
         self.have_curvature = false;
         self.memory.clear();
+        self.cycle.clear();
+    }
+
+    /// Project later pairs and directions off `mode`. `None` clears it.
+    ///
+    /// The stored pairs are the secants of the complement of the minimum
+    /// mode (Yin, Zhang, and Zhang, arXiv:2611.07692). A pair that loses
+    /// its positive curvature under that projection is dropped. Existing
+    /// pairs are reprojected onto the new complement.
+    pub fn set_complement_mode(&mut self, mode: Option<Array1<f64>>) {
+        self.complement = mode.and_then(|mode| unit_mode(&mode));
+        if self.complement.is_some() {
+            self.reproject_pairs();
+        }
+    }
+
+    /// Two-loop direction in the complement of the stored mode.
+    ///
+    /// When that mode is unset this is the ordinary two-loop direction.
+    /// When the position and the proposed direction repeat a stored
+    /// sample, the pairs are dropped and the direction is replaced by
+    /// one in the complement orthogonal to the repeated direction.
+    pub fn complement_direction(&mut self, x: ArrayView1<f64>, g: ArrayView1<f64>) -> Array1<f64> {
+        let proposed = self.direction(g);
+        if self.complement.is_none() || nrm(proposed.view()) <= 1e-15 {
+            return proposed;
+        }
+        let repeated = self.cycle.iter().any(|(position, direction)| {
+            positions_coincide(position, x) && directions_coincide(direction, &proposed)
+        });
+        if !repeated {
+            self.remember_cycle(x, &proposed);
+            return proposed;
+        }
+        self.memory.clear();
+        self.have_curvature = false;
+        self.last_sy = 0.0;
+        self.last_yy = 0.0;
+        let fresh = self.direction(g);
+        if directions_coincide(&fresh, &proposed) {
+            restart_direction(&proposed, self.complement.as_ref())
+        } else {
+            fresh
+        }
+    }
+
+    fn remember_cycle(&mut self, x: ArrayView1<f64>, direction: &Array1<f64>) {
+        self.cycle.push_back((x.to_owned(), direction.clone()));
+        while self.cycle.len() > CYCLE_MEMORY {
+            self.cycle.pop_front();
+        }
+    }
+
+    fn reproject_pairs(&mut self) {
+        let Some(mode) = self.complement.clone() else {
+            return;
+        };
+        let stored = std::mem::take(&mut self.memory);
+        for pair in stored {
+            let s = project_off(pair.s.view(), &mode);
+            let y = project_off(pair.y.view(), &mode);
+            let sy = s.dot(&y);
+            let sn = nrm(s.view());
+            let yn = nrm(y.view());
+            if sy.is_finite() && sy > 1e-8 * sn * yn {
+                self.memory.push(Pair {
+                    s,
+                    y,
+                    rho: 1.0 / sy,
+                });
+            }
+        }
+        self.trim();
     }
 
     /// Times a supplied `H0^{-1}` (a Hessian under the Newton-preconditioned
@@ -209,6 +365,11 @@ impl Lbfgs {
     ///
     /// An installed geometry preconditioner is \(H_0 = P^{-1}\).
     pub(crate) fn direction(&self, g: ArrayView1<f64>) -> Array1<f64> {
+        if let Some(mode) = &self.complement {
+            let g = project_off(g, mode);
+            let d = self.direction_with_sources(g.view(), None, self.h0.as_ref());
+            return project_off(d.view(), mode);
+        }
         self.direction_with_sources(g, None, self.h0.as_ref())
     }
 
@@ -432,7 +593,11 @@ impl Lbfgs {
         self.push_pair(s, y, None);
     }
 
-    pub(crate) fn push_pair(&mut self, s: Array1<f64>, y: Array1<f64>, gnorm: Option<f64>) {
+    pub(crate) fn push_pair(&mut self, mut s: Array1<f64>, mut y: Array1<f64>, gnorm: Option<f64>) {
+        if let Some(mode) = &self.complement {
+            s = project_off(s.view(), mode);
+            y = project_off(y.view(), mode);
+        }
         let sy = s.dot(&y);
         let sn = s.iter().map(|v| v * v).sum::<f64>().sqrt();
         let yn = y.iter().map(|v| v * v).sum::<f64>().sqrt();

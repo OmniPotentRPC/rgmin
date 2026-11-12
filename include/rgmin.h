@@ -55,7 +55,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 36
+#define RGMIN_ABI_VERSION_MINOR 37
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -554,6 +554,17 @@ size_t rgmin_solver_pair_count(const rgmin_solver_t *solver);
 rgmin_status_t rgmin_solver_search_direction(rgmin_solver_t *solver,
                                           const double *grad, double *dir,
                                           size_t n);
+/** Project later L-BFGS pairs and directions off \a mode (length \a n).
+ *  NULL clears the mode. Returns 0, or 1 when \a solver is not L-BFGS.
+ *  ABI minor 37. */
+int32_t rgmin_solver_set_complement_mode(rgmin_solver_t *solver, const double *mode,
+                                      size_t n);
+/** Complement two-loop at \a x. A repeated position and direction drops
+ *  the pairs and replaces the direction. Writes \a n entries to \a dir.
+ *  ABI minor 37. */
+rgmin_status_t rgmin_solver_complement_direction(rgmin_solver_t *solver,
+                                              const double *x, const double *grad,
+                                              double *dir, size_t n);
 
 /** Directional curvature `d^T H(x) d`. Non-success falls back to the probe. */
 typedef rgmin_status_t (*rgmin_curv_fn)(void *user, const DLManagedTensorVersioned *x,

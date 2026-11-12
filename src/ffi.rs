@@ -64,7 +64,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 36;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 37;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -3793,6 +3793,75 @@ pub unsafe extern "C" fn rgmin_solver_search_direction(
         (*solver)
             .solver
             .search_direction(ndarray::ArrayView1::from(gv))
+    } {
+        Ok(d) => {
+            let out = unsafe { std::slice::from_raw_parts_mut(dir, n) };
+            out.copy_from_slice(d.as_slice().unwrap());
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        Err(e) => status_from_error(&e),
+    }
+}
+
+/// Project later L-BFGS pairs and directions off `mode`. NULL clears it.
+///
+/// # Safety
+///
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+/// `mode` is null or addresses `n` `f64` values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_complement_mode(
+    solver: *mut rgmin_solver_t,
+    mode: *const f64,
+    n: usize,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_complement_mode: null solver");
+        return 1;
+    }
+    let dim = unsafe { (*solver).solver.dim() };
+    if !mode.is_null() && n != dim {
+        set_last_error("rgmin_solver_set_complement_mode: n does not match session dim");
+        return 1;
+    }
+    let owned = if mode.is_null() {
+        None
+    } else {
+        let values = unsafe { std::slice::from_raw_parts(mode, n) };
+        Some(Array1::from(values.to_vec()))
+    };
+    i32::from(!unsafe { (*solver).solver.set_complement_mode(owned) })
+}
+
+/// Complement two-loop direction at `x`, with a cycle restart.
+///
+/// # Safety
+///
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+/// `x`, `grad`, and `dir` are null or each addresses `n` `f64` values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_complement_direction(
+    solver: *mut rgmin_solver_t,
+    x: *const f64,
+    grad: *const f64,
+    dir: *mut f64,
+    n: usize,
+) -> rgmin_status_t {
+    if solver.is_null() || x.is_null() || grad.is_null() || dir.is_null() {
+        set_last_error("rgmin_solver_complement_direction: null argument");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let dim = unsafe { (*solver).solver.dim() };
+    if n != dim {
+        set_last_error("rgmin_solver_complement_direction: n does not match session dim");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let xv = unsafe { std::slice::from_raw_parts(x, n) };
+    let gv = unsafe { std::slice::from_raw_parts(grad, n) };
+    match unsafe {
+        (*solver)
+            .solver
+            .complement_direction(ndarray::ArrayView1::from(xv), ndarray::ArrayView1::from(gv))
     } {
         Ok(d) => {
             let out = unsafe { std::slice::from_raw_parts_mut(dir, n) };

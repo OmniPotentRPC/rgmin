@@ -1451,6 +1451,48 @@ impl Solver {
         }
     }
 
+    /// Remove `mode` from later L-BFGS pairs and directions.
+    ///
+    /// `None` clears the mode. Other methods ignore it and return false.
+    /// Existing pairs are reprojected onto the new complement.
+    pub fn set_complement_mode(&mut self, mode: Option<Array1<f64>>) -> bool {
+        match &mut self.inner {
+            Inner::Lbfgs(solver) => {
+                solver.set_complement_mode(mode);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Complement two-loop direction at `x`.
+    ///
+    /// A repeated `(position, direction)` drops the pairs and replaces
+    /// the direction. With no complement mode this is
+    /// [`Self::search_direction`].
+    pub fn complement_direction(
+        &mut self,
+        x: ArrayView1<f64>,
+        g: ArrayView1<f64>,
+    ) -> Result<Array1<f64>> {
+        if x.len() != self.dim || g.len() != self.dim {
+            return Err(Error::Dim {
+                dim: self.dim,
+                got: x.len().max(g.len()),
+            });
+        }
+        let dir = match &mut self.inner {
+            Inner::Lbfgs(solver) => solver.complement_direction(x, g),
+            _ => g.mapv(|value| -value),
+        };
+        if dir.iter().any(|value| !value.is_finite()) {
+            return Err(Error::Oracle {
+                what: "non-finite search direction",
+            });
+        }
+        Ok(dir)
+    }
+
     /// Two-loop direction `d = -H g` with no evaluation and no push.
     pub fn search_direction(&self, g: ArrayView1<f64>) -> Result<Array1<f64>> {
         if g.len() != self.dim {
