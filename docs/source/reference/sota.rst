@@ -305,9 +305,13 @@ These four tokens share ``rgmin_solver_t`` and a fused ``(f, g)``.
   delay window, and a clipped forward move rescales the stored velocity
   to the displacement actually taken. More than 2,000 consecutive
   non-positive-power steps terminate as a stalled solve. An installed
-  exponential preconditioner leaves that order in place and uses ``P``
-  as the metric: power is ``F · v``, and the kick and the mix use
-  ``P^{-1} F``.
+  preconditioner (Packwood et al., J. Chem. Phys. 144, 164109 (2016),
+  `10.1063/1.4947024 <https://doi.org/10.1063/1.4947024>`_; ASE ``PreconFIRE``)
+  leaves that order in place and uses ``P`` as the metric: power is
+  ``F · v``, and the kick and the mix use ``P^{-1} F``. The displacement
+  cap stays Cartesian. ``set_fire_precon(false)`` forces the Euclidean
+  integrator. ``IdentityPrecond`` reproduces it. The trait is
+  ``Preconditioner``; ``Exp`` and ``NystromPrecond`` implement it too.
 
 - ``FirePreset::Guenole2020`` (``set_fire_preset``, opt-in) takes
   Guenole 2020 Table 1 (arXiv:1908.02038v4, page 7), the LAMMPS

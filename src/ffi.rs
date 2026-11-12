@@ -74,7 +74,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 35;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 36;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1876,6 +1876,32 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_abc(solver: *mut rgmin_solver_t, 
         return 1;
     }
     match unsafe { (*solver).solver.set_fire_abc(on != 0) } {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(&e.to_string());
+            1
+        }
+    }
+}
+
+/// Preconditioned FIRE on (`on != 0`) or off for a FIRE or FIRE 2.0
+/// session. The default is on: an exponential preconditioner installed
+/// by [`rgmin_solver_set_exp`] is the metric. The kick and the mix use
+/// `P^{-1} F`, the power is `F · v`, and the displacement cap stays
+/// Cartesian (ASE PreconFIRE; Packwood et al., J. Chem. Phys. 144,
+/// 164109 (2016)). `on == 0` forces the Euclidean integrator. ABI minor
+/// 36. Returns 0, or 1 on a null session or a session that is not
+/// `RGMIN_FIRE` or `RGMIN_FIRE2`.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_fire_precon(solver: *mut rgmin_solver_t, on: i32) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_fire_precon: null solver");
+        return 1;
+    }
+    match unsafe { (*solver).solver.set_fire_precon(on != 0) } {
         Ok(()) => 0,
         Err(e) => {
             set_last_error(&e.to_string());

@@ -61,7 +61,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 35
+#define RGMIN_ABI_VERSION_MINOR 36
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -302,6 +302,14 @@ int32_t rgmin_solver_set_fire_preset(rgmin_solver_t *solver, rgmin_fire_preset_t
  *  \c maxmove, bounds each displacement component. Returns 0, or 1 on
  *  a null session or a session that is not RGMIN_FIRE2. ABI minor 30. */
 int32_t rgmin_solver_set_fire_abc(rgmin_solver_t *solver, int32_t on);
+/** Preconditioned FIRE (Packwood et al., J. Chem. Phys. 144, 164109
+ *  (2016), ASE PreconFIRE) on when \c on is nonzero. The kick and the
+ *  mix use P^{-1} F, the power is F·v, and the displacement cap stays
+ *  Cartesian. The default is nonzero, so an installed exponential
+ *  preconditioner is the metric. Zero forces the Euclidean integrator.
+ *  Returns 0, or 1 on a null session or a session that is not FIRE or
+ *  FIRE 2.0. ABI minor 36. */
+int32_t rgmin_solver_set_fire_precon(rgmin_solver_t *solver, int32_t on);
 /** Per-atom cap of the default eOn L-BFGS step. The first step probes
  *  curvature. A proposal at least as long as the cap clears the memory
  *  and steps along H0 times the force. A positive \c max_atom sets the

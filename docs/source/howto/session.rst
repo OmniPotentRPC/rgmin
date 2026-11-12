@@ -115,6 +115,12 @@ Setters
     +--------------------------------+--------------------------------------------------------------------------+
     | ``set_fire_abc``               | ``fire2`` only: ABC-FIRE bias correction with a per-component cap        |
     +--------------------------------+--------------------------------------------------------------------------+
+    | ``set_fire_precon``            | ``fire`` / ``fire2``: use an installed preconditioner (ASE PreconFIRE).  |
+    |                                | Off keeps the Euclidean integrator                                       |
+    +--------------------------------+--------------------------------------------------------------------------+
+    | ``set_preconditioner``         | Any ``Preconditioner`` as that FIRE metric. Identity reproduces plain    |
+    |                                | FIRE                                                                     |
+    +--------------------------------+--------------------------------------------------------------------------+
     | ``set_distance_constraints``   | Keep atom pairs at fixed distances with SHAKE, LINCS or SETTLE; a        |
     |                                | setting the set cannot run with is a typed error                         |
     +--------------------------------+--------------------------------------------------------------------------+

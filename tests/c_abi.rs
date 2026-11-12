@@ -907,7 +907,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 35);
+    assert_eq!(stamp.abi_minor, 36);
     assert_eq!(stamp.layout_revision, 4);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -917,7 +917,8 @@ fn abi_stamp_identifies_this_optimizer_layout() {
 #[test]
 fn c_abi_fire_preset_and_abc() {
     use rgmin::ffi::{
-        rgmin_fire_preset_t, rgmin_solver_set_fire_abc, rgmin_solver_set_fire_preset,
+        rgmin_fire_preset_t, rgmin_solver_set_fire_abc, rgmin_solver_set_fire_precon,
+        rgmin_solver_set_fire_preset,
     };
     let ctrl = rgmin_control_t {
         maxiter: 10,
@@ -930,10 +931,15 @@ fn c_abi_fire_preset_and_abc() {
     let null = std::ptr::null_mut();
     assert_eq!(unsafe { rgmin_solver_set_fire_preset(null, guenole) }, 1);
     assert_eq!(unsafe { rgmin_solver_set_fire_abc(null, 1) }, 1);
+    assert_eq!(unsafe { rgmin_solver_set_fire_precon(null, 0) }, 1);
     let v1 = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE, &ctrl, 2) };
     assert_eq!(unsafe { rgmin_solver_set_fire_preset(v1, guenole) }, 1);
     assert_eq!(unsafe { rgmin_solver_set_fire_abc(v1, 1) }, 1);
+    assert_eq!(unsafe { rgmin_solver_set_fire_precon(v1, 0) }, 0);
     unsafe { rgmin_solver_free(v1) };
+    let lbfgs = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert_eq!(unsafe { rgmin_solver_set_fire_precon(lbfgs, 1) }, 1);
+    unsafe { rgmin_solver_free(lbfgs) };
     for (abc, shrink) in [(0, 0.98), (1, 0.92)] {
         let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE2, &ctrl, 2) };
         assert_eq!(unsafe { rgmin_solver_set_fire_preset(session, 2) }, 1);

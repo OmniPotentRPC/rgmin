@@ -218,6 +218,16 @@ impl Exp {
     }
 }
 
+impl crate::Preconditioner for Exp {
+    fn solve(&self, r: ArrayView1<f64>) -> Array1<f64> {
+        Exp::solve(self, r).unwrap_or_else(|| r.to_owned())
+    }
+
+    fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {
+        Exp::apply(self, v)
+    }
+}
+
 impl ExpState {
     pub(crate) fn new(
         positions: ArrayView1<f64>,

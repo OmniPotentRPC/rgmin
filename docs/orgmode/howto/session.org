@@ -124,6 +124,8 @@ together is not asked twice.
 | ~set_masses~ | Per-atom masses for ~mw_rigid~ (Page–McIver) |
 | ~set_fire_preset~ | ~fire2~ only: Guenole 2020 Table 1 parameters; restarts the integrator |
 | ~set_fire_abc~ | ~fire2~ only: ABC-FIRE bias correction with a per-component cap |
+| ~set_fire_precon~ | ~fire~ / ~fire2~: use an installed preconditioner (ASE PreconFIRE). Off keeps the Euclidean integrator |
+| ~set_preconditioner~ | Any ~Preconditioner~ as that FIRE metric. Identity reproduces plain FIRE |
 | ~set_distance_constraints~ | Keep atom pairs at fixed distances with SHAKE, LINCS or SETTLE; a setting the set cannot run with is a typed error |
 | ~clear_distance_constraints~ | Drop the set and the method memory |
 

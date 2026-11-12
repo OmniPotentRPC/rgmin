@@ -351,6 +351,9 @@ public:
     }
     /// ABC-FIRE on a FIRE 2.0 session. Returns 0, or 1 on a non-FIRE 2.0 session.
     int set_fire_abc(bool on) { return rgmin_solver_set_fire_abc(ptr_, on ? 1 : 0); }
+    /// Preconditioned FIRE. Returns 0, or 1 when the session is not FIRE or FIRE 2.0.
+    /// The kick and the mix use P^{-1} F. The power is F·v. The cap stays Cartesian.
+    int set_fire_precon(bool on) { return rgmin_solver_set_fire_precon(ptr_, on ? 1 : 0); }
     /// eOn L-BFGS cap. A non-positive cap restores 0.2.
     /// Returns 0, or 1 when the session cannot run the capped step.
     int set_lbfgs_capped(double max_atom) { return rgmin_solver_set_lbfgs_capped(ptr_, max_atom); }

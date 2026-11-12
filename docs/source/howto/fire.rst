@@ -84,3 +84,25 @@ A ``fire2`` session can take its velocity from the secant of the step.
 On a curved kind that secant is projected onto the tangent space.
 The projection is at the new point.
 Flat kinds keep the plain secant.
+
+Preconditioned FIRE
+~~~~~~~~~~~~~~~~~~~
+
+``set_preconditioner`` and ``set_exp`` opt a ``fire`` or ``fire2`` session into
+the preconditioned update of Packwood et al.
+:cite:`packwoodUniversalPreconditionerSimulating2016`,
+which ASE ships as ``PreconFIRE`` (``ase.optimize.precon.fire``).
+The velocity kick and the mix use ``P^{-1} F``.
+The power that grows or resets the time step is ``F · v``, the same
+product as the ``P``-inner product of the velocity with ``P^{-1} F``.
+The displacement cap is applied to the Cartesian step.
+``set_fire_precon(false)`` keeps the Euclidean integrator even when a
+preconditioner is installed.
+With the option left off and no preconditioner installed, FIRE and
+FIRE 2.0 are the Euclidean steppers.
+An identity preconditioner reproduces that trajectory.
+The trait is ``Preconditioner``.
+``Exp``, ``IdentityPrecond`` and ``NystromPrecond`` implement it.
+``set_exp`` remains the way to build the exponential metric from a
+neighbour list, and L-BFGS still reads that factor as ``H0``.
+C: ``rgmin_solver_set_fire_precon``. ``abi_minor`` 36.

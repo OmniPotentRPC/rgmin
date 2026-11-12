@@ -8,6 +8,9 @@
 //! A row that stops on the iteration budget is not a win.
 //!
 //! `env -i PATH HOME LANG RUSTUP_HOME CARGO_HOME cargo run --release --example bench_algo -- bench/raw/algo.csv bench/raw/steps.csv`
+//!
+//! `--fire-precon` times plain FIRE against preconditioned FIRE on the
+//! Pt/Cu slabs and nanoparticles, LJ150 and the Morse slab.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
@@ -123,6 +126,10 @@ fn main() {
         lindh_scale(&out, repeats);
         return;
     }
+    if first.as_deref() == Some("--fire-precon") {
+        fire_precon_report();
+        return;
+    }
     if first.as_deref() == Some("--beat") {
         let out = args
             .next()
@@ -208,6 +215,52 @@ fn main() {
     std::fs::write(&out, rows).expect("algo csv");
     std::fs::write(&steps_path, steps).expect("step log");
     eprintln!("wrote {out}");
+}
+
+/// Plain FIRE against preconditioned FIRE. Wall time is the whole arm,
+/// the potential and the optimizer together, one run.
+fn fire_precon_report() {
+    let want = [
+        "gupta-pt-slab",
+        "gupta-cu-slab",
+        "gupta-pt-nano",
+        "gupta-cu-nano",
+        "lj75",
+        "lj150",
+        "morse-pt-slab",
+    ];
+    println!("problem,arm,atoms,evals,energy,gnorm,converged,seconds");
+    for p in problems() {
+        if !want.contains(&p.name) {
+            continue;
+        }
+        check_force(&p);
+        for arm in [Arm::Fire, Arm::FireExp] {
+            let t0 = Instant::now();
+            let (evals, gnorm, energy, converged, _) = run_arm(&p, arm);
+            let seconds = t0.elapsed().as_secs_f64();
+            println!(
+                "{},{},{},{},{:.8e},{:.6e},{},{:.6}",
+                p.name,
+                arm.name(),
+                p.x0.len() / 3,
+                evals,
+                energy,
+                gnorm,
+                converged as u8,
+                seconds
+            );
+            eprintln!(
+                "{:16} {:10} evals {:5} E {:.8e} |F| {:.3e} conv {converged} {:.3}s",
+                p.name,
+                arm.name(),
+                evals,
+                energy,
+                gnorm,
+                seconds
+            );
+        }
+    }
 }
 
 fn run_arm(p: &Problem, arm: Arm) -> (usize, f64, f64, bool, Vec<EonFeat>) {

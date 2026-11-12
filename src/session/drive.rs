@@ -462,11 +462,12 @@ impl Solver {
         } else if let Some(cap) = self.control.maxmove {
             scale_step(&self.scratch, x, cap);
         }
-        if v2 && dt > 0.0 {
-            if let Inner::Fire(state) = &mut self.inner {
-                for i in 0..n {
-                    state.vel[i] = (x[i] - self.scratch[i]) / dt;
-                }
+        if v2
+            && dt > 0.0
+            && let Inner::Fire(state) = &mut self.inner
+        {
+            for i in 0..n {
+                state.vel[i] = (x[i] - self.scratch[i]) / dt;
             }
         }
         let new_value = fill(x.view(), &mut self.last_grad);

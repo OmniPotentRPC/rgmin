@@ -55,7 +55,10 @@ Callbacks are arguments of each step, not stored on the handle.
 ~rgmin_solver_exp_mu~ returns that scale, or NaN when none is
 installed. L-BFGS uses the factor as ~H0~. FIRE and nonlinear CG
 use it as the metric. ~rgmin_solver_clear_exp~ drops it.
-~abi_minor~ 28.
+~rgmin_solver_set_fire_precon~ turns that metric off for a FIRE
+session: the kick and the mix use ~P^{-1} F~, the power is ~F · v~,
+and the cap stays Cartesian (ASE ~PreconFIRE~, Packwood et al. 2016).
+~abi_minor~ 36. The exponential parameters themselves are minor 28.
 
 A HiGHS feasible set is ~rgmin_solver_set_highs~ plus
 ~rgmin_solver_set_box~ (NULL side unbounded), optional

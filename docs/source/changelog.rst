@@ -7,6 +7,13 @@ Unreleased
 
 ~~~~~~~~~~
 
+FIRE and FIRE 2.0 take an optional preconditioner.
+The kick and the mix use ``P^{-1} F``, the power check is ``F · v``, and the displacement cap stays Cartesian, as in ASE ``PreconFIRE`` (Packwood et al., J. Chem. Phys. 144, 164109 (2016), `10.1063/1.4947024 <https://doi.org/10.1063/1.4947024>`_).
+``set_fire_precon(false)`` keeps the Euclidean integrator.
+``set_exp`` still installs the exponential metric, and any ``Preconditioner`` (``Exp``, ``IdentityPrecond``, ``NystromPrecond``) can be installed with ``set_preconditioner``.
+C: ``rgmin_solver_set_fire_precon``. The C++ wrapper has ``set_fire_precon``. ``xts.h`` aliases it.
+``abi_minor`` 36.
+
 ``Lbfgs::ftol`` is the opt-in relative-decrease stop of L-BFGS-B, and its default of zero turns it off.
 A line-search step from ``f_k`` to ``f_{k+1}`` ends ``minimize``, ``minimize_watched`` and ``minimize_recognized`` when ``f_k - f_{k+1} <= ftol * max(|f_k|, |f_{k+1}|, 1)``.
 ``LBFGSB_FTOL`` is the SciPy default, and :doc:`reference/sota` measures what it saves.

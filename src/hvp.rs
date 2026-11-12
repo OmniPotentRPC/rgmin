@@ -195,6 +195,18 @@ impl<'a, O: DifferentiableObjective<f64> + ?Sized> HessianVector for FdHvp<'a, O
 pub trait Preconditioner {
     /// `P^{-1} r`.
     fn solve(&self, r: ArrayView1<f64>) -> Array1<f64>;
+
+    /// `P v`. The default is the identity action, which is what
+    /// [`IdentityPrecond`] does.
+    fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {
+        v.to_owned()
+    }
+
+    /// `true` when `P` is the identity, so FIRE can take the Euclidean
+    /// update and match it bit for bit.
+    fn is_identity(&self) -> bool {
+        false
+    }
 }
 
 /// No preconditioning: `z = r`.
@@ -203,6 +215,10 @@ pub struct IdentityPrecond;
 impl Preconditioner for IdentityPrecond {
     fn solve(&self, r: ArrayView1<f64>) -> Array1<f64> {
         r.to_owned()
+    }
+
+    fn is_identity(&self) -> bool {
+        true
     }
 }
 
@@ -443,6 +459,23 @@ impl Preconditioner for NystromPrecond {
         let mut z = r.to_owned();
         z += &self.u.dot(&adj);
         z
+    }
+
+    fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {
+        if self.u.ncols() == 0 || !(self.mu.is_finite() && self.mu > 0.0) {
+            return v.to_owned();
+        }
+        // Inverse of `solve` when the sketch columns are orthonormal:
+        // P = I + U diag(lam / mu) U^T.
+        let t = self.u.t().dot(&v);
+        let adj = Array1::from_iter(
+            t.iter()
+                .zip(self.lam.iter())
+                .map(|(ti, li)| ti * (li / self.mu)),
+        );
+        let mut y = v.to_owned();
+        y += &self.u.dot(&adj);
+        y
     }
 }
 

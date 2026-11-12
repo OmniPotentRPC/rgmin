@@ -25,8 +25,8 @@ use crate::fire::{
 };
 use crate::holonomic::DistanceConstraints;
 use crate::hvp::{
-    FiniteDifference, HessianVector, NewtonCgRequest, OptionalAction, newton_cg_step,
-    sym_eig_jacobi,
+    FiniteDifference, HessianVector, NewtonCgRequest, OptionalAction, Preconditioner,
+    newton_cg_step, sym_eig_jacobi,
 };
 use crate::lbfgs::{GradNorm, Lbfgs, LbfgsStep};
 use crate::lindh::LindhSpec;
@@ -77,20 +77,36 @@ fn metric_vector(exp: &Option<ExpState>, v: &Array1<f64>) -> Array1<f64> {
 }
 
 /// P-norms for the FIRE mix: `sqrt(v^T P v)` and `sqrt(F · P^{-1} F)`.
+/// The second of those is the Euclidean product of the physical force
+/// with `P^{-1} F`, which is also the power `F · v` when `v` is that
+/// direction.
 fn fire_mix(
-    exp: &Option<ExpState>,
+    pre: &dyn Preconditioner,
     vel: &Array1<f64>,
     raw: &Array1<f64>,
     steepest: &Array1<f64>,
 ) -> Option<FireMix> {
-    let p = exp.as_ref().and_then(ExpState::matrix)?;
-    let pv = p.apply(vel.view());
-    let vel_n = vel.dot(&pv).max(0.0).sqrt();
-    let dir_n = raw.dot(steepest).max(0.0).sqrt();
+    let pv = pre.apply(vel.view());
+    let vel_n = if pv.len() == vel.len() {
+        vel.dot(&pv).max(0.0).sqrt()
+    } else {
+        l2(vel)
+    };
+    let dir_n = if steepest.len() == raw.len() {
+        raw.dot(steepest).max(0.0).sqrt()
+    } else {
+        l2(steepest)
+    };
     Some(FireMix {
         vel: vel_n,
         direction: dir_n,
     })
+}
+
+/// `P^{-1} v`, or `v` when the preconditioner returns the wrong length.
+fn solved(pre: &dyn Preconditioner, v: &Array1<f64>) -> Array1<f64> {
+    let y = pre.solve(v.view());
+    if y.len() == v.len() { y } else { v.clone() }
 }
 
 /// Dogleg model on a curved kind. The sphere form keeps its work vectors
@@ -169,6 +185,13 @@ pub struct Solver {
     gradient_calls: usize,
     /// Packwood exponential metric. `None` leaves every method unchanged.
     exp: Option<ExpState>,
+    /// When false, FIRE stays Euclidean even if a preconditioner is installed.
+    /// Default true: an installed metric is used, which is what `set_exp`
+    /// has always done. With no metric installed the integrator is Euclidean.
+    fire_precon: bool,
+    /// Caller preconditioner for FIRE. It wins over [`Self::exp`] when
+    /// [`Self::fire_precon`] is set.
+    fire_metric: Option<Arc<dyn Preconditioner + Send + Sync>>,
     /// Lindh model Hessian. `None` leaves the scalar initial scale.
     lindh_spec: Option<LindhSpec>,
     /// Rayleigh scale of the Lindh matrix, from one force probe.
@@ -319,6 +342,8 @@ impl Solver {
             gradient_calls: 0,
             hvp_calls: 0,
             exp: None,
+            fire_precon: true,
+            fire_metric: None,
             lindh_spec: None,
             lindh_mu: None,
             saddle_kicks: 0,
@@ -528,6 +553,49 @@ impl Solver {
                 Ok(())
             }
             _ => Err(Error::NeedFire2),
+        }
+    }
+
+    /// Use an installed preconditioner inside FIRE and FIRE 2.0.
+    ///
+    /// The default is on, so [`Self::set_exp`] keeps the metric it has
+    /// always supplied: the velocity kick and the mix use `P^{-1} F`, the
+    /// power that accepts the step is `F · v`, and the displacement cap
+    /// stays in Cartesian space (ASE `PreconFIRE`, Packwood et al.,
+    /// J. Chem. Phys. 144, 164109 (2016)). `false` forces the Euclidean
+    /// integrator. With no preconditioner installed the integrator is
+    /// Euclidean either way. Any method other than `fire` or `fire2`
+    /// returns [`Error::NeedFire`].
+    pub fn set_fire_precon(&mut self, on: bool) -> Result<()> {
+        match &self.inner {
+            Inner::Fire(_) => {
+                self.fire_precon = on;
+                Ok(())
+            }
+            _ => Err(Error::NeedFire),
+        }
+    }
+
+    /// Install `precon` as the FIRE metric and turn the option on.
+    ///
+    /// [`IdentityPrecond`] reproduces the Euclidean trajectory.
+    /// [`Exp`] and [`NystromPrecond`] are the other kinds already
+    /// implemented for [`Preconditioner`]. [`Self::set_exp`] still builds
+    /// the exponential metric from a neighbour list; a preconditioner
+    /// installed here wins over that matrix for FIRE. L-BFGS keeps
+    /// reading `set_exp` as `H0`. Any method other than `fire` or
+    /// `fire2` returns [`Error::NeedFire`].
+    pub fn set_preconditioner<P>(&mut self, precon: P) -> Result<()>
+    where
+        P: Preconditioner + Send + Sync + 'static,
+    {
+        match &self.inner {
+            Inner::Fire(_) => {
+                self.fire_metric = Some(Arc::new(precon));
+                self.fire_precon = true;
+                Ok(())
+            }
+            _ => Err(Error::NeedFire),
         }
     }
 
@@ -2738,6 +2806,7 @@ impl Solver {
         matches!(self.manifold, ManifoldKind::Euclidean)
             && !self.project_rigid
             && self.exp.is_none()
+            && self.fire_metric.is_none()
             && !state.abc
             && state.preset() == crate::fire::FirePreset::Default
     }
@@ -3240,11 +3309,25 @@ impl Solver {
                     }
                 }
                 let forward_start = x.clone();
-                let dx = if self.exp.is_some() {
-                    let mut steepest = metric_vector(&self.exp, &raw);
+                // Identity takes the Euclidean functions, so the trajectory
+                // matches plain FIRE bit for bit. Any other metric kicks
+                // and mixes with P^{-1} F. The power stays F · v.
+                let pre: Option<&dyn Preconditioner> = if !self.fire_precon {
+                    None
+                } else if let Some(metric) = self.fire_metric.as_deref() {
+                    Some(metric)
+                } else {
+                    self.exp
+                        .as_ref()
+                        .and_then(ExpState::matrix)
+                        .map(|matrix| matrix as &dyn Preconditioner)
+                };
+                let active = pre.filter(|p| !p.is_identity());
+                let dx = if let Some(metric) = active {
+                    let mut steepest = solved(metric, &raw);
                     project_box_tangent(obj.bounds(), x, &mut steepest);
                     fire_displacement_metric(state, &raw, &steepest, |vel| {
-                        fire_mix(&self.exp, vel, &raw, &steepest)
+                        fire_mix(metric, vel, &raw, &steepest)
                     })
                 } else {
                     fire_displacement(state, &raw)
@@ -3306,10 +3389,10 @@ impl Solver {
                 let mut raw_new = grad.mapv(|g| -g);
                 project_box_tangent(obj.bounds(), x, &mut raw_new);
                 project_box_tangent(obj.bounds(), x, &mut state.vel);
-                if self.exp.is_some() {
-                    let mut steep_new = metric_vector(&self.exp, &raw_new);
+                if let Some(metric) = active {
+                    let mut steep_new = solved(metric, &raw_new);
                     project_box_tangent(obj.bounds(), x, &mut steep_new);
-                    let mix_new = fire_mix(&self.exp, &state.vel, &raw_new, &steep_new);
+                    let mix_new = fire_mix(metric, &state.vel, &raw_new, &steep_new);
                     fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
                 } else {
                     fire_after_v1(state, &raw_new);

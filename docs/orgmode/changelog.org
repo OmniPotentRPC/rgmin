@@ -6,6 +6,13 @@
 
 ** Unreleased
 
+FIRE and FIRE 2.0 take an optional preconditioner.
+The kick and the mix use ~P^{-1} F~, the power check is ~F · v~, and the displacement cap stays Cartesian, as in ASE ~PreconFIRE~ (Packwood et al., J. Chem. Phys. 144, 164109 (2016), [[https://doi.org/10.1063/1.4947024][10.1063/1.4947024]]).
+~set_fire_precon(false)~ keeps the Euclidean integrator.
+~set_exp~ still installs the exponential metric, and any ~Preconditioner~ (~Exp~, ~IdentityPrecond~, ~NystromPrecond~) can be installed with ~set_preconditioner~.
+C: ~rgmin_solver_set_fire_precon~. The C++ wrapper has ~set_fire_precon~. ~xts.h~ aliases it.
+~abi_minor~ 36.
+
 The default L-BFGS step follows the eOn client, including the finite-difference curvature probe and ~distance_reset~.
 A proposal at least as long as the cap clears the memory and steps along ~H0~ times the force.
 ~LbfgsStep::Scaled~ and ~rgmin_solver_set_lbfgs_scaled~ keep the previous shorten-and-retain rule.
