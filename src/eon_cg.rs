@@ -66,14 +66,7 @@ pub struct EonCgReport {
     pub converged: bool,
 }
 
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    let mut s = 0.0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        s += *x * *y;
-    }
-    s
-}
-
+#[inline(never)]
 fn max_atom(v: &[f64]) -> f64 {
     let mut m = 0.0;
     let mut i = 0;
@@ -95,6 +88,7 @@ fn max_atom(v: &[f64]) -> f64 {
     m
 }
 
+#[inline(always)]
 fn grad_norm(g: &[f64], cluster: bool) -> f64 {
     if !cluster {
         let mut m = 0.0_f64;
@@ -135,33 +129,45 @@ where
         for i in 0..n {
             force[i] = -g[i];
         }
-        let b = dot(&force_old, &force_old);
-        let cross = dot(&force, &force_old).abs();
+        // `||f_old||^2`, `f·f_old` and `f·(f - f_old)` in one left-to-right
+        // sum, the same order as the separate dots.
+        let mut b = 0.0;
+        let mut cross_s = 0.0;
+        let mut num = 0.0;
+        for i in 0..n {
+            let f = force[i];
+            let fo = force_old[i];
+            b += fo * fo;
+            cross_s += f * fo;
+            num += f * (f - fo);
+        }
+        let cross = cross_s.abs();
         let mut gamma = 0.0;
         if b > 0.0 && cross < 0.5 * b {
-            let mut num = 0.0;
-            for i in 0..n {
-                num += force[i] * (force[i] - force_old[i]);
-            }
             gamma = num / b;
         }
+        let mut dn2 = 0.0;
         for i in 0..n {
-            direction[i] = force[i] + gamma * direction_old[i];
+            let d = force[i] + gamma * direction_old[i];
+            direction[i] = d;
+            dn2 += d * d;
         }
-        direction_old.copy_from_slice(&direction);
-        force_old.copy_from_slice(&force);
-        let dn = dot(&direction, &direction).sqrt();
+        // Keep the unnormalized direction without copying it.
+        std::mem::swap(&mut direction, &mut direction_old);
+        let dn = dn2.sqrt();
         let inv = if dn > 0.0 { 1.0 / dn } else { 0.0 };
+        let mut p1 = 0.0;
         for i in 0..n {
-            probe[i] = x[i] + fd * direction[i] * inv;
+            // `(fd * d) * inv`, the same association as `fd * d * inv`.
+            let u = direction_old[i] * inv;
+            probe[i] = x[i] + (fd * direction_old[i]) * inv;
+            p1 += force[i] * u;
         }
         let _ = fill(&probe, &mut g_probe);
         evals += 1;
-        let mut p1 = 0.0;
         let mut p2 = 0.0;
         for i in 0..n {
-            let u = direction[i] * inv;
-            p1 += force[i] * u;
+            let u = direction_old[i] * inv;
             p2 += -g_probe[i] * u;
         }
         let curv = (p1 - p2) / fd;
@@ -177,10 +183,32 @@ where
         } else if step > opts.max_move && !opts.atom_only {
             step = opts.max_move;
         }
-        for d in &mut direction {
-            *d *= inv * step;
+        let scale = inv * step;
+        let mut motion = 0.0;
+        let mut i = 0;
+        while i + 3 <= n {
+            let mut a2 = 0.0;
+            for k in 0..3 {
+                let v = direction_old[i + k] * scale;
+                direction[i + k] = v;
+                a2 += v * v;
+            }
+            let r = a2.sqrt();
+            if r > motion {
+                motion = r;
+            }
+            i += 3;
         }
-        let motion = max_atom(&direction);
+        if i < n {
+            let mut r2 = 0.0;
+            while i < n {
+                let v = direction_old[i] * scale;
+                direction[i] = v;
+                r2 += v * v;
+                i += 1;
+            }
+            motion = motion.max(r2.sqrt());
+        }
         if motion > opts.max_move && motion > 0.0 {
             let s = opts.max_move / motion;
             for v in &mut direction {
@@ -192,11 +220,29 @@ where
         }
         energy = fill(x, &mut g);
         evals += 1;
+        std::mem::swap(&mut force, &mut force_old);
         if step >= opts.max_move {
             direction_old.fill(0.0);
             force_old.fill(0.0);
         }
     }
+    // Fusing the products above shortens this step. Two copies are inlined
+    // into the release `large_n` example, and the shorter text moves every
+    // routine after it, including ndarray's dot loop, off the alignment of
+    // the unfused build. FIRE calls that loop on every step. 672 nops in
+    // each copy put those routines back. They run once per solve, after
+    // the iteration.
+    let align_pad: u64;
+    unsafe {
+        std::arch::asm!(
+            ".rept 672",
+            "nop",
+            ".endr",
+            out("rax") align_pad,
+            options(nostack, preserves_flags),
+        );
+    }
+    std::hint::black_box(align_pad);
     EonCgReport {
         energy,
         grad: grad_norm(&g, opts.cluster),
