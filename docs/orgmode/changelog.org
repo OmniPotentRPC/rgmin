@@ -6,6 +6,10 @@
 
 ** Unreleased
 
+The eOn conjugate-gradient step fuses the Polak-Ribiere products and swaps its direction buffers instead of copying them.
+~examples/large_n.rs~ times that overhead, with the force call subtracted, on Lennard-Jones and Morse clusters and slabs.
+The capped L-BFGS step and FIRE are unchanged. The strong Wolfe search stays opt-in.
+
 The default L-BFGS step follows the eOn client, including the finite-difference curvature probe and ~distance_reset~.
 A proposal at least as long as the cap clears the memory and steps along ~H0~ times the force.
 ~LbfgsStep::Scaled~ and ~rgmin_solver_set_lbfgs_scaled~ keep the previous shorten-and-retain rule.

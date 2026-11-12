@@ -16,3 +16,13 @@ env -i PATH="/tmp/rgmin-bench-venv/bin:$PATH" HOME="$HOME" LANG="${LANG:-C.UTF-8
 ```
 
 `compare.py` rewrites `results.md` from `rgmin.csv`, `eon.csv`, `ase.csv` and `scipy.csv`.
+
+`examples/large_n.rs` times the capped L-BFGS step, FIRE 1.0 and the eOn conjugate-gradient step on Lennard-Jones and Morse clusters and slabs at 500, 5 000 and 50 000 atoms. The overhead column is wall time minus the force call. The CSV is not checked in; the example writes it.
+
+```
+cargo run --release --example large_n -- bench/raw/large_n.csv
+g++ -O2 -std=c++20 -o /tmp/large_n_eon bench/large_n_eon.cpp
+/tmp/large_n_eon bench/raw/large_n_eon.csv
+```
+
+`large_n_eon.cpp` is the L-BFGS and FIRE step from `eon_ref.cpp` on those same geometries. The full eOn client is a separate build.
