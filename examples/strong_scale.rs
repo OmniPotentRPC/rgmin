@@ -177,6 +177,7 @@ fn relax(sys: &System, name: &str, audit: bool) -> Run {
         gtol: FMAX,
         istep,
         maxmove: None,
+        stop_norm: StopNorm::MaxAtom,
     };
     let calls = AtomicUsize::new(0);
     let origin = Mutex::new(Array1::zeros(0));
