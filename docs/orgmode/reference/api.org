@@ -22,6 +22,7 @@ The types a host works with:
 | ~EigensolverKind~ / ~EigenParams~ | Closed eigen waist. |
 | ~HessianVector~ / ~FdHvp~ | ~H v~ without forming ~H~. |
 | ~Solver::step_hvp~ | Analytic product for ~newton-cg~ / ~newton-pcg~. |
+| ~PeriodicAxes~ / ~superpose~ | Proper rigid superposition of two 3N configurations. |
 
 ~newton-cg~ and ~newton-pcg~ are ~Method::from_name~ tokens. The
 session counts ~gradient_calls~ and ~hvp_calls~ separately. A

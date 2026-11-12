@@ -31,6 +31,8 @@ The types a host works with:
     +-------------------------------------------+--------------------------------------------+
     | ``HessianVector`` / ``FdHvp``             | ``H v`` without forming ``H``.             |
     +-------------------------------------------+--------------------------------------------+
+    | ``PeriodicAxes`` / ``superpose``          | Proper rigid fit of two 3N configurations. |
+    +-------------------------------------------+--------------------------------------------+
 
 The generated Sphinx pages under ``crates/rgmin/`` (when the docs
 environment is built with ``sphinxcontrib-rust``) are the same

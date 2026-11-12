@@ -7,6 +7,10 @@ Unreleased
 
 ~~~~~~~~~~
 
+``superpose`` fits one 3N configuration onto another by the Horn quaternion (J. Opt. Soc. Am. A 4, 629, 1987, https://doi.org/10.1364/josaa.4.000629; Coutsias, Seok, and Dill, J. Comput. Chem. 25, 1849, 2004, https://doi.org/10.1002/jcc.20110).
+``PeriodicAxes`` is the mask shared with the rigid projector.
+A periodic cell still drops every translation and keeps rotations.
+
 ``Lbfgs::ftol`` is the opt-in relative-decrease stop of L-BFGS-B, and its default of zero turns it off.
 A line-search step from ``f_k`` to ``f_{k+1}`` ends ``minimize``, ``minimize_watched`` and ``minimize_recognized`` when ``f_k - f_{k+1} <= ftol * max(|f_k|, |f_{k+1}|, 1)``.
 ``LBFGSB_FTOL`` is the SciPy default, and :doc:`reference/sota` measures what it saves.

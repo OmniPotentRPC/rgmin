@@ -43,7 +43,7 @@ use crate::qn::{
 };
 use crate::qn_step::QnStep;
 use crate::report::Report;
-use crate::rigid::{project_horizontal, project_out_rot_trans};
+use crate::rigid::{PeriodicAxes, project_horizontal, project_out_rot_trans};
 use crate::step::{
     cap_displacement_atom, finite, l2, max_atom_displacement, non_finite,
     scale_displacement_to_atom_cap, scale_step, scale_step_atom,
@@ -1105,12 +1105,22 @@ impl Solver {
             ManifoldKind::MwRigid => {
                 let mut w = v.clone();
                 let masses = self.masses.as_ref().and_then(|m| m.as_slice());
-                project_horizontal(&mut w, x.view(), masses, !self.periodic);
+                project_horizontal(
+                    &mut w,
+                    x.view(),
+                    masses,
+                    PeriodicAxes::from_cell(self.periodic),
+                );
                 w
             }
             ManifoldKind::RigidQuotient => {
                 let mut w = v.clone();
-                project_horizontal(&mut w, x.view(), None, !self.periodic);
+                project_horizontal(
+                    &mut w,
+                    x.view(),
+                    None,
+                    PeriodicAxes::from_cell(self.periodic),
+                );
                 w
             }
             other => other.project(x, v),

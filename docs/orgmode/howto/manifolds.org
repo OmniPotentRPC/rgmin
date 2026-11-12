@@ -237,3 +237,27 @@ alone does not certify that the lowest eigenvalue has been found.
   reserved.
 - ~set_project_rigid~ is the same horizontal projection as
   ~RigidQuotient~ and stays available on Euclidean.
+
+** Finite superposition
+
+~superpose~ moves one packed 3N configuration onto another.
+The rotation is the unit quaternion of Horn (J. Opt. Soc. Am. A 4, 629, 1987, https://doi.org/10.1364/josaa.4.000629) and of Coutsias, Seok, and Dill (J. Comput. Chem. 25, 1849, 2004, https://doi.org/10.1002/jcc.20110).
+It is the eigenvector for the largest eigenvalue of the 4×4 key matrix built from the weighted correlation of the centered coordinates.
+~PeriodicAxes~ is the mask shared with the infinitesimal projector.
+No periodic axis allows a proper rotation in SO(3).
+One periodic axis allows rotation about that axis only, solved as a planar angle.
+Two or three periodic axes leave the rotation at the identity.
+The weighted centroid is removed on every Cartesian axis, including periodic ones.
+That is what the projector already does for an isolated cluster and for a periodic cell (~PeriodicAxes::CELL~, Sella ~proj_rot~ off, quotient ~R^{3N}/T(3)~).
+A repeated leading eigenvalue, a single atom, or a collinear set returns one proper rotation, and the value is finite.
+The scale is fixed.
+
+#+begin_src rust
+use ndarray::array;
+use rgmin::{PeriodicAxes, superpose};
+
+let mobile = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+let target = array![1.0, 2.0, 3.0, 2.0, 2.0, 3.0, 1.0, 3.0, 3.0];
+let fit = superpose(mobile.view(), target.view(), None, PeriodicAxes::ISOLATED);
+assert!(fit.rmsd < 1e-12);
+#+end_src

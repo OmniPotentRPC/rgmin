@@ -6,6 +6,10 @@
 
 ** Unreleased
 
+~superpose~ fits one 3N configuration onto another by the Horn quaternion (J. Opt. Soc. Am. A 4, 629, 1987, https://doi.org/10.1364/josaa.4.000629; Coutsias, Seok, and Dill, J. Comput. Chem. 25, 1849, 2004, https://doi.org/10.1002/jcc.20110).
+~PeriodicAxes~ is the mask shared with the rigid projector.
+A periodic cell still drops every translation and keeps rotations.
+
 The default L-BFGS step follows the eOn client, including the finite-difference curvature probe and ~distance_reset~.
 A proposal at least as long as the cap clears the memory and steps along ~H0~ times the force.
 ~LbfgsStep::Scaled~ and ~rgmin_solver_set_lbfgs_scaled~ keep the previous shorten-and-retain rule.

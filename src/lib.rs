@@ -71,7 +71,8 @@ mod qn;
 pub mod qn_irc;
 mod qn_step;
 mod report;
-mod rigid;
+/// Rigid-body projection and Horn quaternion superposition.
+pub mod rigid;
 /// Tangent-space truncated conjugate gradients and trust-radius updates.
 pub mod rtr;
 /// Moller scaled conjugate gradient (damped-model step, no line search).
@@ -129,6 +130,7 @@ pub use qn_irc::{
 };
 pub use qn_step::QnStep;
 pub use report::Report;
+pub use rigid::{PeriodicAxes, Superposition, superpose};
 pub use scg::{DirectionalCurvature, ScgParams, minimize_scg, minimize_scg_exact};
 pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
 pub use session::Solver;

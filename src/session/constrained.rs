@@ -43,7 +43,7 @@ use crate::qn::{
 };
 use crate::qn_step::QnStep;
 use crate::report::Report;
-use crate::rigid::project_horizontal;
+use crate::rigid::{PeriodicAxes, project_horizontal};
 use crate::step::{
     finite, l2, max_atom_motion, next_istep, non_finite, scale_displacement_to_atom_cap,
     scale_step, scale_step_atom,
@@ -151,7 +151,12 @@ impl<'a> Space<'a> {
         let mut v = self.by_root_w(u);
         self.tangent.vector(&mut v)?;
         if self.rigid {
-            project_horizontal(&mut v, self.point().view(), self.masses, true);
+            project_horizontal(
+                &mut v,
+                self.point().view(),
+                self.masses,
+                PeriodicAxes::ISOLATED,
+            );
         }
         *u = self.by_root_m(&v);
         Ok(())
@@ -165,7 +170,12 @@ impl<'a> Space<'a> {
         let mut q = self.by_root_w(&h);
         if self.rigid {
             let mut v = self.by_root_w(&q);
-            project_horizontal(&mut v, self.point().view(), self.masses, true);
+            project_horizontal(
+                &mut v,
+                self.point().view(),
+                self.masses,
+                PeriodicAxes::ISOLATED,
+            );
             q = self.by_root_m(&v);
             h = self.by_root_m(&q);
         }
