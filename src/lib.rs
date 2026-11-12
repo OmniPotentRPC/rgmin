@@ -20,7 +20,8 @@
 // small dense algebra indexes by position on purpose.
 #![allow(clippy::too_many_arguments, clippy::needless_range_loop)]
 
-/// Line-search strategies (Brent, Armijo, Goldstein, Wolfe/zoom).
+/// Line-search strategies (Brent, Armijo, Goldstein, Wolfe/zoom)
+/// and the strict Armijo stepper.
 pub mod linesearch;
 /// Method selector (NLCG, BFGS family, Adam, steepest descent, PSO).
 pub mod method;
@@ -133,7 +134,7 @@ pub use irc_trust::{IrcTrust, sqrt_masses_3n};
 pub use lbfgs::{GradNorm, Lbfgs};
 #[cfg(feature = "highs")]
 pub use lbfgs_qp::HighsStep;
-pub use linesearch::{LineSearch, LineSearchOptions};
+pub use linesearch::{ArmijoAccept, ArmijoStepper, LineSearch, LineSearchOptions};
 pub use lowest_mode::{
     ApplyHessian, ApplyPreconditioner, Block3Jacobi, DENSE_EIGEN_CUTOFF, DiagonalJacobi,
     EigenParams, EigensolverKind, LowestMode, PreconditionerKind, lowest_eigenpair, lowest_mode,

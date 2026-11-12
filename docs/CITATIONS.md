@@ -63,6 +63,9 @@ ISBN). Do not invent DOIs.
 | Wald sequential tests 1945 | 10.1214/aoms/1177731118 | Sequential Tests of Statistical Hypotheses |
 | ECnoise Moré–Wild 2011 | 10.1137/100786125 | Estimating Computational Noise |
 | Noisy derivatives Moré–Wild 2012 | 10.1145/2168773.2168777 | Estimating Derivatives of Noisy Simulations |
+| Gould–Ortner–Packwood dimer linesearch | 10.1090/mcom/3096 | A dimer-type saddle search algorithm with preconditioning and linesearch |
+| Zhang–Zhang–Zheng shrinking dimer | 10.4208/csiam-am.so-2022-0010 | Mathematical and Numerical Analysis to Shrinking-Dimer Saddle Dynamics with Local Lipschitz Conditions |
+| Luo–Zheng–Cheng–Zhang discrete saddle dynamics | 10.1137/22m1487965 | Convergence Analysis of Discrete High-Index Saddle Dynamics |
 
 Polak-Ribiere 1969 and Hestenes-Stiefel 1952: cite the paper/book
 title in rustdoc if no DOI is on this list. Do not mint a DOI.

@@ -8,6 +8,9 @@ mod interp;
 mod known;
 mod zoom;
 
+mod armijo;
+
+pub use armijo::{ArmijoAccept, ArmijoStepper};
 pub use known::LineOutcome;
 pub use zoom::zoom;
 
@@ -24,6 +27,10 @@ pub enum LineSearch {
         tol: f64,
     },
     /// Armijo backtracking with geometric reduction.
+    ///
+    /// The trial also returns a gradient, and a failed budget keeps the
+    /// lowest decrease. A scalar merit that must meet the inequality, and
+    /// that opens at twice the previous step, is [`ArmijoStepper`].
     ///
     /// Nocedal and Wright, *Numerical Optimization*,
     /// <https://doi.org/10.1007/978-0-387-40065-5>.
