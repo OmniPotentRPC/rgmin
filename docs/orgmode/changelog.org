@@ -13,6 +13,14 @@ FIRE 2.0 does not build the post-step force, which only FIRE 1.0 mixes.
 L-BFGS reuses the curvature dots stored with each pair.
 The Morse-chain iterates are unchanged.
 
+~relax_cell~ minimizes atoms and the cell in the generalized solid-state NEB coordinate, on the existing steppers.
+The Jacobian is \(V^{1/3} N^{1/6}\).
+A frozen mask matches the fixed-cell minimizer.
+The minimum reports the stress and the elastic dipole \(P = V\sigma\).
+A contiguous coordinate is read in place.
+Zero strain, including a frozen cell, passes that slice to the potential, and the report keeps that sample.
+@@rst::doc:`howto/variable-cell`@@ is the call, and @@rst::doc:`explanation/variable-cell`@@ is the comparison with ASE's ~FrechetCellFilter~.
+
 The default L-BFGS step follows the eOn client, including the finite-difference curvature probe and ~distance_reset~.
 A proposal at least as long as the cap clears the memory and steps along ~H0~ times the force.
 ~LbfgsStep::Scaled~ and ~rgmin_solver_set_lbfgs_scaled~ keep the previous shorten-and-retain rule.

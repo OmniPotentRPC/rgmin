@@ -109,6 +109,12 @@ pub enum Error {
     /// or could not be met.
     #[error("distance constraints: {0}")]
     Constraint(#[from] crate::holonomic::ConstraintError),
+    /// Variable-cell chart refused the geometry or the potential sample.
+    #[error("variable cell: {what}")]
+    Cell {
+        /// What was refused.
+        what: &'static str,
+    },
 }
 
 /// Result alias for this crate.

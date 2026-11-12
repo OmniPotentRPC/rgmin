@@ -1,0 +1,173 @@
+
+
+Relax a periodic cell with the atoms
+------------------------------------
+
+``relax_cell`` minimizes a periodic geometry in the generalized
+coordinate of the solid-state nudged elastic band. The stepper is
+any Euclidean ``Method``: capped L-BFGS, FIRE, FIRE 2.0, and the
+others ``Solver`` already runs. The cell can be free, masked, or
+frozen. A frozen cell is the fixed-cell minimization.
+
+The math, and why this chart is the one the solid-state dimer will
+share, is :doc:`../explanation/variable-cell`.
+
+What the potential returns
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Implement ``PeriodicPotential``. ``evaluate`` receives Cartesian
+positions, length ``3N``, and a row-major cell whose rows are the
+lattice vectors. It returns a ``CellSample``:
+
+- ``energy``, the potential energy
+
+- ``forces``, Cartesian :math:`F = -\partial E/\partial R`, length ``3N``
+
+- ``virial``, row-major :math:`W_{ij} = \partial E/\partial\delta_{ij}`
+  at fixed fractional coordinates
+
+A column lattice vector :math:`a` and a column position :math:`r` become
+:math:`(I+\delta)a` and :math:`(I+\delta)r` under that strain. The stress
+is :math:`\sigma = W/V`, from ``CellSample::stress``. The elastic dipole
+on the minimum is :math:`P = W = V\sigma`, from ``CellMinimum::dipole``.
+The dipole whose interaction with a strain is :math:`-P:\varepsilon` is
+the negative of this tensor.
+
+The same derivative is what a finite-difference check should
+reproduce. Deform the cell and the positions at fixed fractional
+coordinates, difference the energy, and compare with ``virial``.
+
+The relaxation
+~~~~~~~~~~~~~~
+
+.. code:: rust
+
+    use rgmin::{
+        CellOptions, CellSample, Control, Method, PeriodicPotential, StopNorm, StrainMask,
+        relax_cell,
+    };
+
+    struct Bowl;
+
+    impl PeriodicPotential for Bowl {
+        fn evaluate(&mut self, positions: &[f64], _cell: &[f64; 9]) -> rgmin::Result<CellSample> {
+            let mut energy = 0.0;
+            let mut forces = vec![0.0; positions.len()];
+            for (index, value) in positions.iter().enumerate() {
+                energy += value * value;
+                forces[index] = -2.0 * value;
+            }
+            Ok(CellSample {
+                energy,
+                forces,
+                virial: [0.0; 9],
+            })
+        }
+    }
+
+    let cell = [6.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 6.0];
+    let positions = [0.4, -0.2, 0.1, -0.1, 0.3, -0.2];
+    let opt = CellOptions {
+        mask: StrainMask::Frozen,
+        method: Method::lbfgs(),
+        control: Control {
+            maxiter: 50,
+            gtol: 1e-8,
+            stop_norm: StopNorm::MaxAtom,
+            ..Control::default()
+        },
+        ..CellOptions::default()
+    };
+    // The bowl ignores the cell, so the mask is frozen and the virial is zero.
+    let got = relax_cell(&mut Bowl, &positions, &cell, &opt).unwrap();
+    assert!(got.energy < 1e-8);
+    let dipole = got.dipole();
+    assert_eq!(dipole, got.virial);
+
+``CellOptions::default`` is a full cell, no external load, L-BFGS with
+the eOn cap, and ``Control::default``. ``lbfgs_step`` replaces the cap
+when the method is L-BFGS. FIRE uses ``control.istep`` as its time
+step.
+
+The returned ``CellMinimum`` holds the Cartesian positions, the cell,
+the strain from the starting cell, the potential energy, the
+enthalpy the stepper minimized, the stress, the virial, the volume,
+and the Jacobian. ``pressure`` on that record is
+:math:`-\mathrm{tr}(\sigma)/3`, positive when the derivative stress is
+compressive.
+
+Frozen cell
+~~~~~~~~~~~
+
+``StrainMask::Frozen`` does not add cell coordinates. Positions,
+energy, step count, gradient norm, and the potential count match
+``relax_fixed``. The stress on the report is the sample from that
+solve. An all-false ``StrainMask::Epsilon`` or ``StrainMask::Lattice``
+mask is the same path. A contiguous coordinate is not copied before
+the potential sees it, and zero strain passes that slice through.
+
+Masks
+~~~~~
+
+``StrainMask::Full`` frees all nine components of the strain
+:math:`\varepsilon` in :math:`F = I + \varepsilon`.
+
+``StrainMask::Hydrostatic`` frees one isotropic strain
+:math:`\varepsilon = s I`. A cubic start stays cubic.
+
+``StrainMask::Epsilon`` frees the ``true`` entries of a row-major
+length-9 flag.
+
+``StrainMask::Lattice`` frees entries of the cell matrix. The
+reference cell has to be diagonal, which an orthorhombic box is.
+:math:`H_{ij}` then tracks :math:`\varepsilon_{ji}`, so freezing a
+component of a lattice vector freezes that one number. A
+non-diagonal reference returns ``Error::Cell``.
+
+External stress and pressure
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``pressure`` is added to the enthalpy as :math:`P V`. Positive :math:`P`
+compresses. With a zero ``external_stress``, equilibrium at the
+reference cell is :math:`\sigma = -P I`.
+
+``external_stress`` is a dead load. The enthalpy contains
+:math:`-V_{\mathrm{ref}}\,\sigma_{\mathrm{ext}}:\varepsilon`. At the
+reference cell the generalized force on the scaled strain is
+
+::
+
+    -(V / J) (sigma - sigma_ext + P I)
+
+which is :math:`-(V/J)(\sigma - \sigma_{\mathrm{applied}})` with
+:math:`\sigma_{\mathrm{applied}}` from ``applied_stress``. Away from the
+reference the stepper follows the derivative of that same enthalpy,
+including the chain rule through :math:`F`.
+
+Driving the chart yourself
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``Chart::new`` builds the coordinate from the atom count, the
+reference cell, and the options. ``Chart::origin`` packs the
+Cartesian positions at zero strain. ``Chart::evaluate`` returns a
+``Probe``: enthalpy, energy, gradient, potential sample, and
+geometry. ``Probe::cell_force`` is the cell block of the generalized
+force, the negative of the cell block of the gradient.
+
+The gradient is what ``Solver`` sees. Atomic entries are positions in
+the reference cell, :math:`q = F^{-1} r`, not the Cartesian positions,
+once the strain is nonzero. Read Cartesian positions and the cell
+from ``Probe::geometry``.
+
+``cell_jacobian`` is :math:`J = V^{1/3} N^{1/6}`. The chart fixes it from
+the reference volume, so the coordinate does not change scale when
+the cell does.
+
+Benchmark
+~~~~~~~~~
+
+``cargo run --release --example bench_cell`` prints force calls and
+the median wall time of capped L-BFGS and FIRE 2.0 on three
+Lennard-Jones cells. ``benches/variable_cell/ase_frechet.py`` is the
+same three systems with ASE ``FrechetCellFilter`` and FIRE or BFGS.
+The measured table is ``benches/variable_cell/results.md``.

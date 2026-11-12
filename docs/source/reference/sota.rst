@@ -12,10 +12,19 @@ Unconstrained local minimization
 
 The production method for a smooth unconstrained problem with an
 analytic or fused gradient is limited-memory BFGS without a line
-search. The default step is the eOn cap: a curvature probe on the
-first step, then a memory reset when the proposal is at least as
-long as the cap. ``LbfgsStep::Wolfe`` is the opt-in search.
-``LbfgsStep::Scaled`` shortens the two-loop step and keeps the pairs.
+search. The eOn client does not line-search its L-BFGS step
+(`https://github.com/TheochemUI/eOn <https://github.com/TheochemUI/eOn>`_, ``client/LBFGS.cpp``, commit
+579738a9387e8d0ea55496f45dd057812cfab892). The default cap is that
+client's ``max_move``, 0.2. The first step estimates curvature with a
+finite difference of length 0.01 and sets ``H0 = 1/C``. Later steps use
+``(s · y) / (y · y)`` when that quotient is positive, and the client's
+``inverse_curvature`` 0.01 otherwise. A proposal whose longest atom
+move is at least the cap clears the memory and steps along ``H0``
+times the force (``distance_reset``). A direction that is not descent
+does the same (``angle_reset``). Negative curvature clears the memory
+and steps along the force at the cap. ``LbfgsStep::Scaled`` is the ASE
+length control: shorten the two-loop step and keep the pairs.
+``LbfgsStep::Wolfe`` opts into the strong Wolfe search.
 The force counts are ``bench/results.md``.
 
 - Nocedal 1980 introduced the limited-memory update
@@ -126,6 +135,117 @@ The test saves the most on the clusters, where ``|f|`` is well above one.
 On LJ38 it saves 99 evaluations and ends 7.7e-6 above the energy of the
 ``ftol = 0`` run.
 A caller that needs the gradient below ``gtol`` keeps ``ftol`` at zero.
+
+Capped step for atomistic L-BFGS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``LbfgsStep::Capped`` drops the line search. The two-loop direction
+keeps the Nocedal-Wright scale ``H0 = ((s · y) / (y · y)) I``
+(equation 7.20). The step is shortened so the longest per-atom
+displacement is at most the caller's cap, which is the ASE LBFGS
+length control with the line search left off. An empty memory
+steps along the force at that length. Pairs stay in the memory
+when the step is shortened. The geometry step selected by
+``set_atom_maxmove`` still clears that memory when the quasi-Newton
+step is longer than its cap, and it can spend further evaluations
+on backtracking. The capped rule does neither.
+
+``LbfgsStep::Scaled`` is the step in the table below, not the default.
+The default is the eOn reset described above.
+``LbfgsStep::Wolfe`` is the opt-in search, and ``set_atom_maxmove``
+selects the geometry step only after that opt-in. The cap is 0.2,
+the eOn ``max_move`` and the length ASE publishes as ``maxstep``, and it
+is not refitted per problem.
+``cargo run --release --example lbfgs_capped`` repeats each arm
+seven times, serially, and the wall time below is the median.
+Evaluations do not change across repeats. Wolfe and capped rows
+are ``Lbfgs`` with memory 8 and stop on ``norminf(g) < 1e-6``. Their
+gradient column is that norm. Session rows use memory 20 and stop
+on the largest atomic force, 0.01. Their gradient column is that
+force. Wolfe's evaluation counts are the counts already recorded
+for ``develop``.
+
+.. table::
+
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | problem        | arm            | evals | median ms | gradient |     value |
+    +================+================+=======+===========+==========+===========+
+    | Rosenbrock 2   | Wolfe          |    49 |     0.012 |  1.74e-7 |  8.82e-16 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Rosenbrock 2   | capped         |    46 |     0.023 |  1.33e-9 |  6.75e-21 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Rosenbrock 2   | geometry       |    99 |     0.050 |  1.08e-3 |   2.36e-9 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Rosenbrock 2   | capped session |    45 |     0.071 |  3.24e-3 |   6.80e-9 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Rosenbrock 10  | Wolfe          |    92 |     0.037 |  5.55e-7 |  3.01e-16 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Rosenbrock 10  | capped         |    83 |     0.056 |  3.16e-7 |  3.986579 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Rosenbrock 10  | geometry       |   155 |     0.149 |  8.38e-3 |   4.50e-8 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Rosenbrock 10  | capped session |    68 |     0.140 |  5.98e-3 |  3.986579 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Rosenbrock 100 | Wolfe          |   635 |     1.019 |  5.70e-7 |  7.06e-15 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Rosenbrock 100 | capped         |   562 |     1.363 |  8.18e-7 |  3.986624 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Rosenbrock 100 | geometry       |   863 |     3.139 |  8.49e-3 |   7.03e-7 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Rosenbrock 100 | capped session |   539 |     2.783 |  8.40e-3 |  3.986624 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ7            | Wolfe          |    58 |     0.028 |  7.75e-7 | -15.59321 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ7            | capped         |    50 |     0.058 |  7.75e-7 | -15.59321 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ7            | geometry       |    26 |     0.038 |  9.82e-3 | -15.59320 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ7            | capped session |    40 |     0.086 |  7.26e-3 | -15.59321 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ13           | Wolfe          |   135 |     0.133 |  5.45e-7 | -38.20651 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ13           | capped         |   149 |     0.230 |  7.89e-7 | -38.20651 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ13           | geometry       |    96 |     0.270 |  4.82e-3 | -38.20651 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ13           | capped session |   106 |     0.330 |  6.31e-3 | -38.20650 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ38           | Wolfe          |   415 |     1.695 |  8.84e-7 | -168.2171 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ38           | capped         |   366 |     1.803 |  7.59e-7 | -165.1035 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ38           | geometry       |   211 |     1.620 |  9.77e-3 | -165.3536 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | LJ38           | capped session |   187 |     1.439 |  9.06e-3 | -161.0777 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Morse Pt256    | geometry       |    11 |     4.945 |  5.47e-3 | -1396.173 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+    | Morse Pt256    | capped session |    11 |     4.965 |  3.94e-3 | -1396.173 |
+    +----------------+----------------+-------+-----------+----------+-----------+
+
+The chained Rosenbrock function
+``sum_i (1 - x_i)^2 + 100 (x_{i+1} - x_i^2)^2`` has a local minimum
+for every ``n >= 4`` in the basin of ``(-1, 1, ..., 1)``.
+SciPy BFGS started at that point converges with a positive definite
+Hessian. For ``n = 4`` the value is 3.701 and the first coordinate
+is −0.776. For ``n = 10`` the value is 3.987 and the first coordinate
+is −0.993, near ``(-1, 1, ..., 1)`` with value about 3.98.
+For ``n = 3`` that start falls through to the valley floor at 0.
+A step that stops at this local minimum has converged.
+From the alternating start ``(-1.2, 1, -1.2, 1, ...)`` the capped
+step enters that minimum for ``n = 10`` and ``n = 100``, while the
+Wolfe search and the geometry step reach value 0.
+On LJ7 and LJ13, at an atomic force of 0.01, the geometry step
+uses fewer evaluations and finishes at the same energy. On LJ38
+the capped session uses 187 evaluations against 211 and finishes
+about 4.3 energy units higher, in another basin. On the periodic
+Morse cluster both session arms take 11 evaluations and the same
+energy. The cap is the default because the eOn client does not
+line-search this step. The fifty-start comparison is
+``benches/ase_h2h/distribution.md``.
+
+The same fmax and the same maxstep against ASE 3.29.0 are recorded
+in ``benches/ase_h2h/results.md``.
 
 Newton and RFO when the Hessian is cheap
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -298,12 +418,12 @@ These four tokens share ``rgmin_solver_t`` and a fused ``(f, g)``.
 
 - FIRE 2.0 (Guénolé 2020,
   `10.1016/j.commatsci.2020.109584 <https://doi.org/10.1016/j.commatsci.2020.109584>`_) uses semi-implicit Euler:
-  update velocity, mix it toward the force, then update position. On
+  update velocity, mix it toward the force, then update position.  On
   non-positive power it applies the paper's half-step-back correction;
   a nonzero correction gets a fresh force before the forward step.
   The initial delay leaves the time step unchanged during the first
   delay window, and a clipped forward move rescales the stored velocity
-  to the displacement actually taken. More than 2,000 consecutive
+  to the displacement actually taken.  More than 2,000 consecutive
   non-positive-power steps terminate as a stalled solve. An installed
   exponential preconditioner leaves that order in place and uses ``P``
   as the metric: power is ``F · v``, and the kick and the mix use
@@ -348,11 +468,18 @@ These four tokens share ``rgmin_solver_t`` and a fused ``(f, g)``.
 - Powell dogleg (Nocedal–Wright algorithm 4.1) consumes the host
   pair Hessian already passed to ``rgmin_solver_step_hess``.
 
-Steihaug–Toint, ARC, DFP, SPSA, CMA-ES, Nelder–Mead, and BOBYQA
-were surveyed and not added: DFP is dominated by BFGS already
-in the crate, the derivative-free methods waste force calls on
-an analytic PES, and Steihaug lost the fourth token slot to
-FIRE 2.0.
+- Steihaug–Toint Newton-CG (``newton-cg``, and ``newton-pcg`` with a
+  rank-16 Nyström preconditioner) is a session method. Hessian
+  access is a product: analytic through ``step_hvp``, otherwise one
+  forward difference of the gradient. ``maxmove`` is the Euclidean
+  trust ceiling; a per-atom cap clips the trial only.
+  Steihaug 1983
+  (`10.1137/0720042 <https://doi.org/10.1137/0720042>`_),
+  Nocedal–Wright chapter 7.
+
+ARC, DFP, SPSA, CMA-ES, Nelder–Mead, and BOBYQA were surveyed and
+not added: DFP is dominated by BFGS already in the crate, and the
+derivative-free methods waste force calls on an analytic PES.
 
 Nonlinear CG
 ~~~~~~~~~~~~
@@ -392,17 +519,46 @@ mass-weighted Eckart, https://doi.org/10.1063/1.454172). Sphere, SO(3) as a
 an n² row-major matrix are matrix-manifold embeddings and
 reject a 3N cluster.
 
+Variable-cell minimization
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The coordinate is the generalized solid-state NEB chart of
+Sheppard, Xiao, and Henkelman, J. Chem. Phys. 136, 074103 (2012)
+(`10.1063/1.3684549 <https://doi.org/10.1063/1.3684549>`_).
+The cell strain is scaled by :math:`J = V^{1/3} N^{1/6}`, a length, so
+the capped L-BFGS step and FIRE bound atoms and the cell together.
+At the reference cell the generalized force is
+:math:`-(V/J)(\sigma - \sigma_{\mathrm{applied}})`.
+The solid-state dimer of Xiao, Sheppard, Rogal, and Henkelman,
+J. Chem. Phys. 140, 174104 (2014)
+(`10.1063/1.4873437 <https://doi.org/10.1063/1.4873437>`_)
+uses that chart. ASE ``FrechetCellFilter`` (the matrix logarithm of
+the deformation, Al-Mohy and Higham,
+`10.1137/080716426 <https://doi.org/10.1137/080716426>`_)
+is the better pure minimizer at large strain and a different
+vector. The page :doc:`../explanation/variable-cell`
+records the choice. The measured comparison is
+``benches/variable_cell/results.md``.
+
 Defaults in this crate
 ~~~~~~~~~~~~~~~~~~~~~~
 
-- Method: ``Lbfgs`` / ``Method::Lbfgs { memory: 8 }``, the eOn cap at 0.2
+- Method: ``Lbfgs`` / ``Method::Lbfgs { memory: 8 }``, line-search-free
+  cap ``EON_MAX_MOVE`` (0.2)
 
-- Opt-in line search: ``LbfgsStep::Wolfe``, constants ``c1 = 1e-4``, ``c2 = 0.9``
+- Opt-in line search: ``LbfgsStep::Wolfe``, constants ``c1 = 1e-4``,
+  ``c2 = 0.9``, at most 20 trials
 
-- ASE length control: ``LbfgsStep::Scaled``, which keeps a shortened pair
+- First trial of that search: ``1`` when the memory is occupied;
+  the initial step length when the memory is empty
 
 - Relative-decrease stop: off on ``Lbfgs`` (``ftol: 0.0``);
   ``LBFGSB_FTOL`` is the SciPy L-BFGS-B default
 
 - Gradient stop: ``norminf(g) < 1e-6`` on ``Lbfgs``, ``norm2(g)`` on
   ``minimize_lbfgs`` so existing cold-start reports stay comparable
+
+- Session stop: ``norm2(g) < gtol`` by default. ``Control::stop_norm``
+  or ``Solver::set_stop_norm`` selects the largest per-atom norm (ASE
+  ``fmax``, eOn ``max_atom``, LAMMPS ``max``), the largest component (eOn
+  ``max_component``, LAMMPS ``inf``) or ``norm2(g) / sqrt(n)`` (eOn ``rms``)

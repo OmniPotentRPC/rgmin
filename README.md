@@ -9,6 +9,11 @@ It is built for geometry optimization.
 There, a host program such as eOn owns the loop, and a `Solver` takes one step per call.
 The step can stay on a manifold, such as the unit sphere or Cartesians with the rigid-body motions removed.
 `Lbfgs::minimize` runs a whole minimization from a Rust closure (example below).
+`relax_cell` runs those steppers on atoms plus the cell strain of the generalized solid-state NEB, scaled by \(V^{1/3} N^{1/6}\).
+A frozen cell matches the fixed-cell minimizer.
+The minimum reports the stress.
+The how-to is [`docs/orgmode/howto/variable-cell.org`](docs/orgmode/howto/variable-cell.org).
+
 Saddle, band, and intrinsic reaction coordinate (IRC) sessions live in [`rgsaddle`](https://github.com/OmniPotentRPC/rgsaddle).
 
 Releases are tagged `vX.Y.Z` on `main` and published to crates.io.

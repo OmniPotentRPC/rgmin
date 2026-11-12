@@ -399,6 +399,26 @@ mass-weighted Eckart, doi:10.1063/1.454172). Sphere, SO(3) as a
 an n² row-major matrix are matrix-manifold embeddings and
 reject a 3N cluster.
 
+** Variable-cell minimization
+
+The coordinate is the generalized solid-state NEB chart of
+Sheppard, Xiao, and Henkelman, J. Chem. Phys. 136, 074103 (2012)
+([[https://doi.org/10.1063/1.3684549][10.1063/1.3684549]]).
+The cell strain is scaled by \(J = V^{1/3} N^{1/6}\), a length, so
+the capped L-BFGS step and FIRE bound atoms and the cell together.
+At the reference cell the generalized force is
+\(-(V/J)(\sigma - \sigma_{\mathrm{applied}})\).
+The solid-state dimer of Xiao, Sheppard, Rogal, and Henkelman,
+J. Chem. Phys. 140, 174104 (2014)
+([[https://doi.org/10.1063/1.4873437][10.1063/1.4873437]])
+uses that chart. ASE ~FrechetCellFilter~ (the matrix logarithm of
+the deformation, Al-Mohy and Higham,
+[[https://doi.org/10.1137/080716426][10.1137/080716426]])
+is the better pure minimizer at large strain and a different
+vector. The page @@rst::doc:`../explanation/variable-cell`@@
+records the choice. The measured comparison is
+~benches/variable_cell/results.md~.
+
 ** Defaults in this crate
 
 - Method: ~Lbfgs~ / ~Method::Lbfgs { memory: 8 }~, line-search-free

@@ -25,6 +25,9 @@ pub mod method;
 /// Nonlinear conjugate-gradient conjugacy and restart.
 pub mod nlcg;
 
+/// Variable-cell relaxation in the solid-state NEB coordinate.
+pub mod cell;
+
 mod accept;
 mod adam;
 mod bb;
@@ -88,6 +91,10 @@ pub mod vecops;
 
 pub use accept::Accept;
 pub use adam::minimize_adam;
+pub use cell::{
+    CellMinimum, CellOptions, CellSample, Chart, FixedMinimum, Geometry, PeriodicPotential, Probe,
+    StrainMask, applied_stress, cell_jacobian, cell_volume, relax_cell, relax_fixed,
+};
 pub use control::{Control, StopNorm};
 pub use eon_cg::{EonCg, EonCgReport, minimize_eon_cg};
 pub use error::{Error, Result};

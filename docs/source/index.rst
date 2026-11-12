@@ -42,13 +42,16 @@ There is no second solver implementation in C++.
 The production unconstrained local method is limited-memory BFGS
 without a line search: the eOn cap of 0.2, a curvature probe on the
 first step, and a memory reset when the proposal is at least that
-long. ``LbfgsStep::Wolfe`` opts into the strong Wolfe search (Nocedal
-and Wright algorithms 3.5--3.6). Hopping chains keep that solver's
-pair history on ``Lbfgs``; anneal's ``WarmLbfgs`` is a thin handle
-around it.
+long. ``LbfgsStep::Scaled`` keeps a shortened pair.
+``LbfgsStep::Wolfe`` opts into the strong Wolfe search (Nocedal and
+Wright algorithms 3.5--3.6). Hopping chains keep that solver's pair
+history on ``Lbfgs``; anneal's ``WarmLbfgs`` is a thin handle around it.
 
 Saddle, band, and IRC sessions live in ``rgsaddle``. They consume this
 crate's ``Solver``; they do not grow a second optimizer.
+A variable-cell relaxation is the same steppers on the solid-state
+NEB coordinate: atoms plus a cell strain scaled by
+:math:`V^{1/3} N^{1/6}`. :doc:`howto/variable-cell` is the call.
 
 .. code:: bash
 
@@ -72,6 +75,7 @@ It also covers the features of each route, the C library and a checkout.
    howto/install
    howto/session
    howto/fire
+   howto/variable-cell
    howto/strong-scaling
    howto/constraints
    howto/manifolds
@@ -91,6 +95,7 @@ It also covers the features of each route, the C library and a checkout.
    explanation/trust-region
    explanation/scg
    explanation/step-bounds
+   explanation/variable-cell
    explanation/randomized
 
 .. toctree::

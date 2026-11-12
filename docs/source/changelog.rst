@@ -4,7 +4,6 @@ Changelog
 ---------
 
 Unreleased
-
 ~~~~~~~~~~
 
 An interior point skips the bounds clip, and a Euclidean session keeps the gradient it already owns.
@@ -13,6 +12,14 @@ A backtracking line search keeps its lowest trial without copying that vector.
 FIRE 2.0 does not build the post-step force, which only FIRE 1.0 mixes.
 L-BFGS reuses the curvature dots stored with each pair.
 The Morse-chain iterates are unchanged.
+
+``relax_cell`` minimizes atoms and the cell in the generalized solid-state NEB coordinate, on the existing steppers.
+The Jacobian is :math:`V^{1/3} N^{1/6}`.
+A frozen mask matches the fixed-cell minimizer.
+The minimum reports the stress and the elastic dipole :math:`P = V\sigma`.
+A contiguous coordinate is read in place.
+Zero strain, including a frozen cell, passes that slice to the potential, and the report keeps that sample.
+:doc:`howto/variable-cell` is the call, and :doc:`explanation/variable-cell` is the comparison with ASE's ``FrechetCellFilter``.
 
 ``Lbfgs::ftol`` is the opt-in relative-decrease stop of L-BFGS-B, and its default of zero turns it off.
 A line-search step from ``f_k`` to ``f_{k+1}`` ends ``minimize``, ``minimize_watched`` and ``minimize_recognized`` when ``f_k - f_{k+1} <= ftol * max(|f_k|, |f_{k+1}|, 1)``.
@@ -103,8 +110,21 @@ Of the two commands it gave before, one failed and the other wrote nothing.
 It takes the version from ``cargo tree``, since the record names no version on ``develop`` and an older one on ``main``.
 The README, the index and the Pt256 tutorial point to it.
 
-L-BFGS session ``Accept::None`` takes the clipped two-loop direction.
-Wolfe line search stays on Energy / Nonmonotone.
+The docs export installs Org 9.7 or newer from the Emacs Lisp Package Archive (ELPA) of the GNU's Not Unix (GNU) project before ox-rst.
+Pull requests run the Org export and the Sphinx build.
+The Pages deploy stays on a push to ``main`` or ``workflow_dispatch``.
+A pull request has its own concurrency group, so it does not cancel a deploy.
+``pages: write`` and ``id-token: write`` belong to the deploy job; the workflow token stays read-only.
+
+CI runs on pushes and pull requests to ``develop`` as well as ``main``, and installs numpy and scipy for the HiGHS reference tests.
+
+``Solver::set_stop_norm`` selects the norm that every session stop test and ``Report::grad_norm`` use.
+``StopNorm::Two`` is the default.
+``StopNorm::MaxAtom`` is the largest per-atom norm (ASE ``fmax``, eOn ``max_atom``, LAMMPS ``max``).
+``StopNorm::Inf`` is the largest absolute component (eOn ``max_component``, LAMMPS ``inf``).
+``Report::grad`` carries the gradient behind a session report.
+C: ``rgmin_solver_set_stop_norm`` and ``rgmin_solver_report_gradient``.
+``abi_minor`` 29.
 
 The exponential preconditioner of Packwood et al., J. Chem. Phys. 144, 164109 (2016) (`10.1063/1.4947024 <https://doi.org/10.1063/1.4947024>`_) is ``Solver::set_exp``.
 The caller supplies the neighbour list.
@@ -115,7 +135,32 @@ C: ``rgmin_exp_t``, ``rgmin_solver_set_exp``, ``rgmin_solver_clear_exp``, ``rgmi
 The C++ session wraps those three as ``set_exp``, ``clear_exp``, and ``exp_mu``.
 ``abi_minor`` 28.
 
-With ``rgmin_solver_set_box``, the caller supplies a per-coordinate HiGHS box on ``x + p``.
+Capped Cartesian L-BFGS reserves the directional-curvature probe for a nominal step at least 64 times larger than the cap.
+Ordinary starts use ``H0 = 0.1 I`` and five-value nonmonotone acceptance.
+An installed exponential preconditioner replaces that scalar seed, including those steepest fallbacks.
+Uncapped L-BFGS keeps the two-loop step and the Wolfe search.
+A HiGHS feasible set and a non-Euclidean manifold stay on that path.
+
+FIRE 2.0 follows Guénolé et al.'s semi-implicit update order, half-step-back uphill correction with a fresh corrected-point force, initial time-step delay, 2,000-step non-positive-power limit, and cap-consistent velocity.
+An installed exponential preconditioner uses ``P`` as the metric: power is ``F · v``, and the kick and the mix use ``P^{-1} F``.
+
+Newton and dogleg leave a first-order saddle.
+When the force is already under ``gtol``, the report reads the analytic Hessian.
+The floor is max(abs(gtol), 1e-6, 1e-8 times the Frobenius norm of H).
+A lowest eigenvalue below minus that floor steps along the mode, scaled to the per-atom cap, at most four times.
+The dogleg radius restarts from the initial step.
+A converged report costs one extra Hessian.
+
+Steihaug-Toint Newton-CG is a session method: tokens ``newton-cg`` and ``newton-pcg`` (``RGMIN_NEWTON_CG`` = 21, ``RGMIN_NEWTON_PCG`` = 22).
+Hessian access is a product, analytic from ``rgmin_solver_step_hvp`` / ``rgmin_minimize_hvp`` and a one-gradient forward difference from ``rgmin_solver_step``.
+``maxmove`` caps the Euclidean trust radius.
+A per-atom cap clips the trial, and the boundary test uses the pre-clip length.
+``rgmin_solver_gradient_calls`` and ``rgmin_solver_hvp_calls`` count the two.
+``rgmin_method_from_name`` parses the token.
+``abi_minor`` 27.
+Steihaug 1983 (`10.1137/0720042 <https://doi.org/10.1137/0720042>`_); Nocedal and Wright, chapter 7.
+
+``rgmin_solver_set_box``: per-coordinate HiGHS box on ``x + p``.
 A NULL side is unbounded.
 Same status as ``set_highs`` (0, or 1 without the ``highs`` feature).
 ``rgmin_solver_set_trust`` is the L\ :sub:`inf`\ radius; ``rgmin_solver_add_equality`` / ``rgmin_solver_clear_equalities`` carry ``a · p = rhs``.
@@ -133,7 +178,7 @@ Tokens 7-10 stay reserved.
 
 Positive orthant (``positive`` / ``RGMIN_MANIFOLD_POSITIVE`` = 21): manopt ``positivefactory``.
 Packed length ``n``.
-Projection is the identity, retraction is ``x ⊙ exp(v ⊘ x)``, transport is the identity.
+Projection is the identity, retraction is ``x odot exp(v oslash x)``, transport is the identity.
 Not the sphere and not a 3N cluster.
 Tokens 7-10 stay reserved.
 ``abi_minor`` 20.
@@ -152,16 +197,33 @@ A 3N cluster is rejected.
 Tokens 7-10 stay reserved.
 ``abi_minor`` 18 and 17.
 
-Symmetric matrices (``symmetric`` / ``RGMIN_MANIFOLD_SYMMETRIC`` = 14): manopt ``symmetricfactory``.
-Packed row-major ``n^2``.
-Projection is symmetrization, retraction is ``X + U``, transport is the identity.
+Constant singleton (``constant`` / ``RGMIN_MANIFOLD_CONSTANT`` = 17): manopt ``constantfactory``.
+Packed length ``n``.
+Projection and transport are the zero tangent, retraction is the fixed point.
 A 3N cluster is rejected.
-The ABI layout revision is 4.
+Tokens 7-10 stay reserved.
+``abi_minor`` 16.
+
+Complex Euclidean (``euclidean_complex`` / ``RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX`` = 16): manopt ``euclideancomplexfactory``.
+Interleaved ``(re, im)``, length ``2 n``.
+Projection is the identity, retraction is ``x + v``, transport is the identity.
+A 3N cluster is rejected.
+Tokens 7-10 stay reserved.
+``abi_minor`` 15.
+
+Skew-symmetric matrices (``skewsymmetric`` / ``RGMIN_MANIFOLD_SKEWSYMMETRIC`` = 15) and symmetric matrices (``symmetric`` / ``RGMIN_MANIFOLD_SYMMETRIC`` = 14): manopt ``skewsymmetricfactory`` and ``symmetricfactory``.
+Both are packed row-major ``n^2``, and the skew-symmetric one needs ``n >= 2``.
+Projection is ``multiskew`` (``0.5 (A - A^T)``) or symmetrization, retraction is ``X + U``, transport is the identity.
+A 3N cluster is rejected.
+The symmetric manifold raised the ABI layout revision to 4.
+
+L-BFGS session ``Accept::None`` takes the clipped two-loop direction.
+Wolfe line search stays on Energy / Nonmonotone.
 
 Scaled conjugate gradient (SCG) C waist: closed ``xts_conjugacy_t`` on ``xts_scg_params_t`` (FR=0 .. FrPr=7, dest leaf order).
 ``params==NULL`` is Netlab Polak-Ribiere.
 Unknown codes are ``RGMIN_INVALID_PARAMETER``.
-The ABI version is 1.13.3, with layout revision 3.
+The ABI version is 1.13.3.
 Hybrid and Restart stay Rust-only.
 
 Typed lowest-mode waist: closed ``EigensolverKind`` (Lanczos=0 through EigenExa=13, ``schema/eigen.capnp``) and ``EigenParams`` (``nev``, ``krylov``, ``max_iter``, ``tol``).
@@ -169,15 +231,13 @@ No Text.
 C ``rgmin_lowest_eigenpair`` plus ``rgmin_eigen_params_t``.
 Unlinked backends return ``RGMIN_UNAVAILABLE``.
 
-The gpr_optim consumer that writes ``RGMIN_CONJUGACY_LIU_STOREY`` is ``RgminScg.inl``, not in-tree ``SCG.inl``.
-
 Molecular manifolds: ``rigid_quotient`` is Sella Cartesian ``R^{3N}/SE(3)`` (``fix_translation`` + ``fix_rotation``); ``mw_rigid`` is the Page-McIver / Sella IRC Eckart metric on the same quotient (``rgmin_solver_set_masses``).
 SO(3) is length 9 and SE(3) is length 12; a 3N cluster is rejected rather than packed or prefix-interpreted.
 Periodic bulk sets ``rgmin_solver_set_periodic``: Sella ``proj_rot = false``, quotient ``R^{3N}/T(3)``.
 Isolated stays ``R^{3N}/SE(3)``.
 ``abi_minor`` 10.
 
-Beside the molecular manifolds, the embedded manopt tokens are Euclidean (default), sphere, SO(3), Stiefel ``St(n,1)`` and ``St(n,p)`` (``rgmin_solver_set_stiefel``), SE(3), Oblique token 11, Multinomial token 12, complex circle ``(S^1)^n``.
+Beside the molecular manifolds, the embedded manopt tokens are Euclidean (default), sphere, SO(3), Stiefel ``St(n,1)`` and ``St(n,p)`` (``rgmin_solver_set_stiefel``), SE(3), Oblique token 11, Multinomial token 12.
 Reserved: 7 symmetric positive definite (SPD), 8 Grassmann, 9 Hyperbolic, 10 Poincare.
 Hourglass mark and the Diataxis book under ``docs/orgmode/``.
 
