@@ -6,6 +6,15 @@ from rgmin._core import Session as Session
 
 __version__: str
 
+def lowest_eigenpairs(
+    hvp: Callable[[Any, Any], Any],
+    x0_block: Any,
+    *,
+    x: Any = None,
+    tol: float = 1e-8,
+    max_iter: int | None = None,
+) -> tuple[Any, Any]: ...
+
 class BFGS:
     maxstep: float
     alpha: float

@@ -9,11 +9,11 @@
 use std::sync::{Arc, Mutex};
 
 use ndarray::{Array1, ArrayView1};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use rgmin::{
-    Accept, Control, FireConfig, FireKind, LbfgsStep, LineSearch, Method, Oracle, SearchStep,
-    Solver, StopNorm, SuppliedSearch,
+    Accept, ApplyHessian, Control, FireConfig, FireKind, LbfgsStep, LineSearch, Method, Oracle,
+    SearchStep, Solver, StopNorm, SuppliedSearch, lowest_eigenpairs as solve_lowest_eigenpairs,
 };
 
 #[pyclass]
@@ -253,10 +253,122 @@ fn call_objective(callback: &PyObject, x: ArrayView1<f64>) -> PyResult<(f64, Arr
     })
 }
 
+fn call_hvp(callback: &PyObject, x: ArrayView1<f64>, v: ArrayView1<f64>) -> PyResult<Array1<f64>> {
+    Python::with_gil(|py| {
+        let point: Vec<f64> = x.iter().copied().collect();
+        let vector: Vec<f64> = v.iter().copied().collect();
+        let out = callback.call1(py, (point, vector))?;
+        let product: Vec<f64> = out.extract(py)?;
+        if product.len() != v.len() {
+            return Err(PyValueError::new_err(format!(
+                "hessian product length {} != {}",
+                product.len(),
+                v.len()
+            )));
+        }
+        Ok(Array1::from_vec(product))
+    })
+}
+
+struct PyHvp {
+    callback: PyObject,
+    caught: Arc<Mutex<Option<PyErr>>>,
+}
+
+impl ApplyHessian for PyHvp {
+    fn apply_hessian(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+        match call_hvp(&self.callback, x, v) {
+            Ok(product) => product,
+            Err(err) => {
+                if let Ok(mut guard) = self.caught.lock() {
+                    if guard.is_none() {
+                        *guard = Some(err);
+                    }
+                }
+                Array1::from_elem(v.len(), f64::NAN)
+            }
+        }
+    }
+}
+
+/// Lowest eigenpairs of a symmetric product.
+///
+/// `hvp(x, v)` returns `H(x) v`. `x0_block` is a list of rows, shape
+/// `(n, k)`. Values come back ascending. Each vector is one column.
+/// A pair that misses `tol` raises `RuntimeError`.
+#[pyfunction]
+#[pyo3(signature = (hvp, x0_block, x=None, *, tol=1e-8, max_iter=None))]
+fn lowest_eigenpairs(
+    py: Python<'_>,
+    hvp: PyObject,
+    x0_block: Vec<Vec<f64>>,
+    x: Option<Vec<f64>>,
+    tol: f64,
+    max_iter: Option<usize>,
+) -> PyResult<(Vec<f64>, Vec<Vec<f64>>)> {
+    let n = x0_block.len();
+    let k = x0_block.first().map(|row| row.len()).unwrap_or(0);
+    if n == 0 || k == 0 || x0_block.iter().any(|row| row.len() != k) {
+        return Err(PyValueError::new_err(
+            "x0_block must have shape (n, k) with n and k positive",
+        ));
+    }
+    let point = match x {
+        Some(point) if point.len() == n => point,
+        Some(point) => {
+            return Err(PyValueError::new_err(format!(
+                "x length {} != {}",
+                point.len(),
+                n
+            )));
+        }
+        None => vec![0.0; n],
+    };
+    let mut seed = ndarray::Array2::zeros((n, k));
+    for (i, row) in x0_block.iter().enumerate() {
+        for (j, value) in row.iter().enumerate() {
+            seed[(i, j)] = *value;
+        }
+    }
+    let iterations = max_iter.unwrap_or_else(|| n.max(8));
+    let caught: Arc<Mutex<Option<PyErr>>> = Arc::new(Mutex::new(None));
+    let apply = PyHvp {
+        callback: hvp.clone_ref(py),
+        caught: caught.clone(),
+    };
+    let x_arr = Array1::from_vec(point);
+    let solved = py.allow_threads(|| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            solve_lowest_eigenpairs(&apply, x_arr.view(), seed.view(), tol, iterations)
+        }))
+    });
+    if let Some(err) = caught.lock().ok().and_then(|mut guard| guard.take()) {
+        return Err(err);
+    }
+    let found = match solved {
+        Ok(Ok(found)) => found,
+        Ok(Err(err)) => return Err(PyValueError::new_err(err.to_string())),
+        Err(_) => return Err(PyRuntimeError::new_err("lowest eigenpairs panicked")),
+    };
+    if found.pairs.iter().any(|pair| !pair.converged) {
+        return Err(PyRuntimeError::new_err(
+            "lowest eigenpairs did not meet the residual tolerance",
+        ));
+    }
+    let values = found.pairs.iter().map(|pair| pair.value).collect();
+    let columns = found
+        .pairs
+        .iter()
+        .map(|pair| pair.vector.to_vec())
+        .collect();
+    Ok((values, columns))
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Session>()?;
     m.add_class::<LineSearchPy>()?;
+    m.add_function(wrap_pyfunction!(lowest_eigenpairs, m)?)?;
     m.add("version", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

@@ -42,3 +42,12 @@ class LineSearch:
     def offer(self, f: float, gradient: list[float]) -> tuple[list[float], float, float, bool]: ...
 
 version: str
+
+def lowest_eigenpairs(
+    hvp: Callable[[list[float], list[float]], list[float]],
+    x0_block: list[list[float]],
+    x: list[float] | None = None,
+    *,
+    tol: float = 1e-8,
+    max_iter: int | None = None,
+) -> tuple[list[float], list[list[float]]]: ...

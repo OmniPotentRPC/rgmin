@@ -25,4 +25,6 @@ FIRE(atoms, logfile=None).run(fmax=0.05, steps=20)
 
 ~LBFGS(eon_cap=True)~ selects the Rust default. Without it the class matches ASE's length control. Stubs live in ~python/rgmin/*.pyi~ and ~py.typed~ marks the package.
 
+~lowest_eigenpairs(hvp, x0_block)~ returns the k lowest pairs of a symmetric product as NumPy arrays. ~hvp(x, v)~ is ~H(x) v~. @@rst::doc:`tutorials/eigenpairs`@@ is the short example, and continuous integration runs it.
+
 C and C++ use ~include/rgmin.h~ and ~include/rgmin/optimize.hpp~. ~examples/c/quadratic.c~ is the short C program: one handle, one minimize, then free.

@@ -24,6 +24,11 @@ imported when an optimizer is constructed.
 matches ASE's length control. Stubs live in ``python/rgmin`` and
 ``py.typed`` marks the package.
 
+``lowest_eigenpairs(hvp, x0_block)`` returns the k lowest pairs of a
+symmetric product as NumPy arrays. ``hvp(x, v)`` is ``H(x) v``.
+:doc:`../tutorials/eigenpairs` is the short example, and continuous
+integration runs it.
+
 C and C++ use ``include/rgmin.h`` and ``include/rgmin/optimize.hpp``.
 The C session is a handle: ``rgmin_solver_create``, ``rgmin_solver_step``,
 ``rgmin_solver_free``. ``rgmin_solver_dim`` and ``rgmin_solver_steps``

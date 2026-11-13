@@ -76,6 +76,7 @@ It also covers the features of each route, the C library and a checkout.
    tutorials/bfgs
    tutorials/newton
    tutorials/scg
+   tutorials/eigenpairs
    tutorials/migration
    tutorials/relax-morse
 
