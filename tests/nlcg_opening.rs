@@ -4,7 +4,7 @@
 use std::sync::Mutex;
 
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Conjugacy, Control, LineSearch, Oracle, Restart, minimize};
+use rgmin::{Conjugacy, Control, LineSearch, Method, Oracle, Restart, Solver, minimize};
 
 fn control() -> Control {
     Control {
@@ -122,4 +122,83 @@ fn an_uphill_fletcher_reeves_direction_is_replaced_by_steepest_descent() {
         cross.abs() < 1e-8 * step.dot(&step).sqrt(),
         "probe {second:?} is not parallel to -g"
     );
+}
+
+fn scaled(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+    let n = x.len();
+    let mut f = -0.0;
+    let mut g = Array1::zeros(n);
+    let denom = (n - 1) as f64;
+    for i in 0..n {
+        let lam = 10f64.powf(8.0 * (i as f64) / denom);
+        f += 0.5 * lam * x[i] * x[i];
+        g[i] = lam * x[i];
+    }
+    (f, g)
+}
+
+#[test]
+fn a_fresh_session_uses_the_cg_curvature_and_quasi_newton_keeps_its_own() {
+    let ctl = control();
+    let cg = Solver::new(Method::nlcg(Conjugacy::FletcherReeves), ctl.clone(), 2);
+    match cg.linesearch() {
+        LineSearch::Wolfe { c1, c2, .. } => {
+            assert!((c1 - 1e-4).abs() < 1e-15);
+            assert!((c2 - 0.1).abs() < 1e-15);
+        }
+        other => panic!("cg search {other:?}"),
+    }
+    let qn = Solver::new(Method::lbfgs(), ctl, 2);
+    match qn.linesearch() {
+        LineSearch::Wolfe { c2, .. } => assert!((c2 - 0.9).abs() < 1e-15),
+        other => panic!("qn search {other:?}"),
+    }
+}
+
+#[test]
+fn session_cg_reaches_the_stiff_quadratic_without_a_caller_linesearch() {
+    // c2 = 0.9 makes the NJWS angle test restart every step. The same
+    // quadratic then stays above 1e5 after forty steepest-descent steps.
+    let obj = Oracle::unbounded(8, scaled);
+    let start = Array1::from_elem(8, 0.5);
+    let ctl = Control {
+        maxiter: 80,
+        gtol: 1e-5,
+        istep: 1.0,
+        maxmove: Some(f64::INFINITY),
+        ftol_rel: None,
+        noise_floor: None,
+    };
+    for beta in [
+        Conjugacy::FletcherReeves,
+        Conjugacy::DaiYuan,
+        Conjugacy::HestenesStiefel,
+        Conjugacy::PolakRibiere,
+    ] {
+        let mut solver = Solver::new(
+            Method::Nlcg {
+                conjugacy: beta.clone(),
+                restart: Restart::njws(),
+            },
+            ctl.clone(),
+            8,
+        );
+        solver.set_atom_maxmove(0.0);
+        solver.set_maxmove(0.0);
+        let mut x = start.clone();
+        let mut steps = 0usize;
+        let mut grad = f64::INFINITY;
+        for _ in 0..ctl.maxiter {
+            let report = solver.step(&obj, &mut x).unwrap();
+            steps = report.steps;
+            grad = report.grad_norm;
+            if grad < ctl.gtol {
+                break;
+            }
+        }
+        assert!(
+            grad < ctl.gtol && steps < ctl.maxiter,
+            "{beta:?} steps={steps} |g|={grad:.3e}"
+        );
+    }
 }

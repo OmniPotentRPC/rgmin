@@ -52,13 +52,26 @@ use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
 };
 
-/// The session's line search until [`Solver::set_linesearch`]: strong
+/// Quasi-Newton line search until [`Solver::set_linesearch`]: strong
 /// Wolfe with `c1 = 1e-4`, `c2 = 0.9`. On the atomistic benchmark it
 /// takes the quasi-Newton unit step at about 1.1 oracle calls per
 /// iteration where Brent's exact search spends about 25.
 const SESSION_LINESEARCH: LineSearch = LineSearch::Wolfe {
     c1: 1e-4,
     c2: 0.9,
+    maxiter: 20,
+};
+
+/// Nonlinear CG line search. Nocedal-Wright section 5.2 uses `c2 = 0.1`.
+///
+/// `c2 = 0.9` accepts a step whose slope is still nearly the opening
+/// slope, so the new gradient stays aligned with the old one. The NJWS
+/// angle restart then fires every step (`|g·g_old| / ||g||^2 >= 0.1`)
+/// and the iteration is steepest descent. A condition-`1e8` quadratic
+/// does not reach the tolerance that way.
+const CG_LINESEARCH: LineSearch = LineSearch::Wolfe {
+    c1: 1e-4,
+    c2: 0.1,
     maxiter: 20,
 };
 
@@ -327,10 +340,15 @@ impl Solver {
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
         let istep = control.istep;
         let inner = Inner::from_method(&method, dim, istep);
+        let linesearch = if matches!(method, Method::Nlcg { .. }) {
+            CG_LINESEARCH
+        } else {
+            SESSION_LINESEARCH
+        };
         let mut solver = Self {
             dim,
             control,
-            linesearch: SESSION_LINESEARCH,
+            linesearch,
             line_options: LineSearchOptions::default(),
             istep,
             steps: 0,
@@ -621,8 +639,9 @@ impl Solver {
 
     /// Line search for the line-searched arms (steepest descent, NLCG,
     /// BFGS, SR1, SR2, Adam, and L-BFGS under [`Accept::Energy`]) on the
-    /// next [`Self::step`]. Default is strong Wolfe (`c1 = 1e-4`,
-    /// `c2 = 0.9`, 20 trials), not [`LineSearch::default`] (Brent).
+    /// next [`Self::step`]. Quasi-Newton methods start at strong Wolfe
+    /// (`c1 = 1e-4`, `c2 = 0.9`, 20 trials). Nonlinear CG starts at
+    /// `c2 = 0.1`. Neither default is [`LineSearch::default`] (Brent).
     pub fn set_linesearch(&mut self, linesearch: LineSearch) {
         self.linesearch = linesearch;
     }
