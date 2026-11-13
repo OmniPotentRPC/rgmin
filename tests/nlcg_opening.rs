@@ -1,5 +1,5 @@
-//! The free nonlinear-CG loop opens from Nocedal-Wright 3.60 and does
-//! not search a direction that fails to descend.
+//! The free nonlinear-CG loop opens at half the step last accepted and
+//! does not search a direction that fails to descend.
 
 use std::sync::Mutex;
 
@@ -26,9 +26,10 @@ fn backtrack() -> LineSearch {
 }
 
 #[test]
-fn the_second_opening_step_follows_the_previous_slope() {
+fn the_second_opening_step_is_half_the_step_last_accepted() {
     // f = 1/2 (x^2 + 4 y^2). Backtracking from istep = 0.2 accepts 0.2.
-    // Equation 3.60 then opens near 5.3, not at half the accepted step.
+    // The next trial is 0.1, not the slope ratio (~5.3) and not
+    // min(1, 1.01 * 2 Δf / φ'(0)) = 1.
     let seen = Mutex::new(Vec::<Array1<f64>>::new());
     let obj = Oracle::unbounded(2, |x: ArrayView1<f64>| {
         seen.lock().unwrap().push(x.to_owned());
@@ -56,8 +57,11 @@ fn the_second_opening_step_follows_the_previous_slope() {
     let y = &g1 - &g0;
     let beta = g1.dot(&y) / g0.dot(&g0);
     let d1 = &(-&g1) + &(beta * &d0);
-    let alpha = 0.2 * (g0.dot(&d0) / g1.dot(&d1));
-    let expect = &x1 + &(alpha * &d1);
+    let slope = 0.2 * (g0.dot(&d0) / g1.dot(&d1));
+    let quad: f64 = 1.01 * 2.0 * (0.4 - 2.5) / g1.dot(&d1);
+    let expect = &x1 + &(0.1 * &d1);
+    let slope_pt = &x1 + &(slope * &d1);
+    let quad_pt = &x1 + &(quad.min(1.0) * &d1);
     // The first point off the opening ray is the second iteration's trial.
     let second = pts
         .iter()
@@ -69,11 +73,11 @@ fn the_second_opening_step_follows_the_previous_slope() {
     for i in 0..2 {
         assert!(
             (second[i] - expect[i]).abs() < 1e-9,
-            "probe {second:?} expected {expect:?} (half-step would be {})",
-            x1[i] + 0.1 * d1[i]
+            "probe {second:?} expected half-step {expect:?}"
         );
+        assert!((second[i] - slope_pt[i]).abs() > 1e-6);
+        assert!((second[i] - quad_pt[i]).abs() > 1e-6);
     }
-    assert!((alpha - 0.1).abs() > 1.0, "alpha {alpha} collapsed to half");
 }
 
 #[test]

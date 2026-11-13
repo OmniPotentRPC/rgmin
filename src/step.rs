@@ -386,9 +386,6 @@ pub(crate) fn qn_istep(control: &Control) -> f64 {
 /// The opening step of the next line search when the direction is the
 /// gradient (steepest descent, Adam): half the step last accepted,
 /// or `control.istep` again after a step that did not move.
-///
-/// Nonlinear CG does not use this. Its opening step is
-/// [`nlcg_opening_alpha`].
 pub(crate) fn next_istep(lsstep: f64, control: &Control) -> f64 {
     if lsstep <= 0.0 {
         control.istep
@@ -397,11 +394,47 @@ pub(crate) fn next_istep(lsstep: f64, control: &Control) -> f64 {
     }
 }
 
-/// Opening step for nonlinear CG, Nocedal-Wright equation 3.60.
+/// Opening step of the free nonlinear-CG loop: half the step last
+/// accepted, or `fallback` when that step did not move, then clamped
+/// to `cap`.
+///
+/// Nocedal-Wright 3.60 has two common readings. The derivative ratio
+/// [`nlcg_opening_alpha`] is what the session uses. The quadratic
+/// interpolation `2 (f_k - f_{k-1}) / φ'(0)`, and `min(1, 1.01 times
+/// that)`, both open the free loop too long under Wolfe `c2 = 0.1`:
+/// the line search accepts a still-descending trial at the step cap,
+/// and Hestenes-Stiefel and Dai-Yuan then take more steps on a stiff
+/// quadratic than half the previous accepted step. The free loop keeps
+/// the half step.
+pub(crate) fn nlcg_half_opening(prev_alpha: f64, cap: f64, fallback: f64) -> f64 {
+    let cap = if cap.is_finite() && cap > 0.0 {
+        cap
+    } else {
+        f64::INFINITY
+    };
+    let fb = if fallback.is_finite() && fallback > 0.0 {
+        fallback.min(cap)
+    } else {
+        1.0_f64.min(cap)
+    };
+    let alpha = if prev_alpha.is_finite() && prev_alpha > 0.0 {
+        prev_alpha * 0.5
+    } else {
+        fb
+    };
+    if !alpha.is_finite() || alpha <= 0.0 {
+        fb
+    } else {
+        alpha.min(cap)
+    }
+}
+
+/// Opening step for the session nonlinear-CG search.
 ///
 /// `α0 = α_{k-1} (g_{k-1}·d_{k-1}) / (g_k·d_k)`, then clamped to `cap`.
 /// Both directional derivatives must be negative. Otherwise, or when the
 /// previous step did not move, the result is `fallback` clamped to `cap`.
+/// The free loop does not use this; see [`nlcg_half_opening`].
 pub(crate) fn nlcg_opening_alpha(
     prev_alpha: f64,
     prev_gd: f64,
@@ -435,6 +468,58 @@ pub(crate) fn nlcg_opening_alpha(
 
 #[cfg(test)]
 mod tests {
+    use super::{nlcg_half_opening, nlcg_opening_alpha};
+
+    /// `2 (f - f_prev) / gd`. NaN unless the slope is a strict descent.
+    fn quadratic_opening(f: f64, f_prev: f64, gd: f64) -> f64 {
+        if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+            return f64::NAN;
+        }
+        2.0 * (f - f_prev) / gd
+    }
+
+    fn quadratic_opening_capped(f: f64, f_prev: f64, gd: f64) -> f64 {
+        let alpha = quadratic_opening(f, f_prev, gd);
+        if !alpha.is_finite() || alpha <= 0.0 {
+            f64::NAN
+        } else {
+            (1.01 * alpha).min(1.0)
+        }
+    }
+
+    #[test]
+    fn half_opening_is_half_the_accepted_step_and_respects_the_cap() {
+        assert!((nlcg_half_opening(0.2, f64::INFINITY, 1.0) - 0.1).abs() < 1e-15);
+        assert!((nlcg_half_opening(0.2, 0.04, 1.0) - 0.04).abs() < 1e-15);
+        assert!((nlcg_half_opening(0.0, 0.5, 0.2) - 0.2).abs() < 1e-15);
+        assert!((nlcg_half_opening(0.0, 0.05, 0.2) - 0.05).abs() < 1e-15);
+    }
+
+    #[test]
+    fn the_slope_ratio_and_both_quadratic_readings_differ_from_the_half_step() {
+        // f = 1/2 (x^2 + 4 y^2) after accepting α = 0.2 from (1, 1).
+        // φ'(0) on the new direction is g1·d1. The three 3.60 readings
+        // are all far from half of 0.2.
+        let prev_alpha = 0.2;
+        let prev_gd = -17.0;
+        let gd = -0.64;
+        let f_prev = 2.5;
+        let f = 0.4;
+        let slope = nlcg_opening_alpha(prev_alpha, prev_gd, gd, f64::INFINITY, 1.0);
+        let quad = quadratic_opening(f, f_prev, gd);
+        let capped = quadratic_opening_capped(f, f_prev, gd);
+        assert!((slope - prev_alpha * prev_gd / gd).abs() < 1e-12);
+        assert!((quad - 2.0 * (f - f_prev) / gd).abs() < 1e-12);
+        assert!(
+            (capped - 1.0).abs() < 1e-15,
+            "min(1, 1.01 * quad) saturates at 1"
+        );
+        assert!(slope > 1.0 && quad > 1.0);
+        assert!((nlcg_half_opening(prev_alpha, f64::INFINITY, 1.0) - 0.1).abs() < 1e-15);
+        assert!(quadratic_opening(f, f_prev, 0.1).is_nan());
+        assert!(quadratic_opening_capped(f_prev, f, gd).is_nan());
+    }
+
     #[test]
     fn an_infinite_euclidean_cap_leaves_the_default_atom_cap_off() {
         use super::*;

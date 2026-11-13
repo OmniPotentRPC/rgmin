@@ -1,5 +1,7 @@
 //! Dispatch Nocedal-Wright local methods on an eindir objective.
 
+use std::cell::Cell;
+
 use eindir_core::{DifferentiableObjective, Objective};
 use ndarray::Array1;
 
@@ -16,7 +18,7 @@ use crate::qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimi
 use crate::report::Report;
 use crate::session::Solver;
 use crate::step::{
-    cap_alpha, energy_noise_report, implicit_atom_cap, l2, nlcg_opening_alpha, take_step,
+    cap_alpha, energy_noise_report, implicit_atom_cap, l2, nlcg_half_opening, take_step,
 };
 
 /// Minimize `obj` from `init` with the chosen conjugacy, restart, and line search.
@@ -210,6 +212,14 @@ where
     Ok(last)
 }
 
+thread_local! {
+    static UPHILL_FIRINGS: Cell<u64> = const { Cell::new(0) };
+}
+
+fn note_uphill() {
+    UPHILL_FIRINGS.with(|c| c.set(c.get() + 1));
+}
+
 fn minimize_nlcg<O>(
     obj: &O,
     init: impl Into<Array1<f64>>,
@@ -234,7 +244,6 @@ where
     let mut g_old = grad.clone();
     let mut d_old = dir.clone();
     let mut prev_alpha = 0.0;
-    let mut prev_gd = 0.0;
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
@@ -247,16 +256,17 @@ where
                 status,
             });
         }
-        // The session does this before the search. An uphill conjugate
-        // direction is not the one equation 3.60 differentiates.
+        // A beta that leaves g·d >= 0 is not a descent direction. The
+        // line search would flip it and then build the next beta from
+        // that flipped vector. Replace it before the search.
         let gd_used = crate::vecops::dot(grad.view(), dir.view());
         if gd_used.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+            note_uphill();
             dir = grad.mapv(|g| -g);
             d_old.assign(&dir);
         }
-        let gd_used = crate::vecops::dot(grad.view(), dir.view());
         let cap = cap_alpha(dir.view(), control, implicit_atom_cap(control));
-        let alpha0 = nlcg_opening_alpha(prev_alpha, prev_gd, gd_used, cap, control.istep);
+        let alpha0 = nlcg_half_opening(prev_alpha, cap, control.istep);
         let t = take_step(
             obj,
             &pos,
@@ -286,12 +296,12 @@ where
         dir = Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d));
         let formed = crate::vecops::dot(grad.view(), dir.view());
         if formed.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+            note_uphill();
             dir = grad.mapv(|g| -g);
         }
         g_old.assign(&grad);
         d_old.assign(&dir);
         prev_alpha = t.alpha;
-        prev_gd = gd_used;
     }
     Ok(Report {
         value,
@@ -300,4 +310,202 @@ where
         grad_norm: l2(&grad),
         status: control.finish_status(l2(&grad), grad.len(), true),
     })
+}
+
+#[cfg(test)]
+mod uphill_count {
+    use super::*;
+    use crate::linesearch::LineSearch;
+    use crate::nlcg::{Conjugacy, Restart};
+    use crate::oracle::Oracle;
+    use ndarray::{Array1, ArrayView1};
+
+    fn rose(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let n = x.len();
+        let mut f = -0.0;
+        let mut g = Array1::zeros(n);
+        for i in 0..n - 1 {
+            let a = 1.0 - x[i];
+            let b = x[i + 1] - x[i] * x[i];
+            f += a * a + 100.0 * b * b;
+            g[i] += -2.0 * a - 400.0 * x[i] * b;
+            g[i + 1] += 200.0 * b;
+        }
+        (f, g)
+    }
+
+    fn scaled(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let n = x.len();
+        let mut f = -0.0;
+        let mut g = Array1::zeros(n);
+        let denom = (n - 1) as f64;
+        for i in 0..n {
+            let lam = 10f64.powf(8.0 * (i as f64) / denom);
+            f += 0.5 * lam * x[i] * x[i];
+            g[i] = lam * x[i];
+        }
+        (f, g)
+    }
+
+    fn morse(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        const D0: f64 = 0.7102;
+        const ALPHA: f64 = 1.6047;
+        const R0: f64 = 2.897;
+        let n = x.len() / 3;
+        let rc = 7.0;
+        let xc = (-ALPHA * (rc - R0)).exp();
+        let shift = D0 * (xc * xc - 2.0 * xc);
+        let mut energy = -0.0;
+        let mut grad = Array1::zeros(x.len());
+        let cut2 = rc * rc;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let mut diff = [0.0; 3];
+                let mut r2 = -0.0;
+                for a in 0..3 {
+                    diff[a] = x[3 * i + a] - x[3 * j + a];
+                    r2 += diff[a] * diff[a];
+                }
+                if r2 <= 0.0 || r2 >= cut2 {
+                    continue;
+                }
+                let r = r2.sqrt();
+                let e = (-ALPHA * (r - R0)).exp();
+                energy += D0 * (e * e - 2.0 * e) - shift;
+                let slope = (2.0 * D0 * ALPHA * e * (1.0 - e)) / r;
+                for a in 0..3 {
+                    let piece = slope * diff[a];
+                    grad[3 * i + a] += piece;
+                    grad[3 * j + a] -= piece;
+                }
+            }
+        }
+        (energy, grad)
+    }
+
+    fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let n = x.len() / 3;
+        let mut energy = -0.0;
+        let mut grad = Array1::zeros(x.len());
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let mut diff = [0.0; 3];
+                let mut r2 = -0.0;
+                for a in 0..3 {
+                    diff[a] = x[3 * i + a] - x[3 * j + a];
+                    r2 += diff[a] * diff[a];
+                }
+                if r2 <= 0.0 {
+                    continue;
+                }
+                let inv = 1.0 / r2;
+                let sr6 = inv * inv * inv;
+                let sr12 = sr6 * sr6;
+                energy += 4.0 * (sr12 - sr6);
+                let slope = 24.0 * (sr6 - 2.0 * sr12) * inv;
+                for a in 0..3 {
+                    let piece = slope * diff[a];
+                    grad[3 * i + a] += piece;
+                    grad[3 * j + a] -= piece;
+                }
+            }
+        }
+        (energy, grad)
+    }
+
+    struct Job {
+        dim: usize,
+        maxiter: usize,
+        gtol: f64,
+        cap: bool,
+        start: Array1<f64>,
+        fg: fn(ArrayView1<f64>) -> (f64, Array1<f64>),
+    }
+
+    #[test]
+    fn the_uphill_fallback_does_not_fire_on_the_oracle_set() {
+        let betas = [
+            Conjugacy::FletcherReeves,
+            Conjugacy::DaiYuan,
+            Conjugacy::HestenesStiefel,
+            Conjugacy::PolakRibiere,
+        ];
+        let linesearch = LineSearch::Wolfe {
+            c1: 1e-4,
+            c2: 0.1,
+            maxiter: 30,
+        };
+        let jobs = [
+            Job {
+                dim: 2,
+                maxiter: 400,
+                gtol: 1e-6,
+                cap: false,
+                start: Array1::from_iter((0..2).map(|i| if i % 2 == 0 { -1.2 } else { 1.0 })),
+                fg: rose,
+            },
+            Job {
+                dim: 10,
+                maxiter: 1500,
+                gtol: 1e-5,
+                cap: false,
+                start: Array1::from_iter((0..10).map(|i| if i % 2 == 0 { -1.2 } else { 1.0 })),
+                fg: rose,
+            },
+            Job {
+                dim: 8,
+                maxiter: 200,
+                gtol: 1e-5,
+                cap: false,
+                start: Array1::from_elem(8, 0.5),
+                fg: scaled,
+            },
+            Job {
+                dim: 6,
+                maxiter: 400,
+                gtol: 1e-4,
+                cap: true,
+                start: ndarray::array![0.0, 0.0, 0.0, 3.4, 0.15, -0.05],
+                fg: morse,
+            },
+            Job {
+                dim: 9,
+                maxiter: 400,
+                gtol: 1e-3,
+                cap: true,
+                start: ndarray::array![0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.4, 1.3, 0.1],
+                fg: lj,
+            },
+        ];
+        for beta in betas {
+            for job in &jobs {
+                let evals = std::sync::atomic::AtomicUsize::new(0);
+                let fg = job.fg;
+                let obj = Oracle::unbounded(job.dim, |x: ArrayView1<f64>| {
+                    evals.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    fg(x)
+                });
+                let control = Control {
+                    maxiter: job.maxiter,
+                    gtol: job.gtol,
+                    istep: 1.0,
+                    maxmove: if job.cap { None } else { Some(f64::INFINITY) },
+                    ftol_rel: None,
+                    noise_floor: None,
+                };
+                UPHILL_FIRINGS.with(|c| c.set(0));
+                minimize(
+                    &obj,
+                    job.start.clone(),
+                    &control,
+                    beta.clone(),
+                    Restart::njws(),
+                    linesearch,
+                )
+                .unwrap();
+                let fired = UPHILL_FIRINGS.with(|c| c.get());
+                assert_eq!(fired, 0, "{beta:?} dim {} fired {fired}", job.dim);
+            }
+        }
+    }
 }

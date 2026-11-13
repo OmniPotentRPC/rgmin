@@ -68,7 +68,8 @@ pub struct Control {
     /// steepest-descent search open every line search here. L-BFGS opens
     /// here while it holds no pairs and at 1.0 once it does. `minimize_sd`
     /// opens here once and then at half the step last accepted. Nonlinear
-    /// CG opens from Nocedal-Wright equation 3.60. Adam opens here once
+    /// CG does the same half step. The session CG search opens from the
+    /// derivative form of Nocedal-Wright equation 3.60. Adam opens here once
     /// and then at the step last accepted, along a direction scaled to
     /// unit per-atom length. SR1 and SR2 do not line search.
     pub istep: f64,
