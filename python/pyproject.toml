@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "rgmin"
+version = "0.2.0"
+description = "Local minimization. The Rust solvers, from Python."
+requires-python = ">=3.9"
+dependencies = ["numpy"]
+authors = [{ name = "Rohit Goswami", email = "rgoswami@ieee.org" }]
+license = { text = "MIT" }
+
+[project.optional-dependencies]
+ase = ["ase"]
+
+[tool.maturin]
+module-name = "rgmin._core"
+python-source = "."
