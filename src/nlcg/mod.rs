@@ -223,9 +223,8 @@ impl Conjugacy {
                 div(gz, dot(gold, z_old))
             }
             Self::PolakRibiere => {
-                let y = &g - &gold;
-                let zy = dot(z, y.view());
-                div(zy, dot(gold, z_old))
+                let (zy, gz_old) = dot_diff_and_dot(z, g, gold, z_old);
+                div(zy, gz_old)
             }
             Self::PolakRibierePlus => Self::PolakRibiere.beta_metric(ctx, z, z_old).max(0.0),
             Self::HestenesStiefel => {
@@ -282,7 +281,37 @@ impl Conjugacy {
 }
 
 fn dot(a: ArrayView1<'_, f64>, b: ArrayView1<'_, f64>) -> f64 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+    sum_products(a.iter().zip(b.iter()).map(|(x, y)| x * y))
+}
+
+/// Left fold of products from the `f64` identity of [`Iterator::sum`].
+///
+/// On the toolchain this crate pins (Rust 1.88) that identity is `-0.0`,
+/// not `+0.0`. An empty sum, or a sum of `-0.0` products, keeps the sign.
+fn sum_products(products: impl Iterator<Item = f64>) -> f64 {
+    products.fold(-0.0, |acc, x| acc + x)
+}
+
+fn sum_identity() -> f64 {
+    sum_products(std::iter::empty())
+}
+
+/// `z · (g - g_old)` and `g_old · z_old`, each a left fold of those products.
+///
+/// The difference is formed once per index and multiplied, which is the
+/// product a stored `g - g_old` feeds to [`dot`]. Both accumulators start
+/// at the same identity [`sum_products`] uses.
+fn dot_diff_and_dot(
+    z: ArrayView1<'_, f64>,
+    g: ArrayView1<'_, f64>,
+    gold: ArrayView1<'_, f64>,
+    z_old: ArrayView1<'_, f64>,
+) -> (f64, f64) {
+    let n = z.len().min(g.len()).min(gold.len()).min(z_old.len());
+    (0..n).fold((sum_identity(), sum_identity()), |(zy, gz), i| {
+        let y = g[i] - gold[i];
+        (zy + z[i] * y, gz + gold[i] * z_old[i])
+    })
 }
 
 /// `num/den`, or 0 when `den` is negligible beside `num`.
@@ -305,7 +334,7 @@ fn div(num: f64, den: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::array;
+    use ndarray::{Array1, array};
 
     #[test]
     fn textbook_betas_on_orthogonal_gradients() {
@@ -491,6 +520,72 @@ mod tests {
             Conjugacy::LiuStorey.beta(&ctx2),
             Conjugacy::PolakRibiere.beta(&ctx2)
         );
+    }
+
+    #[test]
+    fn fused_polak_ribiere_products_match_sum_bit_for_bit() {
+        fn reference(
+            z: ArrayView1<f64>,
+            g: ArrayView1<f64>,
+            gold: ArrayView1<f64>,
+            z_old: ArrayView1<f64>,
+        ) -> (f64, f64) {
+            let y = &g - &gold;
+            let zy: f64 = z.iter().zip(y.iter()).map(|(a, b)| a * b).sum();
+            let gz: f64 = gold.iter().zip(z_old.iter()).map(|(a, b)| a * b).sum();
+            (zy, gz)
+        }
+        fn check(z: Array1<f64>, g: Array1<f64>, gold: Array1<f64>, z_old: Array1<f64>) {
+            let (zy, gz) = dot_diff_and_dot(z.view(), g.view(), gold.view(), z_old.view());
+            let (zy_old, gz_old) = reference(z.view(), g.view(), gold.view(), z_old.view());
+            assert_eq!(zy.to_bits(), zy_old.to_bits(), "zy {z:?} {g:?} {gold:?}");
+            assert_eq!(gz.to_bits(), gz_old.to_bits(), "gz {gold:?} {z_old:?}");
+        }
+
+        let empty = Array1::<f64>::zeros(0);
+        let (zy, gz) = dot_diff_and_dot(empty.view(), empty.view(), empty.view(), empty.view());
+        let neg0 = (-0.0f64).to_bits();
+        assert_eq!(zy.to_bits(), neg0);
+        assert_eq!(gz.to_bits(), neg0);
+        check(empty.clone(), empty.clone(), empty.clone(), empty);
+
+        // Every product is -0.0: (g - g_old) is -0, times +0; g_old is +0 times -0.
+        let z = array![0.0, 0.0, 0.0];
+        let g = array![-0.0, -0.0, -0.0];
+        let gold = array![0.0, 0.0, 0.0];
+        let z_old = array![-0.0, -0.0, -0.0];
+        let (zy, gz) = dot_diff_and_dot(z.view(), g.view(), gold.view(), z_old.view());
+        assert_eq!(zy.to_bits(), neg0);
+        assert_eq!(gz.to_bits(), neg0);
+        check(z, g, gold, z_old);
+
+        check(
+            array![f64::NAN, 1.0],
+            array![2.0, f64::NAN],
+            array![f64::INFINITY, -1.0],
+            array![-0.0, f64::NEG_INFINITY],
+        );
+        check(
+            array![f64::NEG_INFINITY, 0.0, -0.0],
+            array![1.0, f64::INFINITY, -0.0],
+            array![-0.0, 3.0, 0.0],
+            array![f64::NAN, -0.0, f64::INFINITY],
+        );
+
+        let mut state = 0x1234_5678_9abc_def0u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(0x6c62_272e_07bb_0142)
+                .wrapping_add(0x2f4a_8d6c_91e5_b3a7);
+            f64::from_bits(state)
+        };
+        for n in [1usize, 2, 7, 8, 17, 72] {
+            let z = Array1::from_iter((0..n).map(|_| next()));
+            let g = Array1::from_iter((0..n).map(|_| next()));
+            let gold = Array1::from_iter((0..n).map(|_| next()));
+            let z_old = Array1::from_iter((0..n).map(|_| next()));
+            check(z, g, gold, z_old);
+        }
     }
 
     #[test]
