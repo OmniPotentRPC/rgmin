@@ -15,7 +15,9 @@ use crate::pso::minimize_pso;
 use crate::qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 use crate::report::Report;
 use crate::session::Solver;
-use crate::step::{energy_noise_report, implicit_atom_cap, l2, next_istep, take_step};
+use crate::step::{
+    cap_alpha, energy_noise_report, implicit_atom_cap, l2, nlcg_opening_alpha, take_step,
+};
 
 /// Minimize `obj` from `init` with the chosen conjugacy, restart, and line search.
 pub fn minimize<O>(
@@ -231,7 +233,8 @@ where
     let mut dir = grad.mapv(|g| -g);
     let mut g_old = grad.clone();
     let mut d_old = dir.clone();
-    let mut istep = control.istep;
+    let mut prev_alpha = 0.0;
+    let mut prev_gd = 0.0;
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
@@ -244,13 +247,23 @@ where
                 status,
             });
         }
+        // The session does this before the search. An uphill conjugate
+        // direction is not the one equation 3.60 differentiates.
+        let gd_used = crate::vecops::dot(grad.view(), dir.view());
+        if gd_used.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+            dir = grad.mapv(|g| -g);
+            d_old.assign(&dir);
+        }
+        let gd_used = crate::vecops::dot(grad.view(), dir.view());
+        let cap = cap_alpha(dir.view(), control, implicit_atom_cap(control));
+        let alpha0 = nlcg_opening_alpha(prev_alpha, prev_gd, gd_used, cap, control.istep);
         let t = take_step(
             obj,
             &pos,
             value,
             &grad,
             dir.view(),
-            istep,
+            alpha0,
             linesearch,
             control,
             implicit_atom_cap(control),
@@ -258,7 +271,6 @@ where
         if t.energy_noise {
             return Ok(energy_noise_report(value, pos, step + 1, gnorm));
         }
-        let lsstep = t.alpha;
         pos = t.x;
         value = t.f;
         grad = t.g;
@@ -272,9 +284,14 @@ where
             beta = 0.0;
         }
         dir = Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d));
+        let formed = crate::vecops::dot(grad.view(), dir.view());
+        if formed.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+            dir = grad.mapv(|g| -g);
+        }
         g_old.assign(&grad);
         d_old.assign(&dir);
-        istep = next_istep(lsstep, control);
+        prev_alpha = t.alpha;
+        prev_gd = gd_used;
     }
     Ok(Report {
         value,
