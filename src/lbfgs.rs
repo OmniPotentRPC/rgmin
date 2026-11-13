@@ -147,11 +147,30 @@ impl Ring {
         self.oldest = 0;
     }
 
+    /// Oldest-first dense prefix. A wrapped ring is not that prefix: growing
+    /// it has to unwind the ring before the next slot is appended, or the
+    /// new pair lands between the survivors.
+    fn linearize(&mut self) {
+        if self.oldest == 0 && self.slots.len() == self.len {
+            return;
+        }
+        let n = self.slots.len();
+        let mut kept = Vec::with_capacity(self.len);
+        for i in 0..self.len {
+            let idx = (self.oldest + i) % n;
+            kept.push(std::mem::replace(&mut self.slots[idx], empty_pair()));
+        }
+        self.slots = kept;
+        self.len = self.slots.len();
+        self.oldest = 0;
+    }
+
     /// Logical order is oldest first. While `len < cap` the slots stay dense
     /// at the front. Once full, the next insert overwrites `oldest`.
     fn insert(&mut self, cap: usize, pair: Pair) {
         let cap = cap.max(1);
         if self.len < cap {
+            self.linearize();
             debug_assert_eq!(self.oldest, 0);
             debug_assert_eq!(self.slots.len(), self.len);
             self.slots.push(pair);
@@ -1508,6 +1527,75 @@ mod neb_guard_tests {
             let direction = solver.guarded_direction(gradient.view(), Some(1.0));
             assert_eq!(direction, -&gradient);
             assert!(direction.dot(&gradient) < 0.0);
+        }
+    }
+}
+
+#[cfg(test)]
+mod ring_tests {
+    use super::*;
+    use ndarray::array;
+
+    fn pair(s: [f64; 2], y: [f64; 2]) -> (Array1<f64>, Array1<f64>) {
+        (array![s[0], s[1]], array![y[0], y[1]])
+    }
+
+    /// Oldest-first history, the order [`Lbfgs::two_loop`] reads.
+    fn direction_of(pairs: &[(Array1<f64>, Array1<f64>)], g: &Array1<f64>) -> Array1<f64> {
+        let mut solver = Lbfgs::with_capacity(pairs.len().max(1));
+        for (s, y) in pairs {
+            solver.record(s.clone(), y.clone());
+        }
+        assert_eq!(solver.len(), pairs.len());
+        solver.two_loop(g.view())
+    }
+
+    #[test]
+    fn wrapped_memory_matches_the_surviving_pairs_in_order() {
+        let pairs = [
+            pair([1.0, 0.0], [2.0, 0.0]),
+            pair([0.0, 1.0], [0.0, 3.0]),
+            pair([1.0, 1.0], [1.0, 2.0]),
+            pair([1.0, -1.0], [2.0, -0.5]),
+            pair([-1.0, 0.5], [-2.0, 1.0]),
+        ];
+        let g = array![-1.5, 0.75];
+        let mut wrapped = Lbfgs::with_capacity(3);
+        for (s, y) in &pairs {
+            wrapped.record(s.clone(), y.clone());
+        }
+        assert_eq!(wrapped.len(), 3);
+        let kept = &pairs[pairs.len() - 3..];
+        let expect = direction_of(kept, &g);
+        let got = wrapped.two_loop(g.view());
+        for i in 0..g.len() {
+            assert_eq!(got[i].to_bits(), expect[i].to_bits(), "d[{i}]");
+        }
+    }
+
+    #[test]
+    fn growing_after_a_wrap_keeps_chronological_order() {
+        let pairs = [
+            pair([1.0, 0.0], [2.0, 0.0]),
+            pair([0.0, 1.0], [0.0, 3.0]),
+            pair([1.0, 1.0], [1.0, 2.0]),
+            pair([1.0, -1.0], [2.0, -0.5]),
+        ];
+        let g = array![-1.5, 0.75];
+        let mut grown = Lbfgs::with_capacity(2);
+        for (s, y) in &pairs[..3] {
+            grown.record(s.clone(), y.clone());
+        }
+        assert_eq!(grown.len(), 2);
+        grown.max_pairs = 4;
+        grown.record(pairs[3].0.clone(), pairs[3].1.clone());
+        assert_eq!(grown.len(), 3);
+        // Cap 2 dropped the oldest of the first three. Growth must append
+        // the fourth after those two, not insert it in the middle.
+        let expect = direction_of(&pairs[1..], &g);
+        let got = grown.two_loop(g.view());
+        for i in 0..g.len() {
+            assert_eq!(got[i].to_bits(), expect[i].to_bits(), "d[{i}]");
         }
     }
 }
