@@ -67,6 +67,20 @@ pub enum LineSearch {
     },
 }
 
+/// Strong Wolfe for nonlinear CG.
+///
+/// Nocedal-Wright section 5.2 uses `c2 = 0.1`. `c2 = 0.9` accepts a step
+/// whose slope is still nearly the opening slope, so the new gradient
+/// stays aligned with the old one. The NJWS angle restart then fires
+/// every step and the iteration is steepest descent. A fresh session and
+/// a one-shot minimizer that was not given a search both use this value.
+/// A caller that passes its own [`LineSearch`] is left alone.
+pub const CG_LINESEARCH: LineSearch = LineSearch::Wolfe {
+    c1: 1e-4,
+    c2: 0.1,
+    maxiter: 20,
+};
+
 /// Optional policy for objective values whose accuracy is lower than their gradients.
 /// Existing line-search entry points use the default four-epsilon window.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

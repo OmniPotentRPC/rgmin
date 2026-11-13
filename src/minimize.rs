@@ -51,11 +51,7 @@ where
 #[cfg_attr(not(feature = "capi"), allow(dead_code))]
 pub(crate) fn oneshot_linesearch(method: &Method) -> LineSearch {
     if matches!(method, Method::Nlcg { .. }) {
-        LineSearch::Wolfe {
-            c1: 1e-4,
-            c2: 0.1,
-            maxiter: 20,
-        }
+        crate::linesearch::CG_LINESEARCH
     } else {
         LineSearch::default()
     }

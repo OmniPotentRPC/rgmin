@@ -22,7 +22,7 @@ use crate::hvp::{
     sym_eig_jacobi,
 };
 use crate::lbfgs::{GradNorm, Lbfgs};
-use crate::linesearch::{LineSearch, LineSearchOptions};
+use crate::linesearch::{CG_LINESEARCH, LineSearch, LineSearchOptions};
 use crate::lowest_mode::{ApplyHessian, lowest_eigenpair};
 use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
@@ -59,19 +59,6 @@ use crate::trust::{
 const SESSION_LINESEARCH: LineSearch = LineSearch::Wolfe {
     c1: 1e-4,
     c2: 0.9,
-    maxiter: 20,
-};
-
-/// Nonlinear CG line search. Nocedal-Wright section 5.2 uses `c2 = 0.1`.
-///
-/// `c2 = 0.9` accepts a step whose slope is still nearly the opening
-/// slope, so the new gradient stays aligned with the old one. The NJWS
-/// angle restart then fires every step (`|g·g_old| / ||g||^2 >= 0.1`)
-/// and the iteration is steepest descent. A condition-`1e8` quadratic
-/// does not reach the tolerance that way.
-const CG_LINESEARCH: LineSearch = LineSearch::Wolfe {
-    c1: 1e-4,
-    c2: 0.1,
     maxiter: 20,
 };
 
