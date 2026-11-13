@@ -137,11 +137,17 @@ impl Drop for WsHold<'_> {
 }
 
 /// Steepest direction in the metric, `-z`, with the `Accept::Step` scale.
-fn nlcg_steepest(z: &Array1<f64>, accept: Accept, istep: f64) -> Array1<f64> {
+/// `d = -z`, or `d = -istep z` for an explicit step.
+fn steepest_into(dir: &mut Array1<f64>, z: &Array1<f64>, accept: Accept, istep: f64) {
+    let n = dir.len().min(z.len());
     if accept == Accept::Step {
-        z.mapv(|v| -v * istep)
+        for i in 0..n {
+            dir[i] = -z[i] * istep;
+        }
     } else {
-        z.mapv(|v| -v)
+        for i in 0..n {
+            dir[i] = -z[i];
+        }
     }
 }
 
@@ -2707,10 +2713,10 @@ impl Solver {
                         *prev_alpha = 0.0;
                         *prev_gd = 0.0;
                     }
-                    *dir = nlcg_steepest(&z_now, self.accept, self.istep);
-                    *g_old = grad.clone();
-                    *z_old = z_now;
-                    *d_old = dir.clone();
+                    steepest_into(dir, &z_now, self.accept, self.istep);
+                    g_old.assign(&grad);
+                    z_old.assign(&z_now);
+                    d_old.assign(dir);
                     *z_epoch = self.metric_epoch;
                     *initialized = true;
                 }
@@ -2766,23 +2772,22 @@ impl Solver {
                     ) {
                         beta = 0.0;
                     }
-                    *dir = if self.accept == Accept::Step {
-                        Array1::from_iter(
-                            z_new
-                                .iter()
-                                .zip(d_old.iter())
-                                .map(|(z, d)| -z * self.istep + beta * d),
-                        )
+                    let n = dir.len().min(z_new.len()).min(d_old.len());
+                    if self.accept == Accept::Step {
+                        let istep = self.istep;
+                        for i in 0..n {
+                            dir[i] = -z_new[i] * istep + beta * d_old[i];
+                        }
                     } else {
-                        Array1::from_iter(
-                            z_new.iter().zip(d_old.iter()).map(|(z, d)| -z + beta * d),
-                        )
-                    };
+                        for i in 0..n {
+                            dir[i] = -z_new[i] + beta * d_old[i];
+                        }
+                    }
                     // A non-descent direction is not a valid conjugate step.
                     let gd = crate::vecops::dot(grad.view(), dir.view());
                     if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
                         self.nlcg_descent_fallbacks += 1;
-                        *dir = nlcg_steepest(&z_new, self.accept, self.istep);
+                        steepest_into(dir, &z_new, self.accept, self.istep);
                     }
                     g_old.assign(&grad);
                     z_old.assign(&z_new);

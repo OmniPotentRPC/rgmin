@@ -96,4 +96,18 @@ pub struct RigidWorkspace {
     n: usize,
     anchor_n: usize,
     rank: usize,
+    /// Basis inputs from the last rebuild. A later projection at the same
+    /// geometry reuses `basis` instead of repeating the factorization.
+    key_ok: bool,
+    key_pos: Vec<f64>,
+    key_masses: Vec<f64>,
+    key_has_mass: bool,
+    key_frozen: Vec<u8>,
+    key_has_frozen: bool,
+    key_weighted: bool,
+    key_metric: bool,
+    key_mode: RigidMode,
+    key_pbc: [bool; 3],
+    key_broken_t: [bool; 3],
+    key_broken_r: [bool; 3],
 }

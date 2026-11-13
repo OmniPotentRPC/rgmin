@@ -149,3 +149,40 @@
             assert!((v2[i] - rpv[i]).abs() < 1e-8, "{i} {} {}", v2[i], rpv[i]);
         }
     }
+
+    #[test]
+    fn a_second_vector_at_the_same_geometry_matches_a_fresh_workspace() {
+        let pos = [0.0, 0.0, 0.0, 1.0, 0.2, 0.0, 0.1, 1.3, 0.4, -0.4, 0.2, 1.1];
+        let v0 = [
+            0.2, -0.3, 0.1, 0.4, 0.1, -0.2, -0.3, 0.5, 0.2, 0.1, -0.4, 0.3,
+        ];
+        let w0 = [
+            0.1, 0.2, -0.4, -0.2, 0.3, 0.1, 0.5, -0.1, 0.2, -0.3, 0.2, 0.4,
+        ];
+        let req = RigidRequest::cartesian(&pos, RigidMode::Auto);
+        let mut ws = RigidWorkspace::new();
+        let mut v = v0;
+        ws.project(&mut v, &req);
+        let mut w = w0;
+        ws.project(&mut w, &req);
+        let mut fresh = RigidWorkspace::new();
+        let mut w2 = w0;
+        fresh.project(&mut w2, &req);
+        for i in 0..w.len() {
+            assert_eq!(w[i].to_bits(), w2[i].to_bits(), "cached basis drifted at {i}");
+        }
+        let mut moved = pos;
+        moved[0] += 0.05;
+        let req2 = RigidRequest::cartesian(&moved, RigidMode::Auto);
+        let mut u = v0;
+        ws.project(&mut u, &req2);
+        let mut u2 = v0;
+        fresh.project(&mut u2, &req2);
+        for i in 0..u.len() {
+            assert_eq!(
+                u[i].to_bits(),
+                u2[i].to_bits(),
+                "new geometry reused the old basis at {i}"
+            );
+        }
+    }

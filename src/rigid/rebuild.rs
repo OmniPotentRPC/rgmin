@@ -16,11 +16,84 @@ impl RigidWorkspace {
         self.n = n;
     }
 
+    fn bits_eq(a: &[f64], b: &[f64]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(u, v)| u.to_bits() == v.to_bits())
+    }
+
+    /// The stored basis is exactly the one `rebuild` would write for `req`.
+    fn reuse(&self, req: &RigidRequest<'_>) -> bool {
+        if !self.key_ok
+            || self.key_mode != req.mode
+            || self.key_weighted != req.mass_weighted_coords
+            || self.key_metric != req.mass_metric
+            || self.key_pbc != req.pbc
+            || self.key_broken_t != req.broken_translation
+            || self.key_broken_r != req.broken_rotation
+            || !Self::bits_eq(&self.key_pos, req.pos)
+        {
+            return false;
+        }
+        let masses_ok = match req.masses {
+            Some(m) => self.key_has_mass && Self::bits_eq(&self.key_masses, m),
+            None => !self.key_has_mass,
+        };
+        let frozen_ok = match req.frozen {
+            Some(f) => self.key_has_frozen && self.key_frozen == f,
+            None => !self.key_has_frozen,
+        };
+        masses_ok && frozen_ok
+    }
+
+    fn store_key(&mut self, req: &RigidRequest<'_>) {
+        let n = req.pos.len();
+        if self.key_pos.len() != n {
+            self.key_pos.resize(n, 0.0);
+        }
+        if n > 0 {
+            self.key_pos.copy_from_slice(req.pos);
+        }
+        match req.masses {
+            Some(m) => {
+                if self.key_masses.len() != m.len() {
+                    self.key_masses.resize(m.len(), 0.0);
+                }
+                if !m.is_empty() {
+                    self.key_masses.copy_from_slice(m);
+                }
+                self.key_has_mass = true;
+            }
+            None => self.key_has_mass = false,
+        }
+        match req.frozen {
+            Some(f) => {
+                if self.key_frozen.len() != f.len() {
+                    self.key_frozen.resize(f.len(), 0);
+                }
+                if !f.is_empty() {
+                    self.key_frozen.copy_from_slice(f);
+                }
+                self.key_has_frozen = true;
+            }
+            None => self.key_has_frozen = false,
+        }
+        self.key_mode = req.mode;
+        self.key_weighted = req.mass_weighted_coords;
+        self.key_metric = req.mass_metric;
+        self.key_pbc = req.pbc;
+        self.key_broken_t = req.broken_translation;
+        self.key_broken_r = req.broken_rotation;
+        self.key_ok = true;
+    }
+
     fn rebuild(&mut self, req: &RigidRequest<'_>) {
         let n = req.pos.len();
-        self.rank = 0;
         if req.mode == RigidMode::Off || n < 3 || !n.is_multiple_of(3) {
+            if self.reuse(req) {
+                return;
+            }
+            self.rank = 0;
             self.n = n;
+            self.store_key(req);
             return;
         }
         self.ensure(n);
@@ -40,6 +113,10 @@ impl RigidWorkspace {
             mass_metric: metric,
             ..req
         };
+        if self.reuse(&req) {
+            return;
+        }
+        self.rank = 0;
         let (trans, rot) = axes_of(&req);
         let mut com = [0.0; 3];
         let mut mtot = 0.0;
@@ -96,33 +173,32 @@ impl RigidWorkspace {
             }
             m += 1;
         }
-        if m == 0 {
-            return;
+        if m != 0 {
+            m = self.freeze_nullspace(&req, m);
         }
-        m = self.freeze_nullspace(&req, m);
-        if m == 0 {
-            return;
-        }
-        if metric {
-            scale_cols(&mut self.cand, n, m, &req, true);
-        }
-        let rank = cpqr(&mut self.cand, &mut self.reflect, &mut self.qwork, n, m);
-        self.basis[..rank * n].copy_from_slice(&self.qwork[..rank * n]);
-        if metric {
-            scale_cols(&mut self.basis, n, rank, &req, false);
-        }
-        if let Some(frozen) = req.frozen
-            && frozen.len() == n
-        {
-            for k in 0..rank {
-                for i in 0..n {
-                    if frozen[i] != 0 {
-                        self.basis[k * n + i] = 0.0;
+        if m != 0 {
+            if metric {
+                scale_cols(&mut self.cand, n, m, &req, true);
+            }
+            let rank = cpqr(&mut self.cand, &mut self.reflect, &mut self.qwork, n, m);
+            self.basis[..rank * n].copy_from_slice(&self.qwork[..rank * n]);
+            if metric {
+                scale_cols(&mut self.basis, n, rank, &req, false);
+            }
+            if let Some(frozen) = req.frozen
+                && frozen.len() == n
+            {
+                for k in 0..rank {
+                    for i in 0..n {
+                        if frozen[i] != 0 {
+                            self.basis[k * n + i] = 0.0;
+                        }
                     }
                 }
             }
+            self.rank = rank;
         }
-        self.rank = rank;
+        self.store_key(&req);
     }
 
     /// Combinations of the `m` columns that already vanish on frozen

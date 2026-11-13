@@ -214,31 +214,53 @@ impl Conjugacy {
         let g = ctx.current_gradient;
         let gold = ctx.previous_gradient;
         let d = ctx.previous_direction;
-        let gz = dot(g, z);
-        let gz_old = dot(gold, z_old);
-        // y is the Euclidean gradient change. The numerator z · y is the
-        // preconditioned Polak-Ribiere product. It equals g · (z - z_old)
-        // when both Riesz maps use the same SPD P.
-        let y = &g.to_owned() - &gold.to_owned();
-        let zy = dot(z, y.view());
-        let yz = &z.to_owned() - &z_old.to_owned();
-        let y_d = dot(y.view(), d);
-        let yy = dot(y.view(), yz.view());
+        // Each arm forms only the products it returns. A product that the
+        // formula does not read is left out; the ones it does read stay in
+        // the same association.
         match self {
-            Self::FletcherReeves => div(gz, gz_old),
-            Self::PolakRibiere => div(zy, gz_old),
+            Self::FletcherReeves => {
+                let gz = dot(g, z);
+                div(gz, dot(gold, z_old))
+            }
+            Self::PolakRibiere => {
+                let y = &g - &gold;
+                let zy = dot(z, y.view());
+                div(zy, dot(gold, z_old))
+            }
             Self::PolakRibierePlus => Self::PolakRibiere.beta_metric(ctx, z, z_old).max(0.0),
-            Self::HestenesStiefel => div(zy, y_d),
-            Self::DaiYuan => div(gz, y_d),
-            Self::ConjugateDescent => div(gz, -dot(d, gold)),
+            Self::HestenesStiefel => {
+                let y = &g - &gold;
+                let zy = dot(z, y.view());
+                div(zy, dot(y.view(), d))
+            }
+            Self::DaiYuan => {
+                let gz = dot(g, z);
+                let y = &g - &gold;
+                div(gz, dot(y.view(), d))
+            }
+            Self::ConjugateDescent => {
+                let gz = dot(g, z);
+                div(gz, -dot(d, gold))
+            }
             Self::HagerZhang => {
+                // y is the Euclidean gradient change. z · y is the
+                // preconditioned Polak-Ribiere product.
+                let y = &g - &gold;
+                let zy = dot(z, y.view());
+                let yz = &z - &z_old;
+                let y_d = dot(y.view(), d);
+                let yy = dot(y.view(), yz.view());
                 if y_d.abs() <= f64::EPSILON {
                     return 0.0;
                 }
                 let d_g = dot(d, g);
                 zy / y_d - 2.0 * yy * d_g / (y_d * y_d)
             }
-            Self::LiuStorey => div(-zy, dot(d, gold)),
+            Self::LiuStorey => {
+                let y = &g - &gold;
+                let zy = dot(z, y.view());
+                div(-zy, dot(d, gold))
+            }
             Self::FrPr => {
                 let beta_pr = Self::PolakRibiere.beta_metric(ctx, z, z_old);
                 let beta_fr = Self::FletcherReeves.beta_metric(ctx, z, z_old);

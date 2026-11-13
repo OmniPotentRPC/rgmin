@@ -28,6 +28,7 @@ impl RigidWorkspace {
     pub fn project(&mut self, v: &mut [f64], req: &RigidRequest<'_>) {
         if v.len() != req.pos.len() || req.pos.len() % 3 != 0 {
             self.rank = 0;
+            self.key_ok = false;
             return;
         }
         self.rebuild(req);
