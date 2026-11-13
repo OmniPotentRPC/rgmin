@@ -1,0 +1,1 @@
+A Fréchet log-strain cell filter relaxes atomic positions and the cell together with the existing FIRE and L-BFGS steppers. Hydrostatic and fixed-angle masks and an external pressure are supported. The stress comes from a `Mechanical` value, so a host can pass the tensor from `rgpot_potential_calculate_mechanical`.

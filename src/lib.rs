@@ -18,6 +18,8 @@
 
 #![warn(missing_docs)]
 
+/// Fréchet log-strain cell filter (atomic and cell degrees of freedom).
+pub mod cell;
 /// Line-search strategies (Brent, Armijo, Goldstein, Wolfe/zoom).
 pub mod linesearch;
 /// Method selector (NLCG, BFGS family, Adam, steepest descent, PSO).
@@ -88,6 +90,7 @@ pub mod vecops;
 
 pub use accept::Accept;
 pub use adam::minimize_adam;
+pub use cell::{CellFilter, CellMask, Mechanical, Mechanics};
 pub use control::{Control, StopNorm};
 pub use eon_cg::{EonCg, EonCgReport, minimize_eon_cg};
 pub use error::{Error, Result};
