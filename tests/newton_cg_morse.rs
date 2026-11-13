@@ -776,10 +776,12 @@ fn print_summary(label: &str, rows: &[(bool, usize, usize, usize)]) -> Summary {
 #[test]
 #[ignore]
 fn benchmark_morse_newton_cg_campaign() {
-    let dir =
-        std::env::var("MORSE_CON_DIR").unwrap_or_else(|_| "/tmp/morse-con/morse-bulk".to_string());
+    let Ok(dir) = std::env::var("MORSE_CON_DIR") else {
+        eprintln!("skipping Morse campaign, MORSE_CON_DIR is unset");
+        return;
+    };
     if !std::path::Path::new(&dir).is_dir() {
-        eprintln!("skipping Morse campaign, {dir} is missing");
+        eprintln!("skipping Morse campaign, MORSE_CON_DIR is not a directory");
         return;
     }
     let starts = con_dir(&dir);
@@ -892,7 +894,10 @@ fn benchmark_morse_newton_cg_campaign() {
 #[test]
 #[ignore]
 fn benchmark_lj38_newton_cg_campaign() {
-    let dir = std::env::var("LJ_CON_DIR").unwrap_or_else(|_| "/tmp/lj38/lj38-clusters".to_string());
+    let Ok(dir) = std::env::var("LJ_CON_DIR") else {
+        eprintln!("skipping LJ38 campaign, LJ_CON_DIR is unset");
+        return;
+    };
     if !std::path::Path::new(&dir).is_dir() {
         eprintln!("skipping LJ38 campaign, {dir} is missing");
         return;

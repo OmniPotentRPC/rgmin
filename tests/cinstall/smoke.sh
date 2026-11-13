@@ -3,7 +3,7 @@
 set -eu
 root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 cd "$root"
-prefix=${1:-${TMPDIR:-/tmp}/rgmin-cinstall-$$}
+prefix=${1:-$root/target/rgmin-cinstall}
 rm -rf "$prefix"
 mkdir -p "$prefix"
 

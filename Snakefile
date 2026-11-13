@@ -11,7 +11,7 @@ rule all:
 
 rule machine:
     output:
-        "benchflow/out/home/.asv-machine.json",
+        "benchflow/out/asv/.asv-machine.json",
         touch("benchflow/out/machine.done"),
     params:
         machine=config["machine"],

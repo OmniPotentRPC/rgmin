@@ -32,6 +32,9 @@ rustc-ice-*.txt
 docs/doxyYoda/
 docs/doxygen-html/
 docs/source/_build/
+docs/guide/_build/
+docs/guide/_linkcheck/
+.venv/
 .grok/
 .lake/
 .pixi/
@@ -54,3 +57,6 @@ benchflow/out/
 __pycache__/
 *.pyc
 /build/
+
+# maturin develop drops the extension next to the package
+python/rgmin/*.so

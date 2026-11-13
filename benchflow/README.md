@@ -35,7 +35,7 @@ It fails when no result or more than one result matches.
 
 Every run uses the machine name `bench-runner`.
 Its `os`, `arch`, `cpu`, `num_cpu`, and `ram` fields are fixed generic values.
-That record is in `benchflow/out/home/.asv-machine.json`, the asv machine file.
+That record is in `benchflow/out/asv/.asv-machine.json`, the asv machine file.
 The machine check reads only the `bench-runner` record and ignores every other record in that file.
 
 `snakemake -c 1 pr_compare` compares two distinct revisions, `base` and `head`.

@@ -7,9 +7,9 @@ with that tolerance. SciPy L-BFGS-B has no per-atom cap. Each arm is repeated
 five times and the wall time is the median. The script writes bench/raw/ase.csv
 and bench/raw/scipy.csv, then bench/results.md from every CSV in bench/raw.
 
-    python3 -m venv /tmp/rgmin-bench-venv
-    /tmp/rgmin-bench-venv/bin/pip install ase scipy numpy
-    env -i PATH="/tmp/rgmin-bench-venv/bin:$PATH" HOME="$HOME" LANG="${LANG:-C.UTF-8}" \
+    python3 -m venv .venv
+    .venv/bin/pip install ase scipy numpy
+    env -i PATH=".venv/bin:$PATH" HOME="$HOME" LANG="${LANG:-C.UTF-8}" \
         python bench/compare.py
 """
 

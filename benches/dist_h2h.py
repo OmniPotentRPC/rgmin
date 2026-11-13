@@ -7,7 +7,7 @@ arm uses ASE's memory 100 and fixed H0 = 1/70. Wolfe is opt-in. FIRE
 2.0 uses timestep 0.1 and a Euclidean cap of 0.2. ASE LBFGS, FIRE and
 BFGSLineSearch keep their own defaults apart from fmax and maxstep 0.2.
 
-    env -i PATH="/tmp/rgmin-ase-venv/bin:$PATH" HOME="$HOME" LANG="${LANG:-C.UTF-8}" \
+    env -i PATH=".venv/bin:$PATH" HOME="$HOME" LANG="${LANG:-C.UTF-8}" \
         python benches/dist_h2h.py
 
 Raw logs stay in benches/ase_h2h/raw/. The table is

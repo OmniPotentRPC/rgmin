@@ -104,3 +104,54 @@ jobs:
           cargo +1.89.0 install cargo-c --locked --version 0.10.17+cargo-0.92.0
       - name: Install into a prefix and compile C and C++
         run: tests/cinstall/smoke.sh
+
+  abi:
+    name: abidiff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Install libabigail
+        run: sudo apt-get update && sudo apt-get install -y abigail-tools
+      - run: scripts/abi_check.sh
+
+  python:
+    name: python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@v2
+      - run: python -m pip install -q maturin numpy ase pytest
+      - run: maturin develop --release
+        working-directory: python
+      - run: python docs/examples/quadratic.py
+      - run: python -m pytest tests/python
+
+  guide:
+    name: guide
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@v2
+      - run: python -m pip install -q "sphinx>=8,<8.1" myst-parser
+      - run: python scripts/check_docstrings.py
+      - run: python scripts/check_prose.py
+      - run: sphinx-build -W --keep-going -b html docs/guide docs/guide/_build
+      - run: sphinx-build -W --keep-going -b linkcheck docs/guide docs/guide/_linkcheck
+      - run: cargo run --locked --example quadratic
+

@@ -18,9 +18,9 @@ tests/data/morse_pos_0000.con. The script checks that both potentials
 agree at those starts, then runs seven serial repeats and writes the
 median wall time.
 
-    python3 -m venv /tmp/rgmin-ase-venv
-    /tmp/rgmin-ase-venv/bin/pip install ase
-    env -i PATH="/tmp/rgmin-ase-venv/bin:$PATH" HOME="$HOME" LANG="${LANG:-C.UTF-8}" \
+    python3 -m venv .venv
+    .venv/bin/pip install ase
+    env -i PATH=".venv/bin:$PATH" HOME="$HOME" LANG="${LANG:-C.UTF-8}" \
         python benches/ase_h2h.py
 
 Raw logs go to benches/ase_h2h/raw/, which is not committed. The table
