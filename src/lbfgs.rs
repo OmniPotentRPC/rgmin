@@ -123,7 +123,7 @@ impl Ring {
     }
 
     fn recycle(&mut self, a: Array1<f64>) {
-        if a.len() == 0 {
+        if a.is_empty() {
             return;
         }
         self.spare.push(a);
@@ -253,14 +253,15 @@ pub struct Lbfgs {
     pub max_line_evals: usize,
     /// Norm used against [`Lbfgs::gtol`].
     pub norm: GradNorm,
-    /// Al-Baali extra-updates as eOn's `lbfgs_extra_updates` names them:
-    /// replay the newest pair this many extra times.
+    /// Deprecated count kept for callers that still set eOn's
+    /// `lbfgs_extra_updates`.
     ///
-    /// It has no effect, and the two-loop map ignores it: the BFGS update
-    /// with `(s, y)` maps any `H` that already satisfies `H y = s` to
-    /// itself, so a replayed newest pair leaves `H` unchanged in exact
-    /// arithmetic (`validation/lbfgs_two_loop.py`, check 3). The field
-    /// stays for source compatibility.
+    /// That name replayed the newest pair. The BFGS update with `(s, y)`
+    /// maps any inverse Hessian that already satisfies `H y = s` to
+    /// itself (`validation/lbfgs_two_loop.py`, check 3), and the replay
+    /// changed bits. The two-loop does not read this field. The value is
+    /// still stored, so a host can set it and read it back.
+    #[deprecated(note = "stored only; the two-loop does not replay pairs")]
     pub extra_updates: usize,
     /// Li-Fukushima cautious `ε`. Zero disables the filter.
     pub cautious_eps: f64,
@@ -326,6 +327,7 @@ impl Lbfgs {
     /// coordinates it wrote and calls that same entry point again.
     /// The new solver starts with an empty pair list, which is the
     /// resume this library ships.
+    #[allow(deprecated)]
     pub fn with_capacity(max_pairs: usize) -> Self {
         Self {
             memory: Ring::new(),
@@ -1458,6 +1460,43 @@ mod neb_guard_tests {
     }
 
     #[test]
+    fn distance_reset_treats_the_cap_itself_as_too_far() {
+        let g = array![-4.0, 0.0, 0.0];
+        let mut solver = Lbfgs::with_capacity(4);
+        solver.record(array![1.0, 0.0, 0.0], array![1.0, 1.0, 0.0]);
+        let plain = solver.direction(g.view());
+        let cap = crate::step::max_atom_norm(plain.view());
+        assert!(cap.is_finite() && cap > 0.0, "cap {cap}");
+        solver.distance_reset = true;
+        let on_cap = solver.guarded_direction(g.view(), Some(cap));
+        assert_eq!(solver.len(), 0, "landing on the cap must drop the pair");
+        assert!(on_cap.dot(&g) < 0.0, "reset step {on_cap:?}");
+
+        let mut under = Lbfgs::with_capacity(4);
+        under.record(array![1.0, 0.0, 0.0], array![1.0, 1.0, 0.0]);
+        under.distance_reset = true;
+        let kept = under.guarded_direction(g.view(), Some(cap.next_up()));
+        assert_eq!(
+            under.len(),
+            1,
+            "a cap one ulp above the step keeps the pair"
+        );
+        for i in 0..g.len() {
+            assert_eq!(kept[i].to_bits(), plain[i].to_bits(), "d[{i}]");
+        }
+    }
+
+    #[test]
+    fn angle_reset_on_a_zero_gradient_returns_a_zero_step() {
+        let mut solver = Lbfgs::with_capacity(2);
+        solver.angle_reset = true;
+        solver.record(array![1.0, 0.0, 0.0], array![1.0, 0.0, 0.0]);
+        let d = solver.guarded_direction(array![0.0, 0.0, 0.0].view(), Some(0.2));
+        assert_eq!(solver.len(), 0);
+        assert!(d.iter().all(|v| *v == 0.0), "d {d:?}");
+    }
+
+    #[test]
     fn distance_reset_forgets_and_steps_along_h0_force() {
         // One pair: s=(1,0,0), y=(1,1,0), sy=1, yy=2, H0=1/2.
         // g=(-4,0,0). The two-loop step is (6,-2,0). H0 times the
@@ -1597,6 +1636,7 @@ mod ring_tests {
         }
     }
 
+    #[allow(deprecated)]
     fn load(extra: usize) -> Lbfgs {
         let mut solver = Lbfgs::with_capacity(3);
         solver.extra_updates = extra;
@@ -1607,6 +1647,7 @@ mod ring_tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn extra_updates_do_not_change_the_geometry_direction() {
         let g = array![-1.5, 0.75, 0.25];
         let plain = load(0);
@@ -1622,5 +1663,6 @@ mod ring_tests {
         for i in 0..g.len() {
             assert_eq!(left[i].to_bits(), right[i].to_bits(), "two-loop d[{i}]");
         }
+        assert_eq!(replay.extra_updates, 5);
     }
 }

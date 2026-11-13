@@ -410,6 +410,9 @@ void rgmin_solver_set_frozen(rgmin_solver_t *solver, const uint8_t *frozen, size
 /** Broken translations, then broken rotations. The host sets both. */
 void rgmin_solver_set_broken_axes(rgmin_solver_t *solver, int32_t tx, int32_t ty,
                                 int32_t tz, int32_t rx, int32_t ry, int32_t rz);
+/** Deprecated. The count is stored and no two-loop reads it.
+ *  Replaying the newest pair is the identity in exact arithmetic and was
+ *  changing bits. The symbol stays so existing callers still link. */
 void rgmin_solver_set_extra_updates(rgmin_solver_t *solver, size_t extra);
 void rgmin_solver_set_cautious(rgmin_solver_t *solver, double eps, double alpha);
 /** Opt-in L-BFGS NEB guards: distance, angle and curvature resets and an

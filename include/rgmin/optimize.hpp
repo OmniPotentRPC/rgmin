@@ -519,6 +519,7 @@ public:
         rgmin_solver_set_broken_axes(ptr_, tx ? 1 : 0, ty ? 1 : 0, tz ? 1 : 0, rx ? 1 : 0,
                                      ry ? 1 : 0, rz ? 1 : 0);
     }
+    /// Deprecated. The count is stored and the two-loop does not read it.
     void set_extra_updates(std::size_t n) {
         rgmin_solver_set_extra_updates(ptr_, n);
     }

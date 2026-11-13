@@ -924,9 +924,13 @@ impl Solver {
         }
     }
 
-    /// Al-Baali extra-updates on the newest L-BFGS pair. No effect: a
-    /// replayed newest pair leaves the BFGS map unchanged (see
-    /// [`Lbfgs::extra_updates`]).
+    /// Store an extra-update count. The two-loop does not read it.
+    ///
+    /// Deprecated. See [`Lbfgs::extra_updates`]. rgsaddle and the rgpot
+    /// Rust crates do not set this; the C, C++, and Python surfaces still
+    /// accept it.
+    #[deprecated(note = "stored only; the two-loop does not replay pairs")]
+    #[allow(deprecated)]
     pub fn set_extra_updates(&mut self, extra: usize) {
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.extra_updates = extra;

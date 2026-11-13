@@ -40,7 +40,7 @@ with [elan](https://github.com/leanprover/elan).
 | `bfgsProd_eq_expanded`, `bfgsProd_isSymm` | `src/qn.rs::bfgs_inverse_update` | `H` symmetric on entry. The expanded entry loop then equals the product form, and the result stays symmetric. |
 | `twoLoop_eq_lbfgsInv` | `src/lbfgs.rs::Lbfgs::direction_with_precon` | None. The two loops compute the nested BFGS product. |
 | `lbfgsInv_posDef`, `lbfgs_descent` | `src/lbfgs.rs::Lbfgs::direction_with_precon` | Every stored pair has `s.y > 0` (`push_pair` rejects `s.y <= 1e-8 |s| |y|`). `H0` must be positive definite. |
-| `gamma_pos`, `smul_id_posDef`, `lbfgs_gamma_descent` | `src/lbfgs.rs::Lbfgs::scale_gamma` | The newest pair has `s.y > 0`, so `gamma = s.y / y.y > 0`. With no pairs, `gamma = 1`. `extra_updates` is ignored: a replayed newest pair leaves the map unchanged (`validation/lbfgs_two_loop.py`). |
+| `gamma_pos`, `smul_id_posDef`, `lbfgs_gamma_descent` | `src/lbfgs.rs::Lbfgs::scale_gamma` | The newest pair has `s.y > 0`, so `gamma = s.y / y.y > 0`. With no pairs, `gamma = 1`. `extra_updates` is deprecated: the count is stored and the two-loop does not replay a pair (`validation/lbfgs_two_loop.py`). |
 | `clampScale_pos`, `clampScale_le_one`, `clamp_inactive` | `src/step.rs::scale_step_atom`, `scale_step` | `cap > 0`. The factor is then in `(0, 1]` and equals `1` when no block exceeds the cap. |
 | `clamp_block_le`, `clamp_block_eq_cap` | `src/step.rs::scale_step_atom` | `M` is the largest block norm. Every block then ends within `cap`, and the largest lands on it. |
 | `clamp_direction`, `clamp_descent` | `src/step.rs::scale_step_atom` | `cap > 0`. Each block keeps its unit vector, and a descent direction stays one. |

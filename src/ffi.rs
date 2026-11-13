@@ -2577,9 +2577,10 @@ pub unsafe extern "C" fn rgmin_solver_set_broken_axes(
     }
 }
 
-/// Al-Baali extra-updates on the newest L-BFGS pair.
-/// Al-Baali extra-updates on the newest L-BFGS pair. Accepted and
-/// ignored: replaying the newest pair leaves the BFGS map unchanged.
+/// Deprecated extra-update count. Stored and not read by the two-loop.
+///
+/// Replaying the newest pair is the identity in exact arithmetic and was
+/// changing bits. The C entry point remains so existing callers still link.
 ///
 /// # Safety
 ///
@@ -2587,6 +2588,7 @@ pub unsafe extern "C" fn rgmin_solver_set_broken_axes(
 /// length documented above; a session handle must come from
 /// [`rgmin_solver_create`] and not yet be freed.
 #[unsafe(no_mangle)]
+#[allow(deprecated)]
 pub unsafe extern "C" fn rgmin_solver_set_extra_updates(solver: *mut rgmin_solver_t, extra: usize) {
     if solver.is_null() {
         return;
