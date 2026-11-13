@@ -44,6 +44,8 @@ enum class Method {
     Fire2 = RGMIN_FIRE2,
     NewtonCg = RGMIN_NEWTON_CG,
     NewtonPcg = RGMIN_NEWTON_PCG,
+    PolakRibierePlus = RGMIN_POLAK_RIBIERE_PLUS,
+    EonCg = RGMIN_EON_CG,
 };
 
 /** Parse a method token. \c newton-cg and \c newton_cg are the same method. */

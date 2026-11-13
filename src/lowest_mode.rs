@@ -200,19 +200,38 @@ pub struct LowestMode {
 /// Lanczos for the lowest eigenpair of `H(x)`.
 ///
 /// Convenience wrapper around [`lowest_mode`] with
-/// [`EigensolverKind::Lanczos`].
+/// [`EigensolverKind::Lanczos`]. An empty seed is [`Error::Dim`].
+///
+/// ```
+/// use ndarray::array;
+/// use rgmin::lowest_eigenpair;
+///
+/// struct Diag;
+/// impl rgmin::ApplyHessian for Diag {
+///     fn apply_hessian(
+///         &self,
+///         _x: ndarray::ArrayView1<f64>,
+///         v: ndarray::ArrayView1<f64>,
+///     ) -> ndarray::Array1<f64> {
+///         array![2.0 * v[0], 3.0 * v[1]]
+///     }
+/// }
+/// let x = array![0.0, 0.0];
+/// let mode = lowest_eigenpair(&Diag, x.view(), array![1.0, 0.2].view(), 4).unwrap();
+/// assert!(mode.value < 2.5);
+/// ```
 pub fn lowest_eigenpair<H: ApplyHessian + ?Sized>(
     h: &H,
     x: ArrayView1<f64>,
     seed: ArrayView1<f64>,
     krylov: usize,
-) -> LowestMode {
+) -> Result<LowestMode> {
     let params = EigenParams {
         kind: EigensolverKind::Lanczos,
         krylov,
         ..EigenParams::default()
     };
-    lowest_mode(h, x, seed, &params).expect("Lanczos is linked")
+    lowest_mode(h, x, seed, &params)
 }
 
 /// Dispatch on [`EigenParams::kind`]. Unlinked backends return
@@ -786,7 +805,7 @@ mod tests {
         let h = gapped_diag(6);
         let x = Array1::zeros(6);
         let seed = array![0.2, 0.7, 0.1, 0.0, 0.0, 0.0];
-        let mode = lowest_eigenpair(&h, x.view(), seed.view(), 6);
+        let mode = lowest_eigenpair(&h, x.view(), seed.view(), 6).unwrap();
         assert!(mode.value < 0.0, "saddle curvature {}", mode.value);
         assert!(
             mode.vector[0].abs() > 0.9,
@@ -794,6 +813,14 @@ mod tests {
             mode.vector
         );
         assert!(mode.actions <= 6);
+    }
+
+    #[test]
+    fn an_empty_seed_is_a_dimension_error() {
+        let h = gapped_diag(4);
+        let x = Array1::zeros(4);
+        let err = lowest_eigenpair(&h, x.view(), Array1::zeros(0).view(), 4).unwrap_err();
+        assert!(matches!(err, Error::Dim { got: 0, .. }));
     }
 
     #[test]

@@ -227,14 +227,33 @@ fn two_loop_vecops(
 }
 
 /// The value and slope of a line-search probe, `(+inf, NaN)` when the
-/// objective answered with a non-finite value or gradient. Every comparison
-/// against NaN is false, so a raw NaN would fail no decrease test.
+/// objective answered with a non-finite value or a gradient whose length
+/// is not the direction's. Every comparison against NaN is false, so a
+/// raw NaN would fail no decrease test, and a short gradient must not
+/// reach the dot product.
 fn probed(f: f64, d: &Array1<f64>, g: &Array1<f64>) -> (f64, f64) {
-    if finite(f, g.view()) {
+    if shaped(d.len(), f, g) {
         (f, d.dot(g))
     } else {
         (f64::INFINITY, f64::NAN)
     }
+}
+
+/// A callback answer that can be stored next to a vector of length `n`.
+fn shaped(n: usize, f: f64, g: &Array1<f64>) -> bool {
+    g.len() == n && finite(f, g.view())
+}
+
+/// Finite bounds, or an infinite side that does not point the wrong way.
+/// A lower entry above its upper entry is not a box.
+fn bounds_ok(n: usize, lower: ArrayView1<f64>, upper: ArrayView1<f64>) -> bool {
+    lower.len() == n
+        && upper.len() == n
+        && lower.iter().zip(upper).all(|(l, u)| {
+            (l.is_finite() || *l == f64::NEG_INFINITY)
+                && (u.is_finite() || *u == f64::INFINITY)
+                && l <= u
+        })
 }
 
 /// Stored curvature pair from one accepted step.
@@ -303,8 +322,9 @@ pub struct Lbfgs {
     /// Relative-decrease stop of the L-BFGS-B code (Zhu, Byrd, Lu and
     /// Nocedal, Algorithm 778, <https://doi.org/10.1145/279232.279236>).
     /// A line-search step from `f_k`
-    /// to `f_{k+1}` ends [`Lbfgs::minimize`], [`Lbfgs::minimize_watched`]
-    /// and [`Lbfgs::minimize_recognized`] at the new iterate when
+    /// to `f_{k+1}` ends [`Lbfgs::minimize`], [`Lbfgs::minimize_watched`],
+    /// [`Lbfgs::minimize_recognized`], [`Lbfgs::minimize_box`] and
+    /// [`Lbfgs::minimize_box_watched`] at the new iterate when
     /// `f_k - f_{k+1} <= ftol * max(|f_k|, |f_{k+1}|, 1)`.
     /// Zero, the default, turns the test off, as does any value that is
     /// not positive. [`LBFGSB_FTOL`] is the SciPy default.
@@ -1237,7 +1257,7 @@ impl Lbfgs {
         let Some((value, grad)) = fg(probe.view()) else {
             return (EonSeed::Scale(EON_INVERSE_CURVATURE), 0);
         };
-        if !finite(value, grad.view()) {
+        if !shaped(g.len(), value, &grad) {
             return (EonSeed::Steepest, 1);
         }
         let curvature = (&grad - g).dot(&u) / EON_FINITE_DIFFERENCE;
@@ -1380,7 +1400,7 @@ impl Lbfgs {
             return CappedProbe::Stop;
         };
         *evals += 1;
-        if !finite(fv, gv.view()) {
+        if !shaped(g.len(), fv, &gv) {
             for i in 0..n {
                 x[i] -= step[i];
             }
@@ -1467,7 +1487,7 @@ impl Lbfgs {
             return CappedProbe::Stop;
         };
         *evals += 1;
-        if !finite(fv, gv.view()) {
+        if !shaped(g.len(), fv, &gv) {
             return CappedProbe::NonFinite;
         }
         let s = &trial - &*x;
@@ -1708,6 +1728,18 @@ impl Lbfgs {
     /// keeps a shortened pair. A non-finite quasi-Newton trial is
     /// retried once along the force. A second non-finite trial ends the
     /// relaxation at the last finite point.
+    ///
+    /// ```
+    /// use ndarray::array;
+    /// use rgmin::Lbfgs;
+    ///
+    /// let mut opt = Lbfgs::default();
+    /// let (f, x, _) = opt.minimize(array![1.0, -2.0].view(), 40, |x| {
+    ///     Some((x[0] * x[0] + x[1] * x[1], array![2.0 * x[0], 2.0 * x[1]]))
+    /// });
+    /// assert!(f < 1e-8);
+    /// assert!(x[0].abs() < 1e-4 && x[1].abs() < 1e-4);
+    /// ```
     pub fn minimize<F>(
         &mut self,
         x0: ArrayView1<f64>,
@@ -1743,7 +1775,7 @@ impl Lbfgs {
             None => return (f64::INFINITY, x, evals),
         };
         evals += 1;
-        if !finite(f, g.view()) {
+        if !shaped(x.len(), f, &g) {
             return (f64::INFINITY, x, evals);
         }
 
@@ -1836,7 +1868,7 @@ impl Lbfgs {
             None => return (f64::INFINITY, x, evals, false),
         };
         evals += 1;
-        if !finite(f, g.view()) {
+        if !shaped(x.len(), f, &g) {
             return (f64::INFINITY, x, evals, false);
         }
 
@@ -1903,7 +1935,11 @@ impl Lbfgs {
     /// the two-loop direction up to rounding. [`Self::gtol`] is compared
     /// with the projected gradient `x - clip(x - g)`. `fg` only sees points
     /// in the box, and the result is the point, value and evaluation count
-    /// of [`Self::minimize`].
+    /// of [`Self::minimize`]. [`Self::ftol`] ends the run on a small
+    /// decrease, as it does for [`Self::minimize`]. A bound vector whose
+    /// length is not `x0`'s, a NaN bound, or a lower entry above its upper
+    /// entry returns `+inf` and does not call `fg`. A gradient whose length
+    /// is not `x0`'s does the same.
     ///
     /// ```
     /// use ndarray::{ArrayView1, array};
@@ -1957,6 +1993,9 @@ impl Lbfgs {
         W: FnMut(usize, f64) -> bool,
     {
         self.trim();
+        if !bounds_ok(x0.len(), lower, upper) {
+            return (f64::INFINITY, x0.to_owned(), 0);
+        }
         let clip = |v: ArrayView1<f64>| {
             Array1::from_shape_fn(v.len(), |i| v[i].max(lower[i]).min(upper[i]))
         };
@@ -1968,17 +2007,18 @@ impl Lbfgs {
             None => return (f64::INFINITY, x, evals),
         };
         evals += 1;
-        if !finite(f, g.view()) {
+        if !shaped(x.len(), f, &g) {
             return (f64::INFINITY, x, evals);
         }
 
+        let mut stalled = false;
         for it in 0..max_iter {
             if !watch(it, f) {
                 break;
             }
             let pg =
                 Array1::from_shape_fn(x.len(), |i| g[i].max(x[i] - upper[i]).min(x[i] - lower[i]));
-            if self.gnorm(&pg) < self.gtol {
+            if stalled || self.gnorm(&pg) < self.gtol {
                 break;
             }
             let b = cauchy::Compact::new(x.len(), &self.memory);
@@ -2011,9 +2051,11 @@ impl Lbfgs {
                 slope,
                 a_max,
             };
+            let f_old = f;
             let (ok, used) = self.line_search(&mut x, &mut f, &mut g, ray, &mut box_fg);
             evals += used;
             x = clip(x.view());
+            stalled = ok && self.stalled(f_old, f);
             if !ok {
                 if self.memory.is_empty() {
                     break;

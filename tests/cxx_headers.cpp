@@ -234,5 +234,14 @@ int main() {
         std::fprintf(stderr, "fire preset setup failed\n");
         return 5;
     }
+    static_assert(static_cast<int>(rgmin::Method::PolakRibierePlus) == RGMIN_POLAK_RIBIERE_PLUS,
+                  "PolakRibierePlus keeps the C enumerator");
+    static_assert(static_cast<int>(rgmin::Method::EonCg) == RGMIN_EON_CG,
+                  "EonCg keeps the C enumerator");
+    if (rgmin::method_from_name("eon-cg") != rgmin::Method::EonCg ||
+        rgmin::method_from_name("polak-ribiere-plus") != rgmin::Method::PolakRibierePlus) {
+        std::fprintf(stderr, "method_from_name missed a minor-35 method\n");
+        return 6;
+    }
     return constrained();
 }

@@ -74,7 +74,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 35;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 36;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -337,6 +337,15 @@ fn set_last_error(msg: &str) {
 #[unsafe(no_mangle)]
 pub extern "C" fn rgmin_last_error() -> *const c_char {
     LAST_ERROR.with(|cell| cell.borrow().as_ptr())
+}
+
+/// The same borrowed string as [`rgmin_last_error`].
+///
+/// The pointer stays valid until the next rgmin call on this thread.
+/// The caller does not free it.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_last_error_message() -> *const c_char {
+    rgmin_last_error()
 }
 
 /// Package version, NUL-terminated.
@@ -3213,6 +3222,30 @@ pub unsafe extern "C" fn rgmin_solver_push_pair(
             .push_pair(ndarray::ArrayView1::from(sv), ndarray::ArrayView1::from(yv))
     };
     i32::from(!ok)
+}
+
+/// Packed length of `x`. A null session returns zero.
+///
+/// # Safety
+/// A non-null `solver` must be a live session from `rgmin_solver_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_dim(solver: *const rgmin_solver_t) -> usize {
+    if solver.is_null() {
+        return 0;
+    }
+    unsafe { (*solver).solver.dim() }
+}
+
+/// Outer steps completed. A null session returns zero.
+///
+/// # Safety
+/// A non-null `solver` must be a live session from `rgmin_solver_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_steps(solver: *const rgmin_solver_t) -> usize {
+    if solver.is_null() {
+        return 0;
+    }
+    unsafe { (*solver).solver.steps() }
 }
 
 /// Gradient evaluations on this session. A null solver returns zero.

@@ -61,7 +61,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 35
+#define RGMIN_ABI_VERSION_MINOR 36
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -160,8 +160,13 @@ const char *rgmin_version(void);
 rgmin_abi_stamp_t rgmin_abi_stamp(void);
 /** Return nonzero when a stamp is compatible with this build. */
 int32_t rgmin_abi_compatible(const rgmin_abi_stamp_t *stamp);
-/** Thread-local last error. Rust symbol is rgmin_last_error. */
+/** Thread-local detail of the last failing call on this thread.
+ *  The pointer is borrowed. It stays valid until the next rgmin call
+ *  on this thread, and the caller does not free it. Null when this
+ *  thread has not stored an error. */
 const char *rgmin_last_error(void);
+/** The same borrowed string as \ref rgmin_last_error. */
+const char *rgmin_last_error_message(void);
 /** Borrow a CPU f64 buffer as a dlpk tensor. Rust: rgmin_tensor_borrow_cpu_f64. */
 DLManagedTensorVersioned *rgmin_tensor_borrow_cpu_f64(double *data, size_t n);
 /** Free a tensor from rgmin_tensor_borrow_cpu_f64. */
@@ -368,6 +373,8 @@ typedef enum rgmin_highs_solver_t {
 _Static_assert(sizeof(rgmin_highs_solver_t) == sizeof(int32_t),
                "rgmin_highs_solver_t is i32-wide; do not build this header with -fshort-enums");
 #endif
+/** Select the HiGHS engine. Returns 0, or 1 for an unknown token or a
+ *  build without highs. */
 int32_t rgmin_solver_set_highs_solver(rgmin_solver_t *solver,
                                       rgmin_highs_solver_t kind);
 /** HiGHS `run_crossover`. Constrained dest defaults to
@@ -381,6 +388,8 @@ typedef enum rgmin_highs_crossover_t {
 _Static_assert(sizeof(rgmin_highs_crossover_t) == sizeof(int32_t),
                "rgmin_highs_crossover_t is i32-wide; do not build this header with -fshort-enums");
 #endif
+/** Select HiGHS crossover. Returns 0, or 1 for an unknown token or a
+ *  build without highs. */
 int32_t rgmin_solver_set_highs_crossover(rgmin_solver_t *solver,
                                          rgmin_highs_crossover_t kind);
 /** HiGHS callback kind. Integers match HiGHS `HighsCallbackType`. */
@@ -436,6 +445,7 @@ typedef enum rgmin_manifold_t {
     RGMIN_MANIFOLD_POSITIVE = 21,
     RGMIN_MANIFOLD_CENTERED_MATRIX = 22
 } rgmin_manifold_t;
+/** Select the embedded manifold. Euclidean is the default. */
 void rgmin_solver_set_manifold(rgmin_solver_t *solver, rgmin_manifold_t manifold);
 /** Oblique OB(n,m): product of m unit spheres in R^n, column-major. */
 void rgmin_solver_set_oblique(rgmin_solver_t *solver, size_t n, size_t m);
@@ -595,6 +605,11 @@ rgmin_status_t rgmin_solver_step_hess_fg(rgmin_solver_t *solver,
  *  by the L-BFGS pair gate and still returns 0. */
 int32_t rgmin_solver_push_pair(rgmin_solver_t *solver, const double *s,
                              const double *y, size_t n);
+/** Packed length of x. A null session returns zero. The pointer is
+ *  only read. */
+size_t rgmin_solver_dim(const rgmin_solver_t *solver);
+/** Outer steps completed. A null session returns zero. */
+size_t rgmin_solver_steps(const rgmin_solver_t *solver);
 /** Gradient evaluations on this session. Null returns zero.
  *  A finite-difference product is \ref rgmin_solver_hvp_calls, not a gradient. */
 size_t rgmin_solver_gradient_calls(const rgmin_solver_t *solver);

@@ -112,6 +112,38 @@ fn the_recognising_driver_stops_at_the_same_point() {
     assert_eq!((f, x, evals), (f_r, x_r, evals_r));
 }
 
+/// The box driver uses the same relative-decrease stop as `minimize`.
+#[test]
+fn the_box_driver_stops_on_the_relative_decrease() {
+    let inf = Array1::from_elem(2, f64::INFINITY);
+    let ninf = -inf.clone();
+    let mut plain = Lbfgs::default();
+    plain.gtol = 0.0;
+    let (_, _, evals_plain) =
+        plain.minimize_box(start().view(), ninf.view(), inf.view(), MAX_ITER, rosen);
+    let mut opt = Lbfgs::default();
+    opt.gtol = 0.0;
+    opt.ftol = LBFGSB_FTOL;
+    let mut seen = Vec::new();
+    let (f, _, evals) = opt.minimize_box_watched(
+        start().view(),
+        ninf.view(),
+        inf.view(),
+        MAX_ITER,
+        rosen,
+        |_, value| {
+            seen.push(value);
+            true
+        },
+    );
+    assert!(evals < evals_plain, "{evals} >= {evals_plain}");
+    assert!(seen.len() >= 2, "iterates {seen:?}");
+    let f_old = seen[seen.len() - 2];
+    let f_new = *seen.last().unwrap();
+    assert!(passes(LBFGSB_FTOL, f_old, f_new), "{f_old:e} -> {f_new:e}");
+    assert_eq!(f_new, f);
+}
+
 /// Under the default gradient stop the test can only end a run earlier.
 #[test]
 fn with_the_gradient_test_it_never_costs_evaluations() {

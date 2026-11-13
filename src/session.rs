@@ -548,6 +548,11 @@ impl Solver {
         self.dim
     }
 
+    /// Outer steps completed on this session.
+    pub fn steps(&self) -> usize {
+        self.steps
+    }
+
     /// Gradient evaluations charged to this session.
     ///
     /// A forward-difference Hessian-vector product costs one gradient
@@ -2408,7 +2413,10 @@ impl Solver {
             for i in 0..n {
                 seed[i] = ((i % 11) as f64) - 5.0;
             }
-            let found = lowest_eigenpair(&Mat(hess), seed.view(), seed.view(), 48.min(n));
+            let Ok(found) = lowest_eigenpair(&Mat(hess), seed.view(), seed.view(), 48.min(n))
+            else {
+                return None;
+            };
             (found.value, found.vector)
         };
         if value < -tol { Some(vector) } else { None }
@@ -3391,7 +3399,11 @@ impl Solver {
         let pair = if matches!(self.inner, Inner::Lbfgs(_))
             && x.iter().zip(start.iter()).any(|(a, b)| a != b)
         {
-            let gold = gold.as_ref().expect("L-BFGS keeps the gradient");
+            let Some(gold) = gold.as_ref() else {
+                return Err(Error::Oracle {
+                    what: "L-BFGS step lost the gradient it started from",
+                });
+            };
             let (s, y) = self.lbfgs_sy(&start, x, gold, &grad);
             Some((s, y, l2(&grad)))
         } else {
