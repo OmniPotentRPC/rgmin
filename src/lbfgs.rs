@@ -39,6 +39,170 @@ struct Pair {
     s: Array1<f64>,
     y: Array1<f64>,
     rho: f64,
+    /// ndarray `s · y` from the step that stored the pair.
+    sy: f64,
+    /// ndarray `y · y` from that same step. `γ = sy / yy` when `yy > 0`.
+    yy: f64,
+}
+
+impl Pair {
+    fn new(s: Array1<f64>, y: Array1<f64>, sy: f64, yy: f64) -> Self {
+        Self {
+            s,
+            y,
+            rho: 1.0 / sy,
+            sy,
+            yy,
+        }
+    }
+}
+
+/// Limited-memory pairs in a ring. Dropping the oldest pair advances an
+/// index and keeps that slot's allocation for the next step.
+struct Ring {
+    slots: Vec<Pair>,
+    oldest: usize,
+    len: usize,
+    spare: Vec<Array1<f64>>,
+}
+
+enum Middle<'a> {
+    Gamma,
+    Precon(&'a ndarray::Array2<f64>),
+    Exp(&'a crate::precon::Metric),
+    ExpOrScalar(f64),
+}
+
+fn empty_pair() -> Pair {
+    Pair {
+        s: Array1::zeros(0),
+        y: Array1::zeros(0),
+        rho: 0.0,
+        sy: 0.0,
+        yy: 0.0,
+    }
+}
+
+impl Ring {
+    fn new() -> Self {
+        Self {
+            slots: Vec::new(),
+            oldest: 0,
+            len: 0,
+            spare: Vec::new(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn get(&self, logical: usize) -> &Pair {
+        let n = self.slots.len();
+        &self.slots[(self.oldest + logical) % n]
+    }
+
+    fn last(&self) -> Option<&Pair> {
+        if self.len == 0 {
+            None
+        } else {
+            Some(self.get(self.len - 1))
+        }
+    }
+
+    fn take_spare(&mut self, n: usize) -> Array1<f64> {
+        if let Some(i) = self.spare.iter().rposition(|a| a.len() == n) {
+            self.spare.swap_remove(i)
+        } else {
+            Array1::zeros(n)
+        }
+    }
+
+    fn recycle(&mut self, a: Array1<f64>) {
+        if a.len() == 0 {
+            return;
+        }
+        self.spare.push(a);
+        if self.spare.len() > 32 {
+            let drop_n = self.spare.len() - 32;
+            self.spare.drain(0..drop_n);
+        }
+    }
+
+    fn recycle_pair(&mut self, pair: Pair) {
+        self.recycle(pair.s);
+        self.recycle(pair.y);
+    }
+
+    fn clear(&mut self) {
+        let slots = std::mem::take(&mut self.slots);
+        for pair in slots {
+            self.recycle_pair(pair);
+        }
+        self.len = 0;
+        self.oldest = 0;
+    }
+
+    /// Logical order is oldest first. While `len < cap` the slots stay dense
+    /// at the front. Once full, the next insert overwrites `oldest`.
+    fn insert(&mut self, cap: usize, pair: Pair) {
+        let cap = cap.max(1);
+        if self.len < cap {
+            debug_assert_eq!(self.oldest, 0);
+            debug_assert_eq!(self.slots.len(), self.len);
+            self.slots.push(pair);
+            self.len += 1;
+            return;
+        }
+        let n = self.slots.len();
+        let i = self.oldest;
+        let old = std::mem::replace(&mut self.slots[i], pair);
+        self.recycle_pair(old);
+        self.oldest = (self.oldest + 1) % n;
+    }
+
+    fn trim_to(&mut self, cap: usize) {
+        let cap = cap.max(1);
+        if self.len <= cap {
+            return;
+        }
+        let start = self.len - cap;
+        let mut kept = Vec::with_capacity(cap);
+        let n = self.slots.len();
+        for i in 0..self.len {
+            let idx = (self.oldest + i) % n;
+            let pair = std::mem::replace(&mut self.slots[idx], empty_pair());
+            if i < start {
+                self.recycle_pair(pair);
+            } else {
+                kept.push(pair);
+            }
+        }
+        self.slots = kept;
+        self.len = self.slots.len();
+        self.oldest = 0;
+    }
+
+    fn take_all(&mut self) -> Vec<Pair> {
+        if self.oldest == 0 && self.slots.len() == self.len {
+            self.len = 0;
+            return std::mem::take(&mut self.slots);
+        }
+        let n = self.slots.len();
+        let mut out = Vec::with_capacity(self.len);
+        for i in 0..self.len {
+            let idx = (self.oldest + i) % n;
+            out.push(std::mem::replace(&mut self.slots[idx], empty_pair()));
+        }
+        self.slots.clear();
+        self.len = 0;
+        self.oldest = 0;
+        out
+    }
 }
 
 /// L-BFGS whose curvature pairs survive between calls.
@@ -48,7 +212,13 @@ struct Pair {
 /// curvature at the old minimum; a solver that forgets between calls pays
 /// to rediscover it.
 pub struct Lbfgs {
-    memory: Vec<Pair>,
+    memory: Ring,
+    /// Reused direction buffer. Empty until the first relaxation.
+    q_work: Array1<f64>,
+    /// Reused two-loop coefficients.
+    alpha_work: Vec<f64>,
+    /// Reused line-search trial vector.
+    line_scratch: Array1<f64>,
     precon_fallbacks: std::sync::atomic::AtomicUsize,
     #[cfg(feature = "highs")]
     pub(crate) coordinate_box: Option<eindir_core::Bounds<f64>>,
@@ -120,7 +290,10 @@ impl Lbfgs {
     /// resume this library ships.
     pub fn with_capacity(max_pairs: usize) -> Self {
         Self {
-            memory: Vec::new(),
+            memory: Ring::new(),
+            q_work: Array1::zeros(0),
+            alpha_work: Vec::new(),
+            line_scratch: Array1::zeros(0),
             #[cfg(feature = "highs")]
             coordinate_box: None,
             precon_fallbacks: std::sync::atomic::AtomicUsize::new(0),
@@ -187,9 +360,7 @@ impl Lbfgs {
     pub fn trim(&mut self) {
         let cap = self.max_pairs.max(1);
         self.max_pairs = cap;
-        while self.memory.len() > cap {
-            self.memory.remove(0);
-        }
+        self.memory.trim_to(cap);
     }
 
     pub(crate) fn search_direction(
@@ -230,66 +401,190 @@ impl Lbfgs {
         exp: Option<&crate::precon::Metric>,
     ) -> Array1<f64> {
         let mut q = g.to_owned();
+        let mut alpha = Vec::new();
         let m = self.memory.len();
-        let mut alpha = vec![0.0; m];
-        for k in (0..m).rev() {
-            let p = &self.memory[k];
-            let a = p.rho * crate::vecops::dot(p.s.view(), q.view());
-            alpha[k] = a;
-            crate::vecops::axpy(-a, p.y.view(), &mut q);
-        }
-        if let Some(pmat) = precon {
-            // H0 = P^{-1} keeps -H g a descent direction only for an SPD
-            // P; an indefinite Hessian falls back to gamma I and is
-            // counted.
-            q = match solve_spd(pmat, &q) {
-                Some(v) => v,
-                None => {
-                    self.precon_fallbacks
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    self.scale_gamma(q)
-                }
-            };
+        let mid = if let Some(pmat) = precon {
+            Middle::Precon(pmat)
         } else if let Some(exp) = exp {
-            q = match exp.solve(q.view()) {
-                Some(v) => v,
-                None => {
-                    self.precon_fallbacks
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    self.scale_gamma(q)
-                }
-            };
+            Middle::Exp(exp)
         } else {
-            q = self.scale_gamma(q);
-        }
-        for (k, p) in self.memory.iter().enumerate() {
-            let b = p.rho * crate::vecops::dot(p.y.view(), q.view());
-            crate::vecops::axpy(alpha[k] - b, p.s.view(), &mut q);
-        }
-        q.mapv_inplace(|v| -v);
+            Middle::Gamma
+        };
+        self.recurse(&mut q, &mut alpha, m, m, None, mid);
         q
     }
 
-    fn scale_gamma(&self, mut q: Array1<f64>) -> Array1<f64> {
+    /// `steps` counts loop passes, oldest first, with the newest pair repeated
+    /// when `steps > unique`. `first_dot` is `s · g` for that newest pair when
+    /// `q` is already a copy of `g`.
+    fn recurse(
+        &self,
+        q: &mut Array1<f64>,
+        alpha: &mut Vec<f64>,
+        steps: usize,
+        unique: usize,
+        first_dot: Option<f64>,
+        mid: Middle<'_>,
+    ) {
+        if steps == 0 {
+            self.apply_middle(q, mid);
+            q.mapv_inplace(|v| -v);
+            return;
+        }
+        if alpha.len() < steps {
+            alpha.resize(steps, 0.0);
+        }
+        let logical = |step: usize| -> usize { if step < unique { step } else { unique - 1 } };
+        let mut k = steps - 1;
+        let mut a = {
+            let p = self.memory.get(logical(k));
+            let dot_sq = match first_dot {
+                Some(v) => v,
+                None => crate::vecops::dot(p.s.view(), q.view()),
+            };
+            p.rho * dot_sq
+        };
+        alpha[k] = a;
+        while k > 0 {
+            let cur = logical(k);
+            let prev = logical(k - 1);
+            let next_dot = {
+                let y = self.memory.get(cur);
+                let s = self.memory.get(prev);
+                crate::vecops::axpy_dot(-a, y.y.view(), q, s.s.view())
+            };
+            k -= 1;
+            let rho = self.memory.get(logical(k)).rho;
+            a = rho * next_dot;
+            alpha[k] = a;
+        }
+        {
+            let y = self.memory.get(logical(0));
+            crate::vecops::axpy(-a, y.y.view(), q);
+        }
+        let mut ydot = self.middle_ydot(q, mid);
+        let mut k = 0;
+        while k + 1 < steps {
+            let rho = self.memory.get(logical(k)).rho;
+            let coef = alpha[k] - rho * ydot;
+            let cur = logical(k);
+            let next = logical(k + 1);
+            ydot = {
+                let s = self.memory.get(cur);
+                let y = self.memory.get(next);
+                crate::vecops::axpy_dot(coef, s.s.view(), q, y.y.view())
+            };
+            k += 1;
+        }
+        let rho = self.memory.get(logical(k)).rho;
+        let coef = alpha[k] - rho * ydot;
+        {
+            let s = self.memory.get(logical(k));
+            crate::vecops::axpy(coef, s.s.view(), q);
+        }
+        q.mapv_inplace(|v| -v);
+    }
+
+    fn cached_gamma(&self) -> Option<f64> {
+        let p = self.memory.last()?;
+        if p.yy > 0.0 { Some(p.sy / p.yy) } else { None }
+    }
+
+    fn scale_gamma_into(&self, q: &mut Array1<f64>) {
         if let Some(p) = self.memory.last() {
-            let yy = p.y.dot(&p.y);
-            if yy > 0.0 {
-                q *= p.s.dot(&p.y) / yy;
+            if p.yy > 0.0 {
+                *q *= p.sy / p.yy;
             }
         } else if self.inverse_curvature.is_finite()
             && self.inverse_curvature > 0.0
             && self.inverse_curvature != 1.0
         {
-            q *= self.inverse_curvature;
+            *q *= self.inverse_curvature;
         }
-        q
+    }
+
+    fn apply_middle(&self, q: &mut Array1<f64>, mid: Middle<'_>) {
+        match mid {
+            Middle::Gamma => self.scale_gamma_into(q),
+            Middle::ExpOrScalar(h0) => {
+                if let Some(solved) = self.exp_apply(q.view()) {
+                    q.assign(&solved);
+                } else {
+                    *q *= h0;
+                }
+            }
+            Middle::Precon(pmat) => match solve_spd(pmat, q) {
+                Some(v) => q.assign(&v),
+                None => {
+                    self.precon_fallbacks
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    self.scale_gamma_into(q);
+                }
+            },
+            Middle::Exp(exp) => match exp.solve(q.view()) {
+                Some(v) => q.assign(&v),
+                None => {
+                    self.precon_fallbacks
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    self.scale_gamma_into(q);
+                }
+            },
+        }
+    }
+
+    /// Middle scaling, then `y · q` of the oldest pair. A pure scale is one pass.
+    fn middle_ydot(&self, q: &mut Array1<f64>, mid: Middle<'_>) -> f64 {
+        match mid {
+            Middle::Gamma => {
+                if let Some(gamma) = self.cached_gamma() {
+                    let y = self.memory.get(0);
+                    crate::vecops::scale_dot(gamma, q, y.y.view())
+                } else {
+                    let y = self.memory.get(0);
+                    crate::vecops::dot(y.y.view(), q.view())
+                }
+            }
+            Middle::ExpOrScalar(h0) => {
+                if let Some(solved) = self.exp_apply(q.view()) {
+                    q.assign(&solved);
+                    let y = self.memory.get(0);
+                    crate::vecops::dot(y.y.view(), q.view())
+                } else {
+                    let y = self.memory.get(0);
+                    crate::vecops::scale_dot(h0, q, y.y.view())
+                }
+            }
+            Middle::Precon(pmat) => {
+                match solve_spd(pmat, q) {
+                    Some(v) => q.assign(&v),
+                    None => {
+                        self.precon_fallbacks
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        self.scale_gamma_into(q);
+                    }
+                }
+                let y = self.memory.get(0);
+                crate::vecops::dot(y.y.view(), q.view())
+            }
+            Middle::Exp(exp) => {
+                match exp.solve(q.view()) {
+                    Some(v) => q.assign(&v),
+                    None => {
+                        self.precon_fallbacks
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        self.scale_gamma_into(q);
+                    }
+                }
+                let y = self.memory.get(0);
+                crate::vecops::dot(y.y.view(), q.view())
+            }
+        }
     }
 
     fn current_h0(&self) -> f64 {
         if let Some(pair) = self.memory.last() {
-            let yy = pair.y.dot(&pair.y);
-            if yy > 0.0 {
-                return pair.s.dot(&pair.y) / yy;
+            if pair.yy > 0.0 {
+                return pair.sy / pair.yy;
             }
         }
         self.inverse_curvature
@@ -313,12 +608,7 @@ impl Lbfgs {
         gradient: ArrayView1<f64>,
         cap: Option<f64>,
     ) -> Array1<f64> {
-        if self.curvature_reset
-            && self
-                .memory
-                .last()
-                .is_some_and(|pair| pair.s.dot(&pair.y) < 0.0)
-        {
+        if self.curvature_reset && self.memory.last().is_some_and(|pair| pair.sy < 0.0) {
             self.forget();
             return gradient.mapv(|value| -1000.0 * value);
         }
@@ -350,40 +640,27 @@ impl Lbfgs {
     /// failed solve falls back to `h0`.
     pub(crate) fn direction_h0(&self, g: ArrayView1<f64>, h0: f64) -> Array1<f64> {
         let mut q = g.to_owned();
-        let m = self.memory.len();
-        let mut idxs: Vec<usize> = (0..m).collect();
-        for _ in 0..self.extra_updates {
-            if m > 0 {
-                idxs.push(m - 1);
-            }
-        }
-        let mut alpha = vec![0.0; idxs.len()];
-        for k in (0..idxs.len()).rev() {
-            let i = idxs[k];
-            let p = &self.memory[i];
-            let a = p.rho * crate::vecops::dot(p.s.view(), q.view());
-            alpha[k] = a;
-            crate::vecops::axpy(-a, p.y.view(), &mut q);
-        }
-        if let Some(solved) = self.exp_apply(q.view()) {
-            q = solved;
+        let mut alpha = Vec::new();
+        let unique = self.memory.len();
+        let steps = if unique == 0 {
+            0
         } else {
-            q *= h0;
-        }
-        for k in 0..idxs.len() {
-            let i = idxs[k];
-            let p = &self.memory[i];
-            let b = p.rho * crate::vecops::dot(p.y.view(), q.view());
-            crate::vecops::axpy(alpha[k] - b, p.s.view(), &mut q);
-        }
-        q.mapv_inplace(|v| -v);
+            unique + self.extra_updates
+        };
+        self.recurse(
+            &mut q,
+            &mut alpha,
+            steps,
+            unique,
+            None,
+            Middle::ExpOrScalar(h0),
+        );
         q
     }
 
     /// Remember `s·y` and `y·y` from the step just taken.
     pub(crate) fn note_curvature(&mut self, s: &Array1<f64>, y: &Array1<f64>) {
-        let sy = s.dot(y);
-        let yy = y.dot(y);
+        let (sy, yy, _, _) = crate::vecops::curvature_products(s.view(), y.view());
         if sy.is_finite() && yy.is_finite() {
             self.last_sy = sy;
             self.last_yy = yy;
@@ -396,15 +673,13 @@ impl Lbfgs {
     /// Store a geometry-step pair. Negative or vanishing curvature is dropped
     /// here; the caller resets memory from [`Self::note_curvature`].
     pub(crate) fn push_geometry(&mut self, s: Array1<f64>, y: Array1<f64>) {
-        let sy = s.dot(&y);
+        let (sy, yy, _, _) = crate::vecops::curvature_products(s.view(), y.view());
         if !sy.is_finite() || sy.abs() < 1e-30 || sy <= 0.0 {
+            self.memory.recycle(s);
+            self.memory.recycle(y);
             return;
         }
-        self.memory.push(Pair {
-            s,
-            y,
-            rho: 1.0 / sy,
-        });
+        self.memory.insert(self.max_pairs, Pair::new(s, y, sy, yy));
         self.trim();
     }
 
@@ -422,9 +697,13 @@ impl Lbfgs {
     where
         F: FnMut(&Array1<f64>) -> Array1<f64>,
     {
-        let pairs = std::mem::take(&mut self.memory);
+        let pairs = self.memory.take_all();
         for pair in pairs {
-            self.push_pair(map(&pair.s), map(&pair.y), None);
+            let s = map(&pair.s);
+            let y = map(&pair.y);
+            self.memory.recycle(pair.s);
+            self.memory.recycle(pair.y);
+            self.push_pair(s, y, None);
         }
     }
 
@@ -433,20 +712,21 @@ impl Lbfgs {
     }
 
     pub(crate) fn push_pair(&mut self, s: Array1<f64>, y: Array1<f64>, gnorm: Option<f64>) {
-        let sy = s.dot(&y);
-        let sn = s.iter().map(|v| v * v).sum::<f64>().sqrt();
-        let yn = y.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let (sy, yy, ss_sum, yy_sum) = crate::vecops::curvature_products(s.view(), y.view());
+        let sn = ss_sum.sqrt();
+        let yn = yy_sum.sqrt();
         let ss = sn * sn;
+        let reject = |this: &mut Self, s: Array1<f64>, y: Array1<f64>| {
+            this.memory.recycle(s);
+            this.memory.recycle(y);
+        };
         if self.curvature_reset {
             if !sy.is_finite() || sy.abs() < 1e-30 {
                 self.forget();
+                reject(self, s, y);
                 return;
             }
-            self.memory.push(Pair {
-                s,
-                y,
-                rho: 1.0 / sy,
-            });
+            self.memory.insert(self.max_pairs, Pair::new(s, y, sy, yy));
             self.trim();
             return;
         }
@@ -455,19 +735,17 @@ impl Lbfgs {
         {
             let thresh = self.cautious_eps * ss * g.max(1.0e-30).powf(self.cautious_alpha);
             if sy < thresh {
+                reject(self, s, y);
                 return;
             }
         }
         // Relative curvature: a tiny accepted trust step makes the
         // compact Hessian indefinite and HiGHS's QP solver does not return.
         if !sy.is_finite() || sy <= 1e-8 * sn * yn {
+            reject(self, s, y);
             return;
         }
-        self.memory.push(Pair {
-            s,
-            y,
-            rho: 1.0 / sy,
-        });
+        self.memory.insert(self.max_pairs, Pair::new(s, y, sy, yy));
         self.trim();
     }
 
@@ -509,7 +787,10 @@ impl Lbfgs {
     {
         let f0 = *f;
         let mut evals = 0usize;
-        let mut scratch = x.clone();
+        if self.line_scratch.len() != x.len() {
+            self.line_scratch = Array1::zeros(x.len());
+        }
+        let mut scratch = std::mem::take(&mut self.line_scratch);
         let probe = |a: f64, fg: &mut F, evals: &mut usize, scratch: &mut Array1<f64>| {
             scratch.assign(x);
             scratch.scaled_add(a, d);
@@ -546,7 +827,10 @@ impl Lbfgs {
         for i in 0..bracket_cap {
             let (fa, ga) = match probe(a, fg, &mut evals, &mut scratch) {
                 Some(v) => v,
-                None => return (false, evals),
+                None => {
+                    self.line_scratch = scratch;
+                    return (false, evals);
+                }
             };
             let slope_a = d.dot(&ga);
             if fa > f0 + self.armijo * a * slope || (i > 0 && fa >= f_prev) {
@@ -560,6 +844,7 @@ impl Lbfgs {
                 break;
             }
             if slope_a.abs() <= -self.curvature * slope {
+                self.line_scratch = scratch;
                 self.accept(x, f, g, d, a, fa, ga);
                 return (true, evals);
             }
@@ -580,6 +865,7 @@ impl Lbfgs {
         }
 
         if !bracketed {
+            self.line_scratch = scratch;
             return (false, evals);
         }
 
@@ -619,7 +905,10 @@ impl Lbfgs {
             }
             let (ft, gt) = match probe(trial, fg, &mut evals, &mut scratch) {
                 Some(v) => v,
-                None => return (false, evals),
+                None => {
+                    self.line_scratch = scratch;
+                    return (false, evals);
+                }
             };
             let slope_t = d.dot(&gt);
             if ft > f0 + self.armijo * trial * slope || ft >= f_lo {
@@ -628,6 +917,7 @@ impl Lbfgs {
                 slope_hi = slope_t;
             } else {
                 if slope_t.abs() <= -self.curvature * slope {
+                    self.line_scratch = scratch;
                     self.accept(x, f, g, d, trial, ft, gt);
                     return (true, evals);
                 }
@@ -644,6 +934,7 @@ impl Lbfgs {
                 break;
             }
         }
+        self.line_scratch = scratch;
         (false, evals)
     }
 
@@ -657,14 +948,70 @@ impl Lbfgs {
         f_new: f64,
         g_new: Array1<f64>,
     ) {
-        let mut s = d.clone();
+        let mut s = self.memory.take_spare(d.len());
+        s.assign(d);
         s *= step;
-        let mut y = g_new.clone();
+        let mut y = self.memory.take_spare(g.len());
+        y.assign(&g_new);
         y -= &*g;
         self.push(s, y);
         x.scaled_add(step, d);
         *f = f_new;
         *g = g_new;
+    }
+
+    /// Gradient norm and `d · g`. The direction is left in `q`.
+    /// `None` is a failed feasible-direction solve.
+    fn assess(
+        &mut self,
+        x: ArrayView1<f64>,
+        g: &Array1<f64>,
+        q: &mut Array1<f64>,
+    ) -> Option<(f64, f64)> {
+        if q.len() != g.len() {
+            *q = Array1::zeros(g.len());
+        }
+        #[cfg(feature = "highs")]
+        if self.highs.is_some() {
+            let gn = self.gnorm(g);
+            if gn < self.gtol {
+                return Some((gn, 0.0));
+            }
+            let d = self.highs_step(x, g.view()).ok()?;
+            q.assign(&d);
+            return Some((gn, q.dot(g)));
+        }
+        let _ = x;
+        let (gn, first) = self.gnorm_into(g, q);
+        if gn < self.gtol {
+            return Some((gn, 0.0));
+        }
+        let mut alpha = std::mem::take(&mut self.alpha_work);
+        let m = self.memory.len();
+        self.recurse(q, &mut alpha, m, m, first, Middle::Gamma);
+        self.alpha_work = alpha;
+        Some((gn, q.dot(g)))
+    }
+
+    fn gnorm_into(&self, g: &Array1<f64>, q: &mut Array1<f64>) -> (f64, Option<f64>) {
+        let m = self.memory.len();
+        if m == 0 {
+            q.assign(g);
+            return (self.gnorm(g), None);
+        }
+        match self.norm {
+            GradNorm::Infinity => {
+                let s = self.memory.get(m - 1);
+                let (gn, dot_sg) = crate::vecops::copy_inf_dot(g.view(), q, s.s.view());
+                (gn, Some(dot_sg))
+            }
+            GradNorm::Euclidean => {
+                let s = self.memory.get(m - 1);
+                let (gg, sg, finite) = crate::vecops::copy_euclid_dot(g.view(), q, s.s.view());
+                let gn = if finite { gg.sqrt() } else { f64::INFINITY };
+                (gn, Some(sg))
+            }
+        }
     }
 
     /// Relaxes `x0`, calling `fg` for value and gradient.
@@ -709,22 +1056,22 @@ impl Lbfgs {
         };
         evals += 1;
 
+        let mut q = std::mem::take(&mut self.q_work);
         for it in 0..max_iter {
             if !watch(it, f) {
                 break;
             }
-            if self.gnorm(&g) < self.gtol {
-                break;
-            }
-            let Ok(d) = self.search_direction(x.view(), g.view()) else {
+            let Some((gn, slope)) = self.assess(x.view(), &g, &mut q) else {
                 break;
             };
-            let slope = d.dot(&g);
+            if gn < self.gtol {
+                break;
+            }
             if slope >= 0.0 {
                 self.forget();
                 continue;
             }
-            let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &d, slope, &mut fg);
+            let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &q, slope, &mut fg);
             evals += evals_used;
             if !ok {
                 if self.memory.is_empty() {
@@ -733,6 +1080,7 @@ impl Lbfgs {
                 self.forget();
             }
         }
+        self.q_work = q;
         (f, x, evals)
     }
 
@@ -774,22 +1122,23 @@ impl Lbfgs {
         };
         evals += 1;
 
+        let mut q = std::mem::take(&mut self.q_work);
         for it in 0..max_iter {
             if let Some((f_known, x_known)) = recognise(it, f, x.view()) {
+                self.q_work = q;
                 return (f_known, x_known, evals, true);
             }
-            if self.gnorm(&g) < self.gtol {
-                break;
-            }
-            let Ok(d) = self.search_direction(x.view(), g.view()) else {
+            let Some((gn, slope)) = self.assess(x.view(), &g, &mut q) else {
                 break;
             };
-            let slope = d.dot(&g);
+            if gn < self.gtol {
+                break;
+            }
             if slope >= 0.0 {
                 self.forget();
                 continue;
             }
-            let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &d, slope, &mut fg);
+            let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &q, slope, &mut fg);
             evals += evals_used;
             if !ok {
                 if self.memory.is_empty() {
@@ -798,6 +1147,7 @@ impl Lbfgs {
                 self.forget();
             }
         }
+        self.q_work = q;
         (f, x, evals, false)
     }
 
