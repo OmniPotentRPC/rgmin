@@ -14,8 +14,8 @@ use crate::control::Control;
 use crate::diis::{DiisState, gdiis_point};
 use crate::error::{Error, Result};
 use crate::fire::{
-    Fire2Extras, FireMix, FireState, FireVariant, fire_after_v1_metric, fire_displacement,
-    fire_rescale_velocity, fire2_displacement_metric, guenole2020,
+    Fire2Extras, FireKind, FireMix, FireState, FireVariant, apply_velocity_scale,
+    fire_after_v1_metric, fire_displacement, fire2_displacement_metric, guenole2020,
 };
 use crate::hvp::{
     FiniteDifference, HessianVector, NewtonCgRequest, OptionalAction, newton_cg_step,
@@ -44,8 +44,9 @@ use crate::quickmin::{
 use crate::report::{Report, Status};
 use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
-    Taken, cap_alpha, cap_displacement_atom, l2, max_atom_displacement, nlcg_opening_alpha,
-    qn_istep, scale_displacement_to_atom_cap, scale_step, scale_step_atom, take_step_with_options,
+    Taken, cap_alpha, cap_displacement_atom, clip_same_bits, l2, max_atom_displacement,
+    nlcg_opening_alpha, qn_istep, scale_displacement_to_atom_cap, scale_step, scale_step_atom,
+    take_step_with_options,
 };
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
@@ -1119,17 +1120,21 @@ impl Solver {
         }
     }
 
+    /// Bound-aware stationarity, as opposed to the Euclidean gradient norm.
+    fn uses_bound_norm(&self) -> bool {
+        self.has_coordinate_box()
+            && self.manifold == ManifoldKind::Euclidean
+            && self.removal_mode() == RigidMode::Off
+            && !self.has_equalities()
+    }
+
     fn stationarity_norm(
         &self,
         bounds: &eindir_core::Bounds<f64>,
         x: &Array1<f64>,
         grad: &Array1<f64>,
     ) -> f64 {
-        if self.has_coordinate_box()
-            && self.manifold == ManifoldKind::Euclidean
-            && self.removal_mode() == RigidMode::Off
-            && !self.has_equalities()
-        {
+        if self.uses_bound_norm() {
             let mut norm = 0.0_f64;
             for k in 0..x.len() {
                 let lo = bounds.low[k];
@@ -1151,11 +1156,7 @@ impl Solver {
     /// other path uses the length of the horizontal or projected gradient,
     /// which is the session dimension.
     pub(crate) fn free_len(&self, bounds: &eindir_core::Bounds<f64>) -> usize {
-        if self.has_coordinate_box()
-            && self.manifold == ManifoldKind::Euclidean
-            && self.removal_mode() == RigidMode::Off
-            && !self.has_equalities()
-        {
+        if self.uses_bound_norm() {
             let n = self.dim.min(bounds.low.len()).min(bounds.high.len());
             return (0..n).filter(|&k| bounds.high[k] > bounds.low[k]).count();
         }
@@ -1253,6 +1254,15 @@ impl Solver {
         };
         self.kill_at(x, &mut g);
         g
+    }
+
+    /// Euclidean space with rigid removal off leaves the gradient unchanged.
+    /// Replacing it with a clone is the same vector and a fresh allocation.
+    fn horizontalize(&mut self, x: &Array1<f64>, grad: &mut Array1<f64>) {
+        if self.manifold == ManifoldKind::Euclidean && self.removal_mode() == RigidMode::Off {
+            return;
+        }
+        *grad = self.horizontal_grad(x, grad);
     }
 
     /// Vector transport. Quotient manifolds project at the arrival point.
@@ -2007,7 +2017,8 @@ impl Solver {
         let old = x.clone();
         let gold = grad.clone();
         *x = trial;
-        grad = self.horizontal_grad(x, &tgrad);
+        grad = tgrad;
+        self.horizontalize(x, &mut grad);
         let s = &*x - &old;
         let y = &grad - &gold;
         if let Inner::Lbfgs(solver) = &mut self.inner {
@@ -2115,7 +2126,8 @@ impl Solver {
             }
             *x = trial;
             *value = v;
-            *grad = self.horizontal_grad(x, &g);
+            *grad = g;
+            self.horizontalize(x, grad);
             self.saddle_kicks = self.saddle_kicks.saturating_add(1);
             if let Inner::Dogleg { radius } = &mut self.inner {
                 *radius = self.control.istep.max(1.0e-8);
@@ -2183,7 +2195,7 @@ impl Solver {
         } else {
             obj.value_and_gradient(x.view())
         };
-        grad = self.horizontal_grad(x, &grad);
+        self.horizontalize(x, &mut grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
         if self
             .control
@@ -2256,7 +2268,7 @@ impl Solver {
                     value = nval;
                     grad = ngrad;
                 }
-                grad = self.horizontal_grad(x, &grad);
+                self.horizontalize(x, &mut grad);
                 self.remember(x, value, &grad);
                 let pair = if x.iter().zip(old.iter()).any(|(a, b)| a != b) {
                     let (s, y) = self.lbfgs_sy(&old, x, &gold, &grad);
@@ -2301,7 +2313,7 @@ impl Solver {
             value = nval;
             grad = ngrad;
         }
-        grad = self.horizontal_grad(x, &grad);
+        self.horizontalize(x, &mut grad);
         self.remember(x, value, &grad);
         let pair = if x.iter().zip(old.iter()).any(|(a, b)| a != b) {
             let (s, y) = self.lbfgs_sy(&old, x, &gold, &grad);
@@ -2406,7 +2418,7 @@ impl Solver {
         } else {
             obj.value_and_gradient(x.view())
         };
-        grad = self.horizontal_grad(x, &grad);
+        self.horizontalize(x, &mut grad);
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
         // A caller that moved the iterate between steps measured the
         // gradient at both ends, so the displacement is a secant of the
@@ -2465,15 +2477,15 @@ impl Solver {
             }
             self.remember(x, value, &grad);
             self.steps += 1;
+            let grad_norm = self.stationarity_norm(obj.bounds(), x, &grad);
             return Ok(Report {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
-                grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-                status: self.control.classify(
-                    self.stationarity_norm(obj.bounds(), x, &grad),
-                    self.free_len(obj.bounds()),
-                ),
+                grad_norm,
+                status: self
+                    .control
+                    .classify(grad_norm, self.free_len(obj.bounds())),
             });
         }
 
@@ -2483,8 +2495,22 @@ impl Solver {
             } else {
                 LineSearchOptions::default()
             };
-        let start = x.clone();
-        let gold = grad.clone();
+        // FIRE and the other non-secant methods never read the pre-step
+        // point. Cloning it there is a copy that the step drops.
+        let keep_origin = matches!(
+            self.inner,
+            Inner::Lbfgs(_) | Inner::Sr1 { .. } | Inner::Sr2 { .. }
+        ) || !self.manifold.retract_is_translation();
+        let start = if keep_origin {
+            x.clone()
+        } else {
+            Array1::zeros(0)
+        };
+        let gold = if keep_origin {
+            grad.clone()
+        } else {
+            Array1::zeros(0)
+        };
         // Accept::Step: the two-loop direction goes through accept_step
         // like the BB arm and the Hessian path in step_hess, one oracle
         // call and the clipped step with no energy test. The oracle value
@@ -2864,20 +2890,30 @@ impl Solver {
                     rigid_broken_r,
                     &mut raw,
                 );
+                // No metric and no rigid projection: the steepest vector is
+                // the force. A second copy would be read and dropped.
+                let distinct = self.precon.is_some() || rigid_mode != RigidMode::Off;
+                #[cfg(feature = "highs")]
+                let distinct = distinct || boxed;
                 #[allow(unused_mut)]
-                let mut steepest = metric_vector(&self.precon, &raw)?;
-                eckart(
-                    &mut hold.ws,
-                    rigid_mode,
-                    masses,
-                    frozen,
-                    rigid_weighted,
-                    rigid_metric,
-                    rigid_pbc,
-                    rigid_broken_t,
-                    rigid_broken_r,
-                    &mut steepest,
-                );
+                let mut steepest_buf = if distinct {
+                    let mut steepest = metric_vector(&self.precon, &raw)?;
+                    eckart(
+                        &mut hold.ws,
+                        rigid_mode,
+                        masses,
+                        frozen,
+                        rigid_weighted,
+                        rigid_metric,
+                        rigid_pbc,
+                        rigid_broken_t,
+                        rigid_broken_r,
+                        &mut steepest,
+                    );
+                    Some(steepest)
+                } else {
+                    None
+                };
                 eckart(
                     &mut hold.ws,
                     rigid_mode,
@@ -2893,18 +2929,19 @@ impl Solver {
                 #[cfg(feature = "highs")]
                 if boxed {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut raw);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
+                    if let Some(steepest) = steepest_buf.as_mut() {
+                        crate::box_objective::project_tangent(obj.bounds(), x, steepest);
+                    }
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
-                let mix = fire_mix(&self.precon, &state.vel, &raw, &steepest);
+                let steepest = steepest_buf.as_ref().unwrap_or(&raw);
+                let mix = fire_mix(&self.precon, &state.vel, &raw, steepest);
                 let mut dx = match ext {
-                    Some(ext) => {
-                        match fire2_displacement_metric(state, ext, &raw, &steepest, mix) {
-                            Ok(dx) => dx,
-                            Err(_) => return Err(Error::FireStalled { steps: self.steps }),
-                        }
-                    }
-                    None => fire_displacement(state, &steepest),
+                    Some(ext) => match fire2_displacement_metric(state, ext, &raw, steepest, mix) {
+                        Ok(dx) => dx,
+                        Err(_) => return Err(Error::FireStalled { steps: self.steps }),
+                    },
+                    None => fire_displacement(state, steepest),
                 };
                 eckart(
                     &mut hold.ws,
@@ -2924,11 +2961,17 @@ impl Solver {
                 } else if let Some(cap) = self.control.maxmove {
                     scale_step(x, &mut trial, cap);
                 }
-                trial = obj.bounds().clip(trial.view());
+                trial = clip_same_bits(obj.bounds(), trial);
                 // The clamp and clip shorten the move; the velocity has to
                 // describe the move taken, or the power adapt reads an
-                // integral of moves that never happened.
-                fire_rescale_velocity(state, &dx, &(&trial - &*x));
+                // integral of moves that never happened. The displacement
+                // is written over `dx` after its norm is taken: element
+                // `trial[i] - x[i]` is the subtraction ndarray would store.
+                let proposed = l2(&dx);
+                for i in 0..dx.len() {
+                    dx[i] = trial[i] - x[i];
+                }
+                apply_velocity_scale(state, proposed, l2(&dx));
                 *x = trial;
                 if rigid_mode != RigidMode::Off
                     && let Some(xs) = x.as_slice()
@@ -2938,53 +2981,91 @@ impl Solver {
                 let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
                 grad = ev.1;
-                let mut raw_new = grad.mapv(|g| -g);
-                eckart(
-                    &mut hold.ws,
-                    rigid_mode,
-                    masses,
-                    frozen,
-                    rigid_weighted,
-                    rigid_metric,
-                    rigid_pbc,
-                    rigid_broken_t,
-                    rigid_broken_r,
-                    &mut raw_new,
-                );
-                #[allow(unused_mut)]
-                let mut steep_new = metric_vector(&self.precon, &raw_new)?;
-                eckart(
-                    &mut hold.ws,
-                    rigid_mode,
-                    masses,
-                    frozen,
-                    rigid_weighted,
-                    rigid_metric,
-                    rigid_pbc,
-                    rigid_broken_t,
-                    rigid_broken_r,
-                    &mut steep_new,
-                );
-                eckart(
-                    &mut hold.ws,
-                    rigid_mode,
-                    masses,
-                    frozen,
-                    rigid_weighted,
-                    rigid_vmetric,
-                    rigid_pbc,
-                    rigid_broken_t,
-                    rigid_broken_r,
-                    &mut state.vel,
-                );
-                #[cfg(feature = "highs")]
-                if boxed {
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut raw_new);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steep_new);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                // FIRE 2.0 mixes before the step. The force at the new point
+                // is not read, and with rigid removal off the velocity
+                // projection does not write. FIRE 1.0 mixes on that force.
+                if matches!(state.kind, FireKind::V1) {
+                    let mut raw_new = grad.mapv(|g| -g);
+                    eckart(
+                        &mut hold.ws,
+                        rigid_mode,
+                        masses,
+                        frozen,
+                        rigid_weighted,
+                        rigid_metric,
+                        rigid_pbc,
+                        rigid_broken_t,
+                        rigid_broken_r,
+                        &mut raw_new,
+                    );
+                    let distinct = self.precon.is_some() || rigid_mode != RigidMode::Off;
+                    #[cfg(feature = "highs")]
+                    let distinct = distinct || boxed;
+                    #[allow(unused_mut)]
+                    let mut steep_buf = if distinct {
+                        let mut steep_new = metric_vector(&self.precon, &raw_new)?;
+                        eckart(
+                            &mut hold.ws,
+                            rigid_mode,
+                            masses,
+                            frozen,
+                            rigid_weighted,
+                            rigid_metric,
+                            rigid_pbc,
+                            rigid_broken_t,
+                            rigid_broken_r,
+                            &mut steep_new,
+                        );
+                        Some(steep_new)
+                    } else {
+                        None
+                    };
+                    eckart(
+                        &mut hold.ws,
+                        rigid_mode,
+                        masses,
+                        frozen,
+                        rigid_weighted,
+                        rigid_vmetric,
+                        rigid_pbc,
+                        rigid_broken_t,
+                        rigid_broken_r,
+                        &mut state.vel,
+                    );
+                    #[cfg(feature = "highs")]
+                    if boxed {
+                        crate::box_objective::project_tangent(obj.bounds(), x, &mut raw_new);
+                        if let Some(steep_new) = steep_buf.as_mut() {
+                            crate::box_objective::project_tangent(obj.bounds(), x, steep_new);
+                        }
+                        crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                    }
+                    let steep_new = steep_buf.as_ref().unwrap_or(&raw_new);
+                    let mix_new = fire_mix(&self.precon, &state.vel, &raw_new, steep_new);
+                    fire_after_v1_metric(state, &raw_new, steep_new, mix_new);
+                } else if rigid_mode != RigidMode::Off {
+                    eckart(
+                        &mut hold.ws,
+                        rigid_mode,
+                        masses,
+                        frozen,
+                        rigid_weighted,
+                        rigid_vmetric,
+                        rigid_pbc,
+                        rigid_broken_t,
+                        rigid_broken_r,
+                        &mut state.vel,
+                    );
+                    #[cfg(feature = "highs")]
+                    if boxed {
+                        crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                    }
+                } else {
+                    #[cfg(feature = "highs")]
+                    if boxed {
+                        crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                    }
                 }
-                let mix_new = fire_mix(&self.precon, &state.vel, &raw_new, &steep_new);
-                fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
             }
             Inner::QuickMin(state, session) => {
                 #[allow(unused_mut)]
@@ -3172,7 +3253,7 @@ impl Solver {
             value = ev.0;
             grad = ev.1;
         }
-        grad = self.horizontal_grad(x, &grad);
+        self.horizontalize(x, &mut grad);
         if let Some((old_x, old_g)) = sr_secant
             && x.iter().zip(old_x.iter()).any(|(a, b)| a != b)
         {
@@ -3185,11 +3266,19 @@ impl Solver {
             }
         }
 
-        let pair = if matches!(self.inner, Inner::Lbfgs(_))
-            && x.iter().zip(start.iter()).any(|(a, b)| a != b)
-        {
+        let want_pair = matches!(self.inner, Inner::Lbfgs(_))
+            && x.iter().zip(start.iter()).any(|(a, b)| a != b);
+        // The Euclidean stationarity norm is `l2(grad)`, which is also the
+        // norm stored on the pair. One pass serves both.
+        let grad_norm = self.stationarity_norm(obj.bounds(), x, &grad);
+        let pair = if want_pair {
             let (s, y) = self.lbfgs_sy(&start, x, &gold, &grad);
-            Some((s, y, l2(&grad)))
+            let gn = if self.uses_bound_norm() {
+                l2(&grad)
+            } else {
+                grad_norm
+            };
+            Some((s, y, gn))
         } else {
             None
         };
@@ -3201,7 +3290,6 @@ impl Solver {
 
         self.remember(x, value, &grad);
         self.steps += 1;
-        let grad_norm = self.stationarity_norm(obj.bounds(), x, &grad);
         let mut status = self
             .control
             .classify(grad_norm, self.free_len(obj.bounds()));
@@ -3293,15 +3381,15 @@ impl Solver {
             *x = state.gbest_position.clone();
             let (value, grad) = obj.value_and_gradient(x.view());
             self.steps += 1;
+            let grad_norm = self.stationarity_norm(obj.bounds(), x, &grad);
             return Ok(Report {
                 value,
                 coords: x.clone(),
                 steps: self.steps,
-                grad_norm: self.stationarity_norm(obj.bounds(), x, &grad),
-                status: self.control.classify(
-                    self.stationarity_norm(obj.bounds(), x, &grad),
-                    self.free_len(obj.bounds()),
-                ),
+                grad_norm,
+                status: self
+                    .control
+                    .classify(grad_norm, self.free_len(obj.bounds())),
             });
         }
         unreachable!("PSO slot populated above")

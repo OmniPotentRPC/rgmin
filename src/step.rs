@@ -129,6 +129,27 @@ pub(crate) fn max_atom_norm(v: ArrayView1<'_, f64>) -> f64 {
     m
 }
 
+/// `true` when clipping would keep every coordinate. A point inside the
+/// box is the point the line search already evaluated, so the clip's
+/// allocation is skipped. Signed zeros that clipping would flip fail
+/// this test and take the allocating path, which then keeps the original
+/// under `PartialEq`.
+fn point_inside_box(bounds: &eindir_core::Bounds<f64>, x: ArrayView1<'_, f64>) -> bool {
+    x.len() == bounds.dims
+        && x.iter()
+            .enumerate()
+            .all(|(i, xi)| *xi >= bounds.low[i] && *xi <= bounds.high[i])
+}
+
+/// Clip, or return `x` when every clipped coordinate has the same bits.
+pub(crate) fn clip_same_bits(bounds: &eindir_core::Bounds<f64>, x: Array1<f64>) -> Array1<f64> {
+    let unchanged = x.len() == bounds.dims
+        && x.iter()
+            .enumerate()
+            .all(|(i, &xi)| xi.max(bounds.low[i]).min(bounds.high[i]).to_bits() == xi.to_bits());
+    if unchanged { x } else { bounds.clip(x.view()) }
+}
+
 /// Largest `alpha` for which the step `alpha dir` obeys the cap in force:
 /// the per-atom cap when set, else the Euclidean `control.maxmove`, else
 /// unbounded.
@@ -293,16 +314,20 @@ where
     ) else {
         return unmoved(stalled(saw_trial, best_decrease));
     };
-    let trial = obj.bounds().clip(out.x.view());
-    let (x, f, g) = if trial == out.x {
+    let (x, f, g) = if point_inside_box(obj.bounds(), out.x.view()) {
         (out.x, out.f, out.g)
     } else {
-        let (f, g) = obj.value_and_gradient(trial.view());
-        if f.is_finite() {
-            saw_trial = true;
-            best_decrease = best_decrease.max(value - f);
+        let trial = obj.bounds().clip(out.x.view());
+        if trial == out.x {
+            (out.x, out.f, out.g)
+        } else {
+            let (f, g) = obj.value_and_gradient(trial.view());
+            if f.is_finite() {
+                saw_trial = true;
+                best_decrease = best_decrease.max(value - f);
+            }
+            (trial, f, g)
         }
-        (trial, f, g)
     };
     if !f.is_finite() || g.iter().any(|value| !value.is_finite()) {
         return unmoved(stalled(saw_trial, best_decrease));

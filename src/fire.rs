@@ -167,11 +167,16 @@ pub fn fire_displacement(state: &mut FireState, force: &Array1<f64>) -> Array1<f
 /// measures the motion that happened. Without this the integral keeps
 /// growing while the clamp fires every step, and `dt` grows with it.
 pub fn fire_rescale_velocity(state: &mut FireState, proposed: &Array1<f64>, taken: &Array1<f64>) {
-    let pn = l2(proposed);
-    if pn <= 0.0 {
+    apply_velocity_scale(state, l2(proposed), l2(taken));
+}
+
+/// `proposed_norm` is `||proposed||` and `taken_norm` is `||taken||`,
+/// both the Euclidean 2-norm.
+pub(crate) fn apply_velocity_scale(state: &mut FireState, proposed_norm: f64, taken_norm: f64) {
+    if proposed_norm <= 0.0 {
         return;
     }
-    let factor = l2(taken) / pn;
+    let factor = taken_norm / proposed_norm;
     if factor < 1.0 {
         state.vel.mapv_inplace(|v| v * factor);
     }
@@ -360,6 +365,22 @@ pub fn fire2_displacement_metric(
 mod tests {
     use super::*;
     use ndarray::array;
+
+    #[test]
+    fn in_place_displacement_matches_the_ndarray_difference() {
+        let x = array![1.0, -2.0, 0.5, 4.0, -0.0, 8.0];
+        let dx = array![0.1, 0.2, -0.3, 1.0e-16, -0.0, 2.0];
+        let trial = &x + &dx;
+        let mut written = dx.clone();
+        for i in 0..written.len() {
+            written[i] = trial[i] - x[i];
+        }
+        let allocated = &trial - &x;
+        assert_eq!(l2(&written).to_bits(), l2(&allocated).to_bits());
+        for i in 0..written.len() {
+            assert_eq!(written[i].to_bits(), allocated[i].to_bits());
+        }
+    }
 
     #[test]
     fn v1_first_step_follows_the_force() {

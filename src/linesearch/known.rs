@@ -39,6 +39,8 @@ pub struct LineOutcome {
 /// One evaluated trial on the line.
 #[derive(Clone)]
 struct Probe {
+    /// Evaluation order. The lowest trial keeps the earliest one on a tie.
+    seen: usize,
     alpha: f64,
     f: f64,
     dphi: f64,
@@ -79,17 +81,36 @@ where
         let (f, g) = (self.oracle)(x.view());
         self.evals += 1;
         let dphi = crate::vecops::dot(g.view(), self.dir);
-        let p = Probe {
+        Probe {
+            seen: self.evals,
             alpha,
             f,
             dphi,
             x,
             g,
+        }
+    }
+
+    /// Remember a trial that this search will drop. A trial that is returned
+    /// is not copied: the caller already owns it. Equal values keep the
+    /// earlier trial, which is what updating `best` inside `probe` did.
+    fn consider(&mut self, p: &Probe) {
+        if !p.f.is_finite() {
+            return;
+        }
+        let keep = match &self.best {
+            None => p.f < self.f0,
+            Some(b) => p.f < b.f || (p.f == b.f && p.seen < b.seen),
         };
-        if f.is_finite() && f < self.best.as_ref().map_or(self.f0, |b| b.f) {
+        if keep {
             self.best = Some(p.clone());
         }
-        p
+    }
+
+    fn consider_end(&mut self, end: &End) {
+        if let Some(p) = &end.p {
+            self.consider(p);
+        }
     }
 
     fn accept(&self, p: Probe) -> Option<LineOutcome> {
@@ -311,6 +332,7 @@ where
         let t = cubic_min(prev.a, prev.f, prev.d, alpha, f, d)
             .filter(|t| *t > alpha)
             .unwrap_or(hi_ext);
+        line.consider_end(&prev);
         prev = cur;
         alpha = clamp_between(t, lo_ext, hi_ext).min(amax);
     }
@@ -351,13 +373,16 @@ where
             return cur.p.and_then(|p| line.accept(p));
         }
         if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || f >= lo.f {
+            line.consider_end(&hi);
             hi = cur;
+        } else if strong_curvature(d, dphi0, c2) {
+            return cur.p.and_then(|p| line.accept(p));
         } else {
-            if strong_curvature(d, dphi0, c2) {
-                return cur.p.and_then(|p| line.accept(p));
-            }
             if d * (hi.a - lo.a) >= 0.0 {
+                line.consider_end(&hi);
                 hi = lo;
+            } else {
+                line.consider_end(&lo);
             }
             lo = cur;
         }
@@ -366,7 +391,10 @@ where
     // `lo` still at the origin, fall back to the lowest trial.
     match lo.p {
         Some(p) => line.accept(p),
-        None => line.take_best(),
+        None => {
+            line.consider_end(&hi);
+            line.take_best()
+        }
     }
 }
 
@@ -399,6 +427,7 @@ where
         if accept || (goldstein && arm && alpha >= grow_cap) {
             return line.accept(p);
         }
+        line.consider(&p);
         if goldstein && arm {
             // Lower bound failed: the step is too short (Nocedal-Wright 3.11).
             alpha = (alpha / beta).min(grow_cap);
@@ -429,8 +458,9 @@ where
     const GOLD: f64 = 1.618_034;
     const CGOLD: f64 = 0.381_966;
     let phi = |line: &mut Line<'_, F>, t: f64| {
-        let f = line.probe(t).f;
-        if f.is_finite() { f } else { f64::INFINITY }
+        let p = line.probe(t);
+        line.consider(&p);
+        if p.f.is_finite() { p.f } else { f64::INFINITY }
     };
     // Bracket a minimum of phi on [0, c] with phi(b) < phi(0), phi(c).
     let (mut a, mut fa) = (0.0, f0);
@@ -536,8 +566,9 @@ where
             x + if d >= 0.0 { tol1 } else { -tol1 }
         };
         let fu = {
-            let f = line.probe(u).f;
-            if f.is_finite() { f } else { f64::INFINITY }
+            let p = line.probe(u);
+            line.consider(&p);
+            if p.f.is_finite() { p.f } else { f64::INFINITY }
         };
         if fu <= fx {
             if u >= x {
