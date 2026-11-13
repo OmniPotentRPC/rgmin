@@ -680,15 +680,13 @@ impl Lbfgs {
         let mut q = g.to_owned();
         let mut alpha = Vec::new();
         let unique = self.memory.len();
-        let steps = if unique == 0 {
-            0
-        } else {
-            unique + self.extra_updates
-        };
+        // `extra_updates` replays the newest pair. That replay is the
+        // identity on an H that already satisfies H y = s, and the public
+        // two-loop ignores the field. Replaying it here changed bits.
         self.recurse(
             &mut q,
             &mut alpha,
-            steps,
+            unique,
             unique,
             None,
             Middle::ExpOrScalar(h0),
@@ -1596,6 +1594,33 @@ mod ring_tests {
         let got = grown.two_loop(g.view());
         for i in 0..g.len() {
             assert_eq!(got[i].to_bits(), expect[i].to_bits(), "d[{i}]");
+        }
+    }
+
+    fn load(extra: usize) -> Lbfgs {
+        let mut solver = Lbfgs::with_capacity(3);
+        solver.extra_updates = extra;
+        solver.record(array![1.0, 0.0, 0.0], array![2.0, 0.1, 0.0]);
+        solver.record(array![0.0, 1.0, 0.0], array![0.0, 1.5, 0.2]);
+        solver.record(array![0.2, -0.3, 1.0], array![0.4, 0.1, 1.2]);
+        solver
+    }
+
+    #[test]
+    fn extra_updates_do_not_change_the_geometry_direction() {
+        let g = array![-1.5, 0.75, 0.25];
+        let plain = load(0);
+        let replay = load(5);
+        let h0 = 0.37;
+        let a = plain.direction_h0(g.view(), h0);
+        let b = replay.direction_h0(g.view(), h0);
+        for i in 0..g.len() {
+            assert_eq!(a[i].to_bits(), b[i].to_bits(), "h0 d[{i}]");
+        }
+        let left = plain.two_loop(g.view());
+        let right = replay.two_loop(g.view());
+        for i in 0..g.len() {
+            assert_eq!(left[i].to_bits(), right[i].to_bits(), "two-loop d[{i}]");
         }
     }
 }
