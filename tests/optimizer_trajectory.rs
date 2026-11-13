@@ -23,7 +23,7 @@ fn morse_chain(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
             r2 += diff[a] * diff[a];
         }
         let r = r2.sqrt();
-        if !(r > 0.0) {
+        if r.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             continue;
         }
         let ex = (-ALPHA * (r - R0)).exp();
