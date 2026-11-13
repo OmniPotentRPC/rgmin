@@ -10,9 +10,10 @@ use eindir_core::ffi::eindir_core_abi_stamp;
 use eindir_core::ffi::{eindir_objective_t, eindir_status_t};
 use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_conjugacy_t, rgmin_control_t,
-    rgmin_eigen_kind_t, rgmin_eigen_params_t, rgmin_exp_t, rgmin_last_error,
-    rgmin_lowest_eigenpair, rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t,
-    rgmin_minimize, rgmin_minimize_eindir, rgmin_minimize_scg, rgmin_report_t, rgmin_scg_params_t,
+    rgmin_eigen_kind_t, rgmin_eigen_options_t, rgmin_eigen_params_t, rgmin_eigenpair_t,
+    rgmin_exp_t, rgmin_last_error, rgmin_lowest_eigenpair, rgmin_lowest_eigenpairs,
+    rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
+    rgmin_minimize_eindir, rgmin_minimize_scg, rgmin_report_t, rgmin_scg_params_t,
     rgmin_solver_clear_exp, rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free,
     rgmin_solver_gradient_calls, rgmin_solver_hvp_calls, rgmin_solver_set_accept,
     rgmin_solver_set_exp, rgmin_solver_step, rgmin_solver_step_fg, rgmin_solver_step_hvp,
@@ -903,11 +904,231 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
+unsafe extern "C" fn diag_lam_hvp(
+    user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    v: *const DLManagedTensorVersioned,
+    hv_out: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let lam = user.cast::<f64>();
+    let (vp, n) = unsafe { cpu_f64(v) };
+    let (hp, hn) = unsafe { cpu_f64(hv_out.cast()) };
+    assert_eq!(n, hn);
+    let hp = hp as *mut f64;
+    unsafe {
+        for i in 0..n {
+            *hp.add(i) = *lam.add(i) * *vp.add(i);
+        }
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn lowest_eigenpairs_recovers_a_diagonal_and_rejects_bad_blocks() {
+    use dlpk::sys::{DLDataType, DLDataTypeCode, DLDevice, DLPackVersion, DLTensor};
+    let lam = [-4.0_f64, -1.0, 2.0, 5.0];
+    let n = lam.len();
+    let k = 2usize;
+    let mut x = [0.0_f64; 4];
+    let mut seed = [0.0_f64; 8];
+    seed[0] = 1.0;
+    seed[3] = 1.0;
+    seed[1] = 0.2;
+    seed[4] = 0.2;
+    let mut modes = [0.0_f64; 8];
+    let mut values = [0.0_f64; 2];
+    let mut pairs = [
+        rgmin_eigenpair_t {
+            value: 0.0,
+            actions: 0,
+        },
+        rgmin_eigenpair_t {
+            value: 0.0,
+            actions: 0,
+        },
+    ];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), n) };
+    let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), n * k) };
+    let mt = unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), n * k) };
+    let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), k) };
+    let params = rgmin_eigen_params_t {
+        kind: rgmin_eigen_kind_t::RGMIN_EIGEN_LOBPCG as i32,
+        nev: k as u32,
+        krylov: 0,
+        max_iter: 30,
+        tol: 1e-10,
+    };
+    let options = rgmin_eigen_options_t {
+        degree: 0,
+        extra: 0,
+    };
+    let status = unsafe {
+        rgmin_lowest_eigenpairs(
+            Some(diag_lam_hvp),
+            lam.as_ptr().cast_mut().cast(),
+            xt,
+            st,
+            mt,
+            vt,
+            &params,
+            &options,
+            pairs.as_mut_ptr(),
+            k,
+        )
+    };
+    unsafe {
+        rgmin_tensor_free(xt);
+        rgmin_tensor_free(st);
+        rgmin_tensor_free(mt);
+        rgmin_tensor_free(vt);
+    }
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert!((values[0] + 4.0).abs() < 1e-6, "values {values:?}");
+    assert!((values[1] + 1.0).abs() < 1e-6, "values {values:?}");
+    assert!((pairs[0].value - values[0]).abs() < 1e-12);
+    assert_eq!(pairs[0].actions, pairs[1].actions);
+    assert!(pairs[0].actions > 0);
+    assert!(modes[0].abs() > 0.9, "lowest mode {modes:?}");
+
+    let mut shape = [n as i64, k as i64];
+    let mut strides = [k as i64, 1];
+    let mut rank2_seed = seed;
+    let mut rank2_modes = [0.0_f64; 8];
+    let rank2 = DLManagedTensorVersioned {
+        version: DLPackVersion { major: 1, minor: 0 },
+        manager_ctx: std::ptr::null_mut(),
+        deleter: None,
+        flags: 0,
+        dl_tensor: DLTensor {
+            data: rank2_seed.as_mut_ptr().cast(),
+            device: DLDevice {
+                device_type: DLDeviceType::kDLCPU,
+                device_id: 0,
+            },
+            ndim: 2,
+            dtype: DLDataType {
+                code: DLDataTypeCode::kDLFloat,
+                bits: 64,
+                lanes: 1,
+            },
+            shape: shape.as_mut_ptr(),
+            strides: strides.as_mut_ptr(),
+            byte_offset: 0,
+        },
+    };
+    let mut mode_tensor = DLManagedTensorVersioned {
+        dl_tensor: DLTensor {
+            data: rank2_modes.as_mut_ptr().cast(),
+            ..rank2.dl_tensor
+        },
+        ..rank2
+    };
+    mode_tensor.dl_tensor.shape = shape.as_mut_ptr();
+    mode_tensor.dl_tensor.strides = strides.as_mut_ptr();
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), n) };
+    let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), k) };
+    let status = unsafe {
+        rgmin_lowest_eigenpairs(
+            Some(diag_lam_hvp),
+            lam.as_ptr().cast_mut().cast(),
+            xt,
+            &rank2,
+            &mut mode_tensor,
+            vt,
+            std::ptr::null(),
+            std::ptr::null(),
+            pairs.as_mut_ptr(),
+            k,
+        )
+    };
+    unsafe {
+        rgmin_tensor_free(xt);
+        rgmin_tensor_free(vt);
+    }
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert!((values[0] + 4.0).abs() < 1e-6 && (values[1] + 1.0).abs() < 1e-6);
+
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), n) };
+    let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), n * k) };
+    let mt = unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), n * k) };
+    let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), k) };
+    let status = unsafe {
+        rgmin_lowest_eigenpairs(
+            Some(diag_lam_hvp),
+            lam.as_ptr().cast_mut().cast(),
+            xt,
+            st,
+            mt,
+            vt,
+            std::ptr::null(),
+            std::ptr::null(),
+            pairs.as_mut_ptr(),
+            0,
+        )
+    };
+    assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    let status = unsafe {
+        rgmin_lowest_eigenpairs(
+            Some(diag_lam_hvp),
+            lam.as_ptr().cast_mut().cast(),
+            xt,
+            st,
+            mt,
+            vt,
+            std::ptr::null(),
+            std::ptr::null(),
+            pairs.as_mut_ptr(),
+            5,
+        )
+    };
+    assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    seed[0] = f64::NAN;
+    let status = unsafe {
+        rgmin_lowest_eigenpairs(
+            Some(diag_lam_hvp),
+            lam.as_ptr().cast_mut().cast(),
+            xt,
+            st,
+            mt,
+            vt,
+            std::ptr::null(),
+            std::ptr::null(),
+            pairs.as_mut_ptr(),
+            k,
+        )
+    };
+    assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    let mut bad = params;
+    bad.kind = rgmin_eigen_kind_t::RGMIN_EIGEN_ELPA as i32;
+    seed[0] = 1.0;
+    let status = unsafe {
+        rgmin_lowest_eigenpairs(
+            Some(diag_lam_hvp),
+            lam.as_ptr().cast_mut().cast(),
+            xt,
+            st,
+            mt,
+            vt,
+            &bad,
+            std::ptr::null(),
+            pairs.as_mut_ptr(),
+            k,
+        )
+    };
+    unsafe {
+        rgmin_tensor_free(xt);
+        rgmin_tensor_free(st);
+        rgmin_tensor_free(mt);
+        rgmin_tensor_free(vt);
+    }
+    assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
+}
+
 #[test]
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 35);
+    assert_eq!(stamp.abi_minor, 36);
     assert_eq!(stamp.layout_revision, 4);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }

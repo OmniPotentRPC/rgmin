@@ -1,4 +1,5 @@
-//! Matrix-free lowest eigenpair of a symmetric Hessian action.
+//! Matrix-free lowest eigenpair, and the block of k lowest pairs, of a
+//! symmetric Hessian action.
 //!
 //! IRC kick and the `lambda_min` sign check need one extremal pair,
 //! not a full ELPA / SLATE spectrum. Dispatch is a closed
@@ -7,7 +8,7 @@
 //! here; every other named backend fail-closes with
 //! [`Error::EigenUnavailable`]. Integers match `schema/eigen.capnp`.
 
-use ndarray::{Array1, ArrayView1};
+use ndarray::{Array1, ArrayView1, ArrayView2};
 
 use crate::error::{Error, Result};
 use crate::hvp::HessianVector;
@@ -653,6 +654,401 @@ fn lobpcg<H: ApplyHessian + ?Sized>(
     }
 }
 
+/// One Ritz pair from [`lowest_eigenpairs`].
+///
+/// Vectors from one solve are orthonormal. `converged` is the final
+/// residual test `||Hv − θv|| ≤ tol (1 + |θ|)`.
+#[derive(Clone, Debug)]
+pub struct Eigenpair {
+    /// Euclidean-normalized Ritz vector.
+    pub vector: Array1<f64>,
+    /// Ritz value, the Rayleigh quotient.
+    pub value: f64,
+    /// `||Hv − θv||₂`.
+    pub residual: f64,
+    /// Whether `residual` met the tolerance passed to [`lowest_eigenpairs`].
+    pub converged: bool,
+}
+
+/// The k lowest pairs of a symmetric product, lowest value first.
+#[derive(Clone, Debug)]
+pub struct Eigenpairs {
+    /// Length `k`, values ascending.
+    pub pairs: Vec<Eigenpair>,
+    /// Hessian-vector products used by the solve.
+    pub actions: usize,
+    /// Block expansions performed. The seed Rayleigh–Ritz is not one.
+    pub iterations: usize,
+}
+
+const BLOCK_DROP: f64 = 1e-12;
+
+fn eigen_input(what: &'static str) -> Error {
+    Error::EigenInput { what }
+}
+
+/// k lowest eigenpairs of a symmetric product, matrix-free.
+///
+/// Block LOBPCG with an identity preconditioner (Knyazev, SIAM J. Sci.
+/// Comput. 23 (2001), 517–541). `seed` has shape `(n, k)`, one column
+/// per starting vector, and is the warm start: the previous block is a
+/// valid seed. Each iteration orthonormalizes the residual block against
+/// the current Ritz block and the previous conjugate direction, then
+/// takes the lowest k Ritz pairs of that basis. A column that is
+/// numerically in the span already is dropped.
+///
+/// `tol` is the residual tolerance `||Hv − θv|| ≤ tol (1 + |θ|)`.
+/// `max_iter` caps the number of block expansions. A solve that stops
+/// on the cap still returns its best pairs; `Eigenpair::converged`
+/// says which residuals met `tol`.
+///
+/// # Errors
+///
+/// [`Error::EigenBlock`] when `k = 0` or `k > n`. [`Error::EigenInput`]
+/// when `x` or `seed` is non-finite, `tol` is non-positive or
+/// non-finite, `max_iter` is zero, or a product is non-finite or the
+/// wrong length. [`Error::Dim`] when `x.len()` is not `n`. The solve
+/// does not panic on these inputs.
+///
+/// # Examples
+///
+/// ```
+/// use ndarray::{Array1, Array2, ArrayView1};
+/// use rgmin::{ApplyHessian, lowest_eigenpairs};
+///
+/// struct Diag;
+/// impl ApplyHessian for Diag {
+///     fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+///         let lam = [1.0, -2.0, 4.0];
+///         Array1::from_iter(lam.iter().zip(v.iter()).map(|(l, vi)| l * vi))
+///     }
+/// }
+///
+/// let x = Array1::zeros(3);
+/// let mut seed = Array2::zeros((3, 2));
+/// seed[(0, 0)] = 1.0;
+/// seed[(1, 0)] = 0.2;
+/// seed[(1, 1)] = 0.2;
+/// seed[(2, 1)] = 1.0;
+/// let found = lowest_eigenpairs(&Diag, x.view(), seed.view(), 1e-8, 20).unwrap();
+/// assert!((found.pairs[0].value + 2.0).abs() < 1e-6);
+/// assert!((found.pairs[1].value - 1.0).abs() < 1e-6);
+/// assert!(found.pairs.iter().all(|pair| pair.converged));
+/// ```
+pub fn lowest_eigenpairs<H: ApplyHessian + ?Sized>(
+    h: &H,
+    x: ArrayView1<f64>,
+    seed: ArrayView2<f64>,
+    tol: f64,
+    max_iter: usize,
+) -> Result<Eigenpairs> {
+    let (n, k) = seed.dim();
+    if k == 0 || k > n {
+        return Err(Error::EigenBlock { k, dim: n });
+    }
+    if x.len() != n {
+        return Err(Error::Dim {
+            got: x.len(),
+            dim: n,
+        });
+    }
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(eigen_input("tolerance must be positive and finite"));
+    }
+    if max_iter == 0 {
+        return Err(eigen_input("iteration cap must be positive"));
+    }
+    if x.iter().any(|v| !v.is_finite()) || seed.iter().any(|v| !v.is_finite()) {
+        return Err(eigen_input("non-finite value"));
+    }
+    let cols: Vec<Array1<f64>> = (0..k).map(|j| seed.column(j).to_owned()).collect();
+    let mut block = orthonormal_block(cols, n, k)?;
+    let mut search: Vec<Array1<f64>> = Vec::new();
+    let mut search_h: Vec<Array1<f64>> = Vec::new();
+    let mut actions = 0usize;
+    let mut iterations = 0usize;
+    let (_ax, evals, residuals) = loop {
+        let mut ax = apply_columns(h, x, &block, &mut actions)?;
+        let evals = align_block(&mut block, &mut ax)?;
+        let residuals = column_residuals(&ax, &block, &evals)?;
+        let all_converged = residuals.iter().zip(&evals).all(|(r, theta)| {
+            let norm = nrm2(r.view());
+            norm.is_finite() && norm <= tol * (1.0 + theta.abs())
+        });
+        if all_converged || iterations == max_iter {
+            break (ax, evals, residuals);
+        }
+        iterations += 1;
+        let mut width = Vec::new();
+        absorb(&block, &mut width, residuals);
+        let width_h = apply_columns(h, x, &width, &mut actions)?;
+        let mut locked = block.clone();
+        locked.extend(width.iter().cloned());
+        let mut locked_h = ax.clone();
+        locked_h.extend(width_h.iter().cloned());
+        let (search_use, search_h_use) = deflate_directions(&locked, &locked_h, search, search_h)?;
+        if width.is_empty() && search_use.is_empty() {
+            let residuals = column_residuals(&ax, &block, &evals)?;
+            break (ax, evals, residuals);
+        }
+        let mut basis = block.clone();
+        basis.extend(width);
+        basis.extend(search_use);
+        let mut images = ax.clone();
+        images.extend(width_h);
+        images.extend(search_h_use);
+        let (ritz, vecs) = ritz_sorted(&basis, &images)?;
+        if ritz.len() < k {
+            return Err(eigen_input("Ritz block is short"));
+        }
+        block = mix(&basis, &vecs, k)?;
+        let mut mixed_h = mix(&images, &vecs, k)?;
+        rescale_pair(&mut block, &mut mixed_h)?;
+        let tail: Vec<Array1<f64>> = basis.into_iter().skip(k).collect();
+        let tail_h: Vec<Array1<f64>> = images.into_iter().skip(k).collect();
+        let raw_p = mix_rows(&tail, &vecs, k, k)?;
+        let raw_ap = mix_rows(&tail_h, &vecs, k, k)?;
+        search = Vec::new();
+        search_h = Vec::new();
+        for (dir, image) in raw_p.into_iter().zip(raw_ap) {
+            let norm = nrm2(dir.view());
+            if norm > BLOCK_DROP && norm.is_finite() {
+                search.push(dir);
+                search_h.push(image);
+            }
+        }
+    };
+    let mut pairs = Vec::with_capacity(k);
+    for (vector, (theta, residual_vec)) in block.into_iter().zip(evals.iter().zip(&residuals)) {
+        let residual = nrm2(residual_vec.view());
+        if !residual.is_finite() || !theta.is_finite() {
+            return Err(eigen_input("non-finite residual"));
+        }
+        pairs.push(Eigenpair {
+            vector,
+            value: *theta,
+            residual,
+            converged: residual <= tol * (1.0 + theta.abs()),
+        });
+    }
+    Ok(Eigenpairs {
+        pairs,
+        actions,
+        iterations,
+    })
+}
+
+fn orthonormal_block(cols: Vec<Array1<f64>>, n: usize, k: usize) -> Result<Vec<Array1<f64>>> {
+    let mut basis = Vec::with_capacity(k);
+    absorb(&[], &mut basis, cols);
+    let mut axis = 0;
+    while basis.len() < k && axis < n {
+        let mut unit = Array1::zeros(n);
+        unit[axis] = 1.0;
+        axis += 1;
+        absorb(&[], &mut basis, vec![unit]);
+    }
+    if basis.len() != k {
+        return Err(Error::EigenBlock { k, dim: n });
+    }
+    Ok(basis)
+}
+
+fn absorb(locked: &[Array1<f64>], into: &mut Vec<Array1<f64>>, incoming: Vec<Array1<f64>>) {
+    for mut v in incoming {
+        for _ in 0..2 {
+            for q in locked.iter().chain(into.iter()) {
+                let overlap = dot(v.view(), q.view());
+                axpy(-overlap, q.view(), &mut v);
+            }
+        }
+        let norm = nrm2(v.view());
+        if norm > BLOCK_DROP && norm.is_finite() {
+            v.mapv_inplace(|c| c / norm);
+            into.push(v);
+        }
+    }
+}
+
+fn apply_columns<H: ApplyHessian + ?Sized>(
+    h: &H,
+    x: ArrayView1<f64>,
+    cols: &[Array1<f64>],
+    actions: &mut usize,
+) -> Result<Vec<Array1<f64>>> {
+    let n = x.len();
+    let mut out = Vec::with_capacity(cols.len());
+    for col in cols {
+        if col.len() != n {
+            return Err(eigen_input(
+                "block column length does not match the dimension",
+            ));
+        }
+        let image = h.apply_hessian(x, col.view());
+        *actions += 1;
+        if image.len() != n {
+            return Err(eigen_input(
+                "hessian product length does not match the dimension",
+            ));
+        }
+        if image.iter().any(|v| !v.is_finite()) {
+            return Err(eigen_input("hessian product was non-finite"));
+        }
+        out.push(image);
+    }
+    Ok(out)
+}
+
+fn ritz_sorted(q: &[Array1<f64>], aq: &[Array1<f64>]) -> Result<(Vec<f64>, Vec<Vec<f64>>)> {
+    let m = q.len();
+    if m == 0 || aq.len() != m {
+        return Err(eigen_input("empty trial subspace"));
+    }
+    let mut gram = vec![vec![0.0; m]; m];
+    for i in 0..m {
+        for j in 0..=i {
+            let value = dot(q[i].view(), aq[j].view());
+            if !value.is_finite() {
+                return Err(eigen_input("non-finite Rayleigh entry"));
+            }
+            gram[i][j] = value;
+            gram[j][i] = value;
+        }
+    }
+    let (evals, evecs) = jacobi_eigen(&mut gram);
+    if evals.iter().any(|v| !v.is_finite()) {
+        return Err(eigen_input("non-finite Ritz value"));
+    }
+    let mut order: Vec<usize> = (0..m).collect();
+    order.sort_by(|&a, &b| evals[a].total_cmp(&evals[b]));
+    let evals: Vec<f64> = order.iter().map(|&i| evals[i]).collect();
+    let mut sorted = vec![vec![0.0; m]; m];
+    for (new_col, &old_col) in order.iter().enumerate() {
+        for row in 0..m {
+            let coeff = evecs[row][old_col];
+            if !coeff.is_finite() {
+                return Err(eigen_input("non-finite Ritz vector"));
+            }
+            sorted[row][new_col] = coeff;
+        }
+    }
+    Ok((evals, sorted))
+}
+
+fn align_block(cols: &mut Vec<Array1<f64>>, images: &mut Vec<Array1<f64>>) -> Result<Vec<f64>> {
+    let (evals, vecs) = ritz_sorted(cols, images)?;
+    let k = cols.len();
+    let new_cols = mix(cols, &vecs, k)?;
+    let new_images = mix(images, &vecs, k)?;
+    *cols = new_cols;
+    *images = new_images;
+    rescale_pair(cols, images)?;
+    Ok(evals.into_iter().take(k).collect())
+}
+
+fn mix(basis: &[Array1<f64>], evecs: &[Vec<f64>], cols: usize) -> Result<Vec<Array1<f64>>> {
+    mix_rows(basis, evecs, 0, cols)
+}
+
+fn mix_rows(
+    basis: &[Array1<f64>],
+    evecs: &[Vec<f64>],
+    row0: usize,
+    cols: usize,
+) -> Result<Vec<Array1<f64>>> {
+    let n = basis.first().map_or(0, |v| v.len());
+    let mut out = Vec::with_capacity(cols);
+    for col in 0..cols {
+        let mut y = Array1::zeros(n);
+        for (i, vector) in basis.iter().enumerate() {
+            let coeff = evecs
+                .get(row0 + i)
+                .and_then(|row| row.get(col))
+                .copied()
+                .ok_or_else(|| eigen_input("Ritz coefficient is missing"))?;
+            axpy(coeff, vector.view(), &mut y);
+        }
+        out.push(y);
+    }
+    Ok(out)
+}
+
+fn rescale_pair(cols: &mut [Array1<f64>], images: &mut [Array1<f64>]) -> Result<()> {
+    if cols.len() != images.len() {
+        return Err(eigen_input("paired block lengths differ"));
+    }
+    for (vector, image) in cols.iter_mut().zip(images.iter_mut()) {
+        let norm = nrm2(vector.view());
+        if norm <= BLOCK_DROP || !norm.is_finite() {
+            return Err(eigen_input("Ritz vector vanished"));
+        }
+        if (norm - 1.0).abs() > 1e-12 {
+            vector.mapv_inplace(|c| c / norm);
+            image.mapv_inplace(|c| c / norm);
+        }
+    }
+    Ok(())
+}
+
+fn column_residuals(
+    images: &[Array1<f64>],
+    cols: &[Array1<f64>],
+    evals: &[f64],
+) -> Result<Vec<Array1<f64>>> {
+    if images.len() != cols.len() || evals.len() < cols.len() {
+        return Err(eigen_input("residual block is incomplete"));
+    }
+    let mut out = Vec::with_capacity(cols.len());
+    for i in 0..cols.len() {
+        let mut residual = images[i].clone();
+        axpy(-evals[i], cols[i].view(), &mut residual);
+        out.push(residual);
+    }
+    Ok(out)
+}
+
+type PairBlock = (Vec<Array1<f64>>, Vec<Array1<f64>>);
+
+fn deflate_directions(
+    locked: &[Array1<f64>],
+    locked_h: &[Array1<f64>],
+    dirs: Vec<Array1<f64>>,
+    images: Vec<Array1<f64>>,
+) -> Result<PairBlock> {
+    if locked.len() != locked_h.len() || dirs.len() != images.len() {
+        return Err(eigen_input("paired block lengths differ"));
+    }
+    let mut kept = Vec::new();
+    let mut kept_h = Vec::new();
+    for (mut dir, mut image) in dirs.into_iter().zip(images) {
+        if dir.len() != image.len() {
+            return Err(eigen_input("paired block lengths differ"));
+        }
+        for _ in 0..2 {
+            for (basis, basis_h) in locked
+                .iter()
+                .zip(locked_h.iter())
+                .chain(kept.iter().zip(kept_h.iter()))
+            {
+                let overlap = dot(dir.view(), basis.view());
+                axpy(-overlap, basis.view(), &mut dir);
+                axpy(-overlap, basis_h.view(), &mut image);
+            }
+        }
+        let norm = nrm2(dir.view());
+        if norm > BLOCK_DROP && norm.is_finite() {
+            dir.mapv_inplace(|c| c / norm);
+            image.mapv_inplace(|c| c / norm);
+            if image.iter().any(|c| !c.is_finite()) {
+                return Err(eigen_input("non-finite search direction"));
+            }
+            kept.push(dir);
+            kept_h.push(image);
+        }
+    }
+    Ok((kept, kept_h))
+}
+
 fn argmin(vals: &[f64]) -> usize {
     let mut best = 0;
     for i in 1..vals.len() {
@@ -729,7 +1125,7 @@ mod tests {
     use super::*;
     use crate::Error;
     use crate::hvp::HvpOracle;
-    use ndarray::array;
+    use ndarray::{Array2, ArrayView1, array};
 
     fn gapped_diag(n: usize) -> impl HessianVector {
         HvpOracle::unbounded(
@@ -980,6 +1376,249 @@ mod tests {
                 .abs();
             assert!(cos > 0.9, "{kind:?} |cos| = {cos}");
         }
+    }
+
+    struct Mat(Vec<Vec<f64>>);
+    impl ApplyHessian for Mat {
+        fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+            let mut image = Array1::zeros(v.len());
+            for (out, row) in image.iter_mut().zip(&self.0) {
+                *out = row.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
+            }
+            image
+        }
+    }
+
+    fn dense_lowest(mut mat: Vec<Vec<f64>>, k: usize) -> (Vec<f64>, Vec<Array1<f64>>) {
+        let n = mat.len();
+        let (evals, evecs) = jacobi_eigen(&mut mat);
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&a, &b| evals[a].total_cmp(&evals[b]));
+        let values: Vec<f64> = order.iter().take(k).map(|&i| evals[i]).collect();
+        let mut vectors = Vec::with_capacity(k);
+        for &col in order.iter().take(k) {
+            let mut mode = Array1::zeros(n);
+            for row in 0..n {
+                mode[row] = evecs[row][col];
+            }
+            vectors.push(normalize(mode));
+        }
+        (values, vectors)
+    }
+
+    fn assert_subspace(found: &Eigenpairs, truth: &[Array1<f64>], values: &[f64], tol: f64) {
+        assert_eq!(found.pairs.len(), truth.len());
+        let k = truth.len();
+        let mut overlap = 0.0;
+        for (pair, value) in found.pairs.iter().zip(values) {
+            assert!(
+                (pair.value - value).abs() <= tol,
+                "value {} vs {value}",
+                pair.value
+            );
+            assert!(pair.converged, "residual {}", pair.residual);
+            assert!((nrm2(pair.vector.view()) - 1.0).abs() < tol);
+        }
+        for left in truth {
+            for pair in &found.pairs {
+                let cos = dot(left.view(), pair.vector.view());
+                overlap += cos * cos;
+            }
+        }
+        assert!(
+            (overlap - k as f64).abs() < tol,
+            "subspace overlap {overlap} for k={k}"
+        );
+        for i in 0..k {
+            for j in 0..i {
+                let cos = dot(found.pairs[i].vector.view(), found.pairs[j].vector.view());
+                assert!(cos.abs() < tol, "pair {i},{j} overlap {cos}");
+            }
+        }
+    }
+
+    fn random_symmetric(n: usize, seed: u64, spd: bool) -> Vec<Vec<f64>> {
+        use rand::{Rng, SeedableRng, rngs::StdRng};
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut raw = vec![vec![0.0; n]; n];
+        for row in &mut raw {
+            for value in row.iter_mut() {
+                *value = rng.random_range(-1.0..1.0);
+            }
+        }
+        if spd {
+            (0..n)
+                .map(|i| {
+                    (0..n)
+                        .map(|j| raw.iter().map(|row| row[i] * row[j]).sum())
+                        .collect()
+                })
+                .collect()
+        } else {
+            (0..n)
+                .map(|i| (0..n).map(|j| 0.5 * (raw[i][j] + raw[j][i])).collect())
+                .collect()
+        }
+    }
+
+    fn identity_seed(n: usize, k: usize) -> Array2<f64> {
+        let mut seed = Array2::zeros((n, k));
+        for j in 0..k {
+            seed[(j, j)] = 1.0;
+            if j + 1 < n {
+                seed[(j + 1, j)] = 0.3;
+            }
+        }
+        seed
+    }
+
+    #[test]
+    fn block_k1_matches_lowest_eigenpair_to_tolerance() {
+        let lam = array![-2.5, 0.4, 0.55, 0.7, 0.85, 1.0];
+        let h = DiagH(lam);
+        let x = Array1::zeros(6);
+        let seed_col = array![0.3, 0.37, 0.44, 0.51, 0.58, 0.65];
+        let mut seed = Array2::zeros((6, 1));
+        seed.column_mut(0).assign(&seed_col);
+        let tol = 1e-8;
+        let single = lowest_eigenpair(&h, x.view(), seed_col.view(), 6);
+        let block = lowest_eigenpairs(&h, x.view(), seed.view(), tol, 30).unwrap();
+        assert_eq!(block.pairs.len(), 1);
+        assert!((block.pairs[0].value - single.value).abs() <= tol);
+        let cos = dot(block.pairs[0].vector.view(), single.vector.view()).abs();
+        assert!(1.0 - cos <= tol, "|cos| = {cos}");
+        assert!(block.pairs[0].converged);
+    }
+
+    #[test]
+    fn block_diagonal_matches_dense_eigh() {
+        let lam = array![-4.0, -0.5, 0.2, 1.5, 3.0, 8.0];
+        let h = DiagH(lam.clone());
+        let n = lam.len();
+        let k = 3;
+        let x = Array1::zeros(n);
+        let found = lowest_eigenpairs(&h, x.view(), identity_seed(n, k).view(), 1e-10, 40).unwrap();
+        let mut truth = Vec::new();
+        let mut values = Vec::new();
+        for j in 0..k {
+            let mut mode = Array1::zeros(n);
+            mode[j] = 1.0;
+            truth.push(mode);
+            values.push(lam[j]);
+        }
+        assert_subspace(&found, &truth, &values, 1e-6);
+    }
+
+    #[test]
+    fn block_random_spd_and_indefinite_match_dense_eigh() {
+        let xdim = 6;
+        let k = 3;
+        let x = Array1::zeros(xdim);
+        for (spd, seed) in [(true, 11u64), (false, 19u64)] {
+            let mat = random_symmetric(xdim, seed, spd);
+            let h = Mat(mat.clone());
+            let (values, truth) = dense_lowest(mat, k);
+            let found =
+                lowest_eigenpairs(&h, x.view(), identity_seed(xdim, k).view(), 1e-10, 40).unwrap();
+            assert_subspace(&found, &truth, &values, 1e-5);
+        }
+    }
+
+    #[test]
+    fn block_degenerate_eigenvalues_match_the_invariant_subspace() {
+        let v1 = normalize(array![1.0, 1.0, 1.0]);
+        let mut v2 = array![1.0, -1.0, 0.0];
+        axpy(-dot(v2.view(), v1.view()), v1.view(), &mut v2);
+        let v2 = normalize(v2);
+        let v3 = normalize(array![
+            v1[1] * v2[2] - v1[2] * v2[1],
+            v1[2] * v2[0] - v1[0] * v2[2],
+            v1[0] * v2[1] - v1[1] * v2[0],
+        ]);
+        let evals = [1.0, 1.0, 4.0];
+        let modes = [v1.clone(), v2.clone(), v3];
+        let apply = |v: ArrayView1<f64>| {
+            let mut image = Array1::zeros(3);
+            for (lam, mode) in evals.iter().zip(&modes) {
+                axpy(*lam * dot(mode.view(), v), mode.view(), &mut image);
+            }
+            image
+        };
+        struct Outer<F>(F);
+        impl<F> ApplyHessian for Outer<F>
+        where
+            F: Fn(ArrayView1<f64>) -> Array1<f64>,
+        {
+            fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+                (self.0)(v)
+            }
+        }
+        let x = Array1::zeros(3);
+        let mut seed = Array2::zeros((3, 2));
+        seed[(0, 0)] = 0.2;
+        seed[(1, 0)] = -0.4;
+        seed[(2, 0)] = 0.7;
+        seed[(0, 1)] = 0.9;
+        seed[(1, 1)] = 0.1;
+        seed[(2, 1)] = -0.3;
+        let found = lowest_eigenpairs(&Outer(apply), x.view(), seed.view(), 1e-10, 30).unwrap();
+        assert_subspace(&found, &[v1, v2], &[1.0, 1.0], 1e-5);
+    }
+
+    #[test]
+    fn block_rejects_empty_too_wide_and_non_finite_input() {
+        let h = DiagH(array![1.0, 2.0, 3.0]);
+        let x = Array1::zeros(3);
+        let empty = Array2::zeros((3, 0));
+        assert!(matches!(
+            lowest_eigenpairs(&h, x.view(), empty.view(), 1e-8, 4),
+            Err(Error::EigenBlock { k: 0, dim: 3 })
+        ));
+        let wide = Array2::zeros((3, 4));
+        assert!(matches!(
+            lowest_eigenpairs(&h, x.view(), wide.view(), 1e-8, 4),
+            Err(Error::EigenBlock { k: 4, dim: 3 })
+        ));
+        let mut nan_seed = Array2::zeros((3, 1));
+        nan_seed[(1, 0)] = f64::NAN;
+        assert!(matches!(
+            lowest_eigenpairs(&h, x.view(), nan_seed.view(), 1e-8, 4),
+            Err(Error::EigenInput { .. })
+        ));
+        let mut nan_x = x.clone();
+        nan_x[0] = f64::INFINITY;
+        let seed = Array2::ones((3, 1));
+        assert!(matches!(
+            lowest_eigenpairs(&h, nan_x.view(), seed.view(), 1e-8, 4),
+            Err(Error::EigenInput { .. })
+        ));
+        assert!(matches!(
+            lowest_eigenpairs(&h, x.view(), seed.view(), f64::NAN, 4),
+            Err(Error::EigenInput { .. })
+        ));
+        assert!(matches!(
+            lowest_eigenpairs(&h, x.view(), seed.view(), 1e-8, 0),
+            Err(Error::EigenInput { .. })
+        ));
+        let short = Array1::zeros(2);
+        assert!(matches!(
+            lowest_eigenpairs(&h, short.view(), seed.view(), 1e-8, 4),
+            Err(Error::Dim { got: 2, dim: 3 })
+        ));
+    }
+
+    #[test]
+    fn block_refuses_a_non_finite_product_without_panicking() {
+        struct Boom;
+        impl ApplyHessian for Boom {
+            fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+                Array1::from_elem(v.len(), f64::NAN)
+            }
+        }
+        let x = Array1::zeros(2);
+        let seed = Array2::eye(2);
+        let err = lowest_eigenpairs(&Boom, x.view(), seed.view(), 1e-8, 3).unwrap_err();
+        assert!(matches!(err, Error::EigenInput { .. }), "{err}");
     }
 
     #[test]

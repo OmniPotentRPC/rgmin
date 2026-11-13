@@ -76,6 +76,20 @@ pub enum Error {
         /// Closed-enum name (`elpa`, `primme`, ...).
         kind: &'static str,
     },
+    /// Block width is not in `1..=dim`.
+    #[error("eigenpairs: k = {k} is outside 1..={dim}")]
+    EigenBlock {
+        /// Requested number of pairs.
+        k: usize,
+        /// Operator dimension.
+        dim: usize,
+    },
+    /// A block eigenpair argument was non-finite or otherwise unusable.
+    #[error("eigenpairs: {what}")]
+    EigenInput {
+        /// What was refused.
+        what: &'static str,
+    },
     /// [`crate::Method::from_name`] did not recognize the token.
     #[error("unknown method '{name}'")]
     UnknownMethod {

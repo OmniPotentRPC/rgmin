@@ -23,8 +23,9 @@ use crate::precon::{ExpParams, ExpState, Neighbours};
 use crate::{
     Accept, ApplyHessian, Conjugacy, Control, DirectionalCurvature, EigenParams, EigensolverKind,
     Error, HessianObjective, HessianOracle, HessianVector, HvpOracle, LineSearch, ManifoldKind,
-    Method, NewtonKind, Oracle, QnStep, Restart, ScgParams, Solver, StopNorm, lowest_mode,
-    minimize_method, minimize_method_hess, minimize_method_hvp, minimize_scg, minimize_scg_exact,
+    Method, NewtonKind, Oracle, QnStep, Restart, ScgParams, Solver, StopNorm, lowest_eigenpairs,
+    lowest_mode, minimize_method, minimize_method_hess, minimize_method_hvp, minimize_scg,
+    minimize_scg_exact,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -74,7 +75,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 35;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 36;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -298,6 +299,28 @@ pub struct rgmin_eigen_params_t {
     pub max_iter: u32,
     /// Residual tolerance. Non-positive selects `1e-8`.
     pub tol: f64,
+}
+
+/// Separate backend settings. The base parameter record keeps its layout.
+/// Block LOBPCG ignores both fields. Null at the C entry is the default.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_eigen_options_t {
+    /// ChASE filter degree. Zero selects a backend default.
+    pub degree: u32,
+    /// ChASE extra search dimensions. Zero selects a backend default.
+    pub extra: u32,
+}
+
+/// One pair from [`rgmin_lowest_eigenpairs`]. `actions` is the product
+/// count of the whole solve, the same value on every pair.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_eigenpair_t {
+    /// Ritz value.
+    pub value: f64,
+    /// Hessian-vector products used by the solve.
+    pub actions: usize,
 }
 
 /// Result of [`rgmin_lowest_eigenpair`]. The vector is written to
@@ -644,6 +667,263 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair(
             rgmin_status_t::RGMIN_SUCCESS
         }
         Err(e) => status_from_error(&e),
+    }
+}
+
+fn cpu_dl<'a>(
+    tensor: *const DLManagedTensorVersioned,
+    name: &str,
+) -> Result<&'a DLTensor, rgmin_status_t> {
+    if tensor.is_null() {
+        set_last_error(&format!("{name}: null tensor"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    let dl = unsafe { &(*tensor).dl_tensor };
+    if dl.device.device_type != DLDeviceType::kDLCPU {
+        set_last_error(&format!(
+            "{name}: device {:?} not supported in this build (CPU only)",
+            dl.device.device_type as i32
+        ));
+        return Err(rgmin_status_t::RGMIN_UNSUPPORTED_DEVICE);
+    }
+    if dl.dtype.code != DLDataTypeCode::kDLFloat
+        || dl.dtype.bits != 64
+        || dl.dtype.lanes != 1
+        || dl.shape.is_null()
+        || dl.data.is_null()
+        || dl.ndim < 1
+    {
+        set_last_error(&format!("{name}: need an f64 DLPack tensor"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    Ok(dl)
+}
+
+fn block_strides(
+    dl: &DLTensor,
+    n: usize,
+    k: usize,
+    name: &str,
+) -> Result<(isize, isize), rgmin_status_t> {
+    let shape = unsafe { slice::from_raw_parts(dl.shape, dl.ndim as usize) };
+    if shape.iter().any(|dim| *dim < 0) {
+        set_last_error(&format!("{name}: negative dimension"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    let strides = if dl.strides.is_null() {
+        None
+    } else {
+        Some(unsafe { slice::from_raw_parts(dl.strides, dl.ndim as usize) })
+    };
+    if let Some(strides) = strides
+        && strides.iter().any(|stride| *stride < 0)
+    {
+        set_last_error(&format!("{name}: negative stride"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    if dl.ndim == 1 {
+        let len = shape[0] as usize;
+        let expect = match n.checked_mul(k) {
+            Some(expect) => expect,
+            None => {
+                set_last_error(&format!("{name}: block is too large"));
+                return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+            }
+        };
+        if len != expect {
+            set_last_error(&format!("{name}: length {len} is not n*k = {expect}"));
+            return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+        }
+        if let Some(strides) = strides
+            && strides[0] != 1
+        {
+            set_last_error(&format!("{name}: non-unit stride"));
+            return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+        }
+        return Ok((k as isize, 1));
+    }
+    if dl.ndim == 2 {
+        if shape[0] as usize != n || shape[1] as usize != k {
+            set_last_error(&format!(
+                "{name}: shape ({}, {}) is not ({n}, {k})",
+                shape[0], shape[1]
+            ));
+            return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+        }
+        let row = strides.map_or(k as i64, |s| s[0]);
+        let col = strides.map_or(1, |s| s[1]);
+        return Ok((row as isize, col as isize));
+    }
+    set_last_error(&format!("{name}: need rank 1 or rank 2"));
+    Err(rgmin_status_t::RGMIN_INVALID_PARAMETER)
+}
+
+fn f64_base(dl: &DLTensor) -> *const f64 {
+    unsafe { (dl.data as *const u8).add(dl.byte_offset as usize).cast() }
+}
+
+fn read_block(
+    tensor: *const DLManagedTensorVersioned,
+    n: usize,
+    k: usize,
+    name: &str,
+) -> Result<Array2<f64>, rgmin_status_t> {
+    let dl = cpu_dl(tensor, name)?;
+    let (row_stride, col_stride) = block_strides(dl, n, k, name)?;
+    let base = f64_base(dl);
+    let mut out = Array2::zeros((n, k));
+    for i in 0..n {
+        for j in 0..k {
+            let offset = (i as isize * row_stride + j as isize * col_stride) as usize;
+            let value = unsafe { *base.add(offset) };
+            out[(i, j)] = value;
+        }
+    }
+    Ok(out)
+}
+
+fn write_block(
+    tensor: *mut DLManagedTensorVersioned,
+    block: &Array2<f64>,
+    name: &str,
+) -> Result<(), rgmin_status_t> {
+    let (n, k) = block.dim();
+    let dl = cpu_dl(tensor.cast(), name)?;
+    let (row_stride, col_stride) = block_strides(dl, n, k, name)?;
+    let base = f64_base(dl) as *mut f64;
+    for i in 0..n {
+        for j in 0..k {
+            let offset = (i as isize * row_stride + j as isize * col_stride) as usize;
+            unsafe { *base.add(offset) = block[(i, j)] };
+        }
+    }
+    Ok(())
+}
+
+/// k lowest eigenpairs of a symmetric product. Block LOBPCG
+/// (Knyazev 2001). `seed` and `modes_out` are row-major n-by-k: rank 2
+/// with shape `(n, k)`, or rank 1 of length `n * k`. `values_out` and
+/// `pairs_out` have length k, values ascending. Each `actions` field is
+/// the product count of the solve. `params == NULL` selects tol `1e-8`
+/// and `max_iter = max(n, 8)`. `options == NULL` is accepted; this
+/// matrix-free solve ignores ChASE `degree` and `extra`. An unlinked
+/// `params->kind` returns [`rgmin_status_t::RGMIN_UNAVAILABLE`].
+/// `k == 0`, `k > n`, and non-finite input return
+/// [`rgmin_status_t::RGMIN_INVALID_PARAMETER`].
+///
+/// # Safety
+/// `hvp` is callable for this call. `x` is a rank-1 f64 CPU tensor of
+/// length n. `seed` and `modes_out` describe the same n-by-k block and
+/// may alias. `values_out` is rank-1 length k. `pairs_out` points at k
+/// writable records. `params` and `options` are null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_lowest_eigenpairs(
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    seed: *const DLManagedTensorVersioned,
+    modes_out: *mut DLManagedTensorVersioned,
+    values_out: *mut DLManagedTensorVersioned,
+    params: *const rgmin_eigen_params_t,
+    options: *const rgmin_eigen_options_t,
+    pairs_out: *mut rgmin_eigenpair_t,
+    k: usize,
+) -> rgmin_status_t {
+    let Some(hvp) = hvp else {
+        set_last_error("rgmin_lowest_eigenpairs: null hvp");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    };
+    if modes_out.is_null() || values_out.is_null() || pairs_out.is_null() {
+        set_last_error("rgmin_lowest_eigenpairs: null output");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    if k == 0 {
+        set_last_error("rgmin_lowest_eigenpairs: k = 0 is outside 1..=n");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let xs = match cpu_f64_slice(x, "x") {
+        Ok(s) => s,
+        Err(st) => return st,
+    };
+    let n = xs.len();
+    if k > n {
+        set_last_error(&format!(
+            "rgmin_lowest_eigenpairs: k = {k} is outside 1..={n}"
+        ));
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let seed_block = match read_block(seed, n, k, "seed") {
+        Ok(block) => block,
+        Err(st) => return st,
+    };
+    let values = match cpu_f64_slice_mut(values_out, "values_out") {
+        Ok(s) => s,
+        Err(st) => return st,
+    };
+    if values.len() != k {
+        set_last_error("rgmin_lowest_eigenpairs: values_out length is not k");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let typed = match eigen_params_from_c(params) {
+        Ok(p) => p,
+        Err(st) => return st,
+    };
+    if !typed.kind.is_linked() {
+        return status_from_error(&Error::EigenUnavailable {
+            kind: typed.kind.name(),
+        });
+    }
+    if !options.is_null() {
+        let opts = unsafe { *options };
+        let _ = (opts.degree, opts.extra);
+    }
+    if !typed.tol.is_finite() {
+        set_last_error("rgmin_lowest_eigenpairs: tolerance is non-finite");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let tol = if typed.tol > 0.0 { typed.tol } else { 1e-8 };
+    let max_iter = if typed.max_iter == 0 {
+        n.max(8)
+    } else {
+        typed.max_iter
+    };
+    let apply = CHvp { hvp, user };
+    let x_arr = Array1::from(xs.to_vec());
+    let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        lowest_eigenpairs(&apply, x_arr.view(), seed_block.view(), tol, max_iter)
+    }));
+    let found = match solved {
+        Ok(Ok(found)) => found,
+        Ok(Err(err)) => return status_from_error(&err),
+        Err(_) => {
+            set_last_error("rgmin_lowest_eigenpairs: panicked");
+            return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+        }
+    };
+    if found.pairs.len() != k {
+        set_last_error("rgmin_lowest_eigenpairs: solve returned the wrong block width");
+        return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+    }
+    let mut modes = Array2::zeros((n, k));
+    for (j, pair) in found.pairs.iter().enumerate() {
+        if pair.vector.len() != n {
+            set_last_error("rgmin_lowest_eigenpairs: mode length does not match n");
+            return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+        }
+        for i in 0..n {
+            modes[(i, j)] = pair.vector[i];
+        }
+        values[j] = pair.value;
+        unsafe {
+            *pairs_out.add(j) = rgmin_eigenpair_t {
+                value: pair.value,
+                actions: found.actions,
+            };
+        }
+    }
+    match write_block(modes_out, &modes, "modes_out") {
+        Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
+        Err(st) => st,
     }
 }
 

@@ -80,7 +80,16 @@ SCG is the same one-shot shape. Conjugacy is a field on
 (``xts_abi_compatible`` still checks major and layout only).
 ``rgmin_lowest_eigenpair`` takes a typed ``rgmin_eigen_params_t``
 (closed ``rgmin_eigen_kind_t``, no string). Unlinked kinds return
-``RGMIN_UNAVAILABLE``.
+``RGMIN_UNAVAILABLE``. ``rgmin_lowest_eigenpairs`` is the block LOBPCG
+solver for the k lowest pairs (Knyazev 2001). ``seed`` and ``modes_out``
+are row-major n-by-k. ``abi_minor`` 36. The same call is
+``rgmin::lowest_eigenpairs`` and ``xts_lowest_eigenpairs``.
+
+.. code:: c
+
+    rgmin_eigenpair_t pairs[2];
+    double values[2];
+    rgmin_lowest_eigenpairs(hvp, user, x, seed, modes, values, NULL, NULL, pairs, 2);
 
 .. code:: c
 

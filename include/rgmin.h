@@ -61,7 +61,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 35
+#define RGMIN_ABI_VERSION_MINOR 36
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -700,6 +700,39 @@ rgmin_status_t rgmin_lowest_eigenpair(rgmin_hvp_fn hvp, void *user,
                                     DLManagedTensorVersioned *mode_out,
                                     const rgmin_eigen_params_t *params,
                                     rgmin_lowest_mode_t *out);
+
+/** Separate backend settings. Block LOBPCG ignores both fields.
+ *  A null pointer selects the defaults. ABI minor 36. */
+typedef struct rgmin_eigen_options_t {
+    /** ChASE filter degree. Zero selects a backend default. */
+    uint32_t degree;
+    /** ChASE extra search dimensions. Zero selects a backend default. */
+    uint32_t extra;
+} rgmin_eigen_options_t;
+
+/** One pair from \ref rgmin_lowest_eigenpairs. \c actions is the product
+ *  count of the whole solve. */
+typedef struct rgmin_eigenpair_t {
+    double value;
+    size_t actions;
+} rgmin_eigenpair_t;
+
+/**
+ * k lowest eigenpairs of a symmetric product (block LOBPCG, Knyazev 2001).
+ * \a seed and \a modes_out are row-major n-by-k: rank 2 with shape (n, k),
+ * or rank 1 of length n*k. They may alias. \a values_out and \a pairs_out
+ * have length k, values ascending. Each \c actions field is the product
+ * count of the solve. \a params NULL selects tol 1e-8 and
+ * max_iter = max(n, 8). \a options NULL is accepted; this matrix-free
+ * solve ignores ChASE degree and extra. An unlinked \a params->kind
+ * returns \c RGMIN_UNAVAILABLE. k = 0, k > n, and non-finite input return
+ * \c RGMIN_INVALID_PARAMETER. ABI minor 36.
+ */
+rgmin_status_t rgmin_lowest_eigenpairs(
+    rgmin_hvp_fn hvp, void *user, const DLManagedTensorVersioned *x,
+    const DLManagedTensorVersioned *seed, DLManagedTensorVersioned *modes_out,
+    DLManagedTensorVersioned *values_out, const rgmin_eigen_params_t *params,
+    const rgmin_eigen_options_t *options, rgmin_eigenpair_t *pairs_out, size_t k);
 
 /** Steihaug-Toint Newton-CG. \a hvp writes \c H(x) v. \c method is
  *  \c RGMIN_NEWTON_CG or \c RGMIN_NEWTON_PCG. No dense Hessian is formed. */

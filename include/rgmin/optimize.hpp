@@ -168,6 +168,44 @@ inline DLManagedTensorVersioned* borrow_cpu_f64(double* data, std::size_t n) {
     return rgmin_tensor_borrow_cpu_f64(data, n);
 }
 
+/// k lowest eigenpairs of a symmetric product. `seed` and `modes` are
+/// row-major n-by-k. `values` and `pairs` have length k. Block LOBPCG
+/// (Knyazev 2001). Throws on a refused call. ABI minor 36.
+inline void lowest_eigenpairs(rgmin_hvp_fn hvp, void* user, double const* x,
+                              double const* seed, double* modes, double* values,
+                              std::size_t n, std::size_t k,
+                              rgmin_eigen_params_t const* params,
+                              rgmin_eigen_options_t const* options,
+                              rgmin_eigenpair_t* pairs) {
+    if (hvp == nullptr || x == nullptr || seed == nullptr || modes == nullptr ||
+        values == nullptr || pairs == nullptr || k == 0 || n == 0 ||
+        n > static_cast<std::size_t>(-1) / k) {
+        throw std::invalid_argument("rgmin_lowest_eigenpairs: bad block");
+    }
+    auto* xt = rgmin_tensor_borrow_cpu_f64(const_cast<double*>(x), n);
+    auto* st = rgmin_tensor_borrow_cpu_f64(const_cast<double*>(seed), n * k);
+    auto* mt = rgmin_tensor_borrow_cpu_f64(modes, n * k);
+    auto* vt = rgmin_tensor_borrow_cpu_f64(values, k);
+    if (xt == nullptr || st == nullptr || mt == nullptr || vt == nullptr) {
+        rgmin_tensor_free(xt);
+        rgmin_tensor_free(st);
+        rgmin_tensor_free(mt);
+        rgmin_tensor_free(vt);
+        throw std::invalid_argument("rgmin_lowest_eigenpairs: null buffer");
+    }
+    rgmin_status_t status = rgmin_lowest_eigenpairs(
+        hvp, user, xt, st, mt, vt, params, options, pairs, k);
+    rgmin_tensor_free(xt);
+    rgmin_tensor_free(st);
+    rgmin_tensor_free(mt);
+    rgmin_tensor_free(vt);
+    if (status != RGMIN_SUCCESS) {
+        char const* msg = rgmin_last_error();
+        throw std::invalid_argument(msg != nullptr ? msg
+                                                   : "rgmin_lowest_eigenpairs failed");
+    }
+}
+
 /// Thrown when a distance constraint set is refused or cannot be met.
 /// kind() names why; the message is rgmin_last_error.
 class ConstraintError : public std::runtime_error {
