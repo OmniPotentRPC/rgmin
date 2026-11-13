@@ -67,7 +67,12 @@ fn weight(req: &RigidRequest<'_>, coord: usize) -> f64 {
 
 fn metric_dot(a: &[f64], b: &[f64], req: &RigidRequest<'_>) -> f64 {
     if req.mass_weighted_coords || !req.mass_metric {
-        return a.iter().zip(b).map(|(u, v)| u * v).sum();
+        let n = a.len().min(b.len());
+        let mut s = 0.0;
+        for i in 0..n {
+            s += a[i] * b[i];
+        }
+        return s;
     }
     let mut s = 0.0;
     let nat = a.len() / 3;
