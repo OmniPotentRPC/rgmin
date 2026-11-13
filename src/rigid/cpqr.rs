@@ -1,9 +1,34 @@
-/// Column square-sums from row `k`, two columns at a time.
+/// Column square-sums from row `k`, four columns at a time.
 ///
-/// Each column is the left fold `s += t * t` in row order. The neighbour
-/// column's fold is independent, so the two run together.
+/// Each column is the left fold `s += t * t` in row order. The other
+/// columns in the group do not feed that fold.
 fn pair_sumsq(a: &[f64], n: usize, k: usize, m: usize, norm: &mut [f64; 6]) {
     let mut j = k;
+    while j + 3 < m {
+        let mut s0 = 0.0;
+        let mut s1 = 0.0;
+        let mut s2 = 0.0;
+        let mut s3 = 0.0;
+        let c0 = j * n;
+        let c1 = (j + 1) * n;
+        let c2 = (j + 2) * n;
+        let c3 = (j + 3) * n;
+        for i in k..n {
+            let t0 = a[c0 + i];
+            let t1 = a[c1 + i];
+            let t2 = a[c2 + i];
+            let t3 = a[c3 + i];
+            s0 += t0 * t0;
+            s1 += t1 * t1;
+            s2 += t2 * t2;
+            s3 += t3 * t3;
+        }
+        norm[j] = s0;
+        norm[j + 1] = s1;
+        norm[j + 2] = s2;
+        norm[j + 3] = s3;
+        j += 4;
+    }
     while j + 1 < m {
         let mut s0 = 0.0;
         let mut s1 = 0.0;
@@ -30,7 +55,7 @@ fn pair_sumsq(a: &[f64], n: usize, k: usize, m: usize, norm: &mut [f64; 6]) {
     }
 }
 
-/// `dot[j] = sum_i v[i] * col_j[i]` from row `row0`, paired across columns.
+/// `dot[j] = sum_i v[i] * col_j[i]` from row `row0`, four columns at a time.
 fn pair_dots(
     vcol: &[f64],
     a: &[f64],
@@ -41,6 +66,28 @@ fn pair_dots(
     dots: &mut [f64; 6],
 ) {
     let mut j = j0;
+    while j + 3 < j1 {
+        let mut d0 = 0.0;
+        let mut d1 = 0.0;
+        let mut d2 = 0.0;
+        let mut d3 = 0.0;
+        let c0 = j * n;
+        let c1 = (j + 1) * n;
+        let c2 = (j + 2) * n;
+        let c3 = (j + 3) * n;
+        for i in row0..n {
+            let vi = vcol[i];
+            d0 += vi * a[c0 + i];
+            d1 += vi * a[c1 + i];
+            d2 += vi * a[c2 + i];
+            d3 += vi * a[c3 + i];
+        }
+        dots[j] = d0;
+        dots[j + 1] = d1;
+        dots[j + 2] = d2;
+        dots[j + 3] = d3;
+        j += 4;
+    }
     while j + 1 < j1 {
         let mut d0 = 0.0;
         let mut d1 = 0.0;
@@ -65,7 +112,7 @@ fn pair_dots(
     }
 }
 
-/// `col_j[i] -= two[j] * v[i]` from row `row0`, paired across columns.
+/// `col_j[i] -= two[j] * v[i]` from row `row0`, four columns at a time.
 fn pair_update(
     vcol: &[f64],
     a: &mut [f64],
@@ -76,6 +123,24 @@ fn pair_update(
     two: &[f64; 6],
 ) {
     let mut j = j0;
+    while j + 3 < j1 {
+        let t0 = two[j];
+        let t1 = two[j + 1];
+        let t2 = two[j + 2];
+        let t3 = two[j + 3];
+        let c0 = j * n;
+        let c1 = (j + 1) * n;
+        let c2 = (j + 2) * n;
+        let c3 = (j + 3) * n;
+        for i in row0..n {
+            let vi = vcol[i];
+            a[c0 + i] -= t0 * vi;
+            a[c1 + i] -= t1 * vi;
+            a[c2 + i] -= t2 * vi;
+            a[c3 + i] -= t3 * vi;
+        }
+        j += 4;
+    }
     while j + 1 < j1 {
         let t0 = two[j];
         let t1 = two[j + 1];
@@ -132,12 +197,9 @@ fn cpqr(a: &mut [f64], vstore: &mut [f64], q: &mut [f64], n: usize, m: usize) ->
                 a.swap(k * n + i, piv * n + i);
             }
         }
-        let mut nrm2 = 0.0;
-        for i in k..n {
-            let t = a[k * n + i];
-            nrm2 += t * t;
-        }
-        let nrm = nrm2.sqrt();
+        // The pivot column moved as a block. Its trailing square-sum is
+        // the fold already stored for that column.
+        let nrm = norm[piv].sqrt();
         if k == 0 {
             r00 = nrm;
         }
