@@ -574,6 +574,9 @@ pub(crate) struct NewtonCgRequest {
     pub euclid_cap: Option<f64>,
     /// Project the step out of rigid translation and rotation.
     pub project_rigid: bool,
+    /// Atoms that do not move. The rigid projector zeros these
+    /// components before it ranks the modes.
+    pub frozen: Option<Vec<bool>>,
     /// Nyström-preconditioned CG. The trust ceiling stays Euclidean.
     pub precondition: bool,
     /// Rademacher seed for the sketch. Rebuilt every outer step.
@@ -787,7 +790,7 @@ where
     // onto the Euclidean trust sphere before the displacement cap.
     let mut p = p_cg.clone();
     if req.project_rigid {
-        project_out_rot_trans(&mut p, x.view());
+        project_out_rot_trans(&mut p, x.view(), req.frozen.as_deref());
     }
     let pnorm = nrm2(p.view());
     if radius.is_finite() && pnorm > radius * (1.0 + 1e-10) && pnorm > 0.0 {
@@ -934,6 +937,7 @@ where
                 atom_cap: None,
                 euclid_cap: control.maxmove,
                 project_rigid: false,
+                frozen: None,
                 precondition: false,
                 seed: step as u64,
                 manifold: None,

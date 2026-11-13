@@ -124,6 +124,9 @@ pub struct Solver {
     /// Whether geometry L-BFGS needs a finite-difference stiffness probe.
     geometry_lbfgs_stiff: Option<bool>,
     project_rigid: bool,
+    /// Atoms that do not move. Length N when set. The rigid projector
+    /// zeros these components before it ranks translations and rotations.
+    frozen: Option<Vec<bool>>,
     /// Sella `proj_rot`: false under PBC. Rotation is not a symmetry of the cell.
     periodic: bool,
     manifold: ManifoldKind,
@@ -254,6 +257,14 @@ struct PsoState {
     rng: StdRng,
 }
 
+fn restore_frozen(x: &mut Array1<f64>, saved: &[(usize, f64)]) {
+    for &(i, value) in saved {
+        if i < x.len() {
+            x[i] = value;
+        }
+    }
+}
+
 impl Solver {
     /// Fresh session for `method` in dimension `dim`.
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
@@ -284,6 +295,7 @@ impl Solver {
             atom_maxmove: None,
             geometry_lbfgs_stiff: None,
             project_rigid: false,
+            frozen: None,
             periodic: false,
             manifold: ManifoldKind::Euclidean,
             masses: None,
@@ -811,6 +823,77 @@ impl Solver {
         self.apply_highs_opts();
     }
 
+    /// Atoms that stay where they are. `mask[i]` freezes atom `i`
+    /// (length `dim / 3`). An empty mask clears the freeze. A mask of
+    /// the wrong length returns [`Error::Dim`].
+    ///
+    /// Frozen components are zeroed in the rigid-mode matrix before the
+    /// rank test, so a mode that existed only by moving a frozen atom
+    /// drops out. The gradient and the accepted point leave those atoms
+    /// unmoved. Changing the mask restarts the method memory.
+    pub fn set_frozen_atoms(&mut self, mask: &[bool]) -> Result<()> {
+        if !self.dim.is_multiple_of(3) {
+            return Err(Error::Dim {
+                got: self.dim,
+                dim: self.dim,
+            });
+        }
+        let nat = self.dim / 3;
+        if !mask.is_empty() && mask.len() != nat {
+            return Err(Error::Dim {
+                got: mask.len(),
+                dim: nat,
+            });
+        }
+        let next = if mask.iter().any(|&frozen| frozen) {
+            Some(mask.to_vec())
+        } else {
+            None
+        };
+        if self.frozen != next {
+            self.frozen = next;
+            self.forget();
+        }
+        Ok(())
+    }
+
+    fn pin_frozen(&self, v: &mut Array1<f64>) {
+        let Some(mask) = self.frozen.as_deref() else {
+            return;
+        };
+        for (atom, &frozen) in mask.iter().enumerate() {
+            if !frozen {
+                continue;
+            }
+            for c in 0..3 {
+                let i = 3 * atom + c;
+                if i < v.len() {
+                    v[i] = 0.0;
+                }
+            }
+        }
+    }
+
+    /// Coordinates of frozen atoms, so a step can put them back.
+    fn hold_frozen(&self, x: &Array1<f64>) -> Vec<(usize, f64)> {
+        let Some(mask) = self.frozen.as_deref() else {
+            return Vec::new();
+        };
+        let mut saved = Vec::new();
+        for (atom, &frozen) in mask.iter().enumerate() {
+            if !frozen {
+                continue;
+            }
+            for c in 0..3 {
+                let i = 3 * atom + c;
+                if i < x.len() {
+                    saved.push((i, x[i]));
+                }
+            }
+        }
+        saved
+    }
+
     /// Periodic cell. Sella leaves `proj_rot` off; the quotient is \(R^{3N}/T(3)\).
     pub fn set_periodic(&mut self, periodic: bool) {
         self.periodic = periodic;
@@ -1105,12 +1188,24 @@ impl Solver {
             ManifoldKind::MwRigid => {
                 let mut w = v.clone();
                 let masses = self.masses.as_ref().and_then(|m| m.as_slice());
-                project_horizontal(&mut w, x.view(), masses, !self.periodic);
+                project_horizontal(
+                    &mut w,
+                    x.view(),
+                    masses,
+                    !self.periodic,
+                    self.frozen.as_deref(),
+                );
                 w
             }
             ManifoldKind::RigidQuotient => {
                 let mut w = v.clone();
-                project_horizontal(&mut w, x.view(), None, !self.periodic);
+                project_horizontal(
+                    &mut w,
+                    x.view(),
+                    None,
+                    !self.periodic,
+                    self.frozen.as_deref(),
+                );
                 w
             }
             other => other.project(x, v),
@@ -1278,6 +1373,11 @@ impl Solver {
     /// Euclidean sessions keep the owned gradient. Other kinds project it.
     fn horizontal_owned(&self, x: &Array1<f64>, grad: Array1<f64>) -> Array1<f64> {
         if !self.project_rigid && matches!(self.manifold, ManifoldKind::Euclidean) {
+            if self.frozen.is_none() {
+                return grad;
+            }
+            let mut grad = grad;
+            self.pin_frozen(&mut grad);
             return grad;
         }
         self.horizontal_grad(x, &grad)
@@ -1294,8 +1394,9 @@ impl Solver {
                 ManifoldKind::RigidQuotient | ManifoldKind::MwRigid
             )
         {
-            project_out_rot_trans(&mut g, x.view());
+            project_out_rot_trans(&mut g, x.view(), self.frozen.as_deref());
         }
+        self.pin_frozen(&mut g);
         g
     }
 
@@ -1575,6 +1676,16 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        let held = self.hold_frozen(x);
+        let result = self.step_unpinned(obj, x);
+        restore_frozen(x, &held);
+        result
+    }
+
+    fn step_unpinned<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
         if self.constraints.is_some() {
             return self.constrained_step(x, |s, x| s.step_constrained(obj, x));
         }
@@ -1601,6 +1712,16 @@ impl Solver {
 
     /// One Newton / RFO iteration. Hessian is rebuilt at the current `x`.
     pub fn step_hess<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: HessianObjective + ?Sized,
+    {
+        let held = self.hold_frozen(x);
+        let result = self.step_hess_unpinned(obj, x);
+        restore_frozen(x, &held);
+        result
+    }
+
+    fn step_hess_unpinned<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: HessianObjective + ?Sized,
     {
@@ -1634,6 +1755,16 @@ impl Solver {
     /// [`Self::step`] and [`Self::step_hess`] on the same methods use a
     /// forward difference (one gradient per product) instead.
     pub fn step_hvp<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: HessianVector + ?Sized,
+    {
+        let held = self.hold_frozen(x);
+        let result = self.step_hvp_unpinned(obj, x);
+        restore_frozen(x, &held);
+        result
+    }
+
+    fn step_hvp_unpinned<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: HessianVector + ?Sized,
     {
@@ -1705,6 +1836,7 @@ impl Solver {
                 atom_cap: self.atom_maxmove,
                 euclid_cap: self.control.maxmove,
                 project_rigid: self.project_rigid,
+                frozen: self.frozen.clone(),
                 precondition,
                 seed: self.steps as u64,
                 manifold: (!self.manifold.is_flat()).then_some(self.manifold),
@@ -1820,12 +1952,15 @@ impl Solver {
 
     fn shape_step(&self, x: &Array1<f64>, mut direction: Array1<f64>) -> Array1<f64> {
         if !self.project_rigid && matches!(self.manifold, ManifoldKind::Euclidean) {
+            self.pin_frozen(&mut direction);
             return direction;
         }
         if self.project_rigid {
-            project_out_rot_trans(&mut direction, x.view());
+            project_out_rot_trans(&mut direction, x.view(), self.frozen.as_deref());
         }
-        self.project_vec(x, &direction)
+        let mut direction = self.project_vec(x, &direction);
+        self.pin_frozen(&mut direction);
+        direction
     }
 
     /// Search direction of one capped step, after rigid and manifold projection.
@@ -2274,7 +2409,7 @@ impl Solver {
                 _ => h0 * &force,
             };
             if self.project_rigid {
-                project_out_rot_trans(&mut direction, x.view());
+                project_out_rot_trans(&mut direction, x.view(), self.frozen.as_deref());
             }
             direction = self.project_vec(x, &direction);
             let motion = max_atom_displacement(&direction);
@@ -2597,7 +2732,7 @@ impl Solver {
             return self.step_first_order(obj, x);
         };
         if self.project_rigid {
-            project_out_rot_trans(&mut dir, x.view());
+            project_out_rot_trans(&mut dir, x.view(), self.frozen.as_deref());
         }
         dir = self.project_vec(x, &dir);
         let old = x.clone();
@@ -2673,7 +2808,7 @@ impl Solver {
         let curved = !self.manifold.is_flat();
         let mut dir = self.dogleg_point(x, hess, &grad, radius);
         if self.project_rigid {
-            project_out_rot_trans(&mut dir, x.view());
+            project_out_rot_trans(&mut dir, x.view(), self.frozen.as_deref());
         }
         if curved {
             self.manifold.project_in_place(x, &mut dir);

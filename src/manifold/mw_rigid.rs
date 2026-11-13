@@ -31,7 +31,7 @@ impl Manifold for MwRigid {
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         let mut w = v.clone();
-        project_out_rot_trans(&mut w, x.view());
+        project_out_rot_trans(&mut w, x.view(), None);
         w
     }
 

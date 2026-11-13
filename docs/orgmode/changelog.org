@@ -6,6 +6,8 @@
 
 ** Unreleased
 
+Rigid translation and rotation are ranked by a column-pivoted QR after frozen atoms are zeroed, with a cutoff relative to the largest diagonal of R.
+
 An interior point skips the bounds clip, and a Euclidean session keeps the gradient it already owns.
 Polak-Ribiere forms ~g · (g - g_old)~ in the dot product.
 A backtracking line search keeps its lowest trial without copying that vector.

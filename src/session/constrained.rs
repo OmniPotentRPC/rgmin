@@ -78,6 +78,8 @@ struct Space<'a> {
     /// Coordinates of constrained atoms.
     bonded: Vec<bool>,
     rigid: bool,
+    /// Atoms that do not move. Owned so a later step can borrow the session.
+    frozen: Option<Vec<bool>>,
 }
 
 /// Coordinates of the atoms that appear in a pair.
@@ -115,7 +117,12 @@ fn roots(set: &DistanceConstraints, n: usize) -> (Array1<f64>, Array1<f64>) {
 }
 
 impl<'a> Space<'a> {
-    fn at(set: &'a DistanceConstraints, x: ArrayView1<f64>, rigid: bool) -> Result<Self> {
+    fn at(
+        set: &'a DistanceConstraints,
+        x: ArrayView1<f64>,
+        rigid: bool,
+        frozen: Option<&[bool]>,
+    ) -> Result<Self> {
         let tangent = Tangent::new(set, x)?;
         let masses = set.masses();
         let (root_m, root_w) = roots(set, x.len());
@@ -126,6 +133,7 @@ impl<'a> Space<'a> {
             root_w,
             bonded: bonded(set, x.len()),
             rigid,
+            frozen: frozen.map(|mask| mask.to_vec()),
         })
     }
 
@@ -151,7 +159,13 @@ impl<'a> Space<'a> {
         let mut v = self.by_root_w(u);
         self.tangent.vector(&mut v)?;
         if self.rigid {
-            project_horizontal(&mut v, self.point().view(), self.masses, true);
+            project_horizontal(
+                &mut v,
+                self.point().view(),
+                self.masses,
+                true,
+                self.frozen.as_deref(),
+            );
         }
         *u = self.by_root_m(&v);
         Ok(())
@@ -165,7 +179,13 @@ impl<'a> Space<'a> {
         let mut q = self.by_root_w(&h);
         if self.rigid {
             let mut v = self.by_root_w(&q);
-            project_horizontal(&mut v, self.point().view(), self.masses, true);
+            project_horizontal(
+                &mut v,
+                self.point().view(),
+                self.masses,
+                true,
+                self.frozen.as_deref(),
+            );
             q = self.by_root_m(&v);
             h = self.by_root_m(&q);
         }
@@ -572,7 +592,7 @@ impl Solver {
         let (root_m, root_w) = roots(&set, self.dim);
         let (mut s, mut y) = (&s * &root_m, &y * &root_w);
         if let Some(at) = &self.last_pos {
-            let space = Space::at(&set, at.view(), self.project_rigid)?;
+            let space = Space::at(&set, at.view(), self.project_rigid, self.frozen.as_deref())?;
             space.project(&mut s)?;
             space.project(&mut y)?;
         }
@@ -588,7 +608,7 @@ impl Solver {
         };
         let mut d = solver.direction((&g * &root_w).view());
         if let Some(at) = &self.last_pos {
-            let space = Space::at(&set, at.view(), self.project_rigid)?;
+            let space = Space::at(&set, at.view(), self.project_rigid, self.frozen.as_deref())?;
             space.project(&mut d)?;
         }
         Ok(d * &root_w)
@@ -673,7 +693,12 @@ impl Solver {
         if !finite(value, raw.view()) {
             return Err(non_finite());
         }
-        let space = Space::at(set, entered.view(), self.project_rigid)?;
+        let space = Space::at(
+            set,
+            entered.view(),
+            self.project_rigid,
+            self.frozen.as_deref(),
+        )?;
         let (grad, gq, lambda) = space.gradient(&raw)?;
         *x = entered;
         Ok(Start {
@@ -744,7 +769,12 @@ impl Solver {
         let Some(previous) = self.last_pos.clone() else {
             return Ok(());
         };
-        let old = Space::at(set, previous.view(), self.project_rigid)?;
+        let old = Space::at(
+            set,
+            previous.view(),
+            self.project_rigid,
+            self.frozen.as_deref(),
+        )?;
         let (_, gq_old, _) = old.gradient(&self.last_grad)?;
         self.transport_memory(&start.space)?;
         if let Inner::Lbfgs(_) = &self.inner {
@@ -1023,7 +1053,7 @@ impl Solver {
         };
         let old = x.clone();
         *x = trial;
-        let next = Space::at(&set, x.view(), self.project_rigid)?;
+        let next = Space::at(&set, x.view(), self.project_rigid, self.frozen.as_deref())?;
         let (grad, gq_new, _) = next.gradient(&raw)?;
         self.transport_memory(&next)?;
         let (s, y) = Self::tangent_pair(&next, &old, gq, &gq_new)?;
@@ -1157,7 +1187,7 @@ impl Solver {
         };
         let old = x.clone();
         *x = trial;
-        let next = Space::at(set, x.view(), self.project_rigid)?;
+        let next = Space::at(set, x.view(), self.project_rigid, self.frozen.as_deref())?;
         let (grad, gq, _) = next.gradient(&raw)?;
         self.transport_memory(&next)?;
         let (s, y) = Self::tangent_pair(&next, &old, &start.gq, &gq)?;
@@ -1211,7 +1241,7 @@ impl Solver {
                     return Err(non_finite());
                 }
                 *x = back;
-                space = Space::at(set, x.view(), self.project_rigid)?;
+                space = Space::at(set, x.view(), self.project_rigid, self.frozen.as_deref())?;
                 let (_, gq, _) = space.gradient(&ev.1)?;
                 raw = gq.mapv(|g| -g);
                 project_box_tangent(bounds, x, &mut raw);
@@ -1245,7 +1275,7 @@ impl Solver {
             return Err(non_finite());
         }
         *x = trial;
-        let next = Space::at(set, x.view(), self.project_rigid)?;
+        let next = Space::at(set, x.view(), self.project_rigid, self.frozen.as_deref())?;
         let (report_grad, gq, _) = next.gradient(&grad)?;
         let mut raw_new = gq.mapv(|g| -g);
         project_box_tangent(bounds, x, &mut raw_new);
@@ -1318,7 +1348,7 @@ impl Solver {
             *x = trial;
             value = ft;
             raw = gt;
-            let next = Space::at(&set, x.view(), self.project_rigid)?;
+            let next = Space::at(&set, x.view(), self.project_rigid, self.frozen.as_deref())?;
             let (_, gq, _) = next.gradient(&raw)?;
             self.transport_memory(&next)?;
             let (s, y) = Self::tangent_pair(&next, &old, &start.gq, &gq)?;
@@ -1406,7 +1436,7 @@ impl Solver {
     where
         O: HessianObjective + ?Sized,
     {
-        let mut space = Space::at(set, x.view(), self.project_rigid)?;
+        let mut space = Space::at(set, x.view(), self.project_rigid, self.frozen.as_deref())?;
         let (mut grad, _, mut lambda) = space.gradient(&raw)?;
         if self.saddle_escape_enabled() {
             while self.stationarity_norm(x, &grad) <= self.control.gtol
@@ -1436,7 +1466,7 @@ impl Solver {
                 *x = trial;
                 value = v;
                 raw = g;
-                space = Space::at(set, x.view(), self.project_rigid)?;
+                space = Space::at(set, x.view(), self.project_rigid, self.frozen.as_deref())?;
                 (grad, _, lambda) = space.gradient(&raw)?;
                 self.saddle_kicks = self.saddle_kicks.saturating_add(1);
                 if let Inner::Dogleg { radius } = &mut self.inner {
@@ -1546,7 +1576,7 @@ impl Solver {
         let (value, raw, grad) = match found {
             Some((trial, ft, gt)) if rho > ETA_ACCEPT && ft.is_finite() => {
                 *x = trial;
-                let next = Space::at(&set, x.view(), self.project_rigid)?;
+                let next = Space::at(&set, x.view(), self.project_rigid, self.frozen.as_deref())?;
                 let (grad, _, _) = next.gradient(&gt)?;
                 (ft, gt, grad)
             }
@@ -1637,7 +1667,7 @@ mod tests {
                     x = moved;
                     solver.step(&obj, &mut x).unwrap();
                 }
-                let space = Space::at(&set, x.view(), false).unwrap();
+                let space = Space::at(&set, x.view(), false, None).unwrap();
                 let chord = space.by_root_m(&(&x - &before));
                 if l2(&chord) > 0.0 {
                     raw_normal = raw_normal.max(normal_part(&space, &chord));
