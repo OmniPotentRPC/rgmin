@@ -1,5 +1,6 @@
 //! Dispatch Nocedal-Wright local methods on an eindir objective.
 
+#[cfg(test)]
 use std::cell::Cell;
 
 use eindir_core::{DifferentiableObjective, Objective};
@@ -212,10 +213,12 @@ where
     Ok(last)
 }
 
+#[cfg(test)]
 thread_local! {
     static UPHILL_FIRINGS: Cell<u64> = const { Cell::new(0) };
 }
 
+#[cfg(test)]
 fn note_uphill() {
     UPHILL_FIRINGS.with(|c| c.set(c.get() + 1));
 }
@@ -261,6 +264,7 @@ where
         // that flipped vector. Replace it before the search.
         let gd_used = crate::vecops::dot(grad.view(), dir.view());
         if gd_used.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+            #[cfg(test)]
             note_uphill();
             dir = grad.mapv(|g| -g);
             d_old.assign(&dir);
@@ -296,6 +300,7 @@ where
         dir = Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d));
         let formed = crate::vecops::dot(grad.view(), dir.view());
         if formed.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+            #[cfg(test)]
             note_uphill();
             dir = grad.mapv(|g| -g);
         }
@@ -493,7 +498,7 @@ mod uphill_count {
                     ftol_rel: None,
                     noise_floor: None,
                 };
-                UPHILL_FIRINGS.with(|c| c.set(0));
+                super::UPHILL_FIRINGS.with(|c| c.set(0));
                 minimize(
                     &obj,
                     job.start.clone(),
@@ -503,7 +508,7 @@ mod uphill_count {
                     linesearch,
                 )
                 .unwrap();
-                let fired = UPHILL_FIRINGS.with(|c| c.get());
+                let fired = super::UPHILL_FIRINGS.with(|c| c.get());
                 assert_eq!(fired, 0, "{beta:?} dim {} fired {fired}", job.dim);
             }
         }
