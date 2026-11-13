@@ -43,6 +43,24 @@ where
     )
 }
 
+/// Line search for a one-shot minimizer that was not given one.
+///
+/// Nonlinear CG uses strong Wolfe with `c2 = 0.1`. A caller that passes
+/// its own [`LineSearch`] to [`minimize`] or [`minimize_method`] is left
+/// alone, including Brent. Every other method keeps [`LineSearch::default`].
+#[cfg_attr(not(feature = "capi"), allow(dead_code))]
+pub(crate) fn oneshot_linesearch(method: &Method) -> LineSearch {
+    if matches!(method, Method::Nlcg { .. }) {
+        LineSearch::Wolfe {
+            c1: 1e-4,
+            c2: 0.1,
+            maxiter: 20,
+        }
+    } else {
+        LineSearch::default()
+    }
+}
+
 /// Minimize with any [`Method`].
 pub fn minimize_method<O>(
     obj: &O,
@@ -512,5 +530,28 @@ mod uphill_count {
                 assert_eq!(fired, 0, "{beta:?} dim {} fired {fired}", job.dim);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod oneshot_tests {
+    use super::oneshot_linesearch;
+    use crate::linesearch::LineSearch;
+    use crate::method::Method;
+
+    #[test]
+    fn a_one_shot_nlcg_uses_the_cg_curvature_and_lbfgs_keeps_brent() {
+        match oneshot_linesearch(&Method::polak_ribiere()) {
+            LineSearch::Wolfe { c1, c2, maxiter } => {
+                assert!((c1 - 1e-4).abs() < 1e-15);
+                assert!((c2 - 0.1).abs() < 1e-15);
+                assert_eq!(maxiter, 20);
+            }
+            other => panic!("nlcg {other:?}"),
+        }
+        assert!(matches!(
+            oneshot_linesearch(&Method::lbfgs()),
+            LineSearch::Brent { maxiter: 40, tol } if (tol - 1e-10).abs() < 1e-15
+        ));
     }
 }

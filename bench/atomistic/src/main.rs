@@ -749,8 +749,8 @@ fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
         "bb" => (Method::Bb, Accept::None, wolfe(), 0.01),
         "bb-nm" => (Method::Bb, Accept::Nonmonotone, wolfe(), 0.01),
         "cg-wolfe" | "cg" => (pr, Accept::None, cg_wolfe(), 0.01),
-        // Library change alone: signed Polak-Ribiere and the session
-        // Wolfe constant c2 = 0.9. The opening trial is still equation 3.60.
+        // Explicit quasi-Newton curvature. The session and one-shot CG
+        // defaults are c2 = 0.1; this name keeps c2 = 0.9 on purpose.
         "cg-ablation" => (
             Method::Nlcg {
                 conjugacy: Conjugacy::PolakRibiere,

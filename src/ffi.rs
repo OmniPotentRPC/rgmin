@@ -71,9 +71,9 @@ pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum rgmin_method_t {
-    /// Polak-Ribiere NLCG + Brent.
+    /// Polak-Ribiere NLCG. The one-shot minimizer uses Wolfe `c2 = 0.1`.
     RGMIN_POLAK_RIBIERE = 0,
-    /// Fletcher-Reeves NLCG + Brent.
+    /// Fletcher-Reeves NLCG. The one-shot minimizer uses Wolfe `c2 = 0.1`.
     RGMIN_FLETCHER_REEVES = 1,
     /// Dense inverse-BFGS.
     RGMIN_BFGS = 2,
@@ -89,17 +89,17 @@ pub enum rgmin_method_t {
     RGMIN_SR2 = 7,
     /// Particle swarm.
     RGMIN_PSO = 8,
-    /// Hestenes-Stiefel NLCG + Brent.
+    /// Hestenes-Stiefel NLCG. The one-shot minimizer uses Wolfe `c2 = 0.1`.
     RGMIN_HESTENES_STIEFEL = 9,
-    /// Dai-Yuan NLCG + Brent.
+    /// Dai-Yuan NLCG. The one-shot minimizer uses Wolfe `c2 = 0.1`.
     RGMIN_DAI_YUAN = 10,
-    /// Fletcher conjugate-descent NLCG + Brent.
+    /// Fletcher conjugate-descent NLCG. The one-shot minimizer uses Wolfe `c2 = 0.1`.
     RGMIN_CONJUGATE_DESCENT = 11,
-    /// Hager-Zhang NLCG + Brent.
+    /// Hager-Zhang NLCG. The one-shot minimizer uses Wolfe `c2 = 0.1`.
     RGMIN_HAGER_ZHANG = 12,
-    /// Liu-Storey NLCG + Brent.
+    /// Liu-Storey NLCG. The one-shot minimizer uses Wolfe `c2 = 0.1`.
     RGMIN_LIU_STOREY = 13,
-    /// Gilbert-Nocedal FR-PR hybrid NLCG + Brent.
+    /// Gilbert-Nocedal FR-PR hybrid NLCG. The one-shot minimizer uses Wolfe `c2 = 0.1`.
     RGMIN_FR_PR = 14,
     /// Shifted Newton on a caller-supplied Hessian.
     RGMIN_NEWTON = 15,
@@ -1071,7 +1071,7 @@ pub unsafe extern "C" fn rgmin_minimize(
             Array1::from(init),
             &control,
             method_from_c(method, c.memory),
-            LineSearch::default(),
+            crate::minimize::oneshot_linesearch(&method_from_c(method, c.memory)),
         ) {
             Ok(rep) => {
                 let dest = match cpu_f64_slice_mut(x, "x") {
@@ -1333,13 +1333,8 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
             noise_floor: noise_floor_from_c(c),
         };
         let rust_method = method_from_c(method, c.memory);
-        match minimize_method_hess(
-            &obj,
-            Array1::from(init),
-            &control,
-            rust_method,
-            LineSearch::default(),
-        ) {
+        let linesearch = crate::minimize::oneshot_linesearch(&rust_method);
+        match minimize_method_hess(&obj, Array1::from(init), &control, rust_method, linesearch) {
             Ok(rep) => {
                 let dest = match cpu_f64_slice_mut(x, "x") {
                     Ok(s) => s,
@@ -1434,7 +1429,7 @@ pub unsafe extern "C" fn rgmin_minimize_hvp(
             Array1::from(init),
             &control,
             method_from_c(method, c.memory),
-            LineSearch::default(),
+            crate::minimize::oneshot_linesearch(&method_from_c(method, c.memory)),
         ) {
             Ok(rep) => {
                 let dest = match cpu_f64_slice_mut(x, "x") {
@@ -1543,7 +1538,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
             Array1::from(init),
             &control,
             method_from_c(method, c.memory),
-            LineSearch::default(),
+            crate::minimize::oneshot_linesearch(&method_from_c(method, c.memory)),
         ) {
             Ok(rep) => {
                 let dest = match cpu_f64_slice_mut(x, "x") {

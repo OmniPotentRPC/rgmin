@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `vdfmax`. The published schedule uses 2000, from Table 1 of Comput.
   Mater. Sci. 175 (2020) 109584. The stopping step does not move.
 
+### Changed
+
+- Nonlinear CG no longer uses the quasi-Newton Wolfe constant. A fresh
+  session starts at `c2 = 0.1`. The one-shot minimizers
+  (`rgmin_minimize`, `rgmin_minimize_hess`, `rgmin_minimize_hvp`,
+  `rgmin_minimize_eindir`) do the same when the caller does not pass a
+  line search; every other method still uses Brent. `minimize` and
+  `minimize_method` keep the search the caller passes, and
+  `Solver::set_linesearch` still overrides the session. `c2 = 0.9` on
+  CG leaves the gradients aligned, so the NJWS angle restart fires
+  every step. rgsaddle does not call this NLCG path. The atomistic
+  bench's `cg` run already passed `c2 = 0.1`; `cg-brent` and
+  `cg-ablation` still pass Brent and `c2 = 0.9` themselves.
+
 ### Fixed
 
 - The Exp pair weight and the μ sine probe call `libm` `exp` and
