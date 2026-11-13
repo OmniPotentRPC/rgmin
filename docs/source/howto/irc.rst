@@ -44,6 +44,8 @@ Rust
 
 The kick uses ``lowest_eigenpair`` (Lanczos) or ``lowest_mode`` with
 an ``EigenParams`` on a ``HessianVector`` (analytic or ``FdHvp``).
+``lowest_eigenpairs`` is the block form: the k lowest pairs from the
+same product, for an index-k search.
 Default Krylov dimension is small. Do not form the dense Hessian
 just to pick the imaginary mode. Unlinked backends fail closed.
 

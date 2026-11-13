@@ -24,6 +24,7 @@ using rgmin::minimize_hess_fn;
 using rgmin::minimize_eindir;
 using rgmin::optimize;
 using rgmin::borrow_cpu_f64;
+using rgmin::lowest_eigenpairs;
 using rgmin::Solver;
 using rgmin::ConstraintError;
 using rgmin::ConstraintSolver;

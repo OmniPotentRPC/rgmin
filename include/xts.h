@@ -39,6 +39,8 @@ typedef rgmin_curv_fn xts_curv_fn;
 typedef rgmin_scg_params_t xts_scg_params_t;
 typedef rgmin_eigen_kind_t xts_eigen_kind_t;
 typedef rgmin_eigen_params_t xts_eigen_params_t;
+typedef rgmin_eigen_options_t xts_eigen_options_t;
+typedef rgmin_eigenpair_t xts_eigenpair_t;
 typedef rgmin_exp_t xts_exp_t;
 typedef rgmin_lowest_mode_t xts_lowest_mode_t;
 typedef rgmin_hvp_fn xts_hvp_fn;
@@ -169,6 +171,7 @@ typedef rgmin_constraints_t xts_constraints_t;
 #define xts_solver_step_fg rgmin_solver_step_fg
 #define xts_solver_step_hess_fg rgmin_solver_step_hess_fg
 #define xts_lowest_eigenpair rgmin_lowest_eigenpair
+#define xts_lowest_eigenpairs rgmin_lowest_eigenpairs
 #define xts_last_constraint_error rgmin_last_constraint_error
 #define xts_constraints_create rgmin_constraints_create
 #define xts_constraints_create_at rgmin_constraints_create_at

@@ -55,7 +55,7 @@ pub mod lbfgs;
 pub mod lbfgs_qp;
 /// Sparse Lindh model Hessian.
 pub mod lindh;
-/// Matrix-free lowest Hessian eigenpair (IRC kick / lambda_min).
+/// Matrix-free lowest Hessian eigenpair and the block of k lowest pairs.
 pub mod lowest_mode;
 /// Embedded Riemannian manifolds (manopt_cpp proj / retr / transp).
 pub mod manifold;
@@ -112,8 +112,8 @@ pub use lbfgs_qp::HighsStep;
 pub use lindh::{LindhSpec, apply_inverse};
 pub use linesearch::{LineSearch, SearchStep, SuppliedSearch};
 pub use lowest_mode::{
-    ApplyHessian, DENSE_EIGEN_CUTOFF, EigenParams, EigensolverKind, LowestMode, lowest_eigenpair,
-    lowest_mode,
+    ApplyHessian, DENSE_EIGEN_CUTOFF, EigenParams, Eigenpair, Eigenpairs, EigensolverKind,
+    LowestMode, lowest_eigenpair, lowest_eigenpairs, lowest_mode,
 };
 pub use manifold::{Manifold, ManifoldKind};
 pub use method::Method;

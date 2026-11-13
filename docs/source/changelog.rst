@@ -7,6 +7,12 @@ Unreleased
 
 ~~~~~~~~~~
 
+``lowest_eigenpairs`` is block LOBPCG for the k lowest eigenpairs of a symmetric product (Knyazev 2001).
+The seed is an n-by-k block, and each pair reports its residual.
+``k = 0``, ``k`` above the dimension, and non-finite input return an error.
+C: ``rgmin_lowest_eigenpairs``, ``rgmin_eigenpair_t``, ``rgmin_eigen_options_t``, the C++ wrapper ``rgmin::lowest_eigenpairs``, and ``xts_lowest_eigenpairs``.
+``rgmin_linesearch`` and ``rgmin_lowest_eigenpairs`` are both ``abi_minor`` 37.
+
 Opt-in ``Lbfgs::minimize_box`` and ``Lbfgs::minimize_box_watched`` relax inside a box ``lower <= x <= upper`` with the generalized Cauchy point and the subspace minimization of L-BFGS-B (Byrd, Lu, Nocedal and Zhu 1995).
 Each direction ends at the subspace minimizer from the Cauchy point, and the strong Wolfe search stops at the box.
 ``Lbfgs::minimize`` keeps the eOn cap. ``LbfgsStep::Wolfe`` remains opt-in.

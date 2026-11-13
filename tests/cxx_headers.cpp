@@ -177,6 +177,39 @@ int constrained() {
     return 0;
 }
 
+rgmin_status_t diag3_hvp(void*, DLManagedTensorVersioned const*,
+                         DLManagedTensorVersioned const* v, DLManagedTensorVersioned* hv) {
+    double const lam[3] = {-3.0, 1.0, 4.0};
+    double const* vp = data(v);
+    double* hp = data(hv);
+    auto const n = v->dl_tensor.shape[0];
+    for (int64_t i = 0; i < n && i < 3; ++i) {
+        hp[i] = lam[i] * vp[i];
+    }
+    return RGMIN_SUCCESS;
+}
+
+int eigen_block() {
+    double x[3] = {};
+    double seed[6] = {1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
+    double modes[6] = {};
+    double values[2] = {};
+    rgmin_eigenpair_t pairs[2] = {};
+    try {
+        xts::optimize::lowest_eigenpairs(diag3_hvp, nullptr, x, seed, modes, values, 3, 2,
+                                         nullptr, nullptr, pairs);
+    } catch (std::invalid_argument const& err) {
+        std::fprintf(stderr, "eigenpairs: %s\n", err.what());
+        return 6;
+    }
+    if (std::fabs(values[0] + 3.0) > 1e-6 || std::fabs(values[1] - 1.0) > 1e-6 ||
+        pairs[0].actions == 0) {
+        std::fprintf(stderr, "eigenpairs values %g %g\n", values[0], values[1]);
+        return 7;
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -242,6 +275,10 @@ int main() {
         rgmin::method_from_name("polak-ribiere-plus") != rgmin::Method::PolakRibierePlus) {
         std::fprintf(stderr, "method_from_name missed a minor-35 method\n");
         return 6;
+    }
+    int block = eigen_block();
+    if (block != 0) {
+        return block;
     }
     return constrained();
 }

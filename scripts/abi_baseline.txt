@@ -12,6 +12,7 @@ rgmin_last_constraint_error
 rgmin_linesearch
 rgmin_linesearch_free
 rgmin_lowest_eigenpair
+rgmin_lowest_eigenpairs
 rgmin_method_from_name
 rgmin_minimize
 rgmin_minimize_eindir
