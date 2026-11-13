@@ -93,11 +93,17 @@ fn run(method: Method, kind: &str) -> (Vec<u64>, u64, Vec<u64>) {
         c2: 0.9,
         maxiter: 12,
     });
-    solver.set_project_rigid(true);
     match kind {
-        "frozen" => solver.set_frozen(&[1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        "frozen" | "frozen-off" => solver.set_frozen(&[1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
         "pbc" => solver.set_pbc_axes(true, true, true),
         _ => {}
+    }
+    // `set_frozen` declares a molecule. Forcing removal off afterwards
+    // keeps the mask and leaves the projector off.
+    if kind == "frozen-off" {
+        solver.set_project_rigid(false);
+    } else {
+        solver.set_project_rigid(true);
     }
     let mut energies = Vec::new();
     let mut trail = 0u64;
@@ -119,6 +125,39 @@ fn expect(method: Method, kind: &str, energies: &[u64], trail: u64, x: &[u64]) {
     assert_eq!(got_e, energies, "{kind} energies");
     assert_eq!(got_t, trail, "{kind} position trail");
     assert_eq!(got_x, x, "{kind} final coordinates");
+}
+
+#[test]
+fn lbfgs_rigid_off_frozen_matches_the_recorded_trajectory() {
+    expect(
+        Method::lbfgs(),
+        "frozen-off",
+        &[
+            4598806465462252522,
+            4590555898193610499,
+            4570239614205191582,
+            4557381241786653841,
+            4535434888180562643,
+            4526738926881023442,
+            4518580257342221175,
+            4504483704787016615,
+        ],
+        3436931608450598630,
+        &[
+            4594438738762808811,
+            13817984348102474783,
+            13825120512508209277,
+            4607544283441448863,
+            4598881379555780185,
+            4598280972422741703,
+            4598851630055236859,
+            4608269241350633819,
+            4591303349645060717,
+            13816264731659543355,
+            4603764966619138338,
+            4607634361546321863,
+        ],
+    );
 }
 
 #[test]

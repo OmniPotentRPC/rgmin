@@ -1292,6 +1292,9 @@ impl Solver {
         gold: &Array1<f64>,
         grad: &Array1<f64>,
     ) -> (Array1<f64>, Array1<f64>) {
+        if self.manifold == ManifoldKind::Euclidean && self.removal_mode() == RigidMode::Off {
+            return crate::lbfgs::euclidean_pair(x.view(), old.view(), grad.view(), gold.view());
+        }
         let mut s = self.transport_vec(old, x, &(x - old));
         let mut y = grad - &self.transport_vec(old, x, gold);
         self.kill_at(x, &mut s);
@@ -4066,5 +4069,94 @@ mod retained_neb_guard_tests {
             steps > 0 && used <= steps * 2,
             "calls {used} over {steps} steps"
         );
+    }
+
+    #[test]
+    fn euclidean_off_pair_matches_transport_and_leaves_frozen_components() {
+        let mut solver = Solver::new(
+            Method::lbfgs(),
+            Control {
+                maxiter: 4,
+                gtol: 1e-12,
+                istep: 0.2,
+                maxmove: None,
+                ftol_rel: None,
+                noise_floor: None,
+            },
+            12,
+        );
+        // Frozen and periodic settings declare a molecule. Forcing removal
+        // off afterwards keeps the mask and the cell, and `removal_mode`
+        // stays off, which is the shortcut's gate.
+        solver.set_frozen(&[1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        solver.set_pbc_axes(true, false, true);
+        solver.set_broken_axes(true, false, false, true, false, false);
+        solver.set_project_rigid(false);
+        assert_eq!(solver.removal_mode(), RigidMode::Off);
+        assert_eq!(solver.manifold, ManifoldKind::Euclidean);
+        assert_eq!(solver.pbc, [true, false, true]);
+        assert_eq!(solver.broken_translation, [true, false, false]);
+        assert_eq!(solver.broken_rotation, [true, false, false]);
+        assert_eq!(
+            solver.frozen.as_deref(),
+            Some(&[1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0][..])
+        );
+
+        let old = array![0.0, -0.0, 1.0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.1];
+        let x = array![0.4, 0.5, -0.0, 0.3, 0.1, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0];
+        let gold = array![
+            2.0,
+            -0.0,
+            f64::NAN,
+            0.1,
+            0.2,
+            0.3,
+            0.4,
+            0.5,
+            0.6,
+            0.7,
+            0.8,
+            0.9
+        ];
+        let grad = array![5.0, 1.0, 0.0, -0.2, 0.0, 0.4, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+
+        let step = &x - &old;
+        let carried = solver.transport_vec(&old, &x, &step);
+        for i in 0..step.len() {
+            assert_eq!(carried[i].to_bits(), step[i].to_bits(), "transport s {i}");
+        }
+        let gold_carried = solver.transport_vec(&old, &x, &gold);
+        for i in 0..gold.len() {
+            assert_eq!(
+                gold_carried[i].to_bits(),
+                gold[i].to_bits(),
+                "transport g {i}"
+            );
+        }
+        let mut s_old = carried;
+        let mut y_old = &grad - &gold_carried;
+        let s_bits: Vec<u64> = s_old.iter().map(|v| v.to_bits()).collect();
+        let y_bits: Vec<u64> = y_old.iter().map(|v| v.to_bits()).collect();
+        solver.kill_at(&x, &mut s_old);
+        solver.kill_at(&x, &mut y_old);
+        assert_eq!(
+            s_bits,
+            s_old.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            y_bits,
+            y_old.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        );
+        // The frozen coordinates are the raw difference. Removal off does
+        // not zero them.
+        assert_eq!(y_old[0].to_bits(), (5.0f64 - 2.0).to_bits());
+        assert_ne!(y_old[0].to_bits(), 0);
+        assert_ne!(y_old[1].to_bits(), 0);
+
+        let (s_new, y_new) = solver.lbfgs_sy(&old, &x, &gold, &grad);
+        for i in 0..s_new.len() {
+            assert_eq!(s_new[i].to_bits(), s_old[i].to_bits(), "s {i}");
+            assert_eq!(y_new[i].to_bits(), y_old[i].to_bits(), "y {i}");
+        }
     }
 }

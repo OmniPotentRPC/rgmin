@@ -278,6 +278,25 @@ impl Default for Lbfgs {
     }
 }
 
+/// Euclidean step and gradient change, `s = x - x_old` and `y = g - g_old`.
+///
+/// Each element is the same subtraction a stored difference would hold.
+/// Callers that transport or project the pair do not use this.
+pub(crate) fn euclidean_pair(
+    x: ArrayView1<f64>,
+    old: ArrayView1<f64>,
+    grad: ArrayView1<f64>,
+    gold: ArrayView1<f64>,
+) -> (Array1<f64>, Array1<f64>) {
+    let n = x.len();
+    debug_assert_eq!(old.len(), n);
+    debug_assert_eq!(grad.len(), n);
+    debug_assert_eq!(gold.len(), n);
+    let s = Array1::from_shape_fn(n, |i| x[i] - old[i]);
+    let y = Array1::from_shape_fn(n, |i| grad[i] - gold[i]);
+    (s, y)
+}
+
 impl Lbfgs {
     /// Fresh solver with room for `max_pairs` curvature pairs.
     ///
@@ -1335,8 +1354,7 @@ impl Lbfgs {
             (t, stall)
         };
         if t.moved && record_pair {
-            let s = &t.x - &*pos;
-            let y = &t.g - &*grad;
+            let (s, y) = euclidean_pair(t.x.view(), pos.view(), t.g.view(), grad.view());
             self.push(s, y);
         }
         *pos = t.x;
@@ -1351,6 +1369,42 @@ impl Lbfgs {
 mod tests {
     use super::*;
     use ndarray::{Array2, array};
+
+    #[test]
+    fn euclidean_pair_matches_the_allocated_difference() {
+        fn check(x: &Array1<f64>, old: &Array1<f64>, g: &Array1<f64>, gold: &Array1<f64>) {
+            let (s, y) = euclidean_pair(x.view(), old.view(), g.view(), gold.view());
+            let s_old = x - old;
+            let y_old = g - gold;
+            assert_eq!(s.len(), s_old.len());
+            for i in 0..s.len() {
+                assert_eq!(s[i].to_bits(), s_old[i].to_bits(), "s {i}");
+                assert_eq!(y[i].to_bits(), y_old[i].to_bits(), "y {i}");
+            }
+        }
+        let empty = Array1::<f64>::zeros(0);
+        check(&empty, &empty, &empty, &empty);
+        check(
+            &array![0.0, -0.0, 1.0],
+            &array![-0.0, 0.0, -0.0],
+            &array![f64::NAN, f64::INFINITY, -0.0],
+            &array![1.0, f64::NEG_INFINITY, 0.0],
+        );
+        let mut state = 0x0a1b_2c3d_4e5f_6071u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(0x6c62_272e_07bb_0142)
+                .wrapping_add(0x9e37_79b9_7f4a_7c15);
+            f64::from_bits(state)
+        };
+        for n in [1usize, 7, 8, 72] {
+            let x = Array1::from_iter((0..n).map(|_| next()));
+            let old = Array1::from_iter((0..n).map(|_| next()));
+            let g = Array1::from_iter((0..n).map(|_| next()));
+            let gold = Array1::from_iter((0..n).map(|_| next()));
+            check(&x, &old, &g, &gold);
+        }
+    }
 
     #[test]
     fn an_indefinite_hessian_falls_back_to_gamma() {

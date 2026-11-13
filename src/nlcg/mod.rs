@@ -152,33 +152,31 @@ impl Conjugacy {
         let g = ctx.current_gradient;
         let gold = ctx.previous_gradient;
         let d = ctx.previous_direction;
-        let gg = dot(g, g);
-        let gg_old = dot(gold, gold);
-        let y = &g - &gold;
-        let y_g = dot(g, y.view());
         match self {
-            Self::FletcherReeves => div(gg, gg_old),
-            Self::PolakRibiere => div(y_g, gg_old),
+            Self::FletcherReeves => div(dot(g, g), dot(gold, gold)),
+            Self::PolakRibiere => {
+                let (y_g, gg_old) = dot_diff_and_dot(g, g, gold, gold);
+                div(y_g, gg_old)
+            }
             Self::PolakRibierePlus => Self::PolakRibiere.beta(ctx).max(0.0),
             Self::HestenesStiefel => {
-                let y_d = dot(y.view(), d);
+                let (y_g, y_d) = diff_dots(g, g, gold, d);
                 div(y_g, y_d)
             }
-            Self::DaiYuan => {
-                let y_d = dot(y.view(), d);
-                div(gg, y_d)
-            }
-            Self::ConjugateDescent => div(gg, -dot(d, gold)),
+            Self::DaiYuan => div(dot(g, g), diff_dot(g, gold, d)),
+            Self::ConjugateDescent => div(dot(g, g), -dot(d, gold)),
             Self::HagerZhang => {
-                let y_d = dot(y.view(), d);
+                let (y_g, y_d, yy) = diff_dots_self(g, g, gold, d);
                 if y_d.abs() <= f64::EPSILON {
                     return 0.0;
                 }
-                let yy = dot(y.view(), y.view());
                 let d_g = dot(d, g);
                 y_g / y_d - 2.0 * yy * d_g / (y_d * y_d)
             }
-            Self::LiuStorey => div(-y_g, dot(d, gold)),
+            Self::LiuStorey => {
+                let (y_g, _) = dot_diff_and_dot(g, g, gold, gold);
+                div(-y_g, dot(d, gold))
+            }
             Self::FrPr => {
                 let beta_pr = Self::PolakRibiere.beta(ctx);
                 let beta_fr = Self::FletcherReeves.beta(ctx);
@@ -228,27 +226,18 @@ impl Conjugacy {
             }
             Self::PolakRibierePlus => Self::PolakRibiere.beta_metric(ctx, z, z_old).max(0.0),
             Self::HestenesStiefel => {
-                let y = &g - &gold;
-                let zy = dot(z, y.view());
-                div(zy, dot(y.view(), d))
+                let (zy, y_d) = diff_dots(z, g, gold, d);
+                div(zy, y_d)
             }
-            Self::DaiYuan => {
-                let gz = dot(g, z);
-                let y = &g - &gold;
-                div(gz, dot(y.view(), d))
-            }
+            Self::DaiYuan => div(dot(g, z), diff_dot(g, gold, d)),
             Self::ConjugateDescent => {
                 let gz = dot(g, z);
                 div(gz, -dot(d, gold))
             }
             Self::HagerZhang => {
                 // y is the Euclidean gradient change. z · y is the
-                // preconditioned Polak-Ribiere product.
-                let y = &g - &gold;
-                let zy = dot(z, y.view());
-                let yz = &z - &z_old;
-                let y_d = dot(y.view(), d);
-                let yy = dot(y.view(), yz.view());
+                // preconditioned Polak-Ribiere product. yy is y · (z - z_old).
+                let (zy, y_d, yy) = diff_dots_cross(z, g, gold, d, z, z_old);
                 if y_d.abs() <= f64::EPSILON {
                     return 0.0;
                 }
@@ -256,8 +245,7 @@ impl Conjugacy {
                 zy / y_d - 2.0 * yy * d_g / (y_d * y_d)
             }
             Self::LiuStorey => {
-                let y = &g - &gold;
-                let zy = dot(z, y.view());
+                let (zy, _) = dot_diff_and_dot(z, g, gold, z_old);
                 div(-zy, dot(d, gold))
             }
             Self::FrPr => {
@@ -312,6 +300,76 @@ fn dot_diff_and_dot(
         let y = g[i] - gold[i];
         (zy + z[i] * y, gz + gold[i] * z_old[i])
     })
+}
+
+/// `a · (u - v)` and `(u - v) · b`, each a left fold from [`sum_identity`].
+///
+/// `a · d` is the product [`dot`] forms with a stored difference on the
+/// left. `(u - v) · b` is the product with that difference on the left of
+/// the second factor, which is what `dot(y, b)` multiplies.
+fn diff_dots(
+    a: ArrayView1<'_, f64>,
+    u: ArrayView1<'_, f64>,
+    v: ArrayView1<'_, f64>,
+    b: ArrayView1<'_, f64>,
+) -> (f64, f64) {
+    let n = a.len().min(u.len()).min(v.len()).min(b.len());
+    (0..n).fold((sum_identity(), sum_identity()), |(ad, db), i| {
+        let y = u[i] - v[i];
+        (ad + a[i] * y, db + y * b[i])
+    })
+}
+
+/// `(u - v) · b` from [`sum_identity`].
+fn diff_dot(u: ArrayView1<'_, f64>, v: ArrayView1<'_, f64>, b: ArrayView1<'_, f64>) -> f64 {
+    let n = u.len().min(v.len()).min(b.len());
+    (0..n).fold(sum_identity(), |acc, i| {
+        let y = u[i] - v[i];
+        acc + y * b[i]
+    })
+}
+
+/// `a · (u - v)`, `(u - v) · b`, and `(u - v) · (u - v)`.
+fn diff_dots_self(
+    a: ArrayView1<'_, f64>,
+    u: ArrayView1<'_, f64>,
+    v: ArrayView1<'_, f64>,
+    b: ArrayView1<'_, f64>,
+) -> (f64, f64, f64) {
+    let n = a.len().min(u.len()).min(v.len()).min(b.len());
+    (0..n).fold(
+        (sum_identity(), sum_identity(), sum_identity()),
+        |(ad, db, yy), i| {
+            let y = u[i] - v[i];
+            (ad + a[i] * y, db + y * b[i], yy + y * y)
+        },
+    )
+}
+
+/// `a · (u - v)`, `(u - v) · b`, and `(u - v) · (p - q)`.
+fn diff_dots_cross(
+    a: ArrayView1<'_, f64>,
+    u: ArrayView1<'_, f64>,
+    v: ArrayView1<'_, f64>,
+    b: ArrayView1<'_, f64>,
+    p: ArrayView1<'_, f64>,
+    q: ArrayView1<'_, f64>,
+) -> (f64, f64, f64) {
+    let n = a
+        .len()
+        .min(u.len())
+        .min(v.len())
+        .min(b.len())
+        .min(p.len())
+        .min(q.len());
+    (0..n).fold(
+        (sum_identity(), sum_identity(), sum_identity()),
+        |(ad, db, yy), i| {
+            let y = u[i] - v[i];
+            let yz = p[i] - q[i];
+            (ad + a[i] * y, db + y * b[i], yy + y * yz)
+        },
+    )
 }
 
 /// `num/den`, or 0 when `den` is negligible beside `num`.
@@ -585,6 +643,128 @@ mod tests {
             let gold = Array1::from_iter((0..n).map(|_| next()));
             let z_old = Array1::from_iter((0..n).map(|_| next()));
             check(z, g, gold, z_old);
+        }
+    }
+
+    #[test]
+    fn other_betas_match_the_allocated_difference_bit_for_bit() {
+        fn sum_dot(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+            a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+        }
+        fn check(
+            z: &Array1<f64>,
+            g: &Array1<f64>,
+            gold: &Array1<f64>,
+            d: &Array1<f64>,
+            z_old: &Array1<f64>,
+        ) {
+            let y = g - gold;
+            let yz = z - z_old;
+            let yg: f64 = sum_dot(g.view(), y.view());
+            let yd: f64 = sum_dot(y.view(), d.view());
+            let yy: f64 = sum_dot(y.view(), y.view());
+            let zy: f64 = sum_dot(z.view(), y.view());
+            let y_yz: f64 = sum_dot(y.view(), yz.view());
+            let (yg_f, yd_f) = diff_dots(g.view(), g.view(), gold.view(), d.view());
+            let (zy_f, yd_m) = diff_dots(z.view(), g.view(), gold.view(), d.view());
+            let yd_only = diff_dot(g.view(), gold.view(), d.view());
+            let (yg_s, yd_s, yy_s) = diff_dots_self(g.view(), g.view(), gold.view(), d.view());
+            let (zy_c, yd_c, yy_c) = diff_dots_cross(
+                z.view(),
+                g.view(),
+                gold.view(),
+                d.view(),
+                z.view(),
+                z_old.view(),
+            );
+            assert_eq!(yg_f.to_bits(), yg.to_bits());
+            assert_eq!(yd_f.to_bits(), yd.to_bits());
+            assert_eq!(zy_f.to_bits(), zy.to_bits());
+            assert_eq!(yd_m.to_bits(), yd.to_bits());
+            assert_eq!(yd_only.to_bits(), yd.to_bits());
+            assert_eq!(yg_s.to_bits(), yg.to_bits());
+            assert_eq!(yd_s.to_bits(), yd.to_bits());
+            assert_eq!(yy_s.to_bits(), yy.to_bits());
+            assert_eq!(zy_c.to_bits(), zy.to_bits());
+            assert_eq!(yd_c.to_bits(), yd.to_bits());
+            assert_eq!(yy_c.to_bits(), y_yz.to_bits());
+
+            let ctx = ConjugacyContext {
+                current_gradient: g.view(),
+                previous_gradient: gold.view(),
+                previous_direction: d.view(),
+            };
+            let gg: f64 = sum_dot(g.view(), g.view());
+            let gg_old: f64 = sum_dot(gold.view(), gold.view());
+            let gz: f64 = sum_dot(g.view(), z.view());
+            let gz_old: f64 = sum_dot(gold.view(), z_old.view());
+            assert_eq!(
+                Conjugacy::FletcherReeves.beta(&ctx).to_bits(),
+                div(gg, gg_old).to_bits()
+            );
+            assert_eq!(
+                Conjugacy::HestenesStiefel.beta(&ctx).to_bits(),
+                div(yg, yd).to_bits()
+            );
+            assert_eq!(
+                Conjugacy::DaiYuan.beta(&ctx).to_bits(),
+                div(gg, yd).to_bits()
+            );
+            assert_eq!(
+                Conjugacy::FletcherReeves
+                    .beta_metric(&ctx, z.view(), z_old.view())
+                    .to_bits(),
+                div(gz, gz_old).to_bits()
+            );
+            assert_eq!(
+                Conjugacy::HestenesStiefel
+                    .beta_metric(&ctx, z.view(), z_old.view())
+                    .to_bits(),
+                div(zy, yd).to_bits()
+            );
+            assert_eq!(
+                Conjugacy::DaiYuan
+                    .beta_metric(&ctx, z.view(), z_old.view())
+                    .to_bits(),
+                div(gz, yd).to_bits()
+            );
+        }
+
+        let empty = Array1::<f64>::zeros(0);
+        check(&empty, &empty, &empty, &empty, &empty);
+
+        let z = array![0.0, 0.0];
+        let g = array![-0.0, -0.0];
+        let gold = array![0.0, 0.0];
+        let d = array![0.0, 0.0];
+        let z_old = array![-0.0, -0.0];
+        check(&z, &g, &gold, &d, &z_old);
+        let y = &g - &gold;
+        let yd: f64 = y.iter().zip(d.iter()).map(|(a, b)| a * b).sum();
+        assert_eq!(yd.to_bits(), (-0.0f64).to_bits());
+
+        check(
+            &array![f64::NAN, 1.0, f64::INFINITY],
+            &array![2.0, f64::NAN, -0.0],
+            &array![f64::NEG_INFINITY, -1.0, 0.0],
+            &array![-0.0, f64::INFINITY, 3.0],
+            &array![0.0, f64::NAN, -4.0],
+        );
+
+        let mut state = 0x0f1e_2d3c_4b5a_6978u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(0x6c62_272e_07bb_0142)
+                .wrapping_add(0x2f4a_8d6c_91e5_b3a7);
+            f64::from_bits(state)
+        };
+        for n in [1usize, 3, 8, 17] {
+            let z = Array1::from_iter((0..n).map(|_| next()));
+            let g = Array1::from_iter((0..n).map(|_| next()));
+            let gold = Array1::from_iter((0..n).map(|_| next()));
+            let d = Array1::from_iter((0..n).map(|_| next()));
+            let z_old = Array1::from_iter((0..n).map(|_| next()));
+            check(&z, &g, &gold, &d, &z_old);
         }
     }
 
