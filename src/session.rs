@@ -1962,7 +1962,7 @@ impl Solver {
             };
             direction = self.project_vec(x, &direction);
             let motion = max_atom_displacement(&direction);
-            if motion >= cap {
+            if motion > cap {
                 if let Inner::Lbfgs(solver) = &mut self.inner {
                     solver.forget();
                 }
@@ -4158,5 +4158,55 @@ mod retained_neb_guard_tests {
             assert_eq!(s_new[i].to_bits(), s_old[i].to_bits(), "s {i}");
             assert_eq!(y_new[i].to_bits(), y_old[i].to_bits(), "y {i}");
         }
+    }
+
+    #[test]
+    fn a_geometry_step_exactly_at_the_cap_keeps_its_pairs() {
+        // The bowl's gradient at x is x. One stored pair makes the
+        // two-loop step a different direction from the seed. The cap is
+        // that step's length, so the step lands on the cap and must not
+        // be treated as past it.
+        let obj = crate::Oracle::unbounded(3, |x: ArrayView1<f64>| (0.5 * x.dot(&x), x.to_owned()));
+        let mut solver = Solver::new(
+            Method::lbfgs(),
+            Control {
+                maxiter: 4,
+                gtol: 1e-12,
+                istep: 1.0,
+                maxmove: None,
+                ftol_rel: None,
+                noise_floor: None,
+            },
+            3,
+        );
+        solver.set_geometry_step(true);
+        let g = array![-4.0, 0.0, 0.0];
+        let motion = {
+            let Inner::Lbfgs(lbfgs) = &mut solver.inner else {
+                panic!("expected L-BFGS");
+            };
+            lbfgs.record(array![1.0, 0.0, 0.0], array![1.0, 1.0, 0.0]);
+            let direction = lbfgs.direction_h0(g.view(), 0.1);
+            assert!(direction.dot(&g) < 0.0, "ascent {direction:?}");
+            let motion = crate::step::max_atom_norm(direction.view());
+            let nominal = crate::step::max_atom_norm(g.view());
+            assert!(
+                nominal < 64.0 * motion,
+                "the probe would be marked stiff: nominal {nominal} motion {motion}"
+            );
+            assert!(motion.is_finite() && motion > 0.0, "motion {motion}");
+            motion
+        };
+        solver.set_atom_maxmove(motion);
+        let mut x = g.clone();
+        solver.step(&obj, &mut x).unwrap();
+        let pairs = match &solver.inner {
+            Inner::Lbfgs(lbfgs) => lbfgs.len(),
+            _ => panic!("expected L-BFGS"),
+        };
+        assert_eq!(
+            pairs, 2,
+            "a step of length {motion} dropped the pair that produced it"
+        );
     }
 }
