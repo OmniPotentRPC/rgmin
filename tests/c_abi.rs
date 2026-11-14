@@ -309,6 +309,77 @@ fn c_abi_scg_null_params_uses_netlab_polak_ribiere() {
     assert!(x[1].abs() < 1e-4);
 }
 
+/// `2^60 + x0`, flat to the last bit under SCG's damped steps. `user` is
+/// an `AtomicUsize` evaluation count; from 10000 on the value is NaN.
+unsafe extern "C" fn flat_eval(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let calls = unsafe { &*(user as *const AtomicUsize) };
+    let (p, _) = unsafe { cpu_f64(x) };
+    let value = if calls.fetch_add(1, Ordering::Relaxed) >= 10_000 {
+        f64::NAN
+    } else {
+        1_152_921_504_606_846_976.0 + unsafe { *p }
+    };
+    unsafe { *value_out = value };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn flat_grad(
+    _user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (gp, gn) = unsafe { cpu_f64(g as *const _) };
+    for i in 0..gn {
+        unsafe { *(gp as *mut f64).add(i) = if i == 0 { 1.0 } else { 0.0 } };
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn c_abi_scg_unlimited_fit_stops_on_a_flat_plateau() {
+    let calls = AtomicUsize::new(0);
+    let mut x = [0.0, 0.0];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let ctrl = rgmin_control_t {
+        maxiter: 0,
+        gtol: 0.0,
+        ..scg_bowl_ctrl()
+    };
+    let params = rgmin_scg_params_t {
+        lambda_limit: f64::INFINITY,
+        tol_sol: 0.0,
+        tol_func: 1e-8,
+        ..scg_bowl_params(rgmin_conjugacy_t::RGMIN_CONJUGACY_POLAK_RIBIERE as i32)
+    };
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+    };
+    let st = unsafe {
+        rgmin_minimize_scg(
+            Some(flat_eval),
+            Some(flat_grad),
+            None,
+            &calls as *const AtomicUsize as *mut c_void,
+            xt,
+            &ctrl,
+            &params,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS, "{}", last_error_text());
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE);
+    assert_eq!(out.steps, 2);
+    assert_eq!(out.grad_norm, 1.0);
+}
+
 fn scg_one_step_length(maxmove: f64) -> f64 {
     let start = [3.0, -4.0];
     let mut x = start;
