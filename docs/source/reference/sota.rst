@@ -68,9 +68,10 @@ Lennard-Jones, 75 atoms
 The 75-atom Lennard-Jones (LJ75) protocol is anneal's ``examples/warm_quench_lj.rs``: 400 relaxations from perturbed minima, overlaps repaired first, no bounds.
 ``examples/lbfgsb_bench.rs`` rebuilds the same starts and traces rgmin.
 ``docs/figures/lbfgsb/bench_lbfgsb.py`` runs SciPy 1.18.1 on those starts.
-The ``minimize`` arm opts into ``LbfgsStep::Wolfe``.
+The ``minimize`` arms opt into ``LbfgsStep::Wolfe``.
 That is the strong Wolfe search these numbers record.
 The default step stays the eOn cap, and this table does not time it.
+The two ``approx_wolfe = 1e-12`` arms turn on the approximate Wolfe test (:doc:`../explanation/linesearch`).
 
 .. list-table::
    :header-rows: 1
@@ -90,6 +91,16 @@ The default step stays the eOn cap, and this table does not time it.
      - 251.8
      - 119.2
      - 2.67e-5
+   * - ``minimize``, ``Wolfe``, ``approx_wolfe = 1e-12``
+     - 278.6
+     - 252.3
+     - 26.3
+     - 9.99e-7
+   * - ``minimize_box``, ``approx_wolfe = 1e-12``
+     - 278.3
+     - 251.7
+     - 26.6
+     - 9.99e-7
    * - L-BFGS-B, ``maxcor 8``, ``gtol 1e-6``, ``ftol 0``
      - 278.5
      - 252.6
@@ -102,9 +113,9 @@ The default step stays the eOn cap, and this table does not time it.
      - 5.63e-2
 
 ``gmax`` is the largest absolute gradient component at the last accepted iterate.
-The "to" column counts evaluations up to the first accepted iterate with ``gmax <= 1e-5``; every run of the first three arms gets there.
+The "to" column counts evaluations up to the first accepted iterate with ``gmax <= 1e-5``; every run of the first five arms gets there.
 The "after" column is the mean of what each of those runs spends past that point.
-The two rgmin arms end in the same minimum on all 400 starts.
+The four rgmin arms end in the same minimum on all 400 starts.
 rgmin and SciPy agree on 382 starts.
 Of the other 18, SciPy finds the lower minimum on 9 and rgmin on 9.
 
@@ -115,14 +126,19 @@ The re-measured gap, for the Wolfe search, is 371.2 against 278.5, 1.33 times.
 Bound handling is not the cause.
 LJ75 has no bounds.
 SciPy skips its Cauchy point when a problem has none (``mainlb`` in ``scipy/optimize/src/lbfgsb.c``, SciPy 1.18.1, commit e4e854ea), and ``minimize_box`` costs what the Wolfe ``minimize`` costs.
-All three converged arms reach ``gmax <= 1e-5`` after about 252 evaluations.
+Every arm that converges reaches ``gmax <= 1e-5`` after about 252 evaluations.
 The difference is the end of the run.
-Near ``gmax = 1e-6`` the energy, about -380, changes only in its last bits, so the strong Wolfe zoom cannot meet its tests.
+Near ``gmax = 1e-6`` the energy, about -380, changes only in its last bits.
+The last ten values that the strict search tries after its last accepted iterate differ from the value there by up to 1.6e-12, so its decrease test passes or fails on rounding.
 It spends up to 40 evaluations, drops the pairs, and spends up to 40 more from steepest descent before it stops.
-On average 68.3 evaluations per relaxation come after the last accepted iterate.
+On average 68.3 evaluations per relaxation come after the last accepted iterate, and 394 of the 400 runs end with ``gmax`` at or above the ``gtol`` of 1e-6.
+
+With ``approx_wolfe = 1e-12`` the search accepts a trial at most 1e-12 times abs(f) above the start when it meets the strong curvature test, and places such trials by the sign of their slope.
+Every run then ends on the ``gtol`` test, and no run spends an evaluation after its last accepted iterate.
+The test is off by default, since a solver reused after a large perturbation can then take a much too long first step (:doc:`../explanation/linesearch`).
 SciPy's More-Thuente search (``dcsrch``) returns a warning once rounding blocks progress, and ``lnsrlb`` takes that point as the step.
 With ``ftol = 0`` the run then stops at the first step that does not lower f (115 of 400 runs), on the gradient test (284), or on a failed line search (1).
-It spends 0.1 evaluations per relaxation after its last accepted iterate.
+It spends 0.1 evaluations per relaxation after its last accepted iterate, about as few, but 116 of its runs end with ``gmax`` at or above 1e-6.
 With SciPy's default ``ftol`` the run stops much earlier, at a median ``gmax`` of 5.7e-3, which is not a converged relaxation by this page's test.
 
 .. image:: ../../figures/lbfgsb/lj75_tail.png

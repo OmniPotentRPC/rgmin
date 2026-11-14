@@ -14,8 +14,9 @@
 //! opts into the strong Wolfe search the recorded table measured.
 //! `lbfgs-box` is `Lbfgs::minimize_box`, the generalized Cauchy point
 //! and subspace step, with the same settings on `lj75` and with 5 pairs
-//! and `1e-5` on `driver1`, the values of the L-BFGS-B driver. The
-//! iteration cap is 3000 per run.
+//! and `1e-5` on `driver1`, the values of the L-BFGS-B driver.
+//! `lbfgs-approx` and `lbfgs-box-approx` repeat them with
+//! `approx_wolfe = 1e-12`. The iteration cap is 3000 per run.
 //!
 //! The starts go to the file named by the first argument as
 //! `problem x_1 ... x_n`, one per line, so that
@@ -176,23 +177,22 @@ fn trace(
         }
         true
     };
-    let (f, evals) = match arm {
-        "lbfgs" => {
-            let mut opt = Lbfgs::default();
-            opt.step = LbfgsStep::Wolfe;
-            let (f, _, e) = opt.minimize_watched(p.view(), 3000, logged, watch);
-            (f, e)
-        }
-        _ => {
-            let mut opt = Lbfgs::default();
-            if problem == "driver1" {
-                opt = Lbfgs::with_capacity(5);
-                opt.gtol = 1e-5;
-            }
-            let (f, _, e) =
-                opt.minimize_box_watched(p.view(), lo.view(), hi.view(), 3000, logged, watch);
-            (f, e)
-        }
+    let mut opt = Lbfgs::default();
+    if problem == "driver1" {
+        opt = Lbfgs::with_capacity(5);
+        opt.gtol = 1e-5;
+    }
+    if arm.ends_with("-approx") {
+        opt.approx_wolfe = 1e-12;
+    }
+    let (f, evals) = if arm.starts_with("lbfgs-box") {
+        let (f, _, e) =
+            opt.minimize_box_watched(p.view(), lo.view(), hi.view(), 3000, logged, watch);
+        (f, e)
+    } else {
+        opt.step = LbfgsStep::Wolfe;
+        let (f, _, e) = opt.minimize_watched(p.view(), 3000, logged, watch);
+        (f, e)
     };
     let log = log.into_inner();
     assert_eq!(log.len(), evals);
@@ -228,12 +228,14 @@ fn main() {
         Array1::from_elem(25, 100.0),
     );
     println!("problem,arm,start,eval,f,ginf,accepted");
-    for arm in ["lbfgs", "lbfgs-box"] {
+    for arm in ["lbfgs", "lbfgs-approx", "lbfgs-box", "lbfgs-box-approx"] {
         for (k, p) in lj75.iter().enumerate() {
             trace("lj75", arm, k, p, lj, &free);
         }
     }
-    for (k, p) in drv.iter().enumerate() {
-        trace("driver1", "lbfgs-box", k, p, driver1, &boxed);
+    for arm in ["lbfgs-box", "lbfgs-box-approx"] {
+        for (k, p) in drv.iter().enumerate() {
+            trace("driver1", arm, k, p, driver1, &boxed);
+        }
     }
 }

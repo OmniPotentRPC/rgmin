@@ -27,9 +27,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 TOL = 1e-5
-STYLE = {"lbfgs-box": "--"}
+STYLE = {"lbfgs-box": "--", "lbfgs-approx": ":"}
 LJ75_ARMS = {
     "lbfgs": "rgmin Lbfgs::minimize",
+    "lbfgs-approx": "rgmin Lbfgs::minimize, approx_wolfe 1e-12",
     "lbfgs-box": "rgmin Lbfgs::minimize_box",
     "scipy-m8-noftol": "SciPy, maxcor 8, gtol 1e-6, ftol 0",
     "scipy-default": "SciPy defaults",

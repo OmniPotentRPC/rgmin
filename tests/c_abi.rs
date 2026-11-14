@@ -1100,7 +1100,11 @@ fn lowest_eigenpairs_recovers_a_diagonal_and_rejects_bad_blocks() {
     assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
     let mut bad = params;
     bad.kind = rgmin_eigen_kind_t::RGMIN_EIGEN_ELPA as i32;
+    // The call above stored NaN. Read it back to a finite entry so this
+    // call is refused because ELPA is not linked, not because the seed
+    // is non-finite. The read keeps that store live for the pointer in `st`.
     seed[0] = 1.0;
+    let _ = seed[0];
     let status = unsafe {
         rgmin_lowest_eigenpairs(
             Some(diag_lam_hvp),
