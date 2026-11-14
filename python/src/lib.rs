@@ -30,6 +30,7 @@ fn control(dt: f64) -> Control {
         istep: if dt.is_finite() && dt > 0.0 { dt } else { 1.0 },
         maxmove: None,
         stop_norm: StopNorm::MaxAtom,
+        ..Control::default()
     }
 }
 

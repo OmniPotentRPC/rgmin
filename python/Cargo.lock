@@ -166,7 +166,8 @@ dependencies = [
 [[package]]
 name = "eindir-core"
 version = "0.6.0"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9#f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e330e3abad9c1a597b144d40eb4b07ab3511d79f7d2cdbbcb37a44662f974db0"
 dependencies = [
  "cbindgen",
  "dlpk",
@@ -329,6 +330,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "multiversion"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ca4bea16ffc3f443cf7d866912118196bfef4c6a1556ca00f9f9b00bb43f7c"
+dependencies = [
+ "multiversion-macros",
+]
+
+[[package]]
+name = "multiversion-macros"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d416831a7317ef4b08bee00b69cbbb9c8763da7959a7026244d6266869f9c83"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -575,6 +597,8 @@ dependencies = [
  "cbindgen",
  "dlpk",
  "eindir-core",
+ "libm",
+ "multiversion",
  "ndarray",
  "rand",
  "thiserror",
