@@ -327,3 +327,33 @@ fn a_refused_trust_trial_records_the_caller_move_once() {
     assert_ne!(x, moved);
     assert_eq!(solver.pair_count(), pairs + 2);
 }
+
+/// The default Euclidean step is the eOn cap, and that path returns
+/// before the trust step. With the radius on, a zero gradient at
+/// `gtol = 0` is no descent, and a slope that overflows is a non-finite
+/// direction. Both leave `x` where it was. These are the two C cases.
+#[test]
+fn the_eon_fast_path_does_not_bypass_the_radius() {
+    let mut flat_control = control();
+    flat_control.gtol = 0.0;
+    let flat = Oracle::unbounded(2, |x: ArrayView1<f64>| (1.0, Array1::zeros(x.len())));
+    let mut solver = Solver::new(Method::lbfgs(), flat_control, 2);
+    solver.set_lbfgs_trust_radius(0.5);
+    let mut x = array![3.0, -1.0];
+    let err = solver.step(&flat, &mut x).unwrap_err();
+    assert!(err.to_string().contains("no descent direction"), "{err}");
+    assert_eq!(x, array![3.0, -1.0]);
+
+    let steep = Oracle::unbounded(2, |x: ArrayView1<f64>| {
+        (1.0, Array1::from_elem(x.len(), 1e200))
+    });
+    let mut solver = Solver::new(Method::lbfgs(), control(), 2);
+    solver.set_lbfgs_trust_radius(0.5);
+    let mut x = array![3.0, -1.0];
+    let err = solver.step(&steep, &mut x).unwrap_err();
+    assert!(
+        err.to_string().contains("non-finite search direction"),
+        "{err}"
+    );
+    assert_eq!(x, array![3.0, -1.0]);
+}

@@ -3020,6 +3020,7 @@ impl Solver {
         if self.exp.is_none()
             && !self.project_rigid
             && matches!(self.manifold, ManifoldKind::Euclidean)
+            && !self.use_lbfgs_burdakov()
         {
             if self.use_capped_lbfgs() && matches!(self.lbfgs_step(), LbfgsStep::Capped { .. }) {
                 return self.step_eon_euclidean(obj, x);
