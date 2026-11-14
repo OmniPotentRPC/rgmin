@@ -2042,44 +2042,27 @@ unsafe extern "C" fn bowl_eval(
     value_out: *mut f64,
 ) -> rgmin_status_t {
     let (p, n) = unsafe { cpu_f64(x) };
-    let mut f = 0.0;
-    for i in 0..n {
-        let v = unsafe { *p.add(i) };
-        f += 0.5 * v * v;
+    assert_eq!(n, 2);
+    let x0 = unsafe { *p };
+    let x1 = unsafe { *p.add(1) };
+    unsafe {
+        *value_out = 0.5 * (x0 * x0 + x1 * x1);
     }
-    unsafe { *value_out = f };
     rgmin_status_t::RGMIN_SUCCESS
 }
 
 unsafe extern "C" fn bowl_grad(
-    user: *mut c_void,
+    _user: *mut c_void,
     x: *const DLManagedTensorVersioned,
     g: *mut DLManagedTensorVersioned,
 ) -> rgmin_status_t {
-    let count = unsafe { &*(user as *const BowlCount) };
-    count.grads.fetch_add(1, Ordering::Relaxed);
     let (p, n) = unsafe { cpu_f64(x) };
-    let (gp, gn) = unsafe { cpu_f64(g) };
-    assert_eq!(n, gn);
-    for i in 0..n {
-        unsafe { *(gp as *mut f64).add(i) = *p.add(i) };
-    }
-    rgmin_status_t::RGMIN_SUCCESS
-}
-
-unsafe extern "C" fn bowl_hvp(
-    user: *mut c_void,
-    _x: *const DLManagedTensorVersioned,
-    v: *const DLManagedTensorVersioned,
-    hv: *mut DLManagedTensorVersioned,
-) -> rgmin_status_t {
-    let count = unsafe { &*(user as *const BowlCount) };
-    count.hvps.fetch_add(1, Ordering::Relaxed);
-    let (vp, n) = unsafe { cpu_f64(v) };
-    let (hp, hn) = unsafe { cpu_f64(hv) };
-    assert_eq!(n, hn);
-    for i in 0..n {
-        unsafe { *(hp as *mut f64).add(i) = *vp.add(i) };
+    assert_eq!(n, 2);
+    let (gp, gn) = unsafe { cpu_f64(g as *const _) };
+    assert_eq!(gn, 2);
+    unsafe {
+        *(gp as *mut f64) = *p;
+        *(gp as *mut f64).add(1) = *p.add(1);
     }
     rgmin_status_t::RGMIN_SUCCESS
 }
@@ -2139,8 +2122,8 @@ fn newton_cg_method_string_and_counters_cross_the_c_abi() {
         let st = unsafe {
             rgmin_solver_step(
                 session,
-                Some(bowl_eval),
-                Some(bowl_grad),
+                Some(ncg_bowl_eval),
+                Some(ncg_bowl_grad),
                 user,
                 xt,
                 &mut out,
@@ -2168,9 +2151,9 @@ fn newton_cg_method_string_and_counters_cross_the_c_abi() {
         let st = unsafe {
             rgmin_solver_step_hvp(
                 session,
-                Some(bowl_eval),
-                Some(bowl_grad),
-                Some(bowl_hvp),
+                Some(ncg_bowl_eval),
+                Some(ncg_bowl_grad),
+                Some(ncg_bowl_hvp),
                 user,
                 xt,
                 &mut out,
@@ -2941,10 +2924,6 @@ fn c_abi_diis_reduces_a_quadratic() {
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_DIIS, &ctrl, 2) };
     assert!(!session.is_null());
-    let count = BowlCount {
-        grads: AtomicUsize::new(0),
-        hvps: AtomicUsize::new(0),
-    };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
@@ -2960,7 +2939,7 @@ fn c_abi_diis_reduces_a_quadratic() {
                 session,
                 Some(bowl_eval),
                 Some(bowl_grad),
-                &count as *const BowlCount as *mut c_void,
+                std::ptr::null_mut(),
                 xt,
                 &mut out,
             )
@@ -2976,7 +2955,6 @@ fn c_abi_diis_reduces_a_quadratic() {
     assert!(last < 1e-6, "grad norm {last} at {x:?}");
 }
 
-#[test]
 #[test]
 fn c_abi_respects_maxmove_when_initial_step_is_larger() {
     let mut x = [1.0, 0.0];
@@ -3017,7 +2995,6 @@ fn c_abi_respects_maxmove_when_initial_step_is_larger() {
 /// no-op rather than a crash. These were the thirteen exported symbols
 /// with no test at the C surface -- the ABI cannot be called stable
 /// while most of it has never been dialled from C.
-#[test]
 #[test]
 fn lowest_eigenpair_rejects_unknown_integer_without_wrapping() {
     let mut x = [0.0_f64; 2];
@@ -3065,7 +3042,6 @@ fn lowest_eigenpair_rejects_unknown_integer_without_wrapping() {
     }
 }
 
-#[test]
 #[test]
 fn lowest_eigenpair_accepts_in_place_seed_and_point_storage() {
     for output_is_seed in [true, false] {
@@ -3255,7 +3231,6 @@ fn precon_blank(kind: u32) -> rgmin::ffi::rgmin_precon_t {
 }
 
 #[test]
-#[test]
 fn c_abi_lindh_ff_and_auto_install_and_step() {
     use rgmin::ffi::{
         RGMIN_GEOM_CLUSTER, RGMIN_GEOM_MOLECULE, RGMIN_PRECON_AUTO, RGMIN_PRECON_FF,
@@ -3383,7 +3358,6 @@ fn c_abi_lindh_ff_and_auto_install_and_step() {
 }
 
 #[test]
-#[test]
 fn precon_struct_offsets_match_the_header() {
     use rgmin::ffi::{rgmin_angle_t, rgmin_bond_t, rgmin_precon_t};
     assert_eq!(std::mem::size_of::<rgmin_bond_t>(), 16);
@@ -3480,7 +3454,6 @@ fn c_abi_quickmin_variants_relax_the_bowl() {
     }
 }
 
-#[test]
 #[test]
 fn c_abi_rigid_project_drops_a_translation_and_reports_rank() {
     use rgmin::ffi::{
