@@ -1,0 +1,33 @@
+#+TITLE: Fit a point on St x SPD
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+
+* Fit a point on St x SPD
+
+This tutorial fits a frame ~U~ on ~St(6, 2)~ and a matrix ~S~ on ~SPD(3)~ to a target ~(U*, S*)~ by Riemannian gradient steps.
+The cost is ~f(U, S) = |U - U*|^2 / 2 + |S - S*|^2 / 2~, so the Euclidean gradient is ~(U - U*, S - S*)~.
+
+The program is ~examples/tutorial_manifold_fit.py~. Continuous integration runs it.
+
+Build the product once. ~"polar"~ selects the second-order Stiefel retraction, and the SPD factor uses the affine-invariant metric.
+
+#+begin_src python
+from rgmin import SPD, Product, Stiefel
+
+manifold = Product(Stiefel(6, 2, "polar"), SPD(3, "affine_invariant"))
+#+end_src
+
+A point is a tuple ~(U, S)~ of a ~(6, 2)~ and a ~(3, 3)~ array.
+Each step converts the Euclidean gradient to the Riemannian gradient and retracts ~-t~ times it.
+
+#+begin_src python
+for _ in range(200):
+    egrad = (x[0] - target[0], x[1] - target[1])
+    rgrad, x = manifold.gradient_step(x, egrad, 0.1)
+#+end_src
+
+The script asserts that the cost falls at every step, that ~U^T U = I~ to ~1e-12~, that ~S~ stays positive definite, and that the final cost is below a thousandth of the first.
+The affine-invariant gradient is ~S sym(G) S~, so it grows with the eigenvalues of ~S~; the fixed step ~0.1~ suits a target whose eigenvalues are of order one.
+~manifold.norm(x, rgrad)~ is the Riemannian length of the last gradient.
+
+The same step from C is ~rgmin_manifold_gradient_step~ on a handle from ~rgmin_manifold_product~, with ~U~ and ~S~ packed column-major one after the other.
+@@rst::doc:`../reference/manifold`@@ lists every operation.

@@ -109,6 +109,8 @@ jobs:
       - run: python -m pytest python/tests -q --import-mode=importlib
       - name: Tutorial example
         run: python examples/tutorial_lowest_eigenpairs.py
+      - name: Manifold tutorial
+        run: python examples/tutorial_manifold_fit.py
 
   strong-scale:
     name: strong_scale smoke

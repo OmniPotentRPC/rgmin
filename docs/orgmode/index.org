@@ -78,6 +78,7 @@ It also covers the features of each route, the C library and a checkout.
    tutorials/scg
    tutorials/eigenpairs
    tutorials/python
+   tutorials/manifold-fit
    tutorials/migration
    tutorials/relax-morse
 
@@ -131,6 +132,7 @@ It also covers the features of each route, the C library and a checkout.
    reference/api
    reference/constraints
    reference/python
+   reference/manifold
    reference/sota
    reference/proofs
    reference/bibliography
