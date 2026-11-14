@@ -1615,8 +1615,10 @@ fn nlcg_energy_accept_restarts_after_a_refused_step() {
     assert!(last < 0.02, "PR froze at {last} {x:?}");
 }
 
-/// Seven steps reach f = 0.116646. The next spectral length does not
-/// decrease, and later calls repeat that point. The per-atom cap is off.
+/// Seven steps reach f = 0.116646. The eighth spectral length is refused
+/// by the energy test, and the stored pair used to replay it on every
+/// later call. A refused step drops the pair, so the next call takes the
+/// `istep` length from the same point. The per-atom cap is off.
 #[test]
 fn bb_energy_accept_drops_the_pair_after_a_refused_step() {
     let obj = Rosenbrock::<2>::new();
@@ -1628,20 +1630,10 @@ fn bb_energy_accept_drops_the_pair_after_a_refused_step() {
     for _ in 0..80 {
         values.push(solver.step(&obj, &mut x).unwrap().value);
     }
-    assert!(
-        (values[0] - 3.7428600625000414).abs() < 1e-9,
-        "{}",
-        values[0]
-    );
-    assert!(
-        (values[6] - 0.11664627378822379).abs() < 1e-9,
-        "{}",
-        values[6]
-    );
+    assert!((values[6] - 0.116646).abs() < 1e-6, "{}", values[6]);
     assert!(values.windows(2).all(|w| w[1] <= w[0] + 1e-8), "{values:?}");
-    // The eighth trial does not decrease. Later calls repeat that refusal.
-    assert_eq!(values[7], values[6]);
-    assert_eq!(values[79], values[6]);
+    let last = values[79];
+    assert!(last < 1e-3, "BB froze at {last} {x:?}");
 }
 
 /// BFGS line-searches and leaves (-1.2, 1.0) on the first call. SR1 is
@@ -1956,9 +1948,11 @@ fn nlcg_restarts_after_a_refusal_under_energy_and_nonmonotone() {
     assert!(x.iter().all(|v| v.abs() <= 2.048 + 1e-12));
 }
 
-/// Barzilai-Borwein from (-1.2, 1.0), per-atom cap off.
-/// Energy accept descends through f ≈ 0.1166 and then repeats the refusal.
-/// `Accept::Step` keeps the raw pair and the box clips the first point.
+/// Barzilai-Borwein from (-1.2, 1.0). Under `Accept::Energy` the eighth
+/// step is refused and the ninth takes `istep` to f = 0.075584. Under
+/// `Accept::Nonmonotone` the seventh step rises to f = 0.692147, the
+/// first refusal is step 24, and step 25 moves. `Accept::None` keeps
+/// the pair. The per-atom cap is off.
 #[test]
 fn bb_drops_the_pair_after_a_refusal_under_energy_and_nonmonotone() {
     use rgmin::Accept;
@@ -1977,20 +1971,19 @@ fn bb_drops_the_pair_after_a_refusal_under_energy_and_nonmonotone() {
         (values, points)
     };
     let (values, points) = run(Accept::Energy);
-    assert!((values[0] - 3.7428600625000414).abs() < 1e-9);
-    assert!(
-        (values[6] - 0.11664627378822379).abs() < 1e-9,
-        "{}",
-        values[6]
-    );
     assert_eq!(points[7], points[6]);
-    assert_eq!(values[79], values[6]);
+    assert!((values[8] - 0.075584).abs() < 1e-6, "{}", values[8]);
+    assert!(values[79] < 1e-3, "{}", values[79]);
 
     let (values, points) = run(Accept::Nonmonotone);
-    assert!(values[79] < values[0], "{:?}", values.last());
-    assert!(points.iter().any(|p| p != points[0]));
+    assert!((values[6] - 0.692147).abs() < 1e-6, "{}", values[6]);
+    assert!(values[6] > values[5]);
+    let first = (1..80).find(|&k| points[k] == points[k - 1]);
+    assert_eq!(first, Some(23), "{values:?}");
+    assert_ne!(points[24], points[23]);
+    assert!(values[79] < 1e-12, "{}", values[79]);
 
-    let (values, points) = run(Accept::Step);
+    let (values, points) = run(Accept::None);
     assert_eq!(points[0], array![2.048, 2.048]);
     assert!((values[1] - 12.461354).abs() < 1e-6, "{}", values[1]);
 }
