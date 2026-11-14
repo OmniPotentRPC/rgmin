@@ -720,6 +720,12 @@ impl Solver {
     /// L-BFGS the same protocol is a loss on every system: 3.415
     /// [3.390, 3.440] on LJ38, 2.219 [2.218, 2.220] on LJ75, and 2.078
     /// [2.076, 2.081] on Pt7. Use L-BFGS when the measure is wall time.
+    /// Against default CG the overhead does not rise, so the call saving
+    /// is faster at every positive per-call cost on LJ13, LJ38, and LJ75.
+    /// Pt7's fifty-start totals cross at about 8 μs per call. With about
+    /// 100 μs added to each call, the seed-0 ratio against default CG is
+    /// 0.930 [0.930, 0.931] on LJ38 and 0.596 [0.596, 0.596] on LJ75.
+    /// Pt7, with the same call count on that start, ties.
     #[must_use]
     pub fn low_call_cg(control: Control, dim: usize) -> Self {
         let mut solver = Self::new(

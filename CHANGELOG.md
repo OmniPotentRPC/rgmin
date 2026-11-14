@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The atomistic bench reads `RGMIN_BENCH_CALL_US`. That many
+  microseconds of fixed mul-adds run after every force call. The
+  force and the energy stay the same. On the fifty starts,
+  `Method::lbfgs_wide` is faster than default L-BFGS once a call costs
+  more than 2.1 μs on LJ13, 6.7 μs on LJ38, or 4.7 μs on LJ75. Pt7
+  uses the same number of calls. At about 100 μs per call the seed-0
+  ratio is 0.942 [0.941, 0.942] on LJ38, 1.129 [1.129, 1.130] on LJ75
+  (that start takes more calls), and a tie on Pt7.
+  `Solver::low_call_cg` is faster than default CG at every positive
+  per-call cost on LJ13, LJ38, and LJ75, because the call saving is
+  not offset by solver time. Pt7's fifty-start totals cross at about
+  8 μs per call. At about 100 μs the seed-0 ratio is 0.930
+  [0.930, 0.931] on LJ38 and 0.596 [0.596, 0.596] on LJ75, and Pt7 ties.
+  A force-scaled first step raised the call sum from 3154 to 3178.
+  Accepting the unit step on Armijo alone lowered it to 3137.5, but
+  the seed-0 wall time rose (1.027 on LJ38, 1.570 on LJ75). Wolfe
+  `c2 = 0.99` lowered the sum to 3144.5 and raised the LJ13 median
+  from 78.5 to 81.5. None of the three replaces the default.
+
 - On LJ75 one L-BFGS iteration spends 1.2 μs in the two-loop at 10
   pairs and 2.3 μs at 20. The line search's time is the potential
   call, and the history push is about 0.1 μs. The recursion already

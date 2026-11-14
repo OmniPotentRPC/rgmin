@@ -213,6 +213,13 @@ impl Method {
     /// inside the same-code band, so the default path is unchanged. A
     /// repeat of the 20-pair check is still a loss: 1.062 [1.062, 1.063]
     /// on LJ38 and 1.218 [1.218, 1.218] on LJ75, with Pt7 still a tie.
+    ///
+    /// On the fifty starts the extra two-loop is paid back once a call
+    /// costs more than 2.1 μs on LJ13, 6.7 μs on LJ38, or 4.7 μs on LJ75.
+    /// Pt7 uses the same number of calls. With about 100 μs added to each
+    /// call, the seed-0 ratio is 0.942 [0.941, 0.942] on LJ38, 1.129
+    /// [1.129, 1.130] on LJ75 (that start takes more calls), and a tie
+    /// on Pt7.
     pub fn lbfgs_wide() -> Self {
         Self::Lbfgs { memory: 20 }
     }
