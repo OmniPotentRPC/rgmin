@@ -71,12 +71,13 @@ struct Line<'a, F> {
 
 impl<'a, F> Line<'a, F>
 where
-    F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    F: FnMut(f64, ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
     fn probe(&mut self, alpha: f64) -> Probe {
         let mut x = self.pos.to_owned();
         crate::vecops::axpy(alpha, self.dir, &mut x);
-        let (f, g) = (self.oracle)(x.view());
+        let (f, g) = (self.oracle)(alpha, x.view());
+        let f = super::scored(f, g.view());
         self.evals += 1;
         let dphi = crate::vecops::dot(g.view(), self.dir);
         let p = Probe {
@@ -212,7 +213,36 @@ impl LineSearch {
     where
         F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
     {
-        let dphi0 = crate::vecops::dot(g0, dir);
+        self.search_traced(
+            |_, x| oracle(x),
+            pos,
+            f0,
+            g0,
+            dir,
+            istep,
+            alpha_max,
+            options,
+        )
+    }
+
+    /// [`Self::search_from_with_options`] with an oracle that also receives
+    /// each trial's signed step length along the caller's `dir`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn search_traced<F>(
+        &self,
+        mut oracle: F,
+        pos: ArrayView1<'_, f64>,
+        f0: f64,
+        g0: ArrayView1<'_, f64>,
+        dir: ArrayView1<'_, f64>,
+        istep: f64,
+        alpha_max: f64,
+        options: LineSearchOptions,
+    ) -> Option<LineOutcome>
+    where
+        F: FnMut(f64, ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    {
+        let mut dphi0 = crate::vecops::dot(g0, dir);
         let amax = if alpha_max > 0.0 {
             alpha_max
         } else {
@@ -221,21 +251,17 @@ impl LineSearch {
         if !f0.is_finite() || !dphi0.is_finite() || amax.is_nan() || dphi0 == 0.0 {
             return None;
         }
-        if dphi0 > 0.0 {
-            // An uphill direction (an indefinite SR1 or SR2 model) is
-            // searched backwards: -dir descends and obeys the same cap.
-            let back = dir.mapv(|v| -v);
-            return self.search_from_with_options(
-                oracle,
-                pos,
-                f0,
-                g0,
-                back.view(),
-                istep,
-                alpha_max,
-                options,
-            );
-        }
+        // An uphill direction (an indefinite SR1 or SR2 model) is
+        // searched backwards: -dir descends and obeys the same cap.
+        let back;
+        let (dir, sign) = if dphi0 > 0.0 {
+            back = dir.mapv(|v| -v);
+            dphi0 = crate::vecops::dot(g0, back.view());
+            (back.view(), -1.0)
+        } else {
+            (dir, 1.0)
+        };
+        let mut oracle = |alpha: f64, x: ArrayView1<'_, f64>| oracle(sign * alpha, x);
         let open = istep.abs().max(1e-16).min(amax);
         let mut line = Line {
             oracle: &mut oracle,
@@ -274,7 +300,7 @@ fn wolfe<F>(
     maxiter: usize,
 ) -> Option<LineOutcome>
 where
-    F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    F: FnMut(f64, ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
     let mut prev = End {
         a: 0.0,
@@ -334,7 +360,7 @@ fn zoom<F>(
     maxiter: usize,
 ) -> Option<LineOutcome>
 where
-    F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    F: FnMut(f64, ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
     for _ in 0..maxiter {
         let width = (hi.a - lo.a).abs();
@@ -383,7 +409,7 @@ fn backtrack<F>(
     goldstein: bool,
 ) -> Option<LineOutcome>
 where
-    F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    F: FnMut(f64, ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
     let mut alpha = open;
     let grow_cap = amax.min(64.0_f64.max(64.0 * open));
@@ -424,7 +450,7 @@ fn brent<F>(
     tol: f64,
 ) -> Option<LineOutcome>
 where
-    F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    F: FnMut(f64, ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
     const GOLD: f64 = 1.618_034;
     const CGOLD: f64 = 0.381_966;
@@ -489,7 +515,7 @@ fn brent_refine<F>(
     maxiter: usize,
 ) -> Option<LineOutcome>
 where
-    F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    F: FnMut(f64, ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
     const CGOLD: f64 = 0.381_966;
     let mut a = ax.min(cx);
