@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `rgmin_solver_create` opens a session with `RGMIN_ACCEPT_ENERGY`. In 0.5 it opened with `RGMIN_ACCEPT_NONE`. The Rust `Solver::new` default stays `Accept::None`. The default L-BFGS step is the eOn cap and runs no energy test under either policy, and line searches take the same value window under both. Under the energy policy a step that is not line-searched (BB, the Hessian steps) backtracks on a rise above 1e-8, a non-positive `istep` opens steepest descent, unpreconditioned nonlinear CG, BFGS, SR1, SR2 and BB with a unit-length step, and BFGS, SR1 and SR2 rescale their first step. To keep the 0.5 behaviour, call `rgmin_solver_set_accept(s, RGMIN_ACCEPT_NONE)` after `rgmin_solver_create`. The C++ `rgmin::Solver` follows the C default unless its configuration sets `accept`.
 - A negative `maxmove` on `rgmin_control_t` leaves every step cap off, including the default per-atom cap. Zero keeps the defaults. A positive value is the Euclidean cap.
 - SCG reductions stay in plain left-to-right order (`dot_ordered`), as released in 0.5.2. A positive finite `maxmove` also bounds every SCG trial. Other values leave that step unbounded.
 

@@ -1383,6 +1383,17 @@ pub struct rgmin_solver_t {
 
 /// Allocate a session. `dim` is the length of `x`. Null on bad arguments.
 ///
+/// Since 0.6.0 the session opens with [`Accept::Energy`]
+/// (`RGMIN_ACCEPT_ENERGY`), where 0.5 opened with `RGMIN_ACCEPT_NONE`.
+/// The default L-BFGS step is the eOn cap, which runs no energy test
+/// under either. Line searches take the same value window under both.
+/// Under the energy policy a step that is not line-searched backtracks on
+/// a rise, a non-positive `istep` opens steepest descent, unpreconditioned
+/// nonlinear CG, BFGS, SR1, SR2 and BB with a unit-length step, and BFGS,
+/// SR1 and SR2 rescale their first step.
+/// [`rgmin_solver_set_accept`] with `RGMIN_ACCEPT_NONE` restores the 0.5
+/// behaviour.
+///
 /// # Safety
 /// `ctrl` is null or points to a readable [`rgmin_control_t`].
 #[unsafe(no_mangle)]

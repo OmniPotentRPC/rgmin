@@ -249,7 +249,19 @@ rgmin_status_t rgmin_minimize_eindir(
 typedef struct rgmin_solver_t rgmin_solver_t;
 
 /** Allocate a session. \a dim is the length of \c x. Null on error.
- *  The exported symbol is \c rgmin_solver_create. */
+ *  The exported symbol is \c rgmin_solver_create.
+ *
+ *  Since 0.6.0 the session opens with \c RGMIN_ACCEPT_ENERGY, where 0.5
+ *  opened with \c RGMIN_ACCEPT_NONE. The default L-BFGS step is the eOn
+ *  cap, which runs no energy test under either. Line searches, strong
+ *  Wolfe L-BFGS included, take the same value window under both. Under
+ *  the energy policy a step that is not line-searched (BB, the Hessian
+ *  steps) backtracks on a rise above 1e-8, a \c ctrl->istep at or below
+ *  zero opens steepest descent, unpreconditioned nonlinear CG, BFGS,
+ *  SR1, SR2 and BB with a unit-length step, and BFGS, SR1 and SR2
+ *  rescale their first step before the first update.
+ *  Call \ref rgmin_solver_set_accept with \c RGMIN_ACCEPT_NONE after
+ *  this for the 0.5 behaviour. */
 rgmin_solver_t *rgmin_solver_create(rgmin_method_t method, const rgmin_control_t *ctrl,
                                 size_t dim);
 /** Release a session from \ref rgmin_solver_create. */
