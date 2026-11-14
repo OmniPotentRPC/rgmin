@@ -35,9 +35,5 @@ fn requested_residual_tolerance_controls_basis_pruning() {
     assert!((mode.value + 2.5).abs() < 1e-12, "{}", mode.value);
     assert!(mode.vector[0].abs() > 1.0 - 1e-10, "{:?}", mode.vector);
     let residual = &diagonal * &mode.vector - &mode.vector * mode.value;
-    assert!(
-        residual.dot(&residual).sqrt() <= tolerance,
-        "{:?}",
-        residual
-    );
+    assert!(residual.dot(&residual).sqrt() <= tolerance, "{residual:?}");
 }
