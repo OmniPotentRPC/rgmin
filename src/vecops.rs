@@ -157,8 +157,9 @@ fn sve_ready() -> bool {
 
 /// The AVX2 clone enables FMA. A CPU with AVX2 and no FMA stays on
 /// the portable `mul_add` path, which has the same bits.
+#[cfg(feature = "simd")]
 fn scalar_gate() -> bool {
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     {
         if avx512_ready() {
             return false;
@@ -167,7 +168,7 @@ fn scalar_gate() -> bool {
         let fma = std::is_x86_feature_detected!("fma");
         avx2 && !fma
     }
-    #[cfg(not(all(feature = "simd", target_arch = "x86_64")))]
+    #[cfg(not(target_arch = "x86_64"))]
     {
         false
     }
