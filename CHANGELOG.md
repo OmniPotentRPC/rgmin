@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   L-BFGS, CG, and FIRE on LJ13, LJ38, LJ75, and Pt7. The unperturbed
   seed is checked in `cluster_suite_records_iterations_and_potential_calls`.
 
+- The pairwise Pt7 check in the 50-start bench allows `1e-7`
+  relative. On the default starts the energy span among the
+  `fmax = 0.02`, `0.01`, and `0.001` stops reaches `9.3e-8` for
+  L-BFGS and `5.2e-8` for CG. A hit of the known heptamer minimum
+  stays at `1e-8` relative. Shifting the accepted step by a fraction
+  of the last displacement, while `fmax` remains under `0.01`, moves
+  the energy by about `3e-9` relative.
+
 - `Restart::powell` restarts nonlinear CG when
   `|g · g_old| >= 0.2 ||g||^2`. The default remains the NJWS test at
   0.1. With `WolfeExtrapolation::Case3Average`, the 50-start bench

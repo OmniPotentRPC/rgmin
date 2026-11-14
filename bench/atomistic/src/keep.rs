@@ -7,7 +7,7 @@
 //! final energies at `p < 0.05`, the rate of reaching the known lowest
 //! minimum does not fall by more than the baseline binomial standard
 //! error, every start the baseline converged still converges, and each
-//! Pt7 energy stays within `1e-8` relative of the baseline energy on
+//! Pt7 energy stays within `1e-7` relative of the baseline energy on
 //! that same start.
 //!
 //! Lennard-Jones reference energies are the Cambridge Cluster Database
@@ -15,14 +15,22 @@
 //! `Oh` -173.928427, LJ75 `D5h` -397.492331. A hit lies within `1e-4`
 //! relative of that value, inside the gap to the next isomer. The Pt7
 //! reference is the unperturbed L-BFGS energy of `pt_heptamer.con`, and
-//! a hit lies within `1e-8` relative of it.
+//! a hit lies within `1e-8` relative of it. The pairwise Pt7 comparison
+//! uses `1e-7`. On the 50 default starts the relative energy span among
+//! the `fmax = 0.02`, `0.01`, and `0.001` stops reaches `9.3e-8` for
+//! L-BFGS and `5.2e-8` for CG, so `1e-8` is tighter than the force
+//! tolerance. `1e-7` is the round ceiling of that quasi-Newton window.
 
 use super::{build, lj_cluster, lj38, read_con, run_session};
 
 const STARTS: u64 = 50;
 const SIGMA: f64 = 0.1;
 const LJ_HIT: f64 = 1e-4;
+/// Known-minimum hit for Pt7. Tighter than the pairwise window.
 const PT_HIT: f64 = 1e-8;
+/// Pairwise Pt7 window. Ceiling of the default L-BFGS/CG energy span
+/// between force tolerances 0.02, 0.01, and 0.001.
+const PT_MATCH: f64 = 1e-7;
 
 /// Cambridge Cluster Database global minima, and the relaxed Pt7 heptamer.
 fn known_minimum(system: &str) -> f64 {
@@ -59,6 +67,7 @@ fn median(values: &[f64]) -> f64 {
     quantile(&sorted, 0.5)
 }
 
+#[derive(Clone)]
 struct Start {
     calls: f64,
     energy: f64,
@@ -66,6 +75,7 @@ struct Start {
 }
 
 /// One system and method, seeds `0..STARTS` in order.
+#[derive(Clone)]
 struct Sample {
     system: &'static str,
     method: &'static str,
@@ -161,7 +171,7 @@ fn judge_cell(old: &Sample, new: &Sample) -> CellDecision {
     if old.system == "pt7" {
         pt7_moved = old.starts.iter().zip(new.starts.iter()).any(|(a, b)| {
             let scale = a.energy.abs().max(1e-300);
-            (b.energy - a.energy).abs() / scale > PT_HIT
+            (b.energy - a.energy).abs() / scale > PT_MATCH
         });
     }
     let convergence_lost = old
@@ -295,11 +305,11 @@ fn flat(system: &'static str, method: &'static str, calls: f64, energy: f64, n: 
 fn the_keep_rule_requires_fewer_calls_and_no_worse_energies() {
     let old = vec![
         flat("lj13", "lbfgs", 10.0, -1.0, 50),
-        flat("pt7", "cg", 20.0, -1776.0160052124, 50),
+        flat("pt7", "cg", 20.0, -1776.0, 50),
     ];
     let fewer = vec![
         flat("lj13", "lbfgs", 8.0, -1.0, 50),
-        flat("pt7", "cg", 20.0, -1776.0160052124, 50),
+        flat("pt7", "cg", 20.0, -1776.0, 50),
     ];
     assert!(keep(&old, &fewer));
 
@@ -311,16 +321,22 @@ fn the_keep_rule_requires_fewer_calls_and_no_worse_energies() {
 
     let worse = vec![
         flat("lj13", "lbfgs", 8.0, -0.5, 50),
-        flat("pt7", "cg", 20.0, -1776.0160052124, 50),
+        flat("pt7", "cg", 20.0, -1776.0, 50),
     ];
     assert!(
         !keep(&old, &worse),
         "stochastically higher energy is not kept"
     );
 
+    let mut inside = fewer.clone();
+    inside[1].starts[0].energy *= 1.0 + 5e-8;
+    assert!(
+        keep(&old, &inside),
+        "5e-8 is inside the force-tolerance window"
+    );
     let mut moved = fewer;
-    moved[1].starts[0].energy *= 1.0 + 1e-6;
-    assert!(!keep(&old, &moved), "Pt7 must match to 1e-8 relative");
+    moved[1].starts[0].energy *= 1.0 + 2e-7;
+    assert!(!keep(&old, &moved), "Pt7 must match to 1e-7 relative");
 
     let mut missed = flat("lj13", "lbfgs", 8.0, known_minimum("lj13"), 50);
     let baseline_hits = flat("lj13", "lbfgs", 10.0, known_minimum("lj13"), 50);
