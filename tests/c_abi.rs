@@ -3104,7 +3104,6 @@ fn lowest_eigenpair_accepts_in_place_seed_and_point_storage() {
     }
 }
 
-#[test]
 /// rgmin_solver_forget_evaluation drops only the cached point: the step
 /// after it evaluates its start once more and otherwise matches a session
 /// that kept the point, pairs and iterate included.
@@ -3168,9 +3167,6 @@ fn c_abi_forget_evaluation_costs_one_call_and_keeps_memory() {
     unsafe { rgmin_solver_forget_evaluation(std::ptr::null_mut()) };
 }
 
-/// rgmin_solver_set_lbfgs_neb_guards survives live and null sessions and
-/// clears the pair memory when it toggles the guards.
-#[test]
 /// rgmin_solver_set_lbfgs_neb_guards survives live and null sessions and
 /// clears the pair memory when it toggles the guards.
 #[test]
