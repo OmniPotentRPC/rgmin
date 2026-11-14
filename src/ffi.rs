@@ -2199,7 +2199,7 @@ pub unsafe extern "C" fn rgmin_solver_set_highs_crossover(
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
 /// A non-null `cb` must stay callable with `user` until it is cleared or
-/// the session is freed.
+/// the session is freed, from any thread that steps the session.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_highs_callback(
     solver: *mut rgmin_solver_t,
@@ -2212,7 +2212,8 @@ pub unsafe extern "C" fn rgmin_solver_set_highs_callback(
     }
     #[cfg(feature = "highs")]
     {
-        let _ = unsafe { (*solver).solver.set_highs_callback(cb, user) };
+        let callback = cb.map(|function| unsafe { crate::HighsCallback::new(function, user) });
+        let _ = unsafe { (*solver).solver.set_highs_callback(callback) };
         0
     }
     #[cfg(not(feature = "highs"))]

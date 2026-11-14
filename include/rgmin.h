@@ -595,7 +595,9 @@ _Static_assert(sizeof(rgmin_highs_cb_kind_t) == sizeof(int32_t),
                "rgmin_highs_cb_kind_t is i32-wide; do not build this header with -fshort-enums");
 #endif
 /** HiGHS user callback. \a interrupt nonzero stops the solve.
- *  Stored on the session for every later constrained step. */
+ *  Stored on the session for every later constrained step. A NULL \a cb
+ *  clears it. \a cb and \a user stay valid until cleared or the session
+ *  is freed, and may be called from any thread that steps the session. */
 typedef void (*rgmin_highs_callback_t)(int32_t kind, const char *message,
                                        int32_t *interrupt, void *user);
 int32_t rgmin_solver_set_highs_callback(rgmin_solver_t *solver,
