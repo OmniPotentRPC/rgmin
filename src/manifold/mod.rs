@@ -24,6 +24,9 @@
 //! [`ManifoldKind::SphereComplex`] is manopt `spherecomplexfactory`.
 //! [`ManifoldKind::Positive`] is manopt `positivefactory`.
 //! [`ManifoldKind::CenteredMatrix`] is manopt `centeredmatrixfactory`.
+//! [`RiemannianManifold`] is a runtime product of Stiefel and SPD factors
+//! on column-major buffers, with the exponential, logarithm, metric and
+//! parallel transport of each factor.
 
 use ndarray::Array1;
 
@@ -38,6 +41,7 @@ mod multinomial_sym;
 mod mw_rigid;
 mod oblique;
 mod positive;
+mod riemannian;
 mod rigid_quotient;
 mod se3;
 mod skewsymmetric;
@@ -72,6 +76,7 @@ pub use multinomial_sym::{
 pub use mw_rigid::MwRigid;
 pub use oblique::Oblique;
 pub use positive::{Positive, inner as inner_pos, is_positive, typical_dist as typical_dist_pos};
+pub use riemannian::{ManifoldFactor, RiemannianManifold, SpdMetric, StiefelRetraction};
 pub use rigid_quotient::RigidQuotient;
 pub use se3::Se3;
 pub use skewsymmetric::{

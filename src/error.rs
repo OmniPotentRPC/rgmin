@@ -132,6 +132,9 @@ pub enum Error {
         /// What was refused.
         what: &'static str,
     },
+    /// [`crate::RiemannianManifold`] refused a shape, a point or a step.
+    #[error("manifold: {0}")]
+    ManifoldArgument(String),
 }
 
 /// Result alias for this crate.

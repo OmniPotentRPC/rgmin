@@ -117,7 +117,9 @@ pub use lowest_mode::{
     ApplyHessian, DENSE_EIGEN_CUTOFF, EigenParams, Eigenpair, Eigenpairs, EigensolverKind,
     LowestMode, lowest_eigenpair, lowest_eigenpairs, lowest_mode,
 };
-pub use manifold::{Manifold, ManifoldKind};
+pub use manifold::{
+    Manifold, ManifoldFactor, ManifoldKind, RiemannianManifold, SpdMetric, StiefelRetraction,
+};
 pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
 pub use newton::{HessianObjective, HessianOracle, NewtonKind, minimize_newton};
