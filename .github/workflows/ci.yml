@@ -47,6 +47,11 @@ jobs:
           - name: highs
             args: --features highs
             readcon: "0"
+          # The C session waist with HiGHS: rgmin_solver_set_highs_callback
+          # and the other highs-gated C entries compile only here.
+          - name: capi-highs
+            args: --features capi,highs
+            readcon: "0"
           # Named features, not `--all-features`. The `readcon` feature
           # is a separate row so this staticlib does not link it.
           - name: all-features
@@ -130,7 +135,7 @@ jobs:
       fail-fast: false
       matrix:
         toolchain: [1.88.0, stable]
-        name: [default, capi, highs, all-features]
+        name: [default, capi, highs, capi-highs, all-features]
         include:
           - name: default
             args: ""
@@ -138,6 +143,8 @@ jobs:
             args: --features capi
           - name: highs
             args: --features highs
+          - name: capi-highs
+            args: --features capi,highs
           - name: all-features
             args: --features capi,par,highs,slepc,primme,chase,libkrylov
     steps:
