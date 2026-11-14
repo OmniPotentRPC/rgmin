@@ -16,16 +16,17 @@ use eindir_core::ffi::{
     eindir_objective_has_grad, eindir_objective_t, eindir_status_t,
 };
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
-use ndarray::{Array1, Array2, ArrayView1};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
 use crate::holonomic::{ConstraintError, ConstraintSolver, DistanceConstraints};
 use crate::precon::{ExpParams, ExpState, Neighbours};
 use crate::{
-    Accept, ApplyHessian, Conjugacy, Control, DirectionalCurvature, EigenParams, EigensolverKind,
-    Error, HessianObjective, HessianOracle, HessianVector, HvpOracle, LbfgsH0, LbfgsPairs,
-    LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart, ScgParams, SearchStep,
-    Solver, StopNorm, SuppliedSearch, lowest_eigenpairs, lowest_mode, minimize_method,
-    minimize_method_hess, minimize_method_hvp, minimize_scg, minimize_scg_exact,
+    Accept, ApplyHessian, ApplyPreconditioner, Conjugacy, Control, DirectionalCurvature,
+    EigenParams, EigensolverKind, Error, HessianObjective, HessianOracle, HessianVector, HvpOracle,
+    LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart,
+    ScgParams, SearchStep, Solver, StopNorm, SuppliedSearch, lowest_eigenpairs,
+    lowest_eigenpairs_precond, lowest_mode, minimize_method, minimize_method_hess,
+    minimize_method_hvp, minimize_scg, minimize_scg_exact,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -75,7 +76,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 39;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 42;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -323,6 +324,22 @@ pub struct rgmin_eigenpair_t {
     pub actions: usize,
 }
 
+/// One pair from [`rgmin_lowest_eigenpairs_ex`]. The first two fields
+/// match [`rgmin_eigenpair_t`]. `residual` is `||Hv − θv||₂` and
+/// `converged` is 1 when that residual met the tolerance. ABI minor 42.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_eigenpair_ex_t {
+    /// Ritz value.
+    pub value: f64,
+    /// Hessian-vector products used by the solve.
+    pub actions: usize,
+    /// `||Hv − θv||₂` for this pair.
+    pub residual: f64,
+    /// 1 when `residual` met the tolerance, otherwise 0.
+    pub converged: i32,
+}
+
 /// Result of [`rgmin_lowest_eigenpair`]. The vector is written to
 /// the caller tensor.
 #[repr(C)]
@@ -340,6 +357,15 @@ pub type rgmin_hvp_fn = unsafe extern "C" fn(
     x: *const DLManagedTensorVersioned,
     v: *const DLManagedTensorVersioned,
     hv_out: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t;
+
+/// Apply preconditioner `T` to one block. `block` and `out` are row-major
+/// n-by-m f64 tensors, rank 2 with shape `(n, m)`. A null function pointer
+/// at [`rgmin_lowest_eigenpairs_ex`] is the identity and is not called.
+pub type rgmin_precond_fn = unsafe extern "C" fn(
+    user: *mut c_void,
+    block: *const DLManagedTensorVersioned,
+    out: *mut DLManagedTensorVersioned,
 ) -> rgmin_status_t;
 
 thread_local! {
@@ -617,6 +643,37 @@ impl ApplyHessian for CHvp {
     }
 }
 
+struct CPrecond<'a> {
+    precond: rgmin_precond_fn,
+    user: *mut c_void,
+    failed: &'a Cell<bool>,
+}
+
+impl ApplyPreconditioner for CPrecond<'_> {
+    fn apply_preconditioner(&self, block: ArrayView2<f64>) -> Array2<f64> {
+        let (n, m) = block.dim();
+        let mut input = block.to_owned();
+        let mut output = Array2::zeros((n, m));
+        let (Some(input_slice), Some(output_slice)) = (input.as_slice_mut(), output.as_slice_mut())
+        else {
+            self.failed.set(true);
+            return Array2::from_elem((n, m), f64::NAN);
+        };
+        let inn = unsafe { borrow_f64_matrix(input_slice.as_mut_ptr(), n, m) };
+        let out = unsafe { borrow_f64_matrix(output_slice.as_mut_ptr(), n, m) };
+        let status = unsafe { (self.precond)(self.user, inn, out) };
+        unsafe {
+            rgmin_tensor_free(inn);
+            rgmin_tensor_free(out);
+        }
+        if status != rgmin_status_t::RGMIN_SUCCESS {
+            self.failed.set(true);
+            return Array2::from_elem((n, m), f64::NAN);
+        }
+        output
+    }
+}
+
 /// Matrix-free lowest Hessian eigenpair. `params == NULL` is Lanczos.
 /// Unlinked kinds return [`rgmin_status_t::RGMIN_UNAVAILABLE`].
 ///
@@ -809,6 +866,167 @@ fn write_block(
     Ok(())
 }
 
+unsafe fn borrow_f64_matrix(data: *mut f64, n: usize, m: usize) -> *mut DLManagedTensorVersioned {
+    struct Ctx {
+        shape: [i64; 2],
+        strides: [i64; 2],
+    }
+
+    unsafe extern "C" fn deleter(ptr: *mut DLManagedTensorVersioned) {
+        if ptr.is_null() {
+            return;
+        }
+        let ctx = unsafe { (*ptr).manager_ctx.cast::<Ctx>() };
+        if !ctx.is_null() {
+            drop(unsafe { Box::from_raw(ctx) });
+        }
+        drop(unsafe { Box::from_raw(ptr) });
+    }
+
+    let mut ctx = Box::new(Ctx {
+        shape: [n as i64, m as i64],
+        strides: [m as i64, 1],
+    });
+    let dl_tensor = DLTensor {
+        data: data.cast(),
+        device: DLDevice {
+            device_type: DLDeviceType::kDLCPU,
+            device_id: 0,
+        },
+        ndim: 2,
+        dtype: DLDataType {
+            code: DLDataTypeCode::kDLFloat,
+            bits: 64,
+            lanes: 1,
+        },
+        shape: ctx.shape.as_mut_ptr(),
+        strides: ctx.strides.as_mut_ptr(),
+        byte_offset: 0,
+    };
+    let managed = Box::new(DLManagedTensorVersioned {
+        version: DLPackVersion { major: 1, minor: 0 },
+        manager_ctx: Box::into_raw(ctx).cast(),
+        deleter: Some(deleter),
+        flags: 0,
+        dl_tensor,
+    });
+    Box::into_raw(managed)
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe fn run_lowest_eigenpairs(
+    label: &str,
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    precond: Option<rgmin_precond_fn>,
+    precond_user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    seed: *const DLManagedTensorVersioned,
+    modes_out: *mut DLManagedTensorVersioned,
+    values_out: *mut DLManagedTensorVersioned,
+    params: *const rgmin_eigen_params_t,
+    options: *const rgmin_eigen_options_t,
+    k: usize,
+) -> Result<crate::Eigenpairs, rgmin_status_t> {
+    let Some(hvp) = hvp else {
+        set_last_error(&format!("{label}: null hvp"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    };
+    if modes_out.is_null() || values_out.is_null() {
+        set_last_error(&format!("{label}: null output"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    if k == 0 {
+        set_last_error(&format!("{label}: k = 0 is outside 1..=n"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    let xs = cpu_f64_slice(x, "x")?;
+    let n = xs.len();
+    if k > n {
+        set_last_error(&format!("{label}: k = {k} is outside 1..={n}"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    let seed_block = read_block(seed, n, k, "seed")?;
+    let values = cpu_f64_slice_mut(values_out, "values_out")?;
+    if values.len() != k {
+        set_last_error(&format!("{label}: values_out length is not k"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    let typed = eigen_params_from_c(params)?;
+    if !typed.kind.is_linked() {
+        return Err(status_from_error(&Error::EigenUnavailable {
+            kind: typed.kind.name(),
+        }));
+    }
+    if !options.is_null() {
+        let opts = unsafe { *options };
+        let _ = (opts.degree, opts.extra);
+    }
+    if !typed.tol.is_finite() {
+        set_last_error(&format!("{label}: tolerance is non-finite"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    let tol = if typed.tol > 0.0 { typed.tol } else { 1e-8 };
+    let max_iter = if typed.max_iter == 0 {
+        n.max(8)
+    } else {
+        typed.max_iter
+    };
+    let apply = CHvp { hvp, user };
+    let x_arr = Array1::from(xs.to_vec());
+    let failed = Cell::new(false);
+    let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if let Some(callback) = precond {
+            let op = CPrecond {
+                precond: callback,
+                user: precond_user,
+                failed: &failed,
+            };
+            lowest_eigenpairs_precond(
+                &apply,
+                Some(&op),
+                x_arr.view(),
+                seed_block.view(),
+                tol,
+                max_iter,
+            )
+        } else {
+            lowest_eigenpairs(&apply, x_arr.view(), seed_block.view(), tol, max_iter)
+        }
+    }));
+    let found = match solved {
+        Ok(Ok(found)) => found,
+        Ok(Err(err)) => {
+            if failed.get() {
+                set_last_error(&format!("{label}: preconditioner failed"));
+                return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+            }
+            return Err(status_from_error(&err));
+        }
+        Err(_) => {
+            set_last_error(&format!("{label}: panicked"));
+            return Err(rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        }
+    };
+    if found.pairs.len() != k {
+        set_last_error(&format!("{label}: solve returned the wrong block width"));
+        return Err(rgmin_status_t::RGMIN_INTERNAL_ERROR);
+    }
+    let mut modes = Array2::zeros((n, k));
+    for (j, pair) in found.pairs.iter().enumerate() {
+        if pair.vector.len() != n {
+            set_last_error(&format!("{label}: mode length does not match n"));
+            return Err(rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        }
+        for i in 0..n {
+            modes[(i, j)] = pair.vector[i];
+        }
+        values[j] = pair.value;
+    }
+    write_block(modes_out, &modes, "modes_out")?;
+    Ok(found)
+}
+
 /// k lowest eigenpairs of a symmetric product. Block LOBPCG
 /// (Knyazev 2001). `seed` and `modes_out` are row-major n-by-k: rank 2
 /// with shape `(n, k)`, or rank 1 of length `n * k`. `values_out` and
@@ -819,6 +1037,8 @@ fn write_block(
 /// `params->kind` returns [`rgmin_status_t::RGMIN_UNAVAILABLE`].
 /// `k == 0`, `k > n`, and non-finite input return
 /// [`rgmin_status_t::RGMIN_INVALID_PARAMETER`].
+/// [`rgmin_eigenpair_t`] keeps this layout. Residuals and a preconditioner
+/// are [`rgmin_lowest_eigenpairs_ex`].
 ///
 /// # Safety
 /// `hvp` is callable for this call. `x` is a rank-1 f64 CPU tensor of
@@ -838,91 +1058,30 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpairs(
     pairs_out: *mut rgmin_eigenpair_t,
     k: usize,
 ) -> rgmin_status_t {
-    let Some(hvp) = hvp else {
-        set_last_error("rgmin_lowest_eigenpairs: null hvp");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    };
-    if modes_out.is_null() || values_out.is_null() || pairs_out.is_null() {
+    if pairs_out.is_null() {
         set_last_error("rgmin_lowest_eigenpairs: null output");
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
-    if k == 0 {
-        set_last_error("rgmin_lowest_eigenpairs: k = 0 is outside 1..=n");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let xs = match cpu_f64_slice(x, "x") {
-        Ok(s) => s,
-        Err(st) => return st,
+    let found = match unsafe {
+        run_lowest_eigenpairs(
+            "rgmin_lowest_eigenpairs",
+            hvp,
+            user,
+            None,
+            std::ptr::null_mut(),
+            x,
+            seed,
+            modes_out,
+            values_out,
+            params,
+            options,
+            k,
+        )
+    } {
+        Ok(found) => found,
+        Err(status) => return status,
     };
-    let n = xs.len();
-    if k > n {
-        set_last_error(&format!(
-            "rgmin_lowest_eigenpairs: k = {k} is outside 1..={n}"
-        ));
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let seed_block = match read_block(seed, n, k, "seed") {
-        Ok(block) => block,
-        Err(st) => return st,
-    };
-    let values = match cpu_f64_slice_mut(values_out, "values_out") {
-        Ok(s) => s,
-        Err(st) => return st,
-    };
-    if values.len() != k {
-        set_last_error("rgmin_lowest_eigenpairs: values_out length is not k");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let typed = match eigen_params_from_c(params) {
-        Ok(p) => p,
-        Err(st) => return st,
-    };
-    if !typed.kind.is_linked() {
-        return status_from_error(&Error::EigenUnavailable {
-            kind: typed.kind.name(),
-        });
-    }
-    if !options.is_null() {
-        let opts = unsafe { *options };
-        let _ = (opts.degree, opts.extra);
-    }
-    if !typed.tol.is_finite() {
-        set_last_error("rgmin_lowest_eigenpairs: tolerance is non-finite");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let tol = if typed.tol > 0.0 { typed.tol } else { 1e-8 };
-    let max_iter = if typed.max_iter == 0 {
-        n.max(8)
-    } else {
-        typed.max_iter
-    };
-    let apply = CHvp { hvp, user };
-    let x_arr = Array1::from(xs.to_vec());
-    let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        lowest_eigenpairs(&apply, x_arr.view(), seed_block.view(), tol, max_iter)
-    }));
-    let found = match solved {
-        Ok(Ok(found)) => found,
-        Ok(Err(err)) => return status_from_error(&err),
-        Err(_) => {
-            set_last_error("rgmin_lowest_eigenpairs: panicked");
-            return rgmin_status_t::RGMIN_INTERNAL_ERROR;
-        }
-    };
-    if found.pairs.len() != k {
-        set_last_error("rgmin_lowest_eigenpairs: solve returned the wrong block width");
-        return rgmin_status_t::RGMIN_INTERNAL_ERROR;
-    }
-    let mut modes = Array2::zeros((n, k));
     for (j, pair) in found.pairs.iter().enumerate() {
-        if pair.vector.len() != n {
-            set_last_error("rgmin_lowest_eigenpairs: mode length does not match n");
-            return rgmin_status_t::RGMIN_INTERNAL_ERROR;
-        }
-        for i in 0..n {
-            modes[(i, j)] = pair.vector[i];
-        }
-        values[j] = pair.value;
         unsafe {
             *pairs_out.add(j) = rgmin_eigenpair_t {
                 value: pair.value,
@@ -930,10 +1089,69 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpairs(
             };
         }
     }
-    match write_block(modes_out, &modes, "modes_out") {
-        Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
-        Err(st) => st,
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+/// [`rgmin_lowest_eigenpairs`] plus each pair's residual and a converged
+/// flag, and an optional preconditioner. `precond == NULL` is the identity
+/// and is not called; the values and vectors then match
+/// [`rgmin_lowest_eigenpairs`] bit for bit. `precond` applies `T` to one
+/// row-major n-by-m block per expansion. `pairs_out` is
+/// [`rgmin_eigenpair_ex_t`], length k. ABI minor 42. The minor-39 record
+/// [`rgmin_eigenpair_t`] is unchanged.
+///
+/// # Safety
+/// Same tensor rules as [`rgmin_lowest_eigenpairs`]. `precond` is null or
+/// callable for this solve. `pairs_out` points at k writable extended records.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_lowest_eigenpairs_ex(
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    precond: Option<rgmin_precond_fn>,
+    precond_user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    seed: *const DLManagedTensorVersioned,
+    modes_out: *mut DLManagedTensorVersioned,
+    values_out: *mut DLManagedTensorVersioned,
+    params: *const rgmin_eigen_params_t,
+    options: *const rgmin_eigen_options_t,
+    pairs_out: *mut rgmin_eigenpair_ex_t,
+    k: usize,
+) -> rgmin_status_t {
+    if pairs_out.is_null() {
+        set_last_error("rgmin_lowest_eigenpairs_ex: null output");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
+    let found = match unsafe {
+        run_lowest_eigenpairs(
+            "rgmin_lowest_eigenpairs_ex",
+            hvp,
+            user,
+            precond,
+            precond_user,
+            x,
+            seed,
+            modes_out,
+            values_out,
+            params,
+            options,
+            k,
+        )
+    } {
+        Ok(found) => found,
+        Err(status) => return status,
+    };
+    for (j, pair) in found.pairs.iter().enumerate() {
+        unsafe {
+            *pairs_out.add(j) = rgmin_eigenpair_ex_t {
+                value: pair.value,
+                actions: found.actions,
+                residual: pair.residual,
+                converged: i32::from(pair.converged),
+            };
+        }
+    }
+    rgmin_status_t::RGMIN_SUCCESS
 }
 
 unsafe fn create_borrowed_f64_1d(
@@ -4279,6 +4497,18 @@ mod conjugacy_abi_tests {
         assert_eq!(offset_of!(rgmin_scg_params_t, tol_sol), 24);
         assert_eq!(offset_of!(rgmin_scg_params_t, tol_func), 32);
         assert_eq!(offset_of!(rgmin_scg_params_t, conjugacy), 40);
+    }
+
+    #[test]
+    fn eigenpair_ex_extends_the_minor_39_record() {
+        assert_eq!(offset_of!(rgmin_eigenpair_t, value), 0);
+        assert_eq!(offset_of!(rgmin_eigenpair_t, actions), 8);
+        assert_eq!(size_of::<rgmin_eigenpair_t>(), 16);
+        assert_eq!(offset_of!(rgmin_eigenpair_ex_t, value), 0);
+        assert_eq!(offset_of!(rgmin_eigenpair_ex_t, actions), 8);
+        assert_eq!(offset_of!(rgmin_eigenpair_ex_t, residual), 16);
+        assert_eq!(offset_of!(rgmin_eigenpair_ex_t, converged), 24);
+        assert_eq!(size_of::<rgmin_eigenpair_ex_t>(), 32);
     }
 
     #[test]

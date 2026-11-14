@@ -8,7 +8,7 @@
 //! here; every other named backend fail-closes with
 //! [`Error::EigenUnavailable`]. Integers match `schema/eigen.capnp`.
 
-use ndarray::{Array1, ArrayView1, ArrayView2};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
 use crate::error::{Error, Result};
 use crate::hvp::HessianVector;
@@ -688,6 +688,26 @@ fn eigen_input(what: &'static str) -> Error {
     Error::EigenInput { what }
 }
 
+/// Preconditioner `T` for [`lowest_eigenpairs_precond`].
+///
+/// `block` has shape `(n, m)`, one column per vector. The result is `T`
+/// applied to each column and has the same shape. Knyazev's block LOBPCG
+/// applies `T` to the residual block (SIAM J. Sci. Comput. 23 (2001),
+/// 517–541). The identity is [`lowest_eigenpairs`].
+pub trait ApplyPreconditioner {
+    /// `T` applied to each column of `block`.
+    fn apply_preconditioner(&self, block: ArrayView2<f64>) -> Array2<f64>;
+}
+
+/// Placeholder type for the identity path. It is never called.
+struct IdentityPreconditioner;
+
+impl ApplyPreconditioner for IdentityPreconditioner {
+    fn apply_preconditioner(&self, block: ArrayView2<f64>) -> Array2<f64> {
+        block.to_owned()
+    }
+}
+
 /// k lowest eigenpairs of a symmetric product, matrix-free.
 ///
 /// Block LOBPCG with an identity preconditioner (Knyazev, SIAM J. Sci.
@@ -696,7 +716,8 @@ fn eigen_input(what: &'static str) -> Error {
 /// valid seed. Each iteration orthonormalizes the residual block against
 /// the current Ritz block and the previous conjugate direction, then
 /// takes the lowest k Ritz pairs of that basis. A column that is
-/// numerically in the span already is dropped.
+/// numerically in the span already is dropped. [`lowest_eigenpairs_precond`]
+/// applies a caller-supplied `T` to that residual block.
 ///
 /// `tol` is the residual tolerance `||Hv − θv|| ≤ tol (1 + |θ|)`.
 /// `max_iter` caps the number of block expansions. A solve that stops
@@ -743,6 +764,46 @@ pub fn lowest_eigenpairs<H: ApplyHessian + ?Sized>(
     tol: f64,
     max_iter: usize,
 ) -> Result<Eigenpairs> {
+    solve_block_lobpcg(h, None::<&IdentityPreconditioner>, x, seed, tol, max_iter)
+}
+
+/// [`lowest_eigenpairs`] with a preconditioner.
+///
+/// `precond` applies `T` to the residual block on each expansion.
+/// `None` skips that product and matches [`lowest_eigenpairs`] bit for bit,
+/// including the values, vectors, residuals, and iteration count.
+///
+/// # Errors
+///
+/// The same errors as [`lowest_eigenpairs`]. A preconditioner that returns
+/// the wrong shape or a non-finite value is [`Error::EigenInput`].
+pub fn lowest_eigenpairs_precond<H, P>(
+    h: &H,
+    precond: Option<&P>,
+    x: ArrayView1<f64>,
+    seed: ArrayView2<f64>,
+    tol: f64,
+    max_iter: usize,
+) -> Result<Eigenpairs>
+where
+    H: ApplyHessian + ?Sized,
+    P: ApplyPreconditioner + ?Sized,
+{
+    solve_block_lobpcg(h, precond, x, seed, tol, max_iter)
+}
+
+fn solve_block_lobpcg<H, P>(
+    h: &H,
+    precond: Option<&P>,
+    x: ArrayView1<f64>,
+    seed: ArrayView2<f64>,
+    tol: f64,
+    max_iter: usize,
+) -> Result<Eigenpairs>
+where
+    H: ApplyHessian + ?Sized,
+    P: ApplyPreconditioner + ?Sized,
+{
     let (n, k) = seed.dim();
     if k == 0 || k > n {
         return Err(Error::EigenBlock { k, dim: n });
@@ -781,7 +842,8 @@ pub fn lowest_eigenpairs<H: ApplyHessian + ?Sized>(
         }
         iterations += 1;
         let mut width = Vec::new();
-        absorb(&block, &mut width, residuals);
+        let directions = precondition_residuals(precond, residuals)?;
+        absorb(&block, &mut width, directions);
         let width_h = apply_columns(h, x, &width, &mut actions)?;
         let mut locked = block.clone();
         locked.extend(width.iter().cloned());
@@ -837,6 +899,35 @@ pub fn lowest_eigenpairs<H: ApplyHessian + ?Sized>(
         actions,
         iterations,
     })
+}
+
+fn precondition_residuals<P: ApplyPreconditioner + ?Sized>(
+    precond: Option<&P>,
+    residuals: Vec<Array1<f64>>,
+) -> Result<Vec<Array1<f64>>> {
+    let Some(precond) = precond else {
+        return Ok(residuals);
+    };
+    if residuals.is_empty() {
+        return Ok(residuals);
+    }
+    let n = residuals[0].len();
+    let m = residuals.len();
+    if residuals.iter().any(|col| col.len() != n) {
+        return Err(eigen_input("preconditioner block is ragged"));
+    }
+    let mut block = Array2::zeros((n, m));
+    for (j, col) in residuals.iter().enumerate() {
+        block.column_mut(j).assign(col);
+    }
+    let image = precond.apply_preconditioner(block.view());
+    if image.dim() != (n, m) {
+        return Err(eigen_input("preconditioner block has the wrong shape"));
+    }
+    if image.iter().any(|value| !value.is_finite()) {
+        return Err(eigen_input("preconditioner was non-finite"));
+    }
+    Ok((0..m).map(|j| image.column(j).to_owned()).collect())
 }
 
 fn orthonormal_block(cols: Vec<Array1<f64>>, n: usize, k: usize) -> Result<Vec<Array1<f64>>> {
@@ -1629,6 +1720,108 @@ mod tests {
         let seed = Array2::eye(2);
         let err = lowest_eigenpairs(&Boom, x.view(), seed.view(), 1e-8, 3).unwrap_err();
         assert!(matches!(err, Error::EigenInput { .. }), "{err}");
+    }
+
+    #[test]
+    fn block_preconditioner_cuts_iterations_and_null_matches_bits() {
+        let n = 10;
+        let diag = Array1::from_iter((0..n).map(|i| 4.0_f64.powi(i as i32)));
+        let u = Array1::from_elem(n, 0.25);
+        let scale = Array1::from_iter((0..n).map(|i| 1.0 / (diag[i] + u[i] * u[i])));
+        struct Spread {
+            diag: Array1<f64>,
+            u: Array1<f64>,
+        }
+        impl ApplyHessian for Spread {
+            fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+                let mut hv =
+                    Array1::from_iter(self.diag.iter().zip(v.iter()).map(|(d, vi)| d * vi));
+                axpy(dot(self.u.view(), v), self.u.view(), &mut hv);
+                hv
+            }
+        }
+        struct Jacobi(Array1<f64>);
+        impl ApplyPreconditioner for Jacobi {
+            fn apply_preconditioner(&self, block: ArrayView2<f64>) -> Array2<f64> {
+                let mut out = block.to_owned();
+                for mut col in out.columns_mut() {
+                    for (value, scale) in col.iter_mut().zip(self.0.iter()) {
+                        *value *= *scale;
+                    }
+                }
+                out
+            }
+        }
+        struct CopyBlock;
+        impl ApplyPreconditioner for CopyBlock {
+            fn apply_preconditioner(&self, block: ArrayView2<f64>) -> Array2<f64> {
+                block.to_owned()
+            }
+        }
+        let h = Spread { diag, u };
+        let x = Array1::zeros(n);
+        let mut seed = Array2::zeros((n, 2));
+        for i in 0..n {
+            seed[(i, 0)] = ((i * 3 + 1) as f64) * 0.17;
+            seed[(i, 1)] = ((i * 5 + 2) as f64) * -0.11;
+        }
+        let tol = 1e-8;
+        let plain = lowest_eigenpairs(&h, x.view(), seed.view(), tol, 40).unwrap();
+        let skipped =
+            lowest_eigenpairs_precond(&h, None::<&Jacobi>, x.view(), seed.view(), tol, 40).unwrap();
+        let copied =
+            lowest_eigenpairs_precond(&h, Some(&CopyBlock), x.view(), seed.view(), tol, 40)
+                .unwrap();
+        assert_eq!(plain.iterations, skipped.iterations);
+        assert_eq!(plain.actions, skipped.actions);
+        assert_eq!(plain.iterations, copied.iterations);
+        assert_eq!(plain.actions, copied.actions);
+        for (left, right) in plain.pairs.iter().zip(&skipped.pairs) {
+            assert_eq!(left.value.to_bits(), right.value.to_bits());
+            assert_eq!(left.residual.to_bits(), right.residual.to_bits());
+            assert_eq!(left.converged, right.converged);
+            for (a, b) in left.vector.iter().zip(right.vector.iter()) {
+                assert_eq!(a.to_bits(), b.to_bits());
+            }
+        }
+        for (left, right) in plain.pairs.iter().zip(&copied.pairs) {
+            assert_eq!(left.value.to_bits(), right.value.to_bits());
+            assert_eq!(left.residual.to_bits(), right.residual.to_bits());
+            for (a, b) in left.vector.iter().zip(right.vector.iter()) {
+                assert_eq!(a.to_bits(), b.to_bits());
+            }
+        }
+        let jacobi = Jacobi(scale);
+        let fast =
+            lowest_eigenpairs_precond(&h, Some(&jacobi), x.view(), seed.view(), tol, 40).unwrap();
+        assert!(
+            fast.iterations < plain.iterations,
+            "preconditioned {} iterations, identity {}",
+            fast.iterations,
+            plain.iterations
+        );
+        assert!(fast.pairs.iter().all(|pair| pair.converged));
+        for pair in &fast.pairs {
+            let hv = h.apply_hessian(x.view(), pair.vector.view());
+            let mut residual = hv;
+            axpy(-pair.value, pair.vector.view(), &mut residual);
+            let norm = nrm2(residual.view());
+            assert!((norm - pair.residual).abs() <= 1e-12 * (1.0 + pair.residual));
+            assert_eq!(
+                pair.converged,
+                pair.residual <= tol * (1.0 + pair.value.abs())
+            );
+        }
+        struct Short;
+        impl ApplyPreconditioner for Short {
+            fn apply_preconditioner(&self, block: ArrayView2<f64>) -> Array2<f64> {
+                Array2::zeros((block.nrows(), 1))
+            }
+        }
+        assert!(matches!(
+            lowest_eigenpairs_precond(&h, Some(&Short), x.view(), seed.view(), tol, 4),
+            Err(Error::EigenInput { .. })
+        ));
     }
 
     #[test]

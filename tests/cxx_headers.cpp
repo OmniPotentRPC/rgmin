@@ -215,6 +215,22 @@ int eigen_block() {
         std::fprintf(stderr, "eigenpairs values %g %g\n", values[0], values[1]);
         return 7;
     }
+    rgmin_eigenpair_ex_t extended[2] = {};
+    double modes_ex[6] = {};
+    double values_ex[2] = {};
+    try {
+        xts::optimize::lowest_eigenpairs_ex(diag3_hvp, nullptr, nullptr, nullptr, x, seed,
+                                            modes_ex, values_ex, 3, 2, nullptr, nullptr, extended);
+    } catch (std::invalid_argument const& err) {
+        std::fprintf(stderr, "eigenpairs ex: %s\n", err.what());
+        return 10;
+    }
+    if (extended[0].converged != 1 || extended[1].converged != 1 || extended[0].residual > 1e-6 ||
+        std::fabs(values_ex[0] - values[0]) > 0.0 || std::fabs(modes_ex[0] - modes[0]) > 0.0) {
+        std::fprintf(stderr, "extended pair residual %g converged %d\n", extended[0].residual,
+                     extended[0].converged);
+        return 11;
+    }
     return 0;
 }
 

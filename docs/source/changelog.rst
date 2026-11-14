@@ -7,6 +7,8 @@ Unreleased
 
 ~~~~~~~~~~
 
+``rgmin_lowest_eigenpairs_ex`` reports each pair's residual ``||Hv − θv||`` and a converged flag, and takes an optional preconditioner. A null preconditioner is the identity and matches ``rgmin_lowest_eigenpairs`` bit for bit. ``rgmin_eigenpair_t`` stays the minor-39 record. Python ``lowest_eigenpairs`` returns residuals and converged flags. ``strict=False`` returns the flags instead of raising. ``precond`` applies ``T`` to a block. ABI minor 42.
+
 ``lowest_eigenpairs`` is block LOBPCG for the k lowest eigenpairs of a symmetric product (Knyazev 2001).
 The seed is an n-by-k block, and each pair reports its residual.
 ``k = 0``, ``k`` above the dimension, and non-finite input return an error.

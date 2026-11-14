@@ -114,8 +114,9 @@ pub use lbfgs_qp::HighsStep;
 pub use lindh::{LindhSpec, apply_inverse};
 pub use linesearch::{LineSearch, SearchStep, SuppliedSearch};
 pub use lowest_mode::{
-    ApplyHessian, DENSE_EIGEN_CUTOFF, EigenParams, Eigenpair, Eigenpairs, EigensolverKind,
-    LowestMode, lowest_eigenpair, lowest_eigenpairs, lowest_mode,
+    ApplyHessian, ApplyPreconditioner, DENSE_EIGEN_CUTOFF, EigenParams, Eigenpair, Eigenpairs,
+    EigensolverKind, LowestMode, lowest_eigenpair, lowest_eigenpairs, lowest_eigenpairs_precond,
+    lowest_mode,
 };
 pub use manifold::{Manifold, ManifoldKind};
 pub use method::Method;

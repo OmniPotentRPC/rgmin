@@ -29,7 +29,7 @@ The types a host works with:
     +-------------------------------------------+--------------------------------------------+
     | ``lowest_eigenpair`` / ``lowest_mode``    | Matrix-free lowest Hessian pair.           |
     +-------------------------------------------+--------------------------------------------+
-    | ``lowest_eigenpairs``                     | Block LOBPCG, the k lowest pairs.          |
+    | ``lowest_eigenpairs``                     | Block LOBPCG, residuals, optional T.       |
     +-------------------------------------------+--------------------------------------------+
     | ``EigensolverKind`` / ``EigenParams``     | Closed eigen waist.                        |
     +-------------------------------------------+--------------------------------------------+
