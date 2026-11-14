@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A plain FIRE 1.0 step writes the velocity update, the displacement and the trial in one pass, reusing those two buffers. The arithmetic matches the separate force copy and the allocating step.
+
 - L-BFGS writes a new curvature pair into the buffers the full ring displaced, and the session two-loop keeps its direction and coefficients on the solver. The iterates are unchanged.
 
 - Nonlinear CG no longer uses the quasi-Newton Wolfe constant. A fresh

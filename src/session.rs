@@ -136,6 +136,56 @@ impl Drop for WsHold<'_> {
     }
 }
 
+/// Plain FIRE 1.0 step: one pass writes the velocity update, the displacement
+/// and the trial. The arithmetic matches `mapv` negation, [`fire_displacement`]
+/// and `x + dx`.
+fn fire_v1_fused(
+    dx: &mut Array1<f64>,
+    trial: &mut Array1<f64>,
+    state: &mut FireState,
+    x: &mut Array1<f64>,
+    grad: &Array1<f64>,
+    atom_cap: Option<f64>,
+    eucl_cap: Option<f64>,
+    bounds: &eindir_core::Bounds<f64>,
+) {
+    let n = grad.len();
+    let dt = state.dt;
+    {
+        let g = grad.as_slice().unwrap();
+        let vel = state.vel.as_slice_mut().unwrap();
+        let step = dx.as_slice_mut().unwrap();
+        let dest = trial.as_slice_mut().unwrap();
+        let xs = x.as_slice().unwrap();
+        for i in 0..n {
+            let force = -g[i];
+            vel[i] += force * dt;
+            let moved = vel[i] * dt;
+            step[i] = moved;
+            dest[i] = xs[i] + moved;
+        }
+    }
+    if let Some(cap) = atom_cap {
+        scale_step_atom(x, trial, cap);
+    } else if let Some(cap) = eucl_cap {
+        scale_step(x, trial, cap);
+    }
+    let mut held = std::mem::take(trial);
+    held = clip_same_bits(bounds, held);
+    *trial = held;
+    let proposed = l2(dx);
+    {
+        let step = dx.as_slice_mut().unwrap();
+        let dest = trial.as_slice().unwrap();
+        let xs = x.as_slice().unwrap();
+        for i in 0..n {
+            step[i] = dest[i] - xs[i];
+        }
+    }
+    apply_velocity_scale(state, proposed, l2(dx));
+    std::mem::swap(x, trial);
+}
+
 /// Steepest direction in the metric, `-z`, with the `Accept::Step` scale.
 /// `d = -z`, or `d = -istep z` for an explicit step.
 fn steepest_into(dir: &mut Array1<f64>, z: &Array1<f64>, accept: Accept, istep: f64) {
@@ -225,6 +275,9 @@ pub struct Solver {
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
+    /// Reused FIRE displacement and trial. Empty until a plain FIRE step.
+    fire_dx: Array1<f64>,
+    fire_trial: Array1<f64>,
     /// Objective gradients. A finite-difference product is an
     /// [`Self::hvp_calls`] entry, not a gradient.
     gradient_calls: usize,
@@ -374,6 +427,8 @@ impl Solver {
             last_pos: None,
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
+            fire_dx: Array1::zeros(0),
+            fire_trial: Array1::zeros(0),
             gradient_calls: 0,
             hvp_calls: 0,
             saddle_kicks: 0,
@@ -2890,32 +2945,37 @@ impl Solver {
                 }
             }
             Inner::Fire(state, ext) => {
-                // The force, its metric image and the velocity leave the
-                // rigid subspace at the start geometry; the velocity in the
-                // momentum metric, the force in the force metric.
                 let masses = self.masses.as_ref().and_then(|m| m.as_slice());
                 let frozen = self.frozen.as_deref();
-                let mut raw = grad.mapv(|g| -g);
-                eckart(
-                    &mut hold.ws,
-                    rigid_mode,
-                    masses,
-                    frozen,
-                    rigid_weighted,
-                    rigid_metric,
-                    rigid_pbc,
-                    rigid_broken_t,
-                    rigid_broken_r,
-                    &mut raw,
-                );
-                // No metric and no rigid projection: the steepest vector is
-                // the force. A second copy would be read and dropped.
-                let distinct = self.precon.is_some() || rigid_mode != RigidMode::Off;
+                let plain = ext.is_none()
+                    && state.kind == FireKind::V1
+                    && self.precon.is_none()
+                    && rigid_mode == RigidMode::Off
+                    && grad.as_slice().is_some()
+                    && x.as_slice().is_some();
                 #[cfg(feature = "highs")]
-                let distinct = distinct || boxed;
-                #[allow(unused_mut)]
-                let mut steepest_buf = if distinct {
-                    let mut steepest = metric_vector(&self.precon, &raw)?;
+                let plain = plain && !boxed;
+                if plain {
+                    let n = grad.len();
+                    if self.fire_dx.len() != n {
+                        self.fire_dx = Array1::zeros(n);
+                        self.fire_trial = Array1::zeros(n);
+                    }
+                    fire_v1_fused(
+                        &mut self.fire_dx,
+                        &mut self.fire_trial,
+                        state,
+                        x,
+                        &grad,
+                        self.atom_maxmove,
+                        self.control.maxmove,
+                        obj.bounds(),
+                    );
+                } else {
+                    // The force, its metric image and the velocity leave the
+                    // rigid subspace at the start geometry; the velocity in the
+                    // momentum metric, the force in the force metric.
+                    let mut raw = grad.mapv(|g| -g);
                     eckart(
                         &mut hold.ws,
                         rigid_mode,
@@ -2926,71 +2986,94 @@ impl Solver {
                         rigid_pbc,
                         rigid_broken_t,
                         rigid_broken_r,
-                        &mut steepest,
+                        &mut raw,
                     );
-                    Some(steepest)
-                } else {
-                    None
-                };
-                eckart(
-                    &mut hold.ws,
-                    rigid_mode,
-                    masses,
-                    frozen,
-                    rigid_weighted,
-                    rigid_vmetric,
-                    rigid_pbc,
-                    rigid_broken_t,
-                    rigid_broken_r,
-                    &mut state.vel,
-                );
-                #[cfg(feature = "highs")]
-                if boxed {
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut raw);
-                    if let Some(steepest) = steepest_buf.as_mut() {
-                        crate::box_objective::project_tangent(obj.bounds(), x, steepest);
+                    // No metric and no rigid projection: the steepest vector is
+                    // the force. A second copy would be read and dropped.
+                    let distinct = self.precon.is_some() || rigid_mode != RigidMode::Off;
+                    #[cfg(feature = "highs")]
+                    let distinct = distinct || boxed;
+                    #[allow(unused_mut)]
+                    let mut steepest_buf = if distinct {
+                        let mut steepest = metric_vector(&self.precon, &raw)?;
+                        eckart(
+                            &mut hold.ws,
+                            rigid_mode,
+                            masses,
+                            frozen,
+                            rigid_weighted,
+                            rigid_metric,
+                            rigid_pbc,
+                            rigid_broken_t,
+                            rigid_broken_r,
+                            &mut steepest,
+                        );
+                        Some(steepest)
+                    } else {
+                        None
+                    };
+                    eckart(
+                        &mut hold.ws,
+                        rigid_mode,
+                        masses,
+                        frozen,
+                        rigid_weighted,
+                        rigid_vmetric,
+                        rigid_pbc,
+                        rigid_broken_t,
+                        rigid_broken_r,
+                        &mut state.vel,
+                    );
+                    #[cfg(feature = "highs")]
+                    if boxed {
+                        crate::box_objective::project_tangent(obj.bounds(), x, &mut raw);
+                        if let Some(steepest) = steepest_buf.as_mut() {
+                            crate::box_objective::project_tangent(obj.bounds(), x, steepest);
+                        }
+                        crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                     }
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                    let steepest = steepest_buf.as_ref().unwrap_or(&raw);
+                    let mix = fire_mix(&self.precon, &state.vel, &raw, steepest);
+                    let mut dx = match ext {
+                        Some(ext) => {
+                            match fire2_displacement_metric(state, ext, &raw, steepest, mix) {
+                                Ok(dx) => dx,
+                                Err(_) => return Err(Error::FireStalled { steps: self.steps }),
+                            }
+                        }
+                        None => fire_displacement(state, steepest),
+                    };
+                    eckart(
+                        &mut hold.ws,
+                        rigid_mode,
+                        masses,
+                        frozen,
+                        rigid_weighted,
+                        rigid_metric,
+                        rigid_pbc,
+                        rigid_broken_t,
+                        rigid_broken_r,
+                        &mut dx,
+                    );
+                    let mut trial = &*x + &dx;
+                    if let Some(cap) = self.atom_maxmove {
+                        scale_step_atom(x, &mut trial, cap);
+                    } else if let Some(cap) = self.control.maxmove {
+                        scale_step(x, &mut trial, cap);
+                    }
+                    trial = clip_same_bits(obj.bounds(), trial);
+                    // The clamp and clip shorten the move; the velocity has to
+                    // describe the move taken, or the power adapt reads an
+                    // integral of moves that never happened. The displacement
+                    // is written over `dx` after its norm is taken: element
+                    // `trial[i] - x[i]` is the subtraction ndarray would store.
+                    let proposed = l2(&dx);
+                    for i in 0..dx.len() {
+                        dx[i] = trial[i] - x[i];
+                    }
+                    apply_velocity_scale(state, proposed, l2(&dx));
+                    *x = trial;
                 }
-                let steepest = steepest_buf.as_ref().unwrap_or(&raw);
-                let mix = fire_mix(&self.precon, &state.vel, &raw, steepest);
-                let mut dx = match ext {
-                    Some(ext) => match fire2_displacement_metric(state, ext, &raw, steepest, mix) {
-                        Ok(dx) => dx,
-                        Err(_) => return Err(Error::FireStalled { steps: self.steps }),
-                    },
-                    None => fire_displacement(state, steepest),
-                };
-                eckart(
-                    &mut hold.ws,
-                    rigid_mode,
-                    masses,
-                    frozen,
-                    rigid_weighted,
-                    rigid_metric,
-                    rigid_pbc,
-                    rigid_broken_t,
-                    rigid_broken_r,
-                    &mut dx,
-                );
-                let mut trial = &*x + &dx;
-                if let Some(cap) = self.atom_maxmove {
-                    scale_step_atom(x, &mut trial, cap);
-                } else if let Some(cap) = self.control.maxmove {
-                    scale_step(x, &mut trial, cap);
-                }
-                trial = clip_same_bits(obj.bounds(), trial);
-                // The clamp and clip shorten the move; the velocity has to
-                // describe the move taken, or the power adapt reads an
-                // integral of moves that never happened. The displacement
-                // is written over `dx` after its norm is taken: element
-                // `trial[i] - x[i]` is the subtraction ndarray would store.
-                let proposed = l2(&dx);
-                for i in 0..dx.len() {
-                    dx[i] = trial[i] - x[i];
-                }
-                apply_velocity_scale(state, proposed, l2(&dx));
-                *x = trial;
                 if rigid_mode != RigidMode::Off
                     && let Some(xs) = x.as_slice()
                 {
