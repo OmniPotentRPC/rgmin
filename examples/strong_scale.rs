@@ -31,13 +31,16 @@
 //!   --cells 20 --repeats 5 [--max-threads T] [--hardware NAME]`
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use ndarray::{Array1, ArrayView1};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use rayon::prelude::*;
-use rgmin::{Accept, Control, FireKind, FirePreset, LineSearch, Method, Oracle, Solver, StopNorm};
+use rgmin::{
+    Accept, Control, FireKind, FirePreset, LineSearch, Method, Oracle, Solver, StopNorm,
+    phase_enable, phase_reset, phase_times, take_gradient,
+};
 
 /// Pt Morse parameters of tests/newton_cg_morse.rs: eV, 1/Angstrom, Angstrom.
 const D0: f64 = 0.7102;
@@ -113,11 +116,32 @@ fn fcc(cells: usize) -> System {
     }
 }
 
+static PHASES: AtomicBool = AtomicBool::new(false);
+static OBJ_NS: AtomicU64 = AtomicU64::new(0);
+static ALLOC_NS: AtomicU64 = AtomicU64::new(0);
+static FORCE_NS: AtomicU64 = AtomicU64::new(0);
+static SUM_NS: AtomicU64 = AtomicU64::new(0);
+
+fn phase_add(slot: &AtomicU64, t0: Instant) {
+    if PHASES.load(Ordering::Relaxed) {
+        slot.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    }
+}
+
 /// Morse energy and gradient over the fixed bonds, one atom per task.
 fn morse(sys: &System, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     let x = x.as_slice().expect("contiguous");
-    let mut g = vec![0.0; x.len()];
+    let phases = PHASES.load(Ordering::Relaxed);
+    let t_alloc = phases.then(Instant::now);
+    let mut g = take_gradient(x.len());
+    g.fill(0.0);
+    if let Some(t0) = t_alloc {
+        phase_add(&ALLOC_NS, t0);
+    }
+    let t_force = phases.then(Instant::now);
     let e: f64 = g
+        .as_slice_mut()
+        .expect("contiguous")
         .par_chunks_mut(3)
         .enumerate()
         .map(|(i, gi)| {
@@ -139,7 +163,10 @@ fn morse(sys: &System, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
             ei
         })
         .sum();
-    (e, Array1::from(g))
+    if let Some(t0) = t_force {
+        phase_add(&FORCE_NS, t0);
+    }
+    (e, g)
 }
 
 struct Run {
@@ -179,6 +206,12 @@ fn relax(sys: &System, name: &str, audit: bool) -> Run {
         maxmove: None,
         stop_norm: StopNorm::MaxAtom,
     };
+    if PHASES.load(Ordering::Relaxed) {
+        for slot in [&OBJ_NS, &ALLOC_NS, &FORCE_NS, &SUM_NS] {
+            slot.store(0, Ordering::Relaxed);
+        }
+        phase_reset();
+    }
     let calls = AtomicUsize::new(0);
     let origin = Mutex::new(Array1::zeros(0));
     let at_origin = AtomicUsize::new(0);
@@ -187,7 +220,12 @@ fn relax(sys: &System, name: &str, audit: bool) -> Run {
         if audit && *origin.lock().expect("origin") == x {
             at_origin.fetch_add(1, Ordering::Relaxed);
         }
-        morse(sys, x)
+        let t0 = PHASES.load(Ordering::Relaxed).then(Instant::now);
+        let ev = morse(sys, x);
+        if let Some(t0) = t0 {
+            phase_add(&OBJ_NS, t0);
+        }
+        ev
     });
     let start = Instant::now();
     let mut solver = Solver::new(method, control, n);
@@ -231,14 +269,36 @@ fn relax(sys: &System, name: &str, audit: bool) -> Run {
             let own = usize::from(steps == 0);
             searched += usize::from(at_origin.load(Ordering::Relaxed) > own);
             let x0 = std::mem::take(&mut *origin.lock().expect("origin"));
-            let g1 = report.grad.expect("session gradient");
+            let g1 = report.grad.clone().expect("session gradient");
             wolfe += usize::from(strong_wolfe(&(&x - &x0), (f0, &g0), (report.value, &g1)));
             last = Some((report.value, g1));
         }
         steps += 1;
     }
+    let wall = start.elapsed().as_secs_f64();
+    if PHASES.load(Ordering::Relaxed) {
+        let p = phase_times();
+        eprintln!(
+            "phases method={name} wall_ns={} obj_ns={} alloc_ns={} force_ns={} sum_ns={} two_loop_ns={} line_search_ns={} dot_ns={} axpy_ns={} rayon_ns={} dot_calls={} axpy_calls={} rayon_calls={} copy_ns={} elem_ns={}",
+            (wall * 1.0e9) as u64,
+            OBJ_NS.load(Ordering::Relaxed),
+            ALLOC_NS.load(Ordering::Relaxed),
+            FORCE_NS.load(Ordering::Relaxed),
+            SUM_NS.load(Ordering::Relaxed),
+            p.two_loop_ns,
+            p.line_search_ns,
+            p.dot_ns,
+            p.axpy_ns,
+            p.rayon_ns,
+            p.dot_calls,
+            p.axpy_calls,
+            p.rayon_calls,
+            p.copy_ns,
+            p.elem_ns,
+        );
+    }
     Run {
-        wall: start.elapsed().as_secs_f64(),
+        wall,
         calls: calls.load(Ordering::Relaxed),
         steps,
         fmax,
@@ -284,6 +344,10 @@ fn main() {
             .and_then(|i| args.get(i + 1).cloned())
     };
     let num = |key: &str, default: usize| arg(key).map_or(default, |v| v.parse().expect(key));
+    if args.iter().any(|a| a == "--phases") {
+        PHASES.store(true, Ordering::Relaxed);
+        phase_enable();
+    }
     let (model, physical) = host();
     let hardware = arg("--hardware").unwrap_or(model);
     let max_threads = num("--max-threads", physical).max(1);

@@ -4043,7 +4043,7 @@ fn write_report(
             steps: rep.steps,
             grad_norm: rep.grad_norm,
         };
-        (*solver).grad = rep.grad;
+        (*solver).grad = rep.grad.clone();
     }
     rgmin_status_t::RGMIN_SUCCESS
 }

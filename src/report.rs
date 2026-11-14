@@ -25,3 +25,12 @@ pub struct Report {
     /// projection. Sessions fill it. One-shot drivers leave it `None`.
     pub grad: Option<Array1<f64>>,
 }
+
+impl Drop for Report {
+    fn drop(&mut self) {
+        crate::workspace::recycle_array(std::mem::take(&mut self.coords));
+        if let Some(grad) = self.grad.take() {
+            crate::workspace::recycle_array(grad);
+        }
+    }
+}

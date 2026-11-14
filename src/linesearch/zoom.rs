@@ -12,23 +12,26 @@ use ndarray::{Array1, ArrayView1};
 
 use super::conditions::{armijo, strong_curvature};
 use super::{Line, Path, scored, unusable};
+use crate::workspace::SearchBuffers;
 
 /// Evaluate `phi(t) = f(x(t))` and `phi'(t) = grad f(x(t)) . x'(t)`, or
 /// `(+inf, NaN)` where the path is undefined.
 ///
 /// One oracle call yields both values so `φ` and `φ'` do not each hold a
 /// mutable borrow of the same closure.
-fn phi_pair<F, P>(oracle: &mut F, path: &mut P, alpha: f64) -> (f64, f64)
+fn phi_pair<F, P>(oracle: &mut F, path: &mut P, alpha: f64, trial: &mut Array1<f64>) -> (f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
     P: Path + ?Sized,
 {
-    let Some(x) = path.point(alpha) else {
+    if !path.point_into(alpha, trial) {
         return (f64::INFINITY, f64::NAN);
-    };
-    let (f, g) = oracle(x.view());
-    let dphi = path.slope(alpha, x.view(), g.view());
-    (scored(f, g.view()), dphi)
+    }
+    let (f, g) = oracle(trial.view());
+    let dphi = path.slope(alpha, trial.view(), g.view());
+    let score = scored(f, g.view());
+    crate::workspace::recycle_array(g);
+    (score, dphi)
 }
 
 /// Strong Wolfe constants with the measured `(phi(0), phi'(0))`.
@@ -72,14 +75,15 @@ where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
     let path = &mut Line { pos, dir };
-    let (phi0, dphi0) = phi_pair(oracle, path, 0.0);
+    let mut trial = Array1::zeros(pos.len());
+    let (phi0, dphi0) = phi_pair(oracle, path, 0.0, &mut trial);
     let wolfe = Wolfe {
         c1,
         c2,
         phi0,
         dphi0,
     };
-    zoom_into(oracle, path, lo, hi, maxiter, wolfe).0
+    zoom_into(oracle, path, lo, hi, maxiter, wolfe, &mut trial).0
 }
 
 /// Zoom with a precomputed `(φ(0), φ'(0))`.
@@ -90,6 +94,7 @@ fn zoom_into<F, P>(
     mut hi: f64,
     maxiter: usize,
     wolfe: Wolfe,
+    trial: &mut Array1<f64>,
 ) -> (f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
@@ -106,14 +111,14 @@ where
     let mut phi_lo = if lo == 0.0 {
         phi0
     } else {
-        phi_pair(oracle, path, lo).0
+        phi_pair(oracle, path, lo, trial).0
     };
     for _ in 0..maxiter {
         if !lo.is_finite() || !hi.is_finite() || (hi - lo).abs() < 1e-16 {
             break;
         }
         let alpha = bisect(lo, hi);
-        let pair = phi_pair(oracle, path, alpha);
+        let pair = phi_pair(oracle, path, alpha, trial);
         let phi_a = pair.0;
         let dphi_a = pair.1;
         if !phi_a.is_finite() {
@@ -152,23 +157,27 @@ pub(crate) fn wolfe_search<F, P>(
     c1: f64,
     c2: f64,
     maxiter: usize,
-) -> (Array1<f64>, f64, f64)
+    bufs: &mut SearchBuffers,
+) -> (f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
     P: Path + ?Sized,
 {
-    let pos = path.start();
-    let (f0, g0) = oracle(pos.view());
-    let dphi0: f64 = path.slope(0.0, pos.view(), g0.view());
-    if unusable(f0, &g0, path.direction()) || !dphi0.is_finite() || dphi0 >= 0.0 {
-        return (pos, f0, 0.0);
+    path.start_into(&mut bufs.anchor);
+    let (f0, g0) = oracle(bufs.anchor.view());
+    let dphi0: f64 = path.slope(0.0, bufs.anchor.view(), g0.view());
+    let bad = unusable(f0, &g0, path.direction()) || !dphi0.is_finite() || dphi0 >= 0.0;
+    crate::workspace::recycle_array(g0);
+    if bad {
+        bufs.chosen = 0;
+        return (f0, 0.0);
     }
 
     let alpha_max = 64.0_f64.max(istep.abs() * 64.0);
     let mut alpha_prev = 0.0;
     let mut phi_prev = f0;
     let mut alpha = istep.abs().max(1e-16);
-    let mut best_x = pos.clone();
+    bufs.copy_anchor_to_best();
     let mut best_f = f0;
     let mut best_a = 0.0;
     let wolfe = Wolfe {
@@ -179,30 +188,48 @@ where
     };
 
     for i in 0..maxiter {
-        let (x, phi, dphi) = match path.point(alpha) {
-            Some(x) => {
-                let (phi, g) = oracle(x.view());
-                let dphi = path.slope(alpha, x.view(), g.view());
-                (x, scored(phi, g.view()), dphi)
-            }
-            None => (pos.clone(), f64::INFINITY, f64::NAN),
+        let (phi, dphi) = if path.point_into(alpha, &mut bufs.trial) {
+            let (phi, g) = oracle(bufs.trial.view());
+            let dphi = path.slope(alpha, bufs.trial.view(), g.view());
+            let score = scored(phi, g.view());
+            crate::workspace::recycle_array(g);
+            (score, dphi)
+        } else {
+            (f64::INFINITY, f64::NAN)
         };
         if phi.is_finite() && phi < best_f {
             best_f = phi;
-            best_x = x.clone();
+            bufs.copy_trial_to_best();
             best_a = alpha;
         }
         let fail_armijo = !phi.is_finite() || !armijo(phi, f0, alpha, dphi0, c1);
         if !fail_armijo && strong_curvature(dphi, dphi0, c2) {
-            return (x, phi, alpha.abs());
+            bufs.chosen = 2;
+            return (phi, alpha.abs());
         }
         if fail_armijo || (i > 0 && phi >= phi_prev) {
-            let zoomed = zoom_into(oracle, path, alpha_prev, alpha, maxiter, wolfe);
-            return finish(oracle, path, &pos, zoomed, wolfe, (best_x, best_f, best_a));
+            let zoomed = zoom_into(
+                oracle,
+                path,
+                alpha_prev,
+                alpha,
+                maxiter,
+                wolfe,
+                &mut bufs.trial,
+            );
+            return finish(oracle, path, zoomed, wolfe, (best_f, best_a), bufs);
         }
         if dphi >= 0.0 {
-            let zoomed = zoom_into(oracle, path, alpha, alpha_prev, maxiter, wolfe);
-            return finish(oracle, path, &pos, zoomed, wolfe, (best_x, best_f, best_a));
+            let zoomed = zoom_into(
+                oracle,
+                path,
+                alpha,
+                alpha_prev,
+                maxiter,
+                wolfe,
+                &mut bufs.trial,
+            );
+            return finish(oracle, path, zoomed, wolfe, (best_f, best_a), bufs);
         }
         if (alpha - alpha_max).abs() < 1e-16 {
             break;
@@ -212,20 +239,22 @@ where
         alpha = (2.0 * alpha).min(alpha_max);
     }
     if best_f < f0 {
-        (best_x, best_f, best_a.abs())
+        bufs.chosen = 1;
+        (best_f, best_a.abs())
     } else {
-        (pos, f0, 0.0)
+        bufs.chosen = 0;
+        (f0, 0.0)
     }
 }
 
 fn finish<F, P>(
     oracle: &mut F,
     path: &mut P,
-    pos: &Array1<f64>,
     zoomed: (f64, f64),
     wolfe: Wolfe,
-    best: (Array1<f64>, f64, f64),
-) -> (Array1<f64>, f64, f64)
+    best: (f64, f64),
+    bufs: &mut SearchBuffers,
+) -> (f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
     P: Path + ?Sized,
@@ -236,25 +265,25 @@ where
         phi0: f0,
         dphi0,
     } = wolfe;
-    let (best_x, best_f, best_a) = best;
+    let (best_f, best_a) = best;
     let (t, mut ft) = zoomed;
     if t.is_finite() && t.abs() > 0.0 {
         if !ft.is_finite() {
-            ft = phi_pair(oracle, path, t).0;
+            ft = phi_pair(oracle, path, t, &mut bufs.trial).0;
         }
         let tied_wolfe = ft == f0
             && armijo(ft, f0, t, dphi0, c1)
-            && strong_curvature(phi_pair(oracle, path, t).1, dphi0, c2);
-        if ft.is_finite()
-            && (ft < f0 || tied_wolfe)
-            && let Some(x) = path.point(t)
-        {
-            return (x, ft, t.abs());
+            && strong_curvature(phi_pair(oracle, path, t, &mut bufs.trial).1, dphi0, c2);
+        if ft.is_finite() && (ft < f0 || tied_wolfe) && path.point_into(t, &mut bufs.trial) {
+            bufs.chosen = 2;
+            return (ft, t.abs());
         }
     }
     if best_f < f0 {
-        (best_x, best_f, best_a.abs())
+        bufs.chosen = 1;
+        (best_f, best_a.abs())
     } else {
-        (pos.clone(), f0, 0.0)
+        bufs.chosen = 0;
+        (f0, 0.0)
     }
 }

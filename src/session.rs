@@ -19,9 +19,10 @@ use crate::bb::bb_direction;
 use crate::control::{Control, StopNorm};
 use crate::error::{Error, Result};
 use crate::fire::{
-    FireConfig, FireKind, FireMix, FirePreparation, FirePreset, FireState, fire_after_v1,
-    fire_after_v1_metric, fire_clip_components, fire_displacement, fire_displacement_metric,
-    fire_prepare_v2, project_box_tangent,
+    FireConfig, FireKind, FireMix, FirePreparation, FirePreset, FireState, Prepared, fire_after_v1,
+    fire_after_v1_metric, fire_clip_components, fire_clip_velocity, fire_displacement,
+    fire_displacement_into, fire_displacement_metric, fire_prepare_v2, fire_prepare_v2_into,
+    project_box_tangent,
 };
 use crate::holonomic::DistanceConstraints;
 use crate::hvp::{
@@ -45,8 +46,8 @@ use crate::qn_step::QnStep;
 use crate::report::Report;
 use crate::rigid::{project_horizontal, project_out_rot_trans};
 use crate::step::{
-    cap_displacement_atom, clip_mut, clip_owned, finite, l2, max_atom_displacement, non_finite,
-    scale_displacement_to_atom_cap, scale_step, scale_step_atom,
+    cap_displacement_atom, clip_mut, clip_owned, finite, l2, max_atom_displacement,
+    max_atom_motion, non_finite, scale_displacement_to_atom_cap, scale_step, scale_step_atom,
 };
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
@@ -59,6 +60,17 @@ const RADIUS_START: f64 = 1e-8;
 const RADIUS_GROWTH: f64 = 8.0;
 /// Saddle-escape kicks from one stationary point.
 const SADDLE_KICKS: u8 = 4;
+
+/// A length-n vector from the recycle pool, filled with `src`.
+fn copied(src: &Array1<f64>) -> Array1<f64> {
+    let mut dst = crate::workspace::take_array(src.len());
+    if let (Some(d), Some(s)) = (dst.as_slice_mut(), src.as_slice()) {
+        d.copy_from_slice(s);
+    } else {
+        dst.assign(src);
+    }
+    dst
+}
 
 /// Why a capped trial did not move.
 enum CappedMiss {
@@ -101,6 +113,35 @@ struct TangentModel {
     hx: Array1<f64>,
     htx: Array1<f64>,
     basis: Array2<f64>,
+}
+
+/// Scratch for one Euclidean eOn or FIRE step. Sized in [`Solver::new`].
+struct StepScratch {
+    /// Gradient at the point the step starts from.
+    gold: Array1<f64>,
+    /// Gradient at the trial.
+    grad: Array1<f64>,
+    /// Accepted trial coordinates.
+    trial: Array1<f64>,
+    /// Point the FIRE displacement is measured from.
+    fwd: Array1<f64>,
+    /// Uncapped FIRE trial, kept to see whether a cap moved it.
+    free: Array1<f64>,
+    /// FIRE rollback, or a scratch displacement.
+    corr: Array1<f64>,
+}
+
+impl StepScratch {
+    fn new(n: usize) -> Self {
+        Self {
+            gold: Array1::zeros(n),
+            grad: Array1::zeros(n),
+            trial: Array1::zeros(n),
+            fwd: Array1::zeros(n),
+            free: Array1::zeros(n),
+            corr: Array1::zeros(n),
+        }
+    }
 }
 
 /// Long-lived solver. Algorithm memory lives here; `x` stays with the caller.
@@ -164,6 +205,8 @@ pub struct Solver {
     scratch: Array1<f64>,
     scratch_b: Array1<f64>,
     saved_x: Array1<f64>,
+    /// Trial, gradient and FIRE buffers for a steady [`Self::step`].
+    reuse: StepScratch,
     /// Objective gradients. A finite-difference product is an
     /// [`Self::hvp_calls`] entry, not a gradient.
     gradient_calls: usize,
@@ -316,6 +359,7 @@ impl Solver {
             scratch: Array1::zeros(dim),
             scratch_b: Array1::zeros(dim),
             saved_x: Array1::zeros(dim),
+            reuse: StepScratch::new(dim),
             gradient_calls: 0,
             hvp_calls: 0,
             exp: None,
@@ -566,6 +610,30 @@ impl Solver {
     /// Packed length of `x` this session was created with.
     pub fn dim(&self) -> usize {
         self.dim
+    }
+
+    /// Length-n vectors the session is holding for scratch and history.
+    pub fn retained_vectors(&self) -> usize {
+        let mut n = 0;
+        for buf in [
+            &self.scratch,
+            &self.scratch_b,
+            &self.saved_x,
+            &self.reuse.gold,
+            &self.reuse.grad,
+            &self.reuse.trial,
+            &self.reuse.fwd,
+            &self.reuse.free,
+            &self.reuse.corr,
+        ] {
+            if !buf.is_empty() {
+                n += 1;
+            }
+        }
+        if let Inner::Lbfgs(solver) = &self.inner {
+            n += solver.vector_slots();
+        }
+        n
     }
 
     /// Outer steps completed on this session.
@@ -1367,15 +1435,20 @@ impl Solver {
     }
 
     fn remember(&mut self, x: &Array1<f64>, value: f64, grad: &Array1<f64>) {
-        self.remember_owned(x, value, grad.clone());
-    }
-
-    fn remember_owned(&mut self, x: &Array1<f64>, value: f64, grad: Array1<f64>) {
         match &mut self.last_pos {
             Some(pos) if pos.len() == x.len() => pos.assign(x),
-            _ => self.last_pos = Some(x.clone()),
+            _ => self.last_pos = Some(x.to_owned()),
         }
-        self.last_grad = grad;
+        self.last_value = value;
+        crate::workspace::assign_fit(&mut self.last_grad, grad.view());
+    }
+
+    /// Store `x` and `value`. The gradient is already in [`Self::last_grad`].
+    fn remember_pos(&mut self, x: &Array1<f64>, value: f64) {
+        match &mut self.last_pos {
+            Some(pos) if pos.len() == x.len() => pos.assign(x),
+            _ => self.last_pos = Some(x.to_owned()),
+        }
         self.last_value = value;
     }
 
@@ -1424,11 +1497,11 @@ impl Solver {
         }
         Report {
             value,
-            coords: x.clone(),
+            coords: copied(x),
             steps: self.steps,
             grad_norm,
             stop_norm: self.stop_norm,
-            grad: Some(grad.clone()),
+            grad: Some(copied(grad)),
         }
     }
 
@@ -2792,6 +2865,18 @@ impl Solver {
             return self.step_pso(obj, x);
         }
 
+        if self.exp.is_none()
+            && !self.project_rigid
+            && matches!(self.manifold, ManifoldKind::Euclidean)
+        {
+            if self.use_capped_lbfgs() && matches!(self.lbfgs_step(), LbfgsStep::Capped { .. }) {
+                return self.step_eon_euclidean(obj, x);
+            }
+            if matches!(self.inner, Inner::Fire(_)) {
+                return self.step_fire_euclidean(obj, x);
+            }
+        }
+
         let (mut value, mut grad) = if cached {
             if self.brief {
                 (
@@ -3432,6 +3517,442 @@ impl Solver {
         self.remember(x, value, &grad);
         self.steps += 1;
         Ok(self.report(value, x, &grad))
+    }
+
+    /// Euclidean eOn step. The gradient at `x` is [`Self::reuse`].`gold`.
+    /// A warm call writes the trial into the scratch sized at construction.
+    fn step_eon_euclidean<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let cached = self.same_last_x(x);
+        if cached {
+            crate::workspace::assign_fit(&mut self.reuse.gold, self.last_grad.view());
+        } else {
+            let ev = obj.value_and_gradient(x.view());
+            if !finite(ev.0, ev.1.view()) {
+                if self.brief {
+                    crate::workspace::absorb(&mut self.last_grad, ev.1);
+                    self.last_value = ev.0;
+                }
+                return Err(non_finite());
+            }
+            crate::workspace::absorb(&mut self.reuse.gold, ev.1);
+            self.last_value = ev.0;
+        }
+        let value = self.last_value;
+        if !finite(value, self.reuse.gold.view()) {
+            return Err(non_finite());
+        }
+        let gnorm = self.stationarity_norm(x, &self.reuse.gold);
+        if gnorm < self.control.gtol {
+            if self.brief {
+                std::mem::swap(&mut self.last_grad, &mut self.reuse.gold);
+                self.remember_pos(x, value);
+                return Ok(self.report(value, x, &self.last_grad));
+            }
+            return Ok(self.report(value, x, &self.reuse.gold));
+        }
+        self.eon_euclidean_move(obj, x)
+    }
+
+    /// One eOn move from [`Self::reuse`].`gold`. The accepted gradient lands
+    /// in [`Self::last_grad`].
+    fn eon_euclidean_move<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        use crate::lbfgs::{EON_INVERSE_CURVATURE, EonSeed};
+        if self.lindh_spec.is_some() {
+            let xs: Vec<f64> = x.iter().copied().collect();
+            let gs: Vec<f64> = self.reuse.gold.iter().copied().collect();
+            self.ensure_lindh(&xs, &gs, |p| obj.grad(ArrayView1::from(p)));
+        }
+        let Some(cap) = self.lbfgs_step().capped_limit() else {
+            return Err(Error::LbfgsCap {
+                what: "the cap is not positive",
+            });
+        };
+        let mut txn = match &mut self.inner {
+            Inner::Lbfgs(solver) => solver.begin_txn(),
+            _ => {
+                return Err(Error::LbfgsCap {
+                    what: "requires an L-BFGS session",
+                });
+            }
+        };
+        if !self.same_last_x(x)
+            && let Some(previous) = self.last_pos.as_ref()
+        {
+            let prev = previous.as_slice().unwrap_or(&[]);
+            let xs = x.as_slice().unwrap_or(&[]);
+            let gold = self.last_grad.as_slice().unwrap_or(&[]);
+            let gnew = self.reuse.gold.as_slice().unwrap_or(&[]);
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                solver.store_pos_diff(prev, xs, gold, gnew, &mut txn);
+            }
+        }
+        let wants_fd = match &self.inner {
+            Inner::Lbfgs(solver) => solver.eon_wants_fd(),
+            _ => false,
+        };
+        let seed = if wants_fd {
+            self.eon_fd_seed(obj, x, &self.reuse.gold)
+        } else {
+            match &self.inner {
+                Inner::Lbfgs(solver) => solver.eon_seed(),
+                _ => EonSeed::Scale(EON_INVERSE_CURVATURE),
+            }
+        };
+        let h0 = match seed {
+            EonSeed::Scale(h) => h,
+            EonSeed::Steepest => EON_INVERSE_CURVATURE,
+        };
+        let proposed = self.eon_trial(obj, x, cap, seed, &mut txn);
+        let (tval, steep_retry) = match proposed {
+            Ok(value) => (value, false),
+            Err(CappedMiss::Retry) => {
+                if let Inner::Lbfgs(solver) = &mut self.inner {
+                    solver.forget_txn(&mut txn);
+                }
+                self.force_cap_into(h0, cap);
+                match self.trial_of(obj, x, true) {
+                    Ok(value) => (value, true),
+                    Err(err) => {
+                        if let Inner::Lbfgs(solver) = &mut self.inner {
+                            solver.rollback_txn(txn);
+                        }
+                        return Err(err);
+                    }
+                }
+            }
+            Err(CappedMiss::Stop(err)) => {
+                if let Inner::Lbfgs(solver) = &mut self.inner {
+                    solver.rollback_txn(txn);
+                }
+                return Err(err);
+            }
+        };
+        let _ = steep_retry;
+        self.saved_x.assign(x);
+        x.assign(&self.reuse.trial);
+        {
+            let Solver {
+                saved_x,
+                reuse,
+                inner,
+                ..
+            } = &mut *self;
+            if let Inner::Lbfgs(solver) = inner {
+                solver.store_pos_diff(
+                    saved_x.as_slice().unwrap_or(&[]),
+                    x.as_slice().unwrap_or(&[]),
+                    reuse.gold.as_slice().unwrap_or(&[]),
+                    reuse.grad.as_slice().unwrap_or(&[]),
+                    &mut txn,
+                );
+                solver.commit_txn(txn);
+            }
+        }
+        std::mem::swap(&mut self.last_grad, &mut self.reuse.grad);
+        self.remember_pos(x, tval);
+        self.steps += 1;
+        Ok(self.report(tval, x, &self.last_grad))
+    }
+
+    /// `scratch_b = cap(h0 * -gold)`.
+    fn force_cap_into(&mut self, h0: f64, cap: f64) {
+        let n = self.reuse.gold.len().min(self.scratch_b.len());
+        for i in 0..n {
+            self.scratch_b[i] = h0 * -self.reuse.gold[i];
+        }
+        let motion = max_atom_displacement(&self.scratch_b);
+        if motion > cap && motion > 0.0 && cap > 0.0 {
+            self.scratch_b *= cap / motion;
+        }
+    }
+
+    /// Trial of the displacement in `scratch_b` when `from_scratch`, otherwise
+    /// of the vector `eon_step_from_seed` just produced.
+    fn eon_trial<O>(
+        &mut self,
+        obj: &O,
+        x: &Array1<f64>,
+        cap: f64,
+        seed: crate::lbfgs::EonSeed,
+        txn: &mut crate::lbfgs::Txn,
+    ) -> std::result::Result<f64, CappedMiss>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        self.scratch.assign(&self.reuse.gold);
+        let take = {
+            let Solver { scratch, inner, .. } = &mut *self;
+            match inner {
+                Inner::Lbfgs(solver) => solver.eon_step_from_seed(scratch.view(), cap, seed, txn),
+                _ => None,
+            }
+        };
+        let Some(take) = take else {
+            return Err(CappedMiss::Stop(Error::LbfgsCap {
+                what: "the capped step is zero",
+            }));
+        };
+        let step = self.shape_step(x, take.step);
+        let result = self.trial_of_step(obj, x, &step, take.fallback);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.recycle(step);
+        }
+        result
+    }
+
+    /// Value at `clip(x + scratch_b)`. The point is [`Self::reuse`].`trial`
+    /// and the gradient is [`Self::reuse`].`grad`.
+    fn trial_of<O>(&mut self, obj: &O, x: &Array1<f64>, steepest: bool) -> Result<f64>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let n = x.len().min(self.scratch_b.len());
+        for i in 0..n {
+            self.reuse.corr[i] = self.scratch_b[i];
+        }
+        let step = self.shape_step(x, self.reuse.corr.clone());
+        let value = self
+            .trial_of_step(obj, x, &step, steepest)
+            .map_err(|miss| match miss {
+                CappedMiss::Stop(err) => err,
+                CappedMiss::Retry => non_finite(),
+            })?;
+        let _ = step;
+        Ok(value)
+    }
+
+    /// `clip(x + step)` into [`Self::reuse`].`trial`.
+    fn trial_of_step<O>(
+        &mut self,
+        obj: &O,
+        x: &Array1<f64>,
+        step: &Array1<f64>,
+        steepest: bool,
+    ) -> std::result::Result<f64, CappedMiss>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let motion = max_atom_displacement(step);
+        if !motion.is_finite() || motion <= 0.0 {
+            return Err(CappedMiss::Stop(Error::LbfgsCap {
+                what: "the capped step is zero",
+            }));
+        }
+        let n = x.len().min(step.len()).min(self.reuse.trial.len());
+        for i in 0..n {
+            self.reuse.trial[i] = x[i] + step[i];
+        }
+        clip_mut(obj.bounds(), &mut self.reuse.trial);
+        let taken = max_atom_motion(x, &self.reuse.trial);
+        if !taken.is_finite() || taken <= 0.0 {
+            return Err(CappedMiss::Stop(Error::OffManifold {
+                kind: self.manifold.as_str(),
+            }));
+        }
+        let (value, grad) = obj.value_and_gradient(self.reuse.trial.view());
+        if !finite(value, grad.view()) {
+            return Err(if steepest {
+                CappedMiss::Stop(non_finite())
+            } else {
+                CappedMiss::Retry
+            });
+        }
+        crate::workspace::absorb(&mut self.reuse.grad, grad);
+        Ok(value)
+    }
+
+    /// Euclidean FIRE, including Guénolé and ABC. Curved and preconditioned
+    /// sessions stay on the allocating arm.
+    fn step_fire_euclidean<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let cached = self.same_last_x(x);
+        if !cached {
+            let ev = obj.value_and_gradient(x.view());
+            if !finite(ev.0, ev.1.view()) {
+                if self.brief {
+                    crate::workspace::absorb(&mut self.last_grad, ev.1);
+                    self.last_value = ev.0;
+                }
+                return Err(non_finite());
+            }
+            crate::workspace::absorb(&mut self.last_grad, ev.1);
+            self.last_value = ev.0;
+        }
+        let mut value = self.last_value;
+        if !finite(value, self.last_grad.view()) {
+            return Err(non_finite());
+        }
+        let gnorm = self.stationarity_norm(x, &self.last_grad);
+        if gnorm < self.control.gtol {
+            if self.brief {
+                self.remember_pos(x, value);
+            }
+            return Ok(self.report(value, x, &self.last_grad));
+        }
+        self.saved_x.assign(x);
+        self.fire_euclidean_move(obj, x, &mut value)?;
+        let drifted = self.saved_x.iter().zip(x.iter()).any(|(s, xi)| {
+            let d = *xi - *s;
+            (*s + d - *xi).abs() > 1e-15
+        });
+        if drifted {
+            let n = x.len().min(self.saved_x.len());
+            for i in 0..n {
+                let d = x[i] - self.saved_x[i];
+                x[i] = self.saved_x[i] + d;
+            }
+            let ev = obj.value_and_gradient(x.view());
+            value = ev.0;
+            crate::workspace::absorb(&mut self.last_grad, ev.1);
+        }
+        self.remember_pos(x, value);
+        self.steps += 1;
+        Ok(self.report(value, x, &self.last_grad))
+    }
+
+    /// One flat FIRE step. `saved_x` is the point a refusal restores.
+    fn fire_euclidean_move<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        value: &mut f64,
+    ) -> Result<()>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let n = x.len();
+        let steps_now = self.steps;
+        for i in 0..n {
+            self.scratch[i] = -self.last_grad[i];
+        }
+        let saved = {
+            let Solver {
+                scratch,
+                reuse,
+                inner,
+                ..
+            } = &mut *self;
+            project_box_tangent(obj.bounds(), x, scratch);
+            let Inner::Fire(state) = inner else {
+                return Err(Error::FireStalled { steps: steps_now });
+            };
+            project_box_tangent(obj.bounds(), x, &mut state.vel);
+            let saved = state.checkpoint();
+            let prep = fire_prepare_v2_into(state, scratch, &mut reuse.corr);
+            (saved, prep)
+        };
+        if saved.1 == Prepared::Rollback {
+            for i in 0..n {
+                x[i] += self.reuse.corr[i];
+            }
+            clip_mut(obj.bounds(), x);
+            let ev = obj.value_and_gradient(x.view());
+            if !finite(ev.0, ev.1.view()) {
+                x.assign(&self.saved_x);
+                if let Inner::Fire(state) = &mut self.inner {
+                    state.restore(saved.0);
+                }
+                return Err(non_finite());
+            }
+            crate::workspace::absorb(&mut self.reuse.grad, ev.1);
+            for i in 0..n {
+                self.scratch[i] = -self.reuse.grad[i];
+            }
+            project_box_tangent(obj.bounds(), x, &mut self.scratch);
+        } else if saved.1 == Prepared::Stalled {
+            return Err(Error::FireStalled { steps: self.steps });
+        }
+        if let Inner::Fire(state) = &mut self.inner {
+            fire_displacement_into(state, &self.scratch, &mut self.scratch_b);
+            if state.abc
+                && let Some(cap) = self.atom_maxmove.or(self.control.maxmove)
+            {
+                fire_clip_velocity(state, cap);
+                let dt = state.dt;
+                for i in 0..n {
+                    self.scratch_b[i] = state.vel[i] * dt;
+                }
+            }
+        }
+        self.reuse.fwd.assign(x);
+        let (abc, v2, dt, plain) = if let Inner::Fire(state) = &self.inner {
+            (
+                state.abc,
+                matches!(state.kind, FireKind::V2),
+                state.dt,
+                state.preset() == FirePreset::Default && !state.abc,
+            )
+        } else {
+            (false, false, 0.0, true)
+        };
+        for i in 0..n {
+            self.reuse.trial[i] = x[i] + self.scratch_b[i];
+        }
+        if !plain {
+            self.reuse.free.assign(&self.reuse.trial);
+        }
+        let (atom_cap, cap) = if abc {
+            (None, None)
+        } else {
+            (self.atom_maxmove, self.control.maxmove)
+        };
+        if let Some(limit) = atom_cap {
+            scale_step_atom(&self.reuse.fwd, &mut self.reuse.trial, limit);
+        } else if let Some(limit) = cap {
+            scale_step(&self.reuse.fwd, &mut self.reuse.trial, limit);
+        }
+        clip_mut(obj.bounds(), &mut self.reuse.trial);
+        let moved = plain
+            || self
+                .reuse
+                .trial
+                .iter()
+                .zip(self.reuse.free.iter())
+                .any(|(a, b)| a != b);
+        if v2
+            && dt > 0.0
+            && moved
+            && let Inner::Fire(state) = &mut self.inner
+        {
+            for i in 0..n {
+                state.vel[i] = (self.reuse.trial[i] - self.reuse.fwd[i]) / dt;
+            }
+        }
+        let ev = obj.value_and_gradient(self.reuse.trial.view());
+        if !finite(ev.0, ev.1.view()) {
+            x.assign(&self.saved_x);
+            if let Inner::Fire(state) = &mut self.inner {
+                state.restore(saved.0);
+            }
+            return Err(non_finite());
+        }
+        x.assign(&self.reuse.trial);
+        *value = ev.0;
+        crate::workspace::absorb(&mut self.last_grad, ev.1);
+        if let Inner::Fire(state) = &mut self.inner {
+            project_box_tangent(obj.bounds(), x, &mut state.vel);
+        }
+        if matches!(
+            self.inner,
+            Inner::Fire(ref state) if matches!(state.kind, FireKind::V1)
+        ) {
+            for i in 0..n {
+                self.scratch[i] = -self.last_grad[i];
+            }
+            project_box_tangent(obj.bounds(), x, &mut self.scratch);
+            if let Inner::Fire(state) = &mut self.inner {
+                fire_after_v1(state, &self.scratch);
+            }
+        }
+        Ok(())
     }
 
     fn step_pso<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>

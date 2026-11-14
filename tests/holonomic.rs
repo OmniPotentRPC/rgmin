@@ -627,7 +627,7 @@ fn rigid_projection_commutes_with_the_set() {
         for _ in 0..50 {
             let rep = solver.step(&obj, &mut x).unwrap();
             assert!(set.excess(x.view()) <= 1.0);
-            let g = rep.grad.unwrap();
+            let g = rep.grad.as_ref().unwrap();
             let net = [0, 1, 2].map(|c| (0..4).map(|a| g[3 * a + c]).sum::<f64>());
             let scale = g.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
             assert!(

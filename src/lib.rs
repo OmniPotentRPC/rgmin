@@ -65,6 +65,7 @@ mod minimize;
 /// Shifted Newton and Banerjee RFO on a dense Hessian.
 pub mod newton;
 mod oracle;
+mod phase;
 /// Universal exponential preconditioner (Packwood et al. 2016).
 pub mod precon;
 mod pso;
@@ -89,6 +90,7 @@ mod trust;
 pub mod tune;
 /// The vector seam: solver algebra behind one interface.
 pub mod vecops;
+mod workspace;
 
 pub use accept::Accept;
 pub use adam::minimize_adam;
@@ -123,6 +125,7 @@ pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_met
 pub use newton::{HessianObjective, HessianOracle, NewtonKind, minimize_newton};
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
 pub use oracle::Oracle;
+pub use phase::{PhaseTimes, enable as phase_enable, reset as phase_reset, times as phase_times};
 pub use precon::exp_gate_open;
 pub use precon::{Exp, ExpParams, Neighbours, estimate_mu, nearest_neighbour_distance, sine_probe};
 pub use pso::minimize_pso;
@@ -139,5 +142,8 @@ pub use session::Solver;
 pub use session::drive::EonFeat;
 pub use stepper::Stepper;
 pub use tune::{TrainRow, select_train_setting};
+pub use workspace::{
+    buffer_keep, note_buffer_need, recycle_array as recycle_gradient, take_array as take_gradient,
+};
 
 mod sphere_lbfgs;

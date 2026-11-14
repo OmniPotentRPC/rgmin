@@ -37,7 +37,7 @@ use crate::qn::solve_dense;
 use crate::report::Report;
 use crate::step::{
     cap_displacement_atom, finite, l2, max_atom_displacement, next_istep,
-    scale_displacement_to_atom_cap, start_answer, take_step,
+    scale_displacement_to_atom_cap, start_answer, take_step_reuse,
 };
 use eindir_core::{DifferentiableObjective, Objective};
 
@@ -323,6 +323,7 @@ fn two_loop_vecops(
     h0: f64,
     lin: Option<&crate::lindh::LindhFactor>,
 ) {
+    let _phase = crate::phase::Guard::two_loop();
     let m = memory.len();
     let total = if m == 0 { 0 } else { m + extra };
     let mut stack = [0.0; 64];
@@ -513,6 +514,8 @@ pub struct Lbfgs {
     work: Array1<f64>,
     /// Curvature vectors waiting to be written again.
     pool: Vec<Array1<f64>>,
+    /// Empty pair list with `max_pairs` capacity, swapped in by [`Self::forget_txn`].
+    memory_spare: Vec<Pair>,
     /// The last [`Self::forget_txn`] cleared the pairs.
     pub(crate) forgot: bool,
     /// Cap the whole displacement by its Euclidean length.
@@ -533,6 +536,15 @@ pub struct Lbfgs {
     pub(crate) skip_bad: bool,
     /// Lindh model Hessian. `None` keeps the scalar initial scale.
     pub(crate) lindh: Option<crate::lindh::LindhFactor>,
+    /// `-g` for one eOn step. Reused so a warm iteration does not allocate it.
+    force: Array1<f64>,
+    /// Empty `Txn::trimmed` kept so a full history does not allocate the vec.
+    hold_trim: Vec<Pair>,
+    /// Empty `Txn::pre_trimmed`, kept for the same reason.
+    hold_pre: Vec<Pair>,
+    /// Line-search trial kept across Wolfe steps. Boxed so [`crate::session`]
+    /// does not carry the buffers in every method variant.
+    search: Box<crate::workspace::SearchBuffers>,
 }
 
 impl Default for Lbfgs {
@@ -544,9 +556,13 @@ impl Default for Lbfgs {
 impl Lbfgs {
     /// Fresh solver with room for `max_pairs` curvature pairs.
     pub fn with_capacity(max_pairs: usize) -> Self {
+        let max_pairs = max_pairs.max(1);
+        // Each pair is two vectors. The recycle pool has to be able to
+        // hold the whole history or a later take allocates.
+        crate::workspace::note_buffer_need(max_pairs * 2);
         Self {
-            memory: Vec::new(),
-            max_pairs: max_pairs.max(1),
+            memory: Vec::with_capacity(max_pairs),
+            max_pairs,
             gtol: 1e-6,
             armijo: 1e-4,
             curvature: 0.9,
@@ -567,6 +583,7 @@ impl Lbfgs {
             stored: false,
             work: Array1::zeros(0),
             pool: Vec::new(),
+            memory_spare: Vec::with_capacity(max_pairs),
             forgot: false,
             euclidean_cap: false,
             keep_long: false,
@@ -574,6 +591,10 @@ impl Lbfgs {
             compact_tr: false,
             skip_bad: false,
             lindh: None,
+            force: Array1::zeros(0),
+            hold_trim: Vec::with_capacity(max_pairs),
+            hold_pre: Vec::with_capacity(max_pairs),
+            search: Box::new(crate::workspace::SearchBuffers::default()),
         }
     }
 
@@ -640,8 +661,7 @@ impl Lbfgs {
     }
 
     fn recycle_all(&mut self) {
-        let memory = std::mem::take(&mut self.memory);
-        for pair in memory {
+        while let Some(pair) = self.memory.pop() {
             self.recycle_pair(pair);
         }
     }
@@ -669,9 +689,9 @@ impl Lbfgs {
             have: self.have_curvature,
             stored: self.stored,
             parked: None,
-            pre_trimmed: Vec::new(),
+            pre_trimmed: std::mem::take(&mut self.hold_pre),
             pre_pushed: 0,
-            trimmed: Vec::new(),
+            trimmed: std::mem::take(&mut self.hold_trim),
             pushed: 0,
         }
     }
@@ -680,10 +700,11 @@ impl Lbfgs {
     pub(crate) fn forget_txn(&mut self, txn: &mut Txn) {
         self.forgot = true;
         if txn.parked.is_none() {
-            txn.pre_trimmed = std::mem::take(&mut txn.trimmed);
+            txn.pre_trimmed.append(&mut txn.trimmed);
             txn.pre_pushed = txn.pushed;
             txn.pushed = 0;
-            txn.parked = Some(std::mem::take(&mut self.memory));
+            let spare = std::mem::take(&mut self.memory_spare);
+            txn.parked = Some(std::mem::replace(&mut self.memory, spare));
         } else {
             self.recycle_all();
             for pair in txn.trimmed.drain(..) {
@@ -714,33 +735,38 @@ impl Lbfgs {
         self.stored = true;
     }
 
-    pub(crate) fn commit_txn(&mut self, txn: Txn) {
-        for pair in txn.trimmed {
+    pub(crate) fn commit_txn(&mut self, mut txn: Txn) {
+        for pair in txn.trimmed.drain(..) {
             self.recycle_pair(pair);
         }
-        for pair in txn.pre_trimmed {
+        for pair in txn.pre_trimmed.drain(..) {
             self.recycle_pair(pair);
         }
-        if let Some(memory) = txn.parked {
-            for pair in memory {
+        if let Some(mut parked) = txn.parked.take() {
+            for pair in parked.drain(..) {
                 self.recycle_pair(pair);
             }
+            if parked.capacity() > self.memory_spare.capacity() {
+                self.memory_spare = parked;
+            }
         }
+        self.keep_txn_bufs(txn);
     }
 
-    pub(crate) fn rollback_txn(&mut self, txn: Txn) {
+    pub(crate) fn rollback_txn(&mut self, mut txn: Txn) {
         if txn.parked.is_some() {
             self.recycle_all();
-            for pair in txn.trimmed {
+            for pair in txn.trimmed.drain(..) {
                 self.recycle_pair(pair);
             }
-            self.memory = txn.parked.unwrap_or_default();
+            let parked = txn.parked.take().unwrap_or_default();
+            self.memory_spare = std::mem::replace(&mut self.memory, parked);
             for _ in 0..txn.pre_pushed {
                 if let Some(pair) = self.memory.pop() {
                     self.recycle_pair(pair);
                 }
             }
-            for pair in txn.pre_trimmed.into_iter().rev() {
+            while let Some(pair) = txn.pre_trimmed.pop() {
                 self.memory.insert(0, pair);
             }
         } else {
@@ -749,7 +775,7 @@ impl Lbfgs {
                     self.recycle_pair(pair);
                 }
             }
-            for pair in txn.trimmed.into_iter().rev() {
+            while let Some(pair) = txn.trimmed.pop() {
                 self.memory.insert(0, pair);
             }
         }
@@ -757,6 +783,15 @@ impl Lbfgs {
         self.last_yy = txn.yy;
         self.have_curvature = txn.have;
         self.stored = txn.stored;
+        self.keep_txn_bufs(txn);
+    }
+
+    /// Put the transaction's pair lists back. Clearing them keeps the capacity.
+    fn keep_txn_bufs(&mut self, mut txn: Txn) {
+        txn.trimmed.clear();
+        txn.pre_trimmed.clear();
+        self.hold_trim = txn.trimmed;
+        self.hold_pre = txn.pre_trimmed;
     }
 
     /// Copy `s` and `y = g_new - g_old` into a recycled slot.
@@ -852,6 +887,7 @@ impl Lbfgs {
         precon: Option<&ndarray::Array2<f64>>,
         exp: Option<&crate::precon::Exp>,
     ) -> Array1<f64> {
+        let _phase = crate::phase::Guard::two_loop();
         let (mut q, alpha, idxs) = direction::backward(&self.memory, self.extra_updates, g);
         if let Some(pmat) = precon {
             q = solve_dense(pmat, &q).unwrap_or_else(|| self.scale_gamma(q));
@@ -1104,10 +1140,79 @@ impl Lbfgs {
         seed: EonSeed,
         txn: &mut Txn,
     ) -> Option<EonTake> {
+        self.ensure_history(g.len());
         let fallback = self.prepare_eon(g, max_atom, seed, txn)?;
         let step = self.copy_work();
         let motion = max_atom_displacement(&step);
         (motion.is_finite() && motion > 0.0).then_some(EonTake { step, fallback })
+    }
+
+    /// Write `-g` into [`Self::force`].
+    fn fill_neg(&mut self, g: ArrayView1<f64>) {
+        let n = g.len();
+        if self.force.len() != n {
+            self.force = Array1::zeros(n);
+        }
+        if let (Some(f), Some(gv)) = (self.force.as_slice_mut(), g.as_slice()) {
+            for (fi, &gi) in f.iter_mut().zip(gv) {
+                *fi = -gi;
+            }
+        } else {
+            self.force.assign(&g);
+            self.force.mapv_inplace(|v| -v);
+        }
+    }
+
+    /// `work = scale * force`, overwriting the quasi-Newton residual.
+    fn scale_force_into_work(&mut self, scale: f64) {
+        let n = self.force.len();
+        self.ensure_work(n);
+        if let (Some(w), Some(f)) = (self.work.as_slice_mut(), self.force.as_slice()) {
+            for (wi, &fi) in w.iter_mut().zip(f) {
+                *wi = scale * fi;
+            }
+        }
+    }
+
+    /// Pair slots plus the step, the two curvature vectors and one spare.
+    /// The first call at a length allocates them. A later call does not.
+    fn ensure_history(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let target = self.max_pairs.max(1) * 2 + 4;
+        let mut have = self.pool.iter().filter(|v| v.len() == n).count();
+        if self.work.len() == n {
+            have += 1;
+        }
+        for pair in &self.memory {
+            if pair.s.len() == n {
+                have += 1;
+            }
+            if pair.y.len() == n {
+                have += 1;
+            }
+        }
+        if have >= target {
+            return;
+        }
+        let missing = target - have;
+        self.pool.reserve(missing);
+        for _ in 0..missing {
+            self.pool.push(Array1::zeros(n));
+        }
+    }
+
+    /// Length-n vectors the solver is holding for the history and the scratch.
+    pub(crate) fn vector_slots(&self) -> usize {
+        let mut n = self.memory.len() * 2 + self.pool.len();
+        if !self.work.is_empty() {
+            n += 1;
+        }
+        if !self.force.is_empty() {
+            n += 1;
+        }
+        n
     }
 
     /// Write the eOn displacement into [`Self::work`]. `Some(fallback)`.
@@ -1123,9 +1228,9 @@ impl Lbfgs {
         match seed {
             EonSeed::Steepest => {
                 self.forget_txn(txn);
-                let force = g.mapv(|v| -v);
-                let step = self.apply_cap(&(EON_STEEP_SCALE * &force), max_atom);
-                self.work.assign(&step);
+                self.fill_neg(g);
+                self.scale_force_into_work(EON_STEEP_SCALE);
+                self.cap_work(max_atom);
                 Some(true)
             }
             EonSeed::Scale(h0) => {
@@ -1135,11 +1240,11 @@ impl Lbfgs {
                 if self.compact_tr && !self.memory.is_empty() && self.install_compact(g, max_atom) {
                     return Some(false);
                 }
-                let force = g.mapv(|v| -v);
+                self.fill_neg(g);
                 self.write_qn(g, h0);
                 let distance = self.motion(&self.work);
-                let along = self.work.dot(&force);
-                let uphill = l2(&self.work) > 0.0 && l2(&force) > 0.0 && along < 0.0;
+                let along = self.work.dot(&self.force);
+                let uphill = l2(&self.work) > 0.0 && l2(&self.force) > 0.0 && along < 0.0;
                 if !distance.is_finite() {
                     return None;
                 }
@@ -1153,8 +1258,8 @@ impl Lbfgs {
                 }
                 if uphill || (distance >= max_atom && !self.keep_long) {
                     self.forget_txn(txn);
-                    let step = self.apply_cap(&(h0 * &force), max_atom);
-                    self.work.assign(&step);
+                    self.scale_force_into_work(h0);
+                    self.cap_work(max_atom);
                     Some(true)
                 } else {
                     self.cap_work(max_atom);
@@ -1223,20 +1328,6 @@ impl Lbfgs {
             l2(step)
         } else {
             max_atom_displacement(step)
-        }
-    }
-
-    /// Shorten `step` to `cap` in the length [`Self::motion`] uses.
-    fn apply_cap(&self, step: &Array1<f64>, cap: f64) -> Array1<f64> {
-        if self.euclidean_cap {
-            let motion = l2(step);
-            if motion > cap && motion > 0.0 && cap > 0.0 {
-                step * (cap / motion)
-            } else {
-                step.clone()
-            }
-        } else {
-            cap_displacement_atom(step, cap)
         }
     }
 
@@ -1655,6 +1746,7 @@ impl Lbfgs {
     where
         F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
     {
+        let _phase = crate::phase::Guard::line_search();
         let Ray { d, slope, a_max } = ray;
         let f0 = *f;
         let mut evals = 0usize;
@@ -2231,6 +2323,7 @@ impl Lbfgs {
     ) where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        let _phase = crate::phase::Guard::line_search();
         let dir = self.search_direction(pos.view(), grad.view());
         let old = pos.clone();
         let gold = grad.clone();
@@ -2238,7 +2331,7 @@ impl Lbfgs {
         // starts at the unit step so accepted steps retain superlinear
         // convergence instead of inheriting repeated line-search shrinkage.
         let trial_step = if self.memory.is_empty() { *istep } else { 1.0 };
-        let (mut npos, _, mut lsstep, mut moved) = take_step(
+        let (mut lsstep, mut moved) = take_step_reuse(
             obj,
             pos,
             *value,
@@ -2246,13 +2339,14 @@ impl Lbfgs {
             trial_step,
             linesearch,
             control,
+            &mut self.search,
         );
         if !moved && !self.memory.is_empty() {
             // Retained curvature can describe a different objective scale.
             // Retry with an empty history before reporting a stalled step.
             self.forget();
             let restart_direction = self.search_direction(pos.view(), grad.view());
-            let restart = take_step(
+            let restart = take_step_reuse(
                 obj,
                 pos,
                 *value,
@@ -2260,12 +2354,14 @@ impl Lbfgs {
                 control.istep,
                 linesearch,
                 control,
+                &mut self.search,
             );
-            npos = restart.0;
-            lsstep = restart.2;
-            moved = restart.3;
+            lsstep = restart.0;
+            moved = restart.1;
         }
-        *pos = npos;
+        if moved {
+            pos.assign(&self.search.clipped);
+        }
         let ev = obj.value_and_gradient(pos.view());
         *value = ev.0;
         *grad = ev.1;

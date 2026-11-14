@@ -149,8 +149,8 @@ fn report_carries_the_gradient_its_norm_measures() {
             let mut x = lj7_start();
             for _ in 0..25 {
                 let rep = s.step(&obj, &mut x).unwrap();
-                let grad = rep.grad.expect("session report has a gradient");
-                assert_eq!(grad, lj_cluster(rep.coords.view()).1);
+                let grad = rep.grad.as_ref().expect("session report has a gradient");
+                assert_eq!(grad, &lj_cluster(rep.coords.view()).1);
                 assert_eq!(rep.grad_norm, norm.unwrap_or_default().of(grad.view()));
                 assert_eq!(rep.stop_norm, norm.unwrap_or_default());
             }

@@ -30,15 +30,10 @@ pub(crate) fn clip_mut(bounds: &eindir_core::Bounds<f64>, x: &mut Array1<f64>) {
     if point_strictly_inside(bounds, x.view()) {
         return;
     }
-    let clipped = bounds.clip(x.view());
-    if x.len() == clipped.len()
-        && x.iter()
-            .zip(clipped.iter())
-            .all(|(a, b)| a.to_bits() == b.to_bits())
-    {
-        return;
+    let n = x.len().min(bounds.low.len()).min(bounds.high.len());
+    for i in 0..n {
+        x[i] = x[i].max(bounds.low[i]).min(bounds.high[i]);
     }
-    *x = clipped;
 }
 
 fn point_strictly_inside(bounds: &eindir_core::Bounds<f64>, x: ArrayView1<'_, f64>) -> bool {
@@ -58,6 +53,7 @@ fn point_strictly_inside(bounds: &eindir_core::Bounds<f64>, x: ArrayView1<'_, f6
 
 /// An answer a decrease test may compare: value and gradient finite.
 pub(crate) fn finite(f: f64, g: ArrayView1<'_, f64>) -> bool {
+    let _phase = crate::phase::Guard::elem();
     f.is_finite() && g.iter().all(|v| v.is_finite())
 }
 
@@ -216,6 +212,89 @@ where
         (trial, nval, lsstep, true)
     } else {
         (pos.clone(), value, 0.0, false)
+    }
+}
+
+/// [`take_step`] with the line-search point kept in `bufs`.
+///
+/// The accepted coordinates are in `bufs.clipped` when the second
+/// value is true. A refused step leaves `pos` alone.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the line search, the cap and the reused buffers are one step"
+)]
+pub(crate) fn take_step_reuse<O>(
+    obj: &O,
+    pos: &Array1<f64>,
+    value: f64,
+    dir: ArrayView1<'_, f64>,
+    istep: f64,
+    linesearch: LineSearch,
+    control: &Control,
+    bufs: &mut crate::workspace::SearchBuffers,
+) -> (f64, bool)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let (_, lsstep) = linesearch.search_with(
+        |x| obj.value_and_gradient(x),
+        &mut crate::linesearch::Line {
+            pos: pos.view(),
+            dir,
+        },
+        istep,
+        bufs,
+    );
+    let bounds = obj.bounds();
+    let (low, high) = (bounds.low.as_slice(), bounds.high.as_slice());
+    if let (Some(low), Some(high)) = (low, high) {
+        match bufs.chosen {
+            1 => {
+                let crate::workspace::SearchBuffers { best, clipped, .. } = bufs;
+                crate::workspace::clip_into(low, high, best.view(), clipped);
+            }
+            2 => {
+                let crate::workspace::SearchBuffers { trial, clipped, .. } = bufs;
+                crate::workspace::clip_into(low, high, trial.view(), clipped);
+            }
+            _ => {
+                let crate::workspace::SearchBuffers {
+                    anchor, clipped, ..
+                } = bufs;
+                crate::workspace::clip_into(low, high, anchor.view(), clipped);
+            }
+        }
+    } else {
+        let clipped = bounds.clip(bufs.result());
+        crate::workspace::assign_fit(&mut bufs.clipped, clipped.view());
+    }
+    if let Some(cap) = control.maxmove {
+        scale_step(pos, &mut bufs.clipped, cap);
+    }
+    let (nval, grad) = obj.value_and_gradient(bufs.clipped.view());
+    let finite = nval.is_finite() && grad.iter().all(|g| g.is_finite());
+    let curvature_decrease = match linesearch {
+        LineSearch::Wolfe { c1, c2, .. } if finite && nval == value => {
+            let (_, initial_grad) = obj.value_and_gradient(pos.view());
+            {
+                let crate::workspace::SearchBuffers { delta, clipped, .. } = bufs;
+                crate::workspace::assign_fit(delta, clipped.view());
+                *delta -= pos;
+            }
+            let initial_slope = initial_grad.dot(&bufs.delta);
+            let trial_slope = grad.dot(&bufs.delta);
+            crate::workspace::recycle_array(initial_grad);
+            initial_slope < 0.0
+                && crate::linesearch::conditions::armijo(nval, value, 1.0, initial_slope, c1)
+                && crate::linesearch::conditions::strong_curvature(trial_slope, initial_slope, c2)
+        }
+        _ => false,
+    };
+    crate::workspace::recycle_array(grad);
+    if finite && (nval < value || curvature_decrease) {
+        (lsstep, true)
+    } else {
+        (0.0, false)
     }
 }
 

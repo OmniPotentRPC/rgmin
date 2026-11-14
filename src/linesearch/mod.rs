@@ -106,8 +106,28 @@ impl LineSearch {
         F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
         P: Path + ?Sized,
     {
+        let mut bufs = crate::workspace::SearchBuffers::default();
+        let (f, step) = self.search_with(&mut oracle, path, istep, &mut bufs);
+        let point = bufs.result().to_owned();
+        (point, f, step)
+    }
+
+    /// [`Self::search_path`] writing the accepted point into `bufs`.
+    pub(crate) fn search_with<F, P>(
+        &self,
+        mut oracle: F,
+        path: &mut P,
+        istep: f64,
+        bufs: &mut crate::workspace::SearchBuffers,
+    ) -> (f64, f64)
+    where
+        F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+        P: Path + ?Sized,
+    {
         match *self {
-            Self::Brent { maxiter, tol } => brent_search(&mut oracle, path, istep, maxiter, tol),
+            Self::Brent { maxiter, tol } => {
+                brent_search(&mut oracle, path, istep, maxiter, tol, bufs)
+            }
             Self::Backtracking { c, beta, maxiter } => {
                 let rule = Backtrack {
                     c,
@@ -115,7 +135,7 @@ impl LineSearch {
                     maxiter,
                     goldstein: false,
                 };
-                backtrack_search(&mut oracle, path, istep, rule)
+                backtrack_search(&mut oracle, path, istep, rule, bufs)
             }
             Self::Goldstein { c, beta, maxiter } => {
                 let rule = Backtrack {
@@ -124,10 +144,10 @@ impl LineSearch {
                     maxiter,
                     goldstein: true,
                 };
-                backtrack_search(&mut oracle, path, istep, rule)
+                backtrack_search(&mut oracle, path, istep, rule, bufs)
             }
             Self::Wolfe { c1, c2, maxiter } => {
-                zoom::wolfe_search(&mut oracle, path, istep, c1, c2, maxiter)
+                zoom::wolfe_search(&mut oracle, path, istep, c1, c2, maxiter, bufs)
             }
         }
     }
@@ -141,6 +161,24 @@ pub(crate) trait Path {
     fn direction(&self) -> ArrayView1<'_, f64>;
     /// `x(t)`, `None` where the curve is not defined.
     fn point(&mut self, t: f64) -> Option<Array1<f64>>;
+    /// `x(0)` written into `out`. The default copies [`Self::start`].
+    fn start_into(&mut self, out: &mut Array1<f64>) {
+        let s = self.start();
+        crate::workspace::assign_fit(out, s.view());
+    }
+    /// `x(t)` written into `out`. The default copies [`Self::point`].
+    ///
+    /// `false` where the curve is not defined. A straight line overrides
+    /// this and does not allocate once `out` has the right length.
+    fn point_into(&mut self, t: f64, out: &mut Array1<f64>) -> bool {
+        match self.point(t) {
+            Some(p) => {
+                crate::workspace::assign_fit(out, p.view());
+                true
+            }
+            None => false,
+        }
+    }
     /// `g . x'(t)` for the gradient `g` at `at = x(t)`.
     fn slope(&mut self, t: f64, at: ArrayView1<'_, f64>, g: ArrayView1<'_, f64>) -> f64;
 }
@@ -155,14 +193,21 @@ impl Path for Line<'_> {
     fn start(&self) -> Array1<f64> {
         self.pos.to_owned()
     }
+    fn start_into(&mut self, out: &mut Array1<f64>) {
+        crate::workspace::assign_fit(out, self.pos);
+    }
     fn direction(&self) -> ArrayView1<'_, f64> {
         self.dir.view()
     }
     fn point(&mut self, t: f64) -> Option<Array1<f64>> {
         Some(axpy(self.pos, t, self.dir))
     }
+    fn point_into(&mut self, t: f64, out: &mut Array1<f64>) -> bool {
+        axpy_into(self.pos, t, self.dir, out);
+        true
+    }
     fn slope(&mut self, _t: f64, _at: ArrayView1<'_, f64>, g: ArrayView1<'_, f64>) -> f64 {
-        g.iter().zip(self.dir.iter()).map(|(g, d)| g * d).sum()
+        crate::vecops::dot(g, self.dir)
     }
 }
 
@@ -170,6 +215,23 @@ pub(crate) fn axpy(pos: ArrayView1<'_, f64>, t: f64, dir: ArrayView1<'_, f64>) -
     let mut trial = pos.to_owned();
     crate::vecops::axpy(t, dir, &mut trial);
     trial
+}
+
+/// `trial = pos + t dir` into a buffer that already has `pos`'s length.
+pub(crate) fn axpy_into(
+    pos: ArrayView1<'_, f64>,
+    t: f64,
+    dir: ArrayView1<'_, f64>,
+    trial: &mut Array1<f64>,
+) {
+    crate::workspace::fit(trial, pos.len());
+    match (trial.as_slice_mut(), pos.as_slice(), dir.as_slice()) {
+        (Some(d), Some(p), Some(r)) => crate::vecops::lincomb(d, p, t, r),
+        _ => {
+            crate::workspace::assign_fit(trial, pos);
+            crate::vecops::axpy(t, dir, trial);
+        }
+    }
 }
 
 /// `f`, or `+inf` when the value or gradient is non-finite. NaN fails no
@@ -188,40 +250,43 @@ fn unusable(f0: f64, g0: &Array1<f64>, dir: ArrayView1<'_, f64>) -> bool {
     !crate::step::finite(f0, g0.view()) || dir.iter().any(|v| !v.is_finite())
 }
 
-/// `(x(t), f, g)` with `f` scored, `None` where the path is undefined.
-fn probe<F, P>(oracle: &mut F, path: &mut P, t: f64) -> Option<(Array1<f64>, f64, Array1<f64>)>
-where
-    F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
-    P: Path + ?Sized,
-{
-    let x = path.point(t)?;
-    let (f, g) = oracle(x.view());
-    let f = scored(f, g.view());
-    Some((x, f, g))
-}
-
 fn brent_search<F, P>(
     oracle: &mut F,
     path: &mut P,
     istep: f64,
     maxiter: usize,
     tol: f64,
-) -> (Array1<f64>, f64, f64)
+    bufs: &mut crate::workspace::SearchBuffers,
+) -> (f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
     P: Path + ?Sized,
 {
-    let pos = path.start();
-    let (f0, g0) = oracle(pos.view());
-    if unusable(f0, &g0, path.direction()) {
-        return (pos, f0, 0.0);
+    path.start_into(&mut bufs.anchor);
+    let (f0, g0) = oracle(bufs.anchor.view());
+    let bad = unusable(f0, &g0, path.direction());
+    crate::workspace::recycle_array(g0);
+    if bad {
+        bufs.chosen = 0;
+        return (f0, 0.0);
     }
-    let mut phi = |t: f64| probe(oracle, path, t).map_or(f64::INFINITY, |(_, f, _)| f);
+    let mut phi = |t: f64| {
+        if !path.point_into(t, &mut bufs.trial) {
+            return f64::INFINITY;
+        }
+        let (f, g) = oracle(bufs.trial.view());
+        let score = scored(f, g.view());
+        crate::workspace::recycle_array(g);
+        score
+    };
     let (a, b) = bracket(&mut phi, 0.0, istep.max(1e-12), maxiter);
     let (t, ft) = brent(&mut phi, a, b, tol, maxiter.max(20));
-    match path.point(t) {
-        Some(x) if ft < f0 => (x, ft, t.abs()),
-        _ => (pos, f0, 0.0),
+    if ft < f0 && path.point_into(t, &mut bufs.trial) {
+        bufs.chosen = 2;
+        (ft, t.abs())
+    } else {
+        bufs.chosen = 0;
+        (f0, 0.0)
     }
 }
 
@@ -239,7 +304,8 @@ fn backtrack_search<F, P>(
     path: &mut P,
     istep: f64,
     rule: Backtrack,
-) -> (Array1<f64>, f64, f64)
+    bufs: &mut crate::workspace::SearchBuffers,
+) -> (f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
     P: Path + ?Sized,
@@ -250,35 +316,46 @@ where
         maxiter,
         goldstein,
     } = rule;
-    let pos = path.start();
-    let (f0, g0) = oracle(pos.view());
-    if unusable(f0, &g0, path.direction()) {
-        return (pos, f0, 0.0);
+    path.start_into(&mut bufs.anchor);
+    let (f0, g0) = oracle(bufs.anchor.view());
+    let bad = unusable(f0, &g0, path.direction());
+    let slope: f64 = if bad {
+        0.0
+    } else {
+        path.slope(0.0, bufs.anchor.view(), g0.view())
+    };
+    crate::workspace::recycle_array(g0);
+    if bad {
+        bufs.chosen = 0;
+        return (f0, 0.0);
     }
-    let slope: f64 = path.slope(0.0, pos.view(), g0.view());
     let mut alpha = istep.max(1e-16);
-    let mut best_x = pos.clone();
+    bufs.copy_anchor_to_best();
     let mut best_f = f0;
     let mut best_alpha = 0.0;
     for _ in 0..maxiter {
-        let probed = probe(oracle, path, alpha);
-        let (x, f) = match probed {
-            Some((x, f, _)) => (Some(x), f),
-            None => (None, f64::INFINITY),
+        let have = path.point_into(alpha, &mut bufs.trial);
+        let f = if have {
+            let (f, g) = oracle(bufs.trial.view());
+            let score = scored(f, g.view());
+            crate::workspace::recycle_array(g);
+            score
+        } else {
+            f64::INFINITY
         };
+        if have && f < best_f {
+            best_f = f;
+            bufs.copy_trial_to_best();
+            best_alpha = alpha;
+        }
         let accept = if goldstein {
             conditions::goldstein(f, f0, alpha, slope, c)
         } else {
             conditions::armijo(f, f0, alpha, slope, c)
         };
-        match x {
-            Some(x) if accept => return (x, f, alpha.abs()),
-            Some(x) if f < best_f => {
-                best_f = f;
-                best_x = x;
-                best_alpha = alpha;
-            }
-            _ => {}
+        if accept && have {
+            bufs.chosen = 2;
+            return (f, alpha.abs());
         }
         if goldstein && conditions::armijo(f, f0, alpha, slope, c) {
             // Lower bound failed: step is too short (Nocedal-Wright 3.11).
@@ -292,9 +369,11 @@ where
         }
     }
     if best_f < f0 {
-        (best_x, best_f, best_alpha.abs())
+        bufs.chosen = 1;
+        (best_f, best_alpha.abs())
     } else {
-        (pos, f0, 0.0)
+        bufs.chosen = 0;
+        (f0, 0.0)
     }
 }
 

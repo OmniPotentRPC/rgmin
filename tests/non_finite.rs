@@ -218,7 +218,7 @@ fn a_refused_step_leaves_the_session_as_it_was() {
             }
             open.store(true, SeqCst);
             let r = solver.step(&obj, &mut x).unwrap();
-            (r.value, r.coords)
+            (r.value, r.coords.clone())
         };
         assert_eq!(run(true), run(false), "{token}");
     }
@@ -267,7 +267,12 @@ fn a_refused_first_step_leaves_the_session_new() {
             let mut x = Array1::from_elem(3, 0.99);
             probed.lock().unwrap().clear();
             let r = solver.step(&obj, &mut x).unwrap();
-            (r.value, r.coords, r.steps, probed.lock().unwrap().clone())
+            (
+                r.value,
+                r.coords.clone(),
+                r.steps,
+                probed.lock().unwrap().clone(),
+            )
         };
         assert_eq!(run(true), run(false), "{token}");
     }
@@ -340,7 +345,7 @@ fn a_refused_trial_after_a_move_records_the_move_once() {
         }
         open.store(true, SeqCst);
         let r = solver.step(&obj, &mut x).unwrap();
-        (r.value, r.coords, solver.pair_count())
+        (r.value, r.coords.clone(), solver.pair_count())
     };
     assert_eq!(run(true), run(false));
 }

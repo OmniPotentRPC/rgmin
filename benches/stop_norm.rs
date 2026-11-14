@@ -9,14 +9,126 @@
 //! again outside the session.
 //! `cargo bench --bench stop_norm`.
 
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
-use ndarray::{Array1, ArrayView1};
+use ndarray::{Array1, ArrayView1, array};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use rgmin::{Control, FireKind, FirePreset, Method, Oracle, Solver, StopNorm};
+use rgmin::{Accept, Control, FireKind, FirePreset, Lbfgs, Method, Oracle, Solver, StopNorm};
+
+static ALLOCS: AtomicUsize = AtomicUsize::new(0);
+
+struct Counting;
+
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOCS.fetch_add(1, Ordering::Relaxed);
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        ALLOCS.fetch_add(1, Ordering::Relaxed);
+        unsafe { System.realloc(ptr, layout, new_size) }
+    }
+}
+
+#[global_allocator]
+static GLOBAL: Counting = Counting;
+
+fn rosen_2(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+    let (a, b) = (x[0], x[1]);
+    let t = b - a * a;
+    let u = 1.0 - a;
+    (
+        100.0 * t * t + u * u,
+        array![-400.0 * a * t - 2.0 * u, 200.0 * t],
+    )
+}
+
+/// Allocations in one iteration, split into the objective and the rest.
+fn count_lbfgs_minimize() {
+    let mut solver = Lbfgs::with_capacity(8);
+    solver.gtol = 0.0;
+    let obj = AtomicUsize::new(0);
+    let mut total_at = Vec::with_capacity(32);
+    let mut obj_at = Vec::with_capacity(32);
+    let _ = solver.minimize_watched(
+        array![-1.2, 1.0].view(),
+        16,
+        |x| {
+            let before = ALLOCS.load(Ordering::Relaxed);
+            let (f, g) = rosen_2(x);
+            obj.fetch_add(
+                ALLOCS.load(Ordering::Relaxed).saturating_sub(before),
+                Ordering::Relaxed,
+            );
+            Some((f, g))
+        },
+        |_it, _f| {
+            total_at.push(ALLOCS.load(Ordering::Relaxed));
+            obj_at.push(obj.load(Ordering::Relaxed));
+            true
+        },
+    );
+    println!("alloc_probe method=lbfgs_minimize n=2 memory=8");
+    println!("iteration total objective solver");
+    for i in 1..total_at.len() {
+        let total = total_at[i] - total_at[i - 1];
+        let objective = obj_at[i] - obj_at[i - 1];
+        println!(
+            "{i} {total} {objective} {}",
+            total.saturating_sub(objective)
+        );
+    }
+}
+
+fn count_session(name: &str, method: Method, accept: Accept) {
+    let obj_allocs = AtomicUsize::new(0);
+    let calls = AtomicUsize::new(0);
+    let obj = Oracle::unbounded(2, |x: ArrayView1<f64>| {
+        calls.fetch_add(1, Ordering::Relaxed);
+        let before = ALLOCS.load(Ordering::Relaxed);
+        let (f, g) = rosen_2(x);
+        obj_allocs.fetch_add(
+            ALLOCS.load(Ordering::Relaxed).saturating_sub(before),
+            Ordering::Relaxed,
+        );
+        (f, g)
+    });
+    let control = Control {
+        maxiter: 20,
+        gtol: 0.0,
+        istep: 0.1,
+        maxmove: None,
+        ..Default::default()
+    };
+    let mut solver = Solver::new(method, control, 2);
+    if accept == Accept::Energy {
+        solver.set_accept(Accept::Energy);
+    }
+    let mut x = array![-1.2, 1.0];
+    println!("alloc_probe method={name} n=2");
+    println!("iteration total objective solver");
+    for i in 0..8 {
+        let obj0 = obj_allocs.load(Ordering::Relaxed);
+        let before = ALLOCS.load(Ordering::Relaxed);
+        let _ = solver.step(&obj, &mut x);
+        let total = ALLOCS.load(Ordering::Relaxed) - before;
+        let objective = obj_allocs.load(Ordering::Relaxed) - obj0;
+        println!(
+            "{i} {total} {objective} {}",
+            total.saturating_sub(objective)
+        );
+    }
+    let _ = calls;
+}
 
 const BUDGET: usize = 10_000;
 const REPEATS: usize = 3;
@@ -274,6 +386,16 @@ where
 }
 
 fn main() {
+    count_lbfgs_minimize();
+    count_session("session_lbfgs", Method::lbfgs(), Accept::Energy);
+    count_session(
+        "session_fire2",
+        Method::Fire { kind: FireKind::V2 },
+        Accept::None,
+    );
+    if std::env::args().any(|a| a == "--allocs") {
+        return;
+    }
     let lbfgs = || Method::Lbfgs { memory: 20 };
     let fire = || Method::Fire { kind: FireKind::V1 };
     let fire2 = || Method::Fire { kind: FireKind::V2 };

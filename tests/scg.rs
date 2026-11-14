@@ -244,7 +244,7 @@ fn scg_path<O: DifferentiableObjective<f64>>(
             Restart::Never,
         )
         .unwrap();
-        path.push(report.coords);
+        path.push(report.coords.clone());
     }
     path
 }

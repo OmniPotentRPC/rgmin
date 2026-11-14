@@ -1,3 +1,4 @@
+// Copyright (c) rgmin developers
 //! The vector seam: every O(n) operation a solver performs, in one
 //! place.
 //!
@@ -10,40 +11,117 @@
 //! functions; storage-specific execution lives behind them.
 //!
 //! The default implementation is the serial one the whole test suite
-//! pins bit-identically. The `par` feature swaps in rayon over slices
-//! for the length-`n` reductions and updates; results may differ from
-//! serial in the last bits because floating-point addition reorders,
-//! which is why it is a feature and not a default, and why no test of
-//! the serial path runs under it.
+//! pins bit-identically. Above [`REDUCTION_MIN`] every build sums fixed
+//! chunks and then a balanced pairwise tree of those chunks. The `par`
+//! feature only decides which thread fills which chunk.
 
 use ndarray::{Array1, ArrayView1};
 
-/// `x . y`.
-#[cfg(not(feature = "par"))]
-pub fn dot(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
-    x.dot(&y)
+/// Chunk width of the deterministic reduction.
+pub(crate) const REDUCTION_CHUNK: usize = 4096;
+
+/// Length at which reductions switch to the fixed-chunk pairwise tree.
+pub(crate) const REDUCTION_MIN: usize = 65_536;
+
+/// Below this length the par feature stays on the serial element loops.
+#[cfg(feature = "par")]
+const PAR_MIN_LEN: usize = REDUCTION_MIN;
+
+fn pairwise_sum(v: &[f64]) -> f64 {
+    fn rec(v: &[f64]) -> f64 {
+        match v.len() {
+            0 => 0.0,
+            1 => v[0],
+            n => {
+                let mid = n / 2;
+                rec(&v[..mid]) + rec(&v[mid..])
+            }
+        }
+    }
+    rec(v)
 }
 
-/// Below this length the par feature stays on the serial path: on the
-/// reference host the rayon reductions measured 2.6x slower than
-/// serial at n = 20000 (thread coordination outweighs O(n) arithmetic),
-/// so parallel length-n algebra engages only where it has a chance.
-#[cfg(feature = "par")]
-const PAR_MIN_LEN: usize = 65_536;
+fn chunk_dot(a: &[f64], b: &[f64]) -> f64 {
+    let mut acc = 0.0;
+    for (x, y) in a.iter().zip(b) {
+        acc += x * y;
+    }
+    acc
+}
 
-/// `x . y`, reduced in parallel chunks.
-#[cfg(feature = "par")]
+fn chunk_sum(a: &[f64]) -> f64 {
+    let mut acc = 0.0;
+    for x in a {
+        acc += *x;
+    }
+    acc
+}
+
+fn fill_dot_parts(a: &[f64], b: &[f64], parts: &mut [f64]) {
+    #[cfg(feature = "par")]
+    if rayon::current_num_threads() > 1 {
+        use rayon::prelude::*;
+        let _join = crate::phase::Guard::rayon();
+        parts.par_iter_mut().enumerate().for_each(|(c, slot)| {
+            let start = c * REDUCTION_CHUNK;
+            let end = (start + REDUCTION_CHUNK).min(a.len());
+            *slot = chunk_dot(&a[start..end], &b[start..end]);
+        });
+        return;
+    }
+    for (c, slot) in parts.iter_mut().enumerate() {
+        let start = c * REDUCTION_CHUNK;
+        let end = (start + REDUCTION_CHUNK).min(a.len());
+        *slot = chunk_dot(&a[start..end], &b[start..end]);
+    }
+}
+
+fn fill_sum_parts(a: &[f64], parts: &mut [f64]) {
+    #[cfg(feature = "par")]
+    if rayon::current_num_threads() > 1 {
+        use rayon::prelude::*;
+        let _join = crate::phase::Guard::rayon();
+        parts.par_iter_mut().enumerate().for_each(|(c, slot)| {
+            let start = c * REDUCTION_CHUNK;
+            let end = (start + REDUCTION_CHUNK).min(a.len());
+            *slot = chunk_sum(&a[start..end]);
+        });
+        return;
+    }
+    for (c, slot) in parts.iter_mut().enumerate() {
+        let start = c * REDUCTION_CHUNK;
+        let end = (start + REDUCTION_CHUNK).min(a.len());
+        *slot = chunk_sum(&a[start..end]);
+    }
+}
+
+thread_local! {
+    static PARTS: std::cell::RefCell<Vec<f64>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn with_parts<R>(n: usize, f: impl FnOnce(&mut [f64]) -> R) -> R {
+    let nchunks = n.div_ceil(REDUCTION_CHUNK).max(1);
+    PARTS.with(|parts| {
+        let mut parts = parts.borrow_mut();
+        if parts.len() < nchunks {
+            parts.resize(nchunks, 0.0);
+        }
+        f(&mut parts[..nchunks])
+    })
+}
+
+/// `x . y`. At or above [`REDUCTION_MIN`] this is the fixed-chunk
+/// pairwise sum, identical for every thread count.
 pub fn dot(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
-    use rayon::prelude::*;
-    if x.len() < PAR_MIN_LEN {
+    let _phase = crate::phase::Guard::dot();
+    if x.len() < REDUCTION_MIN {
         return x.dot(&y);
     }
     match (x.as_slice(), y.as_slice()) {
-        (Some(a), Some(b)) => a
-            .par_chunks(4096)
-            .zip(b.par_chunks(4096))
-            .map(|(ca, cb)| ca.iter().zip(cb).map(|(p, q)| p * q).sum::<f64>())
-            .sum(),
+        (Some(a), Some(b)) => with_parts(a.len(), |parts| {
+            fill_dot_parts(a, b, parts);
+            pairwise_sum(parts)
+        }),
         _ => x.dot(&y),
     }
 }
@@ -51,6 +129,7 @@ pub fn dot(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
 /// `y += a x`.
 #[cfg(not(feature = "par"))]
 pub fn axpy(a: f64, x: ArrayView1<f64>, y: &mut Array1<f64>) {
+    let _phase = crate::phase::Guard::axpy();
     y.scaled_add(a, &x);
 }
 
@@ -58,40 +137,162 @@ pub fn axpy(a: f64, x: ArrayView1<f64>, y: &mut Array1<f64>) {
 #[cfg(feature = "par")]
 pub fn axpy(a: f64, x: ArrayView1<f64>, y: &mut Array1<f64>) {
     use rayon::prelude::*;
+    let _phase = crate::phase::Guard::axpy();
     if x.len() < PAR_MIN_LEN {
         y.scaled_add(a, &x);
         return;
     }
     match (x.as_slice(), y.as_slice_mut()) {
         (Some(xs), Some(ys)) => {
+            let _join = crate::phase::Guard::rayon();
             ys.par_chunks_mut(4096)
                 .zip(xs.par_chunks(4096))
                 .for_each(|(cy, cx)| {
                     for (p, q) in cy.iter_mut().zip(cx) {
                         *p += a * q;
                     }
-                })
+                });
         }
         _ => y.scaled_add(a, &x),
     }
 }
 
-/// `sum_i x_i`.
-#[cfg(not(feature = "par"))]
+/// `sum_i x_i`. At or above [`REDUCTION_MIN`] this is the fixed-chunk
+/// pairwise sum, identical for every thread count.
 pub fn sum(x: ArrayView1<f64>) -> f64 {
-    x.sum()
-}
-
-/// `sum_i x_i`, reduced in parallel chunks.
-#[cfg(feature = "par")]
-pub fn sum(x: ArrayView1<f64>) -> f64 {
-    use rayon::prelude::*;
-    if x.len() < PAR_MIN_LEN {
+    if x.len() < REDUCTION_MIN {
         return x.sum();
     }
     match x.as_slice() {
-        Some(a) => a.par_chunks(4096).map(|c| c.iter().sum::<f64>()).sum(),
+        Some(a) => with_parts(a.len(), |parts| {
+            fill_sum_parts(a, parts);
+            pairwise_sum(parts)
+        }),
         None => x.sum(),
+    }
+}
+
+/// `dst[i] = src[i]`. A memcpy, not a rayon join: at n = 96_000 a join
+/// costs more than the copy.
+pub fn copy_slice(dst: &mut [f64], src: &[f64]) {
+    debug_assert_eq!(dst.len(), src.len());
+    dst.copy_from_slice(src);
+}
+
+/// `dst[i] = op(src[i])`, one pass.
+#[inline(always)]
+pub fn apply1(dst: &mut [f64], src: &[f64], op: impl Fn(&mut f64, f64) + Sync) {
+    debug_assert_eq!(dst.len(), src.len());
+    #[cfg(feature = "par")]
+    if dst.len() >= PAR_MIN_LEN && rayon::current_num_threads() > 1 {
+        use rayon::prelude::*;
+        let _join = crate::phase::Guard::rayon();
+        dst.par_chunks_mut(16_384)
+            .zip(src.par_chunks(16_384))
+            .for_each(|(d, s)| {
+                for (di, &si) in d.iter_mut().zip(s) {
+                    op(di, si);
+                }
+            });
+        return;
+    }
+    for (d, &s) in dst.iter_mut().zip(src) {
+        op(d, s);
+    }
+}
+
+/// `dst[i] = op(a[i], b[i])`, one pass.
+#[inline(always)]
+pub fn apply2(dst: &mut [f64], a: &[f64], b: &[f64], op: impl Fn(&mut f64, f64, f64) + Sync) {
+    debug_assert_eq!(dst.len(), a.len());
+    debug_assert_eq!(dst.len(), b.len());
+    #[cfg(feature = "par")]
+    if dst.len() >= PAR_MIN_LEN && rayon::current_num_threads() > 1 {
+        use rayon::prelude::*;
+        let _join = crate::phase::Guard::rayon();
+        dst.par_chunks_mut(16_384)
+            .zip(a.par_chunks(16_384))
+            .zip(b.par_chunks(16_384))
+            .for_each(|((d, x), y)| {
+                for ((di, &xi), &yi) in d.iter_mut().zip(x).zip(y) {
+                    op(di, xi, yi);
+                }
+            });
+        return;
+    }
+    for ((d, &x), &y) in dst.iter_mut().zip(a).zip(b) {
+        op(d, x, y);
+    }
+}
+
+/// `dst[i] = keep * dst[i] + scale * src[i]`.
+#[inline(always)]
+pub fn blend(dst: &mut [f64], keep: f64, scale: f64, src: &[f64]) {
+    debug_assert_eq!(dst.len(), src.len());
+    #[cfg(feature = "par")]
+    if dst.len() >= PAR_MIN_LEN && rayon::current_num_threads() > 1 {
+        use rayon::prelude::*;
+        let _join = crate::phase::Guard::rayon();
+        dst.par_chunks_mut(16_384)
+            .zip(src.par_chunks(16_384))
+            .for_each(|(d, s)| {
+                for (di, &si) in d.iter_mut().zip(s) {
+                    *di = keep * *di + scale * si;
+                }
+            });
+        return;
+    }
+    for (di, &si) in dst.iter_mut().zip(src) {
+        *di = keep * *di + scale * si;
+    }
+}
+
+/// `dst[i] += scale * src[i]`.
+#[inline(always)]
+pub fn add_scaled(dst: &mut [f64], src: &[f64], scale: f64) {
+    debug_assert_eq!(dst.len(), src.len());
+    #[cfg(feature = "par")]
+    if dst.len() >= PAR_MIN_LEN && rayon::current_num_threads() > 1 {
+        use rayon::prelude::*;
+        let _join = crate::phase::Guard::rayon();
+        dst.par_chunks_mut(16_384)
+            .zip(src.par_chunks(16_384))
+            .for_each(|(d, s)| {
+                for (di, &si) in d.iter_mut().zip(s) {
+                    *di += scale * si;
+                }
+            });
+        return;
+    }
+    for (di, &si) in dst.iter_mut().zip(src) {
+        *di += scale * si;
+    }
+}
+
+/// `dst[i] = pos[i] + t * dir[i]` in one pass.
+///
+/// A line-search trial used to copy `pos` and then axpy. That is two
+/// trips over three vectors and, under `par`, a rayon join on the
+/// second trip only. One pass writes the same bits.
+pub fn lincomb(dst: &mut [f64], pos: &[f64], t: f64, dir: &[f64]) {
+    debug_assert_eq!(dst.len(), pos.len());
+    debug_assert_eq!(dst.len(), dir.len());
+    #[cfg(feature = "par")]
+    if dst.len() >= PAR_MIN_LEN {
+        use rayon::prelude::*;
+        let _join = crate::phase::Guard::rayon();
+        dst.par_chunks_mut(4096)
+            .zip(pos.par_chunks(4096))
+            .zip(dir.par_chunks(4096))
+            .for_each(|((d, p), r)| {
+                for ((di, &pi), &ri) in d.iter_mut().zip(p).zip(r) {
+                    *di = pi + t * ri;
+                }
+            });
+        return;
+    }
+    for ((di, &pi), &ri) in dst.iter_mut().zip(pos).zip(dir) {
+        *di = pi + t * ri;
     }
 }
 
@@ -348,5 +549,78 @@ mod tests {
         };
         let err = Vector::try_on(cuda, Array1::zeros(4)).unwrap_err();
         assert_eq!(err.device_type, dlpk::sys::DLDeviceType::kDLCUDA as i32);
+    }
+
+    fn reference_dot(a: &[f64], b: &[f64]) -> f64 {
+        let mut parts = Vec::new();
+        let mut start = 0;
+        while start < a.len() {
+            let end = (start + REDUCTION_CHUNK).min(a.len());
+            let mut acc = 0.0;
+            for i in start..end {
+                acc += a[i] * b[i];
+            }
+            parts.push(acc);
+            start = end;
+        }
+        fn rec(v: &[f64]) -> f64 {
+            match v.len() {
+                0 => 0.0,
+                1 => v[0],
+                n => {
+                    let mid = n / 2;
+                    rec(&v[..mid]) + rec(&v[mid..])
+                }
+            }
+        }
+        rec(&parts)
+    }
+
+    #[test]
+    fn a_long_dot_matches_the_fixed_chunk_pairwise_tree() {
+        let n = 70_000;
+        let a = Array1::from((0..n).map(|i| (i as f64 * 0.01).sin()).collect::<Vec<_>>());
+        let b = Array1::from((0..n).map(|i| (i as f64 * 0.01).cos()).collect::<Vec<_>>());
+        let got = dot(a.view(), b.view());
+        let expect = reference_dot(a.as_slice().unwrap(), b.as_slice().unwrap());
+        assert_eq!(got.to_bits(), expect.to_bits());
+        let summed = sum(a.view());
+        let mut parts = Vec::new();
+        let slice = a.as_slice().unwrap();
+        let mut start = 0;
+        while start < n {
+            let end = (start + REDUCTION_CHUNK).min(n);
+            parts.push(slice[start..end].iter().sum::<f64>());
+            start = end;
+        }
+        fn rec(v: &[f64]) -> f64 {
+            match v.len() {
+                1 => v[0],
+                n => {
+                    let mid = n / 2;
+                    rec(&v[..mid]) + rec(&v[mid..])
+                }
+            }
+        }
+        assert_eq!(summed.to_bits(), rec(&parts).to_bits());
+    }
+
+    #[cfg(feature = "par")]
+    #[test]
+    fn a_long_dot_does_not_change_with_the_thread_count() {
+        let n = 70_000;
+        let a = Array1::from((0..n).map(|i| (i as f64 * 0.01).sin()).collect::<Vec<_>>());
+        let b = Array1::from((0..n).map(|i| (i as f64 * 0.01).cos()).collect::<Vec<_>>());
+        let one = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap()
+            .install(|| dot(a.view(), b.view()));
+        let many = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap()
+            .install(|| dot(a.view(), b.view()));
+        assert_eq!(one.to_bits(), many.to_bits());
     }
 }
