@@ -102,6 +102,13 @@ impl Restart {
         Self::Njws { threshold: 0.1 }
     }
 
+    /// Powell restart: `|g · g_old| >= 0.2 ||g||^2`.
+    ///
+    /// The same normalized test as [`Self::njws`], with threshold 0.2.
+    pub fn powell() -> Self {
+        Self::Njws { threshold: 0.2 }
+    }
+
     /// True when the next step should reset to steepest descent.
     pub fn should_restart(&self, ctx: &ConjugacyContext<'_>) -> bool {
         self.should_restart_metric(
@@ -793,5 +800,28 @@ mod tests {
         // |g·g_old| / ||g||^2 = 0.2 / 1 = 0.2 >= 0.1
         assert!(Restart::njws().should_restart(&ctx2));
         assert!(!Restart::Never.should_restart(&ctx2));
+    }
+
+    #[test]
+    fn powell_restarts_at_a_fifth_of_the_squared_gradient() {
+        // |g·g_old| = 0.19 ||g||^2 restarts NJWS (0.1) and not Powell (0.2).
+        let g = array![1.0, 0.0];
+        let gold = array![0.19, 0.0];
+        let d = array![-1.0, 0.0];
+        let ctx = ConjugacyContext {
+            current_gradient: g.view(),
+            previous_gradient: gold.view(),
+            previous_direction: d.view(),
+        };
+        assert!(Restart::njws().should_restart(&ctx));
+        assert!(!Restart::powell().should_restart(&ctx));
+        let gold_at = array![0.2, 0.0];
+        let at = ConjugacyContext {
+            current_gradient: g.view(),
+            previous_gradient: gold_at.view(),
+            previous_direction: d.view(),
+        };
+        assert!(Restart::powell().should_restart(&at));
+        assert_eq!(Restart::powell(), Restart::Njws { threshold: 0.2 });
     }
 }
