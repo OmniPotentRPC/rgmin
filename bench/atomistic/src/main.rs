@@ -1,26 +1,18 @@
 //! rgmin on real rgpot potentials.
 //!
-//! The chain is the one an atomistic host drives: an rgpot C++ / Fortran
-//! potential behind the rgpot-core callback, wrapped by
-//! `rgpot_potential_new_eindir` into an eindir objective, reduced to the
-//! free degrees of freedom, and handed to an `rgmin::Solver` session
-//! (or the persistent `rgmin::Lbfgs`). Every force call is counted and
-//! timed inside the rgpot callback, so the solver's own cost is the wall
-//! time minus the potential time.
+//! Each objective evaluation is one force call: energy and forces come
+//! back together. Frozen atoms are scattered into the full coordinate
+//! buffer; a system with no frozen atoms is copied in order. The gradient
+//! the driver reads for `fmax` is that last call when it was made at the
+//! accepted point. Wall time minus the potential time is the solver.
 //!
 //! One CSV row per run:
 //! `system,method,seed,converged,iters,calls,energy,fmax,wall_s,pot_s,overhead_us_per_iter`.
 
-use std::ffi::c_void;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
-use dlpk::sys::{
-    DLDataType, DLDataTypeCode, DLDevice, DLDeviceType, DLManagedTensorVersioned, DLPackVersion,
-    DLTensor,
-};
-use eindir_core::ffi::{eindir_objective_eval, eindir_objective_grad, eindir_status_t};
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rgmin::{
@@ -28,11 +20,6 @@ use rgmin::{
     LindhParams, LineSearch, Method, Neighbours, PreconChoice, QuickMinOptions, Restart, Solver,
     bonded_terms, select_precon,
 };
-use rgpot_core::eindir::{
-    rgpot_potential_free_eindir, rgpot_potential_new_eindir, rgpot_potential_t,
-};
-use rgpot_core::status::rgpot_status_t;
-use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 
 unsafe extern "C" {
     fn bench_force(
@@ -46,56 +33,6 @@ unsafe extern "C" {
     ) -> i32;
 }
 
-/// Callback context: which kernel, a force buffer, and the counters.
-struct Kernel {
-    kind: i32,
-    forces: Vec<f64>,
-    calls: AtomicUsize,
-    nanos: AtomicU64,
-}
-
-unsafe extern "C" fn force_callback(
-    user: *mut c_void,
-    input: *const rgpot_force_input_t,
-    output: *mut rgpot_force_out_t,
-) -> rgpot_status_t {
-    let k = unsafe { &mut *(user as *mut Kernel) };
-    let input = unsafe { &*input };
-    let pos = unsafe { &(*input.positions).dl_tensor };
-    let natoms = unsafe { *(pos.shape as *const i64) } as usize;
-    let z = unsafe { &(*input.atomic_numbers).dl_tensor };
-    let cell = unsafe { &(*input.box_matrix).dl_tensor };
-    let mut energy = 0.0;
-    let t0 = Instant::now();
-    let st = if k.kind >= 5 {
-        let pos_s = unsafe { std::slice::from_raw_parts(pos.data as *const f64, 3 * natoms) };
-        molecule_forces(k.kind, pos_s, &mut k.forces, &mut energy)
-    } else {
-        unsafe {
-            bench_force(
-                k.kind,
-                natoms,
-                pos.data as *const f64,
-                z.data as *const i32,
-                cell.data as *const f64,
-                k.forces.as_mut_ptr(),
-                &mut energy,
-            )
-        }
-    };
-    k.nanos
-        .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-    k.calls.fetch_add(1, Ordering::Relaxed);
-    if st != 0 {
-        return rgpot_status_t::RGPOT_INTERNAL_ERROR;
-    }
-    let output = unsafe { &mut *output };
-    output.energy = energy;
-    output.forces = unsafe {
-        rgpot_core::tensor::rgpot_tensor_cpu_f64_2d(k.forces.as_mut_ptr(), natoms as i64, 3)
-    };
-    rgpot_status_t::RGPOT_SUCCESS
-}
 
 /// Harmonic water (`kind` 5) and methane (`kind` 6).
 ///
@@ -215,117 +152,113 @@ fn methane_energy(pos: &[f64], grad: &mut [f64], energy: &mut f64) -> bool {
     true
 }
 
-/// Borrowed rank-1 CPU f64 DLPack view over `len` doubles at `data`.
-struct Shell {
-    managed: Box<DLManagedTensorVersioned>,
-    _shape: Box<[i64; 1]>,
-    _strides: Box<[i64; 1]>,
-}
-
-impl Shell {
-    fn new(data: *mut f64, len: usize) -> Self {
-        let mut shape = Box::new([len as i64]);
-        let mut strides = Box::new([1i64]);
-        let managed = Box::new(DLManagedTensorVersioned {
-            version: DLPackVersion { major: 1, minor: 0 },
-            manager_ctx: std::ptr::null_mut(),
-            deleter: None,
-            flags: 0,
-            dl_tensor: DLTensor {
-                data: data.cast(),
-                device: DLDevice {
-                    device_type: DLDeviceType::kDLCPU,
-                    device_id: 0,
-                },
-                ndim: 1,
-                dtype: DLDataType {
-                    code: DLDataTypeCode::kDLFloat,
-                    bits: 64,
-                    lanes: 1,
-                },
-                shape: shape.as_mut_ptr(),
-                strides: strides.as_mut_ptr(),
-                byte_offset: 0,
-            },
-        });
-        Self {
-            managed,
-            _shape: shape,
-            _strides: strides,
-        }
-    }
-}
-
-/// The rgpot eindir objective restricted to the free coordinates.
+/// One force evaluation, restricted to the free coordinates.
+///
+/// `packed` is true when every atom is free and `free` is `0..3N`, so the
+/// trial is copied in order. Frozen atoms are scattered into `pos`. The
+/// last call's positions and forces stay in `state` so the driver's `fmax`
+/// check can reuse them when they are the accepted point.
 struct FreeObjective {
-    pot: *mut rgpot_potential_t,
-    kernel: *mut Kernel,
-    /// Full 3N coordinate and gradient buffers (frozen atoms keep their
-    /// reference positions).
-    full: Mutex<(Vec<f64>, Vec<f64>)>,
+    kind: i32,
+    natoms: usize,
+    z: Vec<i32>,
+    cell: [f64; 9],
+    /// `pos`, physical forces, and the energy of the last successful call.
+    state: Mutex<(Vec<f64>, Vec<f64>, f64)>,
     free: Vec<usize>,
+    packed: bool,
     bounds: Bounds<f64>,
-    /// Last few evaluations, so the driver reads the gradient at an
-    /// accepted iterate without paying a force call.
-    seen: Mutex<Vec<(Array1<f64>, f64, Array1<f64>)>>,
+    calls: AtomicUsize,
+    nanos: AtomicU64,
 }
-
-// SAFETY: the benchmark is single-threaded; the raw pointers are owned
-// by this struct for its lifetime and every access goes through the
-// Mutex-guarded buffers.
-unsafe impl Send for FreeObjective {}
-unsafe impl Sync for FreeObjective {}
 
 impl FreeObjective {
     fn eval(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let mut guard = self.full.lock().unwrap();
-        let (pos, grad) = &mut *guard;
-        for (k, &i) in self.free.iter().enumerate() {
-            pos[i] = x[k];
-        }
-        let n = pos.len();
-        let xs = Shell::new(pos.as_mut_ptr(), n);
-        let mut gs = Shell::new(grad.as_mut_ptr(), n);
-        let mut value = f64::NAN;
-        let base = self.pot as *const eindir_core::ffi::eindir_objective_t;
-        let st = unsafe { eindir_objective_eval(base, &*xs.managed, &mut value) };
-        let sg = unsafe { eindir_objective_grad(base, &*xs.managed, &mut *gs.managed) };
-        if st != eindir_status_t::EINDIR_SUCCESS || sg != eindir_status_t::EINDIR_SUCCESS {
+        let mut guard = self.state.lock().unwrap();
+        let (pos, force, energy_slot) = &mut *guard;
+        self.place(pos, x);
+        let mut energy = 0.0;
+        let t0 = Instant::now();
+        let st = self.forces(pos, force, &mut energy);
+        self.nanos
+            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        if st != 0 {
             return (f64::INFINITY, Array1::zeros(x.len()));
         }
-        let g = Array1::from_iter(self.free.iter().map(|&i| grad[i]));
-        drop(guard);
-        let mut seen = self.seen.lock().unwrap();
-        if seen.len() >= 64 {
-            seen.remove(0);
-        }
-        seen.push((x.to_owned(), value, g.clone()));
-        (value, g)
+        *energy_slot = energy;
+        let g = self.gradient(force);
+        (energy, g)
     }
 
+    /// The gradient of the last call when `x` is that call's position.
     fn lookup(&self, x: &Array1<f64>) -> Option<(f64, Array1<f64>)> {
-        let seen = self.seen.lock().unwrap();
-        seen.iter()
-            .rev()
-            .find(|(p, _, _)| p == x)
-            .map(|(_, f, g)| (*f, g.clone()))
+        let guard = self.state.lock().unwrap();
+        let (pos, force, energy) = &*guard;
+        if !self.at_last(pos, x) {
+            return None;
+        }
+        Some((*energy, self.gradient(force)))
+    }
+
+    fn place(&self, pos: &mut [f64], x: ArrayView1<f64>) {
+        if self.packed {
+            pos[..x.len()].copy_from_slice(x.as_slice().expect("trial is contiguous"));
+        } else {
+            for (k, &i) in self.free.iter().enumerate() {
+                pos[i] = x[k];
+            }
+        }
+    }
+
+    fn at_last(&self, pos: &[f64], x: &Array1<f64>) -> bool {
+        if self.packed {
+            pos.len() >= x.len()
+                && pos[..x.len()]
+                    .iter()
+                    .zip(x.iter())
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+        } else {
+            self.free
+                .iter()
+                .zip(x.iter())
+                .all(|(&i, b)| pos[i].to_bits() == b.to_bits())
+        }
+    }
+
+    /// Physical forces are the rgpot sign. The objective gradient is their negative.
+    fn gradient(&self, force: &[f64]) -> Array1<f64> {
+        if self.packed {
+            Array1::from_iter(force[..self.free.len()].iter().map(|f| -*f))
+        } else {
+            Array1::from_iter(self.free.iter().map(|&i| -force[i]))
+        }
+    }
+
+    fn forces(&self, pos: &[f64], force: &mut [f64], energy: &mut f64) -> i32 {
+        if self.kind >= 5 {
+            molecule_forces(self.kind, pos, force, energy)
+        } else {
+            unsafe {
+                bench_force(
+                    self.kind,
+                    self.natoms,
+                    pos.as_ptr(),
+                    self.z.as_ptr(),
+                    self.cell.as_ptr(),
+                    force.as_mut_ptr(),
+                    energy,
+                )
+            }
+        }
     }
 
     fn calls(&self) -> usize {
-        unsafe { (*self.kernel).calls.load(Ordering::Relaxed) }
+        self.calls.load(Ordering::Relaxed)
     }
 
     fn pot_seconds(&self) -> f64 {
-        unsafe { (*self.kernel).nanos.load(Ordering::Relaxed) as f64 * 1e-9 }
-    }
-}
-
-impl Drop for FreeObjective {
-    fn drop(&mut self) {
-        unsafe {
-            rgpot_potential_free_eindir(self.pot);
-            drop(Box::from_raw(self.kernel));
-        }
+        self.nanos.load(Ordering::Relaxed) as f64 * 1e-9
     }
 }
 
@@ -631,41 +564,25 @@ fn ch4() -> System {
 
 fn build(sys: &System, sigma: f64, seed: u64) -> (FreeObjective, Array1<f64>) {
     let n = sys.fixed.len();
-    let kernel = Box::into_raw(Box::new(Kernel {
-        kind: sys.kind,
-        forces: vec![0.0; 3 * n],
-        calls: AtomicUsize::new(0),
-        nanos: AtomicU64::new(0),
-    }));
-    let lo = vec![-1e6; 3 * n];
-    let hi = vec![1e6; 3 * n];
-    let pot = unsafe {
-        rgpot_potential_new_eindir(
-            force_callback,
-            kernel.cast(),
-            None,
-            n,
-            sys.z.as_ptr(),
-            sys.cell.as_ptr(),
-            lo.as_ptr(),
-            hi.as_ptr(),
-        )
-    };
-    assert!(!pot.is_null());
     let free: Vec<usize> = (0..n)
         .filter(|&a| !sys.fixed[a])
         .flat_map(|a| [3 * a, 3 * a + 1, 3 * a + 2])
         .collect();
+    let packed = free.len() == 3 * n && free.iter().enumerate().all(|(k, &i)| i == k);
     let mut rng = Rng(seed.wrapping_mul(104_729) + 3);
     let x0 = Array1::from_iter(free.iter().map(|&i| sys.pos[i] + sigma * rng.normal()));
     let m = free.len();
     let obj = FreeObjective {
-        pot,
-        kernel,
-        full: Mutex::new((sys.pos.clone(), vec![0.0; 3 * n])),
+        kind: sys.kind,
+        natoms: n,
+        z: sys.z.clone(),
+        cell: sys.cell,
+        state: Mutex::new((sys.pos.clone(), vec![0.0; 3 * n], f64::NAN)),
         free,
+        packed,
         bounds: Bounds::new(Array1::from_elem(m, -1e6), Array1::from_elem(m, 1e6), 0.0),
-        seen: Mutex::new(Vec::new()),
+        calls: AtomicUsize::new(0),
+        nanos: AtomicU64::new(0),
     };
     (obj, x0)
 }
@@ -1009,10 +926,11 @@ fn run_session(
         }
         let (f, g) = obj.lookup(&x).unwrap_or_else(|| {
             // Not counted against the solver: the driver's own check.
-            let calls = unsafe { &(*obj.kernel).calls };
-            let before = calls.load(Ordering::Relaxed);
+            let before = obj.calls.load(Ordering::Relaxed);
+            let before_ns = obj.nanos.load(Ordering::Relaxed);
             let r = obj.eval(x.view());
-            calls.store(before, Ordering::Relaxed);
+            obj.calls.store(before, Ordering::Relaxed);
+            obj.nanos.store(before_ns, Ordering::Relaxed);
             r
         });
         out.energy = f;
