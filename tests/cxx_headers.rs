@@ -34,45 +34,75 @@ fn cxx_compiler() -> &'static str {
     "c++"
 }
 
-fn profile() -> &'static str {
-    if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
+fn enabled_features() -> Vec<&'static str> {
+    [
+        ("capi", cfg!(feature = "capi")),
+        ("par", cfg!(feature = "par")),
+        ("simd", cfg!(feature = "simd")),
+        ("highs", cfg!(feature = "highs")),
+        ("slepc", cfg!(feature = "slepc")),
+        ("primme", cfg!(feature = "primme")),
+        ("chase", cfg!(feature = "chase")),
+        ("libkrylov", cfg!(feature = "libkrylov")),
+        ("readcon", cfg!(feature = "readcon")),
+    ]
+    .into_iter()
+    .filter_map(|(name, on)| on.then_some(name))
+    .collect()
+}
+
+/// The cdylib and staticlib that `cargo build` writes for this test's
+/// features. `cargo test` refreshes only the rlib, so a library already
+/// in the target directory can predate the sources and the header.
+fn build_librgmin(root: &Path) -> (Option<PathBuf>, Option<PathBuf>) {
+    let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut cmd = Command::new(cargo);
+    cmd.current_dir(root)
+        .args(["build", "--lib", "--no-default-features", "--features"])
+        .arg(enabled_features().join(","))
+        .arg("--message-format=json-render-diagnostics")
+        .stderr(Stdio::inherit());
+    if !cfg!(debug_assertions) {
+        cmd.arg("--release");
     }
-}
-
-fn search_dirs(root: &Path) -> [PathBuf; 2] {
-    let base = if let Ok(td) = env::var("CARGO_TARGET_DIR") {
-        PathBuf::from(td).join(profile())
-    } else {
-        root.join("target").join(profile())
-    };
-    let deps = base.join("deps");
-    [base, deps]
-}
-
-fn newest_file(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
-    paths
-        .into_iter()
-        .filter(|path| path.is_file())
-        .max_by_key(|path| path.metadata().and_then(|meta| meta.modified()).ok())
+    let built = cmd.output().expect("spawn cargo to build librgmin");
+    assert!(
+        built.status.success(),
+        "cargo build of librgmin for the C++ smoke failed ({}); \
+         run `cargo build --features capi` and read its errors",
+        built.status
+    );
+    let (mut so, mut a) = (None, None);
+    for line in String::from_utf8_lossy(&built.stdout).lines() {
+        if !line.contains(r#""reason":"compiler-artifact""#) || !line.contains(r#""name":"rgmin""#)
+        {
+            continue;
+        }
+        let Some(start) = line.find(r#""filenames":["#) else {
+            continue;
+        };
+        let rest = &line[start + r#""filenames":["#.len()..];
+        let list = &rest[..rest.find(']').unwrap_or(rest.len())];
+        for file in list.split(',').map(|f| f.trim().trim_matches('"')) {
+            let path = PathBuf::from(file.replace(r"\\", r"\"));
+            match path.file_name().and_then(|n| n.to_str()) {
+                Some("librgmin.so") => so = Some(path),
+                Some("librgmin.a") => a = Some(path),
+                _ => {}
+            }
+        }
+    }
+    (so.filter(|p| p.is_file()), a.filter(|p| p.is_file()))
 }
 
 #[test]
 fn cxx_headers_compile_link_and_set_box() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let src = root.join("tests/cxx_headers.cpp");
-    let dirs = search_dirs(&root);
-    let so = newest_file(dirs.iter().map(|dir| dir.join("librgmin.so")));
-    let a = newest_file(dirs.iter().map(|dir| dir.join("librgmin.a")));
+    let (so, a) = build_librgmin(&root);
     assert!(
         so.is_some() || a.is_some(),
-        "librgmin missing under {} or {} (so={} a={})",
-        dirs[0].display(),
-        dirs[1].display(),
-        so.is_some(),
-        a.is_some()
+        "cargo built no librgmin.so or librgmin.a"
     );
     let out_dir = env::var_os("CARGO_TARGET_TMPDIR")
         .map(PathBuf::from)
