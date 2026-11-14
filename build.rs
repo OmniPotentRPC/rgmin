@@ -58,12 +58,26 @@ fn probe_slepc() {
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
     println!("cargo:rerun-if-env-changed=CONDA_PREFIX");
 
-    let Some(cfg) = discover_slepc() else {
+    let Some(mut cfg) = discover_slepc() else {
         println!(
             "cargo:warning=slepc feature on, PETSc/SLEPc not found; EigensolverKind::Slepc stays EigenUnavailable"
         );
         return;
     };
+    // PETSC_COMM_SELF is MPI_COMM_SELF, which Open MPI defines as the
+    // address of a libmpi symbol, so the shim itself needs libmpi on the
+    // link line. PETSc's pkg-config file names only -lpetsc.
+    let (mpi_paths, mpi_libs) = petsc_mpi_link(&cfg.link_paths);
+    for path in mpi_paths {
+        if !cfg.link_paths.contains(&path) {
+            cfg.link_paths.push(path);
+        }
+    }
+    for lib in mpi_libs {
+        if !cfg.link_libs.contains(&lib) {
+            cfg.link_libs.push(lib);
+        }
+    }
     let mut build = cc::Build::new();
     build.file("src/slepc_shim.c");
     build.warnings(false);
@@ -112,6 +126,50 @@ fn discover_slepc() -> Option<SlepcProbe> {
         return Some(probe);
     }
     probe_prefix(std::path::Path::new("/usr"))
+}
+
+/// The MPI link line PETSc recorded at configure time: `MPI_LIB` when it
+/// was given libraries, else the `-L`/`-l` part of `MPICC_SHOW` when it was
+/// built with compiler wrappers. An MPIUNI build records neither.
+#[cfg(feature = "slepc")]
+fn petsc_mpi_link(link_paths: &[std::path::PathBuf]) -> (Vec<std::path::PathBuf>, Vec<String>) {
+    let Some(text) = link_paths.iter().find_map(|dir| {
+        std::fs::read_to_string(dir.join("petsc").join("conf").join("petscvariables")).ok()
+    }) else {
+        return (Vec::new(), Vec::new());
+    };
+    let variable = |name: &str| {
+        text.lines().find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key.trim() == name).then(|| value.trim().to_string())
+        })
+    };
+    let line = variable("MPI_LIB")
+        .filter(|value| !value.is_empty())
+        .or_else(|| variable("MPICC_SHOW"))
+        .unwrap_or_default();
+    let mut paths = Vec::new();
+    let mut libs = Vec::new();
+    for token in line.split_whitespace() {
+        if let Some(path) = token.strip_prefix("-L") {
+            paths.push(std::path::PathBuf::from(path));
+        } else if let Some(lib) = token.strip_prefix("-l") {
+            libs.push(lib.to_string());
+        } else {
+            let file = std::path::Path::new(token);
+            let name = file
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_prefix("lib"))
+                .and_then(|name| name.split_once('.'))
+                .filter(|(_, ext)| ext.starts_with("so") || *ext == "a" || *ext == "dylib");
+            if let (Some((name, _)), Some(dir)) = (name, file.parent()) {
+                paths.push(dir.to_path_buf());
+                libs.push(name.to_string());
+            }
+        }
+    }
+    (paths, libs)
 }
 
 #[cfg(feature = "slepc")]
