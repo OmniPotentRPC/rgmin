@@ -1100,7 +1100,8 @@ fn lowest_eigenpairs_recovers_a_diagonal_and_rejects_bad_blocks() {
     assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
     let mut bad = params;
     bad.kind = rgmin_eigen_kind_t::RGMIN_EIGEN_ELPA as i32;
-    seed[0] = 1.0;
+    // `st` borrows `seed`: a finite seed leaves the kind as the only refusal.
+    unsafe { seed.as_mut_ptr().write(1.0) };
     let status = unsafe {
         rgmin_lowest_eigenpairs(
             Some(diag_lam_hvp),
