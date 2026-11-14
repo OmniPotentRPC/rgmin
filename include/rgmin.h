@@ -777,7 +777,8 @@ rgmin_status_t rgmin_solver_set_distance_constraints(rgmin_solver_t *solver,
 /** Drop the session's set and its method memory. ABI minor 31. */
 void rgmin_solver_clear_distance_constraints(rgmin_solver_t *solver);
 /**
- * One outer iteration: direction, line search, curvature update.
+ * One outer iteration: direction, step, curvature update. The default
+ * L-BFGS step is the eOn cap and searches no line.
  * \a eval and \a grad are valid for this call only. \a x is in/out.
  */
 rgmin_status_t rgmin_solver_step(rgmin_solver_t *solver, rgmin_eval_fn eval,

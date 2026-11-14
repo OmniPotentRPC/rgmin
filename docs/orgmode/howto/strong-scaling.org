@@ -22,7 +22,8 @@ with the Pt parameters of the Morse tutorial.
 Every bond sits at the Morse minimum in the ideal lattice.
 Two methods run on every pool.
 The first is ~lbfgs~ with m = 10.
-Each step takes the two-loop direction and the strong Wolfe search,
+It opts into ~LbfgsStep::Wolfe~, so each step takes the two-loop
+direction and the strong Wolfe search,
 with c1 = 1e-4, c2 = 0.9 and at most 40 trials.
 The session sets ~Accept::Energy~ and no per-atom cap.
 A per-atom cap would select the capped geometry step and

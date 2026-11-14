@@ -59,10 +59,13 @@ Packwood et al., J. Chem. Phys. 144, 164109 (2016).
 `rgmin_linesearch` (ABI minor 37) takes a caller-supplied energy and gradient.
 `lbfgs_direction` (ABI minor 38) applies a caller-supplied initial inverse Hessian.
 `lowest_eigenpairs` (ABI minor 39) is block LOBPCG for the k lowest pairs.
-Line search: Brent, Armijo, Goldstein, strong Wolfe with zoom; a
-session defaults to strong Wolfe, starts every search from the value and
-gradient it holds, and bounds trials by the displacement cap
-(`LineSearch::search_from`). FIRE 2.0 as Guénolé et al. 2020 publish it
+The default L-BFGS step is the eOn cap and searches no line;
+`LbfgsStep::Wolfe` opts into the strong Wolfe search. The one-shot
+`minimize_method` and C `rgmin_minimize` keep the line search they are
+given. Line search: Brent, Armijo, Goldstein, strong Wolfe with zoom;
+the line-searched session arms default to strong Wolfe, start every
+search from the value and gradient they hold, and bound trials by the
+displacement cap (`LineSearch::search_from`). FIRE 2.0 as Guénolé et al. 2020 publish it
 is `Solver::set_fire_variant(FireVariant::Guenole2020)`. Quick-min
 (`Method::QuickMin`) runs eOn's step with
 `Solver::set_quickmin_options(QuickMinOptions::eon())` and one

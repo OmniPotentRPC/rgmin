@@ -23,7 +23,7 @@ opt.run(fmax=0.05)
 FIRE(atoms, logfile=None).run(fmax=0.05, steps=20)
 #+end_src
 
-The Rust L-BFGS default is the strong Wolfe search. ~LBFGS(eon_cap=True)~ selects the eOn cap. Stubs live in ~python/rgmin/*.pyi~ and ~py.typed~ marks the package.
+The Rust L-BFGS default is the eOn cap, a max-move step with no line search. ~LBFGS~ matches ASE's length control, ~LBFGS(eon_cap=True)~ selects the Rust default, and ~LBFGS(use_line_search=True)~ opts into the strong Wolfe search. Stubs live in ~python/rgmin/*.pyi~ and ~py.typed~ marks the package.
 
 ~lowest_eigenpairs(hvp, x0_block)~ returns the k lowest pairs of a symmetric product as NumPy arrays. ~hvp(x, v)~ is ~H(x) v~. @@rst::doc:`tutorials/eigenpairs`@@ is the short example, and continuous integration runs it.
 

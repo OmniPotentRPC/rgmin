@@ -20,8 +20,10 @@ imported when an optimizer is constructed.
    opt.attach(lambda: atoms.get_potential_energy())
    opt.run(fmax=0.05)
 
-``LBFGS(eon_cap=True)`` selects the Rust default. Without it the class
-matches ASE's length control. Stubs live in ``python/rgmin`` and
+The Rust L-BFGS default is the eOn cap, a max-move step with no line
+search. ``LBFGS`` matches ASE's length control, ``LBFGS(eon_cap=True)``
+selects the Rust default, and ``LBFGS(use_line_search=True)`` opts into
+the strong Wolfe search. Stubs live in ``python/rgmin`` and
 ``py.typed`` marks the package.
 
 ``lowest_eigenpairs(hvp, x0_block)`` returns the k lowest pairs of a

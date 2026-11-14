@@ -27,8 +27,11 @@ Rust
 
 ``step`` is one outer iteration. ``step_hess`` / ``step_hess_fg`` take a
 host Hessian. ``forget`` drops pair history, conjugacy, and moments.
-``set_atom_maxmove`` is the eOn per-atom cap. On a Euclidean L-BFGS
-session it selects the geometry step and ignores ``set_accept``.
+``set_atom_maxmove`` is the eOn per-atom cap. The L-BFGS default is
+``LbfgsStep::Capped``, the eOn step with no line search, and this cap
+sets its length. ``set_lbfgs_step(LbfgsStep::Wolfe)`` opts into the
+strong Wolfe search. ``set_geometry_step`` opts into the geometry step;
+that step uses this cap and ignores ``set_accept``.
 A nominal steepest trial at least 64 times the cap takes one
 finite-difference curvature probe, clipped to the objective bounds.
 Ordinary starts use ``H0 = 0.1 I`` and a five-value nonmonotone window.

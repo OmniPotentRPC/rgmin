@@ -51,7 +51,8 @@ const SEED: u64 = 0;
 const FMAX: f64 = 0.01;
 const BUDGET: usize = 2000;
 
-/// Strong Wolfe constants of the L-BFGS search, the `Solver::new` default.
+/// Strong Wolfe constants of the opted-in L-BFGS search, the
+/// `Solver::new` line-search default.
 const C1: f64 = 1e-4;
 const C2: f64 = 0.9;
 

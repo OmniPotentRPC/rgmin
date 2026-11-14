@@ -27,10 +27,11 @@ let report = solver.step(&obj, &mut x).unwrap();
 
 ~step~ is one outer iteration. ~step_hess~ / ~step_hess_fg~ take a
 host Hessian. ~forget~ drops pair history, conjugacy, and moments.
-~set_atom_maxmove~ is the eOn per-atom cap. The L-BFGS default is the
-strong Wolfe search. ~set_geometry_step~ or ~LbfgsStep::Capped~ opts
-into the line-search-free geometry step; that step uses this cap and
-ignores ~set_accept~. A nominal steepest trial at least 64 times the
+~set_atom_maxmove~ is the eOn per-atom cap. The L-BFGS default is
+~LbfgsStep::Capped~, the eOn step with no line search, and this cap
+sets its length. ~set_lbfgs_step(LbfgsStep::Wolfe)~ opts into the
+strong Wolfe search. ~set_geometry_step~ opts into the geometry step;
+that step uses this cap and ignores ~set_accept~. A nominal steepest trial at least 64 times the
 cap takes one finite-difference curvature probe, clipped to the
 objective bounds. Ordinary starts use ~H0 = 0.1 I~ and a five-value
 nonmonotone window. Later iterations use ~s.y / y.y~. Negative
@@ -153,8 +154,8 @@ together is not asked twice.
 | ~exp_mu~ | Its energy scale after estimation, or none when it is not installed |
 | ~set_accept~ | ~none~ / ~energy~ / ~nonmonotone~ / ~step~ |
 | ~set_stop_norm~ | Replace ~Control::stop_norm~: ~two~ / ~max_atom~ / ~inf~ / ~rms~ |
-| ~set_linesearch~ | Line search for the line-searched arms; default strong Wolfe |
-| ~set_lbfgs_step~ | ~Wolfe~ is the default. ~Capped~ opts into the eOn cap. A non-positive cap selects Wolfe |
+| ~set_linesearch~ | Line search for the line-searched arms; default strong Wolfe. Default L-BFGS searches no line |
+| ~set_lbfgs_step~ | ~Capped~, the eOn cap, is the default. ~Wolfe~ opts into the strong Wolfe search. A non-positive cap resets to ~EON_MAX_MOVE~ |
 | ~set_fire_variant~ | FIRE schedule; ~Guenole2020~ is FIRE 2.0 as published |
 | ~forget_evaluation~ | Re-evaluate the next start, keep the method memory |
 | ~set_atom_maxmove~ | Per-atom clip; Cartesian default 0.2. A positive ~maxmove~ is the Euclidean cap and leaves this default off. A negative ~maxmove~ clears every cap |
