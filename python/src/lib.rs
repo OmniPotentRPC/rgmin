@@ -14,8 +14,8 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use rgmin::{
     Accept, ApplyHessian, Control, Error, FireConfig, FireKind, LbfgsH0, LbfgsPairs, LbfgsStep,
-    LineSearch, Method, Oracle, SearchStep, Solver, StopNorm, SuppliedSearch,
-    lowest_eigenpairs as solve_lowest_eigenpairs,
+    LineSearch, ManifoldFactor, Method, Oracle, RiemannianManifold, SearchStep, Solver, SpdMetric,
+    StiefelRetraction, StopNorm, SuppliedSearch, lowest_eigenpairs as solve_lowest_eigenpairs,
 };
 
 #[pyclass]
@@ -478,11 +478,151 @@ fn lowest_eigenpairs(
     Ok((values, columns))
 }
 
+/// Stiefel, SPD or product manifold over flat column-major lists.
+///
+/// `rgmin.manifold` wraps this class with NumPy arrays.
+#[pyclass(name = "RiemannianManifold", frozen)]
+struct ManifoldPy {
+    inner: RiemannianManifold,
+}
+
+fn manifold_error(err: Error) -> PyErr {
+    PyValueError::new_err(err.to_string())
+}
+
+impl ManifoldPy {
+    fn unary(
+        &self,
+        a: &[f64],
+        b: &[f64],
+        op: impl Fn(&RiemannianManifold, &[f64], &[f64], &mut [f64]) -> rgmin::Result<()>,
+    ) -> PyResult<Vec<f64>> {
+        let mut out = vec![0.0; self.inner.packed_len()];
+        op(&self.inner, a, b, &mut out).map_err(manifold_error)?;
+        Ok(out)
+    }
+}
+
+#[pymethods]
+impl ManifoldPy {
+    /// St(n, p). `retraction` is `qr` or `polar`.
+    #[staticmethod]
+    #[pyo3(signature = (n, p, retraction="qr"))]
+    fn stiefel(n: usize, p: usize, retraction: &str) -> PyResult<Self> {
+        let retraction = match retraction {
+            "qr" => StiefelRetraction::Qr,
+            "polar" => StiefelRetraction::Polar,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "retraction must be 'qr' or 'polar', got '{other}'"
+                )));
+            }
+        };
+        RiemannianManifold::stiefel(n, p, retraction)
+            .map(|inner| Self { inner })
+            .map_err(manifold_error)
+    }
+
+    /// SPD(p). `metric` is `affine_invariant` or `log_euclidean`.
+    #[staticmethod]
+    #[pyo3(signature = (p, metric="affine_invariant"))]
+    fn spd(p: usize, metric: &str) -> PyResult<Self> {
+        let metric = match metric {
+            "affine_invariant" => SpdMetric::AffineInvariant,
+            "log_euclidean" => SpdMetric::LogEuclidean,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "metric must be 'affine_invariant' or 'log_euclidean', got '{other}'"
+                )));
+            }
+        };
+        RiemannianManifold::spd(p, metric)
+            .map(|inner| Self { inner })
+            .map_err(manifold_error)
+    }
+
+    /// Product of the factors in order.
+    #[staticmethod]
+    fn product(factors: Vec<PyRef<'_, Self>>) -> PyResult<Self> {
+        RiemannianManifold::product(factors.iter().map(|f| f.inner.clone()))
+            .map(|inner| Self { inner })
+            .map_err(manifold_error)
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.packed_len()
+    }
+
+    /// `(kind, rows, columns)` of each factor; kind is `stiefel` or `spd`.
+    fn factors(&self) -> Vec<(&'static str, usize, usize)> {
+        self.inner
+            .factors()
+            .iter()
+            .map(|f| {
+                let (rows, cols) = f.shape();
+                let kind = match f {
+                    ManifoldFactor::Stiefel { .. } => "stiefel",
+                    ManifoldFactor::Spd { .. } => "spd",
+                };
+                (kind, rows, cols)
+            })
+            .collect()
+    }
+
+    fn project(&self, x: Vec<f64>, v: Vec<f64>) -> PyResult<Vec<f64>> {
+        self.unary(&x, &v, RiemannianManifold::project)
+    }
+
+    fn egrad_to_rgrad(&self, x: Vec<f64>, egrad: Vec<f64>) -> PyResult<Vec<f64>> {
+        self.unary(&x, &egrad, RiemannianManifold::egrad_to_rgrad)
+    }
+
+    fn retract(&self, x: Vec<f64>, v: Vec<f64>) -> PyResult<Vec<f64>> {
+        self.unary(&x, &v, RiemannianManifold::retract)
+    }
+
+    fn exp(&self, x: Vec<f64>, v: Vec<f64>) -> PyResult<Vec<f64>> {
+        self.unary(&x, &v, RiemannianManifold::exp)
+    }
+
+    fn log(&self, x: Vec<f64>, y: Vec<f64>) -> PyResult<Vec<f64>> {
+        self.unary(&x, &y, RiemannianManifold::log)
+    }
+
+    fn transport(&self, x_from: Vec<f64>, x_to: Vec<f64>, v: Vec<f64>) -> PyResult<Vec<f64>> {
+        let mut out = vec![0.0; self.inner.packed_len()];
+        self.inner
+            .transport(&x_from, &x_to, &v, &mut out)
+            .map_err(manifold_error)?;
+        Ok(out)
+    }
+
+    fn inner(&self, x: Vec<f64>, u: Vec<f64>, v: Vec<f64>) -> PyResult<f64> {
+        self.inner.inner(&x, &u, &v).map_err(manifold_error)
+    }
+
+    /// `(rgrad, x_next)` for one step of size `t`.
+    fn gradient_step(
+        &self,
+        x: Vec<f64>,
+        egrad: Vec<f64>,
+        t: f64,
+    ) -> PyResult<(Vec<f64>, Vec<f64>)> {
+        let len = self.inner.packed_len();
+        let (mut rgrad, mut next) = (vec![0.0; len], vec![0.0; len]);
+        self.inner
+            .gradient_step(&x, &egrad, t, &mut rgrad, &mut next)
+            .map_err(manifold_error)?;
+        Ok((rgrad, next))
+    }
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Session>()?;
     m.add_class::<LineSearchPy>()?;
     m.add_class::<LbfgsPairsPy>()?;
+    m.add_class::<ManifoldPy>()?;
     m.add_function(wrap_pyfunction!(lowest_eigenpairs, m)?)?;
     m.add("version", env!("CARGO_PKG_VERSION"))?;
     Ok(())

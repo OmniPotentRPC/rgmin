@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 
 from rgmin._core import LbfgsPairs, LineSearch, Session, lowest_eigenpairs as _lowest_eigenpairs, version
+from rgmin.manifold import SPD, Product, Stiefel
 
 __all__ = [
     "BFGS",
@@ -20,7 +21,10 @@ __all__ = [
     "LBFGS",
     "LbfgsPairs",
     "LineSearch",
+    "Product",
+    "SPD",
     "Session",
+    "Stiefel",
     "__version__",
     "lowest_eigenpairs",
 ]
