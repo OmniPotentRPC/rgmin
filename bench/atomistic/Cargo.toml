@@ -15,6 +15,7 @@ simd = ["rgmin/simd"]
 [dependencies]
 rgmin = { path = "../.." }
 eindir-core = { version = "0.6.0", features = ["capi"] }
+libm = "0.2.16"
 ndarray = "0.17"
 
 [build-dependencies]

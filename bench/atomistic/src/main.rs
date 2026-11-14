@@ -33,7 +33,6 @@ unsafe extern "C" {
     ) -> i32;
 }
 
-
 /// Harmonic water (`kind` 5) and methane (`kind` 6).
 ///
 /// The buffer written into `forces` is the physical force, the same
@@ -1056,8 +1055,11 @@ fn run_hop(obj: &FreeObjective, x: Array1<f64>, tol: f64, maxiter: usize) -> Out
 }
 
 #[cfg(test)]
+mod keep;
+
+#[cfg(test)]
 mod call_counts {
-    use super::{build, lj38, lj_cluster, read_con, run_session};
+    use super::{build, lj_cluster, lj38, read_con, run_session};
 
     /// Unperturbed seed 0. Lennard-Jones uses no coordinate noise; Pt7
     /// uses the usual 0.1 Å start. `fmax` stops at 0.01.
@@ -1090,7 +1092,11 @@ mod call_counts {
             assert!(out.converged, "{system} {method} did not converge");
             assert_eq!(out.iters, iters, "{system} {method} iterations");
             assert_eq!(obj.calls(), calls, "{system} {method} potential calls");
-            assert_eq!(format!("{:.10}", out.energy), energy, "{system} {method} energy");
+            assert_eq!(
+                format!("{:.10}", out.energy),
+                energy,
+                "{system} {method} energy"
+            );
             assert_eq!(format!("{:.3e}", out.fmax), fmax, "{system} {method} fmax");
         }
     }
@@ -1187,7 +1193,9 @@ fn main() {
             };
             let sig = if let Some(sigma) = forced {
                 sigma
-            } else if system == "lj13" || system == "lj38" || system == "lj75"
+            } else if system == "lj13"
+                || system == "lj38"
+                || system == "lj75"
                 || system.starts_with("si-")
                 || system == "cu-vac"
                 || system == "h2o"

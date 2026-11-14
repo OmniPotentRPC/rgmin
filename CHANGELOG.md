@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   L-BFGS, CG, and FIRE on LJ13, LJ38, LJ75, and Pt7. The unperturbed
   seed is checked in `cluster_suite_records_iterations_and_potential_calls`.
 
+- The same bench runs 50 perturbed starts of each of those systems and
+  methods. It records median calls, the final-energy quartiles, and the
+  rate of reaching the Cambridge Cluster Database minima (LJ13
+  -44.326801, LJ38 -173.928427, LJ75 -397.492331; Pt7 is the relaxed
+  heptamer). `perturbed_starts_record_calls_energies_and_hit_rates`
+  locks that sample. A change is kept when the sum of the median call
+  counts falls, no median rises, a two-sided Mann-Whitney test does not
+  find higher energies at `p < 0.05`, the hit rate stays within the
+  baseline binomial standard error, converged starts stay converged,
+  and each Pt7 energy stays within `1e-8` relative.
+
 - FIRE 2.0 stops when consecutive non-positive-power steps exceed
   `vdfmax`. The published schedule uses 2000, from Table 1 of Comput.
   Mater. Sci. 175 (2020) 109584. The stopping step does not move.
