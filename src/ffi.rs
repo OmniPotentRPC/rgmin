@@ -5385,7 +5385,8 @@ pub unsafe extern "C" fn rgmin_solver_set_linesearch(
     }
 }
 
-/// Configure approximate Wolfe values for Euclidean `RGMIN_ACCEPT_NONE` sessions.
+/// Configure approximate Wolfe values for the session's Euclidean line
+/// searches under every [`rgmin_accept_t`].
 /// Negative or nonfinite relative windows leave the session unchanged.
 ///
 /// # Safety

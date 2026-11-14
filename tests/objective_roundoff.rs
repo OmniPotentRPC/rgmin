@@ -102,18 +102,42 @@ fn configured_window_reaches_exact_stationarity_on_the_same_noisy_oracle() {
     }
 }
 
+/// A C session opens under `Accept::Energy`. The strong Wolfe search of
+/// every energy policy takes a rise inside the window its caller set,
+/// with the two oracle calls `Accept::None` needs.
 #[test]
-fn explicit_zero_slack_and_physical_policies_retain_their_value_test() {
-    for (slack, policy) in [
-        (Some(0.0), Accept::None),
-        (None, Accept::Energy),
-        (None, Accept::Nonmonotone),
+fn energy_policies_take_a_rise_inside_the_configured_window() {
+    for policy in [Accept::None, Accept::Energy, Accept::Nonmonotone] {
+        let objective = NoisyBowl::new();
+        let mut s = solver(None);
+        s.set_accept(policy);
+        assert!(s.set_objective_roundoff(1e-6));
+        let mut x = array![START];
+        let r = s.step(&objective, &mut x).unwrap();
+        assert_eq!(x, array![0.0], "{policy:?}");
+        assert_eq!(r.grad_norm, 0.0, "{policy:?}");
+        assert_eq!(r.value, 100.0 + NOISE, "{policy:?}");
+        assert_eq!(objective.calls.load(Ordering::Relaxed), 2, "{policy:?}");
+        assert_eq!(s.pair_count(), 1, "{policy:?}");
+    }
+}
+
+#[test]
+fn explicit_zero_slack_and_the_default_window_keep_their_value_test() {
+    for (slack, policy, configured) in [
+        (Some(0.0), Accept::None, true),
+        (Some(0.0), Accept::Energy, true),
+        (Some(0.0), Accept::Nonmonotone, true),
+        (None, Accept::Energy, false),
+        (None, Accept::Nonmonotone, false),
     ] {
         let objective = NoisyBowl::new();
         let mut s = solver(slack);
         let mut x = array![START];
         s.set_accept(policy);
-        assert!(s.set_objective_roundoff(1e-8));
+        if configured {
+            assert!(s.set_objective_roundoff(1e-8));
+        }
         let r = s.step(&objective, &mut x).unwrap();
         assert_eq!(x, array![START]);
         assert_eq!(r.value, 100.0);
@@ -230,6 +254,106 @@ fn c_setter_rejects_bad_inputs_without_replacing_the_session() {
             rgmin_status_t::RGMIN_SUCCESS
         );
         rgmin_solver_free(session);
+    }
+}
+
+#[cfg(feature = "capi")]
+mod capi {
+    use super::{NOISE, START};
+    use dlpk::sys::DLManagedTensorVersioned;
+    use rgmin::ffi::*;
+    use std::os::raw::c_void;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    unsafe fn first(t: *const DLManagedTensorVersioned) -> *mut f64 {
+        let dl = unsafe { &(*t).dl_tensor };
+        unsafe { (dl.data as *mut u8).add(dl.byte_offset as usize) as *mut f64 }
+    }
+
+    /// `NoisyBowl` through the C callbacks. `user` counts evaluations.
+    unsafe extern "C" fn eval(
+        user: *mut c_void,
+        x: *const DLManagedTensorVersioned,
+        value: *mut f64,
+    ) -> rgmin_status_t {
+        unsafe { (*(user as *const AtomicUsize)).fetch_add(1, Ordering::Relaxed) };
+        let v = unsafe { *first(x) };
+        let f = if v == START {
+            100.0
+        } else {
+            100.0 + NOISE + 0.5 * v * v
+        };
+        unsafe { *value = f };
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+
+    unsafe extern "C" fn grad(
+        _user: *mut c_void,
+        x: *const DLManagedTensorVersioned,
+        g: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        unsafe { *first(g) = *first(x) };
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+
+    /// A strong Wolfe session from `rgmin_solver_create` with a 1e-6 value
+    /// window takes the rise of 2^-24 under its default acceptance, under
+    /// `RGMIN_ACCEPT_ENERGY`, and under the 0.5 default `RGMIN_ACCEPT_NONE`.
+    #[test]
+    fn c_session_takes_a_rise_inside_the_configured_window() {
+        for accept in [
+            None,
+            Some(rgmin_accept_t::RGMIN_ACCEPT_ENERGY),
+            Some(rgmin_accept_t::RGMIN_ACCEPT_NONE),
+        ] {
+            let calls = AtomicUsize::new(0);
+            let control = rgmin_control_t {
+                maxiter: 10,
+                gtol: 1e-10,
+                istep: 1.0,
+                memory: 8,
+                maxmove: 0.0,
+                noise_eps: 0.0,
+                noise_c: 0.0,
+            };
+            let mut x = [START];
+            let mut out = rgmin_report_t {
+                value: 0.0,
+                steps: 0,
+                grad_norm: 0.0,
+                stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+            };
+            let st = unsafe {
+                let session = rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &control, 1);
+                assert!(!session.is_null());
+                assert_eq!(rgmin_solver_set_lbfgs_wolfe(session), 0);
+                if let Some(accept) = accept {
+                    rgmin_solver_set_accept(session, accept);
+                }
+                assert_eq!(
+                    rgmin_solver_set_objective_roundoff(session, 1e-6),
+                    rgmin_status_t::RGMIN_SUCCESS
+                );
+                let xt = rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 1);
+                let st = rgmin_solver_step(
+                    session,
+                    Some(eval),
+                    Some(grad),
+                    &calls as *const AtomicUsize as *mut c_void,
+                    xt,
+                    &mut out,
+                );
+                rgmin_tensor_free(xt);
+                rgmin_solver_free(session);
+                st
+            };
+            assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS, "{accept:?}");
+            assert_eq!(x, [0.0], "{accept:?}");
+            assert_eq!(out.value, 100.0 + NOISE, "{accept:?}");
+            assert_eq!(out.grad_norm, 0.0, "{accept:?}");
+            assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE, "{accept:?}");
+            assert!(calls.load(Ordering::Relaxed) <= 4, "{accept:?}: {calls:?}");
+        }
     }
 }
 

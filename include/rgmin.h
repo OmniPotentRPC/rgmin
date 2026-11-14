@@ -426,9 +426,12 @@ typedef enum rgmin_quickmin_variant_t {
 void rgmin_solver_set_quickmin_variant(rgmin_solver_t *solver,
                                        rgmin_quickmin_variant_t variant);
 
-/** Approximate Wolfe value window for Euclidean RGMIN_ACCEPT_NONE sessions.
+/** Approximate Wolfe value window of the session's Euclidean line searches,
+ * under every rgmin_accept_t, in place of the default four-epsilon window.
  * Reject negative or nonfinite values without changing the session.
- * Zero permits no rise. Gradient stopping and physical acceptance are unchanged.
+ * Zero permits no rise. Gradient stopping is unchanged, and the
+ * RGMIN_ACCEPT_ENERGY backtracking of a step that is not line-searched
+ * keeps its absolute 1e-8 rise.
  */
 rgmin_status_t rgmin_solver_set_objective_roundoff(rgmin_solver_t *solver,
                                                   double relative);

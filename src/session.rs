@@ -737,8 +737,11 @@ impl Solver {
         self.linesearch = linesearch;
     }
 
-    /// Set the relative value window for Euclidean line searches under `Accept::None`.
-    /// Physical energy policies and manifold searches retain their own acceptance.
+    /// Set the relative value window of the session's Euclidean line searches.
+    /// It replaces the default four-epsilon window under every [`Accept`]
+    /// policy. Manifold searches keep their own acceptance, and the
+    /// [`Accept::Energy`] / [`Accept::Nonmonotone`] backtracking of a
+    /// step that is not line-searched keeps its absolute `1e-8` rise.
     /// Invalid values leave the session unchanged. Zero permits no objective rise.
     pub fn set_objective_roundoff(&mut self, relative: f64) -> bool {
         let Some(options) = LineSearchOptions::with_objective_roundoff(relative) else {
@@ -3173,12 +3176,14 @@ impl Solver {
             self.istep = self.control.istep.min(1.0 / l2(&grad));
         }
 
-        let line_options =
-            if self.accept == Accept::None && self.manifold == ManifoldKind::Euclidean {
-                self.line_options
-            } else {
-                LineSearchOptions::default()
-            };
+        // The window states how accurate the objective's values are, so it
+        // holds under every acceptance policy, as the default four-epsilon
+        // window it replaces does.
+        let line_options = if self.manifold == ManifoldKind::Euclidean {
+            self.line_options
+        } else {
+            LineSearchOptions::default()
+        };
         let start = x.clone();
         let gold = grad.clone();
         // Accept::Step: the two-loop direction goes through accept_step
