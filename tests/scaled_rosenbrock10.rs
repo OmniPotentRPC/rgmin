@@ -33,6 +33,9 @@ fn relax(step: LbfgsStep) -> (f64, f64, usize) {
     };
     let mut solver = Solver::new(Method::Lbfgs { memory: 8 }, control, n);
     solver.set_lbfgs_step(step).unwrap();
+    if matches!(step, LbfgsStep::Wolfe) {
+        solver.set_atom_maxmove(0.0);
+    }
     let mut x = x0;
     let report = solver.run(&obj, &mut x).unwrap();
     let (f, g) = rosenbrock(x.view());

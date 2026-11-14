@@ -448,9 +448,6 @@ impl Solver {
             bound_high: None,
             inner,
         };
-        if let Inner::Lbfgs(memory) = &mut solver.inner {
-            memory.step = LbfgsStep::Wolfe;
-        }
         solver.overlay = match &method {
             Method::QuickMin => {
                 Overlay::QuickMin(QuickMinState::new(dim, istep), QuickMinSession::new(istep))
@@ -2000,10 +1997,41 @@ impl Solver {
         scale * force
     }
 
-    /// Per-atom cap selects the geometry L-BFGS step. Uncapped sessions keep
-    /// the one-oracle two-loop (and Wolfe when acceptance is not [`Accept::None`]).
+    /// Default Euclidean L-BFGS: the eOn cap, no line search.
+    /// [`Self::set_geometry_step`] keeps the geometry algorithm.
+    fn use_eon_lbfgs(&self) -> bool {
+        // Accept::Step is the one-oracle two-loop clip. The default
+        // Accept::None session takes the eOn cap.
+        if self.geometry_step
+            || self.accept == Accept::Step
+            || !matches!(self.lbfgs_step(), LbfgsStep::Capped { .. })
+        {
+            return false;
+        }
+        if !matches!(self.manifold, ManifoldKind::Euclidean) {
+            return false;
+        }
+        if !matches!(self.inner, Inner::Lbfgs(_)) || self.constraints.is_some() {
+            return false;
+        }
+        #[cfg(feature = "highs")]
+        if self.highs {
+            return false;
+        }
+        true
+    }
+
+    /// The geometry step is the explicit flag, or a Wolfe session that
+    /// has a per-atom cap. The default eOn cap is not this path.
     fn use_geometry_lbfgs(&self) -> bool {
-        if !self.geometry_step {
+        // An explicit per-atom cap on a Wolfe session is the geometry
+        // step. Accept::Step keeps the one-oracle two-loop. The implicit
+        // default cap does not select this path.
+        let wolfe_cap = matches!(self.lbfgs_step(), LbfgsStep::Wolfe)
+            && self.atom_maxmove_set
+            && self.atom_maxmove.is_some()
+            && self.accept != Accept::Step;
+        if !self.geometry_step && !wolfe_cap {
             return false;
         }
         if self.atom_maxmove.is_none() || !matches!(self.manifold, ManifoldKind::Euclidean) {
@@ -2640,6 +2668,9 @@ impl Solver {
         }
         self.refresh_exp(obj, x, &grad)?;
 
+        if self.use_eon_lbfgs() {
+            return self.eon_session_step(obj, x, value, grad);
+        }
         if self.use_geometry_lbfgs() {
             return self.geometry_lbfgs_step(obj, x, value, grad);
         }
@@ -3634,9 +3665,12 @@ impl Solver {
 
     /// Step-length rule for an L-BFGS session.
     ///
-    /// [`LbfgsStep::Wolfe`] is the default: strong Wolfe. [`LbfgsStep::Capped`]
-    /// opts into the geometry (eOn) step. [`LbfgsStep::Scaled`] shortens the
-    /// two-loop step and keeps the pairs.
+    /// [`LbfgsStep::Capped`] at [`crate::EON_MAX_MOVE`] is the default:
+    /// the eOn step, no line search. The first step probes curvature.
+    /// A proposal at least as long as the cap clears the memory and
+    /// steps along `H0` times the force. [`LbfgsStep::Scaled`] shortens
+    /// the two-loop step and keeps the pairs. [`LbfgsStep::Wolfe`] opts
+    /// into the strong Wolfe search.
     pub fn set_lbfgs_step(&mut self, step: LbfgsStep) -> Result<()> {
         let step = match step {
             LbfgsStep::Capped { max_atom } | LbfgsStep::Scaled { max_atom }
@@ -3686,9 +3720,10 @@ impl Solver {
                 });
             }
         }
-        // The eOn cap is the released geometry step. Scaled stays the
-        // two-loop length control.
-        self.geometry_step = matches!(step, LbfgsStep::Capped { .. });
+        // Selecting a step rule leaves the geometry algorithm off.
+        // [`Self::set_geometry_step`] is that algorithm, and a Wolfe
+        // session with a per-atom cap also takes it.
+        self.geometry_step = false;
         if let Some(cap) = cap {
             self.set_atom_maxmove(cap);
         }
@@ -4679,6 +4714,7 @@ mod retained_neb_guard_tests {
             },
             3,
         );
+        solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
         solver.set_accept(Accept::Step);
         solver.set_atom_maxmove(0.2);
         solver.step(&obj, &mut x).unwrap();
@@ -4716,6 +4752,7 @@ mod retained_neb_guard_tests {
             },
             3,
         );
+        solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
         solver.set_accept(Accept::Step);
         solver.set_atom_maxmove(0.2);
         solver.set_lbfgs_neb_guards(guards);

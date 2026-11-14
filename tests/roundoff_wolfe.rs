@@ -103,6 +103,7 @@ fn lbfgs_retains_the_stationary_trial_and_honors_explicit_zero_slack() {
             },
             1,
         );
+        solver.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
         let report = solver.step(&objective, &mut point).unwrap();
         if slack.is_none() {
             assert_eq!(point, array![0.0]);
@@ -134,6 +135,7 @@ fn a_box_modified_trial_must_satisfy_its_own_curvature_check() {
         },
         1,
     );
+    solver.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
     let report = solver.step(&objective, &mut point).unwrap();
     assert_eq!(point, array![0.0]);
     assert_eq!(report.grad_norm, 2e-8);

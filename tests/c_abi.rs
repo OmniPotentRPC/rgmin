@@ -2848,8 +2848,8 @@ fn c_abi_capped_lbfgs_moves_one_atom_by_the_cap() {
         rgmin_tensor_free(xt);
     }
     assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
-    // Initial inverse Hessian is 0.1, so a unit force moves 0.1, under the cap.
-    assert!((x[0] - 0.9).abs() <= 1e-12, "{x:?}");
+    // The eOn cap probes curvature, then moves one atom by 0.2.
+    assert!((x[0] - (1.0 - rgmin::EON_MAX_MOVE)).abs() <= 1e-12, "{x:?}");
     assert!(x[1].abs() <= 1e-12 && x[2].abs() <= 1e-12, "{x:?}");
 }
 

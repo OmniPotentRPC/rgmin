@@ -25,8 +25,8 @@ use crate::{
     Error, HessianObjective, HessianOracle, HessianVector, HvpOracle, LbfgsH0, LbfgsPairs,
     LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart, ScgOptions, ScgParams,
     ScgStepTolerance, SearchStep, Solver, StopNorm, SuppliedSearch, lowest_eigenpairs, lowest_mode,
-    minimize_method, minimize_method_hess, minimize_method_hvp, minimize_scg, minimize_scg_exact,
-    minimize_scg_exact_with_options, minimize_scg_with_options,
+    minimize_method, minimize_method_hess, minimize_method_hvp, minimize_scg_exact_with_options,
+    minimize_scg_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -4667,6 +4667,12 @@ fn rigid_masses<'a>(
     }
 }
 
+/// Install a geometry preconditioner.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+/// `params` is null or a `rgmin_precon_t` the caller initialized.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_precon(
     solver: *mut rgmin_solver_t,
     params: *const rgmin_precon_t,

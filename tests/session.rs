@@ -133,6 +133,9 @@ fn first_order_accept_none_moves_a_nonconservative_force() {
         // Accept::None line-searches. A flat energy fails Armijo, so the
         // point stays. Accept::Step is the one-oracle clipped step.
         let mut searched = Solver::new(method.clone(), ctrl.clone(), 2);
+        if matches!(method, Method::Lbfgs { .. }) {
+            searched.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
+        }
         searched.set_accept(Accept::None);
         searched.step(&obj, &mut x).unwrap();
         assert_eq!(
@@ -2323,6 +2326,7 @@ fn a_caller_displacement_between_steps_is_a_secant() {
 
     let pairs_after_two_steps = |displace: bool| {
         let mut solver = Solver::new(Method::lbfgs(), control(), 2);
+        solver.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
         solver.set_accept(Accept::Energy);
         let mut x = array![2.0, 1.0];
         solver.step(&Ellipse, &mut x).unwrap();

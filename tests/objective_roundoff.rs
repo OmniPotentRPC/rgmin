@@ -1,7 +1,7 @@
 //! Exact quadratic gradients with a bounded error in the reported value.
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Accept, Control, LineSearch, LineSearchOptions, Method, Solver};
+use rgmin::{Accept, Control, LbfgsStep, LineSearch, LineSearchOptions, Method, Solver};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const START: f64 = 1.0 / 4096.0;
@@ -62,7 +62,7 @@ fn options() -> LineSearchOptions {
     LineSearchOptions::with_objective_roundoff(1e-8).unwrap()
 }
 fn solver(slack: Option<f64>) -> Solver {
-    Solver::new(
+    let mut solver = Solver::new(
         Method::lbfgs(),
         Control {
             gtol: 1e-10,
@@ -70,7 +70,11 @@ fn solver(slack: Option<f64>) -> Solver {
             ..Control::default()
         },
         1,
-    )
+    );
+    // The window belongs to the strong Wolfe search. The default step is
+    // the eOn cap, which does not consult it.
+    solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+    solver
 }
 
 #[test]

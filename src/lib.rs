@@ -9,11 +9,11 @@
 //! through an `rgmin_solver_t` session (`create` / `step` / `free`)
 //! and the one-shot `rgmin_minimize` wrappers.
 //!
-//! The production unconstrained local method is [`Lbfgs`] with
-//! [`crate::linesearch::LineSearch::Wolfe`]: limited-memory BFGS
-//! (Nocedal-Wright 7.4) and the strong Wolfe conditions (algorithms 3.5
-//! and 3.6). The eOn line-search-free cap is opt-in
-//! ([`crate::LbfgsStep::Capped`], [`EON_MAX_MOVE`]).
+//! The production unconstrained local method is [`Lbfgs`] with the eOn
+//! cap ([`crate::LbfgsStep::Capped`] at [`EON_MAX_MOVE`]): limited-memory
+//! BFGS (Nocedal-Wright 7.4) and no line search. The strong Wolfe
+//! conditions (algorithms 3.5 and 3.6) are
+//! [`crate::LbfgsStep::Wolfe`], and that search is opt-in.
 //! [`lbfgs_direction`] applies a caller-supplied initial inverse Hessian
 //! and does not evaluate an objective. [`minimize_lbfgs`] is the
 //! cold-start dispatch used by [`minimize_method`].

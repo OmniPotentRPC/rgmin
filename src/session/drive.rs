@@ -185,6 +185,40 @@ impl Solver {
         }
     }
 
+    /// One default L-BFGS session step: the eOn cap. The curvature probe,
+    /// when it runs, is one evaluation and does not move `x`.
+    pub(super) fn eon_session_step<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        value: f64,
+        grad: Array1<f64>,
+    ) -> Result<Report>
+    where
+        O: eindir_core::DifferentiableObjective<f64> + ?Sized,
+    {
+        let cap = self.lbfgs_step().capped_limit().ok_or(Error::LbfgsCap {
+            what: "the cap is not positive",
+        })?;
+        self.last_grad.assign(&grad);
+        let end = self.eon_fill_step(x, cap, value, &mut |point, buf| {
+            let (f, g) = obj.value_and_gradient(point);
+            if buf.len() == g.len() {
+                buf.assign(&g);
+            } else {
+                *buf = g;
+            }
+            f
+        })?;
+        if end.rejected {
+            let g = self.last_grad.clone();
+            return Ok(self.report(value, x, &g));
+        }
+        let g = self.last_grad.clone();
+        self.remember(x, end.value, &g);
+        Ok(self.report(end.value, x, &g))
+    }
+
     fn eon_fill_step<F>(
         &mut self,
         x: &mut Array1<f64>,

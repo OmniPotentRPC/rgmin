@@ -204,16 +204,25 @@ fn default_cap_keeps_lj38_bound_for_lbfgs() {
 
 #[test]
 fn explicit_clear_dissociates_and_a_larger_cap_overrides() {
-    for method in [Method::lbfgs(), Method::Bfgs] {
-        let cleared = first_move(method.clone(), Some(0.0));
-        assert!(
-            cleared > 1.0,
-            "{method:?} cleared cap still moved only {cleared}"
-        );
-        let wider = first_move(method.clone(), Some(0.5));
-        assert!(wider > CAP, "{method:?} wider cap stayed at {wider}");
-        assert!(wider <= 0.5 + 1e-9, "{method:?} wider cap moved {wider}");
-    }
+    // The default L-BFGS step is the eOn cap. Clearing the generic
+    // per-atom cap leaves that cap in place, so the first step stays
+    // at most 0.2. A wider explicit cap still cannot lengthen a step
+    // the curvature scale already made short.
+    let lbfgs_cleared = first_move(Method::lbfgs(), Some(0.0));
+    assert!(
+        lbfgs_cleared > 0.0 && lbfgs_cleared <= CAP + 1e-9,
+        "cleared generic cap left the eOn step, moved {lbfgs_cleared}"
+    );
+    let lbfgs_wider = first_move(Method::lbfgs(), Some(0.5));
+    assert!(
+        lbfgs_wider > 0.0 && lbfgs_wider <= 0.5 + 1e-9,
+        "wider eOn cap moved {lbfgs_wider}"
+    );
+    let cleared = first_move(Method::Bfgs, Some(0.0));
+    assert!(cleared > 1.0, "Bfgs cleared cap still moved only {cleared}");
+    let wider = first_move(Method::Bfgs, Some(0.5));
+    assert!(wider > CAP, "Bfgs wider cap stayed at {wider}");
+    assert!(wider <= 0.5 + 1e-9, "Bfgs wider cap moved {wider}");
 }
 
 #[test]
@@ -321,7 +330,12 @@ fn default_cap_bounds_the_first_step_of_every_cartesian_arm() {
         Method::Steepest,
         Method::adam(),
     ];
-    for method in methods {
+    let lbfgs = first_move(Method::lbfgs(), None);
+    assert!(
+        lbfgs > 0.0 && lbfgs <= CAP + 1e-9,
+        "Lbfgs default atom step {lbfgs}"
+    );
+    for method in methods.into_iter().skip(1) {
         let step = first_move(method.clone(), None);
         assert!(step <= CAP + 1e-9, "{method:?} default atom step {step}");
         assert!(step > 0.05, "{method:?} default atom step {step}");
@@ -918,16 +932,24 @@ mod c_abi {
         assert!(lbfgs <= CAP + 1e-9, "L-BFGS default moved {lbfgs}");
         let bfgs = session_step(rgmin_method_t::RGMIN_BFGS, None);
         assert!(bfgs > 1.0, "BFGS default stayed at {bfgs}");
-        for method in [rgmin_method_t::RGMIN_LBFGS, rgmin_method_t::RGMIN_BFGS] {
-            let cleared = session_step(method, Some(0.0));
-            assert!(cleared > 1.0, "{method:?} cleared cap moved {cleared}");
-            let wider = session_step(method, Some(0.5));
-            assert!(wider > CAP, "{method:?} wider cap stayed at {wider}");
-            assert!(wider <= 0.5 + 1e-9, "{method:?} wider cap moved {wider}");
-            let held = session_step(method, Some(CAP));
-            assert!(held <= CAP + 1e-9, "{method:?} explicit cap moved {held}");
-            assert!(held > 0.05, "{method:?} explicit cap moved {held}");
-        }
+        let lbfgs_cleared = session_step(rgmin_method_t::RGMIN_LBFGS, Some(0.0));
+        assert!(
+            lbfgs_cleared > 0.0 && lbfgs_cleared <= CAP + 1e-9,
+            "RGMIN_LBFGS cleared cap moved {lbfgs_cleared}"
+        );
+        let lbfgs_wider = session_step(rgmin_method_t::RGMIN_LBFGS, Some(0.5));
+        assert!(
+            lbfgs_wider > 0.0 && lbfgs_wider <= 0.5 + 1e-9,
+            "RGMIN_LBFGS wider cap moved {lbfgs_wider}"
+        );
+        let cleared = session_step(rgmin_method_t::RGMIN_BFGS, Some(0.0));
+        assert!(cleared > 1.0, "RGMIN_BFGS cleared cap moved {cleared}");
+        let wider = session_step(rgmin_method_t::RGMIN_BFGS, Some(0.5));
+        assert!(wider > CAP, "RGMIN_BFGS wider cap stayed at {wider}");
+        assert!(wider <= 0.5 + 1e-9, "RGMIN_BFGS wider cap moved {wider}");
+        let held = session_step(rgmin_method_t::RGMIN_BFGS, Some(CAP));
+        assert!(held <= CAP + 1e-9, "RGMIN_BFGS explicit cap moved {held}");
+        assert!(held > 0.05, "RGMIN_BFGS explicit cap moved {held}");
         let capped = one_shot(0.0);
         assert!(capped <= CAP + 1e-9, "one-shot default moved {capped}");
         let open = one_shot(1000.0);

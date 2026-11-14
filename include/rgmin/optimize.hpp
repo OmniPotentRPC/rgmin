@@ -11,6 +11,11 @@
 
 #include "../rgmin.h"
 
+// rgmin_minimize_scg_with_options and rgmin_solver_set_objective_roundoff
+// are declared by that header. Solver::set_objective_roundoff wraps the
+// second. A null options pointer on the SCG entry keeps the absolute
+// infinity-norm step rule.
+
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>

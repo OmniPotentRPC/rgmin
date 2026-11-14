@@ -81,6 +81,8 @@ fn steps_until(precon: bool, estimate: bool) -> (usize, Option<f64>) {
     };
     let mut solver = Solver::new(Method::Lbfgs { memory: 5 }, control, x.len());
     // The metric's Newton step is longer than the default per-atom cap.
+    // The comparison is the strong Wolfe search. The default step is the eOn cap.
+    solver.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
     solver.set_atom_maxmove(0.0);
     if precon {
         if estimate {
@@ -354,8 +356,10 @@ fn lindh_and_ff_shorten_lbfgs_on_a_molecule() {
         maxmove: None,
         ..Default::default()
     };
-    let plain = Solver::new(Method::Lbfgs { memory: 5 }, control.clone(), geom.len());
+    let mut plain = Solver::new(Method::Lbfgs { memory: 5 }, control.clone(), geom.len());
     let mut with = Solver::new(Method::Lbfgs { memory: 5 }, control, geom.len());
+    plain.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
+    with.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
     with.set_lindh(geom.view(), &z, &[], &lindh_params).unwrap();
     let without = steps_on(plain, &obj, &geom);
     let taken = steps_on(with, &obj, &geom);
@@ -387,8 +391,10 @@ fn lindh_and_ff_shorten_lbfgs_on_a_molecule() {
         maxmove: None,
         ..Default::default()
     };
-    let plain = Solver::new(Method::Lbfgs { memory: 5 }, control.clone(), geom.len());
+    let mut plain = Solver::new(Method::Lbfgs { memory: 5 }, control.clone(), geom.len());
     let mut with = Solver::new(Method::Lbfgs { memory: 5 }, control, geom.len());
+    plain.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
+    with.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
     with.set_ff(geom.view(), terms, &ff_params).unwrap();
     let without = steps_on(plain, &ff_obj, &geom);
     let taken = steps_on(with, &ff_obj, &geom);

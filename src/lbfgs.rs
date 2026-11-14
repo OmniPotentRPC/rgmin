@@ -1,18 +1,18 @@
 //! Persistent limited-memory BFGS (Nocedal-Wright 7.4, scaling 7.20).
 //!
-//! The default step is the strong Wolfe line search (Nocedal-Wright
-//! algorithms 3.5 and 3.6). The line-search-free eOn cap is opt-in
-//! ([`LbfgsStep::Capped`], [`EON_MAX_MOVE`], [`Lbfgs::capped`]). When
-//! that cap is selected, the first step estimates curvature with a
-//! finite difference of length [`EON_FINITE_DIFFERENCE`] and sets
-//! `H0 = 1/C`. Later steps use `(s·y)/(y·y)` when that quotient is
-//! positive, and [`EON_INVERSE_CURVATURE`] otherwise. A proposal whose
-//! longest atom move is at least the cap clears the memory and steps
-//! along `H0` times the force (`distance_reset`). A direction that is
-//! not descent does the same (`angle_reset`). Negative curvature clears
-//! the memory and steps along the force at the cap. The cap only
-//! shortens a step. [`LbfgsStep::Scaled`] is the ASE length control:
-//! shorten the two-loop step and keep the pairs.
+//! The default step is the line-search-free cap of the eOn client
+//! ([`LbfgsStep::Capped`], [`EON_MAX_MOVE`], [`Lbfgs::default`]). The
+//! first step estimates curvature with a finite difference of length
+//! [`EON_FINITE_DIFFERENCE`] and sets `H0 = 1/C`. Later steps use
+//! `(s·y)/(y·y)` when that quotient is positive, and
+//! [`EON_INVERSE_CURVATURE`] otherwise. A proposal whose longest atom
+//! move is at least the cap clears the memory and steps along `H0`
+//! times the force (`distance_reset`). A direction that is not descent
+//! does the same (`angle_reset`). Negative curvature clears the memory
+//! and steps along the force at the cap. The cap only shortens a step.
+//! [`LbfgsStep::Scaled`] is the ASE length control: shorten the two-loop
+//! step and keep the pairs. [`LbfgsStep::Wolfe`] is the strong Wolfe
+//! search, and it is opt-in.
 //! [`LbfgsPairs`] and [`lbfgs_direction`] are the same two-loop with a
 //! caller-supplied `H0`. They return `-H g` and do not evaluate an
 //! objective.
@@ -67,13 +67,13 @@ const EON_STEEP_SCALE: f64 = 1000.0;
 
 /// How [`Lbfgs`] chooses the length of a step.
 ///
-/// [`LbfgsStep::Wolfe`] is the default: the strong Wolfe search.
-/// [`LbfgsStep::Capped`] is the eOn step, no line search, and it is
-/// opt-in. [`LbfgsStep::Scaled`] is the ASE length control.
+/// [`LbfgsStep::Capped`] is the default: the eOn step, no line search.
+/// [`LbfgsStep::Wolfe`] is the strong Wolfe search, and it is opt-in.
+/// [`LbfgsStep::Scaled`] is the ASE length control.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LbfgsStep {
     /// Strong Wolfe line search. Nocedal and Wright, algorithms 3.5 and 3.6.
-    /// This is the default of [`Lbfgs`] and [`LbfgsBuilder`].
+    /// Opt in with this variant. It is not the default.
     Wolfe,
     /// eOn `LBFGS::getStep` with the client's default switches:
     /// `auto_scale`, `distance_reset`, `angle_reset`, curvature `reset`.
@@ -95,7 +95,9 @@ pub enum LbfgsStep {
 
 impl Default for LbfgsStep {
     fn default() -> Self {
-        Self::Wolfe
+        Self::Capped {
+            max_atom: EON_MAX_MOVE,
+        }
     }
 }
 
@@ -115,8 +117,8 @@ fn free_or_wolfe(capped: bool, max_atom: f64) -> LbfgsStep {
 
 /// Validated [`Lbfgs`] configuration.
 ///
-/// [`Lbfgs::default`] is the strong Wolfe search. [`Self::capped`] is
-/// the eOn cap. A non-positive or non-finite cap passed to
+/// [`Lbfgs::default`] is the eOn cap. [`Self::wolfe`] is the strong
+/// Wolfe search. A non-positive or non-finite cap passed to
 /// [`Self::capped`] or [`Self::scaled`] selects Wolfe, the same rule
 /// as [`Lbfgs::capped`].
 pub struct LbfgsBuilder {
@@ -495,9 +497,9 @@ pub struct Lbfgs {
     /// Zero, the default, turns the test off, as does any value that is
     /// not positive. [`LBFGSB_FTOL`] is the SciPy default.
     pub ftol: f64,
-    /// Step-length rule. The default is [`LbfgsStep::Wolfe`].
-    /// [`LbfgsStep::Capped`] at [`EON_MAX_MOVE`] is the opt-in eOn step.
-    /// [`LbfgsStep::Scaled`] is the ASE length control.
+    /// Step-length rule. The default is [`LbfgsStep::Capped`] at
+    /// [`EON_MAX_MOVE`], the eOn step. [`LbfgsStep::Wolfe`] opts into
+    /// the line search. [`LbfgsStep::Scaled`] is the ASE length control.
     pub step: LbfgsStep,
     /// Fixed initial inverse-Hessian scale. `None`, the default, uses
     /// the Nocedal-Wright scale `(s · y) / (y · y)`. `Some(1/70)` is the
@@ -639,8 +641,8 @@ impl Lbfgs {
         }
     }
 
-    /// Validated configuration. The default is the strong Wolfe search.
-    /// [`LbfgsBuilder::capped`] opts into the eOn cap.
+    /// Validated configuration. The default is the eOn cap.
+    /// [`LbfgsBuilder::wolfe`] opts into the strong Wolfe search.
     #[must_use]
     pub fn builder() -> LbfgsBuilder {
         LbfgsBuilder {
@@ -2187,8 +2189,8 @@ impl Lbfgs {
     /// Relaxes `x0` inside the box `lower <= x <= upper` with the
     /// generalized Cauchy point and the subspace minimization of L-BFGS-B.
     ///
-    /// Opt-in: [`Self::minimize`] keeps its step rule, and the default
-    /// remains the strong Wolfe search. Each direction ends at the subspace minimizer
+    /// The box path line-searches. [`Self::minimize`] keeps the configured
+    /// step, whose default is the eOn cap. Each direction ends at the subspace minimizer
     /// from the Cauchy point (Byrd, Lu, Nocedal and Zhu 1995, algorithm CP
     /// and section 5.1), and the strong Wolfe search along it stops at the
     /// box. A bound may be infinite; with no finite bound the direction is
@@ -2740,9 +2742,9 @@ mod tests {
         assert!(f < 1e-16, "f {f} x {x}");
     }
 
-    /// A non-positive cap does not select the capped step.
+    /// A non-positive cap is not a length. The default step stays the eOn cap.
     #[test]
-    fn a_non_positive_cap_keeps_the_wolfe_search() {
+    fn a_non_positive_cap_is_not_a_length_and_the_default_stays_capped() {
         for max_atom in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             let opt = Lbfgs {
                 step: LbfgsStep::Capped { max_atom },
@@ -2750,15 +2752,24 @@ mod tests {
             };
             assert!(opt.capped_limit().is_none(), "cap {max_atom}");
         }
-        assert_eq!(Lbfgs::default().step, LbfgsStep::Wolfe);
-        assert_eq!(Lbfgs::builder().build().step, LbfgsStep::Wolfe);
+        assert_eq!(
+            Lbfgs::default().step,
+            LbfgsStep::Capped {
+                max_atom: super::EON_MAX_MOVE
+            }
+        );
+        assert_eq!(
+            Lbfgs::builder().build().step,
+            LbfgsStep::Capped {
+                max_atom: super::EON_MAX_MOVE
+            }
+        );
     }
 
-    /// The opt-in eOn cap moves one atom by [`EON_MAX_MOVE`] and does not
-    /// search a line. [`Lbfgs::default`] is the Wolfe search.
+    /// A fresh solver takes the eOn cap and does not search a line.
     #[test]
-    fn the_capped_step_moves_one_atom_by_the_eon_cap() {
-        let mut opt = Lbfgs::capped(super::EON_MAX_MOVE);
+    fn the_default_step_moves_one_atom_by_the_eon_cap() {
+        let mut opt = Lbfgs::default();
         let mut calls = 0usize;
         let (_f, x, evals) = opt.minimize(array![1.0, 0.0, 0.0].view(), 1, |v| {
             calls += 1;
@@ -2938,20 +2949,19 @@ mod tests {
         assert_eq!(x.len(), 2);
     }
 
-    /// The builder's default is the strong Wolfe search. The eOn cap is
-    /// `LbfgsBuilder::capped`.
+    /// The builder's default is the eOn cap, and Wolfe is explicit.
     #[test]
-    fn the_builder_defaults_to_wolfe() {
+    fn the_builder_defaults_to_the_eon_cap() {
         let opt = Lbfgs::builder().tolerance(1e-8).memory(5).build();
         assert_eq!(opt.max_pairs, 5);
         assert!((opt.gtol - 1e-8).abs() < 1e-15);
-        assert_eq!(opt.step, LbfgsStep::Wolfe);
         assert_eq!(
-            Lbfgs::builder().capped(super::EON_MAX_MOVE).build().step,
+            opt.step,
             LbfgsStep::Capped {
                 max_atom: super::EON_MAX_MOVE
             }
         );
+        assert_eq!(Lbfgs::builder().wolfe().build().step, LbfgsStep::Wolfe);
     }
 }
 

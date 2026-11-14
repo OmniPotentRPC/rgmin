@@ -232,8 +232,8 @@ fn uncapped_lbfgs_still_takes_the_unit_newton_step() {
     // alpha = 1; the geometry file's 0.2 opening already satisfies Wolfe.
     ctrl.istep = 1.0;
     let mut solver = Solver::new(Method::lbfgs(), ctrl, 2);
-    // Wolfe is the default. The per-atom default would clip this step,
-    // so the test turns that cap off and checks the unit Newton step.
+    // The strong Wolfe search is opt-in. The per-atom default would clip
+    // this step, so the test turns that cap off and checks the unit Newton step.
     solver.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
     solver.set_atom_maxmove(0.0);
     let mut x = array![0.4, -0.2];

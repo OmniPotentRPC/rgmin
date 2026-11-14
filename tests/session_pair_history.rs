@@ -16,6 +16,7 @@ fn seeded_session(maxmove: Option<f64>) -> Solver {
         },
         1,
     );
+    solver.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
     assert!(solver.push_pair(array![1.0].view(), array![2.0].view()));
     assert_eq!(solver.pair_count(), 1);
     solver

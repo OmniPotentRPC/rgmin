@@ -11,11 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `lowest_eigenpairs` is block LOBPCG for the k lowest eigenpairs of a symmetric Hessian product (Knyazev 2001). The seed is an n-by-k block. Each pair carries its residual and whether that residual met the tolerance. `k = 0`, `k` above the dimension, and a non-finite value or product return an error. C: `rgmin_lowest_eigenpairs`, `rgmin_eigenpair_t`. Python: `rgmin.lowest_eigenpairs`. ABI minor 39.
 - `SuppliedSearch` and `rgmin_linesearch` take a caller-supplied energy and gradient and do not call an objective. ABI minor 37.
 - `LbfgsPairs` and `lbfgs_direction` return the L-BFGS direction `-H g` from stored pairs and a caller-supplied initial inverse Hessian. The call does not evaluate an objective. ABI minor 38.
-- `LbfgsStep::Capped` and `LbfgsStep::Scaled` are opt-in. The default L-BFGS step remains the strong Wolfe line search from 0.5.x. `Lbfgs::builder`, `Lbfgs::minimize_box`, and `Lbfgs::ftol` are available.
+- The default L-BFGS step is the eOn line-search-free cap (`LbfgsStep::Capped` at `EON_MAX_MOVE`, 0.2). The first step probes curvature. A proposal at least as long as the cap clears the memory. `LbfgsStep::Wolfe` and `rgmin_solver_set_lbfgs_wolfe` opt into the strong Wolfe search. `LbfgsStep::Scaled` is the ASE length control. `Lbfgs::builder`, `Lbfgs::minimize_box`, and `Lbfgs::ftol` are available.
 - `Control::stop_norm` selects the norm a session compares to `gtol`. `Report` carries `stop_norm`, `grad`, and `status`.
 - The `python/` package is an ASE `Optimizer` drop-in (`BFGS`, `LBFGS`, `FIRE`). `LBFGS` uses ASE's length control unless `eon_cap=True`.
 - `Stepper::step` is the one-iteration seam a host calls on `Solver`.
-- The combined C surface is ABI minor 40. Minor 37 is linesearch, 38 is `rgmin_lbfgs_direction`, and 39 is `rgmin_lowest_eigenpairs`.
+- The combined C surface is ABI minor 40. Minor 37 is linesearch, 38 is `rgmin_lbfgs_direction`, and 39 is `rgmin_lowest_eigenpairs`. The symbols new at 40 are the 0.5.2 C functions develop did not have, including `rgmin_minimize_scg_with_options` and `rgmin_solver_set_objective_roundoff`. `rgmin_control_t` gains `noise_eps` and `noise_c`. `rgmin_report_t` gains `stop`.
+- `rgmin_minimize_scg_with_options` takes an explicit SCG step rule. Null options and `RGMIN_SCG_ABSOLUTE_INFINITY` keep the absolute infinity-norm rule. `RGMIN_SCG_RELATIVE_EUCLIDEAN` stops on `||alpha d||_2 < tol_sol * (1 + ||x||_2)`. `Solver::set_objective_roundoff` sets the relative value window of a Euclidean Wolfe search. A positive window can accept a rise inside that window and stop at a stationary point that the strict test refuses.
 
 ### Changed
 
