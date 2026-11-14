@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `lowest_eigenpairs` is block LOBPCG for the k lowest eigenpairs of a symmetric Hessian product (Knyazev 2001). The seed is an n-by-k block. Each pair carries its residual and whether that residual met the tolerance. `k = 0`, `k` above the dimension, and a non-finite value or product return an error. C: `rgmin_lowest_eigenpairs`, `rgmin_eigenpair_t`. Python: `rgmin.lowest_eigenpairs`. ABI minor 39.
 - `SuppliedSearch` and `rgmin_linesearch` take a caller-supplied energy and gradient and do not call an objective. ABI minor 37.
 - `LbfgsPairs` and `lbfgs_direction` return the L-BFGS direction `-H g` from stored pairs and a caller-supplied initial inverse Hessian. The call does not evaluate an objective. ABI minor 38.
-- The default L-BFGS step is the eOn line-search-free cap (`LbfgsStep::Capped` at `EON_MAX_MOVE`, 0.2). The first step probes curvature. A proposal at least as long as the cap clears the memory. `LbfgsStep::Wolfe` and `rgmin_solver_set_lbfgs_wolfe` opt into the strong Wolfe search. `LbfgsStep::Scaled` is the ASE length control. `Lbfgs::builder`, `Lbfgs::minimize_box`, and `Lbfgs::ftol` are available.
+- The default L-BFGS step is the eOn line-search-free cap (`LbfgsStep::Capped` at `EON_MAX_MOVE`, 0.2). The first step probes curvature. A proposal at least as long as the cap clears the memory. `LbfgsStep::Wolfe` and `rgmin_solver_set_lbfgs_wolfe` opt into the strong Wolfe search. One-shot `minimize_method` and `rgmin_minimize` keep the line search the caller passes. `LbfgsStep::Scaled` is the ASE length control. `Lbfgs::builder`, `Lbfgs::minimize_box`, and `Lbfgs::ftol` are available.
 - `Control::stop_norm` selects the norm a session compares to `gtol`. `Report` carries `stop_norm`, `grad`, and `status`.
 - The `python/` package is an ASE `Optimizer` drop-in (`BFGS`, `LBFGS`, `FIRE`). `LBFGS` uses ASE's length control unless `eon_cap=True`.
 - `Stepper::step` is the one-iteration seam a host calls on `Solver`.
@@ -64,7 +64,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   These methods return `Error::Oracle` when the start is not finite: steepest descent, nonlinear CG, Broyden-Fletcher-Goldfarb-Shanno (BFGS), L-BFGS, SR1, SR2 and Adam.
   So does a `Solver` step for every first-order method, BB and the fast inertial relaxation engine (FIRE) included.
   Energy and nonmonotone acceptance require a finite trial.
-  FIRE and the geometry L-BFGS fallback return `Error::Oracle` instead of stepping into a non-finite answer.
+  A flat FIRE trial with no answer halves toward the start up to ten times, inside the clip box.
+  FIRE, when no halving answers, and the geometry L-BFGS fallback return `Error::Oracle` instead of stepping into a non-finite answer.
   They leave `x`, the FIRE integrator and the L-BFGS curvature as they were, so a retry probes the same trial.
   Through the C ABI these errors arrive as `RGMIN_INTERNAL_ERROR` with no NaN or clipped-to-the-bound coordinate sent to the callback.
 - An L-BFGS `Solver` step under `Accept::None` records the caller's move as a curvature pair before its one trial.
