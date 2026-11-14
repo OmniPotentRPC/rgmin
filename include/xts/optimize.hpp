@@ -30,6 +30,7 @@ using rgmin::ConstraintError;
 using rgmin::ConstraintSolver;
 using rgmin::DistanceConstraints;
 using rgmin::LbfgsPairs;
+using rgmin::Manifold;
 
 namespace minimize = rgmin::minimize;
 namespace nlcg = rgmin::nlcg;

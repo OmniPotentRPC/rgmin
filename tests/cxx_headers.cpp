@@ -218,6 +218,69 @@ int eigen_block() {
     return 0;
 }
 
+/// Fit U on St(4, 2) and S on SPD(2) to a target by gradient steps on
+/// |U - U*|^2 / 2 + |S - S*|^2 / 2. The cost must fall at every step.
+int manifold_fit() {
+    using xts::optimize::Manifold;
+    Manifold const st = Manifold::stiefel(4, 2, RGMIN_STIEFEL_POLAR);
+    Manifold const spd = Manifold::spd(2, RGMIN_SPD_AFFINE_INVARIANT);
+    Manifold const m = Manifold::product(st, spd);
+    if (m.len() != 12) {
+        std::fprintf(stderr, "manifold len %zu\n", m.len());
+        return 10;
+    }
+    double const c = std::cos(0.4);
+    double const s = std::sin(0.4);
+    std::vector<double> const target = {c, s, 0.0, 0.0, -s, c, 0.0, 0.0, 2.0, 0.3, 0.3, 1.0};
+    std::vector<double> x = {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0};
+    std::vector<double> g(12), rgrad(12), next(12);
+    auto cost = [&](std::vector<double> const& at) {
+        double f = 0.0;
+        for (std::size_t i = 0; i < at.size(); ++i) {
+            f += 0.5 * (at[i] - target[i]) * (at[i] - target[i]);
+        }
+        return f;
+    };
+    double last = cost(x);
+    for (int step = 0; step < 100; ++step) {
+        for (std::size_t i = 0; i < x.size(); ++i) {
+            g[i] = x[i] - target[i];
+        }
+        m.gradient_step(x.data(), g.data(), 0.1, rgrad.data(), next.data());
+        double const f = cost(next);
+        if (!(f < last)) {
+            std::fprintf(stderr, "manifold step %d: %g after %g\n", step, f, last);
+            return 11;
+        }
+        last = f;
+        x.swap(next);
+    }
+    for (int a = 0; a < 2; ++a) {
+        for (int b = 0; b < 2; ++b) {
+            double dot = 0.0;
+            for (int i = 0; i < 4; ++i) {
+                dot += x[i + 4 * a] * x[i + 4 * b];
+            }
+            if (std::fabs(dot - (a == b ? 1.0 : 0.0)) > 1e-12) {
+                std::fprintf(stderr, "U^T U[%d,%d] = %g\n", a, b, dot);
+                return 12;
+            }
+        }
+    }
+    bool threw = false;
+    try {
+        std::vector<double> y(12);
+        m.log(x.data(), x.data(), y.data());
+    } catch (std::runtime_error const&) {
+        threw = true;
+    }
+    if (!threw) {
+        return 13;
+    }
+    std::printf("manifold ok cost=%g\n", last);
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -314,6 +377,10 @@ int main() {
     int block = eigen_block();
     if (block != 0) {
         return block;
+    }
+    int fit = manifold_fit();
+    if (fit != 0) {
+        return fit;
     }
     return constrained();
 }

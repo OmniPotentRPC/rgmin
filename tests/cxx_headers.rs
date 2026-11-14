@@ -121,4 +121,8 @@ fn cxx_headers_compile_link_and_set_box() {
         stdout.contains("constraints ok"),
         "cxx smoke did not run the distance constraints: {stdout}"
     );
+    assert!(
+        stdout.contains("manifold ok"),
+        "cxx smoke did not run the manifold fit: {stdout}"
+    );
 }
