@@ -23,6 +23,10 @@ FIRE 2.0 does not build the post-step force, which only FIRE 1.0 mixes.
 L-BFGS reuses the curvature dots stored with each pair.
 The Morse-chain iterates are unchanged.
 
+Opt-in ~Solver::set_lbfgs_trust_radius~ truncates the session L-BFGS ray at a Burdakov radius (Algorithm 1 of Burdakov, Gong, Zikrin and Yuan 2017).
+It is off by default. ~Solver::set_lbfgs_trust~ remains the eOn Newton-model radius, also off by default.
+The capped step stays the default. C: ~rgmin_solver_set_lbfgs_trust~ and ~rgmin_solver_lbfgs_trust_radius~. ~abi_minor~ 40.
+
 The default L-BFGS step follows the eOn client, including the finite-difference curvature probe and ~distance_reset~.
 A proposal at least as long as the cap clears the memory and steps along ~H0~ times the force.
 ~LbfgsStep::Scaled~ and ~rgmin_solver_set_lbfgs_scaled~ keep the previous shorten-and-retain rule.

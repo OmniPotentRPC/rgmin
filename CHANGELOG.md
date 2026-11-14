@@ -88,6 +88,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Opt-in `Solver::set_lbfgs_trust_radius` truncates the session L-BFGS ray at a Burdakov radius (Algorithm 1 of Burdakov, Gong, Zikrin and Yuan 2017).
+  It is off by default. `Solver::set_lbfgs_trust` remains the eOn Newton-model radius, also off by default.
+  The capped step stays the default. C: `rgmin_solver_set_lbfgs_trust` and `rgmin_solver_lbfgs_trust_radius`. `abi_minor` 40.
 - Opt-in `Lbfgs::minimize_box` and `Lbfgs::minimize_box_watched` relax inside a box `lower <= x <= upper` with the generalized Cauchy point and the subspace minimization of L-BFGS-B (Byrd, Lu, Nocedal and Zhu 1995).
   Each direction ends at the subspace minimizer from the Cauchy point, and the strong Wolfe search stops at the box.
   `Lbfgs::minimize` keeps the eOn cap. `LbfgsStep::Wolfe` remains opt-in.

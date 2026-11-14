@@ -24,6 +24,10 @@ FIRE 2.0 does not build the post-step force, which only FIRE 1.0 mixes.
 L-BFGS reuses the curvature dots stored with each pair.
 The Morse-chain iterates are unchanged.
 
+Opt-in ``Solver::set_lbfgs_trust_radius`` truncates the session L-BFGS ray at a Burdakov radius (Algorithm 1 of Burdakov, Gong, Zikrin and Yuan 2017).
+It is off by default. ``Solver::set_lbfgs_trust`` remains the eOn Newton-model radius, also off by default.
+The capped step stays the default. C: ``rgmin_solver_set_lbfgs_trust`` and ``rgmin_solver_lbfgs_trust_radius``. ``abi_minor`` 40.
+
 ``Lbfgs::ftol`` is the opt-in relative-decrease stop of L-BFGS-B, and its default of zero turns it off.
 A line-search step from ``f_k`` to ``f_{k+1}`` ends ``minimize``, ``minimize_watched`` and ``minimize_recognized`` when ``f_k - f_{k+1} <= ftol * max(|f_k|, |f_{k+1}|, 1)``.
 ``LBFGSB_FTOL`` is the SciPy default, and :doc:`reference/sota` measures what it saves.
