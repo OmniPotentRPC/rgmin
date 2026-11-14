@@ -113,7 +113,10 @@ def minimize(
     return report, x
 
 
-class SolverConfig:
+_SolverConfigBase: Any = getattr(_core, "SolverConfig", object)
+
+
+class SolverConfig(_SolverConfigBase):
     """Validated optimizer options.
 
     Unknown keywords raise ``ValueError`` and name the valid options.
@@ -121,16 +124,15 @@ class SolverConfig:
     already limits the step. BFGS, dogleg, and FIRE 2.0 start without
     that cap. ``maxstep`` or ``atom_maxmove`` replaces it on every
     method, and a non-positive value clears it.
+
+    ``Solver`` takes the native configuration type, so this class
+    derives from it rather than wrapping it.
     """
 
     def __init__(self, method: str | Any = "lbfgs", **options: Any) -> None:
-        base = getattr(_core, "SolverConfig", None)
-        if base is None:
+        if _SolverConfigBase is object:
             raise AttributeError("this rgmin build has no SolverConfig")
-        self._inner = base(method, **options)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)
+        super().__init__(method, **options)
 
 
 def __getattr__(name: str):
