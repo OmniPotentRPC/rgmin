@@ -84,6 +84,8 @@ SCG is the same one-shot shape. Conjugacy is a field on
 solver for the k lowest pairs (Knyazev 2001). ``seed`` and ``modes_out``
 are row-major n-by-k. ``rgmin_lowest_eigenpairs`` is ``abi_minor`` 39. The same call is
 ``rgmin::lowest_eigenpairs`` and ``xts_lowest_eigenpairs``.
+``rgmin_manifold_handle_t`` is a Stiefel, SPD or product manifold with
+column-major point buffers, ``abi_minor`` 41; see :doc:`../reference/manifold`.
 
 .. code:: c
 
