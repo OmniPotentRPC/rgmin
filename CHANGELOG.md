@@ -15,8 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `Method::lbfgs_wide` keeps 20 L-BFGS pairs. `Method::lbfgs` stays
   at 10. On the fifty-start bench, 20 pairs lower the sum of median
-  calls from 3154 to 3102. Memories 3 and 5 raise that sum, and
-  Barzilai-Borwein 1 scaling `(s·s)/(s·y)` raises it from 3154 to 3447.
+  calls from 3154 to 3102. Memories 3 and 5 raise that sum, memory 15
+  raises the LJ13 median, and Barzilai-Borwein 1 scaling `(s·s)/(s·y)`
+  raises the sum from 3154 to 3447. Memory 30 lowers it to 3092, and
+  the More-Thuente case-3 average on 20 pairs leaves it at 3102. The
+  20-pair call drop does not show up as wall time: against default
+  L-BFGS the interleaved ratios are 1.054 [1.054, 1.054] on LJ38
+  (same-code band [0.997, 1.001]), 1.213 [1.212, 1.213] on LJ75
+  ([1.000, 1.000]), and a tie on Pt7, 0.999 [0.997, 1.001] against
+  [0.998, 1.001]. Memory 30 is slower than 20 on LJ38 (1.048
+  [1.048, 1.049] against [1.000, 1.000]), so the preset stays at 20.
 
 - `Solver::low_call_cg` turns on the Dai-Yuan hybrid, the Powell
   restart, and `WolfeExtrapolation::Case3Average` together. Defaults
