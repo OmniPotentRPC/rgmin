@@ -49,17 +49,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1.113912 [1.108215, 1.119540] on copper, and the aluminium call
   median rises, so `Method::lbfgs` stays at 10.
   FIRE, Barzilai-Borwein, and quick-min already install the 0.2
-  per-atom cap. FIRE 2.0 does not. The ASE classes pass `maxstep`
-  0.2 explicitly, including `FIRE2`. Putting that cap on a fresh
-  FIRE 2.0 session, 20 interleaved rounds against the uncapped
-  default: LJ13 calls tie and wall time is 1.018246
-  [1.016316, 1.020015] against a same-code band 0.998981
-  [0.997618, 1.000175], a loss. LJ38 is 0.562281
-  [0.561684, 0.562827] on wall time and 0.554795 on calls. LJ75 is
-  0.685620 [0.684664, 0.686610] and 0.681280. Pt7 ties. The EMT
-  copper packing ties, 1.000473 [0.999971, 1.000901] against
-  0.999569 [0.998031, 1.000504], with equal calls. The LJ13 loss
-  keeps the FIRE 2.0 default uncapped.
+  per-atom cap. The ASE classes pass `maxstep` 0.2 explicitly,
+  including `FIRE2`. An unconditional scan for that cap on FIRE 2.0,
+  20 interleaved rounds against the uncapped integrator: LJ13 calls
+  tie and wall time is 1.018246 [1.016316, 1.020015] against a
+  same-code band 0.998981 [0.997618, 1.000175], a loss. LJ38 is
+  0.562281 [0.561684, 0.562827] on wall time and 0.554795 on calls.
+  LJ75 is 0.685620 [0.684664, 0.686610] and 0.681280. Pt7 ties. The
+  EMT copper packing ties, 1.000473 [0.999971, 1.000901] against
+  0.999569 [0.998031, 1.000504], with equal calls. The EAM aluminium
+  packing ties, 1.000365 [0.999531, 1.001341] against 0.998949
+  [0.997847, 0.999774], 513 calls and energy -2850.8138314504
+  either way. The largest LJ13 atom move on that start is 0.197, so
+  the loss is the scan. No atom can outrun the Euclidean step, which
+  the velocity rescale already computes, and the winning LJ38 and
+  LJ75 clips are the first steps (atom moves 0.856 and 0.315). The
+  scan now runs only when that length exceeds the cap. The same
+  20-round comparison: LJ13 wall time is 0.999951
+  [0.997293, 1.001992] against 1.003015 [1.000684, 1.006248], calls
+  unchanged. LJ38 is 0.555165 [0.554755, 0.555555] and 0.554795 on
+  calls. LJ75 is 0.680807 [0.679923, 0.681674] and 0.681280. Pt7 is
+  1.000095 [0.999412, 1.000839] against 1.000044
+  [0.999343, 1.000713]. Copper is 0.999903 [0.997684, 1.001502]
+  against 1.000795 [0.999082, 1.002912]. Aluminium is 1.000223
+  [0.999662, 1.000975] against 1.000359 [0.999591, 1.001143], again
+  513 calls. No interval sits entirely above 1, and LJ38 and LJ75
+  sit entirely below, so FIRE 2.0 installs the cap. The published
+  Guénolé schedule still leaves it off. A looser cap, such as
+  `dt_max` (0.25 at the initial step of 0.1), would miss the LJ75
+  moves of 0.240 and 0.215 that the 0.2 cap shortens.
 
 - On LJ75 one L-BFGS iteration spends 1.2 μs in the two-loop at 10
   pairs and 2.3 μs at 20. The line search's time is the potential

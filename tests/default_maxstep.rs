@@ -2,11 +2,12 @@
 //!
 //! The start is the seed-1 packing from `bench/atomistic` `lj38`, scaled
 //! by one half. Without a cap the first quasi-Newton step leaves the
-//! cluster. L-BFGS keeps the default cap. BFGS, dogleg, and FIRE 2.0
-//! leave it off, because each already limits the step. FIRE,
-//! Barzilai-Borwein, and quick-min install 0.2. FIRE 2.0 stays
-//! uncapped: the same 0.2 cap loses wall time on LJ13 when the call
-//! count does not change. An explicit cap replaces either choice.
+//! cluster. L-BFGS keeps the default cap. BFGS and dogleg leave it
+//! off, because each already limits the step. FIRE, FIRE 2.0,
+//! Barzilai-Borwein, and quick-min install 0.2. FIRE 2.0 scans for
+//! that cap only when the Euclidean step can exceed it. The published
+//! Guénolé schedule leaves the cap off. An explicit cap replaces
+//! either choice.
 
 use std::sync::OnceLock;
 
@@ -319,6 +320,7 @@ fn default_cap_bounds_the_first_step_of_every_cartesian_arm() {
         Method::diis(),
         Method::polak_ribiere(),
         Method::Fire { kind: FireKind::V1 },
+        Method::Fire { kind: FireKind::V2 },
         Method::Bb,
         Method::QuickMin,
         Method::Steepest,
@@ -329,7 +331,7 @@ fn default_cap_bounds_the_first_step_of_every_cartesian_arm() {
         assert!(step <= CAP + 1e-9, "{method:?} default atom step {step}");
         assert!(step > 0.05, "{method:?} default atom step {step}");
     }
-    for method in [Method::Bfgs, Method::Fire { kind: FireKind::V2 }] {
+    for method in [Method::Bfgs] {
         let step = first_move(method.clone(), None);
         assert!(
             step > CAP,
@@ -603,6 +605,7 @@ fn each_method_installs_the_cap_its_step_control_needs() {
             kind: NewtonKind::Rfo,
         },
         Method::Fire { kind: FireKind::V1 },
+        Method::Fire { kind: FireKind::V2 },
         Method::Bb,
         Method::QuickMin,
         Method::diis(),
@@ -614,11 +617,7 @@ fn each_method_installs_the_cap_its_step_control_needs() {
         let open = bowl_first(method.clone(), Some(0.0));
         assert!(open > CAP, "{method:?} cleared cap stayed at {open}");
     }
-    let open = [
-        Method::Bfgs,
-        Method::Dogleg,
-        Method::Fire { kind: FireKind::V2 },
-    ];
+    let open = [Method::Bfgs, Method::Dogleg];
     for method in open {
         let step = bowl_first(method.clone(), None);
         let cleared = bowl_first(method.clone(), Some(0.0));
@@ -786,6 +785,71 @@ fn pso_ignores_the_per_atom_cap() {
     let left = once(None);
     let right = once(Some(0.0));
     assert_eq!(left, right);
+}
+
+/// The per-atom scan is skipped when the Euclidean step is already
+/// inside the cap. Those steps match an uncapped FIRE 2.0 integrator.
+/// A step that would move one atom past the cap is still shortened.
+#[test]
+fn fire2_cap_leaves_a_short_step_and_clips_a_long_one() {
+    let control = Control {
+        maxiter: 30,
+        gtol: 1e-14,
+        istep: 0.1,
+        ..Control::default()
+    };
+    let mut open = Solver::new(Method::Fire { kind: FireKind::V2 }, control.clone(), 3);
+    let mut held = Solver::new(Method::Fire { kind: FireKind::V2 }, control.clone(), 3);
+    open.set_atom_maxmove(0.0);
+    held.set_atom_maxmove(CAP);
+    let mut x_open = array![1.0, -0.5, 0.25];
+    let mut x_held = x_open.clone();
+    let mut matched = 0;
+    for _ in 0..20 {
+        let before = x_open.clone();
+        open.step(&Bowl, &mut x_open).unwrap();
+        held.step(&Bowl, &mut x_held).unwrap();
+        if max_atom_of(&before, &x_open) > CAP {
+            break;
+        }
+        assert_eq!(x_open, x_held);
+        matched += 1;
+    }
+    assert!(matched > 5, "only {matched} short steps were compared");
+
+    let control = Control {
+        istep: 1.0,
+        ..control
+    };
+    let mut open = Solver::new(Method::Fire { kind: FireKind::V2 }, control.clone(), 3);
+    let mut held = Solver::new(Method::Fire { kind: FireKind::V2 }, control, 3);
+    open.set_atom_maxmove(0.0);
+    held.set_atom_maxmove(CAP);
+    let start = array![8.0, 0.0, 0.0];
+    let mut x_open = start.clone();
+    let mut x_held = start.clone();
+    open.step(&Bowl, &mut x_open).unwrap();
+    held.step(&Bowl, &mut x_held).unwrap();
+    let open_step = max_atom_of(&start, &x_open);
+    let held_step = max_atom_of(&start, &x_held);
+    assert!(
+        open_step > CAP,
+        "uncapped step {open_step} never reached the cap"
+    );
+    assert!(held_step <= CAP + 1e-9, "capped step {held_step}");
+    assert!(held_step > 0.05, "capped step {held_step}");
+}
+
+fn max_atom_of(before: &Array1<f64>, after: &Array1<f64>) -> f64 {
+    let mut m = 0.0_f64;
+    let n = before.len() / 3;
+    for i in 0..n {
+        let dx = after[3 * i] - before[3 * i];
+        let dy = after[3 * i + 1] - before[3 * i + 1];
+        let dz = after[3 * i + 2] - before[3 * i + 2];
+        m = m.max((dx * dx + dy * dy + dz * dz).sqrt());
+    }
+    m
 }
 
 #[cfg(feature = "capi")]

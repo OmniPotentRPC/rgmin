@@ -448,7 +448,11 @@ impl Solver {
         match &self.inner {
             Inner::Bfgs { .. } => Method::Bfgs.installs_default_atom_cap(),
             Inner::Dogleg { .. } => Method::Dogleg.installs_default_atom_cap(),
-            Inner::Fire(state, _) => Method::Fire { kind: state.kind }.installs_default_atom_cap(),
+            // The published FIRE 2.0 schedule carries its own `dt` limits
+            // and leaves the per-atom cap off. The default schedule installs it.
+            Inner::Fire(state, ext) => {
+                ext.is_none() && Method::Fire { kind: state.kind }.installs_default_atom_cap()
+            }
             // The remaining arms install the cap. A method added to the
             // exception list in [`Method::installs_default_atom_cap`]
             // needs an arm here.
@@ -460,7 +464,7 @@ impl Solver {
     /// method has no step control of its own, when the caller has set
     /// neither a per-atom cap nor a positive Euclidean cap.
     ///
-    /// BFGS, dogleg, and FIRE 2.0 leave the default off. Dogleg would
+    /// BFGS and dogleg leave the default off. Dogleg would
     /// otherwise clip the trust step and feed that shorter length to
     /// the radius update, so a step on the trust boundary looks
     /// interior and the radius stays put.
@@ -1471,8 +1475,9 @@ impl Solver {
                 }
             }
         }
-        // FIRE 2.0 leaves the implicit cap off. Switching the schedule
-        // updates that choice unless the caller already set a cap.
+        // The default FIRE 2.0 schedule installs the per-atom cap. The
+        // published schedule leaves it off. Switching updates that
+        // choice unless the caller already set a cap.
         if fire {
             self.apply_default_atom_cap();
         }
@@ -3106,8 +3111,14 @@ impl Solver {
                         &mut dx,
                     );
                     let mut trial = &*x + &dx;
+                    // No atom can outrun the Euclidean step, and that
+                    // length is already needed for the velocity rescale.
+                    // A step inside the cap skips the per-atom scan.
+                    let proposed = l2(&dx);
                     if let Some(cap) = self.atom_maxmove {
-                        scale_step_atom(x, &mut trial, cap);
+                        if !(proposed <= cap) {
+                            scale_step_atom(x, &mut trial, cap);
+                        }
                     } else if let Some(cap) = self.control.maxmove {
                         scale_step(x, &mut trial, cap);
                     }
@@ -3117,7 +3128,6 @@ impl Solver {
                     // integral of moves that never happened. The displacement
                     // is written over `dx` after its norm is taken: element
                     // `trial[i] - x[i]` is the subtraction ndarray would store.
-                    let proposed = l2(&dx);
                     for i in 0..dx.len() {
                         dx[i] = trial[i] - x[i];
                     }

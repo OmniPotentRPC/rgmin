@@ -267,14 +267,16 @@ impl Method {
     ///
     /// BFGS takes its length from a strong Wolfe line search. Dogleg
     /// keeps the step inside a Euclidean trust region and accepts it
-    /// from the model-agreement ratio. FIRE 2.0 sizes the move with
-    /// its own `dt`. Those three leave the per-atom default off. FIRE,
-    /// Barzilai-Borwein, and quick-min install 0.2. A 0.2 cap on FIRE
-    /// 2.0, against this uncapped default,
-    /// loses wall time on LJ13 (1.018 [1.016, 1.020] against a
-    /// same-code band 0.999 [0.998, 1.000], same call count) and wins
-    /// on LJ38 and LJ75, where it uses fewer calls. Pt7 and the EMT
-    /// copper packing tie. The LJ13 loss leaves FIRE 2.0 uncapped.
+    /// from the model-agreement ratio. Those two leave the per-atom
+    /// default off. FIRE, FIRE 2.0, Barzilai-Borwein, and quick-min
+    /// install 0.2. The FIRE 2.0 scan runs only when the Euclidean
+    /// step exceeds that cap: no atom can outrun the whole step, and
+    /// an unconditional scan of the same cap lost LJ13 wall time
+    /// (1.018 [1.016, 1.020] against a same-code band 0.999
+    /// [0.998, 1.000], same call count) while cutting LJ38 and LJ75
+    /// calls to 0.55 and 0.68. Skipping the idle scan keeps those
+    /// call wins. The published Guénolé schedule still leaves the
+    /// cap off; [`crate::Solver::set_fire_variant`] applies that.
     ///
     /// Nocedal and Wright, *Numerical Optimization*, algorithms 3.5,
     /// 3.6, and 4.1, <https://doi.org/10.1007/978-0-387-40065-5>.
@@ -293,13 +295,7 @@ impl Method {
     pub(crate) fn installs_default_atom_cap(&self) -> bool {
         !matches!(
             self,
-            Self::Bfgs
-                | Self::Dogleg
-                | Self::NewtonCg
-                | Self::NewtonPcg
-                | Self::Fire {
-                    kind: crate::fire::FireKind::V2
-                }
+            Self::Bfgs | Self::Dogleg | Self::NewtonCg | Self::NewtonPcg
         )
     }
 
@@ -485,7 +481,6 @@ mod tests {
     fn the_default_atom_cap_follows_the_step_control() {
         assert!(!Method::Bfgs.installs_default_atom_cap());
         assert!(!Method::Dogleg.installs_default_atom_cap());
-        assert!(!Method::Fire { kind: FireKind::V2 }.installs_default_atom_cap());
         let capped = [
             Method::lbfgs(),
             Method::polak_ribiere(),
@@ -501,6 +496,7 @@ mod tests {
                 kind: NewtonKind::Rfo,
             },
             Method::Fire { kind: FireKind::V1 },
+            Method::Fire { kind: FireKind::V2 },
             Method::Bb,
             Method::QuickMin,
             Method::diis(),
