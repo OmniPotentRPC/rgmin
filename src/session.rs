@@ -1285,30 +1285,30 @@ impl Solver {
     /// A Euclidean session with a coordinate box and no other constraint
     /// measures the projected gradient `grad.clamp(x - hi, x - lo)`.
     fn stationarity_norm(&self, x: &Array1<f64>, grad: &Array1<f64>) -> f64 {
-        if self.box_stationarity() {
-            if let (Some(lo), Some(hi)) = (&self.bound_low, &self.bound_high) {
-                let mut projected = Array1::zeros(x.len());
-                for k in 0..x.len() {
-                    let lo_k = lo.get(k).copied().unwrap_or(f64::NEG_INFINITY);
-                    let hi_k = hi.get(k).copied().unwrap_or(f64::INFINITY);
-                    if !(x[k].is_finite() && grad[k].is_finite() && lo_k <= x[k] && x[k] <= hi_k) {
-                        return f64::INFINITY;
-                    }
-                    // Distance clipping retains gradients smaller than an ulp of x.
-                    projected[k] = grad[k].clamp(x[k] - hi_k, x[k] - lo_k);
+        if self.box_stationarity()
+            && let (Some(lo), Some(hi)) = (&self.bound_low, &self.bound_high)
+        {
+            let mut projected = Array1::zeros(x.len());
+            for k in 0..x.len() {
+                let lo_k = lo.get(k).copied().unwrap_or(f64::NEG_INFINITY);
+                let hi_k = hi.get(k).copied().unwrap_or(f64::INFINITY);
+                if !(x[k].is_finite() && grad[k].is_finite() && lo_k <= x[k] && x[k] <= hi_k) {
+                    return f64::INFINITY;
                 }
-                return self.stop_norm.of(projected.view());
+                // Distance clipping retains gradients smaller than an ulp of x.
+                projected[k] = grad[k].clamp(x[k] - hi_k, x[k] - lo_k);
             }
+            return self.stop_norm.of(projected.view());
         }
         self.stop_norm.of(grad.view())
     }
 
     fn noted_free_len(&self) -> usize {
-        if self.box_stationarity() {
-            if let (Some(lo), Some(hi)) = (&self.bound_low, &self.bound_high) {
-                let n = self.dim.min(lo.len()).min(hi.len());
-                return (0..n).filter(|&k| hi[k] > lo[k]).count();
-            }
+        if self.box_stationarity()
+            && let (Some(lo), Some(hi)) = (&self.bound_low, &self.bound_high)
+        {
+            let n = self.dim.min(lo.len()).min(hi.len());
+            return (0..n).filter(|&k| hi[k] > lo[k]).count();
         }
         self.dim
     }
@@ -3711,13 +3711,13 @@ impl Solver {
                             Array1::zeros(state.vel.len())
                         }
                     };
-                    if !stalled && state.abc {
-                        if let Some(cap) = self
+                    if !stalled
+                        && state.abc
+                        && let Some(cap) = self
                             .atom_maxmove
                             .or(self.control.maxmove.filter(|c| c.is_finite() && *c > 0.0))
-                        {
-                            dx = fire_clip_components(state, cap);
-                        }
+                    {
+                        dx = fire_clip_components(state, cap);
                     }
                     if !stalled {
                         eckart(

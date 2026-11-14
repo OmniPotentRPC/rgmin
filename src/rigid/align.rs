@@ -11,7 +11,7 @@ pub fn align_rigid(
     pbc: [bool; 3],
 ) -> f64 {
     let n = mobile.len();
-    if n != reference.len() || n < 3 || n % 3 != 0 {
+    if n != reference.len() || n < 3 || !n.is_multiple_of(3) {
         return f64::NAN;
     }
     let nat = n / 3;

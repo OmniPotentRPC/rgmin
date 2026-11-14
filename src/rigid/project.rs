@@ -26,7 +26,7 @@ impl RigidWorkspace {
 
     /// `P v` at `req.pos`. Rebuilds the basis.
     pub fn project(&mut self, v: &mut [f64], req: &RigidRequest<'_>) {
-        if v.len() != req.pos.len() || req.pos.len() % 3 != 0 {
+        if v.len() != req.pos.len() || !req.pos.len().is_multiple_of(3) {
             self.rank = 0;
             return;
         }
