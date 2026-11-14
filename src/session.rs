@@ -22,7 +22,7 @@ use crate::hvp::{
     sym_eig_jacobi,
 };
 use crate::lbfgs::{GradNorm, Lbfgs};
-use crate::linesearch::{CG_LINESEARCH, LineSearch, LineSearchOptions};
+use crate::linesearch::{CG_LINESEARCH, LineSearch, LineSearchOptions, WolfeExtrapolation};
 use crate::lowest_mode::{ApplyHessian, lowest_eigenpair};
 use crate::manifold::{Manifold, ManifoldKind};
 use crate::method::Method;
@@ -692,11 +692,20 @@ impl Solver {
     /// Physical energy policies and manifold searches retain their own acceptance.
     /// Invalid values leave the session unchanged. Zero permits no objective rise.
     pub fn set_objective_roundoff(&mut self, relative: f64) -> bool {
+        let extrapolation = self.line_options.extrapolation();
         let Some(options) = LineSearchOptions::with_objective_roundoff(relative) else {
             return false;
         };
-        self.line_options = options;
+        self.line_options = options.with_extrapolation(extrapolation);
         true
+    }
+
+    /// Wolfe extrapolation for Euclidean searches under [`Accept::None`].
+    ///
+    /// [`WolfeExtrapolation::Interior`] is the default. Other acceptance
+    /// policies and manifold searches keep their own line search.
+    pub fn set_wolfe_extrapolation(&mut self, extrapolation: WolfeExtrapolation) {
+        self.line_options = self.line_options.with_extrapolation(extrapolation);
     }
 
     /// The configured line search.

@@ -81,11 +81,27 @@ pub const CG_LINESEARCH: LineSearch = LineSearch::Wolfe {
     maxiter: 20,
 };
 
+/// How far a Wolfe search extrapolates while the slope is still negative.
+///
+/// The default is the interior cubic kept inside `[1.1, 4]` times the last
+/// increment. [`WolfeExtrapolation::Case3Average`] is opt-in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WolfeExtrapolation {
+    /// Interior cubic minimiser, at least 1.1 and at most 4 times the last increment.
+    #[default]
+    Interior,
+    /// Average of that cubic and the More-Thuente case-3 step when the
+    /// case-3 step is shorter than three quarters of the interior cubic.
+    /// The growth floor is half an increment, and the cap is still four.
+    Case3Average,
+}
+
 /// Optional policy for objective values whose accuracy is lower than their gradients.
 /// Existing line-search entry points use the default four-epsilon window.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LineSearchOptions {
     relative_objective_error: Option<f64>,
+    extrapolation: WolfeExtrapolation,
 }
 
 impl LineSearchOptions {
@@ -97,7 +113,22 @@ impl LineSearchOptions {
     pub fn with_objective_roundoff(relative: f64) -> Option<Self> {
         (relative.is_finite() && relative >= 0.0).then_some(Self {
             relative_objective_error: Some(relative),
+            ..Self::default()
         })
+    }
+
+    /// Which extrapolation the next Wolfe search uses.
+    /// [`WolfeExtrapolation::Interior`] is the default.
+    #[must_use]
+    pub fn extrapolation(self) -> WolfeExtrapolation {
+        self.extrapolation
+    }
+
+    /// Set the Wolfe extrapolation. Roundoff acceptance is unchanged.
+    #[must_use]
+    pub fn with_extrapolation(mut self, extrapolation: WolfeExtrapolation) -> Self {
+        self.extrapolation = extrapolation;
+        self
     }
 
     pub(crate) fn accepts_approximate_wolfe(

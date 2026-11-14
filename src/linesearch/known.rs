@@ -19,7 +19,7 @@ use ndarray::{Array1, ArrayView1};
 
 use super::conditions::{armijo, goldstein_lower, strong_curvature};
 use super::interp::{clamp_between, cubic_min, quad_min};
-use super::{LineSearch, LineSearchOptions};
+use super::{LineSearch, LineSearchOptions, WolfeExtrapolation};
 
 /// Accepted point of a line search, with the oracle answer at it.
 #[derive(Clone, Debug)]
@@ -188,7 +188,9 @@ impl LineSearch {
     /// [`LineSearch::Wolfe`] brackets and zooms (Nocedal-Wright
     /// algorithms 3.5 and 3.6) with safeguarded cubic interpolation on
     /// both bracket slopes, a quadratic fallback, and More-Thuente
-    /// extrapolation bounds `[1.1, 4]` times the last increment. A trial
+    /// extrapolation bounds `[1.1, 4]` times the last increment.
+    /// [`WolfeExtrapolation::Case3Average`] replaces that extrapolation
+    /// and is off unless the caller opts in. A trial
     /// at `alpha_max` that satisfies Armijo and is still descending is
     /// accepted: the cap, not the curvature, ends the step. If the zoom
     /// exhausts `maxiter` the lowest Armijo point is returned.
@@ -283,6 +285,63 @@ impl LineSearch {
     }
 }
 
+/// More-Thuente case 3: the cubic extrapolant based at the current step,
+/// and the secant of the two slopes. With no bracket yet the farther of
+/// the two is the trial. A cubic that does not point forward is the
+/// upper bound, so that bound wins over a short secant.
+fn extrapolate_case3(
+    prev_a: f64,
+    prev_f: f64,
+    prev_d: f64,
+    alpha: f64,
+    f: f64,
+    d: f64,
+    hi_ext: f64,
+) -> f64 {
+    let w = alpha - prev_a;
+    let theta = 3.0 * (prev_f - f) / w + prev_d + d;
+    let s = theta.abs().max(prev_d.abs()).max(d.abs());
+    let stpc = if w > 0.0 && s > 0.0 && s.is_finite() {
+        let disc = (theta / s) * (theta / s) - (prev_d / s) * (d / s);
+        if disc > 0.0 {
+            let gamma = -s * disc.sqrt();
+            let p = (gamma - d) + theta;
+            let q = (gamma + (prev_d - d)) + gamma;
+            let t = if gamma != 0.0 && q != 0.0 {
+                let r = p / q;
+                if r < 0.0 {
+                    alpha + r * (prev_a - alpha)
+                } else {
+                    hi_ext
+                }
+            } else {
+                hi_ext
+            };
+            if t.is_finite() && t > alpha {
+                t
+            } else {
+                hi_ext
+            }
+        } else {
+            hi_ext
+        }
+    } else {
+        hi_ext
+    };
+    let denom = d - prev_d;
+    let stpq = if denom != 0.0 && denom.is_finite() {
+        let t = alpha + (d / denom) * (prev_a - alpha);
+        if t.is_finite() && t > alpha { t } else { alpha }
+    } else {
+        alpha
+    };
+    if (stpc - alpha).abs() > (stpq - alpha).abs() {
+        stpc
+    } else {
+        stpq
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn wolfe<F>(
     line: &mut Line<'_, F>,
@@ -325,13 +384,28 @@ where
             return zoom(line, f0, dphi0, cur, prev, c1, c2, maxiter);
         }
         // More-Thuente extrapolation: the cubic's minimiser beyond the
-        // current point, kept within [1.1, 4] increments.
+        // current point. The default keeps it within [1.1, 4] increments.
+        // Case3Average, when requested, averages that cubic with the
+        // case-3 step if the case-3 step is the shorter one.
         let step = alpha - prev.a;
-        let lo_ext = alpha + 1.1 * step;
         let hi_ext = alpha + 4.0 * step;
-        let t = cubic_min(prev.a, prev.f, prev.d, alpha, f, d)
-            .filter(|t| *t > alpha)
-            .unwrap_or(hi_ext);
+        let (lo_ext, t) = if line.options.extrapolation() == WolfeExtrapolation::Case3Average {
+            let interior = cubic_min(prev.a, prev.f, prev.d, alpha, f, d)
+                .filter(|t| *t > alpha)
+                .unwrap_or(hi_ext);
+            let case3 = extrapolate_case3(prev.a, prev.f, prev.d, alpha, f, d, hi_ext);
+            let t = if case3 < 0.75 * interior {
+                0.5 * (interior + case3)
+            } else {
+                interior
+            };
+            (alpha + 0.5 * step, t)
+        } else {
+            let t = cubic_min(prev.a, prev.f, prev.d, alpha, f, d)
+                .filter(|t| *t > alpha)
+                .unwrap_or(hi_ext);
+            (alpha + 1.1 * step, t)
+        };
         line.consider_end(&prev);
         prev = cur;
         alpha = clamp_between(t, lo_ext, hi_ext).min(amax);
@@ -822,5 +896,135 @@ mod tests {
         p.sort_by(f64::total_cmp);
         p.dedup();
         assert_eq!(p.len(), total, "a trial was evaluated twice");
+    }
+
+    #[test]
+    fn case3_extrapolation_recovers_a_quadratic_minimiser() {
+        let f = |t: f64| 0.5 * (t - 1.0) * (t - 1.0);
+        let d = |t: f64| t - 1.0;
+        let t = extrapolate_case3(0.2, f(0.2), d(0.2), 0.4, f(0.4), d(0.4), 10.0);
+        assert!((t - 1.0).abs() < 1e-12, "{t}");
+    }
+
+    #[test]
+    fn case3_average_is_opt_in_and_changes_the_extrapolated_step() {
+        assert_eq!(
+            LineSearchOptions::default().extrapolation(),
+            WolfeExtrapolation::Interior
+        );
+        // phi(t) = (t - 0.34)^2 / 2. The opening step 0.2 is still
+        // steeper than c2 = 0.1 allows, so the search extrapolates.
+        // The minimiser sits between half an increment and 1.1
+        // increments, which is where the two safeguards disagree.
+        let phi = |x: ArrayView1<'_, f64>| {
+            let z = x[0] - 0.34;
+            (0.5 * z * z, array![z])
+        };
+        let search = LineSearch::Wolfe {
+            c1: 1e-4,
+            c2: 0.1,
+            maxiter: 20,
+        };
+        let pos = array![0.0];
+        let (f0, g0) = phi(pos.view());
+        let dir = array![1.0];
+        let run = |options: LineSearchOptions| {
+            let seen = std::cell::RefCell::new(Vec::new());
+            let oracle = |x: ArrayView1<'_, f64>| {
+                seen.borrow_mut().push(x[0]);
+                phi(x)
+            };
+            let out = search
+                .search_from_with_options(
+                    oracle,
+                    pos.view(),
+                    f0,
+                    g0.view(),
+                    dir.view(),
+                    0.05,
+                    f64::INFINITY,
+                    options,
+                )
+                .unwrap();
+            (out, seen.into_inner())
+        };
+        let (plain, plain_pts) = run(LineSearchOptions::default());
+        let (opted, opted_pts) =
+            run(LineSearchOptions::default().with_extrapolation(WolfeExtrapolation::Case3Average));
+        assert_ne!(
+            plain_pts, opted_pts,
+            "default {plain_pts:?} case3 {opted_pts:?}"
+        );
+        assert!(opted.f < f0, "case3 energy {}", opted.f);
+        assert!(plain.f < f0, "default energy {}", plain.f);
+    }
+
+    #[test]
+    fn the_session_uses_the_case3_average_preset() {
+        use crate::control::Control;
+        use crate::method::Method;
+        use crate::nlcg::{Conjugacy, Restart};
+        use crate::session::Solver;
+        use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Well {
+            bounds: Bounds<f64>,
+            calls: AtomicUsize,
+        }
+        impl Objective<f64> for Well {
+            fn dim(&self) -> usize {
+                1
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.value_and_gradient(x).0
+            }
+        }
+        impl Gradient<f64> for Well {
+            fn dim(&self) -> usize {
+                1
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.value_and_gradient(x).1
+            }
+        }
+        impl DifferentiableObjective<f64> for Well {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                let z = x[0] - 0.34;
+                (0.5 * z * z, array![z])
+            }
+        }
+        let obj = Well {
+            bounds: Bounds::new(array![-10.0], array![10.0], 0.0),
+            calls: AtomicUsize::new(0),
+        };
+        let control = Control {
+            istep: 0.2 / 0.34,
+            ..Control::default()
+        };
+        let method = Method::Nlcg {
+            conjugacy: Conjugacy::PolakRibierePlus,
+            restart: Restart::njws(),
+        };
+        let mut x_default = array![0.0];
+        let mut x_case3 = array![0.0];
+        let mut plain = Solver::new(method.clone(), control.clone(), 1);
+        let mut opted = Solver::new(method, control, 1);
+        plain.set_atom_maxmove(-1.0);
+        opted.set_atom_maxmove(-1.0);
+        opted.set_wolfe_extrapolation(WolfeExtrapolation::Case3Average);
+        plain.step(&obj, &mut x_default).unwrap();
+        let calls_default = obj.calls.swap(0, Ordering::Relaxed);
+        opted.step(&obj, &mut x_case3).unwrap();
+        let calls_case3 = obj.calls.load(Ordering::Relaxed);
+        assert_ne!(
+            calls_default, calls_case3,
+            "default calls {calls_default} at {} case3 calls {calls_case3} at {}",
+            x_default[0], x_case3[0]
+        );
     }
 }

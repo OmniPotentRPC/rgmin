@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   L-BFGS, CG, and FIRE on LJ13, LJ38, LJ75, and Pt7. The unperturbed
   seed is checked in `cluster_suite_records_iterations_and_potential_calls`.
 
+- `WolfeExtrapolation::Case3Average` is an opt-in Wolfe extrapolation.
+  When the More-Thuente case-3 step is shorter than three quarters of
+  the interior cubic, the trial is their average and the growth floor
+  is half an increment. The default stays the interior cubic inside
+  `[1.1, 4]` increments. On the 50-start bench the sum of median calls
+  falls from 3154 to 3012, no median rises, the Mann-Whitney test does
+  not find higher energies, and every Pt7 energy stays within `1e-8`
+  relative.
+
 - The same bench runs 50 perturbed starts of each of those systems and
   methods. It records median calls, the final-energy quartiles, and the
   rate of reaching the Cambridge Cluster Database minima (LJ13
