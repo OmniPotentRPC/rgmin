@@ -3798,3 +3798,245 @@ fn lowest_eigenpairs_recovers_a_diagonal_and_rejects_bad_blocks() {
     }
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
+
+mod manifold_handles {
+    use std::ffi::CStr;
+
+    use rgmin::ffi::{
+        rgmin_last_error, rgmin_manifold_egrad_to_rgrad, rgmin_manifold_exp, rgmin_manifold_free,
+        rgmin_manifold_gradient_step, rgmin_manifold_handle, rgmin_manifold_inner,
+        rgmin_manifold_len, rgmin_manifold_log, rgmin_manifold_product, rgmin_manifold_project,
+        rgmin_manifold_retract, rgmin_manifold_spd, rgmin_manifold_stiefel,
+        rgmin_manifold_transport, rgmin_spd_metric_t, rgmin_status_t, rgmin_stiefel_retraction_t,
+    };
+    use rgmin::{RiemannianManifold, SpdMetric, StiefelRetraction};
+
+    const QR: i32 = rgmin_stiefel_retraction_t::RGMIN_STIEFEL_QR as i32;
+    const POLAR: i32 = rgmin_stiefel_retraction_t::RGMIN_STIEFEL_POLAR as i32;
+    const AI: i32 = rgmin_spd_metric_t::RGMIN_SPD_AFFINE_INVARIANT as i32;
+    const LE: i32 = rgmin_spd_metric_t::RGMIN_SPD_LOG_EUCLIDEAN as i32;
+
+    fn wave(len: usize, phase: f64) -> Vec<f64> {
+        (0..len).map(|i| (1.3 * i as f64 + phase).sin()).collect()
+    }
+
+    /// A point of `m`: the retraction of a fixed matrix at itself with a
+    /// zero step for Stiefel, `A A^T + I` for SPD.
+    fn point(m: &RiemannianManifold, phase: f64) -> Vec<f64> {
+        let mut x = Vec::new();
+        for f in m.factors() {
+            let (rows, cols) = f.shape();
+            let a = wave(rows * cols, phase + x.len() as f64);
+            match f {
+                rgmin::ManifoldFactor::Stiefel { n, p, .. } => {
+                    let st = RiemannianManifold::stiefel(*n, *p, StiefelRetraction::Qr).unwrap();
+                    let mut q = vec![0.0; a.len()];
+                    st.retract(&a, &vec![0.0; a.len()], &mut q).unwrap();
+                    x.extend(q);
+                }
+                rgmin::ManifoldFactor::Spd { p, .. } => {
+                    for j in 0..*p {
+                        for i in 0..*p {
+                            let s: f64 = (0..*p).map(|k| a[i + p * k] * a[j + p * k]).sum();
+                            x.push(s + if i == j { 1.0 } else { 0.0 });
+                        }
+                    }
+                }
+            }
+        }
+        x
+    }
+
+    fn last_error() -> String {
+        unsafe { CStr::from_ptr(rgmin_last_error()) }
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    struct Handle(*mut rgmin_manifold_handle);
+
+    impl Drop for Handle {
+        fn drop(&mut self) {
+            unsafe { rgmin_manifold_free(self.0) };
+        }
+    }
+
+    fn check_matches_rust(c: &Handle, rust: &RiemannianManifold) {
+        let len = rust.packed_len();
+        assert_eq!(unsafe { rgmin_manifold_len(c.0) }, len);
+        let x = point(rust, 0.1);
+        let y = point(rust, 0.7);
+        let g = wave(len, 2.0);
+        let mut v = vec![0.0; len];
+        rust.project(&x, &wave(len, 3.0), &mut v).unwrap();
+        let (mut want, mut got) = (vec![0.0; len], vec![0.0; len]);
+        let ok = rgmin_status_t::RGMIN_SUCCESS;
+
+        rust.project(&x, &g, &mut want).unwrap();
+        let st =
+            unsafe { rgmin_manifold_project(c.0, x.as_ptr(), g.as_ptr(), got.as_mut_ptr(), len) };
+        assert_eq!((st, &got), (ok, &want), "project");
+
+        rust.egrad_to_rgrad(&x, &g, &mut want).unwrap();
+        let st = unsafe {
+            rgmin_manifold_egrad_to_rgrad(c.0, x.as_ptr(), g.as_ptr(), got.as_mut_ptr(), len)
+        };
+        assert_eq!((st, &got), (ok, &want), "egrad_to_rgrad");
+
+        rust.retract(&x, &v, &mut want).unwrap();
+        let st =
+            unsafe { rgmin_manifold_retract(c.0, x.as_ptr(), v.as_ptr(), got.as_mut_ptr(), len) };
+        assert_eq!((st, &got), (ok, &want), "retract");
+        let mut aliased = x.clone();
+        let st = unsafe {
+            rgmin_manifold_retract(c.0, aliased.as_ptr(), v.as_ptr(), aliased.as_mut_ptr(), len)
+        };
+        assert_eq!((st, &aliased), (ok, &want), "retract into x");
+
+        rust.exp(&x, &v, &mut want).unwrap();
+        let st = unsafe { rgmin_manifold_exp(c.0, x.as_ptr(), v.as_ptr(), got.as_mut_ptr(), len) };
+        assert_eq!((st, &got), (ok, &want), "exp");
+
+        rust.transport(&x, &y, &v, &mut want).unwrap();
+        let st = unsafe {
+            rgmin_manifold_transport(
+                c.0,
+                x.as_ptr(),
+                y.as_ptr(),
+                v.as_ptr(),
+                got.as_mut_ptr(),
+                len,
+            )
+        };
+        assert_eq!((st, &got), (ok, &want), "transport");
+
+        let mut inner = 0.0;
+        let st = unsafe {
+            rgmin_manifold_inner(c.0, x.as_ptr(), v.as_ptr(), g.as_ptr(), &mut inner, len)
+        };
+        assert_eq!((st, inner), (ok, rust.inner(&x, &v, &g).unwrap()), "inner");
+
+        let (mut want_x, mut got_x) = (vec![0.0; len], vec![0.0; len]);
+        rust.gradient_step(&x, &g, 0.05, &mut want, &mut want_x)
+            .unwrap();
+        let st = unsafe {
+            rgmin_manifold_gradient_step(
+                c.0,
+                x.as_ptr(),
+                g.as_ptr(),
+                0.05,
+                got.as_mut_ptr(),
+                got_x.as_mut_ptr(),
+                len,
+            )
+        };
+        assert_eq!((st, &got, &got_x), (ok, &want, &want_x), "gradient_step");
+
+        let st = unsafe { rgmin_manifold_log(c.0, x.as_ptr(), y.as_ptr(), got.as_mut_ptr(), len) };
+        match rust.log(&x, &y, &mut want) {
+            Ok(()) => assert_eq!((st, &got), (ok, &want), "log"),
+            Err(_) => {
+                assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+                assert!(last_error().contains("Stiefel"), "{}", last_error());
+            }
+        }
+    }
+
+    #[test]
+    fn c_abi_manifold_handles_match_the_rust_results() {
+        let st_qr = Handle(rgmin_manifold_stiefel(5, 2, QR));
+        let st_polar = Handle(rgmin_manifold_stiefel(5, 2, POLAR));
+        let ai = Handle(rgmin_manifold_spd(3, AI));
+        let le = Handle(rgmin_manifold_spd(3, LE));
+        let factors = [st_qr.0 as *const _, ai.0 as *const _, le.0 as *const _];
+        let product = Handle(unsafe { rgmin_manifold_product(factors.as_ptr(), 3) });
+        assert!(!product.0.is_null(), "{}", last_error());
+
+        let r_qr = RiemannianManifold::stiefel(5, 2, StiefelRetraction::Qr).unwrap();
+        let r_polar = RiemannianManifold::stiefel(5, 2, StiefelRetraction::Polar).unwrap();
+        let r_ai = RiemannianManifold::spd(3, SpdMetric::AffineInvariant).unwrap();
+        let r_le = RiemannianManifold::spd(3, SpdMetric::LogEuclidean).unwrap();
+        let r_product =
+            RiemannianManifold::product([r_qr.clone(), r_ai.clone(), r_le.clone()]).unwrap();
+
+        check_matches_rust(&st_qr, &r_qr);
+        check_matches_rust(&st_polar, &r_polar);
+        check_matches_rust(&ai, &r_ai);
+        check_matches_rust(&le, &r_le);
+        drop((st_qr, ai, le));
+        check_matches_rust(&product, &r_product);
+        let spd_only = RiemannianManifold::product([r_ai, r_le]).unwrap();
+        let (a2, l2) = (
+            Handle(rgmin_manifold_spd(3, AI)),
+            Handle(rgmin_manifold_spd(3, LE)),
+        );
+        let pair = [a2.0 as *const _, l2.0 as *const _];
+        let spd_product = Handle(unsafe { rgmin_manifold_product(pair.as_ptr(), 2) });
+        check_matches_rust(&spd_product, &spd_only);
+    }
+
+    #[test]
+    fn c_abi_manifold_refuses_bad_arguments_and_leaves_outputs() {
+        assert!(rgmin_manifold_stiefel(2, 3, QR).is_null());
+        assert!(last_error().contains("p <= n"), "{}", last_error());
+        assert!(rgmin_manifold_stiefel(4, 2, 7).is_null());
+        assert!(last_error().contains("retraction"), "{}", last_error());
+        assert!(rgmin_manifold_spd(0, AI).is_null());
+        assert!(rgmin_manifold_spd(2, 9).is_null());
+        assert!(last_error().contains("metric"), "{}", last_error());
+        assert!(unsafe { rgmin_manifold_product(std::ptr::null(), 0) }.is_null());
+        let nulls = [std::ptr::null::<rgmin_manifold_handle>()];
+        assert!(unsafe { rgmin_manifold_product(nulls.as_ptr(), 1) }.is_null());
+        assert_eq!(unsafe { rgmin_manifold_len(std::ptr::null()) }, 0);
+        unsafe { rgmin_manifold_free(std::ptr::null_mut()) };
+
+        let invalid = rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        let spd = Handle(rgmin_manifold_spd(2, AI));
+        let x = [2.0, 0.0, 0.0, 1.0];
+        let v = [0.1, 0.0, 0.0, 0.1];
+        let mut out = [7.0; 4];
+        let st =
+            unsafe { rgmin_manifold_retract(spd.0, x.as_ptr(), v.as_ptr(), out.as_mut_ptr(), 3) };
+        assert_eq!(st, invalid);
+        assert!(last_error().contains("packed length"), "{}", last_error());
+        let st = unsafe {
+            rgmin_manifold_retract(spd.0, std::ptr::null(), v.as_ptr(), out.as_mut_ptr(), 4)
+        };
+        assert_eq!(st, invalid);
+        let indefinite = [1.0, 0.0, 0.0, -1.0];
+        let st = unsafe {
+            rgmin_manifold_retract(spd.0, indefinite.as_ptr(), v.as_ptr(), out.as_mut_ptr(), 4)
+        };
+        assert_eq!(st, invalid);
+        assert!(
+            last_error().contains("positive definite"),
+            "{}",
+            last_error()
+        );
+        let st = unsafe {
+            rgmin_manifold_gradient_step(
+                spd.0,
+                x.as_ptr(),
+                v.as_ptr(),
+                f64::NAN,
+                out.as_mut_ptr(),
+                out.as_mut_ptr(),
+                4,
+            )
+        };
+        assert_eq!(st, invalid);
+        assert_eq!(out, [7.0; 4], "a refused call wrote its output");
+        let mut inner = 3.0;
+        let st = unsafe {
+            rgmin_manifold_inner(
+                spd.0,
+                indefinite.as_ptr(),
+                v.as_ptr(),
+                v.as_ptr(),
+                &mut inner,
+                4,
+            )
+        };
+        assert_eq!((st, inner), (invalid, 3.0));
+    }
+}

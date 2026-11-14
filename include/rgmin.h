@@ -1098,6 +1098,107 @@ rgmin_status_t rgmin_rigid_align(double *mobile, const double *reference, size_t
                              const double *masses, size_t n_mass, int32_t pbc_x,
                              int32_t pbc_y, int32_t pbc_z, double *rmsd);
 
+/** \defgroup manifold Riemannian manifold handles (ABI minor 40)
+ *
+ *  An \ref rgmin_manifold_handle_t is a Stiefel St(n, p), an SPD(p) or a
+ *  product of them. \ref rgmin_manifold_t is the unrelated session token
+ *  of \ref rgmin_solver_set_manifold.
+ *
+ *  Every buffer is caller-owned, column-major, and \c len doubles long,
+ *  where \c len is \ref rgmin_manifold_len:
+ *  - Stiefel: an n-by-p frame with X^T X = I, \c len = n*p.
+ *  - SPD: a p-by-p symmetric positive definite matrix, \c len = p*p.
+ *  - Product: the factors' blocks one after another, in factor order.
+ *  Tangent vectors and Euclidean gradients use the packing of the point.
+ *
+ *  Each call returns \c RGMIN_SUCCESS, or \c RGMIN_INVALID_PARAMETER on a
+ *  null pointer, a \c len other than the packed length, a non-finite
+ *  entry, an SPD point that is not symmetric positive definite, or a
+ *  rank-deficient Stiefel retraction; \ref rgmin_last_error names the
+ *  cause. Inputs are copied first and outputs are written only on
+ *  success, so an output may alias an input.
+ *  @{ */
+
+/** Opaque manifold. Create with \ref rgmin_manifold_stiefel,
+ *  \ref rgmin_manifold_spd or \ref rgmin_manifold_product; release with
+ *  \ref rgmin_manifold_free. */
+typedef struct rgmin_manifold_handle rgmin_manifold_handle_t;
+
+/** Stiefel retraction for \ref rgmin_manifold_stiefel. */
+typedef enum rgmin_stiefel_retraction_t {
+    /** Q factor of X + V with a positive diagonal R. First order. */
+    RGMIN_STIEFEL_QR = 0,
+    /** Polar factor (X + V) ((X + V)^T (X + V))^{-1/2}. Second order. */
+    RGMIN_STIEFEL_POLAR = 1
+} rgmin_stiefel_retraction_t;
+
+/** SPD metric for \ref rgmin_manifold_spd. */
+typedef enum rgmin_spd_metric_t {
+    /** <U, V>_X = tr(X^{-1} U X^{-1} V). */
+    RGMIN_SPD_AFFINE_INVARIANT = 0,
+    /** <U, V>_X = <Dlog(X)[U], Dlog(X)[V]>_F. */
+    RGMIN_SPD_LOG_EUCLIDEAN = 1
+} rgmin_spd_metric_t;
+
+/** St(n, p), 1 <= p <= n, under the embedded metric. \a retraction is an
+ *  \ref rgmin_stiefel_retraction_t value. Null on a bad shape or an
+ *  unknown retraction. */
+rgmin_manifold_handle_t *rgmin_manifold_stiefel(size_t n, size_t p, int32_t retraction);
+/** SPD(p), p >= 1. \a metric is an \ref rgmin_spd_metric_t value. The
+ *  retraction is the exponential of the metric. Null on p = 0 or an
+ *  unknown metric. */
+rgmin_manifold_handle_t *rgmin_manifold_spd(size_t p, int32_t metric);
+/** Product of \a count handles in order. The factors are copied; the
+ *  caller still frees each one. Null on a null array or entry, or
+ *  \a count = 0. */
+rgmin_manifold_handle_t *rgmin_manifold_product(const rgmin_manifold_handle_t *const *factors,
+                                                size_t count);
+/** Release a handle. Null is a no-op. */
+void rgmin_manifold_free(rgmin_manifold_handle_t *manifold);
+/** Packed length of one point. A null handle returns 0. */
+size_t rgmin_manifold_len(const rgmin_manifold_handle_t *manifold);
+
+/** Tangent projection of the ambient \a v at \a x.
+ *  Stiefel: V - X sym(X^T V). SPD: sym(V). */
+rgmin_status_t rgmin_manifold_project(const rgmin_manifold_handle_t *manifold, const double *x,
+                                      const double *v, double *out, size_t len);
+/** Riemannian gradient at \a x from the Euclidean gradient \a egrad.
+ *  Stiefel: the projection. SPD affine-invariant: X sym(G) X.
+ *  SPD log-Euclidean: Dlog(X)^{-2}[sym(G)]. */
+rgmin_status_t rgmin_manifold_egrad_to_rgrad(const rgmin_manifold_handle_t *manifold,
+                                             const double *x, const double *egrad, double *out,
+                                             size_t len);
+/** Retraction of the step \a v at \a x. Stiefel: the handle's QR or polar
+ *  retraction. SPD: the exponential of the metric. */
+rgmin_status_t rgmin_manifold_retract(const rgmin_manifold_handle_t *manifold, const double *x,
+                                      const double *v, double *out, size_t len);
+/** Riemannian exponential at \a x; \a v is projected to the tangent space
+ *  first. Stiefel: the embedded-metric geodesic (Edelman, Arias, Smith
+ *  1998). SPD: the geodesic of the metric. */
+rgmin_status_t rgmin_manifold_exp(const rgmin_manifold_handle_t *manifold, const double *x,
+                                  const double *v, double *out, size_t len);
+/** Riemannian logarithm of \a y at \a x, the inverse of
+ *  \ref rgmin_manifold_exp. A handle with a Stiefel factor returns
+ *  \c RGMIN_INVALID_PARAMETER. */
+rgmin_status_t rgmin_manifold_log(const rgmin_manifold_handle_t *manifold, const double *x,
+                                  const double *y, double *out, size_t len);
+/** Vector transport of \a v from \a x_from to \a x_to. Stiefel: projection
+ *  at \a x_to. SPD: parallel transport of the metric. */
+rgmin_status_t rgmin_manifold_transport(const rgmin_manifold_handle_t *manifold,
+                                        const double *x_from, const double *x_to,
+                                        const double *v, double *out, size_t len);
+/** Riemannian inner product of the tangents \a u and \a v at \a x, written
+ *  to \a *out. The product metric is the sum of the factor metrics. */
+rgmin_status_t rgmin_manifold_inner(const rgmin_manifold_handle_t *manifold, const double *x,
+                                    const double *u, const double *v, double *out, size_t len);
+/** One Riemannian gradient step. \a rgrad_out is the Riemannian gradient
+ *  of \a egrad at \a x; \a x_out is the retraction of -t * rgrad_out at
+ *  \a x. \a t must be finite. \a rgrad_out and \a x_out must not alias
+ *  each other. */
+rgmin_status_t rgmin_manifold_gradient_step(const rgmin_manifold_handle_t *manifold,
+                                            const double *x, const double *egrad, double t,
+                                            double *rgrad_out, double *x_out, size_t len);
+/** @} */
 
 #ifdef __cplusplus
 }
