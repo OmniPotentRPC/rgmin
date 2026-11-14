@@ -61,10 +61,11 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 42
+#define RGMIN_ABI_VERSION_MINOR 43
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
- * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex. */
+ * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
+ * 43 rgmin_lbfgs_pairs_push_rho. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -884,6 +885,15 @@ rgmin_lbfgs_pairs_t *rgmin_lbfgs_pairs_create(size_t n, size_t capacity);
  *  A length other than the handle dimension is \c RGMIN_INVALID_PARAMETER. */
 rgmin_status_t rgmin_lbfgs_pairs_push(rgmin_lbfgs_pairs_t *pairs, const double *s,
                                       const double *y, size_t n, int32_t *stored);
+/** Append one pair with the caller's `rho` in place of `1 / (s . y)`.
+ *  The pair passes the curvature gate of \ref rgmin_lbfgs_pairs_push
+ *  first, and a `rho` that is not finite and positive is declined.
+ *  A declined pair returns success with `*stored` 0. `stored` may be
+ *  NULL. A length other than the handle dimension is
+ *  \c RGMIN_INVALID_PARAMETER. ABI minor 43. */
+rgmin_status_t rgmin_lbfgs_pairs_push_rho(rgmin_lbfgs_pairs_t *pairs, const double *s,
+                                          const double *y, double rho, size_t n,
+                                          int32_t *stored);
 /** Number of stored pairs. A null handle returns zero. */
 size_t rgmin_lbfgs_pairs_count(const rgmin_lbfgs_pairs_t *pairs);
 /** Drop every stored pair. A null handle is a no-op. */
@@ -892,7 +902,10 @@ void rgmin_lbfgs_pairs_clear(rgmin_lbfgs_pairs_t *pairs);
 void rgmin_lbfgs_pairs_free(rgmin_lbfgs_pairs_t *pairs);
 /** Direction `-H g`. Pass `h0_diag` or `apply_h0`, not both and not
  *  neither. An empty memory writes `-H0 g`. Does not evaluate an
- *  objective. ABI minor 38. */
+ *  objective. A diagonal whose entries are all `gamma` is
+ *  `H0 = gamma I`. `apply_h0` is called once, on the residual of the
+ *  backward loop that starts from `grad`; the direction is `-H g` when
+ *  that map is linear. ABI minor 38. */
 rgmin_status_t rgmin_lbfgs_direction(const rgmin_lbfgs_pairs_t *pairs,
                                      const double *grad, const double *h0_diag,
                                      rgmin_h0_fn apply_h0, void *user, double *dir,

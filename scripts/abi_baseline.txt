@@ -19,6 +19,7 @@ rgmin_lbfgs_pairs_count
 rgmin_lbfgs_pairs_create
 rgmin_lbfgs_pairs_free
 rgmin_lbfgs_pairs_push
+rgmin_lbfgs_pairs_push_rho
 rgmin_linesearch
 rgmin_linesearch_create
 rgmin_linesearch_free

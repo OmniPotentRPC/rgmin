@@ -12,6 +12,12 @@
 //! [`LbfgsPairs::push_rho`] takes the caller's `rho` for a pair that
 //! passes that gate.
 //!
+//! The C ABI is a thin wrapper over [`LbfgsPairs`]:
+//! `rgmin_lbfgs_pairs_create`, `rgmin_lbfgs_pairs_push`,
+//! `rgmin_lbfgs_pairs_push_rho` (ABI minor 43) and
+//! `rgmin_lbfgs_direction` (ABI minor 38). C++ wraps them in
+//! `rgmin::LbfgsPairs`, and Python exposes `rgmin.LbfgsPairs`.
+//!
 //! Nocedal and Wright, *Numerical Optimization*,
 //! <https://doi.org/10.1007/978-0-387-40065-5>.
 

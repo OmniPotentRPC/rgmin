@@ -877,6 +877,17 @@ public:
         }
         return stored != 0;
     }
+    /// push() with the caller's `rho` in place of `1 / (s . y)`. False
+    /// when the curvature gate declines the pair or `rho` is not finite
+    /// and positive. A bad length throws. ABI minor 43.
+    bool push_rho(double const* s, double const* y, double rho, std::size_t n) {
+        int32_t stored = 0;
+        rgmin_status_t st = rgmin_lbfgs_pairs_push_rho(ptr_, s, y, rho, n, &stored);
+        if (st != RGMIN_SUCCESS) {
+            detail::raise(st, "rgmin_lbfgs_pairs_push_rho failed");
+        }
+        return stored != 0;
+    }
     std::size_t count() const noexcept { return rgmin_lbfgs_pairs_count(ptr_); }
     void clear() noexcept { rgmin_lbfgs_pairs_clear(ptr_); }
 

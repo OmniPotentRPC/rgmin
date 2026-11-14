@@ -961,14 +961,14 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
-/// ABI minor 42 adds `rgmin_lowest_eigenpairs_ex`. Minor 39 is
-/// `rgmin_lowest_eigenpairs`. Minors 40 and 41 are the 0.6.0 release and
-/// the manifold API.
+/// ABI minor 43 adds `rgmin_lbfgs_pairs_push_rho`. Minor 42 is
+/// `rgmin_lowest_eigenpairs_ex` and minor 39 is `rgmin_lowest_eigenpairs`.
+/// Minors 40 and 41 are the 0.6.0 release and the manifold API.
 #[test]
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 42);
+    assert_eq!(stamp.abi_minor, 43);
     assert_eq!(stamp.layout_revision, 5);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }

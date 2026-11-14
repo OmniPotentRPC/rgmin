@@ -179,6 +179,7 @@ typedef rgmin_lbfgs_pairs_t xts_lbfgs_pairs_t;
 typedef rgmin_h0_fn xts_h0_fn;
 #define xts_lbfgs_pairs_create rgmin_lbfgs_pairs_create
 #define xts_lbfgs_pairs_push rgmin_lbfgs_pairs_push
+#define xts_lbfgs_pairs_push_rho rgmin_lbfgs_pairs_push_rho
 #define xts_lbfgs_pairs_count rgmin_lbfgs_pairs_count
 #define xts_lbfgs_pairs_clear rgmin_lbfgs_pairs_clear
 #define xts_lbfgs_pairs_free rgmin_lbfgs_pairs_free

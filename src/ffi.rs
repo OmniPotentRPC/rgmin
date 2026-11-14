@@ -77,7 +77,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 42;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 43;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -3776,17 +3776,64 @@ pub unsafe extern "C" fn rgmin_lbfgs_pairs_push(
     n: usize,
     stored: *mut i32,
 ) -> rgmin_status_t {
+    unsafe { lbfgs_pairs_push_c("rgmin_lbfgs_pairs_push", pairs, s, y, None, n, stored) }
+}
+
+/// Append one pair with the caller's `rho` in place of `1 / (s · y)`.
+/// `stored`, when non-null, is 1 if the pair was kept. The pair passes
+/// the curvature gate of [`rgmin_lbfgs_pairs_push`] first, and a `rho`
+/// that is not finite and positive is declined. A declined pair returns
+/// success and sets `stored` to 0. ABI minor 43.
+///
+/// # Safety
+/// `pairs` is null or a live handle from [`rgmin_lbfgs_pairs_create`].
+/// `s` and `y` are null or point at `n` readable doubles. `stored` is
+/// null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_lbfgs_pairs_push_rho(
+    pairs: *mut rgmin_lbfgs_pairs,
+    s: *const f64,
+    y: *const f64,
+    rho: f64,
+    n: usize,
+    stored: *mut i32,
+) -> rgmin_status_t {
+    unsafe {
+        lbfgs_pairs_push_c(
+            "rgmin_lbfgs_pairs_push_rho",
+            pairs,
+            s,
+            y,
+            Some(rho),
+            n,
+            stored,
+        )
+    }
+}
+
+/// # Safety
+/// The pointer contract of [`rgmin_lbfgs_pairs_push`].
+unsafe fn lbfgs_pairs_push_c(
+    name: &str,
+    pairs: *mut rgmin_lbfgs_pairs,
+    s: *const f64,
+    y: *const f64,
+    rho: Option<f64>,
+    n: usize,
+    stored: *mut i32,
+) -> rgmin_status_t {
     if pairs.is_null() || s.is_null() || y.is_null() {
-        set_last_error("rgmin_lbfgs_pairs_push: null argument");
+        set_last_error(&format!("{name}: null argument"));
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     }
-    let s = unsafe { slice::from_raw_parts(s, n) };
-    let y = unsafe { slice::from_raw_parts(y, n) };
-    match unsafe {
-        (*pairs)
-            .pairs
-            .push(ArrayView1::from(s), ArrayView1::from(y))
-    } {
+    let s = ArrayView1::from(unsafe { slice::from_raw_parts(s, n) });
+    let y = ArrayView1::from(unsafe { slice::from_raw_parts(y, n) });
+    let handle = unsafe { &mut (*pairs).pairs };
+    let pushed = match rho {
+        Some(rho) => handle.push_rho(s, y, rho),
+        None => handle.push(s, y),
+    };
+    match pushed {
         Ok(kept) => {
             if !stored.is_null() {
                 unsafe { *stored = i32::from(kept) };
@@ -3835,6 +3882,12 @@ pub unsafe extern "C" fn rgmin_lbfgs_pairs_free(pairs: *mut rgmin_lbfgs_pairs) {
 /// Direction `-H g`. Pass either `h0_diag` or `apply_h0`, not both.
 /// An empty memory writes `-H0 g`. The call does not evaluate an
 /// objective. ABI minor 38.
+///
+/// A diagonal whose entries are all `γ` is `H0 = γ I`. `apply_h0` is
+/// called once, on the residual of the backward loop that starts from
+/// `grad`; the direction is `-H g` when that map is linear. Pairs
+/// stored by [`rgmin_lbfgs_pairs_push_rho`] enter with their own `rho`.
+/// The result is [`LbfgsPairs::direction`] for the same pairs and `H0`.
 ///
 /// # Safety
 /// `pairs` is null or a live handle from [`rgmin_lbfgs_pairs_create`].

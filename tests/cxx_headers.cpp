@@ -406,6 +406,34 @@ int main() {
         std::fprintf(stderr, "callback H0 direction (%g, %g)\n", via_callback[0], via_callback[1]);
         return 9;
     }
+    double s1[2] = {1.0, 0.0};
+    double y1[2] = {2.0, 1.0};
+    if (!pairs.push_rho(s1, y1, 0.5, 2) || pairs.push_rho(s1, y1, -1.0, 2) ||
+        pairs.count() != 1) {
+        std::fprintf(stderr, "push_rho keeps one pair and declines a negative rho\n");
+        return 19;
+    }
+    rgmin::LbfgsPairs by_gate(2, 4);
+    by_gate.push(s1, y1, 2);
+    double from_rho[2] = {0.0, 0.0};
+    double from_gate[2] = {0.0, 0.0};
+    pairs.direction_diagonal(grad, diag, from_rho, 2);
+    by_gate.direction_diagonal(grad, diag, from_gate, 2);
+    if (from_rho[0] != from_gate[0] || from_rho[1] != from_gate[1]) {
+        std::fprintf(stderr, "rho = 1/(s.y) direction (%g, %g) push (%g, %g)\n", from_rho[0],
+                     from_rho[1], from_gate[0], from_gate[1]);
+        return 20;
+    }
+    bool short_refused = false;
+    try {
+        pairs.push_rho(s1, y1, 0.5, 1);
+    } catch (std::runtime_error const&) {
+        short_refused = true;
+    }
+    if (!short_refused || pairs.count() != 1) {
+        std::fprintf(stderr, "push_rho must refuse a short pair\n");
+        return 21;
+    }
     std::vector<int32_t> z{1, 1};
     auto precon = rgmin::Precon::lindh(z).cell(10.0, 10.0, 10.0);
     rgmin::Solver geom(rgmin::Method::Lbfgs, rgmin::Control{}, 6);
