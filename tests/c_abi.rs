@@ -888,6 +888,58 @@ fn c_abi_default_istep_leaves_the_rosenbrock_start() {
     }
 }
 
+/// One BB step on `x^2` from `x = 1` with `istep = 3` asks for `x = -5`.
+/// A session from `rgmin_solver_create` opens with `RGMIN_ACCEPT_ENERGY`
+/// and halves to `x = -0.5`. `RGMIN_ACCEPT_NONE`, the 0.5 default, takes
+/// the step uphill.
+#[test]
+fn c_session_opens_with_energy_acceptance() {
+    let ctrl = rgmin_control_t {
+        maxiter: 10,
+        gtol: 1e-10,
+        istep: 3.0,
+        memory: 0,
+        maxmove: -1.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    };
+    for (accept, want) in [
+        (None, -0.5),
+        (Some(rgmin_accept_t::RGMIN_ACCEPT_ENERGY), -0.5),
+        (Some(rgmin_accept_t::RGMIN_ACCEPT_NONE), -5.0),
+    ] {
+        let mut x = [1.0];
+        let mut out = rgmin_report_t {
+            value: 0.0,
+            steps: 0,
+            grad_norm: 0.0,
+            stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        };
+        let st = unsafe {
+            let session = rgmin_solver_create(rgmin_method_t::RGMIN_BB, &ctrl, 1);
+            assert!(!session.is_null());
+            if let Some(accept) = accept {
+                rgmin_solver_set_accept(session, accept);
+            }
+            let xt = rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 1);
+            let st = rgmin_solver_step(
+                session,
+                Some(quad_eval),
+                Some(quad_grad),
+                std::ptr::null_mut(),
+                xt,
+                &mut out,
+            );
+            rgmin_tensor_free(xt);
+            rgmin_solver_free(session);
+            st
+        };
+        assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS, "{accept:?}");
+        assert_eq!(x, [want], "{accept:?}");
+        assert_eq!(out.value, want * want, "{accept:?}");
+    }
+}
+
 #[test]
 fn version_is_nul_terminated() {
     let p = rgmin::ffi::rgmin_version();
