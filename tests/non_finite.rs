@@ -46,6 +46,8 @@ const CONTROL: Control = Control {
     istep: 1.0,
     maxmove: None,
     stop_norm: StopNorm::Two,
+    ftol_rel: None,
+    noise_floor: None,
 };
 
 /// Every method under every line search, then as a session under every

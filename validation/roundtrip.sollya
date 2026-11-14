@@ -1,0 +1,29 @@
+// The translation retract round trip start + (x - start) in binary64.
+// Run: sollya validation/roundtrip.sollya
+//
+// A coordinate in [16, 32) Angstrom has ulp 2^-48 = 3.55e-15, above the
+// absolute 1e-15 the session used to tell a new point from the cached
+// one, so one rounding in the round trip read as a new geometry and
+// bought a force call. Exhibit such a pair and the bound the relative
+// test 4 eps max(|a|, |b|) + 1e-15 gives.
+prec = 200;
+display = decimal;
+u = 2^(-53);
+print("ulp of a coordinate in [16, 32):", 2^(-48));
+// x - s is exact when s/2 <= x <= 2 s (Sterbenz); the pair below is
+// outside that range, as a start and an accepted point are when a
+// coordinate crosses a binade from near the origin.
+x = round(22.57207083200093, D, RN);
+s = round(1.5540922060586926, D, RN);
+d = round(x - s, D, RN);
+y = round(s + d, D, RN);
+print("x =", x);
+print("round trip - x =", y - x);
+print("|round trip - x| > 1e-15:", abs(y - x) > 1e-15);
+// Two roundings, each at most u times its result: |y - x| <= u |x - s|
+// + u |y| <= 2 u (|x| + |s|) to first order, which for |s| <= |x| is
+// at most 4 u |x| = 2 eps |x|; the relative test allows 4 eps.
+tol = 4 * 2^(-52) * max(abs(x), abs(y)) + 1e-15;
+print("relative tolerance:", tol);
+print("|round trip - x| <= tolerance:", abs(y - x) <= tol);
+quit;

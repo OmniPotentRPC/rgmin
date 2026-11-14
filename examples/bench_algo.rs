@@ -1162,7 +1162,7 @@ fn run_beat(p: &Problem, opt: BeatOpt, gate_open: bool) -> (usize, f64, f64, boo
     }
     if opt.lindh {
         solver
-            .set_lindh(Some(LindhSpec {
+            .set_lindh_model(Some(LindhSpec {
                 z: atomic_numbers(p),
                 c_stab: 0.1,
                 cell: p.cell,
@@ -1508,7 +1508,7 @@ fn basin_log(problem: Option<&Problem>) -> String {
         }
         if opt.lindh {
             solver
-                .set_lindh(Some(LindhSpec {
+                .set_lindh_model(Some(LindhSpec {
                     z: atomic_numbers(p),
                     c_stab: 0.1,
                     cell: p.cell,

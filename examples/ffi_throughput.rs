@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use dlpk::sys::DLManagedTensorVersioned;
 use rgmin::ffi::{
-    rgmin_control_t, rgmin_method_t, rgmin_minimize, rgmin_report_t, rgmin_status_t,
+    rgmin_control_t, rgmin_method_t, rgmin_minimize, rgmin_report_t, rgmin_status_t, rgmin_stop_t,
     rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 
@@ -69,6 +69,8 @@ fn main() {
         istep: 1e-3,
         memory: 0,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
 
     let start = Instant::now();
@@ -81,6 +83,7 @@ fn main() {
             value: 0.0,
             steps: 0,
             grad_norm: 0.0,
+            stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
         };
         let st = unsafe {
             rgmin_minimize(

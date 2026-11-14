@@ -33,6 +33,8 @@ fn dim_and_steps_read_a_const_session() {
         istep: 0.1,
         memory: 5,
         maxmove: 0.2,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let solver = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 3) };
     assert!(!solver.is_null());

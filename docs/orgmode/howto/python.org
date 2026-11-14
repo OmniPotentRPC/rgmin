@@ -3,7 +3,7 @@
 
 * Python
 
-The package is ~python/~. ~pip install~ the directory with maturin. ASE is optional and imported when an optimizer is constructed.
+The package under ~python/~ is the maturin binding. ASE is optional and imported when an optimizer is constructed.
 
 #+begin_src bash
 pip install python/[ase]
@@ -23,8 +23,32 @@ opt.run(fmax=0.05)
 FIRE(atoms, logfile=None).run(fmax=0.05, steps=20)
 #+end_src
 
-~LBFGS(eon_cap=True)~ selects the Rust default. Without it the class matches ASE's length control. Stubs live in ~python/rgmin/*.pyi~ and ~py.typed~ marks the package.
+The Rust L-BFGS default is the strong Wolfe search. ~LBFGS(eon_cap=True)~ selects the eOn cap. Stubs live in ~python/rgmin/*.pyi~ and ~py.typed~ marks the package.
 
 ~lowest_eigenpairs(hvp, x0_block)~ returns the k lowest pairs of a symmetric product as NumPy arrays. ~hvp(x, v)~ is ~H(x) v~. @@rst::doc:`tutorials/eigenpairs`@@ is the short example, and continuous integration runs it.
+
+* Nanobind wheel
+
+The repository root builds a second wheel with scikit-build-core. CMake fetches Corrosion 0.6.1 and compiles the =capi= static library. A C++17 compiler, CMake, Ninja, and Rust are required.
+
+=python -m pip install 'rgmin[ase,test]'= adds ASE and the test extras.
+
+=SolverConfig= checks every keyword once. An unknown name raises =ValueError= and lists the names that are accepted. =memory=, =maxiter=, =linesearch_maxiter=, and =extra_updates= have to be Python integers. Other numeric options have to be finite.
+
+A Cartesian solver starts with a per-atom cap of 0.2 (ASE ~maxstep~, eOn ~max_move~). =maxstep= or =atom_maxmove= replaces it. A non-positive value clears it. A positive =maxmove= is the Euclidean step limit and leaves the per-atom default off. A negative =maxmove= leaves every step cap off, including the default per-atom cap. Zero keeps the defaults. The cap is the largest per-atom displacement, not the norm of the whole step.
+
+=rgmin.ase.FIRE=, =LBFGS=, =CG=, and the other method classes are ASE optimizers. Each =step= is one rgmin iteration. =maxstep= is the per-atom cap in angstroms. The ASE classes pass it explicitly, and their default is 0.2. ASE calculators are not thread-safe. Each thread that builds an optimizer needs its own calculator. rgmin still guarantees a shareable config, one solver per thread, and an owned copy of the coordinates. The thread-safety page records the details.
+
+#+begin_src python
+from ase.calculators.emt import EMT
+from rgmin.ase import FIRE
+
+atoms.calc = EMT()
+FIRE(atoms, logfile=None).run(fmax=0.05)
+#+end_src
+
+Newton, RFO, and dogleg need =hessian(x)=, a callable that returns the =(n, n)= matrix. A band or a min-mode run accepts the step rather than the energy. Pass =accept== to choose the rule yourself.
+
+=restart= is refused. =read= and =dump= raise =NotImplementedError=.
 
 C and C++ use ~include/rgmin.h~ and ~include/rgmin/optimize.hpp~. ~examples/c/quadratic.c~ is the short C program: one handle, one minimize, then free.

@@ -1,0 +1,101 @@
+#+TITLE: Quick-min
+#+OPTIONS: toc:nil num:nil
+
+Quick-min keeps a velocity and damps it by a projection before an
+explicit Euler step. Write ~F = -∇f~ and ~Δt~ for the time step. The
+reference update is
+
+: v ← (v · F / |F|²) F    when v · F ≥ 0 and |F| > 0
+: v ← 0                   otherwise
+: v ← v + Δt F
+: Δx = Δt v
+
+~quickmin_baseline~ is that update and nothing else. A negative
+projection takes the second branch, so the velocity that enters the
+Euler kick has no component opposing ~F~. A zero force has no
+direction and takes the same branch.
+
+The session adds three pieces that the other first-order methods
+already own.
+
+The displacement cap is ~Solver::set_atom_maxmove~ or
+~Control::maxmove~. When it shortens ~Δx~, the velocity is multiplied
+by ~|Δx taken| / |Δx proposed|~. That is the ratio FIRE uses after its
+own cap. The next projection then sees the motion that happened. On
+
+: E = ½ (y - 0.2 x)² + 0.02 x²
+
+from ~(2, 0)~ with ~Δt = 0.2~ and cap ~0.08~, eighty reference steps
+that keep the uncapped velocity stay above ~10⁻⁷~, and the same steps
+with the rescale fall below ~10⁻⁸~.
+
+The time step uses FIRE's factors: ~n_min = 5~, ~f_inc = 1.1~,
+~f_dec = 0.5~, ~Δt_max = 2.5 Δt₀~. More than ~n_min~ steps with
+~F · v > 0~ grow ~Δt~. ~F · v < 0~ shrinks it, down to ~10⁻¹²~; the
+velocity on that branch is already zero from the reference rule.
+~F · v = 0~ leaves ~Δt~ alone. A resting velocity is not an uphill
+step, and halving the caller's ~Δt~ before any motion only slows the
+opening. On ~E = ½ x²~ from ~x = 1~ with ~Δt₀ = 0.05~, the growing
+step reaches ~|x| < 10⁻³~ in fewer iterations than the fixed step.
+~Solver::set_quickmin_adapt(false)~ selects the fixed reference step.
+
+A cell block is an index ~at~. Coordinates ~[0, at)~ and ~[at, n)~
+each take the reference replacement on their own force, then the Euler
+kick uses the shared ~Δt~. A cell velocity that opposes the stress is
+zeroed even when the atomic alignment keeps ~v · F~ positive for the
+whole vector. One joint projection would replace both blocks by a
+single component along the joint force and spend atomic momentum on
+the opposing cell direction. On ~E = ½ (x² + c²)~ at ~(-1, 1)~ with
+~v = (3, 1)~, ~F = (1, -1)~ and ~Δt = 0.1~, the split step reaches a
+lower value than the joint projection, and the cell velocity after the
+replacement is only the Euler kick ~Δt F_c~.
+~Solver::set_quickmin_cell~ sets the index. The C entry is
+~RGMIN_QUICKMIN~ and ~rgmin_solver_set_quickmin_cell~ (ABI minor 29).
+
+* Options and what the benchmark keeps
+
+~Solver::set_quickmin_options~ takes ~QuickMinOptions~. ~rgmin()~ is
+the session above. ~eon()~ is eOn's ~Quickmin::step~: fixed ~Δt~, one
+projection, and a capped step that leaves the velocity at its
+uncapped value. ~per_atom()~ projects each xyz triple of the atomic
+block on its own force, so one atom moving against its force stops
+without stopping the others. ~curvature_cap = Some(c)~ bounds ~Δt~ by
+~c / sqrt(λ̂)~, with ~λ̂ = |y| / |s|~ from the last step's force
+difference.
+
+On ~E = λ x² / 2~ with the projection inactive, the step is the
+symplectic Euler map with characteristic polynomial
+~r² - (2 - h) r + 1~, ~h = Δt² λ~. Its roots stay on the unit circle for
+~0 ≤ h ≤ 4~, so ~Δt < 2 / sqrt(λ_max)~ is the stability limit. A step
+from rest moves ~Δt² F~ and lowers the energy exactly when ~h < 2~;
+with ~λ̂~ equal to the mode's curvature, ~c < sqrt(2)~ keeps that.
+With a kept velocity ~v = c F~ the step length along ~F~ is
+~Δt (c + Δt)~, and ~c~ grows while the walker stays on one side, so
+the eOn step can raise the energy even under ~Δt² λ_max < 2~
+(~validation/quickmin.py~). The projection itself never lengthens
+~v~ and leaves no component along ~-F~
+(~formal/RgminContracts/QuickMin.lean~); in binary64 it can lengthen
+~v~ by at most ~B(n) - 1~ relative, 7 machine epsilons for ~n = 6~
+(~validation/quickmin.sollya~).
+
+~bench/atomistic~ (rgpot potentials, 5 starts each, per-atom cap 0.2,
+~fmax < 0.01~), mean force calls and converged starts:
+
+| options                    | LJ38          | Pt7 island | Al slab |
+|----------------------------+---------------+------------+---------|
+| ~eon()~                    | 2001 (0 of 5) |       18.6 |    24.6 |
+| ~rgmin()~                  | 1344 (4 of 5) |       19.6 |    27.6 |
+| ~per_atom()~               | 645 (5 of 5)  |       32.0 |    28.2 |
+| ~rgmin()~, ~cap Some(0.7)~ | 1167 (5 of 5) |       20.0 |    27.6 |
+| FIRE                       | 411           |       50.6 |    60.2 |
+| FIRE 2.0 (Guénolé 2020)    | 871           |       26.0 |    33.8 |
+| L-BFGS                     | 169           |       10.0 |    14.0 |
+
+The eOn options never converge LJ38 from random packings in 2000
+steps; the FIRE time step is what converges it. The per-atom
+projection halves the LJ38 calls and costs 12 calls on the seven-atom
+island, so it is an option, not the default. A restart or a backtrack
+after an energy rise, a ten-fold ~Δt_max~, and dropping the clamp
+rescale moved the LJ38 mean by at most 9 calls and the others by at
+most 0.4, and none of them converged another start; they were removed.
+

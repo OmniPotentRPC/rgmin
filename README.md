@@ -9,6 +9,7 @@ It is built for geometry optimization.
 There, a host program such as eOn owns the loop, and a `Solver` takes one step per call.
 The step can stay on a manifold, such as the unit sphere or Cartesians with the rigid-body motions removed.
 `Lbfgs::minimize` runs a whole minimization from a Rust closure (example below).
+Algorithms live only in Rust, over [`eindir`](https://github.com/HaoZeke/eindir) `DifferentiableObjective`s.
 Saddle, band, and intrinsic reaction coordinate (IRC) sessions live in [`rgsaddle`](https://github.com/OmniPotentRPC/rgsaddle).
 
 Releases are tagged `vX.Y.Z` on `main` and published to crates.io.
@@ -24,16 +25,20 @@ There is no second solver implementation in C++.
 header, the C++ wrappers, and `dlpack/dlpack.h`. The pkg-config name
 is `rgmin`. Version macros are `RGMIN_H_MAJOR`, `RGMIN_H_MINOR`, and
 `RGMIN_H_PATCH`.
+The C ABI also accepts an `eindir_objective_t*` directly through
+`rgmin_minimize_eindir`. The caller supplies the `eindir_abi_stamp_t`, retains
+ownership of the objective, and gets the same CPU f64 DLPack optimization path.
+This lets rgpot's first-member `eindir_objective_t` embedding reach xtsci
+without a callback shim in each consumer.
 
 CPU f64 is wired now. A non-CPU tensor returns `RGMIN_UNSUPPORTED_DEVICE`
 so a CUDA path does not change the ABI.
 
-The production unconstrained local method is [`Lbfgs`] without a line
-search. The default step is the eOn cap. The longest atom move is at
-most 0.2. The first step probes curvature. A longer proposal clears
-the memory and steps along `H0` times the force. `LbfgsStep::Scaled`
-shortens the quasi-Newton step and keeps the pairs. `LbfgsStep::Wolfe`
-opts into the strong Wolfe search.
+The production unconstrained local method is [`Lbfgs`] with the strong
+Wolfe line search. `LbfgsStep::Capped` opts into the eOn cap: the
+longest atom move is at most 0.2, the first step probes curvature, and
+a longer proposal clears the memory. `LbfgsStep::Scaled` shortens the
+quasi-Newton step and keeps the pairs.
 anneal `WarmLbfgs` holds
 that type so hopping does not ship a second two-loop. Feature `highs` keeps the two-loop direction and projects it with
 HiGHS (`Q = I`) onto a box, trust region, or equalities.
@@ -47,13 +52,37 @@ SPD (affine-invariant, row-major `n x n`).
 Conjugacy: Fletcher-Reeves, Polak-Ribiere, Hestenes-Stiefel, Dai-Yuan,
 conjugate descent, Hager-Zhang, Liu-Storey, FR-PR, HybridizedConj.
 Line search: Brent, Armijo, Goldstein, strong Wolfe with zoom.
-Methods: nonlinear conjugate gradients (NLCG), Broyden-Fletcher-Goldfarb-Shanno (BFGS) and limited-memory BFGS (L-BFGS), the symmetric rank-one (SR1) and rank-two (SR2) secant updates, Newton, rational function optimization (RFO), Adam, steepest descent, particle swarm optimization (PSO), the fast inertial relaxation engine (FIRE) and FIRE 2.0, Barzilai-Borwein, Powell dogleg, Steihaug-Toint Newton-CG (`newton-cg`, `newton-pcg`).
+Methods: nonlinear conjugate gradients (NLCG), BFGS, L-BFGS, SR1, SR2, Newton, RFO, Adam, steepest descent, PSO, FIRE and FIRE 2.0, quick-min, Barzilai-Borwein, Powell dogleg, Steihaug-Toint Newton-CG (`newton-cg`, `newton-pcg`).
 Newton, RFO and the dogleg also take a Hessian from the host.
 `Solver::set_exp` installs the exponential preconditioner of
-Packwood et al., J. Chem. Phys. 144, 164109 (2016), from a caller
-neighbour list. L-BFGS uses it as `H0`. FIRE and nonlinear CG use
-it as the metric. A dense pair or Lindh matrix supplied to the
-two-loop still wins.
+Packwood et al., J. Chem. Phys. 144, 164109 (2016).
+`rgmin_linesearch` (ABI minor 37) takes a caller-supplied energy and gradient.
+`lbfgs_direction` (ABI minor 38) applies a caller-supplied initial inverse Hessian.
+`lowest_eigenpairs` (ABI minor 39) is block LOBPCG for the k lowest pairs.
+Line search: Brent, Armijo, Goldstein, strong Wolfe with zoom; a
+session defaults to strong Wolfe, starts every search from the value and
+gradient it holds, and bounds trials by the displacement cap
+(`LineSearch::search_from`). FIRE 2.0 as Guénolé et al. 2020 publish it
+is `Solver::set_fire_variant(FireVariant::Guenole2020)`. Quick-min
+(`Method::QuickMin`) runs eOn's step with
+`Solver::set_quickmin_options(QuickMinOptions::eon())` and one
+projection per atom with `QuickMinOptions::per_atom()`.
+`bench/atomistic` counts force calls on rgpot potentials.
+`bench/gate` (`python -m rggate`, pixi task `gate`) is the censored CSV
+gate: same stationary point, Kaplan-Meier, BCa, and a confidence sequence.
+`validation/` holds the sympy checks behind the interpolation, the
+two-loop map and FIRE 2.0 (`uv run --with sympy python validation/<file>.py`).
+Methods: NLCG, BFGS, L-BFGS, SR1, SR2, Newton, RFO, Adam, steepest
+descent, PSO, FIRE, FIRE 2.0, quick-min, Barzilai-Borwein, Powell dogleg.
+`Solver::set_precon` installs Exp, Lindh, or the bonded metric.
+L-BFGS uses the matrix as the initial inverse Hessian. FIRE and
+nonlinear CG use it as the metric. `select_precon` picks Exp for a
+bulk or a surface of at least 100 atoms, Lindh for a molecule or a
+cluster whose elements are in the Lindh tables, the bonded metric
+when that caller has a force field, and the identity otherwise.
+The Python package `rgmin` is a free-threaded nanobind module
+(`rgmin._core`) plus `rgmin.ase.Optimizer`, and `python/` is the maturin
+ASE drop-in (`BFGS`, `LBFGS`, `FIRE`, `lowest_eigenpairs`). ASE is an extra.
 
 Narrative docs live in [`docs/orgmode/`](docs/orgmode/index.org)
 (Diataxis); the explanation quadrant derives the math behind each
@@ -80,7 +109,7 @@ let (_f, x, _) = opt.minimize(array![-1.2, 1.0].view(), 200, |x| {
 });
 ```
 
-Install the 0.5.2 release from crates.io with `cargo add rgmin ndarray@0.17` on Rust 1.88 or newer.
+Install the 0.6.0 release from crates.io with `cargo add rgmin ndarray@0.17` on Rust 1.88 or newer.
 [`docs/orgmode/howto/install.org`](docs/orgmode/howto/install.org) covers the `develop` branch and how it differs from the release.
 It also covers the features of each route and the C library.
 

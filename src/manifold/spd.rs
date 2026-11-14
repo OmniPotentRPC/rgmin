@@ -7,6 +7,7 @@
 //! is projection at the arrival point; on a tangent that is the
 //! identity used by the MATLAB factory.
 //!
+//! The Riemannian gradient is `X * symm(egrad) * X`.
 //! A 3N cluster is not this packing. Length must be a square.
 
 use ndarray::{Array1, ArrayView1};
@@ -70,7 +71,7 @@ fn cholesky(n: usize, a: &[f64]) -> Option<Vec<f64>> {
                 s -= prefix_dot(&l[i * n..i * n + j], &l[j * n..j * n + j]);
             }
             if i == j {
-                if s.is_nan() || s <= 1e-18 {
+                if s.partial_cmp(&1e-18) != Some(std::cmp::Ordering::Greater) {
                     return None;
                 }
                 l[i * n + i] = s.sqrt();
@@ -203,6 +204,20 @@ impl Manifold for Spd {
     fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         self.project(x_to, v)
     }
+
+    fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
+        let Some((n, xm)) = unpack(x) else {
+            return egrad.clone();
+        };
+        if egrad.len() != x.len() {
+            return egrad.clone();
+        }
+        let eta: Vec<f64> = egrad.iter().copied().collect();
+        let s = symm(n, &eta);
+        let xs = matmul(n, &xm, &s);
+        let r = matmul(n, &xs, &xm);
+        pack(n, symm(n, &r))
+    }
 }
 
 #[cfg(test)]
@@ -302,5 +317,21 @@ mod tests {
         assert!(Spd.required_dim(4).is_ok());
         assert!(Spd.required_dim(9).is_ok());
         assert!(Spd.required_dim(1).is_ok());
+    }
+    #[test]
+    fn egrad2rgrad_is_x_symm_x_not_project() {
+        let x = array![2.0, 0.2, 0.2, 3.0];
+        let egrad = array![1.0, 2.0, 0.0, 1.0];
+        let r = Spd.egrad2rgrad(&x, &egrad);
+        // S = [[1, 1], [1, 1]], X S X = [[4.84, 7.04], [7.04, 10.24]]
+        assert!((r[0] - 4.84).abs() < 1e-12, "{r:?}");
+        assert!((r[1] - 7.04).abs() < 1e-12, "{r:?}");
+        assert!((r[2] - 7.04).abs() < 1e-12, "{r:?}");
+        assert!((r[3] - 10.24).abs() < 1e-12, "{r:?}");
+        let p = Spd.project(&x, &egrad);
+        assert!(
+            (p[0] - r[0]).abs() > 1.0,
+            "rgrad must not be project {p:?} {r:?}"
+        );
     }
 }

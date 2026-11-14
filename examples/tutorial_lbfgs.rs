@@ -1,4 +1,4 @@
-//! Default L-BFGS is the eOn cap. One atom moves by at most 0.2.
+//! Default L-BFGS is the strong Wolfe search. `Lbfgs::capped` is the eOn cap.
 //!
 //! `cargo run --example tutorial_lbfgs`
 
@@ -23,7 +23,7 @@ fn main() {
         "{x}"
     );
 
-    let mut one = Lbfgs::default();
+    let mut one = Lbfgs::capped(EON_MAX_MOVE);
     let (_f, x1, _) = one.minimize(array![1.0, 0.0, 0.0].view(), 1, |v| {
         Some((0.5 * v.dot(&v), v.to_owned()))
     });

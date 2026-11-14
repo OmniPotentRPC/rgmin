@@ -3,6 +3,10 @@
 use crate::nlcg::{Conjugacy, Restart};
 
 /// Local first-order, quasi-Newton, or swarm method over an eindir objective.
+///
+/// Non-exhaustive: a match outside this crate needs a wildcard arm, so a
+/// later method is an additive change.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Method {
     /// Nonlinear CG (Nocedal-Wright algorithm 5.4).
@@ -37,25 +41,22 @@ pub enum Method {
         /// Correction pairs kept (`m`). Typical 5 to 20.
         memory: usize,
     },
-    /// Inverse SR1 (Nocedal-Wright 6.24).
+    /// SR1 in a trust region (Nocedal-Wright 6.24, algorithm 4.1).
+    ///
+    /// The model Hessian starts at `I`. A positive-definite model takes
+    /// a dogleg step; an indefinite model takes the Cauchy point.
     ///
     /// Nocedal and Wright, *Numerical Optimization*,
     /// <https://doi.org/10.1007/978-0-387-40065-5>.
     Sr1,
-    /// SR2: Powell symmetrization of the rank-one secant map on a dense
-    /// Hessian `B`, with `c = y + Bs`.
+    /// Powell symmetric Broyden in the SR1 trust region.
     ///
-    /// With `a = s·y` and `b = s·Bs` both nonzero, it is the Broyden class
-    /// member with `φ = a (a - b) / (a + b)^2` (Nocedal-Wright 6.32). It is
-    /// not the `sr2.hpp` rank-one map `B += δ c^T / (δ·s)`, `δ = y - Bs`,
-    /// and not Powell symmetric Broyden (`c = s`).
-    ///
-    /// Nocedal and Wright, *Numerical Optimization*,
-    /// <https://doi.org/10.1007/978-0-387-40065-5>.
-    /// Dennis and Moré, *Quasi-Newton methods, motivation and theory*,
-    /// <https://doi.org/10.1137/1019005>.
+    /// The update is symmetric and satisfies the secant condition.
+    /// Powell, *A new algorithm for unconstrained optimization*, in
+    /// *Nonlinear Programming*, Academic Press, 1970.
     Sr2,
-    /// Kingma and Ba Adam, with a line search along the preconditioned step.
+    /// Kingma and Ba Adam. The preconditioned direction is scaled to
+    /// unit per-atom length and a line search sets the step.
     ///
     /// Kingma and Ba, *Adam: A Method for Stochastic Optimization*,
     /// <https://doi.org/10.48550/arXiv.1412.6980>.
@@ -111,6 +112,38 @@ pub enum Method {
     /// Barzilai and Borwein, <https://doi.org/10.1093/imanum/8.1.141>.
     /// Raydan, <https://doi.org/10.1137/S1052623494266365>.
     Bb,
+    /// Quick-min: project the velocity on the force, then an Euler step.
+    ///
+    /// The reference rule and the session departures (step cap, FIRE
+    /// time-step factors, per-block cell velocity) are in
+    /// [`crate::quickmin`].
+    QuickMin,
+    /// ODE12r: forward Euler on `P^{-1} F` with an embedded second-order
+    /// error estimate, residual-controlled acceptance and an adaptive step.
+    ///
+    /// Makri, Ortner, Kermode, *A preconditioning scheme for minimum
+    /// energy path finding methods*,
+    /// <https://doi.org/10.1063/1.5064465>. The rule and the session
+    /// clamps are in [`crate::ode12r`]; an installed geometry
+    /// preconditioner is the metric. A Cartesian session keeps the
+    /// default per-atom cap, and the stepper judges a capped move at
+    /// the length it took.
+    Ode12r,
+    /// GDIIS geometry step.
+    ///
+    /// Pulay, *Convergence acceleration of iterative sequences. The
+    /// case of SCF iteration*,
+    /// <https://doi.org/10.1016/0009-2614(80)80396-4>.
+    /// Császár and Pulay, J. Mol. Struct. 114, 31 (1984),
+    /// <https://doi.org/10.1016/0022-2860(84)87198-7>.
+    /// The image is `sum c_i (x_i - α g_i)`. A step past eight caps,
+    /// an uphill image, or a step that does not lower the force drops
+    /// the history and takes one steepest step. The line search chooses
+    /// the length.
+    Diis {
+        /// Stored gradient and position pairs. At least 2.
+        memory: usize,
+    },
     /// Powell dogleg on a caller-supplied dense Hessian.
     ///
     /// Nocedal and Wright, algorithm 4.1,
@@ -164,6 +197,11 @@ impl Method {
         }
     }
 
+    /// Pulay subspace of 6 gradient and position pairs.
+    pub fn diis() -> Self {
+        Self::Diis { memory: 6 }
+    }
+
     /// L-BFGS with `m = 10` correction pairs.
     pub fn lbfgs() -> Self {
         Self::Lbfgs { memory: 10 }
@@ -196,6 +234,41 @@ impl Method {
         }
     }
 
+    /// Whether a fresh Cartesian session installs [`crate::DEFAULT_ATOM_MAXMOVE`].
+    ///
+    /// BFGS takes its length from a strong Wolfe line search. Dogleg
+    /// keeps the step inside a Euclidean trust region and accepts it
+    /// from the model-agreement ratio. FIRE 2.0 sizes the move with
+    /// its own `dt`. Those three leave the per-atom default off. Every
+    /// other method installs 0.2.
+    ///
+    /// Nocedal and Wright, *Numerical Optimization*, algorithms 3.5,
+    /// 3.6, and 4.1, <https://doi.org/10.1007/978-0-387-40065-5>.
+    /// ASE `Optimizer.defaults` is `{"maxstep": 0.2}` in
+    /// `ase/optimize/optimize.py` at tag 3.29.0,
+    /// <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/optimize.py>.
+    /// eOn `OptimizerOptions.maxMove` is `0.2` in `schema/eon_params.capnp`
+    /// at `4be157d4`,
+    /// <https://github.com/TheochemUI/eOn/blob/4be157d43265af6b1140aaac0e52e42add62693f/schema/eon_params.capnp>.
+    /// Guénolé et al., *Assessment and optimization of the fast inertial
+    /// relaxation engine (FIRE)*,
+    /// <https://doi.org/10.1016/j.commatsci.2020.109584>.
+    ///
+    /// An explicit cap still applies to every method. A non-positive
+    /// value still clears it.
+    pub(crate) fn installs_default_atom_cap(&self) -> bool {
+        !matches!(
+            self,
+            Self::Bfgs
+                | Self::Dogleg
+                | Self::NewtonCg
+                | Self::NewtonPcg
+                | Self::Fire {
+                    kind: crate::fire::FireKind::V2
+                }
+        )
+    }
+
     /// Canonical method token. Hyphens, as in `newton-cg`.
     ///
     /// Parameterized variants report the family name (`lbfgs`, `adam`,
@@ -210,13 +283,13 @@ impl Method {
                 (conjugacy, _) => match conjugacy {
                     Conjugacy::FletcherReeves => "fletcher-reeves",
                     Conjugacy::PolakRibiere => "cg",
-                    Conjugacy::PolakRibierePlus => "prp",
                     Conjugacy::HestenesStiefel => "hestenes-stiefel",
                     Conjugacy::DaiYuan => "dai-yuan",
                     Conjugacy::ConjugateDescent => "conjugate-descent",
                     Conjugacy::HagerZhang => "hager-zhang",
                     Conjugacy::LiuStorey => "liu-storey",
                     Conjugacy::FrPr => "fr-pr",
+                    Conjugacy::PolakRibierePlus => "pr-plus",
                     Conjugacy::Hybrid { .. } => "hybrid",
                 },
             },
@@ -237,6 +310,9 @@ impl Method {
             },
             Self::Bb => "bb",
             Self::Dogleg => "dogleg",
+            Self::QuickMin => "quickmin",
+            Self::Ode12r => "ode12r",
+            Self::Diis { .. } => "diis",
             Self::NewtonCg => "newton-cg",
             Self::NewtonPcg => "newton-pcg",
         }
@@ -258,7 +334,7 @@ impl Method {
             "adam" => Self::adam(),
             "sd" | "steepest" | "steepest_descent" => Self::Steepest,
             "cg" | "pr" | "polak_ribiere" => Self::polak_ribiere(),
-            "prp" | "polak_ribiere_plus" => Self::polak_ribiere_plus(),
+            "prp" | "pr_plus" | "polak_ribiere_plus" => Self::polak_ribiere_plus(),
             "eon_cg" | "eon_cg_pr" => Self::eon_cg(),
             "fletcher_reeves" | "fr" => Self::nlcg(Conjugacy::FletcherReeves),
             "hestenes_stiefel" | "hs" => Self::nlcg(Conjugacy::HestenesStiefel),
@@ -282,6 +358,9 @@ impl Method {
             },
             "bb" | "barzilai_borwein" => Self::Bb,
             "dogleg" => Self::Dogleg,
+            "quickmin" | "quick_min" => Self::QuickMin,
+            "ode12r" => Self::Ode12r,
+            "diis" | "gdiis" => Self::diis(),
             "newton_cg" => Self::NewtonCg,
             "newton_pcg" => Self::NewtonPcg,
             _ => {
@@ -305,14 +384,8 @@ fn canon_method(name: &str) -> String {
     out
 }
 
-impl Default for Method {
-    fn default() -> Self {
-        Self::polak_ribiere()
-    }
-}
-
 #[cfg(test)]
-mod tests {
+mod name_tests {
     use super::*;
 
     #[test]
@@ -342,12 +415,70 @@ mod tests {
             Method::from_name("prp").unwrap(),
             Method::polak_ribiere_plus()
         );
+        assert_eq!(
+            Method::from_name("pr-plus").unwrap(),
+            Method::polak_ribiere_plus()
+        );
+        assert_eq!(Method::polak_ribiere_plus().as_str(), "pr-plus");
         assert_eq!(Method::from_name("eon-cg").unwrap(), Method::eon_cg());
         assert_eq!(Method::eon_cg().as_str(), "eon-cg");
-        assert_eq!(Method::polak_ribiere_plus().as_str(), "prp");
+        assert_eq!(Method::from_name("ode12r").unwrap(), Method::Ode12r);
+        assert_eq!(Method::from_name("quick-min").unwrap(), Method::QuickMin);
+        assert_eq!(Method::from_name("gdiis").unwrap(), Method::diis());
+        assert_eq!(Method::Ode12r.as_str(), "ode12r");
+        assert_eq!(Method::QuickMin.as_str(), "quickmin");
+        assert_eq!(Method::diis().as_str(), "diis");
         assert_eq!(Method::from_name("sd").unwrap(), Method::Steepest);
         assert_eq!(Method::from_name("fire2").unwrap().as_str(), "fire2");
         let err = Method::from_name("not-a-solver").unwrap_err();
         assert!(err.to_string().contains("not-a-solver"), "{err}");
+    }
+}
+
+impl Default for Method {
+    fn default() -> Self {
+        Self::polak_ribiere()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fire::FireKind;
+    use crate::newton::NewtonKind;
+
+    #[test]
+    fn the_default_atom_cap_follows_the_step_control() {
+        assert!(!Method::Bfgs.installs_default_atom_cap());
+        assert!(!Method::Dogleg.installs_default_atom_cap());
+        assert!(!Method::Fire { kind: FireKind::V2 }.installs_default_atom_cap());
+        assert!(!Method::NewtonCg.installs_default_atom_cap());
+        assert!(!Method::NewtonPcg.installs_default_atom_cap());
+        let capped = [
+            Method::lbfgs(),
+            Method::polak_ribiere(),
+            Method::nlcg(crate::nlcg::Conjugacy::FletcherReeves),
+            Method::Sr1,
+            Method::Sr2,
+            Method::adam(),
+            Method::Steepest,
+            Method::Newton {
+                kind: NewtonKind::Shifted,
+            },
+            Method::Newton {
+                kind: NewtonKind::Rfo,
+            },
+            Method::Fire { kind: FireKind::V1 },
+            Method::Bb,
+            Method::QuickMin,
+            Method::Ode12r,
+            Method::diis(),
+            Method::pso(),
+            Method::eon_cg(),
+            Method::polak_ribiere_plus(),
+        ];
+        for method in capped {
+            assert!(method.installs_default_atom_cap(), "{method:?}");
+        }
     }
 }

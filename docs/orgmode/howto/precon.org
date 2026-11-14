@@ -1,0 +1,65 @@
+#+TITLE: Choose and install a preconditioner
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Choose and install a preconditioner
+
+~select_precon(kind, z, has_force_field, family)~ returns the metric.
+~z~ is one atomic number per free atom. ~family~ is ~QuasiNewton~,
+~Cg~, or ~Fire~. FIRE returns the identity. Exp and Lindh remain
+available when the caller names them.
+
+- Bulk or surface, at least 100 atoms, L-BFGS or CG: Exp. The 100-atom
+  line is ASE's ~PreconLBFGS~ rule. The bench has no bulk below 100
+  atoms. The copper vacancy, 2047 atoms, is the bulk row (L-BFGS 16
+  calls with none, 11 with Exp). Below 100 atoms the same geometries
+  stay at the identity.
+- Molecule or cluster, a force field, and every element in the Lindh
+  set: the bonded metric. Water with a field is that case. Pt7 with
+  the geometric metric takes more calls than none, and lj38 with it
+  ends at a different minimum, so a metal or a noble gas does not
+  take the field.
+- Molecule or cluster, every element in {H, B, C, N, O, F, Si, P, S, Cl},
+  at most ~N_LINDH~ atoms: Lindh. Water without a field is that case
+  (L-BFGS, 5 calls, the same as the unpreconditioned run).
+- Metal or noble-gas cluster of at least 100 atoms: Exp. The 100-atom
+  line is ASE's ~PreconLBFGS~ rule. The bench does not contain Cu147.
+  Below 100 atoms the cluster stays at the identity. Ar38 is that case:
+  Lindh on lj38 stopped at −164.88 against −167.77. Pt7 is the metal
+  cluster below 100 atoms.
+
+Install the choice with one call. L-BFGS stores ~P^{-1}~ as ~H_0~.
+FIRE and nonlinear CG use ~P~ as the metric of the direction.
+
+#+begin_src rust
+use rgmin::{ExpParams, Neighbours, PreconSpec, Solver};
+
+solver.set_precon(PreconSpec::Exp {
+    positions: x.view(),
+    neighbours: &neigh,
+    params: &ExpParams::default(),
+})?;
+#+end_src
+
+~set_exp~, ~set_lindh~, and ~set_ff~ are the same three arms.
+~clear_precon~ drops the metric. ~precon_scale~ is the estimated ~μ~,
+or ~None~ until the sine probe has run.
+
+From C, fill ~rgmin_precon_t~ and call ~rgmin_solver_set_precon~.
+~RGMIN_PRECON_AUTO~ uses the rule above and the session's method.
+A nonzero bond or angle count is the force field, and it applies
+only for a covalent molecule or cluster. Every index is checked
+against ~dim / 3~ in that call. Neighbour and anchor indices are
+~size_t~. Bond and angle indices are ~uint32_t~. Morse bonds and FF torsions are Rust-only. The Lindh torsion
+term is the ~dihedrals~ flag.
+
+#+begin_src cpp
+auto p = rgmin::Precon::lindh(numbers).cell(a, b, c);
+solver.set_precon(p);
+#+end_src
+
+The neighbour list for Exp is the caller's. Lindh and the bonded
+metric build their own pairs with a cell list. The bench's ~-ff~ arm
+uses unit bond curvatures and an angle curvature of 0.1. That is a
+bonded geometric metric, not the parameterised field of Makri, Ortner,
+and Kermode 2019.

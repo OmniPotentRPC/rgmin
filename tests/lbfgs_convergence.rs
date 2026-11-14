@@ -90,6 +90,7 @@ fn stateful_step_discards_curvature_when_its_line_search_cannot_move() {
             maxiter: 20,
         },
         &Control::default(),
+        None,
     );
     assert_eq!(x, array![0.0, 1.0]);
     assert_eq!(value, 24.5);

@@ -13,9 +13,9 @@ use crate::newton::{HessianObjective, minimize_newton};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
 use crate::pso::minimize_pso;
 use crate::qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
-use crate::report::Report;
+use crate::report::{Report, Status};
 use crate::session::Solver;
-use crate::step::{clip_owned, l2, next_istep, start_answer, take_step};
+use crate::step::{implicit_atom_cap, l2, next_istep, take_step};
 
 /// Minimize `obj` from `init` with the chosen conjugacy, restart, and line search.
 pub fn minimize<O>(
@@ -39,9 +39,6 @@ where
 }
 
 /// Minimize with any [`Method`].
-///
-/// The line-search and first-order methods return [`Error::Oracle`] when
-/// `init` answers with a non-finite value or gradient.
 pub fn minimize_method<O>(
     obj: &O,
     init: impl Into<Array1<f64>>,
@@ -71,9 +68,13 @@ where
             c2,
         } => minimize_pso(obj, init, control, n_particles, inertia, c1, c2),
         Method::Newton { kind: _ } | Method::Dogleg => Err(Error::NeedHessian),
-        Method::Fire { .. } | Method::Bb | Method::NewtonCg | Method::NewtonPcg => {
-            run_session(obj, init, control, method)
-        }
+        Method::Fire { .. }
+        | Method::Bb
+        | Method::QuickMin
+        | Method::Ode12r
+        | Method::Diis { .. }
+        | Method::NewtonCg
+        | Method::NewtonPcg => run_session(obj, init, control, method),
     }
 }
 
@@ -93,14 +94,19 @@ where
         coords: pos.clone(),
         steps: 0,
         grad_norm: f64::INFINITY,
-        stop_norm: control.stop_norm,
+        stop_norm: StopNorm::Two,
         grad: None,
+        status: Status::Iterating,
     };
     for _ in 0..control.maxiter {
         last = solver.step(obj, &mut pos)?;
-        if last.grad_norm < control.gtol {
+        if let Some(status) = control.halt(last.grad_norm, solver.free_len(obj.bounds())) {
+            last.status = status;
             break;
         }
+    }
+    if last.status == Status::Iterating {
+        last.status = Status::Budget;
     }
     Ok(last)
 }
@@ -139,14 +145,19 @@ where
         coords: pos.clone(),
         steps: 0,
         grad_norm: f64::INFINITY,
-        stop_norm: control.stop_norm,
+        stop_norm: StopNorm::Two,
         grad: None,
+        status: Status::Iterating,
     };
     for _ in 0..control.maxiter {
         last = solver.step_hess(obj, &mut pos)?;
-        if last.grad_norm < control.gtol {
+        if let Some(status) = control.halt(last.grad_norm, solver.free_len(obj.bounds())) {
+            last.status = status;
             break;
         }
+    }
+    if last.status == Status::Iterating {
+        last.status = Status::Budget;
     }
     Ok(last)
 }
@@ -186,14 +197,19 @@ where
         coords: pos.clone(),
         steps: 0,
         grad_norm: f64::INFINITY,
-        stop_norm: control.stop_norm,
+        stop_norm: StopNorm::Two,
         grad: None,
+        status: Status::Iterating,
     };
     for _ in 0..control.maxiter {
         last = solver.step_hvp(obj, &mut pos)?;
-        if last.grad_norm < control.gtol {
+        if let Some(status) = control.halt(last.grad_norm, solver.free_len(obj.bounds())) {
+            last.status = status;
             break;
         }
+    }
+    if last.status == Status::Iterating {
+        last.status = Status::Budget;
     }
     Ok(last)
 }
@@ -216,8 +232,9 @@ where
             dim: Objective::dim(obj),
         });
     }
-    pos = clip_owned(obj.bounds(), pos);
-    let (mut value, mut grad) = start_answer(obj, &pos)?;
+    pos = obj.bounds().clip(pos.view());
+    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    crate::step::refuse_non_finite(value, &grad)?;
     let mut dir = grad.mapv(|g| -g);
     let mut g_old = grad.clone();
     let mut d_old = dir.clone();
@@ -225,7 +242,7 @@ where
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
+        if let Some(status) = control.halt(gnorm, grad.len()) {
             return Ok(Report {
                 value,
                 coords: pos,
@@ -233,14 +250,35 @@ where
                 grad_norm: gnorm,
                 stop_norm: StopNorm::Two,
                 grad: None,
+                status,
             });
         }
-        let (npos, _, lsstep, _) =
-            take_step(obj, &pos, value, dir.view(), istep, linesearch, control);
-        pos = npos;
-        let ev = obj.value_and_gradient(pos.view());
-        value = ev.0;
-        grad = ev.1;
+        let t = take_step(
+            obj,
+            &pos,
+            value,
+            &grad,
+            dir.view(),
+            istep,
+            linesearch,
+            control,
+            implicit_atom_cap(control),
+        );
+        if t.energy_noise {
+            return Ok(Report {
+                value,
+                coords: pos,
+                steps: step + 1,
+                grad_norm: gnorm,
+                stop_norm: StopNorm::Two,
+                grad: None,
+                status: Status::NoiseFloor,
+            });
+        }
+        let lsstep = t.alpha;
+        pos = t.x;
+        value = t.f;
+        grad = t.g;
         let ctx = ConjugacyContext {
             current_gradient: grad.view(),
             previous_gradient: g_old.view(),
@@ -255,12 +293,14 @@ where
         d_old.assign(&dir);
         istep = next_istep(lsstep, control);
     }
+    let gnorm = l2(&grad);
     Ok(Report {
         value,
         coords: pos,
         steps: control.maxiter,
-        grad_norm: l2(&grad),
+        grad_norm: gnorm,
         stop_norm: StopNorm::Two,
         grad: None,
+        status: control.finish_status(gnorm, grad.len(), true),
     })
 }

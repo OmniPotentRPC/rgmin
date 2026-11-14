@@ -3,6 +3,7 @@
 #include "xts/optimize.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -185,7 +186,10 @@ int constrained() {
     return 0;
 }
 
-rgmin_status_t diag3_hvp(void*, DLManagedTensorVersioned const*,
+}  // namespace
+
+
+rgmin_status_t diag3_hvp(void*, DLManagedTensorVersioned const* /*x*/,
                          DLManagedTensorVersioned const* v, DLManagedTensorVersioned* hv) {
     double const lam[3] = {-3.0, 1.0, 4.0};
     double const* vp = data(v);
@@ -218,9 +222,9 @@ int eigen_block() {
     return 0;
 }
 
-}  // namespace
-
 int main() {
+    int block = eigen_block();
+    if (block != 0) return block;
     std::vector<double> x{1.0, 1.0};
     DLManagedTensorVersioned* t = rgmin::borrow_cpu_f64(x.data(), 2);
     if (t == nullptr) {
@@ -243,8 +247,19 @@ int main() {
     int st = solver.set_box(lo, hi, 2);
     int st_ipm = solver.set_highs_solver(RGMIN_HIGHS_IPM);
     int st_x = solver.set_highs_crossover(RGMIN_HIGHS_CROSSOVER_OFF);
-    std::printf("optimize nit=%zu grad=%g set_box=%d ipm=%d xover=%d\n", r.nit,
-                r.grad_norm, st, st_ipm, st_x);
+    solver.set_accept(RGMIN_ACCEPT_STEP);
+    solver.set_fire_variant(RGMIN_FIRE_GUENOLE2020);
+    if (solver.set_linesearch(RGMIN_LINESEARCH_WOLFE, 1e-4, 0.9, 20) != RGMIN_SUCCESS) {
+        std::fprintf(stderr, "linesearch setup failed\n");
+        return 12;
+    }
+    double sdir_s[2] = {1.0, 0.0};
+    double sdir_y[2] = {2.0, 0.0};
+    if (solver.push_pair(sdir_s, sdir_y, 2) != 0) {
+        return 13;
+    }
+    std::printf("optimize nit=%zu grad=%g set_box=%d ipm=%d xover=%d pairs=%zu\n", r.nit,
+                r.grad_norm, st, st_ipm, st_x, solver.pair_count());
 
     // Gradient (0.6, 0.8): two-norm 1, infinity norm 0.8. At gtol 0.9 the
     // infinity-norm session stops at the start.
@@ -311,9 +326,20 @@ int main() {
         std::fprintf(stderr, "callback H0 direction (%g, %g)\n", via_callback[0], via_callback[1]);
         return 9;
     }
-    int block = eigen_block();
-    if (block != 0) {
-        return block;
+    std::vector<int32_t> z{1, 1};
+    auto precon = rgmin::Precon::lindh(z).cell(10.0, 10.0, 10.0);
+    rgmin::Solver geom(rgmin::Method::Lbfgs, rgmin::Control{}, 6);
+    if (geom.set_precon(precon) != RGMIN_SUCCESS) {
+        return 14;
+    }
+    if (!std::isnan(geom.precon_scale())) {
+        return 15;
+    }
+    geom.clear_precon();
+    auto stamp = xts_abi_stamp();
+    if (stamp.abi_minor != RGMIN_ABI_VERSION_MINOR ||
+        stamp.layout_revision != RGMIN_ABI_LAYOUT_REVISION) {
+        return 16;
     }
     return constrained();
 }

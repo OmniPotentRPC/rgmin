@@ -2,7 +2,7 @@ project(
     'rgmin',
     'c',
     'cpp',
-    version: '0.2.0',
+    version: '0.6.0',
     meson_version: '>=1.3.0',
     default_options: ['buildtype=debugoptimized', 'warning_level=3'],
     license: 'MIT',
@@ -80,7 +80,7 @@ endif
 _rgmin_meta = []
 foreach _f : ['build.rs', 'cbindgen.toml']
     if not fs.is_file(_msproot / _f)
-        error('missing dest ' + _f)
+        error('missing ' + _f)
     endif
     _rgmin_meta += _f
 endforeach

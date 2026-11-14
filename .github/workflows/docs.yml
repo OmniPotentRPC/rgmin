@@ -46,7 +46,7 @@ jobs:
       id-token: write
     # The github-pages environment accepts main and gh-pages only.
     # A pull request still runs the export and the Sphinx build.
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

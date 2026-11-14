@@ -845,6 +845,9 @@ fn a_step_the_anchor_bonds_cannot_close_is_a_typed_error() {
         ..control()
     };
     let mut solver = Solver::new(Method::Steepest, control, 6);
+    // The default per-atom cap would shorten the sideways step enough
+    // that the anchor correction can still close the bond.
+    solver.set_atom_maxmove(0.0);
     solver.set_distance_constraints(set).unwrap();
     let mut y = x.clone();
     let r = solver.step(&obj, &mut y);

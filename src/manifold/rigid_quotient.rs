@@ -21,7 +21,7 @@ pub struct RigidQuotient;
 
 impl Manifold for RigidQuotient {
     fn required_dim(&self, n: usize) -> Result<(), usize> {
-        if n >= 6 && n.is_multiple_of(3) {
+        if n >= 3 && n.is_multiple_of(3) {
             Ok(())
         } else {
             Err(n)

@@ -156,7 +156,7 @@ pub fn qn_get_s(
             denom
         };
         sproj[i] = vg[i] / denom;
-        dsproj[i] = sproj[i] / denom;
+        dsproj[i] = sproj[i] * one / denom;
     }
     let s = -evecs.dot(&sproj);
     let dsda = evecs.dot(&dsproj);

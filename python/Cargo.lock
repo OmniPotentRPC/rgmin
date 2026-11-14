@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "rgmin"
-version = "0.2.0"
+version = "0.6.0"
 dependencies = [
  "cbindgen",
  "dlpk",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "rgmin-py"
-version = "0.2.0"
+version = "0.6.0"
 dependencies = [
  "ndarray",
  "pyo3",

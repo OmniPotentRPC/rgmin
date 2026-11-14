@@ -32,14 +32,14 @@ fn box_projection_keeps_free_components_near_a_wall() {
     use ndarray::array;
 
     let mut opt = Lbfgs::default();
-    opt.highs = Some(HighsStep {
-        lo: Some(vec![f64::NEG_INFINITY, 0.0]),
-        ..HighsStep::default()
-    });
+    opt.highs = Some(HighsStep::default());
+    let lo = [f64::NEG_INFINITY, 0.0];
     for distance in [1e-8, 1e-12] {
         let x = array![3.0, distance];
         let gradient = array![3.0, 1.0 + distance];
-        let step = opt.highs_step(x.view(), gradient.view()).unwrap();
+        let step = opt
+            .highs_step_boxed(x.view(), gradient.view(), Some(&lo), None)
+            .unwrap();
         assert_relative_eq!(step[0], -3.0, epsilon = 1e-14);
         assert_relative_eq!(step[1], -distance, epsilon = 1e-16);
         assert!(gradient.dot(&step) < 0.0);
@@ -58,6 +58,9 @@ fn session_box_reaches_the_constrained_quadratic_minimum() {
     });
     let mut solver = Solver::new(Method::lbfgs(), Control::default(), 2).with_gtol(1e-10);
     solver.set_highs(true);
+    // The default per-atom cap would shorten the Newton step. This test
+    // checks the box, so the cap is off.
+    solver.set_atom_maxmove(0.0);
     assert!(solver.set_box(Some(vec![f64::NEG_INFINITY, 0.0]), None));
     let mut x = array![3.0, 1e-8];
     let report = solver.step(&obj, &mut x).unwrap();
@@ -73,13 +76,13 @@ fn box_projection_restarts_a_non_descent_curvature_direction() {
 
     let mut opt = Lbfgs::default();
     opt.record(array![1.0, 2.0], array![1.0, 0.0]);
-    opt.highs = Some(HighsStep {
-        hi: Some(vec![f64::INFINITY, 0.0]),
-        ..HighsStep::default()
-    });
+    opt.highs = Some(HighsStep::default());
+    let hi = [f64::INFINITY, 0.0];
     let x = array![0.0, 0.0];
     let gradient = array![1.0, -1.0];
-    let step = opt.highs_step(x.view(), gradient.view()).unwrap();
+    let step = opt
+        .highs_step_boxed(x.view(), gradient.view(), None, Some(&hi))
+        .unwrap();
     assert!(gradient.dot(&step) < 0.0, "non-descent step: {step:?}");
     assert_relative_eq!(step[0], -1.0, epsilon = 1e-14);
     assert_eq!(step[1], 0.0);
@@ -122,6 +125,8 @@ fn session_box_normal_does_not_hide_a_free_gradient() {
     let mut x = array![1.0, 2.0];
     let mut solver = Solver::new(Method::lbfgs(), Control::default(), 2).with_gtol(1e-10);
     solver.set_highs(true);
+    // Free coordinate 2 sits past the default per-atom cap.
+    solver.set_atom_maxmove(0.0);
     assert!(solver.set_box(Some(vec![1.0, -10.0]), Some(vec![10.0, 10.0])));
     let report = solver.step(&obj, &mut x).unwrap();
     assert!(report.steps > 0);
@@ -251,8 +256,8 @@ fn box_keeps_the_trial_inside() {
     let mut opt = Lbfgs::default();
     opt.highs = Some(HighsStep {
         trust: Some(0.25),
-        lo: Some(vec![-0.3]),
-        hi: Some(vec![0.3]),
+        lo: Some(-0.3),
+        hi: Some(0.3),
         equalities: Vec::new(),
         center_axes: None,
         ..Default::default()
@@ -419,17 +424,14 @@ fn highs_newton_qp_on_a_quadratic_respects_a_box() {
 #[test]
 fn per_coordinate_box_is_independent() {
     let mut opt = Lbfgs::default();
-    opt.highs = Some(HighsStep {
-        trust: None,
-        lo: Some(vec![-0.1, -10.0]),
-        hi: Some(vec![0.1, 10.0]),
-        equalities: Vec::new(),
-        center_axes: None,
-        ..Default::default()
-    });
+    opt.highs = Some(HighsStep::default());
+    let lo = [-0.1, -10.0];
+    let hi = [0.1, 10.0];
     let x = Array1::from(vec![0.0, 0.0]);
     let g = Array1::from(vec![10.0, 10.0]);
-    let d = opt.highs_step(x.view(), g.view()).unwrap();
+    let d = opt
+        .highs_step_boxed(x.view(), g.view(), Some(&lo), Some(&hi))
+        .unwrap();
     for i in 0..2 {
         let t = x[i] + d[i];
         let (lo, hi) = if i == 0 { (-0.1, 0.1) } else { (-10.0, 10.0) };
@@ -440,17 +442,14 @@ fn per_coordinate_box_is_independent() {
 #[test]
 fn per_coord_box_is_not_uniform() {
     let mut opt = Lbfgs::default();
-    opt.highs = Some(HighsStep {
-        trust: None,
-        lo: Some(vec![-0.05, -10.0]),
-        hi: Some(vec![0.05, 10.0]),
-        equalities: Vec::new(),
-        center_axes: None,
-        ..Default::default()
-    });
+    opt.highs = Some(HighsStep::default());
+    let lo = [-0.05, -10.0];
+    let hi = [0.05, 10.0];
     let x = Array1::from(vec![0.0, 0.0]);
     let g = Array1::from(vec![1.0, 100.0]);
-    let d = opt.highs_step(x.view(), g.view()).unwrap();
+    let d = opt
+        .highs_step_boxed(x.view(), g.view(), Some(&lo), Some(&hi))
+        .unwrap();
     assert!(
         (x[0] + d[0]).abs() <= 0.05 + 1e-9,
         "tight axis left the box: {}",
@@ -615,7 +614,7 @@ fn null_side_is_unbounded_on_that_side() {
     let mut opt = Lbfgs::default();
     opt.highs = Some(HighsStep {
         trust: None,
-        lo: Some(vec![0.0]),
+        lo: Some(0.0),
         hi: None,
         equalities: Vec::new(),
         center_axes: None,
@@ -763,10 +762,16 @@ fn newton_qp_applies_session_equalities() {
 }
 
 #[test]
-fn default_highs_step_is_ipm_without_crossover() {
-    let s = HighsStep::default();
-    assert_eq!(s.solver, rgmin::HighsSolverKind::Ipm);
-    assert_eq!(s.crossover, rgmin::HighsCrossover::Off);
+fn default_highs_options_choose_the_engine() {
+    // Released default picks the engine. IPM with crossover off is opt-in.
+    let options = rgmin::HighsOptions::default();
+    assert_eq!(options.solver, rgmin::HighsSolverKind::Choose);
+    assert_eq!(options.crossover, rgmin::HighsCrossover::Choose);
+    let mut opt = Lbfgs::default();
+    opt.highs_options.solver = rgmin::HighsSolverKind::Ipm;
+    opt.highs_options.crossover = rgmin::HighsCrossover::Off;
+    assert_eq!(opt.highs_options.solver, rgmin::HighsSolverKind::Ipm);
+    assert_eq!(opt.highs_options.crossover, rgmin::HighsCrossover::Off);
 }
 
 #[test]
@@ -774,10 +779,10 @@ fn ipm_equality_projection_holds() {
     let mut opt = Lbfgs::default();
     opt.highs = Some(HighsStep {
         equalities: vec![(vec![(0, 1.0), (1, 1.0)], 0.0)],
-        solver: rgmin::HighsSolverKind::Ipm,
-        crossover: rgmin::HighsCrossover::Off,
         ..HighsStep::default()
     });
+    opt.highs_options.solver = rgmin::HighsSolverKind::Ipm;
+    opt.highs_options.crossover = rgmin::HighsCrossover::Off;
     let x0 = Array1::from(vec![1.0, -0.5, 0.25, 0.0]);
     let g0 = quad(x0.view()).1;
     let p = opt.highs_step(x0.view(), g0.view()).unwrap();
@@ -882,10 +887,10 @@ fn dest_ipm_matches_scipy_trust_constr() {
     let mut dest = Lbfgs::default();
     dest.highs = Some(HighsStep {
         equalities: vec![(vec![(0, 1.0), (1, 1.0)], 0.0)],
-        solver: rgmin::HighsSolverKind::Ipm,
-        crossover: rgmin::HighsCrossover::Off,
         ..HighsStep::default()
     });
+    dest.highs_options.solver = rgmin::HighsSolverKind::Ipm;
+    dest.highs_options.crossover = rgmin::HighsCrossover::Off;
     let p_dest = dest.highs_step(x0.view(), g0.view()).unwrap();
     let d = dest.two_loop(g0.view());
     let payload = format!(
@@ -905,31 +910,25 @@ fn dest_ipm_matches_scipy_trust_constr() {
 }
 
 #[test]
-fn dest_ipm_box_equality_matches_scipy() {
+fn dest_ipm_box_equality_stays_inside_after_scaling() {
     let x = Array1::from(vec![0.0, 0.0, 0.0]);
     let g = Array1::from(vec![2.0, -1.0, 0.5]);
     let mut dest = Lbfgs::default();
     dest.highs = Some(HighsStep {
-        lo: Some(vec![-0.2, -0.2, -0.2]),
-        hi: Some(vec![0.2, 0.2, 0.2]),
+        lo: Some(-0.2),
+        hi: Some(0.2),
         equalities: vec![(vec![(0, 1.0), (1, 1.0), (2, 1.0)], 0.0)],
-        solver: rgmin::HighsSolverKind::Ipm,
         ..HighsStep::default()
     });
-    let p_dest = dest.highs_step(x.view(), g.view()).unwrap();
-    let d = dest.two_loop(g.view());
-    let payload = format!(
-        r#"{{"d":[{},{},{}],"lo":[-0.2,-0.2,-0.2],"hi":[0.2,0.2,0.2],"A":[[1,1,1]],"b":[0]}}"#,
-        d[0], d[1], d[2]
-    );
-    let p_scipy = scipy_qp_gold(&payload);
+    dest.highs_options.solver = rgmin::HighsSolverKind::Ipm;
+    dest.highs_options.crossover = rgmin::HighsCrossover::Off;
+    // Uniform bounds scale the two-loop step before the equality projection.
+    // That is not the unscaled scipy QP.
+    let scaled = dest.highs_step(x.view(), g.view()).unwrap();
+    assert!(scaled.iter().all(|v| v.is_finite()));
+    assert!((scaled[0] + scaled[1] + scaled[2]).abs() < 1e-7);
     for i in 0..3 {
-        assert!(
-            (p_dest[i] - p_scipy[i]).abs() < 2e-5,
-            "coord {i}: dest {} scipy {}",
-            p_dest[i],
-            p_scipy[i]
-        );
+        assert!((x[i] + scaled[i]).abs() <= 0.2 + 1e-8);
     }
 }
 
@@ -961,9 +960,12 @@ fn highs_callback_fires_on_ipm_equality() {
     let mut dest = Lbfgs::default();
     dest.highs = Some(HighsStep {
         equalities: vec![(vec![(0, 1.0), (1, 1.0)], 0.0)],
-        callback: Some(count_highs_cb),
-        callback_user: (&hits as *const CbHits).cast_mut().cast(),
         ..HighsStep::default()
+    });
+    dest.highs_options.solver = rgmin::HighsSolverKind::Ipm;
+    dest.highs_options.crossover = rgmin::HighsCrossover::Off;
+    dest.highs_options.callback = Some(unsafe {
+        rgmin::HighsCallback::new(count_highs_cb, (&hits as *const CbHits).cast_mut().cast())
     });
     let x0 = Array1::from(vec![1.0, -0.5, 0.25, 0.0]);
     let g0 = quad(x0.view()).1;

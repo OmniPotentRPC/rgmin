@@ -4,13 +4,8 @@ use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::error::{Error, Result};
-use crate::lbfgs_qp::side_at;
-use crate::newton::HessianObjective;
 
-/// `true` unless `lo <= hi`. A NaN on either side is out of order.
-fn out_of_order(lo: f64, hi: f64) -> bool {
-    lo.is_nan() || hi.is_nan() || lo > hi
-}
+use crate::newton::HessianObjective;
 
 pub(crate) struct BoxObjective<'a, O: ?Sized> {
     inner: &'a O,
@@ -39,12 +34,23 @@ impl<'a, O: DifferentiableObjective<f64> + ?Sized> BoxObjective<'a, O> {
         for k in 0..dim {
             let requested_low = side_at(lo.as_deref(), k).unwrap_or(f64::NEG_INFINITY);
             let requested_high = side_at(hi.as_deref(), k).unwrap_or(f64::INFINITY);
-            if out_of_order(requested_low, requested_high) || out_of_order(low[k], high[k]) {
+            if !matches!(
+                requested_low.partial_cmp(&requested_high),
+                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+            ) || !matches!(
+                low[k].partial_cmp(&high[k]),
+                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+            ) {
                 return Err(Error::Highs("invalid coordinate box".into()));
             }
             low[k] = low[k].max(requested_low);
             high[k] = high[k].min(requested_high);
-            if out_of_order(low[k], high[k]) {
+            if !matches!(
+                low[k].partial_cmp(&high[k]),
+                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+            ) || low[k] == f64::INFINITY
+                || high[k] == f64::NEG_INFINITY
+            {
                 return Err(Error::Highs("invalid coordinate box".into()));
             }
         }
@@ -70,6 +76,9 @@ impl<'a, O: DifferentiableObjective<f64> + ?Sized> BoxObjective<'a, O> {
         let dim = Objective::dim(self.inner);
         if x.len() != dim {
             return Err(Error::Dim { got: x.len(), dim });
+        }
+        if x.iter().any(|value| !value.is_finite()) {
+            return Err(Error::Highs("non-finite point in coordinate box".into()));
         }
         let mut changed = false;
         for (k, value) in x.iter_mut().enumerate() {
@@ -133,5 +142,143 @@ impl<O: HessianObjective + ?Sized> HessianObjective for BoxObjective<'_, O> {
         } else {
             Array2::from_elem((x.len(), x.len()), f64::NAN)
         }
+    }
+}
+
+/// A missing or empty side is unbounded; length one broadcasts.
+pub(crate) fn side_at(side: Option<&[f64]>, k: usize) -> Option<f64> {
+    match side {
+        Some([value]) => Some(*value),
+        Some(values) => values.get(k).copied(),
+        None => None,
+    }
+}
+
+/// Project a direction into the displacement box, retaining free coordinates.
+pub(crate) fn project_direction(
+    bounds: &Bounds<f64>,
+    x: ArrayView1<f64>,
+    grad: ArrayView1<f64>,
+    mut direction: Array1<f64>,
+) -> Array1<f64> {
+    let project = |p: &mut Array1<f64>| {
+        for k in 0..p.len() {
+            p[k] = p[k].clamp(bounds.low[k] - x[k], bounds.high[k] - x[k]);
+            // Subtracting the wall and adding the displacement round
+            // separately. Keep the reconstructed trial inside the box;
+            // the adjacent displacement toward zero bounds that error.
+            if x[k] + p[k] < bounds.low[k] {
+                p[k] = p[k].next_up();
+            } else if x[k] + p[k] > bounds.high[k] {
+                p[k] = p[k].next_down();
+            }
+        }
+    };
+    project(&mut direction);
+    if grad.dot(&direction) >= 0.0 {
+        direction = grad.mapv(|value| -value);
+        project(&mut direction);
+    }
+    direction
+}
+
+/// Remove outward wall reactions from a force or velocity.
+pub(crate) fn project_tangent(bounds: &Bounds<f64>, x: &Array1<f64>, v: &mut Array1<f64>) {
+    for k in 0..v.len() {
+        if (x[k] <= bounds.low[k] && v[k] < 0.0) || (x[k] >= bounds.high[k] && v[k] > 0.0) {
+            v[k] = 0.0;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn a_wall_preserves_the_free_direction_and_descent() {
+        let bounds = Bounds::new(
+            array![f64::NEG_INFINITY, 0.0],
+            array![f64::INFINITY, f64::INFINITY],
+            0.0,
+        );
+        for distance in [1e-8, 1e-12] {
+            let x = array![3.0, distance];
+            let gradient = array![3.0, 1.0 + distance];
+            let step = project_direction(&bounds, x.view(), gradient.view(), -&gradient);
+            assert!((step[0] + 3.0).abs() < 1e-14);
+            assert!((step[1] + distance).abs() < 1e-16);
+            assert!(gradient.dot(&step) < 0.0);
+        }
+        let mut model = crate::Lbfgs::default();
+        model.record(array![1.0, 2.0], array![1.0, 0.0]);
+        let bounds = Bounds::new(
+            array![f64::NEG_INFINITY, f64::NEG_INFINITY],
+            array![f64::INFINITY, 0.0],
+            0.0,
+        );
+        let x = array![0.0, 0.0];
+        let gradient = array![1.0, -1.0];
+        let step = project_direction(
+            &bounds,
+            x.view(),
+            gradient.view(),
+            model.two_loop(gradient.view()),
+        );
+        assert!(gradient.dot(&step) < 0.0);
+        assert!((step[0] + 1.0).abs() < 1e-14);
+        assert_eq!(step[1], 0.0);
+    }
+
+    #[test]
+    fn projected_displacement_reconstructs_inside_a_rounded_wall() {
+        let wall = 0.02_f64.ln().next_up();
+        for sign in [-1.0, 1.0] {
+            let x = array![sign * 0.32673629493102274, 1.0];
+            let lo = if sign > 0.0 { wall } else { f64::NEG_INFINITY };
+            let hi = if sign < 0.0 { -wall } else { f64::INFINITY };
+            let bounds = Bounds::new(array![lo, -10.0], array![hi, 10.0], 0.0);
+            let gradient = array![sign * 10.0, 1.0];
+            let step = project_direction(&bounds, x.view(), gradient.view(), -&gradient);
+            let trial = &x + &step;
+            assert!(trial[0] >= lo && trial[0] <= hi, "outside wall: {trial:?}");
+            assert!((trial[0] - sign * wall).abs() <= 2.0 * f64::EPSILON);
+            assert_eq!(trial[1], 0.0);
+            assert!(gradient.dot(&step) < 0.0);
+        }
+    }
+
+    #[test]
+    fn invalid_boxes_and_points_never_reach_the_callback() {
+        let calls = AtomicUsize::new(0);
+        let objective = crate::Oracle::unbounded(2, |x| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            (x.dot(&x), 2.0 * &x)
+        });
+        for lo in [
+            vec![f64::NAN],
+            vec![f64::INFINITY],
+            vec![1.0, 2.0, 3.0],
+            vec![1e13],
+        ] {
+            assert!(BoxObjective::new(&objective, Some(lo), None).is_err());
+        }
+        let guarded = BoxObjective::new(&objective, Some(vec![0.0]), Some(vec![1.0])).unwrap();
+        for x in [array![-1.0, 0.0], array![0.0, 2.0], array![f64::NAN, 0.0]] {
+            assert_eq!(guarded.eval(x.view()), f64::INFINITY);
+            assert!(guarded.grad(x.view()).iter().all(|v| v.is_nan()));
+            let (value, gradient) = guarded.value_and_gradient(x.view());
+            assert_eq!(value, f64::INFINITY);
+            assert!(gradient.iter().all(|v| v.is_nan()));
+        }
+        assert!(guarded.clip_start(&mut array![f64::NAN, 0.0]).is_err());
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        let mut start = array![-1.0, 2.0];
+        assert!(guarded.clip_start(&mut start).unwrap());
+        assert_eq!(start, array![0.0, 1.0]);
+        assert_eq!(guarded.eval(start.view()), 1.0);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 }

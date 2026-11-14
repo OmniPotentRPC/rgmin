@@ -71,6 +71,8 @@ fn control(steps: usize) -> Control {
         istep: 0.1,
         maxmove: None,
         stop_norm: rgmin::StopNorm::Two,
+        ftol_rel: None,
+        noise_floor: None,
     }
 }
 

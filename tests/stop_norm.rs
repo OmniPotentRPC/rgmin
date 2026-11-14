@@ -260,6 +260,8 @@ fn report_names_the_norm_of_grad_norm() {
         istep: 0.1,
         maxmove: Some(0.2),
         stop_norm: StopNorm::MaxAtom,
+        ftol_rel: None,
+        noise_floor: None,
     };
     let obj = Oracle::unbounded(21, lj_cluster);
     let rep =

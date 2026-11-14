@@ -17,7 +17,7 @@ fn main() {
         &obj,
         array![0.0, 0.0],
         &Control {
-            maxiter: 10,
+            maxiter: 40,
             gtol: 1e-12,
             ..Control::default()
         },

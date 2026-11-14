@@ -4,9 +4,12 @@ use ndarray::{Array1, ArrayView1};
 
 /// Accept conditions (Armijo, Wolfe, Goldstein).
 pub mod conditions;
+mod interp;
+mod known;
 mod supplied;
 mod zoom;
 
+pub use known::LineOutcome;
 pub use supplied::{SearchStep, SuppliedSearch};
 pub use zoom::zoom;
 
@@ -66,6 +69,43 @@ pub enum LineSearch {
     },
 }
 
+/// Optional policy for objective values whose accuracy is lower than their gradients.
+/// Existing line-search entry points use the default four-epsilon window.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LineSearchOptions {
+    relative_objective_error: Option<f64>,
+}
+
+impl LineSearchOptions {
+    /// Permit approximate Wolfe acceptance up to `relative * |f0|` above `f0`.
+    ///
+    /// This is an acceptance policy, not a certified oracle error bound.
+    /// Both slope conditions still apply; gradient stopping is independent.
+    /// Negative and nonfinite values are rejected. Zero permits no rise.
+    pub fn with_objective_roundoff(relative: f64) -> Option<Self> {
+        (relative.is_finite() && relative >= 0.0).then_some(Self {
+            relative_objective_error: Some(relative),
+        })
+    }
+
+    pub(crate) fn accepts_approximate_wolfe(
+        self,
+        phi: f64,
+        phi0: f64,
+        dphi: f64,
+        dphi0: f64,
+        c1: f64,
+        c2: f64,
+    ) -> bool {
+        match self.relative_objective_error {
+            Some(relative) => {
+                conditions::approximate_strong_wolfe(phi, phi0, dphi, dphi0, c1, c2, relative)
+            }
+            None => conditions::roundoff_strong_wolfe(phi, phi0, dphi, dphi0, c1, c2),
+        }
+    }
+}
+
 impl Default for LineSearch {
     fn default() -> Self {
         Self::Brent {
@@ -78,12 +118,12 @@ impl Default for LineSearch {
 impl LineSearch {
     /// Returns `(x_new, f_new, |α|)` if the trial beat `f0`, else the start.
     ///
-    /// A trial answered with a non-finite value or gradient fails every
-    /// decrease test. A non-finite start or `dir` returns the start
-    /// without probing.
+    /// Evaluates the start once, then runs [`Self::search_from`] with no
+    /// step cap. A caller that already holds `f` and `g` at `pos` should
+    /// call [`Self::search_from`] directly and save that evaluation.
     pub fn search<F>(
         &self,
-        oracle: F,
+        mut oracle: F,
         pos: ArrayView1<'_, f64>,
         dir: ArrayView1<'_, f64>,
         istep: f64,
@@ -91,11 +131,16 @@ impl LineSearch {
     where
         F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
     {
-        self.search_path(oracle, &mut Line { pos, dir }, istep)
+        let (f0, g0) = oracle(pos);
+        match self.search_from(&mut oracle, pos, f0, g0.view(), dir, istep, f64::INFINITY) {
+            Some(out) => (out.x, out.f, out.alpha),
+            None => (pos.to_owned(), f0, 0.0),
+        }
     }
 
-    /// [`Self::search`] along any [`Path`]. A point the path cannot
-    /// produce scores as a non-finite value.
+    /// Line search along any [`Path`]. A point the path cannot produce
+    /// scores as a non-finite value. Straight-line [`Self::search`] uses
+    /// [`Self::search_from`].
     pub(crate) fn search_path<F, P>(
         &self,
         mut oracle: F,
@@ -146,6 +191,7 @@ pub(crate) trait Path {
 }
 
 /// The straight line `pos + t dir`.
+#[allow(dead_code)]
 pub(crate) struct Line<'a> {
     pub(crate) pos: ArrayView1<'a, f64>,
     pub(crate) dir: ArrayView1<'a, f64>,

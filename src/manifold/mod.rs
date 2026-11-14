@@ -32,11 +32,14 @@ mod complex_circle;
 mod constant;
 mod euclidean;
 mod euclidean_complex;
+mod grassmann;
+mod hyperbolic;
 mod multinomial;
 mod multinomial_ds;
 mod multinomial_sym;
 mod mw_rigid;
 mod oblique;
+mod poincare;
 mod positive;
 mod rigid_quotient;
 mod se3;
@@ -47,10 +50,12 @@ mod sphere;
 mod sphere_complex;
 mod stiefel;
 mod symmetric;
+mod unitary;
 
 pub use centered::{
-    CenteredMatrix, inner as inner_centered, is_centered, pack as pack_centered,
-    typical_dist as typical_dist_centered, unpack as unpack_centered,
+    CenterMode, CenteredMatrix, inner as inner_centered, is_centered, is_centered_mode,
+    pack as pack_centered, typical_dist as typical_dist_centered,
+    typical_dist_mode as typical_dist_centered_mode, unpack as unpack_centered,
 };
 pub use complex_circle::ComplexCircle;
 pub use constant::{
@@ -60,6 +65,8 @@ pub use euclidean::Euclidean;
 pub use euclidean_complex::{
     EuclideanComplex, inner as inner_cplx, is_euclidean_complex, typical_dist as typical_dist_cplx,
 };
+pub use grassmann::Grassmann;
+pub use hyperbolic::{Hyperbolic, minkowski, pack, unpack};
 pub use multinomial::Multinomial;
 pub use multinomial_ds::{
     MultinomialDoublyStochastic, inner as inner_ds, is_doubly_stochastic, pack as pack_ds,
@@ -71,6 +78,7 @@ pub use multinomial_sym::{
 };
 pub use mw_rigid::MwRigid;
 pub use oblique::Oblique;
+pub use poincare::PoincareBall;
 pub use positive::{Positive, inner as inner_pos, is_positive, typical_dist as typical_dist_pos};
 pub use rigid_quotient::RigidQuotient;
 pub use se3::Se3;
@@ -88,6 +96,10 @@ pub use stiefel::{Stiefel, StiefelNp};
 pub use symmetric::{
     Symmetric, inner as inner_sym, is_symmetric, pack as pack_sym, side as side_sym,
     typical_dist as typical_dist_sym, unpack as unpack_sym,
+};
+pub use unitary::{
+    Unitary, inner as inner_unitary, is_unitary, pack as pack_unitary, side as side_unitary,
+    typical_dist as typical_dist_unitary, unpack as unpack_unitary,
 };
 
 /// Which embedded geometry a session retracts onto.
@@ -111,6 +123,24 @@ pub enum ManifoldKind {
     /// Mass-weighted Eckart: Sella IRC / Page–McIver metric on
     /// the same quotient. Masses from [`crate::Solver::set_masses`].
     MwRigid,
+    /// Real Grassmann Gr(n,1), or the session's configured factor shape.
+    Grassmann,
+    /// Real Grassmann Gr(n,p), packed column-major.
+    GrassmannP {
+        /// Ambient dimension.
+        n: usize,
+        /// Number of orthonormal columns.
+        p: usize,
+    },
+    /// Hyperboloid in the Minkowski metric, packed length at least two.
+    Hyperbolic,
+    /// Open unit ball with the Poincare metric.
+    PoincareBall,
+    /// Complex unitary U(n), interleaved row-major length 2*n*n.
+    Unitary {
+        /// Matrix side length.
+        n: usize,
+    },
     /// Product of `m` unit spheres in \(\mathbb{R}^n\). Packed
     /// column-major, length `n*m`. manopt `obliquefactory`.
     Oblique {
@@ -200,6 +230,67 @@ pub enum ManifoldKind {
 }
 
 impl ManifoldKind {
+    /// True when the retraction is the translation `x + v`.
+    pub(crate) fn retract_is_translation(self) -> bool {
+        matches!(self, Self::Euclidean | Self::RigidQuotient | Self::MwRigid)
+    }
+
+    /// Complex unitary U(n), interleaved row-major length 2*n*n.
+    pub fn unitary(n: usize) -> Self {
+        Self::Unitary { n }
+    }
+
+    /// Bind the Grassmann packing to Gr(n,p); no shape means Gr(len,1).
+    pub fn grassmann(shape: Option<(usize, usize)>, len: usize) -> Grassmann {
+        match shape {
+            Some((n, p)) => Grassmann { n, p },
+            None => Grassmann {
+                n: len.max(1),
+                p: 1,
+            },
+        }
+    }
+
+    /// Retract with an optional Grassmann factor shape.
+    pub fn retract_shaped(
+        self,
+        shape: Option<(usize, usize)>,
+        x: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> Array1<f64> {
+        match self {
+            Self::Grassmann => Self::grassmann(shape, x.len()).retract(x, v),
+            other => other.retract(x, v),
+        }
+    }
+
+    /// Project with an optional Grassmann factor shape.
+    pub fn project_shaped(
+        self,
+        shape: Option<(usize, usize)>,
+        x: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> Array1<f64> {
+        match self {
+            Self::Grassmann => Self::grassmann(shape, x.len()).project(x, v),
+            other => other.project(x, v),
+        }
+    }
+
+    /// Transport with an optional Grassmann factor shape.
+    pub fn transport_shaped(
+        self,
+        shape: Option<(usize, usize)>,
+        x_from: &Array1<f64>,
+        x_to: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> Array1<f64> {
+        match self {
+            Self::Grassmann => Self::grassmann(shape, x_to.len()).transport(x_from, x_to, v),
+            other => other.transport(x_from, x_to, v),
+        }
+    }
+
     /// Stiefel \(\mathrm{St}(n,p)\). `p = 1` is the sphere packing.
     pub fn stiefel(n: usize, p: usize) -> Self {
         if p <= 1 {
@@ -302,7 +393,12 @@ impl ManifoldKind {
             | Self::MultinomialDoublyStochastic { .. }
             | Self::MultinomialSymmetric { .. }
             | Self::SphereComplex { .. }
-            | Self::Positive { .. } => false,
+            | Self::Positive { .. }
+            | Self::Grassmann
+            | Self::GrassmannP { .. }
+            | Self::Hyperbolic
+            | Self::PoincareBall
+            | Self::Unitary { .. } => false,
         }
     }
 
@@ -316,6 +412,10 @@ impl ManifoldKind {
             Self::Se3 => "se3",
             Self::RigidQuotient => "rigid_quotient",
             Self::MwRigid => "mw_rigid",
+            Self::Grassmann | Self::GrassmannP { .. } => "grassmann",
+            Self::Hyperbolic => "hyperbolic",
+            Self::PoincareBall => "poincare_ball",
+            Self::Unitary { .. } => "unitary",
             Self::Oblique { .. } => "oblique",
             Self::Multinomial => "multinomial",
             Self::Spd => "spd",
@@ -363,6 +463,17 @@ impl Manifold for ManifoldKind {
             Self::Se3 => Se3.required_dim(n),
             Self::RigidQuotient => RigidQuotient.required_dim(n),
             Self::MwRigid => MwRigid.required_dim(n),
+            Self::Grassmann => {
+                if n >= 2 {
+                    Ok(())
+                } else {
+                    Err(n)
+                }
+            }
+            Self::GrassmannP { n: gn, p } => Grassmann { n: *gn, p: *p }.required_dim(n),
+            Self::Hyperbolic => Hyperbolic.required_dim(n),
+            Self::PoincareBall => PoincareBall.required_dim(n),
+            Self::Unitary { n: un } => Unitary { n: *un }.required_dim(n),
             Self::Oblique { n: an, m } => Oblique { n: *an, m: *m }.required_dim(n),
             Self::Multinomial => Multinomial.required_dim(n),
             Self::StiefelP { n: sn, p } => StiefelNp { n: *sn, p: *p }.required_dim(n),
@@ -396,6 +507,11 @@ impl Manifold for ManifoldKind {
             Self::Se3 => Se3.project(x, v),
             Self::RigidQuotient => RigidQuotient.project(x, v),
             Self::MwRigid => MwRigid.project(x, v),
+            Self::Grassmann => Self::grassmann(None, x.len()).project(x, v),
+            Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.project(x, v),
+            Self::Hyperbolic => Hyperbolic.project(x, v),
+            Self::PoincareBall => PoincareBall.project(x, v),
+            Self::Unitary { n } => Unitary { n: *n }.project(x, v),
             Self::Oblique { n, m } => Oblique { n: *n, m: *m }.project(x, v),
             Self::Multinomial => Multinomial.project(x, v),
             Self::StiefelP { n, p } => StiefelNp { n: *n, p: *p }.project(x, v),
@@ -429,6 +545,11 @@ impl Manifold for ManifoldKind {
             Self::Se3 => Se3.retract(x, v),
             Self::RigidQuotient => RigidQuotient.retract(x, v),
             Self::MwRigid => MwRigid.retract(x, v),
+            Self::Grassmann => Self::grassmann(None, x.len()).retract(x, v),
+            Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.retract(x, v),
+            Self::Hyperbolic => Hyperbolic.retract(x, v),
+            Self::PoincareBall => PoincareBall.retract(x, v),
+            Self::Unitary { n } => Unitary { n: *n }.retract(x, v),
             Self::Oblique { n, m } => Oblique { n: *n, m: *m }.retract(x, v),
             Self::Multinomial => Multinomial.retract(x, v),
             Self::StiefelP { n, p } => StiefelNp { n: *n, p: *p }.retract(x, v),
@@ -462,6 +583,11 @@ impl Manifold for ManifoldKind {
             Self::Se3 => Se3.transport(x_from, x_to, v),
             Self::RigidQuotient => RigidQuotient.transport(x_from, x_to, v),
             Self::MwRigid => MwRigid.transport(x_from, x_to, v),
+            Self::Grassmann => Self::grassmann(None, x_to.len()).transport(x_from, x_to, v),
+            Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.transport(x_from, x_to, v),
+            Self::Hyperbolic => Hyperbolic.transport(x_from, x_to, v),
+            Self::PoincareBall => PoincareBall.transport(x_from, x_to, v),
+            Self::Unitary { n } => Unitary { n: *n }.transport(x_from, x_to, v),
             Self::Oblique { n, m } => Oblique { n: *n, m: *m }.transport(x_from, x_to, v),
             Self::Multinomial => Multinomial.transport(x_from, x_to, v),
             Self::StiefelP { n, p } => StiefelNp { n: *n, p: *p }.transport(x_from, x_to, v),
@@ -497,6 +623,11 @@ impl Manifold for ManifoldKind {
             Self::Se3 => Se3.egrad2rgrad(x, egrad),
             Self::RigidQuotient => RigidQuotient.egrad2rgrad(x, egrad),
             Self::MwRigid => MwRigid.egrad2rgrad(x, egrad),
+            Self::Grassmann => Self::grassmann(None, x.len()).egrad2rgrad(x, egrad),
+            Self::GrassmannP { n, p } => Grassmann { n: *n, p: *p }.egrad2rgrad(x, egrad),
+            Self::Hyperbolic => Hyperbolic.egrad2rgrad(x, egrad),
+            Self::PoincareBall => PoincareBall.egrad2rgrad(x, egrad),
+            Self::Unitary { n } => Unitary { n: *n }.egrad2rgrad(x, egrad),
             Self::Oblique { n, m } => Oblique { n: *n, m: *m }.egrad2rgrad(x, egrad),
             Self::Multinomial => Multinomial.egrad2rgrad(x, egrad),
             Self::StiefelP { n, p } => StiefelNp { n: *n, p: *p }.egrad2rgrad(x, egrad),

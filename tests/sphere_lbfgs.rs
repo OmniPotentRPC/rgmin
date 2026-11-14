@@ -192,3 +192,74 @@ fn sphere_lbfgs_resolves_a_stiff_ritz_initializer() {
     }
     assert!(residual < 1e-6, "residual {residual}");
 }
+
+#[test]
+fn sphere_disabled_caps_preserve_the_unbounded_path() {
+    let path = |cap| {
+        let objective = Rayleigh::new();
+        let n = objective.diagonal.len();
+        let mut solver = Solver::new(
+            Method::Lbfgs { memory: n },
+            Control {
+                gtol: 0.0,
+                maxmove: cap,
+                ..Control::default()
+            },
+            n,
+        );
+        solver.set_manifold(ManifoldKind::Sphere);
+        solver.set_accept(Accept::Energy);
+        let mut point = Array1::from_elem(n, 1.0 / (n as f64).sqrt());
+        let mut points = Vec::new();
+        for _ in 0..4 {
+            solver.step(&objective, &mut point).unwrap();
+            points.push(point.clone());
+        }
+        (points, objective.calls.load(Ordering::Relaxed))
+    };
+    let reference = path(None);
+    for cap in [Some(0.0), Some(-1.0), Some(f64::NAN), Some(f64::INFINITY)] {
+        let observed = path(cap);
+        assert_eq!(observed.1, reference.1);
+        assert_eq!(observed.0, reference.0);
+    }
+}
+
+#[test]
+fn sphere_atom_cap_controls_every_oracle_trial_and_takes_precedence() {
+    let origin = Array1::from_elem(6, 1.0 / 6.0_f64.sqrt());
+    let calls = AtomicUsize::new(0);
+    let objective = rgmin::Oracle::unbounded(6, |point| {
+        calls.fetch_add(1, Ordering::Relaxed);
+        assert!((point.dot(&point) - 1.0).abs() < 1e-12);
+        let displacement = &point - &origin;
+        for atom in 0..2 {
+            let length = (0..3)
+                .map(|k| displacement[3 * atom + k].powi(2))
+                .sum::<f64>()
+                .sqrt();
+            assert!(length <= 0.05 + 1e-12, "atom displacement {length}");
+        }
+        let gradient = &array![-0.02, 0.03, 0.4, 3.0, 30.0, 100.0] * &point;
+        (0.5 * point.dot(&gradient), gradient)
+    });
+    let mut solver = Solver::new(
+        Method::lbfgs(),
+        Control {
+            gtol: 0.0,
+            maxmove: Some(0.001),
+            ..Control::default()
+        },
+        6,
+    );
+    solver.set_manifold(ManifoldKind::Sphere);
+    solver.set_accept(Accept::Energy);
+    solver.set_atom_maxmove(0.05);
+    let mut point = origin.clone();
+    let initial_value = objective.eval(point.view());
+    let report = solver.step(&objective, &mut point).unwrap();
+    assert!(report.value < initial_value);
+    let displacement = &point - &origin;
+    assert!(displacement.dot(&displacement).sqrt() > 0.001);
+    assert!(calls.load(Ordering::Relaxed) > 2);
+}

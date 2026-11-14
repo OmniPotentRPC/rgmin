@@ -43,11 +43,7 @@ pub enum Conjugacy {
     /// in *A New Conjugate Gradient Method with Guaranteed Descent and an
     /// Efficient Line Search*, <https://doi.org/10.1137/030601880>.
     ConjugateDescent,
-    /// Hager-Zhang (2005) eq. 1.3, truncated by eq. 1.6.
-    ///
-    /// `β = max(β_N, -1 / (||d|| min(0.01, ||g_old||)))`. The truncation
-    /// is what keeps the direction a descent direction in CG_DESCENT.
-    /// The formula without it is NJWS 5.50.
+    /// Hager-Zhang (2005) eq. 1.3 / NJWS 5.50.
     ///
     /// Hager and Zhang, *A New Conjugate Gradient Method with Guaranteed
     /// Descent and an Efficient Line Search*,
@@ -160,17 +156,6 @@ impl Restart {
     }
 }
 
-/// CG_DESCENT floor, Hager and Zhang eq. 1.6 with `η = 0.01`.
-fn hz_floor(direction: ArrayView1<'_, f64>, gnorm: f64) -> f64 {
-    let length = dot(direction, direction).sqrt();
-    let scale = length * gnorm.min(0.01);
-    if !(scale.is_finite() && scale > 0.0) {
-        0.0
-    } else {
-        -1.0 / scale
-    }
-}
-
 impl Conjugacy {
     /// Combine two formulas with `max` (`take_max`) or `min`.
     pub fn hybrid(a: Conjugacy, b: Conjugacy, take_max: bool) -> Self {
@@ -209,8 +194,7 @@ impl Conjugacy {
                 let y_g = dot(g, y.view());
                 let yy = dot(y.view(), y.view());
                 let d_g = dot(d, g);
-                let beta = y_g / y_d - 2.0 * yy * d_g / (y_d * y_d);
-                beta.max(hz_floor(d, dot(gold, gold).sqrt()))
+                y_g / y_d - 2.0 * yy * d_g / (y_d * y_d)
             }
             Self::LiuStorey => div(-dot_diff(g, g, gold), dot(d, gold)),
             Self::FrPr => {
@@ -277,8 +261,7 @@ impl Conjugacy {
                 let yz = &z - &z_old;
                 let yy = dot(y.view(), yz.view());
                 let d_g = dot(d, g);
-                let beta = zy / y_d - 2.0 * yy * d_g / (y_d * y_d);
-                beta.max(hz_floor(d, gz_old.sqrt()))
+                zy / y_d - 2.0 * yy * d_g / (y_d * y_d)
             }
             Self::LiuStorey => div(-zy, dot(d, gold)),
             Self::FrPr => {
@@ -317,8 +300,17 @@ fn dot_diff(a: ArrayView1<'_, f64>, b: ArrayView1<'_, f64>, c: ArrayView1<'_, f6
     acc
 }
 
+/// `num/den`, or 0 when `den` is negligible beside `num`.
+///
+/// The test is `|den| <= eps (|num| + 1)`. The `+ 1` is an absolute
+/// floor, in the same units as `num`. A denominator smaller than `eps`
+/// is dropped even when `num` is zero, which keeps a vanishing inner
+/// product from returning a huge β. When `|num|` is large the `|num|`
+/// term dominates, so the test is relative and a genuine ratio is kept.
+/// β is already dimensionless, so the floor does not have to be scaled
+/// by a length unit.
 fn div(num: f64, den: f64) -> f64 {
-    if den.abs() <= f64::EPSILON {
+    if !num.is_finite() || !den.is_finite() || den.abs() <= f64::EPSILON * (num.abs() + 1.0) {
         0.0
     } else {
         num / den
@@ -458,6 +450,7 @@ mod tests {
         // β_FR = 0.1, β_PR = -0.2; Gilbert-Nocedal 5.48 returns -β_FR
         assert_eq!(Conjugacy::FletcherReeves.beta(&ctx), 0.1);
         assert_eq!(Conjugacy::PolakRibiere.beta(&ctx), -0.2);
+        assert_eq!(Conjugacy::PolakRibierePlus.beta(&ctx), 0.0);
         assert_eq!(Conjugacy::FrPr.beta(&ctx), -0.1);
         let take_max = Conjugacy::hybrid(Conjugacy::PolakRibiere, Conjugacy::FletcherReeves, true);
         let take_min = Conjugacy::hybrid(Conjugacy::PolakRibiere, Conjugacy::FletcherReeves, false);
@@ -590,22 +583,6 @@ mod tests {
         };
         assert!((Conjugacy::PolakRibiere.beta(&ctx) + 0.25).abs() < 1e-12);
         assert_eq!(Conjugacy::PolakRibierePlus.beta(&ctx), 0.0);
-    }
-
-    /// The raw Hager-Zhang coefficient here is -2010. CG_DESCENT raises
-    /// it to `-1 / (||d|| * 0.01) = -1000`.
-    #[test]
-    fn hager_zhang_truncates_below_the_descent_floor() {
-        let g = array![1.0, 0.0];
-        let gold = array![0.0, 10.0];
-        let d = array![0.1, 0.0];
-        let ctx = ConjugacyContext {
-            current_gradient: g.view(),
-            previous_gradient: gold.view(),
-            previous_direction: d.view(),
-        };
-        let beta = Conjugacy::HagerZhang.beta(&ctx);
-        assert!((beta + 1000.0).abs() < 1e-8, "beta {beta}");
     }
 
     /// eOn restarts when `|g·g_old|` reaches half of `||g_old||^2`.

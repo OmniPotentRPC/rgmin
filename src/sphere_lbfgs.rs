@@ -26,14 +26,34 @@ pub(crate) fn step<O>(
     solver: &mut Lbfgs,
     linesearch: LineSearch,
     control: &Control,
-) -> (Array1<f64>, f64, Array1<f64>)
+    atom_maxmove: Option<f64>,
+) -> crate::Result<(Array1<f64>, f64, Array1<f64>)>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let mut direction = Sphere.project(
-        origin,
-        &solver.search_direction(origin.view(), gradient.view()),
-    );
+    let cap = atom_maxmove
+        .filter(|c| *c > 0.0 && c.is_finite())
+        .map(|c| (c, true))
+        .or_else(|| {
+            control
+                .maxmove
+                .filter(|c| *c > 0.0 && c.is_finite())
+                .map(|c| (c, false))
+        });
+    let allowed_step = |point: &Array1<f64>| match cap {
+        None => true,
+        Some((limit, atomwise)) => {
+            let displacement = point - origin;
+            let length = if atomwise {
+                crate::step::max_atom_norm(displacement.view())
+            } else {
+                nrm2(displacement.view())
+            };
+            length <= limit
+        }
+    };
+    let raw_direction = solver.search_direction(origin.view(), gradient.view())?;
+    let mut direction = Sphere.project(origin, &raw_direction);
     if direction.dot(gradient) >= 0.0 {
         solver.forget();
         direction = -gradient;
@@ -46,7 +66,7 @@ where
     loop {
         let speed = nrm2(direction.view());
         if !speed.is_finite() || speed <= f64::MIN_POSITIVE {
-            return (origin.clone(), value, gradient.clone());
+            return Ok((origin.clone(), value, gradient.clone()));
         }
         let unit = &direction / speed;
         // With no curvature information, istep is an arc length. Scaling
@@ -77,10 +97,7 @@ where
                 }
                 let (point, velocity) = geodesic(alpha);
                 let bounded = objective.bounds().clip(point.view());
-                let outside_step = control
-                    .maxmove
-                    .is_some_and(|cap| nrm2((&point - origin).view()) > cap);
-                if bounded != point || outside_step {
+                if bounded != point || !allowed_step(&point) {
                     return (f64::INFINITY, array![f64::NAN]);
                 }
                 let (f, eg) = objective.value_and_gradient(point.view());
@@ -96,14 +113,21 @@ where
         let alpha = parameter[0];
         if alpha == 0.0 {
             if solver.is_empty() {
-                return (origin.clone(), value, gradient.clone());
+                return Ok((origin.clone(), value, gradient.clone()));
             }
             solver.forget();
             direction = -gradient;
             trial_step = control.istep;
             continue;
         }
+        let angle = alpha * speed;
+        if !angle.is_finite() || angle.abs() >= std::f64::consts::PI {
+            return Ok((origin.clone(), value, gradient.clone()));
+        }
         let (candidate, velocity) = geodesic(alpha);
+        if objective.bounds().clip(candidate.view()) != candidate || !allowed_step(&candidate) {
+            return Ok((origin.clone(), value, gradient.clone()));
+        }
         let (point, f, rg) = if alpha == last.0 {
             (last.1, last.2, last.3)
         } else {
@@ -113,13 +137,13 @@ where
             (point, f, rg)
         };
         if !f.is_finite() || !rg.iter().all(|g| g.is_finite()) || f > value {
-            return (origin.clone(), value, gradient.clone());
+            return Ok((origin.clone(), value, gradient.clone()));
         }
         solver.transport(|vector| transport(&unit, &velocity, vector));
         let displacement = (alpha * speed) * &velocity;
         let change = &rg - &transport(&unit, &velocity, gradient);
         solver.push_pair(displacement, change, Some(nrm2(rg.view())));
-        return (point, f, rg);
+        return Ok((point, f, rg));
     }
 }
 

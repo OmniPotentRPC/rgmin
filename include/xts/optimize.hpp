@@ -31,6 +31,13 @@ using rgmin::ConstraintSolver;
 using rgmin::DistanceConstraints;
 using rgmin::LbfgsPairs;
 
+using rgmin::EigenKind;
+using rgmin::EigenParams;
+using rgmin::EigenOptions;
+using rgmin::lowest_eigenpair;
+using rgmin::Precon;
+using rgmin::SolverConfig;
+
 namespace minimize = rgmin::minimize;
 namespace nlcg = rgmin::nlcg;
 

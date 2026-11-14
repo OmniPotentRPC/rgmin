@@ -110,13 +110,15 @@ where
     }
 
     let (value, grad) = obj.value_and_gradient(gbest_position.view());
+    let grad_norm = l2(&grad);
     Ok(Report {
         value,
         coords: gbest_position,
         steps: iteration,
-        grad_norm: l2(&grad),
+        grad_norm,
         stop_norm: StopNorm::Two,
         grad: None,
+        status: control.finish_status(grad_norm, grad.len(), true),
     })
 }
 

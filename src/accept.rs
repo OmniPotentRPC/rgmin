@@ -31,6 +31,11 @@ pub enum Accept {
     Energy,
     /// Grippo–Lampariello–Lucidi window of the last five accepted values.
     Nonmonotone,
+    /// Take the clipped quasi-Newton step with no line search: one oracle
+    /// at the new point, on every method. For a force that is not the
+    /// gradient of the reported value (a projected NEB force), where an
+    /// energy test says nothing.
+    Step,
 }
 
 /// Retract the tangent `step` at `pos` on a curved kind, inside the cap.
@@ -50,11 +55,13 @@ pub(crate) fn retract_within_cap<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let motion = |trial: &Array1<f64>| match atom_maxmove {
-        Some(_) => max_atom_motion(pos, trial),
-        None => crate::vecops::nrm2_diff(trial.view(), pos.view()),
-    };
-    let mut step = match (atom_maxmove, maxmove) {
+    // A cap binds only when it is positive and finite. `Some(c)` with
+    // `c <= 0`, NaN, or infinity is no cap, matching `scale_step`: a
+    // non-positive length must not reverse or refuse the step.
+    let binds = |cap: f64| cap > 0.0 && cap.is_finite();
+    let atom = atom_maxmove.filter(|cap| binds(*cap));
+    let euclid = maxmove.filter(|cap| binds(*cap));
+    let mut step = match (atom, euclid) {
         (Some(cap), _) => cap_displacement_atom(step, cap),
         (None, Some(cap)) => {
             let norm = l2(step);
@@ -66,13 +73,17 @@ where
         }
         (None, None) => step.clone(),
     };
-    let cap = atom_maxmove.or(maxmove);
+    let cap = atom.or(euclid);
     let mut trial = manifold.retract(pos, &step);
     if let Some(cap) = cap {
         let mut excess = f64::INFINITY;
         let mut passes = 0;
         loop {
-            let moved = motion(&trial);
+            let moved = if atom.is_some() {
+                max_atom_motion(pos, &trial)
+            } else {
+                crate::vecops::nrm2_diff(trial.view(), pos.view())
+            };
             if moved <= cap {
                 break;
             }
@@ -118,7 +129,8 @@ where
             .map(|(trial, _)| trial);
     }
     let mut trial = manifold.retract(pos, &step);
-    if let Some(cap) = atom_maxmove {
+    let atom_cap = atom_maxmove.filter(|cap| *cap > 0.0 && cap.is_finite());
+    if let Some(cap) = atom_cap {
         scale_step_atom(pos, &mut trial, cap);
     } else if let Some(cap) = control.maxmove {
         scale_step(pos, &mut trial, cap);
@@ -190,7 +202,26 @@ pub(crate) fn accept_step<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    accept_step_with_fallback(obj, pos, value, grad, dir, acceptance, true)
+    let Acceptance {
+        control,
+        accept,
+        e_hist,
+        atom_maxmove,
+        manifold,
+    } = acceptance;
+    accept_step_with_fallback(
+        obj,
+        pos,
+        value,
+        grad,
+        dir,
+        control,
+        accept,
+        e_hist,
+        atom_maxmove,
+        manifold,
+        true,
+    )
 }
 
 /// Accept a direction with an optional steepest-descent fallback.
@@ -202,21 +233,18 @@ pub(crate) fn accept_step_with_fallback<O>(
     value: f64,
     grad: &Array1<f64>,
     dir: &Array1<f64>,
-    acceptance: Acceptance<'_>,
-    steepest_fallback: bool,
+    control: &Control,
+    accept: Accept,
+    e_hist: &mut VecDeque<f64>,
+    atom_maxmove: Option<f64>,
+    manifold: ManifoldKind,
+    allow_gradient_fallback: bool,
 ) -> (Array1<f64>, f64, Array1<f64>, bool)
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let Acceptance {
-        control,
-        accept,
-        e_hist,
-        atom_maxmove,
-        manifold,
-    } = acceptance;
     match accept {
-        Accept::None => {
+        Accept::None | Accept::Step => {
             match single_trial(obj, pos, dir, control, e_hist, atom_maxmove, manifold) {
                 Trial::Accepted(trial, ft, gt) => (trial, ft, gt, true),
                 Trial::OffManifold | Trial::NonFinite => (pos.clone(), value, grad.clone(), false),
@@ -229,20 +257,25 @@ where
             {
                 ref_e = m;
             }
+            // The strict policy tolerates a 1e-8 absolute rise; ftol_rel
+            // widens that to a slack relative to the reference energy.
+            let rise = ENERGY_RISE.max(control.ftol_slack(ref_e));
             let mut alpha = 1.0;
             for _ in 0..HALVINGS {
                 if let Some(trial) =
                     trial_point(obj, pos, dir, alpha, control, atom_maxmove, manifold)
                 {
                     let (ft, gt) = obj.value_and_gradient(trial.view());
-                    if finite(ft, gt.view()) && ft - ref_e <= ENERGY_RISE {
+                    if finite(ft, gt.view()) && ft - ref_e <= rise {
                         push_energy(e_hist, ft);
                         return (trial, ft, gt, true);
                     }
                 }
                 alpha *= 0.5;
             }
-            if !steepest_fallback {
+            // A gradient fallback need not satisfy a constrained model's
+            // trust radius or linear equalities.
+            if !allow_gradient_fallback {
                 return (pos.clone(), value, grad.clone(), false);
             }
             // The fallback faces the same test it exists to satisfy. It
@@ -264,7 +297,7 @@ where
                 return (pos.clone(), value, grad.clone(), false);
             };
             let (ft, gt) = obj.value_and_gradient(trial.view());
-            if finite(ft, gt.view()) && ft - ref_e <= ENERGY_RISE {
+            if finite(ft, gt.view()) && ft - ref_e <= rise {
                 push_energy(e_hist, ft);
                 return (trial, ft, gt, true);
             }
@@ -430,6 +463,62 @@ mod tests {
         );
         // 10 rejected halvings + one short steepest fallback.
         assert_eq!(obj.evals.load(Ordering::Relaxed), 11);
+    }
+
+    #[test]
+    fn ftol_rel_admits_a_rise_inside_the_slack() {
+        // From x = 1 (f = 1) the unit step lands on x = 2 (f = 4), a rise
+        // of 3. A slack of 2 * (|1| + 1) = 4 covers it at the first trial.
+        let obj = CountQuad {
+            evals: AtomicUsize::new(0),
+        };
+        let pos = array![1.0];
+        let dir = array![1.0];
+        let g = array![2.0];
+        let mut hist = VecDeque::new();
+        let mut c = ctrl();
+        c.ftol_rel = Some(2.0);
+        let (x, f, _, moved) = accept_step(
+            &obj,
+            &pos,
+            1.0,
+            &g,
+            &dir,
+            Acceptance {
+                control: &c,
+                accept: Accept::Energy,
+                e_hist: &mut hist,
+                atom_maxmove: None,
+                manifold: ManifoldKind::Euclidean,
+            },
+        );
+        assert!(moved);
+        assert!((x[0] - 2.0).abs() < 1e-15);
+        assert!((f - 4.0).abs() < 1e-15);
+        assert_eq!(obj.evals.load(Ordering::Relaxed), 1);
+        // A slack of 1 * (|1| + 1) = 2 refuses the rise of 3 and halves:
+        // x = 1.5 gives f = 2.25, a rise of 1.25, inside the slack.
+        let obj = CountQuad {
+            evals: AtomicUsize::new(0),
+        };
+        c.ftol_rel = Some(1.0);
+        let (x, _, _, moved) = accept_step(
+            &obj,
+            &pos,
+            1.0,
+            &g,
+            &dir,
+            Acceptance {
+                control: &c,
+                accept: Accept::Energy,
+                e_hist: &mut hist,
+                atom_maxmove: None,
+                manifold: ManifoldKind::Euclidean,
+            },
+        );
+        assert!(moved);
+        assert!((x[0] - 1.5).abs() < 1e-15, "x {}", x[0]);
+        assert_eq!(obj.evals.load(Ordering::Relaxed), 2);
     }
 
     /// A linear objective inside an explicit box.

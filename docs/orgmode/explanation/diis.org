@@ -1,0 +1,21 @@
+#+TITLE: Pulay residual subspace
+#+OPTIONS: toc:nil num:nil
+
+The step stores positions and gradients, oldest first, and drops
+pairs past ~memory~. The coefficients ~c~ solve
+
+: min || sum_i c_i g_i ||    subject to sum_i c_i = 1
+
+which is the bordered Gram system of Pulay, Chem. Phys. Lett. 73,
+393 (1980). Wood and Zunger, J. Phys. A, 1343 (1985), name the
+residual form. No DOI is attached for that line.
+
+One stored pair, or a Gram matrix with no usable pivot, moves by
+~-istep * g~. Two or more pairs move to ~sum_i c_i x_i~. Neither
+branch line searches on the oracle value, and neither applies a
+kinetic preconditioner. ~Control::maxmove~ or
+~Solver::set_atom_maxmove~ caps the displacement the same way the
+other direct steps do.
+
+~Method::diis~ keeps 6 pairs. The C selector is ~RGMIN_DIIS~ (22).
+A control ~memory~ of 0 also means 6. ABI minor 30.

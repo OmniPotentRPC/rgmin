@@ -1,12 +1,13 @@
 [package]
 name = "rgmin"
-version = "0.2.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
 description = "Local first-order minimization and Riemannian steppers."
 repository = "https://github.com/OmniPotentRPC/rgmin"
 readme = "README.md"
+exclude = ["bench/"]
 keywords = ["optimization", "conjugate-gradient", "linesearch"]
 categories = ["science", "mathematics"]
 authors = ["Rohit Goswami <rgoswami@ieee.org>"]
@@ -17,27 +18,46 @@ path = "src/lib.rs"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [features]
-default = []
+default = ["simd"]
 capi = []
 par = ["dep:rayon"]
+simd = ["dep:multiversion"]
 highs = ["dep:highs", "dep:highs-sys"]
+slepc = ["dep:cc", "dep:pkg-config"]
+primme = ["dep:cc", "dep:pkg-config"]
+chase = ["dep:cc", "dep:pkg-config"]
+libkrylov = ["dep:cc", "dep:pkg-config"]
+# Off the default link line. The CI row named all-features lists every
+# other feature by name, so `--all-features` is not that row: this
+# dependency would otherwise be linked into the staticlib.
+readcon = ["dep:readcon-core"]
 
 [dependencies]
-eindir-core = { version = "0.6.0", git = "https://github.com/HaoZeke/eindir.git", rev = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9", features = ["capi"] }
+eindir-core = { version = "0.6.0", features = ["capi"] }
 dlpk = { version = "0.1.5", features = ["ndarray"] }
 ndarray = "0.17"
+libm = "0.2.16"
 thiserror = "2"
 rand = "0.9"
 rayon = { version = "1.10", optional = true }
+multiversion = { version = "=0.9.0", optional = true }
 highs = { version = "2.1", optional = true }
 highs-sys = { version = "1.12", optional = true }
+# crates.io has no 0.17.1. 694e808 is main, and its Cargo.toml version
+# is already 0.17.1. When tag v0.17.1 is published, drop the git pin
+# and keep version = "=0.17.1".
+readcon-core = { version = "=0.17.1", git = "https://github.com/lode-org/readcon-core", rev = "694e808080c49979ee3099afcfa18e5420c40433", optional = true }
 
 [dev-dependencies]
 approx = "0.5"
-rgpot-core = { package = "rgpot-core", git = "https://github.com/OmniPotentRPC/rgpot.git", rev = "b19227f9197a4c927633f1225f1e7546794a6f1e" }
+rayon = "1.10"
+rgpot-core = "3.4.0"
+sha2 = "0.10"
 
 [build-dependencies]
 cbindgen = "0.29"
+cc = { version = "1.2", optional = true }
+pkg-config = { version = "0.3", optional = true }
 
 [package.metadata.capi]
 min_version = "0.10.17"
@@ -65,6 +85,10 @@ description = "Local first-order minimization C ABI"
 
 [package.metadata.capi.library]
 name = "rgmin"
+
+[[test]]
+name = "con_checkpoint"
+required-features = ["readcon"]
 
 [[example]]
 name = "compare_highs"

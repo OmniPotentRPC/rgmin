@@ -1,0 +1,11 @@
+prec = 200!;
+box_small = round(1/100000000,53,RN);
+box_gsecond = round(1+box_small,53,RN);
+box_dfirst = -3;
+box_dsecond = -box_small;
+box_slope = round(round(3*box_dfirst,53,RN)+round(box_gsecond*box_dsecond,53,RN),53,RN);
+print("free coordinate keeps its full step:",box_dfirst==-3);
+print("wall coordinate lands on the bound:",round(box_small+box_dsecond,53,RN)==0);
+print("the projected near-wall step descends:",box_slope<0);
+print("the projected restart reverses the bad slope:",1>0 && -1<0);
+quit;

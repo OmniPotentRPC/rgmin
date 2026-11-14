@@ -1,0 +1,13 @@
+// Binary64 witness for the signed QN derivative away from the denominator floor.
+prec = 200;
+display = decimal;
+g = 2;
+curvature = -2;
+mode_sign = -1;
+alpha = 1/2;
+shifted_value = round(curvature + round(alpha * mode_sign, D, RN), D, RN);
+sproj = round(g / shifted_value, D, RN);
+derivative = round(round(sproj * mode_sign, D, RN) / shifted_value, D, RN);
+print("flipped derivative is negative:", derivative < 0);
+print("flipped derivative matches -8/25 within 2^-50:", abs(derivative + 8/25) < 2^(-50));
+quit;

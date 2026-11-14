@@ -3,7 +3,7 @@
 
 /* Crate version. cargo cinstall ships this header. */
 #define RGMIN_H_MAJOR 0
-#define RGMIN_H_MINOR 2
+#define RGMIN_H_MINOR 6
 #define RGMIN_H_PATCH 0
 
 #ifdef __cplusplus
@@ -61,8 +61,16 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 39
-#define RGMIN_ABI_LAYOUT_REVISION 4
+#define RGMIN_ABI_VERSION_MINOR 40
+/* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
+ * 40 is the 0.6.0 union with the 0.5.2 C surface. */
+#define RGMIN_ABI_LAYOUT_REVISION 5
+/* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
+ * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
+ * the defaults, including the default per-atom cap; a negative value
+ * leaves every step cap off. rgmin_report_t is value, steps, grad_norm,
+ * stop. Both sides shipped these structs as revision 4 with different
+ * fields, so the union is a new revision. */
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
@@ -87,14 +95,20 @@ typedef enum rgmin_method_t {
     RGMIN_BB = 18,
     RGMIN_DOGLEG = 19,
     RGMIN_FIRE2 = 20,
-    /** Steihaug-Toint Newton-CG. Products only; no dense Hessian. */
-    RGMIN_NEWTON_CG = 21,
-    /** Newton-CG with a Nyström preconditioner. The trust ceiling stays Euclidean. */
-    RGMIN_NEWTON_PCG = 22,
-    /** Polak-Ribiere-Polyak, max(0, beta). SciPy method="CG". ABI minor 35. */
-    RGMIN_POLAK_RIBIERE_PLUS = 23,
-    /** Polak-Ribiere with the eOn Powell restart at 0.5. ABI minor 35. */
-    RGMIN_EON_CG = 24
+    /** Quick-min. Released 0.5.2 discriminant. */
+    RGMIN_QUICKMIN = 21,
+    /** Pulay residual subspace. memory 0 means 6 stored pairs. */
+    RGMIN_DIIS = 22,
+    /** ODE12r: adaptive Euler on the (preconditioned) force. */
+    RGMIN_ODE12R = 23,
+    /** Steihaug-Toint Newton-CG. Released 0.5.2 discriminant. */
+    RGMIN_NEWTON_CG = 24,
+    /** Newton-CG with a Nyström preconditioner. Released 0.5.2 discriminant. */
+    RGMIN_NEWTON_PCG = 25,
+    /** Polak-Ribiere-Polyak, max(0, beta). Develop surface, past the released slots. */
+    RGMIN_POLAK_RIBIERE_PLUS = 26,
+    /** Polak-Ribiere with the eOn Powell restart at 0.5. Develop surface. */
+    RGMIN_EON_CG = 27
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.
@@ -122,6 +136,18 @@ _Static_assert(sizeof(rgmin_conjugacy_t) == sizeof(int32_t),
                "rgmin_conjugacy_t is i32-wide; do not build this header with -fshort-enums");
 #endif
 
+/** Why a finished minimization stopped. */
+typedef enum rgmin_stop_t {
+    RGMIN_STOP_TOLERANCE = 0,
+    RGMIN_STOP_NOISE_FLOOR = 1,
+    RGMIN_STOP_STEP_TOLERANCE = 2,
+    RGMIN_STOP_BUDGET = 3
+} rgmin_stop_t;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),
+               "rgmin_stop_t is i32-wide; do not build this header with -fshort-enums");
+#endif
+
 /** Outer-loop controls. \c memory is the L-BFGS pair cap. \c istep <= 0
  *  selects 1. An energy-tested steepest, BFGS, SR1, SR2, BB or
  *  unpreconditioned CG session then takes min(1, 1/||g||) at its first
@@ -132,7 +158,13 @@ typedef struct rgmin_control_t {
     double gtol;
     double istep;
     size_t memory;
+    /** > 0 Euclidean cap; 0 keeps defaults (including the per-atom cap);
+     *  < 0 leaves every step cap off. Layout revision 5. */
     double maxmove;
+    /** Gradient-projection noise. <= 0 leaves the floor off. */
+    double noise_eps;
+    /** Floor factor. <= 0 selects 3. */
+    double noise_c;
 } rgmin_control_t;
 
 /** Result of \ref rgmin_minimize. */
@@ -140,6 +172,8 @@ typedef struct rgmin_report_t {
     double value;
     size_t steps;
     double grad_norm;
+    /** Which stop produced this report. Layout revision 5. */
+    rgmin_stop_t stop;
 } rgmin_report_t;
 
 typedef rgmin_status_t (*rgmin_eval_fn)(void *user, const DLManagedTensorVersioned *x,
@@ -226,6 +260,11 @@ void rgmin_solver_forget(rgmin_solver_t *solver);
 /// empty acceptance window, preconditioned by the retained curvature. The
 /// restart for a sequence of related objectives.
 void rgmin_solver_rebase(rgmin_solver_t *solver);
+/** Drop only the cached evaluation; method memory, step scale and acceptance
+ *  window stay. For an oracle that changes between steps at the same point.
+ *  ABI minor 28. */
+void rgmin_solver_forget_evaluation(rgmin_solver_t *solver);
+
 /** Euclidean step cap for the next \ref rgmin_solver_step (saddle \c max_move). */
 void rgmin_solver_set_maxmove(rgmin_solver_t *solver, double maxmove);
 /** How an L-BFGS session uses a caller Hessian (eOn \c lbfgs_step). */
@@ -261,13 +300,137 @@ rgmin_status_t rgmin_solver_set_exp(rgmin_solver_t *solver, const rgmin_exp_t *p
 void rgmin_solver_clear_exp(rgmin_solver_t *solver);
 /** Energy scale, or NaN when none is installed. */
 double rgmin_solver_exp_mu(const rgmin_solver_t *solver);
+
+/** Which geometry preconditioner \ref rgmin_solver_set_precon installs.
+ *  ABI minor 32. */
+typedef enum rgmin_precon_kind_t {
+    RGMIN_PRECON_NONE = 0,
+    RGMIN_PRECON_EXP = 1,
+    RGMIN_PRECON_LINDH = 2,
+    RGMIN_PRECON_FF = 3,
+    RGMIN_PRECON_AUTO = 4
+} rgmin_precon_kind_t;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(rgmin_precon_kind_t) == sizeof(int32_t),
+               "rgmin_precon_kind_t is i32-wide; do not build this header with -fshort-enums");
+#endif
+/** \ref rgmin_precon_t::geometry_kind for \c RGMIN_PRECON_AUTO. */
+#define RGMIN_GEOM_BULK 0
+#define RGMIN_GEOM_SURFACE 1
+#define RGMIN_GEOM_MOLECULE 2
+#define RGMIN_GEOM_CLUSTER 3
+/** One harmonic bond. Indices are \c uint32_t free-atom numbers. */
+typedef struct rgmin_bond_t {
+    uint32_t i, j;
+    double k;
+} rgmin_bond_t;
+/** One harmonic angle at \c vertex. Indices are \c uint32_t. */
+typedef struct rgmin_angle_t {
+    uint32_t i, vertex, k;
+    double k_theta;
+} rgmin_angle_t;
+/** Parameters for every geometry preconditioner.
+ *
+ *  \c struct_size is \c sizeof(rgmin_precon_t). This revision rejects a
+ *  smaller value. A larger future struct is accepted; bytes past the
+ *  fields this build knows stay unread.
+ *  \c kind is \c uint32_t and holds a \c RGMIN_PRECON_* value.
+ *  \c c_stab, \c mu, \c r_cut, and \c exp_a are NaN or <= 0 for the
+ *  default or an estimate. \c exp_a is the Exp exponent A (default 3).
+ *  \c cell holds orthorhombic lengths; a component <= 0 leaves that
+ *  axis open. \c numbers and \c natoms are the free atoms (Lindh, AUTO).
+ *  Ghost pointers are null when \c nghost is 0. Neighbour indices
+ *  (\c nbr_i, \c nbr_j) and anchor indices (\c anchor_i) are
+ *  \c size_t. Bond and angle indices are \c uint32_t. \c nbr_r null
+ *  takes Cartesian distances on the next step. \c anchor_i bonds a
+ *  free atom to a frozen atom at distance \c anchor_r. \c dihedrals
+ *  nonzero adds the Lindh torsion term.
+ *
+ *  Morse bonds and FF harmonic torsions are Rust-only
+ *  (\c MorseTerm, \c DihedralTerm). They are not fields of this struct.
+ *  Every index is checked against \c dim/3 inside
+ *  \ref rgmin_solver_set_precon. */
+typedef struct rgmin_precon_t {
+    uint32_t struct_size;
+    uint32_t kind;
+    double c_stab, mu, r_cut;
+    double cell[3];
+    const int32_t *numbers;
+    size_t natoms;
+    const int32_t *ghost_z;
+    const double *ghost_pos;
+    size_t nghost;
+    const size_t *nbr_i;
+    const size_t *nbr_j;
+    const double *nbr_r;
+    size_t npairs;
+    const size_t *anchor_i;
+    const double *anchor_r;
+    size_t nanchor;
+    double exp_a;
+    const rgmin_bond_t *bonds;
+    size_t nbonds;
+    const rgmin_angle_t *angles;
+    size_t nangles;
+    int32_t dihedrals;
+    int32_t geometry_kind;
+} rgmin_precon_t;
+/** Zero \a p, set \c struct_size, and select \a kind. Optional doubles
+ *  are NaN so the defaults apply. */
+void rgmin_precon_init(rgmin_precon_t *p, rgmin_precon_kind_t kind);
+/** Install, replace, or clear the geometry preconditioner.
+ *  \c RGMIN_PRECON_NONE clears it. \c RGMIN_PRECON_AUTO calls Rust
+ *  \c select_precon with this session's method, so the caller does
+ *  not pass an optimiser family. FIRE resolves to the identity.
+ *  A force field is present when \c nbonds or \c nangles is nonzero,
+ *  and it is used only for a covalent molecule or cluster.
+ *  Indices are rejected here. */
+rgmin_status_t rgmin_solver_set_precon(rgmin_solver_t *s, const rgmin_precon_t *p);
+/** Drop whichever geometry preconditioner is installed. */
+void rgmin_solver_clear_precon(rgmin_solver_t *s);
+/** Energy scale of the installed geometry preconditioner.
+ *  NaN when none is installed or the scale is not estimated yet. */
+double rgmin_solver_precon_scale(const rgmin_solver_t *s);
+
 /** How a session takes a proposed step (eOn lbfgs_accept). */
 typedef enum rgmin_accept_t {
     RGMIN_ACCEPT_NONE = 0,
     RGMIN_ACCEPT_ENERGY = 1,
-    RGMIN_ACCEPT_NONMONOTONE = 2
+    RGMIN_ACCEPT_NONMONOTONE = 2,
+    /** Clipped step, one oracle, no line search. Released 0.5.2. */
+    RGMIN_ACCEPT_STEP = 3
 } rgmin_accept_t;
 void rgmin_solver_set_accept(rgmin_solver_t *solver, rgmin_accept_t accept);
+
+/** FIRE schedule. */
+typedef enum rgmin_fire_variant_t {
+    RGMIN_FIRE_RGMIN = 0,
+    RGMIN_FIRE_GUENOLE2020 = 1
+} rgmin_fire_variant_t;
+void rgmin_solver_set_fire_variant(rgmin_solver_t *solver,
+                                   rgmin_fire_variant_t variant);
+/** Split a quick-min session at `at`: atoms `[0, at)`, cell `[at, n)`.
+ *  Returns RGMIN_INVALID_PARAMETER when the session is not quick-min or
+ *  `at` is not an interior index. ABI minor 29. */
+rgmin_status_t rgmin_solver_set_quickmin_cell(rgmin_solver_t *solver, size_t at);
+/** Quick-min options: the rgmin default, the eOn step (fixed time step,
+ *  no clamp rescale), or one projection per atom. A no-op on other
+ *  sessions. ABI minor 33. */
+typedef enum rgmin_quickmin_variant_t {
+    RGMIN_QUICKMIN_RGMIN = 0,
+    RGMIN_QUICKMIN_EON = 1,
+    RGMIN_QUICKMIN_PER_ATOM = 2
+} rgmin_quickmin_variant_t;
+void rgmin_solver_set_quickmin_variant(rgmin_solver_t *solver,
+                                       rgmin_quickmin_variant_t variant);
+
+/** Approximate Wolfe value window for Euclidean RGMIN_ACCEPT_NONE sessions.
+ * Reject negative or nonfinite values without changing the session.
+ * Zero permits no rise. Gradient stopping and physical acceptance are unchanged.
+ */
+rgmin_status_t rgmin_solver_set_objective_roundoff(rgmin_solver_t *solver,
+                                                  double relative);
+
 /** Gradient norm a session compares to \c gtol and writes to
  *  \c rgmin_report_t.grad_norm. MAX_ATOM is the largest norm over
  *  (x, y, z) triples (ASE fmax, eOn max_atom, LAMMPS max). INF is the
@@ -336,9 +499,37 @@ int32_t rgmin_solver_set_lbfgs_wolfe(rgmin_solver_t *solver);
  *  including the steepest fallbacks. Newton and dogleg scale a saddle
  *  kick to this length. Non-positive clears it. */
 void rgmin_solver_set_atom_maxmove(rgmin_solver_t *solver, double maxmove);
+/** Capped Cartesian L-BFGS takes the geometry step: eOn's L-BFGS with a
+ *  finite-difference or sy/yy initial curvature, resets on negative
+ *  curvature, and an energy test with halvings. Nonzero turns it on; off,
+ *  the per-atom cap only clips the two-loop trial. Needs a per-atom cap. */
+void rgmin_solver_set_geometry_step(rgmin_solver_t *solver, int32_t enabled);
 void rgmin_solver_set_project_rigid(rgmin_solver_t *solver, int32_t enabled);
+/** 0 off, 1 auto, 2 translation, 3 translation and rotation.
+ *  Nonzero on \ref rgmin_solver_set_project_rigid is auto. */
+typedef enum rgmin_rigid_mode_t {
+    RGMIN_RIGID_OFF = 0,
+    RGMIN_RIGID_AUTO = 1,
+    RGMIN_RIGID_TRANSLATION = 2,
+    RGMIN_RIGID_TRANSLATION_ROTATION = 3
+} rgmin_rigid_mode_t;
+void rgmin_solver_set_rigid_mode(rgmin_solver_t *solver, int32_t mode);
+void rgmin_solver_set_rigid_mass_metric(rgmin_solver_t *solver, int32_t enabled);
+void rgmin_solver_set_rigid_mass_weighted(rgmin_solver_t *solver, int32_t enabled);
+/** Periodic axes. A slab is (1, 1, 0). */
+void rgmin_solver_set_pbc_axes(rgmin_solver_t *solver, int32_t x, int32_t y, int32_t z);
+/** Length 3N. A nonzero byte freezes that coordinate. NULL clears the mask. */
+void rgmin_solver_set_frozen(rgmin_solver_t *solver, const uint8_t *frozen, size_t len);
+/** Broken translations, then broken rotations. The host sets both. */
+void rgmin_solver_set_broken_axes(rgmin_solver_t *solver, int32_t tx, int32_t ty,
+                                int32_t tz, int32_t rx, int32_t ry, int32_t rz);
 void rgmin_solver_set_extra_updates(rgmin_solver_t *solver, size_t extra);
 void rgmin_solver_set_cautious(rgmin_solver_t *solver, double eps, double alpha);
+/** Opt-in L-BFGS NEB guards: distance, angle and curvature resets and an
+ *  empty-memory scale of 0.01. Nonzero enables; other methods ignore it.
+ *  ABI minor 28. */
+void rgmin_solver_set_lbfgs_neb_guards(rgmin_solver_t *solver, int32_t enabled);
+
 /** HiGHS feasible-set step. Nonzero enables it. Returns 0, or 1 if this
  *  build has no highs feature. */
 int32_t rgmin_solver_set_highs(rgmin_solver_t *solver, int32_t enabled);
@@ -350,6 +541,9 @@ int32_t rgmin_solver_set_box(rgmin_solver_t *solver, const double *lower,
 /** L_inf trust radius on the HiGHS step. Non-positive clears it.
  *  Returns 0, or 1 if this build has no highs feature. */
 int32_t rgmin_solver_set_trust(rgmin_solver_t *solver, double radius);
+/** Alias with the same radius and feature contract. */
+int32_t rgmin_solver_set_highs_trust(rgmin_solver_t *solver, double radius);
+
 /** Append one sparse equality \c a.p = rhs. \a idx / \a coef length \a nnz.
  *  Returns 0, or 1 if this build has no highs feature. */
 int32_t rgmin_solver_add_equality(rgmin_solver_t *solver, const size_t *idx,
@@ -438,8 +632,13 @@ typedef enum rgmin_manifold_t {
     RGMIN_MANIFOLD_MULTINOMIAL_DS = 18,
     RGMIN_MANIFOLD_MULTINOMIAL_SYM = 19,
     RGMIN_MANIFOLD_SPHERE_COMPLEX = 20,
+    RGMIN_MANIFOLD_SPD = 7,
+    RGMIN_MANIFOLD_GRASSMANN = 8,
+    RGMIN_MANIFOLD_HYPERBOLIC = 9,
+    RGMIN_MANIFOLD_POINCARE = 10,
     RGMIN_MANIFOLD_POSITIVE = 21,
-    RGMIN_MANIFOLD_CENTERED_MATRIX = 22
+    RGMIN_MANIFOLD_CENTERED_MATRIX = 22,
+    RGMIN_MANIFOLD_UNITARY = 23
 } rgmin_manifold_t;
 void rgmin_solver_set_manifold(rgmin_solver_t *solver, rgmin_manifold_t manifold);
 /** Oblique OB(n,m): product of m unit spheres in R^n, column-major. */
@@ -469,6 +668,9 @@ void rgmin_solver_set_positive(rgmin_solver_t *solver, size_t n);
  *  centers rows. Reserved 7-10 unused. */
 void rgmin_solver_set_centered_matrix(rgmin_solver_t *solver, size_t m, size_t n,
                                     int32_t center_rows);
+void rgmin_solver_set_factor_shape(rgmin_solver_t *solver, size_t n, size_t p);
+void rgmin_solver_set_unitary(rgmin_solver_t *solver, size_t n);
+
 /** Per-atom masses for MW_RIGID. n_atoms == 0 or masses == NULL
  *  restores unit mass. */
 void rgmin_solver_set_masses(rgmin_solver_t *solver, const double *masses,
@@ -632,6 +834,13 @@ typedef enum rgmin_linesearch_kind_t {
 _Static_assert(sizeof(rgmin_linesearch_kind_t) == sizeof(int32_t),
                "rgmin_linesearch_kind_t is i32-wide; do not build this header with -fshort-enums");
 #endif
+/** Reject invalid constants or a zero trial limit without changing the session.
+ *  The 0.5.2 header spelled this kind \c rgmin_linesearch_t. That name is
+ *  the opaque search handle added with \ref rgmin_linesearch. */
+rgmin_status_t rgmin_solver_set_linesearch(rgmin_solver_t *solver,
+                                         rgmin_linesearch_kind_t kind,
+                                         double c1, double c2, size_t maxiter);
+
 
 /** Opaque caller-driven line search. The search does not call an objective. */
 typedef struct rgmin_linesearch rgmin_linesearch_t;
@@ -639,7 +848,7 @@ typedef struct rgmin_linesearch rgmin_linesearch_t;
 /** Start a line search from `x` along `dir`.
  *  The first \ref rgmin_linesearch call supplies the energy and gradient
  *  at `x`. Later calls supply them at the trial the previous call wrote.
- *  Null on a null pointer, a zero length, or an unknown kind. ABI minor 37. */
+ *  Null on a null pointer, a zero length, or an unknown kind. */
 rgmin_linesearch_t *rgmin_linesearch_create(rgmin_linesearch_kind_t kind,
                                             const double *x, const double *dir,
                                             size_t n, double istep, double c1,
@@ -706,8 +915,8 @@ typedef struct rgmin_scg_params_t {
     double tol_sol;
     double tol_func;
     /** Leaf conjugacy. Literal: 0 is Fletcher-Reeves. Values outside
-     *  0..7 are \c RGMIN_INVALID_PARAMETER. Ignored when \a params is
-     *  NULL (Netlab Polak-Ribiere). */
+     *  0..8 are \c RGMIN_INVALID_PARAMETER. 8 is Polak-Ribiere-Plus.
+     *  Ignored when \a params is NULL (Netlab Polak-Ribiere). */
     rgmin_conjugacy_t conjugacy;
 } rgmin_scg_params_t;
 
@@ -722,14 +931,36 @@ typedef struct rgmin_scg_params_t {
  * gpr_optim RgminScg.inl writes \c RGMIN_CONJUGACY_LIU_STOREY. In-tree
  * SCG.inl does not call this entry.
  *
- * A positive finite \c ctrl->maxmove bounds the Euclidean length of
- * every SCG trial step, retries included; zero or negative leaves the
- * step unbounded.
+ * A positive \c ctrl->maxmove is the Euclidean cap. Zero keeps the
+ * defaults. A negative value leaves every step cap off.
  */
 rgmin_status_t rgmin_minimize_scg(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_curv_fn curv,
                                 void *user, DLManagedTensorVersioned *x,
                                 const rgmin_control_t *ctrl,
                                 const rgmin_scg_params_t *params, rgmin_report_t *out);
+
+/** Accepted-step SCG convergence rule. Both require objective convergence. */
+typedef enum rgmin_scg_step_tolerance_t {
+    /** ||alpha d||_inf < tol_sol. */
+    RGMIN_SCG_ABSOLUTE_INFINITY = 0,
+    /** ||alpha d||_2 < tol_sol * (1 + ||accepted x||_2). */
+    RGMIN_SCG_RELATIVE_EUCLIDEAN = 1
+} rgmin_scg_step_tolerance_t;
+
+/** Optional SCG policies, separate from the stable parameter record. */
+typedef struct rgmin_scg_options_t {
+    /** Literal rgmin_scg_step_tolerance_t. Unknown integers are rejected. */
+    int32_t step_tolerance;
+} rgmin_scg_options_t;
+
+/** SCG with explicit convergence policy. NULL options selects the legacy rule. */
+rgmin_status_t rgmin_minimize_scg_with_options(
+    rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_curv_fn curv, void *user,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
+    const rgmin_scg_params_t *params, const rgmin_scg_options_t *options,
+    rgmin_report_t *out);
+
+
 
 
 /** Closed eigensolver tag. Integers match schema/eigen.capnp. */
@@ -748,7 +979,8 @@ typedef enum rgmin_eigen_kind_t {
     RGMIN_EIGEN_CUSOLVER = 11,
     RGMIN_EIGEN_DLA_FUTURE = 12,
     RGMIN_EIGEN_EIGENEXA = 13,
-    RGMIN_EIGEN_DIMER = 14
+    RGMIN_EIGEN_DIMER = 14,
+    RGMIN_EIGEN_LIBKRYLOV = 15
 } rgmin_eigen_kind_t;
 
 typedef struct rgmin_eigen_params_t {
@@ -781,17 +1013,33 @@ rgmin_status_t rgmin_lowest_eigenpair(rgmin_hvp_fn hvp, void *user,
                                     const rgmin_eigen_params_t *params,
                                     rgmin_lowest_mode_t *out);
 
-/** Separate backend settings. Block LOBPCG ignores both fields.
- *  A null pointer selects the defaults. ABI minor 39. */
+/** Steihaug-Toint Newton-CG. \a hvp writes \c H(x) v. \c method is
+ *  \c RGMIN_NEWTON_CG or \c RGMIN_NEWTON_PCG. No dense Hessian is formed. */
+rgmin_status_t rgmin_minimize_hvp(rgmin_eval_fn eval, rgmin_grad_fn grad,
+                              rgmin_hvp_fn hvp, void *user,
+                              DLManagedTensorVersioned *x,
+                              const rgmin_control_t *ctrl, rgmin_method_t method,
+                              rgmin_report_t *out);
+/** One Steihaug-Toint iteration. Legal on \c RGMIN_NEWTON_CG and
+ *  \c RGMIN_NEWTON_PCG. \a hvp is a product, not a matrix. */
+rgmin_status_t rgmin_solver_step_hvp(rgmin_solver_t *solver, rgmin_eval_fn eval,
+                                 rgmin_grad_fn grad, rgmin_hvp_fn hvp, void *user,
+                                 DLManagedTensorVersioned *x, rgmin_report_t *out);
+
+
+
+/** Separate backend settings. ChASE reads both fields. Block LOBPCG
+ *  ignores them. A null pointer selects the defaults. The base
+ *  parameter record retains its layout. */
 typedef struct rgmin_eigen_options_t {
-    /** ChASE filter degree. Zero selects a backend default. */
+    /** ChASE filter degree. Zero selects the backend default. */
     uint32_t degree;
-    /** ChASE extra search dimensions. Zero selects a backend default. */
+    /** ChASE extra search dimensions. Zero selects the backend default. */
     uint32_t extra;
 } rgmin_eigen_options_t;
 
 /** One pair from \ref rgmin_lowest_eigenpairs. \c actions is the product
- *  count of the whole solve. */
+ *  count of the whole solve. ABI minor 39. */
 typedef struct rgmin_eigenpair_t {
     double value;
     size_t actions;
@@ -814,18 +1062,41 @@ rgmin_status_t rgmin_lowest_eigenpairs(
     DLManagedTensorVersioned *values_out, const rgmin_eigen_params_t *params,
     const rgmin_eigen_options_t *options, rgmin_eigenpair_t *pairs_out, size_t k);
 
-/** Steihaug-Toint Newton-CG. \a hvp writes \c H(x) v. \c method is
- *  \c RGMIN_NEWTON_CG or \c RGMIN_NEWTON_PCG. No dense Hessian is formed. */
-rgmin_status_t rgmin_minimize_hvp(rgmin_eval_fn eval, rgmin_grad_fn grad,
-                              rgmin_hvp_fn hvp, void *user,
-                              DLManagedTensorVersioned *x,
-                              const rgmin_control_t *ctrl, rgmin_method_t method,
-                              rgmin_report_t *out);
-/** One Steihaug-Toint iteration. Legal on \c RGMIN_NEWTON_CG and
- *  \c RGMIN_NEWTON_PCG. \a hvp is a product, not a matrix. */
-rgmin_status_t rgmin_solver_step_hvp(rgmin_solver_t *solver, rgmin_eval_fn eval,
-                                 rgmin_grad_fn grad, rgmin_hvp_fn hvp, void *user,
-                                 DLManagedTensorVersioned *x, rgmin_report_t *out);
+/**
+ * Lowest Hessian eigenpair with separate optional backend settings.
+ * Matrix-free backends ignore the ChASE degree and extra dimensions.
+ * A null options pointer selects the backend defaults. The callback and
+ * tensor requirements match rgmin_lowest_eigenpair.
+ */
+rgmin_status_t rgmin_lowest_eigenpair_with_options(
+    rgmin_hvp_fn hvp, void *user, const DLManagedTensorVersioned *x,
+    const DLManagedTensorVersioned *seed, DLManagedTensorVersioned *mode_out,
+    const rgmin_eigen_params_t *params, const rgmin_eigen_options_t *options,
+    rgmin_lowest_mode_t *out);
+
+/** Caller-owned Eckart buffers. One per image. */
+typedef struct rgmin_rigid_workspace rgmin_rigid_workspace_t;
+rgmin_rigid_workspace_t *rgmin_rigid_workspace_new(void);
+void rgmin_rigid_workspace_free(rgmin_rigid_workspace_t *ws);
+size_t rgmin_rigid_workspace_rank(const rgmin_rigid_workspace_t *ws);
+/** P v in place. n_mass == 0 is unit mass. frozen == NULL is no freeze. */
+rgmin_status_t rgmin_rigid_project(
+    rgmin_rigid_workspace_t *ws, double *v, size_t n, const double *pos,
+    const double *masses, size_t n_mass, int32_t mode,
+    int32_t mass_weighted_coords, int32_t mass_metric, int32_t pbc_x, int32_t pbc_y,
+    int32_t pbc_z, const uint8_t *frozen, int32_t broken_tx, int32_t broken_ty,
+    int32_t broken_tz, int32_t broken_rx, int32_t broken_ry, int32_t broken_rz);
+/** Row-major H of length n*n becomes P H P. */
+rgmin_status_t rgmin_rigid_project_hessian(
+    rgmin_rigid_workspace_t *ws, double *h, size_t n, const double *pos,
+    const double *masses, size_t n_mass, int32_t mode,
+    int32_t mass_weighted_coords, int32_t mass_metric, int32_t pbc_x, int32_t pbc_y,
+    int32_t pbc_z, const uint8_t *frozen, int32_t broken_tx, int32_t broken_ty,
+    int32_t broken_tz, int32_t broken_rx, int32_t broken_ry, int32_t broken_rz);
+/** Horn / Coutsias. Any periodic axis skips the rotation. */
+rgmin_status_t rgmin_rigid_align(double *mobile, const double *reference, size_t n,
+                             const double *masses, size_t n_mass, int32_t pbc_x,
+                             int32_t pbc_y, int32_t pbc_z, double *rmsd);
 
 
 #ifdef __cplusplus

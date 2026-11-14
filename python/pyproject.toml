@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "rgmin"
-version = "0.2.0"
+version = "0.6.0"
 description = "ASE Optimizer drop-in for the rgmin local minimizers."
 readme = "README.md"
 requires-python = ">=3.10"

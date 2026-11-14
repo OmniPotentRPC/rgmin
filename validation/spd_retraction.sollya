@@ -1,0 +1,11 @@
+prec = 200!;
+spd_x = 2;
+spd_u = round(-round(1/10,53,RN)*4,53,RN);
+spd_once = round(round(spd_x+spd_u,53,RN)+round(round(spd_u*spd_u,53,RN)/(2*spd_x),53,RN),53,RN);
+spd_chord = round(spd_once-spd_x,53,RN);
+spd_twice = round(round(spd_x+spd_chord,53,RN)+round(round(spd_chord*spd_chord,53,RN)/(2*spd_x),53,RN),53,RN);
+print("single retraction matches the exact diagonal point:",abs(spd_once-41/25)<=4*2^(-52));
+print("chord retraction matches its distinct diagonal point:",abs(spd_twice-4181/2500)<=4*2^(-52));
+print("the extra retraction changes the point beyond roundoff:",spd_twice-spd_once>1/100);
+print("the exact positive scalar retraction stays positive:",((2-2/5)^2+2^2)/(2*2)>0);
+quit;

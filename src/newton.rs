@@ -18,7 +18,7 @@ use ndarray::{Array1, Array2, ArrayView1};
 use crate::control::{Control, StopNorm};
 use crate::error::{Error, Result};
 use crate::report::Report;
-use crate::step::{l2, scale_step};
+use crate::step::{implicit_atom_cap, l2, scale_step, scale_step_atom};
 
 const ENERGY_RISE: f64 = 1.0e-8;
 const EIG_FLOOR: f64 = 1.0e-8;
@@ -142,10 +142,11 @@ where
     }
     pos = obj.bounds().clip(pos.view());
     let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    crate::step::refuse_non_finite(value, &grad)?;
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
-        if gnorm < control.gtol {
+        if let Some(status) = control.halt(gnorm, grad.len()) {
             return Ok(Report {
                 value,
                 coords: pos,
@@ -153,6 +154,7 @@ where
                 grad_norm: gnorm,
                 stop_norm: StopNorm::Two,
                 grad: None,
+                status,
             });
         }
         let hess = obj.hessian(pos.view());
@@ -182,6 +184,7 @@ where
         grad_norm: l2(&grad),
         stop_norm: StopNorm::Two,
         grad: None,
+        status: control.finish_status(l2(&grad), grad.len(), true),
     })
 }
 
@@ -198,7 +201,9 @@ where
     let mut alpha = 1.0;
     for _ in 0..10 {
         let mut trial = pos + &(dir * alpha);
-        if let Some(cap) = control.maxmove {
+        if let Some(cap) = implicit_atom_cap(control) {
+            scale_step_atom(pos, &mut trial, cap);
+        } else if let Some(cap) = control.maxmove {
             scale_step(pos, &mut trial, cap);
         }
         trial = obj.bounds().clip(trial.view());

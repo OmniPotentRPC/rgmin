@@ -5,6 +5,7 @@ platforms = ["linux-64"]
 
 [environments]
 docs = { features = ["docs"] }
+gate = { features = ["gate"] }
 
 [feature.docs]
 platforms = ["linux-64"]
@@ -22,5 +23,25 @@ myst-parser = ">=4.0, <5"
 sphinxcontrib-bibtex = ">=2.6, <3"
 sphinxcontrib-rust = ">=1.0.0, <2"
 sphinx-rustdoc-postprocess = ">=0.1.0, <0.2"
+
+[feature.docs.tasks]
+docs-export = { cmd = "emacs --batch -l export.el", cwd = "docs" }
+docs-build = { cmd = "sphinx-build -b html -n docs/source docs/build", depends-on = ["docs-export"] }
+
+[feature.gate]
+platforms = ["linux-64"]
+
+[feature.gate.dependencies]
+python = ">=3.11,<3.13"
+
+[feature.gate.pypi-dependencies]
+numpy = "==2.2.6"
+scipy = "==1.15.3"
+pytest = "==8.3.5"
+rggate = { path = "bench/gate", editable = true }
+
+[feature.gate.tasks]
+gate = "python -m rggate"
+gate-test = { cmd = "pytest", cwd = "bench/gate" }
 
 [tasks]
