@@ -37,6 +37,49 @@ unsafe extern "C" {
 ///
 /// The buffer written into `forces` is the physical force, the same
 /// sign the rgpot kernels use. `0` is success.
+/// Fixed mul-add chain. The same `n` does the same work on every call.
+fn spin(n: u64) -> f64 {
+    let mut x = 1.0f64;
+    for i in 0..n {
+        x = std::hint::black_box(x.mul_add(1.0000001192092896, (i as f64) * 1e-18));
+    }
+    x
+}
+
+/// Iterations of [`spin`] that take about `us` microseconds on this process.
+fn burn_iters(us: u64) -> u64 {
+    if us == 0 {
+        return 0;
+    }
+    let probe = 200_000u64;
+    let t0 = Instant::now();
+    std::hint::black_box(spin(probe));
+    let dt = t0.elapsed().as_secs_f64().max(1e-8);
+    ((us as f64) * 1e-6 / dt * probe as f64).max(1.0) as u64
+}
+
+/// `RGMIN_BENCH_CALL_US` adds this many microseconds of [`spin`] after
+/// every force call. The force and the energy are unchanged. Unset is zero.
+fn call_burn() -> u64 {
+    static N: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *N.get_or_init(|| {
+        let us = std::env::var("RGMIN_BENCH_CALL_US")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+        let n = burn_iters(us);
+        if us > 0 {
+            let t0 = Instant::now();
+            std::hint::black_box(spin(n));
+            eprintln!(
+                "call cost target {us} us, spin {n}, measured {:.1} us",
+                t0.elapsed().as_secs_f64() * 1e6
+            );
+        }
+        n
+    })
+}
+
 fn molecule_forces(kind: i32, pos: &[f64], forces: &mut [f64], energy: &mut f64) -> i32 {
     if forces.len() < pos.len() {
         return 2;
@@ -169,6 +212,8 @@ struct FreeObjective {
     bounds: Bounds<f64>,
     calls: AtomicUsize,
     nanos: AtomicU64,
+    /// Extra deterministic mul-add iterations after every force call.
+    burn: u64,
 }
 
 impl FreeObjective {
@@ -179,6 +224,9 @@ impl FreeObjective {
         let mut energy = 0.0;
         let t0 = Instant::now();
         let st = self.forces(pos, force, &mut energy);
+        if self.burn > 0 {
+            std::hint::black_box(spin(self.burn));
+        }
         self.nanos
             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         self.calls.fetch_add(1, Ordering::Relaxed);
@@ -606,6 +654,7 @@ fn build(sys: &System, sigma: f64, seed: u64) -> (FreeObjective, Array1<f64>) {
         bounds: Bounds::new(Array1::from_elem(m, -1e6), Array1::from_elem(m, 1e6), 0.0),
         calls: AtomicUsize::new(0),
         nanos: AtomicU64::new(0),
+        burn: call_burn(),
     };
     (obj, x0)
 }
@@ -666,6 +715,7 @@ fn quickmin_from_env() -> QuickMinOptions {
 /// `(method, accept, linesearch, istep)` for a session name.
 fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
     let lbfgs = Method::Lbfgs { memory: 10 };
+    let lbfgs20 = Method::Lbfgs { memory: 20 };
     let pr = Method::Nlcg {
         conjugacy: Conjugacy::PolakRibierePlus,
         restart: Restart::njws(),
@@ -708,6 +758,8 @@ fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
         ),
         "cg-brent" => (pr, Accept::None, LineSearch::default(), 0.01),
         "lbfgs" => (lbfgs, Accept::None, wolfe(), 1.0),
+        "lbfgs-m20" => (lbfgs20, Accept::None, wolfe(), 1.0),
+        "low-call" => (pr, Accept::None, cg_wolfe(), 0.01),
         "qm" | "qm-eon" | "qm-pa" | "qmx" => (Method::QuickMin, Accept::None, wolfe(), 0.1),
         _ => return None,
     })
@@ -867,10 +919,17 @@ fn run_session(
         ftol_rel: None,
         noise_floor: None,
     };
-    let mut solver = Solver::new(method, control, x.len());
-    solver.set_accept(accept);
-    solver.set_linesearch(ls);
-    solver.set_atom_maxmove(maxmove);
+    let mut solver = if name == "low-call" {
+        let mut low = Solver::low_call_cg(control, x.len());
+        low.set_atom_maxmove(maxmove);
+        low
+    } else {
+        let mut solver = Solver::new(method, control, x.len());
+        solver.set_accept(accept);
+        solver.set_linesearch(ls);
+        solver.set_atom_maxmove(maxmove);
+        solver
+    };
     match name {
         "qm-eon" => solver.set_quickmin_options(QuickMinOptions::eon()),
         "qm-pa" => solver.set_quickmin_options(QuickMinOptions::per_atom()),
@@ -1098,6 +1157,19 @@ mod call_counts {
                 "{system} {method} energy"
             );
             assert_eq!(format!("{:.3e}", out.fmax), fmax, "{system} {method} fmax");
+        }
+    }
+
+    #[test]
+    fn added_call_work_does_not_change_the_force() {
+        let (mut obj, x) = build(&lj38(0), 0.0, 0);
+        obj.burn = 0;
+        let (e0, g0) = obj.eval(x.view());
+        obj.burn = 20_000;
+        let (e1, g1) = obj.eval(x.view());
+        assert_eq!(e0.to_bits(), e1.to_bits());
+        for i in 0..g0.len() {
+            assert_eq!(g0[i].to_bits(), g1[i].to_bits(), "{i}");
         }
     }
 }
