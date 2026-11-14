@@ -119,7 +119,13 @@ const MAX_PROBE_RETRIES: usize = 2000;
 /// retries, both within fixed budgets. An objective wrapped with
 /// interior-point barriers therefore composes with no optimizer hook.
 /// A zero `control.maxiter` leaves termination to convergence and the
-/// numerical failure checks.
+/// numerical failure checks. Such a fit also stops, with
+/// [`crate::Status::StepTolerance`] while `||g||` is at or above `gtol`,
+/// after `max(n, 2)` consecutive accepted steps whose objective change
+/// passes `tol_func` and whose gradient norm never falls below its value at
+/// the first of them. Each flat step quadruples the damping, so for large
+/// `n` the default `lambda_limit` can end the run first. A positive
+/// `maxiter` leaves the trajectory unchanged.
 ///
 /// A positive finite `control.maxmove` bounds the Euclidean length of
 /// every trial step, retries included, as [`Control::maxmove`] states.
@@ -297,6 +303,8 @@ where
     let mut gamma = 0.0;
 
     let mut step = 0;
+    let mut flat_steps: usize = 0;
+    let mut flat_grad = 0.0;
     while control.maxiter == 0 || step < control.maxiter {
         let gnorm = l2_ordered(&grad);
         if let Some(status) = control.halt(gnorm, grad.len()) {
@@ -427,6 +435,38 @@ where
                     grad: None,
                     status: scg_stop(control, grad_norm, grad.len()),
                 });
+            }
+            // With no iteration budget, and the damping clamped below a
+            // `lambda_limit` at or above `LAMBDA_MAX`, nothing else ends a
+            // plateau. One flat step whose gradient does not fall can be an
+            // overshoot that the next step corrects, so the plateau is a run
+            // of one Møller period (at least two accepted steps) inside the
+            // objective tolerance whose gradient never drops below its norm
+            // at the start of the run. The `sqrt(eps)` band absorbs probe
+            // rounding.
+            if control.maxiter == 0 && objective_converged {
+                if flat_steps == 0 {
+                    flat_grad = l2_ordered(&grad);
+                }
+                let grad_norm = l2_ordered(&grad_new);
+                if grad_norm + flat_grad * f64::EPSILON.sqrt() >= flat_grad {
+                    flat_steps += 1;
+                    if flat_steps >= nparams.max(2) {
+                        return Ok(Report {
+                            value: f_new,
+                            coords: w,
+                            steps: step + 1,
+                            grad_norm,
+                            stop_norm: StopNorm::Two,
+                            grad: None,
+                            status: scg_stop(control, grad_norm, grad_new.len()),
+                        });
+                    }
+                } else {
+                    flat_steps = 0;
+                }
+            } else {
+                flat_steps = 0;
             }
             f_old = f_new;
             grad_old = std::mem::replace(&mut grad, grad_new);
