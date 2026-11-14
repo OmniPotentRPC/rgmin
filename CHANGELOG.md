@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   L-BFGS, CG, and FIRE on LJ13, LJ38, LJ75, and Pt7. The unperturbed
   seed is checked in `cluster_suite_records_iterations_and_potential_calls`.
 
+- `Conjugacy::DaiYuanHybrid` is `max(0, min(β_HS, β_DY))`. The
+  default CG beta stays Polak-Ribiere+. With
+  `WolfeExtrapolation::Case3Average` the 50-start sum of median calls
+  falls from 3154 to 2929.5 and LJ75 CG from 731.5 to 567. Adding
+  `Restart::powell` as well takes the sum to 2841.5 and LJ75 CG to 496.
+  Neither raises a median, and the Mann-Whitney test does not find
+  higher energies.
+
 - The pairwise Pt7 check in the 50-start bench allows `1e-7`
   relative. On the default starts the energy span among the
   `fmax = 0.02`, `0.01`, and `0.001` stops reaches `9.3e-8` for

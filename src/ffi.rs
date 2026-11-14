@@ -490,7 +490,9 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
             Conjugacy::HagerZhang => rgmin_method_t::RGMIN_HAGER_ZHANG,
             Conjugacy::LiuStorey => rgmin_method_t::RGMIN_LIU_STOREY,
             Conjugacy::FrPr => rgmin_method_t::RGMIN_FR_PR,
-            Conjugacy::PolakRibierePlus | Conjugacy::Hybrid { .. } => return Err(()),
+            Conjugacy::PolakRibierePlus
+            | Conjugacy::DaiYuanHybrid
+            | Conjugacy::Hybrid { .. } => return Err(()),
         },
         Method::Bfgs => rgmin_method_t::RGMIN_BFGS,
         Method::Lbfgs { .. } => rgmin_method_t::RGMIN_LBFGS,

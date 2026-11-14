@@ -43,6 +43,11 @@ pub enum Conjugacy {
     /// Dai and Yuan, *A Nonlinear Conjugate Gradient Method with a Strong
     /// Global Convergence Property*, <https://doi.org/10.1137/S1052623497318992>.
     DaiYuan,
+    /// `max(0, min(β_HS, β_DY))`.
+    ///
+    /// Hestenes-Stiefel when it does not exceed Dai-Yuan, and Dai-Yuan
+    /// otherwise. A negative value restarts.
+    DaiYuanHybrid,
     /// Fletcher conjugate descent: `||g||^2 / (- d_old·g_old)`.
     ///
     /// Same denominator as Liu-Storey. Hager and Zhang review the formula
@@ -171,6 +176,11 @@ impl Conjugacy {
                 div(y_g, y_d)
             }
             Self::DaiYuan => div(dot(g, g), diff_dot(g, gold, d)),
+            Self::DaiYuanHybrid => {
+                let hs = Self::HestenesStiefel.beta(ctx);
+                let dy = Self::DaiYuan.beta(ctx);
+                hs.min(dy).max(0.0)
+            }
             Self::ConjugateDescent => div(dot(g, g), -dot(d, gold)),
             Self::HagerZhang => {
                 let (y_g, y_d, yy) = diff_dots_self(g, g, gold, d);
@@ -237,6 +247,11 @@ impl Conjugacy {
                 div(zy, y_d)
             }
             Self::DaiYuan => div(dot(g, z), diff_dot(g, gold, d)),
+            Self::DaiYuanHybrid => {
+                let hs = Self::HestenesStiefel.beta_metric(ctx, z, z_old);
+                let dy = Self::DaiYuan.beta_metric(ctx, z, z_old);
+                hs.min(dy).max(0.0)
+            }
             Self::ConjugateDescent => {
                 let gz = dot(g, z);
                 div(gz, -dot(d, gold))
@@ -823,5 +838,28 @@ mod tests {
         };
         assert!(Restart::powell().should_restart(&at));
         assert_eq!(Restart::powell(), Restart::Njws { threshold: 0.2 });
+    }
+
+    #[test]
+    fn dai_yuan_hybrid_is_the_nonnegative_min_of_hs_and_dy() {
+        let g = array![2.0, -1.0];
+        let gold = array![1.0, 0.5];
+        let d = array![-1.0, 0.25];
+        let ctx = ConjugacyContext {
+            current_gradient: g.view(),
+            previous_gradient: gold.view(),
+            previous_direction: d.view(),
+        };
+        let hs = Conjugacy::HestenesStiefel.beta(&ctx);
+        let dy = Conjugacy::DaiYuan.beta(&ctx);
+        let hybrid = Conjugacy::DaiYuanHybrid.beta(&ctx);
+        assert_eq!(hybrid, hs.min(dy).max(0.0));
+        let z = g.clone();
+        let z_old = gold.clone();
+        let hs_m = Conjugacy::HestenesStiefel.beta_metric(&ctx, z.view(), z_old.view());
+        let dy_m = Conjugacy::DaiYuan.beta_metric(&ctx, z.view(), z_old.view());
+        let hybrid_m = Conjugacy::DaiYuanHybrid.beta_metric(&ctx, z.view(), z_old.view());
+        assert_eq!(hybrid_m, hs_m.min(dy_m).max(0.0));
+        assert_eq!(hybrid, hybrid_m);
     }
 }
