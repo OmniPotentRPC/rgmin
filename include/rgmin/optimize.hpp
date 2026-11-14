@@ -861,6 +861,90 @@ public:
     }
 };
 
+/// RAII Stiefel St(n, p), SPD(p) or product manifold. Every pointer
+/// argument is a caller-owned column-major buffer of len() doubles; a
+/// product packs its factors in order. A refused call throws
+/// std::runtime_error with rgmin_last_error. ABI minor 40.
+class Manifold {
+    rgmin_manifold_handle_t* ptr_ = nullptr;
+
+    explicit Manifold(rgmin_manifold_handle_t* ptr) : ptr_(ptr) {
+        if (ptr_ == nullptr) {
+            detail::raise(RGMIN_INVALID_PARAMETER, "rgmin_manifold create failed");
+        }
+    }
+    static void check(rgmin_status_t st, char const* what) {
+        if (st != RGMIN_SUCCESS) {
+            detail::raise(st, what);
+        }
+    }
+
+public:
+    static Manifold stiefel(std::size_t n, std::size_t p,
+                            rgmin_stiefel_retraction_t retraction = RGMIN_STIEFEL_QR) {
+        return Manifold(rgmin_manifold_stiefel(n, p, static_cast<int32_t>(retraction)));
+    }
+    static Manifold spd(std::size_t p, rgmin_spd_metric_t metric = RGMIN_SPD_AFFINE_INVARIANT) {
+        return Manifold(rgmin_manifold_spd(p, static_cast<int32_t>(metric)));
+    }
+    /// Product of the factors in order. The factors stay usable.
+    template <class... Factors>
+    static Manifold product(Manifold const& first, Factors const&... rest) {
+        rgmin_manifold_handle_t const* handles[] = {first.get(), rest.get()...};
+        return Manifold(rgmin_manifold_product(handles, sizeof...(Factors) + 1));
+    }
+
+    ~Manifold() { rgmin_manifold_free(ptr_); }
+    Manifold(Manifold const&) = delete;
+    Manifold& operator=(Manifold const&) = delete;
+    Manifold(Manifold&& other) noexcept : ptr_(other.ptr_) { other.ptr_ = nullptr; }
+    Manifold& operator=(Manifold&& other) noexcept {
+        if (this != &other) {
+            rgmin_manifold_free(ptr_);
+            ptr_ = other.ptr_;
+            other.ptr_ = nullptr;
+        }
+        return *this;
+    }
+
+    rgmin_manifold_handle_t const* get() const noexcept { return ptr_; }
+    /// Packed length of one point.
+    std::size_t len() const noexcept { return rgmin_manifold_len(ptr_); }
+
+    void project(double const* x, double const* v, double* out) const {
+        check(rgmin_manifold_project(ptr_, x, v, out, len()), "rgmin_manifold_project failed");
+    }
+    void egrad_to_rgrad(double const* x, double const* egrad, double* out) const {
+        check(rgmin_manifold_egrad_to_rgrad(ptr_, x, egrad, out, len()),
+              "rgmin_manifold_egrad_to_rgrad failed");
+    }
+    void retract(double const* x, double const* v, double* out) const {
+        check(rgmin_manifold_retract(ptr_, x, v, out, len()), "rgmin_manifold_retract failed");
+    }
+    void exp(double const* x, double const* v, double* out) const {
+        check(rgmin_manifold_exp(ptr_, x, v, out, len()), "rgmin_manifold_exp failed");
+    }
+    void log(double const* x, double const* y, double* out) const {
+        check(rgmin_manifold_log(ptr_, x, y, out, len()), "rgmin_manifold_log failed");
+    }
+    void transport(double const* x_from, double const* x_to, double const* v, double* out) const {
+        check(rgmin_manifold_transport(ptr_, x_from, x_to, v, out, len()),
+              "rgmin_manifold_transport failed");
+    }
+    double inner(double const* x, double const* u, double const* v) const {
+        double out = 0.0;
+        check(rgmin_manifold_inner(ptr_, x, u, v, &out, len()), "rgmin_manifold_inner failed");
+        return out;
+    }
+    /// `rgrad_out` is the Riemannian gradient of `egrad` at `x`; `x_out`
+    /// is the retraction of `-t rgrad_out`.
+    void gradient_step(double const* x, double const* egrad, double t, double* rgrad_out,
+                       double* x_out) const {
+        check(rgmin_manifold_gradient_step(ptr_, x, egrad, t, rgrad_out, x_out, len()),
+              "rgmin_manifold_gradient_step failed");
+    }
+};
+
 namespace nlcg {
 namespace conjugacy {
 

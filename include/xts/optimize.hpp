@@ -30,6 +30,7 @@ using rgmin::ConstraintError;
 using rgmin::ConstraintSolver;
 using rgmin::DistanceConstraints;
 using rgmin::LbfgsPairs;
+using rgmin::Manifold;
 
 using rgmin::EigenKind;
 using rgmin::EigenParams;

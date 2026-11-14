@@ -125,4 +125,8 @@ fn cxx_headers_compile_link_and_set_box() {
         stdout.contains("pairs="),
         "cxx smoke did not report retained curvature: {stdout}"
     );
+    assert!(
+        stdout.contains("manifold ok"),
+        "cxx smoke did not run the manifold fit: {stdout}"
+    );
 }
