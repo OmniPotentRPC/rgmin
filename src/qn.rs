@@ -9,7 +9,7 @@ use crate::linesearch::LineSearch;
 use crate::report::Report;
 use crate::step::{
     energy_noise_report, implicit_atom_cap, l2, next_istep, qn_istep, scale_step, scale_step_atom,
-    take_step,
+    start_answer, take_step,
 };
 use crate::trust::{
     accept_ratio, cauchy_point, dogleg_direction, predicted_reduction, reduction_ratio,
@@ -41,7 +41,7 @@ where
 {
     let mut pos = start(obj, init)?;
     let n = pos.len();
-    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    let (mut value, mut grad) = start_answer(obj, &pos)?;
     let mut h = Array2::<f64>::eye(n);
     let mut istep = control.istep;
 
@@ -176,7 +176,7 @@ where
 {
     let mut pos = start(obj, init)?;
     let n = pos.len();
-    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    let (mut value, mut grad) = start_answer(obj, &pos)?;
     let mut b = Array2::<f64>::eye(n);
     let atom_cap = implicit_atom_cap(control);
     let (mut radius, rmax) = sr_trust_limits(control.istep, n, atom_cap, control.maxmove);
@@ -242,7 +242,7 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let mut pos = start(obj, init)?;
-    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    let (mut value, mut grad) = start_answer(obj, &pos)?;
     let mut istep = control.istep;
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);

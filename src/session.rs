@@ -44,8 +44,9 @@ use crate::quickmin::{
 use crate::report::{Report, Status};
 use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
-    Taken, cap_alpha, cap_displacement_atom, l2, max_atom_displacement, nlcg_opening_alpha,
-    qn_istep, scale_displacement_to_atom_cap, scale_step, scale_step_atom, take_step_with_options,
+    Taken, bound_step, cap_alpha, cap_displacement_atom, finite, l2, max_atom_displacement,
+    nlcg_opening_alpha, non_finite, project_box_tangent, qn_istep, scale_displacement_to_atom_cap,
+    scale_step, scale_step_atom, take_step_with_options,
 };
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
@@ -1604,6 +1605,10 @@ impl Solver {
     }
 
     /// One outer iteration. `x` is the iterate and is overwritten in place.
+    /// A non-finite first-order starting answer, FIRE trial or geometry
+    /// fallback returns [`Error::Oracle`], retaining the iterate and the
+    /// solver memory for a retry. A refused [`Accept::Step`] trial returns
+    /// the finite measured start with its gradient cached.
     pub fn step<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -1876,6 +1881,11 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        let saved = match &self.inner {
+            Inner::Lbfgs(solver) => Some(solver.curvature()),
+            _ => None,
+        };
+        let saved_stiff = self.geometry_lbfgs_stiff;
         let cap = self.atom_maxmove.unwrap_or(0.2);
         let nominal_motion = max_atom_displacement(&(self.istep * grad.mapv(|g| -g)));
         let stiff = *self
@@ -1982,7 +1992,7 @@ impl Solver {
             let ev = obj.value_and_gradient(trial.view());
             tval = ev.0;
             tgrad = ev.1;
-            if tval.is_finite() && tval - reference <= 1.0e-8 {
+            if finite(tval, tgrad.view()) && tval - reference <= 1.0e-8 {
                 accepted = true;
                 break;
             }
@@ -1997,6 +2007,13 @@ impl Solver {
             let ev = obj.value_and_gradient(trial.view());
             tval = ev.0;
             tgrad = ev.1;
+        }
+        if !finite(tval, tgrad.view()) {
+            if let (Inner::Lbfgs(solver), Some(saved)) = (&mut self.inner, saved) {
+                solver.restore(saved);
+            }
+            self.geometry_lbfgs_stiff = saved_stiff;
+            return Err(non_finite());
         }
         if !stiff {
             self.e_hist.push_back(tval);
@@ -2406,11 +2423,21 @@ impl Solver {
         } else {
             obj.value_and_gradient(x.view())
         };
+        if !finite(value, grad.view()) {
+            return Err(non_finite());
+        }
         grad = self.horizontal_grad(x, &grad);
+        if !finite(value, grad.view()) {
+            return Err(non_finite());
+        }
         let gnorm = self.stationarity_norm(obj.bounds(), x, &grad);
         // A caller that moved the iterate between steps measured the
         // gradient at both ends, so the displacement is a secant of the
         // retained inverse Hessian.
+        let before_move = match &self.inner {
+            Inner::Lbfgs(solver) if self.use_geometry_lbfgs() => Some(solver.curvature()),
+            _ => None,
+        };
         if !cached
             && self.manifold.retract_is_translation()
             && let Some(previous) = self.last_pos.clone().filter(|p| p.len() == x.len())
@@ -2433,7 +2460,13 @@ impl Solver {
         self.refresh_exp(obj, x, &grad)?;
 
         if self.use_geometry_lbfgs() {
-            return self.geometry_lbfgs_step(obj, x, value, grad);
+            let result = self.geometry_lbfgs_step(obj, x, value, grad);
+            if result.is_err()
+                && let (Inner::Lbfgs(solver), Some(saved)) = (&mut self.inner, before_move)
+            {
+                solver.restore(saved);
+            }
+            return result;
         }
 
         if matches!(self.manifold, ManifoldKind::Sphere | ManifoldKind::Stiefel)
@@ -2491,6 +2524,12 @@ impl Solver {
         // of a projected NEB force is not the potential of the gradient it
         // returns, so a decrease test there says nothing. Every other
         // Accept keeps the line-searched step_objective path.
+        // The measured start and its secant survive a refused Step trial;
+        // proposal guards may discard curvature only for an accepted move.
+        let before_trial = match &self.inner {
+            Inner::Lbfgs(solver) if self.accept == Accept::Step => Some(solver.curvature()),
+            _ => None,
+        };
         let guarded_direction = if self.accept == Accept::Step {
             match &mut self.inner {
                 Inner::Lbfgs(solver)
@@ -2571,6 +2610,10 @@ impl Solver {
                 *x = npos;
                 value = nval;
                 grad = ngrad;
+            } else {
+                if let (Inner::Lbfgs(solver), Some(saved)) = (&mut self.inner, before_trial) {
+                    solver.restore(saved);
+                }
             }
         }
         #[cfg(feature = "highs")]
@@ -2846,6 +2889,8 @@ impl Solver {
                 }
             }
             Inner::Fire(state, ext) => {
+                let saved = state.clone();
+                let saved_ext = ext.clone();
                 // The force, its metric image and the velocity leave the
                 // rigid subspace at the start geometry; the velocity in the
                 // momentum metric, the force in the force metric.
@@ -2890,12 +2935,9 @@ impl Solver {
                     rigid_broken_r,
                     &mut state.vel,
                 );
-                #[cfg(feature = "highs")]
-                if boxed {
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut raw);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
-                }
+                project_box_tangent(obj.bounds(), x, &mut raw);
+                project_box_tangent(obj.bounds(), x, &mut steepest);
+                project_box_tangent(obj.bounds(), x, &mut state.vel);
                 let mix = fire_mix(&self.precon, &state.vel, &raw, &steepest);
                 let mut dx = match ext {
                     Some(ext) => {
@@ -2924,7 +2966,18 @@ impl Solver {
                 } else if let Some(cap) = self.control.maxmove {
                     scale_step(x, &mut trial, cap);
                 }
-                trial = obj.bounds().clip(trial.view());
+                if trial.iter().any(|coordinate| !coordinate.is_finite()) {
+                    *state = saved;
+                    *ext = saved_ext;
+                    return Err(non_finite());
+                }
+                bound_step(obj.bounds(), x, &mut trial);
+                let ev = obj.value_and_gradient(trial.view());
+                if !finite(ev.0, ev.1.view()) {
+                    *state = saved;
+                    *ext = saved_ext;
+                    return Err(non_finite());
+                }
                 // The clamp and clip shorten the move; the velocity has to
                 // describe the move taken, or the power adapt reads an
                 // integral of moves that never happened.
@@ -2935,7 +2988,6 @@ impl Solver {
                 {
                     hold.ws.set_anchor(xs);
                 }
-                let ev = obj.value_and_gradient(x.view());
                 value = ev.0;
                 grad = ev.1;
                 let mut raw_new = grad.mapv(|g| -g);
@@ -2977,12 +3029,9 @@ impl Solver {
                     rigid_broken_r,
                     &mut state.vel,
                 );
-                #[cfg(feature = "highs")]
-                if boxed {
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut raw_new);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut steep_new);
-                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
-                }
+                project_box_tangent(obj.bounds(), x, &mut raw_new);
+                project_box_tangent(obj.bounds(), x, &mut steep_new);
+                project_box_tangent(obj.bounds(), x, &mut state.vel);
                 let mix_new = fire_mix(&self.precon, &state.vel, &raw_new, &steep_new);
                 fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
             }

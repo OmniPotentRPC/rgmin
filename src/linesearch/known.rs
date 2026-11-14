@@ -78,7 +78,11 @@ where
         crate::vecops::axpy(alpha, self.dir, &mut x);
         let (f, g) = (self.oracle)(x.view());
         self.evals += 1;
-        let dphi = crate::vecops::dot(g.view(), self.dir);
+        let (f, dphi) = if crate::step::finite(f, g.view()) {
+            (f, crate::vecops::dot(g.view(), self.dir))
+        } else {
+            (f64::INFINITY, f64::NAN)
+        };
         let p = Probe {
             alpha,
             f,
@@ -93,7 +97,7 @@ where
     }
 
     fn accept(&self, p: Probe) -> Option<LineOutcome> {
-        Some(p.into_outcome(self.evals))
+        crate::step::finite(p.f, p.g.view()).then(|| p.into_outcome(self.evals))
     }
 
     fn take_best(&mut self) -> Option<LineOutcome> {
@@ -218,7 +222,12 @@ impl LineSearch {
         } else {
             f64::INFINITY
         };
-        if !f0.is_finite() || !dphi0.is_finite() || amax.is_nan() || dphi0 == 0.0 {
+        if !crate::step::finite(f0, g0)
+            || dir.iter().any(|value| !value.is_finite())
+            || !dphi0.is_finite()
+            || amax.is_nan()
+            || dphi0 == 0.0
+        {
             return None;
         }
         if dphi0 > 0.0 {

@@ -182,14 +182,7 @@ pub(crate) fn project_direction(
     direction
 }
 
-/// Remove outward wall reactions from a force or velocity.
-pub(crate) fn project_tangent(bounds: &Bounds<f64>, x: &Array1<f64>, v: &mut Array1<f64>) {
-    for k in 0..v.len() {
-        if (x[k] <= bounds.low[k] && v[k] < 0.0) || (x[k] >= bounds.high[k] && v[k] > 0.0) {
-            v[k] = 0.0;
-        }
-    }
-}
+pub(crate) use crate::step::project_box_tangent as project_tangent;
 
 #[cfg(test)]
 mod tests {

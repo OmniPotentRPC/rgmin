@@ -1089,10 +1089,7 @@ pub unsafe extern "C" fn rgmin_minimize(
                 }
                 rgmin_status_t::RGMIN_SUCCESS
             }
-            Err(e) => {
-                set_last_error(&e.to_string());
-                rgmin_status_t::RGMIN_INVALID_PARAMETER
-            }
+            Err(e) => status_from_error(&e),
         }
     })) {
         Ok(s) => s,
@@ -1356,10 +1353,7 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
                 }
                 rgmin_status_t::RGMIN_SUCCESS
             }
-            Err(e) => {
-                set_last_error(&e.to_string());
-                rgmin_status_t::RGMIN_INVALID_PARAMETER
-            }
+            Err(e) => status_from_error(&e),
         }
     })) {
         Ok(s) => s,
@@ -1561,10 +1555,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
                 }
                 rgmin_status_t::RGMIN_SUCCESS
             }
-            Err(e) => {
-                set_last_error(&e.to_string());
-                rgmin_status_t::RGMIN_INVALID_PARAMETER
-            }
+            Err(e) => status_from_error(&e),
         }
     })) {
         Ok(s) => s,
@@ -3440,10 +3431,7 @@ pub unsafe extern "C" fn rgmin_solver_step(
         let mut pos = Array1::from(init);
         match unsafe { (*solver).solver.step(&obj, &mut pos) } {
             Ok(rep) => write_report(x, out, &rep),
-            Err(e) => {
-                set_last_error(&e.to_string());
-                rgmin_status_t::RGMIN_INVALID_PARAMETER
-            }
+            Err(e) => status_from_error(&e),
         }
     })) {
         Ok(s) => s,
@@ -3510,10 +3498,7 @@ pub unsafe extern "C" fn rgmin_solver_step_hess(
         let mut pos = Array1::from(init);
         match unsafe { (*solver).solver.step_hess(&obj, &mut pos) } {
             Ok(rep) => write_report(x, out, &rep),
-            Err(e) => {
-                set_last_error(&e.to_string());
-                rgmin_status_t::RGMIN_INVALID_PARAMETER
-            }
+            Err(e) => status_from_error(&e),
         }
     })) {
         Ok(s) => s,
@@ -3629,10 +3614,7 @@ pub unsafe extern "C" fn rgmin_solver_step_fg(
         let mut pos = Array1::from(init);
         match unsafe { (*solver).solver.step(&obj, &mut pos) } {
             Ok(rep) => write_report(x, out, &rep),
-            Err(e) => {
-                set_last_error(&e.to_string());
-                rgmin_status_t::RGMIN_INVALID_PARAMETER
-            }
+            Err(e) => status_from_error(&e),
         }
     })) {
         Ok(s) => s,
@@ -3851,10 +3833,7 @@ pub unsafe extern "C" fn rgmin_solver_step_hess_fg(
         let mut pos = Array1::from(init);
         match unsafe { (*solver).solver.step_hess(&obj, &mut pos) } {
             Ok(rep) => write_report(x, out, &rep),
-            Err(e) => {
-                set_last_error(&e.to_string());
-                rgmin_status_t::RGMIN_INVALID_PARAMETER
-            }
+            Err(e) => status_from_error(&e),
         }
     })) {
         Ok(s) => s,
