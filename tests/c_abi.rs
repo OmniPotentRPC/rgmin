@@ -10,10 +10,11 @@ use eindir_core::ffi::eindir_core_abi_stamp;
 use eindir_core::ffi::{eindir_objective_t, eindir_status_t};
 use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_conjugacy_t, rgmin_control_t,
-    rgmin_eigen_kind_t, rgmin_eigen_options_t, rgmin_eigen_params_t, rgmin_eigenpair_t,
-    rgmin_exp_t, rgmin_last_error, rgmin_lowest_eigenpair, rgmin_lowest_eigenpairs,
-    rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
-    rgmin_minimize_eindir, rgmin_minimize_scg, rgmin_report_t, rgmin_scg_params_t,
+    rgmin_eigen_kind_t, rgmin_eigen_options_t, rgmin_eigen_params_t, rgmin_eigenpair_ex_t,
+    rgmin_eigenpair_t, rgmin_exp_t, rgmin_last_error, rgmin_lowest_eigenpair,
+    rgmin_lowest_eigenpairs, rgmin_lowest_eigenpairs_ex, rgmin_lowest_mode_t,
+    rgmin_method_from_name, rgmin_method_t, rgmin_minimize, rgmin_minimize_eindir,
+    rgmin_minimize_scg, rgmin_precond_fn, rgmin_report_t, rgmin_scg_params_t,
     rgmin_solver_clear_exp, rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free,
     rgmin_solver_gradient_calls, rgmin_solver_hvp_calls, rgmin_solver_set_accept,
     rgmin_solver_set_exp, rgmin_solver_set_quickmin_cell, rgmin_solver_set_quickmin_variant,
@@ -960,13 +961,14 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
-/// ABI minor 41 adds the `rgmin_manifold_*` handles. Minor 40 is the
-/// 0.6.0 release and minor 39 is `rgmin_lowest_eigenpairs`.
+/// ABI minor 42 adds `rgmin_lowest_eigenpairs_ex`. Minor 39 is
+/// `rgmin_lowest_eigenpairs`. Minors 40 and 41 are the 0.6.0 release and
+/// the manifold API.
 #[test]
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 41);
+    assert_eq!(stamp.abi_minor, 42);
     assert_eq!(stamp.layout_revision, 5);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -3799,6 +3801,226 @@ fn lowest_eigenpairs_recovers_a_diagonal_and_rejects_bad_blocks() {
         rgmin_tensor_free(vt);
     }
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
+}
+
+unsafe extern "C" fn spread_hvp(
+    user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    v: *const DLManagedTensorVersioned,
+    hv_out: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let packed = unsafe { &*user.cast::<(*const f64, *const f64, usize)>() };
+    let (vp, n) = unsafe { cpu_f64(v) };
+    let (hp, hn) = unsafe { cpu_f64(hv_out.cast()) };
+    assert_eq!(n, hn);
+    assert_eq!(n, packed.2);
+    let hp = hp as *mut f64;
+    let mut coeff = 0.0;
+    unsafe {
+        for i in 0..n {
+            coeff += *packed.1.add(i) * *vp.add(i);
+        }
+        for i in 0..n {
+            *hp.add(i) = *packed.0.add(i) * *vp.add(i) + coeff * *packed.1.add(i);
+        }
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn jacobi_block(
+    user: *mut c_void,
+    block: *const DLManagedTensorVersioned,
+    out: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let scale = user.cast::<f64>();
+    let src = unsafe { &*block };
+    let dst = unsafe { &mut *out };
+    assert_eq!(src.dl_tensor.ndim, 2);
+    let n = unsafe { *src.dl_tensor.shape } as usize;
+    let m = unsafe { *src.dl_tensor.shape.add(1) } as usize;
+    let in_row = unsafe { *src.dl_tensor.strides } as isize;
+    let in_col = unsafe { *src.dl_tensor.strides.add(1) } as isize;
+    let out_row = unsafe { *dst.dl_tensor.strides } as isize;
+    let out_col = unsafe { *dst.dl_tensor.strides.add(1) } as isize;
+    let inn = src.dl_tensor.data.cast::<f64>();
+    let written = dst.dl_tensor.data.cast::<f64>();
+    unsafe {
+        for i in 0..n {
+            for j in 0..m {
+                let value = *inn.offset(i as isize * in_row + j as isize * in_col);
+                *written.offset(i as isize * out_row + j as isize * out_col) =
+                    value * *scale.add(i);
+            }
+        }
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn lowest_eigenpairs_ex_reports_residuals_and_null_matches_bits() {
+    let lam = [-4.0_f64, -1.0, 2.0, 5.0];
+    let n = lam.len();
+    let k = 2usize;
+    let mut x = [0.0_f64; 4];
+    let mut seed = [0.0_f64; 8];
+    seed[0] = 1.0;
+    seed[3] = 1.0;
+    seed[1] = 0.2;
+    seed[4] = 0.2;
+    let mut modes = [0.0_f64; 8];
+    let mut values = [0.0_f64; 2];
+    let mut pairs = [rgmin_eigenpair_t {
+        value: 0.0,
+        actions: 0,
+    }; 2];
+    let mut modes_ex = [0.0_f64; 8];
+    let mut values_ex = [0.0_f64; 2];
+    let mut extended = [rgmin_eigenpair_ex_t {
+        value: 0.0,
+        actions: 0,
+        residual: 0.0,
+        converged: 0,
+    }; 2];
+    let params = rgmin_eigen_params_t {
+        kind: rgmin_eigen_kind_t::RGMIN_EIGEN_LOBPCG as i32,
+        nev: k as u32,
+        krylov: 0,
+        max_iter: 30,
+        tol: 1e-10,
+    };
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), n) };
+    let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), n * k) };
+    let mt = unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), n * k) };
+    let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), k) };
+    let status = unsafe {
+        rgmin_lowest_eigenpairs(
+            Some(diag_lam_hvp),
+            lam.as_ptr().cast_mut().cast(),
+            xt,
+            st,
+            mt,
+            vt,
+            &params,
+            std::ptr::null(),
+            pairs.as_mut_ptr(),
+            k,
+        )
+    };
+    unsafe {
+        rgmin_tensor_free(xt);
+        rgmin_tensor_free(st);
+        rgmin_tensor_free(mt);
+        rgmin_tensor_free(vt);
+    }
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), n) };
+    let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), n * k) };
+    let mt = unsafe { rgmin_tensor_borrow_cpu_f64(modes_ex.as_mut_ptr(), n * k) };
+    let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values_ex.as_mut_ptr(), k) };
+    let status = unsafe {
+        rgmin_lowest_eigenpairs_ex(
+            Some(diag_lam_hvp),
+            lam.as_ptr().cast_mut().cast(),
+            None,
+            std::ptr::null_mut(),
+            xt,
+            st,
+            mt,
+            vt,
+            &params,
+            std::ptr::null(),
+            extended.as_mut_ptr(),
+            k,
+        )
+    };
+    unsafe {
+        rgmin_tensor_free(xt);
+        rgmin_tensor_free(st);
+        rgmin_tensor_free(mt);
+        rgmin_tensor_free(vt);
+    }
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    for j in 0..k {
+        assert_eq!(values[j].to_bits(), values_ex[j].to_bits());
+        assert_eq!(pairs[j].value.to_bits(), extended[j].value.to_bits());
+        assert_eq!(pairs[j].actions, extended[j].actions);
+        assert_eq!(extended[j].converged, 1);
+        assert!(extended[j].residual < 1e-8);
+    }
+    for (left, right) in modes.iter().zip(modes_ex.iter()) {
+        assert_eq!(left.to_bits(), right.to_bits());
+    }
+
+    let n = 10usize;
+    let k = 2usize;
+    let diag: Vec<f64> = (0..n).map(|i| 4.0_f64.powi(i as i32)).collect();
+    let u = vec![0.25_f64; n];
+    let scale: Vec<f64> = (0..n).map(|i| 1.0 / (diag[i] + u[i] * u[i])).collect();
+    let packed = (diag.as_ptr(), u.as_ptr(), n);
+    let mut seed = vec![0.0_f64; n * k];
+    for i in 0..n {
+        seed[i * k] = ((i * 3 + 1) as f64) * 0.17;
+        seed[i * k + 1] = ((i * 5 + 2) as f64) * -0.11;
+    }
+    let mut x = vec![0.0_f64; n];
+    let params = rgmin_eigen_params_t {
+        kind: rgmin_eigen_kind_t::RGMIN_EIGEN_LOBPCG as i32,
+        nev: k as u32,
+        krylov: 0,
+        max_iter: 40,
+        tol: 1e-8,
+    };
+    let mut solve = |precond: Option<rgmin_precond_fn>, user: *mut c_void| {
+        let mut modes = vec![0.0_f64; n * k];
+        let mut values = vec![0.0_f64; k];
+        let mut pairs = [rgmin_eigenpair_ex_t {
+            value: 0.0,
+            actions: 0,
+            residual: 1.0,
+            converged: 0,
+        }; 2];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), n) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), n * k) };
+        let mt = unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), n * k) };
+        let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), k) };
+        let status = unsafe {
+            rgmin_lowest_eigenpairs_ex(
+                Some(spread_hvp),
+                (&packed as *const (*const f64, *const f64, usize))
+                    .cast_mut()
+                    .cast(),
+                precond,
+                user,
+                xt,
+                st,
+                mt,
+                vt,
+                &params,
+                std::ptr::null(),
+                pairs.as_mut_ptr(),
+                k,
+            )
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(mt);
+            rgmin_tensor_free(vt);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        pairs
+    };
+    let plain = solve(None, std::ptr::null_mut());
+    let fast = solve(Some(jacobi_block), scale.as_ptr().cast_mut().cast());
+    assert_eq!(fast[0].converged, 1, "residual {}", fast[0].residual);
+    assert_eq!(fast[1].converged, 1, "residual {}", fast[1].residual);
+    assert!(
+        fast[0].actions < plain[0].actions,
+        "preconditioned {} products, identity {} (converged {})",
+        fast[0].actions,
+        plain[0].actions,
+        plain[0].converged
+    );
 }
 
 mod manifold_handles {

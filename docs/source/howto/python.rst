@@ -24,8 +24,10 @@ imported when an optimizer is constructed.
 matches ASE's length control. Stubs live in ``python/rgmin`` and
 ``py.typed`` marks the package.
 
-``lowest_eigenpairs(hvp, x0_block)`` returns the k lowest pairs of a
-symmetric product as NumPy arrays. ``hvp(x, v)`` is ``H(x) v``.
+``lowest_eigenpairs(hvp, x0_block)`` returns values, vectors, residual
+norms, and a converged flag for each of the k lowest pairs.
+``hvp(x, v)`` is ``H(x) v``. ``precond`` applies ``T`` to a block.
+``strict=False`` returns the flags instead of raising.
 :doc:`../tutorials/eigenpairs` is the short example, and continuous
 integration runs it.
 

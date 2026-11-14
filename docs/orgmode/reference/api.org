@@ -21,7 +21,7 @@ The types a host works with:
 | ~RiemannianManifold~ | Stiefel, SPD and product handles; see the manifold page. |
 | ~IrcTrust~ | GS2 / Sella MW-sphere equality. |
 | ~lowest_eigenpair~ / ~lowest_mode~ | Matrix-free lowest Hessian pair. |
-| ~lowest_eigenpairs~ | Block LOBPCG for the k lowest pairs (Knyazev 2001). |
+| ~lowest_eigenpairs~ | Block LOBPCG. Residuals and an optional ~T~ (Knyazev 2001). |
 | ~EigensolverKind~ / ~EigenParams~ | Closed eigen waist. |
 | ~HessianVector~ / ~FdHvp~ | ~H v~ without forming ~H~. |
 | ~Solver::step_hvp~ | Analytic product for ~newton-cg~ / ~newton-pcg~. |

@@ -43,9 +43,11 @@ typedef rgmin_eigenpair_t xts_eigenpair_t;
 typedef rgmin_manifold_handle_t xts_manifold_handle_t;
 typedef rgmin_stiefel_retraction_t xts_stiefel_retraction_t;
 typedef rgmin_spd_metric_t xts_spd_metric_t;
+typedef rgmin_eigenpair_ex_t xts_eigenpair_ex_t;
 typedef rgmin_exp_t xts_exp_t;
 typedef rgmin_lowest_mode_t xts_lowest_mode_t;
 typedef rgmin_hvp_fn xts_hvp_fn;
+typedef rgmin_precond_fn xts_precond_fn;
 typedef rgmin_constraint_error_t xts_constraint_error_t;
 typedef rgmin_constraint_solver_t xts_constraint_solver_t;
 typedef rgmin_constraints_t xts_constraints_t;
@@ -195,6 +197,7 @@ typedef rgmin_h0_fn xts_h0_fn;
 #define xts_manifold_transport rgmin_manifold_transport
 #define xts_manifold_inner rgmin_manifold_inner
 #define xts_manifold_gradient_step rgmin_manifold_gradient_step
+#define xts_lowest_eigenpairs_ex rgmin_lowest_eigenpairs_ex
 #define xts_last_constraint_error rgmin_last_constraint_error
 #define xts_constraints_create rgmin_constraints_create
 #define xts_constraints_create_at rgmin_constraints_create_at

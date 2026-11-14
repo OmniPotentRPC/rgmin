@@ -25,6 +25,7 @@ rgmin_linesearch_free
 rgmin_lowest_eigenpair
 rgmin_lowest_eigenpair_with_options
 rgmin_lowest_eigenpairs
+rgmin_lowest_eigenpairs_ex
 rgmin_manifold_egrad_to_rgrad
 rgmin_manifold_exp
 rgmin_manifold_free

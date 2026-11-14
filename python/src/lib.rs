@@ -9,13 +9,14 @@
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
-use ndarray::{Array1, ArrayView1};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use rgmin::{
-    Accept, ApplyHessian, Control, Error, FireConfig, FireKind, LbfgsH0, LbfgsPairs, LbfgsStep,
-    LineSearch, ManifoldFactor, Method, Oracle, RiemannianManifold, SearchStep, Solver, SpdMetric,
-    StiefelRetraction, StopNorm, SuppliedSearch, lowest_eigenpairs as solve_lowest_eigenpairs,
+    Accept, ApplyBlockPreconditioner, ApplyHessian, Control, Error, FireConfig, FireKind, LbfgsH0,
+    LbfgsPairs, LbfgsStep, LineSearch, ManifoldFactor, Method, Oracle, RiemannianManifold,
+    SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch,
+    lowest_eigenpairs as solve_lowest_eigenpairs, lowest_eigenpairs_precond,
 };
 
 #[pyclass]
@@ -368,6 +369,27 @@ fn call_objective(callback: &PyObject, x: ArrayView1<f64>) -> PyResult<(f64, Arr
     })
 }
 
+fn call_precond(callback: &PyObject, block: ArrayView2<f64>) -> PyResult<Array2<f64>> {
+    Python::with_gil(|py| {
+        let (n, m) = block.dim();
+        let rows: Vec<Vec<f64>> = (0..n).map(|i| block.row(i).to_vec()).collect();
+        let out = callback.call1(py, (rows,))?;
+        let rows: Vec<Vec<f64>> = out.extract(py)?;
+        if rows.len() != n || rows.iter().any(|row| row.len() != m) {
+            return Err(PyValueError::new_err(
+                "preconditioner must return shape (n, m)",
+            ));
+        }
+        let mut image = Array2::zeros((n, m));
+        for (i, row) in rows.iter().enumerate() {
+            for (j, value) in row.iter().enumerate() {
+                image[(i, j)] = *value;
+            }
+        }
+        Ok(image)
+    })
+}
+
 fn call_hvp(callback: &PyObject, x: ArrayView1<f64>, v: ArrayView1<f64>) -> PyResult<Array1<f64>> {
     Python::with_gil(|py| {
         let point: Vec<f64> = x.iter().copied().collect();
@@ -390,6 +412,27 @@ struct PyHvp {
     caught: Arc<Mutex<Option<PyErr>>>,
 }
 
+struct PyPrecond {
+    callback: PyObject,
+    caught: Arc<Mutex<Option<PyErr>>>,
+}
+
+impl ApplyBlockPreconditioner for PyPrecond {
+    fn apply_block_preconditioner(&self, block: ArrayView2<f64>) -> Array2<f64> {
+        match call_precond(&self.callback, block) {
+            Ok(image) => image,
+            Err(err) => {
+                if let Ok(mut guard) = self.caught.lock() {
+                    if guard.is_none() {
+                        *guard = Some(err);
+                    }
+                }
+                Array2::from_elem(block.dim(), f64::NAN)
+            }
+        }
+    }
+}
+
 impl ApplyHessian for PyHvp {
     fn apply_hessian(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
         match call_hvp(&self.callback, x, v) {
@@ -406,13 +449,18 @@ impl ApplyHessian for PyHvp {
     }
 }
 
+type SolvedPairs = (Vec<f64>, Vec<Vec<f64>>, Vec<f64>, Vec<bool>);
+
 /// Lowest eigenpairs of a symmetric product.
 ///
 /// `hvp(x, v)` returns `H(x) v`. `x0_block` is a list of rows, shape
 /// `(n, k)`. Values come back ascending. Each vector is one column.
-/// A pair that misses `tol` raises `RuntimeError`.
+/// The third list is `||Hv − θv||` and the fourth is the converged flag
+/// of each pair. `precond(block)` applies `T` to a row-major `(n, m)`
+/// block. Omitted, `T` is the identity. This function does not raise
+/// when a pair misses `tol`; the flag says so.
 #[pyfunction]
-#[pyo3(signature = (hvp, x0_block, x=None, *, tol=1e-8, max_iter=None))]
+#[pyo3(signature = (hvp, x0_block, x=None, *, tol=1e-8, max_iter=None, precond=None))]
 fn lowest_eigenpairs(
     py: Python<'_>,
     hvp: PyObject,
@@ -420,7 +468,8 @@ fn lowest_eigenpairs(
     x: Option<Vec<f64>>,
     tol: f64,
     max_iter: Option<usize>,
-) -> PyResult<(Vec<f64>, Vec<Vec<f64>>)> {
+    precond: Option<PyObject>,
+) -> PyResult<SolvedPairs> {
     let n = x0_block.len();
     let k = x0_block.first().map(|row| row.len()).unwrap_or(0);
     if n == 0 || k == 0 || x0_block.iter().any(|row| row.len() != k) {
@@ -451,10 +500,25 @@ fn lowest_eigenpairs(
         callback: hvp.clone_ref(py),
         caught: caught.clone(),
     };
+    let pre_apply = precond.map(|callback| PyPrecond {
+        callback,
+        caught: caught.clone(),
+    });
     let x_arr = Array1::from_vec(point);
     let solved = py.allow_threads(|| {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            solve_lowest_eigenpairs(&apply, x_arr.view(), seed.view(), tol, iterations)
+            if let Some(op) = pre_apply.as_ref() {
+                lowest_eigenpairs_precond(
+                    &apply,
+                    Some(op),
+                    x_arr.view(),
+                    seed.view(),
+                    tol,
+                    iterations,
+                )
+            } else {
+                solve_lowest_eigenpairs(&apply, x_arr.view(), seed.view(), tol, iterations)
+            }
         }))
     });
     if let Some(err) = caught.lock().ok().and_then(|mut guard| guard.take()) {
@@ -465,18 +529,15 @@ fn lowest_eigenpairs(
         Ok(Err(err)) => return Err(PyValueError::new_err(err.to_string())),
         Err(_) => return Err(PyRuntimeError::new_err("lowest eigenpairs panicked")),
     };
-    if found.pairs.iter().any(|pair| !pair.converged) {
-        return Err(PyRuntimeError::new_err(
-            "lowest eigenpairs did not meet the residual tolerance",
-        ));
-    }
     let values = found.pairs.iter().map(|pair| pair.value).collect();
     let columns = found
         .pairs
         .iter()
         .map(|pair| pair.vector.to_vec())
         .collect();
-    Ok((values, columns))
+    let residuals = found.pairs.iter().map(|pair| pair.residual).collect();
+    let converged = found.pairs.iter().map(|pair| pair.converged).collect();
+    Ok((values, columns, residuals, converged))
 }
 
 /// Stiefel, SPD or product manifold over flat column-major lists.

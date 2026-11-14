@@ -43,19 +43,25 @@ _EXPORTS = [
 ]
 
 
-def lowest_eigenpairs(hvp, x0_block, *, x=None, tol=1e-8, max_iter=None):
+def lowest_eigenpairs(
+    hvp, x0_block, *, x=None, tol=1e-8, max_iter=None, precond=None, strict=True
+):
     """Lowest eigenpairs of a symmetric product.
 
     ``hvp(x, v)`` returns ``H(x) v`` without forming ``H``.
     ``x0_block`` has shape ``(n, k)``, one column per starting vector.
-    Block LOBPCG (Knyazev 2001) returns the values ascending and the
-    vectors as the columns of an ``(n, k)`` array. ``x`` is the point
-    where the product is taken; omitted, it is the origin.
+    Block LOBPCG (Knyazev 2001) returns the values ascending, the
+    vectors as the columns of an ``(n, k)`` array, the residual norms
+    ``||H v - lambda v||``, and a boolean converged flag per pair.
+    ``x`` is the point where the product is taken; omitted, it is the origin.
 
-    The default tolerance is ``1e-8``. ``max_iter`` defaults to
-    ``max(n, 8)`` block expansions. A pair that misses the tolerance
-    raises ``RuntimeError``. ``k = 0``, ``k`` above ``n``, and a
-    non-finite value or product are ``ValueError``.
+    ``precond(block)`` applies ``T`` to an ``(n, m)`` block. Omitted,
+    ``T`` is the identity. The default tolerance is ``1e-8``.
+    ``max_iter`` defaults to ``max(n, 8)`` block expansions.
+    ``strict=True`` raises ``RuntimeError`` when a pair misses the
+    tolerance. ``strict=False`` returns the per-pair flags instead.
+    ``k = 0``, ``k`` above ``n``, and a non-finite value or product
+    are ``ValueError``.
     """
     native = getattr(_core, "lowest_eigenpairs", None)
     if native is None:
@@ -69,14 +75,28 @@ def lowest_eigenpairs(hvp, x0_block, *, x=None, tol=1e-8, max_iter=None):
         out = hvp(np.asarray(point, dtype=np.float64), np.asarray(vector, dtype=np.float64))
         return np.asarray(out, dtype=np.float64).reshape(-1).tolist()
 
-    values, columns = native(
+    def apply_t(rows):
+        incoming = np.asarray(rows, dtype=np.float64)
+        out = np.asarray(precond(incoming), dtype=np.float64)
+        if out.shape != incoming.shape:
+            raise ValueError("preconditioner must return shape (n, m)")
+        return out.reshape(incoming.shape).tolist()
+
+    values, columns, residuals, converged = native(
         product,
         block.tolist(),
         None if point is None else point.tolist(),
         tol=tol,
         max_iter=max_iter,
+        precond=None if precond is None else apply_t,
     )
-    return np.asarray(values, dtype=np.float64), np.asarray(columns, dtype=np.float64).T
+    values = np.asarray(values, dtype=np.float64)
+    vectors = np.asarray(columns, dtype=np.float64).T
+    residuals = np.asarray(residuals, dtype=np.float64)
+    converged = np.asarray(converged, dtype=bool)
+    if strict and not bool(np.all(converged)):
+        raise RuntimeError("lowest eigenpairs did not meet the residual tolerance")
+    return values, vectors, residuals, converged
 
 
 def minimize(

@@ -263,4 +263,5 @@ def lowest_eigenpairs(
     *,
     tol: float = 1e-8,
     max_iter: int | None = None,
-) -> tuple[list[float], list[list[float]]]: ...
+    precond: Callable[[list[list[float]]], list[list[float]]] | None = None,
+) -> tuple[list[float], list[list[float]], list[float], list[bool]]: ...

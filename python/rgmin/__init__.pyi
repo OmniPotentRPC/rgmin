@@ -16,7 +16,9 @@ def lowest_eigenpairs(
     x: Any = None,
     tol: float = 1e-8,
     max_iter: int | None = None,
-) -> tuple[Any, Any]: ...
+    precond: Callable[[Any], Any] | None = None,
+    strict: bool = True,
+) -> tuple[Any, Any, Any, Any]: ...
 
 class BFGS:
     maxstep: float

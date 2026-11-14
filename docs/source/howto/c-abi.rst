@@ -86,6 +86,9 @@ are row-major n-by-k. ``rgmin_lowest_eigenpairs`` is ``abi_minor`` 39. The same 
 ``rgmin::lowest_eigenpairs`` and ``xts_lowest_eigenpairs``.
 ``rgmin_manifold_handle_t`` is a Stiefel, SPD or product manifold with
 column-major point buffers, ``abi_minor`` 41; see :doc:`../reference/manifold`.
+``rgmin_lowest_eigenpairs_ex`` adds each residual and a converged flag, and an
+optional preconditioner (null is the identity). It is ``abi_minor`` 42.
+``rgmin_eigenpair_t`` is unchanged.
 
 .. code:: c
 

@@ -61,10 +61,10 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 41
+#define RGMIN_ABI_VERSION_MINOR 42
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
- * 41 rgmin_manifold_handle_t. */
+ * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -1002,6 +1002,13 @@ typedef rgmin_status_t (*rgmin_hvp_fn)(void *user, const DLManagedTensorVersione
                                    const DLManagedTensorVersioned *v,
                                    DLManagedTensorVersioned *hv_out);
 
+/** Apply preconditioner T to one row-major n-by-m block. \a block and
+ *  \a out have rank 2 and shape (n, m). A null function pointer at
+ *  \ref rgmin_lowest_eigenpairs_ex is the identity and is not called.
+ *  ABI minor 42. */
+typedef rgmin_status_t (*rgmin_precond_fn)(void *user, const DLManagedTensorVersioned *block,
+                                       DLManagedTensorVersioned *out);
+
 /**
  * Matrix-free lowest Hessian eigenpair. \a params NULL is Lanczos.
  * Unlinked kinds return \c RGMIN_UNAVAILABLE. The vector is written
@@ -1055,13 +1062,40 @@ typedef struct rgmin_eigenpair_t {
  * max_iter = max(n, 8). \a options NULL is accepted; this matrix-free
  * solve ignores ChASE degree and extra. An unlinked \a params->kind
  * returns \c RGMIN_UNAVAILABLE. k = 0, k > n, and non-finite input return
- * \c RGMIN_INVALID_PARAMETER. ABI minor 39.
+ * \c RGMIN_INVALID_PARAMETER. ABI minor 39. This record layout stays.
+ * Residuals, converged flags, and a preconditioner are
+ * \ref rgmin_lowest_eigenpairs_ex.
  */
 rgmin_status_t rgmin_lowest_eigenpairs(
     rgmin_hvp_fn hvp, void *user, const DLManagedTensorVersioned *x,
     const DLManagedTensorVersioned *seed, DLManagedTensorVersioned *modes_out,
     DLManagedTensorVersioned *values_out, const rgmin_eigen_params_t *params,
     const rgmin_eigen_options_t *options, rgmin_eigenpair_t *pairs_out, size_t k);
+
+/** One pair from \ref rgmin_lowest_eigenpairs_ex. The first two fields
+ *  match \ref rgmin_eigenpair_t. \c residual is ||Hv - lambda v|| and
+ *  \c converged is 1 when that residual met the tolerance. ABI minor 42. */
+typedef struct rgmin_eigenpair_ex_t {
+    double value;
+    size_t actions;
+    double residual;
+    int32_t converged;
+} rgmin_eigenpair_ex_t;
+
+/**
+ * \ref rgmin_lowest_eigenpairs with each pair's residual and converged
+ * flag, and an optional preconditioner. \a precond NULL is the identity
+ * and is not called; values and vectors then match
+ * \ref rgmin_lowest_eigenpairs bit for bit. \a precond applies T to one
+ * row-major n-by-m block. \a pairs_out has length k. ABI minor 42.
+ * \ref rgmin_eigenpair_t is unchanged.
+ */
+rgmin_status_t rgmin_lowest_eigenpairs_ex(
+    rgmin_hvp_fn hvp, void *user, rgmin_precond_fn precond, void *precond_user,
+    const DLManagedTensorVersioned *x, const DLManagedTensorVersioned *seed,
+    DLManagedTensorVersioned *modes_out, DLManagedTensorVersioned *values_out,
+    const rgmin_eigen_params_t *params, const rgmin_eigen_options_t *options,
+    rgmin_eigenpair_ex_t *pairs_out, size_t k);
 
 /**
  * Lowest Hessian eigenpair with separate optional backend settings.

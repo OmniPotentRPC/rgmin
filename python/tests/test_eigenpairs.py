@@ -12,12 +12,14 @@ def test_random_spd_matches_numpy_eigh():
     matrix = factor.T @ factor
     seed = np.eye(6, 3)
     seed[1:, :] += 0.3
-    values, vectors = lowest_eigenpairs(
+    values, vectors, residuals, converged = lowest_eigenpairs(
         lambda _x, vector: matrix @ vector, seed, tol=1e-10, max_iter=40
     )
     evals, evecs = np.linalg.eigh(matrix)
     assert values.shape == (3,)
     assert vectors.shape == (6, 3)
+    assert residuals.shape == (3,)
+    assert converged.shape == (3,) and converged.all()
     assert np.allclose(values, evals[:3], atol=1e-5)
     overlap = np.sum((evecs[:, :3].T @ vectors) ** 2)
     assert abs(overlap - 3.0) < 1e-4
@@ -32,13 +34,63 @@ def test_degenerate_subspace_matches_numpy_eigh():
     third = np.cross(first, second)
     matrix = np.eye(3) + 3.0 * np.outer(third, third)
     seed = np.array([[0.2, 0.9], [-0.4, 0.1], [0.7, -0.3]])
-    values, vectors = lowest_eigenpairs(
+    values, vectors, _residuals, converged = lowest_eigenpairs(
         lambda _x, vector: matrix @ vector, seed, tol=1e-10, max_iter=30
     )
+    assert converged.all()
     evals, evecs = np.linalg.eigh(matrix)
     assert np.allclose(values, evals[:2], atol=1e-6)
     overlap = np.sum((evecs[:, :2].T @ vectors) ** 2)
     assert abs(overlap - 2.0) < 1e-5
+
+
+def test_nonconvergence_returns_flags_without_raising():
+    rng = np.random.default_rng(19)
+    raw = rng.normal(size=(8, 8))
+    matrix = 0.5 * (raw + raw.T)
+    seed = np.eye(8, 3)
+    values, vectors, residuals, converged = lowest_eigenpairs(
+        lambda _x, vector: matrix @ vector,
+        seed,
+        tol=1e-14,
+        max_iter=1,
+        strict=False,
+    )
+    assert values.shape == (3,) and vectors.shape == (8, 3)
+    assert residuals.shape == (3,)
+    assert not converged.all()
+
+
+def test_preconditioner_matches_identity_and_cuts_work():
+    n = 10
+    diag = 4.0 ** np.arange(n)
+    u = np.full(n, 0.25)
+    scale = 1.0 / (diag + u * u)
+
+    def hvp(_x, vector):
+        vector = np.asarray(vector, dtype=np.float64)
+        return diag * vector + u * np.dot(u, vector)
+
+    seed = np.zeros((n, 2))
+    seed[:, 0] = (np.arange(n) * 3 + 1) * 0.17
+    seed[:, 1] = (np.arange(n) * 5 + 2) * -0.11
+    plain = lowest_eigenpairs(hvp, seed, tol=1e-8, max_iter=40, strict=False)
+    copied = lowest_eigenpairs(
+        hvp, seed, tol=1e-8, max_iter=40, precond=lambda block: np.array(block, copy=True), strict=False
+    )
+    for left, right in zip(plain, copied):
+        assert np.array_equal(left, right)
+    fast = lowest_eigenpairs(
+        hvp,
+        seed,
+        tol=1e-8,
+        max_iter=8,
+        precond=lambda block: scale[:, None] * block,
+        strict=False,
+    )
+    assert fast[3].all()
+    stalled = lowest_eigenpairs(hvp, seed, tol=1e-8, max_iter=8, strict=False)
+    assert not stalled[3].all()
 
 
 def test_nonconvergence_raises():

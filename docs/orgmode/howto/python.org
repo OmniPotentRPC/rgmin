@@ -25,7 +25,7 @@ FIRE(atoms, logfile=None).run(fmax=0.05, steps=20)
 
 The Rust L-BFGS default is the strong Wolfe search. ~LBFGS(eon_cap=True)~ selects the eOn cap. Stubs live in ~python/rgmin/*.pyi~ and ~py.typed~ marks the package.
 
-~lowest_eigenpairs(hvp, x0_block)~ returns the k lowest pairs of a symmetric product as NumPy arrays. ~hvp(x, v)~ is ~H(x) v~. @@rst::doc:`tutorials/eigenpairs`@@ is the short example, and continuous integration runs it.
+~lowest_eigenpairs(hvp, x0_block)~ returns values, vectors, residual norms, and a converged flag for each of the k lowest pairs. ~hvp(x, v)~ is ~H(x) v~. ~precond~ applies ~T~ to a block. ~strict=False~ returns the flags instead of raising. @@rst::doc:`tutorials/eigenpairs`@@ is the short example, and continuous integration runs it.
 
 * Nanobind wheel
 
