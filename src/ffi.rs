@@ -64,7 +64,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 36;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 37;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -3782,6 +3782,164 @@ pub unsafe extern "C" fn rgmin_solver_search_direction(
             rgmin_status_t::RGMIN_SUCCESS
         }
         Err(e) => status_from_error(&e),
+    }
+}
+
+/// Stored `(s, y)` pairs for [`rgmin_lbfgs_direction`].
+pub struct rgmin_lbfgs_pairs {
+    pairs: crate::lbfgs::direction::LbfgsPairs,
+}
+
+/// Apply `H0` to `v`, writing `n` doubles to `out`. Return 0 on success.
+pub type rgmin_h0_fn = unsafe extern "C" fn(*mut c_void, *const f64, *mut f64, usize) -> i32;
+
+/// Pair memory of dimension `n`. `capacity` 0 keeps ten pairs.
+///
+/// # Safety
+///
+/// The returned pointer is freed with [`rgmin_lbfgs_pairs_free`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_lbfgs_pairs_create(
+    n: usize,
+    capacity: usize,
+) -> *mut rgmin_lbfgs_pairs {
+    match crate::lbfgs::direction::LbfgsPairs::new(n, capacity) {
+        Ok(pairs) => Box::into_raw(Box::new(rgmin_lbfgs_pairs { pairs })),
+        Err(err) => {
+            let _ = status_from_error(&err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Append one pair. `*stored` is 1 when the pair was kept.
+///
+/// # Safety
+///
+/// `pairs` is a live handle. `s` and `y` address `n` doubles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_lbfgs_pairs_push(
+    pairs: *mut rgmin_lbfgs_pairs,
+    s: *const f64,
+    y: *const f64,
+    rho: f64,
+    n: usize,
+    stored: *mut i32,
+) -> rgmin_status_t {
+    if pairs.is_null() || s.is_null() || y.is_null() {
+        set_last_error("rgmin_lbfgs_pairs_push: null argument");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let sv = unsafe { slice::from_raw_parts(s, n) };
+    let yv = unsafe { slice::from_raw_parts(y, n) };
+    match unsafe {
+        (*pairs)
+            .pairs
+            .push_rho(ArrayView1::from(sv), ArrayView1::from(yv), rho)
+    } {
+        Ok(kept) => {
+            if !stored.is_null() {
+                unsafe { *stored = i32::from(kept) };
+            }
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        Err(err) => status_from_error(&err),
+    }
+}
+
+/// Release a handle from [`rgmin_lbfgs_pairs_create`]. Null is a no-op.
+///
+/// # Safety
+///
+/// `pairs` is null or a pointer from [`rgmin_lbfgs_pairs_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_lbfgs_pairs_free(pairs: *mut rgmin_lbfgs_pairs) {
+    if !pairs.is_null() {
+        drop(unsafe { Box::from_raw(pairs) });
+    }
+}
+
+/// Direction from the stored pairs. Pass `h0_diag` (length `n`) or
+/// `apply_h0`, not both and not neither. The result is the two-loop
+/// that starts at `-g`.
+///
+/// # Safety
+///
+/// `pairs` is a live handle. `grad` and `dir` address `n` doubles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_lbfgs_direction(
+    pairs: *const rgmin_lbfgs_pairs,
+    grad: *const f64,
+    h0_diag: *const f64,
+    apply_h0: Option<rgmin_h0_fn>,
+    user: *mut c_void,
+    dir: *mut f64,
+    n: usize,
+) -> rgmin_status_t {
+    if pairs.is_null() || grad.is_null() || dir.is_null() {
+        set_last_error("rgmin_lbfgs_direction: null argument");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    match (h0_diag.is_null(), apply_h0.is_none()) {
+        (false, false) => {
+            set_last_error("rgmin_lbfgs_direction: pass a diagonal or a callback");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        (true, true) => {
+            set_last_error("rgmin_lbfgs_direction: H0 is missing");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        _ => {}
+    }
+    if n == 0 {
+        set_last_error("rgmin_lbfgs_direction: dimension is zero");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let gv = unsafe { slice::from_raw_parts(grad, n) };
+    let outcome = if let Some(apply) = apply_h0 {
+        let callback = |v: ArrayView1<'_, f64>| {
+            let input = v.as_slice().ok_or(Error::LbfgsDirection {
+                what: "H0 input is not contiguous",
+            })?;
+            let mut out = vec![0.0; input.len()];
+            let code = unsafe { apply(user, input.as_ptr(), out.as_mut_ptr(), input.len()) };
+            if code != 0 {
+                return Err(Error::LbfgsDirection {
+                    what: "H0 callback failed",
+                });
+            }
+            Ok(Array1::from_vec(out))
+        };
+        unsafe {
+            (*pairs)
+                .pairs
+                .direction(ArrayView1::from(gv), crate::lbfgs::direction::LbfgsH0::Apply(&callback))
+        }
+    } else {
+        let diag = unsafe { slice::from_raw_parts(h0_diag, n) };
+        if diag.iter().any(|v| !v.is_finite()) {
+            set_last_error("rgmin_lbfgs_direction: H0 diagonal is not finite");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let scale = diag[0];
+        if diag.iter().any(|v| *v != scale) {
+            set_last_error("rgmin_lbfgs_direction: H0 diagonal is not a scalar");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        unsafe {
+            (*pairs).pairs.direction(
+                ArrayView1::from(gv),
+                crate::lbfgs::direction::LbfgsH0::Scale(scale),
+            )
+        }
+    };
+    match outcome {
+        Ok(direction) => {
+            let out = unsafe { slice::from_raw_parts_mut(dir, n) };
+            out.copy_from_slice(direction.as_slice().expect("contiguous"));
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        Err(err) => status_from_error(&err),
     }
 }
 

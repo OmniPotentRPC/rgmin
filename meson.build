@@ -100,7 +100,7 @@ endif
 
 rgmin_cargo = custom_target(
     'rgmin-cargo',
-    input: files('Cargo.toml', 'src/lib.rs'),
+    input: files('Cargo.toml', 'src/lib.rs', 'src/lbfgs/direction.rs', 'src/ffi.rs'),
     depend_files: files('Cargo.lock') + files(_rgmin_meta) + files(_rgmin_rs) + files(_rgmin_inc),
     output: [_cargo_shared, _cargo_static],
     command: [

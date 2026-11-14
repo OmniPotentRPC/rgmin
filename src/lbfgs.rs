@@ -27,6 +27,8 @@ use crate::step::{
 };
 use eindir_core::{DifferentiableObjective, Objective};
 
+pub mod direction;
+
 /// How [`Lbfgs`] compares the gradient to [`Lbfgs::gtol`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GradNorm {

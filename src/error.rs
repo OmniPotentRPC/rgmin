@@ -141,6 +141,12 @@ pub enum Error {
     /// Newton-CG or Newton-PCG.
     #[error("hessian-vector step requires newton-cg or newton-pcg")]
     NeedHvp,
+    /// Caller-supplied L-BFGS direction refused its inputs.
+    #[error("lbfgs direction: {what}")]
+    LbfgsDirection {
+        /// What the call refused.
+        what: &'static str,
+    },
 }
 
 /// Result alias for this crate.

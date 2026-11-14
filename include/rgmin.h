@@ -55,7 +55,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 36
+#define RGMIN_ABI_VERSION_MINOR 37
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -554,6 +554,30 @@ size_t rgmin_solver_pair_count(const rgmin_solver_t *solver);
 rgmin_status_t rgmin_solver_search_direction(rgmin_solver_t *solver,
                                           const double *grad, double *dir,
                                           size_t n);
+
+/** Opaque `(s, y)` memory for \ref rgmin_lbfgs_direction. */
+typedef struct rgmin_lbfgs_pairs rgmin_lbfgs_pairs_t;
+
+/** Apply H0 to `v`, writing `n` doubles to `out`. Return 0 on success. */
+typedef int32_t (*rgmin_h0_fn)(void *user, const double *v, double *out, size_t n);
+
+/** Pair memory of dimension `n`. `capacity` 0 keeps ten pairs. Null when `n` is 0. */
+rgmin_lbfgs_pairs_t *rgmin_lbfgs_pairs_create(size_t n, size_t capacity);
+/** Append one pair. `*stored` is 1 when the curvature gate kept it. `stored` may be NULL. */
+rgmin_status_t rgmin_lbfgs_pairs_push(rgmin_lbfgs_pairs_t *pairs, const double *s,
+                                      const double *y, double rho, size_t n,
+                                      int32_t *stored);
+/** Release a handle from \ref rgmin_lbfgs_pairs_create. Null is a no-op. */
+void rgmin_lbfgs_pairs_free(rgmin_lbfgs_pairs_t *pairs);
+/**
+ * Two-loop direction. Pass `h0_diag` (length `n`, every entry the same
+ * scale) or `apply_h0`, not both and not neither. `q` starts at `-grad`.
+ * ABI minor 37.
+ */
+rgmin_status_t rgmin_lbfgs_direction(const rgmin_lbfgs_pairs_t *pairs,
+                                     const double *grad, const double *h0_diag,
+                                     rgmin_h0_fn apply_h0, void *user, double *dir,
+                                     size_t n);
 
 /** Directional curvature `d^T H(x) d`. Non-success falls back to the probe. */
 typedef rgmin_status_t (*rgmin_curv_fn)(void *user, const DLManagedTensorVersioned *x,
