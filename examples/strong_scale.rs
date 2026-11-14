@@ -22,10 +22,12 @@
 //! run over all repeats, `efficiency` the speedup over 1 thread divided
 //! by the thread count. The harness is CPU only; the `gpu` column stays
 //! empty. After the timed L-BFGS repeats on each pool, one untimed solve
-//! counts the steps that ran the line search, seen as a second oracle
-//! call at the step's start, and the accepted steps that meet the strong
-//! Wolfe conditions, and reports both on stderr. It exits non-zero when a
-//! run does not converge or an L-BFGS step fails either count.
+//! counts the steps that ran the line search, and the accepted steps that
+//! meet the strong Wolfe conditions, and reports both on stderr. A step
+//! ran the search when its oracle calls are the trials a
+//! [`SuppliedSearch`] replay of the strong Wolfe search asks for, in
+//! order, and the replay accepts the session's point. It exits non-zero
+//! when a run does not converge or an L-BFGS step fails either count.
 //!
 //! `cargo run --release --features par --example strong_scale -- \
 //!   --cells 20 --repeats 5 [--max-threads T] [--hardware NAME]`
@@ -37,7 +39,10 @@ use std::time::Instant;
 use ndarray::{Array1, ArrayView1};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use rayon::prelude::*;
-use rgmin::{Accept, Control, FireKind, FirePreset, LineSearch, Method, Oracle, Solver, StopNorm};
+use rgmin::{
+    Accept, Control, FireKind, FirePreset, LineSearch, Method, Oracle, SearchStep, Solver,
+    StopNorm, SuppliedSearch,
+};
 
 /// Pt Morse parameters of tests/newton_cg_morse.rs: eV, 1/Angstrom, Angstrom.
 const D0: f64 = 0.7102;
@@ -54,6 +59,11 @@ const BUDGET: usize = 2000;
 /// Strong Wolfe constants of the L-BFGS search, the `Solver::new` default.
 const C1: f64 = 1e-4;
 const C2: f64 = 0.9;
+const WOLFE: LineSearch = LineSearch::Wolfe {
+    c1: C1,
+    c2: C2,
+    maxiter: 40,
+};
 
 /// Half-lattice offsets of the 12 FCC nearest neighbours.
 const NN: [[i64; 3]; 12] = [
@@ -148,7 +158,8 @@ struct Run {
     steps: usize,
     fmax: f64,
     x: Array1<f64>,
-    /// Steps that ran the line search; counted only on an audited run.
+    /// Steps whose oracle calls are the strong Wolfe search's trials;
+    /// counted only on an audited run.
     searched: usize,
     /// Accepted steps that meet the strong Wolfe conditions; counted only
     /// on an audited run.
@@ -164,6 +175,30 @@ fn strong_wolfe(
 ) -> bool {
     let (d0, d1) = (g0.dot(s), g1.dot(s));
     d0 < 0.0 && f1 <= f0 + C1 * d0 && d1.abs() <= -C2 * d0
+}
+
+type Answer = (f64, Array1<f64>);
+
+/// Whether the strong Wolfe search from `(x0, f0, g0)` along `dir`,
+/// opening at `open`, asks for exactly the points in `trials`, in order,
+/// and accepts `x1`. [`SuppliedSearch`] makes the trials
+/// [`LineSearch::search`] makes on the same answers, with no step cap.
+fn replays(
+    (x0, f0, g0): (&Array1<f64>, f64, &Array1<f64>),
+    dir: &Array1<f64>,
+    open: f64,
+    trials: &[(Array1<f64>, Answer)],
+    x1: &Array1<f64>,
+) -> bool {
+    let mut search = SuppliedSearch::new(WOLFE, x0.view(), dir.view(), open);
+    let mut next = search.offer(f0, g0.view());
+    for (x, (f, g)) in trials {
+        match next {
+            SearchStep::Evaluate { x: ask, .. } if ask == *x => next = search.offer(*f, g.view()),
+            _ => return false,
+        }
+    }
+    matches!(next, SearchStep::Accepted { x, .. } if x == *x1)
 }
 
 fn relax(sys: &System, name: &str, audit: bool) -> Run {
@@ -182,14 +217,17 @@ fn relax(sys: &System, name: &str, audit: bool) -> Run {
         noise_floor: None,
     };
     let calls = AtomicUsize::new(0);
-    let origin = Mutex::new(Array1::zeros(0));
-    let at_origin = AtomicUsize::new(0);
+    let trials: Mutex<Vec<(Array1<f64>, Answer)>> = Mutex::new(Vec::new());
     let obj = Oracle::unbounded(n, |x: ArrayView1<f64>| {
         calls.fetch_add(1, Ordering::Relaxed);
-        if audit && *origin.lock().expect("origin") == x {
-            at_origin.fetch_add(1, Ordering::Relaxed);
+        let answer = morse(sys, x);
+        if audit {
+            trials
+                .lock()
+                .expect("trials")
+                .push((x.to_owned(), answer.clone()));
         }
-        morse(sys, x)
+        answer
     });
     let start = Instant::now();
     let mut solver = Solver::new(method, control, n);
@@ -201,11 +239,7 @@ fn relax(sys: &System, name: &str, audit: bool) -> Run {
                 .set_lbfgs_step(rgmin::LbfgsStep::Wolfe)
                 .expect("wolfe");
             solver.set_accept(Accept::Energy);
-            solver.set_linesearch(LineSearch::Wolfe {
-                c1: C1,
-                c2: C2,
-                maxiter: 40,
-            });
+            solver.set_linesearch(WOLFE);
             // A Cartesian session installs a 0.2 per-atom cap unless one
             // is set; a non-positive cap clears it.
             solver.set_atom_maxmove(0.0);
@@ -218,27 +252,36 @@ fn relax(sys: &System, name: &str, audit: bool) -> Run {
         }
     }
     let mut x = sys.x0.clone();
-    let mut last = audit.then(|| morse(sys, x.view()));
+    // The value and gradient the session holds at the start of a step.
+    // Before the first step that is the oracle's answer at `x0`.
+    let mut held: Option<Answer> = audit.then(|| morse(sys, x.view()));
     let (mut steps, mut fmax) = (0, f64::INFINITY);
     let (mut searched, mut wolfe) = (0, 0);
     while steps < BUDGET && fmax >= FMAX {
-        if audit {
-            *origin.lock().expect("origin") = x.clone();
-            at_origin.store(0, Ordering::Relaxed);
-        }
+        let before = held.take().map(|(f0, g0)| {
+            let dir = solver.search_direction(g0.view()).expect("direction");
+            // The two-loop direction carries its step length once pairs
+            // exist; the first, steepest direction opens at `istep`.
+            let open = if solver.pair_count() == 0 { istep } else { 1.0 };
+            (x.clone(), f0, g0, dir, open)
+        });
         let report = solver.step(&obj, &mut x).expect("step");
         fmax = report.grad_norm;
-        if let Some((f0, g0)) = last.take() {
-            // The session evaluates the start of its first step itself.
-            // LineSearch::search takes no start value, so it evaluates the
-            // start of every step again; the capped geometry step and the
-            // Accept::None trial reuse the value the session holds.
-            let own = usize::from(steps == 0);
-            searched += usize::from(at_origin.load(Ordering::Relaxed) > own);
-            let x0 = std::mem::take(&mut *origin.lock().expect("origin"));
+        if let Some((x0, mut f0, g0, dir, open)) = before {
+            let mut seen = std::mem::take(&mut *trials.lock().expect("trials"));
+            // The session evaluates the start of its first step itself and
+            // reuses the answer it holds on every later step.
+            if steps == 0
+                && seen
+                    .first()
+                    .is_some_and(|(at, (_, g))| *at == x0 && *g == g0)
+            {
+                f0 = seen.remove(0).1.0;
+            }
+            searched += usize::from(replays((&x0, f0, &g0), &dir, open, &seen, &x));
             let g1 = report.grad.expect("session gradient");
             wolfe += usize::from(strong_wolfe(&(&x - &x0), (f0, &g0), (report.value, &g1)));
-            last = Some((report.value, g1));
+            held = Some((report.value, g1));
         }
         steps += 1;
     }

@@ -23,10 +23,10 @@ Two methods run on every pool.
 The first is ``lbfgs`` with m = 10.
 Each step takes the two-loop direction and the strong Wolfe search,
 with c1 = 1e-4, c2 = 0.9 and at most 40 trials.
-The session sets ``Accept::Energy`` and no per-atom cap.
-A per-atom cap would select the capped geometry step and
-``Accept::None`` a single clipped trial, and neither runs the line
-search.
+The session sets ``Accept::Energy`` and clears the per-atom cap that a
+Cartesian session installs by default.
+A per-atom cap would bound every trial of the search, and
+``Accept::None`` takes a single clipped trial.
 The second is ``fire2`` with ``FirePreset::Guenole2020``.
 It has no line search; a 0.2 Angstrom per-atom cap scales each step.
 Each run stops when the largest per-atom force drops below
@@ -45,9 +45,10 @@ The harness is CPU only, so the ``gpu`` column stays empty.
 
 After the timed ``lbfgs`` repeats on each pool, one untimed solve
 checks the line search.
-It counts the steps that call the oracle again at their start, which
-``LineSearch::search`` does and the capped geometry step and the
-``Accept::None`` trial do not.
+It replays each step with ``SuppliedSearch``, which makes the trials
+``LineSearch::search`` makes on the same answers.
+A step counts when its oracle calls are the replay's trials, in order,
+and the replay accepts the session's point.
 It also counts the accepted steps that meet the strong Wolfe
 conditions.
 Both counts go to stderr.
