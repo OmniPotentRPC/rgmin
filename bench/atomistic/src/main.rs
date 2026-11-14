@@ -1056,6 +1056,47 @@ fn run_hop(obj: &FreeObjective, x: Array1<f64>, tol: f64, maxiter: usize) -> Out
 }
 
 #[cfg(test)]
+mod call_counts {
+    use super::{build, lj38, lj_cluster, read_con, run_session};
+
+    /// Unperturbed seed 0. Lennard-Jones uses no coordinate noise; Pt7
+    /// uses the usual 0.1 Å start. `fmax` stops at 0.01.
+    #[test]
+    fn cluster_suite_records_iterations_and_potential_calls() {
+        let expect = [
+            ("lj13", "lbfgs", 62, 80, "-44.3267713815", "8.462e-3"),
+            ("lj13", "cg", 59, 129, "-44.3267734737", "5.778e-3"),
+            ("lj13", "fire", 168, 169, "-44.3267695254", "9.883e-3"),
+            ("lj38", "lbfgs", 139, 145, "-167.7678159554", "8.092e-3"),
+            ("lj38", "cg", 215, 452, "-165.9170681549", "9.908e-3"),
+            ("lj38", "fire", 320, 321, "-167.5344223787", "5.503e-3"),
+            ("lj75", "lbfgs", 244, 253, "-379.4366071297", "7.615e-3"),
+            ("lj75", "cg", 420, 848, "-379.2479211760", "9.810e-3"),
+            ("lj75", "fire", 1331, 1332, "-379.2198391458", "9.142e-3"),
+            ("pt7", "lbfgs", 8, 10, "-1776.0160052124", "5.815e-3"),
+            ("pt7", "cg", 8, 18, "-1776.0160050833", "4.860e-3"),
+            ("pt7", "fire", 48, 49, "-1776.0159853710", "8.562e-3"),
+        ];
+        for (system, method, iters, calls, energy, fmax) in expect {
+            let (sys, sigma) = match system {
+                "lj13" => (lj_cluster(13, 2.0, 0), 0.0),
+                "lj38" => (lj38(0), 0.0),
+                "lj75" => (lj_cluster(75, 3.2, 0), 0.0),
+                "pt7" => (read_con("data/pt_heptamer.con", 78, 1), 0.1),
+                _ => unreachable!(),
+            };
+            let (obj, x0) = build(&sys, sigma, 0);
+            let out = run_session(&obj, x0, &sys, method, 0.01, 2000, 0.2);
+            assert!(out.converged, "{system} {method} did not converge");
+            assert_eq!(out.iters, iters, "{system} {method} iterations");
+            assert_eq!(obj.calls(), calls, "{system} {method} potential calls");
+            assert_eq!(format!("{:.10}", out.energy), energy, "{system} {method} energy");
+            assert_eq!(format!("{:.3e}", out.fmax), fmax, "{system} {method} fmax");
+        }
+    }
+}
+
+#[cfg(test)]
 mod force_check {
     use super::{methane_energy, water_energy};
 
@@ -1107,7 +1148,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "usage: {} <lj38|lj75|pt7|al|si-slab|si-strain|si-wire|cu-vac|h2o|ch4> <method>[,<method>...] [seeds] [sigma] [data_dir] [repeats]",
+            "usage: {} <lj13|lj38|lj75|pt7|al|si-slab|si-strain|si-wire|cu-vac|h2o|ch4> <method>[,<method>...] [seeds] [sigma] [data_dir] [repeats]",
             args[0]
         );
         std::process::exit(2);
@@ -1131,6 +1172,7 @@ fn main() {
     for rep in 0..repeats {
         for seed in seed0..seed0 + seeds {
             let sys = match system {
+                "lj13" => lj_cluster(13, 2.0, seed),
                 "lj38" => lj38(seed),
                 "lj75" => lj_cluster(75, 3.2, seed),
                 "pt7" => read_con(&format!("{data}/pt_heptamer.con"), 78, 1),
@@ -1145,7 +1187,7 @@ fn main() {
             };
             let sig = if let Some(sigma) = forced {
                 sigma
-            } else if system == "lj38" || system == "lj75"
+            } else if system == "lj13" || system == "lj38" || system == "lj75"
                 || system.starts_with("si-")
                 || system == "cu-vac"
                 || system == "h2o"

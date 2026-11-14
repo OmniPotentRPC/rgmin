@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The atomistic bench records iterations and potential calls for
+  L-BFGS, CG, and FIRE on LJ13, LJ38, LJ75, and Pt7. The unperturbed
+  seed is checked in `cluster_suite_records_iterations_and_potential_calls`.
+
 - FIRE 2.0 stops when consecutive non-positive-power steps exceed
   `vdfmax`. The published schedule uses 2000, from Table 1 of Comput.
   Mater. Sci. 175 (2020) 109584. The stopping step does not move.
