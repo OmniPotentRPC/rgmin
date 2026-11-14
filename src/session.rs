@@ -3776,16 +3776,35 @@ impl Solver {
                             // describe the move taken, or the power adapt reads an
                             // integral of moves that never happened. An unshortened
                             // move leaves the velocity alone: `trial - x` is not
-                            // always bit-identical to `dx`.
-                            if !state.abc
-                                && (self.atom_maxmove.is_some() || self.control.maxmove.is_some())
+                            // always bit-identical to `dx`. A move rounding swallows
+                            // whole is shortened to nothing.
+                            let swallowed = trial == *x && dx.iter().any(|v| *v != 0.0);
+                            if swallowed
+                                || (!state.abc
+                                    && (self.atom_maxmove.is_some()
+                                        || self.control.maxmove.is_some()))
                             {
                                 let taken = &trial - &*x;
                                 fire_rescale_velocity(state, &dx, &taken);
                             }
                             trial
                         };
-                        let ev = obj.value_and_gradient(trial.view());
+                        let mut trial = trial;
+                        let mut ev = obj.value_and_gradient(trial.view());
+                        // A flat trial with no answer retreats toward the start,
+                        // inside the clip box, before the step is refused.
+                        let mut halvings = 0;
+                        while !curved
+                            && !crate::step::finite(ev.0, ev.1.view())
+                            && halvings < crate::accept::HALVINGS
+                        {
+                            let before = &trial - &*x;
+                            let after = before.mapv(|v| 0.5 * v);
+                            trial = &*x + &after;
+                            fire_rescale_velocity(state, &before, &after);
+                            halvings += 1;
+                            ev = obj.value_and_gradient(trial.view());
+                        }
                         if !crate::step::finite(ev.0, ev.1.view()) {
                             state.restore(saved);
                             *x = start;
