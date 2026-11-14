@@ -1,0 +1,1 @@
+`rgmin_solver_set_highs_callback` compiles when `capi` and `highs` are both on. It wraps the callback and its `user` pointer in `HighsCallback::new`, and a NULL callback clears it. The C signature and ABI minor 43 are unchanged. `examples/compare_highs.rs` and the `highs` C tests build again.
