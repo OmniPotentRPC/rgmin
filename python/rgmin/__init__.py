@@ -29,10 +29,13 @@ _EXPORTS = [
     "LineSearch",
     "Method",
     "NumericalError",
+    "Product",
     "Report",
+    "SPD",
     "Session",
     "Solver",
     "SolverConfig",
+    "Stiefel",
     "Stop",
     "__version__",
     "lowest_eigenpairs",
@@ -115,6 +118,10 @@ def __getattr__(name: str):
         from rgmin import optimize
 
         return getattr(optimize, name)
+    if name in {"Product", "SPD", "Stiefel"}:
+        from rgmin import manifold
+
+        return getattr(manifold, name)
     if hasattr(_core, name):
         return getattr(_core, name)
     raise AttributeError(f"module 'rgmin' has no attribute {name}")

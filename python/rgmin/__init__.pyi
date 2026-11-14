@@ -3,6 +3,9 @@ from typing import Any
 
 from rgmin._core import LineSearch as LineSearch
 from rgmin._core import Session as Session
+from rgmin.manifold import SPD as SPD
+from rgmin.manifold import Product as Product
+from rgmin.manifold import Stiefel as Stiefel
 
 __version__: str
 
