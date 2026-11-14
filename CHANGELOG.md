@@ -38,6 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   50 starts, 43 of 50 energies differ by more than 1e-4 relative, the
   median absolute gap is about 1.2, and the known-minimum hit rate
   stays 0.
+  On fifty 864-atom random packings, `Solver::low_call_cg` wins
+  against default CG: median calls 1160.5 to 652.5 on EAM aluminium
+  and 1262.5 to 937.0 on EMT copper, and wall-time ratios 0.595321
+  [0.594953, 0.595723] and 0.781444 [0.780747, 0.782044], below
+  same-code bands 1.000392 [0.999931, 1.000949] and 0.999724
+  [0.998548, 1.000816].
+  `Method::lbfgs_wide` is a call-count option, not a speed preset.
+  Wall time is 1.015799 [1.014578, 1.016935] on aluminium and
+  1.113912 [1.108215, 1.119540] on copper, and the aluminium call
+  median rises, so `Method::lbfgs` stays at 10.
 
 - On LJ75 one L-BFGS iteration spends 1.2 μs in the two-loop at 10
   pairs and 2.3 μs at 20. The line search's time is the potential

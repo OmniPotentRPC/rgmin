@@ -4,7 +4,8 @@
 
 * Choosing a preset
 
-~Method::lbfgs~ keeps 10 pairs. ~Method::lbfgs_wide~ keeps 20.
+~Method::lbfgs~ keeps 10 pairs. That is the default. ~Method::lbfgs_wide~
+keeps 20 and is not installed unless the caller asks for it.
 ~Solver::low_call_cg~ is nonlinear CG with the Dai-Yuan hybrid, the
 Powell restart, and the case-3 average extrapolation. Default CG stays
 Polak-Ribiere+ with the NJWS restart.
@@ -15,11 +16,13 @@ Pick from the cost of one force call.
   20 pairs is faster only once a call costs more than 2.1 μs (LJ13),
   4.7 μs (LJ75), or 6.7 μs (LJ38). Below that, the extra two-loop costs
   more than the calls it saves.
-- Above those thresholds, use 20-pair L-BFGS when it actually uses fewer
-  calls. Pt7 uses the same number either way.
+- ~lbfgs_wide~ is a call-count option, not a speed preset. On the
+  864-atom metal packings it loses wall time: 1.016× on EAM aluminium
+  and 1.114× on EMT copper. Pt7 uses the same number of calls either way.
 - Use ~low_call_cg~ instead of default CG on the LJ clusters at any
-  positive call cost. On Pt7 the fifty-start totals cross at about 8 μs.
-  It is slower than L-BFGS on the cheap LJ runs.
+  positive call cost, and on the metal packings below. On Pt7 the
+  fifty-start totals cross at about 8 μs. It is slower than L-BFGS on
+  the cheap LJ runs.
 
 A call of a few milliseconds makes the solver overhead negligible, so
 equal call counts tie. The EAM aluminium slab is about 2.1 ms/call.
@@ -34,3 +37,28 @@ basin, not a longer path to the same minimum. Its energy is 1.76 higher
 (relative 4.6e-3). Over the fifty starts, 43 of 50 energies differ by
 more than 1e-4 relative, the median absolute gap is about 1.2, and
 neither run hits the known minimum.
+
+Fifty random packings of a 6×6×6 cell, 864 atoms, take at least 200
+calls. The EAM aluminium cell is at 4.038 Å with no pair closer than
+2.15 Å. The EMT copper cell is at 3.595 Å with no pair closer than
+1.90 Å.
+
+~low_call_cg~ wins on both metals. The median call count falls from
+1160.5 to 652.5 on aluminium (49 of 50 starts) and from 1262.5 to
+937.0 on copper (42 of 50). The sum of those medians falls from
+2423.0 to 1589.5. No median rises, the Mann-Whitney test does not find
+higher energies, and every start still converges. On the start whose
+call ratio is the median, the interleaved wall-time ratio against
+default CG is 0.595321 [0.594953, 0.595723] on aluminium and 0.781444
+[0.780747, 0.782044] on copper. The same-code bands are 1.000392
+[0.999931, 1.000949] on aluminium and 0.999724 [0.998548, 1.000816]
+on copper.
+
+~lbfgs_wide~ does not win on wall time. The aluminium median rises
+from 403.5 to 413.5, so the 50-start rule does not keep 20 pairs. The
+copper median falls from 426.0 to 414.5. The wall-time ratios are
+1.015799 [1.014578, 1.016935] on aluminium, against a same-code band
+1.000349 [0.999861, 1.000829], and 1.113912 [1.108215, 1.119540] on
+copper, against 1.000237 [0.999510, 1.000942]. Count calls with 20
+pairs when that count is the quantity of interest. The speed default
+stays ~Method::lbfgs~.

@@ -728,7 +728,13 @@ impl Solver {
     /// Pt7, with the same call count on that start, ties. The EAM
     /// aluminium slab and the EMT copper vacancy use the same number of
     /// calls as default CG on seed 0 (27 and 35). Their ratios are 1.003
-    /// [0.996, 1.010] and 1.004 [0.997, 1.014], both ties.
+    /// [0.996, 1.010] and 1.004 [0.997, 1.014], both ties. On the
+    /// 864-atom packings the median calls fall from 1160.5 to 652.5
+    /// on aluminium and from 1262.5 to 937.0 on copper. The wall-time
+    /// ratios on the median-ratio starts are 0.595321
+    /// [0.594953, 0.595723] and 0.781444 [0.780747, 0.782044],
+    /// below same-code bands 1.000392 [0.999931, 1.000949] and
+    /// 0.999724 [0.998548, 1.000816].
     #[must_use]
     pub fn low_call_cg(control: Control, dim: usize) -> Self {
         let mut solver = Self::new(

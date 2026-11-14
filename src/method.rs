@@ -222,7 +222,12 @@ impl Method {
     /// on Pt7. On the EAM aluminium slab (~2.1 ms/call, 15 calls either
     /// way) the ratio is 1.001 [1.000, 1.002], a tie. On the EMT copper
     /// vacancy (~2.2 ms/call, 16 calls either way) it is 1.002
-    /// [1.001, 1.002], a loss of two tenths of a percent. The LJ75
+    /// [1.001, 1.002], a loss of two tenths of a percent. On the
+    /// 864-atom packings it is not a speed preset: wall time is
+    /// 1.015799 [1.014578, 1.016935] on EAM aluminium and 1.113912
+    /// [1.108215, 1.119540] on EMT copper, both above the same-code
+    /// band, and the aluminium call median rises from 403.5 to 413.5.
+    /// [`Self::lbfgs`] stays at 10. The LJ75
     /// seed-0 increase is a different basin:
     /// the energy is 1.76 higher (relative 4.6e-3). Over the 50 starts,
     /// 43 of 50 energies differ by more than 1e-4 relative, the median
