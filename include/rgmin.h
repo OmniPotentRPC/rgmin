@@ -61,7 +61,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 40
+#define RGMIN_ABI_VERSION_MINOR 41
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -827,7 +827,7 @@ rgmin_status_t rgmin_solver_step_hvp(rgmin_solver_t *solver, rgmin_eval_fn eval,
                                  rgmin_grad_fn grad, rgmin_hvp_fn hvp, void *user,
                                  DLManagedTensorVersioned *x, rgmin_report_t *out);
 
-/** \defgroup manifold Riemannian manifold handles (ABI minor 40)
+/** \defgroup manifold Riemannian manifold handles (ABI minor 41)
  *
  *  An \ref rgmin_manifold_handle_t is a Stiefel St(n, p), an SPD(p) or a
  *  product of them. \ref rgmin_manifold_t is the unrelated session token

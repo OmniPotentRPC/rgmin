@@ -1125,13 +1125,13 @@ fn lowest_eigenpairs_recovers_a_diagonal_and_rejects_bad_blocks() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
-/// ABI minor 40 adds the `rgmin_manifold_*` handles. Minor 39 is
-/// `rgmin_lowest_eigenpairs`.
+/// ABI minor 41 adds the `rgmin_manifold_*` handles. Minor 40 is the
+/// 0.6.0 release and minor 39 is `rgmin_lowest_eigenpairs`.
 #[test]
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 40);
+    assert_eq!(stamp.abi_minor, 41);
     assert_eq!(stamp.layout_revision, 4);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
