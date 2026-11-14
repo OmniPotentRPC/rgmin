@@ -219,7 +219,14 @@ impl Method {
     /// Pt7 uses the same number of calls. With about 100 μs added to each
     /// call, the seed-0 ratio is 0.942 [0.941, 0.942] on LJ38, 1.129
     /// [1.129, 1.130] on LJ75 (that start takes more calls), and a tie
-    /// on Pt7.
+    /// on Pt7. On the EAM aluminium slab (~2.1 ms/call, 15 calls either
+    /// way) the ratio is 1.001 [1.000, 1.002], a tie. On the EMT copper
+    /// vacancy (~2.2 ms/call, 16 calls either way) it is 1.002
+    /// [1.001, 1.002], a loss of two tenths of a percent. The LJ75
+    /// seed-0 increase is a different basin:
+    /// the energy is 1.76 higher (relative 4.6e-3). Over the 50 starts,
+    /// 43 of 50 energies differ by more than 1e-4 relative, the median
+    /// absolute gap is about 1.2, and the known-minimum hit rate stays 0.
     pub fn lbfgs_wide() -> Self {
         Self::Lbfgs { memory: 20 }
     }

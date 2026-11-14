@@ -725,7 +725,10 @@ impl Solver {
     /// Pt7's fifty-start totals cross at about 8 μs per call. With about
     /// 100 μs added to each call, the seed-0 ratio against default CG is
     /// 0.930 [0.930, 0.931] on LJ38 and 0.596 [0.596, 0.596] on LJ75.
-    /// Pt7, with the same call count on that start, ties.
+    /// Pt7, with the same call count on that start, ties. The EAM
+    /// aluminium slab and the EMT copper vacancy use the same number of
+    /// calls as default CG on seed 0 (27 and 35). Their ratios are 1.003
+    /// [0.996, 1.010] and 1.004 [0.997, 1.014], both ties.
     #[must_use]
     pub fn low_call_cg(control: Control, dim: usize) -> Self {
         let mut solver = Self::new(

@@ -1,0 +1,36 @@
+#+TITLE: Choosing a preset
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Choosing a preset
+
+~Method::lbfgs~ keeps 10 pairs. ~Method::lbfgs_wide~ keeps 20.
+~Solver::low_call_cg~ is nonlinear CG with the Dai-Yuan hybrid, the
+Powell restart, and the case-3 average extrapolation. Default CG stays
+Polak-Ribiere+ with the NJWS restart.
+
+Pick from the cost of one force call.
+
+- Under a few microseconds, use 10-pair L-BFGS. On the fifty LJ starts,
+  20 pairs is faster only once a call costs more than 2.1 μs (LJ13),
+  4.7 μs (LJ75), or 6.7 μs (LJ38). Below that, the extra two-loop costs
+  more than the calls it saves.
+- Above those thresholds, use 20-pair L-BFGS when it actually uses fewer
+  calls. Pt7 uses the same number either way.
+- Use ~low_call_cg~ instead of default CG on the LJ clusters at any
+  positive call cost. On Pt7 the fifty-start totals cross at about 8 μs.
+  It is slower than L-BFGS on the cheap LJ runs.
+
+A call of a few milliseconds makes the solver overhead negligible, so
+equal call counts tie. The EAM aluminium slab is about 2.1 ms/call.
+Seed 0 takes 15 L-BFGS calls with either memory and 27 CG calls with
+either preset. The interleaved ratios are 1.001 [1.000, 1.002] and
+1.003 [0.996, 1.010]. The EMT copper vacancy is about 2.2 ms/call, with
+16 and 35 calls. The ratios are 1.002 [1.001, 1.002] and 1.004
+[0.997, 1.014].
+
+The LJ75 seed-0 run that uses more calls with 20 pairs is a different
+basin, not a longer path to the same minimum. Its energy is 1.76 higher
+(relative 4.6e-3). Over the fifty starts, 43 of 50 energies differ by
+more than 1e-4 relative, the median absolute gap is about 1.2, and
+neither run hits the known minimum.

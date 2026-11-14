@@ -27,6 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the seed-0 wall time rose (1.027 on LJ38, 1.570 on LJ75). Wolfe
   `c2 = 0.99` lowered the sum to 3144.5 and raised the LJ13 median
   from 78.5 to 81.5. None of the three replaces the default.
+  On real potentials the seed-0 call counts match, so the ratios sit
+  on 1. The EAM aluminium slab (~2.1 ms/call) gives 1.001
+  [1.000, 1.002] for 20 pairs (15 calls) and 1.003 [0.996, 1.010] for
+  low-call CG (27 calls). The EMT copper vacancy (~2.2 ms/call) gives
+  1.002 [1.001, 1.002] for 20 pairs (16 calls) and 1.004
+  [0.997, 1.014] for low-call CG (35 calls). The extra LJ75 calls at
+  20 pairs on seed 0 are a different basin, not a longer path to the
+  same minimum: that energy is 1.76 higher (relative 4.6e-3). Over the
+  50 starts, 43 of 50 energies differ by more than 1e-4 relative, the
+  median absolute gap is about 1.2, and the known-minimum hit rate
+  stays 0.
 
 - On LJ75 one L-BFGS iteration spends 1.2 μs in the two-loop at 10
   pairs and 2.3 μs at 20. The line search's time is the potential
