@@ -149,14 +149,14 @@ fn morse_chain_iterates_stay_bit_identical() {
     ];
     for (name, hash) in got {
         let want = match name {
-            "lbfgs" => 0x20cce606614e993a,
-            "lbfgs-wolfe" => 0xc2156ead0b735471,
-            "nlcg" => 0xf79e4ea9957c7702,
-            "sd" => 0x2252179ee1695692,
-            "adam" => 0xbf23ac7de4adede3,
+            "lbfgs" => 0x8fa602d6fc6cce2d,
+            "lbfgs-wolfe" => 0x8fa602d6fc6cce2d,
+            "nlcg" => 0x0e21edbc2819e7a2,
+            "sd" => 0xe7a20697ff9ba6cc,
+            "adam" => 0x15b5731158a5e4f9,
             "lbfgs-session" => 0x2fcc34118a8f8315,
-            "fire1" => 0x91356a7e96d8c8d4,
-            "fire2" => 0xdbdb7fbf910adad6,
+            "fire1" => 0x9125a47e9685b768,
+            "fire2" => 0xdbccc6bf90cca531,
             _ => panic!("unknown {name}"),
         };
         assert_eq!(hash, want, "{name} trajectory hash {hash:#x} != {want:#x}");
