@@ -436,9 +436,10 @@ where
                     status: scg_stop(control, grad_norm, grad.len()),
                 });
             }
-            // With no iteration budget, and the damping clamped below a
-            // `lambda_limit` at or above `LAMBDA_MAX`, nothing else ends a
-            // plateau. One flat step whose gradient does not fall can be an
+            // With no iteration budget a plateau otherwise ends only on the
+            // damping limit, as a gradient error, and never when
+            // `lambda_limit` is at or above `LAMBDA_MAX`, where the damping
+            // saturates. One flat step whose gradient does not fall can be an
             // overshoot that the next step corrects, so the plateau is a run
             // of one Møller period (at least two accepted steps) inside the
             // objective tolerance whose gradient never drops below its norm
