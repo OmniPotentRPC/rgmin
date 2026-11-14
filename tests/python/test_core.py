@@ -48,10 +48,23 @@ def test_unknown_method_lists_valid_names() -> None:
     assert "lbfgs" in str(exc.value)
 
 
+def test_preset_method_names() -> None:
+    wide = rgmin.SolverConfig("lbfgs-wide")
+    assert wide.method == rgmin.Method.LBFGS_WIDE
+    assert wide.method_name == "lbfgs_wide"
+    low = rgmin.SolverConfig(rgmin.Method.LOW_CALL_CG)
+    assert low.method == rgmin.Method.LowCallCg
+    assert low.method_name == "low_call_cg"
+
+
 def test_method_is_int_enum() -> None:
     assert issubclass(rgmin.Method, int)
     assert int(rgmin.Method.Lbfgs) == 3
     assert rgmin.Method.Fire == 17
+    assert int(rgmin.Method.LOW_CALL_CG) == 26
+    assert int(rgmin.Method.LBFGS_WIDE) == 27
+    assert rgmin.Method.LowCallCg == rgmin.Method.LOW_CALL_CG
+    assert rgmin.Method.LbfgsWide == rgmin.Method.LBFGS_WIDE
 
 
 def test_bad_rank_and_length() -> None:

@@ -89,6 +89,10 @@ std::string method_name_from_code(int code) {
         return "bfgs";
     case RGMIN_LBFGS:
         return "lbfgs";
+    case RGMIN_LBFGS_WIDE:
+        return "lbfgs_wide";
+    case RGMIN_LOW_CALL_CG:
+        return "low_call_cg";
     case RGMIN_SR1:
         return "sr1";
     case RGMIN_ADAM:
@@ -457,6 +461,8 @@ NB_MODULE(_core, m) {
         .value("FLETCHER_REEVES", RGMIN_FLETCHER_REEVES)
         .value("BFGS", RGMIN_BFGS)
         .value("LBFGS", RGMIN_LBFGS)
+        .value("LBFGS_WIDE", RGMIN_LBFGS_WIDE)
+        .value("LOW_CALL_CG", RGMIN_LOW_CALL_CG)
         .value("SR1", RGMIN_SR1)
         .value("ADAM", RGMIN_ADAM)
         .value("STEEPEST", RGMIN_STEEPEST)
@@ -481,6 +487,8 @@ NB_MODULE(_core, m) {
         .value("FletcherReeves", RGMIN_FLETCHER_REEVES)
         .value("Bfgs", RGMIN_BFGS)
         .value("Lbfgs", RGMIN_LBFGS)
+        .value("LbfgsWide", RGMIN_LBFGS_WIDE)
+        .value("LowCallCg", RGMIN_LOW_CALL_CG)
         .value("Sr1", RGMIN_SR1)
         .value("Adam", RGMIN_ADAM)
         .value("Steepest", RGMIN_STEEPEST)

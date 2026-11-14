@@ -22,8 +22,10 @@ use rgmin::ffi::{
 };
 use rgmin::ffi::{
     rgmin_method_from_name, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
+    rgmin_solver_pair_count, rgmin_solver_push_pair, rgmin_solver_set_atom_maxmove,
     rgmin_solver_step_hvp,
 };
+use rgmin::{Control, Solver};
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
 use rgpot_core::status::rgpot_status_t;
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
@@ -611,7 +613,7 @@ fn c_abi_diis_reduces_a_quadratic() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 36);
+    assert_eq!(stamp.abi_minor, 37);
     assert_eq!(stamp.layout_revision, 4);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -2054,4 +2056,180 @@ fn newton_cg_method_string_and_counters_cross_the_c_abi() {
     assert_eq!(count.hvps.load(Ordering::Relaxed), hvps);
     assert!(hvps > 0, "analytic products were not counted");
     unsafe { rgmin_solver_free(session) };
+}
+
+fn preset_ctrl() -> rgmin_control_t {
+    rgmin_control_t {
+        maxiter: 1,
+        gtol: 0.0,
+        istep: 0.2 / 0.34,
+        memory: 0,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    }
+}
+
+unsafe extern "C" fn shifted_well_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 1);
+    let z = unsafe { *p } - 0.34;
+    unsafe { *value_out = 0.5 * z * z };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn shifted_well_grad(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let count = unsafe { &*(user as *const AtomicUsize) };
+    count.fetch_add(1, Ordering::Relaxed);
+    let (p, n) = unsafe { cpu_f64(x) };
+    let (gp, gn) = unsafe { cpu_f64(g) };
+    assert_eq!(n, gn);
+    unsafe { *(gp as *mut f64) = *p - 0.34 };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn low_call_cg_and_lbfgs_wide_cross_the_c_abi() {
+    let mut tag = rgmin_method_t::RGMIN_STEEPEST;
+    let low = std::ffi::CString::new("low-call-cg").unwrap();
+    assert_eq!(
+        unsafe { rgmin_method_from_name(low.as_ptr(), &mut tag) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    assert_eq!(tag, rgmin_method_t::RGMIN_LOW_CALL_CG);
+    let wide = std::ffi::CString::new("lbfgs_wide").unwrap();
+    assert_eq!(
+        unsafe { rgmin_method_from_name(wide.as_ptr(), &mut tag) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    assert_eq!(tag, rgmin_method_t::RGMIN_LBFGS_WIDE);
+    let plain = std::ffi::CString::new("lbfgs").unwrap();
+    assert_eq!(
+        unsafe { rgmin_method_from_name(plain.as_ptr(), &mut tag) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    assert_eq!(tag, rgmin_method_t::RGMIN_LBFGS);
+
+    let ctrl = preset_ctrl();
+    let grads = AtomicUsize::new(0);
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LOW_CALL_CG, &ctrl, 1) };
+    assert!(!session.is_null());
+    unsafe { rgmin_solver_set_atom_maxmove(session, -1.0) };
+    let mut x = [0.0];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 1) };
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+    };
+    let st = unsafe {
+        rgmin_solver_step(
+            session,
+            Some(shifted_well_eval),
+            Some(shifted_well_grad),
+            &grads as *const AtomicUsize as *mut c_void,
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let c_calls = grads.load(Ordering::Relaxed);
+    unsafe { rgmin_solver_free(session) };
+    assert!(c_calls > 0, "the session took no gradient");
+
+    let rust_calls = AtomicUsize::new(0);
+    let mut rust = Solver::low_call_cg(
+        Control {
+            istep: 0.2 / 0.34,
+            gtol: 0.0,
+            maxiter: 1,
+            ..Control::default()
+        },
+        1,
+    );
+    rust.set_atom_maxmove(-1.0);
+    let mut rx = ndarray::array![0.0];
+    let obj = rgmin::Oracle::unbounded(1, |x: ndarray::ArrayView1<f64>| {
+        rust_calls.fetch_add(1, Ordering::Relaxed);
+        let z = x[0] - 0.34;
+        (0.5 * z * z, ndarray::array![z])
+    });
+    rust.step(&obj, &mut rx).unwrap();
+    assert_eq!(c_calls, rust_calls.load(Ordering::Relaxed));
+    assert_eq!(x[0], rx[0]);
+
+    grads.store(0, Ordering::Relaxed);
+    let mut once = [0.0];
+    let once_t = unsafe { rgmin_tensor_borrow_cpu_f64(once.as_mut_ptr(), 1) };
+    let shot = unsafe {
+        rgmin_minimize(
+            Some(shifted_well_eval),
+            Some(shifted_well_grad),
+            &grads as *const AtomicUsize as *mut c_void,
+            once_t,
+            &ctrl,
+            rgmin_method_t::RGMIN_LOW_CALL_CG,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(once_t) };
+    assert_eq!(shot, rgmin_status_t::RGMIN_SUCCESS);
+    let mut capped = Solver::low_call_cg(
+        Control {
+            istep: 0.2 / 0.34,
+            gtol: 0.0,
+            maxiter: 1,
+            ..Control::default()
+        },
+        1,
+    );
+    let capped_calls = AtomicUsize::new(0);
+    let capped_obj = rgmin::Oracle::unbounded(1, |x: ndarray::ArrayView1<f64>| {
+        capped_calls.fetch_add(1, Ordering::Relaxed);
+        let z = x[0] - 0.34;
+        (0.5 * z * z, ndarray::array![z])
+    });
+    let mut cx = ndarray::array![0.0];
+    capped.step(&capped_obj, &mut cx).unwrap();
+    assert_eq!(
+        grads.load(Ordering::Relaxed),
+        capped_calls.load(Ordering::Relaxed)
+    );
+    assert_eq!(once[0], cx[0]);
+    assert_ne!(
+        c_calls,
+        capped_calls.load(Ordering::Relaxed),
+        "clearing the atom cap should change the line search"
+    );
+
+    let kept = |method: rgmin_method_t, memory: usize| {
+        let mut ctrl = preset_ctrl();
+        ctrl.memory = memory;
+        let session = unsafe { rgmin_solver_create(method, &ctrl, 1) };
+        assert!(!session.is_null());
+        let s = [1.0];
+        let y = [1.0];
+        for _ in 0..25 {
+            assert_eq!(
+                unsafe { rgmin_solver_push_pair(session, s.as_ptr(), y.as_ptr(), 1) },
+                0
+            );
+        }
+        let n = unsafe { rgmin_solver_pair_count(session) };
+        unsafe { rgmin_solver_free(session) };
+        n
+    };
+    assert_eq!(kept(rgmin_method_t::RGMIN_LBFGS, 0), 10);
+    assert_eq!(kept(rgmin_method_t::RGMIN_LBFGS_WIDE, 0), 20);
+    assert_eq!(kept(rgmin_method_t::RGMIN_LBFGS, 20), 20);
 }

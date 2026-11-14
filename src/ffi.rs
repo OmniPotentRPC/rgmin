@@ -64,7 +64,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 36;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 37;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -123,6 +123,14 @@ pub enum rgmin_method_t {
     RGMIN_NEWTON_CG = 24,
     /// Steihaug-Toint Newton-CG with a Nyström preconditioner.
     RGMIN_NEWTON_PCG = 25,
+    /// Dai-Yuan hybrid, Powell restart, and the case-3 average extrapolation.
+    ///
+    /// A one-shot call and [`rgmin_solver_create`] both build
+    /// [`Solver::low_call_cg`]. The default CG tag stays Polak-Ribiere.
+    RGMIN_LOW_CALL_CG = 26,
+    /// L-BFGS with 20 correction pairs. `RGMIN_LBFGS` with `memory = 20`
+    /// is the same method. `memory` on this tag is ignored.
+    RGMIN_LBFGS_WIDE = 27,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -476,12 +484,17 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
         },
         rgmin_method_t::RGMIN_NEWTON_CG => Method::NewtonCg,
         rgmin_method_t::RGMIN_NEWTON_PCG => Method::NewtonPcg,
+        rgmin_method_t::RGMIN_LOW_CALL_CG => Method::Nlcg {
+            conjugacy: Conjugacy::DaiYuanHybrid,
+            restart: Restart::powell(),
+        },
+        rgmin_method_t::RGMIN_LBFGS_WIDE => Method::lbfgs_wide(),
     }
 }
 
 fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
     let tag = match method {
-        Method::Nlcg { conjugacy, .. } => match conjugacy {
+        Method::Nlcg { conjugacy, restart } => match conjugacy {
             Conjugacy::FletcherReeves => rgmin_method_t::RGMIN_FLETCHER_REEVES,
             Conjugacy::PolakRibiere => rgmin_method_t::RGMIN_POLAK_RIBIERE,
             Conjugacy::HestenesStiefel => rgmin_method_t::RGMIN_HESTENES_STIEFEL,
@@ -490,12 +503,21 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
             Conjugacy::HagerZhang => rgmin_method_t::RGMIN_HAGER_ZHANG,
             Conjugacy::LiuStorey => rgmin_method_t::RGMIN_LIU_STOREY,
             Conjugacy::FrPr => rgmin_method_t::RGMIN_FR_PR,
-            Conjugacy::PolakRibierePlus
-            | Conjugacy::DaiYuanHybrid
-            | Conjugacy::Hybrid { .. } => return Err(()),
+            Conjugacy::DaiYuanHybrid if *restart == Restart::powell() => {
+                rgmin_method_t::RGMIN_LOW_CALL_CG
+            }
+            Conjugacy::PolakRibierePlus | Conjugacy::DaiYuanHybrid | Conjugacy::Hybrid { .. } => {
+                return Err(());
+            }
         },
         Method::Bfgs => rgmin_method_t::RGMIN_BFGS,
-        Method::Lbfgs { .. } => rgmin_method_t::RGMIN_LBFGS,
+        Method::Lbfgs { memory } => {
+            if *memory == 20 {
+                rgmin_method_t::RGMIN_LBFGS_WIDE
+            } else {
+                rgmin_method_t::RGMIN_LBFGS
+            }
+        }
         Method::Sr1 => rgmin_method_t::RGMIN_SR1,
         Method::Adam { .. } => rgmin_method_t::RGMIN_ADAM,
         Method::Steepest => rgmin_method_t::RGMIN_STEEPEST,
@@ -1009,6 +1031,39 @@ fn cpu_f64_slice_mut<'a>(
     Ok(unsafe { slice::from_raw_parts_mut(p, n) })
 }
 
+/// One-shot run of [`Solver::low_call_cg`]. The free NLCG loop does not
+/// read [`crate::LineSearchOptions`], so the case-3 average would be
+/// dropped if this tag went through [`minimize_method`].
+fn low_call_report<O>(
+    obj: &O,
+    init: Array1<f64>,
+    control: &Control,
+) -> crate::Result<crate::report::Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut pos = init;
+    let mut solver = Solver::low_call_cg(control.clone(), pos.len()).with_gtol(control.gtol);
+    let mut last = crate::report::Report {
+        value: 0.0,
+        coords: pos.clone(),
+        steps: 0,
+        grad_norm: f64::INFINITY,
+        status: crate::report::Status::Iterating,
+    };
+    for _ in 0..control.maxiter {
+        last = solver.step(obj, &mut pos)?;
+        if let Some(status) = control.halt(last.grad_norm, solver.free_len(obj.bounds())) {
+            last.status = status;
+            break;
+        }
+    }
+    if last.status == crate::report::Status::Iterating {
+        last.status = crate::report::Status::Budget;
+    }
+    Ok(last)
+}
+
 /// Minimize `f` from the 1-D f64 DLPack iterate `x`. On success, `x` is
 /// overwritten with the accepted point.
 ///
@@ -1068,13 +1123,14 @@ pub unsafe extern "C" fn rgmin_minimize(
             ftol_rel: None,
             noise_floor: noise_floor_from_c(c),
         };
-        match minimize_method(
-            &obj,
-            Array1::from(init),
-            &control,
-            method_from_c(method, c.memory),
-            crate::minimize::oneshot_linesearch(&method_from_c(method, c.memory)),
-        ) {
+        let report = if method == rgmin_method_t::RGMIN_LOW_CALL_CG {
+            low_call_report(&obj, Array1::from(init), &control)
+        } else {
+            let rust_method = method_from_c(method, c.memory);
+            let linesearch = crate::minimize::oneshot_linesearch(&rust_method);
+            minimize_method(&obj, Array1::from(init), &control, rust_method, linesearch)
+        };
+        match report {
             Ok(rep) => {
                 let dest = match cpu_f64_slice_mut(x, "x") {
                     Ok(s) => s,
@@ -1334,9 +1390,14 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
             ftol_rel: None,
             noise_floor: noise_floor_from_c(c),
         };
-        let rust_method = method_from_c(method, c.memory);
-        let linesearch = crate::minimize::oneshot_linesearch(&rust_method);
-        match minimize_method_hess(&obj, Array1::from(init), &control, rust_method, linesearch) {
+        let report = if method == rgmin_method_t::RGMIN_LOW_CALL_CG {
+            low_call_report(&obj, Array1::from(init), &control)
+        } else {
+            let rust_method = method_from_c(method, c.memory);
+            let linesearch = crate::minimize::oneshot_linesearch(&rust_method);
+            minimize_method_hess(&obj, Array1::from(init), &control, rust_method, linesearch)
+        };
+        match report {
             Ok(rep) => {
                 let dest = match cpu_f64_slice_mut(x, "x") {
                     Ok(s) => s,
@@ -1426,13 +1487,14 @@ pub unsafe extern "C" fn rgmin_minimize_hvp(
             ftol_rel: None,
             noise_floor: noise_floor_from_c(c),
         };
-        match minimize_method_hvp(
-            &obj,
-            Array1::from(init),
-            &control,
-            method_from_c(method, c.memory),
-            crate::minimize::oneshot_linesearch(&method_from_c(method, c.memory)),
-        ) {
+        let report = if method == rgmin_method_t::RGMIN_LOW_CALL_CG {
+            low_call_report(&obj, Array1::from(init), &control)
+        } else {
+            let rust_method = method_from_c(method, c.memory);
+            let linesearch = crate::minimize::oneshot_linesearch(&rust_method);
+            minimize_method_hvp(&obj, Array1::from(init), &control, rust_method, linesearch)
+        };
+        match report {
             Ok(rep) => {
                 let dest = match cpu_f64_slice_mut(x, "x") {
                     Ok(s) => s,
@@ -1535,13 +1597,14 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
             ftol_rel: None,
             noise_floor: noise_floor_from_c(c),
         };
-        match minimize_method(
-            &obj,
-            Array1::from(init),
-            &control,
-            method_from_c(method, c.memory),
-            crate::minimize::oneshot_linesearch(&method_from_c(method, c.memory)),
-        ) {
+        let report = if method == rgmin_method_t::RGMIN_LOW_CALL_CG {
+            low_call_report(&obj, Array1::from(init), &control)
+        } else {
+            let rust_method = method_from_c(method, c.memory);
+            let linesearch = crate::minimize::oneshot_linesearch(&rust_method);
+            minimize_method(&obj, Array1::from(init), &control, rust_method, linesearch)
+        };
+        match report {
             Ok(rep) => {
                 let dest = match cpu_f64_slice_mut(x, "x") {
                     Ok(s) => s,
@@ -1609,7 +1672,11 @@ pub unsafe extern "C" fn rgmin_solver_create(
         ftol_rel: None,
         noise_floor: noise_floor_from_c(c),
     };
-    let solver = Solver::new(method_from_c(method, c.memory), control, dim).with_gtol(c.gtol);
+    let solver = if method == rgmin_method_t::RGMIN_LOW_CALL_CG {
+        Solver::low_call_cg(control, dim).with_gtol(c.gtol)
+    } else {
+        Solver::new(method_from_c(method, c.memory), control, dim).with_gtol(c.gtol)
+    };
     Box::into_raw(Box::new(rgmin_solver_t { solver }))
 }
 

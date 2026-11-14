@@ -73,6 +73,24 @@ int main() {
         stamp.layout_revision != RGMIN_ABI_LAYOUT_REVISION) {
         return 7;
     }
+    if (rgmin::method_from_name("lbfgs-wide") != rgmin::Method::LbfgsWide ||
+        rgmin::method_from_name("low_call_cg") != rgmin::Method::LowCallCg ||
+        xts::optimize::method_from_name("lbfgs_wide") != xts::optimize::Method::LbfgsWide) {
+        return 16;
+    }
+    if (XTS_LBFGS_WIDE != RGMIN_LBFGS_WIDE || XTS_LOW_CALL_CG != RGMIN_LOW_CALL_CG) {
+        return 17;
+    }
+    std::vector<std::pair<std::string, std::string>> no_text;
+    std::vector<std::pair<std::string, double>> no_numbers;
+    std::vector<std::pair<std::string, long long>> no_integers;
+    std::vector<std::pair<std::string, bool>> no_flags;
+    if (rgmin::SolverConfig::build("lbfgs-wide", no_text, no_numbers, no_integers, no_flags)
+                .method() != rgmin::Method::LbfgsWide ||
+        rgmin::SolverConfig::build("low_call_cg", no_text, no_numbers, no_integers, no_flags)
+                .method() != rgmin::Method::LowCallCg) {
+        return 18;
+    }
     std::printf("optimize nit=%zu grad=%g pairs=%zu\n", r.nit,
                 r.grad_norm, solver.pair_count());
     rgmin_tensor_free(t);

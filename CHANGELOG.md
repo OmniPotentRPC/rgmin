@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   L-BFGS, CG, and FIRE on LJ13, LJ38, LJ75, and Pt7. The unperturbed
   seed is checked in `cluster_suite_records_iterations_and_potential_calls`.
 
+- `RGMIN_LOW_CALL_CG` and `RGMIN_LBFGS_WIDE` expose `Solver::low_call_cg`
+  and `Method::lbfgs_wide`. The names are `low_call_cg` and
+  `lbfgs_wide`. A one-shot call of the CG tag runs the session preset,
+  including the case-3 average. `RGMIN_LBFGS` with `memory` 20 is the
+  same method as the wide tag. `abi_minor` 37.
+
 - `Method::lbfgs_wide` keeps 20 L-BFGS pairs. `Method::lbfgs` stays
   at 10. On the fifty-start bench, 20 pairs lower the sum of median
   calls from 3154 to 3102. Memories 3 and 5 raise that sum, memory 15

@@ -57,6 +57,8 @@ enum class Method {
     Ode12r = RGMIN_ODE12R,
     NewtonCg = RGMIN_NEWTON_CG,
     NewtonPcg = RGMIN_NEWTON_PCG,
+    LowCallCg = RGMIN_LOW_CALL_CG,
+    LbfgsWide = RGMIN_LBFGS_WIDE,
 };
 
 /** Parse a method token. \c newton-cg and \c newton_cg are the same method. */
@@ -728,8 +730,8 @@ inline std::string SolverConfig::valid_options() {
 inline std::string SolverConfig::valid_methods() {
     return "adam, bb, bfgs, cg, conjugate_descent, dai_yuan, diis, dogleg, "
            "fire, fire2, fletcher_reeves, fr_pr, hager_zhang, hestenes_stiefel, "
-           "lbfgs, liu_storey, newton, polak_ribiere, pso, quickmin, rfo, sd, "
-           "sr1, sr2, steepest";
+           "lbfgs, lbfgs_wide, liu_storey, low_call_cg, newton, polak_ribiere, "
+           "pso, quickmin, rfo, sd, sr1, sr2, steepest";
 }
 
 namespace detail {
@@ -750,6 +752,8 @@ inline std::string canon_token(std::string_view text) {
 
 inline Method method_from_name(std::string const& name) {
     if (name == "lbfgs") return Method::Lbfgs;
+    if (name == "lbfgs_wide") return Method::LbfgsWide;
+    if (name == "low_call_cg") return Method::LowCallCg;
     if (name == "bfgs") return Method::Bfgs;
     if (name == "fire") return Method::Fire;
     if (name == "fire2") return Method::Fire2;
@@ -790,6 +794,7 @@ inline bool is_cg(Method method) {
     case Method::HagerZhang:
     case Method::LiuStorey:
     case Method::FrPr:
+    case Method::LowCallCg:
         return true;
     default:
         return false;

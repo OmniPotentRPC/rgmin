@@ -55,7 +55,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 36
+#define RGMIN_ABI_VERSION_MINOR 37
 #define RGMIN_ABI_LAYOUT_REVISION 4
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -90,7 +90,13 @@ typedef enum rgmin_method_t {
     /** Steihaug-Toint Newton-CG. Products only; no dense Hessian. */
     RGMIN_NEWTON_CG = 24,
     /** Newton-CG with a Nyström preconditioner. The trust ceiling stays Euclidean. */
-    RGMIN_NEWTON_PCG = 25
+    RGMIN_NEWTON_PCG = 25,
+    /** Dai-Yuan hybrid, Powell restart, and the case-3 average extrapolation.
+     *  One-shot and session entry points both build that preset. */
+    RGMIN_LOW_CALL_CG = 26,
+    /** L-BFGS with 20 correction pairs. \c RGMIN_LBFGS with \c memory = 20
+     *  is the same method. \c memory on this tag is ignored. */
+    RGMIN_LBFGS_WIDE = 27
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.

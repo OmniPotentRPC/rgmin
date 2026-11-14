@@ -320,10 +320,20 @@ impl Method {
     /// `cg` is Polak-Ribiere. `newton` is shifted Newton. `sd` is
     /// steepest descent. L-BFGS memory, Adam, and PSO use the same
     /// defaults as [`Self::lbfgs`], [`Self::adam`], and [`Self::pso`].
+    ///
+    /// `lbfgs_wide` is [`Self::lbfgs_wide`]. `low_call_cg` is the
+    /// Dai-Yuan hybrid with [`Restart::powell`]. The case-3
+    /// extrapolation lives on [`crate::Solver::low_call_cg`], not on
+    /// the method value.
     pub fn from_name(name: &str) -> crate::Result<Self> {
         let token = canon_method(name);
         let method = match token.as_str() {
             "lbfgs" => Self::lbfgs(),
+            "lbfgs_wide" => Self::lbfgs_wide(),
+            "low_call_cg" => Self::Nlcg {
+                conjugacy: Conjugacy::DaiYuanHybrid,
+                restart: Restart::powell(),
+            },
             "bfgs" => Self::Bfgs,
             "sr1" => Self::Sr1,
             "sr2" => Self::Sr2,
@@ -406,6 +416,17 @@ mod name_tests {
         );
         assert_eq!(Method::from_name("dogleg").unwrap(), Method::Dogleg);
         assert_eq!(Method::from_name("lbfgs").unwrap(), Method::lbfgs());
+        assert_eq!(
+            Method::from_name("lbfgs-wide").unwrap(),
+            Method::lbfgs_wide()
+        );
+        assert_eq!(
+            Method::from_name("low_call_cg").unwrap(),
+            Method::Nlcg {
+                conjugacy: Conjugacy::DaiYuanHybrid,
+                restart: Restart::powell(),
+            }
+        );
         assert_eq!(Method::from_name("CG").unwrap(), Method::polak_ribiere());
         assert_eq!(Method::from_name("sd").unwrap(), Method::Steepest);
         assert_eq!(Method::from_name("fire2").unwrap().as_str(), "fire2");
