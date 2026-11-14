@@ -288,13 +288,18 @@ impl LbfgsPairsPy {
     }
 
     /// Store one pair. Returns false when the curvature gate declines it.
-    fn push(&mut self, s: Vec<f64>, y: Vec<f64>) -> PyResult<bool> {
-        self.pairs
-            .push(
-                ArrayView1::from(s.as_slice()),
-                ArrayView1::from(y.as_slice()),
-            )
-            .map_err(direction_error)
+    ///
+    /// `rho` replaces `1 / (s · y)` for a pair that passes the gate; a
+    /// `rho` that is not finite and positive declines the pair.
+    #[pyo3(signature = (s, y, rho=None))]
+    fn push(&mut self, s: Vec<f64>, y: Vec<f64>, rho: Option<f64>) -> PyResult<bool> {
+        let s = ArrayView1::from(s.as_slice());
+        let y = ArrayView1::from(y.as_slice());
+        match rho {
+            Some(rho) => self.pairs.push_rho(s, y, rho),
+            None => self.pairs.push(s, y),
+        }
+        .map_err(direction_error)
     }
 
     fn clear(&mut self) {
