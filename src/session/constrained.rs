@@ -52,6 +52,15 @@ use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
 };
 
+/// The curve search of a first-order step on the set:
+/// Armijo backtracking from the `istep` trial, which a descent along a
+/// straight force accepts as it stands.
+const CURVE_BACKTRACK: LineSearch = LineSearch::Backtracking {
+    c: 1e-4,
+    beta: 0.5,
+    maxiter: HALVINGS,
+};
+
 /// Displacement caps an unconstrained trial would take.
 #[derive(Clone, Copy)]
 struct Caps {
@@ -330,6 +339,10 @@ struct Reduced<'s, 'a, O: ?Sized, A> {
     lambda: &'s [f64],
     action: &'s A,
     hvps: AtomicUsize,
+    /// `P H P + (I - P)` instead of `P H P`. The Nystrom sketch and the
+    /// preconditioned directions have normal parts, which the singular
+    /// model would leave in the step for the projection to cut.
+    whole_model: bool,
 }
 
 impl<O, A> Objective<f64> for Reduced<'_, '_, O, A>
@@ -384,7 +397,11 @@ where
         }
         let w = self.space.by_root_w(&u);
         if l2(&w) <= 0.0 {
-            return Array1::zeros(v.len());
+            return if self.whole_model {
+                &v - &u
+            } else {
+                Array1::zeros(v.len())
+            };
         }
         let at = self.space.point();
         self.hvps.fetch_add(1, Ordering::Relaxed);
@@ -402,6 +419,9 @@ where
         let mut out = self.space.by_root_w(&hv);
         if self.space.project(&mut out).is_err() {
             return nan();
+        }
+        if self.whole_model {
+            out += &(&v - &u);
         }
         out
     }
@@ -756,23 +776,66 @@ impl Solver {
         Ok(())
     }
 
+    /// Methods whose trial [`Self::accept_on`] searches along the curve.
+    fn searches_on_the_set(&self) -> bool {
+        matches!(
+            self.inner,
+            Inner::Steepest | Inner::Nlcg { .. } | Inner::Sr1 { .. } | Inner::Sr2 { .. }
+        )
+    }
+
     /// [`crate::accept::accept_step`] on the set. Trials are placed by
     /// [`Space::place`] and the fallback runs along `-W g`. A trial the
     /// set cannot be met at counts as refused under the energy tests and
     /// is an error under [`Accept::None`], or when no trial was placed.
+    ///
+    /// Steepest descent, nonlinear CG, SR1 and SR2 control their step
+    /// length on a flat kind under every policy but [`Accept::Step`]. On
+    /// the set they backtrack along the curve from the `dir` trial first.
+    /// A search with no decrease falls back to the halvings; under
+    /// [`Accept::None`] it leaves the trial of `fresh` memory as it stands
+    /// and restarts a method that used retained memory.
+    #[allow(clippy::too_many_arguments)]
     fn accept_on<O>(
         &mut self,
         obj: &O,
         space: &Space<'_>,
         value: f64,
+        raw: &Array1<f64>,
         dir: &Array1<f64>,
         steepest: &Array1<f64>,
+        fresh: bool,
     ) -> Result<Outcome>
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
         let caps = self.caps();
         let place = |alpha: f64, d: &Array1<f64>| space.place(obj.bounds(), &(d * alpha), caps);
+        let searched = self.accept != Accept::Step && self.searches_on_the_set();
+        if searched {
+            // Steepest descent under Accept::None takes `istep * g`: a set
+            // that cannot be met there refuses the step, as a single trial
+            // does. The other methods' trial lengths are estimates.
+            if self.accept == Accept::None && matches!(self.inner, Inner::Steepest) {
+                place(1.0, dir)?;
+            }
+            let found = match self.curve_search(obj, space, value, raw, dir, 1.0, CURVE_BACKTRACK) {
+                Ok((found, _)) => found,
+                Err(_) if self.accept != Accept::None => None,
+                Err(e) => return Err(e),
+            };
+            if let Some((trial, ft, gt)) = found {
+                push_energy(&mut self.e_hist, ft);
+                return Ok(Outcome::Moved(trial, ft, gt));
+            }
+            // A search that certifies no decrease, as at the noise floor,
+            // falls back to the energy test's halvings, or under
+            // Accept::None to a fresh trial as it stands. A trial from
+            // retained memory is refused there, which restarts it.
+            if self.accept == Accept::None && !fresh {
+                return Ok(Outcome::Refused);
+            }
+        }
         if self.accept == Accept::None {
             let trial = place(1.0, dir)?;
             let (ft, gt) = obj.value_and_gradient(trial.view());
@@ -821,6 +884,7 @@ impl Solver {
         raw: &Array1<f64>,
         dir: &Array1<f64>,
         t0: f64,
+        linesearch: LineSearch,
     ) -> Result<(Option<Evaluated>, f64)>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -834,8 +898,7 @@ impl Solver {
         };
         let x = space.point();
         let (npos, _, lsstep) =
-            self.linesearch
-                .search_path(|p| obj.value_and_gradient(p), &mut curve, t0);
+            linesearch.search_path(|p| obj.value_and_gradient(p), &mut curve, t0);
         if npos == *x {
             return match curve.failure.take() {
                 Some(e) if !curve.placed => Err(e),
@@ -860,7 +923,7 @@ impl Solver {
         let ok = finite(nval, grad.view());
         // Equal rounded energies: strong curvature along the curve
         // certifies the descent, as on a line.
-        let tied = match self.linesearch {
+        let tied = match linesearch {
             LineSearch::Wolfe { c1, c2, .. } if ok && nval == value => {
                 let initial = t * raw.dot(dir);
                 let at = curve.slope(t, trial.view(), grad.view()) * t;
@@ -925,6 +988,16 @@ impl Solver {
         let gq = &start.gq;
         let istep = self.istep;
         let accept = self.accept;
+        let fresh = matches!(
+            &self.inner,
+            Inner::Steepest
+                | Inner::Nlcg {
+                    initialized: false,
+                    ..
+                }
+                | Inner::Sr1 { fresh: true, .. }
+                | Inner::Sr2 { fresh: true, .. }
+        );
         let mut dir_q = match &mut self.inner {
             Inner::Lbfgs(solver) => solver.direction(gq.view()),
             Inner::Steepest => gq.mapv(|g| -g * istep),
@@ -987,17 +1060,18 @@ impl Solver {
         space.project(&mut dir_q)?;
         let dir = space.by_root_w(&dir_q);
         let steepest = space.by_root_w(&gq.mapv(|g| -g));
-        let moved = match self.accept_on(obj, space, start.value, &dir, &steepest)? {
-            Outcome::Moved(trial, ft, gt) => Some((trial, ft, gt)),
-            Outcome::NonFinite if matches!(self.inner, Inner::Lbfgs(_)) => {
-                return Err(Error::Oracle {
-                    what: "non-finite value or gradient",
-                });
-            }
-            Outcome::NonFinite | Outcome::Refused => None,
-        };
+        let moved =
+            match self.accept_on(obj, space, start.value, &start.raw, &dir, &steepest, fresh)? {
+                Outcome::Moved(trial, ft, gt) => Some((trial, ft, gt)),
+                Outcome::NonFinite if matches!(self.inner, Inner::Lbfgs(_)) => {
+                    return Err(Error::Oracle {
+                        what: "non-finite value or gradient",
+                    });
+                }
+                Outcome::NonFinite | Outcome::Refused => None,
+            };
         let Some((trial, value, raw)) = moved else {
-            let refused = self.accept != Accept::None;
+            let refused = self.accept != Accept::None || self.searches_on_the_set();
             match &mut self.inner {
                 Inner::Nlcg { initialized, .. } if refused => *initialized = false,
                 Inner::Bfgs { h, fresh } | Inner::Sr1 { h, fresh } | Inner::Sr2 { b: h, fresh }
@@ -1012,7 +1086,11 @@ impl Solver {
                 }
                 _ => {}
             }
-            let refused = refused && !matches!(self.inner, Inner::Adam { .. } | Inner::Lbfgs(_));
+            // A refused search under Accept::None restarts the method but,
+            // like the flat line search, never reports a stall.
+            let refused = refused
+                && self.accept != Accept::None
+                && !matches!(self.inner, Inner::Adam { .. } | Inner::Lbfgs(_));
             if refused && self.refused && start.cached {
                 return Err(Error::AcceptStalled { steps: self.steps });
             }
@@ -1128,8 +1206,15 @@ impl Solver {
         // Curvature history supplies the quasi-Newton step length.
         let t0 = if solver.is_empty() { self.istep } else { 1.0 };
         let dir = direction(solver)?;
-        let (mut found, mut lsstep) =
-            self.curve_search(obj, space, start.value, &start.raw, &dir, t0)?;
+        let (mut found, mut lsstep) = self.curve_search(
+            obj,
+            space,
+            start.value,
+            &start.raw,
+            &dir,
+            t0,
+            self.linesearch,
+        )?;
         if found.is_none() {
             let Inner::Lbfgs(solver) = &mut self.inner else {
                 unreachable!()
@@ -1146,6 +1231,7 @@ impl Solver {
                     &start.raw,
                     &dir,
                     self.control.istep,
+                    self.linesearch,
                 )?;
             }
         }
@@ -1313,7 +1399,9 @@ impl Solver {
         let dir = space.by_root_w(&dir_q);
         let steepest = space.by_root_w(&start.gq.mapv(|g| -g));
         let (mut value, mut raw) = (start.value, start.raw.clone());
-        if let Outcome::Moved(trial, ft, gt) = self.accept_on(obj, space, value, &dir, &steepest)? {
+        if let Outcome::Moved(trial, ft, gt) =
+            self.accept_on(obj, space, value, &start.raw, &dir, &steepest, false)?
+        {
             let old = x.clone();
             *x = trial;
             value = ft;
@@ -1489,6 +1577,7 @@ impl Solver {
             lambda: &start.lambda,
             action,
             hvps: AtomicUsize::new(0),
+            whole_model: precondition,
         };
         let n = x.len();
         let rtol = l2(gq).sqrt().min(0.5);
@@ -1498,9 +1587,11 @@ impl Solver {
         } else {
             steihaug_cg(&reduced, x.view(), gq, radius, rtol, 2 * n)
         };
+        let p_cg = p.clone();
         space.project(&mut p)?;
         let pnorm = l2(&p);
-        // The projector is orthogonal in q, so this only trims rounding.
+        // PCG stops on the preconditioner sphere, so this can pull a long
+        // step back onto the Euclidean one; for CG it only trims rounding.
         if radius.is_finite() && pnorm > radius {
             p *= radius / pnorm;
         }
@@ -1514,7 +1605,7 @@ impl Solver {
                 Ok(trial) => {
                     let mut step = space.by_root_m(&(&trial - &*x));
                     space.project(&mut step)?;
-                    if steps_differ(step.view(), p.view()) {
+                    if steps_differ(step.view(), p_cg.view()) {
                         let hs = reduced.hessian_vector(x.view(), step.view());
                         pred = -(gq.dot(&step) + 0.5 * step.dot(&hs));
                     }

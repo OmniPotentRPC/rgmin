@@ -11,7 +11,7 @@ use ndarray::{Array1, Array2, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-use crate::accept::{Accept, Acceptance, accept_step};
+use crate::accept::{Accept, Acceptance, Trial, accept_step, retract_within_cap, single_trial};
 use crate::adam::{adam_direction, scale_to_unit_atom};
 use crate::bb::bb_direction;
 use crate::control::{Control, StopNorm};
@@ -67,6 +67,14 @@ const SESSION_LINESEARCH: LineSearch = LineSearch::Wolfe {
     c2: 0.9,
     maxiter: 20,
 };
+
+/// Why a capped trial did not move.
+enum CappedMiss {
+    /// The quasi-Newton trial was non-finite. Try the force once.
+    Retry,
+    /// Stop and restore the pairs.
+    Stop(Error),
+}
 
 /// Smallest initial trust radius. The constrained stepper reads this.
 const RADIUS_START: f64 = 1e-8;
@@ -175,6 +183,16 @@ fn fire_mix(
     })
 }
 
+/// Dogleg model on a curved kind. The sphere form keeps its work vectors
+/// `H x` and `H^T x`, and other kinds keep the tangent basis `Z`.
+#[derive(Default)]
+struct TangentModel {
+    model: Array2<f64>,
+    hx: Array1<f64>,
+    htx: Array1<f64>,
+    basis: Array2<f64>,
+}
+
 /// Long-lived solver. Algorithm memory lives here; `x` stays with the caller.
 pub struct Solver {
     dim: usize,
@@ -197,6 +215,9 @@ pub struct Solver {
     rigid_declared: bool,
     /// `set_project_rigid(false)` / `set_rigid_mode(Off)` on a Euclidean session.
     rigid_forced_off: bool,
+    /// The rigid settings before periodic axes declared the molecule.
+    /// Clearing the axes puts them back; any other declaration drops them.
+    rigid_before_pbc: Option<(RigidMode, bool, bool, bool)>,
     /// Periodic axes. Any true axis drops rotations under Auto.
     pbc: [bool; 3],
     /// Translations the host says are not symmetries.
@@ -253,6 +274,8 @@ pub struct Solver {
     unit_first_step: bool,
     /// The constrained acceptance test refused the previous step.
     refused: bool,
+    /// Dogleg model on a curved kind, rewritten in place at each step.
+    tangent: TangentModel,
     /// Norm compared with [`Control::gtol`]. Starts as [`Control::stop_norm`].
     stop_norm: StopNorm,
     /// Holonomic distance constraints. `None` is the unconstrained step.
@@ -392,6 +415,7 @@ impl Solver {
             rigid_mode: RigidMode::Auto,
             rigid_declared: false,
             rigid_forced_off: false,
+            rigid_before_pbc: None,
             pbc: [false; 3],
             broken_translation: [false; 3],
             broken_rotation: [false; 3],
@@ -428,6 +452,7 @@ impl Solver {
             nlcg_descent_fallbacks: 0,
             unit_first_step: false,
             refused: false,
+            tangent: TangentModel::default(),
             stop_norm,
             constraints: None,
             brief: false,
@@ -823,6 +848,7 @@ impl Solver {
     /// axes are a host mask, not a field vector.
     /// A bare Euclidean session stays off until something declares it.
     pub fn set_rigid_mode(&mut self, mode: RigidMode) {
+        self.rigid_before_pbc = None;
         self.rigid_mode = mode;
         self.project_rigid = mode != RigidMode::Off;
         if mode == RigidMode::Off {
@@ -857,11 +883,26 @@ impl Solver {
 
     /// Periodic axes. Any true axis drops rotations and keeps only those
     /// translations. This replaces the single bit from [`Self::set_periodic`].
+    /// Clearing every axis undoes a declaration the axes alone made.
     pub fn set_pbc_axes(&mut self, x: bool, y: bool, z: bool) {
         self.pbc = [x, y, z];
         self.periodic = x || y || z;
         if self.periodic {
+            let before = self.rigid_before_pbc.or_else(|| {
+                (!self.rigid_declared).then_some((
+                    self.rigid_mode,
+                    self.project_rigid,
+                    self.rigid_declared,
+                    self.rigid_forced_off,
+                ))
+            });
             self.declare_molecule();
+            self.rigid_before_pbc = before;
+        } else if let Some((mode, project, declared, forced_off)) = self.rigid_before_pbc.take() {
+            self.rigid_mode = mode;
+            self.project_rigid = project;
+            self.rigid_declared = declared;
+            self.rigid_forced_off = forced_off;
         }
     }
 
@@ -896,6 +937,7 @@ impl Solver {
     }
 
     fn declare_molecule(&mut self) {
+        self.rigid_before_pbc = None;
         self.rigid_declared = true;
         self.rigid_forced_off = false;
         if self.rigid_mode == RigidMode::Off {
@@ -907,14 +949,10 @@ impl Solver {
     /// Periodic cell. Sella leaves `proj_rot` off; the quotient is \(R^{3N}/T(3)\).
     ///
     /// Nonzero is [`Self::set_pbc_axes`]`(true, true, true)` and declares
-    /// the molecule. Zero clears the three axes.
+    /// the molecule. Zero clears the three axes and undoes that
+    /// declaration unless something else declared the molecule since.
     pub fn set_periodic(&mut self, periodic: bool) {
-        if periodic {
-            self.set_pbc_axes(true, true, true);
-        } else {
-            self.pbc = [false; 3];
-            self.periodic = false;
-        }
+        self.set_pbc_axes(periodic, periodic, periodic);
     }
 
     /// Embedded manifold for project / retract / transport.
@@ -925,6 +963,7 @@ impl Solver {
         };
         if kind != self.manifold {
             self.forget();
+            self.tangent = TangentModel::default();
         }
         self.manifold = kind;
         self.apply_default_atom_cap();
@@ -1402,6 +1441,154 @@ impl Solver {
         };
         self.kill_at(x, &mut w);
         w
+    }
+
+    /// Dogleg model on a curved kind, for the tangent projection `P` at `x`.
+    ///
+    /// On the sphere `P = I - x x^T` and `(I - P)^T (I - P) = (x.x) x x^T`,
+    /// so the model `P^T H P + (I - P)^T (I - P)` is
+    /// `H - x (H^T x)^T - (H x) x^T + (x^T H x + x.x) x x^T`.
+    /// That form costs O(n^2) and writes into `tangent` without building
+    /// `P` or allocating. On the unit sphere `P` is the orthogonal
+    /// projection and the second term is the identity on `span{x}`, so a
+    /// tangent gradient gives tangent Newton and Cauchy points.
+    ///
+    /// The projection of another kind can be oblique, as the Fisher
+    /// projection of the multinomial kinds is. The Newton point of the
+    /// ambient form then leaves the tangent space. Those kinds keep an
+    /// orthonormal basis `Z` of the tangent space and the model `Z^T H Z`,
+    /// which stays symmetric for the LDLT solve.
+    fn fill_tangent_model(&mut self, x: &Array1<f64>, hess: &Array2<f64>) {
+        let n = x.len();
+        if self.manifold != ManifoldKind::Sphere {
+            let z = self.tangent_basis(x);
+            self.tangent.model = z.t().dot(hess).dot(&z);
+            self.tangent.basis = z;
+            return;
+        }
+        let tm = &mut self.tangent;
+        // Another kind leaves `Z^T H Z` in `model` and no work vectors.
+        if tm.model.dim() != (n, n) || tm.hx.len() != n {
+            tm.model = Array2::zeros((n, n));
+            tm.hx = Array1::zeros(n);
+            tm.htx = Array1::zeros(n);
+        }
+        let mut scale = 0.0;
+        for i in 0..n {
+            let (mut a, mut b) = (0.0, 0.0);
+            for j in 0..n {
+                a += hess[[i, j]] * x[j];
+                b += hess[[j, i]] * x[j];
+            }
+            tm.hx[i] = a;
+            tm.htx[i] = b;
+            scale += x[i] * (a + x[i]);
+        }
+        for i in 0..n {
+            for j in 0..n {
+                tm.model[[i, j]] =
+                    hess[[i, j]] - x[i] * tm.htx[j] - tm.hx[i] * x[j] + scale * x[i] * x[j];
+            }
+        }
+    }
+
+    /// The columns `P e_j` of the tangent projection at `x`.
+    fn projection_columns(&self, x: &Array1<f64>) -> Array2<f64> {
+        let n = x.len();
+        let mut p = Array2::<f64>::zeros((n, n));
+        let mut e = Array1::<f64>::zeros(n);
+        for j in 0..n {
+            e[j] = 1.0;
+            p.column_mut(j).assign(&self.manifold.project(x, &e));
+            e[j] = 0.0;
+        }
+        p
+    }
+
+    /// Orthonormal basis of the range of the tangent projection at `x`, by
+    /// Gram-Schmidt with column pivoting on its columns. A projection has
+    /// no nonzero singular value below one, so the basis stops at the first
+    /// remainder no longer than `RANK` times the longest column.
+    fn tangent_basis(&self, x: &Array1<f64>) -> Array2<f64> {
+        const RANK: f64 = 1e-8;
+        let mut cols = self.projection_columns(x);
+        let n = x.len();
+        let longest_col = (0..n)
+            .map(|j| cols.column(j).dot(&cols.column(j)).sqrt())
+            .fold(0.0, f64::max);
+        let floor = RANK * longest_col;
+        let mut left: Vec<usize> = (0..n).collect();
+        let mut basis: Vec<Array1<f64>> = Vec::with_capacity(n);
+        while !left.is_empty() {
+            let (mut pos, mut longest) = (0, -1.0);
+            for (i, &j) in left.iter().enumerate() {
+                let len = cols.column(j).dot(&cols.column(j)).sqrt();
+                if len > longest {
+                    (pos, longest) = (i, len);
+                }
+            }
+            if longest <= floor {
+                break;
+            }
+            let mut q = cols.column(left.remove(pos)).to_owned();
+            for b in &basis {
+                let c = b.dot(&q);
+                q.scaled_add(-c, b);
+            }
+            let len = l2(&q);
+            q.mapv_inplace(|v| v / len);
+            for &j in &left {
+                let mut col = cols.column_mut(j);
+                let c = q.dot(&col);
+                col.scaled_add(-c, &q);
+            }
+            basis.push(q);
+        }
+        let mut z = Array2::<f64>::zeros((n, basis.len()));
+        for (k, b) in basis.iter().enumerate() {
+            z.column_mut(k).assign(b);
+        }
+        z
+    }
+
+    /// Dogleg point at `x` within `radius`. A curved kind other than the
+    /// sphere runs the dogleg on `Z^T H Z` and `Z^T g` and maps the point
+    /// back with `Z`, so the Newton and Cauchy points are tangent and the
+    /// radius bounds `|Z u| = |u|`.
+    fn dogleg_point(
+        &mut self,
+        x: &Array1<f64>,
+        hess: &Array2<f64>,
+        grad: &Array1<f64>,
+        radius: f64,
+    ) -> Array1<f64> {
+        if self.manifold.is_flat() {
+            return dogleg_direction(hess, grad, radius);
+        }
+        self.fill_tangent_model(x, hess);
+        let tm = &self.tangent;
+        if self.manifold == ManifoldKind::Sphere {
+            return dogleg_direction(&tm.model, grad, radius);
+        }
+        let u = dogleg_direction(&tm.model, &tm.basis.t().dot(grad), radius);
+        tm.basis.dot(&u)
+    }
+
+    /// Predicted reduction of the taken step `p` on the model of
+    /// [`Self::dogleg_point`]. With `Q = Z Z^T` the basis model is
+    /// `Q H Q + (I - Q)` in ambient form, so the normal part of `p` enters
+    /// with the identity, as on the sphere.
+    fn dogleg_pred(&self, hess: &Array2<f64>, grad: &Array1<f64>, p: &Array1<f64>) -> f64 {
+        if self.manifold.is_flat() {
+            return predicted_reduction(hess, grad, p);
+        }
+        let tm = &self.tangent;
+        if self.manifold == ManifoldKind::Sphere {
+            return predicted_reduction(&tm.model, grad, p);
+        }
+        let u = tm.basis.t().dot(p);
+        let normal = p.dot(p) - u.dot(&u);
+        -grad.dot(p) - 0.5 * (u.dot(&tm.model.dot(&u)) + normal)
     }
 
     fn horizontal_grad(&mut self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
@@ -2021,6 +2208,224 @@ impl Solver {
         true
     }
 
+    fn shape_step(&mut self, x: &Array1<f64>, mut direction: Array1<f64>) -> Array1<f64> {
+        if !self.project_rigid && matches!(self.manifold, ManifoldKind::Euclidean) {
+            return direction;
+        }
+        if self.project_rigid {
+            project_out_rot_trans(&mut direction, x.view());
+        }
+        self.project_vec(x, &direction)
+    }
+
+    /// Trial point of a capped displacement. `steepest` reports that the
+    /// direction had no quasi-Newton length, so a non-finite answer is
+    /// not retried.
+    fn capped_trial<O>(
+        &self,
+        obj: &O,
+        x: &Array1<f64>,
+        step: &Array1<f64>,
+        steepest: bool,
+    ) -> Result<(Array1<f64>, f64, Array1<f64>)>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let motion = max_atom_displacement(step);
+        if !motion.is_finite() || motion <= 0.0 {
+            return Err(Error::LbfgsCap {
+                what: "the capped step is zero",
+            });
+        }
+        let trial = crate::step::clip_owned(obj.bounds(), x + step);
+        let taken = max_atom_displacement(&(&trial - x));
+        if !taken.is_finite() || taken <= 0.0 {
+            return Err(Error::OffManifold {
+                kind: self.manifold.as_str(),
+            });
+        }
+        let (value, grad) = obj.value_and_gradient(trial.view());
+        if !crate::step::finite(value, grad.view()) {
+            return Err(if steepest {
+                crate::step::non_finite()
+            } else {
+                Error::Oracle {
+                    what: "non-finite quasi-Newton trial",
+                }
+            });
+        }
+        Ok((trial, value, grad))
+    }
+
+    /// Curvature probe of the first eOn step, clipped to the box.
+    /// The quotient uses the displacement that remains inside the box.
+    fn eon_fd_seed<O>(&self, obj: &O, x: &Array1<f64>, g: &Array1<f64>) -> crate::lbfgs::EonSeed
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        use crate::lbfgs::{EON_FINITE_DIFFERENCE, EON_INVERSE_CURVATURE, EonSeed};
+        let force = g.mapv(|v| -v);
+        let norm = l2(&force);
+        if !(norm.is_finite() && norm > 0.0) {
+            return EonSeed::Scale(EON_INVERSE_CURVATURE);
+        }
+        let u = &force / norm;
+        let raw = x + &(EON_FINITE_DIFFERENCE * &u);
+        let probe = crate::step::clip_owned(obj.bounds(), raw);
+        let along = (&probe - x).dot(&u);
+        if !(along.is_finite() && along > 0.0) {
+            return EonSeed::Scale(EON_INVERSE_CURVATURE);
+        }
+        let (value, grad) = obj.value_and_gradient(probe.view());
+        if !crate::step::finite(value, grad.view()) {
+            return EonSeed::Steepest;
+        }
+        let curvature = (&grad - g).dot(&u) / along;
+        if curvature.is_finite() && curvature > 0.0 {
+            EonSeed::Scale(1.0 / curvature)
+        } else {
+            EonSeed::Steepest
+        }
+    }
+
+    /// One eOn L-BFGS step. A caller's move since the last step is a
+    /// curvature pair. A non-finite quasi-Newton trial is retried once
+    /// along `H0` times the force. A second non-finite trial restores the
+    /// pairs, the caller's included, and returns [`Error::Oracle`].
+    fn eon_lbfgs_step<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        grad: Array1<f64>,
+    ) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        use crate::lbfgs::{EON_INVERSE_CURVATURE, EonSeed};
+        if self.lindh_spec.is_some() {
+            let xs: Vec<f64> = x.iter().copied().collect();
+            let gs: Vec<f64> = grad.iter().copied().collect();
+            self.ensure_lindh(&xs, &gs, |p| obj.grad(ArrayView1::from(p)));
+        }
+        let Some(cap) = self.lbfgs_step().capped_limit() else {
+            return Err(Error::LbfgsCap {
+                what: "the cap is not positive",
+            });
+        };
+        let mut txn = match &mut self.inner {
+            Inner::Lbfgs(solver) => solver.begin_txn(),
+            _ => {
+                return Err(Error::LbfgsCap {
+                    what: "requires an L-BFGS session",
+                });
+            }
+        };
+        if !self.same_last_x(x)
+            && let Some(previous) = self.last_pos.as_ref().filter(|p| p.len() == x.len())
+        {
+            let prev = previous.as_slice().unwrap_or(&[]);
+            let xs = x.as_slice().unwrap_or(&[]);
+            let gold = self.last_grad.as_slice().unwrap_or(&[]);
+            let gnew = grad.as_slice().unwrap_or(&[]);
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                solver.store_pos_diff(prev, xs, gold, gnew, &mut txn);
+            }
+        }
+        let wants_fd = match &self.inner {
+            Inner::Lbfgs(solver) => solver.eon_wants_fd(),
+            _ => false,
+        };
+        let seed = if wants_fd {
+            self.eon_fd_seed(obj, x, &grad)
+        } else {
+            match &self.inner {
+                Inner::Lbfgs(solver) => solver.eon_seed(),
+                _ => EonSeed::Scale(EON_INVERSE_CURVATURE),
+            }
+        };
+        let h0 = match seed {
+            EonSeed::Scale(h) => h,
+            EonSeed::Steepest => EON_INVERSE_CURVATURE,
+        };
+        let proposed = match self.eon_propose(obj, x, &grad, cap, seed, &mut txn) {
+            Ok(point) => point,
+            Err(CappedMiss::Retry) => {
+                if let Inner::Lbfgs(solver) = &mut self.inner {
+                    solver.forget_txn(&mut txn);
+                }
+                let force = grad.mapv(|v| -v);
+                let step = self.shape_step(x, cap_displacement_atom(&(h0 * &force), cap));
+                match self.capped_trial(obj, x, &step, true) {
+                    Ok(point) => point,
+                    Err(err) => {
+                        if let Inner::Lbfgs(solver) = &mut self.inner {
+                            solver.rollback_txn(txn);
+                        }
+                        return Err(err);
+                    }
+                }
+            }
+            Err(CappedMiss::Stop(err)) => {
+                if let Inner::Lbfgs(solver) = &mut self.inner {
+                    solver.rollback_txn(txn);
+                }
+                return Err(err);
+            }
+        };
+        let (trial, tval, tgrad) = proposed;
+        let old = x.clone();
+        let gold = grad;
+        *x = trial;
+        let grad = self.horizontal_grad(x, &tgrad);
+        let y_prev = gold.as_slice().unwrap_or(&[]);
+        let y_new = grad.as_slice().unwrap_or(&[]);
+        let prev = old.as_slice().unwrap_or(&[]);
+        let xs = x.as_slice().unwrap_or(&[]);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.store_pos_diff(prev, xs, y_prev, y_new, &mut txn);
+            solver.commit_txn(txn);
+        }
+        self.remember(x, tval, &grad);
+        self.steps += 1;
+        Ok(self.report(tval, x, &grad))
+    }
+
+    /// Euclidean eOn proposal and its trial.
+    fn eon_propose<O>(
+        &mut self,
+        obj: &O,
+        x: &Array1<f64>,
+        grad: &Array1<f64>,
+        cap: f64,
+        seed: crate::lbfgs::EonSeed,
+        txn: &mut crate::lbfgs::Txn,
+    ) -> std::result::Result<(Array1<f64>, f64, Array1<f64>), CappedMiss>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let take = match &mut self.inner {
+            Inner::Lbfgs(solver) => solver.eon_step_from_seed(grad.view(), cap, seed, txn),
+            _ => None,
+        };
+        let Some(take) = take else {
+            return Err(CappedMiss::Stop(Error::LbfgsCap {
+                what: "the capped step is zero",
+            }));
+        };
+        let step = self.shape_step(x, take.step);
+        let result = self.capped_trial(obj, x, &step, take.fallback);
+        if let Inner::Lbfgs(solver) = &mut self.inner {
+            solver.recycle(step);
+        }
+        match result {
+            Ok(point) => Ok(point),
+            Err(Error::Oracle {
+                what: "non-finite quasi-Newton trial",
+            }) => Err(CappedMiss::Retry),
+            Err(err) => Err(CappedMiss::Stop(err)),
+        }
+    }
+
     /// The geometry step is the explicit flag, or a Wolfe session that
     /// has a per-atom cap. The default eOn cap is not this path.
     fn use_geometry_lbfgs(&self) -> bool {
@@ -2579,20 +2984,49 @@ impl Solver {
         // Δ_max is the Euclidean `maxmove` when one is set, otherwise
         // eight times the current radius. The cap still limits the trial.
         let rmax = self.control.maxmove.unwrap_or(radius * 8.0).max(radius);
-        let mut dir = dogleg_direction(hess, &grad, radius);
+        // A curved kind steps in the tangent space. The dogleg point is
+        // tangent, the trial is the retracted tangent step, and the ratio
+        // compares the energy there with the tangent model.
+        let curved = !self.manifold.is_flat();
+        let mut dir = self.dogleg_point(x, hess, &grad, radius);
         self.kill_at(x, &mut dir);
-        let trust_norm = l2(&dir);
-        let mut trial = &*x + &dir;
-        if let Some(cap) = self.atom_maxmove {
-            scale_step_atom(x, &mut trial, cap);
-        } else if let Some(cap) = self.control.maxmove {
-            scale_step(x, &mut trial, cap);
+        if curved {
+            self.manifold.project_in_place(x, &mut dir);
         }
-        trial = obj.bounds().clip(trial.view());
-        let p = &trial - &*x;
+        let trust_norm = l2(&dir);
+        let (trial, p) = if curved {
+            let fitted = retract_within_cap(
+                obj,
+                x,
+                &dir,
+                self.atom_maxmove,
+                self.control.maxmove,
+                self.manifold,
+            );
+            let Some(pair) = fitted else {
+                // Refused before any oracle: a failed trust step.
+                if let Inner::Dogleg { radius } = &mut self.inner {
+                    *radius = update_radius(*radius, -1.0, trust_norm, rmax);
+                }
+                self.remember(x, value, &grad);
+                self.steps += 1;
+                return self.report_or_escape(obj, x, value, grad);
+            };
+            pair
+        } else {
+            let mut trial = &*x + &dir;
+            if let Some(cap) = self.atom_maxmove {
+                scale_step_atom(x, &mut trial, cap);
+            } else if let Some(cap) = self.control.maxmove {
+                scale_step(x, &mut trial, cap);
+            }
+            trial = obj.bounds().clip(trial.view());
+            let p = &trial - &*x;
+            (trial, p)
+        };
         let taken = l2(&p);
         let (ft, gt) = obj.value_and_gradient(trial.view());
-        let pred = predicted_reduction(hess, &grad, &p);
+        let pred = self.dogleg_pred(hess, &grad, &p);
         let rho = reduction_ratio(value - ft, pred);
         // No displacement cap: the boundary length is the step after the
         // box clip, as before. With a cap, the dogleg length is the one
@@ -2650,10 +3084,13 @@ impl Solver {
             });
         }
         let gnorm = self.stationarity_norm(x, &grad);
+        let eon = self.use_eon_lbfgs();
         // A caller that moved the iterate between steps measured the
         // gradient at both ends, so the displacement is a secant of the
-        // retained inverse Hessian.
+        // retained inverse Hessian. The eOn step records it in the
+        // transaction a refused trial rolls back.
         if !cached
+            && !eon
             && self.manifold.retract_is_translation()
             && let Some(previous) = self.last_pos.clone().filter(|p| p.len() == x.len())
         {
@@ -2668,8 +3105,8 @@ impl Solver {
         }
         self.refresh_exp(obj, x, &grad)?;
 
-        if self.use_eon_lbfgs() {
-            return self.eon_session_step(obj, x, value, grad);
+        if eon {
+            return self.eon_lbfgs_step(obj, x, grad);
         }
         if self.use_geometry_lbfgs() {
             return self.geometry_lbfgs_step(obj, x, value, grad);
@@ -2717,6 +3154,23 @@ impl Solver {
                     self.free_len(obj.bounds()),
                 ),
             ));
+        }
+
+        let raw_gradient = match self.inner {
+            Inner::Steepest
+            | Inner::Bfgs { .. }
+            | Inner::Sr1 { .. }
+            | Inner::Sr2 { .. }
+            | Inner::Bb { .. } => true,
+            Inner::Nlcg { .. } => self.precon.is_none(),
+            _ => false,
+        };
+        if self.unit_first_step
+            && raw_gradient
+            && self.accept != Accept::None
+            && self.last_pos.is_none()
+        {
+            self.istep = self.control.istep.min(1.0 / l2(&grad));
         }
 
         let line_options =
@@ -2794,7 +3248,42 @@ impl Solver {
             }
             _ => None,
         };
-        let lbfgs_line_searched = lbfgs_direct.is_none() && matches!(self.inner, Inner::Lbfgs(_));
+        // On a curved kind the line search would probe the chord, off the
+        // set. Accept::None takes one retracted trial of the two-loop step.
+        let lbfgs_single = lbfgs_direct.is_none()
+            && self.accept == Accept::None
+            && !self.manifold.is_flat()
+            && matches!(self.inner, Inner::Lbfgs(_));
+        let lbfgs_line_searched =
+            lbfgs_direct.is_none() && !lbfgs_single && matches!(self.inner, Inner::Lbfgs(_));
+        let on_set = lbfgs_single;
+        if lbfgs_single {
+            let dir = match &self.inner {
+                Inner::Lbfgs(solver) => solver.search_direction(x.view(), grad.view())?,
+                _ => unreachable!(),
+            };
+            match single_trial(
+                obj,
+                x,
+                &dir,
+                &self.control,
+                &mut self.e_hist,
+                self.atom_maxmove,
+                self.manifold,
+            ) {
+                Trial::Accepted(npos, nval, ngrad) => {
+                    *x = npos;
+                    value = nval;
+                    grad = ngrad;
+                }
+                Trial::OffManifold => {
+                    return Err(Error::OffManifold {
+                        kind: self.manifold.as_str(),
+                    });
+                }
+                Trial::NonFinite => return Err(crate::step::non_finite()),
+            }
+        }
         if let Some(mut dir) = lbfgs_direct {
             dir = self.project_vec(x, &dir);
             let (npos, nval, ngrad, moved) = accept_step(
@@ -3105,6 +3594,11 @@ impl Solver {
                     }
                 }
                 Inner::Fire(state) => {
+                    // A refused trial returns with the integrator as it was,
+                    // so a retry probes the same point.
+                    let saved = state.checkpoint();
+                    let manifold = self.manifold;
+                    let curved = !manifold.is_flat();
                     let n_pos_saved = state.n_pos;
                     let dt_saved = state.dt;
                     let alpha_saved = state.alpha;
@@ -3166,12 +3660,26 @@ impl Solver {
                         None => match fire_prepare_v2(state, &raw) {
                             FirePreparation::Stalled => Err(()),
                             FirePreparation::Rollback(correction) => {
-                                *x = &*x + &correction;
+                                if curved {
+                                    let back = manifold.project(x, &correction);
+                                    let Some((point, _)) =
+                                        retract_within_cap(obj, x, &back, None, None, manifold)
+                                    else {
+                                        state.restore(saved);
+                                        *x = start;
+                                        return Err(Error::OffManifold {
+                                            kind: manifold.as_str(),
+                                        });
+                                    };
+                                    *x = point;
+                                } else {
+                                    *x = &*x + &correction;
+                                }
                                 let ev = obj.value_and_gradient(x.view());
-                                if !(ev.0.is_finite() && ev.1.iter().all(|g| g.is_finite())) {
-                                    return Err(Error::Oracle {
-                                        what: "non-finite FIRE rollback",
-                                    });
+                                if !crate::step::finite(ev.0, ev.1.view()) {
+                                    state.restore(saved);
+                                    *x = start;
+                                    return Err(crate::step::non_finite());
                                 }
                                 value = ev.0;
                                 grad = ev.1;
@@ -3224,31 +3732,64 @@ impl Solver {
                             rigid_broken_r,
                             &mut dx,
                         );
-                        let mut trial = x.clone();
-                        trial += &dx;
-                        if !state.abc {
-                            if let Some(cap) = self.atom_maxmove {
-                                scale_step_atom(x, &mut trial, cap);
-                            } else if let Some(cap) = self.control.maxmove {
-                                scale_step(x, &mut trial, cap);
+                        let trial = if curved {
+                            // The chord leaves the set; the trial is the
+                            // retraction of the tangent step, inside the cap.
+                            let (atom_cap, cap) = if state.abc {
+                                (None, None)
+                            } else {
+                                (self.atom_maxmove, self.control.maxmove)
+                            };
+                            let tangent = manifold.project(x, &dx);
+                            let Some((trial, _)) =
+                                retract_within_cap(obj, x, &tangent, atom_cap, cap, manifold)
+                            else {
+                                state.restore(saved);
+                                *x = start;
+                                return Err(Error::OffManifold {
+                                    kind: manifold.as_str(),
+                                });
+                            };
+                            if matches!(state.kind, FireKind::V2) && state.dt > 0.0 {
+                                let mut secant = (&trial - &*x) / state.dt;
+                                manifold.project_in_place(&trial, &mut secant);
+                                state.vel = secant;
                             }
-                        }
-                        let bounds = obj.bounds();
-                        if bounds.low.iter().any(|v| v.is_finite())
-                            || bounds.high.iter().any(|v| v.is_finite())
-                        {
-                            trial = bounds.clip(trial.view());
-                        }
-                        // The clamp and clip shorten the move; the velocity has to
-                        // describe the move taken, or the power adapt reads an
-                        // integral of moves that never happened. An unshortened
-                        // move leaves the velocity alone: `trial - x` is not
-                        // always bit-identical to `dx`.
-                        if !state.abc
-                            && (self.atom_maxmove.is_some() || self.control.maxmove.is_some())
-                        {
-                            let taken = &trial - &*x;
-                            fire_rescale_velocity(state, &dx, &taken);
+                            trial
+                        } else {
+                            let mut trial = x.clone();
+                            trial += &dx;
+                            if !state.abc {
+                                if let Some(cap) = self.atom_maxmove {
+                                    scale_step_atom(x, &mut trial, cap);
+                                } else if let Some(cap) = self.control.maxmove {
+                                    scale_step(x, &mut trial, cap);
+                                }
+                            }
+                            let bounds = obj.bounds();
+                            if bounds.low.iter().any(|v| v.is_finite())
+                                || bounds.high.iter().any(|v| v.is_finite())
+                            {
+                                trial = bounds.clip(trial.view());
+                            }
+                            // The clamp and clip shorten the move; the velocity has to
+                            // describe the move taken, or the power adapt reads an
+                            // integral of moves that never happened. An unshortened
+                            // move leaves the velocity alone: `trial - x` is not
+                            // always bit-identical to `dx`.
+                            if !state.abc
+                                && (self.atom_maxmove.is_some() || self.control.maxmove.is_some())
+                            {
+                                let taken = &trial - &*x;
+                                fire_rescale_velocity(state, &dx, &taken);
+                            }
+                            trial
+                        };
+                        let ev = obj.value_and_gradient(trial.view());
+                        if !crate::step::finite(ev.0, ev.1.view()) {
+                            state.restore(saved);
+                            *x = start;
+                            return Err(crate::step::non_finite());
                         }
                         *x = trial;
                         if rigid_mode != RigidMode::Off
@@ -3256,7 +3797,6 @@ impl Solver {
                         {
                             hold.ws.set_anchor(xs);
                         }
-                        let ev = obj.value_and_gradient(x.view());
                         value = ev.0;
                         grad = ev.1;
                         let mut raw_new = grad.mapv(|g| -g);
@@ -3332,6 +3872,11 @@ impl Solver {
                     if moved {
                         *prev_s = Some(&*x - &old);
                         *prev_y = Some(&grad - &gold);
+                    } else if self.accept != Accept::None {
+                        // The refused spectral length would be retried from
+                        // the same point on every later call.
+                        *prev_s = None;
+                        *prev_y = None;
                     }
                 }
                 Inner::Pso { .. }
@@ -3354,8 +3899,19 @@ impl Solver {
                 return Err(Error::FireStalled { steps: self.steps });
             }
         }
+        let curved_trial = !self.manifold.is_flat()
+            && matches!(
+                &self.inner,
+                Inner::Steepest
+                    | Inner::Nlcg { .. }
+                    | Inner::Bfgs { .. }
+                    | Inner::Adam { .. }
+                    | Inner::Fire(_)
+            );
         let already_retracted = matches!(self.overlay, Overlay::None)
             && (matches!(&self.inner, Inner::Bb { .. })
+                || on_set
+                || curved_trial
                 || (self.accept == Accept::Step
                     && matches!(
                         &self.inner,
@@ -3953,7 +4509,8 @@ impl Solver {
         self.constraints.as_deref()
     }
 
-    /// Scale the first constrained step to unit length. The C API sets this.
+    /// Open the first raw-gradient step at `min(istep, 1 / |g|)`. The C API
+    /// sets this when the caller leaves `istep` at zero.
     #[cfg(feature = "capi")]
     pub(crate) fn set_unit_first_step(&mut self) {
         self.unit_first_step = true;
@@ -4293,7 +4850,9 @@ impl Solver {
 }
 
 // The explicit step policy uses the method's direction and scale once.
-// Other policies retain the configured line search and its initial step.
+// Other policies retain the configured line search and its initial step
+// on a flat kind. A curved kind takes the retracted trial under the
+// policy: the line search would evaluate the chord, off the set.
 #[allow(clippy::too_many_arguments)]
 fn take_session_step<O>(
     obj: &O,
@@ -4314,7 +4873,7 @@ fn take_session_step<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    if accept != Accept::Step {
+    if accept != Accept::Step && manifold.is_flat() {
         return take_step_with_options(
             obj,
             pos,

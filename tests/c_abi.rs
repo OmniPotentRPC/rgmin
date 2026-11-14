@@ -732,15 +732,19 @@ fn c_abi_solver_step_keeps_lbfgs_history() {
 /// `istep = 0` used to mean a raw `-g` first step. From `(-1.2, 1.0)`
 /// every energy halving of it rises, so these sessions stayed at
 /// `f = 24.2`. A unit first step accepts on its third trial, the
-/// second halving, at `f = 6.321495`.
+/// second halving, at `f = 6.321495`, under backtracking for BFGS and
+/// the energy test for BB. A negative `maxmove` leaves the default
+/// per-atom cap off. SR1 and SR2 open their trust region at the unit
+/// length, refuse that trial and shrink, so their first call stays put.
 #[test]
 fn c_abi_default_istep_leaves_the_rosenbrock_start() {
+    use rgmin::ffi::{rgmin_linesearch_t, rgmin_solver_set_linesearch};
     let ctrl = rgmin_control_t {
         maxiter: 80,
         gtol: 1e-10,
         istep: 0.0,
         memory: 0,
-        maxmove: 0.0,
+        maxmove: -1.0,
         noise_eps: 0.0,
         noise_c: 0.0,
     };
@@ -753,6 +757,16 @@ fn c_abi_default_istep_leaves_the_rosenbrock_start() {
         let mut x = [-1.2, 1.0];
         let session = unsafe { rgmin_solver_create(method, &ctrl, 2) };
         assert!(!session.is_null());
+        let st = unsafe {
+            rgmin_solver_set_linesearch(
+                session,
+                rgmin_linesearch_t::RGMIN_LINESEARCH_BACKTRACKING,
+                1e-4,
+                0.5,
+                10,
+            )
+        };
+        assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
         let mut out = rgmin_report_t {
             value: 0.0,
             steps: 0,
@@ -782,8 +796,13 @@ fn c_abi_default_istep_leaves_the_rosenbrock_start() {
             }
         }
         unsafe { rgmin_solver_free(session) };
+        let trust = matches!(
+            method,
+            rgmin_method_t::RGMIN_SR1 | rgmin_method_t::RGMIN_SR2
+        );
+        let want = if trust { 24.2 } else { 6.321495 };
         assert!(
-            (first - 6.321495).abs() < 1e-6,
+            (first - want).abs() < 1e-6,
             "{method:?} first step f = {first}"
         );
         assert!(out.value < 1e-6, "{method:?} ended at f = {}", out.value);
