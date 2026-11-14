@@ -206,6 +206,9 @@ fn relax(sys: &System, name: &str, audit: bool) -> Run {
                 c2: C2,
                 maxiter: 40,
             });
+            // A Cartesian session installs a 0.2 per-atom cap unless one
+            // is set; a non-positive cap clears it.
+            solver.set_atom_maxmove(0.0);
         }
         _ => {
             solver.set_atom_maxmove(0.2);
