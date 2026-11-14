@@ -203,6 +203,16 @@ impl Method {
     /// ([1.000, 1.000]), and a tie on Pt7, 0.999 [0.997, 1.001] against
     /// [0.998, 1.001]. Memory 30 is slower than 20 on LJ38, 1.048
     /// [1.048, 1.049] against [1.000, 1.000], so the preset stays at 20.
+    ///
+    /// On LJ75 the two-loop itself is 1.2 μs per iteration at 10 pairs
+    /// and 2.3 μs at 20. The line search's time is the potential call,
+    /// and the history push is about 0.1 μs. The recursion already keeps
+    /// a ring, caches `rho = 1/(s·y)`, and fuses each axpy with the
+    /// following dot in the eight-partial order. Reusing the trial vector
+    /// and the saved point left an old-against-new interleaved comparison
+    /// inside the same-code band, so the default path is unchanged. A
+    /// repeat of the 20-pair check is still a loss: 1.062 [1.062, 1.063]
+    /// on LJ38 and 1.218 [1.218, 1.218] on LJ75, with Pt7 still a tie.
     pub fn lbfgs_wide() -> Self {
         Self::Lbfgs { memory: 20 }
     }

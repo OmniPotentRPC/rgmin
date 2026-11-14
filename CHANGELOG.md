@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- On LJ75 one L-BFGS iteration spends 1.2 μs in the two-loop at 10
+  pairs and 2.3 μs at 20. The line search's time is the potential
+  call, and the history push is about 0.1 μs. The recursion already
+  keeps a ring, caches `rho = 1/(s·y)`, and fuses each axpy with the
+  following dot in the eight-partial order. Reusing the trial vector
+  and the saved point left the old-against-new interleaved ratios
+  inside the same-code band (LJ38 0.998 [0.993, 1.002] against
+  [0.998, 1.003], LJ75 0.999 [0.996, 1.001] against [0.998, 1.004]),
+  so the default path is unchanged. A repeat of `Method::lbfgs_wide`
+  is still a loss: 1.062 [1.062, 1.063] on LJ38 and 1.218
+  [1.218, 1.218] on LJ75, with Pt7 still a tie. `Solver::low_call_cg`
+  against default L-BFGS is a loss on every system: 3.415
+  [3.390, 3.440] on LJ38, 2.219 [2.218, 2.220] on LJ75, and 2.078
+  [2.076, 2.081] on Pt7. Use L-BFGS when the measure is wall time.
+
 - The atomistic bench records iterations and potential calls for
   L-BFGS, CG, and FIRE on LJ13, LJ38, LJ75, and Pt7. The unperturbed
   seed is checked in `cluster_suite_records_iterations_and_potential_calls`.

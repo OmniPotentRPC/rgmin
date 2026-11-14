@@ -716,7 +716,10 @@ impl Solver {
     /// On the fifty-start bench this choice lowers the sum of median
     /// calls from 3154 to 2841.5. LJ38 and LJ75 wall-time ratios against
     /// default CG sit below an interleaved same-code band; Pt7, whose
-    /// call count does not change, ties that band.
+    /// call count does not change, ties that band. Against default
+    /// L-BFGS the same protocol is a loss on every system: 3.415
+    /// [3.390, 3.440] on LJ38, 2.219 [2.218, 2.220] on LJ75, and 2.078
+    /// [2.076, 2.081] on Pt7. Use L-BFGS when the measure is wall time.
     #[must_use]
     pub fn low_call_cg(control: Control, dim: usize) -> Self {
         let mut solver = Self::new(
