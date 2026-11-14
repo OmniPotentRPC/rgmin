@@ -864,7 +864,7 @@ public:
 /// RAII Stiefel St(n, p), SPD(p) or product manifold. Every pointer
 /// argument is a caller-owned column-major buffer of len() doubles; a
 /// product packs its factors in order. A refused call throws
-/// std::runtime_error with rgmin_last_error. ABI minor 40.
+/// std::runtime_error with rgmin_last_error. ABI minor 41.
 class Manifold {
     rgmin_manifold_handle_t* ptr_ = nullptr;
 

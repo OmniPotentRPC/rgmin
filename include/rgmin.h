@@ -61,9 +61,10 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 40
+#define RGMIN_ABI_VERSION_MINOR 41
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
- * 40 is the 0.6.0 union with the 0.5.2 C surface. */
+ * 40 is the 0.6.0 union with the 0.5.2 C surface.
+ * 41 rgmin_manifold_handle_t. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -1098,7 +1099,7 @@ rgmin_status_t rgmin_rigid_align(double *mobile, const double *reference, size_t
                              const double *masses, size_t n_mass, int32_t pbc_x,
                              int32_t pbc_y, int32_t pbc_z, double *rmsd);
 
-/** \defgroup manifold Riemannian manifold handles (ABI minor 40)
+/** \defgroup manifold Riemannian manifold handles (ABI minor 41)
  *
  *  An \ref rgmin_manifold_handle_t is a Stiefel St(n, p), an SPD(p) or a
  *  product of them. \ref rgmin_manifold_t is the unrelated session token
