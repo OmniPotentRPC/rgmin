@@ -79,11 +79,10 @@ fn main() {
     let mut h = searched();
     h.highs = Some(HighsStep {
         trust: None,
-        lo: Some(vec![0.0]),
-        hi: Some(vec![0.5]),
+        lo: Some(0.0),
+        hi: Some(0.5),
         equalities: Vec::new(),
         center_axes: None,
-        ..Default::default()
     });
     run("highs-qp box[0,0.5]", h, q0.view(), quad);
 }

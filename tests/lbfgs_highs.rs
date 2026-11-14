@@ -260,7 +260,6 @@ fn box_keeps_the_trial_inside() {
         hi: Some(0.3),
         equalities: Vec::new(),
         center_axes: None,
-        ..Default::default()
     });
     let x = Array1::from(vec![0.2, -0.2]);
     let g = Array1::from(vec![10.0, -10.0]);
@@ -314,7 +313,6 @@ fn trust_scale_keeps_the_two_loop_direction() {
         hi: None,
         equalities: Vec::new(),
         center_axes: None,
-        ..Default::default()
     });
     let p = opt.highs_step(x.view(), g.view()).unwrap();
     let n2 = raw.dot(&raw).sqrt();
@@ -335,7 +333,6 @@ fn center_axes_kills_the_mean() {
         hi: None,
         equalities: Vec::new(),
         center_axes: Some((4, 2)),
-        ..Default::default()
     });
     let x = Array1::zeros(8);
     let g = Array1::from(vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
@@ -534,7 +531,8 @@ fn c_abi_set_box_keeps_the_trial_inside() {
     use rgmin::ffi::{
         rgmin_accept_t, rgmin_control_t, rgmin_method_t, rgmin_report_t, rgmin_solver_create,
         rgmin_solver_free, rgmin_solver_set_accept, rgmin_solver_set_box, rgmin_solver_set_highs,
-        rgmin_solver_step, rgmin_status_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+        rgmin_solver_step, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
+        rgmin_tensor_free,
     };
     use std::os::raw::c_void;
 
@@ -574,6 +572,8 @@ fn c_abi_set_box_keeps_the_trial_inside() {
         istep: 1.0,
         memory: 4,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -591,6 +591,7 @@ fn c_abi_set_box_keeps_the_trial_inside() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let st = unsafe {
         rgmin_solver_step(
@@ -618,7 +619,6 @@ fn null_side_is_unbounded_on_that_side() {
         hi: None,
         equalities: Vec::new(),
         center_axes: None,
-        ..Default::default()
     });
     let x = Array1::from(vec![0.5, 0.5]);
     let g = Array1::from(vec![-10.0, -1.0]);
@@ -804,6 +804,8 @@ fn c_abi_set_highs_solver_is_closed() {
         istep: 0.1,
         memory: 4,
         maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());

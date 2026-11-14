@@ -725,16 +725,6 @@ fn dense_csc(h: &Array2<f64>) -> (Vec<HighsInt>, Vec<HighsInt>, Vec<f64>) {
     (start, index, value)
 }
 
-/// One side of a box. Length 1 is uniform; otherwise the `k`-th entry.
-pub(crate) fn side_at(side: Option<&[f64]>, k: usize) -> Option<f64> {
-    let b = side?;
-    if b.len() == 1 {
-        Some(b[0])
-    } else {
-        b.get(k).copied()
-    }
-}
-
 fn identity_csc(n: usize) -> (Vec<HighsInt>, Vec<HighsInt>, Vec<f64>) {
     let mut start: Vec<HighsInt> = (0..n).map(|j| j as HighsInt).collect();
     start.push(n as HighsInt);
