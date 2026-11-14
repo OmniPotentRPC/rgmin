@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   L-BFGS, CG, and FIRE on LJ13, LJ38, LJ75, and Pt7. The unperturbed
   seed is checked in `cluster_suite_records_iterations_and_potential_calls`.
 
+- `Solver::low_call_cg` turns on the Dai-Yuan hybrid, the Powell
+  restart, and `WolfeExtrapolation::Case3Average` together. Defaults
+  stay Polak-Ribiere+, NJWS at 0.1, and the interior cubic. On LJ38
+  the wall-time ratio against default CG is 0.962 [0.961, 0.962]
+  against a same-code band [1.000, 1.000]; on LJ75 it is 0.612
+  [0.612, 0.612] against [1.000, 1.000]. Pt7, with the same call
+  count, ties [1.000, 1.002] against [0.999, 1.001].
+
 - `Conjugacy::DaiYuanHybrid` is `max(0, min(β_HS, β_DY))`. The
   default CG beta stays Polak-Ribiere+. With
   `WolfeExtrapolation::Case3Average` the 50-start sum of median calls

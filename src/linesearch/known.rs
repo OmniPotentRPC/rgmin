@@ -1027,4 +1027,74 @@ mod tests {
             x_default[0], x_case3[0]
         );
     }
+
+    #[test]
+    fn low_call_cg_uses_fewer_line_search_evaluations_than_the_default() {
+        use crate::control::Control;
+        use crate::method::Method;
+        use crate::nlcg::{Conjugacy, Restart};
+        use crate::session::Solver;
+        use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Well {
+            bounds: Bounds<f64>,
+            calls: AtomicUsize,
+        }
+        impl Objective<f64> for Well {
+            fn dim(&self) -> usize {
+                1
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.value_and_gradient(x).0
+            }
+        }
+        impl Gradient<f64> for Well {
+            fn dim(&self) -> usize {
+                1
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.value_and_gradient(x).1
+            }
+        }
+        impl DifferentiableObjective<f64> for Well {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                let z = x[0] - 0.34;
+                (0.5 * z * z, array![z])
+            }
+        }
+        let obj = Well {
+            bounds: Bounds::new(array![-10.0], array![10.0], 0.0),
+            calls: AtomicUsize::new(0),
+        };
+        let control = Control {
+            istep: 0.2 / 0.34,
+            ..Control::default()
+        };
+        let mut x_default = array![0.0];
+        let mut x_low = array![0.0];
+        let mut plain = Solver::new(
+            Method::Nlcg {
+                conjugacy: Conjugacy::PolakRibierePlus,
+                restart: Restart::njws(),
+            },
+            control.clone(),
+            1,
+        );
+        let mut low = Solver::low_call_cg(control, 1);
+        plain.set_atom_maxmove(-1.0);
+        low.set_atom_maxmove(-1.0);
+        plain.step(&obj, &mut x_default).unwrap();
+        let calls_default = obj.calls.swap(0, Ordering::Relaxed);
+        low.step(&obj, &mut x_low).unwrap();
+        let calls_low = obj.calls.load(Ordering::Relaxed);
+        assert!(
+            calls_low < calls_default,
+            "default {calls_default} low-call {calls_low}"
+        );
+    }
 }

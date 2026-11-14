@@ -708,6 +708,29 @@ impl Solver {
         self.line_options = self.line_options.with_extrapolation(extrapolation);
     }
 
+    /// Nonlinear CG with the Dai-Yuan hybrid, the Powell restart, and
+    /// [`WolfeExtrapolation::Case3Average`].
+    ///
+    /// A fresh [`Self::new`] with [`Method::nlcg`] stays on
+    /// Polak-Ribiere+, no Powell restart, and the interior cubic.
+    /// On the fifty-start bench this choice lowers the sum of median
+    /// calls from 3154 to 2841.5. LJ38 and LJ75 wall-time ratios against
+    /// default CG sit below an interleaved same-code band; Pt7, whose
+    /// call count does not change, ties that band.
+    #[must_use]
+    pub fn low_call_cg(control: Control, dim: usize) -> Self {
+        let mut solver = Self::new(
+            Method::Nlcg {
+                conjugacy: Conjugacy::DaiYuanHybrid,
+                restart: Restart::powell(),
+            },
+            control,
+            dim,
+        );
+        solver.set_wolfe_extrapolation(WolfeExtrapolation::Case3Average);
+        solver
+    }
+
     /// The configured line search.
     pub fn linesearch(&self) -> LineSearch {
         self.linesearch
