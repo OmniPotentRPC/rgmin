@@ -949,6 +949,11 @@ typedef struct rgmin_scg_params_t {
  *
  * A positive \c ctrl->maxmove is the Euclidean cap. Zero keeps the
  * defaults. A negative value leaves every step cap off.
+ *
+ * A zero \c ctrl->maxiter also stops, with \c RGMIN_STOP_STEP_TOLERANCE
+ * while ||g|| is at or above gtol, after max(n, 2) consecutive accepted
+ * steps that pass \c tol_func and never reduce ||g||. A positive
+ * \c ctrl->maxiter is unaffected.
  */
 rgmin_status_t rgmin_minimize_scg(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_curv_fn curv,
                                 void *user, DLManagedTensorVersioned *x,
