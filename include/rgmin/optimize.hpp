@@ -588,11 +588,18 @@ public:
 };
 
 
+/// RAII session. One step() is one outer iteration.
+/// Mutable. Python bindings claim busy() for the duration of a step.
+/// A second caller gets "Solver is in use by another thread".
 class Solver {
     rgmin_solver_t* ptr_ = nullptr;
+    std::size_t dim_ = 0;
+    Method method_ = Method::Lbfgs;
+    std::atomic<bool> busy_{false};
 
 public:
-    Solver(Method method, Control const& ctrl, std::size_t dim) {
+    Solver(Method method, Control const& ctrl, std::size_t dim)
+        : dim_(dim), method_(method) {
         rgmin_control_t c{ctrl.maxiter, ctrl.gtol, ctrl.istep, ctrl.memory,
                           ctrl.maxmove, ctrl.noise_eps, ctrl.noise_c};
         ptr_ = rgmin_solver_create(static_cast<rgmin_method_t>(method), &c, dim);
@@ -604,15 +611,28 @@ public:
     ~Solver() { rgmin_solver_free(ptr_); }
     Solver(Solver const&) = delete;
     Solver& operator=(Solver const&) = delete;
-    Solver(Solver&& o) noexcept : ptr_(o.ptr_) { o.ptr_ = nullptr; }
+    Solver(Solver&& o) noexcept : ptr_(o.ptr_), dim_(o.dim_), method_(o.method_) {
+        o.ptr_ = nullptr;
+        o.dim_ = 0;
+    }
     Solver& operator=(Solver&& o) noexcept {
         if (this != &o) {
             rgmin_solver_free(ptr_);
             ptr_ = o.ptr_;
+            dim_ = o.dim_;
+            method_ = o.method_;
             o.ptr_ = nullptr;
+            o.dim_ = 0;
         }
         return *this;
     }
+
+    /// Busy flag. Bindings claim it for the duration of a step. The flag starts clear.
+    std::atomic<bool>& busy() noexcept { return busy_; }
+    std::atomic<bool> const& busy() const noexcept { return busy_; }
+    std::size_t dim() const noexcept { return dim_; }
+    Method method() const noexcept { return method_; }
+    rgmin_solver_t* raw() noexcept { return ptr_; }
 
     void forget() { rgmin_solver_forget(ptr_); }
     /// Keep the method memory, drop the point (see rgmin_solver_rebase).
