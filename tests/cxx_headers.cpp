@@ -152,13 +152,14 @@ int constrained() {
             return 15;
         }
     }
-    // A sideways pull of 3 per atom under a unit step: the old bond
-    // cannot close the gap, so the step throws and leaves x.
+    // A sideways pull of 3 per atom under a unit step with every cap off:
+    // the old bond cannot close the gap, so the step throws and leaves x.
     double const flat[6] = {0.0, 0.0, 0.0, 1.0, 0.0, 0.0};
     auto bond = rgmin::DistanceConstraints::at(pi, pj, 1, flat, 6);
     double pull[6] = {0.0, 3.0, 0.0, 0.0, -3.0, 0.0};
     rgmin::Control unit;
     unit.istep = 1.0;
+    unit.maxmove = -1.0;
     rgmin::Solver steepest(rgmin::Method::Steepest, unit, 6);
     steepest.set_accept(RGMIN_ACCEPT_NONE);
     steepest.set_distance_constraints(bond);
