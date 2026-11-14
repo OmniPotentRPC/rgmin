@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- L-BFGS writes a new curvature pair into the buffers the full ring displaced, and the session two-loop keeps its direction and coefficients on the solver. The iterates are unchanged.
+
 - Nonlinear CG no longer uses the quasi-Newton Wolfe constant. A fresh
   session starts at `c2 = 0.1`. The one-shot minimizers
   (`rgmin_minimize`, `rgmin_minimize_hess`, `rgmin_minimize_hvp`,

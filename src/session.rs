@@ -3289,21 +3289,30 @@ impl Solver {
         // The Euclidean stationarity norm is `l2(grad)`, which is also the
         // norm stored on the pair. One pass serves both.
         let grad_norm = self.stationarity_norm(obj.bounds(), x, &grad);
-        let pair = if want_pair {
+        let euclidean_pair = want_pair
+            && self.manifold == ManifoldKind::Euclidean
+            && self.removal_mode() == RigidMode::Off;
+        if euclidean_pair {
+            let gn = if self.uses_bound_norm() {
+                l2(&grad)
+            } else {
+                grad_norm
+            };
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                solver.push_euclidean(x.view(), start.view(), grad.view(), gold.view(), Some(gn));
+            }
+        } else if want_pair {
             let (s, y) = self.lbfgs_sy(&start, x, &gold, &grad);
             let gn = if self.uses_bound_norm() {
                 l2(&grad)
             } else {
                 grad_norm
             };
-            Some((s, y, gn))
-        } else {
-            None
-        };
-        if let (Inner::Lbfgs(solver), Some((s, y, gn))) = (&mut self.inner, pair) {
-            // Only the final transported pair can enter the history. A
-            // refused pair leaves every retained pair in place.
-            solver.push_pair(s, y, Some(gn));
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                // Only the final transported pair can enter the history. A
+                // refused pair leaves every retained pair in place.
+                solver.push_pair(s, y, Some(gn));
+            }
         }
 
         self.remember(x, value, &grad);

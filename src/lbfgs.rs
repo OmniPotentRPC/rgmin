@@ -57,8 +57,10 @@ impl Pair {
     }
 }
 
-/// Limited-memory pairs in a ring. Dropping the oldest pair advances an
-/// index and keeps that slot's allocation for the next step.
+/// Limited-memory pairs in a ring. Once the ring is full, inserting a pair
+/// moves the oldest `s` and `y` onto the spare list and the next step
+/// writes the new pair into those buffers. The history does not allocate
+/// again while the dimension stays the same.
 struct Ring {
     slots: Vec<Pair>,
     oldest: usize,
@@ -120,6 +122,31 @@ impl Ring {
         } else {
             Array1::zeros(n)
         }
+    }
+
+    /// Two spare vectors of length `n`, or nothing when fewer than two are waiting.
+    /// A full ring parks the displaced pair here, so the next step fills those
+    /// buffers instead of allocating.
+    fn take_pair_buffers(&mut self, n: usize) -> Option<(Array1<f64>, Array1<f64>)> {
+        let mut first = None;
+        let mut second = None;
+        for (i, a) in self.spare.iter().enumerate() {
+            if a.len() != n {
+                continue;
+            }
+            if first.is_none() {
+                first = Some(i);
+            } else {
+                second = Some(i);
+                break;
+            }
+        }
+        let (Some(a), Some(b)) = (first, second) else {
+            return None;
+        };
+        let y = self.spare.swap_remove(b);
+        let s = self.spare.swap_remove(a);
+        Some((s, y))
     }
 
     fn recycle(&mut self, a: Array1<f64>) {
@@ -317,6 +344,22 @@ pub(crate) fn euclidean_pair(
     (s, y)
 }
 
+/// `dst[i] = a[i] - b[i]`, the subtraction [`euclidean_pair`] stores.
+fn write_difference(dst: &mut Array1<f64>, a: ArrayView1<f64>, b: ArrayView1<f64>) {
+    let n = dst.len();
+    debug_assert_eq!(a.len(), n);
+    debug_assert_eq!(b.len(), n);
+    if let (Some(dst), Some(a), Some(b)) = (dst.as_slice_mut(), a.as_slice(), b.as_slice()) {
+        for i in 0..n {
+            dst[i] = a[i] - b[i];
+        }
+    } else {
+        for i in 0..n {
+            dst[i] = a[i] - b[i];
+        }
+    }
+}
+
 impl Lbfgs {
     /// Fresh solver with room for `max_pairs` curvature pairs.
     ///
@@ -421,6 +464,32 @@ impl Lbfgs {
     /// An installed geometry preconditioner is \(H_0 = P^{-1}\).
     pub(crate) fn direction(&self, g: ArrayView1<f64>) -> Array1<f64> {
         self.direction_with_sources(g, None, self.h0.as_ref())
+    }
+
+    /// Two-loop into the solver's `q` and alpha workspace. The returned
+    /// vector is that workspace; the caller gives it back via [`Self::keep_direction`].
+    /// A geometry metric still goes through [`Self::direction`], which allocates.
+    fn direction_workspace(&mut self, g: ArrayView1<f64>) -> Array1<f64> {
+        if self.h0.is_some() {
+            return self.direction(g);
+        }
+        if self.q_work.len() != g.len() {
+            self.q_work = g.to_owned();
+        } else if let (Some(q), Some(gs)) = (self.q_work.as_slice_mut(), g.as_slice()) {
+            q.copy_from_slice(gs);
+        } else {
+            self.q_work.assign(&g);
+        }
+        let mut q = std::mem::take(&mut self.q_work);
+        let mut alpha = std::mem::take(&mut self.alpha_work);
+        let m = self.memory.len();
+        self.recurse(&mut q, &mut alpha, m, m, None, Middle::Gamma);
+        self.alpha_work = alpha;
+        q
+    }
+
+    fn keep_direction(&mut self, q: Array1<f64>) {
+        self.q_work = q;
     }
 
     /// Two-loop with optional \(H_0 = P^{-1}\). `precon` is the pair / Lindh
@@ -747,6 +816,27 @@ impl Lbfgs {
 
     pub(crate) fn push(&mut self, s: Array1<f64>, y: Array1<f64>) {
         self.push_pair(s, y, None);
+    }
+
+    /// Euclidean pair `s = x - old`, `y = g - g_old`. Once the ring is full,
+    /// `s` and `y` are written into the buffers the previous insert displaced.
+    pub(crate) fn push_euclidean(
+        &mut self,
+        x: ArrayView1<f64>,
+        old: ArrayView1<f64>,
+        grad: ArrayView1<f64>,
+        gold: ArrayView1<f64>,
+        gnorm: Option<f64>,
+    ) {
+        let n = x.len();
+        if let Some((mut s, mut y)) = self.memory.take_pair_buffers(n) {
+            write_difference(&mut s, x, old);
+            write_difference(&mut y, grad, gold);
+            self.push_pair(s, y, gnorm);
+        } else {
+            let (s, y) = euclidean_pair(x, old, grad, gold);
+            self.push_pair(s, y, gnorm);
+        }
     }
 
     pub(crate) fn push_pair(&mut self, s: Array1<f64>, y: Array1<f64>, gnorm: Option<f64>) {
@@ -1307,7 +1397,11 @@ impl Lbfgs {
         O: DifferentiableObjective<f64> + ?Sized,
     {
         let allow_restart = supplied_direction.is_none();
-        let dir = supplied_direction.unwrap_or_else(|| self.direction(grad.view()));
+        let dir = if allow_restart {
+            self.direction_workspace(grad.view())
+        } else {
+            supplied_direction.unwrap()
+        };
         #[cfg(feature = "highs")]
         let dir = if let Some(bounds) = &self.coordinate_box {
             if !allow_restart {
@@ -1345,7 +1439,8 @@ impl Lbfgs {
         let (t, stall) = if allow_restart && !t.moved && !self.memory.is_empty() {
             let first_noise = t.energy_noise;
             self.forget();
-            let direction = self.direction(grad.view());
+            self.keep_direction(dir);
+            let direction = self.direction_workspace(grad.view());
             #[cfg(feature = "highs")]
             let direction = if let Some(bounds) = &self.coordinate_box {
                 crate::box_objective::project_direction(bounds, pos.view(), grad.view(), direction)
@@ -1367,14 +1462,17 @@ impl Lbfgs {
                 options,
             );
             let stall = first_noise && retry.energy_noise;
+            self.keep_direction(direction);
             (retry, stall)
         } else {
             let stall = t.energy_noise;
+            if allow_restart {
+                self.keep_direction(dir);
+            }
             (t, stall)
         };
         if t.moved && record_pair {
-            let (s, y) = euclidean_pair(t.x.view(), pos.view(), t.g.view(), grad.view());
-            self.push(s, y);
+            self.push_euclidean(t.x.view(), pos.view(), t.g.view(), grad.view(), None);
         }
         *pos = t.x;
         *value = t.f;
@@ -1388,6 +1486,29 @@ impl Lbfgs {
 mod tests {
     use super::*;
     use ndarray::{Array2, array};
+
+    #[test]
+    fn reused_pair_storage_matches_a_fresh_pair() {
+        let n = 6;
+        let mut reused = Lbfgs::with_capacity(3);
+        let mut fresh = Lbfgs::with_capacity(3);
+        for k in 0..8 {
+            let scale = (k + 1) as f64;
+            let x = Array1::from_shape_fn(n, |i| scale * 0.1 * (i as f64 + 1.0));
+            let old = Array1::from_shape_fn(n, |i| k as f64 * 0.1 * (i as f64 + 1.0));
+            let g = Array1::from_shape_fn(n, |i| -0.3 * (i as f64 + 0.5) / scale);
+            let gold = Array1::from_shape_fn(n, |i| -0.3 * (i as f64 + 0.5) / (scale + 1.0));
+            reused.push_euclidean(x.view(), old.view(), g.view(), gold.view(), Some(1.0));
+            let (s, y) = euclidean_pair(x.view(), old.view(), g.view(), gold.view());
+            fresh.push_pair(s, y, Some(1.0));
+        }
+        let g = Array1::from_elem(n, 0.2);
+        let left = reused.direction(g.view());
+        let right = fresh.direction(g.view());
+        for i in 0..n {
+            assert_eq!(left[i].to_bits(), right[i].to_bits());
+        }
+    }
 
     #[test]
     fn euclidean_pair_matches_the_allocated_difference() {
