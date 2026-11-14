@@ -77,28 +77,70 @@ pub(crate) fn scale_step_atom(origin: &Array1<f64>, trial: &mut Array1<f64>, cap
     if !binding(cap) {
         return;
     }
+    let (Some(origin), Some(trial)) = (origin.as_slice(), trial.as_slice_mut()) else {
+        scale_step_atom_indexed(origin, trial, cap);
+        return;
+    };
+    // `sqrt` is monotone, so the largest per-atom root is the root of the
+    // largest squared length. One root has the same bits as rooting every
+    // triple and keeping the max.
+    let mut best = 0.0_f64;
+    let mut ot = origin.chunks_exact(3);
+    let mut tt = trial.chunks_exact(3);
+    for (o, t) in ot.by_ref().zip(tt.by_ref()) {
+        let dx = t[0] - o[0];
+        let dy = t[1] - o[1];
+        let dz = t[2] - o[2];
+        let r2 = dx * dx + dy * dy + dz * dz;
+        if r2 > best {
+            best = r2;
+        }
+    }
+    let mut tail = 0.0;
+    let mut tailed = false;
+    for (&o, &t) in ot.remainder().iter().zip(tt.remainder()) {
+        let d = t - o;
+        tail += d * d;
+        tailed = true;
+    }
+    if tailed && tail > best {
+        best = tail;
+    }
+    let max_atom = best.sqrt();
+    if max_atom > cap && max_atom > 0.0 {
+        let s = cap / max_atom;
+        for (&o, t) in origin.iter().zip(trial.iter_mut()) {
+            *t = o + s * (*t - o);
+        }
+    }
+}
+
+fn scale_step_atom_indexed(origin: &Array1<f64>, trial: &mut Array1<f64>, cap: f64) {
     let n = trial.len();
-    let mut max_atom = 0.0;
+    let mut best = 0.0_f64;
     let mut i = 0;
     while i + 3 <= n {
         let dx = trial[i] - origin[i];
         let dy = trial[i + 1] - origin[i + 1];
         let dz = trial[i + 2] - origin[i + 2];
-        let r = (dx * dx + dy * dy + dz * dz).sqrt();
-        if r > max_atom {
-            max_atom = r;
+        let r2 = dx * dx + dy * dy + dz * dz;
+        if r2 > best {
+            best = r2;
         }
         i += 3;
     }
     if i < n {
-        let mut r2 = 0.0;
+        let mut tail = 0.0;
         while i < n {
             let d = trial[i] - origin[i];
-            r2 += d * d;
+            tail += d * d;
             i += 1;
         }
-        max_atom = max_atom.max(r2.sqrt());
+        if tail > best {
+            best = tail;
+        }
     }
+    let max_atom = best.sqrt();
     if max_atom > cap && max_atom > 0.0 {
         let s = cap / max_atom;
         for k in 0..n {
@@ -198,10 +240,25 @@ fn any_non_finite(g: &Array1<f64>) -> bool {
 
 /// Clip, or return `x` when every clipped coordinate has the same bits.
 pub(crate) fn clip_same_bits(bounds: &eindir_core::Bounds<f64>, x: Array1<f64>) -> Array1<f64> {
-    let unchanged = x.len() == bounds.dims
-        && x.iter()
+    let unchanged = if x.len() != bounds.dims {
+        false
+    } else if let (Some(xs), Some(lo), Some(hi)) =
+        (x.as_slice(), bounds.low.as_slice(), bounds.high.as_slice())
+    {
+        xs.chunks(8)
+            .zip(lo.chunks(8))
+            .zip(hi.chunks(8))
+            .all(|((xc, lc), hc)| {
+                xc.iter()
+                    .zip(lc.iter())
+                    .zip(hc.iter())
+                    .all(|((&xi, &l), &h)| xi.max(l).min(h).to_bits() == xi.to_bits())
+            })
+    } else {
+        x.iter()
             .enumerate()
-            .all(|(i, &xi)| xi.max(bounds.low[i]).min(bounds.high[i]).to_bits() == xi.to_bits());
+            .all(|(i, &xi)| xi.max(bounds.low[i]).min(bounds.high[i]).to_bits() == xi.to_bits())
+    };
     if unchanged { x } else { bounds.clip(x.view()) }
 }
 
@@ -539,6 +596,59 @@ mod tests {
             f64::NAN
         } else {
             (1.01 * alpha).min(1.0)
+        }
+    }
+
+    fn legacy_scale(origin: &[f64], trial: &mut [f64], cap: f64) {
+        let n = trial.len();
+        let mut max_atom = 0.0_f64;
+        let mut i = 0;
+        while i + 3 <= n {
+            let dx = trial[i] - origin[i];
+            let dy = trial[i + 1] - origin[i + 1];
+            let dz = trial[i + 2] - origin[i + 2];
+            let r = (dx * dx + dy * dy + dz * dz).sqrt();
+            if r > max_atom {
+                max_atom = r;
+            }
+            i += 3;
+        }
+        if i < n {
+            let mut r2 = 0.0;
+            while i < n {
+                let d = trial[i] - origin[i];
+                r2 += d * d;
+                i += 1;
+            }
+            max_atom = max_atom.max(r2.sqrt());
+        }
+        if max_atom > cap && max_atom > 0.0 {
+            let s = cap / max_atom;
+            for k in 0..n {
+                trial[k] = origin[k] + s * (trial[k] - origin[k]);
+            }
+        }
+    }
+
+    #[test]
+    fn atom_cap_scale_matches_the_per_atom_square_root() {
+        let mut state = 0x1234_5678_9abc_def0u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(0x6c62_272e_07bb_0142)
+                .wrapping_add(0x9e37_79b9_7f4a_7c15);
+            f64::from_bits(state >> 12) / (1u64 << 40) as f64
+        };
+        for n in [0usize, 1, 2, 3, 4, 5, 38 * 3] {
+            let origin: Vec<f64> = (0..n).map(|_| next()).collect();
+            let got: Vec<f64> = (0..n).map(|_| next()).collect();
+            let mut legacy = got.clone();
+            let mut trial = ndarray::Array1::from_vec(got);
+            super::scale_step_atom(&ndarray::Array1::from_vec(origin.clone()), &mut trial, 0.2);
+            legacy_scale(&origin, &mut legacy, 0.2);
+            for i in 0..n {
+                assert_eq!(trial[i].to_bits(), legacy[i].to_bits(), "n={n} i={i}");
+            }
         }
     }
 
