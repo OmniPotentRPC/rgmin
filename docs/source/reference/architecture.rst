@@ -55,7 +55,7 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 39 and ``layout_revision`` 4.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 40 and ``layout_revision`` 4.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``

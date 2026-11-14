@@ -50,9 +50,10 @@ pub enum rgmin_status_t {
 fn status_from_error(e: &Error) -> rgmin_status_t {
     set_last_error(&e.to_string());
     match e {
-        Error::Oracle { .. } | Error::FireStalled { .. } | Error::AcceptStalled { .. } => {
-            rgmin_status_t::RGMIN_INTERNAL_ERROR
-        }
+        Error::Oracle { .. }
+        | Error::FireStalled { .. }
+        | Error::AcceptStalled { .. }
+        | Error::NoDescent { .. } => rgmin_status_t::RGMIN_INTERNAL_ERROR,
         Error::EigenUnavailable { .. } => rgmin_status_t::RGMIN_UNAVAILABLE,
         Error::Constraint(c) => {
             LAST_CONSTRAINT.with(|kind| kind.set(constraint_kind(c)));
@@ -75,7 +76,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 39;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 40;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -2320,6 +2321,37 @@ pub unsafe extern "C" fn rgmin_solver_set_cautious(
         return;
     }
     unsafe { (*solver).solver.set_cautious(eps, alpha) };
+}
+
+/// Burdakov ray-truncation radius for session L-BFGS. A non-positive,
+/// NaN or infinite radius turns it off and still returns 0. This is
+/// not `Solver::set_lbfgs_trust`.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_lbfgs_trust(
+    solver: *mut rgmin_solver_t,
+    radius: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_lbfgs_trust: null solver");
+        return 1;
+    }
+    unsafe { (*solver).solver.set_lbfgs_trust_radius(radius) };
+    0
+}
+
+/// Current Burdakov radius, or 0 when it is off or `solver` is null.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_lbfgs_trust_radius(solver: *const rgmin_solver_t) -> f64 {
+    if solver.is_null() {
+        return 0.0;
+    }
+    unsafe { (*solver).solver.lbfgs_trust_radius().unwrap_or(0.0) }
 }
 
 /// HiGHS feasible-set step. Returns 1 when this build has no `highs` feature.
