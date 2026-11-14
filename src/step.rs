@@ -109,24 +109,56 @@ pub(crate) fn scale_step_atom(origin: &Array1<f64>, trial: &mut Array1<f64>, cap
 
 /// Largest per-atom (xyz triple) norm of `v`; a trailing partial triple
 /// counts as one more atom, matching [`scale_step_atom`].
+///
+/// `sqrt` is monotone on the non-negative sums of squares, so the largest
+/// square root is the square root of the largest sum. One root, and the
+/// same bits as rooting every triple and folding `f64::max`.
 pub(crate) fn max_atom_norm(v: ArrayView1<'_, f64>) -> f64 {
+    let Some(xs) = v.as_slice() else {
+        return max_atom_norm_indexed(v);
+    };
+    let mut best = 0.0_f64;
+    let mut triples = xs.chunks_exact(3);
+    for c in triples.by_ref() {
+        let r2 = c[0] * c[0] + c[1] * c[1] + c[2] * c[2];
+        if r2 > best {
+            best = r2;
+        }
+    }
+    let mut tail = 0.0;
+    let mut tailed = false;
+    for &t in triples.remainder() {
+        tail += t * t;
+        tailed = true;
+    }
+    if tailed && tail > best {
+        best = tail;
+    }
+    best.sqrt()
+}
+
+fn max_atom_norm_indexed(v: ArrayView1<'_, f64>) -> f64 {
     let n = v.len();
-    let mut m: f64 = 0.0;
+    let mut best = 0.0_f64;
     let mut i = 0;
     while i + 3 <= n {
-        let r = (v[i] * v[i] + v[i + 1] * v[i + 1] + v[i + 2] * v[i + 2]).sqrt();
-        m = m.max(r);
+        let r2 = v[i] * v[i] + v[i + 1] * v[i + 1] + v[i + 2] * v[i + 2];
+        if r2 > best {
+            best = r2;
+        }
         i += 3;
     }
     if i < n {
-        let mut r2 = 0.0;
+        let mut tail = 0.0;
         while i < n {
-            r2 += v[i] * v[i];
+            tail += v[i] * v[i];
             i += 1;
         }
-        m = m.max(r2.sqrt());
+        if tail > best {
+            best = tail;
+        }
     }
-    m
+    best.sqrt()
 }
 
 /// `true` when clipping would keep every coordinate. A point inside the
@@ -135,10 +167,33 @@ pub(crate) fn max_atom_norm(v: ArrayView1<'_, f64>) -> f64 {
 /// this test and take the allocating path, which then keeps the original
 /// under `PartialEq`.
 fn point_inside_box(bounds: &eindir_core::Bounds<f64>, x: ArrayView1<'_, f64>) -> bool {
-    x.len() == bounds.dims
-        && x.iter()
-            .enumerate()
-            .all(|(i, xi)| *xi >= bounds.low[i] && *xi <= bounds.high[i])
+    if x.len() != bounds.dims {
+        return false;
+    }
+    if let (Some(xs), Some(lo), Some(hi)) =
+        (x.as_slice(), bounds.low.as_slice(), bounds.high.as_slice())
+    {
+        return xs
+            .chunks(8)
+            .zip(lo.chunks(8))
+            .zip(hi.chunks(8))
+            .all(|((xc, lc), hc)| {
+                xc.iter()
+                    .zip(lc.iter())
+                    .zip(hc.iter())
+                    .all(|((xi, l), h)| *xi >= *l && *xi <= *h)
+            });
+    }
+    x.iter()
+        .enumerate()
+        .all(|(i, xi)| *xi >= bounds.low[i] && *xi <= bounds.high[i])
+}
+
+fn any_non_finite(g: &Array1<f64>) -> bool {
+    match g.as_slice() {
+        Some(xs) => xs.chunks(8).any(|c| c.iter().any(|v| !v.is_finite())),
+        None => g.iter().any(|v| !v.is_finite()),
+    }
 }
 
 /// Clip, or return `x` when every clipped coordinate has the same bits.
@@ -329,7 +384,7 @@ where
             (trial, f, g)
         }
     };
-    if !f.is_finite() || g.iter().any(|value| !value.is_finite()) {
+    if !f.is_finite() || any_non_finite(&g) {
         return unmoved(stalled(saw_trial, best_decrease));
     }
     let accepted = match control.ftol_rel {
@@ -484,6 +539,65 @@ mod tests {
             f64::NAN
         } else {
             (1.01 * alpha).min(1.0)
+        }
+    }
+
+    fn legacy_atom_norm(v: &[f64]) -> f64 {
+        let mut m = 0.0_f64;
+        let mut i = 0;
+        while i + 3 <= v.len() {
+            let r = (v[i] * v[i] + v[i + 1] * v[i + 1] + v[i + 2] * v[i + 2]).sqrt();
+            m = m.max(r);
+            i += 3;
+        }
+        if i < v.len() {
+            let mut r2 = 0.0;
+            while i < v.len() {
+                r2 += v[i] * v[i];
+                i += 1;
+            }
+            m = m.max(r2.sqrt());
+        }
+        m
+    }
+
+    #[test]
+    fn atom_norm_matches_the_per_atom_square_root() {
+        let mut state = 0x1234_5678_9abc_def0u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(0x6c62_272e_07bb_0142)
+                .wrapping_add(0x9e37_79b9_7f4a_7c15);
+            f64::from_bits(state)
+        };
+        for n in 0..24 {
+            let raw: Vec<f64> = (0..n).map(|_| next()).collect();
+            let got = super::max_atom_norm(ndarray::Array1::from_vec(raw.clone()).view());
+            assert_eq!(got.to_bits(), legacy_atom_norm(&raw).to_bits(), "n={n}");
+        }
+        let specials = [
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            f64::MIN,
+            f64::MAX,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            f64::MIN_POSITIVE,
+        ];
+        for n in [1usize, 2, 3, 4, 5, 38 * 3] {
+            let mut raw = Vec::with_capacity(n);
+            for i in 0..n {
+                raw.push(specials[i % specials.len()]);
+            }
+            let got = super::max_atom_norm(ndarray::Array1::from_vec(raw.clone()).view());
+            assert_eq!(
+                got.to_bits(),
+                legacy_atom_norm(&raw).to_bits(),
+                "special {n}"
+            );
         }
     }
 
