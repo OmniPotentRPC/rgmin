@@ -35,12 +35,26 @@ const rgpot::fortranpots::SWPot &sw() {
   return pot;
 }
 
-const rgpot::EMTPot &emt() {
-  static const rgpot::EMTPot pot{};
+} // namespace
+
+namespace {
+
+// The neighbor list lives for the life of the potential. A second
+// relaxation in the same process would otherwise start from the list
+// built at the previous minimum.
+rgpot::EMTPot *&emt_slot() {
+  static rgpot::EMTPot *pot = new rgpot::EMTPot{};
   return pot;
 }
 
+const rgpot::EMTPot &emt() { return *emt_slot(); }
+
 } // namespace
+
+extern "C" void bench_reset_emt() {
+  delete emt_slot();
+  emt_slot() = new rgpot::EMTPot{};
+}
 
 extern "C" int bench_force(int kind, std::size_t natoms, const double *pos,
                            const int *atmnrs, const double *box,

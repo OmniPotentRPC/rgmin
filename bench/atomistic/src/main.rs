@@ -31,6 +31,11 @@ unsafe extern "C" {
         forces: *mut f64,
         energy: *mut f64,
     ) -> i32;
+
+    /// Drop the EMT neighbor list. The list is kept for the life of the
+    /// potential, so a later relaxation in this process would start from
+    /// the geometry of the previous one.
+    fn bench_reset_emt();
 }
 
 /// Harmonic water (`kind` 5) and methane (`kind` 6).
@@ -533,12 +538,9 @@ fn si_wire(nx: usize) -> System {
 fn cu_vacancy() -> System {
     let a = 3.595;
     let ncell = 8;
-    let basis = [
-        [0.0, 0.0, 0.0],
-        [0.5, 0.5, 0.0],
-        [0.5, 0.0, 0.5],
-        [0.0, 0.5, 0.5],
-    ];
+    let basis = [[0.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.5, 0.0, 0.5], [
+        0.0, 0.5, 0.5,
+    ]];
     let mut pos = Vec::new();
     for ix in 0..ncell {
         for iy in 0..ncell {
@@ -581,7 +583,79 @@ fn cu_vacancy() -> System {
     }
 }
 
-/// Water, OH = 0.957 Å, HOH = 104.5°, displaced so the start is not the well.
+/// Random packing at the density of an FCC crystal.
+///
+/// `ncell` conventional cells on a side hold `4 ncell³` atoms. Each
+/// position is drawn uniformly in the cube. A draw closer than
+/// `min_dist` to an atom already placed, in the minimum image, is
+/// rejected. A perfect crystal at `a` has zero force, so the forces
+/// come from the packing. The box is the cubic cell of side `ncell * a`.
+fn random_packing(kind: i32, z: i32, a: f64, ncell: usize, min_dist: f64, seed: u64) -> System {
+    let n = ncell * ncell * ncell * 4;
+    let length = ncell as f64 * a;
+    let mut rng = Rng(seed.wrapping_mul(7919) + 17);
+    let mut placed: Vec<[f64; 3]> = Vec::with_capacity(n);
+    let mut pos = vec![0.0; 3 * n];
+    let min2 = min_dist * min_dist;
+    for i in 0..n {
+        let mut got = false;
+        for _ in 0..200_000 {
+            let trial = [
+                rng.uniform() * length,
+                rng.uniform() * length,
+                rng.uniform() * length,
+            ];
+            let ok = placed.iter().all(|q| {
+                let mut d2 = 0.0;
+                for k in 0..3 {
+                    let d = mic(trial[k] - q[k], length);
+                    d2 += d * d;
+                }
+                d2 >= min2
+            });
+            if ok {
+                placed.push(trial);
+                pos[3 * i] = trial[0];
+                pos[3 * i + 1] = trial[1];
+                pos[3 * i + 2] = trial[2];
+                got = true;
+                break;
+            }
+        }
+        if !got {
+            panic!("random packing placed {i} of {n} atoms");
+        }
+    }
+    System {
+        kind,
+        pos,
+        z: vec![z; n],
+        cell: [length, 0.0, 0.0, 0.0, length, 0.0, 0.0, 0.0, length],
+        fixed: vec![false; n],
+    }
+}
+
+/// EAM aluminium packing, 864 atoms.
+///
+/// The cell is 6×6×6 conventional cells at 4.038 Å, the energy minimum
+/// of the perfect crystal in this EAM build. No pair starts closer than
+/// 2.15 Å. The unperturbed slab relaxes in about 15 calls, which is too
+/// short for the memory or the conjugacy to matter. On fifty seeds of
+/// this packing every run takes at least 227 calls.
+fn al_rand(seed: u64) -> System {
+    random_packing(2, 13, 4.038, 6, 2.15, seed)
+}
+
+/// EMT copper packing, 864 atoms.
+///
+/// The cell is 6×6×6 conventional cells at 3.595 Å, the energy minimum
+/// of this EMT build. No pair starts closer than 1.90 Å. The vacancy
+/// with a 0.1 Å kick relaxes in about 16 L-BFGS calls. On fifty seeds
+/// of this packing every run takes at least 259 calls.
+fn cu_rand(seed: u64) -> System {
+    random_packing(4, 29, 3.595, 6, 1.90, seed)
+}
+
 fn h2o() -> System {
     let ang = 104.5_f64.to_radians();
     let r = 0.957;
@@ -608,12 +682,9 @@ fn h2o() -> System {
 /// Methane on a tetrahedron, CH = 1.09 Å, displaced off the well.
 fn ch4() -> System {
     let r = 1.09;
-    let dirs: [[f64; 3]; 4] = [
-        [1.0, 1.0, 1.0],
-        [1.0, -1.0, -1.0],
-        [-1.0, 1.0, -1.0],
-        [-1.0, -1.0, 1.0],
-    ];
+    let dirs: [[f64; 3]; 4] = [[1.0, 1.0, 1.0], [1.0, -1.0, -1.0], [-1.0, 1.0, -1.0], [
+        -1.0, -1.0, 1.0,
+    ]];
     let mut pos = vec![0.03, -0.02, 0.04];
     for d in dirs {
         let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
@@ -909,6 +980,9 @@ fn run_session(
     maxiter: usize,
     maxmove: f64,
 ) -> Outcome {
+    // EMT keeps a neighbor list on the potential. A fresh list makes this
+    // relaxation independent of whatever ran earlier in the process.
+    unsafe { bench_reset_emt() };
     let (base, which) = classify(name).expect("unknown method");
     let (method, accept, ls, istep) = session(base).expect("unknown method");
     let control = Control {
@@ -1088,6 +1162,7 @@ fn install_ff(solver: &mut Solver, sys: &System, x: &Array1<f64>) -> bool {
 }
 
 fn run_hop(obj: &FreeObjective, x: Array1<f64>, tol: f64, maxiter: usize) -> Outcome {
+    unsafe { bench_reset_emt() };
     let mut solver = Lbfgs::with_capacity(10);
     solver.gtol = 0.0;
     let mut converged = false;
@@ -1118,7 +1193,7 @@ mod keep;
 
 #[cfg(test)]
 mod call_counts {
-    use super::{build, lj_cluster, lj38, read_con, run_session};
+    use super::{al_rand, build, cu_rand, lj_cluster, lj38, read_con, run_session};
 
     /// Unperturbed seed 0. Lennard-Jones uses no coordinate noise; Pt7
     /// uses the usual 0.1 Å start. `fmax` stops at 0.01.
@@ -1170,6 +1245,68 @@ mod call_counts {
         assert_eq!(e0.to_bits(), e1.to_bits());
         for i in 0..g0.len() {
             assert_eq!(g0[i].to_bits(), g1[i].to_bits(), "{i}");
+        }
+    }
+
+    /// Seed 0 of the 864-atom packings. Both stay above 200 calls, and the
+    /// two presets do not take the same path as their defaults.
+    #[test]
+    fn packed_metal_cells_take_at_least_two_hundred_calls() {
+        let expect = [
+            ("al-rand", "lbfgs", 382, 383, "-2851.2820805699", "8.315e-3"),
+            (
+                "al-rand",
+                "lbfgs-m20",
+                414,
+                415,
+                "-2850.1757472705",
+                "9.677e-3",
+            ),
+            ("al-rand", "cg", 507, 1028, "-2850.0610456282", "9.644e-3"),
+            (
+                "al-rand",
+                "low-call",
+                356,
+                582,
+                "-2850.9006823125",
+                "7.332e-3",
+            ),
+            ("cu-rand", "lbfgs", 415, 421, "84.4975020089", "9.235e-3"),
+            (
+                "cu-rand",
+                "lbfgs-m20",
+                331,
+                334,
+                "82.9153920951",
+                "8.745e-3",
+            ),
+            ("cu-rand", "cg", 716, 1430, "82.0379745234", "7.932e-3"),
+            (
+                "cu-rand",
+                "low-call",
+                636,
+                1049,
+                "83.7133520549",
+                "9.690e-3",
+            ),
+        ];
+        for (system, method, iters, calls, energy, fmax) in expect {
+            let sys = match system {
+                "al-rand" => al_rand(0),
+                "cu-rand" => cu_rand(0),
+                _ => unreachable!(),
+            };
+            let (obj, x0) = build(&sys, 0.0, 0);
+            let out = run_session(&obj, x0, &sys, method, 0.01, 2000, 0.2);
+            assert!(out.converged, "{system} {method} did not converge");
+            assert_eq!(out.iters, iters, "{system} {method} iterations");
+            assert_eq!(obj.calls(), calls, "{system} {method} potential calls");
+            assert_eq!(
+                format!("{:.10}", out.energy),
+                energy,
+                "{system} {method} energy"
+            );
+            assert_eq!(format!("{:.3e}", out.fmax), fmax, "{system} {method} fmax");
         }
     }
 }
@@ -1226,7 +1363,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "usage: {} <lj13|lj38|lj75|pt7|al|si-slab|si-strain|si-wire|cu-vac|h2o|ch4> <method>[,<method>...] [seeds] [sigma] [data_dir] [repeats]",
+            "usage: {} <lj13|lj38|lj75|pt7|al|al-rand|si-slab|si-strain|si-wire|cu-vac|cu-rand|h2o|ch4> <method>[,<method>...] [seeds] [sigma] [data_dir] [repeats]",
             args[0]
         );
         std::process::exit(2);
@@ -1255,10 +1392,12 @@ fn main() {
                 "lj75" => lj_cluster(75, 3.2, seed),
                 "pt7" => read_con(&format!("{data}/pt_heptamer.con"), 78, 1),
                 "al" => read_con(&format!("{data}/al_slab.con"), 13, 2),
+                "al-rand" => al_rand(seed),
                 "si-slab" => si_slab(),
                 "si-strain" => si_wire(32),
                 "si-wire" => si_wire(64),
                 "cu-vac" => cu_vacancy(),
+                "cu-rand" => cu_rand(seed),
                 "h2o" => h2o(),
                 "ch4" => ch4(),
                 other => panic!("unknown system {other}"),
@@ -1270,6 +1409,8 @@ fn main() {
                 || system == "lj75"
                 || system.starts_with("si-")
                 || system == "cu-vac"
+                || system == "cu-rand"
+                || system == "al-rand"
                 || system == "h2o"
                 || system == "ch4"
             {
