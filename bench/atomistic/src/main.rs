@@ -187,8 +187,7 @@ impl FreeObjective {
             return (f64::INFINITY, Array1::zeros(x.len()));
         }
         *energy_slot = energy;
-        let g = self.gradient(force);
-        (energy, g)
+        (energy, self.gradient(force))
     }
 
     /// Energy and `fmax` of the last call when `x` is that call's position.
@@ -374,8 +373,11 @@ impl Rng {
 
 /// LJ38 from a random packing in a sphere: no pair closer than 0.9.
 fn lj38(seed: u64) -> System {
-    let n = 38;
-    let radius = 2.4;
+    lj_cluster(38, 2.4, seed)
+}
+
+/// Lennard-Jones cluster from a random packing. No pair closer than 0.9.
+fn lj_cluster(n: usize, radius: f64, seed: u64) -> System {
     let mut rng = Rng(seed.wrapping_mul(7919) + 17);
     let mut pos: Vec<f64> = Vec::with_capacity(3 * n);
     while pos.len() < 3 * n {
@@ -1105,7 +1107,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "usage: {} <lj38|pt7|al|si-slab|si-strain|si-wire|cu-vac|h2o|ch4> <method>[,<method>...] [seeds] [sigma] [data_dir] [repeats]",
+            "usage: {} <lj38|lj75|pt7|al|si-slab|si-strain|si-wire|cu-vac|h2o|ch4> <method>[,<method>...] [seeds] [sigma] [data_dir] [repeats]",
             args[0]
         );
         std::process::exit(2);
@@ -1130,6 +1132,7 @@ fn main() {
         for seed in seed0..seed0 + seeds {
             let sys = match system {
                 "lj38" => lj38(seed),
+                "lj75" => lj_cluster(75, 3.2, seed),
                 "pt7" => read_con(&format!("{data}/pt_heptamer.con"), 78, 1),
                 "al" => read_con(&format!("{data}/al_slab.con"), 13, 2),
                 "si-slab" => si_slab(),
@@ -1142,7 +1145,7 @@ fn main() {
             };
             let sig = if let Some(sigma) = forced {
                 sigma
-            } else if system == "lj38"
+            } else if system == "lj38" || system == "lj75"
                 || system.starts_with("si-")
                 || system == "cu-vac"
                 || system == "h2o"
