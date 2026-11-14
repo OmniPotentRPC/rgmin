@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   L-BFGS, CG, and FIRE on LJ13, LJ38, LJ75, and Pt7. The unperturbed
   seed is checked in `cluster_suite_records_iterations_and_potential_calls`.
 
+- `Method::lbfgs_wide` keeps 20 L-BFGS pairs. `Method::lbfgs` stays
+  at 10. On the fifty-start bench, 20 pairs lower the sum of median
+  calls from 3154 to 3102. Memories 3 and 5 raise that sum, and
+  Barzilai-Borwein 1 scaling `(s·s)/(s·y)` raises it from 3154 to 3447.
+
 - `Solver::low_call_cg` turns on the Dai-Yuan hybrid, the Powell
   restart, and `WolfeExtrapolation::Case3Average` together. Defaults
   stay Polak-Ribiere+, NJWS at 0.1, and the interior cubic. On LJ38

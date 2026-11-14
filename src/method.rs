@@ -189,6 +189,15 @@ impl Method {
         Self::Lbfgs { memory: 10 }
     }
 
+    /// L-BFGS with `m = 20` correction pairs.
+    ///
+    /// [`Self::lbfgs`] stays at 10. On the fifty-start bench, 20 pairs
+    /// lower the sum of median calls from 3154 to 3102. Memories 3 and 5
+    /// raise that sum.
+    pub fn lbfgs_wide() -> Self {
+        Self::Lbfgs { memory: 20 }
+    }
+
     /// Adam with Kingma-Ba defaults.
     pub fn adam() -> Self {
         Self::Adam {
@@ -436,5 +445,11 @@ mod tests {
         for method in capped {
             assert!(method.installs_default_atom_cap(), "{method:?}");
         }
+    }
+
+    #[test]
+    fn lbfgs_wide_keeps_twenty_pairs_and_the_default_keeps_ten() {
+        assert!(matches!(Method::lbfgs(), Method::Lbfgs { memory: 10 }));
+        assert!(matches!(Method::lbfgs_wide(), Method::Lbfgs { memory: 20 }));
     }
 }
