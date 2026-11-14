@@ -48,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Wall time is 1.015799 [1.014578, 1.016935] on aluminium and
   1.113912 [1.108215, 1.119540] on copper, and the aluminium call
   median rises, so `Method::lbfgs` stays at 10.
+  FIRE, Barzilai-Borwein, and quick-min already install the 0.2
+  per-atom cap. FIRE 2.0 does not. The ASE classes pass `maxstep`
+  0.2 explicitly, including `FIRE2`. Putting that cap on a fresh
+  FIRE 2.0 session, 20 interleaved rounds against the uncapped
+  default: LJ13 calls tie and wall time is 1.018246
+  [1.016316, 1.020015] against a same-code band 0.998981
+  [0.997618, 1.000175], a loss. LJ38 is 0.562281
+  [0.561684, 0.562827] on wall time and 0.554795 on calls. LJ75 is
+  0.685620 [0.684664, 0.686610] and 0.681280. Pt7 ties. The EMT
+  copper packing ties, 1.000473 [0.999971, 1.000901] against
+  0.999569 [0.998031, 1.000504], with equal calls. The LJ13 loss
+  keeps the FIRE 2.0 default uncapped.
 
 - On LJ75 one L-BFGS iteration spends 1.2 μs in the two-loop at 10
   pairs and 2.3 μs at 20. The line search's time is the potential

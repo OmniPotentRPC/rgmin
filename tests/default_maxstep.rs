@@ -3,8 +3,10 @@
 //! The start is the seed-1 packing from `bench/atomistic` `lj38`, scaled
 //! by one half. Without a cap the first quasi-Newton step leaves the
 //! cluster. L-BFGS keeps the default cap. BFGS, dogleg, and FIRE 2.0
-//! leave it off, because each already limits the step. An explicit cap
-//! replaces either choice.
+//! leave it off, because each already limits the step. FIRE,
+//! Barzilai-Borwein, and quick-min install 0.2. FIRE 2.0 stays
+//! uncapped: the same 0.2 cap loses wall time on LJ13 when the call
+//! count does not change. An explicit cap replaces either choice.
 
 use std::sync::OnceLock;
 
@@ -317,6 +319,7 @@ fn default_cap_bounds_the_first_step_of_every_cartesian_arm() {
         Method::diis(),
         Method::polak_ribiere(),
         Method::Fire { kind: FireKind::V1 },
+        Method::Bb,
         Method::QuickMin,
         Method::Steepest,
         Method::adam(),

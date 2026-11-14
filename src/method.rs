@@ -268,8 +268,13 @@ impl Method {
     /// BFGS takes its length from a strong Wolfe line search. Dogleg
     /// keeps the step inside a Euclidean trust region and accepts it
     /// from the model-agreement ratio. FIRE 2.0 sizes the move with
-    /// its own `dt`. Those three leave the per-atom default off. Every
-    /// other method installs 0.2.
+    /// its own `dt`. Those three leave the per-atom default off. FIRE,
+    /// Barzilai-Borwein, and quick-min install 0.2. A 0.2 cap on FIRE
+    /// 2.0, against this uncapped default,
+    /// loses wall time on LJ13 (1.018 [1.016, 1.020] against a
+    /// same-code band 0.999 [0.998, 1.000], same call count) and wins
+    /// on LJ38 and LJ75, where it uses fewer calls. Pt7 and the EMT
+    /// copper packing tie. The LJ13 loss leaves FIRE 2.0 uncapped.
     ///
     /// Nocedal and Wright, *Numerical Optimization*, algorithms 3.5,
     /// 3.6, and 4.1, <https://doi.org/10.1007/978-0-387-40065-5>.
