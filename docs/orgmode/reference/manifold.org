@@ -1,0 +1,96 @@
+#+TITLE: Riemannian manifolds
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Riemannian manifolds
+
+~RiemannianManifold~ is a Stiefel manifold ~St(n, p)~, a cone ~SPD(p)~ of symmetric positive definite matrices, or a product of them.
+Rust, C, C++ and Python call the same code.
+@@rst::doc:`../tutorials/manifold-fit`@@ fits a point on ~St x SPD~ by gradient steps.
+
+** Packing
+
+Every buffer is caller-owned, column-major and ~len~ doubles long.
+
+| Factor        | Point                                  | ~len~   |
+|---------------+----------------------------------------+---------|
+| ~St(n, p)~    | ~n x p~ frame, ~U^T U = I~, ~1 <= p <= n~ | ~n p~   |
+| ~SPD(p)~      | ~p x p~ symmetric positive definite    | ~p^2~   |
+| Product       | factor blocks in factor order          | the sum |
+
+Tangent vectors and Euclidean gradients use the packing of the point.
+A nested product contributes its factors.
+
+** Operations
+
+| Operation        | Stiefel (embedded metric)                         | SPD affine-invariant                       | SPD log-Euclidean                         |
+|------------------+---------------------------------------------------+--------------------------------------------+-------------------------------------------|
+| ~project~        | ~V - X sym(X^T V)~                                | ~sym(V)~                                   | ~sym(V)~                                  |
+| ~egrad_to_rgrad~ | the projection                                    | ~X sym(G) X~                               | ~Dlog(X)^{-2}[sym(G)]~                    |
+| ~retract~        | QR (first order) or polar (second order) of ~X + V~ | ~exp~                                      | ~exp~                                     |
+| ~exp~            | Edelman, Arias, Smith (1998) eq. 2.41             | ~X^{1/2} expm(X^{-1/2} V X^{-1/2}) X^{1/2}~ | ~expm(log X + Dlog(X)[V])~                |
+| ~log~            | refused                                           | inverse of ~exp~                           | inverse of ~exp~                          |
+| ~transport~      | projection at the arrival point                   | ~E V E^T~, ~E = (Y X^{-1})^{1/2}~          | ~Dlog(Y)^{-1}[Dlog(X)[V]]~                |
+| ~inner~          | ~tr(U^T V)~                                       | ~tr(X^{-1} U X^{-1} V)~                    | ~<Dlog(X)[U], Dlog(X)[V]>~                |
+
+~sym(A) = (A + A^T) / 2~.
+~Dlog(X)~ is applied in the eigenbasis of ~X~ with the divided differences of ~log~ on its eigenvalues (Daleckii-Krein).
+~exp~ projects ~v~ to the tangent space first.
+The product metric is the sum of the factor metrics.
+~gradient_step(x, egrad, t)~ returns ~rgrad = egrad_to_rgrad(x, egrad)~ and ~retract(x, -t rgrad)~.
+
+The affine-invariant metric is Pennec, Fillard and Ayache ([[https://doi.org/10.1007/s11263-005-3222-z][2006]]).
+The log-Euclidean metric is Arsigny, Fillard, Pennec and Ayache ([[https://doi.org/10.1137/050637996][2007]]).
+The Stiefel geodesic is Edelman, Arias and Smith ([[https://doi.org/10.1137/S0895479895290954][1998]]).
+
+** Refusals
+
+A wrong length, a non-finite entry, an SPD point that is not symmetric positive definite, a rank-deficient ~X + V~ under a Stiefel retraction, a non-finite step size, and ~log~ on a Stiefel factor are refused.
+Rust returns ~Error::ManifoldArgument~, C returns ~RGMIN_INVALID_PARAMETER~ with ~rgmin_last_error~, C++ throws ~std::runtime_error~, and Python raises ~ValueError~.
+C writes the outputs only on success, so an output may alias an input.
+
+** Rust
+
+#+begin_src rust
+use rgmin::{RiemannianManifold, SpdMetric, StiefelRetraction};
+
+let m = RiemannianManifold::product([
+    RiemannianManifold::stiefel(6, 2, StiefelRetraction::Polar)?,
+    RiemannianManifold::spd(3, SpdMetric::AffineInvariant)?,
+])?;
+m.gradient_step(&x, &egrad, 0.1, &mut rgrad, &mut x_next)?;
+#+end_src
+
+~RiemannianManifold~ implements the ~Manifold~ trait, so generic code such as ~rtr::truncated_cg~ accepts it.
+~Solver~ selects its manifold with the closed ~ManifoldKind~ and does not take this type.
+
+** C
+
+~rgmin_manifold_t~ is the session token of ~rgmin_solver_set_manifold~.
+The handle here is ~rgmin_manifold_handle_t~. ABI minor 41.
+
+| Function                         | Shapes and effect                                              |
+|----------------------------------+----------------------------------------------------------------|
+| ~rgmin_manifold_stiefel(n, p, r)~ | ~r~ is ~RGMIN_STIEFEL_QR~ or ~RGMIN_STIEFEL_POLAR~. Null on a bad shape. |
+| ~rgmin_manifold_spd(p, metric)~  | ~RGMIN_SPD_AFFINE_INVARIANT~ or ~RGMIN_SPD_LOG_EUCLIDEAN~.     |
+| ~rgmin_manifold_product(fs, k)~  | Copies ~k~ factors; the caller still frees them.               |
+| ~rgmin_manifold_free(m)~         | Null is a no-op.                                               |
+| ~rgmin_manifold_len(m)~          | Packed length. Zero for null.                                  |
+| ~rgmin_manifold_project~         | ~(m, x, v, out, len)~                                          |
+| ~rgmin_manifold_egrad_to_rgrad~  | ~(m, x, egrad, out, len)~                                      |
+| ~rgmin_manifold_retract~         | ~(m, x, v, out, len)~                                          |
+| ~rgmin_manifold_exp~ / ~_log~    | ~(m, x, v or y, out, len)~                                     |
+| ~rgmin_manifold_transport~       | ~(m, x_from, x_to, v, out, len)~                               |
+| ~rgmin_manifold_inner~           | ~(m, x, u, v, &value, len)~                                    |
+| ~rgmin_manifold_gradient_step~   | ~(m, x, egrad, t, rgrad_out, x_out, len)~                      |
+
+** C++
+
+~rgmin::Manifold~ owns the handle: ~Manifold::stiefel(n, p, r)~, ~Manifold::spd(p, metric)~ and ~Manifold::product(a, b, ...)~.
+The members take buffers of ~len()~ doubles. ~xts::optimize::Manifold~ is the same class.
+
+** Python
+
+~rgmin.Stiefel(n, p, retraction="qr")~, ~rgmin.SPD(p, metric="affine_invariant")~ and ~rgmin.Product(*factors)~ take and return NumPy arrays.
+A Stiefel point is an ~(n, p)~ array, an SPD point a ~(p, p)~ array, and a product point a tuple with one array per factor.
+Each class has ~project~, ~egrad_to_rgrad~, ~retract~, ~exp~, ~log~, ~transport~, ~inner~, ~norm~ and ~gradient_step~, which returns ~(rgrad, x_next)~.

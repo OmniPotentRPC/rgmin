@@ -18,6 +18,7 @@ The types a host works with:
 | ~Lbfgs~ | Persistent limited-memory quasi-Newton; ~minimize_box~ keeps iterates in bounds. |
 | ~Method~ / ~Control~ / ~LineSearch~ | Which step, and how far. |
 | ~ManifoldKind~ | ~project~ / ~retract~ / ~transport~. |
+| ~RiemannianManifold~ | Stiefel, SPD and product handles; see the manifold page. |
 | ~IrcTrust~ | GS2 / Sella MW-sphere equality. |
 | ~lowest_eigenpair~ / ~lowest_mode~ | Matrix-free lowest Hessian pair. |
 | ~lowest_eigenpairs~ | Block LOBPCG for the k lowest pairs (Knyazev 2001). |

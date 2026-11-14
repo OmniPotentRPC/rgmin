@@ -81,6 +81,8 @@ SCG takes the same one-shot shape. Conjugacy is a field on
 ~RGMIN_UNAVAILABLE~. ~rgmin_lowest_eigenpairs~ is the block LOBPCG
 solver for the k lowest pairs (Knyazev 2001). ~seed~ and ~modes_out~
 are row-major n-by-k. ~rgmin_lowest_eigenpairs~ is ~abi_minor~ 39.
+~rgmin_manifold_handle_t~ is a Stiefel, SPD or product manifold with
+column-major point buffers, ~abi_minor~ 41; see the manifold reference.
 
 #+begin_src c
 rgmin_scg_params_t params = {
