@@ -191,6 +191,28 @@ impl FreeObjective {
         (energy, g)
     }
 
+    /// Energy and `fmax` of the last call when `x` is that call's position.
+    ///
+    /// The force buffer already holds the components. Negating them into a
+    /// fresh gradient would not change a square.
+    fn energy_fmax(&self, x: &Array1<f64>) -> Option<(f64, f64)> {
+        let guard = self.state.lock().unwrap();
+        let (pos, force, energy) = &*guard;
+        if !self.at_last(pos, x) {
+            return None;
+        }
+        let fm = if self.packed {
+            fmax_coords(&force[..x.len()])
+        } else {
+            let mut gathered = Vec::with_capacity(x.len());
+            for &i in &self.free {
+                gathered.push(force[i]);
+            }
+            fmax_coords(&gathered)
+        };
+        Some((*energy, fm))
+    }
+
     /// The gradient of the last call when `x` is that call's position.
     fn lookup(&self, x: &Array1<f64>) -> Option<(f64, Array1<f64>)> {
         let guard = self.state.lock().unwrap();
@@ -589,10 +611,16 @@ fn build(sys: &System, sigma: f64, seed: u64) -> (FreeObjective, Array1<f64>) {
 
 /// Largest per-atom force norm.
 fn fmax(g: &Array1<f64>) -> f64 {
-    g.as_slice()
-        .unwrap()
-        .chunks(3)
-        .map(|c| c.iter().map(|v| v * v).sum::<f64>().sqrt())
+    fmax_coords(g.as_slice().unwrap())
+}
+
+/// Same atom norms as [`fmax`], on a contiguous coordinate slice.
+///
+/// `chunks(3).map(sum of squares).fold(max)` is the expression `fmax` used
+/// on the gathered gradient. A force and its negation have the same squares.
+fn fmax_coords(v: &[f64]) -> f64 {
+    v.chunks(3)
+        .map(|c| c.iter().map(|t| t * t).sum::<f64>().sqrt())
         .fold(0.0, f64::max)
 }
 
@@ -924,17 +952,17 @@ fn run_session(
             // `calls` counts it. The fmax check below is refunded.
             mu = solver.precon_scale();
         }
-        let (f, g) = obj.lookup(&x).unwrap_or_else(|| {
+        let (f, fm) = obj.energy_fmax(&x).unwrap_or_else(|| {
             // Not counted against the solver: the driver's own check.
             let before = obj.calls.load(Ordering::Relaxed);
             let before_ns = obj.nanos.load(Ordering::Relaxed);
-            let r = obj.eval(x.view());
+            let (f, g) = obj.eval(x.view());
             obj.calls.store(before, Ordering::Relaxed);
             obj.nanos.store(before_ns, Ordering::Relaxed);
-            r
+            (f, fmax(&g))
         });
         out.energy = f;
-        out.fmax = fmax(&g);
+        out.fmax = fm;
         let _ = rep;
         if out.fmax < tol {
             out.converged = true;
