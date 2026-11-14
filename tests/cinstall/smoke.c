@@ -28,6 +28,26 @@ int main(void) {
         return 2;
     }
     rgmin_constraints_free(set);
+
+    /* One gradient step on St(2, 1) x SPD(1) stays on the product. */
+    rgmin_manifold_handle_t *circle = rgmin_manifold_stiefel(2, 1, RGMIN_STIEFEL_QR);
+    rgmin_manifold_handle_t *line = rgmin_manifold_spd(1, RGMIN_SPD_LOG_EUCLIDEAN);
+    const rgmin_manifold_handle_t *factors[2] = {circle, line};
+    rgmin_manifold_handle_t *both = rgmin_manifold_product(factors, 2);
+    rgmin_manifold_free(circle);
+    rgmin_manifold_free(line);
+    const double point[3] = {1.0, 0.0, 2.0};
+    const double egrad[3] = {0.0, -1.0, 1.0};
+    double rgrad[3] = {0.0, 0.0, 0.0};
+    double next[3] = {0.0, 0.0, 0.0};
+    if (both == 0 || rgmin_manifold_len(both) != 3 ||
+        rgmin_manifold_gradient_step(both, point, egrad, 0.5, rgrad, next, 3) != RGMIN_SUCCESS ||
+        !(next[0] * next[0] + next[1] * next[1] - 1.0 < 1e-15) || !(next[2] > 0.0) ||
+        !(next[2] < point[2]) || rgmin_manifold_stiefel(1, 2, RGMIN_STIEFEL_QR) != 0) {
+        rgmin_manifold_free(both);
+        return 3;
+    }
+    rgmin_manifold_free(both);
     printf("%d.%d.%d %s\n", RGMIN_H_MAJOR, RGMIN_H_MINOR, RGMIN_H_PATCH, version);
     return 0;
 }

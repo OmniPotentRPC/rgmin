@@ -23,9 +23,10 @@ use crate::precon::{ExpParams, ExpState, Neighbours};
 use crate::{
     Accept, ApplyHessian, Conjugacy, Control, DirectionalCurvature, EigenParams, EigensolverKind,
     Error, HessianObjective, HessianOracle, HessianVector, HvpOracle, LbfgsH0, LbfgsPairs,
-    LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart, ScgParams, SearchStep,
-    Solver, StopNorm, SuppliedSearch, lowest_eigenpairs, lowest_mode, minimize_method,
-    minimize_method_hess, minimize_method_hvp, minimize_scg, minimize_scg_exact,
+    LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart, RiemannianManifold,
+    ScgParams, SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch,
+    lowest_eigenpairs, lowest_mode, minimize_method, minimize_method_hess, minimize_method_hvp,
+    minimize_scg, minimize_scg_exact,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -75,7 +76,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 39;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 40;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 4;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -4246,6 +4247,406 @@ fn lbfgs_direction_c(
         }
         Err(err) => status_from_error(&err),
     }
+}
+
+/// Retraction of a Stiefel handle from [`rgmin_manifold_stiefel`].
+/// The C entry takes the integer. ABI minor 40.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_stiefel_retraction_t {
+    /// Q factor of `X + V` with a positive diagonal R.
+    RGMIN_STIEFEL_QR = 0,
+    /// Polar factor of `X + V`.
+    RGMIN_STIEFEL_POLAR = 1,
+}
+
+/// Metric of an SPD handle from [`rgmin_manifold_spd`].
+/// The C entry takes the integer. ABI minor 40.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_spd_metric_t {
+    /// `<U, V>_X = tr(X^-1 U X^-1 V)`.
+    RGMIN_SPD_AFFINE_INVARIANT = 0,
+    /// `<U, V>_X = <Dlog(X)[U], Dlog(X)[V]>`.
+    RGMIN_SPD_LOG_EUCLIDEAN = 1,
+}
+
+/// Opaque Stiefel, SPD or product manifold. Every buffer it reads or
+/// writes is caller-owned, column-major, of length
+/// [`rgmin_manifold_len`]. ABI minor 40.
+pub struct rgmin_manifold_handle {
+    manifold: RiemannianManifold,
+}
+
+fn boxed_manifold(made: crate::Result<RiemannianManifold>) -> *mut rgmin_manifold_handle {
+    match made {
+        Ok(manifold) => Box::into_raw(Box::new(rgmin_manifold_handle { manifold })),
+        Err(err) => {
+            set_last_error(&err.to_string());
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// \(\mathrm{St}(n, p)\), `1 <= p <= n`, packed column-major `n x p`.
+/// `retraction` is an [`rgmin_stiefel_retraction_t`] value. Null on a bad
+/// shape or an unknown retraction. ABI minor 40.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_manifold_stiefel(
+    n: usize,
+    p: usize,
+    retraction: i32,
+) -> *mut rgmin_manifold_handle {
+    let retraction = match retraction {
+        0 => StiefelRetraction::Qr,
+        1 => StiefelRetraction::Polar,
+        other => {
+            set_last_error(&format!(
+                "rgmin_manifold_stiefel: unknown retraction {other}"
+            ));
+            return std::ptr::null_mut();
+        }
+    };
+    boxed_manifold(RiemannianManifold::stiefel(n, p, retraction))
+}
+
+/// \(\mathrm{SPD}(p)\), `p >= 1`, packed column-major `p x p`. `metric` is
+/// an [`rgmin_spd_metric_t`] value. The retraction is the exponential of
+/// the metric. Null on `p = 0` or an unknown metric. ABI minor 40.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_manifold_spd(p: usize, metric: i32) -> *mut rgmin_manifold_handle {
+    let metric = match metric {
+        0 => SpdMetric::AffineInvariant,
+        1 => SpdMetric::LogEuclidean,
+        other => {
+            set_last_error(&format!("rgmin_manifold_spd: unknown metric {other}"));
+            return std::ptr::null_mut();
+        }
+    };
+    boxed_manifold(RiemannianManifold::spd(p, metric))
+}
+
+/// Product of `count` handles in order. The factors are copied; the caller
+/// still frees each one. A factor that is itself a product contributes its
+/// factors. Null on a null array, a null entry or `count = 0`.
+/// ABI minor 40.
+///
+/// # Safety
+/// `factors` is null or points at `count` pointers, each null or a live
+/// handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_manifold_product(
+    factors: *const *const rgmin_manifold_handle,
+    count: usize,
+) -> *mut rgmin_manifold_handle {
+    if factors.is_null() || count == 0 {
+        set_last_error("rgmin_manifold_product: need at least one factor");
+        return std::ptr::null_mut();
+    }
+    let handles = unsafe { slice::from_raw_parts(factors, count) };
+    let mut parts = Vec::with_capacity(count);
+    for (i, h) in handles.iter().enumerate() {
+        if h.is_null() {
+            set_last_error(&format!("rgmin_manifold_product: factor {i} is null"));
+            return std::ptr::null_mut();
+        }
+        parts.push(unsafe { (**h).manifold.clone() });
+    }
+    boxed_manifold(RiemannianManifold::product(parts))
+}
+
+/// Release a manifold handle. Null is a no-op. ABI minor 40.
+///
+/// # Safety
+/// `manifold` is null or a handle that has not been freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_manifold_free(manifold: *mut rgmin_manifold_handle) {
+    if !manifold.is_null() {
+        drop(unsafe { Box::from_raw(manifold) });
+    }
+}
+
+/// Packed length of one point: `n p` for Stiefel, `p^2` for SPD, the sum
+/// for a product. A null handle returns zero. ABI minor 40.
+///
+/// # Safety
+/// `manifold` is null or a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_manifold_len(manifold: *const rgmin_manifold_handle) -> usize {
+    if manifold.is_null() {
+        0
+    } else {
+        unsafe { (*manifold).manifold.packed_len() }
+    }
+}
+
+type ManifoldOp<'a> =
+    dyn FnOnce(&RiemannianManifold, &[Vec<f64>], &mut [Vec<f64>]) -> crate::Result<()> + 'a;
+
+/// Copy the inputs, run `op`, and write the outputs only on success, so an
+/// output may alias an input.
+fn manifold_call(
+    func: &str,
+    manifold: *const rgmin_manifold_handle,
+    len: usize,
+    inputs: &[(&str, *const f64)],
+    outputs: &[(&str, *mut f64)],
+    op: Box<ManifoldOp<'_>>,
+) -> rgmin_status_t {
+    if manifold.is_null() {
+        set_last_error(&format!("{func}: null manifold"));
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let m = unsafe { &(*manifold).manifold };
+    if len != m.packed_len() {
+        set_last_error(&format!(
+            "{func}: len {len} is not the packed length {}",
+            m.packed_len()
+        ));
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let named = inputs
+        .iter()
+        .map(|(name, ptr)| (*name, ptr.is_null()))
+        .chain(outputs.iter().map(|(name, ptr)| (*name, ptr.is_null())));
+    for (name, null) in named {
+        if null {
+            set_last_error(&format!("{func}: null {name}"));
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+    }
+    let copies: Vec<Vec<f64>> = inputs
+        .iter()
+        .map(|(_, ptr)| unsafe { slice::from_raw_parts(*ptr, len) }.to_vec())
+        .collect();
+    let mut outs = vec![vec![0.0; len]; outputs.len()];
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(m, &copies, &mut outs))) {
+        Ok(Ok(())) => {
+            for ((_, ptr), values) in outputs.iter().zip(&outs) {
+                unsafe { slice::from_raw_parts_mut(*ptr, len) }.copy_from_slice(values);
+            }
+            rgmin_status_t::RGMIN_SUCCESS
+        }
+        Ok(Err(err)) => {
+            let status = status_from_error(&err);
+            set_last_error(&format!("{func}: {err}"));
+            status
+        }
+        Err(_) => {
+            set_last_error(&format!("{func}: panic"));
+            rgmin_status_t::RGMIN_INTERNAL_ERROR
+        }
+    }
+}
+
+/// Tangent projection of the ambient `v` at `x` into `out`. Stiefel:
+/// `V - X sym(X^T V)`. SPD: `sym(V)`. ABI minor 40.
+///
+/// # Safety
+/// `manifold` is null or a live handle. `x`, `v` and `out` are null or
+/// point at `len` doubles; `out` is writable and may alias an input.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_manifold_project(
+    manifold: *const rgmin_manifold_handle,
+    x: *const f64,
+    v: *const f64,
+    out: *mut f64,
+    len: usize,
+) -> rgmin_status_t {
+    manifold_call(
+        "rgmin_manifold_project",
+        manifold,
+        len,
+        &[("x", x), ("v", v)],
+        &[("out", out)],
+        Box::new(|m, i, o| m.project(&i[0], &i[1], &mut o[0])),
+    )
+}
+
+/// Riemannian gradient at `x` from the Euclidean gradient `egrad`.
+/// Stiefel: the projection. SPD affine-invariant: `X sym(G) X`. SPD
+/// log-Euclidean: `Dlog(X)^-2 [sym(G)]`. ABI minor 40.
+///
+/// # Safety
+/// As [`rgmin_manifold_project`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_manifold_egrad_to_rgrad(
+    manifold: *const rgmin_manifold_handle,
+    x: *const f64,
+    egrad: *const f64,
+    out: *mut f64,
+    len: usize,
+) -> rgmin_status_t {
+    manifold_call(
+        "rgmin_manifold_egrad_to_rgrad",
+        manifold,
+        len,
+        &[("x", x), ("egrad", egrad)],
+        &[("out", out)],
+        Box::new(|m, i, o| m.egrad_to_rgrad(&i[0], &i[1], &mut o[0])),
+    )
+}
+
+/// Retraction of the step `v` at `x` into `out`. Stiefel uses the
+/// handle's QR or polar retraction; SPD uses the exponential of its
+/// metric. ABI minor 40.
+///
+/// # Safety
+/// As [`rgmin_manifold_project`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_manifold_retract(
+    manifold: *const rgmin_manifold_handle,
+    x: *const f64,
+    v: *const f64,
+    out: *mut f64,
+    len: usize,
+) -> rgmin_status_t {
+    manifold_call(
+        "rgmin_manifold_retract",
+        manifold,
+        len,
+        &[("x", x), ("v", v)],
+        &[("out", out)],
+        Box::new(|m, i, o| m.retract(&i[0], &i[1], &mut o[0])),
+    )
+}
+
+/// Riemannian exponential at `x`; `v` is projected to the tangent space
+/// first. ABI minor 40.
+///
+/// # Safety
+/// As [`rgmin_manifold_project`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_manifold_exp(
+    manifold: *const rgmin_manifold_handle,
+    x: *const f64,
+    v: *const f64,
+    out: *mut f64,
+    len: usize,
+) -> rgmin_status_t {
+    manifold_call(
+        "rgmin_manifold_exp",
+        manifold,
+        len,
+        &[("x", x), ("v", v)],
+        &[("out", out)],
+        Box::new(|m, i, o| m.exp(&i[0], &i[1], &mut o[0])),
+    )
+}
+
+/// Riemannian logarithm of `y` at `x`. A handle with a Stiefel factor
+/// returns `RGMIN_INVALID_PARAMETER`. ABI minor 40.
+///
+/// # Safety
+/// As [`rgmin_manifold_project`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_manifold_log(
+    manifold: *const rgmin_manifold_handle,
+    x: *const f64,
+    y: *const f64,
+    out: *mut f64,
+    len: usize,
+) -> rgmin_status_t {
+    manifold_call(
+        "rgmin_manifold_log",
+        manifold,
+        len,
+        &[("x", x), ("y", y)],
+        &[("out", out)],
+        Box::new(|m, i, o| m.log(&i[0], &i[1], &mut o[0])),
+    )
+}
+
+/// Vector transport of `v` from `x_from` to `x_to`. Stiefel: projection
+/// at `x_to`. SPD: parallel transport of the metric. ABI minor 40.
+///
+/// # Safety
+/// As [`rgmin_manifold_project`], with `x_from` and `x_to` in place of `x`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_manifold_transport(
+    manifold: *const rgmin_manifold_handle,
+    x_from: *const f64,
+    x_to: *const f64,
+    v: *const f64,
+    out: *mut f64,
+    len: usize,
+) -> rgmin_status_t {
+    manifold_call(
+        "rgmin_manifold_transport",
+        manifold,
+        len,
+        &[("x_from", x_from), ("x_to", x_to), ("v", v)],
+        &[("out", out)],
+        Box::new(|m, i, o| m.transport(&i[0], &i[1], &i[2], &mut o[0])),
+    )
+}
+
+/// Riemannian inner product of the tangents `u` and `v` at `x`, written to
+/// `*out`. ABI minor 40.
+///
+/// # Safety
+/// `manifold` is null or a live handle. `x`, `u` and `v` are null or point
+/// at `len` readable doubles. `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_manifold_inner(
+    manifold: *const rgmin_manifold_handle,
+    x: *const f64,
+    u: *const f64,
+    v: *const f64,
+    out: *mut f64,
+    len: usize,
+) -> rgmin_status_t {
+    if out.is_null() {
+        set_last_error("rgmin_manifold_inner: null out");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let mut value = 0.0;
+    let status = manifold_call(
+        "rgmin_manifold_inner",
+        manifold,
+        len,
+        &[("x", x), ("u", u), ("v", v)],
+        &[],
+        Box::new(|m, i, _| {
+            value = m.inner(&i[0], &i[1], &i[2])?;
+            Ok(())
+        }),
+    );
+    if status == rgmin_status_t::RGMIN_SUCCESS {
+        unsafe { *out = value };
+    }
+    status
+}
+
+/// One Riemannian gradient step: `rgrad_out` is the Riemannian gradient of
+/// `egrad` at `x`, and `x_out` is the retraction of `-t rgrad_out` at `x`.
+/// `t` must be finite. ABI minor 40.
+///
+/// # Safety
+/// `manifold` is null or a live handle. `x` and `egrad` are null or point
+/// at `len` readable doubles. `rgrad_out` and `x_out` are null or point at
+/// `len` writable doubles and may alias the inputs, not each other.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_manifold_gradient_step(
+    manifold: *const rgmin_manifold_handle,
+    x: *const f64,
+    egrad: *const f64,
+    t: f64,
+    rgrad_out: *mut f64,
+    x_out: *mut f64,
+    len: usize,
+) -> rgmin_status_t {
+    manifold_call(
+        "rgmin_manifold_gradient_step",
+        manifold,
+        len,
+        &[("x", x), ("egrad", egrad)],
+        &[("rgrad_out", rgrad_out), ("x_out", x_out)],
+        Box::new(move |m, i, o| {
+            let (rgrad, rest) = o.split_at_mut(1);
+            m.gradient_step(&i[0], &i[1], t, &mut rgrad[0], &mut rest[0])
+        }),
+    )
 }
 
 #[cfg(test)]
