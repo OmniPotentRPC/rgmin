@@ -15,7 +15,7 @@ use std::fmt;
 
 use ndarray::{Array1, ArrayView1};
 
-use super::{Lbfgs, Pair, stored_pair};
+use super::{Lbfgs, Pair, stored_pair, two_loop_in_place};
 use crate::error::{Error, Result};
 
 /// Initial inverse Hessian for one two-loop direction.
@@ -211,45 +211,6 @@ pub fn lbfgs_direction(
     pairs.direction(gradient, h0)
 }
 
-pub(super) fn backward(
-    memory: &[Pair],
-    extra: usize,
-    g: ArrayView1<f64>,
-) -> (Array1<f64>, Vec<f64>, Vec<usize>) {
-    let mut q = g.to_owned();
-    let m = memory.len();
-    let mut idxs: Vec<usize> = (0..m).collect();
-    for _ in 0..extra {
-        if m > 0 {
-            idxs.push(m - 1);
-        }
-    }
-    let mut alpha = vec![0.0; idxs.len()];
-    for k in (0..idxs.len()).rev() {
-        let p = &memory[idxs[k]];
-        let a = p.rho * crate::vecops::dot(p.s.view(), q.view());
-        alpha[k] = a;
-        crate::vecops::axpy(-a, p.y.view(), &mut q);
-    }
-    (q, alpha, idxs)
-}
-
-#[allow(clippy::needless_range_loop)]
-pub(super) fn forward(
-    memory: &[Pair],
-    mut q: Array1<f64>,
-    alpha: &[f64],
-    idxs: &[usize],
-) -> Array1<f64> {
-    for k in 0..idxs.len() {
-        let p = &memory[idxs[k]];
-        let b = p.rho * crate::vecops::dot(p.y.view(), q.view());
-        crate::vecops::axpy(alpha[k] - b, p.s.view(), &mut q);
-    }
-    q.mapv_inplace(|v| -v);
-    q
-}
-
 fn direction_of(
     memory: &[Pair],
     extra: usize,
@@ -276,13 +237,12 @@ fn direction_of(
             what: "H0 diagonal length does not match the gradient",
         });
     }
-    let n = gradient.len();
-    let (q, alpha, idxs) = backward(memory, extra, gradient);
-    let q = apply_h0(n, q, h0)?;
-    Ok(forward(memory, q, &alpha, &idxs))
+    let mut q = gradient.to_owned();
+    two_loop_in_place(memory, extra, &mut q, |q| apply_h0(q, h0))?;
+    Ok(q)
 }
 
-fn apply_h0(n: usize, mut q: Array1<f64>, h0: &LbfgsH0<'_>) -> Result<Array1<f64>> {
+fn apply_h0(q: &mut Array1<f64>, h0: &LbfgsH0<'_>) -> Result<()> {
     match h0 {
         LbfgsH0::Scale(gamma) => {
             if !gamma.is_finite() {
@@ -290,11 +250,10 @@ fn apply_h0(n: usize, mut q: Array1<f64>, h0: &LbfgsH0<'_>) -> Result<Array1<f64
                     what: "H0 scale is not finite",
                 });
             }
-            q *= *gamma;
-            Ok(q)
+            *q *= *gamma;
         }
         LbfgsH0::Diagonal(diag) => {
-            if diag.len() != n {
+            if diag.len() != q.len() {
                 return Err(Error::LbfgsDirection {
                     what: "H0 diagonal length does not match the gradient",
                 });
@@ -307,18 +266,18 @@ fn apply_h0(n: usize, mut q: Array1<f64>, h0: &LbfgsH0<'_>) -> Result<Array1<f64
             for (qi, di) in q.iter_mut().zip(diag.iter()) {
                 *qi *= *di;
             }
-            Ok(q)
         }
         LbfgsH0::Apply(apply) => {
             let out = apply(q.view())?;
-            if out.len() != n {
+            if out.len() != q.len() {
                 return Err(Error::LbfgsDirection {
                     what: "H0 callback length does not match the gradient",
                 });
             }
-            Ok(out)
+            *q = out;
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]

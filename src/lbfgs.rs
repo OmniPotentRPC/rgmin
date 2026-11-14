@@ -315,15 +315,21 @@ fn max_atom_slice(step: &[f64]) -> f64 {
     max_atom
 }
 
-/// Two-loop into `q`, using the same dot and axpy as [`Lbfgs::direction_h0`].
+/// Nocedal and Wright algorithm 7.4 in place: `q` enters as `g` and
+/// leaves as `-H g`.
+///
+/// Pairs are oldest first, and the newest is replayed `extra` more times
+/// (Al-Baali). `middle` applies `H0` to the residual of the backward
+/// loop. An error from `middle` skips the forward loop and is returned;
+/// `q` is then unspecified. Every L-BFGS direction in the crate, the
+/// session step, [`Lbfgs::two_loop`] and [`LbfgsPairs`], runs here.
 #[allow(clippy::needless_range_loop)]
-fn two_loop_vecops(
+fn two_loop_in_place<E>(
     memory: &[Pair],
     extra: usize,
     q: &mut Array1<f64>,
-    h0: f64,
-    lin: Option<&crate::lindh::LindhFactor>,
-) {
+    middle: impl FnOnce(&mut Array1<f64>) -> std::result::Result<(), E>,
+) -> std::result::Result<(), E> {
     let m = memory.len();
     let total = if m == 0 { 0 } else { m + extra };
     let mut stack = [0.0; 64];
@@ -341,13 +347,7 @@ fn two_loop_vecops(
         alpha[k] = a;
         crate::vecops::axpy(-a, p.y.view(), q);
     }
-    if let Some(lin) = lin {
-        if !lin.solve_into(q) {
-            *q *= h0;
-        }
-    } else {
-        *q *= h0;
-    }
+    middle(q)?;
     for k in 0..total {
         let i = if k < m { k } else { m - 1 };
         let p = &memory[i];
@@ -355,6 +355,7 @@ fn two_loop_vecops(
         crate::vecops::axpy(alpha[k] - b, p.s.view(), q);
     }
     q.mapv_inplace(|v| -v);
+    Ok(())
 }
 
 /// The value and slope of a line-search probe, `(+inf, NaN)` when the
@@ -912,29 +913,26 @@ impl Lbfgs {
         precon: Option<&ndarray::Array2<f64>>,
         installed: Option<&InitialInverse>,
     ) -> Array1<f64> {
-        let (mut q, alpha, idxs) = direction::backward(&self.memory, self.extra_updates, g);
-        if let Some(pmat) = precon {
+        let mut q = g.to_owned();
+        let Ok(()) = two_loop_in_place(&self.memory, self.extra_updates, &mut q, |q| {
             // H0 = P^{-1} keeps -H g a descent direction only for an SPD
             // P; an indefinite Hessian falls back to gamma I and is counted.
-            q = match solve_spd(pmat, &q) {
-                Some(v) => v,
-                None => {
-                    self.note_precon_fallback();
-                    self.scale_gamma(q)
-                }
+            let solved = match (precon, installed) {
+                (Some(pmat), _) => Some(solve_spd(pmat, q)),
+                (None, Some(installed)) => Some(installed.solve(q.view())),
+                (None, None) => None,
             };
-        } else if let Some(installed) = installed {
-            q = match installed.solve(q.view()) {
-                Some(v) => v,
-                None => {
+            match solved {
+                Some(Some(v)) => *q = v,
+                Some(None) => {
                     self.note_precon_fallback();
-                    self.scale_gamma(q)
+                    self.scale_gamma(q);
                 }
-            };
-        } else {
-            q = self.scale_gamma(q);
-        }
-        direction::forward(&self.memory, q, &alpha, &idxs)
+                None => self.scale_gamma(q),
+            }
+            Ok::<(), std::convert::Infallible>(())
+        });
+        q
     }
 
     fn note_precon_fallback(&self) {
@@ -952,13 +950,15 @@ impl Lbfgs {
     /// preconditioner replaces that scalar: the middle product is
     /// `P^{-1} q`, and a failed solve falls back to `h0`.
     pub(crate) fn direction_h0(&self, g: ArrayView1<f64>, h0: f64) -> Array1<f64> {
-        let (mut q, alpha, idxs) = direction::backward(&self.memory, self.extra_updates, g);
-        if let Some(solved) = self.exp_apply(q.view()) {
-            q = solved;
-        } else {
-            q *= h0;
-        }
-        direction::forward(&self.memory, q, &alpha, &idxs)
+        let mut q = g.to_owned();
+        let Ok(()) = two_loop_in_place(&self.memory, self.extra_updates, &mut q, |q| {
+            match self.exp_apply(q.view()) {
+                Some(solved) => *q = solved,
+                None => *q *= h0,
+            }
+            Ok::<(), std::convert::Infallible>(())
+        });
+        q
     }
 
     /// Remember `s·y` and `y·y` from the step just taken.
@@ -996,24 +996,23 @@ impl Lbfgs {
         self.fixed_h0.filter(|h| h.is_finite() && *h > 0.0)
     }
 
-    fn scale_gamma(&self, mut q: Array1<f64>) -> Array1<f64> {
+    fn scale_gamma(&self, q: &mut Array1<f64>) {
         if let Some(h0) = self.fixed_scale() {
-            q *= h0;
-            return q;
+            *q *= h0;
+            return;
         }
         if let Some(p) = self.memory.last() {
             if p.yy > 0.0 {
-                q *= p.sy / p.yy;
+                *q *= p.sy / p.yy;
             }
-            return q;
+            return;
         }
         if self.inverse_curvature.is_finite()
             && self.inverse_curvature > 0.0
             && self.inverse_curvature != 1.0
         {
-            q *= self.inverse_curvature;
+            *q *= self.inverse_curvature;
         }
-        q
     }
 
     fn current_h0(&self) -> f64 {
@@ -1333,7 +1332,12 @@ impl Lbfgs {
         let lindh = self.lindh.take();
         let extra = self.extra_updates;
         self.work.assign(&g);
-        two_loop_vecops(&memory, extra, &mut self.work, h0, lindh.as_ref());
+        let Ok(()) = two_loop_in_place(&memory, extra, &mut self.work, |q| {
+            if !lindh.as_ref().is_some_and(|lin| lin.solve_into(q)) {
+                *q *= h0;
+            }
+            Ok::<(), std::convert::Infallible>(())
+        });
         self.memory = memory;
         self.lindh = lindh;
     }
