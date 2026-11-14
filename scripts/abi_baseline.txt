@@ -1,6 +1,8 @@
 rgmin_abi_compatible
 rgmin_abi_stamp
 rgmin_constraints_constrain
+rgmin_constraints_create
+rgmin_constraints_create_at
 rgmin_constraints_excess
 rgmin_constraints_free
 rgmin_constraints_set_lincs_order
@@ -9,12 +11,16 @@ rgmin_constraints_set_settle
 rgmin_constraints_set_solver
 rgmin_constraints_set_tolerance
 rgmin_last_constraint_error
+rgmin_last_error
+rgmin_last_error_message
 rgmin_lbfgs_direction
 rgmin_lbfgs_pairs_clear
 rgmin_lbfgs_pairs_count
+rgmin_lbfgs_pairs_create
 rgmin_lbfgs_pairs_free
 rgmin_lbfgs_pairs_push
 rgmin_linesearch
+rgmin_linesearch_create
 rgmin_linesearch_free
 rgmin_lowest_eigenpair
 rgmin_lowest_eigenpairs
@@ -28,6 +34,7 @@ rgmin_solver_add_equality
 rgmin_solver_clear_distance_constraints
 rgmin_solver_clear_equalities
 rgmin_solver_clear_exp
+rgmin_solver_create
 rgmin_solver_dim
 rgmin_solver_exp_mu
 rgmin_solver_forget
@@ -80,4 +87,6 @@ rgmin_solver_step_hess_fg
 rgmin_solver_step_hvp
 rgmin_solver_steps
 rgmin_status_t
+rgmin_tensor_borrow_cpu_f64
 rgmin_tensor_free
+rgmin_version

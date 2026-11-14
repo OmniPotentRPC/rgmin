@@ -17,7 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HEADER = ROOT / "include" / "rgmin.h"
 BASELINE = ROOT / "scripts" / "abi_baseline.txt"
-DECL = re.compile(r"^(?:const\s+char\s+\*|[\w\s\*]+)\s+(rgmin_[A-Za-z0-9_]+)\s*\(", re.M)
+# A return type ending in `*` may sit against the name: `T *rgmin_f(`.
+DECL = re.compile(r"^[A-Za-z_][\w \t\*]*?[\s\*](rgmin_[A-Za-z0-9_]+)\s*\(", re.M)
 
 
 def names() -> list[str]:
