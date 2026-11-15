@@ -680,21 +680,13 @@ fn fmax(g: &Array1<f64>) -> f64 {
 }
 
 fn wolfe() -> LineSearch {
-    LineSearch::Wolfe {
-        c1: 1e-4,
-        c2: 0.9,
-        maxiter: 20,
-    }
+    LineSearch::wolfe(1e-4, 0.9, 20)
 }
 
 /// Nocedal-Wright section 5.2: CG uses a tighter curvature constant than
 /// the quasi-Newton default. The same search is used with and without a metric.
 fn cg_wolfe() -> LineSearch {
-    LineSearch::Wolfe {
-        c1: 1e-4,
-        c2: 0.1,
-        maxiter: 20,
-    }
+    LineSearch::wolfe(1e-4, 0.1, 20)
 }
 
 /// Quick-min options from `QM_X`, a comma list over
@@ -719,43 +711,23 @@ fn quickmin_from_env() -> QuickMinOptions {
 
 /// `(method, accept, linesearch, istep)` for a session name.
 fn session(name: &str) -> Option<(Method, Accept, LineSearch, f64)> {
-    let lbfgs = Method::Lbfgs { memory: 10 };
-    let pr = Method::Nlcg {
-        conjugacy: Conjugacy::PolakRibierePlus,
-        restart: Restart::njws(),
-    };
-    let back = LineSearch::Backtracking {
-        c: 1e-4,
-        beta: 0.5,
-        maxiter: 20,
-    };
+    let lbfgs = Method::lbfgs_with_memory(10);
+    let pr = Method::nlcg_with_restart(Conjugacy::PolakRibierePlus, Restart::njws());
+    let back = LineSearch::backtracking(1e-4, 0.5, 20);
     Some(match name {
         "lbfgs-brent" => (lbfgs, Accept::None, LineSearch::default(), 1.0),
         "lbfgs-wolfe" => (lbfgs, Accept::None, wolfe(), 1.0),
         "lbfgs-backtrack" => (lbfgs, Accept::None, back, 1.0),
         "lbfgs-step" => (lbfgs, Accept::Step, wolfe(), 1.0),
-        "fire" => (
-            Method::Fire { kind: FireKind::V1 },
-            Accept::None,
-            wolfe(),
-            0.1,
-        ),
-        "fire2" | "fire2g" => (
-            Method::Fire { kind: FireKind::V2 },
-            Accept::None,
-            wolfe(),
-            0.1,
-        ),
+        "fire" => (Method::fire(FireKind::V1), Accept::None, wolfe(), 0.1),
+        "fire2" | "fire2g" => (Method::fire(FireKind::V2), Accept::None, wolfe(), 0.1),
         "bb" => (Method::Bb, Accept::None, wolfe(), 0.01),
         "bb-nm" => (Method::Bb, Accept::Nonmonotone, wolfe(), 0.01),
         "cg-wolfe" | "cg" => (pr, Accept::None, cg_wolfe(), 0.01),
         // Library change alone: signed Polak-Ribiere and the session
         // Wolfe constant c2 = 0.9. The opening trial is still equation 3.60.
         "cg-ablation" => (
-            Method::Nlcg {
-                conjugacy: Conjugacy::PolakRibiere,
-                restart: Restart::njws(),
-            },
+            Method::nlcg_with_restart(Conjugacy::PolakRibiere, Restart::njws()),
             Accept::None,
             wolfe(),
             0.01,
@@ -913,15 +885,14 @@ fn run_session(
 ) -> Outcome {
     let (base, which) = classify(name).expect("unknown method");
     let (method, accept, ls, istep) = session(base).expect("unknown method");
-    let control = Control {
-        maxiter: 1,
-        gtol: 0.0,
-        istep,
-        maxmove: None,
-        stop_norm: rgmin::StopNorm::Two,
-        ftol_rel: None,
-        noise_floor: None,
-    };
+    let control = Control::default()
+        .with_maxiter(1)
+        .with_gtol(0.0)
+        .with_istep(istep)
+        .with_maxmove(None)
+        .with_stop_norm(rgmin::StopNorm::Two)
+        .with_ftol_rel(None)
+        .with_noise_floor(None);
     let mut solver = Solver::new(method, control, x.len());
     solver.set_accept(accept);
     solver.set_linesearch(ls);
@@ -1071,14 +1042,8 @@ fn install_ff(solver: &mut Solver, sys: &System, x: &Array1<f64>) -> bool {
     if bonds.is_empty() && angles.is_empty() {
         return false;
     }
-    let terms = FfTerms {
-        bonds: &bonds,
-        angles: &angles,
-        ..FfTerms::default()
-    };
-    let mut params = FfParams::default();
-    params.r_cut = Some(3.5);
-    params.lengths = lengths;
+    let terms = FfTerms::default().with_bonds(&bonds).with_angles(&angles);
+    let params = FfParams::default().with_r_cut(3.5).with_lengths(lengths);
     solver.set_ff(x.view(), terms, &params).is_ok()
 }
 
