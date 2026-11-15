@@ -233,6 +233,9 @@ pub struct Solver {
     hvp_calls: usize,
     /// Negative-curvature kicks already taken in this solve.
     saddle_kicks: u8,
+    /// Uphill block of a partitioned rational-function step. Zero keeps
+    /// the minimization RFO.
+    rfo_order: usize,
     stop_norm: StopNorm,
     /// Holonomic distance constraints. With a set, `last_grad` is the
     /// raw gradient, whose multipliers the Hessian steps need.
@@ -381,6 +384,7 @@ impl Solver {
             lindh_spec: None,
             lindh_mu: None,
             saddle_kicks: 0,
+            rfo_order: 0,
             stop_norm,
             constraints: None,
             inner,
@@ -461,6 +465,17 @@ impl Solver {
     /// eOn `lbfgs_step`. Newton / RFO need a Hessian on [`Self::step_hess`].
     pub fn set_qn_step(&mut self, step: QnStep) {
         self.qn_step = step;
+    }
+
+    /// Uphill modes in a partitioned rational-function step.
+    ///
+    /// Zero is the minimization RFO. A positive order is
+    /// [`crate::partitioned_rfo`]: those modes are maximized and the
+    /// complement is minimized. When the full step does not decrease the
+    /// squared gradient in the quadratic model, the step is the Cauchy
+    /// point of that model.
+    pub fn set_rfo_order(&mut self, order: usize) {
+        self.rfo_order = order;
     }
 
     /// eOn `lbfgs_accept`. Default is take the clipped step.
@@ -2837,7 +2852,25 @@ impl Solver {
         let mut dir = if let Some(kind) = newton_kind {
             match kind {
                 NewtonKind::Shifted => shifted_newton(&hess, &grad),
-                NewtonKind::Rfo => rfo_direction(&hess, &grad),
+                NewtonKind::Rfo => {
+                    if self.rfo_order == 0 {
+                        rfo_direction(&hess, &grad)
+                    } else {
+                        let delta = self.control.maxmove.unwrap_or(f64::INFINITY);
+                        let mut dir =
+                            crate::partitioned_rfo(&hess, &grad, self.rfo_order, delta);
+                        let predicted = hess.dot(&dir);
+                        let merit = grad.dot(&grad);
+                        let forecast = &grad + &predicted;
+                        let forecast_merit = forecast.dot(&forecast);
+                        if !(merit - forecast_merit > 0.0) {
+                            if let Some(alpha) = crate::cauchy_fraction(&grad, &predicted) {
+                                dir *= alpha;
+                            }
+                        }
+                        dir
+                    }
+                }
             }
         } else if let Inner::Lbfgs(solver) = &self.inner {
             solver.direction_with_precon(grad.view(), Some(&hess))

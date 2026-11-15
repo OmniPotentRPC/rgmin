@@ -177,6 +177,60 @@ pub fn ras_clip(s: &Array1<f64>, delta: f64) -> Array1<f64> {
     s * (delta / maxn)
 }
 
+/// Partitioned rational-function step of order `order`.
+///
+/// Eigenpairs are sorted from the most negative curvature upward, so the
+/// first `order` modes are the uphill block. A non-positive or non-finite
+/// trust radius is no clip.
+pub fn partitioned_rfo(h: &Array2<f64>, g: &Array1<f64>, order: usize, delta: f64) -> Array1<f64> {
+    let n = g.len();
+    if n == 0 || h.nrows() != n || h.ncols() != n {
+        return Array1::zeros(n);
+    }
+    let (evals, evecs) = sym_eig_jacobi(h.clone());
+    let mut order_idx: Vec<usize> = (0..n).collect();
+    order_idx.sort_by(|&i, &j| {
+        evals[i]
+            .partial_cmp(&evals[j])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let evals_sorted = Array1::from_iter(order_idx.iter().map(|&i| evals[i]));
+    let mut evecs_sorted = Array2::zeros((n, n));
+    for (column, &old) in order_idx.iter().enumerate() {
+        for row in 0..n {
+            evecs_sorted[(row, column)] = evecs[(row, old)];
+        }
+    }
+    let trust = if delta.is_finite() && delta > 0.0 {
+        delta
+    } else {
+        f64::MAX
+    };
+    prfo_restricted(&evals_sorted, &evecs_sorted, g, order, trust)
+}
+
+/// Step length that minimizes `½‖g + α Hs‖²` along one direction.
+///
+/// The value is returned only when it lies strictly between the rejected
+/// point and the full step. A zero curvature has no such point.
+pub fn cauchy_fraction(gradient: &Array1<f64>, predicted: &Array1<f64>) -> Option<f64> {
+    let mut slope = 0.0;
+    let mut curve = 0.0;
+    for (component, along) in gradient.iter().zip(predicted.iter()) {
+        slope += component * along;
+        curve += along * along;
+    }
+    if !(curve > 0.0 && curve.is_finite() && slope.is_finite()) {
+        return None;
+    }
+    let alpha = -slope / curve;
+    if alpha > 0.0 && alpha < 1.0 {
+        Some(alpha)
+    } else {
+        None
+    }
+}
+
 /// Sella `TS-BFGS` for a single pair (`hessian_update._MS_TS_BFGS`).
 ///
 /// Uses \(|B|\) in the secant weight so a negative mode is not
@@ -265,6 +319,31 @@ mod tests {
         let s = prfo_restricted(&evals, &evecs, &g, 1, 0.5);
         assert!(s[0].abs() > 1e-8, "no uphill component: {s:?}");
         assert!(nrm2(s.view()) <= 0.5 + 1e-8);
+    }
+
+    #[test]
+    fn partitioned_rfo_opposes_the_minimizer_on_the_negative_mode() {
+        let h = Array2::from_diag(&array![-1.0, 4.0]);
+        let g = array![0.5, 0.1];
+        let minimizer = rfo_get_s(&h, &g, 0, 1.0);
+        let saddle = partitioned_rfo(&h, &g, 1, f64::MAX);
+        assert!(
+            minimizer[0] * saddle[0] < 0.0,
+            "minimizer {minimizer:?} saddle {saddle:?}"
+        );
+    }
+
+    #[test]
+    fn cauchy_fraction_is_the_model_minimum() {
+        let gradient = array![1.0];
+        let predicted = array![-3.0];
+        let alpha = cauchy_fraction(&gradient, &predicted).expect("an interior minimum");
+        let scaled = alpha * 3.0;
+        assert!(
+            (scaled - 1.0).abs() <= f64::EPSILON * scaled.abs().max(1.0),
+            "alpha {alpha}"
+        );
+        assert!(cauchy_fraction(&gradient, &array![-0.5]).is_none());
     }
 
     #[test]
