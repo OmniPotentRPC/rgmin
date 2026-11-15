@@ -275,6 +275,13 @@ pub struct Solver {
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
+    /// Pre-step position and gradient for the curvature pair. The
+    /// buffers stay with the session; a step copies into them.
+    origin_x: Array1<f64>,
+    origin_g: Array1<f64>,
+    /// Working copy of the cached gradient. Empty means the next
+    /// cached step allocates once, then the displaced buffer returns.
+    spare_g: Array1<f64>,
     /// Reused FIRE displacement and trial. Empty until a plain FIRE step.
     fire_dx: Array1<f64>,
     fire_trial: Array1<f64>,
@@ -375,6 +382,19 @@ struct PsoState {
     rng: StdRng,
 }
 
+/// Copy `src` into `dst`. A length change allocates; the steady path does not.
+fn copy_into(dst: &mut Array1<f64>, src: &Array1<f64>) {
+    if dst.len() != src.len() {
+        *dst = src.clone();
+        return;
+    }
+    if let (Some(d), Some(s)) = (dst.as_slice_mut(), src.as_slice()) {
+        d.copy_from_slice(s);
+    } else {
+        dst.assign(src);
+    }
+}
+
 impl Solver {
     /// Fresh session for `method` in dimension `dim`.
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
@@ -427,6 +447,9 @@ impl Solver {
             last_pos: None,
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
+            origin_x: Array1::zeros(0),
+            origin_g: Array1::zeros(0),
+            spare_g: Array1::zeros(0),
             fire_dx: Array1::zeros(0),
             fire_trial: Array1::zeros(0),
             gradient_calls: 0,
@@ -1440,9 +1463,12 @@ impl Solver {
     }
 
     fn remember(&mut self, x: &Array1<f64>, value: f64, grad: &Array1<f64>) {
-        self.last_pos = Some(x.clone());
+        match &mut self.last_pos {
+            Some(dst) if dst.len() == x.len() => copy_into(dst, x),
+            slot => *slot = Some(x.clone()),
+        }
         self.last_value = value;
-        self.last_grad = grad.clone();
+        copy_into(&mut self.last_grad, grad);
     }
 
     /// FIRE schedule for a FIRE session; a no-op on any other method.
@@ -2543,7 +2569,8 @@ impl Solver {
         }
 
         let (mut value, mut grad) = if cached {
-            (self.last_value, self.last_grad.clone())
+            copy_into(&mut self.spare_g, &self.last_grad);
+            (self.last_value, std::mem::take(&mut self.spare_g))
         } else {
             obj.value_and_gradient(x.view())
         };
@@ -2631,12 +2658,14 @@ impl Solver {
             Inner::Lbfgs(_) | Inner::Sr1 { .. } | Inner::Sr2 { .. }
         ) || !self.manifold.retract_is_translation();
         let start = if keep_origin {
-            x.clone()
+            copy_into(&mut self.origin_x, x);
+            std::mem::take(&mut self.origin_x)
         } else {
             Array1::zeros(0)
         };
         let gold = if keep_origin {
-            grad.clone()
+            copy_into(&mut self.origin_g, &grad);
+            std::mem::take(&mut self.origin_g)
         } else {
             Array1::zeros(0)
         };
@@ -3382,6 +3411,14 @@ impl Solver {
             | Inner::NewtonPcg { .. } => unreachable!(),
         }
 
+        let parked = if let Inner::Lbfgs(solver) = &mut self.inner {
+            std::mem::take(&mut solver.returned_grad)
+        } else {
+            Array1::zeros(0)
+        };
+        if !parked.is_empty() {
+            self.spare_g = parked;
+        }
         // A translation retract maps the accepted point to itself; the
         // round trip start + (x - start) only adds rounding (one ulp of
         // a 30 Angstrom coordinate is 3.6e-15) and would buy a second
@@ -3459,6 +3496,12 @@ impl Solver {
         }
 
         self.remember(x, value, &grad);
+        if !start.is_empty() {
+            self.origin_x = start;
+        }
+        if !gold.is_empty() {
+            self.origin_g = gold;
+        }
         self.steps += 1;
         let mut status = self
             .control

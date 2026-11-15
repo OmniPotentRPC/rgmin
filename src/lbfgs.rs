@@ -265,6 +265,9 @@ pub struct Lbfgs {
     alpha_work: Vec<f64>,
     /// Reused line-search trial vector.
     line_scratch: Array1<f64>,
+    /// Gradient buffer the last step displaced. The session parks it
+    /// and copies into it next time instead of allocating.
+    pub(crate) returned_grad: Array1<f64>,
     precon_fallbacks: std::sync::atomic::AtomicUsize,
     #[cfg(feature = "highs")]
     pub(crate) coordinate_box: Option<eindir_core::Bounds<f64>>,
@@ -377,6 +380,7 @@ impl Lbfgs {
             q_work: Array1::zeros(0),
             alpha_work: Vec::new(),
             line_scratch: Array1::zeros(0),
+            returned_grad: Array1::zeros(0),
             #[cfg(feature = "highs")]
             coordinate_box: None,
             precon_fallbacks: std::sync::atomic::AtomicUsize::new(0),
@@ -1474,9 +1478,10 @@ impl Lbfgs {
         if t.moved && record_pair {
             self.push_euclidean(t.x.view(), pos.view(), t.g.view(), grad.view(), None);
         }
+        let old_grad = std::mem::replace(grad, t.g);
+        self.returned_grad = old_grad;
         *pos = t.x;
         *value = t.f;
-        *grad = t.g;
         *istep = qn_istep(control);
         stall
     }
