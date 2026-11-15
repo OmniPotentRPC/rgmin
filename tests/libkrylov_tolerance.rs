@@ -22,14 +22,12 @@ fn requested_residual_tolerance_controls_basis_pruning() {
         &h,
         x.view(),
         seed.view(),
-        &EigenParams {
-            kind: EigensolverKind::Libkrylov,
-            krylov: 16,
-            max_iter: 256,
-            tol: tolerance,
-            nev: 1,
-            ..EigenParams::default()
-        },
+        &EigenParams::default()
+            .with_kind(EigensolverKind::Libkrylov)
+            .with_krylov(16)
+            .with_max_iter(256)
+            .with_tol(tolerance)
+            .with_nev(1),
     )
     .expect("the configured backend must resolve the requested pair");
     assert!((mode.value + 2.5).abs() < 1e-12, "{}", mode.value);

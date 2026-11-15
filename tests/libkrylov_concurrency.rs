@@ -30,14 +30,12 @@ fn independent_concurrent_pairs_are_valid() {
                         &Diagonal,
                         x.view(),
                         seed.view(),
-                        &EigenParams {
-                            kind: EigensolverKind::Libkrylov,
-                            krylov: 16,
-                            max_iter: 256,
-                            tol: 1e-9,
-                            nev: 1,
-                            ..EigenParams::default()
-                        },
+                        &EigenParams::default()
+                            .with_kind(EigensolverKind::Libkrylov)
+                            .with_krylov(16)
+                            .with_max_iter(256)
+                            .with_tol(1e-9)
+                            .with_nev(1),
                     )
                     .unwrap();
                     assert!((mode.value + 2.5).abs() < 1e-12);
@@ -63,12 +61,10 @@ fn recursive_callback_is_rejected_without_disturbing_the_outer_solve() {
                 &Diagonal,
                 x,
                 v,
-                &EigenParams {
-                    kind: EigensolverKind::Libkrylov,
-                    max_iter: 256,
-                    tol: 1e-9,
-                    ..EigenParams::default()
-                },
+                &EigenParams::default()
+                    .with_kind(EigensolverKind::Libkrylov)
+                    .with_max_iter(256)
+                    .with_tol(1e-9),
             )
             .unwrap_err();
             assert!(matches!(
@@ -88,12 +84,10 @@ fn recursive_callback_is_rejected_without_disturbing_the_outer_solve() {
         &h,
         x.view(),
         seed.view(),
-        &EigenParams {
-            kind: EigensolverKind::Libkrylov,
-            max_iter: 256,
-            tol: 1e-9,
-            ..EigenParams::default()
-        },
+        &EigenParams::default()
+            .with_kind(EigensolverKind::Libkrylov)
+            .with_max_iter(256)
+            .with_tol(1e-9),
     )
     .unwrap();
     assert!((mode.value + 2.5).abs() < 1e-12);
