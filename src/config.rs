@@ -54,7 +54,7 @@ mod literal_outside_crate {
                             "let v = ", stringify!($ty), " { ", stringify!($field), ": ", $value,
                             ", ..", $base, " };\n```"
                         )]
-            pub struct $ty;
+            struct $ty;
         };
     }
 
