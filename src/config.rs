@@ -7,8 +7,8 @@
 //! sets `Some(0.2)` and `with_maxmove(None)` clears it.
 
 macro_rules! with_setters {
-    ($ty:ident { $($setter:ident => $field:ident : $kind:ident $fty:ty),* $(,)? }) => {
-        impl $ty {
+    ($ty:ident $(<$lt:lifetime>)? { $($setter:ident => $field:ident : $kind:ident $fty:ty),* $(,)? }) => {
+        impl$(<$lt>)? $ty$(<$lt>)? {
             $( with_setters!(@one $setter $field $kind $fty); )*
         }
     };

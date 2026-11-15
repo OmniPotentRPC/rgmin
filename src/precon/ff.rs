@@ -93,6 +93,7 @@ pub struct DihedralTerm {
 }
 
 /// Borrowed bonded terms. Empty slices contribute nothing.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FfTerms<'a> {
     /// Harmonic bonds.
@@ -104,6 +105,13 @@ pub struct FfTerms<'a> {
     /// Harmonic torsions.
     pub dihedrals: &'a [DihedralTerm],
 }
+
+with_setters!(FfTerms<'a> {
+    with_bonds => bonds: val &'a [BondTerm],
+    with_angles => angles: val &'a [AngleTerm],
+    with_morses => morses: val &'a [MorseTerm],
+    with_dihedrals => dihedrals: val &'a [DihedralTerm],
+});
 
 /// Parameters of the FF preconditioner.
 #[non_exhaustive]

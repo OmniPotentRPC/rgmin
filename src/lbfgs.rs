@@ -486,6 +486,7 @@ impl InitialInverse {
 /// already-relaxed structure. The curvature at a new start resembles the
 /// curvature at the old minimum; a solver that forgets between calls pays
 /// to rediscover it.
+#[non_exhaustive]
 pub struct Lbfgs {
     memory: Vec<Pair>,
     /// Pairs retained; the usual choice is between five and ten.
@@ -588,6 +589,31 @@ impl Default for Lbfgs {
         Self::with_capacity(8)
     }
 }
+
+with_setters!(Lbfgs {
+    with_max_pairs => max_pairs: val usize,
+    with_gtol => gtol: val f64,
+    with_armijo => armijo: val f64,
+    with_curvature => curvature: val f64,
+    with_max_line_evals => max_line_evals: val usize,
+    with_norm => norm: val GradNorm,
+    with_ftol => ftol: val f64,
+    with_step => step: val LbfgsStep,
+    with_fixed_h0 => fixed_h0: opt f64,
+    with_extra_updates => extra_updates: val usize,
+    with_cautious_eps => cautious_eps: val f64,
+    with_cautious_alpha => cautious_alpha: val f64,
+    with_distance_reset => distance_reset: val bool,
+    with_angle_reset => angle_reset: val bool,
+    with_curvature_reset => curvature_reset: val bool,
+    with_inverse_curvature => inverse_curvature: val f64,
+});
+
+#[cfg(feature = "highs")]
+with_setters!(Lbfgs {
+    with_highs => highs: opt crate::lbfgs_qp::HighsStep,
+    with_highs_options => highs_options: val crate::HighsOptions,
+});
 
 impl Lbfgs {
     /// Fresh solver with room for `max_pairs` curvature pairs.

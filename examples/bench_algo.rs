@@ -633,12 +633,7 @@ fn neighbours(x: &Array1<f64>, rc: f64, cell: [f64; 3]) -> Neighbours {
             }
         }
     }
-    Neighbours {
-        i,
-        j,
-        r: Vec::new(),
-        anchor: Vec::new(),
-    }
+    Neighbours::default().with_i(i).with_j(j)
 }
 
 fn problems() -> Vec<Problem> {

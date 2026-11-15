@@ -33,6 +33,9 @@ impl RigidMode {
 }
 
 /// Geometry and policy for one projection.
+///
+/// Start from [`Self::cartesian`] and chain the `with_*` setters.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
 pub struct RigidRequest<'a> {
     /// Length `3 N`. Cartesian, or `q_i = sqrt(m_i) x_i` when
@@ -61,6 +64,18 @@ pub struct RigidRequest<'a> {
     /// [`Self::broken_translation`].
     pub broken_rotation: [bool; 3],
 }
+
+with_setters!(RigidRequest<'a> {
+    with_pos => pos: val &'a [f64],
+    with_masses => masses: opt &'a [f64],
+    with_mass_weighted_coords => mass_weighted_coords: val bool,
+    with_mass_metric => mass_metric: val bool,
+    with_mode => mode: val RigidMode,
+    with_pbc => pbc: val [bool; 3],
+    with_frozen => frozen: opt &'a [u8],
+    with_broken_translation => broken_translation: val [bool; 3],
+    with_broken_rotation => broken_rotation: val [bool; 3],
+});
 
 impl<'a> RigidRequest<'a> {
     /// Unit-mass Cartesian request. No periodicity, freeze, or broken axis.

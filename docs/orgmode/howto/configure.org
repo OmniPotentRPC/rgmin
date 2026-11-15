@@ -41,6 +41,10 @@ control that is used again starts from ~control.clone()~.
 | ~EonCg~ | ~EonCg::default()~ |
 | ~QuickMinOptions~ | ~rgmin()~, ~eon()~, ~per_atom()~ |
 | ~FireConfig~ | ~FireConfig::ase()~ |
+| ~Fire2Extras~ | ~Fire2Extras::new(dt0)~, ~guenole2020~ |
+| ~Lbfgs~ | ~default()~, ~with_capacity(m)~, ~capped~, ~scaled~, ~builder()~ |
+| ~Neighbours~, ~FfTerms~ | ~default()~ |
+| ~RigidRequest~ | ~RigidRequest::cartesian(pos, mode)~ |
 | ~TrustRegion~ | ~TrustRegion::new(delta)~ |
 | ~IrcTrust~ | ~IrcTrust::new(d1, sqrtm, dx)~, ~from_atom_masses~ |
 | ~RtrRadius~ | ~RtrRadius::new(radius_max)~ |

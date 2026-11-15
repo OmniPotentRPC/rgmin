@@ -526,11 +526,9 @@ fn the_exponential_preconditioner_is_refused_either_way() {
     let x = water();
     let set = DistanceConstraints::at(vec![(0, 1), (0, 2)], x.view()).unwrap();
     let obj = HessianOracle::unbounded(9, lj, lj_hessian);
-    let neighbours = Neighbours {
-        i: vec![0, 0, 1],
-        j: vec![1, 2, 2],
-        ..Neighbours::default()
-    };
+    let neighbours = Neighbours::default()
+        .with_i(vec![0, 0, 1])
+        .with_j(vec![1, 2, 2]);
     let params = ExpParams::default().with_r_nn(1.0).with_mu(1.0);
     let mut before = Solver::new(Method::lbfgs(), control(), 9);
     before.set_exp(x.view(), &neighbours, &params).unwrap();

@@ -648,6 +648,15 @@ pub struct Fire2Extras {
     pub n_neg_max: usize,
 }
 
+with_setters!(Fire2Extras {
+    with_dt_min => dt_min: val f64,
+    with_n_delay => n_delay: val usize,
+    with_initial_delay => initial_delay: val bool,
+    with_steps => steps: val usize,
+    with_n_neg => n_neg: val usize,
+    with_n_neg_max => n_neg_max: val usize,
+});
+
 impl Fire2Extras {
     /// Table 1 of Guénolé et al., Comput. Mater. Sci. 175 (2020) 109584,
     /// DOI 10.1016/j.commatsci.2020.109584: `dt_min = 0.02 dt0`,

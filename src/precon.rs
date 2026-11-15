@@ -97,6 +97,7 @@ use crate::error::{Error, Result};
 /// [`Exp::assemble`]. `anchor` is a bond from a free atom to an atom
 /// with no coordinate in the vector: it contributes to that atom's
 /// diagonal only.
+#[non_exhaustive]
 #[derive(Clone, Debug, Default)]
 pub struct Neighbours {
     /// First atom of each pair.
@@ -108,6 +109,13 @@ pub struct Neighbours {
     /// `(atom, distance)` bonds to atoms outside the coordinate vector.
     pub anchor: Vec<(usize, f64)>,
 }
+
+with_setters!(Neighbours {
+    with_i => i: val Vec<usize>,
+    with_j => j: val Vec<usize>,
+    with_r => r: val Vec<f64>,
+    with_anchor => anchor: val Vec<(usize, f64)>,
+});
 
 /// Parameters of the exponential preconditioner.
 ///

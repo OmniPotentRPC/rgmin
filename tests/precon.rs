@@ -352,10 +352,7 @@ fn lindh_and_ff_shorten_lbfgs_on_a_molecule() {
         BondTerm { i: 0, j: 2, k: 1.0 },
     ];
     let ff_params = FfParams::default().with_mu(1.0);
-    let terms = FfTerms {
-        bonds: &bonds,
-        ..FfTerms::default()
-    };
+    let terms = FfTerms::default().with_bonds(&bonds);
     let ff = rgmin::Ff::assemble(geom.view(), terms, &ff_params).unwrap();
     let ff_obj = ModelQuad {
         apply: |x: ArrayView1<f64>| ff.apply(x),
@@ -508,12 +505,10 @@ fn neighbours_cutoff(pos: &Array1<f64>, cut: f64) -> Neighbours {
         .collect();
     pairs.sort_by_key(|a| (a.0, a.1));
     pairs.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
-    Neighbours {
-        i: pairs.iter().map(|p| p.0).collect(),
-        j: pairs.iter().map(|p| p.1).collect(),
-        r: pairs.iter().map(|p| p.2).collect(),
-        anchor: Vec::new(),
-    }
+    Neighbours::default()
+        .with_i(pairs.iter().map(|p| p.0).collect())
+        .with_j(pairs.iter().map(|p| p.1).collect())
+        .with_r(pairs.iter().map(|p| p.2).collect())
 }
 
 /// Assembly, apply, and solve above each kernel's gate. The thread
@@ -534,11 +529,7 @@ fn precon_fingerprint() -> Vec<u64> {
 
     let (bonds, angles) = rgmin::bonded_terms(pos.view(), 2.2, 1.0, 0.2, None).unwrap();
     let fp = FfParams::default().with_mu(1.0).with_r_cut(3.0);
-    let terms = FfTerms {
-        bonds: &bonds,
-        angles: &angles,
-        ..FfTerms::default()
-    };
+    let terms = FfTerms::default().with_bonds(&bonds).with_angles(&angles);
     let ff = Ff::assemble(pos.view(), terms, &fp).unwrap();
     out.extend(bits_of(&ff.apply(rhs.view())));
     out.extend(bits_of(&ff.solve(rhs.view()).unwrap()));
