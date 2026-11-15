@@ -63,3 +63,26 @@ convergence gate combines a step-size test in the infinity norm with
 a relative objective test, both scaled, so neither a tiny step at a
 steep point nor a flat stretch at a large step reads as convergence
 alone.
+
+5 Stopping without an iteration budget
+--------------------------------------
+
+A zero ``Control::maxiter`` leaves termination to the convergence gate and the numerical failure checks.
+On a plateau the objective test passes while the step stays above ``tol_sol``, so the gate never closes.
+The comparison ratio is near zero and the damping quadruples on every step.
+The fit then ends on ``lambda_limit`` with a gradient error, or never returns when ``lambda_limit`` is at or above the internal damping cap of 1e100.
+
+Moller resets the direction to steepest descent after n consecutive successful steps, n the number of parameters (his step 9, :cite:`mllerScaledConjugateGradient1993`).
+A whole period of flat steps that never reduces the gradient therefore starts over in the same state.
+An unlimited fit stops after max(n, 2) consecutive accepted steps that pass the objective test,
+
+``abs(f_new - f_old) < tol_func (1 + (f_max - f_min))``,
+
+and whose gradient norm never falls below its value ``g_0`` at the first of them:
+
+``norm(g) + sqrt(eps) g_0 >= g_0``.
+
+The sqrt(eps) band absorbs the rounding of the curvature probe, so a last-bit change is not a decrease.
+The floor of two steps keeps a one-parameter fit from stopping on a single flat step, such as an overshoot to a point of equal value that the next step corrects.
+The stop reports ``StepTolerance``, or ``Tolerance`` or ``NoiseFloor`` when the gradient qualifies for those, as the step test does.
+A positive ``maxiter`` never takes this exit and follows the same trajectory as before.
