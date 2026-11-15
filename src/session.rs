@@ -4920,14 +4920,22 @@ impl Solver {
                 }
                 let h = state.open();
                 let dx = steepest.mapv(|v| h * v);
-                let mut trial = &*x + &dx;
+                let proposed = &*x + &dx;
+                let mut trial = proposed.clone();
                 if let Some(cap) = self.atom_maxmove {
                     scale_step_atom(x, &mut trial, cap);
                 } else if let Some(cap) = self.control.maxmove_cap() {
                     scale_step(x, &mut trial, cap);
                 }
                 trial = obj.bounds().clip(trial.view());
-                let h_taken = crate::ode12r::taken_step(h, &dx, &(&trial - &*x));
+                // Only a move the cap or the box changed is shorter than h.
+                // The length ratio of an unchanged move rounds, and one ulp
+                // under h would trip the capped-move floor below.
+                let h_taken = if trial == proposed {
+                    h
+                } else {
+                    crate::ode12r::taken_step(h, &dx, &(&trial - &*x))
+                };
                 let (trial_value, trial_grad) = obj.value_and_gradient(trial.view());
                 #[allow(unused_mut)]
                 let mut force_new = trial_grad.mapv(|g| -g);

@@ -125,6 +125,25 @@ fn the_displacement_cap_binds_far_from_the_minimum() {
 }
 
 #[test]
+fn an_uncapped_step_keeps_the_length_the_controller_chose() {
+    // h k = 1.5 flips and halves x and is accepted. The line-search length
+    // is the Newton length 1 / k and the error control is loose this close
+    // to the minimum, so the next trial has length 1 and lands on the
+    // minimum. Nothing capped the move, so nothing may floor that length
+    // at 1.5, which would overshoot to x0 / 4. For this x0 the taken
+    // length h |dx_taken| / |dx| rounds one ulp below h.
+    let obj = Quad::new(Array1::from_elem(3, 1.0));
+    let x0 = array![0.25, -0.5, 0.25].mapv(|v| v / 1024.0);
+    let mut x = x0.clone();
+    let mut solver = session(1.5, 3);
+    solver.step(&obj, &mut x).unwrap();
+    assert_eq!(x, x0.mapv(|v| -0.5 * v));
+    solver.step(&obj, &mut x).unwrap();
+    let left = x.mapv(f64::abs).sum() / x0.mapv(f64::abs).sum();
+    assert!(left < 1e-12, "the second trial left {x:?}");
+}
+
+#[test]
 fn forget_reopens_at_the_initial_step() {
     let obj = Quad::new(array![1.0, 1.0]);
     let mut x = array![1.0, 1.0];

@@ -33,9 +33,11 @@
 //! The session owns the clamps: the displacement cap shortens the move,
 //! and the step length that enters the error estimate is the one the
 //! move actually took, `h |Δx_taken| / |Δx_proposed|`, so a capped step
-//! is judged as the step it was. The next trial starts from the length
-//! the controller chose, floored at an accepted capped move's length so
-//! that a cap the move already sits on cannot shrink the step further.
+//! is judged as the step it was. A move that no clamp changed is judged
+//! at `h` itself, since the ratio of two equal lengths can round below
+//! one. The next trial starts from the length the controller chose,
+//! floored at an accepted capped move's length so that a cap the move
+//! already sits on cannot shrink the step further.
 
 use ndarray::Array1;
 
