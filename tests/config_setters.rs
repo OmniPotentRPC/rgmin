@@ -551,12 +551,11 @@ fn declared_in(source: &str, out: &mut Declared) {
         } else if line.starts_with('}') {
             in_impl = None;
         }
-        if let (Some(ty), Some(rest)) = (&in_impl, trimmed.strip_prefix("pub fn with_")) {
-            if let Some((name, args)) = rest.split_once('(') {
-                if args.starts_with("mut self") {
-                    out.hand.push((ty.clone(), name.to_string()));
-                }
-            }
+        if let (Some(ty), Some(rest)) = (&in_impl, trimmed.strip_prefix("pub fn with_"))
+            && let Some((name, args)) = rest.split_once('(')
+            && args.starts_with("mut self")
+        {
+            out.hand.push((ty.clone(), name.to_string()));
         }
     }
 }
