@@ -215,16 +215,16 @@ fn point_inside_box(bounds: &eindir_core::Bounds<f64>, x: ArrayView1<'_, f64>) -
     if let (Some(xs), Some(lo), Some(hi)) =
         (x.as_slice(), bounds.low.as_slice(), bounds.high.as_slice())
     {
-        return xs
-            .chunks(8)
-            .zip(lo.chunks(8))
-            .zip(hi.chunks(8))
-            .all(|((xc, lc), hc)| {
-                xc.iter()
-                    .zip(lc.iter())
-                    .zip(hc.iter())
-                    .all(|((xi, l), h)| *xi >= *l && *xi <= *h)
-            });
+        // Same `xi >= lo && xi <= hi` test on every coordinate. A failing
+        // coordinate still makes the whole point fail; the scan does not
+        // stop, so the answer matches the short-circuiting walk.
+        let mut inside = true;
+        let mut i = 0;
+        while i < xs.len() {
+            inside &= (xs[i] >= lo[i]) & (xs[i] <= hi[i]);
+            i += 1;
+        }
+        return inside;
     }
     x.iter()
         .enumerate()
@@ -580,7 +580,51 @@ pub(crate) fn nlcg_opening_alpha(
 
 #[cfg(test)]
 mod tests {
-    use super::{nlcg_half_opening, nlcg_opening_alpha};
+    use super::{nlcg_half_opening, nlcg_opening_alpha, point_inside_box};
+
+    #[test]
+    fn box_membership_matches_the_coordinate_test() {
+        let mut state = 0x1234_5678_9abc_def0u64;
+        let mut next = || {
+            state = state.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(1);
+            f64::from_bits((state >> 12) | (1023u64 << 52)) - 1.5
+        };
+        for n in [0usize, 1, 7, 8, 9, 17, 64, 1000] {
+            let x: Vec<f64> = (0..n).map(|_| next()).collect();
+            let lo: Vec<f64> = (0..n).map(|_| next() - 0.5).collect();
+            let hi: Vec<f64> = (0..n).map(|_| next() + 0.5).collect();
+            let bounds = eindir_core::Bounds::new(
+                ndarray::Array1::from(lo.clone()),
+                ndarray::Array1::from(hi.clone()),
+                0.0,
+            );
+            let got = point_inside_box(&bounds, ndarray::ArrayView1::from(&x));
+            let expect = x
+                .iter()
+                .zip(&lo)
+                .zip(&hi)
+                .all(|((xi, l), h)| xi >= l && xi <= h);
+            assert_eq!(got, expect, "n {n}");
+        }
+        let bounds = eindir_core::Bounds::new(
+            ndarray::Array1::from_elem(2, -0.0),
+            ndarray::Array1::from_elem(2, 0.0),
+            0.0,
+        );
+        assert!(point_inside_box(
+            &bounds,
+            ndarray::ArrayView1::from(&[-0.0, 0.0])
+        ));
+        let wide = eindir_core::Bounds::new(
+            ndarray::Array1::from_elem(1, f64::NEG_INFINITY),
+            ndarray::Array1::from_elem(1, f64::INFINITY),
+            0.0,
+        );
+        assert!(!point_inside_box(
+            &wide,
+            ndarray::ArrayView1::from(&[f64::NAN])
+        ));
+    }
 
     /// `2 (f - f_prev) / gd`. NaN unless the slope is a strict descent.
     fn quadratic_opening(f: f64, f_prev: f64, gd: f64) -> f64 {
