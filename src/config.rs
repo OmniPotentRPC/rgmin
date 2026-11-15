@@ -13,7 +13,7 @@ macro_rules! with_setters {
         }
     };
     (@one $setter:ident $field:ident val $fty:ty) => {
-        #[doc = concat!("Replace [`Self::", stringify!($field), "`].")]
+        #[doc = concat!("Replace [`", stringify!($field), "`](field@Self::", stringify!($field), ").")]
         ///
         /// Chain it after `default()` or a named constructor.
         #[must_use]
@@ -23,7 +23,7 @@ macro_rules! with_setters {
         }
     };
     (@one $setter:ident $field:ident opt $fty:ty) => {
-        #[doc = concat!("Replace [`Self::", stringify!($field), "`].")]
+        #[doc = concat!("Replace [`", stringify!($field), "`](field@Self::", stringify!($field), ").")]
         ///
         /// A bare value is `Some`; `None` clears it.
         #[must_use]
