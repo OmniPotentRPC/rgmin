@@ -16,6 +16,8 @@ C: ~rgmin_manifold_handle_t~ and the ~rgmin_manifold_*~ functions, ABI minor 41.
 
 ~rgmin_solver_set_highs_callback~ compiles when ~capi~ and ~highs~ are both on. It wraps the callback and its ~user~ pointer in ~HighsCallback::new~, and a NULL callback clears it. The C signature and ABI minor 43 are unchanged. ~examples/compare_highs.rs~ and the ~highs~ C tests build again.
 
+~Lbfgs~, ~Fire2Extras~, ~Neighbours~, ~FfTerms~ and ~RigidRequest~ are ~#[non_exhaustive]~ with a ~with_*~ setter for every public field, like the other configuration types. Start from ~default()~, ~Fire2Extras::new~ or ~RigidRequest::cartesian~; a struct literal outside the crate no longer compiles.
+
 ** 0.6.0 (2026-11-13)
 
 ~lowest_eigenpairs~ is block LOBPCG for the k lowest eigenpairs of a symmetric product (Knyazev 2001).
