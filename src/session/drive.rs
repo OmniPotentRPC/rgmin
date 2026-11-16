@@ -556,43 +556,194 @@ impl Solver {
 }
 
 fn scale_cap(trial: &mut [f64], origin: &[f64], cap: f64, per_atom: bool) {
-    if per_atom {
-        let mut max_a = 0.0_f64;
-        let mut i = 0;
-        while i + 3 <= trial.len() {
-            let dx = trial[i] - origin[i];
-            let dy = trial[i + 1] - origin[i + 1];
-            let dz = trial[i + 2] - origin[i + 2];
-            max_a = max_a.max((dx * dx + dy * dy + dz * dz).sqrt());
-            i += 3;
-        }
-        if i < trial.len() {
-            let mut r2 = 0.0;
-            let mut j = i;
-            while j < trial.len() {
-                let d = trial[j] - origin[j];
-                r2 += d * d;
-                j += 1;
-            }
-            max_a = max_a.max(r2.sqrt());
-        }
-        if max_a > cap && max_a > 0.0 {
-            let s = cap / max_a;
-            for i in 0..trial.len() {
-                trial[i] = origin[i] + s * (trial[i] - origin[i]);
-            }
-        }
+    let origin = &origin[..trial.len()];
+    let size = if per_atom {
+        let (atoms, tail) = trial.as_chunks::<3>();
+        let (origin_atoms, origin_tail) = origin.as_chunks::<3>();
+        // Atoms are taken by value: with references, the inlined loop keeps
+        // noalias scope declarations and LLVM 22 stops vectorizing the max.
+        atoms
+            .iter()
+            .copied()
+            .zip(origin_atoms.iter().copied())
+            .map(|([tx, ty, tz], [ox, oy, oz])| {
+                let (dx, dy, dz) = (tx - ox, ty - oy, tz - oz);
+                (dx * dx + dy * dy + dz * dz).sqrt()
+            })
+            .fold(0.0, f64::max)
+            .max(distance(tail, origin_tail))
     } else {
-        let mut n2 = 0.0;
-        for i in 0..trial.len() {
-            let d = trial[i] - origin[i];
-            n2 += d * d;
+        distance(trial, origin)
+    };
+    if size > cap && size > 0.0 {
+        let s = cap / size;
+        for (t, &o) in trial.iter_mut().zip(origin) {
+            *t = o + s * (*t - o);
         }
-        let nrm = n2.sqrt();
-        if nrm > cap && nrm > 0.0 {
-            let s = cap / nrm;
+    }
+}
+
+fn distance(a: &[f64], b: &[f64]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(a, b)| (a - b) * (a - b))
+        .sum::<f64>()
+        .sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::hint::black_box;
+
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
+
+    use super::scale_cap;
+
+    /// `scale_cap` as it was written with indices.
+    fn scale_cap_indexed(trial: &mut [f64], origin: &[f64], cap: f64, per_atom: bool) {
+        if per_atom {
+            let mut max_a = 0.0_f64;
+            let mut i = 0;
+            // LLVM 21 (rustc 1.93 and 1.94) segfaults vectorizing this loop
+            // unless its bound is opaque.
+            while i + 3 <= black_box(trial.len()) {
+                let dx = trial[i] - origin[i];
+                let dy = trial[i + 1] - origin[i + 1];
+                let dz = trial[i + 2] - origin[i + 2];
+                max_a = max_a.max((dx * dx + dy * dy + dz * dz).sqrt());
+                i += 3;
+            }
+            if i < trial.len() {
+                let mut r2 = 0.0;
+                let mut j = i;
+                while j < trial.len() {
+                    let d = trial[j] - origin[j];
+                    r2 += d * d;
+                    j += 1;
+                }
+                max_a = max_a.max(r2.sqrt());
+            }
+            if max_a > cap && max_a > 0.0 {
+                let s = cap / max_a;
+                for i in 0..trial.len() {
+                    trial[i] = origin[i] + s * (trial[i] - origin[i]);
+                }
+            }
+        } else {
+            let mut n2 = 0.0;
             for i in 0..trial.len() {
-                trial[i] = origin[i] + s * (trial[i] - origin[i]);
+                let d = trial[i] - origin[i];
+                n2 += d * d;
+            }
+            let nrm = n2.sqrt();
+            if nrm > cap && nrm > 0.0 {
+                let s = cap / nrm;
+                for i in 0..trial.len() {
+                    trial[i] = origin[i] + s * (trial[i] - origin[i]);
+                }
+            }
+        }
+    }
+
+    fn assert_same_bits(trial: &[f64], origin: &[f64], cap: f64, per_atom: bool) {
+        let mut want = trial.to_vec();
+        scale_cap_indexed(&mut want, origin, cap, per_atom);
+        let mut got = trial.to_vec();
+        scale_cap(&mut got, origin, cap, per_atom);
+        let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(
+            bits(&got),
+            bits(&want),
+            "trial {trial:?} origin {origin:?} cap {cap} per_atom {per_atom}"
+        );
+    }
+
+    const CAPS: [f64; 10] = [
+        0.0,
+        -0.0,
+        -1.0,
+        1e-300,
+        0.05,
+        0.2,
+        1.0,
+        1e300,
+        f64::INFINITY,
+        f64::NAN,
+    ];
+
+    const ODD: [f64; 10] = [
+        0.0,
+        -0.0,
+        5e-324,
+        1e-200,
+        1e200,
+        f64::MAX,
+        -f64::MAX,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NAN,
+    ];
+
+    #[test]
+    fn scale_cap_writes_the_bits_of_the_indexed_loops() {
+        let mut rng = StdRng::seed_from_u64(0x5ca1e);
+        // At 26 and 112 values the vectorized max of the atoms runs several
+        // vector iterations and a remainder, so a NaN takes its early exit.
+        for n in (0..=13).chain([26, 112]) {
+            let zeros = vec![0.0; n];
+            let neg_zeros = vec![-0.0; n];
+            let origin: Vec<f64> = (0..n).map(|_| rng.random_range(-5.0..5.0)).collect();
+            for per_atom in [true, false] {
+                for cap in CAPS {
+                    assert_same_bits(&zeros, &zeros, cap, per_atom);
+                    assert_same_bits(&neg_zeros, &zeros, cap, per_atom);
+                    assert_same_bits(&origin, &origin, cap, per_atom);
+                    for scale in [1e-200, 1e-3, 0.1, 1.0, 1e3, 1e200] {
+                        let trial: Vec<f64> = origin
+                            .iter()
+                            .map(|o| o + scale * rng.random_range(-1.0..1.0))
+                            .collect();
+                        assert_same_bits(&trial, &origin, cap, per_atom);
+                        for k in 0..n {
+                            for odd in ODD {
+                                let mut t = trial.clone();
+                                t[k] = odd;
+                                assert_same_bits(&t, &origin, cap, per_atom);
+                                let mut o = origin.clone();
+                                o[k] = odd;
+                                assert_same_bits(&trial, &o, cap, per_atom);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for _ in 0..2000 {
+            let n = rng.random_range(0..400);
+            let extra = rng.random_range(0..3);
+            let origin: Vec<f64> = (0..n + extra)
+                .map(|_| rng.random_range(-20.0..20.0))
+                .collect();
+            let scale = 10f64.powi(rng.random_range(-4..2));
+            let trial: Vec<f64> = origin[..n]
+                .iter()
+                .map(|o| o + scale * rng.random_range(-1.0..1.0))
+                .collect();
+            let cap = scale * rng.random_range(0.0..3.0);
+            for per_atom in [true, false] {
+                assert_same_bits(&trial, &origin, cap, per_atom);
+            }
+        }
+    }
+
+    #[test]
+    fn scale_cap_still_panics_on_a_short_origin() {
+        type Cap = fn(&mut [f64], &[f64], f64, bool);
+        for f in [scale_cap as Cap, scale_cap_indexed] {
+            for per_atom in [true, false] {
+                let short = std::panic::catch_unwind(|| f(&mut [1.0; 4], &[0.0; 3], 0.5, per_atom));
+                assert!(short.is_err());
             }
         }
     }
