@@ -10,10 +10,10 @@
     "results_dir": "benchmarks/results",
     "html_dir": "benchmarks/html",
     "build_command": [
-        "cargo build --release --features capi"
+        "cargo build --release --features capi --bin rgquad"
     ],
     "install_command": [
-        "python -c \"import os, shutil, pathlib; env=pathlib.Path('{env_dir}'); dst=env/'lib'; dst.mkdir(parents=True, exist_ok=True); shutil.copy2('target/release/librgmin.so', dst/'librgmin.so')\"",
+        "python -c \"import shutil, pathlib; env=pathlib.Path('{env_dir}'); lib=env/'lib'; lib.mkdir(parents=True, exist_ok=True); shutil.copy2('target/release/librgmin.so', lib/'librgmin.so'); bind=env/'bin'; bind.mkdir(parents=True, exist_ok=True); shutil.copy2('target/release/rgquad', bind/'rgquad')\"",
         "bash -c 'test -n \"$RGPOT_PREFIX\" && mkdir -p {env_dir}/bin && c++ -O2 -std=c++20 -Iinclude -I\"$RGPOT_PREFIX/include\" benchmarks/relax_driver.cc -L{env_dir}/lib -Wl,-rpath,{env_dir}/lib -lrgmin -L\"$RGPOT_PREFIX/lib\" -Wl,-rpath,\"$RGPOT_PREFIX/lib\" -lrgpot -o {env_dir}/bin/relax_driver'"
     ]
 }

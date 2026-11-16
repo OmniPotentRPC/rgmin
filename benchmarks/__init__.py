@@ -1,1 +1,1 @@
-"""Atomistic wall time and call counts for L-BFGS and FIRE 2.0."""
+"""Atomistic wall time, and the quadratic cells for FIRE, CG, and the trust step."""

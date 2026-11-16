@@ -311,7 +311,7 @@ Sys read_con(const std::string &path, int z, int kind) {
 int main(int argc, char **argv) {
   if (argc < 5) {
     std::fprintf(stderr,
-                 "usage: relax_driver <lj13|lj38|lj75|pt7|cu|al> <lbfgs|fire2> <con-or-> <reps>\n");
+                 "usage: relax_driver <lj13|lj38|lj75|pt7|cu|al> <lbfgs|fire|fire2|cg> <con-or-> <reps|session>\n");
     return 2;
   }
   const std::string system = argv[1];
@@ -338,6 +338,11 @@ int main(int argc, char **argv) {
   if (method == "fire2") {
     method_id = RGMIN_FIRE2;
     istep = 0.1;
+  } else if (method == "fire") {
+    method_id = RGMIN_FIRE;
+    istep = 0.1;
+  } else if (method == "cg") {
+    method_id = RGMIN_POLAK_RIBIERE;
   } else if (method != "lbfgs") {
     std::fprintf(stderr, "unknown method\n");
     return 2;
@@ -362,8 +367,8 @@ int main(int argc, char **argv) {
     x0[k] = sys.pos[job.free[k]] + sigma * nrm;
   }
 
-  int failed = 0;
-  for (int rep = 0; rep < reps; ++rep) {
+  const bool session = std::string(argv[4]) == "session";
+  auto relax_once = [&]() -> int {
     reset_emt();
     job.x = x0;
     job.calls = 0;
@@ -377,7 +382,7 @@ int main(int argc, char **argv) {
     rgmin_solver_t *solver = rgmin_solver_create(method_id, &ctrl, job.x.size());
     if (!solver) {
       std::fprintf(stderr, "solver_create failed\n");
-      return 1;
+      return 2;
     }
     auto t0 = std::chrono::steady_clock::now();
     int iters = 0;
@@ -395,7 +400,7 @@ int main(int argc, char **argv) {
       if (st != RGMIN_SUCCESS) {
         std::fprintf(stderr, "step failed\n");
         rgmin_solver_free(solver);
-        return 1;
+        return 2;
       }
       iters = it + 1;
       energy = rep_out.value;
@@ -408,7 +413,28 @@ int main(int argc, char **argv) {
     auto wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     rgmin_solver_free(solver);
     std::printf("%d %d %d %.10f %.3e %.6f\n", converged, iters, job.calls, energy, fm, wall);
-    if (!converged) failed = 1;
+    std::fflush(stdout);
+    return converged ? 0 : 1;
+  };
+
+  if (session) {
+    std::printf("ready\n");
+    std::fflush(stdout);
+    char line[64];
+    while (std::fgets(line, sizeof line, stdin) != nullptr) {
+      if (std::strncmp(line, "quit", 4) == 0) return 0;
+      if (std::strncmp(line, "run", 3) == 0) {
+        if (relax_once() == 2) return 1;
+      }
+    }
+    return 0;
+  }
+
+  int failed = 0;
+  for (int rep = 0; rep < reps; ++rep) {
+    int rc = relax_once();
+    if (rc == 2) return 1;
+    if (rc != 0) failed = 1;
   }
   return failed;
 }

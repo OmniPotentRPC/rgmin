@@ -98,6 +98,10 @@ required-features = ["highs"]
 name = "ffi_throughput"
 required-features = ["capi"]
 
+[[bin]]
+name = "rgquad"
+path = "benchmarks/rgquad.rs"
+
 
 [profile.release]
 lto = "thin"
