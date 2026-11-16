@@ -136,7 +136,10 @@ C
 
     #include "rgmin.h"
 
-    rgmin_control_t ctrl = { .maxiter = 200, .gtol = 1e-8, .istep = 1.0, .memory = 8 };
+    rgmin_control_t ctrl = rgmin_control_default();
+    ctrl.maxiter = 200;
+    ctrl.gtol = 1e-8;
+    ctrl.memory = 8;
     rgmin_solver_t *s = rgmin_solver_create(RGMIN_LBFGS, &ctrl, n);
     rgmin_report_t report;
     while (!done) {

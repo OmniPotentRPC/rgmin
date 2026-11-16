@@ -27,6 +27,41 @@ setters take ``int32_t`` and the closed ``rgmin_highs_*`` enums.
 Pass ``--features capi``. The C symbols are compiled only with that
 feature. ``cbindgen`` output is not installed.
 
+Start from the defaults
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Every struct a caller fills in has an initializer that returns the Rust
+defaults. A caller must start each struct from its initializer and
+assign only the fields it changes.
+
+.. table::
+
+    +---------------------------+-----------------------------------+
+    | Struct                    | Initializer                       |
+    +===========================+===================================+
+    | ``rgmin_control_t``       | ``rgmin_control_default()``       |
+    +---------------------------+-----------------------------------+
+    | ``rgmin_exp_t``           | ``rgmin_exp_default()``           |
+    +---------------------------+-----------------------------------+
+    | ``rgmin_scg_params_t``    | ``rgmin_scg_params_default()``    |
+    +---------------------------+-----------------------------------+
+    | ``rgmin_scg_options_t``   | ``rgmin_scg_options_default()``   |
+    +---------------------------+-----------------------------------+
+    | ``rgmin_eigen_params_t``  | ``rgmin_eigen_params_default()``  |
+    +---------------------------+-----------------------------------+
+    | ``rgmin_eigen_options_t`` | ``rgmin_eigen_options_default()`` |
+    +---------------------------+-----------------------------------+
+    | ``rgmin_precon_t``        | ``rgmin_precon_init(&p, kind)``   |
+    +---------------------------+-----------------------------------+
+
+A field that a later revision adds then holds its default without a
+change to the caller. A struct declared without an initializer holds
+stack bytes in the fields the caller does not set, and a brace or
+designated initializer sets them to zero, which is not every field's
+default. A stray positive ``noise_eps`` turns the noise-floor stop on, and
+a session then stays at its start point. The ``rgmin_*_default`` functions
+are ``abi_minor`` 46, and ``xts.h`` names them ``xts_*_default``.
+
 Session (eOn / ASE ``step``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -34,7 +69,10 @@ Session (eOn / ASE ``step``)
 
     #include "rgmin.h"
 
-    rgmin_control_t ctrl = { .maxiter = 200, .gtol = 1e-8, .istep = 1.0, .memory = 8 };
+    rgmin_control_t ctrl = rgmin_control_default();
+    ctrl.maxiter = 200;
+    ctrl.gtol = 1e-8;
+    ctrl.memory = 8;
     rgmin_solver_t *s = rgmin_solver_create(RGMIN_LBFGS, &ctrl, n);
     rgmin_report_t report;
     while (!done) {
@@ -92,7 +130,10 @@ One-shot
 
     #include "rgmin.h"
 
-    rgmin_control_t ctrl = { .maxiter = 200, .gtol = 1e-8, .istep = 1.0, .memory = 8 };
+    rgmin_control_t ctrl = rgmin_control_default();
+    ctrl.maxiter = 200;
+    ctrl.gtol = 1e-8;
+    ctrl.memory = 8;
     rgmin_report_t report;
     rgmin_status_t st = rgmin_minimize(eval, grad, user, x, &ctrl, RGMIN_LBFGS, &report);
 
@@ -112,13 +153,11 @@ optional preconditioner (null is the identity). It is ``abi_minor`` 42.
 
 .. code:: c
 
-    rgmin_scg_params_t params = {
-        .sigma0 = 1e-4, .lambda = 1.0, .lambda_limit = 1e60,
-        .tol_sol = 1e-6, .tol_func = 1e-8,
-        .conjugacy = RGMIN_CONJUGACY_LIU_STOREY, /* gpr_optim RgminScg.inl */
-    };
+    rgmin_scg_params_t params = rgmin_scg_params_default();
+    params.conjugacy = RGMIN_CONJUGACY_LIU_STOREY; /* gpr_optim RgminScg.inl */
     rgmin_minimize_scg(eval, grad, curv, user, x, &ctrl, &params, &report);
-    /* params == NULL selects Netlab Polak-Ribiere + ScgParams::default + Restart::Never */
+    /* params == NULL is rgmin_scg_params_default(): Netlab Polak-Ribiere +
+       ScgParams::default + Restart::Never */
 
 A non-CPU tensor returns ``RGMIN_UNSUPPORTED_DEVICE``. The ABI does not
 change when a CUDA path lands.
@@ -178,6 +217,8 @@ C++
     auto report = rgmin::minimize_fn(eval, grad, user, x, ctrl,
                                      rgmin::Method::Lbfgs);
 
+``rgmin::Control`` has its own defaults. The wrappers copy it over
+``rgmin_control_default()``, so a C field it lacks keeps its default.
 ``<xts/optimize.hpp>`` keeps the same names under ``xts::optimize`` for old hosts.
 xtensor callers include ``xts/xtensor.hpp``, which adapts ``xt::xarray`` to
 the same ``rgmin_minimize`` entry. There is no solver in the header.

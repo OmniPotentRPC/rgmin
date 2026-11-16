@@ -45,7 +45,8 @@ solver.set_precon(PreconSpec::Exp {
 ~clear_precon~ drops the metric. ~precon_scale~ is the estimated ~μ~,
 or ~None~ until the sine probe has run.
 
-From C, fill ~rgmin_precon_t~ and call ~rgmin_solver_set_precon~.
+From C, start ~rgmin_precon_t~ from ~rgmin_precon_init~, set the fields
+to change, and call ~rgmin_solver_set_precon~.
 ~RGMIN_PRECON_AUTO~ uses the rule above and the session's method.
 A nonzero bond or angle count is the force field, and it applies
 only for a covalent molecule or cluster. Every index is checked

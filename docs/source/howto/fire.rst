@@ -43,7 +43,10 @@ C
 
     #include "rgmin.h"
 
-    rgmin_control_t ctrl = { .maxiter = 5000, .gtol = 1e-5, .istep = 1e-3, .maxmove = 0.2 };
+    rgmin_control_t ctrl = rgmin_control_default(); /* gtol 1e-5 */
+    ctrl.maxiter = 5000;
+    ctrl.istep = 1e-3;
+    ctrl.maxmove = 0.2;
     rgmin_solver_t *s = rgmin_solver_create(RGMIN_FIRE2, &ctrl, n);
     if (rgmin_solver_set_fire_preset(s, RGMIN_FIRE_PRESET_GUENOLE2020) != 0
         || rgmin_solver_set_fire_abc(s, 1) != 0) {

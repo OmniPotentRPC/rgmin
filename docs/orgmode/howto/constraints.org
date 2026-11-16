@@ -64,6 +64,7 @@ rgmin_constraints_t *set = rgmin_constraints_create_at(pi, pj, 3, x, 9);
 if (set == NULL || rgmin_constraints_set_masses(set, masses, 3) != RGMIN_SUCCESS) {
     /* rgmin_last_error() says why, rgmin_last_constraint_error() names it */
 }
+rgmin_control_t ctrl = rgmin_control_default();
 rgmin_solver_t *s = rgmin_solver_create(RGMIN_LBFGS, &ctrl, 9);
 rgmin_solver_set_accept(s, RGMIN_ACCEPT_ENERGY);
 if (rgmin_solver_set_distance_constraints(s, set) != RGMIN_SUCCESS) {
