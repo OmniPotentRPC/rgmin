@@ -82,6 +82,13 @@ jobs:
             exit 1
           fi
       - run: cargo test --locked ${{ matrix.args }}
+      - name: C and C++ consumers under valgrind
+        if: matrix.name == 'capi'
+        run: |
+          set -euo pipefail
+          sudo apt-get update && sudo apt-get install -y valgrind
+          RGMIN_C_TEST_RUNNER="valgrind --error-exitcode=99 --track-origins=yes --quiet" \
+            cargo test --locked --features capi --test c_headers --test cxx_headers
       - name: Public docs and C ABI names
         if: matrix.name == 'default'
         run: |
@@ -202,6 +209,18 @@ jobs:
           export LAMMPS_POTENTIALS="$HOME/lammps/potentials"
           export RGMIN_LAMMPS_MPIRUN="mpirun --oversubscribe"
           ctest --test-dir build-lammps --output-on-failure
+      # Memcheck exits 99 on an uninitialised read, and the tests require
+      # exit 0. The rank tests stay native.
+      - name: Single-rank plugin tests under valgrind
+        if: matrix.lammps == 'stable_22Jul2025_update2'
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y valgrind
+          export LAMMPS_POTENTIALS="$HOME/lammps/potentials"
+          export RGMIN_LAMMPS_LMP="$HOME/lammps/build/lmp"
+          export RGMIN_LAMMPS_PLUGIN="$PWD/build-lammps/rgminplugin.so"
+          export RGMIN_LAMMPS_RUNNER="valgrind --error-exitcode=99 --track-origins=yes --quiet --suppressions=/usr/share/openmpi/openmpi-valgrind.supp"
+          python -m pytest -q lammps/tests -k "not rank_counts"
 
   strong-scale:
     name: strong_scale smoke

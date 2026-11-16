@@ -188,10 +188,15 @@ def run(
     mpirun: str | None = None,
     timeout: float = 1800,
 ) -> Result:
-    """Run ``text`` with ``lmp`` in ``workdir``; MPI when ``nprocs > 1``."""
+    """Run ``text`` with ``lmp`` in ``workdir``; MPI when ``nprocs > 1``.
+
+    ``RGMIN_LAMMPS_RUNNER``, such as valgrind, prefixes ``lmp`` inside the
+    MPI launcher.
+    """
     workdir.mkdir(parents=True, exist_ok=True)
     (workdir / "in.lmp").write_text(text)
     cmd = [lmp, "-in", "in.lmp", "-log", "log.lammps", "-echo", "none", "-screen", "none"]
+    cmd = [*shlex.split(os.environ.get("RGMIN_LAMMPS_RUNNER", "")), *cmd]
     if nprocs > 1:
         launcher = shlex.split(mpirun or os.environ.get("RGMIN_LAMMPS_MPIRUN", "mpirun"))
         cmd = [*launcher, "-np", str(nprocs), *cmd]

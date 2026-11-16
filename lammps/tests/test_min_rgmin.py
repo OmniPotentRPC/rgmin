@@ -3,7 +3,8 @@
 Needs ``RGMIN_LAMMPS_LMP`` (an lmp binary with the PLUGIN and MANYBODY
 packages), ``RGMIN_LAMMPS_PLUGIN`` (the built ``rgminplugin.so``) and
 ``LAMMPS_POTENTIALS`` (the LAMMPS ``potentials`` directory).
-``RGMIN_LAMMPS_MPIRUN`` overrides the ``mpirun`` launcher of the rank tests.
+``RGMIN_LAMMPS_MPIRUN`` overrides the ``mpirun`` launcher of the rank tests,
+and ``RGMIN_LAMMPS_RUNNER`` prefixes every ``lmp`` run, such as with valgrind.
 """
 
 from __future__ import annotations
