@@ -11,8 +11,8 @@ use std::time::Instant;
 
 use dlpk::sys::DLManagedTensorVersioned;
 use rgmin::ffi::{
-    rgmin_control_t, rgmin_method_t, rgmin_minimize, rgmin_report_t, rgmin_status_t, rgmin_stop_t,
-    rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+    rgmin_control_default, rgmin_control_t, rgmin_method_t, rgmin_minimize, rgmin_report_t,
+    rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 
 static EVALS: AtomicUsize = AtomicUsize::new(0);
@@ -67,10 +67,7 @@ fn main() {
         maxiter: 60,
         gtol: 1e-10,
         istep: 1e-3,
-        memory: 0,
-        maxmove: 0.0,
-        noise_eps: 0.0,
-        noise_c: 0.0,
+        ..rgmin_control_default()
     };
 
     let start = Instant::now();
