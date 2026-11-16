@@ -52,6 +52,19 @@ fn search_dirs(root: &Path) -> [PathBuf; 2] {
     [base, deps]
 }
 
+/// `bin`, behind the whitespace-separated `RGMIN_C_TEST_RUNNER` when that
+/// is set, such as `valgrind --error-exitcode=99`.
+fn consumer(bin: &Path) -> Command {
+    let runner = env::var("RGMIN_C_TEST_RUNNER").unwrap_or_default();
+    let mut words = runner.split_whitespace();
+    let Some(program) = words.next() else {
+        return Command::new(bin);
+    };
+    let mut command = Command::new(program);
+    command.args(words).arg(bin);
+    command
+}
+
 fn newest_file(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
     paths
         .into_iter()
@@ -104,7 +117,7 @@ fn cxx_headers_compile_link_and_set_box() {
         "c++ failed:\n{}",
         String::from_utf8_lossy(&compiled.stderr)
     );
-    let ran = Command::new(&bin).output().expect("run cxx smoke");
+    let ran = consumer(&bin).output().expect("run cxx smoke");
     assert!(
         ran.status.success(),
         "cxx smoke exit {}:\n{}\n{}",
