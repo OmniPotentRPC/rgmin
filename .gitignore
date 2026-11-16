@@ -48,6 +48,7 @@ pixi.lock
 # Head-to-head logs. benches/ase_h2h.py regenerates them.
 benches/ase_h2h/raw/
 benches/ase_optimize/raw/
+benches/lammps_minstyle/raw/
 benchflow/out/
 .asv-run-*.conf.json
 
