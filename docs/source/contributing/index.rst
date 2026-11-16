@@ -67,6 +67,23 @@ CI also runs clippy with warnings denied, on Rust 1.88.0 and on the latest stabl
 
 Run the same four commands with ``+stable`` for the second toolchain.
 
+CI also builds and tests in release with Rust 1.93.0 and 1.94.1, which ship LLVM 21.
+Its loop vectorizer once crashed on rgmin, and the debug builds above never run it:
+
+..
+   #skip_lint_start
+
+.. code:: bash
+
+    rustup toolchain install 1.93.0 --profile minimal
+    cargo +1.93.0 build --locked --release --all-features
+    cargo +1.93.0 test --locked --release --all-features --lib
+
+..
+   #skip_lint_end
+
+Install 1.94.1 the same way and run the two ``cargo`` commands with ``+1.94.1``.
+
 These checks need network access on their first run, since cargo fetches two git dependencies pinned to a commit: ``eindir-core`` and, for the tests, ``rgpot-core``.
 The ``highs`` tests check against SciPy through ``python3``, or through the interpreter that ``PYTHON`` names.
 The ``highs`` feature builds HiGHS from source, which needs CMake and a C++ compiler.
