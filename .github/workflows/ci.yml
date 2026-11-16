@@ -61,6 +61,26 @@ jobs:
             cargo run --locked --quiet --example "$ex"
           done
 
+  # rustc 1.93 and 1.94 ship LLVM 21, whose loop vectorizer segfaulted on
+  # an f64::max reduction in session/drive.rs. Debug builds skip it.
+  release:
+    name: cargo build and test --release (${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [1.93.0, 1.94.1]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Python reference dependencies
+        run: python -m pip install -q numpy scipy
+      - run: cargo build --locked --release --all-features
+      - run: cargo test --locked --release --all-features --lib
+
   python:
     name: ASE drop-in
     runs-on: ubuntu-latest

@@ -29,6 +29,17 @@ cargo +1.88.0 clippy --locked --all-targets --all-features -- -D warnings
 
 Run the same four commands with `+stable` for the second toolchain.
 
+CI also builds and tests in release with Rust 1.93.0 and 1.94.1, which ship LLVM 21.
+Its loop vectorizer once crashed on rgmin, and the debug builds above never run it:
+
+```bash
+rustup toolchain install 1.93.0 --profile minimal
+cargo +1.93.0 build --locked --release --all-features
+cargo +1.93.0 test --locked --release --all-features --lib
+```
+
+Install 1.94.1 the same way and run the two `cargo` commands with `+1.94.1`.
+
 A change that users can see adds a fragment to `docs/newsfragments/` and a line under Unreleased in `docs/orgmode/changelog.org`.
 Name the fragment `<issue>.<type>.md`, or `+<name>.<type>.md` for a change with no issue.
 The type is `added`, `changed`, `deprecated`, `removed`, `fixed` or `security`, the sections of [CHANGELOG.md](CHANGELOG.md).
