@@ -103,10 +103,16 @@ impl TrustRegion {
                 .column_mut(column)
                 .assign(&vectors.column(index));
         }
+        let vg = eigenvectors.t().dot(grad);
         let (step, cons) = restrict(
             |alpha| {
-                let (s, dsda) =
-                    crate::qn_get_s(&eigenvalues, &eigenvectors, grad, self.order, alpha);
+                let (s, dsda) = crate::qn_irc::qn_get_s_proj(
+                    &eigenvalues,
+                    &eigenvectors,
+                    vg.view(),
+                    self.order,
+                    alpha,
+                );
                 let (val, dval) = trust_cons(&s, &dsda);
                 (s, val, dval)
             },

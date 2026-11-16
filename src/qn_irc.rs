@@ -11,7 +11,7 @@
 //! inside the ball, Gonzalez--Schlegel equality is restored by the
 //! radial [`IrcTrust::project`]. Algebra is [`crate::vecops`].
 
-use ndarray::{Array1, Array2};
+use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::hvp::sym_eig_jacobi;
 use crate::irc_trust::IrcTrust;
@@ -138,6 +138,18 @@ pub fn qn_get_s(
     alpha: f64,
 ) -> (Array1<f64>, Array1<f64>) {
     let vg = evecs.t().dot(g);
+    qn_get_s_proj(evals, evecs, vg.view(), order, alpha)
+}
+
+/// [`qn_get_s`] with `V^T g` already formed. The product does not depend
+/// on `alpha`, so a search can reuse one projection.
+pub(crate) fn qn_get_s_proj(
+    evals: &Array1<f64>,
+    evecs: &Array2<f64>,
+    vg: ArrayView1<f64>,
+    order: usize,
+    alpha: f64,
+) -> (Array1<f64>, Array1<f64>) {
     let n = evals.len();
     let mut sproj = Array1::zeros(n);
     let mut dsproj = Array1::zeros(n);
@@ -171,7 +183,8 @@ pub fn qn_restricted(
     order: usize,
     delta: f64,
 ) -> Array1<f64> {
-    let (s0, _) = qn_get_s(evals, evecs, g, order, 0.0);
+    let vg = evecs.t().dot(g);
+    let (s0, _) = qn_get_s_proj(evals, evecs, vg.view(), order, 0.0);
     let n0 = nrm2(s0.view());
     if n0 <= delta + 1e-14 {
         return s0;
@@ -181,7 +194,7 @@ pub fn qn_restricted(
     let mut upper: f64 = f64::INFINITY;
     let mut best = s0;
     for _ in 0..ALPHA_MAXITER {
-        let (s, ds) = qn_get_s(evals, evecs, g, order, alpha);
+        let (s, ds) = qn_get_s_proj(evals, evecs, vg.view(), order, alpha);
         let val = nrm2(s.view());
         let err = val - delta;
         best = s.clone();
@@ -507,5 +520,26 @@ mod tests {
         assert!((sm[3] - 2.0).abs() < 1e-14);
         assert!((ym[0] - 2.0).abs() < 1e-14);
         assert!((ym[3] - 1.0).abs() < 1e-14);
+    }
+
+    #[test]
+    fn a_reused_gradient_projection_matches_a_fresh_product() {
+        let mut evecs = Array2::<f64>::eye(4);
+        evecs[(0, 1)] = 0.2;
+        evecs[(1, 0)] = -0.2;
+        evecs[(2, 3)] = 0.05;
+        let evals = array![0.5, 2.0, -1.5, 8.0];
+        let g = array![0.3, -0.7, 1.1, 0.0];
+        let vg = evecs.t().dot(&g);
+        for order in [0usize, 1, 4] {
+            for alpha in [0.0, 0.25, 1.0, 10.0] {
+                let (fresh, dfresh) = qn_get_s(&evals, &evecs, &g, order, alpha);
+                let (kept, dkept) = qn_get_s_proj(&evals, &evecs, vg.view(), order, alpha);
+                for i in 0..fresh.len() {
+                    assert_eq!(fresh[i].to_bits(), kept[i].to_bits());
+                    assert_eq!(dfresh[i].to_bits(), dkept[i].to_bits());
+                }
+            }
+        }
     }
 }
