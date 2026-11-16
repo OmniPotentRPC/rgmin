@@ -239,14 +239,11 @@ void MinRgmin::start_session()
   cache_step = update->ntimestep;
   cache_valid = true;
 
-  // Value-initialized: the fields not set below (noise_eps, noise_c) must be
-  // zero, since a positive noise_eps turns on rgmin's noise-floor stop.
-  rgmin_control_t ctrl{};
+  rgmin_control_t ctrl = rgmin_control_default();
   ctrl.maxiter = static_cast<size_t>(std::max(update->nsteps, 1));
   ctrl.gtol = update->ftol > 0.0 ? update->ftol : 0.0;
   ctrl.istep = istep > 0.0 ? istep : (is_fire(method) ? FIRE_ISTEP : 0.0);
   ctrl.memory = lbfgs_memory;
-  ctrl.maxmove = 0.0;
 
   solver = rgmin_solver_create(method, &ctrl, ndof);
   if (!solver) {
