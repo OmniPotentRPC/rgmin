@@ -10,6 +10,10 @@ rgmin_constraints_set_masses
 rgmin_constraints_set_settle
 rgmin_constraints_set_solver
 rgmin_constraints_set_tolerance
+rgmin_control_default
+rgmin_eigen_options_default
+rgmin_eigen_params_default
+rgmin_exp_default
 rgmin_last_constraint_error
 rgmin_last_error
 rgmin_last_error_message
@@ -54,6 +58,8 @@ rgmin_rigid_project_hessian
 rgmin_rigid_workspace_free
 rgmin_rigid_workspace_new
 rgmin_rigid_workspace_rank
+rgmin_scg_options_default
+rgmin_scg_params_default
 rgmin_solver_add_equality
 rgmin_solver_clear_distance_constraints
 rgmin_solver_clear_equalities

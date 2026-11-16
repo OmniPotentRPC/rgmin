@@ -267,6 +267,12 @@ typedef rgmin_h0_fn xts_h0_fn;
 #define XTS_MANIFOLD_SPHERE_COMPLEX RGMIN_MANIFOLD_SPHERE_COMPLEX
 #define XTS_MANIFOLD_POSITIVE RGMIN_MANIFOLD_POSITIVE
 #define XTS_MANIFOLD_CENTERED_MATRIX RGMIN_MANIFOLD_CENTERED_MATRIX
+#define xts_control_default rgmin_control_default
+#define xts_exp_default rgmin_exp_default
+#define xts_scg_params_default rgmin_scg_params_default
+#define xts_scg_options_default rgmin_scg_options_default
+#define xts_eigen_params_default rgmin_eigen_params_default
+#define xts_eigen_options_default rgmin_eigen_options_default
 
 #endif /* XTS_OPTIMIZE_H */
 

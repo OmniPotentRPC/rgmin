@@ -77,7 +77,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 45;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 46;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1609,29 +1609,7 @@ pub unsafe extern "C" fn rgmin_solver_set_exp(
         r,
         anchor,
     };
-    let finite_pos = |v: f64| v.is_finite() && v > 0.0;
-    let lengths = if finite_pos(p.length_x) || finite_pos(p.length_y) || finite_pos(p.length_z) {
-        Some([p.length_x, p.length_y, p.length_z])
-    } else {
-        None
-    };
-    let exp_params = ExpParams {
-        a: if p.a.is_finite() { p.a } else { 3.0 },
-        c_stab: if p.c_stab.is_finite() { p.c_stab } else { 0.1 },
-        mu: if p.mu.is_finite() { Some(p.mu) } else { None },
-        r_nn: if finite_pos(p.r_nn) {
-            Some(p.r_nn)
-        } else {
-            None
-        },
-        r_cut: if finite_pos(p.r_cut) {
-            Some(p.r_cut)
-        } else {
-            None
-        },
-        recalc_mu: p.recalc_mu != 0,
-        lengths,
-    };
+    let exp_params = exp_params_from_c(p);
     // Supplied distances do not need the geometry. A Cartesian
     // list is placed on the next step, when the session holds `x`.
     if neighbours.r.is_empty() {
@@ -1660,6 +1638,37 @@ pub unsafe extern "C" fn rgmin_solver_set_exp(
                 rgmin_status_t::RGMIN_INVALID_PARAMETER
             }
         }
+    }
+}
+
+fn exp_params_from_c(p: &rgmin_exp_t) -> ExpParams {
+    let defaults = ExpParams::default();
+    let finite_pos = |v: f64| v.is_finite() && v > 0.0;
+    let lengths = if finite_pos(p.length_x) || finite_pos(p.length_y) || finite_pos(p.length_z) {
+        Some([p.length_x, p.length_y, p.length_z])
+    } else {
+        None
+    };
+    ExpParams {
+        a: if p.a.is_finite() { p.a } else { defaults.a },
+        c_stab: if p.c_stab.is_finite() {
+            p.c_stab
+        } else {
+            defaults.c_stab
+        },
+        mu: if p.mu.is_finite() { Some(p.mu) } else { None },
+        r_nn: if finite_pos(p.r_nn) {
+            Some(p.r_nn)
+        } else {
+            None
+        },
+        r_cut: if finite_pos(p.r_cut) {
+            Some(p.r_cut)
+        } else {
+            None
+        },
+        recalc_mu: p.recalc_mu != 0,
+        lengths,
     }
 }
 
@@ -4698,7 +4707,7 @@ pub struct rgmin_precon_t {
 
 /// Optional SCG policies, separate from the stable parameter record.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct rgmin_scg_options_t {
     /// Literal [`rgmin_scg_step_tolerance_t`]. Unknown values are rejected.
     pub step_tolerance: i32,
@@ -4714,12 +4723,54 @@ pub enum rgmin_scg_step_tolerance_t {
 
 /// Optional backend settings, separate from the stable base parameters.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct rgmin_eigen_options_t {
     /// ChASE filter degree. Zero selects the backend default.
     pub degree: u32,
     /// ChASE extra search dimensions. Zero selects the backend default.
     pub extra: u32,
+}
+
+/// Null is [`rgmin_scg_params_t::default`].
+fn scg_params_from_c(
+    raw: *const rgmin_scg_params_t,
+) -> Result<(ScgParams, Conjugacy), rgmin_status_t> {
+    let p = unsafe { raw.as_ref() }.copied().unwrap_or_default();
+    let conjugacy = conjugacy_from_c(p.conjugacy)?;
+    Ok((
+        ScgParams {
+            sigma0: p.sigma0,
+            lambda: p.lambda,
+            lambda_limit: p.lambda_limit,
+            tol_sol: p.tol_sol,
+            tol_func: p.tol_func,
+        },
+        conjugacy,
+    ))
+}
+
+/// Null is [`rgmin_scg_options_t::default`].
+fn scg_options_from_c(raw: *const rgmin_scg_options_t) -> Result<ScgOptions, rgmin_status_t> {
+    let options = unsafe { raw.as_ref() }.copied().unwrap_or_default();
+    let step_tolerance = match options.step_tolerance {
+        0 => ScgStepTolerance::AbsoluteInfinity,
+        1 => ScgStepTolerance::RelativeEuclidean,
+        other => {
+            set_last_error(&format!(
+                "rgmin_minimize_scg: unknown step tolerance {other}"
+            ));
+            return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+        }
+    };
+    Ok(ScgOptions { step_tolerance })
+}
+
+/// Null leaves the ChASE settings of `params` as they are.
+fn apply_eigen_options(params: &mut EigenParams, raw: *const rgmin_eigen_options_t) {
+    if let Some(options) = unsafe { raw.as_ref() } {
+        params.degree = options.degree as usize;
+        params.extra = options.extra as usize;
+    }
 }
 
 /// Lowest Hessian eigenpair with separate optional backend settings.
@@ -4770,10 +4821,7 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_with_options(
         Ok(p) => p,
         Err(st) => return st,
     };
-    if let Some(options) = unsafe { options.as_ref() } {
-        typed.degree = options.degree as usize;
-        typed.extra = options.extra as usize;
-    }
+    apply_eigen_options(&mut typed, options);
     let apply = CHvp { hvp, user };
     match lowest_mode(&apply, x_arr.view(), seed_arr.view(), &typed) {
         Ok(mode) => {
@@ -4834,35 +4882,14 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
         let n = init.len();
         let c = unsafe { &*ctrl };
         let control = control_from_c(c);
-        let (scg, conjugacy) = if params.is_null() {
-            (ScgParams::default(), Conjugacy::PolakRibiere)
-        } else {
-            let p = unsafe { &*params };
-            match conjugacy_from_c(p.conjugacy) {
-                Ok(c) => (
-                    ScgParams {
-                        sigma0: p.sigma0,
-                        lambda: p.lambda,
-                        lambda_limit: p.lambda_limit,
-                        tol_sol: p.tol_sol,
-                        tol_func: p.tol_func,
-                    },
-                    c,
-                ),
-                Err(st) => return st,
-            }
+        let (scg, conjugacy) = match scg_params_from_c(params) {
+            Ok(pair) => pair,
+            Err(st) => return st,
         };
-        let step_tolerance = match unsafe { options.as_ref() }.map_or(0, |o| o.step_tolerance) {
-            0 => ScgStepTolerance::AbsoluteInfinity,
-            1 => ScgStepTolerance::RelativeEuclidean,
-            other => {
-                set_last_error(&format!(
-                    "rgmin_minimize_scg: unknown step tolerance {other}"
-                ));
-                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-            }
+        let options = match scg_options_from_c(options) {
+            Ok(options) => options,
+            Err(st) => return st,
         };
-        let options = ScgOptions { step_tolerance };
         let restart = Restart::Never;
         let obj = ScgFfiOracle {
             inner: c_oracle(eval, grad, user, n),
@@ -5113,16 +5140,7 @@ fn install_exp(solver: *mut rgmin_solver_t, p: &rgmin_precon_t, atoms: usize) ->
         }
     }
     let neighbours = crate::Neighbours { i, j, r, anchor };
-    let mut params = ExpParams::default();
-    if let Some(a) = optional_positive(p.exp_a) {
-        params.a = a;
-    }
-    if let Some(c) = optional_positive(p.c_stab) {
-        params.c_stab = c;
-    }
-    params.mu = optional_positive(p.mu);
-    params.r_cut = optional_positive(p.r_cut);
-    params.lengths = cell_of(p.cell);
+    let params = exp_params_from_precon(p);
     if neighbours.r.is_empty() {
         match crate::precon::ExpState::deferred(neighbours, params) {
             Ok(state) => {
@@ -5175,14 +5193,7 @@ fn install_lindh(solver: *mut rgmin_solver_t, p: &rgmin_precon_t, atoms: usize) 
             });
         }
     }
-    let mut params = crate::LindhParams::default();
-    if let Some(c) = optional_positive(p.c_stab) {
-        params.c_stab = c;
-    }
-    params.r_cut = optional_positive(p.r_cut);
-    params.mu = optional_positive(p.mu);
-    params.lengths = cell_of(p.cell);
-    params.dihedrals = p.dihedrals != 0;
+    let params = lindh_params_from_precon(p);
     match crate::precon::LindhState::deferred(z, ghosts, params) {
         Ok(state) => {
             unsafe { (*solver).solver.set_lindh_deferred(state) };
@@ -5238,13 +5249,7 @@ fn install_ff(solver: *mut rgmin_solver_t, p: &rgmin_precon_t, atoms: usize) -> 
             });
         }
     }
-    let mut params = crate::FfParams::default();
-    if let Some(c) = optional_positive(p.c_stab) {
-        params.c_stab = c;
-    }
-    params.r_cut = optional_positive(p.r_cut);
-    params.mu = optional_positive(p.mu);
-    params.lengths = cell_of(p.cell);
+    let params = ff_params_from_precon(p);
     match crate::precon::FfState::deferred(bonds, angles, params) {
         Ok(state) => {
             unsafe { (*solver).solver.set_ff_deferred(state) };
@@ -5255,6 +5260,43 @@ fn install_ff(solver: *mut rgmin_solver_t, p: &rgmin_precon_t, atoms: usize) -> 
             rgmin_status_t::RGMIN_INVALID_PARAMETER
         }
     }
+}
+
+fn exp_params_from_precon(p: &rgmin_precon_t) -> ExpParams {
+    let mut params = ExpParams::default();
+    if let Some(a) = optional_positive(p.exp_a) {
+        params.a = a;
+    }
+    if let Some(c) = optional_positive(p.c_stab) {
+        params.c_stab = c;
+    }
+    params.mu = optional_positive(p.mu);
+    params.r_cut = optional_positive(p.r_cut);
+    params.lengths = cell_of(p.cell);
+    params
+}
+
+fn lindh_params_from_precon(p: &rgmin_precon_t) -> crate::LindhParams {
+    let mut params = crate::LindhParams::default();
+    if let Some(c) = optional_positive(p.c_stab) {
+        params.c_stab = c;
+    }
+    params.r_cut = optional_positive(p.r_cut);
+    params.mu = optional_positive(p.mu);
+    params.lengths = cell_of(p.cell);
+    params.dihedrals = p.dihedrals != 0;
+    params
+}
+
+fn ff_params_from_precon(p: &rgmin_precon_t) -> crate::FfParams {
+    let mut params = crate::FfParams::default();
+    if let Some(c) = optional_positive(p.c_stab) {
+        params.c_stab = c;
+    }
+    params.r_cut = optional_positive(p.r_cut);
+    params.mu = optional_positive(p.mu);
+    params.lengths = cell_of(p.cell);
+    params
 }
 
 fn rigid_masses<'a>(
@@ -6377,4 +6419,468 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpairs_ex(
         }
     }
     rgmin_status_t::RGMIN_SUCCESS
+}
+
+// --- Default initializers. ABI minor 46. ---
+
+impl Default for rgmin_control_t {
+    /// [`Control::default`]. `memory` 0 is each method's own pair count,
+    /// and `noise_c` is the factor of [`crate::NoiseFloor::new`].
+    fn default() -> Self {
+        let control = Control::default();
+        let floor = control.noise_floor;
+        Self {
+            maxiter: control.maxiter,
+            gtol: control.gtol,
+            istep: control.istep,
+            memory: 0,
+            maxmove: control.maxmove.unwrap_or(0.0),
+            noise_eps: floor.map_or(0.0, |f| f.eps_g),
+            noise_c: floor.unwrap_or_else(|| crate::NoiseFloor::new(0.0)).c,
+        }
+    }
+}
+
+impl Default for rgmin_exp_t {
+    /// [`ExpParams::default`]. A `None` is NaN, and no lattice is zero lengths.
+    fn default() -> Self {
+        let params = ExpParams::default();
+        let [length_x, length_y, length_z] = params.lengths.unwrap_or([0.0; 3]);
+        Self {
+            a: params.a,
+            c_stab: params.c_stab,
+            mu: params.mu.unwrap_or(f64::NAN),
+            r_nn: params.r_nn.unwrap_or(f64::NAN),
+            r_cut: params.r_cut.unwrap_or(f64::NAN),
+            length_x,
+            length_y,
+            length_z,
+            recalc_mu: i32::from(params.recalc_mu),
+        }
+    }
+}
+
+impl Default for rgmin_scg_params_t {
+    /// [`ScgParams::default`] with Netlab's Polak-Ribiere conjugacy.
+    fn default() -> Self {
+        let params = ScgParams::default();
+        Self {
+            sigma0: params.sigma0,
+            lambda: params.lambda,
+            lambda_limit: params.lambda_limit,
+            tol_sol: params.tol_sol,
+            tol_func: params.tol_func,
+            conjugacy: rgmin_conjugacy_t::RGMIN_CONJUGACY_POLAK_RIBIERE as i32,
+        }
+    }
+}
+
+impl Default for rgmin_scg_options_t {
+    /// [`ScgOptions::default`].
+    fn default() -> Self {
+        let step_tolerance = match ScgOptions::default().step_tolerance {
+            ScgStepTolerance::AbsoluteInfinity => {
+                rgmin_scg_step_tolerance_t::RGMIN_SCG_ABSOLUTE_INFINITY
+            }
+            ScgStepTolerance::RelativeEuclidean => {
+                rgmin_scg_step_tolerance_t::RGMIN_SCG_RELATIVE_EUCLIDEAN
+            }
+        };
+        Self {
+            step_tolerance: step_tolerance as i32,
+        }
+    }
+}
+
+impl Default for rgmin_eigen_params_t {
+    /// [`EigenParams::default`].
+    fn default() -> Self {
+        let params = EigenParams::default();
+        Self {
+            kind: params.kind as i32,
+            nev: params.nev as u32,
+            krylov: params.krylov as u32,
+            max_iter: params.max_iter as u32,
+            tol: params.tol,
+        }
+    }
+}
+
+impl Default for rgmin_eigen_options_t {
+    /// The ChASE settings of [`EigenParams::default`].
+    fn default() -> Self {
+        let params = EigenParams::default();
+        Self {
+            degree: params.degree as u32,
+            extra: params.extra as u32,
+        }
+    }
+}
+
+/// [`Control::default`] as a C record. ABI minor 46.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_control_default() -> rgmin_control_t {
+    rgmin_control_t::default()
+}
+
+/// [`ExpParams::default`] as a C record. ABI minor 46.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_exp_default() -> rgmin_exp_t {
+    rgmin_exp_t::default()
+}
+
+/// The record a null `params` of [`rgmin_minimize_scg`] stands for. ABI minor 46.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_scg_params_default() -> rgmin_scg_params_t {
+    rgmin_scg_params_t::default()
+}
+
+/// [`ScgOptions::default`] as a C record. ABI minor 46.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_scg_options_default() -> rgmin_scg_options_t {
+    rgmin_scg_options_t::default()
+}
+
+/// [`EigenParams::default`] as a C record. ABI minor 46.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_eigen_params_default() -> rgmin_eigen_params_t {
+    rgmin_eigen_params_t::default()
+}
+
+/// The ChASE settings of [`EigenParams::default`] as a C record. ABI minor 46.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_eigen_options_default() -> rgmin_eigen_options_t {
+    rgmin_eigen_options_t::default()
+}
+
+#[cfg(test)]
+mod default_tests {
+    use super::*;
+    use crate::{FfParams, LindhParams, NoiseFloor};
+    use std::mem::MaybeUninit;
+
+    // Every pattern below names each field, so a field added to a C
+    // record or to its Rust struct does not compile until it is compared
+    // here. Floats compare as bit patterns.
+
+    type Cell = Option<[u64; 3]>;
+    type FloorBits = (u64, u64, Option<u64>);
+    type ControlBits = (
+        usize,
+        u64,
+        u64,
+        Option<u64>,
+        StopNorm,
+        Option<u64>,
+        Option<FloorBits>,
+    );
+    type ExpBits = (u64, u64, Option<u64>, Option<u64>, Option<u64>, bool, Cell);
+    type LindhBits = (u64, Option<u64>, bool, bool, Cell, Option<u64>, bool);
+    type FfBits = (u64, Option<u64>, Cell, Option<u64>, bool);
+    type EigenBits = (EigensolverKind, usize, usize, usize, u64, usize, usize);
+
+    fn opt(v: Option<f64>) -> Option<u64> {
+        v.map(f64::to_bits)
+    }
+
+    fn cell(v: Option<[f64; 3]>) -> Cell {
+        v.map(|lengths| lengths.map(f64::to_bits))
+    }
+
+    fn floor_bits(floor: NoiseFloor) -> FloorBits {
+        let NoiseFloor { eps_g, c, eps_f } = floor;
+        (eps_g.to_bits(), c.to_bits(), opt(eps_f))
+    }
+
+    fn control_bits(control: Control) -> ControlBits {
+        let Control {
+            maxiter,
+            gtol,
+            istep,
+            maxmove,
+            stop_norm,
+            ftol_rel,
+            noise_floor,
+        } = control;
+        (
+            maxiter,
+            gtol.to_bits(),
+            istep.to_bits(),
+            opt(maxmove),
+            stop_norm,
+            opt(ftol_rel),
+            noise_floor.map(floor_bits),
+        )
+    }
+
+    fn exp_bits(params: ExpParams) -> ExpBits {
+        let ExpParams {
+            a,
+            c_stab,
+            mu,
+            r_nn,
+            r_cut,
+            recalc_mu,
+            lengths,
+        } = params;
+        (
+            a.to_bits(),
+            c_stab.to_bits(),
+            opt(mu),
+            opt(r_nn),
+            opt(r_cut),
+            recalc_mu,
+            cell(lengths),
+        )
+    }
+
+    fn lindh_bits(params: LindhParams) -> LindhBits {
+        let LindhParams {
+            c_stab,
+            r_cut,
+            angles,
+            dihedrals,
+            lengths,
+            mu,
+            recalc_mu,
+        } = params;
+        (
+            c_stab.to_bits(),
+            opt(r_cut),
+            angles,
+            dihedrals,
+            cell(lengths),
+            opt(mu),
+            recalc_mu,
+        )
+    }
+
+    fn ff_bits(params: FfParams) -> FfBits {
+        let FfParams {
+            c_stab,
+            r_cut,
+            lengths,
+            mu,
+            recalc_mu,
+        } = params;
+        (
+            c_stab.to_bits(),
+            opt(r_cut),
+            cell(lengths),
+            opt(mu),
+            recalc_mu,
+        )
+    }
+
+    fn scg_bits(params: ScgParams) -> [u64; 5] {
+        let ScgParams {
+            sigma0,
+            lambda,
+            lambda_limit,
+            tol_sol,
+            tol_func,
+        } = params;
+        [sigma0, lambda, lambda_limit, tol_sol, tol_func].map(f64::to_bits)
+    }
+
+    fn eigen_bits(params: EigenParams) -> EigenBits {
+        let EigenParams {
+            kind,
+            nev,
+            krylov,
+            max_iter,
+            tol,
+            degree,
+            extra,
+        } = params;
+        (kind, nev, krylov, max_iter, tol.to_bits(), degree, extra)
+    }
+
+    #[test]
+    fn control_default_is_control_default() {
+        let want = Control::default();
+        let rgmin_control_t {
+            maxiter,
+            gtol,
+            istep,
+            memory,
+            maxmove,
+            noise_eps,
+            noise_c,
+        } = rgmin_control_default();
+        assert_eq!(maxiter, want.maxiter);
+        assert_eq!(gtol.to_bits(), want.gtol.to_bits());
+        assert_eq!(istep.to_bits(), want.istep.to_bits());
+        assert_eq!(
+            method_from_c(rgmin_method_t::RGMIN_LBFGS, memory),
+            Method::lbfgs()
+        );
+        assert_eq!(
+            method_from_c(rgmin_method_t::RGMIN_DIIS, memory),
+            Method::diis()
+        );
+        assert_eq!(maxmove.to_bits(), want.maxmove.unwrap_or(0.0).to_bits());
+        let floor = want.noise_floor;
+        assert_eq!(
+            noise_eps.to_bits(),
+            floor.map_or(0.0, |f| f.eps_g).to_bits()
+        );
+        assert_eq!(noise_c.to_bits(), NoiseFloor::new(0.0).c.to_bits());
+
+        assert_eq!(
+            control_bits(control_from_c(&rgmin_control_default())),
+            control_bits(want)
+        );
+        let floor_on = rgmin_control_t {
+            noise_eps: 1e-3,
+            ..rgmin_control_default()
+        };
+        assert_eq!(
+            control_from_c(&floor_on).noise_floor.map(floor_bits),
+            Some(floor_bits(NoiseFloor::new(1e-3)))
+        );
+    }
+
+    #[test]
+    fn exp_default_is_exp_params_default() {
+        let want = ExpParams::default();
+        let rgmin_exp_t {
+            a,
+            c_stab,
+            mu,
+            r_nn,
+            r_cut,
+            length_x,
+            length_y,
+            length_z,
+            recalc_mu,
+        } = rgmin_exp_default();
+        let [lx, ly, lz] = want.lengths.unwrap_or([0.0; 3]);
+        let unset = |v: Option<f64>| v.unwrap_or(f64::NAN);
+        assert_eq!(
+            [a, c_stab, mu, r_nn, r_cut, length_x, length_y, length_z].map(f64::to_bits),
+            [
+                want.a,
+                want.c_stab,
+                unset(want.mu),
+                unset(want.r_nn),
+                unset(want.r_cut),
+                lx,
+                ly,
+                lz
+            ]
+            .map(f64::to_bits)
+        );
+        assert_eq!(recalc_mu, i32::from(want.recalc_mu));
+        assert_eq!(
+            exp_bits(exp_params_from_c(&rgmin_exp_default())),
+            exp_bits(want)
+        );
+    }
+
+    #[test]
+    fn scg_params_default_is_what_null_selects() {
+        let want = scg_bits(ScgParams::default());
+        let rgmin_scg_params_t {
+            sigma0,
+            lambda,
+            lambda_limit,
+            tol_sol,
+            tol_func,
+            conjugacy,
+        } = rgmin_scg_params_default();
+        assert_eq!(
+            [sigma0, lambda, lambda_limit, tol_sol, tol_func].map(f64::to_bits),
+            want
+        );
+        assert_eq!(
+            conjugacy,
+            rgmin_conjugacy_t::RGMIN_CONJUGACY_POLAK_RIBIERE as i32
+        );
+        let default = rgmin_scg_params_default();
+        for raw in [&default as *const rgmin_scg_params_t, std::ptr::null()] {
+            let (params, conjugacy) = scg_params_from_c(raw).unwrap();
+            assert_eq!(scg_bits(params), want);
+            assert_eq!(conjugacy, Conjugacy::PolakRibiere);
+        }
+    }
+
+    #[test]
+    fn scg_options_default_is_scg_options_default() {
+        let want = ScgOptions::default();
+        let rgmin_scg_options_t { step_tolerance } = rgmin_scg_options_default();
+        assert_eq!(
+            step_tolerance,
+            rgmin_scg_step_tolerance_t::RGMIN_SCG_ABSOLUTE_INFINITY as i32
+        );
+        let default = rgmin_scg_options_default();
+        for raw in [&default as *const rgmin_scg_options_t, std::ptr::null()] {
+            let ScgOptions { step_tolerance } = scg_options_from_c(raw).unwrap();
+            assert_eq!(step_tolerance, want.step_tolerance);
+        }
+    }
+
+    #[test]
+    fn eigen_params_default_is_eigen_params_default() {
+        let want = EigenParams::default();
+        let rgmin_eigen_params_t {
+            kind,
+            nev,
+            krylov,
+            max_iter,
+            tol,
+        } = rgmin_eigen_params_default();
+        assert_eq!(kind, want.kind as i32);
+        assert_eq!(
+            [nev, krylov, max_iter].map(|v| v as usize),
+            [want.nev, want.krylov, want.max_iter]
+        );
+        assert_eq!(tol.to_bits(), want.tol.to_bits());
+        let default = rgmin_eigen_params_default();
+        for raw in [&default as *const rgmin_eigen_params_t, std::ptr::null()] {
+            assert_eq!(
+                eigen_bits(eigen_params_from_c(raw).unwrap()),
+                eigen_bits(want)
+            );
+        }
+    }
+
+    #[test]
+    fn eigen_options_default_is_the_eigen_params_default() {
+        let want = EigenParams::default();
+        let rgmin_eigen_options_t { degree, extra } = rgmin_eigen_options_default();
+        assert_eq!(
+            [degree, extra].map(|v| v as usize),
+            [want.degree, want.extra]
+        );
+        let default = rgmin_eigen_options_default();
+        for raw in [&default as *const rgmin_eigen_options_t, std::ptr::null()] {
+            let mut params = EigenParams::default();
+            apply_eigen_options(&mut params, raw);
+            assert_eq!(eigen_bits(params), eigen_bits(want));
+        }
+    }
+
+    #[test]
+    fn precon_init_decodes_to_the_rust_defaults() {
+        let init = |kind| {
+            let mut p = MaybeUninit::<rgmin_precon_t>::uninit();
+            unsafe {
+                rgmin_precon_init(p.as_mut_ptr(), kind);
+                p.assume_init()
+            }
+        };
+        assert_eq!(
+            exp_bits(exp_params_from_precon(&init(RGMIN_PRECON_EXP))),
+            exp_bits(ExpParams::default())
+        );
+        assert_eq!(
+            lindh_bits(lindh_params_from_precon(&init(RGMIN_PRECON_LINDH))),
+            lindh_bits(LindhParams::default())
+        );
+        assert_eq!(
+            ff_bits(ff_params_from_precon(&init(RGMIN_PRECON_FF))),
+            ff_bits(FfParams::default())
+        );
+    }
 }

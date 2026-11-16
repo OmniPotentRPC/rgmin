@@ -37,6 +37,15 @@ typedef struct eindir_abi_stamp_t eindir_abi_stamp_t;
  *  Solvers live in Rust. This header is the C entry:
  *  \ref rgmin_minimize over dlpk \c DLManagedTensorVersioned tensors.
  *  include/xts.h is a compatibility alias for old hosts.
+ *
+ *  Every struct a caller fills in starts from its initializer, which
+ *  returns the Rust defaults: \ref rgmin_control_default,
+ *  \ref rgmin_exp_default, \ref rgmin_scg_params_default,
+ *  \ref rgmin_scg_options_default, \ref rgmin_eigen_params_default,
+ *  \ref rgmin_eigen_options_default and \ref rgmin_precon_init. Assign
+ *  only the fields to change. A field added in a later revision then
+ *  holds its default. In an uninitialised struct it holds stack bytes,
+ *  and in a zeroed one it holds 0, which is not always the default.
  */
 
 /** Status of an ABI call. */
@@ -61,12 +70,13 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 45
+#define RGMIN_ABI_VERSION_MINOR 46
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
  * 43 rgmin_lbfgs_pairs_push_rho, 44 rgmin_solver_set_power,
- * 45 rgmin_solver_set_lbfgs_trust (Burdakov ray, not set_lbfgs_trust). */
+ * 45 rgmin_solver_set_lbfgs_trust (Burdakov ray, not set_lbfgs_trust),
+ * 46 rgmin_control_default and the other struct initializers. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -151,11 +161,11 @@ _Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),
                "rgmin_stop_t is i32-wide; do not build this header with -fshort-enums");
 #endif
 
-/** Outer-loop controls. Start from a zeroed struct, such as a designated
- *  initializer, which zeroes the fields it omits. A stray positive
- *  \c noise_eps turns on the noise-floor stop. \c memory is the L-BFGS
- *  pair cap. \c istep <= 0
- *  selects 1. An energy-tested steepest, BFGS, SR1, SR2, BB or
+/** Outer-loop controls. Start from \ref rgmin_control_default and assign
+ *  the fields to change. Neither an uninitialised nor a zeroed struct is
+ *  the default. A stray positive \c noise_eps turns on the noise-floor
+ *  stop. \c memory is the L-BFGS pair cap; 0 selects the method's own.
+ *  \c istep <= 0 selects 1. An energy-tested steepest, BFGS, SR1, SR2, BB or
  *  unpreconditioned CG session then takes min(1, 1/||g||) at its first
  *  step as the step scale, until rgmin_solver_forget or
  *  rgmin_solver_rebase. */
@@ -172,6 +182,10 @@ typedef struct rgmin_control_t {
     /** Floor factor. <= 0 selects 3. */
     double noise_c;
 } rgmin_control_t;
+/** Rust \c Control::default: maxiter 100, gtol 1e-5, istep 1, memory 0
+ *  (10 L-BFGS pairs, 6 for DIIS), maxmove 0 (the default caps),
+ *  noise_eps 0 (no floor) and noise_c 3. ABI minor 46. */
+rgmin_control_t rgmin_control_default(void);
 
 /** Result of \ref rgmin_minimize. */
 typedef struct rgmin_report_t {
@@ -302,7 +316,7 @@ typedef enum rgmin_qn_step_t {
 /** Two-loop + H0, or Newton/RFO on P. Legal with \ref rgmin_solver_step_hess. */
 void rgmin_solver_set_qn_step(rgmin_solver_t *solver, rgmin_qn_step_t step);
 /** Exponential preconditioner parameters. NaN selects a default or an estimate.
- *  ABI minor 28. */
+ *  Start from \ref rgmin_exp_default. ABI minor 28. */
 typedef struct rgmin_exp_t {
     double a;
     double c_stab;
@@ -314,6 +328,10 @@ typedef struct rgmin_exp_t {
     double length_z;
     int32_t recalc_mu;
 } rgmin_exp_t;
+/** Rust \c ExpParams::default: a 3, c_stab 0.1, NaN mu, r_nn and r_cut
+ *  (estimated, the paper's rule, no cutoff), lengths 0 (the position
+ *  span) and recalc_mu 0. ABI minor 46. */
+rgmin_exp_t rgmin_exp_default(void);
 /** Install the Packwood exponential preconditioner.
  *  \a distance is null for Cartesian pairs. \a anchor_i is null when
  *  \a nanchor is 0. \c mu NaN estimates the energy scale on the next step. */
@@ -355,7 +373,8 @@ typedef struct rgmin_angle_t {
     uint32_t i, vertex, k;
     double k_theta;
 } rgmin_angle_t;
-/** Parameters for every geometry preconditioner.
+/** Parameters for every geometry preconditioner. Start from
+ *  \ref rgmin_precon_init.
  *
  *  \c struct_size is \c sizeof(rgmin_precon_t). This revision rejects a
  *  smaller value. A larger future struct is accepted; bytes past the
@@ -980,6 +999,8 @@ typedef rgmin_status_t (*rgmin_curv_fn)(void *user, const DLManagedTensorVersion
                                     const DLManagedTensorVersioned *d,
                                     double *curv_out);
 
+/** Møller SCG damping, tolerances and conjugacy. Start from
+ *  \ref rgmin_scg_params_default. */
 typedef struct rgmin_scg_params_t {
     double sigma0;
     double lambda;
@@ -991,6 +1012,10 @@ typedef struct rgmin_scg_params_t {
      *  Ignored when \a params is NULL (Netlab Polak-Ribiere). */
     rgmin_conjugacy_t conjugacy;
 } rgmin_scg_params_t;
+/** The record a NULL \a params stands for: Rust \c ScgParams::default
+ *  (sigma0 1e-4, lambda 1, lambda_limit 1e60, tol_sol 1e-6, tol_func
+ *  1e-8) with \c RGMIN_CONJUGACY_POLAK_RIBIERE. ABI minor 46. */
+rgmin_scg_params_t rgmin_scg_params_default(void);
 
 /**
  * Møller SCG. \a curv may be NULL (finite-difference probe).
@@ -1024,11 +1049,15 @@ typedef enum rgmin_scg_step_tolerance_t {
     RGMIN_SCG_RELATIVE_EUCLIDEAN = 1
 } rgmin_scg_step_tolerance_t;
 
-/** Optional SCG policies, separate from the stable parameter record. */
+/** Optional SCG policies, separate from the stable parameter record.
+ *  Start from \ref rgmin_scg_options_default. */
 typedef struct rgmin_scg_options_t {
     /** Literal rgmin_scg_step_tolerance_t. Unknown integers are rejected. */
     int32_t step_tolerance;
 } rgmin_scg_options_t;
+/** Rust \c ScgOptions::default, which a NULL \a options selects:
+ *  \c RGMIN_SCG_ABSOLUTE_INFINITY. ABI minor 46. */
+rgmin_scg_options_t rgmin_scg_options_default(void);
 
 /** SCG with explicit convergence policy. NULL options selects the legacy rule. */
 rgmin_status_t rgmin_minimize_scg_with_options(
@@ -1060,6 +1089,7 @@ typedef enum rgmin_eigen_kind_t {
     RGMIN_EIGEN_LIBKRYLOV = 15
 } rgmin_eigen_kind_t;
 
+/** Typed lowest-mode parameters. Start from \ref rgmin_eigen_params_default. */
 typedef struct rgmin_eigen_params_t {
     /** Literal rgmin_eigen_kind_t. Unknown integers are RGMIN_INVALID_PARAMETER. */
     int32_t kind;
@@ -1068,6 +1098,10 @@ typedef struct rgmin_eigen_params_t {
     uint32_t max_iter;
     double tol;
 } rgmin_eigen_params_t;
+/** Rust \c EigenParams::default, the record a NULL \a params stands for:
+ *  \c RGMIN_EIGEN_LANCZOS, nev 1, and krylov, max_iter and tol 0 (the
+ *  solver's own choices). ABI minor 46. */
+rgmin_eigen_params_t rgmin_eigen_params_default(void);
 
 typedef struct rgmin_lowest_mode_t {
     double value;
@@ -1114,13 +1148,17 @@ rgmin_status_t rgmin_solver_step_hvp(rgmin_solver_t *solver, rgmin_eval_fn eval,
 
 /** Separate backend settings. ChASE reads both fields. Block LOBPCG
  *  ignores them. A null pointer selects the defaults. The base
- *  parameter record retains its layout. */
+ *  parameter record retains its layout. Start from
+ *  \ref rgmin_eigen_options_default. */
 typedef struct rgmin_eigen_options_t {
     /** ChASE filter degree. Zero selects the backend default. */
     uint32_t degree;
     /** ChASE extra search dimensions. Zero selects the backend default. */
     uint32_t extra;
 } rgmin_eigen_options_t;
+/** The ChASE settings of Rust \c EigenParams::default, which a NULL
+ *  \a options selects: degree 0 and extra 0. ABI minor 46. */
+rgmin_eigen_options_t rgmin_eigen_options_default(void);
 
 /** One pair from \ref rgmin_lowest_eigenpairs. \c actions is the product
  *  count of the whole solve. ABI minor 39. */
