@@ -862,4 +862,93 @@ mod tests {
         assert_eq!(hybrid_m, hs_m.min(dy_m).max(0.0));
         assert_eq!(hybrid, hybrid_m);
     }
+
+    fn bits(v: f64) -> u64 {
+        v.to_bits()
+    }
+
+    fn reference_dots(a: ArrayView1<f64>, u: ArrayView1<f64>, v: ArrayView1<f64>, b: ArrayView1<f64>) -> (f64, f64) {
+        let n = a.len().min(u.len()).min(v.len()).min(b.len());
+        let mut ad = -0.0;
+        let mut db = -0.0;
+        for i in 0..n {
+            let y = u[i] - v[i];
+            ad += a[i] * y;
+            db += y * b[i];
+        }
+        (ad, db)
+    }
+
+    #[test]
+    fn the_other_fused_products_match_a_stored_difference() {
+        let check = |a: Array1<f64>, u: Array1<f64>, v: Array1<f64>, b: Array1<f64>, p: Array1<f64>, q: Array1<f64>| {
+            let (ad, db) = reference_dots(a.view(), u.view(), v.view(), b.view());
+            let got = diff_dots(a.view(), u.view(), v.view(), b.view());
+            assert_eq!(bits(got.0), bits(ad));
+            assert_eq!(bits(got.1), bits(db));
+            let again = diff_dots(a.view(), u.view(), v.view(), b.view());
+            assert_eq!(bits(again.0), bits(got.0));
+            assert_eq!(bits(again.1), bits(got.1));
+            let one = diff_dot(u.view(), v.view(), b.view());
+            let mut serial = -0.0;
+            let n = u.len().min(v.len()).min(b.len());
+            for i in 0..n {
+                serial += (u[i] - v[i]) * b[i];
+            }
+            assert_eq!(bits(one), bits(serial));
+            let (s, t, y) = diff_dots_self(a.view(), u.view(), v.view(), b.view());
+            let mut sy = -0.0;
+            let mut sb = -0.0;
+            let mut yy = -0.0;
+            let n = a.len().min(u.len()).min(v.len()).min(b.len());
+            for i in 0..n {
+                let d = u[i] - v[i];
+                sy += a[i] * d;
+                sb += d * b[i];
+                yy += d * d;
+            }
+            assert_eq!(bits(s), bits(sy));
+            assert_eq!(bits(t), bits(sb));
+            assert_eq!(bits(y), bits(yy));
+            let (c0, c1, c2) = diff_dots_cross(a.view(), u.view(), v.view(), b.view(), p.view(), q.view());
+            let mut r0 = -0.0;
+            let mut r1 = -0.0;
+            let mut r2 = -0.0;
+            let n = a.len().min(u.len()).min(v.len()).min(b.len()).min(p.len()).min(q.len());
+            for i in 0..n {
+                let y = u[i] - v[i];
+                let yz = p[i] - q[i];
+                r0 += a[i] * y;
+                r1 += y * b[i];
+                r2 += y * yz;
+            }
+            assert_eq!(bits(c0), bits(r0));
+            assert_eq!(bits(c1), bits(r1));
+            assert_eq!(bits(c2), bits(r2));
+        };
+        check(
+            array![],
+            array![],
+            array![],
+            array![],
+            array![],
+            array![],
+        );
+        check(
+            array![1.0],
+            array![-0.0],
+            array![0.0],
+            array![f64::NAN],
+            array![f64::INFINITY],
+            array![-f64::INFINITY],
+        );
+        check(
+            array![1.0, -2.0, 0.5, f64::NAN, 4.0],
+            array![3.0, 0.0, -1.0, 2.0, f64::INFINITY],
+            array![1.0, -0.0, -1.0, 2.0, 1.0],
+            array![0.25, 8.0, -3.0, 1.0, -0.0],
+            array![1.0, 1.0, 1.0, f64::NAN, -2.0],
+            array![0.0, 4.0, -1.0, 0.0, 5.0],
+        );
+    }
 }

@@ -4032,6 +4032,40 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn fire_and_nlcg_repeat_runs_take_the_same_steps() {
+        let obj = steep();
+        let methods = [
+            Method::Fire {
+                kind: FireKind::V1,
+            },
+            Method::Fire {
+                kind: FireKind::V2,
+            },
+            Method::nlcg(crate::nlcg::Conjugacy::PolakRibiere),
+        ];
+        for method in methods {
+            let control = Control {
+                maxiter: 8,
+                gtol: 1e-12,
+                istep: 0.1,
+                maxmove: Some(0.05),
+                ftol_rel: None,
+                noise_floor: None,
+            };
+            let mut a = Solver::new(method.clone(), control.clone(), 2);
+            let mut b = Solver::new(method, control, 2);
+            let mut xa = array![0.4, -0.25];
+            let mut xb = xa.clone();
+            for _ in 0..6 {
+                a.step(&obj, &mut xa).unwrap();
+                b.step(&obj, &mut xb).unwrap();
+                assert_eq!(xa[0].to_bits(), xb[0].to_bits());
+                assert_eq!(xa[1].to_bits(), xb[1].to_bits());
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -4413,5 +4447,98 @@ mod retained_neb_guard_tests {
             pairs, 2,
             "a step of length {motion} dropped the pair that produced it"
         );
+    }
+}
+
+#[cfg(test)]
+mod fire_fast_path {
+    use super::fire_v1_fused;
+    use crate::fire::{FireKind, FireState};
+    use crate::step::{clip_same_bits, l2, scale_step, scale_step_atom};
+    use ndarray::Array1;
+
+    fn direct_v1(
+        state: &mut FireState,
+        x: &Array1<f64>,
+        grad: &Array1<f64>,
+        atom_cap: Option<f64>,
+        eucl_cap: Option<f64>,
+        bounds: &eindir_core::Bounds<f64>,
+    ) -> (Array1<f64>, Array1<f64>) {
+        let n = grad.len();
+        let dt = state.dt;
+        for i in 0..n {
+            let force = -grad[i];
+            state.vel[i] += force * dt;
+        }
+        let mut dx = Array1::from_shape_fn(n, |i| state.vel[i] * dt);
+        let mut trial = Array1::from_shape_fn(n, |i| x[i] + dx[i]);
+        if let Some(cap) = atom_cap {
+            scale_step_atom(x, &mut trial, cap);
+        } else if let Some(cap) = eucl_cap {
+            scale_step(x, &mut trial, cap);
+        }
+        trial = clip_same_bits(bounds, trial);
+        let proposed = l2(&dx);
+        for i in 0..n {
+            dx[i] = trial[i] - x[i];
+        }
+        crate::fire::apply_velocity_scale(state, proposed, l2(&dx));
+        (trial, dx)
+    }
+
+    fn same(a: &Array1<f64>, b: &Array1<f64>, what: &str) {
+        assert_eq!(a.len(), b.len(), "{what}");
+        for i in 0..a.len() {
+            assert_eq!(a[i].to_bits(), b[i].to_bits(), "{what} [{i}]");
+        }
+    }
+
+    #[test]
+    fn the_fused_fire_step_matches_separate_updates() {
+        let cases: &[(usize, Option<f64>, Option<f64>)] = &[
+            (0, None, None),
+            (1, None, None),
+            (5, None, None),
+            (3, Some(0.05), None),
+            (4, None, Some(0.2)),
+        ];
+        for (n, atom, eucl) in cases {
+            let bounds = eindir_core::Bounds::new(
+                Array1::from_elem(*n, -1.0),
+                Array1::from_elem(*n, 1.0),
+                0.0,
+            );
+            let grad = Array1::from_shape_fn(*n, |i| match i % 4 {
+                0 => 0.3,
+                1 => -0.7,
+                2 => f64::NAN,
+                _ => 1.5,
+            });
+            let x0 = Array1::from_shape_fn(*n, |i| if i == 0 { 1.0 } else { -0.2 * i as f64 });
+            let vel = Array1::from_shape_fn(*n, |i| 0.05 * (i as f64 - 1.0));
+            let mut fast = FireState::new(FireKind::V1, *n, 0.1);
+            let mut slow = FireState::new(FireKind::V1, *n, 0.1);
+            fast.vel.assign(&vel);
+            slow.vel.assign(&vel);
+            let mut x = x0.clone();
+            let mut dx = Array1::zeros(*n);
+            let mut trial = Array1::zeros(*n);
+            fire_v1_fused(
+                &mut dx,
+                &mut trial,
+                &mut fast,
+                &mut x,
+                &grad,
+                *atom,
+                *eucl,
+                &bounds,
+            );
+            let (x_ref, dx_ref) = direct_v1(&mut slow, &x0, &grad, *atom, *eucl, &bounds);
+            same(&x, &x_ref, "x");
+            same(&dx, &dx_ref, "dx");
+            same(&fast.vel, &slow.vel, "vel");
+            assert_eq!(fast.dt.to_bits(), slow.dt.to_bits());
+        }
     }
 }

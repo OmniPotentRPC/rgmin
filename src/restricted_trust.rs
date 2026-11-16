@@ -300,4 +300,65 @@ mod tests {
             other => panic!("{other:?}"),
         }
     }
+
+    fn same_bits(a: &Array1<f64>, b: &Array1<f64>) {
+        assert_eq!(a.len(), b.len());
+        for i in 0..a.len() {
+            assert_eq!(a[i].to_bits(), b[i].to_bits(), "[{i}]");
+        }
+    }
+
+    /// On `H = c I` the trust step is `-g/c`, or that direction scaled onto the sphere.
+    fn isotropic_step(g: &Array1<f64>, curvature: f64, delta: f64) -> Array1<f64> {
+        let newton: Array1<f64> = g.mapv(|v| -v / curvature);
+        let length = nrm2(newton.view());
+        if length <= delta {
+            newton
+        } else {
+            newton.mapv(|v| v * (delta / length))
+        }
+    }
+
+    #[test]
+    fn a_diagonal_trust_step_matches_the_closed_form() {
+        for n in [1usize, 3] {
+            let h = Array2::<f64>::eye(n) * 2.0;
+            let g = Array1::from_shape_fn(n, |i| if i == 0 { 2.0 } else { 0.0 });
+            let inside = TrustRegion::new(10.0).restrict_qn(&h, &g).unwrap();
+            let bound = TrustRegion::new(0.1).restrict_qn(&h, &g).unwrap();
+            let again = TrustRegion::new(0.1).restrict_qn(&h, &g).unwrap();
+            let want_in = isotropic_step(&g, 2.0, 10.0);
+            let want_out = isotropic_step(&g, 2.0, 0.1);
+            for i in 0..n {
+                assert!(
+                    (inside.step[i] - want_in[i]).abs() <= 1e-12,
+                    "inside {n} [{i}] {} vs {}",
+                    inside.step[i],
+                    want_in[i]
+                );
+                assert!(
+                    (bound.step[i] - want_out[i]).abs() <= 1e-12,
+                    "bound {n} [{i}] {} vs {}",
+                    bound.step[i],
+                    want_out[i]
+                );
+            }
+            same_bits(&bound.step, &again.step);
+            assert_eq!(bound.cons.to_bits(), again.cons.to_bits());
+        }
+        let zero = TrustRegion::new(0.0)
+            .restrict_qn(&Array2::<f64>::eye(1), &array![4.0])
+            .unwrap();
+        assert_eq!(zero.step[0].to_bits(), 0.0f64.to_bits());
+        let empty_h = Array2::<f64>::zeros((0, 0));
+        let empty_g = Array1::<f64>::zeros(0);
+        let empty = TrustRegion::new(1.0).restrict_qn(&empty_h, &empty_g);
+        assert!(empty.is_ok());
+        let bad = array![f64::NAN, 1.0];
+        assert!(
+            TrustRegion::new(1.0)
+                .restrict_qn(&Array2::eye(2), &bad)
+                .is_err()
+        );
+    }
 }

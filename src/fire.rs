@@ -583,4 +583,112 @@ mod tests {
         let _ = fire2_displacement(&mut state, &mut ext, &array![1.0]).expect("downhill");
         assert_eq!(ext.n_neg, 0);
     }
+
+    #[test]
+    fn fire2_matches_the_written_step() {
+        fn direct_fire2(
+            state: &mut FireState,
+            ext: &mut Fire2Extras,
+            force: &Array1<f64>,
+        ) -> Result<Array1<f64>, Fire2Stalled> {
+            let power = crate::vecops::dot(force.view(), state.vel.view());
+            let mut dx = Array1::zeros(state.vel.len());
+            if power > 0.0 {
+                ext.n_neg = 0;
+                state.n_pos += 1;
+                if state.n_pos > ext.n_delay {
+                    state.dt = (state.dt * state.f_inc).min(state.dt_max);
+                    state.alpha *= state.f_alpha;
+                }
+            } else {
+                state.n_pos = 0;
+                ext.n_neg = ext.n_neg.saturating_add(1);
+                if ext.n_neg > ext.n_neg_max {
+                    return Err(Fire2Stalled);
+                }
+                if !(ext.initial_delay && ext.steps < ext.n_delay) {
+                    if state.dt * state.f_dec >= ext.dt_min {
+                        state.dt *= state.f_dec;
+                    }
+                    state.alpha = state.alpha_start;
+                }
+                let back = -0.5 * state.dt;
+                for i in 0..dx.len() {
+                    dx[i] = back.mul_add(state.vel[i], dx[i]);
+                }
+                state.vel.fill(0.0);
+            }
+            ext.steps += 1;
+            for i in 0..state.vel.len() {
+                state.vel[i] = state.dt.mul_add(force[i], state.vel[i]);
+            }
+            let vnorm = l2(&state.vel);
+            let dnorm = l2(force);
+            if dnorm.is_finite() && dnorm > 0.0 && vnorm.is_finite() && vnorm >= 0.0 {
+                let alpha = if state.alpha.is_nan() {
+                    0.0
+                } else {
+                    state.alpha.clamp(0.0, 1.0)
+                };
+                let scale = alpha * vnorm / dnorm;
+                for i in 0..state.vel.len() {
+                    state.vel[i] = (1.0 - alpha) * state.vel[i] + scale * force[i];
+                }
+            }
+            for i in 0..dx.len() {
+                dx[i] = state.dt.mul_add(state.vel[i], dx[i]);
+            }
+            Ok(dx)
+        }
+
+        let cases: &[(usize, bool, f64)] = &[
+            (0, true, 0.1),
+            (1, true, 0.2),
+            (1, false, 0.2),
+            (3, true, 0.15),
+            (3, false, 0.15),
+        ];
+        for (n, downhill, dt0) in cases {
+            let force = Array1::from_shape_fn(*n, |i| if i == 0 { 0.4 } else { -0.2 });
+            let (mut fast, mut fast_ext) = guenole2020(*n, *dt0);
+            let (mut slow, mut slow_ext) = guenole2020(*n, *dt0);
+            if !downhill {
+                fast_ext.steps = fast_ext.n_delay;
+                slow_ext.steps = slow_ext.n_delay;
+                for i in 0..*n {
+                    fast.vel[i] = -0.3;
+                    slow.vel[i] = -0.3;
+                }
+            } else {
+                for i in 0..*n {
+                    fast.vel[i] = if force[i] > 0.0 { 0.2 } else { -0.2 };
+                    slow.vel[i] = fast.vel[i];
+                }
+            }
+            let got = fire2_displacement(&mut fast, &mut fast_ext, &force);
+            let want = direct_fire2(&mut slow, &mut slow_ext, &force);
+            match (got, want) {
+                (Ok(a), Ok(b)) => {
+                    assert_eq!(a.len(), b.len());
+                    for i in 0..a.len() {
+                        assert_eq!(a[i].to_bits(), b[i].to_bits(), "dx {n} [{i}]");
+                        assert_eq!(fast.vel[i].to_bits(), slow.vel[i].to_bits(), "vel [{i}]");
+                    }
+                    assert_eq!(fast.dt.to_bits(), slow.dt.to_bits());
+                    assert_eq!(fast.alpha.to_bits(), slow.alpha.to_bits());
+                }
+                (Err(Fire2Stalled), Err(Fire2Stalled)) => {}
+                (a, b) => panic!("disagree {a:?} {b:?}"),
+            }
+        }
+        let nan = array![f64::NAN];
+        let (mut fast, mut fast_ext) = guenole2020(1, 0.1);
+        let (mut slow, mut slow_ext) = guenole2020(1, 0.1);
+        fast.vel[0] = 0.2;
+        slow.vel[0] = 0.2;
+        let got = fire2_displacement(&mut fast, &mut fast_ext, &nan).unwrap();
+        let want = direct_fire2(&mut slow, &mut slow_ext, &nan).unwrap();
+        assert_eq!(got[0].to_bits(), want[0].to_bits());
+        assert_eq!(fast.vel[0].to_bits(), slow.vel[0].to_bits());
+    }
 }

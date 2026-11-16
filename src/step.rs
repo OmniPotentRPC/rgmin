@@ -819,6 +819,138 @@ mod tests {
         assert!((nlcg_half_opening(0.0, 0.05, 0.2) - 0.05).abs() < 1e-15);
     }
 
+    fn direct_half(prev_alpha: f64, cap: f64, fallback: f64) -> f64 {
+        let cap = if cap.is_finite() && cap > 0.0 {
+            cap
+        } else {
+            f64::INFINITY
+        };
+        let fb = if fallback.is_finite() && fallback > 0.0 {
+            fallback.min(cap)
+        } else {
+            1.0_f64.min(cap)
+        };
+        if !(prev_alpha > 0.0) {
+            return fb;
+        }
+        let alpha = prev_alpha * 0.5;
+        if !alpha.is_finite() || alpha <= 0.0 {
+            return fb;
+        }
+        alpha.min(cap)
+    }
+
+    fn direct_opening(prev_alpha: f64, prev_gd: f64, gd: f64, cap: f64, fallback: f64) -> f64 {
+        let cap = if cap.is_finite() && cap > 0.0 {
+            cap
+        } else {
+            f64::INFINITY
+        };
+        let fb = if fallback.is_finite() && fallback > 0.0 {
+            fallback.min(cap)
+        } else {
+            1.0_f64.min(cap)
+        };
+        if !(prev_alpha > 0.0 && prev_gd < 0.0 && gd < 0.0) {
+            return fb;
+        }
+        let ratio = prev_gd / gd;
+        if !ratio.is_finite() || ratio <= 0.0 {
+            return fb;
+        }
+        let alpha = prev_alpha * ratio;
+        if !alpha.is_finite() || alpha <= 0.0 {
+            return fb;
+        }
+        alpha.min(cap)
+    }
+
+    #[test]
+    fn the_line_search_opening_matches_its_formula_on_edges() {
+        let edges = [
+            (0.2, -4.0, -1.0, f64::INFINITY, 1.0),
+            (0.2, -4.0, -1.0, 0.04, 1.0),
+            (0.0, -1.0, -1.0, 10.0, 0.3),
+            (-1.0, -1.0, -1.0, 10.0, 0.3),
+            (f64::NAN, -1.0, -1.0, 10.0, 0.3),
+            (f64::INFINITY, -1.0, -1.0, 10.0, 0.3),
+            (0.2, f64::NAN, -1.0, 10.0, 0.3),
+            (0.2, -1.0, 0.0, 10.0, 0.3),
+            (0.2, -1.0, f64::INFINITY, 10.0, 0.3),
+            (0.2, -1.0, -1.0, f64::NAN, f64::NAN),
+            (0.2, -1.0, -1.0, -3.0, -1.0),
+        ];
+        for (prev, prev_gd, gd, cap, fb) in edges {
+            let half = nlcg_half_opening(prev, cap, fb);
+            assert_eq!(half.to_bits(), direct_half(prev, cap, fb).to_bits());
+            assert_eq!(half.to_bits(), nlcg_half_opening(prev, cap, fb).to_bits());
+            let open = nlcg_opening_alpha(prev, prev_gd, gd, cap, fb);
+            assert_eq!(
+                open.to_bits(),
+                direct_opening(prev, prev_gd, gd, cap, fb).to_bits()
+            );
+            assert_eq!(
+                open.to_bits(),
+                nlcg_opening_alpha(prev, prev_gd, gd, cap, fb).to_bits()
+            );
+        }
+        assert_eq!(
+            nlcg_opening_alpha(0.25, -4.0, -1.0, 10.0, 0.3).to_bits(),
+            1.0f64.to_bits()
+        );
+        assert_eq!(
+            nlcg_half_opening(0.2, f64::INFINITY, 1.0).to_bits(),
+            0.1f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn the_fast_clip_matches_a_direct_max_min() {
+        let check = |lo: ndarray::Array1<f64>, hi: ndarray::Array1<f64>, x: ndarray::Array1<f64>| {
+            let bounds = eindir_core::Bounds::new(lo.clone(), hi.clone(), 0.0);
+            let got = super::clip_same_bits(&bounds, x.clone());
+            let again = super::clip_same_bits(&bounds, x.clone());
+            for i in 0..lo.len() {
+                let direct = x[i].max(lo[i]).min(hi[i]);
+                assert_eq!(got[i].to_bits(), direct.to_bits(), "[{i}]");
+                assert_eq!(again[i].to_bits(), got[i].to_bits(), "[{i}]");
+            }
+        };
+        check(
+            ndarray::array![],
+            ndarray::array![],
+            ndarray::array![],
+        );
+        check(
+            ndarray::array![-1.0],
+            ndarray::array![1.0],
+            ndarray::array![0.0],
+        );
+        check(
+            ndarray::array![-1.0],
+            ndarray::array![1.0],
+            ndarray::array![1.0],
+        );
+        check(
+            ndarray::array![-1.0],
+            ndarray::array![1.0],
+            ndarray::array![1.0 + f64::EPSILON],
+        );
+        check(
+            ndarray::array![-1.0, 0.0, -0.5, -2.0, 0.0, -8.0, 3.0],
+            ndarray::array![1.0, 2.0, -0.5, 2.0, 0.0, -1.0, 3.0],
+            ndarray::array![
+                -1.0,
+                2.0 + f64::EPSILON,
+                -0.5,
+                f64::NAN,
+                -0.0,
+                f64::INFINITY,
+                3.0 - f64::EPSILON,
+            ],
+        );
+    }
+
     #[test]
     fn the_slope_ratio_and_both_quadratic_readings_differ_from_the_half_step() {
         // f = 1/2 (x^2 + 4 y^2) after accepting α = 0.2 from (1, 1).
