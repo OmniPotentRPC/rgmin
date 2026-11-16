@@ -233,7 +233,17 @@ fn point_inside_box(bounds: &eindir_core::Bounds<f64>, x: ArrayView1<'_, f64>) -
 
 fn any_non_finite(g: &Array1<f64>) -> bool {
     match g.as_slice() {
-        Some(xs) => xs.chunks(8).any(|c| c.iter().any(|v| !v.is_finite())),
+        // Every coordinate, same `is_finite` test. The walk does not stop,
+        // so a non-finite value still makes the gradient non-finite.
+        Some(xs) => {
+            let mut finite = true;
+            let mut i = 0;
+            while i < xs.len() {
+                finite &= xs[i].is_finite();
+                i += 1;
+            }
+            !finite
+        }
         None => g.iter().any(|v| !v.is_finite()),
     }
 }
@@ -580,7 +590,20 @@ pub(crate) fn nlcg_opening_alpha(
 
 #[cfg(test)]
 mod tests {
-    use super::{nlcg_half_opening, nlcg_opening_alpha, point_inside_box};
+    use super::{any_non_finite, nlcg_half_opening, nlcg_opening_alpha, point_inside_box};
+
+    #[test]
+    fn a_non_finite_component_marks_the_gradient() {
+        assert!(!any_non_finite(&ndarray::array![0.0, -0.0, 1.0]));
+        assert!(any_non_finite(&ndarray::array![1.0, f64::NAN]));
+        assert!(any_non_finite(&ndarray::array![f64::INFINITY, 0.0]));
+        assert!(any_non_finite(&ndarray::array![0.0, f64::NEG_INFINITY]));
+        assert!(!any_non_finite(&ndarray::Array1::zeros(0)));
+        let mut v = ndarray::Array1::ones(17);
+        assert!(!any_non_finite(&v));
+        v[9] = f64::NAN;
+        assert!(any_non_finite(&v));
+    }
 
     #[test]
     fn box_membership_matches_the_coordinate_test() {
