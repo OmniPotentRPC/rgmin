@@ -40,10 +40,13 @@ cargo +1.93.0 test --locked --release --all-features --lib
 
 Install 1.94.1 the same way and run the two `cargo` commands with `+1.94.1`.
 
-A change that users can see adds a fragment to `docs/newsfragments/` and a line under Unreleased in `docs/orgmode/changelog.org`.
+A change that users can see adds a fragment to `docs/newsfragments/`, and the fragment is its only changelog entry.
 Name the fragment `<issue>.<type>.md`, or `+<name>.<type>.md` for a change with no issue.
 The type is `added`, `changed`, `deprecated`, `removed`, `fixed` or `security`, the sections of [CHANGELOG.md](CHANGELOG.md).
 `towncrier build` moves the fragments into `CHANGELOG.md` when a release is cut, with the settings in `towncrier.toml`.
+Leave the Unreleased sections of `CHANGELOG.md` and `docs/orgmode/changelog.org` empty: an entry written there as well would appear twice after `towncrier build`.
+The release commit copies the notes that towncrier wrote into `docs/orgmode/changelog.org`, under a heading for the version.
 `towncrier build --draft --version 0.0.0` prints the notes that the fragments give and changes no file.
+`python3 scripts/check_changelog.py`, which CI runs, fails when a fragment and a line under Unreleased exist together, or when towncrier would skip a fragment because `towncrier.toml` has no such type.
 
 The [contributing page](docs/orgmode/contributing/index.org) of the docs covers the rest: the C library check, the docs build, citations and the formula numbers the code follows.

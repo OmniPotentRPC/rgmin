@@ -9,12 +9,14 @@ Everyone who takes part follows the `code of conduct <https://github.com/OmniPot
 
 Pull requests go to the ``develop`` branch.
 Commit subjects take the form ``type(scope): summary``, as in ``fix(session): report a stall when the energy test refuses a restart``.
-A change that users can see adds a fragment to ``docs/newsfragments/`` and a line under Unreleased in ``docs/orgmode/changelog.org``.
+A change that users can see adds a fragment to ``docs/newsfragments/``, and the fragment is its only changelog entry.
 Name the fragment ``<issue>.<type>.md``, or ``+<name>.<type>.md`` for a change with no issue.
 The type is ``added``, ``changed``, ``deprecated``, ``removed``, ``fixed`` or ``security``, the sections of ``CHANGELOG.md``.
 Write it as one sentence per line, the way ``CHANGELOG.md`` reads.
 ``towncrier build`` moves the fragments into ``CHANGELOG.md`` when a release is cut, with the settings in ``towncrier.toml``.
-To see the notes that the fragments give without changing a file:
+Leave the Unreleased sections of ``CHANGELOG.md`` and ``docs/orgmode/changelog.org`` empty: an entry written there as well would appear twice after ``towncrier build``.
+The release commit copies the notes that towncrier wrote into ``docs/orgmode/changelog.org``, under a heading for the version.
+To see the notes that the fragments give without changing a file, and to run the check that CI runs on them:
 
 ..
    #skip_lint_start
@@ -23,9 +25,12 @@ To see the notes that the fragments give without changing a file:
 
     python3 -m pip install towncrier
     towncrier build --draft --version 0.0.0
+    python3 scripts/check_changelog.py
 
 ..
    #skip_lint_end
+
+The check fails when a fragment and a line under Unreleased exist together, or when towncrier would skip a fragment because ``towncrier.toml`` has no such type.
 
 Build
 ~~~~~
