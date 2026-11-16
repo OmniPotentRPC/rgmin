@@ -12,8 +12,13 @@ from __future__ import annotations
 
 import re
 import sys
-import tomllib
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    # Python 3.10 has no tomllib; towncrier installs tomli there.
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 ORG = ROOT / "docs" / "orgmode" / "changelog.org"
