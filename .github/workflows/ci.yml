@@ -82,6 +82,58 @@ jobs:
       - name: Tutorial example
         run: python examples/tutorial_lowest_eigenpairs.py
 
+  lammps:
+    name: LAMMPS min_style rgmin (${{ matrix.lammps }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The first stable release that loads min styles from plugins,
+        # and the current one.
+        lammps: [stable_22Jul2025_update2, stable_30Sep2026_update1]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y libopenmpi-dev openmpi-bin
+      - uses: actions/cache@v4
+        id: lammps-cache
+        with:
+          path: ~/lammps
+          key: lammps-${{ matrix.lammps }}-mpi-manybody-plugin-v1
+      - name: Build LAMMPS (MPI, MANYBODY, PLUGIN)
+        if: steps.lammps-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/lammps
+          curl -sSfL "https://github.com/lammps/lammps/archive/refs/tags/${{ matrix.lammps }}.tar.gz" \
+            | tar xz -C ~/lammps --strip-components=1
+          cmake -S ~/lammps/cmake -B ~/lammps/build -D CMAKE_BUILD_TYPE=Release \
+            -D BUILD_MPI=on -D BUILD_OMP=off -D BUILD_SHARED_LIBS=on \
+            -D PKG_PLUGIN=on -D PKG_MANYBODY=on \
+            -D WITH_JPEG=off -D WITH_PNG=off -D WITH_FFMPEG=off -D WITH_GZIP=off
+          cmake --build ~/lammps/build -j "$(nproc)"
+          rm -rf ~/lammps/doc ~/lammps/examples ~/lammps/bench ~/lammps/tools ~/lammps/unittest
+      - run: cargo build --release --locked --lib --features capi
+      - name: Build the plugin against the rgmin staticlib
+        run: |
+          cmake -S lammps -B build-lammps -D CMAKE_BUILD_TYPE=Release \
+            -D LAMMPS_SOURCE_DIR="$HOME/lammps/src" \
+            -D RGMIN_LIBRARY="$PWD/target/release/librgmin.a" \
+            -D RGMIN_LAMMPS_LMP="$HOME/lammps/build/lmp" \
+            -D Python3_EXECUTABLE="$(which python)"
+          cmake --build build-lammps
+      - run: python -m pip install -q pytest
+      - name: Plugin tests (1, 2 and 4 MPI ranks)
+        run: |
+          export LAMMPS_POTENTIALS="$HOME/lammps/potentials"
+          export RGMIN_LAMMPS_MPIRUN="mpirun --oversubscribe"
+          ctest --test-dir build-lammps --output-on-failure
+
   strong-scale:
     name: strong_scale smoke
     runs-on: ubuntu-latest

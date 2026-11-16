@@ -100,6 +100,26 @@ RUSTUP_TOOLCHAIN=1.88.0 tests/cinstall/smoke.sh
    #skip_lint_end
 #+end_export
 
+CI builds the LAMMPS plugin in ~lammps/~ against the 22Jul2025 and 30Sep2026 stable releases, each built from source with MPI and the ~MANYBODY~ and ~PLUGIN~ packages.
+It runs ~lammps/tests~ with pytest through ctest, on 1, 2 and 4 MPI ranks.
+With such a LAMMPS tree in ~$LAMMPS~:
+
+#+begin_export rst
+..
+   #skip_lint_start
+#+end_export
+#+begin_src bash
+cargo +1.88.0 build --release --locked --lib --features capi
+cmake -S lammps -B build-lammps -D LAMMPS_SOURCE_DIR=$LAMMPS/src \
+  -D RGMIN_LIBRARY=$PWD/target/release/librgmin.a -D RGMIN_LAMMPS_LMP=$LAMMPS/build/lmp
+cmake --build build-lammps
+LAMMPS_POTENTIALS=$LAMMPS/potentials ctest --test-dir build-lammps --output-on-failure
+#+end_src
+#+begin_export rst
+..
+   #skip_lint_end
+#+end_export
+
 ** Citations
 
 Narrative pages cite through ~sphinxcontrib-bibtex~ (~:cite:`key`~) against ~docs/source/references.bib~.

@@ -92,6 +92,24 @@ On Ubuntu, as on the CI runner:
 ..
    #skip_lint_end
 
+CI builds the LAMMPS plugin in ``lammps/`` against the 22Jul2025 and 30Sep2026 stable releases, each built from source with MPI and the ``MANYBODY`` and ``PLUGIN`` packages.
+It runs ``lammps/tests`` with pytest through ctest, on 1, 2 and 4 MPI ranks.
+With such a LAMMPS tree in ``$LAMMPS``:
+
+..
+   #skip_lint_start
+
+.. code:: bash
+
+    cargo +1.88.0 build --release --locked --lib --features capi
+    cmake -S lammps -B build-lammps -D LAMMPS_SOURCE_DIR=$LAMMPS/src \
+      -D RGMIN_LIBRARY=$PWD/target/release/librgmin.a -D RGMIN_LAMMPS_LMP=$LAMMPS/build/lmp
+    cmake --build build-lammps
+    LAMMPS_POTENTIALS=$LAMMPS/potentials ctest --test-dir build-lammps --output-on-failure
+
+..
+   #skip_lint_end
+
 Citations
 ~~~~~~~~~
 
