@@ -110,9 +110,15 @@ inline rgmin_lowest_mode_t lowest_eigenpair(
     rgmin_hvp_fn hvp, void* user, const DLManagedTensorVersioned* x,
     const DLManagedTensorVersioned* seed, DLManagedTensorVersioned* mode,
     EigenParams const& params = {}, EigenOptions const& options = {}) {
-    rgmin_eigen_params_t c{static_cast<int32_t>(params.kind), params.nev,
-                           params.krylov, params.max_iter, params.tol};
-    rgmin_eigen_options_t extra{options.degree, options.extra};
+    rgmin_eigen_params_t c = rgmin_eigen_params_default();
+    c.kind = static_cast<int32_t>(params.kind);
+    c.nev = params.nev;
+    c.krylov = params.krylov;
+    c.max_iter = params.max_iter;
+    c.tol = params.tol;
+    rgmin_eigen_options_t extra = rgmin_eigen_options_default();
+    extra.degree = options.degree;
+    extra.extra = options.extra;
     rgmin_lowest_mode_t result{};
     rgmin_status_t st = rgmin_lowest_eigenpair_with_options(
         hvp, user, x, seed, mode, &c, &extra, &result);
@@ -133,6 +139,23 @@ struct Control {
     double noise_eps = 0.0;
     double noise_c = 0.0;
 };
+
+namespace detail {
+
+/// The C record of \c ctrl. Fields \c Control lacks keep their defaults.
+inline rgmin_control_t c_control(Control const& ctrl) noexcept {
+    rgmin_control_t c = rgmin_control_default();
+    c.maxiter = ctrl.maxiter;
+    c.gtol = ctrl.gtol;
+    c.istep = ctrl.istep;
+    c.memory = ctrl.memory;
+    c.maxmove = ctrl.maxmove;
+    c.noise_eps = ctrl.noise_eps;
+    c.noise_c = ctrl.noise_c;
+    return c;
+}
+
+}  // namespace detail
 
 struct Report {
     double value = 0.0;
@@ -182,8 +205,7 @@ struct OptimizeResult {
 inline Report minimize_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
                           DLManagedTensorVersioned* x, Control const& ctrl,
                           Method method) {
-    rgmin_control_t c{ctrl.maxiter, ctrl.gtol, ctrl.istep, ctrl.memory,
-                      ctrl.maxmove, ctrl.noise_eps, ctrl.noise_c};
+    rgmin_control_t c = detail::c_control(ctrl);
     rgmin_report_t out{};
     rgmin_status_t st =
         rgmin_minimize(eval, grad, user, x, &c, static_cast<rgmin_method_t>(method), &out);
@@ -197,8 +219,7 @@ inline Report minimize_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
 inline Report minimize_hess_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hess_fn hess,
                                void* user, DLManagedTensorVersioned* x,
                                Control const& ctrl, Method method) {
-    rgmin_control_t c{ctrl.maxiter, ctrl.gtol, ctrl.istep, ctrl.memory,
-                      ctrl.maxmove, ctrl.noise_eps, ctrl.noise_c};
+    rgmin_control_t c = detail::c_control(ctrl);
     rgmin_report_t out{};
     rgmin_status_t st = rgmin_minimize_hess(
         eval, grad, hess, user, x, &c, static_cast<rgmin_method_t>(method), &out);
@@ -213,8 +234,7 @@ inline Report minimize_eindir(const eindir_objective_t* objective,
                               const eindir_abi_stamp_t* stamp,
                               DLManagedTensorVersioned* x, Control const& ctrl,
                               Method method) {
-    rgmin_control_t c{ctrl.maxiter, ctrl.gtol, ctrl.istep, ctrl.memory,
-                      ctrl.maxmove, ctrl.noise_eps, ctrl.noise_c};
+    rgmin_control_t c = detail::c_control(ctrl);
     rgmin_report_t out{};
     rgmin_status_t st = rgmin_minimize_eindir(
         objective, stamp, x, &c, static_cast<rgmin_method_t>(method), &out);
@@ -600,8 +620,7 @@ class Solver {
 public:
     Solver(Method method, Control const& ctrl, std::size_t dim)
         : dim_(dim), method_(method) {
-        rgmin_control_t c{ctrl.maxiter, ctrl.gtol, ctrl.istep, ctrl.memory,
-                          ctrl.maxmove, ctrl.noise_eps, ctrl.noise_c};
+        rgmin_control_t c = detail::c_control(ctrl);
         ptr_ = rgmin_solver_create(static_cast<rgmin_method_t>(method), &c, dim);
         if (ptr_ == nullptr) {
             char const* msg = rgmin_last_error();
