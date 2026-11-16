@@ -50,6 +50,10 @@ It reported the Euclidean gradient that its difference products keep, so on a cu
 The documentation of ~ManifoldKind::Spd~ and ~Spd~ names the Frobenius metric that the kind measures in.
 It said affine-invariant, the metric of manopt's ~sympositivedefinitefactory~, whose retraction the kind keeps.
 
+Release builds on Rust 1.93 and 1.94 no longer crash rustc.
+The LLVM 21 those toolchains ship segfaulted vectorizing the step cap of the FIRE loop in ~Solver::run_fill~, so ~cargo build --release~ and the Meson build failed with them.
+The cap now walks the atoms with ~as_chunks~ and writes the same bits as before.
+
 ~Lbfgs::minimize_on~ and ~Lbfgs::minimize_box_on~ offer each accepted iterate to a callback as the iteration, the value and the coordinates.
 Returning false ends the run at that point, as ~minimize_watched~ does.
 A caller can project those coordinates, a bond length or a height above a slab, without the solver storing that map.
