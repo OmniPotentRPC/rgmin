@@ -1,0 +1,1 @@
+The foreign function interface (FFI) waist reuses standing DLPack shells per solve instead of allocating per evaluation: +26 percent evaluations per second at n=30, +19 percent at n=225, identical trajectories.

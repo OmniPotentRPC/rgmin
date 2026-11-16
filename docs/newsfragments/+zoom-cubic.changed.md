@@ -1,0 +1,1 @@
+The strong-Wolfe zoom proposes cubic-Hermite trials with both bracket slopes (Nocedal-Wright eq. 3.59) behind interior guards; measured on the LJ75 hopping battery this cut force calls per hop from 46 to 43.
