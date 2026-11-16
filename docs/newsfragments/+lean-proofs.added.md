@@ -1,1 +1,0 @@
-Lean proofs (Mathlib) for the zoom guard and its geometric envelope, the Steihaug boundary root, preconditioner scale invariance, the bounds on the trust-radius update, and the sketch's positive semidefiniteness, indexed in `docs/orgmode/reference/proofs.org`.

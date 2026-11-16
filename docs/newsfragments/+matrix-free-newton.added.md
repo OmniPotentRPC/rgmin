@@ -1,1 +1,0 @@
-Matrix-free Newton: the `HessianVector` trait, a finite-difference action wrapper, Steihaug-Toint CG inside a Nocedal-Wright trust region (`minimize_newton_cg`), and preconditioned CG with the Conn-Gould-Toint metric recurrences (`steihaug_pcg`).
