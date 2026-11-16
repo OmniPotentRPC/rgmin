@@ -7,11 +7,14 @@ int main(void) {
     if (xts_abi_compatible(&stamp) == 0) {
         return 1;
     }
-    if (stamp.abi_minor < 25) {
+    if (stamp.abi_minor < 46) {
         return 2;
     }
-    xts_control_t ctrl = {
-        .maxiter = 1, .gtol = 1e-8, .istep = 0.1, .memory = 4, .maxmove = 0.0};
+    xts_control_t ctrl = xts_control_default();
+    ctrl.maxiter = 1;
+    ctrl.gtol = 1e-8;
+    ctrl.istep = 0.1;
+    ctrl.memory = 4;
     xts_solver_t *s = xts_solver_create(XTS_LBFGS, &ctrl, 2);
     if (s == NULL) {
         return 3;

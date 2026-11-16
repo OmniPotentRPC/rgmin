@@ -38,11 +38,16 @@ int main(void) {
     double coef[2] = {1.0, 1.0};
     unsigned long hits = 0;
     unsigned long called;
-    rgmin_control_t ctrl = {.maxiter = 100, .gtol = 1e-8, .istep = 1.0, .memory = 10};
+    rgmin_control_t ctrl = rgmin_control_default();
     rgmin_report_t out = {.stop = RGMIN_STOP_BUDGET};
-    rgmin_solver_t *s = rgmin_solver_create(RGMIN_LBFGS, &ctrl, 2);
+    rgmin_solver_t *s;
     DLManagedTensorVersioned *tensor = rgmin_tensor_borrow_cpu_f64(x, 2);
     int failed = 0;
+    ctrl.maxiter = 100;
+    ctrl.gtol = 1e-8;
+    ctrl.istep = 1.0;
+    ctrl.memory = 10;
+    s = rgmin_solver_create(RGMIN_LBFGS, &ctrl, 2);
     if (s == NULL || tensor == NULL) {
         return 2;
     }

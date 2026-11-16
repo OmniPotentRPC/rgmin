@@ -23,7 +23,7 @@ static rgmin_status_t bowl_grad(void *user, const DLManagedTensorVersioned *x,
 int main(void) {
     double x = 0.02;
     DLManagedTensorVersioned *tensor = rgmin_tensor_borrow_cpu_f64(&x, 1);
-    rgmin_control_t ctrl;
+    rgmin_control_t ctrl = rgmin_control_default();
     rgmin_report_t out;
     rgmin_status_t st;
     if (tensor == NULL) {
@@ -32,8 +32,6 @@ int main(void) {
     ctrl.maxiter = 20;
     ctrl.gtol = 1e-8;
     ctrl.istep = 1.0;
-    ctrl.memory = 0;
-    ctrl.maxmove = 0.0;
     ctrl.noise_eps = 0.01;
     ctrl.noise_c = 0.0; /* non-positive selects 3 */
     out.value = 0.0;
