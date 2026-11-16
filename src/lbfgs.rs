@@ -1692,6 +1692,415 @@ mod neb_guard_tests {
             assert!(direction.dot(&gradient) < 0.0);
         }
     }
+
+    fn same_bits(got: &Array1<f64>, expect: &Array1<f64>, what: &str) {
+        assert_eq!(got.len(), expect.len(), "{what} len");
+        for i in 0..got.len() {
+            assert_eq!(
+                got[i].to_bits(),
+                expect[i].to_bits(),
+                "{what} [{i}] {} vs {}",
+                got[i],
+                expect[i]
+            );
+        }
+    }
+
+    /// Textbook two-loop with a separate dot and a separate axpy.
+    /// Pairs are oldest first. `γ` and `ρ` are the stored curvature products.
+    fn naive_direction(pairs: &[(Array1<f64>, Array1<f64>)], g: &Array1<f64>) -> Array1<f64> {
+        let mut q = g.to_owned();
+        let m = pairs.len();
+        if m == 0 {
+            q.mapv_inplace(|v| -v);
+            return q;
+        }
+        let mut rho = Vec::with_capacity(m);
+        let mut alpha = vec![0.0; m];
+        for (s, y) in pairs {
+            let (sy, _, _, _) = crate::vecops::curvature_products(s.view(), y.view());
+            rho.push(1.0 / sy);
+        }
+        for i in (0..m).rev() {
+            let (s, y) = &pairs[i];
+            alpha[i] = rho[i] * crate::vecops::dot(s.view(), q.view());
+            crate::vecops::axpy(-alpha[i], y.view(), &mut q);
+        }
+        let (s_new, y_new) = &pairs[m - 1];
+        let (sy, yy, _, _) = crate::vecops::curvature_products(s_new.view(), y_new.view());
+        if yy > 0.0 {
+            let gamma = sy / yy;
+            for v in q.iter_mut() {
+                *v *= gamma;
+            }
+        }
+        for i in 0..m {
+            let (s, y) = &pairs[i];
+            let beta = rho[i] * crate::vecops::dot(y.view(), q.view());
+            crate::vecops::axpy(alpha[i] - beta, s.view(), &mut q);
+        }
+        q.mapv_inplace(|v| -v);
+        q
+    }
+
+    fn positive_pair(n: usize, k: usize) -> (Array1<f64>, Array1<f64>) {
+        let s = Array1::from_shape_fn(n, |i| {
+            let sign = if i % 2 == 0 { 1.0 } else { -0.5 };
+            sign * (i + 1) as f64 * (0.15 + 0.04 * k as f64)
+        });
+        let y = Array1::from_shape_fn(n, |i| s[i] * (1.2 + 0.01 * i as f64) + 0.02);
+        (s, y)
+    }
+
+    #[test]
+    fn two_loop_matches_separate_axpy_and_dot() {
+        // One pair with a known inverse-Hessian step.
+        let mut one = Lbfgs::with_capacity(1);
+        one.record(array![1.0, 0.0, 0.0], array![1.0, 1.0, 0.0]);
+        let g = array![-4.0, 0.0, 0.0];
+        let expect = naive_direction(&[(array![1.0, 0.0, 0.0], array![1.0, 1.0, 0.0])], &g);
+        same_bits(&one.two_loop(g.view()), &expect, "known pair");
+        assert!((expect[0] - 6.0).abs() < 1e-12, "{}", expect[0]);
+        assert!((expect[1] + 2.0).abs() < 1e-12, "{}", expect[1]);
+        assert!(expect[2].abs() < 1e-12, "{}", expect[2]);
+
+        for n in [0usize, 1, 3, 9] {
+            for memory in [1usize, 2, 4] {
+                let mut solver = Lbfgs::with_capacity(memory);
+                let mut kept: Vec<(Array1<f64>, Array1<f64>)> = Vec::new();
+                let pushes = if n == 0 { 0 } else { memory + 3 };
+                for k in 0..pushes {
+                    let (s, y) = positive_pair(n, k);
+                    let (sy, _, _, _) = crate::vecops::curvature_products(s.view(), y.view());
+                    assert!(sy > 0.0, "n {n} k {k} sy {sy}");
+                    solver.record(s.clone(), y.clone());
+                    kept.push((s, y));
+                    if kept.len() > memory {
+                        kept.remove(0);
+                    }
+                    if solver.len() == 1 || solver.len() == 2 || solver.len() == memory {
+                        let g = Array1::from_shape_fn(n, |i| -0.25 * (i as f64 + 1.0));
+                        let expect = naive_direction(&kept, &g);
+                        let wrapped = solver.len() == memory && k + 1 > memory;
+                        let label = format!("n {n} m {memory} len {} wrap {wrapped}", solver.len());
+                        same_bits(&solver.two_loop(g.view()), &expect, &label);
+                        same_bits(
+                            &solver.direction_workspace(g.view()),
+                            &expect,
+                            &format!("{label} workspace"),
+                        );
+                    }
+                }
+                if n == 0 {
+                    let g = Array1::<f64>::zeros(0);
+                    same_bits(&solver.two_loop(g.view()), &g, "empty");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_non_positive_pair_is_skipped_or_resets_like_the_explicit_difference() {
+        for n in [0usize, 1, 3, 9] {
+            for (reset, kind) in [(false, "skip"), (true, "reset")] {
+                for make_y in [0.0_f64, -1.0, f64::NAN, f64::INFINITY] {
+                    let mut fast = Lbfgs::with_capacity(2);
+                    let mut slow = Lbfgs::with_capacity(2);
+                    fast.curvature_reset = reset;
+                    slow.curvature_reset = reset;
+                    if n > 0 {
+                        for k in 0..4 {
+                            let (s, y) = positive_pair(n, k);
+                            fast.record(s.clone(), y.clone());
+                            slow.record(s, y);
+                        }
+                    }
+                    let x = Array1::from_elem(n, 1.0);
+                    let old = Array1::zeros(n);
+                    let g = Array1::from_elem(n, make_y);
+                    let gold = Array1::zeros(n);
+                    let before = fast.len();
+                    fast.push_euclidean(x.view(), old.view(), g.view(), gold.view(), Some(1.0));
+                    let (s, y) = euclidean_pair(x.view(), old.view(), g.view(), gold.view());
+                    let (sy, yy, ss, yys) = crate::vecops::curvature_products(s.view(), y.view());
+                    let sn = ss.sqrt();
+                    let yn = yys.sqrt();
+                    let non_positive = !sy.is_finite() || sy <= 1e-8 * sn * yn;
+                    slow.push_pair(s, y, Some(1.0));
+                    assert_eq!(fast.len(), slow.len(), "n {n} {kind} y {make_y}");
+                    if reset && (!sy.is_finite() || sy.abs() < 1e-30) {
+                        assert_eq!(fast.len(), 0, "reset clears n {n} y {make_y}");
+                    } else if non_positive && !reset {
+                        assert_eq!(fast.len(), before, "skip keeps n {n} y {make_y}");
+                    }
+                    let probe = Array1::from_shape_fn(n, |i| 0.3 - 0.1 * i as f64);
+                    same_bits(
+                        &fast.two_loop(probe.view()),
+                        &slow.two_loop(probe.view()),
+                        &format!("n {n} {kind} y {make_y} yy {yy}"),
+                    );
+                }
+            }
+        }
+    }
+
+    struct Bowl {
+        target: f64,
+        low: f64,
+        high: f64,
+        bounds: eindir_core::Bounds<f64>,
+    }
+
+    impl Bowl {
+        fn new(target: f64, low: f64, high: f64) -> Self {
+            Self {
+                target,
+                low,
+                high,
+                bounds: eindir_core::Bounds::new(ndarray::array![low], ndarray::array![high], 0.0),
+            }
+        }
+    }
+
+    impl eindir_core::Objective<f64> for Bowl {
+        fn dim(&self) -> usize {
+            1
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            let d = x[0] - self.target;
+            0.5 * d * d
+        }
+    }
+
+    impl eindir_core::Gradient<f64> for Bowl {
+        fn dim(&self) -> usize {
+            1
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            array![x[0] - self.target]
+        }
+    }
+
+    impl eindir_core::DifferentiableObjective<f64> for Bowl {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let d = x[0] - self.target;
+            (0.5 * d * d, array![d])
+        }
+    }
+
+    fn open_control() -> crate::Control {
+        crate::Control {
+            maxiter: 40,
+            gtol: 1e-12,
+            istep: 1.0,
+            maxmove: Some(f64::INFINITY),
+            ftol_rel: None,
+            noise_floor: None,
+        }
+    }
+
+    fn project(x: f64, low: f64, high: f64) -> f64 {
+        x.max(low).min(high)
+    }
+
+    #[test]
+    fn a_step_that_meets_the_bound_stays_on_it() {
+        for (target, start) in [(2.0, 0.25), (-2.0, -0.25), (2.0, 0.0), (-2.0, 0.0)] {
+            let obj = Bowl::new(target, -0.25, 0.25);
+            let mut x = array![start];
+            let mut solver = crate::Solver::new(crate::Method::lbfgs(), open_control(), 1);
+            for _ in 0..20 {
+                let report = solver.step(&obj, &mut x).unwrap();
+                let clipped = project(x[0], obj.low, obj.high);
+                assert_eq!(
+                    x[0].to_bits(),
+                    clipped.to_bits(),
+                    "target {target} start {start}"
+                );
+                if report.status != crate::Status::Iterating {
+                    break;
+                }
+            }
+            assert_eq!(x[0].to_bits(), project(x[0], obj.low, obj.high).to_bits());
+        }
+    }
+
+    struct RepeatQuad {
+        bounds: eindir_core::Bounds<f64>,
+    }
+
+    impl RepeatQuad {
+        fn new(n: usize) -> Self {
+            Self {
+                bounds: eindir_core::Bounds::new(
+                    Array1::from_elem(n, -2.0),
+                    Array1::from_elem(n, 2.0),
+                    0.0,
+                ),
+            }
+        }
+    }
+
+    impl eindir_core::Objective<f64> for RepeatQuad {
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            let mut f = 0.0;
+            for i in 0..x.len() {
+                let lam = 1.0 + i as f64;
+                f += 0.5 * lam * x[i] * x[i];
+            }
+            f
+        }
+    }
+
+    impl eindir_core::Gradient<f64> for RepeatQuad {
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            Array1::from_shape_fn(x.len(), |i| (1.0 + i as f64) * x[i])
+        }
+    }
+
+    impl eindir_core::DifferentiableObjective<f64> for RepeatQuad {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let mut f = 0.0;
+            let mut g = Array1::zeros(x.len());
+            for i in 0..x.len() {
+                let lam = 1.0 + i as f64;
+                f += 0.5 * lam * x[i] * x[i];
+                g[i] = lam * x[i];
+            }
+            (f, g)
+        }
+    }
+
+    fn step_trace(n: usize) -> Vec<u64> {
+        let obj = RepeatQuad::new(n);
+        let mut x = Array1::from_elem(n, 0.4);
+        let mut solver = crate::Solver::new(crate::Method::lbfgs(), open_control(), n);
+        let mut bits = Vec::new();
+        for _ in 0..12 {
+            let report = solver.step(&obj, &mut x).unwrap();
+            bits.extend(x.iter().map(|v| v.to_bits()));
+            bits.push(report.grad_norm.to_bits());
+            bits.push(report.value.to_bits());
+            if report.status != crate::Status::Iterating {
+                break;
+            }
+        }
+        bits
+    }
+
+    #[test]
+    fn repeat_runs_take_the_same_steps() {
+        for n in [1usize, 3, 8] {
+            let first = step_trace(n);
+            let second = step_trace(n);
+            assert_eq!(first, second, "n {n}");
+        }
+    }
+
+    struct Poison {
+        after: usize,
+        bad: f64,
+        calls: std::sync::atomic::AtomicUsize,
+        bounds: eindir_core::Bounds<f64>,
+    }
+
+    impl Poison {
+        fn new(after: usize, bad: f64) -> Self {
+            Self {
+                after,
+                bad,
+                calls: std::sync::atomic::AtomicUsize::new(0),
+                bounds: eindir_core::Bounds::new(
+                    Array1::from_elem(3, -5.0),
+                    Array1::from_elem(3, 5.0),
+                    0.0,
+                ),
+            }
+        }
+    }
+
+    impl eindir_core::Objective<f64> for Poison {
+        fn dim(&self) -> usize {
+            3
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            x.iter().map(|v| 0.5 * v * v).sum()
+        }
+    }
+
+    impl eindir_core::Gradient<f64> for Poison {
+        fn dim(&self) -> usize {
+            3
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.value_and_gradient(x).1
+        }
+    }
+
+    impl eindir_core::DifferentiableObjective<f64> for Poison {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let n = self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut g = x.to_owned();
+            if n >= self.after {
+                g[1] = self.bad;
+            }
+            let f = x.iter().map(|v| 0.5 * v * v).sum();
+            (f, g)
+        }
+    }
+
+    fn poisoned_trace(after: usize, bad: f64) -> Vec<u64> {
+        let obj = Poison::new(after, bad);
+        let mut x = array![0.7, -0.4, 0.2];
+        let mut control = open_control();
+        control.gtol = 1e-14;
+        let mut solver = crate::Solver::new(crate::Method::lbfgs(), control, 3);
+        let mut bits = Vec::new();
+        for _ in 0..8 {
+            let report = solver.step(&obj, &mut x).unwrap();
+            assert!(
+                x.iter().all(|v| v.is_finite()),
+                "non-finite point after a {bad} gradient"
+            );
+            // A non-finite component is not a small gradient. Stopping
+            // would require the accepted point to actually be there.
+            if report.status == crate::Status::Tolerance {
+                assert!(
+                    x.iter().all(|v| v.abs() < 1e-8),
+                    "tolerance at {x} after a {bad} gradient"
+                );
+            }
+            bits.extend(x.iter().map(|v| v.to_bits()));
+            bits.push(report.status as u64);
+        }
+        bits
+    }
+
+    #[test]
+    fn a_non_finite_gradient_mid_run_does_not_move_and_repeats() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let first = poisoned_trace(2, bad);
+            let second = poisoned_trace(2, bad);
+            assert_eq!(first, second, "{bad}");
+        }
+    }
 }
 
 #[cfg(test)]

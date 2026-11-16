@@ -649,6 +649,39 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn clamping_at_a_bound_matches_a_direct_clip() {
+        let lo = [-1.0, 0.0, -0.5];
+        let hi = [1.0, 2.0, -0.5];
+        let bounds = eindir_core::Bounds::new(
+            ndarray::Array1::from(lo.to_vec()),
+            ndarray::Array1::from(hi.to_vec()),
+            0.0,
+        );
+        let clip = |x: &[f64]| -> Vec<f64> {
+            x.iter()
+                .zip(lo)
+                .zip(hi)
+                .map(|((xi, l), h)| xi.max(l).min(h))
+                .collect()
+        };
+        let on = [-1.0, 0.0, -0.5];
+        let over = [-1.0, 2.0 + f64::EPSILON, -0.5 - f64::EPSILON];
+        assert!(point_inside_box(&bounds, ndarray::ArrayView1::from(&on)));
+        assert!(!point_inside_box(&bounds, ndarray::ArrayView1::from(&over)));
+        for x in [on, over] {
+            let got = bounds.clip(ndarray::ArrayView1::from(&x));
+            let expect = clip(&x);
+            for i in 0..x.len() {
+                assert_eq!(got[i].to_bits(), expect[i].to_bits(), "{i}");
+            }
+        }
+        let got = bounds.clip(ndarray::ArrayView1::from(&on));
+        for i in 0..on.len() {
+            assert_eq!(got[i].to_bits(), on[i].to_bits());
+        }
+    }
+
     /// `2 (f - f_prev) / gd`. NaN unless the slope is a strict descent.
     fn quadratic_opening(f: f64, f_prev: f64, gd: f64) -> f64 {
         if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
