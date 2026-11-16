@@ -91,6 +91,7 @@ It also covers the features of each route, the C library and a checkout.
    howto/python
    howto/ase-migration
    howto/ase-bench
+   howto/lammps-migration
    howto/doxygen
    howto/cite
 
@@ -114,6 +115,7 @@ It also covers the features of each route, the C library and a checkout.
    reference/architecture
    reference/api
    reference/constraints
+   reference/lammps-min-style
    reference/product-manifold
    reference/sota
    reference/proofs

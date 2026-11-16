@@ -1,0 +1,129 @@
+
+
+LAMMPS min\ :sub:`style`\ rgmin
+-------------------------------
+
+This page lists the ``min_modify`` keywords of the LAMMPS plugin in ``lammps/``, the rgmin C ABI call behind each one, and the errors the plugin raises.
+:doc:`../howto/lammps-migration` shows how to build and load it.
+
+.. code:: text
+
+    plugin load rgminplugin.so
+    min_style rgmin
+    min_modify keyword value ...
+    minimize etol ftol maxiter maxeval
+
+``min_modify`` applies to the current minimizer, so it comes after ``min_style rgmin``.
+A new ``min_style`` command starts again from the defaults.
+
+Keywords of the plugin
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. table::
+
+    +----------------+----------------------------------------------------+-------------+-----------------------------------------------------+
+    | keyword        | values                                             | default     | C ABI                                               |
+    +================+====================================================+=============+=====================================================+
+    | ``method``     | ``lbfgs``, ``fire``, ``fire2``, ``sd``, ``bb``     | ``lbfgs``   | ``rgmin_method_from_name``, ``rgmin_solver_create`` |
+    +----------------+----------------------------------------------------+-------------+-----------------------------------------------------+
+    | ``memory``     | integer, at least 1                                | 10          | ``rgmin_control_t.memory``                          |
+    +----------------+----------------------------------------------------+-------------+-----------------------------------------------------+
+    | ``trust``      | radius, at least 0 (distance units)                | 0, off      | ``rgmin_solver_set_lbfgs_trust``                    |
+    +----------------+----------------------------------------------------+-------------+-----------------------------------------------------+
+    | ``linesearch`` | ``none``, ``wolfe``                                | ``none``    | ``rgmin_solver_set_lbfgs_wolfe``                    |
+    +----------------+----------------------------------------------------+-------------+-----------------------------------------------------+
+    | ``accept``     | ``default``, ``energy``, ``none``, ``nonmonotone`` | ``default`` | ``rgmin_solver_set_accept``                         |
+    +----------------+----------------------------------------------------+-------------+-----------------------------------------------------+
+    | ``istep``      | step scale, at least 0                             | 0           | ``rgmin_control_t.istep``                           |
+    +----------------+----------------------------------------------------+-------------+-----------------------------------------------------+
+
+- ``method`` takes rgmin's method names, so ``steepest`` and ``barzilai-borwein`` are ``sd`` and ``bb``.
+  Any other rgmin method is an error.
+
+- ``memory`` is the number of L-BFGS pairs.
+  Other methods ignore it.
+
+- ``trust`` is the Burdakov ray-truncation radius of L-BFGS, which replaces the per-atom cap and the acceptance test while it is on.
+  It needs ``method lbfgs`` and excludes ``linesearch wolfe``.
+
+- ``linesearch wolfe`` needs ``method lbfgs``.
+  With a positive ``dmax`` it is rgmin's geometry L-BFGS step, whose trials the per-atom cap bounds; with ``dmax 0`` it is the strong Wolfe search of Nocedal and Wright, algorithms 3.5 and 3.6.
+
+- ``accept`` is how a session takes a proposed step.
+  ``default`` keeps the C ABI default, ``energy``, which refuses a trial that raises the energy.
+
+- ``istep`` is the FIRE time step of ``fire`` and ``fire2``, 0.1 when it is 0.
+  For ``sd`` and ``bb``, 0 is the C ABI default: a unit step scale, with ``min(1, 1/|g|)`` on the first step.
+
+LAMMPS keywords the plugin reads
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. table::
+
+    +-------------+---------+-----------------------------------------------------------------------------------------------------------+
+    | keyword     | default | use                                                                                                       |
+    +=============+=========+===========================================================================================================+
+    | ``dmax``    | 0.1     | ``rgmin_solver_set_atom_maxmove``: the largest displacement of one atom in one step; 0 leaves the cap off |
+    +-------------+---------+-----------------------------------------------------------------------------------------------------------+
+    | ``norm``    | ``two`` | ``rgmin_solver_set_stop_norm``: ``two`` is ``TWO``, ``max`` is ``MAX_ATOM``, ``inf`` is ``INF``           |
+    +-------------+---------+-----------------------------------------------------------------------------------------------------------+
+    | ``abcfire`` | ``no``  | ``rgmin_solver_set_fire_abc`` on a ``fire2`` session                                                      |
+    +-------------+---------+-----------------------------------------------------------------------------------------------------------+
+
+``method fire2`` selects ``RGMIN_FIRE_PRESET_GUENOLE2020``, the parameter set of the LAMMPS ``min_style fire`` defaults.
+``delaystep``, ``dtgrow``, ``dtshrink``, ``alpha0``, ``alphashrink``, ``tmax``, ``tmin``, ``integrator``, ``halfstepback``, ``initialdelay`` and ``vdfmax`` must keep those defaults, and ``line`` must stay ``quadratic``.
+The ``minimize`` command checks them and stops with an error otherwise.
+
+Stopping rules
+~~~~~~~~~~~~~~
+
+.. table::
+
+    +-------------+---------------------------------------------------------------------------------------------------------+
+    | LAMMPS      | plugin                                                                                                  |
+    +=============+=========================================================================================================+
+    | ``etol``    | ``abs(E_k - E_{k-1}) < etol (abs(E_k) + abs(E_{k-1}) + 1e-8) / 2`` after a step that moved the atoms    |
+    +-------------+---------------------------------------------------------------------------------------------------------+
+    | ``ftol``    | ``rgmin_report_t.grad_norm < ftol``, with ``rgmin_control_t.gtol = ftol`` and the stop norm of ``norm`` |
+    +-------------+---------------------------------------------------------------------------------------------------------+
+    | ``maxiter`` | number of ``rgmin_solver_step_fg`` calls                                                                |
+    +-------------+---------------------------------------------------------------------------------------------------------+
+    | ``maxeval`` | number of ``Min::energy_force`` calls the plugin made, checked after each step                          |
+    +-------------+---------------------------------------------------------------------------------------------------------+
+
+``E`` is the energy LAMMPS prints, per atom under ``thermo_modify norm yes``.
+The gradient rgmin sees is ``-F`` over all ``3N`` coordinates after every fix, so ``grad_norm`` is the force norm that ``min_style cg`` compares with ``ftol``.
+A failed rgmin step ends the minimization with the stopping criterion ``rgmin step failed:`` and the text of ``rgmin_last_error``.
+
+Errors
+~~~~~~
+
+.. table::
+
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    | message contains                                                                    | cause                                                |
+    +=====================================================================================+======================================================+
+    | ``Unknown min_modify keyword X for min_style rgmin``                                | a keyword that neither LAMMPS nor the plugin defines |
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    | ``Unknown rgmin method X``                                                          | a name ``rgmin_method_from_name`` refuses            |
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    | ``stores a dense 3N x 3N matrix``                                                   | ``bfgs``, ``sr1`` or ``sr2``                         |
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    | ``needs a dense Hessian``                                                           | ``newton``, ``rfo`` or ``dogleg``                    |
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    | ``is not available with min_style rgmin``                                           | any other rgmin method                               |
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    | ``does not support fixes that add global degrees of freedom such as fix box/relax`` | ``fix box/relax`` or another fix with ``min_dof``    |
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    | ``does not support pair styles that add per-atom degrees of freedom``               | for example ``pair_style eff/cut``                   |
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    | ``requires consecutive atom IDs 1 to N``                                            | gaps in the atom IDs                                 |
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    | ``does not take min_modify line``                                                   | ``min_modify line`` other than ``quadratic``         |
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    | ``keeps the Guenole 2020 FIRE parameters``                                          | a LAMMPS FIRE keyword changed from its default       |
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    | ``replicated rgmin sessions diverged across ranks``                                 | ranks that reached different step energies           |
+    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+
+Keywords with a bad value (``memory 0``, ``linesearch armijo``, ``accept maybe``) and settings that need another method (``trust`` or ``linesearch wolfe`` without ``lbfgs``, ``abcfire yes`` without ``fire2``) also stop with an error that names them.

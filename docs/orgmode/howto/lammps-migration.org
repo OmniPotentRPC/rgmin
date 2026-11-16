@@ -1,0 +1,175 @@
+#+TITLE: Migrate from LAMMPS minimizers
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+
+* Migrate from LAMMPS minimizers
+
+~min_style rgmin~ is a LAMMPS plugin that runs rgmin's L-BFGS, FIRE, FIRE 2.0, steepest descent and Barzilai-Borwein sessions inside the LAMMPS ~minimize~ command.
+Load the plugin and change the ~min_style~ line; the rest of the input stays as it is.
+
+#+begin_src text
+plugin load rgminplugin.so
+min_style rgmin              # was: min_style cg
+minimize 0.0 1.0e-6 10000 100000
+#+end_src
+
+The plugin calls rgmin only through its C ABI, ~include/rgmin.h~.
+It works with any pair style, bond style, kspace style and fix that contributes energy and forces to a LAMMPS minimization.
+@@rst::doc:`../reference/lammps-min-style`@@ lists every ~min_modify~ keyword, the exact stopping rules and the errors.
+
+** Build
+
+The plugin needs a LAMMPS built with CMake, the ~PLUGIN~ package and the packages of your potentials.
+LAMMPS can load a min style from a plugin from the 22Jul2025 stable release on.
+The plugin was tested with the stable releases 22Jul2025 (update 2) and 30Sep2026 (update 1), with Open MPI 4.1 and GCC 13.
+The 2Aug2023 and 29Aug2024 releases log ~Loading plugins for min styles not yet implemented~ and then stop at ~min_style rgmin~ with ~Illegal minimize style~, so the plugin's CMake refuses their sources.
+
+#+begin_src bash
+cmake -S lammps-stable_30Sep2026_update1/cmake -B build-lammps \
+  -D BUILD_MPI=on -D PKG_PLUGIN=on -D PKG_MANYBODY=on
+cmake --build build-lammps -j
+
+cmake -S rgmin/lammps -B build-rgmin-lammps \
+  -D LAMMPS_SOURCE_DIR=$PWD/lammps-stable_30Sep2026_update1/src \
+  -D RGMIN_LAMMPS_LMP=$PWD/build-lammps/lmp
+cmake --build build-rgmin-lammps
+#+end_src
+
+The second build runs ~cargo build --release --features capi~ in the rgmin checkout and links the static library into ~rgminplugin.so~, whose rgmin symbols stay private.
+The plugin therefore needs no rgmin library at run time.
+~-D RGMIN_LIBRARY=<path>~ links a ~librgmin.a~ or ~librgmin.so~ that is already built with ~capi~ instead.
+The plugin has to be compiled against the source tree, MPI library and ~LAMMPS_SIZES~ (~smallbig~ by default) of the ~lmp~ that loads it.
+~LAMMPS_MPI=OFF~ builds against the serial ~STUBS~ library of a LAMMPS built without MPI.
+The default ~cargo build~ of rgmin does not build or need any of this.
+
+~plugin load~ takes a path, or a file name that LAMMPS finds through ~LAMMPS_PLUGIN_PATH~.
+~cmake --install~ puts the plugin under ~lib/lammps/plugins~ of the install prefix.
+
+** Methods
+
+~min_modify method~ selects the rgmin session.
+
+| ~method~ | rgmin session | nearest LAMMPS style |
+|---+---+---|
+| ~lbfgs~ (default) | L-BFGS without a line search, eOn's per-atom cap, memory 10 | ~cg~ |
+| ~fire~ | FIRE of Bitzek et al. 2006 | ~fire~ |
+| ~fire2~ | FIRE 2.0 with Guénolé et al. 2020 Table 1, the LAMMPS ~fire~ defaults | ~fire~ |
+| ~sd~ | steepest descent with energy acceptance | ~sd~ |
+| ~bb~ | Barzilai-Borwein | none |
+
+~linesearch wolfe~, ~trust~, ~memory~ and ~accept~ change the L-BFGS step.
+The other rgmin methods are refused with an error.
+~bfgs~, ~sr1~ and ~sr2~ store a dense ~3N~ by ~3N~ matrix.
+~newton~, ~rfo~ and ~dogleg~ need a dense Hessian.
+The nonlinear CG family, Adam and Newton-CG take session steps without a line search and stopped short of ~ftol~ on the test systems.
+For example, at ~ftol 1e-8~ Hager-Zhang stopped at 10,000 iterations on a rattled 864-atom LJ crystal that L-BFGS relaxed in 57.
+
+** Stopping criteria
+
+~minimize etol ftol maxiter maxeval~ keeps its LAMMPS meaning.
+
+- ~ftol~ stops when the force norm of ~min_modify norm~ is below ~ftol~: the two-norm of the global ~3N~ force vector by default, the largest per-atom force for ~norm max~, and the largest component for ~norm inf~.
+  rgmin computes it as its ~TWO~, ~MAX_ATOM~ or ~INF~ stop norm of the gradient ~-F~, which is the force after every fix has modified it.
+  LAMMPS compares ~|F|^2 < ftol^2~ and rgmin ~|F| < ftol~; the two agree except within rounding of the bound.
+- ~etol~ stops when ~|E_k - E_{k-1}| < etol (|E_k| + |E_{k-1}| + 1e-8) / 2~ for the energies of two consecutive iterates, as in ~min_style cg~.
+  rgmin has no relative energy rule, so the plugin applies this test after each step.
+  A step that rgmin refused leaves the iterate in place and does not take the test.
+- ~maxiter~ counts rgmin steps, one per LAMMPS iteration and timestep.
+- ~maxeval~ counts force evaluations, the ~Force evaluations~ line of the LAMMPS summary.
+  A step that needs several evaluations can pass the limit by the evaluations of that step.
+
+The energy that rgmin minimizes is the one LAMMPS minimizers see: the potential energy of ~thermo_pe~, including fixes with ~fix_modify energy yes~.
+With ~thermo_modify norm yes~ the plugin hands rgmin the total energy, so energy and forces stay consistent, and applies ~etol~ to the per-atom energy that LAMMPS prints.
+
+** Fixes
+
+Fixes that change forces during a minimization act on the forces rgmin sees.
+~fix setforce~ atoms do not move, and a fix such as ~fix spring/self~ with ~fix_modify energy yes~ adds its energy and forces.
+~python -m pytest lammps/tests~ checks ~setforce~ and ~spring/self~ against ~min_style cg~.
+
+~fix box/relax~ adds the box to the degrees of freedom of the minimization.
+The plugin does not relax the box and stops with an error that names ~fix box/relax~; use ~min_style cg~ for a cell relaxation.
+Pair styles that add per-atom degrees of freedom, such as the electron radius of ~eff~, are refused in the same way.
+
+** Parallel runs
+
+Every MPI rank holds the whole ~3N~ coordinate vector in atom-ID order and runs the same rgmin session on it.
+An evaluation moves the atoms a rank owns to rgmin's coordinates, calls the minimizer's ~energy_force~ on all ranks, and sums each rank's owned forces into the ~3N~ gradient with one ~MPI_Allreduce~.
+Each entry of that sum has one owner and zeros elsewhere, so the result is exact and the same on every rank.
+The energy is broadcast from rank 0.
+The sessions are deterministic, so with identical inputs they take the same steps; the plugin compares the step energy across ranks after every step and stops with an error if they ever differ.
+
+rgmin's solvers take a contiguous vector and compute their own dot products, and the C ABI has no hook for a distributed reduction.
+Gathering costs one sum of ~3N~ doubles per force evaluation, against a force evaluation that already exchanges ghost atoms, and the session's own work is a few ~O(mN)~ vector operations per step.
+That overhead shows on the 32k cell: at the same number of force calls, rgmin's ~fire~ took 2.4 s on 4 ranks against 1.6 s for LAMMPS's ~fire~.
+The ~3N~ copy on every rank and the full-length sum grow with N and not with N per rank, so they limit how far a run scales to more ranks.
+
+Atoms move to the periodic image of rgmin's coordinates that is nearest to where they are, so LAMMPS keeps wrapping atoms and updating image flags across reneighboring.
+Atom IDs must run from 1 to N; ~reset_atoms id~ renumbers them after atoms are deleted.
+
+On the 500-atom Cu dumbbell-and-vacancy cell, 1, 2 and 4 ranks take the same number of steps and force calls.
+Their energies agree to 1e-12 relative at every step and their force norms to 1e-9 eV/Å, the rounding of a force sum taken in a different order.
+
+** Differences
+
+- ~min_modify dmax~ (default 0.1, distance units) is rgmin's per-atom step cap for every method.
+  rgmin's own default cap is 0.2; ~min_modify dmax 0.2~ restores it.
+- ~linesearch wolfe~ with a positive ~dmax~ runs rgmin's geometry L-BFGS step, which bounds each trial by the cap.
+  With ~dmax 0~ it is the plain strong Wolfe search, which ran into ~maxeval~ on the LJ cluster and the dumbbell cell at ~ftol 1e-6~.
+- rgmin's FIRE integrators use unit masses and a step scale ~istep~ (default 0.1), not the atom masses and the LAMMPS ~timestep~ of ~min_style fire~.
+  ~min_modify abcfire yes~ selects ABC-FIRE on ~fire2~.
+  The other LAMMPS FIRE keywords must stay at their defaults, which are the FIRE 2.0 parameters the plugin uses; a changed value is an error.
+- ~min_modify line~ belongs to the LAMMPS line-search styles and is an error with ~min_style rgmin~.
+- The first rgmin step uses the energy and forces that ~Min::setup~ computed, so it costs no force evaluation.
+- When rgmin's iterate is not the last point it evaluated, the plugin evaluates it before a thermo or dump step and counts that evaluation.
+- The summary line ~Final line search alpha~ is always 0.
+
+** Benchmark
+
+~python benches/lammps_minstyle.py~ runs ~min_style cg~, ~sd~, ~fire~ and ~quickmin~ and ~min_style rgmin~ with ~lbfgs~, ~fire~ and ~fire2~, each at its defaults, on the test systems and on a 31,999-atom Cu vacancy cell with every atom rattled by up to 0.05 Å.
+Every run is ~minimize 0.0 1.0e-6 100000 1000000~.
+Wall time is the LAMMPS loop time, the median of five repeats; iterations and force calls were the same on every repeat.
+The 32k cell also ran on 4 MPI ranks.
+The full table, with energies, final force norms and the minimum times, is ~benches/lammps_minstyle/results.md~.
+
+Run on the sources of this change over commit 5a9f396, with rgmin 0.2.0, LAMMPS 30Sep2026 (update 1), Open MPI 4.1.6 and GCC 13.3, on Linux 6.12 ~x86_64~ (Intel Xeon, 8 logical CPUs).
+
+| case | min_style | 1 rank: iterations/calls | 1 rank: median s | 4 ranks: iterations/calls | 4 ranks: median s |
+|---+---+---+---+---+---|
+| lj177 | ~cg~ | 81/162 | 0.00614 | | |
+| lj177 | ~sd~ | 559/1118 | 0.03951 | | |
+| lj177 | ~fire~ | 247/257 | 0.009137 | | |
+| lj177 | ~quickmin~ | 678/678 | 0.02402 | | |
+| lj177 | ~rgmin lbfgs~ | 89/90 | 0.0046 | | |
+| lj177 | ~rgmin fire~ | 237/237 | 0.01121 | | |
+| lj177 | ~rgmin fire2~ | 230/258 | 0.01189 | | |
+| cu-vac | ~cg~ | 32/64 | 0.01321 | | |
+| cu-vac | ~sd~ | 127/254 | 0.0509 | | |
+| cu-vac | ~fire~ | 158/163 | 0.03314 | | |
+| cu-vac | ~quickmin~ | 243/243 | 0.04921 | | |
+| cu-vac | ~rgmin lbfgs~ | 35/36 | 0.008588 | | |
+| cu-vac | ~rgmin fire~ | 154/154 | 0.03396 | | |
+| cu-vac | ~rgmin fire2~ | 115/120 | 0.02632 | | |
+| cu-sia-vac | ~cg~ | 66/129 | 0.05803 | | |
+| cu-sia-vac | ~sd~ | 305/604 | 0.269 | | |
+| cu-sia-vac | ~fire~ | 228/236 | 0.1066 | | |
+| cu-sia-vac | ~quickmin~ | 553/553 | 0.2487 | | |
+| cu-sia-vac | ~rgmin lbfgs~ | 64/65 | 0.03302 | | |
+| cu-sia-vac | ~rgmin fire~ | 175/175 | 0.08474 | | |
+| cu-sia-vac | ~rgmin fire2~ | 204/215 | 0.1033 | | |
+| cu32k-vac | ~cg~ | 121/243 (*) | 5.688 | 130/260 | 1.759 |
+| cu32k-vac | ~sd~ | 859/1723 (*) | 39.03 | 2449/4898 | 30.16 |
+| cu32k-vac | ~fire~ | 271/275 | 6.264 | 271/275 | 1.628 |
+| cu32k-vac | ~quickmin~ | 2680/2680 | 60.65 | 2680/2680 | 16.04 |
+| cu32k-vac | ~rgmin lbfgs~ | 145/146 | 3.909 | 145/146 | 1.533 |
+| cu32k-vac | ~rgmin fire~ | 270/270 | 6.829 | 270/270 | 2.401 |
+| cu32k-vac | ~rgmin fire2~ | 766/805 | 20.09 | 766/805 | 6.962 |
+
+(*) The serial ~cg~ and ~sd~ runs on the 32k cell stopped on ~linesearch alpha is zero~ with force norms of 3.9e-6 and 2.3e-4, above ~ftol~; every other run stopped on the force tolerance.
+Both converged on 4 ranks, where the forces are summed in another order.
+The runs that converged agree on the energy of each case to within 1e-13 relative.
+
+~rgmin lbfgs~ took the fewest force calls and the least time on every case, between half and three fifths of the calls of ~cg~, which spends two calls on each iteration.
+On 4 ranks it took the same 145 iterations and 146 force calls as on one rank.
+rgmin's ~fire~ took no more force calls than LAMMPS's ~fire~ on any case, but more time on the 32k cell: 6.8 s against 6.3 s serially and 2.4 s against 1.6 s on 4 ranks.
+With the same number of force calls, the extra time is the plugin's own work on each call: the gather and scatter between local atoms and the global vector, the sum of the full ~3N~ gradient across ranks, and the session's vector operations, which every rank repeats.
+~fire2~, the Guénolé 2020 parameters with rgmin's FIRE 2.0 step, took about three times the iterations of LAMMPS's ~fire~ on the 32k cell.
