@@ -94,6 +94,46 @@ class Quadratic:
         self.session.close()
 
 
+class DenseTrust:
+    """The diagonal spectrum rotated by a seeded orthogonal factor."""
+
+    params = [100, 500]
+    param_names = ["n"]
+    timeout = 600
+
+    def setup(self, n: int) -> None:
+        if not Path(_quad()).is_file():
+            raise RuntimeError("quadratic driver is not built")
+        self.session = _Session([_quad(), "session", "dtrust", str(n)])
+
+    def time_solve(self, n: int) -> None:
+        line = self.session.run()
+        if not line.startswith("ok"):
+            raise RuntimeError(line.strip())
+
+    def teardown(self, n: int) -> None:
+        self.session.close()
+
+
+class LennardJonesCube:
+    """Lennard-Jones Hessian of a 2x2x2 cube."""
+
+    timeout = 60
+
+    def setup(self) -> None:
+        if not Path(_quad()).is_file():
+            raise RuntimeError("quadratic driver is not built")
+        self.session = _Session([_quad(), "session", "lj", "24"])
+
+    def time_solve(self) -> None:
+        line = self.session.run()
+        if not line.startswith("ok"):
+            raise RuntimeError(line.strip())
+
+    def teardown(self) -> None:
+        self.session.close()
+
+
 class Aluminium:
     """FIRE 1.0 and Polak-Ribiere on the aluminium packing."""
 
