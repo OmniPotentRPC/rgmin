@@ -28,8 +28,9 @@ listed on each class and in the ASE migration page of the docs.
 
 from __future__ import annotations
 
+import sys
 import warnings
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
 import numpy as np
@@ -44,6 +45,53 @@ if TYPE_CHECKING:
 
 RESTART_FORMAT = "rgmin-replay-1"
 _Evaluation = list[list[float] | float]
+
+GROMACS_KJMOL_NM_TO_EV_ANGSTROM = 1.0 / 964.8533212331001
+GROMACS_NM_TO_ANGSTROM = 10.0
+
+
+def gromacs_mdp_options(mdp: Mapping[str, object] | None = None, /, **overrides: object) -> dict[str, Any]:
+    """Map GROMACS ``steep`` MDP keys to native rgmin options in ASE units.
+
+    Defaults are ``emtol=10.0`` kJ mol⁻¹ nm⁻¹, ``emstep=0.01`` nm and
+    ``nsteps=-1`` (no limit). The returned mapping can be passed to
+    :func:`rgmin.minimize`; pop ``method`` for its positional method argument.
+    """
+    values: dict[str, object] = {
+        "integrator": "steep",
+        "emtol": 10.0,
+        "emstep": 0.01,
+        "nsteps": -1,
+    }
+    for source in ({} if mdp is None else mdp, overrides):
+        for raw_key, value in source.items():
+            key = str(raw_key).strip().lower().replace("-", "_")
+            if key not in values:
+                raise ValueError(f"unknown GROMACS steep MDP key {raw_key!r}")
+            values[key] = value
+    if str(values["integrator"]).strip().lower() != "steep":
+        raise ValueError("integrator must be steep")
+    emtol = float(values["emtol"])
+    emstep = float(values["emstep"])
+    if not (np.isfinite(emtol) and emtol > 0.0):
+        raise ValueError("emtol must be positive and finite")
+    if not (np.isfinite(emstep) and emstep > 0.0):
+        raise ValueError("emstep must be positive and finite")
+    raw_steps = values["nsteps"]
+    if isinstance(raw_steps, bool):
+        raise ValueError("nsteps must be -1 or a non-negative integer")
+    try:
+        nsteps = int(raw_steps)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("nsteps must be -1 or a non-negative integer") from None
+    if str(nsteps) != str(raw_steps).strip() or nsteps < -1:
+        raise ValueError("nsteps must be -1 or a non-negative integer")
+    return {
+        "method": "gromacs-steep",
+        "gtol": emtol * GROMACS_KJMOL_NM_TO_EV_ANGSTROM,
+        "istep": emstep * GROMACS_NM_TO_ANGSTROM,
+        "maxiter": sys.maxsize if nsteps == -1 else nsteps,
+    }
 
 
 def _restart_error(message: str) -> Exception:
@@ -707,6 +755,51 @@ class SteepestDescent(_Scaled):
     kind = "sd"
 
 
+class GromacsSteep(_RgminOptimizer):
+    """GROMACS ``integrator = steep`` with MDP parameters and units."""
+
+    kind = "gromacs-steep"
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        *,
+        emtol: float = 10.0,
+        emstep: float = 0.01,
+        nsteps: int = -1,
+        **kwargs: Any,
+    ) -> None:
+        mapped = gromacs_mdp_options(emtol=emtol, emstep=emstep, nsteps=nsteps)
+        self.emtol = float(emtol)
+        self.emstep = float(emstep)
+        self.gromacs_nsteps = int(nsteps)
+        self._fmax = float(mapped["gtol"])
+        self._initial_step = float(mapped["istep"])
+        self.maxstep = self._initial_step
+        super().__init__(
+            atoms,
+            restart=restart,
+            logfile=logfile,
+            trajectory=trajectory,
+            append_trajectory=append_trajectory,
+            **kwargs,
+        )
+
+    def _session_options(self) -> dict[str, Any]:
+        return {"max_atom": 0.0, "istep": self._initial_step}
+
+    def run(self, fmax: float | None = None, steps: int | None = None) -> bool:
+        """Run with ``emtol`` and ``nsteps`` unless explicitly overridden."""
+        force_limit = self._fmax if fmax is None else float(fmax)
+        if steps is None:
+            steps = sys.maxsize if self.gromacs_nsteps == -1 else self.gromacs_nsteps
+        return bool(super().run(fmax=force_limit, steps=steps))
+
+
 class BarzilaiBorwein(_Scaled):
     """Barzilai-Borwein spectral steepest descent."""
 
@@ -838,6 +931,7 @@ __all__ = [
     "DaiYuan",
     "EonCG",
     "FletcherReeves",
+    "GromacsSteep",
     "HagerZhang",
     "HestenesStiefel",
     "LBFGSLineSearch",
@@ -846,4 +940,5 @@ __all__ = [
     "NewtonPCG",
     "PolakRibiere",
     "SteepestDescent",
+    "gromacs_mdp_options",
 ]
