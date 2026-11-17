@@ -1084,11 +1084,12 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
-/// ABI minor 47 adds `rgmin_solver_set_level_set` and
-/// `rgmin_solver_clear_level_set`. Minor 46 adds `rgmin_control_default`
-/// and the other struct initializers. Minor 45 is
-/// `rgmin_solver_set_lbfgs_trust` and minor 44 is
-/// `rgmin_solver_set_power`. Minor 43 is `rgmin_lbfgs_pairs_push_rho`,
+/// ABI minor 48 adds `RGMIN_GROMACS_STEEP` and
+/// `RGMIN_STOP_MACHINE_PRECISION`. Minor 47 adds
+/// `rgmin_solver_set_level_set` and `rgmin_solver_clear_level_set`.
+/// Minor 46 adds `rgmin_control_default` and the other struct
+/// initializers. Minor 45 is `rgmin_solver_set_lbfgs_trust` and minor 44
+/// is `rgmin_solver_set_power`. Minor 43 is `rgmin_lbfgs_pairs_push_rho`,
 /// minor 42 is `rgmin_lowest_eigenpairs_ex` and minor 39 is
 /// `rgmin_lowest_eigenpairs`. Minors 40 and 41 are the 0.6.0 release and
 /// the manifold API.
@@ -1096,7 +1097,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 47);
+    assert_eq!(stamp.abi_minor, 48);
     assert_eq!(stamp.layout_revision, 5);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -2344,6 +2345,12 @@ unsafe extern "C" fn bowl_grad(
 #[test]
 fn newton_cg_method_string_and_counters_cross_the_c_abi() {
     let mut tag = rgmin_method_t::RGMIN_STEEPEST;
+    let steep = std::ffi::CString::new("gromacs-steep").unwrap();
+    assert_eq!(
+        unsafe { rgmin_method_from_name(steep.as_ptr(), &mut tag) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    assert_eq!(tag, rgmin_method_t::RGMIN_GROMACS_STEEP);
     let cg = std::ffi::CString::new("newton-cg").unwrap();
     assert_eq!(
         unsafe { rgmin_method_from_name(cg.as_ptr(), &mut tag) },
