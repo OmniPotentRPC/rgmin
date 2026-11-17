@@ -144,6 +144,8 @@ pub enum rgmin_method_t {
     RGMIN_POLAK_RIBIERE_PLUS = 26,
     /// eOn Polak-Ribiere with the Powell restart at 0.5. Develop surface.
     RGMIN_EON_CG = 27,
+    /// GROMACS `integrator = steep`. ABI minor 48.
+    RGMIN_GROMACS_STEEP = 28,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -207,6 +209,8 @@ pub enum rgmin_stop_t {
     /// The evaluation budget set by `rgmin_solver_set_max_evals` was spent.
     /// ABI minor 50.
     RGMIN_STOP_EVAL_BUDGET = 7,
+    /// GROMACS steep could not represent another coordinate change. ABI minor 51.
+    RGMIN_STOP_MACHINE_PRECISION = 8,
 }
 
 /// Iteration controls. `memory` is used only by L-BFGS (0 means 10).
@@ -529,6 +533,7 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
         rgmin_method_t::RGMIN_NEWTON_PCG => Method::NewtonPcg,
         rgmin_method_t::RGMIN_POLAK_RIBIERE_PLUS => Method::polak_ribiere_plus(),
         rgmin_method_t::RGMIN_EON_CG => Method::eon_cg(),
+        rgmin_method_t::RGMIN_GROMACS_STEEP => Method::GromacsSteep,
     }
 }
 
@@ -556,6 +561,7 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
         Method::Sr1 => rgmin_method_t::RGMIN_SR1,
         Method::Adam { .. } => rgmin_method_t::RGMIN_ADAM,
         Method::Steepest => rgmin_method_t::RGMIN_STEEPEST,
+        Method::GromacsSteep => rgmin_method_t::RGMIN_GROMACS_STEEP,
         Method::Sr2 => rgmin_method_t::RGMIN_SR2,
         Method::Pso { .. } => rgmin_method_t::RGMIN_PSO,
         Method::Newton { kind } => match kind {
@@ -4267,6 +4273,7 @@ fn stop_from_reason(reason: crate::StopReason) -> rgmin_stop_t {
         StopReason::PolishUnmet => rgmin_stop_t::RGMIN_STOP_POLISH_UNMET,
         StopReason::EnergyTolerance => rgmin_stop_t::RGMIN_STOP_ENERGY_TOLERANCE,
         StopReason::EvalBudget => rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET,
+        StopReason::MachinePrecision => rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION,
     }
 }
 

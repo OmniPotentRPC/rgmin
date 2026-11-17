@@ -24,6 +24,7 @@ use crate::fire::{
     fire_displacement_into, fire_move_clipped, fire_prepare_v2, fire_rescale_velocity,
     fire2_displacement_metric, guenole2020,
 };
+use crate::gromacs::GromacsSteep;
 use crate::holonomic::DistanceConstraints;
 use crate::hvp::{
     FiniteDifference, HessianVector, HostAction, HostOracle, NewtonCgRequest, StepAction,
@@ -386,6 +387,7 @@ enum Overlay {
     QuickMin(QuickMinState, QuickMinSession),
     Ode12r(crate::ode12r::Ode12rState),
     Diis(DiisState),
+    GromacsSteep(GromacsSteep),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -477,7 +479,11 @@ impl Solver {
     /// Fresh session for `method` in dimension `dim`.
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
         let istep = control.istep;
-        let stop_norm = control.stop_norm;
+        let stop_norm = if matches!(method, Method::GromacsSteep) {
+            StopNorm::MaxAtom
+        } else {
+            control.stop_norm
+        };
         let inner = Inner::from_method(&method, dim, istep);
         let mut solver = Self {
             dim,
@@ -569,6 +575,7 @@ impl Solver {
             }
             Method::Ode12r => Overlay::Ode12r(crate::ode12r::Ode12rState::new(istep)),
             Method::Diis { memory } => Overlay::Diis(DiisState::new(*memory)),
+            Method::GromacsSteep => Overlay::GromacsSteep(GromacsSteep::new(istep)),
             _ => Overlay::None,
         };
         solver.apply_default_atom_cap();
@@ -581,6 +588,7 @@ impl Solver {
             Inner::Bfgs { .. } => Method::Bfgs.installs_default_atom_cap(),
             Inner::Dogleg { .. } => Method::Dogleg.installs_default_atom_cap(),
             Inner::Fire(state) => Method::Fire { kind: state.kind }.installs_default_atom_cap(),
+            Inner::Steepest if matches!(self.overlay, Overlay::GromacsSteep(_)) => false,
             // The remaining arms install the cap. A method added to the
             // exception list in [`Method::installs_default_atom_cap`]
             // needs an arm here.
@@ -3893,6 +3901,86 @@ impl Solver {
         self.report_or_escape(obj, x, value, grad)
     }
 
+    /// One GROMACS `integrator = steep` trial.
+    fn gromacs_steep_step<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        value: f64,
+        grad: Array1<f64>,
+    ) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let mut overlay = std::mem::replace(&mut self.overlay, Overlay::None);
+        let result = match &mut overlay {
+            Overlay::GromacsSteep(state) => {
+                let mut displacement = state.displacement(grad.view());
+                displacement = self.project_vec(x, &displacement);
+                let trial = if self.manifold.is_flat() {
+                    let mut trial = self.manifold.retract(x, &displacement);
+                    apply_caps(x, &mut trial, self.atom_maxmove, self.control.maxmove_cap());
+                    obj.bounds().clip(trial.view())
+                } else {
+                    match retract_within_cap(
+                        obj,
+                        x,
+                        &displacement,
+                        self.atom_maxmove,
+                        self.control.maxmove_cap(),
+                        &self.manifold,
+                    ) {
+                        Some((trial, _)) => trial,
+                        None => x.clone(),
+                    }
+                };
+                if trial == *x {
+                    self.remember(x, value, &grad);
+                    Ok(self.finish(
+                        value,
+                        x,
+                        &grad,
+                        StopNorm::MaxAtom.of(grad.view()),
+                        Status::MachinePrecision,
+                    ))
+                } else {
+                    let (trial_value, trial_raw) = obj.value_and_gradient(trial.view());
+                    if !trial_value.is_finite() || trial_raw.iter().any(|g| !g.is_finite()) {
+                        Err(Error::Oracle {
+                            what: "non-finite value or gradient",
+                        })
+                    } else if state.update(value, trial_value) {
+                        *x = trial;
+                        let trial_grad = self.horizontal_grad(x, &trial_raw);
+                        let norm = StopNorm::MaxAtom.of(trial_grad.view());
+                        self.remember(x, trial_value, &trial_grad);
+                        self.steps += 1;
+                        Ok(self.finish(
+                            trial_value,
+                            x,
+                            &trial_grad,
+                            norm,
+                            self.control.classify(norm, self.free_len(obj.bounds())),
+                        ))
+                    } else {
+                        self.remember(x, value, &grad);
+                        self.steps += 1;
+                        Ok(self.finish(
+                            value,
+                            x,
+                            &grad,
+                            StopNorm::MaxAtom.of(grad.view()),
+                            Status::Iterating,
+                        ))
+                    }
+                }
+            }
+            _ => unreachable!("GROMACS steep overlay"),
+        };
+        self.overlay = overlay;
+        result
+    }
+
     fn step_dogleg<O>(
         &mut self,
         obj: &O,
@@ -4041,6 +4129,9 @@ impl Solver {
         }
         if let Some(status) = self.control.halt(gnorm, self.free_len(obj.bounds())) {
             return Ok(self.finish(value, x, &grad, gnorm, status));
+        }
+        if matches!(self.overlay, Overlay::GromacsSteep(_)) {
+            return self.gromacs_steep_step(obj, x, value, grad);
         }
         self.refresh_exp(obj, x, &grad)?;
 
@@ -5109,6 +5200,7 @@ impl Solver {
             }
             Overlay::Ode12r(state) => state.reset(),
             Overlay::Diis(state) => state.clear(),
+            Overlay::GromacsSteep(state) => state.reset(self.control.istep),
             Overlay::None => {}
         }
     }
@@ -5116,6 +5208,16 @@ impl Solver {
     /// Outer steps completed on this session.
     pub fn steps(&self) -> usize {
         self.steps
+    }
+
+    /// Current maximum displacement of a GROMACS steep session.
+    ///
+    /// Other methods return `None`.
+    pub fn gromacs_step_size(&self) -> Option<f64> {
+        match self.overlay {
+            Overlay::GromacsSteep(state) => Some(state.step_size()),
+            _ => None,
+        }
     }
 
     /// Norm that every stop test and [`Report::grad_norm`] apply to the gradient.
@@ -5992,6 +6094,9 @@ impl Solver {
                 }
             }
 
+            Overlay::GromacsSteep(_) => {
+                unreachable!("GROMACS steep is dispatched before generic overlays")
+            }
             Overlay::None => {}
         }
         self.overlay = overlay;
@@ -6147,6 +6252,7 @@ impl Inner {
             // The overlay on Solver carries the real state. Inner stays a
             // variant the constraint stepper matches.
             Method::QuickMin | Method::Ode12r | Method::Diis { .. } => Inner::Steepest,
+            Method::GromacsSteep => Inner::Steepest,
             Method::Bb => Inner::Bb {
                 prev_s: None,
                 prev_y: None,

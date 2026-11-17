@@ -74,6 +74,7 @@ where
         | Method::QuickMin
         | Method::Ode12r
         | Method::Diis { .. }
+        | Method::GromacsSteep
         | Method::NewtonCg
         | Method::NewtonPcg => run_session(obj, init, control, method),
     }
