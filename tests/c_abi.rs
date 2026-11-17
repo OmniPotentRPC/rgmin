@@ -17,10 +17,11 @@ use rgmin::ffi::{
     rgmin_minimize_eindir, rgmin_minimize_scg, rgmin_precond_fn, rgmin_report_t,
     rgmin_scg_params_t, rgmin_solver_clear_exp, rgmin_solver_create, rgmin_solver_exp_mu,
     rgmin_solver_free, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
-    rgmin_solver_set_accept, rgmin_solver_set_exp, rgmin_solver_set_gromacs_steep,
-    rgmin_solver_set_quickmin_cell, rgmin_solver_set_quickmin_variant, rgmin_solver_step,
-    rgmin_solver_step_fg, rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t,
-    rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+    rgmin_solver_set_accept, rgmin_solver_set_cell_block, rgmin_solver_set_exp,
+    rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
+    rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
+    rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
+    rgmin_tensor_free,
 };
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
 use rgpot_core::status::rgpot_status_t;
@@ -1085,21 +1086,21 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
-/// ABI minor 49 adds `rgmin_solver_set_fire_config` and
-/// `rgmin_solver_set_lbfgs_fixed_h0`. Minor 48 adds `RGMIN_GROMACS_STEEP`
-/// and `RGMIN_STOP_MACHINE_PRECISION`. Minor 47 adds
-/// `rgmin_solver_set_level_set` and `rgmin_solver_clear_level_set`.
-/// Minor 46 adds `rgmin_control_default` and the other struct
-/// initializers. Minor 45 is `rgmin_solver_set_lbfgs_trust` and minor 44
-/// is `rgmin_solver_set_power`. Minor 43 is `rgmin_lbfgs_pairs_push_rho`,
-/// minor 42 is `rgmin_lowest_eigenpairs_ex` and minor 39 is
-/// `rgmin_lowest_eigenpairs`. Minors 40 and 41 are the 0.6.0 release and
-/// the manifold API.
+/// ABI minor 50 adds `rgmin_solver_set_cell_block`. Minor 49 adds
+/// `rgmin_solver_set_fire_config` and `rgmin_solver_set_lbfgs_fixed_h0`.
+/// Minor 48 adds `RGMIN_GROMACS_STEEP` and `RGMIN_STOP_MACHINE_PRECISION`.
+/// Minor 47 adds `rgmin_solver_set_level_set` and
+/// `rgmin_solver_clear_level_set`. Minor 46 adds `rgmin_control_default`
+/// and the other struct initializers. Minor 45 is
+/// `rgmin_solver_set_lbfgs_trust` and minor 44 is `rgmin_solver_set_power`.
+/// Minor 43 is `rgmin_lbfgs_pairs_push_rho`, minor 42 is
+/// `rgmin_lowest_eigenpairs_ex` and minor 39 is `rgmin_lowest_eigenpairs`.
+/// Minors 40 and 41 are the 0.6.0 release and the manifold API.
 #[test]
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 49);
+    assert_eq!(stamp.abi_minor, 50);
     assert_eq!(stamp.layout_revision, 5);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -3137,6 +3138,40 @@ unsafe extern "C" fn quad3_evalgrad(
     }
     unsafe { *value_out = f };
     rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn c_abi_cell_block_takes_whole_atoms_inside_the_vector() {
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 0.0,
+        istep: 0.05,
+        memory: 0,
+        maxmove: 0.1,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 5) };
+    assert!(!session.is_null());
+    let cases = [
+        (
+            std::ptr::null_mut(),
+            3,
+            rgmin_status_t::RGMIN_INVALID_PARAMETER,
+        ),
+        (session, 2, rgmin_status_t::RGMIN_INVALID_PARAMETER),
+        (session, 6, rgmin_status_t::RGMIN_INVALID_PARAMETER),
+        (session, 3, rgmin_status_t::RGMIN_SUCCESS),
+        (session, 5, rgmin_status_t::RGMIN_SUCCESS),
+    ];
+    for (handle, at, want) in cases {
+        assert_eq!(
+            unsafe { rgmin_solver_set_cell_block(handle, at, 0.01) },
+            want,
+            "at {at}"
+        );
+    }
+    unsafe { rgmin_solver_free(session) };
 }
 
 #[test]

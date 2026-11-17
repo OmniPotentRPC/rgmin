@@ -123,6 +123,11 @@ eOn ``max_move`` is 0.2 Å
 ``OptimizerOptions.maxMove`` is 0.2 at ``4be157d4``
 (`https://github.com/TheochemUI/eOn/blob/4be157d43265af6b1140aaac0e52e42add62693f/schema/eon_params.capnp <https://github.com/TheochemUI/eOn/blob/4be157d43265af6b1140aaac0e52e42add62693f/schema/eon_params.capnp>`_).
 
+``rgmin_solver_set_cell_block(s, at, maxmove)`` reads ``[at, dim)`` as cell coordinates.
+The per-atom cap and ``RGMIN_STOP_NORM_MAX_ATOM`` then count each of them on its own, and the cap bounds each by ``maxmove``.
+It returns ``RGMIN_INVALID_PARAMETER`` when ``at`` is not a multiple of 3 or lies past ``dim``.
+:doc:`session` describes the block. ABI minor 50.
+
 One-shot
 ~~~~~~~~
 

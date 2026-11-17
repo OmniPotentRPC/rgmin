@@ -731,6 +731,10 @@ public:
     void set_periodic(bool periodic) { rgmin_solver_set_periodic(ptr_, periodic ? 1 : 0); }
     /// Stop norm for gtol and Report::grad_norm. Returns 0, or 1 on an unknown norm.
     int set_stop_norm(rgmin_stop_norm_t norm) { return rgmin_solver_set_stop_norm(ptr_, norm); }
+    /// Cell coordinates [at, dim) with their own cap under the per-atom cap.
+    rgmin_status_t set_cell_block(std::size_t at, double maxmove) {
+        return rgmin_solver_set_cell_block(ptr_, at, maxmove);
+    }
     /// FIRE 2.0 parameter set. Returns 0, or 1 on an unknown preset or a non-FIRE 2.0 session.
     int set_fire_preset(rgmin_fire_preset_t preset) {
         return rgmin_solver_set_fire_preset(ptr_, preset);

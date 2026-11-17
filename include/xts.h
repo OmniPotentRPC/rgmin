@@ -123,6 +123,7 @@ typedef rgmin_constraints_t xts_constraints_t;
 #define xts_solver_exp_mu rgmin_solver_exp_mu
 #define xts_solver_set_accept rgmin_solver_set_accept
 #define xts_solver_set_stop_norm rgmin_solver_set_stop_norm
+#define xts_solver_set_cell_block rgmin_solver_set_cell_block
 #define xts_solver_set_fire_preset rgmin_solver_set_fire_preset
 #define xts_solver_set_fire_abc rgmin_solver_set_fire_abc
 #define xts_solver_set_fire_config rgmin_solver_set_fire_config

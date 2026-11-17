@@ -77,7 +77,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 49;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 50;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -5486,6 +5486,28 @@ pub unsafe extern "C" fn rgmin_solver_set_quickmin_cell(
     match unsafe { (*solver).solver.set_quickmin_cell(at) } {
         Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
         Err(_) => rgmin_status_t::RGMIN_INVALID_PARAMETER,
+    }
+}
+
+/// Read `[at, n)` as cell coordinates with the cell cap `maxmove`
+/// (see [`crate::Solver::set_cell_block`]).
+///
+/// # Safety
+///
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_cell_block(
+    solver: *mut rgmin_solver_t,
+    at: usize,
+    maxmove: f64,
+) -> rgmin_status_t {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_cell_block: null solver");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    match unsafe { (*solver).solver.set_cell_block(at, maxmove) } {
+        Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
+        Err(e) => status_from_error(&e),
     }
 }
 

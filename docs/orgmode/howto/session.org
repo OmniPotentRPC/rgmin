@@ -121,6 +121,33 @@ eOn takes ~n~ in ~rms~ as the number of free coordinates, so a host that passes 
 C sessions select the norm with ~rgmin_solver_set_stop_norm~.
 ~RGMIN_STOP_NORM_RMS~ is 3.
 
+** Cell coordinates
+
+A variable-cell relaxation appends the cell degrees of freedom to the ~3N~ atom coordinates.
+~set_cell_block(at, maxmove)~ marks ~[at, dim)~ as those cell coordinates.
+
+#+begin_src rust
+use rgmin::{Control, Method, Solver};
+
+let (n_atoms, n_cell) = (32, 6);
+let mut solver = Solver::new(Method::lbfgs(), Control::default(), 3 * n_atoms + n_cell);
+solver.set_atom_maxmove(0.1);
+solver.set_cell_block(3 * n_atoms, 0.001).unwrap();
+#+end_src
+
+The per-atom cap then groups only ~[0, at)~ in ~(x, y, z)~ triples.
+It bounds each cell coordinate on its own by ~maxmove~.
+A step that moves an atom or a cell coordinate too far is scaled down as a whole.
+A non-positive or NaN ~maxmove~ bounds the cell by the per-atom cap, and ~+inf~ leaves it free.
+Without a per-atom cap the cell is not capped either.
+~StopNorm::MaxAtom~ takes the triples over the atoms and the magnitude of each cell coordinate.
+The other norms do not group coordinates and do not change.
+~at~ must be a multiple of 3 no larger than the dimension, and ~at == dim~ removes the block.
+Sessions on a manifold other than the Euclidean one ignore it.
+The objective never sees the block: a session called from inside an oracle measures atoms as usual.
+C sessions call ~rgmin_solver_set_cell_block~ (ABI minor 50).
+The LAMMPS plugin uses it to relax the box with ~fix box/relax~; see @@rst::doc:`../reference/lammps-min-style`@@.
+
 ** C
 
 #+begin_src c
@@ -156,6 +183,7 @@ together is not asked twice.
 | ~exp_mu~ | Its energy scale after estimation, or none when it is not installed |
 | ~set_accept~ | ~none~ / ~energy~ / ~nonmonotone~ / ~step~ |
 | ~set_stop_norm~ | Replace ~Control::stop_norm~: ~two~ / ~max_atom~ / ~inf~ / ~rms~ |
+| ~set_cell_block~ | Read ~[at, dim)~ as cell coordinates with their own cap under the per-atom cap |
 | ~set_linesearch~ | Line search for the line-searched arms; default strong Wolfe. The default L-BFGS step ignores it |
 | ~set_lbfgs_step~ | ~Capped~ at 0.2, the eOn step, is the default. ~Wolfe~ opts into the strong Wolfe search. A non-positive cap restores 0.2 and a non-finite one is an error. C: ~rgmin_solver_set_lbfgs_capped~, ~_scaled~, ~_wolfe~ |
 | ~set_fire_variant~ | FIRE schedule; ~Guenole2020~ is FIRE 2.0 as published |

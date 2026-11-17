@@ -70,7 +70,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 49
+#define RGMIN_ABI_VERSION_MINOR 50
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -79,7 +79,8 @@ typedef struct rgmin_abi_stamp_t {
  * 46 rgmin_control_default and the other struct initializers,
  * 47 level-set constraint setters,
  * 48 RGMIN_GROMACS_STEEP and RGMIN_STOP_MACHINE_PRECISION,
- * 49 rgmin_solver_set_fire_config and rgmin_solver_set_lbfgs_fixed_h0. */
+ * 49 rgmin_solver_set_fire_config and rgmin_solver_set_lbfgs_fixed_h0,
+ * 50 rgmin_solver_set_cell_block. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -509,6 +510,20 @@ _Static_assert(sizeof(rgmin_stop_norm_t) == sizeof(int32_t),
 /** Select the stop norm. TWO is the default. Returns 0, or 1 on a null
  *  session or an unknown integer. ABI minor 29. */
 int32_t rgmin_solver_set_stop_norm(rgmin_solver_t *solver, rgmin_stop_norm_t norm);
+/** Read \c [at, dim) as cell coordinates, such as the box degrees of
+ *  freedom a variable-cell relaxation appends to the 3N atom coordinates.
+ *  The per-atom cap and MAX_ATOM then group only \c [0, at) in (x, y, z)
+ *  triples and count each cell coordinate on its own. Under the per-atom
+ *  cap a cell coordinate moves at most \a maxmove in one step; a longer
+ *  step is scaled down as a whole. A non-positive or NaN \a maxmove
+ *  bounds it by the per-atom cap and +inf leaves it free. Without a
+ *  per-atom cap the cell is not capped either. \a at is a multiple of 3
+ *  no larger than \c dim; \c at == dim removes the block. Sessions on a
+ *  manifold other than the Euclidean one ignore it. Returns
+ *  RGMIN_INVALID_PARAMETER on a null session or a refused \a at.
+ *  ABI minor 50. */
+rgmin_status_t rgmin_solver_set_cell_block(rgmin_solver_t *solver, size_t at,
+                                           double maxmove);
 /** FIRE 2.0 parameter set. GUENOLE2020 is Table 1 of Guenole et al.,
  *  Comput. Mater. Sci. 175, 109584 (2020): dt_max 10 dt, dt_min
  *  0.02 dt, N_delay 20, alpha_start 0.25, f_inc 1.1, f_dec 0.5,
