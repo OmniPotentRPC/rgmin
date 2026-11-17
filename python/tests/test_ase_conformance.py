@@ -487,7 +487,7 @@ def test_session_refuses_hessian_methods_and_misplaced_options():
 def test_every_gradient_session_method_has_a_class():
     kinds = {getattr(optimize, name).kind for name in optimize.__all__}
     tokens = {"lbfgs", "bfgs", "sr1", "sr2", "adam", "sd", "bb", "fire", "fire2", "newton-cg", "newton-pcg"}
-    tokens |= {"eon-cg", "pr", "prp", "fr", "hs", "dy", "cd", "hz", "ls", "fr-pr"}
+    tokens |= {"eon-cg", "pr", "prp", "fr", "hs", "dy", "cd", "hz", "ls", "fr-pr", "gromacs-steep"}
     for token in tokens:
         Session(token, 3)
     assert tokens <= kinds
