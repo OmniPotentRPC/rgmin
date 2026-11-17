@@ -22,6 +22,12 @@ namespace LAMMPS_NS {
 // sums the owned -f into a 3N gradient with one MPI_Allreduce. The
 // session is deterministic, so identical inputs keep the replicas in
 // lockstep; iterate() checks that after every step.
+//
+// Fixes with extra global dof (fix box/relax) append nextra_global box
+// coordinates ds to the vector, with gradient -fextra. The atom part is
+// then the positions in the box of the session start, which the fixes
+// store with min_store(); each evaluation returns the box there with
+// min_step(0.0), places the atoms and applies min_step(1.0, ds).
 class MinRgmin : public Min {
  public:
   MinRgmin(class LAMMPS *);
@@ -48,13 +54,16 @@ class MinRgmin : public Min {
   // session state, rebuilt by setup_style() for every minimize command
   rgmin_solver_t *solver;
   DLManagedTensorVersioned *xtensor;
-  size_t ndof;
+  size_t ndof;      // natdof + nbox
+  size_t natdof;    // 3N
+  int nbox;         // nextra_global
   double escale;   // natoms when thermo_modify norm yes, else 1
   std::vector<double> xg;       // rgmin's iterate
   std::vector<double> xprev;    // iterate before the current step
   std::vector<double> xcache;   // point of the last evaluation
   std::vector<double> gcache;   // gradient at xcache
   std::vector<double> gbuf;     // owned part of a gradient before the sum
+  std::vector<double> hbox;     // box step handed to Modify::min_step
   double ecache;                // unnormalized energy at xcache
   bigint cache_step;            // timestep of the evaluation in atom->f
   bool cache_valid;
@@ -67,6 +76,8 @@ class MinRgmin : public Min {
   void gather_positions(double *);
   void gather_gradient(double *);
   void scatter_positions(const double *);
+  void place(const double *);
+  double box_cap();
   double evaluate(const double *, double *);
   bool atoms_hold(const std::vector<double> &) const;
   void sync_atoms(bool forces);

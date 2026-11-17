@@ -9,6 +9,7 @@
 #include "comm.h"
 #include "domain.h"
 #include "error.h"
+#include "modify.h"
 #include "output.h"
 #include "thermo.h"
 #include "timer.h"
@@ -53,7 +54,7 @@ static bool is_fire(rgmin_method_t m)
 
 MinRgmin::MinRgmin(LAMMPS *lmp) :
     Min(lmp), method(RGMIN_LBFGS), method_name("lbfgs"), lbfgs_memory(10), trust(0.0), wolfe(0),
-    accept(-1), istep(0.0), solver(nullptr), xtensor(nullptr), ndof(0), escale(1.0), ecache(0.0),
+    accept(-1), istep(0.0), solver(nullptr), xtensor(nullptr), ndof(0), natdof(0), nbox(0), escale(1.0), ecache(0.0),
     cache_step(-1), cache_valid(false)
 {
   searchflag = 1;
@@ -90,10 +91,6 @@ void MinRgmin::init()
 
 void MinRgmin::setup_style()
 {
-  if (nextra_global)
-    error->all(FLERR,
-               "min_style rgmin does not support fixes that add global degrees of freedom "
-               "such as fix box/relax; use min_style cg for cell relaxations");
   if (nextra_atom)
     error->all(FLERR,
                "min_style rgmin does not support pair styles that add per-atom degrees of "
@@ -124,6 +121,19 @@ void MinRgmin::setup_style()
     error->all(FLERR, "min_modify trust needs min_modify method lbfgs");
   if (wolfe && trust > 0.0)
     error->all(FLERR, "min_modify trust and linesearch wolfe are exclusive");
+  if (nextra_global) {
+    if (is_fire(method))
+      error->all(FLERR,
+                 "min_style rgmin cannot relax the box of fix box/relax with method {}, as LAMMPS "
+                 "damped dynamics styles cannot; use min_modify method lbfgs, sd or bb",
+                 method_name);
+    if (trust > 0.0)
+      error->all(FLERR,
+                 "min_modify trust does not bound the box step of fix box/relax; use min_modify "
+                 "trust 0 with fix box/relax");
+    if (!(dmax > 0.0))
+      error->all(FLERR, "min_style rgmin needs min_modify dmax > 0 with fix box/relax");
+  }
 
   free_session();
 }
@@ -220,14 +230,22 @@ int MinRgmin::modify_param(int narg, char **arg)
 
 void MinRgmin::start_session()
 {
-  ndof = 3 * static_cast<size_t>(atom->natoms);
+  natdof = 3 * static_cast<size_t>(atom->natoms);
+  nbox = nextra_global;
+  ndof = natdof + nbox;
   escale = output->thermo->normflag ? static_cast<double>(atom->natoms) : 1.0;
   xg.assign(ndof, 0.0);
   xprev.assign(ndof, 0.0);
   xcache.assign(ndof, 0.0);
   gcache.assign(ndof, 0.0);
   gbuf.assign(ndof, 0.0);
+  hbox.assign(nbox, 0.0);
 
+  // The box here is the reference of the box coordinates ds, which start at 0.
+  if (nbox) {
+    modify->min_clearstore();
+    modify->min_store();
+  }
   gather_positions(xg.data());
   // Min::setup already evaluated the start, fixes included; hand that to
   // the first rgmin call instead of evaluating again.
@@ -259,6 +277,9 @@ void MinRgmin::start_session()
 
   if (accept >= 0) rgmin_solver_set_accept(solver, static_cast<rgmin_accept_t>(accept));
   if (dmax > 0.0) rgmin_solver_set_atom_maxmove(solver, dmax);
+  const double boxcap = nbox ? box_cap() : 0.0;
+  if (nbox && rgmin_solver_set_cell_block(solver, natdof, boxcap) != RGMIN_SUCCESS)
+    error->all(FLERR, "rgmin_solver_set_cell_block failed: {}", rgmin_last_error());
   if (wolfe && rgmin_solver_set_lbfgs_wolfe(solver) != 0)
     error->all(FLERR, "rgmin_solver_set_lbfgs_wolfe failed: {}", rgmin_last_error());
   if (trust > 0.0 && rgmin_solver_set_lbfgs_trust(solver, trust) != 0)
@@ -273,17 +294,39 @@ void MinRgmin::start_session()
   xtensor = rgmin_tensor_borrow_cpu_f64(xg.data(), ndof);
   if (!xtensor) error->all(FLERR, "rgmin_tensor_borrow_cpu_f64 failed: {}", rgmin_last_error());
 
-  if (comm->me == 0)
+  if (comm->me == 0) {
     utils::logmesg(lmp,
                    "rgmin {} (C ABI {}.{}): method {}, {} coordinates on each of {} ranks, "
                    "dmax {}, memory {}\n",
                    rgmin_version(), RGMIN_ABI_VERSION_MAJOR, RGMIN_ABI_VERSION_MINOR,
                    method_name, ndof, comm->nprocs, dmax, lbfgs_memory);
+    if (nbox)
+      utils::logmesg(lmp, "rgmin: {} box coordinates from fixes, box step at most {}\n", nbox,
+                     boxcap);
+  }
+}
+
+/* ----------------------------------------------------------------------
+   largest step of one box coordinate, as Modify::max_alpha allows it
+   along each unit direction
+------------------------------------------------------------------------- */
+
+double MinRgmin::box_cap()
+{
+  double cap = INFINITY;
+  for (int j = 0; j < nbox; j++) {
+    std::fill(hbox.begin(), hbox.end(), 0.0);
+    hbox[j] = 1.0;
+    cap = std::min(cap, modify->max_alpha(hbox.data()));
+  }
+  std::fill(hbox.begin(), hbox.end(), 0.0);
+  return cap;
 }
 
 /* ----------------------------------------------------------------------
    sum per-rank pieces of a 3N vector indexed by atom ID; every entry has
    one owner, so the sum adds zeros and is exact and identical on all ranks
+   the box coordinates are not gathered: they live in xg alone
 ------------------------------------------------------------------------- */
 
 void MinRgmin::gather_positions(double *out)
@@ -297,7 +340,7 @@ void MinRgmin::gather_positions(double *out)
     gbuf[k + 1] = x[i][1];
     gbuf[k + 2] = x[i][2];
   }
-  MPI_Allreduce(gbuf.data(), out, static_cast<int>(ndof), MPI_DOUBLE, MPI_SUM, world);
+  MPI_Allreduce(gbuf.data(), out, static_cast<int>(natdof), MPI_DOUBLE, MPI_SUM, world);
 }
 
 void MinRgmin::gather_gradient(double *out)
@@ -312,7 +355,12 @@ void MinRgmin::gather_gradient(double *out)
     gbuf[k + 1] = -f[i][1];
     gbuf[k + 2] = -f[i][2];
   }
-  MPI_Allreduce(gbuf.data(), out, static_cast<int>(ndof), MPI_DOUBLE, MPI_SUM, world);
+  MPI_Allreduce(gbuf.data(), out, static_cast<int>(natdof), MPI_DOUBLE, MPI_SUM, world);
+  if (nbox) {
+    // like the energy, take rank 0's bits of the fix forces
+    for (int j = 0; j < nbox; j++) out[natdof + j] = -fextra[j];
+    MPI_Bcast(out + natdof, nbox, MPI_DOUBLE, 0, world);
+  }
   timer->stamp(Timer::COMM);
 }
 
@@ -336,13 +384,32 @@ void MinRgmin::scatter_positions(const double *xnew)
 }
 
 /* ----------------------------------------------------------------------
+   put the box and the atoms at the rgmin point z
+------------------------------------------------------------------------- */
+
+void MinRgmin::place(const double *z)
+{
+  if (nbox) {
+    std::fill(hbox.begin(), hbox.end(), 0.0);
+    modify->min_step(0.0, hbox.data());
+  }
+  scatter_positions(z);
+  if (nbox && std::any_of(z + natdof, z + ndof, [](double v) { return v != 0.0; })) {
+    std::copy(z + natdof, z + ndof, hbox.begin());
+    modify->min_step(1.0, hbox.data());
+  }
+}
+
+/* ----------------------------------------------------------------------
    energy and gradient at xnew; collective over all ranks
 ------------------------------------------------------------------------- */
 
 double MinRgmin::evaluate(const double *xnew, double *grad)
 {
   if (!(cache_valid && std::equal(xcache.begin(), xcache.end(), xnew))) {
-    scatter_positions(xnew);
+    place(xnew);
+    // fix box/relax reads the pressure, so every evaluation needs the virial
+    if (nbox) modify->addstep_compute_all(update->ntimestep);
     double e = energy_force(0);
     neval++;
     // thermo_pe sums with MPI_Allreduce; take one rank's bits so the
@@ -390,7 +457,7 @@ void MinRgmin::sync_atoms(bool forces)
     cache_valid = false;
     evaluate(xg.data(), gbuf.data());
   } else {
-    scatter_positions(xg.data());
+    place(xg.data());
     cache_valid = false;
   }
 }
@@ -438,6 +505,17 @@ int MinRgmin::iterate(int maxiter)
     }
     check_replicas(rep.value);
     ecurrent = rep.value / escale;
+
+    // A fix may move its reference state after a step, as fix box/relax
+    // nreset does after a line search; that changes the energy at xg.
+    if (nbox) {
+      sync_atoms(false);
+      if (modify->min_reset_ref()) {
+        cache_valid = false;
+        ecurrent = evaluate(xg.data(), gbuf.data()) / escale;
+        rgmin_solver_forget_evaluation(solver);
+      }
+    }
     const bool moved = !std::equal(xg.begin(), xg.end(), xprev.begin());
 
     if (neval >= update->max_eval) {
