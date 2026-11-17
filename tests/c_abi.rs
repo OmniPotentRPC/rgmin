@@ -10,17 +10,17 @@ use eindir_core::ffi::eindir_core_abi_stamp;
 use eindir_core::ffi::{eindir_objective_t, eindir_status_t};
 use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_backward_error_floor,
-    rgmin_conjugacy_t, rgmin_control_t, rgmin_eigen_kind_t, rgmin_eigen_options_t,
-    rgmin_eigen_params_t, rgmin_eigenpair_ex_t, rgmin_eigenpair_t, rgmin_exp_t, rgmin_last_error,
-    rgmin_lowest_eigenpair, rgmin_lowest_eigenpairs, rgmin_lowest_eigenpairs_ex,
-    rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
-    rgmin_minimize_eindir, rgmin_minimize_opts, rgmin_minimize_scg, rgmin_precond_fn,
-    rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp, rgmin_solver_create,
-    rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
-    rgmin_solver_set_accept, rgmin_solver_set_exp, rgmin_solver_set_quickmin_cell,
-    rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
-    rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
-    rgmin_tensor_free,
+    rgmin_conjugacy_t, rgmin_control_default, rgmin_control_t, rgmin_eigen_kind_t,
+    rgmin_eigen_options_t, rgmin_eigen_params_t, rgmin_eigenpair_ex_t, rgmin_eigenpair_t,
+    rgmin_exp_t, rgmin_last_error, rgmin_lowest_eigenpair, rgmin_lowest_eigenpairs,
+    rgmin_lowest_eigenpairs_ex, rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t,
+    rgmin_minimize, rgmin_minimize_eindir, rgmin_minimize_opts, rgmin_minimize_scg,
+    rgmin_precond_fn, rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp,
+    rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls,
+    rgmin_solver_hvp_calls, rgmin_solver_set_accept, rgmin_solver_set_exp,
+    rgmin_solver_set_quickmin_cell, rgmin_solver_set_quickmin_variant, rgmin_solver_step,
+    rgmin_solver_step_fg, rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t,
+    rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
 use rgpot_core::status::rgpot_status_t;
@@ -5019,4 +5019,84 @@ fn c_abi_a_non_binding_maxmove_is_no_cap() {
             assert_eq!(one_shot(method, cap), off, "{method:?} one-shot {cap}");
         }
     }
+}
+
+unsafe extern "C" fn slope_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let p = unsafe { cap_in(x) };
+    assert_eq!(p.len(), 3);
+    unsafe { *value_out = p[0] };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn slope_grad(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let p = unsafe { cap_in(x) };
+    let gp = unsafe { cap_out(g) };
+    assert_eq!(p.len(), 3);
+    assert_eq!(gp.len(), 3);
+    gp[0] = 1.0;
+    gp[1] = 0.0;
+    gp[2] = 0.0;
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn gromacs_steep_runs_and_reports_machine_precision_across_c_abi() {
+    let mut ctrl = rgmin_control_default();
+    ctrl.maxiter = 10;
+    ctrl.gtol = 1e-12;
+    ctrl.istep = 0.25;
+    let mut x = [3.0_f64, -4.0, 1.5, 2.5, -2.0, 0.5];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+    };
+    let st = unsafe {
+        let xt = rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6);
+        let st = rgmin_minimize(
+            Some(cap_eval),
+            Some(cap_grad),
+            std::ptr::null_mut(),
+            xt,
+            &ctrl,
+            rgmin_method_t::RGMIN_GROMACS_STEEP,
+            &mut out,
+        );
+        rgmin_tensor_free(xt);
+        st
+    };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(out.value < 50.0);
+    assert!(out.steps > 0);
+
+    ctrl.gtol = 0.0;
+    ctrl.istep = f64::MIN_POSITIVE;
+    ctrl.maxiter = 5;
+    let mut rounded = [1.0_f64, 0.0, 0.0];
+    let st_mp = unsafe {
+        let xt = rgmin_tensor_borrow_cpu_f64(rounded.as_mut_ptr(), 3);
+        let st = rgmin_minimize(
+            Some(slope_eval),
+            Some(slope_grad),
+            std::ptr::null_mut(),
+            xt,
+            &ctrl,
+            rgmin_method_t::RGMIN_GROMACS_STEEP,
+            &mut out,
+        );
+        rgmin_tensor_free(xt);
+        st
+    };
+    assert_eq!(st_mp, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION);
+    assert_eq!(rounded[0], 1.0);
 }
