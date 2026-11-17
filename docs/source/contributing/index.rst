@@ -57,6 +57,13 @@ Run them before you open a pull request.
 CI calls the fifth row all-features.
 It names the features instead of passing ``--all-features``, so the static library does not link ``readcon-core``, which gets the last row.
 
+The rows with ``capi`` also compile C and C++ programs against ``include/`` and run them.
+Those tests run ``cargo build --lib`` for the target, profile and features of the test run and link the library it reports, so no ``cargo build`` has to come first.
+They compile with ``CC_<target>`` and ``CXX_<target>``, or ``CC`` and ``CXX``, read the way the ``cc`` crate reads them.
+Without those, they use the first of ``cc``, ``gcc`` and ``clang``, and of ``c++``, ``g++`` and ``clang++``, that builds a test program.
+On Windows with MSVC they call ``cl``, so run them from a Visual Studio developer prompt.
+Under ``--target`` they default to the triple without its vendor and ``-gcc`` or ``-g++``, such as ``aarch64-linux-gnu-gcc``, and run the programs through ``CARGO_TARGET_<TRIPLE>_RUNNER`` when it is set.
+
 CI also runs clippy with warnings denied, on Rust 1.88.0 and on the latest stable, for the first five feature sets:
 
 ..
