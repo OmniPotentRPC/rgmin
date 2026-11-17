@@ -62,6 +62,7 @@ enum class Method {
     NewtonPcg = RGMIN_NEWTON_PCG,
     PolakRibierePlus = RGMIN_POLAK_RIBIERE_PLUS,
     EonCg = RGMIN_EON_CG,
+    GromacsSteep = RGMIN_GROMACS_STEEP,
 };
 
 /** Parse a method token. \c newton-cg and \c newton_cg are the same method. */
@@ -457,6 +458,7 @@ inline constexpr Method SR1Optimizer = Method::Sr1;
 inline constexpr Method SR2Optimizer = Method::Sr2;
 inline constexpr Method ADAMOptimizer = Method::Adam;
 inline constexpr Method SteepestDescentOptimizer = Method::Steepest;
+inline constexpr Method GromacsSteepOptimizer = Method::GromacsSteep;
 inline constexpr Method ConjugateGradientOptimizer = Method::PolakRibiere;
 inline constexpr Method PSOptim = Method::Pso;
 
@@ -1155,7 +1157,7 @@ inline std::string SolverConfig::valid_options() {
 inline std::string SolverConfig::valid_methods() {
     return "adam, bb, bfgs, cg, conjugate_descent, dai_yuan, diis, dogleg, "
            "fire, fire2, fletcher_reeves, fr_pr, hager_zhang, hestenes_stiefel, "
-           "lbfgs, liu_storey, newton, polak_ribiere, pso, quickmin, rfo, sd, "
+           "gromacs_steep, lbfgs, liu_storey, newton, polak_ribiere, pso, quickmin, rfo, sd, "
            "sr1, sr2, steepest";
 }
 
@@ -1182,6 +1184,7 @@ inline Method method_from_name(std::string const& name) {
     if (name == "fire2") return Method::Fire2;
     if (name == "quickmin") return Method::QuickMin;
     if (name == "ode12r") return Method::Ode12r;
+    if (name == "gromacs_steep" || name == "gmx_steep") return Method::GromacsSteep;
     if (name == "sd" || name == "steepest" || name == "steepest_descent") return Method::Steepest;
     if (name == "cg" || name == "pr" || name == "pr+" || name == "polak_ribiere") {
         return Method::PolakRibiere;

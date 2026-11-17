@@ -63,6 +63,8 @@ class Method(enum.IntEnum):
 
     ODE12R = 23
 
+    GROMACS_STEEP = 28
+
     PolakRibiere = 0
 
     FletcherReeves = 1
@@ -111,6 +113,8 @@ class Method(enum.IntEnum):
 
     Ode12r = 23
 
+    GromacsSteep = 28
+
 class Stop(enum.IntEnum):
     """
     Why a step or a run ended. Members are UPPER_SNAKE. CamelCase names are aliases of the same values.
@@ -132,6 +136,8 @@ class Stop(enum.IntEnum):
 
     EVAL_BUDGET = 7
 
+    MACHINE_PRECISION = 8
+
     Tolerance = 0
 
     NoiseFloor = 1
@@ -147,6 +153,8 @@ class Stop(enum.IntEnum):
     EnergyTolerance = 6
 
     EvalBudget = 7
+
+    MachinePrecision = 8
 
 class Report:
     """Result of one optimizer step or of ``minimize``."""

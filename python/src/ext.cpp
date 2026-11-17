@@ -129,6 +129,8 @@ std::string method_name_from_code(int code) {
         return "diis";
     case RGMIN_ODE12R:
         return "ode12r";
+    case RGMIN_GROMACS_STEEP:
+        return "gromacs_steep";
     default:
         throw nb::value_error("unknown method");
     }
@@ -521,6 +523,7 @@ NB_MODULE(_core, m) {
         .value("QUICK_MIN", RGMIN_QUICKMIN)
         .value("DIIS", RGMIN_DIIS)
         .value("ODE12R", RGMIN_ODE12R)
+        .value("GROMACS_STEEP", RGMIN_GROMACS_STEEP)
         .value("PolakRibiere", RGMIN_POLAK_RIBIERE)
         .value("FletcherReeves", RGMIN_FLETCHER_REEVES)
         .value("Bfgs", RGMIN_BFGS)
@@ -544,7 +547,8 @@ NB_MODULE(_core, m) {
         .value("Fire2", RGMIN_FIRE2)
         .value("QuickMin", RGMIN_QUICKMIN)
         .value("Diis", RGMIN_DIIS)
-        .value("Ode12r", RGMIN_ODE12R);
+        .value("Ode12r", RGMIN_ODE12R)
+        .value("GromacsSteep", RGMIN_GROMACS_STEEP);
 
     nb::enum_<rgmin_stop_t>(m, "Stop", nb::is_arithmetic(),
                             "Why a step or a run ended. Members are UPPER_SNAKE. "
@@ -557,6 +561,7 @@ NB_MODULE(_core, m) {
         .value("POLISH_UNMET", RGMIN_STOP_POLISH_UNMET)
         .value("ENERGY_TOLERANCE", RGMIN_STOP_ENERGY_TOLERANCE)
         .value("EVAL_BUDGET", RGMIN_STOP_EVAL_BUDGET)
+        .value("MACHINE_PRECISION", RGMIN_STOP_MACHINE_PRECISION)
         .value("Tolerance", RGMIN_STOP_TOLERANCE)
         .value("NoiseFloor", RGMIN_STOP_NOISE_FLOOR)
         .value("StepTolerance", RGMIN_STOP_STEP_TOLERANCE)
@@ -564,7 +569,8 @@ NB_MODULE(_core, m) {
         .value("LineSearch", RGMIN_STOP_LINE_SEARCH)
         .value("PolishUnmet", RGMIN_STOP_POLISH_UNMET)
         .value("EnergyTolerance", RGMIN_STOP_ENERGY_TOLERANCE)
-        .value("EvalBudget", RGMIN_STOP_EVAL_BUDGET);
+        .value("EvalBudget", RGMIN_STOP_EVAL_BUDGET)
+        .value("MachinePrecision", RGMIN_STOP_MACHINE_PRECISION);
 
     nb::class_<rgmin::Report>(m, "Report", "Result of one optimizer step or of ``minimize``.")
         .def_prop_ro("value", [](rgmin::Report const& report) { return report.value; },
