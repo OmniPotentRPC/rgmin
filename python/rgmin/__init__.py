@@ -177,7 +177,7 @@ class SolverConfig(_SolverConfigBase):
 
 def __getattr__(name: str):
     if name == "gromacs_mdp_options":
-        from rgmin.optimize import gromacs_mdp_options
+        from rgmin._gromacs import gromacs_mdp_options
 
         return gromacs_mdp_options
     if name in _OPTIMIZERS:

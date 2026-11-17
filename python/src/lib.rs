@@ -14,14 +14,16 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use rgmin::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Control, Error, FireConfig, FireKind,
-    FirePreset, LbfgsH0, LbfgsPairs, LbfgsStep, LevelSetConstraint, LineSearch, ManifoldFactor, Method, Oracle,
-    RiemannianManifold, SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch,
-    lowest_eigenpairs as solve_lowest_eigenpairs, lowest_eigenpairs_precond,
+    FirePreset, LbfgsH0, LbfgsPairs, LbfgsStep, LevelSetConstraint, LineSearch, ManifoldFactor,
+    Method, Oracle, RiemannianManifold, SearchStep, Solver, SpdMetric, Status, StiefelRetraction,
+    StopNorm, SuppliedSearch, lowest_eigenpairs as solve_lowest_eigenpairs,
+    lowest_eigenpairs_precond,
 };
 
 #[pyclass]
 struct Session {
     solver: Solver,
+    last_stop: Option<&'static str>,
 }
 
 fn control(dt: f64) -> Control {
@@ -235,7 +237,10 @@ impl Session {
         }
         solver.set_error_on_unmet(error_on_unmet);
         solver.set_backward_polish(backward_polish);
-        Ok(Self { solver })
+        Ok(Self {
+            solver,
+            last_stop: None,
+        })
     }
 
     /// Store `s = x+ - x`, `y = g+ - g` in the L-BFGS memory without an
@@ -259,9 +264,16 @@ impl Session {
         self.solver.steps()
     }
 
+    /// Stop status from the latest step, or `None` before any step.
+    #[getter]
+    fn last_stop(&self) -> Option<&'static str> {
+        self.last_stop
+    }
+
     /// Drop the method memory. The next step is a cold start.
     fn forget(&mut self) {
         self.solver.forget();
+        self.last_stop = None;
     }
 
     /// Keep points on the level set `value(x) = target`. `None` clears it.
@@ -317,7 +329,18 @@ impl Session {
             return Err(err);
         }
         match report {
-            Ok(report) => Ok((pos.to_vec(), report.value, report.grad_norm)),
+            Ok(report) => {
+                self.last_stop = Some(match report.status {
+                    Status::Iterating => "iterating",
+                    Status::Tolerance => "tolerance",
+                    Status::NoiseFloor => "noise_floor",
+                    Status::StepTolerance => "step_tolerance",
+                    Status::MachinePrecision => "machine_precision",
+                    Status::Budget => "budget",
+                    _ => "iterating",
+                });
+                Ok((pos.to_vec(), report.value, report.grad_norm))
+            }
             Err(err) => Err(PyValueError::new_err(err.to_string())),
         }
     }
