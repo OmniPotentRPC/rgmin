@@ -19,7 +19,7 @@ the trial, keeps the old point and force, and sets ``h <- 0.2 h``.
 
 The implementation also follows the state-swap structure and strict
 energy comparison in GROMACS
-`do_steep in src/gromacs/mdrun/minimize.cpp <https://github.com/gromacs/gromacs/blob/main/src/gromacs/mdrun/minimize.cpp#L2881-L3178>`_.
+`do\_steep in src/gromacs/mdrun/minimize.cpp <https://github.com/gromacs/gromacs/blob/main/src/gromacs/mdrun/minimize.cpp#L2881-L3178>`_.
 That source currently multiplies a rejected displacement by 0.5, while
 the reference-manual algorithm says 0.2. rgmin follows the documented
 0.2 rule.
@@ -77,5 +77,5 @@ The Python ``gromacs_mdp_options`` layer converts:
 
 The Rust stepper, C ABI, and C++ wrapper do no unit conversion.
 ABI minor 48 carries ``RGMIN_GROMACS_STEEP`` and
-``RGMIN_STOP_MACHINE_PRECISION``. Minor 47 is left for the concurrent
-changes in PRs #82 and #84.
+``RGMIN_STOP_MACHINE_PRECISION``. Minor 47 is the level-set constraint
+setters.
