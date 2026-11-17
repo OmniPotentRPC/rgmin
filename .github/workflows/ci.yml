@@ -68,7 +68,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Python reference dependencies
         run: python -m pip install -q numpy scipy
-      - name: Build the libraries the C header tests link
+      # Before any `cargo build`, so the C and C++ tests link only the
+      # library they build themselves.
+      - run: cargo test --locked ${{ matrix.args }}
+      - name: Build the libraries the readcon and ABI checks read
         run: cargo build --locked ${{ matrix.args }}
       - name: Staticlib readcon link
         run: |
@@ -81,7 +84,6 @@ jobs:
             echo "this row links readcon"
             exit 1
           fi
-      - run: cargo test --locked ${{ matrix.args }}
       - name: Public docs and C ABI names
         if: matrix.name == 'default'
         run: |
