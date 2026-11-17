@@ -129,7 +129,9 @@ typedef enum rgmin_method_t {
     /** Polak-Ribiere-Polyak, max(0, beta). Develop surface, past the released slots. */
     RGMIN_POLAK_RIBIERE_PLUS = 26,
     /** Polak-Ribiere with the eOn Powell restart at 0.5. Develop surface. */
-    RGMIN_EON_CG = 27
+    RGMIN_EON_CG = 27,
+    /** GROMACS integrator = steep. ABI minor 48. */
+    RGMIN_GROMACS_STEEP = 28
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.
@@ -166,7 +168,9 @@ typedef enum rgmin_stop_t {
     /** No step was accepted. ABI minor 49. */
     RGMIN_STOP_LINE_SEARCH = 4,
     /** A backward-error polish did not meet its test. ABI minor 49. */
-    RGMIN_STOP_POLISH_UNMET = 5
+    RGMIN_STOP_POLISH_UNMET = 5,
+    /** GROMACS steep could not represent another coordinate change. ABI minor 50. */
+    RGMIN_STOP_MACHINE_PRECISION = 6
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),

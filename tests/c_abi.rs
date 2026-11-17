@@ -2426,6 +2426,12 @@ unsafe extern "C" fn bowl_grad(
 #[test]
 fn newton_cg_method_string_and_counters_cross_the_c_abi() {
     let mut tag = rgmin_method_t::RGMIN_STEEPEST;
+    let steep = std::ffi::CString::new("gromacs-steep").unwrap();
+    assert_eq!(
+        unsafe { rgmin_method_from_name(steep.as_ptr(), &mut tag) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    assert_eq!(tag, rgmin_method_t::RGMIN_GROMACS_STEEP);
     let cg = std::ffi::CString::new("newton-cg").unwrap();
     assert_eq!(
         unsafe { rgmin_method_from_name(cg.as_ptr(), &mut tag) },
