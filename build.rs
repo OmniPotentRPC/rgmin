@@ -5,6 +5,7 @@ fn main() {
     println!("cargo:rerun-if-changed=include/");
     println!("cargo:rerun-if-changed=Cargo.toml");
     check_public_header();
+    export_build_for_tests();
     println!("cargo:rustc-check-cfg=cfg(rgmin_avx512)");
     if rustc_at_least(1, 89) {
         println!("cargo:rustc-cfg=rgmin_avx512");
@@ -585,5 +586,18 @@ fn check_public_header() {
     }
     if header.contains("namespace ") || header.contains("namespace\t") {
         panic!("include/rgmin.h must not open a C++ namespace");
+    }
+}
+
+/// The C and C++ consumer tests build this library again with
+/// `cargo build --lib`, for the target, host and features of this build.
+fn export_build_for_tests() {
+    for (name, key) in [
+        ("RGMIN_BUILD_TARGET", "TARGET"),
+        ("RGMIN_BUILD_HOST", "HOST"),
+        ("RGMIN_BUILD_FEATURES", "CARGO_CFG_FEATURE"),
+    ] {
+        let value = std::env::var(key).unwrap_or_default();
+        println!("cargo:rustc-env={name}={value}");
     }
 }
