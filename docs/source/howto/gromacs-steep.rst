@@ -1,0 +1,65 @@
+
+
+Run GROMACS steepest descent
+----------------------------
+
+Use the ``gromacs-steep`` method when a setup should keep the update rule of
+GROMACS ``integrator = steep``, rather than rgmin's line-searched ``steepest``
+method.
+
+Python and MDP keys
+~~~~~~~~~~~~~~~~~~~
+
+``gromacs_mdp_options`` accepts the three minimization keys in GROMACS units
+and converts them to the eV/Å units used by ASE calculators.
+
+.. code:: python
+
+    import numpy as np
+    import rgmin
+
+    options = rgmin.gromacs_mdp_options(
+        {"integrator": "steep", "emtol": 10.0, "emstep": 0.01, "nsteps": 500}
+    )
+    method = options.pop("method")
+    report, x = rgmin.minimize(value_and_gradient, np.asarray(x0), method, **options)
+
+The defaults are ``emtol = 10.0`` kJ mol\ :sup:`-1`\ nm\ :sup:`-1`\, ``emstep = 0.01`` nm,
+and ``nsteps = -1``. The last maps to no iteration limit. A non-negative
+``nsteps`` maps to the native iteration budget.
+
+For an ASE ``Atoms`` or filter, use the class in ``rgmin.optimize``:
+
+.. code:: python
+
+    from rgmin.optimize import GromacsSteep
+
+    opt = GromacsSteep(atoms, emtol=10.0, emstep=0.01, nsteps=500)
+    opt.run()
+
+An explicit ``fmax`` or ``steps`` passed to ``run`` overrides the mapped
+``emtol`` or ``nsteps`` for that run.
+
+Rust, C, and C++
+~~~~~~~~~~~~~~~~
+
+The core is unit-agnostic. Put the force tolerance and displacement in
+the units of the objective:
+
+.. code:: rust
+
+    let control = rgmin::Control::default()
+        .with_gtol(force_tolerance)
+        .with_istep(initial_maximum_displacement)
+        .with_maxiter(number_of_steps);
+    let mut solver = rgmin::Solver::new(rgmin::Method::GromacsSteep, control, x.len());
+    let report = solver.run(&objective, &mut x)?;
+
+The C selector is ``RGMIN_GROMACS_STEEP`` and the C++ selector is
+``rgmin::Method::GromacsSteep``. Set ``rgmin_control_t.gtol`` and
+``rgmin_control_t.istep`` in the same units as the callback.
+``RGMIN_STOP_MACHINE_PRECISION`` reports that the current displacement
+cannot change a coordinate.
+
+The exact update and stop rules are in
+:doc:`../reference/gromacs-steep`.
