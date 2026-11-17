@@ -1,5 +1,5 @@
 #+TITLE: GROMACS steepest descent
-#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:{}
 
 * GROMACS steepest descent
 
@@ -54,11 +54,11 @@ The Python ~gromacs_mdp_options~ layer converts:
 
 | MDP key | default | native option |
 |---+---+---|
-| ~emtol~ | 10.0 kJ mol^-1 nm^-1 | ~gtol~ in eV Å^-1 |
+| ~emtol~ | 10.0 kJ mol^{-1} nm^{-1} | ~gtol~ in eV Å^{-1} |
 | ~emstep~ | 0.01 nm | ~istep~ in Å |
 | ~nsteps~ | -1 | no limit; otherwise ~maxiter~ |
 
 The Rust stepper, C ABI, and C++ wrapper do no unit conversion.
 ABI minor 48 carries ~RGMIN_GROMACS_STEEP~ and
-~RGMIN_STOP_MACHINE_PRECISION~. Minor 47 is left for the concurrent
-changes in PRs #82 and #84.
+~RGMIN_STOP_MACHINE_PRECISION~. Minor 47 is the level-set constraint
+setters.
