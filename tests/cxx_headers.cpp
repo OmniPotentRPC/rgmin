@@ -611,6 +611,8 @@ int main() {
                   "EonCg keeps the C enumerator");
     static_assert(static_cast<int>(rgmin::Method::GromacsSteep) == RGMIN_GROMACS_STEEP,
                   "GromacsSteep keeps the C enumerator");
+    static_assert(XTS_GROMACS_STEEP == RGMIN_GROMACS_STEEP,
+                  "xts.h aliases the GROMACS steep selector");
     if (rgmin::method_from_name("eon-cg") != rgmin::Method::EonCg ||
         rgmin::method_from_name("polak-ribiere-plus") != rgmin::Method::PolakRibierePlus ||
         rgmin::method_from_name("gromacs-steep") != rgmin::Method::GromacsSteep) {
