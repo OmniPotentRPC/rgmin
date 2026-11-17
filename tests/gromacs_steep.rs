@@ -1,7 +1,7 @@
 mod common;
 
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Control, Method, Oracle, Solver, Status};
+use rgmin::{Control, DistanceConstraints, Method, NoiseFloor, Oracle, Solver, Status};
 
 use common::morse_value_grad;
 
@@ -62,4 +62,36 @@ fn tolerance_budget_and_machine_precision_are_distinct_stops() {
     let report = solver.run(&linear, &mut rounded).unwrap();
     assert_eq!(report.status, Status::MachinePrecision);
     assert_eq!(rounded[0], 1.0);
+}
+
+#[test]
+fn forget_resets_step_size_and_holonomic_constraints_stay_on_bond() {
+    let objective = Oracle::unbounded(6, |x: ArrayView1<f64>| {
+        morse_value_grad(x, [100.0, 100.0, 100.0])
+    });
+    let mut x = array![0.0, 0.0, 0.0, 2.8, 0.0, 0.0];
+    let mut solver = Solver::new(Method::GromacsSteep, control(0.1, 0.0, 10), x.len());
+    solver.step(&objective, &mut x).unwrap();
+    assert_ne!(solver.gromacs_step_size().unwrap(), 0.1);
+    solver.forget();
+    assert_eq!(solver.gromacs_step_size().unwrap(), 0.1);
+
+    // Tethered dumbbell under a holonomic distance constraint with a noise floor.
+    let quadratic = Oracle::unbounded(6, |v: ArrayView1<f64>| {
+        let target = array![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
+        let diff = &v - &target;
+        (0.5 * diff.dot(&diff), diff)
+    });
+    let set = DistanceConstraints::new(vec![(0, 1)], vec![1.0]).unwrap();
+    let mut constrained = array![0.0, 0.5, 0.0, 1.0, 0.5, 0.0];
+    let ctrl = control(0.1, 1e-12, 50).with_noise_floor(NoiseFloor::new(10.0));
+    let mut solver = Solver::new(Method::GromacsSteep, ctrl, constrained.len());
+    solver.set_distance_constraints(set).unwrap();
+    let report = solver.run(&quadratic, &mut constrained).unwrap();
+    assert_eq!(report.status, Status::NoiseFloor);
+    let bond = ((constrained[3] - constrained[0]).powi(2)
+        + (constrained[4] - constrained[1]).powi(2)
+        + (constrained[5] - constrained[2]).powi(2))
+    .sqrt();
+    assert!((bond - 1.0).abs() < 1e-12);
 }
