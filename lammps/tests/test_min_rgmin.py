@@ -9,6 +9,7 @@ and ``RGMIN_LAMMPS_RUNNER`` prefixes every ``lmp`` run, such as with valgrind.
 
 from __future__ import annotations
 
+import itertools
 import os
 import sys
 from pathlib import Path
@@ -180,6 +181,101 @@ def test_second_minimize_starts_converged(tmp_path):
     assert "Iterations, force evaluations = 1 0" in res.log
 
 
+BOX_RELAX = "fix relax all box/relax iso 0.0\n"
+BOX_VMAX = 0.001
+BOX_DOF = {"iso": 1, "aniso": 3, "tri": 6}
+BOX_PRINT = (
+    "thermo_style custom step pe vol pxx pyy pzz pxy pxz pyz\nrun 0\n"
+    'print "RGMIN_BOX vol $(vol:%.17g) pxx $(pxx:%.17g) pyy $(pyy:%.17g) pzz $(pzz:%.17g)'
+    ' pxy $(pxy:%.17g) pxz $(pxz:%.17g) pyz $(pyz:%.17g)"\n'
+)
+# fextra is about 1e-3 eV per bar of residual stress in these 108-atom
+# cells, so |F| < FTOL leaves every component under 1e-2 bar.
+BOX_PRESS = 1e-2
+# Both styles stop on the same strain-free crystal; the residual stress
+# leaves the volume within B / |P| ~ 1e-8 of it.
+BOX_VOL_REL = 1e-7
+
+
+def box_relax(mode: str, target: str = "0.0") -> str:
+    return f"fix relax all box/relax {mode} {target} vmax {BOX_VMAX!r}\n"
+
+
+def box_state(res: systems.Result) -> dict[str, float]:
+    words = res.log.split("RGMIN_BOX ")[1].split("\n")[0].split()
+    return {k: float(v) for k, v in zip(words[::2], words[1::2])}
+
+
+def box_run(tmp_path: Path, system: str, style: str, extra: str, modify: str = "", **kw):
+    text = systems.deck(
+        system, style, modify, extra=extra, plugin=PLUGIN if style == "rgmin" else None, **kw
+    )
+    return systems.run(LMP, text + BOX_PRINT, tmp_path)
+
+
+def assert_same_cell(res: systems.Result, ref: systems.Result, press: dict[str, float]) -> None:
+    got, want = box_state(res), box_state(ref)
+    for key in ("pxx", "pyy", "pzz", "pxy", "pxz", "pyz"):
+        assert abs(got[key] - press.get(key, 0.0)) < BOX_PRESS, (key, got[key])
+    assert abs(got["vol"] - want["vol"]) <= BOX_VOL_REL * want["vol"], (got["vol"], want["vol"])
+    assert abs(res.pe - ref.pe) <= ETOL_REL * abs(ref.pe), (res.pe, ref.pe)
+
+
+@pytest.mark.parametrize(
+    ("system", "mode"),
+    [("cu-strained", "iso"), ("cu-strained", "aniso"), ("cu-strained-tri", "tri")],
+)
+@pytest.mark.parametrize(
+    "modify", ["", "min_modify method bb", "min_modify method lbfgs linesearch wolfe"]
+)
+def test_box_relax_matches_cg(tmp_path, system, mode, modify):
+    ref = box_run(tmp_path / "cg", system, "cg", box_relax(mode))
+    assert_converged(ref)
+    res = box_run(tmp_path / "rgmin", system, "rgmin", box_relax(mode), modify)
+    assert_converged(res)
+    assert f"rgmin: {BOX_DOF[mode]} box coordinates" in res.log
+    assert_same_cell(res, ref, {})
+
+
+def test_box_relax_on_three_ranks(tmp_path):
+    extra = box_relax("tri")
+    ref = box_run(tmp_path / "cg", "cu-strained-tri", "cg", extra)
+    text = systems.deck("cu-strained-tri", "rgmin", extra=extra, plugin=PLUGIN) + BOX_PRINT
+    res = systems.run(LMP, text, tmp_path / "rgmin", nprocs=3)
+    assert_converged(ref)
+    assert_converged(res)
+    assert_same_cell(res, ref, {})
+
+
+def test_box_relax_deviatoric_target_resets_the_reference(tmp_path):
+    # A non-hydrostatic target with nreset makes fix box/relax move its
+    # reference cell during the run (Modify::min_reset_ref).
+    extra = "fix relax all box/relax x 0.0 y 0.0 z 5000.0 couple none nreset 20 vmax 0.001\n"
+    ref = box_run(tmp_path / "cg", "cu-strained", "cg", extra)
+    res = box_run(tmp_path / "rgmin", "cu-strained", "rgmin", extra)
+    assert_converged(ref)
+    assert_converged(res)
+    assert_same_cell(res, ref, {"pzz": 5000.0})
+
+
+def test_box_relax_steps_the_cell_at_most_vmax(tmp_path):
+    extra = box_relax("iso") + "group one id 1\ndump cell one atom 1 cell.dump\n"
+    res = box_run(tmp_path, "cu-strained", "rgmin", extra)
+    assert_converged(res)
+    lines = (tmp_path / "cell.dump").read_text().splitlines()
+    lengths = [
+        float(lines[i + 1].split()[1]) - float(lines[i + 1].split()[0])
+        for i, line in enumerate(lines)
+        if line.startswith("ITEM: BOX BOUNDS")
+    ]
+    steps = [abs(b - a) for a, b in itertools.pairwise(lengths)]
+    # fix box/relax measures ds in units of the box of the run's start
+    assert max(steps) <= BOX_VMAX * lengths[0] * (1 + 1e-9), max(steps)
+    shrink = (lengths[0] - lengths[-1]) / lengths[0]
+    assert shrink > 0.02, shrink
+    assert len(steps) >= shrink / BOX_VMAX
+
+
 @pytest.mark.parametrize(
     ("modify", "extra", "message"),
     [
@@ -193,7 +289,10 @@ def test_second_minimize_starts_converged(tmp_path):
         ("min_modify abcfire yes", "", "abcfire yes needs min_modify method fire2"),
         ("min_modify line backtrack", "", "does not take min_modify line"),
         ("min_modify method fire2 tmax 4.0", "", "keeps the Guenole 2020 FIRE parameters"),
-        ("", "fix relax all box/relax iso 0.0\n", "fix box/relax"),
+        ("min_modify method fire", BOX_RELAX, "use min_modify method lbfgs, sd or bb"),
+        ("min_modify method fire2", BOX_RELAX, "use min_modify method lbfgs, sd or bb"),
+        ("min_modify trust 0.1", BOX_RELAX, "min_modify trust does not bound the box step"),
+        ("min_modify dmax 0.0", BOX_RELAX, "needs min_modify dmax > 0 with fix box/relax"),
     ],
 )
 def test_errors(tmp_path, modify, extra, message):
