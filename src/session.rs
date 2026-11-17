@@ -334,6 +334,8 @@ pub struct Solver {
     tangent: TangentModel,
     /// Norm compared with [`Control::gtol`]. Starts as [`Control::stop_norm`].
     stop_norm: StopNorm,
+    /// First cell coordinate and the cell cap of [`Self::set_cell_block`].
+    cell_block: Option<(usize, f64)>,
     /// Holonomic distance constraints. `None` is the unconstrained step.
     constraints: Option<Arc<DistanceConstraints>>,
     /// Optional level-set constraint \(g(x) = c\).
@@ -532,6 +534,7 @@ impl Solver {
             refused: false,
             tangent: TangentModel::default(),
             stop_norm,
+            cell_block: None,
             constraints: None,
             level_set: None,
             brief: false,
@@ -1436,9 +1439,9 @@ impl Solver {
                 // Distance clipping retains gradients smaller than an ulp of x.
                 projected[k] = grad[k].clamp(x[k] - hi_k, x[k] - lo_k);
             }
-            return self.stop_norm.of(projected.view());
+            return self.stop_norm_of(projected.view());
         }
-        self.stop_norm.of(grad.view())
+        self.stop_norm_of(grad.view())
     }
 
     fn noted_free_len(&self) -> usize {
@@ -2358,6 +2361,17 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        if let Some(cell) = self.cell_layout() {
+            let _cells = crate::cell::enter(Some(cell));
+            return self.step_charted(&crate::cell::Unscoped(obj), x);
+        }
+        self.step_charted(obj, x)
+    }
+
+    fn step_charted<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
         if let Some(d) = self.chart.clone() {
             return self.in_chart(&d, obj, x, |s, obj, z| s.step_plain(obj, z));
         }
@@ -2415,6 +2429,17 @@ impl Solver {
 
     /// One Newton / RFO iteration. Hessian is rebuilt at the current `x`.
     pub fn step_hess<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: HessianObjective + ?Sized,
+    {
+        if let Some(cell) = self.cell_layout() {
+            let _cells = crate::cell::enter(Some(cell));
+            return self.step_hess_charted(&crate::cell::Unscoped(obj), x);
+        }
+        self.step_hess_charted(obj, x)
+    }
+
+    fn step_hess_charted<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: HessianObjective + ?Sized,
     {
@@ -2485,6 +2510,17 @@ impl Solver {
     /// [`Self::step_hess`] does the same unless a level set is active, where
     /// it multiplies the supplied dense Hessian.
     pub fn step_hvp<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: HessianVector + ?Sized,
+    {
+        if let Some(cell) = self.cell_layout() {
+            let _cells = crate::cell::enter(Some(cell));
+            return self.step_hvp_charted(&crate::cell::Unscoped(obj), x);
+        }
+        self.step_hvp_charted(obj, x)
+    }
+
+    fn step_hvp_charted<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: HessianVector + ?Sized,
     {
@@ -4858,6 +4894,66 @@ impl Solver {
         self.stop_norm
     }
 
+    /// Read `[at, dim)` as cell coordinates, such as the box degrees of
+    /// freedom a variable-cell relaxation appends to `3N` atom
+    /// coordinates.
+    ///
+    /// The per-atom cap and [`StopNorm::MaxAtom`] then group only
+    /// `[0, at)` in `(x, y, z)` triples and count each cell coordinate on
+    /// its own. Under the per-atom cap a cell coordinate moves at most
+    /// `maxmove` in one step: a longer step is scaled down as a whole, as
+    /// for an atom. A non-positive or NaN `maxmove` bounds it by the
+    /// per-atom cap and `+inf` leaves it free. Without a per-atom cap the
+    /// cell coordinates are not capped either. `at` must be a multiple
+    /// of 3 no larger than the dimension, and `at == dim` removes the
+    /// block. Sessions on other manifolds than the Euclidean one ignore it.
+    pub fn set_cell_block(&mut self, at: usize, maxmove: f64) -> Result<()> {
+        if at > self.dim {
+            return Err(Error::CellBlock {
+                what: "the cell block starts past the end of x",
+            });
+        }
+        if at == self.dim {
+            self.cell_block = None;
+            return Ok(());
+        }
+        if at % 3 != 0 {
+            return Err(Error::CellBlock {
+                what: "the atom coordinates before the cell block are not whole triples",
+            });
+        }
+        self.cell_block = Some((at, maxmove));
+        Ok(())
+    }
+
+    /// First cell coordinate and cell cap of [`Self::set_cell_block`].
+    pub fn cell_block(&self) -> Option<(usize, f64)> {
+        self.cell_block
+    }
+
+    fn cell_split(&self) -> Option<(usize, f64)> {
+        self.cell_block
+            .filter(|_| self.manifold == ManifoldKind::Euclidean)
+    }
+
+    /// The layout the per-atom measures read while this session steps.
+    fn cell_layout(&self) -> Option<crate::cell::CellBlock> {
+        let (at, maxmove) = self.cell_split()?;
+        let atom_cap = match self.atom_maxmove {
+            Some(cap) => cap,
+            None => crate::step::DEFAULT_ATOM_MAXMOVE,
+        };
+        Some(crate::cell::CellBlock {
+            at,
+            weight: crate::cell::CellBlock::weight_for(atom_cap, maxmove),
+        })
+    }
+
+    fn stop_norm_of(&self, g: ArrayView1<f64>) -> f64 {
+        self.stop_norm
+            .of_cells(g, self.cell_split().map(|(at, _)| at))
+    }
+
     /// Parameter set of a FIRE 2.0 session. The integrator restarts from
     /// [`Control::istep`]. [`FirePreset::Guenole2020`] also installs the
     /// published schedule, so a non-positive power run stops at `vdfmax`.
@@ -5283,6 +5379,17 @@ impl Solver {
     /// report is `Self::assess` of `x`, so it says [`Status::Tolerance`]
     /// only when the gradient evaluated there is below `gtol`.
     pub fn run<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        if let Some(cell) = self.cell_layout() {
+            let _cells = crate::cell::enter(Some(cell));
+            return self.run_charted(&crate::cell::Unscoped(obj), x);
+        }
+        self.run_charted(obj, x)
+    }
+
+    fn run_charted<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {

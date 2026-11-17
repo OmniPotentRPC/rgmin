@@ -309,6 +309,9 @@ fn max_atom_slice(step: &[f64]) -> f64 {
     let mut max_atom = 0.0;
     let mut i = 0;
     let n = step.len();
+    if let Some(cell) = crate::cell::active(n) {
+        return cell.max_motion(n, |k| step[k]);
+    }
     while i + 3 <= n {
         let r2 = step[i] * step[i] + step[i + 1] * step[i + 1] + step[i + 2] * step[i + 2];
         if r2 > max_atom * max_atom {

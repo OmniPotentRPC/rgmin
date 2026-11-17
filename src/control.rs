@@ -161,7 +161,9 @@ pub enum StopNorm {
     Two,
     /// Largest Euclidean norm over consecutive `(x, y, z)` triples:
     /// ASE `fmax`, eOn `max_atom`, LAMMPS `max`. A trailing partial
-    /// triple counts as one atom.
+    /// triple counts as one atom. A session with a cell block
+    /// ([`crate::Solver::set_cell_block`]) takes the triples over the
+    /// atoms and the magnitude of each cell coordinate.
     MaxAtom,
     /// Largest absolute component: eOn `max_component`, LAMMPS `inf`.
     Inf,
@@ -213,6 +215,21 @@ impl StopNorm {
                 }
                 worst
             }
+        }
+    }
+
+    /// [`Self::of`] with `[at, n)` read as cell coordinates, which
+    /// [`Self::MaxAtom`] counts one by one. The other norms do not group
+    /// coordinates, so a cell split leaves them as they are.
+    pub(crate) fn of_cells(self, g: ArrayView1<f64>, at: Option<usize>) -> f64 {
+        match at {
+            Some(at) if self == Self::MaxAtom && at <= g.len() => {
+                if g.iter().any(|v| !v.is_finite()) {
+                    return f64::INFINITY;
+                }
+                crate::cell::CellBlock { at, weight: 1.0 }.max_motion(g.len(), |k| g[k])
+            }
+            _ => self.of(g),
         }
     }
 }

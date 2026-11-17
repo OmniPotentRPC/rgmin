@@ -302,6 +302,12 @@ pub enum Error {
         /// What exhausted or invalidated the integration step.
         what: &'static str,
     },
+    /// [`crate::Solver::set_cell_block`] refused its split.
+    #[error("cell block: {what}")]
+    CellBlock {
+        /// What was refused.
+        what: &'static str,
+    },
 }
 
 /// Result alias for this crate.

@@ -38,6 +38,7 @@ mod adam;
 mod bb;
 #[cfg(feature = "highs")]
 mod box_objective;
+mod cell;
 mod compact_tr;
 /// CON checkpoint of an accepted point. Compiled only with `readcon`.
 #[cfg(feature = "readcon")]
