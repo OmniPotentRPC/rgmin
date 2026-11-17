@@ -1488,9 +1488,9 @@ impl Solver {
         let set = self.constraint_set();
         let start = self.enter(&set, obj, x)?;
         let norm = crate::StopNorm::MaxAtom.of(start.grad.view());
-        if norm < self.control.gtol {
+        if let Some(status) = self.control.halt(norm, self.free_len(obj.bounds())) {
             self.remember(x, start.value, &start.raw);
-            return Ok(self.finish(start.value, x, &start.grad, norm, Status::Tolerance));
+            return Ok(self.finish(start.value, x, &start.grad, norm, status));
         }
         let mut overlay = std::mem::replace(&mut self.overlay, Overlay::None);
         let result = (|| match &mut overlay {

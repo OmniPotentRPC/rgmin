@@ -3642,14 +3642,9 @@ impl Solver {
                     }
                 };
                 if trial == *x {
+                    let norm = self.stationarity_norm(x, &grad);
                     self.remember(x, value, &grad);
-                    Ok(self.finish(
-                        value,
-                        x,
-                        &grad,
-                        StopNorm::MaxAtom.of(grad.view()),
-                        Status::MachinePrecision,
-                    ))
+                    Ok(self.finish(value, x, &grad, norm, Status::MachinePrecision))
                 } else {
                     let (trial_value, trial_raw) = obj.value_and_gradient(trial.view());
                     if !trial_value.is_finite() || trial_raw.iter().any(|g| !g.is_finite()) {
@@ -3659,7 +3654,7 @@ impl Solver {
                     } else if state.update(value, trial_value) {
                         *x = trial;
                         let trial_grad = self.horizontal_grad(x, &trial_raw);
-                        let norm = StopNorm::MaxAtom.of(trial_grad.view());
+                        let norm = self.stationarity_norm(x, &trial_grad);
                         self.remember(x, trial_value, &trial_grad);
                         self.steps += 1;
                         Ok(self.finish(
@@ -3670,15 +3665,10 @@ impl Solver {
                             self.control.classify(norm, self.free_len(obj.bounds())),
                         ))
                     } else {
+                        let norm = self.stationarity_norm(x, &grad);
                         self.remember(x, value, &grad);
                         self.steps += 1;
-                        Ok(self.finish(
-                            value,
-                            x,
-                            &grad,
-                            StopNorm::MaxAtom.of(grad.view()),
-                            Status::Iterating,
-                        ))
+                        Ok(self.finish(value, x, &grad, norm, Status::Iterating))
                     }
                 }
             }
