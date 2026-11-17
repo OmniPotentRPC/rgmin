@@ -353,7 +353,8 @@ rgmin::Report finish_step(rgmin_status_t status, rgmin_report_t const& out, rgbi
 // c * sqrt(n) * eps_g (c = 3 unless noise_c is positive), else the spent
 // budget. project_rigid does not project this gradient, so a start whose
 // only gradient is rigid motion reads the larger norm.
-rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control const& control) {
+rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control const& control,
+                                 rgmin::Method method) {
     std::size_t const n = static_cast<std::size_t>(x.shape(0));
     nb::object result = function(owned_copy(x.data(), n));
     if (!nb::isinstance<nb::tuple>(result) || nb::len(result) != 2) {
@@ -365,11 +366,23 @@ rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control
     }
     std::vector<double> gradient(n);
     read_gradient(result[1], n, gradient.data());
-    double squares = 0.0;
-    for (double g : gradient) {
-        squares += g * g;
+    double grad_norm = 0.0;
+    if (method == rgmin::Method::GromacsSteep) {
+        for (std::size_t i = 0; i < n; i += 3) {
+            std::size_t const end = std::min(i + 3, n);
+            double atom_sq = 0.0;
+            for (std::size_t k = i; k < end; ++k) {
+                atom_sq += gradient[k] * gradient[k];
+            }
+            grad_norm = std::max(grad_norm, std::sqrt(atom_sq));
+        }
+    } else {
+        double squares = 0.0;
+        for (double g : gradient) {
+            squares += g * g;
+        }
+        grad_norm = std::sqrt(squares);
     }
-    double const grad_norm = std::sqrt(squares);
     rgmin_stop_t stop = RGMIN_STOP_BUDGET;
     if (grad_norm < control.gtol) {
         stop = RGMIN_STOP_TOLERANCE;
@@ -666,7 +679,7 @@ NB_MODULE(_core, m) {
             std::size_t const budget = config.control().maxiter;
             rgmin::Report report{};
             if (budget == 0) {
-                report = zero_budget_report(function, x0, config.control());
+                report = zero_budget_report(function, x0, config.control(), config.method());
             } else {
                 for (std::size_t i = 0; i < budget; ++i) {
                     report = step_python(solver, function, x0);

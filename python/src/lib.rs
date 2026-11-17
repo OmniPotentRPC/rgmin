@@ -299,6 +299,7 @@ impl Session {
     /// Drop the method memory. The next step is a cold start.
     fn forget(&mut self) {
         self.solver.forget();
+        self.stop = None;
     }
 
     /// Keep points on the level set `value(x) = target`. `None` clears it.

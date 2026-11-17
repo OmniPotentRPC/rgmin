@@ -1156,9 +1156,9 @@ inline std::string SolverConfig::valid_options() {
 
 inline std::string SolverConfig::valid_methods() {
     return "adam, bb, bfgs, cg, conjugate_descent, dai_yuan, diis, dogleg, "
-           "fire, fire2, fletcher_reeves, fr_pr, hager_zhang, hestenes_stiefel, "
-           "gromacs_steep, lbfgs, liu_storey, newton, polak_ribiere, pso, quickmin, rfo, sd, "
-           "sr1, sr2, steepest";
+           "fire, fire2, fletcher_reeves, fr_pr, gromacs_steep, hager_zhang, "
+           "hestenes_stiefel, lbfgs, liu_storey, newton, polak_ribiere, pso, "
+           "quickmin, rfo, sd, sr1, sr2, steepest";
 }
 
 namespace detail {
