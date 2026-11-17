@@ -102,8 +102,27 @@ Fixes that change forces during a minimization act on the forces rgmin sees.
 ``python -m pytest lammps/tests`` checks ``setforce`` and ``spring/self`` against ``min_style cg``.
 
 ``fix box/relax`` adds the box to the degrees of freedom of the minimization.
-The plugin does not relax the box and stops with an error that names ``fix box/relax``; use ``min_style cg`` for a cell relaxation.
-Pair styles that add per-atom degrees of freedom, such as the electron radius of ``eff``, are refused in the same way.
+The plugin relaxes the box with the atoms.
+Keep the fix and change the ``min_style`` line:
+
+.. code:: text
+
+    fix relax all box/relax iso 0.0 vmax 0.001
+    plugin load rgminplugin.so
+    min_style rgmin              # was: min_style cg
+    minimize 0.0 1.0e-8 10000 100000
+
+The box coordinates of the fix join the atom coordinates in the rgmin vector.
+The fix forces are their negative gradient, and the fix energy is part of the energy.
+``dmax`` bounds each atom and the fix's ``vmax`` bounds each box coordinate in one step, as in ``min_style cg``.
+``lbfgs``, ``sd`` and ``bb`` relax the box.
+``fire`` and ``fire2`` are refused, as LAMMPS refuses its damped dynamics styles with ``fix box/relax``.
+``min_modify trust`` and ``dmax 0`` are refused too, because they would leave the box step unbounded.
+``sd`` is slow on a box, as LAMMPS ``min_style sd`` is.
+``python -m pytest lammps/tests`` relaxes a stretched fcc Cu cell with ``iso``, ``aniso`` and ``tri`` and checks pressure, energy and volume against ``min_style cg``.
+:doc:`../reference/lammps-min-style` lists how each LAMMPS call maps to the session.
+
+Pair styles that add per-atom degrees of freedom, such as the electron radius of ``eff``, are refused with an error.
 
 Parallel runs
 ~~~~~~~~~~~~~
@@ -129,6 +148,7 @@ Differences
 ~~~~~~~~~~~
 
 - ``min_modify dmax`` (default 0.1, distance units) is rgmin's per-atom step cap for every method.
+  It must be above 0 with ``fix box/relax``.
   rgmin's own default cap is 0.2; ``min_modify dmax 0.2`` restores it.
 
 - ``linesearch wolfe`` with a positive ``dmax`` runs rgmin's geometry L-BFGS step, which bounds each trial by the cap.
