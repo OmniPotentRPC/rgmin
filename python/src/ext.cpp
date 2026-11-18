@@ -304,6 +304,33 @@ extern "C" rgmin_status_t rgmin_py_hess(void* user, DLManagedTensorVersioned con
     return map_trampoline(slot->hess_entry(slot->hess_trampoline, coordinates, hessian));
 }
 
+// std::max(finite, NaN) returns the finite argument, because
+// (finite < NaN) is false. A non-finite atom norm has to win.
+double max_atom_norm(double const* gradient, std::size_t n) {
+    double grad_norm = 0.0;
+    for (std::size_t i = 0; i < n; i += 3) {
+        std::size_t const end = std::min(i + 3, n);
+        double atom_sq = 0.0;
+        for (std::size_t k = i; k < end; ++k) {
+            atom_sq += gradient[k] * gradient[k];
+        }
+        double const atom_norm = std::sqrt(atom_sq);
+        if (!std::isfinite(atom_norm)) {
+            return atom_norm;
+        }
+        if (atom_norm > grad_norm) {
+            grad_norm = atom_norm;
+        }
+    }
+    return grad_norm;
+}
+
+void copy_gradient(nb::handle gradient, std::size_t n, double* destination) {
+    ConstVector grad = nb::cast<ConstVector>(gradient);
+    check_vector(grad, n, "gradient");
+    std::memcpy(destination, grad.data(), n * sizeof(double));
+}
+
 void read_gradient(nb::handle gradient, std::size_t n, double* destination) {
     ConstVector grad = nb::cast<ConstVector>(gradient);
     check_vector(grad, n, "gradient");
@@ -365,18 +392,17 @@ rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control
         throw rgbind::NumericalError("f_and_grad returned a non-finite value");
     }
     std::vector<double> gradient(n);
-    read_gradient(result[1], n, gradient.data());
     double grad_norm = 0.0;
     if (method == rgmin::Method::GromacsSteep) {
-        for (std::size_t i = 0; i < n; i += 3) {
-            std::size_t const end = std::min(i + 3, n);
-            double atom_sq = 0.0;
-            for (std::size_t k = i; k < end; ++k) {
-                atom_sq += gradient[k] * gradient[k];
-            }
-            grad_norm = std::max(grad_norm, std::sqrt(atom_sq));
+        // read_gradient rejects a non-finite component before the
+        // reduction, which would hide a max that drops NaN.
+        copy_gradient(result[1], n, gradient.data());
+        grad_norm = max_atom_norm(gradient.data(), n);
+        if (!std::isfinite(grad_norm)) {
+            throw rgbind::NumericalError("non-finite max-atom gradient norm");
         }
     } else {
+        read_gradient(result[1], n, gradient.data());
         double squares = 0.0;
         for (double g : gradient) {
             squares += g * g;

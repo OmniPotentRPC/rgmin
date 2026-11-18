@@ -244,6 +244,20 @@ def test_gromacs_steep_mdp_and_zero_budget() -> None:
     assert rep_zero.grad_norm == pytest.approx(0.6)
     assert rep_zero.stop == rgmin.Stop.TOLERANCE
 
+    def nan_after_a_finite_atom(v: np.ndarray) -> tuple[float, np.ndarray]:
+        gradient = np.zeros_like(v)
+        gradient[0] = 1.0
+        gradient[3] = np.nan
+        return 0.0, gradient
+
+    with pytest.raises(rgmin.NumericalError, match="non-finite max-atom gradient norm"):
+        rgmin.minimize(
+            nan_after_a_finite_atom,
+            np.zeros(6, dtype=np.float64),
+            "gromacs-steep",
+            maxiter=0,
+        )
+
     def slope(v: np.ndarray) -> tuple[float, np.ndarray]:
         return float(v[0]), np.array([1.0, 0.0, 0.0], dtype=np.float64)
 
