@@ -314,6 +314,14 @@ rgmin_status_t rgmin_minimize_eindir(
     const eindir_objective_t *objective, const eindir_abi_stamp_t *stamp,
     DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, rgmin_method_t method,
     rgmin_report_t *out);
+/** \ref rgmin_minimize_eindir with the two opt-in flags. Nonzero
+ *  \a error_on_unmet writes \a x and \a out, then returns
+ *  \c RGMIN_UNMET_STOP. \a backward_polish does not change this entry:
+ *  it has no Hessian. */
+rgmin_status_t rgmin_minimize_eindir_opts(
+    const eindir_objective_t *objective, const eindir_abi_stamp_t *stamp,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, rgmin_method_t method,
+    int error_on_unmet, int backward_polish, rgmin_report_t *out);
 
 /**
  * Opaque session. Algorithm memory (L-BFGS pairs, NLCG directions,
