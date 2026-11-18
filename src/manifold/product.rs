@@ -577,6 +577,50 @@ impl Manifold for ProductManifold {
             .all(|b| b.tangent.is_none() && b.kind.transport_is_isometric())
     }
 
+    fn drift_is_straight(&self) -> bool {
+        self.is_flat()
+    }
+
+    fn euclidean_normals(&self, x: &Array1<f64>) -> Option<ndarray::Array2<f64>> {
+        if x.len() != self.len {
+            return None;
+        }
+        let mut columns = Vec::new();
+        for block in &self.blocks {
+            let local = block.kind.euclidean_normals(&block.unscale(x))?;
+            for index in 0..local.ncols() {
+                let mut ambient = Array1::zeros(self.len);
+                let column = local.column(index);
+                for row in 0..block.len {
+                    let packed = if block.scale == 1.0 {
+                        column[row]
+                    } else {
+                        column[row] / block.scale
+                    };
+                    ambient[block.start + row] = packed;
+                }
+                let norm = ambient
+                    .iter()
+                    .map(|value| value * value)
+                    .sum::<f64>()
+                    .sqrt();
+                if !(norm.is_finite() && norm > 0.0) {
+                    return None;
+                }
+                let inv = 1.0 / norm;
+                for value in ambient.iter_mut() {
+                    *value *= inv;
+                }
+                columns.push(ambient);
+            }
+        }
+        let mut out = ndarray::Array2::zeros((self.len, columns.len()));
+        for (index, column) in columns.iter().enumerate() {
+            out.column_mut(index).assign(column);
+        }
+        Some(out)
+    }
+
     /// \(\sqrt{\sum_i w_i\,\mathrm{typicaldist}_i^2}\); manopt's at unit
     /// weights. Tangent metrics do not enter it.
     fn typical_dist(&self, _n: usize) -> f64 {

@@ -290,6 +290,12 @@ pub enum Error {
         /// Derived convergence tolerance at that point.
         tolerance: f64,
     },
+    /// A mass metric or its tangent projector was refused.
+    #[error("mass metric: {what}")]
+    MassMetric {
+        /// What was refused.
+        what: &'static str,
+    },
 }
 
 /// Result alias for this crate.

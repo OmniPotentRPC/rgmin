@@ -126,6 +126,22 @@ fn same_len(a: &Array1<f64>, b: &Array1<f64>) -> bool {
 }
 
 impl Manifold for Sphere {
+    fn euclidean_normals(&self, x: &Array1<f64>) -> Option<ndarray::Array2<f64>> {
+        if x.is_empty() || !x.iter().all(|value| value.is_finite()) {
+            return None;
+        }
+        let norm_sq = x.iter().map(|value| value * value).sum::<f64>();
+        if !(norm_sq.is_finite() && norm_sq > 0.0) {
+            return None;
+        }
+        let inv = 1.0 / norm_sq.sqrt();
+        let mut normals = ndarray::Array2::zeros((x.len(), 1));
+        for (row, value) in x.iter().enumerate() {
+            normals[(row, 0)] = value * inv;
+        }
+        Some(normals)
+    }
+
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         #[cfg(feature = "par")]
         if x.len() >= crate::vecops::PAR_MIN_LEN && x.len() == v.len() {
@@ -277,5 +293,34 @@ mod tests {
         assert!((h[0] - (1.0 - 3.0)).abs() < 1e-15);
         assert!((h[1] - 2.0).abs() < 1e-15);
         assert!(h[2].abs() < 1e-15);
+    }
+
+    #[test]
+    fn normalization_retraction_agrees_with_the_geodesic_through_second_order() {
+        // x = (1, 0), v = (0, a). The degree-2 Taylor of both maps is
+        // (1 - a^2/2, a). The gap is cubic: sin a - a (1+a^2)^{-1/2} ~ -a^3/3.
+        let x = array![1.0, 0.0];
+        let direction = array![0.0, 1.0];
+        let quadratic = |a: f64| array![1.0 - 0.5 * a * a, a];
+        let gap = |a: f64| {
+            let step = &direction * a;
+            let retracted = Sphere.retract(&x, &step);
+            let geodesic = Sphere.exp(&x, &step).expect("sphere exponential");
+            let q = quadratic(a);
+            let retract_gap = nrm(&(&retracted - &q));
+            let exp_gap = nrm(&(&geodesic - &q));
+            let between = nrm(&(&retracted - &geodesic));
+            (retract_gap, exp_gap, between)
+        };
+        let a = 1.0 / 16.0;
+        let (retract_gap, exp_gap, between) = gap(a);
+        let cubic = a * a * a;
+        assert!(retract_gap <= cubic);
+        assert!(exp_gap <= cubic);
+        assert!(between <= cubic);
+        let a_half = 1.0 / 32.0;
+        let between_half = gap(a_half).2;
+        let ratio = between_half / between;
+        assert!((ratio - (1.0 / 8.0)).abs() < a);
     }
 }

@@ -178,10 +178,11 @@ pub use lowest_mode::{
     lowest_mode_slepc, lowest_mode_with,
 };
 pub use manifold::{
-    CenteredMatrix, ComplexCircle, Constant, EuclideanComplex, Grassmann, Hyperbolic, Manifold,
-    ManifoldFactor, ManifoldKind, Multinomial, MultinomialDoublyStochastic, MultinomialSymmetric,
-    Oblique, PoincareBall, Positive, RiemannianManifold, SkewSymmetric, Spd, SpdMetric,
-    SphereComplex, StiefelNp, StiefelRetraction, Symmetric, Unitary,
+    AffineHyperplane, CenteredMatrix, ComplexCircle, Constant, ConstraintReaction,
+    EuclideanComplex, Grassmann, Hyperbolic, Manifold, ManifoldFactor, ManifoldKind, MassMetric,
+    Multinomial, MultinomialDoublyStochastic, MultinomialSymmetric, Oblique, PoincareBall,
+    Positive, RiemannianManifold, SkewSymmetric, Spd, SpdMetric, SphereComplex, StiefelNp,
+    StiefelRetraction, Symmetric, Unitary, constraint_reaction, tangent_dimension,
 };
 pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
