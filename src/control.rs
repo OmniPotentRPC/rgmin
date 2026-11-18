@@ -128,6 +128,14 @@ pub struct Control {
     pub ftol_rel: Option<f64>,
     /// Gradient noise floor. `None` leaves the test off.
     pub noise_floor: Option<NoiseFloor>,
+    /// When set, a finished run whose stop is unmet returns
+    /// [`crate::Error::StopUnmet`] instead of the report. The default
+    /// is off, so a spent `maxiter` is still `Ok` with
+    /// [`crate::StopReason::MaxIter`].
+    pub error_on_unmet: bool,
+    /// When set, Newton and Hessian-vector minimizers finish with a
+    /// backward-error polish. The default is off.
+    pub backward_polish: bool,
 }
 
 with_setters!(Control {
@@ -149,6 +157,8 @@ impl Default for Control {
             stop_norm: StopNorm::Two,
             ftol_rel: None,
             noise_floor: None,
+            error_on_unmet: false,
+            backward_polish: false,
         }
     }
 }
@@ -203,6 +213,48 @@ impl Control {
     /// value that limits a step or a trust radius.
     pub(crate) fn maxmove_cap(&self) -> Option<f64> {
         self.maxmove.filter(|&cap| crate::step::binding(cap))
+    }
+
+    /// Return [`crate::Error::StopUnmet`] when a finished run misses its stop.
+    ///
+    /// [`crate::StopReason::Converged`], [`crate::StopReason::NoiseFloor`]
+    /// and [`crate::StopReason::StepTolerance`] stay `Ok`. The default
+    /// leaves this off.
+    #[must_use]
+    pub fn with_error_on_unmet(mut self, on: bool) -> Self {
+        self.error_on_unmet = on;
+        self
+    }
+
+    /// Finish a Newton or Hessian-vector minimization with a
+    /// backward-error polish.
+    ///
+    /// The polish accepts a point only when the Newton decrement and
+    /// every step component meet the roundoff test in
+    /// [`crate::backward_error_floor`]'s family. An unmet polish is
+    /// [`crate::StopReason::PolishUnmet`]. The default leaves this off,
+    /// so `gtol` remains the stop.
+    #[must_use]
+    pub fn with_backward_polish(mut self, on: bool) -> Self {
+        self.backward_polish = on;
+        self
+    }
+
+    /// `Ok(report)`, or [`crate::Error::StopUnmet`] when
+    /// [`Self::error_on_unmet`] is set and the stop did not hold.
+    pub(crate) fn deliver(
+        &self,
+        report: crate::report::Report,
+    ) -> crate::Result<crate::report::Report> {
+        if self.error_on_unmet && report.stop_reason().is_unmet() {
+            let reason = report.stop_reason();
+            Err(crate::Error::StopUnmet {
+                reason,
+                report: Box::new(report),
+            })
+        } else {
+            Ok(report)
+        }
     }
 
     /// Opt in to the noise floor.

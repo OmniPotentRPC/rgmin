@@ -1463,6 +1463,7 @@ impl Solver {
             stop_norm: self.stop_norm,
             grad: Some(grad.clone()),
             status,
+            reason: None,
         }
     }
 
@@ -4761,6 +4762,23 @@ impl Solver {
         self.stop_norm = norm;
     }
 
+    /// Opt in to [`crate::Error::StopUnmet`] from [`Self::run`].
+    ///
+    /// The default is off. One [`Self::step`] is unchanged: a step that
+    /// is still iterating is not an unmet minimization.
+    pub fn set_error_on_unmet(&mut self, on: bool) {
+        self.control.error_on_unmet = on;
+    }
+
+    /// Record the backward-error polish flag on this session's control.
+    ///
+    /// [`Self::run`] does not form a Hessian. [`crate::minimize_newton`],
+    /// [`crate::minimize_method_hess`], [`crate::minimize_method_hvp`],
+    /// [`crate::polish_newton`] and [`crate::polish_hvp`] read the flag.
+    pub fn set_backward_polish(&mut self, on: bool) {
+        self.control.backward_polish = on;
+    }
+
     /// Norm selected by [`Self::set_stop_norm`].
     pub fn stop_norm(&self) -> StopNorm {
         self.stop_norm
@@ -5233,7 +5251,7 @@ impl Solver {
             Status::Iterating => Status::Budget,
             other => other,
         };
-        Ok(report)
+        self.control.deliver(report)
     }
 
     fn run_plain<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
@@ -5242,7 +5260,8 @@ impl Solver {
     {
         let budget = self.control.maxiter;
         if budget == 0 {
-            return self.assess(obj, x);
+            let report = self.assess(obj, x)?;
+            return self.control.deliver(report);
         }
         self.brief = true;
         let tol = self.control.gtol;
@@ -5276,7 +5295,8 @@ impl Solver {
             other => other,
         };
         let g = self.reported_grad(x);
-        Ok(self.finish(value, x, &g, grad_norm, status))
+        self.control
+            .deliver(self.finish(value, x, &g, grad_norm, status))
     }
 
     /// The gradient a step report carries, for the report at the end of a
@@ -5793,6 +5813,8 @@ mod tests {
                 maxmove: Some(0.01),
                 ftol_rel: None,
                 noise_floor: None,
+                error_on_unmet: false,
+                backward_polish: false,
                 stop_norm: StopNorm::Two,
             },
             2,
@@ -5870,6 +5892,8 @@ mod tests {
                     maxmove: Some(0.05),
                     ftol_rel: None,
                     noise_floor: None,
+                    error_on_unmet: false,
+                    backward_polish: false,
                     stop_norm: StopNorm::Two,
                 },
                 2,
@@ -6031,6 +6055,8 @@ mod retained_neb_guard_tests {
                 maxmove: None,
                 ftol_rel: None,
                 noise_floor: None,
+                error_on_unmet: false,
+                backward_polish: false,
                 stop_norm: StopNorm::Two,
             },
             3,
@@ -6069,6 +6095,8 @@ mod retained_neb_guard_tests {
                 maxmove: None,
                 ftol_rel: None,
                 noise_floor: None,
+                error_on_unmet: false,
+                backward_polish: false,
                 stop_norm: StopNorm::Two,
             },
             3,
@@ -6174,6 +6202,8 @@ mod retained_neb_guard_tests {
                 maxmove: None,
                 ftol_rel: None,
                 noise_floor: None,
+                error_on_unmet: false,
+                backward_polish: false,
                 stop_norm: StopNorm::Two,
             },
             n,

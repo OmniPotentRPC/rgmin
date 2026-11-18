@@ -47,6 +47,9 @@ pub enum rgmin_status_t {
     /// A distance constraint set was refused or could not be met.
     /// [`rgmin_last_constraint_error`] names the kind. ABI minor 31.
     RGMIN_CONSTRAINT_ERROR = 5,
+    /// An opt-in unmet stop. `x` and `out` still hold the report.
+    /// ABI minor 48.
+    RGMIN_UNMET_STOP = 6,
 }
 
 fn status_from_error(e: &Error) -> rgmin_status_t {
@@ -60,6 +63,7 @@ fn status_from_error(e: &Error) -> rgmin_status_t {
             LAST_CONSTRAINT.with(|kind| kind.set(constraint_kind(c)));
             rgmin_status_t::RGMIN_CONSTRAINT_ERROR
         }
+        Error::StopUnmet { .. } => rgmin_status_t::RGMIN_UNMET_STOP,
         _ => rgmin_status_t::RGMIN_INVALID_PARAMETER,
     }
 }
@@ -77,7 +81,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 47;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 48;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -193,6 +197,10 @@ pub enum rgmin_stop_t {
     RGMIN_STOP_STEP_TOLERANCE = 2,
     /// The iteration budget was spent above every stop.
     RGMIN_STOP_BUDGET = 3,
+    /// No step was accepted. Same width as the earlier values. ABI minor 48.
+    RGMIN_STOP_LINE_SEARCH = 4,
+    /// A backward-error polish did not meet its test. ABI minor 48.
+    RGMIN_STOP_POLISH_UNMET = 5,
 }
 
 /// Iteration controls. `memory` is used only by L-BFGS (0 means 10).
@@ -1032,6 +1040,28 @@ pub unsafe extern "C" fn rgmin_minimize(
     method: rgmin_method_t,
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
+    unsafe { rgmin_minimize_opts(eval, grad, user, x, ctrl, method, 0, 0, out) }
+}
+
+/// [`rgmin_minimize`] with the two opt-in controls. A nonzero
+/// `error_on_unmet` writes `x` and `out`, then returns
+/// [`rgmin_status_t::RGMIN_UNMET_STOP`]. `backward_polish` has no Hessian
+/// on this entry and does not change the step. ABI minor 48.
+///
+/// # Safety
+/// Same as [`rgmin_minimize`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_opts(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    method: rgmin_method_t,
+    error_on_unmet: i32,
+    backward_polish: i32,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let eval = match eval {
             Some(f) => f,
@@ -1065,32 +1095,15 @@ pub unsafe extern "C" fn rgmin_minimize(
         let n = init.len();
         let obj = c_oracle(eval, grad, user, n);
         let c = unsafe { &*ctrl };
-        let control = control_from_c(c);
-        match minimize_method(
+        let control = control_with_flags(c, error_on_unmet, backward_polish);
+        let outcome = minimize_method(
             &obj,
             Array1::from(init),
             &control,
             method_from_c(method, c.memory),
             LineSearch::default(),
-        ) {
-            Ok(rep) => {
-                let dest = match cpu_f64_slice_mut(x, "x") {
-                    Ok(s) => s,
-                    Err(st) => return st,
-                };
-                dest.copy_from_slice(rep.coords.as_slice().expect("contiguous"));
-                unsafe {
-                    *out = rgmin_report_t {
-                        value: rep.value,
-                        steps: rep.steps,
-                        grad_norm: rep.grad_norm,
-                        stop: stop_from_status(rep.status),
-                    };
-                }
-                rgmin_status_t::RGMIN_SUCCESS
-            }
-            Err(e) => status_from_error(&e),
-        }
+        );
+        finish_one_shot(x, out, outcome)
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -1151,6 +1164,28 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
     method: rgmin_method_t,
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
+    unsafe { rgmin_minimize_hess_opts(eval, grad, hess, user, x, ctrl, method, 0, 0, out) }
+}
+
+/// [`rgmin_minimize_hess`] with the two opt-in controls. A nonzero
+/// `backward_polish` runs the shifted Newton or RFO polish on the
+/// supplied Hessian. ABI minor 48.
+///
+/// # Safety
+/// Same as [`rgmin_minimize_hess`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_hess_opts(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    hess: Option<rgmin_hess_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    method: rgmin_method_t,
+    error_on_unmet: i32,
+    backward_polish: i32,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let eval = match eval {
             Some(f) => f,
@@ -1184,33 +1219,16 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
         let n = init.len();
         let obj = c_oracle_hess(eval, grad, hess, user, n);
         let c = unsafe { &*ctrl };
-        let control = control_from_c(c);
+        let control = control_with_flags(c, error_on_unmet, backward_polish);
         let rust_method = method_from_c(method, c.memory);
-        match minimize_method_hess(
+        let outcome = minimize_method_hess(
             &obj,
             Array1::from(init),
             &control,
             rust_method,
             LineSearch::default(),
-        ) {
-            Ok(rep) => {
-                let dest = match cpu_f64_slice_mut(x, "x") {
-                    Ok(s) => s,
-                    Err(st) => return st,
-                };
-                dest.copy_from_slice(rep.coords.as_slice().expect("contiguous"));
-                unsafe {
-                    *out = rgmin_report_t {
-                        value: rep.value,
-                        steps: rep.steps,
-                        grad_norm: rep.grad_norm,
-                        stop: stop_from_status(rep.status),
-                    };
-                }
-                rgmin_status_t::RGMIN_SUCCESS
-            }
-            Err(e) => status_from_error(&e),
-        }
+        );
+        finish_one_shot(x, out, outcome)
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -1236,6 +1254,28 @@ pub unsafe extern "C" fn rgmin_minimize_hvp(
     x: *mut DLManagedTensorVersioned,
     ctrl: *const rgmin_control_t,
     method: rgmin_method_t,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    unsafe { rgmin_minimize_hvp_opts(eval, grad, hvp, user, x, ctrl, method, 0, 0, out) }
+}
+
+/// [`rgmin_minimize_hvp`] with the two opt-in controls. A nonzero
+/// `backward_polish` assembles the product into a Hessian and polishes.
+/// ABI minor 48.
+///
+/// # Safety
+/// Same as [`rgmin_minimize_hvp`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_hvp_opts(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    method: rgmin_method_t,
+    error_on_unmet: i32,
+    backward_polish: i32,
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1271,32 +1311,15 @@ pub unsafe extern "C" fn rgmin_minimize_hvp(
         let n = init.len();
         let obj = c_oracle_hvp(eval, grad, hvp, user, n);
         let c = unsafe { &*ctrl };
-        let control = control_from_c(c);
-        match minimize_method_hvp(
+        let control = control_with_flags(c, error_on_unmet, backward_polish);
+        let outcome = minimize_method_hvp(
             &obj,
             Array1::from(init),
             &control,
             method_from_c(method, c.memory),
             LineSearch::default(),
-        ) {
-            Ok(rep) => {
-                let dest = match cpu_f64_slice_mut(x, "x") {
-                    Ok(s) => s,
-                    Err(st) => return st,
-                };
-                dest.copy_from_slice(rep.coords.as_slice().expect("contiguous"));
-                unsafe {
-                    *out = rgmin_report_t {
-                        value: rep.value,
-                        steps: rep.steps,
-                        grad_norm: rep.grad_norm,
-                        stop: stop_from_status(rep.status),
-                    };
-                }
-                rgmin_status_t::RGMIN_SUCCESS
-            }
-            Err(e) => status_from_error(&e),
-        }
+        );
+        finish_one_shot(x, out, outcome)
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -1374,31 +1397,14 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
         });
         let c = unsafe { &*ctrl };
         let control = control_from_c(c);
-        match minimize_method(
+        let outcome = minimize_method(
             &obj,
             Array1::from(init),
             &control,
             method_from_c(method, c.memory),
             LineSearch::default(),
-        ) {
-            Ok(rep) => {
-                let dest = match cpu_f64_slice_mut(x, "x") {
-                    Ok(s) => s,
-                    Err(st) => return st,
-                };
-                dest.copy_from_slice(rep.coords.as_slice().expect("contiguous"));
-                unsafe {
-                    *out = rgmin_report_t {
-                        value: rep.value,
-                        steps: rep.steps,
-                        grad_norm: rep.grad_norm,
-                        stop: stop_from_status(rep.status),
-                    };
-                }
-                rgmin_status_t::RGMIN_SUCCESS
-            }
-            Err(e) => status_from_error(&e),
-        }
+        );
+        finish_one_shot(x, out, outcome)
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -1784,6 +1790,41 @@ pub unsafe extern "C" fn rgmin_solver_set_stop_norm(solver: *mut rgmin_solver_t,
     };
     unsafe { (*solver).solver.set_stop_norm(norm) };
     0
+}
+
+/// Opt in to [`rgmin_status_t::RGMIN_UNMET_STOP`] from a later run that
+/// reads this session's control. One step is unchanged. ABI minor 48.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_error_on_unmet(solver: *mut rgmin_solver_t, on: i32) {
+    unsafe { with_solver(solver, |s| s.set_error_on_unmet(on != 0)) };
+}
+
+/// Record the backward-error polish flag. A session step does not form
+/// a Hessian. ABI minor 48.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_backward_polish(solver: *mut rgmin_solver_t, on: i32) {
+    unsafe { with_solver(solver, |s| s.set_backward_polish(on != 0)) };
+}
+
+/// First-order floor `n * eps * (1 + |value| + sum |x_i|)`, with
+/// `eps` equal to [`f64::EPSILON`]. A null `x` or `n == 0` uses an
+/// empty coordinate vector. ABI minor 48.
+///
+/// # Safety
+/// `x` is null or readable for `n` doubles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_backward_error_floor(value: f64, x: *const f64, n: usize) -> f64 {
+    if x.is_null() || n == 0 {
+        return crate::backward_error_floor(value, ArrayView1::from(&[]));
+    }
+    let coords = unsafe { slice::from_raw_parts(x, n) };
+    crate::backward_error_floor(value, ArrayView1::from(coords))
 }
 
 /// FIRE 2.0 parameter set. Integers match [`crate::FirePreset`].
@@ -3797,7 +3838,7 @@ fn write_report(
             value: rep.value,
             steps: rep.steps,
             grad_norm: rep.grad_norm,
-            stop: stop_from_status(rep.status),
+            stop: stop_from_reason(rep.stop_reason()),
         };
         (*solver).grad = rep.grad;
     }
@@ -4082,6 +4123,10 @@ fn noise_floor_from_c(c: &rgmin_control_t) -> Option<crate::NoiseFloor> {
 }
 
 fn control_from_c(c: &rgmin_control_t) -> Control {
+    control_with_flags(c, 0, 0)
+}
+
+fn control_with_flags(c: &rgmin_control_t, error_on_unmet: i32, backward_polish: i32) -> Control {
     Control {
         maxiter: c.maxiter,
         gtol: c.gtol,
@@ -4090,15 +4135,60 @@ fn control_from_c(c: &rgmin_control_t) -> Control {
         stop_norm: StopNorm::Two,
         ftol_rel: None,
         noise_floor: noise_floor_from_c(c),
+        error_on_unmet: error_on_unmet != 0,
+        backward_polish: backward_polish != 0,
     }
 }
 
-fn stop_from_status(status: crate::Status) -> rgmin_stop_t {
-    match status {
-        crate::Status::Tolerance => rgmin_stop_t::RGMIN_STOP_TOLERANCE,
-        crate::Status::NoiseFloor => rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR,
-        crate::Status::StepTolerance => rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE,
-        crate::Status::Budget | crate::Status::Iterating => rgmin_stop_t::RGMIN_STOP_BUDGET,
+fn stop_from_reason(reason: crate::StopReason) -> rgmin_stop_t {
+    use crate::StopReason;
+    match reason {
+        StopReason::Converged => rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        StopReason::NoiseFloor => rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR,
+        StopReason::StepTolerance => rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE,
+        StopReason::MaxIter | StopReason::Iterating => rgmin_stop_t::RGMIN_STOP_BUDGET,
+        StopReason::LineSearchFailed => rgmin_stop_t::RGMIN_STOP_LINE_SEARCH,
+        StopReason::PolishUnmet => rgmin_stop_t::RGMIN_STOP_POLISH_UNMET,
+    }
+}
+
+fn write_one_shot(
+    x: *mut DLManagedTensorVersioned,
+    out: *mut rgmin_report_t,
+    rep: &crate::Report,
+) -> rgmin_status_t {
+    let dest = match cpu_f64_slice_mut(x, "x") {
+        Ok(s) => s,
+        Err(st) => return st,
+    };
+    dest.copy_from_slice(rep.coords.as_slice().expect("contiguous"));
+    unsafe {
+        *out = rgmin_report_t {
+            value: rep.value,
+            steps: rep.steps,
+            grad_norm: rep.grad_norm,
+            stop: stop_from_reason(rep.stop_reason()),
+        };
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+fn finish_one_shot(
+    x: *mut DLManagedTensorVersioned,
+    out: *mut rgmin_report_t,
+    result: crate::Result<crate::Report>,
+) -> rgmin_status_t {
+    match result {
+        Ok(rep) => write_one_shot(x, out, &rep),
+        Err(err) => {
+            if let Error::StopUnmet { report, .. } = &err {
+                let wrote = write_one_shot(x, out, report);
+                if wrote != rgmin_status_t::RGMIN_SUCCESS {
+                    return wrote;
+                }
+            }
+            status_from_error(&err)
+        }
     }
 }
 
@@ -4886,25 +4976,7 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
                 &options,
             )
         };
-        match report {
-            Ok(rep) => {
-                let dest = match cpu_f64_slice_mut(x, "x") {
-                    Ok(s) => s,
-                    Err(st) => return st,
-                };
-                dest.copy_from_slice(rep.coords.as_slice().expect("contiguous"));
-                unsafe {
-                    *out = rgmin_report_t {
-                        value: rep.value,
-                        steps: rep.steps,
-                        grad_norm: rep.grad_norm,
-                        stop: stop_from_status(rep.status),
-                    };
-                }
-                rgmin_status_t::RGMIN_SUCCESS
-            }
-            Err(e) => status_from_error(&e),
-        }
+        finish_one_shot(x, out, report)
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -6490,6 +6562,8 @@ mod default_tests {
         StopNorm,
         Option<u64>,
         Option<FloorBits>,
+        bool,
+        bool,
     );
     type ExpBits = (u64, u64, Option<u64>, Option<u64>, Option<u64>, bool, Cell);
     type LindhBits = (u64, Option<u64>, bool, bool, Cell, Option<u64>, bool);
@@ -6518,6 +6592,8 @@ mod default_tests {
             stop_norm,
             ftol_rel,
             noise_floor,
+            error_on_unmet,
+            backward_polish,
         } = control;
         (
             maxiter,
@@ -6527,6 +6603,8 @@ mod default_tests {
             stop_norm,
             opt(ftol_rel),
             noise_floor.map(floor_bits),
+            error_on_unmet,
+            backward_polish,
         )
     }
 

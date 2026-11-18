@@ -32,6 +32,92 @@ pub enum Status {
     Budget,
 }
 
+/// Typed stop of a finished minimization.
+///
+/// [`Status`] is the historical code. [`StopReason`] names the same
+/// stops in the vocabulary a caller uses to decide whether the point
+/// is stationary: [`Self::Converged`] is the `gtol` stop,
+/// [`Self::MaxIter`] is a spent budget, and [`Self::LineSearchFailed`]
+/// is a budget spent without accepting a step. A backward-error polish
+/// that does not meet its test is [`Self::PolishUnmet`].
+///
+/// [`Report::converged`] is true only for [`Self::Converged`].
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StopReason {
+    /// [`Status::Tolerance`]: the gradient norm fell below `gtol`, or a
+    /// backward-error polish accepted the point.
+    Converged,
+    /// [`Status::Budget`]: `maxiter` was spent with the stop unmet.
+    MaxIter,
+    /// No step was accepted and the gradient is still above `gtol`.
+    LineSearchFailed,
+    /// [`Status::NoiseFloor`].
+    NoiseFloor,
+    /// [`Status::StepTolerance`].
+    StepTolerance,
+    /// An opt-in backward-error polish ended above its test.
+    PolishUnmet,
+    /// [`Status::Iterating`]: a step that has not stopped.
+    Iterating,
+}
+
+impl StopReason {
+    /// The `gtol` stop, or a polish that met the backward-error test.
+    pub fn converged(self) -> bool {
+        matches!(self, Self::Converged)
+    }
+
+    /// A finished run whose stop test did not hold.
+    ///
+    /// [`Self::NoiseFloor`] and [`Self::StepTolerance`] are stops that
+    /// held. [`Self::Iterating`] is a step still in progress.
+    pub fn is_unmet(self) -> bool {
+        matches!(
+            self,
+            Self::MaxIter | Self::LineSearchFailed | Self::PolishUnmet
+        )
+    }
+
+    /// Historical [`Status`] when this reason has one.
+    ///
+    /// [`Self::LineSearchFailed`] and [`Self::PolishUnmet`] keep
+    /// [`Status::Budget`]: they are a spent stop, named more finely here.
+    pub fn status(self) -> Status {
+        match self {
+            Self::Converged => Status::Tolerance,
+            Self::MaxIter | Self::LineSearchFailed | Self::PolishUnmet => Status::Budget,
+            Self::NoiseFloor => Status::NoiseFloor,
+            Self::StepTolerance => Status::StepTolerance,
+            Self::Iterating => Status::Iterating,
+        }
+    }
+
+    fn from_status(status: Status) -> Self {
+        match status {
+            Status::Tolerance => Self::Converged,
+            Status::Budget => Self::MaxIter,
+            Status::NoiseFloor => Self::NoiseFloor,
+            Status::StepTolerance => Self::StepTolerance,
+            Status::Iterating => Self::Iterating,
+        }
+    }
+}
+
+impl std::fmt::Display for StopReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Converged => "converged",
+            Self::MaxIter => "maxiter",
+            Self::LineSearchFailed => "line search failed",
+            Self::NoiseFloor => "noise floor",
+            Self::StepTolerance => "step tolerance",
+            Self::PolishUnmet => "backward-error polish unmet",
+            Self::Iterating => "iterating",
+        })
+    }
+}
+
 /// Final point, value, and iteration count.
 ///
 /// Non-exhaustive, so a field added later is additive for callers that
@@ -60,6 +146,8 @@ pub struct Report {
     pub grad: Option<Array1<f64>>,
     /// Which stop produced this report.
     pub status: Status,
+    /// Finer stop. `None` follows [`Report::status`].
+    pub(crate) reason: Option<StopReason>,
 }
 
 impl Report {
@@ -74,7 +162,41 @@ impl Report {
             stop_norm: StopNorm::Two,
             grad: None,
             status: Status::Iterating,
+            reason: None,
         }
+    }
+
+    /// Stop named for this report.
+    ///
+    /// A reason set by [`Self::with_stop_reason`] wins. Otherwise
+    /// [`Status::Tolerance`] is [`StopReason::Converged`] and
+    /// [`Status::Budget`] is [`StopReason::MaxIter`].
+    pub fn stop_reason(&self) -> StopReason {
+        match self.reason {
+            Some(reason) => reason,
+            None => StopReason::from_status(self.status),
+        }
+    }
+
+    /// Whether [`Self::stop_reason`] is [`StopReason::Converged`].
+    pub fn converged(&self) -> bool {
+        self.stop_reason().converged()
+    }
+
+    /// Record `reason` and the [`Status`] it corresponds to.
+    #[must_use]
+    pub fn with_stop_reason(mut self, reason: StopReason) -> Self {
+        self.status = reason.status();
+        self.reason = Some(reason);
+        self
+    }
+
+    /// Replace [`Self::status`] and drop a finer [`Self::stop_reason`] override.
+    #[must_use]
+    pub fn with_status(mut self, status: Status) -> Self {
+        self.status = status;
+        self.reason = None;
+        self
     }
 }
 
@@ -85,5 +207,4 @@ with_setters!(Report {
     with_grad_norm => grad_norm: val f64,
     with_stop_norm => stop_norm: val StopNorm,
     with_grad => grad: opt Array1<f64>,
-    with_status => status: val Status,
 });

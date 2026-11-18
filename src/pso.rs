@@ -111,7 +111,7 @@ where
 
     let (value, grad) = obj.value_and_gradient(gbest_position.view());
     let grad_norm = l2(&grad);
-    Ok(one_shot_report(
+    control.deliver(one_shot_report(
         value,
         gbest_position,
         iteration,

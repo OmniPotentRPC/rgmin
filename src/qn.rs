@@ -49,7 +49,7 @@ where
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if control.halt(gnorm, grad.len()).is_some() {
-            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
+            return control.deliver(done(value, pos, step, gnorm, grad.len(), control, false));
         }
         let dir = -h.dot(&grad);
         let old = pos.clone();
@@ -69,7 +69,7 @@ where
             None,
         );
         if t.energy_noise {
-            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+            return control.deliver(energy_noise_report(value, pos, step + 1, gnorm));
         }
         let moved = t.moved;
         pos = t.x;
@@ -82,7 +82,7 @@ where
         }
         istep = qn_istep(control);
     }
-    Ok(done(
+    control.deliver(done(
         value,
         pos,
         control.maxiter,
@@ -186,7 +186,7 @@ where
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if control.halt(gnorm, grad.len()).is_some() {
-            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
+            return control.deliver(done(value, pos, step, gnorm, grad.len(), control, false));
         }
         let dir = sr_trust_direction(&b, &grad, radius);
         let mut trial = &pos + &dir;
@@ -215,7 +215,7 @@ where
             grad = gt;
         }
     }
-    Ok(done(
+    control.deliver(done(
         value,
         pos,
         control.maxiter,
@@ -246,7 +246,7 @@ where
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if control.halt(gnorm, grad.len()).is_some() {
-            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
+            return control.deliver(done(value, pos, step, gnorm, grad.len(), control, false));
         }
         let dir = grad.mapv(|g| -g);
         let t = take_step(
@@ -261,7 +261,7 @@ where
             implicit_atom_cap(control),
         );
         if t.energy_noise {
-            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+            return control.deliver(energy_noise_report(value, pos, step + 1, gnorm));
         }
         let lsstep = t.alpha;
         pos = t.x;
@@ -269,7 +269,7 @@ where
         grad = t.g;
         istep = next_istep(lsstep, control);
     }
-    Ok(done(
+    control.deliver(done(
         value,
         pos,
         control.maxiter,

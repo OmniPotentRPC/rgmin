@@ -56,7 +56,7 @@ where
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if let Some(status) = control.halt(gnorm, grad.len()) {
-            return Ok(one_shot_report(value, pos, step, gnorm, status));
+            return control.deliver(one_shot_report(value, pos, step, gnorm, status));
         }
         let m_old = m.clone();
         let v_old = v.clone();
@@ -74,7 +74,7 @@ where
             implicit_atom_cap(control),
         );
         if t.energy_noise {
-            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+            return control.deliver(energy_noise_report(value, pos, step + 1, gnorm));
         }
         if t.moved {
             pos = t.x;
@@ -90,7 +90,7 @@ where
             v = v_old;
         }
     }
-    Ok(one_shot_report(
+    control.deliver(one_shot_report(
         value,
         pos,
         control.maxiter,
@@ -195,6 +195,8 @@ mod tests {
             stop_norm: StopNorm::Two,
             ftol_rel: None,
             noise_floor: None,
+            error_on_unmet: false,
+            backward_polish: false,
         };
         let linesearch = LineSearch::Backtracking {
             c: 1e-4,

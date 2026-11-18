@@ -2443,11 +2443,12 @@ impl Lbfgs {
         let (mut value, mut grad) = obj.value_and_gradient(pos.view());
         crate::step::refuse_non_finite(value, &grad)?;
         let mut istep = control.istep;
+        let start = pos.clone();
 
         for step in 0..control.maxiter {
             let gnorm = l2(&grad);
             if let Some(status) = control.halt(gnorm, grad.len()) {
-                return Ok(one_shot_report(value, pos, step, gnorm, status));
+                return control.deliver(one_shot_report(value, pos, step, gnorm, status));
             }
             let stall = self.step_objective(
                 obj,
@@ -2460,7 +2461,7 @@ impl Lbfgs {
                 crate::step::implicit_atom_cap(control),
             );
             if stall {
-                return Ok(one_shot_report(
+                return control.deliver(one_shot_report(
                     value,
                     pos,
                     step + 1,
@@ -2470,13 +2471,41 @@ impl Lbfgs {
             }
         }
         let gnorm = l2(&grad);
-        Ok(one_shot_report(
+        let mut report = one_shot_report(
             value,
-            pos,
+            pos.clone(),
             control.maxiter,
             gnorm,
             control.finish_status(gnorm, grad.len(), true),
-        ))
+        );
+        // The gradient is read after the last step as well as at the
+        // top of the loop, so a final step under `gtol` is Converged
+        // via `finish_status`. A budget in which no trial moved is a
+        // failed line search, not a generic maxiter stop.
+        if control.maxiter > 0 && pos == start && report.stop_reason() == crate::StopReason::MaxIter
+        {
+            report = report.with_stop_reason(crate::StopReason::LineSearchFailed);
+        }
+        control.deliver(report)
+    }
+
+    /// Continue from `init` with the curvature pairs already stored.
+    ///
+    /// [`Self::minimize_objective`] does not clear [`Self::len`]. This
+    /// is that continuation under its own name. A new [`Lbfgs`] is the
+    /// cold start [`crate::minimize_method`] builds, and that cold start
+    /// drops the pairs.
+    pub fn resume_objective<O>(
+        &mut self,
+        obj: &O,
+        init: impl Into<Array1<f64>>,
+        control: &Control,
+        linesearch: LineSearch,
+    ) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        self.minimize_objective(obj, init, control, linesearch)
     }
 
     /// One outer L-BFGS iteration: two-loop direction, line search, pair.

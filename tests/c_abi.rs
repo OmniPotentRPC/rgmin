@@ -9,17 +9,18 @@ use dlpk::sys::{DLDeviceType, DLManagedTensorVersioned};
 use eindir_core::ffi::eindir_core_abi_stamp;
 use eindir_core::ffi::{eindir_objective_t, eindir_status_t};
 use rgmin::ffi::{
-    rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_conjugacy_t, rgmin_control_t,
-    rgmin_eigen_kind_t, rgmin_eigen_options_t, rgmin_eigen_params_t, rgmin_eigenpair_ex_t,
-    rgmin_eigenpair_t, rgmin_exp_t, rgmin_last_error, rgmin_lowest_eigenpair,
-    rgmin_lowest_eigenpairs, rgmin_lowest_eigenpairs_ex, rgmin_lowest_mode_t,
-    rgmin_method_from_name, rgmin_method_t, rgmin_minimize, rgmin_minimize_eindir,
-    rgmin_minimize_scg, rgmin_precond_fn, rgmin_report_t, rgmin_scg_params_t,
-    rgmin_solver_clear_exp, rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free,
-    rgmin_solver_gradient_calls, rgmin_solver_hvp_calls, rgmin_solver_set_accept,
-    rgmin_solver_set_exp, rgmin_solver_set_quickmin_cell, rgmin_solver_set_quickmin_variant,
-    rgmin_solver_step, rgmin_solver_step_fg, rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t,
-    rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+    rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_backward_error_floor,
+    rgmin_conjugacy_t, rgmin_control_t, rgmin_eigen_kind_t, rgmin_eigen_options_t,
+    rgmin_eigen_params_t, rgmin_eigenpair_ex_t, rgmin_eigenpair_t, rgmin_exp_t, rgmin_last_error,
+    rgmin_lowest_eigenpair, rgmin_lowest_eigenpairs, rgmin_lowest_eigenpairs_ex,
+    rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
+    rgmin_minimize_eindir, rgmin_minimize_opts, rgmin_minimize_scg, rgmin_precond_fn,
+    rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp, rgmin_solver_create,
+    rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
+    rgmin_solver_set_accept, rgmin_solver_set_exp, rgmin_solver_set_quickmin_cell,
+    rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
+    rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
+    rgmin_tensor_free,
 };
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
 use rgpot_core::status::rgpot_status_t;
@@ -1084,7 +1085,8 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
-/// ABI minor 47 adds `rgmin_solver_set_level_set` and
+/// ABI minor 48 adds the stop-status setters, the floor, and the
+/// `*_opts` one-shots. Minor 47 adds `rgmin_solver_set_level_set` and
 /// `rgmin_solver_clear_level_set`. Minor 46 adds `rgmin_control_default`
 /// and the other struct initializers. Minor 45 is
 /// `rgmin_solver_set_lbfgs_trust` and minor 44 is
@@ -1096,9 +1098,69 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 47);
+    assert_eq!(stamp.abi_minor, 48);
     assert_eq!(stamp.layout_revision, 5);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
+}
+
+#[test]
+fn an_unmet_c_stop_writes_the_report_and_returns_the_typed_status() {
+    let mut x = [-1.2, 1.0];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let ctrl = rgmin_control_t {
+        maxiter: 6,
+        gtol: 1e-12,
+        istep: 1.0,
+        memory: 10,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    };
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+    };
+    let unmet = unsafe {
+        rgmin_minimize_opts(
+            Some(rosen_eval),
+            Some(rosen_grad),
+            std::ptr::null_mut(),
+            xt,
+            &ctrl,
+            rgmin_method_t::RGMIN_LBFGS,
+            1,
+            0,
+            &mut out,
+        )
+    };
+    assert_eq!(unmet, rgmin_status_t::RGMIN_UNMET_STOP);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_BUDGET);
+    assert_eq!(out.steps, 6);
+    assert!(out.grad_norm > 0.0);
+    let floor = unsafe { rgmin_backward_error_floor(out.value, x.as_ptr(), 2) };
+    assert!(out.grad_norm > floor);
+
+    let mut y = [-1.2, 1.0];
+    let yt = unsafe { rgmin_tensor_borrow_cpu_f64(y.as_mut_ptr(), 2) };
+    let plain = unsafe {
+        rgmin_minimize(
+            Some(rosen_eval),
+            Some(rosen_grad),
+            std::ptr::null_mut(),
+            yt,
+            &ctrl,
+            rgmin_method_t::RGMIN_LBFGS,
+            &mut out,
+        )
+    };
+    unsafe {
+        rgmin_tensor_free(xt);
+        rgmin_tensor_free(yt);
+    }
+    assert_eq!(plain, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_BUDGET);
 }
 
 #[test]
@@ -1332,15 +1394,16 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
     use rgmin::ffi::{
         rgmin_fire_variant_t, rgmin_linesearch_t, rgmin_manifold_t, rgmin_qn_step_t,
         rgmin_solver_add_equality, rgmin_solver_clear_equalities, rgmin_solver_forget,
-        rgmin_solver_set_atom_maxmove, rgmin_solver_set_box, rgmin_solver_set_cautious,
-        rgmin_solver_set_centered_matrix, rgmin_solver_set_constant,
-        rgmin_solver_set_euclidean_complex, rgmin_solver_set_extra_updates,
-        rgmin_solver_set_fire_variant, rgmin_solver_set_highs, rgmin_solver_set_linesearch,
-        rgmin_solver_set_manifold, rgmin_solver_set_masses, rgmin_solver_set_maxmove,
-        rgmin_solver_set_multinomial_ds, rgmin_solver_set_multinomial_sym,
-        rgmin_solver_set_oblique, rgmin_solver_set_periodic, rgmin_solver_set_positive,
-        rgmin_solver_set_power, rgmin_solver_set_project_rigid, rgmin_solver_set_qn_step,
-        rgmin_solver_set_sphere_complex, rgmin_solver_set_stiefel, rgmin_solver_set_trust,
+        rgmin_solver_set_atom_maxmove, rgmin_solver_set_backward_polish, rgmin_solver_set_box,
+        rgmin_solver_set_cautious, rgmin_solver_set_centered_matrix, rgmin_solver_set_constant,
+        rgmin_solver_set_error_on_unmet, rgmin_solver_set_euclidean_complex,
+        rgmin_solver_set_extra_updates, rgmin_solver_set_fire_variant, rgmin_solver_set_highs,
+        rgmin_solver_set_linesearch, rgmin_solver_set_manifold, rgmin_solver_set_masses,
+        rgmin_solver_set_maxmove, rgmin_solver_set_multinomial_ds,
+        rgmin_solver_set_multinomial_sym, rgmin_solver_set_oblique, rgmin_solver_set_periodic,
+        rgmin_solver_set_positive, rgmin_solver_set_power, rgmin_solver_set_project_rigid,
+        rgmin_solver_set_qn_step, rgmin_solver_set_sphere_complex, rgmin_solver_set_stiefel,
+        rgmin_solver_set_trust,
     };
     let ctrl = rgmin_control_t {
         maxiter: 20,
@@ -1356,6 +1419,8 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
     let masses = [1.0_f64, 12.0, 16.0];
     unsafe {
         rgmin_solver_set_maxmove(session, 0.5);
+        rgmin_solver_set_error_on_unmet(session, 0);
+        rgmin_solver_set_backward_polish(session, 0);
         rgmin_solver_set_atom_maxmove(session, 0.2);
         rgmin_solver_set_qn_step(session, rgmin_qn_step_t::RGMIN_QN_LBFGS);
         rgmin_solver_set_extra_updates(session, 2);
@@ -1429,6 +1494,8 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
     let null = std::ptr::null_mut();
     unsafe {
         rgmin_solver_set_maxmove(null, 0.5);
+        rgmin_solver_set_error_on_unmet(null, 1);
+        rgmin_solver_set_backward_polish(null, 1);
         rgmin_solver_set_atom_maxmove(null, 0.2);
         rgmin_solver_set_qn_step(null, rgmin_qn_step_t::RGMIN_QN_NEWTON);
         rgmin_solver_set_extra_updates(null, 2);

@@ -123,6 +123,161 @@ where
     }
 }
 
+/// First-order stationarity floor `n ε (1 + |V| + Σ |x_i|)`.
+///
+/// `n` is the length of `x` and `ε` is [`f64::EPSILON`]. A gradient
+/// larger than this scale is not a stationary point of a
+/// first-order evaluation of `V` at `x`.
+pub fn backward_error_floor(value: f64, x: ArrayView1<f64>) -> f64 {
+    let eps = f64::EPSILON;
+    let mut sum_abs = 0.0;
+    for component in x {
+        sum_abs += component.abs();
+    }
+    (x.len() as f64) * eps * (1.0 + value.abs() + sum_abs)
+}
+
+/// Whether `p` is a backward-error Newton step at `(value, x)`.
+///
+/// `p` is the Newton step, or the shifted-Newton / RFO step when the
+/// Hessian is indefinite. The point is accepted only when the Newton
+/// decrement `|g·p| / 2` is at most `ε (1 + |V|)` and every `|p_i|` is
+/// at most `ε (1 + |x_i|)`, with `ε` = [`f64::EPSILON`].
+pub fn newton_decrement_acceptable(
+    value: f64,
+    x: ArrayView1<f64>,
+    grad: ArrayView1<f64>,
+    step: ArrayView1<f64>,
+) -> bool {
+    if x.len() != step.len() || grad.len() != step.len() {
+        return false;
+    }
+    let eps = f64::EPSILON;
+    let decrement = grad.dot(&step).abs() / 2.0;
+    if !at_most(decrement, eps * (1.0 + value.abs())) {
+        return false;
+    }
+    for i in 0..step.len() {
+        if !at_most(step[i].abs(), eps * (1.0 + x[i].abs())) {
+            return false;
+        }
+    }
+    true
+}
+
+/// `left <= right`, and false when either side is not ordered.
+fn at_most(left: f64, right: f64) -> bool {
+    matches!(
+        left.partial_cmp(&right),
+        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+    )
+}
+
+fn newton_direction(kind: NewtonKind, hess: &Array2<f64>, grad: &Array1<f64>) -> Array1<f64> {
+    match kind {
+        NewtonKind::Shifted => shifted_newton(hess, grad),
+        NewtonKind::Rfo => rfo_direction(hess, grad),
+    }
+}
+
+/// Newton polish from `init`.
+///
+/// Each direction is the shifted Newton step, or the RFO step when
+/// `kind` is [`NewtonKind::Rfo`]. An indefinite Hessian takes that
+/// existing step. The point is kept only when
+/// [`newton_decrement_acceptable`] holds, including after the last
+/// step. Otherwise the report is [`crate::StopReason::PolishUnmet`].
+pub fn polish_newton<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    kind: NewtonKind,
+) -> Result<Report>
+where
+    O: HessianObjective + ?Sized,
+{
+    let report = polish_inner(obj, init.into(), control, kind)?;
+    control.deliver(report)
+}
+
+pub(crate) fn polish_inner<O>(
+    obj: &O,
+    mut pos: Array1<f64>,
+    control: &Control,
+    kind: NewtonKind,
+) -> Result<Report>
+where
+    O: HessianObjective + ?Sized,
+{
+    if pos.len() != eindir_core::Objective::dim(obj) {
+        return Err(Error::Dim {
+            got: pos.len(),
+            dim: eindir_core::Objective::dim(obj),
+        });
+    }
+    pos = obj.bounds().clip(pos.view());
+    let (mut value, mut grad) = obj.value_and_gradient(pos.view());
+    crate::step::refuse_non_finite(value, &grad)?;
+    let mut steps = 0usize;
+    let mut stalled = false;
+    for _ in 0..control.maxiter {
+        let hess = obj.hessian(pos.view());
+        let dir = newton_direction(kind, &hess, &grad);
+        if newton_decrement_acceptable(value, pos.view(), grad.view(), dir.view()) {
+            return Ok(polished_report(value, pos, steps, &grad, true));
+        }
+        let (npos, nval, ngrad, moved) = energy_backtrack(obj, &pos, value, &dir, control);
+        steps += 1;
+        if !moved {
+            stalled = true;
+            break;
+        }
+        pos = npos;
+        value = nval;
+        grad = ngrad;
+        crate::step::refuse_non_finite(value, &grad)?;
+    }
+    let hess = obj.hessian(pos.view());
+    let dir = newton_direction(kind, &hess, &grad);
+    let accepted = newton_decrement_acceptable(value, pos.view(), grad.view(), dir.view());
+    if stalled && !accepted {
+        return Ok(polished_report(value, pos, steps, &grad, false)
+            .with_stop_reason(crate::StopReason::LineSearchFailed));
+    }
+    Ok(polished_report(value, pos, steps, &grad, accepted))
+}
+
+fn polished_report(
+    value: f64,
+    pos: Array1<f64>,
+    steps: usize,
+    grad: &Array1<f64>,
+    accepted: bool,
+) -> Report {
+    let gnorm = l2(grad);
+    if accepted {
+        one_shot_report(value, pos, steps, gnorm, crate::report::Status::Tolerance)
+            .with_stop_reason(crate::StopReason::Converged)
+    } else {
+        one_shot_report(value, pos, steps, gnorm, crate::report::Status::Budget)
+            .with_stop_reason(crate::StopReason::PolishUnmet)
+    }
+}
+
+fn finish_newton<O>(obj: &O, control: &Control, kind: NewtonKind, report: Report) -> Result<Report>
+where
+    O: HessianObjective + ?Sized,
+{
+    if !control.backward_polish {
+        return control.deliver(report);
+    }
+    let prior = report.steps;
+    let coords = report.coords.clone();
+    let polished = polish_inner(obj, coords, control, kind)?;
+    let steps = prior + polished.steps;
+    control.deliver(polished.with_steps(steps))
+}
+
 /// Minimize with a Newton or RFO direction on the supplied Hessian.
 pub fn minimize_newton<O>(
     obj: &O,
@@ -147,13 +302,15 @@ where
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if let Some(status) = control.halt(gnorm, grad.len()) {
-            return Ok(one_shot_report(value, pos, step, gnorm, status));
+            return finish_newton(
+                obj,
+                control,
+                kind,
+                one_shot_report(value, pos, step, gnorm, status),
+            );
         }
         let hess = obj.hessian(pos.view());
-        let dir = match kind {
-            NewtonKind::Shifted => shifted_newton(&hess, &grad),
-            NewtonKind::Rfo => rfo_direction(&hess, &grad),
-        };
+        let dir = newton_direction(kind, &hess, &grad);
         let (npos, nval, ngrad, moved) = energy_backtrack(obj, &pos, value, &dir, control);
         if !moved {
             let sd = grad.mapv(|g| -g);
@@ -169,13 +326,19 @@ where
             grad = ngrad;
         }
     }
-    Ok(one_shot_report(
-        value,
-        pos,
-        control.maxiter,
-        l2(&grad),
-        control.finish_status(l2(&grad), grad.len(), true),
-    ))
+    let gnorm = l2(&grad);
+    finish_newton(
+        obj,
+        control,
+        kind,
+        one_shot_report(
+            value,
+            pos,
+            control.maxiter,
+            gnorm,
+            control.finish_status(gnorm, grad.len(), true),
+        ),
+    )
 }
 
 pub(crate) fn energy_backtrack<O>(

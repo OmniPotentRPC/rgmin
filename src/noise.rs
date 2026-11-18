@@ -981,6 +981,8 @@ mod tests {
             stop_norm: crate::StopNorm::Two,
             ftol_rel: None,
             noise_floor: Some(NoiseFloor::new(eps)),
+            error_on_unmet: false,
+            backward_polish: false,
         };
         let report = minimize_method(
             &obj,

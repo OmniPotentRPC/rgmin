@@ -338,6 +338,7 @@ pub(crate) fn one_shot_report(
         stop_norm: StopNorm::Two,
         grad: None,
         status,
+        reason: None,
     }
 }
 

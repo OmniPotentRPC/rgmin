@@ -269,6 +269,22 @@ pub enum Error {
         /// What was refused.
         what: &'static str,
     },
+    /// The iteration finished with the stop unmet.
+    ///
+    /// Opt-in via [`crate::Control::with_error_on_unmet`]. The default
+    /// still returns the [`crate::Report`]. `report` holds the value,
+    /// coordinates, gradient norm and step count at the stop.
+    #[error(
+        "stop {reason} unmet after {} steps (grad_norm {})",
+        report.steps,
+        report.grad_norm
+    )]
+    StopUnmet {
+        /// Why the run stopped.
+        reason: crate::report::StopReason,
+        /// Point where the solver stopped.
+        report: Box<crate::report::Report>,
+    },
     /// Newton retraction to a level set stopped when the residual no
     /// longer contracted relative to the derived tolerance.
     #[error(

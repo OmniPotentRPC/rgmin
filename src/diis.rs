@@ -249,6 +249,8 @@ mod tests {
                 stop_norm: crate::StopNorm::Two,
                 ftol_rel: None,
                 noise_floor: None,
+                error_on_unmet: false,
+                backward_polish: false,
             },
             1,
         );
@@ -280,6 +282,8 @@ mod tests {
                 stop_norm: crate::StopNorm::Two,
                 ftol_rel: None,
                 noise_floor: None,
+                error_on_unmet: false,
+                backward_polish: false,
             },
             1,
         );

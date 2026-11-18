@@ -151,7 +151,7 @@ pub use holonomic::{
 };
 pub use hvp::{
     FdHvp, HessianVector, HvpOracle, IdentityPrecond, NystromPrecond, Preconditioner,
-    minimize_newton_cg, steihaug_cg, steihaug_pcg,
+    minimize_newton_cg, polish_hvp, steihaug_cg, steihaug_pcg,
 };
 pub use irc_trust::{IrcTrust, sqrt_masses_3n};
 pub use lbfgs::{
@@ -179,7 +179,10 @@ pub use manifold::{
 };
 pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
-pub use newton::{HessianObjective, HessianOracle, NewtonKind, minimize_newton};
+pub use newton::{
+    HessianObjective, HessianOracle, NewtonKind, backward_error_floor, minimize_newton,
+    newton_decrement_acceptable, polish_newton,
+};
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
 pub use noise::{
     DEFAULT_M, NoiseEstimate, NoiseFlag, ValueGradientNoise, ecnoise, estimate_second,
@@ -210,7 +213,7 @@ pub use quickmin::{
     QuickMinOptions, QuickMinState, quickmin_baseline, quickmin_displacement, quickmin_project,
     quickmin_rescale_velocity,
 };
-pub use report::{Report, Status};
+pub use report::{Report, Status, StopReason};
 pub use rigid::{RigidMode, RigidRequest, RigidWorkspace, align_rigid};
 pub use scg::{
     DirectionalCurvature, ScgOptions, ScgParams, ScgStepTolerance, minimize_scg,

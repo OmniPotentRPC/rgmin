@@ -909,7 +909,11 @@ where
             return Err(Error::TrustCollapsed { steps: step });
         }
         if let Some(status) = control.halt(gnorm, grad.len()) {
-            return Ok(one_shot_report(value, pos, step, gnorm, status));
+            return finish_newton_cg(
+                obj,
+                control,
+                one_shot_report(value, pos, step, gnorm, status),
+            );
         }
         // Inexact-Newton forcing keeps early CG cheap and the tail
         // superlinear (Nocedal-Wright eq 7.3). The shared step also
@@ -944,13 +948,111 @@ where
         }
     }
     let gnorm = nrm2(grad.view());
-    Ok(one_shot_report(
-        value,
-        pos,
-        control.maxiter,
-        gnorm,
-        control.finish_status(gnorm, grad.len(), true),
-    ))
+    finish_newton_cg(
+        obj,
+        control,
+        one_shot_report(
+            value,
+            pos,
+            control.maxiter,
+            gnorm,
+            control.finish_status(gnorm, grad.len(), true),
+        ),
+    )
+}
+
+fn finish_newton_cg<O>(obj: &O, control: &Control, report: Report) -> Result<Report>
+where
+    O: HessianVector + ?Sized,
+{
+    if !control.backward_polish {
+        return control.deliver(report);
+    }
+    let prior = report.steps;
+    let coords = report.coords.clone();
+    let polished = polish_hvp_inner(obj, coords, control)?;
+    let steps = prior + polished.steps;
+    control.deliver(polished.with_steps(steps))
+}
+
+/// Backward-error polish from Hessian-vector products.
+///
+/// The products are assembled into a dense Hessian and the step is
+/// the shifted Newton step, which shifts when that Hessian is
+/// indefinite. The acceptance test is
+/// [`crate::newton_decrement_acceptable`].
+pub fn polish_hvp<O>(obj: &O, init: impl Into<Array1<f64>>, control: &Control) -> Result<Report>
+where
+    O: HessianVector + ?Sized,
+{
+    let report = polish_hvp_inner(obj, init.into(), control)?;
+    control.deliver(report)
+}
+
+pub(crate) fn polish_hvp_inner<O>(obj: &O, init: Array1<f64>, control: &Control) -> Result<Report>
+where
+    O: HessianVector + ?Sized,
+{
+    crate::newton::polish_inner(&Assembled(obj), init, control, crate::NewtonKind::Shifted)
+}
+
+/// Dense Hessian assembled one column at a time from [`HessianVector`].
+struct Assembled<'a, O: ?Sized>(&'a O);
+
+impl<O: HessianVector + ?Sized> eindir_core::Objective<f64> for Assembled<'_, O> {
+    fn dim(&self) -> usize {
+        eindir_core::Objective::dim(self.0)
+    }
+
+    fn bounds(&self) -> &eindir_core::Bounds<f64> {
+        self.0.bounds()
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        eindir_core::Objective::eval(self.0, x)
+    }
+}
+
+impl<O: HessianVector + ?Sized> eindir_core::Gradient<f64> for Assembled<'_, O> {
+    fn dim(&self) -> usize {
+        eindir_core::Objective::dim(self.0)
+    }
+
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        eindir_core::Gradient::grad(self.0, x)
+    }
+}
+
+impl<O: HessianVector + ?Sized> DifferentiableObjective<f64> for Assembled<'_, O> {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        self.0.value_and_gradient(x)
+    }
+}
+
+impl<O: HessianVector + ?Sized> crate::HessianObjective for Assembled<'_, O> {
+    fn hessian(&self, x: ArrayView1<f64>) -> Array2<f64> {
+        let n = x.len();
+        let mut hess = Array2::<f64>::zeros((n, n));
+        for column in 0..n {
+            let mut basis = Array1::<f64>::zeros(n);
+            basis[column] = 1.0;
+            let action = self.0.hessian_vector(x, basis.view());
+            if action.len() != n {
+                continue;
+            }
+            for row in 0..n {
+                hess[(row, column)] = action[row];
+            }
+        }
+        for row in 0..n {
+            for column in (row + 1)..n {
+                let average = 0.5 * (hess[(row, column)] + hess[(column, row)]);
+                hess[(row, column)] = average;
+                hess[(column, row)] = average;
+            }
+        }
+        hess
+    }
 }
 
 #[cfg(test)]
