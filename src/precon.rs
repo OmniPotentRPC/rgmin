@@ -1,29 +1,46 @@
 //! Geometry preconditioners for atomistic descent.
 //!
-//! [`Exp`] is the universal exponential metric. [`Lindh`] is the model
-//! Hessian of Lindh et al. 1995. [`Ff`] is the bonded reduced Hessian
-//! of Makri, Ortner, and Kermode 2019. All three are sparse symmetric
-//! positive definite matrices, solved by the same Jacobi-preconditioned
-//! conjugate gradients, and held between rebuilds by [`needs_rebuild`].
-//! [`select_precon`] documents which one applies.
+//! [`Exp`] is the universal exponential metric of Packwood et al. 2016.
+//! [`Lindh`] is the model Hessian of Lindh et al. 1995. [`Ff`] is the
+//! bonded reduced Hessian of Makri, Ortner, and Kermode 2019. All three
+//! are sparse symmetric positive definite matrices, inverted by
+//! preconditioned conjugate gradients and held between rebuilds by
+//! [`needs_rebuild`]. [`select_precon`] documents which one applies.
+//!
+//! Because [`Exp`] has Kronecker form `P = A ⊗ I_3` over an `N × N`
+//! scalar symmetric M-matrix `A`, `A` is stored once in scalar CSR form
+//! and applied simultaneously to the three Cartesian components of each
+//! atom, cutting CSR storage and matrix-vector bandwidth by 3×. Its PCG
+//! inner preconditioner defaults to zero-fill incomplete Cholesky
+//! (Meijerink and van der Vorst 1977) on fixed diagonal atom blocks of
+//! `A`, with `A`-orthogonal Rayleigh-projected warm starts across
+//! consecutive solves and stopping tolerance relative to the force norm
+//! ([`DEFAULT_PRECON_RTOL`]). [`Lindh`] and [`Ff`] precondition PCG with
+//! exact `3 × 3` per-atom symmetric diagonal blocks.
 //!
 //! Pair assembly is a cell list. Occupied bins are visited in
 //! lexicographic order and the pairs are sorted by atom index. A
 //! matrix-vector product writes each row from that row's own sum. Every
-//! dot product in the solve folds fixed chunks of 1024 in chunk order,
-//! starting from `0.0`, in every build and at every length. The `par`
-//! feature only decides whether those chunks run concurrently. Each
-//! kernel has its own atom-count gate, and the gate does not read the
-//! thread count.
+//! dot product in the solve reduces fixed chunks of 1024 along one
+//! deterministic chunk-aligned binary tree with zero heap allocations.
 //!
 //! Packwood, Kermode, Mones, Bernstein, Woolley, Gould, Ortner, and
 //! Csányi, *A universal preconditioner for simulating condensed phase
 //! materials*, J. Chem. Phys. 144, 164109 (2016),
 //! <https://doi.org/10.1063/1.4947024>.
 //!
+//! Makri, Ortner, and Kermode, *A preconditioning scheme for minimum
+//! energy path finding methods*, J. Chem. Phys. 150, 094109 (2019),
+//! <https://doi.org/10.1063/1.5064465>.
+//!
+//! Meijerink and van der Vorst, *An iterative solution method for linear
+//! systems of which the coefficient matrix is a symmetric M-matrix*,
+//! Math. Comp. 31, 148 (1977),
+//! <https://doi.org/10.1090/S0025-5718-1977-0438681-4>.
+//!
 //! The caller supplies positions and a neighbour list (linkcell, vesin,
-//! or any other producer). The matrix is the stabilized form of the
-//! paper's equation (16): neighbour weight
+//! or any other producer). The matrix is the stabilized form of
+//! Packwood et al. equation (16): neighbour weight
 //! `c_ij = exp(-A (r_ij / r_nn - 1))`, off-diagonal blocks `-μ c_ij I_3`
 //! (C order, xyz per atom), and diagonal
 //! `μ (C_stab + sum_j c_ij) I_3`. `r_nn` is the maximum of the per-atom
@@ -31,7 +48,6 @@
 //! quotient of the sine probe (15) against this matrix at `μ = 1`.
 //!
 //! `P` is symmetric positive definite for `μ > 0` and `C_stab > 0`.
-//! The linear solve is Jacobi-preconditioned conjugate gradients.
 
 mod ff;
 mod geom;
@@ -82,11 +98,38 @@ pub enum PreconSpec<'a> {
     },
 }
 
-use std::sync::Arc;
+use std::mem::size_of_val;
+use std::sync::{Arc, Mutex};
 
 use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::error::{Error, Result};
+
+/// Default relative residual tolerance `||r||_2 / ||b||_2` for preconditioner
+/// PCG solves (Packwood et al. 2016; Makri, Ortner, and Kermode 2019).
+pub const DEFAULT_PRECON_RTOL: f64 = 1.0e-8;
+
+/// Relaxed relative residual accepted when PCG reaches its iteration cap.
+const FALLBACK_PRECON_RTOL: f64 = 1.0e-6;
+
+/// Largest `||r_0||_2 / ||b||_2` ratio at which a Rayleigh-projected warm
+/// start is retained over a cold zero start.
+const WARM_START_MAX_RATIO: f64 = 0.95;
+
+/// Sine-probe amplitude in units of `r_nn` (Packwood et al. 2016, Eq. 15).
+const SINE_PROBE_SCALE: f64 = 1.0e-2;
+
+/// Smallest denominator magnitude accepted when estimating `μ` (Eq. 14).
+const MU_DENOM_FLOOR: f64 = 1.0e-30;
+
+/// Smallest `3 × 3` determinant accepted for per-atom block-Jacobi inversion.
+const BLOCK3_DET_FLOOR: f64 = 1.0e-30;
+
+/// Fixed diagonal atom-block size for [`ExpPcKind::BlockIc0`].
+const IC_BLOCK_ATOMS: usize = 256;
+
+#[cfg(test)]
+const TEST_HOLD_R_NN: f64 = 1_000_000_000.0;
 
 /// One undirected neighbour list over atoms, plus bonds to atoms that
 /// are not degrees of freedom.
@@ -109,11 +152,29 @@ pub struct Neighbours {
     pub anchor: Vec<(usize, f64)>,
 }
 
+/// Inner preconditioner used by PCG when inverting [`Exp`].
+///
+/// Because the scalar graph matrix `A` of [`Exp`] (`P = A ⊗ I_3`) has
+/// positive diagonal entries, nonpositive off-diagonal entries
+/// `-μ c_ij`, and strict diagonal dominance `μ C_stab > 0`, `A` is a
+/// symmetric M-matrix and every principal block of `A` admits a
+/// breakdown-free zero-fill incomplete Cholesky factor (Meijerink and
+/// van der Vorst 1977).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ExpPcKind {
+    /// Zero-fill incomplete Cholesky on fixed diagonal atom blocks of `A`.
+    #[default]
+    BlockIc0,
+    /// Diagonal Jacobi scaling on `A`.
+    Jacobi,
+}
+
 /// Parameters of the exponential preconditioner.
 ///
 /// Defaults are the paper's generic choice: `A = 3`, `C_stab = 0.1`,
-/// `μ` and `r_nn` computed from the geometry, and no extra cutoff
-/// beyond the supplied list.
+/// `μ` and `r_nn` computed from the geometry, no extra cutoff beyond
+/// the supplied list, [`DEFAULT_PRECON_RTOL`] relative PCG tolerance,
+/// warm starts enabled, and [`ExpPcKind::BlockIc0`] preconditioning.
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct ExpParams {
@@ -133,6 +194,12 @@ pub struct ExpParams {
     /// `None` uses the span of the supplied positions. A nonpositive
     /// component falls back to that span.
     pub lengths: Option<[f64; 3]>,
+    /// Relative residual tolerance `||r||_2 / ||b||_2` of the PCG solve.
+    pub rtol: f64,
+    /// Reuse the previous PCG solution via Rayleigh projection when helpful.
+    pub warm_start: bool,
+    /// Inner preconditioner for the PCG solve on `P = A ⊗ I_3`.
+    pub pc: ExpPcKind,
 }
 
 with_setters!(ExpParams {
@@ -143,6 +210,9 @@ with_setters!(ExpParams {
     with_r_cut => r_cut: opt f64,
     with_recalc_mu => recalc_mu: val bool,
     with_lengths => lengths: opt [f64; 3],
+    with_rtol => rtol: val f64,
+    with_warm_start => warm_start: val bool,
+    with_pc => pc: val ExpPcKind,
 });
 
 impl Default for ExpParams {
@@ -155,8 +225,38 @@ impl Default for ExpParams {
             r_cut: None,
             recalc_mu: false,
             lengths: None,
+            rtol: DEFAULT_PRECON_RTOL,
+            warm_start: true,
+            pc: ExpPcKind::BlockIc0,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct Ic0Subblock {
+    atoms: usize,
+    row_ptr: Vec<usize>,
+    col_idx: Vec<u16>,
+    val: Vec<f32>,
+    inv_d: Vec<f64>,
+}
+
+#[derive(Clone, Debug)]
+struct BlockIc0 {
+    blocks: Vec<Ic0Subblock>,
+}
+
+/// Scalar `N × N` CSR graph representing `P = A ⊗ I_3` on `3 N` coordinates.
+#[derive(Clone, Debug)]
+struct ScalarCsr {
+    n_atoms: usize,
+    row_ptr: Vec<usize>,
+    col_idx: Vec<u32>,
+    val: Vec<f64>,
+    diag: Vec<f64>,
+    ic0: Option<BlockIc0>,
+    apply_gate: usize,
+    solve_gate: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -166,36 +266,84 @@ struct Csr {
     col_idx: Vec<usize>,
     val: Vec<f64>,
     diag: Vec<f64>,
+    /// Optional per-atom symmetric `3 × 3` inverse `[m00, m01, m02, m11, m12, m22]`.
+    inv_block3: Option<Vec<[f64; 6]>>,
     /// Atom count at which `apply` may use the `par` pool.
     apply_gate: usize,
     /// Atom count at which the solve's products may use the `par` pool.
     solve_gate: usize,
 }
 
+#[derive(Clone, Debug)]
+enum SparseOp {
+    Iso3(ScalarCsr),
+    General(Csr),
+}
+
+#[derive(Default, Debug)]
+struct PcgWork {
+    x: Vec<f64>,
+    r: Vec<f64>,
+    z: Vec<f64>,
+    p: Vec<f64>,
+    ap: Vec<f64>,
+    last_x: Vec<f64>,
+    has_last: bool,
+}
+
 /// Sparse SPD metric. `apply` is `P v`. `solve` is `P x = rhs`.
 #[derive(Clone, Debug)]
 pub(crate) struct Metric {
-    csr: Arc<Csr>,
+    op: Arc<SparseOp>,
+    work: Arc<Mutex<PcgWork>>,
+    rtol: f64,
+    warm_start: bool,
 }
 
 impl Metric {
-    fn from_csr(csr: Csr) -> Self {
-        Self { csr: Arc::new(csr) }
+    fn from_scalar_csr(csr: ScalarCsr, rtol: f64, warm_start: bool) -> Self {
+        Self {
+            op: Arc::new(SparseOp::Iso3(csr)),
+            work: Arc::new(Mutex::new(PcgWork::default())),
+            rtol,
+            warm_start,
+        }
+    }
+
+    fn from_general_csr(csr: Csr, rtol: f64, warm_start: bool) -> Self {
+        Self {
+            op: Arc::new(SparseOp::General(csr)),
+            work: Arc::new(Mutex::new(PcgWork::default())),
+            rtol,
+            warm_start,
+        }
     }
 
     pub(crate) fn dim(&self) -> usize {
-        self.csr.n
+        self.op.dim()
+    }
+
+    pub(crate) fn stored_nonzeros(&self) -> usize {
+        self.op.stored_nonzeros()
+    }
+
+    pub(crate) fn csr_bytes(&self) -> usize {
+        self.op.csr_bytes()
     }
 
     pub(crate) fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {
-        let mut y = vec![0.0; self.csr.n];
-        if v.len() == self.csr.n {
-            matvec(
-                &self.csr,
-                v.as_slice().unwrap_or(&v.to_vec()),
-                &mut y,
-                self.csr.apply_gate,
-            );
+        let n = self.dim();
+        let mut y = vec![0.0; n];
+        if v.len() == n {
+            let owned;
+            let slice = match v.as_slice() {
+                Some(s) => s,
+                None => {
+                    owned = v.to_vec();
+                    &owned
+                }
+            };
+            self.op.matvec(slice, &mut y);
         }
         Array1::from_vec(y)
     }
@@ -205,39 +353,106 @@ impl Metric {
     }
 
     pub(crate) fn solve_counted(&self, rhs: ArrayView1<f64>) -> Option<(Array1<f64>, usize)> {
-        if rhs.len() != self.csr.n {
+        if rhs.len() != self.dim() {
             return None;
         }
-        let rhs_vec = rhs
-            .as_slice()
-            .map(<[f64]>::to_vec)
-            .unwrap_or_else(|| rhs.to_vec());
-        solve_pcg(&self.csr, &rhs_vec).map(|(x, iters)| (Array1::from_vec(x), iters))
+        let owned;
+        let rhs_slice = match rhs.as_slice() {
+            Some(s) => s,
+            None => {
+                owned = rhs.to_vec();
+                &owned
+            }
+        };
+        let res = match self.work.try_lock() {
+            Ok(mut guard) => solve_pcg_op(
+                &self.op,
+                rhs_slice,
+                self.rtol,
+                self.warm_start,
+                self.warm_start,
+                &mut guard,
+            ),
+            Err(_) => {
+                let mut local = PcgWork::default();
+                solve_pcg_op(&self.op, rhs_slice, self.rtol, false, false, &mut local)
+            }
+        };
+        res.map(|(x, iters)| (Array1::from_vec(x), iters))
+    }
+
+    pub(crate) fn solve_iterations(&self, rhs: ArrayView1<f64>) -> Option<usize> {
+        if rhs.len() != self.dim() {
+            return None;
+        }
+        let owned;
+        let rhs_slice = match rhs.as_slice() {
+            Some(s) => s,
+            None => {
+                owned = rhs.to_vec();
+                &owned
+            }
+        };
+        let mut local = PcgWork::default();
+        solve_pcg_op(&self.op, rhs_slice, self.rtol, false, false, &mut local).map(|(_, n)| n)
     }
 
     pub(crate) fn to_dense(&self) -> Array2<f64> {
-        let n = self.csr.n;
-        let mut a = Array2::zeros((n, n));
-        for i in 0..n {
-            for k in self.csr.row_ptr[i]..self.csr.row_ptr[i + 1] {
-                a[(i, self.csr.col_idx[k])] = self.csr.val[k];
-            }
-        }
-        a
+        self.op.to_dense()
     }
 
     /// `μ P`. Lindh and FF assemble the model at scale 1 and apply the
     /// estimated energy scale here, the same place Exp folds `μ` into
     /// the matrix.
     pub(crate) fn scaled(&self, mu: f64) -> Self {
-        let mut csr = (*self.csr).clone();
-        for v in &mut csr.val {
-            *v *= mu;
+        let op = match &*self.op {
+            SparseOp::Iso3(csr) => {
+                let mut next = csr.clone();
+                for v in &mut next.val {
+                    *v *= mu;
+                }
+                for d in &mut next.diag {
+                    *d *= mu;
+                }
+                if let Some(ic0) = &mut next.ic0 {
+                    let root = mu.sqrt();
+                    let root_f32 = root as f32;
+                    for block in &mut ic0.blocks {
+                        for lv in &mut block.val {
+                            *lv *= root_f32;
+                        }
+                        for inv in &mut block.inv_d {
+                            *inv /= root;
+                        }
+                    }
+                }
+                SparseOp::Iso3(next)
+            }
+            SparseOp::General(csr) => {
+                let mut next = csr.clone();
+                for v in &mut next.val {
+                    *v *= mu;
+                }
+                for d in &mut next.diag {
+                    *d *= mu;
+                }
+                if let Some(blocks) = &mut next.inv_block3 {
+                    let inv_mu = 1.0 / mu;
+                    for b in blocks {
+                        for entry in b {
+                            *entry *= inv_mu;
+                        }
+                    }
+                }
+                SparseOp::General(next)
+            }
+        };
+        Self {
+            op: Arc::new(op),
+            work: Arc::new(Mutex::new(PcgWork::default())),
+            rtol: self.rtol,
+            warm_start: self.warm_start,
         }
-        for d in &mut csr.diag {
-            *d *= mu;
-        }
-        Self::from_csr(csr)
     }
 }
 
@@ -295,13 +510,32 @@ impl Exp {
                 what: "A is not finite",
             });
         }
+        if !(params.rtol.is_finite() && params.rtol > 0.0) {
+            return Err(Error::Precon {
+                what: "rtol is not positive",
+            });
+        }
         let natoms = atom_count(positions)?;
+        if u32::try_from(natoms).is_err() {
+            return Err(Error::Precon {
+                what: "atom count exceeds u32 index range",
+            });
+        }
         let (pairs, anchors) = bonds(natoms, positions, neighbours, params.r_cut)?;
-        let csr = build_csr(natoms, &pairs, &anchors, mu, params.a, r_nn, params.c_stab);
+        let csr = build_scalar_csr(
+            natoms,
+            &pairs,
+            &anchors,
+            mu,
+            params.a,
+            r_nn,
+            params.c_stab,
+            params.pc,
+        );
         Ok(Self {
             mu,
             r_nn,
-            metric: Metric::from_csr(csr),
+            metric: Metric::from_scalar_csr(csr, params.rtol, params.warm_start),
         })
     }
 
@@ -324,16 +558,21 @@ impl Exp {
         }
         Self {
             mu: 1.0,
-            r_nn: 1.0e9,
-            metric: Metric::from_csr(Csr {
-                n,
-                row_ptr,
-                col_idx,
-                val,
-                diag: diag.to_vec(),
-                apply_gate: N_PAR_EXP_APPLY,
-                solve_gate: N_PAR_EXP_SOLVE,
-            }),
+            r_nn: TEST_HOLD_R_NN,
+            metric: Metric::from_general_csr(
+                Csr {
+                    n,
+                    row_ptr,
+                    col_idx,
+                    val,
+                    diag: diag.to_vec(),
+                    inv_block3: None,
+                    apply_gate: N_PAR_EXP_APPLY,
+                    solve_gate: N_PAR_EXP_SOLVE,
+                },
+                DEFAULT_PRECON_RTOL,
+                true,
+            ),
         }
     }
 
@@ -355,6 +594,18 @@ impl Exp {
         self.metric.dim()
     }
 
+    /// Number of stored scalar-graph CSR entries (`2 * n_bonds + N`).
+    #[must_use]
+    pub fn stored_nonzeros(&self) -> usize {
+        self.metric.stored_nonzeros()
+    }
+
+    /// Heap bytes occupied by the scalar-graph CSR arrays.
+    #[must_use]
+    pub fn csr_bytes(&self) -> usize {
+        self.metric.csr_bytes()
+    }
+
     /// `P v`.
     #[must_use]
     pub fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {
@@ -369,11 +620,17 @@ impl Exp {
         self.metric.solve(rhs)
     }
 
-    /// Jacobi PCG iterations for one solve. The count is the number of
-    /// matrix-vector products.
+    /// Solve `P x = rhs`, returning both the solution and the number of
+    /// Krylov iterations taken (reflecting any cached warm start).
+    #[must_use]
+    pub fn solve_counted(&self, rhs: ArrayView1<f64>) -> Option<(Array1<f64>, usize)> {
+        self.metric.solve_counted(rhs)
+    }
+
+    /// Cold-start PCG iterations for one solve. Does not mutate the warm-start cache.
     #[must_use]
     pub fn solve_iterations(&self, rhs: ArrayView1<f64>) -> Option<usize> {
-        self.metric.solve_counted(rhs).map(|(_, n)| n)
+        self.metric.solve_iterations(rhs)
     }
 
     /// Dense copy, for tests and for a dense Cholesky reference.
@@ -439,6 +696,11 @@ impl ExpState {
                 what: "A or c_stab is not usable",
             });
         }
+        if !(params.rtol.is_finite() && params.rtol > 0.0) {
+            return Err(Error::Precon {
+                what: "rtol is not positive",
+            });
+        }
         if let Some(mu) = params.mu
             && !(mu.is_finite() && mu > 0.0)
         {
@@ -446,8 +708,10 @@ impl ExpState {
                 what: "mu is not positive",
             });
         }
-        let r_nn_pending = params.r_nn.is_none();
-        let r_nn = params.r_nn.unwrap_or(1.0);
+        let (r_nn, r_nn_pending) = match params.r_nn {
+            Some(r) => (r, false),
+            None => (1.0, true),
+        };
         if !(r_nn.is_finite() && r_nn > 0.0) {
             return Err(Error::Precon {
                 what: "r_nn is not positive",
@@ -514,7 +778,7 @@ impl ExpState {
                 }
             }
         }
-        let mu = self.mu.unwrap_or(1.0);
+        let mu = *self.mu.get_or_insert(1.0);
         self.matrix = Some(Exp::assemble(
             positions,
             &self.neighbours,
@@ -544,12 +808,12 @@ impl ExpState {
             neighbours: Neighbours::default(),
             params: ExpParams {
                 mu: Some(1.0),
-                r_nn: Some(1.0e9),
+                r_nn: Some(TEST_HOLD_R_NN),
                 recalc_mu: false,
                 ..ExpParams::default()
             },
             mu: Some(1.0),
-            r_nn: 1.0e9,
+            r_nn: TEST_HOLD_R_NN,
             matrix: Some(Exp::diagonal(diag)),
             r_nn_pending: false,
             built_at: Some(positions.to_owned()),
@@ -659,7 +923,10 @@ pub fn nearest_neighbour_distance(
         let r = if cartesian {
             cartesian_distance(positions, i, j)
         } else {
-            neighbours.r.get(k).copied().unwrap_or(f64::NAN)
+            match neighbours.r.get(k) {
+                Some(&val) => val,
+                None => f64::NAN,
+            }
         };
         if r.is_finite() && r > 0.0 {
             min_d[i] = min_d[i].min(r);
@@ -695,13 +962,16 @@ pub fn sine_probe(positions: ArrayView1<f64>, r_nn: f64, lengths: Option<[f64; 3
         return v;
     }
     let span = position_span(positions);
-    let mut len = lengths.unwrap_or(span);
+    let mut len = match lengths {
+        Some(l) => l,
+        None => span,
+    };
     for a in 0..3 {
         if !(len[a].is_finite() && len[a] > 0.0) {
             len[a] = span[a];
         }
     }
-    let scale = 1e-2 * r_nn;
+    let scale = SINE_PROBE_SCALE * r_nn;
     let natoms = n / 3;
     for i in 0..natoms {
         for a in 0..3 {
@@ -769,7 +1039,7 @@ where
     }
     let pv = p1.apply(v.view());
     let den = v.dot(&pv);
-    if !(den.is_finite() && den.abs() > 1e-30 && num.is_finite()) {
+    if !(den.is_finite() && den.abs() > MU_DENOM_FLOOR && num.is_finite()) {
         return Err(Error::Precon {
             what: "mu estimate denominator vanished",
         });
@@ -817,7 +1087,7 @@ where
         num += (g1[i] - grad_here[i]) * v[i];
     }
     let den = v.dot(&metric.apply(v.view()));
-    if !(den.is_finite() && den.abs() > 1e-30 && num.is_finite()) {
+    if !(den.is_finite() && den.abs() > MU_DENOM_FLOOR && num.is_finite()) {
         return Err(Error::Precon {
             what: "mu estimate denominator vanished",
         });
@@ -844,7 +1114,10 @@ fn resolve_r_nn(
         }
         return Ok(r);
     }
-    Ok(nearest_neighbour_distance(positions, neighbours).unwrap_or(1.0))
+    if let Some(r) = nearest_neighbour_distance(positions, neighbours) {
+        return Ok(r);
+    }
+    Ok(1.0)
 }
 
 fn atom_count(positions: ArrayView1<f64>) -> Result<usize> {
@@ -899,8 +1172,10 @@ fn bonds(
         });
     }
     let cartesian = neighbours.r.is_empty();
-    let mut seen = std::collections::HashSet::new();
-    let mut pairs = Vec::new();
+    let mut raw: Vec<(usize, usize, usize)> = Vec::with_capacity(neighbours.i.len());
+    let mut strictly_sorted = true;
+    let mut prev = (0usize, 0usize);
+    let mut have_prev = false;
     for k in 0..neighbours.i.len() {
         let i = neighbours.i[k];
         let j = neighbours.j[k];
@@ -913,9 +1188,19 @@ fn bonds(
             continue;
         }
         let (a, b) = if i < j { (i, j) } else { (j, i) };
-        if !seen.insert((a, b)) {
-            continue;
+        if have_prev && (a, b) <= prev {
+            strictly_sorted = false;
         }
+        prev = (a, b);
+        have_prev = true;
+        raw.push((a, b, k));
+    }
+    if !strictly_sorted {
+        raw.sort_unstable();
+        raw.dedup_by(|x, y| x.0 == y.0 && x.1 == y.1);
+    }
+    let mut pairs = Vec::with_capacity(raw.len());
+    for (a, b, k) in raw {
         let r = if cartesian {
             cartesian_distance(positions, a, b)
         } else {
@@ -951,7 +1236,9 @@ fn weight(mu: f64, a: f64, r: f64, r_nn: f64) -> f64 {
     mu * crate::portable::exp(-a * (r / r_nn - 1.0))
 }
 
-fn build_csr(
+/// Assemble the scalar `N × N` graph CSR `A` (`P = A ⊗ I_3`) directly from
+/// lexicographically sorted unique pairs `(i < j)`.
+fn build_scalar_csr(
     natoms: usize,
     pairs: &[(usize, usize, f64)],
     anchors: &[(usize, f64)],
@@ -959,75 +1246,200 @@ fn build_csr(
     a: f64,
     r_nn: f64,
     c_stab: f64,
-) -> Csr {
-    let n = 3 * natoms;
-    let mut diag = vec![mu * c_stab; n];
-    let mut trips: Vec<(usize, usize, f64)> = Vec::with_capacity(pairs.len() * 6 + n);
+    pc: ExpPcKind,
+) -> ScalarCsr {
+    let mut diag = vec![mu * c_stab; natoms];
+    let mut lower_deg = vec![0usize; natoms];
+    let mut upper_deg = vec![0usize; natoms];
+    let mut weights = Vec::with_capacity(pairs.len());
     for &(i, j, r) in pairs {
         let c = weight(mu, a, r, r_nn);
-        for d in 0..3 {
-            let ii = 3 * i + d;
-            let jj = 3 * j + d;
-            diag[ii] += c;
-            diag[jj] += c;
-            trips.push((ii, jj, -c));
-            trips.push((jj, ii, -c));
-        }
+        diag[i] += c;
+        diag[j] += c;
+        upper_deg[i] += 1;
+        lower_deg[j] += 1;
+        weights.push(c);
     }
     for &(atom, r) in anchors {
-        let c = weight(mu, a, r, r_nn);
-        for d in 0..3 {
-            diag[3 * atom + d] += c;
-        }
+        diag[atom] += weight(mu, a, r, r_nn);
     }
-    for i in 0..n {
-        trips.push((i, i, diag[i]));
-    }
-    csr_from_coo(n, trips, N_PAR_EXP_APPLY, N_PAR_EXP_SOLVE)
-}
-
-fn csr_from_coo(
-    n: usize,
-    mut trips: Vec<(usize, usize, f64)>,
-    apply_gate: usize,
-    solve_gate: usize,
-) -> Csr {
-    trips.sort_unstable_by_key(|p| (p.0, p.1));
-    let mut row_ptr = Vec::with_capacity(n + 1);
-    let mut col_idx = Vec::with_capacity(trips.len());
-    let mut val = Vec::with_capacity(trips.len());
-    let mut diag = vec![0.0; n];
+    let nnz = 2 * pairs.len() + natoms;
+    let mut row_ptr = Vec::with_capacity(natoms + 1);
     row_ptr.push(0);
-    let mut cursor = 0;
-    while cursor < trips.len() {
-        let row = trips[cursor].0;
-        while row_ptr.len() <= row {
-            row_ptr.push(col_idx.len());
-        }
-        let col = trips[cursor].1;
-        let mut acc = 0.0;
-        while cursor < trips.len() && trips[cursor].0 == row && trips[cursor].1 == col {
-            acc += trips[cursor].2;
-            cursor += 1;
-        }
-        col_idx.push(col);
-        val.push(acc);
-        if row == col {
-            diag[row] = acc;
-        }
+    for i in 0..natoms {
+        let deg = lower_deg[i] + 1 + upper_deg[i];
+        row_ptr.push(row_ptr[i] + deg);
     }
-    while row_ptr.len() <= n {
-        row_ptr.push(col_idx.len());
+    let mut col_idx = vec![0u32; nnz];
+    let mut val = vec![0.0; nnz];
+    let mut lower_cur = vec![0usize; natoms];
+    let mut upper_cur = vec![0usize; natoms];
+    let mut diag_pos = vec![0usize; natoms];
+    for i in 0..natoms {
+        lower_cur[i] = row_ptr[i];
+        let dp = row_ptr[i] + lower_deg[i];
+        diag_pos[i] = dp;
+        col_idx[dp] = i as u32;
+        val[dp] = diag[i];
+        upper_cur[i] = dp + 1;
     }
-    Csr {
-        n,
+    for (&(i, j, _), &c) in pairs.iter().zip(weights.iter()) {
+        let up = upper_cur[i];
+        col_idx[up] = j as u32;
+        val[up] = -c;
+        upper_cur[i] = up + 1;
+
+        let lo = lower_cur[j];
+        col_idx[lo] = i as u32;
+        val[lo] = -c;
+        lower_cur[j] = lo + 1;
+    }
+    let ic0 = match pc {
+        ExpPcKind::BlockIc0 => build_block_ic0(natoms, &row_ptr, &diag_pos, &col_idx, &val, &diag),
+        ExpPcKind::Jacobi => None,
+    };
+    ScalarCsr {
+        n_atoms: natoms,
         row_ptr,
         col_idx,
         val,
         diag,
-        apply_gate,
-        solve_gate,
+        ic0,
+        apply_gate: N_PAR_EXP_APPLY,
+        solve_gate: N_PAR_EXP_SOLVE,
     }
+}
+
+fn factor_ic0_subblock(
+    b_start: usize,
+    b_end: usize,
+    row_ptr: &[usize],
+    diag_pos: &[usize],
+    col_idx: &[u32],
+    val: &[f64],
+    diag: &[f64],
+) -> Option<Ic0Subblock> {
+    let m = b_end - b_start;
+    if u16::try_from(m).is_err() {
+        return None;
+    }
+    let mut l_row_ptr = Vec::with_capacity(m + 1);
+    l_row_ptr.push(0);
+    let mut cap = 0usize;
+    for i in b_start..b_end {
+        for &c in &col_idx[row_ptr[i]..diag_pos[i]] {
+            if (c as usize) >= b_start {
+                cap += 1;
+            }
+        }
+    }
+    let mut l_col: Vec<u16> = Vec::with_capacity(cap);
+    let mut l_val: Vec<f32> = Vec::with_capacity(cap);
+    let mut inv_d = vec![0.0_f64; m];
+    let mut work = vec![0.0_f64; m];
+
+    for li in 0..m {
+        let i = b_start + li;
+        let row_start = l_col.len();
+        for k in row_ptr[i]..diag_pos[i] {
+            let j = col_idx[k] as usize;
+            if j >= b_start {
+                let lj = j - b_start;
+                work[lj] = val[k];
+                l_col.push(lj as u16);
+                l_val.push(0.0);
+            }
+        }
+        let row_end = l_col.len();
+        l_row_ptr.push(row_end);
+
+        for pos in row_start..row_end {
+            let lj = usize::from(l_col[pos]);
+            let mut dot_lj = 0.0_f64;
+            for p in l_row_ptr[lj]..l_row_ptr[lj + 1] {
+                let lk = usize::from(l_col[p]);
+                dot_lj += work[lk] * f64::from(l_val[p]);
+            }
+            let lij = (work[lj] - dot_lj) * inv_d[lj];
+            if !lij.is_finite() {
+                return None;
+            }
+            let lij_f32 = lij as f32;
+            l_val[pos] = lij_f32;
+            work[lj] = f64::from(lij_f32);
+        }
+
+        let mut diag_sq = diag[i];
+        for pos in row_start..row_end {
+            let lj = usize::from(l_col[pos]);
+            let w = work[lj];
+            diag_sq -= w * w;
+            work[lj] = 0.0;
+        }
+        if !(diag_sq.is_finite() && diag_sq > 0.0) {
+            return None;
+        }
+        inv_d[li] = 1.0 / diag_sq.sqrt();
+    }
+
+    Some(Ic0Subblock {
+        atoms: m,
+        row_ptr: l_row_ptr,
+        col_idx: l_col,
+        val: l_val,
+        inv_d,
+    })
+}
+
+fn build_block_ic0(
+    natoms: usize,
+    row_ptr: &[usize],
+    diag_pos: &[usize],
+    col_idx: &[u32],
+    val: &[f64],
+    diag: &[f64],
+) -> Option<BlockIc0> {
+    let nblocks = natoms.div_ceil(IC_BLOCK_ATOMS);
+    let mut blocks = Vec::with_capacity(nblocks);
+    for b in 0..nblocks {
+        let b_start = b * IC_BLOCK_ATOMS;
+        let b_end = (b_start + IC_BLOCK_ATOMS).min(natoms);
+        blocks.push(factor_ic0_subblock(
+            b_start, b_end, row_ptr, diag_pos, col_idx, val, diag,
+        )?);
+    }
+    Some(BlockIc0 { blocks })
+}
+
+#[inline]
+fn invert_spd3(d00: f64, d01: f64, d02: f64, d11: f64, d12: f64, d22: f64) -> Option<[f64; 6]> {
+    if !(d00.is_finite() && d00 > 0.0) {
+        return None;
+    }
+    let minor2 = d00 * d11 - d01 * d01;
+    if !(minor2.is_finite() && minor2 > 0.0) {
+        return None;
+    }
+    let c00 = d11 * d22 - d12 * d12;
+    let c01 = d02 * d12 - d01 * d22;
+    let c02 = d01 * d12 - d02 * d11;
+    let c11 = d00 * d22 - d02 * d02;
+    let c12 = d01 * d02 - d00 * d12;
+    let c22 = minor2;
+    let det = d00 * c00 + d01 * c01 + d02 * c02;
+    if !(det.is_finite() && det > BLOCK3_DET_FLOOR) {
+        return None;
+    }
+    let inv = 1.0 / det;
+    let out = [
+        c00 * inv,
+        c01 * inv,
+        c02 * inv,
+        c11 * inv,
+        c12 * inv,
+        c22 * inv,
+    ];
+    out.iter().all(|v| v.is_finite()).then_some(out)
 }
 
 /// Record which free atoms share a 3×3 block, then scatter into that
@@ -1126,12 +1538,40 @@ impl BlockAccum {
                 diag[i] = self.val[s + k];
             }
         }
+        let mut inv_blocks = Vec::with_capacity(self.n_atoms);
+        let mut all_spd = true;
+        for atom in 0..self.n_atoms {
+            if let Ok(p) = self.partners[atom].binary_search(&atom) {
+                let r0 = self.row_ptr[3 * atom] + 3 * p;
+                let r1 = self.row_ptr[3 * atom + 1] + 3 * p;
+                let r2 = self.row_ptr[3 * atom + 2] + 3 * p;
+                match invert_spd3(
+                    self.val[r0],
+                    self.val[r0 + 1],
+                    self.val[r0 + 2],
+                    self.val[r1 + 1],
+                    self.val[r1 + 2],
+                    self.val[r2 + 2],
+                ) {
+                    Some(inv) => inv_blocks.push(inv),
+                    None => {
+                        all_spd = false;
+                        break;
+                    }
+                }
+            } else {
+                all_spd = false;
+                break;
+            }
+        }
+        let inv_block3 = all_spd.then_some(inv_blocks);
         Csr {
             n,
             row_ptr: self.row_ptr,
             col_idx: self.col_idx,
             val: self.val,
             diag,
+            inv_block3,
             apply_gate,
             solve_gate,
         }
@@ -1225,6 +1665,126 @@ where
     (0..n).map(f).collect()
 }
 
+#[inline]
+fn scalar_row_apply(a: &ScalarCsr, x_atoms: &[[f64; 3]], atom: usize) -> [f64; 3] {
+    let start = a.row_ptr[atom];
+    let end = a.row_ptr[atom + 1];
+    let cols = &a.col_idx[start..end];
+    let vals = &a.val[start..end];
+    let mut s0 = 0.0;
+    let mut s1 = 0.0;
+    let mut s2 = 0.0;
+    for (&col_u32, &v) in cols.iter().zip(vals.iter()) {
+        if let Some(xj) = x_atoms.get(col_u32 as usize) {
+            s0 += v * xj[0];
+            s1 += v * xj[1];
+            s2 += v * xj[2];
+        }
+    }
+    [s0, s1, s2]
+}
+
+fn matvec_scalar(a: &ScalarCsr, x: &[f64], y: &mut [f64], gate: usize) {
+    let (x_atoms, _) = x.as_chunks::<3>();
+    let (y_atoms, _) = y.as_chunks_mut::<3>();
+    let parallel = gate < usize::MAX && a.n_atoms >= gate && a.n_atoms >= 2;
+    #[cfg(not(feature = "par"))]
+    let _ = parallel;
+    #[cfg(feature = "par")]
+    {
+        use rayon::prelude::*;
+        if parallel
+            && rayon::current_thread_index().is_some()
+            && rayon::current_num_threads() > 1
+        {
+            y_atoms.par_iter_mut().enumerate().for_each(|(atom, out)| {
+                *out = scalar_row_apply(a, x_atoms, atom);
+            });
+            return;
+        }
+    }
+    for (atom, out) in y_atoms.iter_mut().enumerate() {
+        *out = scalar_row_apply(a, x_atoms, atom);
+    }
+}
+
+fn apply_ic0_subblock(sub: &Ic0Subblock, r_sub: &[f64], z_sub: &mut [f64]) {
+    let m = sub.atoms;
+    for li in 0..m {
+        let r_off = 3 * li;
+        let mut acc0 = r_sub[r_off];
+        let mut acc1 = r_sub[r_off + 1];
+        let mut acc2 = r_sub[r_off + 2];
+        for p in sub.row_ptr[li]..sub.row_ptr[li + 1] {
+            let lj_off = 3 * usize::from(sub.col_idx[p]);
+            let lv = f64::from(sub.val[p]);
+            acc0 -= lv * z_sub[lj_off];
+            acc1 -= lv * z_sub[lj_off + 1];
+            acc2 -= lv * z_sub[lj_off + 2];
+        }
+        let inv = sub.inv_d[li];
+        z_sub[r_off] = acc0 * inv;
+        z_sub[r_off + 1] = acc1 * inv;
+        z_sub[r_off + 2] = acc2 * inv;
+    }
+    for li in (0..m).rev() {
+        let z_off = 3 * li;
+        let inv = sub.inv_d[li];
+        let zi0 = z_sub[z_off] * inv;
+        let zi1 = z_sub[z_off + 1] * inv;
+        let zi2 = z_sub[z_off + 2] * inv;
+        z_sub[z_off] = zi0;
+        z_sub[z_off + 1] = zi1;
+        z_sub[z_off + 2] = zi2;
+        for p in sub.row_ptr[li]..sub.row_ptr[li + 1] {
+            let lj_off = 3 * usize::from(sub.col_idx[p]);
+            let lv = f64::from(sub.val[p]);
+            z_sub[lj_off] -= lv * zi0;
+            z_sub[lj_off + 1] -= lv * zi1;
+            z_sub[lj_off + 2] -= lv * zi2;
+        }
+    }
+}
+
+fn precond_scalar(a: &ScalarCsr, r: &[f64], z: &mut [f64], gate: usize) {
+    if let Some(ic0) = &a.ic0 {
+        let block_coords = 3 * IC_BLOCK_ATOMS;
+        let parallel = gate < usize::MAX && a.n_atoms >= gate && ic0.blocks.len() >= 2;
+        #[cfg(not(feature = "par"))]
+        let _ = parallel;
+        #[cfg(feature = "par")]
+        {
+            use rayon::prelude::*;
+            if parallel
+                && rayon::current_thread_index().is_some()
+                && rayon::current_num_threads() > 1
+            {
+                z.par_chunks_mut(block_coords)
+                    .zip(r.par_chunks(block_coords))
+                    .zip(ic0.blocks.par_iter())
+                    .for_each(|((z_sub, r_sub), sub)| {
+                        apply_ic0_subblock(sub, r_sub, z_sub);
+                    });
+                return;
+            }
+        }
+        for ((z_sub, r_sub), sub) in z
+            .chunks_mut(block_coords)
+            .zip(r.chunks(block_coords))
+            .zip(ic0.blocks.iter())
+        {
+            apply_ic0_subblock(sub, r_sub, z_sub);
+        }
+        return;
+    }
+    let (z_atoms, _) = z.as_chunks_mut::<3>();
+    let (r_atoms, _) = r.as_chunks::<3>();
+    for (atom, (z_atom, r_atom)) in z_atoms.iter_mut().zip(r_atoms.iter()).enumerate() {
+        let inv = 1.0 / a.diag[atom];
+        *z_atom = [r_atom[0] * inv, r_atom[1] * inv, r_atom[2] * inv];
+    }
+}
+
 fn row_dot(a: &Csr, x: &[f64], i: usize) -> f64 {
     let mut s = 0.0;
     for k in a.row_ptr[i]..a.row_ptr[i + 1] {
@@ -1243,7 +1803,10 @@ fn matvec(a: &Csr, x: &[f64], y: &mut [f64], gate: usize) {
         // Each row is an independent product. Writing `y[i]` from that
         // row does not reorder any sum, so the vector matches the
         // serial loop at every thread count.
-        if parallel {
+        if parallel
+            && rayon::current_thread_index().is_some()
+            && rayon::current_num_threads() > 1
+        {
             y.par_iter_mut().enumerate().for_each(|(i, yi)| {
                 *yi = row_dot(a, x, i);
             });
@@ -1252,6 +1815,121 @@ fn matvec(a: &Csr, x: &[f64], y: &mut [f64], gate: usize) {
     }
     for i in 0..a.n {
         y[i] = row_dot(a, x, i);
+    }
+}
+
+fn precond_general(a: &Csr, r: &[f64], z: &mut [f64]) {
+    if let Some(blocks) = &a.inv_block3 {
+        let (z_atoms, _) = z.as_chunks_mut::<3>();
+        let (r_atoms, _) = r.as_chunks::<3>();
+        for ((z_atom, r_atom), inv) in z_atoms.iter_mut().zip(r_atoms.iter()).zip(blocks.iter()) {
+            let [r0, r1, r2] = *r_atom;
+            *z_atom = [
+                inv[0] * r0 + inv[1] * r1 + inv[2] * r2,
+                inv[1] * r0 + inv[3] * r1 + inv[4] * r2,
+                inv[2] * r0 + inv[4] * r1 + inv[5] * r2,
+            ];
+        }
+        return;
+    }
+    for i in 0..a.n {
+        z[i] = r[i] / a.diag[i];
+    }
+}
+
+impl SparseOp {
+    fn dim(&self) -> usize {
+        match self {
+            Self::Iso3(s) => 3 * s.n_atoms,
+            Self::General(g) => g.n,
+        }
+    }
+
+    fn solve_gate(&self) -> usize {
+        match self {
+            Self::Iso3(s) => s.solve_gate,
+            Self::General(g) => g.solve_gate,
+        }
+    }
+
+    fn stored_nonzeros(&self) -> usize {
+        match self {
+            Self::Iso3(s) => s.val.len(),
+            Self::General(g) => g.val.len(),
+        }
+    }
+
+    fn csr_bytes(&self) -> usize {
+        match self {
+            Self::Iso3(s) => {
+                size_of_val(s.row_ptr.as_slice())
+                    + size_of_val(s.col_idx.as_slice())
+                    + size_of_val(s.val.as_slice())
+                    + size_of_val(s.diag.as_slice())
+            }
+            Self::General(g) => {
+                size_of_val(g.row_ptr.as_slice())
+                    + size_of_val(g.col_idx.as_slice())
+                    + size_of_val(g.val.as_slice())
+                    + size_of_val(g.diag.as_slice())
+            }
+        }
+    }
+
+    fn valid_diag(&self) -> bool {
+        match self {
+            Self::Iso3(s) => s.diag.iter().all(|d| d.is_finite() && *d > 0.0),
+            Self::General(g) => g.diag.iter().all(|d| d.is_finite() && *d > 0.0),
+        }
+    }
+
+    fn matvec(&self, x: &[f64], y: &mut [f64]) {
+        match self {
+            Self::Iso3(s) => matvec_scalar(s, x, y, s.apply_gate),
+            Self::General(g) => matvec(g, x, y, g.apply_gate),
+        }
+    }
+
+    fn matvec_for_solve(&self, x: &[f64], y: &mut [f64]) {
+        match self {
+            Self::Iso3(s) => matvec_scalar(s, x, y, s.solve_gate),
+            Self::General(g) => matvec(g, x, y, g.solve_gate),
+        }
+    }
+
+    fn precond(&self, r: &[f64], z: &mut [f64]) {
+        match self {
+            Self::Iso3(s) => precond_scalar(s, r, z, s.solve_gate),
+            Self::General(g) => precond_general(g, r, z),
+        }
+    }
+
+    fn to_dense(&self) -> Array2<f64> {
+        match self {
+            Self::Iso3(s) => {
+                let n = 3 * s.n_atoms;
+                let mut a = Array2::zeros((n, n));
+                for i in 0..s.n_atoms {
+                    for k in s.row_ptr[i]..s.row_ptr[i + 1] {
+                        let j = s.col_idx[k] as usize;
+                        let v = s.val[k];
+                        for d in 0..3 {
+                            a[(3 * i + d, 3 * j + d)] = v;
+                        }
+                    }
+                }
+                a
+            }
+            Self::General(g) => {
+                let mut a = Array2::zeros((g.n, g.n));
+                for i in 0..g.n {
+                    for k in g.row_ptr[i]..g.row_ptr[i + 1] {
+                        a[(i, g.col_idx[k])] = g.val[k];
+                    }
+                }
+                a
+            }
+        }
     }
 }
 
@@ -1349,40 +2027,106 @@ fn nrm2(a: &[f64], gate: usize) -> f64 {
     dot_gated(a, a, gate).sqrt()
 }
 
-fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
-    let n = a.n;
-    let gate = a.solve_gate;
+fn record_warm(work: &mut PcgWork, record_last: bool) {
+    if record_last {
+        if work.last_x.len() != work.x.len() {
+            work.last_x.resize(work.x.len(), 0.0);
+        }
+        work.last_x.copy_from_slice(&work.x);
+        work.has_last = true;
+    }
+}
+
+fn solve_pcg_op(
+    op: &SparseOp,
+    b: &[f64],
+    rtol: f64,
+    use_warm: bool,
+    record_last: bool,
+    work: &mut PcgWork,
+) -> Option<(Vec<f64>, usize)> {
+    let n = op.dim();
+    let gate = op.solve_gate();
     if b.len() != n {
         return None;
     }
     let bnorm = nrm2(b, gate);
     if bnorm == 0.0 {
+        if record_last {
+            work.has_last = false;
+        }
         return Some((vec![0.0; n], 0));
     }
-    if a.diag.iter().any(|d| !(d.is_finite() && *d > 0.0)) {
+    if !op.valid_diag() {
         return None;
     }
-    let mut x = vec![0.0; n];
-    let mut r = b.to_vec();
-    let mut z = vec![0.0; n];
-    let mut p = vec![0.0; n];
-    let mut ap = vec![0.0; n];
-    jacobi(a, &r, &mut z);
-    p.copy_from_slice(&z);
-    let mut rz = dot_gated(&r, &z, gate);
+
+    work.x.resize(n, 0.0);
+    work.r.resize(n, 0.0);
+    work.z.resize(n, 0.0);
+    work.p.resize(n, 0.0);
+    work.ap.resize(n, 0.0);
+
+    let eff_rtol = if rtol.is_finite() && rtol > 0.0 {
+        rtol
+    } else {
+        DEFAULT_PRECON_RTOL
+    };
+    let tol = eff_rtol * bnorm;
+
+    let mut rnorm = bnorm;
+    let mut warmed = false;
+    if use_warm && work.has_last && work.last_x.len() == n {
+        op.matvec_for_solve(&work.last_x, &mut work.ap);
+        let u_au = dot_gated(&work.last_x, &work.ap, gate);
+        let b_u = dot_gated(b, &work.last_x, gate);
+        if u_au.is_finite() && u_au > 0.0 && b_u.is_finite() {
+            let gamma = b_u / u_au;
+            if gamma.is_finite() {
+                for i in 0..n {
+                    work.x[i] = gamma * work.last_x[i];
+                    work.r[i] = b[i] - gamma * work.ap[i];
+                }
+                let rnorm0 = nrm2(&work.r, gate);
+                if rnorm0.is_finite() && rnorm0 <= tol {
+                    if !work.x.iter().all(|v| v.is_finite()) {
+                        return None;
+                    }
+                    let out = work.x.clone();
+                    record_warm(work, record_last);
+                    return Some((out, 0));
+                }
+                if rnorm0.is_finite() && rnorm0 < WARM_START_MAX_RATIO * bnorm {
+                    rnorm = rnorm0;
+                    warmed = true;
+                }
+            }
+        }
+    }
+    if !warmed {
+        work.x.fill(0.0);
+        work.r.copy_from_slice(b);
+    }
+
+    if rnorm <= tol {
+        let out = work.x.clone();
+        record_warm(work, record_last);
+        return finite_vec(out).map(|v| (v, 0));
+    }
+
+    op.precond(&work.r, &mut work.z);
+    work.p.copy_from_slice(&work.z);
+    let mut rz = dot_gated(&work.r, &work.z, gate);
     if !(rz.is_finite() && rz > 0.0) {
         return None;
     }
-    let tol = 1e-12 * bnorm;
+
     let maxit = (8 * n).max(64);
     let mut iters = 0usize;
     for _ in 0..maxit {
-        if nrm2(&r, gate) <= tol {
-            return finite_vec(x).map(|v| (v, iters));
-        }
         iters += 1;
-        matvec(a, &p, &mut ap, gate);
-        let pap = dot_gated(&p, &ap, gate);
+        op.matvec_for_solve(&work.p, &mut work.ap);
+        let pap = dot_gated(&work.p, &work.ap, gate);
         if !(pap.is_finite() && pap > 0.0) {
             return None;
         }
@@ -1391,33 +2135,44 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
             return None;
         }
         for i in 0..n {
-            x[i] += alpha * p[i];
-            r[i] -= alpha * ap[i];
+            work.x[i] += alpha * work.p[i];
+            work.r[i] -= alpha * work.ap[i];
         }
-        if nrm2(&r, gate) <= tol {
-            return finite_vec(x).map(|v| (v, iters));
+        rnorm = nrm2(&work.r, gate);
+        if rnorm <= tol {
+            if !work.x.iter().all(|v| v.is_finite()) {
+                return None;
+            }
+            let out = work.x.clone();
+            record_warm(work, record_last);
+            return Some((out, iters));
         }
-        jacobi(a, &r, &mut z);
-        let rz_new = dot_gated(&r, &z, gate);
+        op.precond(&work.r, &mut work.z);
+        let rz_new = dot_gated(&work.r, &work.z, gate);
         if !(rz_new.is_finite() && rz_new > 0.0) {
             return None;
         }
         let beta = rz_new / rz;
         for i in 0..n {
-            p[i] = z[i] + beta * p[i];
+            work.p[i] = work.z[i] + beta * work.p[i];
         }
         rz = rz_new;
     }
-    if nrm2(&r, gate) <= 1e-8 * bnorm {
-        return finite_vec(x).map(|v| (v, iters));
+
+    let fallback_tol = FALLBACK_PRECON_RTOL.max(eff_rtol) * bnorm;
+    if rnorm <= fallback_tol && work.x.iter().all(|v| v.is_finite()) {
+        let out = work.x.clone();
+        record_warm(work, record_last);
+        return Some((out, iters));
     }
     None
 }
 
-fn jacobi(a: &Csr, r: &[f64], z: &mut [f64]) {
-    for i in 0..a.n {
-        z[i] = r[i] / a.diag[i];
-    }
+#[cfg(test)]
+fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
+    let op = SparseOp::General(a.clone());
+    let mut work = PcgWork::default();
+    solve_pcg_op(&op, b, 1.0e-12, false, false, &mut work)
 }
 
 fn finite_vec(x: Vec<f64>) -> Option<Vec<f64>> {
@@ -1640,6 +2395,7 @@ mod tests {
             col_idx,
             val,
             diag,
+            inv_block3: None,
             apply_gate: usize::MAX,
             solve_gate: usize::MAX,
         };

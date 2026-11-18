@@ -1681,6 +1681,7 @@ fn exp_params_from_c(p: &rgmin_exp_t) -> ExpParams {
         },
         recalc_mu: p.recalc_mu != 0,
         lengths,
+        ..defaults
     }
 }
 
@@ -6457,9 +6458,30 @@ mod default_tests {
         Option<u64>,
         Option<FloorBits>,
     );
-    type ExpBits = (u64, u64, Option<u64>, Option<u64>, Option<u64>, bool, Cell);
-    type LindhBits = (u64, Option<u64>, bool, bool, Cell, Option<u64>, bool);
-    type FfBits = (u64, Option<u64>, Cell, Option<u64>, bool);
+    type ExpBits = (
+        u64,
+        u64,
+        Option<u64>,
+        Option<u64>,
+        Option<u64>,
+        bool,
+        Cell,
+        u64,
+        bool,
+        crate::ExpPcKind,
+    );
+    type LindhBits = (
+        u64,
+        Option<u64>,
+        bool,
+        bool,
+        Cell,
+        Option<u64>,
+        bool,
+        u64,
+        bool,
+    );
+    type FfBits = (u64, Option<u64>, Cell, Option<u64>, bool, u64, bool);
     type EigenBits = (EigensolverKind, usize, usize, usize, u64, usize, usize);
 
     fn opt(v: Option<f64>) -> Option<u64> {
@@ -6505,6 +6527,9 @@ mod default_tests {
             r_cut,
             recalc_mu,
             lengths,
+            rtol,
+            warm_start,
+            pc,
         } = params;
         (
             a.to_bits(),
@@ -6514,6 +6539,9 @@ mod default_tests {
             opt(r_cut),
             recalc_mu,
             cell(lengths),
+            rtol.to_bits(),
+            warm_start,
+            pc,
         )
     }
 
@@ -6526,6 +6554,8 @@ mod default_tests {
             lengths,
             mu,
             recalc_mu,
+            rtol,
+            warm_start,
         } = params;
         (
             c_stab.to_bits(),
@@ -6535,6 +6565,8 @@ mod default_tests {
             cell(lengths),
             opt(mu),
             recalc_mu,
+            rtol.to_bits(),
+            warm_start,
         )
     }
 
@@ -6545,6 +6577,8 @@ mod default_tests {
             lengths,
             mu,
             recalc_mu,
+            rtol,
+            warm_start,
         } = params;
         (
             c_stab.to_bits(),
@@ -6552,6 +6586,8 @@ mod default_tests {
             cell(lengths),
             opt(mu),
             recalc_mu,
+            rtol.to_bits(),
+            warm_start,
         )
     }
 

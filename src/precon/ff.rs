@@ -33,10 +33,13 @@ use ndarray::{Array1, ArrayView1};
 
 use super::geom::{angle_grad, dihedral_grad, mic, norm3, pos_of, require_atoms, scale3};
 use super::{
-    BlockAccum, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, max_atom_displacement, needs_rebuild,
-    note_block,
+    BlockAccum, DEFAULT_PRECON_RTOL, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE,
+    max_atom_displacement, needs_rebuild, note_block,
 };
 use crate::error::{Error, Result};
+
+/// Minimum bond or leg distance accepted into a reduced force-field term.
+const MIN_LEG_DIST: f64 = 1.0e-8;
 
 /// Harmonic bond. `k` is the curvature, energy / Å².
 #[derive(Clone, Copy, Debug)]
@@ -119,6 +122,10 @@ pub struct FfParams {
     pub mu: Option<f64>,
     /// Reestimate `μ` whenever the matrix is rebuilt.
     pub recalc_mu: bool,
+    /// Relative residual tolerance `||r||_2 / ||b||_2` of the PCG solve.
+    pub rtol: f64,
+    /// Reuse the previous PCG solution via Rayleigh projection when helpful.
+    pub warm_start: bool,
 }
 
 with_setters!(FfParams {
@@ -127,6 +134,8 @@ with_setters!(FfParams {
     with_lengths => lengths: opt [f64; 3],
     with_mu => mu: opt f64,
     with_recalc_mu => recalc_mu: val bool,
+    with_rtol => rtol: val f64,
+    with_warm_start => warm_start: val bool,
 });
 
 impl Default for FfParams {
@@ -137,6 +146,8 @@ impl Default for FfParams {
             lengths: None,
             mu: None,
             recalc_mu: false,
+            rtol: DEFAULT_PRECON_RTOL,
+            warm_start: true,
         }
     }
 }
@@ -178,6 +189,11 @@ impl Ff {
                 what: "c_stab is not positive",
             });
         }
+        if !(params.rtol.is_finite() && params.rtol > 0.0) {
+            return Err(Error::Precon {
+                what: "rtol is not positive",
+            });
+        }
         if terms.bonds.is_empty()
             && terms.angles.is_empty()
             && terms.morses.is_empty()
@@ -187,10 +203,10 @@ impl Ff {
                 what: "ff has no bonded terms",
             });
         }
-        let coords = positions
-            .as_slice()
-            .map(<[f64]>::to_vec)
-            .unwrap_or_else(|| positions.to_vec());
+        let coords = match positions.as_slice() {
+            Some(s) => s.to_vec(),
+            None => positions.to_vec(),
+        };
         if coords.iter().any(|v| !v.is_finite()) {
             return Err(Error::Precon {
                 what: "a coordinate is not finite",
@@ -224,10 +240,22 @@ impl Ff {
         self.metric.solve(rhs)
     }
 
-    /// Jacobi PCG iterations for one solve.
+    /// PCG iterations for one cold solve.
     #[must_use]
     pub fn solve_iterations(&self, rhs: ArrayView1<f64>) -> Option<usize> {
-        self.metric.solve_counted(rhs).map(|(_, n)| n)
+        self.metric.solve_iterations(rhs)
+    }
+
+    /// Number of stored scalar CSR entries.
+    #[must_use]
+    pub fn stored_nonzeros(&self) -> usize {
+        self.metric.stored_nonzeros()
+    }
+
+    /// Heap bytes occupied by the CSR index, value, and diagonal arrays.
+    #[must_use]
+    pub fn csr_bytes(&self) -> usize {
+        self.metric.csr_bytes()
     }
 
     /// Dense copy, for tests and for a dense Cholesky reference.
@@ -274,6 +302,11 @@ impl FfState {
         if !(params.c_stab.is_finite() && params.c_stab > 0.0) {
             return Err(Error::Precon {
                 what: "c_stab is not positive",
+            });
+        }
+        if !(params.rtol.is_finite() && params.rtol > 0.0) {
+            return Err(Error::Precon {
+                what: "rtol is not positive",
             });
         }
         let mu = usable_mu(params.mu)?;
@@ -341,7 +374,7 @@ impl FfState {
                 }
             }
         }
-        let mu = self.mu.unwrap_or(1.0);
+        let mu = *self.mu.get_or_insert(1.0);
         self.metric = Some(built.metric.scaled(mu));
         self.built_at = Some(positions.to_owned());
         Ok(true)
@@ -370,7 +403,7 @@ fn in_range(atom: usize, natoms: usize) -> Result<()> {
 }
 
 fn leg_ok(r: f64, cut: Option<f64>) -> bool {
-    r.is_finite() && r > 1e-8 && cut.is_none_or(|c| r < c)
+    r.is_finite() && r > MIN_LEG_DIST && cut.is_none_or(|c| r < c)
 }
 
 fn assemble_metric(
@@ -430,7 +463,11 @@ fn assemble_metric(
     });
     acc.add_stabilization(params.c_stab);
     Ok((
-        Metric::from_csr(acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE)),
+        Metric::from_general_csr(
+            acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE),
+            params.rtol,
+            params.warm_start,
+        ),
         r_nn,
     ))
 }

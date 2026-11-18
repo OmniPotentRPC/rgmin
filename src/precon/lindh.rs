@@ -31,15 +31,16 @@ use ndarray::{Array1, ArrayView1};
 
 use super::geom::{angle_grad, dihedral_grad, mic, norm3, pos_of, require_atoms};
 use super::{
-    BlockAccum, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, max_atom_displacement, needs_rebuild,
-    note_block,
+    BlockAccum, DEFAULT_PRECON_RTOL, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE,
+    max_atom_displacement, needs_rebuild, note_block,
 };
 use crate::error::{Error, Result};
 
 const BOHR: f64 = 0.529177210903;
 const HARTREE: f64 = 27.211386245988;
 const BOHR2: f64 = BOHR * BOHR;
-const RHO_MIN: f64 = 1e-3;
+const RHO_MIN: f64 = 1.0e-3;
+const MIN_STRETCH_DIST: f64 = 1.0e-12;
 
 const ALPHA_RAW: [[f64; 3]; 3] = [
     [1.0000, 0.3949, 0.3949],
@@ -133,6 +134,10 @@ pub struct LindhParams {
     pub mu: Option<f64>,
     /// Reestimate `μ` whenever the matrix is rebuilt.
     pub recalc_mu: bool,
+    /// Relative residual tolerance `||r||_2 / ||b||_2` of the PCG solve.
+    pub rtol: f64,
+    /// Reuse the previous PCG solution via Rayleigh projection when helpful.
+    pub warm_start: bool,
 }
 
 with_setters!(LindhParams {
@@ -143,6 +148,8 @@ with_setters!(LindhParams {
     with_lengths => lengths: opt [f64; 3],
     with_mu => mu: opt f64,
     with_recalc_mu => recalc_mu: val bool,
+    with_rtol => rtol: val f64,
+    with_warm_start => warm_start: val bool,
 });
 
 impl Default for LindhParams {
@@ -155,6 +162,8 @@ impl Default for LindhParams {
             lengths: None,
             mu: None,
             recalc_mu: false,
+            rtol: DEFAULT_PRECON_RTOL,
+            warm_start: true,
         }
     }
 }
@@ -213,6 +222,11 @@ impl Lindh {
                 what: "c_stab is not positive",
             });
         }
+        if !(params.rtol.is_finite() && params.rtol > 0.0) {
+            return Err(Error::Precon {
+                what: "rtol is not positive",
+            });
+        }
         if let Some(cut) = params.r_cut
             && !(cut.is_finite() && cut > 0.0)
         {
@@ -225,10 +239,10 @@ impl Lindh {
                 what: "atomic number is not positive",
             });
         }
-        let coords = positions
-            .as_slice()
-            .map(<[f64]>::to_vec)
-            .unwrap_or_else(|| positions.to_vec());
+        let coords = match positions.as_slice() {
+            Some(s) => s.to_vec(),
+            None => positions.to_vec(),
+        };
         if coords.iter().any(|v| !v.is_finite())
             || ghosts
                 .iter()
@@ -266,10 +280,22 @@ impl Lindh {
         self.metric.solve(rhs)
     }
 
-    /// Jacobi PCG iterations for one solve.
+    /// PCG iterations for one cold solve.
     #[must_use]
     pub fn solve_iterations(&self, rhs: ArrayView1<f64>) -> Option<usize> {
-        self.metric.solve_counted(rhs).map(|(_, n)| n)
+        self.metric.solve_iterations(rhs)
+    }
+
+    /// Number of stored scalar CSR entries.
+    #[must_use]
+    pub fn stored_nonzeros(&self) -> usize {
+        self.metric.stored_nonzeros()
+    }
+
+    /// Heap bytes occupied by the CSR index, value, and diagonal arrays.
+    #[must_use]
+    pub fn csr_bytes(&self) -> usize {
+        self.metric.csr_bytes()
     }
 
     /// Dense copy, for tests and for a dense Cholesky reference.
@@ -311,6 +337,11 @@ impl LindhState {
         if !(params.c_stab.is_finite() && params.c_stab > 0.0) {
             return Err(Error::Precon {
                 what: "c_stab is not positive",
+            });
+        }
+        if !(params.rtol.is_finite() && params.rtol > 0.0) {
+            return Err(Error::Precon {
+                what: "rtol is not positive",
             });
         }
         let mu = usable_mu(params.mu)?;
@@ -370,7 +401,7 @@ impl LindhState {
                 }
             }
         }
-        let mu = self.mu.unwrap_or(1.0);
+        let mu = *self.mu.get_or_insert(1.0);
         self.metric = Some(built.metric.scaled(mu));
         self.built_at = Some(positions.to_owned());
         Ok(true)
@@ -447,7 +478,10 @@ fn assemble_metric(
             free: None,
         });
     }
-    let search = params.r_cut.unwrap_or_else(default_search);
+    let search = match params.r_cut {
+        Some(cut) => cut,
+        None => default_search(),
+    };
     let (pairs, min_d) = gather_pairs(&sites, n_free, search, params);
     let mut r_nn = 0.0_f64;
     let mut any = false;
@@ -477,7 +511,11 @@ fn assemble_metric(
     });
     acc.add_stabilization(params.c_stab);
     Ok((
-        Metric::from_csr(acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE)),
+        Metric::from_general_csr(
+            acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE),
+            params.rtol,
+            params.warm_start,
+        ),
         r_nn,
     ))
 }
@@ -494,7 +532,7 @@ fn emit_terms(
     for &(a, b, _r, w) in pairs {
         let d = mic(sites[a].pos, sites[b].pos, params.lengths);
         let r = norm3(d);
-        if r < 1e-12 {
+        if r < MIN_STRETCH_DIST {
             continue;
         }
         let e = [d[0] / r, d[1] / r, d[2] / r];
