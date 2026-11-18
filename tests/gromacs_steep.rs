@@ -241,6 +241,45 @@ fn constrained_zero_budget_halt_uses_max_atom_norm() {
 }
 
 #[test]
+fn constrained_stop_norm_two_matches_steepest() {
+    let objective = Oracle::unbounded(6, |v: ArrayView1<f64>| {
+        (
+            0.6 * (v[0] + v[3]),
+            Array1::from_vec(vec![0.6, 0.0, 0.0, 0.6, 0.0, 0.0]),
+        )
+    });
+    let set = DistanceConstraints::new(vec![(0, 1)], vec![1.0]).unwrap();
+    let expected = StopNorm::Two.of(Array1::from_vec(vec![0.6, 0.0, 0.0, 0.6, 0.0, 0.0]).view());
+
+    let mut x_steepest = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut steepest = Solver::new(Method::Steepest, control(0.1, 0.7, 3), x_steepest.len());
+    steepest.set_stop_norm(StopNorm::Two);
+    steepest.set_distance_constraints(set.clone()).unwrap();
+    let rep_steepest = steepest.step(&objective, &mut x_steepest).unwrap();
+    assert_eq!(
+        (
+            rep_steepest.status,
+            rep_steepest.grad_norm,
+            rep_steepest.steps
+        ),
+        (Status::Iterating, expected, 1)
+    );
+    assert_eq!(rep_steepest.grad_norm.to_bits(), expected.to_bits());
+
+    let mut x_gromacs = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut gromacs = Solver::new(Method::GromacsSteep, control(0.1, 0.7, 3), x_gromacs.len());
+    gromacs.set_stop_norm(StopNorm::Two);
+    gromacs.set_distance_constraints(set).unwrap();
+    let rep_gromacs = gromacs.step(&objective, &mut x_gromacs).unwrap();
+    assert_eq!(
+        (rep_gromacs.status, rep_gromacs.grad_norm, rep_gromacs.steps),
+        (Status::Iterating, expected, 1)
+    );
+    assert_eq!(rep_gromacs.grad_norm.to_bits(), expected.to_bits());
+    assert_eq!(rep_gromacs.stop_norm, StopNorm::Two);
+}
+
+#[test]
 fn rejected_step_reports_configured_stationarity_norm() {
     let objective = Oracle::unbounded(6, |v: ArrayView1<f64>| {
         (
