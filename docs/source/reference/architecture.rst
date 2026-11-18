@@ -48,7 +48,9 @@ Objects
     ``Control::with_error_on_unmet`` is set, in which case the error
     is ``Error::StopUnmet`` and carries the report. A zero iteration
     budget is that same unmet stop. ``LineSearchFailed`` is a budget
-    spent without accepting a step.
+    spent without accepting a step. An L-BFGS run that never moves
+    reports it from ``minimize_method``, ``Solver::run``,
+    ``Solver::run_gauged``, ``rgmin_minimize`` and Python ``minimize`` alike.
 
 ``backward_error_floor``
     ``n * eps * (1 + |V| + sum |x_i|)`` with
@@ -60,7 +62,8 @@ Objects
     is not converged. An unmet polish is ``StopReason::PolishUnmet``.
     The C names are ``rgmin_backward_error_floor``,
     ``rgmin_solver_set_error_on_unmet``,
-    ``rgmin_solver_set_backward_polish``, and the ``\*_opts`` one-shots.
+    ``rgmin_solver_set_backward_polish``, and the ``\*_opts`` one-shots,
+    which include ``rgmin_minimize_eindir_opts``.
     ``xts.h`` aliases ``RGMIN_UNMET_STOP``, ``RGMIN_STOP_LINE_SEARCH``,
     and ``RGMIN_STOP_POLISH_UNMET``. ``RGMIN_UNMET_STOP`` is status 6.
     ``RGMIN_STOP_LINE_SEARCH`` is 4 and ``RGMIN_STOP_POLISH_UNMET`` is 5.
@@ -89,11 +92,12 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 50 and ``layout_revision`` 5.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 51 and ``layout_revision`` 5.
     Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
     error, and the backward-error polish. A zero iteration budget
     follows the same unmet-stop policy. Minor 50 adds the energy and
-    evaluation stops. ``rgmin_control_t`` is unchanged.
+    evaluation stops. Minor 51 adds ``rgmin_minimize_eindir_opts``, the
+    eindir one-shot with the same two flags. ``rgmin_control_t`` is unchanged.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``

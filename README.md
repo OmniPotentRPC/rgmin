@@ -26,7 +26,8 @@ header, the C++ wrappers, and `dlpack/dlpack.h`. The pkg-config name
 is `rgmin`. Version macros are `RGMIN_H_MAJOR`, `RGMIN_H_MINOR`, and
 `RGMIN_H_PATCH`.
 The C ABI also accepts an `eindir_objective_t*` directly through
-`rgmin_minimize_eindir`. The caller supplies the `eindir_abi_stamp_t`, retains
+`rgmin_minimize_eindir`, or `rgmin_minimize_eindir_opts` for the
+`error_on_unmet` and `backward_polish` flags. The caller supplies the `eindir_abi_stamp_t`, retains
 ownership of the objective, and gets the same CPU f64 DLPack optimization path.
 This lets rgpot's first-member `eindir_objective_t` embedding reach xtsci
 without a callback shim in each consumer.
