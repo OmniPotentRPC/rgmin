@@ -51,6 +51,9 @@ Objects
     spent without accepting a step. An L-BFGS run that never moves
     reports it from ``minimize_method``, ``Solver::run``,
     ``Solver::run_gauged``, ``rgmin_minimize`` and Python ``minimize`` alike.
+    The C++ one-shots throw ``rgmin::StopUnmetError`` and Python
+    ``minimize`` raises ``rgmin.StopUnmetError``. Each is a runtime error
+    that carries the report of the stop, as ``report()`` and ``.report``.
 
 ``backward_error_floor``
     ``n * eps * (1 + |V| + sum |x_i|)`` with
