@@ -77,8 +77,8 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 48;
-pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 49;
+pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
 #[repr(C)]
@@ -219,6 +219,8 @@ pub struct rgmin_control_t {
     pub noise_eps: f64,
     /// Floor factor. Non-positive selects 3.
     pub noise_c: f64,
+    /// Nonzero turns strict convergence on.
+    pub require_convergence: i32,
 }
 
 /// Result written by [`rgmin_minimize`].
@@ -231,6 +233,8 @@ pub struct rgmin_report_t {
     pub steps: usize,
     /// Gradient norm at the accepted point.
     pub grad_norm: f64,
+    /// Nonzero when `grad_norm <= gtol`.
+    pub converged: i32,
     /// Which stop produced this report.
     pub stop: rgmin_stop_t,
 }
@@ -1084,6 +1088,7 @@ pub unsafe extern "C" fn rgmin_minimize(
                         value: rep.value,
                         steps: rep.steps,
                         grad_norm: rep.grad_norm,
+                        converged: i32::from(rep.converged),
                         stop: stop_from_status(rep.status),
                     };
                 }
@@ -1204,6 +1209,7 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
                         value: rep.value,
                         steps: rep.steps,
                         grad_norm: rep.grad_norm,
+                        converged: i32::from(rep.converged),
                         stop: stop_from_status(rep.status),
                     };
                 }
@@ -1290,6 +1296,7 @@ pub unsafe extern "C" fn rgmin_minimize_hvp(
                         value: rep.value,
                         steps: rep.steps,
                         grad_norm: rep.grad_norm,
+                        converged: i32::from(rep.converged),
                         stop: stop_from_status(rep.status),
                     };
                 }
@@ -1392,6 +1399,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
                         value: rep.value,
                         steps: rep.steps,
                         grad_norm: rep.grad_norm,
+                        converged: i32::from(rep.converged),
                         stop: stop_from_status(rep.status),
                     };
                 }
@@ -3815,6 +3823,7 @@ fn write_report(
             value: rep.value,
             steps: rep.steps,
             grad_norm: rep.grad_norm,
+            converged: i32::from(rep.converged),
             stop: stop_from_status(rep.status),
         };
         (*solver).grad = rep.grad;
@@ -4108,6 +4117,7 @@ fn control_from_c(c: &rgmin_control_t) -> Control {
         stop_norm: StopNorm::Two,
         ftol_rel: None,
         noise_floor: noise_floor_from_c(c),
+        require_convergence: c.require_convergence != 0,
     }
 }
 
@@ -4916,6 +4926,7 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
                         value: rep.value,
                         steps: rep.steps,
                         grad_norm: rep.grad_norm,
+                        converged: i32::from(rep.converged),
                         stop: stop_from_status(rep.status),
                     };
                 }
@@ -6372,6 +6383,7 @@ impl Default for rgmin_control_t {
             maxmove: control.maxmove.unwrap_or(0.0),
             noise_eps: floor.map_or(0.0, |f| f.eps_g),
             noise_c: floor.unwrap_or_else(|| crate::NoiseFloor::new(0.0)).c,
+            require_convergence: i32::from(control.require_convergence),
         }
     }
 }
@@ -6508,6 +6520,7 @@ mod default_tests {
         StopNorm,
         Option<u64>,
         Option<FloorBits>,
+        bool,
     );
     type ExpBits = (u64, u64, Option<u64>, Option<u64>, Option<u64>, bool, Cell);
     type LindhBits = (u64, Option<u64>, bool, bool, Cell, Option<u64>, bool);
@@ -6536,6 +6549,7 @@ mod default_tests {
             stop_norm,
             ftol_rel,
             noise_floor,
+            require_convergence,
         } = control;
         (
             maxiter,
@@ -6545,6 +6559,7 @@ mod default_tests {
             stop_norm,
             opt(ftol_rel),
             noise_floor.map(floor_bits),
+            require_convergence,
         )
     }
 
@@ -6642,6 +6657,7 @@ mod default_tests {
             maxmove,
             noise_eps,
             noise_c,
+            require_convergence,
         } = rgmin_control_default();
         assert_eq!(maxiter, want.maxiter);
         assert_eq!(gtol.to_bits(), want.gtol.to_bits());
@@ -6661,6 +6677,7 @@ mod default_tests {
             floor.map_or(0.0, |f| f.eps_g).to_bits()
         );
         assert_eq!(noise_c.to_bits(), NoiseFloor::new(0.0).c.to_bits());
+        assert_eq!(require_convergence, 0);
 
         assert_eq!(
             control_bits(control_from_c(&rgmin_control_default())),

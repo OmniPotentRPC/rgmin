@@ -138,6 +138,7 @@ struct Control {
     double maxmove = 0.0;
     double noise_eps = 0.0;
     double noise_c = 0.0;
+    bool require_convergence = false;
 };
 
 namespace detail {
@@ -152,6 +153,7 @@ inline rgmin_control_t c_control(Control const& ctrl) noexcept {
     c.maxmove = ctrl.maxmove;
     c.noise_eps = ctrl.noise_eps;
     c.noise_c = ctrl.noise_c;
+    c.require_convergence = ctrl.require_convergence ? 1 : 0;
     return c;
 }
 
@@ -161,6 +163,7 @@ struct Report {
     double value = 0.0;
     std::size_t steps = 0;
     double grad_norm = 0.0;
+    bool converged = false;
     rgmin_stop_t stop = RGMIN_STOP_BUDGET;
 };
 
@@ -198,6 +201,7 @@ struct OptimizeResult {
         out.fun = r.value;
         out.nit = r.steps;
         out.grad_norm = r.grad_norm;
+        out.success = r.converged;
         return out;
     }
 };
@@ -213,7 +217,7 @@ inline Report minimize_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
         char const* msg = rgmin_last_error();
         throw std::runtime_error(msg ? msg : "rgmin_minimize failed");
     }
-    return Report{out.value, out.steps, out.grad_norm, out.stop};
+    return Report{out.value, out.steps, out.grad_norm, out.converged != 0, out.stop};
 }
 
 inline Report minimize_hess_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hess_fn hess,
@@ -227,7 +231,7 @@ inline Report minimize_hess_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hes
         char const* msg = rgmin_last_error();
         throw std::runtime_error(msg ? msg : "rgmin_minimize_hess failed");
     }
-    return Report{out.value, out.steps, out.grad_norm, out.stop};
+    return Report{out.value, out.steps, out.grad_norm, out.converged != 0, out.stop};
 }
 
 inline Report minimize_eindir(const eindir_objective_t* objective,
@@ -242,7 +246,7 @@ inline Report minimize_eindir(const eindir_objective_t* objective,
         char const* msg = rgmin_last_error();
         throw std::runtime_error(msg ? msg : "rgmin_minimize_eindir failed");
     }
-    return Report{out.value, out.steps, out.grad_norm, out.stop};
+    return Report{out.value, out.steps, out.grad_norm, out.converged != 0, out.stop};
 }
 
 /// One-shot solve. Named for the header rather than `minimize`, which
@@ -846,7 +850,7 @@ public:
         if (st != RGMIN_SUCCESS) {
             detail::raise(st, "rgmin_solver_step failed");
         }
-        return Report{out.value, out.steps, out.grad_norm, out.stop};
+        return Report{out.value, out.steps, out.grad_norm, out.converged != 0, out.stop};
     }
 
     Report step_fg(rgmin_evalgrad_fn evalgrad, void* user,
@@ -857,7 +861,7 @@ public:
         if (st != RGMIN_SUCCESS) {
             detail::raise(st, "rgmin_solver_step_fg failed");
         }
-        return Report{out.value, out.steps, out.grad_norm, out.stop};
+        return Report{out.value, out.steps, out.grad_norm, out.converged != 0, out.stop};
     }
 
     Report step_hvp(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hvp_fn hvp,
@@ -868,7 +872,7 @@ public:
         if (st != RGMIN_SUCCESS) {
             detail::raise(st, "rgmin_solver_step_hvp failed");
         }
-        return Report{out.value, out.steps, out.grad_norm, out.stop};
+        return Report{out.value, out.steps, out.grad_norm, out.converged != 0, out.stop};
     }
 
     Report step_hess(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hess_fn hess,
@@ -879,7 +883,7 @@ public:
         if (st != RGMIN_SUCCESS) {
             detail::raise(st, "rgmin_solver_step_hess failed");
         }
-        return Report{out.value, out.steps, out.grad_norm, out.stop};
+        return Report{out.value, out.steps, out.grad_norm, out.converged != 0, out.stop};
     }
 
     Report step_hess_fg(rgmin_evalgrad_fn evalgrad, rgmin_hess_fn hess,
@@ -890,7 +894,7 @@ public:
         if (st != RGMIN_SUCCESS) {
             detail::raise(st, "rgmin_solver_step_hess_fg failed");
         }
-        return Report{out.value, out.steps, out.grad_norm, out.stop};
+        return Report{out.value, out.steps, out.grad_norm, out.converged != 0, out.stop};
     }
 };
 
@@ -1113,7 +1117,8 @@ inline std::string SolverConfig::valid_options() {
     return "accept, atom_maxmove, beta, c1, c2, cautious_alpha, cautious_eps, "
            "extra_updates, fire_variant, gtol, istep, linesearch, "
            "linesearch_maxiter, maxiter, maxmove, maxstep, memory, neb_guards, "
-           "noise_c, noise_eps, objective_roundoff, periodic, project_rigid, qn_step";
+           "noise_c, noise_eps, objective_roundoff, periodic, project_rigid, "
+           "qn_step, require_convergence";
 }
 
 inline std::string SolverConfig::valid_methods() {
@@ -1201,7 +1206,7 @@ inline bool known_option(std::string const& key) {
         "cautious_eps", "extra_updates", "fire_variant", "gtol", "istep",
         "linesearch", "linesearch_maxiter", "maxiter", "maxmove", "maxstep",
         "memory", "neb_guards", "noise_c", "noise_eps", "objective_roundoff",
-        "periodic", "project_rigid", "qn_step"};
+        "periodic", "project_rigid", "qn_step", "require_convergence"};
     for (char const* item : keys) {
         if (key == item) return true;
     }
@@ -1304,6 +1309,7 @@ inline SolverConfig SolverConfig::build(
         if (key == "neb_guards") cfg.neb_guards_ = item.second;
         else if (key == "periodic") cfg.periodic_ = item.second;
         else if (key == "project_rigid") cfg.project_rigid_ = item.second;
+        else if (key == "require_convergence") cfg.control_.require_convergence = item.second;
         else if (detail::is_count_option(key)) {
             throw std::invalid_argument(key + " must be an int");
         } else {
@@ -1324,7 +1330,7 @@ inline SolverConfig SolverConfig::build(
         } else if (key == "gtol" || key == "istep" || key == "maxmove" || key == "noise_eps" ||
                    key == "noise_c" || key == "c1" || key == "c2" || key == "atom_maxmove" ||
                    key == "maxstep" || key == "cautious_eps" || key == "cautious_alpha" ||
-                   key == "objective_roundoff") {
+                   key == "objective_roundoff" || key == "require_convergence") {
             double value = static_cast<double>(item.second);
             detail::require_finite(key, value);
             if (key == "gtol") cfg.control_.gtol = value;
@@ -1332,6 +1338,7 @@ inline SolverConfig SolverConfig::build(
             else if (key == "maxmove") cfg.control_.maxmove = value;
             else if (key == "noise_eps") cfg.control_.noise_eps = value;
             else if (key == "noise_c") cfg.control_.noise_c = value;
+            else if (key == "require_convergence") cfg.control_.require_convergence = (value != 0.0);
             else if (key == "c1") cfg.c1_ = value;
             else if (key == "c2") cfg.c2_ = value;
             else if (key == "atom_maxmove" || key == "maxstep") cfg.atom_maxmove_ = value;
@@ -1353,6 +1360,9 @@ inline SolverConfig SolverConfig::build(
         else if (key == "maxmove") cfg.control_.maxmove = item.second;
         else if (key == "noise_eps") cfg.control_.noise_eps = item.second;
         else if (key == "noise_c") cfg.control_.noise_c = item.second;
+        else if (key == "require_convergence") {
+            cfg.control_.require_convergence = (item.second != 0.0);
+        }
         else if (key == "c1") cfg.c1_ = item.second;
         else if (key == "c2") cfg.c2_ = item.second;
         else if (key == "atom_maxmove" || key == "maxstep") cfg.atom_maxmove_ = item.second;

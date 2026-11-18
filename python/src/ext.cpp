@@ -342,7 +342,7 @@ rgmin::Report finish_step(rgmin_status_t status, rgmin_report_t const& out, rgbi
     if (!std::isfinite(out.value)) {
         throw rgbind::NumericalError("Solver produced a non-finite value");
     }
-    return rgmin::Report{out.value, out.steps, out.grad_norm, out.stop};
+    return rgmin::Report{out.value, out.steps, out.grad_norm, out.converged != 0, out.stop};
 }
 
 // A zero budget takes no step, and the C API has no evaluation without
@@ -378,7 +378,7 @@ rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control
             stop = RGMIN_STOP_NOISE_FLOOR;
         }
     }
-    return rgmin::Report{value, 0, grad_norm, stop};
+    return rgmin::Report{value, 0, grad_norm, grad_norm <= control.gtol, stop};
 }
 
 DLManagedTensorVersioned* borrow_x(Vector x, std::size_t n) {
@@ -565,6 +565,8 @@ NB_MODULE(_core, m) {
                      "Number of oracle evaluations used.")
         .def_prop_ro("grad_norm", [](rgmin::Report const& report) { return report.grad_norm; },
                      "Norm of the gradient.")
+        .def_prop_ro("converged", [](rgmin::Report const& report) { return report.converged; },
+                     "Whether ``grad_norm <= gtol`` at the final point.")
         .def_prop_ro("stop", [](rgmin::Report const& report) { return report.stop; },
                      "The ``Stop`` reason.");
 

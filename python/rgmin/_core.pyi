@@ -148,6 +148,10 @@ class Report:
         """Norm of the gradient."""
 
     @property
+    def converged(self) -> bool:
+        """Whether ``grad_norm <= gtol`` at the final point."""
+
+    @property
     def stop(self) -> Stop:
         """The ``Stop`` reason."""
 

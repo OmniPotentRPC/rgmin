@@ -70,7 +70,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 48
+#define RGMIN_ABI_VERSION_MINOR 49
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -78,13 +78,14 @@ typedef struct rgmin_abi_stamp_t {
  * 45 rgmin_solver_set_lbfgs_trust (Burdakov ray, not set_lbfgs_trust),
  * 46 rgmin_control_default and the other struct initializers,
  * 47 level-set constraint setters,
- * 48 rgmin_solver_set_fire_cap_two_step_overshoot. */
-#define RGMIN_ABI_LAYOUT_REVISION 5
-/* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
- * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
+ * 48 rgmin_solver_set_fire_cap_two_step_overshoot,
+ * 49 rgmin_report_t.converged and strict convergence control. */
+#define RGMIN_ABI_LAYOUT_REVISION 6
+/* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
+ * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the Euclidean cap; 0 keeps
  * the defaults, including the default per-atom cap; a negative value
  * leaves every step cap off. rgmin_report_t is value, steps, grad_norm,
- * stop. Both sides shipped these structs as revision 4 with different
+ * converged, stop. Both sides shipped these structs as revision 4 with different
  * fields, so the union is a new revision. */
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
@@ -183,10 +184,14 @@ typedef struct rgmin_control_t {
     double noise_eps;
     /** Floor factor. <= 0 selects 3. */
     double noise_c;
+    /** Nonzero returns RGMIN_INVALID_PARAMETER with "not converged" when
+     *  a driver exits above gtol. */
+    int32_t require_convergence;
 } rgmin_control_t;
 /** Rust \c Control::default: maxiter 100, gtol 1e-5, istep 1, memory 0
  *  (10 L-BFGS pairs, 6 for DIIS), maxmove 0 (the default caps),
- *  noise_eps 0 (no floor) and noise_c 3. ABI minor 46. */
+ *  noise_eps 0 (no floor), noise_c 3, and require_convergence 0.
+ *  ABI minor 46. */
 rgmin_control_t rgmin_control_default(void);
 
 /** Result of \ref rgmin_minimize. */
@@ -194,7 +199,9 @@ typedef struct rgmin_report_t {
     double value;
     size_t steps;
     double grad_norm;
-    /** Which stop produced this report. Layout revision 5. */
+    /** Nonzero when \c grad_norm <= gtol. */
+    int32_t converged;
+    /** Which stop produced this report. Layout revision 6. */
     rgmin_stop_t stop;
 } rgmin_report_t;
 

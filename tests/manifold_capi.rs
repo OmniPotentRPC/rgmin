@@ -207,6 +207,7 @@ fn c_abi_euclidean_complex_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -216,6 +217,7 @@ fn c_abi_euclidean_complex_stays_on_the_set() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        converged: 0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
@@ -259,6 +261,7 @@ fn c_abi_constant_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 3) };
     assert!(!session.is_null());
@@ -269,6 +272,7 @@ fn c_abi_constant_stays_on_the_set() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        converged: 0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 3) };
@@ -314,6 +318,7 @@ fn c_abi_multinomial_ds_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -323,6 +328,7 @@ fn c_abi_multinomial_ds_stays_on_the_set() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        converged: 0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
@@ -370,6 +376,7 @@ fn c_abi_multinomial_sym_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -379,6 +386,7 @@ fn c_abi_multinomial_sym_stays_on_the_set() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        converged: 0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
@@ -428,6 +436,7 @@ fn c_abi_sphere_complex_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -437,6 +446,7 @@ fn c_abi_sphere_complex_stays_on_the_set() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        converged: 0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
@@ -474,6 +484,7 @@ fn c_abi_positive_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 3) };
     assert!(!session.is_null());
@@ -484,6 +495,7 @@ fn c_abi_positive_stays_on_the_set() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        converged: 0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 3) };
@@ -524,6 +536,7 @@ fn c_abi_centered_matrix_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -534,6 +547,7 @@ fn c_abi_centered_matrix_stays_on_the_set() {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
+        converged: 0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
