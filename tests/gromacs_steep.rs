@@ -221,6 +221,44 @@ fn tolerance_budget_and_machine_precision_are_distinct_stops() {
 }
 
 #[test]
+fn constrained_zero_budget_halt_uses_max_atom_norm() {
+    let objective = Oracle::unbounded(6, |v: ArrayView1<f64>| {
+        (
+            0.6 * (v[0] + v[3]),
+            Array1::from_vec(vec![0.6, 0.0, 0.0, 0.6, 0.0, 0.0]),
+        )
+    });
+    let mut x = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let ctrl = control(0.1, 0.0, 0).with_noise_floor(NoiseFloor::new(10.0));
+    let mut solver = Solver::new(Method::GromacsSteep, ctrl, x.len());
+    solver
+        .set_distance_constraints(DistanceConstraints::new(vec![(0, 1)], vec![1.0]).unwrap())
+        .unwrap();
+    let report = solver.step(&objective, &mut x).unwrap();
+    assert_eq!(report.status, Status::NoiseFloor);
+    assert_eq!(report.steps, 0);
+    assert_eq!(x.to_vec(), vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+}
+
+#[test]
+fn rejected_step_reports_configured_stationarity_norm() {
+    let objective = Oracle::unbounded(6, |v: ArrayView1<f64>| {
+        (
+            -(v[0] + v[3]),
+            Array1::from_vec(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
+        )
+    });
+    let mut x = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut solver = Solver::new(Method::GromacsSteep, control(0.1, 0.0, 3), x.len());
+    solver.set_stop_norm(StopNorm::Two);
+    let report = solver.step(&objective, &mut x).unwrap();
+    let expected = StopNorm::Two.of(Array1::from_vec(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]).view());
+    assert_eq!(report.status, Status::Iterating);
+    assert_eq!(report.grad_norm.to_bits(), expected.to_bits());
+    assert_eq!(x.to_vec(), vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+}
+
+#[test]
 fn forget_resets_step_size_and_holonomic_constraints_stay_on_bond() {
     let objective = Oracle::unbounded(6, |x: ArrayView1<f64>| {
         morse_value_grad(x, [100.0, 100.0, 100.0])
