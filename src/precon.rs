@@ -125,7 +125,7 @@ pub struct ExpParams {
     pub mu: Option<f64>,
     /// Scale `μ_c` of the cell block, `μ_c I` on the nine strain
     /// coordinates of a [`crate::CellFilter`] layout. `None` estimates it
-    /// together with `μ`, floored at 1 as ASE `SparsePrecon` does. A
+    /// together with `μ`, and ASE `SparsePrecon` floors both at 1. A
     /// session without a cell filter ignores it.
     pub mu_c: Option<f64>,
     /// Nearest-neighbour distance. `None` uses [`nearest_neighbour_distance`].
@@ -1014,6 +1014,13 @@ where
 /// of `r_nn` (equation (15); ASE `estimate_mu` sets `H = 10^{-2} r_nn I`).
 const PROBE_AMPLITUDE: f64 = 0.01;
 
+/// ASE `SparsePrecon.estimate_mu` floors both `μ` and `μ_c` at this value.
+const MU_FLOOR: f64 = 1.0;
+
+fn floor_mu_scale(scale: f64) -> f64 {
+    if scale < MU_FLOOR { MU_FLOOR } else { scale }
+}
+
 /// The positions of an extended vector: everything before the nine
 /// cell coordinates.
 fn cell_atom_positions(positions: ArrayView1<f64>) -> Result<ArrayView1<f64>> {
@@ -1033,8 +1040,8 @@ fn cell_atom_positions(positions: ArrayView1<f64>) -> Result<ArrayView1<f64>> {
 /// and `μ_c`.
 ///
 /// `positions` has length `3 N + 9` and `grad` is the gradient over that
-/// vector. `μ` must come out positive. `μ_c` is floored at 1, as in ASE,
-/// so it is an error only when it is not finite.
+/// vector. Both `μ` and `μ_c` are floored at 1, as in ASE, and either is
+/// an error only when it is not finite.
 pub fn estimate_mu_cell<G>(
     positions: ArrayView1<f64>,
     neighbours: &Neighbours,
@@ -1097,9 +1104,9 @@ where
         });
     }
     let mu = num[0] / den[0];
-    if !(mu.is_finite() && mu > 0.0) {
+    if !mu.is_finite() {
         return Err(Error::Precon {
-            what: "mu estimate is not positive",
+            what: "mu estimate is not finite",
         });
     }
     let ratio = num[1] / den[1];
@@ -1108,8 +1115,7 @@ where
             what: "mu_c estimate is not finite",
         });
     }
-    let mu_c = if ratio < 1.0 { 1.0 } else { ratio };
-    Ok((mu, mu_c))
+    Ok((floor_mu_scale(mu), floor_mu_scale(ratio)))
 }
 
 /// `μ = vᵀ (∇E(x+v) - ∇E(x)) / vᵀ P v` for a model already at scale 1.

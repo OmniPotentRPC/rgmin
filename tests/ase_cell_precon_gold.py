@@ -7,7 +7,7 @@ what the cell block of Packwood et al., J. Chem. Phys. 144, 164109
 
   * mu and mu_c from the two gradient evaluations of estimate_mu, with
     the sine probe on the atoms and 1e-2 I on the strain block, and
-    mu_c floored at 1 as ASE floors it;
+    both floored at 1 as ASE floors them;
   * the matrix P, whose strain block is mu_c I;
   * P x = q for a given q;
   * the L-BFGS direction -H g of the pairs ASE stored, with H0 = P^-1.
