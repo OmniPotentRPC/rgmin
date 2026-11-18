@@ -106,6 +106,10 @@ harness = false
 name = "holonomic"
 harness = false
 
+[[bench]]
+name = "precon"
+harness = false
+
 
 [profile.release]
 lto = "thin"
