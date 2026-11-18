@@ -188,6 +188,55 @@ fn a_constraint_failure_shrinks_and_the_bound_then_errors() {
 }
 
 #[test]
+fn constraint_shrink_budget_follows_istep() {
+    for (small_step, large_step) in [(0.001, 0.1), (0.01, 1.0)] {
+        let small = Solver::new(Method::GromacsSteep, control(small_step, 0.0, 1), 6);
+        let large = Solver::new(Method::GromacsSteep, control(large_step, 0.0, 1), 6);
+        let small_budget = small.gromacs_steep_config().unwrap().max_constraint_shrinks;
+        let large_budget = large.gromacs_steep_config().unwrap().max_constraint_shrinks;
+        assert_eq!(
+            small_budget,
+            rgmin::gromacs_steep_max_constraint_shrinks(small_step, GROMACS_STEEP_SHRINK)
+        );
+        assert_eq!(
+            large_budget,
+            rgmin::gromacs_steep_max_constraint_shrinks(large_step, GROMACS_STEEP_SHRINK)
+        );
+        assert!(small_budget < large_budget);
+
+        let mut small_manual = Solver::new(Method::GromacsSteep, control(small_step, 0.0, 1), 6);
+        small_manual
+            .set_gromacs_steep_config(
+                GromacsSteepConfig::for_step_size(small_step).with_shrink(0.2),
+            )
+            .unwrap();
+        let mut large_manual = Solver::new(Method::GromacsSteep, control(large_step, 0.0, 1), 6);
+        large_manual
+            .set_gromacs_steep_config(
+                GromacsSteepConfig::for_step_size(large_step).with_shrink(0.2),
+            )
+            .unwrap();
+        let small_manual_budget = small_manual
+            .gromacs_steep_config()
+            .unwrap()
+            .max_constraint_shrinks;
+        let large_manual_budget = large_manual
+            .gromacs_steep_config()
+            .unwrap()
+            .max_constraint_shrinks;
+        assert_eq!(
+            small_manual_budget,
+            rgmin::gromacs_steep_max_constraint_shrinks(small_step, 0.2)
+        );
+        assert_eq!(
+            large_manual_budget,
+            rgmin::gromacs_steep_max_constraint_shrinks(large_step, 0.2)
+        );
+        assert!(small_manual_budget < large_manual_budget);
+    }
+}
+
+#[test]
 fn tolerance_budget_and_machine_precision_are_distinct_stops() {
     let quadratic = Oracle::unbounded(3, |x: ArrayView1<f64>| (0.5 * x.dot(&x), x.to_owned()));
     let mut at_tolerance = array![1.0, 0.0, 0.0];

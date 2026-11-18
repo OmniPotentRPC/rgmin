@@ -74,10 +74,10 @@ pub struct GromacsSteepConfig {
     /// returns the constraint error on the first failure and does not
     /// shrink.
     pub max_constraint_shrinks: u32,
+    step_size: f64,
 }
 
 with_setters!(GromacsSteepConfig {
-    with_shrink => shrink: val f64,
     with_max_constraint_shrinks => max_constraint_shrinks: val u32,
 });
 
@@ -96,7 +96,19 @@ impl GromacsSteepConfig {
                 step_size,
                 GROMACS_STEEP_SHRINK,
             ),
+            step_size,
         }
+    }
+
+    /// Replace [`Self::shrink`] and recompute [`Self::max_constraint_shrinks`]
+    /// from the step size.
+    ///
+    /// Chain it after `default()` or [`Self::for_step_size`].
+    #[must_use]
+    pub fn with_shrink(mut self, shrink: f64) -> Self {
+        self.shrink = shrink;
+        self.max_constraint_shrinks = gromacs_steep_max_constraint_shrinks(self.step_size, shrink);
+        self
     }
 
     pub(crate) fn validate(self) -> Result<Self> {
@@ -286,5 +298,21 @@ mod tests {
             GromacsSteepConfig::default().max_constraint_shrinks,
             GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS
         );
+        let manual_smaller = GromacsSteepConfig::for_step_size(0.001)
+            .with_shrink(0.2)
+            .max_constraint_shrinks;
+        let manual_larger = GromacsSteepConfig::for_step_size(0.1)
+            .with_shrink(0.2)
+            .max_constraint_shrinks;
+        assert_eq!(
+            manual_smaller,
+            gromacs_steep_max_constraint_shrinks(0.001, 0.2)
+        );
+        assert_eq!(
+            manual_larger,
+            gromacs_steep_max_constraint_shrinks(0.1, 0.2)
+        );
+        assert!(manual_smaller < manual_larger);
+        assert!(manual_larger < larger);
     }
 }
