@@ -4,8 +4,8 @@
 The ABI stamp defines in ``include/rgmin.h`` must equal the constants in
 ``src/ffi.rs``.
 
-A new function is listed and does not fail. A removed or renamed
-function fails. Type changes are what ``abidiff`` would catch when it
+A new function now fails until it is added to the baseline. A removed
+or renamed function fails. Type changes are what ``abidiff`` would catch when it
 is installed; this check is the one that always runs.
 """
 
@@ -106,6 +106,7 @@ def main() -> int:
         print("added to the C ABI (update scripts/abi_baseline.txt when the addition is intentional):")
         for name in added:
             print(f"  {name}")
+        return 1
     if shutil.which("abidiff"):
         library = ROOT / "target" / "debug" / "librgmin.so"
         if library.is_file():

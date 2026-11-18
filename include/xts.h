@@ -127,6 +127,7 @@ typedef rgmin_constraints_t xts_constraints_t;
 #define xts_solver_clear_exp rgmin_solver_clear_exp
 #define xts_solver_exp_mu rgmin_solver_exp_mu
 #define xts_solver_set_accept rgmin_solver_set_accept
+#define xts_solver_set_gromacs_steep rgmin_solver_set_gromacs_steep
 #define xts_solver_set_stop_norm rgmin_solver_set_stop_norm
 #define xts_solver_set_error_on_unmet rgmin_solver_set_error_on_unmet
 #define xts_solver_set_backward_polish rgmin_solver_set_backward_polish
