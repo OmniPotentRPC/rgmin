@@ -53,6 +53,18 @@ pub(crate) fn retract_within_cap<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    retract_within_bounds(obj.bounds(), pos, step, atom_maxmove, maxmove, manifold)
+}
+
+/// [`retract_within_cap`] against the box itself.
+pub(crate) fn retract_within_bounds(
+    bounds: &eindir_core::Bounds<f64>,
+    pos: &Array1<f64>,
+    step: &Array1<f64>,
+    atom_maxmove: Option<f64>,
+    maxmove: Option<f64>,
+    manifold: &ManifoldKind,
+) -> Option<(Array1<f64>, Array1<f64>)> {
     // A cap binds only when it is positive and finite. `Some(c)` with
     // `c <= 0`, NaN, or infinity is no cap, matching `scale_step`: a
     // non-positive length must not reverse or refuse the step.
@@ -95,7 +107,6 @@ where
             trial = manifold.retract(pos, &step);
         }
     }
-    let bounds = obj.bounds();
     let inside = (trial.iter().zip(&bounds.low).zip(&bounds.high))
         .all(|((&t, &lo), &hi)| t.max(lo).min(hi) == t);
     if !inside {
