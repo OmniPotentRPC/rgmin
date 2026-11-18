@@ -1310,6 +1310,8 @@ mod tests {
         capped.n_pos = 1;
         capped.vel[0] = 1.0;
         let force = array![-1.0];
+        let mut direct_plain = plain.clone();
+        let mut direct_capped = capped.clone();
 
         let _ = fire_prepare_v2(&mut plain, &force);
         let _ = fire_prepare_v2(&mut capped, &force);
@@ -1317,6 +1319,15 @@ mod tests {
         assert_eq!(plain.dt_max, 8.0);
         assert_eq!(capped.dt_max, 0.8);
         assert_eq!(capped.dt, 0.4);
+
+        let mut plain_ext = Fire2Extras::new(0.8);
+        plain_ext.steps = plain_ext.n_delay;
+        let mut capped_ext = plain_ext.clone();
+        let _ = fire2_displacement(&mut direct_plain, &mut plain_ext, &force).unwrap();
+        let _ = fire2_displacement(&mut direct_capped, &mut capped_ext, &force).unwrap();
+        assert_eq!(direct_plain.dt_max, 8.0);
+        assert_eq!(direct_capped.dt_max, 0.8);
+        assert_eq!(direct_capped.dt, 0.4);
     }
 
     #[test]
