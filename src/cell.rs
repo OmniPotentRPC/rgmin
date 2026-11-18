@@ -26,6 +26,8 @@ mod matrix;
 
 #[cfg(test)]
 mod gold;
+#[cfg(test)]
+mod precon_gold;
 
 use ndarray::{Array1, ArrayView1};
 
