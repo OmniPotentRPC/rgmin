@@ -9,7 +9,7 @@ class Session:
         kind: str,
         n: int,
         *,
-        max_atom: float = 0.2,
+        max_atom: float | None = None,
         wolfe: bool = False,
         eon_cap: bool = False,
         memory: int = 8,
