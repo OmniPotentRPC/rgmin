@@ -3,7 +3,7 @@ mod common;
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::{
     ConstraintSolver, Control, DistanceConstraints, Error, GROMACS_STEEP_GROW,
-    GROMACS_STEEP_SHRINK, GromacsSteepConfig, Method, NoiseFloor, Oracle, Solver, Status,
+    GROMACS_STEEP_SHRINK, GromacsSteepConfig, Method, NoiseFloor, Oracle, Solver, Status, StopNorm,
 };
 
 use common::morse_value_grad;
@@ -244,4 +244,226 @@ fn forget_resets_step_size_and_holonomic_constraints_stay_on_bond() {
         + (constrained[5] - constrained[2]).powi(2))
     .sqrt();
     assert!((bond - 1.0).abs() < 1e-12);
+}
+
+struct PrintedStep {
+    dmax: f64,
+    dmax_text: String,
+    epot_text: String,
+    fmax_text: String,
+}
+
+struct ArgonReference {
+    emstep: f64,
+    sigma: f64,
+    epsilon: f64,
+    cutoff: f64,
+    final_energy: String,
+    steps: Vec<PrintedStep>,
+    start: Vec<String>,
+    end: Vec<String>,
+}
+
+fn load_argon() -> ArgonReference {
+    let text = include_str!("data/gromacs_steep_argon.txt");
+    let mut emstep = None;
+    let mut sigma = None;
+    let mut epsilon = None;
+    let mut cutoff = None;
+    let mut final_energy = None;
+    let mut section = "";
+    let mut steps = Vec::new();
+    let mut start = Vec::new();
+    let mut end = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        match line {
+            "steps" => section = "steps",
+            "start" => section = "start",
+            "final" => section = "final",
+            _ if section == "steps" => {
+                let mut parts = line.split_whitespace();
+                let _count = parts.next().unwrap();
+                let dmax_text = parts.next().unwrap().to_string();
+                let epot_text = parts.next().unwrap().to_string();
+                let fmax_text = parts.next().unwrap().to_string();
+                steps.push(PrintedStep {
+                    dmax: dmax_text.parse().unwrap(),
+                    dmax_text,
+                    epot_text,
+                    fmax_text,
+                });
+            }
+            _ if section == "start" => start.extend(line.split_whitespace().map(str::to_string)),
+            _ if section == "final" => end.extend(line.split_whitespace().map(str::to_string)),
+            _ => {
+                let (key, value) = line.split_once(' ').unwrap();
+                match key {
+                    "emstep" => emstep = Some(value.parse().unwrap()),
+                    "sigma" => sigma = Some(value.parse().unwrap()),
+                    "epsilon" => epsilon = Some(value.parse().unwrap()),
+                    "cutoff" => cutoff = Some(value.parse().unwrap()),
+                    "final_energy" => final_energy = Some(value.to_string()),
+                    "final_fmax" => {}
+                    other => panic!("unknown field {other}"),
+                }
+            }
+        }
+    }
+    ArgonReference {
+        emstep: emstep.unwrap(),
+        sigma: sigma.unwrap(),
+        epsilon: epsilon.unwrap(),
+        cutoff: cutoff.unwrap(),
+        final_energy: final_energy.unwrap(),
+        steps,
+        start,
+        end,
+    }
+}
+
+fn printed_half_ulp(token: &str) -> f64 {
+    let (mantissa, exponent) = token.split_once(['e', 'E']).expect(token);
+    let digits = mantissa
+        .trim_start_matches(['+', '-'])
+        .split_once('.')
+        .map(|(_, fraction)| fraction.len())
+        .unwrap_or(0);
+    let exp: i32 = exponent.parse().unwrap();
+    0.5 * 10f64.powi(exp - digits as i32)
+}
+
+fn matches_print(got: f64, token: &str) -> bool {
+    let printed: f64 = token.parse().unwrap();
+    (got - printed).abs() <= printed_half_ulp(token)
+}
+
+fn parse_coordinates(tokens: &[String]) -> Array1<f64> {
+    Array1::from_vec(tokens.iter().map(|token| token.parse().unwrap()).collect())
+}
+
+fn lennard_jones(x: ArrayView1<f64>, sigma: f64, epsilon: f64, cutoff: f64) -> (f64, Array1<f64>) {
+    let atoms = x.len() / 3;
+    let mut energy = 0.0;
+    let mut force = Array1::zeros(x.len());
+    let sigma6 = sigma.powi(6);
+    let c6 = 4.0 * epsilon * sigma6;
+    let c12 = c6 * sigma6;
+    let cutoff_sq = cutoff * cutoff;
+    for i in 0..atoms {
+        for j in (i + 1)..atoms {
+            let mut delta = [0.0; 3];
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                delta[k] = x[3 * i + k] - x[3 * j + k];
+                r2 += delta[k] * delta[k];
+            }
+            if r2 >= cutoff_sq {
+                continue;
+            }
+            let r6 = r2 * r2 * r2;
+            let r12 = r6 * r6;
+            energy += c12 / r12 - c6 / r6;
+            let coef = (12.0 * c12 / r12 - 6.0 * c6 / r6) / r2;
+            for k in 0..3 {
+                let component = coef * delta[k];
+                force[3 * i + k] += component;
+                force[3 * j + k] -= component;
+            }
+        }
+    }
+    (energy, force.mapv(|component: f64| -component))
+}
+
+fn next_dmax_grew(current: f64, next: f64) -> bool {
+    let grew = (next - current * GROMACS_STEEP_GROW).abs();
+    let shrank = (next - current * GROMACS_STEEP_SHRINK).abs();
+    grew < shrank
+}
+
+/// Seven-atom argon cluster against `gmx_d` 2025.4 double precision.
+///
+/// The reference file is that run's verbose step lines, the
+/// double-precision energy footer, and the g96 coordinates. Step 0 is
+/// the initial evaluation. Each later `Solver::step` is one GROMACS
+/// trial. Dmax, Epot and Fmax are compared inside half a unit of the
+/// last digit `minimize.cpp` prints.
+#[test]
+fn argon_cluster_matches_gromacs_2025_step_sequence() {
+    let reference = load_argon();
+    assert!(reference.steps.len() > 2);
+    let mut x = parse_coordinates(&reference.start);
+    let sigma = reference.sigma;
+    let epsilon = reference.epsilon;
+    let cutoff = reference.cutoff;
+    let objective = Oracle::unbounded(x.len(), move |point: ArrayView1<f64>| {
+        lennard_jones(point, sigma, epsilon, cutoff)
+    });
+    let (energy, gradient) = lennard_jones(x.view(), sigma, epsilon, cutoff);
+    let opening = &reference.steps[0];
+    assert!(
+        matches_print(energy, &opening.epot_text),
+        "step 0 energy {energy} vs {}",
+        opening.epot_text
+    );
+    assert!(
+        matches_print(StopNorm::MaxAtom.of(gradient.view()), &opening.fmax_text),
+        "step 0 fmax"
+    );
+
+    let mut solver = Solver::new(
+        Method::GromacsSteep,
+        control(reference.emstep, 0.0, reference.steps.len()),
+        x.len(),
+    );
+    let mut best = energy;
+    let mut saw_refusal = false;
+    for index in 1..reference.steps.len() {
+        let printed = &reference.steps[index];
+        let step_size = solver.gromacs_step_size().unwrap();
+        assert!(
+            matches_print(step_size, &printed.dmax_text),
+            "step {index} Dmax {step_size} vs {}",
+            printed.dmax_text
+        );
+        let before = x.clone();
+        let report = solver.step(&objective, &mut x).unwrap();
+        assert_eq!(report.status, Status::Iterating);
+        let accepted = if index + 1 < reference.steps.len() {
+            next_dmax_grew(printed.dmax, reference.steps[index + 1].dmax)
+        } else {
+            report.value < best
+        };
+        if accepted {
+            assert!(
+                matches_print(report.value, &printed.epot_text),
+                "step {index} energy {} vs {}",
+                report.value,
+                printed.epot_text
+            );
+            assert!(
+                matches_print(report.grad_norm, &printed.fmax_text),
+                "step {index} fmax {} vs {}",
+                report.grad_norm,
+                printed.fmax_text
+            );
+            assert_ne!(x, before);
+            best = report.value;
+        } else {
+            saw_refusal = true;
+            assert_eq!(x, before);
+            assert_eq!(report.value.to_bits(), best.to_bits());
+        }
+    }
+    assert!(saw_refusal);
+    for (got, stored) in x.iter().zip(&reference.end) {
+        assert_eq!(format!("{got:.9}"), *stored, "{got}");
+    }
+    assert!(
+        matches_print(best, &reference.final_energy),
+        "final energy {best} vs {}",
+        reference.final_energy
+    );
 }
