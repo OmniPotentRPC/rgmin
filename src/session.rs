@@ -19,7 +19,7 @@ use crate::control::{Control, StopNorm};
 use crate::diis::{DiisState, gdiis_point};
 use crate::error::{Error, Result};
 use crate::fire::{
-    Fire2Extras, FireConfig, FireKind, FireMix, FirePreparation, FirePreset, FireState,
+    Fire2Extras, FireConfig, FireKind, FireMix, FirePreparation, FirePreset, FireState, FireTrace,
     FireVariant, fire_after_v1_metric, fire_clip_components, fire_displacement_into,
     fire_prepare_v2, fire_rescale_velocity, fire2_displacement_metric, guenole2020,
 };
@@ -341,6 +341,10 @@ pub struct Solver {
     brief: bool,
     /// Optional trace of the eOn fill step.
     eon_log: Option<Vec<drive::EonFeat>>,
+    /// Whether per-step FIRE tracing is active.
+    fire_trace_on: bool,
+    /// Recorded per-step trace of a FIRE session.
+    fire_trace: Vec<FireTrace>,
     /// Ratio test on a capped two-loop fill. Off by default.
     trust: bool,
     trust_delta: f64,
@@ -530,6 +534,8 @@ impl Solver {
             level_set: None,
             brief: false,
             eon_log: None,
+            fire_trace_on: false,
+            fire_trace: Vec::new(),
             trust: false,
             trust_delta: 0.0,
             trust_max: 0.0,
@@ -4237,6 +4243,7 @@ impl Solver {
                     let curved = !manifold.is_flat();
                     let n_pos_saved = state.n_pos;
                     let dt_saved = state.dt;
+                    let dt_max_saved = state.dt_max;
                     let alpha_saved = state.alpha;
                     let vel_saved = state.vel.clone();
                     // The force, its metric image and the velocity leave the
@@ -4263,13 +4270,20 @@ impl Solver {
                         crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
                         crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                     }
+                    let mut power_trace = crate::vecops::dot(raw.view(), state.vel.view());
+                    let had_vel = state.vel.iter().any(|v| *v != 0.0);
+                    let mut hsb_trace = false;
                     let mix = fire_mix(&self.precon, &state.vel, &raw, &steepest);
                     let displacement = match fire2_local.as_mut() {
-                        Some(ext) => fire2_displacement_metric(state, ext, &raw, &steepest, mix)
-                            .map_err(|_| ()),
+                        Some(ext) => {
+                            hsb_trace = power_trace <= 0.0 && had_vel;
+                            fire2_displacement_metric(state, ext, &raw, &steepest, mix)
+                                .map_err(|_| ())
+                        }
                         None => match fire_prepare_v2(state, &raw) {
                             FirePreparation::Stalled => Err(()),
                             FirePreparation::Rollback(correction) => {
+                                hsb_trace = true;
                                 if curved {
                                     let back = manifold.project(x, &correction);
                                     let Some((point, _)) =
@@ -4315,16 +4329,20 @@ impl Solver {
                             // the integrator as it was, apart from that count.
                             state.n_pos = n_pos_saved;
                             state.dt = dt_saved;
+                            state.dt_max = dt_max_saved;
                             state.alpha = alpha_saved;
                             state.vel.assign(&vel_saved);
                             stalled = true;
                             Array1::zeros(state.vel.len())
                         }
                     };
+                    let mut clip_trace = false;
                     if !stalled
                         && state.abc
                         && let Some(cap) = self.atom_maxmove.or(self.control.maxmove_cap())
                     {
+                        let vmax = cap / state.dt;
+                        clip_trace = state.vel.iter().any(|v| v.abs() > vmax);
                         dx = fire_clip_components(state, cap);
                     }
                     if !stalled {
@@ -4338,7 +4356,7 @@ impl Solver {
                                 (self.atom_maxmove, self.control.maxmove_cap())
                             };
                             let tangent = manifold.project(x, &dx);
-                            let Some((trial, _)) =
+                            let Some((trial, used)) =
                                 retract_within_cap(obj, x, &tangent, atom_cap, cap, &manifold)
                             else {
                                 state.restore(saved);
@@ -4347,6 +4365,9 @@ impl Solver {
                                     kind: manifold.as_str(),
                                 });
                             };
+                            if used != tangent {
+                                clip_trace = true;
+                            }
                             if matches!(state.kind, FireKind::V2) && state.dt > 0.0 {
                                 let mut secant = (&trial - &*x) / state.dt;
                                 manifold.project_in_place(&trial, &mut secant);
@@ -4356,6 +4377,10 @@ impl Solver {
                         } else {
                             let mut trial = x.clone();
                             trial += &dx;
+                            let plain = state.preset() == FirePreset::Default
+                                && !state.abc
+                                && fire2_local.is_none();
+                            let unclipped = (!plain || self.fire_trace_on).then(|| trial.clone());
                             if !state.abc {
                                 apply_caps(
                                     x,
@@ -4370,6 +4395,10 @@ impl Solver {
                             {
                                 trial = bounds.clip(trial.view());
                             }
+                            let shortened = unclipped.is_some_and(|free| trial != free);
+                            if shortened {
+                                clip_trace = true;
+                            }
                             // The clamp and clip shorten the move; the velocity has to
                             // describe the move taken, or the power adapt reads an
                             // integral of moves that never happened. An unshortened
@@ -4378,7 +4407,8 @@ impl Solver {
                             // whole is shortened to nothing.
                             let swallowed = trial == *x && dx.iter().any(|v| *v != 0.0);
                             if swallowed
-                                || (!state.abc
+                                || ((plain || shortened)
+                                    && !state.abc
                                     && (self.atom_maxmove.is_some()
                                         || self.control.maxmove_cap().is_some()))
                             {
@@ -4428,8 +4458,26 @@ impl Solver {
                             crate::box_objective::project_tangent(obj.bounds(), x, &mut steep_new);
                             crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                         }
+                        if matches!(state.kind, FireKind::V1) {
+                            power_trace = crate::vecops::dot(raw_new.view(), state.vel.view());
+                        }
                         let mix_new = fire_mix(&self.precon, &state.vel, &raw_new, &steep_new);
                         fire_after_v1_metric(state, &raw_new, &steep_new, mix_new);
+                        if self.fire_trace_on {
+                            let (prev_hsb, prev_clip) = match self.fire_trace.last() {
+                                Some(last) => (last.half_step_backs, last.clipped_moves),
+                                None => (0, 0),
+                            };
+                            self.fire_trace.push(FireTrace {
+                                dt: state.dt,
+                                dt_max: state.dt_max,
+                                alpha: state.alpha,
+                                power: power_trace,
+                                n_pos: state.n_pos,
+                                half_step_backs: prev_hsb + usize::from(hsb_trace),
+                                clipped_moves: prev_clip + usize::from(clip_trace),
+                            });
+                        }
                     }
                 }
                 Inner::Bb { prev_s, prev_y } => {
@@ -4811,6 +4859,18 @@ impl Solver {
             }
             _ => Err(Error::NeedFire2),
         }
+    }
+
+    /// Start recording per-step [`FireTrace`] entries on a FIRE session.
+    pub fn start_fire_trace(&mut self) {
+        self.fire_trace.clear();
+        self.fire_trace_on = true;
+    }
+
+    /// Take the recorded [`FireTrace`] entries, if tracing was started.
+    pub fn take_fire_trace(&mut self) -> Vec<FireTrace> {
+        self.fire_trace_on = false;
+        std::mem::take(&mut self.fire_trace)
     }
 
     /// Step-length rule for an L-BFGS session.
@@ -5302,6 +5362,7 @@ impl Solver {
             && !self.project_rigid
             && self.exp.is_none()
             && self.fire2.is_none()
+            && !self.fire_trace_on
             && !state.abc
             && state.preset() == FirePreset::Default
     }
@@ -5919,6 +5980,7 @@ mod tests {
     fn fire_v2_velocity_times_dt_is_the_clamped_move() {
         let obj = steep();
         let mut solver = fire_solver(FireKind::V2);
+        solver.start_fire_trace();
         let mut x = array![1.0, 1.0];
         for _ in 0..5 {
             let before = x.clone();
@@ -5939,6 +6001,9 @@ mod tests {
                 );
             }
         }
+        let trace = solver.take_fire_trace();
+        assert_eq!(trace.len(), 5);
+        assert_eq!(trace.last().unwrap().clipped_moves, 5);
     }
 
     #[test]

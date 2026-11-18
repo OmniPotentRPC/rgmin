@@ -62,6 +62,14 @@ pub enum FirePreset {
     /// start step. Inside the first `N_delay` steps an uphill step
     /// neither shrinks `dt` nor resets `alpha`. A later shrink that
     /// would pass `dt_min` keeps `dt` (Algorithm 2).
+    ///
+    /// The default follows Algorithm 2 and LAMMPS without changing
+    /// `dt_max` on an uphill step. LAMMPS `develop`,
+    /// `src/min_fire.cpp:296-306`, only resets `alpha` and shrinks `dt`.
+    /// [`FireConfig::cap_two_step_overshoot`] opts into lowering `dt_max`
+    /// when an uphill step follows exactly one downhill step. That
+    /// deviation can stop a repeated semi-implicit-Euler overshoot cycle
+    /// on stiff systems.
     Guenole2020,
 }
 
@@ -93,6 +101,11 @@ pub struct FireConfig {
     pub alpha: f64,
     /// `alpha` decay.
     pub f_alpha: f64,
+    /// Cap `dt_max` after a two-step overshoot.
+    ///
+    /// This opt-in stabilization is not part of Guénolé et al. Algorithm 2
+    /// or LAMMPS `min_style fire`; see [`FirePreset::Guenole2020`].
+    pub cap_two_step_overshoot: bool,
 }
 
 with_setters!(FireConfig {
@@ -103,6 +116,7 @@ with_setters!(FireConfig {
     with_f_dec => f_dec: val f64,
     with_alpha => alpha: val f64,
     with_f_alpha => f_alpha: val f64,
+    with_cap_two_step_overshoot => cap_two_step_overshoot: val bool,
 });
 
 impl FireConfig {
@@ -117,9 +131,46 @@ impl FireConfig {
             f_dec: 0.5,
             alpha: 0.1,
             f_alpha: 0.99,
+            cap_two_step_overshoot: false,
         }
     }
 }
+
+impl Default for FireConfig {
+    fn default() -> Self {
+        Self::ase()
+    }
+}
+
+/// Per-step FIRE diagnostic record from [`crate::Solver::start_fire_trace`].
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FireTrace {
+    /// Time step `dt` used for the forward step.
+    pub dt: f64,
+    /// Current time-step ceiling.
+    pub dt_max: f64,
+    /// Velocity-mixing weight `alpha` used on the step.
+    pub alpha: f64,
+    /// Power `P = F · v` evaluated on the step.
+    pub power: f64,
+    /// Consecutive positive-power count `N_pos` after the power check.
+    pub n_pos: usize,
+    /// Cumulative half-step-back corrections taken so far in the trace.
+    pub half_step_backs: usize,
+    /// Cumulative cap- or bound-clipped moves taken so far in the trace.
+    pub clipped_moves: usize,
+}
+
+with_setters!(FireTrace {
+    with_dt => dt: val f64,
+    with_dt_max => dt_max: val f64,
+    with_alpha => alpha: val f64,
+    with_power => power: val f64,
+    with_n_pos => n_pos: val usize,
+    with_half_step_backs => half_step_backs: val usize,
+    with_clipped_moves => clipped_moves: val usize,
+});
 
 /// Session memory for one FIRE or FIRE 2.0 solve.
 #[derive(Clone)]
@@ -136,6 +187,8 @@ pub struct FireState {
     dt_min: f64,
     /// Time-step cap.
     pub dt_max: f64,
+    /// Configured time-step cap restored by [`Self::reset`].
+    dt_max_start: f64,
     /// Mixing parameter. The mix uses it clamped to `[0, 1]` (NaN as 0),
     /// the range in which it never lengthens the velocity.
     pub alpha: f64,
@@ -162,6 +215,8 @@ pub struct FireState {
     /// FIRE 2.0 only: divide the mixed velocity by
     /// `1 - (1 - alpha)^(n_pos + 1)` (ABC-FIRE).
     pub abc: bool,
+    /// Opt-in stabilization for an uphill step after one downhill step.
+    cap_two_step_overshoot: bool,
     /// Velocity from the start of the current step, so a refused trial
     /// restores it without allocating.
     saved_vel: Array1<f64>,
@@ -171,6 +226,7 @@ pub struct FireState {
 #[derive(Clone, Copy)]
 pub(crate) struct FireCheckpoint {
     dt: f64,
+    dt_max: f64,
     alpha: f64,
     n_pos: usize,
     n_neg: usize,
@@ -188,6 +244,7 @@ impl FireState {
             dt_start: dt,
             dt_min: 1.0e-12,
             dt_max: (dt * 2.5).max(dt),
+            dt_max_start: (dt * 2.5).max(dt),
             alpha: 0.1,
             alpha_start: 0.1,
             n_pos: 0,
@@ -200,6 +257,7 @@ impl FireState {
             f_alpha: 0.99,
             preset: FirePreset::Default,
             abc: false,
+            cap_two_step_overshoot: false,
             saved_vel: Array1::zeros(dim),
         }
     }
@@ -213,6 +271,7 @@ impl FireState {
         }
         FireCheckpoint {
             dt: self.dt,
+            dt_max: self.dt_max,
             alpha: self.alpha,
             n_pos: self.n_pos,
             n_neg: self.n_neg,
@@ -223,6 +282,7 @@ impl FireState {
     /// Undo the integrator mutations made since [`Self::checkpoint`].
     pub(crate) fn restore(&mut self, saved: FireCheckpoint) {
         self.dt = saved.dt;
+        self.dt_max = saved.dt_max;
         self.alpha = saved.alpha;
         self.n_pos = saved.n_pos;
         self.n_neg = saved.n_neg;
@@ -243,6 +303,7 @@ impl FireState {
         self.preset = preset;
         if preset == FirePreset::Guenole2020 {
             self.dt_max = 10.0 * self.dt_start;
+            self.dt_max_start = self.dt_max;
             self.dt_min = 0.02 * self.dt_start;
             self.n_min = 20;
             self.f_inc = 1.1;
@@ -269,6 +330,7 @@ impl FireState {
         }
         if config.dt_max.is_finite() && config.dt_max > 0.0 {
             self.dt_max = config.dt_max;
+            self.dt_max_start = config.dt_max;
         }
         self.n_min = config.n_min;
         if config.f_inc.is_finite() && config.f_inc > 1.0 {
@@ -284,15 +346,18 @@ impl FireState {
         if config.f_alpha.is_finite() && config.f_alpha > 0.0 && config.f_alpha < 1.0 {
             self.f_alpha = config.f_alpha;
         }
+        self.cap_two_step_overshoot = config.cap_two_step_overshoot;
         self.vel.fill(0.0);
         self.n_pos = 0;
         self.n_neg = 0;
         self.steps = 0;
     }
 
-    /// Drop velocity and mixing. The current `dt` is kept.
+    /// Drop velocity and mixing. The current `dt` is kept and `dt_max`
+    /// returns to its configured value.
     pub fn reset(&mut self) {
         self.vel.fill(0.0);
+        self.dt_max = self.dt_max_start;
         self.alpha = self.alpha_start;
         self.n_pos = 0;
         self.n_neg = 0;
@@ -398,6 +463,9 @@ pub(crate) enum FirePreparation {
 ///
 /// The caller must evaluate a fresh force after applying a nonzero
 /// correction, before passing that force to [`fire_displacement_into`].
+/// This matches LAMMPS `develop` `src/min_fire.cpp:296-336`: its
+/// non-positive-power branch steps back and clears velocity, then
+/// `energy_force(0)` refreshes the force before the Euler kick.
 /// A step that makes the consecutive non-positive count exceed the
 /// limit returns [`FirePreparation::Stalled`] before the shrink and the
 /// half-step. [`FirePreset::Guenole2020`] uses the published initial
@@ -417,6 +485,7 @@ pub(crate) fn fire_prepare_v2(state: &mut FireState, force: &Array1<f64>) -> Fir
         }
         return FirePreparation::Ready;
     }
+    let prev_n_pos = state.n_pos;
     state.n_pos = 0;
     state.n_neg = state.n_neg.saturating_add(1);
     if state.n_neg > state.n_neg_max {
@@ -425,6 +494,9 @@ pub(crate) fn fire_prepare_v2(state: &mut FireState, force: &Array1<f64>) -> Fir
     match state.preset {
         FirePreset::Guenole2020 => {
             if state.steps >= state.n_min {
+                if state.cap_two_step_overshoot && prev_n_pos == 1 {
+                    state.dt_max = state.dt_max.min(state.dt);
+                }
                 let shrunk = state.dt * state.f_dec;
                 if shrunk >= state.dt_min {
                     state.dt = shrunk;
@@ -730,12 +802,16 @@ pub fn fire2_displacement_metric(
             state.alpha *= state.f_alpha;
         }
     } else {
+        let prev_n_pos = state.n_pos;
         state.n_pos = 0;
         ext.n_neg = ext.n_neg.saturating_add(1);
         if ext.n_neg > ext.n_neg_max {
             return Err(crate::Error::FireStalled { steps: ext.steps });
         }
         if !(ext.initial_delay && ext.steps < ext.n_delay) {
+            if state.cap_two_step_overshoot && prev_n_pos == 1 {
+                state.dt_max = state.dt_max.min(state.dt);
+            }
             if state.dt * state.f_dec >= ext.dt_min {
                 state.dt *= state.f_dec;
             }
@@ -1200,5 +1276,143 @@ mod tests {
         assert!((state.dt_max - 1.0).abs() < 1e-15);
         assert_eq!(state.n_min, 5);
         assert!((state.f_alpha - 0.99).abs() < 1e-15);
+    }
+
+    #[test]
+    fn checkpoint_and_reset_restore_the_configured_dt_max() {
+        let mut state = FireState::new(FireKind::V2, 1, 0.1);
+        state.apply_config(&FireConfig::ase().with_dt_max(4.0));
+        let saved = state.checkpoint();
+        state.dt_max = 0.5;
+        state.restore(saved);
+        assert_eq!(state.dt_max, 4.0);
+        state.dt_max = 0.25;
+        state.reset();
+        assert_eq!(state.dt_max, 4.0);
+    }
+
+    #[test]
+    fn two_step_overshoot_cap_is_opt_in_and_uses_the_pre_shrink_dt() {
+        let mut plain = FireState::new(FireKind::V2, 1, 0.8);
+        plain.set_preset(FirePreset::Guenole2020);
+        plain.steps = plain.n_min;
+        plain.n_pos = 1;
+        plain.vel[0] = 1.0;
+        let mut capped = plain.clone();
+        capped.apply_config(
+            &FireConfig::ase()
+                .with_dt(0.8)
+                .with_dt_max(8.0)
+                .with_n_min(20)
+                .with_cap_two_step_overshoot(true),
+        );
+        capped.steps = capped.n_min;
+        capped.n_pos = 1;
+        capped.vel[0] = 1.0;
+        let force = array![-1.0];
+
+        let _ = fire_prepare_v2(&mut plain, &force);
+        let _ = fire_prepare_v2(&mut capped, &force);
+
+        assert_eq!(plain.dt_max, 8.0);
+        assert_eq!(capped.dt_max, 0.8);
+        assert_eq!(capped.dt, 0.4);
+    }
+
+    #[test]
+    fn opt_in_two_step_cap_stops_sawtooth_cycle() {
+        // Stiff optical mode (lambda = 14) coupled with a slow acoustic mode
+        // (lambda = 0.04) at dt0 = 0.1. Uncapped dt_max = 1.0 grows past
+        // 2 / sqrt(14) = 0.5345, shrinks once to ~0.20 > 0.618 / sqrt(14) = 0.165,
+        // overshoots on the second step from rest (prev_n_pos == 1), and
+        // repeats a 37-step sawtooth cycle. Capping dt_max at that second
+        // reset keeps dt below the stability ceiling.
+        let stiff_soft = |x: ArrayView1<f64>| -> (f64, Array1<f64>) {
+            let e = 7.0 * x[0] * x[0] + 0.02 * x[1] * x[1];
+            let g = array![14.0 * x[0], 0.04 * x[1]];
+            (e, g)
+        };
+        let tol = 1.0 / 1_000_000.0;
+        let control = crate::Control::default()
+            .with_maxiter(600)
+            .with_gtol(tol)
+            .with_istep(0.1);
+        let mut solver = crate::Solver::new(crate::Method::Fire { kind: FireKind::V2 }, control, 2);
+        solver.set_fire_preset(FirePreset::Guenole2020).unwrap();
+        solver
+            .set_fire_config(
+                FireConfig::ase()
+                    .with_dt(0.1)
+                    .with_dt_max(1.0)
+                    .with_n_min(20)
+                    .with_alpha(0.25)
+                    .with_cap_two_step_overshoot(true),
+            )
+            .unwrap();
+        solver.set_atom_maxmove(0.1);
+        solver.start_fire_trace();
+        let obj = crate::Oracle::unbounded(2, stiff_soft);
+        let mut x = array![0.02, 0.05];
+        let mut steps = 0;
+        for _ in 0..600 {
+            steps += 1;
+            let rep = solver.step(&obj, &mut x).unwrap();
+            if rep.grad_norm < tol {
+                break;
+            }
+        }
+        let trace = solver.take_fire_trace();
+        assert_eq!(trace.len(), steps);
+        assert!(
+            steps < 260,
+            "sawtooth cycle was not stopped: took {steps} steps (last trace {:?})",
+            trace.last()
+        );
+        assert!(
+            trace.last().unwrap().half_step_backs <= 10,
+            "too many half-step-backs: {}",
+            trace.last().unwrap().half_step_backs
+        );
+    }
+
+    #[test]
+    fn unclipped_guenole_move_with_atom_cap_leaves_velocity_and_clip_count_intact() {
+        let shift = 72.0;
+        let quad = move |x: ArrayView1<f64>| -> (f64, Array1<f64>) {
+            let d0 = x[0] - shift;
+            let d1 = x[1] - shift;
+            let d2 = x[2] - shift;
+            (0.5 * (d0 * d0 + d1 * d1 + d2 * d2), array![d0, d1, d2])
+        };
+        let control = crate::Control::default()
+            .with_maxiter(10)
+            .with_gtol(0.0)
+            .with_istep(0.1);
+        let mut capped = crate::Solver::new(
+            crate::Method::Fire { kind: FireKind::V2 },
+            control.clone(),
+            3,
+        );
+        capped.set_fire_preset(FirePreset::Guenole2020).unwrap();
+        capped.set_atom_maxmove(0.1);
+        capped.start_fire_trace();
+
+        let mut uncapped =
+            crate::Solver::new(crate::Method::Fire { kind: FireKind::V2 }, control, 3);
+        uncapped.set_fire_preset(FirePreset::Guenole2020).unwrap();
+        uncapped.start_fire_trace();
+
+        let obj = crate::Oracle::unbounded(3, quad);
+        let delta = 1.0 / 10_000_000.0;
+        let mut x_cap = array![shift + delta, shift - delta, shift + 0.5 * delta];
+        let mut x_uncap = x_cap.clone();
+        for _ in 0..8 {
+            capped.step(&obj, &mut x_cap).unwrap();
+            uncapped.step(&obj, &mut x_uncap).unwrap();
+            assert_eq!(x_cap, x_uncap);
+        }
+        let trace = capped.take_fire_trace();
+        assert_eq!(trace.len(), 8);
+        assert_eq!(trace.last().unwrap().clipped_moves, 0);
     }
 }

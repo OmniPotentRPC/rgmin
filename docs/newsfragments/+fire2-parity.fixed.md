@@ -1,0 +1,2 @@
+- Added an opt-in FIRE 2.0 stabilization that caps `dt_max` when an uphill reset follows one downhill move, preventing repeated semi-implicit-Euler overshoot cycles on stiff systems. The Guénolé et al. / LAMMPS schedule leaves it off by default.
+- Added per-step FIRE diagnostic tracing (`FireTrace`, `Solver::start_fire_trace`, `Solver::take_fire_trace`) recording `dt`, `dt_max`, `alpha`, `power`, `n_pos`, `half_step_backs`, and `clipped_moves`.
