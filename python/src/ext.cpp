@@ -718,11 +718,16 @@ NB_MODULE(_core, m) {
             if (budget == 0) {
                 report = zero_budget_report(function, x0, config.control(), config.method());
             } else {
+                std::vector<double> const start(x0.data(), x0.data() + n);
                 for (std::size_t i = 0; i < budget; ++i) {
                     report = step_python(solver, function, x0);
                     if (report.stop != RGMIN_STOP_BUDGET) {
                         break;
                     }
+                }
+                if (report.stop == RGMIN_STOP_BUDGET && config.method() == rgmin::Method::Lbfgs &&
+                    std::equal(start.begin(), start.end(), x0.data())) {
+                    report.stop = RGMIN_STOP_LINE_SEARCH;
                 }
             }
             if (config.error_on_unmet() &&
