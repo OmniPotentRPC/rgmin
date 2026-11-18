@@ -22,12 +22,12 @@ use crate::holonomic::{ConstraintError, ConstraintSolver, DistanceConstraints};
 use crate::precon::{ExpParams, ExpState, Neighbours};
 use crate::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Conjugacy, Control, DirectionalCurvature,
-    EigenParams, EigensolverKind, Error, HessianObjective, HessianOracle, HessianVector, HvpOracle,
-    LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart,
-    RiemannianManifold, ScgOptions, ScgParams, ScgStepTolerance, SearchStep, Solver, SpdMetric,
-    StiefelRetraction, StopNorm, SuppliedSearch, lowest_eigenpairs, lowest_eigenpairs_precond,
-    lowest_mode, minimize_method, minimize_method_hess, minimize_method_hvp,
-    minimize_scg_exact_with_options, minimize_scg_with_options,
+    EigenParams, EigensolverKind, Error, GromacsSteepConfig, HessianObjective, HessianOracle,
+    HessianVector, HvpOracle, LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method, NewtonKind,
+    Oracle, QnStep, Restart, RiemannianManifold, ScgOptions, ScgParams, ScgStepTolerance,
+    SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch, lowest_eigenpairs,
+    lowest_eigenpairs_precond, lowest_mode, minimize_method, minimize_method_hess,
+    minimize_method_hvp, minimize_scg_exact_with_options, minimize_scg_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -1767,6 +1767,28 @@ pub unsafe extern "C" fn rgmin_solver_set_accept(
         rgmin_accept_t::RGMIN_ACCEPT_STEP => Accept::Step,
     };
     unsafe { (*solver).solver.set_accept(a) };
+}
+
+/// GROMACS steep parameters on a `RGMIN_GROMACS_STEEP` session.
+/// Returns 0, or 1 on a null session, an invalid shrink factor, or a
+/// session that is not `RGMIN_GROMACS_STEEP`.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_gromacs_steep(
+    solver: *mut rgmin_solver_t,
+    shrink: f64,
+    max_constraint_shrinks: u32,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_gromacs_steep: null solver");
+        return 1;
+    }
+    let config = GromacsSteepConfig::default()
+        .with_shrink(shrink)
+        .with_max_constraint_shrinks(max_constraint_shrinks);
+    flag(unsafe { (*solver).solver.set_gromacs_steep_config(config) })
 }
 
 /// Gradient norm a session compares to `gtol` and writes to

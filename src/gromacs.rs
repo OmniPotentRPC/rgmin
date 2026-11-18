@@ -29,17 +29,31 @@ pub const GROMACS_STEEP_GROW: f64 = 1.2;
 /// energy is not strictly lower (`minimize.cpp` line 3104).
 pub const GROMACS_STEEP_SHRINK: f64 = 0.5;
 
-/// Consecutive constraint failures that shrink the displacement before
-/// the next one is returned as an error.
-///
-/// GROMACS 2025.4 does not abort a steep step on a constraint failure.
-/// `do_em_step` returns false, `do_steep` sets the trial energy to
-/// +infinity (`minimize.cpp` lines 3008-3009), and the energy test then
-/// takes the same `ustep *= 0.5` branch as a refused energy (line 3104).
-/// Single precision aborts once `ustep < 1e-6` (line 3143). From the
-/// default `emstep` of 0.01 (`readir.cpp` line 2384), the 14th factor of
-/// one half crosses that floor, and that iteration sets the abort.
-pub const GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS: u32 = 14;
+/// Canonical GROMACS initial `emstep` used for the static default.
+pub const GROMACS_STEEP_EMSTEP_DEFAULT: f64 = 0.01;
+
+/// Largest shrink count from this step size and shrink factor before the
+/// displacement reaches floating-point epsilon.
+pub fn gromacs_steep_max_constraint_shrinks(step_size: f64, shrink: f64) -> u32 {
+    if !(step_size.is_finite()
+        && step_size > 0.0
+        && shrink.is_finite()
+        && shrink > 0.0
+        && shrink < 1.0)
+    {
+        return 0;
+    }
+    let mut count = 0_u32;
+    let mut h = step_size;
+    while h > f64::EPSILON && count < u32::MAX {
+        h *= shrink;
+        count += 1;
+    }
+    count
+}
+
+/// Consecutive constraint failures for a canonical `emstep = 0.01`.
+pub const GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS: u32 = 46;
 
 /// Parameters of [`GromacsSteep`].
 ///
@@ -69,14 +83,22 @@ with_setters!(GromacsSteepConfig {
 
 impl Default for GromacsSteepConfig {
     fn default() -> Self {
-        Self {
-            shrink: GROMACS_STEEP_SHRINK,
-            max_constraint_shrinks: GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS,
-        }
+        Self::for_step_size(GROMACS_STEEP_EMSTEP_DEFAULT)
     }
 }
 
 impl GromacsSteepConfig {
+    /// Parameters with a shrink budget derived from `step_size`.
+    pub fn for_step_size(step_size: f64) -> Self {
+        Self {
+            shrink: GROMACS_STEEP_SHRINK,
+            max_constraint_shrinks: gromacs_steep_max_constraint_shrinks(
+                step_size,
+                GROMACS_STEEP_SHRINK,
+            ),
+        }
+    }
+
     pub(crate) fn validate(self) -> Result<Self> {
         if self.shrink.is_finite() && self.shrink > 0.0 && self.shrink < 1.0 {
             Ok(self)
@@ -102,7 +124,7 @@ impl GromacsSteep {
     pub fn new(step_size: f64) -> Self {
         Self {
             step_size,
-            config: GromacsSteepConfig::default(),
+            config: GromacsSteepConfig::for_step_size(step_size),
             constraint_shrinks: 0,
         }
     }
@@ -253,5 +275,16 @@ mod tests {
         for (&got, &want) in step.iter().zip(want.iter()) {
             assert_abs_diff_eq!(got, want, epsilon = 1e-16);
         }
+    }
+
+    #[test]
+    fn default_constraint_shrink_budget_tracks_the_initial_step_size() {
+        let smaller = GromacsSteepConfig::for_step_size(0.001).max_constraint_shrinks;
+        let larger = GromacsSteepConfig::for_step_size(0.1).max_constraint_shrinks;
+        assert!(smaller < larger);
+        assert_eq!(
+            GromacsSteepConfig::default().max_constraint_shrinks,
+            GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS
+        );
     }
 }
