@@ -768,10 +768,10 @@ impl Solver {
     /// Install a neighbour list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
     pub(crate) fn set_exp_deferred(&mut self, mut state: crate::precon::ExpState) {
-        if state.threads().is_none() {
-            if let Some(t) = self.precon_threads {
-                let _ = state.set_threads(Some(t));
-            }
+        if state.threads().is_none()
+            && let Some(t) = self.precon_threads
+        {
+            let _ = state.set_threads(Some(t));
         }
         self.install_slot(Slot::Exp(state));
     }
@@ -779,10 +779,10 @@ impl Solver {
     /// Install a Lindh list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
     pub(crate) fn set_lindh_deferred(&mut self, mut state: crate::precon::LindhState) {
-        if state.threads().is_none() {
-            if let Some(t) = self.precon_threads {
-                let _ = state.set_threads(Some(t));
-            }
+        if state.threads().is_none()
+            && let Some(t) = self.precon_threads
+        {
+            let _ = state.set_threads(Some(t));
         }
         self.install_slot(Slot::Lindh(state));
     }
@@ -790,10 +790,10 @@ impl Solver {
     /// Install an FF list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
     pub(crate) fn set_ff_deferred(&mut self, mut state: crate::precon::FfState) {
-        if state.threads().is_none() {
-            if let Some(t) = self.precon_threads {
-                let _ = state.set_threads(Some(t));
-            }
+        if state.threads().is_none()
+            && let Some(t) = self.precon_threads
+        {
+            let _ = state.set_threads(Some(t));
         }
         self.install_slot(Slot::Ff(state));
     }
