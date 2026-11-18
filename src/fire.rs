@@ -581,12 +581,42 @@ pub fn fire_displacement_into(state: &mut FireState, force: &Array1<f64>, dx: &m
     }
 }
 
+/// Whether a cap or bound shortened `trial` from the unclipped `free` point.
+///
+/// Any non-finite coordinate in `trial` or `free` returns `false` so a NaN
+/// or infinity never registers as a clipped move.
+pub(crate) fn fire_move_clipped(trial: &Array1<f64>, free: &Array1<f64>) -> bool {
+    trial.len() == free.len()
+        && trial
+            .iter()
+            .zip(free.iter())
+            .all(|(t, f)| t.is_finite() && f.is_finite())
+        && trial != free
+}
+
+/// Whether the ABC-FIRE component cap shortens a finite velocity.
+pub(crate) fn fire_abc_clipped(state: &FireState, cap: f64) -> bool {
+    let vmax = cap / state.dt;
+    vmax.is_finite()
+        && vmax > 0.0
+        && state.vel.iter().all(|v| v.is_finite())
+        && state.vel.iter().any(|v| v.abs() > vmax)
+}
+
 /// ABC-FIRE cap: clip each velocity component to `cap / dt` and return
 /// the displacement `dt v`, as ASE `FIRE2` does with `use_abc`.
 #[allow(dead_code)]
 pub(crate) fn fire_clip_components(state: &mut FireState, cap: f64) -> Array1<f64> {
     let vmax = cap / state.dt;
-    state.vel.mapv_inplace(|v| v.max(-vmax).min(vmax));
+    if vmax.is_finite() && vmax > 0.0 {
+        state.vel.mapv_inplace(|v| {
+            if v.is_finite() {
+                v.max(-vmax).min(vmax)
+            } else {
+                v
+            }
+        });
+    }
     &state.vel * state.dt
 }
 
@@ -1425,5 +1455,25 @@ mod tests {
         let trace = capped.take_fire_trace();
         assert_eq!(trace.len(), 8);
         assert_eq!(trace.last().unwrap().clipped_moves, 0);
+    }
+
+    #[test]
+    fn non_finite_coordinates_do_not_register_as_clipped_moves() {
+        let finite_a = array![1.0, 2.0];
+        let finite_b = array![0.5, 2.0];
+        let nan_vec = array![f64::NAN, 2.0];
+        let inf_vec = array![f64::INFINITY, 2.0];
+        assert!(fire_move_clipped(&finite_b, &finite_a));
+        assert!(!fire_move_clipped(&finite_a, &finite_a));
+        assert!(!fire_move_clipped(&nan_vec, &nan_vec));
+        assert!(!fire_move_clipped(&finite_b, &nan_vec));
+        assert!(!fire_move_clipped(&nan_vec, &finite_a));
+        assert!(!fire_move_clipped(&inf_vec, &finite_a));
+
+        let mut state = FireState::new(FireKind::V2, 2, 0.1);
+        state.vel = array![f64::NAN, 10.0];
+        assert!(!fire_abc_clipped(&state, 0.1));
+        let dx = fire_clip_components(&mut state, 0.1);
+        assert!(dx[0].is_nan());
     }
 }

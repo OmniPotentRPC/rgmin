@@ -26,7 +26,7 @@ use crate::bb::bb_direction;
 use crate::error::{Error, Result};
 use crate::fire::{
     FireKind, FirePreparation, FirePreset, FireState, fire_after_v1, fire_displacement,
-    fire_prepare_v2, project_box_tangent,
+    fire_move_clipped, fire_prepare_v2, project_box_tangent,
 };
 use crate::holonomic::{ConstraintError, DistanceConstraints, Tangent, unsupported};
 use crate::hvp::{
@@ -96,7 +96,9 @@ fn bonded(set: &DistanceConstraints, n: usize) -> Vec<bool> {
 /// Clip the free coordinates of `x` to `bounds`.
 fn clip_free(bonded: &[bool], bounds: &Bounds<f64>, x: &mut Array1<f64>) {
     for (k, v) in x.iter_mut().enumerate().filter(|(k, _)| !bonded[*k]) {
-        *v = v.max(bounds.low[k]).min(bounds.high[k]);
+        if v.is_finite() {
+            *v = v.max(bounds.low[k]).min(bounds.high[k]);
+        }
     }
 }
 
@@ -510,11 +512,13 @@ struct Checkpoint {
 /// moves its coordinate of `x` by at most `cap` in one step.
 fn clip_components_q(state: &mut FireState, cap: f64, root_m: &Array1<f64>) -> Array1<f64> {
     let dt = state.dt;
-    state
-        .vel
-        .iter_mut()
-        .zip(root_m)
-        .for_each(|(v, m)| *v = v.max(-cap * m / dt).min(cap * m / dt));
+    if dt.is_finite() && dt > 0.0 && cap.is_finite() && cap > 0.0 {
+        state.vel.iter_mut().zip(root_m).for_each(|(v, m)| {
+            if v.is_finite() && m.is_finite() {
+                *v = v.max(-cap * m / dt).min(cap * m / dt);
+            }
+        });
+    }
     &state.vel * dt
 }
 
@@ -1315,7 +1319,9 @@ impl Solver {
             caps.apply(x, &mut trial);
         }
         clip_free(&space.bonded, bounds, &mut trial);
-        let moved = free.is_none_or(|free| trial != free);
+        let moved = free
+            .as_ref()
+            .is_none_or(|free| fire_move_clipped(&trial, free));
         space.tangent.constrain(&mut trial)?;
         inside(&space.bonded, bounds, &trial)?;
         if matches!(state.kind, FireKind::V2) && state.dt > 0.0 && moved {
@@ -1653,9 +1659,10 @@ mod tests {
 
     use super::{Inner, Solver, Space, l2};
     use crate::accept::Accept;
-    use crate::holonomic::DistanceConstraints;
+    use crate::fire::FireKind;
+    use crate::holonomic::{ConstraintError, DistanceConstraints};
     use crate::newton::HessianOracle;
-    use crate::{Control, Method};
+    use crate::{Control, Error, Method, Oracle};
 
     fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = x.len() / 3;
@@ -1747,5 +1754,25 @@ mod tests {
                 "{accept:?}: raw chords {raw_normal}"
             );
         }
+    }
+
+    #[test]
+    fn constrained_fire_nan_on_a_free_coordinate_returns_non_finite_error() {
+        let start = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.5, 0.0, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], start.view()).unwrap();
+        let obj = Oracle::unbounded(9, |x: ArrayView1<f64>| (0.5 * x.dot(&x), x.to_owned()));
+        let control = Control::default().with_maxiter(10).with_gtol(0.0);
+        let mut solver = Solver::new(Method::fire(FireKind::V2), control, 9);
+        solver.set_distance_constraints(set).unwrap();
+        if let Inner::Fire(state) = &mut solver.inner {
+            state.vel[6] = f64::NAN;
+        }
+        let mut x = start.clone();
+        let err = solver.step(&obj, &mut x).unwrap_err();
+        assert!(
+            matches!(err, Error::Constraint(ConstraintError::NonFinite)),
+            "{err:?}"
+        );
+        assert_eq!(x, start);
     }
 }
