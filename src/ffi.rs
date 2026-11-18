@@ -186,6 +186,7 @@ pub enum rgmin_highs_crossover_t {
 }
 
 /// Why a finished minimization stopped. `Iterating` is not a C result.
+/// A session step that has not stopped reports `RGMIN_STOP_BUDGET`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum rgmin_stop_t {
@@ -3877,7 +3878,7 @@ fn write_report(
             value: rep.value,
             steps: rep.steps,
             grad_norm: rep.grad_norm,
-            stop: stop_from_reason(rep.stop_reason()),
+            stop: step_stop(rep.stop_reason()),
         };
         (*solver).grad = rep.grad;
     }
@@ -4179,15 +4180,27 @@ fn control_with_flags(c: &rgmin_control_t, error_on_unmet: i32, backward_polish:
     }
 }
 
-fn stop_from_reason(reason: crate::StopReason) -> rgmin_stop_t {
+/// The C stop of a finished run. [`crate::StopReason::Iterating`] is a
+/// step still in progress, not a stop, so it has none.
+fn finished_stop(reason: crate::StopReason) -> Option<rgmin_stop_t> {
     use crate::StopReason;
     match reason {
-        StopReason::Converged => rgmin_stop_t::RGMIN_STOP_TOLERANCE,
-        StopReason::NoiseFloor => rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR,
-        StopReason::StepTolerance => rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE,
-        StopReason::MaxIter | StopReason::Iterating => rgmin_stop_t::RGMIN_STOP_BUDGET,
-        StopReason::LineSearchFailed => rgmin_stop_t::RGMIN_STOP_LINE_SEARCH,
-        StopReason::PolishUnmet => rgmin_stop_t::RGMIN_STOP_POLISH_UNMET,
+        StopReason::Converged => Some(rgmin_stop_t::RGMIN_STOP_TOLERANCE),
+        StopReason::NoiseFloor => Some(rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR),
+        StopReason::StepTolerance => Some(rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE),
+        StopReason::MaxIter => Some(rgmin_stop_t::RGMIN_STOP_BUDGET),
+        StopReason::LineSearchFailed => Some(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH),
+        StopReason::PolishUnmet => Some(rgmin_stop_t::RGMIN_STOP_POLISH_UNMET),
+        StopReason::Iterating => None,
+    }
+}
+
+/// The C stop of one session step. A step that has not stopped is
+/// `RGMIN_STOP_BUDGET`, the documented "while the fit goes on".
+fn step_stop(reason: crate::StopReason) -> rgmin_stop_t {
+    match finished_stop(reason) {
+        Some(stop) => stop,
+        None => rgmin_stop_t::RGMIN_STOP_BUDGET,
     }
 }
 
@@ -4196,6 +4209,10 @@ fn write_one_shot(
     out: *mut rgmin_report_t,
     rep: &crate::Report,
 ) -> rgmin_status_t {
+    let Some(stop) = finished_stop(rep.stop_reason()) else {
+        set_last_error("a finished run reported a step still iterating");
+        return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+    };
     let dest = match cpu_f64_slice_mut(x, "x") {
         Ok(s) => s,
         Err(st) => return st,
@@ -4206,7 +4223,7 @@ fn write_one_shot(
             value: rep.value,
             steps: rep.steps,
             grad_norm: rep.grad_norm,
-            stop: stop_from_reason(rep.stop_reason()),
+            stop,
         };
     }
     rgmin_status_t::RGMIN_SUCCESS
@@ -6916,5 +6933,101 @@ mod default_tests {
             ff_bits(ff_params_from_precon(&init(RGMIN_PRECON_FF))),
             ff_bits(FfParams::default())
         );
+    }
+}
+
+#[cfg(test)]
+mod stop_mapping_tests {
+    use super::*;
+    use crate::{Report, StopReason};
+
+    const FINISHED: [(StopReason, rgmin_stop_t); 6] = [
+        (StopReason::Converged, rgmin_stop_t::RGMIN_STOP_TOLERANCE),
+        (StopReason::NoiseFloor, rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR),
+        (
+            StopReason::StepTolerance,
+            rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE,
+        ),
+        (StopReason::MaxIter, rgmin_stop_t::RGMIN_STOP_BUDGET),
+        (
+            StopReason::LineSearchFailed,
+            rgmin_stop_t::RGMIN_STOP_LINE_SEARCH,
+        ),
+        (
+            StopReason::PolishUnmet,
+            rgmin_stop_t::RGMIN_STOP_POLISH_UNMET,
+        ),
+    ];
+
+    fn one_shot(reason: StopReason) -> (rgmin_status_t, [f64; 2], rgmin_report_t) {
+        let mut x = [7.0, 7.0];
+        let t = unsafe { create_borrowed_f64_1d(x.as_mut_ptr(), 2, DLDeviceType::kDLCPU, 0) };
+        let mut out = rgmin_report_t {
+            value: -1.0,
+            steps: 99,
+            grad_norm: -1.0,
+            stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        };
+        let mut rep = Report::new(2.5, Array1::from(vec![1.0, 2.0])).with_stop_reason(reason);
+        rep.steps = 4;
+        rep.grad_norm = 0.5;
+        let st = write_one_shot(t, &mut out, &rep);
+        unsafe { rgmin_tensor_free(t) };
+        (st, x, out)
+    }
+
+    #[test]
+    fn the_codes_keep_their_numbers() {
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_TOLERANCE as i32, 0);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR as i32, 1);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE as i32, 2);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_BUDGET as i32, 3);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH as i32, 4);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_POLISH_UNMET as i32, 5);
+    }
+
+    #[test]
+    fn a_finished_run_maps_each_reason_to_its_own_code() {
+        for (reason, stop) in FINISHED {
+            assert_eq!(finished_stop(reason), Some(stop), "{reason}");
+        }
+    }
+
+    #[test]
+    fn iterating_is_no_finished_stop() {
+        assert_eq!(finished_stop(StopReason::Iterating), None);
+    }
+
+    #[test]
+    fn a_step_in_progress_is_budget_and_the_rest_match_a_finished_run() {
+        assert_eq!(
+            step_stop(StopReason::Iterating),
+            rgmin_stop_t::RGMIN_STOP_BUDGET
+        );
+        for (reason, stop) in FINISHED {
+            assert_eq!(step_stop(reason), stop, "{reason}");
+        }
+    }
+
+    #[test]
+    fn a_one_shot_writes_the_point_and_the_stop_of_a_finished_run() {
+        for (reason, stop) in FINISHED {
+            let (st, x, out) = one_shot(reason);
+            assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS, "{reason}");
+            assert_eq!(x, [1.0, 2.0]);
+            assert_eq!(out.stop, stop, "{reason}");
+            assert_eq!((out.value, out.steps, out.grad_norm), (2.5, 4, 0.5));
+        }
+    }
+
+    #[test]
+    fn a_one_shot_refuses_a_run_still_iterating_and_writes_nothing() {
+        let (st, x, out) = one_shot(StopReason::Iterating);
+        assert_eq!(st, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        assert_eq!(x, [7.0, 7.0]);
+        assert_eq!(out.steps, 99);
+        assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE);
+        let message = unsafe { CStr::from_ptr(rgmin_last_error()) };
+        assert!(message.to_string_lossy().contains("still iterating"));
     }
 }

@@ -158,7 +158,10 @@ _Static_assert(sizeof(rgmin_conjugacy_t) == sizeof(int32_t),
                "rgmin_conjugacy_t is i32-wide; do not build this header with -fshort-enums");
 #endif
 
-/** Why a finished minimization stopped. */
+/**
+ * Why a finished minimization stopped. A session step that has not
+ * stopped reports \c RGMIN_STOP_BUDGET. No code names a run in progress.
+ */
 typedef enum rgmin_stop_t {
     RGMIN_STOP_TOLERANCE = 0,
     RGMIN_STOP_NOISE_FLOOR = 1,
