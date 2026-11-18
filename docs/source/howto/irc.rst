@@ -47,6 +47,9 @@ an ``EigenParams`` on a ``HessianVector`` (analytic or ``FdHvp``).
 ``lowest_eigenpairs`` is the block form: the k lowest pairs from the
 same product, for an index-k search. Each pair carries its residual.
 ``lowest_eigenpairs_precond`` applies ``T`` to that residual block.
+``try_lowest_eigenpairs`` and ``try_lowest_eigenpairs_precond`` are
+those solves when the product can fail: the first error is
+``Error::Host``, and nothing is evaluated after it.
 Default Krylov dimension is small. Do not form the dense Hessian
 just to pick the imaginary mode. Unlinked backends fail closed.
 

@@ -24,7 +24,11 @@ The types a host works with:
 | ~lowest_eigenpairs~ | Block LOBPCG. Residuals and an optional ~T~ (Knyazev 2001). |
 | ~EigensolverKind~ / ~EigenParams~ | Closed eigen waist. |
 | ~HessianVector~ / ~FdHvp~ | ~H v~ without forming ~H~. |
+| ~TryHessianVector~ | The same callbacks, each one allowed to fail. |
 | ~Solver::step_hvp~ | Analytic product for ~newton-cg~ / ~newton-pcg~. |
+| ~Solver::try_step_hvp~ | That step. The first host error is ~Error::Host~. |
+| ~TryApplyHessian~ | A block-eigen product that can fail. |
+| ~try_lowest_eigenpairs~ | ~lowest_eigenpairs~ on that product, with or without ~T~. |
 
 ~newton-cg~ and ~newton-pcg~ are ~Method::from_name~ tokens. The
 session counts ~gradient_calls~ and ~hvp_calls~ separately. A
