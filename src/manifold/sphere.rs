@@ -20,7 +20,7 @@
 //! Hessian that way, without the term; [`crate::rtr::minimize_rtr`]
 //! calls this one.
 
-use ndarray::{Array1, ArrayView1};
+use ndarray::{Array1, Array2, ArrayView1};
 
 use super::Manifold;
 
@@ -140,6 +140,19 @@ impl Manifold for Sphere {
             normals[(row, 0)] = value * inv;
         }
         Some(normals)
+    }
+
+    fn holonomic_chart(&self, x: &Array1<f64>) -> Option<(Array1<f64>, Array2<f64>)> {
+        if x.is_empty() || !x.iter().all(|value| value.is_finite()) {
+            return None;
+        }
+        let mut value = -1.0;
+        let mut gradient = Array2::zeros((x.len(), 1));
+        for (row, component) in x.iter().enumerate() {
+            value += component * component;
+            gradient[(row, 0)] = 2.0 * component;
+        }
+        Some((Array1::from_elem(1, value), gradient))
     }
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {

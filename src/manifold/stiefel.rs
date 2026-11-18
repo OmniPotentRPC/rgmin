@@ -81,6 +81,10 @@ impl Manifold for Stiefel {
     fn typical_dist(&self, n: usize) -> f64 {
         Sphere.typical_dist(n)
     }
+
+    fn holonomic_chart(&self, x: &Array1<f64>) -> Option<(Array1<f64>, ndarray::Array2<f64>)> {
+        Sphere.holonomic_chart(x)
+    }
 }
 
 /// Stiefel \(\mathrm{St}(n,p)\) for `p > 1`. Packed column-major, length `n*p`.

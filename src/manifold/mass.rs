@@ -82,7 +82,6 @@ impl MassMetric {
     }
 
     /// Replace the diagonal.
-    #[must_use]
     pub fn with_masses(self, masses: Array1<f64>) -> Result<Self> {
         Self::new(masses)
     }
@@ -95,6 +94,11 @@ impl MassMetric {
     /// Ambient dimension.
     pub fn len(&self) -> usize {
         self.masses.len()
+    }
+
+    /// Always false. [`Self::new`] rejects an empty diagonal.
+    pub fn is_empty(&self) -> bool {
+        self.masses.is_empty()
     }
 }
 
@@ -452,7 +456,7 @@ fn velocity_lambda(
     Ok(Array1::from_vec(rhs))
 }
 
-fn solve_linear(a: &mut [f64], rhs: &mut [f64], c: usize) -> Result<()> {
+pub(crate) fn solve_linear(a: &mut [f64], rhs: &mut [f64], c: usize) -> Result<()> {
     let mut max_entry = 0.0;
     for value in a.iter() {
         if value.abs() > max_entry {

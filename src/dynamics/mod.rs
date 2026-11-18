@@ -11,8 +11,11 @@
 //! 1. **B** half kick by the force, then the mass-metric projection of the
 //!    velocity (RATTLE; Andersen, J. Comput. Phys. 52, 24, 1983,
 //!    <https://doi.org/10.1016/0021-9991(83)90014-1>).
-//! 2. **A** half drift: the geodesic when the manifold provides it, or the
-//!    straight RATTLE step on a flat constraint.
+//! 2. **A** half drift. Equal positive masses use the embedding geodesic,
+//!    which is then the kinetic geodesic. Any other diagonal mass, on a
+//!    manifold that publishes a holonomic chart, takes one RATTLE step
+//!    along \(M^{-1}\nabla c\) (the \(A_g\) map with one substep). A flat
+//!    constraint takes the straight step and restores the point.
 //! 3. **O** Ornstein–Uhlenbeck kick with the noise projected onto the
 //!    tangent space.
 //! 4. **A** and **B** again. The second kick uses the force at the new point.
@@ -31,7 +34,8 @@
 //! flat manifold the reflection is the mass-metric law used for the
 //! hyperplane: the wall normal is reduced to the tangent space, the
 //! position and velocity reverse along `M^{-1}` of that direction, and the
-//! point is restored to the manifold.
+//! point is restored to the manifold. A curved manifold recomputes that
+//! tangent at the current point and retracts the reflected step.
 
 use ndarray::Array1;
 
@@ -376,6 +380,164 @@ fn kick(velocity: &mut Array1<f64>, force: &[f64], masses: &[f64], half: f64, sc
     }
 }
 
+fn positive_multiple_of_identity(metric: &MassMetric) -> bool {
+    let mut found = None;
+    for mass in metric.masses() {
+        if *mass > 0.0 {
+            match found {
+                None => found = Some(*mass),
+                Some(value) if value == *mass => {}
+                Some(_) => return false,
+            }
+        } else {
+            return false;
+        }
+    }
+    found.is_some()
+}
+
+fn embedding_drift<M, E>(
+    manifold: &M,
+    metric: &MassMetric,
+    position: &Array1<f64>,
+    velocity: &Array1<f64>,
+    step: f64,
+) -> Result<(Array1<f64>, Array1<f64>), DynamicsError<E>>
+where
+    M: Manifold + ?Sized,
+{
+    let mut tangent = velocity.clone();
+    for value in tangent.iter_mut() {
+        *value *= step;
+    }
+    let tangent = manifold.project(position, &tangent);
+    let next = manifold.retract_second_order(position, &tangent);
+    let carried = manifold.transport_second_order(position, &tangent, &next, velocity);
+    let carried = manifold
+        .project_mass_velocity(metric, &next, &carried)
+        .map_err(geometry)?;
+    Ok((next, carried))
+}
+
+fn chart_tolerance(position: &Array1<f64>) -> f64 {
+    let mut scale = 1.0;
+    for value in position {
+        if value.abs() > scale {
+            scale = value.abs();
+        }
+    }
+    (position.len() as f64) * f64::EPSILON * scale * scale.max(1.0)
+}
+
+type KineticStep<E> = Result<Option<(Array1<f64>, Array1<f64>)>, DynamicsError<E>>;
+
+/// One oblique RATTLE step, the paper's \(A_g\) map at \(K_r = 1\).
+///
+/// `None` means the manifold did not publish a chart. The correction
+/// direction \(M^{-1}\nabla c\) is frozen at the start of the step, and
+/// Newton drives the chart to its solver tolerance.
+fn kinetic_rattle<M, E>(
+    manifold: &M,
+    metric: &MassMetric,
+    position: &Array1<f64>,
+    velocity: &Array1<f64>,
+    step: f64,
+) -> KineticStep<E>
+where
+    M: Manifold + ?Sized,
+{
+    let Some((start_values, start_grad)) = manifold.holonomic_chart(position) else {
+        return Ok(None);
+    };
+    let codim = start_grad.ncols();
+    if codim == 0 || start_values.len() != codim || start_grad.nrows() != position.len() {
+        return Ok(None);
+    }
+    let masses = metric.masses().as_slice().ok_or_else(|| {
+        geometry(Error::MassMetric {
+            what: "the mass diagonal is not contiguous",
+        })
+    })?;
+    let n = position.len();
+    let mut lambda = vec![0.0; codim];
+    let mut position_next = position.clone();
+    for i in 0..n {
+        position_next[i] += velocity[i] * step;
+    }
+    let tolerance = chart_tolerance(position);
+    let mut satisfied = false;
+    for _ in 0..MAX_REFLECTION_PASSES {
+        let Some((values, gradient)) = manifold.holonomic_chart(&position_next) else {
+            return Err(geometry(Error::MassMetric {
+                what: "the holonomic chart disappeared during RATTLE",
+            }));
+        };
+        if values.len() != codim || gradient.ncols() != codim || gradient.nrows() != n {
+            return Err(geometry(Error::MassMetric {
+                what: "the holonomic chart changed rank during RATTLE",
+            }));
+        }
+        satisfied = values
+            .iter()
+            .all(|value| value.is_finite() && value.abs() <= tolerance);
+        if satisfied {
+            break;
+        }
+        let mut gram = vec![0.0; codim * codim];
+        let mut rhs = vec![0.0; codim];
+        for a in 0..codim {
+            rhs[a] = -values[a];
+            for b in 0..codim {
+                let mut entry = 0.0;
+                for i in 0..n {
+                    if masses[i] > 0.0 {
+                        entry += gradient[(i, a)] * step * start_grad[(i, b)] / masses[i];
+                    }
+                }
+                gram[a * codim + b] = entry;
+            }
+        }
+        mass::solve_linear(&mut gram, &mut rhs, codim).map_err(geometry)?;
+        for (slot, delta) in lambda.iter_mut().zip(rhs.iter()) {
+            *slot += *delta;
+        }
+        if lambda.iter().any(|value| !value.is_finite()) {
+            return Err(geometry(Error::MassMetric {
+                what: "the RATTLE multiplier is not finite",
+            }));
+        }
+        for i in 0..n {
+            let mut corr = 0.0;
+            if masses[i] > 0.0 {
+                for b in 0..codim {
+                    corr += start_grad[(i, b)] * lambda[b];
+                }
+                corr /= masses[i];
+            }
+            position_next[i] = position[i] + velocity[i] * step + step * corr;
+        }
+    }
+    if !satisfied && let Some((values, _)) = manifold.holonomic_chart(&position_next) {
+        satisfied = values.len() == codim
+            && values
+                .iter()
+                .all(|value| value.is_finite() && value.abs() <= tolerance);
+    }
+    if !satisfied {
+        return Err(geometry(Error::MassMetric {
+            what: "the RATTLE step missed the constraint",
+        }));
+    }
+    let mut carried = velocity.clone();
+    for i in 0..n {
+        carried[i] = (position_next[i] - position[i]) / step;
+    }
+    let carried = manifold
+        .project_mass_velocity(metric, &position_next, &carried)
+        .map_err(geometry)?;
+    Ok(Some((position_next, carried)))
+}
+
 fn drift<M, E>(
     manifold: &M,
     metric: &MassMetric,
@@ -393,18 +555,12 @@ where
         }
         let next = manifold.snap_mass(metric, &next).map_err(geometry)?;
         Ok((next, velocity.clone()))
+    } else if positive_multiple_of_identity(metric) {
+        embedding_drift(manifold, metric, position, velocity, step)
+    } else if let Some(stepped) = kinetic_rattle(manifold, metric, position, velocity, step)? {
+        Ok(stepped)
     } else {
-        let mut tangent = velocity.clone();
-        for value in tangent.iter_mut() {
-            *value *= step;
-        }
-        let tangent = manifold.project(position, &tangent);
-        let next = manifold.retract_second_order(position, &tangent);
-        let carried = manifold.transport_second_order(position, &tangent, &next, velocity);
-        let carried = manifold
-            .project_mass_velocity(metric, &next, &carried)
-            .map_err(geometry)?;
-        Ok((next, carried))
+        embedding_drift(manifold, metric, position, velocity, step)
     }
 }
 
@@ -431,10 +587,10 @@ fn prepare_walls<E>(
     })?;
     let codim = normals.ncols();
     if codim == 0 {
-        return Ok(walls
+        return walls
             .iter()
             .map(|wall| prepare_free_wall::<E>(wall, masses))
-            .collect::<Result<Vec<_>, _>>()?);
+            .collect();
     }
     if codim != 1 {
         return Err(geometry(Error::MassMetric {
@@ -554,10 +710,78 @@ fn prepare_free_wall<E>(
     })
 }
 
+fn reflect_curved<M, E>(
+    manifold: &M,
+    metric: &MassMetric,
+    walls: &[PlanarWall],
+    position: &mut Array1<f64>,
+    velocity: &mut Array1<f64>,
+) -> Result<u64, DynamicsError<E>>
+where
+    M: Manifold + ?Sized,
+{
+    let masses = metric
+        .masses()
+        .as_slice()
+        .ok_or_else(|| {
+            geometry(Error::MassMetric {
+                what: "the mass diagonal is not contiguous",
+            })
+        })?
+        .to_vec();
+    let mut hits = 0u64;
+    for _ in 0..MAX_REFLECTION_PASSES {
+        let normals = match manifold.euclidean_normals(position) {
+            Some(basis) => basis,
+            None => mass::normal_frame(manifold, position).map_err(geometry)?,
+        };
+        let prepared = prepare_walls(&normals, metric, walls)?;
+        let mut any = false;
+        for wall in &prepared {
+            if wall.scale <= 0.0 {
+                continue;
+            }
+            let mut raw = 0.0;
+            for i in 0..position.len() {
+                raw += wall.normal[i] * (position[i] - wall.point[i]);
+            }
+            let excess = raw / wall.scale;
+            if excess > 0.0 {
+                let mut v_dot = 0.0;
+                for i in 0..velocity.len() {
+                    if masses[i] > 0.0 {
+                        v_dot += wall.tangent_m_inv[i] * masses[i] * velocity[i];
+                    }
+                }
+                let mut step = Array1::zeros(position.len());
+                let mut reflected = velocity.clone();
+                for i in 0..position.len() {
+                    let delta = wall.tangent_m_inv[i] * (2.0 * excess);
+                    step[i] = -delta;
+                    reflected[i] -= wall.tangent_m_inv[i] * (2.0 * v_dot);
+                }
+                let next = manifold.retract_second_order(position, &step);
+                let carried = manifold.transport_second_order(position, &step, &next, &reflected);
+                *position = next;
+                *velocity = manifold
+                    .project_mass_velocity(metric, position, &carried)
+                    .map_err(geometry)?;
+                any = true;
+                hits += 1;
+            }
+        }
+        if !any {
+            break;
+        }
+    }
+    Ok(hits)
+}
+
 fn reflect_prepared<M, E>(
     manifold: &M,
     metric: &MassMetric,
     prepared: &[PreparedWall],
+    walls: &[PlanarWall],
     position: &mut Array1<f64>,
     velocity: &mut Array1<f64>,
 ) -> Result<u64, DynamicsError<E>>
@@ -566,6 +790,9 @@ where
 {
     if prepared.is_empty() {
         return Ok(0);
+    }
+    if !manifold.drift_is_straight() {
+        return reflect_curved(manifold, metric, walls, position, velocity);
     }
     let masses = metric.masses().as_slice().ok_or_else(|| {
         geometry(Error::MassMetric {
@@ -740,14 +967,16 @@ where
             manifold,
             metric,
             &prepared,
+            walls,
             &mut point.position,
             &mut point.velocity,
         )?;
 
         for i in 0..n {
+            let sample = rng.next_normal();
             if masses[i] > 0.0 {
                 let sigma = noise_amp / masses[i].sqrt();
-                point.velocity[i] = point.velocity[i] * decay + sigma * rng.next_normal();
+                point.velocity[i] = point.velocity[i] * decay + sigma * sample;
             }
         }
         point.velocity = manifold
@@ -761,6 +990,7 @@ where
             manifold,
             metric,
             &prepared,
+            walls,
             &mut point.position,
             &mut point.velocity,
         )?;
@@ -985,34 +1215,35 @@ mod tests {
                 x[i] += v[i] * half;
             }
             restore(&mut x);
-            if let Some((wp, unit, tangent, scale)) = &prepared {
-                if *scale > 0.0 {
-                    let mut raw = 0.0;
+            if let Some((wp, unit, tangent, scale)) = &prepared
+                && *scale > 0.0
+            {
+                let mut raw = 0.0;
+                for i in 0..n {
+                    raw += unit[i] * (x[i] - wp[i]);
+                }
+                let excess = raw / scale;
+                if excess > 0.0 {
+                    let mut v_dot = 0.0;
                     for i in 0..n {
-                        raw += unit[i] * (x[i] - wp[i]);
-                    }
-                    let excess = raw / scale;
-                    if excess > 0.0 {
-                        let mut v_dot = 0.0;
-                        for i in 0..n {
-                            if mass[i] > 0.0 {
-                                v_dot += tangent[i] * mass[i] * v[i];
-                            }
+                        if mass[i] > 0.0 {
+                            v_dot += tangent[i] * mass[i] * v[i];
                         }
-                        for i in 0..n {
-                            x[i] -= tangent[i] * (2.0 * excess);
-                            v[i] -= tangent[i] * (2.0 * v_dot);
-                        }
-                        restore(&mut x);
-                        project(&mut v);
-                        hits += 1;
                     }
+                    for i in 0..n {
+                        x[i] -= tangent[i] * (2.0 * excess);
+                        v[i] -= tangent[i] * (2.0 * v_dot);
+                    }
+                    restore(&mut x);
+                    project(&mut v);
+                    hits += 1;
                 }
             }
             for i in 0..n {
+                let sample = rng.next_normal();
                 if mass[i] > 0.0 {
                     let sigma = noise_amp / mass[i].sqrt();
-                    v[i] = v[i] * decay + sigma * rng.next_normal();
+                    v[i] = v[i] * decay + sigma * sample;
                 }
             }
             project(&mut v);
@@ -1020,28 +1251,28 @@ mod tests {
                 x[i] += v[i] * half;
             }
             restore(&mut x);
-            if let Some((wp, unit, tangent, scale)) = &prepared {
-                if *scale > 0.0 {
-                    let mut raw = 0.0;
+            if let Some((wp, unit, tangent, scale)) = &prepared
+                && *scale > 0.0
+            {
+                let mut raw = 0.0;
+                for i in 0..n {
+                    raw += unit[i] * (x[i] - wp[i]);
+                }
+                let excess = raw / scale;
+                if excess > 0.0 {
+                    let mut v_dot = 0.0;
                     for i in 0..n {
-                        raw += unit[i] * (x[i] - wp[i]);
-                    }
-                    let excess = raw / scale;
-                    if excess > 0.0 {
-                        let mut v_dot = 0.0;
-                        for i in 0..n {
-                            if mass[i] > 0.0 {
-                                v_dot += tangent[i] * mass[i] * v[i];
-                            }
+                        if mass[i] > 0.0 {
+                            v_dot += tangent[i] * mass[i] * v[i];
                         }
-                        for i in 0..n {
-                            x[i] -= tangent[i] * (2.0 * excess);
-                            v[i] -= tangent[i] * (2.0 * v_dot);
-                        }
-                        restore(&mut x);
-                        project(&mut v);
-                        hits += 1;
                     }
+                    for i in 0..n {
+                        x[i] -= tangent[i] * (2.0 * excess);
+                        v[i] -= tangent[i] * (2.0 * v_dot);
+                    }
+                    restore(&mut x);
+                    project(&mut v);
+                    hits += 1;
                 }
             }
             f = force_at(&x);

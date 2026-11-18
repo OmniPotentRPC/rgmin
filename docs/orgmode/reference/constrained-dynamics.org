@@ -59,5 +59,6 @@ Its drift is straight, its retraction is the Euclidean projector, and ~snap_mass
 The sphere publishes its radial normal.
 A product publishes the stacked factor normals when every factor has them.
 ~Manifold::retract_second_order~ uses the exponential when the manifold has one, and ~Manifold::transport_second_order~ uses parallel transport along that step.
+~Manifold::holonomic_chart~ publishes \(c(x)\) and \(\nabla c\) for the unequal-mass RATTLE drift. The sphere's chart is \(\|x\|^2 - 1\).
 ~Manifold::drift_is_straight~ selects the RATTLE straight step.
 Euclidean space, an affine hyperplane, and a product of flat factors set it.

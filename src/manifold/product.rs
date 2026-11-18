@@ -621,6 +621,44 @@ impl Manifold for ProductManifold {
         Some(out)
     }
 
+    fn holonomic_chart(&self, x: &Array1<f64>) -> Option<(Array1<f64>, ndarray::Array2<f64>)> {
+        if x.len() != self.len {
+            return None;
+        }
+        let mut values = Vec::new();
+        let mut columns = Vec::new();
+        for block in &self.blocks {
+            let Some((local_values, local_grad)) = block.kind.holonomic_chart(&block.unscale(x))
+            else {
+                if block.kind.is_flat() {
+                    continue;
+                }
+                return None;
+            };
+            if local_grad.nrows() != block.len || local_grad.ncols() != local_values.len() {
+                return None;
+            }
+            for column in 0..local_grad.ncols() {
+                let mut ambient = Array1::zeros(self.len);
+                for row in 0..block.len {
+                    let component = if block.scale == 1.0 {
+                        local_grad[(row, column)]
+                    } else {
+                        local_grad[(row, column)] / block.scale
+                    };
+                    ambient[block.start + row] = component;
+                }
+                columns.push(ambient);
+            }
+            values.extend(local_values.iter().copied());
+        }
+        let mut gradient = ndarray::Array2::zeros((self.len, columns.len()));
+        for (index, column) in columns.iter().enumerate() {
+            gradient.column_mut(index).assign(column);
+        }
+        Some((Array1::from_vec(values), gradient))
+    }
+
     /// \(\sqrt{\sum_i w_i\,\mathrm{typicaldist}_i^2}\); manopt's at unit
     /// weights. Tangent metrics do not enter it.
     fn typical_dist(&self, _n: usize) -> f64 {

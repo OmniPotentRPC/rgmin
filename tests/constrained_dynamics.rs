@@ -61,32 +61,36 @@ fn circle_cdf(beta: f64, theta: f64) -> f64 {
     sum
 }
 
+struct SampleWindow {
+    burn: usize,
+    stride: usize,
+    count: usize,
+}
+
 fn sample_positions(
     manifold: &dyn Manifold,
     metric: &MassMetric,
     mut phase: PhasePoint,
     config: &LangevinConfig,
-    burn: usize,
-    stride: usize,
-    count: usize,
+    window: SampleWindow,
     force: impl Fn(&[f64]) -> (Vec<f64>, f64),
 ) -> (Vec<Array1<f64>>, Vec<f64>) {
-    let mut positions = Vec::with_capacity(count);
-    let mut kinetic = Vec::with_capacity(count);
+    let mut positions = Vec::with_capacity(window.count);
+    let mut kinetic = Vec::with_capacity(window.count);
     let mut draws = 0u64;
-    for sample in 0..burn + count {
+    for sample in 0..window.burn + window.count {
         let report = baoab(
             manifold,
             metric,
             &mut phase,
             &config.with_seed(config.seed.wrapping_add(draws)),
             &[],
-            stride,
+            window.stride,
             |x| Ok::<_, &'static str>(force(x)),
         )
         .expect("sample");
         draws = draws.wrapping_add(1);
-        if sample >= burn {
+        if sample >= window.burn {
             kinetic.push(report.kinetic);
             positions.push(phase.position.clone());
         }
@@ -110,9 +114,11 @@ fn circle_samples_the_boltzmann_density() {
             .with_position(array![1.0, 0.0])
             .with_velocity(array![0.0, 0.0]),
         &config,
-        400,
-        40,
-        500,
+        SampleWindow {
+            burn: 400,
+            stride: 40,
+            count: 500,
+        },
         |x| (vec![-1.0, 0.0], x[0]),
     );
     let angles: Vec<f64> = positions
@@ -155,9 +161,11 @@ fn sphere_coordinate_is_uniform_and_kinetic_energy_equipartitions() {
             .with_position(array![0.0, 0.0, 1.0])
             .with_velocity(array![0.2, 0.0, 0.0]),
         &config,
-        400,
-        40,
-        500,
+        SampleWindow {
+            burn: 400,
+            stride: 40,
+            count: 500,
+        },
         |_| (vec![0.0, 0.0, 0.0], 0.0),
     );
     let heights: Vec<f64> = positions.iter().map(|point| point[2]).collect();
@@ -218,9 +226,11 @@ fn product_of_circles_stays_on_each_factor_and_equipartitions() {
             .with_position(array![1.0, 0.0, 0.0, 1.0])
             .with_velocity(array![0.0, 0.1, 0.2, 0.0]),
         &config,
-        200,
-        30,
-        400,
+        SampleWindow {
+            burn: 200,
+            stride: 30,
+            count: 400,
+        },
         |_| (vec![0.0; 4], 0.0),
     );
     let mut worst = 0.0_f64;
@@ -354,4 +364,396 @@ fn argon_rattle_on_a_com_plane_conserves_energy() {
     assert!(fine <= coarse * 0.5, "coarse {coarse} fine {fine}");
     assert!(gap <= 20.0 * f64::EPSILON * 64.0, "constraint gap {gap}");
     let _ = phase;
+}
+
+fn constraint_gap(point: &Array1<f64>) -> f64 {
+    (point.iter().map(|value| value * value).sum::<f64>().sqrt() - 1.0).abs()
+}
+
+fn radial_speed(point: &Array1<f64>, velocity: &Array1<f64>) -> f64 {
+    point
+        .iter()
+        .zip(velocity.iter())
+        .map(|(q, u)| q * u)
+        .sum::<f64>()
+        .abs()
+}
+
+/// Gram-solve tolerance from `mass::solve_linear`: one normal, unit scale.
+fn solver_tolerance(magnitude: f64) -> f64 {
+    f64::EPSILON * magnitude.max(1.0) * 64.0
+}
+
+#[test]
+fn constraint_drift_stays_at_solver_tolerance_over_a_long_run() {
+    let steps = 20_000usize;
+    let metric = MassMetric::uniform(3, 1.0).unwrap();
+    let mut phase = PhasePoint::default()
+        .with_position(array![0.0, 0.0, 1.0])
+        .with_velocity(array![0.35, -0.15, 0.0]);
+    let config = LangevinConfig::default()
+        .with_thermal(0.4)
+        .with_friction(0.8)
+        .with_time_step(0.02)
+        .with_seed(23);
+    let mut worst_gap = 0.0_f64;
+    let mut worst_radial = 0.0_f64;
+    for block in 0..steps / 100 {
+        baoab(
+            &Sphere,
+            &metric,
+            &mut phase,
+            &config.with_seed(config.seed.wrapping_add(block as u64)),
+            &[],
+            100,
+            |x| {
+                Ok::<_, &'static str>((
+                    vec![-x[0], 0.2, -0.5 * x[2]],
+                    0.5 * x[0] * x[0] + 0.25 * x[2] * x[2],
+                ))
+            },
+        )
+        .expect("long sphere run");
+        worst_gap = worst_gap.max(constraint_gap(&phase.position));
+        worst_radial = worst_radial.max(radial_speed(&phase.position, &phase.velocity));
+    }
+    let tolerance = solver_tolerance(1.0);
+    assert!(
+        worst_gap <= tolerance,
+        "position gap {worst_gap} exceeds solver tolerance {tolerance}"
+    );
+    assert!(
+        worst_radial <= tolerance,
+        "radial velocity {worst_radial} exceeds solver tolerance {tolerance}"
+    );
+
+    let plane = rgmin::manifold::AffineHyperplane::new(
+        array![0.0, 0.0, 0.0, 0.0],
+        array![1.0, -1.0, 0.5, 0.0],
+    )
+    .unwrap();
+    let metric = MassMetric::new(array![2.0, 0.5, 3.0, 1.0]).unwrap();
+    let mut phase = PhasePoint::default()
+        .with_position(array![0.2, 0.2, 0.0, 0.1])
+        .with_velocity(array![0.1, -0.05, 0.2, -0.1]);
+    let config = NveConfig::default().with_time_step(0.01);
+    let mut worst = 0.0_f64;
+    for _ in 0..200 {
+        rattle(&plane, &metric, &mut phase, &config, 50, |x| {
+            Ok::<_, &'static str>((vec![-x[0], -0.3 * x[1], -x[2], 0.0], 0.0))
+        })
+        .expect("long plane run");
+        let gap = plane.signed_distance(&phase.position).unwrap().abs();
+        worst = worst.max(gap);
+    }
+    let magnitude = phase
+        .position
+        .iter()
+        .fold(0.0_f64, |acc, value| acc + value.abs());
+    let tolerance = solver_tolerance(magnitude);
+    assert!(
+        worst <= tolerance,
+        "hyperplane gap {worst} exceeds solver tolerance {tolerance}"
+    );
+}
+
+fn free_kinetic_band(
+    metric: &MassMetric,
+    position: Array1<f64>,
+    velocity: Array1<f64>,
+    time_step: f64,
+) -> f64 {
+    let horizon = 1.0;
+    let steps = (horizon / time_step).round() as usize;
+    let mut phase = PhasePoint::default()
+        .with_position(position)
+        .with_velocity(velocity);
+    let config = LangevinConfig::default()
+        .with_friction(0.0)
+        .with_thermal(1.0)
+        .with_time_step(time_step)
+        .with_seed(1);
+    let mut energy = 0.0;
+    let mut worst = 0.0_f64;
+    let mut worst_gap = 0.0_f64;
+    let width = phase.position.len();
+    for index in 0..=steps {
+        let report = baoab(&Sphere, metric, &mut phase, &config, &[], 1, |_| {
+            Ok::<_, &'static str>((vec![0.0; width], 0.0))
+        })
+        .expect("free geodesic");
+        worst_gap = worst_gap.max(constraint_gap(&phase.position));
+        if index == 0 {
+            energy = report.kinetic;
+        } else {
+            worst = worst.max((report.kinetic - energy).abs());
+        }
+    }
+    assert!(
+        worst_gap <= solver_tolerance(1.0),
+        "constraint gap {worst_gap}"
+    );
+    worst
+}
+
+#[test]
+fn unequal_mass_rattle_matches_the_oblique_step_and_conserves_energy() {
+    let metric = MassMetric::new(array![1.0, 4.0]).unwrap();
+    let position = array![1.0, 0.0];
+    let velocity = array![0.0, 0.2];
+    let step = 0.1;
+    let mut phase = PhasePoint::default()
+        .with_position(position.clone())
+        .with_velocity(velocity.clone());
+    let config = NveConfig::default().with_time_step(step);
+    rattle(&Sphere, &metric, &mut phase, &config, 1, |_| {
+        Ok::<_, &'static str>((vec![0.0, 0.0], 0.0))
+    })
+    .expect("one rattle step");
+    // The straight step is (1, 0.02). The sphere gradient is (2, 0), so the
+    // oblique correction changes only the first coordinate, and the result
+    // sits on the circle.
+    let straight_y = step * velocity[1];
+    assert!((phase.position[1] - straight_y).abs() <= solver_tolerance(1.0));
+    assert!(constraint_gap(&phase.position) <= solver_tolerance(1.0));
+    let radial = radial_speed(&phase.position, &phase.velocity);
+    assert!(radial <= solver_tolerance(1.0), "radial {radial}");
+
+    let coarse = free_kinetic_band(&metric, array![1.0, 0.0], array![0.0, 0.25], 1.0 / 64.0);
+    let fine = free_kinetic_band(&metric, array![1.0, 0.0], array![0.0, 0.25], 1.0 / 128.0);
+    assert!(
+        fine <= coarse * 0.5,
+        "kinetic band is not second order: coarse {coarse} fine {fine}"
+    );
+
+    let product = ProductManifold::new([
+        ProductFactor::new(ManifoldKind::Sphere, 2),
+        ProductFactor::new(ManifoldKind::Sphere, 2),
+    ])
+    .unwrap();
+    let metric = MassMetric::new(array![1.0, 3.0, 2.0, 5.0]).unwrap();
+    let mut phase = PhasePoint::default()
+        .with_position(array![1.0, 0.0, 0.0, 1.0])
+        .with_velocity(array![0.0, 0.2, 0.15, 0.0]);
+    let config = LangevinConfig::default()
+        .with_friction(0.0)
+        .with_time_step(0.01)
+        .with_seed(4);
+    let mut worst = 0.0_f64;
+    for _ in 0..400 {
+        baoab(&product, &metric, &mut phase, &config, &[], 1, |_| {
+            Ok::<_, &'static str>((vec![0.0; 4], 0.0))
+        })
+        .expect("product rattle");
+        for block in [[0, 1], [2, 3]] {
+            let norm = (phase.position[block[0]].powi(2) + phase.position[block[1]].powi(2)).sqrt();
+            worst = worst.max((norm - 1.0).abs());
+        }
+    }
+    assert!(worst <= solver_tolerance(1.0), "product gap {worst}");
+}
+
+#[test]
+fn ou_stream_does_not_depend_on_which_masses_vanish() {
+    let config = LangevinConfig::default()
+        .with_thermal(0.3)
+        .with_friction(1.5)
+        .with_time_step(0.2)
+        .with_seed(42)
+        .with_kinetic_scale(2.0);
+    let run = |masses: [f64; 3]| {
+        let metric = MassMetric::new(array![masses[0], masses[1], masses[2]]).unwrap();
+        let mut phase = PhasePoint::default()
+            .with_position(array![0.0, 0.0, 0.0])
+            .with_velocity(array![0.0, 0.0, 0.0]);
+        baoab(
+            &rgmin::manifold::Euclidean,
+            &metric,
+            &mut phase,
+            &config,
+            &[],
+            1,
+            |_| Ok::<_, &'static str>((vec![0.0, 0.0, 0.0], 0.0)),
+        )
+        .expect("ou");
+        phase.velocity
+    };
+    let frozen = run([0.0, 1.0, 4.0]);
+    let full = run([2.0, 1.0, 4.0]);
+    assert_eq!(frozen[0].to_bits(), 0.0_f64.to_bits());
+    assert_eq!(frozen[1].to_bits(), full[1].to_bits());
+    assert_eq!(frozen[2].to_bits(), full[2].to_bits());
+    assert_ne!(full[0].to_bits(), frozen[0].to_bits());
+}
+
+#[test]
+fn curved_wall_stays_on_the_sphere_and_the_allowed_side() {
+    let metric = MassMetric::uniform(3, 1.0).unwrap();
+    let wall = rgmin::PlanarWall::new(array![0.0, 0.0, 0.2], array![0.0, 0.0, 1.0]).unwrap();
+    let mut phase = PhasePoint::default()
+        .with_position(array![1.0, 0.0, 0.0])
+        .with_velocity(array![0.0, 0.2, 0.45]);
+    let config = LangevinConfig::default()
+        .with_thermal(0.05)
+        .with_friction(0.0)
+        .with_time_step(0.05)
+        .with_seed(8);
+    let mut hits = 0u64;
+    let mut worst = 0.0_f64;
+    let mut worst_outside = 0.0_f64;
+    for _ in 0..80 {
+        let report = baoab(
+            &Sphere,
+            &metric,
+            &mut phase,
+            &config,
+            std::slice::from_ref(&wall),
+            1,
+            |_| Ok::<_, &'static str>((vec![0.0, 0.0, 0.0], 0.0)),
+        )
+        .expect("wall");
+        hits += report.wall_hits;
+        worst = worst.max(constraint_gap(&phase.position));
+        let height = phase.position[2] - 0.2;
+        if height > 0.0 {
+            worst_outside = worst_outside.max(height);
+        }
+    }
+    assert!(hits > 0, "the particle never met the wall");
+    assert!(worst <= solver_tolerance(1.0), "left the sphere by {worst}");
+    assert!(
+        worst_outside <= solver_tolerance(1.0) * 64.0,
+        "crossed the wall by {worst_outside}"
+    );
+}
+
+fn hamiltonian(report_potential: f64, report_kinetic: f64) -> f64 {
+    report_potential + report_kinetic
+}
+
+fn zero_friction_band(time_step: f64, horizon: f64) -> (f64, f64) {
+    let steps = (horizon / time_step).round() as usize;
+    let metric = MassMetric::uniform(3, 2.0).unwrap();
+    let mut phase = PhasePoint::default()
+        .with_position(array![0.0, 1.0, 0.0])
+        .with_velocity(array![0.25, 0.0, -0.1]);
+    let config = LangevinConfig::default()
+        .with_thermal(1.0)
+        .with_friction(0.0)
+        .with_time_step(time_step)
+        .with_seed(5)
+        .with_kinetic_scale(1.0);
+    let force = |x: &[f64]| (vec![0.0, 0.0, -1.0], x[2]);
+    let mut energy = 0.0;
+    let mut worst = 0.0_f64;
+    let mut late = 0.0_f64;
+    for index in 0..=steps {
+        let report = baoab(&Sphere, &metric, &mut phase, &config, &[], 1, |x| {
+            Ok::<_, &'static str>(force(x))
+        })
+        .expect("zero friction");
+        let total = hamiltonian(report.potential, report.kinetic);
+        if index == 0 {
+            energy = total;
+        } else {
+            let gap = (total - energy).abs();
+            worst = worst.max(gap);
+            if index * 2 >= steps {
+                late = late.max(gap);
+            }
+        }
+        assert!(constraint_gap(&phase.position) <= solver_tolerance(1.0));
+    }
+    (worst, late)
+}
+
+#[test]
+fn zero_friction_is_reversible_and_the_energy_stays_second_order() {
+    let metric = MassMetric::uniform(2, 1.0).unwrap();
+    let start = PhasePoint::default()
+        .with_position(array![1.0, 0.0])
+        .with_velocity(array![0.0, 0.4]);
+    let config = LangevinConfig::default()
+        .with_thermal(0.7)
+        .with_friction(0.0)
+        .with_time_step(0.05)
+        .with_seed(9);
+    let force = |x: &[f64]| (vec![-1.0, 0.0], x[0]);
+    let mut forward = start.clone();
+    let steps = 80usize;
+    baoab(&Sphere, &metric, &mut forward, &config, &[], steps, |x| {
+        Ok::<_, &'static str>(force(x))
+    })
+    .expect("forward");
+    forward.velocity *= -1.0;
+    baoab(&Sphere, &metric, &mut forward, &config, &[], steps, |x| {
+        Ok::<_, &'static str>(force(x))
+    })
+    .expect("reverse");
+    let position_gap = start
+        .position
+        .iter()
+        .zip(forward.position.iter())
+        .map(|(a, b)| (a - b) * (a - b))
+        .sum::<f64>()
+        .sqrt();
+    let velocity_gap = start
+        .velocity
+        .iter()
+        .zip(forward.velocity.iter())
+        .map(|(a, b)| (a + b) * (a + b))
+        .sum::<f64>()
+        .sqrt();
+    let roundoff = solver_tolerance(steps as f64);
+    assert!(
+        position_gap <= roundoff,
+        "position did not reverse: {position_gap}"
+    );
+    assert!(
+        velocity_gap <= roundoff,
+        "velocity did not reverse: {velocity_gap}"
+    );
+
+    let mut rattled = start.clone();
+    let nve = NveConfig::default().with_time_step(config.time_step);
+    rattle(&Sphere, &metric, &mut rattled, &nve, steps, |x| {
+        Ok::<_, &'static str>(force(x))
+    })
+    .expect("rattle");
+    rattled.velocity *= -1.0;
+    rattle(&Sphere, &metric, &mut rattled, &nve, steps, |x| {
+        Ok::<_, &'static str>(force(x))
+    })
+    .expect("rattle reverse");
+    let rattle_gap = start
+        .position
+        .iter()
+        .zip(rattled.position.iter())
+        .map(|(a, b)| (a - b) * (a - b))
+        .sum::<f64>()
+        .sqrt();
+    assert!(
+        rattle_gap <= roundoff,
+        "RATTLE position did not reverse: {rattle_gap}"
+    );
+
+    let (coarse, coarse_late) = zero_friction_band(1.0 / 32.0, 2.0);
+    let (fine, fine_late) = zero_friction_band(1.0 / 64.0, 2.0);
+    assert!(
+        fine <= coarse * 0.5,
+        "energy band is not second order: coarse {coarse} fine {fine}"
+    );
+    assert!(
+        coarse_late <= coarse * 2.0,
+        "energy drifted inside the coarse run: band {coarse} late {coarse_late}"
+    );
+    assert!(
+        fine_late <= fine * 2.0,
+        "energy drifted inside the fine run: band {fine} late {fine_late}"
+    );
+    let (longer, _) = zero_friction_band(1.0 / 64.0, 8.0);
+    assert!(
+        longer <= fine * 2.0,
+        "energy grew with the horizon: short {fine} long {longer}"
+    );
 }

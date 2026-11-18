@@ -11,7 +11,7 @@
 //! `sign(z+v)` (normalize each pair). Transport is projection at the
 //! arrival point. Pair reductions go through [`crate::vecops`].
 
-use ndarray::{Array1, ArrayView1};
+use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::vecops::{self, Vector};
 
@@ -83,6 +83,22 @@ impl Manifold for ComplexCircle {
             Some(want) => Err(want),
             None => Err(n),
         }
+    }
+
+    fn holonomic_chart(&self, x: &Array1<f64>) -> Option<(Array1<f64>, Array2<f64>)> {
+        if !self.fits(x.len()) || !x.iter().all(|value| value.is_finite()) {
+            return None;
+        }
+        let mut values = Array1::zeros(self.n);
+        let mut gradient = Array2::zeros((x.len(), self.n));
+        for pair in 0..self.n {
+            let real = x[2 * pair];
+            let imag = x[2 * pair + 1];
+            values[pair] = real * real + imag * imag - 1.0;
+            gradient[(2 * pair, pair)] = 2.0 * real;
+            gradient[(2 * pair + 1, pair)] = 2.0 * imag;
+        }
+        Some((values, gradient))
     }
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {

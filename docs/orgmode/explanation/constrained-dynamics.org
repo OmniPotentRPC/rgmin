@@ -33,8 +33,10 @@ The velocity multiplier uses \(N^\top v\) instead.
 
 On a flat affine constraint the hidden constraint is linear, the geodesic is the straight line, and the restoration is exact RATTLE.
 That is the special case of a \(3N\) hyperplane.
-On a curved manifold the drift is the embedding geodesic (the kinetic energy of equal masses).
-Unequal masses still enforce \(N^\top v = 0\), which is the hidden constraint of \(c(x) = 0\); they do not replace the geodesic by the kinetic-energy geodesic of a non-constant mass matrix.
+On a curved manifold with one common positive mass the drift is the embedding geodesic, which is the kinetic geodesic of that mass matrix.
+Unequal masses and frozen coordinates use one RATTLE step along \(M^{-1}\nabla c\) when the manifold publishes a holonomic chart (Leimkuhler and Matthews, the \(A_g\) map with \(K_r = 1\)).
+The position is corrected until the chart reads zero and the velocity is projected at the arrival point.
+A manifold without a chart keeps the embedding geodesic.
 
 A projection retraction is second-order accurate (Absil and Malick, SIAM J. Optim. 22, 2012, doi:10.1137/100802529).
 The sphere's normalization \((x+v)/\|x+v\|\) is one, and it agrees with the great-circle exponential through order \(\|v\|^2\).
@@ -55,5 +57,5 @@ The checks are the ones the measure predicts:
 
 Specular planar walls are an optional extra half-space.
 On a flat constraint the reflection reduces the wall normal to the tangent space and reverses position and velocity along \(M^{-1}\) of that direction, then restores the point.
-A curved manifold uses the same reflection and then the second-order retraction.
+A curved manifold recomputes the tangent wall direction at the current point, reflects, and then applies the second-order retraction.
 The flat hyperplane path matches the existing inverse-mass BAOAB, including the wall product, bit for bit.

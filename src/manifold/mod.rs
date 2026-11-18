@@ -848,6 +848,19 @@ pub trait Manifold {
         let _ = metric;
         Ok(x.clone())
     }
+
+    /// Holonomic chart \(c(x) = 0\) and its Euclidean gradient.
+    ///
+    /// Columns of the gradient are \(\nabla c_i\), in the same order as
+    /// the values. The kinetic drift uses the chart for one RATTLE step
+    /// when the masses are not a positive multiple of the identity
+    /// (Leimkuhler and Matthews, Proc. R. Soc. A 472, 20160138, 2016, the
+    /// \(A_g\) map). `None` keeps the embedding geodesic. The sphere
+    /// publishes \(c = \|x\|^2 - 1\).
+    fn holonomic_chart(&self, x: &Array1<f64>) -> Option<(Array1<f64>, Array2<f64>)> {
+        let _ = x;
+        None
+    }
 }
 
 /// [`ManifoldKind::Grassmann`]: \(\mathrm{Gr}(n, 1)\) with `n` the packed
@@ -986,5 +999,9 @@ impl Manifold for ManifoldKind {
 
     fn snap_mass(&self, metric: &mass::MassMetric, x: &Array1<f64>) -> crate::Result<Array1<f64>> {
         with_kind!(self, |f| f.snap_mass(metric, x))
+    }
+
+    fn holonomic_chart(&self, x: &Array1<f64>) -> Option<(Array1<f64>, Array2<f64>)> {
+        with_kind!(self, |f| f.holonomic_chart(x))
     }
 }
