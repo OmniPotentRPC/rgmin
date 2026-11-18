@@ -693,6 +693,62 @@ fn a_valid_etol_of_zero_is_accepted_and_never_fires_on_a_moving_run() {
     assert_ne!(report.status, Status::EnergyTolerance, "{report:?}");
 }
 
+/// Step `solver` `n` times on the Morse trimer from `morse_start` and
+/// return the iterate and the value of the last step.
+fn warm_up(solver: &mut Solver, n: usize) -> (Array1<f64>, f64) {
+    let mut x = morse_start();
+    let mut value = f64::NAN;
+    for _ in 0..n {
+        let report = solver.step(&MorseTrimer, &mut x).unwrap();
+        assert_eq!(report.status, Status::Iterating, "{report:?}");
+        value = report.value;
+    }
+    (x, value)
+}
+
+/// The least warm-up whose next step is accepted and still iterating,
+/// with the energies on either side of that step.
+fn first_moving_step(method: &Method) -> (usize, f64, f64) {
+    for warm in 1..12 {
+        let mut probe = Solver::new(method.clone(), strict(), 9);
+        let (mut x, before) = warm_up(&mut probe, warm);
+        let report = probe.step(&MorseTrimer, &mut x).unwrap();
+        if report.status == Status::Iterating && report.value != before {
+            return (warm, before, report.value);
+        }
+    }
+    panic!("{method:?} never took an accepted step");
+}
+
+#[test]
+fn set_etol_on_a_cached_point_compares_on_the_next_step() {
+    // FIRE reads no energy inside its delay after a velocity reset.
+    for method in session_methods()
+        .into_iter()
+        .filter(|method| !matches!(method, Method::Fire { .. }))
+    {
+        let (warm, before, after) = first_moving_step(&method);
+        let mean = 0.5 * (before.abs() + after.abs());
+        let etol = 4.0 * (after - before).abs() / mean;
+        assert!(
+            strict().with_etol(etol).energy_converged(before, after),
+            "{method:?}: {before} {after}"
+        );
+
+        let mut solver = Solver::new(method.clone(), strict(), 9);
+        let (mut x, value) = warm_up(&mut solver, warm);
+        assert_eq!(value, before, "{method:?}");
+        solver.set_etol(Some(etol)).unwrap();
+        let report = solver.step(&MorseTrimer, &mut x).unwrap();
+        assert_eq!(report.value, after, "{method:?}");
+        assert_eq!(
+            report.status,
+            Status::EnergyTolerance,
+            "{method:?}: the first comparison was deferred a step"
+        );
+    }
+}
+
 #[test]
 fn particle_swarm_refuses_etol_with_a_typed_error() {
     let control = strict().with_etol(1e-3);
