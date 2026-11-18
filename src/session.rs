@@ -768,8 +768,10 @@ impl Solver {
     /// Install a neighbour list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
     pub(crate) fn set_exp_deferred(&mut self, mut state: crate::precon::ExpState) {
-        if let Some(t) = self.precon_threads {
-            let _ = state.set_threads(Some(t));
+        if state.threads().is_none() {
+            if let Some(t) = self.precon_threads {
+                let _ = state.set_threads(Some(t));
+            }
         }
         self.install_slot(Slot::Exp(state));
     }
@@ -777,8 +779,10 @@ impl Solver {
     /// Install a Lindh list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
     pub(crate) fn set_lindh_deferred(&mut self, mut state: crate::precon::LindhState) {
-        if let Some(t) = self.precon_threads {
-            let _ = state.set_threads(Some(t));
+        if state.threads().is_none() {
+            if let Some(t) = self.precon_threads {
+                let _ = state.set_threads(Some(t));
+            }
         }
         self.install_slot(Slot::Lindh(state));
     }
@@ -786,8 +790,10 @@ impl Solver {
     /// Install an FF list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
     pub(crate) fn set_ff_deferred(&mut self, mut state: crate::precon::FfState) {
-        if let Some(t) = self.precon_threads {
-            let _ = state.set_threads(Some(t));
+        if state.threads().is_none() {
+            if let Some(t) = self.precon_threads {
+                let _ = state.set_threads(Some(t));
+            }
         }
         self.install_slot(Slot::Ff(state));
     }
@@ -5567,6 +5573,30 @@ mod tests {
         match &solver.inner {
             Inner::Fire(state) => state,
             _ => unreachable!("FIRE session"),
+        }
+    }
+
+    #[cfg(feature = "capi")]
+    #[test]
+    fn deferred_precon_keeps_explicit_threads() {
+        let mut solver = Solver::new(Method::Lbfgs { memory: 5 }, Control::default(), 3);
+        solver.set_threads(4).expect("session threads");
+        let state = crate::precon::ExpState::deferred(
+            Neighbours {
+                i: Vec::new(),
+                j: Vec::new(),
+                r: Vec::new(),
+                anchor: Vec::new(),
+            },
+            ExpParams::default().with_threads(2),
+        )
+        .expect("deferred exp");
+
+        solver.set_exp_deferred(state);
+
+        match solver.precon.as_ref() {
+            Some(Slot::Exp(state)) => assert_eq!(state.threads(), Some(2)),
+            _ => panic!("deferred Exp state was not installed"),
         }
     }
 

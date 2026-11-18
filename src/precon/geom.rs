@@ -301,7 +301,7 @@ pub(super) fn dihedral_grad(
 
 #[cfg(test)]
 mod tests {
-    use super::pairs_in_range;
+    use super::{MIN_PAIR_DIST, pairs_in_range};
 
     fn brute(pos: &[[f64; 3]], cutoff: f64, lengths: Option<[f64; 3]>) -> Vec<(usize, usize, f64)> {
         let mut out = Vec::new();
@@ -309,7 +309,7 @@ mod tests {
             for j in (i + 1)..pos.len() {
                 let d = super::mic(pos[i], pos[j], lengths);
                 let r = super::norm3(d);
-                if r.is_finite() && r > 1e-8 && r < cutoff {
+                if r.is_finite() && r > MIN_PAIR_DIST && r < cutoff {
                     out.push((i, j, r));
                 }
             }

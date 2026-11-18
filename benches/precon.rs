@@ -7,7 +7,8 @@
 //! `cargo bench --bench precon --features par`.
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
+use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use ndarray::Array1;
@@ -15,44 +16,67 @@ use rgmin::{Exp, ExpParams, Lindh, LindhParams, Neighbours};
 
 struct CountingAlloc;
 
+thread_local! {
+    static TRACK_THREAD: Cell<bool> = const { Cell::new(false) };
+}
+
 static ALLOC_CALLS: AtomicUsize = AtomicUsize::new(0);
-static LIVE_BYTES: AtomicUsize = AtomicUsize::new(0);
+static LIVE_BYTES: AtomicIsize = AtomicIsize::new(0);
+
+struct TrackScope;
+
+impl TrackScope {
+    fn enter() -> Self {
+        TRACK_THREAD.with(|flag| flag.set(true));
+        Self
+    }
+}
+
+impl Drop for TrackScope {
+    fn drop(&mut self) {
+        TRACK_THREAD.with(|flag| flag.set(false));
+    }
+}
+
+#[inline]
+fn is_tracked() -> bool {
+    matches!(TRACK_THREAD.try_with(Cell::get), Ok(true))
+}
 
 unsafe impl GlobalAlloc for CountingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
-        if !ptr.is_null() {
+        if !ptr.is_null() && is_tracked() {
             ALLOC_CALLS.fetch_add(1, Ordering::Relaxed);
-            LIVE_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
+            LIVE_BYTES.fetch_add(layout.size() as isize, Ordering::Relaxed);
         }
         ptr
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc_zeroed(layout) };
-        if !ptr.is_null() {
+        if !ptr.is_null() && is_tracked() {
             ALLOC_CALLS.fetch_add(1, Ordering::Relaxed);
-            LIVE_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
+            LIVE_BYTES.fetch_add(layout.size() as isize, Ordering::Relaxed);
         }
         ptr
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let out = unsafe { System.realloc(ptr, layout, new_size) };
-        if !out.is_null() {
+        if !out.is_null() && is_tracked() {
             ALLOC_CALLS.fetch_add(1, Ordering::Relaxed);
-            if new_size >= layout.size() {
-                LIVE_BYTES.fetch_add(new_size - layout.size(), Ordering::Relaxed);
-            } else {
-                LIVE_BYTES.fetch_sub(layout.size() - new_size, Ordering::Relaxed);
-            }
+            let delta = new_size as isize - layout.size() as isize;
+            LIVE_BYTES.fetch_add(delta, Ordering::Relaxed);
         }
         out
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         unsafe { System.dealloc(ptr, layout) };
-        LIVE_BYTES.fetch_sub(layout.size(), Ordering::Relaxed);
+        if is_tracked() {
+            LIVE_BYTES.fetch_sub(layout.size() as isize, Ordering::Relaxed);
+        }
     }
 }
 
@@ -167,6 +191,7 @@ fn bench_us(mut f: impl FnMut()) -> (f64, f64) {
 }
 
 fn main() {
+    let _track = TrackScope::enter();
     println!(
         "| cell | N | pairs | CSR KiB | held KiB | 62-img MiB | assemble us (IQR) | apply us (IQR) | cold solve us (IQR) | cold iters | warm8 solve us/step (IQR) | solve allocs | dot allocs |"
     );
@@ -182,7 +207,7 @@ fn main() {
         let live_before = LIVE_BYTES.load(Ordering::Relaxed);
         let held = Exp::assemble(sys.pos.view(), &sys.neigh, &params, 1.0, R0_CU).expect("exp");
         let live_after = LIVE_BYTES.load(Ordering::Relaxed);
-        let held_bytes = live_after.saturating_sub(live_before);
+        let held_bytes = (live_after - live_before).max(0) as usize;
         let csr_kib = held.csr_bytes() as f64 / 1024.0;
         let held_kib = held_bytes as f64 / 1024.0;
         let band62_mib = (held_bytes as f64 * 62.0) / (1024.0 * 1024.0);

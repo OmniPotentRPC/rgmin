@@ -345,6 +345,10 @@ impl FfState {
         Ok(())
     }
 
+    pub(crate) fn threads(&self) -> Option<usize> {
+        self.params.threads
+    }
+
     pub(crate) fn mu(&self) -> Option<f64> {
         self.mu
     }

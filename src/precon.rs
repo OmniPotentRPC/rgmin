@@ -119,12 +119,6 @@ const WARM_START_MAX_RATIO: f64 = 0.95;
 /// Sine-probe amplitude in units of `r_nn` (Packwood et al. 2016, Eq. 15).
 const SINE_PROBE_SCALE: f64 = 1.0e-2;
 
-/// Smallest denominator magnitude accepted when estimating `μ` (Eq. 14).
-const MU_DENOM_FLOOR: f64 = 1.0e-30;
-
-/// Smallest `3 × 3` determinant accepted for per-atom block-Jacobi inversion.
-const BLOCK3_DET_FLOOR: f64 = 1.0e-30;
-
 /// Fixed diagonal atom-block size for [`ExpPcKind::BlockIc0`].
 const IC_BLOCK_ATOMS: usize = 1024;
 
@@ -958,6 +952,10 @@ impl ExpState {
         Ok(())
     }
 
+    pub(crate) fn threads(&self) -> Option<usize> {
+        self.params.threads
+    }
+
     pub(crate) fn mu(&self) -> Option<f64> {
         self.mu
     }
@@ -1276,7 +1274,13 @@ where
     }
     let pv = p1.apply(v.view());
     let den = v.dot(&pv);
-    if !(den.is_finite() && den.abs() > MU_DENOM_FLOOR && num.is_finite()) {
+    // Reject cancellation at machine precision relative to the dot-product terms.
+    let den_scale = v.iter().zip(&pv).map(|(a, b)| (a * b).abs()).sum::<f64>();
+    if !(den.is_finite()
+        && den_scale.is_finite()
+        && den.abs() > f64::EPSILON * den_scale
+        && num.is_finite())
+    {
         return Err(Error::Precon {
             what: "mu estimate denominator vanished",
         });
@@ -1323,8 +1327,15 @@ where
     for i in 0..positions.len() {
         num += (g1[i] - grad_here[i]) * v[i];
     }
-    let den = v.dot(&metric.apply(v.view()));
-    if !(den.is_finite() && den.abs() > MU_DENOM_FLOOR && num.is_finite()) {
+    let pv = metric.apply(v.view());
+    let den = v.dot(&pv);
+    // Reject cancellation at machine precision relative to the dot-product terms.
+    let den_scale = v.iter().zip(&pv).map(|(a, b)| (a * b).abs()).sum::<f64>();
+    if !(den.is_finite()
+        && den_scale.is_finite()
+        && den.abs() > f64::EPSILON * den_scale
+        && num.is_finite())
+    {
         return Err(Error::Precon {
             what: "mu estimate denominator vanished",
         });
@@ -1713,7 +1724,16 @@ fn invert_spd3(d00: f64, d01: f64, d02: f64, d11: f64, d12: f64, d22: f64) -> Op
     let c12 = d01 * d02 - d00 * d12;
     let c22 = minor2;
     let det = d00 * c00 + d01 * c01 + d02 * c02;
-    if !(det.is_finite() && det > BLOCK3_DET_FLOOR) {
+    // A determinant scales cubically, so compare it to epsilon at the block's scale.
+    let scale = d00
+        .abs()
+        .max(d01.abs())
+        .max(d02.abs())
+        .max(d11.abs())
+        .max(d12.abs())
+        .max(d22.abs());
+    let det_floor = f64::EPSILON * scale * scale * scale;
+    if !(det.is_finite() && det > det_floor) {
         return None;
     }
     let inv = 1.0 / det;
