@@ -10,6 +10,13 @@ from numpy.typing import NDArray
 class NumericalError(ArithmeticError):
     pass
 
+class StopUnmetError(RuntimeError):
+    """
+    Raised when ``error_on_unmet`` is set and the run stops short of its criterion. ``report`` is the ``Report`` of that stop.
+    """
+
+    report: Report
+
 class Method(enum.IntEnum):
     """
     Geometry-optimization method. Members are UPPER_SNAKE. CamelCase names are aliases of the same values.
