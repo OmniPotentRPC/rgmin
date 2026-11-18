@@ -26,11 +26,11 @@ use crate::fire::{
 };
 use crate::holonomic::DistanceConstraints;
 use crate::hvp::{
-    FiniteDifference, HessianVector, NewtonCgRequest, OptionalAction, newton_cg_step,
-    sym_eig_jacobi,
+    FiniteDifference, HessianVector, HostAction, HostOracle, NewtonCgRequest, StepAction,
+    StepOracle, TryHessianVector, newton_cg_step, sym_eig_jacobi,
 };
 use crate::lbfgs::{GradNorm, Lbfgs, LbfgsStep};
-use crate::level_set::{LevelSetConstraint, project_tangent, retract_to_level_set};
+use crate::level_set::{LevelSetConstraint, project_tangent, retract_to_level_set_fallible};
 use crate::lindh::LindhSpec;
 use crate::linesearch::{LineSearch, LineSearchOptions};
 use crate::lowest_mode::ApplyHessian;
@@ -1422,8 +1422,18 @@ impl Solver {
     /// A Euclidean session with a coordinate box and no other constraint
     /// measures the projected gradient `grad.clamp(x - hi, x - lo)`.
     fn stationarity_norm(&self, x: &Array1<f64>, grad: &Array1<f64>) -> f64 {
+        self.stationarity_norm_in(x, grad, self.bound_low.as_ref(), self.bound_high.as_ref())
+    }
+
+    fn stationarity_norm_in(
+        &self,
+        x: &Array1<f64>,
+        grad: &Array1<f64>,
+        bound_low: Option<&Array1<f64>>,
+        bound_high: Option<&Array1<f64>>,
+    ) -> f64 {
         if self.box_stationarity()
-            && let (Some(lo), Some(hi)) = (&self.bound_low, &self.bound_high)
+            && let (Some(lo), Some(hi)) = (bound_low, bound_high)
         {
             let mut projected = Array1::zeros(x.len());
             for k in 0..x.len() {
@@ -1532,7 +1542,7 @@ impl Solver {
         !self.chart_weighted() && (self.mass_metric || self.masses.is_some())
     }
 
-    fn anchor_and_project(&mut self, x: &[f64], v: &mut [f64]) {
+    fn anchor_and_project_into(&self, ws: &mut RigidWorkspace, x: &[f64], v: &mut [f64]) {
         let mode = self.removal_mode();
         if mode == RigidMode::Off || v.len() != x.len() {
             return;
@@ -1542,23 +1552,29 @@ impl Solver {
         let pbc = self.pbc;
         let broken_t = self.broken_translation;
         let broken_r = self.broken_rotation;
-        self.rigid_ws.set_anchor(x);
+        ws.set_anchor(x);
         let masses = self.masses.as_ref().and_then(|m| m.as_slice());
         let frozen = self.frozen.as_deref();
-        self.rigid_ws.project_at_anchor(
+        ws.project_at_anchor(
             v, masses, frozen, weighted, metric, mode, pbc, broken_t, broken_r,
         );
     }
 
-    /// Remove the rigid motion of `v` at the geometry `x`.
-    fn kill_at(&mut self, x: &Array1<f64>, v: &mut Array1<f64>) {
+    fn kill_at_into(&self, ws: &mut RigidWorkspace, x: &Array1<f64>, v: &mut Array1<f64>) {
         let Some(xs) = x.as_slice() else {
             return;
         };
         let Some(vs) = v.as_slice_mut() else {
             return;
         };
-        self.anchor_and_project(xs, vs);
+        self.anchor_and_project_into(ws, xs, vs);
+    }
+
+    /// Remove the rigid motion of `v` at the geometry `x`.
+    fn kill_at(&mut self, x: &Array1<f64>, v: &mut Array1<f64>) {
+        let mut ws = std::mem::take(&mut self.rigid_ws);
+        self.kill_at_into(&mut ws, x, v);
+        self.rigid_ws = ws;
     }
 
     fn check_manifold(&self, n: usize) -> Result<()> {
@@ -1743,7 +1759,12 @@ impl Solver {
         -grad.dot(p) - 0.5 * (u.dot(&tm.model.dot(&u)) + normal)
     }
 
-    fn horizontal_grad(&mut self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
+    fn horizontal_grad_into(
+        &self,
+        ws: &mut RigidWorkspace,
+        x: &Array1<f64>,
+        grad: &Array1<f64>,
+    ) -> Array1<f64> {
         let mut g = match &self.manifold {
             ManifoldKind::MwRigid | ManifoldKind::RigidQuotient => grad.clone(),
             ManifoldKind::Product(product) if product.has_rigid() => {
@@ -1753,7 +1774,14 @@ impl Solver {
             }
             other => other.egrad2rgrad(x, grad),
         };
-        self.kill_at(x, &mut g);
+        self.kill_at_into(ws, x, &mut g);
+        g
+    }
+
+    fn horizontal_grad(&mut self, x: &Array1<f64>, grad: &Array1<f64>) -> Array1<f64> {
+        let mut ws = std::mem::take(&mut self.rigid_ws);
+        let g = self.horizontal_grad_into(&mut ws, x, grad);
+        self.rigid_ws = ws;
         g
     }
 
@@ -1804,12 +1832,13 @@ impl Solver {
         grad: &mut Array1<f64>,
     ) -> Result<()>
     where
-        O: DifferentiableObjective<f64> + ?Sized,
+        O: StepOracle + ?Sized,
     {
         let Some(cfg) = self.level_set else {
             return Ok(());
         };
-        let retracted = retract_to_level_set(obj, cfg, x)?;
+        let retracted =
+            retract_to_level_set_fallible(cfg, x, |point| obj.step_value_and_gradient(point))?;
         *x = retracted.point;
         *value = retracted.value;
         *grad = retracted.gradient;
@@ -1818,7 +1847,7 @@ impl Solver {
 
     fn retract_level_set_start<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<()>
     where
-        O: DifferentiableObjective<f64> + ?Sized,
+        O: StepOracle + ?Sized,
     {
         if self.level_set.is_none() {
             return Ok(());
@@ -1848,7 +1877,7 @@ impl Solver {
         report: &mut Report,
     ) -> Result<()>
     where
-        O: DifferentiableObjective<f64> + ?Sized,
+        O: StepOracle + ?Sized,
     {
         if self.level_set.is_none() {
             return Ok(());
@@ -1880,9 +1909,9 @@ impl Solver {
     /// Report the current point when the tangent step vanished.
     fn level_set_stay<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
-        O: DifferentiableObjective<f64> + ?Sized,
+        O: StepOracle + ?Sized,
     {
-        let (value, raw) = obj.value_and_gradient(x.view());
+        let (value, raw) = obj.step_value_and_gradient(x.view())?;
         if !crate::step::finite(value, raw.view()) {
             return Err(Error::LevelSet {
                 what: "non-finite value or gradient during level-set retraction",
@@ -2405,7 +2434,9 @@ impl Solver {
                     self.last_pos = None;
                 }
                 if let Inner::Lbfgs(solver) = &mut self.inner {
-                    solver.coordinate_box = Some(bounded.bounds().clone());
+                    // `StepOracle::bounds` is also in scope on every
+                    // differentiable objective. This is the box itself.
+                    solver.coordinate_box = Some(eindir_core::Objective::bounds(&bounded).clone());
                 }
                 return self.step_with_equalities(&bounded, x, Self::step_first_order);
             }
@@ -2462,7 +2493,8 @@ impl Solver {
                         self.last_pos = None;
                     }
                     if let Inner::Lbfgs(solver) = &mut self.inner {
-                        solver.coordinate_box = Some(bounded.bounds().clone());
+                        solver.coordinate_box =
+                            Some(eindir_core::Objective::bounds(&bounded).clone());
                     }
                     self.step_with_equalities(&bounded, x, Self::step_hess_inner)?
                 } else {
@@ -2512,52 +2544,153 @@ impl Solver {
         Ok(report)
     }
 
+    /// [`Self::step_hvp`] on an objective whose callbacks can fail.
+    ///
+    /// The step is the one [`Self::step_hvp`] takes on the same values,
+    /// gradients and products. The first callback error ends the step
+    /// as [`Error::Host`], evaluates nothing after it, and leaves `x`
+    /// and the session (counters, bounds, trust radius and cached point)
+    /// as they were before the step. A trial value the host returns as
+    /// non-finite is refused by the ratio test, as on [`Self::step_hvp`].
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`Self::step_hvp`], [`Error::Host`], and
+    /// [`Error::FallibleUnsupported`] when this session is Newton-CG or
+    /// Newton-PCG and a chart or distance constraints are set. Any other
+    /// method returns [`Error::NeedHvp`] before those checks.
+    pub fn try_step_hvp<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: TryHessianVector + ?Sized,
+    {
+        // The same refusal `step_hvp` makes, before a chart or a
+        // constraint set, which this entry does not carry.
+        if !matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. }) {
+            return Err(Error::NeedHvp);
+        }
+        if self.chart.is_some() {
+            return Err(Error::FallibleUnsupported { what: "a chart" });
+        }
+        if self.constraints.is_some() {
+            return Err(Error::FallibleUnsupported {
+                what: "distance constraints",
+            });
+        }
+        let saved_steps = self.steps;
+        let saved_gradient_calls = self.gradient_calls;
+        let saved_hvp_calls = self.hvp_calls;
+        let saved_last_pos = self.last_pos.clone();
+        let saved_last_value = self.last_value;
+        let saved_last_grad = self.last_grad.clone();
+        let saved_bound_low = self.bound_low.clone();
+        let saved_bound_high = self.bound_high.clone();
+        let saved_radius = match &self.inner {
+            Inner::NewtonCg { radius } | Inner::NewtonPcg { radius } => Some(*radius),
+            _ => None,
+        };
+        let saved_x = x.clone();
+        let oracle = HostOracle(obj);
+        let result = (|| {
+            self.retract_level_set_start(&oracle, x)?;
+            let mut report = self.step_newton_cg(&oracle, x, &HostAction(obj))?;
+            self.finish_level_set(&oracle, x, &mut report)?;
+            Ok(report)
+        })();
+        match result {
+            Err(err @ Error::Host(_)) => {
+                self.steps = saved_steps;
+                self.gradient_calls = saved_gradient_calls;
+                self.hvp_calls = saved_hvp_calls;
+                self.last_pos = saved_last_pos;
+                self.last_value = saved_last_value;
+                self.last_grad = saved_last_grad;
+                self.bound_low = saved_bound_low;
+                self.bound_high = saved_bound_high;
+                if let Some(radius) = saved_radius {
+                    match &mut self.inner {
+                        Inner::NewtonCg { radius: r } | Inner::NewtonPcg { radius: r } => {
+                            *r = radius;
+                        }
+                        _ => {}
+                    }
+                }
+                *x = saved_x;
+                Err(err)
+            }
+            other => other,
+        }
+    }
+
     fn step_newton_cg<O, A>(&mut self, obj: &O, x: &mut Array1<f64>, action: &A) -> Result<Report>
     where
-        O: DifferentiableObjective<f64> + ?Sized,
-        A: OptionalAction + Send + Sync,
+        O: StepOracle + ?Sized,
+        A: StepAction,
     {
-        if x.len() != self.dim || self.dim != Objective::dim(obj) {
+        if x.len() != self.dim || self.dim != obj.dim() {
             return Err(Error::Dim {
                 got: x.len(),
                 dim: self.dim,
             });
         }
         self.check_manifold(x.len())?;
-        self.note_bounds(obj.bounds());
+        let (radius, precondition) = match &self.inner {
+            Inner::NewtonCg { radius } => (*radius, false),
+            Inner::NewtonPcg { radius } => (*radius, true),
+            _ => return Err(Error::NeedHvp),
+        };
+        let bounds = obj.bounds();
         let cached = self.same_last_x(x);
-        if !cached {
-            *x = obj.bounds().clip(x.view());
-        }
-        let (value, raw_grad) = if cached {
-            (self.last_value, self.last_grad.clone())
+        let pos = if cached {
+            x.clone()
         } else {
-            self.gradient_calls += 1;
-            obj.value_and_gradient(x.view())
+            bounds.clip(x.view())
+        };
+        let (value, raw_grad, opening_gradients) = if cached {
+            (self.last_value, self.last_grad.clone(), 0)
+        } else {
+            let (value, raw_grad) = obj.step_value_and_gradient(pos.view())?;
+            (value, raw_grad, 1)
+        };
+        let project_rigid = self.removal_mode() != RigidMode::Off;
+        let mut ws = if project_rigid {
+            self.rigid_ws.clone()
+        } else {
+            RigidWorkspace::new()
         };
         // CG sees the horizontal gradient. The forward difference
         // needs the raw gradient, which is what `remember` stores on
         // this path.
-        let grad = self.horizontal_grad(x, &raw_grad);
-        let gnorm = self.stationarity_norm(x, &grad);
+        let grad = self.horizontal_grad_into(&mut ws, &pos, &raw_grad);
+        let gnorm = self.stationarity_norm_in(&pos, &grad, Some(&bounds.low), Some(&bounds.high));
         if !gnorm.is_finite() {
+            self.note_bounds(bounds);
+            if !cached {
+                *x = pos;
+                self.gradient_calls += opening_gradients;
+            }
+            if project_rigid {
+                self.rigid_ws = ws;
+            }
             return Err(Error::TrustCollapsed { steps: self.steps });
         }
         if gnorm < self.control.gtol {
+            self.note_bounds(bounds);
+            if !cached {
+                *x = pos;
+                self.gradient_calls += opening_gradients;
+            }
+            if project_rigid {
+                self.rigid_ws = ws;
+            }
             self.remember(x, value, &raw_grad);
             return Ok(self.finish(
                 value,
                 x,
                 &grad,
                 gnorm,
-                self.control.classify(gnorm, self.free_len(obj.bounds())),
+                self.control.classify(gnorm, self.free_len(bounds)),
             ));
         }
-        let (radius, precondition) = match &self.inner {
-            Inner::NewtonCg { radius } => (*radius, false),
-            Inner::NewtonPcg { radius } => (*radius, true),
-            _ => return Err(Error::NeedHvp),
-        };
         // Same ceiling as dogleg: Euclidean `maxmove` when one is set,
         // otherwise eight times the current radius, and never below it.
         let rmax = self
@@ -2565,10 +2698,9 @@ impl Solver {
             .maxmove_cap()
             .unwrap_or(radius * 8.0)
             .max(radius);
-        let project_rigid = self.removal_mode() != RigidMode::Off;
         let taken = newton_cg_step(
             obj,
-            x,
+            &pos,
             value,
             &grad,
             &raw_grad,
@@ -2583,9 +2715,16 @@ impl Solver {
                 manifold: (!self.manifold.is_flat()).then(|| self.manifold.clone()),
             },
             action,
-        );
+        )?;
+        self.note_bounds(bounds);
+        if !cached {
+            *x = pos;
+        }
+        if project_rigid {
+            self.rigid_ws = ws;
+        }
+        self.gradient_calls += opening_gradients + taken.trial_gradients;
         self.hvp_calls += taken.hvps;
-        self.gradient_calls += taken.trial_gradients;
         if let Inner::NewtonCg { radius } | Inner::NewtonPcg { radius } = &mut self.inner {
             *radius = taken.radius;
         }
@@ -2611,7 +2750,7 @@ impl Solver {
             x,
             &report_grad,
             gnorm,
-            self.control.classify(gnorm, self.free_len(obj.bounds())),
+            self.control.classify(gnorm, self.free_len(bounds)),
         ))
     }
 

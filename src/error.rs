@@ -300,6 +300,18 @@ pub enum Error {
         /// Derived convergence tolerance at that point.
         tolerance: f64,
     },
+    /// A fallible host callback returned this error. The solver stopped
+    /// at that call, evaluated nothing after it, and left the working
+    /// vector and the session as they were before the step.
+    #[error("host: {0}")]
+    Host(#[source] Box<dyn std::error::Error + Send + Sync>),
+    /// A fallible entry point was asked for a configuration it does not
+    /// carry.
+    #[error("fallible step: {what}")]
+    FallibleUnsupported {
+        /// What the fallible entry point does not carry.
+        what: &'static str,
+    },
 }
 
 /// Result alias for this crate.

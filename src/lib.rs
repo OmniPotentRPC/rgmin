@@ -153,7 +153,7 @@ pub use holonomic::{
 };
 pub use hvp::{
     FdHvp, HessianVector, HvpOracle, IdentityPrecond, NystromPrecond, Preconditioner,
-    minimize_newton_cg, polish_hvp, steihaug_cg, steihaug_pcg,
+    TryHessianVector, minimize_newton_cg, polish_hvp, steihaug_cg, steihaug_pcg,
 };
 pub use irc_trust::{IrcTrust, sqrt_masses_3n};
 pub use lbfgs::{
@@ -168,10 +168,11 @@ pub use linesearch::{LineSearch, LineSearchOptions, SearchStep, SuppliedSearch};
 pub use lowest_mode::{
     ApplyBlockPreconditioner, ApplyHessian, ApplyPreconditioner, Block3Jacobi, DENSE_EIGEN_CUTOFF,
     DiagonalJacobi, EigenParams, Eigenpair, Eigenpairs, EigensolverKind, LowestMode,
-    PreconditionerKind, lowest_eigenpair, lowest_eigenpairs, lowest_eigenpairs_precond,
-    lowest_mode, lowest_mode_chase, lowest_mode_dense, lowest_mode_dlaf, lowest_mode_eigenexa,
-    lowest_mode_libkrylov, lowest_mode_precond, lowest_mode_precond_with, lowest_mode_primme,
-    lowest_mode_slepc, lowest_mode_with,
+    PreconditionerKind, TryApplyHessian, lowest_eigenpair, lowest_eigenpairs,
+    lowest_eigenpairs_precond, lowest_mode, lowest_mode_chase, lowest_mode_dense, lowest_mode_dlaf,
+    lowest_mode_eigenexa, lowest_mode_libkrylov, lowest_mode_precond, lowest_mode_precond_with,
+    lowest_mode_primme, lowest_mode_slepc, lowest_mode_with, try_lowest_eigenpairs,
+    try_lowest_eigenpairs_precond,
 };
 pub use manifold::{
     CenteredMatrix, ComplexCircle, Constant, EuclideanComplex, Grassmann, Hyperbolic, Manifold,

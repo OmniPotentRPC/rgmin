@@ -11,13 +11,18 @@
 //! 7.2, <https://doi.org/10.1007/978-0-387-40065-5>.
 //! Steihaug, *The Conjugate Gradient Method and Trust Regions in Large
 //! Scale Optimization*, <https://doi.org/10.1137/0720042>.
+//!
+//! [`TryHessianVector`] is that step when a callback can fail.
+//! [`crate::Solver::try_step_hvp`] returns the first error as
+//! [`crate::Error::Host`] and evaluates nothing after it.
 
+use std::convert::Infallible;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, Array2, ArrayView1, Zip};
 
-use crate::accept::retract_within_cap;
+use crate::accept::retract_within_bounds;
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::manifold::ManifoldKind;
@@ -241,6 +246,39 @@ where
     O: HessianVector + ?Sized,
     P: Preconditioner + ?Sized,
 {
+    infallible(steihaug_pcg_with(
+        &|xv: ArrayView1<f64>, v: ArrayView1<f64>| Ok(obj.hessian_vector(xv, v)),
+        x,
+        grad,
+        radius,
+        rtol,
+        maxiter,
+        precond,
+    ))
+}
+
+fn infallible<T>(result: std::result::Result<T, Infallible>) -> T {
+    match result {
+        Ok(value) => value,
+        Err(never) => match never {},
+    }
+}
+
+/// [`steihaug_pcg`] on a product that can fail. The first error ends
+/// the solve.
+pub(crate) fn steihaug_pcg_with<F, P, E>(
+    product: &F,
+    x: ArrayView1<f64>,
+    grad: &Array1<f64>,
+    radius: f64,
+    rtol: f64,
+    maxiter: usize,
+    precond: &P,
+) -> std::result::Result<(Array1<f64>, f64), E>
+where
+    F: Fn(ArrayView1<f64>, ArrayView1<f64>) -> std::result::Result<Array1<f64>, E> + ?Sized,
+    P: Preconditioner + ?Sized,
+{
     let n = grad.len();
     let mut p = Array1::<f64>::zeros(n);
     let mut hp = Array1::<f64>::zeros(n);
@@ -273,21 +311,21 @@ where
         // A broken or indefinite preconditioner forfeits its metric;
         // fall back to the steepest boundary step.
         let p = grad.mapv(|v| -radius * v / gnorm.max(f64::MIN_POSITIVE));
-        let hp = obj.hessian_vector(x, p.view());
+        let hp = product(x, p.view())?;
         let drop = model_drop(&p, &hp);
-        return (p, drop);
+        return Ok((p, drop));
     }
 
     for _ in 0..maxiter {
-        let hd = obj.hessian_vector(x, d.view());
+        let hd = product(x, d.view())?;
         let dhd = dot(d.view(), hd.view());
         if !dhd.is_finite() {
             // A broken action cannot price curvature; take the
             // steepest boundary step and let the ratio test judge it.
             let p = grad.mapv(|v| -radius * v / gnorm.max(f64::MIN_POSITIVE));
-            let hp = obj.hessian_vector(x, p.view());
+            let hp = product(x, p.view())?;
             let drop = model_drop(&p, &hp);
-            return (p, drop);
+            return Ok((p, drop));
         }
         if dhd <= 0.0 {
             // Negative curvature: follow d to the boundary.
@@ -295,7 +333,7 @@ where
             axpy(tau, d.view(), &mut p);
             axpy(tau, hd.view(), &mut hp);
             let drop = model_drop(&p, &hp);
-            return (p, drop);
+            return Ok((p, drop));
         }
         let alpha = rz / dhd;
         let p_mp_next = p_mp + 2.0 * alpha * p_md + alpha * alpha * d_md;
@@ -304,7 +342,7 @@ where
             axpy(tau, d.view(), &mut p);
             axpy(tau, hd.view(), &mut hp);
             let drop = model_drop(&p, &hp);
-            return (p, drop);
+            return Ok((p, drop));
         }
         axpy(alpha, d.view(), &mut p);
         axpy(alpha, hd.view(), &mut hp);
@@ -327,7 +365,7 @@ where
         }
     }
     let drop = model_drop(&p, &hp);
-    (p, drop)
+    Ok((p, drop))
 }
 
 /// Randomized Nystrom preconditioner (Frangella, Tropp, Udell,
@@ -355,6 +393,25 @@ impl NystromPrecond {
     where
         O: HessianVector + ?Sized,
     {
+        infallible(Self::build_with(
+            &|xv: ArrayView1<f64>, v: ArrayView1<f64>| Ok(obj.hessian_vector(xv, v)),
+            x,
+            rank,
+            seed,
+        ))
+    }
+
+    /// [`Self::build`] on a product that can fail. The first error ends
+    /// the sketch.
+    pub(crate) fn build_with<F, E>(
+        product: &F,
+        x: ArrayView1<f64>,
+        rank: usize,
+        seed: u64,
+    ) -> std::result::Result<Self, E>
+    where
+        F: Fn(ArrayView1<f64>, ArrayView1<f64>) -> std::result::Result<Array1<f64>, E> + ?Sized,
+    {
         use rand::{Rng, SeedableRng, rngs::StdRng};
         let n = x.len();
         let k = rank.clamp(1, n);
@@ -366,7 +423,7 @@ impl NystromPrecond {
         let mut y = Array2::<f64>::zeros((n, k));
         for j in 0..k {
             let col = omega.column(j).to_owned();
-            let hcol = obj.hessian_vector(x, col.view());
+            let hcol = product(x, col.view())?;
             y.column_mut(j).assign(&hcol);
         }
         let ynorm = y.iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -386,11 +443,11 @@ impl NystromPrecond {
         let floor = nu.max(1e-14 * svals.iter().cloned().fold(0.0, f64::max));
         let kept: Vec<usize> = (0..k).filter(|&i| svals[i] > floor).collect();
         if kept.is_empty() {
-            return Self {
+            return Ok(Self {
                 u: Array2::zeros((n, 0)),
                 lam: Array1::zeros(0),
                 mu: 1.0,
-            };
+            });
         }
         let mut b = Array2::<f64>::zeros((n, kept.len()));
         for (bj, &i) in kept.iter().enumerate() {
@@ -418,7 +475,7 @@ impl NystromPrecond {
             .filter(|&l| l > 0.0)
             .fold(f64::INFINITY, f64::min);
         let mu = if mu.is_finite() { mu } else { 1.0 };
-        Self { u, lam, mu }
+        Ok(Self { u, lam, mu })
     }
 
     /// Captured eigenvalue estimates, unordered.
@@ -605,6 +662,90 @@ pub(crate) struct NewtonCgTaken {
     pub collapsed: bool,
 }
 
+/// Objective with a Hessian action whose callbacks can fail.
+///
+/// [`crate::Solver::try_step_hvp`] walks it as [`crate::Solver::step_hvp`]
+/// walks a [`HessianVector`], and returns the first error as
+/// [`Error::Host`].
+pub trait TryHessianVector {
+    /// The host's error.
+    type Error: std::error::Error + Send + Sync + 'static;
+    /// Number of coordinates.
+    fn dim(&self) -> usize;
+    /// Box on the coordinates.
+    fn bounds(&self) -> &eindir_core::Bounds<f64>;
+    /// `(f(x), grad f(x))`, or the host's error.
+    fn try_value_and_gradient(
+        &self,
+        x: ArrayView1<f64>,
+    ) -> std::result::Result<(f64, Array1<f64>), Self::Error>;
+    /// `grad^2 f(x) . v`, or the host's error.
+    fn try_hessian_vector(
+        &self,
+        x: ArrayView1<f64>,
+        v: ArrayView1<f64>,
+    ) -> std::result::Result<Array1<f64>, Self::Error>;
+}
+
+fn host_error<E: std::error::Error + Send + Sync + 'static>(err: E) -> Error {
+    Error::Host(Box::new(err))
+}
+
+/// The objective side of a [`TryHessianVector`].
+pub(crate) struct HostOracle<'a, O: ?Sized>(pub &'a O);
+
+impl<O: TryHessianVector + ?Sized> StepOracle for HostOracle<'_, O> {
+    fn dim(&self) -> usize {
+        self.0.dim()
+    }
+    fn bounds(&self) -> &eindir_core::Bounds<f64> {
+        self.0.bounds()
+    }
+    fn step_value_and_gradient(&self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>)> {
+        self.0.try_value_and_gradient(x).map_err(host_error)
+    }
+}
+
+/// The action side of a [`TryHessianVector`].
+pub(crate) struct HostAction<'a, O: ?Sized>(pub &'a O);
+
+impl<O: TryHessianVector + ?Sized> StepAction for HostAction<'_, O> {
+    fn step_apply(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Option<Result<Array1<f64>>> {
+        Some(self.0.try_hessian_vector(x, v).map_err(host_error))
+    }
+}
+
+/// Value, gradient and box of the objective a Newton-CG step walks.
+/// An infallible objective is always `Ok`.
+pub(crate) trait StepOracle {
+    fn dim(&self) -> usize;
+    fn bounds(&self) -> &eindir_core::Bounds<f64>;
+    fn step_value_and_gradient(&self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>)>;
+}
+
+impl<O: DifferentiableObjective<f64> + ?Sized> StepOracle for O {
+    fn dim(&self) -> usize {
+        eindir_core::Objective::dim(self)
+    }
+    fn bounds(&self) -> &eindir_core::Bounds<f64> {
+        eindir_core::Objective::bounds(self)
+    }
+    fn step_value_and_gradient(&self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>)> {
+        Ok(self.value_and_gradient(x))
+    }
+}
+
+/// [`OptionalAction`] whose product can fail.
+pub(crate) trait StepAction {
+    fn step_apply(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Option<Result<Array1<f64>>>;
+}
+
+impl<A: OptionalAction + ?Sized> StepAction for A {
+    fn step_apply(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Option<Result<Array1<f64>>> {
+        self.apply(x, v).map(Ok)
+    }
+}
+
 /// Counts products and serves either an analytic action or one
 /// forward difference of the known gradient.
 struct SessionAction<'a, O: ?Sized, A> {
@@ -620,51 +761,12 @@ struct SessionAction<'a, O: ?Sized, A> {
     whole_model: bool,
 }
 
-impl<'a, O, A> eindir_core::Objective<f64> for SessionAction<'a, O, A>
+impl<O, A> SessionAction<'_, O, A>
 where
-    O: DifferentiableObjective<f64> + ?Sized,
-    A: OptionalAction + Send + Sync,
+    O: StepOracle + ?Sized,
+    A: StepAction,
 {
-    fn dim(&self) -> usize {
-        eindir_core::Objective::dim(self.obj)
-    }
-    fn bounds(&self) -> &eindir_core::Bounds<f64> {
-        self.obj.bounds()
-    }
-    fn eval(&self, x: ArrayView1<f64>) -> f64 {
-        self.obj.eval(x)
-    }
-}
-
-impl<'a, O, A> eindir_core::Gradient<f64> for SessionAction<'a, O, A>
-where
-    O: DifferentiableObjective<f64> + ?Sized,
-    A: OptionalAction + Send + Sync,
-{
-    fn dim(&self) -> usize {
-        eindir_core::Objective::dim(self.obj)
-    }
-    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
-        self.obj.value_and_gradient(x).1
-    }
-}
-
-impl<'a, O, A> DifferentiableObjective<f64> for SessionAction<'a, O, A>
-where
-    O: DifferentiableObjective<f64> + ?Sized,
-    A: OptionalAction + Send + Sync,
-{
-    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        self.obj.value_and_gradient(x)
-    }
-}
-
-impl<'a, O, A> HessianVector for SessionAction<'a, O, A>
-where
-    O: DifferentiableObjective<f64> + ?Sized,
-    A: OptionalAction + Send + Sync,
-{
-    fn hessian_vector(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+    fn product(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Result<Array1<f64>> {
         let Some((kind, at)) = self.tangent else {
             return self.ambient_hv(x, v);
         };
@@ -680,38 +782,39 @@ where
         // preconditioned directions have normal parts, which need the
         // whole model.
         if !self.whole_model {
-            let mut hv = self.ambient_hv(x, v);
+            let mut hv = self.ambient_hv(x, v)?;
             kind.project_in_place(at, &mut hv);
-            return hv;
+            return Ok(hv);
         }
         let mut pv = v.to_owned();
         kind.project_in_place(at, &mut pv);
-        let mut hv = self.ambient_hv(x, pv.view());
+        let mut hv = self.ambient_hv(x, pv.view())?;
         kind.project_in_place(at, &mut hv);
         Zip::from(&mut hv)
             .and(&v)
             .and(&pv)
             .for_each(|h, &vi, &pi| *h += vi - pi);
-        hv
+        Ok(hv)
     }
-}
 
-impl<O, A> SessionAction<'_, O, A>
-where
-    O: DifferentiableObjective<f64> + ?Sized,
-    A: OptionalAction + Send + Sync,
-{
-    fn ambient_hv(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
-        if let Some(hv) = self.action.apply(x, v) {
+    fn ambient_hv(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Result<Array1<f64>> {
+        if let Some(hv) = self.action.step_apply(x, v) {
+            let hv = hv?;
             self.hvps.fetch_add(1, Ordering::Relaxed);
-            return hv;
+            return Ok(hv);
         }
         let vn = nrm2(v);
         if vn <= 0.0 {
-            return Array1::zeros(v.len());
+            return Ok(Array1::zeros(v.len()));
         }
+        let hv = forward_difference_with(
+            |xp| -> Result<Array1<f64>> { Ok(self.obj.step_value_and_gradient(xp)?.1) },
+            self.fd_grad,
+            x,
+            v,
+        )?;
         self.hvps.fetch_add(1, Ordering::Relaxed);
-        forward_difference(self.obj, self.fd_grad, x, v)
+        Ok(hv)
     }
 }
 
@@ -726,12 +829,29 @@ pub(crate) fn forward_difference<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    infallible(forward_difference_with(
+        |xp| Ok(obj.value_and_gradient(xp).1),
+        grad,
+        x,
+        v,
+    ))
+}
+
+fn forward_difference_with<G, E>(
+    gradient: G,
+    grad: &Array1<f64>,
+    x: ArrayView1<f64>,
+    v: ArrayView1<f64>,
+) -> std::result::Result<Array1<f64>, E>
+where
+    G: FnOnce(ArrayView1<f64>) -> std::result::Result<Array1<f64>, E>,
+{
     let vn = nrm2(v);
     let h = 1e-8 / vn;
     let mut xp = x.to_owned();
     axpy(h, v, &mut xp);
-    let gp = obj.value_and_gradient(xp.view()).1;
-    (gp - grad) / h
+    let gp = gradient(xp.view())?;
+    Ok((gp - grad) / h)
 }
 
 pub(crate) fn steps_differ(a: ArrayView1<f64>, b: ArrayView1<f64>) -> bool {
@@ -758,10 +878,10 @@ pub(crate) fn newton_cg_step<O, A>(
     fd_grad: &Array1<f64>,
     req: &NewtonCgRequest,
     action: &A,
-) -> NewtonCgTaken
+) -> Result<NewtonCgTaken>
 where
-    O: DifferentiableObjective<f64> + ?Sized,
-    A: OptionalAction + Send + Sync,
+    O: StepOracle + ?Sized,
+    A: StepAction,
 {
     let hvps = AtomicUsize::new(0);
     let adapter = SessionAction {
@@ -777,11 +897,20 @@ where
     let rtol = gnorm.sqrt().min(0.5);
     let radius = req.radius;
     let rmax = req.rmax.max(radius);
+    let product = |xv: ArrayView1<f64>, v: ArrayView1<f64>| adapter.product(xv, v);
     let (p_cg, mut pred) = if req.precondition {
-        let pre = NystromPrecond::build(&adapter, x.view(), NYSTROM_RANK, req.seed);
-        steihaug_pcg(&adapter, x.view(), grad, radius, rtol, 2 * n, &pre)
+        let pre = NystromPrecond::build_with(&product, x.view(), NYSTROM_RANK, req.seed)?;
+        steihaug_pcg_with(&product, x.view(), grad, radius, rtol, 2 * n, &pre)?
     } else {
-        steihaug_cg(&adapter, x.view(), grad, radius, rtol, 2 * n)
+        steihaug_pcg_with(
+            &product,
+            x.view(),
+            grad,
+            radius,
+            rtol,
+            2 * n,
+            &IdentityPrecond,
+        )?
     };
     // PCG stops on the preconditioner sphere. Pull a long step back
     // onto the Euclidean trust sphere before the displacement cap.
@@ -810,9 +939,9 @@ where
     };
     let (trial, step) = if let Some(kind) = &req.manifold {
         kind.project_in_place(x, &mut p);
-        match retract_within_cap(obj, x, &p, req.atom_cap, req.euclid_cap, kind) {
+        match retract_within_bounds(obj.bounds(), x, &p, req.atom_cap, req.euclid_cap, kind) {
             Some(pair) => pair,
-            None => return refuse(),
+            None => return Ok(refuse()),
         }
     } else {
         let mut trial = x.clone();
@@ -823,7 +952,7 @@ where
         (trial, step)
     };
     if steps_differ(step.view(), p_cg.view()) {
-        let hp = adapter.hessian_vector(x.view(), step.view());
+        let hp = adapter.product(x.view(), step.view())?;
         pred = -(dot(grad.view(), step.view()) + 0.5 * dot(step.view(), hp.view()));
     }
     let taken = nrm2(step.view());
@@ -833,9 +962,9 @@ where
         taken
     };
     if trust_norm <= 0.0 || !(pred.is_finite() && pred > 0.0) {
-        return refuse();
+        return Ok(refuse());
     }
-    let (ft, gt) = obj.value_and_gradient(trial.view());
+    let (ft, gt) = obj.step_value_and_gradient(trial.view())?;
     let rho = if ft.is_finite() {
         reduction_ratio(value - ft, pred)
     } else {
@@ -844,7 +973,7 @@ where
     let radius = update_radius(radius, rho, boundary_norm, rmax);
     let moved = rho > ETA_ACCEPT && ft.is_finite();
     let collapsed = radius < RADIUS_FLOOR;
-    if moved {
+    Ok(if moved {
         NewtonCgTaken {
             pos: trial,
             value: ft,
@@ -866,7 +995,7 @@ where
             hvps: hvps.load(Ordering::Relaxed),
             collapsed,
         }
-    }
+    })
 }
 
 /// Matrix-free Newton: Steihaug-Toint CG inside a Nocedal-Wright trust
@@ -936,7 +1065,7 @@ where
                 manifold: None,
             },
             &action,
-        );
+        )?;
         radius = taken.radius;
         if taken.collapsed {
             return Err(Error::TrustCollapsed { steps: step });
