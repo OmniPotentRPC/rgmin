@@ -14,6 +14,21 @@ use super::{Cell, CellFilter, CellFilterConfig};
 use crate::{Exp, ExpParams, LbfgsH0, LbfgsPairs, Neighbours, estimate_mu_cell};
 
 const U: f64 = f64::EPSILON / 2.0;
+/// Multiplier of `u * max|P|` in the entrywise bound on `P`.
+///
+/// `u` is the unit roundoff, half of `f64::EPSILON` (half an ulp). An
+/// off-diagonal entry is one weight `μ exp(-a (r/r_nn - 1))`: a division,
+/// a subtraction and two multiplications around an exponential. Each step
+/// rounds to half an ulp (`u`), and on this fixture the exponent stays
+/// below one, so the two weights differ by only a few `u` times `|c|`. A
+/// diagonal entry adds `μ c_stab` to one weight per neighbour. These lists
+/// have degree at most 12, so a diagonal sums at most 13 positive terms.
+/// Two recursive sums of `n` terms differ by at most `2 γ_{n-1}` times the
+/// sum, with `γ_n = n u / (1 - n u)` (Higham, *Accuracy and Stability of
+/// Numerical Algorithms*), and `2 γ_12` plus the weight error is under
+/// `32 u`. The cell diagonals copy the stored `μ_c`. Every entry is at
+/// most `max|P|` in magnitude, so the absolute tolerance is `32 u max|P|`.
+const P_ENTRY_OPS: f64 = 32.0;
 /// ASE keeps the strain block as `ecf logm(N F)` and `set_positions`
 /// undoes it with `expm`. SciPy `logm` reaches `logm(N I)` by inverse
 /// scaling and squaring, about `log2(ln N / ln 1.2)` square roots whose
@@ -318,7 +333,7 @@ fn the_matrix_has_the_ase_entries_and_a_mu_c_cell_block() {
             want[(i, j)] = v;
         }
         let scale = want.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-        let tol = 64.0 * U * scale;
+        let tol = P_ENTRY_OPS * U * scale;
         for i in 0..dim {
             for j in 0..dim {
                 assert!(
