@@ -141,6 +141,7 @@ typedef rgmin_constraints_t xts_constraints_t;
 #define xts_minimize_opts rgmin_minimize_opts
 #define xts_minimize_hess_opts rgmin_minimize_hess_opts
 #define xts_minimize_hvp_opts rgmin_minimize_hvp_opts
+#define xts_minimize_eindir_opts rgmin_minimize_eindir_opts
 #define xts_solver_set_fire_preset rgmin_solver_set_fire_preset
 #define xts_solver_set_fire_abc rgmin_solver_set_fire_abc
 #define xts_solver_set_fire_cap_two_step_overshoot rgmin_solver_set_fire_cap_two_step_overshoot

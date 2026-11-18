@@ -28,6 +28,10 @@ fn cxx_headers_compile_link_and_set_box() {
         "cxx smoke did not name the no-move run: {stdout}"
     );
     assert!(
+        stdout.contains("eindir unmet ok"),
+        "cxx smoke did not honour error_on_unmet on the eindir entry: {stdout}"
+    );
+    assert!(
         stdout.contains("manifold ok"),
         "cxx smoke did not run the manifold fit: {stdout}"
     );

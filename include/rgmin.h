@@ -96,7 +96,8 @@ typedef struct rgmin_abi_stamp_t {
  *    rgmin_solver_set_gromacs_steep, and
  *    rgmin_gromacs_steep_max_constraint_shrinks. rgmin_control_t is unchanged.
  * 58 require_convergence, the report converged flag,
- *    RGMIN_NOT_CONVERGED, and rgmin_solver_set_require_convergence. */
+ *    RGMIN_NOT_CONVERGED, and rgmin_solver_set_require_convergence.
+ * 69 rgmin_minimize_eindir_opts. rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 6
 /* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the
@@ -106,7 +107,6 @@ typedef struct rgmin_abi_stamp_t {
  * Revision 5 was value, steps, grad_norm, stop. Both sides shipped
  * those structs as revision 4 with different fields, so the union was
  * revision 5. */
-
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
     RGMIN_POLAK_RIBIERE = 0,
@@ -327,6 +327,14 @@ rgmin_status_t rgmin_minimize_eindir(
     const eindir_objective_t *objective, const eindir_abi_stamp_t *stamp,
     DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, rgmin_method_t method,
     rgmin_report_t *out);
+/** \ref rgmin_minimize_eindir with the two opt-in flags. Nonzero
+ *  \a error_on_unmet writes \a x and \a out, then returns
+ *  \c RGMIN_UNMET_STOP. \a backward_polish does not change this entry:
+ *  it has no Hessian. ABI minor 69. */
+rgmin_status_t rgmin_minimize_eindir_opts(
+    const eindir_objective_t *objective, const eindir_abi_stamp_t *stamp,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, rgmin_method_t method,
+    int error_on_unmet, int backward_polish, rgmin_report_t *out);
 
 /**
  * Opaque session. Algorithm memory (L-BFGS pairs, NLCG directions,
