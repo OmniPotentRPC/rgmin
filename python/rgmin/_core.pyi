@@ -10,6 +10,13 @@ from numpy.typing import NDArray
 class NumericalError(ArithmeticError):
     pass
 
+class StopUnmetError(RuntimeError):
+    """
+    Raised when ``error_on_unmet`` is set and the run stops short of its criterion. ``report`` is the ``Report`` of that stop.
+    """
+
+    report: Report
+
 class Method(enum.IntEnum):
     """
     Geometry-optimization method. Members are UPPER_SNAKE. CamelCase names are aliases of the same values.
@@ -220,7 +227,7 @@ class Solver:
 
 def minimize(f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], x0: NDArray[numpy.float64], method: object, **kwargs) -> tuple[Report, NDArray[numpy.float64]]:
     """
-    Minimize ``f_and_grad`` in place and return ``(report, x)``. ``error_on_unmet=True`` raises ``RuntimeError`` when the stop is ``BUDGET``, ``LINE_SEARCH``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. ``backward_polish`` is stored on the session and is not used by this step loop, which does not form a Hessian.
+    Minimize ``f_and_grad`` in place and return ``(report, x)``. ``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` that carries the ``Report`` as ``.report``, when the stop is ``BUDGET``, ``LINE_SEARCH``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. ``backward_polish`` is stored on the session and is not used by this step loop, which does not form a Hessian.
     """
 
 def backward_error_floor(value: float, x: object) -> float:
