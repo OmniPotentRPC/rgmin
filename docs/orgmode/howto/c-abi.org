@@ -239,3 +239,10 @@ Tokens 7-10 stay reserved. See
 It returns 1 and keeps the manifold for a null session, a token with shape parameters, a block the token cannot hold, or a count of zero.
 ~MW_RIGID~ copies read ~rgmin_solver_set_masses~ as one molecule reused on every copy or as every copy's masses in order.
 Weighted products of arbitrary factors are Rust only; @@rst::doc:`../reference/product-manifold`@@ lists them.
+
+** Variable-cell layout (~abi_minor~ 48)
+Size the session at ~3 N + 9~ and call ~rgmin_solver_set_cell_filter(s, &cfg, orig_cell, N)~ with ~cfg~ from ~rgmin_cell_default()~ (NaN ~exp_cell_factor~ means N, ASE's default; ~pressure~, a nine-entry ~mask~, ~hydrostatic~ and ~constant_volume~ follow ASE's FrechetCellFilter).
+~rgmin_solver_step_cell(s, eval, user, positions, cell, &report)~ then moves the positions (a ~3 N~ DLPack tensor) and the cell (nine row-major doubles) together.
+The callback receives the Cartesian positions and the cell, and writes the energy, the forces and the nine-entry stress in ASE's sign convention.
+Install the filter before ~rgmin_solver_set_exp~: the exponential preconditioner then carries the ~mu_c~ cell block, floored at 1 as ASE's SparsePrecon does, which ~rgmin_solver_exp_mu_c~ reads and ~rgmin_solver_set_exp_mu_c~ fixes.
+Lindh and force-field preconditioners have no cell block and are refused on this layout.

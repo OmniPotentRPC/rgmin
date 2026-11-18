@@ -57,6 +57,22 @@ static const field_t exp_fields[] = {
     FIELD(rgmin_exp_t, recalc_mu),
 };
 
+static const field_t cell_fields[] = {
+    FIELD(rgmin_cell_t, exp_cell_factor),
+    FIELD(rgmin_cell_t, pressure),
+    ELEMENT(rgmin_cell_t, mask, 0),
+    ELEMENT(rgmin_cell_t, mask, 1),
+    ELEMENT(rgmin_cell_t, mask, 2),
+    ELEMENT(rgmin_cell_t, mask, 3),
+    ELEMENT(rgmin_cell_t, mask, 4),
+    ELEMENT(rgmin_cell_t, mask, 5),
+    ELEMENT(rgmin_cell_t, mask, 6),
+    ELEMENT(rgmin_cell_t, mask, 7),
+    ELEMENT(rgmin_cell_t, mask, 8),
+    FIELD(rgmin_cell_t, hydrostatic),
+    FIELD(rgmin_cell_t, constant_volume),
+};
+
 static const field_t scg_params_fields[] = {
     FIELD(rgmin_scg_params_t, sigma0),
     FIELD(rgmin_scg_params_t, lambda),
@@ -227,6 +243,11 @@ static NOINLINE int check_exp(void) {
     return check("rgmin_exp_t", &c, sizeof c, exp_fields, COUNT(exp_fields));
 }
 
+static NOINLINE int check_cell(void) {
+    rgmin_cell_t c = rgmin_cell_default();
+    return check("rgmin_cell_t", &c, sizeof c, cell_fields, COUNT(cell_fields));
+}
+
 static NOINLINE int check_scg_params(void) {
     rgmin_scg_params_t c = rgmin_scg_params_default();
     return check("rgmin_scg_params_t", &c, sizeof c, scg_params_fields,
@@ -378,6 +399,8 @@ int main(int argc, char **argv) {
     failed |= check_control();
     poison_stack();
     failed |= check_exp();
+    poison_stack();
+    failed |= check_cell();
     poison_stack();
     failed |= check_scg_params();
     poison_stack();

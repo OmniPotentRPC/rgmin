@@ -568,7 +568,6 @@ impl ExpState {
     /// Give a state built without a geometry the cell block of an
     /// `natoms`-atom layout. The next refresh places `r_nn`, `μ` and `μ_c`.
     #[cfg(feature = "capi")]
-    #[allow(dead_code)]
     pub(crate) fn enable_cell(&mut self, natoms: usize) {
         self.cell_atoms = Some(natoms);
         self.mu_c = self.params.mu_c;
@@ -578,6 +577,15 @@ impl ExpState {
 
     pub(crate) fn mu_c(&self) -> Option<f64> {
         self.mu_c
+    }
+
+    /// Fix `μ_c`, or `None` to estimate it again. The matrix is rebuilt on
+    /// the next refresh.
+    pub(crate) fn set_mu_c(&mut self, mu_c: Option<f64>) {
+        self.params.mu_c = mu_c;
+        self.mu_c = mu_c;
+        self.matrix = None;
+        self.built_at = None;
     }
 
     pub(crate) fn mu(&self) -> Option<f64> {
