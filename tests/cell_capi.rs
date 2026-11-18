@@ -79,10 +79,8 @@ unsafe extern "C" fn lj_cell(
         *energy_out = ev.energy;
         std::slice::from_raw_parts_mut(f as *mut f64, n)
             .copy_from_slice(ev.forces.as_slice().unwrap());
-        for i in 0..3 {
-            for j in 0..3 {
-                *stress_out.add(3 * i + j) = ev.stress[i][j];
-            }
+        for (k, v) in ev.stress.iter().flatten().enumerate() {
+            *stress_out.add(k) = *v;
         }
     }
     rgmin_status_t::RGMIN_SUCCESS

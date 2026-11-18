@@ -153,7 +153,8 @@ impl CellFilter {
         if natoms == 0 {
             return Err(Error::Cell { what: "no atoms" });
         }
-        if !finite3(&orig_cell) || !(det3(&orig_cell).abs() > 0.0) {
+        let det = det3(&orig_cell);
+        if !finite3(&orig_cell) || !det.is_finite() || det == 0.0 {
             return Err(Error::Cell {
                 what: "the original cell is singular or not finite",
             });

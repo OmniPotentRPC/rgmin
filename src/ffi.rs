@@ -1778,10 +1778,8 @@ pub unsafe extern "C" fn rgmin_solver_exp_mu_c(solver: *const rgmin_solver_t) ->
     if solver.is_null() {
         return f64::NAN;
     }
-    match unsafe { (*solver).solver.exp_mu_c() } {
-        Some(mu_c) => mu_c,
-        None => f64::NAN,
-    }
+    // mu_c is positive, so abs is the identity on a held value.
+    unsafe { (*solver).solver.exp_mu_c() }.map_or(f64::NAN, f64::abs)
 }
 
 /// Fix `μ_c` of the installed exponential preconditioner. NaN or a
