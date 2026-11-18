@@ -61,5 +61,11 @@ The C selector is ``RGMIN_GROMACS_STEEP`` and the C++ selector is
 ``RGMIN_STOP_MACHINE_PRECISION`` reports that the current displacement
 cannot change a coordinate.
 
+A non-finite callback value or gradient is reported as an oracle error
+(Rust ``Error::Oracle``, C ``RGMIN_INTERNAL_ERROR`` with
+``rgmin_last_error`` text). A distance-constraint placement failure
+returns a constraint error (Rust ``Error::Constraint``, C
+``RGMIN_CONSTRAINT_ERROR`` with ``rgmin_last_constraint_error``).
+
 The exact update and stop rules are in
 :doc:`../reference/gromacs-steep`.
