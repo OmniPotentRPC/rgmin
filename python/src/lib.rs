@@ -84,7 +84,9 @@ impl Session {
     /// `nonmonotone`; `downhill` is `energy`. `istep` is the step scale
     /// of a method other than FIRE, whose scale is `dt`. `shrink` is
     /// the refused-trial factor of a `gromacs-steep` session; omitted,
-    /// the session uses the GROMACS 0.5 factor.
+    /// the session uses the GROMACS 0.5 factor. `max_constraint_shrinks`
+    /// bounds consecutive constraint failures before the session returns
+    /// a constraint error.
     #[allow(clippy::too_many_arguments)]
     #[new]
     #[pyo3(signature = (
@@ -110,6 +112,7 @@ impl Session {
         accept=None,
         istep=None,
         shrink=None,
+        max_constraint_shrinks=None,
         level_set=None,
     ))]
     fn new(
@@ -134,6 +137,7 @@ impl Session {
         accept: Option<&str>,
         istep: Option<f64>,
         shrink: Option<f64>,
+        max_constraint_shrinks: Option<u32>,
         level_set: Option<f64>,
     ) -> PyResult<Self> {
         if n == 0 {
@@ -227,14 +231,21 @@ impl Session {
         if accept != Accept::None {
             solver.set_accept(accept);
         }
-        if let Some(factor) = shrink {
+        if shrink.is_some() || max_constraint_shrinks.is_some() {
             if !steep {
                 return Err(PyValueError::new_err(
-                    "shrink applies to a gromacs-steep session only",
+                    "shrink and max_constraint_shrinks apply to a gromacs-steep session only",
                 ));
             }
+            let mut config = GromacsSteepConfig::default();
+            if let Some(factor) = shrink {
+                config = config.with_shrink(factor);
+            }
+            if let Some(max_shrinks) = max_constraint_shrinks {
+                config = config.with_max_constraint_shrinks(max_shrinks);
+            }
             solver
-                .set_gromacs_steep_config(GromacsSteepConfig::default().with_shrink(factor))
+                .set_gromacs_steep_config(config)
                 .map_err(value_error)?;
         }
         if atom_cap.is_finite() && atom_cap > 0.0 {

@@ -71,6 +71,8 @@ class GromacsSteep:
     emtol: float
     emstep: float
     gromacs_nsteps: int
+    shrink: float | None
+    max_constraint_shrinks: int | None
     maxstep: float
     def __init__(
         self,
@@ -83,6 +85,8 @@ class GromacsSteep:
         emtol: float = 10.0,
         emstep: float = 0.01,
         nsteps: int = -1,
+        shrink: float | None = None,
+        max_constraint_shrinks: int | None = None,
         **kwargs: Any,
     ) -> None: ...
     def run(self, fmax: float | None = None, steps: int | None = None) -> bool: ...

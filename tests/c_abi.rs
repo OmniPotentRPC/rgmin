@@ -17,10 +17,10 @@ use rgmin::ffi::{
     rgmin_minimize_eindir, rgmin_minimize_scg, rgmin_precond_fn, rgmin_report_t,
     rgmin_scg_params_t, rgmin_solver_clear_exp, rgmin_solver_create, rgmin_solver_exp_mu,
     rgmin_solver_free, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
-    rgmin_solver_set_accept, rgmin_solver_set_exp, rgmin_solver_set_quickmin_cell,
-    rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
-    rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
-    rgmin_tensor_free,
+    rgmin_solver_set_accept, rgmin_solver_set_exp, rgmin_solver_set_gromacs_steep,
+    rgmin_solver_set_quickmin_cell, rgmin_solver_set_quickmin_variant, rgmin_solver_step,
+    rgmin_solver_step_fg, rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t,
+    rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
 use rgpot_core::status::rgpot_status_t;
@@ -4831,6 +4831,17 @@ fn gromacs_steep_runs_and_reports_machine_precision_across_c_abi() {
     assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
     assert!(out.value < 50.0);
     assert!(out.steps > 0);
+    unsafe {
+        let steep_solver = rgmin_solver_create(rgmin_method_t::RGMIN_GROMACS_STEEP, &ctrl, 3);
+        assert!(!steep_solver.is_null());
+        assert_eq!(rgmin_solver_set_gromacs_steep(steep_solver, 0.5, 12), 0);
+        assert_eq!(rgmin_solver_set_gromacs_steep(steep_solver, 1.0, 12), 1);
+        rgmin_solver_free(steep_solver);
+        let lbfgs_solver = rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 3);
+        assert!(!lbfgs_solver.is_null());
+        assert_eq!(rgmin_solver_set_gromacs_steep(lbfgs_solver, 0.5, 12), 1);
+        rgmin_solver_free(lbfgs_solver);
+    }
 
     ctrl.gtol = 0.0;
     ctrl.istep = f64::MIN_POSITIVE;

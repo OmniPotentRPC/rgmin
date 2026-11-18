@@ -682,6 +682,10 @@ public:
     /// Energy scale, or NaN when none is installed.
     double exp_mu() const noexcept { return rgmin_solver_exp_mu(ptr_); }
     void set_accept(rgmin_accept_t accept) { rgmin_solver_set_accept(ptr_, accept); }
+    /// GROMACS steep refused-trial shrink and constraint-failure budget.
+    int set_gromacs_steep(double shrink, std::uint32_t max_constraint_shrinks) {
+        return rgmin_solver_set_gromacs_steep(ptr_, shrink, max_constraint_shrinks);
+    }
 
     void forget_evaluation() { rgmin_solver_forget_evaluation(ptr_); }
     rgmin_status_t set_precon(Precon const& p) { return rgmin_solver_set_precon(ptr_, p.get()); }
@@ -1104,13 +1108,16 @@ private:
     std::optional<double> cautious_eps_;
     std::optional<double> cautious_alpha_;
     std::optional<double> objective_roundoff_;
+    std::optional<double> gromacs_shrink_;
+    std::optional<std::uint32_t> gromacs_max_constraint_shrinks_;
 };
 
 inline std::string SolverConfig::valid_options() {
     return "accept, atom_maxmove, beta, c1, c2, cautious_alpha, cautious_eps, "
            "extra_updates, fire_variant, gtol, istep, linesearch, "
            "linesearch_maxiter, maxiter, maxmove, maxstep, memory, neb_guards, "
-           "noise_c, noise_eps, objective_roundoff, periodic, project_rigid, qn_step";
+           "noise_c, noise_eps, objective_roundoff, periodic, project_rigid, qn_step, "
+           "shrink, max_constraint_shrinks";
 }
 
 inline std::string SolverConfig::valid_methods() {
@@ -1199,7 +1206,7 @@ inline bool known_option(std::string const& key) {
         "cautious_eps", "extra_updates", "fire_variant", "gtol", "istep",
         "linesearch", "linesearch_maxiter", "maxiter", "maxmove", "maxstep",
         "memory", "neb_guards", "noise_c", "noise_eps", "objective_roundoff",
-        "periodic", "project_rigid", "qn_step"};
+        "periodic", "project_rigid", "qn_step", "shrink", "max_constraint_shrinks"};
     for (char const* item : keys) {
         if (key == item) return true;
     }
@@ -1222,7 +1229,21 @@ inline void require_finite(std::string const& key, double value) {
 
 inline bool is_count_option(std::string const& key) {
     return key == "memory" || key == "maxiter" || key == "linesearch_maxiter" ||
-           key == "extra_updates";
+           key == "extra_updates" || key == "max_constraint_shrinks";
+}
+
+inline std::uint32_t gromacs_constraint_shrinks(double step, double shrink) {
+    if (!(std::isfinite(step) && step > 0.0 && std::isfinite(shrink) && shrink > 0.0 &&
+          shrink < 1.0)) {
+        return 0;
+    }
+    std::uint32_t count = 0;
+    while (step > std::numeric_limits<double>::epsilon() &&
+           count < std::numeric_limits<std::uint32_t>::max()) {
+        step *= shrink;
+        ++count;
+    }
+    return count;
 }
 
 inline std::size_t require_count(std::string const& key, long long value, long long min_value) {
@@ -1319,6 +1340,12 @@ inline SolverConfig SolverConfig::build(
             cfg.linesearch_maxiter_ = detail::require_count(key, item.second, 1);
         } else if (key == "extra_updates") {
             cfg.extra_updates_ = detail::require_count(key, item.second, 0);
+        } else if (key == "max_constraint_shrinks") {
+            std::size_t count = detail::require_count(key, item.second, 0);
+            if (count > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+                throw std::invalid_argument("max_constraint_shrinks is out of range");
+            }
+            cfg.gromacs_max_constraint_shrinks_ = static_cast<std::uint32_t>(count);
         } else if (key == "gtol" || key == "istep" || key == "maxmove" || key == "noise_eps" ||
                    key == "noise_c" || key == "c1" || key == "c2" || key == "atom_maxmove" ||
                    key == "maxstep" || key == "cautious_eps" || key == "cautious_alpha" ||
@@ -1357,6 +1384,7 @@ inline SolverConfig SolverConfig::build(
         else if (key == "cautious_eps") cfg.cautious_eps_ = item.second;
         else if (key == "cautious_alpha") cfg.cautious_alpha_ = item.second;
         else if (key == "objective_roundoff") cfg.objective_roundoff_ = item.second;
+        else if (key == "shrink") cfg.gromacs_shrink_ = item.second;
         else {
             throw std::invalid_argument(key + " must be a string or a flag");
         }
@@ -1444,6 +1472,15 @@ inline void SolverConfig::apply(Solver& solver) const {
         if (st != RGMIN_SUCCESS) {
             char const* msg = rgmin_last_error();
             throw std::invalid_argument(msg ? msg : "set_objective_roundoff failed");
+        }
+    }
+    if (gromacs_shrink_ || gromacs_max_constraint_shrinks_) {
+        double const shrink = gromacs_shrink_.value_or(0.5);
+        std::uint32_t const max_constraint_shrinks = gromacs_max_constraint_shrinks_.value_or(
+            detail::gromacs_constraint_shrinks(control_.istep, shrink));
+        if (solver.set_gromacs_steep(shrink, max_constraint_shrinks) != 0) {
+            char const* msg = rgmin_last_error();
+            throw std::invalid_argument(msg ? msg : "set_gromacs_steep failed");
         }
     }
 }

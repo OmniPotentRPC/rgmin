@@ -146,8 +146,8 @@ pub use eon_cg::{EonCg, EonCgReport, minimize_eon_cg};
 pub use error::{Error, Result};
 pub use fire::{Fire2Extras, FireConfig, FireKind, FirePreset, FireVariant, guenole2020};
 pub use gromacs::{
-    GROMACS_STEEP_GROW, GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS, GROMACS_STEEP_SHRINK, GromacsSteep,
-    GromacsSteepConfig,
+    GROMACS_STEEP_EMSTEP_DEFAULT, GROMACS_STEEP_GROW, GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS,
+    GROMACS_STEEP_SHRINK, GromacsSteep, GromacsSteepConfig, gromacs_steep_max_constraint_shrinks,
 };
 pub use highs_kind::{
     HighsCCallback, HighsCallback, HighsCallbackKind, HighsCrossover, HighsOptions, HighsSolverKind,
