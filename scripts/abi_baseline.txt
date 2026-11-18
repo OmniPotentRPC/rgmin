@@ -1,6 +1,7 @@
 rgmin_abi_compatible
 rgmin_abi_stamp
 rgmin_backward_error_floor
+rgmin_cell_default
 rgmin_constraints_constrain
 rgmin_constraints_create
 rgmin_constraints_create_at
@@ -65,6 +66,7 @@ rgmin_rigid_workspace_rank
 rgmin_scg_options_default
 rgmin_scg_params_default
 rgmin_solver_add_equality
+rgmin_solver_clear_cell_filter
 rgmin_solver_clear_distance_constraints
 rgmin_solver_clear_equalities
 rgmin_solver_clear_exp
@@ -73,6 +75,7 @@ rgmin_solver_clear_precon
 rgmin_solver_create
 rgmin_solver_dim
 rgmin_solver_exp_mu
+rgmin_solver_exp_mu_c
 rgmin_solver_forget
 rgmin_solver_forget_evaluation
 rgmin_solver_free
@@ -91,6 +94,7 @@ rgmin_solver_set_backward_polish
 rgmin_solver_set_box
 rgmin_solver_set_broken_axes
 rgmin_solver_set_cautious
+rgmin_solver_set_cell_filter
 rgmin_solver_set_centered_matrix
 rgmin_solver_set_complex_circle
 rgmin_solver_set_constant
@@ -98,6 +102,7 @@ rgmin_solver_set_distance_constraints
 rgmin_solver_set_error_on_unmet
 rgmin_solver_set_euclidean_complex
 rgmin_solver_set_exp
+rgmin_solver_set_exp_mu_c
 rgmin_solver_set_extra_updates
 rgmin_solver_set_factor_shape
 rgmin_solver_set_fire_abc
@@ -143,6 +148,7 @@ rgmin_solver_set_stop_norm
 rgmin_solver_set_trust
 rgmin_solver_set_unitary
 rgmin_solver_step
+rgmin_solver_step_cell
 rgmin_solver_step_fg
 rgmin_solver_step_hess
 rgmin_solver_step_hess_fg

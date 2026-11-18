@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 49
+#define RGMIN_ABI_VERSION_MINOR 50
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -84,7 +84,9 @@ typedef struct rgmin_abi_stamp_t {
  * 48 rgmin_solver_set_fire_cap_two_step_overshoot,
  * 49 stop reasons LINE_SEARCH and POLISH_UNMET, RGMIN_UNMET_STOP,
  *    the two session setters, rgmin_backward_error_floor, and the
- *    *_opts one-shots. rgmin_control_t is unchanged. */
+ *    *_opts one-shots. rgmin_control_t is unchanged,
+ * 50 variable-cell layout: rgmin_cell_t, rgmin_solver_set_cell_filter,
+ *    rgmin_solver_step_cell and the mu_c accessors. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -377,6 +379,15 @@ rgmin_status_t rgmin_solver_set_exp(rgmin_solver_t *solver, const rgmin_exp_t *p
 void rgmin_solver_clear_exp(rgmin_solver_t *solver);
 /** Energy scale, or NaN when none is installed. */
 double rgmin_solver_exp_mu(const rgmin_solver_t *solver);
+/** Scale of the cell block of the exponential preconditioner on a cell
+ *  layout, or NaN when none is installed or not yet estimated.
+ *  ABI minor 50. */
+double rgmin_solver_exp_mu_c(const rgmin_solver_t *solver);
+/** Fix the cell-block scale mu_c of the installed exponential
+ *  preconditioner. NaN or a non-positive value estimates it again on the
+ *  next step, floored at 1 as ASE does. Needs \ref rgmin_solver_set_cell_filter
+ *  and \ref rgmin_solver_set_exp. ABI minor 50. */
+rgmin_status_t rgmin_solver_set_exp_mu_c(rgmin_solver_t *solver, double mu_c);
 
 /** Which geometry preconditioner \ref rgmin_solver_set_precon installs.
  *  ABI minor 32. */
@@ -892,6 +903,43 @@ void rgmin_solver_clear_distance_constraints(rgmin_solver_t *solver);
 rgmin_status_t rgmin_solver_set_level_set(rgmin_solver_t *solver, double target);
 /** Drop the session's level-set constraint. ABI minor 47. */
 void rgmin_solver_clear_level_set(rgmin_solver_t *solver);
+/** Options of the variable-cell filter, ASE \c FrechetCellFilter. The strain
+ *  mask is row-major, entry 3 i + j for strain component (i, j) of
+ *  F = (cell_0^-1 cell)^T. Start from \ref rgmin_cell_default. ABI minor 50. */
+typedef struct rgmin_cell_t {
+    double exp_cell_factor; /**< NaN or non-positive selects the atom count. */
+    double pressure;        /**< Scalar pressure of E + p V. */
+    int32_t mask[9];        /**< Nonzero relaxes the strain component. */
+    int32_t hydrostatic;    /**< Nonzero keeps the isotropic stress only. */
+    int32_t constant_volume; /**< Nonzero projects the volume change out. */
+} rgmin_cell_t;
+/** Rust \c CellFilterConfig::default: NaN factor (the atom count), zero
+ *  pressure, every component relaxing, no hydrostatic or constant-volume
+ *  option. ABI minor 50. */
+rgmin_cell_t rgmin_cell_default(void);
+/** Energy, forces and stress at Cartesian positions and a cell. \a cell is
+ *  nine doubles, row-major, one lattice vector per row. Write the energy, the
+ *  forces (-dE/dr, length 3 N) into the tensor, and nine stress doubles
+ *  row-major in the ASE sign convention (1/V dE/d strain). ABI minor 50. */
+typedef rgmin_status_t (*rgmin_cell_eval_fn)(void *user, const DLManagedTensorVersioned *positions,
+                                             const double *cell, double *energy_out,
+                                             DLManagedTensorVersioned *forces_out,
+                                             double *stress_out);
+/** Run the session on the extended [positions, cell strain] layout. The
+ *  session dimension must be 3 natoms + 9. \a orig_cell is nine doubles,
+ *  row-major, the reference cell. \a config null takes the defaults. Install
+ *  this before any preconditioner. ABI minor 50. */
+rgmin_status_t rgmin_solver_set_cell_filter(rgmin_solver_t *solver, const rgmin_cell_t *config,
+                                            const double *orig_cell, size_t natoms);
+/** Back to the plain layout; drops a preconditioner set for the cell layout.
+ *  ABI minor 50. */
+void rgmin_solver_clear_cell_filter(rgmin_solver_t *solver);
+/** One outer iteration on a cell layout. \a positions (3 N) and \a cell (nine
+ *  doubles) are in/out. The report describes the extended vector: its value is
+ *  the enthalpy and its gradient norm is tested against gtol. ABI minor 50. */
+rgmin_status_t rgmin_solver_step_cell(rgmin_solver_t *solver, rgmin_cell_eval_fn eval, void *user,
+                                      DLManagedTensorVersioned *positions, double *cell,
+                                      rgmin_report_t *out);
 /**
  * One outer iteration: direction, line search, curvature update.
  * \a eval and \a grad are valid for this call only. \a x is in/out.

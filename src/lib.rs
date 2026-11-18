@@ -26,6 +26,8 @@
 #[macro_use]
 mod config;
 
+/// Variable-cell layout and the ASE `FrechetCellFilter` gradient.
+pub mod cell;
 /// Line-search strategies (Brent, Armijo, Goldstein, Wolfe/zoom).
 pub mod linesearch;
 /// Method selector (NLCG, BFGS family, Adam, steepest descent, PSO).
@@ -134,6 +136,7 @@ pub mod vecops;
 
 pub use accept::Accept;
 pub use adam::minimize_adam;
+pub use cell::{CELL_DOF, Cell, CellEvaluation, CellFilter, CellFilterConfig};
 #[cfg(feature = "readcon")]
 pub use con_checkpoint::{read_checkpoint, write_checkpoint};
 pub use control::{Control, NoiseFloor, StopNorm};
@@ -201,8 +204,8 @@ pub use precon::{
     AngleTerm, BondTerm, DihedralTerm, Exp, ExpParams, Ff, FfParams, FfTerms, GeometryKind, Ghost,
     Lindh, LindhParams, MorseTerm, N_LINDH, N_PAR_ASSEMBLE, N_PAR_EXP_APPLY, N_PAR_EXP_SOLVE,
     N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, Neighbours, OptimizerFamily, PreconChoice, PreconSpec,
-    bonded_terms, estimate_mu, max_atom_displacement, nearest_neighbour_distance, needs_rebuild,
-    select_precon, sine_probe,
+    bonded_terms, estimate_mu, estimate_mu_cell, max_atom_displacement, nearest_neighbour_distance,
+    needs_rebuild, select_precon, sine_probe,
 };
 pub use pso::minimize_pso;
 pub use qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
