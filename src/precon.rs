@@ -133,6 +133,10 @@ const PAIR_PAR_CHUNK: usize = 512;
 
 #[cfg(test)]
 const TEST_HOLD_R_NN: f64 = 1_000_000_000.0;
+// 4096 * eps = 2^-40, the power-of-two multiple of machine epsilon nearest
+// the previous absolute residual cutoff used by these in-module PCG solves.
+#[cfg(test)]
+const TEST_PCG_SOLVE_RTOL: f64 = 4096.0 * f64::EPSILON;
 
 /// One undirected neighbour list over atoms, plus bonds to atoms that
 /// are not degrees of freedom.
@@ -2660,7 +2664,7 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
     let op = SparseOp::General(a.clone());
     let exec = Exec::default();
     let mut work = PcgWork::default();
-    solve_pcg_op(&op, b, 1.0e-12, false, false, &exec, &mut work)
+    solve_pcg_op(&op, b, TEST_PCG_SOLVE_RTOL, false, false, &exec, &mut work)
 }
 
 fn finite_vec(x: Vec<f64>) -> Option<Vec<f64>> {
@@ -2831,6 +2835,63 @@ mod tests {
         let num = (&g1 - &g0).dot(&v);
         let den = v.dot(&p1.apply(v.view()));
         assert!((mu - num / den).abs() < 1e-12, "formula drift");
+    }
+
+    #[test]
+    fn invert_spd3_guard_and_preconditioned_action_are_scale_invariant() {
+        let a = [4.0, 1.5, 0.25, 3.0, 0.5, 2.5];
+        let rhs = [0.8, -0.4, 0.2];
+        let apply_inv = |inv: [f64; 6], b: [f64; 3]| -> [f64; 3] {
+            [
+                inv[0] * b[0] + inv[1] * b[1] + inv[2] * b[2],
+                inv[1] * b[0] + inv[3] * b[1] + inv[4] * b[2],
+                inv[2] * b[0] + inv[4] * b[1] + inv[5] * b[2],
+            ]
+        };
+        let inv_ref = invert_spd3(a[0], a[1], a[2], a[3], a[4], a[5]).expect("base SPD block");
+        let z_ref = apply_inv(inv_ref, rhs);
+        for p in [-40_i32, 40_i32] {
+            let s = 2.0_f64.powi(p);
+            let inv = invert_spd3(s * a[0], s * a[1], s * a[2], s * a[3], s * a[4], s * a[5])
+                .expect("scaled SPD block");
+            let z = apply_inv(inv, [s * rhs[0], s * rhs[1], s * rhs[2]]);
+            for i in 0..3 {
+                let scale = z_ref[i].abs().max(z[i].abs()).max(1.0);
+                let tol = 64.0 * f64::EPSILON * scale;
+                assert!(
+                    (z[i] - z_ref[i]).abs() <= tol,
+                    "scale 2^{p}: component {i} drifted {} vs {} (tol {tol})",
+                    z[i],
+                    z_ref[i]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn invert_spd3_rejects_exactly_singular_minor() {
+        assert!(
+            invert_spd3(1.0, 1.0, 0.0, 1.0, 0.0, 1.0).is_none(),
+            "exactly singular leading minor must be rejected"
+        );
+    }
+
+    /// Positive leading minor below eps*s^2. `minor2 > 0.0` returns Some;
+    /// the scale-relative floor returns None.
+    #[test]
+    fn invert_spd3_rejects_positive_minor_below_scale_floor() {
+        assert!(
+            invert_spd3(
+                0.18939220242941968,
+                0.17896518182033547,
+                0.0,
+                0.1691122226424382,
+                0.0,
+                0.20499081484829917,
+            )
+            .is_none(),
+            "positive minor below eps*s^2 must be rejected"
+        );
     }
 
     /// FNV-1a over the little-endian bits of the solution. The same
