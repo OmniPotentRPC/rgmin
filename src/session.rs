@@ -6007,6 +6007,21 @@ mod tests {
     }
 
     #[test]
+    fn fire_v2_stall_restores_dt_max() {
+        let obj = steep();
+        let mut solver = fire_solver(FireKind::V2);
+        solver.set_fire_variant(FireVariant::Guenole2020);
+        solver
+            .set_fire_config(FireConfig::ase().with_dt_max(4.0))
+            .unwrap();
+        solver.set_fire_vdfmax(0);
+        let mut x = array![1.0, 1.0];
+        let err = solver.step(&obj, &mut x).unwrap_err();
+        assert!(matches!(err, Error::FireStalled { .. }));
+        assert_eq!(fire_state(&solver).dt_max, 4.0);
+    }
+
+    #[test]
     fn fire_v1_velocity_is_bounded_by_the_clamped_move() {
         let obj = steep();
         let mut solver = fire_solver(FireKind::V1);
