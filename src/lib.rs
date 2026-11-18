@@ -164,7 +164,10 @@ pub use lbfgs::{
 pub use lbfgs_qp::HighsStep;
 pub use level_set::LevelSetConstraint;
 pub use lindh::{LindhSpec, apply_inverse};
-pub use linesearch::{LineSearch, LineSearchOptions, SearchStep, SuppliedSearch};
+pub use linesearch::{
+    LineSearch, LineSearchOptions, LineSearchResult, LineSearchStopReason, SearchStep,
+    SuppliedSearch,
+};
 pub use lowest_mode::{
     ApplyBlockPreconditioner, ApplyHessian, ApplyPreconditioner, Block3Jacobi, DENSE_EIGEN_CUTOFF,
     DiagonalJacobi, EigenParams, Eigenpair, Eigenpairs, EigensolverKind, LowestMode,
