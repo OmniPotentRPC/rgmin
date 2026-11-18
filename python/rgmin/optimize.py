@@ -729,12 +729,18 @@ class GromacsSteep(_RgminOptimizer):
         emtol: float = 10.0,
         emstep: float = 0.01,
         nsteps: int = -1,
+        shrink: float | None = None,
+        max_constraint_shrinks: int | None = None,
         **kwargs: Any,
     ) -> None:
         mapped = gromacs_mdp_options(emtol=emtol, emstep=emstep, nsteps=nsteps)
         self.emtol = float(emtol)
         self.emstep = float(emstep)
         self.gromacs_nsteps = int(nsteps)
+        self.shrink = None if shrink is None else float(shrink)
+        self.max_constraint_shrinks = (
+            None if max_constraint_shrinks is None else int(max_constraint_shrinks)
+        )
         self._fmax = float(mapped["gtol"])
         self._initial_step = float(mapped["istep"])
         self.maxstep = self._initial_step
@@ -748,7 +754,12 @@ class GromacsSteep(_RgminOptimizer):
         )
 
     def _session_options(self) -> dict[str, Any]:
-        return {"max_atom": 0.0, "istep": self._initial_step}
+        options: dict[str, Any] = {"max_atom": 0.0, "istep": self._initial_step}
+        if self.shrink is not None:
+            options["shrink"] = self.shrink
+        if self.max_constraint_shrinks is not None:
+            options["max_constraint_shrinks"] = self.max_constraint_shrinks
+        return options
 
     def irun(self, fmax: float | None = None, steps: int | None = None) -> Iterator[bool]:
         """Yield convergence after each step, stopping at machine precision."""

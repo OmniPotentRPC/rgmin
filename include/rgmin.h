@@ -494,6 +494,11 @@ typedef enum rgmin_accept_t {
  *  \ref rgmin_solver_create opens with \c RGMIN_ACCEPT_ENERGY. A session
  *  built from Rust with `Solver::new` opens with \c RGMIN_ACCEPT_NONE. */
 void rgmin_solver_set_accept(rgmin_solver_t *solver, rgmin_accept_t accept);
+/** GROMACS steep parameters on a RGMIN_GROMACS_STEEP session.
+ *  Returns 0, or 1 on a null session, an invalid shrink factor, or a
+ *  session that is not RGMIN_GROMACS_STEEP. */
+int32_t rgmin_solver_set_gromacs_steep(rgmin_solver_t *solver, double shrink,
+                                       uint32_t max_constraint_shrinks);
 
 /** FIRE schedule. */
 typedef enum rgmin_fire_variant_t {

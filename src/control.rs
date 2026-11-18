@@ -231,11 +231,30 @@ impl StopNorm {
                 let mut i = 0;
                 while i < g.len() {
                     let end = (i + 3).min(g.len());
-                    let r2: f64 = (i..end).map(|k| g[k] * g[k]).sum();
-                    if !r2.is_finite() {
-                        return f64::INFINITY;
+                    let mut scale = 0.0_f64;
+                    let mut sum = 1.0_f64;
+                    for k in i..end {
+                        let value = g[k].abs();
+                        if !value.is_finite() {
+                            return f64::INFINITY;
+                        }
+                        if value != 0.0 {
+                            if scale < value {
+                                let ratio = scale / value;
+                                sum = 1.0 + sum * ratio * ratio;
+                                scale = value;
+                            } else {
+                                let ratio = value / scale;
+                                sum += ratio * ratio;
+                            }
+                        }
                     }
-                    worst = worst.max(r2.sqrt());
+                    let norm = if scale == 0.0 {
+                        0.0
+                    } else {
+                        scale * sum.sqrt()
+                    };
+                    worst = worst.max(norm);
                     i = end;
                 }
                 worst
