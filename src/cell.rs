@@ -24,6 +24,9 @@
 
 mod matrix;
 
+#[cfg(test)]
+mod gold;
+
 use ndarray::{Array1, ArrayView1};
 
 use crate::Oracle;
