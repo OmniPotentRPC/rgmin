@@ -43,6 +43,7 @@ static const field_t control_fields[] = {
     FIELD(rgmin_control_t, maxmove),
     FIELD(rgmin_control_t, noise_eps),
     FIELD(rgmin_control_t, noise_c),
+    FIELD(rgmin_control_t, require_convergence),
 };
 
 static const field_t exp_fields[] = {

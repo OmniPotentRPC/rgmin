@@ -342,7 +342,7 @@ rgmin::Report finish_step(rgmin_status_t status, rgmin_report_t const& out, rgbi
     if (!std::isfinite(out.value)) {
         throw rgbind::NumericalError("Solver produced a non-finite value");
     }
-    return rgmin::Report{out.value, out.steps, out.grad_norm, out.stop};
+    return rgmin::Report{out.value, out.steps, out.grad_norm, out.stop, out.converged != 0};
 }
 
 // A zero budget takes no step, and the C API has no evaluation without
@@ -378,7 +378,7 @@ rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control
             stop = RGMIN_STOP_NOISE_FLOOR;
         }
     }
-    return rgmin::Report{value, 0, grad_norm, stop};
+    return rgmin::Report{value, 0, grad_norm, stop, grad_norm <= control.gtol};
 }
 
 DLManagedTensorVersioned* borrow_x(Vector x, std::size_t n) {
@@ -489,10 +489,30 @@ rgmin::Report step_hess_python(rgmin::Solver& solver, nb::callable function, nb:
 
 }  // namespace
 
+PyObject* not_converged_type = nullptr;
+
 NB_MODULE(_core, m) {
     m.attr("__version__") = rgmin_version();
     m.doc() = "Free-threaded bindings for the rgmin geometry optimizer.";
     rgbind::install_policy(m);
+    not_converged_type = PyErr_NewExceptionWithDoc(
+        "rgmin._core.NotConverged",
+        "Strict convergence failed. The report attribute is the terminal report.",
+        PyExc_RuntimeError, nullptr);
+    if (not_converged_type == nullptr) {
+        throw std::runtime_error("failed to create NotConverged");
+    }
+    m.attr("NotConverged") = nb::borrow<nb::object>(not_converged_type);
+    nb::register_exception_translator([](std::exception_ptr const& pointer, void*) {
+        try {
+            std::rethrow_exception(pointer);
+        } catch (rgmin::NotConverged const& error) {
+            nb::object type = nb::borrow<nb::object>(not_converged_type);
+            nb::object instance = type(error.what());
+            instance.attr("report") = error.report;
+            PyErr_SetObject(not_converged_type, instance.ptr());
+        }
+    });
 
     nb::enum_<rgmin_method_t>(m, "Method", nb::is_arithmetic(),
                               "Geometry-optimization method. Members are UPPER_SNAKE. "
@@ -601,6 +621,8 @@ NB_MODULE(_core, m) {
              "Whether an unmet stop raises.")
         .def("backward_polish", &rgmin::SolverConfig::backward_polish,
              "Whether a Hessian one-shot polishes to the backward-error floor.")
+        .def("require_convergence", &rgmin::SolverConfig::require_convergence,
+             "Whether a run still above ``gtol`` raises ``NotConverged``.")
         .def_static("valid_options", &rgmin::SolverConfig::valid_options)
         .def_static("valid_methods", &rgmin::SolverConfig::valid_methods);
 
@@ -663,6 +685,9 @@ NB_MODULE(_core, m) {
                     }
                 }
             }
+            if (config.require_convergence() && !report.converged) {
+                throw rgmin::NotConverged(report);
+            }
             if (config.error_on_unmet() &&
                 (report.stop == RGMIN_STOP_BUDGET || report.stop == RGMIN_STOP_LINE_SEARCH ||
                  report.stop == RGMIN_STOP_POLISH_UNMET)) {
@@ -677,8 +702,11 @@ NB_MODULE(_core, m) {
                 "tuple[float, ndarray[dtype=float64]]], x0: ndarray[dtype=float64], "
                 "method: object, **kwargs) -> tuple[Report, ndarray[dtype=float64]]"),
         "Minimize ``f_and_grad`` in place and return ``(report, x)``. "
-        "``error_on_unmet=True`` raises ``RuntimeError`` when the stop is "
-        "``BUDGET``, ``LINE_SEARCH``, or ``POLISH_UNMET``. ``backward_polish`` "
+        "``require_convergence=True`` raises ``NotConverged`` when the "
+        "gradient norm is still above ``gtol``. The exception ``report`` "
+        "attribute is the terminal report. ``error_on_unmet=True`` raises "
+        "``RuntimeError`` when the stop is ``BUDGET``, ``LINE_SEARCH``, or "
+        "``POLISH_UNMET``. ``backward_polish`` "
         "is stored on the session and is not used by this step loop, which "
         "does not form a Hessian.");
 

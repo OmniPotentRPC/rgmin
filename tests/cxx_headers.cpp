@@ -477,7 +477,69 @@ int maxmove_off() {
     return 0;
 }
 
+int strict_convergence() {
+    rgmin::Report unmet;
+    unmet.value = 1.0;
+    unmet.steps = 3;
+    unmet.grad_norm = 1.0;
+    unmet.stop = RGMIN_STOP_BUDGET;
+    unmet.converged = false;
+    rgmin::OptimizeResult kept = rgmin::OptimizeResult::from_report(unmet);
+    if (!kept.success || kept.fun != 1.0 || kept.nit != 3 || kept.grad_norm != 1.0) {
+        std::fprintf(stderr, "from_report changed the default success flag\n");
+        return 60;
+    }
+
+    std::vector<double> origin{0.0, 0.0};
+    DLManagedTensorVersioned* at = rgmin::borrow_cpu_f64(origin.data(), 2);
+    rgmin::Control met;
+    met.maxiter = 0;
+    met.gtol = 1e-8;
+    met.require_convergence = true;
+    rgmin::Report met_report =
+        rgmin::minimize_fn(quad_eval, quad_grad, nullptr, at, met, rgmin::Method::Steepest);
+    rgmin_tensor_free(at);
+    if (met_report.stop != RGMIN_STOP_TOLERANCE || !met_report.converged) {
+        std::fprintf(stderr, "strict tolerance stop %d converged %d\n", (int)met_report.stop,
+                     met_report.converged);
+        return 61;
+    }
+
+    std::vector<double> x{1.0, 1.0};
+    DLManagedTensorVersioned* t = rgmin::borrow_cpu_f64(x.data(), 2);
+    rgmin::Control ctrl;
+    ctrl.maxiter = 0;
+    ctrl.gtol = 1e-8;
+    rgmin::Report lax =
+        rgmin::minimize_fn(quad_eval, quad_grad, nullptr, t, ctrl, rgmin::Method::Steepest);
+    if (lax.stop != RGMIN_STOP_BUDGET || lax.converged) {
+        std::fprintf(stderr, "default zero budget stop %d converged %d\n", (int)lax.stop,
+                     lax.converged);
+        return 62;
+    }
+    rgmin_tensor_free(t);
+    x = {1.0, 1.0};
+    t = rgmin::borrow_cpu_f64(x.data(), 2);
+    ctrl.require_convergence = true;
+    bool threw = false;
+    try {
+        rgmin::minimize_fn(quad_eval, quad_grad, nullptr, t, ctrl, rgmin::Method::Steepest);
+    } catch (rgmin::NotConverged const& error) {
+        threw = error.report.stop == RGMIN_STOP_BUDGET && !error.report.converged &&
+                error.report.grad_norm > 0.0;
+    }
+    rgmin_tensor_free(t);
+    if (!threw) {
+        std::fprintf(stderr, "strict zero budget did not raise NotConverged\n");
+        return 63;
+    }
+    std::printf("strict convergence ok\n");
+    return 0;
+}
+
 int main() {
+    int strict = strict_convergence();
+    if (strict != 0) return strict;
     int off = maxmove_off();
     if (off != 0) return off;
     int block = eigen_block();
