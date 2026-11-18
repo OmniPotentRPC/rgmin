@@ -126,7 +126,7 @@ const MU_DENOM_FLOOR: f64 = 1.0e-30;
 const BLOCK3_DET_FLOOR: f64 = 1.0e-30;
 
 /// Fixed diagonal atom-block size for [`ExpPcKind::BlockIc0`].
-const IC_BLOCK_ATOMS: usize = 256;
+const IC_BLOCK_ATOMS: usize = 1024;
 
 /// Smallest atom count that runs multi-threaded when the caller explicitly sets `threads >= 2`.
 const EXPLICIT_PAR_MIN_ATOMS: usize = 32;
