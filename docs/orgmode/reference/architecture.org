@@ -99,6 +99,7 @@ python3 docs/figures/architecture/draw_hourglass.py
   =rgmin_minimize_eindir_opts=, the
   eindir one-shot with the same two flags. Minor 70 adds
   =rgmin_solver_set_highs_time_limit= and =rgmin_solver_highs_timeouts=.
+  Minor 71 adds the line-search rounding stop.
   =rgmin_control_t= is unchanged.
   =rgmin_abi_compatible= checks the major version and the layout revision only.
 - =DistanceConstraints= :: Holonomic atom-pair distances for a session.

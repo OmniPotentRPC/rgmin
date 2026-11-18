@@ -4555,6 +4555,7 @@ impl Solver {
         #[cfg(feature = "highs")]
         let boxed = self.has_coordinate_box();
         let mut energy_stall = false;
+        let mut line_stop = None;
         let mut sr_secant: Option<(Array1<f64>, Array1<f64>)> = None;
         let diis_alpha = self.istep;
         let diis_atom_cap = self.atom_maxmove;
@@ -4605,7 +4606,7 @@ impl Solver {
                     let mut project = |d: &mut Array1<f64>| {
                         rigid.force(&mut hold.ws, d);
                     };
-                    energy_stall = solver.step_objective_with_direction(
+                    let outcome = solver.step_objective_with_direction(
                         obj,
                         x,
                         &mut value,
@@ -4619,6 +4620,8 @@ impl Solver {
                         line_options,
                         &mut project,
                     );
+                    energy_stall = outcome.energy_noise;
+                    line_stop = outcome.line_stop;
                 }
                 Inner::Steepest => {
                     let dir = grad.mapv(|g| -g);
@@ -5245,7 +5248,12 @@ impl Solver {
         if energy_stall && status == Status::Iterating {
             status = Status::NoiseFloor;
         }
-        Ok(self.finish(value, x, &grad, grad_norm, status))
+        let report = self.finish(value, x, &grad, grad_norm, status);
+        if line_stop.is_some() && status == Status::Iterating {
+            Ok(report.with_stop_reason(crate::StopReason::LineSearchRounding))
+        } else {
+            Ok(report)
+        }
     }
 
     fn step_pso<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
@@ -6076,14 +6084,14 @@ impl Solver {
         for _ in 0..budget {
             match self.step_plain(obj, x) {
                 Ok(rep) => {
-                    let status = match rep.status {
+                    let reason = match rep.status {
                         Status::Iterating if self.control.converged(rep.grad_norm) => {
-                            Status::Tolerance
+                            crate::StopReason::Converged
                         }
-                        other => other,
+                        _ => rep.stop_reason(),
                     };
-                    last = Some((rep.value, rep.grad_norm, status));
-                    if status != Status::Iterating {
+                    last = Some((rep.value, rep.grad_norm, reason));
+                    if reason != crate::StopReason::Iterating {
                         break;
                     }
                 }
@@ -6095,15 +6103,17 @@ impl Solver {
         }
         self.brief = false;
         stop?;
-        let Some((value, grad_norm, status)) = last else {
+        let Some((value, grad_norm, reason)) = last else {
             unreachable!("a positive budget takes a step or returns its error");
         };
-        let status = match status {
-            Status::Iterating => Status::Budget,
+        let reason = match reason {
+            crate::StopReason::Iterating => crate::StopReason::MaxIter,
             other => other,
         };
         let g = self.reported_grad(x);
-        let report = self.finish(value, x, &g, grad_norm, status);
+        let report = self
+            .finish(value, x, &g, grad_norm, reason.status())
+            .with_stop_reason(reason);
         self.control.deliver(self.name_budget(report, *x != start))
     }
 
@@ -6510,6 +6520,7 @@ where
         alpha: if moved { direct_scale } else { 0.0 },
         moved,
         energy_noise: false,
+        line_stop: None,
     })
 }
 

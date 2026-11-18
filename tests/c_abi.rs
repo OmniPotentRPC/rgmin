@@ -1201,6 +1201,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
+/// ABI minor 71 adds the line-search rounding stop.
 /// ABI minor 70 adds `rgmin_solver_set_highs_time_limit` and
 /// `rgmin_solver_highs_timeouts`.
 /// ABI minor 69 adds `rgmin_minimize_eindir_opts`.
@@ -1229,6 +1230,7 @@ fn abi_stamp_identifies_this_optimizer_layout() {
     assert_eq!(stamp.abi_major, 1);
     assert_eq!(stamp.abi_minor, 70);
     assert_eq!(stamp.layout_revision, 6);
+    assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING as i32, 9);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
 
