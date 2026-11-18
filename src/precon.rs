@@ -1860,6 +1860,121 @@ mod tests {
         assert!((mu - num / den).abs() < 1e-12, "formula drift");
     }
 
+    /// Two atoms, a positive nearest-neighbour distance, and lattice
+    /// lengths that make the sine probe nonzero.
+    fn ratio_case() -> (Array1<f64>, Neighbours, ExpParams) {
+        let (pos, neigh) = two_atoms();
+        let params = ExpParams {
+            lengths: Some([4.0, 4.0, 4.0]),
+            r_nn: Some(1.5),
+            ..ExpParams::default()
+        };
+        (pos, neigh, params)
+    }
+
+    fn scale_one_metric(pos: &Array1<f64>, neigh: &Neighbours, params: &ExpParams) -> Metric {
+        Exp::assemble(pos.view(), neigh, params, 1.0, 1.5)
+            .unwrap()
+            .metric()
+            .clone()
+    }
+
+    #[test]
+    fn estimate_mu_with_floors_a_zero_ratio() {
+        let (pos, neigh, params) = ratio_case();
+        // A constant gradient makes the numerator of (14) zero.
+        let grad = |_: ArrayView1<f64>| Array1::zeros(pos.len());
+        let mu = estimate_mu_with(pos.view(), &neigh, &params, 1.5, None, grad).unwrap();
+        assert_eq!(mu, MU_FLOOR);
+    }
+
+    #[test]
+    fn estimate_mu_with_floors_a_negative_ratio() {
+        let (pos, neigh, params) = ratio_case();
+        // g(x) = -x, so vᵀ (g(x+v) - g(x)) = -||v||².
+        let grad = |x: ArrayView1<f64>| x.mapv(|v| -v);
+        let mu = estimate_mu_with(pos.view(), &neigh, &params, 1.5, None, grad).unwrap();
+        assert_eq!(mu, MU_FLOOR);
+    }
+
+    #[test]
+    fn model_scale_floors_a_zero_ratio() {
+        let (pos, neigh, params) = ratio_case();
+        let metric = scale_one_metric(&pos, &neigh, &params);
+        let here = Array1::zeros(pos.len());
+        let grad = |_: ArrayView1<f64>| Array1::zeros(pos.len());
+        let mu = model_scale(&metric, pos.view(), 1.5, params.lengths, &here, grad).unwrap();
+        assert_eq!(mu, MU_FLOOR);
+    }
+
+    #[test]
+    fn model_scale_floors_a_negative_ratio() {
+        let (pos, neigh, params) = ratio_case();
+        let metric = scale_one_metric(&pos, &neigh, &params);
+        let grad = |x: ArrayView1<f64>| x.mapv(|v| -v);
+        let here = grad(pos.view());
+        let mu = model_scale(&metric, pos.view(), 1.5, params.lengths, &here, grad).unwrap();
+        assert_eq!(mu, MU_FLOOR);
+    }
+
+    #[test]
+    fn estimate_mu_with_floors_a_sub_unit_ratio_and_keeps_one() {
+        let (pos, neigh, params) = ratio_case();
+        let metric = scale_one_metric(&pos, &neigh, &params);
+        let v = sine_probe(pos.view(), 1.5, params.lengths);
+        let pv = metric.apply(v.view());
+        for target in [0.5, 1.0] {
+            let grad = |x: ArrayView1<f64>| {
+                if x == pos.view() {
+                    Array1::zeros(pos.len())
+                } else {
+                    target * &pv
+                }
+            };
+            let mu = estimate_mu_with(pos.view(), &neigh, &params, 1.5, None, grad).unwrap();
+            assert_eq!(mu, MU_FLOOR, "target {target}");
+        }
+    }
+
+    #[test]
+    fn model_scale_floors_a_sub_unit_ratio_and_keeps_one() {
+        let (pos, neigh, params) = ratio_case();
+        let metric = scale_one_metric(&pos, &neigh, &params);
+        let v = sine_probe(pos.view(), 1.5, params.lengths);
+        let pv = metric.apply(v.view());
+        let here = Array1::zeros(pos.len());
+        for target in [0.5, 1.0] {
+            let grad = |_: ArrayView1<f64>| target * &pv;
+            let mu = model_scale(&metric, pos.view(), 1.5, params.lengths, &here, grad).unwrap();
+            assert_eq!(mu, MU_FLOOR, "target {target}");
+        }
+    }
+
+    #[test]
+    fn estimate_mu_cell_floors_sub_unit_ratios_and_keeps_one() {
+        let (pos, neigh, params) = ratio_case();
+        let mut extended = Array1::zeros(pos.len() + crate::CELL_DOF);
+        extended.slice_mut(ndarray::s![..pos.len()]).assign(&pos);
+        let p1 = Exp::assemble_cell(extended.view(), &neigh, &params, 1.0, 1.0, 1.5).unwrap();
+        let mut v = sine_probe(extended.view(), 1.5, params.lengths);
+        v.slice_mut(ndarray::s![pos.len()..]).fill(0.0);
+        for d in 0..3 {
+            v[pos.len() + 4 * d] = PROBE_AMPLITUDE;
+        }
+        let pv = p1.apply(v.view());
+        for target in [0.5, 1.0] {
+            let grad = |x: ArrayView1<f64>| {
+                if x == extended.view() {
+                    Array1::zeros(extended.len())
+                } else {
+                    target * &pv
+                }
+            };
+            let (mu, mu_c) = estimate_mu_cell(extended.view(), &neigh, &params, grad).unwrap();
+            assert_eq!((mu, mu_c), (MU_FLOOR, MU_FLOOR), "target {target}");
+        }
+    }
+
     /// FNV-1a over the little-endian bits of the solution. The same
     /// digest is required with and without the `par` feature.
     fn fnv1a(x: &[f64]) -> u64 {
