@@ -244,8 +244,9 @@ inline Report minimize_eindir(const eindir_objective_t* objective,
                               Method method) {
     rgmin_control_t c = detail::c_control(ctrl);
     rgmin_report_t out{};
-    rgmin_status_t st = rgmin_minimize_eindir(
-        objective, stamp, x, &c, static_cast<rgmin_method_t>(method), &out);
+    rgmin_status_t st = rgmin_minimize_eindir_opts(
+        objective, stamp, x, &c, static_cast<rgmin_method_t>(method),
+        ctrl.error_on_unmet ? 1 : 0, ctrl.backward_polish ? 1 : 0, &out);
     if (st != RGMIN_SUCCESS) {
         char const* msg = rgmin_last_error();
         throw std::runtime_error(msg ? msg : "rgmin_minimize_eindir failed");
