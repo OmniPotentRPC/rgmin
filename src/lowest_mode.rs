@@ -356,6 +356,44 @@ impl<T: HessianVector + ?Sized> ApplyHessian for T {
     }
 }
 
+/// Hessian action that can fail.
+///
+/// [`try_lowest_eigenpairs`] stops at the first error and returns it as
+/// [`Error::Host`]. Nothing is evaluated after the failing product.
+pub trait TryApplyHessian {
+    /// The host's error.
+    type Error: std::error::Error + Send + Sync + 'static;
+    /// `H(x) v` without forming `H`, or the host's error.
+    fn try_apply_hessian(
+        &self,
+        x: ArrayView1<f64>,
+        v: ArrayView1<f64>,
+    ) -> std::result::Result<Array1<f64>, Self::Error>;
+}
+
+/// One block product, from an infallible or a fallible action.
+trait BlockAction {
+    fn act(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Result<Array1<f64>>;
+}
+
+struct Plain<'a, H: ?Sized>(&'a H);
+
+impl<H: ApplyHessian + ?Sized> BlockAction for Plain<'_, H> {
+    fn act(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Result<Array1<f64>> {
+        Ok(self.0.apply_hessian(x, v))
+    }
+}
+
+struct Fallible<'a, H: ?Sized>(&'a H);
+
+impl<H: TryApplyHessian + ?Sized> BlockAction for Fallible<'_, H> {
+    fn act(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Result<Array1<f64>> {
+        self.0
+            .try_apply_hessian(x, v)
+            .map_err(|err| Error::Host(Box::new(err)))
+    }
+}
+
 /// Result of [`lowest_eigenpair`] / [`lowest_mode`].
 #[non_exhaustive]
 #[derive(Clone, Debug)]
@@ -988,7 +1026,41 @@ pub fn lowest_eigenpairs<H: ApplyHessian + ?Sized>(
     tol: f64,
     max_iter: usize,
 ) -> Result<Eigenpairs> {
-    solve_block_lobpcg(h, None::<&IdentityPreconditioner>, x, seed, tol, max_iter)
+    solve_block_lobpcg(
+        &Plain(h),
+        None::<&IdentityPreconditioner>,
+        x,
+        seed,
+        tol,
+        max_iter,
+    )
+}
+
+/// [`lowest_eigenpairs`] on a fallible action.
+///
+/// The iterates, residuals and stop are those of [`lowest_eigenpairs`]
+/// on the same products. A product that fails ends the solve with
+/// [`Error::Host`] carrying the host's error, and nothing is evaluated
+/// after it.
+///
+/// # Errors
+///
+/// The errors of [`lowest_eigenpairs`], and [`Error::Host`].
+pub fn try_lowest_eigenpairs<H: TryApplyHessian + ?Sized>(
+    h: &H,
+    x: ArrayView1<f64>,
+    seed: ArrayView2<f64>,
+    tol: f64,
+    max_iter: usize,
+) -> Result<Eigenpairs> {
+    solve_block_lobpcg(
+        &Fallible(h),
+        None::<&IdentityPreconditioner>,
+        x,
+        seed,
+        tol,
+        max_iter,
+    )
 }
 
 /// [`lowest_eigenpairs`] with a preconditioner.
@@ -1013,7 +1085,31 @@ where
     H: ApplyHessian + ?Sized,
     P: ApplyBlockPreconditioner + ?Sized,
 {
-    solve_block_lobpcg(h, precond, x, seed, tol, max_iter)
+    solve_block_lobpcg(&Plain(h), precond, x, seed, tol, max_iter)
+}
+
+/// [`lowest_eigenpairs_precond`] on a fallible action.
+///
+/// The iterates match [`lowest_eigenpairs_precond`] on the same products.
+/// The first product error ends the solve with [`Error::Host`], and
+/// nothing is evaluated after it.
+///
+/// # Errors
+///
+/// The errors of [`lowest_eigenpairs_precond`], and [`Error::Host`].
+pub fn try_lowest_eigenpairs_precond<H, P>(
+    h: &H,
+    precond: Option<&P>,
+    x: ArrayView1<f64>,
+    seed: ArrayView2<f64>,
+    tol: f64,
+    max_iter: usize,
+) -> Result<Eigenpairs>
+where
+    H: TryApplyHessian + ?Sized,
+    P: ApplyBlockPreconditioner + ?Sized,
+{
+    solve_block_lobpcg(&Fallible(h), precond, x, seed, tol, max_iter)
 }
 
 fn solve_block_lobpcg<H, P>(
@@ -1025,7 +1121,7 @@ fn solve_block_lobpcg<H, P>(
     max_iter: usize,
 ) -> Result<Eigenpairs>
 where
-    H: ApplyHessian + ?Sized,
+    H: BlockAction + ?Sized,
     P: ApplyBlockPreconditioner + ?Sized,
 {
     let (n, k) = seed.dim();
@@ -1186,7 +1282,7 @@ fn absorb(locked: &[Array1<f64>], into: &mut Vec<Array1<f64>>, incoming: Vec<Arr
     }
 }
 
-fn apply_columns<H: ApplyHessian + ?Sized>(
+fn apply_columns<H: BlockAction + ?Sized>(
     h: &H,
     x: ArrayView1<f64>,
     cols: &[Array1<f64>],
@@ -1200,7 +1296,7 @@ fn apply_columns<H: ApplyHessian + ?Sized>(
                 "block column length does not match the dimension",
             ));
         }
-        let image = h.apply_hessian(x, col.view());
+        let image = h.act(x, col.view())?;
         *actions += 1;
         if image.len() != n {
             return Err(eigen_input(

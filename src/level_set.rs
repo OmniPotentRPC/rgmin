@@ -64,7 +64,7 @@ pub(crate) fn project_tangent(grad: ArrayView1<'_, f64>, v: &Array1<f64>) -> Res
 /// cannot resolve. `||∇g|| * eps * (||x|| + 1)` is the change in `g`
 /// from a one-ulp move in `x`: relative to `||x||`, plus one absolute
 /// coordinate unit. `eps` is the absolute floor of a unit-scale energy.
-fn correction_tolerance(
+pub(crate) fn correction_tolerance(
     target: f64,
     value: f64,
     grad: ArrayView1<'_, f64>,
@@ -85,6 +85,7 @@ pub(crate) struct Retraction {
     pub(crate) gradient: Array1<f64>,
 }
 
+#[allow(dead_code)]
 pub(crate) fn retract_to_level_set<O>(
     obj: &O,
     cfg: LevelSetConstraint,
@@ -93,12 +94,23 @@ pub(crate) fn retract_to_level_set<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    retract_to_level_set_fallible(cfg, start, |x| Ok(obj.value_and_gradient(x)))
+}
+
+pub(crate) fn retract_to_level_set_fallible<F>(
+    cfg: LevelSetConstraint,
+    start: &Array1<f64>,
+    mut value_and_gradient: F,
+) -> Result<Retraction>
+where
+    F: FnMut(ArrayView1<'_, f64>) -> Result<(f64, Array1<f64>)>,
+{
     let cfg = cfg.validate()?;
     let mut x = start.clone();
     let mut iter = 0usize;
     let mut previous_abs: Option<f64> = None;
     loop {
-        let (value, gradient) = obj.value_and_gradient(x.view());
+        let (value, gradient) = value_and_gradient(x.view())?;
         if !value.is_finite() || gradient.iter().any(|v| !v.is_finite()) {
             return Err(Error::LevelSet {
                 what: "non-finite value or gradient during level-set retraction",
