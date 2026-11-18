@@ -1,29 +1,46 @@
 //! Geometry preconditioners for atomistic descent.
 //!
-//! [`Exp`] is the universal exponential metric. [`Lindh`] is the model
-//! Hessian of Lindh et al. 1995. [`Ff`] is the bonded reduced Hessian
-//! of Makri, Ortner, and Kermode 2019. All three are sparse symmetric
-//! positive definite matrices, solved by the same Jacobi-preconditioned
-//! conjugate gradients, and held between rebuilds by [`needs_rebuild`].
-//! [`select_precon`] documents which one applies.
+//! [`Exp`] is the universal exponential metric of Packwood et al. 2016.
+//! [`Lindh`] is the model Hessian of Lindh et al. 1995. [`Ff`] is the
+//! bonded reduced Hessian of Makri, Ortner, and Kermode 2019. All three
+//! are sparse symmetric positive definite matrices, inverted by
+//! preconditioned conjugate gradients and held between rebuilds by
+//! [`needs_rebuild`]. [`select_precon`] documents which one applies.
+//!
+//! Because [`Exp`] has Kronecker form `P = A ⊗ I_3` over an `N × N`
+//! scalar symmetric M-matrix `A`, `A` is stored once in scalar CSR form
+//! and applied simultaneously to the three Cartesian components of each
+//! atom, cutting CSR storage and matrix-vector bandwidth by 3×. Its PCG
+//! inner preconditioner defaults to zero-fill incomplete Cholesky
+//! (Meijerink and van der Vorst 1977) on fixed diagonal atom blocks of
+//! `A`, with `A`-orthogonal Rayleigh-projected warm starts across
+//! consecutive solves and stopping tolerance relative to the force norm
+//! ([`DEFAULT_PRECON_RTOL`]). [`Lindh`] and [`Ff`] precondition PCG with
+//! exact `3 × 3` per-atom symmetric diagonal blocks.
 //!
 //! Pair assembly is a cell list. Occupied bins are visited in
 //! lexicographic order and the pairs are sorted by atom index. A
 //! matrix-vector product writes each row from that row's own sum. Every
-//! dot product in the solve folds fixed chunks of 1024 in chunk order,
-//! starting from `0.0`, in every build and at every length. The `par`
-//! feature only decides whether those chunks run concurrently. Each
-//! kernel has its own atom-count gate, and the gate does not read the
-//! thread count.
+//! dot product in the solve reduces fixed chunks of 1024 along one
+//! deterministic chunk-aligned binary tree with zero heap allocations.
 //!
 //! Packwood, Kermode, Mones, Bernstein, Woolley, Gould, Ortner, and
 //! Csányi, *A universal preconditioner for simulating condensed phase
 //! materials*, J. Chem. Phys. 144, 164109 (2016),
 //! <https://doi.org/10.1063/1.4947024>.
 //!
+//! Makri, Ortner, and Kermode, *A preconditioning scheme for minimum
+//! energy path finding methods*, J. Chem. Phys. 150, 094109 (2019),
+//! <https://doi.org/10.1063/1.5064465>.
+//!
+//! Meijerink and van der Vorst, *An iterative solution method for linear
+//! systems of which the coefficient matrix is a symmetric M-matrix*,
+//! Math. Comp. 31, 148 (1977),
+//! <https://doi.org/10.1090/S0025-5718-1977-0438681-4>.
+//!
 //! The caller supplies positions and a neighbour list (linkcell, vesin,
-//! or any other producer). The matrix is the stabilized form of the
-//! paper's equation (16): neighbour weight
+//! or any other producer). The matrix is the stabilized form of
+//! Packwood et al. equation (16): neighbour weight
 //! `c_ij = exp(-A (r_ij / r_nn - 1))`, off-diagonal blocks `-μ c_ij I_3`
 //! (C order, xyz per atom), and diagonal
 //! `μ (C_stab + sum_j c_ij) I_3`. `r_nn` is the maximum of the per-atom
@@ -31,7 +48,6 @@
 //! quotient of the sine probe (15) against this matrix at `μ = 1`.
 //!
 //! `P` is symmetric positive definite for `μ > 0` and `C_stab > 0`.
-//! The linear solve is Jacobi-preconditioned conjugate gradients.
 
 mod ff;
 mod geom;
@@ -82,11 +98,45 @@ pub enum PreconSpec<'a> {
     },
 }
 
-use std::sync::Arc;
+use std::mem::size_of_val;
+use std::sync::{Arc, Mutex};
 
 use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::error::{Error, Result};
+
+/// Default relative residual tolerance `||r||_2 / ||b||_2` for preconditioner
+/// PCG solves (Packwood et al. 2016; Makri, Ortner, and Kermode 2019).
+pub const DEFAULT_PRECON_RTOL: f64 = 1.0e-8;
+
+/// Relaxed relative residual accepted when PCG reaches its iteration cap.
+const FALLBACK_PRECON_RTOL: f64 = 1.0e-6;
+
+/// Largest `||r_0||_2 / ||b||_2` ratio at which a Rayleigh-projected warm
+/// start is retained over a cold zero start.
+const WARM_START_MAX_RATIO: f64 = 0.95;
+
+/// Sine-probe amplitude in units of `r_nn` (Packwood et al. 2016, Eq. 15).
+const SINE_PROBE_SCALE: f64 = 1.0e-2;
+
+/// Fixed diagonal atom-block size for [`ExpPcKind::BlockIc0`].
+const IC_BLOCK_ATOMS: usize = 1024;
+
+/// Smallest atom count that runs multi-threaded when the caller explicitly sets `threads >= 2`.
+const EXPLICIT_PAR_MIN_ATOMS: usize = 32;
+
+/// Atom chunk width for parallel matrix-vector and block-Jacobi rows (`64` atoms = `192` floats).
+const MATVEC_ATOM_CHUNK: usize = 64;
+
+/// Pair chunk width for parallel bond-distance and exponential-weight evaluation.
+const PAIR_PAR_CHUNK: usize = 512;
+
+#[cfg(test)]
+const TEST_HOLD_R_NN: f64 = 1_000_000_000.0;
+// 4096 * eps = 2^-40, the power-of-two multiple of machine epsilon nearest
+// the previous absolute residual cutoff used by these in-module PCG solves.
+#[cfg(test)]
+const TEST_PCG_SOLVE_RTOL: f64 = 4096.0 * f64::EPSILON;
 
 /// One undirected neighbour list over atoms, plus bonds to atoms that
 /// are not degrees of freedom.
@@ -109,11 +159,29 @@ pub struct Neighbours {
     pub anchor: Vec<(usize, f64)>,
 }
 
+/// Inner preconditioner used by PCG when inverting [`Exp`].
+///
+/// Because the scalar graph matrix `A` of [`Exp`] (`P = A ⊗ I_3`) has
+/// positive diagonal entries, nonpositive off-diagonal entries
+/// `-μ c_ij`, and strict diagonal dominance `μ C_stab > 0`, `A` is a
+/// symmetric M-matrix and every principal block of `A` admits a
+/// breakdown-free zero-fill incomplete Cholesky factor (Meijerink and
+/// van der Vorst 1977).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ExpPcKind {
+    /// Zero-fill incomplete Cholesky on fixed diagonal atom blocks of `A`.
+    #[default]
+    BlockIc0,
+    /// Diagonal Jacobi scaling on `A`.
+    Jacobi,
+}
+
 /// Parameters of the exponential preconditioner.
 ///
 /// Defaults are the paper's generic choice: `A = 3`, `C_stab = 0.1`,
-/// `μ` and `r_nn` computed from the geometry, and no extra cutoff
-/// beyond the supplied list.
+/// `μ` and `r_nn` computed from the geometry, no extra cutoff beyond
+/// the supplied list, [`DEFAULT_PRECON_RTOL`] relative PCG tolerance,
+/// warm starts enabled, and [`ExpPcKind::BlockIc0`] preconditioning.
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct ExpParams {
@@ -133,6 +201,16 @@ pub struct ExpParams {
     /// `None` uses the span of the supplied positions. A nonpositive
     /// component falls back to that span.
     pub lengths: Option<[f64; 3]>,
+    /// Relative residual tolerance `||r||_2 / ||b||_2` of the PCG solve.
+    pub rtol: f64,
+    /// Reuse the previous PCG solution via Rayleigh projection when helpful.
+    pub warm_start: bool,
+    /// Inner preconditioner for the PCG solve on `P = A ⊗ I_3`.
+    pub pc: ExpPcKind,
+    /// Worker threads for preconditioner assembly and PCG. `None` is serial
+    /// (`1` thread) unless called inside a multi-thread Rayon pool; `Some(1)`
+    /// forces serial execution.
+    pub threads: Option<usize>,
 }
 
 with_setters!(ExpParams {
@@ -143,6 +221,10 @@ with_setters!(ExpParams {
     with_r_cut => r_cut: opt f64,
     with_recalc_mu => recalc_mu: val bool,
     with_lengths => lengths: opt [f64; 3],
+    with_rtol => rtol: val f64,
+    with_warm_start => warm_start: val bool,
+    with_pc => pc: val ExpPcKind,
+    with_threads => threads: opt usize,
 });
 
 impl Default for ExpParams {
@@ -155,8 +237,140 @@ impl Default for ExpParams {
             r_cut: None,
             recalc_mu: false,
             lengths: None,
+            rtol: DEFAULT_PRECON_RTOL,
+            warm_start: true,
+            pc: ExpPcKind::BlockIc0,
+            threads: None,
         }
     }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct Exec {
+    threads: Option<usize>,
+    #[cfg(feature = "par")]
+    pool: Option<Arc<rayon::ThreadPool>>,
+}
+
+impl Exec {
+    pub(super) fn new(threads: Option<usize>) -> Result<Self> {
+        if matches!(threads, Some(0)) {
+            return Err(Error::Precon {
+                what: "thread count is zero",
+            });
+        }
+        #[cfg(feature = "par")]
+        let pool = match threads {
+            Some(t) if t >= 2 => {
+                if rayon::current_thread_index().is_some() && rayon::current_num_threads() == t {
+                    None
+                } else {
+                    rayon::ThreadPoolBuilder::new()
+                        .num_threads(t)
+                        .build()
+                        .ok()
+                        .map(Arc::new)
+                }
+            }
+            _ => None,
+        };
+        Ok(Self {
+            threads,
+            #[cfg(feature = "par")]
+            pool,
+        })
+    }
+
+    #[inline]
+    pub(super) fn install<R>(&self, f: impl FnOnce() -> R + Send) -> R
+    where
+        R: Send,
+    {
+        #[cfg(feature = "par")]
+        if let Some(pool) = &self.pool {
+            return pool.install(f);
+        }
+        f()
+    }
+
+    /// Worker count for a kernel over `atoms` atoms with ambient gate `gate`.
+    /// Returns `1` whenever execution stays serial.
+    #[inline]
+    pub(super) fn workers(&self, atoms: usize, gate: usize) -> usize {
+        match self.threads {
+            Some(t) if t <= 1 => 1,
+            Some(t) => {
+                if atoms >= EXPLICIT_PAR_MIN_ATOMS {
+                    t
+                } else {
+                    1
+                }
+            }
+            None => {
+                if gate == usize::MAX || atoms < gate {
+                    return 1;
+                }
+                #[cfg(feature = "par")]
+                {
+                    if rayon::current_thread_index().is_some() {
+                        let t = rayon::current_num_threads();
+                        if t >= 2 {
+                            return t;
+                        }
+                    }
+                }
+                1
+            }
+        }
+    }
+
+    /// Worker count for an outer multi-image batch, independent of atom gate.
+    #[inline]
+    fn batch_workers(&self) -> usize {
+        match self.threads {
+            Some(t) if t <= 1 => 1,
+            Some(t) => t,
+            None => {
+                #[cfg(feature = "par")]
+                {
+                    if rayon::current_thread_index().is_some() {
+                        let t = rayon::current_num_threads();
+                        if t >= 2 {
+                            return t;
+                        }
+                    }
+                }
+                1
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Ic0Subblock {
+    atoms: usize,
+    row_ptr: Vec<usize>,
+    col_idx: Vec<u16>,
+    val: Vec<f32>,
+    inv_d: Vec<f64>,
+}
+
+#[derive(Clone, Debug)]
+struct BlockIc0 {
+    blocks: Vec<Ic0Subblock>,
+}
+
+/// Scalar `N × N` CSR graph representing `P = A ⊗ I_3` on `3 N` coordinates.
+#[derive(Clone, Debug)]
+struct ScalarCsr {
+    n_atoms: usize,
+    row_ptr: Vec<usize>,
+    col_idx: Vec<u32>,
+    val: Vec<f64>,
+    diag: Vec<f64>,
+    ic0: Option<BlockIc0>,
+    apply_gate: usize,
+    solve_gate: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -166,36 +380,93 @@ struct Csr {
     col_idx: Vec<usize>,
     val: Vec<f64>,
     diag: Vec<f64>,
+    /// Optional per-atom symmetric `3 × 3` inverse `[m00, m01, m02, m11, m12, m22]`.
+    inv_block3: Option<Vec<[f64; 6]>>,
     /// Atom count at which `apply` may use the `par` pool.
     apply_gate: usize,
     /// Atom count at which the solve's products may use the `par` pool.
     solve_gate: usize,
 }
 
+#[derive(Clone, Debug)]
+enum SparseOp {
+    Iso3(ScalarCsr),
+    General(Csr),
+}
+
+#[derive(Default, Debug)]
+struct PcgWork {
+    x: Vec<f64>,
+    r: Vec<f64>,
+    z: Vec<f64>,
+    p: Vec<f64>,
+    ap: Vec<f64>,
+    last_x: Vec<f64>,
+    has_last: bool,
+}
+
 /// Sparse SPD metric. `apply` is `P v`. `solve` is `P x = rhs`.
 #[derive(Clone, Debug)]
 pub(crate) struct Metric {
-    csr: Arc<Csr>,
+    op: Arc<SparseOp>,
+    work: Arc<Mutex<PcgWork>>,
+    rtol: f64,
+    warm_start: bool,
+    exec: Exec,
 }
 
 impl Metric {
-    fn from_csr(csr: Csr) -> Self {
-        Self { csr: Arc::new(csr) }
+    fn from_scalar_csr(csr: ScalarCsr, rtol: f64, warm_start: bool, exec: Exec) -> Self {
+        Self {
+            op: Arc::new(SparseOp::Iso3(csr)),
+            work: Arc::new(Mutex::new(PcgWork::default())),
+            rtol,
+            warm_start,
+            exec,
+        }
+    }
+
+    fn from_general_csr(csr: Csr, rtol: f64, warm_start: bool, exec: Exec) -> Self {
+        Self {
+            op: Arc::new(SparseOp::General(csr)),
+            work: Arc::new(Mutex::new(PcgWork::default())),
+            rtol,
+            warm_start,
+            exec,
+        }
+    }
+
+    pub(crate) fn set_exec(&mut self, exec: Exec) {
+        self.exec = exec;
     }
 
     pub(crate) fn dim(&self) -> usize {
-        self.csr.n
+        self.op.dim()
+    }
+
+    pub(crate) fn stored_nonzeros(&self) -> usize {
+        self.op.stored_nonzeros()
+    }
+
+    pub(crate) fn csr_bytes(&self) -> usize {
+        self.op.csr_bytes()
     }
 
     pub(crate) fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {
-        let mut y = vec![0.0; self.csr.n];
-        if v.len() == self.csr.n {
-            matvec(
-                &self.csr,
-                v.as_slice().unwrap_or(&v.to_vec()),
-                &mut y,
-                self.csr.apply_gate,
-            );
+        let n = self.dim();
+        let mut y = vec![0.0; n];
+        if v.len() == n {
+            let owned;
+            let slice = match v.as_slice() {
+                Some(s) => s,
+                None => {
+                    owned = v.to_vec();
+                    &owned
+                }
+            };
+            self.exec.install(|| {
+                self.op.matvec(slice, &mut y, &self.exec);
+            });
         }
         Array1::from_vec(y)
     }
@@ -205,39 +476,117 @@ impl Metric {
     }
 
     pub(crate) fn solve_counted(&self, rhs: ArrayView1<f64>) -> Option<(Array1<f64>, usize)> {
-        if rhs.len() != self.csr.n {
+        if rhs.len() != self.dim() {
             return None;
         }
-        let rhs_vec = rhs
-            .as_slice()
-            .map(<[f64]>::to_vec)
-            .unwrap_or_else(|| rhs.to_vec());
-        solve_pcg(&self.csr, &rhs_vec).map(|(x, iters)| (Array1::from_vec(x), iters))
+        let owned;
+        let rhs_slice = match rhs.as_slice() {
+            Some(s) => s,
+            None => {
+                owned = rhs.to_vec();
+                &owned
+            }
+        };
+        let exec = &self.exec;
+        let res = exec.install(|| match self.work.try_lock() {
+            Ok(mut guard) => solve_pcg_op(
+                &self.op,
+                rhs_slice,
+                self.rtol,
+                self.warm_start,
+                self.warm_start,
+                exec,
+                &mut guard,
+            ),
+            Err(_) => {
+                let mut local = PcgWork::default();
+                solve_pcg_op(
+                    &self.op, rhs_slice, self.rtol, false, false, exec, &mut local,
+                )
+            }
+        });
+        res.map(|(x, iters)| (Array1::from_vec(x), iters))
+    }
+
+    pub(crate) fn solve_iterations(&self, rhs: ArrayView1<f64>) -> Option<usize> {
+        if rhs.len() != self.dim() {
+            return None;
+        }
+        let owned;
+        let rhs_slice = match rhs.as_slice() {
+            Some(s) => s,
+            None => {
+                owned = rhs.to_vec();
+                &owned
+            }
+        };
+        let exec = &self.exec;
+        exec.install(|| {
+            let mut local = PcgWork::default();
+            solve_pcg_op(
+                &self.op, rhs_slice, self.rtol, false, false, exec, &mut local,
+            )
+            .map(|(_, n)| n)
+        })
     }
 
     pub(crate) fn to_dense(&self) -> Array2<f64> {
-        let n = self.csr.n;
-        let mut a = Array2::zeros((n, n));
-        for i in 0..n {
-            for k in self.csr.row_ptr[i]..self.csr.row_ptr[i + 1] {
-                a[(i, self.csr.col_idx[k])] = self.csr.val[k];
-            }
-        }
-        a
+        self.op.to_dense()
     }
 
     /// `μ P`. Lindh and FF assemble the model at scale 1 and apply the
     /// estimated energy scale here, the same place Exp folds `μ` into
     /// the matrix.
     pub(crate) fn scaled(&self, mu: f64) -> Self {
-        let mut csr = (*self.csr).clone();
-        for v in &mut csr.val {
-            *v *= mu;
+        let op = match &*self.op {
+            SparseOp::Iso3(csr) => {
+                let mut next = csr.clone();
+                for v in &mut next.val {
+                    *v *= mu;
+                }
+                for d in &mut next.diag {
+                    *d *= mu;
+                }
+                if let Some(ic0) = &mut next.ic0 {
+                    let root = mu.sqrt();
+                    let root_f32 = root as f32;
+                    for block in &mut ic0.blocks {
+                        for lv in &mut block.val {
+                            *lv *= root_f32;
+                        }
+                        for inv in &mut block.inv_d {
+                            *inv /= root;
+                        }
+                    }
+                }
+                SparseOp::Iso3(next)
+            }
+            SparseOp::General(csr) => {
+                let mut next = csr.clone();
+                for v in &mut next.val {
+                    *v *= mu;
+                }
+                for d in &mut next.diag {
+                    *d *= mu;
+                }
+                if let Some(blocks) = &mut next.inv_block3 {
+                    let inv_mu = 1.0 / mu;
+                    for b in blocks {
+                        for entry in b {
+                            *entry *= inv_mu;
+                        }
+                    }
+                }
+                SparseOp::General(next)
+            }
+        };
+        Self {
+            op: Arc::new(op),
+            work: Arc::new(Mutex::new(PcgWork::default())),
+            rtol: self.rtol,
+            warm_start: self.warm_start,
+            exec: self.exec.clone(),
         }
-        for d in &mut csr.diag {
-            *d *= mu;
-        }
-        Self::from_csr(csr)
     }
 }
 
@@ -295,18 +644,118 @@ impl Exp {
                 what: "A is not finite",
             });
         }
+        if !(params.rtol.is_finite() && params.rtol > 0.0) {
+            return Err(Error::Precon {
+                what: "rtol is not positive",
+            });
+        }
+        let exec = Exec::new(params.threads)?;
         let natoms = atom_count(positions)?;
-        let (pairs, anchors) = bonds(natoms, positions, neighbours, params.r_cut)?;
-        let csr = build_csr(natoms, &pairs, &anchors, mu, params.a, r_nn, params.c_stab);
+        if u32::try_from(natoms).is_err() {
+            return Err(Error::Precon {
+                what: "atom count exceeds u32 index range",
+            });
+        }
+        let csr = exec.install(|| -> Result<ScalarCsr> {
+            let (pairs, anchors) = bonds(natoms, positions, neighbours, params.r_cut, &exec)?;
+            Ok(build_scalar_csr(
+                natoms,
+                &pairs,
+                &anchors,
+                mu,
+                params.a,
+                r_nn,
+                params.c_stab,
+                params.pc,
+                &exec,
+            ))
+        })?;
         Ok(Self {
             mu,
             r_nn,
-            metric: Metric::from_csr(csr),
+            metric: Metric::from_scalar_csr(csr, params.rtol, params.warm_start, exec),
         })
+    }
+
+    /// Assemble one [`Exp`] metric per image in deterministic slice order.
+    ///
+    /// Uses [`ExpParams::threads`] (or the ambient Rayon pool when unset,
+    /// staying serial at one thread) to assemble independent images
+    /// concurrently without nested thread-pool oversubscription.
+    pub fn assemble_batch(
+        images: &[(ArrayView1<f64>, &Neighbours)],
+        params: &ExpParams,
+        mu: f64,
+        r_nn: f64,
+    ) -> Result<Vec<Self>> {
+        let outer = Exec::new(params.threads)?;
+        let workers = outer.batch_workers();
+        if workers <= 1 || images.len() < 2 {
+            let mut out = Vec::with_capacity(images.len());
+            for &(pos, neigh) in images {
+                out.push(Self::assemble(pos, neigh, params, mu, r_nn)?);
+            }
+            return Ok(out);
+        }
+        let mut inner = params.clone();
+        inner.threads = Some(1);
+        let built = ordered_map_batch(&outer, images.len(), workers, |idx| {
+            let (pos, neigh) = images[idx];
+            Self::assemble(pos, neigh, &inner, mu, r_nn)
+        });
+        let mut out = Vec::with_capacity(built.len());
+        for item in built {
+            out.push(item?);
+        }
+        Ok(out)
+    }
+
+    /// Solve `P_m x_m = rhs_m` across a slice of per-image metrics in
+    /// deterministic slice order.
+    ///
+    /// `threads` `None` stays serial unless called inside a multi-thread
+    /// Rayon pool; `Some(1)` forces serial execution; `Some(0)` is an error.
+    pub fn solve_batch(
+        metrics: &[Self],
+        rhs: &[ArrayView1<f64>],
+        threads: Option<usize>,
+    ) -> Result<Option<Vec<Array1<f64>>>> {
+        if metrics.len() != rhs.len() {
+            return Err(Error::Precon {
+                what: "batch metric and rhs counts differ",
+            });
+        }
+        let outer = Exec::new(threads)?;
+        let workers = outer.batch_workers();
+        if workers <= 1 || metrics.len() < 2 {
+            let mut out = Vec::with_capacity(metrics.len());
+            for (m, &b) in metrics.iter().zip(rhs.iter()) {
+                match m.solve(b) {
+                    Some(x) => out.push(x),
+                    None => return Ok(None),
+                }
+            }
+            return Ok(Some(out));
+        }
+        let solved = ordered_map_batch(&outer, metrics.len(), workers, |idx| {
+            metrics[idx].solve(rhs[idx])
+        });
+        let mut out = Vec::with_capacity(solved.len());
+        for item in solved {
+            match item {
+                Some(x) => out.push(x),
+                None => return Ok(None),
+            }
+        }
+        Ok(Some(out))
     }
 
     pub(crate) fn metric(&self) -> &Metric {
         &self.metric
+    }
+
+    pub(crate) fn set_exec(&mut self, exec: Exec) {
+        self.metric.set_exec(exec);
     }
 
     /// Diagonal SPD matrix. Jacobi PCG inverts it in one iteration.
@@ -324,16 +773,22 @@ impl Exp {
         }
         Self {
             mu: 1.0,
-            r_nn: 1.0e9,
-            metric: Metric::from_csr(Csr {
-                n,
-                row_ptr,
-                col_idx,
-                val,
-                diag: diag.to_vec(),
-                apply_gate: N_PAR_EXP_APPLY,
-                solve_gate: N_PAR_EXP_SOLVE,
-            }),
+            r_nn: TEST_HOLD_R_NN,
+            metric: Metric::from_general_csr(
+                Csr {
+                    n,
+                    row_ptr,
+                    col_idx,
+                    val,
+                    diag: diag.to_vec(),
+                    inv_block3: None,
+                    apply_gate: N_PAR_EXP_APPLY,
+                    solve_gate: N_PAR_EXP_SOLVE,
+                },
+                DEFAULT_PRECON_RTOL,
+                true,
+                Exec::default(),
+            ),
         }
     }
 
@@ -355,6 +810,18 @@ impl Exp {
         self.metric.dim()
     }
 
+    /// Number of stored scalar-graph CSR entries (`2 * n_bonds + N`).
+    #[must_use]
+    pub fn stored_nonzeros(&self) -> usize {
+        self.metric.stored_nonzeros()
+    }
+
+    /// Heap bytes occupied by the scalar-graph CSR arrays.
+    #[must_use]
+    pub fn csr_bytes(&self) -> usize {
+        self.metric.csr_bytes()
+    }
+
     /// `P v`.
     #[must_use]
     pub fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {
@@ -369,11 +836,17 @@ impl Exp {
         self.metric.solve(rhs)
     }
 
-    /// Jacobi PCG iterations for one solve. The count is the number of
-    /// matrix-vector products.
+    /// Solve `P x = rhs`, returning both the solution and the number of
+    /// Krylov iterations taken (reflecting any cached warm start).
+    #[must_use]
+    pub fn solve_counted(&self, rhs: ArrayView1<f64>) -> Option<(Array1<f64>, usize)> {
+        self.metric.solve_counted(rhs)
+    }
+
+    /// Cold-start PCG iterations for one solve. Does not mutate the warm-start cache.
     #[must_use]
     pub fn solve_iterations(&self, rhs: ArrayView1<f64>) -> Option<usize> {
-        self.metric.solve_counted(rhs).map(|(_, n)| n)
+        self.metric.solve_iterations(rhs)
     }
 
     /// Dense copy, for tests and for a dense Cholesky reference.
@@ -391,6 +864,7 @@ impl ExpState {
     ) -> Result<Self> {
         let natoms = atom_count(positions)?;
         let _ = natoms;
+        let _ = Exec::new(params.threads)?;
         if neighbours.i.len() != neighbours.j.len() {
             return Err(Error::Precon {
                 what: "neighbour index arrays differ in length",
@@ -424,6 +898,7 @@ impl ExpState {
     /// the step.
     #[cfg(feature = "capi")]
     pub(crate) fn deferred(neighbours: Neighbours, params: ExpParams) -> Result<Self> {
+        let _ = Exec::new(params.threads)?;
         if neighbours.i.len() != neighbours.j.len() {
             return Err(Error::Precon {
                 what: "neighbour index arrays differ in length",
@@ -439,6 +914,11 @@ impl ExpState {
                 what: "A or c_stab is not usable",
             });
         }
+        if !(params.rtol.is_finite() && params.rtol > 0.0) {
+            return Err(Error::Precon {
+                what: "rtol is not positive",
+            });
+        }
         if let Some(mu) = params.mu
             && !(mu.is_finite() && mu > 0.0)
         {
@@ -446,8 +926,10 @@ impl ExpState {
                 what: "mu is not positive",
             });
         }
-        let r_nn_pending = params.r_nn.is_none();
-        let r_nn = params.r_nn.unwrap_or(1.0);
+        let (r_nn, r_nn_pending) = match params.r_nn {
+            Some(r) => (r, false),
+            None => (1.0, true),
+        };
         if !(r_nn.is_finite() && r_nn > 0.0) {
             return Err(Error::Precon {
                 what: "r_nn is not positive",
@@ -463,6 +945,20 @@ impl ExpState {
             r_nn_pending,
             built_at: None,
         })
+    }
+
+    pub(crate) fn set_threads(&mut self, threads: Option<usize>) -> Result<()> {
+        let exec = Exec::new(threads)?;
+        self.params.threads = threads;
+        if let Some(matrix) = &mut self.matrix {
+            matrix.set_exec(exec);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "capi")]
+    pub(crate) fn threads(&self) -> Option<usize> {
+        self.params.threads
     }
 
     pub(crate) fn mu(&self) -> Option<f64> {
@@ -514,7 +1010,7 @@ impl ExpState {
                 }
             }
         }
-        let mu = self.mu.unwrap_or(1.0);
+        let mu = *self.mu.get_or_insert(1.0);
         self.matrix = Some(Exp::assemble(
             positions,
             &self.neighbours,
@@ -544,12 +1040,12 @@ impl ExpState {
             neighbours: Neighbours::default(),
             params: ExpParams {
                 mu: Some(1.0),
-                r_nn: Some(1.0e9),
+                r_nn: Some(TEST_HOLD_R_NN),
                 recalc_mu: false,
                 ..ExpParams::default()
             },
             mu: Some(1.0),
-            r_nn: 1.0e9,
+            r_nn: TEST_HOLD_R_NN,
             matrix: Some(Exp::diagonal(diag)),
             r_nn_pending: false,
             built_at: Some(positions.to_owned()),
@@ -632,6 +1128,14 @@ impl Slot {
             Self::Ff(state) => state.mu(),
         }
     }
+
+    pub(crate) fn set_threads(&mut self, threads: Option<usize>) -> Result<()> {
+        match self {
+            Self::Exp(state) => state.set_threads(threads),
+            Self::Lindh(state) => state.set_threads(threads),
+            Self::Ff(state) => state.set_threads(threads),
+        }
+    }
 }
 
 /// Paper's `r_nn`: the maximum, over atoms that have a neighbour, of
@@ -659,7 +1163,10 @@ pub fn nearest_neighbour_distance(
         let r = if cartesian {
             cartesian_distance(positions, i, j)
         } else {
-            neighbours.r.get(k).copied().unwrap_or(f64::NAN)
+            match neighbours.r.get(k) {
+                Some(&val) => val,
+                None => f64::NAN,
+            }
         };
         if r.is_finite() && r > 0.0 {
             min_d[i] = min_d[i].min(r);
@@ -695,13 +1202,16 @@ pub fn sine_probe(positions: ArrayView1<f64>, r_nn: f64, lengths: Option<[f64; 3
         return v;
     }
     let span = position_span(positions);
-    let mut len = lengths.unwrap_or(span);
+    let mut len = match lengths {
+        Some(l) => l,
+        None => span,
+    };
     for a in 0..3 {
         if !(len[a].is_finite() && len[a] > 0.0) {
             len[a] = span[a];
         }
     }
-    let scale = 1e-2 * r_nn;
+    let scale = SINE_PROBE_SCALE * r_nn;
     let natoms = n / 3;
     for i in 0..natoms {
         for a in 0..3 {
@@ -769,7 +1279,13 @@ where
     }
     let pv = p1.apply(v.view());
     let den = v.dot(&pv);
-    if !(den.is_finite() && den.abs() > 1e-30 && num.is_finite()) {
+    // Reject cancellation at machine precision relative to the dot-product terms.
+    let den_scale = v.iter().zip(&pv).map(|(a, b)| (a * b).abs()).sum::<f64>();
+    if !(den.is_finite()
+        && den_scale.is_finite()
+        && den.abs() > f64::EPSILON * den_scale
+        && num.is_finite())
+    {
         return Err(Error::Precon {
             what: "mu estimate denominator vanished",
         });
@@ -816,8 +1332,15 @@ where
     for i in 0..positions.len() {
         num += (g1[i] - grad_here[i]) * v[i];
     }
-    let den = v.dot(&metric.apply(v.view()));
-    if !(den.is_finite() && den.abs() > 1e-30 && num.is_finite()) {
+    let pv = metric.apply(v.view());
+    let den = v.dot(&pv);
+    // Reject cancellation at machine precision relative to the dot-product terms.
+    let den_scale = v.iter().zip(&pv).map(|(a, b)| (a * b).abs()).sum::<f64>();
+    if !(den.is_finite()
+        && den_scale.is_finite()
+        && den.abs() > f64::EPSILON * den_scale
+        && num.is_finite())
+    {
         return Err(Error::Precon {
             what: "mu estimate denominator vanished",
         });
@@ -844,7 +1367,10 @@ fn resolve_r_nn(
         }
         return Ok(r);
     }
-    Ok(nearest_neighbour_distance(positions, neighbours).unwrap_or(1.0))
+    if let Some(r) = nearest_neighbour_distance(positions, neighbours) {
+        return Ok(r);
+    }
+    Ok(1.0)
 }
 
 fn atom_count(positions: ArrayView1<f64>) -> Result<usize> {
@@ -887,6 +1413,7 @@ fn bonds(
     positions: ArrayView1<f64>,
     neighbours: &Neighbours,
     r_cut: Option<f64>,
+    exec: &Exec,
 ) -> Result<(Vec<BondRow>, Vec<AnchorRow>)> {
     if neighbours.i.len() != neighbours.j.len() {
         return Err(Error::Precon {
@@ -899,8 +1426,10 @@ fn bonds(
         });
     }
     let cartesian = neighbours.r.is_empty();
-    let mut seen = std::collections::HashSet::new();
-    let mut pairs = Vec::new();
+    let mut raw: Vec<(usize, usize, usize)> = Vec::with_capacity(neighbours.i.len());
+    let mut strictly_sorted = true;
+    let mut prev = (0usize, 0usize);
+    let mut have_prev = false;
     for k in 0..neighbours.i.len() {
         let i = neighbours.i[k];
         let j = neighbours.j[k];
@@ -913,22 +1442,63 @@ fn bonds(
             continue;
         }
         let (a, b) = if i < j { (i, j) } else { (j, i) };
-        if !seen.insert((a, b)) {
-            continue;
+        if have_prev && (a, b) <= prev {
+            strictly_sorted = false;
         }
-        let r = if cartesian {
-            cartesian_distance(positions, a, b)
-        } else {
-            neighbours.r[k]
-        };
-        if !(r.is_finite() && r > 0.0) {
-            continue;
-        }
-        if r_cut.is_some_and(|cut| r >= cut) {
-            continue;
-        }
-        pairs.push((a, b, r));
+        prev = (a, b);
+        have_prev = true;
+        raw.push((a, b, k));
     }
+    if !strictly_sorted {
+        raw.sort_unstable();
+        raw.dedup_by(|x, y| x.0 == y.0 && x.1 == y.1);
+    }
+    let pairs = if exec.workers(natoms, N_PAR_ASSEMBLE) >= 2 && raw.len() >= 2 * PAIR_PAR_CHUNK {
+        let nchunks = raw.len().div_ceil(PAIR_PAR_CHUNK);
+        let parts = ordered_map_exec(exec, nchunks, natoms, N_PAR_ASSEMBLE, |c| {
+            let start = c * PAIR_PAR_CHUNK;
+            let end = (start + PAIR_PAR_CHUNK).min(raw.len());
+            let mut local = Vec::with_capacity(end - start);
+            for &(a, b, k) in &raw[start..end] {
+                let r = if cartesian {
+                    cartesian_distance(positions, a, b)
+                } else {
+                    neighbours.r[k]
+                };
+                if !(r.is_finite() && r > 0.0) {
+                    continue;
+                }
+                if r_cut.is_some_and(|cut| r >= cut) {
+                    continue;
+                }
+                local.push((a, b, r));
+            }
+            local
+        });
+        let total: usize = parts.iter().map(Vec::len).sum();
+        let mut merged = Vec::with_capacity(total);
+        for part in parts {
+            merged.extend(part);
+        }
+        merged
+    } else {
+        let mut pairs = Vec::with_capacity(raw.len());
+        for (a, b, k) in raw {
+            let r = if cartesian {
+                cartesian_distance(positions, a, b)
+            } else {
+                neighbours.r[k]
+            };
+            if !(r.is_finite() && r > 0.0) {
+                continue;
+            }
+            if r_cut.is_some_and(|cut| r >= cut) {
+                continue;
+            }
+            pairs.push((a, b, r));
+        }
+        pairs
+    };
     let mut anchors = Vec::new();
     for &(atom, r) in &neighbours.anchor {
         if atom >= natoms {
@@ -951,7 +1521,9 @@ fn weight(mu: f64, a: f64, r: f64, r_nn: f64) -> f64 {
     mu * crate::portable::exp(-a * (r / r_nn - 1.0))
 }
 
-fn build_csr(
+/// Assemble the scalar `N × N` graph CSR `A` (`P = A ⊗ I_3`) directly from
+/// lexicographically sorted unique pairs `(i < j)`.
+fn build_scalar_csr(
     natoms: usize,
     pairs: &[(usize, usize, f64)],
     anchors: &[(usize, f64)],
@@ -959,75 +1531,230 @@ fn build_csr(
     a: f64,
     r_nn: f64,
     c_stab: f64,
-) -> Csr {
-    let n = 3 * natoms;
-    let mut diag = vec![mu * c_stab; n];
-    let mut trips: Vec<(usize, usize, f64)> = Vec::with_capacity(pairs.len() * 6 + n);
-    for &(i, j, r) in pairs {
-        let c = weight(mu, a, r, r_nn);
-        for d in 0..3 {
-            let ii = 3 * i + d;
-            let jj = 3 * j + d;
-            diag[ii] += c;
-            diag[jj] += c;
-            trips.push((ii, jj, -c));
-            trips.push((jj, ii, -c));
-        }
+    pc: ExpPcKind,
+    exec: &Exec,
+) -> ScalarCsr {
+    let mut diag = vec![mu * c_stab; natoms];
+    let mut lower_deg = vec![0usize; natoms];
+    let mut upper_deg = vec![0usize; natoms];
+    let mut weights = vec![0.0; pairs.len()];
+    par_chunks_mut_exec(
+        exec,
+        &mut weights,
+        PAIR_PAR_CHUNK,
+        natoms,
+        N_PAR_ASSEMBLE,
+        |c, out| {
+            let base = c * PAIR_PAR_CHUNK;
+            for (offset, slot) in out.iter_mut().enumerate() {
+                let (_, _, r) = pairs[base + offset];
+                *slot = weight(mu, a, r, r_nn);
+            }
+        },
+    );
+    for (&(i, j, _), &c) in pairs.iter().zip(weights.iter()) {
+        diag[i] += c;
+        diag[j] += c;
+        upper_deg[i] += 1;
+        lower_deg[j] += 1;
     }
     for &(atom, r) in anchors {
-        let c = weight(mu, a, r, r_nn);
-        for d in 0..3 {
-            diag[3 * atom + d] += c;
-        }
+        diag[atom] += weight(mu, a, r, r_nn);
     }
-    for i in 0..n {
-        trips.push((i, i, diag[i]));
-    }
-    csr_from_coo(n, trips, N_PAR_EXP_APPLY, N_PAR_EXP_SOLVE)
-}
-
-fn csr_from_coo(
-    n: usize,
-    mut trips: Vec<(usize, usize, f64)>,
-    apply_gate: usize,
-    solve_gate: usize,
-) -> Csr {
-    trips.sort_unstable_by_key(|p| (p.0, p.1));
-    let mut row_ptr = Vec::with_capacity(n + 1);
-    let mut col_idx = Vec::with_capacity(trips.len());
-    let mut val = Vec::with_capacity(trips.len());
-    let mut diag = vec![0.0; n];
+    let nnz = 2 * pairs.len() + natoms;
+    let mut row_ptr = Vec::with_capacity(natoms + 1);
     row_ptr.push(0);
-    let mut cursor = 0;
-    while cursor < trips.len() {
-        let row = trips[cursor].0;
-        while row_ptr.len() <= row {
-            row_ptr.push(col_idx.len());
-        }
-        let col = trips[cursor].1;
-        let mut acc = 0.0;
-        while cursor < trips.len() && trips[cursor].0 == row && trips[cursor].1 == col {
-            acc += trips[cursor].2;
-            cursor += 1;
-        }
-        col_idx.push(col);
-        val.push(acc);
-        if row == col {
-            diag[row] = acc;
-        }
+    for i in 0..natoms {
+        let deg = lower_deg[i] + 1 + upper_deg[i];
+        row_ptr.push(row_ptr[i] + deg);
     }
-    while row_ptr.len() <= n {
-        row_ptr.push(col_idx.len());
+    let mut col_idx = vec![0u32; nnz];
+    let mut val = vec![0.0; nnz];
+    let mut lower_cur = vec![0usize; natoms];
+    let mut upper_cur = vec![0usize; natoms];
+    let mut diag_pos = vec![0usize; natoms];
+    for i in 0..natoms {
+        lower_cur[i] = row_ptr[i];
+        let dp = row_ptr[i] + lower_deg[i];
+        diag_pos[i] = dp;
+        col_idx[dp] = i as u32;
+        val[dp] = diag[i];
+        upper_cur[i] = dp + 1;
     }
-    Csr {
-        n,
+    for (&(i, j, _), &c) in pairs.iter().zip(weights.iter()) {
+        let up = upper_cur[i];
+        col_idx[up] = j as u32;
+        val[up] = -c;
+        upper_cur[i] = up + 1;
+
+        let lo = lower_cur[j];
+        col_idx[lo] = i as u32;
+        val[lo] = -c;
+        lower_cur[j] = lo + 1;
+    }
+    let ic0 = match pc {
+        ExpPcKind::BlockIc0 => {
+            build_block_ic0(natoms, &row_ptr, &diag_pos, &col_idx, &val, &diag, exec)
+        }
+        ExpPcKind::Jacobi => None,
+    };
+    ScalarCsr {
+        n_atoms: natoms,
         row_ptr,
         col_idx,
         val,
         diag,
-        apply_gate,
-        solve_gate,
+        ic0,
+        apply_gate: N_PAR_EXP_APPLY,
+        solve_gate: N_PAR_EXP_SOLVE,
     }
+}
+
+fn factor_ic0_subblock(
+    b_start: usize,
+    b_end: usize,
+    row_ptr: &[usize],
+    diag_pos: &[usize],
+    col_idx: &[u32],
+    val: &[f64],
+    diag: &[f64],
+) -> Option<Ic0Subblock> {
+    let m = b_end - b_start;
+    if u16::try_from(m).is_err() {
+        return None;
+    }
+    let mut l_row_ptr = Vec::with_capacity(m + 1);
+    l_row_ptr.push(0);
+    let mut cap = 0usize;
+    for i in b_start..b_end {
+        for &c in &col_idx[row_ptr[i]..diag_pos[i]] {
+            if (c as usize) >= b_start {
+                cap += 1;
+            }
+        }
+    }
+    let mut l_col: Vec<u16> = Vec::with_capacity(cap);
+    let mut l_val: Vec<f32> = Vec::with_capacity(cap);
+    let mut inv_d = vec![0.0_f64; m];
+    let mut work = vec![0.0_f64; m];
+
+    for li in 0..m {
+        let i = b_start + li;
+        let row_start = l_col.len();
+        for k in row_ptr[i]..diag_pos[i] {
+            let j = col_idx[k] as usize;
+            if j >= b_start {
+                let lj = j - b_start;
+                work[lj] = val[k];
+                l_col.push(lj as u16);
+                l_val.push(0.0);
+            }
+        }
+        let row_end = l_col.len();
+        l_row_ptr.push(row_end);
+
+        for pos in row_start..row_end {
+            let lj = usize::from(l_col[pos]);
+            let mut dot_lj = 0.0_f64;
+            for p in l_row_ptr[lj]..l_row_ptr[lj + 1] {
+                let lk = usize::from(l_col[p]);
+                dot_lj += work[lk] * f64::from(l_val[p]);
+            }
+            let lij = (work[lj] - dot_lj) * inv_d[lj];
+            if !lij.is_finite() {
+                return None;
+            }
+            let lij_f32 = lij as f32;
+            l_val[pos] = lij_f32;
+            work[lj] = f64::from(lij_f32);
+        }
+
+        let mut diag_sq = diag[i];
+        for pos in row_start..row_end {
+            let lj = usize::from(l_col[pos]);
+            let w = work[lj];
+            diag_sq -= w * w;
+            work[lj] = 0.0;
+        }
+        if !(diag_sq.is_finite() && diag_sq > 0.0) {
+            return None;
+        }
+        inv_d[li] = 1.0 / diag_sq.sqrt();
+    }
+
+    Some(Ic0Subblock {
+        atoms: m,
+        row_ptr: l_row_ptr,
+        col_idx: l_col,
+        val: l_val,
+        inv_d,
+    })
+}
+
+fn build_block_ic0(
+    natoms: usize,
+    row_ptr: &[usize],
+    diag_pos: &[usize],
+    col_idx: &[u32],
+    val: &[f64],
+    diag: &[f64],
+    exec: &Exec,
+) -> Option<BlockIc0> {
+    let nblocks = natoms.div_ceil(IC_BLOCK_ATOMS);
+    let parts = ordered_map_exec(exec, nblocks, natoms, N_PAR_ASSEMBLE, |b| {
+        let b_start = b * IC_BLOCK_ATOMS;
+        let b_end = (b_start + IC_BLOCK_ATOMS).min(natoms);
+        factor_ic0_subblock(b_start, b_end, row_ptr, diag_pos, col_idx, val, diag)
+    });
+    let mut blocks = Vec::with_capacity(nblocks);
+    for item in parts {
+        blocks.push(item?);
+    }
+    Some(BlockIc0 { blocks })
+}
+
+#[inline]
+fn invert_spd3(d00: f64, d01: f64, d02: f64, d11: f64, d12: f64, d22: f64) -> Option<[f64; 6]> {
+    if !(d00.is_finite() && d00 > 0.0) {
+        return None;
+    }
+    let minor2 = d00 * d11 - d01 * d01;
+    let minor2_scale = d00.abs().max(d01.abs()).max(d11.abs());
+    // The leading 2×2 minor scales as s^2, so its floor is eps*s^2.
+    let minor2_floor = f64::EPSILON * minor2_scale * minor2_scale;
+    if !(minor2.is_finite() && minor2 > minor2_floor) {
+        return None;
+    }
+    let c00 = d11 * d22 - d12 * d12;
+    let c01 = d02 * d12 - d01 * d22;
+    let c02 = d01 * d12 - d02 * d11;
+    let c11 = d00 * d22 - d02 * d02;
+    let c12 = d01 * d02 - d00 * d12;
+    let c22 = minor2;
+    let det = d00 * c00 + d01 * c01 + d02 * c02;
+    // The determinant scales as s^3, so its floor is eps*s^3.
+    // Both comparisons are exactly scale-invariant for power-of-two scales.
+    let scale = d00
+        .abs()
+        .max(d01.abs())
+        .max(d02.abs())
+        .max(d11.abs())
+        .max(d12.abs())
+        .max(d22.abs());
+    let det_floor = f64::EPSILON * scale * scale * scale;
+    if !(det.is_finite() && det > det_floor) {
+        return None;
+    }
+    let inv = 1.0 / det;
+    let out = [
+        c00 * inv,
+        c01 * inv,
+        c02 * inv,
+        c11 * inv,
+        c12 * inv,
+        c22 * inv,
+    ];
+    out.iter().all(|v| v.is_finite()).then_some(out)
 }
 
 /// Record which free atoms share a 3×3 block, then scatter into that
@@ -1116,7 +1843,7 @@ impl BlockAccum {
         }
     }
 
-    fn finish(self, apply_gate: usize, solve_gate: usize) -> Csr {
+    fn finish(self, apply_gate: usize, solve_gate: usize, exec: &Exec) -> Csr {
         let n = 3 * self.n_atoms;
         let mut diag = vec![0.0; n];
         for i in 0..n {
@@ -1126,12 +1853,51 @@ impl BlockAccum {
                 diag[i] = self.val[s + k];
             }
         }
+        let partners = &self.partners;
+        let row_ptr = &self.row_ptr;
+        let val = &self.val;
+        let nchunks = self.n_atoms.div_ceil(MATVEC_ATOM_CHUNK);
+        let parts = ordered_map_exec(exec, nchunks, self.n_atoms, N_PAR_ASSEMBLE, |c| {
+            let start = c * MATVEC_ATOM_CHUNK;
+            let end = (start + MATVEC_ATOM_CHUNK).min(self.n_atoms);
+            let mut local = Vec::with_capacity(end - start);
+            for atom in start..end {
+                let Ok(p) = partners[atom].binary_search(&atom) else {
+                    return None;
+                };
+                let r0 = row_ptr[3 * atom] + 3 * p;
+                let r1 = row_ptr[3 * atom + 1] + 3 * p;
+                let r2 = row_ptr[3 * atom + 2] + 3 * p;
+                local.push(invert_spd3(
+                    val[r0],
+                    val[r0 + 1],
+                    val[r0 + 2],
+                    val[r1 + 1],
+                    val[r1 + 2],
+                    val[r2 + 2],
+                )?);
+            }
+            Some(local)
+        });
+        let mut inv_blocks = Vec::with_capacity(self.n_atoms);
+        let mut all_spd = true;
+        for part in parts {
+            match part {
+                Some(v) => inv_blocks.extend(v),
+                None => {
+                    all_spd = false;
+                    break;
+                }
+            }
+        }
+        let inv_block3 = all_spd.then_some(inv_blocks);
         Csr {
             n,
             row_ptr: self.row_ptr,
             col_idx: self.col_idx,
             val: self.val,
             diag,
+            inv_block3,
             apply_gate,
             solve_gate,
         }
@@ -1151,75 +1917,257 @@ fn note_block(partners: &mut [Vec<usize>], atoms: &[(Option<usize>, [f64; 3])], 
     }
 }
 
-/// Atom counts for the `par` loops. Each gate is an atom count.
-/// A kernel stays serial below its gate in every build.
+/// Atom counts for the ambient `par` loops when `threads` is unset.
 ///
-/// Measured on bulk diamond Si, 4 Å cutoff, release, five interleaved
-/// runs, threads 1/2/4/8 (`tests/precon_scaling.rs`). A gate is the
-/// smallest size in {160, 2_000, 8_000, 32_000, 100_000} where two
-/// threads beat one by more than the wider run-to-run range.
-/// `usize::MAX` means that bar was never cleared, so the kernel stays
-/// serial. The gate does not read the thread count.
+/// Serial (`threads = 1`) is the default outside an installed multi-thread
+/// Rayon pool, and `Some(1)` forces serial execution inside one. When
+/// `threads >= 2` is passed explicitly, multi-threaded kernels engage at
+/// [`EXPLICIT_PAR_MIN_ATOMS`].
 ///
-/// Lindh and bonded-metric matvec, eight applies.
-/// 160 atoms: 1 thread 0.493 ms, 2 threads 0.361 ms, gap 0.132 ms,
-/// range 0.344 ms, no.
-/// 2,000 atoms: 1 thread 8.360 ms, 2 threads 4.751 ms, gap 3.609 ms,
-/// range 1.052 ms, yes.
-pub const N_PAR_LINDH_APPLY: usize = 2_000;
-/// Lindh and bonded-metric Jacobi PCG, eight solves.
-/// 160 atoms: 1 thread 31.355 ms, 2 threads 16.752 ms, gap 14.602 ms,
-/// range 17.571 ms, no.
-/// 2,000 atoms: 1 thread 0.914 s, 2 threads 0.467 s, gap 0.447 s,
-/// range 0.035 s, yes.
-pub const N_PAR_LINDH_SOLVE: usize = 2_000;
-/// Exp matvec, eight applies.
-/// 8,000 atoms: 1 thread 2.607 ms, 2 threads 1.939 ms, gap 0.668 ms,
-/// range 0.961 ms, no.
-/// 32,000 atoms: 1 thread 11.770 ms, 2 threads 7.745 ms, gap 4.025 ms,
-/// range 3.247 ms, yes.
-pub const N_PAR_EXP_APPLY: usize = 32_000;
-/// Exp Jacobi PCG, eight solves.
-/// 8,000 atoms: 1 thread 0.161 s, 2 threads 0.146 s, gap 0.015 s,
-/// range 0.059 s, no.
-/// 32,000 atoms: 1 thread 1.026 s, 2 threads 0.681 s, gap 0.345 s,
-/// range 0.144 s, yes.
-pub const N_PAR_EXP_SOLVE: usize = 32_000;
-/// Pair-list assembly. The value fill is a serial scatter into the
-/// stored nonzeros, so this gate covers only the cell-list search.
-/// Two threads never beat one by more than the run-to-run range.
-/// The closest row is Exp at 100,000 atoms: 1 thread 0.388 s,
-/// 2 threads 0.362 s, gap 0.026 s, range 0.027 s, no.
-/// Lindh at 100,000 atoms: 1 thread 6.339 s, 2 threads 6.401 s,
-/// gap -0.062 s, range 0.709 s, no.
-pub const N_PAR_ASSEMBLE: usize = usize::MAX;
+/// Lindh and bonded-metric matvec ambient atom gate.
+pub const N_PAR_LINDH_APPLY: usize = 512;
+/// Lindh and bonded-metric PCG solve ambient atom gate.
+pub const N_PAR_LINDH_SOLVE: usize = 512;
+/// Exp scalar-graph matvec ambient atom gate.
+pub const N_PAR_EXP_APPLY: usize = 512;
+/// Exp block-IC(0) PCG solve ambient atom gate.
+pub const N_PAR_EXP_SOLVE: usize = 512;
+/// Preconditioner assembly ambient atom gate.
+pub const N_PAR_ASSEMBLE: usize = 512;
 
 /// Fixed length of one dot-product chunk. The same chunks are used
 /// with and without the `par` feature.
 const DOT_CHUNK: usize = 1024;
+/// Smallest chunk count split across parallel tasks (`4 * 1024 = 4096` elements).
+const DOT_PAR_MIN_CHUNKS: usize = 4;
 
-/// Map `0..n` and keep index order.
-///
-/// With the `par` feature and `atoms >= gate` the chunks run on the
-/// current rayon pool. `collect` on an indexed iterator concatenates
-/// in index order. Below the gate, and in a build without `par`, the
-/// map is a serial loop. The gate is an atom count.
-pub(super) fn ordered_map<T, F>(n: usize, atoms: usize, gate: usize, f: F) -> Vec<T>
+/// Map `0..n` and keep index order under `exec`.
+pub(super) fn ordered_map_exec<T, F>(
+    exec: &Exec,
+    n: usize,
+    atoms: usize,
+    gate: usize,
+    f: F,
+) -> Vec<T>
 where
     T: Send,
     F: Fn(usize) -> T + Send + Sync,
 {
-    let parallel = gate < usize::MAX && atoms >= gate && n >= 2;
-    #[cfg(not(feature = "par"))]
-    let _ = parallel;
+    let workers = exec.workers(atoms, gate);
+    if workers <= 1 || n < 2 {
+        return (0..n).map(f).collect();
+    }
+    ordered_map_batch(exec, n, workers, f)
+}
+
+fn ordered_map_batch<T, F>(exec: &Exec, n: usize, workers: usize, f: F) -> Vec<T>
+where
+    T: Send,
+    F: Fn(usize) -> T + Send + Sync,
+{
+    if workers <= 1 || n < 2 {
+        return (0..n).map(f).collect();
+    }
     #[cfg(feature = "par")]
     {
-        use rayon::prelude::*;
-        if parallel {
-            return (0..n).into_par_iter().map(f).collect();
+        exec.install(|| {
+            use rayon::prelude::*;
+            (0..n).into_par_iter().map(f).collect()
+        })
+    }
+    #[cfg(not(feature = "par"))]
+    {
+        let _ = exec;
+        let nw = workers.min(n);
+        let span = n.div_ceil(nw);
+        let parts = std::thread::scope(|scope| {
+            let f_ref = &f;
+            let mut handles = Vec::with_capacity(nw);
+            for w in 0..nw {
+                let start = w * span;
+                let end = (start + span).min(n);
+                if start >= end {
+                    break;
+                }
+                handles.push(scope.spawn(move || (start..end).map(f_ref).collect::<Vec<T>>()));
+            }
+            let mut joined = Vec::with_capacity(handles.len());
+            for h in handles {
+                match h.join() {
+                    Ok(v) => joined.push(v),
+                    Err(payload) => std::panic::resume_unwind(payload),
+                }
+            }
+            joined
+        });
+        let mut out = Vec::with_capacity(n);
+        for part in parts {
+            out.extend(part);
+        }
+        out
+    }
+}
+
+fn par_chunks_mut_exec<T, F>(
+    exec: &Exec,
+    slice: &mut [T],
+    chunk_len: usize,
+    atoms: usize,
+    gate: usize,
+    f: F,
+) where
+    T: Send,
+    F: Fn(usize, &mut [T]) + Send + Sync,
+{
+    if slice.is_empty() {
+        return;
+    }
+    let nchunks = slice.len().div_ceil(chunk_len);
+    let workers = exec.workers(atoms, gate);
+    if workers <= 1 || nchunks < 2 {
+        for (c, sub) in slice.chunks_mut(chunk_len).enumerate() {
+            f(c, sub);
+        }
+        return;
+    }
+    #[cfg(feature = "par")]
+    {
+        exec.install(|| {
+            use rayon::prelude::*;
+            slice
+                .par_chunks_mut(chunk_len)
+                .enumerate()
+                .for_each(|(c, sub)| f(c, sub));
+        });
+    }
+    #[cfg(not(feature = "par"))]
+    {
+        let _ = exec;
+        let nw = workers.min(nchunks);
+        let chunks_per = nchunks.div_ceil(nw);
+        std::thread::scope(|scope| {
+            let f_ref = &f;
+            let mut rest = slice;
+            let mut base_chunk = 0usize;
+            while !rest.is_empty() {
+                let take_elems = (chunks_per * chunk_len).min(rest.len());
+                let (head, tail) = rest.split_at_mut(take_elems);
+                let chunk0 = base_chunk;
+                scope.spawn(move || {
+                    for (local, sub) in head.chunks_mut(chunk_len).enumerate() {
+                        f_ref(chunk0 + local, sub);
+                    }
+                });
+                base_chunk += take_elems.div_ceil(chunk_len);
+                rest = tail;
+            }
+        });
+    }
+}
+
+#[inline]
+fn scalar_row_apply(a: &ScalarCsr, x_atoms: &[[f64; 3]], atom: usize) -> [f64; 3] {
+    let start = a.row_ptr[atom];
+    let end = a.row_ptr[atom + 1];
+    let cols = &a.col_idx[start..end];
+    let vals = &a.val[start..end];
+    let mut s0 = 0.0;
+    let mut s1 = 0.0;
+    let mut s2 = 0.0;
+    for (&col_u32, &v) in cols.iter().zip(vals.iter()) {
+        if let Some(xj) = x_atoms.get(col_u32 as usize) {
+            s0 += v * xj[0];
+            s1 += v * xj[1];
+            s2 += v * xj[2];
         }
     }
-    (0..n).map(f).collect()
+    [s0, s1, s2]
+}
+
+fn matvec_scalar(a: &ScalarCsr, x: &[f64], y: &mut [f64], gate: usize, exec: &Exec) {
+    let (x_atoms, _) = x.as_chunks::<3>();
+    let (y_atoms, _) = y.as_chunks_mut::<3>();
+    par_chunks_mut_exec(
+        exec,
+        y_atoms,
+        MATVEC_ATOM_CHUNK,
+        a.n_atoms,
+        gate,
+        |c, chunk| {
+            let atom0 = c * MATVEC_ATOM_CHUNK;
+            for (offset, out) in chunk.iter_mut().enumerate() {
+                *out = scalar_row_apply(a, x_atoms, atom0 + offset);
+            }
+        },
+    );
+}
+
+fn apply_ic0_subblock(sub: &Ic0Subblock, r_sub: &[f64], z_sub: &mut [f64]) {
+    let m = sub.atoms;
+    for li in 0..m {
+        let r_off = 3 * li;
+        let mut acc0 = r_sub[r_off];
+        let mut acc1 = r_sub[r_off + 1];
+        let mut acc2 = r_sub[r_off + 2];
+        for p in sub.row_ptr[li]..sub.row_ptr[li + 1] {
+            let lj_off = 3 * usize::from(sub.col_idx[p]);
+            let lv = f64::from(sub.val[p]);
+            acc0 -= lv * z_sub[lj_off];
+            acc1 -= lv * z_sub[lj_off + 1];
+            acc2 -= lv * z_sub[lj_off + 2];
+        }
+        let inv = sub.inv_d[li];
+        z_sub[r_off] = acc0 * inv;
+        z_sub[r_off + 1] = acc1 * inv;
+        z_sub[r_off + 2] = acc2 * inv;
+    }
+    for li in (0..m).rev() {
+        let z_off = 3 * li;
+        let inv = sub.inv_d[li];
+        let zi0 = z_sub[z_off] * inv;
+        let zi1 = z_sub[z_off + 1] * inv;
+        let zi2 = z_sub[z_off + 2] * inv;
+        z_sub[z_off] = zi0;
+        z_sub[z_off + 1] = zi1;
+        z_sub[z_off + 2] = zi2;
+        for p in sub.row_ptr[li]..sub.row_ptr[li + 1] {
+            let lj_off = 3 * usize::from(sub.col_idx[p]);
+            let lv = f64::from(sub.val[p]);
+            z_sub[lj_off] -= lv * zi0;
+            z_sub[lj_off + 1] -= lv * zi1;
+            z_sub[lj_off + 2] -= lv * zi2;
+        }
+    }
+}
+
+fn precond_scalar(a: &ScalarCsr, r: &[f64], z: &mut [f64], gate: usize, exec: &Exec) {
+    if let Some(ic0) = &a.ic0 {
+        let block_coords = 3 * IC_BLOCK_ATOMS;
+        par_chunks_mut_exec(exec, z, block_coords, a.n_atoms, gate, |b, z_sub| {
+            let start = b * block_coords;
+            let end = start + z_sub.len();
+            apply_ic0_subblock(&ic0.blocks[b], &r[start..end], z_sub);
+        });
+        return;
+    }
+    let (z_atoms, _) = z.as_chunks_mut::<3>();
+    let (r_atoms, _) = r.as_chunks::<3>();
+    par_chunks_mut_exec(
+        exec,
+        z_atoms,
+        MATVEC_ATOM_CHUNK,
+        a.n_atoms,
+        gate,
+        |c, z_chunk| {
+            let atom0 = c * MATVEC_ATOM_CHUNK;
+            for (offset, z_atom) in z_chunk.iter_mut().enumerate() {
+                let atom = atom0 + offset;
+                let inv = 1.0 / a.diag[atom];
+                let r_atom = r_atoms[atom];
+                *z_atom = [r_atom[0] * inv, r_atom[1] * inv, r_atom[2] * inv];
+            }
+        },
+    );
 }
 
 fn row_dot(a: &Csr, x: &[f64], i: usize) -> f64 {
@@ -1230,88 +2178,442 @@ fn row_dot(a: &Csr, x: &[f64], i: usize) -> f64 {
     s
 }
 
-fn matvec(a: &Csr, x: &[f64], y: &mut [f64], gate: usize) {
-    let parallel = gate < usize::MAX && a.n / 3 >= gate && a.n >= 2;
-    #[cfg(not(feature = "par"))]
-    let _ = parallel;
-    #[cfg(feature = "par")]
-    {
-        use rayon::prelude::*;
-        // Each row is an independent product. Writing `y[i]` from that
-        // row does not reorder any sum, so the vector matches the
-        // serial loop at every thread count.
-        if parallel {
-            y.par_iter_mut().enumerate().for_each(|(i, yi)| {
-                *yi = row_dot(a, x, i);
-            });
-            return;
+fn matvec(a: &Csr, x: &[f64], y: &mut [f64], gate: usize, exec: &Exec) {
+    let atoms = a.n / 3;
+    let row_chunk = 3 * MATVEC_ATOM_CHUNK;
+    par_chunks_mut_exec(exec, y, row_chunk, atoms, gate, |c, y_chunk| {
+        let row0 = c * row_chunk;
+        for (offset, yi) in y_chunk.iter_mut().enumerate() {
+            *yi = row_dot(a, x, row0 + offset);
+        }
+    });
+}
+
+fn precond_general(a: &Csr, r: &[f64], z: &mut [f64], gate: usize, exec: &Exec) {
+    let atoms = a.n / 3;
+    if let Some(blocks) = &a.inv_block3 {
+        let (z_atoms, _) = z.as_chunks_mut::<3>();
+        let (r_atoms, _) = r.as_chunks::<3>();
+        par_chunks_mut_exec(
+            exec,
+            z_atoms,
+            MATVEC_ATOM_CHUNK,
+            atoms,
+            gate,
+            |c, z_chunk| {
+                let atom0 = c * MATVEC_ATOM_CHUNK;
+                for (offset, z_atom) in z_chunk.iter_mut().enumerate() {
+                    let atom = atom0 + offset;
+                    let [r0, r1, r2] = r_atoms[atom];
+                    let inv = &blocks[atom];
+                    *z_atom = [
+                        inv[0] * r0 + inv[1] * r1 + inv[2] * r2,
+                        inv[1] * r0 + inv[3] * r1 + inv[4] * r2,
+                        inv[2] * r0 + inv[4] * r1 + inv[5] * r2,
+                    ];
+                }
+            },
+        );
+        return;
+    }
+    par_chunks_mut_exec(exec, z, DOT_CHUNK, atoms, gate, |c, z_chunk| {
+        let i0 = c * DOT_CHUNK;
+        for (offset, zi) in z_chunk.iter_mut().enumerate() {
+            let i = i0 + offset;
+            *zi = r[i] / a.diag[i];
+        }
+    });
+}
+
+impl SparseOp {
+    fn dim(&self) -> usize {
+        match self {
+            Self::Iso3(s) => 3 * s.n_atoms,
+            Self::General(g) => g.n,
         }
     }
-    for i in 0..a.n {
-        y[i] = row_dot(a, x, i);
+
+    fn solve_gate(&self) -> usize {
+        match self {
+            Self::Iso3(s) => s.solve_gate,
+            Self::General(g) => g.solve_gate,
+        }
+    }
+
+    fn stored_nonzeros(&self) -> usize {
+        match self {
+            Self::Iso3(s) => s.val.len(),
+            Self::General(g) => g.val.len(),
+        }
+    }
+
+    fn csr_bytes(&self) -> usize {
+        match self {
+            Self::Iso3(s) => {
+                size_of_val(s.row_ptr.as_slice())
+                    + size_of_val(s.col_idx.as_slice())
+                    + size_of_val(s.val.as_slice())
+                    + size_of_val(s.diag.as_slice())
+            }
+            Self::General(g) => {
+                size_of_val(g.row_ptr.as_slice())
+                    + size_of_val(g.col_idx.as_slice())
+                    + size_of_val(g.val.as_slice())
+                    + size_of_val(g.diag.as_slice())
+            }
+        }
+    }
+
+    fn valid_diag(&self) -> bool {
+        match self {
+            Self::Iso3(s) => s.diag.iter().all(|d| d.is_finite() && *d > 0.0),
+            Self::General(g) => g.diag.iter().all(|d| d.is_finite() && *d > 0.0),
+        }
+    }
+
+    fn matvec(&self, x: &[f64], y: &mut [f64], exec: &Exec) {
+        match self {
+            Self::Iso3(s) => matvec_scalar(s, x, y, s.apply_gate, exec),
+            Self::General(g) => matvec(g, x, y, g.apply_gate, exec),
+        }
+    }
+
+    fn matvec_for_solve(&self, x: &[f64], y: &mut [f64], exec: &Exec) {
+        match self {
+            Self::Iso3(s) => matvec_scalar(s, x, y, s.solve_gate, exec),
+            Self::General(g) => matvec(g, x, y, g.solve_gate, exec),
+        }
+    }
+
+    fn precond(&self, r: &[f64], z: &mut [f64], exec: &Exec) {
+        match self {
+            Self::Iso3(s) => precond_scalar(s, r, z, s.solve_gate, exec),
+            Self::General(g) => precond_general(g, r, z, g.solve_gate, exec),
+        }
+    }
+
+    fn to_dense(&self) -> Array2<f64> {
+        match self {
+            Self::Iso3(s) => {
+                let n = 3 * s.n_atoms;
+                let mut a = Array2::zeros((n, n));
+                for i in 0..s.n_atoms {
+                    for k in s.row_ptr[i]..s.row_ptr[i + 1] {
+                        let j = s.col_idx[k] as usize;
+                        let v = s.val[k];
+                        for d in 0..3 {
+                            a[(3 * i + d, 3 * j + d)] = v;
+                        }
+                    }
+                }
+                a
+            }
+            Self::General(g) => {
+                let mut a = Array2::zeros((g.n, g.n));
+                for i in 0..g.n {
+                    for k in g.row_ptr[i]..g.row_ptr[i + 1] {
+                        a[(i, g.col_idx[k])] = g.val[k];
+                    }
+                }
+                a
+            }
+        }
     }
 }
 
-/// Dot product. Chunks of [`DOT_CHUNK`] are summed left to right from
-/// `0.0` in every build. The `par` feature evaluates the chunks
-/// concurrently when `atoms >= gate`; the fold of the partials stays
-/// in chunk order.
-fn dot(a: &[f64], b: &[f64], gate: usize) -> f64 {
-    if a.is_empty() {
+#[inline]
+fn dot_leaf(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len().min(b.len());
+    let blocks = n / 8;
+    let mut s0 = 0.0;
+    let mut s1 = 0.0;
+    let mut s2 = 0.0;
+    let mut s3 = 0.0;
+    let mut s4 = 0.0;
+    let mut s5 = 0.0;
+    let mut s6 = 0.0;
+    let mut s7 = 0.0;
+    for k in 0..blocks {
+        let base = 8 * k;
+        s0 += a[base] * b[base];
+        s1 += a[base + 1] * b[base + 1];
+        s2 += a[base + 2] * b[base + 2];
+        s3 += a[base + 3] * b[base + 3];
+        s4 += a[base + 4] * b[base + 4];
+        s5 += a[base + 5] * b[base + 5];
+        s6 += a[base + 6] * b[base + 6];
+        s7 += a[base + 7] * b[base + 7];
+    }
+    let mut acc = ((s0 + s4) + (s1 + s5)) + ((s2 + s6) + (s3 + s7));
+    for i in (8 * blocks)..n {
+        acc += a[i] * b[i];
+    }
+    acc
+}
+
+fn dot_tree_serial(a: &[f64], b: &[f64]) -> f64 {
+    let len = a.len();
+    if len <= DOT_CHUNK {
+        return dot_leaf(a, b);
+    }
+    let nchunks = len.div_ceil(DOT_CHUNK);
+    let mid = (nchunks / 2) * DOT_CHUNK;
+    dot_tree_serial(&a[..mid], &b[..mid]) + dot_tree_serial(&a[mid..], &b[mid..])
+}
+
+#[cfg(feature = "par")]
+fn dot_tree_rayon(a: &[f64], b: &[f64]) -> f64 {
+    let len = a.len();
+    if len <= DOT_CHUNK {
+        return dot_leaf(a, b);
+    }
+    let nchunks = len.div_ceil(DOT_CHUNK);
+    if nchunks < DOT_PAR_MIN_CHUNKS {
+        return dot_tree_serial(a, b);
+    }
+    let mid = (nchunks / 2) * DOT_CHUNK;
+    let (left, right) = rayon::join(
+        || dot_tree_rayon(&a[..mid], &b[..mid]),
+        || dot_tree_rayon(&a[mid..], &b[mid..]),
+    );
+    left + right
+}
+
+#[cfg(not(feature = "par"))]
+fn dot_tree_scoped(a: &[f64], b: &[f64], budget: usize) -> f64 {
+    let len = a.len();
+    if len <= DOT_CHUNK {
+        return dot_leaf(a, b);
+    }
+    let nchunks = len.div_ceil(DOT_CHUNK);
+    if budget <= 1 || nchunks < DOT_PAR_MIN_CHUNKS {
+        return dot_tree_serial(a, b);
+    }
+    let mid = (nchunks / 2) * DOT_CHUNK;
+    let right_budget = budget / 2;
+    let left_budget = budget - right_budget;
+    std::thread::scope(|scope| {
+        let right_handle = scope.spawn(|| dot_tree_scoped(&a[mid..], &b[mid..], right_budget));
+        let left = dot_tree_scoped(&a[..mid], &b[..mid], left_budget);
+        let right = match right_handle.join() {
+            Ok(v) => v,
+            Err(payload) => std::panic::resume_unwind(payload),
+        };
+        left + right
+    })
+}
+
+/// Allocation-free deterministic dot product used by preconditioner PCG.
+///
+/// Leaves of length `1024` are reduced with an eight-lane accumulator tree
+/// and combined along a fixed chunk-aligned binary split, so serial and
+/// multi-threaded `par` builds produce identical bits with zero heap
+/// allocations. Mismatched or empty slices return `0.0`.
+#[must_use]
+pub fn dot(a: &[f64], b: &[f64]) -> f64 {
+    let exec = Exec::default();
+    dot_exec(&exec, a, b, N_PAR_EXP_SOLVE)
+}
+
+fn dot_exec(exec: &Exec, a: &[f64], b: &[f64], gate: usize) -> f64 {
+    if a.is_empty() || a.len() != b.len() {
         return 0.0;
     }
     let nchunks = a.len().div_ceil(DOT_CHUNK);
     let atoms = a.len() / 3;
-    let partials = ordered_map(nchunks, atoms, gate, |c| {
-        let start = c * DOT_CHUNK;
-        let end = (start + DOT_CHUNK).min(a.len());
-        let mut acc = 0.0;
-        for i in start..end {
-            acc += a[i] * b[i];
+    let workers = exec.workers(atoms, gate);
+    if workers <= 1 || nchunks < 2 {
+        return dot_tree_serial(a, b);
+    }
+    #[cfg(feature = "par")]
+    {
+        exec.install(|| dot_tree_rayon(a, b))
+    }
+    #[cfg(not(feature = "par"))]
+    {
+        dot_tree_scoped(a, b, workers)
+    }
+}
+
+fn nrm2_exec(exec: &Exec, a: &[f64], gate: usize) -> f64 {
+    dot_exec(exec, a, a, gate).sqrt()
+}
+
+fn pcg_axpy2(
+    exec: &Exec,
+    atoms: usize,
+    gate: usize,
+    alpha: f64,
+    p: &[f64],
+    ap: &[f64],
+    x: &mut [f64],
+    r: &mut [f64],
+) {
+    let nchunks = x.len().div_ceil(DOT_CHUNK);
+    let workers = exec.workers(atoms, gate);
+    if workers <= 1 || nchunks < 2 {
+        for i in 0..x.len() {
+            x[i] += alpha * p[i];
+            r[i] -= alpha * ap[i];
         }
-        acc
+        return;
+    }
+    #[cfg(feature = "par")]
+    {
+        exec.install(|| {
+            use rayon::prelude::*;
+            x.par_chunks_mut(DOT_CHUNK)
+                .zip(r.par_chunks_mut(DOT_CHUNK))
+                .zip(p.par_chunks(DOT_CHUNK))
+                .zip(ap.par_chunks(DOT_CHUNK))
+                .for_each(|(((xc, rc), pc), apc)| {
+                    for i in 0..xc.len() {
+                        xc[i] += alpha * pc[i];
+                        rc[i] -= alpha * apc[i];
+                    }
+                });
+        });
+    }
+    #[cfg(not(feature = "par"))]
+    {
+        let nw = workers.min(nchunks);
+        let elems_per = nchunks.div_ceil(nw) * DOT_CHUNK;
+        std::thread::scope(|scope| {
+            let mut xr = x;
+            let mut rr = r;
+            let mut off = 0usize;
+            while !xr.is_empty() {
+                let take = elems_per.min(xr.len());
+                let (xh, xt) = xr.split_at_mut(take);
+                let (rh, rt) = rr.split_at_mut(take);
+                let ps = &p[off..off + take];
+                let aps = &ap[off..off + take];
+                scope.spawn(move || {
+                    for i in 0..xh.len() {
+                        xh[i] += alpha * ps[i];
+                        rh[i] -= alpha * aps[i];
+                    }
+                });
+                off += take;
+                xr = xt;
+                rr = rt;
+            }
+        });
+    }
+}
+
+fn pcg_xpay(exec: &Exec, atoms: usize, gate: usize, beta: f64, z: &[f64], p: &mut [f64]) {
+    par_chunks_mut_exec(exec, p, DOT_CHUNK, atoms, gate, |c, pc| {
+        let base = c * DOT_CHUNK;
+        let zc = &z[base..base + pc.len()];
+        for i in 0..pc.len() {
+            pc[i] = zc[i] + beta * pc[i];
+        }
     });
-    partials.into_iter().fold(0.0, |acc, v| acc + v)
 }
 
-fn nrm2(a: &[f64], gate: usize) -> f64 {
-    dot(a, a, gate).sqrt()
+fn record_warm(work: &mut PcgWork, record_last: bool) {
+    if record_last {
+        if work.last_x.len() != work.x.len() {
+            work.last_x.resize(work.x.len(), 0.0);
+        }
+        work.last_x.copy_from_slice(&work.x);
+        work.has_last = true;
+    }
 }
 
-fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
-    let n = a.n;
-    let gate = a.solve_gate;
+fn solve_pcg_op(
+    op: &SparseOp,
+    b: &[f64],
+    rtol: f64,
+    use_warm: bool,
+    record_last: bool,
+    exec: &Exec,
+    work: &mut PcgWork,
+) -> Option<(Vec<f64>, usize)> {
+    let n = op.dim();
+    let atoms = n / 3;
+    let gate = op.solve_gate();
     if b.len() != n {
         return None;
     }
-    let bnorm = nrm2(b, gate);
+    let bnorm = nrm2_exec(exec, b, gate);
     if bnorm == 0.0 {
+        if record_last {
+            work.has_last = false;
+        }
         return Some((vec![0.0; n], 0));
     }
-    if a.diag.iter().any(|d| !(d.is_finite() && *d > 0.0)) {
+    if !op.valid_diag() {
         return None;
     }
-    let mut x = vec![0.0; n];
-    let mut r = b.to_vec();
-    let mut z = vec![0.0; n];
-    let mut p = vec![0.0; n];
-    let mut ap = vec![0.0; n];
-    jacobi(a, &r, &mut z);
-    p.copy_from_slice(&z);
-    let mut rz = dot(&r, &z, gate);
+
+    work.x.resize(n, 0.0);
+    work.r.resize(n, 0.0);
+    work.z.resize(n, 0.0);
+    work.p.resize(n, 0.0);
+    work.ap.resize(n, 0.0);
+
+    let eff_rtol = if rtol.is_finite() && rtol > 0.0 {
+        rtol
+    } else {
+        DEFAULT_PRECON_RTOL
+    };
+    let tol = eff_rtol * bnorm;
+
+    let mut rnorm = bnorm;
+    let mut warmed = false;
+    if use_warm && work.has_last && work.last_x.len() == n {
+        op.matvec_for_solve(&work.last_x, &mut work.ap, exec);
+        let u_au = dot_exec(exec, &work.last_x, &work.ap, gate);
+        let b_u = dot_exec(exec, b, &work.last_x, gate);
+        if u_au.is_finite() && u_au > 0.0 && b_u.is_finite() {
+            let gamma = b_u / u_au;
+            if gamma.is_finite() {
+                for i in 0..n {
+                    work.x[i] = gamma * work.last_x[i];
+                    work.r[i] = b[i] - gamma * work.ap[i];
+                }
+                let rnorm0 = nrm2_exec(exec, &work.r, gate);
+                if rnorm0.is_finite() && rnorm0 <= tol {
+                    if !work.x.iter().all(|v| v.is_finite()) {
+                        return None;
+                    }
+                    let out = work.x.clone();
+                    record_warm(work, record_last);
+                    return Some((out, 0));
+                }
+                if rnorm0.is_finite() && rnorm0 < WARM_START_MAX_RATIO * bnorm {
+                    rnorm = rnorm0;
+                    warmed = true;
+                }
+            }
+        }
+    }
+    if !warmed {
+        work.x.fill(0.0);
+        work.r.copy_from_slice(b);
+    }
+
+    if rnorm <= tol {
+        let out = work.x.clone();
+        record_warm(work, record_last);
+        return finite_vec(out).map(|v| (v, 0));
+    }
+
+    op.precond(&work.r, &mut work.z, exec);
+    work.p.copy_from_slice(&work.z);
+    let mut rz = dot_exec(exec, &work.r, &work.z, gate);
     if !(rz.is_finite() && rz > 0.0) {
         return None;
     }
-    let tol = 1e-12 * bnorm;
+
     let maxit = (8 * n).max(64);
     let mut iters = 0usize;
     for _ in 0..maxit {
-        if nrm2(&r, gate) <= tol {
-            return finite_vec(x).map(|v| (v, iters));
-        }
         iters += 1;
-        matvec(a, &p, &mut ap, gate);
-        let pap = dot(&p, &ap, gate);
+        op.matvec_for_solve(&work.p, &mut work.ap, exec);
+        let pap = dot_exec(exec, &work.p, &work.ap, gate);
         if !(pap.is_finite() && pap > 0.0) {
             return None;
         }
@@ -1319,34 +2621,50 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
         if !alpha.is_finite() {
             return None;
         }
-        for i in 0..n {
-            x[i] += alpha * p[i];
-            r[i] -= alpha * ap[i];
+        pcg_axpy2(
+            exec,
+            atoms,
+            gate,
+            alpha,
+            &work.p,
+            &work.ap,
+            &mut work.x,
+            &mut work.r,
+        );
+        rnorm = nrm2_exec(exec, &work.r, gate);
+        if rnorm <= tol {
+            if !work.x.iter().all(|v| v.is_finite()) {
+                return None;
+            }
+            let out = work.x.clone();
+            record_warm(work, record_last);
+            return Some((out, iters));
         }
-        if nrm2(&r, gate) <= tol {
-            return finite_vec(x).map(|v| (v, iters));
-        }
-        jacobi(a, &r, &mut z);
-        let rz_new = dot(&r, &z, gate);
+        op.precond(&work.r, &mut work.z, exec);
+        let rz_new = dot_exec(exec, &work.r, &work.z, gate);
         if !(rz_new.is_finite() && rz_new > 0.0) {
             return None;
         }
         let beta = rz_new / rz;
-        for i in 0..n {
-            p[i] = z[i] + beta * p[i];
-        }
+        pcg_xpay(exec, atoms, gate, beta, &work.z, &mut work.p);
         rz = rz_new;
     }
-    if nrm2(&r, gate) <= 1e-8 * bnorm {
-        return finite_vec(x).map(|v| (v, iters));
+
+    let fallback_tol = FALLBACK_PRECON_RTOL.max(eff_rtol) * bnorm;
+    if rnorm <= fallback_tol && work.x.iter().all(|v| v.is_finite()) {
+        let out = work.x.clone();
+        record_warm(work, record_last);
+        return Some((out, iters));
     }
     None
 }
 
-fn jacobi(a: &Csr, r: &[f64], z: &mut [f64]) {
-    for i in 0..a.n {
-        z[i] = r[i] / a.diag[i];
-    }
+#[cfg(test)]
+fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
+    let op = SparseOp::General(a.clone());
+    let exec = Exec::default();
+    let mut work = PcgWork::default();
+    solve_pcg_op(&op, b, TEST_PCG_SOLVE_RTOL, false, false, &exec, &mut work)
 }
 
 fn finite_vec(x: Vec<f64>) -> Option<Vec<f64>> {
@@ -1519,6 +2837,63 @@ mod tests {
         assert!((mu - num / den).abs() < 1e-12, "formula drift");
     }
 
+    #[test]
+    fn invert_spd3_guard_and_preconditioned_action_are_scale_invariant() {
+        let a = [4.0, 1.5, 0.25, 3.0, 0.5, 2.5];
+        let rhs = [0.8, -0.4, 0.2];
+        let apply_inv = |inv: [f64; 6], b: [f64; 3]| -> [f64; 3] {
+            [
+                inv[0] * b[0] + inv[1] * b[1] + inv[2] * b[2],
+                inv[1] * b[0] + inv[3] * b[1] + inv[4] * b[2],
+                inv[2] * b[0] + inv[4] * b[1] + inv[5] * b[2],
+            ]
+        };
+        let inv_ref = invert_spd3(a[0], a[1], a[2], a[3], a[4], a[5]).expect("base SPD block");
+        let z_ref = apply_inv(inv_ref, rhs);
+        for p in [-40_i32, 40_i32] {
+            let s = 2.0_f64.powi(p);
+            let inv = invert_spd3(s * a[0], s * a[1], s * a[2], s * a[3], s * a[4], s * a[5])
+                .expect("scaled SPD block");
+            let z = apply_inv(inv, [s * rhs[0], s * rhs[1], s * rhs[2]]);
+            for i in 0..3 {
+                let scale = z_ref[i].abs().max(z[i].abs()).max(1.0);
+                let tol = 64.0 * f64::EPSILON * scale;
+                assert!(
+                    (z[i] - z_ref[i]).abs() <= tol,
+                    "scale 2^{p}: component {i} drifted {} vs {} (tol {tol})",
+                    z[i],
+                    z_ref[i]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn invert_spd3_rejects_exactly_singular_minor() {
+        assert!(
+            invert_spd3(1.0, 1.0, 0.0, 1.0, 0.0, 1.0).is_none(),
+            "exactly singular leading minor must be rejected"
+        );
+    }
+
+    /// Positive leading minor below eps*s^2. `minor2 > 0.0` returns Some;
+    /// the scale-relative floor returns None.
+    #[test]
+    fn invert_spd3_rejects_positive_minor_below_scale_floor() {
+        assert!(
+            invert_spd3(
+                0.18939220242941968,
+                0.17896518182033547,
+                0.0,
+                0.1691122226424382,
+                0.0,
+                0.20499081484829917,
+            )
+            .is_none(),
+            "positive minor below eps*s^2 must be rejected"
+        );
+    }
+
     /// FNV-1a over the little-endian bits of the solution. The same
     /// digest is required with and without the `par` feature.
     fn fnv1a(x: &[f64]) -> u64 {
@@ -1569,6 +2944,7 @@ mod tests {
             col_idx,
             val,
             diag,
+            inv_block3: None,
             apply_gate: usize::MAX,
             solve_gate: usize::MAX,
         };
@@ -1580,7 +2956,7 @@ mod tests {
             "iters {iters} should take more than one step and at most n"
         );
         assert_eq!(
-            hash, 0xf9a8d91302c9cb63,
+            hash, 0x75ec5f2a232e41f3,
             "committed hash drifted: iters {iters} hash {hash:#x}"
         );
     }

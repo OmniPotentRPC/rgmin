@@ -321,6 +321,8 @@ pub struct Solver {
     geometry_step: Option<bool>,
     /// Geometry metric. `None` leaves every method unchanged.
     precon: Option<Slot>,
+    /// Optional worker-thread setting propagated to geometry preconditioners.
+    precon_threads: Option<usize>,
     /// Bumped when `P` is installed, cleared, or rebuilt.
     metric_epoch: u64,
     /// Times NLCG replaced a non-descent direction with steepest descent.
@@ -520,6 +522,7 @@ impl Solver {
             geometry_lbfgs_stiff: None,
             geometry_step: None,
             precon: None,
+            precon_threads: None,
             metric_epoch: 0,
             nlcg_descent_fallbacks: 0,
             unit_first_step: false,
@@ -615,6 +618,36 @@ impl Solver {
         }
     }
 
+    /// Set the worker-thread count used by installed geometry preconditioners.
+    ///
+    /// `1` (the default) runs preconditioner assembly and PCG serially.
+    /// `0` returns [`Error::Precon`].
+    pub fn set_threads(&mut self, threads: usize) -> Result<()> {
+        if threads == 0 {
+            return Err(Error::Precon {
+                what: "thread count is zero",
+            });
+        }
+        self.precon_threads = Some(threads);
+        if let Some(slot) = &mut self.precon {
+            slot.set_threads(Some(threads))?;
+            let matrix = slot.metric().cloned();
+            if let Inner::Lbfgs(solver) = &mut self.inner {
+                solver.set_h0(matrix);
+            }
+        }
+        Ok(())
+    }
+
+    /// Configured preconditioner worker-thread count (`1` when unset).
+    #[must_use]
+    pub fn threads(&self) -> usize {
+        if let Some(t) = self.precon_threads {
+            return t;
+        }
+        1
+    }
+
     /// Install one geometry preconditioner.
     ///
     /// L-BFGS takes \(H_0 = P^{-1}\). FIRE and nonlinear CG take `P`
@@ -629,7 +662,11 @@ impl Solver {
                 params,
             } => {
                 self.require_precon_dim(positions.len())?;
-                Slot::Exp(crate::precon::ExpState::new(positions, neighbours, params)?)
+                let mut eff = params.clone();
+                if eff.threads.is_none() {
+                    eff.threads = self.precon_threads;
+                }
+                Slot::Exp(crate::precon::ExpState::new(positions, neighbours, &eff)?)
             }
             PreconSpec::Lindh {
                 positions,
@@ -638,9 +675,11 @@ impl Solver {
                 params,
             } => {
                 self.require_precon_dim(positions.len())?;
-                Slot::Lindh(crate::precon::LindhState::new(
-                    positions, z, ghosts, params,
-                )?)
+                let mut eff = params.clone();
+                if eff.threads.is_none() {
+                    eff.threads = self.precon_threads;
+                }
+                Slot::Lindh(crate::precon::LindhState::new(positions, z, ghosts, &eff)?)
             }
             PreconSpec::Ff {
                 positions,
@@ -648,7 +687,11 @@ impl Solver {
                 params,
             } => {
                 self.require_precon_dim(positions.len())?;
-                Slot::Ff(crate::precon::FfState::new(positions, terms, params)?)
+                let mut eff = params.clone();
+                if eff.threads.is_none() {
+                    eff.threads = self.precon_threads;
+                }
+                Slot::Ff(crate::precon::FfState::new(positions, terms, &eff)?)
             }
         };
         self.install_slot(slot);
@@ -731,19 +774,34 @@ impl Solver {
 
     /// Install a neighbour list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
-    pub(crate) fn set_exp_deferred(&mut self, state: crate::precon::ExpState) {
+    pub(crate) fn set_exp_deferred(&mut self, mut state: crate::precon::ExpState) {
+        if state.threads().is_none()
+            && let Some(t) = self.precon_threads
+        {
+            let _ = state.set_threads(Some(t));
+        }
         self.install_slot(Slot::Exp(state));
     }
 
     /// Install a Lindh list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
-    pub(crate) fn set_lindh_deferred(&mut self, state: crate::precon::LindhState) {
+    pub(crate) fn set_lindh_deferred(&mut self, mut state: crate::precon::LindhState) {
+        if state.threads().is_none()
+            && let Some(t) = self.precon_threads
+        {
+            let _ = state.set_threads(Some(t));
+        }
         self.install_slot(Slot::Lindh(state));
     }
 
     /// Install an FF list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
-    pub(crate) fn set_ff_deferred(&mut self, state: crate::precon::FfState) {
+    pub(crate) fn set_ff_deferred(&mut self, mut state: crate::precon::FfState) {
+        if state.threads().is_none()
+            && let Some(t) = self.precon_threads
+        {
+            let _ = state.set_threads(Some(t));
+        }
         self.install_slot(Slot::Ff(state));
     }
 
@@ -5803,6 +5861,30 @@ mod tests {
         match &solver.inner {
             Inner::Fire(state) => state,
             _ => unreachable!("FIRE session"),
+        }
+    }
+
+    #[cfg(feature = "capi")]
+    #[test]
+    fn deferred_precon_keeps_explicit_threads() {
+        let mut solver = Solver::new(Method::Lbfgs { memory: 5 }, Control::default(), 3);
+        solver.set_threads(4).expect("session threads");
+        let state = crate::precon::ExpState::deferred(
+            Neighbours {
+                i: Vec::new(),
+                j: Vec::new(),
+                r: Vec::new(),
+                anchor: Vec::new(),
+            },
+            ExpParams::default().with_threads(2),
+        )
+        .expect("deferred exp");
+
+        solver.set_exp_deferred(state);
+
+        match solver.precon.as_ref() {
+            Some(Slot::Exp(state)) => assert_eq!(state.threads(), Some(2)),
+            _ => panic!("deferred Exp state was not installed"),
         }
     }
 

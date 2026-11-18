@@ -6,6 +6,15 @@
 
 use crate::error::{Error, Result};
 
+/// Lower distance guard that excludes coincident atoms from pair lists.
+const MIN_PAIR_DIST: f64 = 1.0e-8;
+/// Shortest bond vector accepted by the Wilson angle and torsion derivatives.
+const MIN_LEG_LEN: f64 = 1.0e-12;
+/// Drop reduced angle terms within `1e-3` of `0` or `π` (`sin θ <= 1e-3`).
+const MIN_ANGLE_SIN: f64 = 1.0e-3;
+/// Minimum squared cross-product norm for a non-collinear torsion plane.
+const MIN_CROSS_SQ: f64 = 1.0e-16;
+
 pub(super) fn require_atoms(positions_len: usize) -> Result<usize> {
     if !positions_len.is_multiple_of(3) || positions_len == 0 {
         return Err(Error::Precon {
@@ -53,6 +62,7 @@ pub(super) fn pairs_in_range(
     pos: &[[f64; 3]],
     cutoff: f64,
     lengths: Option<[f64; 3]>,
+    exec: &super::Exec,
 ) -> Vec<(usize, usize, f64)> {
     let n = pos.len();
     if n < 2 || !(cutoff.is_finite() && cutoff > 0.0) {
@@ -66,7 +76,6 @@ pub(super) fn pairs_in_range(
         ],
         None => [false, false, false],
     };
-    let len = lengths.unwrap_or([0.0, 0.0, 0.0]);
     let mut origin = [f64::INFINITY; 3];
     let mut span = [0.0_f64; 3];
     for p in pos {
@@ -77,7 +86,9 @@ pub(super) fn pairs_in_range(
         }
     }
     for k in 0..3 {
-        if periodic[k] {
+        if let Some(len) = lengths
+            && periodic[k]
+        {
             origin[k] = 0.0;
             span[k] = len[k];
         } else {
@@ -96,11 +107,11 @@ pub(super) fn pairs_in_range(
     let mut cells: std::collections::BTreeMap<(i32, i32, i32), Vec<usize>> =
         std::collections::BTreeMap::new();
     for i in 0..n {
-        let key = bin_of(pos[i], origin, cutoff, nbin, periodic, len);
+        let key = bin_of(pos[i], origin, cutoff, nbin, periodic, lengths);
         cells.entry(key).or_default().push(i);
     }
     let keys: Vec<(i32, i32, i32)> = cells.keys().copied().collect();
-    let parts = super::ordered_map(keys.len().max(1), n, super::N_PAR_ASSEMBLE, |c| {
+    let parts = super::ordered_map_exec(exec, keys.len().max(1), n, super::N_PAR_ASSEMBLE, |c| {
         if c >= keys.len() {
             return Vec::new();
         }
@@ -130,7 +141,7 @@ pub(super) fn pairs_in_range(
                             }
                             let d = mic(pos[i], pos[j], lengths);
                             let r = norm3(d);
-                            if r.is_finite() && r > 1e-8 && r < cutoff {
+                            if r.is_finite() && r > MIN_PAIR_DIST && r < cutoff {
                                 local.push((i, j, r));
                             }
                         }
@@ -154,12 +165,14 @@ fn bin_of(
     cutoff: f64,
     nbin: [usize; 3],
     periodic: [bool; 3],
-    len: [f64; 3],
+    lengths: Option<[f64; 3]>,
 ) -> (i32, i32, i32) {
     let mut key = [0i32; 3];
     for k in 0..3 {
         let n = nbin[k] as i32;
-        let idx = if periodic[k] {
+        let idx = if let Some(len) = lengths
+            && periodic[k]
+        {
             let mut f = p[k] / len[k];
             f -= f.floor();
             if f >= 1.0 {
@@ -167,9 +180,9 @@ fn bin_of(
             }
             (f * n as f64).floor() as i32
         } else {
-            ((p[k] - origin[k]) / cutoff).floor() as i32
+            ((p[k] - origin[k]).max(0.0) / cutoff).floor() as i32
         };
-        key[k] = idx.clamp(0, n - 1);
+        key[k] = idx.min(n - 1);
     }
     (key[0], key[1], key[2])
 }
@@ -229,14 +242,14 @@ pub(super) fn angle_grad(
     let v = mic(end_k, vertex, lengths);
     let du = norm3(u);
     let dv = norm3(v);
-    if du < 1e-12 || dv < 1e-12 {
+    if du < MIN_LEG_LEN || dv < MIN_LEG_LEN {
         return None;
     }
     let eu = scale3(u, 1.0 / du);
     let ev = scale3(v, 1.0 / dv);
-    let c = dot3(eu, ev).clamp(-1.0, 1.0);
-    let s = (1.0 - c * c).sqrt();
-    if s <= 1e-3 {
+    let c = dot3(eu, ev);
+    let s = norm3(cross(eu, ev));
+    if s <= MIN_ANGLE_SIN {
         return None;
     }
     let qu_ev = [ev[0] - c * eu[0], ev[1] - c * eu[1], ev[2] - c * eu[2]];
@@ -260,7 +273,7 @@ pub(super) fn dihedral_grad(
     let rkj = mic(pk, pj, lengths);
     let rkl = mic(pk, pl, lengths);
     let dkj = norm3(rkj);
-    if dkj < 1e-12 {
+    if dkj < MIN_LEG_LEN {
         return None;
     }
     let dkj2 = dkj * dkj;
@@ -268,7 +281,7 @@ pub(super) fn dihedral_grad(
     let rnk = cross(rkj, rkl);
     let dmj2 = dot3(rmj, rmj);
     let dnk2 = dot3(rnk, rnk);
-    if dmj2 < 1e-16 || dnk2 < 1e-16 {
+    if dmj2 < MIN_CROSS_SQ || dnk2 < MIN_CROSS_SQ {
         return None;
     }
     let dddri = scale3(rmj, dkj / dmj2);
@@ -288,7 +301,7 @@ pub(super) fn dihedral_grad(
 
 #[cfg(test)]
 mod tests {
-    use super::pairs_in_range;
+    use super::{MIN_PAIR_DIST, pairs_in_range};
 
     fn brute(pos: &[[f64; 3]], cutoff: f64, lengths: Option<[f64; 3]>) -> Vec<(usize, usize, f64)> {
         let mut out = Vec::new();
@@ -296,7 +309,7 @@ mod tests {
             for j in (i + 1)..pos.len() {
                 let d = super::mic(pos[i], pos[j], lengths);
                 let r = super::norm3(d);
-                if r.is_finite() && r > 1e-8 && r < cutoff {
+                if r.is_finite() && r > MIN_PAIR_DIST && r < cutoff {
                     out.push((i, j, r));
                 }
             }
@@ -315,7 +328,8 @@ mod tests {
             ]);
         }
         let cutoff = 2.5;
-        let got = pairs_in_range(&pos, cutoff, None);
+        let exec = super::super::Exec::default();
+        let got = pairs_in_range(&pos, cutoff, None, &exec);
         let expect = brute(&pos, cutoff, None);
         assert_eq!(got.len(), expect.len());
         for (a, b) in got.iter().zip(&expect) {
@@ -324,7 +338,7 @@ mod tests {
             assert!((a.2 - b.2).abs() < 1e-12);
         }
         let lengths = Some([6.0, 5.5, 4.0]);
-        let got = pairs_in_range(&pos, cutoff, lengths);
+        let got = pairs_in_range(&pos, cutoff, lengths, &exec);
         let expect = brute(&pos, cutoff, lengths);
         assert_eq!(got.len(), expect.len());
         for (a, b) in got.iter().zip(&expect) {

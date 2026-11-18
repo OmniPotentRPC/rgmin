@@ -33,10 +33,13 @@ use ndarray::{Array1, ArrayView1};
 
 use super::geom::{angle_grad, dihedral_grad, mic, norm3, pos_of, require_atoms, scale3};
 use super::{
-    BlockAccum, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, max_atom_displacement, needs_rebuild,
-    note_block,
+    BlockAccum, DEFAULT_PRECON_RTOL, Exec, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE,
+    max_atom_displacement, needs_rebuild, note_block,
 };
 use crate::error::{Error, Result};
+
+/// Minimum bond or leg distance accepted into a reduced force-field term.
+const MIN_LEG_DIST: f64 = 1.0e-8;
 
 /// Harmonic bond. `k` is the curvature, energy / Å².
 #[derive(Clone, Copy, Debug)]
@@ -119,6 +122,14 @@ pub struct FfParams {
     pub mu: Option<f64>,
     /// Reestimate `μ` whenever the matrix is rebuilt.
     pub recalc_mu: bool,
+    /// Relative residual tolerance `||r||_2 / ||b||_2` of the PCG solve.
+    pub rtol: f64,
+    /// Reuse the previous PCG solution via Rayleigh projection when helpful.
+    pub warm_start: bool,
+    /// Worker threads for preconditioner assembly and PCG. `None` is serial
+    /// (`1` thread) unless called inside a multi-thread Rayon pool; `Some(1)`
+    /// forces serial execution.
+    pub threads: Option<usize>,
 }
 
 with_setters!(FfParams {
@@ -127,6 +138,9 @@ with_setters!(FfParams {
     with_lengths => lengths: opt [f64; 3],
     with_mu => mu: opt f64,
     with_recalc_mu => recalc_mu: val bool,
+    with_rtol => rtol: val f64,
+    with_warm_start => warm_start: val bool,
+    with_threads => threads: opt usize,
 });
 
 impl Default for FfParams {
@@ -137,6 +151,9 @@ impl Default for FfParams {
             lengths: None,
             mu: None,
             recalc_mu: false,
+            rtol: DEFAULT_PRECON_RTOL,
+            warm_start: true,
+            threads: None,
         }
     }
 }
@@ -178,6 +195,12 @@ impl Ff {
                 what: "c_stab is not positive",
             });
         }
+        if !(params.rtol.is_finite() && params.rtol > 0.0) {
+            return Err(Error::Precon {
+                what: "rtol is not positive",
+            });
+        }
+        let exec = Exec::new(params.threads)?;
         if terms.bonds.is_empty()
             && terms.angles.is_empty()
             && terms.morses.is_empty()
@@ -187,16 +210,16 @@ impl Ff {
                 what: "ff has no bonded terms",
             });
         }
-        let coords = positions
-            .as_slice()
-            .map(<[f64]>::to_vec)
-            .unwrap_or_else(|| positions.to_vec());
+        let coords = match positions.as_slice() {
+            Some(s) => s.to_vec(),
+            None => positions.to_vec(),
+        };
         if coords.iter().any(|v| !v.is_finite()) {
             return Err(Error::Precon {
                 what: "a coordinate is not finite",
             });
         }
-        let (metric, r_nn) = assemble_metric(natoms, &coords, terms, params)?;
+        let (metric, r_nn) = assemble_metric(natoms, &coords, terms, params, exec)?;
         Ok(Self { r_nn, metric })
     }
 
@@ -224,10 +247,22 @@ impl Ff {
         self.metric.solve(rhs)
     }
 
-    /// Jacobi PCG iterations for one solve.
+    /// PCG iterations for one cold solve.
     #[must_use]
     pub fn solve_iterations(&self, rhs: ArrayView1<f64>) -> Option<usize> {
-        self.metric.solve_counted(rhs).map(|(_, n)| n)
+        self.metric.solve_iterations(rhs)
+    }
+
+    /// Number of stored scalar CSR entries.
+    #[must_use]
+    pub fn stored_nonzeros(&self) -> usize {
+        self.metric.stored_nonzeros()
+    }
+
+    /// Heap bytes occupied by the CSR index, value, and diagonal arrays.
+    #[must_use]
+    pub fn csr_bytes(&self) -> usize {
+        self.metric.csr_bytes()
     }
 
     /// Dense copy, for tests and for a dense Cholesky reference.
@@ -276,6 +311,13 @@ impl FfState {
                 what: "c_stab is not positive",
             });
         }
+        if !(params.rtol.is_finite() && params.rtol > 0.0) {
+            return Err(Error::Precon {
+                what: "rtol is not positive",
+            });
+        }
+        let exec = Exec::new(params.threads)?;
+        let _ = exec;
         let mu = usable_mu(params.mu)?;
         Ok(Self {
             bonds,
@@ -292,6 +334,20 @@ impl FfState {
 
     pub(crate) fn metric(&self) -> Option<&Metric> {
         self.metric.as_ref()
+    }
+
+    pub(crate) fn set_threads(&mut self, threads: Option<usize>) -> Result<()> {
+        let exec = Exec::new(threads)?;
+        self.params.threads = threads;
+        if let Some(metric) = &mut self.metric {
+            metric.set_exec(exec);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "capi")]
+    pub(crate) fn threads(&self) -> Option<usize> {
+        self.params.threads
     }
 
     pub(crate) fn mu(&self) -> Option<f64> {
@@ -341,7 +397,7 @@ impl FfState {
                 }
             }
         }
-        let mu = self.mu.unwrap_or(1.0);
+        let mu = *self.mu.get_or_insert(1.0);
         self.metric = Some(built.metric.scaled(mu));
         self.built_at = Some(positions.to_owned());
         Ok(true)
@@ -370,7 +426,7 @@ fn in_range(atom: usize, natoms: usize) -> Result<()> {
 }
 
 fn leg_ok(r: f64, cut: Option<f64>) -> bool {
-    r.is_finite() && r > 1e-8 && cut.is_none_or(|c| r < c)
+    r.is_finite() && r > MIN_LEG_DIST && cut.is_none_or(|c| r < c)
 }
 
 fn assemble_metric(
@@ -378,6 +434,7 @@ fn assemble_metric(
     positions: &[f64],
     terms: FfTerms<'_>,
     params: &FfParams,
+    exec: Exec,
 ) -> Result<(Metric, f64)> {
     for b in terms.bonds {
         in_range(b.i, natoms)?;
@@ -429,8 +486,9 @@ fn assemble_metric(
         acc.add_rank1(atoms, scale);
     });
     acc.add_stabilization(params.c_stab);
+    let csr = acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, &exec);
     Ok((
-        Metric::from_csr(acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE)),
+        Metric::from_general_csr(csr, params.rtol, params.warm_start, exec),
         r_nn,
     ))
 }
@@ -546,7 +604,8 @@ pub fn bonded_terms(
     }
     let owned = positions.to_vec();
     let coords: Vec<[f64; 3]> = (0..natoms).map(|i| pos_of(&owned, i)).collect();
-    let found = super::geom::pairs_in_range(&coords, r_cut, lengths);
+    let exec = Exec::default();
+    let found = super::geom::pairs_in_range(&coords, r_cut, lengths, &exec);
     let mut bonds = Vec::new();
     let mut adj = vec![Vec::new(); natoms];
     for (i, j, _) in found {

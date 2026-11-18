@@ -193,11 +193,11 @@ pub use ode12r::{
 pub use oracle::Oracle;
 pub use precon::exp_gate_open;
 pub use precon::{
-    AngleTerm, BondTerm, DihedralTerm, Exp, ExpParams, Ff, FfParams, FfTerms, GeometryKind, Ghost,
-    Lindh, LindhParams, MorseTerm, N_LINDH, N_PAR_ASSEMBLE, N_PAR_EXP_APPLY, N_PAR_EXP_SOLVE,
-    N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, Neighbours, OptimizerFamily, PreconChoice, PreconSpec,
-    bonded_terms, estimate_mu, max_atom_displacement, nearest_neighbour_distance, needs_rebuild,
-    select_precon, sine_probe,
+    AngleTerm, BondTerm, DEFAULT_PRECON_RTOL, DihedralTerm, Exp, ExpParams, ExpPcKind, Ff,
+    FfParams, FfTerms, GeometryKind, Ghost, Lindh, LindhParams, MorseTerm, N_LINDH, N_PAR_ASSEMBLE,
+    N_PAR_EXP_APPLY, N_PAR_EXP_SOLVE, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, Neighbours,
+    OptimizerFamily, PreconChoice, PreconSpec, bonded_terms, estimate_mu, max_atom_displacement,
+    nearest_neighbour_distance, needs_rebuild, select_precon, sine_probe,
 };
 pub use pso::minimize_pso;
 pub use qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};

@@ -4,21 +4,45 @@
 
 * Exp, Lindh, and the bonded metric
 
-Three sparse symmetric positive definite matrices share one solve and
-one rebuild rule. The solve is Jacobi-preconditioned conjugate
-gradients. The matrix is held until the largest atomic move exceeds
-half the nearest-neighbour distance.
+Three sparse symmetric positive definite matrices share one
+conjugate-gradient solver and one rebuild rule. The matrix is held
+until the largest atomic move exceeds half the nearest-neighbour
+distance.
 
 ** Exp
 
 Packwood, Kermode, Mones, Bernstein, Woolley, Gould, Ortner, and
 Csányi, J. Chem. Phys. 144, 164109 (2016),
 https://doi.org/10.1063/1.4947024.
+@@rst::cite:`packwoodUniversalPreconditionerSimulating2016`@@
 
 The caller supplies the neighbour list. The weight on a pair is
 ~exp(-A (r / r_nn - 1))~ with ~A = 3~. Off-diagonal blocks are
 ~-μ c_ij I_3~. The diagonal is ~μ (C_stab + sum_j c_ij) I_3~ with
-~C_stab = 0.1~. ~r_nn~ is the largest per-atom nearest-neighbour
+~C_stab = 0.1~. Because ~P = A ⊗ I_3~ is the Kronecker product of an
+~N × N~ scalar graph matrix ~A~ with ~I_3~, ~Exp~ stores ~A~ once in
+scalar CSR form (~2 E + N~ entries rather than ~3 (2 E + N)~) and
+applies each row across all three Cartesian components at once,
+cutting CSR memory and matrix-vector bandwidth by ~3×~ while keeping
+~Exp::apply~ bit-identical.
+
+For ~μ > 0~ and ~C_stab > 0~, ~A~ has positive diagonal entries,
+nonpositive off-diagonal entries, and strict row-sum margin ~μ C_stab~,
+so ~A~ is a symmetric M-matrix. Its inner PCG preconditioner defaults
+to ~ExpPcKind::BlockIc0~: zero-fill incomplete Cholesky (Meijerink and
+van der Vorst, Math. Comp. 31, 148 (1977),
+https://doi.org/10.1090/S0025-5718-1977-0438681-4) on fixed 1,024-atom
+diagonal blocks of ~A~, with ~ExpPcKind::Jacobi~ retained as an opt-in
+diagonal preconditioner. On 3×3×3, 4×4×4, and 6×6×6 copper vacancy
+Morse supercells (107, 255, and 863 atoms; Makri, Ortner, and Kermode,
+J. Chem. Phys. 150, 094109 (2019), https://doi.org/10.1063/1.5064465),
+~BlockIc0~ holds the full global IC(0) factor in a single block and
+cuts cold PCG iterations from 20, 25, and 36 down to 8, 9, and 12.
+The 3×3 SPD block inverse floors the leading 2×2 minor at eps*s^2 and
+the determinant at eps*s^3, where s is the largest absolute entry of
+the block. Exact scale invariance holds for power-of-two scales.
+
+~r_nn~ is the largest per-atom nearest-neighbour
 distance. ~μ~ is the Rayleigh quotient of a sine probe against this
 matrix at ~μ = 1~. The probe's shifted gradient is an extra force
 evaluation and is counted with the other force calls. ASE's
@@ -77,23 +101,32 @@ against −167.77. The bonded metric on pt7 takes 18, 29, and 78 calls
 against 10, 18, and 49, and on lj38 it ends at −166.65, so the field
 is taken only for the covalent set.
 
-~N_LINDH~ is 2,000. On bulk diamond Si with a 4 Å cutoff the Jacobi
-PCG iteration counts are Lindh 69, 124, 140 and Exp 21, 48, 85 at
-160, 2,000, and 32,000 atoms. Eight solves on one thread take Lindh
-0.031 s, 0.914 s, and 34.9 s against Exp 0.001 s, 0.031 s, and 1.03 s.
-The iteration count levels off near 140, and 2,000 atoms is the
-largest measured size at which eight Lindh solves still finish in
-about a second.
+~N_LINDH~ is 2,000. ~Lindh~ and ~Ff~ invert exact ~3 × 3~ symmetric
+per-atom diagonal blocks inside PCG instead of scalar diagonals. Across
+consecutive solves on a held metric, PCG reuses its workspace buffers,
+projects the previous solution onto the one-dimensional ~P~-orthogonal
+Rayleigh subspace when that reduces the residual (~warm_start = true~),
+and stops when ~||r||_2 <= rtol ||b||_2~ relative to the force norm
+(~DEFAULT_PRECON_RTOL = 1e-8~; Packwood et al. 2016; Makri, Ortner, and
+Kermode 2019). Every PCG dot product (~precon::dot~) reduces fixed
+1,024-element eight-lane leaves along a chunk-aligned binary split with
+zero heap allocations.
 
-Each kernel has its own atom-count gate, measured as the smallest
-size where two threads beat one by more than the run-to-run range.
-Lindh apply and Lindh solve gate at 2,000 atoms. Exp apply and Exp
-solve gate at 32,000 atoms (at 8,000 atoms the Exp gaps, 0.67 ms and
-0.015 s, sit inside ranges of 0.96 ms and 0.059 s). Assembly stays
-serial: at 100,000 atoms the Exp gap is 0.026 s inside a range of
-0.027 s. The gate does not read the thread count, so the result is
-the same at 1, 2, 3, and 8 threads. Peak RSS at 100,000 atoms is
-2.65 GB.
+Serial execution (~threads = 1~) is the default outside an installed
+multi-thread Rayon pool. Setting ~with_threads(t)~ on ~ExpParams~,
+~LindhParams~, or ~FfParams~, or ~Solver::set_threads(t)~, threads pair
+assembly, block-IC(0) and ~3 × 3~ block-Jacobi construction,
+matrix-vector products, preconditioner solves, dot reductions, and PCG
+vector updates across ~t~ workers (~with_threads(1)~ forces serial even
+inside an outer pool). When ~threads~ is unset inside an active Rayon
+pool under the ~par~ feature, ambient parallel loops engage at 512
+atoms (~N_PAR_ASSEMBLE~, ~N_PAR_EXP_APPLY~, ~N_PAR_EXP_SOLVE~,
+~N_PAR_LINDH_APPLY~, ~N_PAR_LINDH_SOLVE~). Because block boundaries and
+dot reduction trees depend only on vector length, 1, 2, 3, and 8
+threads produce identical floating-point results. For multi-image band
+methods such as NEB, ~Exp::assemble_batch~ and ~Exp::solve_batch~
+parallelize across images in slice order without nested pool
+oversubscription.
 
 ** H0 and the metric
 
