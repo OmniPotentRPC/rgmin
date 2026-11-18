@@ -237,6 +237,27 @@ fn constraint_shrink_budget_follows_istep() {
 }
 
 #[test]
+fn default_with_shrink_derives_the_budget_from_the_session_istep() {
+    let noncanonical_istep = 2.0;
+    let mut solver = Solver::new(Method::GromacsSteep, control(noncanonical_istep, 0.0, 1), 3);
+    solver
+        .set_gromacs_steep_config(GromacsSteepConfig::default().with_shrink(0.3))
+        .unwrap();
+    let budget = solver
+        .gromacs_steep_config()
+        .unwrap()
+        .max_constraint_shrinks;
+    assert_eq!(
+        budget,
+        rgmin::gromacs_steep_max_constraint_shrinks(noncanonical_istep, 0.3)
+    );
+    assert_ne!(
+        budget,
+        rgmin::gromacs_steep_max_constraint_shrinks(rgmin::GROMACS_STEEP_EMSTEP_DEFAULT, 0.3)
+    );
+}
+
+#[test]
 fn tolerance_budget_and_machine_precision_are_distinct_stops() {
     let quadratic = Oracle::unbounded(3, |x: ArrayView1<f64>| (0.5 * x.dot(&x), x.to_owned()));
     let mut at_tolerance = array![1.0, 0.0, 0.0];
