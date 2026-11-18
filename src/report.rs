@@ -52,6 +52,10 @@ pub struct Report {
     /// A session measures it in [`Report::stop_norm`], `||.||_2` by default.
     /// One-shot drivers report `||g||_2`.
     pub grad_norm: f64,
+    /// Whether the final stop norm cleared `gtol`.
+    ///
+    /// This is true only when the final stop norm is `<= gtol`.
+    pub converged: bool,
     /// Norm in which [`Report::grad_norm`] is measured. Drivers that run
     /// no session report [`StopNorm::Two`].
     pub stop_norm: StopNorm,
@@ -71,6 +75,7 @@ impl Report {
             coords,
             steps: 0,
             grad_norm: 0.0,
+            converged: false,
             stop_norm: StopNorm::Two,
             grad: None,
             status: Status::Iterating,
@@ -83,6 +88,7 @@ with_setters!(Report {
     with_coords => coords: val Array1<f64>,
     with_steps => steps: val usize,
     with_grad_norm => grad_norm: val f64,
+    with_converged => converged: val bool,
     with_stop_norm => stop_norm: val StopNorm,
     with_grad => grad: opt Array1<f64>,
     with_status => status: val Status,

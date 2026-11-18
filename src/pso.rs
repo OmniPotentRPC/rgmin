@@ -111,13 +111,15 @@ where
 
     let (value, grad) = obj.value_and_gradient(gbest_position.view());
     let grad_norm = l2(&grad);
-    Ok(one_shot_report(
+    let report = one_shot_report(
         value,
         gbest_position,
         iteration,
         grad_norm,
+        control.converged(grad_norm),
         control.finish_status(grad_norm, grad.len(), true),
-    ))
+    );
+    control.maybe_not_converged(report)
 }
 
 pub(crate) fn update_swarm<O>(

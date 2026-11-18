@@ -147,7 +147,8 @@ where
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if let Some(status) = control.halt(gnorm, grad.len()) {
-            return Ok(one_shot_report(value, pos, step, gnorm, status));
+            let report = one_shot_report(value, pos, step, gnorm, control.converged(gnorm), status);
+            return control.maybe_not_converged(report);
         }
         let hess = obj.hessian(pos.view());
         let dir = match kind {
@@ -162,6 +163,16 @@ where
                 pos = spos;
                 value = sval;
                 grad = sgrad;
+            } else if control.require_convergence && !control.converged(gnorm) {
+                let report = one_shot_report(
+                    value,
+                    pos,
+                    step + 1,
+                    gnorm,
+                    false,
+                    crate::Status::StepTolerance,
+                );
+                return control.maybe_not_converged(report);
             }
         } else {
             pos = npos;
@@ -169,13 +180,16 @@ where
             grad = ngrad;
         }
     }
-    Ok(one_shot_report(
+    let gnorm = l2(&grad);
+    let report = one_shot_report(
         value,
         pos,
         control.maxiter,
-        l2(&grad),
-        control.finish_status(l2(&grad), grad.len(), true),
-    ))
+        gnorm,
+        control.converged(gnorm),
+        control.finish_status(gnorm, grad.len(), true),
+    );
+    control.maybe_not_converged(report)
 }
 
 pub(crate) fn energy_backtrack<O>(

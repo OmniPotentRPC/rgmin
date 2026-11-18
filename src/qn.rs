@@ -49,7 +49,8 @@ where
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if control.halt(gnorm, grad.len()).is_some() {
-            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
+            let report = done(value, pos, step, gnorm, grad.len(), control, false);
+            return control.maybe_not_converged(report);
         }
         let dir = -h.dot(&grad);
         let old = pos.clone();
@@ -75,6 +76,17 @@ where
         pos = t.x;
         value = t.f;
         grad = t.g;
+        if control.require_convergence && !moved && !control.converged(gnorm) {
+            let report = one_shot_report(
+                value,
+                pos,
+                step + 1,
+                gnorm,
+                false,
+                crate::Status::StepTolerance,
+            );
+            return control.maybe_not_converged(report);
+        }
         if moved {
             let s = &pos - &old;
             let y = &grad - &gold;
@@ -82,7 +94,7 @@ where
         }
         istep = qn_istep(control);
     }
-    Ok(done(
+    let report = done(
         value,
         pos,
         control.maxiter,
@@ -90,7 +102,8 @@ where
         grad.len(),
         control,
         true,
-    ))
+    );
+    control.maybe_not_converged(report)
 }
 
 /// L-BFGS two-loop recursion (Nocedal-Wright 7.4), scaling 7.20.
@@ -186,7 +199,8 @@ where
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if control.halt(gnorm, grad.len()).is_some() {
-            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
+            let report = done(value, pos, step, gnorm, grad.len(), control, false);
+            return control.maybe_not_converged(report);
         }
         let dir = sr_trust_direction(&b, &grad, radius);
         let mut trial = &pos + &dir;
@@ -213,9 +227,19 @@ where
             pos = trial;
             value = ft;
             grad = gt;
+        } else if control.require_convergence && !control.converged(gnorm) {
+            let report = one_shot_report(
+                value,
+                pos,
+                step + 1,
+                gnorm,
+                false,
+                crate::Status::StepTolerance,
+            );
+            return control.maybe_not_converged(report);
         }
     }
-    Ok(done(
+    let report = done(
         value,
         pos,
         control.maxiter,
@@ -223,7 +247,8 @@ where
         grad.len(),
         control,
         true,
-    ))
+    );
+    control.maybe_not_converged(report)
 }
 
 /// Steepest descent: `d = -g` every iteration.
@@ -246,7 +271,8 @@ where
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if control.halt(gnorm, grad.len()).is_some() {
-            return Ok(done(value, pos, step, gnorm, grad.len(), control, false));
+            let report = done(value, pos, step, gnorm, grad.len(), control, false);
+            return control.maybe_not_converged(report);
         }
         let dir = grad.mapv(|g| -g);
         let t = take_step(
@@ -264,12 +290,23 @@ where
             return Ok(energy_noise_report(value, pos, step + 1, gnorm));
         }
         let lsstep = t.alpha;
+        if control.require_convergence && !t.moved && !control.converged(gnorm) {
+            let report = one_shot_report(
+                value,
+                pos,
+                step + 1,
+                gnorm,
+                false,
+                crate::Status::StepTolerance,
+            );
+            return control.maybe_not_converged(report);
+        }
         pos = t.x;
         value = t.f;
         grad = t.g;
         istep = next_istep(lsstep, control);
     }
-    Ok(done(
+    let report = done(
         value,
         pos,
         control.maxiter,
@@ -277,7 +314,8 @@ where
         grad.len(),
         control,
         true,
-    ))
+    );
+    control.maybe_not_converged(report)
 }
 
 fn start<O>(obj: &O, init: impl Into<Array1<f64>>) -> Result<Array1<f64>>
@@ -308,6 +346,7 @@ fn done(
         coords,
         steps,
         grad_norm,
+        control.converged(grad_norm),
         control.finish_status(grad_norm, n_free, exhausted),
     )
 }

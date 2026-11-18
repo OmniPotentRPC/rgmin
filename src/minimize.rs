@@ -112,13 +112,25 @@ where
     let mut pos = init.into();
     let mut solver = Solver::new(method, control.clone(), pos.len());
     if control.maxiter == 0 {
-        return solver.assess(obj, &mut pos);
+        let mut report = solver.assess(obj, &mut pos)?;
+        report.converged = control.converged(report.grad_norm);
+        return control.maybe_not_converged(report);
     }
     let mut last = None;
     for _ in 0..control.maxiter {
+        let old_pos = pos.clone();
         let mut report = step(&mut solver, obj, &mut pos)?;
         if let Some(status) = control.halt(report.grad_norm, solver.free_len(obj.bounds())) {
             report.status = status;
+        }
+        if control.require_convergence
+            && report.status == Status::Iterating
+            && !control.converged(report.grad_norm)
+            && pos == old_pos
+        {
+            report.status = Status::StepTolerance;
+            report.converged = false;
+            return control.maybe_not_converged(report);
         }
         let stopped = report.status != Status::Iterating;
         last = Some(report);
@@ -132,7 +144,8 @@ where
     if last.status == Status::Iterating {
         last.status = Status::Budget;
     }
-    Ok(last)
+    last.converged = control.converged(last.grad_norm);
+    control.maybe_not_converged(last)
 }
 
 /// Minimize with any [`Method`], including Newton / RFO.
@@ -229,7 +242,8 @@ where
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if let Some(status) = control.halt(gnorm, grad.len()) {
-            return Ok(one_shot_report(value, pos, step, gnorm, status));
+            let report = one_shot_report(value, pos, step, gnorm, control.converged(gnorm), status);
+            return control.maybe_not_converged(report);
         }
         let t = take_step(
             obj,
@@ -243,15 +257,21 @@ where
             implicit_atom_cap(control),
         );
         if t.energy_noise {
-            return Ok(one_shot_report(
+            let report = one_shot_report(
                 value,
                 pos,
                 step + 1,
                 gnorm,
+                control.converged(gnorm),
                 Status::NoiseFloor,
-            ));
+            );
+            return control.maybe_not_converged(report);
         }
         let lsstep = t.alpha;
+        if control.require_convergence && !t.moved && !control.converged(gnorm) {
+            let report = one_shot_report(value, pos, step + 1, gnorm, false, Status::StepTolerance);
+            return control.maybe_not_converged(report);
+        }
         pos = t.x;
         value = t.f;
         grad = t.g;
@@ -270,11 +290,13 @@ where
         istep = next_istep(lsstep, control);
     }
     let gnorm = l2(&grad);
-    Ok(one_shot_report(
+    let report = one_shot_report(
         value,
         pos,
         control.maxiter,
         gnorm,
+        control.converged(gnorm),
         control.finish_status(gnorm, grad.len(), true),
-    ))
+    );
+    control.maybe_not_converged(report)
 }

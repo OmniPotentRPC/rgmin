@@ -2447,8 +2447,11 @@ impl Lbfgs {
         for step in 0..control.maxiter {
             let gnorm = l2(&grad);
             if let Some(status) = control.halt(gnorm, grad.len()) {
-                return Ok(one_shot_report(value, pos, step, gnorm, status));
+                let report =
+                    one_shot_report(value, pos, step, gnorm, control.converged(gnorm), status);
+                return control.maybe_not_converged(report);
             }
+            let old_pos = pos.clone();
             let stall = self.step_objective(
                 obj,
                 &mut pos,
@@ -2459,24 +2462,40 @@ impl Lbfgs {
                 control,
                 crate::step::implicit_atom_cap(control),
             );
+            let moved = pos != old_pos;
             if stall {
-                return Ok(one_shot_report(
+                let report = one_shot_report(
                     value,
                     pos,
                     step + 1,
                     gnorm,
+                    control.converged(gnorm),
                     crate::report::Status::NoiseFloor,
-                ));
+                );
+                return control.maybe_not_converged(report);
+            }
+            if control.require_convergence && !moved && !control.converged(gnorm) {
+                let report = one_shot_report(
+                    value,
+                    pos,
+                    step + 1,
+                    gnorm,
+                    false,
+                    crate::report::Status::StepTolerance,
+                );
+                return control.maybe_not_converged(report);
             }
         }
         let gnorm = l2(&grad);
-        Ok(one_shot_report(
+        let report = one_shot_report(
             value,
             pos,
             control.maxiter,
             gnorm,
+            control.converged(gnorm),
             control.finish_status(gnorm, grad.len(), true),
-        ))
+        );
+        control.maybe_not_converged(report)
     }
 
     /// One outer L-BFGS iteration: two-loop direction, line search, pair.

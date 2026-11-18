@@ -909,7 +909,8 @@ where
             return Err(Error::TrustCollapsed { steps: step });
         }
         if let Some(status) = control.halt(gnorm, grad.len()) {
-            return Ok(one_shot_report(value, pos, step, gnorm, status));
+            let report = one_shot_report(value, pos, step, gnorm, control.converged(gnorm), status);
+            return control.maybe_not_converged(report);
         }
         // Inexact-Newton forcing keeps early CG cheap and the tail
         // superlinear (Nocedal-Wright eq 7.3). The shared step also
@@ -944,13 +945,15 @@ where
         }
     }
     let gnorm = nrm2(grad.view());
-    Ok(one_shot_report(
+    let report = one_shot_report(
         value,
         pos,
         control.maxiter,
         gnorm,
+        control.converged(gnorm),
         control.finish_status(gnorm, grad.len(), true),
-    ))
+    );
+    control.maybe_not_converged(report)
 }
 
 #[cfg(test)]

@@ -1467,6 +1467,7 @@ impl Solver {
             },
             steps: self.steps,
             grad_norm,
+            converged: self.control.converged(grad_norm),
             stop_norm: self.stop_norm,
             grad: Some(grad.clone()),
             status,
@@ -5889,6 +5890,7 @@ mod tests {
                 ftol_rel: None,
                 noise_floor: None,
                 stop_norm: StopNorm::Two,
+                require_convergence: false,
             },
             2,
         )
@@ -5973,6 +5975,7 @@ mod tests {
                     ftol_rel: None,
                     noise_floor: None,
                     stop_norm: StopNorm::Two,
+                    require_convergence: false,
                 },
                 2,
             );
@@ -6191,6 +6194,7 @@ mod retained_neb_guard_tests {
                 ftol_rel: None,
                 noise_floor: None,
                 stop_norm: StopNorm::Two,
+                require_convergence: false,
             },
             3,
         );
@@ -6229,6 +6233,7 @@ mod retained_neb_guard_tests {
                 ftol_rel: None,
                 noise_floor: None,
                 stop_norm: StopNorm::Two,
+                require_convergence: false,
             },
             3,
         );
@@ -6334,6 +6339,7 @@ mod retained_neb_guard_tests {
                 ftol_rel: None,
                 noise_floor: None,
                 stop_norm: StopNorm::Two,
+                require_convergence: false,
             },
             n,
         );

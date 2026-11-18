@@ -230,6 +230,7 @@ fn c_setter_rejects_bad_inputs_without_replacing_the_session() {
             maxmove: 0.0,
             noise_eps: 0.0,
             noise_c: 0.0,
+            require_convergence: 0,
         };
         let session = rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &control, 1);
         assert!(!session.is_null());
@@ -307,12 +308,14 @@ mod capi {
                 maxmove: 0.0,
                 noise_eps: 0.0,
                 noise_c: 0.0,
+                require_convergence: 0,
             };
             let mut x = [START];
             let mut out = rgmin_report_t {
                 value: 0.0,
                 steps: 0,
                 grad_norm: 0.0,
+                converged: 0,
                 stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
             };
             let st = unsafe {

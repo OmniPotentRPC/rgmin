@@ -328,6 +328,7 @@ pub(crate) fn one_shot_report(
     coords: Array1<f64>,
     steps: usize,
     grad_norm: f64,
+    converged: bool,
     status: crate::report::Status,
 ) -> Report {
     Report {
@@ -335,6 +336,7 @@ pub(crate) fn one_shot_report(
         coords,
         steps,
         grad_norm,
+        converged,
         stop_norm: StopNorm::Two,
         grad: None,
         status,
@@ -352,6 +354,7 @@ pub(crate) fn energy_noise_report(
         coords,
         steps,
         grad_norm,
+        false,
         crate::report::Status::NoiseFloor,
     )
 }

@@ -56,7 +56,8 @@ where
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if let Some(status) = control.halt(gnorm, grad.len()) {
-            return Ok(one_shot_report(value, pos, step, gnorm, status));
+            let report = one_shot_report(value, pos, step, gnorm, control.converged(gnorm), status);
+            return control.maybe_not_converged(report);
         }
         let m_old = m.clone();
         let v_old = v.clone();
@@ -74,7 +75,8 @@ where
             implicit_atom_cap(control),
         );
         if t.energy_noise {
-            return Ok(energy_noise_report(value, pos, step + 1, gnorm));
+            let report = energy_noise_report(value, pos, step + 1, gnorm);
+            return control.maybe_not_converged(report);
         }
         if t.moved {
             pos = t.x;
@@ -86,17 +88,31 @@ where
                 istep = t.alpha;
             }
         } else {
+            if control.require_convergence && !control.converged(gnorm) {
+                let report = one_shot_report(
+                    value,
+                    pos,
+                    step + 1,
+                    gnorm,
+                    false,
+                    crate::Status::StepTolerance,
+                );
+                return control.maybe_not_converged(report);
+            }
             m = m_old;
             v = v_old;
         }
     }
-    Ok(one_shot_report(
+    let gnorm = l2(&grad);
+    let report = one_shot_report(
         value,
         pos,
         control.maxiter,
-        l2(&grad),
-        control.finish_status(l2(&grad), grad.len(), true),
-    ))
+        gnorm,
+        control.converged(gnorm),
+        control.finish_status(gnorm, grad.len(), true),
+    );
+    control.maybe_not_converged(report)
 }
 
 /// Kingma-Ba moment update and bias-corrected direction (Algorithm 1).
@@ -195,6 +211,7 @@ mod tests {
             stop_norm: StopNorm::Two,
             ftol_rel: None,
             noise_floor: None,
+            require_convergence: false,
         };
         let linesearch = LineSearch::Backtracking {
             c: 1e-4,

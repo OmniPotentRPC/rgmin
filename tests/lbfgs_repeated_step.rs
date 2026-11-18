@@ -612,6 +612,7 @@ mod capi {
             maxmove: 0.0,
             noise_eps: 0.0,
             noise_c: 0.0,
+            require_convergence: 0,
         };
         let mut x = [0.0; DIM];
         let mut seen = Vec::new();
@@ -623,6 +624,7 @@ mod capi {
                     value: 0.0,
                     steps: 0,
                     grad_norm: 0.0,
+                    converged: 0,
                     stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
                 };
                 let before = x;

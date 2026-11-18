@@ -14,6 +14,9 @@ pub enum Error {
         /// `Objective::dim`.
         dim: usize,
     },
+    /// A run ended without `||g|| <= gtol` under strict convergence.
+    #[error("not converged: status {0:?}")]
+    NotConverged(Box<crate::Report>),
     /// HiGHS rejected the L-BFGS quadratic model.
     #[error("HiGHS: {0}")]
     Highs(String),

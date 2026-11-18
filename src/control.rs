@@ -128,6 +128,10 @@ pub struct Control {
     pub ftol_rel: Option<f64>,
     /// Gradient noise floor. `None` leaves the test off.
     pub noise_floor: Option<NoiseFloor>,
+    /// Return an error on a non-converged final report.
+    ///
+    /// Off by default to keep existing behavior.
+    pub require_convergence: bool,
 }
 
 with_setters!(Control {
@@ -137,6 +141,7 @@ with_setters!(Control {
     with_maxmove => maxmove: opt f64,
     with_stop_norm => stop_norm: val StopNorm,
     with_ftol_rel => ftol_rel: opt f64,
+    with_require_convergence => require_convergence: val bool,
 });
 
 impl Default for Control {
@@ -149,6 +154,7 @@ impl Default for Control {
             stop_norm: StopNorm::Two,
             ftol_rel: None,
             noise_floor: None,
+            require_convergence: false,
         }
     }
 }
@@ -199,6 +205,11 @@ impl StopNorm {
 }
 
 impl Control {
+    /// Whether `grad` clears `gtol` under strict convergence.
+    pub fn converged(&self, grad: f64) -> bool {
+        grad <= self.gtol
+    }
+
     /// [`Self::maxmove`] when it is a positive finite length, the only
     /// value that limits a step or a trust radius.
     pub(crate) fn maxmove_cap(&self) -> Option<f64> {
@@ -267,6 +278,18 @@ impl Control {
         match self.classify(grad, n_free) {
             crate::report::Status::Iterating if exhausted => crate::report::Status::Budget,
             other => other,
+        }
+    }
+
+    /// Keep the historical `Ok(report)` path unless strict convergence is on.
+    pub(crate) fn maybe_not_converged(
+        &self,
+        report: crate::Report,
+    ) -> crate::Result<crate::Report> {
+        if self.require_convergence && !report.converged {
+            Err(crate::Error::NotConverged(Box::new(report)))
+        } else {
+            Ok(report)
         }
     }
 

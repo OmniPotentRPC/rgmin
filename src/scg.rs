@@ -323,7 +323,8 @@ where
     while control.maxiter == 0 || step < control.maxiter {
         let gnorm = l2_ordered(&grad);
         if let Some(status) = control.halt(gnorm, grad.len()) {
-            return Ok(one_shot_report(f_old, w, step, gnorm, status));
+            let report = one_shot_report(f_old, w, step, gnorm, control.converged(gnorm), status);
+            return control.maybe_not_converged(report);
         }
 
         if success {
@@ -337,13 +338,15 @@ where
             kappa = crate::vecops::dot_ordered(dir.view(), dir.view());
             if kappa < f64::EPSILON {
                 if crate::vecops::dot_ordered(grad.view(), grad.view()) < f64::EPSILON {
-                    return Ok(one_shot_report(
+                    let report = one_shot_report(
                         f_old,
                         w,
                         step,
                         gnorm,
+                        control.converged(gnorm),
                         scg_stop(control, gnorm, grad.len()),
-                    ));
+                    );
+                    return control.maybe_not_converged(report);
                 }
                 // Conjugacy can cancel the direction while the gradient
                 // remains nonstationary. Price a steepest-descent step.
@@ -431,13 +434,15 @@ where
             w = trial;
             if solution_converged && objective_converged {
                 let grad_norm = l2_ordered(&grad_new);
-                return Ok(one_shot_report(
+                let report = one_shot_report(
                     f_new,
                     w,
                     step + 1,
                     grad_norm,
+                    control.converged(grad_norm),
                     scg_stop(control, grad_norm, grad.len()),
-                ));
+                );
+                return control.maybe_not_converged(report);
             }
             // With no iteration budget a plateau otherwise ends only on the
             // damping limit, as a gradient error, and never when
@@ -456,13 +461,15 @@ where
                 if grad_norm + flat_grad * f64::EPSILON.sqrt() >= flat_grad {
                     flat_steps += 1;
                     if flat_steps >= nparams.max(2) {
-                        return Ok(one_shot_report(
+                        let report = one_shot_report(
                             f_new,
                             w,
                             step + 1,
                             grad_norm,
+                            control.converged(grad_norm),
                             scg_stop(control, grad_norm, grad_new.len()),
-                        ));
+                        );
+                        return control.maybe_not_converged(report);
                     }
                 } else {
                     flat_steps = 0;
@@ -474,13 +481,15 @@ where
             grad_old = std::mem::replace(&mut grad, grad_new);
             if crate::vecops::dot_ordered(grad.view(), grad.view()) < f64::EPSILON {
                 let grad_norm = l2_ordered(&grad);
-                return Ok(one_shot_report(
+                let report = one_shot_report(
                     f_old,
                     w,
                     step + 1,
                     grad_norm,
+                    control.converged(grad_norm),
                     scg_stop(control, grad_norm, grad.len()),
-                ));
+                );
+                return control.maybe_not_converged(report);
             }
         }
 
@@ -516,13 +525,15 @@ where
     }
 
     let grad_norm = l2_ordered(&grad);
-    Ok(one_shot_report(
+    let report = one_shot_report(
         f_old,
         w,
         control.maxiter,
         grad_norm,
+        control.converged(grad_norm),
         control.finish_status(grad_norm, grad.len(), true),
-    ))
+    );
+    control.maybe_not_converged(report)
 }
 
 /// SCG's step and objective tests are [`crate::Status::StepTolerance`]
