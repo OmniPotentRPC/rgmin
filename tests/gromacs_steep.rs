@@ -2,8 +2,8 @@ mod common;
 
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::{
-    Control, DistanceConstraints, Error, GROMACS_STEEP_GROW, GROMACS_STEEP_SHRINK,
-    GromacsSteepConfig, Method, NoiseFloor, Oracle, Solver, Status,
+    ConstraintSolver, Control, DistanceConstraints, Error, GROMACS_STEEP_GROW,
+    GROMACS_STEEP_SHRINK, GromacsSteepConfig, Method, NoiseFloor, Oracle, Solver, Status,
 };
 
 use common::morse_value_grad;
@@ -84,6 +84,101 @@ fn steep_config_is_refused_outside_a_steep_session_and_outside_the_unit_interval
         .set_gromacs_steep_config(GromacsSteepConfig::default())
         .unwrap_err();
     assert!(matches!(err, Error::Steep { .. }), "{err}");
+}
+
+fn bond_length(x: &Array1<f64>) -> f64 {
+    let dx = x[3] - x[0];
+    let dy = x[4] - x[1];
+    let dz = x[5] - x[2];
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+fn lincs_pair() -> DistanceConstraints {
+    DistanceConstraints::new(vec![(0, 1)], vec![1.0])
+        .unwrap()
+        .with_solver(ConstraintSolver::Lincs)
+}
+
+/// Lateral kick that LINCS reverses on a unit bond: the trial end is
+/// `(1.4, 1.2, 0)` when `h` is the length of `(0.4, 1.2, 0)`.
+fn sideways_gradient() -> Array1<f64> {
+    array![0.0, 0.0, 0.0, -0.4, -1.2, 0.0]
+}
+
+fn failing_step() -> f64 {
+    (0.4_f64 * 0.4 + 1.2 * 1.2).sqrt()
+}
+
+#[test]
+fn a_constraint_failure_shrinks_and_the_bound_then_errors() {
+    let gradient = sideways_gradient();
+    let objective = Oracle::unbounded(6, move |x: ArrayView1<f64>| {
+        (x.dot(&gradient), gradient.clone())
+    });
+    let start = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let h = failing_step();
+
+    let mut kept = start.clone();
+    let mut solver = Solver::new(Method::GromacsSteep, control(h, 0.0, 20), kept.len());
+    solver.set_distance_constraints(lincs_pair()).unwrap();
+    let report = solver.step(&objective, &mut kept).unwrap();
+    assert_eq!(report.status, Status::Iterating);
+    assert_eq!(kept, start);
+    assert_eq!(
+        solver.gromacs_step_size().unwrap().to_bits(),
+        (h * GROMACS_STEEP_SHRINK).to_bits()
+    );
+
+    let mut bounded = start.clone();
+    let mut solver = Solver::new(
+        Method::GromacsSteep,
+        control(h * 4.0, 0.0, 20),
+        bounded.len(),
+    );
+    solver.set_distance_constraints(lincs_pair()).unwrap();
+    solver
+        .set_gromacs_steep_config(GromacsSteepConfig::default().with_max_constraint_shrinks(2))
+        .unwrap();
+    for shrinks in 1..=2 {
+        let report = solver.step(&objective, &mut bounded).unwrap();
+        assert_eq!(report.status, Status::Iterating);
+        assert_eq!(bounded, start);
+        let shrunk = h * 4.0 * GROMACS_STEEP_SHRINK.powi(shrinks);
+        assert_eq!(
+            solver.gromacs_step_size().unwrap().to_bits(),
+            shrunk.to_bits()
+        );
+    }
+    let err = solver.step(&objective, &mut bounded).unwrap_err();
+    assert!(matches!(err, Error::Constraint(_)), "{err}");
+    assert_eq!(bounded, start);
+    assert_eq!(solver.gromacs_step_size().unwrap().to_bits(), h.to_bits());
+
+    let mut immediate = start.clone();
+    let mut solver = Solver::new(Method::GromacsSteep, control(h, 0.0, 20), immediate.len());
+    solver.set_distance_constraints(lincs_pair()).unwrap();
+    solver
+        .set_gromacs_steep_config(GromacsSteepConfig::default().with_max_constraint_shrinks(0))
+        .unwrap();
+    let err = solver.step(&objective, &mut immediate).unwrap_err();
+    assert!(matches!(err, Error::Constraint(_)), "{err}");
+    assert_eq!(immediate, start);
+    assert_eq!(solver.gromacs_step_size().unwrap().to_bits(), h.to_bits());
+
+    let mut placed = start.clone();
+    let mut solver = Solver::new(Method::GromacsSteep, control(h, 0.0, 20), placed.len());
+    solver.set_distance_constraints(lincs_pair()).unwrap();
+    let mut moved = false;
+    for _ in 0..8 {
+        solver.step(&objective, &mut placed).unwrap();
+        if placed != start {
+            moved = true;
+            break;
+        }
+    }
+    assert!(moved);
+    let length = bond_length(&placed);
+    assert_eq!(length.to_bits(), 1.0_f64.to_bits());
 }
 
 #[test]
