@@ -4,9 +4,9 @@
 //! `tests/ase_cell_precon_gold.py`).
 //!
 //! Compared: `μ` and `μ_c` of the two-evaluation estimate (Cu lands on
-//! the floor of 1, Si clears it), the matrix, a solve, and the L-BFGS
-//! direction from the pairs ASE stored. The tolerances are derived in
-//! place from `u` and the data.
+//! the floor of 1, Si clears it), the matrix built from those rgmin
+//! scales, a solve, and the L-BFGS direction from the pairs ASE stored.
+//! The tolerances are derived in place from `u` and the data.
 
 use ndarray::{Array1, ArrayView1};
 
@@ -201,6 +201,32 @@ fn gradient_of(filter: &CellFilter, call: &Call) -> Array1<f64> {
         .unwrap()
 }
 
+/// `μ` and `μ_c` from [`estimate_mu_cell`] on the two evaluations ASE stored.
+fn own_scales(case: &Case) -> (f64, f64) {
+    let filter = filter(case);
+    let x0 = start(case);
+    let packed: Vec<Array1<f64>> = case
+        .calls
+        .iter()
+        .map(|c| filter.pack(c.positions.view(), &c.cell).unwrap())
+        .collect();
+    let grads: Vec<Array1<f64>> = case.calls.iter().map(|c| gradient_of(&filter, c)).collect();
+    let point_tol = OFFSET_OPS * U * max_abs(case.x0.view());
+    let grad = |x: ArrayView1<f64>| -> Array1<f64> {
+        for (p, g) in packed.iter().zip(&grads) {
+            let near = (0..x.len()).all(|i| (x[i] - p[i]).abs() <= point_tol);
+            if near {
+                return g.clone();
+            }
+        }
+        panic!(
+            "{}: the estimate asked for a point ASE did not evaluate",
+            case.name
+        );
+    };
+    estimate_mu_cell(x0.view(), &case.neighbours, &params(case), grad).unwrap()
+}
+
 #[test]
 fn mu_and_mu_c_match_the_two_evaluation_estimate() {
     for case in &load() {
@@ -214,20 +240,7 @@ fn mu_and_mu_c_match_the_two_evaluation_estimate() {
         let grads: Vec<Array1<f64>> = case.calls.iter().map(|c| gradient_of(&filter, c)).collect();
         let scale = max_abs(case.x0.view());
         let point_tol = OFFSET_OPS * U * scale;
-        let grad = |x: ArrayView1<f64>| -> Array1<f64> {
-            for (p, g) in packed.iter().zip(&grads) {
-                let near = (0..x.len()).all(|i| (x[i] - p[i]).abs() <= point_tol);
-                if near {
-                    return g.clone();
-                }
-            }
-            panic!(
-                "{}: the estimate asked for a point ASE did not evaluate",
-                case.name
-            );
-        };
-        let (mu, mu_c) =
-            estimate_mu_cell(x0.view(), &case.neighbours, &params(case), grad).unwrap();
+        let (mu, mu_c) = own_scales(case);
 
         let split = 3 * case.natoms;
         let g_scale = max_abs(grads[0].view()).max(max_abs(grads[1].view()));
@@ -257,7 +270,8 @@ fn mu_and_mu_c_match_the_two_evaluation_estimate() {
                 case.mu
             );
         } else {
-            assert!(mu < 1.0, "{}: ASE floored mu, rgmin's is {mu}", case.name);
+            assert_eq!(mu, 1.0, "{}: mu floors at 1", case.name);
+            assert_eq!(case.mu, 1.0);
         }
         if case.mu_c > 1.0 {
             let tol = case.mu_c * cond(block(split..split + 9));
@@ -278,14 +292,16 @@ fn mu_and_mu_c_match_the_two_evaluation_estimate() {
     }
 }
 
+/// ASE's matrix, rebuilt from rgmin's own `μ` and `μ_c`.
 fn assemble(case: &Case) -> Exp {
     let x0 = start(case);
+    let (mu, mu_c) = own_scales(case);
     Exp::assemble_cell(
         x0.view(),
         &case.neighbours,
         &params(case),
-        case.mu,
-        case.mu_c,
+        mu,
+        mu_c,
         case.r_nn,
     )
     .unwrap()
@@ -314,8 +330,16 @@ fn the_matrix_has_the_ase_entries_and_a_mu_c_cell_block() {
                 );
             }
         }
+        // The diagonal is the μ_c rgmin estimated. ASE's stored value
+        // agrees to the same rounding bound as the rest of P.
         for k in 3 * case.natoms..dim {
-            assert_eq!(dense[(k, k)], case.mu_c, "{} cell diagonal", case.name);
+            assert!(
+                (dense[(k, k)] - case.mu_c).abs() <= tol,
+                "{} cell diagonal: {} vs {}",
+                case.name,
+                dense[(k, k)],
+                case.mu_c
+            );
         }
     }
 }
