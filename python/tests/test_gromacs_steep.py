@@ -120,3 +120,34 @@ def test_session_shrink_selects_the_refusal_factor() -> None:
     assert _refused_then_accepted(0.5) != _refused_then_accepted(0.2)
     with pytest.raises(ValueError):
         Session("steepest", 1, shrink=0.5)
+
+
+def test_gromacs_steep_session_does_not_install_the_generic_atom_cap() -> None:
+    def walk(max_atom: float | None) -> float:
+        kwargs: dict[str, float] = {"istep": 0.1}
+        if max_atom is not None:
+            kwargs["max_atom"] = max_atom
+        session = Session("gromacs-steep", 1, **kwargs)
+        point = [1.0]
+        for _ in range(5):
+            point, _value, _gnorm = session.step(point, _quadratic)
+        return point[0]
+
+    def recurrence(cap: float | None) -> float:
+        point = 1.0
+        step = 0.1
+        for _ in range(5):
+            move = step if cap is None or step <= cap else cap
+            point -= move
+            step *= 1.2
+        return point
+
+    assert walk(None) == recurrence(None)
+    assert walk(0.0) == recurrence(None)
+    assert walk(0.2) == recurrence(0.2)
+    assert walk(None) != walk(0.2)
+
+    plain = Session("lbfgs", 3)
+    capped = Session("lbfgs", 3, max_atom=0.2)
+    start = [1.0, 0.0, 0.0]
+    assert plain.step(start, _quadratic)[0] == capped.step(start, _quadratic)[0]
