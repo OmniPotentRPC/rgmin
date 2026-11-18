@@ -96,9 +96,12 @@ def _quadratic(point: list[float]) -> tuple[float, list[float]]:
     return 0.5 * float(vector @ vector), vector.tolist()
 
 
-def _refused_then_accepted(shrink: float) -> float:
+def _refused_then_accepted(shrink: float | None = None) -> float:
     """One accept, one refusal, one accept, from x=0.3 with h=0.5."""
-    session = Session("gromacs-steep", 1, istep=0.5, max_atom=0.0, shrink=shrink)
+    kwargs: dict[str, float] = {"istep": 0.5, "max_atom": 0.0}
+    if shrink is not None:
+        kwargs["shrink"] = shrink
+    session = Session("gromacs-steep", 1, **kwargs)
     point = [0.3]
     for _ in range(3):
         point, _value, _gnorm = session.step(point, _quadratic)
@@ -118,8 +121,20 @@ def test_session_shrink_selects_the_refusal_factor() -> None:
     assert _refused_then_accepted(0.5) == expected(0.5)
     assert _refused_then_accepted(0.2) == expected(0.2)
     assert _refused_then_accepted(0.5) != _refused_then_accepted(0.2)
+    # Omitted shrink follows the GROMACS 2025 default (0.5). If the
+    # implementation mutates to 0.2, this equality fails.
+    assert _refused_then_accepted() == expected(0.5)
+    assert _refused_then_accepted() != expected(0.2)
     with pytest.raises(ValueError):
         Session("steepest", 1, shrink=0.5)
+    with pytest.raises(ValueError):
+        Session("steepest", 1, max_constraint_shrinks=2)
+
+
+def test_session_accepts_max_constraint_shrinks_for_gromacs_steep() -> None:
+    session = Session("gromacs-steep", 1, max_constraint_shrinks=0)
+    point, _value, _gnorm = session.step([0.3], _quadratic)
+    assert len(point) == 1
 
 
 def test_gromacs_steep_session_does_not_install_the_generic_atom_cap() -> None:
@@ -151,3 +166,23 @@ def test_gromacs_steep_session_does_not_install_the_generic_atom_cap() -> None:
     capped = Session("lbfgs", 3, max_atom=0.2)
     start = [1.0, 0.0, 0.0]
     assert plain.step(start, _quadratic)[0] == capped.step(start, _quadratic)[0]
+
+
+def test_ase_gromacs_steep_emtol_convergence() -> None:
+    class _FlatEnough(Calculator):
+        implemented_properties = ["energy", "forces"]
+
+        def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
+            super().calculate(atoms, properties, system_changes)
+            assert atoms is not None
+            self.results["energy"] = 0.0
+            forces = np.zeros((len(atoms), 3))
+            forces[0, 0] = -0.4
+            self.results["forces"] = forces
+
+    atoms = Atoms("H", positions=[[0.0, 0.0, 0.0]])
+    atoms.calc = _FlatEnough()
+    emtol = 500.0  # kJ mol^-1 nm^-1
+    opt = GromacsSteep(atoms, logfile=None, emtol=emtol, nsteps=8)
+    assert opt.run() is True
+    assert opt.nsteps == 0
