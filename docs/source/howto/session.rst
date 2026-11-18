@@ -225,3 +225,22 @@ Scripts that want a cold-start solve to ``gtol`` still call
 ``rgmin_minimize`` / ``minimize_method``. Hopping chains that own the
 pair history hold ``Lbfgs`` directly (see
 :doc:`embed in anneal <embed-anneal>`).
+
+Strict convergence mode
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``Control`` now carries a strict-convergence switch:
+
+.. code-block:: rust
+
+   let control = Control::default()
+       .with_gtol(1e-6)
+       .with_require_convergence(true);
+
+With the default ``false``, drivers keep returning ``Ok(Report)`` on
+budget exhaustion or a stalled step exactly as before.
+
+With ``true``, a final report whose stop norm is still above ``gtol``
+returns ``Err(Error::NotConverged(Box<Report>))``. The boxed report
+contains the same terminal point and status, with ``report.converged``
+set from ``report.grad_norm <= gtol``.

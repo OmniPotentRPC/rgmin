@@ -409,6 +409,10 @@ fn brent(
     maxiter: usize,
 ) -> (f64, f64) {
     let cgold = 0.381_966;
+    // Brent's safeguard uses tol1 = tol*|x| + ZEPS. Numerical Recipes
+    // (Brent 1973, section on parabolic interpolation) takes ZEPS as a
+    // tiny machine-scaled positive value to keep tol1 nonzero at x = 0.
+    let zeps_scale = 1.0 / 1024.0;
     let mut a = ax.min(cx);
     let mut b = ax.max(cx);
     let mut x = 0.5 * (a + b);
@@ -421,7 +425,8 @@ fn brent(
     let mut d: f64 = 0.0;
     for _ in 0..maxiter {
         let xm = 0.5 * (a + b);
-        let tol1 = tol * x.abs() + 1e-12;
+        let zeps = f64::EPSILON * zeps_scale * (x.abs() + 1.0);
+        let tol1 = tol * x.abs() + zeps;
         let tol2 = 2.0 * tol1;
         if (x - xm).abs() <= tol2 - 0.5 * (b - a) {
             return (x, fx);
@@ -488,4 +493,28 @@ fn brent(
         }
     }
     (x, fx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::brent;
+
+    #[test]
+    fn brent_resolves_tiny_scale_quadratic() {
+        let target = 5.0e-14;
+        let mut phi = |x: f64| {
+            let d = x - target;
+            d * d
+        };
+        let (x, _f) = brent(&mut phi, 0.0, 1.0e-12, 1.0e-12, 128);
+        assert!((x - target).abs() < 1.0e-13, "x={x:e}");
+    }
+
+    #[test]
+    fn brent_keeps_tol1_positive_at_zero() {
+        let mut phi = |x: f64| x * x;
+        let (x, f) = brent(&mut phi, -1.0, 1.0, 0.0, 64);
+        assert!(x.is_finite() && f.is_finite());
+        assert!(x.abs() <= 1.0e-8, "x={x:e}");
+    }
 }
