@@ -1487,7 +1487,7 @@ impl Solver {
     {
         let set = self.constraint_set();
         let start = self.enter(&set, obj, x)?;
-        let norm = crate::StopNorm::MaxAtom.of(start.grad.view());
+        let norm = self.stationarity_norm(x, &start.grad);
         if let Some(status) = self.control.halt(norm, self.free_len(obj.bounds())) {
             self.remember(x, start.value, &start.raw);
             return Ok(self.finish(start.value, x, &start.grad, norm, status));
@@ -1531,7 +1531,7 @@ impl Solver {
                         *x = trial;
                         let next = Space::at(&set, x.view(), self.project_rigid)?;
                         let (trial_grad, _, _) = next.gradient(&trial_raw)?;
-                        let trial_norm = crate::StopNorm::MaxAtom.of(trial_grad.view());
+                        let trial_norm = self.stationarity_norm(x, &trial_grad);
                         self.remember(x, trial_value, &trial_raw);
                         self.steps += 1;
                         Ok(self.finish(
