@@ -48,6 +48,12 @@ when the input ``Control`` names another norm. Rejected trials count as
 steps. ``Solver::gromacs_step_size`` returns the displacement that the next
 trial will use.
 
+Non-finite callback values or gradients are runtime errors
+(``Error::Oracle`` in Rust, ``RGMIN_INTERNAL_ERROR`` in C with
+``rgmin_last_error`` text). A distance-constraint failure returns
+``Error::Constraint`` in Rust and ``RGMIN_CONSTRAINT_ERROR`` in C, with
+``rgmin_last_constraint_error`` naming the reason.
+
 Session hooks
 ~~~~~~~~~~~~~
 
@@ -60,9 +66,10 @@ step: the old point is kept and ``h`` is multiplied by ``shrink``, the
 same branch GROMACS takes by setting the trial energy to +infinity
 (``minimize.cpp`` lines 3008-3009 and 3104).
 ``GromacsSteepConfig::max_constraint_shrinks`` bounds that run. The
-default, 14, is the number of factors of one half that take the default
-``emstep`` of 0.01 down through the single-precision ``ustep`` floor
-(``minimize.cpp`` line 3143, ``readir.cpp`` line 2384). The next failure
+session derives its default from the actual ``emstep`` and shrink factor:
+the number of shrinks until ``h`` reaches floating-point epsilon
+(``h * shrink^k <= eps``). At the canonical ``emstep = 0.01`` and
+``shrink = 0.5``, that gives 46 in f64 arithmetic. The next failure
 returns the constraint error. Zero restores an error on the first
 failure and does not shrink. A placement that meets the constraints
 restarts the count. The trial energy is tested only after those hooks,
@@ -89,8 +96,9 @@ The Python ``gromacs_mdp_options`` layer converts:
     | ``nsteps`` | -1                                     | no limit; otherwise ``maxiter`` |
     +------------+----------------------------------------+---------------------------------+
 
-The Rust stepper, C ABI, and C++ wrapper do no unit conversion.
+The Rust stepper, C ABI, and C++ wrapper do no unit conversion. C and
+C++ expose both ``shrink`` and ``max_constraint_shrinks`` through
+``rgmin_solver_set_gromacs_steep`` / ``Solver::set_gromacs_steep``.
 ABI minor 48 carries ``RGMIN_GROMACS_STEEP`` and
 ``RGMIN_STOP_MACHINE_PRECISION``. Minor 47 is the level-set constraint
-setters. The shrink factor is not a C symbol: the public C surface is
-unchanged, so the minor stays 48.
+setters.
