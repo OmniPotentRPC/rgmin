@@ -540,7 +540,6 @@ impl ExpState {
 
     /// The state over the extended vector of a [`crate::CellFilter`], at
     /// `positions` of length `3 N + 9`.
-    #[allow(dead_code)]
     pub(crate) fn new_cell(
         positions: ArrayView1<f64>,
         neighbours: &Neighbours,
@@ -577,7 +576,6 @@ impl ExpState {
         self.built_at = None;
     }
 
-    #[allow(dead_code)]
     pub(crate) fn mu_c(&self) -> Option<f64> {
         self.mu_c
     }
@@ -832,7 +830,6 @@ impl Slot {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn mu_c(&self) -> Option<f64> {
         match self {
             Self::Exp(state) => state.mu_c(),

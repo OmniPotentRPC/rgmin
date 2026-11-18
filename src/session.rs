@@ -1,5 +1,6 @@
 //! Persistent solver session. One [`Solver::step`] is one outer iteration.
 
+mod cell;
 mod chart;
 mod constrained;
 pub(crate) mod drive;
@@ -337,6 +338,8 @@ pub struct Solver {
     constraints: Option<Arc<DistanceConstraints>>,
     /// Optional level-set constraint \(g(x) = c\).
     level_set: Option<LevelSetConstraint>,
+    /// Extended `[positions, cell strain]` layout. `None` is the plain layout.
+    cell: Option<cell::CellSession>,
     /// [`Self::run`] skips the coordinate copy on intermediate reports.
     brief: bool,
     /// Optional trace of the eOn fill step.
@@ -528,6 +531,7 @@ impl Solver {
             stop_norm,
             constraints: None,
             level_set: None,
+            cell: None,
             brief: false,
             eon_log: None,
             trust: false,
@@ -629,7 +633,11 @@ impl Solver {
                 params,
             } => {
                 self.require_precon_dim(positions.len())?;
-                Slot::Exp(crate::precon::ExpState::new(positions, neighbours, params)?)
+                Slot::Exp(if self.cell.is_some() {
+                    crate::precon::ExpState::new_cell(positions, neighbours, params)?
+                } else {
+                    crate::precon::ExpState::new(positions, neighbours, params)?
+                })
             }
             PreconSpec::Lindh {
                 positions,
@@ -637,6 +645,7 @@ impl Solver {
                 ghosts,
                 params,
             } => {
+                self.require_no_cell_precon()?;
                 self.require_precon_dim(positions.len())?;
                 Slot::Lindh(crate::precon::LindhState::new(
                     positions, z, ghosts, params,
@@ -647,6 +656,7 @@ impl Solver {
                 terms,
                 params,
             } => {
+                self.require_no_cell_precon()?;
                 self.require_precon_dim(positions.len())?;
                 Slot::Ff(crate::precon::FfState::new(positions, terms, params)?)
             }
@@ -731,7 +741,10 @@ impl Solver {
 
     /// Install a neighbour list whose geometry arrives on the next step.
     #[cfg(feature = "capi")]
-    pub(crate) fn set_exp_deferred(&mut self, state: crate::precon::ExpState) {
+    pub(crate) fn set_exp_deferred(&mut self, mut state: crate::precon::ExpState) {
+        if let Some(session) = &self.cell {
+            state.enable_cell(session.filter.natoms());
+        }
         self.install_slot(Slot::Exp(state));
     }
 
@@ -745,6 +758,16 @@ impl Solver {
     #[cfg(feature = "capi")]
     pub(crate) fn set_ff_deferred(&mut self, state: crate::precon::FfState) {
         self.install_slot(Slot::Ff(state));
+    }
+
+    /// Lindh and FF matrices have no cell block.
+    pub(crate) fn require_no_cell_precon(&self) -> Result<()> {
+        if self.cell.is_some() {
+            return Err(Error::Cell {
+                what: "only the exponential preconditioner has a cell block",
+            });
+        }
+        Ok(())
     }
 
     /// Drop the installed geometry preconditioner.
@@ -1492,6 +1515,9 @@ impl Solver {
     /// Active Eckart mode. Quotient manifolds project even when the
     /// Euclidean flag is off. A bare Euclidean session does not.
     fn removal_mode(&self) -> RigidMode {
+        if self.cell.is_some() {
+            return RigidMode::Off;
+        }
         let quotient = matches!(
             self.manifold,
             ManifoldKind::RigidQuotient | ManifoldKind::MwRigid
