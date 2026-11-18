@@ -32,16 +32,29 @@ Install the choice with one call. L-BFGS stores ~P^{-1}~ as ~H_0~.
 FIRE and nonlinear CG use ~P~ as the metric of the direction.
 
 #+begin_src rust
-use rgmin::{ExpParams, Neighbours, PreconSpec, Solver};
+use rgmin::{ExpParams, ExpPcKind, Neighbours, PreconSpec, Solver};
+
+let params = ExpParams::default()
+    .with_pc(ExpPcKind::BlockIc0)
+    .with_rtol(rgmin::DEFAULT_PRECON_RTOL)
+    .with_warm_start(true)
+    .with_threads(4);
 
 solver.set_precon(PreconSpec::Exp {
     positions: x.view(),
     neighbours: &neigh,
-    params: &ExpParams::default(),
+    params: &params,
 })?;
 #+end_src
 
 ~set_exp~, ~set_lindh~, and ~set_ff~ are the same three arms.
+~Solver::set_threads~ sets a session-wide worker count inherited by
+preconditioners whose own ~threads~ field is ~None~ (~1~ is serial, the
+default). For multi-image band drivers such as NEB (Makri, Ortner, and
+Kermode 2019), ~Exp::assemble_batch~ and ~Exp::solve_batch~ dispatch
+independent image assemblies and PCG solves across the configured
+threads in slice order. ~Exp::stored_nonzeros~ and ~Exp::csr_bytes~
+report the scalar-graph CSR size.
 ~clear_precon~ drops the metric. ~precon_scale~ is the estimated ~μ~,
 or ~None~ until the sine probe has run.
 
