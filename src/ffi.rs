@@ -1774,15 +1774,12 @@ pub unsafe extern "C" fn rgmin_solver_exp_mu(solver: *const rgmin_solver_t) -> f
 /// # Safety
 /// A non-null `solver` must be a live session from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
-#[allow(clippy::manual_unwrap_or)]
 pub unsafe extern "C" fn rgmin_solver_exp_mu_c(solver: *const rgmin_solver_t) -> f64 {
     if solver.is_null() {
         return f64::NAN;
     }
-    match unsafe { (*solver).solver.exp_mu_c() } {
-        Some(mu_c) => mu_c,
-        None => f64::NAN,
-    }
+    // mu_c is positive, so abs is the identity on a held value.
+    unsafe { (*solver).solver.exp_mu_c() }.map_or(f64::NAN, f64::abs)
 }
 
 /// Fix `μ_c` of the installed exponential preconditioner. NaN or a
