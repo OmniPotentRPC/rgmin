@@ -140,9 +140,9 @@ fn cu_vacancy(cells: usize) -> VacancyCell {
     for i in 0..natoms {
         for j in (i + 1)..natoms {
             let mut d2 = 0.0;
-            for k in 0..3 {
-                let mut d = coords[i][k] - coords[j][k];
-                d -= lengths[k] * (d / lengths[k]).round();
+            for ((&pi, &pj), &len) in coords[i].iter().zip(coords[j].iter()).zip(lengths.iter()) {
+                let mut d = pi - pj;
+                d -= len * (d / len).round();
                 d2 += d * d;
             }
             let r = d2.sqrt();
