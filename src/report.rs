@@ -30,6 +30,12 @@ pub enum Status {
     StepTolerance,
     /// The iteration budget was spent above every stop.
     Budget,
+    /// The energy changed by less than [`crate::Control::etol`] allows
+    /// between two accepted steps, the LAMMPS `minimize etol` stop.
+    EnergyTolerance,
+    /// [`crate::Control::max_evals`] objective evaluations were spent above
+    /// every other stop, the LAMMPS `minimize maxeval` stop.
+    EvalBudget,
 }
 
 /// Final point, value, and iteration count.
@@ -60,6 +66,12 @@ pub struct Report {
     pub grad: Option<Array1<f64>>,
     /// Which stop produced this report.
     pub status: Status,
+    /// Objective evaluations the run made: calls to the objective's value,
+    /// gradient or fused value-and-gradient. A one-shot driver counts its
+    /// own call. A session counts every step it has taken, and
+    /// [`crate::Solver::run`] counts the whole run. This is the quantity
+    /// [`crate::Control::max_evals`] limits.
+    pub evals: usize,
 }
 
 impl Report {
@@ -74,6 +86,7 @@ impl Report {
             stop_norm: StopNorm::Two,
             grad: None,
             status: Status::Iterating,
+            evals: 0,
         }
     }
 }
@@ -86,4 +99,5 @@ with_setters!(Report {
     with_stop_norm => stop_norm: val StopNorm,
     with_grad => grad: opt Array1<f64>,
     with_status => status: val Status,
+    with_evals => evals: val usize,
 });

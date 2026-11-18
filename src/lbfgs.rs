@@ -2432,6 +2432,21 @@ impl Lbfgs {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        crate::stop::counted(obj, control, |obj| {
+            self.objective_counted(obj, init, control, linesearch)
+        })
+    }
+
+    fn objective_counted<O>(
+        &mut self,
+        obj: &crate::stop::Counted<'_, O>,
+        init: impl Into<Array1<f64>>,
+        control: &Control,
+        linesearch: LineSearch,
+    ) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
         let mut pos = init.into();
         if pos.len() != Objective::dim(obj) {
             return Err(Error::Dim {
@@ -2443,12 +2458,15 @@ impl Lbfgs {
         let (mut value, mut grad) = obj.value_and_gradient(pos.view());
         crate::step::refuse_non_finite(value, &grad)?;
         let mut istep = control.istep;
+        let mut stops = crate::stop::StopRules::from_start(value);
+        let track = control.etol.is_some() || control.max_evals.is_some();
 
         for step in 0..control.maxiter {
             let gnorm = l2(&grad);
             if let Some(status) = control.halt(gnorm, grad.len()) {
                 return Ok(one_shot_report(value, pos, step, gnorm, status));
             }
+            let before = track.then(|| pos.clone());
             let stall = self.step_objective(
                 obj,
                 &mut pos,
@@ -2467,6 +2485,12 @@ impl Lbfgs {
                     gnorm,
                     crate::report::Status::NoiseFloor,
                 ));
+            }
+            let moved = before.is_none_or(|before| crate::stop::moved(&before, &pos));
+            if let Some(status) =
+                crate::stop::stop_after(&mut stops, control, obj, value, moved, &grad)
+            {
+                return Ok(one_shot_report(value, pos, step + 1, l2(&grad), status));
             }
         }
         let gnorm = l2(&grad);

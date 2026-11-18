@@ -262,6 +262,21 @@ pub enum Error {
         /// What was refused.
         what: &'static str,
     },
+    /// [`crate::Control`] holds a stop no driver can read.
+    #[error("control: {what}")]
+    InvalidControl {
+        /// What was refused.
+        what: &'static str,
+    },
+    /// A method has no accepted-step energy sequence for the stop that was
+    /// asked of it, so it would ignore it.
+    #[error("{method} does not support {setting}")]
+    StopUnsupported {
+        /// The method that cannot read the stop.
+        method: &'static str,
+        /// The [`crate::Control`] field that was set.
+        setting: &'static str,
+    },
     /// A level-set constraint \(g(x)=c\) was configured or applied with
     /// invalid data.
     #[error("level set: {what}")]

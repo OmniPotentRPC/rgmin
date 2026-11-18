@@ -56,6 +56,7 @@ use crate::step::{
     Taken, apply_caps, cap_alpha, cap_displacement_atom, l2, max_atom_displacement,
     nlcg_opening_alpha, qn_istep, scale_displacement_to_atom_cap, take_step_with_options,
 };
+use crate::stop::{Counted, StopRules, moved as point_moved};
 use crate::trust::{
     accept_ratio, burdakov_radius, dogleg_direction, predicted_reduction, reduction_ratio,
     update_radius,
@@ -312,6 +313,11 @@ pub struct Solver {
     gradient_calls: usize,
     /// Analytic or finite-difference Hessian-vector products.
     hvp_calls: usize,
+    /// Objective evaluations of every step, counted at the objective.
+    evals: usize,
+    /// [`Control::etol`] and [`Control::max_evals`], with the energy of the
+    /// last accepted point.
+    stops: StopRules,
     /// Negative-curvature kicks already taken in this solve.
     saddle_kicks: u8,
     /// Whether geometry L-BFGS needs a finite-difference stiffness probe.
@@ -516,6 +522,8 @@ impl Solver {
             lbfgs_plateau: crate::lbfgs_plateau::RepeatedAcceptedStep::new(),
             gradient_calls: 0,
             hvp_calls: 0,
+            evals: 0,
+            stops: StopRules::new(),
             saddle_kicks: 0,
             geometry_lbfgs_stiff: None,
             geometry_step: None,
@@ -1463,6 +1471,7 @@ impl Solver {
             stop_norm: self.stop_norm,
             grad: Some(grad.clone()),
             status,
+            evals: self.evals,
         }
     }
 
@@ -2057,10 +2066,12 @@ impl Solver {
     /// the current curvature: with `R = I - 2 tau tau'` the effective
     /// Hessian is `R H R`, which moves by `O(theta) ||H||` when `tau`
     /// rotates by `theta`. Small rotations between steps keep the memory
-    /// useful; after a large one call [`Self::forget`].
+    /// useful; after a large one call [`Self::forget`]. The energy kept
+    /// for [`Control::etol`] belongs to the old oracle and is dropped.
     pub fn forget_evaluation(&mut self) {
         self.geometry_lbfgs_stiff = None;
         self.last_pos = None;
+        self.stops.reset();
         if let Overlay::QuickMin(_, session) = &mut self.overlay {
             session.forget_last();
         }
@@ -2360,12 +2371,116 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        self.begin_stops()?;
+        let counted = self.counting(obj, x);
+        let outcome = self.step_counted(&counted, x);
+        self.evals += counted.count();
+        let (mut report, moved) = outcome?;
+        self.judge_stops(&mut report, moved, counted.start_value());
+        Ok(report)
+    }
+
+    fn step_counted<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<(Report, bool)>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
         self.retract_level_set_start(obj, x)?;
         let before = x.clone();
         let mut report = self.step_once(obj, x)?;
         self.finish_level_set(obj, x, &mut report)?;
         self.note_repeated_lbfgs_step(&before, x, &mut report);
-        Ok(report)
+        Ok((report, point_moved(&before, x)))
+    }
+
+    /// Refuse a stop this session's method cannot read.
+    fn begin_stops(&self) -> Result<()> {
+        self.control.validate()?;
+        if matches!(self.inner, Inner::Pso { .. }) {
+            crate::stop::refuse_etol(&self.control, "particle swarm")?;
+        }
+        Ok(())
+    }
+
+    /// `obj` behind the evaluation counter. With `etol` set and no energy
+    /// recorded yet, it also keeps the value the step finds at `x`.
+    fn counting<'a, O>(&self, obj: &'a O, x: &Array1<f64>) -> Counted<'a, O>
+    where
+        O: ?Sized,
+    {
+        if self.control.etol.is_some() && self.stops.wants_start() {
+            Counted::watching(obj, x)
+        } else {
+            Counted::new(obj)
+        }
+    }
+
+    /// Whether the energy test may read this step. A FIRE integrator that
+    /// reset its velocity within its delay has not settled, as the LAMMPS
+    /// `delaystep` rule for the damped dynamics minimizers.
+    fn energy_settled(&self) -> bool {
+        match &self.inner {
+            Inner::Fire(state) => state.n_pos > state.n_min,
+            _ => true,
+        }
+    }
+
+    /// Stamp the evaluation count on `report` and apply `etol` and
+    /// `max_evals` to a step that is still iterating.
+    fn judge_stops(&mut self, report: &mut Report, moved: bool, start_value: Option<f64>) {
+        report.evals = self.evals;
+        self.stops.seed(start_value);
+        let iterating = report.status == Status::Iterating;
+        let settled = self.energy_settled();
+        let stop = self.stops.after(
+            &self.control,
+            report.value,
+            moved,
+            self.evals,
+            settled,
+            !iterating,
+        );
+        if let (true, Some(status)) = (iterating, stop) {
+            report.status = status;
+        }
+    }
+
+    /// Objective evaluations of every step this session has taken.
+    pub fn evals(&self) -> usize {
+        self.evals
+    }
+
+    /// Stop when the energy changes by less than `etol` between accepted
+    /// steps, the LAMMPS `minimize etol` test of [`Control::etol`]. `None`
+    /// turns it off. A negative or non-finite `etol` is
+    /// [`Error::InvalidControl`]. Particle swarm has no energy sequence and
+    /// answers [`Error::StopUnsupported`]. Either refusal leaves the
+    /// session as it was.
+    pub fn set_etol(&mut self, etol: Option<f64>) -> Result<()> {
+        let control = Control {
+            etol,
+            ..self.control.clone()
+        };
+        control.validate()?;
+        if matches!(self.inner, Inner::Pso { .. }) {
+            crate::stop::refuse_etol(&control, "particle swarm")?;
+        }
+        self.control.etol = etol;
+        Ok(())
+    }
+
+    /// Stop once `max_evals` objective evaluations have been made, the
+    /// LAMMPS `minimize maxeval` test of [`Control::max_evals`]. `None`
+    /// turns it off. Zero is [`Error::InvalidControl`] and leaves the
+    /// session as it was. The count is [`Self::evals`], over the life of the
+    /// session.
+    pub fn set_max_evals(&mut self, max_evals: Option<usize>) -> Result<()> {
+        let control = Control {
+            max_evals,
+            ..self.control.clone()
+        };
+        control.validate()?;
+        self.control.max_evals = max_evals;
+        Ok(())
     }
 
     /// One iteration, without the unlimited-budget plateau check.
@@ -2420,7 +2535,21 @@ impl Solver {
     where
         O: HessianObjective + ?Sized,
     {
+        self.begin_stops()?;
+        let counted = self.counting(obj, x);
+        let outcome = self.step_hess_counted(&counted, x);
+        self.evals += counted.count();
+        let (mut report, moved) = outcome?;
+        self.judge_stops(&mut report, moved, counted.start_value());
+        Ok(report)
+    }
+
+    fn step_hess_counted<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<(Report, bool)>
+    where
+        O: HessianObjective + ?Sized,
+    {
         self.retract_level_set_start(obj, x)?;
+        let before = x.clone();
         let mut report = if matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. })
             && self.level_set.is_some()
         {
@@ -2467,7 +2596,7 @@ impl Solver {
             }
         };
         self.finish_level_set(obj, x, &mut report)?;
-        Ok(report)
+        Ok((report, point_moved(&before, x)))
     }
 
     /// One Steihaug-Toint iteration. `obj` supplies analytic products;
@@ -2493,7 +2622,21 @@ impl Solver {
         if !matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. }) {
             return Err(Error::NeedHvp);
         }
+        self.begin_stops()?;
+        let counted = self.counting(obj, x);
+        let outcome = self.step_hvp_counted(&counted, x);
+        self.evals += counted.count();
+        let (mut report, moved) = outcome?;
+        self.judge_stops(&mut report, moved, counted.start_value());
+        Ok(report)
+    }
+
+    fn step_hvp_counted<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<(Report, bool)>
+    where
+        O: HessianVector + ?Sized,
+    {
         self.retract_level_set_start(obj, x)?;
+        let before = x.clone();
         let action = |xv: ArrayView1<f64>, v: ArrayView1<f64>| obj.hessian_vector(xv, v);
         let mut report = if self.constraints.is_some() {
             self.constrained_step(x, |s, x| s.step_constrained_newton_cg(obj, x, &action))?
@@ -2501,7 +2644,7 @@ impl Solver {
             self.step_newton_cg(obj, x, &action)?
         };
         self.finish_level_set(obj, x, &mut report)?;
-        Ok(report)
+        Ok((report, point_moved(&before, x)))
     }
 
     fn step_newton_cg<O, A>(&mut self, obj: &O, x: &mut Array1<f64>, action: &A) -> Result<Report>
@@ -5143,6 +5286,7 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        self.begin_stops()?;
         if x.len() != self.dim || self.dim != Objective::dim(obj) {
             return Err(Error::Dim {
                 got: x.len(),
@@ -5156,6 +5300,7 @@ impl Solver {
         } else {
             *x = obj.bounds().clip(x.view());
             self.gradient_calls += 1;
+            self.evals += 1;
             obj.value_and_gradient(x.view())
         };
         let grad = self.horizontal_grad(x, &raw_grad);
@@ -5793,6 +5938,8 @@ mod tests {
                 maxmove: Some(0.01),
                 ftol_rel: None,
                 noise_floor: None,
+                etol: None,
+                max_evals: None,
                 stop_norm: StopNorm::Two,
             },
             2,
@@ -5870,6 +6017,8 @@ mod tests {
                     maxmove: Some(0.05),
                     ftol_rel: None,
                     noise_floor: None,
+                    etol: None,
+                    max_evals: None,
                     stop_norm: StopNorm::Two,
                 },
                 2,
@@ -6031,6 +6180,8 @@ mod retained_neb_guard_tests {
                 maxmove: None,
                 ftol_rel: None,
                 noise_floor: None,
+                etol: None,
+                max_evals: None,
                 stop_norm: StopNorm::Two,
             },
             3,
@@ -6069,6 +6220,8 @@ mod retained_neb_guard_tests {
                 maxmove: None,
                 ftol_rel: None,
                 noise_floor: None,
+                etol: None,
+                max_evals: None,
                 stop_norm: StopNorm::Two,
             },
             3,
@@ -6174,6 +6327,8 @@ mod retained_neb_guard_tests {
                 maxmove: None,
                 ftol_rel: None,
                 noise_floor: None,
+                etol: None,
+                max_evals: None,
                 stop_norm: StopNorm::Two,
             },
             n,

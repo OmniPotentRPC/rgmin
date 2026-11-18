@@ -8,8 +8,9 @@ use rand::rngs::StdRng;
 
 use crate::control::Control;
 use crate::error::{Error, Result};
-use crate::report::Report;
+use crate::report::{Report, Status};
 use crate::step::{l2, one_shot_report};
+use crate::stop::{Counted, counted};
 
 /// Swarm RNG seed. Tests and the public API share this value.
 pub(crate) const RNG_SEED: u64 = 1;
@@ -35,6 +36,25 @@ pub(crate) struct Particle {
 /// <https://doi.org/10.1109/ICNN.1995.488968>.
 pub fn minimize_pso<O>(
     obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    n_particles: usize,
+    inertia: f64,
+    c1: f64,
+    c2: f64,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    control.validate()?;
+    crate::stop::refuse_etol(control, "particle swarm")?;
+    counted(obj, control, |obj| {
+        pso_counted(obj, init, control, n_particles, inertia, c1, c2)
+    })
+}
+
+fn pso_counted<O>(
+    obj: &Counted<'_, O>,
     init: impl Into<Array1<f64>>,
     control: &Control,
     n_particles: usize,
@@ -86,6 +106,7 @@ where
     let mut prev_gbest_value = f64::INFINITY;
     let mut iteration = 0;
     let mut stagnant_iterations = 0;
+    let mut spent = false;
     while iteration < control.maxiter {
         update_swarm(
             obj,
@@ -107,6 +128,10 @@ where
         }
         prev_gbest_value = gbest_value;
         iteration += 1;
+        if control.max_evals.is_some_and(|cap| obj.count() >= cap) {
+            spent = true;
+            break;
+        }
     }
 
     let (value, grad) = obj.value_and_gradient(gbest_position.view());
@@ -116,7 +141,10 @@ where
         gbest_position,
         iteration,
         grad_norm,
-        control.finish_status(grad_norm, grad.len(), true),
+        match control.finish_status(grad_norm, grad.len(), true) {
+            Status::Budget if spent => Status::EvalBudget,
+            other => other,
+        },
     ))
 }
 

@@ -125,6 +125,7 @@ mod sphere_lbfgs;
 mod step;
 /// One outer iteration. rgsaddle calls this; the host owns the loop.
 pub mod stepper;
+mod stop;
 /// Dense dogleg and Sella trust-region steps.
 pub mod trust;
 /// Training-set memory and cap selection.

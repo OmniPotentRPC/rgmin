@@ -128,6 +128,36 @@ pub struct Control {
     pub ftol_rel: Option<f64>,
     /// Gradient noise floor. `None` leaves the test off.
     pub noise_floor: Option<NoiseFloor>,
+    /// Stop when the energy stops changing between accepted steps.
+    ///
+    /// The LAMMPS `minimize etol` test (`src/min_cg.cpp`, `MinCG::iterate`),
+    /// `|E_k - E_{k-1}| < etol * 0.5 * (|E_k| + |E_{k-1}| + eps_E)`, with
+    /// `eps_E = sqrt(f64::EPSILON)` where LAMMPS writes `EPS_ENERGY = 1.0e-8`.
+    /// `E_k` and `E_{k-1}` are the values at consecutive accepted points,
+    /// so an iteration that left the point where it was is no test. SciPy
+    /// `L-BFGS-B` `ftol` divides by `max(|f_k|, |f_{k+1}|, 1)`; the two agree
+    /// for energies of magnitude 1 or more that change by little, and differ
+    /// below 1, where LAMMPS divides by the energy and SciPy by 1. A
+    /// gradient stop at the same point is reported instead, and the
+    /// evaluation budget [`Self::max_evals`] is read first.
+    /// [`crate::Status::EnergyTolerance`] is this stop.
+    ///
+    /// Must be finite and at least zero. Zero never stops, as in LAMMPS.
+    /// `None`, the default, leaves the test off. A method with no energy
+    /// sequence (particle swarm) refuses it with
+    /// [`crate::Error::StopUnsupported`].
+    pub etol: Option<f64>,
+    /// Stop after this many objective evaluations.
+    ///
+    /// One evaluation is one call to the objective's value, gradient or
+    /// fused value-and-gradient, a line-search trial and a finite-difference
+    /// probe included. A Hessian or a Hessian-vector product is not one.
+    /// The count is read when an iteration finishes, as LAMMPS reads
+    /// `maxeval`, so the last iteration may overshoot by the evaluations
+    /// one iteration costs. [`crate::Report::evals`] holds the count.
+    /// [`crate::Status::EvalBudget`] is this stop. It must be at least 1.
+    /// `None`, the default, leaves the budget off.
+    pub max_evals: Option<usize>,
 }
 
 with_setters!(Control {
@@ -137,6 +167,8 @@ with_setters!(Control {
     with_maxmove => maxmove: opt f64,
     with_stop_norm => stop_norm: val StopNorm,
     with_ftol_rel => ftol_rel: opt f64,
+    with_etol => etol: opt f64,
+    with_max_evals => max_evals: opt usize,
 });
 
 impl Default for Control {
@@ -149,6 +181,8 @@ impl Default for Control {
             stop_norm: StopNorm::Two,
             ftol_rel: None,
             noise_floor: None,
+            etol: None,
+            max_evals: None,
         }
     }
 }
@@ -268,6 +302,23 @@ impl Control {
             crate::report::Status::Iterating if exhausted => crate::report::Status::Budget,
             other => other,
         }
+    }
+
+    /// Refuse an [`Self::etol`] that is negative or not finite and a
+    /// [`Self::max_evals`] of zero, with [`crate::Error::InvalidControl`].
+    ///
+    /// Every driver and session step calls this before it evaluates the
+    /// objective.
+    pub fn validate(&self) -> crate::error::Result<()> {
+        crate::stop::validate(self)
+    }
+
+    /// Whether `|current - previous| < etol * 0.5 * (|current| + |previous| + eps_E)`
+    /// for the [`Self::etol`] set here, the test a driver applies between
+    /// accepted steps. `false` when `etol` is `None`.
+    pub fn energy_converged(&self, previous: f64, current: f64) -> bool {
+        self.etol
+            .is_some_and(|etol| crate::stop::energy_converged(etol, previous, current))
     }
 
     /// Absolute slack an energy test grants at reference `ref_e`:

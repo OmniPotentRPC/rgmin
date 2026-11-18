@@ -553,6 +553,8 @@ mod tests {
                 stop_norm: crate::StopNorm::Two,
                 ftol_rel: None,
                 noise_floor: None,
+                etol: None,
+                max_evals: None,
             },
             1,
         );
