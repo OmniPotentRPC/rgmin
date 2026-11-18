@@ -255,3 +255,62 @@ fn clearing_the_filter_returns_the_plain_layout() {
     assert!(solver.cell_filter().is_none());
     assert_eq!(solver.exp_mu_c(), None);
 }
+
+#[test]
+fn mu_c_is_fixed_and_released_after_the_preconditioner_is_installed() {
+    let c = crystal();
+    let filter = CellFilter::new(CellFilterConfig::default(), c.orig, c.natoms).unwrap();
+    let mut solver = session(LbfgsStep::default(), filter.dim(), 3);
+    assert!(matches!(
+        solver.set_exp_mu_c(Some(2.0)),
+        Err(Error::Cell { .. })
+    ));
+    solver.set_cell_filter(filter.clone()).unwrap();
+    assert!(matches!(
+        solver.set_exp_mu_c(Some(2.0)),
+        Err(Error::Cell { .. })
+    ));
+    let x = filter.pack(c.positions.view(), &c.cell).unwrap();
+    let nb = neighbours(c.positions.view(), &c.cell, R_CUT);
+    let params = ExpParams::default().with_r_cut(R_CUT);
+    solver
+        .set_precon(PreconSpec::Exp {
+            positions: x.view(),
+            neighbours: &nb,
+            params: &params,
+        })
+        .unwrap();
+    assert!(matches!(
+        solver.set_exp_mu_c(Some(-1.0)),
+        Err(Error::Cell { .. })
+    ));
+    solver.set_exp_mu_c(Some(2.5)).unwrap();
+    assert_eq!(solver.exp_mu_c(), Some(2.5));
+    let mut positions = c.positions.clone();
+    let mut cell = c.cell;
+    let eval = |p: ArrayView1<f64>, lattice: &Cell| evaluate(p, lattice);
+    solver.step_cell(&eval, &mut positions, &mut cell).unwrap();
+    assert_eq!(solver.exp_mu_c(), Some(2.5));
+    solver.set_exp_mu_c(None).unwrap();
+    assert_eq!(solver.exp_mu_c(), None);
+    solver.step_cell(&eval, &mut positions, &mut cell).unwrap();
+    assert!(solver.exp_mu_c().unwrap() >= 1.0);
+}
+
+#[test]
+fn lindh_and_ff_have_no_cell_block() {
+    let c = crystal();
+    let filter = CellFilter::new(CellFilterConfig::default(), c.orig, c.natoms).unwrap();
+    let mut solver = session(LbfgsStep::default(), filter.dim(), 1);
+    solver.set_cell_filter(filter.clone()).unwrap();
+    let x = filter.pack(c.positions.view(), &c.cell).unwrap();
+    let z = vec![29; c.natoms];
+    let params = rgmin::LindhParams::default();
+    let result = solver.set_precon(PreconSpec::Lindh {
+        positions: x.view(),
+        z: &z,
+        ghosts: &[],
+        params: &params,
+    });
+    assert!(matches!(result, Err(Error::Cell { .. })));
+}

@@ -1085,12 +1085,16 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
-/// ABI minor 49 adds the stop-status setters, the floor, and the
-/// `*_opts` one-shots. Minor 48 adds
+/// ABI minor 50 adds the variable-cell layout: `rgmin_cell_t`,
+/// `rgmin_cell_default`, `rgmin_solver_set_cell_filter`,
+/// `rgmin_solver_clear_cell_filter`, `rgmin_solver_step_cell`,
+/// `rgmin_solver_exp_mu_c` and `rgmin_solver_set_exp_mu_c`. Minor 49
+/// adds the stop-status setters, the floor, and the `*_opts`
+/// one-shots. Minor 48 adds
 /// `rgmin_solver_set_fire_cap_two_step_overshoot`. Minor 47 adds
-/// `rgmin_solver_set_level_set` and
-/// `rgmin_solver_clear_level_set`. Minor 46 adds `rgmin_control_default`
-/// and the other struct initializers. Minor 45 is
+/// `rgmin_solver_set_level_set` and `rgmin_solver_clear_level_set`.
+/// Minor 46 adds `rgmin_control_default` and the other struct
+/// initializers. Minor 45 is
 /// `rgmin_solver_set_lbfgs_trust` and minor 44 is
 /// `rgmin_solver_set_power`. Minor 43 is `rgmin_lbfgs_pairs_push_rho`,
 /// minor 42 is `rgmin_lowest_eigenpairs_ex` and minor 39 is
@@ -1100,7 +1104,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 49);
+    assert_eq!(stamp.abi_minor, 50);
     assert_eq!(stamp.layout_revision, 5);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }

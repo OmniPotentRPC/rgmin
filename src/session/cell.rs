@@ -12,6 +12,7 @@ use super::Solver;
 use crate::cell::{Cell, CellEvaluation, CellFilter};
 use crate::error::{Error, Result};
 use crate::manifold::ManifoldKind;
+use crate::precon::Slot;
 use crate::report::Report;
 
 /// The filter and the iterate the session keeps between steps.
@@ -102,6 +103,38 @@ impl Solver {
     #[must_use]
     pub fn exp_mu_c(&self) -> Option<f64> {
         self.precon.as_ref().and_then(crate::precon::Slot::mu_c)
+    }
+
+    /// Fix the scale `μ_c` of the preconditioner's cell block, or `None`
+    /// to estimate it with `μ` on the next step.
+    ///
+    /// # Errors
+    /// [`Error::Cell`] without a cell filter or an exponential
+    /// preconditioner, and for a `μ_c` that is not positive and finite.
+    pub fn set_exp_mu_c(&mut self, mu_c: Option<f64>) -> Result<()> {
+        if self.cell.is_none() {
+            return Err(Error::Cell {
+                what: "mu_c belongs to the cell layout",
+            });
+        }
+        if mu_c.is_some_and(|v| !(v.is_finite() && v > 0.0)) {
+            return Err(Error::Cell {
+                what: "mu_c is not positive",
+            });
+        }
+        match self.precon.take() {
+            Some(Slot::Exp(mut state)) => {
+                state.set_mu_c(mu_c);
+                self.install_slot(Slot::Exp(state));
+                Ok(())
+            }
+            other => {
+                self.precon = other;
+                Err(Error::Cell {
+                    what: "no exponential preconditioner is installed",
+                })
+            }
+        }
     }
 
     /// One outer iteration on Cartesian `positions` and `cell`, both

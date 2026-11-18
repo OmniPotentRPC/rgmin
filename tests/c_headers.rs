@@ -8,11 +8,14 @@ use std::mem::{offset_of, size_of, size_of_val};
 use std::ptr::null;
 
 use rgmin::ffi::{
-    RGMIN_PRECON_EXP, rgmin_conjugacy_t, rgmin_control_t, rgmin_eigen_options_t,
+    RGMIN_PRECON_EXP, rgmin_cell_t, rgmin_conjugacy_t, rgmin_control_t, rgmin_eigen_options_t,
     rgmin_eigen_params_t, rgmin_exp_t, rgmin_precon_t, rgmin_scg_options_t, rgmin_scg_params_t,
     rgmin_scg_step_tolerance_t,
 };
-use rgmin::{Control, EigenParams, ExpParams, NoiseFloor, ScgOptions, ScgParams, ScgStepTolerance};
+use rgmin::{
+    CellFilterConfig, Control, EigenParams, ExpParams, NoiseFloor, ScgOptions, ScgParams,
+    ScgStepTolerance,
+};
 
 #[test]
 fn public_c_header_compiles_and_checks_the_abi() {
@@ -71,6 +74,12 @@ impl<const N: usize> Words for [f64; N] {
     }
 }
 
+impl<const N: usize> Words for [i32; N] {
+    fn words(&self) -> Vec<u64> {
+        self.iter().map(|v| u64::from(*v as u32)).collect()
+    }
+}
+
 /// `NAME:SIZE` for the record, then `NAME:OFFSET:SIZE:BITS` for each field
 /// element. The struct literal names every field, so a field added to a
 /// record does not compile until it has a default here.
@@ -101,6 +110,11 @@ fn c_initializers_hold_the_rust_defaults() {
     let control = Control::default();
     let exp = ExpParams::default();
     let lengths = exp.lengths.unwrap_or([0.0; 3]);
+    let cell = CellFilterConfig::default();
+    let mut cell_mask = [0; 9];
+    for (dst, src) in cell_mask.iter_mut().zip(cell.mask.iter().flatten()) {
+        *dst = i32::from(*src);
+    }
     let scg = ScgParams::default();
     let eigen = EigenParams::default();
     let mut args = record!(rgmin_control_t {
@@ -122,6 +136,13 @@ fn c_initializers_hold_the_rust_defaults() {
         length_y: lengths[1],
         length_z: lengths[2],
         recalc_mu: i32::from(exp.recalc_mu),
+    }));
+    args.extend(record!(rgmin_cell_t {
+        exp_cell_factor: cell.exp_cell_factor.unwrap_or(f64::NAN),
+        pressure: cell.pressure,
+        mask: cell_mask,
+        hydrostatic: i32::from(cell.hydrostatic),
+        constant_volume: i32::from(cell.constant_volume),
     }));
     args.extend(record!(rgmin_scg_params_t {
         sigma0: scg.sigma0,

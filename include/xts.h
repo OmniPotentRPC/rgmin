@@ -227,6 +227,14 @@ typedef rgmin_h0_fn xts_h0_fn;
 #define xts_solver_clear_distance_constraints rgmin_solver_clear_distance_constraints
 #define xts_solver_set_level_set rgmin_solver_set_level_set
 #define xts_solver_clear_level_set rgmin_solver_clear_level_set
+typedef rgmin_cell_t xts_cell_t;
+typedef rgmin_cell_eval_fn xts_cell_eval_fn;
+#define xts_cell_default rgmin_cell_default
+#define xts_solver_set_cell_filter rgmin_solver_set_cell_filter
+#define xts_solver_clear_cell_filter rgmin_solver_clear_cell_filter
+#define xts_solver_step_cell rgmin_solver_step_cell
+#define xts_solver_exp_mu_c rgmin_solver_exp_mu_c
+#define xts_solver_set_exp_mu_c rgmin_solver_set_exp_mu_c
 
 #define XTS_CONSTRAINT_NONE RGMIN_CONSTRAINT_NONE
 #define XTS_CONSTRAINT_MALFORMED RGMIN_CONSTRAINT_MALFORMED

@@ -65,9 +65,13 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 49 and ``layout_revision`` 5.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 50 and ``layout_revision`` 5.
     Minor 49 adds a typed stop on the report, the opt-in unmet stop,
     and the backward-error polish. ``rgmin_control_t`` is unchanged.
+    Minor 50 adds the variable-cell layout (``rgmin_cell_t``,
+    ``rgmin_cell_default``, ``rgmin_solver_set_cell_filter``,
+    ``rgmin_solver_clear_cell_filter``, ``rgmin_solver_step_cell``,
+    ``rgmin_solver_exp_mu_c`` and ``rgmin_solver_set_exp_mu_c``).
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``
