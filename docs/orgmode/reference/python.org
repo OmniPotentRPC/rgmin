@@ -20,6 +20,8 @@ iteration. =step_hess(f_and_grad, hessian, x)= is the same for Newton,
 RFO, and dogleg.
 =minimize(f_and_grad, x0, method="lbfgs", **options)= returns
 =(report, x)=. =x0= must already be a contiguous float64 vector.
+An =lbfgs= run that spends its budget with =x= unmoved stops on
+=LINE_SEARCH=, as the C =rgmin_minimize= does, not on =BUDGET=.
 =error_on_unmet= and =backward_polish= are flags and default to
 off. =error_on_unmet= raises =RuntimeError= when the run stops on
 =BUDGET=, =LINE_SEARCH=, or =POLISH_UNMET=. =backward_polish= is

@@ -191,6 +191,21 @@ impl Report {
         self
     }
 
+    /// Name a spent budget in which the iterate never moved.
+    ///
+    /// [`StopReason::MaxIter`] becomes [`StopReason::LineSearchFailed`]
+    /// when `moved` is false. Every other stop is returned as it is.
+    /// One-shot L-BFGS and the session drivers apply the same rule, so a
+    /// run reports one stop whichever front end drives it.
+    #[must_use]
+    pub(crate) fn with_budget_moved(self, moved: bool) -> Self {
+        if !moved && self.stop_reason() == StopReason::MaxIter {
+            self.with_stop_reason(StopReason::LineSearchFailed)
+        } else {
+            self
+        }
+    }
+
     /// Replace [`Self::status`] and drop a finer [`Self::stop_reason`] override.
     #[must_use]
     pub fn with_status(mut self, status: Status) -> Self {

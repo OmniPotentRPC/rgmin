@@ -477,7 +477,44 @@ int maxmove_off() {
     return 0;
 }
 
+rgmin_status_t uphill_eval(void* /*user*/, DLManagedTensorVersioned const* x, double* value) {
+    double const v = data(x)[0];
+    *value = 0.5 * v * v;
+    return RGMIN_SUCCESS;
+}
+
+rgmin_status_t uphill_grad(void* /*user*/, DLManagedTensorVersioned const* x,
+                           DLManagedTensorVersioned* g) {
+    data(g)[0] = -data(x)[0];
+    return RGMIN_SUCCESS;
+}
+
+// The gradient points uphill, so no trial is accepted. The C one-shot and
+// the C++ wrapper over it name that run LINE_SEARCH, as the Python
+// minimize and the Rust drivers do.
+int no_move_stop() {
+    std::vector<double> x{1.0};
+    DLManagedTensorVersioned* t = rgmin::borrow_cpu_f64(x.data(), 1);
+    if (t == nullptr) {
+        return 30;
+    }
+    rgmin::Control ctrl;
+    ctrl.maxiter = 3;
+    ctrl.gtol = 1e-8;
+    rgmin::Report report =
+        rgmin::minimize_fn(uphill_eval, uphill_grad, nullptr, t, ctrl, rgmin::Method::Lbfgs);
+    rgmin_tensor_free(t);
+    if (report.stop != RGMIN_STOP_LINE_SEARCH || x[0] != 1.0) {
+        std::fprintf(stderr, "no-move stop %d x=%g\n", static_cast<int>(report.stop), x[0]);
+        return 31;
+    }
+    std::printf("no-move stop ok\n");
+    return 0;
+}
+
 int main() {
+    int still = no_move_stop();
+    if (still != 0) return still;
     int off = maxmove_off();
     if (off != 0) return off;
     int block = eigen_block();
