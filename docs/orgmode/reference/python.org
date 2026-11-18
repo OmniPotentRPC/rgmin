@@ -29,6 +29,8 @@ gradient norm is not below =gtol=. =error_on_unmet= raises
 =POLISH_UNMET=. =backward_polish= is stored on the session. This step
 loop does not form a Hessian, so the polish itself is the C
 =rgmin_minimize_hess_opts= and =rgmin_minimize_hvp_opts= entries.
+An =lbfgs= run that spends its budget with =x= unmoved stops on
+=LINE_SEARCH=, as the C =rgmin_minimize= does, not on =BUDGET=.
 
 =__version__= is the version string of the extension.
 

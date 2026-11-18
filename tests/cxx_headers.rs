@@ -24,6 +24,10 @@ fn cxx_headers_compile_link_and_set_box() {
         "cxx smoke did not report retained curvature: {stdout}"
     );
     assert!(
+        stdout.contains("no-move stop ok"),
+        "cxx smoke did not name the no-move run: {stdout}"
+    );
+    assert!(
         stdout.contains("manifold ok"),
         "cxx smoke did not run the manifold fit: {stdout}"
     );
