@@ -91,6 +91,7 @@ That installs the 0.6 release on Rust 1.88 or newer.
    howto/fire
    howto/strong-scaling
    howto/constraints
+   howto/constrained-dynamics
    howto/noise
    howto/manifolds
    howto/irc
@@ -126,6 +127,7 @@ That installs the 0.6 release on Rust 1.88 or newer.
    explanation/simd
    explanation/precon
    explanation/product-manifold
+   explanation/constrained-dynamics
 
 .. toctree::
    :maxdepth: 2
@@ -134,6 +136,7 @@ That installs the 0.6 release on Rust 1.88 or newer.
    reference/architecture
    reference/api
    reference/constraints
+   reference/constrained-dynamics
    reference/python
    reference/lammps-min-style
    reference/gromacs-steep

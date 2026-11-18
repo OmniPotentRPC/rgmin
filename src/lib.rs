@@ -44,6 +44,8 @@ mod compact_tr;
 pub mod con_checkpoint;
 mod control;
 mod diis;
+/// Constrained BAOAB and RATTLE on an embedded manifold.
+pub mod dynamics;
 mod eon_cg;
 mod error;
 /// C ABI, gated behind the `capi` feature.
@@ -140,6 +142,9 @@ pub use adam::minimize_adam;
 pub use con_checkpoint::{read_checkpoint, write_checkpoint};
 pub use control::{Control, NoiseFloor, StopNorm};
 pub use dlaf_kind::DlaFutureParams;
+pub use dynamics::{
+    DynamicsError, DynamicsReport, LangevinConfig, NveConfig, PhasePoint, PlanarWall, baoab, rattle,
+};
 pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};
 pub use elpa_kind::{ElpaParams, ElpaSpectrum, ElpaStage, elpa_config, elpa_spectrum};
 pub use eon_cg::{EonCg, EonCgReport, minimize_eon_cg};

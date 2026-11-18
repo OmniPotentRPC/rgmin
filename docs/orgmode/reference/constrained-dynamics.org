@@ -1,0 +1,63 @@
+#+TITLE: Constrained dynamics
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Constrained dynamics
+
+~baoab~ and ~rattle~ in ~rgmin::dynamics~ integrate on any type that implements ~Manifold~.
+The force callback returns the ambient force and the potential.
+~kinetic_scale~ converts \(\tfrac12 v^\top M v\) into the unit of the potential, so a molecular engine can pass the amu·Å²/ps² per eV factor and a unitless toy can leave it at one.
+@@rst::doc:`../explanation/constrained-dynamics`@@ derives the step.
+
+** Types
+
+| Type | Role |
+|---+---|
+| ~PhasePoint~ | ambient position and velocity |
+| ~LangevinConfig~ | \(kT\), friction, time step, seed, kinetic scale |
+| ~NveConfig~ | time step and kinetic scale |
+| ~PlanarWall~ | one specular half-space, outward normal |
+| ~DynamicsReport~ | potential, tangent kinetic energy, multipliers, wall hits, degrees of freedom |
+| ~MassMetric~ | nonnegative masses, one per coordinate, not all zero |
+| ~AffineHyperplane~ | the flat constraint \(n^\top(x-p)=0\) |
+| ~ConstraintReaction~ | \(\lambda\) and the reaction \(N\lambda\) |
+
+Every config and the phase point is ~#[non_exhaustive]~, with ~Default~ and a ~with_*~ setter per field.
+~MassMetric::per_atom~ repeats each atom mass across three coordinates.
+~MassMetric::uniform~ is one mass on every coordinate.
+
+** Calls
+
+#+begin_src rust
+pub fn baoab<M, E, F>(
+    manifold: &M,
+    metric: &MassMetric,
+    point: &mut PhasePoint,
+    config: &LangevinConfig,
+    walls: &[PlanarWall],
+    steps: usize,
+    force: F,
+) -> Result<DynamicsReport, DynamicsError<E>>
+#+end_src
+
+~rattle~ has the same shape with ~NveConfig~ and no walls.
+Zero steps returns the default report and does not move the point.
+A positive step count restores a flat point and projects the velocity before the first kick.
+~DynamicsError::Geometry~ is a manifold or mass-metric refusal.
+~DynamicsError::Force~ is the callback's error.
+
+** Flat hyperplane
+
+~AffineHyperplane~ stores a unit Euclidean normal.
+Its drift is straight, its retraction is the Euclidean projector, and ~snap_mass~ is the inverse-mass restoration against the stored point.
+~signed_distance~ is \(n^\top(x-p)\).
+~restore_euclidean~ is the orthogonal foot, which is the equal-mass case of the restoration.
+
+** Normals and the second-order step
+
+~Manifold::euclidean_normals~ returns an orthonormal Euclidean basis of the normal space, or ~None~ to build one from the projector.
+The sphere publishes its radial normal.
+A product publishes the stacked factor normals when every factor has them.
+~Manifold::retract_second_order~ uses the exponential when the manifold has one, and ~Manifold::transport_second_order~ uses parallel transport along that step.
+~Manifold::drift_is_straight~ selects the RATTLE straight step.
+Euclidean space, an affine hyperplane, and a product of flat factors set it.
