@@ -5268,7 +5268,11 @@ impl Solver {
     }
 
     /// Shrink factor of a GROMACS steep session. The current displacement
-    /// is kept. Other methods return [`Error::Steep`].
+    /// is kept. A budget that [`GromacsSteepConfig::with_shrink`] derived
+    /// is rederived here from this session's own step size, not the
+    /// step size `config` was built for; see
+    /// [`GromacsSteep::set_config`](crate::GromacsSteep::set_config).
+    /// Other methods return [`Error::Steep`].
     pub fn set_gromacs_steep_config(&mut self, config: GromacsSteepConfig) -> Result<()> {
         match &mut self.overlay {
             Overlay::GromacsSteep(state) => state.set_config(config),
