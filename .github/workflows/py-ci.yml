@@ -5,11 +5,6 @@ on:
     branches:
       - main
       - develop
-      - "release/**"
-      - "feat/**"
-      - "fix/**"
-      - "ci/**"
-      - "perf/**"
     paths:
       - "python/**"
       - "include/rgbind/**"
@@ -26,6 +21,8 @@ on:
       - "examples/**"
       - "ci/limit_pe_exports.py"
       - ".github/workflows/py-ci.yml"
+    tags:
+      - '*'
   pull_request:
     paths:
       - "python/**"
@@ -46,9 +43,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: py-ci-${{ github.ref }}
-  cancel-in-progress: true
-
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 
+    github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.ref != 
+    'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')) }}
 permissions:
   contents: read
 
@@ -57,15 +55,20 @@ jobs:
   # the workflows together at a commit, and rgbind-sync compares the
   # vendored header with the rgpot that runs the other jobs.
   wheels:
-    uses: OmniPotentRPC/rgpot/.github/workflows/py-wheels.yml@e34a43b63a69ccc88bc63692001cafc273992082
+    uses: 
+      OmniPotentRPC/rgpot/.github/workflows/py-wheels.yml@e34a43b63a69ccc88bc63692001cafc273992082
     with:
       package-dir: .
       import-names: rgmin._core
       test-path: tests/python
       extras: test
 
+    if: github.event_name == 'workflow_dispatch' || github.ref == 
+      'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || 
+      contains(github.event.pull_request.labels.*.name, 'ci:full')
   freethreading:
-    uses: OmniPotentRPC/rgpot/.github/workflows/py-freethreading.yml@e34a43b63a69ccc88bc63692001cafc273992082
+    uses: 
+      OmniPotentRPC/rgpot/.github/workflows/py-freethreading.yml@e34a43b63a69ccc88bc63692001cafc273992082
     with:
       package-dir: .
       import-names: rgmin._core
@@ -75,7 +78,8 @@ jobs:
       rust-crate-dir: .
 
   tsan:
-    uses: OmniPotentRPC/rgpot/.github/workflows/py-tsan.yml@e34a43b63a69ccc88bc63692001cafc273992082
+    uses: 
+      OmniPotentRPC/rgpot/.github/workflows/py-tsan.yml@e34a43b63a69ccc88bc63692001cafc273992082
     with:
       package-dir: .
       import-names: rgmin._core
@@ -85,8 +89,12 @@ jobs:
       rust-toolchain: nightly-2026-01-20
       tsan-cmake-args: -DRGMIN_TSAN=ON
 
+    if: github.event_name == 'workflow_dispatch' || github.ref == 
+      'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || 
+      contains(github.event.pull_request.labels.*.name, 'ci:full')
   typing:
-    uses: OmniPotentRPC/rgpot/.github/workflows/py-typing.yml@e34a43b63a69ccc88bc63692001cafc273992082
+    uses: 
+      OmniPotentRPC/rgpot/.github/workflows/py-typing.yml@e34a43b63a69ccc88bc63692001cafc273992082
     with:
       package-dir: .
       import-names: rgmin._core
@@ -96,7 +104,8 @@ jobs:
       rust-crate-dir: .
 
   rgbind-sync:
-    uses: OmniPotentRPC/rgpot/.github/workflows/py-rgbind-sync.yml@e34a43b63a69ccc88bc63692001cafc273992082
+    uses: 
+      OmniPotentRPC/rgpot/.github/workflows/py-rgbind-sync.yml@e34a43b63a69ccc88bc63692001cafc273992082
     with:
       vendored-path: include/rgbind/rgbind.hpp
       rgpot-ref: e34a43b63a69ccc88bc63692001cafc273992082
@@ -142,4 +151,5 @@ jobs:
 
       - name: ASE contract tests
         shell: bash
-        run: python -m pytest -q tests/python/test_ase.py --timeout=180 -o faulthandler_timeout=120
+        run: python -m pytest -q tests/python/test_ase.py --timeout=180 -o 
+          faulthandler_timeout=120
