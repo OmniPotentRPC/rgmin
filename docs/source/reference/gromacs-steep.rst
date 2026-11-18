@@ -55,7 +55,17 @@ The core state contains ``h`` and the 1.2 / ``shrink`` update. The session
 projects rigid motion from the force before normalization, applies an
 explicit per-atom or Euclidean ``maxmove`` cap to the proposed displacement,
 and uses the ordinary manifold, coordinate-bound, and holonomic-distance
-constraint placement. The trial energy is tested only after those hooks,
+constraint placement. A constraint the trial cannot meet is a refused
+step: the old point is kept and ``h`` is multiplied by ``shrink``, the
+same branch GROMACS takes by setting the trial energy to +infinity
+(``minimize.cpp`` lines 3008-3009 and 3104).
+``GromacsSteepConfig::max_constraint_shrinks`` bounds that run. The
+default, 14, is the number of factors of one half that take the default
+``emstep`` of 0.01 down through the single-precision ``ustep`` floor
+(``minimize.cpp`` line 3143, ``readir.cpp`` line 2384). The next failure
+returns the constraint error. Zero restores an error on the first
+failure and does not shrink. A placement that meets the constraints
+restarts the count. The trial energy is tested only after those hooks,
 so an accepted step and its reported gradient describe the point the host
 receives.
 

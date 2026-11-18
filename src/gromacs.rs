@@ -29,6 +29,18 @@ pub const GROMACS_STEEP_GROW: f64 = 1.2;
 /// energy is not strictly lower (`minimize.cpp` line 3104).
 pub const GROMACS_STEEP_SHRINK: f64 = 0.5;
 
+/// Consecutive constraint failures that shrink the displacement before
+/// the next one is returned as an error.
+///
+/// GROMACS 2025.4 does not abort a steep step on a constraint failure.
+/// `do_em_step` returns false, `do_steep` sets the trial energy to
+/// +infinity (`minimize.cpp` lines 3008-3009), and the energy test then
+/// takes the same `ustep *= 0.5` branch as a refused energy (line 3104).
+/// Single precision aborts once `ustep < 1e-6` (line 3143). From the
+/// default `emstep` of 0.01 (`readir.cpp` line 2384), the 14th factor of
+/// one half crosses that floor, and that iteration sets the abort.
+pub const GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS: u32 = 14;
+
 /// Parameters of [`GromacsSteep`].
 ///
 /// The struct is [`non_exhaustive`](https://doc.rust-lang.org/reference/attributes/type_system.html#the-non_exhaustive-attribute):
@@ -41,16 +53,25 @@ pub struct GromacsSteepConfig {
     /// The default is [`GROMACS_STEEP_SHRINK`]. A session accepts a finite
     /// value in the open interval `(0, 1)`.
     pub shrink: f64,
+    /// How many consecutive constraint failures shrink the displacement
+    /// and keep the old point. The next failure is [`Error::Constraint`].
+    ///
+    /// The default is [`GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS`]. Zero
+    /// returns the constraint error on the first failure and does not
+    /// shrink.
+    pub max_constraint_shrinks: u32,
 }
 
 with_setters!(GromacsSteepConfig {
     with_shrink => shrink: val f64,
+    with_max_constraint_shrinks => max_constraint_shrinks: val u32,
 });
 
 impl Default for GromacsSteepConfig {
     fn default() -> Self {
         Self {
             shrink: GROMACS_STEEP_SHRINK,
+            max_constraint_shrinks: GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS,
         }
     }
 }
@@ -72,6 +93,7 @@ impl GromacsSteepConfig {
 pub struct GromacsSteep {
     step_size: f64,
     config: GromacsSteepConfig,
+    constraint_shrinks: u32,
 }
 
 impl GromacsSteep {
@@ -81,6 +103,7 @@ impl GromacsSteep {
         Self {
             step_size,
             config: GromacsSteepConfig::default(),
+            constraint_shrinks: 0,
         }
     }
 
@@ -94,15 +117,39 @@ impl GromacsSteep {
         self.config
     }
 
-    /// Replace the shrink factor. The current displacement is kept.
+    /// Replace the parameters. The current displacement is kept and the
+    /// consecutive-failure count restarts.
     pub fn set_config(&mut self, config: GromacsSteepConfig) -> Result<()> {
         self.config = config.validate()?;
+        self.constraint_shrinks = 0;
         Ok(())
     }
 
-    /// Reset the maximum displacement. The shrink factor is kept.
+    /// Reset the maximum displacement and the constraint-failure count.
+    /// The shrink factor is kept.
     pub fn reset(&mut self, step_size: f64) {
         self.step_size = step_size;
+        self.constraint_shrinks = 0;
+    }
+
+    /// Shrink after a trial the constraints could not meet.
+    ///
+    /// Returns true when this failure is past
+    /// [`GromacsSteepConfig::max_constraint_shrinks`]. The displacement
+    /// is multiplied by the shrink factor on each counted failure, and
+    /// left unchanged when the bound is already spent or is zero.
+    pub fn reject_constraint(&mut self) -> bool {
+        if self.constraint_shrinks >= self.config.max_constraint_shrinks {
+            return true;
+        }
+        self.step_size *= self.config.shrink;
+        self.constraint_shrinks += 1;
+        false
+    }
+
+    /// A placement met the constraints, so the next failure starts a new run.
+    pub fn clear_constraint_shrinks(&mut self) {
+        self.constraint_shrinks = 0;
     }
 
     /// Displacement `-h g / max_atom_norm(g)`, or zero at a stationary point.
@@ -172,6 +219,30 @@ mod tests {
                 .set_config(GromacsSteepConfig::default().with_shrink(1.0))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn constraint_shrinks_stop_at_the_bound_and_a_success_restarts_the_count() {
+        let mut state = GromacsSteep::new(1.0);
+        state
+            .set_config(GromacsSteepConfig::default().with_max_constraint_shrinks(2))
+            .unwrap();
+        assert!(!state.reject_constraint());
+        assert_eq!(state.step_size().to_bits(), 0.5_f64.to_bits());
+        assert!(!state.reject_constraint());
+        assert_eq!(state.step_size().to_bits(), 0.25_f64.to_bits());
+        assert!(state.reject_constraint());
+        assert_eq!(state.step_size().to_bits(), 0.25_f64.to_bits());
+        state.clear_constraint_shrinks();
+        assert!(!state.reject_constraint());
+        assert_eq!(state.step_size().to_bits(), 0.125_f64.to_bits());
+
+        let mut immediate = GromacsSteep::new(1.0);
+        immediate
+            .set_config(GromacsSteepConfig::default().with_max_constraint_shrinks(0))
+            .unwrap();
+        assert!(immediate.reject_constraint());
+        assert_eq!(immediate.step_size().to_bits(), 1.0_f64.to_bits());
     }
 
     #[test]
