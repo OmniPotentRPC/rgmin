@@ -1,4 +1,6 @@
+import math
 import sys
+import time
 
 import numpy as np
 import pytest
@@ -140,12 +142,12 @@ def test_session_accepts_max_constraint_shrinks_for_gromacs_steep() -> None:
 
 def _expected_shrinks(step_size: float, shrink: float) -> int:
     eps = float(np.finfo(np.float64).eps)
-    count = 0
-    h = step_size
-    while h > eps:
-        h *= shrink
-        count += 1
-    return count
+    if not (np.isfinite(step_size) and step_size > 0.0 and np.isfinite(shrink) and 0.0 < shrink < 1.0):
+        return 0
+    if step_size <= eps:
+        return 0
+    count = math.ceil(math.log(eps / step_size) / math.log(shrink))
+    return int(min(1_000_000, max(0, count)))
 
 
 def test_session_constraint_shrink_budget_follows_istep() -> None:
@@ -171,6 +173,16 @@ def test_session_constraint_shrink_budget_follows_istep() -> None:
     explicit = Session("gromacs-steep", 3, istep=0.1, shrink=0.2, max_constraint_shrinks=3)
     assert explicit.max_constraint_shrinks == 3
     assert Session("steepest", 3).max_constraint_shrinks is None
+
+
+def test_session_constraint_shrink_budget_near_one_is_capped_and_fast() -> None:
+    shrink = float(np.nextafter(1.0, 0.0))
+    start = time.perf_counter()
+    session = Session("gromacs-steep", 3, istep=0.1, shrink=shrink)
+    elapsed = time.perf_counter() - start
+    assert session.max_constraint_shrinks == _expected_shrinks(0.1, shrink)
+    assert session.max_constraint_shrinks == 1_000_000
+    assert elapsed < 1.0
 
 
 def test_gromacs_steep_session_does_not_install_the_generic_atom_cap() -> None:

@@ -67,8 +67,9 @@ Objects
     Callbacks are arguments of each step, not stored on the handle.
     ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 50 and ``layout_revision`` 5.
     Minor 50 adds ``RGMIN_GROMACS_STEEP``,
-    ``RGMIN_STOP_MACHINE_PRECISION``, and
-    ``rgmin_solver_set_gromacs_steep``.
+    ``RGMIN_STOP_MACHINE_PRECISION``,
+    ``rgmin_solver_set_gromacs_steep``, and
+    ``rgmin_gromacs_steep_max_constraint_shrinks``.
     Minor 49 adds a typed stop on the report, the opt-in unmet stop,
     and the backward-error polish. ``rgmin_control_t`` is unchanged.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.

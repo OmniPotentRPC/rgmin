@@ -55,6 +55,11 @@ Non-finite callback values or gradients are runtime errors
 ``rgmin_last_error`` text). A distance-constraint failure returns
 ``Error::Constraint`` in Rust and ``RGMIN_CONSTRAINT_ERROR`` in C, with
 ``rgmin_last_constraint_error`` naming the reason.
+This differs from GROMACS ``do_steep`` in two places by design: a
+non-finite trial is an immediate oracle error here, where GROMACS
+refuses and shrinks, and a constraint-failure run returns
+``Error::Constraint`` once the shrink budget is spent, where GROMACS
+ends the minimization loop gracefully once ``ustep < 1e-12``.
 
 Session hooks
 ~~~~~~~~~~~~~
@@ -102,5 +107,4 @@ The Rust stepper, C ABI, and C++ wrapper do no unit conversion. C and
 C++ expose both ``shrink`` and ``max_constraint_shrinks`` through
 ``rgmin_solver_set_gromacs_steep`` / ``Solver::set_gromacs_steep``.
 ``RGMIN_GROMACS_STEEP`` and ``RGMIN_STOP_MACHINE_PRECISION`` belong to
-the minor named by ``include/rgmin.h``. Minor 47 is the level-set
-constraint setters.
+ABI minor 50, the minor named by ``include/rgmin.h``.

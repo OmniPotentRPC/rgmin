@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pytest
 
@@ -278,3 +280,24 @@ def test_gromacs_steep_mdp_and_zero_budget() -> None:
     )
     assert rep_cfg.stop in {rgmin.Stop.BUDGET, rgmin.Stop.TOLERANCE}
     assert x_cfg.shape == (1,)
+
+
+def test_gromacs_shrink_budget_near_one_is_capped_and_fast() -> None:
+    shrink = float(np.nextafter(1.0, 0.0))
+    start = time.perf_counter()
+    budget = rgmin.gromacs_steep_max_constraint_shrinks(0.1, shrink)
+    elapsed = time.perf_counter() - start
+    assert budget == 1_000_000
+    assert elapsed < 1.0
+
+
+def test_gromacs_zero_budget_accepts_large_finite_max_atom_gradient() -> None:
+    def huge_atom(_v: np.ndarray) -> tuple[float, np.ndarray]:
+        gradient = np.array([1e200, 0.0, 0.0], dtype=np.float64)
+        return 0.0, gradient
+
+    report, _ = rgmin.minimize(
+        huge_atom, np.zeros(3, dtype=np.float64), "gromacs-steep", gtol=0.0, maxiter=0
+    )
+    assert np.isfinite(report.grad_norm)
+    assert report.grad_norm == pytest.approx(1e200)

@@ -191,6 +191,40 @@ pub struct GromacsSteep {
     constraint_shrinks: u32,
 }
 
+fn max_atom_norm_stable(gradient: ArrayView1<'_, f64>) -> f64 {
+    let mut worst = 0.0_f64;
+    let mut i = 0;
+    while i < gradient.len() {
+        let end = (i + 3).min(gradient.len());
+        let mut scale = 0.0_f64;
+        let mut sum = 1.0_f64;
+        for k in i..end {
+            let value = gradient[k].abs();
+            if !value.is_finite() {
+                return f64::INFINITY;
+            }
+            if value != 0.0 {
+                if scale < value {
+                    let ratio = scale / value;
+                    sum = 1.0 + sum * ratio * ratio;
+                    scale = value;
+                } else {
+                    let ratio = value / scale;
+                    sum += ratio * ratio;
+                }
+            }
+        }
+        let norm = if scale == 0.0 {
+            0.0
+        } else {
+            scale * sum.sqrt()
+        };
+        worst = worst.max(norm);
+        i = end;
+    }
+    worst
+}
+
 impl GromacsSteep {
     /// Start with maximum per-atom displacement `step_size` and
     /// [`GromacsSteepConfig::default`].
@@ -256,7 +290,7 @@ impl GromacsSteep {
 
     /// Displacement `-h g / max_atom_norm(g)`, or zero at a stationary point.
     pub fn displacement(self, gradient: ArrayView1<'_, f64>) -> Array1<f64> {
-        let norm = crate::StopNorm::MaxAtom.of(gradient);
+        let norm = max_atom_norm_stable(gradient);
         if !(norm.is_finite() && norm > 0.0 && self.step_size.is_finite() && self.step_size > 0.0) {
             return Array1::zeros(gradient.len());
         }

@@ -81,7 +81,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 49;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 50;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1762,6 +1762,10 @@ pub unsafe extern "C" fn rgmin_solver_set_accept(
 /// Returns 0, or 1 on a null session, an invalid shrink factor, or a
 /// session that is not `RGMIN_GROMACS_STEEP`.
 ///
+/// `max_constraint_shrinks` is an exact budget, including 0: 0 returns
+/// `RGMIN_CONSTRAINT_ERROR` on the first failed projection, and a positive
+/// value allows that many consecutive failed projections before the error.
+///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
@@ -1778,6 +1782,15 @@ pub unsafe extern "C" fn rgmin_solver_set_gromacs_steep(
         .with_shrink(shrink)
         .with_max_constraint_shrinks(max_constraint_shrinks);
     flag(unsafe { (*solver).solver.set_gromacs_steep_config(config) })
+}
+
+/// Largest consecutive failed-projection budget from a GROMACS steep
+/// step size and shrink factor before the displacement reaches
+/// floating-point epsilon. Invalid input gives 0. The result is capped
+/// to bound construction time.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_gromacs_steep_max_constraint_shrinks(step_size: f64, shrink: f64) -> u32 {
+    crate::gromacs_steep_max_constraint_shrinks(step_size, shrink)
 }
 
 /// Gradient norm a session compares to `gtol` and writes to
@@ -4191,6 +4204,7 @@ fn stop_from_reason(reason: crate::StopReason) -> rgmin_stop_t {
         StopReason::StepTolerance => rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE,
         StopReason::MaxIter | StopReason::Iterating => rgmin_stop_t::RGMIN_STOP_BUDGET,
         StopReason::LineSearchFailed => rgmin_stop_t::RGMIN_STOP_LINE_SEARCH,
+        StopReason::MachinePrecision => rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION,
         StopReason::PolishUnmet => rgmin_stop_t::RGMIN_STOP_POLISH_UNMET,
     }
 }
