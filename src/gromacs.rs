@@ -95,11 +95,15 @@ pub struct GromacsSteepConfig {
     /// shrink.
     pub max_constraint_shrinks: u32,
     step_size: f64,
+    /// Whether [`Self::max_constraint_shrinks`] was set by
+    /// [`Self::with_max_constraint_shrinks`] rather than derived.
+    ///
+    /// A derived budget is stale once attached to a session whose step
+    /// size differs from [`Self::step_size`], so [`GromacsSteep::set_config`]
+    /// rederives it from the session's own step size; an explicit budget
+    /// is kept as given.
+    shrink_budget_fixed: bool,
 }
-
-with_setters!(GromacsSteepConfig {
-    with_max_constraint_shrinks => max_constraint_shrinks: val u32,
-});
 
 impl Default for GromacsSteepConfig {
     fn default() -> Self {
@@ -117,17 +121,54 @@ impl GromacsSteepConfig {
                 GROMACS_STEEP_SHRINK,
             ),
             step_size,
+            shrink_budget_fixed: false,
         }
     }
 
-    /// Replace [`Self::shrink`] and recompute [`Self::max_constraint_shrinks`]
-    /// from the step size.
+    /// Replace [`Self::shrink`] and, unless [`Self::with_max_constraint_shrinks`]
+    /// already fixed [`Self::max_constraint_shrinks`], recompute it from
+    /// the step size this configuration was built for.
     ///
-    /// Chain it after `default()` or [`Self::for_step_size`].
+    /// Chain it after `default()` or [`Self::for_step_size`]. A config
+    /// built from `default()` and attached to a session by
+    /// [`GromacsSteep::set_config`] has its budget rederived there from
+    /// the session's own step size, so the recomputation here only
+    /// matters for a config read back before that attachment.
     #[must_use]
     pub fn with_shrink(mut self, shrink: f64) -> Self {
         self.shrink = shrink;
-        self.max_constraint_shrinks = gromacs_steep_max_constraint_shrinks(self.step_size, shrink);
+        if !self.shrink_budget_fixed {
+            self.max_constraint_shrinks =
+                gromacs_steep_max_constraint_shrinks(self.step_size, shrink);
+        }
+        self
+    }
+
+    /// Replace [`Self::max_constraint_shrinks`] and fix it there.
+    ///
+    /// A fixed budget is kept as given by [`Self::with_shrink`] and by
+    /// [`GromacsSteep::set_config`], instead of being rederived from a
+    /// step size.
+    #[must_use]
+    pub fn with_max_constraint_shrinks(mut self, max_constraint_shrinks: u32) -> Self {
+        self.max_constraint_shrinks = max_constraint_shrinks;
+        self.shrink_budget_fixed = true;
+        self
+    }
+
+    /// Rederive [`Self::max_constraint_shrinks`] from `step_size` unless
+    /// [`Self::with_max_constraint_shrinks`] fixed it.
+    ///
+    /// [`GromacsSteep::set_config`] calls this with the session's own
+    /// step size, so a config built from `default()` or
+    /// [`Self::for_step_size`] with a different step size still gets a
+    /// budget sized for the session it attaches to.
+    #[must_use]
+    pub(crate) fn rebased_shrink_budget(mut self, step_size: f64) -> Self {
+        if !self.shrink_budget_fixed {
+            self.max_constraint_shrinks =
+                gromacs_steep_max_constraint_shrinks(step_size, self.shrink);
+        }
         self
     }
 
@@ -173,8 +214,15 @@ impl GromacsSteep {
 
     /// Replace the parameters. The current displacement is kept and the
     /// consecutive-failure count restarts.
+    ///
+    /// A `max_constraint_shrinks` derived from `config`'s own step size,
+    /// for example by `default().with_shrink(...)`, is rederived here
+    /// from [`Self::step_size`] instead, so a config built for a
+    /// different step size still gets a budget sized for this one.
+    /// [`GromacsSteepConfig::with_max_constraint_shrinks`] fixes an
+    /// explicit value against that rederivation.
     pub fn set_config(&mut self, config: GromacsSteepConfig) -> Result<()> {
-        self.config = config.validate()?;
+        self.config = config.rebased_shrink_budget(self.step_size).validate()?;
         self.constraint_shrinks = 0;
         Ok(())
     }
@@ -352,5 +400,35 @@ mod tests {
             started.elapsed()
         );
         assert_eq!(budget, GROMACS_STEEP_SHRINK_BUDGET_CAP);
+    }
+
+    #[test]
+    fn set_config_rederives_a_default_shrink_budget_from_the_session_step_size() {
+        // `default()` bakes in `GROMACS_STEEP_EMSTEP_DEFAULT`, so without
+        // the rederivation in `set_config` this budget would equal
+        // `gromacs_steep_max_constraint_shrinks(GROMACS_STEEP_EMSTEP_DEFAULT, 0.3)`
+        // instead of being sized for `state`'s own, noncanonical step size.
+        let noncanonical_step_size = 2.0;
+        let mut state = GromacsSteep::new(noncanonical_step_size);
+        state
+            .set_config(GromacsSteepConfig::default().with_shrink(0.3))
+            .unwrap();
+        assert_eq!(
+            state.config().max_constraint_shrinks,
+            gromacs_steep_max_constraint_shrinks(noncanonical_step_size, 0.3)
+        );
+        assert_ne!(
+            state.config().max_constraint_shrinks,
+            gromacs_steep_max_constraint_shrinks(GROMACS_STEEP_EMSTEP_DEFAULT, 0.3)
+        );
+    }
+
+    #[test]
+    fn set_config_keeps_an_explicit_shrink_budget_despite_rederivation() {
+        let mut state = GromacsSteep::new(2.0);
+        state
+            .set_config(GromacsSteepConfig::default().with_max_constraint_shrinks(5))
+            .unwrap();
+        assert_eq!(state.config().max_constraint_shrinks, 5);
     }
 }
