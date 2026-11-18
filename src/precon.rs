@@ -1197,6 +1197,9 @@ pub const N_PAR_ASSEMBLE: usize = usize::MAX;
 /// Fixed length of one dot-product chunk. The same chunks are used
 /// with and without the `par` feature.
 const DOT_CHUNK: usize = 1024;
+/// Smallest chunk count split across Rayon tasks (`4 * 1024 = 4096` elements).
+#[cfg(feature = "par")]
+const DOT_PAR_MIN_CHUNKS: usize = 4;
 
 /// Map `0..n` and keep index order.
 ///
@@ -1252,30 +1255,98 @@ fn matvec(a: &Csr, x: &[f64], y: &mut [f64], gate: usize) {
     }
 }
 
-/// Dot product. Chunks of [`DOT_CHUNK`] are summed left to right from
-/// `0.0` in every build. The `par` feature evaluates the chunks
-/// concurrently when `atoms >= gate`; the fold of the partials stays
-/// in chunk order.
-fn dot(a: &[f64], b: &[f64], gate: usize) -> f64 {
-    if a.is_empty() {
+#[inline]
+fn dot_leaf(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len().min(b.len());
+    let blocks = n / 8;
+    let mut s0 = 0.0;
+    let mut s1 = 0.0;
+    let mut s2 = 0.0;
+    let mut s3 = 0.0;
+    let mut s4 = 0.0;
+    let mut s5 = 0.0;
+    let mut s6 = 0.0;
+    let mut s7 = 0.0;
+    for k in 0..blocks {
+        let base = 8 * k;
+        s0 += a[base] * b[base];
+        s1 += a[base + 1] * b[base + 1];
+        s2 += a[base + 2] * b[base + 2];
+        s3 += a[base + 3] * b[base + 3];
+        s4 += a[base + 4] * b[base + 4];
+        s5 += a[base + 5] * b[base + 5];
+        s6 += a[base + 6] * b[base + 6];
+        s7 += a[base + 7] * b[base + 7];
+    }
+    let mut acc = ((s0 + s4) + (s1 + s5)) + ((s2 + s6) + (s3 + s7));
+    for i in (8 * blocks)..n {
+        acc += a[i] * b[i];
+    }
+    acc
+}
+
+fn dot_tree_serial(a: &[f64], b: &[f64]) -> f64 {
+    let len = a.len();
+    if len <= DOT_CHUNK {
+        return dot_leaf(a, b);
+    }
+    let nchunks = len.div_ceil(DOT_CHUNK);
+    let mid = (nchunks / 2) * DOT_CHUNK;
+    dot_tree_serial(&a[..mid], &b[..mid]) + dot_tree_serial(&a[mid..], &b[mid..])
+}
+
+#[cfg(feature = "par")]
+fn dot_tree_rayon(a: &[f64], b: &[f64]) -> f64 {
+    let len = a.len();
+    if len <= DOT_CHUNK {
+        return dot_leaf(a, b);
+    }
+    let nchunks = len.div_ceil(DOT_CHUNK);
+    if nchunks < DOT_PAR_MIN_CHUNKS {
+        return dot_tree_serial(a, b);
+    }
+    let mid = (nchunks / 2) * DOT_CHUNK;
+    let (left, right) = rayon::join(
+        || dot_tree_rayon(&a[..mid], &b[..mid]),
+        || dot_tree_rayon(&a[mid..], &b[mid..]),
+    );
+    left + right
+}
+
+/// Allocation-free deterministic dot product used by preconditioner PCG.
+///
+/// Leaves of length `1024` are reduced with an eight-lane accumulator tree
+/// and combined along a fixed chunk-aligned binary split, so serial and
+/// multi-threaded `par` builds produce identical bits with zero heap
+/// allocations. Mismatched or empty slices return `0.0`.
+#[must_use]
+pub fn dot(a: &[f64], b: &[f64]) -> f64 {
+    dot_gated(a, b, N_PAR_EXP_SOLVE)
+}
+
+fn dot_gated(a: &[f64], b: &[f64], gate: usize) -> f64 {
+    if a.is_empty() || a.len() != b.len() {
         return 0.0;
     }
     let nchunks = a.len().div_ceil(DOT_CHUNK);
     let atoms = a.len() / 3;
-    let partials = ordered_map(nchunks, atoms, gate, |c| {
-        let start = c * DOT_CHUNK;
-        let end = (start + DOT_CHUNK).min(a.len());
-        let mut acc = 0.0;
-        for i in start..end {
-            acc += a[i] * b[i];
+    let parallel = gate < usize::MAX && atoms >= gate && nchunks >= 2;
+    #[cfg(not(feature = "par"))]
+    let _ = parallel;
+    #[cfg(feature = "par")]
+    {
+        if parallel
+            && rayon::current_thread_index().is_some()
+            && rayon::current_num_threads() > 1
+        {
+            return dot_tree_rayon(a, b);
         }
-        acc
-    });
-    partials.into_iter().fold(0.0, |acc, v| acc + v)
+    }
+    dot_tree_serial(a, b)
 }
 
 fn nrm2(a: &[f64], gate: usize) -> f64 {
-    dot(a, a, gate).sqrt()
+    dot_gated(a, a, gate).sqrt()
 }
 
 fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
@@ -1298,7 +1369,7 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
     let mut ap = vec![0.0; n];
     jacobi(a, &r, &mut z);
     p.copy_from_slice(&z);
-    let mut rz = dot(&r, &z, gate);
+    let mut rz = dot_gated(&r, &z, gate);
     if !(rz.is_finite() && rz > 0.0) {
         return None;
     }
@@ -1311,7 +1382,7 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
         }
         iters += 1;
         matvec(a, &p, &mut ap, gate);
-        let pap = dot(&p, &ap, gate);
+        let pap = dot_gated(&p, &ap, gate);
         if !(pap.is_finite() && pap > 0.0) {
             return None;
         }
@@ -1327,7 +1398,7 @@ fn solve_pcg(a: &Csr, b: &[f64]) -> Option<(Vec<f64>, usize)> {
             return finite_vec(x).map(|v| (v, iters));
         }
         jacobi(a, &r, &mut z);
-        let rz_new = dot(&r, &z, gate);
+        let rz_new = dot_gated(&r, &z, gate);
         if !(rz_new.is_finite() && rz_new > 0.0) {
             return None;
         }
@@ -1580,7 +1651,7 @@ mod tests {
             "iters {iters} should take more than one step and at most n"
         );
         assert_eq!(
-            hash, 0xf9a8d91302c9cb63,
+            hash, 0x75ec5f2a232e41f3,
             "committed hash drifted: iters {iters} hash {hash:#x}"
         );
     }
