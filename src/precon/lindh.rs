@@ -31,7 +31,7 @@ use ndarray::{Array1, ArrayView1};
 
 use super::geom::{angle_grad, dihedral_grad, mic, norm3, pos_of, require_atoms};
 use super::{
-    BlockAccum, DEFAULT_PRECON_RTOL, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE,
+    BlockAccum, DEFAULT_PRECON_RTOL, Exec, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE,
     max_atom_displacement, needs_rebuild, note_block,
 };
 use crate::error::{Error, Result};
@@ -138,6 +138,10 @@ pub struct LindhParams {
     pub rtol: f64,
     /// Reuse the previous PCG solution via Rayleigh projection when helpful.
     pub warm_start: bool,
+    /// Worker threads for preconditioner assembly and PCG. `None` is serial
+    /// (`1` thread) unless called inside a multi-thread Rayon pool; `Some(1)`
+    /// forces serial execution.
+    pub threads: Option<usize>,
 }
 
 with_setters!(LindhParams {
@@ -150,6 +154,7 @@ with_setters!(LindhParams {
     with_recalc_mu => recalc_mu: val bool,
     with_rtol => rtol: val f64,
     with_warm_start => warm_start: val bool,
+    with_threads => threads: opt usize,
 });
 
 impl Default for LindhParams {
@@ -164,6 +169,7 @@ impl Default for LindhParams {
             recalc_mu: false,
             rtol: DEFAULT_PRECON_RTOL,
             warm_start: true,
+            threads: None,
         }
     }
 }
@@ -227,6 +233,7 @@ impl Lindh {
                 what: "rtol is not positive",
             });
         }
+        let exec = Exec::new(params.threads)?;
         if let Some(cut) = params.r_cut
             && !(cut.is_finite() && cut > 0.0)
         {
@@ -252,7 +259,7 @@ impl Lindh {
                 what: "a coordinate is not finite",
             });
         }
-        let (metric, r_nn) = assemble_metric(&coords, z, ghosts, params)?;
+        let (metric, r_nn) = assemble_metric(&coords, z, ghosts, params, exec)?;
         Ok(Self { r_nn, metric })
     }
 
@@ -344,6 +351,8 @@ impl LindhState {
                 what: "rtol is not positive",
             });
         }
+        let exec = Exec::new(params.threads)?;
+        let _ = exec;
         let mu = usable_mu(params.mu)?;
         Ok(Self {
             z,
@@ -358,6 +367,15 @@ impl LindhState {
 
     pub(crate) fn metric(&self) -> Option<&Metric> {
         self.metric.as_ref()
+    }
+
+    pub(crate) fn set_threads(&mut self, threads: Option<usize>) -> Result<()> {
+        let exec = Exec::new(threads)?;
+        self.params.threads = threads;
+        if let Some(metric) = &mut self.metric {
+            metric.set_exec(exec);
+        }
+        Ok(())
     }
 
     pub(crate) fn mu(&self) -> Option<f64> {
@@ -428,9 +446,10 @@ fn gather_pairs(
     n_free: usize,
     search: f64,
     params: &LindhParams,
+    exec: &Exec,
 ) -> (Vec<WeightedPair>, Vec<f64>) {
     let coords: Vec<[f64; 3]> = sites.iter().map(|s| s.pos).collect();
-    let found = super::geom::pairs_in_range(&coords, search, params.lengths);
+    let found = super::geom::pairs_in_range(&coords, search, params.lengths, exec);
     let mut pairs = Vec::new();
     let mut min_d = vec![f64::INFINITY; n_free];
     for (a, b, r) in found {
@@ -461,6 +480,7 @@ fn assemble_metric(
     z: &[i32],
     ghosts: &[Ghost],
     params: &LindhParams,
+    exec: Exec,
 ) -> Result<(Metric, f64)> {
     let n_free = z.len();
     let mut sites = Vec::with_capacity(n_free + ghosts.len());
@@ -482,7 +502,7 @@ fn assemble_metric(
         Some(cut) => cut,
         None => default_search(),
     };
-    let (pairs, min_d) = gather_pairs(&sites, n_free, search, params);
+    let (pairs, min_d) = gather_pairs(&sites, n_free, search, params, &exec);
     let mut r_nn = 0.0_f64;
     let mut any = false;
     for d in min_d {
@@ -510,12 +530,9 @@ fn assemble_metric(
         acc.add_rank1(atoms, scale);
     });
     acc.add_stabilization(params.c_stab);
+    let csr = acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, &exec);
     Ok((
-        Metric::from_general_csr(
-            acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE),
-            params.rtol,
-            params.warm_start,
-        ),
+        Metric::from_general_csr(csr, params.rtol, params.warm_start, exec),
         r_nn,
     ))
 }

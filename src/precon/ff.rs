@@ -33,7 +33,7 @@ use ndarray::{Array1, ArrayView1};
 
 use super::geom::{angle_grad, dihedral_grad, mic, norm3, pos_of, require_atoms, scale3};
 use super::{
-    BlockAccum, DEFAULT_PRECON_RTOL, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE,
+    BlockAccum, DEFAULT_PRECON_RTOL, Exec, Metric, N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE,
     max_atom_displacement, needs_rebuild, note_block,
 };
 use crate::error::{Error, Result};
@@ -126,6 +126,10 @@ pub struct FfParams {
     pub rtol: f64,
     /// Reuse the previous PCG solution via Rayleigh projection when helpful.
     pub warm_start: bool,
+    /// Worker threads for preconditioner assembly and PCG. `None` is serial
+    /// (`1` thread) unless called inside a multi-thread Rayon pool; `Some(1)`
+    /// forces serial execution.
+    pub threads: Option<usize>,
 }
 
 with_setters!(FfParams {
@@ -136,6 +140,7 @@ with_setters!(FfParams {
     with_recalc_mu => recalc_mu: val bool,
     with_rtol => rtol: val f64,
     with_warm_start => warm_start: val bool,
+    with_threads => threads: opt usize,
 });
 
 impl Default for FfParams {
@@ -148,6 +153,7 @@ impl Default for FfParams {
             recalc_mu: false,
             rtol: DEFAULT_PRECON_RTOL,
             warm_start: true,
+            threads: None,
         }
     }
 }
@@ -194,6 +200,7 @@ impl Ff {
                 what: "rtol is not positive",
             });
         }
+        let exec = Exec::new(params.threads)?;
         if terms.bonds.is_empty()
             && terms.angles.is_empty()
             && terms.morses.is_empty()
@@ -212,7 +219,7 @@ impl Ff {
                 what: "a coordinate is not finite",
             });
         }
-        let (metric, r_nn) = assemble_metric(natoms, &coords, terms, params)?;
+        let (metric, r_nn) = assemble_metric(natoms, &coords, terms, params, exec)?;
         Ok(Self { r_nn, metric })
     }
 
@@ -309,6 +316,8 @@ impl FfState {
                 what: "rtol is not positive",
             });
         }
+        let exec = Exec::new(params.threads)?;
+        let _ = exec;
         let mu = usable_mu(params.mu)?;
         Ok(Self {
             bonds,
@@ -325,6 +334,15 @@ impl FfState {
 
     pub(crate) fn metric(&self) -> Option<&Metric> {
         self.metric.as_ref()
+    }
+
+    pub(crate) fn set_threads(&mut self, threads: Option<usize>) -> Result<()> {
+        let exec = Exec::new(threads)?;
+        self.params.threads = threads;
+        if let Some(metric) = &mut self.metric {
+            metric.set_exec(exec);
+        }
+        Ok(())
     }
 
     pub(crate) fn mu(&self) -> Option<f64> {
@@ -411,6 +429,7 @@ fn assemble_metric(
     positions: &[f64],
     terms: FfTerms<'_>,
     params: &FfParams,
+    exec: Exec,
 ) -> Result<(Metric, f64)> {
     for b in terms.bonds {
         in_range(b.i, natoms)?;
@@ -462,12 +481,9 @@ fn assemble_metric(
         acc.add_rank1(atoms, scale);
     });
     acc.add_stabilization(params.c_stab);
+    let csr = acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, &exec);
     Ok((
-        Metric::from_general_csr(
-            acc.finish(N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE),
-            params.rtol,
-            params.warm_start,
-        ),
+        Metric::from_general_csr(csr, params.rtol, params.warm_start, exec),
         r_nn,
     ))
 }
@@ -583,7 +599,8 @@ pub fn bonded_terms(
     }
     let owned = positions.to_vec();
     let coords: Vec<[f64; 3]> = (0..natoms).map(|i| pos_of(&owned, i)).collect();
-    let found = super::geom::pairs_in_range(&coords, r_cut, lengths);
+    let exec = Exec::default();
+    let found = super::geom::pairs_in_range(&coords, r_cut, lengths, &exec);
     let mut bonds = Vec::new();
     let mut adj = vec![Vec::new(); natoms];
     for (i, j, _) in found {

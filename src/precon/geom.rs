@@ -62,6 +62,7 @@ pub(super) fn pairs_in_range(
     pos: &[[f64; 3]],
     cutoff: f64,
     lengths: Option<[f64; 3]>,
+    exec: &super::Exec,
 ) -> Vec<(usize, usize, f64)> {
     let n = pos.len();
     if n < 2 || !(cutoff.is_finite() && cutoff > 0.0) {
@@ -110,7 +111,8 @@ pub(super) fn pairs_in_range(
         cells.entry(key).or_default().push(i);
     }
     let keys: Vec<(i32, i32, i32)> = cells.keys().copied().collect();
-    let parts = super::ordered_map(keys.len().max(1), n, super::N_PAR_ASSEMBLE, |c| {
+    let parts =
+        super::ordered_map_exec(exec, keys.len().max(1), n, super::N_PAR_ASSEMBLE, |c| {
         if c >= keys.len() {
             return Vec::new();
         }
@@ -327,7 +329,8 @@ mod tests {
             ]);
         }
         let cutoff = 2.5;
-        let got = pairs_in_range(&pos, cutoff, None);
+        let exec = super::super::Exec::default();
+        let got = pairs_in_range(&pos, cutoff, None, &exec);
         let expect = brute(&pos, cutoff, None);
         assert_eq!(got.len(), expect.len());
         for (a, b) in got.iter().zip(&expect) {
@@ -336,7 +339,7 @@ mod tests {
             assert!((a.2 - b.2).abs() < 1e-12);
         }
         let lengths = Some([6.0, 5.5, 4.0]);
-        let got = pairs_in_range(&pos, cutoff, lengths);
+        let got = pairs_in_range(&pos, cutoff, lengths, &exec);
         let expect = brute(&pos, cutoff, lengths);
         assert_eq!(got.len(), expect.len());
         for (a, b) in got.iter().zip(&expect) {
