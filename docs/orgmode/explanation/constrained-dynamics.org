@@ -1,0 +1,61 @@
+#+TITLE: Constrained Langevin and RATTLE
+#+OPTIONS: ^:nil author:nil
+
+A holonomic constraint \(c(x) = 0\) cuts a submanifold out of the ambient coordinates.
+Molecular dynamics on that submanifold keeps the position on the set and the velocity in its tangent space, measured with the mass matrix \(M\).
+~src/dynamics/mod.rs~ integrates that system.
+The engine, when there is one, supplies only the force.
+@@rst::doc:`../reference/constrained-dynamics`@@ lists the calls.
+@@rst::doc:`../howto/constrained-dynamics`@@ is a short program.
+
+* The step
+
+One BAOAB step (Leimkuhler and Matthews, Appl. Math. Res. Express 2013, doi:10.1093/amrx/abs010; the geodesic form in Proc. R. Soc. A 472, 20160138, 2016, doi:10.1098/rspa.2016.0138) is
+
+1. *B.* A half kick by the ambient force, then the mass-metric projection of the velocity.
+2. *A.* A half drift. A curved manifold uses its geodesic when it has one, and otherwise the second-order retraction. A flat constraint uses the straight step \(x + \Delta t\, v\) and restores the point along \(M^{-1} N\).
+3. *O.* The Ornstein–Uhlenbeck update. The Gaussian increment is drawn in the ambient coordinates and then projected, including when the amplitude is zero, so the stream does not depend on the masses that happen to vanish.
+4. *A* and *B* again. The second kick uses the force at the new point.
+
+RATTLE (Andersen, J. Comput. Phys. 52, 24, 1983, doi:10.1016/0021-9991(83)90014-1) is the same half-kick and full drift without the *O* step.
+On Euclidean space it is velocity Verlet.
+
+The mass-metric projector is
+\[
+\Pi v = v - M^{-1} N (N^\top M^{-1} N)^{-1} N^\top v.
+\]
+\(N\) is a Euclidean basis of the normal space.
+The result satisfies \(N^\top \Pi v = 0\), and the correction lies along \(M^{-1} N\).
+For one normal this is the product \(w = n \odot (1/(\alpha m))\), \(v \leftarrow v - w\,(n^\top v)\), \(\alpha = n^\top M^{-1} n\), which is the arithmetic of the flat hyperplane integrator.
+A frozen coordinate has mass zero: its inverse mass is zero and it draws no noise.
+The Lagrange multiplier of a force \(F\) uses the right-hand side \(N^\top M^{-1} F\), and the reaction is \(N\lambda\).
+The velocity multiplier uses \(N^\top v\) instead.
+
+On a flat affine constraint the hidden constraint is linear, the geodesic is the straight line, and the restoration is exact RATTLE.
+That is the special case of a \(3N\) hyperplane.
+On a curved manifold with one common positive mass the drift is the embedding geodesic, which is the kinetic geodesic of that mass matrix.
+Unequal masses and frozen coordinates use one RATTLE step along \(M^{-1}\nabla c\) when the manifold publishes a holonomic chart (Leimkuhler and Matthews, the \(A_g\) map with \(K_r = 1\)).
+The position is corrected until the chart reads zero and the velocity is projected at the arrival point.
+A manifold without a chart keeps the embedding geodesic.
+
+A projection retraction is second-order accurate (Absil and Malick, SIAM J. Optim. 22, 2012, doi:10.1137/100802529).
+The sphere's normalization \((x+v)/\|x+v\|\) is one, and it agrees with the great-circle exponential through order \(\|v\|^2\).
+The Stiefel QR retraction is only first order, so the second-order step uses the polar factor.
+Where the manifold provides an exponential, the drift uses that geodesic rather than the retraction.
+
+* The invariant
+
+The constrained Langevin equation has invariant measure the Boltzmann density on the manifold times the Gaussian of the tangent kinetic energy (Lelièvre, Rousset and Stoltz, Math. Comp. 81, 2012, doi:10.1090/S0025-5718-2012-02594-4; also /Free Energy Computations/).
+Geodesic BAOAB is built so that an exact geodesic drift preserves that measure for a quadratic energy.
+The checks are the ones the measure predicts:
+
+- On the circle with \(V = \cos\theta\), the angle has density proportional to \(e^{-\beta\cos\theta}\), and the partition function is \(2\pi I_0(\beta)\).
+- On the unit sphere with \(V = 0\), the height is uniform on \([-1, 1]\).
+- The mean tangent kinetic energy is \(\tfrac12 kT\) times the dimension of the tangent space.
+- The constraint residual stays at rounding.
+- Constrained velocity Verlet conserves energy with an excursion that scales as \(\Delta t^2\).
+
+Specular planar walls are an optional extra half-space.
+On a flat constraint the reflection reduces the wall normal to the tangent space and reverses position and velocity along \(M^{-1}\) of that direction, then restores the point.
+A curved manifold recomputes the tangent wall direction at the current point, reflects, and then applies the second-order retraction.
+The flat hyperplane path matches the existing inverse-mass BAOAB, including the wall product, bit for bit.

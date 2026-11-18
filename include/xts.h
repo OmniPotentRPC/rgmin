@@ -75,6 +75,7 @@ typedef rgmin_constraints_t xts_constraints_t;
 #define XTS_FIRE2 RGMIN_FIRE2
 #define XTS_NEWTON_CG RGMIN_NEWTON_CG
 #define XTS_NEWTON_PCG RGMIN_NEWTON_PCG
+#define XTS_GROMACS_STEEP RGMIN_GROMACS_STEEP
 
 #define XTS_CONJUGACY_FLETCHER_REEVES RGMIN_CONJUGACY_FLETCHER_REEVES
 #define XTS_CONJUGACY_POLAK_RIBIERE RGMIN_CONJUGACY_POLAK_RIBIERE
@@ -124,8 +125,10 @@ typedef rgmin_constraints_t xts_constraints_t;
 #define xts_solver_set_stop_norm rgmin_solver_set_stop_norm
 #define xts_solver_set_fire_preset rgmin_solver_set_fire_preset
 #define xts_solver_set_fire_abc rgmin_solver_set_fire_abc
+#define xts_solver_set_fire_config rgmin_solver_set_fire_config
 #define xts_solver_set_lbfgs_capped rgmin_solver_set_lbfgs_capped
 #define xts_solver_set_lbfgs_scaled rgmin_solver_set_lbfgs_scaled
+#define xts_solver_set_lbfgs_fixed_h0 rgmin_solver_set_lbfgs_fixed_h0
 #define xts_solver_set_lbfgs_wolfe rgmin_solver_set_lbfgs_wolfe
 #define xts_solver_set_lbfgs_trust rgmin_solver_set_lbfgs_trust
 #define xts_solver_lbfgs_trust_radius rgmin_solver_lbfgs_trust_radius

@@ -62,6 +62,10 @@ impl Manifold for Euclidean {
     fn transport_is_isometric(&self) -> bool {
         true
     }
+
+    fn drift_is_straight(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

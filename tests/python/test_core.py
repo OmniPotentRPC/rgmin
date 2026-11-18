@@ -204,6 +204,7 @@ def test_import_does_not_pull_ase() -> None:
 
     code = (
         "import sys, rgmin; "
+        "rgmin.gromacs_mdp_options(); "
         "assert 'ase' not in sys.modules; "
         "assert 'rgmin.ase' not in sys.modules; "
         "assert rgmin.__version__"
@@ -221,3 +222,59 @@ def test_distribution_version_is_the_crate_version() -> None:
     except metadata.PackageNotFoundError:
         pytest.skip("rgmin is not installed as a distribution")
     assert Version(installed) == Version(rgmin.__version__)
+
+
+def test_gromacs_steep_mdp_and_zero_budget() -> None:
+    options = rgmin.gromacs_mdp_options({"integrator": "steep", "emtol": 10.0, "emstep": 0.01, "nsteps": 25})
+    method = options.pop("method")
+    x = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    report, out = rgmin.minimize(_quad, x, method, **options)
+    assert out is x
+    assert report.stop == rgmin.Stop.TOLERANCE
+    assert report.grad_norm < options["gtol"]
+
+    # Zero-budget check uses MaxAtom (per-atom max force), not Euclidean L2.
+    # Two atoms with gradients (0.6, 0, 0) and (0.6, 0, 0): MaxAtom = 0.6 < 0.7 < L2.
+    def two_atoms(v: np.ndarray) -> tuple[float, np.ndarray]:
+        return float(0.6 * (v[0] + v[3])), np.array([0.6, 0.0, 0.0, 0.6, 0.0, 0.0], dtype=np.float64)
+
+    rep_zero, _ = rgmin.minimize(
+        two_atoms, np.zeros(6, dtype=np.float64), "gromacs-steep", gtol=0.7, maxiter=0
+    )
+    assert rep_zero.grad_norm == pytest.approx(0.6)
+    assert rep_zero.stop == rgmin.Stop.TOLERANCE
+
+    def nan_after_a_finite_atom(v: np.ndarray) -> tuple[float, np.ndarray]:
+        gradient = np.zeros_like(v)
+        gradient[0] = 1.0
+        gradient[3] = np.nan
+        return 0.0, gradient
+
+    with pytest.raises(rgmin.NumericalError, match="non-finite max-atom gradient norm"):
+        rgmin.minimize(
+            nan_after_a_finite_atom,
+            np.zeros(6, dtype=np.float64),
+            "gromacs-steep",
+            maxiter=0,
+        )
+
+    def slope(v: np.ndarray) -> tuple[float, np.ndarray]:
+        return float(v[0]), np.array([1.0, 0.0, 0.0], dtype=np.float64)
+
+    rep_mp, x_mp = rgmin.minimize(
+        slope, np.array([1.0, 0.0, 0.0], dtype=np.float64), "gromacs-steep", gtol=0.0, istep=1e-18, maxiter=5
+    )
+    assert rep_mp.stop == rgmin.Stop.MACHINE_PRECISION
+    assert x_mp[0] == 1.0
+
+    rep_cfg, x_cfg = rgmin.minimize(
+        _quad,
+        np.array([0.3], dtype=np.float64),
+        "gromacs-steep",
+        maxiter=3,
+        istep=0.5,
+        shrink=0.2,
+        max_constraint_shrinks=1,
+    )
+    assert rep_cfg.stop in {rgmin.Stop.BUDGET, rgmin.Stop.TOLERANCE}
+    assert x_cfg.shape == (1,)

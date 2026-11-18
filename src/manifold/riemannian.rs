@@ -156,7 +156,7 @@ impl ManifoldFactor {
                 retraction: StiefelRetraction::Polar,
             } => {
                 let y: Vec<f64> = x.iter().zip(v).map(|(a, b)| a + b).collect();
-                out.copy_from_slice(&polar(n, p, &y)?);
+                out.copy_from_slice(&polar_factor(n, p, &y)?);
                 Ok(())
             }
             Self::Spd { .. } => self.exp(x, v, out),
@@ -787,7 +787,7 @@ fn qr_q(n: usize, p: usize, y: &mut [f64]) -> Result<()> {
 }
 
 /// Polar factor `y (y^T y)^{-1/2}` of an `n x p` matrix.
-fn polar(n: usize, p: usize, y: &[f64]) -> Result<Vec<f64>> {
+pub(crate) fn polar_factor(n: usize, p: usize, y: &[f64]) -> Result<Vec<f64>> {
     let (lam, q) = sym_eig(p, &sym(p, &mul_tn(n, p, p, y, y)));
     let top = lam.iter().copied().fold(0.0, f64::max);
     if top <= 0.0 || lam.iter().any(|&l| l.is_nan() || l <= 1e-24 * top) {

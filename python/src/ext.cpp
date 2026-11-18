@@ -129,6 +129,8 @@ std::string method_name_from_code(int code) {
         return "diis";
     case RGMIN_ODE12R:
         return "ode12r";
+    case RGMIN_GROMACS_STEEP:
+        return "gromacs_steep";
     default:
         throw nb::value_error("unknown method");
     }
@@ -302,6 +304,33 @@ extern "C" rgmin_status_t rgmin_py_hess(void* user, DLManagedTensorVersioned con
     return map_trampoline(slot->hess_entry(slot->hess_trampoline, coordinates, hessian));
 }
 
+// std::max(finite, NaN) returns the finite argument, because
+// (finite < NaN) is false. A non-finite atom norm has to win.
+double max_atom_norm(double const* gradient, std::size_t n) {
+    double grad_norm = 0.0;
+    for (std::size_t i = 0; i < n; i += 3) {
+        std::size_t const end = std::min(i + 3, n);
+        double atom_sq = 0.0;
+        for (std::size_t k = i; k < end; ++k) {
+            atom_sq += gradient[k] * gradient[k];
+        }
+        double const atom_norm = std::sqrt(atom_sq);
+        if (!std::isfinite(atom_norm)) {
+            return atom_norm;
+        }
+        if (atom_norm > grad_norm) {
+            grad_norm = atom_norm;
+        }
+    }
+    return grad_norm;
+}
+
+void copy_gradient(nb::handle gradient, std::size_t n, double* destination) {
+    ConstVector grad = nb::cast<ConstVector>(gradient);
+    check_vector(grad, n, "gradient");
+    std::memcpy(destination, grad.data(), n * sizeof(double));
+}
+
 void read_gradient(nb::handle gradient, std::size_t n, double* destination) {
     ConstVector grad = nb::cast<ConstVector>(gradient);
     check_vector(grad, n, "gradient");
@@ -351,7 +380,8 @@ rgmin::Report finish_step(rgmin_status_t status, rgmin_report_t const& out, rgbi
 // c * sqrt(n) * eps_g (c = 3 unless noise_c is positive), else the spent
 // budget. project_rigid does not project this gradient, so a start whose
 // only gradient is rigid motion reads the larger norm.
-rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control const& control) {
+rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control const& control,
+                                 rgmin::Method method) {
     std::size_t const n = static_cast<std::size_t>(x.shape(0));
     nb::object result = function(owned_copy(x.data(), n));
     if (!nb::isinstance<nb::tuple>(result) || nb::len(result) != 2) {
@@ -362,12 +392,23 @@ rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control
         throw rgbind::NumericalError("f_and_grad returned a non-finite value");
     }
     std::vector<double> gradient(n);
-    read_gradient(result[1], n, gradient.data());
-    double squares = 0.0;
-    for (double g : gradient) {
-        squares += g * g;
+    double grad_norm = 0.0;
+    if (method == rgmin::Method::GromacsSteep) {
+        // read_gradient rejects a non-finite component before the
+        // reduction, which would hide a max that drops NaN.
+        copy_gradient(result[1], n, gradient.data());
+        grad_norm = max_atom_norm(gradient.data(), n);
+        if (!std::isfinite(grad_norm)) {
+            throw rgbind::NumericalError("non-finite max-atom gradient norm");
+        }
+    } else {
+        read_gradient(result[1], n, gradient.data());
+        double squares = 0.0;
+        for (double g : gradient) {
+            squares += g * g;
+        }
+        grad_norm = std::sqrt(squares);
     }
-    double const grad_norm = std::sqrt(squares);
     rgmin_stop_t stop = RGMIN_STOP_BUDGET;
     if (grad_norm < control.gtol) {
         stop = RGMIN_STOP_TOLERANCE;
@@ -521,6 +562,7 @@ NB_MODULE(_core, m) {
         .value("QUICK_MIN", RGMIN_QUICKMIN)
         .value("DIIS", RGMIN_DIIS)
         .value("ODE12R", RGMIN_ODE12R)
+        .value("GROMACS_STEEP", RGMIN_GROMACS_STEEP)
         .value("PolakRibiere", RGMIN_POLAK_RIBIERE)
         .value("FletcherReeves", RGMIN_FLETCHER_REEVES)
         .value("Bfgs", RGMIN_BFGS)
@@ -544,7 +586,8 @@ NB_MODULE(_core, m) {
         .value("Fire2", RGMIN_FIRE2)
         .value("QuickMin", RGMIN_QUICKMIN)
         .value("Diis", RGMIN_DIIS)
-        .value("Ode12r", RGMIN_ODE12R);
+        .value("Ode12r", RGMIN_ODE12R)
+        .value("GromacsSteep", RGMIN_GROMACS_STEEP);
 
     nb::enum_<rgmin_stop_t>(m, "Stop", nb::is_arithmetic(),
                             "Why a step or a run ended. Members are UPPER_SNAKE. "
@@ -553,10 +596,12 @@ NB_MODULE(_core, m) {
         .value("NOISE_FLOOR", RGMIN_STOP_NOISE_FLOOR)
         .value("STEP_TOLERANCE", RGMIN_STOP_STEP_TOLERANCE)
         .value("BUDGET", RGMIN_STOP_BUDGET)
+        .value("MACHINE_PRECISION", RGMIN_STOP_MACHINE_PRECISION)
         .value("Tolerance", RGMIN_STOP_TOLERANCE)
         .value("NoiseFloor", RGMIN_STOP_NOISE_FLOOR)
         .value("StepTolerance", RGMIN_STOP_STEP_TOLERANCE)
-        .value("Budget", RGMIN_STOP_BUDGET);
+        .value("Budget", RGMIN_STOP_BUDGET)
+        .value("MachinePrecision", RGMIN_STOP_MACHINE_PRECISION);
 
     nb::class_<rgmin::Report>(m, "Report", "Result of one optimizer step or of ``minimize``.")
         .def_prop_ro("value", [](rgmin::Report const& report) { return report.value; },
@@ -615,7 +660,98 @@ NB_MODULE(_core, m) {
                      "tuple[float, ndarray[dtype=float64]]], hessian: collections.abc.Callable[["
                      "ndarray[dtype=float64]], ndarray[dtype=float64]], "
                      "x: ndarray[dtype=float64]) -> Report"),
-             "One Newton, RFO, or dogleg step. ``hessian(x)`` returns an ``(n, n)`` matrix.");
+             "One Newton, RFO, or dogleg step. ``hessian(x)`` returns an ``(n, n)`` matrix.")
+        .def("forget", [](rgmin::Solver& solver) { solver.forget(); },
+             "Drop the method memory. The next step starts from the point it is given.")
+        .def("pair_count", [](rgmin::Solver const& solver) { return solver.pair_count(); },
+             "Stored L-BFGS pairs.")
+        .def(
+            "push_pair",
+            [](rgmin::Solver& solver, nb::handle s_obj, nb::handle y_obj) {
+                auto take = [](nb::handle obj, char const* name) {
+                    std::vector<double> out;
+                    try {
+                        auto array = nb::cast<nb::ndarray<double, nb::ndim<1>, nb::c_contig>>(obj);
+                        out.assign(array.data(), array.data() + array.size());
+                    } catch (nb::cast_error const&) {
+                        throw nb::type_error((std::string(name) + " must be a contiguous float64 vector").c_str());
+                    }
+                    return out;
+                };
+                std::vector<double> s = take(s_obj, "s");
+                std::vector<double> y = take(y_obj, "y");
+                if (s.size() != y.size() || s.size() != solver.dim()) {
+                    throw nb::value_error("push_pair vectors must have length dim");
+                }
+                if (solver.push_pair(s.data(), y.data(), s.size()) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "push_pair failed");
+                }
+            },
+            nb::arg("s"), nb::arg("y"),
+            "Store one L-BFGS pair ``(s, y)``. A pair the curvature gate rejects is declined.")
+        .def(
+            "set_maxmove", [](rgmin::Solver& solver, double cap) { solver.set_maxmove(cap); },
+            nb::arg("cap"), "Euclidean step cap. A negative value clears every cap.")
+        .def(
+            "set_atom_maxmove",
+            [](rgmin::Solver& solver, double cap) { solver.set_atom_maxmove(cap); }, nb::arg("cap"),
+            "Per-atom step cap. A non-positive value clears it.")
+        .def(
+            "set_lbfgs_scaled",
+            [](rgmin::Solver& solver, double cap) {
+                if (solver.set_lbfgs_scaled(cap) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "set_lbfgs_scaled failed");
+                }
+            },
+            nb::arg("cap"),
+            "ASE length control. A non-positive cap restores 0.2.")
+        .def(
+            "set_lbfgs_fixed_h0",
+            [](rgmin::Solver& solver, double h0) {
+                if (solver.set_lbfgs_fixed_h0(h0) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "set_lbfgs_fixed_h0 failed");
+                }
+            },
+            nb::arg("h0"), "Fixed initial inverse-Hessian scale. A non-positive value clears it.")
+        .def(
+            "set_fire_config",
+            [](rgmin::Solver& solver, double dt, double dt_max, std::size_t n_min, double f_inc,
+               double f_dec, double alpha, double f_alpha) {
+                if (solver.set_fire_config(dt, dt_max, n_min, f_inc, f_dec, alpha, f_alpha) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "set_fire_config failed");
+                }
+            },
+            nb::arg("dt"), nb::arg("dt_max"), nb::arg("n_min"), nb::arg("f_inc"), nb::arg("f_dec"),
+            nb::arg("alpha"), nb::arg("f_alpha"),
+            "FIRE integrator parameters. The velocity is cleared.")
+        .def(
+            "set_fire_preset",
+            [](rgmin::Solver& solver, std::string const& name) {
+                rgmin_fire_preset_t preset = RGMIN_FIRE_PRESET_DEFAULT;
+                if (name == "guenole2020" || name == "fire2") {
+                    preset = RGMIN_FIRE_PRESET_GUENOLE2020;
+                } else if (name != "default") {
+                    throw nb::value_error("fire preset must be default or guenole2020");
+                }
+                if (solver.set_fire_preset(preset) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "set_fire_preset failed");
+                }
+            },
+            nb::arg("name"), "FIRE 2.0 parameter set. ``guenole2020`` is Table 1 of Guenole 2020.")
+        .def(
+            "set_fire_abc",
+            [](rgmin::Solver& solver, bool on) {
+                if (solver.set_fire_abc(on) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "set_fire_abc failed");
+                }
+            },
+            nb::arg("on"), "ABC-FIRE on a FIRE 2.0 session.");
 
     m.def(
         "minimize",
@@ -642,7 +778,8 @@ NB_MODULE(_core, m) {
             }
             std::size_t const budget = config.control().maxiter;
             if (budget == 0) {
-                return nb::make_tuple(zero_budget_report(function, x0, config.control()), x0);
+                return nb::make_tuple(
+                    zero_budget_report(function, x0, config.control(), config.method()), x0);
             }
             rgmin::Report report{};
             for (std::size_t i = 0; i < budget; ++i) {

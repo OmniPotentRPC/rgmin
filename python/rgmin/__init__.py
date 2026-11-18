@@ -34,6 +34,7 @@ _OPTIMIZERS = frozenset(
         "FIRE2",
         "FRPR",
         "FletcherReeves",
+        "GromacsSteep",
         "HagerZhang",
         "HestenesStiefel",
         "LBFGS",
@@ -52,6 +53,7 @@ _EXPORTS = [
     "BFGS",
     "FIRE",
     "FIRE2",
+    "GromacsSteep",
     "LBFGS",
     "LBFGSLineSearch",
     "LbfgsPairs",
@@ -69,6 +71,7 @@ _EXPORTS = [
     "__version__",
     "lowest_eigenpairs",
     "minimize",
+    "gromacs_mdp_options",
 ]
 
 
@@ -172,6 +175,10 @@ class SolverConfig(_SolverConfigBase):
 
 
 def __getattr__(name: str):
+    if name == "gromacs_mdp_options":
+        from rgmin._gromacs import gromacs_mdp_options
+
+        return gromacs_mdp_options
     if name in _OPTIMIZERS:
         from rgmin import optimize
 
