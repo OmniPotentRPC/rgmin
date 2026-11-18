@@ -2410,12 +2410,19 @@ impl Solver {
     }
 
     /// `obj` behind the evaluation counter. With `etol` set and no energy
-    /// recorded yet, it also keeps the value the step finds at `x`.
-    fn counting<'a, O>(&self, obj: &'a O, x: &Array1<f64>) -> Counted<'a, O>
+    /// recorded yet, the energy at `x` is the cached one when `x` is the
+    /// iterate this session last evaluated, since the step will not call
+    /// the oracle there. Otherwise the counter keeps the value the step
+    /// finds at `x`.
+    fn counting<'a, O>(&mut self, obj: &'a O, x: &Array1<f64>) -> Counted<'a, O>
     where
         O: ?Sized,
     {
-        if self.control.etol.is_some() && self.stops.wants_start() {
+        let wants_start = self.control.etol.is_some() && self.stops.wants_start();
+        if wants_start && self.same_last_x(x) {
+            self.stops.seed(Some(self.last_value));
+            Counted::new(obj)
+        } else if wants_start {
             Counted::watching(obj, x)
         } else {
             Counted::new(obj)
