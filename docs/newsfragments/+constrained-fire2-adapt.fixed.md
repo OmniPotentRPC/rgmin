@@ -1,0 +1,1 @@
+Constrained FIRE 2.0 adapts `dt`, `n_pos` and `alpha` once per step. The preparation step already applies that update, and the forward step no longer applies it again, so a rollback shrinks `dt` by `f_dec` once and a downhill step counts `n_pos` once.

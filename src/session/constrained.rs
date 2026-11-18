@@ -25,7 +25,7 @@ use crate::adam::adam_direction;
 use crate::bb::bb_direction;
 use crate::error::{Error, Result};
 use crate::fire::{
-    FireKind, FirePreparation, FirePreset, FireState, fire_after_v1, fire_displacement,
+    FireKind, FirePreparation, FirePreset, FireState, fire_after_v1, fire_displacement_into,
     fire_prepare_v2, project_box_tangent,
 };
 use crate::holonomic::{ConstraintError, DistanceConstraints, Tangent, unsupported};
@@ -1303,7 +1303,13 @@ impl Solver {
             }
         }
         let forward_start = x.clone();
-        let dx_q = fire_displacement(state, &raw);
+        // `fire_prepare_v2` already counted this step's power: `n_pos`,
+        // `dt` and `alpha` are current. A second adapt here would grow
+        // them again on a downhill step and, after the delay, shrink
+        // `dt` by `f_dec` a second time on a rollback. The forward step
+        // only kicks and mixes, as the unconstrained session does.
+        let mut dx_q = Array1::zeros(state.vel.len());
+        fire_displacement_into(state, &raw, &mut dx_q);
         let dx_q = match caps.atom.or(caps.euclid) {
             Some(cap) if state.abc => clip_components_q(state, cap, &space.root_m),
             _ => dx_q,
@@ -1649,6 +1655,7 @@ impl Solver {
 
 #[cfg(test)]
 mod tests {
+    use eindir_core::{DifferentiableObjective, Objective};
     use ndarray::{Array1, ArrayView1, array};
 
     use super::{Inner, Solver, Space, l2};
@@ -1747,5 +1754,169 @@ mod tests {
                 "{accept:?}: raw chords {raw_normal}"
             );
         }
+    }
+
+    /// Equal y-force on both atoms of a bond that lies on x. The force is
+    /// orthogonal to the constraint, the bond stays at its length, and the
+    /// multiplier is zero: the set is installed and does no work.
+    struct Slide {
+        sign: std::sync::atomic::AtomicI8,
+        bounds: eindir_core::Bounds<f64>,
+    }
+
+    impl Objective<f64> for Slide {
+        fn dim(&self) -> usize {
+            6
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.value_and_gradient(x).0
+        }
+    }
+
+    impl eindir_core::Gradient<f64> for Slide {
+        fn dim(&self) -> usize {
+            6
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.value_and_gradient(x).1
+        }
+    }
+
+    impl DifferentiableObjective<f64> for Slide {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let s = f64::from(self.sign.load(std::sync::atomic::Ordering::Relaxed));
+            let mut g = Array1::zeros(x.len());
+            g[1] = -s;
+            g[4] = -s;
+            (-s * (x[1] + x[4]), g)
+        }
+    }
+
+    fn fire_scalars(solver: &Solver) -> (f64, usize, f64) {
+        let Inner::Fire(state) = &solver.inner else {
+            unreachable!("FIRE session")
+        };
+        (state.dt, state.n_pos, state.alpha)
+    }
+
+    /// Constrained FIRE 2.0 used to adapt twice: `fire_prepare_v2` and
+    /// then `fire_displacement`. On this uphill/downhill script the
+    /// constrained `dt`, `n_pos` and `alpha` follow the unconstrained
+    /// session, and a rollback multiplies `dt` by `f_dec` once.
+    #[test]
+    fn constrained_fire2_adapts_once_on_the_unconstrained_schedule() {
+        use std::sync::atomic::Ordering;
+
+        let config = crate::FireConfig {
+            dt: 0.2,
+            dt_max: 10.0,
+            // `N_min = 1` so the non-positive branch shrinks on the
+            // first step. A second adapt then multiplies by `f_dec` again.
+            n_min: 1,
+            f_inc: 1.1,
+            f_dec: 0.5,
+            alpha: 0.1,
+            f_alpha: 0.99,
+        };
+        // The first step has zero velocity, so its power is not positive
+        // and `dt` must shrink once. Two downhill steps cross `n_min`.
+        // Each later sign change is an uphill rollback.
+        let script = [1_i8, 1, 1, -1, -1, -1, 1];
+        let start = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], start.view()).unwrap();
+        let control = Control::default()
+            .with_maxiter(script.len())
+            .with_gtol(0.0)
+            .with_istep(config.dt);
+        let mut held = Solver::new(Method::fire(crate::FireKind::V2), control.clone(), 6);
+        let mut free = Solver::new(Method::fire(crate::FireKind::V2), control, 6);
+        held.set_fire_config(config).unwrap();
+        free.set_fire_config(config).unwrap();
+        held.set_distance_constraints(set.clone()).unwrap();
+        let slide = Slide {
+            sign: 1.into(),
+            bounds: eindir_core::Bounds::new(
+                Array1::from_elem(6, -1e6),
+                Array1::from_elem(6, 1e6),
+                0.0,
+            ),
+        };
+        let mut x_held = start.clone();
+        let mut x_free = start;
+        let mut grew = false;
+        let mut shrank = false;
+        let mut held_trace = Vec::new();
+        let mut free_trace = Vec::new();
+        for (k, &sign) in script.iter().enumerate() {
+            slide.sign.store(sign, Ordering::Relaxed);
+            // The session reuses the gradient at an unchanged point. Drop
+            // that cache so this step reads the scripted sign.
+            held.forget_evaluation();
+            free.forget_evaluation();
+            let (dt_before, n_pos_before, _) = fire_scalars(&held);
+            held.step(&slide, &mut x_held).unwrap();
+            free.step(&slide, &mut x_free).unwrap();
+            let (dt, n_pos, alpha) = fire_scalars(&held);
+            let unconstrained = fire_scalars(&free);
+            held_trace.push((dt, n_pos, alpha));
+            free_trace.push(unconstrained);
+            assert_eq!(
+                (dt, n_pos, alpha),
+                unconstrained,
+                "step {k}: dt, n_pos, alpha"
+            );
+            assert!(
+                set.excess(x_held.view()) <= 1.0,
+                "step {k}: the bond left the set"
+            );
+            assert!(
+                n_pos <= n_pos_before + 1,
+                "step {k}: n_pos advanced by more than one"
+            );
+            let state = match &held.inner {
+                Inner::Fire(state) => state,
+                _ => unreachable!("FIRE session"),
+            };
+            if n_pos == n_pos_before + 1 && n_pos > state.n_min {
+                assert_eq!(
+                    dt,
+                    dt_before * state.f_inc,
+                    "step {k}: downhill dt grew by more or less than f_inc"
+                );
+                assert_ne!(
+                    dt,
+                    dt_before * state.f_inc * state.f_inc,
+                    "step {k}: downhill dt grew twice"
+                );
+                grew = true;
+            }
+            // Non-positive power, including a rollback after the velocity
+            // was zeroed. The delay has already passed (`n_min` is 1), so
+            // `dt` shrinks by `f_dec` and must not shrink again.
+            if dt < dt_before {
+                assert_eq!(
+                    dt,
+                    dt_before * state.f_dec,
+                    "step {k}: rollback shrank dt by other than one f_dec"
+                );
+                assert_ne!(
+                    dt,
+                    dt_before * state.f_dec * state.f_dec,
+                    "step {k}: rollback shrank dt twice"
+                );
+                assert_eq!(n_pos, 0, "step {k}: rollback left n_pos set");
+                assert_eq!(alpha, state.alpha_start, "step {k}: rollback left alpha");
+                shrank = true;
+            }
+        }
+        assert!(grew, "the script never grew dt");
+        assert!(shrank, "the script never rolled back");
+        assert_eq!(
+            held_trace, free_trace,
+            "constrained FIRE 2.0 left the unconstrained dt, n_pos, alpha trajectory"
+        );
     }
 }
