@@ -1,0 +1,1 @@
+GROMACS steepest descent multiplies a rejected displacement by 0.5, matching `do_steep` in GROMACS 2025.4. `GromacsSteepConfig::with_shrink` selects another factor in `(0, 1)`, including the reference manual's 0.2.
