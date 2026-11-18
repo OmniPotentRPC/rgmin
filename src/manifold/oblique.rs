@@ -156,6 +156,24 @@ impl Manifold for Oblique {
         }
     }
 
+    fn holonomic_chart(&self, x: &Array1<f64>) -> Option<(Array1<f64>, Array2<f64>)> {
+        if !self.fits(x.len()) || !x.iter().all(|value| value.is_finite()) {
+            return None;
+        }
+        let mut values = Array1::zeros(self.m);
+        let mut gradient = Array2::zeros((x.len(), self.m));
+        for column in 0..self.m {
+            let mut value = -1.0;
+            for row in 0..self.n {
+                let component = x[row + column * self.n];
+                value += component * component;
+                gradient[(row + column * self.n, column)] = 2.0 * component;
+            }
+            values[column] = value;
+        }
+        Some((values, gradient))
+    }
+
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         if !self.fits(x.len()) || v.len() != x.len() {
             return v.clone();

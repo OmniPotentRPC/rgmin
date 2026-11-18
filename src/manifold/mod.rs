@@ -202,6 +202,7 @@ macro_rules! flat_geodesics {
     };
 }
 
+mod affine;
 mod centered;
 mod complex_circle;
 mod constant;
@@ -209,6 +210,7 @@ mod euclidean;
 mod euclidean_complex;
 mod grassmann;
 mod hyperbolic;
+pub(crate) mod mass;
 mod multinomial;
 mod multinomial_ds;
 mod multinomial_sym;
@@ -230,6 +232,7 @@ mod subspace_sphere;
 mod symmetric;
 mod unitary;
 
+pub use affine::AffineHyperplane;
 pub use centered::{
     CenterMode, CenteredMatrix, inner as inner_centered, is_centered, is_centered_mode,
     pack as pack_centered, typical_dist as typical_dist_centered,
@@ -245,6 +248,7 @@ pub use euclidean_complex::{
 };
 pub use grassmann::Grassmann;
 pub use hyperbolic::{Hyperbolic, minkowski, pack, unpack};
+pub use mass::{ConstraintReaction, MassMetric, constraint_reaction, tangent_dimension};
 pub use multinomial::Multinomial;
 pub use multinomial_ds::{
     MultinomialDoublyStochastic, inner as inner_ds, is_doubly_stochastic, pack as pack_ds,
@@ -773,6 +777,90 @@ pub trait Manifold {
     fn typical_dist(&self, n: usize) -> f64 {
         (n as f64).sqrt()
     }
+
+    /// Retraction that agrees with the exponential through second order.
+    ///
+    /// [`Self::exp`] is the geodesic, which is exact. A kind without a
+    /// closed exponential uses [`Self::retract`]. The embedded projection
+    /// retraction is second order (Absil and Malick, SIAM J. Optim. 22,
+    /// 2012, <https://doi.org/10.1137/100802529>); the Stiefel QR
+    /// retraction is not, and [`crate::manifold::StiefelNp`] replaces it
+    /// here with the polar factor.
+    fn retract_second_order(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        if let Some(y) = self.exp(x, v) {
+            y
+        } else {
+            self.retract(x, v)
+        }
+    }
+
+    /// Vector transport consistent with [`Self::retract_second_order`].
+    ///
+    /// Parallel transport along `step` when the kind provides it, and
+    /// [`Self::transport`] otherwise.
+    fn transport_second_order(
+        &self,
+        x: &Array1<f64>,
+        step: &Array1<f64>,
+        y: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> Array1<f64> {
+        if let Some(w) = self.parallel_transport_along(x, step, v) {
+            w
+        } else {
+            self.transport(x, y, v)
+        }
+    }
+
+    /// `true` when the kinetic drift is the straight step `x + v` followed
+    /// by [`Self::snap_mass`]. Affine constraints use this so the mass-metric
+    /// restoration matches RATTLE. Curved kinds use the geodesic.
+    fn drift_is_straight(&self) -> bool {
+        false
+    }
+
+    /// Orthonormal Euclidean basis of the normal space at `x`, one column
+    /// per normal. `None` asks the caller to build the basis from
+    /// [`Self::project`].
+    fn euclidean_normals(&self, x: &Array1<f64>) -> Option<Array2<f64>> {
+        let _ = x;
+        None
+    }
+
+    /// Orthogonal projection of `v` onto `T_x` in the mass inner product
+    /// `u^T M v`. The result satisfies `N^T v = 0` and the correction lies
+    /// along `M^{-1} N`, which is RATTLE's velocity projection.
+    fn project_mass_velocity(
+        &self,
+        metric: &mass::MassMetric,
+        x: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> crate::Result<Array1<f64>> {
+        mass::project_mass(self, metric, x, v)
+    }
+
+    /// Mass-metric restoration of a point onto a flat constraint.
+    ///
+    /// The default returns `x`: a curved retraction has already landed on
+    /// the manifold. An affine constraint overrides this with the RATTLE
+    /// correction along `M^{-1} N`.
+    fn snap_mass(&self, metric: &mass::MassMetric, x: &Array1<f64>) -> crate::Result<Array1<f64>> {
+        let _ = metric;
+        Ok(x.clone())
+    }
+
+    /// Holonomic chart \(c(x) = 0\) and its Euclidean gradient.
+    ///
+    /// Columns of the gradient are \(\nabla c_i\), in the same order as
+    /// the values. The kinetic drift uses the chart for one RATTLE step
+    /// when the masses are not a positive multiple of the identity
+    /// (Leimkuhler and Matthews, Proc. R. Soc. A 472, 20160138, 2016, the
+    /// \(A_g\) map). `None` keeps the embedding geodesic. The sphere
+    /// publishes \(c = \|x\|^2 - 1\).
+    fn holonomic_chart(&self, x: &Array1<f64>) -> Option<(Array1<f64>, Array2<f64>)> {
+        let _ = x;
+        None
+    }
 }
 
 /// [`ManifoldKind::Grassmann`]: \(\mathrm{Gr}(n, 1)\) with `n` the packed
@@ -876,5 +964,44 @@ impl Manifold for ManifoldKind {
 
     fn typical_dist(&self, n: usize) -> f64 {
         with_kind!(self, |f| f.typical_dist(n))
+    }
+
+    fn retract_second_order(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        with_kind!(self, |f| f.retract_second_order(x, v))
+    }
+
+    fn transport_second_order(
+        &self,
+        x: &Array1<f64>,
+        step: &Array1<f64>,
+        y: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> Array1<f64> {
+        with_kind!(self, |f| f.transport_second_order(x, step, y, v))
+    }
+
+    fn drift_is_straight(&self) -> bool {
+        with_kind!(self, |f| f.drift_is_straight())
+    }
+
+    fn euclidean_normals(&self, x: &Array1<f64>) -> Option<Array2<f64>> {
+        with_kind!(self, |f| f.euclidean_normals(x))
+    }
+
+    fn project_mass_velocity(
+        &self,
+        metric: &mass::MassMetric,
+        x: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> crate::Result<Array1<f64>> {
+        with_kind!(self, |f| f.project_mass_velocity(metric, x, v))
+    }
+
+    fn snap_mass(&self, metric: &mass::MassMetric, x: &Array1<f64>) -> crate::Result<Array1<f64>> {
+        with_kind!(self, |f| f.snap_mass(metric, x))
+    }
+
+    fn holonomic_chart(&self, x: &Array1<f64>) -> Option<(Array1<f64>, Array2<f64>)> {
+        with_kind!(self, |f| f.holonomic_chart(x))
     }
 }

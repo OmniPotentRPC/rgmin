@@ -28,12 +28,18 @@ listed on each class and in the ASE migration page of the docs.
 
 from __future__ import annotations
 
+import sys
 import warnings
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, TypeGuard
 
 import numpy as np
 
+from rgmin._gromacs import (
+    GROMACS_KJMOL_NM_TO_EV_ANGSTROM,
+    GROMACS_NM_TO_ANGSTROM,
+    gromacs_mdp_options,
+)
 from rgmin._maturin import Session
 
 # After the maturin import, so a nanobind build fails there before ASE loads.
@@ -661,6 +667,72 @@ class SteepestDescent(_Scaled):
     kind = "sd"
 
 
+class GromacsSteep(_RgminOptimizer):
+    """GROMACS ``integrator = steep`` with MDP parameters and units."""
+
+    kind = "gromacs-steep"
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        *,
+        emtol: float = 10.0,
+        emstep: float = 0.01,
+        nsteps: int = -1,
+        shrink: float | None = None,
+        max_constraint_shrinks: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        mapped = gromacs_mdp_options(emtol=emtol, emstep=emstep, nsteps=nsteps)
+        self.emtol = float(emtol)
+        self.emstep = float(emstep)
+        self.gromacs_nsteps = int(nsteps)
+        self.shrink = None if shrink is None else float(shrink)
+        self.max_constraint_shrinks = (
+            None if max_constraint_shrinks is None else int(max_constraint_shrinks)
+        )
+        self._fmax = float(mapped["gtol"])
+        self._initial_step = float(mapped["istep"])
+        self.maxstep = self._initial_step
+        super().__init__(
+            atoms,
+            restart=restart,
+            logfile=logfile,
+            trajectory=trajectory,
+            append_trajectory=append_trajectory,
+            **kwargs,
+        )
+
+    def _session_options(self) -> dict[str, Any]:
+        options: dict[str, Any] = {"max_atom": 0.0, "istep": self._initial_step}
+        if self.shrink is not None:
+            options["shrink"] = self.shrink
+        if self.max_constraint_shrinks is not None:
+            options["max_constraint_shrinks"] = self.max_constraint_shrinks
+        return options
+
+    def irun(self, fmax: float | None = None, steps: int | None = None) -> Iterator[bool]:
+        """Yield convergence after each step, stopping at machine precision."""
+        force_limit = self._fmax if fmax is None else float(fmax)
+        if steps is None:
+            steps = sys.maxsize if self.gromacs_nsteps == -1 else self.gromacs_nsteps
+        for converged in super().irun(fmax=force_limit, steps=steps):
+            yield converged
+            if self._native is not None and self._native.last_stop == "machine_precision":
+                break
+
+    def run(self, fmax: float | None = None, steps: int | None = None) -> bool:
+        """Run with ``emtol`` and ``nsteps`` unless explicitly overridden."""
+        converged = False
+        for converged in self.irun(fmax=fmax, steps=steps):
+            pass
+        return bool(converged)
+
+
 class BarzilaiBorwein(_Scaled):
     """Barzilai-Borwein spectral steepest descent."""
 
@@ -792,6 +864,7 @@ __all__ = [
     "DaiYuan",
     "EonCG",
     "FletcherReeves",
+    "GromacsSteep",
     "HagerZhang",
     "HestenesStiefel",
     "LBFGSLineSearch",

@@ -44,6 +44,8 @@ mod compact_tr;
 pub mod con_checkpoint;
 mod control;
 mod diis;
+/// Constrained BAOAB and RATTLE on an embedded manifold.
+pub mod dynamics;
 mod eon_cg;
 mod error;
 /// C ABI, gated behind the `capi` feature.
@@ -52,6 +54,8 @@ mod error;
 pub mod ffi;
 /// FIRE / FIRE 2.0 inertial first-order steps.
 pub mod fire;
+/// GROMACS `integrator = steep` adaptive maximum-displacement rule.
+pub mod gromacs;
 /// Holonomic distance constraints (SHAKE, LINCS, SETTLE and RATTLE).
 pub mod holonomic;
 /// Matrix-free Newton: Hessian actions and Steihaug-Toint CG.
@@ -138,11 +142,18 @@ pub use adam::minimize_adam;
 pub use con_checkpoint::{read_checkpoint, write_checkpoint};
 pub use control::{Control, NoiseFloor, StopNorm};
 pub use dlaf_kind::DlaFutureParams;
+pub use dynamics::{
+    DynamicsError, DynamicsReport, LangevinConfig, NveConfig, PhasePoint, PlanarWall, baoab, rattle,
+};
 pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};
 pub use elpa_kind::{ElpaParams, ElpaSpectrum, ElpaStage, elpa_config, elpa_spectrum};
 pub use eon_cg::{EonCg, EonCgReport, minimize_eon_cg};
 pub use error::{Error, Result};
 pub use fire::{Fire2Extras, FireConfig, FireKind, FirePreset, FireVariant, guenole2020};
+pub use gromacs::{
+    GROMACS_STEEP_EMSTEP_DEFAULT, GROMACS_STEEP_GROW, GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS,
+    GROMACS_STEEP_SHRINK, GromacsSteep, GromacsSteepConfig, gromacs_steep_max_constraint_shrinks,
+};
 pub use highs_kind::{
     HighsCCallback, HighsCallback, HighsCallbackKind, HighsCrossover, HighsOptions, HighsSolverKind,
 };
@@ -172,10 +183,11 @@ pub use lowest_mode::{
     lowest_mode_slepc, lowest_mode_with,
 };
 pub use manifold::{
-    CenteredMatrix, ComplexCircle, Constant, EuclideanComplex, Grassmann, Hyperbolic, Manifold,
-    ManifoldFactor, ManifoldKind, Multinomial, MultinomialDoublyStochastic, MultinomialSymmetric,
-    Oblique, PoincareBall, Positive, RiemannianManifold, SkewSymmetric, Spd, SpdMetric,
-    SphereComplex, StiefelNp, StiefelRetraction, Symmetric, Unitary,
+    AffineHyperplane, CenteredMatrix, ComplexCircle, Constant, ConstraintReaction,
+    EuclideanComplex, Grassmann, Hyperbolic, Manifold, ManifoldFactor, ManifoldKind, MassMetric,
+    Multinomial, MultinomialDoublyStochastic, MultinomialSymmetric, Oblique, PoincareBall,
+    Positive, RiemannianManifold, SkewSymmetric, Spd, SpdMetric, SphereComplex, StiefelNp,
+    StiefelRetraction, Symmetric, Unitary, constraint_reaction, tangent_dimension,
 };
 pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
