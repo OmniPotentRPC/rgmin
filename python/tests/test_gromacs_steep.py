@@ -89,3 +89,34 @@ def test_native_session_consumes_the_mapped_step() -> None:
 
     result, _value, _gnorm = session.step([1.0, 0.0, 0.0], quadratic)
     np.testing.assert_allclose(result, [0.9, 0.0, 0.0], rtol=0.0, atol=1e-15)
+
+
+def _quadratic(point: list[float]) -> tuple[float, list[float]]:
+    vector = np.asarray(point, dtype=float)
+    return 0.5 * float(vector @ vector), vector.tolist()
+
+
+def _refused_then_accepted(shrink: float) -> float:
+    """One accept, one refusal, one accept, from x=0.3 with h=0.5."""
+    session = Session("gromacs-steep", 1, istep=0.5, max_atom=0.0, shrink=shrink)
+    point = [0.3]
+    for _ in range(3):
+        point, _value, _gnorm = session.step(point, _quadratic)
+    return point[0]
+
+
+def test_session_shrink_selects_the_refusal_factor() -> None:
+    def expected(shrink: float) -> float:
+        step = 0.5
+        point = 0.3
+        point -= step
+        step *= 1.2
+        step *= shrink
+        point += step
+        return point
+
+    assert _refused_then_accepted(0.5) == expected(0.5)
+    assert _refused_then_accepted(0.2) == expected(0.2)
+    assert _refused_then_accepted(0.5) != _refused_then_accepted(0.2)
+    with pytest.raises(ValueError):
+        Session("steepest", 1, shrink=0.5)

@@ -1,7 +1,10 @@
 mod common;
 
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Control, DistanceConstraints, Method, NoiseFloor, Oracle, Solver, Status};
+use rgmin::{
+    Control, DistanceConstraints, Error, GROMACS_STEEP_GROW, GROMACS_STEEP_SHRINK,
+    GromacsSteepConfig, Method, NoiseFloor, Oracle, Solver, Status,
+};
 
 use common::morse_value_grad;
 
@@ -21,14 +24,66 @@ fn morse_dimer_has_the_exact_accept_reject_h_sequence() {
     let mut x = array![0.0, 0.0, 0.0, 2.8, 0.0, 0.0];
     let mut solver = Solver::new(Method::GromacsSteep, control(0.1, 0.0, 10), x.len());
 
-    let expected: [f64; 3] = [0.12, 0.024, 0.0288];
-    let expected_positions: [f64; 3] = [3.0, 3.0, 2.952];
-    for (&h, &distance) in expected.iter().zip(&expected_positions) {
+    // Accept grows by 1.2, the overshoot is refused and multiplied by the
+    // GROMACS 0.5 factor, and the shorter trial is accepted.
+    let mut h = 0.1;
+    let mut distance = 2.8;
+    let accepted = [true, false, true];
+    for &take in &accepted {
         let report = solver.step(&objective, &mut x).unwrap();
         assert_eq!(report.status, Status::Iterating);
+        if take {
+            distance += if distance < 3.0 { 2.0 * h } else { -2.0 * h };
+            h *= GROMACS_STEEP_GROW;
+        } else {
+            h *= GROMACS_STEEP_SHRINK;
+        }
         assert_eq!(solver.gromacs_step_size().unwrap().to_bits(), h.to_bits());
-        assert!((x[3] - x[0] - distance).abs() < 1e-14);
+        assert_eq!((x[3] - x[0]).to_bits(), distance.to_bits());
     }
+}
+
+#[test]
+fn with_shrink_replays_the_reference_manual_sequence() {
+    let objective = Oracle::unbounded(6, |x: ArrayView1<f64>| {
+        morse_value_grad(x, [100.0, 100.0, 100.0])
+    });
+    let mut x = array![0.0, 0.0, 0.0, 2.8, 0.0, 0.0];
+    let mut solver = Solver::new(Method::GromacsSteep, control(0.1, 0.0, 10), x.len());
+    solver
+        .set_gromacs_steep_config(GromacsSteepConfig::default().with_shrink(0.2))
+        .unwrap();
+
+    let mut h = 0.1;
+    let mut distance = 2.8;
+    let accepted = [true, false, true];
+    for &take in &accepted {
+        solver.step(&objective, &mut x).unwrap();
+        if take {
+            distance += if distance < 3.0 { 2.0 * h } else { -2.0 * h };
+            h *= GROMACS_STEEP_GROW;
+        } else {
+            h *= 0.2;
+        }
+        assert_eq!(solver.gromacs_step_size().unwrap().to_bits(), h.to_bits());
+        assert_eq!((x[3] - x[0]).to_bits(), distance.to_bits());
+    }
+}
+
+#[test]
+fn steep_config_is_refused_outside_a_steep_session_and_outside_the_unit_interval() {
+    let mut solver = Solver::new(Method::GromacsSteep, control(0.1, 0.0, 1), 3);
+    for factor in [0.0, 1.0, -0.5, 2.0, f64::NAN, f64::INFINITY] {
+        let err = solver
+            .set_gromacs_steep_config(GromacsSteepConfig::default().with_shrink(factor))
+            .unwrap_err();
+        assert!(matches!(err, Error::Steep { .. }), "{factor}: {err}");
+    }
+    let mut other = Solver::new(Method::Steepest, control(0.1, 0.0, 1), 3);
+    let err = other
+        .set_gromacs_steep_config(GromacsSteepConfig::default())
+        .unwrap_err();
+    assert!(matches!(err, Error::Steep { .. }), "{err}");
 }
 
 #[test]
