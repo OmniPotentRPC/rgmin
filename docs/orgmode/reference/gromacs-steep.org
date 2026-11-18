@@ -33,6 +33,8 @@ does the same for ~gromacs-steep~.
 | largest per-atom force is below ~Control::gtol~ | ~Tolerance~ | ~RGMIN_STOP_TOLERANCE~ |
 | ~Control::maxiter~ trials were attempted | ~Budget~ | ~RGMIN_STOP_BUDGET~ |
 | the proposed displacement cannot change any coordinate | ~MachinePrecision~ | ~RGMIN_STOP_MACHINE_PRECISION~ |
+| callback returned a non-finite value or gradient | ~Error::Oracle~ | ~RGMIN_INTERNAL_ERROR~ (+ ~rgmin_last_error~) |
+| constraints could not place a trial point | ~Error::Constraint~ | ~RGMIN_CONSTRAINT_ERROR~ (+ ~rgmin_last_constraint_error~) |
 
 ~Report::stop_norm~ is always ~StopNorm::MaxAtom~ for this method, even
 when the input ~Control~ names another norm. Rejected trials count as
@@ -50,9 +52,10 @@ step: the old point is kept and ~h~ is multiplied by ~shrink~, the
 same branch GROMACS takes by setting the trial energy to +infinity
 (~minimize.cpp~ lines 3008-3009 and 3104).
 ~GromacsSteepConfig::max_constraint_shrinks~ bounds that run. The
-default, 14, is the number of factors of one half that take the default
-~emstep~ of 0.01 down through the single-precision ~ustep~ floor
-(~minimize.cpp~ line 3143, ~readir.cpp~ line 2384). The next failure
+session derives its default from the actual ~emstep~ and shrink factor:
+the number of shrinks until ~h~ reaches floating-point epsilon
+(`~h * shrink^k <= eps~`). At the canonical ~emstep = 0.01~ and
+~shrink = 0.5~, that gives 46 in f64 arithmetic. The next failure
 returns the constraint error. Zero restores an error on the first
 failure and does not shrink. A placement that meets the constraints
 restarts the count. The trial energy is tested only after those hooks,
@@ -72,8 +75,9 @@ The Python ~gromacs_mdp_options~ layer converts:
 | ~emstep~ | 0.01 nm | ~istep~ in Å |
 | ~nsteps~ | -1 | no limit; otherwise ~maxiter~ |
 
-The Rust stepper, C ABI, and C++ wrapper do no unit conversion.
+The Rust stepper, C ABI, and C++ wrapper do no unit conversion. C and
+C++ expose both ~shrink~ and ~max_constraint_shrinks~ through
+~rgmin_solver_set_gromacs_steep~ / ~Solver::set_gromacs_steep~.
 ABI minor 48 carries ~RGMIN_GROMACS_STEEP~ and
 ~RGMIN_STOP_MACHINE_PRECISION~. Minor 47 is the level-set constraint
-setters. The shrink factor is not a C symbol: the public C surface is
-unchanged, so the minor stays 48.
+setters.
