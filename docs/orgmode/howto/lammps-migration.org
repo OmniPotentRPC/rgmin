@@ -70,15 +70,19 @@ For example, at ~ftol 1e-8~ Hager-Zhang stopped at 10,000 iterations on a rattle
 - ~ftol~ stops when the force norm of ~min_modify norm~ is below ~ftol~: the two-norm of the global ~3N~ force vector by default, the largest per-atom force for ~norm max~, and the largest component for ~norm inf~.
   rgmin computes it as its ~TWO~, ~MAX_ATOM~ or ~INF~ stop norm of the gradient ~-F~, which is the force after every fix has modified it.
   LAMMPS compares ~|F|^2 < ftol^2~ and rgmin ~|F| < ftol~; the two agree except within rounding of the bound.
-- ~etol~ stops when ~|E_k - E_{k-1}| < etol (|E_k| + |E_{k-1}| + 1e-8) / 2~ for the energies of two consecutive iterates, as in ~min_style cg~.
-  rgmin has no relative energy rule, so the plugin applies this test after each step.
-  A step that rgmin refused leaves the iterate in place and does not take the test.
+- ~etol~ stops when ~|E_k - E_{k-1}| < etol (|E_k| + |E_{k-1}| + eps) / 2~ for the energies of two consecutive accepted steps, the test of ~min_style cg~.
+  The plugin passes ~etol~ to ~rgmin_solver_set_etol~ and ends the run with the LAMMPS stopping criterion ~energy tolerance~ when rgmin reports ~RGMIN_STOP_ENERGY_TOLERANCE~.
+  A step that rgmin refused leaves the iterate in place and does not take the test, and FIRE takes it only after its delay steps, as ~min_style fire~ does.
+  The floor ~eps~ is ~sqrt(DBL_EPSILON)~, 1.5e-8, on the total energy; LAMMPS adds 1e-8 to the energy per atom under ~thermo_modify norm yes~.
+  The two tests are the same relative test and differ only when the energy is as small as the floor.
+  When ~etol~ and ~ftol~ are met by the same step, rgmin reports the force stop, where ~min_style cg~ reports ~energy tolerance~.
+  ~etol 0~ leaves the test off.
 - ~maxiter~ counts rgmin steps, one per LAMMPS iteration and timestep.
 - ~maxeval~ counts force evaluations, the ~Force evaluations~ line of the LAMMPS summary.
   A step that needs several evaluations can pass the limit by the evaluations of that step.
 
 The energy that rgmin minimizes is the one LAMMPS minimizers see: the potential energy of ~thermo_pe~, including fixes with ~fix_modify energy yes~.
-With ~thermo_modify norm yes~ the plugin hands rgmin the total energy, so energy and forces stay consistent, and applies ~etol~ to the per-atom energy that LAMMPS prints.
+With ~thermo_modify norm yes~ the plugin hands rgmin the total energy, so energy and forces stay consistent. The relative ~etol~ test gives the same answer on the total and on the per-atom energy.
 
 ** Fixes
 
