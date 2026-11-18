@@ -538,6 +538,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "minimage"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad8f0c3ad52d3a9253be305dfee0ce9412d3f008784a031e346cc9de8700ee0e"
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -832,6 +838,7 @@ dependencies = [
  "highs",
  "highs-sys",
  "libm",
+ "minimage",
  "multiversion",
  "ndarray",
  "pkg-config",

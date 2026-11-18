@@ -161,7 +161,9 @@ pub enum StopNorm {
     Two,
     /// Largest Euclidean norm over consecutive `(x, y, z)` triples:
     /// ASE `fmax`, eOn `max_atom`, LAMMPS `max`. A trailing partial
-    /// triple counts as one atom.
+    /// triple counts as one atom. A session with a cell block
+    /// ([`crate::Solver::set_cell_block`]) takes the triples over the
+    /// atoms and the magnitude of each cell coordinate.
     MaxAtom,
     /// Largest absolute component: eOn `max_component`, LAMMPS `inf`.
     Inf,
@@ -185,15 +187,49 @@ impl StopNorm {
                 let mut i = 0;
                 while i < g.len() {
                     let end = (i + 3).min(g.len());
-                    let r2: f64 = (i..end).map(|k| g[k] * g[k]).sum();
-                    if !r2.is_finite() {
-                        return f64::INFINITY;
+                    let mut scale = 0.0_f64;
+                    let mut sum = 1.0_f64;
+                    for k in i..end {
+                        let value = g[k].abs();
+                        if !value.is_finite() {
+                            return f64::INFINITY;
+                        }
+                        if value != 0.0 {
+                            if scale < value {
+                                let ratio = scale / value;
+                                sum = 1.0 + sum * ratio * ratio;
+                                scale = value;
+                            } else {
+                                let ratio = value / scale;
+                                sum += ratio * ratio;
+                            }
+                        }
                     }
-                    worst = worst.max(r2.sqrt());
+                    let norm = if scale == 0.0 {
+                        0.0
+                    } else {
+                        scale * sum.sqrt()
+                    };
+                    worst = worst.max(norm);
                     i = end;
                 }
                 worst
             }
+        }
+    }
+
+    /// [`Self::of`] with `[at, n)` read as cell coordinates, which
+    /// [`Self::MaxAtom`] counts one by one. The other norms do not group
+    /// coordinates, so a cell split leaves them as they are.
+    pub(crate) fn of_cells(self, g: ArrayView1<f64>, at: Option<usize>) -> f64 {
+        match at {
+            Some(at) if self == Self::MaxAtom && at <= g.len() => {
+                if g.iter().any(|v| !v.is_finite()) {
+                    return f64::INFINITY;
+                }
+                crate::cell::CellBlock { at, weight: 1.0 }.max_motion(g.len(), |k| g[k])
+            }
+            _ => self.of(g),
         }
     }
 }

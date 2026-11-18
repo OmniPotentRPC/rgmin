@@ -86,6 +86,7 @@ rgmin_solver_set_atom_maxmove
 rgmin_solver_set_box
 rgmin_solver_set_broken_axes
 rgmin_solver_set_cautious
+rgmin_solver_set_cell_block
 rgmin_solver_set_centered_matrix
 rgmin_solver_set_complex_circle
 rgmin_solver_set_constant
@@ -95,6 +96,7 @@ rgmin_solver_set_exp
 rgmin_solver_set_extra_updates
 rgmin_solver_set_factor_shape
 rgmin_solver_set_fire_abc
+rgmin_solver_set_fire_config
 rgmin_solver_set_fire_preset
 rgmin_solver_set_fire_variant
 rgmin_solver_set_frozen
@@ -105,6 +107,7 @@ rgmin_solver_set_highs_crossover
 rgmin_solver_set_highs_solver
 rgmin_solver_set_highs_trust
 rgmin_solver_set_lbfgs_capped
+rgmin_solver_set_lbfgs_fixed_h0
 rgmin_solver_set_lbfgs_neb_guards
 rgmin_solver_set_lbfgs_scaled
 rgmin_solver_set_lbfgs_trust

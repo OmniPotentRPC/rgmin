@@ -252,6 +252,9 @@ fn axpy(a: f64, x: &[f64], y: &mut [f64]) {
 }
 
 fn max_atom(v: &[f64]) -> f64 {
+    if let Some(cell) = crate::cell::active(v.len()) {
+        return cell.max_motion(v.len(), |k| v[k]);
+    }
     let mut m = 0.0_f64;
     let mut i = 0;
     while i < v.len() {

@@ -63,6 +63,8 @@ class Method(enum.IntEnum):
 
     ODE12R = 23
 
+    GROMACS_STEEP = 28
+
     PolakRibiere = 0
 
     FletcherReeves = 1
@@ -111,6 +113,8 @@ class Method(enum.IntEnum):
 
     Ode12r = 23
 
+    GromacsSteep = 28
+
 class Stop(enum.IntEnum):
     """
     Why a step or a run ended. Members are UPPER_SNAKE. CamelCase names are aliases of the same values.
@@ -124,6 +128,8 @@ class Stop(enum.IntEnum):
 
     BUDGET = 3
 
+    MACHINE_PRECISION = 4
+
     Tolerance = 0
 
     NoiseFloor = 1
@@ -131,6 +137,8 @@ class Stop(enum.IntEnum):
     StepTolerance = 2
 
     Budget = 3
+
+    MachinePrecision = 4
 
 class Report:
     """Result of one optimizer step or of ``minimize``."""
@@ -188,6 +196,36 @@ class Solver:
         """
         One Newton, RFO, or dogleg step. ``hessian(x)`` returns an ``(n, n)`` matrix.
         """
+
+    def forget(self) -> None:
+        """Drop the method memory. The next step starts from the point it is given."""
+
+    def pair_count(self) -> int:
+        """Stored L-BFGS pairs."""
+
+    def push_pair(self, s: NDArray[numpy.float64], y: NDArray[numpy.float64]) -> None:
+        """Store one L-BFGS pair. A pair the curvature gate rejects is declined."""
+
+    def set_maxmove(self, cap: float) -> None:
+        """Euclidean step cap. A negative value clears every cap."""
+
+    def set_atom_maxmove(self, cap: float) -> None:
+        """Per-atom step cap. A non-positive value clears it."""
+
+    def set_lbfgs_scaled(self, cap: float) -> None:
+        """ASE length control. A non-positive cap restores 0.2."""
+
+    def set_lbfgs_fixed_h0(self, h0: float) -> None:
+        """Fixed initial inverse-Hessian scale. A non-positive value clears it."""
+
+    def set_fire_config(self, dt: float, dt_max: float, n_min: int, f_inc: float, f_dec: float, alpha: float, f_alpha: float) -> None:
+        """FIRE integrator parameters. The velocity is cleared."""
+
+    def set_fire_preset(self, name: str) -> None:
+        """FIRE 2.0 parameter set. ``guenole2020`` is Table 1 of Guenole 2020."""
+
+    def set_fire_abc(self, on: bool) -> None:
+        """ABC-FIRE on a FIRE 2.0 session."""
 
 def minimize(f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], x0: NDArray[numpy.float64], method: object, **kwargs) -> tuple[Report, NDArray[numpy.float64]]:
     """Minimize ``f_and_grad`` in place and return ``(report, x)``."""

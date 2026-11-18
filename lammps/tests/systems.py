@@ -38,12 +38,12 @@ neighbor 0.3 bin
 """
 
 
-def _cu_header(cells: int) -> str:
+def _cu_header(cells: int, a: float = CU_A0) -> str:
     return f"""
 units metal
 atom_modify map array
 boundary p p p
-lattice fcc {CU_A0}
+lattice fcc {a!r}
 region box block 0 {cells} 0 {cells} 0 {cells}
 create_box 1 box
 create_atoms 1 box
@@ -94,11 +94,34 @@ def cu_large(cells: int = 20, seed: int = 9001) -> str:
     return cu_vacancy(cells=cells, seed=seed, rattle=0.05)
 
 
+def cu_strained(cells: int = 3, strain: float = 0.03, seed: int = 5821) -> str:
+    """Perfect fcc Cu, 108 atoms, with the lattice stretched by ``strain`` and rattled."""
+    return (
+        _cu_header(cells, CU_A0 * (1 + strain))
+        + f"""
+displace_atoms all random 0.05 0.05 0.05 {seed} units box
+"""
+    )
+
+
+def cu_strained_tri(cells: int = 3) -> str:
+    """:func:`cu_strained` in a triclinic box sheared by xy 0.2 A and yz -0.1 A."""
+    return (
+        cu_strained(cells)
+        + """
+change_box all triclinic
+change_box all xy final 0.2 yz final -0.1 remap units box
+"""
+    )
+
+
 SYSTEMS = {
     "lj177": lj_cluster,
     "cu-vac": cu_vacancy,
     "cu-sia-vac": cu_dumbbell_vacancy,
     "cu32k-vac": cu_large,
+    "cu-strained": cu_strained,
+    "cu-strained-tri": cu_strained_tri,
 }
 
 

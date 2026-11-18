@@ -165,6 +165,16 @@ pub(crate) fn scale_step_atom(origin: &Array1<f64>, trial: &mut Array1<f64>, cap
         return;
     }
     let n = trial.len();
+    if let Some(cell) = crate::cell::active(n) {
+        let motion = cell.max_motion(n, |k| trial[k] - origin[k]);
+        if motion > cap {
+            let s = cap / motion;
+            for k in 0..n {
+                trial[k] = origin[k] + s * (trial[k] - origin[k]);
+            }
+        }
+        return;
+    }
     let mut max_atom = 0.0;
     let mut i = 0;
     while i + 3 <= n {
@@ -211,9 +221,13 @@ pub(crate) fn apply_caps(
 }
 
 /// Largest per-atom (xyz triple) norm of `v`; a trailing partial triple
-/// counts as one more atom, matching [`scale_step_atom`].
+/// counts as one more atom, matching [`scale_step_atom`]. Under a cell
+/// block each cell coordinate counts on its own instead.
 pub(crate) fn max_atom_norm(v: ArrayView1<'_, f64>) -> f64 {
     let n = v.len();
+    if let Some(cell) = crate::cell::active(n) {
+        return cell.max_motion(n, |k| v[k]);
+    }
     let mut m: f64 = 0.0;
     let mut i = 0;
     while i + 3 <= n {
@@ -238,6 +252,9 @@ pub(crate) fn max_atom_norm(v: ArrayView1<'_, f64>) -> f64 {
 /// shorter of the two vectors.
 pub(crate) fn max_atom_motion(origin: &Array1<f64>, trial: &Array1<f64>) -> f64 {
     let n = trial.len().min(origin.len());
+    if let Some(cell) = crate::cell::active(n) {
+        return cell.max_motion(n, |k| trial[k] - origin[k]);
+    }
     let mut max_atom = 0.0;
     let mut i = 0;
     while i + 3 <= n {

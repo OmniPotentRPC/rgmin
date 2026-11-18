@@ -22,12 +22,12 @@ use crate::holonomic::{ConstraintError, ConstraintSolver, DistanceConstraints};
 use crate::precon::{ExpParams, ExpState, Neighbours};
 use crate::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Conjugacy, Control, DirectionalCurvature,
-    EigenParams, EigensolverKind, Error, HessianObjective, HessianOracle, HessianVector, HvpOracle,
-    LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart,
-    RiemannianManifold, ScgOptions, ScgParams, ScgStepTolerance, SearchStep, Solver, SpdMetric,
-    StiefelRetraction, StopNorm, SuppliedSearch, lowest_eigenpairs, lowest_eigenpairs_precond,
-    lowest_mode, minimize_method, minimize_method_hess, minimize_method_hvp,
-    minimize_scg_exact_with_options, minimize_scg_with_options,
+    EigenParams, EigensolverKind, Error, GromacsSteepConfig, HessianObjective, HessianOracle,
+    HessianVector, HvpOracle, LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method, NewtonKind,
+    Oracle, QnStep, Restart, RiemannianManifold, ScgOptions, ScgParams, ScgStepTolerance,
+    SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch, lowest_eigenpairs,
+    lowest_eigenpairs_precond, lowest_mode, minimize_method, minimize_method_hess,
+    minimize_method_hvp, minimize_scg_exact_with_options, minimize_scg_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -77,7 +77,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 47;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 50;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -140,6 +140,8 @@ pub enum rgmin_method_t {
     RGMIN_POLAK_RIBIERE_PLUS = 26,
     /// eOn Polak-Ribiere with the Powell restart at 0.5. Develop surface.
     RGMIN_EON_CG = 27,
+    /// GROMACS `integrator = steep`. ABI minor 48.
+    RGMIN_GROMACS_STEEP = 28,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -193,6 +195,8 @@ pub enum rgmin_stop_t {
     RGMIN_STOP_STEP_TOLERANCE = 2,
     /// The iteration budget was spent above every stop.
     RGMIN_STOP_BUDGET = 3,
+    /// GROMACS steep could not represent another coordinate change.
+    RGMIN_STOP_MACHINE_PRECISION = 4,
 }
 
 /// Iteration controls. `memory` is used only by L-BFGS (0 means 10).
@@ -515,6 +519,7 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
         rgmin_method_t::RGMIN_NEWTON_PCG => Method::NewtonPcg,
         rgmin_method_t::RGMIN_POLAK_RIBIERE_PLUS => Method::polak_ribiere_plus(),
         rgmin_method_t::RGMIN_EON_CG => Method::eon_cg(),
+        rgmin_method_t::RGMIN_GROMACS_STEEP => Method::GromacsSteep,
     }
 }
 
@@ -542,6 +547,7 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
         Method::Sr1 => rgmin_method_t::RGMIN_SR1,
         Method::Adam { .. } => rgmin_method_t::RGMIN_ADAM,
         Method::Steepest => rgmin_method_t::RGMIN_STEEPEST,
+        Method::GromacsSteep => rgmin_method_t::RGMIN_GROMACS_STEEP,
         Method::Sr2 => rgmin_method_t::RGMIN_SR2,
         Method::Pso { .. } => rgmin_method_t::RGMIN_PSO,
         Method::Newton { kind } => match kind {
@@ -1746,6 +1752,28 @@ pub unsafe extern "C" fn rgmin_solver_set_accept(
     unsafe { (*solver).solver.set_accept(a) };
 }
 
+/// GROMACS steep parameters on a `RGMIN_GROMACS_STEEP` session.
+/// Returns 0, or 1 on a null session, an invalid shrink factor, or a
+/// session that is not `RGMIN_GROMACS_STEEP`.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_gromacs_steep(
+    solver: *mut rgmin_solver_t,
+    shrink: f64,
+    max_constraint_shrinks: u32,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_gromacs_steep: null solver");
+        return 1;
+    }
+    let config = GromacsSteepConfig::default()
+        .with_shrink(shrink)
+        .with_max_constraint_shrinks(max_constraint_shrinks);
+    flag(unsafe { (*solver).solver.set_gromacs_steep_config(config) })
+}
+
 /// Gradient norm a session compares to `gtol` and writes to
 /// [`rgmin_report_t::grad_norm`]. Integers match [`StopNorm`].
 #[repr(i32)]
@@ -1837,6 +1865,65 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_abc(solver: *mut rgmin_solver_t, 
     flag(unsafe { (*solver).solver.set_fire_abc(on != 0) })
 }
 
+/// FIRE integrator parameters. Clears the velocity. ABI minor 49.
+/// Returns 0, or 1 on a null session, a session that is not FIRE, or a
+/// parameter outside the range [`crate::FireConfig`] keeps.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_fire_config(
+    solver: *mut rgmin_solver_t,
+    dt: f64,
+    dt_max: f64,
+    n_min: usize,
+    f_inc: f64,
+    f_dec: f64,
+    alpha: f64,
+    f_alpha: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_fire_config: null solver");
+        return 1;
+    }
+    if !(dt.is_finite() && dt > 0.0 && dt_max.is_finite() && dt_max > 0.0) {
+        set_last_error("rgmin_solver_set_fire_config: dt and dt_max must be finite and positive");
+        return 1;
+    }
+    if !(f_inc.is_finite() && f_inc > 1.0) {
+        set_last_error("rgmin_solver_set_fire_config: f_inc must be finite and greater than 1");
+        return 1;
+    }
+    if !(f_dec.is_finite() && f_dec > 0.0 && f_dec < 1.0) {
+        set_last_error("rgmin_solver_set_fire_config: f_dec must be finite and in (0, 1)");
+        return 1;
+    }
+    if !(alpha.is_finite() && alpha > 0.0) {
+        set_last_error("rgmin_solver_set_fire_config: alpha must be finite and positive");
+        return 1;
+    }
+    if !(f_alpha.is_finite() && f_alpha > 0.0 && f_alpha < 1.0) {
+        set_last_error("rgmin_solver_set_fire_config: f_alpha must be finite and in (0, 1)");
+        return 1;
+    }
+    let config = crate::FireConfig {
+        dt,
+        dt_max,
+        n_min,
+        f_inc,
+        f_dec,
+        alpha,
+        f_alpha,
+    };
+    match unsafe { (*solver).solver.set_fire_config(config) } {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(&e.to_string());
+            1
+        }
+    }
+}
+
 /// Per-atom cap of the default eOn L-BFGS step.
 /// `max_atom > 0` sets that cap. A non-positive value restores
 /// [`crate::EON_MAX_MOVE`]. Returns 0, or 1 on a null session or a
@@ -1887,6 +1974,35 @@ pub unsafe extern "C" fn rgmin_solver_set_lbfgs_scaled(
         },
     };
     flag(unsafe { (*solver).solver.set_lbfgs_step(step) })
+}
+
+/// Fixed initial inverse-Hessian scale, ASE's `H0 = 1/alpha`.
+/// A non-positive or non-finite value clears it. ABI minor 49.
+/// Returns 0, or 1 on a null session or a session that is not L-BFGS.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_lbfgs_fixed_h0(
+    solver: *mut rgmin_solver_t,
+    h0: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_lbfgs_fixed_h0: null solver");
+        return 1;
+    }
+    let scale = if h0.is_finite() && h0 > 0.0 {
+        Some(h0)
+    } else {
+        None
+    };
+    match unsafe { (*solver).solver.set_lbfgs_fixed_h0(scale) } {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(&e.to_string());
+            1
+        }
+    }
 }
 
 /// Opt into the strong Wolfe line search on an L-BFGS session.
@@ -4098,6 +4214,7 @@ fn stop_from_status(status: crate::Status) -> rgmin_stop_t {
         crate::Status::Tolerance => rgmin_stop_t::RGMIN_STOP_TOLERANCE,
         crate::Status::NoiseFloor => rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR,
         crate::Status::StepTolerance => rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE,
+        crate::Status::MachinePrecision => rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION,
         crate::Status::Budget | crate::Status::Iterating => rgmin_stop_t::RGMIN_STOP_BUDGET,
     }
 }
@@ -5369,6 +5486,28 @@ pub unsafe extern "C" fn rgmin_solver_set_quickmin_cell(
     match unsafe { (*solver).solver.set_quickmin_cell(at) } {
         Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
         Err(_) => rgmin_status_t::RGMIN_INVALID_PARAMETER,
+    }
+}
+
+/// Read `[at, n)` as cell coordinates with the cell cap `maxmove`
+/// (see [`crate::Solver::set_cell_block`]).
+///
+/// # Safety
+///
+/// `solver` must be null or a live handle from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_cell_block(
+    solver: *mut rgmin_solver_t,
+    at: usize,
+    maxmove: f64,
+) -> rgmin_status_t {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_cell_block: null solver");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    match unsafe { (*solver).solver.set_cell_block(at, maxmove) } {
+        Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
+        Err(e) => status_from_error(&e),
     }
 }
 

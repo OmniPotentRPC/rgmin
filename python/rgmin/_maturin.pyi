@@ -9,7 +9,7 @@ class Session:
         kind: str,
         n: int,
         *,
-        max_atom: float = 0.2,
+        max_atom: float | None = None,
         wolfe: bool = False,
         eon_cap: bool = False,
         memory: int = 8,
@@ -27,12 +27,16 @@ class Session:
         abc: bool = False,
         accept: str | None = None,
         istep: float | None = None,
+        shrink: float | None = None,
+        max_constraint_shrinks: int | None = None,
         level_set: float | None = None,
     ) -> None: ...
     def push_pair(self, s: list[float], y: list[float]) -> bool: ...
     def pair_count(self) -> int: ...
     @property
     def steps(self) -> int: ...
+    @property
+    def last_stop(self) -> str | None: ...
     def forget(self) -> None: ...
     def set_level_set(self, target: float | None = None) -> None: ...
     def step(

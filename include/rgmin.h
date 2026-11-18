@@ -70,14 +70,17 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 47
+#define RGMIN_ABI_VERSION_MINOR 50
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
  * 43 rgmin_lbfgs_pairs_push_rho, 44 rgmin_solver_set_power,
  * 45 rgmin_solver_set_lbfgs_trust (Burdakov ray, not set_lbfgs_trust),
  * 46 rgmin_control_default and the other struct initializers,
- * 47 level-set constraint setters. */
+ * 47 level-set constraint setters,
+ * 48 RGMIN_GROMACS_STEEP and RGMIN_STOP_MACHINE_PRECISION,
+ * 49 rgmin_solver_set_fire_config and rgmin_solver_set_lbfgs_fixed_h0,
+ * 50 rgmin_solver_set_cell_block. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -122,7 +125,9 @@ typedef enum rgmin_method_t {
     /** Polak-Ribiere-Polyak, max(0, beta). Develop surface, past the released slots. */
     RGMIN_POLAK_RIBIERE_PLUS = 26,
     /** Polak-Ribiere with the eOn Powell restart at 0.5. Develop surface. */
-    RGMIN_EON_CG = 27
+    RGMIN_EON_CG = 27,
+    /** GROMACS integrator = steep. ABI minor 48. */
+    RGMIN_GROMACS_STEEP = 28
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.
@@ -155,7 +160,9 @@ typedef enum rgmin_stop_t {
     RGMIN_STOP_TOLERANCE = 0,
     RGMIN_STOP_NOISE_FLOOR = 1,
     RGMIN_STOP_STEP_TOLERANCE = 2,
-    RGMIN_STOP_BUDGET = 3
+    RGMIN_STOP_BUDGET = 3,
+    /** GROMACS steep could not represent another coordinate change. ABI minor 48. */
+    RGMIN_STOP_MACHINE_PRECISION = 4
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),
@@ -447,6 +454,11 @@ typedef enum rgmin_accept_t {
     RGMIN_ACCEPT_STEP = 3
 } rgmin_accept_t;
 void rgmin_solver_set_accept(rgmin_solver_t *solver, rgmin_accept_t accept);
+/** GROMACS steep parameters on a RGMIN_GROMACS_STEEP session.
+ *  Returns 0, or 1 on a null session, an invalid shrink factor, or a
+ *  session that is not RGMIN_GROMACS_STEEP. */
+int32_t rgmin_solver_set_gromacs_steep(rgmin_solver_t *solver, double shrink,
+                                       uint32_t max_constraint_shrinks);
 
 /** FIRE schedule. */
 typedef enum rgmin_fire_variant_t {
@@ -498,6 +510,20 @@ _Static_assert(sizeof(rgmin_stop_norm_t) == sizeof(int32_t),
 /** Select the stop norm. TWO is the default. Returns 0, or 1 on a null
  *  session or an unknown integer. ABI minor 29. */
 int32_t rgmin_solver_set_stop_norm(rgmin_solver_t *solver, rgmin_stop_norm_t norm);
+/** Read \c [at, dim) as cell coordinates, such as the box degrees of
+ *  freedom a variable-cell relaxation appends to the 3N atom coordinates.
+ *  The per-atom cap and MAX_ATOM then group only \c [0, at) in (x, y, z)
+ *  triples and count each cell coordinate on its own. Under the per-atom
+ *  cap a cell coordinate moves at most \a maxmove in one step; a longer
+ *  step is scaled down as a whole. A non-positive or NaN \a maxmove
+ *  bounds it by the per-atom cap and +inf leaves it free. Without a
+ *  per-atom cap the cell is not capped either. \a at is a multiple of 3
+ *  no larger than \c dim; \c at == dim removes the block. Sessions on a
+ *  manifold other than the Euclidean one ignore it. Returns
+ *  RGMIN_INVALID_PARAMETER on a null session or a refused \a at.
+ *  ABI minor 50. */
+rgmin_status_t rgmin_solver_set_cell_block(rgmin_solver_t *solver, size_t at,
+                                           double maxmove);
 /** FIRE 2.0 parameter set. GUENOLE2020 is Table 1 of Guenole et al.,
  *  Comput. Mater. Sci. 175, 109584 (2020): dt_max 10 dt, dt_min
  *  0.02 dt, N_delay 20, alpha_start 0.25, f_inc 1.1, f_dec 0.5,
@@ -519,6 +545,15 @@ int32_t rgmin_solver_set_fire_preset(rgmin_solver_t *solver, rgmin_fire_preset_t
  *  \c maxmove, bounds each displacement component. Returns 0, or 1 on
  *  a null session or a session that is not RGMIN_FIRE2. ABI minor 30. */
 int32_t rgmin_solver_set_fire_abc(rgmin_solver_t *solver, int32_t on);
+/** Replace the FIRE integrator parameters and clear the velocity.
+ *  dt and dt_max must be finite and positive, f_inc finite and greater
+ *  than 1, f_dec and f_alpha finite and in (0, 1), alpha finite and
+ *  positive. n_min is the downhill count before dt grows. Returns 0,
+ *  or 1 on a null session, a session that is not FIRE or FIRE 2.0, or
+ *  a parameter outside that range. ABI minor 49. */
+int32_t rgmin_solver_set_fire_config(rgmin_solver_t *solver, double dt,
+                                    double dt_max, size_t n_min, double f_inc,
+                                    double f_dec, double alpha, double f_alpha);
 /** Per-atom cap of the default eOn L-BFGS step. The first step probes
  *  curvature. A proposal at least as long as the cap clears the memory
  *  and steps along H0 times the force. A positive \c max_atom sets the
@@ -531,6 +566,11 @@ int32_t rgmin_solver_set_lbfgs_capped(rgmin_solver_t *solver, double max_atom);
  *  A non-positive cap restores 0.2. Same refusal rules as
  *  rgmin_solver_set_lbfgs_capped. ABI minor 35. */
 int32_t rgmin_solver_set_lbfgs_scaled(rgmin_solver_t *solver, double max_atom);
+/** Fixed initial inverse-Hessian scale of an L-BFGS session, ASE's
+ *  H0 = 1/alpha. A non-positive or non-finite h0 clears it and the
+ *  two-loop uses the Nocedal-Wright scale again. Returns 0, or 1 on a
+ *  null session or a session that is not L-BFGS. ABI minor 49. */
+int32_t rgmin_solver_set_lbfgs_fixed_h0(rgmin_solver_t *solver, double h0);
 /** Opt into the strong Wolfe line search. The default L-BFGS session
  *  does not search a line. Returns 0, or 1 on a null session or a
  *  session that is not RGMIN_LBFGS. ABI minor 34. */

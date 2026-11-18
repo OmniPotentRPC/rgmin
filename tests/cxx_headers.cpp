@@ -541,9 +541,12 @@ int main() {
         return 4;
     }
     rgmin::Solver fire2(rgmin::Method::Fire2, stop_ctrl, 2);
+    rgmin::Solver steep(rgmin::Method::GromacsSteep, stop_ctrl, 2);
     if (stopper.set_fire_abc(true) != 1 ||
         fire2.set_fire_preset(RGMIN_FIRE_PRESET_GUENOLE2020) != 0 ||
-        fire2.set_fire_abc(true) != 0) {
+        fire2.set_fire_abc(true) != 0 ||
+        steep.set_gromacs_steep(0.5, 8) != 0 ||
+        stopper.set_gromacs_steep(0.5, 8) != 1) {
         std::fprintf(stderr, "fire preset setup failed\n");
         return 5;
     }
@@ -551,9 +554,14 @@ int main() {
                   "PolakRibierePlus keeps the C enumerator");
     static_assert(static_cast<int>(rgmin::Method::EonCg) == RGMIN_EON_CG,
                   "EonCg keeps the C enumerator");
+    static_assert(static_cast<int>(rgmin::Method::GromacsSteep) == RGMIN_GROMACS_STEEP,
+                  "GromacsSteep keeps the C enumerator");
+    static_assert(XTS_GROMACS_STEEP == RGMIN_GROMACS_STEEP,
+                  "xts.h aliases the GROMACS steep selector");
     if (rgmin::method_from_name("eon-cg") != rgmin::Method::EonCg ||
-        rgmin::method_from_name("polak-ribiere-plus") != rgmin::Method::PolakRibierePlus) {
-        std::fprintf(stderr, "method_from_name missed a minor-35 method\n");
+        rgmin::method_from_name("polak-ribiere-plus") != rgmin::Method::PolakRibierePlus ||
+        rgmin::method_from_name("gromacs-steep") != rgmin::Method::GromacsSteep) {
+        std::fprintf(stderr, "method_from_name missed a public method\n");
         return 6;
     }
     bool refused = false;

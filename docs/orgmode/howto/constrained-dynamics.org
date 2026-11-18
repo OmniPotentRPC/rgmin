@@ -1,0 +1,71 @@
+#+TITLE: Run constrained Langevin on a manifold
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Run constrained Langevin on a manifold
+
+~baoab~ asks the caller for forces and uses the manifold for the drift, the projection, and the vector transport.
+The same function covers a sphere, a product, and the flat hyperplane.
+@@rst::doc:`../explanation/constrained-dynamics`@@ cites the schemes and the invariant.
+@@rst::doc:`../reference/constrained-dynamics`@@ lists the types.
+
+** A sphere
+
+The height of a free particle on the unit sphere is uniform, and the mean tangent kinetic energy is \(kT\) for the two tangent directions.
+
+#+begin_src rust
+use ndarray::array;
+use rgmin::dynamics::{LangevinConfig, PhasePoint, baoab};
+use rgmin::manifold::{MassMetric, Sphere};
+
+let metric = MassMetric::uniform(3, 1.0)?;
+let mut phase = PhasePoint::default()
+    .with_position(array![0.0, 0.0, 1.0])
+    .with_velocity(array![0.2, 0.0, 0.0]);
+let config = LangevinConfig::default()
+    .with_thermal(0.8)
+    .with_friction(1.0)
+    .with_time_step(0.05)
+    .with_seed(11);
+let report = baoab(&Sphere, &metric, &mut phase, &config, &[], 100, |x| {
+    Ok::<_, &'static str>((vec![0.0; x.len()], 0.0))
+})?;
+assert_eq!(report.degrees_of_freedom, 2);
+#+end_src
+
+** A product
+
+A product of manifolds is a manifold.
+Unit weights keep each factor in its own coordinates, and the normals are the factor normals placed in their blocks.
+
+#+begin_src rust
+use rgmin::manifold::{ManifoldKind, ProductFactor, ProductManifold};
+
+let product = ProductManifold::new([
+    ProductFactor::new(ManifoldKind::Sphere, 2),
+    ProductFactor::new(ManifoldKind::Sphere, 2),
+])?;
+#+end_src
+
+Pass ~&product~ to ~baoab~ with a mass metric of length four.
+
+** The flat hyperplane
+
+An affine hyperplane is the RATTLE special case: the drift is straight and the velocity projection is the inverse-mass product.
+A specular wall is a ~PlanarWall~ on the allowed side \(n^\top(x - p) \le 0\).
+
+#+begin_src rust
+use ndarray::array;
+use rgmin::dynamics::PlanarWall;
+use rgmin::manifold::AffineHyperplane;
+
+let plane = AffineHyperplane::new(array![0.0, 0.0, 0.0], array![0.0, 0.0, 1.0])?;
+let wall = PlanarWall::new(array![0.0, 1.0, 0.0], array![0.0, 1.0, 0.0])?;
+let _ = (plane, wall);
+#+end_src
+
+** Constrained velocity Verlet
+
+~rattle~ is the same drift and kick without the thermostat.
+On a Euclidean manifold it is unconstrained velocity Verlet.
+The energy excursion of a smooth potential on the sphere scales as the square of the time step.

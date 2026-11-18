@@ -81,6 +81,10 @@ impl Manifold for Stiefel {
     fn typical_dist(&self, n: usize) -> f64 {
         Sphere.typical_dist(n)
     }
+
+    fn holonomic_chart(&self, x: &Array1<f64>) -> Option<(Array1<f64>, ndarray::Array2<f64>)> {
+        Sphere.holonomic_chart(x)
+    }
 }
 
 /// Stiefel \(\mathrm{St}(n,p)\) for `p > 1`. Packed column-major, length `n*p`.
@@ -242,6 +246,23 @@ impl Manifold for StiefelNp {
         self.project(x_to, v)
     }
 
+    fn retract_second_order(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        let (Some(xv), Some(uv)) = (x.as_slice(), v.as_slice()) else {
+            return self.retract(x, v);
+        };
+        if !self.fits(xv.len()) || xv.len() != uv.len() {
+            return self.retract(x, v);
+        }
+        let mut y = xv.to_vec();
+        for (slot, step) in y.iter_mut().zip(uv.iter()) {
+            *slot += *step;
+        }
+        match super::riemannian::polar_factor(self.n, self.p, &y) {
+            Ok(factor) => Array1::from(factor),
+            Err(_) => self.retract(x, v),
+        }
+    }
+
     /// manopt `stiefelfactory`: \(P_X(\nabla^2 f\,U - U\,\mathrm{sym}(X^\top \nabla f))\).
     fn ehess2rhess(
         &self,
@@ -356,6 +377,60 @@ mod tests {
         assert_eq!(x.len(), 6);
         assert_eq!(st.unpack(&x).unwrap(), frame);
         assert!(st.pack(&[1.0, 0.0, 0.0]).is_none());
+    }
+
+    #[test]
+    fn polar_retraction_matches_the_quadratic_taylor_through_second_order() {
+        // (X + t V)(I + t^2 V^T V)^{-1/2} = X + t V - (t^2/2) X (V^T V) + O(t^3)
+        // when V is tangent, so the polar gap is cubic. Absil and Malick,
+        // SIAM J. Optim. 22 (2012), doi:10.1137/100802529.
+        let st = StiefelNp::new(4, 2).unwrap();
+        let x = frame_4x2();
+        let v = st.project(&x, &array![0.2, -0.1, 0.4, 0.05, 0.0, 0.3, -0.2, 0.1]);
+        let n = 4usize;
+        let p = 2usize;
+        let quadratic = |t: f64| {
+            let mut gram = [0.0; 4];
+            for a in 0..p {
+                for b in 0..p {
+                    let mut sum = 0.0;
+                    for row in 0..n {
+                        sum += v[row + n * a] * v[row + n * b];
+                    }
+                    gram[a + p * b] = sum;
+                }
+            }
+            let mut out = vec![0.0; n * p];
+            for col in 0..p {
+                for row in 0..n {
+                    let mut extra = 0.0;
+                    for a in 0..p {
+                        extra += x[row + n * a] * gram[a + p * col];
+                    }
+                    let index = row + n * col;
+                    out[index] = x[index] + t * v[index] - 0.5 * t * t * extra;
+                }
+            }
+            out
+        };
+        let gap = |t: f64| {
+            let step = &v * t;
+            let retracted = st.retract_second_order(&x, &step);
+            let model = quadratic(t);
+            retracted
+                .iter()
+                .zip(model.iter())
+                .map(|(got, want)| (got - want) * (got - want))
+                .sum::<f64>()
+                .sqrt()
+        };
+        let t = 1.0 / 16.0;
+        let coarse = gap(t);
+        let fine = gap(t / 2.0);
+        assert!(coarse <= t * t * t);
+        assert!(fine <= (t / 2.0).powi(3));
+        let ratio = fine / coarse;
+        assert!((ratio - (1.0 / 8.0)).abs() < t);
     }
 
     #[test]

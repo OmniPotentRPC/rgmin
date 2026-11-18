@@ -62,6 +62,7 @@ enum class Method {
     NewtonPcg = RGMIN_NEWTON_PCG,
     PolakRibierePlus = RGMIN_POLAK_RIBIERE_PLUS,
     EonCg = RGMIN_EON_CG,
+    GromacsSteep = RGMIN_GROMACS_STEEP,
 };
 
 /** Parse a method token. \c newton-cg and \c newton_cg are the same method. */
@@ -450,6 +451,7 @@ inline constexpr Method SR1Optimizer = Method::Sr1;
 inline constexpr Method SR2Optimizer = Method::Sr2;
 inline constexpr Method ADAMOptimizer = Method::Adam;
 inline constexpr Method SteepestDescentOptimizer = Method::Steepest;
+inline constexpr Method GromacsSteepOptimizer = Method::GromacsSteep;
 inline constexpr Method ConjugateGradientOptimizer = Method::PolakRibiere;
 inline constexpr Method PSOptim = Method::Pso;
 
@@ -680,6 +682,10 @@ public:
     /// Energy scale, or NaN when none is installed.
     double exp_mu() const noexcept { return rgmin_solver_exp_mu(ptr_); }
     void set_accept(rgmin_accept_t accept) { rgmin_solver_set_accept(ptr_, accept); }
+    /// GROMACS steep refused-trial shrink and constraint-failure budget.
+    int set_gromacs_steep(double shrink, std::uint32_t max_constraint_shrinks) {
+        return rgmin_solver_set_gromacs_steep(ptr_, shrink, max_constraint_shrinks);
+    }
 
     void forget_evaluation() { rgmin_solver_forget_evaluation(ptr_); }
     rgmin_status_t set_precon(Precon const& p) { return rgmin_solver_set_precon(ptr_, p.get()); }
@@ -725,18 +731,29 @@ public:
     void set_periodic(bool periodic) { rgmin_solver_set_periodic(ptr_, periodic ? 1 : 0); }
     /// Stop norm for gtol and Report::grad_norm. Returns 0, or 1 on an unknown norm.
     int set_stop_norm(rgmin_stop_norm_t norm) { return rgmin_solver_set_stop_norm(ptr_, norm); }
+    /// Cell coordinates [at, dim) with their own cap under the per-atom cap.
+    rgmin_status_t set_cell_block(std::size_t at, double maxmove) {
+        return rgmin_solver_set_cell_block(ptr_, at, maxmove);
+    }
     /// FIRE 2.0 parameter set. Returns 0, or 1 on an unknown preset or a non-FIRE 2.0 session.
     int set_fire_preset(rgmin_fire_preset_t preset) {
         return rgmin_solver_set_fire_preset(ptr_, preset);
     }
     /// ABC-FIRE on a FIRE 2.0 session. Returns 0, or 1 on a non-FIRE 2.0 session.
     int set_fire_abc(bool on) { return rgmin_solver_set_fire_abc(ptr_, on ? 1 : 0); }
+    /// FIRE integrator parameters. Returns 0, or 1 when the session is not FIRE.
+    int set_fire_config(double dt, double dt_max, std::size_t n_min, double f_inc, double f_dec,
+                        double alpha, double f_alpha) {
+        return rgmin_solver_set_fire_config(ptr_, dt, dt_max, n_min, f_inc, f_dec, alpha, f_alpha);
+    }
     /// eOn L-BFGS cap. A non-positive cap restores 0.2.
     /// Returns 0, or 1 when the session cannot run the capped step.
     int set_lbfgs_capped(double max_atom) { return rgmin_solver_set_lbfgs_capped(ptr_, max_atom); }
     /// ASE length control. A non-positive cap restores 0.2.
     /// Returns 0, or 1 when the session cannot run the scaled step.
     int set_lbfgs_scaled(double max_atom) { return rgmin_solver_set_lbfgs_scaled(ptr_, max_atom); }
+    /// Fixed H0 scale. A non-positive value clears it. Returns 0, or 1 when not L-BFGS.
+    int set_lbfgs_fixed_h0(double h0) { return rgmin_solver_set_lbfgs_fixed_h0(ptr_, h0); }
     /// Strong Wolfe line search. The default session does not search a line.
     int set_lbfgs_wolfe() { return rgmin_solver_set_lbfgs_wolfe(ptr_); }
     /// Burdakov ray-truncation radius for session L-BFGS. A non-positive,
@@ -1102,20 +1119,23 @@ private:
     std::optional<double> cautious_eps_;
     std::optional<double> cautious_alpha_;
     std::optional<double> objective_roundoff_;
+    std::optional<double> gromacs_shrink_;
+    std::optional<std::uint32_t> gromacs_max_constraint_shrinks_;
 };
 
 inline std::string SolverConfig::valid_options() {
     return "accept, atom_maxmove, beta, c1, c2, cautious_alpha, cautious_eps, "
            "extra_updates, fire_variant, gtol, istep, linesearch, "
            "linesearch_maxiter, maxiter, maxmove, maxstep, memory, neb_guards, "
-           "noise_c, noise_eps, objective_roundoff, periodic, project_rigid, qn_step";
+           "noise_c, noise_eps, objective_roundoff, periodic, project_rigid, qn_step, "
+           "shrink, max_constraint_shrinks";
 }
 
 inline std::string SolverConfig::valid_methods() {
     return "adam, bb, bfgs, cg, conjugate_descent, dai_yuan, diis, dogleg, "
-           "fire, fire2, fletcher_reeves, fr_pr, hager_zhang, hestenes_stiefel, "
-           "lbfgs, liu_storey, newton, polak_ribiere, pso, quickmin, rfo, sd, "
-           "sr1, sr2, steepest";
+           "fire, fire2, fletcher_reeves, fr_pr, gromacs_steep, hager_zhang, "
+           "hestenes_stiefel, lbfgs, liu_storey, newton, polak_ribiere, pso, "
+           "quickmin, rfo, sd, sr1, sr2, steepest";
 }
 
 namespace detail {
@@ -1141,6 +1161,7 @@ inline Method method_from_name(std::string const& name) {
     if (name == "fire2") return Method::Fire2;
     if (name == "quickmin") return Method::QuickMin;
     if (name == "ode12r") return Method::Ode12r;
+    if (name == "gromacs_steep" || name == "gmx_steep") return Method::GromacsSteep;
     if (name == "sd" || name == "steepest" || name == "steepest_descent") return Method::Steepest;
     if (name == "cg" || name == "pr" || name == "pr+" || name == "polak_ribiere") {
         return Method::PolakRibiere;
@@ -1196,7 +1217,7 @@ inline bool known_option(std::string const& key) {
         "cautious_eps", "extra_updates", "fire_variant", "gtol", "istep",
         "linesearch", "linesearch_maxiter", "maxiter", "maxmove", "maxstep",
         "memory", "neb_guards", "noise_c", "noise_eps", "objective_roundoff",
-        "periodic", "project_rigid", "qn_step"};
+        "periodic", "project_rigid", "qn_step", "shrink", "max_constraint_shrinks"};
     for (char const* item : keys) {
         if (key == item) return true;
     }
@@ -1219,7 +1240,21 @@ inline void require_finite(std::string const& key, double value) {
 
 inline bool is_count_option(std::string const& key) {
     return key == "memory" || key == "maxiter" || key == "linesearch_maxiter" ||
-           key == "extra_updates";
+           key == "extra_updates" || key == "max_constraint_shrinks";
+}
+
+inline std::uint32_t gromacs_constraint_shrinks(double step, double shrink) {
+    if (!(std::isfinite(step) && step > 0.0 && std::isfinite(shrink) && shrink > 0.0 &&
+          shrink < 1.0)) {
+        return 0;
+    }
+    std::uint32_t count = 0;
+    while (step > std::numeric_limits<double>::epsilon() &&
+           count < std::numeric_limits<std::uint32_t>::max()) {
+        step *= shrink;
+        ++count;
+    }
+    return count;
 }
 
 inline std::size_t require_count(std::string const& key, long long value, long long min_value) {
@@ -1316,6 +1351,12 @@ inline SolverConfig SolverConfig::build(
             cfg.linesearch_maxiter_ = detail::require_count(key, item.second, 1);
         } else if (key == "extra_updates") {
             cfg.extra_updates_ = detail::require_count(key, item.second, 0);
+        } else if (key == "max_constraint_shrinks") {
+            std::size_t count = detail::require_count(key, item.second, 0);
+            if (count > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+                throw std::invalid_argument("max_constraint_shrinks is out of range");
+            }
+            cfg.gromacs_max_constraint_shrinks_ = static_cast<std::uint32_t>(count);
         } else if (key == "gtol" || key == "istep" || key == "maxmove" || key == "noise_eps" ||
                    key == "noise_c" || key == "c1" || key == "c2" || key == "atom_maxmove" ||
                    key == "maxstep" || key == "cautious_eps" || key == "cautious_alpha" ||
@@ -1354,6 +1395,7 @@ inline SolverConfig SolverConfig::build(
         else if (key == "cautious_eps") cfg.cautious_eps_ = item.second;
         else if (key == "cautious_alpha") cfg.cautious_alpha_ = item.second;
         else if (key == "objective_roundoff") cfg.objective_roundoff_ = item.second;
+        else if (key == "shrink") cfg.gromacs_shrink_ = item.second;
         else {
             throw std::invalid_argument(key + " must be a string or a flag");
         }
@@ -1441,6 +1483,15 @@ inline void SolverConfig::apply(Solver& solver) const {
         if (st != RGMIN_SUCCESS) {
             char const* msg = rgmin_last_error();
             throw std::invalid_argument(msg ? msg : "set_objective_roundoff failed");
+        }
+    }
+    if (gromacs_shrink_ || gromacs_max_constraint_shrinks_) {
+        double const shrink = gromacs_shrink_.value_or(0.5);
+        std::uint32_t const max_constraint_shrinks = gromacs_max_constraint_shrinks_.value_or(
+            detail::gromacs_constraint_shrinks(control_.istep, shrink));
+        if (solver.set_gromacs_steep(shrink, max_constraint_shrinks) != 0) {
+            char const* msg = rgmin_last_error();
+            throw std::invalid_argument(msg ? msg : "set_gromacs_steep failed");
         }
     }
 }

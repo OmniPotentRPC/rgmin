@@ -118,6 +118,11 @@ impl Solver {
     where
         F: FnMut(ArrayView1<f64>, &mut Array1<f64>) -> f64,
     {
+        let _cells = crate::cell::enter(self.cell_layout());
+        let mut fill = |x: ArrayView1<f64>, g: &mut Array1<f64>| {
+            let _out = crate::cell::enter(None);
+            fill(x, g)
+        };
         if self.fire_is_flat() {
             return self.run_fire_fill(x, &mut fill);
         }
@@ -158,7 +163,7 @@ impl Solver {
             if !finite(value, self.last_grad.view()) {
                 return Err(non_finite());
             }
-            if self.stop_norm.of(self.last_grad.view()) < tol {
+            if self.stop_norm_of(self.last_grad.view()) < tol {
                 break;
             }
             let use_cap = if self.trust {
@@ -310,6 +315,9 @@ impl Solver {
             atom_max = atom_max.max(a2.sqrt());
             i = end;
         }
+        if let Some(cell) = crate::cell::active(n) {
+            atom_max = cell.max_motion(n, |k| step[k]);
+        }
         let pred = if gdot < 0.0 { -0.5 * gdot } else { 0.0 };
         let ared = fold - fnew;
         let rho = if pred > 1.0e-16 {
@@ -392,7 +400,7 @@ impl Solver {
             if !finite(value, self.last_grad.view()) {
                 return Err(non_finite());
             }
-            if self.stop_norm.of(self.last_grad.view()) < tol {
+            if self.stop_norm_of(self.last_grad.view()) < tol {
                 break;
             }
             value = self.fire_fill_step(x, fill)?;
@@ -565,7 +573,10 @@ fn scale_cap(trial: &mut [f64], origin: &[f64], cap: f64, per_atom: bool) {
         return;
     }
     let origin = &origin[..trial.len()];
-    let size = if per_atom {
+    let cell = crate::cell::active(trial.len()).filter(|_| per_atom);
+    let size = if let Some(cell) = cell {
+        cell.max_motion(trial.len(), |k| trial[k] - origin[k])
+    } else if per_atom {
         let (atoms, tail) = trial.as_chunks::<3>();
         let (origin_atoms, origin_tail) = origin.as_chunks::<3>();
         // Atoms are taken by value: with references, the inlined loop keeps

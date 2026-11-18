@@ -204,6 +204,12 @@ pub enum Error {
     /// A FIRE parameter change was asked of a session that is not FIRE.
     #[error("FIRE parameters require a FIRE session")]
     NeedFire,
+    /// A GROMACS steep parameter was refused, or asked of another method.
+    #[error("GROMACS steep: {what}")]
+    Steep {
+        /// What was refused.
+        what: &'static str,
+    },
     /// Capped L-BFGS was asked for where it cannot run, or a capped
     /// step could not be formed.
     #[error("capped L-BFGS: {what}")]
@@ -283,6 +289,24 @@ pub enum Error {
         previous_residual: f64,
         /// Derived convergence tolerance at that point.
         tolerance: f64,
+    },
+    /// A mass metric or its tangent projector was refused.
+    #[error("mass metric: {what}")]
+    MassMetric {
+        /// What was refused.
+        what: &'static str,
+    },
+    /// A constrained dynamics step cannot safely continue.
+    #[error("dynamics: {what}")]
+    Dynamics {
+        /// What exhausted or invalidated the integration step.
+        what: &'static str,
+    },
+    /// [`crate::Solver::set_cell_block`] refused its split.
+    #[error("cell block: {what}")]
+    CellBlock {
+        /// What was refused.
+        what: &'static str,
     },
 }
 

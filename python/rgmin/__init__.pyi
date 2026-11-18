@@ -29,6 +29,8 @@ def minimize(
     **options: Any,
 ) -> tuple[Report, NDArray[numpy.float64]]: ...
 
+def gromacs_mdp_options(mdp: Any = None, /, **overrides: object) -> dict[str, Any]: ...
+
 def lowest_eigenpairs(
     hvp: Callable[[Any, Any], Any],
     x0_block: Any,
@@ -64,6 +66,31 @@ class BFGS:
         **kwargs: Any,
     ) -> None: ...
     def converged(self, forces: Any = None) -> bool: ...
+
+class GromacsSteep:
+    emtol: float
+    emstep: float
+    gromacs_nsteps: int
+    shrink: float | None
+    max_constraint_shrinks: int | None
+    maxstep: float
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        *,
+        emtol: float = 10.0,
+        emstep: float = 0.01,
+        nsteps: int = -1,
+        shrink: float | None = None,
+        max_constraint_shrinks: int | None = None,
+        **kwargs: Any,
+    ) -> None: ...
+    def run(self, fmax: float | None = None, steps: int | None = None) -> bool: ...
+    def step(self, forces: Any = None) -> None: ...
 
 class LBFGS:
     maxstep: float

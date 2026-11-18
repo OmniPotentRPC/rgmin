@@ -79,6 +79,10 @@ pub enum Method {
     /// Nocedal and Wright, *Numerical Optimization*,
     /// <https://doi.org/10.1007/978-0-387-40065-5>.
     Steepest,
+    /// GROMACS `integrator = steep`: normalize the force by the largest
+    /// per-atom force norm and adapt the maximum displacement after a
+    /// strict energy-decrease test.
+    GromacsSteep,
     /// Shifted Newton on a caller-supplied dense Hessian.
     ///
     /// Banerjee, Adams, Simons, Shepard,
@@ -325,6 +329,7 @@ impl Method {
             self,
             Self::Bfgs
                 | Self::Dogleg
+                | Self::GromacsSteep
                 | Self::NewtonCg
                 | Self::NewtonPcg
                 | Self::Fire {
@@ -363,6 +368,7 @@ impl Method {
             Self::Sr2 => "sr2",
             Self::Adam { .. } => "adam",
             Self::Steepest => "steepest",
+            Self::GromacsSteep => "gromacs-steep",
             Self::Newton { kind } => match kind {
                 crate::newton::NewtonKind::Shifted => "newton",
                 crate::newton::NewtonKind::Rfo => "rfo",
@@ -397,6 +403,7 @@ impl Method {
             "sr2" => Self::Sr2,
             "adam" => Self::adam(),
             "sd" | "steepest" | "steepest_descent" => Self::Steepest,
+            "gromacs_steep" | "gmx_steep" => Self::GromacsSteep,
             "cg" | "pr" | "polak_ribiere" => Self::polak_ribiere(),
             "prp" | "pr_plus" | "polak_ribiere_plus" => Self::polak_ribiere_plus(),
             "eon_cg" | "eon_cg_pr" => Self::eon_cg(),
@@ -493,6 +500,11 @@ mod name_tests {
         assert_eq!(Method::QuickMin.as_str(), "quickmin");
         assert_eq!(Method::diis().as_str(), "diis");
         assert_eq!(Method::from_name("sd").unwrap(), Method::Steepest);
+        assert_eq!(
+            Method::from_name("gromacs-steep").unwrap(),
+            Method::GromacsSteep
+        );
+        assert_eq!(Method::GromacsSteep.as_str(), "gromacs-steep");
         assert_eq!(Method::from_name("fire2").unwrap().as_str(), "fire2");
         let err = Method::from_name("not-a-solver").unwrap_err();
         assert!(err.to_string().contains("not-a-solver"), "{err}");
@@ -515,6 +527,7 @@ mod tests {
     fn the_default_atom_cap_follows_the_step_control() {
         assert!(!Method::Bfgs.installs_default_atom_cap());
         assert!(!Method::Dogleg.installs_default_atom_cap());
+        assert!(!Method::GromacsSteep.installs_default_atom_cap());
         assert!(!Method::Fire { kind: FireKind::V2 }.installs_default_atom_cap());
         assert!(!Method::NewtonCg.installs_default_atom_cap());
         assert!(!Method::NewtonPcg.installs_default_atom_cap());

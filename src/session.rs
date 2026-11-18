@@ -23,6 +23,7 @@ use crate::fire::{
     FireVariant, fire_after_v1_metric, fire_clip_components, fire_displacement_into,
     fire_prepare_v2, fire_rescale_velocity, fire2_displacement_metric, guenole2020,
 };
+use crate::gromacs::{GromacsSteep, GromacsSteepConfig};
 use crate::holonomic::DistanceConstraints;
 use crate::hvp::{
     FiniteDifference, HessianVector, NewtonCgRequest, OptionalAction, newton_cg_step,
@@ -333,6 +334,8 @@ pub struct Solver {
     tangent: TangentModel,
     /// Norm compared with [`Control::gtol`]. Starts as [`Control::stop_norm`].
     stop_norm: StopNorm,
+    /// First cell coordinate and the cell cap of [`Self::set_cell_block`].
+    cell_block: Option<(usize, f64)>,
     /// Holonomic distance constraints. `None` is the unconstrained step.
     constraints: Option<Arc<DistanceConstraints>>,
     /// Optional level-set constraint \(g(x) = c\).
@@ -375,6 +378,7 @@ enum Overlay {
     QuickMin(QuickMinState, QuickMinSession),
     Ode12r(crate::ode12r::Ode12rState),
     Diis(DiisState),
+    GromacsSteep(GromacsSteep),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -466,7 +470,11 @@ impl Solver {
     /// Fresh session for `method` in dimension `dim`.
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
         let istep = control.istep;
-        let stop_norm = control.stop_norm;
+        let stop_norm = if matches!(method, Method::GromacsSteep) {
+            StopNorm::MaxAtom
+        } else {
+            control.stop_norm
+        };
         let inner = Inner::from_method(&method, dim, istep);
         let mut solver = Self {
             dim,
@@ -526,6 +534,7 @@ impl Solver {
             refused: false,
             tangent: TangentModel::default(),
             stop_norm,
+            cell_block: None,
             constraints: None,
             level_set: None,
             brief: false,
@@ -554,6 +563,7 @@ impl Solver {
             }
             Method::Ode12r => Overlay::Ode12r(crate::ode12r::Ode12rState::new(istep)),
             Method::Diis { memory } => Overlay::Diis(DiisState::new(*memory)),
+            Method::GromacsSteep => Overlay::GromacsSteep(GromacsSteep::new(istep)),
             _ => Overlay::None,
         };
         solver.apply_default_atom_cap();
@@ -566,6 +576,7 @@ impl Solver {
             Inner::Bfgs { .. } => Method::Bfgs.installs_default_atom_cap(),
             Inner::Dogleg { .. } => Method::Dogleg.installs_default_atom_cap(),
             Inner::Fire(state) => Method::Fire { kind: state.kind }.installs_default_atom_cap(),
+            Inner::Steepest if matches!(self.overlay, Overlay::GromacsSteep(_)) => false,
             // The remaining arms install the cap. A method added to the
             // exception list in [`Method::installs_default_atom_cap`]
             // needs an arm here.
@@ -1428,9 +1439,9 @@ impl Solver {
                 // Distance clipping retains gradients smaller than an ulp of x.
                 projected[k] = grad[k].clamp(x[k] - hi_k, x[k] - lo_k);
             }
-            return self.stop_norm.of(projected.view());
+            return self.stop_norm_of(projected.view());
         }
-        self.stop_norm.of(grad.view())
+        self.stop_norm_of(grad.view())
     }
 
     fn noted_free_len(&self) -> usize {
@@ -2350,6 +2361,17 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        if let Some(cell) = self.cell_layout() {
+            let _cells = crate::cell::enter(Some(cell));
+            return self.step_charted(&crate::cell::Unscoped(obj), x);
+        }
+        self.step_charted(obj, x)
+    }
+
+    fn step_charted<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
         if let Some(d) = self.chart.clone() {
             return self.in_chart(&d, obj, x, |s, obj, z| s.step_plain(obj, z));
         }
@@ -2407,6 +2429,17 @@ impl Solver {
 
     /// One Newton / RFO iteration. Hessian is rebuilt at the current `x`.
     pub fn step_hess<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: HessianObjective + ?Sized,
+    {
+        if let Some(cell) = self.cell_layout() {
+            let _cells = crate::cell::enter(Some(cell));
+            return self.step_hess_charted(&crate::cell::Unscoped(obj), x);
+        }
+        self.step_hess_charted(obj, x)
+    }
+
+    fn step_hess_charted<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: HessianObjective + ?Sized,
     {
@@ -2477,6 +2510,17 @@ impl Solver {
     /// [`Self::step_hess`] does the same unless a level set is active, where
     /// it multiplies the supplied dense Hessian.
     pub fn step_hvp<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: HessianVector + ?Sized,
+    {
+        if let Some(cell) = self.cell_layout() {
+            let _cells = crate::cell::enter(Some(cell));
+            return self.step_hvp_charted(&crate::cell::Unscoped(obj), x);
+        }
+        self.step_hvp_charted(obj, x)
+    }
+
+    fn step_hvp_charted<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: HessianVector + ?Sized,
     {
@@ -3592,6 +3636,76 @@ impl Solver {
         self.report_or_escape(obj, x, value, grad)
     }
 
+    /// One GROMACS `integrator = steep` trial.
+    fn gromacs_steep_step<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        value: f64,
+        grad: Array1<f64>,
+    ) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let mut overlay = std::mem::replace(&mut self.overlay, Overlay::None);
+        let result = match &mut overlay {
+            Overlay::GromacsSteep(state) => {
+                let mut displacement = state.displacement(grad.view());
+                displacement = self.project_vec(x, &displacement);
+                let trial = if self.manifold.is_flat() {
+                    let mut trial = self.manifold.retract(x, &displacement);
+                    apply_caps(x, &mut trial, self.atom_maxmove, self.control.maxmove_cap());
+                    obj.bounds().clip(trial.view())
+                } else {
+                    match retract_within_cap(
+                        obj,
+                        x,
+                        &displacement,
+                        self.atom_maxmove,
+                        self.control.maxmove_cap(),
+                        &self.manifold,
+                    ) {
+                        Some((trial, _)) => trial,
+                        None => x.clone(),
+                    }
+                };
+                if trial == *x {
+                    let norm = self.stationarity_norm(x, &grad);
+                    self.remember(x, value, &grad);
+                    Ok(self.finish(value, x, &grad, norm, Status::MachinePrecision))
+                } else {
+                    let (trial_value, trial_raw) = obj.value_and_gradient(trial.view());
+                    if !trial_value.is_finite() || trial_raw.iter().any(|g| !g.is_finite()) {
+                        Err(Error::Oracle {
+                            what: "non-finite value or gradient",
+                        })
+                    } else if state.update(value, trial_value) {
+                        *x = trial;
+                        let trial_grad = self.horizontal_grad(x, &trial_raw);
+                        let norm = self.stationarity_norm(x, &trial_grad);
+                        self.remember(x, trial_value, &trial_grad);
+                        self.steps += 1;
+                        Ok(self.finish(
+                            trial_value,
+                            x,
+                            &trial_grad,
+                            norm,
+                            self.control.classify(norm, self.free_len(obj.bounds())),
+                        ))
+                    } else {
+                        let norm = self.stationarity_norm(x, &grad);
+                        self.remember(x, value, &grad);
+                        self.steps += 1;
+                        Ok(self.finish(value, x, &grad, norm, Status::Iterating))
+                    }
+                }
+            }
+            _ => unreachable!("GROMACS steep overlay"),
+        };
+        self.overlay = overlay;
+        result
+    }
+
     fn step_dogleg<O>(
         &mut self,
         obj: &O,
@@ -3737,6 +3851,9 @@ impl Solver {
         }
         if let Some(status) = self.control.halt(gnorm, self.free_len(obj.bounds())) {
             return Ok(self.finish(value, x, &grad, gnorm, status));
+        }
+        if matches!(self.overlay, Overlay::GromacsSteep(_)) {
+            return self.gromacs_steep_step(obj, x, value, grad);
         }
         self.refresh_exp(obj, x, &grad)?;
 
@@ -4747,6 +4864,7 @@ impl Solver {
             }
             Overlay::Ode12r(state) => state.reset(),
             Overlay::Diis(state) => state.clear(),
+            Overlay::GromacsSteep(state) => state.reset(self.control.istep),
             Overlay::None => {}
         }
     }
@@ -4754,6 +4872,16 @@ impl Solver {
     /// Outer steps completed on this session.
     pub fn steps(&self) -> usize {
         self.steps
+    }
+
+    /// Current maximum displacement of a GROMACS steep session.
+    ///
+    /// Other methods return `None`.
+    pub fn gromacs_step_size(&self) -> Option<f64> {
+        match self.overlay {
+            Overlay::GromacsSteep(state) => Some(state.step_size()),
+            _ => None,
+        }
     }
 
     /// Norm that every stop test and [`Report::grad_norm`] apply to the gradient.
@@ -4764,6 +4892,66 @@ impl Solver {
     /// Norm selected by [`Self::set_stop_norm`].
     pub fn stop_norm(&self) -> StopNorm {
         self.stop_norm
+    }
+
+    /// Read `[at, dim)` as cell coordinates, such as the box degrees of
+    /// freedom a variable-cell relaxation appends to `3N` atom
+    /// coordinates.
+    ///
+    /// The per-atom cap and [`StopNorm::MaxAtom`] then group only
+    /// `[0, at)` in `(x, y, z)` triples and count each cell coordinate on
+    /// its own. Under the per-atom cap a cell coordinate moves at most
+    /// `maxmove` in one step: a longer step is scaled down as a whole, as
+    /// for an atom. A non-positive or NaN `maxmove` bounds it by the
+    /// per-atom cap and `+inf` leaves it free. Without a per-atom cap the
+    /// cell coordinates are not capped either. `at` must be a multiple
+    /// of 3 no larger than the dimension, and `at == dim` removes the
+    /// block. Sessions on other manifolds than the Euclidean one ignore it.
+    pub fn set_cell_block(&mut self, at: usize, maxmove: f64) -> Result<()> {
+        if at > self.dim {
+            return Err(Error::CellBlock {
+                what: "the cell block starts past the end of x",
+            });
+        }
+        if at == self.dim {
+            self.cell_block = None;
+            return Ok(());
+        }
+        if !at.is_multiple_of(3) {
+            return Err(Error::CellBlock {
+                what: "the atom coordinates before the cell block are not whole triples",
+            });
+        }
+        self.cell_block = Some((at, maxmove));
+        Ok(())
+    }
+
+    /// First cell coordinate and cell cap of [`Self::set_cell_block`].
+    pub fn cell_block(&self) -> Option<(usize, f64)> {
+        self.cell_block
+    }
+
+    fn cell_split(&self) -> Option<(usize, f64)> {
+        self.cell_block
+            .filter(|_| self.manifold == ManifoldKind::Euclidean)
+    }
+
+    /// The layout the per-atom measures read while this session steps.
+    fn cell_layout(&self) -> Option<crate::cell::CellBlock> {
+        let (at, maxmove) = self.cell_split()?;
+        let atom_cap = match self.atom_maxmove {
+            Some(cap) => cap,
+            None => crate::step::DEFAULT_ATOM_MAXMOVE,
+        };
+        Some(crate::cell::CellBlock {
+            at,
+            weight: crate::cell::CellBlock::weight_for(atom_cap, maxmove),
+        })
+    }
+
+    fn stop_norm_of(&self, g: ArrayView1<f64>) -> f64 {
+        self.stop_norm
+            .of_cells(g, self.cell_split().map(|(at, _)| at))
     }
 
     /// Parameter set of a FIRE 2.0 session. The integrator restarts from
@@ -4784,6 +4972,17 @@ impl Solver {
         self.fire2 = None;
         self.apply_default_atom_cap();
         Ok(())
+    }
+
+    /// Shrink factor of a GROMACS steep session. The current displacement
+    /// is kept. Other methods return [`Error::Steep`].
+    pub fn set_gromacs_steep_config(&mut self, config: GromacsSteepConfig) -> Result<()> {
+        match &mut self.overlay {
+            Overlay::GromacsSteep(state) => state.set_config(config),
+            _ => Err(Error::Steep {
+                what: "parameters require a gromacs-steep session",
+            }),
+        }
     }
 
     /// Integrator parameters of a FIRE session. The velocity is cleared.
@@ -5180,6 +5379,17 @@ impl Solver {
     /// report is `Self::assess` of `x`, so it says [`Status::Tolerance`]
     /// only when the gradient evaluated there is below `gtol`.
     pub fn run<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        if let Some(cell) = self.cell_layout() {
+            let _cells = crate::cell::enter(Some(cell));
+            return self.run_charted(&crate::cell::Unscoped(obj), x);
+        }
+        self.run_charted(obj, x)
+    }
+
+    fn run_charted<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
@@ -5582,6 +5792,9 @@ impl Solver {
                 }
             }
 
+            Overlay::GromacsSteep(_) => {
+                unreachable!("GROMACS steep is dispatched before generic overlays")
+            }
             Overlay::None => {}
         }
         self.overlay = overlay;
@@ -5737,6 +5950,7 @@ impl Inner {
             // The overlay on Solver carries the real state. Inner stays a
             // variant the constraint stepper matches.
             Method::QuickMin | Method::Ode12r | Method::Diis { .. } => Inner::Steepest,
+            Method::GromacsSteep => Inner::Steepest,
             Method::Bb => Inner::Bb {
                 prev_s: None,
                 prev_y: None,
