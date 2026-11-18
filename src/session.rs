@@ -469,6 +469,40 @@ fn strip_rigid(dir: &mut Array1<f64>, x: &Array1<f64>) -> bool {
     l2(&(&before - &*dir)) > 1e-12 * l2(&before)
 }
 
+fn max_atom_norm_stable(g: ArrayView1<f64>) -> f64 {
+    let mut worst = 0.0_f64;
+    let mut i = 0;
+    while i < g.len() {
+        let end = (i + 3).min(g.len());
+        let mut scale = 0.0_f64;
+        let mut sum = 1.0_f64;
+        for k in i..end {
+            let value = g[k].abs();
+            if !value.is_finite() {
+                return f64::INFINITY;
+            }
+            if value != 0.0 {
+                if scale < value {
+                    let ratio = scale / value;
+                    sum = 1.0 + sum * ratio * ratio;
+                    scale = value;
+                } else {
+                    let ratio = value / scale;
+                    sum += ratio * ratio;
+                }
+            }
+        }
+        let norm = if scale == 0.0 {
+            0.0
+        } else {
+            scale * sum.sqrt()
+        };
+        worst = worst.max(norm);
+        i = end;
+    }
+    worst
+}
+
 impl Solver {
     /// Fresh session for `method` in dimension `dim`.
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
@@ -1430,6 +1464,8 @@ impl Solver {
     /// A Euclidean session with a coordinate box and no other constraint
     /// measures the projected gradient `grad.clamp(x - hi, x - lo)`.
     fn stationarity_norm(&self, x: &Array1<f64>, grad: &Array1<f64>) -> f64 {
+        let gromacs_max_atom =
+            matches!(self.overlay, Overlay::GromacsSteep(_)) && self.stop_norm == StopNorm::MaxAtom;
         if self.box_stationarity()
             && let (Some(lo), Some(hi)) = (&self.bound_low, &self.bound_high)
         {
@@ -1443,9 +1479,17 @@ impl Solver {
                 // Distance clipping retains gradients smaller than an ulp of x.
                 projected[k] = grad[k].clamp(x[k] - hi_k, x[k] - lo_k);
             }
-            return self.stop_norm.of(projected.view());
+            return if gromacs_max_atom {
+                max_atom_norm_stable(projected.view())
+            } else {
+                self.stop_norm.of(projected.view())
+            };
         }
-        self.stop_norm.of(grad.view())
+        if gromacs_max_atom {
+            max_atom_norm_stable(grad.view())
+        } else {
+            self.stop_norm.of(grad.view())
+        }
     }
 
     fn noted_free_len(&self) -> usize {

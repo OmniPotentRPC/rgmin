@@ -1230,7 +1230,7 @@ inline bool known_option(std::string const& key) {
         "cautious_alpha", "cautious_eps", "error_on_unmet", "extra_updates",
         "fire_variant", "gtol", "istep", "linesearch", "linesearch_maxiter",
         "maxiter", "maxmove", "maxstep", "memory", "neb_guards", "noise_c",
-        "noise_eps", "objective_roundoff", "periodic", "project_rigid", "qn_step"};
+        "noise_eps", "objective_roundoff", "periodic", "project_rigid", "qn_step",
         "shrink", "max_constraint_shrinks"};
     for (char const* item : keys) {
         if (key == item) return true;
@@ -1258,17 +1258,7 @@ inline bool is_count_option(std::string const& key) {
 }
 
 inline std::uint32_t gromacs_constraint_shrinks(double step, double shrink) {
-    if (!(std::isfinite(step) && step > 0.0 && std::isfinite(shrink) && shrink > 0.0 &&
-          shrink < 1.0)) {
-        return 0;
-    }
-    std::uint32_t count = 0;
-    while (step > std::numeric_limits<double>::epsilon() &&
-           count < std::numeric_limits<std::uint32_t>::max()) {
-        step *= shrink;
-        ++count;
-    }
-    return count;
+    return rgmin_gromacs_steep_max_constraint_shrinks(step, shrink);
 }
 
 inline std::size_t require_count(std::string const& key, long long value, long long min_value) {

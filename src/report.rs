@@ -59,6 +59,8 @@ pub enum StopReason {
     NoiseFloor,
     /// [`Status::StepTolerance`].
     StepTolerance,
+    /// [`Status::MachinePrecision`].
+    MachinePrecision,
     /// An opt-in backward-error polish ended above its test.
     PolishUnmet,
     /// [`Status::Iterating`]: a step that has not stopped.
@@ -92,6 +94,7 @@ impl StopReason {
             Self::MaxIter | Self::LineSearchFailed | Self::PolishUnmet => Status::Budget,
             Self::NoiseFloor => Status::NoiseFloor,
             Self::StepTolerance => Status::StepTolerance,
+            Self::MachinePrecision => Status::MachinePrecision,
             Self::Iterating => Status::Iterating,
         }
     }
@@ -102,6 +105,7 @@ impl StopReason {
             Status::Budget => Self::MaxIter,
             Status::NoiseFloor => Self::NoiseFloor,
             Status::StepTolerance => Self::StepTolerance,
+            Status::MachinePrecision => Self::MachinePrecision,
             Status::Iterating => Self::Iterating,
         }
     }
@@ -115,6 +119,7 @@ impl std::fmt::Display for StopReason {
             Self::LineSearchFailed => "line search failed",
             Self::NoiseFloor => "noise floor",
             Self::StepTolerance => "step tolerance",
+            Self::MachinePrecision => "machine precision",
             Self::PolishUnmet => "backward-error polish unmet",
             Self::Iterating => "iterating",
         })
