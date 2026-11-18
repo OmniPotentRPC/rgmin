@@ -15,13 +15,14 @@ use rgmin::ffi::{
     rgmin_exp_t, rgmin_gromacs_steep_max_constraint_shrinks, rgmin_last_error,
     rgmin_lowest_eigenpair, rgmin_lowest_eigenpairs, rgmin_lowest_eigenpairs_ex,
     rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
-    rgmin_minimize_eindir, rgmin_minimize_opts, rgmin_minimize_scg, rgmin_precond_fn,
-    rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp, rgmin_solver_create,
-    rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
-    rgmin_solver_set_accept, rgmin_solver_set_exp, rgmin_solver_set_gromacs_steep,
-    rgmin_solver_set_quickmin_cell, rgmin_solver_set_quickmin_variant, rgmin_solver_step,
-    rgmin_solver_step_fg, rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t,
-    rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+    rgmin_minimize_eindir, rgmin_minimize_eindir_opts, rgmin_minimize_opts, rgmin_minimize_scg,
+    rgmin_precond_fn, rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp,
+    rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls,
+    rgmin_solver_hvp_calls, rgmin_solver_set_accept, rgmin_solver_set_exp,
+    rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
+    rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
+    rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
+    rgmin_tensor_free,
 };
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
 use rgpot_core::status::rgpot_status_t;
@@ -608,6 +609,91 @@ fn c_abi_eindir_rejects_incompatible_stamp_before_evaluation() {
     unsafe { rgmin_tensor_free(xt) };
 }
 
+fn eindir_run(
+    x: &mut [f64; 2],
+    maxiter: usize,
+    error_on_unmet: Option<i32>,
+) -> (rgmin_status_t, rgmin_report_t) {
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let objective = quadratic_objective();
+    let ctrl = rgmin_control_t {
+        maxiter,
+        gtol: 1e-12,
+        istep: 0.1,
+        memory: 10,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    };
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+    };
+    let stamp = eindir_core_abi_stamp();
+    let st = unsafe {
+        match error_on_unmet {
+            None => rgmin_minimize_eindir(
+                &*objective,
+                &stamp,
+                xt,
+                &ctrl,
+                rgmin_method_t::RGMIN_LBFGS,
+                &mut out,
+            ),
+            Some(flag) => rgmin_minimize_eindir_opts(
+                &*objective,
+                &stamp,
+                xt,
+                &ctrl,
+                rgmin_method_t::RGMIN_LBFGS,
+                flag,
+                0,
+                &mut out,
+            ),
+        }
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    (st, out)
+}
+
+/// The plain eindir entry keeps a spent budget `Ok`. The opts entry
+/// with the flag set writes the same point and report, then returns the
+/// typed status, as `rgmin_minimize_opts` does.
+#[test]
+fn c_abi_eindir_error_on_unmet_returns_the_typed_status_and_the_report() {
+    let mut plain_x = [3.0, -4.0];
+    let (plain, plain_out) = eindir_run(&mut plain_x, 1, None);
+    assert_eq!(plain, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(plain_out.stop, rgmin_stop_t::RGMIN_STOP_BUDGET);
+
+    let mut off_x = [3.0, -4.0];
+    let (off, off_out) = eindir_run(&mut off_x, 1, Some(0));
+    assert_eq!(off, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(off_x, plain_x);
+    assert_eq!(off_out.stop, plain_out.stop);
+
+    let mut unmet_x = [3.0, -4.0];
+    let (unmet, out) = eindir_run(&mut unmet_x, 1, Some(1));
+    assert_eq!(unmet, rgmin_status_t::RGMIN_UNMET_STOP);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_BUDGET);
+    assert_eq!(out.steps, 1);
+    assert_eq!(out.value, plain_out.value);
+    assert_eq!(out.grad_norm, plain_out.grad_norm);
+    assert_eq!(unmet_x, plain_x);
+    assert_ne!(unmet_x, [3.0, -4.0]);
+}
+
+/// A run that meets `gtol` stays `Ok` with the flag set.
+#[test]
+fn c_abi_eindir_error_on_unmet_leaves_a_converged_run_ok() {
+    let mut x = [3.0, -4.0];
+    let (st, out) = eindir_run(&mut x, 100, Some(1));
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE);
+}
+
 struct QuadraticContext {
     forces: [f64; 6],
 }
@@ -1090,10 +1176,11 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 /// `rgmin_solver_set_gromacs_steep`, and
 /// `rgmin_gromacs_steep_max_constraint_shrinks`.
 /// ABI minor 51 adds `rgmin_minimize_rlbfgs` and `rgmin_rlbfgs_default`.
-/// ABI minor 50 adds `rgmin_solver_set_etol`, `rgmin_solver_set_max_evals`,
-/// their clear functions, `rgmin_solver_evals` and the two stop codes.
-/// ABI minor 49 adds the stop-status setters, the floor, and the
-/// `*_opts` one-shots. Minor 48 adds
+/// ABI minor 53 adds `rgmin_minimize_eindir_opts`. Minor 50 adds
+/// `rgmin_solver_set_etol`, `rgmin_solver_set_max_evals`, their clear
+/// functions, `rgmin_solver_evals` and the two stop codes. Minor 49 adds
+/// the stop-status setters, the floor, and the `*_opts` one-shots. Minor 48
+/// adds
 /// `rgmin_solver_set_fire_cap_two_step_overshoot`. Minor 47 adds
 /// `rgmin_solver_set_level_set` and
 /// `rgmin_solver_clear_level_set`. Minor 46 adds `rgmin_control_default`
@@ -1107,7 +1194,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 52);
+    assert_eq!(stamp.abi_minor, 53);
     assert_eq!(stamp.layout_revision, 5);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
