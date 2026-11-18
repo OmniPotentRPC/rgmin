@@ -199,7 +199,7 @@ fn assert_within_tol(got: &Array1<f64>, reference: &Array1<f64>, label: &str) {
 
 #[test]
 fn csr_memory_size_stores_the_scalar_graph_once() {
-    let _guard = ALLOC_LOCK.lock().expect("alloc lock");
+    let _guard = ALLOC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let _track = TrackScope::enter();
     for (cells, expected_atoms, expected_pairs) in [
         (3usize, 107usize, 2862usize),
@@ -250,7 +250,7 @@ fn csr_memory_size_stores_the_scalar_graph_once() {
 
 #[test]
 fn precon_dot_and_steady_pcg_do_not_allocate_scratch_vecs() {
-    let _guard = ALLOC_LOCK.lock().expect("alloc lock");
+    let _guard = ALLOC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let _track = TrackScope::enter();
     for len in [0usize, 17, 1024, 1536, 2589, 20_000] {
         let a: Vec<f64> = (0..len)
@@ -277,21 +277,29 @@ fn precon_dot_and_steady_pcg_do_not_allocate_scratch_vecs() {
         if len >= 4096 {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(4)
-                .start_handler(|_| TRACK_THREAD.with(|flag| flag.set(true)))
                 .build()
                 .expect("rayon pool");
-            let warmup = pool.install(|| rgmin::precon::dot(&a, &b));
-            std::hint::black_box(warmup);
-
-            let par_before = ALLOC_CALLS.load(Ordering::SeqCst);
-            let par_val = pool.install(|| {
+            pool.broadcast(|_| {});
+            let warmup = pool.install(|| {
                 let mut total = 0.0;
                 for _ in 0..16 {
                     total += rgmin::precon::dot(&a, &b);
                 }
                 total
             });
-            let par_after = ALLOC_CALLS.load(Ordering::SeqCst);
+            std::hint::black_box(warmup);
+
+            pool.broadcast(|_| TRACK_THREAD.with(|flag| flag.set(true)));
+            let (par_val, par_before, par_after) = pool.install(|| {
+                let before = ALLOC_CALLS.load(Ordering::SeqCst);
+                let mut total = 0.0;
+                for _ in 0..16 {
+                    total += rgmin::precon::dot(&a, &b);
+                }
+                let after = ALLOC_CALLS.load(Ordering::SeqCst);
+                (total, before, after)
+            });
+            pool.broadcast(|_| TRACK_THREAD.with(|flag| flag.set(false)));
             assert_eq!(
                 par_after - par_before,
                 0,
@@ -331,7 +339,7 @@ fn precon_dot_and_steady_pcg_do_not_allocate_scratch_vecs() {
 
 #[test]
 fn serial_results_are_bit_identical_and_default_lbfgs_is_capped_eon() {
-    let _guard = ALLOC_LOCK.lock().expect("alloc lock");
+    let _guard = ALLOC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let lbfgs = Lbfgs::default();
     assert!(
         matches!(lbfgs.step, LbfgsStep::Capped { max_atom, .. } if max_atom == EON_MAX_MOVE),
@@ -440,7 +448,7 @@ fn serial_results_are_bit_identical_and_default_lbfgs_is_capped_eon() {
 
 #[test]
 fn threaded_build_pcg_and_batch_match_serial_within_stated_tolerance() {
-    let _guard = ALLOC_LOCK.lock().expect("alloc lock");
+    let _guard = ALLOC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let fix = cu_vacancy(7); // N = 1371, crosses 512-atom gate and spans 2 1024-atom IC(0) blocks
     assert!(
         Exp::assemble(
