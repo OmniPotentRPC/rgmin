@@ -4,6 +4,8 @@
 //! write `g` into storage that outlives one evaluation. The eOn cap and
 //! the default Euclidean FIRE step do not allocate inside the loop.
 
+use std::cell::Cell;
+
 use ndarray::{Array1, ArrayView1};
 
 use super::{Inner, Solver};
@@ -12,7 +14,7 @@ use crate::fire::{
     FireKind, FirePreparation, fire_after_v1, fire_displacement_into, fire_prepare_v2,
 };
 use crate::lbfgs::{EON_FINITE_DIFFERENCE, EON_INVERSE_CURVATURE, EonSeed};
-use crate::report::Report;
+use crate::report::{Report, Status};
 
 /// One eOn fill step, for the reset and cap study.
 #[derive(Clone, Copy, Debug)]
@@ -118,15 +120,28 @@ impl Solver {
     where
         F: FnMut(ArrayView1<f64>, &mut Array1<f64>) -> f64,
     {
-        if self.fire_is_flat() {
-            return self.run_fire_fill(x, &mut fill);
+        let fire = self.fire_is_flat();
+        if !fire && !self.eon_fill_ok() {
+            return Err(Error::LbfgsCap {
+                what: "run_fill is the unbounded eOn cap or Euclidean FIRE",
+            });
         }
-        if self.eon_fill_ok() {
-            return self.run_eon_fill(x, &mut fill);
-        }
-        let _ = fill;
-        Err(Error::LbfgsCap {
-            what: "run_fill is the unbounded eOn cap or Euclidean FIRE",
+        self.begin_stops()?;
+        let calls = Cell::new(0usize);
+        let mut counted = |at: ArrayView1<f64>, grad: &mut Array1<f64>| {
+            calls.set(calls.get() + 1);
+            fill(at, grad)
+        };
+        let base = self.evals;
+        let result = if fire {
+            self.run_fire_fill(x, &mut counted, &calls)
+        } else {
+            self.run_eon_fill(x, &mut counted, &calls)
+        };
+        self.evals = base + calls.get();
+        result.map(|mut report| {
+            report.evals = self.evals;
+            report
         })
     }
 
@@ -138,7 +153,12 @@ impl Solver {
             && self.exp.is_none()
     }
 
-    fn run_eon_fill<F>(&mut self, x: &mut Array1<f64>, fill: &mut F) -> Result<Report>
+    fn run_eon_fill<F>(
+        &mut self,
+        x: &mut Array1<f64>,
+        fill: &mut F,
+        calls: &Cell<usize>,
+    ) -> Result<Report>
     where
         F: FnMut(ArrayView1<f64>, &mut Array1<f64>) -> f64,
     {
@@ -153,7 +173,10 @@ impl Solver {
             what: "the cap is not positive",
         })?;
         let mut value = fill(x.view(), &mut self.last_grad);
+        self.stops.seed(Some(value));
+        let base = self.evals;
         let tol = self.control.gtol;
+        let mut halt = None;
         for _ in 0..self.control.maxiter {
             if !finite(value, self.last_grad.view()) {
                 return Err(non_finite());
@@ -167,15 +190,33 @@ impl Solver {
                 cap
             };
             let end = self.eon_fill_step(x, use_cap, value, fill)?;
-            if end.rejected {
-                continue;
+            let moved = !end.rejected;
+            if moved {
+                value = end.value;
             }
-            value = end.value;
+            let met = moved && self.stop_norm.of(self.last_grad.view()) < tol;
+            halt = self.stops.after(
+                &self.control,
+                value,
+                moved,
+                base + calls.get(),
+                self.energy_settled(),
+                met,
+            );
+            if halt.is_some() {
+                break;
+            }
         }
         self.last_value = value;
         self.store_x(x);
         let g = self.last_grad.clone();
-        Ok(self.report(value, x, &g))
+        let mut report = self.report(value, x, &g);
+        if report.status == Status::Iterating
+            && let Some(status) = halt
+        {
+            report.status = status;
+        }
+        Ok(report)
     }
 
     fn store_x(&mut self, x: &Array1<f64>) {
@@ -372,7 +413,12 @@ impl Solver {
         }
     }
 
-    fn run_fire_fill<F>(&mut self, x: &mut Array1<f64>, fill: &mut F) -> Result<Report>
+    fn run_fire_fill<F>(
+        &mut self,
+        x: &mut Array1<f64>,
+        fill: &mut F,
+        calls: &Cell<usize>,
+    ) -> Result<Report>
     where
         F: FnMut(ArrayView1<f64>, &mut Array1<f64>) -> f64,
     {
@@ -387,7 +433,10 @@ impl Solver {
             self.scratch_b = Array1::zeros(n);
         }
         let mut value = fill(x.view(), &mut self.last_grad);
+        self.stops.seed(Some(value));
+        let base = self.evals;
         let tol = self.control.gtol;
+        let mut halt = None;
         for _ in 0..self.control.maxiter {
             if !finite(value, self.last_grad.view()) {
                 return Err(non_finite());
@@ -396,11 +445,29 @@ impl Solver {
                 break;
             }
             value = self.fire_fill_step(x, fill)?;
+            let met = self.stop_norm.of(self.last_grad.view()) < tol;
+            halt = self.stops.after(
+                &self.control,
+                value,
+                true,
+                base + calls.get(),
+                self.energy_settled(),
+                met,
+            );
+            if halt.is_some() {
+                break;
+            }
         }
         self.last_value = value;
         self.store_x(x);
         let g = self.last_grad.clone();
-        Ok(self.report(value, x, &g))
+        let mut report = self.report(value, x, &g);
+        if report.status == Status::Iterating
+            && let Some(status) = halt
+        {
+            report.status = status;
+        }
+        Ok(report)
     }
 
     fn fire_fill_step<F>(&mut self, x: &mut Array1<f64>, fill: &mut F) -> Result<f64>

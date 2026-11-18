@@ -67,11 +67,14 @@ rgmin_scg_params_default
 rgmin_solver_add_equality
 rgmin_solver_clear_distance_constraints
 rgmin_solver_clear_equalities
+rgmin_solver_clear_etol
 rgmin_solver_clear_exp
 rgmin_solver_clear_level_set
+rgmin_solver_clear_max_evals
 rgmin_solver_clear_precon
 rgmin_solver_create
 rgmin_solver_dim
+rgmin_solver_evals
 rgmin_solver_exp_mu
 rgmin_solver_forget
 rgmin_solver_forget_evaluation
@@ -96,6 +99,7 @@ rgmin_solver_set_complex_circle
 rgmin_solver_set_constant
 rgmin_solver_set_distance_constraints
 rgmin_solver_set_error_on_unmet
+rgmin_solver_set_etol
 rgmin_solver_set_euclidean_complex
 rgmin_solver_set_exp
 rgmin_solver_set_extra_updates
@@ -120,6 +124,7 @@ rgmin_solver_set_level_set
 rgmin_solver_set_linesearch
 rgmin_solver_set_manifold
 rgmin_solver_set_masses
+rgmin_solver_set_max_evals
 rgmin_solver_set_maxmove
 rgmin_solver_set_multinomial_ds
 rgmin_solver_set_multinomial_sym

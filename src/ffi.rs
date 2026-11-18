@@ -81,7 +81,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 49;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 50;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -201,6 +201,12 @@ pub enum rgmin_stop_t {
     RGMIN_STOP_LINE_SEARCH = 4,
     /// A backward-error polish did not meet its test. ABI minor 49.
     RGMIN_STOP_POLISH_UNMET = 5,
+    /// The relative energy change between accepted steps fell below `etol`.
+    /// ABI minor 50.
+    RGMIN_STOP_ENERGY_TOLERANCE = 6,
+    /// The evaluation budget set by `rgmin_solver_set_max_evals` was spent.
+    /// ABI minor 50.
+    RGMIN_STOP_EVAL_BUDGET = 7,
 }
 
 /// Iteration controls. `memory` is used only by L-BFGS (0 means 10).
@@ -3020,6 +3026,89 @@ pub unsafe extern "C" fn rgmin_solver_clear_level_set(solver: *mut rgmin_solver_
     }
 }
 
+/// Stop when the relative energy change between accepted steps falls
+/// below `etol`, the LAMMPS `minimize etol` test. `etol` of zero is the
+/// strictest setting and never fires on a run that still moves. A
+/// negative or non-finite `etol` returns `RGMIN_INVALID_PARAMETER` and
+/// leaves the session as it was. Particle swarm has no energy sequence
+/// and returns `RGMIN_INVALID_PARAMETER` as well. The reason is in
+/// [`rgmin_last_error`]. ABI minor 50.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_etol(
+    solver: *mut rgmin_solver_t,
+    etol: f64,
+) -> rgmin_status_t {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_etol: null solver");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    match unsafe { (*solver).solver.set_etol(Some(etol)) } {
+        Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
+        Err(err) => status_from_error(&err),
+    }
+}
+
+/// Turn the energy-change stop off.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_clear_etol(solver: *mut rgmin_solver_t) {
+    if !solver.is_null() {
+        let _ = unsafe { (*solver).solver.set_etol(None) };
+    }
+}
+
+/// Stop once the session has made `max_evals` objective evaluations, the
+/// LAMMPS `minimize maxeval` test. The count includes line-search trials
+/// and is checked after each outer step, so the step that crosses it
+/// finishes. Zero returns `RGMIN_INVALID_PARAMETER` and leaves the session
+/// as it was. ABI minor 50.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_max_evals(
+    solver: *mut rgmin_solver_t,
+    max_evals: usize,
+) -> rgmin_status_t {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_max_evals: null solver");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    match unsafe { (*solver).solver.set_max_evals(Some(max_evals)) } {
+        Ok(()) => rgmin_status_t::RGMIN_SUCCESS,
+        Err(err) => status_from_error(&err),
+    }
+}
+
+/// Turn the evaluation budget off.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_clear_max_evals(solver: *mut rgmin_solver_t) {
+    if !solver.is_null() {
+        let _ = unsafe { (*solver).solver.set_max_evals(None) };
+    }
+}
+
+/// Objective evaluations the session's steps have made, the count
+/// `rgmin_solver_set_max_evals` compares. A null solver returns zero.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_evals(solver: *const rgmin_solver_t) -> usize {
+    if solver.is_null() {
+        return 0;
+    }
+    unsafe { (*solver).solver.evals() }
+}
+
 /// One outer iteration. `x` is in/out. Callbacks live for this call only.
 ///
 /// # Safety
@@ -4151,6 +4240,8 @@ fn control_with_flags(c: &rgmin_control_t, error_on_unmet: i32, backward_polish:
         noise_floor: noise_floor_from_c(c),
         error_on_unmet: error_on_unmet != 0,
         backward_polish: backward_polish != 0,
+        etol: None,
+        max_evals: None,
     }
 }
 
@@ -4163,6 +4254,8 @@ fn stop_from_reason(reason: crate::StopReason) -> rgmin_stop_t {
         StopReason::MaxIter | StopReason::Iterating => rgmin_stop_t::RGMIN_STOP_BUDGET,
         StopReason::LineSearchFailed => rgmin_stop_t::RGMIN_STOP_LINE_SEARCH,
         StopReason::PolishUnmet => rgmin_stop_t::RGMIN_STOP_POLISH_UNMET,
+        StopReason::EnergyTolerance => rgmin_stop_t::RGMIN_STOP_ENERGY_TOLERANCE,
+        StopReason::EvalBudget => rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET,
     }
 }
 
@@ -6579,6 +6672,8 @@ mod default_tests {
         Option<FloorBits>,
         bool,
         bool,
+        Option<u64>,
+        Option<usize>,
     );
     type ExpBits = (u64, u64, Option<u64>, Option<u64>, Option<u64>, bool, Cell);
     type LindhBits = (u64, Option<u64>, bool, bool, Cell, Option<u64>, bool);
@@ -6609,6 +6704,8 @@ mod default_tests {
             noise_floor,
             error_on_unmet,
             backward_polish,
+            etol,
+            max_evals,
         } = control;
         (
             maxiter,
@@ -6620,6 +6717,8 @@ mod default_tests {
             noise_floor.map(floor_bits),
             error_on_unmet,
             backward_polish,
+            opt(etol),
+            max_evals,
         )
     }
 

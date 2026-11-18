@@ -14,7 +14,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use eindir_core::DifferentiableObjective;
+use eindir_core::{DifferentiableObjective, Objective};
 use ndarray::{Array1, Array2, ArrayView1, Zip};
 
 use crate::accept::retract_within_cap;
@@ -25,6 +25,7 @@ use crate::report::Report;
 use crate::rigid::project_out_rot_trans;
 use crate::scg::DirectionalCurvature;
 use crate::step::{apply_caps, one_shot_report};
+use crate::stop::{Counted, StopRules, counted, stop_after};
 use crate::trust::{reduction_ratio, update_radius};
 use crate::vecops::{axpy, dot, nrm2};
 
@@ -881,6 +882,17 @@ pub fn minimize_newton_cg<O>(
 where
     O: HessianVector + ?Sized,
 {
+    counted(obj, control, |obj| newton_cg_counted(obj, init, control))
+}
+
+fn newton_cg_counted<O>(
+    obj: &Counted<'_, O>,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+) -> Result<Report>
+where
+    O: HessianVector + ?Sized,
+{
     let mut pos = init.into();
     if pos.len() != eindir_core::Objective::dim(obj) {
         return Err(Error::Dim {
@@ -902,6 +914,7 @@ where
         1.0_f64.min(rmax)
     };
     let action = |xv: ArrayView1<f64>, v: ArrayView1<f64>| obj.hessian_vector(xv, v);
+    let mut stops = StopRules::from_start(value);
 
     for step in 0..control.maxiter {
         let gnorm = nrm2(grad.view());
@@ -941,10 +954,20 @@ where
         if taken.collapsed {
             return Err(Error::TrustCollapsed { steps: step });
         }
-        if taken.moved {
+        let moved = taken.moved;
+        if moved {
             pos = taken.pos;
             value = taken.value;
             grad = taken.grad;
+        }
+        if let Some(status) = stop_after(&mut stops, control, obj, value, moved, &grad) {
+            return control.deliver(one_shot_report(
+                value,
+                pos,
+                step + 1,
+                nrm2(grad.view()),
+                status,
+            ));
         }
     }
     let gnorm = nrm2(grad.view());

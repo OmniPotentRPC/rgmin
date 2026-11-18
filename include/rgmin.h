@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 49
+#define RGMIN_ABI_VERSION_MINOR 50
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -84,7 +84,9 @@ typedef struct rgmin_abi_stamp_t {
  * 48 rgmin_solver_set_fire_cap_two_step_overshoot,
  * 49 stop reasons LINE_SEARCH and POLISH_UNMET, RGMIN_UNMET_STOP,
  *    the two session setters, rgmin_backward_error_floor, and the
- *    *_opts one-shots. rgmin_control_t is unchanged. */
+ *    *_opts one-shots. rgmin_control_t is unchanged.
+ * 50 etol and max_evals stops, RGMIN_STOP_ENERGY_TOLERANCE and
+ *    RGMIN_STOP_EVAL_BUDGET. rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -166,7 +168,12 @@ typedef enum rgmin_stop_t {
     /** No step was accepted. ABI minor 49. */
     RGMIN_STOP_LINE_SEARCH = 4,
     /** A backward-error polish did not meet its test. ABI minor 49. */
-    RGMIN_STOP_POLISH_UNMET = 5
+    RGMIN_STOP_POLISH_UNMET = 5,
+    /** The relative energy change between accepted steps fell below the
+     *  rgmin_solver_set_etol value. ABI minor 50. */
+    RGMIN_STOP_ENERGY_TOLERANCE = 6,
+    /** The rgmin_solver_set_max_evals budget was spent. ABI minor 50. */
+    RGMIN_STOP_EVAL_BUDGET = 7
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),
@@ -591,6 +598,31 @@ int32_t rgmin_solver_set_lbfgs_wolfe(rgmin_solver_t *solver);
 int32_t rgmin_solver_set_lbfgs_trust(rgmin_solver_t *solver, double radius);
 /** Current Burdakov radius, or 0 when it is off or \c solver is null. */
 double rgmin_solver_lbfgs_trust_radius(const rgmin_solver_t *solver);
+/** Stop when the relative energy change between accepted steps falls
+ *  below \c etol, the LAMMPS <tt>minimize etol</tt> test: with E the
+ *  energy after an accepted step and E' the one before,
+ *  |E - E'| < etol * 0.5 * (|E| + |E'| + sqrt(DBL_EPSILON)). Off until
+ *  set. A negative or non-finite value, a null session, and a particle
+ *  swarm session (it has no accepted-step energy sequence) return
+ *  RGMIN_INVALID_PARAMETER and leave the session as it was; the reason
+ *  is in rgmin_last_error. A gradient stop wins when both hold at once;
+ *  the finished step reports RGMIN_STOP_ENERGY_TOLERANCE. ABI minor 50. */
+rgmin_status_t rgmin_solver_set_etol(rgmin_solver_t *solver, double etol);
+/** Turn the energy-change stop off. ABI minor 50. */
+void rgmin_solver_clear_etol(rgmin_solver_t *solver);
+/** Stop once the session has made \c max_evals objective evaluations,
+ *  the LAMMPS <tt>minimize maxeval</tt> test. Line-search trials count.
+ *  The budget is read after each outer step, so the step that crosses it
+ *  finishes and \ref rgmin_solver_evals can exceed \c max_evals by that
+ *  step's evaluations. Zero or a null session returns
+ *  RGMIN_INVALID_PARAMETER. Off until set. ABI minor 50. */
+rgmin_status_t rgmin_solver_set_max_evals(rgmin_solver_t *solver, size_t max_evals);
+/** Turn the evaluation budget off. ABI minor 50. */
+void rgmin_solver_clear_max_evals(rgmin_solver_t *solver);
+/** Objective evaluations the session's steps have made, the count
+ *  rgmin_solver_set_max_evals compares. Zero for a null session.
+ *  ABI minor 50. */
+size_t rgmin_solver_evals(const rgmin_solver_t *solver);
 /** Per-atom cap (eOn \c maxAtomMotionAppliedV). While the L-BFGS step
  *  is the default cap, this replaces that cap. After
  *  rgmin_solver_set_lbfgs_wolfe, and without a distance constraint set,

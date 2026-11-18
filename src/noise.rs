@@ -983,6 +983,8 @@ mod tests {
             noise_floor: Some(NoiseFloor::new(eps)),
             error_on_unmet: false,
             backward_polish: false,
+            etol: None,
+            max_evals: None,
         };
         let report = minimize_method(
             &obj,

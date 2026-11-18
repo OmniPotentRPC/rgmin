@@ -1085,6 +1085,8 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
+/// ABI minor 50 adds `rgmin_solver_set_etol`, `rgmin_solver_set_max_evals`,
+/// their clear functions, `rgmin_solver_evals` and the two stop codes.
 /// ABI minor 49 adds the stop-status setters, the floor, and the
 /// `*_opts` one-shots. Minor 48 adds
 /// `rgmin_solver_set_fire_cap_two_step_overshoot`. Minor 47 adds
@@ -1100,7 +1102,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 49);
+    assert_eq!(stamp.abi_minor, 50);
     assert_eq!(stamp.layout_revision, 5);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -1192,6 +1194,170 @@ fn c_abi_burdakov_radius_is_off_until_set() {
     assert_eq!(unsafe { rgmin_solver_set_lbfgs_trust(session, 0.0) }, 0);
     assert_eq!(unsafe { rgmin_solver_lbfgs_trust_radius(session) }, 0.0);
     unsafe { rgmin_solver_free(session) };
+}
+
+/// The C adapter asks for a value and then a gradient at each point, one
+/// evaluation, so only the gradient callback is counted.
+unsafe extern "C" fn tallied_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    unsafe { rosen_eval(std::ptr::null_mut(), x, value_out) }
+}
+
+unsafe extern "C" fn tallied_grad(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    unsafe { &*(user as *const AtomicUsize) }.fetch_add(1, Ordering::SeqCst);
+    unsafe { rosen_grad(std::ptr::null_mut(), x, g) }
+}
+
+fn stop_ctrl() -> rgmin_control_t {
+    rgmin_control_t {
+        maxiter: 5000,
+        gtol: 1e-12,
+        istep: 0.1,
+        memory: 10,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    }
+}
+
+/// Steps a session to the first stop, with the oracle's own call count.
+fn run_to_stop(
+    session: *mut rgmin::ffi::rgmin_solver_t,
+    calls: &AtomicUsize,
+) -> (rgmin_report_t, usize) {
+    let mut x = [-1.2, 1.0];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+    };
+    let mut taken = 0;
+    while out.stop == rgmin_stop_t::RGMIN_STOP_BUDGET && taken < 5000 {
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+        let st = unsafe {
+            rgmin_solver_step(
+                session,
+                Some(tallied_eval),
+                Some(tallied_grad),
+                calls as *const AtomicUsize as *mut c_void,
+                xt,
+                &mut out,
+            )
+        };
+        unsafe { rgmin_tensor_free(xt) };
+        assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+        taken += 1;
+    }
+    (out, taken)
+}
+
+#[test]
+fn c_abi_etol_stops_a_session_before_the_gradient_does() {
+    use rgmin::ffi::{rgmin_solver_clear_etol, rgmin_solver_evals, rgmin_solver_set_etol};
+    let ctrl = stop_ctrl();
+    let calls = AtomicUsize::new(0);
+    let plain = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    let (free, free_steps) = run_to_stop(plain, &calls);
+    assert_eq!(free.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE);
+    unsafe { rgmin_solver_free(plain) };
+
+    calls.store(0, Ordering::SeqCst);
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert_eq!(
+        unsafe { rgmin_solver_set_etol(session, 1e-6) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    let (cut, cut_steps) = run_to_stop(session, &calls);
+    assert_eq!(cut.stop, rgmin_stop_t::RGMIN_STOP_ENERGY_TOLERANCE);
+    assert!(cut_steps < free_steps, "{cut_steps} vs {free_steps}");
+    assert_eq!(
+        unsafe { rgmin_solver_evals(session) },
+        calls.load(Ordering::SeqCst)
+    );
+    unsafe { rgmin_solver_free(session) };
+
+    calls.store(0, Ordering::SeqCst);
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    unsafe {
+        rgmin_solver_set_etol(session, 1e-6);
+        rgmin_solver_clear_etol(session);
+    }
+    let (back, back_steps) = run_to_stop(session, &calls);
+    assert_eq!(back.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE);
+    assert_eq!(back_steps, free_steps);
+    assert_eq!(back.value.to_bits(), free.value.to_bits());
+    unsafe { rgmin_solver_free(session) };
+}
+
+#[test]
+fn c_abi_max_evals_stops_a_session_with_the_exact_count() {
+    use rgmin::ffi::{
+        rgmin_solver_clear_max_evals, rgmin_solver_evals, rgmin_solver_set_max_evals,
+    };
+    let ctrl = stop_ctrl();
+    let calls = AtomicUsize::new(0);
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_POLAK_RIBIERE, &ctrl, 2) };
+    assert_eq!(
+        unsafe { rgmin_solver_set_max_evals(session, 30) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    let (out, _) = run_to_stop(session, &calls);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET);
+    let spent = unsafe { rgmin_solver_evals(session) };
+    assert_eq!(spent, calls.load(Ordering::SeqCst));
+    assert!(spent >= 30);
+    unsafe { rgmin_solver_free(session) };
+
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_POLAK_RIBIERE, &ctrl, 2) };
+    unsafe {
+        rgmin_solver_set_max_evals(session, 30);
+        rgmin_solver_clear_max_evals(session);
+    }
+    let (out, _) = run_to_stop(session, &AtomicUsize::new(0));
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE);
+    unsafe { rgmin_solver_free(session) };
+}
+
+#[test]
+fn c_abi_refuses_invalid_stops_and_keeps_the_session() {
+    use rgmin::ffi::{rgmin_solver_set_etol, rgmin_solver_set_max_evals};
+    let refused = rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    assert_eq!(
+        unsafe { rgmin_solver_set_etol(std::ptr::null_mut(), 1e-3) },
+        refused
+    );
+    assert_eq!(
+        unsafe { rgmin_solver_set_max_evals(std::ptr::null_mut(), 3) },
+        refused
+    );
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &stop_ctrl(), 2) };
+    for bad in [-1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(unsafe { rgmin_solver_set_etol(session, bad) }, refused);
+        let message = unsafe { std::ffi::CStr::from_ptr(rgmin_last_error()) }
+            .to_string_lossy()
+            .into_owned();
+        assert!(message.contains("etol"), "{message}");
+    }
+    assert_eq!(unsafe { rgmin_solver_set_max_evals(session, 0) }, refused);
+    let (out, _) = run_to_stop(session, &AtomicUsize::new(0));
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE);
+    unsafe { rgmin_solver_free(session) };
+
+    let swarm = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_PSO, &stop_ctrl(), 2) };
+    assert_eq!(unsafe { rgmin_solver_set_etol(swarm, 1e-3) }, refused);
+    assert_eq!(
+        unsafe { rgmin_solver_set_max_evals(swarm, 3) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    unsafe { rgmin_solver_free(swarm) };
 }
 
 /// On `f = x . x` from rest the first FIRE 2.0 move is `-2 dt^2 x`.

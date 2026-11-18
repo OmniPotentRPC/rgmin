@@ -12,13 +12,14 @@
 //! Nocedal and Wright, *Numerical Optimization*,
 //! <https://doi.org/10.1007/978-0-387-40065-5>.
 
-use eindir_core::DifferentiableObjective;
+use eindir_core::{DifferentiableObjective, Objective};
 use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::report::Report;
 use crate::step::{apply_caps, implicit_atom_cap, l2, one_shot_report};
+use crate::stop::{Counted, StopRules, counted, stop_after};
 
 const ENERGY_RISE: f64 = 1.0e-8;
 const EIG_FLOOR: f64 = 1.0e-8;
@@ -309,6 +310,18 @@ pub fn minimize_newton<O>(
 where
     O: HessianObjective + ?Sized,
 {
+    counted(obj, control, |obj| newton_counted(obj, init, control, kind))
+}
+
+fn newton_counted<O>(
+    obj: &Counted<'_, O>,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    kind: NewtonKind,
+) -> Result<Report>
+where
+    O: HessianObjective + ?Sized,
+{
     let mut pos = init.into();
     if pos.len() != eindir_core::Objective::dim(obj) {
         return Err(Error::Dim {
@@ -319,6 +332,7 @@ where
     pos = obj.bounds().clip(pos.view());
     let (mut value, mut grad) = obj.value_and_gradient(pos.view());
     crate::step::refuse_non_finite(value, &grad)?;
+    let mut stops = StopRules::from_start(value);
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
@@ -333,6 +347,7 @@ where
         let hess = obj.hessian(pos.view());
         let dir = newton_direction(kind, &hess, &grad);
         let (npos, nval, ngrad, moved) = energy_backtrack(obj, &pos, value, &dir, control);
+        let mut accepted = moved;
         if !moved {
             let sd = grad.mapv(|g| -g);
             let (spos, sval, sgrad, sok) = energy_backtrack(obj, &pos, value, &sd, control);
@@ -340,11 +355,15 @@ where
                 pos = spos;
                 value = sval;
                 grad = sgrad;
+                accepted = true;
             }
         } else {
             pos = npos;
             value = nval;
             grad = ngrad;
+        }
+        if let Some(status) = stop_after(&mut stops, control, obj, value, accepted, &grad) {
+            return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));
         }
     }
     let gnorm = l2(&grad);

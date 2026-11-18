@@ -11,6 +11,7 @@ use crate::step::{
     apply_caps, energy_noise_report, implicit_atom_cap, l2, next_istep, one_shot_report, qn_istep,
     take_step,
 };
+use crate::stop::{Counted, StopRules, counted, stop_after};
 use crate::trust::{
     accept_ratio, cauchy_point, dogleg_direction, predicted_reduction, reduction_ratio,
     update_radius,
@@ -39,12 +40,27 @@ pub fn minimize_bfgs<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    counted(obj, control, |obj| {
+        bfgs_counted(obj, init, control, linesearch)
+    })
+}
+
+fn bfgs_counted<O>(
+    obj: &Counted<'_, O>,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    linesearch: LineSearch,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let mut pos = start(obj, init)?;
     let n = pos.len();
     let (mut value, mut grad) = obj.value_and_gradient(pos.view());
     crate::step::refuse_non_finite(value, &grad)?;
     let mut h = Array2::<f64>::eye(n);
     let mut istep = control.istep;
+    let mut stops = StopRules::from_start(value);
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
@@ -81,6 +97,9 @@ where
             bfgs_inverse_update(&mut h, &s, &y);
         }
         istep = qn_istep(control);
+        if let Some(status) = stop_after(&mut stops, control, obj, value, moved, &grad) {
+            return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));
+        }
     }
     control.deliver(done(
         value,
@@ -175,10 +194,25 @@ fn minimize_sr_trust<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    counted(obj, control, |obj| {
+        sr_trust_counted(obj, init, control, update)
+    })
+}
+
+fn sr_trust_counted<O>(
+    obj: &Counted<'_, O>,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    update: fn(&mut Array2<f64>, &Array1<f64>, &Array1<f64>),
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let mut pos = start(obj, init)?;
     let n = pos.len();
     let (mut value, mut grad) = obj.value_and_gradient(pos.view());
     crate::step::refuse_non_finite(value, &grad)?;
+    let mut stops = StopRules::from_start(value);
     let mut b = Array2::<f64>::eye(n);
     let atom_cap = implicit_atom_cap(control);
     let (mut radius, rmax) = sr_trust_limits(control.istep, n, atom_cap, control.maxmove_cap());
@@ -192,27 +226,34 @@ where
         let mut trial = &pos + &dir;
         apply_caps(&pos, &mut trial, atom_cap, control.maxmove_cap());
         trial = obj.bounds().clip(trial.view());
-        let p = &trial - &pos;
-        let pnorm = l2(&p);
-        if !(pnorm.is_finite() && pnorm > 1e-16) {
-            radius = update_radius(radius, -1.0, 0.0, rmax);
-            continue;
+        let mut moved = false;
+        'attempt: {
+            let p = &trial - &pos;
+            let pnorm = l2(&p);
+            if !(pnorm.is_finite() && pnorm > 1e-16) {
+                radius = update_radius(radius, -1.0, 0.0, rmax);
+                break 'attempt;
+            }
+            let (ft, gt) = obj.value_and_gradient(trial.view());
+            if !ft.is_finite() || gt.iter().any(|v| !v.is_finite()) {
+                radius = update_radius(radius, -1.0, pnorm, rmax);
+                break 'attempt;
+            }
+            let pred = predicted_reduction(&b, &grad, &p);
+            let rho = reduction_ratio(value - ft, pred);
+            radius = update_radius(radius, rho, pnorm, rmax);
+            if accept_ratio(rho) {
+                let s = &trial - &pos;
+                let y = &gt - &grad;
+                update(&mut b, &s, &y);
+                pos = trial;
+                value = ft;
+                grad = gt;
+                moved = true;
+            }
         }
-        let (ft, gt) = obj.value_and_gradient(trial.view());
-        if !ft.is_finite() || gt.iter().any(|v| !v.is_finite()) {
-            radius = update_radius(radius, -1.0, pnorm, rmax);
-            continue;
-        }
-        let pred = predicted_reduction(&b, &grad, &p);
-        let rho = reduction_ratio(value - ft, pred);
-        radius = update_radius(radius, rho, pnorm, rmax);
-        if accept_ratio(rho) {
-            let s = &trial - &pos;
-            let y = &gt - &grad;
-            update(&mut b, &s, &y);
-            pos = trial;
-            value = ft;
-            grad = gt;
+        if let Some(status) = stop_after(&mut stops, control, obj, value, moved, &grad) {
+            return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));
         }
     }
     control.deliver(done(
@@ -239,10 +280,25 @@ pub fn minimize_sd<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    counted(obj, control, |obj| {
+        sd_counted(obj, init, control, linesearch)
+    })
+}
+
+fn sd_counted<O>(
+    obj: &Counted<'_, O>,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    linesearch: LineSearch,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let mut pos = start(obj, init)?;
     let (mut value, mut grad) = obj.value_and_gradient(pos.view());
     crate::step::refuse_non_finite(value, &grad)?;
     let mut istep = control.istep;
+    let mut stops = StopRules::from_start(value);
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
         if control.halt(gnorm, grad.len()).is_some() {
@@ -264,10 +320,14 @@ where
             return control.deliver(energy_noise_report(value, pos, step + 1, gnorm));
         }
         let lsstep = t.alpha;
+        let moved = t.moved;
         pos = t.x;
         value = t.f;
         grad = t.g;
         istep = next_istep(lsstep, control);
+        if let Some(status) = stop_after(&mut stops, control, obj, value, moved, &grad) {
+            return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));
+        }
     }
     control.deliver(done(
         value,

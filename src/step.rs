@@ -339,6 +339,7 @@ pub(crate) fn one_shot_report(
         grad: None,
         status,
         reason: None,
+        evals: 0,
     }
 }
 

@@ -30,6 +30,12 @@ pub enum Status {
     StepTolerance,
     /// The iteration budget was spent above every stop.
     Budget,
+    /// The energy changed by less than [`crate::Control::etol`] allows
+    /// between two accepted steps, the LAMMPS `minimize etol` stop.
+    EnergyTolerance,
+    /// [`crate::Control::max_evals`] objective evaluations were spent above
+    /// every other stop, the LAMMPS `minimize maxeval` stop.
+    EvalBudget,
 }
 
 /// Typed stop of a finished minimization.
@@ -60,6 +66,11 @@ pub enum StopReason {
     PolishUnmet,
     /// [`Status::Iterating`]: a step that has not stopped.
     Iterating,
+    /// [`Status::EnergyTolerance`]: the relative energy change between
+    /// accepted steps fell below [`crate::Control::etol`].
+    EnergyTolerance,
+    /// [`Status::EvalBudget`]: [`crate::Control::max_evals`] was spent.
+    EvalBudget,
 }
 
 impl StopReason {
@@ -70,12 +81,13 @@ impl StopReason {
 
     /// A finished run whose stop test did not hold.
     ///
-    /// [`Self::NoiseFloor`] and [`Self::StepTolerance`] are stops that
-    /// held. [`Self::Iterating`] is a step still in progress.
+    /// [`Self::NoiseFloor`], [`Self::StepTolerance`] and
+    /// [`Self::EnergyTolerance`] are stops that held.
+    /// [`Self::Iterating`] is a step still in progress.
     pub fn is_unmet(self) -> bool {
         matches!(
             self,
-            Self::MaxIter | Self::LineSearchFailed | Self::PolishUnmet
+            Self::MaxIter | Self::LineSearchFailed | Self::PolishUnmet | Self::EvalBudget
         )
     }
 
@@ -90,6 +102,8 @@ impl StopReason {
             Self::NoiseFloor => Status::NoiseFloor,
             Self::StepTolerance => Status::StepTolerance,
             Self::Iterating => Status::Iterating,
+            Self::EnergyTolerance => Status::EnergyTolerance,
+            Self::EvalBudget => Status::EvalBudget,
         }
     }
 
@@ -100,6 +114,8 @@ impl StopReason {
             Status::NoiseFloor => Self::NoiseFloor,
             Status::StepTolerance => Self::StepTolerance,
             Status::Iterating => Self::Iterating,
+            Status::EnergyTolerance => Self::EnergyTolerance,
+            Status::EvalBudget => Self::EvalBudget,
         }
     }
 }
@@ -114,6 +130,8 @@ impl std::fmt::Display for StopReason {
             Self::StepTolerance => "step tolerance",
             Self::PolishUnmet => "backward-error polish unmet",
             Self::Iterating => "iterating",
+            Self::EnergyTolerance => "energy tolerance",
+            Self::EvalBudget => "evaluation budget",
         })
     }
 }
@@ -148,6 +166,12 @@ pub struct Report {
     pub status: Status,
     /// Finer stop. `None` follows [`Report::status`].
     pub(crate) reason: Option<StopReason>,
+    /// Objective evaluations the run made: calls to the objective's value,
+    /// gradient or fused value-and-gradient. A one-shot driver counts its
+    /// own call. A session counts every step it has taken, and
+    /// [`crate::Solver::run`] counts the whole run. This is the quantity
+    /// [`crate::Control::max_evals`] limits.
+    pub evals: usize,
 }
 
 impl Report {
@@ -163,6 +187,7 @@ impl Report {
             grad: None,
             status: Status::Iterating,
             reason: None,
+            evals: 0,
         }
     }
 
@@ -207,4 +232,5 @@ with_setters!(Report {
     with_grad_norm => grad_norm: val f64,
     with_stop_norm => stop_norm: val StopNorm,
     with_grad => grad: opt Array1<f64>,
+    with_evals => evals: val usize,
 });

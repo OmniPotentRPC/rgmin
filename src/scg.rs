@@ -17,6 +17,7 @@ use crate::error::{Error, Result};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
 use crate::report::Report;
 use crate::step::one_shot_report;
+use crate::stop::{Counted, StopRules, counted, stop_after};
 use crate::vecops::dot_ordered;
 use ndarray::ArrayView1;
 
@@ -289,6 +290,26 @@ fn run_scg<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    counted(obj, control, |obj| {
+        scg_counted(
+            obj, init, control, params, conjugacy, restart, options, curvature,
+        )
+    })
+}
+
+fn scg_counted<O>(
+    obj: &Counted<'_, O>,
+    init: Array1<f64>,
+    control: &Control,
+    params: &ScgParams,
+    conjugacy: Conjugacy,
+    restart: Restart,
+    options: &ScgOptions,
+    curvature: impl Fn(ArrayView1<f64>, ArrayView1<f64>) -> Option<f64>,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let mut w = init;
     if w.len() != Objective::dim(obj) {
         return Err(Error::Dim {
@@ -306,6 +327,7 @@ where
             what: "start point has a non-finite objective",
         });
     }
+    let mut stops = StopRules::from_start(f_old);
     let mut objective_min = f_old;
     let mut objective_max = f_old;
     let mut grad_old = grad.clone();
@@ -511,6 +533,15 @@ where
                 let beta = conjugacy.beta(&ctx);
                 dir = beta * &dir - &grad;
             }
+        }
+        if let Some(status) = stop_after(&mut stops, control, obj, f_old, success, &grad) {
+            return control.deliver(one_shot_report(
+                f_old,
+                w,
+                step + 1,
+                l2_ordered(&grad),
+                status,
+            ));
         }
         step += 1;
     }

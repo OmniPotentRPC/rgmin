@@ -10,6 +10,7 @@ use crate::report::Report;
 use crate::step::{
     energy_noise_report, implicit_atom_cap, l2, max_atom_norm, one_shot_report, take_step,
 };
+use crate::stop::{Counted, StopRules, counted, stop_after};
 
 /// Adam plus a line search along the Kingma-Ba preconditioned step.
 ///
@@ -36,6 +37,23 @@ pub fn minimize_adam<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    counted(obj, control, |obj| {
+        adam_counted(obj, init, control, linesearch, beta1, beta2, eps)
+    })
+}
+
+fn adam_counted<O>(
+    obj: &Counted<'_, O>,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    linesearch: LineSearch,
+    beta1: f64,
+    beta2: f64,
+    eps: f64,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let mut pos = init.into();
     if pos.len() != Objective::dim(obj) {
         return Err(Error::Dim {
@@ -52,6 +70,7 @@ where
     let mut b1p = beta1;
     let mut b2p = beta2;
     let mut istep = control.istep;
+    let mut stops = StopRules::from_start(value);
 
     for step in 0..control.maxiter {
         let gnorm = l2(&grad);
@@ -88,6 +107,9 @@ where
         } else {
             m = m_old;
             v = v_old;
+        }
+        if let Some(status) = stop_after(&mut stops, control, obj, value, t.moved, &grad) {
+            return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));
         }
     }
     control.deliver(one_shot_report(
@@ -197,6 +219,8 @@ mod tests {
             noise_floor: None,
             error_on_unmet: false,
             backward_polish: false,
+            etol: None,
+            max_evals: None,
         };
         let linesearch = LineSearch::Backtracking {
             c: 1e-4,
