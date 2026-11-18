@@ -579,6 +579,15 @@ impl ExpState {
         self.mu_c
     }
 
+    /// Fix `μ_c`, or `None` to estimate it again. The matrix is rebuilt on
+    /// the next refresh.
+    pub(crate) fn set_mu_c(&mut self, mu_c: Option<f64>) {
+        self.params.mu_c = mu_c;
+        self.mu_c = mu_c;
+        self.matrix = None;
+        self.built_at = None;
+    }
+
     pub(crate) fn mu(&self) -> Option<f64> {
         self.mu
     }

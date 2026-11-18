@@ -77,7 +77,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 47;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 48;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1560,6 +1560,62 @@ pub struct rgmin_exp_t {
     pub recalc_mu: i32,
 }
 
+/// Variable-cell filter options. ABI minor 48. Start from
+/// [`rgmin_cell_default`].
+///
+/// The strain mask is row-major: entry `3 i + j` nonzero relaxes strain
+/// component `(i, j)` of `F = (cell_0^{-1} cell)^T`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_cell_t {
+    /// Cell-block scale `ecf`. NaN or non-positive selects the atom count.
+    pub exp_cell_factor: f64,
+    /// Scalar pressure `p` of the enthalpy `E + p V`, in energy per volume.
+    pub pressure: f64,
+    /// Strain components that relax. Nonzero relaxes.
+    pub mask: [i32; 9],
+    /// Nonzero keeps only the isotropic part of the stress.
+    pub hydrostatic: i32,
+    /// Nonzero projects the volume change out of the cell gradient.
+    pub constant_volume: i32,
+}
+
+impl Default for rgmin_cell_t {
+    fn default() -> Self {
+        let want = crate::CellFilterConfig::default();
+        let mut mask = [0; 9];
+        for i in 0..3 {
+            for j in 0..3 {
+                mask[3 * i + j] = i32::from(want.mask[i][j]);
+            }
+        }
+        Self {
+            exp_cell_factor: f64::NAN,
+            pressure: want.pressure,
+            mask,
+            hydrostatic: i32::from(want.hydrostatic),
+            constant_volume: i32::from(want.constant_volume),
+        }
+    }
+}
+
+/// Energy, forces and stress at Cartesian positions and a cell.
+///
+/// `positions` is a rank-1 f64 DLPack tensor of length `3 N`. `cell` is
+/// nine doubles, row-major, one lattice vector per row. The callback
+/// writes `energy_out`, fills the `forces_out` tensor (`-dE/dr`, length
+/// `3 N`) and writes nine doubles to `stress_out`, row-major, in the
+/// ASE sign convention (`(1/V) dE/d(strain)`, positive under tension of
+/// the cell). ABI minor 48.
+pub type rgmin_cell_eval_fn = unsafe extern "C" fn(
+    user: *mut c_void,
+    positions: *const DLManagedTensorVersioned,
+    cell: *const f64,
+    energy_out: *mut f64,
+    forces_out: *mut DLManagedTensorVersioned,
+    stress_out: *mut f64,
+) -> rgmin_status_t;
+
 /// Install the exponential preconditioner on a session.
 ///
 /// `pair_i` and `pair_j` have length `npair` and index atoms in the
@@ -1710,6 +1766,45 @@ pub unsafe extern "C" fn rgmin_solver_exp_mu(solver: *const rgmin_solver_t) -> f
         return f64::NAN;
     }
     unsafe { (*solver).solver.exp_mu().unwrap_or(f64::NAN) }
+}
+
+/// `μ_c` of the exponential preconditioner on a cell layout, or NaN.
+/// ABI minor 48.
+///
+/// # Safety
+/// A non-null `solver` must be a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_exp_mu_c(solver: *const rgmin_solver_t) -> f64 {
+    if solver.is_null() {
+        return f64::NAN;
+    }
+    match unsafe { (*solver).solver.exp_mu_c() } {
+        Some(mu_c) => mu_c,
+        None => f64::NAN,
+    }
+}
+
+/// Fix `μ_c` of the installed exponential preconditioner. NaN or a
+/// non-positive value estimates it again on the next step. The session
+/// needs a cell filter and a preconditioner. ABI minor 48.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_exp_mu_c(
+    solver: *mut rgmin_solver_t,
+    mu_c: f64,
+) -> rgmin_status_t {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_exp_mu_c: null solver");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let value = if mu_c.is_finite() && mu_c > 0.0 {
+        Some(mu_c)
+    } else {
+        None
+    };
+    invalid_on_error(unsafe { (*solver).solver.set_exp_mu_c(value) })
 }
 
 /// How a session takes a proposed step (eOn `lbfgs_accept`).
@@ -2963,6 +3058,183 @@ pub unsafe extern "C" fn rgmin_solver_set_level_set(
 pub unsafe extern "C" fn rgmin_solver_clear_level_set(solver: *mut rgmin_solver_t) {
     if !solver.is_null() {
         unsafe { (*solver).solver.clear_level_set() };
+    }
+}
+
+/// Run the session on the extended `[positions, cell strain]` layout of
+/// a variable-cell filter. ABI minor 48.
+///
+/// The session dimension must be `3 natoms + 9`. `orig_cell` is nine
+/// doubles, row-major, the reference cell of the deformation. Install
+/// the filter before any preconditioner.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+/// `config` is null for the defaults or points to a record, and
+/// `orig_cell` points to nine readable doubles.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_cell_filter(
+    solver: *mut rgmin_solver_t,
+    config: *const rgmin_cell_t,
+    orig_cell: *const f64,
+    natoms: usize,
+) -> rgmin_status_t {
+    if solver.is_null() || orig_cell.is_null() {
+        set_last_error("rgmin_solver_set_cell_filter: null solver or cell");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let c = match unsafe { config.as_ref() } {
+        Some(c) => *c,
+        None => rgmin_cell_t::default(),
+    };
+    let mut mask = [[false; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            mask[i][j] = c.mask[3 * i + j] != 0;
+        }
+    }
+    let mut options = crate::CellFilterConfig::default()
+        .with_pressure(c.pressure)
+        .with_mask(mask)
+        .with_hydrostatic(c.hydrostatic != 0)
+        .with_constant_volume(c.constant_volume != 0);
+    if c.exp_cell_factor.is_finite() && c.exp_cell_factor > 0.0 {
+        options = options.with_exp_cell_factor(c.exp_cell_factor);
+    }
+    let flat = unsafe { slice::from_raw_parts(orig_cell, 9) };
+    let orig = cell_from_flat(flat);
+    let built = crate::CellFilter::new(options, orig, natoms);
+    match built {
+        Ok(filter) => invalid_on_error(unsafe { (*solver).solver.set_cell_filter(filter) }),
+        Err(e) => status_from_error(&e),
+    }
+}
+
+/// Back to the plain layout. Drops a preconditioner installed on the
+/// cell layout. ABI minor 48.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_clear_cell_filter(solver: *mut rgmin_solver_t) {
+    if !solver.is_null() {
+        unsafe { (*solver).solver.clear_cell_filter() };
+    }
+}
+
+fn cell_from_flat(flat: &[f64]) -> crate::Cell {
+    [
+        [flat[0], flat[1], flat[2]],
+        [flat[3], flat[4], flat[5]],
+        [flat[6], flat[7], flat[8]],
+    ]
+}
+
+/// One outer iteration on a cell layout. `positions` (length `3 N`) and
+/// `cell` (nine doubles, row-major) are in/out. `out` describes the
+/// extended vector: its value is the enthalpy and its gradient norm is
+/// what `gtol` is tested against. ABI minor 48.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+/// `eval` must be callable with `user` for the duration of this call.
+/// `positions` is null or a writable rank-1 f64 tensor, `cell` is null
+/// or nine writable doubles, and `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_step_cell(
+    solver: *mut rgmin_solver_t,
+    eval: Option<rgmin_cell_eval_fn>,
+    user: *mut c_void,
+    positions: *mut DLManagedTensorVersioned,
+    cell: *mut f64,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if solver.is_null() || cell.is_null() || out.is_null() {
+            set_last_error("rgmin_solver_step_cell: null solver, cell or out");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let Some(eval) = eval else {
+            set_last_error("rgmin_solver_step_cell: eval is NULL");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        };
+        let init = match cpu_f64_slice_mut(positions, "positions") {
+            Ok(s) => s.to_vec(),
+            Err(st) => return st,
+        };
+        let eval_ptr = eval as usize;
+        let user_addr = user as usize;
+        let scratch = Scratch::new();
+        let callback = move |p: ndarray::ArrayView1<f64>, c: &crate::Cell| {
+            let eval: rgmin_cell_eval_fn = unsafe { std::mem::transmute(eval_ptr) };
+            let user = user_addr as *mut c_void;
+            let n = p.len();
+            let flat = [
+                c[0][0], c[0][1], c[0][2], c[1][0], c[1][1], c[1][2], c[2][0], c[2][1], c[2][2],
+            ];
+            let mut s = scratch.lock().expect("ffi scratch");
+            let pt = s.x_tensor(p);
+            let mut forces = Array1::zeros(n);
+            let ft = s.out.point_at(forces.as_mut_ptr(), n);
+            let mut energy = 0.0;
+            let mut stress = [0.0; 9];
+            let st = unsafe {
+                eval(
+                    user,
+                    pt,
+                    flat.as_ptr(),
+                    &mut energy,
+                    ft,
+                    stress.as_mut_ptr(),
+                )
+            };
+            if st != rgmin_status_t::RGMIN_SUCCESS {
+                return crate::CellEvaluation::new(
+                    f64::NAN,
+                    Array1::from_elem(n, f64::NAN),
+                    [[f64::NAN; 3]; 3],
+                );
+            }
+            crate::CellEvaluation::new(energy, forces, cell_from_flat(&stress))
+        };
+        let mut pos = Array1::from(init);
+        let mut lattice = cell_from_flat(unsafe { slice::from_raw_parts(cell, 9) });
+        match unsafe {
+            (*solver)
+                .solver
+                .step_cell(&callback, &mut pos, &mut lattice)
+        } {
+            Ok(rep) => {
+                let dest = match cpu_f64_slice_mut(positions, "positions") {
+                    Ok(s) => s,
+                    Err(st) => return st,
+                };
+                dest.copy_from_slice(pos.as_slice().expect("contiguous"));
+                let flat = unsafe { slice::from_raw_parts_mut(cell, 9) };
+                for i in 0..3 {
+                    for j in 0..3 {
+                        flat[3 * i + j] = lattice[i][j];
+                    }
+                }
+                unsafe {
+                    *out = rgmin_report_t {
+                        value: rep.value,
+                        steps: rep.steps,
+                        grad_norm: rep.grad_norm,
+                        stop: stop_from_status(rep.status),
+                    };
+                    (*solver).grad = rep.grad;
+                }
+                rgmin_status_t::RGMIN_SUCCESS
+            }
+            Err(e) => status_from_error(&e),
+        }
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("rgmin_solver_step_cell: panic");
+            rgmin_status_t::RGMIN_INTERNAL_ERROR
+        }
     }
 }
 
@@ -6445,6 +6717,12 @@ pub extern "C" fn rgmin_control_default() -> rgmin_control_t {
 #[unsafe(no_mangle)]
 pub extern "C" fn rgmin_exp_default() -> rgmin_exp_t {
     rgmin_exp_t::default()
+}
+
+/// [`crate::CellFilterConfig::default`] as a C record. ABI minor 48.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_cell_default() -> rgmin_cell_t {
+    rgmin_cell_t::default()
 }
 
 /// The record a null `params` of [`rgmin_minimize_scg`] stands for. ABI minor 46.
