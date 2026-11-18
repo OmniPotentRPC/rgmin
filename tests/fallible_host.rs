@@ -15,8 +15,8 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2, array};
 use rgmin::manifold::{ManifoldKind, ProductFactor};
 use rgmin::{
     ApplyBlockPreconditioner, ApplyHessian, Control, DistanceConstraints, Error, HessianVector,
-    LbfgsStep, LineSearch, Method, OptimizerFamily, Report, Solver, Status, StopNorm,
-    TryApplyHessian, TryHessianVector, lowest_eigenpairs, lowest_eigenpairs_precond,
+    LbfgsStep, LevelSetConstraint, LineSearch, Method, OptimizerFamily, Report, Solver, Status,
+    StopNorm, TryApplyHessian, TryHessianVector, lowest_eigenpairs, lowest_eigenpairs_precond,
     try_lowest_eigenpairs, try_lowest_eigenpairs_precond,
 };
 
@@ -562,6 +562,109 @@ fn a_failed_step_does_not_change_the_next_one() {
             assert_eq!(
                 SessionState::of(&marked, &x_marked),
                 SessionState::of(&warm_ref, &x_warm_ref)
+            );
+        }
+    }
+}
+
+#[test]
+fn level_set_step_rolls_back_on_host_failure() {
+    fn level_set_start() -> Array1<f64> {
+        array![2.0, -1.0, 0.5, -0.25]
+    }
+
+    struct LevelSetHost {
+        calls: Cell<usize>,
+        fail_at: Option<usize>,
+    }
+
+    impl LevelSetHost {
+        fn new(fail_at: Option<usize>) -> Self {
+            Self {
+                calls: Cell::new(0),
+                fail_at,
+            }
+        }
+
+        fn call(&self) -> Result<(), HostFailure> {
+            let n = self.calls.get() + 1;
+            self.calls.set(n);
+            if self.fail_at == Some(n) {
+                return Err(HostFailure(n));
+            }
+            Ok(())
+        }
+    }
+
+    impl TryHessianVector for LevelSetHost {
+        type Error = HostFailure;
+
+        fn dim(&self) -> usize {
+            DIM
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            bounds()
+        }
+
+        fn try_value_and_gradient(
+            &self,
+            x: ArrayView1<f64>,
+        ) -> Result<(f64, Array1<f64>), HostFailure> {
+            self.call()?;
+            Ok((0.5 * x.dot(&x), x.to_owned()))
+        }
+
+        fn try_hessian_vector(
+            &self,
+            _x: ArrayView1<f64>,
+            v: ArrayView1<f64>,
+        ) -> Result<Array1<f64>, HostFailure> {
+            self.call()?;
+            Ok(v.to_owned())
+        }
+    }
+
+    for method in methods() {
+        let mut reference = Solver::new(method.clone(), Control::default(), DIM);
+        reference
+            .set_level_set(LevelSetConstraint::new(1.0))
+            .expect("a finite target");
+        let mut x_ref = level_set_start();
+        let counter = LevelSetHost::new(None);
+        let ref_report = reference
+            .try_step_hvp(&counter, &mut x_ref)
+            .expect("the reference constrained step");
+        let per_step = counter.calls.get();
+        assert!(
+            per_step >= 4,
+            "{method:?}: expected callbacks in the constrained step"
+        );
+
+        for fail_at in 1..=per_step {
+            let mut solver = Solver::new(method.clone(), Control::default(), DIM);
+            solver
+                .set_level_set(LevelSetConstraint::new(1.0))
+                .expect("a finite target");
+            let mut x = level_set_start();
+            let before = SessionState::of(&solver, &x);
+            let host = LevelSetHost::new(Some(fail_at));
+            let err = solver
+                .try_step_hvp(&host, &mut x)
+                .expect_err("the host failed");
+            assert_eq!(host_failure(&err), &HostFailure(fail_at));
+            assert_eq!(host.calls.get(), fail_at, "no call after the failure");
+            assert_eq!(SessionState::of(&solver, &x), before);
+            assert_eq!(bits(&x), bits(&level_set_start()));
+
+            let retry_host = LevelSetHost::new(None);
+            let retry = solver
+                .try_step_hvp(&retry_host, &mut x)
+                .expect("retry after constrained host failure");
+            assert_eq!(ReportBits::of(&retry), ReportBits::of(&ref_report));
+            assert_eq!(
+                SessionState::of(&solver, &x),
+                SessionState::of(&reference, &x_ref)
             );
         }
     }
