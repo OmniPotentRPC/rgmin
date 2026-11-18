@@ -2,6 +2,7 @@
 #include "xts.h"
 #include "xts/optimize.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -607,6 +608,19 @@ int main() {
         stopper.set_gromacs_steep(0.5, 8) != 1) {
         std::fprintf(stderr, "fire preset setup failed\n");
         return 5;
+    }
+    {
+        double const shrink = std::nextafter(1.0, 0.0);
+        auto const t0 = std::chrono::steady_clock::now();
+        std::uint32_t const budget = rgmin_gromacs_steep_max_constraint_shrinks(0.1, shrink);
+        auto const elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - t0)
+                                    .count();
+        if (budget != 1'000'000u || elapsed_ms > 1000) {
+            std::fprintf(stderr, "shrink budget mismatch: budget=%u elapsed_ms=%lld\n", budget,
+                         static_cast<long long>(elapsed_ms));
+            return 23;
+        }
     }
     static_assert(static_cast<int>(rgmin::Method::PolakRibierePlus) == RGMIN_POLAK_RIBIERE_PLUS,
                   "PolakRibierePlus keeps the C enumerator");

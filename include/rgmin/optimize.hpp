@@ -1281,17 +1281,7 @@ inline double require_etol(double value) {
 }
 
 inline std::uint32_t gromacs_constraint_shrinks(double step, double shrink) {
-    if (!(std::isfinite(step) && step > 0.0 && std::isfinite(shrink) && shrink > 0.0 &&
-          shrink < 1.0)) {
-        return 0;
-    }
-    std::uint32_t count = 0;
-    while (step > std::numeric_limits<double>::epsilon() &&
-           count < std::numeric_limits<std::uint32_t>::max()) {
-        step *= shrink;
-        ++count;
-    }
-    return count;
+    return rgmin_gromacs_steep_max_constraint_shrinks(step, shrink);
 }
 
 inline std::size_t require_count(std::string const& key, long long value, long long min_value) {

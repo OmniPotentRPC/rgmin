@@ -88,7 +88,8 @@ typedef struct rgmin_abi_stamp_t {
  * 50 etol and max_evals stops, RGMIN_STOP_ENERGY_TOLERANCE and
  *    RGMIN_STOP_EVAL_BUDGET. rgmin_control_t is unchanged.
  * 51 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
- *    and rgmin_solver_set_gromacs_steep. */
+ *    rgmin_solver_set_gromacs_steep, and
+ *    rgmin_gromacs_steep_max_constraint_shrinks. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -498,9 +499,18 @@ typedef enum rgmin_accept_t {
 void rgmin_solver_set_accept(rgmin_solver_t *solver, rgmin_accept_t accept);
 /** GROMACS steep parameters on a RGMIN_GROMACS_STEEP session.
  *  Returns 0, or 1 on a null session, an invalid shrink factor, or a
- *  session that is not RGMIN_GROMACS_STEEP. */
+ *  session that is not RGMIN_GROMACS_STEEP.
+ *  max_constraint_shrinks is an exact budget, including 0: 0 returns
+ *  RGMIN_CONSTRAINT_ERROR on the first failed projection, and a positive
+ *  value allows that many consecutive failed projections before the
+ *  error. */
 int32_t rgmin_solver_set_gromacs_steep(rgmin_solver_t *solver, double shrink,
                                        uint32_t max_constraint_shrinks);
+/** Largest consecutive failed-projection budget from a GROMACS steep
+ *  step size and shrink factor before the displacement reaches
+ *  floating-point epsilon. Invalid input gives 0. The result is capped
+ *  to bound construction time. ABI minor 51. */
+uint32_t rgmin_gromacs_steep_max_constraint_shrinks(double step_size, double shrink);
 
 /** FIRE schedule. */
 typedef enum rgmin_fire_variant_t {

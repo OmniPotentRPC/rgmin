@@ -12,13 +12,13 @@ use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_accept_t, rgmin_backward_error_floor,
     rgmin_conjugacy_t, rgmin_control_default, rgmin_control_t, rgmin_eigen_kind_t,
     rgmin_eigen_options_t, rgmin_eigen_params_t, rgmin_eigenpair_ex_t, rgmin_eigenpair_t,
-    rgmin_exp_t, rgmin_last_error, rgmin_lowest_eigenpair, rgmin_lowest_eigenpairs,
-    rgmin_lowest_eigenpairs_ex, rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t,
-    rgmin_minimize, rgmin_minimize_eindir, rgmin_minimize_opts, rgmin_minimize_scg,
-    rgmin_precond_fn, rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp,
-    rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls,
-    rgmin_solver_hvp_calls, rgmin_solver_set_accept, rgmin_solver_set_exp,
-    rgmin_solver_set_gromacs_steep,
+    rgmin_exp_t, rgmin_gromacs_steep_max_constraint_shrinks, rgmin_last_error,
+    rgmin_lowest_eigenpair, rgmin_lowest_eigenpairs, rgmin_lowest_eigenpairs_ex,
+    rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
+    rgmin_minimize_eindir, rgmin_minimize_opts, rgmin_minimize_scg, rgmin_precond_fn,
+    rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp, rgmin_solver_create,
+    rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
+    rgmin_solver_set_accept, rgmin_solver_set_exp, rgmin_solver_set_gromacs_steep,
     rgmin_solver_set_quickmin_cell, rgmin_solver_set_quickmin_variant, rgmin_solver_step,
     rgmin_solver_step_fg, rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t,
     rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
@@ -1087,7 +1087,8 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 }
 
 /// ABI minor 51 adds `RGMIN_GROMACS_STEEP`, `RGMIN_STOP_MACHINE_PRECISION`,
-/// and `rgmin_solver_set_gromacs_steep`.
+/// `rgmin_solver_set_gromacs_steep`, and
+/// `rgmin_gromacs_steep_max_constraint_shrinks`.
 /// ABI minor 50 adds `rgmin_solver_set_etol`, `rgmin_solver_set_max_evals`,
 /// their clear functions, `rgmin_solver_evals` and the two stop codes.
 /// ABI minor 49 adds the stop-status setters, the floor, and the
@@ -5080,10 +5081,17 @@ fn gromacs_steep_runs_and_reports_machine_precision_across_c_abi() {
     assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
     assert!(out.value < 50.0);
     assert!(out.steps > 0);
+    let near_one = f64::from_bits(1.0f64.to_bits() - 1);
+    let budget = rgmin_gromacs_steep_max_constraint_shrinks(0.1, near_one);
+    assert_eq!(budget, 1_000_000);
     unsafe {
         let steep_solver = rgmin_solver_create(rgmin_method_t::RGMIN_GROMACS_STEEP, &ctrl, 3);
         assert!(!steep_solver.is_null());
         assert_eq!(rgmin_solver_set_gromacs_steep(steep_solver, 0.5, 12), 0);
+        assert_eq!(
+            rgmin_solver_set_gromacs_steep(steep_solver, near_one, budget),
+            0
+        );
         assert_eq!(rgmin_solver_set_gromacs_steep(steep_solver, 1.0, 12), 1);
         rgmin_solver_free(steep_solver);
         let lbfgs_solver = rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 3);

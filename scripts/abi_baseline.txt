@@ -15,6 +15,7 @@ rgmin_control_default
 rgmin_eigen_options_default
 rgmin_eigen_params_default
 rgmin_exp_default
+rgmin_gromacs_steep_max_constraint_shrinks
 rgmin_last_constraint_error
 rgmin_last_error
 rgmin_last_error_message

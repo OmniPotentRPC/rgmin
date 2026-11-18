@@ -233,3 +233,6 @@ def minimize(f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray
 
 def backward_error_floor(value: float, x: object) -> float:
     """First-order floor ``n * eps * (1 + |value| + sum |x_i|)``."""
+
+def gromacs_steep_max_constraint_shrinks(istep: float, shrink: float) -> int:
+    """Closed-form capped constraint-failure budget for ``gromacs-steep``."""

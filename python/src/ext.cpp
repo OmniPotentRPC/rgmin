@@ -310,14 +310,25 @@ double max_atom_norm(double const* gradient, std::size_t n) {
     double grad_norm = 0.0;
     for (std::size_t i = 0; i < n; i += 3) {
         std::size_t const end = std::min(i + 3, n);
-        double atom_sq = 0.0;
+        double scale = 0.0;
+        double sum = 1.0;
         for (std::size_t k = i; k < end; ++k) {
-            atom_sq += gradient[k] * gradient[k];
+            double const value = std::abs(gradient[k]);
+            if (!std::isfinite(value)) {
+                return value;
+            }
+            if (value != 0.0) {
+                if (scale < value) {
+                    double const ratio = scale / value;
+                    sum = 1.0 + sum * ratio * ratio;
+                    scale = value;
+                } else {
+                    double const ratio = value / scale;
+                    sum += ratio * ratio;
+                }
+            }
         }
-        double const atom_norm = std::sqrt(atom_sq);
-        if (!std::isfinite(atom_norm)) {
-            return atom_norm;
-        }
+        double const atom_norm = scale == 0.0 ? 0.0 : scale * std::sqrt(sum);
         if (atom_norm > grad_norm) {
             grad_norm = atom_norm;
         }
@@ -752,4 +763,12 @@ NB_MODULE(_core, m) {
         },
         nb::arg("value"), nb::arg("x"),
         "First-order floor ``n * eps * (1 + |value| + sum |x_i|)``.");
+
+    m.def(
+        "gromacs_steep_max_constraint_shrinks",
+        [](double istep, double shrink) {
+            return rgmin_gromacs_steep_max_constraint_shrinks(istep, shrink);
+        },
+        nb::arg("istep"), nb::arg("shrink"),
+        "Closed-form capped constraint-failure budget for ``gromacs-steep``.");
 }
