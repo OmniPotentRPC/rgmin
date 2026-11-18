@@ -139,7 +139,15 @@ dogleg. The string parser is ``Method::from_name``; the C waist is
 methods never call ``hessian``. The product is analytic when the
 caller uses ``Solver::step_hvp`` (or ``minimize_method_hvp``), and a
 forward difference of the known gradient otherwise: one extra
-gradient per product, ``h = 1e-8 / ||v||``. The central-difference
+gradient per product, ``h = 1e-8 / ||v||``. ``Solver::try_step_hvp``
+is that step when the host's callbacks return ``Result``. The same
+values, gradients and products take the same step. The first error is
+``Error::Host``; nothing is evaluated after it, and ``x`` and the
+session stay as they were before the step. A chart or distance
+constraints on a Newton-CG or Newton-PCG session return
+``Error::FallibleUnsupported``. ``try_lowest_eigenpairs`` and
+``try_lowest_eigenpairs_precond`` are the same split for one product.
+The central-difference
 wrapper ``FdHvp`` is unchanged and still costs two gradients; it is
 not what the session uses.
 
