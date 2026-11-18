@@ -133,8 +133,44 @@ def test_session_shrink_selects_the_refusal_factor() -> None:
 
 def test_session_accepts_max_constraint_shrinks_for_gromacs_steep() -> None:
     session = Session("gromacs-steep", 1, max_constraint_shrinks=0)
+    assert session.max_constraint_shrinks == 0
     point, _value, _gnorm = session.step([0.3], _quadratic)
     assert len(point) == 1
+
+
+def _expected_shrinks(step_size: float, shrink: float) -> int:
+    eps = float(np.finfo(np.float64).eps)
+    count = 0
+    h = step_size
+    while h > eps:
+        h *= shrink
+        count += 1
+    return count
+
+
+def test_session_constraint_shrink_budget_follows_istep() -> None:
+    small = Session("gromacs-steep", 3, istep=0.001)
+    large = Session("gromacs-steep", 3, istep=0.1)
+    assert small.max_constraint_shrinks == _expected_shrinks(0.001, 0.5)
+    assert large.max_constraint_shrinks == _expected_shrinks(0.1, 0.5)
+    assert small.max_constraint_shrinks < large.max_constraint_shrinks
+
+    small_half = Session("gromacs-steep", 3, istep=0.001, shrink=0.5)
+    large_half = Session("gromacs-steep", 3, istep=0.1, shrink=0.5)
+    assert small_half.max_constraint_shrinks == _expected_shrinks(0.001, 0.5)
+    assert large_half.max_constraint_shrinks == _expected_shrinks(0.1, 0.5)
+    assert small_half.max_constraint_shrinks < large_half.max_constraint_shrinks
+
+    small_manual = Session("gromacs-steep", 3, istep=0.001, shrink=0.2)
+    large_manual = Session("gromacs-steep", 3, istep=0.1, shrink=0.2)
+    assert small_manual.max_constraint_shrinks == _expected_shrinks(0.001, 0.2)
+    assert large_manual.max_constraint_shrinks == _expected_shrinks(0.1, 0.2)
+    assert small_manual.max_constraint_shrinks < large_manual.max_constraint_shrinks
+    assert large_manual.max_constraint_shrinks < large_half.max_constraint_shrinks
+
+    explicit = Session("gromacs-steep", 3, istep=0.1, shrink=0.2, max_constraint_shrinks=3)
+    assert explicit.max_constraint_shrinks == 3
+    assert Session("steepest", 3).max_constraint_shrinks is None
 
 
 def test_gromacs_steep_session_does_not_install_the_generic_atom_cap() -> None:

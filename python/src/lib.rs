@@ -250,7 +250,7 @@ impl Session {
                     "shrink and max_constraint_shrinks apply to a gromacs-steep session only",
                 ));
             }
-            let mut config = GromacsSteepConfig::default();
+            let mut config = GromacsSteepConfig::for_step_size(istep);
             if let Some(factor) = shrink {
                 config = config.with_shrink(factor);
             }
@@ -327,6 +327,15 @@ impl Session {
     #[pyo3(signature = (max_evals=None))]
     fn set_max_evals(&mut self, max_evals: Option<usize>) -> PyResult<()> {
         self.solver.set_max_evals(max_evals).map_err(value_error)
+    }
+
+    /// Consecutive constraint-failure budget of a `gromacs-steep` session,
+    /// or `None` for other methods.
+    #[getter]
+    fn max_constraint_shrinks(&self) -> Option<u32> {
+        self.solver
+            .gromacs_steep_config()
+            .map(|config| config.max_constraint_shrinks)
     }
 
     /// Drop the method memory. The next step is a cold start.

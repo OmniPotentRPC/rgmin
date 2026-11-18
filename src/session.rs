@@ -5210,6 +5210,16 @@ impl Solver {
         }
     }
 
+    /// Parameters of a GROMACS steep session.
+    ///
+    /// Other methods return `None`.
+    pub fn gromacs_steep_config(&self) -> Option<GromacsSteepConfig> {
+        match self.overlay {
+            Overlay::GromacsSteep(state) => Some(state.config()),
+            _ => None,
+        }
+    }
+
     /// Norm that every stop test and [`Report::grad_norm`] apply to the gradient.
     pub fn set_stop_norm(&mut self, norm: StopNorm) {
         self.stop_norm = norm;
