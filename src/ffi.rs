@@ -1669,6 +1669,7 @@ fn exp_params_from_c(p: &rgmin_exp_t) -> ExpParams {
             defaults.c_stab
         },
         mu: if p.mu.is_finite() { Some(p.mu) } else { None },
+        mu_c: None,
         r_nn: if finite_pos(p.r_nn) {
             Some(p.r_nn)
         } else {
@@ -6535,11 +6536,13 @@ mod default_tests {
             a,
             c_stab,
             mu,
+            mu_c,
             r_nn,
             r_cut,
             recalc_mu,
             lengths,
         } = params;
+        assert_eq!(mu_c, None);
         (
             a.to_bits(),
             c_stab.to_bits(),

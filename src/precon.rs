@@ -123,6 +123,11 @@ pub struct ExpParams {
     pub c_stab: f64,
     /// Energy scale `μ`. `None` estimates it from the objective.
     pub mu: Option<f64>,
+    /// Scale `μ_c` of the cell block, `μ_c I` on the nine strain
+    /// coordinates of a [`crate::CellFilter`] layout. `None` estimates it
+    /// together with `μ`, floored at 1 as ASE `SparsePrecon` does. A
+    /// session without a cell filter ignores it.
+    pub mu_c: Option<f64>,
     /// Nearest-neighbour distance. `None` uses [`nearest_neighbour_distance`].
     pub r_nn: Option<f64>,
     /// Drop pairs with `r >= r_cut`. `None` keeps every supplied pair.
@@ -139,6 +144,7 @@ with_setters!(ExpParams {
     with_a => a: val f64,
     with_c_stab => c_stab: val f64,
     with_mu => mu: opt f64,
+    with_mu_c => mu_c: opt f64,
     with_r_nn => r_nn: opt f64,
     with_r_cut => r_cut: opt f64,
     with_recalc_mu => recalc_mu: val bool,
@@ -151,6 +157,7 @@ impl Default for ExpParams {
             a: 3.0,
             c_stab: 0.1,
             mu: None,
+            mu_c: None,
             r_nn: None,
             r_cut: None,
             recalc_mu: false,
@@ -245,6 +252,7 @@ impl Metric {
 #[derive(Clone, Debug)]
 pub struct Exp {
     mu: f64,
+    mu_c: Option<f64>,
     r_nn: f64,
     metric: Metric,
 }
@@ -255,6 +263,9 @@ pub(crate) struct ExpState {
     neighbours: Neighbours,
     params: ExpParams,
     mu: Option<f64>,
+    /// Atom count `N` when the vector ends in a cell block.
+    cell_atoms: Option<usize>,
+    mu_c: Option<f64>,
     r_nn: f64,
     matrix: Option<Exp>,
     /// `r_nn` is filled from the first real geometry.
@@ -273,6 +284,40 @@ impl Exp {
         neighbours: &Neighbours,
         params: &ExpParams,
         mu: f64,
+        r_nn: f64,
+    ) -> Result<Self> {
+        Self::assemble_with(positions, neighbours, params, mu, None, r_nn)
+    }
+
+    /// Build `P` over the extended vector of a [`crate::CellFilter`]:
+    /// the exponential metric on the `3 N` positions and `μ_c I` on the
+    /// nine cell coordinates (Packwood et al. 2016, the variable-cell
+    /// block, and ASE `SparsePrecon` with a `Filter`).
+    ///
+    /// `positions` has length `3 N + 9`. Only its first `3 N` entries are
+    /// read, and pair indices lie in `0..N`.
+    pub fn assemble_cell(
+        positions: ArrayView1<f64>,
+        neighbours: &Neighbours,
+        params: &ExpParams,
+        mu: f64,
+        mu_c: f64,
+        r_nn: f64,
+    ) -> Result<Self> {
+        if !(mu_c.is_finite() && mu_c > 0.0) {
+            return Err(Error::Precon {
+                what: "mu_c is not positive",
+            });
+        }
+        Self::assemble_with(positions, neighbours, params, mu, Some(mu_c), r_nn)
+    }
+
+    fn assemble_with(
+        positions: ArrayView1<f64>,
+        neighbours: &Neighbours,
+        params: &ExpParams,
+        mu: f64,
+        mu_c: Option<f64>,
         r_nn: f64,
     ) -> Result<Self> {
         if !(mu.is_finite() && mu > 0.0) {
@@ -295,11 +340,28 @@ impl Exp {
                 what: "A is not finite",
             });
         }
-        let natoms = atom_count(positions)?;
-        let (pairs, anchors) = bonds(natoms, positions, neighbours, params.r_cut)?;
-        let csr = build_csr(natoms, &pairs, &anchors, mu, params.a, r_nn, params.c_stab);
+        let (atoms, extra) = match mu_c {
+            Some(mu_c) => {
+                let atoms = cell_atom_positions(positions)?;
+                (atoms, vec![mu_c; crate::CELL_DOF])
+            }
+            None => (positions, Vec::new()),
+        };
+        let natoms = atom_count(atoms)?;
+        let (pairs, anchors) = bonds(natoms, atoms, neighbours, params.r_cut)?;
+        let csr = build_csr(
+            natoms,
+            &pairs,
+            &anchors,
+            mu,
+            params.a,
+            r_nn,
+            params.c_stab,
+            &extra,
+        );
         Ok(Self {
             mu,
+            mu_c,
             r_nn,
             metric: Metric::from_csr(csr),
         })
@@ -324,6 +386,7 @@ impl Exp {
         }
         Self {
             mu: 1.0,
+            mu_c: None,
             r_nn: 1.0e9,
             metric: Metric::from_csr(Csr {
                 n,
@@ -341,6 +404,12 @@ impl Exp {
     #[must_use]
     pub fn mu(&self) -> f64 {
         self.mu
+    }
+
+    /// Scale `μ_c` of the cell block, or `None` for a matrix without one.
+    #[must_use]
+    pub fn mu_c(&self) -> Option<f64> {
+        self.mu_c
     }
 
     /// Nearest-neighbour distance used to build this matrix.
@@ -406,6 +475,8 @@ impl ExpState {
             neighbours: neighbours.clone(),
             params: params.clone(),
             mu: None,
+            cell_atoms: None,
+            mu_c: None,
             r_nn,
             matrix: None,
             r_nn_pending: false,
@@ -458,11 +529,57 @@ impl ExpState {
             neighbours,
             params,
             mu,
+            cell_atoms: None,
+            mu_c: None,
             r_nn,
             matrix: None,
             r_nn_pending,
             built_at: None,
         })
+    }
+
+    /// The state over the extended vector of a [`crate::CellFilter`], at
+    /// `positions` of length `3 N + 9`.
+    #[allow(dead_code)]
+    pub(crate) fn new_cell(
+        positions: ArrayView1<f64>,
+        neighbours: &Neighbours,
+        params: &ExpParams,
+    ) -> Result<Self> {
+        let atoms = cell_atom_positions(positions)?;
+        let natoms = atoms.len() / 3;
+        let unset = ExpParams {
+            mu: None,
+            ..params.clone()
+        };
+        let mut state = Self::new(atoms, neighbours, &unset)?;
+        state.params = params.clone();
+        state.cell_atoms = Some(natoms);
+        state.mu = params.mu;
+        state.mu_c = params.mu_c;
+        if let (Some(mu), Some(mu_c)) = (params.mu, params.mu_c) {
+            state.matrix = Some(Exp::assemble_cell(
+                positions, neighbours, params, mu, mu_c, state.r_nn,
+            )?);
+            state.built_at = Some(atoms.to_owned());
+        }
+        Ok(state)
+    }
+
+    /// Give a state built without a geometry the cell block of an
+    /// `natoms`-atom layout. The next refresh places `r_nn`, `μ` and `μ_c`.
+    #[cfg(feature = "capi")]
+    #[allow(dead_code)]
+    pub(crate) fn enable_cell(&mut self, natoms: usize) {
+        self.cell_atoms = Some(natoms);
+        self.mu_c = self.params.mu_c;
+        self.matrix = None;
+        self.built_at = None;
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn mu_c(&self) -> Option<f64> {
+        self.mu_c
     }
 
     pub(crate) fn mu(&self) -> Option<f64> {
@@ -479,6 +596,21 @@ impl ExpState {
     /// `grad_here` is `∇E(positions)`. `Ok(true)` means the matrix was
     /// replaced. `Ok(false)` means the previous matrix is still in use.
     pub(crate) fn refresh<G>(
+        &mut self,
+        positions: ArrayView1<f64>,
+        grad_here: &Array1<f64>,
+        grad: G,
+    ) -> Result<bool>
+    where
+        G: Fn(ArrayView1<f64>) -> Array1<f64>,
+    {
+        if self.cell_atoms.is_some() {
+            return self.refresh_cell(positions, grad_here, grad);
+        }
+        self.refresh_atoms(positions, grad_here, grad)
+    }
+
+    fn refresh_atoms<G>(
         &mut self,
         positions: ArrayView1<f64>,
         grad_here: &Array1<f64>,
@@ -526,6 +658,79 @@ impl ExpState {
         Ok(true)
     }
 
+    /// [`Self::refresh`] over the extended vector. The hold rule and `r_nn`
+    /// read the atoms only; the sine period spans the `N + 3` rows and the
+    /// cell block is `μ_c I`.
+    fn refresh_cell<G>(
+        &mut self,
+        positions: ArrayView1<f64>,
+        grad_here: &Array1<f64>,
+        grad: G,
+    ) -> Result<bool>
+    where
+        G: Fn(ArrayView1<f64>) -> Array1<f64>,
+    {
+        let atoms = cell_atom_positions(positions)?;
+        if self.r_nn_pending
+            && let Some(r) = nearest_neighbour_distance(atoms, &self.neighbours)
+        {
+            self.r_nn = r;
+            self.r_nn_pending = false;
+        }
+        if self.hold_cell(atoms) {
+            return Ok(false);
+        }
+        let (mu, mu_c) = match (self.mu, self.mu_c) {
+            (Some(mu), Some(mu_c)) if !self.params.recalc_mu => (mu, mu_c),
+            (prev_mu, prev_mu_c) => {
+                let (est_mu, est_mu_c) = estimate_mu_cell_with(
+                    positions,
+                    &self.neighbours,
+                    &self.params,
+                    self.r_nn,
+                    Some(grad_here),
+                    grad,
+                )?;
+                let recalc = self.params.recalc_mu;
+                let mu = match prev_mu {
+                    Some(m) if !recalc => m,
+                    _ => est_mu,
+                };
+                let mu_c = match prev_mu_c {
+                    Some(m) if !recalc => m,
+                    _ => est_mu_c,
+                };
+                self.mu = Some(mu);
+                self.mu_c = Some(mu_c);
+                (mu, mu_c)
+            }
+        };
+        self.matrix = Some(Exp::assemble_cell(
+            positions,
+            &self.neighbours,
+            &self.params,
+            mu,
+            mu_c,
+            self.r_nn,
+        )?);
+        self.built_at = Some(atoms.to_owned());
+        Ok(true)
+    }
+
+    fn hold_cell(&self, atoms: ArrayView1<f64>) -> bool {
+        if self.r_nn_pending
+            || self.matrix.is_none()
+            || self.mu.is_none()
+            || self.mu_c.is_none()
+            || self.params.recalc_mu
+        {
+            return false;
+        }
+        self.built_at.as_ref().is_some_and(|prev| {
+            !needs_rebuild(max_atom_displacement(prev.view(), atoms), self.r_nn)
+        })
+    }
+
     fn hold(&self, positions: ArrayView1<f64>) -> bool {
         if self.r_nn_pending || self.matrix.is_none() || self.mu.is_none() || self.params.recalc_mu
         {
@@ -549,6 +754,8 @@ impl ExpState {
                 ..ExpParams::default()
             },
             mu: Some(1.0),
+            cell_atoms: None,
+            mu_c: None,
             r_nn: 1.0e9,
             matrix: Some(Exp::diagonal(diag)),
             r_nn_pending: false,
@@ -622,6 +829,14 @@ impl Slot {
             Self::Exp(state) => state.refresh(positions, grad_here, grad),
             Self::Lindh(state) => state.refresh(positions, grad_here, grad),
             Self::Ff(state) => state.refresh(positions, grad_here, grad),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn mu_c(&self) -> Option<f64> {
+        match self {
+            Self::Exp(state) => state.mu_c(),
+            _ => None,
         }
     }
 
@@ -781,6 +996,117 @@ where
         });
     }
     Ok(mu)
+}
+
+/// Amplitude `10^{-2}` of the sine probe and of the cell probe, in units
+/// of `r_nn` (equation (15); ASE `estimate_mu` sets `H = 10^{-2} r_nn I`).
+const PROBE_AMPLITUDE: f64 = 0.01;
+
+/// The positions of an extended vector: everything before the nine
+/// cell coordinates.
+fn cell_atom_positions(positions: ArrayView1<f64>) -> Result<ArrayView1<f64>> {
+    let len = positions.len();
+    if len < 3 + crate::CELL_DOF || !(len - crate::CELL_DOF).is_multiple_of(3) {
+        return Err(Error::Precon {
+            what: "extended vector is not 3 N + 9 long",
+        });
+    }
+    Ok(positions.slice_move(ndarray::s![..len - crate::CELL_DOF]))
+}
+
+/// Equation (14) twice over the extended vector of a
+/// [`crate::CellFilter`], as ASE 3.29.0 `SparsePrecon.estimate_mu`
+/// does in `ase/optimize/precon/precon.py` with a `Filter`: the default
+/// sine period `[Lx, Ly, Lz]` spans all `N + 3` rows of `positions`
+/// before the three strain rows of the probe are replaced by `10^{-2} I`,
+/// and the partial sums over the two blocks give `μ` and `μ_c`.
+///
+/// Two differences from ASE's `estimate_mu` follow from the filter API:
+/// [`crate::CellFilter::pack`] stores `exp_cell_factor log F` without
+/// ASE's `exp_cell_factor ln N` diagonal shift (pass [`ExpParams::lengths`]
+/// to supply ASE's shifted span), and `grad` is evaluated directly at
+/// `positions + v` in the caller's filter rather than wrapping a copy of
+/// the current cell in a fresh default filter (`atoms.__class__(atoms.copy())`),
+/// which in ASE resets `orig_cell` to the current cell and drops
+/// `exp_cell_factor`, `scalar_pressure`, `hydrostatic_strain` and `mask`.
+///
+/// `positions` has length `3 N + 9` and `grad` is the gradient over that
+/// vector. `μ` must come out positive. `μ_c` is floored at 1, as in ASE,
+/// so it is an error only when it is not finite.
+pub fn estimate_mu_cell<G>(
+    positions: ArrayView1<f64>,
+    neighbours: &Neighbours,
+    params: &ExpParams,
+    grad: G,
+) -> Result<(f64, f64)>
+where
+    G: Fn(ArrayView1<f64>) -> Array1<f64>,
+{
+    let atoms = cell_atom_positions(positions)?;
+    let r_nn = resolve_r_nn(atoms, neighbours, params)?;
+    estimate_mu_cell_with(positions, neighbours, params, r_nn, None, grad)
+}
+
+fn estimate_mu_cell_with<G>(
+    positions: ArrayView1<f64>,
+    neighbours: &Neighbours,
+    params: &ExpParams,
+    r_nn: f64,
+    grad_here: Option<&Array1<f64>>,
+    grad: G,
+) -> Result<(f64, f64)>
+where
+    G: Fn(ArrayView1<f64>) -> Array1<f64>,
+{
+    let atoms = cell_atom_positions(positions)?;
+    let split = atoms.len();
+    let p1 = Exp::assemble_cell(positions, neighbours, params, 1.0, 1.0, r_nn)?;
+    let mut v = sine_probe(positions, r_nn, params.lengths);
+    v.slice_mut(ndarray::s![split..]).fill(0.0);
+    let strain = PROBE_AMPLITUDE * r_nn / r_nn;
+    for d in 0..3 {
+        v[split + 4 * d] = strain;
+    }
+    let g0 = match grad_here {
+        Some(g) if g.len() == positions.len() => g.clone(),
+        _ => grad(positions),
+    };
+    let mut shifted = positions.to_owned();
+    shifted += &v;
+    let g1 = grad(shifted.view());
+    if g0.len() != positions.len() || g1.len() != positions.len() {
+        return Err(Error::Precon {
+            what: "gradient length does not match positions",
+        });
+    }
+    let pv = p1.apply(v.view());
+    let mut num = [0.0; 2];
+    let mut den = [0.0; 2];
+    for k in 0..positions.len() {
+        let block = usize::from(k >= split);
+        num[block] += (g1[k] - g0[k]) * v[k];
+        den[block] += v[k] * pv[k];
+    }
+    let usable = |n: f64, d: f64| d.is_finite() && d.abs() > f64::MIN_POSITIVE && n.is_finite();
+    if !(usable(num[0], den[0]) && usable(num[1], den[1])) {
+        return Err(Error::Precon {
+            what: "mu estimate denominator vanished",
+        });
+    }
+    let mu = num[0] / den[0];
+    if !(mu.is_finite() && mu > 0.0) {
+        return Err(Error::Precon {
+            what: "mu estimate is not positive",
+        });
+    }
+    let ratio = num[1] / den[1];
+    if !ratio.is_finite() {
+        return Err(Error::Precon {
+            what: "mu_c estimate is not finite",
+        });
+    }
+    let mu_c = if ratio < 1.0 { 1.0 } else { ratio };
+    Ok((mu, mu_c))
 }
 
 /// `μ = vᵀ (∇E(x+v) - ∇E(x)) / vᵀ P v` for a model already at scale 1.
@@ -959,9 +1285,11 @@ fn build_csr(
     a: f64,
     r_nn: f64,
     c_stab: f64,
+    extra: &[f64],
 ) -> Csr {
-    let n = 3 * natoms;
+    let n = 3 * natoms + extra.len();
     let mut diag = vec![mu * c_stab; n];
+    diag[3 * natoms..].copy_from_slice(extra);
     let mut trips: Vec<(usize, usize, f64)> = Vec::with_capacity(pairs.len() * 6 + n);
     for &(i, j, r) in pairs {
         let c = weight(mu, a, r, r_nn);
@@ -1610,5 +1938,57 @@ mod tests {
         assert!(!exp_gate_open(f64::NAN, 1.0, EXP_GATE_MAX_SPREAD));
         assert!(!exp_gate_open(-1.0, 2.0, EXP_GATE_MAX_SPREAD));
         assert!((curvature_spread(2.0, 8.0) - 4.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn refresh_cell_propagates_an_estimate_error() {
+        let (_, neigh) = two_atoms();
+        // Zero atom coordinates make the sine probe vanish on the atom
+        // block, so the denominator of (14) is zero and the estimate
+        // returns Error::Precon.
+        let extended = Array1::zeros(15);
+        let params = ExpParams {
+            lengths: Some([4.0, 4.0, 4.0]),
+            r_nn: Some(1.5),
+            ..ExpParams::default()
+        };
+        let mut state = ExpState::new_cell(extended.view(), &neigh, &params).unwrap();
+        let grad_here = Array1::zeros(extended.len());
+        let err = state.refresh(extended.view(), &grad_here, |x| Array1::zeros(x.len()));
+        assert!(matches!(err, Err(Error::Precon { .. })));
+        assert_eq!(state.mu(), None);
+        assert_eq!(state.mu_c(), None);
+        assert!(state.matrix().is_none());
+    }
+
+    #[test]
+    fn estimate_mu_cell_spans_all_n_plus_three_rows_when_lengths_are_unset() {
+        let (_, neigh) = two_atoms();
+        let mut extended = array![
+            0.0, 0.0, 0.0, 1.5, 2.0, 3.0, 10.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 0.0, 15.0
+        ];
+        let params = ExpParams {
+            r_nn: Some(1.5),
+            ..ExpParams::default()
+        };
+        let seen = std::cell::RefCell::new(Vec::new());
+        let p1 = Exp::assemble_cell(extended.view(), &neigh, &params, 1.0, 1.0, 1.5).unwrap();
+        let (mu, mu_c) = estimate_mu_cell(extended.view(), &neigh, &params, |x| {
+            seen.borrow_mut().push(x.to_owned());
+            2.5 * p1.apply(x)
+        })
+        .unwrap();
+        let calls = seen.borrow();
+        assert_eq!(calls.len(), 2);
+        let probe = &calls[1] - &calls[0];
+        let want_full = sine_probe(extended.view(), 1.5, None);
+        let atoms_only = sine_probe(extended.slice(ndarray::s![..6]), 1.5, None);
+        for k in 0..6 {
+            assert!((probe[k] - want_full[k]).abs() <= f64::EPSILON);
+        }
+        assert!((probe[3] - atoms_only[3]).abs() > 1.0e-4);
+        assert!((mu - 2.5).abs() < 1.0e-12);
+        assert!((mu_c - 2.5).abs() < 1.0e-12);
+        extended[6] = 0.0;
     }
 }
