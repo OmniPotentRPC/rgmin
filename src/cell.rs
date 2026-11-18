@@ -26,6 +26,7 @@ mod matrix;
 
 use ndarray::{Array1, ArrayView1};
 
+use crate::Oracle;
 use crate::error::{Error, Result};
 use matrix::{Mat, det3, eye, inverse, logm, mul, transpose};
 
@@ -408,6 +409,35 @@ impl CellFilter {
             }
         }
         Ok(g)
+    }
+
+    /// Objective over the extended vector, built from an oracle that
+    /// answers for Cartesian positions and a cell.
+    ///
+    /// The value is the enthalpy and the gradient is [`Self::gradient`]. An
+    /// oracle answer the filter cannot use (a wrong length, a
+    /// non-finite energy or stress, a cell with no real logarithm) is a
+    /// non-finite value and gradient, which the solver reports as
+    /// [`Error::Oracle`].
+    pub fn objective<F>(
+        &self,
+        eval: F,
+    ) -> Oracle<impl Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync>
+    where
+        F: Fn(ArrayView1<f64>, &Cell) -> CellEvaluation + Send + Sync,
+    {
+        let filter = self.clone();
+        let dim = self.dim();
+        Oracle::unbounded(dim, move |x| {
+            let answer = filter.unpack(x).and_then(|(positions, cell)| {
+                let evaluation = eval(positions.view(), &cell);
+                filter.value_and_gradient(&evaluation, &cell)
+            });
+            match answer {
+                Ok(pair) => pair,
+                Err(_) => (f64::INFINITY, Array1::from_elem(dim, f64::NAN)),
+            }
+        })
     }
 
     /// Enthalpy and extended gradient of an [`CellEvaluation`] at the
