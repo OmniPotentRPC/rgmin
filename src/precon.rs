@@ -1122,8 +1122,11 @@ where
 
 /// `μ = vᵀ (∇E(x+v) - ∇E(x)) / vᵀ P v` for a model already at scale 1.
 ///
-/// The probe is [`sine_probe`]. A nonpositive ratio is an error. The
-/// session then keeps the previous scale, or `1` if it has none.
+/// The probe is [`sine_probe`]. This is one ratio, not the atom and cell
+/// split of [`estimate_mu_cell`], and the floor is the same: a ratio
+/// below 1 is floored at 1, and the ratio is an error only when it is
+/// not finite. A denominator that vanishes is an error too; the session
+/// then keeps the previous scale, or `1` if it has none.
 pub(crate) fn model_scale<G>(
     metric: &Metric,
     positions: ArrayView1<f64>,
