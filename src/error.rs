@@ -296,6 +296,12 @@ pub enum Error {
         /// What was refused.
         what: &'static str,
     },
+    /// A constrained dynamics step cannot safely continue.
+    #[error("dynamics: {what}")]
+    Dynamics {
+        /// What exhausted or invalidated the integration step.
+        what: &'static str,
+    },
 }
 
 /// Result alias for this crate.

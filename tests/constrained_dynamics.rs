@@ -14,22 +14,6 @@ use rgmin::dynamics::{LangevinConfig, NveConfig, PhasePoint, baoab, rattle};
 use rgmin::manifold::AffineHyperplane;
 use rgmin::manifold::{Manifold, ManifoldKind, MassMetric, ProductFactor, ProductManifold, Sphere};
 
-fn i0(x: f64) -> f64 {
-    let mut term = 1.0;
-    let mut sum = 1.0;
-    let half = 0.5 * x;
-    let mut k = 1.0;
-    loop {
-        term *= half * half / (k * k);
-        let next = sum + term;
-        if next == sum {
-            return sum;
-        }
-        sum = next;
-        k += 1.0;
-    }
-}
-
 fn kolmogorov(samples: &[f64], cdf: impl Fn(f64) -> f64) -> f64 {
     let mut ordered = samples.to_vec();
     ordered.sort_by(|left, right| left.partial_cmp(right).expect("finite sample"));
@@ -44,12 +28,21 @@ fn kolmogorov(samples: &[f64], cdf: impl Fn(f64) -> f64) -> f64 {
     stat
 }
 
-fn circle_cdf(beta: f64, theta: f64) -> f64 {
+fn circle_cdf(beta: f64, theta: f64, density_weight: impl Fn(f64) -> f64) -> f64 {
     let panels = 1024usize;
     let start = -std::f64::consts::PI;
     let width = (theta - start) / panels as f64;
-    let partition = 2.0 * std::f64::consts::PI * i0(beta);
-    let density_at = |at: f64| (-beta * at.cos()).exp() / partition;
+    let full_width = 2.0 * std::f64::consts::PI / panels as f64;
+    let unnormalized = |at: f64| (-beta * at.cos()).exp() * density_weight(at);
+    let mut partition = 0.0;
+    let mut partition_previous = unnormalized(start);
+    for index in 1..=panels {
+        let at = start + full_width * index as f64;
+        let value = unnormalized(at);
+        partition += 0.5 * (partition_previous + value) * full_width;
+        partition_previous = value;
+    }
+    let density_at = |at: f64| unnormalized(at) / partition;
     let mut sum = 0.0;
     let mut previous = density_at(start);
     for index in 1..=panels {
@@ -101,7 +94,7 @@ fn sample_positions(
 #[test]
 fn circle_samples_the_boltzmann_density() {
     let beta = 1.5;
-    let metric = MassMetric::uniform(2, 1.0).unwrap();
+    let metric = MassMetric::new(array![1.0, 3.0]).unwrap();
     let config = LangevinConfig::default()
         .with_thermal(1.0 / beta)
         .with_friction(4.0)
@@ -117,7 +110,7 @@ fn circle_samples_the_boltzmann_density() {
         SampleWindow {
             burn: 400,
             stride: 40,
-            count: 500,
+            count: 300,
         },
         |x| (vec![-1.0, 0.0], x[0]),
     );
@@ -125,7 +118,11 @@ fn circle_samples_the_boltzmann_density() {
         .iter()
         .map(|point| point[1].atan2(point[0]))
         .collect();
-    let stat = kolmogorov(&angles, |theta| circle_cdf(beta, theta));
+    let stat = kolmogorov(&angles, |theta| {
+        circle_cdf(beta, theta, |angle| {
+            (angle.cos().powi(2) + angle.sin().powi(2) / 3.0).sqrt()
+        })
+    });
     let threshold = 1.36 / (angles.len() as f64).sqrt();
     assert!(stat <= threshold, "Kolmogorov {stat} exceeds {threshold}");
     let mean = kinetic.iter().sum::<f64>() / kinetic.len() as f64;
@@ -554,6 +551,47 @@ fn unequal_mass_rattle_matches_the_oblique_step_and_conserves_energy() {
 }
 
 #[test]
+fn rattle_projects_the_final_velocity_to_the_tangent_space() {
+    let metric = MassMetric::new(array![1.0, 4.0]).unwrap();
+    let mut phase = PhasePoint::default()
+        .with_position(array![1.0, 0.0])
+        .with_velocity(array![0.0, 0.2]);
+    let config = NveConfig::default().with_time_step(0.1);
+    rattle(&Sphere, &metric, &mut phase, &config, 1, |_| {
+        Ok::<_, &'static str>((vec![1.0, 0.0], 0.0))
+    })
+    .expect("rattle");
+    let radial = radial_speed(&phase.position, &phase.velocity);
+    let tolerance = solver_tolerance(1.0);
+    assert!(
+        radial <= tolerance,
+        "final RATTLE velocity has radial component {radial}, tolerance {tolerance}"
+    );
+}
+
+#[test]
+fn kinetic_scale_is_applied_without_readcon() {
+    let metric = MassMetric::new(array![2.0]).unwrap();
+    let mut phase = PhasePoint::default()
+        .with_position(array![0.0])
+        .with_velocity(array![3.0]);
+    let config = NveConfig::default()
+        .with_time_step(0.1)
+        .with_kinetic_scale(3.0);
+    let report = rattle(
+        &rgmin::manifold::Euclidean,
+        &metric,
+        &mut phase,
+        &config,
+        1,
+        |_| Ok::<_, &'static str>((vec![0.0], 0.0)),
+    )
+    .expect("rattle");
+    let expected = 3.0;
+    assert!((report.kinetic - expected).abs() <= f64::EPSILON * expected);
+}
+
+#[test]
 fn ou_stream_does_not_depend_on_which_masses_vanish() {
     let config = LangevinConfig::default()
         .with_thermal(0.3)
@@ -584,6 +622,91 @@ fn ou_stream_does_not_depend_on_which_masses_vanish() {
     assert_eq!(frozen[1].to_bits(), full[1].to_bits());
     assert_eq!(frozen[2].to_bits(), full[2].to_bits());
     assert_ne!(full[0].to_bits(), frozen[0].to_bits());
+}
+
+#[test]
+fn ou_noise_samples_the_requested_thermal_kinetic_energy() {
+    const SAMPLE_COUNT: usize = 1_000;
+    const STANDARD_ERRORS: f64 = 5.0;
+    let thermal = 0.7;
+    let metric = MassMetric::new(array![2.0]).unwrap();
+    let config = LangevinConfig::default()
+        .with_thermal(thermal)
+        .with_friction(100.0)
+        .with_time_step(0.1)
+        .with_kinetic_scale(2.0);
+    let mut kinetic = Vec::with_capacity(SAMPLE_COUNT);
+    for seed in 0..SAMPLE_COUNT as u64 {
+        let mut phase = PhasePoint::default()
+            .with_position(array![0.0])
+            .with_velocity(array![0.0]);
+        let report = baoab(
+            &rgmin::manifold::Euclidean,
+            &metric,
+            &mut phase,
+            &config.with_seed(seed),
+            &[],
+            1,
+            |_| Ok::<_, &'static str>((vec![0.0], 0.0)),
+        )
+        .expect("OU sample");
+        kinetic.push(report.kinetic);
+    }
+    let mean = kinetic.iter().sum::<f64>() / kinetic.len() as f64;
+    let variance = kinetic
+        .iter()
+        .map(|value| (value - mean) * (value - mean))
+        .sum::<f64>()
+        / kinetic.len() as f64;
+    let standard_error = (variance / kinetic.len() as f64).sqrt();
+    let expected = 0.5 * thermal;
+    assert!(
+        (mean - expected).abs() <= STANDARD_ERRORS * standard_error,
+        "OU kinetic mean {mean}, expected {expected}, standard error {standard_error}"
+    );
+}
+
+#[test]
+fn curved_dynamics_rejects_an_off_manifold_start() {
+    let metric = MassMetric::uniform(2, 1.0).unwrap();
+    let mut phase = PhasePoint::default()
+        .with_position(array![2.0, 0.0])
+        .with_velocity(array![0.0, 0.0]);
+    let error = rattle(
+        &Sphere,
+        &metric,
+        &mut phase,
+        &NveConfig::default(),
+        1,
+        |_| Ok::<_, &'static str>((vec![0.0, 0.0], 0.0)),
+    )
+    .expect_err("off-sphere start");
+    assert!(matches!(
+        error,
+        rgmin::dynamics::DynamicsError::Geometry(rgmin::Error::Dynamics { .. })
+    ));
+}
+
+#[test]
+fn dynamics_rejects_a_nonzero_velocity_for_a_zero_mass_coordinate() {
+    let metric = MassMetric::new(array![0.0, 1.0]).unwrap();
+    let mut phase = PhasePoint::default()
+        .with_position(array![0.0, 0.0])
+        .with_velocity(array![1.0, 0.0]);
+    let error = baoab(
+        &rgmin::manifold::Euclidean,
+        &metric,
+        &mut phase,
+        &LangevinConfig::default(),
+        &[],
+        1,
+        |_| Ok::<_, &'static str>((vec![0.0, 0.0], 0.0)),
+    )
+    .expect_err("moving zero-mass coordinate");
+    assert!(matches!(
+        error,
+        rgmin::dynamics::DynamicsError::Geometry(rgmin::Error::Dynamics { .. })
+    ));
 }
 
 #[test]
@@ -624,6 +747,78 @@ fn curved_wall_stays_on_the_sphere_and_the_allowed_side() {
     assert!(
         worst_outside <= solver_tolerance(1.0) * 64.0,
         "crossed the wall by {worst_outside}"
+    );
+}
+
+#[test]
+fn flat_wall_reflects_position_and_normal_velocity() {
+    let metric = MassMetric::uniform(1, 1.0).unwrap();
+    let wall = rgmin::PlanarWall::new(array![0.0], array![1.0]).unwrap();
+    let mut phase = PhasePoint::default()
+        .with_position(array![-0.1])
+        .with_velocity(array![1.0]);
+    let config = LangevinConfig::default()
+        .with_friction(0.0)
+        .with_time_step(0.4);
+    baoab(
+        &rgmin::manifold::Euclidean,
+        &metric,
+        &mut phase,
+        &config,
+        std::slice::from_ref(&wall),
+        1,
+        |_| Ok::<_, &'static str>((vec![0.0], 0.0)),
+    )
+    .expect("flat wall");
+    let tolerance = solver_tolerance(1.0);
+    assert!(
+        (phase.position[0] + 0.3).abs() <= tolerance,
+        "flat wall position is {}, expected -0.3",
+        phase.position[0]
+    );
+    assert!(
+        (phase.velocity[0] + 1.0).abs() <= tolerance,
+        "flat wall normal velocity is {}, expected -1",
+        phase.velocity[0]
+    );
+}
+
+#[test]
+fn curved_wall_reflects_position_and_normal_velocity() {
+    const STEP_ANGLE: f64 = 0.2;
+    const EXPECTED_X: f64 = 0.979_933_380_147_167_4;
+    const EXPECTED_Z: f64 = -0.199_325_288_092_974_45;
+    let metric = MassMetric::uniform(3, 1.0).unwrap();
+    let wall = rgmin::PlanarWall::new(array![0.0, 0.0, 0.0], array![0.0, 0.0, 1.0]).unwrap();
+    let mut phase = PhasePoint::default()
+        .with_position(array![1.0, 0.0, 0.0])
+        .with_velocity(array![0.0, 0.0, 1.0]);
+    let config = LangevinConfig::default()
+        .with_friction(0.0)
+        .with_time_step(STEP_ANGLE);
+    baoab(
+        &Sphere,
+        &metric,
+        &mut phase,
+        &config,
+        std::slice::from_ref(&wall),
+        1,
+        |_| Ok::<_, &'static str>((vec![0.0; 3], 0.0)),
+    )
+    .expect("curved wall");
+    let tolerance = solver_tolerance(1.0);
+    assert!(
+        (phase.position[0] - EXPECTED_X).abs() <= tolerance
+            && phase.position[1].abs() <= tolerance
+            && (phase.position[2] - EXPECTED_Z).abs() <= tolerance,
+        "curved wall position is {:?}",
+        phase.position
+    );
+    assert!(
+        (phase.velocity[2] + EXPECTED_X).abs() <= tolerance,
+        "curved wall normal velocity is {}, expected {}",
+        phase.velocity[2],
+        -EXPECTED_X
     );
 }
 

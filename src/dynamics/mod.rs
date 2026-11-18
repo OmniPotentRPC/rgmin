@@ -331,6 +331,7 @@ impl DynamicsReport {
 }
 
 const MAX_REFLECTION_PASSES: usize = 8;
+const START_CONSTRAINT_TOLERANCE_FACTOR: f64 = 1_024.0;
 
 fn check_langevin<E>(config: &LangevinConfig) -> Result<(), DynamicsError<E>> {
     if !(config.thermal.is_finite() && config.thermal > 0.0) {
@@ -343,8 +344,10 @@ fn check_langevin<E>(config: &LangevinConfig) -> Result<(), DynamicsError<E>> {
             what: "Langevin friction must be finite and non-negative",
         }));
     }
-    if !(config.time_step.is_finite() && config.time_step > 0.0)
-        || !(config.kinetic_scale.is_finite() && config.kinetic_scale > 0.0)
+    if !(config.time_step.is_finite()
+        && config.time_step > 0.0
+        && config.kinetic_scale.is_finite()
+        && config.kinetic_scale > 0.0)
     {
         return Err(geometry(Error::MassMetric {
             what: "Langevin time step and kinetic scale must be finite and positive",
@@ -354,8 +357,10 @@ fn check_langevin<E>(config: &LangevinConfig) -> Result<(), DynamicsError<E>> {
 }
 
 fn check_nve<E>(config: &NveConfig) -> Result<(), DynamicsError<E>> {
-    if !(config.time_step.is_finite() && config.time_step > 0.0)
-        || !(config.kinetic_scale.is_finite() && config.kinetic_scale > 0.0)
+    if !(config.time_step.is_finite()
+        && config.time_step > 0.0
+        && config.kinetic_scale.is_finite()
+        && config.kinetic_scale > 0.0)
     {
         return Err(geometry(Error::MassMetric {
             what: "RATTLE time step and kinetic scale must be finite and positive",
@@ -394,6 +399,36 @@ fn positive_multiple_of_identity(metric: &MassMetric) -> bool {
         }
     }
     found.is_some()
+}
+
+fn check_phase<M, E>(
+    manifold: &M,
+    metric: &MassMetric,
+    position: &Array1<f64>,
+    velocity: &Array1<f64>,
+) -> Result<(), DynamicsError<E>>
+where
+    M: Manifold + ?Sized,
+{
+    for (mass, speed) in metric.masses().iter().zip(velocity.iter()) {
+        if *mass == 0.0 && *speed != 0.0 {
+            return Err(geometry(Error::Dynamics {
+                what: "a zero-mass coordinate must have zero velocity",
+            }));
+        }
+    }
+    if !manifold.drift_is_straight()
+        && let Some((values, _)) = manifold.holonomic_chart(position)
+        && values.iter().any(|value| {
+            !value.is_finite()
+                || value.abs() > START_CONSTRAINT_TOLERANCE_FACTOR * chart_tolerance(position)
+        })
+    {
+        return Err(geometry(Error::Dynamics {
+            what: "the initial point is off the manifold",
+        }));
+    }
+    Ok(())
 }
 
 fn embedding_drift<M, E>(
@@ -730,7 +765,7 @@ where
         })?
         .to_vec();
     let mut hits = 0u64;
-    for _ in 0..MAX_REFLECTION_PASSES {
+    for pass in 0..=MAX_REFLECTION_PASSES {
         let normals = match manifold.euclidean_normals(position) {
             Some(basis) => basis,
             None => mass::normal_frame(manifold, position).map_err(geometry)?,
@@ -747,6 +782,11 @@ where
             }
             let excess = raw / wall.scale;
             if excess > 0.0 {
+                if pass == MAX_REFLECTION_PASSES {
+                    return Err(geometry(Error::Dynamics {
+                        what: "curved wall reflections did not converge",
+                    }));
+                }
                 let mut v_dot = 0.0;
                 for i in 0..velocity.len() {
                     if masses[i] > 0.0 {
@@ -800,7 +840,7 @@ where
         })
     })?;
     let mut hits = 0u64;
-    for _ in 0..MAX_REFLECTION_PASSES {
+    for pass in 0..=MAX_REFLECTION_PASSES {
         let mut any = false;
         for wall in prepared {
             if wall.scale <= 0.0 {
@@ -812,6 +852,11 @@ where
             }
             let excess = raw / wall.scale;
             if excess > 0.0 {
+                if pass == MAX_REFLECTION_PASSES {
+                    return Err(geometry(Error::Dynamics {
+                        what: "flat wall reflections did not converge",
+                    }));
+                }
                 let mut v_dot = 0.0;
                 for i in 0..velocity.len() {
                     if masses[i] > 0.0 {
@@ -892,8 +937,9 @@ where
 }
 
 /// Constrained BAOAB. `force` returns the ambient force and the potential
-/// at a position. `point` is restored to the manifold and its velocity is
-/// projected before the first step.
+/// at a position. On a flat manifold `point` is restored before the first
+/// step; on a curved manifold it must already lie on the manifold. Each
+/// force kick is projected before the following drift.
 pub fn baoab<M, E, F>(
     manifold: &M,
     metric: &MassMetric,
@@ -917,6 +963,7 @@ where
     if steps == 0 {
         return Ok(DynamicsReport::default());
     }
+    check_phase(manifold, metric, &point.position, &point.velocity)?;
     let masses = metric
         .masses()
         .as_slice()
@@ -931,9 +978,6 @@ where
             .snap_mass(metric, &point.position)
             .map_err(geometry)?;
     }
-    point.velocity = manifold
-        .project_mass_velocity(metric, &point.position, &point.velocity)
-        .map_err(geometry)?;
     let normals = match manifold.euclidean_normals(&point.position) {
         Some(basis) => basis,
         None => mass::normal_frame(manifold, &point.position).map_err(geometry)?,
@@ -1045,6 +1089,7 @@ where
     if steps == 0 {
         return Ok(DynamicsReport::default());
     }
+    check_phase(manifold, metric, &point.position, &point.velocity)?;
     let masses = metric
         .masses()
         .as_slice()
@@ -1059,9 +1104,6 @@ where
             .snap_mass(metric, &point.position)
             .map_err(geometry)?;
     }
-    point.velocity = manifold
-        .project_mass_velocity(metric, &point.position, &point.velocity)
-        .map_err(geometry)?;
     let half = 0.5 * config.time_step;
     let (mut force_now, mut potential) = pull_force(&mut force, &point.position)?;
     for _ in 0..steps {
