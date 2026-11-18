@@ -51,7 +51,6 @@ class MinRgmin : public Min {
   size_t ndof;
   double escale;   // natoms when thermo_modify norm yes, else 1
   std::vector<double> xg;       // rgmin's iterate
-  std::vector<double> xprev;    // iterate before the current step
   std::vector<double> xcache;   // point of the last evaluation
   std::vector<double> gcache;   // gradient at xcache
   std::vector<double> gbuf;     // owned part of a gradient before the sum

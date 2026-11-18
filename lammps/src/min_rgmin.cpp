@@ -21,9 +21,6 @@
 
 using namespace LAMMPS_NS;
 
-// Same relative-energy floor as min_cg, min_fire and the other LAMMPS styles.
-static constexpr double EPS_ENERGY = 1.0e-8;
-
 // LAMMPS min_style fire defaults (Guenole et al. 2020, Table 1), which
 // rgmin's RGMIN_FIRE_PRESET_GUENOLE2020 also holds.
 static constexpr int FIRE_DELAYSTEP = 20;
@@ -223,7 +220,6 @@ void MinRgmin::start_session()
   ndof = 3 * static_cast<size_t>(atom->natoms);
   escale = output->thermo->normflag ? static_cast<double>(atom->natoms) : 1.0;
   xg.assign(ndof, 0.0);
-  xprev.assign(ndof, 0.0);
   xcache.assign(ndof, 0.0);
   gcache.assign(ndof, 0.0);
   gbuf.assign(ndof, 0.0);
@@ -263,6 +259,10 @@ void MinRgmin::start_session()
     error->all(FLERR, "rgmin_solver_set_lbfgs_wolfe failed: {}", rgmin_last_error());
   if (trust > 0.0 && rgmin_solver_set_lbfgs_trust(solver, trust) != 0)
     error->all(FLERR, "rgmin_solver_set_lbfgs_trust failed: {}", rgmin_last_error());
+  // minimize etol: rgmin tests the relative energy change between accepted
+  // steps and reports RGMIN_STOP_ENERGY_TOLERANCE. etol 0 is LAMMPS's "off".
+  if (update->etol > 0.0 && rgmin_solver_set_etol(solver, update->etol) != RGMIN_SUCCESS)
+    error->all(FLERR, "rgmin_solver_set_etol failed: {}", rgmin_last_error());
   if (method == RGMIN_FIRE2) {
     if (rgmin_solver_set_fire_preset(solver, RGMIN_FIRE_PRESET_GUENOLE2020) != 0)
       error->all(FLERR, "rgmin_solver_set_fire_preset failed: {}", rgmin_last_error());
@@ -420,7 +420,6 @@ int MinRgmin::iterate(int maxiter)
     niter++;
 
     eprevious = ecurrent;
-    std::copy(xg.begin(), xg.end(), xprev.begin());
 
     rgmin_report_t rep;
     const rgmin_status_t status = rgmin_solver_step_fg(solver, &evalgrad, this, xtensor, &rep);
@@ -438,17 +437,15 @@ int MinRgmin::iterate(int maxiter)
     }
     check_replicas(rep.value);
     ecurrent = rep.value / escale;
-    const bool moved = !std::equal(xg.begin(), xg.end(), xprev.begin());
 
     if (neval >= update->max_eval) {
       sync_atoms(false);
       return MAXEVAL;
     }
 
-    // min_cg's test, skipped when the session refused its trial and stayed put
-    if (moved &&
-        fabs(ecurrent - eprevious) <
-            update->etol * 0.5 * (fabs(ecurrent) + fabs(eprevious) + EPS_ENERGY)) {
+    // The energy test of minimize etol runs inside rgmin, which skips a step
+    // that refused its trial and stayed put.
+    if (rep.stop == RGMIN_STOP_ENERGY_TOLERANCE) {
       sync_atoms(false);
       return ETOL;
     }
