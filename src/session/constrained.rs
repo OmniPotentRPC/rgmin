@@ -1496,9 +1496,30 @@ impl Solver {
         let result = (|| match &mut overlay {
             Overlay::GromacsSteep(state) => {
                 let displacement = state.displacement(start.grad.view());
-                let trial = start
-                    .space
-                    .place(obj.bounds(), &displacement, self.caps())?;
+                // GROMACS do_steep sets a failed constraint trial to +infinity
+                // and shrinks ustep (minimize.cpp lines 3008-3009 and 3104).
+                // The failure is a rejected step until the shrink bound is spent.
+                let trial = match start.space.place(obj.bounds(), &displacement, self.caps()) {
+                    Err(e @ Error::Constraint(_)) => {
+                        if state.reject_constraint() {
+                            return Err(e);
+                        }
+                        self.remember(x, start.value, &start.raw);
+                        self.steps += 1;
+                        return Ok(self.finish(
+                            start.value,
+                            x,
+                            &start.grad,
+                            norm,
+                            Status::Iterating,
+                        ));
+                    }
+                    Err(e) => return Err(e),
+                    Ok(trial) => {
+                        state.clear_constraint_shrinks();
+                        trial
+                    }
+                };
                 if trial == *x {
                     self.remember(x, start.value, &start.raw);
                     Ok(self.finish(start.value, x, &start.grad, norm, Status::MachinePrecision))
