@@ -6540,3 +6540,475 @@ mod retained_neb_guard_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod fallible_newton_cg_tests {
+    use super::*;
+    use eindir_core::{Bounds, Gradient};
+    use ndarray::{ArrayView1, array};
+    use std::cell::Cell;
+    use std::fmt;
+
+    const DIM: usize = 4;
+
+    struct Valleys {
+        bounds: Bounds<f64>,
+    }
+
+    impl Valleys {
+        fn wide() -> Self {
+            Self {
+                bounds: Bounds::new(
+                    Array1::from_elem(DIM, -1024.0),
+                    Array1::from_elem(DIM, 1024.0),
+                    0.0,
+                ),
+            }
+        }
+    }
+
+    impl Objective<f64> for Valleys {
+        fn dim(&self) -> usize {
+            DIM
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            (0..DIM / 2)
+                .map(|k| {
+                    let (a, b) = (x[2 * k], x[2 * k + 1]);
+                    (1.0 - a).powi(2) + 100.0 * (b - a * a).powi(2)
+                })
+                .sum()
+        }
+    }
+
+    impl Gradient<f64> for Valleys {
+        fn dim(&self) -> usize {
+            DIM
+        }
+
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            let mut g = Array1::zeros(DIM);
+            for k in 0..DIM / 2 {
+                let (a, b) = (x[2 * k], x[2 * k + 1]);
+                g[2 * k] = -2.0 * (1.0 - a) - 400.0 * a * (b - a * a);
+                g[2 * k + 1] = 200.0 * (b - a * a);
+            }
+            g
+        }
+    }
+
+    impl DifferentiableObjective<f64> for Valleys {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+
+    impl HessianVector for Valleys {
+        fn hessian_vector(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+            let mut hv = Array1::zeros(DIM);
+            for k in 0..DIM / 2 {
+                let (a, b) = (x[2 * k], x[2 * k + 1]);
+                let haa = 2.0 - 400.0 * (b - a * a) + 800.0 * a * a;
+                let hab = -400.0 * a;
+                hv[2 * k] = haa * v[2 * k] + hab * v[2 * k + 1];
+                hv[2 * k + 1] = hab * v[2 * k] + 200.0 * v[2 * k + 1];
+            }
+            hv
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct HostFailure(usize);
+
+    impl fmt::Display for HostFailure {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "host call {} failed", self.0)
+        }
+    }
+
+    impl std::error::Error for HostFailure {}
+
+    struct FallibleValleys {
+        calls: Cell<usize>,
+        fail_at: Option<usize>,
+        bounds: Bounds<f64>,
+        allow_hvp: bool,
+    }
+
+    impl FallibleValleys {
+        fn analytic(fail_at: Option<usize>, bounds: Bounds<f64>) -> Self {
+            Self {
+                calls: Cell::new(0),
+                fail_at,
+                bounds,
+                allow_hvp: true,
+            }
+        }
+
+        fn gradient_only(fail_at: Option<usize>, bounds: Bounds<f64>) -> Self {
+            Self {
+                calls: Cell::new(0),
+                fail_at,
+                bounds,
+                allow_hvp: false,
+            }
+        }
+
+        fn tick(&self) -> std::result::Result<(), HostFailure> {
+            let n = self.calls.get() + 1;
+            self.calls.set(n);
+            if self.fail_at == Some(n) {
+                return Err(HostFailure(n));
+            }
+            Ok(())
+        }
+    }
+
+    impl TryHessianVector for FallibleValleys {
+        type Error = HostFailure;
+
+        fn dim(&self) -> usize {
+            DIM
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+
+        fn try_value_and_gradient(
+            &self,
+            x: ArrayView1<f64>,
+        ) -> std::result::Result<(f64, Array1<f64>), HostFailure> {
+            self.tick()?;
+            Ok(Valleys::wide().value_and_gradient(x))
+        }
+
+        fn try_hessian_vector(
+            &self,
+            x: ArrayView1<f64>,
+            v: ArrayView1<f64>,
+        ) -> std::result::Result<Array1<f64>, HostFailure> {
+            assert!(
+                self.allow_hvp,
+                "forward-difference path must not call try_hessian_vector"
+            );
+            self.tick()?;
+            Ok(Valleys::wide().hessian_vector(x, v))
+        }
+    }
+
+    fn vec_bits(x: &Array1<f64>) -> Vec<u64> {
+        x.iter().map(|v| v.to_bits()).collect()
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct SessionSnapshot {
+        x: Vec<u64>,
+        steps: usize,
+        gradient_calls: usize,
+        hvp_calls: usize,
+        last_pos: Option<Vec<u64>>,
+        last_value: u64,
+        last_grad: Vec<u64>,
+        bound_low: Option<Vec<u64>>,
+        bound_high: Option<Vec<u64>>,
+        radius: u64,
+        stop_norm: StopNorm,
+        rigid_rank: usize,
+    }
+
+    impl SessionSnapshot {
+        fn capture(solver: &Solver, x: &Array1<f64>) -> Self {
+            let radius = match &solver.inner {
+                Inner::NewtonCg { radius } | Inner::NewtonPcg { radius } => radius.to_bits(),
+                _ => 0,
+            };
+            Self {
+                x: vec_bits(x),
+                steps: solver.steps,
+                gradient_calls: solver.gradient_calls,
+                hvp_calls: solver.hvp_calls,
+                last_pos: solver.last_pos.as_ref().map(vec_bits),
+                last_value: solver.last_value.to_bits(),
+                last_grad: vec_bits(&solver.last_grad),
+                bound_low: solver.bound_low.as_ref().map(vec_bits),
+                bound_high: solver.bound_high.as_ref().map(vec_bits),
+                radius,
+                stop_norm: solver.stop_norm,
+                rigid_rank: solver.rigid_ws.rank(),
+            }
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct ReportSnapshot {
+        value: u64,
+        coords: Vec<u64>,
+        steps: usize,
+        grad_norm: u64,
+        stop_norm: StopNorm,
+        grad: Option<Vec<u64>>,
+        status: Status,
+    }
+
+    impl ReportSnapshot {
+        fn of(report: &Report) -> Self {
+            Self {
+                value: report.value.to_bits(),
+                coords: vec_bits(&report.coords),
+                steps: report.steps,
+                grad_norm: report.grad_norm.to_bits(),
+                stop_norm: report.stop_norm,
+                grad: report.grad.as_ref().map(vec_bits),
+                status: report.status,
+            }
+        }
+    }
+
+    fn wide_box() -> Bounds<f64> {
+        Bounds::new(
+            Array1::from_elem(DIM, -1024.0),
+            Array1::from_elem(DIM, 1024.0),
+            0.0,
+        )
+    }
+
+    fn unit_box() -> Bounds<f64> {
+        Bounds::new(
+            Array1::from_elem(DIM, -1.0),
+            Array1::from_elem(DIM, 1.0),
+            0.0,
+        )
+    }
+
+    fn configured_solver(method: Method) -> Solver {
+        let mut solver = Solver::new(method, Control::default(), DIM);
+        solver.set_highs(true);
+        solver.set_box(Some(vec![-1024.0; DIM]), Some(vec![1024.0; DIM]));
+        solver
+    }
+
+    fn expect_host_call(err: &Error) -> usize {
+        let Error::Host(inner) = err else {
+            unreachable!("expected Error::Host, got {err:?}");
+        };
+        let Some(failure) = inner.downcast_ref::<HostFailure>() else {
+            unreachable!("expected HostFailure, got {inner:?}");
+        };
+        failure.0
+    }
+
+    #[test]
+    fn try_step_hvp_host_error_preserves_every_session_field() {
+        let outside = array![-1.2, 1.4, 0.3, -1.7];
+        for method in [Method::NewtonCg, Method::NewtonPcg] {
+            let mut probe = configured_solver(method.clone());
+            let probe_host = FallibleValleys::analytic(None, unit_box());
+            let mut x_probe = outside.clone();
+            let ref_first = probe
+                .try_step_hvp(&probe_host, &mut x_probe)
+                .expect("reference step");
+            let first_calls = probe_host.calls.get();
+            assert!(first_calls >= 3);
+
+            for fail_at in 1..=first_calls {
+                let mut solver = configured_solver(method.clone());
+                let mut x = outside.clone();
+                let before = SessionSnapshot::capture(&solver, &x);
+                let bad = FallibleValleys::analytic(Some(fail_at), unit_box());
+                let err = solver
+                    .try_step_hvp(&bad, &mut x)
+                    .expect_err("host failed on cold step");
+                assert_eq!(expect_host_call(&err), fail_at);
+                assert_eq!(bad.calls.get(), fail_at);
+                assert_eq!(SessionSnapshot::capture(&solver, &x), before);
+
+                let good = FallibleValleys::analytic(None, unit_box());
+                let retry = solver
+                    .try_step_hvp(&good, &mut x)
+                    .expect("retry after cold failure");
+                assert_eq!(ReportSnapshot::of(&retry), ReportSnapshot::of(&ref_first));
+                assert_eq!(
+                    SessionSnapshot::capture(&solver, &x),
+                    SessionSnapshot::capture(&probe, &x_probe)
+                );
+            }
+
+            // Warm session: step 1 succeeds on wide_box, step 2 fails on unit_box
+            // from an unclipped point, then retries at step 1's point on wide_box.
+            let mut fresh = configured_solver(method.clone());
+            let mut x_fresh = array![-1.2, 1.0, 0.3, -0.7];
+            fresh
+                .try_step_hvp(&FallibleValleys::analytic(None, wide_box()), &mut x_fresh)
+                .expect("warm fresh step 1");
+            let warm_count_host = FallibleValleys::analytic(None, wide_box());
+            let ref_second = fresh
+                .try_step_hvp(&warm_count_host, &mut x_fresh)
+                .expect("warm fresh step 2");
+
+            let mut moved_probe = configured_solver(method.clone());
+            let mut x_moved_probe = array![-1.2, 1.0, 0.3, -0.7];
+            moved_probe
+                .try_step_hvp(
+                    &FallibleValleys::analytic(None, wide_box()),
+                    &mut x_moved_probe,
+                )
+                .expect("moved probe step 1");
+            let moved_counter = FallibleValleys::analytic(None, unit_box());
+            let mut x_moved = outside.clone();
+            moved_probe
+                .try_step_hvp(&moved_counter, &mut x_moved)
+                .expect("moved probe step 2");
+            let warm_calls = moved_counter.calls.get();
+
+            for fail_at in 1..=warm_calls {
+                let mut solver = configured_solver(method.clone());
+                let mut x1 = array![-1.2, 1.0, 0.3, -0.7];
+                solver
+                    .try_step_hvp(&FallibleValleys::analytic(None, wide_box()), &mut x1)
+                    .expect("warm step 1");
+                let mut x_try = outside.clone();
+                let before = SessionSnapshot::capture(&solver, &x_try);
+                let bad = FallibleValleys::analytic(Some(fail_at), unit_box());
+                let err = solver
+                    .try_step_hvp(&bad, &mut x_try)
+                    .expect_err("host failed on warm step");
+                assert_eq!(expect_host_call(&err), fail_at);
+                assert_eq!(bad.calls.get(), fail_at);
+                assert_eq!(SessionSnapshot::capture(&solver, &x_try), before);
+
+                let good = FallibleValleys::analytic(None, wide_box());
+                let retry = solver
+                    .try_step_hvp(&good, &mut x1)
+                    .expect("warm retry at cached point");
+                assert_eq!(good.calls.get(), warm_count_host.calls.get());
+                assert_eq!(ReportSnapshot::of(&retry), ReportSnapshot::of(&ref_second));
+                assert_eq!(
+                    SessionSnapshot::capture(&solver, &x1),
+                    SessionSnapshot::capture(&fresh, &x_fresh)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn forward_difference_hvp_host_error_preserves_session_and_retries_cleanly() {
+        let start = array![-1.2, 1.0, 0.3, -0.7];
+        let outside = array![-1.2, 1.4, 0.3, -1.7];
+        let valleys = Valleys::wide();
+        for method in [Method::NewtonCg, Method::NewtonPcg] {
+            // Succeeding callbacks match Solver::step bit for bit.
+            let mut plain = configured_solver(method.clone());
+            let mut fallible = configured_solver(method.clone());
+            let mut x_plain = start.clone();
+            let mut x_fallible = start.clone();
+            let ok_host = FallibleValleys::gradient_only(None, wide_box());
+            for _ in 0..8 {
+                let rep_plain = plain.step(&valleys, &mut x_plain).expect("plain step");
+                let rep_fallible = fallible
+                    .step_newton_cg(&HostOracle(&ok_host), &mut x_fallible, &FiniteDifference)
+                    .expect("fallible fd step");
+                assert_eq!(
+                    ReportSnapshot::of(&rep_plain),
+                    ReportSnapshot::of(&rep_fallible)
+                );
+                assert_eq!(
+                    SessionSnapshot::capture(&plain, &x_plain),
+                    SessionSnapshot::capture(&fallible, &x_fallible)
+                );
+            }
+            assert_eq!(
+                ok_host.calls.get(),
+                fallible.gradient_calls() + fallible.hvp_calls()
+            );
+
+            // Cold failure on every call (opening gradient, forward-difference
+            // Hessian-vector products in sketch and CG, and trial evaluation).
+            let mut ref_solver = configured_solver(method.clone());
+            let ref_host = FallibleValleys::gradient_only(None, unit_box());
+            let mut x_ref = outside.clone();
+            let ref_report = ref_solver
+                .step_newton_cg(&HostOracle(&ref_host), &mut x_ref, &FiniteDifference)
+                .expect("reference fd step");
+            let per_step = ref_host.calls.get();
+            assert!(per_step >= 3);
+
+            for fail_at in 1..=per_step {
+                let mut solver = configured_solver(method.clone());
+                let mut x = outside.clone();
+                let before = SessionSnapshot::capture(&solver, &x);
+                let bad = FallibleValleys::gradient_only(Some(fail_at), unit_box());
+                let err = solver
+                    .step_newton_cg(&HostOracle(&bad), &mut x, &FiniteDifference)
+                    .expect_err("fd host failed");
+                assert_eq!(expect_host_call(&err), fail_at);
+                assert_eq!(bad.calls.get(), fail_at);
+                assert_eq!(SessionSnapshot::capture(&solver, &x), before);
+
+                let good = FallibleValleys::gradient_only(None, unit_box());
+                let retry = solver
+                    .step_newton_cg(&HostOracle(&good), &mut x, &FiniteDifference)
+                    .expect("fd retry");
+                assert_eq!(ReportSnapshot::of(&retry), ReportSnapshot::of(&ref_report));
+                assert_eq!(
+                    SessionSnapshot::capture(&solver, &x),
+                    SessionSnapshot::capture(&ref_solver, &x_ref)
+                );
+            }
+
+            // Warm failure on the forward-difference product path (cached opening
+            // gradient, so call 1 is already a forward-difference HVP probe).
+            let mut fresh = configured_solver(method.clone());
+            let mut x_fresh = start.clone();
+            fresh
+                .step_newton_cg(
+                    &HostOracle(&FallibleValleys::gradient_only(None, wide_box())),
+                    &mut x_fresh,
+                    &FiniteDifference,
+                )
+                .expect("warm fd step 1");
+            let warm_ref_host = FallibleValleys::gradient_only(None, wide_box());
+            let ref_warm = fresh
+                .step_newton_cg(&HostOracle(&warm_ref_host), &mut x_fresh, &FiniteDifference)
+                .expect("warm fd step 2");
+            let warm_calls = warm_ref_host.calls.get();
+            assert!(warm_calls >= 2);
+
+            for fail_at in 1..=warm_calls {
+                let mut solver = configured_solver(method.clone());
+                let mut x = start.clone();
+                solver
+                    .step_newton_cg(
+                        &HostOracle(&FallibleValleys::gradient_only(None, wide_box())),
+                        &mut x,
+                        &FiniteDifference,
+                    )
+                    .expect("warm step 1");
+                let before = SessionSnapshot::capture(&solver, &x);
+                let bad = FallibleValleys::gradient_only(Some(fail_at), wide_box());
+                let err = solver
+                    .step_newton_cg(&HostOracle(&bad), &mut x, &FiniteDifference)
+                    .expect_err("warm fd host failed");
+                assert_eq!(expect_host_call(&err), fail_at);
+                assert_eq!(bad.calls.get(), fail_at);
+                assert_eq!(SessionSnapshot::capture(&solver, &x), before);
+
+                let good = FallibleValleys::gradient_only(None, wide_box());
+                let retry = solver
+                    .step_newton_cg(&HostOracle(&good), &mut x, &FiniteDifference)
+                    .expect("warm fd retry");
+                assert_eq!(good.calls.get(), warm_calls);
+                assert_eq!(ReportSnapshot::of(&retry), ReportSnapshot::of(&ref_warm));
+                assert_eq!(
+                    SessionSnapshot::capture(&solver, &x),
+                    SessionSnapshot::capture(&fresh, &x_fresh)
+                );
+            }
+        }
+    }
+}
