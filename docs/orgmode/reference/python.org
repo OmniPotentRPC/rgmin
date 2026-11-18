@@ -25,8 +25,9 @@ RFO, and dogleg.
 =require_convergence=, =error_on_unmet=, and =backward_polish= are flags
 and default to off. =require_convergence= raises =NotConverged= when the
 gradient norm is not below =gtol=. =error_on_unmet= raises
-=RuntimeError= when the run stops on =BUDGET=, =LINE_SEARCH=, or
-=POLISH_UNMET=. =backward_polish= is stored on the session. This step
+=StopUnmetError= when the run stops on =BUDGET=, =LINE_SEARCH=, or
+=POLISH_UNMET=. It is a =RuntimeError= whose =report= attribute is the
+=Report= of the stop. =backward_polish= is stored on the session. This step
 loop does not form a Hessian, so the polish itself is the C
 =rgmin_minimize_hess_opts= and =rgmin_minimize_hvp_opts= entries.
 An =lbfgs= run that spends its budget with =x= unmoved stops on

@@ -197,6 +197,22 @@ private:
     Report report_;
 };
 
+/// Thrown by the one-shots when \c Control::error_on_unmet is set and the
+/// run stops short of its criterion. It is a \c std::runtime_error, so
+/// existing handlers still catch it. \c report() is the C report of the
+/// stop: the value, step count, final gradient norm and \c rgmin_stop_t
+/// reason.
+class StopUnmetError : public std::runtime_error {
+public:
+    StopUnmetError(std::string const& what, Report const& report)
+        : std::runtime_error(what), report_(report) {}
+
+    Report const& report() const noexcept { return report_; }
+
+private:
+    Report report_;
+};
+
 inline Report report_from_c(rgmin_report_t const& out) {
     return Report{out.value, out.steps, out.grad_norm, out.stop, out.converged != 0};
 }
@@ -402,6 +418,10 @@ inline Report finish_report(rgmin_status_t st, rgmin_report_t const& out, char c
     }
     if (st == RGMIN_NOT_CONVERGED) {
         throw NotConverged(report);
+    }
+    if (st == RGMIN_UNMET_STOP) {
+        char const* msg = rgmin_last_error();
+        throw StopUnmetError(msg != nullptr && msg[0] != '\0' ? msg : fallback, report);
     }
     detail::raise(st, fallback);
 }

@@ -632,6 +632,59 @@ int no_move_stop() {
     return 0;
 }
 
+rgmin_status_t uphill_hess(void* /*user*/, DLManagedTensorVersioned const* /*x*/,
+                           DLManagedTensorVersioned* h) {
+    data(h)[0] = -1.0;
+    return RGMIN_SUCCESS;
+}
+
+// With error_on_unmet the unmet stop is a StopUnmetError that carries the
+// C report, from both the gradient and the Hessian one-shot. It is still
+// a std::runtime_error to a caller that catches the base.
+int unmet_carries_report() {
+    for (int with_hess = 0; with_hess < 2; ++with_hess) {
+        std::vector<double> x{1.0};
+        DLManagedTensorVersioned* t = rgmin::borrow_cpu_f64(x.data(), 1);
+        if (t == nullptr) {
+            return 50;
+        }
+        rgmin::Control ctrl;
+        ctrl.maxiter = 3;
+        ctrl.gtol = 1e-8;
+        ctrl.error_on_unmet = true;
+        bool derived = false;
+        bool base = false;
+        rgmin::Report carried;
+        try {
+            if (with_hess != 0) {
+                rgmin::minimize_hess_fn(uphill_eval, uphill_grad, uphill_hess, nullptr, t, ctrl,
+                                        rgmin::Method::Lbfgs);
+            } else {
+                rgmin::minimize_fn(uphill_eval, uphill_grad, nullptr, t, ctrl,
+                                   rgmin::Method::Lbfgs);
+            }
+        } catch (rgmin::StopUnmetError const& error) {
+            derived = true;
+            carried = error.report();
+            try {
+                throw;
+            } catch (std::runtime_error const&) {
+                base = true;
+            }
+        }
+        rgmin_tensor_free(t);
+        if (!derived || !base || carried.stop != RGMIN_STOP_LINE_SEARCH ||
+            carried.grad_norm != 1.0 || carried.value != 0.5 || x[0] != 1.0) {
+            std::fprintf(stderr, "unmet report hess=%d derived=%d base=%d stop %d norm %g\n",
+                         with_hess, derived ? 1 : 0, base ? 1 : 0,
+                         static_cast<int>(carried.stop), carried.grad_norm);
+            return 51;
+        }
+    }
+    std::printf("unmet report ok\n");
+    return 0;
+}
+
 #if !defined(__has_include) || !__has_include(<eindir-core.h>)
 // rgmin.h only forward declares the eindir types. These are the pieces of
 // eindir-core's C ABI that the unmet-stop check below calls, as the
@@ -709,13 +762,22 @@ int eindir_unmet() {
     std::vector<double> loud{-1.2, 1.0};
     DLManagedTensorVersioned* tl = rgmin::borrow_cpu_f64(loud.data(), 2);
     bool raised = false;
+    rgmin::Report carried;
     try {
         rgmin::minimize_eindir(objective, &stamp, tl, ctrl, rgmin::Method::Lbfgs);
-    } catch (std::runtime_error const& error) {
+    } catch (rgmin::StopUnmetError const& error) {
         raised = std::string(error.what()).find("unmet after") != std::string::npos;
+        carried = error.report();
     }
     rgmin_tensor_free(tl);
     eindir_objective_free(objective);
+    if (carried.stop != spent.stop || carried.steps != spent.steps ||
+        carried.value != spent.value || carried.grad_norm != spent.grad_norm) {
+        std::fprintf(stderr, "eindir report stop %d steps %zu value %g norm %g\n",
+                     static_cast<int>(carried.stop), carried.steps, carried.value,
+                     carried.grad_norm);
+        return 43;
+    }
     if (!raised || loud[0] != quiet[0] || loud[1] != quiet[1] || loud[0] == -1.2) {
         std::fprintf(stderr, "eindir error_on_unmet raised=%d x=(%g,%g)\n", raised ? 1 : 0,
                      loud[0], loud[1]);
@@ -732,6 +794,8 @@ int main() {
     if (unmet != 0) return unmet;
     int still = no_move_stop();
     if (still != 0) return still;
+    int carry = unmet_carries_report();
+    if (carry != 0) return carry;
     int off = maxmove_off();
     if (off != 0) return off;
     int block = eigen_block();

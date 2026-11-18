@@ -11,6 +11,7 @@ from rgmin._core import NumericalError as NumericalError
 from rgmin._core import Report as Report
 from rgmin._core import Solver as Solver
 from rgmin._core import Stop as Stop
+from rgmin._core import StopUnmetError as StopUnmetError
 from rgmin._maturin import LbfgsPairs as LbfgsPairs
 from rgmin._maturin import LineSearch as LineSearch
 from rgmin._maturin import Session as Session
