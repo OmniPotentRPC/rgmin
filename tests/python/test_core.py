@@ -266,3 +266,15 @@ def test_gromacs_steep_mdp_and_zero_budget() -> None:
     )
     assert rep_mp.stop == rgmin.Stop.MACHINE_PRECISION
     assert x_mp[0] == 1.0
+
+    rep_cfg, x_cfg = rgmin.minimize(
+        _quad,
+        np.array([0.3], dtype=np.float64),
+        "gromacs-steep",
+        maxiter=3,
+        istep=0.5,
+        shrink=0.2,
+        max_constraint_shrinks=1,
+    )
+    assert rep_cfg.stop in {rgmin.Stop.BUDGET, rgmin.Stop.TOLERANCE}
+    assert x_cfg.shape == (1,)
