@@ -2,6 +2,7 @@
 # package gromacs=2025.4=nompi_dblprec_h377b941_0, SIMD AVX2_256, -nt 1 -ntmpi 1
 # integrator=steep nsteps=12 emtol=1e-8 emstep=0.02
 # vdwtype=Cut-off vdw-modifier=None rvdw=3.0 DispCorr=no pbc=xyz constraints=none
+# topol defaults: nbfunc=1 comb-rule=2 gen-pairs=no fudgeLJ=1.0 fudgeQQ=1.0
 # atomtype Ar 39.948 0.0 A 0.34 1.0, seven one-atom molecules, box 10 nm
 # Step lines are stderr from gmx_d mdrun -v.
 # minimize.cpp:3028 prints Dmax %6.1e, Epot %12.5e, Fmax %11.5e.
