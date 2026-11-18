@@ -764,6 +764,20 @@ public:
     int set_lbfgs_trust(double radius) { return rgmin_solver_set_lbfgs_trust(ptr_, radius); }
     /// Current Burdakov radius, or 0 when it is off.
     double lbfgs_trust_radius() const noexcept { return rgmin_solver_lbfgs_trust_radius(ptr_); }
+    /// Stop when the relative energy change between accepted steps falls
+    /// below `etol`, the LAMMPS `minimize etol` test.
+    rgmin_status_t set_etol(double etol) { return rgmin_solver_set_etol(ptr_, etol); }
+    /// Turn the energy-change stop off.
+    void clear_etol() { rgmin_solver_clear_etol(ptr_); }
+    /// Stop once the session has made `max_evals` objective evaluations,
+    /// the LAMMPS `minimize maxeval` test.
+    rgmin_status_t set_max_evals(std::size_t max_evals) {
+        return rgmin_solver_set_max_evals(ptr_, max_evals);
+    }
+    /// Turn the evaluation budget off.
+    void clear_max_evals() { rgmin_solver_clear_max_evals(ptr_); }
+    /// Objective evaluations the session's steps have made.
+    std::size_t evals() const noexcept { return rgmin_solver_evals(ptr_); }
     /// Copy the gradient behind the last step report. n is the session dimension.
     rgmin_status_t report_gradient(double* out, std::size_t n) const {
         return rgmin_solver_report_gradient(ptr_, out, n);
@@ -1126,12 +1140,14 @@ private:
     std::optional<double> objective_roundoff_;
     bool error_on_unmet_ = false;
     bool backward_polish_ = false;
+    std::optional<double> etol_;
+    std::optional<std::size_t> max_evals_;
 };
 
 inline std::string SolverConfig::valid_options() {
     return "accept, atom_maxmove, backward_polish, beta, c1, c2, cautious_alpha, "
-           "cautious_eps, error_on_unmet, extra_updates, fire_variant, gtol, istep, "
-           "linesearch, linesearch_maxiter, maxiter, maxmove, maxstep, memory, "
+           "cautious_eps, error_on_unmet, etol, extra_updates, fire_variant, gtol, istep, "
+           "linesearch, linesearch_maxiter, max_evals, maxiter, maxmove, maxstep, memory, "
            "neb_guards, noise_c, noise_eps, objective_roundoff, periodic, "
            "project_rigid, qn_step";
 }
@@ -1218,9 +1234,9 @@ inline bool is_cg(Method method) {
 inline bool known_option(std::string const& key) {
     static constexpr char const* const keys[] = {
         "accept", "atom_maxmove", "backward_polish", "beta", "c1", "c2",
-        "cautious_alpha", "cautious_eps", "error_on_unmet", "extra_updates",
+        "cautious_alpha", "cautious_eps", "error_on_unmet", "etol", "extra_updates",
         "fire_variant", "gtol", "istep", "linesearch", "linesearch_maxiter",
-        "maxiter", "maxmove", "maxstep", "memory", "neb_guards", "noise_c",
+        "max_evals", "maxiter", "maxmove", "maxstep", "memory", "neb_guards", "noise_c",
         "noise_eps", "objective_roundoff", "periodic", "project_rigid", "qn_step"};
     for (char const* item : keys) {
         if (key == item) return true;
@@ -1244,7 +1260,14 @@ inline void require_finite(std::string const& key, double value) {
 
 inline bool is_count_option(std::string const& key) {
     return key == "memory" || key == "maxiter" || key == "linesearch_maxiter" ||
-           key == "extra_updates";
+           key == "extra_updates" || key == "max_evals";
+}
+
+inline double require_etol(double value) {
+    if (!std::isfinite(value) || value < 0.0) {
+        throw std::invalid_argument("etol must be finite and >= 0");
+    }
+    return value;
 }
 
 inline std::size_t require_count(std::string const& key, long long value, long long min_value) {
@@ -1343,13 +1366,16 @@ inline SolverConfig SolverConfig::build(
             cfg.linesearch_maxiter_ = detail::require_count(key, item.second, 1);
         } else if (key == "extra_updates") {
             cfg.extra_updates_ = detail::require_count(key, item.second, 0);
+        } else if (key == "max_evals") {
+            cfg.max_evals_ = detail::require_count(key, item.second, 1);
         } else if (key == "gtol" || key == "istep" || key == "maxmove" || key == "noise_eps" ||
                    key == "noise_c" || key == "c1" || key == "c2" || key == "atom_maxmove" ||
                    key == "maxstep" || key == "cautious_eps" || key == "cautious_alpha" ||
-                   key == "objective_roundoff") {
+                   key == "objective_roundoff" || key == "etol") {
             double value = static_cast<double>(item.second);
             detail::require_finite(key, value);
-            if (key == "gtol") cfg.control_.gtol = value;
+            if (key == "etol") cfg.etol_ = detail::require_etol(value);
+            else if (key == "gtol") cfg.control_.gtol = value;
             else if (key == "istep") cfg.control_.istep = value;
             else if (key == "maxmove") cfg.control_.maxmove = value;
             else if (key == "noise_eps") cfg.control_.noise_eps = value;
@@ -1370,7 +1396,8 @@ inline SolverConfig SolverConfig::build(
         detail::require_finite(key, item.second);
         if (detail::is_count_option(key)) {
             throw std::invalid_argument(key + " must be an int");
-        } else if (key == "gtol") cfg.control_.gtol = item.second;
+        } else if (key == "etol") cfg.etol_ = detail::require_etol(item.second);
+        else if (key == "gtol") cfg.control_.gtol = item.second;
         else if (key == "istep") cfg.control_.istep = item.second;
         else if (key == "maxmove") cfg.control_.maxmove = item.second;
         else if (key == "noise_eps") cfg.control_.noise_eps = item.second;
@@ -1472,6 +1499,20 @@ inline void SolverConfig::apply(Solver& solver) const {
     }
     solver.set_error_on_unmet(error_on_unmet_);
     solver.set_backward_polish(backward_polish_);
+    if (etol_) {
+        rgmin_status_t st = solver.set_etol(*etol_);
+        if (st != RGMIN_SUCCESS) {
+            char const* msg = rgmin_last_error();
+            throw std::invalid_argument(msg ? msg : "set_etol failed");
+        }
+    }
+    if (max_evals_) {
+        rgmin_status_t st = solver.set_max_evals(*max_evals_);
+        if (st != RGMIN_SUCCESS) {
+            char const* msg = rgmin_last_error();
+            throw std::invalid_argument(msg ? msg : "set_max_evals failed");
+        }
+    }
 }
 
 }  // namespace rgmin

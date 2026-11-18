@@ -555,12 +555,16 @@ NB_MODULE(_core, m) {
         .value("BUDGET", RGMIN_STOP_BUDGET)
         .value("LINE_SEARCH", RGMIN_STOP_LINE_SEARCH)
         .value("POLISH_UNMET", RGMIN_STOP_POLISH_UNMET)
+        .value("ENERGY_TOLERANCE", RGMIN_STOP_ENERGY_TOLERANCE)
+        .value("EVAL_BUDGET", RGMIN_STOP_EVAL_BUDGET)
         .value("Tolerance", RGMIN_STOP_TOLERANCE)
         .value("NoiseFloor", RGMIN_STOP_NOISE_FLOOR)
         .value("StepTolerance", RGMIN_STOP_STEP_TOLERANCE)
         .value("Budget", RGMIN_STOP_BUDGET)
         .value("LineSearch", RGMIN_STOP_LINE_SEARCH)
-        .value("PolishUnmet", RGMIN_STOP_POLISH_UNMET);
+        .value("PolishUnmet", RGMIN_STOP_POLISH_UNMET)
+        .value("EnergyTolerance", RGMIN_STOP_ENERGY_TOLERANCE)
+        .value("EvalBudget", RGMIN_STOP_EVAL_BUDGET);
 
     nb::class_<rgmin::Report>(m, "Report", "Result of one optimizer step or of ``minimize``.")
         .def_prop_ro("value", [](rgmin::Report const& report) { return report.value; },
@@ -612,6 +616,8 @@ NB_MODULE(_core, m) {
             },
             nb::arg("n"), nb::arg("config"))
         .def_prop_ro("dim", &rgmin::Solver::dim)
+        .def_prop_ro("evals", &rgmin::Solver::evals,
+                     "Objective evaluations the steps of this solver have made.")
         .def_prop_ro("method",
                      [](rgmin::Solver const& solver) {
                          return static_cast<rgmin_method_t>(solver.method());
@@ -665,7 +671,8 @@ NB_MODULE(_core, m) {
             }
             if (config.error_on_unmet() &&
                 (report.stop == RGMIN_STOP_BUDGET || report.stop == RGMIN_STOP_LINE_SEARCH ||
-                 report.stop == RGMIN_STOP_POLISH_UNMET)) {
+                 report.stop == RGMIN_STOP_POLISH_UNMET ||
+                 report.stop == RGMIN_STOP_EVAL_BUDGET)) {
                 std::ostringstream message;
                 message << "stop unmet after " << report.steps << " steps (grad_norm "
                         << report.grad_norm << ")";
@@ -678,7 +685,8 @@ NB_MODULE(_core, m) {
                 "method: object, **kwargs) -> tuple[Report, ndarray[dtype=float64]]"),
         "Minimize ``f_and_grad`` in place and return ``(report, x)``. "
         "``error_on_unmet=True`` raises ``RuntimeError`` when the stop is "
-        "``BUDGET``, ``LINE_SEARCH``, or ``POLISH_UNMET``. ``backward_polish`` "
+        "``BUDGET``, ``LINE_SEARCH``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. "
+        "``backward_polish`` "
         "is stored on the session and is not used by this step loop, which "
         "does not form a Hessian.");
 

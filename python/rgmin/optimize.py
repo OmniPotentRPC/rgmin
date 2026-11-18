@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, TypeGuard
+from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
 import numpy as np
 
@@ -83,8 +83,14 @@ class _RgminOptimizer(_ASEOptimizer):
         logfile: Any = "-",
         trajectory: Any = None,
         append_trajectory: bool = False,
+        etol: float | None = None,
+        max_evals: int | None = None,
         **kwargs: Any,
     ) -> None:
+        self._stops: dict[str, Any] = {
+            key: value for key, value in (("etol", etol), ("max_evals", max_evals)) if value is not None
+        }
+        self.stop: str | None = None
         self._native: Session | None = None
         self._history: list[dict[str, Any]] = []
         self._pending: list[dict[str, Any]] | None = None
@@ -115,7 +121,9 @@ class _RgminOptimizer(_ASEOptimizer):
 
     def _open(self) -> Session:
         if self._native is None:
-            self._native = Session(self.kind, self.optimizable.ndofs(), **self._session_options())
+            self._native = Session(
+                self.kind, self.optimizable.ndofs(), **{**self._session_options(), **self._stops}
+            )
             if self._pending:
                 self._replay(self._pending)
             self._pending = None
@@ -168,6 +176,7 @@ class _RgminOptimizer(_ASEOptimizer):
             return self._evaluate(x, record)
 
         updated, value, _gnorm = native.step(x0, objective)
+        self.stop = native.stop
         if not last or last[0] != updated:
             self.optimizable.set_x(np.asarray(updated, dtype=np.float64))
         self._x_session = list(updated)
@@ -178,6 +187,40 @@ class _RgminOptimizer(_ASEOptimizer):
                 entry["forget"] = True
             self._history.append(entry)
             self._dump_history()
+
+    def _stop_requested(self) -> bool:
+        return self.stop in ("EnergyTolerance", "EvalBudget")
+
+    def converged(self, *args: Any, **kwargs: Any) -> bool:
+        """ASE's force test, or ``True`` once ``etol`` or ``max_evals`` stopped the session."""
+        if self._stop_requested():
+            return True
+        return cast(bool, cast(Any, super()).converged(*args, **kwargs))
+
+    def gradient_converged(self, gradient: Any = None) -> bool:
+        """The ``converged`` of ASE 3.2x and later, which its run loop calls."""
+        if self._stop_requested():
+            return True
+        return cast(bool, cast(Any, super()).gradient_converged(gradient))
+
+    def run(self, fmax: float = 0.05, steps: int | None = None) -> bool:  # type: ignore[override]
+        """Run to ``fmax``, an ``etol`` stop, or the ``max_evals`` budget.
+
+        ``etol`` and ``max_evals`` are keywords of every optimizer here.
+        The result is ``True`` when the forces or the energy change met
+        their tolerance and ``False`` when the step count or the
+        evaluation budget ran out. :attr:`stop` is the name of the last
+        step's status, such as ``"EnergyTolerance"``, ``None`` before
+        the first.
+        """
+        self.stop = None
+        if steps is None:
+            converged = cast(Any, super()).run(fmax=fmax)
+        else:
+            converged = cast(Any, super()).run(fmax=fmax, steps=steps)
+        if self.stop == "EvalBudget":
+            return False
+        return cast(bool, converged)
 
     def _before_step(self, native: Session) -> bool:
         """Return true after clearing the session memory for this step."""

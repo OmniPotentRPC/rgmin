@@ -128,6 +128,10 @@ class Stop(enum.IntEnum):
 
     POLISH_UNMET = 5
 
+    ENERGY_TOLERANCE = 6
+
+    EVAL_BUDGET = 7
+
     Tolerance = 0
 
     NoiseFloor = 1
@@ -139,6 +143,10 @@ class Stop(enum.IntEnum):
     LineSearch = 4
 
     PolishUnmet = 5
+
+    EnergyTolerance = 6
+
+    EvalBudget = 7
 
 class Report:
     """Result of one optimizer step or of ``minimize``."""
@@ -196,6 +204,10 @@ class Solver:
     def dim(self) -> int: ...
 
     @property
+    def evals(self) -> int:
+        """Objective evaluations the steps of this solver have made."""
+
+    @property
     def method(self) -> Method: ...
 
     def step(self, f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], x: NDArray[numpy.float64]) -> Report:
@@ -208,7 +220,7 @@ class Solver:
 
 def minimize(f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], x0: NDArray[numpy.float64], method: object, **kwargs) -> tuple[Report, NDArray[numpy.float64]]:
     """
-    Minimize ``f_and_grad`` in place and return ``(report, x)``. ``error_on_unmet=True`` raises ``RuntimeError`` when the stop is ``BUDGET``, ``LINE_SEARCH``, or ``POLISH_UNMET``. ``backward_polish`` is stored on the session and is not used by this step loop.
+    Minimize ``f_and_grad`` in place and return ``(report, x)``. ``error_on_unmet=True`` raises ``RuntimeError`` when the stop is ``BUDGET``, ``LINE_SEARCH``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. ``backward_polish`` is stored on the session and is not used by this step loop.
     """
 
 def backward_error_floor(value: float, x: NDArray[numpy.float64]) -> float:

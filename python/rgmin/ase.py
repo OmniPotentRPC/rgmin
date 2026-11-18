@@ -339,6 +339,7 @@ class Optimizer(_ASEOptimizer):
             maxstep = float(self.defaults["maxstep"])
         self.maxstep = float(maxstep)
         self._solver: rgmin.Solver | None = None
+        self.stop: rgmin.Stop | None = None
         self._id_entry: _IdEntry | None = None
         self._id_finalizer: weakref.finalize[[_IdEntry], Optimizer] | None = None
         super().__init__(
@@ -454,20 +455,43 @@ class Optimizer(_ASEOptimizer):
             raise NotImplementedError(f"{type(self).__name__}.step requires a hessian callable")
         x = np.array(geom.positions(), dtype=np.float64, copy=True)
         if self._rgmin_method in _HESSIAN_METHODS:
-            self._solver.step_hess(self._evaluate, self._hessian_of, x)
+            report = self._solver.step_hess(self._evaluate, self._hessian_of, x)
         else:
-            self._solver.step(self._evaluate, x)
+            report = self._solver.step(self._evaluate, x)
+        self.stop = report.stop
         if not np.array_equal(x, geom.positions()):
             geom.write(x)
+
+    def _stop_requested(self) -> bool:
+        return self.stop in (rgmin.Stop.ENERGY_TOLERANCE, rgmin.Stop.EVAL_BUDGET)
+
+    def converged(self, *args: Any, **kwargs: Any) -> bool:
+        """ASE's force test, or ``True`` once ``etol`` or ``max_evals`` stopped the solver."""
+        return self._stop_requested() or bool(cast(Any, super()).converged(*args, **kwargs))
+
+    def gradient_converged(self, gradient: Any = None) -> bool:
+        """The ``converged`` of ASE 3.2x and later, which its run loop calls."""
+        if self._stop_requested():
+            return True
+        return bool(cast(Any, super()).gradient_converged(gradient))
 
     def run(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
         self, fmax: float = 0.05, steps: int | None = None
     ) -> bool:
+        """Run to ``fmax``, an ``etol`` stop, or the ``max_evals`` budget.
+
+        ``etol`` and ``max_evals`` are :class:`rgmin.SolverConfig` options.
+        The return value is ``True`` when the forces or the energy change
+        met their tolerance and ``False`` when the step count or the
+        evaluation budget ran out. :attr:`stop` is the :class:`rgmin.Stop`
+        of the last step, ``None`` before the first.
+        """
+        self.stop = None
         if steps is None:
             converged = cast(Any, super()).run(fmax=fmax)
         else:
             converged = cast(Any, super()).run(fmax=fmax, steps=steps)
-        return bool(converged)
+        return bool(converged) and self.stop is not rgmin.Stop.EVAL_BUDGET
 
     def _log_fmax(self, gradient: Any, forces: Any) -> float:
         if gradient is not None and hasattr(self.optimizable, "gradient_norm"):
