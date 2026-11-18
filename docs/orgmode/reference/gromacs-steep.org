@@ -36,10 +36,12 @@ does the same for ~gromacs-steep~.
 | callback returned a non-finite value or gradient | ~Error::Oracle~ | ~RGMIN_INTERNAL_ERROR~ (+ ~rgmin_last_error~) |
 | constraints could not place a trial point | ~Error::Constraint~ | ~RGMIN_CONSTRAINT_ERROR~ (+ ~rgmin_last_constraint_error~) |
 
-~Report::stop_norm~ is always ~StopNorm::MaxAtom~ for this method, even
-when the input ~Control~ names another norm. Rejected trials count as
-steps. ~Solver::gromacs_step_size~ returns the displacement that the next
-trial will use.
+~Report::stop_norm~ is ~StopNorm::MaxAtom~ by default for this method,
+even when the input ~Control~ names another norm. An explicit
+~Solver::set_stop_norm~ call after construction overrides that default,
+the same as for any other method. Rejected trials count as steps.
+~Solver::gromacs_step_size~ returns the displacement that the next trial
+will use.
 
 ** Session hooks
 
