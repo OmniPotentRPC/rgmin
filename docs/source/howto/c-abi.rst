@@ -208,6 +208,19 @@ handle in ``rgmin::LbfgsPairs`` (``push``, ``push_rho``, ``direction_diagonal``,
 ``direction_apply``), ``xts.h`` aliases each entry as ``xts_lbfgs_*``, and
 Python takes ``rgmin.LbfgsPairs.push(s, y, rho=None)``.
 
+Stopping rules
+~~~~~~~~~~~~~~
+
+``rgmin_solver_set_etol(s, etol)`` stops a session when the relative energy change between accepted steps falls below ``etol``, the LAMMPS ``minimize etol`` test.
+``rgmin_solver_set_max_evals(s, n)`` stops it after ``n`` objective evaluations, line-search trials included, the LAMMPS ``maxeval`` test.
+Both are off until set, and ``rgmin_solver_clear_etol`` and ``rgmin_solver_clear_max_evals`` turn them off again.
+``rgmin_solver_evals(s)`` is the count the budget compares.
+The finished step reports ``RGMIN_STOP_ENERGY_TOLERANCE`` or ``RGMIN_STOP_EVAL_BUDGET`` in ``rgmin_report_t.stop``.
+A negative or non-finite ``etol``, a zero budget, a null session and an ``etol`` on a particle swarm session return ``RGMIN_INVALID_PARAMETER``, leave the session as it was, and put the reason in ``rgmin_last_error``.
+These are ``abi_minor`` 50, so check ``rgmin_abi_stamp().abi_minor >= 50`` first.
+``rgmin_control_t`` keeps its layout and the one-shot ``rgmin_minimize`` calls carry no stops.
+:doc:`stopping` has the formula and the SciPy and LAMMPS mapping.
+
 C++
 ~~~
 

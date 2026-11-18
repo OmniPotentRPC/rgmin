@@ -88,6 +88,7 @@ That installs the 0.6 release on Rust 1.88 or newer.
    howto/constraints
    howto/level-set
    howto/noise
+   howto/stopping
    howto/manifolds
    howto/irc
    howto/embed-anneal

@@ -57,12 +57,12 @@ The ~minimize~ command checks them and stops with an error otherwise.
 
 | LAMMPS | plugin |
 |---+---|
-| ~etol~ | ~abs(E_k - E_{k-1}) < etol (abs(E_k) + abs(E_{k-1}) + 1e-8) / 2~ after a step that moved the atoms |
+| ~etol~ | ~rgmin_solver_set_etol~: ~abs(E_k - E_{k-1}) < etol (abs(E_k) + abs(E_{k-1}) + sqrt(DBL_EPSILON)) / 2~ after an accepted step; ~0~ is off |
 | ~ftol~ | ~rgmin_report_t.grad_norm < ftol~, with ~rgmin_control_t.gtol = ftol~ and the stop norm of ~norm~ |
 | ~maxiter~ | number of ~rgmin_solver_step_fg~ calls |
 | ~maxeval~ | number of ~Min::energy_force~ calls the plugin made, checked after each step |
 
-~E~ is the energy LAMMPS prints, per atom under ~thermo_modify norm yes~.
+~E~ is the total energy rgmin minimizes. The relative test is the same on the per-atom energy that LAMMPS prints, apart from the floor, which is ~sqrt(DBL_EPSILON)~ here and 1e-8 in LAMMPS.
 The gradient rgmin sees is ~-F~ over all ~3N~ coordinates after every fix, so ~grad_norm~ is the force norm that ~min_style cg~ compares with ~ftol~.
 A failed rgmin step ends the minimization with the stopping criterion ~rgmin step failed:~ and the text of ~rgmin_last_error~.
 
