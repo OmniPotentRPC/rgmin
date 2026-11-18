@@ -178,7 +178,13 @@ fn a_constraint_failure_shrinks_and_the_bound_then_errors() {
     }
     assert!(moved);
     let length = bond_length(&placed);
-    assert_eq!(length.to_bits(), 1.0_f64.to_bits());
+    // LINCS enforces relative bond errors at a rounding-level floor, so
+    // the post-step bond is numerically close to 1.0, not bit-exact.
+    let lincs_length_tolerance = 64.0 * f64::EPSILON;
+    assert!(
+        (length - 1.0).abs() <= lincs_length_tolerance,
+        "length {length} exceeds LINCS floor {lincs_length_tolerance}",
+    );
 }
 
 #[test]
@@ -259,6 +265,7 @@ struct ArgonReference {
     epsilon: f64,
     cutoff: f64,
     final_energy: String,
+    final_fmax: String,
     steps: Vec<PrintedStep>,
     start: Vec<String>,
     end: Vec<String>,
@@ -271,6 +278,7 @@ fn load_argon() -> ArgonReference {
     let mut epsilon = None;
     let mut cutoff = None;
     let mut final_energy = None;
+    let mut final_fmax = None;
     let mut section = "";
     let mut steps = Vec::new();
     let mut start = Vec::new();
@@ -306,7 +314,7 @@ fn load_argon() -> ArgonReference {
                     "epsilon" => epsilon = Some(value.parse().unwrap()),
                     "cutoff" => cutoff = Some(value.parse().unwrap()),
                     "final_energy" => final_energy = Some(value.to_string()),
-                    "final_fmax" => {}
+                    "final_fmax" => final_fmax = Some(value.to_string()),
                     other => panic!("unknown field {other}"),
                 }
             }
@@ -318,6 +326,7 @@ fn load_argon() -> ArgonReference {
         epsilon: epsilon.unwrap(),
         cutoff: cutoff.unwrap(),
         final_energy: final_energy.unwrap(),
+        final_fmax: final_fmax.unwrap(),
         steps,
         start,
         end,
@@ -419,6 +428,7 @@ fn argon_cluster_matches_gromacs_2025_step_sequence() {
         x.len(),
     );
     let mut best = energy;
+    let mut current_gradient = gradient;
     let mut saw_refusal = false;
     for index in 1..reference.steps.len() {
         let printed = &reference.steps[index];
@@ -427,6 +437,26 @@ fn argon_cluster_matches_gromacs_2025_step_sequence() {
             matches_print(step_size, &printed.dmax_text),
             "step {index} Dmax {step_size} vs {}",
             printed.dmax_text
+        );
+        let force_norm = StopNorm::MaxAtom.of(current_gradient.view());
+        let mut trial = x.clone();
+        if force_norm.is_finite() && force_norm > 0.0 {
+            for k in 0..trial.len() {
+                trial[k] -= step_size * current_gradient[k] / force_norm;
+            }
+        }
+        let (trial_energy, trial_gradient) = lennard_jones(trial.view(), sigma, epsilon, cutoff);
+        assert!(
+            matches_print(trial_energy, &printed.epot_text),
+            "step {index} trial energy {trial_energy} vs {}",
+            printed.epot_text
+        );
+        assert!(
+            matches_print(
+                StopNorm::MaxAtom.of(trial_gradient.view()),
+                &printed.fmax_text
+            ),
+            "step {index} trial fmax"
         );
         let before = x.clone();
         let report = solver.step(&objective, &mut x).unwrap();
@@ -443,6 +473,7 @@ fn argon_cluster_matches_gromacs_2025_step_sequence() {
                 report.value,
                 printed.epot_text
             );
+            assert_eq!(report.value.to_bits(), trial_energy.to_bits());
             assert!(
                 matches_print(report.grad_norm, &printed.fmax_text),
                 "step {index} fmax {} vs {}",
@@ -451,10 +482,15 @@ fn argon_cluster_matches_gromacs_2025_step_sequence() {
             );
             assert_ne!(x, before);
             best = report.value;
+            current_gradient = trial_gradient;
         } else {
             saw_refusal = true;
             assert_eq!(x, before);
             assert_eq!(report.value.to_bits(), best.to_bits());
+            assert_eq!(
+                report.grad_norm.to_bits(),
+                StopNorm::MaxAtom.of(current_gradient.view()).to_bits()
+            );
         }
     }
     assert!(saw_refusal);
@@ -466,4 +502,25 @@ fn argon_cluster_matches_gromacs_2025_step_sequence() {
         "final energy {best} vs {}",
         reference.final_energy
     );
+    let (_final_energy, final_gradient) = lennard_jones(x.view(), sigma, epsilon, cutoff);
+    let expected_final_fmax: f64 = reference.final_fmax.parse().unwrap();
+    let got_final_fmax = StopNorm::MaxAtom.of(final_gradient.view());
+    let final_fmax_tolerance = 1.0e-10;
+    assert!(
+        (got_final_fmax - expected_final_fmax).abs() <= final_fmax_tolerance,
+        "final fmax {got_final_fmax} vs {}",
+        reference.final_fmax
+    );
+}
+
+#[test]
+fn huge_but_finite_gradients_do_not_trigger_machine_precision() {
+    let huge = Oracle::unbounded(3, |_x: ArrayView1<f64>| {
+        (0.0, Array1::from_vec(vec![1.0e200, 0.0, 0.0]))
+    });
+    let mut point = array![1.0, 0.0, 0.0];
+    let mut solver = Solver::new(Method::GromacsSteep, control(0.1, 0.0, 1), point.len());
+    let report = solver.step(&huge, &mut point).unwrap();
+    assert_eq!(report.status, Status::Iterating);
+    assert_eq!(point[0].to_bits(), 1.0_f64.to_bits());
 }
