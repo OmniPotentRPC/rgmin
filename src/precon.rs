@@ -945,8 +945,10 @@ pub fn sine_probe(positions: ArrayView1<f64>, r_nn: f64, lengths: Option<[f64; 3
 /// Equation (14): `μ = vᵀ (∇E(x+v) - ∇E(x)) / vᵀ P_{μ=1} v`.
 ///
 /// `grad` is `∇E`. The denominator is this preconditioner at `μ = 1`,
-/// including `C_stab`. A nonpositive or nonfinite ratio is an error;
-/// the session then keeps the previous scale, or `1` if it has none.
+/// including `C_stab`. A ratio below 1 is floored at 1, as ASE
+/// `estimate_mu` caps `μ`. A nonfinite ratio, or a denominator that
+/// vanishes, is an error; the session then keeps the previous scale,
+/// or `1` if it has none.
 pub fn estimate_mu<G>(
     positions: ArrayView1<f64>,
     neighbours: &Neighbours,
@@ -1002,12 +1004,12 @@ where
         });
     }
     let mu = num / den;
-    if !(mu.is_finite() && mu > 0.0) {
+    if !mu.is_finite() {
         return Err(Error::Precon {
-            what: "mu estimate is not positive",
+            what: "mu estimate is not finite",
         });
     }
-    Ok(mu)
+    Ok(floor_mu_scale(mu))
 }
 
 /// Amplitude `10^{-2}` of the sine probe and of the cell probe, in units
@@ -1158,12 +1160,12 @@ where
         });
     }
     let mu = num / den;
-    if !(mu.is_finite() && mu > 0.0) {
+    if !mu.is_finite() {
         return Err(Error::Precon {
-            what: "mu estimate is not positive",
+            what: "mu estimate is not finite",
         });
     }
-    Ok(mu)
+    Ok(floor_mu_scale(mu))
 }
 
 fn resolve_r_nn(
