@@ -1,0 +1,1 @@
+The shrink budget for a GROMACS steep session is now a closed-form logarithm, capped at `GROMACS_STEEP_SHRINK_BUDGET_CAP` (one million), so a shrink factor near one no longer walks a loop toward `u32::MAX` and hangs construction.

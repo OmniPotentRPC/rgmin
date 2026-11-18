@@ -32,8 +32,22 @@ pub const GROMACS_STEEP_SHRINK: f64 = 0.5;
 /// Canonical GROMACS initial `emstep` used for the static default.
 pub const GROMACS_STEEP_EMSTEP_DEFAULT: f64 = 0.01;
 
+/// Upper bound on [`gromacs_steep_max_constraint_shrinks`].
+///
+/// A `shrink` close enough to one needs an astronomic count of
+/// multiplications to bring `step_size` down to [`f64::EPSILON`]; past
+/// this bound the count is capped rather than returned exactly, so a
+/// caller still gets a usable budget in bounded time.
+pub const GROMACS_STEEP_SHRINK_BUDGET_CAP: u32 = 1_000_000;
+
 /// Largest shrink count from this step size and shrink factor before the
 /// displacement reaches floating-point epsilon.
+///
+/// The count is the least `k` with `step_size * shrink.powi(k) <=
+/// f64::EPSILON`, taken in closed form from logarithms rather than by
+/// repeated multiplication, so a `shrink` near one returns in bounded
+/// time instead of multiplying until a loop counter overflows. The
+/// result saturates at [`GROMACS_STEEP_SHRINK_BUDGET_CAP`].
 pub fn gromacs_steep_max_constraint_shrinks(step_size: f64, shrink: f64) -> u32 {
     if !(step_size.is_finite()
         && step_size > 0.0
@@ -43,13 +57,19 @@ pub fn gromacs_steep_max_constraint_shrinks(step_size: f64, shrink: f64) -> u32 
     {
         return 0;
     }
-    let mut count = 0_u32;
-    let mut h = step_size;
-    while h > f64::EPSILON && count < u32::MAX {
-        h *= shrink;
-        count += 1;
+    if step_size <= f64::EPSILON {
+        return 0;
     }
-    count
+    let exact_count = (f64::EPSILON / step_size).ln() / shrink.ln();
+    let count = exact_count.ceil();
+    if !(count.is_finite() && count > 0.0) {
+        return 0;
+    }
+    if count < f64::from(GROMACS_STEEP_SHRINK_BUDGET_CAP) {
+        count as u32
+    } else {
+        GROMACS_STEEP_SHRINK_BUDGET_CAP
+    }
 }
 
 /// Consecutive constraint failures for a canonical `emstep = 0.01`.
@@ -314,5 +334,23 @@ mod tests {
         );
         assert!(manual_smaller < manual_larger);
         assert!(manual_larger < larger);
+    }
+
+    #[test]
+    fn a_shrink_near_one_returns_quickly_with_the_capped_budget() {
+        // `1.0.next_down()` is the GROMACS-manual "nextafter(1, 0)" case:
+        // the loop this replaced needed close to u32::MAX multiplications
+        // to bring any ordinary step size down to f64::EPSILON, which the
+        // gate measured as a multi-second hang.
+        let shrink = 1.0_f64.next_down();
+        let budget_timeout = std::time::Duration::from_millis(200);
+        let started = std::time::Instant::now();
+        let budget = gromacs_steep_max_constraint_shrinks(0.01, shrink);
+        assert!(
+            started.elapsed() < budget_timeout,
+            "took {:?}, expected well under {budget_timeout:?}",
+            started.elapsed()
+        );
+        assert_eq!(budget, GROMACS_STEEP_SHRINK_BUDGET_CAP);
     }
 }
