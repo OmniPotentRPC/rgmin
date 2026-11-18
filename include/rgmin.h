@@ -70,7 +70,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 48
+#define RGMIN_ABI_VERSION_MINOR 49
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -78,7 +78,9 @@ typedef struct rgmin_abi_stamp_t {
  * 45 rgmin_solver_set_lbfgs_trust (Burdakov ray, not set_lbfgs_trust),
  * 46 rgmin_control_default and the other struct initializers,
  * 47 level-set constraint setters,
- * 48 rgmin_solver_set_fire_cap_two_step_overshoot. */
+ * 48 rgmin_solver_set_fire_cap_two_step_overshoot,
+ * 49 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
+ * and rgmin_solver_set_gromacs_steep. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -124,7 +126,7 @@ typedef enum rgmin_method_t {
     RGMIN_POLAK_RIBIERE_PLUS = 26,
     /** Polak-Ribiere with the eOn Powell restart at 0.5. Develop surface. */
     RGMIN_EON_CG = 27,
-    /** GROMACS integrator = steep. ABI minor 48. */
+    /** GROMACS integrator = steep. ABI minor 49. */
     RGMIN_GROMACS_STEEP = 28
 } rgmin_method_t;
 
@@ -159,7 +161,7 @@ typedef enum rgmin_stop_t {
     RGMIN_STOP_NOISE_FLOOR = 1,
     RGMIN_STOP_STEP_TOLERANCE = 2,
     RGMIN_STOP_BUDGET = 3,
-    /** GROMACS steep could not represent another coordinate change. ABI minor 48. */
+    /** GROMACS steep could not represent another coordinate change. ABI minor 49. */
     RGMIN_STOP_MACHINE_PRECISION = 4
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
