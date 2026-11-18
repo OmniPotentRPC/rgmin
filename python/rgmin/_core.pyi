@@ -124,6 +124,10 @@ class Stop(enum.IntEnum):
 
     BUDGET = 3
 
+    ENERGY_TOLERANCE = 4
+
+    EVAL_BUDGET = 5
+
     Tolerance = 0
 
     NoiseFloor = 1
@@ -131,6 +135,10 @@ class Stop(enum.IntEnum):
     StepTolerance = 2
 
     Budget = 3
+
+    EnergyTolerance = 4
+
+    EvalBudget = 5
 
 class Report:
     """Result of one optimizer step or of ``minimize``."""
@@ -177,6 +185,10 @@ class Solver:
 
     @property
     def dim(self) -> int: ...
+
+    @property
+    def evals(self) -> int:
+        """Objective evaluations the steps of this solver have made."""
 
     @property
     def method(self) -> Method: ...

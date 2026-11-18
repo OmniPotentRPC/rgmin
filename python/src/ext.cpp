@@ -553,10 +553,14 @@ NB_MODULE(_core, m) {
         .value("NOISE_FLOOR", RGMIN_STOP_NOISE_FLOOR)
         .value("STEP_TOLERANCE", RGMIN_STOP_STEP_TOLERANCE)
         .value("BUDGET", RGMIN_STOP_BUDGET)
+        .value("ENERGY_TOLERANCE", RGMIN_STOP_ENERGY_TOLERANCE)
+        .value("EVAL_BUDGET", RGMIN_STOP_EVAL_BUDGET)
         .value("Tolerance", RGMIN_STOP_TOLERANCE)
         .value("NoiseFloor", RGMIN_STOP_NOISE_FLOOR)
         .value("StepTolerance", RGMIN_STOP_STEP_TOLERANCE)
-        .value("Budget", RGMIN_STOP_BUDGET);
+        .value("Budget", RGMIN_STOP_BUDGET)
+        .value("EnergyTolerance", RGMIN_STOP_ENERGY_TOLERANCE)
+        .value("EvalBudget", RGMIN_STOP_EVAL_BUDGET);
 
     nb::class_<rgmin::Report>(m, "Report", "Result of one optimizer step or of ``minimize``.")
         .def_prop_ro("value", [](rgmin::Report const& report) { return report.value; },
@@ -601,6 +605,8 @@ NB_MODULE(_core, m) {
             },
             nb::arg("n"), nb::arg("config"))
         .def_prop_ro("dim", &rgmin::Solver::dim)
+        .def_prop_ro("evals", &rgmin::Solver::evals,
+                     "Objective evaluations the steps of this solver have made.")
         .def_prop_ro("method",
                      [](rgmin::Solver const& solver) {
                          return static_cast<rgmin_method_t>(solver.method());

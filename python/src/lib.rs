@@ -14,14 +14,16 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use rgmin::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Control, Error, FireConfig, FireKind,
-    FirePreset, LbfgsH0, LbfgsPairs, LbfgsStep, LevelSetConstraint, LineSearch, ManifoldFactor, Method, Oracle,
-    RiemannianManifold, SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch,
-    lowest_eigenpairs as solve_lowest_eigenpairs, lowest_eigenpairs_precond,
+    FirePreset, LbfgsH0, LbfgsPairs, LbfgsStep, LevelSetConstraint, LineSearch, ManifoldFactor,
+    Method, Oracle, RiemannianManifold, SearchStep, Solver, SpdMetric, Status, StiefelRetraction,
+    StopNorm, SuppliedSearch, lowest_eigenpairs as solve_lowest_eigenpairs,
+    lowest_eigenpairs_precond,
 };
 
 #[pyclass]
 struct Session {
     solver: Solver,
+    stop: Option<Status>,
 }
 
 fn control(dt: f64) -> Control {
@@ -104,6 +106,8 @@ impl Session {
         accept=None,
         istep=None,
         level_set=None,
+        etol=None,
+        max_evals=None,
     ))]
     fn new(
         kind: &str,
@@ -127,6 +131,8 @@ impl Session {
         accept: Option<&str>,
         istep: Option<f64>,
         level_set: Option<f64>,
+        etol: Option<f64>,
+        max_evals: Option<usize>,
     ) -> PyResult<Self> {
         if n == 0 {
             return Err(PyValueError::new_err("dimension must be positive"));
@@ -224,7 +230,9 @@ impl Session {
                 .set_level_set(LevelSetConstraint::new(target))
                 .map_err(value_error)?;
         }
-        Ok(Self { solver })
+        solver.set_etol(etol).map_err(value_error)?;
+        solver.set_max_evals(max_evals).map_err(value_error)?;
+        Ok(Self { solver, stop: None })
     }
 
     /// Store `s = x+ - x`, `y = g+ - g` in the L-BFGS memory without an
@@ -246,6 +254,35 @@ impl Session {
     #[getter]
     fn steps(&self) -> usize {
         self.solver.steps()
+    }
+
+    /// Objective evaluations the session's steps have made.
+    #[getter]
+    fn evals(&self) -> usize {
+        self.solver.evals()
+    }
+
+    /// Name of the status the last step reported, such as `Tolerance`,
+    /// `EnergyTolerance` or `EvalBudget`, or `None` before the first step.
+    #[getter]
+    fn stop(&self) -> Option<String> {
+        self.stop.map(|status| format!("{status:?}"))
+    }
+
+    /// Stop when the relative energy change between accepted steps falls
+    /// below `etol`, the LAMMPS `minimize etol` test. `None` clears it. A
+    /// negative or non-finite value raises `ValueError`.
+    #[pyo3(signature = (etol=None))]
+    fn set_etol(&mut self, etol: Option<f64>) -> PyResult<()> {
+        self.solver.set_etol(etol).map_err(value_error)
+    }
+
+    /// Stop once the session has made `max_evals` objective evaluations,
+    /// the LAMMPS `minimize maxeval` test. `None` clears it. Zero raises
+    /// `ValueError`.
+    #[pyo3(signature = (max_evals=None))]
+    fn set_max_evals(&mut self, max_evals: Option<usize>) -> PyResult<()> {
+        self.solver.set_max_evals(max_evals).map_err(value_error)
     }
 
     /// Drop the method memory. The next step is a cold start.
@@ -306,7 +343,10 @@ impl Session {
             return Err(err);
         }
         match report {
-            Ok(report) => Ok((pos.to_vec(), report.value, report.grad_norm)),
+            Ok(report) => {
+                self.stop = Some(report.status);
+                Ok((pos.to_vec(), report.value, report.grad_norm))
+            }
             Err(err) => Err(PyValueError::new_err(err.to_string())),
         }
     }
