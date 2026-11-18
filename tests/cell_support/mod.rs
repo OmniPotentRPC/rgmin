@@ -54,11 +54,11 @@ pub fn rattle(positions: &mut Array1<f64>, amplitude: f64, seed: u64) {
 /// `cell` applied to a strain `(I + e)`: rows of `cell` times `(I + e)^T`.
 pub fn strained(cell: &Cell, e: [[f64; 3]; 3]) -> Cell {
     let mut out = [[0.0; 3]; 3];
-    for i in 0..3 {
-        for j in 0..3 {
-            for k in 0..3 {
+    for (out_row, cell_row) in out.iter_mut().zip(cell) {
+        for (j, out_ij) in out_row.iter_mut().enumerate() {
+            for (k, &cell_ik) in cell_row.iter().enumerate() {
                 let m = if j == k { 1.0 } else { 0.0 } + e[j][k];
-                out[i][j] += cell[i][k] * m;
+                *out_ij += cell_ik * m;
             }
         }
     }
@@ -113,10 +113,9 @@ fn images(cell: &Cell, reach: f64) -> Vec<[f64; 3]> {
     for a in -n[0]..=n[0] {
         for b in -n[1]..=n[1] {
             for c in -n[2]..=n[2] {
-                let mut t = [0.0; 3];
-                for d in 0..3 {
-                    t[d] = a as f64 * cell[0][d] + b as f64 * cell[1][d] + c as f64 * cell[2][d];
-                }
+                let t = std::array::from_fn(|d| {
+                    a as f64 * cell[0][d] + b as f64 * cell[1][d] + c as f64 * cell[2][d]
+                });
                 out.push(t);
             }
         }
