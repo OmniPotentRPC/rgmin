@@ -110,7 +110,9 @@ Objects
     ``rgmin_solver_set_gromacs_steep``, and
     ``rgmin_gromacs_steep_max_constraint_shrinks``. Minor 53 adds
     ``rgmin_minimize_eindir_opts``, the
-    eindir one-shot with the same two flags. ``rgmin_control_t`` is unchanged.
+    eindir one-shot with the same two flags, ``rgmin_solver_set_highs_time_limit``,
+    ``rgmin_solver_highs_timeouts``, and the line-search rounding stop.
+    ``rgmin_control_t`` is unchanged.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``

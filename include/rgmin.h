@@ -92,8 +92,9 @@ typedef struct rgmin_abi_stamp_t {
  * 52 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
  *    rgmin_solver_set_gromacs_steep, and
  *    rgmin_gromacs_steep_max_constraint_shrinks.
- * 53 rgmin_minimize_eindir_opts, rgmin_solver_set_highs_time_limit, and
- *    rgmin_solver_highs_timeouts. rgmin_control_t is unchanged. */
+ * 53 rgmin_minimize_eindir_opts, rgmin_solver_set_highs_time_limit,
+ *    rgmin_solver_highs_timeouts, and RGMIN_STOP_LINE_SEARCH_ROUNDING.
+ *    rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -188,7 +189,9 @@ typedef enum rgmin_stop_t {
     RGMIN_STOP_EVAL_BUDGET = 7,
     /** GROMACS steep could not represent another coordinate change.
      *  ABI minor 52. */
-    RGMIN_STOP_MACHINE_PRECISION = 8
+    RGMIN_STOP_MACHINE_PRECISION = 8,
+    /** Wolfe zoom stopped when rounding blocked progress. ABI minor 53. */
+    RGMIN_STOP_LINE_SEARCH_ROUNDING = 9
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),
