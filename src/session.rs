@@ -672,9 +672,7 @@ impl Solver {
                 if eff.threads.is_none() {
                     eff.threads = self.precon_threads;
                 }
-                Slot::Lindh(crate::precon::LindhState::new(
-                    positions, z, ghosts, &eff,
-                )?)
+                Slot::Lindh(crate::precon::LindhState::new(positions, z, ghosts, &eff)?)
             }
             PreconSpec::Ff {
                 positions,

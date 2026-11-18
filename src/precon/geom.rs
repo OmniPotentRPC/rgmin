@@ -111,8 +111,7 @@ pub(super) fn pairs_in_range(
         cells.entry(key).or_default().push(i);
     }
     let keys: Vec<(i32, i32, i32)> = cells.keys().copied().collect();
-    let parts =
-        super::ordered_map_exec(exec, keys.len().max(1), n, super::N_PAR_ASSEMBLE, |c| {
+    let parts = super::ordered_map_exec(exec, keys.len().max(1), n, super::N_PAR_ASSEMBLE, |c| {
         if c >= keys.len() {
             return Vec::new();
         }

@@ -202,7 +202,9 @@ fn main() {
         let dot_alloc0 = ALLOC_CALLS.load(Ordering::Relaxed);
         let dval = rgmin::precon::dot(slice_a, slice_b);
         std::hint::black_box(dval);
-        let dot_allocs = ALLOC_CALLS.load(Ordering::Relaxed).saturating_sub(dot_alloc0);
+        let dot_allocs = ALLOC_CALLS
+            .load(Ordering::Relaxed)
+            .saturating_sub(dot_alloc0);
 
         let (asm_med, asm_iqr) = bench_us(|| {
             let m = Exp::assemble(sys.pos.view(), &sys.neigh, &params, 1.0, R0_CU).expect("exp");
@@ -216,7 +218,9 @@ fn main() {
 
         let (cold_med, cold_iqr) = {
             let fresh: Vec<Exp> = (0..(WARMUP + SAMPLES))
-                .map(|_| Exp::assemble(sys.pos.view(), &sys.neigh, &params, 1.0, R0_CU).expect("exp"))
+                .map(|_| {
+                    Exp::assemble(sys.pos.view(), &sys.neigh, &params, 1.0, R0_CU).expect("exp")
+                })
                 .collect();
             let mut idx = 0usize;
             bench_us(|| {
@@ -229,9 +233,12 @@ fn main() {
         let rhs_seq: Vec<Array1<f64>> = (0..WARM_STEPS)
             .map(|step| {
                 let decay = 1.0 - 0.04 * (step as f64);
-                Array1::from_iter(sys.rhs.iter().enumerate().map(|(k, &v)| {
-                    decay * v + 0.005 * ((k + step) as f64 * 0.31).cos()
-                }))
+                Array1::from_iter(
+                    sys.rhs
+                        .iter()
+                        .enumerate()
+                        .map(|(k, &v)| decay * v + 0.005 * ((k + step) as f64 * 0.31).cos()),
+                )
             })
             .collect();
         let (warm_total_med, warm_total_iqr) = bench_us(|| {
@@ -353,7 +360,9 @@ fn main() {
         let rhs_views: Vec<ArrayView1<f64>> = imgs_rhs.iter().map(|r| r.view()).collect();
 
         println!();
-        println!("| Cu 6x6x6 x 16-img batch threads | assemble_batch+solve_batch us (IQR) | speedup |");
+        println!(
+            "| Cu 6x6x6 x 16-img batch threads | assemble_batch+solve_batch us (IQR) | speedup |"
+        );
         println!("|---:|---:|---:|");
         let mut b1_med = 0.0;
         for threads in [1usize, 4, 8] {

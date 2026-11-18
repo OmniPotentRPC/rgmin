@@ -201,7 +201,11 @@ fn assert_within_tol(got: &Array1<f64>, reference: &Array1<f64>, label: &str) {
 fn csr_memory_size_stores_the_scalar_graph_once() {
     let _guard = ALLOC_LOCK.lock().expect("alloc lock");
     let _track = TrackScope::enter();
-    for (cells, expected_atoms, expected_pairs) in [(3usize, 107usize, 2862usize), (4, 255, 6858), (6, 863, 23274)] {
+    for (cells, expected_atoms, expected_pairs) in [
+        (3usize, 107usize, 2862usize),
+        (4, 255, 6858),
+        (6, 863, 23274),
+    ] {
         let fix = cu_vacancy(cells);
         assert_eq!(fix.natoms, expected_atoms);
         assert_eq!(fix.neigh.i.len(), expected_pairs);
@@ -249,8 +253,12 @@ fn precon_dot_and_steady_pcg_do_not_allocate_scratch_vecs() {
     let _guard = ALLOC_LOCK.lock().expect("alloc lock");
     let _track = TrackScope::enter();
     for len in [0usize, 17, 1024, 1536, 2589, 20_000] {
-        let a: Vec<f64> = (0..len).map(|i| ((i * 19 + 3) % 29) as f64 * 0.1 - 1.4).collect();
-        let b: Vec<f64> = (0..len).map(|i| ((i * 7 + 11) % 23) as f64 * 0.1 - 1.1).collect();
+        let a: Vec<f64> = (0..len)
+            .map(|i| ((i * 19 + 3) % 29) as f64 * 0.1 - 1.4)
+            .collect();
+        let b: Vec<f64> = (0..len)
+            .map(|i| ((i * 7 + 11) % 23) as f64 * 0.1 - 1.1)
+            .collect();
 
         let calls_before = ALLOC_CALLS.load(Ordering::SeqCst);
         let mut s = 0.0;
@@ -289,7 +297,11 @@ fn precon_dot_and_steady_pcg_do_not_allocate_scratch_vecs() {
                 0,
                 "parallel precon::dot allocated on len={len}"
             );
-            assert_eq!(par_val.to_bits(), s.to_bits(), "parallel vs serial dot bits");
+            assert_eq!(
+                par_val.to_bits(),
+                s.to_bits(),
+                "parallel vs serial dot bits"
+            );
         }
     }
 
@@ -376,7 +388,10 @@ fn serial_results_are_bit_identical_and_default_lbfgs_is_capped_eon() {
     let default_serial_b = run_serial(false);
     let explicit_one = run_serial(true);
     assert_eq!(default_serial_a, default_serial_b, "serial repeat drifted");
-    assert_eq!(default_serial_a, explicit_one, "threads=None vs threads=1 drifted");
+    assert_eq!(
+        default_serial_a, explicit_one,
+        "threads=None vs threads=1 drifted"
+    );
 
     // BlockIc0 vs Jacobi must solve the same SPD system within tolerance and cut iterations.
     let fix4 = cu_vacancy(4);
@@ -397,7 +412,9 @@ fn serial_results_are_bit_identical_and_default_lbfgs_is_capped_eon() {
     )
     .expect("jacobi");
     let it_ic0 = p_ic0.solve_iterations(fix4.rhs.view()).expect("ic0 iters");
-    let it_jac = p_jac.solve_iterations(fix4.rhs.view()).expect("jacobi iters");
+    let it_jac = p_jac
+        .solve_iterations(fix4.rhs.view())
+        .expect("jacobi iters");
     assert!(
         it_ic0 < it_jac,
         "BlockIc0 ({it_ic0}) should take fewer PCG iterations than Jacobi ({it_jac})"
@@ -425,14 +442,16 @@ fn serial_results_are_bit_identical_and_default_lbfgs_is_capped_eon() {
 fn threaded_build_pcg_and_batch_match_serial_within_stated_tolerance() {
     let _guard = ALLOC_LOCK.lock().expect("alloc lock");
     let fix = cu_vacancy(7); // N = 1371, crosses 512-atom gate and spans 2 1024-atom IC(0) blocks
-    assert!(Exp::assemble(
-        fix.pos.view(),
-        &fix.neigh,
-        &ExpParams::default().with_threads(0),
-        1.0,
-        R0_CU
-    )
-    .is_err());
+    assert!(
+        Exp::assemble(
+            fix.pos.view(),
+            &fix.neigh,
+            &ExpParams::default().with_threads(0),
+            1.0,
+            R0_CU
+        )
+        .is_err()
+    );
 
     let serial_params = ExpParams::default()
         .with_mu(1.0)
@@ -459,8 +478,16 @@ fn threaded_build_pcg_and_batch_match_serial_within_stated_tolerance() {
         let got_warm = par_exp.solve(rhs2.view()).expect("par warm");
 
         assert_within_tol(&got_apply, &ref_apply, &format!("Exp::apply T={threads}"));
-        assert_within_tol(&got_cold, &ref_cold, &format!("Exp::solve cold T={threads}"));
-        assert_within_tol(&got_warm, &ref_warm, &format!("Exp::solve warm T={threads}"));
+        assert_within_tol(
+            &got_cold,
+            &ref_cold,
+            &format!("Exp::solve cold T={threads}"),
+        );
+        assert_within_tol(
+            &got_warm,
+            &ref_warm,
+            &format!("Exp::solve warm T={threads}"),
+        );
     }
 
     // Batch multi-image assembly & solve parity (6 images)
@@ -470,10 +497,8 @@ fn threaded_build_pcg_and_batch_match_serial_within_stated_tolerance() {
     let images_rhs: Vec<Array1<f64>> = (0..6)
         .map(|m| fix.rhs.mapv(|v| (1.0 - 0.05 * m as f64) * v))
         .collect();
-    let batch_inputs: Vec<(ArrayView1<f64>, &Neighbours)> = images_pos
-        .iter()
-        .map(|p| (p.view(), &fix.neigh))
-        .collect();
+    let batch_inputs: Vec<(ArrayView1<f64>, &Neighbours)> =
+        images_pos.iter().map(|p| (p.view(), &fix.neigh)).collect();
     let rhs_views: Vec<ArrayView1<f64>> = images_rhs.iter().map(|r| r.view()).collect();
 
     let batch_serial =
@@ -534,10 +559,10 @@ fn threaded_build_pcg_and_batch_match_serial_within_stated_tolerance() {
         bonds: &bonds,
         ..FfTerms::default()
     };
-    let ff1 = Ff::assemble(cov_pos.view(), terms, &FfParams::default().with_threads(1))
-        .expect("ff 1");
-    let ff4 = Ff::assemble(cov_pos.view(), terms, &FfParams::default().with_threads(4))
-        .expect("ff 4");
+    let ff1 =
+        Ff::assemble(cov_pos.view(), terms, &FfParams::default().with_threads(1)).expect("ff 1");
+    let ff4 =
+        Ff::assemble(cov_pos.view(), terms, &FfParams::default().with_threads(4)).expect("ff 4");
     assert_within_tol(
         &ff4.solve(cov_rhs.view()).expect("ff4"),
         &ff1.solve(cov_rhs.view()).expect("ff1"),
@@ -561,8 +586,10 @@ fn threaded_build_pcg_and_batch_match_serial_within_stated_tolerance() {
     s4.set_threads(4).expect("t4");
     assert_eq!(s4.threads(), 4);
     let lp = LindhParams::default().with_mu(1.0).with_r_cut(3.0);
-    s1.set_lindh(cov_pos.view(), &z, &[], &lp).expect("s1 lindh");
-    s4.set_lindh(cov_pos.view(), &z, &[], &lp).expect("s4 lindh");
+    s1.set_lindh(cov_pos.view(), &z, &[], &lp)
+        .expect("s1 lindh");
+    s4.set_lindh(cov_pos.view(), &z, &[], &lp)
+        .expect("s4 lindh");
     s1.step(&obj, &mut x1).expect("step 1");
     s4.step(&obj, &mut x4).expect("step 4");
     assert_within_tol(&x4, &x1, "Solver::step T=4 vs T=1");

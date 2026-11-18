@@ -502,7 +502,9 @@ impl Metric {
             ),
             Err(_) => {
                 let mut local = PcgWork::default();
-                solve_pcg_op(&self.op, rhs_slice, self.rtol, false, false, exec, &mut local)
+                solve_pcg_op(
+                    &self.op, rhs_slice, self.rtol, false, false, exec, &mut local,
+                )
             }
         });
         res.map(|(x, iters)| (Array1::from_vec(x), iters))
@@ -523,8 +525,10 @@ impl Metric {
         let exec = &self.exec;
         exec.install(|| {
             let mut local = PcgWork::default();
-            solve_pcg_op(&self.op, rhs_slice, self.rtol, false, false, exec, &mut local)
-                .map(|(_, n)| n)
+            solve_pcg_op(
+                &self.op, rhs_slice, self.rtol, false, false, exec, &mut local,
+            )
+            .map(|(_, n)| n)
         })
     }
 
@@ -2054,12 +2058,19 @@ fn scalar_row_apply(a: &ScalarCsr, x_atoms: &[[f64; 3]], atom: usize) -> [f64; 3
 fn matvec_scalar(a: &ScalarCsr, x: &[f64], y: &mut [f64], gate: usize, exec: &Exec) {
     let (x_atoms, _) = x.as_chunks::<3>();
     let (y_atoms, _) = y.as_chunks_mut::<3>();
-    par_chunks_mut_exec(exec, y_atoms, MATVEC_ATOM_CHUNK, a.n_atoms, gate, |c, chunk| {
-        let atom0 = c * MATVEC_ATOM_CHUNK;
-        for (offset, out) in chunk.iter_mut().enumerate() {
-            *out = scalar_row_apply(a, x_atoms, atom0 + offset);
-        }
-    });
+    par_chunks_mut_exec(
+        exec,
+        y_atoms,
+        MATVEC_ATOM_CHUNK,
+        a.n_atoms,
+        gate,
+        |c, chunk| {
+            let atom0 = c * MATVEC_ATOM_CHUNK;
+            for (offset, out) in chunk.iter_mut().enumerate() {
+                *out = scalar_row_apply(a, x_atoms, atom0 + offset);
+            }
+        },
+    );
 }
 
 fn apply_ic0_subblock(sub: &Ic0Subblock, r_sub: &[f64], z_sub: &mut [f64]) {
@@ -2112,15 +2123,22 @@ fn precond_scalar(a: &ScalarCsr, r: &[f64], z: &mut [f64], gate: usize, exec: &E
     }
     let (z_atoms, _) = z.as_chunks_mut::<3>();
     let (r_atoms, _) = r.as_chunks::<3>();
-    par_chunks_mut_exec(exec, z_atoms, MATVEC_ATOM_CHUNK, a.n_atoms, gate, |c, z_chunk| {
-        let atom0 = c * MATVEC_ATOM_CHUNK;
-        for (offset, z_atom) in z_chunk.iter_mut().enumerate() {
-            let atom = atom0 + offset;
-            let inv = 1.0 / a.diag[atom];
-            let r_atom = r_atoms[atom];
-            *z_atom = [r_atom[0] * inv, r_atom[1] * inv, r_atom[2] * inv];
-        }
-    });
+    par_chunks_mut_exec(
+        exec,
+        z_atoms,
+        MATVEC_ATOM_CHUNK,
+        a.n_atoms,
+        gate,
+        |c, z_chunk| {
+            let atom0 = c * MATVEC_ATOM_CHUNK;
+            for (offset, z_atom) in z_chunk.iter_mut().enumerate() {
+                let atom = atom0 + offset;
+                let inv = 1.0 / a.diag[atom];
+                let r_atom = r_atoms[atom];
+                *z_atom = [r_atom[0] * inv, r_atom[1] * inv, r_atom[2] * inv];
+            }
+        },
+    );
 }
 
 fn row_dot(a: &Csr, x: &[f64], i: usize) -> f64 {
@@ -2147,19 +2165,26 @@ fn precond_general(a: &Csr, r: &[f64], z: &mut [f64], gate: usize, exec: &Exec) 
     if let Some(blocks) = &a.inv_block3 {
         let (z_atoms, _) = z.as_chunks_mut::<3>();
         let (r_atoms, _) = r.as_chunks::<3>();
-        par_chunks_mut_exec(exec, z_atoms, MATVEC_ATOM_CHUNK, atoms, gate, |c, z_chunk| {
-            let atom0 = c * MATVEC_ATOM_CHUNK;
-            for (offset, z_atom) in z_chunk.iter_mut().enumerate() {
-                let atom = atom0 + offset;
-                let [r0, r1, r2] = r_atoms[atom];
-                let inv = &blocks[atom];
-                *z_atom = [
-                    inv[0] * r0 + inv[1] * r1 + inv[2] * r2,
-                    inv[1] * r0 + inv[3] * r1 + inv[4] * r2,
-                    inv[2] * r0 + inv[4] * r1 + inv[5] * r2,
-                ];
-            }
-        });
+        par_chunks_mut_exec(
+            exec,
+            z_atoms,
+            MATVEC_ATOM_CHUNK,
+            atoms,
+            gate,
+            |c, z_chunk| {
+                let atom0 = c * MATVEC_ATOM_CHUNK;
+                for (offset, z_atom) in z_chunk.iter_mut().enumerate() {
+                    let atom = atom0 + offset;
+                    let [r0, r1, r2] = r_atoms[atom];
+                    let inv = &blocks[atom];
+                    *z_atom = [
+                        inv[0] * r0 + inv[1] * r1 + inv[2] * r2,
+                        inv[1] * r0 + inv[3] * r1 + inv[4] * r2,
+                        inv[2] * r0 + inv[4] * r1 + inv[5] * r2,
+                    ];
+                }
+            },
+        );
         return;
     }
     par_chunks_mut_exec(exec, z, DOT_CHUNK, atoms, gate, |c, z_chunk| {
@@ -2567,7 +2592,16 @@ fn solve_pcg_op(
         if !alpha.is_finite() {
             return None;
         }
-        pcg_axpy2(exec, atoms, gate, alpha, &work.p, &work.ap, &mut work.x, &mut work.r);
+        pcg_axpy2(
+            exec,
+            atoms,
+            gate,
+            alpha,
+            &work.p,
+            &work.ap,
+            &mut work.x,
+            &mut work.r,
+        );
         rnorm = nrm2_exec(exec, &work.r, gate);
         if rnorm <= tol {
             if !work.x.iter().all(|v| v.is_finite()) {
