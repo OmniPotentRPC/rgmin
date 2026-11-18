@@ -1,5 +1,6 @@
 rgmin_abi_compatible
 rgmin_abi_stamp
+rgmin_backward_error_floor
 rgmin_constraints_constrain
 rgmin_constraints_create
 rgmin_constraints_create_at
@@ -48,7 +49,10 @@ rgmin_method_from_name
 rgmin_minimize
 rgmin_minimize_eindir
 rgmin_minimize_hess
+rgmin_minimize_hess_opts
 rgmin_minimize_hvp
+rgmin_minimize_hvp_opts
+rgmin_minimize_opts
 rgmin_minimize_scg
 rgmin_minimize_scg_with_options
 rgmin_precon_init
@@ -83,6 +87,7 @@ rgmin_solver_report_gradient
 rgmin_solver_search_direction
 rgmin_solver_set_accept
 rgmin_solver_set_atom_maxmove
+rgmin_solver_set_backward_polish
 rgmin_solver_set_box
 rgmin_solver_set_broken_axes
 rgmin_solver_set_cautious
@@ -90,6 +95,7 @@ rgmin_solver_set_centered_matrix
 rgmin_solver_set_complex_circle
 rgmin_solver_set_constant
 rgmin_solver_set_distance_constraints
+rgmin_solver_set_error_on_unmet
 rgmin_solver_set_euclidean_complex
 rgmin_solver_set_exp
 rgmin_solver_set_extra_updates

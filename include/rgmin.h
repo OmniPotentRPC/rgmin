@@ -59,7 +59,10 @@ typedef enum rgmin_status_t {
     RGMIN_UNAVAILABLE = 4,
     /** A distance constraint set was refused or could not be met.
      *  \ref rgmin_last_constraint_error names the kind. ABI minor 31. */
-    RGMIN_CONSTRAINT_ERROR = 5
+    RGMIN_CONSTRAINT_ERROR = 5,
+    /** An opt-in unmet stop. \c x and \c out still hold the report.
+     *  ABI minor 48. */
+    RGMIN_UNMET_STOP = 6
 } rgmin_status_t;
 
 /** Compatibility identity for this C ABI. */
@@ -70,14 +73,17 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 47
+#define RGMIN_ABI_VERSION_MINOR 48
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
  * 43 rgmin_lbfgs_pairs_push_rho, 44 rgmin_solver_set_power,
  * 45 rgmin_solver_set_lbfgs_trust (Burdakov ray, not set_lbfgs_trust),
  * 46 rgmin_control_default and the other struct initializers,
- * 47 level-set constraint setters. */
+ * 47 level-set constraint setters.
+ * 48 stop reasons LINE_SEARCH and POLISH_UNMET, RGMIN_UNMET_STOP,
+ *    the two session setters, rgmin_backward_error_floor, and the
+ *    *_opts one-shots. rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -155,7 +161,11 @@ typedef enum rgmin_stop_t {
     RGMIN_STOP_TOLERANCE = 0,
     RGMIN_STOP_NOISE_FLOOR = 1,
     RGMIN_STOP_STEP_TOLERANCE = 2,
-    RGMIN_STOP_BUDGET = 3
+    RGMIN_STOP_BUDGET = 3,
+    /** No step was accepted. ABI minor 48. */
+    RGMIN_STOP_LINE_SEARCH = 4,
+    /** A backward-error polish did not meet its test. ABI minor 48. */
+    RGMIN_STOP_POLISH_UNMET = 5
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),
@@ -187,6 +197,11 @@ typedef struct rgmin_control_t {
  *  (10 L-BFGS pairs, 6 for DIIS), maxmove 0 (the default caps),
  *  noise_eps 0 (no floor) and noise_c 3. ABI minor 46. */
 rgmin_control_t rgmin_control_default(void);
+
+/** First-order floor \c n * eps * (1 + |value| + sum |x_i|), with
+ *  \c eps the IEEE-754 binary64 unit roundoff. A null \a x or \a n of
+ *  0 uses an empty coordinate vector. ABI minor 48. */
+double rgmin_backward_error_floor(double value, const double *x, size_t n);
 
 /** Result of \ref rgmin_minimize. */
 typedef struct rgmin_report_t {
@@ -246,6 +261,14 @@ void rgmin_tensor_free(DLManagedTensorVersioned *tensor);
 rgmin_status_t rgmin_minimize(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
                             DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
                             rgmin_method_t method, rgmin_report_t *out);
+/** \ref rgmin_minimize with the two opt-in flags. Nonzero
+ *  \a error_on_unmet writes \a x and \a out, then returns
+ *  \c RGMIN_UNMET_STOP. \a backward_polish does not change this entry:
+ *  it has no Hessian. ABI minor 48. */
+rgmin_status_t rgmin_minimize_opts(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
+                            DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
+                            rgmin_method_t method, int error_on_unmet,
+                            int backward_polish, rgmin_report_t *out);
 /**
  * Newton / RFO. \a hess writes a length-\c n*n row-major Hessian.
  * \c method is \c RGMIN_NEWTON or \c RGMIN_RFO.
@@ -254,6 +277,14 @@ rgmin_status_t rgmin_minimize_hess(rgmin_eval_fn eval, rgmin_grad_fn grad,
                                rgmin_hess_fn hess, void *user,
                                DLManagedTensorVersioned *x,
                                const rgmin_control_t *ctrl, rgmin_method_t method,
+                               rgmin_report_t *out);
+/** \ref rgmin_minimize_hess with the two opt-in flags. Nonzero
+ *  \a backward_polish polishes on the supplied Hessian. ABI minor 48. */
+rgmin_status_t rgmin_minimize_hess_opts(rgmin_eval_fn eval, rgmin_grad_fn grad,
+                               rgmin_hess_fn hess, void *user,
+                               DLManagedTensorVersioned *x,
+                               const rgmin_control_t *ctrl, rgmin_method_t method,
+                               int error_on_unmet, int backward_polish,
                                rgmin_report_t *out);
 
 /**
@@ -498,6 +529,12 @@ _Static_assert(sizeof(rgmin_stop_norm_t) == sizeof(int32_t),
 /** Select the stop norm. TWO is the default. Returns 0, or 1 on a null
  *  session or an unknown integer. ABI minor 29. */
 int32_t rgmin_solver_set_stop_norm(rgmin_solver_t *solver, rgmin_stop_norm_t norm);
+/** Nonzero opts a later run into \c RGMIN_UNMET_STOP. One step is
+ *  unchanged. ABI minor 48. */
+void rgmin_solver_set_error_on_unmet(rgmin_solver_t *solver, int32_t on);
+/** Record the backward-error polish flag. A session step does not
+ *  form a Hessian. ABI minor 48. */
+void rgmin_solver_set_backward_polish(rgmin_solver_t *solver, int32_t on);
 /** FIRE 2.0 parameter set. GUENOLE2020 is Table 1 of Guenole et al.,
  *  Comput. Mater. Sci. 175, 109584 (2020): dt_max 10 dt, dt_min
  *  0.02 dt, N_delay 20, alpha_start 0.25, f_inc 1.1, f_dec 0.5,
@@ -1142,6 +1179,15 @@ rgmin_status_t rgmin_minimize_hvp(rgmin_eval_fn eval, rgmin_grad_fn grad,
                               rgmin_hvp_fn hvp, void *user,
                               DLManagedTensorVersioned *x,
                               const rgmin_control_t *ctrl, rgmin_method_t method,
+                              rgmin_report_t *out);
+/** \ref rgmin_minimize_hvp with the two opt-in flags. Nonzero
+ *  \a backward_polish polishes from the Hessian-vector product.
+ *  ABI minor 48. */
+rgmin_status_t rgmin_minimize_hvp_opts(rgmin_eval_fn eval, rgmin_grad_fn grad,
+                              rgmin_hvp_fn hvp, void *user,
+                              DLManagedTensorVersioned *x,
+                              const rgmin_control_t *ctrl, rgmin_method_t method,
+                              int error_on_unmet, int backward_polish,
                               rgmin_report_t *out);
 /** One Steihaug-Toint iteration. Legal on \c RGMIN_NEWTON_CG and
  *  \c RGMIN_NEWTON_PCG. \a hvp is a product, not a matrix. */

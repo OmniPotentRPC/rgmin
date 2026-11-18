@@ -124,6 +124,10 @@ class Stop(enum.IntEnum):
 
     BUDGET = 3
 
+    LINE_SEARCH = 4
+
+    POLISH_UNMET = 5
+
     Tolerance = 0
 
     NoiseFloor = 1
@@ -131,6 +135,10 @@ class Stop(enum.IntEnum):
     StepTolerance = 2
 
     Budget = 3
+
+    LineSearch = 4
+
+    PolishUnmet = 5
 
 class Report:
     """Result of one optimizer step or of ``minimize``."""
@@ -151,6 +159,9 @@ class Report:
     def stop(self) -> Stop:
         """The ``Stop`` reason."""
 
+    def converged(self) -> bool:
+        """True when ``stop`` is ``TOLERANCE``."""
+
 class SolverConfig:
     """
     Validated, immutable optimizer options. Unknown keywords raise ``ValueError`` listing the valid options. A Cartesian solver installs a per-atom cap of 0.2 (ASE maxstep, eOn max_move) unless the method already limits the step. BFGS, dogleg, and FIRE 2.0 start without that cap. ``maxstep`` or ``atom_maxmove`` replaces it on every method. A non-positive value clears it. A positive ``maxmove`` is the Euclidean step limit and leaves the per-atom default off.
@@ -163,6 +174,12 @@ class SolverConfig:
 
     @property
     def method_name(self) -> str: ...
+
+    def error_on_unmet(self) -> bool:
+        """Whether an unmet stop raises."""
+
+    def backward_polish(self) -> bool:
+        """Whether a Hessian one-shot polishes to the backward-error floor."""
 
     @staticmethod
     def valid_options() -> str: ...
@@ -190,4 +207,9 @@ class Solver:
         """
 
 def minimize(f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], x0: NDArray[numpy.float64], method: object, **kwargs) -> tuple[Report, NDArray[numpy.float64]]:
-    """Minimize ``f_and_grad`` in place and return ``(report, x)``."""
+    """
+    Minimize ``f_and_grad`` in place and return ``(report, x)``. ``error_on_unmet=True`` raises ``RuntimeError`` when the stop is ``BUDGET``, ``LINE_SEARCH``, or ``POLISH_UNMET``. ``backward_polish`` is stored on the session and is not used by this step loop.
+    """
+
+def backward_error_floor(value: float, x: NDArray[numpy.float64]) -> float:
+    """First-order floor ``n * eps * (1 + |value| + sum |x_i|)``."""

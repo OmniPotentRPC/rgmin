@@ -67,6 +67,7 @@ _EXPORTS = [
     "Stiefel",
     "Stop",
     "__version__",
+    "backward_error_floor",
     "lowest_eigenpairs",
     "minimize",
 ]

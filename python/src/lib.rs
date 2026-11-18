@@ -79,6 +79,8 @@ impl Session {
     /// parameter set and ABC-FIRE. `accept` is `none`, `energy` or
     /// `nonmonotone`; `downhill` is `energy`. `istep` is the step scale
     /// of a method other than FIRE, whose scale is `dt`.
+    /// `error_on_unmet` and `backward_polish` are recorded on the
+    /// session. One `step` stays `Ok`; the polish needs a Hessian.
     #[allow(clippy::too_many_arguments)]
     #[new]
     #[pyo3(signature = (
@@ -104,6 +106,8 @@ impl Session {
         accept=None,
         istep=None,
         level_set=None,
+        error_on_unmet=false,
+        backward_polish=false,
     ))]
     fn new(
         kind: &str,
@@ -127,6 +131,8 @@ impl Session {
         accept: Option<&str>,
         istep: Option<f64>,
         level_set: Option<f64>,
+        error_on_unmet: bool,
+        backward_polish: bool,
     ) -> PyResult<Self> {
         if n == 0 {
             return Err(PyValueError::new_err("dimension must be positive"));
@@ -224,6 +230,8 @@ impl Session {
                 .set_level_set(LevelSetConstraint::new(target))
                 .map_err(value_error)?;
         }
+        solver.set_error_on_unmet(error_on_unmet);
+        solver.set_backward_polish(backward_polish);
         Ok(Self { solver })
     }
 
@@ -806,6 +814,12 @@ impl ManifoldPy {
     }
 }
 
+/// First-order floor `n * eps * (1 + |value| + sum |x_i|)`.
+#[pyfunction]
+fn backward_error_floor(value: f64, x: Vec<f64>) -> f64 {
+    rgmin::backward_error_floor(value, ArrayView1::from(&x))
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Session>()?;
@@ -813,6 +827,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<LbfgsPairsPy>()?;
     m.add_class::<ManifoldPy>()?;
     m.add_function(wrap_pyfunction!(lowest_eigenpairs, m)?)?;
+    m.add_function(wrap_pyfunction!(backward_error_floor, m)?)?;
     m.add("version", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

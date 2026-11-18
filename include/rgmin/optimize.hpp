@@ -138,6 +138,11 @@ struct Control {
     double maxmove = 0.0;
     double noise_eps = 0.0;
     double noise_c = 0.0;
+    /// Opt in to RGMIN_UNMET_STOP. Default off.
+    bool error_on_unmet = false;
+    /// Polish a supplied Hessian or product. Default off. The first-order
+    /// one-shot ignores this flag.
+    bool backward_polish = false;
 };
 
 namespace detail {
@@ -207,8 +212,9 @@ inline Report minimize_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
                           Method method) {
     rgmin_control_t c = detail::c_control(ctrl);
     rgmin_report_t out{};
-    rgmin_status_t st =
-        rgmin_minimize(eval, grad, user, x, &c, static_cast<rgmin_method_t>(method), &out);
+    rgmin_status_t st = rgmin_minimize_opts(
+        eval, grad, user, x, &c, static_cast<rgmin_method_t>(method),
+        ctrl.error_on_unmet ? 1 : 0, ctrl.backward_polish ? 1 : 0, &out);
     if (st != RGMIN_SUCCESS) {
         char const* msg = rgmin_last_error();
         throw std::runtime_error(msg ? msg : "rgmin_minimize failed");
@@ -221,8 +227,9 @@ inline Report minimize_hess_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hes
                                Control const& ctrl, Method method) {
     rgmin_control_t c = detail::c_control(ctrl);
     rgmin_report_t out{};
-    rgmin_status_t st = rgmin_minimize_hess(
-        eval, grad, hess, user, x, &c, static_cast<rgmin_method_t>(method), &out);
+    rgmin_status_t st = rgmin_minimize_hess_opts(
+        eval, grad, hess, user, x, &c, static_cast<rgmin_method_t>(method),
+        ctrl.error_on_unmet ? 1 : 0, ctrl.backward_polish ? 1 : 0, &out);
     if (st != RGMIN_SUCCESS) {
         char const* msg = rgmin_last_error();
         throw std::runtime_error(msg ? msg : "rgmin_minimize_hess failed");
@@ -725,6 +732,14 @@ public:
     void set_periodic(bool periodic) { rgmin_solver_set_periodic(ptr_, periodic ? 1 : 0); }
     /// Stop norm for gtol and Report::grad_norm. Returns 0, or 1 on an unknown norm.
     int set_stop_norm(rgmin_stop_norm_t norm) { return rgmin_solver_set_stop_norm(ptr_, norm); }
+    /// Opt in to RGMIN_UNMET_STOP from a later run. One step is unchanged.
+    void set_error_on_unmet(bool on) {
+        rgmin_solver_set_error_on_unmet(ptr_, on ? 1 : 0);
+    }
+    /// Record the backward-error polish flag. A session step does not form a Hessian.
+    void set_backward_polish(bool on) {
+        rgmin_solver_set_backward_polish(ptr_, on ? 1 : 0);
+    }
     /// FIRE 2.0 parameter set. Returns 0, or 1 on an unknown preset or a non-FIRE 2.0 session.
     int set_fire_preset(rgmin_fire_preset_t preset) {
         return rgmin_solver_set_fire_preset(ptr_, preset);
@@ -1075,6 +1090,8 @@ public:
     Method method() const noexcept { return method_; }
     std::string const& method_name() const noexcept { return method_name_; }
     Control const& control() const noexcept { return control_; }
+    bool error_on_unmet() const noexcept { return error_on_unmet_; }
+    bool backward_polish() const noexcept { return backward_polish_; }
     void apply(Solver& solver) const;
     /// Why a Euclidean session of this configuration ignores its line
     /// search, or an empty string when the session reads it or none is
@@ -1102,13 +1119,16 @@ private:
     std::optional<double> cautious_eps_;
     std::optional<double> cautious_alpha_;
     std::optional<double> objective_roundoff_;
+    bool error_on_unmet_ = false;
+    bool backward_polish_ = false;
 };
 
 inline std::string SolverConfig::valid_options() {
-    return "accept, atom_maxmove, beta, c1, c2, cautious_alpha, cautious_eps, "
-           "extra_updates, fire_variant, gtol, istep, linesearch, "
-           "linesearch_maxiter, maxiter, maxmove, maxstep, memory, neb_guards, "
-           "noise_c, noise_eps, objective_roundoff, periodic, project_rigid, qn_step";
+    return "accept, atom_maxmove, backward_polish, beta, c1, c2, cautious_alpha, "
+           "cautious_eps, error_on_unmet, extra_updates, fire_variant, gtol, istep, "
+           "linesearch, linesearch_maxiter, maxiter, maxmove, maxstep, memory, "
+           "neb_guards, noise_c, noise_eps, objective_roundoff, periodic, "
+           "project_rigid, qn_step";
 }
 
 inline std::string SolverConfig::valid_methods() {
@@ -1192,11 +1212,11 @@ inline bool is_cg(Method method) {
 
 inline bool known_option(std::string const& key) {
     static constexpr char const* const keys[] = {
-        "accept", "atom_maxmove", "beta", "c1", "c2", "cautious_alpha",
-        "cautious_eps", "extra_updates", "fire_variant", "gtol", "istep",
-        "linesearch", "linesearch_maxiter", "maxiter", "maxmove", "maxstep",
-        "memory", "neb_guards", "noise_c", "noise_eps", "objective_roundoff",
-        "periodic", "project_rigid", "qn_step"};
+        "accept", "atom_maxmove", "backward_polish", "beta", "c1", "c2",
+        "cautious_alpha", "cautious_eps", "error_on_unmet", "extra_updates",
+        "fire_variant", "gtol", "istep", "linesearch", "linesearch_maxiter",
+        "maxiter", "maxmove", "maxstep", "memory", "neb_guards", "noise_c",
+        "noise_eps", "objective_roundoff", "periodic", "project_rigid", "qn_step"};
     for (char const* item : keys) {
         if (key == item) return true;
     }
@@ -1299,6 +1319,8 @@ inline SolverConfig SolverConfig::build(
         if (key == "neb_guards") cfg.neb_guards_ = item.second;
         else if (key == "periodic") cfg.periodic_ = item.second;
         else if (key == "project_rigid") cfg.project_rigid_ = item.second;
+        else if (key == "error_on_unmet") cfg.error_on_unmet_ = item.second;
+        else if (key == "backward_polish") cfg.backward_polish_ = item.second;
         else if (detail::is_count_option(key)) {
             throw std::invalid_argument(key + " must be an int");
         } else {
@@ -1443,6 +1465,8 @@ inline void SolverConfig::apply(Solver& solver) const {
             throw std::invalid_argument(msg ? msg : "set_objective_roundoff failed");
         }
     }
+    solver.set_error_on_unmet(error_on_unmet_);
+    solver.set_backward_polish(backward_polish_);
 }
 
 }  // namespace rgmin

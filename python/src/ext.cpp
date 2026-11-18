@@ -553,10 +553,14 @@ NB_MODULE(_core, m) {
         .value("NOISE_FLOOR", RGMIN_STOP_NOISE_FLOOR)
         .value("STEP_TOLERANCE", RGMIN_STOP_STEP_TOLERANCE)
         .value("BUDGET", RGMIN_STOP_BUDGET)
+        .value("LINE_SEARCH", RGMIN_STOP_LINE_SEARCH)
+        .value("POLISH_UNMET", RGMIN_STOP_POLISH_UNMET)
         .value("Tolerance", RGMIN_STOP_TOLERANCE)
         .value("NoiseFloor", RGMIN_STOP_NOISE_FLOOR)
         .value("StepTolerance", RGMIN_STOP_STEP_TOLERANCE)
-        .value("Budget", RGMIN_STOP_BUDGET);
+        .value("Budget", RGMIN_STOP_BUDGET)
+        .value("LineSearch", RGMIN_STOP_LINE_SEARCH)
+        .value("PolishUnmet", RGMIN_STOP_POLISH_UNMET);
 
     nb::class_<rgmin::Report>(m, "Report", "Result of one optimizer step or of ``minimize``.")
         .def_prop_ro("value", [](rgmin::Report const& report) { return report.value; },
@@ -566,7 +570,10 @@ NB_MODULE(_core, m) {
         .def_prop_ro("grad_norm", [](rgmin::Report const& report) { return report.grad_norm; },
                      "Norm of the gradient.")
         .def_prop_ro("stop", [](rgmin::Report const& report) { return report.stop; },
-                     "The ``Stop`` reason.");
+                     "The ``Stop`` reason.")
+        .def("converged",
+             [](rgmin::Report const& report) { return report.stop == RGMIN_STOP_TOLERANCE; },
+             "True when ``stop`` is ``TOLERANCE``.");
 
     nb::class_<rgmin::SolverConfig>(m, "SolverConfig",
                                     "Validated, immutable optimizer options. Unknown keywords raise "
@@ -590,6 +597,10 @@ NB_MODULE(_core, m) {
                      })
         .def_prop_ro("method_name",
                      [](rgmin::SolverConfig const& config) { return config.method_name(); })
+        .def("error_on_unmet", &rgmin::SolverConfig::error_on_unmet,
+             "Whether an unmet stop raises.")
+        .def("backward_polish", &rgmin::SolverConfig::backward_polish,
+             "Whether a Hessian one-shot polishes to the backward-error floor.")
         .def_static("valid_options", &rgmin::SolverConfig::valid_options)
         .def_static("valid_methods", &rgmin::SolverConfig::valid_methods);
 
@@ -641,20 +652,51 @@ NB_MODULE(_core, m) {
                 throw nb::value_error(error.what());
             }
             std::size_t const budget = config.control().maxiter;
-            if (budget == 0) {
-                return nb::make_tuple(zero_budget_report(function, x0, config.control()), x0);
-            }
             rgmin::Report report{};
-            for (std::size_t i = 0; i < budget; ++i) {
-                report = step_python(solver, function, x0);
-                if (report.stop != RGMIN_STOP_BUDGET) {
-                    break;
+            if (budget == 0) {
+                report = zero_budget_report(function, x0, config.control());
+            } else {
+                for (std::size_t i = 0; i < budget; ++i) {
+                    report = step_python(solver, function, x0);
+                    if (report.stop != RGMIN_STOP_BUDGET) {
+                        break;
+                    }
                 }
+            }
+            if (config.error_on_unmet() &&
+                (report.stop == RGMIN_STOP_BUDGET || report.stop == RGMIN_STOP_LINE_SEARCH ||
+                 report.stop == RGMIN_STOP_POLISH_UNMET)) {
+                std::ostringstream message;
+                message << "stop unmet after " << report.steps << " steps (grad_norm "
+                        << report.grad_norm << ")";
+                throw std::runtime_error(message.str());
             }
             return nb::make_tuple(report, x0);
         },
         nb::sig("def minimize(f_and_grad: collections.abc.Callable[[ndarray[dtype=float64]], "
                 "tuple[float, ndarray[dtype=float64]]], x0: ndarray[dtype=float64], "
                 "method: object, **kwargs) -> tuple[Report, ndarray[dtype=float64]]"),
-        "Minimize ``f_and_grad`` in place and return ``(report, x)``.");
+        "Minimize ``f_and_grad`` in place and return ``(report, x)``. "
+        "``error_on_unmet=True`` raises ``RuntimeError`` when the stop is "
+        "``BUDGET``, ``LINE_SEARCH``, or ``POLISH_UNMET``. ``backward_polish`` "
+        "is stored on the session and is not used by this step loop, which "
+        "does not form a Hessian.");
+
+    m.def(
+        "backward_error_floor",
+        [](double value, nb::handle x_obj) {
+            Vector x;
+            try {
+                x = nb::cast<Vector>(x_obj, false);
+            } catch (nb::cast_error const&) {
+                throw nb::type_error("x must be a contiguous float64 array");
+            }
+            if (x.ndim() != 1) {
+                throw nb::value_error("x must be a rank-1 array");
+            }
+            return rgmin_backward_error_floor(
+                value, x.data(), static_cast<std::size_t>(x.shape(0)));
+        },
+        nb::arg("value"), nb::arg("x"),
+        "First-order floor ``n * eps * (1 + |value| + sum |x_i|)``.");
 }

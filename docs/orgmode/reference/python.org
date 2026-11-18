@@ -7,9 +7,12 @@
 UPPER_SNAKE, for example =LBFGS= and =POLAK_RIBIERE=. The older
 CamelCase spellings are aliases of the same values.
 =Stop= is why a step ended. Its members are =TOLERANCE=,
-=NOISE_FLOOR=, =STEP_TOLERANCE=, and =BUDGET=, again with CamelCase
-aliases.
+=NOISE_FLOOR=, =STEP_TOLERANCE=, =BUDGET=, =LINE_SEARCH=, and
+=POLISH_UNMET=, again with CamelCase aliases.
 =Report= has =value=, =steps=, =grad_norm=, and =stop=.
+=Report.converged= is true when =stop= is =TOLERANCE=.
+=backward_error_floor(value, x)= is the first-order stationarity
+floor =n * eps * (1 + |value| + sum |x_i|)=.
 =NumericalError= is an =ArithmeticError=.
 =SolverConfig(method="lbfgs", **options)= validates options.
 =Solver(n, config)= is the session. =step(f_and_grad, x)= takes one
@@ -17,6 +20,12 @@ iteration. =step_hess(f_and_grad, hessian, x)= is the same for Newton,
 RFO, and dogleg.
 =minimize(f_and_grad, x0, method="lbfgs", **options)= returns
 =(report, x)=. =x0= must already be a contiguous float64 vector.
+=error_on_unmet= and =backward_polish= are flags and default to
+off. =error_on_unmet= raises =RuntimeError= when the run stops on
+=BUDGET=, =LINE_SEARCH=, or =POLISH_UNMET=. =backward_polish= is
+stored on the session. This step loop does not form a Hessian, so
+the polish itself is the C =rgmin_minimize_hess_opts= and
+=rgmin_minimize_hvp_opts= entries.
 
 =__version__= is the version string of the extension.
 

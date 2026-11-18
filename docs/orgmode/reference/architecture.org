@@ -35,6 +35,26 @@ python3 docs/figures/architecture/draw_hourglass.py
   Hopping chains hold this type (anneal ~WarmLbfgs~ is a handle).
 - =Solver= :: Method-agnostic session. One =step= is one outer
   iteration. The C type =rgmin_solver_t= is a pointer to this.
+  L-BFGS pairs stay on the session, so a later =step= or =run=
+  continues from the returned point. =Lbfgs::resume_objective= is
+  the same continuation for a line-search solver.
+- =StopReason= :: Typed stop on =Report=, beside =Status=.
+  =converged()= is the =gtol= stop, including a last step that
+  meets it. =MaxIter= is a spent budget and stays =Ok= unless
+  =Control::with_error_on_unmet= is set, in which case the error
+  is =Error::StopUnmet= and carries the report. =LineSearchFailed=
+  is a budget spent without accepting a step.
+- =backward_error_floor= :: =n * eps * (1 + |V| + sum |x_i|)= with
+  =eps= equal to =f64::EPSILON=. =with_backward_polish= takes a
+  shifted Newton or RFO step from a supplied Hessian or
+  Hessian-vector product. The point is accepted only when the
+  Newton decrement and every coordinate step sit under that
+  scale. An unmet polish is =StopReason::PolishUnmet=. The C
+  names are =rgmin_backward_error_floor=,
+  =rgmin_solver_set_error_on_unmet=,
+  =rgmin_solver_set_backward_polish=, and the =*_opts= one-shots.
+  =RGMIN_UNMET_STOP= is status 6. =RGMIN_STOP_LINE_SEARCH= is 4
+  and =RGMIN_STOP_POLISH_UNMET= is 5.
 - =minimize_method= :: Cold-start dispatch for every =Method=.
 - =LineSearch::Wolfe= :: Nocedal-Wright 3.5 / 3.6. The default line
   search of a session's line-searched methods, BFGS among them. The
@@ -51,7 +71,10 @@ python3 docs/figures/architecture/draw_hourglass.py
 - =rgmin_solver_create= / =rgmin_solver_step= / =rgmin_solver_free= ::
   The session half of the waist.
   Callbacks are arguments of each step, not stored on the handle.
-  =include/rgmin.h= sets =abi_major= 1, =abi_minor= 47 and =layout_revision= 5.
+  =include/rgmin.h= sets =abi_major= 1, =abi_minor= 48 and =layout_revision= 5.
+  Minor 48 adds =StopReason= on the report, the opt-in unmet-stop
+  error, a resumable L-BFGS session, and the backward-error polish.
+  =rgmin_control_t= is unchanged.
   =rgmin_abi_compatible= checks the major version and the layout revision only.
 - =DistanceConstraints= :: Holonomic atom-pair distances for a session.
   SHAKE, LINCS and SETTLE return each trial to the set.
