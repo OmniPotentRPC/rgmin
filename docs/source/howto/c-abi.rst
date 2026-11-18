@@ -60,7 +60,7 @@ stack bytes in the fields the caller does not set, and a brace or
 designated initializer sets them to zero, which is not every field's
 default. A stray positive ``noise_eps`` turns the noise-floor stop on, and
 a session then stays at its start point. The ``rgmin_*_default`` functions
-are ``abi_minor`` 48, and ``xts.h`` names them ``xts_*_default``.
+are ``abi_minor`` 46, and ``xts.h`` names them ``xts_*_default``.
 
 Session (eOn / ASE ``step``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
