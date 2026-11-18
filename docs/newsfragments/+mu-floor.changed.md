@@ -1,0 +1,1 @@
+- `Exp` `estimate_mu` (`estimate_mu_with`) and the Lindh and FF `model_scale` estimate now floor finite `mu` ratios below 1 at 1, matching ASE `SparsePrecon.estimate_mu` and `estimate_mu_cell`; only a vanishing denominator or a non-finite ratio returns `Error::Precon`.
