@@ -24,6 +24,11 @@ fn c_header_reads_the_noise_floor_stop() {
     consumer::compile_and_run("tests/c_noise_floor.c", "rgmin_c_noise_floor", &[]);
 }
 
+#[test]
+fn c_header_reads_the_new_stops_through_the_xts_aliases() {
+    consumer::compile_and_run("tests/c_xts_stops.c", "rgmin_c_xts_stops", &[]);
+}
+
 #[cfg(feature = "highs")]
 #[test]
 fn c_header_routes_and_clears_the_highs_callback() {

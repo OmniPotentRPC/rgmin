@@ -19,9 +19,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADER = ROOT / "include" / "rgmin.h"
+COMPAT = ROOT / "include" / "xts.h"
 BASELINE = ROOT / "scripts" / "abi_baseline.txt"
 FFI = ROOT / "src" / "ffi.rs"
 VERSION_FIELDS = ("MAJOR", "MINOR", "LAYOUT_REVISION")
+# Stop reasons the compatibility header must alias, as ``XTS_STOP_<name>``.
+REQUIRED_STOP_ALIASES = ("ENERGY_TOLERANCE", "EVAL_BUDGET")
+ALIAS = re.compile(r"^#define\s+(XTS_[A-Z0-9_]+|xts_[a-z0-9_]+)\s+(RGMIN_[A-Z0-9_]+|rgmin_[a-z0-9_]+)\s*$", re.M)
 # A return type ending in `*` may sit against the name: `T *rgmin_f(`.
 DECL = re.compile(r"^[A-Za-z_][\w \t\*]*?[\s\*](rgmin_[A-Za-z0-9_]+)\s*\(", re.M)
 
@@ -48,11 +52,46 @@ def versions() -> list[str]:
     return wrong
 
 
+def aliases() -> list[str]:
+    """Problems in include/xts.h, as printable lines.
+
+    Every alias must name a symbol of rgmin.h, each ``rgmin_stop_t`` value
+    named in ``REQUIRED_STOP_ALIASES`` must have its ``XTS_STOP_`` alias,
+    and the alias must read that value and no other.
+    """
+    header = HEADER.read_text()
+    problems = []
+    functions = set(names())
+    enumerators = set(re.findall(r"\b(RGMIN_[A-Z0-9_]+)\s*=", header))
+    defined = set(re.findall(r"^#define\s+(RGMIN_[A-Z0-9_]+)\b", header, re.M))
+    targets = {}
+    for alias, target in ALIAS.findall(COMPAT.read_text()):
+        targets[alias] = target
+        known = functions if target.startswith("rgmin_") else enumerators | defined
+        if target not in known:
+            problems.append(f"  {alias} aliases {target}, which include/rgmin.h does not declare")
+    for stop in REQUIRED_STOP_ALIASES:
+        alias = f"XTS_STOP_{stop}"
+        want = f"RGMIN_STOP_{stop}"
+        if want not in enumerators:
+            problems.append(f"  {want} is not an rgmin_stop_t value in include/rgmin.h")
+        elif targets.get(alias) is None:
+            problems.append(f"  include/xts.h has no {alias} for {want}")
+        elif targets[alias] != want:
+            problems.append(f"  {alias} aliases {targets[alias]}, not {want}")
+    return problems
+
+
 def main() -> int:
     wrong = versions()
     if wrong:
         print("include/rgmin.h and src/ffi.rs disagree on the ABI stamp:")
         print("\n".join(wrong))
+        return 1
+    broken = aliases()
+    if broken:
+        print("include/xts.h does not match include/rgmin.h:")
+        print("\n".join(broken))
         return 1
     current = names()
     expected = [line.strip() for line in BASELINE.read_text().splitlines() if line.strip()]

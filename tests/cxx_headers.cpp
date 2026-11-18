@@ -477,11 +477,69 @@ int maxmove_off() {
     return 0;
 }
 
+static_assert(XTS_STOP_ENERGY_TOLERANCE == RGMIN_STOP_ENERGY_TOLERANCE,
+              "XTS_STOP_ENERGY_TOLERANCE aliases RGMIN_STOP_ENERGY_TOLERANCE");
+static_assert(XTS_STOP_EVAL_BUDGET == RGMIN_STOP_EVAL_BUDGET,
+              "XTS_STOP_EVAL_BUDGET aliases RGMIN_STOP_EVAL_BUDGET");
+
+rgmin_status_t bowl_eval(void* /*user*/, DLManagedTensorVersioned const* x, double* value) {
+    double const* p = data(x);
+    *value = 0.5 * (p[0] * p[0] + 4.0 * p[1] * p[1]);
+    return RGMIN_SUCCESS;
+}
+
+rgmin_status_t bowl_grad(void* /*user*/, DLManagedTensorVersioned const* x,
+                         DLManagedTensorVersioned* g) {
+    double const* p = data(x);
+    double* gp = data(g);
+    gp[0] = p[0];
+    gp[1] = 4.0 * p[1];
+    return RGMIN_SUCCESS;
+}
+
+// A session reads both new stops under their XTS_STOP_* names.
+static int stop_aliases() {
+    rgmin::Control ctrl;
+    ctrl.maxiter = 5000;
+    ctrl.gtol = 1e-12;
+    ctrl.istep = 0.1;
+    for (int budget = 0; budget < 2; ++budget) {
+        xts::optimize::Solver solver(xts::optimize::Method::Lbfgs, ctrl, 2);
+        rgmin_status_t armed =
+            budget != 0 ? solver.set_max_evals(6) : solver.set_etol(1e-6);
+        if (armed != XTS_SUCCESS) {
+            return 20;
+        }
+        std::vector<double> x{1.0, 1.0};
+        xts::optimize::Report report;
+        for (int taken = 0; taken < 5000 && report.stop == RGMIN_STOP_BUDGET; ++taken) {
+            DLManagedTensorVersioned* t = rgmin::borrow_cpu_f64(x.data(), 2);
+            if (t == nullptr) {
+                return 21;
+            }
+            report = solver.step(bowl_eval, bowl_grad, nullptr, t);
+            xts_tensor_free(t);
+        }
+        rgmin_stop_t const want = budget != 0 ? XTS_STOP_EVAL_BUDGET : XTS_STOP_ENERGY_TOLERANCE;
+        if (report.stop != want) {
+            std::fprintf(stderr, "stop alias: %d, wanted %d\n", static_cast<int>(report.stop),
+                         static_cast<int>(want));
+            return 22;
+        }
+        if (budget != 0 && solver.evals() < 6) {
+            return 23;
+        }
+    }
+    return 0;
+}
+
 int main() {
     int off = maxmove_off();
     if (off != 0) return off;
     int block = eigen_block();
     if (block != 0) return block;
+    int stops = stop_aliases();
+    if (stops != 0) return stops;
     std::vector<double> x{1.0, 1.0};
     DLManagedTensorVersioned* t = rgmin::borrow_cpu_f64(x.data(), 2);
     if (t == nullptr) {
