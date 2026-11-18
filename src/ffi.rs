@@ -81,7 +81,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 49;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 50;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1349,6 +1349,27 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
     method: rgmin_method_t,
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
+    unsafe { rgmin_minimize_eindir_opts(objective, stamp, x, ctrl, method, 0, 0, out) }
+}
+
+/// [`rgmin_minimize_eindir`] with the two opt-in controls. A nonzero
+/// `error_on_unmet` writes `x` and `out`, then returns
+/// [`rgmin_status_t::RGMIN_UNMET_STOP`]. `backward_polish` has no Hessian
+/// on this entry and does not change the step. ABI minor 50.
+///
+/// # Safety
+/// Same as [`rgmin_minimize_eindir`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
+    objective: *const eindir_objective_t,
+    stamp: *const eindir_abi_stamp_t,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    method: rgmin_method_t,
+    error_on_unmet: i32,
+    backward_polish: i32,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if objective.is_null() || stamp.is_null() || ctrl.is_null() || out.is_null() {
             set_last_error("rgmin_minimize_eindir: null argument");
@@ -1396,7 +1417,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
             (value, gradient)
         });
         let c = unsafe { &*ctrl };
-        let control = control_from_c(c);
+        let control = control_with_flags(c, error_on_unmet, backward_polish);
         let outcome = minimize_method(
             &obj,
             Array1::from(init),
