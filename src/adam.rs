@@ -8,7 +8,8 @@ use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
 use crate::step::{
-    energy_noise_report, implicit_atom_cap, l2, max_atom_norm, one_shot_report, take_step,
+    energy_noise_report, implicit_atom_cap, l2, max_atom_norm, one_shot_report, stop_if_unmoved,
+    take_step,
 };
 
 /// Adam plus a line search along the Kingma-Ba preconditioned step.
@@ -86,6 +87,10 @@ where
                 istep = t.alpha;
             }
         } else {
+            if let Some(stop) = stop_if_unmoved(control, false, value, pos.clone(), step + 1, gnorm)
+            {
+                return stop;
+            }
             m = m_old;
             v = v_old;
         }
@@ -197,6 +202,7 @@ mod tests {
             noise_floor: None,
             error_on_unmet: false,
             backward_polish: false,
+            require_convergence: false,
         };
         let linesearch = LineSearch::Backtracking {
             c: 1e-4,

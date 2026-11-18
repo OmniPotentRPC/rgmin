@@ -269,6 +269,19 @@ pub enum Error {
         /// What was refused.
         what: &'static str,
     },
+    /// A run ended above `gtol` under strict convergence.
+    ///
+    /// Opt-in via [`crate::Control::with_require_convergence`]. The
+    /// default still returns the [`crate::Report`]. The boxed report is
+    /// the terminal point, with [`crate::Report::converged`] set from
+    /// `grad_norm <= gtol`.
+    #[error(
+        "not converged: status {status:?} after {steps} steps (grad_norm {grad_norm})",
+        status = .0.status,
+        steps = .0.steps,
+        grad_norm = .0.grad_norm
+    )]
+    NotConverged(Box<crate::Report>),
     /// The iteration finished with the stop unmet.
     ///
     /// Opt-in via [`crate::Control::with_error_on_unmet`]. The default

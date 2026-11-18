@@ -339,6 +339,32 @@ pub(crate) fn one_shot_report(
         grad: None,
         status,
         reason: None,
+        converged: false,
+    }
+}
+
+/// `Some(deliver(StepTolerance))` when strict mode is on, the step did
+/// not move, and the gradient is still above `gtol`.
+///
+/// The default returns `None` so the caller keeps its existing stop.
+pub(crate) fn stop_if_unmoved(
+    control: &Control,
+    moved: bool,
+    value: f64,
+    coords: Array1<f64>,
+    steps: usize,
+    grad_norm: f64,
+) -> Option<crate::Result<Report>> {
+    if control.require_convergence && !moved && grad_norm > control.gtol {
+        Some(control.deliver(one_shot_report(
+            value,
+            coords,
+            steps,
+            grad_norm,
+            crate::report::Status::StepTolerance,
+        )))
+    } else {
+        None
     }
 }
 

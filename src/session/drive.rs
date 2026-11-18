@@ -175,7 +175,7 @@ impl Solver {
         self.last_value = value;
         self.store_x(x);
         let g = self.last_grad.clone();
-        Ok(self.report(value, x, &g))
+        self.control.maybe_not_converged(self.report(value, x, &g))
     }
 
     fn store_x(&mut self, x: &Array1<f64>) {
@@ -400,7 +400,7 @@ impl Solver {
         self.last_value = value;
         self.store_x(x);
         let g = self.last_grad.clone();
-        Ok(self.report(value, x, &g))
+        self.control.maybe_not_converged(self.report(value, x, &g))
     }
 
     fn fire_fill_step<F>(&mut self, x: &mut Array1<f64>, fill: &mut F) -> Result<f64>

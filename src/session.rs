@@ -1471,6 +1471,7 @@ impl Solver {
             grad: Some(grad.clone()),
             status,
             reason: None,
+            converged: grad_norm <= self.control.gtol,
         }
     }
 
@@ -2342,6 +2343,22 @@ impl Solver {
         }
     }
 
+    /// Reclassify an unmoved step that is still above `gtol` when strict
+    /// convergence is on. The default leaves the status alone.
+    fn note_strict_stall(&self, before: &Array1<f64>, x: &Array1<f64>, report: &mut Report) {
+        if self.control.require_convergence
+            && report.status == Status::Iterating
+            && before.len() == x.len()
+            && before
+                .iter()
+                .zip(x.iter())
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+            && report.grad_norm > self.control.gtol
+        {
+            report.status = Status::StepTolerance;
+        }
+    }
+
     /// One outer iteration. `x` is the iterate and is overwritten in place.
     ///
     /// With `control.maxiter == 0` an L-BFGS session reports
@@ -2373,6 +2390,7 @@ impl Solver {
         let mut report = self.step_once(obj, x)?;
         self.finish_level_set(obj, x, &mut report)?;
         self.note_repeated_lbfgs_step(&before, x, &mut report);
+        self.note_strict_stall(&before, x, &mut report);
         Ok(report)
     }
 
@@ -2429,6 +2447,7 @@ impl Solver {
         O: HessianObjective + ?Sized,
     {
         self.retract_level_set_start(obj, x)?;
+        let before = x.clone();
         let mut report = if matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. })
             && self.level_set.is_some()
         {
@@ -2475,6 +2494,7 @@ impl Solver {
             }
         };
         self.finish_level_set(obj, x, &mut report)?;
+        self.note_strict_stall(&before, x, &mut report);
         Ok(report)
     }
 
@@ -2502,6 +2522,7 @@ impl Solver {
             return Err(Error::NeedHvp);
         }
         self.retract_level_set_start(obj, x)?;
+        let before = x.clone();
         let action = |xv: ArrayView1<f64>, v: ArrayView1<f64>| obj.hessian_vector(xv, v);
         let mut report = if self.constraints.is_some() {
             self.constrained_step(x, |s, x| s.step_constrained_newton_cg(obj, x, &action))?
@@ -2509,6 +2530,7 @@ impl Solver {
             self.step_newton_cg(obj, x, &action)?
         };
         self.finish_level_set(obj, x, &mut report)?;
+        self.note_strict_stall(&before, x, &mut report);
         Ok(report)
     }
 
@@ -4838,6 +4860,15 @@ impl Solver {
         self.control.error_on_unmet = on;
     }
 
+    /// Opt in to [`crate::Error::NotConverged`] from [`Self::run`].
+    ///
+    /// The default is off. A step stays `Ok`. A finished run whose
+    /// gradient norm is still above `gtol` returns the error, and the
+    /// boxed report is the terminal point.
+    pub fn set_require_convergence(&mut self, on: bool) {
+        self.control.require_convergence = on;
+    }
+
     /// Record the backward-error polish flag on this session's control.
     ///
     /// [`Self::run`] does not form a Hessian. [`crate::minimize_newton`],
@@ -5910,6 +5941,7 @@ mod tests {
                 noise_floor: None,
                 error_on_unmet: false,
                 backward_polish: false,
+                require_convergence: false,
                 stop_norm: StopNorm::Two,
             },
             2,
@@ -5996,6 +6028,7 @@ mod tests {
                     noise_floor: None,
                     error_on_unmet: false,
                     backward_polish: false,
+                    require_convergence: false,
                     stop_norm: StopNorm::Two,
                 },
                 2,
@@ -6216,6 +6249,7 @@ mod retained_neb_guard_tests {
                 noise_floor: None,
                 error_on_unmet: false,
                 backward_polish: false,
+                require_convergence: false,
                 stop_norm: StopNorm::Two,
             },
             3,
@@ -6256,6 +6290,7 @@ mod retained_neb_guard_tests {
                 noise_floor: None,
                 error_on_unmet: false,
                 backward_polish: false,
+                require_convergence: false,
                 stop_norm: StopNorm::Two,
             },
             3,
@@ -6363,6 +6398,7 @@ mod retained_neb_guard_tests {
                 noise_floor: None,
                 error_on_unmet: false,
                 backward_polish: false,
+                require_convergence: false,
                 stop_norm: StopNorm::Two,
             },
             n,

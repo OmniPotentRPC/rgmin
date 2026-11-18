@@ -4155,6 +4155,7 @@ fn control_with_flags(c: &rgmin_control_t, error_on_unmet: i32, backward_polish:
         noise_floor: noise_floor_from_c(c),
         error_on_unmet: error_on_unmet != 0,
         backward_polish: backward_polish != 0,
+        require_convergence: false,
     }
 }
 
@@ -6582,6 +6583,7 @@ mod default_tests {
         Option<FloorBits>,
         bool,
         bool,
+        bool,
     );
     type ExpBits = (u64, u64, Option<u64>, Option<u64>, Option<u64>, bool, Cell);
     type LindhBits = (u64, Option<u64>, bool, bool, Cell, Option<u64>, bool);
@@ -6612,6 +6614,7 @@ mod default_tests {
             noise_floor,
             error_on_unmet,
             backward_polish,
+            require_convergence,
         } = control;
         (
             maxiter,
@@ -6623,6 +6626,7 @@ mod default_tests {
             noise_floor.map(floor_bits),
             error_on_unmet,
             backward_polish,
+            require_convergence,
         )
     }
 

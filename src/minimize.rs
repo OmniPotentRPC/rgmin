@@ -15,7 +15,7 @@ use crate::pso::minimize_pso;
 use crate::qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 use crate::report::{Report, Status};
 use crate::session::Solver;
-use crate::step::{implicit_atom_cap, l2, next_istep, one_shot_report, take_step};
+use crate::step::{implicit_atom_cap, l2, next_istep, one_shot_report, stop_if_unmoved, take_step};
 
 /// Minimize `obj` from `init` with the chosen conjugacy, restart, and line search.
 pub fn minimize<O>(
@@ -167,6 +167,7 @@ fn without_polish(control: &Control) -> Control {
             .clone()
             .with_backward_polish(false)
             .with_error_on_unmet(false)
+            .with_require_convergence(false)
     } else {
         control.clone()
     }
@@ -291,6 +292,9 @@ where
                 gnorm,
                 Status::NoiseFloor,
             ));
+        }
+        if let Some(stop) = stop_if_unmoved(control, t.moved, value, pos.clone(), step + 1, gnorm) {
+            return stop;
         }
         let lsstep = t.alpha;
         pos = t.x;

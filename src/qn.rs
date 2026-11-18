@@ -9,7 +9,7 @@ use crate::linesearch::LineSearch;
 use crate::report::Report;
 use crate::step::{
     apply_caps, energy_noise_report, implicit_atom_cap, l2, next_istep, one_shot_report, qn_istep,
-    take_step,
+    stop_if_unmoved, take_step,
 };
 use crate::trust::{
     accept_ratio, cauchy_point, dogleg_direction, predicted_reduction, reduction_ratio,
@@ -70,6 +70,9 @@ where
         );
         if t.energy_noise {
             return control.deliver(energy_noise_report(value, pos, step + 1, gnorm));
+        }
+        if let Some(stop) = stop_if_unmoved(control, t.moved, value, pos.clone(), step + 1, gnorm) {
+            return stop;
         }
         let moved = t.moved;
         pos = t.x;
@@ -195,11 +198,19 @@ where
         let p = &trial - &pos;
         let pnorm = l2(&p);
         if !(pnorm.is_finite() && pnorm > 1e-16) {
+            if let Some(stop) = stop_if_unmoved(control, false, value, pos.clone(), step + 1, gnorm)
+            {
+                return stop;
+            }
             radius = update_radius(radius, -1.0, 0.0, rmax);
             continue;
         }
         let (ft, gt) = obj.value_and_gradient(trial.view());
         if !ft.is_finite() || gt.iter().any(|v| !v.is_finite()) {
+            if let Some(stop) = stop_if_unmoved(control, false, value, pos.clone(), step + 1, gnorm)
+            {
+                return stop;
+            }
             radius = update_radius(radius, -1.0, pnorm, rmax);
             continue;
         }
@@ -213,6 +224,10 @@ where
             pos = trial;
             value = ft;
             grad = gt;
+        } else if let Some(stop) =
+            stop_if_unmoved(control, false, value, pos.clone(), step + 1, gnorm)
+        {
+            return stop;
         }
     }
     control.deliver(done(
@@ -262,6 +277,9 @@ where
         );
         if t.energy_noise {
             return control.deliver(energy_noise_report(value, pos, step + 1, gnorm));
+        }
+        if let Some(stop) = stop_if_unmoved(control, t.moved, value, pos.clone(), step + 1, gnorm) {
+            return stop;
         }
         let lsstep = t.alpha;
         pos = t.x;
