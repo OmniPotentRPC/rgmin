@@ -29,7 +29,7 @@ The energy test
 ``etol`` stops a run when the objective changes by little between two
 accepted steps:
 
-.. code:: text
+::
 
     |E_k - E_{k-1}| < etol * 0.5 * (|E_k| + |E_{k-1}| + eps_E)
 
@@ -41,13 +41,18 @@ for the floor that keeps the test finite at ``E = 0``. rgmin uses
 where the energy is as small as the floor.
 
 - ``etol = Some(0.0)`` never stops, as in LAMMPS. ``None`` is the default.
+
 - A negative or non-finite ``etol`` is ``Error::InvalidControl`` before the
   objective is called.
+
 - An iteration that left the point where it was, because its line search
   refused every trial, is not a test.
+
 - FIRE takes the test only after more than ``n_min`` consecutive steps with
   positive power, as ``min_style fire`` does with its delay steps.
+
 - A gradient stop at the same point is reported as ``Tolerance``.
+
 - Particle swarm has no sequence of accepted energies. It answers
   ``Error::StopUnsupported`` rather than ignoring ``etol``.
 
@@ -101,7 +106,7 @@ Other languages
 .. table::
 
     +-------------------------+--------------------------------------------------------+------------------------------------------------------------------+------------------------+
-    | surface                 | etol                                                   | max_evals                                                        | count                  |
+    | surface                 | etol                                                   | max\ :sub:`evals`\                                               | count                  |
     +=========================+========================================================+==================================================================+========================+
     | C                       | ``rgmin_solver_set_etol``, ``rgmin_solver_clear_etol`` | ``rgmin_solver_set_max_evals``, ``rgmin_solver_clear_max_evals`` | ``rgmin_solver_evals`` |
     +-------------------------+--------------------------------------------------------+------------------------------------------------------------------+------------------------+
@@ -115,7 +120,7 @@ Other languages
     +-------------------------+--------------------------------------------------------+------------------------------------------------------------------+------------------------+
     | ``rgmin.optimize``      | ``etol=``                                              | ``max_evals=``                                                   | ``Optimizer.stop``     |
     +-------------------------+--------------------------------------------------------+------------------------------------------------------------------+------------------------+
-    | LAMMPS                  | ``minimize etol``                                      | ``minimize ... maxeval``                                         |                        |
+    | LAMMPS                  | ``minimize etol``                                      | ``minimize ... maxeval``                                         | \                      |
     +-------------------------+--------------------------------------------------------+------------------------------------------------------------------+------------------------+
 
 The C setters return ``RGMIN_INVALID_PARAMETER`` with the reason in
