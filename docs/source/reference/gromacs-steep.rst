@@ -99,6 +99,6 @@ The Python ``gromacs_mdp_options`` layer converts:
 The Rust stepper, C ABI, and C++ wrapper do no unit conversion. C and
 C++ expose both ``shrink`` and ``max_constraint_shrinks`` through
 ``rgmin_solver_set_gromacs_steep`` / ``Solver::set_gromacs_steep``.
-ABI minor 48 carries ``RGMIN_GROMACS_STEEP`` and
-``RGMIN_STOP_MACHINE_PRECISION``. Minor 47 is the level-set constraint
-setters.
+``RGMIN_GROMACS_STEEP`` and ``RGMIN_STOP_MACHINE_PRECISION`` belong to
+the minor named by ``include/rgmin.h``. Minor 47 is the level-set
+constraint setters.
