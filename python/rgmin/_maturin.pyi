@@ -28,6 +28,7 @@ class Session:
         abc: bool = False,
         accept: str | None = None,
         istep: float | None = None,
+        shrink: float | None = None,
         level_set: float | None = None,
     ) -> None: ...
     def push_pair(self, s: list[float], y: list[float]) -> bool: ...

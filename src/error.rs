@@ -204,6 +204,12 @@ pub enum Error {
     /// A FIRE parameter change was asked of a session that is not FIRE.
     #[error("FIRE parameters require a FIRE session")]
     NeedFire,
+    /// A GROMACS steep parameter was refused, or asked of another method.
+    #[error("GROMACS steep: {what}")]
+    Steep {
+        /// What was refused.
+        what: &'static str,
+    },
     /// Capped L-BFGS was asked for where it cannot run, or a capped
     /// step could not be formed.
     #[error("capped L-BFGS: {what}")]
