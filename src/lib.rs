@@ -26,6 +26,8 @@
 #[macro_use]
 mod config;
 
+/// Variable-cell layout and the ASE `FrechetCellFilter` gradient.
+pub mod cell;
 /// Line-search strategies (Brent, Armijo, Goldstein, Wolfe/zoom).
 pub mod linesearch;
 /// Method selector (NLCG, BFGS family, Adam, steepest descent, PSO).
@@ -134,6 +136,7 @@ pub mod vecops;
 
 pub use accept::Accept;
 pub use adam::minimize_adam;
+pub use cell::{CELL_DOF, Cell, CellEvaluation, CellFilter, CellFilterConfig};
 #[cfg(feature = "readcon")]
 pub use con_checkpoint::{read_checkpoint, write_checkpoint};
 pub use control::{Control, NoiseFloor, StopNorm};

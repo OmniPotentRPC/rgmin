@@ -262,6 +262,13 @@ pub enum Error {
         /// What was refused.
         what: &'static str,
     },
+    /// The variable-cell layout was configured or applied with invalid
+    /// data, or a deformation has no real logarithm.
+    #[error("cell: {what}")]
+    Cell {
+        /// What was refused.
+        what: &'static str,
+    },
     /// A level-set constraint \(g(x)=c\) was configured or applied with
     /// invalid data.
     #[error("level set: {what}")]
