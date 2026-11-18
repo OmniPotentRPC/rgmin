@@ -4917,7 +4917,7 @@ impl Solver {
             self.cell_block = None;
             return Ok(());
         }
-        if at % 3 != 0 {
+        if !at.is_multiple_of(3) {
             return Err(Error::CellBlock {
                 what: "the atom coordinates before the cell block are not whole triples",
             });
