@@ -4470,6 +4470,7 @@ impl Solver {
                             };
                             self.fire_trace.push(FireTrace {
                                 dt: state.dt,
+                                dt_max: state.dt_max,
                                 alpha: state.alpha,
                                 power: power_trace,
                                 n_pos: state.n_pos,
@@ -5979,6 +5980,7 @@ mod tests {
     fn fire_v2_velocity_times_dt_is_the_clamped_move() {
         let obj = steep();
         let mut solver = fire_solver(FireKind::V2);
+        solver.start_fire_trace();
         let mut x = array![1.0, 1.0];
         for _ in 0..5 {
             let before = x.clone();
@@ -5999,6 +6001,9 @@ mod tests {
                 );
             }
         }
+        let trace = solver.take_fire_trace();
+        assert_eq!(trace.len(), 5);
+        assert_eq!(trace.last().unwrap().clipped_moves, 5);
     }
 
     #[test]
