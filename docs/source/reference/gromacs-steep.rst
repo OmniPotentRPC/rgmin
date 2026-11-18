@@ -43,10 +43,12 @@ Stops and reports
     | the proposed displacement cannot change any coordinate | ``MachinePrecision`` | ``RGMIN_STOP_MACHINE_PRECISION`` |
     +--------------------------------------------------------+----------------------+----------------------------------+
 
-``Report::stop_norm`` is always ``StopNorm::MaxAtom`` for this method, even
-when the input ``Control`` names another norm. Rejected trials count as
-steps. ``Solver::gromacs_step_size`` returns the displacement that the next
-trial will use.
+``Report::stop_norm`` is ``StopNorm::MaxAtom`` by default for this method,
+even when the input ``Control`` names another norm. An explicit
+``Solver::set_stop_norm`` call after construction overrides that default,
+the same as for any other method. Rejected trials count as steps.
+``Solver::gromacs_step_size`` returns the displacement that the next trial
+will use.
 
 Non-finite callback values or gradients are runtime errors
 (``Error::Oracle`` in Rust, ``RGMIN_INTERNAL_ERROR`` in C with
