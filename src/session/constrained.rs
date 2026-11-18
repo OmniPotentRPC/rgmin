@@ -25,7 +25,7 @@ use crate::adam::adam_direction;
 use crate::bb::bb_direction;
 use crate::error::{Error, Result};
 use crate::fire::{
-    FireKind, FirePreparation, FirePreset, FireState, fire_after_v1, fire_displacement,
+    FireKind, FirePreparation, FirePreset, FireState, FireTrace, fire_after_v1, fire_displacement,
     fire_move_clipped, fire_prepare_v2, project_box_tangent,
 };
 use crate::holonomic::{ConstraintError, DistanceConstraints, Tangent, unsupported};
@@ -506,6 +506,26 @@ struct Checkpoint {
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
+    fire_trace_len: usize,
+}
+
+/// Whether the ABC-FIRE component cap shortens a finite `q` velocity.
+fn abc_clipped_q(state: &FireState, cap: f64, root_m: &Array1<f64>) -> bool {
+    let dt = state.dt;
+    dt.is_finite()
+        && dt > 0.0
+        && cap.is_finite()
+        && cap > 0.0
+        && state
+            .vel
+            .iter()
+            .zip(root_m)
+            .all(|(v, m)| v.is_finite() && m.is_finite())
+        && state
+            .vel
+            .iter()
+            .zip(root_m)
+            .any(|(v, m)| v.abs() > cap * m / dt)
 }
 
 /// `v` with each component of `q` capped at the per-coordinate speed that
@@ -542,6 +562,7 @@ impl Solver {
             last_pos: self.last_pos.clone(),
             last_value: self.last_value,
             last_grad: self.last_grad.clone(),
+            fire_trace_len: self.fire_trace.len(),
         }
     }
 
@@ -555,6 +576,7 @@ impl Solver {
         self.last_pos = saved.last_pos;
         self.last_value = saved.last_value;
         self.last_grad = saved.last_grad;
+        self.fire_trace.truncate(saved.fire_trace_len);
     }
 
     /// Run one constrained step on a copy of `x`. On
@@ -1280,9 +1302,12 @@ impl Solver {
         project_box_tangent(bounds, x, &mut raw);
         space.project(&mut state.vel)?;
         project_box_tangent(bounds, x, &mut state.vel);
+        let mut power_trace = crate::vecops::dot(raw.view(), state.vel.view());
+        let mut hsb_trace = false;
         match fire_prepare_v2(state, &raw) {
             FirePreparation::Ready => {}
             FirePreparation::Rollback(correction) => {
+                hsb_trace = true;
                 let back = space.place(
                     bounds,
                     &space.by_root_w(&correction),
@@ -1308,20 +1333,28 @@ impl Solver {
         }
         let forward_start = x.clone();
         let dx_q = fire_displacement(state, &raw);
+        let mut clip_trace = false;
         let dx_q = match caps.atom.or(caps.euclid) {
-            Some(cap) if state.abc => clip_components_q(state, cap, &space.root_m),
+            Some(cap) if state.abc => {
+                clip_trace = abc_clipped_q(state, cap, &space.root_m);
+                clip_components_q(state, cap, &space.root_m)
+            }
             _ => dx_q,
         };
         let mut trial = &*x + &space.by_root_w(&dx_q);
         let plain = state.preset() == FirePreset::Default && !state.abc;
-        let free = (!plain).then(|| trial.clone());
+        let free = (!plain || self.fire_trace_on).then(|| trial.clone());
         if !state.abc {
             caps.apply(x, &mut trial);
         }
         clip_free(&space.bonded, bounds, &mut trial);
-        let moved = free
+        let shortened = free
             .as_ref()
-            .is_none_or(|free| fire_move_clipped(&trial, free));
+            .is_some_and(|free| fire_move_clipped(&trial, free));
+        if shortened {
+            clip_trace = true;
+        }
+        let moved = plain || shortened;
         space.tangent.constrain(&mut trial)?;
         inside(&space.bonded, bounds, &trial)?;
         if matches!(state.kind, FireKind::V2) && state.dt > 0.0 && moved {
@@ -1338,7 +1371,25 @@ impl Solver {
         project_box_tangent(bounds, x, &mut raw_new);
         next.project(&mut state.vel)?;
         project_box_tangent(bounds, x, &mut state.vel);
+        if matches!(state.kind, FireKind::V1) {
+            power_trace = crate::vecops::dot(raw_new.view(), state.vel.view());
+        }
         fire_after_v1(state, &raw_new);
+        if self.fire_trace_on {
+            let (prev_hsb, prev_clip) = match self.fire_trace.last() {
+                Some(last) => (last.half_step_backs, last.clipped_moves),
+                None => (0, 0),
+            };
+            self.fire_trace.push(FireTrace {
+                dt: state.dt,
+                dt_max: state.dt_max,
+                alpha: state.alpha,
+                power: power_trace,
+                n_pos: state.n_pos,
+                half_step_backs: prev_hsb + usize::from(hsb_trace),
+                clipped_moves: prev_clip + usize::from(clip_trace),
+            });
+        }
         self.remember(x, value, &grad);
         self.steps += 1;
         Ok(self.report(value, x, &report_grad))
@@ -1659,7 +1710,7 @@ mod tests {
 
     use super::{Inner, Solver, Space, l2};
     use crate::accept::Accept;
-    use crate::fire::FireKind;
+    use crate::fire::{FireKind, FirePreset};
     use crate::holonomic::{ConstraintError, DistanceConstraints};
     use crate::newton::HessianOracle;
     use crate::{Control, Error, Method, Oracle};
@@ -1774,5 +1825,62 @@ mod tests {
             "{err:?}"
         );
         assert_eq!(x, start);
+    }
+
+    #[test]
+    fn constrained_fire_records_per_step_trace_and_keeps_default_trajectory_identical() {
+        let start = array![-0.5, 0.0, 0.0, 0.5, 0.0, 0.0, 0.35, 0.0, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], start.view()).unwrap();
+        let obj = Oracle::unbounded(9, |x: ArrayView1<f64>| {
+            (50.0 * x.dot(&x), x.mapv(|v| 100.0 * v))
+        });
+        let control = Control::default()
+            .with_maxiter(20)
+            .with_gtol(0.0)
+            .with_istep(0.1);
+
+        let mut solver = Solver::new(Method::fire(FireKind::V2), control.clone(), 9);
+        solver.set_fire_preset(FirePreset::Guenole2020).unwrap();
+        solver.set_atom_maxmove(0.05);
+        solver.set_distance_constraints(set.clone()).unwrap();
+        solver.start_fire_trace();
+        let mut x = start.clone();
+        for _ in 0..12 {
+            solver.step(&obj, &mut x).unwrap();
+        }
+        let trace = solver.take_fire_trace();
+        assert_eq!(trace.len(), 12);
+        assert_eq!(trace[0].dt_max, 1.0);
+        assert_eq!(trace[0].alpha, 0.25);
+        assert!(trace.last().unwrap().clipped_moves > 0);
+        assert!(trace.last().unwrap().half_step_backs > 0);
+
+        let mut v1 = Solver::new(Method::fire(FireKind::V1), control.clone(), 9);
+        v1.set_atom_maxmove(0.05);
+        v1.set_distance_constraints(set.clone()).unwrap();
+        v1.start_fire_trace();
+        let mut x_v1 = start.clone();
+        for _ in 0..4 {
+            v1.step(&obj, &mut x_v1).unwrap();
+        }
+        let v1_trace = v1.take_fire_trace();
+        assert_eq!(v1_trace.len(), 4);
+        assert!(v1_trace.iter().all(|t| t.power.is_finite() && t.dt > 0.0));
+
+        let mut plain = Solver::new(Method::fire(FireKind::V2), control.clone(), 9);
+        plain.set_distance_constraints(set.clone()).unwrap();
+        let mut traced = Solver::new(Method::fire(FireKind::V2), control, 9);
+        traced.set_distance_constraints(set).unwrap();
+        traced.start_fire_trace();
+        let mut x_plain = start.clone();
+        let mut x_traced = start;
+        for _ in 0..6 {
+            plain.step(&obj, &mut x_plain).unwrap();
+            traced.step(&obj, &mut x_traced).unwrap();
+            for (a, b) in x_plain.iter().zip(x_traced.iter()) {
+                assert_eq!(a.to_bits(), b.to_bits());
+            }
+        }
+        assert_eq!(traced.take_fire_trace().len(), 6);
     }
 }
