@@ -1178,7 +1178,8 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 /// ABI minor 51 adds `rgmin_minimize_rlbfgs` and `rgmin_rlbfgs_default`.
 /// ABI minor 60 adds `rgmin_minimize_eindir_opts`.
 /// ABI minor 61 adds `rgmin_solver_set_highs_time_limit` and
-/// `rgmin_solver_highs_timeouts`. Minor 50 adds
+/// `rgmin_solver_highs_timeouts`.
+/// ABI minor 62 adds the line-search rounding stop. Minor 50 adds
 /// `rgmin_solver_set_etol`, `rgmin_solver_set_max_evals`, their clear
 /// functions, `rgmin_solver_evals` and the two stop codes. Minor 49 adds
 /// the stop-status setters, the floor, and the `*_opts` one-shots. Minor 48
@@ -1196,8 +1197,9 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 61);
+    assert_eq!(stamp.abi_minor, 62);
     assert_eq!(stamp.layout_revision, 5);
+    assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING as i32, 9);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
 

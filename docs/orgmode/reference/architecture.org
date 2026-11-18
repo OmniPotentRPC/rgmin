@@ -82,7 +82,7 @@ python3 docs/figures/architecture/draw_hourglass.py
 - =rgmin_solver_create= / =rgmin_solver_step= / =rgmin_solver_free= ::
   The session half of the waist.
   Callbacks are arguments of each step, not stored on the handle.
-  =include/rgmin.h= sets =abi_major= 1, =abi_minor= 61 and =layout_revision= 5.
+  =include/rgmin.h= sets =abi_major= 1, =abi_minor= 62 and =layout_revision= 5.
   Minor 49 adds =StopReason= on the report, the opt-in unmet-stop
   error, and the backward-error polish. A zero iteration budget
   follows the same unmet-stop policy. Minor 50 adds the energy and
@@ -94,6 +94,7 @@ python3 docs/figures/architecture/draw_hourglass.py
   =rgmin_minimize_eindir_opts=, the
   eindir one-shot with the same two flags. Minor 61 adds
   =rgmin_solver_set_highs_time_limit= and =rgmin_solver_highs_timeouts=.
+  Minor 62 adds the line-search rounding stop.
   =rgmin_control_t= is unchanged.
   =rgmin_abi_compatible= checks the major version and the layout revision only.
 - =DistanceConstraints= :: Holonomic atom-pair distances for a session.
