@@ -15,14 +15,18 @@ GROMACS steepest descent
 The maximum is the largest Euclidean norm of one consecutive xyz atom
 triple. A trailing partial triple is one atom. A strict energy decrease
 accepts the trial and sets ``h <- 1.2 h``. An equal or larger energy rejects
-the trial, keeps the old point and force, and sets ``h <- 0.2 h``.
+the trial, keeps the old point and force, and sets ``h <- shrink * h``.
+``GromacsSteepConfig`` defaults ``shrink`` to 0.5.
 
-The implementation also follows the state-swap structure and strict
-energy comparison in GROMACS
-`do\_steep in src/gromacs/mdrun/minimize.cpp <https://github.com/gromacs/gromacs/blob/main/src/gromacs/mdrun/minimize.cpp#L2881-L3178>`_.
-That source currently multiplies a rejected displacement by 0.5, while
-the reference-manual algorithm says 0.2. rgmin follows the documented
-0.2 rule.
+The implementation follows the state-swap structure and strict energy
+comparison in GROMACS 2025.4
+`do_steep <https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L3104>`_.
+That function multiplies a rejected ``ustep`` by 0.5 (``minimize.cpp``
+line 3104) and an accepted one by 1.2 when ``count > 0`` (line 3092).
+The reference manual still says 0.2. ``GromacsSteepConfig::with_shrink``
+and ``Solver::set_gromacs_steep_config`` select that factor, or any other
+finite value in ``(0, 1)``. The Python ``Session`` keyword ``shrink``
+does the same for ``gromacs-steep``.
 
 Stops and reports
 ~~~~~~~~~~~~~~~~~
@@ -47,7 +51,7 @@ trial will use.
 Session hooks
 ~~~~~~~~~~~~~
 
-The core state contains only ``h`` and the 1.2/0.2 update. The session
+The core state contains ``h`` and the 1.2 / ``shrink`` update. The session
 projects rigid motion from the force before normalization, applies an
 explicit per-atom or Euclidean ``maxmove`` cap to the proposed displacement,
 and uses the ordinary manifold, coordinate-bound, and holonomic-distance
@@ -78,4 +82,5 @@ The Python ``gromacs_mdp_options`` layer converts:
 The Rust stepper, C ABI, and C++ wrapper do no unit conversion.
 ABI minor 48 carries ``RGMIN_GROMACS_STEEP`` and
 ``RGMIN_STOP_MACHINE_PRECISION``. Minor 47 is the level-set constraint
-setters.
+setters. The shrink factor is not a C symbol: the public C surface is
+unchanged, so the minor stays 48.

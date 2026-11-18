@@ -28,6 +28,7 @@ class Session:
         abc: bool = False,
         accept: str | None = None,
         istep: float | None = None,
+        shrink: float | None = None,
         level_set: float | None = None,
         error_on_unmet: bool = False,
         backward_polish: bool = False,

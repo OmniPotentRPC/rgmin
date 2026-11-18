@@ -24,7 +24,7 @@ use crate::fire::{
     fire_displacement_into, fire_move_clipped, fire_prepare_v2, fire_rescale_velocity,
     fire2_displacement_metric, guenole2020,
 };
-use crate::gromacs::GromacsSteep;
+use crate::gromacs::{GromacsSteep, GromacsSteepConfig};
 use crate::holonomic::DistanceConstraints;
 use crate::hvp::{
     FiniteDifference, HessianVector, HostAction, HostOracle, NewtonCgRequest, StepAction,
@@ -5255,6 +5255,17 @@ impl Solver {
         self.fire2 = None;
         self.apply_default_atom_cap();
         Ok(())
+    }
+
+    /// Shrink factor of a GROMACS steep session. The current displacement
+    /// is kept. Other methods return [`Error::Steep`].
+    pub fn set_gromacs_steep_config(&mut self, config: GromacsSteepConfig) -> Result<()> {
+        match &mut self.overlay {
+            Overlay::GromacsSteep(state) => state.set_config(config),
+            _ => Err(Error::Steep {
+                what: "parameters require a gromacs-steep session",
+            }),
+        }
     }
 
     /// Integrator parameters of a FIRE session. The velocity is cleared.

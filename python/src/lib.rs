@@ -14,7 +14,8 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use rgmin::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Control, Error, FireConfig, FireKind,
-    FirePreset, LbfgsH0, LbfgsPairs, LbfgsStep, LevelSetConstraint, LineSearch, ManifoldFactor,
+    FirePreset, GromacsSteepConfig, LbfgsH0, LbfgsPairs, LbfgsStep, LevelSetConstraint,
+    LineSearch, ManifoldFactor,
     Method, Oracle, RiemannianManifold, SearchStep, Solver, SpdMetric, Status, StiefelRetraction,
     StopNorm, SuppliedSearch, lowest_eigenpairs as solve_lowest_eigenpairs,
     lowest_eigenpairs_precond,
@@ -80,7 +81,9 @@ impl Session {
     /// scale. `preset="guenole2020"` and `abc` select the FIRE 2.0
     /// parameter set and ABC-FIRE. `accept` is `none`, `energy` or
     /// `nonmonotone`; `downhill` is `energy`. `istep` is the step scale
-    /// of a method other than FIRE, whose scale is `dt`.
+    /// of a method other than FIRE, whose scale is `dt`. `shrink` is
+    /// the refused-trial factor of a `gromacs-steep` session; omitted,
+    /// the session uses the GROMACS 0.5 factor.
     /// `error_on_unmet` and `backward_polish` are recorded on the
     /// session. One `step` stays `Ok`; the polish needs a Hessian.
     #[allow(clippy::too_many_arguments)]
@@ -108,6 +111,7 @@ impl Session {
         abc=false,
         accept=None,
         istep=None,
+        shrink=None,
         level_set=None,
         error_on_unmet=false,
         backward_polish=false,
@@ -136,6 +140,7 @@ impl Session {
         abc: bool,
         accept: Option<&str>,
         istep: Option<f64>,
+        shrink: Option<f64>,
         level_set: Option<f64>,
         error_on_unmet: bool,
         backward_polish: bool,
@@ -156,6 +161,7 @@ impl Session {
         );
         let lbfgs = matches!(method, Method::Lbfgs { .. });
         let nlcg = matches!(method, Method::Nlcg { .. });
+        let steep = matches!(method, Method::GromacsSteep);
         let istep = match istep {
             Some(_) if fire => {
                 return Err(PyValueError::new_err(
@@ -227,6 +233,16 @@ impl Session {
         }
         if accept != Accept::None {
             solver.set_accept(accept);
+        }
+        if let Some(factor) = shrink {
+            if !steep {
+                return Err(PyValueError::new_err(
+                    "shrink applies to a gromacs-steep session only",
+                ));
+            }
+            solver
+                .set_gromacs_steep_config(GromacsSteepConfig::default().with_shrink(factor))
+                .map_err(value_error)?;
         }
         if max_atom.is_finite() && max_atom > 0.0 {
             solver.set_atom_maxmove(max_atom);
