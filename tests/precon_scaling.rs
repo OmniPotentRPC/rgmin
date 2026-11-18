@@ -20,6 +20,7 @@ use rgmin::{Exp, ExpParams, Lindh, LindhParams, Neighbours};
 
 const A_SI: f64 = 5.431;
 const CUTOFF: f64 = 4.0;
+const MIN_PAIR_DIST: f64 = 1.0e-8;
 const REPS: usize = 5;
 const APPLIES: usize = 8;
 const SOLVES: usize = 8;
@@ -124,7 +125,7 @@ fn cell_pairs(pos: &[[f64; 3]], cutoff: f64, lengths: [f64; 3]) -> Vec<(usize, u
                                 d[k] -= lengths[k] * (d[k] / lengths[k]).round();
                             }
                             let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-                            if r > 1e-8 && r < cutoff {
+                            if r > MIN_PAIR_DIST && r < cutoff {
                                 pairs.push((i, j, r));
                             }
                         }

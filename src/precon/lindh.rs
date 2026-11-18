@@ -378,6 +378,7 @@ impl LindhState {
         Ok(())
     }
 
+    #[cfg(feature = "capi")]
     pub(crate) fn threads(&self) -> Option<usize> {
         self.params.threads
     }
