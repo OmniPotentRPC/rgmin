@@ -170,6 +170,42 @@ struct Report {
     rgmin_stop_t stop = RGMIN_STOP_BUDGET;
 };
 
+/// Thrown by the one-shots when \c Control::error_on_unmet is set and the
+/// run stops short of its criterion. It is a \c std::runtime_error, so
+/// existing handlers still catch it. \c report() is the C report of the
+/// stop: the value, step count, final gradient norm and \c rgmin_stop_t
+/// reason.
+class StopUnmetError : public std::runtime_error {
+public:
+    StopUnmetError(std::string const& what, Report const& report)
+        : std::runtime_error(what), report_(report) {}
+
+    Report const& report() const noexcept { return report_; }
+
+private:
+    Report report_;
+};
+
+namespace detail {
+
+/// The report of a one-shot, or the exception for its status. The C
+/// one-shots write \c out before they return \c RGMIN_UNMET_STOP.
+inline Report one_shot_report(rgmin_status_t st, rgmin_report_t const& out,
+                              char const* fallback) {
+    Report const report{out.value, out.steps, out.grad_norm, out.stop};
+    if (st == RGMIN_SUCCESS) {
+        return report;
+    }
+    char const* msg = rgmin_last_error();
+    std::string const what = msg ? msg : fallback;
+    if (st == RGMIN_UNMET_STOP) {
+        throw StopUnmetError(what, report);
+    }
+    throw std::runtime_error(what);
+}
+
+}  // namespace detail
+
 using ScalarType = double;
 
 struct OptimizeControl {
@@ -216,11 +252,7 @@ inline Report minimize_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,
     rgmin_status_t st = rgmin_minimize_opts(
         eval, grad, user, x, &c, static_cast<rgmin_method_t>(method),
         ctrl.error_on_unmet ? 1 : 0, ctrl.backward_polish ? 1 : 0, &out);
-    if (st != RGMIN_SUCCESS) {
-        char const* msg = rgmin_last_error();
-        throw std::runtime_error(msg ? msg : "rgmin_minimize failed");
-    }
-    return Report{out.value, out.steps, out.grad_norm, out.stop};
+    return detail::one_shot_report(st, out, "rgmin_minimize failed");
 }
 
 inline Report minimize_hess_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hess_fn hess,
@@ -231,11 +263,7 @@ inline Report minimize_hess_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hes
     rgmin_status_t st = rgmin_minimize_hess_opts(
         eval, grad, hess, user, x, &c, static_cast<rgmin_method_t>(method),
         ctrl.error_on_unmet ? 1 : 0, ctrl.backward_polish ? 1 : 0, &out);
-    if (st != RGMIN_SUCCESS) {
-        char const* msg = rgmin_last_error();
-        throw std::runtime_error(msg ? msg : "rgmin_minimize_hess failed");
-    }
-    return Report{out.value, out.steps, out.grad_norm, out.stop};
+    return detail::one_shot_report(st, out, "rgmin_minimize_hess failed");
 }
 
 inline Report minimize_eindir(const eindir_objective_t* objective,
@@ -247,11 +275,7 @@ inline Report minimize_eindir(const eindir_objective_t* objective,
     rgmin_status_t st = rgmin_minimize_eindir_opts(
         objective, stamp, x, &c, static_cast<rgmin_method_t>(method),
         ctrl.error_on_unmet ? 1 : 0, ctrl.backward_polish ? 1 : 0, &out);
-    if (st != RGMIN_SUCCESS) {
-        char const* msg = rgmin_last_error();
-        throw std::runtime_error(msg ? msg : "rgmin_minimize_eindir failed");
-    }
-    return Report{out.value, out.steps, out.grad_norm, out.stop};
+    return detail::one_shot_report(st, out, "rgmin_minimize_eindir failed");
 }
 
 /// One-shot solve. Named for the header rather than `minimize`, which
