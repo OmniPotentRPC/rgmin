@@ -54,6 +54,10 @@ Objects
     The C++ one-shots throw ``rgmin::StopUnmetError`` and Python
     ``minimize`` raises ``rgmin.StopUnmetError``. Each is a runtime error
     that carries the report of the stop, as ``report()`` and ``.report``.
+    ``StopReason::Iterating`` is a step still in progress and has no C
+    code of its own. A session step that has not stopped reports
+    ``RGMIN_STOP_BUDGET``. A finished one-shot never reports it, and the C
+    one-shots return ``RGMIN_INTERNAL_ERROR`` if one did.
 
 ``backward_error_floor``
     ``n * eps * (1 + |V| + sum |x_i|)`` with
