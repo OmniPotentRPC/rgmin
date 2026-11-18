@@ -908,3 +908,115 @@ fn try_lowest_eigenpairs_validates_before_any_product() {
     assert!(matches!(err, Error::EigenInput { .. }), "{err:?}");
     assert_eq!(host.calls.get(), 0);
 }
+
+const RIGID_DIM: usize = 6;
+
+fn rigid_bounds() -> &'static Bounds<f64> {
+    static B: OnceLock<Bounds<f64>> = OnceLock::new();
+    B.get_or_init(|| {
+        Bounds::new(
+            Array1::from_elem(RIGID_DIM, -1e6),
+            Array1::from_elem(RIGID_DIM, 1e6),
+            0.0,
+        )
+    })
+}
+
+struct RigidHost {
+    calls: Cell<usize>,
+    fail_at: Option<usize>,
+}
+
+impl RigidHost {
+    fn new(fail_at: Option<usize>) -> Self {
+        Self {
+            calls: Cell::new(0),
+            fail_at,
+        }
+    }
+
+    fn call(&self) -> Result<(), HostFailure> {
+        let n = self.calls.get() + 1;
+        self.calls.set(n);
+        if self.fail_at == Some(n) {
+            return Err(HostFailure(n));
+        }
+        Ok(())
+    }
+}
+
+impl TryHessianVector for RigidHost {
+    type Error = HostFailure;
+
+    fn dim(&self) -> usize {
+        RIGID_DIM
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        rigid_bounds()
+    }
+
+    fn try_value_and_gradient(
+        &self,
+        x: ArrayView1<f64>,
+    ) -> Result<(f64, Array1<f64>), HostFailure> {
+        self.call()?;
+        Ok((0.5 * x.dot(&x), x.to_owned()))
+    }
+
+    fn try_hessian_vector(
+        &self,
+        _x: ArrayView1<f64>,
+        v: ArrayView1<f64>,
+    ) -> Result<Array1<f64>, HostFailure> {
+        self.call()?;
+        Ok(v.to_owned())
+    }
+}
+
+fn rigid_start() -> Array1<f64> {
+    array![1.1, -0.7, 0.4, -0.2, 0.9, -1.3]
+}
+
+#[test]
+fn try_step_hvp_with_rigid_removal_keeps_the_fallible_contract() {
+    for method in methods() {
+        let mut reference = Solver::new(method.clone(), Control::default(), RIGID_DIM);
+        reference.set_project_rigid(true);
+        let mut x_ref = rigid_start();
+        let counter = RigidHost::new(None);
+        let ref_report = reference
+            .try_step_hvp(&counter, &mut x_ref)
+            .expect("the reference rigid step");
+        let per_step = counter.calls.get();
+        assert!(
+            per_step >= 2,
+            "{method:?}: expected callbacks in rigid step"
+        );
+
+        for fail_at in 1..=per_step {
+            let mut solver = Solver::new(method.clone(), Control::default(), RIGID_DIM);
+            solver.set_project_rigid(true);
+            let mut x = rigid_start();
+            let before = SessionState::of(&solver, &x);
+            let host = RigidHost::new(Some(fail_at));
+            let err = solver
+                .try_step_hvp(&host, &mut x)
+                .expect_err("the host failed");
+            assert_eq!(host_failure(&err), &HostFailure(fail_at));
+            assert_eq!(host.calls.get(), fail_at, "no call after the failure");
+            assert_eq!(SessionState::of(&solver, &x), before);
+            assert_eq!(bits(&x), bits(&rigid_start()));
+
+            let retry_host = RigidHost::new(None);
+            let retry = solver
+                .try_step_hvp(&retry_host, &mut x)
+                .expect("retry after rigid host failure");
+            assert_eq!(ReportBits::of(&retry), ReportBits::of(&ref_report));
+            assert_eq!(
+                SessionState::of(&solver, &x),
+                SessionState::of(&reference, &x_ref)
+            );
+        }
+    }
+}
