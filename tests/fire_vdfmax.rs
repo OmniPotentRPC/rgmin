@@ -1,7 +1,10 @@
 //! The published FIRE 2.0 schedule stops when `vdfmax` is exceeded.
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Control, Error, FireKind, FirePreset, FireTrace, FireVariant, Method, Oracle, Solver};
+use rgmin::{
+    Control, Error, FireConfig, FireKind, FirePreset, FireTrace, FireVariant, Method, Oracle,
+    Solver,
+};
 
 struct Bowl;
 
@@ -104,7 +107,8 @@ fn lj7_start() -> Array1<f64> {
 /// Reference transcription of Guénolé et al., Comput. Mater. Sci. 175,
 /// 109584 (2020) Algorithm 2 / LAMMPS `min_style fire` (`integrator
 /// eulerimplicit halfstepback yes initialdelay yes vdfmax 2000`),
-/// recording `(dt, alpha, power, n_pos, half_step_backs, clipped_moves)`.
+/// recording `(dt, dt_max, alpha, power, n_pos, half_step_backs,
+/// clipped_moves)`.
 fn lammps_fire2_reference(
     mut x: Array1<f64>,
     dt0: f64,
@@ -115,7 +119,7 @@ fn lammps_fire2_reference(
     let n = x.len();
     let mut vel = Array1::<f64>::zeros(n);
     let mut dt = dt0;
-    let mut dt_max = 10.0 * dt0;
+    let dt_max = 10.0 * dt0;
     let dt_min = 0.02 * dt0;
     let n_delay = 20usize;
     let f_inc = 1.1;
@@ -144,14 +148,10 @@ fn lammps_fire2_reference(
                 alpha *= f_alpha;
             }
         } else {
-            let prev_n_pos = n_pos;
             n_pos = 0;
             n_neg += 1;
             assert!(n_neg <= vdfmax, "exceeded vdfmax");
             if steps >= n_delay {
-                if prev_n_pos == 1 {
-                    dt_max = dt_max.min(dt);
-                }
                 if dt * f_dec >= dt_min {
                     dt *= f_dec;
                 }
@@ -202,6 +202,7 @@ fn lammps_fire2_reference(
         trace.push(
             FireTrace::default()
                 .with_dt(dt)
+                .with_dt_max(dt_max)
                 .with_alpha(alpha)
                 .with_power(power)
                 .with_n_pos(n_pos)
@@ -251,11 +252,14 @@ fn fire2_trace_matches_lammps_reference_step_for_step_on_lj7() {
 
     assert_eq!(got_trace.len(), want_trace.len());
     assert_eq!(got_evals, want_evals);
-    assert!(want_trace.last().unwrap().half_step_backs > 0);
+    let last = want_trace.last().unwrap();
+    assert!(last.half_step_backs > 0);
+    assert_eq!(want_evals, 1 + want_trace.len() + last.half_step_backs);
     let p_rel = 1.0 / 10_000_000_000.0;
     let x_tol = 1.0 / 1_000_000_000_000.0;
     for (step, (got, want)) in got_trace.iter().zip(want_trace.iter()).enumerate() {
         assert_eq!(got.dt, want.dt, "step {step} dt");
+        assert_eq!(got.dt_max, want.dt_max, "step {step} dt_max");
         assert_eq!(got.alpha, want.alpha, "step {step} alpha");
         assert_eq!(got.n_pos, want.n_pos, "step {step} n_pos");
         assert_eq!(
@@ -281,4 +285,53 @@ fn fire2_trace_matches_lammps_reference_step_for_step_on_lj7() {
             want_x[i]
         );
     }
+}
+
+fn stiff_soft_overshoot(cap_two_step_overshoot: bool) -> (Array1<f64>, Vec<FireTrace>) {
+    let dt = 0.1;
+    let control = Control::default()
+        .with_maxiter(180)
+        .with_gtol(0.0)
+        .with_istep(dt);
+    let mut solver = Solver::new(Method::fire(FireKind::V2), control, 2);
+    solver.set_fire_preset(FirePreset::Guenole2020).unwrap();
+    solver
+        .set_fire_config(
+            FireConfig::ase()
+                .with_dt(dt)
+                .with_dt_max(1.0)
+                .with_n_min(20)
+                .with_alpha(0.25)
+                .with_cap_two_step_overshoot(cap_two_step_overshoot),
+        )
+        .unwrap();
+    solver.set_atom_maxmove(0.1);
+    solver.start_fire_trace();
+    let obj = Oracle::unbounded(2, |x: ArrayView1<f64>| {
+        (
+            7.0 * x[0] * x[0] + 0.02 * x[1] * x[1],
+            array![14.0 * x[0], 0.04 * x[1]],
+        )
+    });
+    let mut x = array![0.02, 0.05];
+    for _ in 0..180 {
+        solver.step(&obj, &mut x).unwrap();
+    }
+    (x, solver.take_fire_trace())
+}
+
+#[test]
+fn two_step_overshoot_cap_engages_and_changes_the_stiff_soft_trajectory() {
+    let (plain_x, plain) = stiff_soft_overshoot(false);
+    let (capped_x, capped) = stiff_soft_overshoot(true);
+    let cap_step = capped
+        .iter()
+        .position(|entry| entry.dt_max < 1.0)
+        .expect("the stiff mode must trigger the cap");
+
+    assert_eq!(capped[cap_step - 1].n_pos, 1);
+    assert!(capped[cap_step].power <= 0.0);
+    assert_eq!(plain[cap_step].dt_max, 1.0);
+    assert_ne!(plain_x, capped_x);
+    assert_ne!(plain, capped);
 }
