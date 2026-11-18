@@ -144,7 +144,7 @@ pub enum rgmin_method_t {
     RGMIN_POLAK_RIBIERE_PLUS = 26,
     /// eOn Polak-Ribiere with the Powell restart at 0.5. Develop surface.
     RGMIN_EON_CG = 27,
-    /// GROMACS `integrator = steep`. ABI minor 48.
+    /// GROMACS `integrator = steep`. ABI minor 49.
     RGMIN_GROMACS_STEEP = 28,
 }
 
