@@ -1715,7 +1715,10 @@ fn invert_spd3(d00: f64, d01: f64, d02: f64, d11: f64, d12: f64, d22: f64) -> Op
         return None;
     }
     let minor2 = d00 * d11 - d01 * d01;
-    if !(minor2.is_finite() && minor2 > 0.0) {
+    let minor2_scale = d00.abs().max(d01.abs()).max(d11.abs());
+    // The leading 2×2 minor scales as s^2, so its floor is eps*s^2.
+    let minor2_floor = f64::EPSILON * minor2_scale * minor2_scale;
+    if !(minor2.is_finite() && minor2 > minor2_floor) {
         return None;
     }
     let c00 = d11 * d22 - d12 * d12;
@@ -1725,7 +1728,8 @@ fn invert_spd3(d00: f64, d01: f64, d02: f64, d11: f64, d12: f64, d22: f64) -> Op
     let c12 = d01 * d02 - d00 * d12;
     let c22 = minor2;
     let det = d00 * c00 + d01 * c01 + d02 * c02;
-    // A determinant scales cubically, so compare it to epsilon at the block's scale.
+    // The determinant scales as s^3, so its floor is eps*s^3.
+    // Both comparisons are exactly scale-invariant for power-of-two scales.
     let scale = d00
         .abs()
         .max(d01.abs())

@@ -38,6 +38,9 @@ Morse supercells (107, 255, and 863 atoms; Makri, Ortner, and Kermode,
 J. Chem. Phys. 150, 094109 (2019), https://doi.org/10.1063/1.5064465),
 ~BlockIc0~ holds the full global IC(0) factor in a single block and
 cuts cold PCG iterations from 20, 25, and 36 down to 8, 9, and 12.
+The 3×3 SPD block inverse floors the leading 2×2 minor at eps*s^2 and
+the determinant at eps*s^3, where s is the largest absolute entry of
+the block. Exact scale invariance holds for power-of-two scales.
 
 ~r_nn~ is the largest per-atom nearest-neighbour
 distance. ~μ~ is the Rayleigh quotient of a sine probe against this

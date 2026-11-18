@@ -20,7 +20,8 @@ use rgmin::{Exp, ExpParams, Lindh, LindhParams, Neighbours};
 
 const A_SI: f64 = 5.431;
 const CUTOFF: f64 = 4.0;
-const MIN_PAIR_DIST: f64 = 1.0e-8;
+// Skip only near-zero separations from periodic cancellation; this is 2^-26 = sqrt(2^-52).
+const MIN_PAIR_DIST: f64 = 67_108_864.0 * f64::EPSILON;
 const REPS: usize = 5;
 const APPLIES: usize = 8;
 const SOLVES: usize = 8;
