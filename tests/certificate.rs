@@ -32,6 +32,13 @@ fn scalar_quadratic_zero_is_inside_the_kantorovich_ball() {
 #[test]
 fn failed_smallness_and_morse_gap_are_typed() {
     assert!(matches!(
+        kantorovich_ball(0.0, 0.0, 0.0),
+        Err(CertificateError::InvalidMajorant {
+            input: "inverse_norm",
+            value: 0.0
+        })
+    ));
+    assert!(matches!(
         kantorovich_ball(1.0, 1.0, 1.0),
         Err(CertificateError::NoExistenceBall { h }) if h == 1.0
     ));

@@ -92,6 +92,14 @@ fn nonnegative(input: &'static str, value: f64) -> Result<f64, CertificateError>
     }
 }
 
+fn positive(input: &'static str, value: f64) -> Result<f64, CertificateError> {
+    if value.is_finite() && value > 0.0 {
+        Ok(value)
+    } else {
+        Err(CertificateError::InvalidMajorant { input, value })
+    }
+}
+
 /// Prove the classical Newton--Kantorovich existence ball.
 ///
 /// `inverse_norm` bounds `||J(x0)^{-1}||`, `jacobian_lipschitz` bounds
@@ -104,7 +112,7 @@ pub fn kantorovich_ball(
     jacobian_lipschitz: f64,
 ) -> Result<KantorovichBall, CertificateError> {
     let eta = nonnegative("newton_step", newton_step)?;
-    let inverse = nonnegative("inverse_norm", inverse_norm)?;
+    let inverse = positive("inverse_norm", inverse_norm)?;
     let lipschitz = nonnegative("jacobian_lipschitz", jacobian_lipschitz)?;
     let k = inverse * lipschitz;
     if !k.is_finite() {
