@@ -979,7 +979,10 @@ impl Solver {
         }
         let set = self.constraint_set();
         let start = self.enter(&set, obj, x)?;
-        if self.stationarity_norm(x, &start.grad) < self.control.gtol {
+        if self
+            .control
+            .converged(self.stationarity_norm(x, &start.grad))
+        {
             self.remember(x, start.value, &start.raw);
             return Ok(self.report(start.value, x, &start.grad));
         }
@@ -1430,7 +1433,10 @@ impl Solver {
         };
         let set = self.constraint_set();
         let start = self.enter(&set, obj, x)?;
-        if self.stationarity_norm(x, &start.grad) < self.control.gtol {
+        if self
+            .control
+            .converged(self.stationarity_norm(x, &start.grad))
+        {
             self.remember(x, start.value, &start.raw);
             return self.report_or_escape_constrained(&set, obj, x, start.value, start.raw);
         }
@@ -1700,7 +1706,10 @@ impl Solver {
         if !start.cached {
             self.gradient_calls += 1;
         }
-        if self.stationarity_norm(x, &start.grad) < self.control.gtol {
+        if self
+            .control
+            .converged(self.stationarity_norm(x, &start.grad))
+        {
             self.remember(x, start.value, &start.raw);
             return Ok(self.report(start.value, x, &start.grad));
         }

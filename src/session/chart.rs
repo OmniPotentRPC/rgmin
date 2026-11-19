@@ -150,7 +150,17 @@ impl Solver {
         let out = step(self, &charted, &mut z);
         *x = &z / &**d;
         self.chart_seen = Some((x.clone(), z));
-        out.map(|report| report_to_natural(report, d))
+        match out {
+            Ok(report) => Ok(report_to_natural(report, d)),
+            Err(Error::StopUnmet { reason, report }) => Err(Error::StopUnmet {
+                reason,
+                report: Box::new(report_to_natural(*report, d)),
+            }),
+            Err(Error::NotConverged(report)) => {
+                Err(Error::NotConverged(Box::new(report_to_natural(*report, d))))
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// Settings that read raw coordinates as atoms or boxes, which the
