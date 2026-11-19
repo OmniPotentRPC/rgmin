@@ -236,6 +236,8 @@ fn a_rounding_flat_bracket_stops_without_the_steepest_retry_tail() {
     let base_gradient = objective.grad(point.view());
     let mut solver = Solver::new(Method::lbfgs(), Control::default().with_gtol(0.0), 1);
     solver.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
+    assert!(solver.push_pair(array![1.0].view(), array![1.0].view()));
+    assert_eq!(solver.pair_count(), 1);
 
     let report = solver.run(&objective, &mut point).unwrap();
 
@@ -243,7 +245,7 @@ fn a_rounding_flat_bracket_stops_without_the_steepest_retry_tail() {
     assert_eq!(point, array![2.0 * f64::EPSILON.sqrt()]);
     assert_eq!(report.grad.as_ref(), Some(&base_gradient));
     assert!(objective.calls.load(Ordering::Relaxed) <= 16);
-    assert_eq!(solver.pair_count(), 0);
+    assert_eq!(solver.pair_count(), 1);
 }
 
 #[test]
@@ -279,13 +281,16 @@ fn direct_lbfgs_stops_the_rounding_tail_without_changing_the_gradient() {
     let mut solver = Lbfgs::default();
     solver.step = LbfgsStep::Wolfe;
     solver.gtol = 0.0;
+    solver.record(array![1.0], array![2.0]);
+    assert_eq!(solver.len(), 1);
 
     let (_, point, evals) =
         solver.minimize(start.view(), 100, |x| Some(objective.value_and_gradient(x)));
 
     assert_eq!(point, start);
     assert_eq!(objective.grad(point.view()), base_gradient);
-    assert!(evals <= 10);
+    assert_eq!(solver.len(), 1);
+    assert!(evals <= 4);
 }
 
 #[test]
@@ -295,6 +300,7 @@ fn error_on_unmet_carries_the_rounding_stop() {
     let control = Control::default().with_gtol(0.0).with_error_on_unmet(true);
     let mut solver = Solver::new(Method::lbfgs(), control, 1);
     solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+    assert!(solver.push_pair(array![1.0].view(), array![1.0].view()));
 
     let error = solver.run(&objective, &mut point).unwrap_err();
 
@@ -305,4 +311,5 @@ fn error_on_unmet_carries_the_rounding_stop() {
         }
         other => panic!("unexpected error {other}"),
     }
+    assert_eq!(solver.pair_count(), 1);
 }
