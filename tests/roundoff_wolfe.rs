@@ -313,3 +313,130 @@ fn error_on_unmet_carries_the_rounding_stop() {
     }
     assert_eq!(solver.pair_count(), 1);
 }
+
+#[test]
+fn a_kinked_valley_stops_when_the_bracket_width_hits_rounding() {
+    let kink = 4.0;
+    let calls = AtomicUsize::new(0);
+    let result = LineSearch::wolfe(1e-4, 0.1, 80).search_from_result(
+        |x| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            if x[0] <= kink {
+                (-x[0], array![-1.0])
+            } else {
+                (-kink + (x[0] - kink), array![1.0])
+            }
+        },
+        array![0.0].view(),
+        0.0,
+        array![-1.0].view(),
+        array![1.0].view(),
+        3.0,
+        f64::INFINITY,
+    );
+
+    assert_eq!(
+        result.stop_reason,
+        Some(LineSearchStopReason::RoundingBlocked)
+    );
+    let step = result.step.expect("best Armijo point kept");
+    assert!((step.alpha - kink).abs() <= 64.0 * f64::EPSILON);
+    assert!(step.f < -3.9);
+    assert!(calls.load(Ordering::Relaxed) < 65);
+}
+
+#[test]
+fn standalone_zoom_respects_the_relative_bracket_rounding_width() {
+    let lo = 4.0;
+    let blocked_hi = lo + 32.0 * f64::EPSILON;
+    let blocked_mid = 0.5 * (lo + blocked_hi);
+    let blocked_calls = AtomicUsize::new(0);
+    let blocked_alpha = rgmin::linesearch::zoom(
+        &mut |x| {
+            blocked_calls.fetch_add(1, Ordering::Relaxed);
+            if x[0] == blocked_mid {
+                (-x[0], array![0.0])
+            } else {
+                (-x[0], array![-1.0])
+            }
+        },
+        array![0.0].view(),
+        array![1.0].view(),
+        lo,
+        blocked_hi,
+        1e-4,
+        0.9,
+        20,
+    );
+    assert_eq!(blocked_alpha, lo);
+    assert_eq!(blocked_calls.load(Ordering::Relaxed), 2);
+
+    let open_hi = lo + 64.0 * f64::EPSILON;
+    let open_mid = 0.5 * (lo + open_hi);
+    let open_calls = AtomicUsize::new(0);
+    let open_alpha = rgmin::linesearch::zoom(
+        &mut |x| {
+            open_calls.fetch_add(1, Ordering::Relaxed);
+            if x[0] == open_mid {
+                (-x[0], array![0.0])
+            } else {
+                (-x[0], array![-1.0])
+            }
+        },
+        array![0.0].view(),
+        array![1.0].view(),
+        lo,
+        open_hi,
+        1e-4,
+        0.9,
+        20,
+    );
+    assert_eq!(open_alpha, open_mid);
+    assert_eq!(open_calls.load(Ordering::Relaxed), 3);
+}
+
+#[test]
+fn a_sharp_slope_crossing_keeps_a_rounded_wolfe_bracket_alive() {
+    let basin_edge = 2.0_f64.powi(-28);
+    let minimizer = 0.5 * basin_edge;
+    let curvature = 2.0 / minimizer;
+    let search = LineSearch::wolfe(1e-4, 0.9, 80);
+    let run = |wall_slope: f64| {
+        let calls = AtomicUsize::new(0);
+        let result = search.search_from_result(
+            |x| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                if x[0] <= basin_edge {
+                    let f = 1.0 - 2.0 * x[0] + 0.5 * curvature * x[0] * x[0];
+                    (f, array![-2.0 + curvature * x[0]])
+                } else {
+                    (1.0, array![wall_slope])
+                }
+            },
+            array![0.0].view(),
+            1.0,
+            array![-2.0].view(),
+            array![1.0].view(),
+            1.0,
+            f64::INFINITY,
+        );
+        (result, calls.load(Ordering::Relaxed))
+    };
+
+    let (crossed, _) = run(100.0);
+    assert_eq!(crossed.stop_reason, None);
+    let accepted = crossed.step.expect("narrow basin minimum found");
+    assert!(accepted.f < 1.0);
+    assert!(accepted.g[0].abs() <= 1.8);
+
+    for unresolvable_wall in [64.0, 48.0, -100.0] {
+        let (blocked, evals) = run(unresolvable_wall);
+        assert_eq!(
+            blocked.stop_reason,
+            Some(LineSearchStopReason::RoundingBlocked),
+            "wall slope {unresolvable_wall} should stop on rounding"
+        );
+        assert!(blocked.step.is_none());
+        assert!(evals <= 10, "wall slope {unresolvable_wall} took {evals}");
+    }
+}
