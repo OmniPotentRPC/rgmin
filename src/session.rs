@@ -1888,6 +1888,17 @@ impl Solver {
         };
         let retracted =
             retract_to_level_set_fallible(cfg, x, |point| obj.step_value_and_gradient(point))?;
+        let moved = retracted
+            .point
+            .iter()
+            .zip(x.iter())
+            .any(|(a, b)| a.to_bits() != b.to_bits());
+        if moved && let Overlay::Rcg(memory) = &mut self.overlay {
+            // The held gradient and direction belong to the point before
+            // the retraction, and the next conjugacy test would mix them
+            // with a gradient from the new point.
+            memory.reset();
+        }
         *x = retracted.point;
         *value = retracted.value;
         *grad = retracted.gradient;
@@ -6299,6 +6310,41 @@ mod tests {
             },
             2,
         )
+    }
+
+    fn rcg_holds_direction(solver: &Solver) -> bool {
+        match &solver.overlay {
+            Overlay::Rcg(memory) => memory.holds_direction(),
+            _ => panic!("not a Riemannian CG session"),
+        }
+    }
+
+    #[test]
+    fn a_level_set_retraction_clears_the_riemannian_cg_memory() {
+        let bowl = Oracle::unbounded(2, |x: ArrayView1<f64>| (x.dot(&x), x.mapv(|v| 2.0 * v)));
+        let mut free = Solver::new(Method::rcg(), Control::default(), 2);
+        let mut x = array![0.6, 0.8];
+        free.step(&bowl, &mut x).unwrap();
+        assert!(
+            rcg_holds_direction(&free),
+            "a plain step keeps its direction"
+        );
+
+        // The capped step runs inward off the circle, and the level-set
+        // retraction brings the point back.
+        let control = Control {
+            maxmove: Some(0.3),
+            ..Control::default()
+        };
+        let mut tied = Solver::new(Method::rcg(), control, 2);
+        tied.set_level_set(LevelSetConstraint::new(1.0)).unwrap();
+        let mut y = array![0.6, 0.8];
+        tied.step(&bowl, &mut y).unwrap();
+        assert!((y.dot(&y) - 1.0).abs() < 1e-6, "off the level set: {y}");
+        assert!(
+            !rcg_holds_direction(&tied),
+            "the direction was built at the point before the retraction"
+        );
     }
 
     fn fire_state(solver: &Solver) -> &FireState {
