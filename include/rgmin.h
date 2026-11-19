@@ -84,7 +84,8 @@ typedef struct rgmin_abi_stamp_t {
  * 48 rgmin_solver_set_fire_cap_two_step_overshoot,
  * 49 stop reasons LINE_SEARCH and POLISH_UNMET, RGMIN_UNMET_STOP,
  *    the two session setters, rgmin_backward_error_floor, and the
- *    *_opts one-shots. rgmin_control_t is unchanged. */
+ *    *_opts one-shots. rgmin_control_t is unchanged.
+ * 50 stop reason LINE_SEARCH_ROUNDING. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps

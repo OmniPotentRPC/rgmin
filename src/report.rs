@@ -86,8 +86,9 @@ impl StopReason {
 
     /// Historical [`Status`] when this reason has one.
     ///
-    /// [`Self::LineSearchFailed`] and [`Self::PolishUnmet`] keep
-    /// [`Status::Budget`]: they are a spent stop, named more finely here.
+    /// [`Self::LineSearchFailed`], [`Self::LineSearchRounding`], and
+    /// [`Self::PolishUnmet`] keep [`Status::Budget`]: they are a spent
+    /// stop, named more finely here.
     pub fn status(self) -> Status {
         match self {
             Self::Converged => Status::Tolerance,

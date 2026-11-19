@@ -62,8 +62,10 @@ Objects
     ``rgmin_solver_set_error_on_unmet``,
     ``rgmin_solver_set_backward_polish``, and the ``\*_opts`` one-shots.
     ``xts.h`` aliases ``RGMIN_UNMET_STOP``, ``RGMIN_STOP_LINE_SEARCH``,
-    and ``RGMIN_STOP_POLISH_UNMET``. ``RGMIN_UNMET_STOP`` is status 6.
-    ``RGMIN_STOP_LINE_SEARCH`` is 4 and ``RGMIN_STOP_POLISH_UNMET`` is 5.
+    ``RGMIN_STOP_POLISH_UNMET``, and ``RGMIN_STOP_LINE_SEARCH_ROUNDING``.
+    ``RGMIN_UNMET_STOP`` is status 6. ``RGMIN_STOP_LINE_SEARCH`` is 4,
+    ``RGMIN_STOP_POLISH_UNMET`` is 5, and
+    ``RGMIN_STOP_LINE_SEARCH_ROUNDING`` is 6.
 
 ``minimize_method``
     Cold-start dispatch for every ``Method``.
