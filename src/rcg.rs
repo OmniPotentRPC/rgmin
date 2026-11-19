@@ -155,6 +155,32 @@ impl Default for RcgOptions {
     }
 }
 
+impl RcgOptions {
+    /// Refuse a tolerance or step no run could read.
+    ///
+    /// [`Self::grad_tol`] must be finite and not negative, and
+    /// [`Self::initial_step`] finite and positive. A NaN tolerance would
+    /// compare false against every gradient norm and run to the iteration
+    /// cap; a negative one could never be met.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidControl`] names the setting.
+    pub fn validate(&self) -> Result<()> {
+        if !(self.grad_tol.is_finite() && self.grad_tol >= 0.0) {
+            return Err(Error::InvalidControl {
+                what: "rcg grad_tol must be finite and not negative",
+            });
+        }
+        if !(self.initial_step.is_finite() && self.initial_step > 0.0) {
+            return Err(Error::InvalidControl {
+                what: "rcg initial_step must be finite and positive",
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Point returned by [`minimize_rcg`].
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -416,6 +442,13 @@ where
 /// `fg` returns the value and the Euclidean gradient. The Riemannian
 /// gradient is [`Manifold::egrad2rgrad`]. The start is retracted by a
 /// zero tangent step so it lies on the manifold.
+///
+/// # Errors
+///
+/// [`Error::InvalidControl`] from [`RcgOptions::validate`],
+/// [`Error::ManifoldDim`] for a start the manifold cannot hold,
+/// [`Error::Oracle`] for a non-finite value or gradient, and the typed
+/// failure of a projection or retraction that could not be carried out.
 pub fn minimize_rcg<M, F>(
     manifold: &M,
     x0: Array1<f64>,
@@ -426,6 +459,7 @@ where
     M: Manifold + ?Sized,
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
+    opts.validate()?;
     if manifold.required_dim(x0.len()).is_err() {
         return Err(Error::ManifoldDim {
             kind: "rcg",
@@ -878,6 +912,27 @@ mod tests {
     use crate::manifold::{Sphere, StiefelNp};
     use crate::{Control, DistanceConstraints, Method, Oracle, Solver};
     use ndarray::array;
+
+    #[test]
+    fn options_refuse_a_tolerance_or_step_no_run_could_read() {
+        let bowl = |x: ArrayView1<f64>| (x.dot(&x), x.mapv(|v| 2.0 * v));
+        let bad = [
+            RcgOptions::default().with_grad_tol(f64::NAN),
+            RcgOptions::default().with_grad_tol(f64::INFINITY),
+            RcgOptions::default().with_grad_tol(-1e-8),
+            RcgOptions::default().with_initial_step(f64::NAN),
+            RcgOptions::default().with_initial_step(f64::INFINITY),
+            RcgOptions::default().with_initial_step(0.0),
+            RcgOptions::default().with_initial_step(-1.0),
+        ];
+        for opts in &bad {
+            assert!(matches!(opts.validate(), Err(Error::InvalidControl { .. })));
+            let got = minimize_rcg(&crate::manifold::Euclidean, array![1.0, 2.0], bowl, opts);
+            assert!(matches!(got, Err(Error::InvalidControl { .. })), "{opts:?}");
+        }
+        assert!(RcgOptions::default().validate().is_ok());
+        assert!(RcgOptions::default().with_grad_tol(0.0).validate().is_ok());
+    }
 
     fn rayleigh(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let a = [3.0, 1.0, 2.0];
