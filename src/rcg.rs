@@ -987,6 +987,8 @@ mod tests {
             euclid: Some(0.05),
         };
         let mut memory = RcgMemory::from_options(&RcgOptions::default());
+        // Strong Wolfe cannot meet curvature inside this cap. Armijo
+        // backtracking takes the opening trial, which the cap still bounds.
         let moved = rcg_step(
             &sphere,
             &Infallible,
@@ -994,7 +996,7 @@ mod tests {
             &x,
             value,
             &egrad,
-            RcgOptions::default().linesearch,
+            LineSearch::backtracking(1e-4, 0.5, 8),
             caps,
             rayleigh,
         )
