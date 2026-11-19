@@ -241,21 +241,39 @@ impl Failures for Infallible {
     }
 }
 
-/// Holonomic bond set as a manifold.
+/// Alternating projections between the tangent spaces, and between the
+/// two sets, stop at this many sweeps.
+const MAX_SWEEPS: usize = 200;
+
+/// Relative gap under which two projections of one vector agree.
+const SWEEP_TOL: f64 = 1e-13;
+
+/// A manifold cut by a holonomic bond set.
 ///
-/// [`DistanceConstraints::project_vector`] is the tangent projection,
-/// [`DistanceConstraints::project_gradient`] is the Riemannian gradient,
-/// and [`DistanceConstraints::constrain`] is the retraction. The transport
-/// is that projection at the arrival point. A failure in any of them is
-/// recorded and read through [`Failures`].
-pub(crate) struct BondManifold<'a> {
+/// The tangent space at a point is the intersection of the tangent space
+/// of `base` and the null space of the bond Jacobian. The retraction
+/// returns a trial to the bonds along those of the point it leaves, then to
+/// `base`, until both hold. A flat `base` such as Euclidean space needs no
+/// second sweep, so the bond set alone is the one-pass case.
+///
+/// [`DistanceConstraints::project_vector`] is the bond tangent projection,
+/// [`DistanceConstraints::project_gradient`] the bond part of the
+/// Riemannian gradient, and [`DistanceConstraints::constrain`] the return
+/// to the bonds. A failure in any of them is recorded and read through
+/// [`Failures`].
+pub(crate) struct BondedManifold<'a, M: ?Sized> {
+    base: &'a M,
     constraints: &'a DistanceConstraints,
     failure: RefCell<Option<Error>>,
 }
 
-impl<'a> BondManifold<'a> {
-    pub(crate) fn new(constraints: &'a DistanceConstraints) -> Self {
+impl<'a, M> BondedManifold<'a, M>
+where
+    M: Manifold + ?Sized,
+{
+    pub(crate) fn new(base: &'a M, constraints: &'a DistanceConstraints) -> Self {
         Self {
+            base,
             constraints,
             failure: RefCell::new(None),
         }
@@ -267,45 +285,87 @@ impl<'a> BondManifold<'a> {
             *slot = Some(error);
         }
     }
+
+    /// `start` moved into both tangent spaces at `x`. `bond` is the bond
+    /// projection applied to it.
+    fn tangent<B>(&self, x: &Array1<f64>, start: Array1<f64>, bond: B) -> Array1<f64>
+    where
+        B: Fn(&DistanceConstraints, ArrayView1<'_, f64>, &mut Array1<f64>) -> Result<()>,
+    {
+        let mut v = start;
+        for _ in 0..MAX_SWEEPS {
+            let before = v.clone();
+            if let Err(e) = bond(self.constraints, x.view(), &mut v) {
+                self.fail(e);
+                return before;
+            }
+            let carried = self.base.project(x, &v);
+            if agree(&carried, &v) {
+                return carried;
+            }
+            v = carried;
+        }
+        self.fail(crate::holonomic::unsupported(
+            "a manifold whose tangent space does not meet the bond tangent space",
+        ));
+        v
+    }
 }
 
-impl Failures for BondManifold<'_> {
+impl<M> Failures for BondedManifold<'_, M> {
     fn take(&self) -> Option<Error> {
         self.failure.borrow_mut().take()
     }
 }
 
-impl Manifold for BondManifold<'_> {
+fn agree(a: &Array1<f64>, b: &Array1<f64>) -> bool {
+    let scale = 1.0 + crate::vecops::nrm2(a.view()).max(crate::vecops::nrm2(b.view()));
+    crate::vecops::nrm2_diff(a.view(), b.view()) <= SWEEP_TOL * scale
+}
+
+impl<M> Manifold for BondedManifold<'_, M>
+where
+    M: Manifold + ?Sized,
+{
+    fn required_dim(&self, n: usize) -> std::result::Result<(), usize> {
+        self.base.required_dim(n)
+    }
+
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        let mut out = v.clone();
-        if let Err(e) = self.constraints.project_vector(x.view(), &mut out) {
-            self.fail(e);
-            return v.clone();
-        }
-        out
+        self.tangent(x, v.clone(), |set, at, w| set.project_vector(at, w))
     }
 
     fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
-        let mut out = egrad.clone();
-        if let Err(e) = self.constraints.project_gradient(x.view(), &mut out) {
-            self.fail(e);
-            return egrad.clone();
-        }
-        out
+        let start = self.base.egrad2rgrad(x, egrad);
+        self.tangent(x, start, |set, at, w| set.project_gradient(at, w).map(drop))
     }
 
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        let mut y = x.clone();
-        crate::vecops::axpy(1.0, v.view(), &mut y);
-        if let Err(e) = self.constraints.constrain(x.view(), &mut y) {
-            self.fail(e);
-            return x.clone();
+        let zero = Array1::zeros(x.len());
+        let mut y = self.base.retract(x, v);
+        for _ in 0..MAX_SWEEPS {
+            if let Err(e) = self.constraints.constrain(x.view(), &mut y) {
+                self.fail(e);
+                return x.clone();
+            }
+            let on_base = self.base.retract(&y, &zero);
+            if self.constraints.excess(on_base.view()) <= 1.0 {
+                return on_base;
+            }
+            y = on_base;
         }
-        y
+        self.fail(crate::holonomic::unsupported(
+            "a manifold that does not meet the bond set near the trial",
+        ));
+        x.clone()
     }
 
-    fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        self.project(x_to, v)
+    fn transport(&self, x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        self.project(x_to, &self.base.transport(x_from, x_to, v))
+    }
+
+    fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {
+        self.base.inner(x, u, v)
     }
 }
 
@@ -878,6 +938,30 @@ mod tests {
         assert!(moved.value < value);
     }
 
+    #[test]
+    fn a_bonded_sphere_is_tangent_to_both_and_retracts_onto_both() {
+        let x = array![0.6, 0.0, 0.0, 0.0, 0.8, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], x.view()).unwrap();
+        let bonded = BondedManifold::new(&Sphere, &set);
+        let egrad = array![0.3, -0.2, 1.0, 0.1, 0.5, 2.0];
+        let rgrad = bonded.egrad2rgrad(&x, &egrad);
+        let bond = |v: &Array1<f64>, w: &Array1<f64>| {
+            (0..3)
+                .map(|k| (v[k] - v[3 + k]) * (w[k] - w[3 + k]))
+                .sum::<f64>()
+        };
+        assert!(x.dot(&rgrad).abs() < 1e-12, "normal part {}", x.dot(&rgrad));
+        assert!(
+            bond(&x, &rgrad).abs() < 1e-12,
+            "bond part {}",
+            bond(&x, &rgrad)
+        );
+        let y = bonded.retract(&x, &rgrad.mapv(|c| -0.3 * c));
+        assert!((y.dot(&y).sqrt() - 1.0).abs() < 1e-12);
+        assert!(set.excess(y.view()) <= 1.0);
+        assert!(bonded.take().is_none());
+    }
+
     fn brockett(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let a = [1.0, 2.0, 3.0, 4.0];
         let nmu = [1.0, 2.0];
@@ -1078,7 +1162,7 @@ mod tests {
         let obj = Oracle::unbounded(6, fg);
         let mut direct = start.clone();
         let mut memory = RcgMemory::from_options(&RcgOptions::default());
-        let bond = BondManifold::new(&constraints);
+        let bond = BondedManifold::new(&crate::manifold::Euclidean, &constraints);
         for _ in 0..2 {
             let (value, grad) = fg(direct.view());
             let moved = rcg_step(

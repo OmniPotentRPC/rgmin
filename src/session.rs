@@ -6204,7 +6204,7 @@ impl Solver {
                     euclid: self.control.maxmove_cap(),
                 };
                 let moved = if let Some(set) = self.constraints.as_deref() {
-                    let bonded = crate::rcg::BondManifold::new(set);
+                    let bonded = crate::rcg::BondedManifold::new(&self.manifold, set);
                     crate::rcg::rcg_step(
                         &bonded,
                         &bonded,
