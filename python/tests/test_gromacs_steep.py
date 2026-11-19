@@ -140,14 +140,22 @@ def test_session_accepts_max_constraint_shrinks_for_gromacs_steep() -> None:
     assert len(point) == 1
 
 
+_GROMACS_STEEP_MIN_USTEP = 1e-12
+
+
 def _expected_shrinks(step_size: float, shrink: float) -> int:
-    eps = float(np.finfo(np.float64).eps)
-    if not (np.isfinite(step_size) and step_size > 0.0 and np.isfinite(shrink) and 0.0 < shrink < 1.0):
+    floor = _GROMACS_STEEP_MIN_USTEP
+    if not (
+        np.isfinite(step_size) and step_size > 0.0 and np.isfinite(shrink) and 0.0 < shrink < 1.0
+    ):
         return 0
-    if step_size <= eps:
+    if step_size < floor:
         return 0
-    count = math.ceil(math.log(eps / step_size) / math.log(shrink))
-    return int(min(1_000_000, max(0, count)))
+    exact = math.log(floor / step_size) / math.log(shrink)
+    if not math.isfinite(exact) or exact < 0.0:
+        return 0
+    count = math.floor(exact) + 1
+    return int(min(1_000_000, count))
 
 
 def test_session_constraint_shrink_budget_follows_istep() -> None:

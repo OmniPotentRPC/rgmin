@@ -85,8 +85,10 @@ impl Session {
     /// of a method other than FIRE, whose scale is `dt`. `shrink` is
     /// the refused-trial factor of a `gromacs-steep` session; omitted,
     /// the session uses the GROMACS 0.5 factor. `max_constraint_shrinks`
-    /// bounds consecutive constraint failures before the session returns
-    /// a constraint error.
+    /// bounds consecutive constraint failures. Crossing the GROMACS
+    /// double precision displacement floor stops at machine precision.
+    /// An explicit budget that runs out while the displacement is still
+    /// at least that floor returns a constraint error.
     /// `error_on_unmet` and `backward_polish` are recorded on the
     /// session. One `step` stays `Ok`; the polish needs a Hessian.
     #[allow(clippy::too_many_arguments)]

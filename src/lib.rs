@@ -150,8 +150,8 @@ pub use fire::{
 };
 pub use gromacs::{
     GROMACS_STEEP_EMSTEP_DEFAULT, GROMACS_STEEP_GROW, GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS,
-    GROMACS_STEEP_SHRINK, GROMACS_STEEP_SHRINK_BUDGET_CAP, GromacsSteep, GromacsSteepConfig,
-    gromacs_steep_max_constraint_shrinks,
+    GROMACS_STEEP_MIN_USTEP, GROMACS_STEEP_SHRINK, GROMACS_STEEP_SHRINK_BUDGET_CAP, GromacsSteep,
+    GromacsSteepConfig, gromacs_steep_max_constraint_shrinks,
 };
 pub use highs_kind::{
     HighsCCallback, HighsCallback, HighsCallbackKind, HighsCrossover, HighsOptions, HighsSolverKind,

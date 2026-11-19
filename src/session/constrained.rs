@@ -28,6 +28,7 @@ use crate::fire::{
     FireKind, FirePreparation, FirePreset, FireState, FireTrace, fire_after_v1,
     fire_displacement_into, fire_move_clipped, fire_prepare_v2, project_box_tangent,
 };
+use crate::gromacs::GROMACS_STEEP_MIN_USTEP;
 use crate::holonomic::{ConstraintError, DistanceConstraints, Tangent, unsupported};
 use crate::hvp::{
     ETA_ACCEPT, FiniteDifference, HessianVector, NYSTROM_RANK, NystromPrecond, OptionalAction,
@@ -1501,18 +1502,28 @@ impl Solver {
                 // The failure is a rejected step until the shrink bound is spent.
                 let trial = match start.space.place(obj.bounds(), &displacement, self.caps()) {
                     Err(e @ Error::Constraint(_)) => {
+                        if state.step_size() < GROMACS_STEEP_MIN_USTEP {
+                            self.remember(x, start.value, &start.raw);
+                            self.steps += 1;
+                            return Ok(self.finish(
+                                start.value,
+                                x,
+                                &start.grad,
+                                norm,
+                                Status::MachinePrecision,
+                            ));
+                        }
                         if state.reject_constraint() {
                             return Err(e);
                         }
                         self.remember(x, start.value, &start.raw);
                         self.steps += 1;
-                        return Ok(self.finish(
-                            start.value,
-                            x,
-                            &start.grad,
-                            norm,
-                            Status::Iterating,
-                        ));
+                        let status = if state.step_size() < GROMACS_STEEP_MIN_USTEP {
+                            Status::MachinePrecision
+                        } else {
+                            Status::Iterating
+                        };
+                        return Ok(self.finish(start.value, x, &start.grad, norm, status));
                     }
                     Err(e) => return Err(e),
                     Ok(trial) => {

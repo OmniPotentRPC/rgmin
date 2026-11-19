@@ -20,7 +20,7 @@ the trial, keeps the old point and force, and sets ``h <- shrink * h``.
 
 The implementation follows the state-swap structure and strict energy
 comparison in GROMACS 2025.4
-`do_steep <https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L3104>`_.
+`do\_steep <https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L3104>`_.
 That function multiplies a rejected ``ustep`` by 0.5 (``minimize.cpp``
 line 3104) and an accepted one by 1.2 when ``count > 0`` (line 3092).
 The reference manual still says 0.2. ``GromacsSteepConfig::with_shrink``
@@ -33,15 +33,19 @@ Stops and reports
 
 .. table::
 
-    +--------------------------------------------------------+----------------------+----------------------------------+
-    | condition                                              | ``Status``           | C ABI                            |
-    +========================================================+======================+==================================+
-    | largest per-atom force is below ``Control::gtol``      | ``Tolerance``        | ``RGMIN_STOP_TOLERANCE``         |
-    +--------------------------------------------------------+----------------------+----------------------------------+
-    | ``Control::maxiter`` trials were attempted             | ``Budget``           | ``RGMIN_STOP_BUDGET``            |
-    +--------------------------------------------------------+----------------------+----------------------------------+
-    | the proposed displacement cannot change any coordinate | ``MachinePrecision`` | ``RGMIN_STOP_MACHINE_PRECISION`` |
-    +--------------------------------------------------------+----------------------+----------------------------------+
+    +-----------------------------------------------------------------------------------------------------+-----------------------+----------------------------------------------------------------+
+    | condition                                                                                           | ``Status``            | C ABI                                                          |
+    +=====================================================================================================+=======================+================================================================+
+    | largest per-atom force is below ``Control::gtol``                                                   | ``Tolerance``         | ``RGMIN_STOP_TOLERANCE``                                       |
+    +-----------------------------------------------------------------------------------------------------+-----------------------+----------------------------------------------------------------+
+    | ``Control::maxiter`` trials were attempted                                                          | ``Budget``            | ``RGMIN_STOP_BUDGET``                                          |
+    +-----------------------------------------------------------------------------------------------------+-----------------------+----------------------------------------------------------------+
+    | the proposed displacement cannot change any coordinate, or it fell below the double precision floor | ``MachinePrecision``  | ``RGMIN_STOP_MACHINE_PRECISION``                               |
+    +-----------------------------------------------------------------------------------------------------+-----------------------+----------------------------------------------------------------+
+    | callback returned a non-finite value or gradient                                                    | ``Error::Oracle``     | ``RGMIN_INTERNAL_ERROR`` (+ ``rgmin_last_error``)              |
+    +-----------------------------------------------------------------------------------------------------+-----------------------+----------------------------------------------------------------+
+    | an explicit shrink budget ran out while the displacement was still at least the floor               | ``Error::Constraint`` | ``RGMIN_CONSTRAINT_ERROR`` (+ ``rgmin_last_constraint_error``) |
+    +-----------------------------------------------------------------------------------------------------+-----------------------+----------------------------------------------------------------+
 
 ``Report::stop_norm`` is ``StopNorm::MaxAtom`` by default for this method,
 even when the input ``Control`` names another norm. An explicit
@@ -49,17 +53,9 @@ even when the input ``Control`` names another norm. An explicit
 the same as for any other method. Rejected trials count as steps.
 ``Solver::gromacs_step_size`` returns the displacement that the next trial
 will use.
-
-Non-finite callback values or gradients are runtime errors
-(``Error::Oracle`` in Rust, ``RGMIN_INTERNAL_ERROR`` in C with
-``rgmin_last_error`` text). A distance-constraint failure returns
-``Error::Constraint`` in Rust and ``RGMIN_CONSTRAINT_ERROR`` in C, with
-``rgmin_last_constraint_error`` naming the reason.
-This differs from GROMACS ``do_steep`` in two places by design: a
+This differs from GROMACS ``do_steep`` in one place by design: a
 non-finite trial is an immediate oracle error here, where GROMACS
-refuses and shrinks, and a constraint-failure run returns
-``Error::Constraint`` once the shrink budget is spent, where GROMACS
-ends the minimization loop gracefully once ``ustep < 1e-12``.
+refuses the trial and shrinks.
 
 Session hooks
 ~~~~~~~~~~~~~
@@ -74,12 +70,15 @@ same branch GROMACS takes by setting the trial energy to +infinity
 (``minimize.cpp`` lines 3008-3009 and 3104).
 ``GromacsSteepConfig::max_constraint_shrinks`` bounds that run. The
 session derives its default from the actual ``emstep`` and shrink factor:
-the number of shrinks until ``h`` reaches floating-point epsilon
-(``h * shrink^k <= eps``). At the canonical ``emstep = 0.01`` and
-``shrink = 0.5``, that gives 46 in f64 arithmetic. The next failure
-returns the constraint error. Zero restores an error on the first
-failure and does not shrink. A placement that meets the constraints
-restarts the count. The trial energy is tested only after those hooks,
+the least ``k`` with ``h * shrink^k`` below ``GROMACS_STEEP_MIN_USTEP``, the
+GROMACS double precision ``ustep`` floor. At the canonical
+``emstep = 0.01`` and ``shrink = 0.5``, that count is 34. Crossing the
+floor stops with ``Status::MachinePrecision`` and keeps the last accepted
+point. An explicit budget that runs out while ``h`` is still at least
+the floor returns ``Error::Constraint``. Zero returns that error on the
+first failure and does not shrink. A placement that meets the
+constraints restarts the count. The trial energy is tested only after
+those hooks,
 so an accepted step and its reported gradient describe the point the host
 receives.
 

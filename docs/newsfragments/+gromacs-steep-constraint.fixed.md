@@ -1,1 +1,1 @@
-A GROMACS steep trial that misses its distance constraints is rejected and the displacement shrinks, matching `do_steep`. `GromacsSteepConfig::max_constraint_shrinks` bounds that run before the constraint error is returned.
+A GROMACS steep trial that misses its distance constraints is rejected and the displacement shrinks, matching `do_steep`. Crossing `GROMACS_STEEP_MIN_USTEP` stops with `Status::MachinePrecision`. An explicit `GromacsSteepConfig::max_constraint_shrinks` that runs out while the displacement is still at least that floor returns `Error::Constraint`.

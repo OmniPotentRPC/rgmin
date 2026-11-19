@@ -58,14 +58,18 @@ the units of the objective:
 The C selector is ``RGMIN_GROMACS_STEEP`` and the C++ selector is
 ``rgmin::Method::GromacsSteep``. Set ``rgmin_control_t.gtol`` and
 ``rgmin_control_t.istep`` in the same units as the callback.
-``RGMIN_STOP_MACHINE_PRECISION`` reports that the current displacement
-cannot change a coordinate.
+``RGMIN_STOP_MACHINE_PRECISION`` reports that the displacement is below
+the GROMACS double precision floor, or that it cannot change a
+coordinate.
 
-A non-finite callback value or gradient is reported as an oracle error
+A non-finite callback value or gradient is returned as an oracle error
 (Rust ``Error::Oracle``, C ``RGMIN_INTERNAL_ERROR`` with
 ``rgmin_last_error`` text). A distance-constraint placement failure
 returns a constraint error (Rust ``Error::Constraint``, C
-``RGMIN_CONSTRAINT_ERROR`` with ``rgmin_last_constraint_error``).
+``RGMIN_CONSTRAINT_ERROR`` with ``rgmin_last_constraint_error``) when an
+explicit shrink budget runs out while the displacement is still at
+least the floor. Crossing the floor stops with
+``RGMIN_STOP_MACHINE_PRECISION`` instead.
 
 The exact update and stop rules are in
 :doc:`../reference/gromacs-steep`.

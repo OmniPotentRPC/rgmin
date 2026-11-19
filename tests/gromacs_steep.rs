@@ -188,6 +188,72 @@ fn a_constraint_failure_shrinks_and_the_bound_then_errors() {
 }
 
 #[test]
+fn persistent_lincs_failures_stop_at_the_double_precision_floor() {
+    // A light hub with three heavy ends in a 30 degree cone has a LINCS
+    // spectral radius above one, so every projection fails no matter how
+    // small the step is. GROMACS double precision `do_steep` then stops
+    // once `ustep` drops below `GROMACS_STEEP_MIN_USTEP`, thirty four
+    // halvings of the canonical `emstep` 0.01.
+    let (s, c) = 30_f64.to_radians().sin_cos();
+    let mut start = Array1::zeros(12);
+    for k in 0..3 {
+        let phi = (120.0 * k as f64).to_radians();
+        start[3 * (k + 1)] = s * phi.cos();
+        start[3 * (k + 1) + 1] = s * phi.sin();
+        start[3 * (k + 1) + 2] = c;
+    }
+    let set = DistanceConstraints::at(vec![(0, 1), (0, 2), (0, 3)], start.view())
+        .unwrap()
+        .with_masses(vec![1.0, 100.0, 100.0, 100.0])
+        .unwrap()
+        .with_solver(ConstraintSolver::Lincs);
+    let objective = Oracle::unbounded(start.len(), |p: ArrayView1<f64>| {
+        (p[0], Array1::ones(p.len()))
+    });
+    let mut x = start.clone();
+    let mut solver = Solver::new(
+        Method::GromacsSteep,
+        control(rgmin::GROMACS_STEEP_EMSTEP_DEFAULT, 0.0, 80),
+        x.len(),
+    );
+    solver.set_distance_constraints(set).unwrap();
+    let mut report = None;
+    for _ in 0..80 {
+        match solver.step(&objective, &mut x) {
+            Ok(step) if step.status == Status::MachinePrecision => {
+                report = Some(step);
+                break;
+            }
+            Ok(step) => {
+                assert_eq!(step.status, Status::Iterating);
+                assert_eq!(x, start);
+            }
+            Err(err) => panic!("constraint run returned an error: {err}"),
+        }
+    }
+    let report = report.expect("the run did not stop at machine precision");
+    assert_eq!(report.steps, 34);
+    assert_eq!(report.stop_reason(), rgmin::StopReason::MachinePrecision);
+    assert_eq!(x, start);
+    let h = solver.gromacs_step_size().unwrap();
+    let mut halved = rgmin::GROMACS_STEEP_EMSTEP_DEFAULT;
+    let mut count = 0u32;
+    while halved >= rgmin::GROMACS_STEEP_MIN_USTEP {
+        halved *= GROMACS_STEEP_SHRINK;
+        count += 1;
+    }
+    assert_eq!(count, 34);
+    assert!(h < rgmin::GROMACS_STEEP_MIN_USTEP, "{h}");
+    assert_eq!(
+        solver
+            .gromacs_steep_config()
+            .unwrap()
+            .max_constraint_shrinks,
+        34
+    );
+}
+
+#[test]
 fn constraint_shrink_budget_follows_istep() {
     for (small_step, large_step) in [(0.001, 0.1), (0.01, 1.0)] {
         let small = Solver::new(Method::GromacsSteep, control(small_step, 0.0, 1), 6);

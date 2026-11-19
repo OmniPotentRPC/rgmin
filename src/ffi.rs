@@ -1781,7 +1781,10 @@ pub unsafe extern "C" fn rgmin_solver_set_accept(
 ///
 /// `max_constraint_shrinks` is an exact budget, including 0: 0 returns
 /// `RGMIN_CONSTRAINT_ERROR` on the first failed projection, and a positive
-/// value allows that many consecutive failed projections before the error.
+/// value allows that many consecutive failed projections before the error,
+/// while the displacement is still at least the GROMACS double precision
+/// floor. A failure that crosses that floor returns
+/// `RGMIN_STOP_MACHINE_PRECISION` and keeps the last accepted point.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
@@ -1802,9 +1805,9 @@ pub unsafe extern "C" fn rgmin_solver_set_gromacs_steep(
 }
 
 /// Largest consecutive failed-projection budget from a GROMACS steep
-/// step size and shrink factor before the displacement reaches
-/// floating-point epsilon. Invalid input gives 0. The result is capped
-/// to bound construction time.
+/// step size and shrink factor before the displacement falls below the
+/// GROMACS double precision floor. Invalid input gives 0. The result is
+/// capped to bound construction time.
 #[unsafe(no_mangle)]
 pub extern "C" fn rgmin_gromacs_steep_max_constraint_shrinks(step_size: f64, shrink: f64) -> u32 {
     crate::gromacs_steep_max_constraint_shrinks(step_size, shrink)

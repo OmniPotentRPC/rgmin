@@ -35,19 +35,29 @@ pub const GROMACS_STEEP_EMSTEP_DEFAULT: f64 = 0.01;
 /// Upper bound on [`gromacs_steep_max_constraint_shrinks`].
 ///
 /// A `shrink` close enough to one needs an astronomic count of
-/// multiplications to bring `step_size` down to [`f64::EPSILON`]; past
-/// this bound the count is capped rather than returned exactly, so a
-/// caller still gets a usable budget in bounded time.
+/// multiplications to bring `step_size` down to
+/// [`GROMACS_STEEP_MIN_USTEP`]; past this bound the count is capped
+/// rather than returned exactly, so a caller still gets a usable budget
+/// in bounded time.
 pub const GROMACS_STEEP_SHRINK_BUDGET_CAP: u32 = 1_000_000;
 
-/// Largest shrink count from this step size and shrink factor before the
-/// displacement reaches floating-point epsilon.
+/// GROMACS double precision floor on the steep displacement `ustep`.
 ///
-/// The count is the least `k` with `step_size * shrink.powi(k) <=
-/// f64::EPSILON`, taken in closed form from logarithms rather than by
-/// repeated multiplication, so a `shrink` near one returns in bounded
-/// time instead of multiplying until a loop counter overflows. The
-/// result saturates at [`GROMACS_STEEP_SHRINK_BUDGET_CAP`].
+/// `do_steep` in GROMACS 2025.4 `minimize.cpp` ends the minimization when
+/// `ustep` is below this value under `GMX_DOUBLE`. The single precision
+/// build uses a looser floor. This stepper is `f64`, so it follows the
+/// double precision branch. Thirty four halvings of
+/// [`GROMACS_STEEP_EMSTEP_DEFAULT`] land below it.
+pub const GROMACS_STEEP_MIN_USTEP: f64 = 1e-12;
+
+/// Largest shrink count from this step size and shrink factor before the
+/// displacement falls below [`GROMACS_STEEP_MIN_USTEP`].
+///
+/// The count is the least `k` with `step_size * shrink.powi(k) <
+/// GROMACS_STEEP_MIN_USTEP`, taken in closed form from logarithms rather
+/// than by repeated multiplication, so a `shrink` near one returns in
+/// bounded time instead of multiplying until a loop counter overflows.
+/// The result saturates at [`GROMACS_STEEP_SHRINK_BUDGET_CAP`].
 pub fn gromacs_steep_max_constraint_shrinks(step_size: f64, shrink: f64) -> u32 {
     if !(step_size.is_finite()
         && step_size > 0.0
@@ -57,11 +67,14 @@ pub fn gromacs_steep_max_constraint_shrinks(step_size: f64, shrink: f64) -> u32 
     {
         return 0;
     }
-    if step_size <= f64::EPSILON {
+    if step_size < GROMACS_STEEP_MIN_USTEP {
         return 0;
     }
-    let exact_count = (f64::EPSILON / step_size).ln() / shrink.ln();
-    let count = exact_count.ceil();
+    let exact_count = (GROMACS_STEEP_MIN_USTEP / step_size).ln() / shrink.ln();
+    if !(exact_count.is_finite() && exact_count >= 0.0) {
+        return 0;
+    }
+    let count = exact_count.floor() + 1.0;
     if !(count.is_finite() && count > 0.0) {
         return 0;
     }
@@ -73,7 +86,7 @@ pub fn gromacs_steep_max_constraint_shrinks(step_size: f64, shrink: f64) -> u32 
 }
 
 /// Consecutive constraint failures for a canonical `emstep = 0.01`.
-pub const GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS: u32 = 46;
+pub const GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS: u32 = 34;
 
 /// Parameters of [`GromacsSteep`].
 ///
@@ -88,11 +101,16 @@ pub struct GromacsSteepConfig {
     /// value in the open interval `(0, 1)`.
     pub shrink: f64,
     /// How many consecutive constraint failures shrink the displacement
-    /// and keep the old point. The next failure is [`Error::Constraint`].
+    /// and keep the old point.
+    ///
+    /// A failure that leaves the displacement below
+    /// [`GROMACS_STEEP_MIN_USTEP`] stops with [`crate::Status::MachinePrecision`].
+    /// A failure after this budget, while the displacement is still at
+    /// least that floor, is [`Error::Constraint`].
     ///
     /// The default is [`GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS`]. Zero
     /// returns the constraint error on the first failure and does not
-    /// shrink.
+    /// shrink, unless the displacement is already below the floor.
     pub max_constraint_shrinks: u32,
     step_size: f64,
     /// Whether [`Self::max_constraint_shrinks`] was set by
@@ -419,11 +437,23 @@ mod tests {
     }
 
     #[test]
+    fn the_default_budget_matches_thirty_four_halvings_of_emstep() {
+        assert_eq!(
+            gromacs_steep_max_constraint_shrinks(
+                GROMACS_STEEP_EMSTEP_DEFAULT,
+                GROMACS_STEEP_SHRINK
+            ),
+            34
+        );
+        assert_eq!(GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS, 34);
+    }
+
+    #[test]
     fn a_shrink_near_one_returns_quickly_with_the_capped_budget() {
         // `1.0.next_down()` is the GROMACS-manual "nextafter(1, 0)" case:
         // the loop this replaced needed close to u32::MAX multiplications
-        // to bring any ordinary step size down to f64::EPSILON, which the
-        // gate measured as a multi-second hang.
+        // to bring any ordinary step size down to the double precision
+        // floor, which the gate measured as a multi-second hang.
         let shrink = 1.0_f64.next_down();
         let budget_timeout = std::time::Duration::from_millis(200);
         let started = std::time::Instant::now();
