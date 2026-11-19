@@ -2,7 +2,9 @@
 //! and the stops that every other method in the session obeys.
 
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{ConstraintError, Control, DistanceConstraints, Error, Method, Oracle, Solver};
+use rgmin::{
+    ConstraintError, Control, DistanceConstraints, Error, ManifoldKind, Method, Oracle, Solver,
+};
 
 /// `f = |x - c|^2 / 2` with `c` ten units from the start.
 fn far_bowl(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
@@ -85,4 +87,49 @@ fn rcg_reports_a_projection_that_fails_on_a_dependent_set() {
         other => panic!("expected a dependent-set error, got {other:?}"),
     }
     assert_eq!(x, start, "a refused step leaves x");
+}
+
+fn tilt(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+    let slope = [0.0, 0.0, 1.0, 0.0, 0.0, 2.0];
+    let value = x.iter().zip(slope).map(|(a, c)| a * c).sum();
+    (value, Array1::from_iter(slope))
+}
+
+fn bond_length(x: &Array1<f64>) -> f64 {
+    (0..3)
+        .map(|k| (x[k] - x[3 + k]).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+#[test]
+fn rcg_keeps_the_manifold_and_the_bonds_together() {
+    // Two atoms on the unit sphere of R^6, a distance of 1 apart.
+    let start = array![0.6, 0.0, 0.0, 0.0, 0.8, 0.0];
+    assert!((bond_length(&start) - 1.0).abs() < 1e-15);
+    let set = DistanceConstraints::at(vec![(0, 1)], start.view()).unwrap();
+    let mut solver = Solver::new(Method::rcg(), Control::default().with_gtol(1e-10), 6);
+    solver.set_distance_constraints(set).unwrap();
+    solver.set_manifold(ManifoldKind::Sphere);
+    let obj = Oracle::unbounded(6, tilt);
+    let mut x = start.clone();
+    let first = tilt(x.view()).0;
+    for _ in 0..40 {
+        solver.step(&obj, &mut x).unwrap();
+        let radius = x.dot(&x).sqrt();
+        assert!(
+            (radius - 1.0).abs() < 1e-8,
+            "left the sphere: |x| = {radius}"
+        );
+        assert!(
+            (bond_length(&x) - 1.0).abs() < 1e-8,
+            "left the bonds: {}",
+            bond_length(&x)
+        );
+    }
+    assert!(
+        tilt(x.view()).0 < first - 0.1,
+        "no descent: {}",
+        tilt(x.view()).0
+    );
 }
