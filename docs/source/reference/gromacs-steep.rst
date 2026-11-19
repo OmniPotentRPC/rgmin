@@ -109,4 +109,4 @@ C++ expose both ``shrink`` and ``max_constraint_shrinks`` through
 ``RGMIN_GROMACS_STEEP``, ``RGMIN_STOP_MACHINE_PRECISION``,
 ``rgmin_solver_set_gromacs_steep``, and
 ``rgmin_gromacs_steep_max_constraint_shrinks`` belong to
-ABI minor 52, the minor named by ``include/rgmin.h``.
+ABI minor 52. ``include/rgmin.h`` names minor 53.

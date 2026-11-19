@@ -213,6 +213,7 @@ typedef rgmin_h0_fn xts_h0_fn;
 #define xts_lowest_eigenpairs rgmin_lowest_eigenpairs
 #define xts_manifold_stiefel rgmin_manifold_stiefel
 #define xts_manifold_spd rgmin_manifold_spd
+#define xts_manifold_rigid_quotient rgmin_manifold_rigid_quotient
 #define xts_manifold_product rgmin_manifold_product
 #define xts_manifold_free rgmin_manifold_free
 #define xts_manifold_len rgmin_manifold_len
@@ -225,6 +226,17 @@ typedef rgmin_h0_fn xts_h0_fn;
 #define xts_manifold_inner rgmin_manifold_inner
 #define xts_manifold_gradient_step rgmin_manifold_gradient_step
 #define xts_lowest_eigenpairs_ex rgmin_lowest_eigenpairs_ex
+#define xts_rtr_tcg_solve rgmin_rtr_tcg_solve
+#define xts_rtr_radius_update rgmin_rtr_radius_update
+#define xts_lowest_eigenpair_on_manifold rgmin_lowest_eigenpair_on_manifold
+#define xts_lowest_eigenpairs_projected rgmin_lowest_eigenpairs_projected
+typedef rgmin_tcg_stop_t xts_tcg_stop_t;
+typedef rgmin_rtr_tcg_result_t xts_rtr_tcg_result_t;
+#define XTS_TCG_NEGATIVE_CURVATURE RGMIN_TCG_NEGATIVE_CURVATURE
+#define XTS_TCG_BOUNDARY RGMIN_TCG_BOUNDARY
+#define XTS_TCG_RESIDUAL RGMIN_TCG_RESIDUAL
+#define XTS_TCG_MAX_ITER RGMIN_TCG_MAX_ITER
+#define XTS_TCG_ZERO_GRADIENT RGMIN_TCG_ZERO_GRADIENT
 #define xts_last_constraint_error rgmin_last_constraint_error
 #define xts_constraints_create rgmin_constraints_create
 #define xts_constraints_create_at rgmin_constraints_create_at
