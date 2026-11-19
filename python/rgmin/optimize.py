@@ -895,6 +895,35 @@ class RiemannianCG(_Scaled):
 
     kind = "rcg"
 
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        maxstep: float | None = None,
+        alpha: float | None = None,
+        accept: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self._cap_requested = maxstep is not None
+        super().__init__(
+            atoms,
+            restart=restart,
+            logfile=logfile,
+            trajectory=trajectory,
+            append_trajectory=append_trajectory,
+            maxstep=maxstep,
+            alpha=alpha,
+            accept=accept,
+            **kwargs,
+        )
+
+    def _session_options(self) -> dict[str, Any]:
+        cap = self.maxstep if self._cap_requested else 0.0
+        return {"max_atom": cap, "accept": self.accept}
+
 
 class NewtonCG(_Scaled):
     """Steihaug-Toint Newton-CG on forward-difference Hessian products.
