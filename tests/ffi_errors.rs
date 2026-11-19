@@ -3,10 +3,12 @@
 use std::os::raw::c_void;
 
 use dlpk::sys::DLManagedTensorVersioned;
+use eindir_core::ffi::{eindir_core_abi_stamp, eindir_objective_t, eindir_status_t};
 use rgmin::ffi::{
-    rgmin_abi_compatible, rgmin_abi_stamp, rgmin_control_t, rgmin_method_from_name,
-    rgmin_method_t, rgmin_minimize, rgmin_report_t, rgmin_status_t, rgmin_stop_t,
-    rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+    rgmin_abi_compatible, rgmin_abi_stamp, rgmin_control_t, rgmin_eigenpair_t,
+    rgmin_lowest_eigenpairs, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
+    rgmin_minimize_eindir, rgmin_minimize_hess, rgmin_minimize_hvp, rgmin_minimize_scg,
+    rgmin_report_t, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 
 unsafe extern "C" fn square_eval(
@@ -28,6 +30,58 @@ unsafe extern "C" fn square_grad(
     let output = unsafe { (*grad).dl_tensor.data.cast::<f64>() };
     unsafe { *output = 2.0 * *data };
     rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn square_hess(
+    _user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    hess: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let n = unsafe { *(*hess).dl_tensor.shape as usize };
+    let output = unsafe { (*hess).dl_tensor.data.cast::<f64>() };
+    for i in 0..n {
+        unsafe { *output.add(i) = 2.0 };
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn square_hvp(
+    _user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    v: *const DLManagedTensorVersioned,
+    hv: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let n = unsafe { *(*v).dl_tensor.shape as usize };
+    let input = unsafe { (*v).dl_tensor.data.cast::<f64>() };
+    let output = unsafe { (*hv).dl_tensor.data.cast::<f64>() };
+    for i in 0..n {
+        unsafe { *output.add(i) = 2.0 * *input.add(i) };
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn eindir_eval(
+    _user_data: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value: *mut f64,
+) -> eindir_status_t {
+    let data = unsafe { (*x).dl_tensor.data.cast::<f64>() };
+    unsafe { *value = *data * *data };
+    eindir_status_t::EINDIR_SUCCESS
+}
+
+unsafe extern "C" fn eindir_grad(
+    _user_data: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    grad: *mut DLManagedTensorVersioned,
+) -> eindir_status_t {
+    let n = unsafe { *(*grad).dl_tensor.shape as usize };
+    let data = unsafe { (*x).dl_tensor.data.cast::<f64>() };
+    let output = unsafe { (*grad).dl_tensor.data.cast::<f64>() };
+    for i in 0..n {
+        unsafe { *output.add(i) = 2.0 * *data.add(i) };
+    }
+    eindir_status_t::EINDIR_SUCCESS
 }
 
 fn control() -> rgmin_control_t {
@@ -223,25 +277,91 @@ fn malformed_tensor_sizes_and_layouts_are_rejected() {
 #[test]
 fn nonfinite_initial_values_are_reported() {
     for initial in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        let mut value = [initial];
-        let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
-        let mut out = report();
         let mut ctrl = control();
         ctrl.maxiter = 1;
-        let status = unsafe {
-            rgmin_minimize(
-                Some(square_eval),
-                Some(square_grad),
-                std::ptr::null_mut(),
-                tensor,
-                &ctrl,
-                rgmin_method_t::RGMIN_STEEPEST,
-                &mut out,
-            )
+        let objective = eindir_objective_t {
+            dim: 2,
+            low: std::ptr::null_mut(),
+            high: std::ptr::null_mut(),
+            eval_fn: eindir_eval,
+            grad_fn: Some(eindir_grad),
+            user_data: std::ptr::null_mut(),
+            free_fn: None,
         };
-        unsafe { rgmin_tensor_free(tensor) };
-        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
-        assert_eq!(value[0].to_bits(), initial.to_bits());
+        let stamp = eindir_core_abi_stamp();
+        for case in 0..6 {
+            let mut values = [1.0, initial];
+            let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), values.len()) };
+            let mut out = report();
+            let status = unsafe {
+                match case {
+                    0 => rgmin_minimize(
+                        Some(square_eval),
+                        Some(square_grad),
+                        std::ptr::null_mut(),
+                        tensor,
+                        &ctrl,
+                        rgmin_method_t::RGMIN_STEEPEST,
+                        &mut out,
+                    ),
+                    1 => rgmin_minimize(
+                        Some(square_eval),
+                        Some(square_grad),
+                        std::ptr::null_mut(),
+                        tensor,
+                        &ctrl,
+                        rgmin_method_t::RGMIN_PSO,
+                        &mut out,
+                    ),
+                    2 => rgmin_minimize_hess(
+                        Some(square_eval),
+                        Some(square_grad),
+                        Some(square_hess),
+                        std::ptr::null_mut(),
+                        tensor,
+                        &ctrl,
+                        rgmin_method_t::RGMIN_NEWTON,
+                        &mut out,
+                    ),
+                    3 => rgmin_minimize_hvp(
+                        Some(square_eval),
+                        Some(square_grad),
+                        Some(square_hvp),
+                        std::ptr::null_mut(),
+                        tensor,
+                        &ctrl,
+                        rgmin_method_t::RGMIN_NEWTON_CG,
+                        &mut out,
+                    ),
+                    4 => rgmin_minimize_eindir(
+                        &objective,
+                        &stamp,
+                        tensor,
+                        &ctrl,
+                        rgmin_method_t::RGMIN_STEEPEST,
+                        &mut out,
+                    ),
+                    _ => rgmin_minimize_scg(
+                        Some(square_eval),
+                        Some(square_grad),
+                        None,
+                        std::ptr::null_mut(),
+                        tensor,
+                        &ctrl,
+                        std::ptr::null(),
+                        &mut out,
+                    ),
+                }
+            };
+            unsafe { rgmin_tensor_free(tensor) };
+            assert_eq!(
+                status,
+                rgmin_status_t::RGMIN_INVALID_PARAMETER,
+                "case {case}"
+            );
+            assert_eq!(values[0].to_bits(), 1.0_f64.to_bits(), "case {case}");
+            assert_eq!(values[1].to_bits(), initial.to_bits(), "case {case}");
+        }
     }
 }
 
@@ -260,21 +380,64 @@ fn incompatible_abi_and_dlpack_versions_are_rejected() {
     };
     assert_eq!(unsafe { rgmin_abi_compatible(&wrong_layout) }, 0);
 
-    let mut value = [1.0];
-    let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
-    unsafe { (*tensor).version.major += 1 };
-    let mut out = report();
-    let status = unsafe {
-        rgmin_minimize(
-            Some(square_eval),
-            Some(square_grad),
-            std::ptr::null_mut(),
-            tensor,
-            &control(),
-            rgmin_method_t::RGMIN_STEEPEST,
-            &mut out,
-        )
-    };
-    unsafe { rgmin_tensor_free(tensor) };
-    assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    for (major, minor) in [(2, 0), (1, 1)] {
+        let mut value = [1.0];
+        let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+        unsafe {
+            (*tensor).version.major = major;
+            (*tensor).version.minor = minor;
+        }
+        let mut out = report();
+        let status = unsafe {
+            rgmin_minimize(
+                Some(square_eval),
+                Some(square_grad),
+                std::ptr::null_mut(),
+                tensor,
+                &control(),
+                rgmin_method_t::RGMIN_STEEPEST,
+                &mut out,
+            )
+        };
+        unsafe { rgmin_tensor_free(tensor) };
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+
+        let mut x = [1.0];
+        let mut seed = [1.0];
+        let mut modes = [0.0];
+        let mut values = [0.0];
+        let mut pairs = [rgmin_eigenpair_t {
+            value: 0.0,
+            actions: 0,
+        }];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), x.len()) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), seed.len()) };
+        let mt = unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), modes.len()) };
+        let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), values.len()) };
+        unsafe {
+            (*st).version.major = major;
+            (*st).version.minor = minor;
+        }
+        let status = unsafe {
+            rgmin_lowest_eigenpairs(
+                Some(square_hvp),
+                std::ptr::null_mut(),
+                xt,
+                st,
+                mt,
+                vt,
+                std::ptr::null(),
+                std::ptr::null(),
+                pairs.as_mut_ptr(),
+                1,
+            )
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(mt);
+            rgmin_tensor_free(vt);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
 }
