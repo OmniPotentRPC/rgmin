@@ -654,6 +654,22 @@ mod update_tests {
         assert!((b[(0, 1)] - b[(1, 0)]).abs() < 1e-12);
     }
 
+    /// A repeat of a pair the update already meets has a zero curvature
+    /// increment, so the matrix is left as it was.
+    #[test]
+    fn sr1_update_skips_a_vanishing_increment() {
+        let mut b = Array2::<f64>::eye(2);
+        let s = array![1.0, 0.0];
+        let y = array![4.0, 0.0];
+        sr1_hessian_update(&mut b, &s, &y);
+        let bs = b.dot(&s);
+        assert!((bs[0] - y[0]).abs() < f64::EPSILON.sqrt());
+        assert!((bs[1] - y[1]).abs() < f64::EPSILON.sqrt());
+        let frozen = b.clone();
+        sr1_hessian_update(&mut b, &s, &y);
+        assert_eq!(b, frozen);
+    }
+
     /// `-B^{-1} g` is uphill when the curvature along `g` is negative.
     /// The Cauchy point of that model is downhill.
     #[test]
