@@ -147,6 +147,9 @@ pub enum rgmin_method_t {
     RGMIN_EON_CG = 27,
     /// GROMACS `integrator = steep`. ABI minor 52.
     RGMIN_GROMACS_STEEP = 28,
+    /// Riemannian CG. Default coefficient is PRP+, transport is scaled.
+    /// ABI minor 53. The options record carries the other coefficients.
+    RGMIN_RCG = 29,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -554,6 +557,7 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
         rgmin_method_t::RGMIN_POLAK_RIBIERE_PLUS => Method::polak_ribiere_plus(),
         rgmin_method_t::RGMIN_EON_CG => Method::eon_cg(),
         rgmin_method_t::RGMIN_GROMACS_STEEP => Method::GromacsSteep,
+        rgmin_method_t::RGMIN_RCG => Method::rcg(),
     }
 }
 
@@ -599,6 +603,7 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
         Method::Diis { .. } => rgmin_method_t::RGMIN_DIIS,
         Method::NewtonCg => rgmin_method_t::RGMIN_NEWTON_CG,
         Method::NewtonPcg => rgmin_method_t::RGMIN_NEWTON_PCG,
+        Method::Rcg { .. } => rgmin_method_t::RGMIN_RCG,
     };
     Ok(tag)
 }
@@ -1162,6 +1167,206 @@ pub unsafe extern "C" fn rgmin_minimize_opts(
         Ok(s) => s,
         Err(_) => {
             set_last_error("rgmin_minimize: panic");
+            rgmin_status_t::RGMIN_INTERNAL_ERROR
+        }
+    }
+}
+
+const RCG_BETA_FLETCHER_REEVES: i32 = 0;
+const RCG_BETA_PRP_PLUS: i32 = 1;
+const RCG_BETA_HAGER_ZHANG: i32 = 2;
+const RCG_TRANSPORT_SCALED: i32 = 0;
+const RCG_TRANSPORT_IDENTITY: i32 = 1;
+const RCG_LINESEARCH_WOLFE: i32 = 0;
+const RCG_LINESEARCH_BRENT: i32 = 1;
+
+/// Riemannian CG coefficient, transport and line search. ABI minor 53.
+///
+/// `beta` is 0 for Fletcher-Reeves, 1 for PRP+ and 2 for Hager-Zhang.
+/// `transport` is 0 for the scaled transport and 1 for the identity.
+/// `linesearch` is 0 for the strong Wolfe search and 1 for Brent.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_rcg_options_t {
+    /// Coefficient tag. Unknown values are rejected.
+    pub beta: i32,
+    /// Transport tag. Unknown values are rejected.
+    pub transport: i32,
+    /// Line-search tag. Unknown values are rejected.
+    pub linesearch: i32,
+    /// Riemannian gradient norm that stops the run.
+    pub grad_tol: f64,
+    /// Iteration cap.
+    pub max_iter: usize,
+    /// First trial displacement length.
+    pub initial_step: f64,
+}
+
+impl Default for rgmin_rcg_options_t {
+    fn default() -> Self {
+        let opts = crate::RcgOptions::default();
+        Self {
+            beta: RCG_BETA_PRP_PLUS,
+            transport: RCG_TRANSPORT_SCALED,
+            linesearch: RCG_LINESEARCH_WOLFE,
+            grad_tol: opts.grad_tol,
+            max_iter: opts.max_iter,
+            initial_step: opts.initial_step,
+        }
+    }
+}
+
+fn rcg_options_from_c(
+    raw: *const rgmin_rcg_options_t,
+) -> Result<crate::RcgOptions, rgmin_status_t> {
+    let Some(raw) = (unsafe { raw.as_ref() }) else {
+        return Ok(crate::RcgOptions::default());
+    };
+    let beta = match raw.beta {
+        RCG_BETA_FLETCHER_REEVES => crate::RcgBeta::FletcherReeves,
+        RCG_BETA_PRP_PLUS => crate::RcgBeta::PrpPlus,
+        RCG_BETA_HAGER_ZHANG => crate::RcgBeta::HagerZhang,
+        other => {
+            set_last_error(&format!(
+                "rgmin_minimize_rcg: beta {other} is not 0, 1 or 2"
+            ));
+            return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+        }
+    };
+    let transport = match raw.transport {
+        RCG_TRANSPORT_SCALED => crate::RcgTransport::Scaled,
+        RCG_TRANSPORT_IDENTITY => crate::RcgTransport::Identity,
+        other => {
+            set_last_error(&format!(
+                "rgmin_minimize_rcg: transport {other} is not 0 or 1"
+            ));
+            return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+        }
+    };
+    let linesearch = match raw.linesearch {
+        RCG_LINESEARCH_WOLFE => LineSearch::wolfe(
+            crate::RCG_WOLFE_C1,
+            crate::RCG_WOLFE_C2,
+            crate::RCG_WOLFE_MAX_ITER,
+        ),
+        RCG_LINESEARCH_BRENT => LineSearch::default(),
+        other => {
+            set_last_error(&format!(
+                "rgmin_minimize_rcg: linesearch {other} is not 0 or 1"
+            ));
+            return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+        }
+    };
+    if !(raw.grad_tol.is_finite() && raw.grad_tol >= 0.0) {
+        set_last_error("rgmin_minimize_rcg: grad_tol must be finite and non-negative");
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    if !(raw.initial_step.is_finite() && raw.initial_step > 0.0) {
+        set_last_error("rgmin_minimize_rcg: initial_step must be finite and positive");
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    Ok(crate::RcgOptions::default()
+        .with_beta(beta)
+        .with_transport(transport)
+        .with_linesearch(linesearch)
+        .with_grad_tol(raw.grad_tol)
+        .with_max_iter(raw.max_iter)
+        .with_initial_step(raw.initial_step))
+}
+
+fn rcg_as_report(out: crate::RcgMin, grad_tol: f64, max_iter: usize) -> crate::Report {
+    use crate::Status;
+    let status = if out.grad_norm <= grad_tol {
+        Status::Tolerance
+    } else if out.iterations < max_iter {
+        Status::StepTolerance
+    } else {
+        Status::Budget
+    };
+    crate::Report {
+        value: out.value,
+        coords: out.x,
+        steps: out.iterations,
+        grad_norm: out.grad_norm,
+        stop_norm: StopNorm::Two,
+        grad: None,
+        status,
+        reason: None,
+        evals: out.evals,
+    }
+}
+
+/// [`crate::RcgOptions::default`] as a C record. ABI minor 53.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_rcg_options_default() -> rgmin_rcg_options_t {
+    rgmin_rcg_options_t::default()
+}
+
+/// Riemannian CG in Euclidean space. `options` null selects
+/// [`rgmin_rcg_options_default`].
+///
+/// # Safety
+///
+/// `eval` and `grad` must be callable for the lifetime of this call.
+/// `x` is a CPU f64 tensor updated in place. `out` is written on success.
+/// `options` may be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_rcg(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    options: *const rgmin_rcg_options_t,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let eval = match eval {
+            Some(f) => f,
+            None => {
+                set_last_error("rgmin_minimize_rcg: eval is NULL");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+        };
+        let grad = match grad {
+            Some(f) => f,
+            None => {
+                set_last_error("rgmin_minimize_rcg: grad is NULL");
+                return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+            }
+        };
+        if out.is_null() {
+            set_last_error("rgmin_minimize_rcg: out is NULL");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let opts = match rcg_options_from_c(options) {
+            Ok(opts) => opts,
+            Err(st) => return st,
+        };
+        let init = match cpu_f64_slice_mut(x, "x") {
+            Ok(s) => s.to_vec(),
+            Err(st) => return st,
+        };
+        if init.iter().any(|value| !value.is_finite()) {
+            set_last_error("rgmin_minimize_rcg: x contains a non-finite value");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let n = init.len();
+        let obj = c_oracle(eval, grad, user, n);
+        let solved = crate::minimize_rcg(
+            &crate::manifold::Euclidean,
+            Array1::from(init),
+            |xv| obj.value_and_gradient(xv),
+            &opts,
+        );
+        finish_one_shot(
+            x,
+            out,
+            solved.map(|min| rcg_as_report(min, opts.grad_tol, opts.max_iter)),
+        )
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error("rgmin_minimize_rcg: panic");
             rgmin_status_t::RGMIN_INTERNAL_ERROR
         }
     }

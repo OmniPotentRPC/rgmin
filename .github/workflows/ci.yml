@@ -103,7 +103,7 @@ jobs:
       - name: Tutorial examples
         if: matrix.name == 'default'
         run: |
-          for ex in tutorial_quickstart tutorial_session tutorial_lbfgs tutorial_fire tutorial_cg tutorial_bfgs tutorial_newton tutorial_scg tutorial_linesearch tutorial_lbfgs_direction howto_level_set; do
+          for ex in tutorial_quickstart tutorial_session tutorial_lbfgs tutorial_fire tutorial_cg tutorial_bfgs tutorial_newton tutorial_scg tutorial_rcg tutorial_linesearch tutorial_lbfgs_direction howto_level_set; do
             cargo run --locked --quiet --example "$ex"
           done
 

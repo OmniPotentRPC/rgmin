@@ -114,6 +114,8 @@ pub mod qn_irc;
 mod qn_step;
 /// Quick-min projection and Euler step.
 pub mod quickmin;
+/// Riemannian nonlinear conjugate gradient on the existing retraction.
+pub mod rcg;
 mod report;
 mod restricted_trust;
 /// Eckart projector and Horn / Coutsias alignment.
@@ -227,6 +229,10 @@ pub use qn_step::QnStep;
 pub use quickmin::{
     QuickMinOptions, QuickMinState, quickmin_baseline, quickmin_displacement, quickmin_project,
     quickmin_rescale_velocity,
+};
+pub use rcg::{
+    RCG_GRAD_TOL, RCG_HAGER_ZHANG_ETA, RCG_INITIAL_STEP, RCG_MAX_ITER, RCG_WOLFE_C1, RCG_WOLFE_C2,
+    RCG_WOLFE_MAX_ITER, RcgBeta, RcgMin, RcgOptions, RcgTransport, minimize_rcg, scaled_transport,
 };
 pub use report::{Report, Status, StopReason};
 pub use rigid::{RigidMode, RigidRequest, RigidWorkspace, align_rigid};

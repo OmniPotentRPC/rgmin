@@ -15,12 +15,13 @@ use rgmin::ffi::{
     rgmin_exp_t, rgmin_gromacs_steep_max_constraint_shrinks, rgmin_last_error,
     rgmin_lowest_eigenpair, rgmin_lowest_eigenpairs, rgmin_lowest_eigenpairs_ex,
     rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
-    rgmin_minimize_eindir, rgmin_minimize_opts, rgmin_minimize_scg, rgmin_precond_fn,
-    rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp, rgmin_solver_create,
-    rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
-    rgmin_solver_set_accept, rgmin_solver_set_exp, rgmin_solver_set_gromacs_steep,
-    rgmin_solver_set_quickmin_cell, rgmin_solver_set_quickmin_variant, rgmin_solver_step,
-    rgmin_solver_step_fg, rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t,
+    rgmin_minimize_eindir, rgmin_minimize_opts, rgmin_minimize_rcg, rgmin_minimize_scg,
+    rgmin_precond_fn, rgmin_rcg_options_default, rgmin_report_t, rgmin_scg_params_t,
+    rgmin_solver_clear_exp, rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free,
+    rgmin_solver_gradient_calls, rgmin_solver_hvp_calls, rgmin_solver_set_accept,
+    rgmin_solver_set_exp, rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
+    rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
+    rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t,
     rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
@@ -1086,6 +1087,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
+/// ABI minor 53 adds `rgmin_rcg_options_default` and `rgmin_minimize_rcg`.
 /// ABI minor 52 adds `RGMIN_GROMACS_STEEP`, `RGMIN_STOP_MACHINE_PRECISION`,
 /// `rgmin_solver_set_gromacs_steep`, and
 /// `rgmin_gromacs_steep_max_constraint_shrinks`.
@@ -5122,4 +5124,101 @@ fn gromacs_steep_runs_and_reports_machine_precision_across_c_abi() {
     assert_eq!(st_mp, rgmin_status_t::RGMIN_SUCCESS);
     assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION);
     assert_eq!(rounded[0], 1.0);
+}
+
+unsafe extern "C" fn rcg_quad_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 2);
+    unsafe {
+        let x0 = *p;
+        let x1 = *p.add(1);
+        *value_out = x0 * x0 + x1 * x1;
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn rcg_quad_grad(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 2);
+    let (gp, gn) = unsafe { cpu_f64(g as *const _) };
+    assert_eq!(gn, 2);
+    unsafe {
+        *(gp as *mut f64) = 2.0 * *p;
+        *(gp as *mut f64).add(1) = 2.0 * *p.add(1);
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn c_abi_rcg_matches_the_rust_quadratic() {
+    let defaults = rgmin_rcg_options_default();
+    assert_eq!(defaults.beta, 1);
+    assert_eq!(defaults.transport, 0);
+    assert_eq!(defaults.linesearch, 0);
+    let mut x = [1.5, -0.75];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    assert!(!xt.is_null());
+    let mut options = defaults;
+    options.grad_tol = 1e-8;
+    options.max_iter = 40;
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+    };
+    let st = unsafe {
+        rgmin_minimize_rcg(
+            Some(rcg_quad_eval),
+            Some(rcg_quad_grad),
+            std::ptr::null_mut(),
+            xt,
+            &options,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(out.value < 1e-12, "C value {}", out.value);
+    assert!(out.grad_norm <= 1e-8, "C grad {}", out.grad_norm);
+    let rust = rgmin::minimize_rcg(
+        &rgmin::manifold::Euclidean,
+        ndarray::array![1.5, -0.75],
+        |p: ndarray::ArrayView1<f64>| {
+            let f = p[0] * p[0] + p[1] * p[1];
+            let g = ndarray::array![2.0 * p[0], 2.0 * p[1]];
+            (f, g)
+        },
+        &rgmin::RcgOptions::default()
+            .with_grad_tol(1e-8)
+            .with_max_iter(40),
+    )
+    .unwrap();
+    assert!((x[0] - rust.x[0]).abs() < 1e-8, "x {x:?} rust {}", rust.x);
+    assert!((x[1] - rust.x[1]).abs() < 1e-8, "x {x:?} rust {}", rust.x);
+    assert_eq!(out.steps, rust.iterations);
+    let mut bad = options;
+    bad.beta = 9;
+    let mut y = [1.0, 1.0];
+    let yt = unsafe { rgmin_tensor_borrow_cpu_f64(y.as_mut_ptr(), 2) };
+    let bad_st = unsafe {
+        rgmin_minimize_rcg(
+            Some(rcg_quad_eval),
+            Some(rcg_quad_grad),
+            std::ptr::null_mut(),
+            yt,
+            &bad,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(yt) };
+    assert_eq!(bad_st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
 }

@@ -138,7 +138,10 @@ typedef enum rgmin_method_t {
     /** Polak-Ribiere with the eOn Powell restart at 0.5. Develop surface. */
     RGMIN_EON_CG = 27,
     /** GROMACS integrator = steep. ABI minor 52. */
-    RGMIN_GROMACS_STEEP = 28
+    RGMIN_GROMACS_STEEP = 28,
+    /** Riemannian CG. PRP+ and the scaled transport. ABI minor 53.
+     *  rgmin_minimize_rcg carries the other coefficients. */
+    RGMIN_RCG = 29
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.
@@ -1133,6 +1136,40 @@ rgmin_status_t rgmin_lbfgs_direction(const rgmin_lbfgs_pairs_t *pairs,
 rgmin_status_t rgmin_solver_search_direction(rgmin_solver_t *solver,
                                           const double *grad, double *dir,
                                           size_t n);
+
+/** Riemannian CG coefficient, transport and line search.
+ *  Start from \ref rgmin_rcg_options_default. ABI minor 53.
+ *
+ *  \c beta is 0 for Fletcher-Reeves, 1 for PRP+ (a negative Polak-Ribiere
+ *  coefficient is replaced by zero) and 2 for Hager-Zhang.
+ *  \c transport is 0 for the scaled transport and 1 for the identity.
+ *  \c linesearch is 0 for the strong Wolfe search and 1 for Brent
+ *  (\c LineSearch::default). Any other integer is
+ *  \c RGMIN_INVALID_PARAMETER.
+ *  \c grad_tol is the Riemannian gradient norm that stops the run.
+ *  \c max_iter is the iteration cap. \c initial_step is the length of
+ *  the first trial displacement. */
+typedef struct rgmin_rcg_options_t {
+    int32_t beta;
+    int32_t transport;
+    int32_t linesearch;
+    double grad_tol;
+    size_t max_iter;
+    double initial_step;
+} rgmin_rcg_options_t;
+
+/** Rust \c RcgOptions::default, which a NULL \a options selects:
+ *  PRP+, the scaled transport, the strong Wolfe search, and the named
+ *  gradient tolerance, iteration cap and opening length. ABI minor 53. */
+rgmin_rcg_options_t rgmin_rcg_options_default(void);
+
+/** Riemannian CG on Euclidean space. \a options NULL selects
+ *  \ref rgmin_rcg_options_default. \a x is updated in place and \a out
+ *  is written on success. A non-finite \a x, a NULL callback, or an
+ *  unknown tag returns \c RGMIN_INVALID_PARAMETER. */
+rgmin_status_t rgmin_minimize_rcg(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
+                                  DLManagedTensorVersioned *x,
+                                  const rgmin_rcg_options_t *options, rgmin_report_t *out);
 
 /** Directional curvature `d^T H(x) d`. Non-success falls back to the probe. */
 typedef rgmin_status_t (*rgmin_curv_fn)(void *user, const DLManagedTensorVersioned *x,

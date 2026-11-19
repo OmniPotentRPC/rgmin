@@ -1,0 +1,39 @@
+
+Riemannian conjugate gradients
+------------------------------
+
+``minimize_rcg`` runs Fletcher-Reeves, PRP+ or Hager-Zhang on a manifold the crate already retracts. The vector transport is that manifold's, scaled back to its original length when the image is longer (Sato and Iwai, `10.1080/02331934.2013.836650 <https://doi.org/10.1080/02331934.2013.836650>`_). ``RcgTransport::Identity`` is the Euclidean case. The default line search is strong Wolfe with curvature constant 0.1. ``LineSearch::default`` selects Brent instead.
+
+The listing is ``examples/tutorial_rcg.rs``, whole. Continuous integration runs it, so it is the program as it builds.
+
+.. code:: rust
+
+    //! Riemannian conjugate gradients on a Euclidean quadratic.
+    //! The transport is the identity.
+    //!
+    //! `cargo run --example tutorial_rcg`
+
+    use ndarray::{ArrayView1, array};
+    use rgmin::manifold::Euclidean;
+    use rgmin::{RcgOptions, RcgTransport, minimize_rcg};
+
+    fn main() {
+        let out = minimize_rcg(
+            &Euclidean,
+            array![0.0, 0.0],
+            |x: ArrayView1<f64>| {
+                let f = (x[0] - 1.0).powi(2) + 4.0 * (x[1] + 2.0).powi(2);
+                let g = array![2.0 * (x[0] - 1.0), 8.0 * (x[1] + 2.0)];
+                (f, g)
+            },
+            &RcgOptions::default()
+                .with_transport(RcgTransport::Identity)
+                .with_max_iter(40)
+                .with_grad_tol(1e-8),
+        )
+        .unwrap();
+        assert!((out.x[0] - 1.0).abs() < 1e-4, "{}", out.x);
+        assert!((out.x[1] + 2.0).abs() < 1e-4, "{}", out.x);
+    }
+
+The example calls ``minimize_rcg`` on a quadratic and checks both coordinates.
