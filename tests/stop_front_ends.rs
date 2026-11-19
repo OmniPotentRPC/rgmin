@@ -73,6 +73,7 @@ fn c_control() -> rgmin_control_t {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     }
 }
 
@@ -86,6 +87,7 @@ fn c_run(error_on_unmet: i32) -> (rgmin_status_t, rgmin_report_t, f64) {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let status = unsafe {
         if error_on_unmet == 0 {

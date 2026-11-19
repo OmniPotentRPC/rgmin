@@ -116,6 +116,7 @@ fn c_initializers_hold_the_rust_defaults() {
         maxmove: control.maxmove.unwrap_or(0.0),
         noise_eps: control.noise_floor.map_or(0.0, |floor| floor.eps_g),
         noise_c: NoiseFloor::new(0.0).c,
+        require_convergence: 0,
     });
     args.extend(record!(rgmin_exp_t {
         a: exp.a,

@@ -100,12 +100,15 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 51 and ``layout_revision`` 5.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 52 and ``layout_revision`` 6.
     Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
     error, and the backward-error polish. A zero iteration budget
     follows the same unmet-stop policy. Minor 50 adds the energy and
     evaluation stops. Minor 51 adds ``rgmin_minimize_eindir_opts``, the
-    eindir one-shot with the same two flags. ``rgmin_control_t`` is unchanged.
+    eindir one-shot with the same two flags. Minor 52 adds
+    ``require_convergence`` on ``rgmin_control_t``, ``converged`` on
+    ``rgmin_report_t``, ``RGMIN_NOT_CONVERGED``, and
+    ``rgmin_solver_set_require_convergence``.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``

@@ -53,6 +53,7 @@ fn c_abi_set_highs_solver_is_closed() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());

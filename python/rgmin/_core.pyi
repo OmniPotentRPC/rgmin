@@ -177,6 +177,13 @@ class Report:
     def converged(self) -> bool:
         """True when ``stop`` is ``TOLERANCE``."""
 
+class NotConverged(RuntimeError):
+    """
+    Raised when ``require_convergence`` is set and the gradient norm is still above ``gtol``. ``report`` is the terminal ``Report``.
+    """
+
+    report: Report
+
 class SolverConfig:
     """
     Validated, immutable optimizer options. Unknown keywords raise ``ValueError`` listing the valid options. A Cartesian solver installs a per-atom cap of 0.2 (ASE maxstep, eOn max_move) unless the method already limits the step. BFGS, dogleg, and FIRE 2.0 start without that cap. ``maxstep`` or ``atom_maxmove`` replaces it on every method. A non-positive value clears it. A positive ``maxmove`` is the Euclidean step limit and leaves the per-atom default off.
@@ -195,6 +202,9 @@ class SolverConfig:
 
     def backward_polish(self) -> bool:
         """Whether a Hessian one-shot polishes to the backward-error floor."""
+
+    def require_convergence(self) -> bool:
+        """Whether a run still above ``gtol`` raises ``NotConverged``."""
 
     @staticmethod
     def valid_options() -> str: ...
@@ -227,7 +237,7 @@ class Solver:
 
 def minimize(f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], x0: NDArray[numpy.float64], method: object, **kwargs) -> tuple[Report, NDArray[numpy.float64]]:
     """
-    Minimize ``f_and_grad`` in place and return ``(report, x)``. ``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` that carries the ``Report`` as ``.report``, when the stop is ``BUDGET``, ``LINE_SEARCH``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. ``backward_polish`` is stored on the session and is not used by this step loop, which does not form a Hessian.
+    Minimize ``f_and_grad`` in place and return ``(report, x)``. ``require_convergence=True`` raises ``NotConverged``, a ``RuntimeError`` that carries the terminal ``Report`` as ``.report``, when the gradient norm is still above ``gtol``. ``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` that carries the ``Report`` as ``.report``, when the stop is ``BUDGET``, ``LINE_SEARCH``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. ``backward_polish`` is stored on the session and is not used by this step loop, which does not form a Hessian.
     """
 
 def backward_error_floor(value: float, x: object) -> float:

@@ -39,6 +39,7 @@ fn control() -> rgmin_control_t {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     }
 }
 
@@ -48,6 +49,7 @@ fn report() -> rgmin_report_t {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     }
 }
 

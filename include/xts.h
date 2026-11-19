@@ -15,6 +15,7 @@
 #define XTS_UNAVAILABLE RGMIN_UNAVAILABLE
 #define XTS_CONSTRAINT_ERROR RGMIN_CONSTRAINT_ERROR
 #define XTS_UNMET_STOP RGMIN_UNMET_STOP
+#define XTS_NOT_CONVERGED RGMIN_NOT_CONVERGED
 #define XTS_STOP_LINE_SEARCH RGMIN_STOP_LINE_SEARCH
 #define XTS_STOP_POLISH_UNMET RGMIN_STOP_POLISH_UNMET
 #define XTS_STOP_ENERGY_TOLERANCE RGMIN_STOP_ENERGY_TOLERANCE
@@ -129,6 +130,7 @@ typedef rgmin_constraints_t xts_constraints_t;
 #define xts_solver_set_stop_norm rgmin_solver_set_stop_norm
 #define xts_solver_set_error_on_unmet rgmin_solver_set_error_on_unmet
 #define xts_solver_set_backward_polish rgmin_solver_set_backward_polish
+#define xts_solver_set_require_convergence rgmin_solver_set_require_convergence
 #define xts_backward_error_floor rgmin_backward_error_floor
 #define xts_minimize_opts rgmin_minimize_opts
 #define xts_minimize_hess_opts rgmin_minimize_hess_opts
