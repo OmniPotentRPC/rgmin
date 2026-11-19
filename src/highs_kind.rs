@@ -178,6 +178,18 @@ impl Default for HighsOptions {
     }
 }
 
+impl HighsOptions {
+    /// Return this solve's limit after validating an explicit override.
+    pub(crate) fn time_limit_or(self, default: f64) -> crate::Result<f64> {
+        let limit = self.time_limit.unwrap_or(default);
+        if limit.is_finite() && limit >= 0.0 {
+            Ok(limit)
+        } else {
+            Err(crate::Error::HighsTimeLimit { limit })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,5 +221,18 @@ mod tests {
             Some(HighsCallbackKind::IpmInterrupt)
         );
         assert!(HighsCallbackKind::from_ordinal(3).is_none());
+    }
+
+    #[test]
+    fn time_limit_rejects_negative_and_non_finite_overrides() {
+        for limit in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let error = HighsOptions::default()
+                .with_time_limit(limit)
+                .time_limit_or(1.0)
+                .expect_err("invalid limit");
+            assert!(
+                matches!(error, crate::Error::HighsTimeLimit { limit: got } if got.to_bits() == limit.to_bits())
+            );
+        }
     }
 }
