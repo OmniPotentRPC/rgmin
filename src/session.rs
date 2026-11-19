@@ -1813,6 +1813,27 @@ impl Solver {
         g
     }
 
+    /// [`Self::horizontal_grad`], then the bond tangent of a constraint set.
+    ///
+    /// Riemannian CG steps on the manifold cut by the set, so its stops and
+    /// its report measure the gradient there. Every other method reads
+    /// the horizontal gradient, as it did.
+    fn tangent_grad(&mut self, x: &Array1<f64>, raw: &Array1<f64>) -> Result<Array1<f64>> {
+        let horizontal = self.horizontal_grad(x, raw);
+        let Overlay::Rcg(_) = self.overlay else {
+            return Ok(horizontal);
+        };
+        let Some(set) = self.constraints.clone() else {
+            return Ok(horizontal);
+        };
+        let bonded = crate::rcg::BondedManifold::new(&self.manifold, &set);
+        let cut = bonded.cut_gradient(x, horizontal);
+        match crate::rcg::Failures::take(&bonded) {
+            Some(failure) => Err(failure),
+            None => Ok(cut),
+        }
+    }
+
     /// Vector transport. Quotient manifolds project at the arrival point.
     fn transport_vec(
         &mut self,
@@ -1920,7 +1941,7 @@ impl Solver {
         {
             return Ok(());
         }
-        grad = self.horizontal_grad(x, &grad);
+        grad = self.tangent_grad(x, &grad)?;
         self.remember(x, value, &grad);
         let grad_norm = self.stationarity_norm(x, &grad);
         let status = self.control.classify(grad_norm, self.noted_free_len());
@@ -1945,7 +1966,7 @@ impl Solver {
                 what: "non-finite value or gradient during level-set retraction",
             });
         }
-        let grad = self.horizontal_grad(x, &raw);
+        let grad = self.tangent_grad(x, &raw)?;
         self.remember(x, value, &grad);
         self.steps += 1;
         Ok(self.report(value, x, &grad))
@@ -4037,7 +4058,7 @@ impl Solver {
         } else {
             obj.value_and_gradient(x.view())
         };
-        grad = self.horizontal_grad(x, &grad);
+        grad = self.tangent_grad(x, &grad)?;
         if !value.is_finite() || grad.iter().any(|g| !g.is_finite()) {
             return Err(Error::Oracle {
                 what: "non-finite value or gradient",
@@ -4911,7 +4932,7 @@ impl Solver {
         }
         self.retract_level_set_here(obj, x, &mut value, &mut grad)?;
         let level_grad = grad.clone();
-        grad = self.horizontal_grad(x, &grad);
+        grad = self.tangent_grad(x, &grad)?;
         if self.level_set.is_some()
             && let Inner::Fire(state) = &mut self.inner
         {
@@ -5566,7 +5587,8 @@ impl Solver {
     /// bounds, as a step clips it, and the method memory is untouched. The
     /// stationarity measure is the one a step opens with; a distance or
     /// equality constraint set does not project the gradient here, so
-    /// such a session reads the larger, unprojected norm.
+    /// such a session reads the larger, unprojected norm. Riemannian CG
+    /// is the exception: it reads the gradient cut by the bonds.
     pub(crate) fn assess<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -5591,7 +5613,7 @@ impl Solver {
             self.evals += 1;
             obj.value_and_gradient(x.view())
         };
-        let grad = self.horizontal_grad(x, &raw_grad);
+        let grad = self.tangent_grad(x, &raw_grad)?;
         if !value.is_finite() || grad.iter().any(|g| !g.is_finite()) {
             return Err(Error::Oracle {
                 what: "non-finite value or gradient",
