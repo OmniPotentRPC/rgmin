@@ -1,0 +1,23 @@
+#+TITLE: Riemannian conjugate gradients
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+
+* Riemannian conjugate gradients
+
+~minimize_rcg~ runs Fletcher-Reeves, PRP+ or Hager-Zhang on a manifold the crate already retracts. The vector transport is that manifold's, scaled back to its original length when the image is longer (Sato and Iwai, [[https://doi.org/10.1080/02331934.2013.836650][10.1080/02331934.2013.836650]]). ~RcgTransport::Identity~ is the Euclidean case. The default line search is strong Wolfe with curvature constant 0.1. ~LineSearch::default~ selects Brent instead.
+
+The listing is ~examples/tutorial_rcg.rs~, whole. Continuous integration runs it, so it is the program as it builds.
+
+#+INCLUDE: "../../../examples/tutorial_rcg.rs" src rust
+
+The example calls ~minimize_rcg~ on a quadratic and checks both coordinates.
+
+~RcgOptions::validate~ refuses a gradient tolerance that is not finite or is negative, and an initial step that is not finite and positive, with ~Error::InvalidControl~. ~minimize_rcg~ calls it before the first evaluation. A projection or retraction that cannot be carried out is returned as its typed error rather than skipped.
+
+** In a session
+
+~Method::rcg()~ runs the same step inside a ~Solver~. There it keeps the session's rules:
+
+- ~Control::maxmove~ and the per-atom cap bound the move that is taken. A trial beyond a cap lies outside the line-search domain, so the search contracts to the cap. The default per-atom cap stays off for this method.
+- A distance constraint set composes with the configured manifold. The tangent space is the intersection of the manifold's and the bonds', and the retraction alternates between the two until both hold.
+- The stop and the report read the gradient cut by the bonds, so a constrained minimum with a pure constraint force meets the tolerance.
+- A level-set retraction that moves the point clears the held direction. The next step opens on steepest descent.
