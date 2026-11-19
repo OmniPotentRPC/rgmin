@@ -11,7 +11,7 @@ entry elsewhere. Regenerate it instead of editing it.
 
 * Coverage
 
-Before this inventory, 1610 of 3881 source items had an exact
+Before this inventory, 1620 of 3877 source items had an exact
 marked-up name in an Org source. After this inventory, every item has a
 reference entry and a documentation location.
 
@@ -207,37 +207,6 @@ reference entry and a documentation location.
 | ~SOLVE_RTOL~ | const | ~pub const SOLVE_RTOL: f64 = 1.0e-2;~ | ~src/lindh.rs:46~ | ~docs/orgmode/reference/public-api.org~ |
 | ~STEP_CLAMP_MAX~ | const | ~pub const STEP_CLAMP_MAX: f64 = 1.0;~ | ~src/noise.rs:46~ | ~docs/orgmode/reference/public-api.org~ |
 | ~STEP_CLAMP_MIN~ | const | ~pub const STEP_CLAMP_MIN: f64 = 1e-16;~ | ~src/noise.rs:44~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn name(self) -> &'static str {~ | ~src/eigenexa_kind.rs:17~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn from_ordinal(raw: u8) -> Option<Self> {~ | ~src/eigenexa_kind.rs:25~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn name(self) -> &'static str {~ | ~src/elpa_kind.rs:19~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn from_solver(raw: i32) -> Option<Self> {~ | ~src/elpa_kind.rs:27~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn from_kind(kind: EigensolverKind) -> Option<Self> {~ | ~src/elpa_kind.rs:36~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn elpa_solver(self) -> i32 {~ | ~src/elpa_kind.rs:45~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn nblk_or_default(self) -> u32 {~ | ~src/elpa_kind.rs:64~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn capped(max_atom: f64) -> Self {~ | ~src/lbfgs.rs:235~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn scaled(max_atom: f64) -> Self {~ | ~src/lbfgs.rs:240~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn brent(maxiter: usize, tol: f64) -> Self {~ | ~src/linesearch/mod.rs:129~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn backtracking(c: f64, beta: f64, maxiter: usize) -> Self {~ | ~src/linesearch/mod.rs:134~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn goldstein(c: f64, beta: f64, maxiter: usize) -> Self {~ | ~src/linesearch/mod.rs:139~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn wolfe(c1: f64, c2: f64, maxiter: usize) -> Self {~ | ~src/linesearch/mod.rs:144~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn name(self) -> &'static str {~ | ~src/lowest_mode.rs:67~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn is_linked(self) -> bool {~ | ~src/lowest_mode.rs:89~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn is_matrix_free(self) -> bool {~ | ~src/lowest_mode.rs:100~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn from_ordinal(raw: u8) -> Option<Self> {~ | ~src/lowest_mode.rs:115~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn nlcg_with_restart(conjugacy: Conjugacy, restart: Restart) -> Self {~ | ~src/method.rs:254~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn lbfgs_with_memory(memory: usize) -> Self {~ | ~src/method.rs:259~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn diis_with_memory(memory: usize) -> Self {~ | ~src/method.rs:264~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn adam_with(beta1: f64, beta2: f64, eps: f64) -> Self {~ | ~src/method.rs:269~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn pso_with(n_particles: usize, inertia: f64, c1: f64, c2: f64) -> Self {~ | ~src/method.rs:274~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn fire(kind: crate::fire::FireKind) -> Self {~ | ~src/method.rs:284~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn newton(kind: crate::newton::NewtonKind) -> Self {~ | ~src/method.rs:289~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn njws_at(threshold: f64) -> Self {~ | ~src/nlcg/mod.rs:121~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn powell_at(threshold: f64) -> Self {~ | ~src/nlcg/mod.rs:126~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn name(self) -> &'static str {~ | ~src/slepc_kind.rs:24~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn from_ordinal(raw: u8) -> Option<Self> {~ | ~src/slepc_kind.rs:35~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn needs_pmat(self) -> bool {~ | ~src/slepc_kind.rs:47~ | ~docs/orgmode/reference/public-api.org~ |
-| ~fn~ | const | ~pub const fn as_raw(self) -> *mut c_void {~ | ~src/slepc_kind.rs:71~ | ~docs/orgmode/reference/public-api.org~ |
-| ~unsafe~ | const | ~pub const unsafe fn from_raw(mat: *mut c_void) -> Self {~ | ~src/slepc_kind.rs:66~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Accept~ | enum | ~pub enum Accept {~ | ~src/accept.rs:24~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/constraints.org~ |
 | ~CenterMode~ | enum | ~pub enum CenterMode {~ | ~src/manifold/centered.rs:23~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Conjugacy~ | enum | ~pub enum Conjugacy {~ | ~src/nlcg/mod.rs:19~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/method-catalog.org~ |
@@ -701,6 +670,7 @@ reference entry and a documentation location.
 | ~accept_ratio~ | function | ~pub fn accept_ratio(rho: f64) -> bool {~ | ~src/trust.rs:121~ | ~docs/orgmode/reference/public-api.org~ |
 | ~active_simd_path~ | function | ~pub fn active_simd_path() -> &'static str {~ | ~src/vecops.rs:205~ | ~docs/orgmode/reference/public-api.org~ |
 | ~adam~ | function | ~pub fn adam() -> Self {~ | ~src/method.rs:235~ | ~docs/orgmode/howto/python.org~, ~docs/orgmode/reference/python.org~ |
+| ~adam_with~ | function | ~pub const fn adam_with(beta1: f64, beta2: f64, eps: f64) -> Self {~ | ~src/method.rs:269~ | ~docs/orgmode/reference/public-api.org~ |
 | ~add_equality~ | function | ~pub fn add_equality(&mut self, coefficients: Vec<(usize, f64)>, rhs: f64) -> bool {~ | ~src/session.rs:1357~ | ~docs/orgmode/howto/session.org~ |
 | ~align_rigid~ | function | ~pub fn align_rigid(~ | ~src/rigid/align.rs:7~ | ~docs/orgmode/changelog.org~ |
 | ~ambient_dim~ | function | ~pub fn ambient_dim(&self) -> usize {~ | ~src/manifold/subspace_sphere.rs:108~ | ~docs/orgmode/reference/public-api.org~ |
@@ -713,6 +683,7 @@ reference entry and a documentation location.
 | ~armijo~ | function | ~pub fn armijo(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> bool {~ | ~src/linesearch/conditions.rs:13~ | ~docs/orgmode/reference/python.org~ |
 | ~as_highs~ | function | ~pub fn as_highs(self) -> Option<&'static str> {~ | ~src/highs_kind.rs:43~ | ~docs/orgmode/reference/public-api.org~ |
 | ~as_highs~ | function | ~pub fn as_highs(self) -> Option<&'static str> {~ | ~src/highs_kind.rs:80~ | ~docs/orgmode/reference/public-api.org~ |
+| ~as_raw~ | function | ~pub const fn as_raw(self) -> *mut c_void {~ | ~src/slepc_kind.rs:71~ | ~docs/orgmode/reference/public-api.org~ |
 | ~as_str~ | function | ~pub fn as_str(self) -> &'static str {~ | ~src/holonomic/mod.rs:80~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/product-manifold.org~ |
 | ~as_str~ | function | ~pub fn as_str(&self) -> &'static str {~ | ~src/manifold/mod.rs:625~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/product-manifold.org~ |
 | ~as_str~ | function | ~pub fn as_str(&self) -> &'static str {~ | ~src/method.rs:341~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/product-manifold.org~ |
@@ -722,6 +693,7 @@ reference entry and a documentation location.
 | ~assemble~ | function | ~pub fn assemble(~ | ~src/precon/lindh.rs:199~ | ~docs/orgmode/reference/public-api.org~ |
 | ~at~ | function | ~pub fn at(pairs: Vec<(usize, usize)>, x: ArrayView1<f64>) -> Result<Self> {~ | ~src/holonomic/mod.rs:290~ | ~docs/orgmode/explanation/quickmin.org~ |
 | ~axpy~ | function | ~pub fn axpy(a: f64, x: ArrayView1<f64>, y: &mut Array1<f64>) {~ | ~src/vecops.rs:738~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/simd.org~ |
+| ~backtracking~ | function | ~pub const fn backtracking(c: f64, beta: f64, maxiter: usize) -> Self {~ | ~src/linesearch/mod.rs:134~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/configure.org~, ~docs/orgmode/howto/python.org~ |
 | ~backward_error_floor~ | function | ~pub fn backward_error_floor(value: f64, x: ArrayView1<f64>) -> f64 {~ | ~src/newton.rs:132~ | ~docs/orgmode/reference/architecture.org~ |
 | ~basis~ | function | ~pub fn basis(&self) -> &Array2<f64> {~ | ~src/manifold/subspace_sphere.rs:123~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/manifolds.org~, ~docs/orgmode/reference/product-manifold.org~ |
 | ~basis~ | function | ~pub fn basis(&self) -> &[f64] {~ | ~src/rigid/project.rs:13~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/manifolds.org~, ~docs/orgmode/reference/product-manifold.org~ |
@@ -731,10 +703,12 @@ reference entry and a documentation location.
 | ~beta_metric~ | function | ~pub fn beta_metric(~ | ~src/nlcg/mod.rs:239~ | ~docs/orgmode/reference/public-api.org~ |
 | ~bfgs_hessian_update~ | function | ~pub fn bfgs_hessian_update(b: &mut Array2<f64>, s: &Array1<f64>, y: &Array1<f64>) {~ | ~src/qn_irc.rs:112~ | ~docs/orgmode/reference/public-api.org~ |
 | ~bonded_terms~ | function | ~pub fn bonded_terms(~ | ~src/precon/ff.rs:534~ | ~docs/orgmode/explanation/precon.org~ |
+| ~brent~ | function | ~pub const fn brent(maxiter: usize, tol: f64) -> Self {~ | ~src/linesearch/mod.rs:129~ | ~docs/orgmode/howto/python.org~, ~docs/orgmode/reference/python.org~ |
 | ~build~ | function | ~pub fn build<O>(obj: &O, x: ArrayView1<f64>, rank: usize, seed: u64) -> Self~ | ~src/hvp.rs:393~ | ~docs/orgmode/reference/public-api.org~ |
 | ~build~ | function | ~pub fn build(self) -> Lbfgs {~ | ~src/lbfgs.rs:228~ | ~docs/orgmode/reference/public-api.org~ |
 | ~builder~ | function | ~pub fn builder() -> LbfgsBuilder {~ | ~src/lbfgs.rs:671~ | ~docs/orgmode/reference/public-api.org~ |
 | ~capped~ | function | ~pub fn capped(self, max_atom: f64) -> Self {~ | ~src/lbfgs.rs:181~ | ~docs/orgmode/reference/public-api.org~ |
+| ~capped~ | function | ~pub const fn capped(max_atom: f64) -> Self {~ | ~src/lbfgs.rs:235~ | ~docs/orgmode/reference/public-api.org~ |
 | ~capped~ | function | ~pub fn capped(max_atom: f64) -> Self {~ | ~src/lbfgs.rs:651~ | ~docs/orgmode/reference/public-api.org~ |
 | ~capped_limit~ | function | ~pub fn capped_limit(self) -> Option<f64> {~ | ~src/lbfgs.rs:246~ | ~docs/orgmode/reference/public-api.org~ |
 | ~cartesian~ | function | ~pub fn cartesian(pos: &'a [f64], mode: RigidMode) -> Self {~ | ~src/rigid/mode.rs:67~ | ~docs/orgmode/reference/public-api.org~ |
@@ -771,6 +745,7 @@ reference entry and a documentation location.
 | ~declared~ | function | ~pub fn declared(eps: f64) -> Self {~ | ~src/noise.rs:98~ | ~docs/orgmode/reference/public-api.org~ |
 | ~device~ | function | ~pub fn device(&self) -> dlpk::sys::DLDevice {~ | ~src/vecops.rs:941~ | ~docs/orgmode/reference/public-api.org~ |
 | ~diis~ | function | ~pub fn diis() -> Self {~ | ~src/method.rs:225~ | ~docs/orgmode/howto/python.org~, ~docs/orgmode/reference/python.org~ |
+| ~diis_with_memory~ | function | ~pub const fn diis_with_memory(memory: usize) -> Self {~ | ~src/method.rs:264~ | ~docs/orgmode/reference/public-api.org~ |
 | ~dim~ | function | ~pub fn dim(&self) -> usize {~ | ~src/lbfgs/direction.rs:97~ | ~docs/orgmode/howto/bench-gate.org~ |
 | ~dim~ | function | ~pub fn dim(self) -> usize {~ | ~src/manifold/grassmann.rs:155~ | ~docs/orgmode/howto/bench-gate.org~ |
 | ~dim~ | function | ~pub fn dim(&self) -> usize {~ | ~src/precon.rs:354~ | ~docs/orgmode/howto/bench-gate.org~ |
@@ -787,6 +762,7 @@ reference entry and a documentation location.
 | ~egrad_to_rgrad~ | function | ~pub fn egrad_to_rgrad(&self, x: &[f64], egrad: &[f64], out: &mut [f64]) -> Result<()> {~ | ~src/manifold/riemannian.rs:421~ | ~docs/orgmode/reference/manifold.org~ |
 | ~eigh~ | function | ~pub fn eigh(&self) -> (Array1<f64>, Array2<f64>) {~ | ~src/qn_irc.rs:105~ | ~docs/orgmode/reference/public-api.org~ |
 | ~elpa_config~ | function | ~pub fn elpa_config(kind: EigensolverKind, elpa: &ElpaParams) -> Option<(i32, u32)> {~ | ~src/elpa_kind.rs:70~ | ~docs/orgmode/reference/public-api.org~ |
+| ~elpa_solver~ | function | ~pub const fn elpa_solver(self) -> i32 {~ | ~src/elpa_kind.rs:45~ | ~docs/orgmode/reference/public-api.org~ |
 | ~elpa_spectrum~ | function | ~pub fn elpa_spectrum(n: usize, nev: usize) -> crate::error::Result<ElpaSpectrum> {~ | ~src/elpa_kind.rs:93~ | ~docs/orgmode/reference/public-api.org~ |
 | ~energy_converged~ | function | ~pub fn energy_converged(&self, previous: f64, current: f64) -> bool {~ | ~src/control.rs:374~ | ~docs/orgmode/reference/public-api.org~ |
 | ~eon~ | function | ~pub fn eon() -> Self {~ | ~src/quickmin.rs:311~ | ~docs/orgmode/reference/public-api.org~ |
@@ -807,6 +783,7 @@ reference entry and a documentation location.
 | ~factor_count~ | function | ~pub fn factor_count(&self) -> usize {~ | ~src/manifold/product.rs:313~ | ~docs/orgmode/reference/public-api.org~ |
 | ~factors~ | function | ~pub fn factors(&self) -> Vec<ProductFactor> {~ | ~src/manifold/product.rs:319~ | ~docs/orgmode/reference/public-api.org~ |
 | ~factors~ | function | ~pub fn factors(&self) -> &[ManifoldFactor] {~ | ~src/manifold/riemannian.rs:347~ | ~docs/orgmode/reference/public-api.org~ |
+| ~fire~ | function | ~pub const fn fire(kind: crate::fire::FireKind) -> Self {~ | ~src/method.rs:284~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~fire2_displacement~ | function | ~pub fn fire2_displacement(~ | ~src/fire.rs:810~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/configure.org~ |
 | ~fire2_displacement_metric~ | function | ~pub fn fire2_displacement_metric(~ | ~src/fire.rs:823~ | ~docs/orgmode/changelog.org~ |
 | ~fire_after_v1~ | function | ~pub fn fire_after_v1(state: &mut FireState, force: &Array1<f64>) {~ | ~src/fire.rs:649~ | ~docs/orgmode/reference/public-api.org~ |
@@ -827,14 +804,21 @@ reference entry and a documentation location.
 | ~from_diag~ | function | ~pub fn from_diag(diag: ArrayView1<f64>) -> Self {~ | ~src/lowest_mode.rs:299~ | ~docs/orgmode/reference/public-api.org~ |
 | ~from_host~ | function | ~pub fn from_host(data: Array1<f64>) -> Self {~ | ~src/vecops.rs:923~ | ~docs/orgmode/reference/public-api.org~ |
 | ~from_i32~ | function | ~pub fn from_i32(code: i32) -> Option<Self> {~ | ~src/rigid/mode.rs:24~ | ~docs/orgmode/reference/public-api.org~ |
+| ~from_kind~ | function | ~pub const fn from_kind(kind: EigensolverKind) -> Option<Self> {~ | ~src/elpa_kind.rs:36~ | ~docs/orgmode/reference/public-api.org~ |
 | ~from_name~ | function | ~pub fn from_name(name: &str) -> crate::Result<Self> {~ | ~src/method.rs:391~ | ~docs/orgmode/reference/public-api.org~ |
+| ~from_ordinal~ | function | ~pub const fn from_ordinal(raw: u8) -> Option<Self> {~ | ~src/eigenexa_kind.rs:25~ | ~docs/orgmode/reference/public-api.org~ |
 | ~from_ordinal~ | function | ~pub fn from_ordinal(raw: i32) -> Option<Self> {~ | ~src/highs_kind.rs:28~ | ~docs/orgmode/reference/public-api.org~ |
 | ~from_ordinal~ | function | ~pub fn from_ordinal(raw: i32) -> Option<Self> {~ | ~src/highs_kind.rs:70~ | ~docs/orgmode/reference/public-api.org~ |
 | ~from_ordinal~ | function | ~pub fn from_ordinal(raw: i32) -> Option<Self> {~ | ~src/highs_kind.rs:103~ | ~docs/orgmode/reference/public-api.org~ |
+| ~from_ordinal~ | function | ~pub const fn from_ordinal(raw: u8) -> Option<Self> {~ | ~src/lowest_mode.rs:115~ | ~docs/orgmode/reference/public-api.org~ |
 | ~from_ordinal~ | function | ~pub fn from_ordinal(raw: u8) -> Option<Self> {~ | ~src/lowest_mode.rs:258~ | ~docs/orgmode/reference/public-api.org~ |
+| ~from_ordinal~ | function | ~pub const fn from_ordinal(raw: u8) -> Option<Self> {~ | ~src/slepc_kind.rs:35~ | ~docs/orgmode/reference/public-api.org~ |
+| ~from_raw~ | function | ~pub const unsafe fn from_raw(mat: *mut c_void) -> Self {~ | ~src/slepc_kind.rs:66~ | ~docs/orgmode/reference/public-api.org~ |
+| ~from_solver~ | function | ~pub const fn from_solver(raw: i32) -> Option<Self> {~ | ~src/elpa_kind.rs:27~ | ~docs/orgmode/reference/public-api.org~ |
 | ~ftol~ | function | ~pub fn ftol(mut self, ftol: f64) -> Self {~ | ~src/lbfgs.rs:157~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/howto/stopping.org~ |
 | ~gdiis_point~ | function | ~pub fn gdiis_point(~ | ~src/diis.rs:115~ | ~docs/orgmode/reference/public-api.org~ |
 | ~goldstein~ | function | ~pub fn goldstein(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> bool {~ | ~src/linesearch/conditions.rs:152~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/configure.org~, ~docs/orgmode/howto/python.org~ |
+| ~goldstein~ | function | ~pub const fn goldstein(c: f64, beta: f64, maxiter: usize) -> Self {~ | ~src/linesearch/mod.rs:139~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/configure.org~, ~docs/orgmode/howto/python.org~ |
 | ~goldstein_lower~ | function | ~pub fn goldstein_lower(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> bool {~ | ~src/linesearch/conditions.rs:141~ | ~docs/orgmode/reference/public-api.org~ |
 | ~goldstein_upper~ | function | ~pub fn goldstein_upper(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> bool {~ | ~src/linesearch/conditions.rs:130~ | ~docs/orgmode/reference/public-api.org~ |
 | ~gradient_calls~ | function | ~pub fn gradient_calls(&self) -> usize {~ | ~src/session.rs:864~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/api.org~ |
@@ -878,6 +862,8 @@ reference entry and a documentation location.
 | ~is_empty~ | function | ~pub fn is_empty(&self) -> bool {~ | ~src/lbfgs/direction.rs:107~ | ~docs/orgmode/reference/public-api.org~ |
 | ~is_euclidean_complex~ | function | ~pub fn is_euclidean_complex(x: &Array1<f64>) -> bool {~ | ~src/manifold/euclidean_complex.rs:87~ | ~docs/orgmode/reference/public-api.org~ |
 | ~is_flat~ | function | ~pub fn is_flat(&self) -> bool {~ | ~src/manifold/product.rs:340~ | ~docs/orgmode/explanation/product-manifold.org~ |
+| ~is_linked~ | function | ~pub const fn is_linked(self) -> bool {~ | ~src/lowest_mode.rs:89~ | ~docs/orgmode/reference/public-api.org~ |
+| ~is_matrix_free~ | function | ~pub const fn is_matrix_free(self) -> bool {~ | ~src/lowest_mode.rs:100~ | ~docs/orgmode/reference/public-api.org~ |
 | ~is_posdef~ | function | ~pub fn is_posdef(&self) -> bool {~ | ~src/qn_irc.rs:75~ | ~docs/orgmode/reference/public-api.org~ |
 | ~is_positive~ | function | ~pub fn is_positive(x: &Array1<f64>) -> bool {~ | ~src/manifold/positive.rs:91~ | ~docs/orgmode/reference/public-api.org~ |
 | ~is_skewsymmetric~ | function | ~pub fn is_skewsymmetric(x: &Array1<f64>) -> bool {~ | ~src/manifold/skewsymmetric.rs:58~ | ~docs/orgmode/reference/public-api.org~ |
@@ -892,6 +878,7 @@ reference entry and a documentation location.
 | ~lbfgs_direction~ | function | ~pub fn lbfgs_direction(~ | ~src/lbfgs/direction.rs:251~ | ~docs/orgmode/changelog.org~ |
 | ~lbfgs_step~ | function | ~pub fn lbfgs_step(&self) -> LbfgsStep {~ | ~src/session.rs:5292~ | ~docs/orgmode/reference/public-api.org~ |
 | ~lbfgs_trust_radius~ | function | ~pub fn lbfgs_trust_radius(&self) -> Option<f64> {~ | ~src/session.rs:2977~ | ~docs/orgmode/reference/public-api.org~ |
+| ~lbfgs_with_memory~ | function | ~pub const fn lbfgs_with_memory(memory: usize) -> Self {~ | ~src/method.rs:259~ | ~docs/orgmode/reference/public-api.org~ |
 | ~len~ | function | ~pub fn len(&self) -> usize {~ | ~src/lbfgs.rs:875~ | ~docs/orgmode/reference/manifold.org~ |
 | ~len~ | function | ~pub fn len(&self) -> usize {~ | ~src/lbfgs/direction.rs:102~ | ~docs/orgmode/reference/manifold.org~ |
 | ~lengths~ | function | ~pub fn lengths(&self) -> &[f64] {~ | ~src/holonomic/mod.rs:347~ | ~docs/orgmode/reference/public-api.org~ |
@@ -956,8 +943,14 @@ reference entry and a documentation location.
 | ~multinomial_ds~ | function | ~pub fn multinomial_ds(n: usize) -> Self {~ | ~src/manifold/mod.rs:550~ | ~docs/orgmode/reference/public-api.org~ |
 | ~multinomial_sym~ | function | ~pub fn multinomial_sym(n: usize) -> Self {~ | ~src/manifold/mod.rs:556~ | ~docs/orgmode/reference/public-api.org~ |
 | ~mw_pair~ | function | ~pub fn mw_pair(~ | ~src/qn_irc.rs:352~ | ~docs/orgmode/reference/public-api.org~ |
+| ~name~ | function | ~pub const fn name(self) -> &'static str {~ | ~src/eigenexa_kind.rs:17~ | ~docs/orgmode/reference/public-api.org~ |
+| ~name~ | function | ~pub const fn name(self) -> &'static str {~ | ~src/elpa_kind.rs:19~ | ~docs/orgmode/reference/public-api.org~ |
+| ~name~ | function | ~pub const fn name(self) -> &'static str {~ | ~src/lowest_mode.rs:67~ | ~docs/orgmode/reference/public-api.org~ |
 | ~name~ | function | ~pub fn name(self) -> &'static str {~ | ~src/lowest_mode.rs:248~ | ~docs/orgmode/reference/public-api.org~ |
+| ~name~ | function | ~pub const fn name(self) -> &'static str {~ | ~src/slepc_kind.rs:24~ | ~docs/orgmode/reference/public-api.org~ |
+| ~nblk_or_default~ | function | ~pub const fn nblk_or_default(self) -> u32 {~ | ~src/elpa_kind.rs:64~ | ~docs/orgmode/reference/public-api.org~ |
 | ~nearest_neighbour_distance~ | function | ~pub fn nearest_neighbour_distance(~ | ~src/precon.rs:643~ | ~docs/orgmode/reference/public-api.org~ |
+| ~needs_pmat~ | function | ~pub const fn needs_pmat(self) -> bool {~ | ~src/slepc_kind.rs:47~ | ~docs/orgmode/reference/public-api.org~ |
 | ~needs_rebuild~ | function | ~pub fn needs_rebuild(max_atom_displacement: f64, scale: f64) -> bool {~ | ~src/precon.rs:588~ | ~docs/orgmode/reference/public-api.org~ |
 | ~new~ | function | ~pub fn new(eps_g: f64) -> Self {~ | ~src/control.rs:28~ | ~docs/orgmode/reference/product-manifold.org~ |
 | ~new~ | function | ~pub fn new(memory: usize) -> Self {~ | ~src/diis.rs:30~ | ~docs/orgmode/reference/product-manifold.org~ |
@@ -992,11 +985,14 @@ reference entry and a documentation location.
 | ~new~ | function | ~pub fn new() -> Self {~ | ~src/rigid/project.rs:3~ | ~docs/orgmode/reference/product-manifold.org~ |
 | ~new~ | function | ~pub fn new(radius_max: f64) -> Self {~ | ~src/rtr.rs:234~ | ~docs/orgmode/reference/product-manifold.org~ |
 | ~new~ | function | ~pub fn new(method: Method, control: Control, dim: usize) -> Self {~ | ~src/session.rs:478~ | ~docs/orgmode/reference/product-manifold.org~ |
+| ~newton~ | function | ~pub const fn newton(kind: crate::newton::NewtonKind) -> Self {~ | ~src/method.rs:289~ | ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/reference/lammps-min-style.org~, ~docs/orgmode/reference/python.org~ |
 | ~newton_decrement_acceptable~ | function | ~pub fn newton_decrement_acceptable(~ | ~src/newton.rs:152~ | ~docs/orgmode/reference/public-api.org~ |
 | ~next_spacing~ | function | ~pub fn next_spacing(h: f64, flag: NoiseFlag) -> Option<f64> {~ | ~src/noise.rs:184~ | ~docs/orgmode/howto/noise.org~ |
 | ~njws~ | function | ~pub fn njws() -> Self {~ | ~src/nlcg/mod.rs:111~ | ~docs/orgmode/reference/public-api.org~ |
+| ~njws_at~ | function | ~pub const fn njws_at(threshold: f64) -> Self {~ | ~src/nlcg/mod.rs:121~ | ~docs/orgmode/reference/public-api.org~ |
 | ~nlcg~ | function | ~pub fn nlcg(conjugacy: Conjugacy) -> Self {~ | ~src/method.rs:294~ | ~docs/orgmode/reference/public-api.org~ |
 | ~nlcg_descent_fallbacks~ | function | ~pub fn nlcg_descent_fallbacks(&self) -> u64 {~ | ~src/session.rs:778~ | ~docs/orgmode/reference/public-api.org~ |
+| ~nlcg_with_restart~ | function | ~pub const fn nlcg_with_restart(conjugacy: Conjugacy, restart: Restart) -> Self {~ | ~src/method.rs:254~ | ~docs/orgmode/reference/public-api.org~ |
 | ~norm~ | function | ~pub fn norm(mut self, norm: GradNorm) -> Self {~ | ~src/lbfgs.rs:150~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/howto/session.org~ |
 | ~nrm2~ | function | ~pub fn nrm2(&self) -> f64 {~ | ~src/restricted_trust.rs:50~ | ~docs/orgmode/explanation/simd.org~ |
 | ~nrm2~ | function | ~pub fn nrm2(x: ArrayView1<f64>) -> f64 {~ | ~src/vecops.rs:770~ | ~docs/orgmode/explanation/simd.org~ |
@@ -1053,6 +1049,7 @@ reference entry and a documentation location.
 | ~positions~ | function | ~pub fn positions(&self) -> &[Array1<f64>] {~ | ~src/diis.rs:61~ | ~docs/orgmode/reference/public-api.org~ |
 | ~positive~ | function | ~pub fn positive(n: usize) -> Self {~ | ~src/manifold/mod.rs:567~ | ~docs/orgmode/changelog.org~ |
 | ~powell~ | function | ~pub fn powell() -> Self {~ | ~src/nlcg/mod.rs:116~ | ~docs/orgmode/reference/public-api.org~ |
+| ~powell_at~ | function | ~pub const fn powell_at(threshold: f64) -> Self {~ | ~src/nlcg/mod.rs:126~ | ~docs/orgmode/changelog.org~ |
 | ~power~ | function | ~pub fn power(factor: Self, block: usize, count: usize) -> crate::Result<Self> {~ | ~src/manifold/mod.rs:495~ | ~docs/orgmode/reference/public-api.org~ |
 | ~power~ | function | ~pub fn power(kind: ManifoldKind, block: usize, count: usize) -> Result<Self> {~ | ~src/manifold/product.rs:297~ | ~docs/orgmode/reference/public-api.org~ |
 | ~precon_fallbacks~ | function | ~pub fn precon_fallbacks(&self) -> usize {~ | ~src/lbfgs.rs:691~ | ~docs/orgmode/reference/public-api.org~ |
@@ -1073,6 +1070,7 @@ reference entry and a documentation location.
 | ~project_subspace~ | function | ~pub fn project_subspace(&self, v: &Array1<f64>) -> Array1<f64> {~ | ~src/manifold/subspace_sphere.rs:133~ | ~docs/orgmode/reference/public-api.org~ |
 | ~project_vector~ | function | ~pub fn project_vector(&self, at: ArrayView1<f64>, v: &mut Array1<f64>) -> Result<()> {~ | ~src/holonomic/mod.rs:445~ | ~docs/orgmode/reference/public-api.org~ |
 | ~pso~ | function | ~pub fn pso() -> Self {~ | ~src/method.rs:244~ | ~docs/orgmode/reference/python.org~ |
+| ~pso_with~ | function | ~pub const fn pso_with(n_particles: usize, inertia: f64, c1: f64, c2: f64) -> Self {~ | ~src/method.rs:274~ | ~docs/orgmode/reference/public-api.org~ |
 | ~pulay_coefficients~ | function | ~pub fn pulay_coefficients(gs: &[Array1<f64>]) -> Option<Vec<f64>> {~ | ~src/diis.rs:69~ | ~docs/orgmode/reference/public-api.org~ |
 | ~push~ | function | ~pub fn push(&mut self, x: Array1<f64>, g: Array1<f64>) {~ | ~src/diis.rs:45~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~push~ | function | ~pub fn push(&mut self, s: ArrayView1<'_, f64>, y: ArrayView1<'_, f64>) -> Result<bool> {~ | ~src/lbfgs/direction.rs:122~ | ~docs/orgmode/howto/c-abi.org~ |
@@ -1121,6 +1119,7 @@ reference entry and a documentation location.
 | ~sample_value_gradient_noise~ | function | ~pub fn sample_value_gradient_noise<O>(~ | ~src/noise.rs:307~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/noise.org~ |
 | ~scale~ | function | ~pub fn scale(a: f64, y: &mut Array1<f64>) {~ | ~src/vecops.rs:786~ | ~docs/orgmode/explanation/simd.org~ |
 | ~scaled~ | function | ~pub fn scaled(self, max_atom: f64) -> Self {~ | ~src/lbfgs.rs:187~ | ~docs/orgmode/changelog.org~ |
+| ~scaled~ | function | ~pub const fn scaled(max_atom: f64) -> Self {~ | ~src/lbfgs.rs:240~ | ~docs/orgmode/changelog.org~ |
 | ~scaled~ | function | ~pub fn scaled(max_atom: f64) -> Self {~ | ~src/lbfgs.rs:661~ | ~docs/orgmode/changelog.org~ |
 | ~search~ | function | ~pub fn search<F>(~ | ~src/linesearch/mod.rs:155~ | ~docs/orgmode/reference/public-api.org~ |
 | ~search_direction~ | function | ~pub fn search_direction(&self, g: ArrayView1<f64>) -> Result<Array1<f64>> {~ | ~src/session.rs:2172~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/reference/product-manifold.org~ |
@@ -1348,6 +1347,7 @@ reference entry and a documentation location.
 | ~with_weight~ | function | ~pub fn with_weight(mut self, weight: f64) -> Self {~ | ~src/manifold/product.rs:134~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/reference/product-manifold.org~ |
 | ~within~ | function | ~pub fn within(basis: Array2<f64>) -> Result<Self> {~ | ~src/manifold/subspace_sphere.rs:78~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/reference/product-manifold.org~ |
 | ~wolfe~ | function | ~pub fn wolfe(self) -> Self {~ | ~src/lbfgs.rs:175~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/configure.org~, ~docs/orgmode/howto/python.org~ |
+| ~wolfe~ | function | ~pub const fn wolfe(c1: f64, c2: f64, maxiter: usize) -> Self {~ | ~src/linesearch/mod.rs:144~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/configure.org~, ~docs/orgmode/howto/python.org~ |
 | ~write_checkpoint~ | function | ~pub fn write_checkpoint<S>(~ | ~src/con_checkpoint.rs:47~ | ~docs/orgmode/howto/install.org~ |
 | ~zeros_cpu~ | function | ~pub fn zeros_cpu(n: usize) -> Self {~ | ~src/vecops.rs:915~ | ~docs/orgmode/reference/public-api.org~ |
 | ~zoom~ | function | ~pub fn zoom<F>(~ | ~src/linesearch/zoom.rs:52~ | ~docs/orgmode/reference/public-api.org~ |
@@ -1473,7 +1473,7 @@ reference entry and a documentation location.
 | ~newton~ | mod | ~pub mod newton;~ | ~src/lib.rs:100~ | ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/reference/lammps-min-style.org~, ~docs/orgmode/reference/python.org~ |
 | ~nlcg~ | mod | ~pub mod nlcg;~ | ~src/lib.rs:34~ | ~docs/orgmode/reference/public-api.org~ |
 | ~noise~ | mod | ~pub mod noise;~ | ~src/lib.rs:75~ | ~docs/orgmode/reference/public-api.org~ |
-| ~ode12r~ | mod | ~pub mod ode12r;~ | ~src/lib.rs:102~ | ~docs/orgmode/reference/public-api.org~ |
+| ~ode12r~ | mod | ~pub mod ode12r;~ | ~src/lib.rs:102~ | ~docs/orgmode/reference/python.org~ |
 | ~precon~ | mod | ~pub mod precon;~ | ~src/lib.rs:105~ | ~docs/orgmode/reference/public-api.org~ |
 | ~qn_irc~ | mod | ~pub mod qn_irc;~ | ~src/lib.rs:109~ | ~docs/orgmode/reference/public-api.org~ |
 | ~quickmin~ | mod | ~pub mod quickmin;~ | ~src/lib.rs:112~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/reference/python.org~ |
@@ -1540,7 +1540,7 @@ reference entry and a documentation location.
 | ~callback~ | public field | ~pub callback: Option<HighsCallback>,~ | ~src/highs_kind.rs:154~ | ~docs/orgmode/reference/public-api.org~ |
 | ~cap~ | public field | ~pub cap: f64,~ | ~src/tune.rs:14~ | ~docs/orgmode/reference/public-api.org~ |
 | ~cap_ratio~ | public field | ~pub cap_ratio: f64,~ | ~src/session/drive.rs:31~ | ~docs/orgmode/reference/public-api.org~ |
-| ~cap_two_step_overshoot~ | public field | ~pub cap_two_step_overshoot: bool,~ | ~src/fire.rs:108~ | ~docs/orgmode/reference/public-api.org~ |
+| ~cap_two_step_overshoot~ | public field | ~pub cap_two_step_overshoot: bool,~ | ~src/fire.rs:108~ | ~docs/orgmode/reference/python.org~ |
 | ~cautious_alpha~ | public field | ~pub cautious_alpha: f64,~ | ~src/lbfgs.rs:536~ | ~docs/orgmode/reference/python.org~ |
 | ~cautious_eps~ | public field | ~pub cautious_eps: f64,~ | ~src/lbfgs.rs:534~ | ~docs/orgmode/reference/python.org~ |
 | ~cell~ | public field | ~pub cell: [f64; 3],~ | ~src/ffi.rs:4843~ | ~docs/orgmode/howto/bench-gate.org~ |
@@ -2206,10 +2206,10 @@ reference entry and a documentation location.
 | ~RGMIN_ABI_VERSION_MAJOR~ | constant | ~#define XTS_ABI_VERSION_MAJOR RGMIN_ABI_VERSION_MAJOR~ | ~include/xts.h:23~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_ABI_VERSION_MINOR~ | constant | ~#define RGMIN_ABI_VERSION_MINOR 50~ | ~include/rgmin.h:76~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_ABI_VERSION_MINOR~ | constant | ~#define XTS_ABI_VERSION_MINOR RGMIN_ABI_VERSION_MINOR~ | ~include/xts.h:24~ | ~docs/orgmode/reference/public-api.org~ |
-| ~RGMIN_ACCEPT_ENERGY~ | constant | ~* Since 0.6.0 the session opens with \c RGMIN_ACCEPT_ENERGY, where 0.5~ | ~include/rgmin.h:318~ | ~docs/orgmode/changelog.org~ |
+| ~RGMIN_ACCEPT_ENERGY~ | constant | ~RGMIN_ACCEPT_ENERGY = 1,~ | ~include/rgmin.h:483~ | ~docs/orgmode/changelog.org~ |
 | ~RGMIN_ACCEPT_ENERGY~ | constant | ~else if (value == "energy") cfg.accept_ = RGMIN_ACCEPT_ENERGY;~ | ~include/rgmin/optimize.hpp:1309~ | ~docs/orgmode/changelog.org~ |
 | ~RGMIN_ACCEPT_ENERGY~ | constant | ~#define XTS_ACCEPT_ENERGY RGMIN_ACCEPT_ENERGY~ | ~include/xts.h:98~ | ~docs/orgmode/changelog.org~ |
-| ~RGMIN_ACCEPT_NONE~ | constant | ~* opened with \c RGMIN_ACCEPT_NONE. The default L-BFGS step is the eOn~ | ~include/rgmin.h:319~ | ~docs/orgmode/changelog.org~ |
+| ~RGMIN_ACCEPT_NONE~ | constant | ~RGMIN_ACCEPT_NONE = 0,~ | ~include/rgmin.h:482~ | ~docs/orgmode/changelog.org~ |
 | ~RGMIN_ACCEPT_NONE~ | constant | ~if (value == "none") cfg.accept_ = RGMIN_ACCEPT_NONE;~ | ~include/rgmin/optimize.hpp:1308~ | ~docs/orgmode/changelog.org~ |
 | ~RGMIN_ACCEPT_NONE~ | constant | ~#define XTS_ACCEPT_NONE RGMIN_ACCEPT_NONE~ | ~include/xts.h:97~ | ~docs/orgmode/changelog.org~ |
 | ~RGMIN_ACCEPT_NONMONOTONE~ | constant | ~RGMIN_ACCEPT_NONMONOTONE = 2,~ | ~include/rgmin.h:484~ | ~docs/orgmode/reference/public-api.org~ |
@@ -2252,7 +2252,7 @@ reference entry and a documentation location.
 | ~RGMIN_CONSTRAINT_DEPENDENT~ | constant | ~RGMIN_CONSTRAINT_DEPENDENT = 7,~ | ~include/rgmin.h:879~ | ~docs/orgmode/howto/constraints.org~ |
 | ~RGMIN_CONSTRAINT_DEPENDENT~ | constant | ~#define XTS_CONSTRAINT_DEPENDENT RGMIN_CONSTRAINT_DEPENDENT~ | ~include/xts.h:245~ | ~docs/orgmode/howto/constraints.org~ |
 | ~RGMIN_CONSTRAINT_ERROR~ | constant | ~RGMIN_CONSTRAINT_ERROR = 5,~ | ~include/rgmin.h:62~ | ~docs/orgmode/reference/public-api.org~ |
-| ~RGMIN_CONSTRAINT_ERROR~ | constant | ~/// ConstraintError for RGMIN_CONSTRAINT_ERROR, std::runtime_error otherwise.~ | ~include/rgmin/optimize.hpp:357~ | ~docs/orgmode/reference/public-api.org~ |
+| ~RGMIN_CONSTRAINT_ERROR~ | constant | ~if (st == RGMIN_CONSTRAINT_ERROR) {~ | ~include/rgmin/optimize.hpp:361~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_CONSTRAINT_ERROR~ | constant | ~#define XTS_CONSTRAINT_ERROR RGMIN_CONSTRAINT_ERROR~ | ~include/xts.h:16~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_CONSTRAINT_LINCS_UNSAFE~ | constant | ~RGMIN_CONSTRAINT_LINCS_UNSAFE = 8,~ | ~include/rgmin.h:881~ | ~docs/orgmode/howto/constraints.org~ |
 | ~RGMIN_CONSTRAINT_LINCS_UNSAFE~ | constant | ~#define XTS_CONSTRAINT_LINCS_UNSAFE RGMIN_CONSTRAINT_LINCS_UNSAFE~ | ~include/xts.h:246~ | ~docs/orgmode/howto/constraints.org~ |
@@ -2366,7 +2366,6 @@ reference entry and a documentation location.
 | ~RGMIN_FR_PR~ | constant | ~FrPr = RGMIN_FR_PR,~ | ~include/rgmin/optimize.hpp:51~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_FR_PR~ | constant | ~#define XTS_FR_PR RGMIN_FR_PR~ | ~include/xts.h:74~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_GEOM_BULK~ | constant | ~#define RGMIN_GEOM_BULK 0~ | ~include/rgmin.h:402~ | ~docs/orgmode/reference/public-api.org~ |
-| ~RGMIN_GEOM_BULK~ | constant | ~/// \c select_precon. \c geometry_kind is \c RGMIN_GEOM_BULK and companions.~ | ~include/rgmin/optimize.hpp:559~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_GEOM_CLUSTER~ | constant | ~#define RGMIN_GEOM_CLUSTER 3~ | ~include/rgmin.h:405~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_GEOM_MOLECULE~ | constant | ~#define RGMIN_GEOM_MOLECULE 2~ | ~include/rgmin.h:404~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_GEOM_SURFACE~ | constant | ~#define RGMIN_GEOM_SURFACE 1~ | ~include/rgmin.h:403~ | ~docs/orgmode/reference/public-api.org~ |
@@ -2387,7 +2386,7 @@ reference entry and a documentation location.
 | ~RGMIN_HIGHS_CHOOSE~ | constant | ~#define XTS_HIGHS_CHOOSE RGMIN_HIGHS_CHOOSE~ | ~include/xts.h:167~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_HIGHS_CROSSOVER_CHOOSE~ | constant | ~RGMIN_HIGHS_CROSSOVER_CHOOSE = 0,~ | ~include/rgmin.h:729~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_HIGHS_CROSSOVER_CHOOSE~ | constant | ~#define XTS_HIGHS_CROSSOVER_CHOOSE RGMIN_HIGHS_CROSSOVER_CHOOSE~ | ~include/xts.h:175~ | ~docs/orgmode/reference/public-api.org~ |
-| ~RGMIN_HIGHS_CROSSOVER_OFF~ | constant | ~* \c RGMIN_HIGHS_CROSSOVER_OFF. Unknown integers return 1. */~ | ~include/rgmin.h:727~ | ~docs/orgmode/reference/public-api.org~ |
+| ~RGMIN_HIGHS_CROSSOVER_OFF~ | constant | ~RGMIN_HIGHS_CROSSOVER_OFF = 2~ | ~include/rgmin.h:731~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_HIGHS_CROSSOVER_OFF~ | constant | ~#define XTS_HIGHS_CROSSOVER_OFF RGMIN_HIGHS_CROSSOVER_OFF~ | ~include/xts.h:177~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_HIGHS_CROSSOVER_ON~ | constant | ~RGMIN_HIGHS_CROSSOVER_ON = 1,~ | ~include/rgmin.h:730~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_HIGHS_CROSSOVER_ON~ | constant | ~#define XTS_HIGHS_CROSSOVER_ON RGMIN_HIGHS_CROSSOVER_ON~ | ~include/xts.h:176~ | ~docs/orgmode/reference/public-api.org~ |
@@ -2395,7 +2394,7 @@ reference entry and a documentation location.
 | ~RGMIN_HIGHS_HIPDLP~ | constant | ~#define XTS_HIGHS_HIPDLP RGMIN_HIGHS_HIPDLP~ | ~include/xts.h:173~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_HIGHS_HIPO~ | constant | ~RGMIN_HIGHS_HIPO = 4,~ | ~include/rgmin.h:714~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_HIGHS_HIPO~ | constant | ~#define XTS_HIGHS_HIPO RGMIN_HIGHS_HIPO~ | ~include/xts.h:171~ | ~docs/orgmode/reference/public-api.org~ |
-| ~RGMIN_HIGHS_IPM~ | constant | ~* \c RGMIN_HIGHS_IPM. Unknown integers return 1. Returns 0, or 1~ | ~include/rgmin.h:707~ | ~docs/orgmode/reference/public-api.org~ |
+| ~RGMIN_HIGHS_IPM~ | constant | ~RGMIN_HIGHS_IPM = 2,~ | ~include/rgmin.h:712~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_HIGHS_IPM~ | constant | ~#define XTS_HIGHS_IPM RGMIN_HIGHS_IPM~ | ~include/xts.h:169~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_HIGHS_IPX~ | constant | ~RGMIN_HIGHS_IPX = 3,~ | ~include/rgmin.h:713~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_HIGHS_IPX~ | constant | ~#define XTS_HIGHS_IPX RGMIN_HIGHS_IPX~ | ~include/xts.h:170~ | ~docs/orgmode/reference/public-api.org~ |
@@ -2413,7 +2412,7 @@ reference entry and a documentation location.
 | ~RGMIN_INVALID_PARAMETER~ | constant | ~RGMIN_INVALID_PARAMETER = 1,~ | ~include/rgmin.h:54~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/level-set.org~ |
 | ~RGMIN_INVALID_PARAMETER~ | constant | ~? RGMIN_INVALID_PARAMETER~ | ~include/rgmin/optimize.hpp:383~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/level-set.org~ |
 | ~RGMIN_INVALID_PARAMETER~ | constant | ~#define XTS_INVALID_PARAMETER RGMIN_INVALID_PARAMETER~ | ~include/xts.h:12~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/level-set.org~ |
-| ~RGMIN_LBFGS~ | constant | ~/** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */~ | ~include/rgmin.h:98~ | ~docs/orgmode/reference/public-api.org~ |
+| ~RGMIN_LBFGS~ | constant | ~RGMIN_LBFGS = 3,~ | ~include/rgmin.h:103~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_LBFGS~ | constant | ~Lbfgs = RGMIN_LBFGS,~ | ~include/rgmin/optimize.hpp:40~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_LBFGS~ | constant | ~#define XTS_LBFGS RGMIN_LBFGS~ | ~include/xts.h:63~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_LINESEARCH_BACKTRACKING~ | constant | ~RGMIN_LINESEARCH_BACKTRACKING = 1,~ | ~include/rgmin.h:1019~ | ~docs/orgmode/reference/public-api.org~ |
@@ -2494,9 +2493,8 @@ reference entry and a documentation location.
 | ~RGMIN_POLAK_RIBIERE~ | constant | ~RGMIN_POLAK_RIBIERE = 0,~ | ~include/rgmin.h:100~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_POLAK_RIBIERE~ | constant | ~PolakRibiere = RGMIN_POLAK_RIBIERE,~ | ~include/rgmin/optimize.hpp:37~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_POLAK_RIBIERE~ | constant | ~#define XTS_POLAK_RIBIERE RGMIN_POLAK_RIBIERE~ | ~include/xts.h:60~ | ~docs/orgmode/reference/public-api.org~ |
-| ~RGMIN_POLAK_RIBIERE_PLUS~ | constant | ~RGMIN_POLAK_RIBIERE_PLUS = 26,~ | ~include/rgmin.h:132~ | ~docs/orgmode/reference/public-api.org~ |
-| ~RGMIN_POLAK_RIBIERE_PLUS~ | constant | ~PolakRibierePlus = RGMIN_POLAK_RIBIERE_PLUS,~ | ~include/rgmin/optimize.hpp:63~ | ~docs/orgmode/reference/public-api.org~ |
-| ~RGMIN_PRECON_~ | constant | ~* \c kind is \c uint32_t and holds a \c RGMIN_PRECON_* value.~ | ~include/rgmin.h:422~ | ~docs/orgmode/reference/public-api.org~ |
+| ~RGMIN_POLAK_RIBIERE_PLUS~ | constant | ~RGMIN_POLAK_RIBIERE_PLUS = 26,~ | ~include/rgmin.h:132~ | ~docs/orgmode/reference/python.org~ |
+| ~RGMIN_POLAK_RIBIERE_PLUS~ | constant | ~PolakRibierePlus = RGMIN_POLAK_RIBIERE_PLUS,~ | ~include/rgmin/optimize.hpp:63~ | ~docs/orgmode/reference/python.org~ |
 | ~RGMIN_PRECON_AUTO~ | constant | ~RGMIN_PRECON_AUTO = 4~ | ~include/rgmin.h:395~ | ~docs/orgmode/explanation/precon.org~, ~docs/orgmode/howto/precon.org~, ~docs/orgmode/reference/architecture.org~ |
 | ~RGMIN_PRECON_AUTO~ | constant | ~rgmin_precon_init(&p.raw_, RGMIN_PRECON_AUTO);~ | ~include/rgmin/optimize.hpp:562~ | ~docs/orgmode/explanation/precon.org~, ~docs/orgmode/howto/precon.org~, ~docs/orgmode/reference/architecture.org~ |
 | ~RGMIN_PRECON_EXP~ | constant | ~RGMIN_PRECON_EXP = 1,~ | ~include/rgmin.h:392~ | ~docs/orgmode/reference/architecture.org~ |
@@ -2527,7 +2525,7 @@ reference entry and a documentation location.
 | ~RGMIN_RFO~ | constant | ~RGMIN_RFO = 16,~ | ~include/rgmin.h:116~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_RFO~ | constant | ~Rfo = RGMIN_RFO,~ | ~include/rgmin/optimize.hpp:53~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_RFO~ | constant | ~#define XTS_RFO RGMIN_RFO~ | ~include/xts.h:76~ | ~docs/orgmode/reference/public-api.org~ |
-| ~RGMIN_RIGID_AUTO~ | constant | ~* \c RGMIN_RIGID_AUTO; zero forces the Euclidean projection off. A~ | ~include/rgmin.h:649~ | ~docs/orgmode/reference/public-api.org~ |
+| ~RGMIN_RIGID_AUTO~ | constant | ~RGMIN_RIGID_AUTO = 1,~ | ~include/rgmin.h:656~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_RIGID_AUTO~ | constant | ~#define XTS_RIGID_AUTO RGMIN_RIGID_AUTO~ | ~include/xts.h:346~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_RIGID_OFF~ | constant | ~RGMIN_RIGID_OFF = 0,~ | ~include/rgmin.h:655~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_RIGID_OFF~ | constant | ~#define XTS_RIGID_OFF RGMIN_RIGID_OFF~ | ~include/xts.h:345~ | ~docs/orgmode/reference/public-api.org~ |
@@ -2556,9 +2554,9 @@ reference entry and a documentation location.
 | ~RGMIN_STIEFEL_QR~ | constant | ~rgmin_stiefel_retraction_t retraction = RGMIN_STIEFEL_QR) {~ | ~include/rgmin/optimize.hpp:1015~ | ~docs/orgmode/reference/manifold.org~ |
 | ~RGMIN_STOP_BUDGET~ | constant | ~RGMIN_STOP_BUDGET = 3,~ | ~include/rgmin.h:167~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RGMIN_STOP_BUDGET~ | constant | ~rgmin_stop_t stop = RGMIN_STOP_BUDGET;~ | ~include/rgmin/optimize.hpp:169~ | ~docs/orgmode/reference/public-api.org~ |
-| ~RGMIN_STOP_ENERGY_TOLERANCE~ | constant | ~* 50 etol and max_evals stops, RGMIN_STOP_ENERGY_TOLERANCE and~ | ~include/rgmin.h:88~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/howto/stopping.org~ |
+| ~RGMIN_STOP_ENERGY_TOLERANCE~ | constant | ~RGMIN_STOP_ENERGY_TOLERANCE = 6,~ | ~include/rgmin.h:174~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/howto/stopping.org~ |
 | ~RGMIN_STOP_ENERGY_TOLERANCE~ | constant | ~#define XTS_STOP_ENERGY_TOLERANCE RGMIN_STOP_ENERGY_TOLERANCE~ | ~include/xts.h:20~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/howto/stopping.org~ |
-| ~RGMIN_STOP_EVAL_BUDGET~ | constant | ~* RGMIN_STOP_EVAL_BUDGET. rgmin_control_t is unchanged. */~ | ~include/rgmin.h:89~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/architecture.org~ |
+| ~RGMIN_STOP_EVAL_BUDGET~ | constant | ~RGMIN_STOP_EVAL_BUDGET = 7~ | ~include/rgmin.h:176~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/architecture.org~ |
 | ~RGMIN_STOP_EVAL_BUDGET~ | constant | ~#define XTS_STOP_EVAL_BUDGET RGMIN_STOP_EVAL_BUDGET~ | ~include/xts.h:21~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/architecture.org~ |
 | ~RGMIN_STOP_LINE_SEARCH~ | constant | ~RGMIN_STOP_LINE_SEARCH = 4,~ | ~include/rgmin.h:169~ | ~docs/orgmode/reference/architecture.org~ |
 | ~RGMIN_STOP_LINE_SEARCH~ | constant | ~#define XTS_STOP_LINE_SEARCH RGMIN_STOP_LINE_SEARCH~ | ~include/xts.h:18~ | ~docs/orgmode/reference/architecture.org~ |
@@ -2582,7 +2580,6 @@ reference entry and a documentation location.
 | ~RGMIN_UNAVAILABLE~ | constant | ~RGMIN_UNAVAILABLE = 4,~ | ~include/rgmin.h:59~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~RGMIN_UNAVAILABLE~ | constant | ~#define XTS_UNAVAILABLE RGMIN_UNAVAILABLE~ | ~include/xts.h:15~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~RGMIN_UNMET_STOP~ | constant | ~RGMIN_UNMET_STOP = 6~ | ~include/rgmin.h:65~ | ~docs/orgmode/reference/architecture.org~ |
-| ~RGMIN_UNMET_STOP~ | constant | ~/// Opt in to RGMIN_UNMET_STOP. Default off.~ | ~include/rgmin/optimize.hpp:141~ | ~docs/orgmode/reference/architecture.org~ |
 | ~RGMIN_UNMET_STOP~ | constant | ~#define XTS_UNMET_STOP RGMIN_UNMET_STOP~ | ~include/xts.h:17~ | ~docs/orgmode/reference/architecture.org~ |
 | ~RGMIN_UNSUPPORTED_DEVICE~ | constant | ~RGMIN_UNSUPPORTED_DEVICE = 3,~ | ~include/rgmin.h:57~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/architecture.org~ |
 | ~RGMIN_UNSUPPORTED_DEVICE~ | constant | ~#define XTS_UNSUPPORTED_DEVICE RGMIN_UNSUPPORTED_DEVICE~ | ~include/xts.h:14~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/architecture.org~ |
@@ -2748,7 +2745,7 @@ reference entry and a documentation location.
 | ~rgmin_angle_t~ | symbol | ~typedef struct rgmin_angle_t {~ | ~include/rgmin.h:412~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_angle_t~ | symbol | ~std::vector<rgmin_angle_t> angles_;~ | ~include/rgmin/optimize.hpp:479~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_angle_t~ | symbol | ~typedef rgmin_angle_t xts_angle_t;~ | ~include/xts.h:302~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_backward_error_floor~ | symbol | ~* the two session setters, rgmin_backward_error_floor, and the~ | ~include/rgmin.h:86~ | ~docs/orgmode/reference/architecture.org~ |
+| ~rgmin_backward_error_floor~ | symbol | ~double rgmin_backward_error_floor(double value, const double *x, size_t n);~ | ~include/rgmin.h:212~ | ~docs/orgmode/reference/architecture.org~ |
 | ~rgmin_backward_error_floor~ | symbol | ~#define xts_backward_error_floor rgmin_backward_error_floor~ | ~include/xts.h:132~ | ~docs/orgmode/reference/architecture.org~ |
 | ~rgmin_bond_t~ | symbol | ~typedef struct rgmin_bond_t {~ | ~include/rgmin.h:407~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_bond_t~ | symbol | ~std::vector<rgmin_bond_t> bonds_;~ | ~include/rgmin/optimize.hpp:478~ | ~docs/orgmode/reference/public-api.org~ |
@@ -2794,23 +2791,23 @@ reference entry and a documentation location.
 | ~rgmin_constraints_t~ | symbol | ~typedef struct rgmin_constraints_t rgmin_constraints_t;~ | ~include/rgmin.h:912~ | ~docs/orgmode/reference/architecture.org~ |
 | ~rgmin_constraints_t~ | symbol | ~rgmin_constraints_t* ptr_ = nullptr;~ | ~include/rgmin/optimize.hpp:378~ | ~docs/orgmode/reference/architecture.org~ |
 | ~rgmin_constraints_t~ | symbol | ~typedef rgmin_constraints_t xts_constraints_t;~ | ~include/xts.h:58~ | ~docs/orgmode/reference/architecture.org~ |
-| ~rgmin_control_default~ | symbol | ~* returns the Rust defaults: \ref rgmin_control_default,~ | ~include/rgmin.h:42~ | ~docs/orgmode/reference/python.org~ |
+| ~rgmin_control_default~ | symbol | ~rgmin_control_t rgmin_control_default(void);~ | ~include/rgmin.h:207~ | ~docs/orgmode/reference/python.org~ |
 | ~rgmin_control_default~ | symbol | ~rgmin_control_t c = rgmin_control_default();~ | ~include/rgmin/optimize.hpp:152~ | ~docs/orgmode/reference/python.org~ |
 | ~rgmin_control_default~ | symbol | ~#define xts_control_default rgmin_control_default~ | ~include/xts.h:289~ | ~docs/orgmode/reference/python.org~ |
-| ~rgmin_control_t~ | symbol | ~* *_opts one-shots. rgmin_control_t is unchanged.~ | ~include/rgmin.h:87~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/stopping.org~ |
+| ~rgmin_control_t~ | symbol | ~typedef struct rgmin_control_t {~ | ~include/rgmin.h:191~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_control_t~ | symbol | ~inline rgmin_control_t c_control(Control const& ctrl) noexcept {~ | ~include/rgmin/optimize.hpp:151~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_control_t~ | symbol | ~typedef rgmin_control_t xts_control_t;~ | ~include/xts.h:31~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_curv_fn~ | symbol | ~typedef rgmin_status_t (*rgmin_curv_fn)(void *user, const DLManagedTensorVersioned *x,~ | ~include/rgmin.h:1111~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_curv_fn~ | symbol | ~typedef rgmin_curv_fn xts_curv_fn;~ | ~include/xts.h:43~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_eigen_kind_t~ | symbol | ~typedef enum rgmin_eigen_kind_t {~ | ~include/rgmin.h:1186~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_eigen_kind_t~ | symbol | ~typedef rgmin_eigen_kind_t xts_eigen_kind_t;~ | ~include/xts.h:45~ | ~docs/orgmode/howto/c-abi.org~ |
-| ~rgmin_eigen_options_default~ | symbol | ~* \ref rgmin_eigen_options_default and \ref rgmin_precon_init. Assign~ | ~include/rgmin.h:45~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_eigen_options_default~ | symbol | ~rgmin_eigen_options_t rgmin_eigen_options_default(void);~ | ~include/rgmin.h:1283~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_eigen_options_default~ | symbol | ~rgmin_eigen_options_t extra = rgmin_eigen_options_default();~ | ~include/rgmin/optimize.hpp:119~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_eigen_options_default~ | symbol | ~#define xts_eigen_options_default rgmin_eigen_options_default~ | ~include/xts.h:294~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_eigen_options_t~ | symbol | ~typedef struct rgmin_eigen_options_t {~ | ~include/rgmin.h:1275~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_eigen_options_t~ | symbol | ~rgmin_eigen_options_t extra = rgmin_eigen_options_default();~ | ~include/rgmin/optimize.hpp:119~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_eigen_options_t~ | symbol | ~typedef rgmin_eigen_options_t xts_eigen_options_t;~ | ~include/xts.h:299~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
-| ~rgmin_eigen_params_default~ | symbol | ~* \ref rgmin_scg_options_default, \ref rgmin_eigen_params_default,~ | ~include/rgmin.h:44~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_eigen_params_default~ | symbol | ~rgmin_eigen_params_t rgmin_eigen_params_default(void);~ | ~include/rgmin.h:1217~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_eigen_params_default~ | symbol | ~rgmin_eigen_params_t c = rgmin_eigen_params_default();~ | ~include/rgmin/optimize.hpp:113~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_eigen_params_default~ | symbol | ~#define xts_eigen_params_default rgmin_eigen_params_default~ | ~include/xts.h:293~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_eigen_params_t~ | symbol | ~typedef struct rgmin_eigen_params_t {~ | ~include/rgmin.h:1206~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
@@ -2828,7 +2825,7 @@ reference entry and a documentation location.
 | ~rgmin_evalgrad_fn~ | symbol | ~typedef rgmin_status_t (*rgmin_evalgrad_fn)(void *user,~ | ~include/rgmin.h:230~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_evalgrad_fn~ | symbol | ~Report step_fg(rgmin_evalgrad_fn evalgrad, void* user,~ | ~include/rgmin/optimize.hpp:881~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_evalgrad_fn~ | symbol | ~typedef rgmin_evalgrad_fn xts_evalgrad_fn;~ | ~include/xts.h:36~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_exp_default~ | symbol | ~* \ref rgmin_exp_default, \ref rgmin_scg_params_default,~ | ~include/rgmin.h:43~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_exp_default~ | symbol | ~rgmin_exp_t rgmin_exp_default(void);~ | ~include/rgmin.h:374~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_exp_default~ | symbol | ~#define xts_exp_default rgmin_exp_default~ | ~include/xts.h:290~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_exp_t~ | symbol | ~typedef struct rgmin_exp_t {~ | ~include/rgmin.h:360~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_exp_t~ | symbol | ~rgmin_status_t set_exp(rgmin_exp_t const* params, std::uint32_t const* pair_i,~ | ~include/rgmin/optimize.hpp:678~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
@@ -2862,14 +2859,14 @@ reference entry and a documentation location.
 | ~rgmin_hvp_fn~ | symbol | ~typedef rgmin_status_t (*rgmin_hvp_fn)(void *user, const DLManagedTensorVersioned *x,~ | ~include/rgmin.h:1224~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_hvp_fn~ | symbol | ~rgmin_hvp_fn hvp, void* user, const DLManagedTensorVersioned* x,~ | ~include/rgmin/optimize.hpp:110~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_hvp_fn~ | symbol | ~typedef rgmin_hvp_fn xts_hvp_fn;~ | ~include/xts.h:54~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_last_constraint_error~ | symbol | ~* \ref rgmin_last_constraint_error names the kind. ABI minor 31. */~ | ~include/rgmin.h:61~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_last_constraint_error~ | symbol | ~rgmin_constraint_error_t rgmin_last_constraint_error(void);~ | ~include/rgmin.h:895~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_last_constraint_error~ | symbol | ~throw ConstraintError(msg, rgmin_last_constraint_error());~ | ~include/rgmin/optimize.hpp:362~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_last_constraint_error~ | symbol | ~#define xts_last_constraint_error rgmin_last_constraint_error~ | ~include/xts.h:222~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_last_error~ | symbol | ~const char *rgmin_last_error(void);~ | ~include/rgmin.h:245~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_last_error~ | symbol | ~char const* msg = rgmin_last_error();~ | ~include/rgmin/optimize.hpp:71~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_last_error~ | symbol | ~#define xts_last_error rgmin_last_error~ | ~include/xts.h:111~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_last_error_message~ | symbol | ~const char *rgmin_last_error_message(void);~ | ~include/rgmin.h:247~ | ~docs/orgmode/changelog.org~ |
-| ~rgmin_lbfgs_direction~ | symbol | ~/** Opaque `(s, y)` memory for \ref rgmin_lbfgs_direction.~ | ~include/rgmin.h:1061~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
+| ~rgmin_lbfgs_direction~ | symbol | ~rgmin_status_t rgmin_lbfgs_direction(const rgmin_lbfgs_pairs_t *pairs,~ | ~include/rgmin.h:1099~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lbfgs_direction~ | symbol | ~rgmin_status_t st = rgmin_lbfgs_direction(ptr_, grad, h0, nullptr, nullptr, dir, n);~ | ~include/rgmin/optimize.hpp:980~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lbfgs_direction~ | symbol | ~#define xts_lbfgs_direction rgmin_lbfgs_direction~ | ~include/xts.h:206~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lbfgs_pairs~ | symbol | ~typedef struct rgmin_lbfgs_pairs rgmin_lbfgs_pairs_t;~ | ~include/rgmin.h:1063~ | ~docs/orgmode/reference/public-api.org~ |
@@ -2888,19 +2885,19 @@ reference entry and a documentation location.
 | ~rgmin_lbfgs_pairs_push~ | symbol | ~rgmin_status_t rgmin_lbfgs_pairs_push(rgmin_lbfgs_pairs_t *pairs, const double *s,~ | ~include/rgmin.h:1076~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lbfgs_pairs_push~ | symbol | ~rgmin_status_t st = rgmin_lbfgs_pairs_push(ptr_, s, y, n, &stored);~ | ~include/rgmin/optimize.hpp:957~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lbfgs_pairs_push~ | symbol | ~#define xts_lbfgs_pairs_push rgmin_lbfgs_pairs_push~ | ~include/xts.h:201~ | ~docs/orgmode/howto/c-abi.org~ |
-| ~rgmin_lbfgs_pairs_push_rho~ | symbol | ~* 43 rgmin_lbfgs_pairs_push_rho, 44 rgmin_solver_set_power,~ | ~include/rgmin.h:80~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
+| ~rgmin_lbfgs_pairs_push_rho~ | symbol | ~rgmin_status_t rgmin_lbfgs_pairs_push_rho(rgmin_lbfgs_pairs_t *pairs, const double *s,~ | ~include/rgmin.h:1084~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lbfgs_pairs_push_rho~ | symbol | ~rgmin_status_t st = rgmin_lbfgs_pairs_push_rho(ptr_, s, y, rho, n, &stored);~ | ~include/rgmin/optimize.hpp:968~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lbfgs_pairs_push_rho~ | symbol | ~#define xts_lbfgs_pairs_push_rho rgmin_lbfgs_pairs_push_rho~ | ~include/xts.h:202~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lbfgs_pairs_t~ | symbol | ~typedef struct rgmin_lbfgs_pairs rgmin_lbfgs_pairs_t;~ | ~include/rgmin.h:1063~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lbfgs_pairs_t~ | symbol | ~rgmin_lbfgs_pairs_t* ptr_ = nullptr;~ | ~include/rgmin/optimize.hpp:929~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lbfgs_pairs_t~ | symbol | ~typedef rgmin_lbfgs_pairs_t xts_lbfgs_pairs_t;~ | ~include/xts.h:198~ | ~docs/orgmode/howto/c-abi.org~ |
-| ~rgmin_linesearch~ | symbol | ~/** Line-search rule for \ref rgmin_linesearch. Integers are stable. */~ | ~include/rgmin.h:1014~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/linesearch.org~, ~docs/orgmode/tutorials/linesearch.org~ |
+| ~rgmin_linesearch~ | symbol | ~typedef struct rgmin_linesearch rgmin_linesearch_t;~ | ~include/rgmin.h:1038~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/linesearch.org~, ~docs/orgmode/tutorials/linesearch.org~ |
 | ~rgmin_linesearch_create~ | symbol | ~rgmin_linesearch_t *rgmin_linesearch_create(rgmin_linesearch_kind_t kind,~ | ~include/rgmin.h:1044~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_linesearch_free~ | symbol | ~void rgmin_linesearch_free(rgmin_linesearch_t *search);~ | ~include/rgmin.h:1059~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_linesearch_free~ | symbol | ~#define xts_linesearch_free rgmin_linesearch_free~ | ~include/xts.h:365~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_linesearch_kind_t~ | symbol | ~typedef enum rgmin_linesearch_kind_t {~ | ~include/rgmin.h:1015~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_linesearch_kind_t~ | symbol | ~rgmin_status_t set_linesearch(rgmin_linesearch_kind_t kind, double c1, double c2,~ | ~include/rgmin/optimize.hpp:704~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_linesearch_t~ | symbol | ~* The 0.5.2 header spelled this kind \c rgmin_linesearch_t. That name is~ | ~include/rgmin.h:1030~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_linesearch_t~ | symbol | ~typedef struct rgmin_linesearch rgmin_linesearch_t;~ | ~include/rgmin.h:1038~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_linesearch_t~ | symbol | ~typedef rgmin_linesearch_t xts_linesearch_t;~ | ~include/xts.h:309~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_lowest_eigenpair~ | symbol | ~rgmin_status_t rgmin_lowest_eigenpair(rgmin_hvp_fn hvp, void *user,~ | ~include/rgmin.h:1240~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lowest_eigenpair~ | symbol | ~throw std::runtime_error(msg ? msg : "rgmin_lowest_eigenpair failed");~ | ~include/rgmin/optimize.hpp:127~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
@@ -2908,11 +2905,11 @@ reference entry and a documentation location.
 | ~rgmin_lowest_eigenpair_with_options~ | symbol | ~rgmin_status_t rgmin_lowest_eigenpair_with_options(~ | ~include/rgmin.h:1342~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_lowest_eigenpair_with_options~ | symbol | ~rgmin_status_t st = rgmin_lowest_eigenpair_with_options(~ | ~include/rgmin/optimize.hpp:123~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_lowest_eigenpair_with_options~ | symbol | ~#define xts_lowest_eigenpair_with_options rgmin_lowest_eigenpair_with_options~ | ~include/xts.h:328~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_lowest_eigenpairs~ | symbol | ~/* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.~ | ~include/rgmin.h:77~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
+| ~rgmin_lowest_eigenpairs~ | symbol | ~rgmin_status_t rgmin_lowest_eigenpairs(~ | ~include/rgmin.h:1305~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lowest_eigenpairs~ | symbol | ~throw std::invalid_argument("rgmin_lowest_eigenpairs: bad block");~ | ~include/rgmin/optimize.hpp:281~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lowest_eigenpairs~ | symbol | ~#define xts_lowest_eigenpairs rgmin_lowest_eigenpairs~ | ~include/xts.h:207~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
-| ~rgmin_lowest_eigenpairs_ex~ | symbol | ~* 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,~ | ~include/rgmin.h:79~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
-| ~rgmin_lowest_eigenpairs_ex~ | symbol | ~/// \ref rgmin_lowest_eigenpairs_ex. `precond` null is the identity.~ | ~include/rgmin/optimize.hpp:307~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
+| ~rgmin_lowest_eigenpairs_ex~ | symbol | ~rgmin_status_t rgmin_lowest_eigenpairs_ex(~ | ~include/rgmin.h:1329~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
+| ~rgmin_lowest_eigenpairs_ex~ | symbol | ~throw std::invalid_argument("rgmin_lowest_eigenpairs_ex: bad block");~ | ~include/rgmin/optimize.hpp:318~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lowest_eigenpairs_ex~ | symbol | ~#define xts_lowest_eigenpairs_ex rgmin_lowest_eigenpairs_ex~ | ~include/xts.h:221~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_lowest_mode_t~ | symbol | ~typedef struct rgmin_lowest_mode_t {~ | ~include/rgmin.h:1219~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_lowest_mode_t~ | symbol | ~inline rgmin_lowest_mode_t lowest_eigenpair(~ | ~include/rgmin/optimize.hpp:109~ | ~docs/orgmode/reference/public-api.org~ |
@@ -2924,26 +2921,26 @@ reference entry and a documentation location.
 | ~rgmin_manifold_exp~ | symbol | ~rgmin_status_t rgmin_manifold_exp(const rgmin_manifold_handle_t *manifold, const double *x,~ | ~include/rgmin.h:1454~ | ~docs/orgmode/reference/manifold.org~ |
 | ~rgmin_manifold_exp~ | symbol | ~check(rgmin_manifold_exp(ptr_, x, v, out, len()), "rgmin_manifold_exp failed");~ | ~include/rgmin/optimize.hpp:1056~ | ~docs/orgmode/reference/manifold.org~ |
 | ~rgmin_manifold_exp~ | symbol | ~#define xts_manifold_exp rgmin_manifold_exp~ | ~include/xts.h:216~ | ~docs/orgmode/reference/manifold.org~ |
-| ~rgmin_manifold_free~ | symbol | ~* \ref rgmin_manifold_free. */~ | ~include/rgmin.h:1400~ | ~docs/orgmode/explanation/product-manifold.org~ |
+| ~rgmin_manifold_free~ | symbol | ~void rgmin_manifold_free(rgmin_manifold_handle_t *manifold);~ | ~include/rgmin.h:1433~ | ~docs/orgmode/explanation/product-manifold.org~ |
 | ~rgmin_manifold_free~ | symbol | ~~Manifold() { rgmin_manifold_free(ptr_); }~ | ~include/rgmin/optimize.hpp:1028~ | ~docs/orgmode/explanation/product-manifold.org~ |
 | ~rgmin_manifold_free~ | symbol | ~#define xts_manifold_free rgmin_manifold_free~ | ~include/xts.h:211~ | ~docs/orgmode/explanation/product-manifold.org~ |
 | ~rgmin_manifold_gradient_step~ | symbol | ~rgmin_status_t rgmin_manifold_gradient_step(const rgmin_manifold_handle_t *manifold,~ | ~include/rgmin.h:1474~ | ~docs/orgmode/reference/manifold.org~, ~docs/orgmode/tutorials/manifold-fit.org~ |
 | ~rgmin_manifold_gradient_step~ | symbol | ~check(rgmin_manifold_gradient_step(ptr_, x, egrad, t, rgrad_out, x_out, len()),~ | ~include/rgmin/optimize.hpp:1074~ | ~docs/orgmode/reference/manifold.org~, ~docs/orgmode/tutorials/manifold-fit.org~ |
 | ~rgmin_manifold_gradient_step~ | symbol | ~#define xts_manifold_gradient_step rgmin_manifold_gradient_step~ | ~include/xts.h:220~ | ~docs/orgmode/reference/manifold.org~, ~docs/orgmode/tutorials/manifold-fit.org~ |
 | ~rgmin_manifold_handle~ | symbol | ~typedef struct rgmin_manifold_handle rgmin_manifold_handle_t;~ | ~include/rgmin.h:1401~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_manifold_handle_t~ | symbol | ~* 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,~ | ~include/rgmin.h:79~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/manifold.org~ |
+| ~rgmin_manifold_handle_t~ | symbol | ~typedef struct rgmin_manifold_handle rgmin_manifold_handle_t;~ | ~include/rgmin.h:1401~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/manifold.org~ |
 | ~rgmin_manifold_handle_t~ | symbol | ~rgmin_manifold_handle_t* ptr_ = nullptr;~ | ~include/rgmin/optimize.hpp:1000~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/manifold.org~ |
 | ~rgmin_manifold_handle_t~ | symbol | ~typedef rgmin_manifold_handle_t xts_manifold_handle_t;~ | ~include/xts.h:48~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/manifold.org~ |
 | ~rgmin_manifold_inner~ | symbol | ~rgmin_status_t rgmin_manifold_inner(const rgmin_manifold_handle_t *manifold, const double *x,~ | ~include/rgmin.h:1468~ | ~docs/orgmode/reference/manifold.org~ |
 | ~rgmin_manifold_inner~ | symbol | ~check(rgmin_manifold_inner(ptr_, x, u, v, &out, len()), "rgmin_manifold_inner failed");~ | ~include/rgmin/optimize.hpp:1067~ | ~docs/orgmode/reference/manifold.org~ |
 | ~rgmin_manifold_inner~ | symbol | ~#define xts_manifold_inner rgmin_manifold_inner~ | ~include/xts.h:219~ | ~docs/orgmode/reference/manifold.org~ |
-| ~rgmin_manifold_len~ | symbol | ~* where \c len is \ref rgmin_manifold_len:~ | ~include/rgmin.h:1384~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_manifold_len~ | symbol | ~size_t rgmin_manifold_len(const rgmin_manifold_handle_t *manifold);~ | ~include/rgmin.h:1435~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_manifold_len~ | symbol | ~std::size_t len() const noexcept { return rgmin_manifold_len(ptr_); }~ | ~include/rgmin/optimize.hpp:1043~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_manifold_len~ | symbol | ~#define xts_manifold_len rgmin_manifold_len~ | ~include/xts.h:212~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_manifold_log~ | symbol | ~rgmin_status_t rgmin_manifold_log(const rgmin_manifold_handle_t *manifold, const double *x,~ | ~include/rgmin.h:1459~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_manifold_log~ | symbol | ~check(rgmin_manifold_log(ptr_, x, y, out, len()), "rgmin_manifold_log failed");~ | ~include/rgmin/optimize.hpp:1059~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_manifold_log~ | symbol | ~#define xts_manifold_log rgmin_manifold_log~ | ~include/xts.h:217~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_manifold_product~ | symbol | ~* \ref rgmin_manifold_spd or \ref rgmin_manifold_product; release with~ | ~include/rgmin.h:1399~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/tutorials/manifold-fit.org~ |
+| ~rgmin_manifold_product~ | symbol | ~rgmin_manifold_handle_t *rgmin_manifold_product(const rgmin_manifold_handle_t *const *factors,~ | ~include/rgmin.h:1430~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/tutorials/manifold-fit.org~ |
 | ~rgmin_manifold_product~ | symbol | ~return Manifold(rgmin_manifold_product(handles, sizeof...(Factors) + 1));~ | ~include/rgmin/optimize.hpp:1025~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/tutorials/manifold-fit.org~ |
 | ~rgmin_manifold_product~ | symbol | ~#define xts_manifold_product rgmin_manifold_product~ | ~include/xts.h:210~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/tutorials/manifold-fit.org~ |
 | ~rgmin_manifold_project~ | symbol | ~rgmin_status_t rgmin_manifold_project(const rgmin_manifold_handle_t *manifold, const double *x,~ | ~include/rgmin.h:1439~ | ~docs/orgmode/reference/manifold.org~ |
@@ -2952,10 +2949,10 @@ reference entry and a documentation location.
 | ~rgmin_manifold_retract~ | symbol | ~rgmin_status_t rgmin_manifold_retract(const rgmin_manifold_handle_t *manifold, const double *x,~ | ~include/rgmin.h:1449~ | ~docs/orgmode/reference/manifold.org~ |
 | ~rgmin_manifold_retract~ | symbol | ~check(rgmin_manifold_retract(ptr_, x, v, out, len()), "rgmin_manifold_retract failed");~ | ~include/rgmin/optimize.hpp:1053~ | ~docs/orgmode/reference/manifold.org~ |
 | ~rgmin_manifold_retract~ | symbol | ~#define xts_manifold_retract rgmin_manifold_retract~ | ~include/xts.h:215~ | ~docs/orgmode/reference/manifold.org~ |
-| ~rgmin_manifold_spd~ | symbol | ~* \ref rgmin_manifold_spd or \ref rgmin_manifold_product; release with~ | ~include/rgmin.h:1399~ | ~docs/orgmode/explanation/product-manifold.org~ |
+| ~rgmin_manifold_spd~ | symbol | ~rgmin_manifold_handle_t *rgmin_manifold_spd(size_t p, int32_t metric);~ | ~include/rgmin.h:1426~ | ~docs/orgmode/explanation/product-manifold.org~ |
 | ~rgmin_manifold_spd~ | symbol | ~return Manifold(rgmin_manifold_spd(p, static_cast<int32_t>(metric)));~ | ~include/rgmin/optimize.hpp:1019~ | ~docs/orgmode/explanation/product-manifold.org~ |
 | ~rgmin_manifold_spd~ | symbol | ~#define xts_manifold_spd rgmin_manifold_spd~ | ~include/xts.h:209~ | ~docs/orgmode/explanation/product-manifold.org~ |
-| ~rgmin_manifold_stiefel~ | symbol | ~/** Opaque manifold. Create with \ref rgmin_manifold_stiefel,~ | ~include/rgmin.h:1398~ | ~docs/orgmode/explanation/product-manifold.org~ |
+| ~rgmin_manifold_stiefel~ | symbol | ~rgmin_manifold_handle_t *rgmin_manifold_stiefel(size_t n, size_t p, int32_t retraction);~ | ~include/rgmin.h:1422~ | ~docs/orgmode/explanation/product-manifold.org~ |
 | ~rgmin_manifold_stiefel~ | symbol | ~return Manifold(rgmin_manifold_stiefel(n, p, static_cast<int32_t>(retraction)));~ | ~include/rgmin/optimize.hpp:1016~ | ~docs/orgmode/explanation/product-manifold.org~ |
 | ~rgmin_manifold_stiefel~ | symbol | ~#define xts_manifold_stiefel rgmin_manifold_stiefel~ | ~include/xts.h:208~ | ~docs/orgmode/explanation/product-manifold.org~ |
 | ~rgmin_manifold_t~ | symbol | ~typedef enum rgmin_manifold_t {~ | ~include/rgmin.h:780~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/reference/manifold.org~, ~docs/orgmode/reference/product-manifold.org~ |
@@ -2970,37 +2967,36 @@ reference entry and a documentation location.
 | ~rgmin_method_t~ | symbol | ~typedef enum rgmin_method_t {~ | ~include/rgmin.h:99~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_method_t~ | symbol | ~rgmin_method_t tag{};~ | ~include/rgmin/optimize.hpp:69~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_method_t~ | symbol | ~typedef rgmin_method_t xts_method_t;~ | ~include/xts.h:29~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_minimize~ | symbol | ~* \ref rgmin_minimize over dlpk \c DLManagedTensorVersioned tensors.~ | ~include/rgmin.h:38~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/python.org~ |
-| ~rgmin_minimize~ | symbol | ~* Solvers live in Rust. This header wraps rgmin_minimize over dlpk tensors.~ | ~include/rgmin/optimize.hpp:7~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/python.org~ |
+| ~rgmin_minimize~ | symbol | ~rgmin_status_t rgmin_minimize(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,~ | ~include/rgmin.h:269~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/python.org~ |
+| ~rgmin_minimize~ | symbol | ~throw std::runtime_error(msg ? msg : "rgmin_minimize failed");~ | ~include/rgmin/optimize.hpp:220~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/python.org~ |
 | ~rgmin_minimize~ | symbol | ~#define xts_minimize rgmin_minimize~ | ~include/xts.h:114~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/python.org~ |
-| ~rgmin_minimize_eindir~ | symbol | ~* \ref rgmin_minimize_hvp and \ref rgmin_minimize_eindir do the same.~ | ~include/rgmin.h:267~ | ~docs/orgmode/changelog.org~ |
+| ~rgmin_minimize_eindir~ | symbol | ~rgmin_status_t rgmin_minimize_eindir(~ | ~include/rgmin.h:303~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_minimize_eindir~ | symbol | ~rgmin_status_t st = rgmin_minimize_eindir(~ | ~include/rgmin/optimize.hpp:246~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_minimize_eindir~ | symbol | ~#define xts_minimize_eindir rgmin_minimize_eindir~ | ~include/xts.h:117~ | ~docs/orgmode/changelog.org~ |
-| ~rgmin_minimize_hess~ | symbol | ~* the noise floor, else \c RGMIN_STOP_BUDGET. \ref rgmin_minimize_hess,~ | ~include/rgmin.h:266~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/architecture.org~, ~docs/orgmode/reference/sota.org~ |
+| ~rgmin_minimize_hess~ | symbol | ~rgmin_status_t rgmin_minimize_hess(rgmin_eval_fn eval, rgmin_grad_fn grad,~ | ~include/rgmin.h:284~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/architecture.org~, ~docs/orgmode/reference/sota.org~ |
 | ~rgmin_minimize_hess~ | symbol | ~throw std::runtime_error(msg ? msg : "rgmin_minimize_hess failed");~ | ~include/rgmin/optimize.hpp:235~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/architecture.org~, ~docs/orgmode/reference/sota.org~ |
 | ~rgmin_minimize_hess~ | symbol | ~#define xts_minimize_hess rgmin_minimize_hess~ | ~include/xts.h:115~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/architecture.org~, ~docs/orgmode/reference/sota.org~ |
 | ~rgmin_minimize_hess_opts~ | symbol | ~rgmin_status_t rgmin_minimize_hess_opts(rgmin_eval_fn eval, rgmin_grad_fn grad,~ | ~include/rgmin.h:291~ | ~docs/orgmode/reference/python.org~ |
 | ~rgmin_minimize_hess_opts~ | symbol | ~rgmin_status_t st = rgmin_minimize_hess_opts(~ | ~include/rgmin/optimize.hpp:230~ | ~docs/orgmode/reference/python.org~ |
 | ~rgmin_minimize_hess_opts~ | symbol | ~#define xts_minimize_hess_opts rgmin_minimize_hess_opts~ | ~include/xts.h:134~ | ~docs/orgmode/reference/python.org~ |
-| ~rgmin_minimize_hvp~ | symbol | ~* \ref rgmin_minimize_hvp and \ref rgmin_minimize_eindir do the same.~ | ~include/rgmin.h:267~ | ~docs/orgmode/changelog.org~ |
+| ~rgmin_minimize_hvp~ | symbol | ~rgmin_status_t rgmin_minimize_hvp(rgmin_eval_fn eval, rgmin_grad_fn grad,~ | ~include/rgmin.h:1249~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_minimize_hvp~ | symbol | ~#define xts_minimize_hvp rgmin_minimize_hvp~ | ~include/xts.h:116~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_minimize_hvp_opts~ | symbol | ~rgmin_status_t rgmin_minimize_hvp_opts(rgmin_eval_fn eval, rgmin_grad_fn grad,~ | ~include/rgmin.h:1257~ | ~docs/orgmode/reference/python.org~ |
 | ~rgmin_minimize_hvp_opts~ | symbol | ~#define xts_minimize_hvp_opts rgmin_minimize_hvp_opts~ | ~include/xts.h:135~ | ~docs/orgmode/reference/python.org~ |
 | ~rgmin_minimize_opts~ | symbol | ~rgmin_status_t rgmin_minimize_opts(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,~ | ~include/rgmin.h:276~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_minimize_opts~ | symbol | ~rgmin_status_t st = rgmin_minimize_opts(~ | ~include/rgmin/optimize.hpp:215~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_minimize_opts~ | symbol | ~#define xts_minimize_opts rgmin_minimize_opts~ | ~include/xts.h:133~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_minimize_scg~ | symbol | ~* The exported symbol is \c rgmin_minimize_scg.~ | ~include/rgmin.h:1135~ | ~docs/orgmode/changelog.org~ |
+| ~rgmin_minimize_scg~ | symbol | ~rgmin_status_t rgmin_minimize_scg(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_curv_fn curv,~ | ~include/rgmin.h:1152~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_minimize_scg~ | symbol | ~#define xts_minimize_scg rgmin_minimize_scg~ | ~include/xts.h:118~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_minimize_scg_with_options~ | symbol | ~rgmin_status_t rgmin_minimize_scg_with_options(~ | ~include/rgmin.h:1176~ | ~docs/orgmode/changelog.org~ |
-| ~rgmin_minimize_scg_with_options~ | symbol | ~// rgmin_minimize_scg_with_options and rgmin_solver_set_objective_roundoff~ | ~include/rgmin/optimize.hpp:14~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_minimize_scg_with_options~ | symbol | ~#define xts_minimize_scg_with_options rgmin_minimize_scg_with_options~ | ~include/xts.h:329~ | ~docs/orgmode/changelog.org~ |
-| ~rgmin_precon_init~ | symbol | ~* \ref rgmin_eigen_options_default and \ref rgmin_precon_init. Assign~ | ~include/rgmin.h:45~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
+| ~rgmin_precon_init~ | symbol | ~void rgmin_precon_init(rgmin_precon_t *p, rgmin_precon_kind_t kind);~ | ~include/rgmin.h:465~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
 | ~rgmin_precon_init~ | symbol | ~rgmin_precon_init(&p.raw_, RGMIN_PRECON_LINDH);~ | ~include/rgmin/optimize.hpp:540~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
 | ~rgmin_precon_init~ | symbol | ~#define xts_precon_init rgmin_precon_init~ | ~include/xts.h:354~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
 | ~rgmin_precon_kind_t~ | symbol | ~typedef enum rgmin_precon_kind_t {~ | ~include/rgmin.h:390~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_precon_kind_t~ | symbol | ~typedef rgmin_precon_kind_t xts_precon_kind_t;~ | ~include/xts.h:300~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_precon_t~ | symbol | ~/** \ref rgmin_precon_t::geometry_kind for \c RGMIN_PRECON_AUTO. */~ | ~include/rgmin.h:401~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
-| ~rgmin_precon_t~ | symbol | ~/// Fills \c rgmin_precon_t. The owned arrays keep the pointers valid.~ | ~include/rgmin/optimize.hpp:466~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
+| ~rgmin_precon_t~ | symbol | ~typedef struct rgmin_precon_t {~ | ~include/rgmin.h:438~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
+| ~rgmin_precon_t~ | symbol | ~rgmin_precon_t raw_{};~ | ~include/rgmin/optimize.hpp:469~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
 | ~rgmin_precon_t~ | symbol | ~typedef rgmin_precon_t xts_precon_t;~ | ~include/xts.h:303~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
 | ~rgmin_precond_fn~ | symbol | ~typedef rgmin_status_t (*rgmin_precond_fn)(void *user, const DLManagedTensorVersioned *block,~ | ~include/rgmin.h:1232~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_precond_fn~ | symbol | ~inline void lowest_eigenpairs_ex(rgmin_hvp_fn hvp, void* user, rgmin_precond_fn precond,~ | ~include/rgmin/optimize.hpp:309~ | ~docs/orgmode/reference/public-api.org~ |
@@ -3011,7 +3007,7 @@ reference entry and a documentation location.
 | ~rgmin_quickmin_variant_t~ | symbol | ~typedef enum rgmin_quickmin_variant_t {~ | ~include/rgmin.h:508~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_quickmin_variant_t~ | symbol | ~void set_quickmin_variant(rgmin_quickmin_variant_t variant) {~ | ~include/rgmin/optimize.hpp:701~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_quickmin_variant_t~ | symbol | ~typedef rgmin_quickmin_variant_t xts_quickmin_variant_t;~ | ~include/xts.h:371~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_report_t~ | symbol | ~* leaves every step cap off. rgmin_report_t is value, steps, grad_norm,~ | ~include/rgmin.h:94~ | ~docs/orgmode/changelog.org~ |
+| ~rgmin_report_t~ | symbol | ~typedef struct rgmin_report_t {~ | ~include/rgmin.h:215~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_report_t~ | symbol | ~rgmin_report_t out{};~ | ~include/rgmin/optimize.hpp:214~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_report_t~ | symbol | ~typedef rgmin_report_t xts_report_t;~ | ~include/xts.h:32~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_rigid_align~ | symbol | ~rgmin_status_t rgmin_rigid_align(double *mobile, const double *reference, size_t n,~ | ~include/rgmin.h:1373~ | ~docs/orgmode/changelog.org~ |
@@ -3023,7 +3019,7 @@ reference entry and a documentation location.
 | ~rgmin_rigid_project_hessian~ | symbol | ~rgmin_status_t rgmin_rigid_project_hessian(~ | ~include/rgmin.h:1366~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_rigid_project_hessian~ | symbol | ~#define xts_rigid_project_hessian rgmin_rigid_project_hessian~ | ~include/xts.h:343~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_rigid_workspace~ | symbol | ~typedef struct rgmin_rigid_workspace rgmin_rigid_workspace_t;~ | ~include/rgmin.h:1349~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_rigid_workspace_free~ | symbol | ~* \ref rgmin_rigid_workspace_free. */~ | ~include/rgmin.h:1351~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_rigid_workspace_free~ | symbol | ~void rgmin_rigid_workspace_free(rgmin_rigid_workspace_t *ws);~ | ~include/rgmin.h:1354~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_rigid_workspace_free~ | symbol | ~#define xts_rigid_workspace_free rgmin_rigid_workspace_free~ | ~include/xts.h:340~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_rigid_workspace_new~ | symbol | ~rgmin_rigid_workspace_t *rgmin_rigid_workspace_new(void);~ | ~include/rgmin.h:1352~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_rigid_workspace_new~ | symbol | ~#define xts_rigid_workspace_new rgmin_rigid_workspace_new~ | ~include/xts.h:339~ | ~docs/orgmode/reference/public-api.org~ |
@@ -3031,11 +3027,11 @@ reference entry and a documentation location.
 | ~rgmin_rigid_workspace_rank~ | symbol | ~#define xts_rigid_workspace_rank rgmin_rigid_workspace_rank~ | ~include/xts.h:341~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_rigid_workspace_t~ | symbol | ~typedef struct rgmin_rigid_workspace rgmin_rigid_workspace_t;~ | ~include/rgmin.h:1349~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_rigid_workspace_t~ | symbol | ~typedef rgmin_rigid_workspace_t xts_rigid_workspace_t;~ | ~include/xts.h:373~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_scg_options_default~ | symbol | ~* \ref rgmin_scg_options_default, \ref rgmin_eigen_params_default,~ | ~include/rgmin.h:44~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_scg_options_default~ | symbol | ~rgmin_scg_options_t rgmin_scg_options_default(void);~ | ~include/rgmin.h:1173~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_scg_options_default~ | symbol | ~#define xts_scg_options_default rgmin_scg_options_default~ | ~include/xts.h:292~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_scg_options_t~ | symbol | ~typedef struct rgmin_scg_options_t {~ | ~include/rgmin.h:1167~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_scg_options_t~ | symbol | ~typedef rgmin_scg_options_t xts_scg_options_t;~ | ~include/xts.h:310~ | ~docs/orgmode/howto/c-abi.org~ |
-| ~rgmin_scg_params_default~ | symbol | ~* \ref rgmin_exp_default, \ref rgmin_scg_params_default,~ | ~include/rgmin.h:43~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_scg_params_default~ | symbol | ~rgmin_scg_params_t rgmin_scg_params_default(void);~ | ~include/rgmin.h:1131~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_scg_params_default~ | symbol | ~#define xts_scg_params_default rgmin_scg_params_default~ | ~include/xts.h:291~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_scg_params_t~ | symbol | ~typedef struct rgmin_scg_params_t {~ | ~include/rgmin.h:1117~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_scg_params_t~ | symbol | ~typedef rgmin_scg_params_t xts_scg_params_t;~ | ~include/xts.h:44~ | ~docs/orgmode/howto/c-abi.org~ |
@@ -3064,18 +3060,18 @@ reference entry and a documentation location.
 | ~rgmin_solver_clear_precon~ | symbol | ~void rgmin_solver_clear_precon(rgmin_solver_t *s);~ | ~include/rgmin.h:475~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_clear_precon~ | symbol | ~void clear_precon() { rgmin_solver_clear_precon(ptr_); }~ | ~include/rgmin/optimize.hpp:693~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_clear_precon~ | symbol | ~#define xts_solver_clear_precon rgmin_solver_clear_precon~ | ~include/xts.h:356~ | ~docs/orgmode/howto/c-abi.org~ |
-| ~rgmin_solver_create~ | symbol | ~* The exported symbol is \c rgmin_solver_create.~ | ~include/rgmin.h:316~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/api.org~ |
+| ~rgmin_solver_create~ | symbol | ~rgmin_solver_t *rgmin_solver_create(rgmin_method_t method, const rgmin_control_t *ctrl,~ | ~include/rgmin.h:329~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/api.org~ |
 | ~rgmin_solver_create~ | symbol | ~ptr_ = rgmin_solver_create(static_cast<rgmin_method_t>(method), &c, dim);~ | ~include/rgmin/optimize.hpp:631~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/api.org~ |
 | ~rgmin_solver_create~ | symbol | ~#define xts_solver_create rgmin_solver_create~ | ~include/xts.h:119~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/api.org~ |
 | ~rgmin_solver_dim~ | symbol | ~size_t rgmin_solver_dim(const rgmin_solver_t *solver);~ | ~include/rgmin.h:998~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_solver_dim~ | symbol | ~#define xts_solver_dim rgmin_solver_dim~ | ~include/xts.h:366~ | ~docs/orgmode/changelog.org~ |
-| ~rgmin_solver_evals~ | symbol | ~* finishes and \ref rgmin_solver_evals can exceed \c max_evals by that~ | ~include/rgmin.h:618~ | ~docs/orgmode/howto/stopping.org~ |
+| ~rgmin_solver_evals~ | symbol | ~size_t rgmin_solver_evals(const rgmin_solver_t *solver);~ | ~include/rgmin.h:627~ | ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_solver_evals~ | symbol | ~std::size_t evals() const noexcept { return rgmin_solver_evals(ptr_); }~ | ~include/rgmin/optimize.hpp:780~ | ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_solver_evals~ | symbol | ~#define xts_solver_evals rgmin_solver_evals~ | ~include/xts.h:148~ | ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_solver_exp_mu~ | symbol | ~double rgmin_solver_exp_mu(const rgmin_solver_t *solver);~ | ~include/rgmin.h:386~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_exp_mu~ | symbol | ~double exp_mu() const noexcept { return rgmin_solver_exp_mu(ptr_); }~ | ~include/rgmin/optimize.hpp:688~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_exp_mu~ | symbol | ~#define xts_solver_exp_mu rgmin_solver_exp_mu~ | ~include/xts.h:127~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
-| ~rgmin_solver_forget~ | symbol | ~* step as the step scale, until rgmin_solver_forget or~ | ~include/rgmin.h:189~ | ~docs/orgmode/howto/c-abi.org~ |
+| ~rgmin_solver_forget~ | symbol | ~void rgmin_solver_forget(rgmin_solver_t *solver);~ | ~include/rgmin.h:334~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_forget~ | symbol | ~void forget() { rgmin_solver_forget(ptr_); }~ | ~include/rgmin/optimize.hpp:663~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_forget~ | symbol | ~#define xts_solver_forget rgmin_solver_forget~ | ~include/xts.h:121~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_forget_evaluation~ | symbol | ~void rgmin_solver_forget_evaluation(rgmin_solver_t *solver);~ | ~include/rgmin.h:344~ | ~docs/orgmode/howto/session.org~ |
@@ -3087,7 +3083,7 @@ reference entry and a documentation location.
 | ~rgmin_solver_gradient_calls~ | symbol | ~size_t rgmin_solver_gradient_calls(const rgmin_solver_t *solver);~ | ~include/rgmin.h:1003~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_solver_gradient_calls~ | symbol | ~return rgmin_solver_gradient_calls(ptr_);~ | ~include/rgmin/optimize.hpp:669~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_solver_gradient_calls~ | symbol | ~#define xts_solver_gradient_calls rgmin_solver_gradient_calls~ | ~include/xts.h:153~ | ~docs/orgmode/changelog.org~ |
-| ~rgmin_solver_hvp_calls~ | symbol | ~* A finite-difference product is \ref rgmin_solver_hvp_calls, not a gradient. */~ | ~include/rgmin.h:1002~ | ~docs/orgmode/changelog.org~ |
+| ~rgmin_solver_hvp_calls~ | symbol | ~size_t rgmin_solver_hvp_calls(const rgmin_solver_t *solver);~ | ~include/rgmin.h:1006~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_solver_hvp_calls~ | symbol | ~std::size_t hvp_calls() const noexcept { return rgmin_solver_hvp_calls(ptr_); }~ | ~include/rgmin/optimize.hpp:672~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_solver_hvp_calls~ | symbol | ~#define xts_solver_hvp_calls rgmin_solver_hvp_calls~ | ~include/xts.h:154~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_solver_lbfgs_trust_radius~ | symbol | ~double rgmin_solver_lbfgs_trust_radius(const rgmin_solver_t *solver);~ | ~include/rgmin.h:600~ | ~docs/orgmode/changelog.org~ |
@@ -3102,8 +3098,8 @@ reference entry and a documentation location.
 | ~rgmin_solver_push_pair~ | symbol | ~int32_t rgmin_solver_push_pair(rgmin_solver_t *solver, const double *s,~ | ~include/rgmin.h:995~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_push_pair~ | symbol | ~return rgmin_solver_push_pair(ptr_, s, y, n);~ | ~include/rgmin/optimize.hpp:810~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_push_pair~ | symbol | ~#define xts_solver_push_pair rgmin_solver_push_pair~ | ~include/xts.h:150~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_solver_rebase~ | symbol | ~* rgmin_solver_rebase. */~ | ~include/rgmin.h:190~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_solver_rebase~ | symbol | ~/// Keep the method memory, drop the point (see rgmin_solver_rebase).~ | ~include/rgmin/optimize.hpp:664~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_solver_rebase~ | symbol | ~void rgmin_solver_rebase(rgmin_solver_t *solver);~ | ~include/rgmin.h:340~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_solver_rebase~ | symbol | ~void rebase() { rgmin_solver_rebase(ptr_); }~ | ~include/rgmin/optimize.hpp:665~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_rebase~ | symbol | ~#define xts_solver_rebase rgmin_solver_rebase~ | ~include/xts.h:122~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_report_gradient~ | symbol | ~rgmin_status_t rgmin_solver_report_gradient(const rgmin_solver_t *solver,~ | ~include/rgmin.h:1012~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_solver_report_gradient~ | symbol | ~return rgmin_solver_report_gradient(ptr_, out, n);~ | ~include/rgmin/optimize.hpp:783~ | ~docs/orgmode/changelog.org~ |
@@ -3111,7 +3107,7 @@ reference entry and a documentation location.
 | ~rgmin_solver_search_direction~ | symbol | ~rgmin_status_t rgmin_solver_search_direction(rgmin_solver_t *solver,~ | ~include/rgmin.h:1106~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_search_direction~ | symbol | ~return rgmin_solver_search_direction(ptr_, grad, dir, n);~ | ~include/rgmin/optimize.hpp:813~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_search_direction~ | symbol | ~#define xts_solver_search_direction rgmin_solver_search_direction~ | ~include/xts.h:151~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_solver_set_accept~ | symbol | ~* Call \ref rgmin_solver_set_accept with \c RGMIN_ACCEPT_NONE after~ | ~include/rgmin.h:327~ | ~docs/orgmode/reference/lammps-min-style.org~ |
+| ~rgmin_solver_set_accept~ | symbol | ~void rgmin_solver_set_accept(rgmin_solver_t *solver, rgmin_accept_t accept);~ | ~include/rgmin.h:491~ | ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_set_accept~ | symbol | ~void set_accept(rgmin_accept_t accept) { rgmin_solver_set_accept(ptr_, accept); }~ | ~include/rgmin/optimize.hpp:689~ | ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_set_accept~ | symbol | ~#define xts_solver_set_accept rgmin_solver_set_accept~ | ~include/xts.h:128~ | ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_set_atom_maxmove~ | symbol | ~void rgmin_solver_set_atom_maxmove(rgmin_solver_t *solver, double maxmove);~ | ~include/rgmin.h:640~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
@@ -3144,7 +3140,7 @@ reference entry and a documentation location.
 | ~rgmin_solver_set_error_on_unmet~ | symbol | ~void rgmin_solver_set_error_on_unmet(rgmin_solver_t *solver, int32_t on);~ | ~include/rgmin.h:549~ | ~docs/orgmode/reference/architecture.org~ |
 | ~rgmin_solver_set_error_on_unmet~ | symbol | ~rgmin_solver_set_error_on_unmet(ptr_, on ? 1 : 0);~ | ~include/rgmin/optimize.hpp:737~ | ~docs/orgmode/reference/architecture.org~ |
 | ~rgmin_solver_set_error_on_unmet~ | symbol | ~#define xts_solver_set_error_on_unmet rgmin_solver_set_error_on_unmet~ | ~include/xts.h:130~ | ~docs/orgmode/reference/architecture.org~ |
-| ~rgmin_solver_set_etol~ | symbol | ~* rgmin_solver_set_etol value. ABI minor 50. */~ | ~include/rgmin.h:173~ | ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
+| ~rgmin_solver_set_etol~ | symbol | ~rgmin_status_t rgmin_solver_set_etol(rgmin_solver_t *solver, double etol);~ | ~include/rgmin.h:612~ | ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_set_etol~ | symbol | ~rgmin_status_t set_etol(double etol) { return rgmin_solver_set_etol(ptr_, etol); }~ | ~include/rgmin/optimize.hpp:769~ | ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_set_etol~ | symbol | ~#define xts_solver_set_etol rgmin_solver_set_etol~ | ~include/xts.h:144~ | ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_set_euclidean_complex~ | symbol | ~void rgmin_solver_set_euclidean_complex(rgmin_solver_t *solver, size_t n);~ | ~include/rgmin.h:816~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
@@ -3156,13 +3152,13 @@ reference entry and a documentation location.
 | ~rgmin_solver_set_extra_updates~ | symbol | ~void rgmin_solver_set_extra_updates(rgmin_solver_t *solver, size_t extra);~ | ~include/rgmin.h:677~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_set_extra_updates~ | symbol | ~rgmin_solver_set_extra_updates(ptr_, n);~ | ~include/rgmin/optimize.hpp:800~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_set_extra_updates~ | symbol | ~#define xts_solver_set_extra_updates rgmin_solver_set_extra_updates~ | ~include/xts.h:157~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_solver_set_factor_shape~ | symbol | ~* rgmin_solver_set_factor_shape names. Token 9 is the hyperboloid,~ | ~include/rgmin.h:767~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
+| ~rgmin_solver_set_factor_shape~ | symbol | ~void rgmin_solver_set_factor_shape(rgmin_solver_t *solver, size_t n, size_t p);~ | ~include/rgmin.h:838~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~rgmin_solver_set_factor_shape~ | symbol | ~void set_factor_shape(std::size_t n, std::size_t p) { rgmin_solver_set_factor_shape(ptr_, n, p); }~ | ~include/rgmin/optimize.hpp:727~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~rgmin_solver_set_factor_shape~ | symbol | ~#define xts_solver_set_factor_shape rgmin_solver_set_factor_shape~ | ~include/xts.h:363~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~rgmin_solver_set_fire_abc~ | symbol | ~int32_t rgmin_solver_set_fire_abc(rgmin_solver_t *solver, int32_t on);~ | ~include/rgmin.h:573~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_set_fire_abc~ | symbol | ~int set_fire_abc(bool on) { return rgmin_solver_set_fire_abc(ptr_, on ? 1 : 0); }~ | ~include/rgmin/optimize.hpp:748~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_set_fire_abc~ | symbol | ~#define xts_solver_set_fire_abc rgmin_solver_set_fire_abc~ | ~include/xts.h:137~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
-| ~rgmin_solver_set_fire_cap_two_step_overshoot~ | symbol | ~* 48 rgmin_solver_set_fire_cap_two_step_overshoot,~ | ~include/rgmin.h:84~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_solver_set_fire_cap_two_step_overshoot~ | symbol | ~int32_t rgmin_solver_set_fire_cap_two_step_overshoot(rgmin_solver_t *solver, int32_t on);~ | ~include/rgmin.h:577~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_set_fire_cap_two_step_overshoot~ | symbol | ~return rgmin_solver_set_fire_cap_two_step_overshoot(ptr_, on ? 1 : 0);~ | ~include/rgmin/optimize.hpp:752~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_set_fire_cap_two_step_overshoot~ | symbol | ~#define xts_solver_set_fire_cap_two_step_overshoot rgmin_solver_set_fire_cap_two_step_overshoot~ | ~include/xts.h:138~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_set_fire_preset~ | symbol | ~int32_t rgmin_solver_set_fire_preset(rgmin_solver_t *solver, rgmin_fire_preset_t preset);~ | ~include/rgmin.h:568~ | ~docs/orgmode/changelog.org~ |
@@ -3201,7 +3197,7 @@ reference entry and a documentation location.
 | ~rgmin_solver_set_lbfgs_scaled~ | symbol | ~int32_t rgmin_solver_set_lbfgs_scaled(rgmin_solver_t *solver, double max_atom);~ | ~include/rgmin.h:589~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_solver_set_lbfgs_scaled~ | symbol | ~int set_lbfgs_scaled(double max_atom) { return rgmin_solver_set_lbfgs_scaled(ptr_, max_atom); }~ | ~include/rgmin/optimize.hpp:759~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_solver_set_lbfgs_scaled~ | symbol | ~#define xts_solver_set_lbfgs_scaled rgmin_solver_set_lbfgs_scaled~ | ~include/xts.h:140~ | ~docs/orgmode/changelog.org~ |
-| ~rgmin_solver_set_lbfgs_trust~ | symbol | ~* 45 rgmin_solver_set_lbfgs_trust (Burdakov ray, not set_lbfgs_trust),~ | ~include/rgmin.h:81~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
+| ~rgmin_solver_set_lbfgs_trust~ | symbol | ~int32_t rgmin_solver_set_lbfgs_trust(rgmin_solver_t *solver, double radius);~ | ~include/rgmin.h:598~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_set_lbfgs_trust~ | symbol | ~int set_lbfgs_trust(double radius) { return rgmin_solver_set_lbfgs_trust(ptr_, radius); }~ | ~include/rgmin/optimize.hpp:764~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_set_lbfgs_trust~ | symbol | ~#define xts_solver_set_lbfgs_trust rgmin_solver_set_lbfgs_trust~ | ~include/xts.h:142~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_set_lbfgs_wolfe~ | symbol | ~int32_t rgmin_solver_set_lbfgs_wolfe(rgmin_solver_t *solver);~ | ~include/rgmin.h:593~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
@@ -3215,10 +3211,10 @@ reference entry and a documentation location.
 | ~rgmin_solver_set_manifold~ | symbol | ~void rgmin_solver_set_manifold(rgmin_solver_t *solver, rgmin_manifold_t manifold);~ | ~include/rgmin.h:808~ | ~docs/orgmode/howto/manifolds.org~, ~docs/orgmode/reference/manifold.org~ |
 | ~rgmin_solver_set_manifold~ | symbol | ~void set_manifold(rgmin_manifold_t m) { rgmin_solver_set_manifold(ptr_, m); }~ | ~include/rgmin/optimize.hpp:830~ | ~docs/orgmode/howto/manifolds.org~, ~docs/orgmode/reference/manifold.org~ |
 | ~rgmin_solver_set_manifold~ | symbol | ~#define xts_solver_set_manifold rgmin_solver_set_manifold~ | ~include/xts.h:178~ | ~docs/orgmode/howto/manifolds.org~, ~docs/orgmode/reference/manifold.org~ |
-| ~rgmin_solver_set_masses~ | symbol | ~* rgmin_solver_set_masses as one molecule reused on every copy or as~ | ~include/rgmin.h:846~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/product-manifold.org~ |
+| ~rgmin_solver_set_masses~ | symbol | ~void rgmin_solver_set_masses(rgmin_solver_t *solver, const double *masses,~ | ~include/rgmin.h:854~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/product-manifold.org~ |
 | ~rgmin_solver_set_masses~ | symbol | ~rgmin_solver_set_masses(ptr_, masses, n_atoms);~ | ~include/rgmin/optimize.hpp:730~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/product-manifold.org~ |
 | ~rgmin_solver_set_masses~ | symbol | ~#define xts_solver_set_masses rgmin_solver_set_masses~ | ~include/xts.h:190~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/reference/product-manifold.org~ |
-| ~rgmin_solver_set_max_evals~ | symbol | ~/** The rgmin_solver_set_max_evals budget was spent. ABI minor 50. */~ | ~include/rgmin.h:175~ | ~docs/orgmode/howto/stopping.org~ |
+| ~rgmin_solver_set_max_evals~ | symbol | ~rgmin_status_t rgmin_solver_set_max_evals(rgmin_solver_t *solver, size_t max_evals);~ | ~include/rgmin.h:621~ | ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_solver_set_max_evals~ | symbol | ~return rgmin_solver_set_max_evals(ptr_, max_evals);~ | ~include/rgmin/optimize.hpp:775~ | ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_solver_set_max_evals~ | symbol | ~#define xts_solver_set_max_evals rgmin_solver_set_max_evals~ | ~include/xts.h:146~ | ~docs/orgmode/howto/stopping.org~ |
 | ~rgmin_solver_set_maxmove~ | symbol | ~void rgmin_solver_set_maxmove(rgmin_solver_t *solver, double maxmove);~ | ~include/rgmin.h:349~ | ~docs/orgmode/changelog.org~ |
@@ -3231,9 +3227,9 @@ reference entry and a documentation location.
 | ~rgmin_solver_set_multinomial_sym~ | symbol | ~rgmin_solver_set_multinomial_sym(ptr_, n);~ | ~include/rgmin/optimize.hpp:848~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~rgmin_solver_set_multinomial_sym~ | symbol | ~#define xts_solver_set_multinomial_sym rgmin_solver_set_multinomial_sym~ | ~include/xts.h:185~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~rgmin_solver_set_objective_roundoff~ | symbol | ~rgmin_status_t rgmin_solver_set_objective_roundoff(rgmin_solver_t *solver,~ | ~include/rgmin.h:526~ | ~docs/orgmode/changelog.org~ |
-| ~rgmin_solver_set_objective_roundoff~ | symbol | ~// rgmin_minimize_scg_with_options and rgmin_solver_set_objective_roundoff~ | ~include/rgmin/optimize.hpp:14~ | ~docs/orgmode/changelog.org~ |
+| ~rgmin_solver_set_objective_roundoff~ | symbol | ~return rgmin_solver_set_objective_roundoff(ptr_, relative);~ | ~include/rgmin/optimize.hpp:709~ | ~docs/orgmode/changelog.org~ |
 | ~rgmin_solver_set_objective_roundoff~ | symbol | ~#define xts_solver_set_objective_roundoff rgmin_solver_set_objective_roundoff~ | ~include/xts.h:352~ | ~docs/orgmode/changelog.org~ |
-| ~rgmin_solver_set_oblique~ | symbol | ~* rgmin_solver_set_oblique. Stiefel p>1 is rgmin_solver_set_stiefel.~ | ~include/rgmin.h:764~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_solver_set_oblique~ | symbol | ~void rgmin_solver_set_oblique(rgmin_solver_t *solver, size_t n, size_t m);~ | ~include/rgmin.h:810~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_set_oblique~ | symbol | ~rgmin_solver_set_oblique(ptr_, n, m);~ | ~include/rgmin/optimize.hpp:832~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_set_oblique~ | symbol | ~#define xts_solver_set_oblique rgmin_solver_set_oblique~ | ~include/xts.h:179~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_solver_set_pbc_axes~ | symbol | ~void rgmin_solver_set_pbc_axes(rgmin_solver_t *solver, int32_t x, int32_t y, int32_t z);~ | ~include/rgmin.h:669~ | ~docs/orgmode/reference/public-api.org~ |
@@ -3245,10 +3241,10 @@ reference entry and a documentation location.
 | ~rgmin_solver_set_positive~ | symbol | ~void rgmin_solver_set_positive(rgmin_solver_t *solver, size_t n);~ | ~include/rgmin.h:830~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~rgmin_solver_set_positive~ | symbol | ~void set_positive(std::size_t n) { rgmin_solver_set_positive(ptr_, n); }~ | ~include/rgmin/optimize.hpp:853~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~rgmin_solver_set_positive~ | symbol | ~#define xts_solver_set_positive rgmin_solver_set_positive~ | ~include/xts.h:187~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
-| ~rgmin_solver_set_power~ | symbol | ~* 43 rgmin_lbfgs_pairs_push_rho, 44 rgmin_solver_set_power,~ | ~include/rgmin.h:80~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/howto/manifolds.org~ |
+| ~rgmin_solver_set_power~ | symbol | ~int32_t rgmin_solver_set_power(rgmin_solver_t *solver, int32_t factor, size_t block,~ | ~include/rgmin.h:850~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~rgmin_solver_set_power~ | symbol | ~return rgmin_solver_set_power(ptr_, factor, block, count);~ | ~include/rgmin/optimize.hpp:860~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~rgmin_solver_set_power~ | symbol | ~#define xts_solver_set_power rgmin_solver_set_power~ | ~include/xts.h:189~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/howto/manifolds.org~ |
-| ~rgmin_solver_set_precon~ | symbol | ~/** Which geometry preconditioner \ref rgmin_solver_set_precon installs.~ | ~include/rgmin.h:388~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
+| ~rgmin_solver_set_precon~ | symbol | ~rgmin_status_t rgmin_solver_set_precon(rgmin_solver_t *s, const rgmin_precon_t *p);~ | ~include/rgmin.h:473~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
 | ~rgmin_solver_set_precon~ | symbol | ~rgmin_status_t set_precon(Precon const& p) { return rgmin_solver_set_precon(ptr_, p.get()); }~ | ~include/rgmin/optimize.hpp:692~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
 | ~rgmin_solver_set_precon~ | symbol | ~#define xts_solver_set_precon rgmin_solver_set_precon~ | ~include/xts.h:355~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/precon.org~ |
 | ~rgmin_solver_set_project_rigid~ | symbol | ~void rgmin_solver_set_project_rigid(rgmin_solver_t *solver, int32_t enabled);~ | ~include/rgmin.h:651~ | ~docs/orgmode/reference/public-api.org~ |
@@ -3275,7 +3271,7 @@ reference entry and a documentation location.
 | ~rgmin_solver_set_sphere_complex~ | symbol | ~void rgmin_solver_set_sphere_complex(rgmin_solver_t *solver, size_t n);~ | ~include/rgmin.h:827~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~rgmin_solver_set_sphere_complex~ | symbol | ~rgmin_solver_set_sphere_complex(ptr_, n);~ | ~include/rgmin/optimize.hpp:851~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~rgmin_solver_set_sphere_complex~ | symbol | ~#define xts_solver_set_sphere_complex rgmin_solver_set_sphere_complex~ | ~include/xts.h:186~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
-| ~rgmin_solver_set_stiefel~ | symbol | ~* rgmin_solver_set_oblique. Stiefel p>1 is rgmin_solver_set_stiefel.~ | ~include/rgmin.h:764~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
+| ~rgmin_solver_set_stiefel~ | symbol | ~void rgmin_solver_set_stiefel(rgmin_solver_t *solver, size_t n, size_t p);~ | ~include/rgmin.h:812~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_set_stiefel~ | symbol | ~rgmin_solver_set_stiefel(ptr_, n, p);~ | ~include/rgmin/optimize.hpp:835~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_set_stiefel~ | symbol | ~#define xts_solver_set_stiefel rgmin_solver_set_stiefel~ | ~include/xts.h:180~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_set_stop_norm~ | symbol | ~int32_t rgmin_solver_set_stop_norm(rgmin_solver_t *solver, rgmin_stop_norm_t norm);~ | ~include/rgmin.h:546~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/session.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
@@ -3284,16 +3280,16 @@ reference entry and a documentation location.
 | ~rgmin_solver_set_trust~ | symbol | ~int32_t rgmin_solver_set_trust(rgmin_solver_t *solver, double radius);~ | ~include/rgmin.h:696~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/highs-qp.org~ |
 | ~rgmin_solver_set_trust~ | symbol | ~int set_trust(double radius) { return rgmin_solver_set_trust(ptr_, radius); }~ | ~include/rgmin/optimize.hpp:815~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/highs-qp.org~ |
 | ~rgmin_solver_set_trust~ | symbol | ~#define xts_solver_set_trust rgmin_solver_set_trust~ | ~include/xts.h:161~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/highs-qp.org~ |
-| ~rgmin_solver_set_unitary~ | symbol | ~* U(n), interleaved row-major 2n^2, with n from rgmin_solver_set_unitary~ | ~include/rgmin.h:769~ | ~docs/orgmode/howto/c-abi.org~ |
+| ~rgmin_solver_set_unitary~ | symbol | ~void rgmin_solver_set_unitary(rgmin_solver_t *solver, size_t n);~ | ~include/rgmin.h:840~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_set_unitary~ | symbol | ~void set_unitary(std::size_t n) { rgmin_solver_set_unitary(ptr_, n); }~ | ~include/rgmin/optimize.hpp:728~ | ~docs/orgmode/howto/c-abi.org~ |
 | ~rgmin_solver_set_unitary~ | symbol | ~#define xts_solver_set_unitary rgmin_solver_set_unitary~ | ~include/xts.h:364~ | ~docs/orgmode/howto/c-abi.org~ |
-| ~rgmin_solver_step~ | symbol | ~/** Euclidean step cap for the next \ref rgmin_solver_step (saddle \c max_move).~ | ~include/rgmin.h:346~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/linesearch.org~, ~docs/orgmode/reference/api.org~ |
+| ~rgmin_solver_step~ | symbol | ~rgmin_status_t rgmin_solver_step(rgmin_solver_t *solver, rgmin_eval_fn eval,~ | ~include/rgmin.h:975~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/linesearch.org~, ~docs/orgmode/reference/api.org~ |
 | ~rgmin_solver_step~ | symbol | ~rgmin_status_t st = rgmin_solver_step(ptr_, eval, grad, user, x, &out);~ | ~include/rgmin/optimize.hpp:874~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/linesearch.org~, ~docs/orgmode/reference/api.org~ |
 | ~rgmin_solver_step~ | symbol | ~#define xts_solver_step rgmin_solver_step~ | ~include/xts.h:192~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/linesearch.org~, ~docs/orgmode/reference/api.org~ |
 | ~rgmin_solver_step_fg~ | symbol | ~rgmin_status_t rgmin_solver_step_fg(rgmin_solver_t *solver, rgmin_evalgrad_fn evalgrad,~ | ~include/rgmin.h:984~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/session.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_step_fg~ | symbol | ~rgmin_solver_step_fg(ptr_, evalgrad, user, x, &out);~ | ~include/rgmin/optimize.hpp:885~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/session.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
 | ~rgmin_solver_step_fg~ | symbol | ~#define xts_solver_step_fg rgmin_solver_step_fg~ | ~include/xts.h:195~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/session.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
-| ~rgmin_solver_step_hess~ | symbol | ~/** Two-loop + H0, or Newton/RFO on P. Legal with \ref rgmin_solver_step_hess. */~ | ~include/rgmin.h:356~ | ~docs/orgmode/howto/highs-qp.org~, ~docs/orgmode/reference/sota.org~ |
+| ~rgmin_solver_step_hess~ | symbol | ~rgmin_status_t rgmin_solver_step_hess(rgmin_solver_t *solver, rgmin_eval_fn eval,~ | ~include/rgmin.h:979~ | ~docs/orgmode/howto/highs-qp.org~, ~docs/orgmode/reference/sota.org~ |
 | ~rgmin_solver_step_hess~ | symbol | ~rgmin_solver_step_hess(ptr_, eval, grad, hess, user, x, &out);~ | ~include/rgmin/optimize.hpp:907~ | ~docs/orgmode/howto/highs-qp.org~, ~docs/orgmode/reference/sota.org~ |
 | ~rgmin_solver_step_hess~ | symbol | ~#define xts_solver_step_hess rgmin_solver_step_hess~ | ~include/xts.h:193~ | ~docs/orgmode/howto/highs-qp.org~, ~docs/orgmode/reference/sota.org~ |
 | ~rgmin_solver_step_hess_fg~ | symbol | ~rgmin_status_t rgmin_solver_step_hess_fg(rgmin_solver_t *solver,~ | ~include/rgmin.h:988~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/session.org~ |
@@ -3323,7 +3319,7 @@ reference entry and a documentation location.
 | ~rgmin_stop_t~ | symbol | ~typedef enum rgmin_stop_t {~ | ~include/rgmin.h:163~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_stop_t~ | symbol | ~rgmin_stop_t stop = RGMIN_STOP_BUDGET;~ | ~include/rgmin/optimize.hpp:169~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_stop_t~ | symbol | ~typedef rgmin_stop_t xts_stop_t;~ | ~include/xts.h:370~ | ~docs/orgmode/reference/public-api.org~ |
-| ~rgmin_tensor_borrow_cpu_f64~ | symbol | ~/** Borrow a CPU f64 buffer as a dlpk tensor. Rust: rgmin_tensor_borrow_cpu_f64. */~ | ~include/rgmin.h:248~ | ~docs/orgmode/reference/public-api.org~ |
+| ~rgmin_tensor_borrow_cpu_f64~ | symbol | ~DLManagedTensorVersioned *rgmin_tensor_borrow_cpu_f64(double *data, size_t n);~ | ~include/rgmin.h:249~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_tensor_borrow_cpu_f64~ | symbol | ~return rgmin_tensor_borrow_cpu_f64(data, n);~ | ~include/rgmin/optimize.hpp:266~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_tensor_borrow_cpu_f64~ | symbol | ~#define xts_tensor_borrow_cpu_f64 rgmin_tensor_borrow_cpu_f64~ | ~include/xts.h:112~ | ~docs/orgmode/reference/public-api.org~ |
 | ~rgmin_tensor_free~ | symbol | ~void rgmin_tensor_free(DLManagedTensorVersioned *tensor);~ | ~include/rgmin.h:251~ | ~docs/orgmode/reference/public-api.org~ |

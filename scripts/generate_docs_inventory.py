@@ -27,17 +27,18 @@ class Item:
     declaration: str
 
 
+RUST_FUNCTION = re.compile(
+    r'^\s*pub\s+(?!\()'
+    r'(?P<qualifiers>(?:const\s+)?(?:async\s+)?(?:unsafe\s+)?'
+    r'(?:extern\s+"[^"]+"\s+)?)'
+    r"fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
+)
 RUST_ITEM = re.compile(
-    r"^\s*pub\s+(?!\()(?:unsafe\s+)?(?:async\s+)?"
-    r"(?P<kind>mod|struct|enum|union|trait|type|const|static|fn)\s+"
+    r"^\s*pub\s+(?!\()(?P<kind>mod|struct|enum|union|trait|type|const|static)\s+"
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
 )
 RUST_FIELD = re.compile(
     r"^\s*pub\s+(?!\()(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*:"
-)
-RUST_EXTERN = re.compile(
-    r"^\s*pub\s+(?:unsafe\s+)?extern\s+\"C\"\s+fn\s+"
-    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
 )
 RUST_USE = re.compile(r"^\s*pub\s+use\s+(.+?);\s*$")
 TRAIT_MEMBER = re.compile(
@@ -52,6 +53,18 @@ MARKUP = re.compile(r"[~=]([A-Za-z_][A-Za-z0-9_:.-]*)[~=]")
 
 def relative(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
+
+
+def rust_declaration(line: str) -> tuple[str, str] | None:
+    function = RUST_FUNCTION.match(line)
+    if function:
+        qualifiers = function["qualifiers"]
+        kind = "C export" if re.search(r'extern\s+"C"', qualifiers) else "function"
+        return kind, function["name"]
+    item = RUST_ITEM.match(line)
+    if item:
+        return item["kind"], item["name"]
+    return None
 
 
 def rust_items() -> list[Item]:
@@ -83,16 +96,12 @@ def rust_items() -> list[Item]:
                 items.append(
                     Item("Rust", "generated method", setter["name"], rel, number, declaration)
                 )
-            match = RUST_EXTERN.match(line)
-            if match:
-                items.append(Item("Rust", "C export", match["name"], rel, number, declaration))
-            else:
-                match = RUST_ITEM.match(line)
-            if match and not RUST_EXTERN.match(line):
-                kind = "function" if match["kind"] == "fn" else match["kind"]
-                items.append(Item("Rust", kind, match["name"], rel, number, declaration))
-                if match["kind"] in {"trait", "enum"} and "{" in line:
-                    contexts.append((match["kind"], match["name"], depth + 1))
+            parsed = rust_declaration(line)
+            if parsed:
+                kind, name = parsed
+                items.append(Item("Rust", kind, name, rel, number, declaration))
+                if kind in {"trait", "enum"} and "{" in line:
+                    contexts.append((kind, name, depth + 1))
             field = RUST_FIELD.match(line)
             if field:
                 items.append(Item("Rust", "public field", field["name"], rel, number, declaration))
@@ -120,8 +129,18 @@ def header_items() -> list[Item]:
         rel = relative(path)
         items.append(Item("C and C++", "header", rel, rel, 1, f"Public header {rel}"))
         seen: set[str] = set()
-        for number, line in enumerate(path.read_text().splitlines(), 1):
-            for name in HEADER_TOKEN.findall(line):
+        text = path.read_text()
+        code = re.sub(
+            r"/\*.*?\*/",
+            lambda match: re.sub(r"[^\n]", " ", match.group()),
+            text,
+            flags=re.S,
+        )
+        code = re.sub(r"//[^\n]*", "", code)
+        for number, (line, code_line) in enumerate(
+            zip(text.splitlines(), code.splitlines(), strict=True), 1
+        ):
+            for name in HEADER_TOKEN.findall(code_line):
                 if name in seen:
                     continue
                 seen.add(name)
