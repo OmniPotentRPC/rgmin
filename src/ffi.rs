@@ -1029,6 +1029,15 @@ fn cpu_f64_slice_mut<'a>(
     Ok(unsafe { slice::from_raw_parts_mut(p, n) })
 }
 
+fn finite_init(x: *mut DLManagedTensorVersioned, caller: &str) -> Result<Vec<f64>, rgmin_status_t> {
+    let init = cpu_f64_slice_mut(x, "x")?.to_vec();
+    if init.iter().any(|value| !value.is_finite()) {
+        set_last_error(&format!("{caller}: x contains a non-finite value"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    Ok(init)
+}
+
 /// Minimize `f` from the 1-D f64 DLPack iterate `x`. On success, `x` is
 /// overwritten with the accepted point.
 ///
@@ -1095,14 +1104,10 @@ pub unsafe extern "C" fn rgmin_minimize_opts(
             set_last_error("rgmin_minimize: ctrl/out null");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
-        let init = match cpu_f64_slice_mut(x, "x") {
-            Ok(s) => s.to_vec(),
+        let init = match finite_init(x, "rgmin_minimize") {
+            Ok(init) => init,
             Err(st) => return st,
         };
-        if init.iter().any(|value| !value.is_finite()) {
-            set_last_error("rgmin_minimize: x contains a non-finite value");
-            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-        }
         let n = init.len();
         let obj = c_oracle(eval, grad, user, n);
         let c = unsafe { &*ctrl };
@@ -1223,8 +1228,8 @@ pub unsafe extern "C" fn rgmin_minimize_hess_opts(
             set_last_error("rgmin_minimize_hess: ctrl/out null");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
-        let init = match cpu_f64_slice_mut(x, "x") {
-            Ok(s) => s.to_vec(),
+        let init = match finite_init(x, "rgmin_minimize_hess") {
+            Ok(init) => init,
             Err(st) => return st,
         };
         let n = init.len();
@@ -1315,8 +1320,8 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_opts(
             set_last_error("rgmin_minimize_hvp: ctrl/out null");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
-        let init = match cpu_f64_slice_mut(x, "x") {
-            Ok(s) => s.to_vec(),
+        let init = match finite_init(x, "rgmin_minimize_hvp") {
+            Ok(init) => init,
             Err(st) => return st,
         };
         let n = init.len();
@@ -1373,8 +1378,8 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
             set_last_error("rgmin_minimize_eindir: objective has no gradient");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
-        let init = match cpu_f64_slice_mut(x, "x") {
-            Ok(s) => s.to_vec(),
+        let init = match finite_init(x, "rgmin_minimize_eindir") {
+            Ok(init) => init,
             Err(st) => return st,
         };
         let dim = unsafe { (*objective).dim };
@@ -4958,8 +4963,8 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
             set_last_error("rgmin_minimize_scg: ctrl/out null");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
-        let init = match cpu_f64_slice_mut(x, "x") {
-            Ok(s) => s.to_vec(),
+        let init = match finite_init(x, "rgmin_minimize_scg") {
+            Ok(init) => init,
             Err(st) => return st,
         };
         let n = init.len();
@@ -6026,7 +6031,15 @@ fn cpu_dl<'a>(
         set_last_error(&format!("{name}: null tensor"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
-    let dl = unsafe { &(*tensor).dl_tensor };
+    let tensor = unsafe { &*tensor };
+    if tensor.version.major != 1 || tensor.version.minor != 0 {
+        set_last_error(&format!(
+            "{name}: unsupported DLPack version {}.{}",
+            tensor.version.major, tensor.version.minor
+        ));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    let dl = &tensor.dl_tensor;
     if dl.device.device_type != DLDeviceType::kDLCPU {
         set_last_error(&format!(
             "{name}: device {:?} not supported in this build (CPU only)",

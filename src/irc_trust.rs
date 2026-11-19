@@ -9,6 +9,9 @@ use ndarray::Array1;
 
 use crate::vecops::nrm2;
 
+/// Floor on mass-weighted step norms and \(\sqrt{m}\) weights in [`IrcTrust::project`].
+const WEIGHT_FLOOR: f64 = 1.0 / 10_000_000_000_000_000.0;
+
 /// Per-atom masses (length N) to a 3N \(\sqrt{m}\) weight.
 pub fn sqrt_masses_3n(masses: &[f64]) -> Array1<f64> {
     let mut out = Array1::zeros(masses.len() * 3);
@@ -81,19 +84,12 @@ impl IrcTrust {
             w[i] = (s[i] + self.d1[i]) * self.sqrtm[i];
         }
         let norm = nrm2(w.view());
-        if norm <= 1e-16 {
+        if norm <= WEIGHT_FLOOR {
             // Degenerate: sit on the first represented weighted axis.
-            let axis = (0..n).find(|&i| self.sqrtm[i] > 1e-16);
-            if axis.is_none() || self.dx == 0.0 {
-                for i in 0..n {
-                    out[i] = -self.d1[i];
-                }
-                return out;
-            }
             for i in 0..n {
                 out[i] = -self.d1[i];
             }
-            if let Some(axis) = axis {
+            if let Some(axis) = (0..n).find(|&i| self.sqrtm[i] > WEIGHT_FLOOR) {
                 out[axis] = self.dx / self.sqrtm[axis] - self.d1[axis];
             }
             return out;
@@ -101,7 +97,7 @@ impl IrcTrust {
         let scale = self.dx / norm;
         for i in 0..n {
             let wi = w[i] * scale;
-            let sm = self.sqrtm[i].max(1e-16);
+            let sm = self.sqrtm[i].max(WEIGHT_FLOOR);
             out[i] = wi / sm - self.d1[i];
         }
         out
