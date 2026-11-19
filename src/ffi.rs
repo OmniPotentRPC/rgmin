@@ -1205,6 +1205,19 @@ impl Default for rgmin_rcg_options_t {
     }
 }
 
+/// Run `body` so that a panic never crosses the C boundary. A panic
+/// becomes [`rgmin_status_t::RGMIN_INTERNAL_ERROR`] with the entry point
+/// named in [`rgmin_last_error`].
+fn guarded(name: &str, body: impl FnOnce() -> rgmin_status_t) -> rgmin_status_t {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+        Ok(status) => status,
+        Err(_) => {
+            set_last_error(&format!("{name}: panic"));
+            rgmin_status_t::RGMIN_INTERNAL_ERROR
+        }
+    }
+}
+
 fn rcg_options_from_c(
     raw: *const rgmin_rcg_options_t,
 ) -> Result<crate::RcgOptions, rgmin_status_t> {
@@ -1302,7 +1315,7 @@ pub unsafe extern "C" fn rgmin_minimize_rcg(
     options: *const rgmin_rcg_options_t,
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    guarded("rgmin_minimize_rcg", || {
         let eval = match eval {
             Some(f) => f,
             None => {
@@ -1346,13 +1359,7 @@ pub unsafe extern "C" fn rgmin_minimize_rcg(
             out,
             solved.map(|min| rcg_as_report(min, opts.grad_tol, opts.max_iter)),
         )
-    })) {
-        Ok(s) => s,
-        Err(_) => {
-            set_last_error("rgmin_minimize_rcg: panic");
-            rgmin_status_t::RGMIN_INTERNAL_ERROR
-        }
-    }
+    })
 }
 
 /// Møller SCG. `curv` is optional: null uses the finite-difference probe;
@@ -5078,6 +5085,29 @@ mod device_tests {
         let err = cpu_f64_slice(t, "cuda").unwrap_err();
         unsafe { rgmin_tensor_free(t) };
         assert_eq!(err, rgmin_status_t::RGMIN_UNSUPPORTED_DEVICE);
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+
+    #[test]
+    fn a_panic_behind_the_boundary_becomes_an_internal_error() {
+        let status = guarded("rgmin_minimize_rcg", || panic!("boom"));
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        let text = unsafe { std::ffi::CStr::from_ptr(rgmin_last_error()) }
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(text, "rgmin_minimize_rcg: panic");
+    }
+
+    #[test]
+    fn a_body_that_returns_passes_its_status_through() {
+        let status = guarded("rgmin_minimize_rcg", || {
+            rgmin_status_t::RGMIN_INVALID_PARAMETER
+        });
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
 }
 
