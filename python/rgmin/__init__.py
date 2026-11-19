@@ -59,6 +59,7 @@ _EXPORTS = [
     "LbfgsPairs",
     "LineSearch",
     "Method",
+    "NotConverged",
     "NumericalError",
     "Product",
     "Report",
