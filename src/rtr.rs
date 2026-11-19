@@ -743,6 +743,93 @@ mod tests {
     }
 
     #[test]
+    fn truncated_cg_known_answers_on_small_quadratics() {
+        // 1D positive curvature inside a large ball: the Newton step.
+        // H = 2, g = 2, eta = -1, model decrease = 1, residual stop.
+        let residual = truncated_cg_projected(
+            |v| v.clone(),
+            array![2.0].view(),
+            |v| v * 2.0,
+            10.0,
+            1.0,
+            0.1,
+            5,
+        );
+        assert_eq!(residual.stop, TcgStop::Residual);
+        assert_eq!(residual.iterations, 1);
+        assert!((residual.eta[0] + 1.0).abs() < 1e-12);
+        assert!((residual.model_decrease - 1.0).abs() < 1e-12);
+
+        // Same model, trust radius 0.25. The full step has length 0.5
+        // when H = 4 and g = 2, so the step stops at eta = -0.25.
+        // Model decrease is 0.375.
+        let boundary = truncated_cg_projected(
+            |v| v.clone(),
+            array![2.0].view(),
+            |v| v * 4.0,
+            0.25,
+            1.0,
+            0.1,
+            5,
+        );
+        assert_eq!(boundary.stop, TcgStop::Boundary);
+        assert!((boundary.eta[0] + 0.25).abs() < 1e-12);
+        assert!((boundary.model_decrease - 0.375).abs() < 1e-12);
+
+        // Negative curvature runs to the boundary along -g.
+        // H = -2, g = 1, radius 0.4, eta = -0.4, model decrease 0.56.
+        let curved = truncated_cg_projected(
+            |v| v.clone(),
+            array![1.0].view(),
+            |v| v * -2.0,
+            0.4,
+            1.0,
+            0.1,
+            5,
+        );
+        assert_eq!(curved.stop, TcgStop::NegativeCurvature);
+        assert!((curved.eta[0] + 0.4).abs() < 1e-12);
+        assert!((curved.model_decrease - 0.56).abs() < 1e-12);
+
+        let flat = truncated_cg_projected(
+            |v| v.clone(),
+            array![0.0, 0.0].view(),
+            |v| v.clone(),
+            1.0,
+            1.0,
+            0.1,
+            4,
+        );
+        assert_eq!(flat.stop, TcgStop::ZeroGradient);
+        assert_eq!(flat.iterations, 0);
+        assert_eq!(flat.model_decrease, 0.0);
+    }
+
+    #[test]
+    fn radius_update_follows_the_absil_baker_gallivan_rules() {
+        let mut radius = RtrRadius {
+            radius: 1.0,
+            radius_max: 8.0,
+        };
+        assert!(!radius.update(0.1, 1.0, 0.5));
+        assert!((radius.radius - 0.25).abs() < 1e-15);
+        assert!(radius.update(0.9, 1.0, 0.25));
+        assert!((radius.radius - 0.5).abs() < 1e-15);
+        assert!(radius.update(0.5, 1.0, 0.1));
+        assert!((radius.radius - 0.5).abs() < 1e-15);
+        assert!(!radius.update(1.0, 0.0, 0.1));
+        assert!((radius.radius - 0.125).abs() < 1e-15);
+        radius.radius = 3.0;
+        radius.radius_max = 4.0;
+        assert!(radius.update(0.9, 1.0, 3.0));
+        assert!((radius.radius - 4.0).abs() < 1e-15);
+        assert!(radius.update(0.75, 1.0, 4.0));
+        assert!((radius.radius - 4.0).abs() < 1e-15);
+        assert!(radius.update(0.25, 1.0, 1.0));
+        assert!((radius.radius - 4.0).abs() < 1e-15);
+    }
+
+    #[test]
     fn radius_update_follows_the_reference_rule() {
         let mut r = RtrRadius::new(8.0);
         assert_eq!(r.radius, 1.0);
