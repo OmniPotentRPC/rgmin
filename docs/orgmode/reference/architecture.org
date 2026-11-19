@@ -53,8 +53,10 @@ python3 docs/figures/architecture/draw_hourglass.py
   =rgmin_solver_set_error_on_unmet=,
   =rgmin_solver_set_backward_polish=, and the =*_opts= one-shots.
   =xts.h= aliases =RGMIN_UNMET_STOP=, =RGMIN_STOP_LINE_SEARCH=,
-  and =RGMIN_STOP_POLISH_UNMET=. =RGMIN_UNMET_STOP= is status 6.
-  =RGMIN_STOP_LINE_SEARCH= is 4 and =RGMIN_STOP_POLISH_UNMET= is 5.
+  =RGMIN_STOP_POLISH_UNMET=, and =RGMIN_STOP_LINE_SEARCH_ROUNDING=.
+  =RGMIN_UNMET_STOP= is status 6. =RGMIN_STOP_LINE_SEARCH= is 4,
+  =RGMIN_STOP_POLISH_UNMET= is 5, and
+  =RGMIN_STOP_LINE_SEARCH_ROUNDING= is 6.
 - =minimize_method= :: Cold-start dispatch for every =Method=.
 - =LineSearch::Wolfe= :: Nocedal-Wright 3.5 / 3.6. The default line
   search of a session's line-searched methods, BFGS among them. The
@@ -71,7 +73,8 @@ python3 docs/figures/architecture/draw_hourglass.py
 - =rgmin_solver_create= / =rgmin_solver_step= / =rgmin_solver_free= ::
   The session half of the waist.
   Callbacks are arguments of each step, not stored on the handle.
-  =include/rgmin.h= sets =abi_major= 1, =abi_minor= 49 and =layout_revision= 5.
+  =include/rgmin.h= sets =abi_major= 1, =abi_minor= 50 and =layout_revision= 5.
+  Minor 50 adds the line-search rounding stop.
   Minor 49 adds =StopReason= on the report, the opt-in unmet-stop
   error, and the backward-error polish. A zero iteration budget
   follows the same unmet-stop policy. =rgmin_control_t= is unchanged.

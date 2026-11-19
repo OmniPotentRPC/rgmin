@@ -84,13 +84,14 @@ where
 {
     // The low endpoint retains a measured Armijo decrease. An infeasible
     // trial only contracts the other endpoint and cannot erase that evidence.
-    let mut phi_lo = if lo == 0.0 {
-        phi0
+    let (mut phi_lo, mut dphi_lo) = if lo == 0.0 {
+        (phi0, dphi0)
     } else {
-        phi_pair(oracle, pos, dir, lo).0
+        phi_pair(oracle, pos, dir, lo)
     };
+    let mut unresolved_failures = 0;
     for _ in 0..maxiter {
-        if !lo.is_finite() || !hi.is_finite() || (hi - lo).abs() < 1e-16 {
+        if !lo.is_finite() || !hi.is_finite() || super::bracket_rounding_blocked(lo, hi) {
             break;
         }
         let alpha = bisect(lo, hi);
@@ -106,7 +107,21 @@ where
         {
             return (alpha, phi_a);
         }
-        if !armijo(phi_a, phi0, alpha, dphi0, c1) || phi_a >= phi_lo {
+        let armijo_holds = armijo(phi_a, phi0, alpha, dphi0, c1);
+        if !armijo_holds && super::value_rounding_blocked(phi_a, phi_lo) {
+            unresolved_failures += 1;
+        } else {
+            unresolved_failures = 0;
+        }
+        if super::rounding_stalled(unresolved_failures) {
+            if super::resolvable_slope_crossing(dphi_a, dphi_lo, dphi0) {
+                unresolved_failures = 0;
+                hi = alpha;
+                continue;
+            }
+            break;
+        }
+        if !armijo_holds || phi_a >= phi_lo {
             hi = alpha;
         } else {
             if dphi_a * (hi - lo) >= 0.0 {
@@ -114,6 +129,7 @@ where
             }
             lo = alpha;
             phi_lo = phi_a;
+            dphi_lo = dphi_a;
         }
     }
     (lo, phi_lo)
@@ -162,13 +178,14 @@ where
     } = wolfe;
     // The low endpoint retains a measured Armijo decrease. An infeasible
     // trial only contracts the other endpoint and cannot erase that evidence.
-    let mut phi_lo = if lo == 0.0 {
-        phi0
+    let (mut phi_lo, mut dphi_lo) = if lo == 0.0 {
+        (phi0, dphi0)
     } else {
-        phi_on_path(oracle, path, lo).0
+        phi_on_path(oracle, path, lo)
     };
+    let mut unresolved_failures = 0;
     for _ in 0..maxiter {
-        if !lo.is_finite() || !hi.is_finite() || (hi - lo).abs() < 1e-16 {
+        if !lo.is_finite() || !hi.is_finite() || super::bracket_rounding_blocked(lo, hi) {
             break;
         }
         let alpha = bisect(lo, hi);
@@ -182,7 +199,21 @@ where
         if armijo(phi_a, phi0, alpha, dphi0, c1) && strong_curvature(dphi_a, dphi0, c2) {
             return (alpha, phi_a);
         }
-        if !armijo(phi_a, phi0, alpha, dphi0, c1) || phi_a >= phi_lo {
+        let armijo_holds = armijo(phi_a, phi0, alpha, dphi0, c1);
+        if !armijo_holds && super::value_rounding_blocked(phi_a, phi_lo) {
+            unresolved_failures += 1;
+        } else {
+            unresolved_failures = 0;
+        }
+        if super::rounding_stalled(unresolved_failures) {
+            if super::resolvable_slope_crossing(dphi_a, dphi_lo, dphi0) {
+                unresolved_failures = 0;
+                hi = alpha;
+                continue;
+            }
+            break;
+        }
+        if !armijo_holds || phi_a >= phi_lo {
             hi = alpha;
         } else {
             if dphi_a * (hi - lo) >= 0.0 {
@@ -190,6 +221,7 @@ where
             }
             lo = alpha;
             phi_lo = phi_a;
+            dphi_lo = dphi_a;
         }
     }
     (lo, phi_lo)

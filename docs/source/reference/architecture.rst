@@ -41,6 +41,32 @@ Objects
     Method-agnostic session. One ``step`` is one outer
     iteration. The C type ``rgmin_solver_t`` is a pointer to this.
 
+``StopReason``
+    Typed stop on ``Report``, beside ``Status``.
+    ``converged()`` is the ``gtol`` stop, including a last step that
+    meets it. ``MaxIter`` is a spent budget and stays ``Ok`` unless
+    ``Control::with_error_on_unmet`` is set, in which case the error
+    is ``Error::StopUnmet`` and carries the report. A zero iteration
+    budget is that same unmet stop. ``LineSearchFailed`` is a budget
+    spent without accepting a step.
+
+``backward_error_floor``
+    ``n * eps * (1 + |V| + sum |x_i|)`` with
+    ``eps`` equal to ``f64::EPSILON``. ``with_backward_polish`` takes a
+    shifted Newton or RFO step from a supplied Hessian or
+    Hessian-vector product. The point is accepted only when the
+    Newton decrement, every coordinate step, and the gradient norm
+    sit under that scale. A tiny step that misses the gradient test
+    is not converged. An unmet polish is ``StopReason::PolishUnmet``.
+    The C names are ``rgmin_backward_error_floor``,
+    ``rgmin_solver_set_error_on_unmet``,
+    ``rgmin_solver_set_backward_polish``, and the ``\*_opts`` one-shots.
+    ``xts.h`` aliases ``RGMIN_UNMET_STOP``, ``RGMIN_STOP_LINE_SEARCH``,
+    ``RGMIN_STOP_POLISH_UNMET``, and ``RGMIN_STOP_LINE_SEARCH_ROUNDING``.
+    ``RGMIN_UNMET_STOP`` is status 6. ``RGMIN_STOP_LINE_SEARCH`` is 4,
+    ``RGMIN_STOP_POLISH_UNMET`` is 5, and
+    ``RGMIN_STOP_LINE_SEARCH_ROUNDING`` is 6.
+
 ``minimize_method``
     Cold-start dispatch for every ``Method``.
 
@@ -65,9 +91,11 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 49 and ``layout_revision`` 5.
-    Minor 49 adds a typed stop on the report, the opt-in unmet stop,
-    and the backward-error polish. ``rgmin_control_t`` is unchanged.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 50 and ``layout_revision`` 5.
+    Minor 50 adds the line-search rounding stop.
+    Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
+    error, and the backward-error polish. A zero iteration budget
+    follows the same unmet-stop policy. ``rgmin_control_t`` is unchanged.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``

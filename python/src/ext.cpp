@@ -554,12 +554,14 @@ NB_MODULE(_core, m) {
         .value("STEP_TOLERANCE", RGMIN_STOP_STEP_TOLERANCE)
         .value("BUDGET", RGMIN_STOP_BUDGET)
         .value("LINE_SEARCH", RGMIN_STOP_LINE_SEARCH)
+        .value("LINE_SEARCH_ROUNDING", RGMIN_STOP_LINE_SEARCH_ROUNDING)
         .value("POLISH_UNMET", RGMIN_STOP_POLISH_UNMET)
         .value("Tolerance", RGMIN_STOP_TOLERANCE)
         .value("NoiseFloor", RGMIN_STOP_NOISE_FLOOR)
         .value("StepTolerance", RGMIN_STOP_STEP_TOLERANCE)
         .value("Budget", RGMIN_STOP_BUDGET)
         .value("LineSearch", RGMIN_STOP_LINE_SEARCH)
+        .value("LineSearchRounding", RGMIN_STOP_LINE_SEARCH_ROUNDING)
         .value("PolishUnmet", RGMIN_STOP_POLISH_UNMET);
 
     nb::class_<rgmin::Report>(m, "Report", "Result of one optimizer step or of ``minimize``.")
@@ -665,6 +667,7 @@ NB_MODULE(_core, m) {
             }
             if (config.error_on_unmet() &&
                 (report.stop == RGMIN_STOP_BUDGET || report.stop == RGMIN_STOP_LINE_SEARCH ||
+                 report.stop == RGMIN_STOP_LINE_SEARCH_ROUNDING ||
                  report.stop == RGMIN_STOP_POLISH_UNMET)) {
                 std::ostringstream message;
                 message << "stop unmet after " << report.steps << " steps (grad_norm "
@@ -678,7 +681,8 @@ NB_MODULE(_core, m) {
                 "method: object, **kwargs) -> tuple[Report, ndarray[dtype=float64]]"),
         "Minimize ``f_and_grad`` in place and return ``(report, x)``. "
         "``error_on_unmet=True`` raises ``RuntimeError`` when the stop is "
-        "``BUDGET``, ``LINE_SEARCH``, or ``POLISH_UNMET``. ``backward_polish`` "
+        "``BUDGET``, ``LINE_SEARCH``, ``LINE_SEARCH_ROUNDING``, or "
+        "``POLISH_UNMET``. ``backward_polish`` "
         "is stored on the session and is not used by this step loop, which "
         "does not form a Hessian.");
 

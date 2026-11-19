@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 49
+#define RGMIN_ABI_VERSION_MINOR 50
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -84,7 +84,8 @@ typedef struct rgmin_abi_stamp_t {
  * 48 rgmin_solver_set_fire_cap_two_step_overshoot,
  * 49 stop reasons LINE_SEARCH and POLISH_UNMET, RGMIN_UNMET_STOP,
  *    the two session setters, rgmin_backward_error_floor, and the
- *    *_opts one-shots. rgmin_control_t is unchanged. */
+ *    *_opts one-shots. rgmin_control_t is unchanged.
+ * 50 stop reason LINE_SEARCH_ROUNDING. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -166,7 +167,9 @@ typedef enum rgmin_stop_t {
     /** No step was accepted. ABI minor 49. */
     RGMIN_STOP_LINE_SEARCH = 4,
     /** A backward-error polish did not meet its test. ABI minor 49. */
-    RGMIN_STOP_POLISH_UNMET = 5
+    RGMIN_STOP_POLISH_UNMET = 5,
+    /** Wolfe zoom stopped when rounding blocked progress. ABI minor 50. */
+    RGMIN_STOP_LINE_SEARCH_ROUNDING = 6
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),
