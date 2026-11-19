@@ -155,7 +155,6 @@ rgmin_solver_step_hess
 rgmin_solver_step_hess_fg
 rgmin_solver_step_hvp
 rgmin_solver_steps
-rgmin_status_t
 rgmin_tensor_borrow_cpu_f64
 rgmin_tensor_free
 rgmin_version

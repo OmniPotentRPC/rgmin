@@ -32,10 +32,15 @@ DECL = re.compile(r"^[A-Za-z_][\w \t\*]*?[\s\*](rgmin_[A-Za-z0-9_]+)\s*\(", re.M
 
 def names() -> list[str]:
     text = HEADER.read_text()
-    found = DECL.findall(text)
-    # Function-pointer typedefs match the same pattern. Drop those.
-    typedefs = set(re.findall(r"typedef\s+[^\n]*\s+(rgmin_[A-Za-z0-9_]+)\s*\)", text))
-    return sorted(set(found) - typedefs)
+    kept: list[str] = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        # A function pointer typedef matches the declarator pattern on its
+        # return type. That name is not an ELF export.
+        if stripped.startswith("typedef") and "(*" in stripped:
+            continue
+        kept.extend(DECL.findall(line))
+    return sorted(set(kept))
 
 
 def versions() -> list[str]:
