@@ -114,8 +114,8 @@ pub(crate) fn binding(cap: f64) -> bool {
 /// is capped at 0.2 Å. `scale_step_atom` limits the largest per-atom
 /// displacement. It does not limit the Euclidean norm of the whole step.
 ///
-/// BFGS, dogleg, and FIRE 2.0 do not install this value. See
-/// `Method::installs_default_atom_cap`.
+/// BFGS, dogleg, Newton-CG, Newton-PCG, FIRE 2.0 and Riemannian CG do
+/// not install this value. See `Method::installs_default_atom_cap`.
 pub const DEFAULT_ATOM_MAXMOVE: f64 = 0.2;
 
 /// Cap used when the caller has not set a per-atom value and the method
@@ -124,7 +124,8 @@ pub const DEFAULT_ATOM_MAXMOVE: f64 = 0.2;
 /// A positive finite Euclidean [`Control::maxmove`] is that caller's
 /// step limit, so this returns `None` and the Euclidean cap stays in
 /// force. Otherwise the cap is [`DEFAULT_ATOM_MAXMOVE`]. BFGS, dogleg,
-/// and FIRE 2.0 do not call this for their default.
+/// Newton-CG, Newton-PCG, FIRE 2.0 and Riemannian CG do not call this
+/// for their default.
 pub(crate) fn implicit_atom_cap(control: &Control) -> Option<f64> {
     match control.maxmove {
         Some(cap) if binding(cap) => None,

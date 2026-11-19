@@ -68,6 +68,7 @@ That installs the 0.6 release on Rust 1.88 or newer.
    tutorials/bfgs
    tutorials/newton
    tutorials/scg
+   tutorials/rcg
    tutorials/linesearch
    tutorials/lbfgs-direction
    tutorials/eigenpairs

@@ -156,6 +156,7 @@ impl Session {
         );
         let lbfgs = matches!(method, Method::Lbfgs { .. });
         let nlcg = matches!(method, Method::Nlcg { .. });
+        let rcg = matches!(method, Method::Rcg { .. });
         let istep = match istep {
             Some(_) if fire => {
                 return Err(PyValueError::new_err(
@@ -224,6 +225,13 @@ impl Session {
         }
         if nlcg {
             solver.set_linesearch(LineSearch::wolfe(1e-4, 0.1, 20));
+        }
+        if rcg {
+            solver.set_linesearch(LineSearch::wolfe(
+                rgmin::RCG_WOLFE_C1,
+                rgmin::RCG_WOLFE_C2,
+                rgmin::RCG_WOLFE_MAX_ITER,
+            ));
         }
         if accept != Accept::None {
             solver.set_accept(accept);
