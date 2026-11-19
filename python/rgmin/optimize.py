@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import sys
 import warnings
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
 import numpy as np
@@ -761,17 +761,21 @@ class GromacsSteep(_RgminOptimizer):
             options["max_constraint_shrinks"] = self.max_constraint_shrinks
         return options
 
-    def irun(self, fmax: float | None = None, steps: int | None = None) -> Iterator[bool]:
+    def irun(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, fmax: float | None = None, steps: int | None = None
+    ) -> Iterator[bool]:
         """Yield convergence after each step, stopping at machine precision."""
         force_limit = self._fmax if fmax is None else float(fmax)
         if steps is None:
             steps = sys.maxsize if self.gromacs_nsteps == -1 else self.gromacs_nsteps
-        for converged in super().irun(fmax=force_limit, steps=steps):
+        for converged in cast(Any, super()).irun(fmax=force_limit, steps=steps):
             yield converged
             if self._native is not None and self._native.stop == "MachinePrecision":
                 break
 
-    def run(self, fmax: float | None = None, steps: int | None = None) -> bool:
+    def run(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, fmax: float | None = None, steps: int | None = None
+    ) -> bool:
         """Run with ``emtol`` and ``nsteps`` unless explicitly overridden."""
         converged = False
         for converged in self.irun(fmax=fmax, steps=steps):
