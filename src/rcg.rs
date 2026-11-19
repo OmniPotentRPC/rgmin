@@ -205,6 +205,12 @@ impl RcgMemory {
         Self::new(opts.beta, opts.transport, opts.initial_step)
     }
 
+    /// Whether a conjugate direction is held for the next step.
+    #[cfg(test)]
+    pub(crate) fn holds_direction(&self) -> bool {
+        self.ready
+    }
+
     pub(crate) fn reset(&mut self) {
         self.dir = Array1::zeros(0);
         self.prev_alpha = 0.0;
