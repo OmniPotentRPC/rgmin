@@ -480,6 +480,7 @@ fn fixture_cases() -> Vec<Case> {
                 .flat_map(|f| match *f {
                     rgmin::ManifoldFactor::Stiefel { n, p, .. } => stiefel_point(rng, n, p),
                     rgmin::ManifoldFactor::Spd { p, .. } => spd_point(rng, p),
+                    rgmin::ManifoldFactor::RigidQuotient { n_atoms, .. } => rng.vec(3 * n_atoms),
                 })
                 .collect()
         };

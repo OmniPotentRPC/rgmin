@@ -803,6 +803,7 @@ impl ManifoldPy {
                 let kind = match f {
                     ManifoldFactor::Stiefel { .. } => "stiefel",
                     ManifoldFactor::Spd { .. } => "spd",
+                    ManifoldFactor::RigidQuotient { .. } => "rigid_quotient",
                 };
                 (kind, rows, cols)
             })

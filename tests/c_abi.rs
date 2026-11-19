@@ -4566,6 +4566,7 @@ mod manifold_handles {
                         }
                     }
                 }
+                rgmin::ManifoldFactor::RigidQuotient { .. } => x.extend(a),
             }
         }
         x
