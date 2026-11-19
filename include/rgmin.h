@@ -1475,6 +1475,10 @@ rgmin_manifold_handle_t *rgmin_manifold_stiefel(size_t n, size_t p, int32_t retr
  *  retraction is the exponential of the metric. Null on p = 0 or an
  *  unknown metric. */
 rgmin_manifold_handle_t *rgmin_manifold_spd(size_t p, int32_t metric);
+/** Molecular or cluster quotient R^{3N}/SE(3) (periodic == 0) or
+ *  R^{3N}/T(3) (periodic != 0). Packed length is 3 * n_atoms. Null when
+ *  n_atoms == 0. */
+rgmin_manifold_handle_t *rgmin_manifold_rigid_quotient(size_t n_atoms, int32_t periodic);
 /** Product of \a count handles in order. The factors are copied; the
  *  caller still frees each one. Null on a null array or entry, or
  *  \a count = 0. */
@@ -1525,6 +1529,60 @@ rgmin_status_t rgmin_manifold_inner(const rgmin_manifold_handle_t *manifold, con
 rgmin_status_t rgmin_manifold_gradient_step(const rgmin_manifold_handle_t *manifold,
                                             const double *x, const double *egrad, double t,
                                             double *rgrad_out, double *x_out, size_t len);
+
+/** Termination reason of \ref rgmin_rtr_tcg_solve. */
+typedef enum rgmin_tcg_stop_t {
+    /** Negative curvature. The step lies on the trust boundary. */
+    RGMIN_TCG_NEGATIVE_CURVATURE = 0,
+    /** The step was cut on the trust sphere. */
+    RGMIN_TCG_BOUNDARY = 1,
+    /** The residual met the inner stopping rule. */
+    RGMIN_TCG_RESIDUAL = 2,
+    /** The iteration budget ran out. */
+    RGMIN_TCG_MAX_ITER = 3,
+    /** The projected gradient is zero. */
+    RGMIN_TCG_ZERO_GRADIENT = 4
+} rgmin_tcg_stop_t;
+
+/** Result of \ref rgmin_rtr_tcg_solve. */
+typedef struct rgmin_rtr_tcg_result_t {
+    double model_decrease;
+    double eta_norm;
+    int32_t stop;
+    size_t iterations;
+} rgmin_rtr_tcg_result_t;
+
+/** Steihaug-Toint truncated CG on \a manifold's tangent space at \a x.
+ *  A null manifold is Euclidean. */
+rgmin_status_t rgmin_rtr_tcg_solve(const rgmin_manifold_handle_t *manifold, rgmin_hvp_fn hvp,
+                                   void *user, const double *x, const double *grad, double radius,
+                                   double theta, double kappa, size_t maxiter, double *eta_out,
+                                   size_t len, rgmin_rtr_tcg_result_t *out);
+
+/** Absil-Baker-Gallivan trust-region radius update.
+ *  Accepts when actual/predicted is above 1/10. Shrinks by 1/4 below
+ *  1/4. Doubles above 3/4 when the step lies on the boundary, never
+ *  past \a radius_max. \a accepted_out may be null. */
+rgmin_status_t rgmin_rtr_radius_update(double *radius, double radius_max, double actual_decrease,
+                                       double model_decrease, double eta_norm,
+                                       int32_t *accepted_out);
+
+/** Lowest Hessian eigenpair on \a manifold's tangent space at \a x.
+ *  A null manifold is Euclidean. Lanczos and LOBPCG apply the projector. */
+rgmin_status_t rgmin_lowest_eigenpair_on_manifold(
+    const rgmin_manifold_handle_t *manifold, rgmin_hvp_fn hvp, void *user,
+    const DLManagedTensorVersioned *x, const DLManagedTensorVersioned *seed,
+    DLManagedTensorVersioned *mode_out, const rgmin_eigen_params_t *params,
+    const rgmin_eigen_options_t *options, rgmin_lowest_mode_t *out);
+
+/** \ref rgmin_lowest_eigenpairs_ex on \a manifold's tangent space at \a x.
+ *  A null manifold matches that entry. */
+rgmin_status_t rgmin_lowest_eigenpairs_projected(
+    const rgmin_manifold_handle_t *manifold, rgmin_hvp_fn hvp, void *user,
+    rgmin_precond_fn precond, void *precond_user, const DLManagedTensorVersioned *x,
+    const DLManagedTensorVersioned *seed, DLManagedTensorVersioned *modes_out,
+    DLManagedTensorVersioned *values_out, const rgmin_eigen_params_t *params,
+    const rgmin_eigen_options_t *options, rgmin_eigenpair_ex_t *pairs_out, size_t k);
 /** @} */
 
 #ifdef __cplusplus
