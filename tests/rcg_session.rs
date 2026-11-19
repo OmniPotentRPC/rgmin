@@ -2,7 +2,7 @@
 //! and the stops that every other method in the session obeys.
 
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Control, Method, Oracle, Solver};
+use rgmin::{ConstraintError, Control, DistanceConstraints, Error, Method, Oracle, Solver};
 
 /// `f = |x - c|^2 / 2` with `c` ten units from the start.
 fn far_bowl(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
@@ -61,4 +61,28 @@ fn a_capped_rcg_still_reaches_the_minimum() {
     assert!(report.grad_norm <= 1e-8, "grad {}", report.grad_norm);
     let expect = array![10.0, 0.0, 0.0, 10.0, 0.0, 0.0];
     assert!((&x - &expect).iter().all(|d| d.abs() < 1e-6), "x = {x}");
+}
+
+fn pull_on_the_last_atom(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+    let mut g = Array1::zeros(x.len());
+    g[x.len() - 2] = 1.0;
+    (x[x.len() - 2], g)
+}
+
+#[test]
+fn rcg_reports_a_projection_that_fails_on_a_dependent_set() {
+    // Four coplanar atoms with all six distances fixed: the rows of the
+    // constraint Jacobian are dependent, so no tangent space exists.
+    let start = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0];
+    let pairs = vec![(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
+    let set = DistanceConstraints::at(pairs, start.view()).unwrap();
+    let mut solver = Solver::new(Method::rcg(), Control::default(), 12);
+    solver.set_distance_constraints(set).unwrap();
+    let obj = Oracle::unbounded(12, pull_on_the_last_atom);
+    let mut x = start.clone();
+    match solver.step(&obj, &mut x) {
+        Err(Error::Constraint(ConstraintError::Dependent { .. })) => {}
+        other => panic!("expected a dependent-set error, got {other:?}"),
+    }
+    assert_eq!(x, start, "a refused step leaves x");
 }

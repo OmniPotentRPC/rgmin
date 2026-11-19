@@ -43,6 +43,8 @@
 //! A direction whose slope is not negative is replaced by the negative
 //! Riemannian gradient.
 
+use std::cell::RefCell;
+
 use ndarray::{Array1, ArrayView1};
 
 use crate::error::{Error, Result};
@@ -220,20 +222,64 @@ pub(crate) struct RcgMoved {
     pub alpha: f64,
 }
 
+/// Failures of the maps a [`Manifold`] cannot report.
+///
+/// [`Manifold`] returns vectors, not results. A manifold that can fail
+/// records the first failure and returns the vector it was given, and the
+/// step reads the record after the calls that matter.
+pub(crate) trait Failures {
+    /// The first failure recorded since the last call. The call clears it.
+    fn take(&self) -> Option<Error>;
+}
+
+/// A manifold whose maps cannot fail.
+pub(crate) struct Infallible;
+
+impl Failures for Infallible {
+    fn take(&self) -> Option<Error> {
+        None
+    }
+}
+
 /// Holonomic bond set as a manifold.
 ///
 /// [`DistanceConstraints::project_vector`] is the tangent projection,
 /// [`DistanceConstraints::project_gradient`] is the Riemannian gradient,
 /// and [`DistanceConstraints::constrain`] is the retraction. The transport
-/// is that projection at the arrival point.
+/// is that projection at the arrival point. A failure in any of them is
+/// recorded and read through [`Failures`].
 pub(crate) struct BondManifold<'a> {
-    pub(crate) constraints: &'a DistanceConstraints,
+    constraints: &'a DistanceConstraints,
+    failure: RefCell<Option<Error>>,
+}
+
+impl<'a> BondManifold<'a> {
+    pub(crate) fn new(constraints: &'a DistanceConstraints) -> Self {
+        Self {
+            constraints,
+            failure: RefCell::new(None),
+        }
+    }
+
+    fn fail(&self, error: Error) {
+        let mut slot = self.failure.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(error);
+        }
+    }
+}
+
+impl Failures for BondManifold<'_> {
+    fn take(&self) -> Option<Error> {
+        self.failure.borrow_mut().take()
+    }
 }
 
 impl Manifold for BondManifold<'_> {
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         let mut out = v.clone();
-        if self.constraints.project_vector(x.view(), &mut out).is_err() {
+        if let Err(e) = self.constraints.project_vector(x.view(), &mut out) {
+            self.fail(e);
             return v.clone();
         }
         out
@@ -241,11 +287,8 @@ impl Manifold for BondManifold<'_> {
 
     fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
         let mut out = egrad.clone();
-        if self
-            .constraints
-            .project_gradient(x.view(), &mut out)
-            .is_err()
-        {
+        if let Err(e) = self.constraints.project_gradient(x.view(), &mut out) {
+            self.fail(e);
             return egrad.clone();
         }
         out
@@ -254,7 +297,8 @@ impl Manifold for BondManifold<'_> {
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         let mut y = x.clone();
         crate::vecops::axpy(1.0, v.view(), &mut y);
-        if self.constraints.constrain(x.view(), &mut y).is_err() {
+        if let Err(e) = self.constraints.constrain(x.view(), &mut y) {
+            self.fail(e);
             return x.clone();
         }
         y
@@ -326,6 +370,7 @@ where
     while iterations < opts.max_iter && grad_norm > opts.grad_tol {
         let moved = rcg_step(
             manifold,
+            &Infallible,
             &mut memory,
             &x,
             value,
@@ -359,8 +404,10 @@ where
 ///
 /// `caps` bound the displacement of every trial, measured on the retracted
 /// point, the way the session bounds the step of every other method.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rcg_step<M, F>(
     manifold: &M,
+    failures: &dyn Failures,
     memory: &mut RcgMemory,
     x: &Array1<f64>,
     value: f64,
@@ -377,6 +424,9 @@ where
         return Err(crate::step::non_finite());
     }
     let rgrad = manifold.egrad2rgrad(x, egrad);
+    if let Some(failure) = failures.take() {
+        return Err(failure);
+    }
     if rgrad.len() != x.len() || rgrad.iter().any(|g| !g.is_finite()) {
         return Err(crate::step::non_finite());
     }
@@ -397,9 +447,12 @@ where
         }
         let mut path = RetractPath {
             manifold,
+            failures,
             origin: x.clone(),
             dir: dir.clone(),
             caps,
+            failure: None,
+            placed: false,
         };
         let (x_new, _f_new, alpha) = linesearch.search_path(&mut counted, &mut path, alpha0);
         if alpha > 0.0 {
@@ -421,6 +474,9 @@ where
                 &rgrad_new,
                 &dir,
             );
+            if let Some(failure) = failures.take() {
+                return Err(failure);
+            }
             if restarted {
                 memory.restarts += 1;
             }
@@ -435,6 +491,11 @@ where
                 evals: calls,
                 alpha,
             });
+        }
+        if !path.placed
+            && let Some(failure) = path.failure.take()
+        {
+            return Err(failure);
         }
         if attempt == 1 || steepest(manifold, x, &rgrad, &dir) {
             break;
@@ -640,11 +701,30 @@ where
 
 /// The curve `t |-> retract(origin, t dir)`, undefined where its point
 /// is farther from `origin` than `caps` allow.
+///
+/// A trial the manifold failed to retract is undefined too. The first such
+/// failure is kept, and the step reports it when no trial was ever placed.
 struct RetractPath<'a, M: ?Sized> {
     manifold: &'a M,
+    failures: &'a dyn Failures,
     origin: Array1<f64>,
     dir: Array1<f64>,
     caps: Caps,
+    failure: Option<Error>,
+    placed: bool,
+}
+
+impl<M: ?Sized> RetractPath<'_, M> {
+    /// `true` when the manifold failed since the last call.
+    fn failed(&mut self) -> bool {
+        match self.failures.take() {
+            Some(failure) => {
+                self.failure.get_or_insert(failure);
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 impl<M> Path for RetractPath<'_, M>
@@ -665,13 +745,20 @@ where
         }
         let step = self.dir.mapv(|c| c * t);
         let point = self.manifold.retract(&self.origin, &step);
-        self.caps.admits(&self.origin, &point).then_some(point)
+        if self.failed() || !self.caps.admits(&self.origin, &point) {
+            return None;
+        }
+        self.placed = true;
+        Some(point)
     }
 
     fn slope(&mut self, t: f64, at: ArrayView1<'_, f64>, g: ArrayView1<'_, f64>) -> f64 {
         let at_owned = at.to_owned();
         let vel = retraction_velocity(self.manifold, &self.origin, &self.dir, t, &at_owned);
         let rg = self.manifold.egrad2rgrad(&at_owned, &g.to_owned());
+        if self.failed() {
+            return f64::NAN;
+        }
         self.manifold.inner(&at_owned, &rg, &vel)
     }
 }
@@ -775,6 +862,7 @@ mod tests {
         let mut memory = RcgMemory::from_options(&RcgOptions::default());
         let moved = rcg_step(
             &sphere,
+            &Infallible,
             &mut memory,
             &x,
             value,
@@ -990,12 +1078,11 @@ mod tests {
         let obj = Oracle::unbounded(6, fg);
         let mut direct = start.clone();
         let mut memory = RcgMemory::from_options(&RcgOptions::default());
-        let bond = BondManifold {
-            constraints: &constraints,
-        };
+        let bond = BondManifold::new(&constraints);
         for _ in 0..2 {
             let (value, grad) = fg(direct.view());
             let moved = rcg_step(
+                &bond,
                 &bond,
                 &mut memory,
                 &direct,
