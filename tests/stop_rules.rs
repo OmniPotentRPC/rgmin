@@ -238,6 +238,7 @@ fn session_methods() -> Vec<Method> {
         Method::Bb,
         Method::QuickMin,
         Method::Ode12r,
+        Method::MdMin,
         Method::diis(),
         Method::NewtonCg,
     ]

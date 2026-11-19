@@ -633,9 +633,12 @@ int main() {
                   "GromacsSteep keeps the C enumerator");
     static_assert(XTS_GROMACS_STEEP == RGMIN_GROMACS_STEEP,
                   "xts.h aliases the GROMACS steep selector");
+    static_assert(static_cast<int>(rgmin::Method::MdMin) == RGMIN_MDMIN,
+                  "MdMin keeps the C enumerator");
     if (rgmin::method_from_name("eon-cg") != rgmin::Method::EonCg ||
         rgmin::method_from_name("polak-ribiere-plus") != rgmin::Method::PolakRibierePlus ||
-        rgmin::method_from_name("gromacs-steep") != rgmin::Method::GromacsSteep) {
+        rgmin::method_from_name("gromacs-steep") != rgmin::Method::GromacsSteep ||
+        rgmin::method_from_name("mdmin") != rgmin::Method::MdMin) {
         std::fprintf(stderr, "method_from_name missed a public method\n");
         return 6;
     }

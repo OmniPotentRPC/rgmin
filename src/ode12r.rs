@@ -41,13 +41,30 @@
 
 use ndarray::Array1;
 
-/// Session memory for one ODE12r integration.
+/// Which step-length formulas a trial uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Ode12rScheme {
+    /// The paper's line-search length and an opening step of `h0`.
+    Paper,
+    /// ASE 3.29 `extrapolate=3`: the length that minimizes the linear
+    /// force model, and an opening step from the force infinity norm.
+    AseMin,
+}
+
+/// Denominator offset of the ASE 3.29 extrapolate-3 length.
+const ASE_H_LS_OFFSET: f64 = 1.0 / 10_000_000_000.0;
+
+/// Session memory for one ODE12r integration. Build it with
+/// [`Ode12rState::new`].
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Ode12rState {
     /// Step length `h` for the next trial. Zero until the first step,
-    /// which opens at `h0`.
+    /// which opens at `h0` or, under [`Ode12rScheme::AseMin`], from the
+    /// force infinity norm.
     pub h: f64,
-    /// Opening step length.
+    /// Opening step length of [`Ode12rScheme::Paper`].
     pub h0: f64,
     /// Local error accepted with the growth bound, in force units.
     pub rtol: f64,
@@ -63,6 +80,8 @@ pub struct Ode12rState {
     pub accepted: usize,
     /// Rejected trials.
     pub rejected: usize,
+    /// Step-length formulas. [`Ode12rState::new`] selects the paper.
+    pub scheme: Ode12rScheme,
 }
 
 /// What one trial decided.
@@ -99,7 +118,19 @@ impl Ode12rState {
             h_min: 1e-10,
             accepted: 0,
             rejected: 0,
+            scheme: Ode12rScheme::Paper,
         }
+    }
+
+    /// ASE 3.29 class settings: `rtol` as given and the extrapolate-3
+    /// length. A non-positive or non-finite `rtol` leaves the state as it was.
+    pub fn configure_ase(&mut self, rtol: f64) -> bool {
+        if !(rtol.is_finite() && rtol > 0.0) {
+            return false;
+        }
+        self.rtol = rtol;
+        self.scheme = Ode12rScheme::AseMin;
+        true
     }
 
     /// Forget the step length and the counters.
@@ -114,6 +145,27 @@ impl Ode12rState {
     pub fn open(&mut self) -> f64 {
         if self.h <= 0.0 || !self.h.is_finite() {
             self.h = self.h0;
+        }
+        self.h
+    }
+
+    /// Step length of the next trial. The first call opens at
+    /// `max(h_min, 0.5 sqrt(rtol) / ||s||_inf)`, the ASE 3.29 estimate
+    /// from the preconditioned force.
+    #[must_use]
+    pub fn open_from_force(&mut self, steepest_inf: f64) -> f64 {
+        if self.h <= 0.0 || !self.h.is_finite() {
+            let r = if steepest_inf.is_finite() && steepest_inf > 0.0 {
+                steepest_inf
+            } else {
+                f64::INFINITY
+            };
+            let guess = 0.5 * self.rtol.sqrt() / r;
+            self.h = if guess.is_finite() {
+                guess.max(self.h_min)
+            } else {
+                self.h_min
+            };
         }
         self.h
     }
@@ -137,22 +189,40 @@ impl Ode12rState {
         let error = local_error(h, &y);
         let accepted = residual_new <= residual * (1.0 - self.c1 * h)
             || (residual_new <= self.c2 * residual && error <= self.rtol);
-        let h_ode12 = if error > f64::EPSILON {
-            0.5 * h * (self.rtol / error).sqrt()
-        } else {
-            f64::INFINITY
+        let h_ode12 = match self.scheme {
+            Ode12rScheme::Paper if error > f64::EPSILON => 0.5 * h * (self.rtol / error).sqrt(),
+            Ode12rScheme::AseMin if error > 0.0 => 0.5 * h * (self.rtol / error).sqrt(),
+            Ode12rScheme::Paper | Ode12rScheme::AseMin => f64::INFINITY,
         };
-        let df = force - force_new;
-        let denominator = crate::vecops::dot(df.view(), y.view());
-        let h_ls = if denominator > f64::EPSILON {
-            h * crate::vecops::dot(force.view(), y.view()) / denominator
-        } else {
-            f64::INFINITY
+        let h_ls = match self.scheme {
+            Ode12rScheme::Paper => {
+                let df = force - force_new;
+                let denominator = crate::vecops::dot(df.view(), y.view());
+                if denominator > f64::EPSILON {
+                    h * crate::vecops::dot(force.view(), y.view()) / denominator
+                } else {
+                    f64::INFINITY
+                }
+            }
+            Ode12rScheme::AseMin => {
+                let yy = crate::vecops::dot(y.view(), y.view());
+                let raw =
+                    h * crate::vecops::dot(steepest.view(), y.view()) / (yy + ASE_H_LS_OFFSET);
+                if raw.is_nan() || raw < self.h_min {
+                    f64::INFINITY
+                } else {
+                    raw
+                }
+            }
         };
-        let h_ls = if h_ls.is_finite() && h_ls > 0.0 {
+        let h_ls = if self.scheme == Ode12rScheme::Paper {
+            if h_ls.is_finite() && h_ls > 0.0 {
+                h_ls
+            } else {
+                f64::INFINITY
+            }
+        } else {
             h_ls
-        } else {
-            f64::INFINITY
         };
         let h_next = if accepted {
             self.accepted += 1;
@@ -277,6 +347,30 @@ mod tests {
         let taken = array![0.25, 0.0];
         assert!((taken_step(0.8, &proposed, &taken) - 0.2).abs() < 1e-15);
         assert_eq!(taken_step(0.8, &array![0.0, 0.0], &taken), 0.8);
+    }
+
+    #[test]
+    fn ase_scheme_opens_from_the_force_norm() {
+        let mut state = Ode12rState::new(0.1);
+        assert!(!state.configure_ase(0.0));
+        assert_eq!(state.scheme, Ode12rScheme::Paper);
+        assert!(state.configure_ase(0.01));
+        let h = state.open_from_force(4.0);
+        let expect = 0.5 * 0.01_f64.sqrt() / 4.0;
+        assert!((h - expect).abs() < 1e-15, "{h} {expect}");
+        let force = array![1.0, 0.0];
+        let next = array![0.0, 0.0];
+        let verdict = state.judge(&force, &force, &next, &next, h);
+        let y = 1.0_f64;
+        let h_ls = h * y / (y * y + 1.0 / 10_000_000_000.0);
+        let error = 0.5 * h * 1.0;
+        let h_err = h * 0.5 * (0.01 / error).sqrt();
+        let chosen = (0.25 * h).max((4.0 * h).min(h_err).min(h_ls));
+        assert!(
+            (verdict.h_next - chosen.max(state.h_min)).abs() < 1e-12,
+            "{}",
+            verdict.h_next
+        );
     }
 
     #[test]

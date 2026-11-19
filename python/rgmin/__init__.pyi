@@ -166,3 +166,102 @@ class FIRE:
         **kwargs: Any,
     ) -> None: ...
     def converged(self, forces: Any = None) -> bool: ...
+
+class ODE12r:
+    alpha: float
+    rtol: float
+    verbose: int
+    callback_always: bool
+    precon: Any
+    def __init__(
+        self,
+        atoms: Any,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        callback_always: bool = False,
+        alpha: float = 1.0,
+        precon: Any = None,
+        verbose: int = 0,
+        rtol: float = 0.01,
+        **kwargs: Any,
+    ) -> None: ...
+    def run(self, fmax: float = 0.05, steps: int | None = None) -> bool: ...
+    def step(self, forces: Any = None) -> None: ...
+
+class MDMin:
+    dt: float
+    maxstep: float
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        dt: float | None = None,
+        maxstep: float | None = None,
+        **kwargs: Any,
+    ) -> None: ...
+    def run(self, fmax: float = 0.05, steps: int | None = None) -> bool: ...
+    def step(self, forces: Any = None) -> None: ...
+
+class PreconLBFGS:
+    maxstep: float
+    memory: int
+    damping: float
+    precon: Any
+    use_armijo: bool
+    c1: float
+    c2: float
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        maxstep: float | None = None,
+        memory: int = 100,
+        damping: float = 1.0,
+        alpha: float = 70.0,
+        precon: Any = "auto",
+        variable_cell: bool = False,
+        use_armijo: bool = True,
+        c1: float = 0.23,
+        c2: float = 0.46,
+        a_min: float | None = None,
+        rigid_units: Any = None,
+        rotation_factors: Any = None,
+        Hinv: Any = None,
+        **kwargs: Any,
+    ) -> None: ...
+    def run(self, fmax: float = 0.05, steps: int | None = None) -> bool: ...
+    def step(self, forces: Any = None) -> None: ...
+
+class PreconFIRE:
+    maxstep: float
+    dt: float
+    theta: float
+    precon: Any
+    use_armijo: bool
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        dt: float = 0.1,
+        maxmove: float = 0.2,
+        dtmax: float = 1.0,
+        Nmin: int = 5,
+        finc: float = 1.1,
+        fdec: float = 0.5,
+        astart: float = 0.1,
+        fa: float = 0.99,
+        a: float = 0.1,
+        theta: float = 0.1,
+        precon: Any = None,
+        use_armijo: bool = True,
+        variable_cell: bool = False,
+        **kwargs: Any,
+    ) -> None: ...
+    def run(self, fmax: float = 0.05, steps: int | None = None) -> bool: ...
+    def step(self, forces: Any = None) -> None: ...
