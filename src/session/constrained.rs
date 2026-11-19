@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use eindir_core::{Bounds, DifferentiableObjective, Objective};
 use ndarray::{Array1, Array2, ArrayView1, Axis};
 
-use super::{Inner, RADIUS_GROWTH, RADIUS_START, SADDLE_KICKS, Solver};
+use super::{Inner, Overlay, RADIUS_GROWTH, RADIUS_START, SADDLE_KICKS, Solver};
 use crate::accept::{Accept, ENERGY_RISE, FALLBACK_STEP, HALVINGS, push_energy};
 use crate::adam::adam_direction;
 use crate::bb::bb_direction;
@@ -623,7 +623,8 @@ impl Solver {
     /// The settings a constrained step cannot honour, as typed errors.
     pub(super) fn refuse_constraint_settings(&self, set: &DistanceConstraints) -> Result<()> {
         set.fits(self.dim)?;
-        if self.manifold != ManifoldKind::Euclidean {
+        // Riemannian CG cuts its manifold by the set instead of leaving it.
+        if self.manifold != ManifoldKind::Euclidean && !matches!(self.overlay, Overlay::Rcg(_)) {
             return Err(unsupported("a manifold other than Euclidean coordinates"));
         }
         if self.exp.is_some() {
