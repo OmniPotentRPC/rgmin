@@ -245,6 +245,10 @@ where
             report.evals = counter.count();
             Err(Error::StopUnmet { reason, report })
         }
+        Err(Error::NotConverged(mut report)) => {
+            report.evals = counter.count();
+            Err(Error::NotConverged(report))
+        }
         Err(err) => Err(err),
     }
 }
