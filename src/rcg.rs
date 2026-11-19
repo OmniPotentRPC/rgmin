@@ -286,6 +286,13 @@ where
         }
     }
 
+    /// The Riemannian gradient `grad` of `base` at `x`, cut by the bond
+    /// tangent space. [`Manifold::egrad2rgrad`] is `base`'s map of an
+    /// ambient gradient followed by this.
+    pub(crate) fn cut_gradient(&self, x: &Array1<f64>, grad: Array1<f64>) -> Array1<f64> {
+        self.tangent(x, grad, |set, at, w| set.project_gradient(at, w).map(drop))
+    }
+
     /// `start` moved into both tangent spaces at `x`. `bond` is the bond
     /// projection applied to it.
     fn tangent<B>(&self, x: &Array1<f64>, start: Array1<f64>, bond: B) -> Array1<f64>
@@ -336,8 +343,7 @@ where
     }
 
     fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
-        let start = self.base.egrad2rgrad(x, egrad);
-        self.tangent(x, start, |set, at, w| set.project_gradient(at, w).map(drop))
+        self.cut_gradient(x, self.base.egrad2rgrad(x, egrad))
     }
 
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
