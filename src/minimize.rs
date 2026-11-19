@@ -75,7 +75,8 @@ where
         | Method::Ode12r
         | Method::Diis { .. }
         | Method::NewtonCg
-        | Method::NewtonPcg => run_session(obj, init, control, method),
+        | Method::NewtonPcg
+        | Method::Rcg { .. } => run_session(obj, init, control, method),
     }
 }
 

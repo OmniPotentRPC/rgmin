@@ -192,6 +192,17 @@ pub enum Method {
     /// Frangella, Tropp, Udell,
     /// <https://doi.org/10.1137/21M1466244>.
     NewtonPcg,
+    /// Riemannian nonlinear CG on the session manifold.
+    ///
+    /// The retraction, tangent projection and vector transport are the
+    /// manifold's. See [`crate::rcg`].
+    #[non_exhaustive]
+    Rcg {
+        /// Coefficient.
+        beta: crate::rcg::RcgBeta,
+        /// Scaled transport, or the identity.
+        transport: crate::rcg::RcgTransport,
+    },
 }
 
 impl Method {
@@ -290,6 +301,19 @@ impl Method {
         Self::Newton { kind }
     }
 
+    /// Riemannian CG with PRP+ and the scaled transport.
+    pub fn rcg() -> Self {
+        Self::Rcg {
+            beta: crate::rcg::RcgBeta::default(),
+            transport: crate::rcg::RcgTransport::default(),
+        }
+    }
+
+    /// Riemannian CG with the given coefficient and transport.
+    pub const fn rcg_with(beta: crate::rcg::RcgBeta, transport: crate::rcg::RcgTransport) -> Self {
+        Self::Rcg { beta, transport }
+    }
+
     /// NLCG with the given conjugacy and no restart.
     pub fn nlcg(conjugacy: Conjugacy) -> Self {
         Self::Nlcg {
@@ -302,9 +326,10 @@ impl Method {
     ///
     /// BFGS takes its length from a strong Wolfe line search. Dogleg
     /// keeps the step inside a Euclidean trust region and accepts it
-    /// from the model-agreement ratio. FIRE 2.0 sizes the move with
-    /// its own `dt`. Those three leave the per-atom default off. Every
-    /// other method installs 0.2.
+    /// from the model-agreement ratio. Newton-CG and Newton-PCG do the
+    /// same. FIRE 2.0 sizes the move with its own `dt`. Riemannian CG
+    /// sizes the move with its line search. Those leave the per-atom
+    /// default off. Every other method installs 0.2.
     ///
     /// Nocedal and Wright, *Numerical Optimization*, algorithms 3.5,
     /// 3.6, and 4.1, <https://doi.org/10.1007/978-0-387-40065-5>.
@@ -327,6 +352,7 @@ impl Method {
                 | Self::Dogleg
                 | Self::NewtonCg
                 | Self::NewtonPcg
+                | Self::Rcg { .. }
                 | Self::Fire {
                     kind: crate::fire::FireKind::V2
                 }
@@ -379,6 +405,7 @@ impl Method {
             Self::Diis { .. } => "diis",
             Self::NewtonCg => "newton-cg",
             Self::NewtonPcg => "newton-pcg",
+            Self::Rcg { .. } => "rcg",
         }
     }
 
@@ -427,6 +454,7 @@ impl Method {
             "diis" | "gdiis" => Self::diis(),
             "newton_cg" => Self::NewtonCg,
             "newton_pcg" => Self::NewtonPcg,
+            "rcg" => Self::rcg(),
             _ => {
                 return Err(crate::Error::UnknownMethod {
                     name: name.to_string(),
@@ -518,6 +546,7 @@ mod tests {
         assert!(!Method::Fire { kind: FireKind::V2 }.installs_default_atom_cap());
         assert!(!Method::NewtonCg.installs_default_atom_cap());
         assert!(!Method::NewtonPcg.installs_default_atom_cap());
+        assert!(!Method::rcg().installs_default_atom_cap());
         let capped = [
             Method::lbfgs(),
             Method::polak_ribiere(),
