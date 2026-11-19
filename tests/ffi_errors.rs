@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use dlpk::sys::DLManagedTensorVersioned;
 use eindir_core::ffi::{eindir_core_abi_stamp, eindir_objective_t, eindir_status_t};
 use rgmin::ffi::{
-    rgmin_abi_compatible, rgmin_abi_stamp, rgmin_control_t, rgmin_last_error,
+    rgmin_abi_compatible, rgmin_abi_stamp, rgmin_control_t, rgmin_eigen_kind_t,
+    rgmin_eigen_params_t, rgmin_eigenpair_t, rgmin_last_error, rgmin_lowest_eigenpairs,
     rgmin_method_from_name, rgmin_method_t, rgmin_minimize, rgmin_minimize_eindir,
     rgmin_minimize_hess_opts, rgmin_minimize_hvp_opts, rgmin_minimize_scg_with_options,
     rgmin_report_t, rgmin_scg_params_t, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
@@ -481,4 +482,88 @@ fn refuse_scg(initial: f64) {
     assert_eq!(HOST_CALLS.load(Ordering::Relaxed), 0, "{initial}");
     assert!(last_error().contains("non-finite"), "{}", last_error());
     assert_eq!(value[0].to_bits(), initial.to_bits());
+}
+
+static HVP_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+unsafe extern "C" fn counted_block_hvp(
+    user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    v: *const DLManagedTensorVersioned,
+    hv: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    HVP_CALLS.fetch_add(1, Ordering::Relaxed);
+    let lam = user.cast::<f64>();
+    let source = unsafe { (*v).dl_tensor.data.cast::<f64>() };
+    let dest = unsafe { (*hv).dl_tensor.data.cast::<f64>() };
+    unsafe {
+        *dest = *lam * *source;
+        *dest.add(1) = *lam.add(1) * *source.add(1);
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+/// `cpu_dl` imports the seed block. A version other than 1.0 must be
+/// `RGMIN_INVALID_PARAMETER` with the same message as `cpu_f64_slice`,
+/// before any product.
+#[test]
+fn block_import_rejects_a_foreign_dlpack_version() {
+    let lam = [1.0_f64, 4.0];
+    let mut x = [0.0_f64; 2];
+    let mut seed = [1.0_f64, 0.2];
+    let mut modes = [0.0_f64; 2];
+    let mut values = [0.0_f64; 1];
+    let mut pairs = [rgmin_eigenpair_t {
+        value: 0.0,
+        actions: 0,
+    }];
+    let params = rgmin_eigen_params_t {
+        kind: rgmin_eigen_kind_t::RGMIN_EIGEN_LOBPCG as i32,
+        nev: 1,
+        krylov: 0,
+        max_iter: 20,
+        tol: 1e-8,
+    };
+    for (major, minor) in [(2_u32, 0_u32), (1, 1)] {
+        HVP_CALLS.store(0, Ordering::Relaxed);
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 2) };
+        let mt = unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), 2) };
+        let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), 1) };
+        unsafe {
+            (*st).version.major = major;
+            (*st).version.minor = minor;
+        }
+        let status = unsafe {
+            rgmin_lowest_eigenpairs(
+                Some(counted_block_hvp),
+                lam.as_ptr().cast_mut().cast(),
+                xt,
+                st,
+                mt,
+                vt,
+                &params,
+                std::ptr::null(),
+                pairs.as_mut_ptr(),
+                1,
+            )
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(mt);
+            rgmin_tensor_free(vt);
+        }
+        assert_eq!(
+            status,
+            rgmin_status_t::RGMIN_INVALID_PARAMETER,
+            "version {major}.{minor}"
+        );
+        assert_eq!(HVP_CALLS.load(Ordering::Relaxed), 0, "{major}.{minor}");
+        assert!(
+            last_error().contains("unsupported DLPack version"),
+            "{}",
+            last_error()
+        );
+    }
 }

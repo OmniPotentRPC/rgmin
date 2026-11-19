@@ -6335,7 +6335,15 @@ fn cpu_dl<'a>(
         set_last_error(&format!("{name}: null tensor"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
-    let dl = unsafe { &(*tensor).dl_tensor };
+    let managed = unsafe { &*tensor };
+    if managed.version.major != 1 || managed.version.minor != 0 {
+        set_last_error(&format!(
+            "{name}: unsupported DLPack version {}.{}",
+            managed.version.major, managed.version.minor
+        ));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    let dl = &managed.dl_tensor;
     if dl.device.device_type != DLDeviceType::kDLCPU {
         set_last_error(&format!(
             "{name}: device {:?} not supported in this build (CPU only)",
