@@ -9,8 +9,8 @@ use std::ptr::null;
 
 use rgmin::ffi::{
     RGMIN_PRECON_EXP, rgmin_conjugacy_t, rgmin_control_t, rgmin_eigen_options_t,
-    rgmin_eigen_params_t, rgmin_exp_t, rgmin_precon_t, rgmin_scg_options_t, rgmin_scg_params_t,
-    rgmin_scg_step_tolerance_t,
+    rgmin_eigen_params_t, rgmin_exp_t, rgmin_precon_t, rgmin_rtr_tcg_result_t, rgmin_scg_options_t,
+    rgmin_scg_params_t, rgmin_scg_step_tolerance_t,
 };
 use rgmin::{Control, EigenParams, ExpParams, NoiseFloor, ScgOptions, ScgParams, ScgStepTolerance};
 
@@ -27,6 +27,14 @@ fn c_header_reads_the_noise_floor_stop() {
 #[test]
 fn c_header_reads_the_new_stops_through_the_xts_aliases() {
     consumer::compile_and_run("tests/c_xts_stops.c", "rgmin_c_xts_stops", &[]);
+}
+
+/// ABI minor 52. The C record matches the Rust record, and the new entries
+/// answer the same quadratics, radius rule, and deflated mode as the Rust API.
+#[test]
+fn c_header_checks_rigid_quotient_tcg_and_projected_modes() {
+    let size = size_of::<rgmin_rtr_tcg_result_t>().to_string();
+    consumer::compile_and_run("tests/c_manifold_rtr.c", "rgmin_c_manifold_rtr", &[size]);
 }
 
 #[cfg(feature = "highs")]

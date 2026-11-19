@@ -29,9 +29,11 @@ rgmin_linesearch
 rgmin_linesearch_create
 rgmin_linesearch_free
 rgmin_lowest_eigenpair
+rgmin_lowest_eigenpair_on_manifold
 rgmin_lowest_eigenpair_with_options
 rgmin_lowest_eigenpairs
 rgmin_lowest_eigenpairs_ex
+rgmin_lowest_eigenpairs_projected
 rgmin_manifold_egrad_to_rgrad
 rgmin_manifold_exp
 rgmin_manifold_free
@@ -42,6 +44,7 @@ rgmin_manifold_log
 rgmin_manifold_product
 rgmin_manifold_project
 rgmin_manifold_retract
+rgmin_manifold_rigid_quotient
 rgmin_manifold_spd
 rgmin_manifold_stiefel
 rgmin_manifold_transport
@@ -64,6 +67,8 @@ rgmin_rigid_workspace_free
 rgmin_rigid_workspace_new
 rgmin_rigid_workspace_rank
 rgmin_rlbfgs_default
+rgmin_rtr_radius_update
+rgmin_rtr_tcg_solve
 rgmin_scg_options_default
 rgmin_scg_params_default
 rgmin_solver_add_equality
