@@ -86,7 +86,7 @@ set later compares with the evaluations already made.
 
 ** Other languages
 
-| surface | etol | max_evals | count |
+| surface | etol | ~max_evals~ | count |
 |---+---+---+---|
 | C | ~rgmin_solver_set_etol~, ~rgmin_solver_clear_etol~ | ~rgmin_solver_set_max_evals~, ~rgmin_solver_clear_max_evals~ | ~rgmin_solver_evals~ |
 | C++ | ~Solver::set_etol~, ~Solver::clear_etol~ | ~Solver::set_max_evals~, ~Solver::clear_max_evals~ | ~Solver::evals~ |
