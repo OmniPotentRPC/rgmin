@@ -6020,15 +6020,19 @@ impl Solver {
 
             Overlay::Rcg(state) => {
                 let linesearch = self.linesearch;
+                let caps = crate::step::Caps {
+                    atom: self.atom_maxmove,
+                    euclid: self.control.maxmove_cap(),
+                };
                 let constraints = self.constraints.take();
                 let moved = if let Some(set) = constraints.as_ref() {
                     let bond = crate::rcg::BondManifold { constraints: set };
-                    crate::rcg::rcg_step(&bond, state, x, value, &grad, linesearch, |p| {
+                    crate::rcg::rcg_step(&bond, state, x, value, &grad, linesearch, caps, |p| {
                         obj.value_and_gradient(p.view())
                     })
                 } else {
                     let manifold = self.manifold.clone();
-                    crate::rcg::rcg_step(&manifold, state, x, value, &grad, linesearch, |p| {
+                    crate::rcg::rcg_step(&manifold, state, x, value, &grad, linesearch, caps, |p| {
                         obj.value_and_gradient(p.view())
                     })
                 };
