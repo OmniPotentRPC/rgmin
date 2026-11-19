@@ -94,17 +94,10 @@ impl IrcTrust {
         let norm = nrm2(w.view());
         if norm <= MASS_WEIGHT_FLOOR {
             // Degenerate: sit on the first represented weighted axis.
-            let axis = (0..n).find(|&i| weight_is_present(self.sqrtm[i]));
-            if axis.is_none() || self.dx == 0.0 {
-                for i in 0..n {
-                    out[i] = -self.d1[i];
-                }
-                return out;
-            }
             for i in 0..n {
                 out[i] = -self.d1[i];
             }
-            if let Some(axis) = axis {
+            if let Some(axis) = (0..n).find(|&i| weight_is_present(self.sqrtm[i])) {
                 out[axis] = self.dx / self.sqrtm[axis] - self.d1[axis];
             }
             return out;
