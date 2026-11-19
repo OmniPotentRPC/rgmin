@@ -9,6 +9,34 @@ fn automatic_engine_and_crossover_preserve_main_defaults() {
     assert_eq!(options.solver, rgmin::HighsSolverKind::Choose);
     assert_eq!(options.crossover, rgmin::HighsCrossover::Choose);
     assert!(options.callback.is_none());
+    assert_eq!(options.time_limit, 0.05);
+}
+
+/// HiGHS refuses a negative limit. The projection QP and the feasible
+/// step QP must both pass `HighsOptions::time_limit` through and
+/// surface that refusal, instead of keeping a private literal.
+#[test]
+fn both_solves_apply_the_configured_time_limit() {
+    use ndarray::array;
+    let options = rgmin::HighsOptions::default().with_time_limit(-1.0);
+    let direction = array![1.0, -1.0];
+    let point = array![0.0, 0.0];
+    let constraints = HighsStep::default().with_equalities(vec![(vec![(0, 1.0), (1, 1.0)], 0.0)]);
+    let projected =
+        rgmin::lbfgs_qp::highs_projected_step(&direction, point.view(), &constraints, &options);
+    let feasible = rgmin::lbfgs_qp::highs_feasible_step_with_options(
+        Some(&direction),
+        None,
+        &direction,
+        Some(1.0),
+        None,
+        None,
+        &options,
+    );
+    for (name, result) in [("projection", projected), ("feasible", feasible)] {
+        let err = result.expect_err(name);
+        assert!(err.to_string().contains("time_limit"), "{name}: {err}");
+    }
 }
 
 fn quad(x: ArrayView1<f64>) -> (f64, Array1<f64>) {

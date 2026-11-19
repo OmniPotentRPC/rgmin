@@ -123,6 +123,13 @@ fn apply_engine(model: &mut highs::Model, options: &HighsOptions) -> Result<()> 
     Ok(())
 }
 
+/// Apply the configured HiGHS time limit to one model.
+fn set_time_limit(model: &mut highs::Model, options: &HighsOptions) -> Result<()> {
+    model
+        .try_set_option("time_limit", options.time_limit)
+        .map_err(|_| Error::Highs("cannot set time_limit".into()))
+}
+
 fn bind_callback(
     model: &mut highs::Model,
     options: &HighsOptions,
@@ -388,9 +395,7 @@ fn project_qp(
     model
         .try_set_option("threads", 1_i32)
         .map_err(|_| Error::Highs("cannot set threads=1".into()))?;
-    model
-        .try_set_option("time_limit", 0.05_f64)
-        .map_err(|_| Error::Highs("cannot set time_limit".into()))?;
+    set_time_limit(&mut model, options)?;
 
     let (q_start, q_index, q_value) = identity_csc(n);
     let st = unsafe {
@@ -650,7 +655,7 @@ pub(crate) fn highs_feasible_step_boxed(
     serialise_openmp_once();
     let _ = model.try_set_option("parallel", "off");
     let _ = model.try_set_option("threads", 1_i32);
-    let _ = model.try_set_option("time_limit", 1.0_f64);
+    set_time_limit(&mut model, options)?;
     if !equalities.is_empty() {
         model
             .try_set_option(

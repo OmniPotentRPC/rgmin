@@ -142,6 +142,9 @@ impl HighsCallback {
     }
 }
 
+/// Seconds one HiGHS feasible set solve may run.
+const DEFAULT_HIGHS_TIME_LIMIT: f64 = 0.05;
+
 /// Engine and callback policies, independent of the feasible-set record.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
@@ -152,12 +155,17 @@ pub struct HighsOptions {
     pub crossover: HighsCrossover,
     /// Optional host callback. Its context is borrowed from the host.
     pub callback: Option<HighsCallback>,
+    /// Seconds one HiGHS solve may run.
+    ///
+    /// The projection QP and the feasible step QP both set this value.
+    pub time_limit: f64,
 }
 
 with_setters!(HighsOptions {
     with_solver => solver: val HighsSolverKind,
     with_crossover => crossover: val HighsCrossover,
     with_callback => callback: opt HighsCallback,
+    with_time_limit => time_limit: val f64,
 });
 
 impl Default for HighsOptions {
@@ -166,6 +174,7 @@ impl Default for HighsOptions {
             solver: HighsSolverKind::Choose,
             crossover: HighsCrossover::Choose,
             callback: None,
+            time_limit: DEFAULT_HIGHS_TIME_LIMIT,
         }
     }
 }
