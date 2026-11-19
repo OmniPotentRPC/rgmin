@@ -1,4 +1,5 @@
 
+
 Riemannian conjugate gradients
 ------------------------------
 
@@ -37,3 +38,18 @@ The listing is ``examples/tutorial_rcg.rs``, whole. Continuous integration runs 
     }
 
 The example calls ``minimize_rcg`` on a quadratic and checks both coordinates.
+
+``RcgOptions::validate`` refuses a gradient tolerance that is not finite or is negative, and an initial step that is not finite and positive, with ``Error::InvalidControl``. ``minimize_rcg`` calls it before the first evaluation. A projection or retraction that cannot be carried out is returned as its typed error rather than skipped.
+
+In a session
+~~~~~~~~~~~~
+
+``Method::rcg()`` runs the same step inside a ``Solver``. There it keeps the session's rules:
+
+- ``Control::maxmove`` and the per-atom cap bound the move that is taken. A trial beyond a cap lies outside the line-search domain, so the search contracts to the cap. The default per-atom cap stays off for this method.
+
+- A distance constraint set composes with the configured manifold. The tangent space is the intersection of the manifold's and the bonds', and the retraction alternates between the two until both hold.
+
+- The stop and the report read the gradient cut by the bonds, so a constrained minimum with a pure constraint force meets the tolerance.
+
+- A level-set retraction that moves the point clears the held direction. The next step opens on steepest descent.
