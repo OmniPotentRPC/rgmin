@@ -4,6 +4,7 @@
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::{
     ConstraintError, Control, DistanceConstraints, Error, ManifoldKind, Method, Oracle, Solver,
+    Status,
 };
 
 /// `f = |x - c|^2 / 2` with `c` ten units from the start.
@@ -131,5 +132,83 @@ fn rcg_keeps_the_manifold_and_the_bonds_together() {
         tilt(x.view()).0 < first - 0.1,
         "no descent: {}",
         tilt(x.view()).0
+    );
+}
+
+/// The two atoms of a dimer pulled apart along the bond: the force on the
+/// dimer is all constraint force.
+fn pull_along_the_bond(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+    let mut g = Array1::zeros(x.len());
+    g[0] = -1.0;
+    g[3] = 1.0;
+    (x[3] - x[0], g)
+}
+
+fn dimer() -> (Array1<f64>, Solver) {
+    let start = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let set = DistanceConstraints::at(vec![(0, 1)], start.view()).unwrap();
+    let mut solver = Solver::new(Method::rcg(), Control::default().with_gtol(1e-8), 6);
+    solver.set_distance_constraints(set).unwrap();
+    (start, solver)
+}
+
+#[test]
+fn rcg_stops_on_the_projected_gradient_of_a_constrained_start() {
+    let (start, mut solver) = dimer();
+    let obj = Oracle::unbounded(6, pull_along_the_bond);
+    let mut x = start.clone();
+    let report = solver.step(&obj, &mut x).unwrap();
+    assert!(report.grad_norm < 1e-12, "grad_norm {}", report.grad_norm);
+    assert_eq!(report.status, Status::Tolerance);
+    let grad = report.grad.expect("the gradient is reported");
+    assert!(grad.iter().all(|g| g.abs() < 1e-12), "grad {grad}");
+    assert_eq!(x, start);
+}
+
+#[test]
+fn rcg_assesses_a_constrained_start_by_the_projected_gradient() {
+    let (start, _) = dimer();
+    let set = DistanceConstraints::at(vec![(0, 1)], start.view()).unwrap();
+    let control = Control::default().with_gtol(1e-8).with_maxiter(0);
+    let mut solver = Solver::new(Method::rcg(), control, 6);
+    solver.set_distance_constraints(set).unwrap();
+    let obj = Oracle::unbounded(6, pull_along_the_bond);
+    let mut x = start;
+    let report = solver.run(&obj, &mut x).unwrap();
+    assert_eq!(report.status, Status::Tolerance, "{report:?}");
+}
+
+#[test]
+fn rcg_reports_the_projected_gradient_after_a_constrained_move() {
+    let start = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let set = DistanceConstraints::at(vec![(0, 1)], start.view()).unwrap();
+    let mut solver = Solver::new(Method::rcg(), Control::default().with_gtol(1e-6), 6);
+    solver.set_distance_constraints(set).unwrap();
+    // Hold atom 0 at the origin and pull atom 1 toward (3, 3, 0). On the
+    // unit bond sphere it settles at the point nearest that target, where
+    // the whole force is normal.
+    let obj = Oracle::unbounded(6, |x: ArrayView1<f64>| {
+        let g = array![x[0], x[1], x[2], x[3] - 3.0, x[4] - 3.0, x[5]];
+        (0.5 * g.dot(&g), g)
+    });
+    let mut x = start.clone();
+    let mut report = None;
+    for _ in 0..200 {
+        let r = solver.step(&obj, &mut x).unwrap();
+        let done = r.status != Status::Iterating;
+        report = Some(r);
+        if done {
+            break;
+        }
+    }
+    let report = report.unwrap();
+    assert_eq!(report.status, Status::Tolerance, "{report:?}");
+    assert!(report.grad_norm <= 1e-6, "grad_norm {}", report.grad_norm);
+    let grad = report.grad.unwrap();
+    let bond = [x[3] - x[0], x[4] - x[1], x[5] - x[2]];
+    let along: f64 = (0..3).map(|k| bond[k] * (grad[3 + k] - grad[k])).sum();
+    assert!(
+        along.abs() < 1e-8,
+        "reported gradient is not tangent: {along}"
     );
 }
