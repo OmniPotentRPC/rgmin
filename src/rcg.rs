@@ -50,6 +50,7 @@ use crate::holonomic::DistanceConstraints;
 use crate::linesearch::{LineSearch, Path};
 use crate::manifold::Manifold;
 use crate::nlcg::div;
+use crate::step::Caps;
 
 /// Stop when the Riemannian gradient norm is at most this value.
 ///
@@ -330,6 +331,7 @@ where
             value,
             &egrad,
             opts.linesearch,
+            Caps::default(),
             &mut fg,
         )?;
         evals += moved.evals;
@@ -354,6 +356,9 @@ where
 }
 
 /// One Riemannian CG step from `x`. `egrad` is the Euclidean gradient there.
+///
+/// `caps` bound the displacement of every trial, measured on the retracted
+/// point, the way the session bounds the step of every other method.
 pub(crate) fn rcg_step<M, F>(
     manifold: &M,
     memory: &mut RcgMemory,
@@ -361,6 +366,7 @@ pub(crate) fn rcg_step<M, F>(
     value: f64,
     egrad: &Array1<f64>,
     linesearch: LineSearch,
+    caps: Caps,
     mut fg: F,
 ) -> Result<RcgMoved>
 where
@@ -384,7 +390,8 @@ where
     };
     for attempt in 0..2 {
         let speed = manifold.norm(x, &dir);
-        let alpha0 = opening_step(speed, memory.initial_step, previous, previous_speed);
+        let alpha0 = opening_step(speed, memory.initial_step, previous, previous_speed)
+            .min(caps.alpha(dir.view()));
         if !alpha0.is_finite() || alpha0 <= 0.0 {
             break;
         }
@@ -392,6 +399,7 @@ where
             manifold,
             origin: x.clone(),
             dir: dir.clone(),
+            caps,
         };
         let (x_new, _f_new, alpha) = linesearch.search_path(&mut counted, &mut path, alpha0);
         if alpha > 0.0 {
@@ -630,10 +638,13 @@ where
     Ok((value, grad))
 }
 
+/// The curve `t |-> retract(origin, t dir)`, undefined where its point
+/// is farther from `origin` than `caps` allow.
 struct RetractPath<'a, M: ?Sized> {
     manifold: &'a M,
     origin: Array1<f64>,
     dir: Array1<f64>,
+    caps: Caps,
 }
 
 impl<M> Path for RetractPath<'_, M>
@@ -653,7 +664,8 @@ where
             return None;
         }
         let step = self.dir.mapv(|c| c * t);
-        Some(self.manifold.retract(&self.origin, &step))
+        let point = self.manifold.retract(&self.origin, &step);
+        self.caps.admits(&self.origin, &point).then_some(point)
     }
 
     fn slope(&mut self, t: f64, at: ArrayView1<'_, f64>, g: ArrayView1<'_, f64>) -> f64 {
@@ -749,6 +761,33 @@ mod tests {
             let n = out.x.dot(&out.x).sqrt();
             assert!((n - 1.0).abs() < 1e-8, "{beta:?} norm {n}");
         }
+    }
+
+    #[test]
+    fn a_cap_bounds_the_retracted_move_on_a_curved_manifold() {
+        let sphere = Sphere;
+        let x = array![0.6, 0.48, 0.64];
+        let (value, egrad) = rayleigh(x.view());
+        let caps = Caps {
+            atom: None,
+            euclid: Some(0.05),
+        };
+        let mut memory = RcgMemory::from_options(&RcgOptions::default());
+        let moved = rcg_step(
+            &sphere,
+            &mut memory,
+            &x,
+            value,
+            &egrad,
+            RcgOptions::default().linesearch,
+            caps,
+            rayleigh,
+        )
+        .unwrap();
+        let length = crate::vecops::nrm2_diff(moved.x.view(), x.view());
+        assert!(moved.alpha > 0.0, "no step");
+        assert!(length <= 0.05 * (1.0 + 1e-9), "moved {length}");
+        assert!(moved.value < value);
     }
 
     fn brockett(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
@@ -963,6 +1002,7 @@ mod tests {
                 value,
                 &grad,
                 RcgOptions::default().linesearch,
+                Caps::default(),
                 fg,
             )
             .unwrap();
