@@ -1,0 +1,1 @@
+- Added generic fixed-Talbot and Weeks/Laguerre inverse Laplace kernels, orthonormal Laguerre evaluation, and complex dense Gaussian elimination with an inverse infinity norm. Contour results are typed estimates. A disk majorant whose singularity lies inside the disk is refused, and algebraic tails slower than `O(n^{-3/2})` are refused.
