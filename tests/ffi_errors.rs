@@ -4,9 +4,9 @@ use std::os::raw::c_void;
 
 use dlpk::sys::DLManagedTensorVersioned;
 use rgmin::ffi::{
-    rgmin_abi_compatible, rgmin_abi_stamp, rgmin_control_t, rgmin_method_from_name,
-    rgmin_method_t, rgmin_minimize, rgmin_report_t, rgmin_status_t, rgmin_stop_t,
-    rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+    rgmin_abi_compatible, rgmin_abi_stamp, rgmin_control_t, rgmin_method_from_name, rgmin_method_t,
+    rgmin_minimize, rgmin_report_t, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
+    rgmin_tensor_free,
 };
 
 unsafe extern "C" fn square_eval(

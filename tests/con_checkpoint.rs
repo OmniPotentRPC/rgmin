@@ -300,10 +300,8 @@ fn multiline_headers_are_refused_without_touching_the_destination() {
 
 #[test]
 fn checkpoint_io_failures_are_returned_to_the_caller() {
-    let directory = std::env::temp_dir().join(format!(
-        "rgmin-con-directory-{}",
-        std::process::id()
-    ));
+    let directory =
+        std::env::temp_dir().join(format!("rgmin-con-directory-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
     let err = write_checkpoint(
         &directory,
@@ -325,9 +323,11 @@ fn checkpoint_io_failures_are_returned_to_the_caller() {
 #[test]
 fn duplicate_atom_ids_fall_back_to_file_order() {
     let path = scratch("duplicate-ids");
-    let text = std::fs::read_to_string(fixture())
-        .unwrap()
-        .replacen("3.0 0.0 -1.0 0 2", "3.0 0.0 -1.0 0 0", 1);
+    let text = std::fs::read_to_string(fixture()).unwrap().replacen(
+        "3.0 0.0 -1.0 0 2",
+        "3.0 0.0 -1.0 0 0",
+        1,
+    );
     std::fs::write(&path, text).unwrap();
 
     let (got, energy) = read_checkpoint(&path).unwrap();

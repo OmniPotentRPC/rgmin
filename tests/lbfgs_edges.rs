@@ -18,10 +18,7 @@ fn builder_normalizes_memory_caps_and_fixed_scales() {
     assert_eq!(configured.step, LbfgsStep::Wolfe);
     assert_eq!(configured.fixed_h0, None);
 
-    let configured = Lbfgs::builder()
-        .scaled(0.5)
-        .fixed_scale(0.25)
-        .build();
+    let configured = Lbfgs::builder().scaled(0.5).fixed_scale(0.25).build();
     assert_eq!(configured.step, LbfgsStep::scaled(0.5));
     assert_eq!(configured.fixed_h0, Some(0.25));
 }
