@@ -19,7 +19,7 @@
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use eindir_core::{DifferentiableObjective, Objective};
+use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, Array2, ArrayView1, Zip};
 
 use crate::accept::retract_within_bounds;
@@ -1029,7 +1029,7 @@ where
             dim: eindir_core::Objective::dim(obj),
         });
     }
-    pos = obj.bounds().clip(pos.view());
+    pos = eindir_core::Objective::bounds(obj).clip(pos.view());
     let (mut value, mut grad) = obj.value_and_gradient(pos.view());
     crate::step::refuse_non_finite(value, &grad)?;
 
