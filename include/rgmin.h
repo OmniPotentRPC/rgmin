@@ -1146,9 +1146,11 @@ rgmin_status_t rgmin_solver_search_direction(rgmin_solver_t *solver,
  *  \c linesearch is 0 for the strong Wolfe search and 1 for Brent
  *  (\c LineSearch::default). Any other integer is
  *  \c RGMIN_INVALID_PARAMETER.
- *  \c grad_tol is the Riemannian gradient norm that stops the run.
- *  \c max_iter is the iteration cap. \c initial_step is the length of
- *  the first trial displacement. */
+ *  \c grad_tol is the Riemannian gradient norm that stops the run. It
+ *  must be finite and not negative. \c max_iter is the iteration cap.
+ *  \c initial_step is the length of the first trial displacement. It
+ *  must be finite and positive. Anything else is
+ *  \c RGMIN_INVALID_PARAMETER. */
 typedef struct rgmin_rcg_options_t {
     int32_t beta;
     int32_t transport;
@@ -1165,8 +1167,11 @@ rgmin_rcg_options_t rgmin_rcg_options_default(void);
 
 /** Riemannian CG on Euclidean space. \a options NULL selects
  *  \ref rgmin_rcg_options_default. \a x is updated in place and \a out
- *  is written on success. A non-finite \a x, a NULL callback, or an
- *  unknown tag returns \c RGMIN_INVALID_PARAMETER. */
+ *  is written on success. A non-finite \a x, a NULL \a x, \a eval,
+ *  \a grad or \a out, an unknown tag, or a tolerance or step that
+ *  \ref rgmin_rcg_options_t refuses returns
+ *  \c RGMIN_INVALID_PARAMETER and leaves \a x as it was. A panic is
+ *  \c RGMIN_INTERNAL_ERROR. */
 rgmin_status_t rgmin_minimize_rcg(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
                                   DLManagedTensorVersioned *x,
                                   const rgmin_rcg_options_t *options, rgmin_report_t *out);
