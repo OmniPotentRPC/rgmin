@@ -40,6 +40,8 @@ mod adam;
 mod bb;
 #[cfg(feature = "highs")]
 mod box_objective;
+/// A-posteriori Newton--Kantorovich, adjoint, and Morse-gap bounds.
+pub mod certificate;
 mod compact_tr;
 /// CON checkpoint of an accepted point. Compiled only with `readcon`.
 #[cfg(feature = "readcon")]
@@ -141,6 +143,10 @@ pub mod vecops;
 
 pub use accept::Accept;
 pub use adam::minimize_adam;
+pub use certificate::{
+    AdjointFunctionalBar, CertificateError, KantorovichBall, MorseGap, adjoint_functional_bar,
+    certify_morse_gap, kantorovich_ball,
+};
 #[cfg(feature = "readcon")]
 pub use con_checkpoint::{read_checkpoint, write_checkpoint};
 pub use control::{Control, NoiseFloor, StopNorm};
