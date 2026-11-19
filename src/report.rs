@@ -148,6 +148,12 @@ pub struct Report {
     pub status: Status,
     /// Finer stop. `None` follows [`Report::status`].
     pub(crate) reason: Option<StopReason>,
+    /// `true` when `grad_norm` is at most the run's `gtol`.
+    ///
+    /// `Report::converged()` is the stop reason. This flag is the `gtol`
+    /// comparison, so a polish that accepts a point above `gtol` can be
+    /// [`StopReason::Converged`] while this flag stays `false`.
+    pub converged: bool,
 }
 
 impl Report {
@@ -163,6 +169,7 @@ impl Report {
             grad: None,
             status: Status::Iterating,
             reason: None,
+            converged: false,
         }
     }
 
@@ -181,6 +188,16 @@ impl Report {
     /// Whether [`Self::stop_reason`] is [`StopReason::Converged`].
     pub fn converged(&self) -> bool {
         self.stop_reason().converged()
+    }
+
+    /// Replace the `gtol` flag.
+    ///
+    /// Chain it after [`Self::new`]. Drivers set it from
+    /// `grad_norm <= gtol` before they return.
+    #[must_use]
+    pub fn with_converged(mut self, converged: bool) -> Self {
+        self.converged = converged;
+        self
     }
 
     /// Record `reason` and the [`Status`] it corresponds to.

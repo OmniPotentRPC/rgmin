@@ -153,12 +153,14 @@ impl Solver {
             what: "the cap is not positive",
         })?;
         let mut value = fill(x.view(), &mut self.last_grad);
-        let tol = self.control.gtol;
         for _ in 0..self.control.maxiter {
             if !finite(value, self.last_grad.view()) {
                 return Err(non_finite());
             }
-            if self.stop_norm.of(self.last_grad.view()) < tol {
+            if self
+                .control
+                .converged(self.stop_norm.of(self.last_grad.view()))
+            {
                 break;
             }
             let use_cap = if self.trust {
@@ -175,7 +177,7 @@ impl Solver {
         self.last_value = value;
         self.store_x(x);
         let g = self.last_grad.clone();
-        Ok(self.report(value, x, &g))
+        self.control.maybe_not_converged(self.report(value, x, &g))
     }
 
     fn store_x(&mut self, x: &Array1<f64>) {
@@ -387,12 +389,14 @@ impl Solver {
             self.scratch_b = Array1::zeros(n);
         }
         let mut value = fill(x.view(), &mut self.last_grad);
-        let tol = self.control.gtol;
         for _ in 0..self.control.maxiter {
             if !finite(value, self.last_grad.view()) {
                 return Err(non_finite());
             }
-            if self.stop_norm.of(self.last_grad.view()) < tol {
+            if self
+                .control
+                .converged(self.stop_norm.of(self.last_grad.view()))
+            {
                 break;
             }
             value = self.fire_fill_step(x, fill)?;
@@ -400,7 +404,7 @@ impl Solver {
         self.last_value = value;
         self.store_x(x);
         let g = self.last_grad.clone();
-        Ok(self.report(value, x, &g))
+        self.control.maybe_not_converged(self.report(value, x, &g))
     }
 
     fn fire_fill_step<F>(&mut self, x: &mut Array1<f64>, fill: &mut F) -> Result<f64>

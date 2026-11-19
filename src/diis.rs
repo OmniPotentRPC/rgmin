@@ -251,6 +251,7 @@ mod tests {
                 noise_floor: None,
                 error_on_unmet: false,
                 backward_polish: false,
+                require_convergence: false,
             },
             1,
         );
@@ -284,6 +285,7 @@ mod tests {
                 noise_floor: None,
                 error_on_unmet: false,
                 backward_polish: false,
+                require_convergence: false,
             },
             1,
         );

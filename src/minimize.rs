@@ -15,7 +15,7 @@ use crate::pso::minimize_pso;
 use crate::qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 use crate::report::{Report, Status};
 use crate::session::Solver;
-use crate::step::{implicit_atom_cap, l2, next_istep, one_shot_report, take_step};
+use crate::step::{implicit_atom_cap, l2, next_istep, one_shot_report, stop_if_unmoved, take_step};
 
 /// Minimize `obj` from `init` with the chosen conjugacy, restart, and line search.
 pub fn minimize<O>(
@@ -167,6 +167,7 @@ fn without_polish(control: &Control) -> Control {
             .clone()
             .with_backward_polish(false)
             .with_error_on_unmet(false)
+            .with_require_convergence(false)
     } else {
         control.clone()
     }
@@ -293,6 +294,7 @@ where
             ));
         }
         let lsstep = t.alpha;
+        let unmoved = !t.moved;
         pos = t.x;
         value = t.f;
         grad = t.g;
@@ -305,10 +307,16 @@ where
         if restart.should_restart(&ctx) {
             beta = 0.0;
         }
-        dir = Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d));
+        let next_dir = Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d));
+        let next = next_istep(lsstep, control);
+        let fixed = unmoved && next_dir == dir && next == istep;
+        if let Some(stop) = stop_if_unmoved(control, fixed, value, pos.clone(), step + 1, gnorm) {
+            return stop;
+        }
+        dir = next_dir;
         g_old.assign(&grad);
         d_old.assign(&dir);
-        istep = next_istep(lsstep, control);
+        istep = next;
     }
     let gnorm = l2(&grad);
     control.deliver(one_shot_report(

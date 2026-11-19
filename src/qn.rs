@@ -9,7 +9,7 @@ use crate::linesearch::LineSearch;
 use crate::report::Report;
 use crate::step::{
     apply_caps, energy_noise_report, implicit_atom_cap, l2, next_istep, one_shot_report, qn_istep,
-    take_step,
+    stop_if_unmoved, take_step,
 };
 use crate::trust::{
     accept_ratio, cauchy_point, dogleg_direction, predicted_reduction, reduction_ratio,
@@ -70,6 +70,10 @@ where
         );
         if t.energy_noise {
             return control.deliver(energy_noise_report(value, pos, step + 1, gnorm));
+        }
+        if let Some(stop) = stop_if_unmoved(control, !t.moved, value, pos.clone(), step + 1, gnorm)
+        {
+            return stop;
         }
         let moved = t.moved;
         pos = t.x;
@@ -195,7 +199,13 @@ where
         let p = &trial - &pos;
         let pnorm = l2(&p);
         if !(pnorm.is_finite() && pnorm > 1e-16) {
-            radius = update_radius(radius, -1.0, 0.0, rmax);
+            let shrunk = update_radius(radius, -1.0, 0.0, rmax);
+            let fixed = pnorm.is_finite() && shrunk == radius;
+            if let Some(stop) = stop_if_unmoved(control, fixed, value, pos.clone(), step + 1, gnorm)
+            {
+                return stop;
+            }
+            radius = shrunk;
             continue;
         }
         let (ft, gt) = obj.value_and_gradient(trial.view());
@@ -263,11 +273,15 @@ where
         if t.energy_noise {
             return control.deliver(energy_noise_report(value, pos, step + 1, gnorm));
         }
-        let lsstep = t.alpha;
+        let next = next_istep(t.alpha, control);
+        let fixed = !t.moved && next == istep;
+        if let Some(stop) = stop_if_unmoved(control, fixed, value, pos.clone(), step + 1, gnorm) {
+            return stop;
+        }
         pos = t.x;
         value = t.f;
         grad = t.g;
-        istep = next_istep(lsstep, control);
+        istep = next;
     }
     control.deliver(done(
         value,

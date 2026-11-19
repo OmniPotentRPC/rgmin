@@ -339,6 +339,36 @@ pub(crate) fn one_shot_report(
         grad: None,
         status,
         reason: None,
+        converged: false,
+    }
+}
+
+/// `Some(deliver(StepTolerance))` when strict mode is on, the loop has
+/// reached a fixed point, and the gradient is still not below `gtol`.
+///
+/// `fixed` is the caller's proof that the next iteration repeats this
+/// one: the step took no move and nothing the next iteration reads has
+/// changed. A rejected trust region trial or a rejected adaptive step
+/// changes the radius or the step length, so it is not a fixed point.
+/// The default returns `None` so the caller keeps its existing stop.
+pub(crate) fn stop_if_unmoved(
+    control: &Control,
+    fixed: bool,
+    value: f64,
+    coords: Array1<f64>,
+    steps: usize,
+    grad_norm: f64,
+) -> Option<crate::Result<Report>> {
+    if control.require_convergence && fixed && !control.converged(grad_norm) {
+        Some(control.deliver(one_shot_report(
+            value,
+            coords,
+            steps,
+            grad_norm,
+            crate::report::Status::StepTolerance,
+        )))
+    } else {
+        None
     }
 }
 
