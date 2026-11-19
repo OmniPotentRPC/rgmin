@@ -54,10 +54,12 @@ rgmin_minimize_hess_opts
 rgmin_minimize_hvp
 rgmin_minimize_hvp_opts
 rgmin_minimize_opts
+rgmin_minimize_rcg
 rgmin_minimize_rlbfgs
 rgmin_minimize_scg
 rgmin_minimize_scg_with_options
 rgmin_precon_init
+rgmin_rcg_options_default
 rgmin_rigid_align
 rgmin_rigid_project
 rgmin_rigid_project_hessian

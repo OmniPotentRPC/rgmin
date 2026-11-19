@@ -80,7 +80,9 @@ python3 docs/figures/architecture/draw_hourglass.py
   =rgmin_rlbfgs_default=. Minor 52 adds =RGMIN_GROMACS_STEEP=,
   =RGMIN_STOP_MACHINE_PRECISION=,
   =rgmin_solver_set_gromacs_steep=, and
-  =rgmin_gromacs_steep_max_constraint_shrinks=. =rgmin_control_t= is unchanged.
+  =rgmin_gromacs_steep_max_constraint_shrinks=. Minor 52 adds
+  =rgmin_rcg_options_default= and =rgmin_minimize_rcg=.
+  =rgmin_control_t= is unchanged.
   =rgmin_abi_compatible= checks the major version and the layout revision only.
 - =DistanceConstraints= :: Holonomic atom-pair distances for a session.
   SHAKE, LINCS and SETTLE return each trial to the set.

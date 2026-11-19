@@ -884,6 +884,18 @@ class EonCG(_Scaled):
     kind = "eon-cg"
 
 
+class RiemannianCG(_Scaled):
+    """Riemannian conjugate gradients on the session manifold.
+
+    The coefficient is PRP+ and the transport is scaled. The line search
+    is the strong Wolfe search. ``maxstep`` still caps the longest atomic
+    displacement when the caller sets it. The default per-atom cap stays
+    off, because the line search chooses the length.
+    """
+
+    kind = "rcg"
+
+
 class NewtonCG(_Scaled):
     """Steihaug-Toint Newton-CG on forward-difference Hessian products.
 
@@ -925,5 +937,6 @@ __all__ = [
     "NewtonCG",
     "NewtonPCG",
     "PolakRibiere",
+    "RiemannianCG",
     "SteepestDescent",
 ]

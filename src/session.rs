@@ -388,6 +388,7 @@ enum Overlay {
     Ode12r(crate::ode12r::Ode12rState),
     Diis(DiisState),
     GromacsSteep(GromacsSteep),
+    Rcg(crate::rcg::RcgMemory),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -610,14 +611,29 @@ impl Solver {
             Method::Ode12r => Overlay::Ode12r(crate::ode12r::Ode12rState::new(istep)),
             Method::Diis { memory } => Overlay::Diis(DiisState::new(*memory)),
             Method::GromacsSteep => Overlay::GromacsSteep(GromacsSteep::new(istep)),
+            Method::Rcg { beta, transport } => {
+                Overlay::Rcg(crate::rcg::RcgMemory::new(*beta, *transport, istep))
+            }
             _ => Overlay::None,
         };
+        if matches!(method, Method::Rcg { .. }) {
+            // The session default c2 is 0.9, a quasi-Newton value. Fletcher
+            // Reeves on a manifold needs c2 below one half.
+            solver.linesearch = LineSearch::wolfe(
+                crate::rcg::RCG_WOLFE_C1,
+                crate::rcg::RCG_WOLFE_C2,
+                crate::rcg::RCG_WOLFE_MAX_ITER,
+            );
+        }
         solver.apply_default_atom_cap();
         solver
     }
 
     /// [`Method::installs_default_atom_cap`] for the arm this session runs.
     fn installs_default_atom_cap(&self) -> bool {
+        if matches!(self.overlay, Overlay::Rcg(_)) {
+            return false;
+        }
         match &self.inner {
             Inner::Bfgs { .. } => Method::Bfgs.installs_default_atom_cap(),
             Inner::Dogleg { .. } => Method::Dogleg.installs_default_atom_cap(),
@@ -634,7 +650,8 @@ impl Solver {
     /// method has no step control of its own, when the caller has set
     /// neither a per-atom cap nor a positive Euclidean cap.
     ///
-    /// BFGS, dogleg, and FIRE 2.0 leave the default off. Dogleg would
+    /// BFGS, dogleg, Newton-CG, FIRE 2.0 and Riemannian CG leave the
+    /// default off. Dogleg would
     /// otherwise clip the trust step and feed that shorter length to
     /// the radius update, so a step on the trust boundary looks
     /// interior and the radius stays put.
@@ -665,7 +682,9 @@ impl Solver {
     pub fn optimizer_family(&self) -> crate::OptimizerFamily {
         if matches!(self.overlay, Overlay::Ode12r(_)) || matches!(self.inner, Inner::Fire(_)) {
             crate::OptimizerFamily::Fire
-        } else if matches!(self.inner, Inner::Nlcg { .. }) {
+        } else if matches!(self.inner, Inner::Nlcg { .. })
+            || matches!(self.overlay, Overlay::Rcg(_))
+        {
             crate::OptimizerFamily::Cg
         } else {
             crate::OptimizerFamily::QuasiNewton
@@ -2588,7 +2607,9 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
-        if self.constraints.is_some() {
+        // Riemannian CG retracts through the bond set itself. The
+        // constraint stepper's match does not know that overlay.
+        if self.constraints.is_some() && !matches!(self.overlay, Overlay::Rcg(_)) {
             return self.constrained_step(x, |s, x| s.step_constrained(obj, x));
         }
         if matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. }) {
@@ -5012,7 +5033,11 @@ impl Solver {
                             | Inner::Sr2 { .. }
                             | Inner::Adam { .. }
                     )));
-        let y = if already_retracted || self.manifold.retract_is_translation() {
+        // Riemannian CG already retracted along its own curve. A second
+        // retraction of the chord would leave that curve. The level-set
+        // retraction below still runs.
+        let rcg_retracted = matches!(self.overlay, Overlay::Rcg(_));
+        let y = if already_retracted || rcg_retracted || self.manifold.retract_is_translation() {
             None
         } else {
             Some(self.manifold.retract(&start, &(&*x - &start)))
@@ -5250,6 +5275,7 @@ impl Solver {
             Overlay::Ode12r(state) => state.reset(),
             Overlay::Diis(state) => state.clear(),
             Overlay::GromacsSteep(state) => state.reset(self.control.istep),
+            Overlay::Rcg(state) => state.reset(),
             Overlay::None => {}
         }
     }
@@ -6171,6 +6197,27 @@ impl Solver {
             Overlay::GromacsSteep(_) => {
                 unreachable!("GROMACS steep is dispatched before generic overlays")
             }
+            Overlay::Rcg(state) => {
+                let linesearch = self.linesearch;
+                let constraints = self.constraints.take();
+                let moved = if let Some(set) = constraints.as_ref() {
+                    let bond = crate::rcg::BondManifold { constraints: set };
+                    crate::rcg::rcg_step(&bond, state, x, value, &grad, linesearch, |p| {
+                        obj.value_and_gradient(p.view())
+                    })
+                } else {
+                    let manifold = self.manifold.clone();
+                    crate::rcg::rcg_step(&manifold, state, x, value, &grad, linesearch, |p| {
+                        obj.value_and_gradient(p.view())
+                    })
+                };
+                self.constraints = constraints;
+                let moved = moved?;
+                *x = moved.x;
+                value = moved.value;
+                grad = moved.egrad;
+            }
+
             Overlay::None => {}
         }
         self.overlay = overlay;
@@ -6325,8 +6372,11 @@ impl Inner {
             Method::Fire { kind } => Inner::Fire(FireState::new(*kind, dim, istep)),
             // The overlay on Solver carries the real state. Inner stays a
             // variant the constraint stepper matches.
-            Method::QuickMin | Method::Ode12r | Method::Diis { .. } => Inner::Steepest,
-            Method::GromacsSteep => Inner::Steepest,
+            Method::QuickMin
+            | Method::Ode12r
+            | Method::Diis { .. }
+            | Method::Rcg { .. }
+            | Method::GromacsSteep => Inner::Steepest,
             Method::Bb => Inner::Bb {
                 prev_s: None,
                 prev_y: None,
