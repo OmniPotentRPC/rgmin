@@ -2011,7 +2011,7 @@ impl Solver {
         }
         report.grad_norm = grad_norm;
         report.grad = Some(grad);
-        report.status = status;
+        *report = report.clone().with_status(status);
         Ok(())
     }
 
