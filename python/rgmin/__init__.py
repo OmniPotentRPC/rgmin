@@ -43,6 +43,7 @@ _OPTIMIZERS = frozenset(
         "NewtonCG",
         "NewtonPCG",
         "PolakRibiere",
+        "RiemannianCG",
         "SR1",
         "SR2",
         "SteepestDescent",
@@ -155,8 +156,8 @@ class SolverConfig(_SolverConfigBase):
 
     Unknown keywords raise ``ValueError`` and name the valid options.
     A Cartesian solver installs a per-atom cap of 0.2 unless the method
-    already limits the step. BFGS, dogleg, and FIRE 2.0 start without
-    that cap. ``maxstep`` or ``atom_maxmove`` replaces it on every
+    already limits the step. BFGS, dogleg, FIRE 2.0, GROMACS steep and
+    Riemannian CG start without that cap. ``maxstep`` or ``atom_maxmove`` replaces it on every
     method. A non-positive value clears it, except on the default
     L-BFGS step, where it restores 0.2.
 

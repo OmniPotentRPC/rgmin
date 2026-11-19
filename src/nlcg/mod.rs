@@ -322,7 +322,7 @@ fn dot_diff(a: ArrayView1<'_, f64>, b: ArrayView1<'_, f64>, c: ArrayView1<'_, f6
 /// term dominates, so the test is relative and a genuine ratio is kept.
 /// β is already dimensionless, so the floor does not have to be scaled
 /// by a length unit.
-fn div(num: f64, den: f64) -> f64 {
+pub(crate) fn div(num: f64, den: f64) -> f64 {
     if !num.is_finite() || !den.is_finite() || den.abs() <= f64::EPSILON * (num.abs() + 1.0) {
         0.0
     } else {
