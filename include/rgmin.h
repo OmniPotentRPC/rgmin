@@ -62,7 +62,9 @@ typedef enum rgmin_status_t {
     RGMIN_CONSTRAINT_ERROR = 5,
     /** An opt-in unmet stop. \c x and \c out still hold the report.
      *  ABI minor 49. */
-    RGMIN_UNMET_STOP = 6
+    RGMIN_UNMET_STOP = 6,
+    /** Strict convergence failed. \c x and \c out still hold the report. */
+    RGMIN_NOT_CONVERGED = 7
 } rgmin_status_t;
 
 /** Compatibility identity for this C ABI. */
@@ -210,10 +212,14 @@ typedef struct rgmin_control_t {
     double noise_eps;
     /** Floor factor. <= 0 selects 3. */
     double noise_c;
+    /** Nonzero returns RGMIN_NOT_CONVERGED when the gradient norm is
+     *  not below gtol. Zero keeps the report. */
+    int32_t require_convergence;
 } rgmin_control_t;
 /** Rust \c Control::default: maxiter 100, gtol 1e-5, istep 1, memory 0
  *  (10 L-BFGS pairs, 6 for DIIS), maxmove 0 (the default caps),
- *  noise_eps 0 (no floor) and noise_c 3. ABI minor 46. */
+ *  noise_eps 0 (no floor), noise_c 3, and require_convergence 0.
+ *  ABI minor 46. */
 rgmin_control_t rgmin_control_default(void);
 
 /** First-order floor \c n * eps * (1 + |value| + sum |x_i|), with
@@ -226,8 +232,10 @@ typedef struct rgmin_report_t {
     double value;
     size_t steps;
     double grad_norm;
-    /** Which stop produced this report. Layout revision 5. */
+    /** Which stop produced this report. */
     rgmin_stop_t stop;
+    /** Nonzero when grad_norm is below gtol. */
+    int32_t converged;
 } rgmin_report_t;
 
 typedef rgmin_status_t (*rgmin_eval_fn)(void *user, const DLManagedTensorVersioned *x,
@@ -577,6 +585,11 @@ void rgmin_solver_set_error_on_unmet(rgmin_solver_t *solver, int32_t on);
 /** Record the backward-error polish flag. A session step does not
  *  form a Hessian. ABI minor 49. */
 void rgmin_solver_set_backward_polish(rgmin_solver_t *solver, int32_t on);
+/** Nonzero opts a later run into \c RGMIN_NOT_CONVERGED. A step stays
+ *  \c RGMIN_SUCCESS, except that a steepest, BFGS, nonlinear CG or Adam
+ *  step that took no move and left its state unchanged reports
+ *  \c RGMIN_STOP_STEP_TOLERANCE. */
+void rgmin_solver_set_require_convergence(rgmin_solver_t *solver, int32_t on);
 /** FIRE 2.0 parameter set. GUENOLE2020 is Table 1 of Guenole et al.,
  *  Comput. Mater. Sci. 175, 109584 (2020): dt_max 10 dt, dt_min
  *  0.02 dt, N_delay 20, alpha_start 0.25, f_inc 1.1, f_dec 0.5,

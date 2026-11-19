@@ -276,6 +276,7 @@ mod capi {
             maxmove: 0.0,
             noise_eps: 0.0,
             noise_c: 0.0,
+            require_convergence: 0,
         }
     }
 
@@ -285,6 +286,7 @@ mod capi {
             steps: 99,
             grad_norm: -1.0,
             stop: rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR,
+            converged: 0,
         }
     }
 
