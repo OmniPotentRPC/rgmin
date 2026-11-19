@@ -62,7 +62,10 @@ typedef enum rgmin_status_t {
     RGMIN_CONSTRAINT_ERROR = 5,
     /** An opt-in unmet stop. \c x and \c out still hold the report.
      *  ABI minor 49. */
-    RGMIN_UNMET_STOP = 6
+    RGMIN_UNMET_STOP = 6,
+    /** Strict convergence failed. \c x and \c out still hold the report.
+     *  ABI minor 51. */
+    RGMIN_NOT_CONVERGED = 7
 } rgmin_status_t;
 
 /** Compatibility identity for this C ABI. */
@@ -73,7 +76,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 50
+#define RGMIN_ABI_VERSION_MINOR 51
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -85,14 +88,18 @@ typedef struct rgmin_abi_stamp_t {
  * 49 stop reasons LINE_SEARCH and POLISH_UNMET, RGMIN_UNMET_STOP,
  *    the two session setters, rgmin_backward_error_floor, and the
  *    *_opts one-shots. rgmin_control_t is unchanged,
- * 50 rgmin_minimize_eindir_opts. */
-#define RGMIN_ABI_LAYOUT_REVISION 5
-/* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
- * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
- * the defaults, including the default per-atom cap; a negative value
- * leaves every step cap off. rgmin_report_t is value, steps, grad_norm,
- * stop. Both sides shipped these structs as revision 4 with different
- * fields, so the union is a new revision. */
+ * 50 rgmin_minimize_eindir_opts,
+ * 51 require_convergence, the report converged flag,
+ *    RGMIN_NOT_CONVERGED, and rgmin_solver_set_require_convergence. */
+#define RGMIN_ABI_LAYOUT_REVISION 6
+/* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
+ * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the
+ * Euclidean cap; 0 keeps the defaults, including the default per-atom
+ * cap; a negative value leaves every step cap off.
+ * rgmin_report_t is value, steps, grad_norm, stop, converged.
+ * Revision 5 was value, steps, grad_norm, stop. Both sides shipped
+ * those structs as revision 4 with different fields, so the union was
+ * revision 5. */
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
@@ -197,10 +204,14 @@ typedef struct rgmin_control_t {
     double noise_eps;
     /** Floor factor. <= 0 selects 3. */
     double noise_c;
+    /** Nonzero returns RGMIN_NOT_CONVERGED when the gradient norm is
+     *  not below gtol. Zero keeps the report. ABI minor 51. */
+    int32_t require_convergence;
 } rgmin_control_t;
 /** Rust \c Control::default: maxiter 100, gtol 1e-5, istep 1, memory 0
  *  (10 L-BFGS pairs, 6 for DIIS), maxmove 0 (the default caps),
- *  noise_eps 0 (no floor) and noise_c 3. ABI minor 46. */
+ *  noise_eps 0 (no floor), noise_c 3, and require_convergence 0.
+ *  ABI minor 46. */
 rgmin_control_t rgmin_control_default(void);
 
 /** First-order floor \c n * eps * (1 + |value| + sum |x_i|), with
@@ -213,8 +224,10 @@ typedef struct rgmin_report_t {
     double value;
     size_t steps;
     double grad_norm;
-    /** Which stop produced this report. Layout revision 5. */
+    /** Which stop produced this report. */
     rgmin_stop_t stop;
+    /** Nonzero when grad_norm is below gtol. Layout revision 6. */
+    int32_t converged;
 } rgmin_report_t;
 
 typedef rgmin_status_t (*rgmin_eval_fn)(void *user, const DLManagedTensorVersioned *x,
@@ -548,6 +561,11 @@ void rgmin_solver_set_error_on_unmet(rgmin_solver_t *solver, int32_t on);
 /** Record the backward-error polish flag. A session step does not
  *  form a Hessian. ABI minor 49. */
 void rgmin_solver_set_backward_polish(rgmin_solver_t *solver, int32_t on);
+/** Nonzero opts a later run into \c RGMIN_NOT_CONVERGED. A step stays
+ *  \c RGMIN_SUCCESS, except that a steepest, BFGS or Adam step that took
+ *  no move and left its state unchanged reports
+ *  \c RGMIN_STOP_STEP_TOLERANCE. ABI minor 51. */
+void rgmin_solver_set_require_convergence(rgmin_solver_t *solver, int32_t on);
 /** FIRE 2.0 parameter set. GUENOLE2020 is Table 1 of Guenole et al.,
  *  Comput. Mater. Sci. 175, 109584 (2020): dt_max 10 dt, dt_min
  *  0.02 dt, N_delay 20, alpha_start 0.25, f_inc 1.1, f_dec 0.5,
