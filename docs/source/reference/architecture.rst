@@ -64,6 +64,7 @@ Objects
     ``xts.h`` aliases ``RGMIN_UNMET_STOP``, ``RGMIN_STOP_LINE_SEARCH``,
     and ``RGMIN_STOP_POLISH_UNMET``. ``RGMIN_UNMET_STOP`` is status 6.
     ``RGMIN_STOP_LINE_SEARCH`` is 4 and ``RGMIN_STOP_POLISH_UNMET`` is 5.
+    ``RGMIN_STOP_ENERGY_TOLERANCE`` is 6 and ``RGMIN_STOP_EVAL_BUDGET`` is 7.
 
 ``minimize_method``
     Cold-start dispatch for every ``Method``.
