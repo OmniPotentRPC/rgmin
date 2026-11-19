@@ -3,8 +3,8 @@
 
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::{
-    ConstraintError, Control, DistanceConstraints, Error, ManifoldKind, Method, Oracle, Solver,
-    Status,
+    ConstraintError, Control, DistanceConstraints, Error, LineSearch, ManifoldKind, Method, Oracle,
+    Solver, Status,
 };
 
 /// `f = |x - c|^2 / 2` with `c` ten units from the start.
@@ -29,6 +29,9 @@ fn atom_motion(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
 fn rcg_obeys_the_per_atom_cap() {
     let obj = Oracle::unbounded(6, far_bowl);
     let mut solver = Solver::new(Method::rcg(), Control::default(), 6);
+    // The curvature point of this bowl sits far outside the cap. Armijo
+    // backtracking takes the opening trial, which the cap still bounds.
+    solver.set_linesearch(LineSearch::backtracking(1e-4, 0.5, 8));
     solver.set_atom_maxmove(0.01);
     let start = Array1::zeros(6);
     let mut x = start.clone();
@@ -42,6 +45,7 @@ fn rcg_obeys_the_per_atom_cap() {
 fn rcg_obeys_the_euclidean_cap() {
     let obj = Oracle::unbounded(6, far_bowl);
     let mut solver = Solver::new(Method::rcg(), Control::default().with_maxmove(0.05), 6);
+    solver.set_linesearch(LineSearch::backtracking(1e-4, 0.5, 8));
     let start = Array1::zeros(6);
     let mut x = start.clone();
     solver.step(&obj, &mut x).unwrap();
@@ -58,6 +62,7 @@ fn a_capped_rcg_still_reaches_the_minimum() {
         Control::default().with_maxiter(400).with_gtol(1e-8),
         6,
     );
+    solver.set_linesearch(LineSearch::backtracking(1e-4, 0.5, 8));
     solver.set_atom_maxmove(0.5);
     let mut x = Array1::zeros(6);
     let report = solver.run(&obj, &mut x).unwrap();
