@@ -63,6 +63,7 @@ enum class Method {
     PolakRibierePlus = RGMIN_POLAK_RIBIERE_PLUS,
     EonCg = RGMIN_EON_CG,
     GromacsSteep = RGMIN_GROMACS_STEEP,
+    MdMin = RGMIN_MDMIN,
 };
 
 /** Parse a method token. \c newton-cg and \c newton_cg are the same method. */
@@ -1163,7 +1164,7 @@ inline std::string SolverConfig::valid_options() {
 inline std::string SolverConfig::valid_methods() {
     return "adam, bb, bfgs, cg, conjugate_descent, dai_yuan, diis, dogleg, "
            "fire, fire2, fletcher_reeves, fr_pr, gromacs_steep, hager_zhang, "
-           "hestenes_stiefel, lbfgs, liu_storey, newton, polak_ribiere, pso, "
+           "hestenes_stiefel, lbfgs, liu_storey, mdmin, newton, polak_ribiere, pso, "
            "quickmin, rfo, sd, sr1, sr2, steepest";
 }
 
@@ -1191,6 +1192,7 @@ inline Method method_from_name(std::string const& name) {
     if (name == "quickmin") return Method::QuickMin;
     if (name == "ode12r") return Method::Ode12r;
     if (name == "gromacs_steep" || name == "gmx_steep") return Method::GromacsSteep;
+    if (name == "mdmin" || name == "md_min") return Method::MdMin;
     if (name == "sd" || name == "steepest" || name == "steepest_descent") return Method::Steepest;
     if (name == "cg" || name == "pr" || name == "pr+" || name == "polak_ribiere") {
         return Method::PolakRibiere;

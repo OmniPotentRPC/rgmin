@@ -138,7 +138,10 @@ typedef enum rgmin_method_t {
     /** Polak-Ribiere with the eOn Powell restart at 0.5. Develop surface. */
     RGMIN_EON_CG = 27,
     /** GROMACS integrator = steep. ABI minor 52. */
-    RGMIN_GROMACS_STEEP = 28
+    RGMIN_GROMACS_STEEP = 28,
+    /** MDMin. The time step is the control istep; the per-atom cap is the session atom cap.
+     *  A positive maxmove also caps the Euclidean length of the step. */
+    RGMIN_MDMIN = 29
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.

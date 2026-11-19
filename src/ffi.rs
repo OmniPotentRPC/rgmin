@@ -147,6 +147,8 @@ pub enum rgmin_method_t {
     RGMIN_EON_CG = 27,
     /// GROMACS `integrator = steep`. ABI minor 52.
     RGMIN_GROMACS_STEEP = 28,
+    /// MDMin: velocity Verlet with the velocity reset onto the force.
+    RGMIN_MDMIN = 29,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -554,6 +556,7 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
         rgmin_method_t::RGMIN_POLAK_RIBIERE_PLUS => Method::polak_ribiere_plus(),
         rgmin_method_t::RGMIN_EON_CG => Method::eon_cg(),
         rgmin_method_t::RGMIN_GROMACS_STEEP => Method::GromacsSteep,
+        rgmin_method_t::RGMIN_MDMIN => Method::MdMin,
     }
 }
 
@@ -600,6 +603,7 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
         Method::Diis { .. } => rgmin_method_t::RGMIN_DIIS,
         Method::NewtonCg => rgmin_method_t::RGMIN_NEWTON_CG,
         Method::NewtonPcg => rgmin_method_t::RGMIN_NEWTON_PCG,
+        Method::MdMin => rgmin_method_t::RGMIN_MDMIN,
     };
     Ok(tag)
 }

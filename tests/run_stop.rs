@@ -32,6 +32,7 @@ fn a_spent_budget_is_budget_not_iterating() {
         Method::fire(FireKind::V1),
         Method::Bb,
         Method::QuickMin,
+        Method::MdMin,
         Method::diis(),
         Method::NewtonCg,
     ] {
