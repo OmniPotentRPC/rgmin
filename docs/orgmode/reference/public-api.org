@@ -1712,7 +1712,7 @@ reference entry and a documentation location.
 | ~mass_metric~ | public field | ~pub mass_metric: bool,~ | ~src/rigid/mode.rs:48~ | ~docs/orgmode/reference/public-api.org~ |
 | ~mass_weighted_coords~ | public field | ~pub mass_weighted_coords: bool,~ | ~src/rigid/mode.rs:45~ | ~docs/orgmode/reference/public-api.org~ |
 | ~masses~ | public field | ~pub masses: Option<&'a [f64]>,~ | ~src/rigid/mode.rs:42~ | ~docs/orgmode/reference/public-api.org~ |
-| ~max_evals~ | public field | ~pub max_evals: Option<usize>,~ | ~src/control.rs:170~ | ~docs/orgmode/howto/stopping.org~ |
+| ~max_evals~ | public field | ~pub max_evals: Option<usize>,~ | ~src/control.rs:170~ | ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/python.org~ |
 | ~max_iter~ | public field | ~pub max_iter: usize,~ | ~src/eon_cg.rs:27~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/product-manifold.org~ |
 | ~max_iter~ | public field | ~pub max_iter: u32,~ | ~src/ffi.rs:345~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/product-manifold.org~ |
 | ~max_iter~ | public field | ~pub max_iter: usize,~ | ~src/lowest_mode.rs:149~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/product-manifold.org~ |
@@ -3703,8 +3703,8 @@ reference entry and a documentation location.
 | ~SteepestDescent.kind~ | class attribute | ~kind = "sd"~ | ~python/rgmin/optimize.py:707~ | ~docs/orgmode/reference/product-manifold.org~, ~docs/orgmode/reference/python.org~ |
 | ~Stop.BUDGET~ | class attribute | ~BUDGET = 3~ | ~python/rgmin/_core.pyi:125~ | ~docs/orgmode/reference/python.org~ |
 | ~Stop.Budget~ | class attribute | ~Budget = 3~ | ~python/rgmin/_core.pyi:141~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/stopping.org~ |
-| ~Stop.ENERGY_TOLERANCE~ | class attribute | ~ENERGY_TOLERANCE = 6~ | ~python/rgmin/_core.pyi:131~ | ~docs/orgmode/howto/stopping.org~ |
-| ~Stop.EVAL_BUDGET~ | class attribute | ~EVAL_BUDGET = 7~ | ~python/rgmin/_core.pyi:133~ | ~docs/orgmode/howto/stopping.org~ |
+| ~Stop.ENERGY_TOLERANCE~ | class attribute | ~ENERGY_TOLERANCE = 6~ | ~python/rgmin/_core.pyi:131~ | ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/python.org~ |
+| ~Stop.EVAL_BUDGET~ | class attribute | ~EVAL_BUDGET = 7~ | ~python/rgmin/_core.pyi:133~ | ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/python.org~ |
 | ~Stop.EnergyTolerance~ | class attribute | ~EnergyTolerance = 6~ | ~python/rgmin/_core.pyi:147~ | ~docs/orgmode/howto/stopping.org~ |
 | ~Stop.EvalBudget~ | class attribute | ~EvalBudget = 7~ | ~python/rgmin/_core.pyi:149~ | ~docs/orgmode/howto/stopping.org~ |
 | ~Stop.LINE_SEARCH~ | class attribute | ~LINE_SEARCH = 4~ | ~python/rgmin/_core.pyi:127~ | ~docs/orgmode/reference/python.org~ |

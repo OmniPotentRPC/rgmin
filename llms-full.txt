@@ -8569,7 +8569,7 @@ reference entry and a documentation location.
 | `mass_metric` | public field | `pub mass_metric: bool,` | `src/rigid/mode.rs:48` | `docs/orgmode/reference/public-api.org` |
 | `mass_weighted_coords` | public field | `pub mass_weighted_coords: bool,` | `src/rigid/mode.rs:45` | `docs/orgmode/reference/public-api.org` |
 | `masses` | public field | `pub masses: Option<&'a [f64]>,` | `src/rigid/mode.rs:42` | `docs/orgmode/reference/public-api.org` |
-| `max_evals` | public field | `pub max_evals: Option<usize>,` | `src/control.rs:170` | `docs/orgmode/howto/stopping.org` |
+| `max_evals` | public field | `pub max_evals: Option<usize>,` | `src/control.rs:170` | `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/python.org` |
 | `max_iter` | public field | `pub max_iter: usize,` | `src/eon_cg.rs:27` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
 | `max_iter` | public field | `pub max_iter: u32,` | `src/ffi.rs:345` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
 | `max_iter` | public field | `pub max_iter: usize,` | `src/lowest_mode.rs:149` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
@@ -10560,8 +10560,8 @@ reference entry and a documentation location.
 | `SteepestDescent.kind` | class attribute | `kind = "sd"` | `python/rgmin/optimize.py:707` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
 | `Stop.BUDGET` | class attribute | `BUDGET = 3` | `python/rgmin/_core.pyi:125` | `docs/orgmode/reference/python.org` |
 | `Stop.Budget` | class attribute | `Budget = 3` | `python/rgmin/_core.pyi:141` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/stopping.org` |
-| `Stop.ENERGY_TOLERANCE` | class attribute | `ENERGY_TOLERANCE = 6` | `python/rgmin/_core.pyi:131` | `docs/orgmode/howto/stopping.org` |
-| `Stop.EVAL_BUDGET` | class attribute | `EVAL_BUDGET = 7` | `python/rgmin/_core.pyi:133` | `docs/orgmode/howto/stopping.org` |
+| `Stop.ENERGY_TOLERANCE` | class attribute | `ENERGY_TOLERANCE = 6` | `python/rgmin/_core.pyi:131` | `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/python.org` |
+| `Stop.EVAL_BUDGET` | class attribute | `EVAL_BUDGET = 7` | `python/rgmin/_core.pyi:133` | `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/python.org` |
 | `Stop.EnergyTolerance` | class attribute | `EnergyTolerance = 6` | `python/rgmin/_core.pyi:147` | `docs/orgmode/howto/stopping.org` |
 | `Stop.EvalBudget` | class attribute | `EvalBudget = 7` | `python/rgmin/_core.pyi:149` | `docs/orgmode/howto/stopping.org` |
 | `Stop.LINE_SEARCH` | class attribute | `LINE_SEARCH = 4` | `python/rgmin/_core.pyi:127` | `docs/orgmode/reference/python.org` |
@@ -10779,7 +10779,8 @@ UPPER_SNAKE, for example `LBFGS` and `POLAK_RIBIERE`. The older
 CamelCase spellings are aliases of the same values.
 `Stop` is why a step ended. Its members are `TOLERANCE`,
 `NOISE_FLOOR`, `STEP_TOLERANCE`, `BUDGET`, `LINE_SEARCH`, and
-`POLISH_UNMET`, again with CamelCase aliases.
+`POLISH_UNMET`, `ENERGY_TOLERANCE`, and `EVAL_BUDGET`, again with
+CamelCase aliases.
 `Report` has `value`, `steps`, `grad_norm`, and `stop`.
 `Report.converged` is true when `stop` is `TOLERANCE`.
 `backward_error_floor(value, x)` is the first-order stationarity
@@ -10844,10 +10845,18 @@ Those differ from the Rust `Control::default` (`gtol` 1e-5, `istep` 1) and from 
 | `cautious_eps`, `cautious_alpha` | float, set together                    | unset   | Li-Fukushima filter: a pair is dropped when s.y < eps * norm(s)^2 * norm(g)^alpha. |
 | `noise_eps`, `noise_c` | float                                            | 0, 0    | Gradient noise floor. `noise_eps` <` 0 leaves it off, and `noise_c` <` 0 selects 3. |
 | `objective_roundoff` | float                                              | unset   | Relative value window of the approximate Wolfe test, in place of the default four epsilon. Zero permits no rise, and a negative or non-finite value raises `ValueError`. |
+| `etol`               | float >= 0                                         | unset   | Relative accepted-energy change stop. Unset disables it. |
+| `max_evals`          | int >= 1                                           | unset   | Objective evaluation budget, including line-search trials. Unset disables it. |
+| `error_on_unmet`     | bool                                               | false   | Raise `RuntimeError` for an unmet budget, line search, or polish stop. |
+| `backward_polish`    | bool                                               | false   | Record the backward-error polish request for Hessian one-shot entry points. |
 
 A count must be an int, and a flag must be a bool.
 A kind or constant that the method ignores raises `ValueError` rather than being dropped.
 Method names are `adam`, `bb`, `bfgs`, `cg`, `conjugate_descent`, `dai_yuan`, `diis`, `dogleg`, `fire`, `fire2`, `fletcher_reeves`, `fr_pr`, `hager_zhang`, `hestenes_stiefel`, `lbfgs`, `liu_storey`, `newton`, `polak_ribiere`, `pso`, `quickmin`, `rfo`, `sd`, `sr1`, `sr2` and `steepest`.
+
+The nanobind `Method` enum does not expose the newer C values
+`NEWTON_CG`, `NEWTON_PCG`, `POLAK_RIBIERE_PLUS`, or `EON_CG`.
+The C and Rust reference entries remain authoritative for those methods.
 
 # Module `rgmin` in the maturin package
 

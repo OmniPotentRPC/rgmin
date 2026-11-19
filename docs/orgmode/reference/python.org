@@ -8,7 +8,8 @@ UPPER_SNAKE, for example =LBFGS= and =POLAK_RIBIERE=. The older
 CamelCase spellings are aliases of the same values.
 =Stop= is why a step ended. Its members are =TOLERANCE=,
 =NOISE_FLOOR=, =STEP_TOLERANCE=, =BUDGET=, =LINE_SEARCH=, and
-=POLISH_UNMET=, again with CamelCase aliases.
+=POLISH_UNMET=, =ENERGY_TOLERANCE=, and =EVAL_BUDGET=, again with
+CamelCase aliases.
 =Report= has =value=, =steps=, =grad_norm=, and =stop=.
 =Report.converged= is true when =stop= is =TOLERANCE=.
 =backward_error_floor(value, x)= is the first-order stationarity
@@ -73,10 +74,18 @@ Those differ from the Rust =Control::default= (=gtol= 1e-5, =istep= 1) and from 
 | =cautious_eps=, =cautious_alpha= | float, set together                    | unset   | Li-Fukushima filter: a pair is dropped when s.y < eps * norm(s)^2 * norm(g)^alpha. |
 | =noise_eps=, =noise_c= | float                                            | 0, 0    | Gradient noise floor. =noise_eps= <= 0 leaves it off, and =noise_c= <= 0 selects 3. |
 | =objective_roundoff= | float                                              | unset   | Relative value window of the approximate Wolfe test, in place of the default four epsilon. Zero permits no rise, and a negative or non-finite value raises =ValueError=. |
+| =etol=               | float >= 0                                         | unset   | Relative accepted-energy change stop. Unset disables it. |
+| =max_evals=          | int >= 1                                           | unset   | Objective evaluation budget, including line-search trials. Unset disables it. |
+| =error_on_unmet=     | bool                                               | false   | Raise =RuntimeError= for an unmet budget, line search, or polish stop. |
+| =backward_polish=    | bool                                               | false   | Record the backward-error polish request for Hessian one-shot entry points. |
 
 A count must be an int, and a flag must be a bool.
 A kind or constant that the method ignores raises =ValueError= rather than being dropped.
 Method names are =adam=, =bb=, =bfgs=, =cg=, =conjugate_descent=, =dai_yuan=, =diis=, =dogleg=, =fire=, =fire2=, =fletcher_reeves=, =fr_pr=, =hager_zhang=, =hestenes_stiefel=, =lbfgs=, =liu_storey=, =newton=, =polak_ribiere=, =pso=, =quickmin=, =rfo=, =sd=, =sr1=, =sr2= and =steepest=.
+
+The nanobind =Method= enum does not expose the newer C values
+=NEWTON_CG=, =NEWTON_PCG=, =POLAK_RIBIERE_PLUS=, or =EON_CG=.
+The C and Rust reference entries remain authoritative for those methods.
 
 * Module =rgmin= in the maturin package
 
