@@ -624,7 +624,8 @@ impl Solver {
     /// The settings a constrained step cannot honour, as typed errors.
     pub(super) fn refuse_constraint_settings(&self, set: &DistanceConstraints) -> Result<()> {
         set.fits(self.dim)?;
-        if self.manifold != ManifoldKind::Euclidean {
+        // Riemannian CG cuts its manifold by the set instead of leaving it.
+        if self.manifold != ManifoldKind::Euclidean && !matches!(self.overlay, Overlay::Rcg(_)) {
             return Err(unsupported("a manifold other than Euclidean coordinates"));
         }
         if self.exp.is_some() {
