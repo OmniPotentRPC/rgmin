@@ -1868,8 +1868,9 @@ impl Solver {
     /// [`Self::horizontal_grad`], then the bond tangent of a constraint set.
     ///
     /// Riemannian CG steps on the manifold cut by the set, so its stops and
-    /// its report measure the gradient there. Every other method reads
-    /// the horizontal gradient, as it did.
+    /// its report measure the gradient there. The step converts the
+    /// Euclidean gradient once; this projected gradient is not that input.
+    /// Every other method reads the horizontal gradient, as it did.
     fn tangent_grad(&mut self, x: &Array1<f64>, raw: &Array1<f64>) -> Result<Array1<f64>> {
         let horizontal = self.horizontal_grad(x, raw);
         let Overlay::Rcg(_) = self.overlay else {
@@ -4201,11 +4202,17 @@ impl Solver {
             return self.step_pso(obj, x);
         }
 
-        let (mut value, mut grad) = if cached {
+        let rcg = matches!(self.overlay, Overlay::Rcg(_));
+        // `remember` stores the projected gradient. On a manifold where
+        // `egrad2rgrad` is not a projection, a later step that converted
+        // that cache again would change the direction. Riemannian CG reads
+        // the Euclidean gradient and converts it once.
+        let (mut value, mut grad) = if cached && !rcg {
             (self.last_value, self.last_grad.clone())
         } else {
             obj.value_and_gradient(x.view())
         };
+        let rcg_egrad = rcg.then(|| grad.clone());
         grad = self.tangent_grad(x, &grad)?;
         if !value.is_finite() || grad.iter().any(|g| !g.is_finite()) {
             return Err(Error::Oracle {
@@ -4468,6 +4475,7 @@ impl Solver {
                 diis_alpha,
                 diis_atom_cap,
                 diis_euclidean_cap,
+                rcg_egrad,
             )?;
         } else {
             let mut fire2_local = self.fire2.clone();
@@ -6091,6 +6099,7 @@ impl Solver {
         diis_alpha: f64,
         diis_atom_cap: Option<f64>,
         diis_euclidean_cap: Option<f64>,
+        rcg_egrad: Option<Array1<f64>>,
     ) -> Result<()>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -6236,6 +6245,9 @@ impl Solver {
                     atom: self.atom_maxmove,
                     euclid: self.control.maxmove_cap(),
                 };
+                // `grad` is already the projected gradient of the stop.
+                // The step converts this Euclidean gradient once.
+                let egrad = rcg_egrad.unwrap_or_else(|| grad.clone());
                 let moved = if let Some(set) = self.constraints.as_deref() {
                     let bonded = crate::rcg::BondedManifold::new(&self.manifold, set);
                     crate::rcg::rcg_step(
@@ -6244,7 +6256,7 @@ impl Solver {
                         state,
                         x,
                         value,
-                        &grad,
+                        &egrad,
                         linesearch,
                         caps,
                         |p| obj.value_and_gradient(p.view()),
@@ -6256,7 +6268,7 @@ impl Solver {
                         state,
                         x,
                         value,
-                        &grad,
+                        &egrad,
                         linesearch,
                         caps,
                         |p| obj.value_and_gradient(p.view()),

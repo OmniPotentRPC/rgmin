@@ -217,3 +217,70 @@ fn rcg_reports_the_projected_gradient_after_a_constrained_move() {
         "reported gradient is not tangent: {along}"
     );
 }
+#[test]
+fn session_projects_the_euclidean_gradient_once_on_the_positive_orthant() {
+    // f = 0.5 * ||x - (1, 1)||^2. At x = (2, 0.5) the Euclidean gradient
+    // is (1, -0.5). On the positive orthant the Riemannian gradient scales
+    // each entry by x_i^2, which is not a projection: a second scaling is
+    // a different direction and a different retraction.
+    let x0 = array![2.0, 0.5];
+    let g = array![1.0, -0.5];
+    let istep = 1e-3;
+    let once = retracted(&x0, &scaled(&g, &x0), istep);
+    let twice = retracted(&x0, &scaled(&scaled(&g, &x0), &x0), istep);
+    let gap: f64 = once
+        .iter()
+        .zip(twice.iter())
+        .map(|(a, b)| (a - b).abs())
+        .sum();
+    assert!(
+        gap > 1e-6,
+        "the two projections retract to the same point: {once} and {twice}"
+    );
+
+    let obj = Oracle::unbounded(2, |x: ArrayView1<f64>| {
+        let d0 = x[0] - 1.0;
+        let d1 = x[1] - 1.0;
+        (0.5 * (d0 * d0 + d1 * d1), array![d0, d1])
+    });
+    let mut solver = Solver::new(
+        Method::rcg(),
+        Control::default().with_istep(istep).with_gtol(1e-12),
+        2,
+    );
+    solver.set_positive(2);
+    // Armijo accepts the opening trial. Strong Wolfe would not, because a
+    // short step leaves the slope almost unchanged.
+    solver.set_linesearch(LineSearch::backtracking(1e-4, 0.5, 8));
+    let mut x = x0.clone();
+    solver.step(&obj, &mut x).unwrap();
+    for i in 0..2 {
+        assert!(
+            (x[i] - once[i]).abs() < 1e-10,
+            "x[{i}] = {} from one projection {}, and twice would be {}",
+            x[i],
+            once[i],
+            twice[i]
+        );
+    }
+}
+
+/// Componentwise `g_i * x_i^2`, the positive-orthant `egrad2rgrad`.
+fn scaled(g: &Array1<f64>, x: &Array1<f64>) -> Array1<f64> {
+    Array1::from_iter(g.iter().zip(x.iter()).map(|(gi, xi)| gi * xi * xi))
+}
+
+/// Retraction of the steepest step of length `istep` in the orthant metric.
+fn retracted(x: &Array1<f64>, rgrad: &Array1<f64>, istep: f64) -> Array1<f64> {
+    let speed = x
+        .iter()
+        .zip(rgrad.iter())
+        .map(|(xi, ri)| (ri / xi).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let alpha = istep / speed;
+    Array1::from_iter(x.iter().zip(rgrad.iter()).map(|(xi, ri)| {
+        let dir = -ri;
+        xi * (alpha * dir / xi).exp()
+    }))
+}
