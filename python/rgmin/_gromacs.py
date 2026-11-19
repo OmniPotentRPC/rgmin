@@ -7,7 +7,7 @@ from __future__ import annotations
 import math
 import sys
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, SupportsIndex, SupportsInt
 
 GROMACS_KJMOL_NM_TO_EV_ANGSTROM = 1.0 / 964.8533212331001
 GROMACS_NM_TO_ANGSTROM = 10.0
@@ -53,8 +53,10 @@ def gromacs_mdp_options(
     raw_steps = values["nsteps"]
     if isinstance(raw_steps, bool):
         raise ValueError("nsteps must be -1 or a non-negative integer")
+    if not isinstance(raw_steps, (str, bytes, bytearray, SupportsInt, SupportsIndex)):
+        raise ValueError("nsteps must be -1 or a non-negative integer")
     try:
-        nsteps = int(raw_steps)  # type: ignore[arg-type]
+        nsteps = int(raw_steps)
     except (TypeError, ValueError, OverflowError):
         raise ValueError("nsteps must be -1 or a non-negative integer") from None
     if str(nsteps) != str(raw_steps).strip() or nsteps < -1:
