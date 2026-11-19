@@ -5112,3 +5112,168 @@ fn c_abi_rcg_matches_the_rust_quadratic() {
     unsafe { rgmin_tensor_free(yt) };
     assert_eq!(bad_st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
 }
+
+fn rcg_report() -> rgmin_report_t {
+    rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+    }
+}
+
+type RcgEval = Option<
+    unsafe extern "C" fn(*mut c_void, *const DLManagedTensorVersioned, *mut f64) -> rgmin_status_t,
+>;
+type RcgGrad = Option<
+    unsafe extern "C" fn(
+        *mut c_void,
+        *const DLManagedTensorVersioned,
+        *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t,
+>;
+
+/// One call of the C entry point on a borrowed two-vector. A null
+/// `x_ptr` passes a null tensor.
+fn rcg_call(
+    eval: RcgEval,
+    grad: RcgGrad,
+    start: Option<[f64; 2]>,
+    options: Option<&rgmin::ffi::rgmin_rcg_options_t>,
+    out: Option<&mut rgmin_report_t>,
+) -> (rgmin_status_t, [f64; 2]) {
+    let mut x = start.unwrap_or([0.0; 2]);
+    let xt = match start {
+        Some(_) => unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) },
+        None => std::ptr::null_mut(),
+    };
+    let status = unsafe {
+        rgmin_minimize_rcg(
+            eval,
+            grad,
+            std::ptr::null_mut(),
+            xt,
+            options.map_or(std::ptr::null(), |o| o as *const _),
+            out.map_or(std::ptr::null_mut(), |o| o as *mut _),
+        )
+    };
+    if !xt.is_null() {
+        unsafe { rgmin_tensor_free(xt) };
+    }
+    (status, x)
+}
+
+#[test]
+fn c_abi_rcg_refuses_null_pointers() {
+    let mut out = rcg_report();
+    let (st, _) = rcg_call(
+        None,
+        Some(rcg_quad_grad),
+        Some([1.0, 1.0]),
+        None,
+        Some(&mut out),
+    );
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    assert!(
+        last_error_text().contains("eval is NULL"),
+        "{}",
+        last_error_text()
+    );
+
+    let (st, _) = rcg_call(
+        Some(rcg_quad_eval),
+        None,
+        Some([1.0, 1.0]),
+        None,
+        Some(&mut out),
+    );
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    assert!(
+        last_error_text().contains("grad is NULL"),
+        "{}",
+        last_error_text()
+    );
+
+    let (st, x) = rcg_call(
+        Some(rcg_quad_eval),
+        Some(rcg_quad_grad),
+        Some([1.0, 1.0]),
+        None,
+        None,
+    );
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    assert!(
+        last_error_text().contains("out is NULL"),
+        "{}",
+        last_error_text()
+    );
+    assert_eq!(x, [1.0, 1.0]);
+
+    let (st, _) = rcg_call(
+        Some(rcg_quad_eval),
+        Some(rcg_quad_grad),
+        None,
+        None,
+        Some(&mut out),
+    );
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+}
+
+#[test]
+fn c_abi_rcg_takes_null_options_as_the_defaults() {
+    let mut out = rcg_report();
+    let (st, x) = rcg_call(
+        Some(rcg_quad_eval),
+        Some(rcg_quad_grad),
+        Some([1.5, -0.75]),
+        None,
+        Some(&mut out),
+    );
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(x[0].abs() < 1e-6 && x[1].abs() < 1e-6, "{x:?}");
+}
+
+#[test]
+fn c_abi_rcg_refuses_options_and_starts_it_cannot_read() {
+    let base = rgmin_rcg_options_default();
+    let mut tags = [base; 3];
+    tags[0].beta = 3;
+    tags[1].transport = 2;
+    tags[2].linesearch = 2;
+    let mut numbers = [base; 7];
+    numbers[0].grad_tol = f64::NAN;
+    numbers[1].grad_tol = f64::INFINITY;
+    numbers[2].grad_tol = -1e-8;
+    numbers[3].initial_step = f64::NAN;
+    numbers[4].initial_step = f64::INFINITY;
+    numbers[5].initial_step = 0.0;
+    numbers[6].initial_step = -1.0;
+    for options in tags.iter().chain(numbers.iter()) {
+        let mut out = rcg_report();
+        let (st, x) = rcg_call(
+            Some(rcg_quad_eval),
+            Some(rcg_quad_grad),
+            Some([1.0, 1.0]),
+            Some(options),
+            Some(&mut out),
+        );
+        assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{options:?}");
+        assert_eq!(x, [1.0, 1.0], "a refused call leaves x alone: {options:?}");
+    }
+    for start in [[f64::NAN, 1.0], [1.0, f64::INFINITY]] {
+        let mut out = rcg_report();
+        let (st, _) = rcg_call(
+            Some(rcg_quad_eval),
+            Some(rcg_quad_grad),
+            Some(start),
+            None,
+            Some(&mut out),
+        );
+        assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{start:?}");
+        assert!(
+            last_error_text().contains("non-finite"),
+            "{}",
+            last_error_text()
+        );
+    }
+}
