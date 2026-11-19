@@ -6024,19 +6024,32 @@ impl Solver {
                     atom: self.atom_maxmove,
                     euclid: self.control.maxmove_cap(),
                 };
-                let constraints = self.constraints.take();
-                let moved = if let Some(set) = constraints.as_ref() {
-                    let bond = crate::rcg::BondManifold { constraints: set };
-                    crate::rcg::rcg_step(&bond, state, x, value, &grad, linesearch, caps, |p| {
-                        obj.value_and_gradient(p.view())
-                    })
+                let moved = if let Some(set) = self.constraints.as_deref() {
+                    let bonded = crate::rcg::BondManifold::new(set);
+                    crate::rcg::rcg_step(
+                        &bonded,
+                        &bonded,
+                        state,
+                        x,
+                        value,
+                        &grad,
+                        linesearch,
+                        caps,
+                        |p| obj.value_and_gradient(p.view()),
+                    )
                 } else {
-                    let manifold = self.manifold.clone();
-                    crate::rcg::rcg_step(&manifold, state, x, value, &grad, linesearch, caps, |p| {
-                        obj.value_and_gradient(p.view())
-                    })
+                    crate::rcg::rcg_step(
+                        &self.manifold,
+                        &crate::rcg::Infallible,
+                        state,
+                        x,
+                        value,
+                        &grad,
+                        linesearch,
+                        caps,
+                        |p| obj.value_and_gradient(p.view()),
+                    )
                 };
-                self.constraints = constraints;
                 let moved = moved?;
                 *x = moved.x;
                 value = moved.value;
