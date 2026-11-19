@@ -18,7 +18,7 @@ use ndarray::{Array1, Array2, ArrayView1};
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::report::Report;
-use crate::step::{apply_caps, implicit_atom_cap, l2, one_shot_report};
+use crate::step::{apply_caps, implicit_atom_cap, l2, one_shot_report, stop_if_unmoved};
 use crate::stop::{Counted, StopRules, counted, stop_after};
 
 const ENERGY_RISE: f64 = 1.0e-8;
@@ -356,6 +356,10 @@ where
                 value = sval;
                 grad = sgrad;
                 accepted = true;
+            } else if let Some(stop) =
+                stop_if_unmoved(control, true, value, pos.clone(), step + 1, gnorm)
+            {
+                return stop;
             }
         } else {
             pos = npos;

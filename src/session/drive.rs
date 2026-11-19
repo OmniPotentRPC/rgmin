@@ -181,7 +181,10 @@ impl Solver {
             if !finite(value, self.last_grad.view()) {
                 return Err(non_finite());
             }
-            if self.stop_norm.of(self.last_grad.view()) < tol {
+            if self
+                .control
+                .converged(self.stop_norm.of(self.last_grad.view()))
+            {
                 break;
             }
             let use_cap = if self.trust {
@@ -216,7 +219,7 @@ impl Solver {
         {
             report.status = status;
         }
-        Ok(report)
+        self.control.maybe_not_converged(report)
     }
 
     fn store_x(&mut self, x: &Array1<f64>) {
@@ -441,7 +444,10 @@ impl Solver {
             if !finite(value, self.last_grad.view()) {
                 return Err(non_finite());
             }
-            if self.stop_norm.of(self.last_grad.view()) < tol {
+            if self
+                .control
+                .converged(self.stop_norm.of(self.last_grad.view()))
+            {
                 break;
             }
             value = self.fire_fill_step(x, fill)?;
@@ -467,7 +473,7 @@ impl Solver {
         {
             report.status = status;
         }
-        Ok(report)
+        self.control.maybe_not_converged(report)
     }
 
     fn fire_fill_step<F>(&mut self, x: &mut Array1<f64>, fill: &mut F) -> Result<f64>

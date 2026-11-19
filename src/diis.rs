@@ -253,6 +253,7 @@ mod tests {
                 backward_polish: false,
                 etol: None,
                 max_evals: None,
+                require_convergence: false,
             },
             1,
         );
@@ -288,6 +289,7 @@ mod tests {
                 backward_polish: false,
                 etol: None,
                 max_evals: None,
+                require_convergence: false,
             },
             1,
         );

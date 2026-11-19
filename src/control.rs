@@ -168,6 +168,10 @@ pub struct Control {
     /// [`crate::Status::EvalBudget`] is this stop. It must be at least 1.
     /// `None`, the default, leaves the budget off.
     pub max_evals: Option<usize>,
+    /// When set, a finished run whose gradient norm is still above
+    /// [`Self::gtol`] returns [`crate::Error::NotConverged`]. The
+    /// default is off, so a spent budget or a stall stays `Ok`.
+    pub require_convergence: bool,
 }
 
 with_setters!(Control {
@@ -195,6 +199,7 @@ impl Default for Control {
             backward_polish: false,
             etol: None,
             max_evals: None,
+            require_convergence: false,
         }
     }
 }
@@ -245,6 +250,48 @@ impl StopNorm {
 }
 
 impl Control {
+    /// Whether `grad` is below [`Self::gtol`].
+    ///
+    /// This is the one comparison every stop uses. Equality does not
+    /// clear it, and neither does a non-finite `grad`.
+    pub fn converged(&self, grad: f64) -> bool {
+        grad < self.gtol
+    }
+
+    /// Return [`crate::Error::NotConverged`] when strict convergence is
+    /// on and [`Self::converged`] is false for
+    /// [`crate::Report::grad_norm`].
+    ///
+    /// The flag on the report is set from that comparison. The default
+    /// leaves the report as `Ok`.
+    pub(crate) fn maybe_not_converged(
+        &self,
+        mut report: crate::report::Report,
+    ) -> crate::Result<crate::report::Report> {
+        report.converged = self.converged(report.grad_norm);
+        if self.require_convergence && !report.converged {
+            Err(crate::Error::NotConverged(Box::new(report)))
+        } else {
+            Ok(report)
+        }
+    }
+
+    /// Opt in to [`crate::Error::NotConverged`] when a finished run is
+    /// still above [`Self::gtol`].
+    ///
+    /// The default is off. Noise floor, step tolerance, a spent budget,
+    /// a failed line search, and an unmet polish then stay `Ok`. When on,
+    /// a driver that can prove its next iteration repeats the last,
+    /// because the step took no move and no state changed, ends with
+    /// [`crate::StopReason::StepTolerance`] in place of the rest of the
+    /// budget. A rejected trial that shrinks a trust radius or an
+    /// adaptive step is not that proof.
+    #[must_use]
+    pub fn with_require_convergence(mut self, on: bool) -> Self {
+        self.require_convergence = on;
+        self
+    }
+
     /// [`Self::maxmove`] when it is a positive finite length, the only
     /// value that limits a step or a trust radius.
     pub(crate) fn maxmove_cap(&self) -> Option<f64> {
@@ -283,6 +330,7 @@ impl Control {
         &self,
         report: crate::report::Report,
     ) -> crate::Result<crate::report::Report> {
+        let report = self.maybe_not_converged(report)?;
         if self.error_on_unmet && report.stop_reason().is_unmet() {
             let reason = report.stop_reason();
             Err(crate::Error::StopUnmet {
@@ -316,7 +364,7 @@ impl Control {
     /// uses, with frozen or fixed coordinates left out.
     pub fn classify(&self, grad: f64, n_free: usize) -> crate::report::Status {
         use crate::report::Status;
-        if grad < self.gtol {
+        if self.converged(grad) {
             return Status::Tolerance;
         }
         if let Some(floor) = self.noise_floor {

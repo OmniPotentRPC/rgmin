@@ -309,6 +309,9 @@ pub struct Solver {
     /// Unlimited L-BFGS plateau. Unused by every other method, and unused
     /// when the iteration budget is positive.
     lbfgs_plateau: crate::lbfgs_plateau::RepeatedAcceptedStep,
+    /// Set by a step that took no move and changed no state, so the next
+    /// step repeats it. Read and cleared by `note_strict_stall`.
+    unmoved_fixed: bool,
     /// Objective gradients. A finite-difference product is an
     /// [`Self::hvp_calls`] entry, not a gradient.
     gradient_calls: usize,
@@ -525,6 +528,7 @@ impl Solver {
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
             lbfgs_plateau: crate::lbfgs_plateau::RepeatedAcceptedStep::new(),
+            unmoved_fixed: false,
             gradient_calls: 0,
             hvp_calls: 0,
             evals: 0,
@@ -1490,6 +1494,7 @@ impl Solver {
             status,
             reason: None,
             evals: self.evals,
+            converged: self.control.converged(grad_norm),
         }
     }
 
@@ -2386,6 +2391,26 @@ impl Solver {
         }
     }
 
+    /// Reclassify a step that took no move and left its state unchanged,
+    /// when strict convergence is on. The next step would repeat it, so the
+    /// budget is not worth spending. The step methods that cannot prove
+    /// that, a rejected trust region trial among them, never set the flag.
+    /// The default leaves the status alone.
+    fn note_strict_stall(&mut self, before: &Array1<f64>, x: &Array1<f64>, report: &mut Report) {
+        let fixed = std::mem::take(&mut self.unmoved_fixed);
+        if self.control.require_convergence
+            && fixed
+            && report.status == Status::Iterating
+            && before.len() == x.len()
+            && before
+                .iter()
+                .zip(x.iter())
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+        {
+            report.status = Status::StepTolerance;
+        }
+    }
+
     /// One outer iteration. `x` is the iterate and is overwritten in place.
     ///
     /// With `control.maxiter == 0` an L-BFGS session reports
@@ -2426,10 +2451,12 @@ impl Solver {
         O: DifferentiableObjective<f64> + ?Sized,
     {
         self.retract_level_set_start(obj, x)?;
+        self.unmoved_fixed = false;
         let before = x.clone();
         let mut report = self.step_once(obj, x)?;
         self.finish_level_set(obj, x, &mut report)?;
         self.note_repeated_lbfgs_step(&before, x, &mut report);
+        self.note_strict_stall(&before, x, &mut report);
         Ok((report, point_moved(&before, x)))
     }
 
@@ -2827,7 +2854,7 @@ impl Solver {
             }
             return Err(Error::TrustCollapsed { steps: self.steps });
         }
-        if gnorm < self.control.gtol {
+        if self.control.converged(gnorm) {
             self.note_bounds(bounds);
             if !cached {
                 *x = pos;
@@ -4338,12 +4365,14 @@ impl Solver {
                         line_options,
                     )?;
                     energy_stall = t.energy_noise;
+                    let istep_before = self.istep;
                     *x = t.x;
                     value = t.f;
                     grad = t.g;
                     if self.accept != Accept::Step {
                         self.istep = qn_istep(&self.control);
                     }
+                    self.unmoved_fixed = !t.moved && self.istep == istep_before;
                 }
                 Inner::Nlcg {
                     conjugacy,
@@ -4477,6 +4506,7 @@ impl Solver {
                     )?;
                     energy_stall = t.energy_noise;
                     let moved = t.moved;
+                    let istep_before = self.istep;
                     *x = t.x;
                     value = t.f;
                     grad = t.g;
@@ -4486,6 +4516,7 @@ impl Solver {
                     if self.accept != Accept::Step {
                         self.istep = qn_istep(&self.control);
                     }
+                    self.unmoved_fixed = !moved && self.istep == istep_before;
                 }
                 Inner::Sr1 { .. } | Inner::Sr2 { .. } => {}
                 Inner::Adam {
@@ -4531,6 +4562,7 @@ impl Solver {
                     } else {
                         m.assign(&m_old);
                         v.assign(&v_old);
+                        self.unmoved_fixed = true;
                     }
                 }
                 Inner::Fire(state) => {
@@ -5131,6 +5163,17 @@ impl Solver {
         self.control.error_on_unmet = on;
     }
 
+    /// Opt in to [`crate::Error::NotConverged`] from [`Self::run`].
+    ///
+    /// The default is off. A step stays `Ok`, except that a first-order
+    /// step which took no move and left its state unchanged reports
+    /// [`Status::StepTolerance`]. A finished run whose gradient norm is
+    /// not below `gtol` returns the error, and the boxed report is the
+    /// terminal point.
+    pub fn set_require_convergence(&mut self, on: bool) {
+        self.control.require_convergence = on;
+    }
+
     /// Record the backward-error polish flag on this session's control.
     ///
     /// [`Self::run`] does not form a Hessian. [`crate::minimize_newton`],
@@ -5627,12 +5670,11 @@ impl Solver {
         if self.control.maxiter == 0 {
             return self.run(obj, x);
         }
-        let tol = self.control.gtol;
         let start = x.clone();
         let mut gauged = false;
         let mut report = self.step(obj, x)?;
         for _ in 1..self.control.maxiter {
-            if report.grad_norm < tol || report.status != Status::Iterating {
+            if self.control.converged(report.grad_norm) || report.status != Status::Iterating {
                 break;
             }
             let before = x.clone();
@@ -5644,7 +5686,7 @@ impl Solver {
             report = self.step(obj, x)?;
         }
         report.status = match report.status {
-            Status::Iterating if report.grad_norm < tol => Status::Tolerance,
+            Status::Iterating if self.control.converged(report.grad_norm) => Status::Tolerance,
             Status::Iterating => Status::Budget,
             other => other,
         };
@@ -5672,7 +5714,6 @@ impl Solver {
             return self.control.deliver(report);
         }
         self.brief = true;
-        let tol = self.control.gtol;
         let start = x.clone();
         let mut last = None;
         let mut stop: Result<()> = Ok(());
@@ -5680,7 +5721,9 @@ impl Solver {
             match self.step_plain(obj, x) {
                 Ok(rep) => {
                     let status = match rep.status {
-                        Status::Iterating if rep.grad_norm < tol => Status::Tolerance,
+                        Status::Iterating if self.control.converged(rep.grad_norm) => {
+                            Status::Tolerance
+                        }
                         other => other,
                     };
                     last = Some((rep.value, rep.grad_norm, status));
@@ -6227,6 +6270,7 @@ mod tests {
                 backward_polish: false,
                 etol: None,
                 max_evals: None,
+                require_convergence: false,
                 stop_norm: StopNorm::Two,
             },
             2,
@@ -6315,6 +6359,7 @@ mod tests {
                     backward_polish: false,
                     etol: None,
                     max_evals: None,
+                    require_convergence: false,
                     stop_norm: StopNorm::Two,
                 },
                 2,
@@ -6537,6 +6582,7 @@ mod retained_neb_guard_tests {
                 backward_polish: false,
                 etol: None,
                 max_evals: None,
+                require_convergence: false,
                 stop_norm: StopNorm::Two,
             },
             3,
@@ -6579,6 +6625,7 @@ mod retained_neb_guard_tests {
                 backward_polish: false,
                 etol: None,
                 max_evals: None,
+                require_convergence: false,
                 stop_norm: StopNorm::Two,
             },
             3,
@@ -6688,6 +6735,7 @@ mod retained_neb_guard_tests {
                 backward_polish: false,
                 etol: None,
                 max_evals: None,
+                require_convergence: false,
                 stop_norm: StopNorm::Two,
             },
             n,
