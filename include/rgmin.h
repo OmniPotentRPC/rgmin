@@ -605,8 +605,10 @@ double rgmin_solver_lbfgs_trust_radius(const rgmin_solver_t *solver);
  *  set. A negative or non-finite value, a null session, and a particle
  *  swarm session (it has no accepted-step energy sequence) return
  *  RGMIN_INVALID_PARAMETER and leave the session as it was; the reason
- *  is in rgmin_last_error. A gradient stop wins when both hold at once;
- *  the finished step reports RGMIN_STOP_ENERGY_TOLERANCE. ABI minor 50. */
+ *  is in rgmin_last_error. The finished step reports
+ *  RGMIN_STOP_ENERGY_TOLERANCE, unless the gradient stop also holds, in
+ *  which case the gradient stop wins and the step reports
+ *  RGMIN_STOP_TOLERANCE. ABI minor 50. */
 rgmin_status_t rgmin_solver_set_etol(rgmin_solver_t *solver, double etol);
 /** Turn the energy-change stop off. ABI minor 50. */
 void rgmin_solver_clear_etol(rgmin_solver_t *solver);
