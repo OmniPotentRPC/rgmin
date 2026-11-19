@@ -1,7 +1,7 @@
 //! Riemannian nonlinear conjugate gradient.
 //!
 //! The retraction, the tangent projection and the vector transport are
-//! the ones on [`Manifold`](crate::manifold::Manifold). The session uses
+//! the ones on [`Manifold`]. The session uses
 //! those same maps for an embedded kind, retracts a level set through
 //! the session, and returns a holonomic bond to its length with
 //! [`crate::holonomic`]. This solver does not define a second copy of
