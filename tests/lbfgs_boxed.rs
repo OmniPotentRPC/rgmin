@@ -225,7 +225,10 @@ fn bounded_steps_report_nonfinite_and_inconsistent_controls() {
         let err = opt
             .highs_step_boxed(x.view(), gradient.view(), None, None)
             .unwrap_err();
-        assert!(err.to_string().contains("invalid bounded-step data"), "{err}");
+        assert!(
+            err.to_string().contains("invalid bounded-step data"),
+            "{err}"
+        );
     }
 
     let mut opt = Lbfgs::default();
@@ -237,7 +240,10 @@ fn bounded_steps_report_nonfinite_and_inconsistent_controls() {
         let err = opt
             .highs_step_boxed(point.view(), grad.view(), None, None)
             .unwrap_err();
-        assert!(err.to_string().contains("invalid bounded-step data"), "{err}");
+        assert!(
+            err.to_string().contains("invalid bounded-step data"),
+            "{err}"
+        );
     }
 }
 

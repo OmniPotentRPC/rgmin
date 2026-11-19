@@ -226,11 +226,8 @@ fn finite_difference_returns_zero_for_a_zero_direction() {
         (x.dot(&x), x.mapv(|value| 2.0 * value))
     });
     let fd = FdHvp::new(&base, f64::EPSILON.sqrt());
-    let action = rgmin::HessianVector::hessian_vector(
-        &fd,
-        array![1.0, 2.0].view(),
-        array![0.0, 0.0].view(),
-    );
+    let action =
+        rgmin::HessianVector::hessian_vector(&fd, array![1.0, 2.0].view(), array![0.0, 0.0].view());
     assert_eq!(action, array![0.0, 0.0]);
 }
 
@@ -244,11 +241,7 @@ impl Preconditioner for NegativePreconditioner {
 
 #[test]
 fn invalid_preconditioners_fall_back_to_the_steepest_boundary() {
-    let objective = HvpOracle::unbounded(
-        2,
-        |x| (x[0], array![1.0, 0.0]),
-        |_, _| array![0.0, 0.0],
-    );
+    let objective = HvpOracle::unbounded(2, |x| (x[0], array![1.0, 0.0]), |_, _| array![0.0, 0.0]);
     let (step, drop) = steihaug_pcg(
         &objective,
         array![0.0, 0.0].view(),
@@ -283,20 +276,10 @@ fn nonfinite_hessian_actions_return_a_boundary_step() {
 
 #[test]
 fn newton_cg_reports_bad_dimensions_and_initial_values() {
-    let objective = HvpOracle::unbounded(
-        2,
-        |_| (f64::NAN, array![0.0, 0.0]),
-        |_, v| v.to_owned(),
-    );
-    let err = minimize_newton_cg(&objective, array![0.0], &ctrl(4, f64::EPSILON))
-        .unwrap_err();
+    let objective = HvpOracle::unbounded(2, |_| (f64::NAN, array![0.0, 0.0]), |_, v| v.to_owned());
+    let err = minimize_newton_cg(&objective, array![0.0], &ctrl(4, f64::EPSILON)).unwrap_err();
     assert!(err.to_string().contains("length 1"), "{err}");
 
-    let err = minimize_newton_cg(
-        &objective,
-        array![0.0, 0.0],
-        &ctrl(4, f64::EPSILON),
-    )
-    .unwrap_err();
+    let err = minimize_newton_cg(&objective, array![0.0, 0.0], &ctrl(4, f64::EPSILON)).unwrap_err();
     assert!(err.to_string().contains("non-finite"), "{err}");
 }
