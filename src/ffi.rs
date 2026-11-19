@@ -1257,21 +1257,15 @@ fn rcg_options_from_c(
             return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
         }
     };
-    if !(raw.grad_tol.is_finite() && raw.grad_tol >= 0.0) {
-        set_last_error("rgmin_minimize_rcg: grad_tol must be finite and non-negative");
-        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
-    }
-    if !(raw.initial_step.is_finite() && raw.initial_step > 0.0) {
-        set_last_error("rgmin_minimize_rcg: initial_step must be finite and positive");
-        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
-    }
-    Ok(crate::RcgOptions::default()
+    let opts = crate::RcgOptions::default()
         .with_beta(beta)
         .with_transport(transport)
         .with_linesearch(linesearch)
         .with_grad_tol(raw.grad_tol)
         .with_max_iter(raw.max_iter)
-        .with_initial_step(raw.initial_step))
+        .with_initial_step(raw.initial_step);
+    opts.validate().map_err(|err| status_from_error(&err))?;
+    Ok(opts)
 }
 
 fn rcg_as_report(out: crate::RcgMin, grad_tol: f64, max_iter: usize) -> crate::Report {
