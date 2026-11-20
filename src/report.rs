@@ -28,8 +28,8 @@ pub enum Status {
     /// `||g||` inside `sqrt(eps)` of the step that opened the run. One
     /// such step is an overshoot.
     StepTolerance,
-    /// GROMACS steepest descent could not represent a coordinate change
-    /// at its current maximum displacement.
+    /// GROMACS-style steepest descent or conjugate gradient could not
+    /// represent another coordinate change.
     MachinePrecision,
     /// The iteration budget was spent above every stop.
     Budget,
