@@ -1116,8 +1116,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 /// ABI minor 52 adds `RGMIN_GROMACS_STEEP`, `RGMIN_STOP_MACHINE_PRECISION`,
 /// `rgmin_solver_set_gromacs_steep`, and
 /// `rgmin_gromacs_steep_max_constraint_shrinks`.
-/// The strict-convergence ABI adds `require_convergence`, the report
-/// `converged` flag,
+/// ABI minor 53 adds `require_convergence`, the report `converged` flag,
 /// `RGMIN_NOT_CONVERGED`, and `rgmin_solver_set_require_convergence`.
 /// ABI minor 51 adds `rgmin_minimize_rlbfgs` and `rgmin_rlbfgs_default`.
 /// ABI minor 50 adds `rgmin_solver_set_etol`, `rgmin_solver_set_max_evals`,

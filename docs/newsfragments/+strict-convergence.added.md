@@ -7,7 +7,7 @@
   leaves the point unchanged and the next iteration would repeat it. A
   rejected trust region trial or a rejected adaptive step is not a stall,
   so a run that converges by default converges identically when strict.
-  The C ABI adds the control field, the report
+  C ABI minor 53 and layout revision 6 add the control field, the report
   flag, `RGMIN_NOT_CONVERGED`, and `rgmin_solver_set_require_convergence`.
   C++ throws `rgmin::NotConverged` and Python `minimize` raises
   `rgmin.NotConverged`; both carry the report.
