@@ -556,12 +556,14 @@ fn argon_cluster_matches_gromacs_cg_reference_energy_and_force_scales() {
     // fixture (`tests/data/gromacs_steep_argon.*`):
     //   - Initial (Step 0): Epot = -1.23140162769774e+01, Fmax = 7.58904e+00
     //   - At nsteps = 12, emtol = 1e-8:
-    //       gmx_d reaches the 12-step cap with Epot = -1.25489376279603e+01,
-    //       Fmax = 3.54506055235772e-03 (whereas steep is at Fmax = 4.087015e-01).
+    //       gmx_d reaches the 12-step cap with Epot = -1.25489376279604e+01,
+    //       Fmax = 3.54506056338870e-03 (whereas steep is at Fmax = 4.087015e-01).
     //   - At emtol = 1e-2, nsteps = 100:
     //       gmx_d converges in 9 steps with Epot = -1.25489364597334e+01, Fmax < 1e-2.
     //   - At emtol = 1e-3, nsteps = 100:
     //       gmx_d converges in 13 steps with Epot = -1.25489376639539e+01, Fmax < 1e-3.
+    //   - At emtol = 1e-6, nsteps = 100:
+    //       gmx_d converges in 57 steps with Epot = -1.25489377088303e+01, Fmax < 1e-6.
     let fixture = parse_argon_fixture();
     let sigma = fixture.sigma;
     let epsilon = fixture.epsilon;
@@ -589,9 +591,9 @@ fn argon_cluster_matches_gromacs_cg_reference_energy_and_force_scales() {
     assert_eq!(report_12.status, Status::Budget);
     assert_eq!(report_12.steps, fixture.nsteps);
     assert_eq!(report_12.stop_norm, StopNorm::MaxAtom);
-    // Epot matches gmx_d (-12.5489376279603) to < 1e-6 kJ/mol, and Fmax is at the
+    // Epot matches gmx_d (-12.5489376279604) to < 1e-6 kJ/mol, and Fmax is at the
     // same ~1e-3 kJ/(mol nm) order (over 100x lower than steep's 0.4087 after 12 steps).
-    assert_abs_diff_eq!(report_12.value, -1.25489376279603e+01, epsilon = 1e-5);
+    assert_abs_diff_eq!(report_12.value, -1.25489376279604e+01, epsilon = 1e-5);
     assert!(
         report_12.grad_norm < 5.0e-3,
         "expected Fmax < 5e-3 after 12 CG steps, got {}",

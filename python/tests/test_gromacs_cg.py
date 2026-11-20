@@ -110,7 +110,7 @@ def test_argon_session_and_ase_match_gromacs_cg_reference() -> None:
     natoms = start.size // 3
     lj = ArgonLjGromacsUnits(meta["sigma"], meta["epsilon"], meta["cutoff"])
 
-    # Step 0 Fmax and Epot match GROMACS exactly; after 12 steps Epot matches gmx_d within 1e-5.
+    # The initial Fmax and Epot match GROMACS; after 12 steps Epot matches gmx_d within 1e-5.
     session = Session("gromacs-cg", start.size, istep=meta["emstep"], max_atom=0.0, nstcgsteep=1000)
     assert session.nstcgsteep == 1000
     point = start.tolist()
@@ -121,7 +121,7 @@ def test_argon_session_and_ase_match_gromacs_cg_reference() -> None:
     for _ in range(12):
         point, value, _ = session.step(point, lj.eval_and_grad)
     _, grad_12 = lj.eval_and_grad(point)
-    assert value == pytest.approx(-1.25489376279603e01, abs=1e-5)
+    assert value == pytest.approx(-1.25489376279604e01, abs=1e-5)
     assert _max_atom_norm(grad_12) < 5e-3
 
     # ASE GromacsCg wrapper in Angstrom / eV units with emtol in kJ/mol/nm and emstep in nm.

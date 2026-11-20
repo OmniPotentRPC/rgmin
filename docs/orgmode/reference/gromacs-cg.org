@@ -129,19 +129,22 @@ The 7-atom Lennard-Jones argon cluster fixture
 $\epsilon = 1.0\text{ kJ mol}^{-1}$, $r_c = 3.0\text{ nm}$,
 $\text{emstep} = 0.02\text{ nm}$, $\text{nstcgsteep} = 1000$) was run with
 both double-precision ~gmx_d mdrun~ and single-precision ~gmx mdrun~
-(GROMACS ~2023.3-Ubuntu_2023.3_1ubuntu3~, ~-nt 1 -ntmpi 1~) under
-~integrator = cg~ and compared against ~rgmin~ (~Method::GromacsCg~):
+(GROMACS 2023.3 built from source with GCC 13.3.0 and AVX2_256 SIMD,
+~-nt 1 -ntmpi 1~) under ~integrator = cg~ and compared against ~rgmin~
+(~Method::GromacsCg~). The complete inputs, terminal output, ~em.log~ files,
+and machine-readable summary are committed under
+~tests/data/gromacs_cg_reference/~.
 
 | run / tolerance | solver | steps | force evals | final $E_{\text{pot}}$ (kJ mol^-1) | final $F_{\max}$ (kJ mol^-1 nm^-1) |
 |-----------------+--------+-------+-------------+------------------------------------+------------------------------------|
-| ~nsteps = 12~, ~emtol = 1e-8~ | ~gmx_d mdrun~ (f64) | 12 | 29 | ~-1.25489376279603e+01~ | ~1.06954886357896e-03~ |
-| ~nsteps = 12~, ~emtol = 1e-8~ | ~gmx mdrun~ (f32) | 12 | 27 | ~-1.2548935e+01~ | ~1.2535201e-03~ |
+| ~nsteps = 12~, ~emtol = 1e-8~ | ~gmx_d mdrun~ (f64) | 12 | 16 | ~-1.25489376279604e+01~ | ~3.54506056338870e-03~ |
+| ~nsteps = 12~, ~emtol = 1e-8~ | ~gmx mdrun~ (f32) | 11 | 25 | ~-1.2548939e+01~ | ~4.3311492e-03~ |
 | ~nsteps = 12~, ~emtol = 1e-8~ | ~rgmin~ ~GromacsCg~ | 12 | 60 | ~-1.25489377088303e+01~ | ~4.735427e-07~ |
-| ~emtol = 1e-2~ | ~gmx_d mdrun~ (f64) | 9 | 24 | ~-1.25489364597334e+01~ | ~5.544026e-03~ |
+| ~emtol = 1e-2~ | ~gmx_d mdrun~ (f64) | 9 | 12 | ~-1.25489364597334e+01~ | ~5.54402580304420e-03~ |
 | ~emtol = 1e-2~ | ~rgmin~ ~GromacsCg~ | 6 | 18 | ~-1.25489374174275e+01~ | ~8.694525e-03~ |
-| ~emtol = 1e-3~ | ~gmx_d mdrun~ (f64) | 13 | 31 | ~-1.25489376639539e+01~ | ~4.980898e-04~ |
+| ~emtol = 1e-3~ | ~gmx_d mdrun~ (f64) | 13 | 18 | ~-1.25489376639539e+01~ | ~4.98089785018483e-04~ |
 | ~emtol = 1e-3~ | ~rgmin~ ~GromacsCg~ | 7 | 22 | ~-1.25489377085847e+01~ | ~1.529776e-04~ |
-| ~emtol = 1e-6~ | ~gmx_d mdrun~ (f64) | 30 | 76 | ~-1.25489377088304e+01~ | ~1.314348e-07~ |
+| ~emtol = 1e-6~ | ~gmx_d mdrun~ (f64) | 57 | 72 | ~-1.25489377088303e+01~ | ~3.48102157458076e-07~ |
 | ~emtol = 1e-6~ | ~rgmin~ ~GromacsCg~ | 9 | 33 | ~-1.25489377088303e+01~ | ~7.015111e-07~ |
 
 Both solvers take steepest-descent steps at iterations 0 and 1 and
@@ -150,40 +153,45 @@ bracketing and cubic-zoom line search ($c_1 = 10^{-4}, c_2 = 0.1$) rather
 than ~do_cg~'s midpoint/cubic secant heuristic, step-by-step intermediate
 iterates differ while
 converging to the same potential-energy minimum
-($-12.548937708830\text{ kJ mol}^{-1}$, agreeing to 14 significant digits
-with ~gmx_d~) in fewer outer CG iterations and force evaluations.
+($-12.548937708830\text{ kJ mol}^{-1}$). On this fixture, ~rgmin~ uses
+fewer outer iterations at each tested tolerance. It uses more force
+evaluations at ~emtol = 1e-2~ and ~1e-3~, but fewer at ~emtol = 1e-6~.
+At the 12-step cap it uses more force evaluations and reaches a lower
+$F_{\max}$. The single-precision GROMACS run stops at machine precision
+after 11 steps.
 
-Raw ~gmx_d mdrun -v~ output for ~integrator = cg~, ~nsteps = 12~,
-~emtol = 1e-8~, ~emstep = 0.02~, ~nstcgsteep = 1000~:
+Minimization section of the raw ~gmx_d mdrun -v~ output for
+~integrator = cg~, ~nsteps = 12~, ~emtol = 1e-8~, ~emstep = 0.02~,
+~nstcgsteep = 1000~:
 
 #+BEGIN_EXAMPLE
 Polak-Ribiere Conjugate Gradients:
    Tolerance (Fmax)   =  1.00000e-08
    Number of steps    =           12
-   F-max             =  7.58904e+00 on atom 2
-   F-Norm            =  4.62490e+00
+   F-max             =  7.58904e+00 on atom 3
+   F-Norm            =  7.02609e+00
 
-Step 0, Epot=-1.231402e+01, Fnorm=4.625e+00, Fmax=7.589e+00 (atom 2)
-Step 1, Epot=-1.253588e+01, Fnorm=6.782e-01, Fmax=1.351e+00 (atom 5)
-Step 2, Epot=-1.254457e+01, Fnorm=2.927e-01, Fmax=4.342e-01 (atom 2)
-Step 3, Epot=-1.254791e+01, Fnorm=1.412e-01, Fmax=2.765e-01 (atom 4)
-Step 4, Epot=-1.254877e+01, Fnorm=6.394e-02, Fmax=1.360e-01 (atom 3)
-Step 5, Epot=-1.254889e+01, Fnorm=3.021e-02, Fmax=6.428e-02 (atom 3)
-Step 6, Epot=-1.254892e+01, Fnorm=1.671e-02, Fmax=3.095e-02 (atom 5)
-Step 7, Epot=-1.254893e+01, Fnorm=8.938e-03, Fmax=1.594e-02 (atom 7)
-Step 8, Epot=-1.254893e+01, Fnorm=5.557e-03, Fmax=1.089e-02 (atom 3)
-Step 9, Epot=-1.254894e+01, Fnorm=3.038e-03, Fmax=5.544e-03 (atom 2)
-Step 10, Epot=-1.254894e+01, Fnorm=1.545e-03, Fmax=2.707e-03 (atom 6)
-Step 11, Epot=-1.254894e+01, Fnorm=1.182e-03, Fmax=2.238e-03 (atom 3)
-Step 12, Epot=-1.254894e+01, Fnorm=6.000e-04, Fmax=1.070e-03 (atom 7)
+Step 0, Epot=-1.253293e+01, Fnorm=8.103e-01, Fmax=8.753e-01 (atom 6)
+Step 1, Epot=-1.253484e+01, Fnorm=7.289e-01, Fmax=7.873e-01 (atom 2)
+Step 2, Epot=-1.253491e+01, Fnorm=8.501e-01, Fmax=9.183e-01 (atom 2)
+Step 3, Epot=-1.253735e+01, Fnorm=3.975e-01, Fmax=4.293e-01 (atom 6)
+Step 4, Epot=-1.253801e+01, Fnorm=3.227e-01, Fmax=3.485e-01 (atom 6)
+Step 5, Epot=-1.253901e+01, Fnorm=2.951e-01, Fmax=3.187e-01 (atom 5)
+Step 6, Epot=-1.254064e+01, Fnorm=2.856e-01, Fmax=3.085e-01 (atom 2)
+Step 7, Epot=-1.254246e+01, Fnorm=4.829e-01, Fmax=5.216e-01 (atom 2)
+Step 8, Epot=-1.254889e+01, Fnorm=1.090e-01, Fmax=1.177e-01 (atom 2)
+Step 9, Epot=-1.254894e+01, Fnorm=5.133e-03, Fmax=5.544e-03 (atom 2)
+Step 10, Epot=-1.254894e+01, Fnorm=1.983e-03, Fmax=2.141e-03 (atom 4)
+Step 11, Epot=-1.254894e+01, Fnorm=1.121e-03, Fmax=1.211e-03 (atom 4)
+Step 12, Epot=-1.254894e+01, Fnorm=3.282e-03, Fmax=3.545e-03 (atom 3)
 
-energy minimization reached the maximum number of steps before the forces
+Energy minimization reached the maximum number of steps before the forces
 reached the requested precision Fmax < 1e-08.
 
 writing lowest energy coordinates.
 
 Polak-Ribiere Conjugate Gradients did not converge to Fmax < 1e-08 in 13 steps.
-Potential Energy  = -1.25489376279603e+01
-Maximum force     =  1.06954886357896e-03 on atom 7
-Norm of force     =  6.00018007655033e-04
+Potential Energy  = -1.25489376279604e+01
+Maximum force     =  3.54506056338870e-03 on atom 3
+Norm of force     =  3.28204766414723e-03
 #+END_EXAMPLE
