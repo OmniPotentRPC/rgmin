@@ -54,6 +54,8 @@ mod error;
 pub mod ffi;
 /// FIRE / FIRE 2.0 inertial first-order steps.
 pub mod fire;
+/// Gaussian-process-accelerated local geometry optimizer (GPMin).
+pub mod gpmin;
 /// GROMACS `integrator = steep` adaptive maximum-displacement rule.
 pub mod gromacs;
 /// Holonomic distance constraints (SHAKE, LINCS, SETTLE and RATTLE).
@@ -151,6 +153,14 @@ pub use eon_cg::{EonCg, EonCgReport, minimize_eon_cg};
 pub use error::{Error, Result};
 pub use fire::{
     Fire2Extras, FireConfig, FireKind, FirePreset, FireTrace, FireVariant, guenole2020,
+};
+pub use gpmin::{
+    GPMIN_DEFAULT_HYPERPARAM_MAXITER, GPMIN_DEFAULT_HYPERPARAM_TOL, GPMIN_DEFAULT_MAX_REFINEMENTS,
+    GPMIN_DEFAULT_NOISE, GPMIN_DEFAULT_SCALE, GPMIN_DEFAULT_SURROGATE_MAXITER,
+    GPMIN_DEFAULT_SURROGATE_MEMORY, GPMIN_DEFAULT_WEIGHT, GPMIN_UPDATED_BATCH_SIZE,
+    GPMIN_UPDATED_BOUNDS, GPMIN_UPDATED_NOISE, GPMIN_UPDATED_SCALE, GPMIN_UPDATED_WEIGHT,
+    GaussianProcess, GpMin, GpMinConfig, PriorStrategy, SquaredExponentialKernel,
+    default_surrogate_gtol,
 };
 pub use gromacs::{
     GROMACS_STEEP_EMSTEP_DEFAULT, GROMACS_STEEP_GROW, GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS,

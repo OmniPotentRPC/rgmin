@@ -582,6 +582,7 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
         Method::Adam { .. } => rgmin_method_t::RGMIN_ADAM,
         Method::Steepest => rgmin_method_t::RGMIN_STEEPEST,
         Method::GromacsSteep => rgmin_method_t::RGMIN_GROMACS_STEEP,
+        Method::GpMin => return Err(()),
         Method::Sr2 => rgmin_method_t::RGMIN_SR2,
         Method::Pso { .. } => rgmin_method_t::RGMIN_PSO,
         Method::Newton { kind } => match kind {
