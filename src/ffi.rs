@@ -7227,7 +7227,7 @@ mod stop_mapping_tests {
     use super::*;
     use crate::{Report, StopReason};
 
-    const FINISHED: [(StopReason, rgmin_stop_t); 6] = [
+    const FINISHED: [(StopReason, rgmin_stop_t); 9] = [
         (StopReason::Converged, rgmin_stop_t::RGMIN_STOP_TOLERANCE),
         (StopReason::NoiseFloor, rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR),
         (
@@ -7242,6 +7242,15 @@ mod stop_mapping_tests {
         (
             StopReason::PolishUnmet,
             rgmin_stop_t::RGMIN_STOP_POLISH_UNMET,
+        ),
+        (
+            StopReason::EnergyTolerance,
+            rgmin_stop_t::RGMIN_STOP_ENERGY_TOLERANCE,
+        ),
+        (StopReason::EvalBudget, rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET),
+        (
+            StopReason::MachinePrecision,
+            rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION,
         ),
     ];
 
@@ -7270,6 +7279,9 @@ mod stop_mapping_tests {
         assert_eq!(rgmin_stop_t::RGMIN_STOP_BUDGET as i32, 3);
         assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH as i32, 4);
         assert_eq!(rgmin_stop_t::RGMIN_STOP_POLISH_UNMET as i32, 5);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_ENERGY_TOLERANCE as i32, 6);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET as i32, 7);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION as i32, 8);
     }
 
     #[test]
