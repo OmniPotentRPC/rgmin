@@ -16,8 +16,23 @@ pub enum BatchOperatorError<E> {
         /// Number of contiguous vectors.
         vectors: usize,
     },
-    /// One serial operator application failed.
-    Operator(E),
+    /// A serial operator application failed after earlier directions completed.
+    Operator {
+        /// Original operator error.
+        source: E,
+        /// Number of directions completed before the failure.
+        completed: usize,
+    },
+}
+
+impl<E> BatchOperatorError<E> {
+    /// Directions whose operator applications completed before this failure.
+    pub fn completed(&self) -> usize {
+        match self {
+            Self::Dimension { .. } => 0,
+            Self::Operator { completed, .. } => *completed,
+        }
+    }
 }
 
 /// A fallible matrix-free linear operator.
@@ -60,8 +75,12 @@ pub trait LinearOperator {
         for index in 0..vectors {
             let begin = index * width;
             let end = begin + width;
-            self.apply(&inputs[begin..end], &mut outputs[begin..end])
-                .map_err(BatchOperatorError::Operator)?;
+            if let Err(source) = self.apply(&inputs[begin..end], &mut outputs[begin..end]) {
+                return Err(BatchOperatorError::Operator {
+                    source,
+                    completed: index,
+                });
+            }
         }
         Ok(())
     }
@@ -162,6 +181,8 @@ pub enum GmresStatus {
     ZeroRightHandSide,
     /// The configured iteration budget was consumed.
     Exhausted,
+    /// Arnoldi reached an invariant subspace before meeting the tolerance.
+    Stagnated,
 }
 
 /// Complete GMRES telemetry, available on success and refusal.
@@ -337,30 +358,20 @@ fn norm(vector: &[f64]) -> f64 {
             largest = magnitude;
         }
     }
-    let unscaled_limit = if vector.is_empty() {
-        f64::MAX.sqrt()
-    } else {
-        f64::MAX.sqrt() / (vector.len() as f64).sqrt()
-    };
-    if largest <= unscaled_limit {
+    if largest == 0.0 {
+        return 0.0;
+    }
+    let unscaled_upper = f64::MAX.sqrt() / (vector.len() as f64).sqrt();
+    let unscaled_lower = f64::MIN_POSITIVE.sqrt();
+    if largest >= unscaled_lower && largest <= unscaled_upper {
         return dot(vector, vector).sqrt();
     }
-    let mut scale = 0.0;
-    let mut sum_squares = 1.0;
+    let mut sum_squares = 0.0;
     for value in vector {
-        let magnitude = value.abs();
-        if magnitude != 0.0 {
-            if scale < magnitude {
-                let ratio = scale / magnitude;
-                sum_squares = 1.0 + sum_squares * ratio * ratio;
-                scale = magnitude;
-            } else {
-                let ratio = magnitude / scale;
-                sum_squares += ratio * ratio;
-            }
-        }
+        let ratio = value / largest;
+        sum_squares += ratio * ratio;
     }
-    scale * sum_squares.sqrt()
+    largest * sum_squares.sqrt()
 }
 
 fn finite(vector: &[f64]) -> bool {
@@ -440,7 +451,7 @@ where
     if dimension == 0 {
         return Err(refusal(KrylovRefusal::EmptySystem, record));
     }
-    if !finite(right_hand_side) {
+    if !finite(right_hand_side) || !right_hand_side_norm.is_finite() {
         return Err(refusal(KrylovRefusal::NonFinite, record));
     }
     if !(options.relative_tolerance.is_finite() && options.relative_tolerance > 0.0) {
@@ -555,6 +566,8 @@ where
         if converged || exhausted || subdiagonal == 0.0 {
             let status = if converged {
                 GmresStatus::Converged
+            } else if subdiagonal == 0.0 {
+                GmresStatus::Stagnated
             } else {
                 GmresStatus::Exhausted
             };
@@ -657,7 +670,7 @@ where
         }
         let right_hand_side_norm = norm(right_hand_side);
         let record = KrylovRecord::new(right_hand_side_norm);
-        if !finite(right_hand_side) {
+        if !finite(right_hand_side) || !right_hand_side_norm.is_finite() {
             return Err(refusal(KrylovRefusal::NonFinite, record));
         }
         if right_hand_side_norm == 0.0 {
@@ -738,6 +751,10 @@ where
         }
         let mut images = vec![0.0; directions.len()];
         if let Err(source) = operator.apply_batch(&directions, &mut images, active.len()) {
+            for index in active.iter().take(source.completed()).copied() {
+                states[index].record.operator_applications += 1;
+                states[index].record.operator_rounds += 1;
+            }
             let Some(first) = active.first() else {
                 return Err(refusal(KrylovRefusal::Dimension, KrylovRecord::new(0.0)));
             };
@@ -857,6 +874,8 @@ where
                     solution: answer,
                     status: if converged {
                         GmresStatus::Converged
+                    } else if subdiagonal == 0.0 {
+                        GmresStatus::Stagnated
                     } else {
                         GmresStatus::Exhausted
                     },
@@ -869,7 +888,7 @@ where
                         &state.preconditioned_basis,
                         dimension,
                     ),
-                    status: GmresStatus::Exhausted,
+                    status: GmresStatus::Stagnated,
                     record: state.record.clone(),
                 });
             } else if !subdiagonal.is_finite() {
@@ -1225,7 +1244,10 @@ mod tests {
             _outputs: &mut [f64],
             _vectors: usize,
         ) -> Result<(), BatchOperatorError<Self::Error>> {
-            Err(BatchOperatorError::Operator("batch"))
+            Err(BatchOperatorError::Operator {
+                source: "batch",
+                completed: 0,
+            })
         }
     }
 
@@ -1244,7 +1266,13 @@ mod tests {
                 record,
                 sibling_records,
             }) => {
-                assert_eq!(source, BatchOperatorError::Operator("batch"));
+                assert_eq!(
+                    source,
+                    BatchOperatorError::Operator {
+                        source: "batch",
+                        completed: 0
+                    }
+                );
                 assert_eq!(record.right_hand_side_norm, 5.0);
                 assert_eq!(record.preconditioner_applications, 1);
                 assert_eq!(sibling_records.len(), 1);
@@ -1256,8 +1284,53 @@ mod tests {
         Ok(())
     }
 
+    struct FailsSecondSerial {
+        calls: usize,
+    }
+
+    impl LinearOperator for FailsSecondSerial {
+        type Error = &'static str;
+
+        fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {
+            self.calls += 1;
+            if self.calls == 2 {
+                return Err("second direction");
+            }
+            output.copy_from_slice(input);
+            Ok(())
+        }
+    }
+
     #[test]
-    fn happy_breakdown_with_roundoff_is_exhausted() -> Result<(), &'static str> {
+    fn failed_default_batch_counts_completed_operator_calls() -> Result<(), &'static str> {
+        let failure = gmres_right_block(
+            &mut FailsSecondSerial { calls: 0 },
+            &mut [Identity, Identity],
+            &[vec![1.0, 0.0], vec![0.0, 1.0]],
+            GmresOptions::unrestarted(1e-12),
+            &mut [NoObserver, NoObserver],
+        );
+        match failure {
+            Err(GmresFailure::BlockOperator {
+                source:
+                    BatchOperatorError::Operator {
+                        source: "second direction",
+                        completed: 1,
+                    },
+                record,
+                sibling_records,
+            }) => {
+                assert_eq!(record.operator_applications, 1);
+                assert_eq!(sibling_records.len(), 1);
+                assert_eq!(sibling_records[0].operator_applications, 0);
+            }
+            _ => return Err("failed default batch lost completed operator count"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn happy_breakdown_with_roundoff_is_stagnated() -> Result<(), &'static str> {
         let mut operator =
             |input: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
                 for (slot, value) in output.iter_mut().zip(input) {
@@ -1273,7 +1346,7 @@ mod tests {
             &mut NoObserver,
         )
         .map_err(|_| "happy breakdown was refused")?;
-        assert_eq!(run.status, GmresStatus::Exhausted);
+        assert_eq!(run.status, GmresStatus::Stagnated);
         assert_eq!(run.record.iterations.len(), 1);
         assert!(run.record.iterations[0].relative_residual > 1e-16);
         Ok(())
@@ -1307,7 +1380,7 @@ mod tests {
     }
 
     #[test]
-    fn scaled_norm_accepts_large_finite_right_hand_sides() -> Result<(), &'static str> {
+    fn scaled_norm_accepts_small_and_large_finite_right_hand_sides() -> Result<(), &'static str> {
         let mut operator =
             |input: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
                 output.copy_from_slice(input);
@@ -1323,6 +1396,31 @@ mod tests {
         .map_err(|_| "large finite identity solve refused")?;
         assert!(run.record.right_hand_side_norm.is_finite());
         assert_eq!(run.status, GmresStatus::Converged);
+        let small = gmres_right(
+            &mut operator,
+            &mut Identity,
+            &[1e-170, 1e-170],
+            GmresOptions::unrestarted(1e-12),
+            &mut NoObserver,
+        )
+        .map_err(|_| "small finite identity solve refused")?;
+        assert!(small.record.right_hand_side_norm > 0.0);
+        assert!(small.record.right_hand_side_norm.is_finite());
+        assert_eq!(small.status, GmresStatus::Converged);
+        let overflow = gmres_right(
+            &mut operator,
+            &mut Identity,
+            &[f64::MAX, f64::MAX],
+            GmresOptions::unrestarted(1e-12),
+            &mut NoObserver,
+        );
+        assert!(matches!(
+            overflow,
+            Err(GmresFailure::Refused {
+                reason: KrylovRefusal::NonFinite,
+                ..
+            })
+        ));
         Ok(())
     }
 
@@ -1346,7 +1444,10 @@ mod tests {
         ) -> Result<(), BatchOperatorError<Self::Error>> {
             self.calls += 1;
             if self.calls == 2 {
-                return Err(BatchOperatorError::Operator("second batch"));
+                return Err(BatchOperatorError::Operator {
+                    source: "second batch",
+                    completed: 0,
+                });
             }
             let width = inputs.len() / vectors;
             outputs[..width].copy_from_slice(&inputs[..width]);
