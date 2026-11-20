@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 52
+#define RGMIN_ABI_VERSION_MINOR 53
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -91,7 +91,10 @@ typedef struct rgmin_abi_stamp_t {
  *    is unchanged.
  * 52 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
  *    rgmin_solver_set_gromacs_steep, and
- *    rgmin_gromacs_steep_max_constraint_shrinks. */
+ *    rgmin_gromacs_steep_max_constraint_shrinks.
+ * 53 RGMIN_MDMIN. The time step is rgmin_control_t.istep, the per-atom
+ *    cap is the session atom cap, and a positive maxmove also caps the
+ *    Euclidean step. rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
