@@ -83,6 +83,10 @@ pub enum Method {
     /// per-atom force norm and adapt the maximum displacement after a
     /// strict energy-decrease test.
     GromacsSteep,
+    /// GROMACS `integrator = cg`: Polak-Ribiere conjugate gradients with a
+    /// steepest-descent step every `nstcgsteep` steps and convergence on
+    /// the largest per-atom force norm.
+    GromacsCg,
     /// Shifted Newton on a caller-supplied dense Hessian.
     ///
     /// Banerjee, Adams, Simons, Shepard,
@@ -330,6 +334,7 @@ impl Method {
             Self::Bfgs
                 | Self::Dogleg
                 | Self::GromacsSteep
+                | Self::GromacsCg
                 | Self::NewtonCg
                 | Self::NewtonPcg
                 | Self::Fire {
@@ -369,6 +374,7 @@ impl Method {
             Self::Adam { .. } => "adam",
             Self::Steepest => "steepest",
             Self::GromacsSteep => "gromacs-steep",
+            Self::GromacsCg => "gromacs-cg",
             Self::Newton { kind } => match kind {
                 crate::newton::NewtonKind::Shifted => "newton",
                 crate::newton::NewtonKind::Rfo => "rfo",
@@ -404,6 +410,7 @@ impl Method {
             "adam" => Self::adam(),
             "sd" | "steepest" | "steepest_descent" => Self::Steepest,
             "gromacs_steep" | "gmx_steep" => Self::GromacsSteep,
+            "gromacs_cg" | "gmx_cg" => Self::GromacsCg,
             "cg" | "pr" | "polak_ribiere" => Self::polak_ribiere(),
             "prp" | "pr_plus" | "polak_ribiere_plus" => Self::polak_ribiere_plus(),
             "eon_cg" | "eon_cg_pr" => Self::eon_cg(),
@@ -505,6 +512,9 @@ mod name_tests {
             Method::GromacsSteep
         );
         assert_eq!(Method::GromacsSteep.as_str(), "gromacs-steep");
+        assert_eq!(Method::from_name("gromacs-cg").unwrap(), Method::GromacsCg);
+        assert_eq!(Method::from_name("gmx_cg").unwrap(), Method::GromacsCg);
+        assert_eq!(Method::GromacsCg.as_str(), "gromacs-cg");
         assert_eq!(Method::from_name("fire2").unwrap().as_str(), "fire2");
         let err = Method::from_name("not-a-solver").unwrap_err();
         assert!(err.to_string().contains("not-a-solver"), "{err}");
@@ -528,6 +538,7 @@ mod tests {
         assert!(!Method::Bfgs.installs_default_atom_cap());
         assert!(!Method::Dogleg.installs_default_atom_cap());
         assert!(!Method::GromacsSteep.installs_default_atom_cap());
+        assert!(!Method::GromacsCg.installs_default_atom_cap());
         assert!(!Method::Fire { kind: FireKind::V2 }.installs_default_atom_cap());
         assert!(!Method::NewtonCg.installs_default_atom_cap());
         assert!(!Method::NewtonPcg.installs_default_atom_cap());
