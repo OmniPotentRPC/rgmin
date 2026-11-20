@@ -1089,6 +1089,9 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 /// ABI minor 52 adds `RGMIN_GROMACS_STEEP`, `RGMIN_STOP_MACHINE_PRECISION`,
 /// `rgmin_solver_set_gromacs_steep`, and
 /// `rgmin_gromacs_steep_max_constraint_shrinks`.
+/// ABI minor 65 adds `RGMIN_MDMIN`. The time step is `istep`, the
+/// per-atom cap is the session atom cap, and a positive `maxmove` also
+/// caps the Euclidean step.
 /// ABI minor 51 adds `rgmin_minimize_rlbfgs` and `rgmin_rlbfgs_default`.
 /// ABI minor 50 adds `rgmin_solver_set_etol`, `rgmin_solver_set_max_evals`,
 /// their clear functions, `rgmin_solver_evals` and the two stop codes.
@@ -1107,7 +1110,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 52);
+    assert_eq!(stamp.abi_minor, 65);
     assert_eq!(stamp.layout_revision, 5);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
