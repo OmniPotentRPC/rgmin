@@ -1,0 +1,1 @@
+Borrowed DLPack tensors keep valid shape and stride pointers, and the C entries form output slices from the raw tensor pointer instead of from a shared slice, so they no longer break the Rust aliasing rules.
