@@ -15,10 +15,12 @@
 //! `O(h^7)` locally and `exp(Ω4)` to `O(h^5)`; both use the same three
 //! samples, so their difference costs no further evaluations of `A`.
 //!
-//! The exponential is Higham's scaling and squaring with the degree-13
-//! Padé approximant (SIAM J. Matrix Anal. Appl. 26 (2005) 1179): scale by
-//! `2^{-s}` until the 1-norm is at most `θ13`, evaluate the approximant
-//! with six products and one linear solve, and square `s` times.
+//! The exponential is Higham's scaling and squaring (SIAM J. Matrix Anal.
+//! Appl. 26 (2005) 1179): the lowest Padé degree of 3, 5, 7 and 9 whose
+//! `θ` bounds the 1-norm, with two to five products and one linear solve;
+//! above `θ9`, scale by `2^{-s}` until the 1-norm is at most `θ13`,
+//! evaluate the degree-13 approximant with six products and one solve,
+//! and square `s` times.
 
 use thiserror::Error;
 
@@ -55,8 +57,68 @@ pub struct MagnusStep {
 pub struct Exponential {
     /// Row-major `m x m`.
     pub matrix: Vec<f64>,
-    /// Six Padé products, three for the solve, and one per squaring.
+    /// Padé products, three for the solve, and one per squaring.
     pub products: u64,
+}
+
+/// `(θ_d, b)` of the Padé degrees `d = 3, 5, 7, 9`, Higham (2005) table 2.1
+/// and the coefficients of `p_d(x) = Σ b_j x^j`.
+const LOW_DEGREES: [(f64, &[f64]); 4] = [
+    (1.495585217958292e-2, &[120.0, 60.0, 12.0, 1.0]),
+    (
+        2.539398330063230e-1,
+        &[30240.0, 15120.0, 3360.0, 420.0, 30.0, 1.0],
+    ),
+    (
+        9.504178996162932e-1,
+        &[17297280.0, 8648640.0, 1995840.0, 277200.0, 25200.0, 1512.0, 56.0, 1.0],
+    ),
+    (
+        2.097847961257068e0,
+        &[
+            17643225600.0,
+            8821612800.0,
+            2075673600.0,
+            302702400.0,
+            30270240.0,
+            2162160.0,
+            110880.0,
+            3960.0,
+            90.0,
+            1.0,
+        ],
+    ),
+];
+
+/// Unscaled Padé approximant of degree `b.len() - 1`, valid while `‖a‖₁`
+/// is within that degree's `θ`.
+fn low_degree_pade(a: &[f64], m: usize, b: &[f64]) -> Result<Exponential, MagnusError> {
+    let half = b.len() / 2;
+    let x2 = multiply(a, a, m);
+    let mut powers = vec![identity(m), x2];
+    while powers.len() < half {
+        let next = multiply(&powers[powers.len() - 1], &powers[1], m);
+        powers.push(next);
+    }
+    let mut odd = vec![0.0; m * m];
+    let mut v = vec![0.0; m * m];
+    for (j, power) in powers.iter().enumerate() {
+        for k in 0..m * m {
+            odd[k] += b[2 * j + 1] * power[k];
+            v[k] += b[2 * j] * power[k];
+        }
+    }
+    let u = multiply(a, &odd, m);
+    let denominator: Vec<f64> = v.iter().zip(&u).map(|(p, q)| p - q).collect();
+    let numerator: Vec<f64> = v.iter().zip(&u).map(|(p, q)| p + q).collect();
+    let result = solve(denominator, numerator, m)?;
+    if result.iter().any(|value| !value.is_finite()) {
+        return Err(MagnusError::NonFinite);
+    }
+    Ok(Exponential {
+        matrix: result,
+        products: half as u64 + 3,
+    })
 }
 
 /// Gauss-Legendre fractions `c_i` of a step, in increasing order.
@@ -150,6 +212,9 @@ pub fn expm(a: &[f64], m: usize) -> Result<Exponential, MagnusError> {
     let norm = norm1(a, m);
     if !norm.is_finite() {
         return Err(MagnusError::NonFinite);
+    }
+    if let Some(&(_, b)) = LOW_DEGREES.iter().find(|(theta, _)| norm <= *theta) {
+        return low_degree_pade(a, m, b);
     }
     let mut squarings = 0i32;
     let mut scaled = norm;
@@ -283,7 +348,7 @@ mod tests {
 
     #[test]
     fn the_exponential_matches_closed_forms() {
-        for t in [1.0e-3, 0.7, 3.0, 40.0] {
+        for t in [1.0e-3, 0.01, 0.2, 0.7, 0.9, 2.0, 3.0, 5.0, 40.0] {
             let rotation = expm(&[0.0, t, -t, 0.0], 2).expect("rotation");
             let exact = [t.cos(), t.sin(), -t.sin(), t.cos()];
             assert!(max_gap(&rotation.matrix, &exact) <= 64.0 * f64::EPSILON * (1.0 + t));
@@ -295,6 +360,15 @@ mod tests {
         let nilpotent = expm(&[0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0], 3).expect("nilpotent");
         let exact = [1.0, 2.0, 3.0, 0.0, 1.0, 3.0, 0.0, 0.0, 1.0];
         assert!(max_gap(&nilpotent.matrix, &exact) <= 8.0 * f64::EPSILON);
+    }
+
+    #[test]
+    fn the_pade_degree_follows_the_norm() {
+        let products: Vec<u64> = [0.01, 0.2, 0.9, 2.0, 5.0, 20.0]
+            .iter()
+            .map(|t| expm(&[0.0, *t, -*t, 0.0], 2).expect("rotation").products)
+            .collect();
+        assert_eq!(products, vec![5, 6, 7, 8, 9, 11]);
     }
 
     #[test]
