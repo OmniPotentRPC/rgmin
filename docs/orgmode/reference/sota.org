@@ -475,3 +475,30 @@ reject a 3N cluster.
   or ~Solver::set_stop_norm~ selects the largest per-atom norm (ASE
   ~fmax~, eOn ~max_atom~, LAMMPS ~max~), the largest component (eOn
   ~max_component~, LAMMPS ~inf~) or ~norm2(g) / sqrt(n)~ (eOn ~rms~)
+
+** A-posteriori nonlinear certificates
+
+~certificate~ combines caller-supplied majorants in standard ~f64~
+floating-point arithmetic without outward rounding:
+
+- ~kantorovich_ball~ evaluates the classical Newton--Kantorovich
+  existence radius ~2 eta / (1 + sqrt(1 - 2 h))~ under ~h <= 1/2~
+  (Kantorovich and Akilov 1982,
+  [[https://doi.org/10.1016/B978-0-08-023036-8.50024-2][10.1016/B978-0-08-023036-8.50024-2]]; Gragg and Tapia 1974,
+  [[https://doi.org/10.1137/0711002][10.1137/0711002]]) @@rst::cite:`kantorovichNewtonsMethod1982,graggOptimalErrorBounds1974`@@.
+  Because ~r <= 2 eta~ whenever ~h <= 1/2~, an induced operator-norm
+  Lipschitz bound for ~J~ on ~B(x0, 2 eta)~ suffices.
+- ~adjoint_functional_bar~ adds the dual-weighted residual
+  ~first_order = |lambda^T F(x0)|~ for an exact adjoint
+  ~J(x0)^T lambda = grad q(x0)~ to the nonlinear displacement and
+  quadratic Taylor remainders, using the dual norm for ~grad q(x0)~
+  and the induced operator norm for ~D^2 q~ (Becker and Rannacher
+  2001, [[https://doi.org/10.1017/S0962492901000010][10.1017/S0962492901000010]])
+  @@rst::cite:`beckerOptimalControlApproach2001`@@.
+- ~certify_morse_gap~ certifies that a projected self-adjoint operator
+  cannot cross zero inside the Kantorovich ball by Weyl's eigenvalue
+  perturbation inequality (Weyl 1912,
+  [[https://doi.org/10.1007/BF01456804][10.1007/BF01456804]])
+  @@rst::cite:`weylAsymptotischeVerteilungsgesetzEigenwerte1912`@@,
+  requiring ~operator_lipschitz~ to bound the spectral-norm Lipschitz
+  constant of the operator.

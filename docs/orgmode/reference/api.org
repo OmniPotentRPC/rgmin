@@ -30,11 +30,31 @@ The types a host works with:
 | ~TryApplyHessian~ | A block-eigen product that can fail. |
 | ~try_lowest_eigenpairs~ | ~lowest_eigenpairs~ on that product, without ~T~. |
 | ~try_lowest_eigenpairs_precond~ | ~lowest_eigenpairs_precond~ on that product, with an optional ~T~. |
+| ~kantorovich_ball~ / ~KantorovichBall~ | Newton--Kantorovich existence ball from supplied majorants (Kantorovich and Akilov 1982; Gragg and Tapia 1974). |
+| ~adjoint_functional_bar~ / ~AdjointFunctionalBar~ | Dual-weighted residual functional bound and remainder (Becker and Rannacher 2001). |
+| ~certify_morse_gap~ / ~MorseGap~ | Self-adjoint spectral gap certified by Weyl's inequality (Weyl 1912). |
 
 ~newton-cg~ and ~newton-pcg~ are ~Method::from_name~ tokens. The
 session counts ~gradient_calls~ and ~hvp_calls~ separately. A
 forward-difference product on ~step~ costs one gradient and is
 charged as a product.
+
+~kantorovich_ball~, ~adjoint_functional_bar~, and ~certify_morse_gap~
+combine caller-supplied majorants in standard ~f64~ floating-point
+arithmetic without outward rounding. Given a primal norm and its
+induced operator norm, a Jacobian Lipschitz bound on ~B(x0, 2 eta)~
+suffices for the Kantorovich ball ([[https://doi.org/10.1016/B978-0-08-023036-8.50024-2][10.1016/B978-0-08-023036-8.50024-2]],
+[[https://doi.org/10.1137/0711002][10.1137/0711002]]) @@rst::cite:`kantorovichNewtonsMethod1982,graggOptimalErrorBounds1974`@@.
+~adjoint_functional_bar~ pairs ~first_order = |lambda^T F(x0)|~ for an
+exact adjoint ~J(x0)^T lambda = grad q(x0)~ with ~gradient_norm~ in the
+dual norm and ~hessian_bound~ in the induced operator norm from the
+primal space to its dual ([[https://doi.org/10.1017/S0962492901000010][10.1017/S0962492901000010]])
+@@rst::cite:`beckerOptimalControlApproach2001`@@. ~certify_morse_gap~
+requires ~operator_lipschitz~ to bound the spectral-norm Lipschitz
+constant of the projected self-adjoint operator and subtracts that
+perturbation plus ~eigensolver_roundoff~ from ~computed_gap~ by Weyl's
+inequality ([[https://doi.org/10.1007/BF01456804][10.1007/BF01456804]])
+@@rst::cite:`weylAsymptotischeVerteilungsgesetzEigenwerte1912`@@.
 
 The generated Sphinx pages under ~crates/rgmin/~ (when the docs
 environment is built with ~sphinxcontrib-rust~) are the same
