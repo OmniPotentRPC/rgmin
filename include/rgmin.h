@@ -1569,7 +1569,8 @@ rgmin_status_t rgmin_rtr_radius_update(double *radius, double radius_max, double
                                        int32_t *accepted_out);
 
 /** Lowest Hessian eigenpair on \a manifold's tangent space at \a x.
- *  A null manifold is Euclidean. Lanczos and LOBPCG apply the projector.
+ *  A null manifold is Euclidean. Every matrix-free backend solves the
+ *  projected operator; projected preconditioners remain tangent.
  *  \a mode_out may alias \a x or \a seed. \a out must not overlap tensor
  *  storage. */
 rgmin_status_t rgmin_lowest_eigenpair_on_manifold(
