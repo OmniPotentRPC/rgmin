@@ -278,20 +278,19 @@ fn overflow_in_majorant_products_and_remainders_is_rejected() {
 }
 
 // 2^-1074, the smallest positive subnormal.
-const MIN_SUBNORMAL: f64 = 4.940_656_458_412_465e-324;
+const MIN_SUBNORMAL: f64 = f64::from_bits(1);
 
 #[test]
 fn quadratic_functional_remainder_does_not_underflow_with_a_subnormal_hessian() {
     let radius = 1.0e308;
     let ball = kantorovich_ball(radius, 1.0, 0.0).expect("affine ball");
     assert_eq!(ball.radius(), radius);
-    assert_eq!(MIN_SUBNORMAL, f64::from_bits(1));
 
     let bar = adjoint_functional_bar(ball, 0.0, 0.0, MIN_SUBNORMAL).expect("finite functional");
     // 0.5 * 2^-1074 * r = r * 2^-1000 * 2^-75 is exact and normal, so the
     // final product rounds once.
     let expected = (radius * 2.0_f64.powi(-1000) * 2.0_f64.powi(-75)) * radius;
-    assert!((expected - 2.470_328_229_206_232_7e292).abs() <= 1.0e277);
+    assert!((expected - 2.470_328_229_206_233e292).abs() <= 1.0e277);
     assert_relative(bar.remainder, expected, 2.0 * f64::EPSILON);
     assert_eq!(bar.total, bar.remainder);
 }
