@@ -33,11 +33,10 @@ fn talbot_and_weeks_invert_exponential_and_report_typed_estimates() {
     let exact = (-a * energy).exp();
     let gamma4 = higham_gamma(4).expect("gamma4");
 
-    let talbot_cfg = TalbotConfig {
-        nodes: 32,
-        min_re_beta: -1.0e6,
-        tolerance: 1.0e-8,
-    };
+    let talbot_cfg = TalbotConfig::default()
+        .with_nodes(32)
+        .with_min_re_beta(-1.0e6)
+        .with_tolerance(1.0e-8);
     let got_t = talbot_invert(energy, talbot_cfg, |beta| {
         let val = Complex64::new(1.0, 0.0) / (beta + Complex64::new(a, 0.0));
         Ok(ComplexSample::estimated(val, gamma4 * val.norm()))
@@ -49,15 +48,7 @@ fn talbot_and_weeks_invert_exponential_and_report_typed_estimates() {
     assert!(err_t <= got_t.uncertainty_estimate());
     assert!(err_t <= 1.0e-12);
 
-    let weeks_cfg = WeeksConfig {
-        sigma: 0.5,
-        scale_b: 1.5,
-        circle_radius: 0.85,
-        laguerre_degree: 48,
-        min_re_beta: 0.0,
-        max_imag_beta: 1.0e4,
-        tolerance: 1.0e-6,
-    };
+    let weeks_cfg = WeeksConfig::default();
     let got_w = weeks_invert(energy, weeks_cfg, |beta| {
         let val = Complex64::new(1.0, 0.0) / (beta + Complex64::new(a, 0.0));
         Ok(ComplexSample::estimated(val, gamma4 * val.norm()))
@@ -87,15 +78,11 @@ fn weeks_and_laguerre_refuse_slow_algebraic_tails() {
     }
 
     // 2. End-to-end Laplace transform F(beta) = (beta + 1)^(-5/4), sigma = 0.5, b = 1.5, E = 1e-6, N = 16, r = 1
-    let slow_cfg = WeeksConfig {
-        sigma: 0.5,
-        scale_b: 1.5,
-        circle_radius: 1.0,
-        laguerre_degree: 16,
-        min_re_beta: 0.0,
-        max_imag_beta: 1.0e6,
-        tolerance: 10.0,
-    };
+    let slow_cfg = WeeksConfig::default()
+        .with_circle_radius(1.0)
+        .with_laguerre_degree(16)
+        .with_max_imag_beta(1.0e6)
+        .with_tolerance(10.0);
     let gamma8 = higham_gamma(8).expect("gamma8");
     let res_weeks = weeks_invert(1.0e-6, slow_cfg, |beta| {
         let z = beta + Complex64::new(1.0, 0.0);
@@ -147,15 +134,10 @@ fn weeks_and_laguerre_refuse_slow_algebraic_tails() {
     let modulus = exterior_disk_modulus(Complex64::new(-a_out, 0.0), sigma_out, b_out, 3.0)
         .expect("pole at w=13 is outside R=3");
     assert!(modulus > 3.0);
-    let exterior_cfg = WeeksConfig {
-        sigma: sigma_out,
-        scale_b: b_out,
-        circle_radius: 0.85,
-        laguerre_degree: 32,
-        min_re_beta: 0.0,
-        max_imag_beta: 1.0e4,
-        tolerance: 1.0e-6,
-    };
+    let exterior_cfg = WeeksConfig::default()
+        .with_sigma(sigma_out)
+        .with_scale_b(b_out)
+        .with_laguerre_degree(32);
     let exterior = weeks_invert(0.8, exterior_cfg, |beta| {
         let val = Complex64::new(1.0, 0.0) / (beta + Complex64::new(a_out, 0.0));
         Ok(ComplexSample::estimated(val, gamma8 * val.norm()))
@@ -203,11 +185,10 @@ fn tiny_well_conditioned_system_is_not_refused_by_an_absolute_pivot_floor() {
 #[test]
 fn talbot_endpoint_tail_scales_with_the_transform() {
     let energy = 0.8_f64;
-    let config = TalbotConfig {
-        nodes: 8,
-        min_re_beta: -1.0e6,
-        tolerance: 1.0,
-    };
+    let config = TalbotConfig::default()
+        .with_nodes(8)
+        .with_min_re_beta(-1.0e6)
+        .with_tolerance(1.0);
     let invert = |scale: f64| {
         talbot_invert(energy, config, move |beta| {
             let val = Complex64::new(scale, 0.0) / (beta + Complex64::new(1.25, 0.0));

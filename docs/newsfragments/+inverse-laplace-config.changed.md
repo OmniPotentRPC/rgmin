@@ -1,0 +1,1 @@
+`TalbotConfig` and `WeeksConfig` are `non_exhaustive` and accept `Default` plus chainable `with_*` setters; `WeeksConfig` now has a `Default`. Contour result and sample structs are `non_exhaustive` as well.

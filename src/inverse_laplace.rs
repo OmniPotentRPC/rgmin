@@ -1,6 +1,16 @@
 //! Generic complex-contour inverse Laplace transform kernels (fixed-Talbot and Weeks/Laguerre),
 //! orthonormal Laguerre series evaluation, and complex dense linear algebra.
 //!
+//! Fixed-Talbot quadrature follows Talbot, *The Numerical Inversion of Laplace Transforms
+//! by an Integration over the Real Line*,
+//! <https://doi.org/10.1093/imamat/23.1.97>.
+//! The Möbius–Laguerre Weeks contour is Weeks, *Numerical Inversion of Laplace
+//! Transforms Using Laguerre Functions*,
+//! <https://doi.org/10.1145/321341.321351>.
+//! Algebraic tail refusal and typed estimate bookkeeping follow the outward-directed
+//! summation model of Abate and Valkó, *Multi-precision Laplace Transform Inversion*,
+//! <https://doi.org/10.1002/nme.995>.
+//!
 //! Every floating-point evaluation of a complex Laplace transform `F(beta)` using standard
 //! `f64` elementary functions is represented as a typed [`ComplexSample`] estimate, and
 //! contour inversions return typed [`TalbotEstimate`] and [`WeeksEstimate`] diagnostics
@@ -537,6 +547,7 @@ fn require_nonnegative_finite(name: &'static str, value: f64) -> Result<(), Inve
 /// Evaluations in binary64 arithmetic that call standard library transcendental functions
 /// (`sqrt`, `exp`, `sinh`, `sin`, `cos`) are never labeled as proof-level enclosures;
 /// [`Self::is_certified`] is always `false` and [`Self::certified_bar`] is always `None`.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ComplexSample {
     /// Sampled complex value `F(beta)`.
@@ -906,6 +917,10 @@ pub fn exterior_disk_modulus(
 }
 
 /// Configuration for fixed-Talbot complex-contour inverse Laplace transform.
+///
+/// Non-exhaustive: start from [`TalbotConfig::default`] and chain the
+/// `with_*` setters, so a field added later is not a breaking change.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
 pub struct TalbotConfig {
     /// Fine quadrature node count `M` (`M >= 8`, even; compared against coarse `M/2`).
@@ -926,10 +941,17 @@ impl Default for TalbotConfig {
     }
 }
 
+with_setters!(TalbotConfig {
+    with_nodes => nodes: val usize,
+    with_min_re_beta => min_re_beta: val f64,
+    with_tolerance => tolerance: val f64,
+});
+
 /// Typed refinement and roundoff estimate for fixed-Talbot contour inversion.
 ///
 /// Because contour samples evaluate binary64 transcendental functions, this is an estimate
 /// (`is_certified() == false`, `certified_bar() == None`).
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct TalbotEstimate {
     /// Outward-directed sum of `discretization_estimate`, `evaluation_estimate`, and `roundoff_estimate`.
@@ -943,6 +965,7 @@ pub struct TalbotEstimate {
 }
 
 /// Result of fixed-Talbot complex-contour inverse Laplace transform.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct TalbotResult {
     /// Recovered inverse Laplace value at `energy`.
@@ -1155,6 +1178,10 @@ where
 
 /// Configuration for Weeks (Möbius–Laguerre) complex-contour inverse Laplace transform
 /// inside a strip `Re(beta) > min_re_beta`, `|Im(beta)| <= max_imag_beta`.
+///
+/// Non-exhaustive: start from [`WeeksConfig::default`] and chain the
+/// `with_*` setters, so a field added later is not a breaking change.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
 pub struct WeeksConfig {
     /// Real Möbius center `sigma > min_re_beta`.
@@ -1173,10 +1200,35 @@ pub struct WeeksConfig {
     pub tolerance: f64,
 }
 
+impl Default for WeeksConfig {
+    fn default() -> Self {
+        Self {
+            sigma: 0.5,
+            scale_b: 1.5,
+            circle_radius: 0.85,
+            laguerre_degree: 48,
+            min_re_beta: 0.0,
+            max_imag_beta: 1.0e4,
+            tolerance: 1.0e-6,
+        }
+    }
+}
+
+with_setters!(WeeksConfig {
+    with_sigma => sigma: val f64,
+    with_scale_b => scale_b: val f64,
+    with_circle_radius => circle_radius: val f64,
+    with_laguerre_degree => laguerre_degree: val usize,
+    with_min_re_beta => min_re_beta: val f64,
+    with_max_imag_beta => max_imag_beta: val f64,
+    with_tolerance => tolerance: val f64,
+});
+
 /// Typed refinement, roundoff, and `O(n^{-3/2})` algebraic-tail estimate for Weeks inversion.
 ///
 /// Because contour samples evaluate binary64 transcendental functions, this is an estimate
 /// (`is_certified() == false`, `certified_bar() == None`).
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct WeeksEstimate {
     /// Outward-directed sum of `discretization_estimate`, `evaluation_estimate`, `roundoff_estimate`,
@@ -1198,6 +1250,7 @@ pub struct WeeksEstimate {
 }
 
 /// Result of Weeks (Möbius–Laguerre) complex-contour inverse Laplace transform.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct WeeksResult {
     /// Recovered inverse Laplace value at `energy`.
