@@ -67,6 +67,48 @@ class BFGS:
     ) -> None: ...
     def converged(self, forces: Any = None) -> bool: ...
 
+class GPMin:
+    scale: float
+    weight: float
+    noise: float
+    batch_size: int | None
+    bounds: float | bool | None
+    update_prior_strategy: str
+    update_hyperparams: bool
+    maxstep: float
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        prior: Any = None,
+        kernel: Any = None,
+        noise: float | None = None,
+        weight: float | None = None,
+        scale: float | None = None,
+        batch_size: int | None = None,
+        bounds: float | bool | None = None,
+        update_prior_strategy: str = "maximum",
+        update_hyperparams: bool = False,
+        *,
+        maxstep: float | None = None,
+        max_refinements: int | None = None,
+        **kwargs: Any,
+    ) -> None: ...
+    def run(self, fmax: float = 0.05, steps: int | None = None) -> bool: ...
+    def step(self, forces: Any = None) -> None: ...
+    def attach(
+        self,
+        function: Callable[..., Any],
+        interval: int = 1,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None: ...
+    def converged(self, forces: Any = None) -> bool: ...
+    @property
+    def hyperparameters(self) -> tuple[float, float, float]: ...
+
 class GromacsSteep:
     emtol: float
     emstep: float
