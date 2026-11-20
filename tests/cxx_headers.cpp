@@ -637,10 +637,15 @@ int main() {
                   "GromacsCg keeps the C enumerator");
     static_assert(XTS_GROMACS_CG == RGMIN_GROMACS_CG,
                   "xts.h aliases the GROMACS cg selector");
+    static_assert(static_cast<int>(rgmin::Method::GromacsLbfgs) == RGMIN_GROMACS_LBFGS,
+                  "GromacsLbfgs keeps the C enumerator");
+    static_assert(XTS_GROMACS_LBFGS == RGMIN_GROMACS_LBFGS,
+                  "xts.h aliases the GROMACS L-BFGS selector");
     if (rgmin::method_from_name("eon-cg") != rgmin::Method::EonCg ||
         rgmin::method_from_name("polak-ribiere-plus") != rgmin::Method::PolakRibierePlus ||
         rgmin::method_from_name("gromacs-steep") != rgmin::Method::GromacsSteep ||
-        rgmin::method_from_name("gromacs-cg") != rgmin::Method::GromacsCg) {
+        rgmin::method_from_name("gromacs-cg") != rgmin::Method::GromacsCg ||
+        rgmin::method_from_name("gromacs-lbfgs") != rgmin::Method::GromacsLbfgs) {
         std::fprintf(stderr, "method_from_name missed a public method\n");
         return 6;
     }
