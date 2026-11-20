@@ -1,0 +1,1 @@
+New integration tests check the rigid quotient projector against an independent dense reference at scales from 1e-10 to 1e10, assert the exact horizontal rank on the regular stratum and on the singular ones (one atom, coincident atoms, collinear atoms), and cover the retraction, the refused logarithm, transport and the Euclidean metric.

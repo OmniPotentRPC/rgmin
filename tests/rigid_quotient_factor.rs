@@ -150,7 +150,7 @@ fn projected_eigenpairs_match_the_deflated_dense_spectrum() {
         }
     }
     let rank = basis.len();
-    assert!(rank >= 2, "horizontal rank {rank}");
+    assert_eq!(rank, 3, "horizontal rank of a non-collinear triangle");
     let op = Spectrum {
         translation: translation.clone(),
     };
