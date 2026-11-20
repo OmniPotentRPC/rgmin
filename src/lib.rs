@@ -112,6 +112,8 @@ mod qn;
 /// Sella QuasiNewton / QuasiNewtonIRC restricted step.
 pub mod qn_irc;
 mod qn_step;
+/// Gauss–Legendre rules and Lobatto shape functions on `[-1, 1]`.
+pub mod quadrature;
 /// Quick-min projection and Euler step.
 pub mod quickmin;
 mod report;
