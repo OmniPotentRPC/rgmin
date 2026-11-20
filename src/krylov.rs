@@ -64,7 +64,7 @@ pub trait LinearOperator {
                 })
             };
         }
-        if inputs.len() % vectors != 0 || outputs.len() != inputs.len() {
+        if !inputs.len().is_multiple_of(vectors) || outputs.len() != inputs.len() {
             return Err(BatchOperatorError::Dimension {
                 inputs: inputs.len(),
                 outputs: outputs.len(),
