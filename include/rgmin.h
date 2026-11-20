@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 52
+#define RGMIN_ABI_VERSION_MINOR 53
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -91,7 +91,9 @@ typedef struct rgmin_abi_stamp_t {
  *    is unchanged.
  * 52 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
  *    rgmin_solver_set_gromacs_steep, and
- *    rgmin_gromacs_steep_max_constraint_shrinks. */
+ *    rgmin_gromacs_steep_max_constraint_shrinks.
+ * 53 rgmin_solver_set_fixed_h0 and rgmin_solver_set_line_alpha_max.
+ *    rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -618,6 +620,16 @@ int32_t rgmin_solver_set_lbfgs_scaled(rgmin_solver_t *solver, double max_atom);
  *  does not search a line. Returns 0, or 1 on a null session or a
  *  session that is not RGMIN_LBFGS. ABI minor 34. */
 int32_t rgmin_solver_set_lbfgs_wolfe(rgmin_solver_t *solver);
+/** Initial inverse-Hessian scale on BFGS or L-BFGS. A fresh BFGS
+ *  matrix becomes \c h0 I, and L-BFGS keeps this scale instead of the
+ *  Nocedal-Wright \c sy/yy scale. Returns 0, or 1 on a null session, a
+ *  non-positive or non-finite scale, or another method. ABI minor 53. */
+int32_t rgmin_solver_set_fixed_h0(rgmin_solver_t *solver, double h0);
+/** Line-search step-multiplier bound. A positive finite value is used
+ *  when it is tighter than the displacement cap. A non-positive finite
+ *  value clears the bound. A non-finite value returns 1 and leaves the
+ *  session unchanged. ABI minor 53. */
+int32_t rgmin_solver_set_line_alpha_max(rgmin_solver_t *solver, double limit);
 /** Burdakov ray-truncation radius for session L-BFGS. A non-positive,
  *  NaN or infinite radius turns it off and still returns 0. This is
  *  not the Newton-model radius. Returns 0, or 1 on a null session.

@@ -249,6 +249,10 @@ pub struct Solver {
     control: Control,
     linesearch: LineSearch,
     line_options: LineSearchOptions,
+    /// Inverse-Hessian scale for a fresh BFGS matrix. `None` keeps `I`.
+    bfgs_h0: Option<f64>,
+    /// Line-search step-multiplier bound. `None` keeps the displacement cap.
+    line_alpha_max: Option<f64>,
     istep: f64,
     steps: usize,
     qn_step: QnStep,
@@ -524,6 +528,8 @@ impl Solver {
             control,
             linesearch: SESSION_LINESEARCH,
             line_options: LineSearchOptions::default(),
+            bfgs_h0: None,
+            line_alpha_max: None,
             istep,
             steps: 0,
             qn_step: QnStep::TwoLoop,
@@ -885,6 +891,55 @@ impl Solver {
         };
         self.line_options = options;
         true
+    }
+
+    /// Initial inverse-Hessian scale.
+    ///
+    /// On L-BFGS this is the fixed scale of [`Self::set_lbfgs_fixed_h0`].
+    /// On BFGS it replaces the fresh inverse Hessian with `h0 I`, and
+    /// [`Self::forget`] restores that scale. A BFGS matrix that has
+    /// already been updated keeps its pairs until `forget`. Other
+    /// methods return an error. `h0` must be finite and positive.
+    /// Leaving this unset keeps the identity BFGS matrix and the
+    /// Nocedal-Wright L-BFGS scale.
+    pub fn set_fixed_h0(&mut self, h0: f64) -> Result<()> {
+        if !(h0.is_finite() && h0 > 0.0) {
+            return Err(Error::InvalidControl {
+                what: "h0 must be finite and positive",
+            });
+        }
+        match &mut self.inner {
+            Inner::Lbfgs(solver) => {
+                solver.fixed_h0 = Some(h0);
+                Ok(())
+            }
+            Inner::Bfgs { h, fresh } => {
+                self.bfgs_h0 = Some(h0);
+                if *fresh {
+                    *h = Array2::<f64>::eye(self.dim) * h0;
+                }
+                Ok(())
+            }
+            _ => Err(Error::InvalidControl {
+                what: "h0 requires a BFGS or L-BFGS session",
+            }),
+        }
+    }
+
+    /// Bound the line-search step multiplier.
+    ///
+    /// A positive finite value is applied only when it is tighter than
+    /// the displacement cap the search already had. A non-positive
+    /// finite value clears the bound, which is the default. A non-finite
+    /// value is an error and leaves the session unchanged.
+    pub fn set_line_alpha_max(&mut self, limit: f64) -> Result<()> {
+        if !limit.is_finite() {
+            return Err(Error::InvalidControl {
+                what: "line alpha max must be finite",
+            });
+        }
+        self.line_alpha_max = (limit > 0.0).then_some(limit);
+        Ok(())
     }
 
     /// The configured line search.
@@ -2296,7 +2351,11 @@ impl Solver {
                 *prev_gd = 0.0;
             }
             Inner::Bfgs { h, fresh } => {
+                let scale = self.bfgs_h0;
                 *h = Array2::<f64>::eye(self.dim);
+                if let Some(scale) = scale {
+                    *h *= scale;
+                }
                 *fresh = true;
             }
             Inner::Sr1 { h, fresh } => {
@@ -2400,7 +2459,10 @@ impl Solver {
     /// window it replaces does.
     fn search_options(&self) -> LineSearchOptions {
         if self.manifold == ManifoldKind::Euclidean {
-            self.line_options
+            match self.line_alpha_max {
+                Some(limit) => self.line_options.with_alpha_max(limit),
+                None => self.line_options,
+            }
         } else {
             LineSearchOptions::default()
         }
