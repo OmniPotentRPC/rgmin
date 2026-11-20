@@ -90,7 +90,7 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 52 and ``layout_revision`` 5.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 53 and ``layout_revision`` 5.
     Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
     error, and the backward-error polish. A zero iteration budget
     follows the same unmet-stop policy. Minor 50 adds the energy and
@@ -98,7 +98,9 @@ Objects
     ``rgmin_rlbfgs_default``. Minor 52 adds ``RGMIN_GROMACS_STEEP``,
     ``RGMIN_STOP_MACHINE_PRECISION``,
     ``rgmin_solver_set_gromacs_steep``, and
-    ``rgmin_gromacs_steep_max_constraint_shrinks``. ``rgmin_control_t`` is unchanged.
+    ``rgmin_gromacs_steep_max_constraint_shrinks``. Minor 53 adds
+    ``rgmin_solver_set_fire_config`` and
+    ``rgmin_solver_set_lbfgs_fixed_h0``. ``rgmin_control_t`` is unchanged.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``

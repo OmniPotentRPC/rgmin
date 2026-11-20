@@ -688,7 +688,98 @@ NB_MODULE(_core, m) {
                      "tuple[float, ndarray[dtype=float64]]], hessian: collections.abc.Callable[["
                      "ndarray[dtype=float64]], ndarray[dtype=float64]], "
                      "x: ndarray[dtype=float64]) -> Report"),
-             "One Newton, RFO, or dogleg step. ``hessian(x)`` returns an ``(n, n)`` matrix.");
+             "One Newton, RFO, or dogleg step. ``hessian(x)`` returns an ``(n, n)`` matrix.")
+        .def("forget", [](rgmin::Solver& solver) { solver.forget(); },
+             "Drop the method memory. The next step starts from the point it is given.")
+        .def("pair_count", [](rgmin::Solver const& solver) { return solver.pair_count(); },
+             "Stored L-BFGS pairs.")
+        .def(
+            "push_pair",
+            [](rgmin::Solver& solver, nb::handle s_obj, nb::handle y_obj) {
+                auto take = [](nb::handle obj, char const* name) {
+                    std::vector<double> out;
+                    try {
+                        auto array = nb::cast<nb::ndarray<double, nb::ndim<1>, nb::c_contig>>(obj);
+                        out.assign(array.data(), array.data() + array.size());
+                    } catch (nb::cast_error const&) {
+                        throw nb::type_error((std::string(name) + " must be a contiguous float64 vector").c_str());
+                    }
+                    return out;
+                };
+                std::vector<double> s = take(s_obj, "s");
+                std::vector<double> y = take(y_obj, "y");
+                if (s.size() != y.size() || s.size() != solver.dim()) {
+                    throw nb::value_error("push_pair vectors must have length dim");
+                }
+                if (solver.push_pair(s.data(), y.data(), s.size()) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "push_pair failed");
+                }
+            },
+            nb::arg("s"), nb::arg("y"),
+            "Store one L-BFGS pair ``(s, y)``. A pair the curvature gate rejects is declined.")
+        .def(
+            "set_maxmove", [](rgmin::Solver& solver, double cap) { solver.set_maxmove(cap); },
+            nb::arg("cap"), "Euclidean step cap. A negative value clears every cap.")
+        .def(
+            "set_atom_maxmove",
+            [](rgmin::Solver& solver, double cap) { solver.set_atom_maxmove(cap); }, nb::arg("cap"),
+            "Per-atom step cap. A non-positive value clears it.")
+        .def(
+            "set_lbfgs_scaled",
+            [](rgmin::Solver& solver, double cap) {
+                if (solver.set_lbfgs_scaled(cap) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "set_lbfgs_scaled failed");
+                }
+            },
+            nb::arg("cap"),
+            "ASE length control. A non-positive cap restores 0.2.")
+        .def(
+            "set_lbfgs_fixed_h0",
+            [](rgmin::Solver& solver, double h0) {
+                if (solver.set_lbfgs_fixed_h0(h0) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "set_lbfgs_fixed_h0 failed");
+                }
+            },
+            nb::arg("h0"), "Fixed initial inverse-Hessian scale. A non-positive value clears it.")
+        .def(
+            "set_fire_config",
+            [](rgmin::Solver& solver, double dt, double dt_max, std::size_t n_min, double f_inc,
+               double f_dec, double alpha, double f_alpha) {
+                if (solver.set_fire_config(dt, dt_max, n_min, f_inc, f_dec, alpha, f_alpha) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "set_fire_config failed");
+                }
+            },
+            nb::arg("dt"), nb::arg("dt_max"), nb::arg("n_min"), nb::arg("f_inc"), nb::arg("f_dec"),
+            nb::arg("alpha"), nb::arg("f_alpha"),
+            "FIRE integrator parameters. The velocity is cleared.")
+        .def(
+            "set_fire_preset",
+            [](rgmin::Solver& solver, std::string const& name) {
+                rgmin_fire_preset_t preset = RGMIN_FIRE_PRESET_DEFAULT;
+                if (name == "guenole2020" || name == "fire2") {
+                    preset = RGMIN_FIRE_PRESET_GUENOLE2020;
+                } else if (name != "default") {
+                    throw nb::value_error("fire preset must be default or guenole2020");
+                }
+                if (solver.set_fire_preset(preset) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "set_fire_preset failed");
+                }
+            },
+            nb::arg("name"), "FIRE 2.0 parameter set. ``guenole2020`` is Table 1 of Guenole 2020.")
+        .def(
+            "set_fire_abc",
+            [](rgmin::Solver& solver, bool on) {
+                if (solver.set_fire_abc(on) != 0) {
+                    char const* msg = rgmin_last_error();
+                    throw nb::value_error(msg ? msg : "set_fire_abc failed");
+                }
+            },
+            nb::arg("on"), "ABC-FIRE on a FIRE 2.0 session.");
 
     m.def(
         "minimize",
