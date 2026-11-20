@@ -113,6 +113,9 @@ pub mod ode12r;
 mod oracle;
 /// Linear-storage factorization of periodic block-tridiagonal matrices.
 pub mod periodic_block;
+/// Extended-precision products of short periodic transfer matrices.
+#[cfg(feature = "periodic-product")]
+pub mod periodic_product;
 /// Geometry preconditioners: Exp, Lindh, and the bonded FF metric.
 pub mod precon;
 mod pso;

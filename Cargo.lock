@@ -83,6 +83,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "az"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be5eb007b7cacc6c660343e96f650fedf4b5a77512399eb952ca6642cf8d13f7"
+
+[[package]]
 name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -398,6 +404,16 @@ name = "glob"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
+
+[[package]]
+name = "gmp-mpfr-sys"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7db155b537cb791b133341f99f68371d86ee7fa4c79aacfbc376d72d23c70531"
+dependencies = [
+ "libc",
+ "windows-sys",
+]
 
 [[package]]
 name = "half"
@@ -839,6 +855,7 @@ dependencies = [
  "rayon",
  "readcon-core",
  "rgpot-core",
+ "rug",
  "sha2",
  "thiserror",
 ]
@@ -851,6 +868,18 @@ checksum = "67ab8328f695a6ec5a3b499eacc56e0a2831cdc207651a190b8fd5b335ffb558"
 dependencies = [
  "dlpk",
  "eindir-core",
+]
+
+[[package]]
+name = "rug"
+version = "1.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07a8857882aec59d27254b02481c709327c13de6fad1da60bfc4f9783eaaa61e"
+dependencies = [
+ "az",
+ "gmp-mpfr-sys",
+ "libc",
+ "libm",
 ]
 
 [[package]]
