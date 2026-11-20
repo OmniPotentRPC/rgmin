@@ -822,6 +822,11 @@ where
 
 /// eOn `client/Lanczos.cpp`: `beta < eps` on the start vector returns.
 const LANCZOS_START_EPS: f64 = f64::EPSILON;
+/// Reject a projected seed below `1e-12` times its unprojected norm.
+///
+/// A rejected seed is replaced by the first projected coordinate vector
+/// whose norm exceeds the same relative threshold.
+const LANCZOS_PROJECTED_START_RTOL: f64 = 1e-12;
 /// eOn `client/Lanczos.cpp`: `beta <= 1e-10 * |alpha|` is linear dependence.
 const LANCZOS_LINDEP: f64 = 1e-10;
 
@@ -889,7 +894,29 @@ where
     // basis stays in the projected subspace.
     let mut q0 = seed.to_owned();
     project(&mut q0);
-    let start = nrm2(q0.view());
+    let seed_norm = nrm2(seed);
+    if !seed_norm.is_finite() || seed_norm < LANCZOS_START_EPS {
+        return (Vec::new(), Vec::new(), Vec::new(), 0);
+    }
+    let mut start = nrm2(q0.view());
+    if !start.is_finite() || start <= LANCZOS_PROJECTED_START_RTOL * seed_norm {
+        let mut replacement = None;
+        for i in 0..n {
+            let mut unit = Array1::zeros(n);
+            unit[i] = 1.0;
+            project(&mut unit);
+            let norm = nrm2(unit.view());
+            if norm.is_finite() && norm > LANCZOS_PROJECTED_START_RTOL {
+                replacement = Some((unit, norm));
+                break;
+            }
+        }
+        let Some((unit, norm)) = replacement else {
+            return (Vec::new(), Vec::new(), Vec::new(), 0);
+        };
+        q0 = unit;
+        start = norm;
+    }
     if !start.is_finite() || start < LANCZOS_START_EPS {
         return (Vec::new(), Vec::new(), Vec::new(), 0);
     }
@@ -2368,6 +2395,18 @@ mod tests {
         assert!(mode.value.is_finite());
         assert!((mode.value - 1.0).abs() < 1e-12);
         assert!(mode.vector.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn lanczos_reseeds_a_projected_away_rigid_seed() {
+        let h = DiagH(Array1::ones(3));
+        let x = Array1::zeros(3);
+        let seed = array![1.0, 0.0, 0.0];
+        let mut remove_rigid = |v: &mut Array1<f64>| v[0] = 0.0;
+        let mode = lanczos(&h, x.view(), seed.view(), 3, &mut remove_rigid);
+        assert!((mode.value - 1.0).abs() < 1e-12, "Ritz {}", mode.value);
+        assert!((nrm2(mode.vector.view()) - 1.0).abs() < 1e-12);
+        assert!(mode.vector[0].abs() < 1e-12, "mode {:?}", mode.vector);
     }
 
     #[test]
