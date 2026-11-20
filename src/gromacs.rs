@@ -1,17 +1,24 @@
-//! GROMACS steepest-descent step-size state.
+//! GROMACS steepest-descent and conjugate-gradient state.
 //!
 //! The state is deliberately independent of coordinates, units, and the
 //! objective. A session supplies the projected force and applies its usual
 //! retraction, constraint, and displacement-cap hooks.
 //!
-//! The update is the normalized-force trial and strict energy test of
-//! GROMACS [`do_steep`][source]. A lower energy multiplies the maximum
-//! displacement by [`GROMACS_STEEP_GROW`]. A refusal multiplies it by
-//! [`GromacsSteepConfig::shrink`], whose default is the 0.5 factor in
+//! The steepest-descent update is the normalized-force trial and strict
+//! energy test of GROMACS [`do_steep`][source]. A lower energy multiplies
+//! the maximum displacement by [`GROMACS_STEEP_GROW`]. A refusal multiplies
+//! it by [`GromacsSteepConfig::shrink`], whose default is the 0.5 factor in
 //! GROMACS 2025.4 (`minimize.cpp` line 3104). The reference manual still
 //! says 0.2; [`GromacsSteepConfig::with_shrink`] selects that factor.
 //!
+//! The conjugate-gradient state [`GromacsCg`] tracks the periodic
+//! steepest-descent restart interval `nstcgsteep` and the `|beta| <= 5`
+//! guard of GROMACS [`do_cg`][cg_source] (`minimize.cpp` lines 1868-1887),
+//! paired with [`crate::nlcg::Conjugacy::PolakRibiere`] and the session line
+//! search.
+//!
 //! [source]: https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L2861
+//! [cg_source]: https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L1313
 
 use ndarray::{Array1, ArrayView1};
 
@@ -336,6 +343,188 @@ impl GromacsSteep {
     }
 }
 
+/// Canonical GROMACS initial `emstep` for `integrator = cg`.
+pub const GROMACS_CG_EMSTEP_DEFAULT: f64 = GROMACS_STEEP_EMSTEP_DEFAULT;
+
+/// Default GROMACS `nstcgsteep` interval for `integrator = cg`.
+///
+/// GROMACS `do_cg` resets `beta = 0` every `nstcgsteep` steps
+/// (`readir.cpp` line 2390, `minimize.cpp` line 1868).
+pub const GROMACS_CG_NSTCGSTEEP_DEFAULT: u32 = 1000;
+
+/// Magnitude bound on the Polak-Ribiere factor in GROMACS `do_cg`.
+///
+/// GROMACS `do_cg` resets `beta = 0` when `|beta| > 5.0` to prevent
+/// oscillation (`minimize.cpp` line 1884).
+pub const GROMACS_CG_BETA_CAP: f64 = 5.0;
+
+/// Default Armijo sufficient-decrease factor `c1` for the [`GromacsCg`]
+/// strong-Wolfe line search.
+pub const GROMACS_CG_WOLFE_C1: f64 = 0.0001;
+
+/// Default curvature factor `c2` for the [`GromacsCg`] strong-Wolfe line
+/// search (Nocedal-Wright conjugate-gradient recommendation).
+pub const GROMACS_CG_WOLFE_C2: f64 = 0.1;
+
+/// Default trial budget per [`GromacsCg`] strong-Wolfe line search.
+pub const GROMACS_CG_WOLFE_MAXITER: usize = 20;
+
+/// Parameters of [`GromacsCg`].
+///
+/// The struct is [`non_exhaustive`](https://doc.rust-lang.org/reference/attributes/type_system.html#the-non_exhaustive-attribute):
+/// build it with [`Default`] and [`Self::with_nstcgsteep`].
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GromacsCgConfig {
+    /// Period of performing 1 steepest-descent step while doing
+    /// conjugate-gradient energy minimization (`nstcgsteep`).
+    ///
+    /// The default is [`GROMACS_CG_NSTCGSTEEP_DEFAULT`]. Zero turns the
+    /// periodic restart off, as `nstcgsteep = 0` does in GROMACS.
+    pub nstcgsteep: u32,
+}
+
+impl Default for GromacsCgConfig {
+    fn default() -> Self {
+        Self {
+            nstcgsteep: GROMACS_CG_NSTCGSTEEP_DEFAULT,
+        }
+    }
+}
+
+impl GromacsCgConfig {
+    /// Replace [`Self::nstcgsteep`].
+    #[must_use]
+    pub fn with_nstcgsteep(mut self, nstcgsteep: u32) -> Self {
+        self.nstcgsteep = nstcgsteep;
+        self
+    }
+}
+
+/// Periodic steepest-descent restart state for GROMACS `integrator = cg`.
+///
+/// [`Self::step`] is the `step` counter of the GROMACS `do_cg` loop: the
+/// index of the iteration in progress, counted from zero at construction
+/// or [`Self::reset`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GromacsCg {
+    config: GromacsCgConfig,
+    steepest_direction: bool,
+    step: usize,
+}
+
+impl Default for GromacsCg {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GromacsCg {
+    /// Start with [`GromacsCgConfig::default`] on a steepest-descent direction.
+    pub fn new() -> Self {
+        Self {
+            config: GromacsCgConfig::default(),
+            steepest_direction: true,
+            step: 0,
+        }
+    }
+
+    /// Parameters governing periodic steepest-descent restarts.
+    pub fn config(self) -> GromacsCgConfig {
+        self.config
+    }
+
+    /// Replace the parameters. [`Self::step`] is kept.
+    pub fn set_config(&mut self, config: GromacsCgConfig) {
+        self.config = config;
+    }
+
+    /// Restart on a steepest-descent direction at [`Self::step`] zero while
+    /// keeping [`Self::config`].
+    pub fn reset(&mut self) {
+        self.steepest_direction = true;
+        self.step = 0;
+    }
+
+    /// Index of the GROMACS `do_cg` iteration in progress.
+    pub fn step(self) -> usize {
+        self.step
+    }
+
+    /// Close the iteration in progress, as the `step++` of the `do_cg` loop.
+    ///
+    /// A step that ends on the `gpa > 0` descent check does not call this:
+    /// GROMACS undoes its count with `step--`.
+    pub fn advance(&mut self) {
+        self.step = self.step.saturating_add(1);
+    }
+
+    /// Whether the active direction is a steepest-descent direction (`beta == 0`).
+    pub fn is_steepest_direction(self) -> bool {
+        self.steepest_direction
+    }
+
+    /// Record whether the prepared search direction used `beta == 0`.
+    pub fn note_direction(&mut self, beta: f64) {
+        self.steepest_direction = beta == 0.0;
+    }
+
+    /// Apply the GROMACS `do_cg` periodic steepest-descent restart and `|beta| <= 5` cap
+    /// (`minimize.cpp` lines 1868-1887) to the factor of the next direction.
+    ///
+    /// Call this after the line search of iteration [`Self::step`] and before
+    /// [`Self::advance`]. GROMACS tests `nstcg && (step % nstcg) == 0` on the
+    /// index of the iteration that just moved, so `step = 0` always restarts
+    /// and the steepest-descent directions are those of iterations `0`, `1`,
+    /// `nstcgsteep + 1`, `2 nstcgsteep + 1`, and so on. A zero
+    /// [`GromacsCgConfig::nstcgsteep`] keeps only the `|beta| > 5` restart.
+    pub fn filter_beta(self, beta: f64) -> f64 {
+        let period = self.config.nstcgsteep as usize;
+        if (period != 0 && self.step.is_multiple_of(period))
+            || !beta.is_finite()
+            || beta.abs() > GROMACS_CG_BETA_CAP
+        {
+            0.0
+        } else {
+            beta
+        }
+    }
+}
+
+pub(crate) fn euclidean_norm_stable(vector: ArrayView1<'_, f64>) -> f64 {
+    let mut scale = 0.0_f64;
+    let mut sum = 1.0_f64;
+    for &raw in vector {
+        let value = raw.abs();
+        if !value.is_finite() {
+            return f64::INFINITY;
+        }
+        if value != 0.0 {
+            if scale < value {
+                let ratio = scale / value;
+                sum = 1.0 + sum * ratio * ratio;
+                scale = value;
+            } else {
+                let ratio = value / scale;
+                sum += ratio * ratio;
+            }
+        }
+    }
+    if scale == 0.0 {
+        0.0
+    } else {
+        scale * sum.sqrt()
+    }
+}
+
+pub(crate) fn unit_direction_stable(direction: ArrayView1<'_, f64>) -> (Array1<f64>, f64) {
+    let norm = euclidean_norm_stable(direction);
+    if !(norm.is_finite() && norm > 0.0) {
+        return (Array1::zeros(direction.len()), 0.0);
+    }
+    (direction.mapv(|component| component / norm), norm)
+}
+
 #[cfg(test)]
 mod tests {
     use approx::assert_abs_diff_eq;
@@ -500,5 +689,51 @@ mod tests {
             .set_config(GromacsSteepConfig::default().with_max_constraint_shrinks(5))
             .unwrap();
         assert_eq!(state.config().max_constraint_shrinks, 5);
+    }
+
+    #[test]
+    fn gromacs_cg_filters_beta_on_nstcgsteep_and_beta_cap() {
+        let mut state = GromacsCg::new();
+        assert_eq!(state.config().nstcgsteep, GROMACS_CG_NSTCGSTEEP_DEFAULT);
+        assert!(state.is_steepest_direction());
+        assert_eq!(state.step(), 0);
+        state.set_config(GromacsCgConfig::default().with_nstcgsteep(3));
+        // `nstcg && (step % nstcg) == 0` on the index of the iteration that moved.
+        let kept: Vec<bool> = (0..7)
+            .map(|_| {
+                let kept = state.filter_beta(0.75) != 0.0;
+                state.advance();
+                kept
+            })
+            .collect();
+        assert_eq!(kept, [false, true, true, false, true, true, false]);
+        assert_eq!(state.step(), 7);
+        assert_eq!(state.filter_beta(GROMACS_CG_BETA_CAP), GROMACS_CG_BETA_CAP);
+        assert_eq!(state.filter_beta(GROMACS_CG_BETA_CAP + 0.1), 0.0);
+        assert_eq!(state.filter_beta(-GROMACS_CG_BETA_CAP - 0.1), 0.0);
+        assert_eq!(state.filter_beta(f64::NAN), 0.0);
+        state.reset();
+        assert_eq!(state.step(), 0);
+        assert_eq!(state.filter_beta(0.75), 0.0);
+    }
+
+    #[test]
+    fn gromacs_cg_zero_nstcgsteep_keeps_only_the_beta_cap() {
+        let mut state = GromacsCg::new();
+        state.set_config(GromacsCgConfig::default().with_nstcgsteep(0));
+        for _ in 0..5 {
+            assert_eq!(state.filter_beta(-1.25), -1.25);
+            assert_eq!(state.filter_beta(GROMACS_CG_BETA_CAP + 0.1), 0.0);
+            state.advance();
+        }
+    }
+
+    #[test]
+    fn unit_direction_stable_scales_huge_finite_vectors() {
+        let (unit, norm) = unit_direction_stable(ndarray::array![-3.0e200, 4.0e200, 0.0].view());
+        assert_abs_diff_eq!(norm, 5.0e200, epsilon = 1e186);
+        assert_abs_diff_eq!(unit[0], -0.6, epsilon = 1e-15);
+        assert_abs_diff_eq!(unit[1], 0.8, epsilon = 1e-15);
+        assert_abs_diff_eq!(unit[2], 0.0, epsilon = 1e-15);
     }
 }

@@ -657,6 +657,11 @@ impl Solver {
         if matches!(self.inner, Inner::Pso { .. }) {
             return Err(unsupported("particle swarm, which samples the whole box"));
         }
+        if matches!(self.overlay, Overlay::GromacsCg(_)) {
+            return Err(unsupported(
+                "GROMACS conjugate gradient, which has no constrained line search",
+            ));
+        }
         Ok(())
     }
 

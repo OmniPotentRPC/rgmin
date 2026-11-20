@@ -78,6 +78,7 @@ where
         | Method::GpMin
         | Method::NewtonCg
         | Method::NewtonPcg => run_session(obj, init, control, method),
+        Method::GromacsCg => run_session_linesearch(obj, init, control, method, linesearch),
     }
 }
 
@@ -90,9 +91,29 @@ fn run_session<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    drive_session(obj, init, control, method, |solver, obj, pos| {
+    drive_session(obj, init, control, method, None, |solver, obj, pos| {
         solver.step(obj, pos)
     })
+}
+
+fn run_session_linesearch<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    method: Method,
+    linesearch: LineSearch,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    drive_session(
+        obj,
+        init,
+        control,
+        method,
+        Some(linesearch),
+        |solver, obj, pos| solver.step(obj, pos),
+    )
 }
 
 /// Step a fresh session to a stop or the end of `control.maxiter`.
@@ -106,6 +127,7 @@ fn drive_session<O, S>(
     init: impl Into<Array1<f64>>,
     control: &Control,
     method: Method,
+    linesearch: Option<LineSearch>,
     mut step: S,
 ) -> Result<Report>
 where
@@ -114,6 +136,9 @@ where
 {
     let mut pos = init.into();
     let mut solver = Solver::new(method, control.clone(), pos.len());
+    if let Some(ls) = linesearch {
+        solver.set_linesearch(ls);
+    }
     if control.maxiter == 0 {
         let report = solver.assess(obj, &mut pos)?;
         return control.deliver(report);
@@ -202,7 +227,7 @@ fn run_session_hess<O>(
 where
     O: HessianObjective + ?Sized,
 {
-    drive_session(obj, init, control, method, |solver, obj, pos| {
+    drive_session(obj, init, control, method, None, |solver, obj, pos| {
         solver.step_hess(obj, pos)
     })
 }
@@ -255,7 +280,7 @@ fn run_session_hvp<O>(
 where
     O: HessianVector + ?Sized,
 {
-    drive_session(obj, init, control, method, |solver, obj, pos| {
+    drive_session(obj, init, control, method, None, |solver, obj, pos| {
         solver.step_hvp(obj, pos)
     })
 }
