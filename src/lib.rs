@@ -122,6 +122,8 @@ mod restricted_trust;
 pub mod rigid;
 /// Cautious limited-memory Riemannian BFGS (Huang, Absil, Gallivan).
 pub mod rlbfgs;
+/// Bracketed scalar roots by bisection.
+pub mod root;
 /// Tangent-space truncated conjugate gradients and trust-radius updates.
 pub mod rtr;
 /// Moller scaled conjugate gradient (damped-model step, no line search).
