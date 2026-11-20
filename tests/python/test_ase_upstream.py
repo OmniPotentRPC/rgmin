@@ -528,3 +528,47 @@ def test_replay_trajectory_is_lbfgs_only(tmp_path: Path) -> None:
         rgmin_ase.BFGS(fresh, logfile=None).replay_trajectory(str(path))
     with pytest.raises(TypeError, match="_replay_trajectory"):
         rgmin_ase.FIRE(fresh, logfile=None).replay_trajectory(str(path))
+
+
+def test_fire2_default_dtmin_follows_the_time_step() -> None:
+    atoms = _au8()
+    opt = rgmin_ase.FIRE2(atoms, logfile=None, dt=0.05)
+    assert opt.dtmin == pytest.approx(0.02 * 0.05)
+    opt.run(fmax=0.05, steps=3)
+
+
+def test_replay_trajectory_accepts_a_path(tmp_path: Path) -> None:
+    atoms = _au8()
+    path = tmp_path / "opt.traj"
+    rgmin_ase.LBFGS(atoms, logfile=None, trajectory=str(path)).run(fmax=0.05, steps=6)
+    opt = rgmin_ase.LBFGS(_au8(), logfile=None)
+    opt.replay_trajectory(path)
+    assert opt._open().pair_count() > 0
+
+
+class _LockSpy(EMT):
+    """EMT that records whether the optimizer's calculator lock is held."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.held: list[bool] = []
+
+    def calculate(self, *args: object, **kwargs: object) -> None:
+        self.held.append(rgmin_ase._calc_locks[self].locked())
+        super().calculate(*args, **kwargs)
+
+
+def test_fire_downhill_check_reads_the_calculator_under_its_lock() -> None:
+    atoms = bulk("Au") * (2, 2, 2)
+    spy = _LockSpy()
+    atoms.calc = spy
+    atoms.rattle(stdev=0.1, seed=7)
+    opt = rgmin_ase.FIRE(atoms, logfile=None, downhill_check=True)
+    solver = opt._open()
+    spy.held.clear()
+    opt._before_step(solver)
+    assert spy.held and all(spy.held)
+    atoms.rattle(stdev=0.05, seed=8)
+    spy.held.clear()
+    opt._before_step(solver)
+    assert spy.held and all(spy.held)
