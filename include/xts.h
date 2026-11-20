@@ -83,6 +83,7 @@ typedef rgmin_constraints_t xts_constraints_t;
 #define XTS_NEWTON_CG RGMIN_NEWTON_CG
 #define XTS_NEWTON_PCG RGMIN_NEWTON_PCG
 #define XTS_GROMACS_STEEP RGMIN_GROMACS_STEEP
+#define XTS_GROMACS_CG RGMIN_GROMACS_CG
 
 #define XTS_CONJUGACY_FLETCHER_REEVES RGMIN_CONJUGACY_FLETCHER_REEVES
 #define XTS_CONJUGACY_POLAK_RIBIERE RGMIN_CONJUGACY_POLAK_RIBIERE
@@ -132,6 +133,7 @@ typedef rgmin_constraints_t xts_constraints_t;
 #define xts_solver_set_accept rgmin_solver_set_accept
 #define xts_solver_set_gromacs_steep rgmin_solver_set_gromacs_steep
 #define xts_gromacs_steep_max_constraint_shrinks rgmin_gromacs_steep_max_constraint_shrinks
+#define xts_solver_set_gromacs_cg rgmin_solver_set_gromacs_cg
 #define xts_solver_set_stop_norm rgmin_solver_set_stop_norm
 #define xts_solver_set_error_on_unmet rgmin_solver_set_error_on_unmet
 #define xts_solver_set_backward_polish rgmin_solver_set_backward_polish
