@@ -1,5 +1,88 @@
 use rgmin::{CertificateError, adjoint_functional_bar, certify_morse_gap, kantorovich_ball};
 
+#[derive(Clone, Copy)]
+struct DoubleDouble {
+    hi: f64,
+    lo: f64,
+}
+
+impl DoubleDouble {
+    fn from(value: f64) -> Self {
+        Self { hi: value, lo: 0.0 }
+    }
+
+    fn normalize(hi: f64, lo: f64) -> Self {
+        let sum = hi + lo;
+        Self {
+            hi: sum,
+            lo: lo - (sum - hi),
+        }
+    }
+
+    fn add(self, rhs: Self) -> Self {
+        let sum = self.hi + rhs.hi;
+        let carried = sum - self.hi;
+        let error = (self.hi - (sum - carried)) + (rhs.hi - carried) + self.lo + rhs.lo;
+        Self::normalize(sum, error)
+    }
+
+    fn sub(self, rhs: Self) -> Self {
+        self.add(Self {
+            hi: -rhs.hi,
+            lo: -rhs.lo,
+        })
+    }
+
+    fn mul(self, rhs: Self) -> Self {
+        let product = self.hi * rhs.hi;
+        let error = self.hi.mul_add(rhs.hi, -product)
+            + self.hi * rhs.lo
+            + self.lo * rhs.hi
+            + self.lo * rhs.lo;
+        Self::normalize(product, error)
+    }
+
+    fn div(self, rhs: Self) -> Self {
+        let quotient = Self::from(self.hi / rhs.hi);
+        let correction = Self::from(self.sub(rhs.mul(quotient)).hi / rhs.hi);
+        let estimate = quotient.add(correction);
+        estimate.add(Self::from(self.sub(rhs.mul(estimate)).hi / rhs.hi))
+    }
+
+    fn sqrt(self) -> Self {
+        let half = Self::from(0.5);
+        let mut estimate = Self::from(self.hi.sqrt());
+        for _ in 0..2 {
+            estimate = estimate.add(self.div(estimate)).mul(half);
+        }
+        estimate
+    }
+
+    fn as_f64(self) -> f64 {
+        self.hi + self.lo
+    }
+}
+
+fn high_precision_ball(eta: f64, h: f64) -> (f64, f64) {
+    let one = DoubleDouble::from(1.0);
+    let denominator = one.add(
+        one.sub(DoubleDouble::from(2.0).mul(DoubleDouble::from(h)))
+            .sqrt(),
+    );
+    let radius = DoubleDouble::from(eta).mul(DoubleDouble::from(2.0).div(denominator));
+    let remainder = DoubleDouble::from(h).mul(radius.div(denominator));
+    (radius.as_f64(), remainder.as_f64())
+}
+
+fn assert_relative(actual: f64, expected: f64, tolerance: f64) {
+    let relative_error = (actual - expected).abs() / expected.abs().max(f64::MIN_POSITIVE);
+    assert!(
+        relative_error <= tolerance,
+        "actual={actual:.17e}, expected={expected:.17e}, relative_error={relative_error:.3e}, \
+         tolerance={tolerance:.3e}"
+    );
+}
+
 #[test]
 fn affine_stationarity_has_no_nonlinear_remainder() {
     let ball = kantorovich_ball(0.25, 2.0, 0.0).expect("affine ball");
@@ -159,6 +242,13 @@ fn overflow_in_majorant_products_and_remainders_is_rejected() {
             value: f64::INFINITY,
         })
     );
+    assert_eq!(
+        kantorovich_ball(f64::MAX, f64::MIN_POSITIVE, 0.125),
+        Err(CertificateError::InvalidMajorant {
+            input: "radius",
+            value: f64::INFINITY,
+        })
+    );
 
     let large_ball = kantorovich_ball(2.0, 0.25, 1.0).expect("ball with nonlinear_remainder >= 1");
     assert_eq!(
@@ -185,6 +275,33 @@ fn overflow_in_majorant_products_and_remainders_is_rejected() {
             value: f64::INFINITY,
         })
     );
+}
+
+#[test]
+fn kantorovich_radius_and_remainder_match_double_double_reference() {
+    // The compact double-double calculation above treats each f64 input exactly.
+    // Four ulps of relative slack cover the final f64 sqrt and arithmetic.
+    const RADIUS_RELATIVE_TOLERANCE: f64 = 4.0 * f64::EPSILON;
+    const REMAINDER_RELATIVE_TOLERANCE: f64 = 4.0 * f64::EPSILON;
+
+    for eta in [1.0e308, f64::MAX] {
+        let ball = kantorovich_ball(eta, 1.0, 0.0).expect("finite affine radius");
+        let (reference_radius, reference_remainder) = high_precision_ball(eta, 0.0);
+        assert_relative(ball.radius(), reference_radius, RADIUS_RELATIVE_TOLERANCE);
+        assert_eq!(ball.nonlinear_remainder(), reference_remainder);
+        certify_morse_gap(f64::MAX, 0.0, 0.0, ball).expect("finite radius does not poison gap");
+    }
+
+    for h in [1.0e-17, 1.0e-12, 0.5 - f64::EPSILON] {
+        let ball = kantorovich_ball(1.0, 1.0, h).expect("valid Kantorovich parameter");
+        let (reference_radius, reference_remainder) = high_precision_ball(1.0, h);
+        assert_relative(ball.radius(), reference_radius, RADIUS_RELATIVE_TOLERANCE);
+        assert_relative(
+            ball.nonlinear_remainder(),
+            reference_remainder,
+            REMAINDER_RELATIVE_TOLERANCE,
+        );
+    }
 }
 
 #[test]
