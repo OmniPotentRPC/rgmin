@@ -119,6 +119,7 @@ environment = { PATH = "$USERPROFILE\\.cargo\\bin;$PATH" }
 
 [tool.pytest.ini_options]
 markers = [
+  "iterations(n): repeat a test under pytest-run-parallel",
   "thread_unsafe: run single-threaded under pytest-run-parallel",
 ]
 
