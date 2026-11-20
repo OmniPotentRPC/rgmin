@@ -733,10 +733,12 @@ where
                 sibling_records,
             });
         }
+        for index in active.iter().copied() {
+            states[index].record.operator_applications += 1;
+            states[index].record.operator_rounds += 1;
+        }
         for (block, index) in active.iter().copied().enumerate() {
             let state = &mut states[index];
-            state.record.operator_applications += 1;
-            state.record.operator_rounds += 1;
             let begin = block * dimension;
             let end = begin + dimension;
             if !finite(&images[begin..end]) {
