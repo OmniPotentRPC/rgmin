@@ -788,17 +788,36 @@ where
     if seed.is_empty() {
         return Err(Error::Dim { got: 0, dim: 0 });
     }
-    match params.kind {
+    let mut projected_seed = seed.to_owned();
+    project(&mut projected_seed);
+    let mut mode = match params.kind {
         EigensolverKind::Lanczos => Ok(lanczos(h, x, seed, params.krylov_dim(seed.len()), project)),
-        EigensolverKind::RayleighRitz => Ok(rayleigh_ritz(h, x, seed, params)),
-        EigensolverKind::JacobiDavidson => Ok(jacobi_davidson(h, x, seed, params, t)),
+        EigensolverKind::RayleighRitz => {
+            Ok(rayleigh_ritz(h, x, projected_seed.view(), params, project))
+        }
+        EigensolverKind::JacobiDavidson => Ok(jacobi_davidson(
+            h,
+            x,
+            projected_seed.view(),
+            params,
+            t,
+            project,
+        )),
         EigensolverKind::Lobpcg => Ok(lobpcg(h, x, seed, params, t, project)),
-        EigensolverKind::Dimer => Ok(dimer(h, x, seed, params)),
-        EigensolverKind::Primme => lowest_mode_primme(h, x, seed, params, t),
-        EigensolverKind::Libkrylov => lowest_mode_libkrylov(h, x, seed, params),
-        EigensolverKind::Slepc => lowest_mode_slepc(h, x, seed, params, &SlepcParams::default()),
+        EigensolverKind::Dimer => Ok(dimer(h, x, projected_seed.view(), params, project)),
+        EigensolverKind::Primme => lowest_mode_primme(h, x, projected_seed.view(), params, t),
+        EigensolverKind::Libkrylov => lowest_mode_libkrylov(h, x, projected_seed.view(), params),
+        EigensolverKind::Slepc => {
+            lowest_mode_slepc(h, x, projected_seed.view(), params, &SlepcParams::default())
+        }
         other => Err(Error::EigenUnavailable { kind: other.name() }),
+    }?;
+    project(&mut mode.vector);
+    let norm = nrm2(mode.vector.view());
+    if norm.is_finite() && norm > 0.0 {
+        mode.vector.mapv_inplace(|value| value / norm);
     }
+    Ok(mode)
 }
 
 /// eOn `client/Lanczos.cpp`: `beta < eps` on the start vector returns.
@@ -1536,13 +1555,20 @@ fn gram_inf_error(q: &[Array1<f64>]) -> f64 {
 /// A Rayleigh-Ritz solve selects the lower-curvature axis in the plane
 /// `{N, Θ}`, with `Θ = F_rot/‖F_rot‖`. The Hessian is fixed at `x`, so
 /// its action rotates with the axis and each plane needs one new action.
-fn dimer<H: ApplyHessian + ?Sized>(
+fn dimer<H, F>(
     h: &H,
     x: ArrayView1<f64>,
     seed: ArrayView1<f64>,
     params: &EigenParams,
-) -> LowestMode {
-    let mut nvec = normalize(seed.to_owned());
+    project: &mut F,
+) -> LowestMode
+where
+    H: ApplyHessian + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
+    let mut nvec = seed.to_owned();
+    project(&mut nvec);
+    nvec = normalize(nvec);
     let max_rot = if params.max_iter == 0 {
         20
     } else {
@@ -1550,6 +1576,7 @@ fn dimer<H: ApplyHessian + ?Sized>(
     };
     let tol = params.tolerance();
     let mut hn = h.apply_hessian(x, nvec.view());
+    project(&mut hn);
     let mut actions = 1;
     let mut curvature = 0.0;
     for _ in 0..max_rot {
@@ -1561,7 +1588,8 @@ fn dimer<H: ApplyHessian + ?Sized>(
             break;
         }
         let theta = &frot / frn;
-        let ht = h.apply_hessian(x, theta.view());
+        let mut ht = h.apply_hessian(x, theta.view());
+        project(&mut ht);
         actions += 1;
         let b = dot(nvec.view(), ht.view());
         let c_th = dot(theta.view(), ht.view());
@@ -1604,15 +1632,6 @@ impl Subspace {
             aq: Vec::with_capacity(m),
             actions: 0,
         }
-    }
-
-    fn try_append<H: ApplyHessian + ?Sized>(
-        &mut self,
-        h: &H,
-        x: ArrayView1<f64>,
-        v: Array1<f64>,
-    ) -> bool {
-        self.try_append_projected(h, x, v, &mut |_| {})
     }
 
     fn try_append_projected<H, F>(
@@ -1682,20 +1701,25 @@ impl Subspace {
     }
 }
 
-fn rayleigh_ritz<H: ApplyHessian + ?Sized>(
+fn rayleigh_ritz<H, F>(
     h: &H,
     x: ArrayView1<f64>,
     seed: ArrayView1<f64>,
     params: &EigenParams,
-) -> LowestMode {
+    project: &mut F,
+) -> LowestMode
+where
+    H: ApplyHessian + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
     let n = seed.len();
     let m = params.krylov_dim(n);
     let tol = params.tolerance();
     let mut space = Subspace::with_capacity(m);
-    if !space.try_append(h, x, seed.to_owned()) {
+    if !space.try_append_projected(h, x, seed.to_owned(), project) {
         let mut unit = Array1::zeros(n);
         unit[0] = 1.0;
-        space.try_append(h, x, unit);
+        space.try_append_projected(h, x, unit, project);
     }
     let mut last = LowestMode {
         vector: normalize(seed.to_owned()),
@@ -1718,7 +1742,7 @@ fn rayleigh_ritz<H: ApplyHessian + ?Sized>(
         if space.q.len() >= m {
             break;
         }
-        if !space.try_append(h, x, residual) {
+        if !space.try_append_projected(h, x, residual, project) {
             break;
         }
     }
@@ -1808,26 +1832,28 @@ where
     }
 }
 
-fn jacobi_davidson<H, P>(
+fn jacobi_davidson<H, P, F>(
     h: &H,
     x: ArrayView1<f64>,
     seed: ArrayView1<f64>,
     params: &EigenParams,
     t: &P,
+    project: &mut F,
 ) -> LowestMode
 where
     H: ApplyHessian + ?Sized,
     P: ApplyPreconditioner + ?Sized,
+    F: FnMut(&mut Array1<f64>),
 {
     let n = seed.len();
     let m = params.krylov_dim(n);
     let tol = params.tolerance();
     let inner = (n / 4).clamp(4, 16);
     let mut space = Subspace::with_capacity(m);
-    if !space.try_append(h, x, seed.to_owned()) {
+    if !space.try_append_projected(h, x, seed.to_owned(), project) {
         let mut unit = Array1::zeros(n);
         unit[0] = 1.0;
-        space.try_append(h, x, unit);
+        space.try_append_projected(h, x, unit, project);
     }
     let mut last = LowestMode {
         vector: normalize(seed.to_owned()),
@@ -1862,7 +1888,7 @@ where
             t,
         )
         .unwrap_or(residual);
-        if !space.try_append(h, x, next) {
+        if !space.try_append_projected(h, x, next, project) {
             break;
         }
     }
@@ -2342,6 +2368,38 @@ mod tests {
         assert!(mode.value.is_finite());
         assert!((mode.value - 1.0).abs() < 1e-12);
         assert!(mode.vector.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn rayleigh_ritz_applies_the_supplied_projector() {
+        use std::cell::Cell;
+
+        let h = DiagH(array![-100.0, 1.0, 2.0]);
+        let x = Array1::zeros(3);
+        let seed = array![1.0, 1.0, 0.0];
+        let calls = Cell::new(0);
+        let mut remove_rigid = |v: &mut Array1<f64>| {
+            calls.set(calls.get() + 1);
+            v[0] = 0.0;
+        };
+        let mode = lowest_mode_precond_with(
+            &h,
+            x.view(),
+            seed.view(),
+            &EigenParams {
+                kind: EigensolverKind::RayleighRitz,
+                krylov: 3,
+                max_iter: 8,
+                tol: 1e-10,
+                ..EigenParams::default()
+            },
+            &crate::hvp::IdentityPrecond,
+            &mut remove_rigid,
+        )
+        .unwrap();
+        assert!(calls.get() > 0);
+        assert!(mode.vector[0].abs() < 1e-12, "mode {:?}", mode.vector);
+        assert!((mode.value - 1.0).abs() < 1e-10, "Ritz {}", mode.value);
     }
 
     fn hdr_diag(n: usize) -> DiagH {
