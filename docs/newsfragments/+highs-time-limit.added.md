@@ -1,5 +1,3 @@
-Added `HighsOptions::time_limit` and `HighsOptions::with_time_limit`. A value
-replaces the time limit of both the projection and the feasible step HiGHS
-solves, and `None`, the default, keeps the 0.05 s and 1.0 s limits they had.
-The feasible step solve also reports a refused `parallel` or `threads` option
-as `Error::Highs` instead of ignoring it.
+- Added `HighsOptions::time_limit` and `HighsOptions::with_time_limit`. A value replaces the time limit of both the projection and the feasible step HiGHS solves, and `None`, the default, keeps the 0.05 s and 1.0 s limits they had. The feasible step solve also reports a refused `parallel` or `threads` option as `Error::Highs` instead of ignoring it.
+- `Solver::set_highs_time_limit` sets the same limit on a session.
+- A HiGHS solve that reaches its limit is no longer silent. `Error::HighsTimeLimit` names it where the step cannot go on without the solve, and `Solver::highs_timeouts` counts the Hessian steps that fell back to the shifted Newton, RFO or L-BFGS step.

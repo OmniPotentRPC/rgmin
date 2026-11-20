@@ -17,6 +17,17 @@ pub enum Error {
     /// HiGHS rejected the L-BFGS quadratic model.
     #[error("HiGHS: {0}")]
     Highs(String),
+    /// A HiGHS solve reached its time limit before it finished.
+    ///
+    /// [`crate::HighsOptions::time_limit`] sets the limit. A session
+    /// that can still take a step without the solve counts the timeout in
+    /// [`crate::Solver::highs_timeouts`] and takes that step. A step the
+    /// constraints must shape returns this error.
+    #[error("HiGHS reached its time limit of {seconds} s")]
+    HighsTimeLimit {
+        /// The limit the solve ran under, in seconds.
+        seconds: f64,
+    },
     /// Newton / RFO / dogleg needs a Hessian oracle.
     #[error("Newton/RFO/dogleg needs a Hessian; call step_hess")]
     NeedHessian,
