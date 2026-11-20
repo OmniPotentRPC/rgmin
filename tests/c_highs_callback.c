@@ -1,8 +1,11 @@
 /* Install a HiGHS callback through rgmin.h and take constrained steps.
  * f = x.x / 2 under x0 + x1 = 0 from (2, -1). The callback counts calls
- * through its user pointer, and a NULL callback clears it. */
+ * through its user pointer, and a NULL callback clears it. A time limit
+ * that no solve can meet fails the constrained step with a message that
+ * names it, and zero clears the limit. */
 
 #include <stdio.h>
+#include <string.h>
 #include "rgmin.h"
 
 static rgmin_status_t half_square(void *user, const DLManagedTensorVersioned *x,
@@ -73,6 +76,21 @@ int main(void) {
         } else if (hits != called) {
             fprintf(stderr, "a cleared callback ran: %lu then %lu\n", called, hits);
             failed = 7;
+        } else {
+            x[0] = 2.0;
+            x[1] = -1.0;
+            if (rgmin_solver_set_highs_time_limit(s, 1e-12) != 0 ||
+                rgmin_solver_set_highs_time_limit(s, 0.0 / 0.0) != 1) {
+                failed = 8;
+            } else if (rgmin_solver_step_fg(s, half_square, NULL, tensor, &out) ==
+                           RGMIN_SUCCESS ||
+                       strstr(rgmin_last_error(), "time limit") == NULL) {
+                fprintf(stderr, "a timed out step: %s\n", rgmin_last_error());
+                failed = 9;
+            } else if (rgmin_solver_set_highs_time_limit(s, 0.0) != 0 || step(s, tensor, &out) != 0 ||
+                       rgmin_solver_highs_timeouts(s) != 0) {
+                failed = 10;
+            }
         }
     }
     rgmin_tensor_free(tensor);
