@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 53
+#define RGMIN_ABI_VERSION_MINOR 54
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -92,7 +92,8 @@ typedef struct rgmin_abi_stamp_t {
  * 52 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
  *    rgmin_solver_set_gromacs_steep, and
  *    rgmin_gromacs_steep_max_constraint_shrinks.
- * 53 RGMIN_GROMACS_CG and rgmin_solver_set_gromacs_cg. */
+ * 53 RGMIN_GROMACS_CG and rgmin_solver_set_gromacs_cg.
+ * 54 RGMIN_GROMACS_LBFGS and rgmin_solver_set_gromacs_lbfgs. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -142,7 +143,7 @@ typedef enum rgmin_method_t {
     RGMIN_GROMACS_STEEP = 28,
     /** GROMACS integrator = cg. ABI minor 53. */
     RGMIN_GROMACS_CG = 29,
-    /** GROMACS integrator = l-bfgs. */
+    /** GROMACS integrator = l-bfgs. ABI minor 54. */
     RGMIN_GROMACS_LBFGS = 30
 } rgmin_method_t;
 
@@ -528,7 +529,7 @@ uint32_t rgmin_gromacs_steep_max_constraint_shrinks(double step_size, double shr
 int32_t rgmin_solver_set_gromacs_cg(rgmin_solver_t *solver, uint32_t nstcgsteep);
 /** GROMACS L-BFGS correction count on a RGMIN_GROMACS_LBFGS session.
  *  Returns 0, or 1 on a null solver, nbfgscorr == 0, or a session that
- *  is not RGMIN_GROMACS_LBFGS. */
+ *  is not RGMIN_GROMACS_LBFGS. ABI minor 54. */
 int32_t rgmin_solver_set_gromacs_lbfgs(rgmin_solver_t *solver, size_t nbfgscorr);
 
 /** FIRE schedule. */
