@@ -203,4 +203,4 @@ jobs:
 
       - name: ASE contract tests
         shell: bash
-        run: python -m pytest -q tests/python/test_ase.py --timeout=180 -o faulthandler_timeout=120
+        run: python -m pytest -q tests/python/test_ase.py tests/python/test_ase_stops.py tests/python/test_ase_upstream.py --timeout=180 -o faulthandler_timeout=120
