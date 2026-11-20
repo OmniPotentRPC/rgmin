@@ -310,7 +310,11 @@ where
             record,
         });
     }
-    let budget = options.max_iterations.unwrap_or(dimension).min(dimension);
+    let requested = match options.max_iterations {
+        Some(limit) => limit,
+        None => dimension,
+    };
+    let budget = requested.min(dimension);
     let mut basis = vec![
         right_hand_side
             .iter()
@@ -456,7 +460,11 @@ where
     if dimension == 0 {
         return Err(refusal(KrylovRefusal::EmptySystem, KrylovRecord::new(0.0)));
     }
-    let budget = options.max_iterations.unwrap_or(dimension).min(dimension);
+    let requested = match options.max_iterations {
+        Some(limit) => limit,
+        None => dimension,
+    };
+    let budget = requested.min(dimension);
     let mut states = Vec::with_capacity(right_hand_sides.len());
     for right_hand_side in right_hand_sides {
         if right_hand_side.len() != dimension {
