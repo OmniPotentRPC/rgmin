@@ -238,6 +238,24 @@ pub enum GmresFailure<OperatorError, PreconditionerError> {
         /// Records for every remaining active right-hand side, in order.
         sibling_records: Vec<KrylovRecord>,
     },
+    /// A block preconditioner failed with every right-hand-side record.
+    BlockPreconditioner {
+        /// Original preconditioner error.
+        source: PreconditionerError,
+        /// Record for the right-hand side whose preconditioner failed.
+        record: KrylovRecord,
+        /// Records for every other right-hand side.
+        sibling_records: Vec<KrylovRecord>,
+    },
+    /// A block solve refused with every right-hand-side record.
+    BlockRefused {
+        /// Typed reason.
+        reason: KrylovRefusal,
+        /// Record for the right-hand side that caused the refusal.
+        record: KrylovRecord,
+        /// Records for every other right-hand side.
+        sibling_records: Vec<KrylovRecord>,
+    },
     /// The preconditioner returned an error.
     Preconditioner {
         /// Original preconditioner error.
@@ -264,6 +282,8 @@ impl<OE, PE> GmresFailure<OE, PE> {
         match self {
             Self::Operator { record, .. }
             | Self::BlockOperator { record, .. }
+            | Self::BlockPreconditioner { record, .. }
+            | Self::BlockRefused { record, .. }
             | Self::Preconditioner { record, .. }
             | Self::Refused { record, .. } => record,
         }
@@ -273,6 +293,12 @@ impl<OE, PE> GmresFailure<OE, PE> {
     pub fn sibling_records(&self) -> &[KrylovRecord] {
         match self {
             Self::BlockOperator {
+                sibling_records, ..
+            }
+            | Self::BlockPreconditioner {
+                sibling_records, ..
+            }
+            | Self::BlockRefused {
                 sibling_records, ..
             } => sibling_records,
             _ => &[],
@@ -304,7 +330,22 @@ fn dot(left: &[f64], right: &[f64]) -> f64 {
 }
 
 fn norm(vector: &[f64]) -> f64 {
-    dot(vector, vector).sqrt()
+    let mut scale = 0.0;
+    let mut sum_squares = 1.0;
+    for value in vector {
+        let magnitude = value.abs();
+        if magnitude != 0.0 {
+            if scale < magnitude {
+                let ratio = scale / magnitude;
+                sum_squares = 1.0 + sum_squares * ratio * ratio;
+                scale = magnitude;
+            } else {
+                let ratio = magnitude / scale;
+                sum_squares += ratio * ratio;
+            }
+        }
+    }
+    scale * sum_squares.sqrt()
 }
 
 fn finite(vector: &[f64]) -> bool {
@@ -457,10 +498,11 @@ where
         }
         let rotation_norm = hessenberg[column_index].hypot(hessenberg[column_index + 1]);
         if !rotation_norm.is_finite() || rotation_norm == 0.0 {
+            let absolute_residual = transformed_rhs[column_index].abs();
             let iteration = KrylovIteration {
                 iteration: column_index + 1,
-                absolute_residual: right_hand_side_norm,
-                relative_residual: 1.0,
+                absolute_residual,
+                relative_residual: absolute_residual / right_hand_side_norm,
                 operator_applications: record.operator_applications,
                 preconditioner_applications: record.preconditioner_applications,
             };
@@ -495,7 +537,7 @@ where
         observer.observe(iteration);
         let converged = absolute_residual <= options.relative_tolerance * right_hand_side_norm;
         let exhausted = column_index + 1 == budget || column_index + 1 == dimension;
-        if converged || exhausted {
+        if converged || exhausted || subdiagonal == 0.0 {
             let status = if converged {
                 GmresStatus::Converged
             } else {
@@ -511,7 +553,7 @@ where
                 record,
             });
         }
-        if !subdiagonal.is_finite() || subdiagonal == 0.0 {
+        if !subdiagonal.is_finite() {
             return Err(refusal(KrylovRefusal::SingularProjectedSystem, record));
         }
         basis.push(image.iter().map(|value| value / subdiagonal).collect());
@@ -529,6 +571,30 @@ struct BlockState {
     operator_images: Vec<Vec<f64>>,
     record: KrylovRecord,
     run: Option<GmresRun>,
+}
+
+fn block_records(states: &[BlockState], primary: usize) -> (KrylovRecord, Vec<KrylovRecord>) {
+    let record = states[primary].record.clone();
+    let sibling_records = states
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != primary)
+        .map(|(_, state)| state.record.clone())
+        .collect();
+    (record, sibling_records)
+}
+
+fn block_refusal<OE, PE>(
+    reason: KrylovRefusal,
+    states: &[BlockState],
+    primary: usize,
+) -> BlockGmresFailure<OE, PE> {
+    let (record, sibling_records) = block_records(states, primary);
+    GmresFailure::BlockRefused {
+        reason,
+        record,
+        sibling_records,
+    }
 }
 
 /// Block GMRES for several independent right-hand sides.
@@ -615,11 +681,12 @@ where
         }
     }
     if budget == 0 {
-        for state in &states {
+        for (index, state) in states.iter().enumerate() {
             if state.run.is_none() {
-                return Err(refusal(
+                return Err(block_refusal(
                     KrylovRefusal::ZeroIterationBudget,
-                    state.record.clone(),
+                    &states,
+                    index,
                 ));
             }
         }
@@ -642,28 +709,28 @@ where
             if let Err(source) = preconditioners[index]
                 .apply(&state.basis[column_index], &mut directions[begin..end])
             {
-                return Err(GmresFailure::Preconditioner {
+                let (record, sibling_records) = block_records(&states, index);
+                return Err(GmresFailure::BlockPreconditioner {
                     source,
-                    record: state.record.clone(),
+                    record,
+                    sibling_records,
                 });
             }
             state.record.preconditioner_applications += 1;
             if !finite(&directions[begin..end]) {
-                return Err(refusal(KrylovRefusal::NonFinite, state.record.clone()));
+                return Err(block_refusal(KrylovRefusal::NonFinite, &states, index));
             }
         }
         let mut images = vec![0.0; directions.len()];
         if let Err(source) = operator.apply_batch(&directions, &mut images, active.len()) {
-            let Some((first, siblings)) = active.split_first() else {
+            let Some(first) = active.first() else {
                 return Err(refusal(KrylovRefusal::Dimension, KrylovRecord::new(0.0)));
             };
+            let (record, sibling_records) = block_records(&states, *first);
             return Err(GmresFailure::BlockOperator {
                 source,
-                record: states[*first].record.clone(),
-                sibling_records: siblings
-                    .iter()
-                    .map(|index| states[*index].record.clone())
-                    .collect(),
+                record,
+                sibling_records,
             });
         }
         for (block, index) in active.iter().copied().enumerate() {
@@ -673,7 +740,7 @@ where
             let begin = block * dimension;
             let end = begin + dimension;
             if !finite(&images[begin..end]) {
-                return Err(refusal(KrylovRefusal::NonFinite, state.record.clone()));
+                return Err(block_refusal(KrylovRefusal::NonFinite, &states, index));
             }
             state
                 .preconditioned_basis
@@ -700,18 +767,20 @@ where
             }
             let rotation_norm = hessenberg[column_index].hypot(hessenberg[column_index + 1]);
             if !rotation_norm.is_finite() || rotation_norm == 0.0 {
+                let absolute_residual = state.transformed_rhs[column_index].abs();
                 let iteration = KrylovIteration {
                     iteration: column_index + 1,
-                    absolute_residual: state.record.right_hand_side_norm,
-                    relative_residual: 1.0,
+                    absolute_residual,
+                    relative_residual: absolute_residual / state.record.right_hand_side_norm,
                     operator_applications: state.record.operator_applications,
                     preconditioner_applications: state.record.preconditioner_applications,
                 };
                 state.record.iterations.push(iteration);
                 observers[index].observe(iteration);
-                return Err(refusal(
+                return Err(block_refusal(
                     KrylovRefusal::SingularProjectedSystem,
-                    state.record.clone(),
+                    &states,
+                    index,
                 ));
             }
             let cosine = hessenberg[column_index] / rotation_norm;
@@ -724,18 +793,30 @@ where
             state.transformed_rhs[column_index] = cosine * previous;
             state.transformed_rhs.push(-sine * previous);
             state.columns.push(hessenberg);
-            let coefficients = projected_coefficients(
+            let coefficients = match projected_coefficients::<BatchOperatorError<O::Error>, P::Error>(
                 &state.columns,
                 &state.transformed_rhs,
                 state.record.clone(),
-            )?;
+            ) {
+                Ok(coefficients) => coefficients,
+                Err(GmresFailure::Refused { reason, .. }) => {
+                    return Err(block_refusal(reason, &states, index));
+                }
+                Err(_) => {
+                    return Err(block_refusal(
+                        KrylovRefusal::SingularProjectedSystem,
+                        &states,
+                        index,
+                    ));
+                }
+            };
             let absolute_residual = true_residual_norm(
                 &right_hand_sides[index],
                 &state.operator_images,
                 &coefficients,
             );
             if !absolute_residual.is_finite() {
-                return Err(refusal(KrylovRefusal::NonFinite, state.record.clone()));
+                return Err(block_refusal(KrylovRefusal::NonFinite, &states, index));
             }
             let iteration = KrylovIteration {
                 iteration: column_index + 1,
@@ -753,7 +834,7 @@ where
                 let answer =
                     linear_combination(&coefficients, &state.preconditioned_basis, dimension);
                 if !finite(&answer) {
-                    return Err(refusal(KrylovRefusal::NonFinite, state.record.clone()));
+                    return Err(block_refusal(KrylovRefusal::NonFinite, &states, index));
                 }
                 state.run = Some(GmresRun {
                     solution: answer,
@@ -764,32 +845,37 @@ where
                     },
                     record: state.record.clone(),
                 });
+            } else if subdiagonal == 0.0 {
+                state.run = Some(GmresRun {
+                    solution: linear_combination(
+                        &coefficients,
+                        &state.preconditioned_basis,
+                        dimension,
+                    ),
+                    status: GmresStatus::Exhausted,
+                    record: state.record.clone(),
+                });
+            } else if !subdiagonal.is_finite() {
+                return Err(block_refusal(
+                    KrylovRefusal::SingularProjectedSystem,
+                    &states,
+                    index,
+                ));
             } else {
-                if !subdiagonal.is_finite() || subdiagonal == 0.0 {
-                    return Err(refusal(
-                        KrylovRefusal::SingularProjectedSystem,
-                        state.record.clone(),
-                    ));
-                }
                 state
                     .basis
                     .push(image.iter().map(|value| value / subdiagonal).collect());
             }
         }
     }
-    let mut runs = Vec::with_capacity(states.len());
-    for state in states {
-        match state.run {
-            Some(run) => runs.push(run),
-            None => {
-                return Err(refusal(
-                    KrylovRefusal::SingularProjectedSystem,
-                    state.record,
-                ));
-            }
-        }
+    if let Some(index) = states.iter().position(|state| state.run.is_none()) {
+        return Err(block_refusal(
+            KrylovRefusal::SingularProjectedSystem,
+            &states,
+            index,
+        ));
     }
-    Ok(runs)
+    Ok(states.into_iter().filter_map(|state| state.run).collect())
 }
 
 #[cfg(test)]
@@ -847,7 +933,8 @@ mod tests {
     }
 
     #[test]
-    fn telemetry_streams_non_null_norms_and_preconditioning_reduces_iterations() {
+    fn telemetry_streams_non_null_norms_and_preconditioning_reduces_iterations()
+    -> Result<(), &'static str> {
         let diagonal = vec![1.0, 10.0, 100.0, 1000.0];
         let right_hand_side = vec![1.0; diagonal.len()];
         let options = GmresOptions::unrestarted(1e-12);
@@ -867,7 +954,7 @@ mod tests {
         );
         let plain = match plain {
             Ok(run) => run,
-            Err(_) => return assert!(false, "plain diagonal solve refused"),
+            Err(_) => return Err("plain diagonal solve refused"),
         };
         let mut preconditioned_operator = Diagonal {
             values: diagonal.clone(),
@@ -884,7 +971,7 @@ mod tests {
         );
         let preconditioned = match preconditioned {
             Ok(run) => run,
-            Err(_) => return assert!(false, "preconditioned diagonal solve refused"),
+            Err(_) => return Err("preconditioned diagonal solve refused"),
         };
         assert_eq!(streamed, plain.record.iterations);
         assert!(
@@ -896,10 +983,12 @@ mod tests {
             preconditioned.record.iterations.len() < plain.record.iterations.len(),
             "exact right preconditioning should shorten stiff diagonal GMRES"
         );
+        Ok(())
     }
 
     #[test]
-    fn block_and_serial_runs_are_identical_and_batch_directions_share_rounds() {
+    fn block_and_serial_runs_are_identical_and_batch_directions_share_rounds()
+    -> Result<(), &'static str> {
         let diagonal = vec![1.0, 3.0, 9.0];
         let right_hand_sides = vec![vec![1.0, 2.0, 3.0], vec![3.0, -1.0, 2.0]];
         let options = GmresOptions::unrestarted(1e-13);
@@ -919,7 +1008,7 @@ mod tests {
             );
             match run {
                 Ok(run) => serial_runs.push(run),
-                Err(_) => return assert!(false, "serial solve refused"),
+                Err(_) => return Err("serial solve refused"),
             }
         }
         let mut block_operator = Diagonal {
@@ -936,11 +1025,12 @@ mod tests {
         );
         let block_runs = match block_runs {
             Ok(runs) => runs,
-            Err(_) => return assert!(false, "block solve refused"),
+            Err(_) => return Err("block solve refused"),
         };
         assert_eq!(block_runs, serial_runs);
         assert_eq!(block_operator.scalar_calls, 0);
         assert!(block_operator.batch_calls < serial_operator.scalar_calls);
+        Ok(())
     }
 
     struct NanPreconditioner;
@@ -955,7 +1045,7 @@ mod tests {
     }
 
     #[test]
-    fn a_non_finite_preconditioner_is_a_typed_refusal_with_a_record() {
+    fn a_non_finite_preconditioner_is_a_typed_refusal_with_a_record() -> Result<(), &'static str> {
         let mut operator = Diagonal {
             values: vec![1.0, 2.0],
             scalar_calls: 0,
@@ -974,12 +1064,13 @@ mod tests {
                 assert_eq!(record.operator_applications, 0);
                 assert_eq!(record.preconditioner_applications, 1);
             }
-            _ => assert!(false, "NaN preconditioner did not produce a typed refusal"),
+            _ => return Err("NaN preconditioner did not produce a typed refusal"),
         }
+        Ok(())
     }
 
     #[test]
-    fn a_small_givens_estimate_does_not_hide_a_large_true_residual() {
+    fn a_small_givens_estimate_does_not_hide_a_large_true_residual() -> Result<(), &'static str> {
         let dimension = 12;
         let mut matrix = vec![0.0; dimension * dimension];
         for row in 0..dimension {
@@ -1011,18 +1102,19 @@ mod tests {
         );
         let run = match run {
             Ok(value) => value,
-            Err(_) => return assert!(false, "non-normal solve refused"),
+            Err(_) => return Err("non-normal solve refused"),
         };
         let residual = match run.record.iterations.last() {
             Some(iteration) => iteration.absolute_residual,
-            None => return assert!(false, "non-normal solve returned no iteration"),
+            None => return Err("non-normal solve returned no iteration"),
         };
         assert_eq!(run.status, GmresStatus::Exhausted);
         assert!(residual > 1e-5 && residual < 1e-3);
+        Ok(())
     }
 
     #[test]
-    fn zero_budget_and_a_zero_arnoldi_column_have_distinct_records() {
+    fn zero_budget_and_a_zero_arnoldi_column_have_distinct_records() -> Result<(), &'static str> {
         let options = GmresOptions {
             relative_tolerance: 1e-8,
             max_iterations: Some(0),
@@ -1045,7 +1137,7 @@ mod tests {
                 assert!(record.iterations.is_empty());
                 assert_eq!(record.operator_applications, 0);
             }
-            _ => return assert!(false, "zero budget did not have its own refusal"),
+            _ => return Err("zero budget did not have its own refusal"),
         }
 
         let mut singular_operator =
@@ -1068,8 +1160,9 @@ mod tests {
                 assert_eq!(record.iterations[0].absolute_residual, 1.0);
                 assert_eq!(record.operator_applications, 1);
             }
-            _ => assert!(false, "zero Arnoldi column lost its iteration record"),
+            _ => return Err("zero Arnoldi column lost its iteration record"),
         }
+        Ok(())
     }
 
     #[test]
@@ -1120,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn block_operator_failure_carries_every_active_record() {
+    fn block_operator_failure_carries_every_active_record() -> Result<(), &'static str> {
         let failure = gmres_right_block(
             &mut FailingBatch,
             &mut [Identity, Identity],
@@ -1141,7 +1234,178 @@ mod tests {
                 assert_eq!(sibling_records[0].right_hand_side_norm, 1.0);
                 assert_eq!(sibling_records[0].preconditioner_applications, 1);
             }
-            _ => assert!(false, "block failure dropped active records"),
+            _ => return Err("block failure dropped active records"),
         }
+        Ok(())
+    }
+
+    #[test]
+    fn happy_breakdown_with_roundoff_is_exhausted() -> Result<(), &'static str> {
+        let mut operator =
+            |input: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
+                for (slot, value) in output.iter_mut().zip(input) {
+                    *slot = 0.3 * value;
+                }
+                Ok(())
+            };
+        let run = gmres_right(
+            &mut operator,
+            &mut Identity,
+            &[1.0, 2.0],
+            GmresOptions::unrestarted(1e-16),
+            &mut NoObserver,
+        )
+        .map_err(|_| "happy breakdown was refused")?;
+        assert_eq!(run.status, GmresStatus::Exhausted);
+        assert_eq!(run.record.iterations.len(), 1);
+        assert!(run.record.iterations[0].relative_residual > 1e-16);
+        Ok(())
+    }
+
+    #[test]
+    fn singular_later_column_keeps_the_current_residual() -> Result<(), &'static str> {
+        let mut operator =
+            |_input: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
+                output.copy_from_slice(&[1.0, 1.0]);
+                Ok(())
+            };
+        let failure = gmres_right(
+            &mut operator,
+            &mut Identity,
+            &[1.0, 0.0],
+            GmresOptions::unrestarted(1e-16),
+            &mut NoObserver,
+        );
+        let record = match failure {
+            Err(failure) => failure.record().clone(),
+            Ok(_) => return Err("singular later column unexpectedly succeeded"),
+        };
+        assert_eq!(record.iterations.len(), 2);
+        assert_eq!(
+            record.iterations[1].absolute_residual,
+            record.iterations[0].absolute_residual
+        );
+        assert_ne!(record.iterations[1].absolute_residual, 1.0);
+        Ok(())
+    }
+
+    #[test]
+    fn scaled_norm_accepts_large_finite_right_hand_sides() -> Result<(), &'static str> {
+        let mut operator =
+            |input: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
+                output.copy_from_slice(input);
+                Ok(())
+            };
+        let run = gmres_right(
+            &mut operator,
+            &mut Identity,
+            &[1e160, 1e160],
+            GmresOptions::unrestarted(1e-12),
+            &mut NoObserver,
+        )
+        .map_err(|_| "large finite identity solve refused")?;
+        assert!(run.record.right_hand_side_norm.is_finite());
+        assert_eq!(run.status, GmresStatus::Converged);
+        Ok(())
+    }
+
+    struct FailOnSecondBatch {
+        calls: usize,
+    }
+
+    impl LinearOperator for FailOnSecondBatch {
+        type Error = &'static str;
+
+        fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {
+            output.copy_from_slice(input);
+            Ok(())
+        }
+
+        fn apply_batch(
+            &mut self,
+            inputs: &[f64],
+            outputs: &mut [f64],
+            vectors: usize,
+        ) -> Result<(), BatchOperatorError<Self::Error>> {
+            self.calls += 1;
+            if self.calls == 2 {
+                return Err(BatchOperatorError::Operator("second batch"));
+            }
+            let width = inputs.len() / vectors;
+            outputs[..width].copy_from_slice(&inputs[..width]);
+            for index in width..inputs.len() {
+                let coordinate = index % width;
+                outputs[index] = inputs[index] * (coordinate + 1) as f64;
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn block_failure_keeps_an_already_converged_record() -> Result<(), &'static str> {
+        let failure = gmres_right_block(
+            &mut FailOnSecondBatch { calls: 0 },
+            &mut [Identity, Identity],
+            &[vec![1.0, 0.0], vec![1.0, 1.0]],
+            GmresOptions::unrestarted(1e-12),
+            &mut [NoObserver, NoObserver],
+        );
+        match failure {
+            Err(GmresFailure::BlockOperator {
+                record,
+                sibling_records,
+                ..
+            }) => {
+                assert_eq!(record.iterations.len(), 1);
+                assert_eq!(sibling_records.len(), 1);
+                assert_eq!(sibling_records[0].iterations.len(), 1);
+                assert_eq!(sibling_records[0].iterations[0].absolute_residual, 0.0);
+            }
+            _ => return Err("block operator failure lost a completed record"),
+        }
+        Ok(())
+    }
+
+    struct OptionalFailure(bool);
+
+    impl Preconditioner for OptionalFailure {
+        type Error = &'static str;
+
+        fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {
+            if self.0 {
+                return Err("preconditioner");
+            }
+            output.copy_from_slice(input);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn block_preconditioner_failure_keeps_every_slot_record() -> Result<(), &'static str> {
+        let mut operator = Diagonal {
+            values: vec![1.0, 2.0],
+            scalar_calls: 0,
+            batch_calls: 0,
+        };
+        let failure = gmres_right_block(
+            &mut operator,
+            &mut [OptionalFailure(false), OptionalFailure(true)],
+            &[vec![1.0, 1.0], vec![2.0, 1.0]],
+            GmresOptions::unrestarted(1e-12),
+            &mut [NoObserver, NoObserver],
+        );
+        match failure {
+            Err(GmresFailure::BlockPreconditioner {
+                record,
+                sibling_records,
+                ..
+            }) => {
+                assert_eq!(record.preconditioner_applications, 0);
+                assert_eq!(sibling_records.len(), 1);
+                assert_eq!(sibling_records[0].preconditioner_applications, 1);
+            }
+            _ => return Err("block preconditioner failure lost sibling records"),
+        }
+        Ok(())
     }
 }
