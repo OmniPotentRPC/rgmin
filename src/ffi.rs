@@ -1062,10 +1062,11 @@ fn cpu_f64_slice_mut<'a>(
     Ok(unsafe { slice::from_raw_parts_mut(p, n) })
 }
 
-/// The initial point check used by every one shot minimizer.
-fn reject_non_finite_initial(x: &[f64]) -> Result<(), rgmin_status_t> {
+/// The initial point check used by every one shot minimizer. `entry`
+/// names the C entry point in the error text.
+fn reject_non_finite_initial(entry: &str, x: &[f64]) -> Result<(), rgmin_status_t> {
     if x.iter().any(|value| !value.is_finite()) {
-        set_last_error("rgmin_minimize: x contains a non-finite value");
+        set_last_error(&format!("{entry}: x contains a non-finite value"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
     Ok(())
@@ -1141,7 +1142,7 @@ pub unsafe extern "C" fn rgmin_minimize_opts(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
-        if let Err(status) = reject_non_finite_initial(&init) {
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize", &init) {
             return status;
         }
         let n = init.len();
@@ -1244,9 +1245,8 @@ pub unsafe extern "C" fn rgmin_minimize_rlbfgs(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
-        if init.iter().any(|value| !value.is_finite()) {
-            set_last_error("rgmin_minimize_rlbfgs: x contains a non-finite value");
-            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_rlbfgs", &init) {
+            return status;
         }
         let n = init.len();
         let obj = c_oracle(eval, grad, user, n);
@@ -1356,7 +1356,7 @@ pub unsafe extern "C" fn rgmin_minimize_hess_opts(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
-        if let Err(status) = reject_non_finite_initial(&init) {
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_hess", &init) {
             return status;
         }
         let n = init.len();
@@ -1451,7 +1451,7 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_opts(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
-        if let Err(status) = reject_non_finite_initial(&init) {
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_hvp", &init) {
             return status;
         }
         let n = init.len();
@@ -1533,7 +1533,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
-        if let Err(status) = reject_non_finite_initial(&init) {
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_eindir", &init) {
             return status;
         }
         let dim = unsafe { (*objective).dim };
@@ -5268,7 +5268,7 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
-        if let Err(status) = reject_non_finite_initial(&init) {
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_scg", &init) {
             return status;
         }
         let n = init.len();

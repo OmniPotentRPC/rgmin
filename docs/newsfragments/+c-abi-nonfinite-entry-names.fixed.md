@@ -1,0 +1,1 @@
+The error for a nonfinite starting point now names the C entry point the host called (`rgmin_minimize`, `rgmin_minimize_hess`, `rgmin_minimize_hvp`, `rgmin_minimize_eindir`, `rgmin_minimize_scg` or `rgmin_minimize_rlbfgs`) instead of `rgmin_minimize` for all of them.

@@ -9,10 +9,10 @@ use eindir_core::ffi::{eindir_core_abi_stamp, eindir_objective_t, eindir_status_
 use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_control_t, rgmin_eigen_kind_t,
     rgmin_eigen_params_t, rgmin_eigenpair_t, rgmin_last_error, rgmin_lowest_eigenpairs,
-    rgmin_method_from_name, rgmin_method_t, rgmin_minimize, rgmin_minimize_eindir,
-    rgmin_minimize_hess_opts, rgmin_minimize_hvp_opts, rgmin_minimize_scg_with_options,
-    rgmin_report_t, rgmin_scg_params_t, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
-    rgmin_tensor_free,
+    rgmin_manifold_t, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
+    rgmin_minimize_eindir, rgmin_minimize_hess_opts, rgmin_minimize_hvp_opts,
+    rgmin_minimize_rlbfgs, rgmin_minimize_scg_with_options, rgmin_report_t, rgmin_scg_params_t,
+    rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 
 unsafe extern "C" fn square_eval(
@@ -354,17 +354,80 @@ fn last_error() -> String {
         .into_owned()
 }
 
-/// The four entries that used to skip the check must refuse a nonfinite
-/// start the way `rgmin_minimize` does: `RGMIN_INVALID_PARAMETER`, the
-/// same message, an unchanged `x`, and no host evaluation.
+/// The entries that used to skip the check must refuse a nonfinite
+/// start the way `rgmin_minimize` does: `RGMIN_INVALID_PARAMETER`, an
+/// unchanged `x`, and no host evaluation. Each error names the entry
+/// point the host called.
 #[test]
 fn remaining_entries_reject_a_nonfinite_start() {
     for initial in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        refuse_minimize(initial);
         refuse_hess(initial);
         refuse_hvp(initial);
         refuse_eindir(initial);
         refuse_scg(initial);
+        refuse_rlbfgs(initial);
     }
+}
+
+fn assert_names_entry(entry: &str) {
+    let message = last_error();
+    assert_eq!(
+        message,
+        format!("{entry}: x contains a non-finite value"),
+        "{message}"
+    );
+}
+
+fn refuse_minimize(initial: f64) {
+    HOST_CALLS.store(0, Ordering::Relaxed);
+    let mut value = [initial];
+    let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+    let mut out = report();
+    let mut ctrl = control();
+    ctrl.maxiter = 1;
+    let status = unsafe {
+        rgmin_minimize(
+            Some(counted_eval),
+            Some(counted_grad),
+            std::ptr::null_mut(),
+            tensor,
+            &ctrl,
+            rgmin_method_t::RGMIN_STEEPEST,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(tensor) };
+    assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{initial}");
+    assert_eq!(HOST_CALLS.load(Ordering::Relaxed), 0, "{initial}");
+    assert_names_entry("rgmin_minimize");
+    assert_eq!(value[0].to_bits(), initial.to_bits());
+}
+
+fn refuse_rlbfgs(initial: f64) {
+    HOST_CALLS.store(0, Ordering::Relaxed);
+    let mut value = [initial];
+    let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+    let mut out = report();
+    let mut ctrl = control();
+    ctrl.maxiter = 1;
+    let status = unsafe {
+        rgmin_minimize_rlbfgs(
+            Some(counted_eval),
+            Some(counted_grad),
+            std::ptr::null_mut(),
+            tensor,
+            &ctrl,
+            std::ptr::null(),
+            rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(tensor) };
+    assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{initial}");
+    assert_eq!(HOST_CALLS.load(Ordering::Relaxed), 0, "{initial}");
+    assert_names_entry("rgmin_minimize_rlbfgs");
+    assert_eq!(value[0].to_bits(), initial.to_bits());
 }
 
 fn refuse_hess(initial: f64) {
@@ -391,7 +454,7 @@ fn refuse_hess(initial: f64) {
     unsafe { rgmin_tensor_free(tensor) };
     assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{initial}");
     assert_eq!(HOST_CALLS.load(Ordering::Relaxed), 0, "{initial}");
-    assert!(last_error().contains("non-finite"), "{}", last_error());
+    assert_names_entry("rgmin_minimize_hess");
     assert_eq!(value[0].to_bits(), initial.to_bits());
 }
 
@@ -419,7 +482,7 @@ fn refuse_hvp(initial: f64) {
     unsafe { rgmin_tensor_free(tensor) };
     assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{initial}");
     assert_eq!(HOST_CALLS.load(Ordering::Relaxed), 0, "{initial}");
-    assert!(last_error().contains("non-finite"), "{}", last_error());
+    assert_names_entry("rgmin_minimize_hvp");
     assert_eq!(value[0].to_bits(), initial.to_bits());
 }
 
@@ -452,7 +515,7 @@ fn refuse_eindir(initial: f64) {
     unsafe { rgmin_tensor_free(tensor) };
     assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{initial}");
     assert_eq!(HOST_CALLS.load(Ordering::Relaxed), 0, "{initial}");
-    assert!(last_error().contains("non-finite"), "{}", last_error());
+    assert_names_entry("rgmin_minimize_eindir");
     assert_eq!(value[0].to_bits(), initial.to_bits());
 }
 
@@ -480,7 +543,7 @@ fn refuse_scg(initial: f64) {
     unsafe { rgmin_tensor_free(tensor) };
     assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{initial}");
     assert_eq!(HOST_CALLS.load(Ordering::Relaxed), 0, "{initial}");
-    assert!(last_error().contains("non-finite"), "{}", last_error());
+    assert_names_entry("rgmin_minimize_scg");
     assert_eq!(value[0].to_bits(), initial.to_bits());
 }
 
