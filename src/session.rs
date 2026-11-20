@@ -4212,7 +4212,11 @@ impl Solver {
         } else {
             obj.value_and_gradient(x.view())
         };
-        let rcg_egrad = rcg.then(|| grad.clone());
+        // An empty array, not an `Option`: a conditionally built `Option` that
+        // most methods drop unmoved at the end of this long function left
+        // optimized code testing a slot no path had written, which memcheck
+        // reports as an uninitialised jump.
+        let rcg_egrad = if rcg { grad.clone() } else { Array1::zeros(0) };
         grad = self.tangent_grad(x, &grad)?;
         if !value.is_finite() || grad.iter().any(|g| !g.is_finite()) {
             return Err(Error::Oracle {
@@ -6099,7 +6103,7 @@ impl Solver {
         diis_alpha: f64,
         diis_atom_cap: Option<f64>,
         diis_euclidean_cap: Option<f64>,
-        rcg_egrad: Option<Array1<f64>>,
+        rcg_egrad: Array1<f64>,
     ) -> Result<()>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -6247,7 +6251,7 @@ impl Solver {
                 };
                 // `grad` is already the projected gradient of the stop.
                 // The step converts this Euclidean gradient once.
-                let egrad = rcg_egrad.unwrap_or_else(|| grad.clone());
+                let egrad = rcg_egrad;
                 let moved = if let Some(set) = self.constraints.as_deref() {
                     let bonded = crate::rcg::BondedManifold::new(&self.manifold, set);
                     crate::rcg::rcg_step(
