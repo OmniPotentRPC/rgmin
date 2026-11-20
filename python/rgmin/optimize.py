@@ -786,6 +786,98 @@ class GromacsSteep(_RgminOptimizer):
         return bool(converged)
 
 
+class GromacsCg(_RgminOptimizer):
+    """GROMACS ``integrator = cg`` with MDP parameters and units."""
+
+    kind = "gromacs-cg"
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        *,
+        emtol: float = 10.0,
+        emstep: float = 0.01,
+        nsteps: int = -1,
+        nstcgsteep: int = 1000,
+        constraints: str = "none",
+        **kwargs: Any,
+    ) -> None:
+        mapped = gromacs_mdp_options(
+            integrator="cg",
+            emtol=emtol,
+            emstep=emstep,
+            nsteps=nsteps,
+            nstcgsteep=nstcgsteep,
+            constraints=constraints,
+        )
+        self._refuse_constraints(atoms)
+        self.emtol = float(emtol)
+        self.emstep = float(emstep)
+        self.gromacs_nsteps = int(nsteps)
+        self.nstcgsteep = int(mapped["nstcgsteep"])
+        self._fmax = float(mapped["gtol"])
+        self._initial_step = float(mapped["istep"])
+        self.maxstep = self._initial_step
+        super().__init__(
+            atoms,
+            restart=restart,
+            logfile=logfile,
+            trajectory=trajectory,
+            append_trajectory=append_trajectory,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _refuse_constraints(target: Any) -> None:
+        from ase.constraints import FixAtoms, FixCartesian, FixedLine, FixedPlane
+
+        allowed = (FixAtoms, FixCartesian, FixedLine, FixedPlane)
+        for holder in (target, getattr(target, "atoms", None)):
+            items = getattr(holder, "constraints", None) or ()
+            for item in items:
+                if not isinstance(item, allowed):
+                    raise ValueError(
+                        "GROMACS integrator = cg does not support holonomic constraints; "
+                        "use GromacsSteep or remove bond/internal constraints"
+                    )
+
+    def _before_step(self, native: Session) -> bool:
+        self._refuse_constraints(self.atoms)
+        return False
+
+    def _session_options(self) -> dict[str, Any]:
+        return {
+            "max_atom": 0.0,
+            "istep": self._initial_step,
+            "nstcgsteep": self.nstcgsteep,
+        }
+
+    def irun(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, fmax: float | None = None, steps: int | None = None
+    ) -> Iterator[bool]:
+        """Yield convergence after each step, stopping at machine precision."""
+        force_limit = self._fmax if fmax is None else float(fmax)
+        if steps is None:
+            steps = sys.maxsize if self.gromacs_nsteps == -1 else self.gromacs_nsteps
+        for converged in cast(Any, super()).irun(fmax=force_limit, steps=steps):
+            yield converged
+            if self._native is not None and self._native.stop == "MachinePrecision":
+                break
+
+    def run(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, fmax: float | None = None, steps: int | None = None
+    ) -> bool:
+        """Run with ``emtol`` and ``nsteps`` unless explicitly overridden."""
+        converged = False
+        for converged in self.irun(fmax=fmax, steps=steps):
+            pass
+        return bool(converged)
+
+
 class BarzilaiBorwein(_Scaled):
     """Barzilai-Borwein spectral steepest descent."""
 
@@ -917,6 +1009,7 @@ __all__ = [
     "DaiYuan",
     "EonCG",
     "FletcherReeves",
+    "GromacsCg",
     "GromacsSteep",
     "HagerZhang",
     "HestenesStiefel",

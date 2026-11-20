@@ -14,9 +14,9 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use rgmin::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Control, DEFAULT_ATOM_MAXMOVE, Error,
-    FireConfig, FireKind, FirePreset, GromacsSteepConfig, LbfgsH0, LbfgsPairs, LbfgsStep,
-    LevelSetConstraint, LineSearch, ManifoldFactor, Method, Oracle, RiemannianManifold, SearchStep,
-    Solver, SpdMetric, Status, StiefelRetraction, StopNorm, SuppliedSearch,
+    FireConfig, FireKind, FirePreset, GromacsCgConfig, GromacsSteepConfig, LbfgsH0, LbfgsPairs,
+    LbfgsStep, LevelSetConstraint, LineSearch, ManifoldFactor, Method, Oracle, RiemannianManifold,
+    SearchStep, Solver, SpdMetric, Status, StiefelRetraction, StopNorm, SuppliedSearch,
     lowest_eigenpairs as solve_lowest_eigenpairs, lowest_eigenpairs_precond,
 };
 
@@ -118,6 +118,7 @@ impl Session {
         istep=None,
         shrink=None,
         max_constraint_shrinks=None,
+        nstcgsteep=None,
         level_set=None,
         error_on_unmet=false,
         backward_polish=false,
@@ -148,6 +149,7 @@ impl Session {
         istep: Option<f64>,
         shrink: Option<f64>,
         max_constraint_shrinks: Option<u32>,
+        nstcgsteep: Option<u32>,
         level_set: Option<f64>,
         error_on_unmet: bool,
         backward_polish: bool,
@@ -169,9 +171,10 @@ impl Session {
         let lbfgs = matches!(method, Method::Lbfgs { .. });
         let nlcg = matches!(method, Method::Nlcg { .. });
         let steep = matches!(method, Method::GromacsSteep);
+        let gromacs_cg = matches!(method, Method::GromacsCg);
         let atom_cap = match max_atom {
             Some(value) => value,
-            None if steep => 0.0,
+            None if steep || gromacs_cg => 0.0,
             None => DEFAULT_ATOM_MAXMOVE,
         };
         let istep = match istep {
@@ -263,6 +266,16 @@ impl Session {
                 .set_gromacs_steep_config(config)
                 .map_err(value_error)?;
         }
+        if let Some(period) = nstcgsteep {
+            if !gromacs_cg {
+                return Err(PyValueError::new_err(
+                    "nstcgsteep applies to a gromacs-cg session only",
+                ));
+            }
+            solver
+                .set_gromacs_cg_config(GromacsCgConfig::default().with_nstcgsteep(period))
+                .map_err(value_error)?;
+        }
         if atom_cap.is_finite() && atom_cap > 0.0 {
             solver.set_atom_maxmove(atom_cap);
         }
@@ -338,6 +351,15 @@ impl Session {
         self.solver
             .gromacs_steep_config()
             .map(|config| config.max_constraint_shrinks)
+    }
+
+    /// Periodic steepest-descent restart interval of a `gromacs-cg` session,
+    /// or `None` for other methods.
+    #[getter]
+    fn nstcgsteep(&self) -> Option<u32> {
+        self.solver
+            .gromacs_cg_config()
+            .map(|config| config.nstcgsteep)
     }
 
     /// Drop the method memory. The next step is a cold start.
