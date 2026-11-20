@@ -707,12 +707,15 @@ fn eigen_params_from_c(raw: *const rgmin_eigen_params_t) -> Result<EigenParams, 
     })
 }
 
-struct CHvp {
+struct CHvp<'a> {
     hvp: rgmin_hvp_fn,
     user: *mut c_void,
+    /// Set when the callback returns a failure status. The product is then
+    /// NaN, so the caller can tell a failed callback from a failed projection.
+    failed: Option<&'a Cell<bool>>,
 }
 
-impl ApplyHessian for CHvp {
+impl ApplyHessian for CHvp<'_> {
     fn apply_hessian(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
         let n = x.len();
         let mut xbuf = x.to_owned();
@@ -728,6 +731,9 @@ impl ApplyHessian for CHvp {
             rgmin_tensor_free(ht);
         }
         if st != rgmin_status_t::RGMIN_SUCCESS {
+            if let Some(flag) = self.failed {
+                flag.set(true);
+            }
             return Array1::from_elem(n, f64::NAN);
         }
         hv
@@ -5311,6 +5317,144 @@ mod rtr_entry_tests {
 }
 
 #[cfg(test)]
+mod projected_entry_tests {
+    use super::*;
+
+    unsafe extern "C" fn diagonal_hvp(
+        _user: *mut c_void,
+        _x: *const DLManagedTensorVersioned,
+        v: *const DLManagedTensorVersioned,
+        hv: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        let input = cpu_f64_slice(v, "v").unwrap();
+        let output = cpu_f64_slice_mut(hv, "hv").unwrap();
+        for (i, (o, a)) in output.iter_mut().zip(input).enumerate() {
+            *o = (i as f64 - 3.0) * a;
+        }
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+
+    struct PanicGuard;
+
+    impl PanicGuard {
+        fn armed() -> Self {
+            PANIC_IN_PROJECTION.with(|flag| flag.set(true));
+            PanicGuard
+        }
+    }
+
+    impl Drop for PanicGuard {
+        fn drop(&mut self) {
+            PANIC_IN_PROJECTION.with(|flag| flag.set(false));
+        }
+    }
+
+    fn last_error() -> String {
+        unsafe { CStr::from_ptr(rgmin_last_error()) }
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn single_entry_traps_a_panic_and_writes_nothing() {
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let mut point = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
+        let mut seed = [0.2, 0.1, -0.3, 0.4, 0.0, 0.2];
+        let mut mode = [7.0; 6];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), 6) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 6) };
+        let mt = unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), 6) };
+        let mut result = rgmin_lowest_mode_t {
+            value: 7.0,
+            actions: 7,
+        };
+        let status = {
+            let _armed = PanicGuard::armed();
+            unsafe {
+                rgmin_lowest_eigenpair_on_manifold(
+                    manifold,
+                    Some(diagonal_hvp),
+                    std::ptr::null_mut(),
+                    xt,
+                    st,
+                    mt,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    &mut result,
+                )
+            }
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(mt);
+            rgmin_manifold_free(manifold);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        assert!(last_error().ends_with("panicked"), "{}", last_error());
+        assert_eq!(mode, [7.0; 6]);
+        assert_eq!((result.value, result.actions), (7.0, 7));
+    }
+
+    #[test]
+    fn block_entry_traps_a_panic_and_writes_nothing() {
+        let manifold = rgmin_manifold_rigid_quotient(3, 0);
+        let mut point = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 0.8, 0.1];
+        let mut seed = [
+            0.2, 0.1, -0.3, 0.4, 0.0, 0.2, 0.1, 0.3, 0.2, 0.5, 0.0, 0.1, 0.3, 0.2, 0.4, 0.1, 0.1,
+            0.2,
+        ];
+        let mut modes = [7.0; 18];
+        let mut values = [7.0; 2];
+        let mut pairs = [rgmin_eigenpair_ex_t {
+            value: 7.0,
+            actions: 7,
+            residual: 7.0,
+            converged: 7,
+        }; 2];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), 9) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 18) };
+        let mt = unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), 18) };
+        let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), 2) };
+        let mut params = rgmin_eigen_params_default();
+        params.kind = rgmin_eigen_kind_t::RGMIN_EIGEN_LOBPCG as i32;
+        let status = {
+            let _armed = PanicGuard::armed();
+            unsafe {
+                rgmin_lowest_eigenpairs_projected(
+                    manifold,
+                    Some(diagonal_hvp),
+                    std::ptr::null_mut(),
+                    None,
+                    std::ptr::null_mut(),
+                    xt,
+                    st,
+                    mt,
+                    vt,
+                    &params,
+                    std::ptr::null(),
+                    pairs.as_mut_ptr(),
+                    2,
+                )
+            }
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(mt);
+            rgmin_tensor_free(vt);
+            rgmin_manifold_free(manifold);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        assert!(last_error().ends_with("panicked"), "{}", last_error());
+        assert_eq!(modes, [7.0; 18]);
+        assert_eq!(values, [7.0; 2]);
+        assert_eq!((pairs[0].value, pairs[0].actions), (7.0, 7));
+    }
+}
+
+#[cfg(test)]
 mod conjugacy_abi_tests {
     use super::*;
     use std::mem::{offset_of, size_of};
@@ -5584,7 +5728,11 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_with_options(
         Err(st) => return st,
     };
     apply_eigen_options(&mut typed, options);
-    let apply = CHvp { hvp, user };
+    let apply = CHvp {
+        hvp,
+        user,
+        failed: None,
+    };
     match lowest_mode(&apply, x_arr.view(), seed_arr.view(), &typed) {
         Ok(mode) => {
             mode_s.copy_from_slice(mode.vector.as_slice().unwrap_or(&[]));
@@ -6901,6 +7049,7 @@ unsafe fn run_lowest_eigenpairs(
     k: usize,
     project: &mut dyn FnMut(&mut Array1<f64>),
     projected: bool,
+    projection_failed: &Cell<bool>,
 ) -> Result<crate::Eigenpairs, rgmin_status_t> {
     let Some(hvp) = hvp else {
         set_last_error(&format!("{label}: null hvp"));
@@ -6954,7 +7103,12 @@ unsafe fn run_lowest_eigenpairs(
     } else {
         typed.max_iter
     };
-    let apply = CHvp { hvp, user };
+    let hvp_failed = Cell::new(false);
+    let apply = CHvp {
+        hvp,
+        user,
+        failed: Some(&hvp_failed),
+    };
     let x_arr = Array1::from(x_owned);
     let failed = Cell::new(false);
     let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -7003,6 +7157,18 @@ unsafe fn run_lowest_eigenpairs(
             lowest_eigenpairs(&apply, x_arr.view(), seed_block.view(), tol, max_iter)
         }
     }));
+    if projected && solved.is_ok() {
+        // A failed callback hands NaN to the projector, so the projection
+        // flag is a symptom of it. Report the cause.
+        if hvp_failed.get() {
+            set_last_error(&format!("{label}: HVP callback failed"));
+            return Err(rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        }
+        if projection_failed.get() {
+            set_last_error(&format!("{label}: projection failed"));
+            return Err(rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        }
+    }
     let found = match solved {
         Ok(Ok(found)) => found,
         Ok(Err(err)) => {
@@ -7087,6 +7253,7 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpairs(
             k,
             &mut |_| {},
             false,
+            &Cell::new(false),
         )
     } {
         Ok(found) => found,
@@ -7149,6 +7316,7 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpairs_ex(
             k,
             &mut |_| {},
             false,
+            &Cell::new(false),
         )
     } {
         Ok(found) => found,
@@ -7289,7 +7457,12 @@ pub unsafe extern "C" fn rgmin_rtr_tcg_solve(
         }
         let x_arr = Array1::from(xs);
         let g_arr = Array1::from(gs);
-        let apply = CHvp { hvp, user };
+        let hvp_failed = Cell::new(false);
+        let apply = CHvp {
+            hvp,
+            user,
+            failed: Some(&hvp_failed),
+        };
         let hvp_at = |v: &Array1<f64>| apply.apply_hessian(x_arr.view(), v.view());
         let options = crate::rtr::RtrOptions::default()
             .with_theta(theta)
@@ -7322,7 +7495,11 @@ pub unsafe extern "C" fn rgmin_rtr_tcg_solve(
             || !eta_norm.is_finite()
             || res.eta.iter().any(|c| !c.is_finite())
         {
-            set_last_error("rgmin_rtr_tcg_solve: HVP or manifold projection failed");
+            set_last_error(if hvp_failed.get() {
+                "rgmin_rtr_tcg_solve: HVP callback failed"
+            } else {
+                "rgmin_rtr_tcg_solve: Hessian action or manifold projection is not finite"
+            });
             return rgmin_status_t::RGMIN_INTERNAL_ERROR;
         }
         let dst = unsafe { slice::from_raw_parts_mut(eta_out, len) };
@@ -7395,12 +7572,23 @@ pub unsafe extern "C" fn rgmin_rtr_radius_update(
     rgmin_status_t::RGMIN_SUCCESS
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Makes the next projection panic, to reach the unwind barrier of the
+    /// entries that build their projector with [`project_onto`].
+    static PANIC_IN_PROJECTION: Cell<bool> = const { Cell::new(false) };
+}
+
 fn project_onto<'a>(
     manifold: Option<&'a RiemannianManifold>,
     x: &'a [f64],
     failed: &'a Cell<bool>,
 ) -> impl FnMut(&mut Array1<f64>) + 'a {
     move |v: &mut Array1<f64>| {
+        #[cfg(test)]
+        if PANIC_IN_PROJECTION.with(Cell::get) {
+            panic!("injected projection panic");
+        }
         let Some(inner) = manifold else {
             return;
         };
@@ -7418,9 +7606,17 @@ fn project_onto<'a>(
 }
 
 /// Lowest Hessian eigenpair on `manifold`'s tangent space at `x`.
-/// A null manifold is Euclidean. Every eigensolver applies the projector
-/// to its seed and returned mode; built-in iterative solvers also project
-/// their subspaces. ABI minor 53.
+/// A null manifold is Euclidean.
+///
+/// The built-in solvers (Lanczos, Rayleigh-Ritz, Jacobi-Davidson, LOBPCG
+/// and the dimer) project the seed, every operator and preconditioner
+/// action, and the returned mode. PRIMME, libkrylov and SLEPc cannot honor
+/// a projector: a non-null manifold with one of those kinds returns
+/// [`rgmin_status_t::RGMIN_INVALID_PARAMETER`] with
+/// [`Error::ProjectorUnsupported`] as the message, before any backend is
+/// called and whether or not it is linked. A manifold that leaves no tangent
+/// direction returns the same status. `mode_out` and `out` are written only
+/// on success. ABI minor 53.
 ///
 /// # Safety
 /// Same tensor rules as [`rgmin_lowest_eigenpair_with_options`]. `mode_out`
@@ -7489,7 +7685,12 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
         apply_eigen_options(&mut typed, options);
         let x_arr = Array1::from(x_owned.clone());
         let seed_arr = Array1::from(seed_owned);
-        let apply = CHvp { hvp, user };
+        let hvp_failed = Cell::new(false);
+        let apply = CHvp {
+            hvp,
+            user,
+            failed: Some(&hvp_failed),
+        };
         let failed = Cell::new(false);
         let mut project = project_onto(geometry, &x_owned, &failed);
         match lowest_mode_precond_with(
@@ -7501,12 +7702,21 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
             &mut project,
         ) {
             Ok(mode) => {
-                if failed.get()
-                    || mode.vector.iter().any(|value| !value.is_finite())
-                    || !copy_contiguous(mode_s, &mode.vector)
-                    || !mode.value.is_finite()
-                {
-                    set_last_error("rgmin_lowest_eigenpair_on_manifold: projection failed");
+                let failure = if hvp_failed.get() {
+                    Some("HVP callback failed")
+                } else if failed.get() {
+                    Some("projection failed")
+                } else if !mode.value.is_finite() || mode.vector.iter().any(|v| !v.is_finite()) {
+                    Some("result is not finite")
+                } else {
+                    None
+                };
+                if let Some(what) = failure {
+                    set_last_error(&format!("rgmin_lowest_eigenpair_on_manifold: {what}"));
+                    return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+                }
+                if !copy_contiguous(mode_s, &mode.vector) {
+                    set_last_error("rgmin_lowest_eigenpair_on_manifold: mode is not contiguous");
                     return rgmin_status_t::RGMIN_INTERNAL_ERROR;
                 }
                 unsafe {
@@ -7518,7 +7728,10 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
                 rgmin_status_t::RGMIN_SUCCESS
             }
             Err(err) => {
-                if failed.get() {
+                if hvp_failed.get() {
+                    set_last_error("rgmin_lowest_eigenpair_on_manifold: HVP callback failed");
+                    rgmin_status_t::RGMIN_INTERNAL_ERROR
+                } else if failed.get() {
                     set_last_error("rgmin_lowest_eigenpair_on_manifold: projection failed");
                     rgmin_status_t::RGMIN_INTERNAL_ERROR
                 } else {
@@ -7553,64 +7766,60 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpairs_projected(
     pairs_out: *mut rgmin_eigenpair_ex_t,
     k: usize,
 ) -> rgmin_status_t {
-    if pairs_out.is_null() {
-        set_last_error("rgmin_lowest_eigenpairs_projected: null output");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let xs = match cpu_f64_slice(x, "x") {
-        Ok(slice) => slice,
-        Err(status) => return status,
-    };
-    let geometry =
-        match unsafe { manifold_at(manifold, xs.len(), "rgmin_lowest_eigenpairs_projected") } {
+    ffi_status("rgmin_lowest_eigenpairs_projected", || {
+        if pairs_out.is_null() {
+            set_last_error("rgmin_lowest_eigenpairs_projected: null output");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let x_owned = match cpu_f64_slice(x, "x") {
+            Ok(slice) => slice.to_vec(),
+            Err(status) => return status,
+        };
+        let geometry = match unsafe {
+            manifold_at(manifold, x_owned.len(), "rgmin_lowest_eigenpairs_projected")
+        } {
             Ok(inner) => inner,
             Err(status) => return status,
         };
-    let x_owned = xs.to_vec();
-    let failed = Cell::new(false);
-    let mut project = project_onto(geometry, &x_owned, &failed);
-    let found = match unsafe {
-        run_lowest_eigenpairs(
-            "rgmin_lowest_eigenpairs_projected",
-            hvp,
-            user,
-            precond,
-            precond_user,
-            x,
-            seed,
-            modes_out,
-            values_out,
-            params,
-            options,
-            k,
-            &mut project,
-            geometry.is_some(),
-        )
-    } {
-        Ok(found) => found,
-        Err(status) => {
-            if failed.get() {
-                set_last_error("rgmin_lowest_eigenpairs_projected: projection failed");
-                return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+        let failed = Cell::new(false);
+        let mut project = project_onto(geometry, &x_owned, &failed);
+        // `run_lowest_eigenpairs` writes the mode and value tensors only after
+        // the solve, the projection and the Hessian callback have all
+        // succeeded, so a failure leaves every output as the caller had it.
+        let found = match unsafe {
+            run_lowest_eigenpairs(
+                "rgmin_lowest_eigenpairs_projected",
+                hvp,
+                user,
+                precond,
+                precond_user,
+                x,
+                seed,
+                modes_out,
+                values_out,
+                params,
+                options,
+                k,
+                &mut project,
+                geometry.is_some(),
+                &failed,
+            )
+        } {
+            Ok(found) => found,
+            Err(status) => return status,
+        };
+        for (j, pair) in found.pairs.iter().enumerate() {
+            unsafe {
+                *pairs_out.add(j) = rgmin_eigenpair_ex_t {
+                    value: pair.value,
+                    actions: found.actions,
+                    residual: pair.residual,
+                    converged: i32::from(pair.converged),
+                };
             }
-            return status;
         }
-    };
-    if failed.get() {
-        set_last_error("rgmin_lowest_eigenpairs_projected: projection failed");
-        return rgmin_status_t::RGMIN_INTERNAL_ERROR;
-    }
-    for (j, pair) in found.pairs.iter().enumerate() {
-        unsafe {
-            *pairs_out.add(j) = rgmin_eigenpair_ex_t {
-                value: pair.value,
-                actions: found.actions,
-                residual: pair.residual,
-                converged: i32::from(pair.converged),
-            };
-        }
-    }
-    rgmin_status_t::RGMIN_SUCCESS
+        rgmin_status_t::RGMIN_SUCCESS
+    })
 }
 
 // --- Default initializers. ABI minor 46. ---
