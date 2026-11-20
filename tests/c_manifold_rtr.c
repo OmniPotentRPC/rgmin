@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "xts.h"
 
 static int close_to(double got, double want) {
@@ -355,6 +356,245 @@ static int check_projected_mode(void) {
     return rc;
 }
 
+static rgmin_status_t identity_precond(void *user, const DLManagedTensorVersioned *block,
+                                       DLManagedTensorVersioned *out) {
+    const double *in = (const double *)block->dl_tensor.data;
+    double *dst = (double *)out->dl_tensor.data;
+    size_t n = 1;
+    int32_t d;
+    (void)user;
+    for (d = 0; d < block->dl_tensor.ndim; d++) {
+        n *= (size_t)block->dl_tensor.shape[d];
+    }
+    memcpy(dst, in, n * sizeof(double));
+    return RGMIN_SUCCESS;
+}
+
+static int bytes_equal(const double *a, const double *b, size_t n) {
+    return memcmp(a, b, n * sizeof(double)) == 0;
+}
+
+/* The stretch Hessian has eigenvalues -100 (translation), -2 (stretch) and
+ * 0 elsewhere. A null manifold must match rgmin_lowest_eigenpairs_ex bit for
+ * bit, since both run the same unprojected solver. */
+static int check_null_manifold_parity(void) {
+    const double x0[6] = {0.0, 0.0, 0.0, 2.0, 0.0, 0.0};
+    const double seed0[6] = {0.2, 0.1, -0.3, 0.4, 0.0, 0.2};
+    double x[6], seed[6], modes_a[6], modes_b[6], value_a[1] = {0.0}, value_b[1] = {0.0};
+    DLManagedTensorVersioned *xt, *st, *ma, *mb, *va, *vb;
+    rgmin_eigen_params_t params = rgmin_eigen_params_default();
+    rgmin_eigenpair_ex_t pa, pb;
+    rgmin_status_t sa, sb;
+    int rc = 0;
+    memcpy(x, x0, sizeof x);
+    memcpy(seed, seed0, sizeof seed);
+    memset(modes_a, 0, sizeof modes_a);
+    memset(modes_b, 0, sizeof modes_b);
+    params.kind = RGMIN_EIGEN_LOBPCG;
+    params.tol = 1e-10;
+    params.max_iter = 40;
+    params.nev = 1;
+    xt = rgmin_tensor_borrow_cpu_f64(x, 6);
+    st = rgmin_tensor_borrow_cpu_f64(seed, 6);
+    ma = rgmin_tensor_borrow_cpu_f64(modes_a, 6);
+    mb = rgmin_tensor_borrow_cpu_f64(modes_b, 6);
+    va = rgmin_tensor_borrow_cpu_f64(value_a, 1);
+    vb = rgmin_tensor_borrow_cpu_f64(value_b, 1);
+    sa = rgmin_lowest_eigenpairs_ex(stretch_hvp, NULL, NULL, NULL, xt, st, ma, va, &params, NULL,
+                                    &pa, 1);
+    sb = rgmin_lowest_eigenpairs_projected(NULL, stretch_hvp, NULL, NULL, NULL, xt, st, mb, vb,
+                                           &params, NULL, &pb, 1);
+    if (sa != RGMIN_SUCCESS || sb != RGMIN_SUCCESS || !bytes_equal(modes_a, modes_b, 6) ||
+        !bytes_equal(value_a, value_b, 1) || pa.actions != pb.actions ||
+        pa.converged != pb.converged || !close_to(value_a[0], -100.0)) {
+        fprintf(stderr, "null manifold parity: status %d %d value %g %g actions %zu %zu\n", sa, sb,
+                value_a[0], value_b[0], (size_t)pa.actions, (size_t)pb.actions);
+        rc = 70;
+    }
+    rgmin_tensor_free(xt);
+    rgmin_tensor_free(st);
+    rgmin_tensor_free(ma);
+    rgmin_tensor_free(mb);
+    rgmin_tensor_free(va);
+    rgmin_tensor_free(vb);
+    return rc;
+}
+
+static int check_projected_in_place_and_precond(void) {
+    rgmin_manifold_handle_t *m = rgmin_manifold_rigid_quotient(2, 0);
+    double x[6] = {0.0, 0.0, 0.0, 2.0, 0.0, 0.0};
+    double seed[6] = {0.2, 0.1, -0.3, 0.4, 0.0, 0.2};
+    double values[1] = {0.0};
+    DLManagedTensorVersioned *xt, *st, *vt;
+    rgmin_eigen_params_t params = rgmin_eigen_params_default();
+    rgmin_eigenpair_ex_t pair;
+    rgmin_lowest_mode_t single;
+    rgmin_status_t code;
+    int rc = 0;
+    if (m == NULL) {
+        return 71;
+    }
+    params.kind = RGMIN_EIGEN_LOBPCG;
+    params.tol = 1e-10;
+    params.max_iter = 40;
+    params.nev = 1;
+    xt = rgmin_tensor_borrow_cpu_f64(x, 6);
+    st = rgmin_tensor_borrow_cpu_f64(seed, 6);
+    vt = rgmin_tensor_borrow_cpu_f64(values, 1);
+    /* modes_out is x itself, with a non-null preconditioner. */
+    code = rgmin_lowest_eigenpairs_projected(m, stretch_hvp, NULL, identity_precond, NULL, xt, st,
+                                             xt, vt, &params, NULL, &pair, 1);
+    if (code != RGMIN_SUCCESS || !close_to(pair.value, -2.0) || !close_to(values[0], -2.0) ||
+        fabs(fabs(x[0]) - 0.7071067811865476) > 1e-6 || fabs(x[0] + x[3]) > 1e-6 ||
+        fabs(x[1]) > 1e-6 || fabs(x[2]) > 1e-6) {
+        fprintf(stderr, "in-place block status %d value %g x (%g, %g, %g, %g)\n", code,
+                pair.value, x[0], x[1], x[2], x[3]);
+        rc = 72;
+        goto done;
+    }
+    /* mode_out is x itself on the single-pair entry. */
+    x[0] = 0.0;
+    x[1] = 0.0;
+    x[2] = 0.0;
+    x[3] = 2.0;
+    x[4] = 0.0;
+    x[5] = 0.0;
+    params.kind = RGMIN_EIGEN_LANCZOS;
+    code = rgmin_lowest_eigenpair_on_manifold(m, stretch_hvp, NULL, xt, st, xt, &params, NULL,
+                                              &single);
+    if (code != RGMIN_SUCCESS || !close_to(single.value, -2.0) ||
+        fabs(fabs(x[0]) - 0.7071067811865476) > 1e-6 || fabs(x[0] + x[3]) > 1e-6) {
+        fprintf(stderr, "in-place single status %d value %g x (%g, %g)\n", code, single.value,
+                x[0], x[3]);
+        rc = 73;
+    }
+done:
+    rgmin_tensor_free(xt);
+    rgmin_tensor_free(st);
+    rgmin_tensor_free(vt);
+    rgmin_manifold_free(m);
+    return rc;
+}
+
+static int check_projected_failures(void) {
+    rgmin_manifold_handle_t *m = rgmin_manifold_rigid_quotient(2, 0);
+    double x[6] = {0.0, 0.0, 0.0, 2.0, 0.0, 0.0};
+    double seed[6] = {0.2, 0.1, -0.3, 0.4, 0.0, 0.2};
+    double block_seed[12] = {0.2, 0.1, -0.3, 0.4, 0.0, 0.2, 0.1, 0.3, 0.2, -0.1, 0.5, 0.0};
+    double mode[6] = {7.0, 7.0, 7.0, 7.0, 7.0, 7.0};
+    double modes2[12] = {7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0};
+    double values1[1] = {7.0};
+    double values2[2] = {7.0, 7.0};
+    size_t calls = 0;
+    size_t i;
+    DLManagedTensorVersioned *xt, *st, *bt, *mt, *m2t, *v1t, *v2t;
+    rgmin_eigen_params_t params = rgmin_eigen_params_default();
+    rgmin_eigenpair_ex_t pairs[2];
+    rgmin_lowest_mode_t single;
+    rgmin_status_t code;
+    int rc = 0;
+    if (m == NULL) {
+        return 74;
+    }
+    params.kind = RGMIN_EIGEN_LOBPCG;
+    params.tol = 1e-10;
+    params.max_iter = 30;
+    params.nev = 1;
+    xt = rgmin_tensor_borrow_cpu_f64(x, 6);
+    st = rgmin_tensor_borrow_cpu_f64(seed, 6);
+    bt = rgmin_tensor_borrow_cpu_f64(block_seed, 12);
+    mt = rgmin_tensor_borrow_cpu_f64(mode, 6);
+    m2t = rgmin_tensor_borrow_cpu_f64(modes2, 12);
+    v1t = rgmin_tensor_borrow_cpu_f64(values1, 1);
+    v2t = rgmin_tensor_borrow_cpu_f64(values2, 2);
+
+    /* A failing Hessian callback is an internal error that names the
+     * callback, and it leaves every output as it was. */
+    code = rgmin_lowest_eigenpairs_projected(m, failing_hvp, &calls, NULL, NULL, xt, st, mt, v1t,
+                                             &params, NULL, pairs, 1);
+    if (code != RGMIN_INTERNAL_ERROR || strstr(rgmin_last_error(), "HVP callback") == NULL ||
+        mode[0] != 7.0 || values1[0] != 7.0) {
+        fprintf(stderr, "block hvp failure status %d message '%s'\n", code, rgmin_last_error());
+        rc = 75;
+        goto done;
+    }
+    code = rgmin_lowest_eigenpair_on_manifold(m, failing_hvp, &calls, xt, st, mt, &params, NULL,
+                                              &single);
+    if (code != RGMIN_INTERNAL_ERROR || strstr(rgmin_last_error(), "HVP callback") == NULL ||
+        strstr(rgmin_last_error(), "projection failed") != NULL || mode[0] != 7.0) {
+        fprintf(stderr, "manifold hvp failure status %d message '%s'\n", code,
+                rgmin_last_error());
+        rc = 76;
+        goto done;
+    }
+    code = rgmin_lowest_eigenpair_on_manifold(NULL, failing_hvp, &calls, xt, st, mt, &params, NULL,
+                                              &single);
+    if (code != RGMIN_INTERNAL_ERROR || strstr(rgmin_last_error(), "HVP callback") == NULL ||
+        strstr(rgmin_last_error(), "projection failed") != NULL || mode[0] != 7.0) {
+        fprintf(stderr, "null manifold hvp failure status %d message '%s'\n", code,
+                rgmin_last_error());
+        rc = 77;
+        goto done;
+    }
+
+    /* Two atoms leave one horizontal direction, so two pairs do not exist. */
+    params.nev = 2;
+    code = rgmin_lowest_eigenpairs_projected(m, stretch_hvp, NULL, NULL, NULL, xt, bt, m2t, v2t,
+                                             &params, NULL, pairs, 2);
+    if (code != RGMIN_INVALID_PARAMETER || modes2[0] != 7.0 || values2[0] != 7.0) {
+        fprintf(stderr, "k above the horizontal rank status %d\n", code);
+        rc = 78;
+        goto done;
+    }
+    params.nev = 1;
+
+    /* A non-finite seed is refused before any output is written. */
+    seed[1] = NAN;
+    code = rgmin_lowest_eigenpair_on_manifold(m, stretch_hvp, NULL, xt, st, mt, &params, NULL,
+                                              &single);
+    if (code != RGMIN_INVALID_PARAMETER || mode[0] != 7.0) {
+        fprintf(stderr, "non-finite seed status %d\n", code);
+        rc = 79;
+        goto done;
+    }
+    seed[1] = 0.1;
+
+    /* PRIMME, libkrylov and SLEPc cannot honor a projector. */
+    {
+        const int32_t external[3] = {RGMIN_EIGEN_PRIMME, RGMIN_EIGEN_LIBKRYLOV, RGMIN_EIGEN_SLEPC};
+        for (i = 0; i < 3; i++) {
+            params.kind = external[i];
+            code = rgmin_lowest_eigenpair_on_manifold(m, stretch_hvp, NULL, xt, st, mt, &params,
+                                                      NULL, &single);
+            if (code != RGMIN_INVALID_PARAMETER || strstr(rgmin_last_error(), "projector") == NULL ||
+                mode[0] != 7.0) {
+                fprintf(stderr, "external kind %d with a manifold: status %d message '%s'\n",
+                        (int)external[i], code, rgmin_last_error());
+                rc = 80;
+                goto done;
+            }
+            code = rgmin_lowest_eigenpair_on_manifold(NULL, stretch_hvp, NULL, xt, st, mt, &params,
+                                                      NULL, &single);
+            if (code == RGMIN_INVALID_PARAMETER) {
+                fprintf(stderr, "external kind %d without a manifold was refused\n",
+                        (int)external[i]);
+                rc = 81;
+                goto done;
+            }
+        }
+    }
+done:
+    rgmin_tensor_free(xt);
+    rgmin_tensor_free(st);
+    rgmin_tensor_free(bt);
+    rgmin_tensor_free(mt);
+    rgmin_tensor_free(m2t);
+    rgmin_tensor_free(v1t);
+    rgmin_tensor_free(v2t);
+    rgmin_manifold_free(m);
+    return rc;
+}
+
 int main(int argc, char **argv) {
     unsigned long want;
     int rc;
@@ -402,5 +642,17 @@ int main(int argc, char **argv) {
     if (rc != 0) {
         return rc;
     }
-    return check_projected_mode();
+    rc = check_projected_mode();
+    if (rc != 0) {
+        return rc;
+    }
+    rc = check_null_manifold_parity();
+    if (rc != 0) {
+        return rc;
+    }
+    rc = check_projected_in_place_and_precond();
+    if (rc != 0) {
+        return rc;
+    }
+    return check_projected_failures();
 }
