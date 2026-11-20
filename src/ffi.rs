@@ -1062,6 +1062,16 @@ fn cpu_f64_slice_mut<'a>(
     Ok(unsafe { slice::from_raw_parts_mut(p, n) })
 }
 
+/// The initial point check used by every one shot minimizer. `entry`
+/// names the C entry point in the error text.
+fn reject_non_finite_initial(entry: &str, x: &[f64]) -> Result<(), rgmin_status_t> {
+    if x.iter().any(|value| !value.is_finite()) {
+        set_last_error(&format!("{entry}: x contains a non-finite value"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    Ok(())
+}
+
 /// Minimize `f` from the 1-D f64 DLPack iterate `x`. On success, `x` is
 /// overwritten with the accepted point.
 ///
@@ -1132,9 +1142,8 @@ pub unsafe extern "C" fn rgmin_minimize_opts(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
-        if init.iter().any(|value| !value.is_finite()) {
-            set_last_error("rgmin_minimize: x contains a non-finite value");
-            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize", &init) {
+            return status;
         }
         let n = init.len();
         let obj = c_oracle(eval, grad, user, n);
@@ -1236,9 +1245,8 @@ pub unsafe extern "C" fn rgmin_minimize_rlbfgs(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
-        if init.iter().any(|value| !value.is_finite()) {
-            set_last_error("rgmin_minimize_rlbfgs: x contains a non-finite value");
-            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_rlbfgs", &init) {
+            return status;
         }
         let n = init.len();
         let obj = c_oracle(eval, grad, user, n);
@@ -1348,6 +1356,9 @@ pub unsafe extern "C" fn rgmin_minimize_hess_opts(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_hess", &init) {
+            return status;
+        }
         let n = init.len();
         let obj = c_oracle_hess(eval, grad, hess, user, n);
         let c = unsafe { &*ctrl };
@@ -1440,6 +1451,9 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_opts(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_hvp", &init) {
+            return status;
+        }
         let n = init.len();
         let obj = c_oracle_hvp(eval, grad, hvp, user, n);
         let c = unsafe { &*ctrl };
@@ -1519,6 +1533,9 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_eindir", &init) {
+            return status;
+        }
         let dim = unsafe { (*objective).dim };
         if dim != init.len() {
             set_last_error(&format!(
@@ -2464,6 +2481,59 @@ pub unsafe extern "C" fn rgmin_solver_set_highs_crossover(
         set_last_error("rgmin_solver_set_highs_crossover: build has no highs feature");
         1
     }
+}
+
+/// Seconds one HiGHS solve may run. A positive value, infinity included,
+/// replaces the default of every solve. Zero or a negative value clears
+/// it, so the L-BFGS projection QP is back to 0.05 s and the feasible step
+/// QP to 1.0 s. NaN returns 1 and leaves the limit as it was. Returns 0,
+/// or 1 on a null solver or a build without the `highs` feature. A step
+/// the constraints must shape that reaches the limit returns
+/// `RGMIN_INVALID_PARAMETER`, and [`rgmin_last_error`] names the time
+/// limit. ABI minor 53.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_highs_time_limit(
+    solver: *mut rgmin_solver_t,
+    seconds: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_highs_time_limit: null solver");
+        return 1;
+    }
+    #[cfg(feature = "highs")]
+    {
+        if seconds.is_nan() {
+            set_last_error("rgmin_solver_set_highs_time_limit: seconds is NaN");
+            return 1;
+        }
+        let limit = (seconds > 0.0).then_some(seconds);
+        let _ = unsafe { (*solver).solver.set_highs_time_limit(limit) };
+        0
+    }
+    #[cfg(not(feature = "highs"))]
+    {
+        let _ = seconds;
+        set_last_error("rgmin_solver_set_highs_time_limit: build has no highs feature");
+        1
+    }
+}
+
+/// Hessian steps whose HiGHS solve reached its time limit and fell back
+/// to the step the session takes without HiGHS. A null solver, a session
+/// that takes no Hessian step, and a build without the `highs` feature
+/// return zero. ABI minor 53.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_highs_timeouts(solver: *const rgmin_solver_t) -> usize {
+    if solver.is_null() {
+        return 0;
+    }
+    unsafe { (*solver).solver.highs_timeouts() }
 }
 
 /// HiGHS user callback. NULL `cb` clears it.
@@ -5251,6 +5321,9 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_scg", &init) {
+            return status;
+        }
         let n = init.len();
         let c = unsafe { &*ctrl };
         let control = control_from_c(c);
@@ -6315,7 +6388,15 @@ fn cpu_dl<'a>(
         set_last_error(&format!("{name}: null tensor"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
-    let dl = unsafe { &(*tensor).dl_tensor };
+    let managed = unsafe { &*tensor };
+    if managed.version.major != 1 || managed.version.minor != 0 {
+        set_last_error(&format!(
+            "{name}: unsupported DLPack version {}.{}",
+            managed.version.major, managed.version.minor
+        ));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    let dl = &managed.dl_tensor;
     if dl.device.device_type != DLDeviceType::kDLCPU {
         set_last_error(&format!(
             "{name}: device {:?} not supported in this build (CPU only)",

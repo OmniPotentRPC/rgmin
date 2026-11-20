@@ -9,6 +9,49 @@ fn automatic_engine_and_crossover_preserve_main_defaults() {
     assert_eq!(options.solver, rgmin::HighsSolverKind::Choose);
     assert_eq!(options.crossover, rgmin::HighsCrossover::Choose);
     assert!(options.callback.is_none());
+    assert_eq!(options.time_limit, None);
+}
+
+/// Each solve keeps the limit it had before the option existed: the
+/// projection QP 0.05 s, the feasible step QP with or without a Hessian
+/// 1.0 s. A configured limit replaces both.
+#[test]
+fn each_solve_keeps_its_own_default_time_limit() {
+    let options = rgmin::HighsOptions::default();
+    assert_eq!(options.projection_time_limit(), 0.05);
+    assert_eq!(options.step_time_limit(), 1.0);
+    let configured = options.with_time_limit(2.5);
+    assert_eq!(configured.time_limit, Some(2.5));
+    assert_eq!(configured.projection_time_limit(), 2.5);
+    assert_eq!(configured.step_time_limit(), 2.5);
+    assert_eq!(configured.with_time_limit(None).step_time_limit(), 1.0);
+}
+
+/// HiGHS refuses a negative limit. The projection QP and the feasible
+/// step QP must both pass `HighsOptions::time_limit` through and
+/// surface that refusal, instead of keeping a private literal.
+#[test]
+fn both_solves_apply_the_configured_time_limit() {
+    use ndarray::array;
+    let options = rgmin::HighsOptions::default().with_time_limit(-1.0);
+    let direction = array![1.0, -1.0];
+    let point = array![0.0, 0.0];
+    let constraints = HighsStep::default().with_equalities(vec![(vec![(0, 1.0), (1, 1.0)], 0.0)]);
+    let projected =
+        rgmin::lbfgs_qp::highs_projected_step(&direction, point.view(), &constraints, &options);
+    let feasible = rgmin::lbfgs_qp::highs_feasible_step_with_options(
+        Some(&direction),
+        None,
+        &direction,
+        Some(1.0),
+        None,
+        None,
+        &options,
+    );
+    for (name, result) in [("projection", projected), ("feasible", feasible)] {
+        let err = result.expect_err(name);
+        assert!(err.to_string().contains("time_limit"), "{name}: {err}");
+    }
 }
 
 fn quad(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
@@ -88,6 +131,42 @@ fn c_abi_set_highs_solver_is_closed() {
         },
         1
     );
+}
+
+#[cfg(feature = "capi")]
+#[test]
+fn c_abi_set_highs_time_limit_refuses_nan_and_clears_on_non_positive() {
+    use rgmin::ffi::{
+        rgmin_control_t, rgmin_method_t, rgmin_solver_create, rgmin_solver_free,
+        rgmin_solver_highs_timeouts, rgmin_solver_set_highs_time_limit,
+    };
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 1e-8,
+        istep: 0.1,
+        memory: 4,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    for accepted in [0.5, f64::INFINITY, 0.0, -1.0, f64::NEG_INFINITY] {
+        assert_eq!(
+            unsafe { rgmin_solver_set_highs_time_limit(session, accepted) },
+            0,
+            "{accepted}"
+        );
+    }
+    assert_eq!(
+        unsafe { rgmin_solver_set_highs_time_limit(session, f64::NAN) },
+        1
+    );
+    assert_eq!(unsafe { rgmin_solver_highs_timeouts(session) }, 0);
+    unsafe { rgmin_solver_free(session) };
+    let null = std::ptr::null_mut();
+    assert_eq!(unsafe { rgmin_solver_set_highs_time_limit(null, 1.0) }, 1);
+    assert_eq!(unsafe { rgmin_solver_highs_timeouts(null) }, 0);
 }
 
 fn scipy_qp_gold(payload: &str) -> Vec<f64> {
@@ -454,4 +533,121 @@ fn a_zero_hessian_preserves_the_linear_model() {
     )
     .unwrap();
     assert!((step[0] - 1.0).abs() < 1e-7, "linear minimum {step:?}");
+}
+
+mod time_limit {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::{Array1, Array2, ArrayView1, array};
+    use rgmin::{Control, Error, HessianObjective, Method, QnStep, Solver};
+
+    struct Quad;
+
+    impl Objective<f64> for Quad {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            static BOUNDS: std::sync::OnceLock<Bounds<f64>> = std::sync::OnceLock::new();
+            BOUNDS.get_or_init(|| Bounds::new(array![-10.0, -10.0], array![10.0, 10.0], 0.0))
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            0.5 * x.dot(&x)
+        }
+    }
+    impl Gradient<f64> for Quad {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            x.to_owned()
+        }
+    }
+    impl DifferentiableObjective<f64> for Quad {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+    impl HessianObjective for Quad {
+        fn hessian(&self, _x: ArrayView1<f64>) -> Array2<f64> {
+            Array2::eye(2)
+        }
+    }
+
+    /// Newton steps through the feasible Hessian QP: HiGHS on, a step cap
+    /// to bound the step, and no box, trust radius or equality.
+    fn hessian_qp_session() -> Solver {
+        let mut solver = Solver::new(Method::lbfgs(), Control::default().with_maxmove(0.5), 2);
+        solver.set_qn_step(QnStep::Newton);
+        solver.set_highs(true);
+        solver
+    }
+
+    /// A Hessian QP that reaches its limit used to vanish: the session
+    /// took the unbounded Newton step and nothing said HiGHS had not
+    /// answered. The timeout is now counted, and the fallback still moves.
+    #[test]
+    fn a_hessian_qp_that_times_out_is_recorded_and_the_fallback_runs() {
+        let mut solver = hessian_qp_session();
+        assert_eq!(solver.highs_timeouts(), 0);
+        assert!(solver.set_highs_time_limit(Some(1e-12)));
+        let mut x = array![2.0, -1.0];
+        let start_value = 0.5 * x.dot(&x);
+        let report = solver.step_hess(&Quad, &mut x).unwrap();
+        assert_eq!(solver.highs_timeouts(), 1);
+        assert!(report.value < start_value, "{report:?}");
+        assert_ne!(x, array![2.0, -1.0]);
+    }
+
+    /// With the default limit the same step is solved by HiGHS and nothing
+    /// is recorded. The 0.05 s limit of the projection QP must not apply
+    /// here.
+    #[test]
+    fn the_default_limit_lets_the_hessian_qp_finish() {
+        let mut solver = hessian_qp_session();
+        let mut x = array![2.0, -1.0];
+        solver.step_hess(&Quad, &mut x).unwrap();
+        assert_eq!(solver.highs_timeouts(), 0);
+        let moved = ((x[0] - 2.0).powi(2) + (x[1] + 1.0).powi(2)).sqrt();
+        assert!((moved - 0.5).abs() < 1e-7, "{x:?}");
+    }
+
+    #[test]
+    fn clearing_the_limit_stops_the_timeouts() {
+        let mut solver = hessian_qp_session();
+        assert!(solver.set_highs_time_limit(Some(1e-12)));
+        let mut x = array![2.0, -1.0];
+        solver.step_hess(&Quad, &mut x).unwrap();
+        assert_eq!(solver.highs_timeouts(), 1);
+        assert!(solver.set_highs_time_limit(None));
+        solver.step_hess(&Quad, &mut x).unwrap();
+        assert_eq!(solver.highs_timeouts(), 1);
+    }
+
+    #[test]
+    fn the_setter_refuses_a_limit_that_is_not_a_positive_number() {
+        let mut solver = hessian_qp_session();
+        for bad in [f64::NAN, 0.0, -1.0, f64::NEG_INFINITY] {
+            assert!(!solver.set_highs_time_limit(Some(bad)), "{bad}");
+        }
+        assert!(solver.set_highs_time_limit(Some(f64::INFINITY)));
+        let mut x = array![2.0, -1.0];
+        solver.step_hess(&Quad, &mut x).unwrap();
+        assert_eq!(solver.highs_timeouts(), 0);
+    }
+
+    /// A step the constraints must shape cannot fall back, so its timeout
+    /// is the distinct error instead of a counter.
+    #[test]
+    fn a_constrained_step_that_times_out_is_an_error() {
+        let mut solver = hessian_qp_session();
+        assert!(solver.set_trust(0.1));
+        assert!(solver.set_highs_time_limit(Some(1e-12)));
+        let mut x = array![2.0, -1.0];
+        let result = solver.step_hess(&Quad, &mut x);
+        assert!(
+            matches!(result, Err(Error::HighsTimeLimit { seconds }) if seconds == 1e-12),
+            "{result:?}"
+        );
+        assert_eq!(x, array![2.0, -1.0]);
+    }
 }

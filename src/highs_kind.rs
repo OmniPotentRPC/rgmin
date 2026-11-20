@@ -142,6 +142,13 @@ impl HighsCallback {
     }
 }
 
+/// Seconds the projection QP may run when no limit is configured.
+const PROJECTION_TIME_LIMIT: f64 = 0.05;
+
+/// Seconds the feasible step QP, with or without a Hessian, may run when
+/// no limit is configured.
+const STEP_TIME_LIMIT: f64 = 1.0;
+
 /// Engine and callback policies, independent of the feasible-set record.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
@@ -152,13 +159,35 @@ pub struct HighsOptions {
     pub crossover: HighsCrossover,
     /// Optional host callback. Its context is borrowed from the host.
     pub callback: Option<HighsCallback>,
+    /// Seconds one HiGHS solve may run, for the projection QP and the
+    /// feasible step QP alike.
+    ///
+    /// `None` keeps the default of each solve: 0.05 s for the projection
+    /// QP, 1.0 s for the feasible step QP. A solve that reaches the limit
+    /// is [`crate::Error::HighsTimeLimit`].
+    pub time_limit: Option<f64>,
 }
 
 with_setters!(HighsOptions {
     with_solver => solver: val HighsSolverKind,
     with_crossover => crossover: val HighsCrossover,
     with_callback => callback: opt HighsCallback,
+    with_time_limit => time_limit: opt f64,
 });
+
+impl HighsOptions {
+    /// Seconds the projection QP may run: [`Self::time_limit`], else 0.05.
+    #[must_use]
+    pub fn projection_time_limit(&self) -> f64 {
+        self.time_limit.unwrap_or(PROJECTION_TIME_LIMIT)
+    }
+
+    /// Seconds the feasible step QP may run: [`Self::time_limit`], else 1.0.
+    #[must_use]
+    pub fn step_time_limit(&self) -> f64 {
+        self.time_limit.unwrap_or(STEP_TIME_LIMIT)
+    }
+}
 
 impl Default for HighsOptions {
     fn default() -> Self {
@@ -166,6 +195,7 @@ impl Default for HighsOptions {
             solver: HighsSolverKind::Choose,
             crossover: HighsCrossover::Choose,
             callback: None,
+            time_limit: None,
         }
     }
 }

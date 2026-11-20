@@ -39,6 +39,17 @@ with_setters!(IrcTrust {
     with_dx => dx: val f64,
 });
 
+/// Smallest mass weight treated as present.
+///
+/// The degenerate axis and the radial divisor both keep a weight at
+/// least this large. A lighter weight is not an axis, and the divisor
+/// uses this floor.
+const MASS_WEIGHT_FLOOR: f64 = 1e-16;
+
+fn weight_is_present(weight: f64) -> bool {
+    weight >= MASS_WEIGHT_FLOOR
+}
+
 impl IrcTrust {
     /// Build from the displacement `d1`, the length-3N square-root masses
     /// `sqrtm`, and the mass-weighted radius `dx`, each taken as given.
@@ -81,9 +92,9 @@ impl IrcTrust {
             w[i] = (s[i] + self.d1[i]) * self.sqrtm[i];
         }
         let norm = nrm2(w.view());
-        if norm <= 1e-16 {
+        if norm <= MASS_WEIGHT_FLOOR {
             // Degenerate: sit on the first represented weighted axis.
-            let axis = (0..n).find(|&i| self.sqrtm[i] > 1e-16);
+            let axis = (0..n).find(|&i| weight_is_present(self.sqrtm[i]));
             if axis.is_none() || self.dx == 0.0 {
                 for i in 0..n {
                     out[i] = -self.d1[i];
@@ -101,7 +112,11 @@ impl IrcTrust {
         let scale = self.dx / norm;
         for i in 0..n {
             let wi = w[i] * scale;
-            let sm = self.sqrtm[i].max(1e-16);
+            let sm = if weight_is_present(self.sqrtm[i]) {
+                self.sqrtm[i]
+            } else {
+                MASS_WEIGHT_FLOOR
+            };
             out[i] = wi / sm - self.d1[i];
         }
         out
@@ -139,5 +154,33 @@ mod tests {
         for (a, b) in s.iter().zip(again.iter()) {
             assert!((a - b).abs() < 1e-12, "{a} vs {b}");
         }
+    }
+
+    /// A weight equal to the floor is present, because that is the
+    /// smallest divisor the radial scale will use. The degenerate
+    /// projection therefore puts the radius on that axis
+    /// (`dx / weight`). A lighter weight is not an axis, and the
+    /// radial scale divides by the floor instead. Both sites ask
+    /// whether the weight is at least `MASS_WEIGHT_FLOOR`.
+    #[test]
+    fn mass_floor_treats_its_own_value_as_present() {
+        let floor = MASS_WEIGHT_FLOOR;
+        let on_floor = IrcTrust::new(array![0.0, 0.0], array![0.0, floor], floor);
+        let placed = on_floor.project(&array![0.0, 0.0]);
+        assert_eq!(placed, array![0.0, 1.0], "a floor weight is an axis");
+
+        let light = floor * 0.5;
+        let absent = IrcTrust::new(array![0.0, 1.0], array![0.0, light], 4.0);
+        assert_eq!(absent.project(&array![0.0, -1.0]), array![0.0, -1.0]);
+
+        let scaled = IrcTrust::new(array![0.0, 0.0], array![light, 1.0], 2.0);
+        let radial = scaled.project(&array![1.0, 1.0]);
+        let norm = (light * light + 1.0).sqrt();
+        let scale = 2.0 / norm;
+        assert!(
+            (radial[0] - light * scale / floor).abs() < 1e-12,
+            "{radial:?}"
+        );
+        assert!((radial[1] - scale).abs() < 1e-12, "{radial:?}");
     }
 }
