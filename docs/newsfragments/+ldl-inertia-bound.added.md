@@ -1,0 +1,1 @@
+- Added standard-form Bunch-Kaufman symmetric indefinite `LDL^T` factorization (`BunchKaufman`, `LdlError`), explicit-constant backward-error and pivot-growth bounds (`LdlInertiaBound`, `ldl_inertia_with_backward_bound`), and two-shift Loewner-sandwich inertia certification (`certify_shifted_ldlt_inertia`, `ShiftedLdlCertificate`, `ShiftedLdlRefusal`).

@@ -333,6 +333,9 @@ pub enum Error {
         /// What the fallible entry point does not carry.
         what: &'static str,
     },
+    /// Bunch-Kaufman `LDL^T` factorization or inertia bound refused its input.
+    #[error("LDL^T inertia: {0}")]
+    LdlInertia(#[from] crate::newton::LdlError),
 }
 
 /// Result alias for this crate.
