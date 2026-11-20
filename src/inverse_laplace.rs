@@ -373,17 +373,23 @@ impl Mul<Complex64> for f64 {
 
 impl Div for Complex64 {
     type Output = Self;
+    /// Max-component scaling. `|re| + |im|` overflows to infinity when both
+    /// components are large and finite, and the old scaling then divides by
+    /// zero. Scaling by the larger component keeps the normalized denominator
+    /// in `[1, √2]`.
     #[inline]
     fn div(self, rhs: Self) -> Self::Output {
-        let scale = rhs.re.abs() + rhs.im.abs();
-        if scale == 0.0 {
+        let ar = rhs.re.abs();
+        let ai = rhs.im.abs();
+        if ar == 0.0 && ai == 0.0 {
             return Self::new(f64::NAN, f64::NAN);
         }
-        let xr = self.re / scale;
-        let xi = self.im / scale;
+        let scale = if ar >= ai { ar } else { ai };
         let yr = rhs.re / scale;
         let yi = rhs.im / scale;
         let denom = yr * yr + yi * yi;
+        let xr = self.re / scale;
+        let xi = self.im / scale;
         Self {
             re: (xr * yr + xi * yi) / denom,
             im: (xi * yr - xr * yi) / denom,
@@ -712,8 +718,27 @@ pub fn eval_orthonormal_laguerre_series(
             });
         }
     }
-    let x = 2.0 * scale_b * energy;
-    let pref = (2.0 * scale_b).sqrt();
+    let two_b = 2.0 * scale_b;
+    if !two_b.is_finite() {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "scale_b",
+            value: scale_b,
+        });
+    }
+    let x = two_b * energy;
+    if !x.is_finite() {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "laguerre_argument",
+            value: x,
+        });
+    }
+    let pref = two_b.sqrt();
+    if !pref.is_finite() {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "laguerre_scale",
+            value: pref,
+        });
+    }
     let pref_up = mul_up(sqrt_up(2.0), sqrt_up(scale_b));
     let half_x = 0.5 * x;
 
@@ -740,6 +765,18 @@ pub fn eval_orthonormal_laguerre_series(
             .and_then(|ops| ops.checked_add(6)),
     )?)?;
     let roundoff = mul_up(gamma, mul_up(pref_up, abs_sum));
+    if !value.is_finite() {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "laguerre_value",
+            value,
+        });
+    }
+    if !roundoff.is_finite() {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "laguerre_roundoff",
+            value: roundoff,
+        });
+    }
     Ok((value, roundoff))
 }
 

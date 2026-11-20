@@ -1,8 +1,7 @@
 use rgmin::inverse_laplace::{
-    Complex64, ComplexSample, InverseLaplaceError, TalbotConfig, WeeksConfig,
     complex_matrix_inv_inf_norm, eval_orthonormal_laguerre_series, exterior_disk_modulus,
     higham_gamma, solve_complex_dense, talbot_invert, verify_laguerre_tail_decay, weeks_invert,
-    weeks_mobius_w,
+    weeks_mobius_w, Complex64, ComplexSample, InverseLaplaceError, TalbotConfig, WeeksConfig,
 };
 
 #[test]
@@ -227,4 +226,47 @@ fn talbot_endpoint_tail_scales_with_the_transform() {
         (estimate_ratio - 4.0).abs() <= 1.0e-8,
         "estimate ratio {estimate_ratio}"
     );
+}
+
+#[test]
+fn laguerre_refuses_a_non_finite_derived_scale_or_value() {
+    let overflow_scale = eval_orthonormal_laguerre_series(&[1.0], f64::MAX, 0.0);
+    assert!(matches!(
+        overflow_scale,
+        Err(InverseLaplaceError::InvalidParameter {
+            parameter: "scale_b",
+            ..
+        })
+    ));
+    let overflow_argument = eval_orthonormal_laguerre_series(&[1.0], 1.0e200, 1.0e200);
+    assert!(matches!(
+        overflow_argument,
+        Err(InverseLaplaceError::InvalidParameter {
+            parameter: "laguerre_argument",
+            ..
+        })
+    ));
+    let (value, roundoff) =
+        eval_orthonormal_laguerre_series(&[1.0, 0.0], 1.0, 0.25).expect("finite laguerre");
+    assert!(value.is_finite() && roundoff.is_finite());
+}
+
+#[test]
+fn complex_division_of_large_finite_components_stays_finite() {
+    let big = 1.5e308_f64;
+    let quotient = Complex64::new(big, 0.0) / Complex64::new(big, big);
+    assert!(quotient.re.is_finite() && quotient.im.is_finite());
+    assert!((quotient.re - 0.5).abs() <= 1.0e-12);
+    assert!((quotient.im + 0.5).abs() <= 1.0e-12);
+
+    let huge = 0.75 * f64::MAX;
+    let tiny = Complex64::new(1.0, 0.0) / Complex64::new(huge, huge);
+    let expect = 0.5 / huge;
+    assert!(tiny.re.is_finite() && tiny.im.is_finite());
+    assert!((tiny.re / expect - 1.0).abs() <= 1.0e-6);
+    assert!((tiny.im / -expect - 1.0).abs() <= 1.0e-6);
+
+    let ordinary = Complex64::new(1.0, 2.0) / Complex64::new(3.0, 4.0);
+    assert!((ordinary.re - 0.44).abs() <= 1.0e-15);
+    assert!((ordinary.im - 0.08).abs() <= 1.0e-15);
 }
