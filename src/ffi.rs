@@ -82,7 +82,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 52;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 53;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1504,7 +1504,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
 /// [`rgmin_minimize_eindir`] with the two opt-in controls. A nonzero
 /// `error_on_unmet` writes `x` and `out`, then returns
 /// [`rgmin_status_t::RGMIN_UNMET_STOP`]. `backward_polish` has no Hessian
-/// on this entry and does not change the step.
+/// on this entry and does not change the step. ABI minor 53.
 ///
 /// # Safety
 /// Same as [`rgmin_minimize_eindir`].
