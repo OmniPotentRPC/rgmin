@@ -1176,7 +1176,9 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 /// `rgmin_solver_set_gromacs_steep`, and
 /// `rgmin_gromacs_steep_max_constraint_shrinks`.
 /// ABI minor 51 adds `rgmin_minimize_rlbfgs` and `rgmin_rlbfgs_default`.
-/// ABI minor 53 adds `rgmin_minimize_eindir_opts`. Minor 50 adds
+/// ABI minor 53 adds `rgmin_minimize_eindir_opts`,
+/// `rgmin_solver_set_highs_time_limit` and `rgmin_solver_highs_timeouts`.
+/// Minor 50 adds
 /// `rgmin_solver_set_etol`, `rgmin_solver_set_max_evals`, their clear
 /// functions, `rgmin_solver_evals` and the two stop codes. Minor 49 adds
 /// the stop-status setters, the floor, and the `*_opts` one-shots. Minor 48

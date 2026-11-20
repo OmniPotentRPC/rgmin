@@ -2483,6 +2483,59 @@ pub unsafe extern "C" fn rgmin_solver_set_highs_crossover(
     }
 }
 
+/// Seconds one HiGHS solve may run. A positive value, infinity included,
+/// replaces the default of every solve. Zero or a negative value clears
+/// it, so the L-BFGS projection QP is back to 0.05 s and the feasible step
+/// QP to 1.0 s. NaN returns 1 and leaves the limit as it was. Returns 0,
+/// or 1 on a null solver or a build without the `highs` feature. A step
+/// the constraints must shape that reaches the limit returns
+/// `RGMIN_INVALID_PARAMETER`, and [`rgmin_last_error`] names the time
+/// limit. ABI minor 53.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_highs_time_limit(
+    solver: *mut rgmin_solver_t,
+    seconds: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_highs_time_limit: null solver");
+        return 1;
+    }
+    #[cfg(feature = "highs")]
+    {
+        if seconds.is_nan() {
+            set_last_error("rgmin_solver_set_highs_time_limit: seconds is NaN");
+            return 1;
+        }
+        let limit = (seconds > 0.0).then_some(seconds);
+        let _ = unsafe { (*solver).solver.set_highs_time_limit(limit) };
+        0
+    }
+    #[cfg(not(feature = "highs"))]
+    {
+        let _ = seconds;
+        set_last_error("rgmin_solver_set_highs_time_limit: build has no highs feature");
+        1
+    }
+}
+
+/// Hessian steps whose HiGHS solve reached its time limit and fell back
+/// to the step the session takes without HiGHS. A null solver, a session
+/// that takes no Hessian step, and a build without the `highs` feature
+/// return zero. ABI minor 53.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_highs_timeouts(solver: *const rgmin_solver_t) -> usize {
+    if solver.is_null() {
+        return 0;
+    }
+    unsafe { (*solver).solver.highs_timeouts() }
+}
+
 /// HiGHS user callback. NULL `cb` clears it.
 ///
 /// # Safety

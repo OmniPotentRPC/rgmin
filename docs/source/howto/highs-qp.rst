@@ -49,3 +49,21 @@ The tests also need SciPy (:doc:`install`):
 ``Solver::set_box`` takes one bound per coordinate.
 
 landfold ``--highs`` is this step on chi, not sequential LP.
+
+Time limit
+----------
+
+Each HiGHS solve runs under a time limit. Without one the L-BFGS
+projection QP gets 0.05 s and the feasible step QP, with or without a
+Hessian, gets 1.0 s. ``Solver::set_highs_time_limit(Some(seconds))``,
+``HighsOptions::with_time_limit``, and ``rgmin_solver_set_highs_time_limit``
+replace both. In C a non-positive value clears the limit and NaN is
+refused with status 1.
+
+A solve that reaches the limit is ``Error::HighsTimeLimit``. The Hessian
+step can go on without the QP, so it falls back to the shifted Newton,
+RFO or L-BFGS step and counts the timeout in ``Solver::highs_timeouts``
+(``rgmin_solver_highs_timeouts`` in C). A step the box, the trust
+radius or the equalities must shape has no such fallback and returns the
+error; in C that is ``RGMIN_INVALID_PARAMETER`` with the time limit named
+in ``rgmin_last_error``.
