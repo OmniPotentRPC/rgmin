@@ -236,24 +236,35 @@ The packed length is ~3 * n_atoms~. Projection removes translations,
 and rotations as well when the quotient is ~SE(3)~.
 ~xts_manifold_rigid_quotient~ is the alias.
 
-~rgmin_rtr_tcg_solve~ is one Steihaug-Toint truncated CG step on that
-tangent space, or in Euclidean space when the manifold pointer is null.
-It stops on negative curvature, on the trust boundary, on the residual
-test, on the iteration budget, or on a zero projected gradient.
-~rgmin_rtr_tcg_result_t~ reports the model decrease, the step length,
-the stop code and the iteration count.
+~rgmin_rtr_tcg_solve~ is one Steihaug-Toint truncated CG step on the
+tangent space of any manifold handle, or in Euclidean space when the
+manifold pointer is null. The gradient and the Hessian action are the
+Euclidean ones. The model, the trust ball and the reported step length
+are in the metric of the manifold, so an SPD factor measures the step in
+its own metric. It stops on negative curvature, on the trust boundary, on
+the residual test, on the iteration budget, or on a zero projected
+gradient. A Hessian action that is not finite, or a failing callback,
+ends it at once with ~RGMIN_INTERNAL_ERROR~ and leaves the outputs alone.
+~rgmin_rtr_tcg_result_t~ reports the model decrease, the step length in
+that metric, the stop code and the iteration count.
 
 ~rgmin_rtr_radius_update~ applies the Absil, Baker and Gallivan rule.
 The step is accepted when the ratio of actual to predicted decrease
 is above 1/10. The radius shrinks by 1/4 when the ratio is below 1/4,
 and it doubles, never past the supplied maximum, when the ratio is
-above 3/4 and the step lies on the trust boundary.
+above 3/4 and the step lies on the trust boundary. A radius already above
+the maximum is clamped to it first.
 
 ~rgmin_lowest_eigenpair_on_manifold~ and
 ~rgmin_lowest_eigenpairs_projected~ solve the tangent-projected
-operator. Every matrix-free single-pair backend applies the projector
-to its operator and preconditioner actions; the block entry uses
-projected LOBPCG. A null manifold matches the unprojected entries.
+operator. Lanczos, Rayleigh-Ritz, Jacobi-Davidson, LOBPCG and the dimer
+project the seed, every operator and preconditioner action, and the
+returned mode; the block entry uses projected LOBPCG. PRIMME, libkrylov
+and SLEPc cannot honor a projector. With a non-null manifold they return
+~RGMIN_INVALID_PARAMETER~ before any backend is called, whether or not it
+is linked, and a manifold that leaves no tangent direction returns the
+same status. Neither output is written on failure. A null manifold
+matches the unprojected entries.
 
 ** C++
 

@@ -1585,10 +1585,16 @@ rgmin_status_t rgmin_rtr_radius_update(double *radius, double radius_max, double
                                        int32_t *accepted_out);
 
 /** Lowest Hessian eigenpair on \a manifold's tangent space at \a x.
- *  A null manifold is Euclidean. Every matrix-free backend solves the
- *  projected operator; projected preconditioners remain tangent.
- *  \a mode_out may alias \a x or \a seed. \a out must not overlap tensor
- *  storage. */
+ *  A null manifold is Euclidean. The built-in solvers (Lanczos,
+ *  Rayleigh-Ritz, Jacobi-Davidson, LOBPCG and the dimer) project the seed,
+ *  every operator and preconditioner action, and the returned mode.
+ *  PRIMME, libkrylov and SLEPc cannot honor a projector, so they are refused
+ *  with RGMIN_INVALID_PARAMETER on a non-null \a manifold, before any
+ *  backend is called and whether or not it is linked. A null \a manifold
+ *  reaches them as it does \ref rgmin_lowest_eigenpair_with_options. A
+ *  manifold that leaves no tangent direction also returns
+ *  RGMIN_INVALID_PARAMETER. \a mode_out may alias \a x or \a seed. \a out
+ *  must not overlap tensor storage. Neither is written on failure. */
 rgmin_status_t rgmin_lowest_eigenpair_on_manifold(
     const rgmin_manifold_handle_t *manifold, rgmin_hvp_fn hvp, void *user,
     const DLManagedTensorVersioned *x, const DLManagedTensorVersioned *seed,
