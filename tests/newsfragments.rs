@@ -7,7 +7,7 @@ fn weighted_irc_axis_and_c_tensor_checks_have_fragments() {
     let notes = [
         (
             "+irc-weighted-axis.fixed.md",
-            "first represented mass weight",
+            "mass weight equal to its floor",
         ),
         (
             "+c-abi-tensor-validation.fixed.md",
