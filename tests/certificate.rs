@@ -7,7 +7,7 @@ struct DoubleDouble {
 }
 
 impl DoubleDouble {
-    fn from(value: f64) -> Self {
+    fn new(value: f64) -> Self {
         Self { hi: value, lo: 0.0 }
     }
 
@@ -19,21 +19,21 @@ impl DoubleDouble {
         }
     }
 
-    fn add(self, rhs: Self) -> Self {
+    fn plus(self, rhs: Self) -> Self {
         let sum = self.hi + rhs.hi;
         let carried = sum - self.hi;
         let error = (self.hi - (sum - carried)) + (rhs.hi - carried) + self.lo + rhs.lo;
         Self::normalize(sum, error)
     }
 
-    fn sub(self, rhs: Self) -> Self {
-        self.add(Self {
+    fn minus(self, rhs: Self) -> Self {
+        self.plus(Self {
             hi: -rhs.hi,
             lo: -rhs.lo,
         })
     }
 
-    fn mul(self, rhs: Self) -> Self {
+    fn times(self, rhs: Self) -> Self {
         let product = self.hi * rhs.hi;
         let error = self.hi.mul_add(rhs.hi, -product)
             + self.hi * rhs.lo
@@ -42,36 +42,36 @@ impl DoubleDouble {
         Self::normalize(product, error)
     }
 
-    fn div(self, rhs: Self) -> Self {
-        let quotient = Self::from(self.hi / rhs.hi);
-        let correction = Self::from(self.sub(rhs.mul(quotient)).hi / rhs.hi);
-        let estimate = quotient.add(correction);
-        estimate.add(Self::from(self.sub(rhs.mul(estimate)).hi / rhs.hi))
+    fn over(self, rhs: Self) -> Self {
+        let quotient = Self::new(self.hi / rhs.hi);
+        let correction = Self::new(self.minus(rhs.times(quotient)).hi / rhs.hi);
+        let estimate = quotient.plus(correction);
+        estimate.plus(Self::new(self.minus(rhs.times(estimate)).hi / rhs.hi))
     }
 
     fn sqrt(self) -> Self {
-        let half = Self::from(0.5);
-        let mut estimate = Self::from(self.hi.sqrt());
+        let half = Self::new(0.5);
+        let mut estimate = Self::new(self.hi.sqrt());
         for _ in 0..2 {
-            estimate = estimate.add(self.div(estimate)).mul(half);
+            estimate = estimate.plus(self.over(estimate)).times(half);
         }
         estimate
     }
 
-    fn as_f64(self) -> f64 {
+    fn value(self) -> f64 {
         self.hi + self.lo
     }
 }
 
 fn high_precision_ball(eta: f64, h: f64) -> (f64, f64) {
-    let one = DoubleDouble::from(1.0);
-    let denominator = one.add(
-        one.sub(DoubleDouble::from(2.0).mul(DoubleDouble::from(h)))
+    let one = DoubleDouble::new(1.0);
+    let denominator = one.plus(
+        one.minus(DoubleDouble::new(2.0).times(DoubleDouble::new(h)))
             .sqrt(),
     );
-    let radius = DoubleDouble::from(eta).mul(DoubleDouble::from(2.0).div(denominator));
-    let remainder = DoubleDouble::from(h).mul(radius.div(denominator));
-    (radius.as_f64(), remainder.as_f64())
+    let radius = DoubleDouble::new(eta).times(DoubleDouble::new(2.0).over(denominator));
+    let remainder = DoubleDouble::new(h).times(radius.over(denominator));
+    (radius.value(), remainder.value())
 }
 
 fn assert_relative(actual: f64, expected: f64, tolerance: f64) {
