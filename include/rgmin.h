@@ -138,7 +138,9 @@ typedef enum rgmin_method_t {
     /** Polak-Ribiere with the eOn Powell restart at 0.5. Develop surface. */
     RGMIN_EON_CG = 27,
     /** GROMACS integrator = steep. ABI minor 52. */
-    RGMIN_GROMACS_STEEP = 28
+    RGMIN_GROMACS_STEEP = 28,
+    /** GROMACS integrator = cg. */
+    RGMIN_GROMACS_CG = 29
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.
@@ -516,6 +518,11 @@ int32_t rgmin_solver_set_gromacs_steep(rgmin_solver_t *solver, double shrink,
  *  rgmin's displacement floor. Invalid input gives 0. The result is
  *  capped to bound construction time. ABI minor 52. */
 uint32_t rgmin_gromacs_steep_max_constraint_shrinks(double step_size, double shrink);
+/** GROMACS conjugate-gradient parameters on a RGMIN_GROMACS_CG session.
+ *  nstcgsteep == 0 turns the periodic steepest-descent restart off, as in
+ *  GROMACS. Returns 0, or 1 on a null session or a session that is not
+ *  RGMIN_GROMACS_CG. */
+int32_t rgmin_solver_set_gromacs_cg(rgmin_solver_t *solver, uint32_t nstcgsteep);
 
 /** FIRE schedule. */
 typedef enum rgmin_fire_variant_t {
