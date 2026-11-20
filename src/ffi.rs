@@ -212,7 +212,8 @@ pub enum rgmin_stop_t {
     /// The evaluation budget set by `rgmin_solver_set_max_evals` was spent.
     /// ABI minor 50.
     RGMIN_STOP_EVAL_BUDGET = 7,
-    /// GROMACS steep could not represent another coordinate change. ABI minor 52.
+    /// GROMACS-style steep or conjugate-gradient minimization could not
+    /// represent another coordinate change. ABI minor 52.
     RGMIN_STOP_MACHINE_PRECISION = 8,
 }
 

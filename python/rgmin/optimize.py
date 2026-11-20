@@ -841,8 +841,8 @@ class GromacsCg(_RgminOptimizer):
             for item in items:
                 if not isinstance(item, allowed):
                     raise ValueError(
-                        "GROMACS integrator = cg does not support holonomic constraints; "
-                        "use GromacsSteep or remove bond/internal constraints"
+                        "rgmin GromacsCg does not implement constrained conjugate "
+                        "gradients; use GromacsSteep or remove bond/internal constraints"
                     )
 
     def _before_step(self, native: Session) -> bool:
