@@ -31,6 +31,7 @@ class Session:
         shrink: float | None = None,
         max_constraint_shrinks: int | None = None,
         nstcgsteep: int | None = None,
+        nbfgscorr: int | None = None,
         level_set: float | None = None,
         error_on_unmet: bool = False,
         backward_polish: bool = False,
@@ -51,6 +52,8 @@ class Session:
     def max_constraint_shrinks(self) -> int | None: ...
     @property
     def nstcgsteep(self) -> int | None: ...
+    @property
+    def nbfgscorr(self) -> int | None: ...
     def forget(self) -> None: ...
     def set_level_set(self, target: float | None = None) -> None: ...
     def step(
