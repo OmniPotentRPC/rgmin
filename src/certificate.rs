@@ -29,7 +29,11 @@
 use core::fmt;
 
 /// A failure to prove an a-posteriori bound from the supplied majorants.
+///
+/// The enum is non-exhaustive, so a `match` outside this crate needs a
+/// wildcard arm.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum CertificateError {
     /// An input was negative or non-finite.
     InvalidMajorant {
@@ -78,6 +82,7 @@ impl std::error::Error for CertificateError {}
 /// remainder cannot be forged. Bounds are evaluated in standard `f64`
 /// floating-point without outward rounding.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct KantorovichBall {
     newton_step: f64,
     h: f64,
@@ -113,9 +118,12 @@ impl KantorovichBall {
 
 /// Certified first-order adjoint contribution and second-order remainder.
 ///
-/// All quantities are evaluated in standard `f64` floating-point without
+/// Instances are constructed by [`adjoint_functional_bar`]; the struct is
+/// non-exhaustive, so it cannot be built by a struct literal outside this
+/// crate. All quantities are evaluated in standard `f64` floating-point without
 /// outward rounding.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct AdjointFunctionalBar {
     /// Absolute first-order dual-weighted residual `|lambda^T F(x0)|`.
     pub first_order: f64,
@@ -127,9 +135,12 @@ pub struct AdjointFunctionalBar {
 
 /// Certified distance of a perturbed self-adjoint spectrum from zero.
 ///
-/// All quantities are evaluated in standard `f64` floating-point without
+/// Instances are constructed by [`certify_morse_gap`]; the struct is
+/// non-exhaustive, so it cannot be built by a struct literal outside this
+/// crate. All quantities are evaluated in standard `f64` floating-point without
 /// outward rounding.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct MorseGap {
     /// Gap of the computed projected operator.
     pub computed: f64,
