@@ -2344,6 +2344,50 @@ mod tests {
         assert!(mode.vector.iter().all(|v| v.is_finite()));
     }
 
+    #[test]
+    fn lanczos_reseeds_a_projected_away_rigid_seed() {
+        let h = DiagH(Array1::ones(3));
+        let x = Array1::zeros(3);
+        let seed = array![1.0, 0.0, 0.0];
+        let mut remove_rigid = |v: &mut Array1<f64>| v[0] = 0.0;
+        let mode = lanczos(&h, x.view(), seed.view(), 3, &mut remove_rigid);
+        assert!((mode.value - 1.0).abs() < 1e-12, "Ritz {}", mode.value);
+        assert!((nrm2(mode.vector.view()) - 1.0).abs() < 1e-12);
+        assert!(mode.vector[0].abs() < 1e-12, "mode {:?}", mode.vector);
+    }
+
+    #[test]
+    fn rayleigh_ritz_applies_the_supplied_projector() {
+        use std::cell::Cell;
+
+        let h = DiagH(array![-100.0, 1.0, 2.0]);
+        let x = Array1::zeros(3);
+        let seed = array![1.0, 1.0, 0.0];
+        let calls = Cell::new(0);
+        let mut remove_rigid = |v: &mut Array1<f64>| {
+            calls.set(calls.get() + 1);
+            v[0] = 0.0;
+        };
+        let mode = lowest_mode_precond_with(
+            &h,
+            x.view(),
+            seed.view(),
+            &EigenParams {
+                kind: EigensolverKind::RayleighRitz,
+                krylov: 3,
+                max_iter: 8,
+                tol: 1e-10,
+                ..EigenParams::default()
+            },
+            &crate::hvp::IdentityPrecond,
+            &mut remove_rigid,
+        )
+        .unwrap();
+        assert!(calls.get() > 0);
+        assert!(mode.vector[0].abs() < 1e-12, "mode {:?}", mode.vector);
+        assert!((mode.value - 1.0).abs() < 1e-10, "Ritz {}", mode.value);
+    }
+
     fn hdr_diag(n: usize) -> DiagH {
         let mut lam = Array1::zeros(n);
         let lo = 1.0_f64.ln();
