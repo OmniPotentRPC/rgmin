@@ -3,7 +3,7 @@
 Riemannian manifolds
 --------------------
 
-``RiemannianManifold`` is a Stiefel manifold ``St(n, p)``, a cone ``SPD(p)`` of symmetric positive definite matrices, or a product of them.
+``RiemannianManifold`` is a Stiefel manifold ``St(n, p)``, a cone ``SPD(p)`` of symmetric positive definite matrices, the rigid quotient ``R^{3N}/SE(3)`` of ``N`` atoms, or a product of them.
 Rust, C, C++ and Python call the same code.
 :doc:`../tutorials/manifold-fit` fits a point on ``St x SPD`` by gradient steps.
 
@@ -14,15 +14,17 @@ Every buffer is caller-owned, column-major and ``len`` doubles long.
 
 .. table::
 
-    +--------------+-------------------------------------------------+---------+
-    | Factor       | Point                                           | ``len`` |
-    +==============+=================================================+=========+
-    | ``St(n, p)`` | ``n x p`` frame, ``U^T U = I``, ``1 <= p <= n`` | ``n p`` |
-    +--------------+-------------------------------------------------+---------+
-    | ``SPD(p)``   | ``p x p`` symmetric positive definite           | ``p^2`` |
-    +--------------+-------------------------------------------------+---------+
-    | Product      | factor blocks in factor order                   | the sum |
-    +--------------+-------------------------------------------------+---------+
+    +----------------+--------------------------------------------------------+---------+
+    | Factor         | Point                                                  | ``len`` |
+    +================+========================================================+=========+
+    | ``St(n, p)``   | ``n x p`` frame, ``U^T U = I``, ``1 <= p <= n``        | ``n p`` |
+    +----------------+--------------------------------------------------------+---------+
+    | ``SPD(p)``     | ``p x p`` symmetric positive definite                  | ``p^2`` |
+    +----------------+--------------------------------------------------------+---------+
+    | Rigid quotient | ``3 N`` Cartesians ``x0, y0, z0, x1, ...``, ``N >= 1`` | ``3 N`` |
+    +----------------+--------------------------------------------------------+---------+
+    | Product        | factor blocks in factor order                          | the sum |
+    +----------------+--------------------------------------------------------+---------+
 
 Tangent vectors and Euclidean gradients use the packing of the point.
 A nested product contributes its factors.
@@ -32,38 +34,55 @@ Operations
 
 .. table::
 
-    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+
-    | Operation          | Stiefel (embedded metric)                             | SPD affine-invariant                          | SPD log-Euclidean            |
-    +====================+=======================================================+===============================================+==============================+
-    | ``project``        | ``V - X sym(X^T V)``                                  | ``sym(V)``                                    | ``sym(V)``                   |
-    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+
-    | ``egrad_to_rgrad`` | the projection                                        | ``X sym(G) X``                                | ``Dlog(X)^{-2}[sym(G)]``     |
-    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+
-    | ``retract``        | QR (first order) or polar (second order) of ``X + V`` | ``exp``                                       | ``exp``                      |
-    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+
-    | ``exp``            | Edelman, Arias, Smith (1998) eq. 2.41                 | ``X^{1/2} expm(X^{-1/2} V X^{-1/2}) X^{1/2}`` | ``expm(log X + Dlog(X)[V])`` |
-    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+
-    | ``log``            | refused                                               | inverse of ``exp``                            | inverse of ``exp``           |
-    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+
-    | ``transport``      | projection at the arrival point                       | ``E V E^T``, ``E = (Y X^{-1})^{1/2}``         | ``Dlog(Y)^{-1}[Dlog(X)[V]]`` |
-    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+
-    | ``inner``          | ``tr(U^T V)``                                         | ``tr(X^{-1} U X^{-1} V)``                     | ``<Dlog(X)[U], Dlog(X)[V]>`` |
-    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+
+    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+------------------------------------------------------------------+
+    | Operation          | Stiefel (embedded metric)                             | SPD affine-invariant                          | SPD log-Euclidean            | Rigid quotient (Euclidean metric)                                |
+    +====================+=======================================================+===============================================+==============================+==================================================================+
+    | ``project``        | ``V - X sym(X^T V)``                                  | ``sym(V)``                                    | ``sym(V)``                   | remove translations and rotations (rotations kept when periodic) |
+    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+------------------------------------------------------------------+
+    | ``egrad_to_rgrad`` | the projection                                        | ``X sym(G) X``                                | ``Dlog(X)^{-2}[sym(G)]``     | the projection                                                   |
+    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+------------------------------------------------------------------+
+    | ``retract``        | QR (first order) or polar (second order) of ``X + V`` | ``exp``                                       | ``exp``                      | ``X + V``                                                        |
+    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+------------------------------------------------------------------+
+    | ``exp``            | Edelman, Arias, Smith (1998) eq. 2.41                 | ``X^{1/2} expm(X^{-1/2} V X^{-1/2}) X^{1/2}`` | ``expm(log X + Dlog(X)[V])`` | ``X + P_X V``                                                    |
+    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+------------------------------------------------------------------+
+    | ``log``            | refused                                               | inverse of ``exp``                            | inverse of ``exp``           | refused                                                          |
+    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+------------------------------------------------------------------+
+    | ``transport``      | projection at the arrival point                       | ``E V E^T``, ``E = (Y X^{-1})^{1/2}``         | ``Dlog(Y)^{-1}[Dlog(X)[V]]`` | projection at the arrival point                                  |
+    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+------------------------------------------------------------------+
+    | ``inner``          | ``tr(U^T V)``                                         | ``tr(X^{-1} U X^{-1} V)``                     | ``<Dlog(X)[U], Dlog(X)[V]>`` | ``U . V``                                                        |
+    +--------------------+-------------------------------------------------------+-----------------------------------------------+------------------------------+------------------------------------------------------------------+
 
 ``sym(A) = (A + A^T) / 2``.
 ``Dlog(X)`` is applied in the eigenbasis of ``X`` with the divided differences of ``log`` on its eigenvalues (Daleckii-Krein).
 ``exp`` projects ``v`` to the tangent space first.
 The product metric is the sum of the factor metrics.
+``P_X`` is the horizontal projector at ``X``.
 ``gradient_step(x, egrad, t)`` returns ``rgrad = egrad_to_rgrad(x, egrad)`` and ``retract(x, -t rgrad)``.
 
 The affine-invariant metric is Pennec, Fillard and Ayache (`2006 <https://doi.org/10.1007/s11263-005-3222-z>`_).
 The log-Euclidean metric is Arsigny, Fillard, Pennec and Ayache (`2007 <https://doi.org/10.1137/050637996>`_).
 The Stiefel geodesic is Edelman, Arias and Smith (`1998 <https://doi.org/10.1137/S0895479895290954>`_).
 
+The rigid quotient and its strata
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The factor is a manifold on the regular stratum, ``N >= 3`` atoms that are not collinear.
+The horizontal space has dimension ``3N - 6``, or ``3N - 3`` when ``periodic`` (translations only), and the projector has rank 6, or 3.
+The projector is built from a rank-revealing factorization of the six rigid motions, with every column scaled to unit size, so the rank does not depend on the size of the cluster.
+
+At a singular configuration the quotient is not a manifold.
+One atom, or atoms that all coincide, have rank 3: the three rotations move nothing.
+Collinear atoms have rank 5: the rotation about the line moves nothing.
+The horizontal space is then larger than ``3N - 6``, and its dimension changes with the configuration.
+The projection stays valid there and removes exactly the motions that move the atoms.
+The retraction ``X + V`` and the transport are well defined, but a step that bends a collinear cluster changes the dimension of the tangent space, so a method that keeps a subspace across the step gets no guarantee from the transport.
+Treat a singular configuration as the boundary of the manifold.
+
 Refusals
 ~~~~~~~~
 
-A wrong length, a non-finite entry, an SPD point that is not symmetric positive definite, a rank-deficient ``X + V`` under a Stiefel retraction, a non-finite step size, and ``log`` on a Stiefel factor are refused.
+A wrong length, a non-finite entry, an SPD point that is not symmetric positive definite, a rank-deficient ``X + V`` under a Stiefel retraction, a non-finite step size, and ``log`` on a Stiefel or rigid-quotient factor are refused.
+A rigid-quotient factor with no atoms is refused too.
 Rust returns ``Error::ManifoldArgument``, C returns ``RGMIN_INVALID_PARAMETER`` with ``rgmin_last_error``, C++ throws ``std::runtime_error``, and Python raises ``ValueError``.
 C writes the outputs only on success, so an output may alias an input.
 
@@ -77,6 +96,7 @@ Rust
     let m = RiemannianManifold::product([
         RiemannianManifold::stiefel(6, 2, StiefelRetraction::Polar)?,
         RiemannianManifold::spd(3, SpdMetric::AffineInvariant)?,
+        RiemannianManifold::rigid_quotient(5, false)?,
     ])?;
     m.gradient_step(&x, &egrad, 0.1, &mut rgrad, &mut x_next)?;
 
@@ -124,12 +144,12 @@ The handle here is ``rgmin_manifold_handle_t``. ABI minor 41.
 C++
 ~~~
 
-``rgmin::Manifold`` owns the handle: ``Manifold::stiefel(n, p, r)``, ``Manifold::spd(p, metric)`` and ``Manifold::product(a, b, ...)``.
+``rgmin::Manifold`` owns the handle: ``Manifold::stiefel(n, p, r)``, ``Manifold::spd(p, metric)``, ``Manifold::rigid_quotient(n_atoms, periodic)`` and ``Manifold::product(a, b, ...)``.
 The members take buffers of ``len()`` doubles. ``xts::optimize::Manifold`` is the same class.
 
 Python
 ~~~~~~
 
-``rgmin.Stiefel(n, p, retraction="qr")``, ``rgmin.SPD(p, metric="affine_invariant")`` and ``rgmin.Product(*factors)`` take and return NumPy arrays.
-A Stiefel point is an ``(n, p)`` array, an SPD point a ``(p, p)`` array, and a product point a tuple with one array per factor.
+``rgmin.Stiefel(n, p, retraction="qr")``, ``rgmin.SPD(p, metric="affine_invariant")``, ``rgmin.RigidQuotient(n_atoms, periodic=False)`` and ``rgmin.Product(*factors)`` take and return NumPy arrays.
+A Stiefel point is an ``(n, p)`` array, an SPD point a ``(p, p)`` array, a rigid-quotient point a ``(3 n_atoms, 1)`` column of Cartesians (``x.reshape(-1, 3)`` gives one atom per row), and a product point a tuple with one array per factor.
 Each class has ``project``, ``egrad_to_rgrad``, ``retract``, ``exp``, ``log``, ``transport``, ``inner``, ``norm`` and ``gradient_step``, which returns ``(rgrad, x_next)``.
