@@ -1,0 +1,1 @@
+- `irun` on every `rgmin.optimize` optimizer now yields `False` for a run that stopped with `stop == "EvalBudget"`, as `run` returns it. It yielded `True` there before, because the ASE loop stops by asking `converged`.
