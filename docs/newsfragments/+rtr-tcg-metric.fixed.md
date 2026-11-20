@@ -1,0 +1,1 @@
+`rgmin_rtr_tcg_solve` on a manifold handle now runs the Riemannian subproblem, so SPD factors use their own metric for the trust ball and `eta_norm`. Truncated CG stops at the first Hessian action that is not finite instead of spending the whole iteration budget on it.
