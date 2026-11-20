@@ -4045,14 +4045,14 @@ mod tests {
         assert_eq!(done.value, -5.0);
 
         let zero = LowestMode {
-            vector: Array1::zeros(3),
+            vector: Array1::<f64>::zeros(3),
             value: 0.0,
             actions: 0,
         };
         let mut keep = |_: &mut Array1<f64>| {};
         assert_eq!(
             finish_projected(zero, &mut keep).unwrap().vector,
-            Array1::zeros(3)
+            Array1::<f64>::zeros(3)
         );
     }
 

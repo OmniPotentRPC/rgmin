@@ -7439,12 +7439,7 @@ pub unsafe extern "C" fn rgmin_rtr_tcg_solve(
             .with_cg_max(maxiter);
         let res = match geometry {
             Some(inner) => crate::rtr::truncated_cg_riemannian(
-                inner,
-                &x_arr,
-                &g_arr,
-                |v| hvp_at(v),
-                radius,
-                &options,
+                inner, &x_arr, &g_arr, &hvp_at, radius, &options,
             ),
             None => crate::rtr::truncated_cg_projected(
                 |v| v.clone(),
