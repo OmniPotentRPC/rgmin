@@ -101,6 +101,7 @@ That installs the 0.6 release on Rust 1.88 or newer.
    howto/ase-bench
    howto/lammps-migration
    howto/gromacs-steep
+   howto/gpmin
    howto/precon
    howto/doxygen
    howto/bench-gate
