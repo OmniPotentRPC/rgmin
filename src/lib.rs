@@ -142,6 +142,8 @@ pub mod root;
 pub mod rtr;
 /// Moller scaled conjugate gradient (damped-model step, no line search).
 pub mod scg;
+/// Symmetric secant updates (PSB, SR1, Bofill) of a dense Hessian model.
+pub mod secant;
 /// Sella RFO, P-RFO, and restricted atomic step.
 pub mod sella_step;
 mod session;
