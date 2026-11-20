@@ -129,6 +129,9 @@ pub mod scg;
 /// Sella RFO, P-RFO, and restricted atomic step.
 pub mod sella_step;
 mod session;
+/// Matrix-free Krylov primitives: preconditioned CG, deflated thick-restart
+/// Lanczos, Gauss/Gauss-Radau Lanczos quadrature, and deflated SLQ log-determinant.
+pub mod slq;
 mod sphere_lbfgs;
 mod step;
 /// One outer iteration. rgsaddle calls this; the host owns the loop.
@@ -247,6 +250,13 @@ pub use scg::{
 pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
 pub use session::Solver;
 pub use session::drive::EonFeat;
+pub use slq::{
+    DeflatedPair, ExtremePairsConfig, ExtremePairsReport, HutchPpConfig, PcgConfig, PcgResult,
+    ProbeStrategy, QuadratureEstimate, SlqConfig, SlqLogDetReport, TridiagEigh,
+    gauss_radau_tridiag, lanczos_extreme_pairs, lanczos_quadrature_fn, lanczos_quadrature_log,
+    pcg_solve, slq_logdet_deflated, slq_logdet_deflated_with_cv, slq_logdet_hutchpp, sym_eigh,
+    tridiag_eigh,
+};
 pub use slepc_kind::{SlepcParams, SlepcPmat, SlepcStKind};
 pub use step::DEFAULT_ATOM_MAXMOVE;
 pub use stepper::Stepper;
