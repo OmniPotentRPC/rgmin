@@ -3,6 +3,12 @@
 ///
 /// Rank is the number of R diagonals above `1e-10` times the leading
 /// pivot, the test Sella uses. An absolute cutoff is not used.
+///
+/// The columns must already be commensurate. Translation candidates have a
+/// norm that does not depend on the coordinate scale, rotation candidates
+/// scale with it, so `rebuild` divides each candidate by its own reference
+/// norm before it gets here. Every column then lies in `[0, 1]` and the
+/// relative cutoff means the same thing at any scale.
 fn cpqr(a: &mut [f64], vstore: &mut [f64], q: &mut [f64], n: usize, m: usize) -> usize {
     const TOL: f64 = 1e-10;
     if n == 0 || m == 0 {
