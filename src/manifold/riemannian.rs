@@ -10,6 +10,24 @@
 //! factor is \(\mathbb{R}^{3N}/\mathrm{SE}(3)\), or \(\mathbb{R}^{3N}/\mathrm{T}(3)\)
 //! when the cell is periodic.
 //!
+//! # Regular and singular strata of the rigid quotient
+//!
+//! The action of \(\mathrm{SE}(3)\) on \(\mathbb{R}^{3N}\) is free only on the
+//! regular stratum, the configurations of three or more atoms that are not
+//! collinear. There the quotient is a manifold of dimension \(3N-6\)
+//! (\(3N-3\) when periodic), the projector has rank 6 (3), and every
+//! operation is exact. At a singular configuration the stabilizer is not
+//! trivial and the orbit is smaller: one atom or coincident atoms have rank
+//! 3, and collinear atoms have rank 5, so the horizontal space is larger and
+//! its dimension changes with the configuration. The projector is
+//! rank-revealing and scale invariant, so it still removes exactly the
+//! motions that move the atoms and returns a valid horizontal vector, but
+//! the quotient is not a manifold there. A step that crosses a stratum, for
+//! example by bending a collinear cluster, changes the tangent dimension, and
+//! the transport and the retraction do not carry the history of a subspace
+//! method across the change. Treat a singular configuration as the boundary
+//! of the manifold, not as a point of it.
+//!
 //! Every operation checks lengths and finiteness and returns
 //! [`Error::ManifoldArgument`] rather than guessing. An SPD point must be
 //! symmetric and positive definite.
@@ -98,7 +116,9 @@ pub enum ManifoldFactor {
     /// Molecular or cluster quotient \(\mathbb{R}^{3N}/\mathrm{SE}(3)\)
     /// (`periodic` false) or \(\mathbb{R}^{3N}/\mathrm{T}(3)\) (`periodic` true).
     /// Packed length is `3 * n_atoms`. The metric is Euclidean on the
-    /// horizontal space.
+    /// horizontal space. It is a manifold on the regular stratum, with
+    /// three or more atoms that are not collinear; see the module
+    /// documentation for the singular configurations.
     RigidQuotient {
         /// Number of atoms. At least 1.
         n_atoms: usize,
@@ -330,7 +350,8 @@ impl ManifoldFactor {
     }
 }
 
-/// Product of Stiefel and SPD factors on column-major `f64` buffers.
+/// Product of Stiefel, SPD and rigid-quotient factors on column-major `f64`
+/// buffers.
 ///
 /// The packed point is the concatenation of each factor's column-major
 /// block in factor order. Tangent vectors and Euclidean gradients use the
@@ -368,6 +389,15 @@ impl RiemannianManifold {
     /// The packed point is `3 * n_atoms` Cartesian coordinates. Projection
     /// removes translations and, unless `periodic`, rotations. The
     /// retraction is the horizontal lift `x + v`.
+    ///
+    /// The quotient is a manifold only on the regular stratum: three or
+    /// more atoms that are not collinear, where the horizontal space has
+    /// dimension `3 * n_atoms - 6` (`- 3` when `periodic`). At one atom,
+    /// coincident atoms or collinear atoms the projector removes fewer
+    /// motions (rank 3, 3 and 5), the horizontal space is larger, and its
+    /// dimension changes with the configuration. The call accepts such a
+    /// geometry and the projection stays valid there. See the module
+    /// documentation.
     ///
     /// # Errors
     ///
@@ -478,6 +508,8 @@ impl RiemannianManifold {
 
     /// Orthogonal projection of the ambient `v` onto the tangent space at `x`.
     /// Stiefel: \(V - X\,\mathrm{sym}(X^\top V)\). SPD: \(\mathrm{sym}(V)\).
+    /// Rigid quotient: the horizontal part, with translations (and
+    /// rotations unless periodic) removed in the Euclidean metric.
     pub fn project(&self, x: &[f64], v: &[f64], out: &mut [f64]) -> Result<()> {
         self.check("x", x)?;
         self.check("v", v)?;
@@ -489,7 +521,8 @@ impl RiemannianManifold {
     }
 
     /// Riemannian gradient at `x` from the Euclidean gradient `egrad`.
-    /// Stiefel: the projection. SPD affine-invariant: \(X\,\mathrm{sym}(G)\,X\).
+    /// Stiefel and rigid quotient: the projection. SPD affine-invariant:
+    /// \(X\,\mathrm{sym}(G)\,X\).
     /// SPD log-Euclidean: \(D\log(X)^{-2}[\mathrm{sym}(G)]\).
     pub fn egrad_to_rgrad(&self, x: &[f64], egrad: &[f64], out: &mut [f64]) -> Result<()> {
         self.check("x", x)?;
@@ -499,7 +532,8 @@ impl RiemannianManifold {
     }
 
     /// Retraction of the step `v` at `x`. Stiefel uses its
-    /// [`StiefelRetraction`]; SPD uses the exponential of its metric.
+    /// [`StiefelRetraction`]; SPD uses the exponential of its metric; a
+    /// rigid quotient uses the horizontal lift `x + v`.
     pub fn retract(&self, x: &[f64], v: &[f64], out: &mut [f64]) -> Result<()> {
         self.check("x", x)?;
         self.check("v", v)?;
@@ -509,7 +543,8 @@ impl RiemannianManifold {
 
     /// Riemannian exponential at `x`. `v` is projected to the tangent
     /// space first. Stiefel: the embedded-metric geodesic of Edelman, Arias
-    /// and Smith. SPD: the geodesic of the factor's metric.
+    /// and Smith. SPD: the geodesic of the factor's metric. Rigid quotient:
+    /// the horizontal lift `x + P_x v`.
     pub fn exp(&self, x: &[f64], v: &[f64], out: &mut [f64]) -> Result<()> {
         self.check("x", x)?;
         self.check("v", v)?;
@@ -518,7 +553,8 @@ impl RiemannianManifold {
     }
 
     /// Riemannian logarithm: the tangent `v` at `x` with `exp(x, v) = y`.
-    /// SPD factors only; a Stiefel factor is refused.
+    /// SPD factors only; a Stiefel factor and a rigid quotient factor are
+    /// refused, so a product with either returns [`Error::ManifoldArgument`].
     pub fn log(&self, x: &[f64], y: &[f64], out: &mut [f64]) -> Result<()> {
         self.check("x", x)?;
         self.check("y", y)?;
@@ -528,6 +564,7 @@ impl RiemannianManifold {
 
     /// Vector transport of the tangent `v` from `x_from` to `x_to`.
     /// Stiefel: projection at `x_to`. SPD: parallel transport of the metric.
+    /// Rigid quotient: projection at `x_to`.
     pub fn transport(
         &self,
         x_from: &[f64],
