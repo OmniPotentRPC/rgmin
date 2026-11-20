@@ -15,6 +15,7 @@ from rgmin._maturin import LineSearch as LineSearch
 from rgmin._maturin import Session as Session
 from rgmin.manifold import SPD as SPD
 from rgmin.manifold import Product as Product
+from rgmin.manifold import RigidQuotient as RigidQuotient
 from rgmin.manifold import Stiefel as Stiefel
 
 __version__: str
