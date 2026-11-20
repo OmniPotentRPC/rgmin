@@ -1,0 +1,1 @@
+The rustdoc and the manifold reference now describe the rigid quotient factor: its operations, the regular stratum where it is a manifold, and the singular configurations (one atom, coincident atoms, collinear atoms) where the projection stays valid but the quotient is not a manifold and the tangent dimension changes.
