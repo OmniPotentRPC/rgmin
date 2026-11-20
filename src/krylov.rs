@@ -229,13 +229,13 @@ pub enum GmresFailure<OperatorError, PreconditionerError> {
         /// Partial solve record.
         record: KrylovRecord,
     },
-    /// A batched operator failed with every active right-hand-side record.
+    /// A batched operator failed with every right-hand-side record.
     BlockOperator {
         /// Original batched operator error.
         source: OperatorError,
         /// Record for the first active right-hand side.
         record: KrylovRecord,
-        /// Records for every remaining active right-hand side, in order.
+        /// Records for every other right-hand side, including completed ones.
         sibling_records: Vec<KrylovRecord>,
     },
     /// A block preconditioner failed with every right-hand-side record.
@@ -289,7 +289,7 @@ impl<OE, PE> GmresFailure<OE, PE> {
         }
     }
 
-    /// Additional active records carried by a failed block application.
+    /// Every other record carried by a failed block solve.
     pub fn sibling_records(&self) -> &[KrylovRecord] {
         match self {
             Self::BlockOperator {
