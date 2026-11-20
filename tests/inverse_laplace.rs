@@ -1,7 +1,8 @@
 use rgmin::inverse_laplace::{
+    Complex64, ComplexSample, InverseLaplaceError, TalbotConfig, WeeksConfig,
     complex_matrix_inv_inf_norm, eval_orthonormal_laguerre_series, exterior_disk_modulus,
     higham_gamma, solve_complex_dense, talbot_invert, verify_laguerre_tail_decay, weeks_invert,
-    weeks_mobius_w, Complex64, ComplexSample, InverseLaplaceError, TalbotConfig, WeeksConfig,
+    weeks_mobius_w,
 };
 
 #[test]
