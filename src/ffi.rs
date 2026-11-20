@@ -4696,6 +4696,15 @@ fn manifold_call(
         .iter()
         .map(|(_, ptr)| unsafe { slice::from_raw_parts(*ptr, len) }.to_vec())
         .collect();
+    if let Some(name) = inputs.iter().zip(&copies).find_map(|((name, _), values)| {
+        values
+            .iter()
+            .any(|value| !value.is_finite())
+            .then_some(*name)
+    }) {
+        set_last_error(&format!("{func}: non-finite {name}"));
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
     let mut outs = vec![vec![0.0; len]; outputs.len()];
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(m, &copies, &mut outs))) {
         Ok(Ok(())) => {
@@ -4913,6 +4922,10 @@ pub unsafe extern "C" fn rgmin_manifold_gradient_step(
     x_out: *mut f64,
     len: usize,
 ) -> rgmin_status_t {
+    if !t.is_finite() {
+        set_last_error("rgmin_manifold_gradient_step: non-finite t");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
     manifold_call(
         "rgmin_manifold_gradient_step",
         manifold,
@@ -5051,6 +5064,63 @@ mod manifold_alias_tests {
                 assert!((actual - orientation * expected).abs() < 1e-12);
             }
         }
+    }
+
+    #[test]
+    fn manifold_calls_reject_non_finite_inputs_without_writing_output() {
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let point = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
+        let vector = [f64::NAN, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let mut output = [7.0; 6];
+        let status = unsafe {
+            rgmin_manifold_project(
+                manifold,
+                point.as_ptr(),
+                vector.as_ptr(),
+                output.as_mut_ptr(),
+                output.len(),
+            )
+        };
+        unsafe { rgmin_manifold_free(manifold) };
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+        assert_eq!(output, [7.0; 6]);
+    }
+
+    #[test]
+    fn manifold_eigenpair_rejects_non_finite_inputs_without_writing_output() {
+        let mut point = vec![f64::INFINITY, 0.0, 0.0, 2.0, 0.0, 0.0];
+        let mut seed = vec![0.2, 0.1, -0.3, 0.4, 0.0, 0.2];
+        let mut mode = vec![7.0; 6];
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), point.len()) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), seed.len()) };
+        let mt = unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), mode.len()) };
+        let mut result = rgmin_lowest_mode_t {
+            value: 7.0,
+            actions: 7,
+        };
+        let status = unsafe {
+            rgmin_lowest_eigenpair_on_manifold(
+                manifold,
+                Some(stretch_hvp),
+                std::ptr::null_mut(),
+                xt,
+                st,
+                mt,
+                std::ptr::null(),
+                std::ptr::null(),
+                &mut result,
+            )
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(mt);
+            rgmin_manifold_free(manifold);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+        assert_eq!(mode, vec![7.0; 6]);
+        assert_eq!((result.value, result.actions), (7.0, 7));
     }
 }
 
@@ -6667,6 +6737,12 @@ unsafe fn run_lowest_eigenpairs(
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
     let seed_block = read_block(seed, n, k, "seed")?;
+    if x_owned.iter().any(|value| !value.is_finite())
+        || seed_block.iter().any(|value| !value.is_finite())
+    {
+        set_last_error(&format!("{label}: non-finite x or seed"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
     let values = cpu_f64_slice_mut(values_out, "values_out")?;
     if values.len() != k {
         set_last_error(&format!("{label}: values_out length is not k"));
@@ -7174,6 +7250,12 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
             Ok(slice) => slice.to_vec(),
             Err(status) => return status,
         };
+        if x_owned.iter().any(|value| !value.is_finite())
+            || seed_owned.iter().any(|value| !value.is_finite())
+        {
+            set_last_error("rgmin_lowest_eigenpair_on_manifold: non-finite x or seed");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
         // Inputs are owned before the mutable output slice is formed. This
         // is required even when all three DLPack handles describe one buffer.
         let mode_s = match cpu_f64_slice_mut(mode_out, "mode_out") {
@@ -7213,7 +7295,10 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
             &mut project,
         ) {
             Ok(mode) => {
-                if failed.get() || !copy_contiguous(mode_s, &mode.vector) || !mode.value.is_finite()
+                if failed.get()
+                    || mode.vector.iter().any(|value| !value.is_finite())
+                    || !copy_contiguous(mode_s, &mode.vector)
+                    || !mode.value.is_finite()
                 {
                     set_last_error("rgmin_lowest_eigenpair_on_manifold: projection failed");
                     return rgmin_status_t::RGMIN_INTERNAL_ERROR;
