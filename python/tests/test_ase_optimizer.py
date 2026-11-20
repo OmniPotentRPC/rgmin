@@ -220,7 +220,10 @@ class BoothFunctionOptimizable(Optimizable):
 def test_booth(optcls):
     target = BoothFunctionOptimizable([1.234, 2.345])
     eps = 1e-8
-    with optcls(target, logfile=None) as opt:
+    # GPMin's ASE default observation noise (1e-3) sits five orders of
+    # magnitude above eps = 1e-8; pass a noise floor compatible with eps.
+    extra = {"noise": 1e-6} if optcls is optimize.GPMin else {}
+    with optcls(target, logfile=None, **extra) as opt:
         opt.run(fmax=eps, steps=20_000)
     assert target.xy == pytest.approx([1, 3], abs=eps)
     assert target.get_value() == pytest.approx(0, abs=eps**2)

@@ -902,12 +902,190 @@ class NewtonPCG(NewtonCG):
     kind = "newton-pcg"
 
 
+class GPMin(_RgminOptimizer):
+    """Gaussian-process-accelerated optimizer matching ``ase.optimize.GPMin``.
+
+    Implements the algorithm of Garijo del Río, Mortensen, and Jacobsen
+    (Phys. Rev. B 100, 104103, 2019) on top of rgmin's native Rust GPMin
+    core. Every hyperparameter matches ASE's defaults:
+
+    - ``update_hyperparams=False``: ``scale=0.4``, ``weight=1.0``,
+      ``noise=0.001``.
+    - ``update_hyperparams=True``: ``scale=0.3``, ``weight=2.0``,
+      ``noise=0.004``, ``bounds=0.1``, ``batch_size=1``.
+
+    ``maxstep`` defaults to ``0.2`` Å to cap per-atom displacements,
+    matching rgmin's other drop-in optimizers; pass ``maxstep=0.0`` to
+    disable the displacement cap and match ASE's uncapped surrogate steps.
+    """
+
+    kind = "gpmin"
+    defaults = {
+        "scale": 0.4,
+        "weight": 1.0,
+        "noise": 0.001,
+        "maxstep": 0.2,
+    }
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        prior: Any = None,
+        kernel: Any = None,
+        noise: float | None = None,
+        weight: float | None = None,
+        scale: float | None = None,
+        batch_size: int | None = None,
+        bounds: float | bool | None = None,
+        update_prior_strategy: str = "maximum",
+        update_hyperparams: bool = False,
+        *,
+        maxstep: float | None = None,
+        max_refinements: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if hasattr(atoms, "__len__") and len(atoms) > 100:
+            warnings.warn(
+                "Possible memory issue. Please consider using a different "
+                "optimizer for systems with more than 100 atoms.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        self.update_hyperparams = bool(update_hyperparams)
+        self.update_prior_strategy = str(update_prior_strategy)
+        self.maxstep = _check_maxstep(maxstep, self.defaults["maxstep"])
+        self.max_refinements = max_refinements
+
+        # Resolve prior (None -> strategy, float or ASE ConstantPrior -> fixed)
+        if prior is None:
+            self._fixed_prior: float | None = None
+        elif isinstance(prior, bool):
+            raise ValueError("prior must be None, a finite float, or a ConstantPrior")
+        elif isinstance(prior, (int, float)):
+            self._fixed_prior = float(prior)
+        elif hasattr(prior, "constant") and isinstance(prior.constant, (int, float)):
+            self._fixed_prior = float(prior.constant)
+        else:
+            raise ValueError(
+                f"unsupported GPMin prior {prior!r}; pass None, a finite constant, or ConstantPrior"
+            )
+
+        # Resolve kernel (None or ASE SquaredExponential)
+        kernel_weight: float | None = None
+        kernel_scale: float | None = None
+        if kernel is not None:
+            if type(kernel).__name__ == "SquaredExponential":
+                if hasattr(kernel, "weight"):
+                    kernel_weight = float(kernel.weight)
+                if hasattr(kernel, "l"):
+                    kernel_scale = float(kernel.l)
+            else:
+                raise ValueError(
+                    f"unsupported GPMin kernel {kernel!r}; only SquaredExponential is supported"
+                )
+
+        if self.update_hyperparams:
+            default_scale = 0.3
+            default_weight = 2.0
+            default_noise = 0.004
+            default_batch_size: int | None = 1
+            default_bounds: float | bool | None = 0.1
+        else:
+            default_scale = 0.4
+            default_weight = 1.0
+            default_noise = 0.001
+            default_batch_size = None
+            default_bounds = None
+            if batch_size is not None:
+                warnings.warn(
+                    "A value was specified for the parameter batch_size, "
+                    "which is not used when update_hyperparams=False.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            if bounds is not None:
+                warnings.warn(
+                    "A value was specified for the parameter bounds, "
+                    "which is not used when update_hyperparams=False.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+        self.scale = (
+            float(scale)
+            if scale is not None
+            else (kernel_scale if kernel_scale is not None else default_scale)
+        )
+        self.weight = (
+            float(weight)
+            if weight is not None
+            else (kernel_weight if kernel_weight is not None else default_weight)
+        )
+        self.noise = float(noise) if noise is not None else default_noise
+        self.batch_size: int | None = (
+            int(batch_size) if batch_size is not None else default_batch_size
+        )
+        if bounds is False:
+            self.bounds: float | bool | None = False
+        elif bounds is True:
+            raise ValueError("bounds must be False, None, or a float in (0, 1)")
+        elif bounds is not None:
+            self.bounds = float(bounds)
+        else:
+            self.bounds = default_bounds
+
+        super().__init__(atoms, restart=restart, logfile=logfile, trajectory=trajectory, **kwargs)
+
+    def _session_options(self) -> dict[str, Any]:
+        opts: dict[str, Any] = {
+            "max_atom": self.maxstep,
+            "scale": self.scale,
+            "weight": self.weight,
+            "noise": self.noise,
+            "update_hyperparams": self.update_hyperparams,
+        }
+        if self._fixed_prior is not None:
+            opts["prior"] = self._fixed_prior
+        else:
+            opts["update_prior_strategy"] = self.update_prior_strategy
+        if self.update_hyperparams:
+            if self.batch_size is not None:
+                opts["batch_size"] = self.batch_size
+            if self.bounds is False:
+                opts["unbounded_hyperparams"] = True
+            elif self.bounds is not None:
+                opts["bounds"] = float(self.bounds)
+        if self.max_refinements is not None:
+            opts["max_refinements"] = int(self.max_refinements)
+        return opts
+
+    def _before_step(self, native: Session) -> bool:
+        fmax = getattr(self, "fmax", None)
+        if isinstance(fmax, (int, float)) and np.isfinite(fmax) and float(fmax) > 0.0:
+            native.set_gtol(float(fmax))
+        return False
+
+    @property
+    def hyperparameters(self) -> tuple[float, float, float]:
+        """Current ``(weight, scale, noise)`` hyperparameters."""
+        if self._native is not None:
+            hp = self._native.gpmin_hyperparameters
+            if hp is not None:
+                return hp
+        return (self.weight, self.scale, self.noise)
+
+
 __all__ = [
     "BFGS",
     "CG",
     "FIRE",
     "FIRE2",
     "FRPR",
+    "GPMin",
     "LBFGS",
     "SR1",
     "SR2",

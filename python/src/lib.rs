@@ -14,10 +14,10 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use rgmin::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Control, DEFAULT_ATOM_MAXMOVE, Error,
-    FireConfig, FireKind, FirePreset, GromacsSteepConfig, LbfgsH0, LbfgsPairs, LbfgsStep,
-    LevelSetConstraint, LineSearch, ManifoldFactor, Method, Oracle, RiemannianManifold, SearchStep,
-    Solver, SpdMetric, Status, StiefelRetraction, StopNorm, SuppliedSearch,
-    lowest_eigenpairs as solve_lowest_eigenpairs, lowest_eigenpairs_precond,
+    FireConfig, FireKind, FirePreset, GpMinConfig, GromacsSteepConfig, LbfgsH0, LbfgsPairs,
+    LbfgsStep, LevelSetConstraint, LineSearch, ManifoldFactor, Method, Oracle, PriorStrategy,
+    RiemannianManifold, SearchStep, Solver, SpdMetric, Status, StiefelRetraction, StopNorm,
+    SuppliedSearch, lowest_eigenpairs as solve_lowest_eigenpairs, lowest_eigenpairs_precond,
 };
 
 #[pyclass]
@@ -123,6 +123,16 @@ impl Session {
         backward_polish=false,
         etol=None,
         max_evals=None,
+        scale=None,
+        weight=None,
+        noise=None,
+        prior=None,
+        update_prior_strategy=None,
+        update_hyperparams=false,
+        batch_size=None,
+        bounds=None,
+        unbounded_hyperparams=false,
+        max_refinements=None,
     ))]
     fn new(
         kind: &str,
@@ -153,6 +163,16 @@ impl Session {
         backward_polish: bool,
         etol: Option<f64>,
         max_evals: Option<usize>,
+        scale: Option<f64>,
+        weight: Option<f64>,
+        noise: Option<f64>,
+        prior: Option<f64>,
+        update_prior_strategy: Option<&str>,
+        update_hyperparams: bool,
+        batch_size: Option<usize>,
+        bounds: Option<f64>,
+        unbounded_hyperparams: bool,
+        max_refinements: Option<usize>,
     ) -> PyResult<Self> {
         if n == 0 {
             return Err(PyValueError::new_err("dimension must be positive"));
@@ -169,6 +189,7 @@ impl Session {
         let lbfgs = matches!(method, Method::Lbfgs { .. });
         let nlcg = matches!(method, Method::Nlcg { .. });
         let steep = matches!(method, Method::GromacsSteep);
+        let gpmin = matches!(method, Method::GpMin);
         let atom_cap = match max_atom {
             Some(value) => value,
             None if steep => 0.0,
@@ -263,6 +284,63 @@ impl Session {
                 .set_gromacs_steep_config(config)
                 .map_err(value_error)?;
         }
+        let has_gpmin_opts = scale.is_some()
+            || weight.is_some()
+            || noise.is_some()
+            || prior.is_some()
+            || update_prior_strategy.is_some()
+            || update_hyperparams
+            || batch_size.is_some()
+            || bounds.is_some()
+            || unbounded_hyperparams
+            || max_refinements.is_some();
+        if gpmin {
+            let mut cfg = if update_hyperparams {
+                GpMinConfig::with_hyperparam_updates()
+            } else {
+                GpMinConfig::default()
+            };
+            if let Some(v) = scale {
+                cfg = cfg.with_scale(v);
+            }
+            if let Some(v) = weight {
+                cfg = cfg.with_weight(v);
+            }
+            if let Some(v) = noise {
+                cfg = cfg.with_noise(v);
+            }
+            if let Some(c) = prior {
+                cfg = cfg.with_prior(PriorStrategy::Fixed(c));
+            } else if let Some(strategy) = update_prior_strategy {
+                let strat = match strategy {
+                    "maximum" => PriorStrategy::Maximum,
+                    "init" => PriorStrategy::Init,
+                    "average" => PriorStrategy::Average,
+                    other => {
+                        return Err(PyValueError::new_err(format!(
+                            "update_prior_strategy must be maximum, init or average, not {other}"
+                        )));
+                    }
+                };
+                cfg = cfg.with_prior(strat);
+            }
+            if let Some(b) = batch_size {
+                cfg = cfg.with_batch_size(b);
+            }
+            if unbounded_hyperparams {
+                cfg = cfg.with_hyperparam_bounds(None);
+            } else if let Some(b) = bounds {
+                cfg = cfg.with_hyperparam_bounds(Some(b));
+            }
+            if let Some(r) = max_refinements {
+                cfg = cfg.with_max_refinements(r);
+            }
+            solver.set_gpmin_config(cfg).map_err(value_error)?;
+        } else if has_gpmin_opts {
+            return Err(PyValueError::new_err(
+                "GPMin options apply to a gpmin session only",
+            ));
+        }
         if atom_cap.is_finite() && atom_cap > 0.0 {
             solver.set_atom_maxmove(atom_cap);
         }
@@ -329,6 +407,24 @@ impl Session {
     #[pyo3(signature = (max_evals=None))]
     fn set_max_evals(&mut self, max_evals: Option<usize>) -> PyResult<()> {
         self.solver.set_max_evals(max_evals).map_err(value_error)
+    }
+
+    /// Set the session gradient tolerance.
+    fn set_gtol(&mut self, gtol: f64) -> PyResult<()> {
+        if !(gtol.is_finite() && gtol > 0.0) {
+            return Err(PyValueError::new_err(format!(
+                "gtol must be positive and finite, not {gtol}"
+            )));
+        }
+        self.solver.set_gtol(gtol);
+        Ok(())
+    }
+
+    /// Current GPMin `(weight, scale, noise)` hyperparameters, or `None`
+    /// for other methods.
+    #[getter]
+    fn gpmin_hyperparameters(&self) -> Option<(f64, f64, f64)> {
+        self.solver.gpmin_hyperparameters()
     }
 
     /// Consecutive constraint-failure budget of a `gromacs-steep` session,

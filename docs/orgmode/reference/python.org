@@ -99,6 +99,11 @@ The options and their defaults are:
 | =downhill=        | False   | The same as =accept="energy"=. |
 | =istep=           | =None=  | Step scale of a method other than FIRE, whose scale is =dt=. |
 | =level_set=       | =None=  | Target of the level-set constraint, as in @@rst::doc:`../howto/level-set`@@. |
+| =scale=, =weight=, =noise= | =0.4=, =1.0=, =0.001= (or =0.3=, =2.0=, =0.004= when updating) | GPMin kernel length scale, weight, and observation noise. |
+| =prior=, =update_prior_strategy= | =None=, ="maximum"= | Fixed GPMin prior mean constant or adaptive strategy (="maximum"=, ="init"=, ="average"=). |
+| =update_hyperparams=, =batch_size=, =bounds=, =unbounded_hyperparams=, =max_refinements= | =False=, =1=, =0.1=, =False=, =30= | GPMin marginal-likelihood hyperparameter update schedule and refinement cap (see @@rst::doc:`../howto/gpmin`@@). |
+
+=rgmin.optimize.GPMin= (also re-exported as =rgmin.GPMin=) wraps =Session("gpmin", ...)= with =ase.optimize.GPMin='s constructor signature, defaults, and =run(fmax, steps)= convergence flag, plus =maxstep= (default =0.2=, or =0.0= for ASE's uncapped steps) and =hyperparameters= property. =Session.set_gtol(gtol)= updates the session gradient tolerance and =Session.gpmin_hyperparameters= reports =(weight, scale, noise)=.
 
 =LineSearch(kind, x, direction, istep=1.0, c1=1e-4, c2=0.9, beta=0.5, maxiter=40, tol=1e-10)= is the supplied search. =offer(f, gradient)= takes the value and gradient at =x=, then at each trial, and returns =(x, alpha, value, done)=. =done= is False when =x= is the next trial.
 =LbfgsPairs(n, capacity=10)= is the pair memory. =push(s, y, rho=None)= returns whether the pair was stored, and =direction(gradient, h0)= returns =-H g= for =h0= a float, an array or a callable. =clear()=, =dim()= and =len()= complete it.

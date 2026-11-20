@@ -24,6 +24,7 @@ use crate::fire::{
     fire_displacement_into, fire_move_clipped, fire_prepare_v2, fire_rescale_velocity,
     fire2_displacement_metric, guenole2020,
 };
+use crate::gpmin::{GpMin, GpMinConfig};
 use crate::gromacs::{GromacsSteep, GromacsSteepConfig};
 use crate::holonomic::DistanceConstraints;
 use crate::hvp::{
@@ -388,6 +389,7 @@ enum Overlay {
     Ode12r(crate::ode12r::Ode12rState),
     Diis(DiisState),
     GromacsSteep(GromacsSteep),
+    GpMin(Option<Box<GpMin>>),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -610,6 +612,13 @@ impl Solver {
             Method::Ode12r => Overlay::Ode12r(crate::ode12r::Ode12rState::new(istep)),
             Method::Diis { memory } => Overlay::Diis(DiisState::new(*memory)),
             Method::GromacsSteep => Overlay::GromacsSteep(GromacsSteep::new(istep)),
+            Method::GpMin => {
+                let state = match GpMin::new(GpMinConfig::default(), dim) {
+                    Ok(gp) => Some(Box::new(gp)),
+                    Err(_) => None,
+                };
+                Overlay::GpMin(state)
+            }
             _ => Overlay::None,
         };
         solver.apply_default_atom_cap();
@@ -4030,6 +4039,74 @@ impl Solver {
         result
     }
 
+    fn gpmin_step<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        value: f64,
+        grad: Array1<f64>,
+    ) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        if !self.manifold.is_flat() {
+            return Err(Error::GpMin {
+                what: "GPMin requires a flat Euclidean coordinate space",
+            });
+        }
+        let mut overlay = std::mem::replace(&mut self.overlay, Overlay::None);
+        let result = match &mut overlay {
+            Overlay::GpMin(Some(state)) => {
+                let atom_cap = self.atom_maxmove;
+                let euclid_cap = self.control.maxmove_cap();
+                let gtol = self.control.gtol;
+                let gnorm0 = self.stationarity_norm(x, &grad);
+                let outcome = state.step_from_evaluated(
+                    x,
+                    value,
+                    &grad,
+                    gnorm0,
+                    atom_cap,
+                    euclid_cap,
+                    gtol,
+                    |trial| {
+                        let clipped = obj.bounds().clip(trial.view());
+                        let (trial_val, trial_raw) = obj.value_and_gradient(clipped.view());
+                        if !trial_val.is_finite() || trial_raw.iter().any(|g| !g.is_finite()) {
+                            return Err(Error::Oracle {
+                                what: "non-finite value or gradient",
+                            });
+                        }
+                        let trial_grad = self.horizontal_grad(&clipped, &trial_raw);
+                        let trial_norm = self.stationarity_norm(&clipped, &trial_grad);
+                        Ok((trial_val, trial_grad, trial_norm))
+                    },
+                );
+                match outcome {
+                    Ok(out) => {
+                        *x = obj.bounds().clip(out.x.view());
+                        self.remember(x, out.value, &out.grad);
+                        self.steps += 1;
+                        let status = if out.stalled_machine && out.grad_norm > self.control.gtol {
+                            Status::MachinePrecision
+                        } else {
+                            self.control
+                                .classify(out.grad_norm, self.free_len(obj.bounds()))
+                        };
+                        Ok(self.finish(out.value, x, &out.grad, out.grad_norm, status))
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            Overlay::GpMin(None) => Err(Error::GpMin {
+                what: "dimension must be positive",
+            }),
+            _ => unreachable!("GPMin overlay"),
+        };
+        self.overlay = overlay;
+        result
+    }
+
     fn step_dogleg<O>(
         &mut self,
         obj: &O,
@@ -4181,6 +4258,9 @@ impl Solver {
         }
         if matches!(self.overlay, Overlay::GromacsSteep(_)) {
             return self.gromacs_steep_step(obj, x, value, grad);
+        }
+        if matches!(self.overlay, Overlay::GpMin(_)) {
+            return self.gpmin_step(obj, x, value, grad);
         }
         self.refresh_exp(obj, x, &grad)?;
 
@@ -5250,6 +5330,10 @@ impl Solver {
             Overlay::Ode12r(state) => state.reset(),
             Overlay::Diis(state) => state.clear(),
             Overlay::GromacsSteep(state) => state.reset(self.control.istep),
+            Overlay::GpMin(Some(state)) => {
+                let _ = state.reset();
+            }
+            Overlay::GpMin(None) => {}
             Overlay::None => {}
         }
     }
@@ -5275,6 +5359,26 @@ impl Solver {
     pub fn gromacs_steep_config(&self) -> Option<GromacsSteepConfig> {
         match self.overlay {
             Overlay::GromacsSteep(state) => Some(state.config()),
+            _ => None,
+        }
+    }
+
+    /// Parameters of a GPMin session.
+    ///
+    /// Other methods return `None`.
+    pub fn gpmin_config(&self) -> Option<GpMinConfig> {
+        match &self.overlay {
+            Overlay::GpMin(Some(state)) => Some(state.config()),
+            _ => None,
+        }
+    }
+
+    /// Current `(weight, scale, noise)` hyperparameters of a GPMin session.
+    ///
+    /// Other methods return `None`.
+    pub fn gpmin_hyperparameters(&self) -> Option<(f64, f64, f64)> {
+        match &self.overlay {
+            Overlay::GpMin(Some(state)) => Some(state.hyperparameters()),
             _ => None,
         }
     }
@@ -5337,6 +5441,20 @@ impl Solver {
             Overlay::GromacsSteep(state) => state.set_config(config),
             _ => Err(Error::Steep {
                 what: "parameters require a gromacs-steep session",
+            }),
+        }
+    }
+
+    /// Replace the configuration of a GPMin session and clear its GP
+    /// training history. Other methods return [`Error::GpMin`].
+    pub fn set_gpmin_config(&mut self, config: GpMinConfig) -> Result<()> {
+        match &mut self.overlay {
+            Overlay::GpMin(Some(state)) => state.set_config(config),
+            Overlay::GpMin(None) => Err(Error::GpMin {
+                what: "dimension must be positive",
+            }),
+            _ => Err(Error::GpMin {
+                what: "parameters require a gpmin session",
             }),
         }
     }
@@ -6171,6 +6289,9 @@ impl Solver {
             Overlay::GromacsSteep(_) => {
                 unreachable!("GROMACS steep is dispatched before generic overlays")
             }
+            Overlay::GpMin(_) => {
+                unreachable!("GPMin is dispatched before generic overlays")
+            }
             Overlay::None => {}
         }
         self.overlay = overlay;
@@ -6326,7 +6447,7 @@ impl Inner {
             // The overlay on Solver carries the real state. Inner stays a
             // variant the constraint stepper matches.
             Method::QuickMin | Method::Ode12r | Method::Diis { .. } => Inner::Steepest,
-            Method::GromacsSteep => Inner::Steepest,
+            Method::GromacsSteep | Method::GpMin => Inner::Steepest,
             Method::Bb => Inner::Bb {
                 prev_s: None,
                 prev_y: None,
@@ -6347,11 +6468,16 @@ impl Inner {
 impl Solver {
     /// Set the gradient tolerance of the session and its internal solver.
     pub fn with_gtol(mut self, gtol: f64) -> Self {
+        self.set_gtol(gtol);
+        self
+    }
+
+    /// Update the gradient tolerance of the session and its internal solver.
+    pub fn set_gtol(&mut self, gtol: f64) {
         self.control.gtol = gtol;
         if let Inner::Lbfgs(solver) = &mut self.inner {
             solver.gtol = gtol;
         }
-        self
     }
 }
 

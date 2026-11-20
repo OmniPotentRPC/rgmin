@@ -83,6 +83,16 @@ pub enum Method {
     /// per-atom force norm and adapt the maximum displacement after a
     /// strict energy-decrease test.
     GromacsSteep,
+    /// Gaussian-process-accelerated local geometry optimizer (GPMin).
+    ///
+    /// Fits a Gaussian process surrogate with energy and gradient
+    /// observations and minimizes the posterior mean with an inner L-BFGS
+    /// search.
+    ///
+    /// Garijo del Río, Mortensen, and Jacobsen, *Local Bayesian optimizer
+    /// for atomic structures*, Phys. Rev. B 100, 104103 (2019),
+    /// <https://doi.org/10.1103/PhysRevB.100.104103>.
+    GpMin,
     /// Shifted Newton on a caller-supplied dense Hessian.
     ///
     /// Banerjee, Adams, Simons, Shepard,
@@ -369,6 +379,7 @@ impl Method {
             Self::Adam { .. } => "adam",
             Self::Steepest => "steepest",
             Self::GromacsSteep => "gromacs-steep",
+            Self::GpMin => "gpmin",
             Self::Newton { kind } => match kind {
                 crate::newton::NewtonKind::Shifted => "newton",
                 crate::newton::NewtonKind::Rfo => "rfo",
@@ -404,6 +415,7 @@ impl Method {
             "adam" => Self::adam(),
             "sd" | "steepest" | "steepest_descent" => Self::Steepest,
             "gromacs_steep" | "gmx_steep" => Self::GromacsSteep,
+            "gpmin" | "gp_min" => Self::GpMin,
             "cg" | "pr" | "polak_ribiere" => Self::polak_ribiere(),
             "prp" | "pr_plus" | "polak_ribiere_plus" => Self::polak_ribiere_plus(),
             "eon_cg" | "eon_cg_pr" => Self::eon_cg(),
@@ -505,6 +517,9 @@ mod name_tests {
             Method::GromacsSteep
         );
         assert_eq!(Method::GromacsSteep.as_str(), "gromacs-steep");
+        assert_eq!(Method::from_name("gpmin").unwrap(), Method::GpMin);
+        assert_eq!(Method::from_name("GP-Min").unwrap(), Method::GpMin);
+        assert_eq!(Method::GpMin.as_str(), "gpmin");
         assert_eq!(Method::from_name("fire2").unwrap().as_str(), "fire2");
         let err = Method::from_name("not-a-solver").unwrap_err();
         assert!(err.to_string().contains("not-a-solver"), "{err}");
