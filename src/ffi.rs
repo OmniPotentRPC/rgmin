@@ -1247,9 +1247,8 @@ pub unsafe extern "C" fn rgmin_minimize_rlbfgs(
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
-        if init.iter().any(|value| !value.is_finite()) {
-            set_last_error("rgmin_minimize_rlbfgs: x contains a non-finite value");
-            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_rlbfgs", &init) {
+            return status;
         }
         let n = init.len();
         let obj = c_oracle(eval, grad, user, n);
