@@ -13,7 +13,8 @@
 use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::{
-    Control, HUANG_GRADIENT_RATIO, Manifold, ManifoldKind, Oracle, Rlbfgs, Status, minimize_rlbfgs,
+    Control, HUANG_GRADIENT_RATIO, Manifold, ManifoldKind, Oracle, Rlbfgs, Status, StopReason,
+    minimize_rlbfgs,
 };
 
 fn quadratic() -> Oracle<impl Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync> {
@@ -185,6 +186,62 @@ fn rlbfgs_checks_the_evaluation_budget_when_the_iteration_ends() {
     assert_eq!(report.evals, 3, "{report:?}");
     assert!((report.coords[0] + 0.5).abs() < 1e-12, "{report:?}");
     assert!(report.value < 1.5, "{report:?}");
+}
+
+/// A start that is the only point with a low value, so no trial can
+/// satisfy the Armijo test and the line search ends without a step.
+fn uphill_everywhere() -> Oracle<impl Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync> {
+    Oracle::unbounded(1, |x: ArrayView1<f64>| {
+        let value = if x[0] == 1.0 { 0.5 } else { 10.0 };
+        (value, array![x[0]])
+    })
+}
+
+#[test]
+fn rlbfgs_names_the_evaluation_budget_when_the_line_search_fails_with_it_spent() {
+    let control = Control::default()
+        .with_maxiter(10)
+        .with_gtol(1e-12)
+        .with_max_evals(3);
+    let params = Rlbfgs::default().with_grad_ratio(0.0);
+    let report = minimize_rlbfgs(
+        &ManifoldKind::Euclidean,
+        &uphill_everywhere(),
+        array![1.0],
+        &control,
+        &params,
+    )
+    .expect("rlbfgs");
+    assert_eq!(report.status, Status::EvalBudget, "{report:?}");
+    assert_eq!(report.stop_reason(), StopReason::EvalBudget, "{report:?}");
+    assert_eq!(report.steps, 1, "{report:?}");
+    assert!(report.evals >= 3, "{report:?}");
+    assert_eq!(report.coords, array![1.0], "{report:?}");
+    assert_eq!(report.value, 0.5, "{report:?}");
+}
+
+#[test]
+fn rlbfgs_reports_a_failed_line_search_while_the_evaluation_budget_holds() {
+    let control = Control::default()
+        .with_maxiter(10)
+        .with_gtol(1e-12)
+        .with_max_evals(1_000);
+    let params = Rlbfgs::default().with_grad_ratio(0.0);
+    let report = minimize_rlbfgs(
+        &ManifoldKind::Euclidean,
+        &uphill_everywhere(),
+        array![1.0],
+        &control,
+        &params,
+    )
+    .expect("rlbfgs");
+    assert_eq!(
+        report.stop_reason(),
+        StopReason::LineSearchFailed,
+        "{report:?}"
+    );
+    assert_eq!(report.steps, 0, "{report:?}");
+    assert_eq!(report.coords, array![1.0], "{report:?}");
 }
 
 #[cfg(feature = "capi")]
