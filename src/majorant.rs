@@ -54,7 +54,7 @@ pub struct RadiiCertificate {
     pub contraction: f64,
     /// Upward-rounded bound on `epsilon + radius * kappa(radius)`.
     pub image_radius: f64,
-    /// Downward-safe positive margin `radius - image_radius`.
+    /// Downward-rounded positive lower bound on `radius - image_radius`.
     pub margin: f64,
 }
 
@@ -70,6 +70,21 @@ fn next_up(value: f64) -> f64 {
         f64::from_bits(bits + 1)
     } else {
         f64::from_bits(bits - 1)
+    }
+}
+
+fn next_down(value: f64) -> f64 {
+    if value == f64::NEG_INFINITY {
+        return value;
+    }
+    if value == 0.0 {
+        return -f64::from_bits(1);
+    }
+    let bits = value.to_bits();
+    if value > 0.0 {
+        f64::from_bits(bits - 1)
+    } else {
+        f64::from_bits(bits + 1)
     }
 }
 
@@ -130,7 +145,7 @@ pub fn certify_radii_polynomial(
             radius,
         });
     }
-    let margin = radius - image_radius;
+    let margin = next_down(radius - image_radius);
     if !margin.is_finite() || margin <= 0.0 {
         return Err(MajorantRefusal::NotContracting {
             image_radius,
@@ -155,6 +170,7 @@ mod tests {
             certify_radii_polynomial(0.01, &[0.25, 0.5], 0.02).expect("strict comparison");
         assert!(certificate.image_radius < certificate.radius);
         assert!(certificate.margin > 0.0);
+        assert!(certificate.margin < certificate.radius - certificate.image_radius);
     }
 
     #[test]
