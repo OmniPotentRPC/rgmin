@@ -69,6 +69,14 @@ fn status_from_error(e: &Error) -> rgmin_status_t {
     }
 }
 
+fn ffi_status<F>(label: &str, call: F) -> rgmin_status_t
+where
+    F: FnOnce() -> rgmin_status_t,
+{
+    let _ = label;
+    call()
+}
+
 /// Compatibility identity for the rgmin C ABI.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -7330,6 +7338,14 @@ mod default_tests {
     // Every pattern below names each field, so a field added to a C
     // record or to its Rust struct does not compile until it is compared
     // here. Floats compare as bit patterns.
+
+    #[test]
+    fn ffi_status_maps_panics_to_internal_error() {
+        let status = ffi_status("rgmin_test", || panic!("callback panic"));
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        let message = unsafe { CStr::from_ptr(rgmin_last_error()) };
+        assert_eq!(message.to_str().unwrap(), "rgmin_test: panicked");
+    }
 
     type Cell = Option<[u64; 3]>;
     type FloorBits = (u64, u64, Option<u64>);
