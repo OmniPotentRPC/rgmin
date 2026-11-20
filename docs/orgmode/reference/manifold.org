@@ -91,7 +91,7 @@ The handle here is ~rgmin_manifold_handle_t~. ABI minor 41.
 |----------------------------------+----------------------------------------------------------------|
 | ~rgmin_manifold_stiefel(n, p, r)~ | ~r~ is ~RGMIN_STIEFEL_QR~ or ~RGMIN_STIEFEL_POLAR~. Null on a bad shape. |
 | ~rgmin_manifold_spd(p, metric)~  | ~RGMIN_SPD_AFFINE_INVARIANT~ or ~RGMIN_SPD_LOG_EUCLIDEAN~.     |
-| ~rgmin_manifold_rigid_quotient(n, periodic)~ | ~R^{3N}/SE(3)~, or ~R^{3N}/T(3)~ when ~periodic~ is nonzero. Packed length ~3 n~. |
+| ~rgmin_manifold_rigid_quotient(n, periodic)~ | ~R^{3N}/SE(3)~, or ~R^{3N}/T(3)~ when ~periodic~ is nonzero. Packed length ~3 n~. ABI minor 53. |
 | ~rgmin_manifold_product(fs, k)~  | Copies ~k~ factors; the caller still frees them.               |
 | ~rgmin_manifold_free(m)~         | Null is a no-op.                                               |
 | ~rgmin_manifold_len(m)~          | Packed length. Zero for null.                                  |
