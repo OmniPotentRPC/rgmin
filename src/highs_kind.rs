@@ -180,6 +180,7 @@ impl Default for HighsOptions {
 
 impl HighsOptions {
     /// Return this solve's limit after validating an explicit override.
+    #[cfg_attr(not(feature = "highs"), allow(dead_code))]
     pub(crate) fn time_limit_or(self, default: f64) -> crate::Result<f64> {
         let limit = self.time_limit.unwrap_or(default);
         if limit.is_finite() && limit >= 0.0 {
