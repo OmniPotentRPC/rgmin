@@ -148,16 +148,16 @@ pub use con_checkpoint::{read_checkpoint, write_checkpoint};
 pub use control::{Control, NoiseFloor, StopNorm};
 pub use dlaf_kind::DlaFutureParams;
 pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};
-pub use elpa_kind::{elpa_config, elpa_spectrum, ElpaParams, ElpaSpectrum, ElpaStage};
-pub use eon_cg::{minimize_eon_cg, EonCg, EonCgReport};
+pub use elpa_kind::{ElpaParams, ElpaSpectrum, ElpaStage, elpa_config, elpa_spectrum};
+pub use eon_cg::{EonCg, EonCgReport, minimize_eon_cg};
 pub use error::{Error, Result};
 pub use fire::{
-    guenole2020, Fire2Extras, FireConfig, FireKind, FirePreset, FireTrace, FireVariant,
+    Fire2Extras, FireConfig, FireKind, FirePreset, FireTrace, FireVariant, guenole2020,
 };
 pub use gromacs::{
-    gromacs_steep_max_constraint_shrinks, GromacsSteep, GromacsSteepConfig,
     GROMACS_STEEP_EMSTEP_DEFAULT, GROMACS_STEEP_GROW, GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS,
-    GROMACS_STEEP_MIN_USTEP, GROMACS_STEEP_SHRINK, GROMACS_STEEP_SHRINK_BUDGET_CAP,
+    GROMACS_STEEP_MIN_USTEP, GROMACS_STEEP_SHRINK, GROMACS_STEEP_SHRINK_BUDGET_CAP, GromacsSteep,
+    GromacsSteepConfig, gromacs_steep_max_constraint_shrinks,
 };
 pub use highs_kind::{
     HighsCCallback, HighsCallback, HighsCallbackKind, HighsCrossover, HighsOptions, HighsSolverKind,
@@ -166,33 +166,33 @@ pub use holonomic::{
     ConstraintAlgorithm, ConstraintError, ConstraintReport, ConstraintSolver, DistanceConstraints,
 };
 pub use hvp::{
-    minimize_newton_cg, polish_hvp, steihaug_cg, steihaug_pcg, FdHvp, HessianVector, HvpOracle,
-    IdentityPrecond, NystromPrecond, Preconditioner, TryHessianVector,
+    FdHvp, HessianVector, HvpOracle, IdentityPrecond, NystromPrecond, Preconditioner,
+    TryHessianVector, minimize_newton_cg, polish_hvp, steihaug_cg, steihaug_pcg,
 };
-pub use irc_trust::{sqrt_masses_3n, IrcTrust};
+pub use irc_trust::{IrcTrust, sqrt_masses_3n};
 pub use krylov::{
-    gmres_right, gmres_right_block, BatchOperatorError, BlockGmresFailure, GmresFailure,
-    GmresOptions, GmresRun, GmresStatus, Identity as KrylovIdentity,
-    IdentityError as KrylovIdentityError, KrylovIteration, KrylovObserver, KrylovRecord,
-    KrylovRefusal, LinearOperator, NoObserver, Preconditioner as KrylovPreconditioner,
+    BatchOperatorError, BlockGmresFailure, GmresFailure, GmresOptions, GmresRun, GmresStatus,
+    Identity as KrylovIdentity, IdentityError as KrylovIdentityError, KrylovIteration,
+    KrylovObserver, KrylovRecord, KrylovRefusal, LinearOperator, NoObserver,
+    Preconditioner as KrylovPreconditioner, gmres_right, gmres_right_block,
 };
 pub use lbfgs::{
-    lbfgs_direction, GradNorm, Lbfgs, LbfgsBuilder, LbfgsH0, LbfgsPairs, LbfgsStep,
-    EON_FINITE_DIFFERENCE, EON_INVERSE_CURVATURE, EON_MAX_MOVE, LBFGSB_FACTR, LBFGSB_FTOL,
+    EON_FINITE_DIFFERENCE, EON_INVERSE_CURVATURE, EON_MAX_MOVE, GradNorm, LBFGSB_FACTR,
+    LBFGSB_FTOL, Lbfgs, LbfgsBuilder, LbfgsH0, LbfgsPairs, LbfgsStep, lbfgs_direction,
 };
 #[cfg(feature = "highs")]
 pub use lbfgs_qp::HighsStep;
 pub use level_set::LevelSetConstraint;
-pub use lindh::{apply_inverse, LindhSpec};
+pub use lindh::{LindhSpec, apply_inverse};
 pub use linesearch::{LineSearch, LineSearchOptions, SearchStep, SuppliedSearch};
 pub use lowest_mode::{
-    lowest_eigenpair, lowest_eigenpairs, lowest_eigenpairs_precond, lowest_mode, lowest_mode_chase,
-    lowest_mode_dense, lowest_mode_dlaf, lowest_mode_eigenexa, lowest_mode_libkrylov,
-    lowest_mode_precond, lowest_mode_precond_with, lowest_mode_primme, lowest_mode_slepc,
-    lowest_mode_with, try_lowest_eigenpairs, try_lowest_eigenpairs_precond,
-    ApplyBlockPreconditioner, ApplyHessian, ApplyPreconditioner, Block3Jacobi, DiagonalJacobi,
-    EigenParams, Eigenpair, Eigenpairs, EigensolverKind, LowestMode, PreconditionerKind,
-    TryApplyHessian, DENSE_EIGEN_CUTOFF,
+    ApplyBlockPreconditioner, ApplyHessian, ApplyPreconditioner, Block3Jacobi, DENSE_EIGEN_CUTOFF,
+    DiagonalJacobi, EigenParams, Eigenpair, Eigenpairs, EigensolverKind, LowestMode,
+    PreconditionerKind, TryApplyHessian, lowest_eigenpair, lowest_eigenpairs,
+    lowest_eigenpairs_precond, lowest_mode, lowest_mode_chase, lowest_mode_dense, lowest_mode_dlaf,
+    lowest_mode_eigenexa, lowest_mode_libkrylov, lowest_mode_precond, lowest_mode_precond_with,
+    lowest_mode_primme, lowest_mode_slepc, lowest_mode_with, try_lowest_eigenpairs,
+    try_lowest_eigenpairs_precond,
 };
 pub use manifold::{
     CenteredMatrix, ComplexCircle, Constant, EuclideanComplex, Grassmann, Hyperbolic, Manifold,
@@ -203,54 +203,54 @@ pub use manifold::{
 pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
 pub use newton::{
-    backward_error_floor, minimize_newton, newton_decrement_acceptable, polish_newton,
-    HessianObjective, HessianOracle, NewtonKind,
+    HessianObjective, HessianOracle, NewtonKind, backward_error_floor, minimize_newton,
+    newton_decrement_acceptable, polish_newton,
 };
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
 pub use noise::{
-    ecnoise, estimate_second, estimate_third, forward_step, gradient_dr, line_values, next_spacing,
-    sample_gradient_noise, sample_gradient_noise_k, sample_noise, sample_value_gradient_noise,
-    NoiseEstimate, NoiseFlag, ValueGradientNoise, DEFAULT_M,
+    DEFAULT_M, NoiseEstimate, NoiseFlag, ValueGradientNoise, ecnoise, estimate_second,
+    estimate_third, forward_step, gradient_dr, line_values, next_spacing, sample_gradient_noise,
+    sample_gradient_noise_k, sample_noise, sample_value_gradient_noise,
 };
 pub use ode12r::{
-    inf_norm as ode12r_inf_norm, local_error as ode12r_local_error,
-    taken_step as ode12r_taken_step, Ode12rState, Ode12rVerdict,
+    Ode12rState, Ode12rVerdict, inf_norm as ode12r_inf_norm, local_error as ode12r_local_error,
+    taken_step as ode12r_taken_step,
 };
 pub use oracle::Oracle;
 pub use precon::exp_gate_open;
 pub use precon::{
+    AngleTerm, BondTerm, DihedralTerm, Exp, ExpParams, Ff, FfParams, FfTerms, GeometryKind, Ghost,
+    Lindh, LindhParams, MorseTerm, N_LINDH, N_PAR_ASSEMBLE, N_PAR_EXP_APPLY, N_PAR_EXP_SOLVE,
+    N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE, Neighbours, OptimizerFamily, PreconChoice, PreconSpec,
     bonded_terms, estimate_mu, max_atom_displacement, nearest_neighbour_distance, needs_rebuild,
-    select_precon, sine_probe, AngleTerm, BondTerm, DihedralTerm, Exp, ExpParams, Ff, FfParams,
-    FfTerms, GeometryKind, Ghost, Lindh, LindhParams, MorseTerm, Neighbours, OptimizerFamily,
-    PreconChoice, PreconSpec, N_LINDH, N_PAR_ASSEMBLE, N_PAR_EXP_APPLY, N_PAR_EXP_SOLVE,
-    N_PAR_LINDH_APPLY, N_PAR_LINDH_SOLVE,
+    select_precon, sine_probe,
 };
 pub use pso::minimize_pso;
 pub use qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 pub use qn_irc::{
-    bfgs_hessian_update, mw_pair, qn_get_s, qn_irc_get_s, qn_irc_restricted,
-    qn_irc_restricted_identity, qn_restricted, to_mw, BfgsModel,
+    BfgsModel, bfgs_hessian_update, mw_pair, qn_get_s, qn_irc_get_s, qn_irc_restricted,
+    qn_irc_restricted_identity, qn_restricted, to_mw,
 };
 pub use qn_step::QnStep;
 pub use quickmin::{
-    quickmin_baseline, quickmin_displacement, quickmin_project, quickmin_rescale_velocity,
-    QuickMinOptions, QuickMinState,
+    QuickMinOptions, QuickMinState, quickmin_baseline, quickmin_displacement, quickmin_project,
+    quickmin_rescale_velocity,
 };
 pub use report::{Report, Status, StopReason};
-pub use rigid::{align_rigid, RigidMode, RigidRequest, RigidWorkspace};
+pub use rigid::{RigidMode, RigidRequest, RigidWorkspace, align_rigid};
 pub use rlbfgs::{
-    minimize_rlbfgs, Rlbfgs, HUANG_ARMIJO, HUANG_BACKTRACK, HUANG_CAUTIOUS_SLOPE,
-    HUANG_GRADIENT_RATIO, HUANG_LINESEARCH_MAX, HUANG_MEMORY,
+    HUANG_ARMIJO, HUANG_BACKTRACK, HUANG_CAUTIOUS_SLOPE, HUANG_GRADIENT_RATIO,
+    HUANG_LINESEARCH_MAX, HUANG_MEMORY, Rlbfgs, minimize_rlbfgs,
 };
 pub use scg::{
-    minimize_scg, minimize_scg_exact, minimize_scg_exact_with_options, minimize_scg_with_options,
-    DirectionalCurvature, ScgOptions, ScgParams, ScgStepTolerance,
+    DirectionalCurvature, ScgOptions, ScgParams, ScgStepTolerance, minimize_scg,
+    minimize_scg_exact, minimize_scg_exact_with_options, minimize_scg_with_options,
 };
 pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
-pub use session::drive::EonFeat;
 pub use session::Solver;
+pub use session::drive::EonFeat;
 pub use slepc_kind::{SlepcParams, SlepcPmat, SlepcStKind};
 pub use step::DEFAULT_ATOM_MAXMOVE;
 pub use stepper::Stepper;
 pub use trust::{RestrictedStep, TrustRegion};
-pub use tune::{select_train_setting, TrainRow};
+pub use tune::{TrainRow, select_train_setting};
