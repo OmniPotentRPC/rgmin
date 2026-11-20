@@ -245,6 +245,21 @@ int eigen_block() {
 /// |U - U*|^2 / 2 + |S - S*|^2 / 2. The cost must fall at every step.
 int manifold_fit() {
     using xts::optimize::Manifold;
+    Manifold const rigid = Manifold::rigid_quotient(2);
+    double const rigid_x[6] = {0.0, 0.0, 0.0, 2.0, 0.0, 0.0};
+    double const translation[6] = {0.4, -0.2, 0.7, 0.4, -0.2, 0.7};
+    double horizontal[6] = {};
+    rigid.project(rigid_x, translation, horizontal);
+    if (rigid.len() != 6) {
+        std::fprintf(stderr, "rigid quotient len %zu\n", rigid.len());
+        return 8;
+    }
+    for (double value : horizontal) {
+        if (std::fabs(value) > 1e-12) {
+            std::fprintf(stderr, "rigid quotient retained translation %g\n", value);
+            return 9;
+        }
+    }
     Manifold const st = Manifold::stiefel(4, 2, RGMIN_STIEFEL_POLAR);
     Manifold const spd = Manifold::spd(2, RGMIN_SPD_AFFINE_INVARIANT);
     Manifold const m = Manifold::product(st, spd);

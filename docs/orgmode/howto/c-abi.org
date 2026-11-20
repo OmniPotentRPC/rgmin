@@ -251,9 +251,10 @@ and it doubles, never past the supplied maximum, when the ratio is
 above 3/4 and the step lies on the trust boundary.
 
 ~rgmin_lowest_eigenpair_on_manifold~ and
-~rgmin_lowest_eigenpairs_projected~ are the Lanczos or LOBPCG pair and
-the block LOBPCG pairs with each vector projected onto the tangent
-space. A null manifold matches the unprojected entries.
+~rgmin_lowest_eigenpairs_projected~ solve the tangent-projected
+operator. Every matrix-free single-pair backend applies the projector
+to its operator and preconditioner actions; the block entry uses
+projected LOBPCG. A null manifold matches the unprojected entries.
 
 ** C++
 

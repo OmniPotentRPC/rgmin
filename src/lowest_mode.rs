@@ -10,6 +10,7 @@
 //! [`Error::EigenUnavailable`]. Integers match `schema/eigen.capnp`.
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
+use std::cell::RefCell;
 
 use crate::dlaf_kind::DlaFutureParams;
 use crate::eigenexa_kind::EigenExaParams;
@@ -436,11 +437,11 @@ pub fn lowest_mode<H: ApplyHessian + ?Sized>(
     lowest_mode_with(h, x, seed, params, &mut |_| {})
 }
 
-/// [`lowest_mode`], projecting each Lanczos or LOBPCG vector with `project`.
+/// [`lowest_mode`], solving in the subspace selected by `project`.
 ///
 /// The callback is `P` from one shared [`crate::rigid::RigidWorkspace`]:
 /// project `v`, apply `H`, project `H v`, then reorthogonalise. Lanczos
-/// and LOBPCG honor `project`. Other linked kinds ignore it.
+/// and every other matrix-free backend honor `project`.
 pub fn lowest_mode_with<H, F>(
     h: &H,
     x: ArrayView1<f64>,
@@ -771,7 +772,7 @@ where
     lowest_mode_precond_with(h, x, seed, params, t, &mut |_| {})
 }
 
-/// [`lowest_mode_precond`] with the Lanczos projector of [`lowest_mode_with`].
+/// [`lowest_mode_precond`] with the projector of [`lowest_mode_with`].
 pub fn lowest_mode_precond_with<H, P, F>(
     h: &H,
     x: ArrayView1<f64>,
@@ -788,10 +789,15 @@ where
     if seed.is_empty() {
         return Err(Error::Dim { got: 0, dim: 0 });
     }
-    let mut projected_seed = seed.to_owned();
-    project(&mut projected_seed);
+    let projected_seed = projected_start(seed, project);
     let mut mode = match params.kind {
-        EigensolverKind::Lanczos => Ok(lanczos(h, x, seed, params.krylov_dim(seed.len()), project)),
+        EigensolverKind::Lanczos => Ok(lanczos(
+            h,
+            x,
+            projected_seed.view(),
+            params.krylov_dim(seed.len()),
+            project,
+        )),
         EigensolverKind::RayleighRitz => {
             Ok(rayleigh_ritz(h, x, projected_seed.view(), params, project))
         }
@@ -803,12 +809,25 @@ where
             t,
             project,
         )),
-        EigensolverKind::Lobpcg => Ok(lobpcg(h, x, seed, params, t, project)),
+        EigensolverKind::Lobpcg => Ok(lobpcg(h, x, projected_seed.view(), params, t, project)),
         EigensolverKind::Dimer => Ok(dimer(h, x, projected_seed.view(), params, project)),
-        EigensolverKind::Primme => lowest_mode_primme(h, x, projected_seed.view(), params, t),
-        EigensolverKind::Libkrylov => lowest_mode_libkrylov(h, x, projected_seed.view(), params),
+        EigensolverKind::Primme => {
+            let projected = ProjectedOps::new(h, t, project);
+            lowest_mode_primme(&projected, x, projected_seed.view(), params, &projected)
+        }
+        EigensolverKind::Libkrylov => {
+            let projected = ProjectedOps::new(h, t, project);
+            lowest_mode_libkrylov(&projected, x, projected_seed.view(), params)
+        }
         EigensolverKind::Slepc => {
-            lowest_mode_slepc(h, x, projected_seed.view(), params, &SlepcParams::default())
+            let projected = ProjectedOps::new(h, t, project);
+            lowest_mode_slepc(
+                &projected,
+                x,
+                projected_seed.view(),
+                params,
+                &SlepcParams::default(),
+            )
         }
         other => Err(Error::EigenUnavailable { kind: other.name() }),
     }?;
@@ -829,6 +848,82 @@ const LANCZOS_START_EPS: f64 = f64::EPSILON;
 const LANCZOS_PROJECTED_START_RTOL: f64 = 1e-12;
 /// eOn `client/Lanczos.cpp`: `beta <= 1e-10 * |alpha|` is linear dependence.
 const LANCZOS_LINDEP: f64 = 1e-10;
+
+fn projected_start<F>(seed: ArrayView1<f64>, project: &mut F) -> Array1<f64>
+where
+    F: FnMut(&mut Array1<f64>),
+{
+    let mut projected = seed.to_owned();
+    project(&mut projected);
+    let seed_norm = nrm2(seed);
+    let projected_norm = nrm2(projected.view());
+    if !seed_norm.is_finite()
+        || seed_norm < LANCZOS_START_EPS
+        || (projected_norm.is_finite() && projected_norm > LANCZOS_PROJECTED_START_RTOL * seed_norm)
+    {
+        return projected;
+    }
+    for i in 0..seed.len() {
+        let mut unit = Array1::zeros(seed.len());
+        unit[i] = 1.0;
+        project(&mut unit);
+        let norm = nrm2(unit.view());
+        if norm.is_finite() && norm > LANCZOS_PROJECTED_START_RTOL {
+            return unit;
+        }
+    }
+    projected
+}
+
+struct ProjectedOps<'a, H: ?Sized, P: ?Sized, F> {
+    h: &'a H,
+    precond: &'a P,
+    project: RefCell<&'a mut F>,
+}
+
+impl<'a, H: ?Sized, P: ?Sized, F> ProjectedOps<'a, H, P, F> {
+    fn new(h: &'a H, precond: &'a P, project: &'a mut F) -> Self {
+        Self {
+            h,
+            precond,
+            project: RefCell::new(project),
+        }
+    }
+}
+
+impl<H, P, F> ApplyHessian for ProjectedOps<'_, H, P, F>
+where
+    H: ApplyHessian + ?Sized,
+    P: ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
+    fn apply_hessian(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+        let mut input = v.to_owned();
+        (self.project.borrow_mut())(&mut input);
+        let mut output = self.h.apply_hessian(x, input.view());
+        (self.project.borrow_mut())(&mut output);
+        output
+    }
+}
+
+impl<H, P, F> ApplyPreconditioner for ProjectedOps<'_, H, P, F>
+where
+    H: ?Sized,
+    P: ApplyPreconditioner + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
+    fn kind(&self) -> PreconditionerKind {
+        self.precond.kind()
+    }
+
+    fn apply_preconditioner(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+        let mut input = v.to_owned();
+        (self.project.borrow_mut())(&mut input);
+        let mut output = self.precond.apply_preconditioner(x, input.view());
+        (self.project.borrow_mut())(&mut output);
+        output
+    }
+}
 
 fn lanczos<H, F>(
     h: &H,
@@ -1781,24 +1876,32 @@ fn project_against(u: ArrayView1<f64>, v: &mut Array1<f64>) {
     axpy(-overlap, u, v);
 }
 
-fn apply_jd<H: ApplyHessian + ?Sized>(
+fn apply_jd<H, F>(
     h: &H,
     x: ArrayView1<f64>,
     u: ArrayView1<f64>,
     theta: f64,
     p: ArrayView1<f64>,
-) -> Array1<f64> {
+    project: &mut F,
+) -> Array1<f64>
+where
+    H: ApplyHessian + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
     let mut w = p.to_owned();
     project_against(u, &mut w);
+    project(&mut w);
     let mut hw = h.apply_hessian(x, w.view());
+    project(&mut hw);
     axpy(-theta, w.view(), &mut hw);
     project_against(u, &mut hw);
+    project(&mut hw);
     hw
 }
 
 /// Matrix-free Jacobi-Davidson correction: CG on
 /// `(I-uu^T)(H-θI)(I-uu^T) t = -r`, `t ⊥ u`.
-fn jd_correction<H, P>(
+fn jd_correction<H, P, F>(
     h: &H,
     x: ArrayView1<f64>,
     u: ArrayView1<f64>,
@@ -1807,28 +1910,31 @@ fn jd_correction<H, P>(
     max_inner: usize,
     actions: &mut usize,
     t: &P,
+    project: &mut F,
 ) -> Option<Array1<f64>>
 where
     H: ApplyHessian + ?Sized,
     P: ApplyPreconditioner + ?Sized,
+    F: FnMut(&mut Array1<f64>),
 {
     let n = residual.len();
     let mut b = residual.to_owned();
     b.mapv_inplace(|c| -c);
     project_against(u, &mut b);
+    project(&mut b);
     let mut sol = Array1::zeros(n);
     let mut r = b;
     let mut z = t.apply_preconditioner(x, r.view());
-    if t.kind() != PreconditionerKind::None {
-        project_against(u, &mut z);
-    }
+    project(&mut z);
+    project_against(u, &mut z);
+    project(&mut z);
     let mut p = z.clone();
     let mut rsold = dot(r.view(), z.view());
     if rsold.abs() <= 1e-30 {
         return None;
     }
     for _ in 0..max_inner {
-        let ap = apply_jd(h, x, u, theta, p.view());
+        let ap = apply_jd(h, x, u, theta, p.view(), project);
         *actions += 1;
         let pap = dot(p.view(), ap.view());
         if pap.abs() <= 1e-30 {
@@ -1841,9 +1947,9 @@ where
             break;
         }
         z = t.apply_preconditioner(x, r.view());
-        if t.kind() != PreconditionerKind::None {
-            project_against(u, &mut z);
-        }
+        project(&mut z);
+        project_against(u, &mut z);
+        project(&mut z);
         let rsnew = dot(r.view(), z.view());
         let beta = rsnew / rsold;
         let mut p_new = z;
@@ -1852,6 +1958,7 @@ where
         rsold = rsnew;
     }
     project_against(u, &mut sol);
+    project(&mut sol);
     if nrm2(sol.view()) <= 1e-14 {
         None
     } else {
@@ -1913,6 +2020,7 @@ where
             inner,
             &mut extra_actions,
             t,
+            project,
         )
         .unwrap_or(residual);
         if !space.try_append_projected(h, x, next, project) {
@@ -3643,7 +3751,7 @@ mod tests {
     /// `H = -100 t t^T - 2 u u^T`. `t` is the direction the projector
     /// removes. A solver that ignores the projector returns -100.
     #[test]
-    fn projected_lobpcg_returns_the_horizontal_eigenvalue() {
+    fn projected_builtins_reseed_a_removed_rigid_start() {
         let t = array![
             std::f64::consts::FRAC_1_SQRT_2,
             0.0,
@@ -3676,8 +3784,14 @@ mod tests {
             u: u.clone(),
         };
         let x = array![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
-        let seed = array![0.2, 0.1, -0.3, 0.4, 0.0, 0.2];
-        for kind in [EigensolverKind::Lobpcg, EigensolverKind::Lanczos] {
+        let seed = t.clone();
+        for kind in [
+            EigensolverKind::Lanczos,
+            EigensolverKind::RayleighRitz,
+            EigensolverKind::JacobiDavidson,
+            EigensolverKind::Lobpcg,
+            EigensolverKind::Dimer,
+        ] {
             let params = EigenParams {
                 kind,
                 tol: 1e-10,
@@ -3706,5 +3820,79 @@ mod tests {
             let leak = dot(mode.vector.view(), t.view()).abs();
             assert!(leak < 1e-8, "{kind:?} translation component {leak}");
         }
+    }
+
+    #[test]
+    fn jd_correction_projects_hessian_and_preconditioner_actions() {
+        struct InjectRigid;
+        impl ApplyPreconditioner for InjectRigid {
+            fn apply_preconditioner(
+                &self,
+                _x: ArrayView1<f64>,
+                residual: ArrayView1<f64>,
+            ) -> Array1<f64> {
+                let mut result = residual.to_owned();
+                result[0] += 100.0;
+                result
+            }
+        }
+
+        struct Diagonal;
+        impl ApplyHessian for Diagonal {
+            fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+                array![-100.0 * v[0], -2.0 * v[1], v[2]]
+            }
+        }
+        let x = Array1::zeros(3);
+        let u = array![0.0, 1.0, 0.0];
+        let residual = array![0.0, 0.0, 1.0];
+        let mut actions = 0;
+        let mut project = |v: &mut Array1<f64>| v[0] = 0.0;
+        let correction = jd_correction(
+            &Diagonal,
+            x.view(),
+            u.view(),
+            -2.0,
+            residual.view(),
+            4,
+            &mut actions,
+            &InjectRigid,
+            &mut project,
+        )
+        .unwrap();
+        assert!(correction[0].abs() < 1e-14);
+        assert!(correction[2].abs() > 0.0);
+    }
+
+    #[test]
+    fn linked_backend_adapter_projects_operator_and_preconditioner() {
+        struct KeepRigid;
+        impl ApplyHessian for KeepRigid {
+            fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+                array![-100.0 * v[0], -2.0 * v[1]]
+            }
+        }
+        impl ApplyPreconditioner for KeepRigid {
+            fn apply_preconditioner(
+                &self,
+                _x: ArrayView1<f64>,
+                residual: ArrayView1<f64>,
+            ) -> Array1<f64> {
+                array![100.0 + residual[0], residual[1]]
+            }
+        }
+
+        let mut project = |v: &mut Array1<f64>| v[0] = 0.0;
+        let projected = ProjectedOps::new(&KeepRigid, &KeepRigid, &mut project);
+        let x = Array1::zeros(2);
+        let input = array![3.0, 4.0];
+        assert_eq!(
+            projected.apply_hessian(x.view(), input.view()),
+            array![0.0, -8.0]
+        );
+        assert_eq!(
+            projected.apply_preconditioner(x.view(), input.view()),
+            array![0.0, 4.0]
+        );
     }
 }

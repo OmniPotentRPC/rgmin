@@ -76,6 +76,7 @@ pub enum SpdMetric {
 
 /// One factor of a [`RiemannianManifold`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ManifoldFactor {
     /// \(\mathrm{St}(n,p)\), `1 <= p <= n`. Column-major `n x p`, length `n p`.
     Stiefel {
