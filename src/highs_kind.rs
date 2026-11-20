@@ -156,7 +156,8 @@ pub struct HighsOptions {
     /// limit.
     ///
     /// Left as `None`, the projection QP stops after 0.05 s and the
-    /// feasible step QP after 1.0 s. A value replaces both limits.
+    /// feasible step QP after 1.0 s. A value replaces both limits. A
+    /// solve that reaches the limit is [`crate::Error::HighsTimeLimit`].
     pub time_limit: Option<f64>,
 }
 
