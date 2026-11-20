@@ -330,6 +330,21 @@ fn dot(left: &[f64], right: &[f64]) -> f64 {
 }
 
 fn norm(vector: &[f64]) -> f64 {
+    let mut largest = 0.0;
+    for value in vector {
+        let magnitude = value.abs();
+        if largest < magnitude {
+            largest = magnitude;
+        }
+    }
+    let unscaled_limit = if vector.is_empty() {
+        f64::MAX.sqrt()
+    } else {
+        f64::MAX.sqrt() / (vector.len() as f64).sqrt()
+    };
+    if largest <= unscaled_limit {
+        return dot(vector, vector).sqrt();
+    }
     let mut scale = 0.0;
     let mut sum_squares = 1.0;
     for value in vector {
