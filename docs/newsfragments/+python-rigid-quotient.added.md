@@ -1,0 +1,1 @@
+Python gains `rgmin.RigidQuotient(n_atoms, periodic=False)`, the constructor for the rigid quotient factor, which can also sit inside a `rgmin.Product`. The extension crate matches `ManifoldFactor` with a wildcard arm, since the enum is non-exhaustive.
