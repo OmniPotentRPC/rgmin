@@ -100,7 +100,7 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 58 and ``layout_revision`` 6.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 69 and ``layout_revision`` 6.
     Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
     error, and the backward-error polish. A zero iteration budget
     follows the same unmet-stop policy.   Minor 50 adds the energy and

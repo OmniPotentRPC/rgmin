@@ -46,6 +46,13 @@ def test_max_evals_ends_an_ase_run_and_reports_false() -> None:
     assert opt.stop == rgmin.Stop.EVAL_BUDGET
 
 
+def test_max_evals_irun_never_reports_convergence() -> None:
+    opt = FIRE(_pt7(), logfile=None, max_evals=4)
+    flags = list(opt.irun(fmax=1e-9, steps=200))
+    assert opt.stop == rgmin.Stop.EVAL_BUDGET
+    assert flags == [False, False, False, False]
+
+
 def test_stop_is_none_before_the_first_step_and_after_a_force_stop() -> None:
     opt = FIRE(_pt7(), logfile=None)
     assert opt.stop is None

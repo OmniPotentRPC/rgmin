@@ -20,7 +20,7 @@ import threading
 import time
 import weakref
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from types import TracebackType
 from typing import Any, cast
 
@@ -474,6 +474,18 @@ class Optimizer(_ASEOptimizer):
         if self._stop_requested():
             return True
         return bool(cast(Any, super()).gradient_converged(gradient))
+
+    def irun(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, fmax: float = 0.05, steps: int | None = None
+    ) -> Iterator[bool]:
+        """Yield ASE convergence without calling an evaluation-budget stop converged."""
+        self.stop = None
+        if steps is None:
+            states = cast(Any, super()).irun(fmax=fmax)
+        else:
+            states = cast(Any, super()).irun(fmax=fmax, steps=steps)
+        for converged in states:
+            yield bool(converged) and self.stop is not rgmin.Stop.EVAL_BUDGET
 
     def run(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
         self, fmax: float = 0.05, steps: int | None = None
