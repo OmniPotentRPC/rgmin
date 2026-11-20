@@ -24,7 +24,10 @@ use crate::fire::{
     fire_displacement_into, fire_move_clipped, fire_prepare_v2, fire_rescale_velocity,
     fire2_displacement_metric, guenole2020,
 };
-use crate::gromacs::{GromacsCg, GromacsCgConfig, GromacsSteep, GromacsSteepConfig};
+use crate::gromacs::{
+    GROMACS_LBFGS_LINESEARCH_MAXITER, GROMACS_LBFGS_STEP_REDUCTION, GromacsCg, GromacsCgConfig,
+    GromacsLbfgs, GromacsLbfgsConfig, GromacsSteep, GromacsSteepConfig,
+};
 use crate::holonomic::DistanceConstraints;
 use crate::hvp::{
     FiniteDifference, HessianVector, HostAction, HostOracle, NewtonCgRequest, StepAction,
@@ -93,6 +96,16 @@ enum CappedMiss {
     /// The level-set tangent of the capped step is zero. Keep the pairs
     /// and the current point; it is already on the set.
     LevelStay,
+}
+
+#[derive(Clone)]
+struct GromacsLbfgsPoint {
+    alpha: f64,
+    value: f64,
+    gradient: Array1<f64>,
+    force: Array1<f64>,
+    derivative: f64,
+    coords: Array1<f64>,
 }
 
 /// Smallest initial trust radius. The constrained stepper reads this.
@@ -399,6 +412,7 @@ enum Overlay {
     Diis(DiisState),
     GromacsSteep(GromacsSteep),
     GromacsCg(GromacsCg),
+    GromacsLbfgs(GromacsLbfgs),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -524,7 +538,10 @@ impl Solver {
     /// Fresh session for `method` in dimension `dim`.
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
         let istep = control.istep;
-        let stop_norm = if matches!(method, Method::GromacsSteep | Method::GromacsCg) {
+        let stop_norm = if matches!(
+            method,
+            Method::GromacsSteep | Method::GromacsCg | Method::GromacsLbfgs
+        ) {
             StopNorm::MaxAtom
         } else {
             control.stop_norm
@@ -627,6 +644,7 @@ impl Solver {
             Method::Diis { memory } => Overlay::Diis(DiisState::new(*memory)),
             Method::GromacsSteep => Overlay::GromacsSteep(GromacsSteep::new(istep)),
             Method::GromacsCg => Overlay::GromacsCg(GromacsCg::new()),
+            Method::GromacsLbfgs => Overlay::GromacsLbfgs(GromacsLbfgs::new(dim)),
             _ => Overlay::None,
         };
         solver.apply_default_atom_cap();
@@ -641,6 +659,7 @@ impl Solver {
             Inner::Fire(state) => Method::Fire { kind: state.kind }.installs_default_atom_cap(),
             Inner::Steepest if matches!(self.overlay, Overlay::GromacsSteep(_)) => false,
             Inner::Nlcg { .. } if matches!(self.overlay, Overlay::GromacsCg(_)) => false,
+            Inner::Steepest if matches!(self.overlay, Overlay::GromacsLbfgs(_)) => false,
             // The remaining arms install the cap. A method added to the
             // exception list in [`Method::installs_default_atom_cap`]
             // needs an arm here.
@@ -1502,7 +1521,7 @@ impl Solver {
     ) -> f64 {
         let gromacs_max_atom = matches!(
             self.overlay,
-            Overlay::GromacsSteep(_) | Overlay::GromacsCg(_)
+            Overlay::GromacsSteep(_) | Overlay::GromacsCg(_) | Overlay::GromacsLbfgs(_)
         ) && self.stop_norm == StopNorm::MaxAtom;
         if self.box_stationarity()
             && let (Some(lo), Some(hi)) = (bound_low, bound_high)
@@ -2181,8 +2200,10 @@ impl Solver {
         self.geometry_lbfgs_stiff = None;
         self.last_pos = None;
         self.stops.reset();
-        if let Overlay::QuickMin(_, session) = &mut self.overlay {
-            session.forget_last();
+        match &mut self.overlay {
+            Overlay::QuickMin(_, session) => session.forget_last(),
+            Overlay::GromacsLbfgs(state) => state.mark_rebase(),
+            _ => {}
         }
     }
 
@@ -2231,6 +2252,9 @@ impl Solver {
 
     /// Number of accepted L-BFGS curvature pairs retained by the session.
     pub fn pair_count(&self) -> usize {
+        if let Overlay::GromacsLbfgs(state) = &self.overlay {
+            return state.pair_count();
+        }
         match &self.inner {
             Inner::Lbfgs(solver) => solver.len(),
             _ => 0,
@@ -2286,8 +2310,10 @@ impl Solver {
         self.stops.reset();
         self.lbfgs_burdakov = self.lbfgs_burdakov_init;
         self.lbfgs_plateau = crate::lbfgs_plateau::RepeatedAcceptedStep::new();
-        if let Overlay::QuickMin(_, session) = &mut self.overlay {
-            session.forget_last();
+        match &mut self.overlay {
+            Overlay::QuickMin(_, session) => session.forget_last(),
+            Overlay::GromacsLbfgs(state) => state.mark_rebase(),
+            _ => {}
         }
     }
 
@@ -4050,6 +4076,187 @@ impl Solver {
         result
     }
 
+    fn gromacs_lbfgs_trial<O>(
+        &mut self,
+        obj: &O,
+        origin: &Array1<f64>,
+        direction: ArrayView1<'_, f64>,
+        alpha: f64,
+    ) -> Result<GromacsLbfgsPoint>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let displacement = direction.mapv(|component| alpha * component);
+        let retracted = self.manifold.retract(origin, &displacement);
+        let coords = obj.bounds().clip(retracted.view());
+        let (value, raw_gradient) = obj.value_and_gradient(coords.view());
+        let gradient = self.horizontal_grad(&coords, &raw_gradient);
+        if !value.is_finite() || gradient.iter().any(|component| !component.is_finite()) {
+            return Err(Error::Oracle {
+                what: "non-finite value or gradient",
+            });
+        }
+        let force = self.project_vec(&coords, &gradient.mapv(|component| -component));
+        let derivative = crate::vecops::dot(gradient.view(), direction);
+        Ok(GromacsLbfgsPoint {
+            alpha,
+            value,
+            gradient,
+            force,
+            derivative,
+            coords,
+        })
+    }
+
+    /// One GROMACS 2025.4 `integrator = l-bfgs` iteration.
+    fn gromacs_lbfgs_step<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        value: f64,
+        grad: Array1<f64>,
+    ) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let Overlay::GromacsLbfgs(mut state) = std::mem::replace(&mut self.overlay, Overlay::None)
+        else {
+            unreachable!("GROMACS L-BFGS overlay");
+        };
+        let force = self.project_vec(x, &grad.mapv(|component| -component));
+        let force_norm = crate::gromacs::euclidean_norm_stable(force.view());
+        if let Err(error) = state.initialize(force.view(), force_norm) {
+            self.overlay = Overlay::GromacsLbfgs(state);
+            return Err(error);
+        }
+        let projected_direction = self.project_vec(x, &state.direction().to_owned());
+        state.set_direction(projected_direction);
+        let direction = state.direction().to_owned();
+
+        let mut relative_direction_square = 0.0;
+        for (&coordinate, &component) in x.iter().zip(direction.iter()) {
+            let scale = coordinate.abs().max(1.0);
+            let relative = component / scale;
+            relative_direction_square += relative * relative;
+        }
+        let rms_relative_direction = (relative_direction_square / direction.len() as f64).sqrt();
+        let minimum_step = if rms_relative_direction > 0.0 {
+            f64::EPSILON / rms_relative_direction
+        } else {
+            f64::INFINITY
+        };
+        if state.step_size() < minimum_step {
+            self.overlay = Overlay::GromacsLbfgs(state);
+            let norm = self.stationarity_norm(x, &grad);
+            self.remember(x, value, &grad);
+            return Ok(self.finish(value, x, &grad, norm, Status::MachinePrecision));
+        }
+
+        let origin = x.clone();
+        let mut opening = state.step_size();
+        loop {
+            let alpha = opening;
+            let mut maximum_positive_displacement = 0.0_f64;
+            for &component in &direction {
+                maximum_positive_displacement =
+                    maximum_positive_displacement.max(alpha * component);
+            }
+            if maximum_positive_displacement <= self.control.istep {
+                break;
+            }
+            opening *= GROMACS_LBFGS_STEP_REDUCTION;
+        }
+
+        let mut a = GromacsLbfgsPoint {
+            alpha: 0.0,
+            value,
+            gradient: grad.clone(),
+            force: force.clone(),
+            derivative: crate::vecops::dot(grad.view(), direction.view()),
+            coords: origin.clone(),
+        };
+        let mut c = match self.gromacs_lbfgs_trial(obj, &origin, direction.view(), opening) {
+            Ok(point) => point,
+            Err(error) => {
+                self.overlay = Overlay::GromacsLbfgs(state);
+                return Err(error);
+            }
+        };
+        let accepted_energy_rise = f64::EPSILON.sqrt() * a.value.abs();
+        let found_lower =
+            c.value < a.value || (c.derivative < 0.0 && c.value < a.value + accepted_energy_rise);
+
+        let accepted = if found_lower {
+            c
+        } else {
+            let original_value = value;
+            let mut line_trials = 0;
+            let last_b = loop {
+                let mut b_alpha = if a.derivative < 0.0 && c.derivative > 0.0 {
+                    a.alpha + a.derivative * (a.alpha - c.alpha) / (c.derivative - a.derivative)
+                } else {
+                    0.5 * (a.alpha + c.alpha)
+                };
+                if !(b_alpha > a.alpha && b_alpha < c.alpha) {
+                    b_alpha = 0.5 * (a.alpha + c.alpha);
+                }
+                let b = match self.gromacs_lbfgs_trial(obj, &origin, direction.view(), b_alpha) {
+                    Ok(point) => point,
+                    Err(error) => {
+                        self.overlay = Overlay::GromacsLbfgs(state);
+                        return Err(error);
+                    }
+                };
+                let last = b.clone();
+                line_trials += 1;
+                let keep_searching = if b.derivative > 0.0 {
+                    c = b;
+                    c.value > a.value
+                } else {
+                    a = b;
+                    a.value > c.value
+                };
+                if !keep_searching || line_trials >= GROMACS_LBFGS_LINESEARCH_MAXITER {
+                    break last;
+                }
+            };
+            if (last_b.value - original_value).abs() < f64::EPSILON
+                || line_trials >= GROMACS_LBFGS_LINESEARCH_MAXITER
+            {
+                if state.pair_count() == 0 {
+                    self.overlay = Overlay::GromacsLbfgs(state);
+                    let norm = self.stationarity_norm(x, &grad);
+                    self.remember(x, value, &grad);
+                    return Ok(self.finish(value, x, &grad, norm, Status::MachinePrecision));
+                }
+                let restart_norm = crate::gromacs::euclidean_norm_stable(last_b.force.view());
+                state.restart_steepest(force.view(), restart_norm);
+                self.overlay = Overlay::GromacsLbfgs(state);
+                self.steps += 1;
+                let norm = self.stationarity_norm(x, &grad);
+                self.remember(x, value, &grad);
+                return Ok(self.finish(value, x, &grad, norm, Status::Iterating));
+            }
+            if c.value < a.value { c } else { a }
+        };
+
+        if let Err(error) = state.accept(force.view(), accepted.force.view(), accepted.alpha) {
+            self.overlay = Overlay::GromacsLbfgs(state);
+            return Err(error);
+        }
+        let next_direction = self.project_vec(&accepted.coords, &state.direction().to_owned());
+        state.set_direction(next_direction);
+        *x = accepted.coords;
+        self.steps += 1;
+        self.overlay = Overlay::GromacsLbfgs(state);
+        self.remember(x, accepted.value, &accepted.gradient);
+        let grad_norm = self.stationarity_norm(x, &accepted.gradient);
+        let status = self
+            .control
+            .classify(grad_norm, self.free_len(obj.bounds()));
+        Ok(self.finish(accepted.value, x, &accepted.gradient, grad_norm, status))
+    }
+
     /// One GROMACS `integrator = cg` iteration.
     fn gromacs_cg_step<O>(
         &mut self,
@@ -4540,6 +4747,7 @@ impl Solver {
         self.check_manifold(x.len())?;
         self.note_bounds(obj.bounds());
         let cached = self.same_last_x(x);
+        let externally_moved = !cached && self.last_pos.is_some();
         if !cached {
             if x.iter().any(|v| !v.is_finite()) {
                 return Err(crate::step::non_finite());
@@ -4561,6 +4769,9 @@ impl Solver {
             return Err(Error::Oracle {
                 what: "non-finite value or gradient",
             });
+        }
+        if externally_moved && let Overlay::GromacsLbfgs(state) = &mut self.overlay {
+            state.mark_rebase();
         }
         let gnorm = self.stationarity_norm(x, &grad);
         let eon = self.use_eon_lbfgs();
@@ -4587,6 +4798,9 @@ impl Solver {
         }
         if matches!(self.overlay, Overlay::GromacsCg(_)) {
             return self.gromacs_cg_step(obj, x, value, grad);
+        }
+        if matches!(self.overlay, Overlay::GromacsLbfgs(_)) {
+            return self.gromacs_lbfgs_step(obj, x, value, grad);
         }
         self.refresh_exp(obj, x, &grad)?;
 
@@ -5657,6 +5871,7 @@ impl Solver {
             Overlay::Diis(state) => state.clear(),
             Overlay::GromacsSteep(state) => state.reset(self.control.istep),
             Overlay::GromacsCg(state) => state.reset(),
+            Overlay::GromacsLbfgs(state) => state.reset(),
             Overlay::None => {}
         }
     }
@@ -5692,6 +5907,26 @@ impl Solver {
     pub fn gromacs_cg_config(&self) -> Option<GromacsCgConfig> {
         match self.overlay {
             Overlay::GromacsCg(state) => Some(state.config()),
+            _ => None,
+        }
+    }
+
+    /// Parameters of a GROMACS L-BFGS session.
+    ///
+    /// Other methods return `None`.
+    pub fn gromacs_lbfgs_config(&self) -> Option<GromacsLbfgsConfig> {
+        match &self.overlay {
+            Overlay::GromacsLbfgs(state) => Some(state.config()),
+            _ => None,
+        }
+    }
+
+    /// Current scalar line step of a GROMACS L-BFGS session.
+    ///
+    /// Other methods return `None`.
+    pub fn gromacs_lbfgs_step_size(&self) -> Option<f64> {
+        match &self.overlay {
+            Overlay::GromacsLbfgs(state) => Some(state.step_size()),
             _ => None,
         }
     }
@@ -5771,6 +6006,18 @@ impl Solver {
             }
             _ => Err(Error::GromacsCg {
                 what: "parameters require a gromacs-cg session",
+            }),
+        }
+    }
+
+    /// Correction-memory capacity of a GROMACS L-BFGS session (`nbfgscorr`).
+    ///
+    /// Other methods return [`Error::GromacsLbfgs`].
+    pub fn set_gromacs_lbfgs_config(&mut self, config: GromacsLbfgsConfig) -> Result<()> {
+        match &mut self.overlay {
+            Overlay::GromacsLbfgs(state) => state.set_config(config),
+            _ => Err(Error::GromacsLbfgs {
+                what: "parameters require a gromacs-lbfgs session",
             }),
         }
     }
@@ -6602,7 +6849,7 @@ impl Solver {
                 }
             }
 
-            Overlay::GromacsSteep(_) | Overlay::GromacsCg(_) => {
+            Overlay::GromacsSteep(_) | Overlay::GromacsCg(_) | Overlay::GromacsLbfgs(_) => {
                 unreachable!("GROMACS methods are dispatched before generic overlays")
             }
             Overlay::None => {}
@@ -6773,6 +7020,7 @@ impl Inner {
                 prev_alpha: 0.0,
                 prev_gd: 0.0,
             },
+            Method::GromacsLbfgs => Inner::Steepest,
             Method::Bb => Inner::Bb {
                 prev_s: None,
                 prev_y: None,

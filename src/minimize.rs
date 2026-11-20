@@ -75,6 +75,7 @@ where
         | Method::Ode12r
         | Method::Diis { .. }
         | Method::GromacsSteep
+        | Method::GromacsLbfgs
         | Method::NewtonCg
         | Method::NewtonPcg => run_session(obj, init, control, method),
         Method::GromacsCg => run_session_linesearch(obj, init, control, method, linesearch),
