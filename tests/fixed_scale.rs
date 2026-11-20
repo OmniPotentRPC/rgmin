@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Accept, Control, LineSearch, Method, Solver};
+use rgmin::{Accept, Control, LbfgsStep, LineSearch, Method, Solver, StopReason};
 
 struct Quadratic;
 
@@ -91,6 +91,45 @@ fn the_ase_search_opens_at_the_unit_step_whatever_istep_is() {
     let mut x = Array1::from_elem(1, 1.0);
     solver.step(&Quadratic, &mut x).unwrap();
     assert_eq!(x[0], 0.0);
+}
+
+fn ase_session(method: Method, stpmax: f64, budget: usize) -> Solver {
+    let lbfgs = matches!(method, Method::Lbfgs { .. });
+    let mut solver = Solver::new(method, open_control(), 1);
+    solver.set_atom_maxmove(0.2);
+    solver.set_accept(Accept::Energy);
+    if lbfgs {
+        solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+    }
+    solver.set_linesearch(LineSearch::wolfe(0.23, 0.46, budget));
+    solver.set_ase_linesearch(stpmax).unwrap();
+    solver
+}
+
+#[test]
+fn a_failed_ase_search_stops_the_step_where_it_was() {
+    // stpmax below the opening step of 1 is ASE's input error, and a
+    // budget of two trials ends before the third one ASE needs here.
+    for (stpmax, budget) in [(0.5, 20), (50.0, 2)] {
+        for method in [Method::Bfgs, Method::lbfgs()] {
+            let mut solver = ase_session(method.clone(), stpmax, budget);
+            let mut x = Array1::from_elem(1, 1.0);
+            let report = solver.step(&Quadratic, &mut x).unwrap();
+            assert_eq!(x[0], 1.0, "{method:?} {stpmax} {budget}");
+            assert_eq!(report.stop_reason(), StopReason::LineSearchFailed);
+        }
+    }
+}
+
+#[test]
+fn a_finished_ase_search_keeps_iterating() {
+    for method in [Method::Bfgs, Method::lbfgs()] {
+        let mut solver = ase_session(method.clone(), 50.0, 20);
+        let mut x = Array1::from_elem(1, 1.0);
+        let report = solver.step(&Quadratic, &mut x).unwrap();
+        assert!((x[0] - 0.4).abs() < 1e-12, "{method:?} {}", x[0]);
+        assert_eq!(report.stop_reason(), StopReason::Iterating);
+    }
 }
 
 #[test]

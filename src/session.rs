@@ -52,7 +52,7 @@ use crate::quickmin::{
     QuickMinOptions, QuickMinSession, QuickMinState, quickmin_rescale_velocity,
     quickmin_session_step,
 };
-use crate::report::{Report, Status};
+use crate::report::{Report, Status, StopReason};
 use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
     Taken, apply_caps, cap_alpha, cap_displacement_atom, l2, max_atom_displacement,
@@ -935,14 +935,16 @@ impl Solver {
     /// `[1e-8, stpmax]`, and it ends only on ASE's strong-Wolfe test or
     /// one of its warnings. An opening step above `stpmax`, a spent
     /// evaluation budget or a non-finite trial fails the search; there
-    /// is no fallback point. `c1`, `c2` and the budget are those of the
-    /// session's [`LineSearch::Wolfe`]. A step under this search refuses
-    /// another line-search kind, the step-acceptance rule, a manifold,
-    /// constraints, an overlay, a Euclidean `maxmove`, and on L-BFGS any
-    /// step but [`LbfgsStep::Wolfe`]. `stpmax` must not be NaN; any other
-    /// value is ASE's, including one below 1 that fails every search.
-    /// Other methods return an error. Without this call the session
-    /// keeps rgmin's own search.
+    /// is no fallback point. The step then leaves `x` where it was and
+    /// reports [`StopReason::LineSearchFailed`].
+    ///
+    /// `c1`, `c2` and the budget are those of the session's
+    /// [`LineSearch::Wolfe`]. A step refuses another line-search kind,
+    /// [`Accept::Step`], a manifold, constraints, an overlay, a Euclidean
+    /// `maxmove`, and on L-BFGS any step but [`LbfgsStep::Wolfe`].
+    /// `stpmax` must not be NaN. Any other value is used as ASE uses it,
+    /// so one below 1 fails every search. Other methods return an error.
+    /// Without this call the session keeps rgmin's own search.
     pub fn set_ase_linesearch(&mut self, stpmax: f64) -> Result<()> {
         if stpmax.is_nan() {
             return Err(Error::InvalidControl {
@@ -4514,6 +4516,7 @@ impl Solver {
         #[cfg(feature = "highs")]
         let boxed = self.has_coordinate_box();
         let mut energy_stall = false;
+        let mut line_failed = false;
         let mut sr_secant: Option<(Array1<f64>, Array1<f64>)> = None;
         let diis_alpha = self.istep;
         let diis_atom_cap = self.atom_maxmove;
@@ -4564,7 +4567,7 @@ impl Solver {
                     let mut project = |d: &mut Array1<f64>| {
                         rigid.force(&mut hold.ws, d);
                     };
-                    energy_stall = solver.step_objective_with_direction(
+                    let ended = solver.step_objective_with_direction(
                         obj,
                         x,
                         &mut value,
@@ -4578,6 +4581,8 @@ impl Solver {
                         line_options,
                         &mut project,
                     );
+                    energy_stall = ended.energy_noise;
+                    line_failed = ended.line_failed;
                 }
                 Inner::Steepest => {
                     let dir = grad.mapv(|g| -g);
@@ -4737,6 +4742,7 @@ impl Solver {
                         line_options,
                     )?;
                     energy_stall = t.energy_noise;
+                    line_failed = t.line_failed;
                     let moved = t.moved;
                     *x = t.x;
                     value = t.f;
@@ -5192,7 +5198,11 @@ impl Solver {
         if energy_stall && status == Status::Iterating {
             status = Status::NoiseFloor;
         }
-        Ok(self.finish(value, x, &grad, grad_norm, status))
+        let report = self.finish(value, x, &grad, grad_norm, status);
+        if line_failed && status == Status::Iterating {
+            return Ok(report.with_stop_reason(StopReason::LineSearchFailed));
+        }
+        Ok(report)
     }
 
     fn step_pso<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
@@ -6385,6 +6395,7 @@ where
         alpha: if moved { direct_scale } else { 0.0 },
         moved,
         energy_noise: false,
+        line_failed: false,
     })
 }
 
