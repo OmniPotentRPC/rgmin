@@ -141,7 +141,9 @@ typedef enum rgmin_method_t {
     /** GROMACS integrator = steep. ABI minor 52. */
     RGMIN_GROMACS_STEEP = 28,
     /** GROMACS integrator = cg. ABI minor 53. */
-    RGMIN_GROMACS_CG = 29
+    RGMIN_GROMACS_CG = 29,
+    /** GROMACS integrator = l-bfgs. */
+    RGMIN_GROMACS_LBFGS = 30
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.
@@ -524,6 +526,10 @@ uint32_t rgmin_gromacs_steep_max_constraint_shrinks(double step_size, double shr
  *  GROMACS. Returns 0, or 1 on a null session or a session that is not
  *  RGMIN_GROMACS_CG. ABI minor 53. */
 int32_t rgmin_solver_set_gromacs_cg(rgmin_solver_t *solver, uint32_t nstcgsteep);
+/** GROMACS L-BFGS correction count on a RGMIN_GROMACS_LBFGS session.
+ *  Returns 0, or 1 on a null solver, nbfgscorr == 0, or a session that
+ *  is not RGMIN_GROMACS_LBFGS. */
+int32_t rgmin_solver_set_gromacs_lbfgs(rgmin_solver_t *solver, size_t nbfgscorr);
 
 /** FIRE schedule. */
 typedef enum rgmin_fire_variant_t {
