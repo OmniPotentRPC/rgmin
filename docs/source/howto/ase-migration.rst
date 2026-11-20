@@ -15,9 +15,11 @@ with
 
     from rgmin.optimize import BFGS, LBFGS, FIRE
 
-``LBFGSLineSearch`` and ``FIRE2`` match those ASE names. The other gradient
-methods of ``Session`` are ``SR1``, ``SR2``, ``SteepestDescent``, ``BarzilaiBorwein``,
-``Adam``, the nonlinear CG family, ``EonCG``, ``NewtonCG`` and ``NewtonPCG``.
+``LBFGSLineSearch``, ``FIRE2``, and ``GPMin`` match those ASE names (see
+:doc:`gpmin` for GPMin hyperparameters and step-cap behavior).
+The other gradient methods of ``Session`` are ``SR1``, ``SR2``, ``SteepestDescent``,
+``BarzilaiBorwein``, ``Adam``, the nonlinear CG family, ``EonCG``, ``NewtonCG``
+and ``NewtonPCG``.
 Importing ``rgmin`` does not import ASE. The classes do, when they are constructed.
 
 Each class is an ``ase.optimize.optimize.Optimizer``. ``run``, ``irun``, ``attach``,
