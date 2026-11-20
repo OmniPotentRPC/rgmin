@@ -1351,6 +1351,20 @@ fn run_to_stop(
 }
 
 #[test]
+fn c_abi_stop_codes_pin_energy_tolerance_and_evaluation_budget() {
+    assert_eq!(
+        rgmin_stop_t::RGMIN_STOP_ENERGY_TOLERANCE as i32,
+        6,
+        "code 6 means the energy-change tolerance was met"
+    );
+    assert_eq!(
+        rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET as i32,
+        7,
+        "code 7 means the evaluation budget was spent"
+    );
+}
+
+#[test]
 fn c_abi_etol_stops_a_session_before_the_gradient_does() {
     use rgmin::ffi::{rgmin_solver_clear_etol, rgmin_solver_evals, rgmin_solver_set_etol};
     let ctrl = stop_ctrl();
