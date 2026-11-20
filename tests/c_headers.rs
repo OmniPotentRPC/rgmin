@@ -31,6 +31,11 @@ fn c_header_reads_the_new_stops_through_the_xts_aliases() {
     consumer::compile_and_run("tests/c_xts_stops.c", "rgmin_c_xts_stops", &[]);
 }
 
+#[test]
+fn c_header_reads_riemannian_cg_through_the_xts_aliases() {
+    consumer::compile_and_run("tests/c_xts_rcg.c", "rgmin_c_xts_rcg", &[]);
+}
+
 #[cfg(feature = "highs")]
 #[test]
 fn c_header_routes_and_clears_the_highs_callback() {
