@@ -24,7 +24,7 @@ use crate::fire::{
     fire_displacement_into, fire_move_clipped, fire_prepare_v2, fire_rescale_velocity,
     fire2_displacement_metric, guenole2020,
 };
-use crate::gromacs::{GromacsSteep, GromacsSteepConfig};
+use crate::gromacs::{GromacsCg, GromacsCgConfig, GromacsSteep, GromacsSteepConfig};
 use crate::holonomic::DistanceConstraints;
 use crate::hvp::{
     FiniteDifference, HessianVector, HostAction, HostOracle, NewtonCgRequest, StepAction,
@@ -72,6 +72,16 @@ const SESSION_LINESEARCH: LineSearch = LineSearch::Wolfe {
     c1: 1e-4,
     c2: 0.9,
     maxiter: 20,
+};
+
+/// Default strong-Wolfe line search for [`Method::GromacsCg`], using the
+/// Nocedal-Wright conjugate-gradient curvature parameter `c2 = 0.1` so
+/// cubic interpolation zooms close to the 1D directional stationary point
+/// before computing the Polak-Ribiere multiplier.
+const GROMACS_CG_LINESEARCH: LineSearch = LineSearch::Wolfe {
+    c1: crate::gromacs::GROMACS_CG_WOLFE_C1,
+    c2: crate::gromacs::GROMACS_CG_WOLFE_C2,
+    maxiter: crate::gromacs::GROMACS_CG_WOLFE_MAXITER,
 };
 
 /// Why a capped trial did not move.
@@ -388,6 +398,7 @@ enum Overlay {
     Ode12r(crate::ode12r::Ode12rState),
     Diis(DiisState),
     GromacsSteep(GromacsSteep),
+    GromacsCg(GromacsCg),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -513,16 +524,21 @@ impl Solver {
     /// Fresh session for `method` in dimension `dim`.
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
         let istep = control.istep;
-        let stop_norm = if matches!(method, Method::GromacsSteep) {
+        let stop_norm = if matches!(method, Method::GromacsSteep | Method::GromacsCg) {
             StopNorm::MaxAtom
         } else {
             control.stop_norm
+        };
+        let linesearch = if matches!(method, Method::GromacsCg) {
+            GROMACS_CG_LINESEARCH
+        } else {
+            SESSION_LINESEARCH
         };
         let inner = Inner::from_method(&method, dim, istep);
         let mut solver = Self {
             dim,
             control,
-            linesearch: SESSION_LINESEARCH,
+            linesearch,
             line_options: LineSearchOptions::default(),
             istep,
             steps: 0,
@@ -610,6 +626,7 @@ impl Solver {
             Method::Ode12r => Overlay::Ode12r(crate::ode12r::Ode12rState::new(istep)),
             Method::Diis { memory } => Overlay::Diis(DiisState::new(*memory)),
             Method::GromacsSteep => Overlay::GromacsSteep(GromacsSteep::new(istep)),
+            Method::GromacsCg => Overlay::GromacsCg(GromacsCg::new()),
             _ => Overlay::None,
         };
         solver.apply_default_atom_cap();
@@ -623,6 +640,7 @@ impl Solver {
             Inner::Dogleg { .. } => Method::Dogleg.installs_default_atom_cap(),
             Inner::Fire(state) => Method::Fire { kind: state.kind }.installs_default_atom_cap(),
             Inner::Steepest if matches!(self.overlay, Overlay::GromacsSteep(_)) => false,
+            Inner::Nlcg { .. } if matches!(self.overlay, Overlay::GromacsCg(_)) => false,
             // The remaining arms install the cap. A method added to the
             // exception list in [`Method::installs_default_atom_cap`]
             // needs an arm here.
@@ -1482,8 +1500,10 @@ impl Solver {
         bound_low: Option<&Array1<f64>>,
         bound_high: Option<&Array1<f64>>,
     ) -> f64 {
-        let gromacs_max_atom =
-            matches!(self.overlay, Overlay::GromacsSteep(_)) && self.stop_norm == StopNorm::MaxAtom;
+        let gromacs_max_atom = matches!(
+            self.overlay,
+            Overlay::GromacsSteep(_) | Overlay::GromacsCg(_)
+        ) && self.stop_norm == StopNorm::MaxAtom;
         if self.box_stationarity()
             && let (Some(lo), Some(hi)) = (bound_low, bound_high)
         {
@@ -4030,6 +4050,389 @@ impl Solver {
         result
     }
 
+    /// One GROMACS `integrator = cg` iteration.
+    fn gromacs_cg_step<O>(
+        &mut self,
+        obj: &O,
+        x: &mut Array1<f64>,
+        value: f64,
+        grad: Array1<f64>,
+    ) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        struct FiniteProbe<'a, T: ?Sized> {
+            inner: &'a T,
+            saw_finite_trial: std::sync::atomic::AtomicBool,
+            saw_non_finite_trial: std::sync::atomic::AtomicBool,
+        }
+
+        impl<T> Objective<f64> for FiniteProbe<'_, T>
+        where
+            T: Objective<f64> + ?Sized,
+        {
+            fn dim(&self) -> usize {
+                Objective::dim(self.inner)
+            }
+
+            fn bounds(&self) -> &eindir_core::Bounds<f64> {
+                self.inner.bounds()
+            }
+
+            fn eval(&self, point: ArrayView1<f64>) -> f64 {
+                let f = self.inner.eval(point);
+                if f.is_finite() {
+                    self.saw_finite_trial
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                } else {
+                    self.saw_non_finite_trial
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                f
+            }
+        }
+
+        impl<T> eindir_core::Gradient<f64> for FiniteProbe<'_, T>
+        where
+            T: DifferentiableObjective<f64> + ?Sized,
+        {
+            fn dim(&self) -> usize {
+                eindir_core::Gradient::dim(self.inner)
+            }
+
+            fn grad(&self, point: ArrayView1<f64>) -> Array1<f64> {
+                let g = self.inner.grad(point);
+                if g.iter().all(|v| v.is_finite()) {
+                    self.saw_finite_trial
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                } else {
+                    self.saw_non_finite_trial
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                g
+            }
+        }
+
+        impl<T> DifferentiableObjective<f64> for FiniteProbe<'_, T>
+        where
+            T: DifferentiableObjective<f64> + ?Sized,
+        {
+            fn value_and_gradient(&self, point: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                let (f, g) = self.inner.value_and_gradient(point);
+                if f.is_finite() && g.iter().all(|v| v.is_finite()) {
+                    self.saw_finite_trial
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                } else {
+                    self.saw_non_finite_trial
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                (f, g)
+            }
+        }
+
+        let Overlay::GromacsCg(mut cg_state) = self.overlay else {
+            unreachable!("GROMACS cg overlay");
+        };
+        self.refresh_exp(obj, x, &grad)?;
+        let z_now = metric_vector(&self.precon, &grad)?;
+        let mut dir_vec = {
+            let Inner::Nlcg {
+                dir,
+                g_old,
+                z_old,
+                d_old,
+                initialized,
+                z_epoch,
+                prev_alpha,
+                prev_gd,
+                ..
+            } = &mut self.inner
+            else {
+                unreachable!("GROMACS cg uses Inner::Nlcg");
+            };
+            if !*initialized || *z_epoch != self.metric_epoch {
+                if *initialized {
+                    *prev_alpha = 0.0;
+                    *prev_gd = 0.0;
+                }
+                *dir = nlcg_steepest(&z_now, self.accept, 1.0);
+                *g_old = grad.clone();
+                *z_old = z_now.clone();
+                *d_old = dir.clone();
+                *z_epoch = self.metric_epoch;
+                *initialized = true;
+                cg_state.note_direction(0.0);
+            }
+            dir.clone()
+        };
+        dir_vec = self.project_vec(x, &dir_vec);
+        if self.level_set.is_some() {
+            dir_vec = project_tangent(grad.view(), &dir_vec)?;
+        }
+        let (mut unit_dir, _) = crate::gromacs::unit_direction_stable(dir_vec.view());
+        let mut gd_unit = crate::vecops::dot(grad.view(), unit_dir.view());
+        if gd_unit.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+            self.nlcg_descent_fallbacks += 1;
+            let mut steepest = nlcg_steepest(&z_now, self.accept, 1.0);
+            steepest = self.project_vec(x, &steepest);
+            if self.level_set.is_some() {
+                steepest = project_tangent(grad.view(), &steepest)?;
+            }
+            dir_vec = steepest;
+            cg_state.note_direction(0.0);
+            if let Inner::Nlcg {
+                dir,
+                d_old,
+                prev_alpha,
+                prev_gd,
+                ..
+            } = &mut self.inner
+            {
+                *dir = dir_vec.clone();
+                *d_old = dir_vec.clone();
+                *prev_alpha = 0.0;
+                *prev_gd = 0.0;
+            }
+            (unit_dir, _) = crate::gromacs::unit_direction_stable(dir_vec.view());
+            gd_unit = crate::vecops::dot(grad.view(), unit_dir.view());
+        } else if let Inner::Nlcg { dir, .. } = &mut self.inner {
+            *dir = dir_vec.clone();
+        }
+        let (prev_alpha_val, prev_gd_val) = match &self.inner {
+            Inner::Nlcg {
+                prev_alpha,
+                prev_gd,
+                ..
+            } => (*prev_alpha, *prev_gd),
+            _ => (0.0, 0.0),
+        };
+        let cap = cap_alpha(unit_dir.view(), &self.control, self.atom_maxmove);
+        let first = self.control.istep;
+        let alpha0 = if self.accept == Accept::Step {
+            self.istep
+        } else {
+            nlcg_opening_alpha(prev_alpha_val, prev_gd_val, gd_unit, cap, first)
+        };
+        let opening_disp = unit_dir.mapv(|u| alpha0 * u);
+        let opening_trial = if self.manifold.is_flat() {
+            let mut trial = self.manifold.retract(x, &opening_disp);
+            apply_caps(x, &mut trial, self.atom_maxmove, self.control.maxmove_cap());
+            obj.bounds().clip(trial.view())
+        } else {
+            match retract_within_cap(
+                obj,
+                x,
+                &opening_disp,
+                self.atom_maxmove,
+                self.control.maxmove_cap(),
+                &self.manifold,
+            ) {
+                Some((trial, _)) => trial,
+                None => x.clone(),
+            }
+        };
+        if opening_trial == *x {
+            self.overlay = Overlay::GromacsCg(cg_state);
+            let norm = self.stationarity_norm(x, &grad);
+            self.remember(x, value, &grad);
+            return Ok(self.finish(value, x, &grad, norm, Status::MachinePrecision));
+        }
+        let line_options = self.search_options();
+        let probe = FiniteProbe {
+            inner: obj,
+            saw_finite_trial: std::sync::atomic::AtomicBool::new(false),
+            saw_non_finite_trial: std::sync::atomic::AtomicBool::new(false),
+        };
+        let mut t = take_session_step(
+            &probe,
+            x,
+            value,
+            &grad,
+            unit_dir.view(),
+            alpha0,
+            self.linesearch,
+            &self.control,
+            self.atom_maxmove,
+            self.accept,
+            &mut self.e_hist,
+            &self.manifold,
+            self.level_set,
+            1.0,
+            line_options,
+        )?;
+        if !t.moved && !cg_state.is_steepest_direction() {
+            // GROMACS retries a stalled conjugate step with `beta = 0; continue;`,
+            // which spends a loop index, unlike the `gpa > 0` restart.
+            cg_state.advance();
+            let mut steepest = nlcg_steepest(&z_now, self.accept, 1.0);
+            steepest = self.project_vec(x, &steepest);
+            if self.level_set.is_some() {
+                steepest = project_tangent(grad.view(), &steepest)?;
+            }
+            dir_vec = steepest;
+            cg_state.note_direction(0.0);
+            if let Inner::Nlcg {
+                dir,
+                d_old,
+                prev_alpha,
+                prev_gd,
+                ..
+            } = &mut self.inner
+            {
+                *dir = dir_vec.clone();
+                *d_old = dir_vec.clone();
+                *prev_alpha = 0.0;
+                *prev_gd = 0.0;
+            }
+            (unit_dir, _) = crate::gromacs::unit_direction_stable(dir_vec.view());
+            gd_unit = crate::vecops::dot(grad.view(), unit_dir.view());
+            let retry_cap = cap_alpha(unit_dir.view(), &self.control, self.atom_maxmove);
+            let retry_alpha0 = if self.accept == Accept::Step {
+                self.istep
+            } else {
+                first.min(retry_cap)
+            };
+            let retry_disp = unit_dir.mapv(|u| retry_alpha0 * u);
+            let retry_trial = if self.manifold.is_flat() {
+                let mut trial = self.manifold.retract(x, &retry_disp);
+                apply_caps(x, &mut trial, self.atom_maxmove, self.control.maxmove_cap());
+                obj.bounds().clip(trial.view())
+            } else {
+                match retract_within_cap(
+                    obj,
+                    x,
+                    &retry_disp,
+                    self.atom_maxmove,
+                    self.control.maxmove_cap(),
+                    &self.manifold,
+                ) {
+                    Some((trial, _)) => trial,
+                    None => x.clone(),
+                }
+            };
+            if retry_trial != *x {
+                t = take_session_step(
+                    &probe,
+                    x,
+                    value,
+                    &grad,
+                    unit_dir.view(),
+                    retry_alpha0,
+                    self.linesearch,
+                    &self.control,
+                    self.atom_maxmove,
+                    self.accept,
+                    &mut self.e_hist,
+                    &self.manifold,
+                    self.level_set,
+                    1.0,
+                    line_options,
+                )?;
+            }
+        }
+        if !t.moved {
+            self.overlay = Overlay::GromacsCg(cg_state);
+            if !probe
+                .saw_finite_trial
+                .load(std::sync::atomic::Ordering::Relaxed)
+                && probe
+                    .saw_non_finite_trial
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                return Err(Error::Oracle {
+                    what: "non-finite value or gradient",
+                });
+            }
+            let norm = self.stationarity_norm(x, &grad);
+            self.remember(x, value, &grad);
+            self.steps += 1;
+            let status = if t.energy_noise {
+                Status::NoiseFloor
+            } else {
+                Status::MachinePrecision
+            };
+            return Ok(self.finish(value, x, &grad, norm, status));
+        }
+        *x = t.x;
+        let mut new_value = t.f;
+        let mut new_grad = self.horizontal_grad(x, &t.g);
+        if self.level_set.is_some() {
+            self.retract_level_set_here(obj, x, &mut new_value, &mut new_grad)?;
+            new_grad = self.horizontal_grad(x, &new_grad);
+        }
+        self.steps += 1;
+        let z_new = metric_vector(&self.precon, &new_grad)?;
+        if let Inner::Nlcg {
+            conjugacy,
+            restart,
+            dir,
+            g_old,
+            z_old,
+            d_old,
+            z_epoch,
+            prev_alpha,
+            prev_gd,
+            ..
+        } = &mut self.inner
+        {
+            let ctx = ConjugacyContext {
+                current_gradient: new_grad.view(),
+                previous_gradient: g_old.view(),
+                previous_direction: d_old.view(),
+            };
+            let raw_beta = if *z_epoch != self.metric_epoch {
+                0.0
+            } else {
+                conjugacy.beta_metric(&ctx, z_new.view(), z_old.view())
+            };
+            let mut beta = cg_state.filter_beta(raw_beta);
+            if restart.should_restart_metric(
+                new_grad.view(),
+                z_new.view(),
+                g_old.view(),
+                z_old.view(),
+            ) {
+                beta = 0.0;
+            }
+            *dir = if self.accept == Accept::Step {
+                Array1::from_iter(
+                    z_new
+                        .iter()
+                        .zip(d_old.iter())
+                        .map(|(z, d)| -z * self.istep + beta * d),
+                )
+            } else {
+                Array1::from_iter(z_new.iter().zip(d_old.iter()).map(|(z, d)| -z + beta * d))
+            };
+            let gd = crate::vecops::dot(new_grad.view(), dir.view());
+            if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+                self.nlcg_descent_fallbacks += 1;
+                *dir = nlcg_steepest(&z_new, self.accept, 1.0);
+                beta = 0.0;
+            }
+            cg_state.note_direction(beta);
+            cg_state.advance();
+            g_old.assign(&new_grad);
+            z_old.assign(&z_new);
+            d_old.assign(dir);
+            *z_epoch = self.metric_epoch;
+            if self.accept != Accept::Step {
+                *prev_alpha = t.alpha;
+                *prev_gd = gd_unit;
+            }
+        }
+        self.overlay = Overlay::GromacsCg(cg_state);
+        self.remember(x, new_value, &new_grad);
+        let grad_norm = self.stationarity_norm(x, &new_grad);
+        let mut status = self
+            .control
+            .classify(grad_norm, self.free_len(obj.bounds()));
+        if t.energy_noise && status == Status::Iterating {
+            status = Status::NoiseFloor;
+        }
+        Ok(self.finish(new_value, x, &new_grad, grad_norm, status))
+    }
+
     fn step_dogleg<O>(
         &mut self,
         obj: &O,
@@ -4181,6 +4584,9 @@ impl Solver {
         }
         if matches!(self.overlay, Overlay::GromacsSteep(_)) {
             return self.gromacs_steep_step(obj, x, value, grad);
+        }
+        if matches!(self.overlay, Overlay::GromacsCg(_)) {
+            return self.gromacs_cg_step(obj, x, value, grad);
         }
         self.refresh_exp(obj, x, &grad)?;
 
@@ -5250,6 +5656,7 @@ impl Solver {
             Overlay::Ode12r(state) => state.reset(),
             Overlay::Diis(state) => state.clear(),
             Overlay::GromacsSteep(state) => state.reset(self.control.istep),
+            Overlay::GromacsCg(state) => state.reset(),
             Overlay::None => {}
         }
     }
@@ -5275,6 +5682,16 @@ impl Solver {
     pub fn gromacs_steep_config(&self) -> Option<GromacsSteepConfig> {
         match self.overlay {
             Overlay::GromacsSteep(state) => Some(state.config()),
+            _ => None,
+        }
+    }
+
+    /// Parameters of a GROMACS conjugate-gradient session.
+    ///
+    /// Other methods return `None`.
+    pub fn gromacs_cg_config(&self) -> Option<GromacsCgConfig> {
+        match self.overlay {
+            Overlay::GromacsCg(state) => Some(state.config()),
             _ => None,
         }
     }
@@ -5337,6 +5754,23 @@ impl Solver {
             Overlay::GromacsSteep(state) => state.set_config(config),
             _ => Err(Error::Steep {
                 what: "parameters require a gromacs-steep session",
+            }),
+        }
+    }
+
+    /// Periodic steepest-descent restart interval of a GROMACS
+    /// conjugate-gradient session (`nstcgsteep`). Zero turns the periodic
+    /// restart off.
+    ///
+    /// Other methods return [`Error::GromacsCg`].
+    pub fn set_gromacs_cg_config(&mut self, config: GromacsCgConfig) -> Result<()> {
+        match &mut self.overlay {
+            Overlay::GromacsCg(state) => {
+                state.set_config(config);
+                Ok(())
+            }
+            _ => Err(Error::GromacsCg {
+                what: "parameters require a gromacs-cg session",
             }),
         }
     }
@@ -6168,8 +6602,8 @@ impl Solver {
                 }
             }
 
-            Overlay::GromacsSteep(_) => {
-                unreachable!("GROMACS steep is dispatched before generic overlays")
+            Overlay::GromacsSteep(_) | Overlay::GromacsCg(_) => {
+                unreachable!("GROMACS methods are dispatched before generic overlays")
             }
             Overlay::None => {}
         }
@@ -6327,6 +6761,18 @@ impl Inner {
             // variant the constraint stepper matches.
             Method::QuickMin | Method::Ode12r | Method::Diis { .. } => Inner::Steepest,
             Method::GromacsSteep => Inner::Steepest,
+            Method::GromacsCg => Inner::Nlcg {
+                conjugacy: Conjugacy::PolakRibiere,
+                restart: Restart::Never,
+                dir: Array1::zeros(dim),
+                g_old: Array1::zeros(dim),
+                z_old: Array1::zeros(dim),
+                d_old: Array1::zeros(dim),
+                initialized: false,
+                z_epoch: 0,
+                prev_alpha: 0.0,
+                prev_gd: 0.0,
+            },
             Method::Bb => Inner::Bb {
                 prev_s: None,
                 prev_y: None,
@@ -6624,6 +7070,105 @@ mod tests {
                 moved / dt
             );
         }
+    }
+
+    /// `f = sum_i k_i x_i^2 / 2` with stiffnesses spread over two decades:
+    /// strong-Wolfe Polak-Ribiere factors stay inside `(0, 5]` for the
+    /// first steps, so every zero factor below is a periodic restart.
+    fn spread_bowl() -> Oracle<impl Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync> {
+        Oracle::unbounded(12, |x: ArrayView1<f64>| {
+            let k = Array1::from_iter((0..12).map(|i| 1.0 + 9.0 * i as f64));
+            let g = &k * &x;
+            (0.5 * g.dot(&x), g)
+        })
+    }
+
+    fn gromacs_cg_solver(nstcgsteep: u32) -> Solver {
+        let control = Control::default()
+            .with_istep(0.01)
+            .with_gtol(1e-14)
+            .with_maxiter(100)
+            .with_maxmove(None);
+        let mut solver = Solver::new(Method::GromacsCg, control, 12);
+        solver
+            .set_gromacs_cg_config(GromacsCgConfig::default().with_nstcgsteep(nstcgsteep))
+            .unwrap();
+        solver
+    }
+
+    fn gromacs_cg_state(solver: &Solver) -> GromacsCg {
+        match solver.overlay {
+            Overlay::GromacsCg(state) => state,
+            _ => unreachable!("GROMACS cg session"),
+        }
+    }
+
+    /// Whether the direction prepared by each of `steps` iterations is a
+    /// steepest-descent direction.
+    fn gromacs_cg_restarts(solver: &mut Solver, x: &mut Array1<f64>, steps: usize) -> Vec<bool> {
+        let obj = spread_bowl();
+        (0..steps)
+            .map(|_| {
+                let report = solver.step(&obj, x).unwrap();
+                assert_eq!(report.status, Status::Iterating);
+                gromacs_cg_state(solver).is_steepest_direction()
+            })
+            .collect()
+    }
+
+    // GROMACS `do_cg` (`minimize.cpp` lines 1497 and 1866-1887) runs
+    // `for (step = 0; ...; step++)` and, after iteration `step` moves, sets
+    // `beta = 0` when `nstcg && (step % nstcg) == 0`. The direction built
+    // after iteration `k` is therefore steepest descent exactly when
+    // `k % nstcgsteep == 0`, starting with `k = 0`.
+    #[test]
+    fn gromacs_cg_nstcgsteep_two_restarts_after_even_iterations() {
+        let mut solver = gromacs_cg_solver(2);
+        let mut x = Array1::ones(12);
+        let restarts = gromacs_cg_restarts(&mut solver, &mut x, 8);
+        assert_eq!(
+            restarts,
+            [true, false, true, false, true, false, true, false]
+        );
+        assert_eq!(solver.nlcg_descent_fallbacks(), 0);
+        assert_eq!(gromacs_cg_state(&solver).step(), 8);
+    }
+
+    #[test]
+    fn gromacs_cg_nstcgsteep_three_restarts_after_every_third_iteration() {
+        let mut solver = gromacs_cg_solver(3);
+        let mut x = Array1::ones(12);
+        let restarts = gromacs_cg_restarts(&mut solver, &mut x, 8);
+        assert_eq!(
+            restarts,
+            [true, false, false, true, false, false, true, false]
+        );
+        assert_eq!(solver.nlcg_descent_fallbacks(), 0);
+    }
+
+    #[test]
+    fn gromacs_cg_nstcgsteep_zero_never_restarts_periodically() {
+        let mut solver = gromacs_cg_solver(0);
+        let mut x = Array1::ones(12);
+        let restarts = gromacs_cg_restarts(&mut solver, &mut x, 8);
+        assert_eq!(restarts, [false; 8]);
+        assert_eq!(solver.nlcg_descent_fallbacks(), 0);
+    }
+
+    #[test]
+    fn gromacs_cg_forget_resets_the_restart_cadence() {
+        let mut solver = gromacs_cg_solver(3);
+        let mut x = Array1::ones(12);
+        assert_eq!(gromacs_cg_restarts(&mut solver, &mut x, 2), [true, false]);
+        assert_eq!(gromacs_cg_state(&solver).step(), 2);
+        solver.forget();
+        assert_eq!(gromacs_cg_state(&solver).step(), 0);
+        // Without the reset, the iteration after `forget` would be index 2
+        // and would keep its Polak-Ribiere factor.
+        assert_eq!(
+            gromacs_cg_restarts(&mut solver, &mut x, 4),
+            [true, false, false, true]
+        );
     }
 }
 
