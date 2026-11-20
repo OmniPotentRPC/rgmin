@@ -353,6 +353,11 @@ impl FireState {
         self.steps = 0;
     }
 
+    #[cfg(feature = "capi")]
+    pub(crate) fn caps_two_step_overshoot(&self) -> bool {
+        self.cap_two_step_overshoot
+    }
+
     /// Opt into lowering `dt_max` after one downhill step followed by an uphill one.
     pub(crate) fn set_cap_two_step_overshoot(&mut self, on: bool) {
         self.cap_two_step_overshoot = on;
