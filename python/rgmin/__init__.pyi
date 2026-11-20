@@ -92,6 +92,30 @@ class GromacsSteep:
     def run(self, fmax: float | None = None, steps: int | None = None) -> bool: ...
     def step(self, forces: Any = None) -> None: ...
 
+class GromacsCg:
+    emtol: float
+    emstep: float
+    gromacs_nsteps: int
+    nstcgsteep: int
+    maxstep: float
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        append_trajectory: bool = False,
+        *,
+        emtol: float = 10.0,
+        emstep: float = 0.01,
+        nsteps: int = -1,
+        nstcgsteep: int = 1000,
+        constraints: str = "none",
+        **kwargs: Any,
+    ) -> None: ...
+    def run(self, fmax: float | None = None, steps: int | None = None) -> bool: ...
+    def step(self, forces: Any = None) -> None: ...
+
 class LBFGS:
     maxstep: float
     memory: int
