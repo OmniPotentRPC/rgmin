@@ -7,7 +7,10 @@
 //! Jacobians. All arithmetic is IEEE 754 `f64` floating-point without outward
 //! directed rounding or interval arithmetic, so the returned quantities are
 //! floating-point evaluations of the analytical majorants rather than
-//! machine-rigorous interval enclosures.
+//! machine-rigorous interval enclosures. Products of three or more majorants
+//! keep their binary exponents apart until one final scaling, so a bound
+//! underflows or overflows only when its exact value does, and a non-finite
+//! bound is returned as [`CertificateError::InvalidMajorant`].
 //!
 //! References:
 //! - L. V. Kantorovich and G. P. Akilov, *Functional Analysis*, 2nd ed.,
@@ -152,6 +155,29 @@ fn positive(input: &'static str, value: f64) -> Result<f64, CertificateError> {
     }
 }
 
+/// Product of finite nonnegative factors that underflows or overflows only
+/// when the exact product does.
+///
+/// A left-to-right product can flush an intermediate to zero or infinity
+/// while the exact result is representable, as in `0.5 * h * r * r` with a
+/// subnormal `h` and `r` near `f64::MAX`. The significands in `[0.5, 1)` are
+/// multiplied apart from the binary exponents, so their running product
+/// stays within `[2^-N, 1)`, and the exponent is applied by one correctly
+/// rounded scaling.
+fn scaled_product<const N: usize>(factors: [f64; N]) -> f64 {
+    let mut significand = 1.0;
+    let mut exponent = 0_i32;
+    for factor in factors {
+        if factor == 0.0 {
+            return 0.0;
+        }
+        let (mantissa, power) = libm::frexp(factor);
+        significand *= mantissa;
+        exponent += power;
+    }
+    libm::scalbn(significand, exponent)
+}
+
 /// Prove the classical Newton--Kantorovich existence ball.
 ///
 /// Given a chosen primal norm `||.||` and its induced operator norm on linear
@@ -173,14 +199,7 @@ pub fn kantorovich_ball(
     let eta = nonnegative("newton_step", newton_step)?;
     let inverse = positive("inverse_norm", inverse_norm)?;
     let lipschitz = nonnegative("jacobian_lipschitz", jacobian_lipschitz)?;
-    let k = inverse * lipschitz;
-    if !k.is_finite() {
-        return Err(CertificateError::InvalidMajorant {
-            input: "inverse_norm*jacobian_lipschitz",
-            value: k,
-        });
-    }
-    let h = k * eta;
+    let h = scaled_product([inverse, lipschitz, eta]);
     if !h.is_finite() {
         return Err(CertificateError::InvalidMajorant {
             input: "h",
@@ -235,7 +254,8 @@ pub fn adjoint_functional_bar(
     let first = nonnegative("first_order", first_order)?;
     let gradient = nonnegative("gradient_norm", gradient_norm)?;
     let hessian = nonnegative("hessian_bound", hessian_bound)?;
-    let remainder = gradient * ball.nonlinear_remainder + 0.5 * hessian * ball.radius * ball.radius;
+    let quadratic = scaled_product([0.5, hessian, ball.radius, ball.radius]);
+    let remainder = gradient * ball.nonlinear_remainder + quadratic;
     if !remainder.is_finite() {
         return Err(CertificateError::InvalidMajorant {
             input: "functional_remainder",

@@ -231,7 +231,7 @@ fn overflow_in_majorant_products_and_remainders_is_rejected() {
     assert_eq!(
         kantorovich_ball(1.0, f64::MAX, 2.0),
         Err(CertificateError::InvalidMajorant {
-            input: "inverse_norm*jacobian_lipschitz",
+            input: "h",
             value: f64::INFINITY,
         })
     );
@@ -275,6 +275,69 @@ fn overflow_in_majorant_products_and_remainders_is_rejected() {
             value: f64::INFINITY,
         })
     );
+}
+
+// 2^-1074, the smallest positive subnormal.
+const MIN_SUBNORMAL: f64 = 4.940_656_458_412_465e-324;
+
+#[test]
+fn quadratic_functional_remainder_does_not_underflow_with_a_subnormal_hessian() {
+    let radius = 1.0e308;
+    let ball = kantorovich_ball(radius, 1.0, 0.0).expect("affine ball");
+    assert_eq!(ball.radius(), radius);
+    assert_eq!(MIN_SUBNORMAL, f64::from_bits(1));
+
+    let bar = adjoint_functional_bar(ball, 0.0, 0.0, MIN_SUBNORMAL).expect("finite functional");
+    // 0.5 * 2^-1074 * r = r * 2^-1000 * 2^-75 is exact and normal, so the
+    // final product rounds once.
+    let expected = (radius * 2.0_f64.powi(-1000) * 2.0_f64.powi(-75)) * radius;
+    assert!((expected - 2.470_328_229_206_232_7e292).abs() <= 1.0e277);
+    assert_relative(bar.remainder, expected, 2.0 * f64::EPSILON);
+    assert_eq!(bar.total, bar.remainder);
+}
+
+#[test]
+fn quadratic_functional_remainder_does_not_overflow_below_f64_max() {
+    // 0.5 * MAX * 1.2^2 = 0.72 * MAX, although MAX * 1.2 overflows.
+    let ball = kantorovich_ball(1.2, 1.0, 0.0).expect("affine ball");
+    let bar = adjoint_functional_bar(ball, 0.0, 0.0, f64::MAX).expect("finite functional");
+    assert_relative(bar.remainder, 0.72 * f64::MAX, 4.0 * f64::EPSILON);
+
+    let wide = kantorovich_ball(1.0e308, 1.0, 0.0).expect("affine ball");
+    assert_eq!(
+        adjoint_functional_bar(wide, 0.0, 0.0, 1.0),
+        Err(CertificateError::InvalidMajorant {
+            input: "functional_remainder",
+            value: f64::INFINITY,
+        })
+    );
+}
+
+#[test]
+fn kantorovich_parameter_does_not_underflow_when_the_newton_step_is_large() {
+    // inverse_norm * jacobian_lipschitz = 1e-400 is below every subnormal,
+    // but h = 1e-100 and the nonlinear remainder is near 5e199.
+    let ball = kantorovich_ball(1.0e300, 1.0e-200, 1.0e-200).expect("small h");
+    assert_relative(ball.h(), 1.0e-100, 4.0 * f64::EPSILON);
+    let (reference_radius, reference_remainder) = high_precision_ball(1.0e300, ball.h());
+    assert_relative(ball.radius(), reference_radius, 4.0 * f64::EPSILON);
+    assert_relative(
+        ball.nonlinear_remainder(),
+        reference_remainder,
+        4.0 * f64::EPSILON,
+    );
+    assert!(ball.nonlinear_remainder() > 4.9e199);
+}
+
+#[test]
+fn kantorovich_parameter_does_not_overflow_when_the_newton_step_is_small() {
+    // inverse_norm * jacobian_lipschitz = 1e320 overflows, but
+    // h = 1e320 * 2^-1074 is about 4.94e-4.
+    let ball = kantorovich_ball(MIN_SUBNORMAL, 1.0e160, 1.0e160).expect("small h");
+    let expected = (1.0e160 * MIN_SUBNORMAL) * 1.0e160;
+    assert_relative(ball.h(), expected, 2.0 * f64::EPSILON);
+    assert!((ball.h() - 4.940_656_458_412_465e-4).abs() <= 1.0e-18);
+    assert!(ball.radius() >= MIN_SUBNORMAL);
 }
 
 #[test]
