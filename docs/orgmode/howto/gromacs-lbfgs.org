@@ -1,0 +1,69 @@
+#+TITLE: Run GROMACS L-BFGS minimization
+#+AUTHOR: rgmin developers
+
+* Run GROMACS L-BFGS minimization
+
+Use ~gromacs-lbfgs~ to carry a GROMACS ~integrator = l-bfgs~
+energy-minimization block into rgmin. The defaults are ~emtol = 10.0~
+kJ mol^-1 nm^-1, ~emstep = 0.01~ nm, ~nsteps = -1~, ~nbfgscorr = 10~,
+and ~constraints = none~.
+
+** Python and MDP keys
+
+#+BEGIN_SRC python
+from rgmin.optimize import GromacsLbfgs
+
+opt = GromacsLbfgs(
+    atoms,
+    emtol=10.0,
+    emstep=0.01,
+    nsteps=500,
+    nbfgscorr=10,
+)
+opt.run()
+#+END_SRC
+
+For the functional API, map the MDP keys first:
+
+#+BEGIN_SRC python
+options = rgmin.gromacs_mdp_options(
+    {
+        "integrator": "l-bfgs",
+        "emtol": 10.0,
+        "emstep": 0.01,
+        "nsteps": 500,
+        "nbfgscorr": 10,
+        "constraints": "none",
+    }
+)
+method = options.pop("method")
+report, x = rgmin.minimize(value_and_gradient, x0, method, **options)
+#+END_SRC
+
+Unknown keys raise ~ValueError~ and name the key. A non-~none~
+~constraints~ value is refused, as it is by GROMACS L-BFGS.
+
+** Rust, C, and C++
+
+The Rust core is unit-agnostic:
+
+#+BEGIN_SRC rust
+let control = rgmin::Control::default()
+    .with_gtol(force_tolerance)
+    .with_istep(emstep)
+    .with_maxiter(nsteps);
+let mut solver =
+    rgmin::Solver::new(rgmin::Method::GromacsLbfgs, control, x.len());
+solver.set_gromacs_lbfgs_config(
+    rgmin::GromacsLbfgsConfig::default().with_nbfgscorr(10),
+)?;
+let report = solver.run(&objective, &mut x)?;
+#+END_SRC
+
+The C selector is ~RGMIN_GROMACS_LBFGS~ and
+~rgmin_solver_set_gromacs_lbfgs~ sets the correction count. C++ uses
+~rgmin::Method::GromacsLbfgs~ and ~Solver::set_gromacs_lbfgs~.
+
+The exact line search, restart, stopping rules, and documented
+differences from GROMACS 2025.4 are in
+@@rst::doc:`../reference/gromacs-lbfgs`@@.
