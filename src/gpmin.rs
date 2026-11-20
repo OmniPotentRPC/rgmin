@@ -84,10 +84,10 @@ pub const GPMIN_DEFAULT_HYPERPARAM_TOL: f64 = 0.01;
 pub const GPMIN_DEFAULT_HYPERPARAM_MAXITER: usize = 50;
 
 /// Default inner surrogate L-BFGS gradient tolerance derived from machine
-/// epsilon (`f64::EPSILON.powf(0.6)`).
+/// epsilon (`f64::EPSILON.powf(0.75)`).
 #[must_use]
 pub fn default_surrogate_gtol() -> f64 {
-    f64::EPSILON.powf(0.6)
+    f64::EPSILON.powf(0.75)
 }
 
 /// Strategy for updating the constant energy prior mean `m(x) = [c, 0, ..., 0]`.
