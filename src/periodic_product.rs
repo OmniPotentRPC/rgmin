@@ -35,6 +35,9 @@ pub enum PeriodicProductError {
     /// The returned multipliers failed the determinant identity.
     #[error("periodic product eigenvalues failed a-posteriori verification")]
     VerificationFailed,
+    /// The returned multipliers could not be matched to reciprocal partners.
+    #[error("periodic product eigenvalues failed reciprocal-pair verification")]
+    ReciprocityFailed,
 }
 
 /// One multiplier of a periodic matrix product.
@@ -57,6 +60,8 @@ pub struct PeriodicProductSpectrum {
     pub qr_iterations: usize,
     /// Relative defect in `product(eigenvalues) = det(product matrix)`.
     pub verification_residual: f64,
+    /// Largest defect `|lambda * lambda' - 1|` in reciprocal matching.
+    pub reciprocity_residual: f64,
 }
 
 trait ComplexOps {
@@ -417,6 +422,41 @@ fn eigenvalues(
     Ok((values, iterations))
 }
 
+fn verify_reciprocity(
+    eigenvalues: &[Complex],
+    bound: &Float,
+) -> Result<Float, PeriodicProductError> {
+    let precision = eigenvalues[0].prec().0;
+    let one = complex(precision, 1.0);
+    let mut unused = vec![true; eigenvalues.len()];
+    let mut worst = Float::with_val(precision, 0);
+    while let Some(left) = unused.iter().position(|present| *present) {
+        let mut best: Option<(usize, Float)> = None;
+        for (right, candidate) in eigenvalues.iter().enumerate() {
+            if !unused[right] {
+                continue;
+            }
+            let defect = eigenvalues[left].mul(candidate).sub(&one).modulus();
+            if best
+                .as_ref()
+                .is_none_or(|(_, old_defect)| defect < *old_defect)
+            {
+                best = Some((right, defect));
+            }
+        }
+        let (right, defect) = best.ok_or(PeriodicProductError::ReciprocityFailed)?;
+        if !defect.is_finite() || defect > *bound {
+            return Err(PeriodicProductError::ReciprocityFailed);
+        }
+        if defect > worst {
+            worst = defect;
+        }
+        unused[left] = false;
+        unused[right] = false;
+    }
+    Ok(worst)
+}
+
 /// Multiply short transfer factors and diagonalize their product.
 ///
 /// Every factor is promoted before it participates in a product.  Factors are
@@ -474,6 +514,19 @@ pub fn periodic_product_spectrum(
         return Err(PeriodicProductError::VerificationFailed);
     }
     let verification_residual = verification_residual.to_f64();
+    let product_operations = factors
+        .len()
+        .checked_mul(width)
+        .and_then(|work| work.checked_mul(width))
+        .and_then(|work| work.checked_mul(width))
+        .ok_or(PeriodicProductError::InvalidConfiguration)?;
+    let reciprocity_bound =
+        width as f64 * f64::EPSILON.sqrt() + product_operations as f64 * f64::EPSILON;
+    let reciprocity_residual = verify_reciprocity(
+        &eigenvalues,
+        &Float::with_val(precision_bits, reciprocity_bound),
+    )?
+    .to_f64();
     let mut multipliers = Vec::with_capacity(width);
     for value in eigenvalues {
         let mut modulus = value.modulus();
@@ -497,6 +550,7 @@ pub fn periodic_product_spectrum(
         precision_bits,
         qr_iterations,
         verification_residual,
+        reciprocity_residual,
     })
 }
 
@@ -598,6 +652,10 @@ mod tests {
             periodic_product_spectrum(&[vec![0.0; 4]], 2, 128),
             Err(PeriodicProductError::InvalidSpectrum)
         );
+        assert_eq!(
+            periodic_product_spectrum(&[vec![2.0, 0.0, 0.0, 3.0]], 2, 128),
+            Err(PeriodicProductError::ReciprocityFailed)
+        );
     }
 
     #[test]
@@ -606,16 +664,29 @@ mod tests {
         let radial = 10.0_f64.exp();
         let angle = 0.003_f64;
         let (sine, cosine) = angle.sin_cos();
+        let inverse = radial.recip();
         let factor = vec![
             radial * cosine,
             -radial * sine,
+            0.0,
+            0.0,
             radial * sine,
             radial * cosine,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            inverse * cosine,
+            -inverse * sine,
+            0.0,
+            0.0,
+            inverse * sine,
+            inverse * cosine,
         ];
-        let got = periodic_product_spectrum(&vec![factor; steps], 2, 256)
+        let got = periodic_product_spectrum(&vec![factor; steps], 4, 256)
             .expect("large complex spectrum");
         for value in &got.multipliers {
-            assert!((value.log_modulus - 1000.0).abs() < 1e-10);
+            assert!((value.log_modulus.abs() - 1000.0).abs() < 1e-10);
             assert!((value.argument.abs() - 0.3).abs() < 1e-12);
         }
     }
