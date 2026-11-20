@@ -44,7 +44,6 @@ _ASE_LBFGS_MEMORY = 100
 _ASE_LBFGS_DAMPING = 1.0
 _ASE_LBFGS_STPMAX = 50.0
 _ASE_LBFGS_MAXSTEP_LIMIT = 1.0
-_ASE_LINESEARCH_OPENING = 1.0
 _ASE_LINESEARCH_RESTART = "rgmin-ase-linesearch-1"
 # Serialises _calc_locks and _id_locks. Finalizers must not block on
 # this lock: a collection can run while the creating thread already
@@ -1364,10 +1363,12 @@ class BFGSLineSearch(_AseWolfe):
     The constructor matches ASE 3.29.0, including the positional order
     ``maxstep`` then ``trajectory``. ``alpha`` is the initial inverse
     Hessian scale ``1/alpha`` (ASE scales the objective by ``1/alpha``
-    and starts from ``I``). ``c1``, ``c2``, and ``stpmax`` are the ASE
-    Wolfe search. The first trial is the full quasi-Newton step.
-    ``maxstep`` is the per-atom cap. ``damping`` is not a parameter of
-    this class.
+    and starts from ``I``). The session runs ASE's own line search,
+    ``ase.utils.linesearch.LineSearch``, with ``c1``, ``c2``, and
+    ``stpmax``. It opens at the full quasi-Newton step, and ``maxstep``
+    limits how far an atom moves from one trial to the next, so one
+    step can move an atom further than ``maxstep``. ``damping`` is not
+    a parameter of this class.
 
     https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/bfgslinesearch.py
     https://gitlab.com/ase/ase/-/blob/3.29.0/ase/utils/linesearch.py
@@ -1398,12 +1399,11 @@ class BFGSLineSearch(_AseWolfe):
         self.alpha = scale
         self.stpmax = bound
         options = dict(kwargs)
-        options["linesearch"] = "wolfe"
+        options["linesearch"] = "ase"
         options["c1"] = self.c1
         options["c2"] = self.c2
         options["h0"] = 1.0 / scale
         options["stpmax"] = bound
-        options["istep"] = _ASE_LINESEARCH_OPENING
         Optimizer.__init__(
             self,
             atoms,
@@ -1485,8 +1485,9 @@ class LBFGSLineSearch(_AseWolfe, LBFGS):
     ``alpha`` to 70, and ``damping`` to 1. ``damping`` is stored and,
     as in ASE, does not scale a line-search step. ``maxstep`` above 1
     angstrom raises ``ValueError``. The inverse Hessian starts at
-    ``I/alpha`` and stays there. The Wolfe constants are ASE's
-    ``c1=0.23``, ``c2=0.46``, and ``stpmax=50``.
+    ``I/alpha`` and stays there. The session runs ASE's own line
+    search with ASE's ``c1=0.23``, ``c2=0.46``, and ``stpmax=50``. As in
+    ASE, ``maxstep`` limits each increment between trials, not the step.
 
     https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/lbfgs.py
     """
@@ -1521,12 +1522,11 @@ class LBFGSLineSearch(_AseWolfe, LBFGS):
         self.use_line_search = True
         self.stpmax = _ASE_LBFGS_STPMAX
         options = dict(bound)
-        options["linesearch"] = "wolfe"
+        options["linesearch"] = "ase"
         options["c1"] = _ASE_WOLFE_C1
         options["c2"] = _ASE_WOLFE_C2
         options["h0"] = 1.0 / scale
         options["stpmax"] = _ASE_LBFGS_STPMAX
-        options["istep"] = _ASE_LINESEARCH_OPENING
         options["memory"] = self.memory
         Optimizer.__init__(
             self,

@@ -2,6 +2,7 @@
 
 use ndarray::{Array1, ArrayView1};
 
+pub(crate) mod ase;
 /// Accept conditions (Armijo, Wolfe, Goldstein).
 pub mod conditions;
 mod interp;
@@ -75,11 +76,11 @@ pub enum LineSearch {
 
 /// Optional policy for objective values whose accuracy is lower than their gradients.
 /// Existing line-search entry points use the default four-epsilon window.
-/// `alpha_max` is unset until a caller opts into a step-multiplier bound.
+/// `ase` is unset until a BFGS or L-BFGS session opts into ASE's search.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LineSearchOptions {
     relative_objective_error: Option<f64>,
-    alpha_max: Option<f64>,
+    ase: Option<ase::AseSearch>,
 }
 
 impl LineSearchOptions {
@@ -91,24 +92,21 @@ impl LineSearchOptions {
     pub fn with_objective_roundoff(relative: f64) -> Option<Self> {
         (relative.is_finite() && relative >= 0.0).then_some(Self {
             relative_objective_error: Some(relative),
-            alpha_max: None,
+            ase: None,
         })
     }
 
-    /// Keep the value window and set the step-multiplier bound.
-    ///
-    /// A non-positive or non-finite limit is not stored. The search then
-    /// uses only the displacement cap it already had.
-    pub(crate) fn with_alpha_max(self, limit: f64) -> Self {
+    /// Keep the value window and run ASE's search in place of Wolfe.
+    pub(crate) fn with_ase(self, search: ase::AseSearch) -> Self {
         Self {
-            alpha_max: (limit.is_finite() && limit > 0.0).then_some(limit),
+            ase: Some(search),
             ..self
         }
     }
 
-    /// Step-multiplier bound, if one was set.
-    pub(crate) fn alpha_max(self) -> Option<f64> {
-        self.alpha_max
+    /// ASE's search, if a session selected it.
+    pub(crate) fn ase(self) -> Option<ase::AseSearch> {
+        self.ase
     }
 
     /// Relative value window: the configured roundoff, else four epsilon.

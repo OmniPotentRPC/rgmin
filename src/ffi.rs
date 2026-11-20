@@ -2169,24 +2169,24 @@ pub unsafe extern "C" fn rgmin_solver_set_fixed_h0(solver: *mut rgmin_solver_t, 
     flag(unsafe { (*solver).solver.set_fixed_h0(h0) })
 }
 
-/// Line-search step-multiplier bound.
-/// See [`crate::Solver::set_line_alpha_max`]. A positive finite value
-/// is the tighter of this bound and the displacement cap. A
-/// non-positive finite value clears it. A non-finite value returns 1
-/// and leaves the session unchanged. ABI minor 53.
+/// ASE 3.29's line search with step-multiplier bound `stpmax` on a
+/// BFGS or L-BFGS session. See [`crate::Solver::set_ase_linesearch`].
+/// Returns 0, or 1 on a null session, a NaN `stpmax`, or another
+/// method. A `stpmax` below 1 is accepted and fails each search, as in
+/// ASE. ABI minor 53.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_solver_set_line_alpha_max(
+pub unsafe extern "C" fn rgmin_solver_set_ase_linesearch(
     solver: *mut rgmin_solver_t,
-    limit: f64,
+    stpmax: f64,
 ) -> i32 {
     if solver.is_null() {
-        set_last_error("rgmin_solver_set_line_alpha_max: null solver");
+        set_last_error("rgmin_solver_set_ase_linesearch: null solver");
         return 1;
     }
-    flag(unsafe { (*solver).solver.set_line_alpha_max(limit) })
+    flag(unsafe { (*solver).solver.set_ase_linesearch(stpmax) })
 }
 
 /// Burdakov ray-truncation radius for session L-BFGS. A non-positive,
