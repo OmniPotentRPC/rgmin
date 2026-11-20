@@ -1,8 +1,27 @@
-//! A-posteriori Newton--Kantorovich and adjoint functional bounds.
+//! A-posteriori Newton--Kantorovich, adjoint functional, and Morse-gap bounds.
 //!
-//! The caller supplies operator-norm majorants in one consistent norm.  This
-//! module only combines those proved inputs; it does not estimate a Lipschitz
-//! constant from sampled Jacobians.
+//! The caller supplies operator-norm majorants in one consistent norm on the
+//! primal space, together with the matching dual norm for linear functionals
+//! and the induced operator norm for linear maps. This module only combines
+//! those proved inputs; it does not estimate a Lipschitz constant from sampled
+//! Jacobians. All arithmetic is IEEE 754 `f64` floating-point without outward
+//! directed rounding or interval arithmetic, so the returned quantities are
+//! floating-point evaluations of the analytical majorants rather than
+//! machine-rigorous interval enclosures.
+//!
+//! References:
+//! - L. V. Kantorovich and G. P. Akilov, *Functional Analysis*, 2nd ed.,
+//!   Chapter XVIII ("Newton's Method"), Pergamon, 1982,
+//!   <https://doi.org/10.1016/B978-0-08-023036-8.50024-2>;
+//!   W. B. Gragg and R. A. Tapia, *Optimal Error Bounds for the
+//!   Newton--Kantorovich Theorem*, SIAM J. Numer. Anal. 11 (1974) 10--13,
+//!   <https://doi.org/10.1137/0711002>.
+//! - R. Becker and R. Rannacher, *An optimal control approach to a posteriori
+//!   error estimation in finite element methods*, Acta Numer. 10 (2001)
+//!   1--102, <https://doi.org/10.1017/S0962492901000010>.
+//! - H. Weyl, *Das asymptotische Verteilungsgesetz der Eigenwerte linearer
+//!   partieller Differentialgleichungen*, Math. Ann. 71 (1912) 441--479,
+//!   <https://doi.org/10.1007/BF01456804>.
 
 use core::fmt;
 
@@ -34,14 +53,14 @@ impl fmt::Display for CertificateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidMajorant { input, value } => {
-                write!(f, "invalid certificate majorant {input}={value:.8e}")
+                write!(f, "invalid certificate majorant {input}={value:.16e}")
             }
             Self::NoExistenceBall { h } => {
-                write!(f, "Newton--Kantorovich condition failed: h={h:.8e} > 1/2")
+                write!(f, "Newton--Kantorovich condition failed: h={h:.16e} > 1/2")
             }
             Self::UnresolvedMorseGap { gap, uncertainty } => write!(
                 f,
-                "Morse gap unresolved: gap={gap:.8e}, uncertainty={uncertainty:.8e}"
+                "Morse gap unresolved: gap={gap:.16e}, uncertainty={uncertainty:.16e}"
             ),
         }
     }
@@ -50,19 +69,49 @@ impl fmt::Display for CertificateError {
 impl std::error::Error for CertificateError {}
 
 /// Certified ball containing a zero of a nonlinear stationarity map.
+///
+/// Instances are constructed by [`kantorovich_ball`], which validates the
+/// majorants and enforces `h <= 1/2` so a negative radius or nonlinear
+/// remainder cannot be forged. Bounds are evaluated in standard `f64`
+/// floating-point without outward rounding.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct KantorovichBall {
-    /// Norm of the exact Newton correction `J(x0)^{-1} F(x0)`.
-    pub newton_step: f64,
-    /// `h = ||J(x0)^{-1}|| Lip(J) ||J(x0)^{-1} F(x0)||`.
-    pub h: f64,
+    newton_step: f64,
+    h: f64,
+    radius: f64,
+    nonlinear_remainder: f64,
+}
+
+impl KantorovichBall {
+    /// Norm of the exact Newton correction `||J(x0)^{-1} F(x0)||`.
+    #[must_use]
+    pub const fn newton_step(&self) -> f64 {
+        self.newton_step
+    }
+
+    /// Affine-invariant Kantorovich parameter `h = ||J(x0)^{-1}|| Lip(J) ||J(x0)^{-1} F(x0)||`.
+    #[must_use]
+    pub const fn h(&self) -> f64 {
+        self.h
+    }
+
     /// Radius about `x0` containing a zero.
-    pub radius: f64,
+    #[must_use]
+    pub const fn radius(&self) -> f64 {
+        self.radius
+    }
+
     /// Bound on the nonlinear part of the displacement beyond the Newton step.
-    pub nonlinear_remainder: f64,
+    #[must_use]
+    pub const fn nonlinear_remainder(&self) -> f64 {
+        self.nonlinear_remainder
+    }
 }
 
 /// Certified first-order adjoint contribution and second-order remainder.
+///
+/// All quantities are evaluated in standard `f64` floating-point without
+/// outward rounding.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AdjointFunctionalBar {
     /// Absolute first-order dual-weighted residual `|lambda^T F(x0)|`.
@@ -74,6 +123,9 @@ pub struct AdjointFunctionalBar {
 }
 
 /// Certified distance of a perturbed self-adjoint spectrum from zero.
+///
+/// All quantities are evaluated in standard `f64` floating-point without
+/// outward rounding.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MorseGap {
     /// Gap of the computed projected operator.
@@ -102,10 +154,17 @@ fn positive(input: &'static str, value: f64) -> Result<f64, CertificateError> {
 
 /// Prove the classical Newton--Kantorovich existence ball.
 ///
-/// `inverse_norm` bounds `||J(x0)^{-1}||`, `jacobian_lipschitz` bounds
-/// `||J(x)-J(y)|| / ||x-y||` on the resulting ball, and `newton_step` is
-/// `||J(x0)^{-1} F(x0)||`.  The returned radius uses the cancellation-free
-/// form `2 eta / (1 + sqrt(1 - 2 h))`.
+/// Given a chosen primal norm `||.||` and its induced operator norm on linear
+/// maps, `inverse_norm` bounds `||J(x0)^{-1}||`, `newton_step` is
+/// `eta = ||J(x0)^{-1} F(x0)||`, and `jacobian_lipschitz` bounds the operator
+/// Lipschitz ratio `||J(x) - J(y)|| / ||x - y||` on the ball. Since the
+/// returned existence radius satisfies `r <= 2 eta` whenever `h <= 1/2`, a
+/// Lipschitz bound valid on `B(x0, 2 eta)` suffices prior to evaluating `r`.
+/// The returned radius uses the cancellation-free form
+/// `2 eta / (1 + sqrt(1 - 2 h))` (Kantorovich and Akilov 1982,
+/// <https://doi.org/10.1016/B978-0-08-023036-8.50024-2>; Gragg and Tapia
+/// 1974, <https://doi.org/10.1137/0711002>). Arithmetic is standard `f64`
+/// floating-point without outward rounding.
 pub fn kantorovich_ball(
     newton_step: f64,
     inverse_norm: f64,
@@ -147,9 +206,17 @@ pub fn kantorovich_ball(
 
 /// Bound a scalar functional at the zero enclosed by `ball`.
 ///
-/// If `J(x0)^T lambda = grad q(x0)`, `first_order` is
-/// `|lambda^T F(x0)|`. `gradient_norm` bounds `||grad q(x0)||`, while
-/// `hessian_bound` bounds `||D^2 q||` throughout the existence ball.
+/// For the exact adjoint equation `J(x0)^T lambda = grad q(x0)`, `first_order`
+/// is the dual-weighted residual `|lambda^T F(x0)|`, which assumes an exact
+/// adjoint solve (any inexact-adjoint defect `||(J(x0)^T lambda - grad q(x0))||_*`
+/// times `ball.radius()` must be added by the caller). `gradient_norm` bounds
+/// `||grad q(x0)||_*` in the dual norm paired with `ball`'s primal norm, while
+/// `hessian_bound` bounds `||D^2 q(x)||` in the induced operator norm from the
+/// primal space to its dual throughout the existence ball (for example on
+/// `B(x0, 2 eta)`). The remainder combines the linear displacement remainder
+/// beyond the Newton step with the quadratic Taylor remainder of `q` (Becker
+/// and Rannacher 2001, <https://doi.org/10.1017/S0962492901000010>). Bounds
+/// are evaluated in standard `f64` floating-point without outward rounding.
 pub fn adjoint_functional_bar(
     ball: KantorovichBall,
     first_order: f64,
@@ -182,9 +249,17 @@ pub fn adjoint_functional_bar(
 
 /// Certify that a projected self-adjoint operator cannot change inertia.
 ///
-/// `operator_lipschitz * ball.radius` bounds the operator change between the
-/// approximate and exact stationary points. `eigensolver_roundoff` is added
-/// before comparing that perturbation with the computed gap from zero.
+/// By Weyl's eigenvalue perturbation inequality for self-adjoint operators
+/// (Weyl 1912, <https://doi.org/10.1007/BF01456804>), each exact eigenvalue
+/// differs from the corresponding unperturbed eigenvalue by at most the
+/// spectral norm (Euclidean operator 2-norm) of the perturbation. Therefore
+/// `operator_lipschitz` must bound the spectral-norm Lipschitz constant of the
+/// projected self-adjoint operator over the existence ball (for example on
+/// `B(x0, 2 eta)`), so that `operator_lipschitz * ball.radius()` bounds the
+/// spectral-norm change between the approximate and exact stationary points.
+/// `eigensolver_roundoff` is added before comparing that perturbation with the
+/// computed spectral gap `computed_gap` from zero. Bounds are evaluated in
+/// standard `f64` floating-point without outward rounding.
 pub fn certify_morse_gap(
     computed_gap: f64,
     operator_lipschitz: f64,
