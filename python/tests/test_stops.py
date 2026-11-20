@@ -124,3 +124,41 @@ def test_gromacs_steep_stops_on_the_eval_budget() -> None:
     opt = GromacsSteep(_pt7(), logfile=None, max_evals=2)
     assert opt.run(fmax=1e-9, steps=200) is False
     assert opt.stop == "EvalBudget"
+
+
+def test_ase_optimizer_irun_stops_on_etol() -> None:
+    pytest.importorskip("ase")
+    from rgmin.optimize import LBFGS
+
+    cut = LBFGS(_pt7(), logfile=None, etol=1e-4)
+    flags = list(cut.irun(fmax=1e-9, steps=200))
+    assert cut.stop == "EnergyTolerance"
+    assert flags[-1] is True
+    assert not any(flags[:-1])
+    twin = LBFGS(_pt7(), logfile=None, etol=1e-4)
+    assert twin.run(fmax=1e-9, steps=200) is flags[-1]
+    assert twin.nsteps == cut.nsteps
+
+
+def test_ase_optimizer_irun_does_not_call_an_eval_budget_stop_converged() -> None:
+    pytest.importorskip("ase")
+    from rgmin.optimize import FIRE
+
+    opt = FIRE(_pt7(), logfile=None, max_evals=6)
+    flags = list(opt.irun(fmax=1e-9, steps=200))
+    assert opt.stop == "EvalBudget"
+    assert flags[-1] is False
+    assert not any(flags)
+    twin = FIRE(_pt7(), logfile=None, max_evals=6)
+    assert twin.run(fmax=1e-9, steps=200) is flags[-1]
+    assert twin.nsteps == opt.nsteps
+
+
+def test_gromacs_steep_irun_does_not_call_an_eval_budget_stop_converged() -> None:
+    pytest.importorskip("ase")
+    from rgmin.optimize import GromacsSteep
+
+    opt = GromacsSteep(_pt7(), logfile=None, max_evals=2)
+    flags = list(opt.irun(fmax=1e-9, steps=200))
+    assert opt.stop == "EvalBudget"
+    assert not any(flags)
