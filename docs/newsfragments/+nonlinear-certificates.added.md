@@ -1,0 +1,1 @@
+Add a-posteriori nonlinear certificates built from caller-supplied majorants: a Newton-Kantorovich existence radius, an adjoint functional bound with nonlinear and quadratic remainders, and a residual-robust Morse-gap test that returns a typed error when the gap cannot be certified.
