@@ -73,6 +73,10 @@ pub struct TcgResult {
     pub eta: Array1<f64>,
     /// Model decrease `m(0) - m(eta) = -(<g, eta> + 1/2 <H eta, eta>)`,
     /// evaluated with one extra Hessian-vector product on the returned step.
+    ///
+    /// NaN when a Hessian action was not finite. The iteration stops at the
+    /// first such action, `eta` is the last finite iterate, and `stop` is
+    /// [`TcgStop::MaxIter`].
     pub model_decrease: f64,
     /// Condition terminating the conjugate-gradient subproblem.
     pub stop: TcgStop,
@@ -179,6 +183,14 @@ where
         iterations += 1;
         let hd = project(&hvp(&delta));
         let kap = inner(&delta, &hd);
+        if !kap.is_finite() || hd.iter().any(|c| !c.is_finite()) {
+            return TcgResult {
+                eta,
+                model_decrease: f64::NAN,
+                stop: TcgStop::MaxIter,
+                iterations,
+            };
+        }
         if kap <= 0.0 {
             let tau = boundary_tau(&inner, &eta, &delta, radius);
             eta = &eta + &(&delta * tau);
@@ -205,7 +217,11 @@ where
         delta = &(-&r) + &(&delta * beta);
     }
     let heta = project(&hvp(&eta));
-    let model_decrease = -(inner(&g, &eta) + 0.5 * inner(&eta, &heta));
+    let model_decrease = if heta.iter().all(|c| c.is_finite()) {
+        -(inner(&g, &eta) + 0.5 * inner(&eta, &heta))
+    } else {
+        f64::NAN
+    };
     TcgResult {
         eta,
         model_decrease,
@@ -243,7 +259,13 @@ impl RtrRadius {
     /// radius update of Absil-Baker-Gallivan Algorithm 1. Returns whether
     /// the step is accepted (`rho > 1/10`). A non-positive predicted
     /// decrease is treated as a failed model (`rho = -inf`).
+    ///
+    /// A radius above [`Self::radius_max`], which the public fields allow,
+    /// is clamped to the maximum before the update, so the radius left
+    /// behind never exceeds it whatever the ratio is. The growth test then
+    /// compares `eta_norm` with the clamped radius.
     pub fn update(&mut self, actual_decrease: f64, model_decrease: f64, eta_norm: f64) -> bool {
+        self.radius = self.radius.min(self.radius_max);
         let rho = if model_decrease > 0.0 {
             actual_decrease / model_decrease
         } else {
@@ -840,5 +862,74 @@ mod tests {
         assert!(r.update(0.5, 1.0, 0.1)); // rho = 0.5 interior: unchanged
         assert!((r.radius - 0.5).abs() < 1e-15);
         assert!(!r.update(1.0, 0.0, 0.1)); // no predicted decrease: reject
+    }
+
+    #[test]
+    fn radius_above_the_maximum_is_clamped() {
+        let mut radius = RtrRadius {
+            radius: 8.0,
+            radius_max: 1.0,
+        };
+        assert!(radius.update(0.5, 1.0, 0.0));
+        assert_eq!(radius.radius, 1.0);
+
+        let mut radius = RtrRadius {
+            radius: 8.0,
+            radius_max: 1.0,
+        };
+        assert!(!radius.update(0.1, 1.0, 0.0));
+        assert!((radius.radius - 0.25).abs() < 1e-15);
+
+        let mut radius = RtrRadius {
+            radius: 8.0,
+            radius_max: 1.0,
+        };
+        assert!(radius.update(0.9, 1.0, 1.0));
+        assert_eq!(radius.radius, 1.0);
+    }
+
+    #[test]
+    fn tcg_stops_on_a_non_finite_hessian_action() {
+        let calls = std::cell::Cell::new(0usize);
+        let result = truncated_cg_projected(
+            |v| v.clone(),
+            ndarray::array![1.0, 1.0].view(),
+            |v| {
+                calls.set(calls.get() + 1);
+                v.mapv(|_| f64::NAN)
+            },
+            10.0,
+            1.0,
+            0.1,
+            50,
+        );
+        assert_eq!(calls.get(), 1, "tCG kept calling a poisoned Hessian");
+        assert!(result.model_decrease.is_nan());
+        assert!(result.eta.iter().all(|c| c.is_finite()));
+        assert_eq!(result.iterations, 1);
+    }
+
+    #[test]
+    fn tcg_stops_when_the_action_turns_infinite_midway() {
+        let calls = std::cell::Cell::new(0usize);
+        let result = truncated_cg_projected(
+            |v| v.clone(),
+            ndarray::array![1.0, 0.5, 0.25].view(),
+            |v| {
+                calls.set(calls.get() + 1);
+                if calls.get() >= 2 {
+                    v.mapv(|_| f64::INFINITY)
+                } else {
+                    v * 0.1
+                }
+            },
+            100.0,
+            1.0,
+            1e-12,
+            50,
+        );
+        assert_eq!(calls.get(), 2);
+        assert!(result.model_decrease.is_nan());
+        assert!(result.eta.iter().all(|c| c.is_finite()));
     }
 }

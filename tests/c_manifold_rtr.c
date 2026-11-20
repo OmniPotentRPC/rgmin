@@ -120,6 +120,113 @@ static int check_radius(void) {
     return 0;
 }
 
+static int check_radius_above_maximum(void) {
+    double radius = 8.0;
+    int32_t accepted = -1;
+    if (rgmin_rtr_radius_update(&radius, 1.0, 0.5, 1.0, 0.0, &accepted) != RGMIN_SUCCESS ||
+        accepted != 1 || !close_to(radius, 1.0)) {
+        fprintf(stderr, "clamp radius %g accepted %d\n", radius, accepted);
+        return 25;
+    }
+    radius = 8.0;
+    if (rgmin_rtr_radius_update(&radius, 1.0, 0.1, 1.0, 0.0, &accepted) != RGMIN_SUCCESS ||
+        accepted != 0 || !close_to(radius, 0.25)) {
+        fprintf(stderr, "clamp then shrink radius %g accepted %d\n", radius, accepted);
+        return 26;
+    }
+    return 0;
+}
+
+typedef struct counted_hvp_state {
+    size_t calls;
+    double value;
+} counted_hvp_state;
+
+static rgmin_status_t counted_hvp(void *user, const DLManagedTensorVersioned *x,
+                                  const DLManagedTensorVersioned *v,
+                                  DLManagedTensorVersioned *hv) {
+    counted_hvp_state *state = (counted_hvp_state *)user;
+    const double *vs = (const double *)v->dl_tensor.data;
+    double *hs = (double *)hv->dl_tensor.data;
+    size_t n = (size_t)v->dl_tensor.shape[0];
+    size_t i;
+    (void)x;
+    state->calls++;
+    for (i = 0; i < n; i++) {
+        hs[i] = state->value * vs[i];
+    }
+    return RGMIN_SUCCESS;
+}
+
+static rgmin_status_t failing_hvp(void *user, const DLManagedTensorVersioned *x,
+                                  const DLManagedTensorVersioned *v,
+                                  DLManagedTensorVersioned *hv) {
+    (void)x;
+    (void)v;
+    (void)hv;
+    (*(size_t *)user)++;
+    return RGMIN_INTERNAL_ERROR;
+}
+
+/* SPD(1) at 4 under the affine-invariant metric has <u, v> = u v / 16. With
+ * gradient 2 and curvature 1 the step is -2, which is 0.5 long in the
+ * manifold metric and 2 long in the Euclidean one. */
+static int check_spd_tcg(void) {
+    rgmin_manifold_handle_t *spd = rgmin_manifold_spd(1, RGMIN_SPD_AFFINE_INVARIANT);
+    double scale = 1.0;
+    const double x = 4.0;
+    const double grad = 2.0;
+    double eta = 0.0;
+    rgmin_rtr_tcg_result_t out;
+    rgmin_status_t st;
+    int rc = 0;
+    if (spd == NULL) {
+        return 60;
+    }
+    st = rgmin_rtr_tcg_solve(spd, scale_hvp, &scale, &x, &grad, 10.0, 1.0, 0.1, 5, &eta, 1, &out);
+    if (st != RGMIN_SUCCESS || out.stop != RGMIN_TCG_RESIDUAL || !close_to(eta, -2.0) ||
+        !close_to(out.eta_norm, 0.5) || !close_to(out.model_decrease, 2.0)) {
+        fprintf(stderr, "spd tcg eta %g norm %g decrease %g status %d\n", eta, out.eta_norm,
+                out.model_decrease, st);
+        rc = 61;
+        goto done;
+    }
+    st = rgmin_rtr_tcg_solve(spd, scale_hvp, &scale, &x, &grad, 0.25, 1.0, 0.1, 5, &eta, 1, &out);
+    if (st != RGMIN_SUCCESS || out.stop != RGMIN_TCG_BOUNDARY || !close_to(eta, -1.0) ||
+        !close_to(out.eta_norm, 0.25)) {
+        fprintf(stderr, "spd tcg boundary eta %g norm %g status %d\n", eta, out.eta_norm, st);
+        rc = 62;
+    }
+done:
+    rgmin_manifold_free(spd);
+    return rc;
+}
+
+static int check_tcg_hessian_failure(void) {
+    counted_hvp_state state;
+    size_t calls = 0;
+    const double x[2] = {0.0, 0.0};
+    const double grad[2] = {1.0, 1.0};
+    double eta[2] = {7.0, 7.0};
+    rgmin_rtr_tcg_result_t out;
+    rgmin_status_t st;
+    out.eta_norm = -1.0;
+    state.calls = 0;
+    state.value = NAN;
+    st = rgmin_rtr_tcg_solve(NULL, counted_hvp, &state, x, grad, 10.0, 1.0, 0.1, 50, eta, 2, &out);
+    if (st != RGMIN_INTERNAL_ERROR || state.calls != 1 || eta[0] != 7.0 || eta[1] != 7.0 ||
+        out.eta_norm != -1.0) {
+        fprintf(stderr, "non-finite hvp status %d calls %zu eta %g\n", st, state.calls, eta[0]);
+        return 63;
+    }
+    st = rgmin_rtr_tcg_solve(NULL, failing_hvp, &calls, x, grad, 10.0, 1.0, 0.1, 50, eta, 2, &out);
+    if (st != RGMIN_INTERNAL_ERROR || calls != 1 || eta[0] != 7.0) {
+        fprintf(stderr, "failing hvp status %d calls %zu\n", st, calls);
+        return 64;
+    }
+    return 0;
+}
+
 static int check_quotient(void) {
     rgmin_manifold_handle_t *isolated = rgmin_manifold_rigid_quotient(2, 0);
     rgmin_manifold_handle_t *periodic = xts_manifold_rigid_quotient(2, 1);
@@ -276,6 +383,18 @@ int main(int argc, char **argv) {
         return rc;
     }
     rc = check_radius();
+    if (rc != 0) {
+        return rc;
+    }
+    rc = check_radius_above_maximum();
+    if (rc != 0) {
+        return rc;
+    }
+    rc = check_spd_tcg();
+    if (rc != 0) {
+        return rc;
+    }
+    rc = check_tcg_hessian_failure();
     if (rc != 0) {
         return rc;
     }

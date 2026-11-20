@@ -1553,7 +1553,20 @@ typedef struct rgmin_rtr_tcg_result_t {
 } rgmin_rtr_tcg_result_t;
 
 /** Steihaug-Toint truncated CG on \a manifold's tangent space at \a x.
- *  A null manifold is Euclidean. \a eta_out may alias \a x or \a grad;
+ *
+ *  \a grad is the Euclidean gradient and \a hvp the Euclidean Hessian
+ *  action at \a x. A non-null \a manifold builds the model in its own
+ *  metric: the gradient is the Riemannian gradient of \a grad, the Hessian
+ *  is the Riemannian gradient of the action (the Gauss-Newton part, with no
+ *  Weingarten term), and the inner products, the trust ball of radius
+ *  \a radius, and \c eta_norm are measured in that metric. This holds for
+ *  the affine-invariant and log-Euclidean SPD factors as well as Stiefel and
+ *  the rigid quotient, and \c eta_norm is the value to give
+ *  \ref rgmin_rtr_radius_update. A null manifold is Euclidean.
+ *
+ *  A Hessian action that is not finite, or an \a hvp that fails, ends the
+ *  iteration at once. The call then returns RGMIN_INTERNAL_ERROR and leaves
+ *  \a eta_out and \a out untouched. \a eta_out may alias \a x or \a grad;
  *  \a out must not overlap any vector buffer. */
 rgmin_status_t rgmin_rtr_tcg_solve(const rgmin_manifold_handle_t *manifold, rgmin_hvp_fn hvp,
                                    void *user, const double *x, const double *grad, double radius,
@@ -1563,7 +1576,10 @@ rgmin_status_t rgmin_rtr_tcg_solve(const rgmin_manifold_handle_t *manifold, rgmi
 /** Absil-Baker-Gallivan trust-region radius update.
  *  Accepts when actual/predicted is above 1/10. Shrinks by 1/4 below
  *  1/4. Doubles above 3/4 when the step lies on the boundary, never
- *  past \a radius_max. \a accepted_out may be null. */
+ *  past \a radius_max. A \c *radius above \a radius_max is clamped to
+ *  \a radius_max before the update and the call still succeeds, so the
+ *  radius it leaves never exceeds the maximum. \a accepted_out may be
+ *  null. */
 rgmin_status_t rgmin_rtr_radius_update(double *radius, double radius_max, double actual_decrease,
                                        double model_decrease, double eta_norm,
                                        int32_t *accepted_out);
