@@ -82,7 +82,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 53;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 56;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -2156,7 +2156,7 @@ pub unsafe extern "C" fn rgmin_solver_set_lbfgs_wolfe(solver: *mut rgmin_solver_
 /// Initial inverse-Hessian scale on a BFGS or L-BFGS session.
 /// See [`crate::Solver::set_fixed_h0`]. Returns 0, or 1 on a null
 /// session, a non-positive or non-finite scale, or another method.
-/// ABI minor 53. Unset, the session keeps its previous scale.
+/// ABI minor 56. Unset, the session keeps its previous scale.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
@@ -2173,7 +2173,7 @@ pub unsafe extern "C" fn rgmin_solver_set_fixed_h0(solver: *mut rgmin_solver_t, 
 /// BFGS or L-BFGS session. See [`crate::Solver::set_ase_linesearch`].
 /// Returns 0, or 1 on a null session, a NaN `stpmax`, or another
 /// method. A `stpmax` below 1 is accepted and fails each search, as in
-/// ASE. ABI minor 53.
+/// ASE. ABI minor 56.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].

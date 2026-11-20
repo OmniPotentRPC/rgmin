@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 53
+#define RGMIN_ABI_VERSION_MINOR 56
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -92,7 +92,7 @@ typedef struct rgmin_abi_stamp_t {
  * 52 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
  *    rgmin_solver_set_gromacs_steep, and
  *    rgmin_gromacs_steep_max_constraint_shrinks.
- * 53 rgmin_solver_set_fixed_h0 and rgmin_solver_set_ase_linesearch.
+ * 56 rgmin_solver_set_fixed_h0 and rgmin_solver_set_ase_linesearch.
  *    rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
@@ -623,7 +623,7 @@ int32_t rgmin_solver_set_lbfgs_wolfe(rgmin_solver_t *solver);
 /** Initial inverse-Hessian scale on BFGS or L-BFGS. A fresh BFGS
  *  matrix becomes \c h0 I, and L-BFGS keeps this scale instead of the
  *  Nocedal-Wright \c sy/yy scale. Returns 0, or 1 on a null session, a
- *  non-positive or non-finite scale, or another method. ABI minor 53. */
+ *  non-positive or non-finite scale, or another method. ABI minor 56. */
 int32_t rgmin_solver_set_fixed_h0(rgmin_solver_t *solver, double h0);
 /** Run the line search of ASE 3.29 on a BFGS or L-BFGS session with
  *  step-multiplier bound \c stpmax. It opens at the unit step, the
@@ -631,7 +631,7 @@ int32_t rgmin_solver_set_fixed_h0(rgmin_solver_t *solver, double h0);
  *  a failed search moves nothing. \c c1, \c c2 and the evaluation
  *  budget come from the session's Wolfe search. A \c stpmax below 1 is
  *  accepted and fails each search, as in ASE. Returns 0, or 1 on a null
- *  session, a NaN \c stpmax, or another method. ABI minor 53. */
+ *  session, a NaN \c stpmax, or another method. ABI minor 56. */
 int32_t rgmin_solver_set_ase_linesearch(rgmin_solver_t *solver, double stpmax);
 /** Burdakov ray-truncation radius for session L-BFGS. A non-positive,
  *  NaN or infinite radius turns it off and still returns 0. This is
