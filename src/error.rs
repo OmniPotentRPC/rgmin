@@ -333,6 +333,14 @@ pub enum Error {
         /// What the fallible entry point does not carry.
         what: &'static str,
     },
+    /// GPMin rejected its configuration, encountered a non-SPD kernel
+    /// matrix after the configured noise, or could not build a descent
+    /// surrogate.
+    #[error("GPMin: {what}")]
+    GpMin {
+        /// What failed in GPMin.
+        what: &'static str,
+    },
 }
 
 /// Result alias for this crate.

@@ -970,6 +970,11 @@ impl Solver {
         if matches!(self.overlay, Overlay::GromacsSteep(_)) {
             return self.step_constrained_gromacs(obj, x);
         }
+        if matches!(self.overlay, Overlay::GpMin(_)) {
+            return Err(Error::GpMin {
+                what: "GPMin does not support holonomic distance constraints",
+            });
+        }
         match self.inner {
             Inner::NewtonCg { .. } | Inner::NewtonPcg { .. } => {
                 return self.step_constrained_newton_cg(obj, x, &FiniteDifference);
