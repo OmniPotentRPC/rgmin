@@ -1,0 +1,21 @@
+$ /tmp/rgmin-gromacs-2023.3/install-double/bin/gmx_d -quiet grompp -f input.mdp -p topol.top -c start.g96 -o em.tpr -maxwarn 1
+
+NOTE 1 [file input.mdp]:
+  With Verlet lists the optimal nstlist is >= 10, with GPUs >= 20. Note
+  that with the Verlet scheme, nstlist has no effect on the accuracy of
+  your simulation.
+
+Number of degrees of freedom in T-Coupling group rest is 18.00
+The integrator does not provide a ensemble temperature, there is no system ensemble temperature
+
+There was 1 NOTE
+Setting the LD random seed to -89276773
+
+Generated 1 of the 1 non-bonded parameter combinations
+
+Excluding 0 bonded neighbours molecule type 'AR'
+Analysing residue names:
+There are:     7      Other residues
+Analysing residues not classified as Protein/DNA/RNA/Water and splitting into groups...
+
+This run will generate roughly 0 Mb of data

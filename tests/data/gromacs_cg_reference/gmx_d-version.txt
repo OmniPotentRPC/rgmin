@@ -1,0 +1,30 @@
+$ /tmp/rgmin-gromacs-2023.3/install-double/bin/gmx_d --version
+               :-) GROMACS - gmx_d, 2023.3 (double precision) (-:
+
+Executable:   /tmp/rgmin-gromacs-2023.3/install-double/bin/gmx_d
+Data prefix:  /tmp/rgmin-gromacs-2023.3/install-double
+Working dir:  /tmp/rgmin-reference-tree
+Command line:
+  gmx_d --version
+
+GROMACS version:    2023.3
+Precision:          double
+Memory model:       64 bit
+MPI library:        thread_mpi
+OpenMP support:     enabled (GMX_OPENMP_MAX_THREADS = 128)
+GPU support:        disabled
+SIMD instructions:  AVX2_256
+CPU FFT library:    fftw-3.3.8-sse2-avx-avx2-avx2_128
+GPU FFT library:    none
+Multi-GPU FFT:      none
+RDTSCP usage:       enabled
+TNG support:        enabled
+Hwloc support:      disabled
+Tracing support:    disabled
+C compiler:         /usr/bin/gcc GNU 13.3.0
+C compiler flags:   -fexcess-precision=fast -funroll-all-loops -mavx2 -mfma -Wno-missing-field-initializers -O3 -DNDEBUG
+C++ compiler:       /usr/bin/g++ GNU 13.3.0
+C++ compiler flags: -fexcess-precision=fast -funroll-all-loops -mavx2 -mfma -Wno-missing-field-initializers -Wno-cast-function-type-strict SHELL:-fopenmp -O3 -DNDEBUG
+BLAS library:       Internal
+LAPACK library:     Internal
+
