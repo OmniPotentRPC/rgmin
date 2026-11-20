@@ -101,6 +101,7 @@ That installs the 0.6 release on Rust 1.88 or newer.
    howto/ase-bench
    howto/lammps-migration
    howto/gromacs-steep
+   howto/gromacs-cg
    howto/precon
    howto/doxygen
    howto/bench-gate
@@ -135,6 +136,7 @@ That installs the 0.6 release on Rust 1.88 or newer.
    reference/python
    reference/lammps-min-style
    reference/gromacs-steep
+   reference/gromacs-cg
    reference/manifold
    reference/product-manifold
    reference/sota
