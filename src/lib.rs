@@ -66,6 +66,8 @@ pub mod holonomic;
 pub mod hvp;
 /// Sella IRCTrustRegion / Gonzalez--Schlegel mass-weighted sphere.
 pub mod irc_trust;
+/// Matrix-free GMRES with typed telemetry and right preconditioning.
+pub mod krylov;
 /// Persistent L-BFGS (Nocedal-Wright 7.4): the eOn cap by default,
 /// strong Wolfe on request.
 pub mod lbfgs;
@@ -190,6 +192,11 @@ pub use hvp::{
     TryHessianVector, minimize_newton_cg, polish_hvp, steihaug_cg, steihaug_pcg,
 };
 pub use irc_trust::{IrcTrust, sqrt_masses_3n};
+pub use krylov::{
+    GmresFailure, GmresOptions, GmresRun, GmresStatus, Identity as KrylovIdentity, KrylovIteration,
+    KrylovObserver, KrylovRecord, KrylovRefusal, LinearOperator, NoObserver,
+    Preconditioner as KrylovPreconditioner, gmres_right, gmres_right_block,
+};
 pub use lbfgs::{
     EON_FINITE_DIFFERENCE, EON_INVERSE_CURVATURE, EON_MAX_MOVE, GradNorm, LBFGSB_FACTR,
     LBFGSB_FTOL, Lbfgs, LbfgsBuilder, LbfgsH0, LbfgsPairs, LbfgsStep, lbfgs_direction,
