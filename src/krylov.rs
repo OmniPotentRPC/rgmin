@@ -4,6 +4,22 @@
 //! remote calculation.  GMRES uses right preconditioning: Arnoldi sees
 //! `A M^-1`, while every reported residual is in the original system's norm.
 
+/// Failure from a batched operator application.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BatchOperatorError<E> {
+    /// The flat input/output shape does not match the direction count.
+    Dimension {
+        /// Number of input entries.
+        inputs: usize,
+        /// Number of output entries.
+        outputs: usize,
+        /// Number of contiguous vectors.
+        vectors: usize,
+    },
+    /// One serial operator application failed.
+    Operator(E),
+}
+
 /// A fallible matrix-free linear operator.
 pub trait LinearOperator {
     /// Error returned by an operator application.
@@ -21,15 +37,31 @@ pub trait LinearOperator {
         inputs: &[f64],
         outputs: &mut [f64],
         vectors: usize,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), BatchOperatorError<Self::Error>> {
         if vectors == 0 {
-            return Ok(());
+            return if inputs.is_empty() && outputs.is_empty() {
+                Ok(())
+            } else {
+                Err(BatchOperatorError::Dimension {
+                    inputs: inputs.len(),
+                    outputs: outputs.len(),
+                    vectors,
+                })
+            };
+        }
+        if inputs.len() % vectors != 0 || outputs.len() != inputs.len() {
+            return Err(BatchOperatorError::Dimension {
+                inputs: inputs.len(),
+                outputs: outputs.len(),
+                vectors,
+            });
         }
         let width = inputs.len() / vectors;
         for index in 0..vectors {
             let begin = index * width;
             let end = begin + width;
-            self.apply(&inputs[begin..end], &mut outputs[begin..end])?;
+            self.apply(&inputs[begin..end], &mut outputs[begin..end])
+                .map_err(BatchOperatorError::Operator)?;
         }
         Ok(())
     }
@@ -59,10 +91,25 @@ pub trait Preconditioner {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Identity;
 
+/// Shape refusal from the identity preconditioner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IdentityError {
+    /// Number of input entries.
+    pub input: usize,
+    /// Number of output entries.
+    pub output: usize,
+}
+
 impl Preconditioner for Identity {
-    type Error = core::convert::Infallible;
+    type Error = IdentityError;
 
     fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {
+        if input.len() != output.len() {
+            return Err(IdentityError {
+                input: input.len(),
+                output: output.len(),
+            });
+        }
         output.copy_from_slice(input);
         Ok(())
     }
@@ -182,6 +229,15 @@ pub enum GmresFailure<OperatorError, PreconditionerError> {
         /// Partial solve record.
         record: KrylovRecord,
     },
+    /// A batched operator failed with every active right-hand-side record.
+    BlockOperator {
+        /// Original batched operator error.
+        source: OperatorError,
+        /// Record for the first active right-hand side.
+        record: KrylovRecord,
+        /// Records for every remaining active right-hand side, in order.
+        sibling_records: Vec<KrylovRecord>,
+    },
     /// The preconditioner returned an error.
     Preconditioner {
         /// Original preconditioner error.
@@ -198,13 +254,28 @@ pub enum GmresFailure<OperatorError, PreconditionerError> {
     },
 }
 
+/// Failure returned by batched independent-right-hand-side GMRES.
+pub type BlockGmresFailure<OperatorError, PreconditionerError> =
+    GmresFailure<BatchOperatorError<OperatorError>, PreconditionerError>;
+
 impl<OE, PE> GmresFailure<OE, PE> {
     /// Telemetry collected before refusal.
     pub fn record(&self) -> &KrylovRecord {
         match self {
             Self::Operator { record, .. }
+            | Self::BlockOperator { record, .. }
             | Self::Preconditioner { record, .. }
             | Self::Refused { record, .. } => record,
+        }
+    }
+
+    /// Additional active records carried by a failed block application.
+    pub fn sibling_records(&self) -> &[KrylovRecord] {
+        match self {
+            Self::BlockOperator {
+                sibling_records, ..
+            } => sibling_records,
+            _ => &[],
         }
     }
 }
@@ -471,7 +542,7 @@ pub fn gmres_right_block<O, P, B>(
     right_hand_sides: &[Vec<f64>],
     options: GmresOptions,
     observers: &mut [B],
-) -> Result<Vec<GmresRun>, GmresFailure<O::Error, P::Error>>
+) -> Result<Vec<GmresRun>, BlockGmresFailure<O::Error, P::Error>>
 where
     O: LinearOperator,
     P: Preconditioner,
@@ -579,9 +650,16 @@ where
         }
         let mut images = vec![0.0; directions.len()];
         if let Err(source) = operator.apply_batch(&directions, &mut images, active.len()) {
-            return Err(GmresFailure::Operator {
+            let Some((first, siblings)) = active.split_first() else {
+                return Err(refusal(KrylovRefusal::Dimension, KrylovRecord::new(0.0)));
+            };
+            return Err(GmresFailure::BlockOperator {
                 source,
-                record: states[active[0]].record.clone(),
+                record: states[*first].record.clone(),
+                sibling_records: siblings
+                    .iter()
+                    .map(|index| states[*index].record.clone())
+                    .collect(),
             });
         }
         for (block, index) in active.iter().copied().enumerate() {
@@ -736,7 +814,7 @@ mod tests {
             inputs: &[f64],
             outputs: &mut [f64],
             vectors: usize,
-        ) -> Result<(), Self::Error> {
+        ) -> Result<(), BatchOperatorError<Self::Error>> {
             self.batch_calls += 1;
             let width = self.values.len();
             for vector in 0..vectors {
@@ -985,6 +1063,79 @@ mod tests {
                 assert_eq!(record.operator_applications, 1);
             }
             _ => assert!(false, "zero Arnoldi column lost its iteration record"),
+        }
+    }
+
+    #[test]
+    fn default_batch_and_identity_report_shape_errors() {
+        let mut operator =
+            |input: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
+                output.copy_from_slice(input);
+                Ok(())
+            };
+        let mut short_output = [0.0; 2];
+        let batch = operator.apply_batch(&[1.0, 2.0, 3.0, 4.0], &mut short_output, 2);
+        assert!(matches!(
+            batch,
+            Err(BatchOperatorError::Dimension {
+                inputs: 4,
+                outputs: 2,
+                vectors: 2
+            })
+        ));
+
+        let identity = Identity.apply(&[1.0, 2.0], &mut [0.0]);
+        assert_eq!(
+            identity,
+            Err(IdentityError {
+                input: 2,
+                output: 1
+            })
+        );
+    }
+
+    struct FailingBatch;
+
+    impl LinearOperator for FailingBatch {
+        type Error = &'static str;
+
+        fn apply(&mut self, _input: &[f64], _output: &mut [f64]) -> Result<(), Self::Error> {
+            Err("scalar")
+        }
+
+        fn apply_batch(
+            &mut self,
+            _inputs: &[f64],
+            _outputs: &mut [f64],
+            _vectors: usize,
+        ) -> Result<(), BatchOperatorError<Self::Error>> {
+            Err(BatchOperatorError::Operator("batch"))
+        }
+    }
+
+    #[test]
+    fn block_operator_failure_carries_every_active_record() {
+        let failure = gmres_right_block(
+            &mut FailingBatch,
+            &mut [Identity, Identity],
+            &[vec![3.0, 4.0], vec![1.0, 0.0]],
+            GmresOptions::unrestarted(1e-8),
+            &mut [NoObserver, NoObserver],
+        );
+        match failure {
+            Err(GmresFailure::BlockOperator {
+                source,
+                record,
+                sibling_records,
+            }) => {
+                assert_eq!(source, BatchOperatorError::Operator("batch"));
+                assert_eq!(record.right_hand_side_norm, 5.0);
+                assert_eq!(record.preconditioner_applications, 1);
+                assert_eq!(sibling_records.len(), 1);
+                assert_eq!(sibling_records[0].right_hand_side_norm, 1.0);
+                assert_eq!(sibling_records[0].preconditioner_applications, 1);
+            }
+            _ => assert!(false, "block failure dropped active records"),
         }
     }
 }
