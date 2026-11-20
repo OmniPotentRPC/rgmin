@@ -69,7 +69,9 @@ pub enum InverseLaplaceError {
         /// Fine discrepancy or block norm.
         fine_gap: f64,
     },
-    /// Laguerre coefficients decay slower than `O(n^{-3/2})`, violating the algebraic tail model.
+    /// An observed dyadic block fails the finite-resolution `n^{-3/2}` model.
+    ///
+    /// This is one dyadic comparison, not a proof of the eventual decay.
     SlowAlgebraicTail {
         /// Stage where slow algebraic decay was detected.
         stage: &'static str,
@@ -96,6 +98,8 @@ pub enum InverseLaplaceError {
         /// Requested disk radius. Certification would have required `modulus > outer_radius > 1`.
         outer_radius: f64,
     },
+    /// The integrand callback refused the sample. The caller keeps the detailed error.
+    CallbackRefused,
 }
 
 impl fmt::Display for InverseLaplaceError {
@@ -141,7 +145,7 @@ impl fmt::Display for InverseLaplaceError {
                 max_dyadic_ratio,
             } => write!(
                 f,
-                "Laguerre tail in {stage} decays slower than O(n^-3/2): dyadic ratio {dyadic_ratio:.6e} > {max_dyadic_ratio:.6e}"
+                "observed Laguerre block in {stage} fails the n^-3/2 model: dyadic ratio {dyadic_ratio:.6e} > {max_dyadic_ratio:.6e}"
             ),
             Self::ToleranceNotMet {
                 method,
@@ -158,8 +162,19 @@ impl fmt::Display for InverseLaplaceError {
                 f,
                 "Weeks singularity lies inside the disk: |w_pole| = {modulus:.6e} <= R = {outer_radius:.6e}"
             ),
+            Self::CallbackRefused => f.write_str("inverse-Laplace callback refused the sample"),
         }
     }
+}
+
+fn checked_dim(
+    parameter: &'static str,
+    value: Option<usize>,
+) -> Result<usize, InverseLaplaceError> {
+    value.ok_or(InverseLaplaceError::InvalidParameter {
+        parameter,
+        value: f64::INFINITY,
+    })
 }
 
 impl std::error::Error for InverseLaplaceError {}
@@ -562,7 +577,8 @@ pub fn solve_complex_dense(
     b: &[Complex64],
     n: usize,
 ) -> Result<Vec<Complex64>, InverseLaplaceError> {
-    if n == 0 || a.len() != n * n || b.len() != n {
+    let nn = checked_dim("matrix_dimension", n.checked_mul(n))?;
+    if n == 0 || a.len() != nn || b.len() != n {
         return Err(InverseLaplaceError::InvalidParameter {
             parameter: "linear_system_dimension",
             value: n as f64,
@@ -580,7 +596,9 @@ pub fn solve_complex_dense(
         }
         scale = max_finite(scale, z.norm(), "matrix_entry")?;
     }
-    let pivot_floor = 64.0 * f64::EPSILON * max_finite(scale, 1.0, "matrix_scale")?;
+    // Relative to the matrix. An absolute floor of `64 ε` rejects a tiny
+    // well-conditioned system whose entries are all far below 1.
+    let pivot_floor = mul_up(mul_up(64.0, f64::EPSILON), scale);
 
     for k in 0..n {
         let mut piv_row = k;
@@ -633,16 +651,20 @@ pub fn solve_complex_dense(
     Ok(x)
 }
 
-/// Compute an outward-directed upper bound on the infinity norm `||A^{-1}||_inf` of an `n x n`
-/// complex matrix `A`.
+/// Estimate `||A^{-1}||_inf` from binary64 Gaussian elimination.
+///
+/// The columns are ordinary `f64` solves with no residual correction. Applying
+/// `next_up` while summing those computed columns does not upper-bound the
+/// norm of the exact inverse.
 pub fn complex_matrix_inv_inf_norm(a: &[Complex64], n: usize) -> Result<f64, InverseLaplaceError> {
-    if n == 0 || a.len() != n * n {
+    let nn = checked_dim("matrix_dimension", n.checked_mul(n))?;
+    if n == 0 || a.len() != nn {
         return Err(InverseLaplaceError::InvalidParameter {
             parameter: "matrix_dimension",
             value: n as f64,
         });
     }
-    let mut cols = vec![Complex64::new(0.0, 0.0); n * n];
+    let mut cols = vec![Complex64::new(0.0, 0.0); nn];
     let mut unit = vec![Complex64::new(0.0, 0.0); n];
     for j in 0..n {
         if j > 0 {
@@ -682,6 +704,14 @@ pub fn eval_orthonormal_laguerre_series(
             value: 0.0,
         });
     }
+    for &c in coeffs {
+        if !c.is_finite() {
+            return Err(InverseLaplaceError::InvalidParameter {
+                parameter: "laguerre_coeff",
+                value: c,
+            });
+        }
+    }
     let x = 2.0 * scale_b * energy;
     let pref = (2.0 * scale_b).sqrt();
     let pref_up = mul_up(sqrt_up(2.0), sqrt_up(scale_b));
@@ -693,12 +723,6 @@ pub fn eval_orthonormal_laguerre_series(
     let mut abs_sum = mul_up(coeffs[0].abs(), l_curr.abs().next_up());
 
     for (idx, &c) in coeffs.iter().enumerate().skip(1) {
-        if !c.is_finite() {
-            return Err(InverseLaplaceError::InvalidParameter {
-                parameter: "laguerre_coeff",
-                value: c,
-            });
-        }
         let n_minus_1 = idx - 1;
         let nf = n_minus_1 as f64;
         let l_next = ((2.0 * nf + 1.0 - x) * l_curr - nf * l_prev) / ((n_minus_1 + 1) as f64);
@@ -708,7 +732,13 @@ pub fn eval_orthonormal_laguerre_series(
         abs_sum = add_up(abs_sum, mul_up(c.abs(), l_curr.abs().next_up()));
     }
     let value = pref * sum;
-    let gamma = higham_gamma(4 * coeffs.len() + 6)?;
+    let gamma = higham_gamma(checked_dim(
+        "laguerre_ops",
+        coeffs
+            .len()
+            .checked_mul(4)
+            .and_then(|ops| ops.checked_add(6)),
+    )?)?;
     let roundoff = mul_up(gamma, mul_up(pref_up, abs_sum));
     Ok((value, roundoff))
 }
@@ -958,6 +988,7 @@ where
     let mut eval_est = 0.0_f64;
     let mut min_re = f64::INFINITY;
     let mut max_im = 0.0_f64;
+    let mut endpoint_abs = 0.0_f64;
 
     for k in 1..=m {
         let theta = ((k as f64) - 0.5) * h_nom;
@@ -990,19 +1021,30 @@ where
         sum_abs = add_up(sum_abs, term_abs);
         let weight_abs = norm_up(weight);
         eval_est = add_up(eval_est, mul_up(weight_abs, f_err));
+        if k == m {
+            endpoint_abs = norm_up(f_val);
+        }
     }
 
     let value = h_nom * sum_re;
     let eval_est = mul_up(h, eval_est);
     let l1_integral = mul_up(h, sum_abs);
-    let gamma = higham_gamma(6 * m + 8)?;
+    let gamma = higham_gamma(checked_dim(
+        "talbot_ops",
+        m.checked_mul(6).and_then(|ops| ops.checked_add(8)),
+    )?)?;
     let roundoff = mul_up(gamma, l1_integral);
 
     let theta_end = ((m as f64) - 0.5) * h_nom;
     let (beta_end, dbeta_end) = talbot_node(theta_end, m, energy)?;
+    // One panel of the endpoint integrand, including |F|. Scaling F by a
+    // constant then scales this truncation term by the same factor.
     let tail_est = mul_up(
         div_up(h, PI),
-        mul_up((beta_end.re * energy).exp().next_up(), norm_up(dbeta_end)),
+        mul_up(
+            mul_up((beta_end.re * energy).exp().next_up(), norm_up(dbeta_end)),
+            endpoint_abs,
+        ),
     );
 
     Ok((value, eval_est, roundoff, tail_est, min_re, max_im))
@@ -1034,12 +1076,14 @@ where
 
     let m_coarse = config.nodes / 2;
     let m_fine = config.nodes;
-    let (v_coarse, _, _, _, min_re_c, max_im_c) =
+    let (v_coarse, eval_coarse, round_coarse, _tail_coarse, min_re_c, max_im_c) =
         talbot_pass(energy, m_coarse, config.min_re_beta, &mut eval_f)?;
-    let (v_fine, eval_est, roundoff_est, tail_est, min_re_f, max_im_f) =
+    let (v_fine, eval_fine, round_fine, tail_fine, min_re_f, max_im_f) =
         talbot_pass(energy, m_fine, config.min_re_beta, &mut eval_f)?;
 
-    let disc_est = add_up((v_fine - v_coarse).abs().next_up(), tail_est);
+    let disc_est = add_up((v_fine - v_coarse).abs().next_up(), tail_fine);
+    let eval_est = upward_sum(&[eval_coarse, eval_fine])?;
+    let roundoff_est = upward_sum(&[round_coarse, round_fine])?;
     let estimate = upward_sum(&[disc_est, eval_est, roundoff_est])?;
 
     if estimate > config.tolerance {
@@ -1252,7 +1296,10 @@ where
         r_inv_sum = add_up(r_inv_sum, powi_inv_up(r, n));
     }
     let eval_est = mul_up(max_sample_err, r_inv_sum);
-    let gamma_dft = higham_gamma(6 * quad_m + 8)?;
+    let gamma_dft = higham_gamma(checked_dim(
+        "weeks_dft_ops",
+        quad_m.checked_mul(6).and_then(|ops| ops.checked_add(8)),
+    )?)?;
     let dft_roundoff = mul_up(gamma_dft, mul_up(max_phi_abs, r_inv_sum));
     let sample_noise_per_mode = add_up(max_sample_err, mul_up(gamma_dft, max_phi_abs));
 
@@ -1269,8 +1316,8 @@ where
 /// Invert a complex Laplace transform `F(beta)` at `energy > 0` using Weeks's Möbius–Laguerre
 /// expansion on the circle `|w| = r <= 1`.
 ///
-/// Refuses with [`InverseLaplaceError::SlowAlgebraicTail`] if the midpoint-DFT Laguerre
-/// coefficients decay slower than `O(n^{-3/2})` (dyadic block ratio `> 2^{-1/2}`).
+/// Refuses with [`InverseLaplaceError::SlowAlgebraicTail`] when an observed dyadic
+/// block fails the finite-resolution `n^{-3/2}` model (ratio `> 2^{-1/2}`).
 pub fn weeks_invert<F>(
     energy: f64,
     config: WeeksConfig,
@@ -1324,8 +1371,9 @@ where
     }
 
     let m = config.laguerre_degree;
+    let fine_m = checked_dim("weeks_fine_degree", m.checked_mul(2))?;
     let coarse = weeks_dft_coefficients(&config, m, m, &mut eval_f)?;
-    let fine = weeks_dft_coefficients(&config, 2 * m, 2 * m, &mut eval_f)?;
+    let fine = weeks_dft_coefficients(&config, fine_m, fine_m, &mut eval_f)?;
 
     let mut shift_l1 = 0.0_f64;
     for n in 0..m {
@@ -1359,7 +1407,7 @@ where
     for n in (m / 2)..m {
         fine_lower_dyadic = add_up(fine_lower_dyadic, fine.coeffs[n].abs());
     }
-    for n in m..(2 * m) {
+    for n in m..fine_m {
         fine_upper_dyadic = add_up(fine_upper_dyadic, fine.coeffs[n].abs());
         fine_upper_noise_floor = add_up(
             fine_upper_noise_floor,
@@ -1463,7 +1511,7 @@ where
             observed_dyadic_ratio,
         },
         coefficients: fine.coeffs[..m].to_vec(),
-        evaluations: 3 * m,
+        evaluations: checked_dim("weeks_evaluations", m.checked_mul(3))?,
         min_re_beta_sampled: min_re_sampled,
         max_imag_beta_sampled: max_imag_sampled,
     })

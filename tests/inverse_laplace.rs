@@ -173,4 +173,58 @@ fn weeks_and_laguerre_refuse_slow_algebraic_tails() {
     let (val, round) =
         eval_orthonormal_laguerre_series(&coeffs_half, 1.0, 0.5).expect("laguerre eval");
     assert!(val.is_finite() && round > 0.0);
+
+    let mut nan_first = coeffs_half.clone();
+    nan_first[0] = f64::NAN;
+    assert!(matches!(
+        eval_orthonormal_laguerre_series(&nan_first, 1.0, 0.5),
+        Err(InverseLaplaceError::InvalidParameter {
+            parameter: "laguerre_coeff",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn tiny_well_conditioned_system_is_not_refused_by_an_absolute_pivot_floor() {
+    let scale = 1.0e-18_f64;
+    let a = [
+        Complex64::new(scale, 0.0),
+        Complex64::new(0.0, 0.0),
+        Complex64::new(0.0, 0.0),
+        Complex64::new(scale, 0.0),
+    ];
+    let b = [Complex64::new(scale, 0.0), Complex64::new(2.0 * scale, 0.0)];
+    let x = solve_complex_dense(&a, &b, 2).expect("relative pivot floor");
+    assert!((x[0].re - 1.0).abs() <= 1.0e-12);
+    assert!((x[1].re - 2.0).abs() <= 1.0e-12);
+}
+
+#[test]
+fn talbot_endpoint_tail_scales_with_the_transform() {
+    let energy = 0.8_f64;
+    let config = TalbotConfig {
+        nodes: 8,
+        min_re_beta: -1.0e6,
+        tolerance: 1.0,
+    };
+    let invert = |scale: f64| {
+        talbot_invert(energy, config, move |beta| {
+            let val = Complex64::new(scale, 0.0) / (beta + Complex64::new(1.25, 0.0));
+            Ok(ComplexSample::estimated(val, 0.0))
+        })
+        .expect("talbot")
+    };
+    let small = invert(1.0);
+    let large = invert(4.0);
+    let value_ratio = large.value / small.value;
+    let estimate_ratio = large.uncertainty_estimate() / small.uncertainty_estimate();
+    assert!(
+        (value_ratio - 4.0).abs() <= 1.0e-12,
+        "value ratio {value_ratio}"
+    );
+    assert!(
+        (estimate_ratio - 4.0).abs() <= 1.0e-8,
+        "estimate ratio {estimate_ratio}"
+    );
 }
