@@ -50,6 +50,11 @@ impl DoubleDouble {
     }
 
     fn sqrt(self) -> Self {
+        // The seed is hi.sqrt(). A zero high word starts Heron iteration at
+        // zero, and the correction then divides by that seed.
+        if self.hi == 0.0 {
+            return Self::new(0.0);
+        }
         let half = Self::new(0.5);
         let mut estimate = Self::new(self.hi.sqrt());
         for _ in 0..2 {
@@ -61,6 +66,28 @@ impl DoubleDouble {
     fn value(self) -> f64 {
         self.hi + self.lo
     }
+}
+
+#[test]
+fn double_double_sqrt_of_zero_is_positive_zero() {
+    let positive_zero = 0.0_f64.to_bits();
+    let root = DoubleDouble::new(0.0).sqrt();
+    assert_eq!(root.hi.to_bits(), positive_zero);
+    assert_eq!(root.lo.to_bits(), positive_zero);
+    assert_eq!(root.value().to_bits(), positive_zero);
+
+    let negative_zero = DoubleDouble { hi: -0.0, lo: -0.0 }.sqrt();
+    assert_eq!(negative_zero.hi.to_bits(), positive_zero);
+    assert_eq!(negative_zero.lo.to_bits(), positive_zero);
+
+    let one = DoubleDouble::new(1.0).sqrt();
+    assert_eq!(one.hi.to_bits(), 1.0_f64.to_bits());
+    assert_eq!(one.lo.to_bits(), positive_zero);
+
+    // h = 1/2 makes the radicand 1 - 2h exactly zero.
+    let (radius, remainder) = high_precision_ball(0.25, 0.5);
+    assert_eq!(radius.to_bits(), 0.5_f64.to_bits());
+    assert_eq!(remainder.to_bits(), 0.25_f64.to_bits());
 }
 
 fn high_precision_ball(eta: f64, h: f64) -> (f64, f64) {
