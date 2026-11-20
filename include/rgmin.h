@@ -1556,7 +1556,8 @@ typedef struct rgmin_rtr_tcg_result_t {
 } rgmin_rtr_tcg_result_t;
 
 /** Steihaug-Toint truncated CG on \a manifold's tangent space at \a x.
- *  A null manifold is Euclidean. ABI minor 53. */
+ *  A null manifold is Euclidean. \a eta_out may alias \a x or \a grad;
+ *  \a out must not overlap any vector buffer. ABI minor 53. */
 rgmin_status_t rgmin_rtr_tcg_solve(const rgmin_manifold_handle_t *manifold, rgmin_hvp_fn hvp,
                                    void *user, const double *x, const double *grad, double radius,
                                    double theta, double kappa, size_t maxiter, double *eta_out,
@@ -1572,7 +1573,8 @@ rgmin_status_t rgmin_rtr_radius_update(double *radius, double radius_max, double
 
 /** Lowest Hessian eigenpair on \a manifold's tangent space at \a x.
  *  A null manifold is Euclidean. Lanczos and LOBPCG apply the projector.
- *  ABI minor 53. */
+ *  \a mode_out may alias \a x or \a seed. \a out must not overlap tensor
+ *  storage. ABI minor 53. */
 rgmin_status_t rgmin_lowest_eigenpair_on_manifold(
     const rgmin_manifold_handle_t *manifold, rgmin_hvp_fn hvp, void *user,
     const DLManagedTensorVersioned *x, const DLManagedTensorVersioned *seed,
@@ -1580,7 +1582,9 @@ rgmin_status_t rgmin_lowest_eigenpair_on_manifold(
     const rgmin_eigen_options_t *options, rgmin_lowest_mode_t *out);
 
 /** \ref rgmin_lowest_eigenpairs_ex on \a manifold's tangent space at \a x.
- *  A null manifold matches that entry. ABI minor 53. */
+ *  A null manifold matches that entry. \a modes_out and \a values_out may
+ *  each alias \a x or \a seed, but must not overlap each other or
+ *  \a pairs_out. ABI minor 53. */
 rgmin_status_t rgmin_lowest_eigenpairs_projected(
     const rgmin_manifold_handle_t *manifold, rgmin_hvp_fn hvp, void *user,
     rgmin_precond_fn precond, void *precond_user, const DLManagedTensorVersioned *x,
