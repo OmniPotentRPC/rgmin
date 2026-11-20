@@ -164,6 +164,8 @@ pub enum KrylovRefusal {
     Dimension,
     /// Tolerance is not finite and strictly positive.
     Tolerance,
+    /// A nonzero system was given no iteration budget.
+    ZeroIterationBudget,
     /// A right-hand side, operator image, or preconditioner image is non-finite.
     NonFinite,
     /// Arnoldi produced a singular projected system.
@@ -242,11 +244,9 @@ fn refusal<OE, PE>(reason: KrylovRefusal, record: KrylovRecord) -> GmresFailure<
     GmresFailure::Refused { reason, record }
 }
 
-fn solution<OE, PE>(
+fn projected_coefficients<OE, PE>(
     columns: &[Vec<f64>],
     transformed_rhs: &[f64],
-    preconditioned_basis: &[Vec<f64>],
-    dimension: usize,
     record: KrylovRecord,
 ) -> Result<Vec<f64>, GmresFailure<OE, PE>> {
     let count = columns.len();
@@ -262,23 +262,39 @@ fn solution<OE, PE>(
         }
         coefficients[row] = value / diagonal;
     }
+    Ok(coefficients)
+}
+
+fn linear_combination(coefficients: &[f64], vectors: &[Vec<f64>], dimension: usize) -> Vec<f64> {
     let mut result = vec![0.0; dimension];
-    for (coefficient, vector) in coefficients.iter().zip(preconditioned_basis) {
+    for (coefficient, vector) in coefficients.iter().zip(vectors) {
         for (slot, value) in result.iter_mut().zip(vector) {
             *slot += coefficient * value;
         }
     }
-    if !finite(&result) {
-        return Err(refusal(KrylovRefusal::NonFinite, record));
+    result
+}
+
+fn true_residual_norm(
+    right_hand_side: &[f64],
+    operator_images: &[Vec<f64>],
+    coefficients: &[f64],
+) -> f64 {
+    let mut residual = right_hand_side.to_vec();
+    for (coefficient, image) in coefficients.iter().zip(operator_images) {
+        for (slot, value) in residual.iter_mut().zip(image) {
+            *slot -= coefficient * value;
+        }
     }
-    Ok(result)
+    norm(&residual)
 }
 
 /// Unrestarted, right-preconditioned GMRES.
 ///
 /// Two-pass modified Gram--Schmidt and Givens rotations match full GMRES.
-/// The residual sequence is `|g[k+1]|`, the norm of `b - A x_k` represented
-/// by the Arnoldi relation for `A M^-1`; it is never a preconditioned norm.
+/// Every reported residual is recomputed as `‖b - A x_k‖` from the operator
+/// images already produced by Arnoldi. This adds no operator applications and
+/// prevents a small Givens estimate from accepting an inaccurate solution.
 pub fn gmres_right<O, P, B>(
     operator: &mut O,
     preconditioner: &mut P,
@@ -315,6 +331,9 @@ where
         None => dimension,
     };
     let budget = requested.min(dimension);
+    if budget == 0 {
+        return Err(refusal(KrylovRefusal::ZeroIterationBudget, record));
+    }
     let mut basis = vec![
         right_hand_side
             .iter()
@@ -322,6 +341,7 @@ where
             .collect::<Vec<_>>(),
     ];
     let mut preconditioned_basis: Vec<Vec<f64>> = Vec::new();
+    let mut operator_images: Vec<Vec<f64>> = Vec::new();
     let mut columns: Vec<Vec<f64>> = Vec::new();
     let mut cosines: Vec<f64> = Vec::new();
     let mut sines: Vec<f64> = Vec::new();
@@ -345,6 +365,7 @@ where
             return Err(refusal(KrylovRefusal::NonFinite, record));
         }
         preconditioned_basis.push(preconditioned);
+        operator_images.push(image.clone());
         let mut hessenberg = vec![0.0; column_index + 2];
         for _ in 0..2 {
             for (row, vector) in basis.iter().enumerate() {
@@ -365,6 +386,15 @@ where
         }
         let rotation_norm = hessenberg[column_index].hypot(hessenberg[column_index + 1]);
         if !rotation_norm.is_finite() || rotation_norm == 0.0 {
+            let iteration = KrylovIteration {
+                iteration: column_index + 1,
+                absolute_residual: right_hand_side_norm,
+                relative_residual: 1.0,
+                operator_applications: record.operator_applications,
+                preconditioner_applications: record.preconditioner_applications,
+            };
+            record.iterations.push(iteration);
+            observer.observe(iteration);
             return Err(refusal(KrylovRefusal::SingularProjectedSystem, record));
         }
         let cosine = hessenberg[column_index] / rotation_norm;
@@ -377,7 +407,12 @@ where
         transformed_rhs[column_index] = cosine * previous;
         transformed_rhs.push(-sine * previous);
         columns.push(hessenberg);
-        let absolute_residual = transformed_rhs[column_index + 1].abs();
+        let coefficients = projected_coefficients(&columns, &transformed_rhs, record.clone())?;
+        let absolute_residual =
+            true_residual_norm(right_hand_side, &operator_images, &coefficients);
+        if !absolute_residual.is_finite() {
+            return Err(refusal(KrylovRefusal::NonFinite, record));
+        }
         let iteration = KrylovIteration {
             iteration: column_index + 1,
             absolute_residual,
@@ -395,13 +430,10 @@ where
             } else {
                 GmresStatus::Exhausted
             };
-            let answer = solution(
-                &columns,
-                &transformed_rhs,
-                &preconditioned_basis,
-                dimension,
-                record.clone(),
-            )?;
+            let answer = linear_combination(&coefficients, &preconditioned_basis, dimension);
+            if !finite(&answer) {
+                return Err(refusal(KrylovRefusal::NonFinite, record));
+            }
             return Ok(GmresRun {
                 solution: answer,
                 status,
@@ -423,6 +455,7 @@ struct BlockState {
     cosines: Vec<f64>,
     sines: Vec<f64>,
     transformed_rhs: Vec<f64>,
+    operator_images: Vec<Vec<f64>>,
     record: KrylovRecord,
     run: Option<GmresRun>,
 }
@@ -483,6 +516,7 @@ where
                 cosines: Vec::new(),
                 sines: Vec::new(),
                 transformed_rhs: Vec::new(),
+                operator_images: Vec::new(),
                 run: Some(GmresRun {
                     solution: vec![0.0; dimension],
                     status: GmresStatus::ZeroRightHandSide,
@@ -503,10 +537,22 @@ where
                 cosines: Vec::new(),
                 sines: Vec::new(),
                 transformed_rhs: vec![right_hand_side_norm],
+                operator_images: Vec::new(),
                 record,
                 run: None,
             });
         }
+    }
+    if budget == 0 {
+        for state in &states {
+            if state.run.is_none() {
+                return Err(refusal(
+                    KrylovRefusal::ZeroIterationBudget,
+                    state.record.clone(),
+                ));
+            }
+        }
+        return Ok(states.into_iter().filter_map(|state| state.run).collect());
     }
     for column_index in 0..budget {
         let active: Vec<usize> = states
@@ -555,6 +601,7 @@ where
                 .preconditioned_basis
                 .push(directions[begin..end].to_vec());
             let mut image = images[begin..end].to_vec();
+            state.operator_images.push(image.clone());
             let mut hessenberg = vec![0.0; column_index + 2];
             for _ in 0..2 {
                 for (row, vector) in state.basis.iter().enumerate() {
@@ -575,6 +622,15 @@ where
             }
             let rotation_norm = hessenberg[column_index].hypot(hessenberg[column_index + 1]);
             if !rotation_norm.is_finite() || rotation_norm == 0.0 {
+                let iteration = KrylovIteration {
+                    iteration: column_index + 1,
+                    absolute_residual: state.record.right_hand_side_norm,
+                    relative_residual: 1.0,
+                    operator_applications: state.record.operator_applications,
+                    preconditioner_applications: state.record.preconditioner_applications,
+                };
+                state.record.iterations.push(iteration);
+                observers[index].observe(iteration);
                 return Err(refusal(
                     KrylovRefusal::SingularProjectedSystem,
                     state.record.clone(),
@@ -590,7 +646,19 @@ where
             state.transformed_rhs[column_index] = cosine * previous;
             state.transformed_rhs.push(-sine * previous);
             state.columns.push(hessenberg);
-            let absolute_residual = state.transformed_rhs[column_index + 1].abs();
+            let coefficients = projected_coefficients(
+                &state.columns,
+                &state.transformed_rhs,
+                state.record.clone(),
+            )?;
+            let absolute_residual = true_residual_norm(
+                &right_hand_sides[index],
+                &state.operator_images,
+                &coefficients,
+            );
+            if !absolute_residual.is_finite() {
+                return Err(refusal(KrylovRefusal::NonFinite, state.record.clone()));
+            }
             let iteration = KrylovIteration {
                 iteration: column_index + 1,
                 absolute_residual,
@@ -604,13 +672,11 @@ where
                 absolute_residual <= options.relative_tolerance * state.record.right_hand_side_norm;
             let exhausted = column_index + 1 == budget || column_index + 1 == dimension;
             if converged || exhausted {
-                let answer = solution(
-                    &state.columns,
-                    &state.transformed_rhs,
-                    &state.preconditioned_basis,
-                    dimension,
-                    state.record.clone(),
-                )?;
+                let answer =
+                    linear_combination(&coefficients, &state.preconditioned_basis, dimension);
+                if !finite(&answer) {
+                    return Err(refusal(KrylovRefusal::NonFinite, state.record.clone()));
+                }
                 state.run = Some(GmresRun {
                     solution: answer,
                     status: if converged {
@@ -831,6 +897,100 @@ mod tests {
                 assert_eq!(record.preconditioner_applications, 1);
             }
             _ => assert!(false, "NaN preconditioner did not produce a typed refusal"),
+        }
+    }
+
+    #[test]
+    fn a_small_givens_estimate_does_not_hide_a_large_true_residual() {
+        let dimension = 12;
+        let mut matrix = vec![0.0; dimension * dimension];
+        for row in 0..dimension {
+            matrix[row * dimension + row] = 0.5 + 0.15 * row as f64;
+            if row + 1 < dimension {
+                matrix[row * dimension + row + 1] = 8.0 + row as f64;
+            }
+            if row + 2 < dimension {
+                matrix[row * dimension + row + 2] = -3.0;
+            }
+        }
+        let mut operator =
+            |input: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
+                for row in 0..dimension {
+                    output[row] = matrix[row * dimension..(row + 1) * dimension]
+                        .iter()
+                        .zip(input)
+                        .map(|(entry, value)| entry * value)
+                        .sum();
+                }
+                Ok(())
+            };
+        let run = gmres_right(
+            &mut operator,
+            &mut Identity,
+            &vec![1.0; dimension],
+            GmresOptions::unrestarted(1e-8),
+            &mut NoObserver,
+        );
+        let run = match run {
+            Ok(value) => value,
+            Err(_) => return assert!(false, "non-normal solve refused"),
+        };
+        let residual = match run.record.iterations.last() {
+            Some(iteration) => iteration.absolute_residual,
+            None => return assert!(false, "non-normal solve returned no iteration"),
+        };
+        assert_eq!(run.status, GmresStatus::Exhausted);
+        assert!(residual > 1e-5 && residual < 1e-3);
+    }
+
+    #[test]
+    fn zero_budget_and_a_zero_arnoldi_column_have_distinct_records() {
+        let options = GmresOptions {
+            relative_tolerance: 1e-8,
+            max_iterations: Some(0),
+        };
+        let mut identity_operator =
+            |input: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
+                output.copy_from_slice(input);
+                Ok(())
+            };
+        let refused = gmres_right(
+            &mut identity_operator,
+            &mut Identity,
+            &[1.0],
+            options,
+            &mut NoObserver,
+        );
+        match refused {
+            Err(GmresFailure::Refused { reason, record }) => {
+                assert_eq!(reason, KrylovRefusal::ZeroIterationBudget);
+                assert!(record.iterations.is_empty());
+                assert_eq!(record.operator_applications, 0);
+            }
+            _ => return assert!(false, "zero budget did not have its own refusal"),
+        }
+
+        let mut singular_operator =
+            |input: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
+                output[0] = input[0];
+                output[1] = 0.0;
+                Ok(())
+            };
+        let refused = gmres_right(
+            &mut singular_operator,
+            &mut Identity,
+            &[0.0, 1.0],
+            GmresOptions::unrestarted(1e-8),
+            &mut NoObserver,
+        );
+        match refused {
+            Err(GmresFailure::Refused { reason, record }) => {
+                assert_eq!(reason, KrylovRefusal::SingularProjectedSystem);
+                assert_eq!(record.iterations.len(), 1);
+                assert_eq!(record.iterations[0].absolute_residual, 1.0);
+                assert_eq!(record.operator_applications, 1);
+            }
+            _ => assert!(false, "zero Arnoldi column lost its iteration record"),
         }
     }
 }
