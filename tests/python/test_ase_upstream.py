@@ -61,6 +61,7 @@ _ENERGY_ATOL = float.fromhex("0x1.0c6f7a0b5ed8dp-20")
 _FIRE2_DTMIN = float.fromhex("0x1.a36e2eb1c432dp-14")
 _BOOTH_FMAX = float.fromhex("0x1.5798ee2308c3ap-27")
 _BOOTH_ZERO_ATOL = float.fromhex("0x1.cd2b297d889bcp-54")
+_MODERN_OPTIMIZABLE = hasattr(Optimizable, "get_x")
 # replay_trajectory pushes L-BFGS pairs. Other classes have no ASE
 # Hessian or velocity to rebuild, so replay_trajectory raises TypeError.
 _REPLAY = "LBFGS"
@@ -132,8 +133,9 @@ def test_optimize(name: str, atoms: Atoms) -> None:
     assert final < fmax
     assert opt.converged()
     assert opt.converged(forces=forces)
-    with pytest.warns(FutureWarning):
-        assert opt.converged(gradient=-forces.ravel())
+    if hasattr(opt.optimizable, "get_gradient"):
+        with pytest.warns(FutureWarning):
+            assert opt.converged(gradient=-forces.ravel())
 
 
 @pytest.mark.parametrize("name", rgmin_ase.__all__)
@@ -142,7 +144,10 @@ def test_unconverged(name: str, atoms: Atoms) -> None:
     fmax = _STRICT_FMAX
     opt = _cls(name)(atoms, logfile=None)
     opt.run(fmax=fmax, steps=1)
-    gradient = opt.optimizable.get_gradient()
+    if hasattr(opt.optimizable, "get_gradient"):
+        gradient = opt.optimizable.get_gradient()
+    else:
+        gradient = -atoms.get_forces().reshape(-1)
     assert not opt.gradient_converged(gradient)
     assert not opt.converged()
     assert not opt.converged(forces=-gradient.reshape(-1, 3))
@@ -238,7 +243,7 @@ def test_restart_path_and_none(name: str, tmp_path: Path) -> None:
     restart = tmp_path / "restart.json"
     opt = _cls(name)(atoms, trajectory=str(tmp_path / "opt.traj"), restart=restart, logfile=None)
     opt.run(fmax=0.05, steps=2)
-    assert opt.todict()["restart"] == str(restart)
+    assert str(opt.todict()["restart"]) == str(restart)
     bare = bulk("Cu")
     bare.calc = EMT()
     opt = _cls(name)(bare, restart=None, logfile=None)
@@ -454,6 +459,15 @@ class _Booth(Optimizable):
     def set_x(self, x: np.ndarray) -> None:
         self.xy[:] = x
 
+    def __len__(self) -> int:
+        return 1
+
+    def get_positions(self) -> np.ndarray:
+        return self.xy.copy()
+
+    def set_positions(self, x: np.ndarray) -> None:
+        self.xy[:] = np.asarray(x, dtype=np.float64).reshape(-1)
+
     def get_value(self) -> float:
         x, y = self.xy
         a = x + 2 * y - 7
@@ -466,6 +480,12 @@ class _Booth(Optimizable):
         b = 2 * x + y - 5
         return np.array([2 * a + 4 * b, 4 * a + 2 * b])
 
+    def get_potential_energy(self, force_consistent: bool = False) -> float:
+        return self.get_value()
+
+    def get_forces(self) -> np.ndarray:
+        return -self.get_gradient()
+
     def iterimages(self) -> object:
         return iter(())
 
@@ -476,6 +496,10 @@ class _Booth(Optimizable):
         return float(np.linalg.norm(gradient))
 
 
+@pytest.mark.skipif(
+    not _MODERN_OPTIMIZABLE,
+    reason="ASE before 3.29 restricts Optimizable to atom-shaped coordinates",
+)
 @pytest.mark.parametrize("name", rgmin_ase.__all__)
 def test_booth(name: str) -> None:
     _xfail_without_hessian(name)
