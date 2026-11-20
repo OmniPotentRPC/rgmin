@@ -149,7 +149,7 @@ solver for the k lowest pairs (Knyazev 2001). ``seed`` and ``modes_out``
 are row-major n-by-k. ``rgmin_lowest_eigenpairs`` is ``abi_minor`` 39.
 ``rgmin_manifold_handle_t`` is a Stiefel, SPD, rigid quotient or product
 manifold with column-major point buffers, ``abi_minor`` 41; see the
-manifold reference. ``rgmin_manifold_rigid_quotient`` is ``abi_minor`` 53.
+manifold reference. ``rgmin_manifold_rigid_quotient`` is ``abi_minor`` 54.
 ``rgmin_lowest_eigenpairs_ex`` adds each residual and a converged flag, and an
 optional preconditioner (null is the identity). It is ``abi_minor`` 42.
 ``rgmin_eigenpair_t`` is unchanged.
@@ -245,7 +245,7 @@ default Euclidean L-BFGS step stays the eOn cap.
 Rigid quotient, trust region and projected modes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-ABI minor 53 adds five entries. Check ``rgmin_abi_stamp().abi_minor >= 53``
+ABI minor 54 adds five entries. Check ``rgmin_abi_stamp().abi_minor >= 54``
 before calling them. ``rgmin_control_t`` is unchanged.
 
 ``rgmin_manifold_rigid_quotient(n_atoms, periodic)`` builds
