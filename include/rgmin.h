@@ -63,7 +63,8 @@ typedef enum rgmin_status_t {
     /** An opt-in unmet stop. \c x and \c out still hold the report.
      *  ABI minor 49. */
     RGMIN_UNMET_STOP = 6,
-    /** Strict convergence failed. \c x and \c out still hold the report. */
+    /** Strict convergence failed. \c x and \c out still hold the report.
+     *  ABI minor 53. */
     RGMIN_NOT_CONVERGED = 7
 } rgmin_status_t;
 
@@ -75,7 +76,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 52
+#define RGMIN_ABI_VERSION_MINOR 53
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -93,14 +94,18 @@ typedef struct rgmin_abi_stamp_t {
  *    is unchanged.
  * 52 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
  *    rgmin_solver_set_gromacs_steep, and
- *    rgmin_gromacs_steep_max_constraint_shrinks. */
-#define RGMIN_ABI_LAYOUT_REVISION 5
-/* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
- * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
- * the defaults, including the default per-atom cap; a negative value
- * leaves every step cap off. rgmin_report_t is value, steps, grad_norm,
- * stop. Both sides shipped these structs as revision 4 with different
- * fields, so the union is a new revision. */
+ *    rgmin_gromacs_steep_max_constraint_shrinks. rgmin_control_t is unchanged.
+ * 53 require_convergence, the report converged flag,
+ *    RGMIN_NOT_CONVERGED, and rgmin_solver_set_require_convergence. */
+#define RGMIN_ABI_LAYOUT_REVISION 6
+/* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
+ * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the
+ * Euclidean cap; 0 keeps the defaults, including the default per-atom
+ * cap; a negative value leaves every step cap off.
+ * rgmin_report_t is value, steps, grad_norm, stop, converged.
+ * Revision 5 was value, steps, grad_norm, stop. Both sides shipped
+ * those structs as revision 4 with different fields, so the union was
+ * revision 5. */
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
@@ -213,7 +218,7 @@ typedef struct rgmin_control_t {
     /** Floor factor. <= 0 selects 3. */
     double noise_c;
     /** Nonzero returns RGMIN_NOT_CONVERGED when the gradient norm is
-     *  not below gtol. Zero keeps the report. */
+     *  not below gtol. Zero keeps the report. ABI minor 53. */
     int32_t require_convergence;
 } rgmin_control_t;
 /** Rust \c Control::default: maxiter 100, gtol 1e-5, istep 1, memory 0
@@ -234,7 +239,7 @@ typedef struct rgmin_report_t {
     double grad_norm;
     /** Which stop produced this report. */
     rgmin_stop_t stop;
-    /** Nonzero when grad_norm is below gtol. */
+    /** Nonzero when grad_norm is below gtol. Layout revision 6. */
     int32_t converged;
 } rgmin_report_t;
 
@@ -588,7 +593,7 @@ void rgmin_solver_set_backward_polish(rgmin_solver_t *solver, int32_t on);
 /** Nonzero opts a later run into \c RGMIN_NOT_CONVERGED. A step stays
  *  \c RGMIN_SUCCESS, except that a steepest, BFGS, nonlinear CG or Adam
  *  step that took no move and left its state unchanged reports
- *  \c RGMIN_STOP_STEP_TOLERANCE. */
+ *  \c RGMIN_STOP_STEP_TOLERANCE. ABI minor 53. */
 void rgmin_solver_set_require_convergence(rgmin_solver_t *solver, int32_t on);
 /** FIRE 2.0 parameter set. GUENOLE2020 is Table 1 of Guenole et al.,
  *  Comput. Mater. Sci. 175, 109584 (2020): dt_max 10 dt, dt_min
