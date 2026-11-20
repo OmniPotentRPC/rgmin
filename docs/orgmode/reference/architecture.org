@@ -63,9 +63,12 @@ python3 docs/figures/architecture/draw_hourglass.py
   =rgmin_solver_set_backward_polish=, and the =*_opts= one-shots,
   which include =rgmin_minimize_eindir_opts=.
   =xts.h= aliases =RGMIN_UNMET_STOP=, =RGMIN_STOP_LINE_SEARCH=,
-  and =RGMIN_STOP_POLISH_UNMET=. =RGMIN_UNMET_STOP= is status 6.
-  =RGMIN_STOP_LINE_SEARCH= is 4 and =RGMIN_STOP_POLISH_UNMET= is 5.
-  =RGMIN_STOP_ENERGY_TOLERANCE= is 6 and =RGMIN_STOP_EVAL_BUDGET= is 7.
+  =RGMIN_STOP_POLISH_UNMET=, =RGMIN_STOP_MACHINE_PRECISION=, and
+  =RGMIN_STOP_LINE_SEARCH_ROUNDING=.
+  =RGMIN_UNMET_STOP= is status 6. =RGMIN_STOP_LINE_SEARCH= is 4,
+  =RGMIN_STOP_POLISH_UNMET= is 5, =RGMIN_STOP_ENERGY_TOLERANCE= is 6,
+  =RGMIN_STOP_EVAL_BUDGET= is 7, =RGMIN_STOP_MACHINE_PRECISION= is 8,
+  and =RGMIN_STOP_LINE_SEARCH_ROUNDING= is 9.
 - =minimize_method= :: Cold-start dispatch for every =Method=.
 - =LineSearch::Wolfe= :: Nocedal-Wright 3.5 / 3.6. The default line
   search of a session's line-searched methods, BFGS among them. The
@@ -92,7 +95,9 @@ python3 docs/figures/architecture/draw_hourglass.py
   =rgmin_solver_set_gromacs_steep=, and
   =rgmin_gromacs_steep_max_constraint_shrinks=. Minor 53 adds
   =rgmin_minimize_eindir_opts=, the
-  eindir one-shot with the same two flags. =rgmin_control_t= is unchanged.
+  eindir one-shot with the same two flags, =rgmin_solver_set_highs_time_limit=,
+  =rgmin_solver_highs_timeouts=, and the line-search rounding stop.
+  =rgmin_control_t= is unchanged.
   =rgmin_abi_compatible= checks the major version and the layout revision only.
 - =DistanceConstraints= :: Holonomic atom-pair distances for a session.
   SHAKE, LINCS and SETTLE return each trial to the set.

@@ -1177,12 +1177,11 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 /// `rgmin_gromacs_steep_max_constraint_shrinks`.
 /// ABI minor 51 adds `rgmin_minimize_rlbfgs` and `rgmin_rlbfgs_default`.
 /// ABI minor 53 adds `rgmin_minimize_eindir_opts`,
-/// `rgmin_solver_set_highs_time_limit` and `rgmin_solver_highs_timeouts`.
-/// Minor 50 adds
-/// `rgmin_solver_set_etol`, `rgmin_solver_set_max_evals`, their clear
-/// functions, `rgmin_solver_evals` and the two stop codes. Minor 49 adds
-/// the stop-status setters, the floor, and the `*_opts` one-shots. Minor 48
-/// adds
+/// `rgmin_solver_set_highs_time_limit`, `rgmin_solver_highs_timeouts` and
+/// the line-search rounding stop. Minor 50 adds `rgmin_solver_set_etol`,
+/// `rgmin_solver_set_max_evals`, their clear functions, `rgmin_solver_evals`
+/// and the two stop codes. Minor 49 adds the stop-status setters, the floor,
+/// and the `*_opts` one-shots. Minor 48 adds
 /// `rgmin_solver_set_fire_cap_two_step_overshoot`. Minor 47 adds
 /// `rgmin_solver_set_level_set` and
 /// `rgmin_solver_clear_level_set`. Minor 46 adds `rgmin_control_default`
@@ -1198,6 +1197,7 @@ fn abi_stamp_identifies_this_optimizer_layout() {
     assert_eq!(stamp.abi_major, 1);
     assert_eq!(stamp.abi_minor, 53);
     assert_eq!(stamp.layout_revision, 5);
+    assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING as i32, 9);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
 
