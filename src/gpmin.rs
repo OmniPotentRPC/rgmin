@@ -123,6 +123,9 @@ impl PriorStrategy {
 /// Configuration for [`GpMin`] and a `Method::GpMin` [`crate::Solver`]
 /// session.
 ///
+/// Non-exhaustive: start from [`Default`] or
+/// [`Self::with_hyperparam_updates`] and chain the `with_*` setters.
+///
 /// [`Default`] selects ASE's fixed-hyperparameter defaults
 /// (`scale = 0.4`, `noise = 0.001`, `weight = 1.0`,
 /// `prior = PriorStrategy::Maximum`, `update_hyperparams = false`).
@@ -177,6 +180,23 @@ pub struct GpMinConfig {
     pub hyperparam_maxiter: usize,
 }
 
+with_setters!(GpMinConfig {
+    with_scale => scale: val f64,
+    with_weight => weight: val f64,
+    with_noise => noise: val f64,
+    with_prior => prior: val PriorStrategy,
+    with_update_hyperparams => update_hyperparams: val bool,
+    with_batch_size => batch_size: val usize,
+    with_hyperparam_bounds => hyperparam_bounds: opt f64,
+    with_max_step => max_step: opt f64,
+    with_max_refinements => max_refinements: val usize,
+    with_surrogate_maxiter => surrogate_maxiter: val usize,
+    with_surrogate_memory => surrogate_memory: val usize,
+    with_surrogate_gtol => surrogate_gtol: val f64,
+    with_hyperparam_tol => hyperparam_tol: val f64,
+    with_hyperparam_maxiter => hyperparam_maxiter: val usize,
+});
+
 impl Default for GpMinConfig {
     fn default() -> Self {
         Self {
@@ -218,107 +238,6 @@ impl GpMinConfig {
             hyperparam_tol: GPMIN_DEFAULT_HYPERPARAM_TOL,
             hyperparam_maxiter: GPMIN_DEFAULT_HYPERPARAM_MAXITER,
         }
-    }
-
-    /// Set the squared-exponential kernel length scale.
-    #[must_use]
-    pub const fn with_scale(mut self, scale: f64) -> Self {
-        self.scale = scale;
-        self
-    }
-
-    /// Set the squared-exponential kernel weight.
-    #[must_use]
-    pub const fn with_weight(mut self, weight: f64) -> Self {
-        self.weight = weight;
-        self
-    }
-
-    /// Set the observation regularization (`noise`).
-    #[must_use]
-    pub const fn with_noise(mut self, noise: f64) -> Self {
-        self.noise = noise;
-        self
-    }
-
-    /// Set the prior mean strategy.
-    #[must_use]
-    pub const fn with_prior(mut self, prior: PriorStrategy) -> Self {
-        self.prior = prior;
-        self
-    }
-
-    /// Enable or disable marginal log-likelihood hyperparameter updates.
-    #[must_use]
-    pub const fn with_update_hyperparams(mut self, enabled: bool) -> Self {
-        self.update_hyperparams = enabled;
-        self
-    }
-
-    /// Set the update interval (`batch_size`) for hyperparameter updates.
-    #[must_use]
-    pub const fn with_batch_size(mut self, batch_size: usize) -> Self {
-        self.batch_size = batch_size;
-        self
-    }
-
-    /// Set the relative bound factor for hyperparameter updates (`None`
-    /// leaves hyperparameters unbounded above zero).
-    #[must_use]
-    pub const fn with_hyperparam_bounds(mut self, bounds: Option<f64>) -> Self {
-        self.hyperparam_bounds = bounds;
-        self
-    }
-
-    /// Set the optional per-atom maximum displacement cap for the standalone
-    /// [`GpMin`] stepper.
-    #[must_use]
-    pub const fn with_max_step(mut self, max_step: Option<f64>) -> Self {
-        self.max_step = max_step;
-        self
-    }
-
-    /// Set the maximum number of surrogate refinement evaluations per outer
-    /// step.
-    #[must_use]
-    pub const fn with_max_refinements(mut self, max_refinements: usize) -> Self {
-        self.max_refinements = max_refinements;
-        self
-    }
-
-    /// Set the inner L-BFGS iteration limit for surrogate minimization.
-    #[must_use]
-    pub const fn with_surrogate_maxiter(mut self, surrogate_maxiter: usize) -> Self {
-        self.surrogate_maxiter = surrogate_maxiter;
-        self
-    }
-
-    /// Set the inner L-BFGS pair memory for surrogate minimization.
-    #[must_use]
-    pub const fn with_surrogate_memory(mut self, surrogate_memory: usize) -> Self {
-        self.surrogate_memory = surrogate_memory;
-        self
-    }
-
-    /// Set the inner L-BFGS gradient tolerance for surrogate minimization.
-    #[must_use]
-    pub const fn with_surrogate_gtol(mut self, surrogate_gtol: f64) -> Self {
-        self.surrogate_gtol = surrogate_gtol;
-        self
-    }
-
-    /// Set the gradient tolerance for marginal log-likelihood optimization.
-    #[must_use]
-    pub const fn with_hyperparam_tol(mut self, hyperparam_tol: f64) -> Self {
-        self.hyperparam_tol = hyperparam_tol;
-        self
-    }
-
-    /// Set the iteration limit for marginal log-likelihood optimization.
-    #[must_use]
-    pub const fn with_hyperparam_maxiter(mut self, hyperparam_maxiter: usize) -> Self {
-        self.hyperparam_maxiter = hyperparam_maxiter;
-        self
     }
 
     /// Validate all configuration parameters, failing closed on any
@@ -410,6 +329,19 @@ impl GpMinConfig {
 /// - `K[0, b] = k * d_b / l^2`
 /// - `K[a, 0] = -k * d_a / l^2`
 /// - `K[a, b] = (k / l^2) * (delta_{ab} - d_a * d_b / l^2)`
+///
+/// Non-exhaustive: start from [`Default`] and chain [`Self::with_weight`]
+/// and [`Self::with_scale`].
+///
+/// [`Default`] is the ASE `ase.optimize.GPMin` kernel for
+/// `update_hyperparams = false`: weight [`GPMIN_DEFAULT_WEIGHT`] (`1.0`)
+/// and scale [`GPMIN_DEFAULT_SCALE`] (`0.4`). ASE's `SquaredExponential`
+/// stores no numeric default of its own; `GPMin.__init__` assigns those
+/// two values in that mode (Garijo del Río, Mortensen, and Jacobsen,
+/// Phys. Rev. B 100, 104103, 2019, as shipped by ASE). The
+/// updated-hyperparameter preset is weight [`GPMIN_UPDATED_WEIGHT`]
+/// (`2.0`) and scale [`GPMIN_UPDATED_SCALE`] (`0.3`).
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SquaredExponentialKernel {
     /// Amplitude prefactor `w > 0`.
@@ -418,20 +350,53 @@ pub struct SquaredExponentialKernel {
     pub scale: f64,
 }
 
+with_setters!(SquaredExponentialKernel {
+    with_weight => weight: val f64,
+    with_scale => scale: val f64,
+});
+
+impl Default for SquaredExponentialKernel {
+    /// ASE fixed-hyperparameter kernel: weight `1.0`, scale `0.4`.
+    ///
+    /// Those are [`GPMIN_DEFAULT_WEIGHT`] and [`GPMIN_DEFAULT_SCALE`].
+    /// `ase.optimize.gpmin.kernel.SquaredExponential` has no numeric
+    /// default; `ase.optimize.GPMin.__init__` assigns `weight = 1.0` and
+    /// `scale = 0.4` when `update_hyperparams` is false. The
+    /// updated-hyperparameter preset (`update_hyperparams` true) is
+    /// weight [`GPMIN_UPDATED_WEIGHT`] (`2.0`) and scale
+    /// [`GPMIN_UPDATED_SCALE`] (`0.3`).
+    fn default() -> Self {
+        Self {
+            weight: GPMIN_DEFAULT_WEIGHT,
+            scale: GPMIN_DEFAULT_SCALE,
+        }
+    }
+}
+
 impl SquaredExponentialKernel {
     /// Construct a validated squared-exponential kernel.
+    ///
+    /// Same values as [`Default`] followed by [`Self::with_weight`] and
+    /// [`Self::with_scale`], then the positivity check.
     pub fn new(weight: f64, scale: f64) -> Result<Self> {
-        if !(weight.is_finite() && weight > 0.0) {
+        Self::default()
+            .with_weight(weight)
+            .with_scale(scale)
+            .validated()
+    }
+
+    fn validated(self) -> Result<Self> {
+        if !(self.weight.is_finite() && self.weight > 0.0) {
             return Err(Error::GpMin {
                 what: "kernel weight must be finite and positive",
             });
         }
-        if !(scale.is_finite() && scale > 0.0) {
+        if !(self.scale.is_finite() && self.scale > 0.0) {
             return Err(Error::GpMin {
                 what: "kernel scale must be finite and positive",
             });
         }
-        Ok(Self { weight, scale })
+        Ok(self)
     }
 
     /// Scalar energy-energy kernel value `w^2 * exp(-||x1 - x2||^2 / (2 l^2))`.
@@ -991,7 +956,10 @@ impl GaussianProcess {
                 what: "cannot train GP with zero observations",
             });
         }
-        let kernel = SquaredExponentialKernel::new(self.weight, self.scale)?;
+        let kernel = SquaredExponentialKernel::default()
+            .with_weight(self.weight)
+            .with_scale(self.scale)
+            .validated()?;
         let m = self.xs.len() * (self.dim + 1);
         let cov = kernel.assemble_regularized_flat(&self.xs, self.dim, self.noise);
         let l = cholesky_lower(&cov, m)?;
@@ -1097,7 +1065,10 @@ impl GaussianProcess {
                 what: "cannot evaluate marginal likelihood with zero observations",
             });
         }
-        let kernel = SquaredExponentialKernel::new(weight, scale)?;
+        let kernel = SquaredExponentialKernel::default()
+            .with_weight(weight)
+            .with_scale(scale)
+            .validated()?;
         if !(noise.is_finite() && noise > 0.0) {
             return Err(Error::GpMin {
                 what: "noise must be finite and positive",
@@ -2145,7 +2116,9 @@ mod tests {
     fn kernel_derivative_blocks_match_analytic_formulas() {
         let w = 1.7;
         let l = 0.65;
-        let kernel = SquaredExponentialKernel::new(w, l).unwrap();
+        let kernel = SquaredExponentialKernel::default()
+            .with_weight(w)
+            .with_scale(l);
         let x1 = array![0.2, -0.5, 0.9];
         let x2 = array![-0.1, 0.3, 0.4];
 
@@ -2191,7 +2164,9 @@ mod tests {
     fn kernel_hyperparam_derivatives_match_closed_form() {
         let w = 2.3;
         let l = 0.55;
-        let kernel = SquaredExponentialKernel::new(w, l).unwrap();
+        let kernel = SquaredExponentialKernel::default()
+            .with_weight(w)
+            .with_scale(l);
         let x1 = array![0.15, -0.25, 0.45];
         let x2 = array![-0.2, 0.1, 0.05];
 
@@ -2253,7 +2228,9 @@ mod tests {
         let (e_fast, g_fast) = gp.predict(query.view()).unwrap();
 
         // Compare with explicit block matrix-vector product.
-        let kernel = SquaredExponentialKernel::new(cfg.weight, cfg.scale).unwrap();
+        let kernel = SquaredExponentialKernel::default()
+            .with_weight(cfg.weight)
+            .with_scale(cfg.scale);
         let mut e_ref = gp.prior_mean();
         let mut g_ref: Array1<f64> = Array1::zeros(3);
         let d1 = 4;
@@ -2369,5 +2346,47 @@ mod tests {
         assert!((nll - exact_nll).abs() <= tol);
         assert!((grad[0] - exact_dw).abs() <= tol);
         assert!((grad[1] - exact_dl).abs() <= tol);
+    }
+
+    /// Public configs are built from [`Default`] and the `with_*` setters.
+    #[test]
+    fn public_configs_build_from_default_and_setters() {
+        let cfg = GpMinConfig::default()
+            .with_scale(0.35)
+            .with_weight(1.5)
+            .with_noise(0.002)
+            .with_prior(PriorStrategy::Fixed(0.25))
+            .with_update_hyperparams(true)
+            .with_batch_size(2)
+            .with_hyperparam_bounds(0.2)
+            .with_max_step(0.15)
+            .with_max_refinements(4)
+            .with_surrogate_maxiter(20)
+            .with_surrogate_memory(3)
+            .with_surrogate_gtol(1.0e-6)
+            .with_hyperparam_tol(0.02)
+            .with_hyperparam_maxiter(8);
+        assert_eq!(cfg.scale, 0.35);
+        assert_eq!(cfg.weight, 1.5);
+        assert_eq!(cfg.noise, 0.002);
+        assert_eq!(cfg.prior, PriorStrategy::Fixed(0.25));
+        assert!(cfg.update_hyperparams);
+        assert_eq!(cfg.batch_size, 2);
+        assert_eq!(cfg.hyperparam_bounds, Some(0.2));
+        assert_eq!(cfg.max_step, Some(0.15));
+        assert_eq!(cfg.max_refinements, 4);
+        assert_eq!(cfg.surrogate_maxiter, 20);
+        assert_eq!(cfg.surrogate_memory, 3);
+        assert_eq!(cfg.surrogate_gtol, 1.0e-6);
+        assert_eq!(cfg.hyperparam_tol, 0.02);
+        assert_eq!(cfg.hyperparam_maxiter, 8);
+        cfg.validate().unwrap();
+
+        let defaults = SquaredExponentialKernel::default();
+        assert_eq!(defaults.weight, GPMIN_DEFAULT_WEIGHT);
+        assert_eq!(defaults.scale, GPMIN_DEFAULT_SCALE);
+        let kernel = defaults.with_weight(1.5).with_scale(0.35);
+        assert_eq!(kernel.weight, 1.5);
+        assert_eq!(kernel.scale, 0.35);
     }
 }
