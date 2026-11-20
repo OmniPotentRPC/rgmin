@@ -190,12 +190,21 @@ pub fn kantorovich_ball(
     if h > 0.5 {
         return Err(CertificateError::NoExistenceBall { h });
     }
+    let denominator = 1.0 + (1.0 - 2.0 * h).sqrt();
     let radius = if eta == 0.0 {
         0.0
     } else {
-        2.0 * eta / (1.0 + (1.0 - 2.0 * h).sqrt())
+        eta * (2.0 / denominator)
     };
-    let nonlinear_remainder = radius - eta;
+    if !radius.is_finite() {
+        return Err(CertificateError::InvalidMajorant {
+            input: "radius",
+            value: radius,
+        });
+    }
+    // With d = 1 + sqrt(1 - 2h), r = 2 eta / d and
+    // r - eta = eta(1 - sqrt(1 - 2h))/d = h r / d.
+    let nonlinear_remainder = h * (radius / denominator);
     Ok(KantorovichBall {
         newton_step: eta,
         h,
@@ -269,7 +278,8 @@ pub fn certify_morse_gap(
     let gap = nonnegative("computed_gap", computed_gap)?;
     let lipschitz = nonnegative("operator_lipschitz", operator_lipschitz)?;
     let roundoff = nonnegative("eigensolver_roundoff", eigensolver_roundoff)?;
-    let uncertainty = lipschitz * ball.radius + roundoff;
+    let radius = nonnegative("radius", ball.radius)?;
+    let uncertainty = lipschitz * radius + roundoff;
     if !uncertainty.is_finite() {
         return Err(CertificateError::InvalidMajorant {
             input: "morse_uncertainty",
