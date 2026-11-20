@@ -79,6 +79,8 @@ mod level_set;
 pub mod lindh;
 /// Matrix-free lowest Hessian eigenpair and the block of k lowest pairs.
 pub mod lowest_mode;
+/// Sixth-order Magnus steps and the Padé matrix exponential.
+pub mod magnus;
 /// Moré and Wild computational-noise estimate and difference steps.
 pub mod noise;
 mod portable;
