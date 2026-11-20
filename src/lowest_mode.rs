@@ -10,7 +10,6 @@
 //! [`Error::EigenUnavailable`]. Integers match `schema/eigen.capnp`.
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
-use std::cell::RefCell;
 
 use crate::dlaf_kind::DlaFutureParams;
 use crate::eigenexa_kind::EigenExaParams;
@@ -440,8 +439,20 @@ pub fn lowest_mode<H: ApplyHessian + ?Sized>(
 /// [`lowest_mode`], solving in the subspace selected by `project`.
 ///
 /// The callback is `P` from one shared [`crate::rigid::RigidWorkspace`]:
-/// project `v`, apply `H`, project `H v`, then reorthogonalise. Lanczos
-/// and every other matrix-free backend honor `project`.
+/// project `v`, apply `H`, project `H v`, then reorthogonalise. Lanczos,
+/// Rayleigh-Ritz, Jacobi-Davidson, LOBPCG and the dimer honor `project`.
+///
+/// PRIMME, libkrylov and SLEPc cannot. They solve the operator they are
+/// handed, and wrapping it as `P H P` would turn every vertical direction
+/// into an eigenvalue 0 that wins whenever the horizontal spectrum is
+/// positive. When `project` is not the identity these kinds are refused with
+/// [`Error::ProjectorUnsupported`] before any backend is called, whether or
+/// not the backend is linked. A projector that leaves a vector unchanged is
+/// the identity for this test, so a call without a manifold is unaffected.
+///
+/// A projector that leaves no direction at all, or a solve whose vector
+/// does not survive the projection, returns [`Error::ProjectedSolve`] and
+/// never a zero vector with a stale value.
 pub fn lowest_mode_with<H, F>(
     h: &H,
     x: ArrayView1<f64>,
@@ -789,51 +800,66 @@ where
     if seed.is_empty() {
         return Err(Error::Dim { got: 0, dim: 0 });
     }
-    let projected_seed = projected_start(seed, project);
-    let mut mode = match params.kind {
-        EigensolverKind::Lanczos => Ok(lanczos(
-            h,
-            x,
-            projected_seed.view(),
-            params.krylov_dim(seed.len()),
-            project,
-        )),
-        EigensolverKind::RayleighRitz => {
-            Ok(rayleigh_ritz(h, x, projected_seed.view(), params, project))
-        }
-        EigensolverKind::JacobiDavidson => Ok(jacobi_davidson(
-            h,
-            x,
-            projected_seed.view(),
-            params,
-            t,
-            project,
-        )),
-        EigensolverKind::Lobpcg => Ok(lobpcg(h, x, projected_seed.view(), params, t, project)),
-        EigensolverKind::Dimer => Ok(dimer(h, x, projected_seed.view(), params, project)),
-        EigensolverKind::Primme => {
-            let projected = ProjectedOps::new(h, t, project);
-            lowest_mode_primme(&projected, x, projected_seed.view(), params, &projected)
-        }
-        EigensolverKind::Libkrylov => {
-            let projected = ProjectedOps::new(h, t, project);
-            lowest_mode_libkrylov(&projected, x, projected_seed.view(), params)
-        }
-        EigensolverKind::Slepc => {
-            let projected = ProjectedOps::new(h, t, project);
-            lowest_mode_slepc(
-                &projected,
+    if is_external(params.kind) && !projector_is_identity(project, seed) {
+        return Err(Error::ProjectorUnsupported {
+            kind: params.kind.name(),
+        });
+    }
+    let n = seed.len();
+    let mode = match params.kind {
+        EigensolverKind::Lanczos => {
+            let start = projected_start(seed, project)?;
+            Ok(lanczos_from(
+                h,
                 x,
-                projected_seed.view(),
-                params,
-                &SlepcParams::default(),
-            )
+                start.view(),
+                params.krylov_dim(n),
+                project,
+            ))
         }
+        EigensolverKind::RayleighRitz => {
+            let start = projected_start(seed, project)?;
+            Ok(rayleigh_ritz(h, x, start.view(), params, project))
+        }
+        EigensolverKind::JacobiDavidson => {
+            let start = projected_start(seed, project)?;
+            Ok(jacobi_davidson(h, x, start.view(), params, t, project))
+        }
+        EigensolverKind::Lobpcg => {
+            let start = projected_start(seed, project)?;
+            Ok(lobpcg(h, x, start.view(), params, t, project))
+        }
+        EigensolverKind::Dimer => {
+            let start = projected_start(seed, project)?;
+            Ok(dimer(h, x, start.view(), params, project))
+        }
+        EigensolverKind::Primme => lowest_mode_primme(h, x, seed, params, t),
+        EigensolverKind::Libkrylov => lowest_mode_libkrylov(h, x, seed, params),
+        EigensolverKind::Slepc => lowest_mode_slepc(h, x, seed, params, &SlepcParams::default()),
         other => Err(Error::EigenUnavailable { kind: other.name() }),
     }?;
+    finish_projected(mode, project)
+}
+
+/// Project the solver's vector and normalize it.
+///
+/// A vector that is rounding residue of the projection is not a mode.
+/// Dividing it by its norm would turn noise into a unit vector that carries
+/// the solver's eigenvalue, so it is an error instead. A zero or non-finite
+/// vector from the solver is passed through unscaled, as it always was.
+fn finish_projected<F>(mut mode: LowestMode, project: &mut F) -> Result<LowestMode>
+where
+    F: FnMut(&mut Array1<f64>),
+{
+    let before = nrm2(mode.vector.view());
     project(&mut mode.vector);
     let norm = nrm2(mode.vector.view());
-    if norm.is_finite() && norm > 0.0 {
+    if before.is_finite() && before > 0.0 {
+        if !norm.is_finite() || norm <= LANCZOS_PROJECTED_START_RTOL * before {
+            return Err(Error::ProjectedSolve {
+                what: "the solver's vector does not survive the projection",
+            });
+        }
         mode.vector.mapv_inplace(|value| value / norm);
     }
     Ok(mode)
@@ -849,7 +875,9 @@ const LANCZOS_PROJECTED_START_RTOL: f64 = 1e-12;
 /// eOn `client/Lanczos.cpp`: `beta <= 1e-10 * |alpha|` is linear dependence.
 const LANCZOS_LINDEP: f64 = 1e-10;
 
-fn projected_start<F>(seed: ArrayView1<f64>, project: &mut F) -> Array1<f64>
+/// A start vector inside the projected space, or [`Error::ProjectedSolve`]
+/// when the projector leaves no direction to start from.
+fn projected_start<F>(seed: ArrayView1<f64>, project: &mut F) -> Result<Array1<f64>>
 where
     F: FnMut(&mut Array1<f64>),
 {
@@ -861,7 +889,7 @@ where
         || seed_norm < LANCZOS_START_EPS
         || (projected_norm.is_finite() && projected_norm > LANCZOS_PROJECTED_START_RTOL * seed_norm)
     {
-        return projected;
+        return Ok(projected);
     }
     for i in 0..seed.len() {
         let mut unit = Array1::zeros(seed.len());
@@ -869,62 +897,57 @@ where
         project(&mut unit);
         let norm = nrm2(unit.view());
         if norm.is_finite() && norm > LANCZOS_PROJECTED_START_RTOL {
-            return unit;
+            return Ok(unit);
         }
     }
-    projected
+    Err(Error::ProjectedSolve {
+        what: "the projector leaves no direction to search",
+    })
 }
 
-struct ProjectedOps<'a, H: ?Sized, P: ?Sized, F> {
-    h: &'a H,
-    precond: &'a P,
-    project: RefCell<&'a mut F>,
+fn is_external(kind: EigensolverKind) -> bool {
+    matches!(
+        kind,
+        EigensolverKind::Primme | EigensolverKind::Libkrylov | EigensolverKind::Slepc
+    )
 }
 
-impl<'a, H: ?Sized, P: ?Sized, F> ProjectedOps<'a, H, P, F> {
-    fn new(h: &'a H, precond: &'a P, project: &'a mut F) -> Self {
-        Self {
-            h,
-            precond,
-            project: RefCell::new(project),
+/// Whether `project` leaves every vector unchanged.
+///
+/// A linear projector other than the identity moves a generic vector, so the
+/// seed and two fixed pseudo-random vectors decide it. The probes cost three
+/// projections and never depend on the dimension.
+fn projector_is_identity<F>(project: &mut F, seed: ArrayView1<f64>) -> bool
+where
+    F: FnMut(&mut Array1<f64>),
+{
+    let n = seed.len();
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut probes = vec![seed.to_owned()];
+    for _ in 0..2 {
+        let mut v = Array1::zeros(n);
+        for value in v.iter_mut() {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            *value = ((state >> 11) as f64) / ((1u64 << 53) as f64) * 2.0 - 1.0;
         }
+        probes.push(v);
     }
+    probes.iter().all(|probe| {
+        let size = nrm2(probe.view());
+        if !size.is_finite() || size == 0.0 {
+            return true;
+        }
+        let mut moved = probe.clone();
+        project(&mut moved);
+        nrm2((&moved - probe).view()) <= 1e-12 * size
+    })
 }
 
-impl<H, P, F> ApplyHessian for ProjectedOps<'_, H, P, F>
-where
-    H: ApplyHessian + ?Sized,
-    P: ?Sized,
-    F: FnMut(&mut Array1<f64>),
-{
-    fn apply_hessian(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
-        let mut input = v.to_owned();
-        (self.project.borrow_mut())(&mut input);
-        let mut output = self.h.apply_hessian(x, input.view());
-        (self.project.borrow_mut())(&mut output);
-        output
-    }
-}
-
-impl<H, P, F> ApplyPreconditioner for ProjectedOps<'_, H, P, F>
-where
-    H: ?Sized,
-    P: ApplyPreconditioner + ?Sized,
-    F: FnMut(&mut Array1<f64>),
-{
-    fn kind(&self) -> PreconditionerKind {
-        self.precond.kind()
-    }
-
-    fn apply_preconditioner(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
-        let mut input = v.to_owned();
-        (self.project.borrow_mut())(&mut input);
-        let mut output = self.precond.apply_preconditioner(x, input.view());
-        (self.project.borrow_mut())(&mut output);
-        output
-    }
-}
-
+/// [`lanczos_from`] on the projected, reseeded start of `seed`. A projector
+/// with no direction left gives the empty result.
+#[cfg(test)]
 fn lanczos<H, F>(
     h: &H,
     x: ArrayView1<f64>,
@@ -936,8 +959,30 @@ where
     H: ApplyHessian + ?Sized,
     F: FnMut(&mut Array1<f64>),
 {
-    let (q, alpha, beta, actions) = lanczos_basis(h, x, seed, krylov, project);
-    let n = seed.len();
+    match projected_start(seed, project) {
+        Ok(start) => lanczos_from(h, x, start.view(), krylov, project),
+        Err(_) => LowestMode {
+            vector: Array1::zeros(seed.len()),
+            value: 0.0,
+            actions: 0,
+        },
+    }
+}
+
+/// Lanczos from a start vector already inside the projected space.
+fn lanczos_from<H, F>(
+    h: &H,
+    x: ArrayView1<f64>,
+    start: ArrayView1<f64>,
+    krylov: usize,
+    project: &mut F,
+) -> LowestMode
+where
+    H: ApplyHessian + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
+    let (q, alpha, beta, actions) = lanczos_basis_from(h, x, start, krylov, project);
+    let n = start.len();
     if q.is_empty() || alpha.is_empty() {
         return LowestMode {
             vector: Array1::zeros(n),
@@ -973,6 +1018,7 @@ where
 /// linear dependence when `beta <= 1e-10 |alpha|` without emitting
 /// another column. SLEPc likewise tests breakdown before the
 /// residual divide and shortens the factorization.
+#[cfg(test)]
 fn lanczos_basis<H, F>(
     h: &H,
     x: ArrayView1<f64>,
@@ -984,37 +1030,32 @@ where
     H: ApplyHessian + ?Sized,
     F: FnMut(&mut Array1<f64>),
 {
-    let n = seed.len();
-    // The projector acts on the start vector and on every `H v`, so the
-    // basis stays in the projected subspace.
-    let mut q0 = seed.to_owned();
-    project(&mut q0);
-    let seed_norm = nrm2(seed);
-    if !seed_norm.is_finite() || seed_norm < LANCZOS_START_EPS {
-        return (Vec::new(), Vec::new(), Vec::new(), 0);
+    match projected_start(seed, project) {
+        Ok(start) => lanczos_basis_from(h, x, start.view(), krylov, project),
+        Err(_) => (Vec::new(), Vec::new(), Vec::new(), 0),
     }
-    let mut start = nrm2(q0.view());
-    if !start.is_finite() || start <= LANCZOS_PROJECTED_START_RTOL * seed_norm {
-        let mut replacement = None;
-        for i in 0..n {
-            let mut unit = Array1::zeros(n);
-            unit[i] = 1.0;
-            project(&mut unit);
-            let norm = nrm2(unit.view());
-            if norm.is_finite() && norm > LANCZOS_PROJECTED_START_RTOL {
-                replacement = Some((unit, norm));
-                break;
-            }
-        }
-        let Some((unit, norm)) = replacement else {
-            return (Vec::new(), Vec::new(), Vec::new(), 0);
-        };
-        q0 = unit;
-        start = norm;
-    }
+}
+
+/// [`lanczos_basis`] from a start vector already inside the projected space.
+/// The projector acts on every `H v` and on each new direction, so the basis
+/// stays in the projected subspace.
+fn lanczos_basis_from<H, F>(
+    h: &H,
+    x: ArrayView1<f64>,
+    q0: ArrayView1<f64>,
+    krylov: usize,
+    project: &mut F,
+) -> (Vec<Array1<f64>>, Vec<f64>, Vec<f64>, usize)
+where
+    H: ApplyHessian + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
+    let n = q0.len();
+    let start = nrm2(q0);
     if !start.is_finite() || start < LANCZOS_START_EPS {
         return (Vec::new(), Vec::new(), Vec::new(), 0);
     }
+    let q0 = q0.to_owned();
     let m = krylov.min(n).max(1);
     let mut q: Vec<Array1<f64>> = Vec::with_capacity(m);
     let mut alpha = Vec::with_capacity(m);
@@ -1037,6 +1078,10 @@ where
             axpy(-beta[j - 1], q[j - 1].view(), &mut w);
         }
         reorthogonalize(&mut w, &q);
+        // `H v` was projected, but the two subtractions and the
+        // reorthogonalization leave rounding in the vertical directions. The
+        // division by `b` below would amplify it near an invariant subspace.
+        project(&mut w);
         let b = nrm2(w.view());
         if !b.is_finite() || b <= LANCZOS_LINDEP * a.abs() {
             break;
@@ -3864,35 +3909,169 @@ mod tests {
         assert!(correction[2].abs() > 0.0);
     }
 
-    #[test]
-    fn linked_backend_adapter_projects_operator_and_preconditioner() {
-        struct KeepRigid;
-        impl ApplyHessian for KeepRigid {
-            fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
-                array![-100.0 * v[0], -2.0 * v[1]]
-            }
+    struct Vertical;
+    impl ApplyHessian for Vertical {
+        fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+            array![-100.0 * v[0], -2.0 * v[1], 3.0 * v[2]]
         }
-        impl ApplyPreconditioner for KeepRigid {
-            fn apply_preconditioner(
-                &self,
-                _x: ArrayView1<f64>,
-                residual: ArrayView1<f64>,
-            ) -> Array1<f64> {
-                array![100.0 + residual[0], residual[1]]
-            }
-        }
+    }
 
+    const EXTERNAL: [EigensolverKind; 3] = [
+        EigensolverKind::Primme,
+        EigensolverKind::Libkrylov,
+        EigensolverKind::Slepc,
+    ];
+
+    #[test]
+    fn external_backends_refuse_a_projector_that_is_not_the_identity() {
+        let x = Array1::zeros(3);
+        let seed = array![1.0, 1.0, 1.0];
+        for kind in EXTERNAL {
+            let params = EigenParams {
+                kind,
+                ..EigenParams::default()
+            };
+            let mut project = |v: &mut Array1<f64>| v[0] = 0.0;
+            let err = lowest_mode_with(&Vertical, x.view(), seed.view(), &params, &mut project)
+                .expect_err("a vertical eigenvalue must not be reported");
+            assert!(
+                matches!(err, Error::ProjectorUnsupported { kind: name } if name == kind.name()),
+                "{kind:?}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn external_backends_refuse_a_projector_that_only_the_probes_move() {
+        let x = Array1::zeros(3);
+        let seed = array![0.0, 1.0, 1.0];
+        for kind in EXTERNAL {
+            let params = EigenParams {
+                kind,
+                ..EigenParams::default()
+            };
+            let mut project = |v: &mut Array1<f64>| v[0] = 0.0;
+            let err = lowest_mode_with(&Vertical, x.view(), seed.view(), &params, &mut project)
+                .expect_err("the seed is already horizontal, the operator is not");
+            assert!(matches!(err, Error::ProjectorUnsupported { .. }), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn external_backends_with_the_identity_projector_reach_the_backend() {
+        let x = Array1::zeros(3);
+        let seed = array![1.0, 1.0, 1.0];
+        for kind in EXTERNAL {
+            let params = EigenParams {
+                kind,
+                ..EigenParams::default()
+            };
+            let result = lowest_mode(&Vertical, x.view(), seed.view(), &params);
+            if kind.is_linked() {
+                continue;
+            }
+            assert!(
+                matches!(result, Err(Error::EigenUnavailable { .. })),
+                "{kind:?}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_refusal_does_not_call_the_hessian() {
+        struct Counting(std::cell::Cell<usize>);
+        impl ApplyHessian for Counting {
+            fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+                self.0.set(self.0.get() + 1);
+                v.to_owned()
+            }
+        }
+        let h = Counting(std::cell::Cell::new(0));
+        let x = Array1::zeros(3);
+        let seed = array![1.0, 1.0, 1.0];
+        let params = EigenParams {
+            kind: EigensolverKind::Primme,
+            ..EigenParams::default()
+        };
         let mut project = |v: &mut Array1<f64>| v[0] = 0.0;
-        let projected = ProjectedOps::new(&KeepRigid, &KeepRigid, &mut project);
-        let x = Array1::zeros(2);
-        let input = array![3.0, 4.0];
+        assert!(lowest_mode_with(&h, x.view(), seed.view(), &params, &mut project).is_err());
+        assert_eq!(h.0.get(), 0);
+    }
+
+    #[test]
+    fn a_projector_with_no_direction_is_a_typed_error_on_every_built_in() {
+        let x = Array1::zeros(3);
+        let seed = array![1.0, 2.0, 3.0];
+        for kind in [
+            EigensolverKind::Lanczos,
+            EigensolverKind::RayleighRitz,
+            EigensolverKind::JacobiDavidson,
+            EigensolverKind::Lobpcg,
+            EigensolverKind::Dimer,
+        ] {
+            let params = EigenParams {
+                kind,
+                ..EigenParams::default()
+            };
+            let mut project = |v: &mut Array1<f64>| v.fill(0.0);
+            let err = lowest_mode_with(&Vertical, x.view(), seed.view(), &params, &mut project)
+                .expect_err("nothing is left to search");
+            assert!(
+                matches!(err, Error::ProjectedSolve { .. }),
+                "{kind:?}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_final_normalize_does_not_amplify_projection_residue() {
+        let mode = LowestMode {
+            vector: array![1.0, 1e-15, 0.0],
+            value: -5.0,
+            actions: 3,
+        };
+        let mut kill_first = |v: &mut Array1<f64>| v[0] = 0.0;
+        let err = finish_projected(mode, &mut kill_first).expect_err("residue is not a mode");
+        assert!(matches!(err, Error::ProjectedSolve { .. }), "{err:?}");
+
+        let mode = LowestMode {
+            vector: array![1.0, 3.0, 4.0],
+            value: -5.0,
+            actions: 3,
+        };
+        let mut kill_first = |v: &mut Array1<f64>| v[0] = 0.0;
+        let done = finish_projected(mode, &mut kill_first).unwrap();
+        assert!((nrm2(done.vector.view()) - 1.0).abs() < 1e-15);
+        assert_eq!(done.value, -5.0);
+
+        let zero = LowestMode {
+            vector: Array1::zeros(3),
+            value: 0.0,
+            actions: 0,
+        };
+        let mut keep = |_: &mut Array1<f64>| {};
         assert_eq!(
-            projected.apply_hessian(x.view(), input.view()),
-            array![0.0, -8.0]
+            finish_projected(zero, &mut keep).unwrap().vector,
+            Array1::zeros(3)
         );
-        assert_eq!(
-            projected.apply_preconditioner(x.view(), input.view()),
-            array![0.0, 4.0]
-        );
+    }
+
+    #[test]
+    fn lanczos_projects_the_new_direction_before_dividing_by_beta() {
+        let calls = std::cell::Cell::new(0usize);
+        let mut project = |v: &mut Array1<f64>| {
+            calls.set(calls.get() + 1);
+            v[0] = 0.0;
+        };
+        let x = Array1::zeros(3);
+        let seed = array![0.0, 1.0, 0.5];
+        let (q, _, _, actions) = lanczos_basis(&Vertical, x.view(), seed.view(), 3, &mut project);
+        // The horizontal space has two directions, so the third column breaks down.
+        assert_eq!((q.len(), actions), (2, 2));
+        // One for the start, one per Hessian action, one per new direction.
+        assert_eq!(calls.get(), 1 + 2 + 2);
+        for column in &q {
+            assert_eq!(column[0], 0.0, "{column:?}");
+        }
     }
 }
