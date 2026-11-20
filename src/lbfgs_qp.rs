@@ -123,11 +123,21 @@ fn apply_engine(model: &mut highs::Model, options: &HighsOptions) -> Result<()> 
     Ok(())
 }
 
-/// Apply the configured HiGHS time limit to one model.
-fn set_time_limit(model: &mut highs::Model, options: &HighsOptions) -> Result<()> {
+/// Set the HiGHS `time_limit` option, in seconds, on one problem.
+fn set_time_limit(model: &mut highs::Model, seconds: f64) -> Result<()> {
     model
-        .try_set_option("time_limit", options.time_limit)
+        .try_set_option("time_limit", seconds)
         .map_err(|_| Error::Highs("cannot set time_limit".into()))
+}
+
+/// `Ok` when the solve is optimal, else the error for its status. A solve
+/// that reached `seconds` is [`Error::HighsTimeLimit`].
+fn require_optimal(solved: &highs::SolvedModel, seconds: f64) -> Result<()> {
+    match solved.status() {
+        HighsModelStatus::Optimal => Ok(()),
+        HighsModelStatus::ReachedTimeLimit => Err(Error::HighsTimeLimit { seconds }),
+        status => Err(Error::Highs(format!("status {status:?}"))),
+    }
 }
 
 fn bind_callback(
@@ -395,7 +405,8 @@ fn project_qp(
     model
         .try_set_option("threads", 1_i32)
         .map_err(|_| Error::Highs("cannot set threads=1".into()))?;
-    set_time_limit(&mut model, options)?;
+    let time_limit = options.projection_time_limit();
+    set_time_limit(&mut model, time_limit)?;
 
     let (q_start, q_index, q_value) = identity_csc(n);
     let st = unsafe {
@@ -417,9 +428,7 @@ fn project_qp(
     let solved = model
         .try_solve()
         .map_err(|e| Error::Highs(format!("solve {e:?}")))?;
-    if solved.status() != HighsModelStatus::Optimal {
-        return Err(Error::Highs(format!("status {:?}", solved.status())));
-    }
+    require_optimal(&solved, time_limit)?;
     let sol = solved.get_solution();
     let p = sol.columns();
     if p.len() != n {
@@ -655,7 +664,8 @@ pub(crate) fn highs_feasible_step_boxed(
     serialise_openmp_once();
     let _ = model.try_set_option("parallel", "off");
     let _ = model.try_set_option("threads", 1_i32);
-    set_time_limit(&mut model, options)?;
+    let time_limit = options.step_time_limit();
+    set_time_limit(&mut model, time_limit)?;
     if !equalities.is_empty() {
         model
             .try_set_option(
@@ -687,9 +697,7 @@ pub(crate) fn highs_feasible_step_boxed(
     let solved = model
         .try_solve()
         .map_err(|e| Error::Highs(format!("solve {e:?}")))?;
-    if solved.status() != HighsModelStatus::Optimal {
-        return Err(Error::Highs(format!("status {:?}", solved.status())));
-    }
+    require_optimal(&solved, time_limit)?;
     let sol = solved.get_solution();
     let p = sol.columns();
     if p.len() != n {

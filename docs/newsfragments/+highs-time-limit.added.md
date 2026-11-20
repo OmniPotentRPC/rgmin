@@ -1,0 +1,2 @@
+- `Solver::set_highs_time_limit` sets the seconds one HiGHS solve may run, and `HighsOptions::time_limit` is an `Option<f64>` with the same meaning. Without a limit the L-BFGS projection QP keeps 0.05 s and the feasible step QP, with or without a Hessian, keeps 1.0 s.
+- A HiGHS solve that reaches its limit is no longer silent. `Error::HighsTimeLimit` names it where the step cannot go on without the solve, and `Solver::highs_timeouts` counts the Hessian steps that fell back to the shifted Newton, RFO or L-BFGS step.
