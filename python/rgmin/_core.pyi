@@ -180,7 +180,7 @@ class Report:
 
 class SolverConfig:
     """
-    Validated, immutable optimizer options. Unknown keywords raise ``ValueError`` listing the valid options. A Cartesian solver installs a per-atom cap of 0.2 (ASE maxstep, eOn max_move) unless the method already limits the step. BFGS, dogleg, and FIRE 2.0 start without that cap. ``maxstep`` or ``atom_maxmove`` replaces it on every method. A non-positive value clears it. A positive ``maxmove`` is the Euclidean step limit and leaves the per-atom default off. ``h0`` and ``stpmax`` are opt-in: ``h0`` scales the initial inverse Hessian of BFGS and L-BFGS, and ``stpmax`` bounds a line-search multiplier where a line search runs. Omitting either leaves the session defaults.
+    Validated, immutable optimizer options. Unknown keywords raise ``ValueError`` listing the valid options. A Cartesian solver installs a per-atom cap of 0.2 (ASE maxstep, eOn max_move) unless the method already limits the step. BFGS, dogleg, and FIRE 2.0 start without that cap. ``maxstep`` or ``atom_maxmove`` replaces it on every method. A non-positive value clears it. A positive ``maxmove`` is the Euclidean step limit and leaves the per-atom default off. ``h0`` and ``linesearch="ase"`` are opt-in: ``h0`` scales the initial inverse Hessian of BFGS and L-BFGS, and ``linesearch="ase"`` runs a port of ASE's line search on those two methods, with ``stpmax`` bounding its step multiplier. Omitting both leaves the session defaults.
     """
 
     def __init__(self, method: str | Method = 'lbfgs', **kwargs) -> None: ...
