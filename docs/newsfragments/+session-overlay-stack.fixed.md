@@ -1,0 +1,1 @@
+Kept first-order method overlay state out of the solver step stack frame, preventing undefined inactive enum storage from reaching optimized conditional loads under Valgrind.

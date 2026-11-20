@@ -385,10 +385,10 @@ pub struct Solver {
 /// Methods added after the constraint stepper's match was written.
 enum Overlay {
     None,
-    QuickMin(QuickMinState, QuickMinSession),
-    Ode12r(crate::ode12r::Ode12rState),
-    Diis(DiisState),
-    GromacsSteep(GromacsSteep),
+    QuickMin(Box<QuickMinState>, Box<QuickMinSession>),
+    Ode12r(Box<crate::ode12r::Ode12rState>),
+    Diis(Box<DiisState>),
+    GromacsSteep(Box<GromacsSteep>),
     GpMin(Option<Box<GpMin>>),
 }
 
@@ -606,12 +606,13 @@ impl Solver {
             inner,
         };
         solver.overlay = match &method {
-            Method::QuickMin => {
-                Overlay::QuickMin(QuickMinState::new(dim, istep), QuickMinSession::new(istep))
-            }
-            Method::Ode12r => Overlay::Ode12r(crate::ode12r::Ode12rState::new(istep)),
-            Method::Diis { memory } => Overlay::Diis(DiisState::new(*memory)),
-            Method::GromacsSteep => Overlay::GromacsSteep(GromacsSteep::new(istep)),
+            Method::QuickMin => Overlay::QuickMin(
+                Box::new(QuickMinState::new(dim, istep)),
+                Box::new(QuickMinSession::new(istep)),
+            ),
+            Method::Ode12r => Overlay::Ode12r(Box::new(crate::ode12r::Ode12rState::new(istep))),
+            Method::Diis { memory } => Overlay::Diis(Box::new(DiisState::new(*memory))),
+            Method::GromacsSteep => Overlay::GromacsSteep(Box::new(GromacsSteep::new(istep))),
             Method::GpMin => {
                 let state = match GpMin::new(GpMinConfig::default(), dim) {
                     Ok(gp) => Some(Box::new(gp)),
@@ -5347,7 +5348,7 @@ impl Solver {
     ///
     /// Other methods return `None`.
     pub fn gromacs_step_size(&self) -> Option<f64> {
-        match self.overlay {
+        match &self.overlay {
             Overlay::GromacsSteep(state) => Some(state.step_size()),
             _ => None,
         }
@@ -5357,7 +5358,7 @@ impl Solver {
     ///
     /// Other methods return `None`.
     pub fn gromacs_steep_config(&self) -> Option<GromacsSteepConfig> {
-        match self.overlay {
+        match &self.overlay {
             Overlay::GromacsSteep(state) => Some(state.config()),
             _ => None,
         }
@@ -6487,6 +6488,15 @@ mod tests {
     use crate::fire::FireKind;
     use crate::oracle::Oracle;
     use ndarray::{ArrayView1, array};
+
+    #[test]
+    fn overlay_keeps_method_state_out_of_the_step_stack_frame() {
+        assert!(
+            std::mem::size_of::<Overlay>() <= 3 * std::mem::size_of::<usize>(),
+            "overlay grew to {} bytes",
+            std::mem::size_of::<Overlay>()
+        );
+    }
 
     /// A steep well under a tiny Euclidean cap: every FIRE step is
     /// clamped, and the velocity has to describe the clamped move.
