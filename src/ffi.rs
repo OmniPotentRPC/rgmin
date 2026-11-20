@@ -95,7 +95,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 53;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 54;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -4580,7 +4580,7 @@ pub extern "C" fn rgmin_manifold_spd(p: usize, metric: i32) -> *mut rgmin_manifo
 
 /// Molecular or cluster quotient \(\mathbb{R}^{3N}/\mathrm{SE}(3)\)
 /// (`periodic == 0`) or \(\mathbb{R}^{3N}/\mathrm{T}(3)\) (`periodic != 0`).
-/// Packed length is `3 * n_atoms`. Null when `n_atoms == 0`. ABI minor 53.
+/// Packed length is `3 * n_atoms`. Null when `n_atoms == 0`. ABI minor 54.
 #[unsafe(no_mangle)]
 pub extern "C" fn rgmin_manifold_rigid_quotient(
     n_atoms: usize,
@@ -7304,7 +7304,7 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpairs_ex(
     rgmin_status_t::RGMIN_SUCCESS
 }
 
-/// Termination reason of [`rgmin_rtr_tcg_solve`]. ABI minor 53.
+/// Termination reason of [`rgmin_rtr_tcg_solve`]. ABI minor 54.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum rgmin_tcg_stop_t {
@@ -7320,7 +7320,7 @@ pub enum rgmin_tcg_stop_t {
     RGMIN_TCG_ZERO_GRADIENT = 4,
 }
 
-/// Output summary of [`rgmin_rtr_tcg_solve`]. ABI minor 53.
+/// Output summary of [`rgmin_rtr_tcg_solve`]. ABI minor 54.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct rgmin_rtr_tcg_result_t {
@@ -7374,7 +7374,7 @@ fn copy_contiguous(dst: &mut [f64], src: &Array1<f64>) -> bool {
 /// [`crate::rtr::truncated_cg_projected`] with the identity projector. A
 /// Hessian action that is not finite ends the iteration at once and the
 /// call returns `RGMIN_INTERNAL_ERROR` without writing `eta_out`. ABI
-/// minor 53.
+/// minor 54.
 ///
 /// # Safety
 /// `hvp` is callable with `user`. `x`, `grad`, and `eta_out` each address
@@ -7490,7 +7490,7 @@ pub unsafe extern "C" fn rgmin_rtr_tcg_solve(
     })
 }
 
-/// Absil-Baker-Gallivan trust-region radius update. ABI minor 53.
+/// Absil-Baker-Gallivan trust-region radius update. ABI minor 54.
 ///
 /// Accepts when the ratio of actual to predicted decrease is above 1/10.
 /// Shrinks by 1/4 below 1/4, and doubles above 3/4 when the step lies on
@@ -7585,7 +7585,7 @@ fn project_onto<'a>(
 /// [`Error::ProjectorUnsupported`] as the message, before any backend is
 /// called and whether or not it is linked. A manifold that leaves no tangent
 /// direction returns the same status. `mode_out` and `out` are written only
-/// on success. ABI minor 53.
+/// on success. ABI minor 54.
 ///
 /// # Safety
 /// Same tensor rules as [`rgmin_lowest_eigenpair_with_options`]. `mode_out`
@@ -7712,7 +7712,7 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
 }
 
 /// [`rgmin_lowest_eigenpairs_ex`] on `manifold`'s tangent space at `x`.
-/// A null manifold matches [`rgmin_lowest_eigenpairs_ex`]. ABI minor 53.
+/// A null manifold matches [`rgmin_lowest_eigenpairs_ex`]. ABI minor 54.
 ///
 /// # Safety
 /// Same tensor and callback rules as [`rgmin_lowest_eigenpairs_ex`].
