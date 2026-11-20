@@ -150,6 +150,42 @@ fn strict_morse_gap_survives_the_residual_ball() {
 }
 
 #[test]
+fn nonnegative_majorant_of_signed_zero_is_positive_zero() {
+    let positive_zero = 0.0_f64.to_bits();
+    let ball = kantorovich_ball(-0.0, 1.0, -0.0).expect("signed zero is nonnegative");
+    assert_eq!(ball.newton_step().to_bits(), positive_zero);
+    assert_eq!(ball.h().to_bits(), positive_zero);
+    assert_eq!(ball.radius().to_bits(), positive_zero);
+    assert_eq!(ball.nonlinear_remainder().to_bits(), positive_zero);
+
+    let bar = adjoint_functional_bar(ball, -0.0, -0.0, -0.0).expect("signed zero");
+    assert_eq!(bar.first_order.to_bits(), positive_zero);
+    assert_eq!(bar.remainder.to_bits(), positive_zero);
+    assert_eq!(bar.total.to_bits(), positive_zero);
+
+    let gap = certify_morse_gap(1.0, -0.0, -0.0, ball).expect("zero perturbation");
+    assert_eq!(gap.computed.to_bits(), 1.0_f64.to_bits());
+    assert_eq!(gap.uncertainty.to_bits(), positive_zero);
+    assert_eq!(gap.certified.to_bits(), 1.0_f64.to_bits());
+
+    match certify_morse_gap(-0.0, -0.0, -0.0, ball) {
+        Err(CertificateError::UnresolvedMorseGap { gap, uncertainty }) => {
+            assert_eq!(gap.to_bits(), positive_zero);
+            assert_eq!(uncertainty.to_bits(), positive_zero);
+        }
+        other => panic!("a zero computed gap stays unresolved, got {other:?}"),
+    }
+
+    match kantorovich_ball(1.0, -0.0, 0.0) {
+        Err(CertificateError::InvalidMajorant { input, value }) => {
+            assert_eq!(input, "inverse_norm");
+            assert_eq!(value.to_bits(), (-0.0_f64).to_bits());
+        }
+        other => panic!("inverse_norm rejects signed zero, got {other:?}"),
+    }
+}
+
+#[test]
 fn nonnegative_and_positive_majorants_reject_negative_nan_and_infinite_inputs() {
     for bad in [
         -1.0,

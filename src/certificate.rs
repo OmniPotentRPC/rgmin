@@ -168,8 +168,11 @@ pub struct MorseGap {
 }
 
 fn nonnegative(input: &'static str, value: f64) -> Result<f64, CertificateError> {
-    if value.is_finite() && value >= 0.0 {
+    if value.is_finite() && value > 0.0 {
         Ok(value)
+    } else if value == 0.0 {
+        // -0.0 compares equal to zero and would otherwise keep its sign bit.
+        Ok(0.0)
     } else {
         Err(CertificateError::InvalidMajorant { input, value })
     }
