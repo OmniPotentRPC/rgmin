@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 60
+#define RGMIN_ABI_VERSION_MINOR 61
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -92,7 +92,9 @@ typedef struct rgmin_abi_stamp_t {
  * 52 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
  *    rgmin_solver_set_gromacs_steep, and
  *    rgmin_gromacs_steep_max_constraint_shrinks.
- * 60 rgmin_minimize_eindir_opts. rgmin_control_t is unchanged. */
+ * 60 rgmin_minimize_eindir_opts.
+ * 61 rgmin_solver_set_highs_time_limit and rgmin_solver_highs_timeouts.
+ *    rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -776,6 +778,20 @@ _Static_assert(sizeof(rgmin_highs_crossover_t) == sizeof(int32_t),
 /** Set HiGHS `run_crossover`. Unknown integers return 1. */
 int32_t rgmin_solver_set_highs_crossover(rgmin_solver_t *solver,
                                          rgmin_highs_crossover_t kind);
+/** Seconds one HiGHS solve may run. A positive value, infinity included,
+ *  replaces the default of every solve. Zero or a negative value clears
+ *  it, so the L-BFGS projection QP is back to 0.05 s and the feasible
+ *  step QP to 1.0 s. NaN returns 1 and leaves the limit as it was.
+ *  Returns 0, or 1 on a NULL solver or a build without the highs
+ *  feature. A step the constraints must shape that reaches the limit
+ *  returns \c RGMIN_INVALID_PARAMETER, and \ref rgmin_last_error names
+ *  the time limit. ABI minor 61. */
+int32_t rgmin_solver_set_highs_time_limit(rgmin_solver_t *solver, double seconds);
+/** Hessian steps whose HiGHS solve reached its time limit and fell back
+ *  to the step the session takes without HiGHS. Zero for a NULL solver,
+ *  a session that takes no Hessian step, and a build without highs.
+ *  ABI minor 61. */
+size_t rgmin_solver_highs_timeouts(const rgmin_solver_t *solver);
 /** HiGHS callback kind. Integers match HiGHS `HighsCallbackType`. */
 typedef enum rgmin_highs_cb_kind_t {
     RGMIN_HIGHS_CB_LOGGING = 0,
