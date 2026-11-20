@@ -4,10 +4,11 @@
 //! primal space, together with the matching dual norm for linear functionals
 //! and the induced operator norm for linear maps. This module only combines
 //! those proved inputs; it does not estimate a Lipschitz constant from sampled
-//! Jacobians. All arithmetic is IEEE 754 `f64` floating-point without outward
-//! directed rounding or interval arithmetic, so the returned quantities are
-//! floating-point evaluations of the analytical majorants rather than
-//! machine-rigorous interval enclosures. Products of three or more majorants
+//! Jacobians. All arithmetic is IEEE 754 `f64` in the default rounding mode,
+//! round to nearest with ties to even. This module does not change that mode
+//! and does not use directed rounding or interval arithmetic, so each returned
+//! quantity is the nearest estimate of the corresponding analytical majorant
+//! rather than a machine-rigorous enclosure. Products of three or more majorants
 //! keep their binary exponents apart until one final scaling, so a bound
 //! underflows or overflows only when its exact value does, and a non-finite
 //! bound is returned as [`CertificateError::InvalidMajorant`].
@@ -75,12 +76,13 @@ impl fmt::Display for CertificateError {
 
 impl std::error::Error for CertificateError {}
 
-/// Certified ball containing a zero of a nonlinear stationarity map.
+/// Newton--Kantorovich ball evaluated from caller-supplied majorants.
 ///
 /// Instances are constructed by [`kantorovich_ball`], which validates the
 /// majorants and enforces `h <= 1/2` so a negative radius or nonlinear
-/// remainder cannot be forged. Bounds are evaluated in standard `f64`
-/// floating-point without outward rounding.
+/// remainder cannot be forged. The radius and remainder are IEEE 754
+/// binary64 evaluations in the default mode, round to nearest, ties to
+/// even. This module does not change that mode.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct KantorovichBall {
@@ -103,25 +105,32 @@ impl KantorovichBall {
         self.h
     }
 
-    /// Radius about `x0` containing a zero.
+    /// Estimate of the existence radius `2 eta / (1 + sqrt(1 - 2 h))`.
+    ///
+    /// Each operation is IEEE 754 binary64 in the default mode, round to
+    /// nearest, ties to even. This module does not change that mode.
     #[must_use]
     pub const fn radius(&self) -> f64 {
         self.radius
     }
 
-    /// Bound on the nonlinear part of the displacement beyond the Newton step.
+    /// Estimate of the nonlinear displacement `h * radius / (1 + sqrt(1 - 2 h))`.
+    ///
+    /// Each operation is IEEE 754 binary64 in the default mode, round to
+    /// nearest, ties to even. This module does not change that mode.
     #[must_use]
     pub const fn nonlinear_remainder(&self) -> f64 {
         self.nonlinear_remainder
     }
 }
 
-/// Certified first-order adjoint contribution and second-order remainder.
+/// Adjoint functional estimate and its second-order remainder.
 ///
 /// Instances are constructed by [`adjoint_functional_bar`]; the struct is
 /// non-exhaustive, so it cannot be built by a struct literal outside this
-/// crate. All quantities are evaluated in standard `f64` floating-point without
-/// outward rounding.
+/// crate. Each stored value is an IEEE 754 binary64 evaluation in the
+/// default mode, round to nearest, ties to even. This module does not
+/// change that mode.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct AdjointFunctionalBar {
@@ -133,12 +142,13 @@ pub struct AdjointFunctionalBar {
     pub total: f64,
 }
 
-/// Certified distance of a perturbed self-adjoint spectrum from zero.
+/// Estimate of the distance from zero of a perturbed self-adjoint spectrum.
 ///
 /// Instances are constructed by [`certify_morse_gap`]; the struct is
 /// non-exhaustive, so it cannot be built by a struct literal outside this
-/// crate. All quantities are evaluated in standard `f64` floating-point without
-/// outward rounding.
+/// crate. Each stored value is an IEEE 754 binary64 evaluation in the
+/// default mode, round to nearest, ties to even. This module does not
+/// change that mode.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct MorseGap {
@@ -146,7 +156,14 @@ pub struct MorseGap {
     pub computed: f64,
     /// Residual-induced perturbation plus eigensolver roundoff.
     pub uncertainty: f64,
-    /// Strict lower bound on the exact gap.
+    /// Estimate of the real value `computed - uncertainty`.
+    ///
+    /// `computed` is the supplied gap. `uncertainty` is the round-to-nearest
+    /// evaluation of `operator_lipschitz * radius + eigensolver_roundoff`.
+    /// Their difference is IEEE 754 binary64 in the default mode, round to
+    /// nearest, ties to even. This module does not change that mode, so the
+    /// stored value is the nearest representable estimate of that real
+    /// expression.
     pub certified: f64,
 }
 
@@ -189,7 +206,7 @@ fn scaled_product<const N: usize>(factors: [f64; N]) -> f64 {
     libm::scalbn(significand, exponent)
 }
 
-/// Prove the classical Newton--Kantorovich existence ball.
+/// Evaluate the classical Newton--Kantorovich existence ball.
 ///
 /// Given a chosen primal norm `||.||` and its induced operator norm on linear
 /// maps, `inverse_norm` bounds `||J(x0)^{-1}||`, `newton_step` is
@@ -200,8 +217,9 @@ fn scaled_product<const N: usize>(factors: [f64; N]) -> f64 {
 /// The returned radius uses the cancellation-free form
 /// `2 eta / (1 + sqrt(1 - 2 h))` (Kantorovich and Akilov 1982,
 /// <https://doi.org/10.1016/B978-0-08-023036-8.50024-2>; Gragg and Tapia
-/// 1974, <https://doi.org/10.1137/0711002>). Arithmetic is standard `f64`
-/// floating-point without outward rounding.
+/// 1974, <https://doi.org/10.1137/0711002>). Each operation is IEEE 754
+/// binary64 in the default mode, round to nearest, ties to even. This
+/// function does not change that mode.
 pub fn kantorovich_ball(
     newton_step: f64,
     inverse_norm: f64,
@@ -243,7 +261,7 @@ pub fn kantorovich_ball(
     })
 }
 
-/// Bound a scalar functional at the zero enclosed by `ball`.
+/// Evaluate a scalar functional bound at the zero enclosed by `ball`.
 ///
 /// For the exact adjoint equation `J(x0)^T lambda = grad q(x0)`, `first_order`
 /// is the dual-weighted residual `|lambda^T F(x0)|`, which assumes an exact
@@ -254,8 +272,9 @@ pub fn kantorovich_ball(
 /// primal space to its dual throughout the existence ball (for example on
 /// `B(x0, 2 eta)`). The remainder combines the linear displacement remainder
 /// beyond the Newton step with the quadratic Taylor remainder of `q` (Becker
-/// and Rannacher 2001, <https://doi.org/10.1017/S0962492901000010>). Bounds
-/// are evaluated in standard `f64` floating-point without outward rounding.
+/// and Rannacher 2001, <https://doi.org/10.1017/S0962492901000010>). Each
+/// operation is IEEE 754 binary64 in the default mode, round to nearest,
+/// ties to even. This function does not change that mode.
 pub fn adjoint_functional_bar(
     ball: KantorovichBall,
     first_order: f64,
@@ -287,7 +306,7 @@ pub fn adjoint_functional_bar(
     })
 }
 
-/// Certify that a projected self-adjoint operator cannot change inertia.
+/// Estimate the Morse gap of a projected self-adjoint operator.
 ///
 /// By Weyl's eigenvalue perturbation inequality for self-adjoint operators
 /// (Weyl 1912, <https://doi.org/10.1007/BF01456804>), each exact eigenvalue
@@ -298,8 +317,10 @@ pub fn adjoint_functional_bar(
 /// `B(x0, 2 eta)`), so that `operator_lipschitz * ball.radius()` bounds the
 /// spectral-norm change between the approximate and exact stationary points.
 /// `eigensolver_roundoff` is added before comparing that perturbation with the
-/// computed spectral gap `computed_gap` from zero. Bounds are evaluated in
-/// standard `f64` floating-point without outward rounding.
+/// computed spectral gap `computed_gap` from zero. The comparison and
+/// [`MorseGap::certified`] use IEEE 754 binary64 in the default mode, round
+/// to nearest, ties to even. This function does not change that mode, so
+/// `certified` is the nearest estimate of `computed - uncertainty`.
 pub fn certify_morse_gap(
     computed_gap: f64,
     operator_lipschitz: f64,
