@@ -1,0 +1,189 @@
+#+TITLE: GROMACS conjugate gradient
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:{}
+
+* GROMACS conjugate gradient
+
+~Method::GromacsCg~ implements the Polak-Ribière conjugate-gradient
+minimizer documented in the
+[[https://manual.gromacs.org/current/reference-manual/algorithms/energy-minimization.html#conjugate-gradient][GROMACS reference manual, Energy Minimization: Conjugate Gradient]]
+and in GROMACS 2025.4
+[[https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L1313][do_cg]]
+(~src/gromacs/mdrun/minimize.cpp~, lines 1313-2035):
+
+\[
+\mathbf{p}_k = -\mathbf{g}_k + \beta_k \mathbf{p}_{k-1}, \qquad
+\beta_k = \frac{\mathbf{g}_k \cdot (\mathbf{g}_k - \mathbf{g}_{k-1})}{\mathbf{g}_{k-1} \cdot \mathbf{g}_{k-1}},
+\]
+
+where $\mathbf{g}_k = -\mathbf{F}_k$ is the potential-energy gradient.
+
+** Reuse of rgmin's NLCG and line-search machinery
+
+Rather than duplicating a custom line-search loop, ~Method::GromacsCg~
+runs on top of rgmin's existing ~Inner::Nlcg~ (~Conjugacy::PolakRibiere~)
+and ~LineSearch~ infrastructure (~take_session_step~), adding the
+GROMACS-specific rules from ~do_cg~:
+
+1. *Periodic steepest-descent restart (~nstcgsteep~)*: ~do_cg~ counts its
+   iterations with ~for (step = 0; ...; step++)~ and, once iteration
+   ~step~ has moved, sets $\beta = 0$ for the next direction when
+   ~nstcg && ((step % nstcg) == 0)~ (~minimize.cpp~ lines 1497 and
+   1868-1871). ~GromacsCg::step~ is that counter and
+   ~GromacsCg::filter_beta~ applies the test before ~GromacsCg::advance~,
+   so the steepest-descent directions are those of iterations 0, 1,
+   $\text{nstcgsteep} + 1$, $2\,\text{nstcgsteep} + 1$, and so on: the
+   second step is always steepest descent. As in ~do_cg~, a restart for a
+   positive $\mathbf{g} \cdot \mathbf{p}$ (~gpa > 0~, which undoes its count
+   with ~step--~) keeps the index, while the retry of a stalled conjugate
+   step spends one. ~nstcgsteep = 0~ turns the periodic restart off.
+   ~Solver::forget~ sets the counter back to zero, so a forgotten session
+   restarts like a fresh one. The default is
+   ~GROMACS_CG_NSTCGSTEEP_DEFAULT = 1000~
+   ([[https://manual.gromacs.org/current/user-guide/mdp-options.html#mdp-nstcgsteep][MDP nstcgsteep]]).
+2. *Polak-Ribière multiplier cap*: ~do_cg~ suppresses the conjugate term
+   when $|\beta_k| > 5.0$ (~minimize.cpp~ lines 1883-1887:
+   ~if (std::fabs(beta) > 5.0) { beta = 0.0; }~). ~GromacsCg::filter_beta~
+   enforces the same ~GROMACS_CG_BETA_CAP = 5.0~ bound on the raw
+   Polak-Ribière ratio from ~Conjugacy::PolakRibiere~.
+3. *Unit search direction and opening step scale*: before entering the line
+   search, the search direction is normalized to unit Euclidean length via
+   overflow-safe scaling. On the first step, the opening trial step is
+   ~Control::istep~ (~emstep~, default ~GROMACS_CG_EMSTEP_DEFAULT = 0.01~);
+   subsequent steps scale the previous accepted step length through
+   rgmin's Nocedal-Wright eq. 3.60 opening estimate (~nlcg_opening_alpha~).
+   The session defaults to strong Wolfe with $c_1 = 10^{-4}$ and the
+   conjugate-gradient curvature parameter $c_2 = 0.1$ so cubic Hermite
+   zoom locates the 1D directional stationary point before the next
+   Polak-Ribière update. Callers can override the line search via
+   ~Solver::set_linesearch~ or ~minimize_method~.
+4. *Steepest-descent fallback on a stalled conjugate direction*: if a
+   line search along a conjugate direction ($\beta_{k-1} \neq 0$) fails to
+   decrease the energy or rounds away all coordinates, the session clears
+   the CG memory and retries the step along the steepest-descent direction
+   $-\mathbf{g}_k$, matching the ~beta = 0.0; continue;~ branch of ~do_cg~
+   (~minimize.cpp~ lines 1814-1832). If a steepest-descent step still cannot change any
+   coordinate or decrease the energy, the session stops with
+   ~Status::MachinePrecision~ (~RGMIN_STOP_MACHINE_PRECISION~).
+5. *Max-atom force norm (~Fmax~)*: ~Report::stop_norm~ defaults to
+   ~StopNorm::MaxAtom~ ($\max_i \|\mathbf{F}_i\|_2$ over consecutive xyz
+   atom triples), matching ~gmx_f_norm_max~ in ~minimize.cpp~ and
+   ~Method::GromacsSteep~. There is no implicit 0.2 per-atom displacement
+   cap unless explicitly requested.
+
+** Refusal of holonomic constraints
+
+GROMACS 2025.4 runs ~do_cg~ with LINCS constraints applied to each trial
+configuration; ~gmx grompp~ refuses only SHAKE with ~integrator = cg~
+([[https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/gmxpreprocess/grompp.cpp#L2371][grompp.cpp]])
+and suggests ~lincs-order~ of 8 or more
+([[https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/gmxpreprocess/readir.cpp#L5365][readir.cpp]]).
+~gromacs-cg~ does not implement that constrained line search: projecting
+coordinates back onto a nonlinear constraint manifold after a step breaks
+the conjugacy of consecutive search directions that the rest of the
+session relies on. Use ~gromacs-steep~ for constrained systems.
+
+~rgmin~ refuses holonomic constraints on ~gromacs-cg~ across every layer:
+- Rust / C / C++: ~Solver::set_constraints~ (~rgmin_solver_set_constraints~)
+  and stepping with installed ~DistanceConstraint~ pairs return
+  ~Error::Constraint(ConstraintError::Unsupported)~ (~RGMIN_CONSTRAINT_ERROR~).
+- Python ~gromacs_mdp_options~: any ~constraints~ value other than ~"none"~
+  raises ~ValueError~.
+- Python ~GromacsCg~ ASE optimizer: holonomic geometry constraints on
+  ~atoms~ (such as ~FixBondLength~ / ~FixBondLengths~) or a non-~"none"~
+  ~constraints~ keyword raise ~ValueError~. Linear coordinate subspace
+  masks (~FixAtoms~, ~FixCartesian~, ~FixedLine~, ~FixedPlane~, analogous
+  to GROMACS ~freezegrps~ / ~freezedim~) remain supported.
+
+** Stops and reports
+
+| condition | ~Status~ | C ABI |
+|-----------+----------+-------|
+| largest per-atom force is below ~Control::gtol~ (~emtol~) | ~Tolerance~ | ~RGMIN_STOP_TOLERANCE~ |
+| ~Control::maxiter~ (~nsteps~) steps were taken | ~Budget~ | ~RGMIN_STOP_BUDGET~ |
+| a steepest-descent step cannot change any coordinate or decrease the energy | ~MachinePrecision~ | ~RGMIN_STOP_MACHINE_PRECISION~ |
+| callback returned a non-finite value or gradient | ~Error::Oracle~ | ~RGMIN_INTERNAL_ERROR~ (+ ~rgmin_last_error~) |
+| holonomic distance constraints were attached | ~Error::Constraint~ | ~RGMIN_CONSTRAINT_ERROR~ (+ ~rgmin_last_constraint_error~) |
+
+** GROMACS-unit mapping
+
+The Python ~gromacs_mdp_options~ helper converts:
+
+| MDP key | default | native option |
+|---------+---------+---------------|
+| ~integrator~ | ~"steep"~ (~"cg"~ selects CG) | ~method = "gromacs-cg"~ |
+| ~emtol~ | 10.0 kJ mol^-1 nm^-1 | ~gtol~ in eV Å^-1 |
+| ~emstep~ | 0.01 nm | ~istep~ in Å |
+| ~nsteps~ | -1 | no limit; otherwise ~maxiter~ |
+| ~nstcgsteep~ | 1000 | ~nstcgsteep~ ($\ge 0$, 0 turns the restart off; ~cg~ only) |
+| ~constraints~ | ~"none"~ | validated; non-~"none"~ raises ~ValueError~ on ~cg~ |
+
+The Rust stepper, C ABI, and C++ wrapper do no unit conversion. C and C++
+expose ~nstcgsteep~ through ~rgmin_solver_set_gromacs_cg~ /
+~Solver::set_gromacs_cg~; ~RGMIN_GROMACS_CG~ and
+~rgmin_solver_set_gromacs_cg~ are declared in ~include/rgmin.h~.
+
+** Comparison against ~gmx mdrun~ on the 7-atom argon cluster
+
+The 7-atom Lennard-Jones argon cluster fixture
+(~tests/data/gromacs_steep_argon.txt~, $\sigma = 0.34\text{ nm}$,
+$\epsilon = 1.0\text{ kJ mol}^{-1}$, $r_c = 3.0\text{ nm}$,
+$\text{emstep} = 0.02\text{ nm}$, $\text{nstcgsteep} = 1000$) was run with
+both double-precision ~gmx_d mdrun~ and single-precision ~gmx mdrun~
+(GROMACS ~2023.3-Ubuntu_2023.3_1ubuntu3~, ~-nt 1 -ntmpi 1~) under
+~integrator = cg~ and compared against ~rgmin~ (~Method::GromacsCg~):
+
+| run / tolerance | solver | steps | force evals | final $E_{\text{pot}}$ (kJ mol^-1) | final $F_{\max}$ (kJ mol^-1 nm^-1) |
+|-----------------+--------+-------+-------------+------------------------------------+------------------------------------|
+| ~nsteps = 12~, ~emtol = 1e-8~ | ~gmx_d mdrun~ (f64) | 12 | 29 | ~-1.25489376279603e+01~ | ~1.06954886357896e-03~ |
+| ~nsteps = 12~, ~emtol = 1e-8~ | ~gmx mdrun~ (f32) | 12 | 27 | ~-1.2548935e+01~ | ~1.2535201e-03~ |
+| ~nsteps = 12~, ~emtol = 1e-8~ | ~rgmin~ ~GromacsCg~ | 12 | 60 | ~-1.25489377088303e+01~ | ~4.735427e-07~ |
+| ~emtol = 1e-2~ | ~gmx_d mdrun~ (f64) | 9 | 24 | ~-1.25489364597334e+01~ | ~5.544026e-03~ |
+| ~emtol = 1e-2~ | ~rgmin~ ~GromacsCg~ | 6 | 18 | ~-1.25489374174275e+01~ | ~8.694525e-03~ |
+| ~emtol = 1e-3~ | ~gmx_d mdrun~ (f64) | 13 | 31 | ~-1.25489376639539e+01~ | ~4.980898e-04~ |
+| ~emtol = 1e-3~ | ~rgmin~ ~GromacsCg~ | 7 | 22 | ~-1.25489377085847e+01~ | ~1.529776e-04~ |
+| ~emtol = 1e-6~ | ~gmx_d mdrun~ (f64) | 30 | 76 | ~-1.25489377088304e+01~ | ~1.314348e-07~ |
+| ~emtol = 1e-6~ | ~rgmin~ ~GromacsCg~ | 9 | 33 | ~-1.25489377088303e+01~ | ~7.015111e-07~ |
+
+Both solvers take steepest-descent steps at iterations 0 and 1 and
+conjugate steps after that. Because ~rgmin~ reuses its strong-Wolfe
+bracketing and cubic-zoom line search ($c_1 = 10^{-4}, c_2 = 0.1$) rather
+than ~do_cg~'s midpoint/cubic secant heuristic, step-by-step intermediate
+iterates differ while
+converging to the same potential-energy minimum
+($-12.548937708830\text{ kJ mol}^{-1}$, agreeing to 14 significant digits
+with ~gmx_d~) in fewer outer CG iterations and force evaluations.
+
+Raw ~gmx_d mdrun -v~ output for ~integrator = cg~, ~nsteps = 12~,
+~emtol = 1e-8~, ~emstep = 0.02~, ~nstcgsteep = 1000~:
+
+#+BEGIN_EXAMPLE
+Polak-Ribiere Conjugate Gradients:
+   Tolerance (Fmax)   =  1.00000e-08
+   Number of steps    =           12
+   F-max             =  7.58904e+00 on atom 2
+   F-Norm            =  4.62490e+00
+
+Step 0, Epot=-1.231402e+01, Fnorm=4.625e+00, Fmax=7.589e+00 (atom 2)
+Step 1, Epot=-1.253588e+01, Fnorm=6.782e-01, Fmax=1.351e+00 (atom 5)
+Step 2, Epot=-1.254457e+01, Fnorm=2.927e-01, Fmax=4.342e-01 (atom 2)
+Step 3, Epot=-1.254791e+01, Fnorm=1.412e-01, Fmax=2.765e-01 (atom 4)
+Step 4, Epot=-1.254877e+01, Fnorm=6.394e-02, Fmax=1.360e-01 (atom 3)
+Step 5, Epot=-1.254889e+01, Fnorm=3.021e-02, Fmax=6.428e-02 (atom 3)
+Step 6, Epot=-1.254892e+01, Fnorm=1.671e-02, Fmax=3.095e-02 (atom 5)
+Step 7, Epot=-1.254893e+01, Fnorm=8.938e-03, Fmax=1.594e-02 (atom 7)
+Step 8, Epot=-1.254893e+01, Fnorm=5.557e-03, Fmax=1.089e-02 (atom 3)
+Step 9, Epot=-1.254894e+01, Fnorm=3.038e-03, Fmax=5.544e-03 (atom 2)
+Step 10, Epot=-1.254894e+01, Fnorm=1.545e-03, Fmax=2.707e-03 (atom 6)
+Step 11, Epot=-1.254894e+01, Fnorm=1.182e-03, Fmax=2.238e-03 (atom 3)
+Step 12, Epot=-1.254894e+01, Fnorm=6.000e-04, Fmax=1.070e-03 (atom 7)
+
+energy minimization reached the maximum number of steps before the forces
+reached the requested precision Fmax < 1e-08.
+
+writing lowest energy coordinates.
+
+Polak-Ribiere Conjugate Gradients did not converge to Fmax < 1e-08 in 13 steps.
+Potential Energy  = -1.25489376279603e+01
+Maximum force     =  1.06954886357896e-03 on atom 7
+Norm of force     =  6.00018007655033e-04
+#+END_EXAMPLE

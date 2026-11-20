@@ -72,4 +72,6 @@ least the floor. Crossing the floor stops with
 ``RGMIN_STOP_MACHINE_PRECISION`` instead.
 
 The exact update and stop rules are in
-:doc:`../reference/gromacs-steep`.
+:doc:`../reference/gromacs-steep`. For GROMACS
+``integrator = cg``, see :doc:`gromacs-cg` and
+:doc:`../reference/gromacs-cg`.
