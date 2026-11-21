@@ -150,6 +150,20 @@ fn brent_matches_on_the_quadratic() {
 }
 
 #[test]
+fn brent_resolves_a_minimum_below_the_old_floor() {
+    let tiny = |x: ArrayView1<'_, f64>| {
+        let z = x[0] - 5.0e-14;
+        (z * z, array![2.0 * z])
+    };
+    let kind = LineSearch::brent(128, 0.0);
+    let (x0, dir) = (array![0.0], array![1.0]);
+    same(kind, x0.clone(), dir.clone(), 1.0, tiny);
+    let (x, _value, alpha, _) = supplied(kind, &x0, &dir, 1.0, tiny);
+    assert_eq!(x[0], alpha);
+    assert!((alpha - 5.0e-14).abs() < 1.0e-15, "alpha={alpha:e}");
+}
+
+#[test]
 fn wolfe_matches_rosenbrock_along_the_gradient() {
     let x0 = array![-1.2, 1.0];
     let (_, g) = rosen(x0.view());

@@ -527,7 +527,7 @@ where
     let mut d: f64 = 0.0;
     for _ in 0..maxiter {
         let xm = 0.5 * (a + b);
-        let tol1 = tol * x.abs() + 1e-12;
+        let tol1 = super::brent_tol1(tol, x);
         let tol2 = 2.0 * tol1;
         if (x - xm).abs() <= tol2 - 0.5 * (b - a) {
             break;
