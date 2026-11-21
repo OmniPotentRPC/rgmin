@@ -558,9 +558,13 @@ where
             dir: dir.clone(),
             caps,
             failure: None,
+            slope_failure: None,
             placed: false,
         };
         let (x_new, _f_new, alpha) = linesearch.search_path(&mut counted, &mut path, alpha0);
+        if let Some(failure) = path.slope_failure.take() {
+            return Err(failure);
+        }
         if alpha > 0.0 {
             let (value_new, egrad_new) = counted(x_new.view());
             if !value_new.is_finite()
@@ -817,6 +821,7 @@ struct RetractPath<'a, M: ?Sized> {
     dir: Array1<f64>,
     caps: Caps,
     failure: Option<Error>,
+    slope_failure: Option<Error>,
     placed: bool,
 }
 
@@ -860,7 +865,13 @@ where
 
     fn slope(&mut self, t: f64, at: ArrayView1<'_, f64>, g: ArrayView1<'_, f64>) -> f64 {
         let at_owned = at.to_owned();
-        let vel = retraction_velocity(self.manifold, &self.origin, &self.dir, t, &at_owned);
+        let vel = match retraction_velocity(self.manifold, &self.origin, &self.dir, t, &at_owned) {
+            Ok(vel) => vel,
+            Err(error) => {
+                self.slope_failure.get_or_insert(error);
+                return f64::NAN;
+            }
+        };
         let rg = self.manifold.egrad2rgrad(&at_owned, &g.to_owned());
         if self.failed() {
             return f64::NAN;
@@ -873,37 +884,49 @@ where
 ///
 /// At the foot the velocity is `dir`, because a retraction's derivative
 /// there is the identity on the tangent space. Away from the foot the
-/// velocity is a central difference of [`Manifold::retract`] when the
-/// sample stays positive, and a forward difference otherwise, then
-/// [`Manifold::project`] at the arrival point. The spacing is the square
-/// root of machine epsilon.
+/// velocity is a central difference of [`Manifold::retract`], then
+/// [`Manifold::project`] at the arrival point. The relative spacing
+/// `eps^(1/3) * t` balances cancellation and truncation error for a central
+/// difference while scaling with every positive parameter produced by
+/// `opening_step`. Both rounded neighbors must remain finite and distinct
+/// from `t`; otherwise [`Error::RcgSlope`] refuses the unresolved slope.
 fn retraction_velocity<M>(
     manifold: &M,
     origin: &Array1<f64>,
     dir: &Array1<f64>,
     t: f64,
     at: &Array1<f64>,
-) -> Array1<f64>
+) -> Result<Array1<f64>>
 where
     M: Manifold + ?Sized,
 {
     if !t.is_finite() || t <= 0.0 {
-        return dir.clone();
+        return Ok(dir.clone());
     }
-    let h = f64::EPSILON.sqrt();
-    let ahead = manifold.retract(origin, &dir.mapv(|c| c * (t + h)));
-    let vel = if t > h {
-        let behind = manifold.retract(origin, &dir.mapv(|c| c * (t - h)));
-        let mut diff = ahead;
-        crate::vecops::axpy(-1.0, behind.view(), &mut diff);
-        diff.mapv(|c| c / (2.0 * h))
+    let h = f64::EPSILON.cbrt() * t;
+    let behind_t = t - h;
+    let ahead_t = t + h;
+    let width = ahead_t - behind_t;
+    if !(behind_t.is_finite()
+        && ahead_t.is_finite()
+        && behind_t < t
+        && t < ahead_t
+        && width.is_finite()
+        && width > 0.0)
+    {
+        return Err(Error::RcgSlope { t });
+    }
+    let ahead = manifold.retract(origin, &dir.mapv(|c| c * ahead_t));
+    let behind = manifold.retract(origin, &dir.mapv(|c| c * behind_t));
+    let mut diff = ahead;
+    crate::vecops::axpy(-1.0, behind.view(), &mut diff);
+    let vel = diff.mapv(|c| c / width);
+    let projected = manifold.project(at, &vel);
+    if projected.len() != dir.len() || projected.iter().any(|v| !v.is_finite()) {
+        Err(Error::RcgSlope { t })
     } else {
-        let here = manifold.retract(origin, &dir.mapv(|c| c * t));
-        let mut diff = ahead;
-        crate::vecops::axpy(-1.0, here.view(), &mut diff);
-        diff.mapv(|c| c / h)
-    };
-    manifold.project(at, &vel)
+        Ok(projected)
+    }
 }
 
 #[cfg(test)]
@@ -932,6 +955,60 @@ mod tests {
         }
         assert!(RcgOptions::default().validate().is_ok());
         assert!(RcgOptions::default().with_grad_tol(0.0).validate().is_ok());
+    }
+
+    fn assert_sphere_velocity(scale: f64, t: f64) {
+        let origin = array![0.0, 1.0];
+        let dir = array![scale, 0.0];
+        let at = Sphere.retract(&origin, &dir.mapv(|c| c * t));
+        let got = retraction_velocity(&Sphere, &origin, &dir, t, &at).unwrap();
+        let denom = (1.0 + (scale * t).powi(2)).powf(1.5);
+        let want = array![scale / denom, -t * scale * scale / denom];
+        let relative =
+            crate::vecops::nrm2_diff(got.view(), want.view()) / crate::vecops::nrm2(want.view());
+        assert!(
+            relative < 1e-6,
+            "scale {scale} t {t}: got {got}, want {want}, relative error {relative}"
+        );
+    }
+
+    #[test]
+    fn retraction_velocity_resolves_tiny_and_large_parameters() {
+        assert_sphere_velocity(1e9, 1e-9);
+        assert_sphere_velocity(1e-9, 1e9);
+    }
+
+    #[test]
+    fn large_parameter_does_not_fake_strong_wolfe_curvature() {
+        let manifold = crate::manifold::Euclidean;
+        let failures = Infallible;
+        let start = array![0.0];
+        let mut path = RetractPath {
+            manifold: &manifold,
+            failures: &failures,
+            origin: start.clone(),
+            dir: array![1e-9],
+            caps: Caps::default(),
+            failure: None,
+            slope_failure: None,
+            placed: false,
+        };
+        let mut linear = |x: ArrayView1<'_, f64>| (-x[0], array![-1.0]);
+        let (x, value, alpha) =
+            LineSearch::wolfe(1e-4, 0.1, 20).search_path(&mut linear, &mut path, 1e9);
+        assert_eq!(alpha, 0.0, "accepted alpha {alpha} at {x}");
+        assert_eq!(x, start);
+        assert_eq!(value, 0.0);
+    }
+
+    #[test]
+    fn unresolved_retraction_slope_is_a_typed_error() {
+        let origin = array![0.0, 1.0];
+        let dir = array![1.0, 0.0];
+        let t = f64::from_bits(1);
+        let at = Sphere.retract(&origin, &dir.mapv(|c| c * t));
+        let error = retraction_velocity(&Sphere, &origin, &dir, t, &at).unwrap_err();
+        assert!(matches!(error, Error::RcgSlope { t: got } if got == t));
     }
 
     fn rayleigh(x: ArrayView1<f64>) -> (f64, Array1<f64>) {

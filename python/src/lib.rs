@@ -172,7 +172,7 @@ impl Session {
         let rcg = matches!(method, Method::Rcg { .. });
         let atom_cap = match max_atom {
             Some(value) => value,
-            None if steep => 0.0,
+            None if steep || rcg => 0.0,
             None => DEFAULT_ATOM_MAXMOVE,
         };
         let istep = match istep {

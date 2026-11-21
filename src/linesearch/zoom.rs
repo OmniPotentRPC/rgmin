@@ -97,7 +97,7 @@ where
         let pair = phi_pair(oracle, pos, dir, alpha);
         let phi_a = pair.0;
         let dphi_a = pair.1;
-        if !phi_a.is_finite() {
+        if !phi_a.is_finite() || !dphi_a.is_finite() {
             hi = alpha;
             continue;
         }
@@ -175,7 +175,7 @@ where
         let pair = phi_on_path(oracle, path, alpha);
         let phi_a = pair.0;
         let dphi_a = pair.1;
-        if !phi_a.is_finite() {
+        if !phi_a.is_finite() || !dphi_a.is_finite() {
             hi = alpha;
             continue;
         }
@@ -247,7 +247,7 @@ where
         if !fail_armijo && strong_curvature(dphi, dphi0, c2) {
             return (x, phi, alpha.abs());
         }
-        if fail_armijo || (i > 0 && phi >= phi_prev) {
+        if fail_armijo || !dphi.is_finite() || (i > 0 && phi >= phi_prev) {
             let zoomed = zoom_on_path(oracle, path, alpha_prev, alpha, maxiter, wolfe);
             return finish(oracle, path, &pos, zoomed, wolfe);
         }
@@ -316,6 +316,52 @@ mod tests {
 
     fn quadratic(x: ArrayView1<'_, f64>) -> (f64, Array1<f64>) {
         (0.5 * x[0] * x[0], array![x[0]])
+    }
+
+    struct NanAtOne {
+        start: Array1<f64>,
+        direction: Array1<f64>,
+    }
+
+    impl Path for NanAtOne {
+        fn start(&self) -> Array1<f64> {
+            self.start.clone()
+        }
+
+        fn direction(&self) -> ArrayView1<'_, f64> {
+            self.direction.view()
+        }
+
+        fn point(&mut self, t: f64) -> Option<Array1<f64>> {
+            Some(array![t])
+        }
+
+        fn slope(&mut self, t: f64, _at: ArrayView1<'_, f64>, _g: ArrayView1<'_, f64>) -> f64 {
+            if t == 1.0 { f64::NAN } else { t - 1.0 }
+        }
+    }
+
+    #[test]
+    fn zoom_contracts_away_from_an_unresolved_slope() {
+        let mut path = NanAtOne {
+            start: array![0.0],
+            direction: array![1.0],
+        };
+        let mut shifted_bowl = |x: ArrayView1<'_, f64>| {
+            let d = x[0] - 1.0;
+            (0.5 * d * d, array![d])
+        };
+        let wolfe = Wolfe {
+            c1: C1,
+            c2: C2,
+            phi0: 0.5,
+            dphi0: -1.0,
+        };
+        let (alpha, _) = zoom_on_path(&mut shifted_bowl, &mut path, 0.0, 2.0, 20, wolfe);
+        assert!(
+            alpha > 0.0 && alpha < 1.0,
+            "zoom crossed the unresolved slope at alpha = {alpha}"
+        );
     }
 
     #[test]
