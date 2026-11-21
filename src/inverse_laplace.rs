@@ -793,12 +793,41 @@ pub fn eval_orthonormal_laguerre_series(
     Ok((value, roundoff))
 }
 
+/// Outward-directed `sum |c_n|` of finite coefficients. Exact zeros add nothing,
+/// so a terminating series does not accumulate `next_up` steps of `5e-324`.
+fn abs_sum_up(coeffs: &[f64]) -> f64 {
+    coeffs.iter().fold(
+        0.0_f64,
+        |acc, &c| {
+            if c == 0.0 { acc } else { add_up(acc, c.abs()) }
+        },
+    )
+}
+
+/// Outward-directed block ratio `upper / lower`: infinite when the lower block
+/// is exactly zero and the upper block is not, and zero when both are zero.
+fn block_ratio_up(upper: f64, lower: f64) -> f64 {
+    if lower > 0.0 {
+        div_up(upper, lower)
+    } else if upper > 0.0 {
+        f64::INFINITY
+    } else {
+        0.0
+    }
+}
+
 /// Verify that a sequence of `N` Laguerre coefficients (`N >= 16`) contracts across its last
 /// two quarters and satisfies the dyadic algebraic decay bound
-/// `sum_{n=N/2}^{N-1} |c_n| / sum_{n=N/4}^{N/2-1} |c_n| <= 2^{-1/2}` whenever the upper half
-/// exceeds `roundoff_floor`.
+/// `sum_{n=2q}^{4q-1} |c_n| / sum_{n=q}^{2q-1} |c_n| <= 2^{-1/2}`, `q = floor(N/4)`, whenever
+/// the upper block exceeds `roundoff_floor`.
 ///
-/// Returns the observed dyadic ratio `sum_{n=N/2}^{N-1} |c_n| / sum_{n=N/4}^{N/2-1} |c_n|`.
+/// The dyadic blocks are exactly `[q, 2q)` and `[2q, 4q)` for every `N`, so an exact
+/// `O(n^{-3/2})` sequence is judged on the same geometry whether or not `4` divides `N`.
+/// The contraction check compares the last two length-`q` blocks `[N-2q, N-q)` and
+/// `[N-q, N)`, so the up to three coefficients above `4q` are still examined.
+///
+/// Returns the observed dyadic ratio, which is infinite when the lower block is exactly
+/// zero and the upper block is not.
 pub fn verify_laguerre_tail_decay(
     coeffs: &[f64],
     roundoff_floor: f64,
@@ -820,32 +849,19 @@ pub fn verify_laguerre_tail_decay(
         }
     }
     let q = m / 4;
-    let mut q1 = 0.0_f64;
-    let mut q2 = 0.0_f64;
-    let mut q3 = 0.0_f64;
-    for &c in &coeffs[q..2 * q] {
-        q1 = add_up(q1, c.abs());
-    }
-    for &c in &coeffs[2 * q..3 * q] {
-        q2 = add_up(q2, c.abs());
-    }
-    for &c in &coeffs[3 * q..m] {
-        q3 = add_up(q3, c.abs());
-    }
-    if q3 > roundoff_floor && q3 > q2 {
+    let prev_quarter = abs_sum_up(&coeffs[m - 2 * q..m - q]);
+    let last_quarter = abs_sum_up(&coeffs[m - q..m]);
+    if last_quarter > roundoff_floor && last_quarter > prev_quarter {
         return Err(InverseLaplaceError::NonContractingRefinement {
             stage: "laguerre_tail_quarters",
-            coarse_gap: q2,
-            fine_gap: q3,
+            coarse_gap: prev_quarter,
+            fine_gap: last_quarter,
         });
     }
-    let upper_half = add_up(q2, q3);
-    let dyadic_ratio = if q1 > 0.0 {
-        div_up(upper_half, q1)
-    } else {
-        0.0
-    };
-    if upper_half > roundoff_floor && dyadic_ratio > WEEKS_MAX_DYADIC_TAIL_RATIO {
+    let lower_block = abs_sum_up(&coeffs[q..2 * q]);
+    let upper_block = abs_sum_up(&coeffs[2 * q..4 * q]);
+    let dyadic_ratio = block_ratio_up(upper_block, lower_block);
+    if upper_block > roundoff_floor && dyadic_ratio > WEEKS_MAX_DYADIC_TAIL_RATIO {
         return Err(InverseLaplaceError::SlowAlgebraicTail {
             stage: "laguerre_dyadic_tail",
             dyadic_ratio,
@@ -1192,7 +1208,8 @@ pub struct WeeksConfig {
     pub scale_b: f64,
     /// Cauchy circle radius `r in (0, 1]`.
     pub circle_radius: f64,
-    /// Number of retained Laguerre modes `M >= 16` (even; verified against `2M`).
+    /// Number of retained Laguerre modes `M >= 16`, a multiple of `4` so the last quarter is
+    /// exactly `[3M/4, M)`; verified against `2M`.
     pub laguerre_degree: usize,
     /// Minimum admissible `Re(beta)` (such as `beta_c`).
     pub min_re_beta: f64,
@@ -1435,7 +1452,8 @@ where
             value: config.sigma,
         });
     }
-    if config.laguerre_degree < 16 || !config.laguerre_degree.is_multiple_of(2) {
+    // `WEEKS_ALGEBRAIC_TAIL_FACTOR` converts the exact last quarter `[3M/4, M)`.
+    if config.laguerre_degree < 16 || !config.laguerre_degree.is_multiple_of(4) {
         return Err(InverseLaplaceError::InvalidParameter {
             parameter: "laguerre_degree",
             value: config.laguerre_degree as f64,
@@ -1469,18 +1487,15 @@ where
 
     let mut shift_l1 = 0.0_f64;
     for n in 0..m {
-        shift_l1 = add_up(shift_l1, (fine.coeffs[n] - coarse.coeffs[n]).abs());
+        let d = (fine.coeffs[n] - coarse.coeffs[n]).abs();
+        if d != 0.0 {
+            shift_l1 = add_up(shift_l1, d);
+        }
     }
 
     let q = m / 4;
-    let mut prev_oct = 0.0_f64;
-    let mut last_oct = 0.0_f64;
-    for &c in &coarse.coeffs[2 * q..3 * q] {
-        prev_oct = add_up(prev_oct, c.abs());
-    }
-    for &c in &coarse.coeffs[3 * q..m] {
-        last_oct = add_up(last_oct, c.abs());
-    }
+    let prev_oct = abs_sum_up(&coarse.coeffs[2 * q..3 * q]);
+    let last_oct = abs_sum_up(&coarse.coeffs[3 * q..m]);
     let coarse_floor = mul_up(16.0, add_up(coarse.dft_roundoff, coarse.eval_est));
     if last_oct > coarse_floor && last_oct > prev_oct {
         return Err(InverseLaplaceError::NonContractingRefinement {
@@ -1493,24 +1508,16 @@ where
     // Check dyadic decay rate on the fine 2M-point circle DFT:
     // For |c_n| ~ C n^{-p}, sum_{M..2M} |c_n| / sum_{M/2..M} |c_n| = 2^{1-p}.
     // An O(n^{-3/2}) tail (p >= 3/2) requires this dyadic ratio to be <= 2^{-1/2}.
-    let mut fine_lower_dyadic = 0.0_f64;
-    let mut fine_upper_dyadic = 0.0_f64;
+    let fine_lower_dyadic = abs_sum_up(&fine.coeffs[(m / 2)..m]);
+    let fine_upper_dyadic = abs_sum_up(&fine.coeffs[m..fine_m]);
     let mut fine_upper_noise_floor = 0.0_f64;
-    for n in (m / 2)..m {
-        fine_lower_dyadic = add_up(fine_lower_dyadic, fine.coeffs[n].abs());
-    }
     for n in m..fine_m {
-        fine_upper_dyadic = add_up(fine_upper_dyadic, fine.coeffs[n].abs());
         fine_upper_noise_floor = add_up(
             fine_upper_noise_floor,
             mul_up(4.0, mul_up(powi_inv_up(r, n), fine.sample_noise_per_mode)),
         );
     }
-    let observed_dyadic_ratio = if fine_lower_dyadic > 0.0 {
-        div_up(fine_upper_dyadic, fine_lower_dyadic)
-    } else {
-        0.0
-    };
+    let observed_dyadic_ratio = block_ratio_up(fine_upper_dyadic, fine_lower_dyadic);
     if fine_upper_dyadic > fine_upper_noise_floor
         && observed_dyadic_ratio > WEEKS_MAX_DYADIC_TAIL_RATIO
     {

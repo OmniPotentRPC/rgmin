@@ -233,6 +233,97 @@ fn laguerre_refuses_a_non_finite_derived_scale_or_value() {
     assert!(value.is_finite() && roundoff.is_finite());
 }
 
+fn binomial_taylor(alpha: f64, len: usize) -> Vec<f64> {
+    let mut coeffs = vec![0.0_f64; len];
+    coeffs[0] = 1.0;
+    for n in 1..len {
+        coeffs[n] = coeffs[n - 1] * ((n as f64) - 1.0 - alpha) / (n as f64);
+    }
+    coeffs
+}
+
+#[test]
+fn laguerre_tail_accepts_an_exact_three_halves_tail_at_every_length() {
+    for len in 16..=40 {
+        let coeffs = binomial_taylor(0.5, len);
+        let ratio = verify_laguerre_tail_decay(&coeffs, 0.0)
+            .unwrap_or_else(|e| panic!("N={len}: (1-w)^(1/2) refused: {e:?}"));
+        assert!(
+            ratio <= core::f64::consts::FRAC_1_SQRT_2,
+            "N={len}: ratio {ratio}"
+        );
+    }
+    for alpha in [0.25_f64, 0.1_f64] {
+        for len in 16..=40 {
+            let res = verify_laguerre_tail_decay(&binomial_taylor(alpha, len), 0.0);
+            assert!(
+                matches!(res, Err(InverseLaplaceError::SlowAlgebraicTail { .. })),
+                "alpha={alpha} N={len}: {res:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn laguerre_tail_skips_exact_zero_terms() {
+    for len in [16_usize, 17, 18, 19] {
+        let mut coeffs = vec![0.0_f64; len];
+        coeffs[0] = 1.0;
+        assert_eq!(
+            verify_laguerre_tail_decay(&coeffs, 0.0),
+            Ok(0.0),
+            "terminating series of length {len}"
+        );
+    }
+}
+
+#[test]
+fn laguerre_tail_refuses_a_zero_lower_block_under_a_live_upper_block() {
+    let mut coeffs = vec![0.0_f64; 16];
+    coeffs[0] = 1.0;
+    coeffs[8] = 1.0e-300;
+    match verify_laguerre_tail_decay(&coeffs, 0.0) {
+        Err(InverseLaplaceError::SlowAlgebraicTail { dyadic_ratio, .. }) => {
+            assert_eq!(dyadic_ratio, f64::INFINITY);
+        }
+        other => panic!("zero lower block must refuse, got {other:?}"),
+    }
+    let mut trailing = vec![0.0_f64; 19];
+    trailing[0] = 1.0;
+    trailing[18] = 1.0e-300;
+    assert!(matches!(
+        verify_laguerre_tail_decay(&trailing, 0.0),
+        Err(InverseLaplaceError::NonContractingRefinement { .. })
+    ));
+}
+
+#[test]
+fn weeks_degree_must_be_a_multiple_of_four() {
+    let gamma4 = higham_gamma(4).expect("gamma4");
+    let eval = |beta: Complex64| {
+        let val = Complex64::new(1.0, 0.0) / (beta + Complex64::new(1.25, 0.0));
+        Ok(ComplexSample::estimated(val, gamma4 * val.norm()))
+    };
+    for degree in [18_usize, 22, 30] {
+        let cfg = WeeksConfig::default().with_laguerre_degree(degree);
+        assert!(
+            matches!(
+                weeks_invert(0.8, cfg, eval),
+                Err(InverseLaplaceError::InvalidParameter {
+                    parameter: "laguerre_degree",
+                    ..
+                })
+            ),
+            "M={degree}"
+        );
+    }
+    let cfg = WeeksConfig::default()
+        .with_laguerre_degree(20)
+        .with_tolerance(1.0e-3);
+    let got = weeks_invert(0.8, cfg, eval).expect("M=20");
+    assert!((got.value - (-1.25_f64 * 0.8).exp()).abs() <= got.uncertainty_estimate());
+}
+
 #[test]
 fn complex_division_of_large_finite_components_stays_finite() {
     let big = 1.5e308_f64;
