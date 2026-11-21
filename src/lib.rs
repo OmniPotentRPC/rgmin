@@ -40,6 +40,8 @@ mod adam;
 mod bb;
 #[cfg(feature = "highs")]
 mod box_objective;
+/// A-posteriori Newton--Kantorovich, adjoint, and Morse-gap bounds.
+pub mod certificate;
 mod compact_tr;
 /// CON checkpoint of an accepted point. Compiled only with `readcon`.
 #[cfg(feature = "readcon")]
@@ -105,6 +107,8 @@ pub mod newton;
 /// ODE12r: adaptive first-order integration of the force.
 pub mod ode12r;
 mod oracle;
+/// Linear-storage factorization of periodic block-tridiagonal matrices.
+pub mod periodic_block;
 /// Geometry preconditioners: Exp, Lindh, and the bonded FF metric.
 pub mod precon;
 mod pso;
@@ -112,6 +116,8 @@ mod qn;
 /// Sella QuasiNewton / QuasiNewtonIRC restricted step.
 pub mod qn_irc;
 mod qn_step;
+/// Gauss–Legendre rules and Lobatto shape functions on `[-1, 1]`.
+pub mod quadrature;
 /// Quick-min projection and Euler step.
 pub mod quickmin;
 mod report;
@@ -120,6 +126,8 @@ mod restricted_trust;
 pub mod rigid;
 /// Cautious limited-memory Riemannian BFGS (Huang, Absil, Gallivan).
 pub mod rlbfgs;
+/// Bracketed scalar roots by bisection.
+pub mod root;
 /// Tangent-space truncated conjugate gradients and trust-radius updates.
 pub mod rtr;
 /// Moller scaled conjugate gradient (damped-model step, no line search).
@@ -141,6 +149,10 @@ pub mod vecops;
 
 pub use accept::Accept;
 pub use adam::minimize_adam;
+pub use certificate::{
+    AdjointFunctionalBar, CertificateError, KantorovichBall, MorseGap, adjoint_functional_bar,
+    certify_morse_gap, kantorovich_ball,
+};
 #[cfg(feature = "readcon")]
 pub use con_checkpoint::{read_checkpoint, write_checkpoint};
 pub use control::{Control, NoiseFloor, StopNorm};
