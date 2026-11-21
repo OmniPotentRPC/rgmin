@@ -1,1 +1,0 @@
-Certificate radii, remainders, and the Morse-gap `certified` field are documented as IEEE 754 binary64 estimates in the default round-to-nearest, ties-to-even mode. `certified` was previously described as a strict lower bound on the exact gap.

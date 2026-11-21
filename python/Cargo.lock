@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "rgmin"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "dlpk",
  "eindir-core",
@@ -605,7 +605,7 @@ dependencies = [
 
 [[package]]
 name = "rgmin-py"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "ndarray",
  "pyo3",

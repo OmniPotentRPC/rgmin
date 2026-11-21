@@ -9,7 +9,7 @@ Get the entry
 ~~~~~~~~~~~~~
 
 ``CITATION.cff`` at the top of the repository is the citation record, in the Citation File Format (CFF).
-It names version 0.6.0, dated 13 November 2026.
+It names version 0.7.0, dated 21 November 2026.
 cffconvert turns it into BibTeX.
 Run it at the top of a checkout:
 
@@ -46,15 +46,15 @@ With the release from crates.io, it prints:
 
 ::
 
-    rgmin v0.6.0
+    rgmin v0.7.0
 
-With the ``develop`` branch, the short commit follows the ``#``:
+With a git dependency on the release tag, it prints:
 
 ::
 
-    rgmin v0.6.0 (https://github.com/OmniPotentRPC/rgmin?branch=develop#113fb592)
+    rgmin v0.7.0 (https://github.com/OmniPotentRPC/rgmin?tag=v0.7.0)
 
-The version in ``Cargo.toml`` on ``develop`` does not change with each commit, so on that route cite the commit.
+The version in ``Cargo.toml`` on ``develop`` does not change with each commit, so on a dependency on ``develop`` cite the commit.
 ``Cargo.lock`` has the full commit:
 
 .. code:: bash
@@ -64,8 +64,8 @@ The version in ``Cargo.toml`` on ``develop`` does not change with each commit, s
 ::
 
     name = "rgmin"
-    version = "0.6.0"
-    source = "git+https://github.com/OmniPotentRPC/rgmin?branch=develop#113fb592707406a6d621e4da6d8eea243abce968"
+    version = "0.7.0"
+    source = "git+https://github.com/OmniPotentRPC/rgmin?branch=develop#<full commit hash>"
 
 In the rgmin checkout that ``Cargo.lock`` names, ``git rev-parse HEAD`` prints the same full commit.
 
@@ -75,7 +75,7 @@ Put the version in the entry
 Give the entry a key, and add the version.
 The ``plain`` style of BibTeX prints a ``note`` field, but it drops ``version`` and ``url``, so put the version in ``note``.
 Braces around ``rgmin`` in the title stop a style from capitalizing the name.
-For the 0.6.0 release:
+For the 0.7.0 release:
 
 .. code:: bibtex
 
@@ -83,11 +83,11 @@ For the 0.6.0 release:
     author = {Goswami, Rohit},
     title = {{rgmin}: local minimization over eindir differentiable objectives},
     url = {https://github.com/OmniPotentRPC/rgmin},
-    note = {Version 0.6.0},
+    note = {Version 0.7.0},
     year = {2026}
     }
 
-On the ``develop`` route, the note names the full commit, such as ``note = {Commit 113fb592707406a6d621e4da6d8eea243abce968 of the develop branch}``.
+On the ``develop`` route, the note names the full commit, such as ``note = {Commit <full commit hash> of the develop branch}``.
 
 Cite the published work too
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

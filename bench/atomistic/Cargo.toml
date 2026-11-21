@@ -13,7 +13,7 @@ description = "rgmin on real rgpot potentials: oracle calls, iterations, and per
 simd = ["rgmin/simd"]
 
 [dependencies]
-rgmin = { path = "../.." }
+rgmin = { path = "../..", version = "0.7.0" }
 rgpot-core = "3.4.0"
 eindir-core = { version = "0.6.0", features = ["capi"] }
 dlpk = "0.1.5"
