@@ -545,6 +545,25 @@ NB_MODULE(_core, m) {
     m.attr("__version__") = rgmin_version();
     m.doc() = "Free-threaded bindings for the rgmin geometry optimizer.";
     rgbind::install_policy(m);
+    nb::object unmet_type = nb::steal(PyErr_NewExceptionWithDoc(
+        "rgmin._core.StopUnmetError",
+        "Raised when ``error_on_unmet`` is set and the run stops short of its "
+        "criterion. ``report`` is the ``Report`` of that stop.",
+        PyExc_RuntimeError, nullptr));
+    if (!unmet_type.is_valid()) {
+        throw nb::python_error();
+    }
+    m.attr("StopUnmetError") = unmet_type;
+    nb::register_exception_translator([](std::exception_ptr const& ptr, void*) {
+        try {
+            std::rethrow_exception(ptr);
+        } catch (rgmin::StopUnmetError const& error) {
+            nb::object type = nb::module_::import_("rgmin._core").attr("StopUnmetError");
+            nb::object instance = type(error.what());
+            instance.attr("report") = nb::cast(error.report());
+            PyErr_SetObject(type.ptr(), instance.ptr());
+        }
+    });
 
     nb::enum_<rgmin_method_t>(m, "Method", nb::is_arithmetic(),
                               "Geometry-optimization method. Members are UPPER_SNAKE. "
@@ -718,11 +737,16 @@ NB_MODULE(_core, m) {
             if (budget == 0) {
                 report = zero_budget_report(function, x0, config.control(), config.method());
             } else {
+                std::vector<double> const start(x0.data(), x0.data() + n);
                 for (std::size_t i = 0; i < budget; ++i) {
                     report = step_python(solver, function, x0);
                     if (report.stop != RGMIN_STOP_BUDGET) {
                         break;
                     }
+                }
+                if (report.stop == RGMIN_STOP_BUDGET && config.method() == rgmin::Method::Lbfgs &&
+                    std::equal(start.begin(), start.end(), x0.data())) {
+                    report.stop = RGMIN_STOP_LINE_SEARCH;
                 }
             }
             if (config.error_on_unmet() &&
@@ -732,7 +756,7 @@ NB_MODULE(_core, m) {
                 std::ostringstream message;
                 message << "stop unmet after " << report.steps << " steps (grad_norm "
                         << report.grad_norm << ")";
-                throw std::runtime_error(message.str());
+                throw rgmin::StopUnmetError(message.str(), report);
             }
             return nb::make_tuple(report, x0);
         },
@@ -740,7 +764,8 @@ NB_MODULE(_core, m) {
                 "tuple[float, ndarray[dtype=float64]]], x0: ndarray[dtype=float64], "
                 "method: object, **kwargs) -> tuple[Report, ndarray[dtype=float64]]"),
         "Minimize ``f_and_grad`` in place and return ``(report, x)``. "
-        "``error_on_unmet=True`` raises ``RuntimeError`` when the stop is "
+        "``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` "
+        "that carries the ``Report`` as ``.report``, when the stop is "
         "``BUDGET``, ``LINE_SEARCH``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. "
         "``backward_polish`` "
         "is stored on the session and is not used by this step loop, which "
