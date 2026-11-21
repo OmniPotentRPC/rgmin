@@ -52,7 +52,7 @@ pub enum rgmin_status_t {
     /// ABI minor 49.
     RGMIN_UNMET_STOP = 6,
     /// Strict convergence failed. `x` and `out` still hold the report.
-    /// ABI minor 53.
+    /// ABI minor 58.
     RGMIN_NOT_CONVERGED = 7,
 }
 
@@ -86,7 +86,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 53;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 58;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -244,7 +244,7 @@ pub struct rgmin_control_t {
     pub noise_c: f64,
     /// Nonzero returns [`rgmin_status_t::RGMIN_NOT_CONVERGED`] when the
     /// gradient norm is not below `gtol`. Zero keeps the `Ok` report.
-    /// ABI minor 53.
+    /// ABI minor 58.
     pub require_convergence: i32,
 }
 
@@ -260,7 +260,7 @@ pub struct rgmin_report_t {
     pub grad_norm: f64,
     /// Which stop produced this report.
     pub stop: rgmin_stop_t,
-    /// Nonzero when `grad_norm` is below `gtol`. ABI minor 53.
+    /// Nonzero when `grad_norm` is below `gtol`. ABI minor 58.
     pub converged: i32,
 }
 
@@ -2016,7 +2016,7 @@ pub unsafe extern "C" fn rgmin_solver_set_backward_polish(solver: *mut rgmin_sol
 /// that reads this session's control. A step stays success, except that
 /// a steepest, BFGS, nonlinear CG or Adam step which took no move and
 /// left its state unchanged reports
-/// [`rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE`]. ABI minor 53.
+/// [`rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE`]. ABI minor 58.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
