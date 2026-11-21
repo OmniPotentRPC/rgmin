@@ -1129,7 +1129,7 @@ where
             value: config.min_re_beta,
         });
     }
-    if config.nodes < 8 || config.nodes % 2 != 0 {
+    if config.nodes < 8 || !config.nodes.is_multiple_of(2) {
         return Err(InverseLaplaceError::InvalidParameter {
             parameter: "nodes",
             value: config.nodes as f64,
@@ -1435,7 +1435,7 @@ where
             value: config.sigma,
         });
     }
-    if config.laguerre_degree < 16 || config.laguerre_degree % 2 != 0 {
+    if config.laguerre_degree < 16 || !config.laguerre_degree.is_multiple_of(2) {
         return Err(InverseLaplaceError::InvalidParameter {
             parameter: "laguerre_degree",
             value: config.laguerre_degree as f64,
