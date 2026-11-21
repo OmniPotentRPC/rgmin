@@ -64,6 +64,7 @@ enum class Method {
     EonCg = RGMIN_EON_CG,
     GromacsSteep = RGMIN_GROMACS_STEEP,
     GromacsCg = RGMIN_GROMACS_CG,
+    GromacsLbfgs = RGMIN_GROMACS_LBFGS,
 };
 
 /** Parse a method token. \c newton-cg and \c newton_cg are the same method. */
@@ -460,6 +461,7 @@ inline constexpr Method SR2Optimizer = Method::Sr2;
 inline constexpr Method ADAMOptimizer = Method::Adam;
 inline constexpr Method SteepestDescentOptimizer = Method::Steepest;
 inline constexpr Method GromacsSteepOptimizer = Method::GromacsSteep;
+inline constexpr Method GromacsLbfgsOptimizer = Method::GromacsLbfgs;
 inline constexpr Method ConjugateGradientOptimizer = Method::PolakRibiere;
 inline constexpr Method PSOptim = Method::Pso;
 
@@ -697,6 +699,10 @@ public:
     /// GROMACS conjugate-gradient periodic steepest-descent interval; 0 turns it off.
     int set_gromacs_cg(std::uint32_t nstcgsteep) {
         return rgmin_solver_set_gromacs_cg(ptr_, nstcgsteep);
+    }
+    /// GROMACS L-BFGS correction-memory capacity.
+    int set_gromacs_lbfgs(std::size_t nbfgscorr) {
+        return rgmin_solver_set_gromacs_lbfgs(ptr_, nbfgscorr);
     }
 
     void forget_evaluation() { rgmin_solver_forget_evaluation(ptr_); }
@@ -1156,19 +1162,20 @@ private:
     std::optional<double> gromacs_shrink_;
     std::optional<std::uint32_t> gromacs_max_constraint_shrinks_;
     std::optional<std::uint32_t> gromacs_nstcgsteep_;
+    std::optional<std::size_t> gromacs_nbfgscorr_;
 };
 
 inline std::string SolverConfig::valid_options() {
     return "accept, atom_maxmove, backward_polish, beta, c1, c2, cautious_alpha, "
            "cautious_eps, error_on_unmet, etol, extra_updates, fire_variant, gtol, istep, "
            "linesearch, linesearch_maxiter, max_evals, maxiter, maxmove, maxstep, memory, "
-           "neb_guards, noise_c, noise_eps, nstcgsteep, objective_roundoff, periodic, "
+           "nbfgscorr, neb_guards, noise_c, noise_eps, nstcgsteep, objective_roundoff, periodic, "
            "project_rigid, qn_step, shrink, max_constraint_shrinks";
 }
 
 inline std::string SolverConfig::valid_methods() {
     return "adam, bb, bfgs, cg, conjugate_descent, dai_yuan, diis, dogleg, "
-           "fire, fire2, fletcher_reeves, fr_pr, gromacs_cg, gromacs_steep, hager_zhang, "
+           "fire, fire2, fletcher_reeves, fr_pr, gromacs_cg, gromacs_lbfgs, gromacs_steep, hager_zhang, "
            "hestenes_stiefel, lbfgs, liu_storey, newton, polak_ribiere, pso, "
            "quickmin, rfo, sd, sr1, sr2, steepest";
 }
@@ -1198,6 +1205,9 @@ inline Method method_from_name(std::string const& name) {
     if (name == "ode12r") return Method::Ode12r;
     if (name == "gromacs_steep" || name == "gmx_steep") return Method::GromacsSteep;
     if (name == "gromacs_cg" || name == "gmx_cg") return Method::GromacsCg;
+    if (name == "gromacs_lbfgs" || name == "gmx_lbfgs" || name == "gromacs_l_bfgs") {
+        return Method::GromacsLbfgs;
+    }
     if (name == "sd" || name == "steepest" || name == "steepest_descent") return Method::Steepest;
     if (name == "cg" || name == "pr" || name == "pr+" || name == "polak_ribiere") {
         return Method::PolakRibiere;
@@ -1253,6 +1263,7 @@ inline bool known_option(std::string const& key) {
         "cautious_alpha", "cautious_eps", "error_on_unmet", "etol", "extra_updates",
         "fire_variant", "gtol", "istep", "linesearch", "linesearch_maxiter",
         "max_constraint_shrinks", "max_evals", "maxiter", "maxmove", "maxstep", "memory",
+        "nbfgscorr",
         "neb_guards", "noise_c", "noise_eps", "nstcgsteep", "objective_roundoff", "periodic",
         "project_rigid", "qn_step", "shrink"};
     for (char const* item : keys) {
@@ -1278,7 +1289,7 @@ inline void require_finite(std::string const& key, double value) {
 inline bool is_count_option(std::string const& key) {
     return key == "memory" || key == "maxiter" || key == "linesearch_maxiter" ||
            key == "extra_updates" || key == "max_evals" || key == "max_constraint_shrinks" ||
-           key == "nstcgsteep";
+           key == "nstcgsteep" || key == "nbfgscorr";
 }
 
 inline double require_etol(double value) {
@@ -1402,6 +1413,8 @@ inline SolverConfig SolverConfig::build(
                 throw std::invalid_argument("nstcgsteep is out of range");
             }
             cfg.gromacs_nstcgsteep_ = static_cast<std::uint32_t>(count);
+        } else if (key == "nbfgscorr") {
+            cfg.gromacs_nbfgscorr_ = detail::require_count(key, item.second, 1);
         } else if (key == "gtol" || key == "istep" || key == "maxmove" || key == "noise_eps" ||
                    key == "noise_c" || key == "c1" || key == "c2" || key == "atom_maxmove" ||
                    key == "maxstep" || key == "cautious_eps" || key == "cautious_alpha" ||
@@ -1561,6 +1574,12 @@ inline void SolverConfig::apply(Solver& solver) const {
         if (solver.set_gromacs_cg(*gromacs_nstcgsteep_) != 0) {
             char const* msg = rgmin_last_error();
             throw std::invalid_argument(msg ? msg : "set_gromacs_cg failed");
+        }
+    }
+    if (gromacs_nbfgscorr_) {
+        if (solver.set_gromacs_lbfgs(*gromacs_nbfgscorr_) != 0) {
+            char const* msg = rgmin_last_error();
+            throw std::invalid_argument(msg ? msg : "set_gromacs_lbfgs failed");
         }
     }
 }

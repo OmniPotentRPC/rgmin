@@ -67,6 +67,8 @@ class Method(enum.IntEnum):
 
     GROMACS_CG = 29
 
+    GROMACS_LBFGS = 30
+
     PolakRibiere = 0
 
     FletcherReeves = 1
@@ -118,6 +120,8 @@ class Method(enum.IntEnum):
     GromacsSteep = 28
 
     GromacsCg = 29
+
+    GromacsLbfgs = 30
 
 class Stop(enum.IntEnum):
     """

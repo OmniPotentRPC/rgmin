@@ -500,6 +500,7 @@ def test_every_gradient_session_method_has_a_class():
         "fr-pr",
         "gromacs-steep",
         "gromacs-cg",
+        "gromacs-lbfgs",
     }
     for token in tokens:
         Session(token, 3)

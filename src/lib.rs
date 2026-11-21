@@ -155,9 +155,11 @@ pub use fire::{
 pub use gromacs::{
     GROMACS_CG_BETA_CAP, GROMACS_CG_EMSTEP_DEFAULT, GROMACS_CG_NSTCGSTEEP_DEFAULT,
     GROMACS_CG_WOLFE_C1, GROMACS_CG_WOLFE_C2, GROMACS_CG_WOLFE_MAXITER,
+    GROMACS_LBFGS_LINESEARCH_MAXITER, GROMACS_LBFGS_NCORR_DEFAULT, GROMACS_LBFGS_STEP_REDUCTION,
     GROMACS_STEEP_EMSTEP_DEFAULT, GROMACS_STEEP_GROW, GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS,
     GROMACS_STEEP_MIN_USTEP, GROMACS_STEEP_SHRINK, GROMACS_STEEP_SHRINK_BUDGET_CAP, GromacsCg,
-    GromacsCgConfig, GromacsSteep, GromacsSteepConfig, gromacs_steep_max_constraint_shrinks,
+    GromacsCgConfig, GromacsLbfgs, GromacsLbfgsConfig, GromacsSteep, GromacsSteepConfig,
+    gromacs_steep_max_constraint_shrinks,
 };
 pub use highs_kind::{
     HighsCCallback, HighsCallback, HighsCallbackKind, HighsCrossover, HighsOptions, HighsSolverKind,

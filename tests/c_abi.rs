@@ -19,7 +19,7 @@ use rgmin::ffi::{
     rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp, rgmin_solver_create,
     rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
     rgmin_solver_set_accept, rgmin_solver_set_exp, rgmin_solver_set_gromacs_cg,
-    rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
+    rgmin_solver_set_gromacs_lbfgs, rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
     rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
     rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
     rgmin_tensor_free,
@@ -251,6 +251,51 @@ fn c_abi_scg_quadratic_bowl_with_exact_curvature() {
     assert!(out.value < 1e-8, "C ABI SCG value {}", out.value);
     assert!(x[0].abs() < 1e-4);
     assert!(x[1].abs() < 1e-4);
+}
+
+#[test]
+fn c_abi_gromacs_lbfgs_reaches_the_max_force_tolerance() {
+    let mut x = [3.0, -4.0, 1.0];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), x.len()) };
+    assert!(!xt.is_null());
+    let ctrl = rgmin_control_t {
+        maxiter: 100,
+        gtol: 1e-3,
+        istep: 1.0,
+        memory: 0,
+        maxmove: -1.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    };
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+    };
+    let status = unsafe {
+        rgmin_minimize(
+            Some(quad_eval),
+            Some(quad_grad),
+            std::ptr::null_mut(),
+            xt,
+            &ctrl,
+            rgmin_method_t::RGMIN_GROMACS_LBFGS,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(
+        out.stop,
+        rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        "steps={}, value={}, force={}",
+        out.steps,
+        out.value,
+        out.grad_norm
+    );
+    assert!(out.grad_norm < ctrl.gtol);
+    assert!(out.steps > 0);
 }
 
 fn scg_bowl_ctrl() -> rgmin_control_t {
@@ -1087,6 +1132,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
+/// ABI minor 54 adds `RGMIN_GROMACS_LBFGS` and `rgmin_solver_set_gromacs_lbfgs`.
 /// ABI minor 53 adds `RGMIN_GROMACS_CG` and `rgmin_solver_set_gromacs_cg`.
 /// ABI minor 52 adds `RGMIN_GROMACS_STEEP`, `RGMIN_STOP_MACHINE_PRECISION`,
 /// `rgmin_solver_set_gromacs_steep`, and
@@ -1109,7 +1155,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 53);
+    assert_eq!(stamp.abi_minor, 54);
     assert_eq!(stamp.layout_revision, 5);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -2611,6 +2657,12 @@ fn newton_cg_method_string_and_counters_cross_the_c_abi() {
         rgmin_status_t::RGMIN_SUCCESS
     );
     assert_eq!(tag, rgmin_method_t::RGMIN_GROMACS_CG);
+    let gromacs_lbfgs = std::ffi::CString::new("gromacs-lbfgs").unwrap();
+    assert_eq!(
+        unsafe { rgmin_method_from_name(gromacs_lbfgs.as_ptr(), &mut tag) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    assert_eq!(tag, rgmin_method_t::RGMIN_GROMACS_LBFGS);
     let cg = std::ffi::CString::new("newton-cg").unwrap();
     assert_eq!(
         unsafe { rgmin_method_from_name(cg.as_ptr(), &mut tag) },
@@ -5139,6 +5191,13 @@ fn gromacs_steep_runs_and_reports_machine_precision_across_c_abi() {
         assert_eq!(rgmin_solver_set_gromacs_cg(std::ptr::null_mut(), 10), 1);
         assert_eq!(rgmin_solver_set_gromacs_steep(cg_solver, 0.5, 12), 1);
         rgmin_solver_free(cg_solver);
+        let gmx_lbfgs = rgmin_solver_create(rgmin_method_t::RGMIN_GROMACS_LBFGS, &ctrl, 3);
+        assert!(!gmx_lbfgs.is_null());
+        assert_eq!(rgmin_solver_set_gromacs_lbfgs(gmx_lbfgs, 3), 0);
+        assert_eq!(rgmin_solver_set_gromacs_lbfgs(gmx_lbfgs, 0), 1);
+        assert_eq!(rgmin_solver_set_gromacs_lbfgs(std::ptr::null_mut(), 10), 1);
+        assert_eq!(rgmin_solver_set_gromacs_cg(gmx_lbfgs, 100), 1);
+        rgmin_solver_free(gmx_lbfgs);
         let lbfgs_solver = rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 3);
         assert!(!lbfgs_solver.is_null());
         assert_eq!(rgmin_solver_set_gromacs_cg(lbfgs_solver, 100), 1);

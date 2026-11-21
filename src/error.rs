@@ -216,6 +216,12 @@ pub enum Error {
         /// What was refused.
         what: &'static str,
     },
+    /// A GROMACS L-BFGS parameter or numerical update was refused.
+    #[error("GROMACS L-BFGS: {what}")]
+    GromacsLbfgs {
+        /// What was refused.
+        what: &'static str,
+    },
     /// Capped L-BFGS was asked for where it cannot run, or a capped
     /// step could not be formed.
     #[error("capped L-BFGS: {what}")]
