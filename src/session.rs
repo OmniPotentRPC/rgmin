@@ -58,7 +58,7 @@ use crate::step::{
     Taken, apply_caps, cap_alpha, cap_displacement_atom, l2, max_atom_displacement,
     nlcg_opening_alpha, qn_istep, scale_displacement_to_atom_cap, take_step_with_options,
 };
-use crate::stop::{Counted, StopRules, moved as point_moved};
+use crate::stop::{Counted, StopRules, bounded_step_moved};
 use crate::trust::{
     accept_ratio, burdakov_radius, dogleg_direction, predicted_reduction, reduction_ratio,
     update_radius,
@@ -1453,6 +1453,39 @@ impl Solver {
         }
     }
 
+    /// Whether [`Self::step`] and [`Self::step_hess`] project onto the
+    /// session box. Distance constraints and Newton-CG never read it.
+    #[cfg(feature = "highs")]
+    fn boxes_steps(&self) -> bool {
+        self.has_coordinate_box()
+            && self.constraints.is_none()
+            && !matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. })
+    }
+
+    /// The box a step on a `dim`-coordinate objective with `bounds` keeps
+    /// its iterate in: `bounds` met with the session box where a step
+    /// projects onto it. Movement is read against this box, so a
+    /// projection is no move.
+    fn step_bounds<'b>(
+        &self,
+        bounds: &'b eindir_core::Bounds<f64>,
+        dim: usize,
+    ) -> Result<std::borrow::Cow<'b, eindir_core::Bounds<f64>>> {
+        #[cfg(feature = "highs")]
+        if self.boxes_steps() {
+            return crate::box_objective::session_box(
+                bounds,
+                dim,
+                self.box_lo.as_deref(),
+                self.box_hi.as_deref(),
+            )
+            .map(std::borrow::Cow::Owned);
+        }
+        #[cfg(not(feature = "highs"))]
+        let _ = dim;
+        Ok(std::borrow::Cow::Borrowed(bounds))
+    }
+
     fn note_bounds(&mut self, bounds: &eindir_core::Bounds<f64>) {
         if self.box_stationarity() {
             self.bound_low = Some(bounds.low.clone());
@@ -2409,23 +2442,13 @@ impl Solver {
     /// A zero iteration budget is the SCG reading. The plateau itself is
     /// `lbfgs_plateau`: this only asks it, and only for L-BFGS. A positive
     /// budget does not ask, so its trajectory is unchanged.
-    fn note_repeated_lbfgs_step(
-        &mut self,
-        before: &Array1<f64>,
-        x: &Array1<f64>,
-        report: &mut Report,
-    ) {
+    fn note_repeated_lbfgs_step(&mut self, moved: bool, report: &mut Report) {
         if self.control.maxiter != 0 || !matches!(self.inner, Inner::Lbfgs(_)) {
             return;
         }
         if report.status != Status::Iterating {
             return;
         }
-        let moved = before.len() == x.len()
-            && before
-                .iter()
-                .zip(x.iter())
-                .any(|(a, b)| a.to_bits() != b.to_bits());
         if self.lbfgs_plateau.observe(
             self.dim,
             moved,
@@ -2481,8 +2504,10 @@ impl Solver {
         let before = x.clone();
         let mut report = self.step_once(obj, x)?;
         self.finish_level_set(obj, x, &mut report)?;
-        self.note_repeated_lbfgs_step(&before, x, &mut report);
-        Ok((report, point_moved(&before, x)))
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        let moved = bounded_step_moved(&bounds, &before, x);
+        self.note_repeated_lbfgs_step(moved, &mut report);
+        Ok((report, moved))
     }
 
     /// Refuse a stop this session's method cannot read.
@@ -2602,7 +2627,7 @@ impl Solver {
             if let Inner::Lbfgs(solver) = &mut self.inner {
                 solver.coordinate_box = None;
             }
-            if self.has_coordinate_box() {
+            if self.boxes_steps() {
                 let bounded = crate::box_objective::BoxObjective::new(
                     obj,
                     self.box_lo.clone(),
@@ -2675,7 +2700,7 @@ impl Solver {
                 if let Inner::Lbfgs(solver) = &mut self.inner {
                     solver.coordinate_box = None;
                 }
-                if self.has_coordinate_box() {
+                if self.boxes_steps() {
                     let bounded = crate::box_objective::BoxObjective::new(
                         obj,
                         self.box_lo.clone(),
@@ -2699,7 +2724,8 @@ impl Solver {
             }
         };
         self.finish_level_set(obj, x, &mut report)?;
-        Ok((report, point_moved(&before, x)))
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        Ok((report, bounded_step_moved(&bounds, &before, x)))
     }
 
     /// One Steihaug-Toint iteration. `obj` supplies analytic products;
@@ -2747,7 +2773,8 @@ impl Solver {
             self.step_newton_cg(obj, x, &action)?
         };
         self.finish_level_set(obj, x, &mut report)?;
-        Ok((report, point_moved(&before, x)))
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        Ok((report, bounded_step_moved(&bounds, &before, x)))
     }
 
     /// [`Self::step_hvp`] on an objective whose callbacks can fail.
@@ -2805,7 +2832,8 @@ impl Solver {
             let before = x.clone();
             let mut report = self.step_newton_cg(&counted, x, &HostAction(obj))?;
             self.finish_level_set(&counted, x, &mut report)?;
-            Ok((report, point_moved(&before, x)))
+            let bounds = self.step_bounds(counted.bounds(), StepOracle::dim(&counted))?;
+            Ok((report, bounded_step_moved(&bounds, &before, x)))
         })();
         match result {
             Err(err @ Error::Host(_)) => {
@@ -5759,9 +5787,12 @@ impl Solver {
     /// The run ends on the first step whose status is not
     /// [`Status::Iterating`] and returns that status, so an energy-noise
     /// [`Status::NoiseFloor`] is kept rather than stepped past. A spent
-    /// budget is [`Status::Budget`]. A zero `maxiter` takes no step: the
-    /// report is `Self::assess` of `x`, so it says [`Status::Tolerance`]
-    /// only when the gradient evaluated there is below `gtol`.
+    /// budget is [`Status::Budget`]. An L-BFGS run that spends it with `x`
+    /// unmoved is [`crate::StopReason::LineSearchFailed`], as the one-shot
+    /// [`crate::minimize_method`] reports it. A zero `maxiter` takes no
+    /// step: the report is `Self::assess` of `x`, so it says
+    /// [`Status::Tolerance`] only when the gradient evaluated there is
+    /// below `gtol`.
     pub fn run<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -5781,7 +5812,9 @@ impl Solver {
     /// returned report describes the point left in `x`. Every report
     /// carries its coordinates and gradient. The run ends as [`Self::run`]
     /// does, on the first step whose status is not [`Status::Iterating`],
-    /// and a spent budget is [`Status::Budget`].
+    /// and a spent budget is [`Status::Budget`]. An L-BFGS run that spends
+    /// it with `x` unmoved, and no gauge move, is
+    /// [`crate::StopReason::LineSearchFailed`].
     ///
     /// A move is not a step: the value and gradient before it belong to
     /// the old representation, where a plane rotates about the old pivot,
@@ -5799,6 +5832,8 @@ impl Solver {
             return self.run(obj, x);
         }
         let tol = self.control.gtol;
+        let start = x.clone();
+        let mut gauged = false;
         let mut report = self.step(obj, x)?;
         for _ in 1..self.control.maxiter {
             if report.grad_norm < tol || report.status != Status::Iterating {
@@ -5807,6 +5842,7 @@ impl Solver {
             let before = x.clone();
             gauge(x);
             if *x != before {
+                gauged = true;
                 self.rebase();
             }
             report = self.step(obj, x)?;
@@ -5816,7 +5852,19 @@ impl Solver {
             Status::Iterating => Status::Budget,
             other => other,
         };
-        self.control.deliver(report)
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        let moved = gauged || bounded_step_moved(&bounds, &start, x);
+        self.control.deliver(self.name_budget(report, moved))
+    }
+
+    /// An L-BFGS run that spends its budget with the iterate unmoved is
+    /// [`crate::StopReason::LineSearchFailed`], as in the one-shot driver.
+    fn name_budget(&self, report: Report, moved: bool) -> Report {
+        if matches!(self.inner, Inner::Lbfgs(_)) {
+            report.with_budget_moved(moved)
+        } else {
+            report
+        }
     }
 
     fn run_plain<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
@@ -5830,6 +5878,7 @@ impl Solver {
         }
         self.brief = true;
         let tol = self.control.gtol;
+        let start = x.clone();
         let mut last = None;
         let mut stop: Result<()> = Ok(());
         for _ in 0..budget {
@@ -5860,8 +5909,10 @@ impl Solver {
             other => other,
         };
         let g = self.reported_grad(x);
-        self.control
-            .deliver(self.finish(value, x, &g, grad_norm, status))
+        let report = self.finish(value, x, &g, grad_norm, status);
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        let moved = bounded_step_moved(&bounds, &start, x);
+        self.control.deliver(self.name_budget(report, moved))
     }
 
     /// The gradient a step report carries, for the report at the end of a

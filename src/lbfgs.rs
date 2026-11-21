@@ -2490,7 +2490,8 @@ impl Lbfgs {
                     crate::report::Status::NoiseFloor,
                 ));
             }
-            let moved = before.is_none_or(|before| crate::stop::moved(&before, &pos));
+            let moved = before
+                .is_none_or(|before| crate::stop::bounded_step_moved(obj.bounds(), &before, &pos));
             if let Some(status) =
                 crate::stop::stop_after(&mut stops, control, obj, value, moved, &grad)
             {
@@ -2498,7 +2499,7 @@ impl Lbfgs {
             }
         }
         let gnorm = l2(&grad);
-        let mut report = one_shot_report(
+        let report = one_shot_report(
             value,
             pos.clone(),
             control.maxiter,
@@ -2509,11 +2510,11 @@ impl Lbfgs {
         // top of the loop, so a final step under `gtol` is Converged
         // via `finish_status`. A budget in which no trial moved is a
         // failed line search, not a generic maxiter stop.
-        if control.maxiter > 0 && pos == start && report.stop_reason() == crate::StopReason::MaxIter
-        {
-            report = report.with_stop_reason(crate::StopReason::LineSearchFailed);
-        }
-        control.deliver(report)
+        control.deliver(if control.maxiter > 0 {
+            report.with_budget_moved(crate::stop::bounded_step_moved(obj.bounds(), &start, &pos))
+        } else {
+            report
+        })
     }
 
     /// One outer L-BFGS iteration: two-loop direction, line search, pair.

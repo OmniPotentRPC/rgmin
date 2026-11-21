@@ -537,7 +537,203 @@ static int stop_aliases() {
     return 0;
 }
 
+rgmin_status_t uphill_eval(void* /*user*/, DLManagedTensorVersioned const* x, double* value) {
+    double const v = data(x)[0];
+    *value = 0.5 * v * v;
+    return RGMIN_SUCCESS;
+}
+
+rgmin_status_t uphill_grad(void* /*user*/, DLManagedTensorVersioned const* x,
+                           DLManagedTensorVersioned* g) {
+    data(g)[0] = -data(x)[0];
+    return RGMIN_SUCCESS;
+}
+
+// The gradient points uphill, so no trial is accepted. The C one-shot and
+// the C++ wrapper over it name that run LINE_SEARCH, as the Python
+// minimize and the Rust drivers do.
+int no_move_stop() {
+    std::vector<double> x{1.0};
+    DLManagedTensorVersioned* t = rgmin::borrow_cpu_f64(x.data(), 1);
+    if (t == nullptr) {
+        return 30;
+    }
+    rgmin::Control ctrl;
+    ctrl.maxiter = 3;
+    ctrl.gtol = 1e-8;
+    rgmin::Report report =
+        rgmin::minimize_fn(uphill_eval, uphill_grad, nullptr, t, ctrl, rgmin::Method::Lbfgs);
+    rgmin_tensor_free(t);
+    if (report.stop != RGMIN_STOP_LINE_SEARCH || x[0] != 1.0) {
+        std::fprintf(stderr, "no-move stop %d x=%g\n", static_cast<int>(report.stop), x[0]);
+        return 31;
+    }
+    std::printf("no-move stop ok\n");
+    return 0;
+}
+
+rgmin_status_t uphill_hess(void* /*user*/, DLManagedTensorVersioned const* /*x*/,
+                           DLManagedTensorVersioned* h) {
+    data(h)[0] = -1.0;
+    return RGMIN_SUCCESS;
+}
+
+// With error_on_unmet the unmet stop is a StopUnmetError that carries the
+// C report, from both the gradient and the Hessian one-shot. It is still
+// a std::runtime_error to a caller that catches the base.
+int unmet_carries_report() {
+    for (int with_hess = 0; with_hess < 2; ++with_hess) {
+        std::vector<double> x{1.0};
+        DLManagedTensorVersioned* t = rgmin::borrow_cpu_f64(x.data(), 1);
+        if (t == nullptr) {
+            return 50;
+        }
+        rgmin::Control ctrl;
+        ctrl.maxiter = 3;
+        ctrl.gtol = 1e-8;
+        ctrl.error_on_unmet = true;
+        bool derived = false;
+        bool base = false;
+        rgmin::Report carried;
+        try {
+            if (with_hess != 0) {
+                rgmin::minimize_hess_fn(uphill_eval, uphill_grad, uphill_hess, nullptr, t, ctrl,
+                                        rgmin::Method::Lbfgs);
+            } else {
+                rgmin::minimize_fn(uphill_eval, uphill_grad, nullptr, t, ctrl,
+                                   rgmin::Method::Lbfgs);
+            }
+        } catch (rgmin::StopUnmetError const& error) {
+            derived = true;
+            carried = error.report();
+            try {
+                throw;
+            } catch (std::runtime_error const&) {
+                base = true;
+            }
+        }
+        rgmin_tensor_free(t);
+        if (!derived || !base || carried.stop != RGMIN_STOP_LINE_SEARCH ||
+            carried.grad_norm != 1.0 || carried.value != 0.5 || x[0] != 1.0) {
+            std::fprintf(stderr, "unmet report hess=%d derived=%d base=%d stop %d norm %g\n",
+                         with_hess, derived ? 1 : 0, base ? 1 : 0,
+                         static_cast<int>(carried.stop), carried.grad_norm);
+            return 51;
+        }
+    }
+    std::printf("unmet report ok\n");
+    return 0;
+}
+
+#if !defined(__has_include) || !__has_include(<eindir-core.h>)
+// rgmin.h only forward declares the eindir types. These are the pieces of
+// eindir-core's C ABI that the unmet-stop check below calls, as the
+// library exports them.
+extern "C" {
+enum eindir_status_t { EINDIR_SUCCESS = 0, EINDIR_INVALID_PARAMETER = 1, EINDIR_INTERNAL_ERROR = 2 };
+struct eindir_abi_stamp_t {
+    uint32_t abi_major;
+    uint32_t abi_minor;
+    uint32_t objective_layout;
+    std::size_t objective_size;
+    std::size_t objective_align;
+    uint32_t dlpack_major;
+    uint32_t dlpack_minor;
+    uint64_t features;
+};
+eindir_abi_stamp_t eindir_core_abi_stamp(void);
+eindir_objective_t* eindir_objective_new(
+    std::size_t dim, DLManagedTensorVersioned const* low, DLManagedTensorVersioned const* high,
+    eindir_status_t (*eval)(void*, DLManagedTensorVersioned const*, double*),
+    eindir_status_t (*grad)(void*, DLManagedTensorVersioned const*, DLManagedTensorVersioned*),
+    void* user, void (*free_fn)(void*));
+void eindir_objective_free(eindir_objective_t* objective);
+}
+#endif
+
+eindir_status_t rose_eindir_eval(void* /*user*/, DLManagedTensorVersioned const* x, double* value) {
+    double const a = data(x)[0];
+    double const b = data(x)[1];
+    *value = 100.0 * (b - a * a) * (b - a * a) + (1.0 - a) * (1.0 - a);
+    return EINDIR_SUCCESS;
+}
+
+eindir_status_t rose_eindir_grad(void* /*user*/, DLManagedTensorVersioned const* x,
+                                 DLManagedTensorVersioned* g) {
+    double const a = data(x)[0];
+    double const b = data(x)[1];
+    data(g)[0] = -400.0 * a * (b - a * a) + 2.0 * (a - 1.0);
+    data(g)[1] = 200.0 * (b - a * a);
+    return EINDIR_SUCCESS;
+}
+
+// The eindir one-shot honours Control::error_on_unmet as the other
+// one-shots do: a spent budget is a report until the flag is set, then
+// an exception.
+int eindir_unmet() {
+    double low[2] = {-HUGE_VAL, -HUGE_VAL};
+    double high[2] = {HUGE_VAL, HUGE_VAL};
+    DLManagedTensorVersioned* tlow = rgmin::borrow_cpu_f64(low, 2);
+    DLManagedTensorVersioned* thigh = rgmin::borrow_cpu_f64(high, 2);
+    eindir_objective_t* objective = eindir_objective_new(
+        2, tlow, thigh, rose_eindir_eval, rose_eindir_grad, nullptr, nullptr);
+    rgmin_tensor_free(tlow);
+    rgmin_tensor_free(thigh);
+    if (objective == nullptr) {
+        return 40;
+    }
+    eindir_abi_stamp_t const stamp = eindir_core_abi_stamp();
+    rgmin::Control ctrl;
+    ctrl.maxiter = 3;
+    ctrl.gtol = 1e-12;
+
+    std::vector<double> quiet{-1.2, 1.0};
+    DLManagedTensorVersioned* tq = rgmin::borrow_cpu_f64(quiet.data(), 2);
+    rgmin::Report spent = rgmin::minimize_eindir(objective, &stamp, tq, ctrl, rgmin::Method::Lbfgs);
+    rgmin_tensor_free(tq);
+    if (spent.stop != RGMIN_STOP_BUDGET || spent.steps != 3) {
+        std::fprintf(stderr, "eindir spent budget: stop %d steps %zu\n",
+                     static_cast<int>(spent.stop), spent.steps);
+        eindir_objective_free(objective);
+        return 41;
+    }
+
+    ctrl.error_on_unmet = true;
+    std::vector<double> loud{-1.2, 1.0};
+    DLManagedTensorVersioned* tl = rgmin::borrow_cpu_f64(loud.data(), 2);
+    bool raised = false;
+    rgmin::Report carried;
+    try {
+        rgmin::minimize_eindir(objective, &stamp, tl, ctrl, rgmin::Method::Lbfgs);
+    } catch (rgmin::StopUnmetError const& error) {
+        raised = std::string(error.what()).find("unmet after") != std::string::npos;
+        carried = error.report();
+    }
+    rgmin_tensor_free(tl);
+    eindir_objective_free(objective);
+    if (carried.stop != spent.stop || carried.steps != spent.steps ||
+        carried.value != spent.value || carried.grad_norm != spent.grad_norm) {
+        std::fprintf(stderr, "eindir report stop %d steps %zu value %g norm %g\n",
+                     static_cast<int>(carried.stop), carried.steps, carried.value,
+                     carried.grad_norm);
+        return 43;
+    }
+    if (!raised || loud[0] != quiet[0] || loud[1] != quiet[1] || loud[0] == -1.2) {
+        std::fprintf(stderr, "eindir error_on_unmet raised=%d x=(%g,%g)\n", raised ? 1 : 0,
+                     loud[0], loud[1]);
+        return 42;
+    }
+    std::printf("eindir unmet ok\n");
+    return 0;
+}
+
 int main() {
+    int unmet = eindir_unmet();
+    if (unmet != 0) return unmet;
+    int still = no_move_stop();
+    if (still != 0) return still;
+    int carry = unmet_carries_report();
+    if (carry != 0) return carry;
     int off = maxmove_off();
     if (off != 0) return off;
     int block = eigen_block();
