@@ -207,8 +207,9 @@ pub use manifold::{
 pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
 pub use newton::{
-    HessianObjective, HessianOracle, NewtonKind, backward_error_floor, minimize_newton,
-    newton_decrement_acceptable, polish_newton,
+    BunchKaufman, HessianObjective, HessianOracle, LdlError, LdlInertiaBound, NewtonKind,
+    ShiftedLdlCertificate, ShiftedLdlRefusal, backward_error_floor, certify_shifted_ldlt_inertia,
+    ldl_inertia_with_backward_bound, minimize_newton, newton_decrement_acceptable, polish_newton,
 };
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
 pub use noise::{
