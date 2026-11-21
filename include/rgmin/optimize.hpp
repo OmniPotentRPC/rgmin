@@ -752,6 +752,11 @@ public:
     }
     /// ABC-FIRE on a FIRE 2.0 session. Returns 0, or 1 on a non-FIRE 2.0 session.
     int set_fire_abc(bool on) { return rgmin_solver_set_fire_abc(ptr_, on ? 1 : 0); }
+    /// FIRE integrator parameters. Returns 0, or 1 when the session is not FIRE.
+    int set_fire_config(double dt, double dt_max, std::size_t n_min, double f_inc, double f_dec,
+                        double alpha, double f_alpha) {
+        return rgmin_solver_set_fire_config(ptr_, dt, dt_max, n_min, f_inc, f_dec, alpha, f_alpha);
+    }
     /// Opt into capping dt_max after one downhill step followed by an uphill one.
     /// Returns 0, or 1 on a non-FIRE 2.0 session.
     int set_fire_cap_two_step_overshoot(bool on) {
@@ -763,6 +768,8 @@ public:
     /// ASE length control. A non-positive cap restores 0.2.
     /// Returns 0, or 1 when the session cannot run the scaled step.
     int set_lbfgs_scaled(double max_atom) { return rgmin_solver_set_lbfgs_scaled(ptr_, max_atom); }
+    /// Fixed H0 scale. A non-positive value clears it. Returns 0, or 1 when not L-BFGS.
+    int set_lbfgs_fixed_h0(double h0) { return rgmin_solver_set_lbfgs_fixed_h0(ptr_, h0); }
     /// Strong Wolfe line search. The default session does not search a line.
     int set_lbfgs_wolfe() { return rgmin_solver_set_lbfgs_wolfe(ptr_); }
     /// Burdakov ray-truncation radius for session L-BFGS. A non-positive,

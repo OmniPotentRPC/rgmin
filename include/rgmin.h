@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 52
+#define RGMIN_ABI_VERSION_MINOR 53
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -91,7 +91,9 @@ typedef struct rgmin_abi_stamp_t {
  *    is unchanged.
  * 52 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
  *    rgmin_solver_set_gromacs_steep, and
- *    rgmin_gromacs_steep_max_constraint_shrinks. */
+ *    rgmin_gromacs_steep_max_constraint_shrinks.
+ * 53 rgmin_solver_set_fire_config and
+ *    rgmin_solver_set_lbfgs_fixed_h0. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -598,6 +600,16 @@ int32_t rgmin_solver_set_fire_preset(rgmin_solver_t *solver, rgmin_fire_preset_t
  *  \c maxmove, bounds each displacement component. Returns 0, or 1 on
  *  a null session or a session that is not RGMIN_FIRE2. ABI minor 30. */
 int32_t rgmin_solver_set_fire_abc(rgmin_solver_t *solver, int32_t on);
+/** Replace the FIRE integrator parameters and clear the velocity. The
+ *  two-step overshoot cap of rgmin_solver_set_fire_cap_two_step_overshoot
+ *  stays as it was. dt and dt_max must be finite and positive with
+ *  dt <= dt_max, f_inc finite and greater than 1, and f_dec, alpha and
+ *  f_alpha finite and in (0, 1). n_min is the downhill count before dt
+ *  grows. Returns 0, or 1 on a null session, a session that is not FIRE
+ *  or FIRE 2.0, or a parameter outside that range. ABI minor 53. */
+int32_t rgmin_solver_set_fire_config(rgmin_solver_t *solver, double dt,
+                                     double dt_max, size_t n_min, double f_inc,
+                                     double f_dec, double alpha, double f_alpha);
 /** Opt into capping `dt_max` after one downhill step followed by an
  *  uphill one on FIRE 2.0. Returns 0, or 1 on a null session or a
  *  session that is not RGMIN_FIRE2. ABI minor 48. */
@@ -614,6 +626,11 @@ int32_t rgmin_solver_set_lbfgs_capped(rgmin_solver_t *solver, double max_atom);
  *  A non-positive cap restores 0.2. Same refusal rules as
  *  rgmin_solver_set_lbfgs_capped. ABI minor 35. */
 int32_t rgmin_solver_set_lbfgs_scaled(rgmin_solver_t *solver, double max_atom);
+/** Fixed initial inverse-Hessian scale of an L-BFGS session, ASE's
+ *  H0 = 1/alpha. A non-positive or non-finite h0 clears it and the
+ *  two-loop uses the Nocedal-Wright scale again. Returns 0, or 1 on a
+ *  null session or a session that is not L-BFGS. ABI minor 53. */
+int32_t rgmin_solver_set_lbfgs_fixed_h0(rgmin_solver_t *solver, double h0);
 /** Opt into the strong Wolfe line search. The default L-BFGS session
  *  does not search a line. Returns 0, or 1 on a null session or a
  *  session that is not RGMIN_LBFGS. ABI minor 34. */
