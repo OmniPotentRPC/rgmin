@@ -65,6 +65,8 @@ A Cartesian solver starts with a per-atom cap of 0.2 (ASE ``maxstep``, eOn ``max
 
 Newton, RFO, and dogleg need ``hessian(x)``, a callable that returns the ``(n, n)`` matrix. A band or a min-mode run accepts the step rather than the energy. Pass ``accept=`` to choose the rule yourself.
 
-``restart`` is refused. ``read`` and ``dump`` raise ``NotImplementedError``.
+``h0`` and ``linesearch``"ase"= are opt-in. ``h0`` scales the initial inverse Hessian of ``bfgs`` and ``lbfgs``. ``linesearch``"ase"= runs a port of ASE's line search on those two methods, and ``stpmax`` bounds its step multiplier. Omitting both leaves the session defaults. A value the method would ignore raises ``ValueError``.
+
+``restart`` is refused, and ``read`` and ``dump`` raise ``NotImplementedError``, except ``BFGSLineSearch`` and ``LBFGSLineSearch``, which replay an rgmin evaluation log.
 
 C and C++ use ``include/rgmin.h`` and ``include/rgmin/optimize.hpp``. :doc:`c-abi` has the short C programs: a session handle, and one ``rgmin_minimize`` call.

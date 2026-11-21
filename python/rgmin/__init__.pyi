@@ -20,6 +20,14 @@ from rgmin.manifold import Stiefel as Stiefel
 __version__: str
 
 class SolverConfig(_core.SolverConfig):
+    """Session options.
+
+    ``h0`` scales the initial inverse Hessian of ``bfgs`` and ``lbfgs``.
+    ``linesearch="ase"`` runs a port of ASE's line search on those two
+    methods, and ``stpmax`` bounds its step multiplier. Both are opt-in.
+    Omitting them leaves the session defaults.
+    """
+
     def __init__(self, method: str | Method = "lbfgs", **options: Any) -> None: ...
 
 def minimize(

@@ -52,7 +52,7 @@ use crate::quickmin::{
     QuickMinOptions, QuickMinSession, QuickMinState, quickmin_rescale_velocity,
     quickmin_session_step,
 };
-use crate::report::{Report, Status};
+use crate::report::{Report, Status, StopReason};
 use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
     Taken, apply_caps, cap_alpha, cap_displacement_atom, l2, max_atom_displacement,
@@ -249,6 +249,10 @@ pub struct Solver {
     control: Control,
     linesearch: LineSearch,
     line_options: LineSearchOptions,
+    /// Inverse-Hessian scale for a fresh BFGS matrix. `None` keeps `I`.
+    bfgs_h0: Option<f64>,
+    /// ASE's line search in place of Wolfe. `None` keeps rgmin's search.
+    ase_search: Option<crate::linesearch::ase::AseSearch>,
     istep: f64,
     steps: usize,
     qn_step: QnStep,
@@ -524,6 +528,8 @@ impl Solver {
             control,
             linesearch: SESSION_LINESEARCH,
             line_options: LineSearchOptions::default(),
+            bfgs_h0: None,
+            ase_search: None,
             istep,
             steps: 0,
             qn_step: QnStep::TwoLoop,
@@ -885,6 +891,114 @@ impl Solver {
         };
         self.line_options = options;
         true
+    }
+
+    /// Initial inverse-Hessian scale.
+    ///
+    /// On L-BFGS this is the fixed scale of [`Self::set_lbfgs_fixed_h0`].
+    /// On BFGS it replaces the fresh inverse Hessian with `h0 I`, and
+    /// [`Self::forget`] restores that scale. A BFGS matrix that has
+    /// already been updated keeps its pairs until `forget`. Other
+    /// methods return an error. `h0` must be finite and positive.
+    /// Leaving this unset keeps the identity BFGS matrix and the
+    /// Nocedal-Wright L-BFGS scale.
+    pub fn set_fixed_h0(&mut self, h0: f64) -> Result<()> {
+        if !(h0.is_finite() && h0 > 0.0) {
+            return Err(Error::InvalidControl {
+                what: "h0 must be finite and positive",
+            });
+        }
+        match &mut self.inner {
+            Inner::Lbfgs(solver) => {
+                solver.fixed_h0 = Some(h0);
+                Ok(())
+            }
+            Inner::Bfgs { h, fresh } => {
+                self.bfgs_h0 = Some(h0);
+                if *fresh {
+                    *h = Array2::<f64>::eye(self.dim) * h0;
+                }
+                Ok(())
+            }
+            _ => Err(Error::InvalidControl {
+                what: "h0 requires a BFGS or L-BFGS session",
+            }),
+        }
+    }
+
+    /// Run the line search of ASE 3.29 on this BFGS or L-BFGS session.
+    ///
+    /// The search is `ase.utils.linesearch.LineSearch` as ASE's
+    /// `BFGSLineSearch` and `LBFGSLineSearch` call it: it opens at the
+    /// unit step, the per-atom cap limits each increment from the
+    /// previous trial rather than the whole step, trials stay in
+    /// `[1e-8, stpmax]`, and it ends only on ASE's strong-Wolfe test or
+    /// one of its warnings. An opening step above `stpmax`, a spent
+    /// evaluation budget or a non-finite trial fails the search; there
+    /// is no fallback point. The step then leaves `x` where it was and
+    /// reports [`StopReason::LineSearchFailed`].
+    ///
+    /// `c1`, `c2` and the budget are those of the session's
+    /// [`LineSearch::Wolfe`]. A step refuses another line-search kind,
+    /// [`Accept::Step`], a manifold, constraints, an overlay, a Euclidean
+    /// `maxmove`, and on L-BFGS any step but [`LbfgsStep::Wolfe`].
+    /// `stpmax` must not be NaN. Any other value is used as ASE uses it,
+    /// so one below 1 fails every search. Other methods return an error.
+    /// Without this call the session keeps rgmin's own search.
+    pub fn set_ase_linesearch(&mut self, stpmax: f64) -> Result<()> {
+        if stpmax.is_nan() {
+            return Err(Error::InvalidControl {
+                what: "ASE stpmax must not be NaN",
+            });
+        }
+        if !matches!(self.inner, Inner::Bfgs { .. } | Inner::Lbfgs(_)) {
+            return Err(Error::InvalidControl {
+                what: "the ASE line search requires a BFGS or L-BFGS session",
+            });
+        }
+        self.ase_search = Some(crate::linesearch::ase::AseSearch { stpmax });
+        Ok(())
+    }
+
+    /// Refuse a step on which ASE's line search would not run.
+    fn check_ase_search(&self) -> Result<()> {
+        if self.ase_search.is_none() {
+            return Ok(());
+        }
+        let refuse = |what| Err(Error::InvalidControl { what });
+        if !matches!(self.linesearch, LineSearch::Wolfe { .. }) {
+            return refuse("the ASE line search takes c1, c2 and its budget from a Wolfe search");
+        }
+        #[cfg(feature = "highs")]
+        let equalities = !self.equalities.is_empty();
+        #[cfg(not(feature = "highs"))]
+        let equalities = false;
+        if self.accept == Accept::Step
+            || self.manifold != ManifoldKind::Euclidean
+            || self.level_set.is_some()
+            || self.constraints.is_some()
+            || equalities
+            || !matches!(self.overlay, Overlay::None)
+            || self.has_coordinate_box()
+        {
+            return refuse(
+                "the ASE line search runs only on an unconstrained Euclidean session \
+                 with energy acceptance",
+            );
+        }
+        if self.control.maxmove_cap().is_some() {
+            return refuse(
+                "the ASE line search limits increments by the per-atom cap, not maxmove",
+            );
+        }
+        if matches!(self.inner, Inner::Lbfgs(_))
+            && (!matches!(self.lbfgs_step(), LbfgsStep::Wolfe)
+                || self.geometry_step == Some(true)
+                || self.use_lbfgs_burdakov())
+        {
+            return refuse("the ASE line search on L-BFGS requires the plain Wolfe step");
+        }
+        Ok(())
     }
 
     /// The configured line search.
@@ -2296,7 +2410,11 @@ impl Solver {
                 *prev_gd = 0.0;
             }
             Inner::Bfgs { h, fresh } => {
+                let scale = self.bfgs_h0;
                 *h = Array2::<f64>::eye(self.dim);
+                if let Some(scale) = scale {
+                    *h *= scale;
+                }
                 *fresh = true;
             }
             Inner::Sr1 { h, fresh } => {
@@ -2400,7 +2518,10 @@ impl Solver {
     /// window it replaces does.
     fn search_options(&self) -> LineSearchOptions {
         if self.manifold == ManifoldKind::Euclidean {
-            self.line_options
+            match self.ase_search {
+                Some(search) => self.line_options.with_ase(search),
+                None => self.line_options,
+            }
         } else {
             LineSearchOptions::default()
         }
@@ -2588,6 +2709,7 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        self.check_ase_search()?;
         if self.constraints.is_some() {
             return self.constrained_step(x, |s, x| s.step_constrained(obj, x));
         }
@@ -3438,7 +3560,8 @@ impl Solver {
             && self.geometry_step.is_none()
             && self.atom_maxmove_set
             && self.atom_maxmove.is_some()
-            && self.accept != Accept::Step;
+            && self.accept != Accept::Step
+            && self.ase_search.is_none();
         if self.geometry_step != Some(true) && !wolfe_cap {
             return false;
         }
@@ -4393,6 +4516,7 @@ impl Solver {
         #[cfg(feature = "highs")]
         let boxed = self.has_coordinate_box();
         let mut energy_stall = false;
+        let mut line_failed = false;
         let mut sr_secant: Option<(Array1<f64>, Array1<f64>)> = None;
         let diis_alpha = self.istep;
         let diis_atom_cap = self.atom_maxmove;
@@ -4443,7 +4567,7 @@ impl Solver {
                     let mut project = |d: &mut Array1<f64>| {
                         rigid.force(&mut hold.ws, d);
                     };
-                    energy_stall = solver.step_objective_with_direction(
+                    let ended = solver.step_objective_with_direction(
                         obj,
                         x,
                         &mut value,
@@ -4457,6 +4581,8 @@ impl Solver {
                         line_options,
                         &mut project,
                     );
+                    energy_stall = ended.energy_noise;
+                    line_failed = ended.line_failed;
                 }
                 Inner::Steepest => {
                     let dir = grad.mapv(|g| -g);
@@ -4616,6 +4742,7 @@ impl Solver {
                         line_options,
                     )?;
                     energy_stall = t.energy_noise;
+                    line_failed = t.line_failed;
                     let moved = t.moved;
                     *x = t.x;
                     value = t.f;
@@ -5071,7 +5198,11 @@ impl Solver {
         if energy_stall && status == Status::Iterating {
             status = Status::NoiseFloor;
         }
-        Ok(self.finish(value, x, &grad, grad_norm, status))
+        let report = self.finish(value, x, &grad, grad_norm, status);
+        if line_failed && status == Status::Iterating {
+            return Ok(report.with_stop_reason(StopReason::LineSearchFailed));
+        }
+        Ok(report)
     }
 
     fn step_pso<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
@@ -6264,6 +6395,7 @@ where
         alpha: if moved { direct_scale } else { 0.0 },
         moved,
         energy_noise: false,
+        line_failed: false,
     })
 }
 
