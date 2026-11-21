@@ -105,6 +105,8 @@ pub mod newton;
 /// ODE12r: adaptive first-order integration of the force.
 pub mod ode12r;
 mod oracle;
+/// Bordered cyclic block determinants without the period product.
+pub mod periodic;
 /// Geometry preconditioners: Exp, Lindh, and the bonded FF metric.
 pub mod precon;
 mod pso;
