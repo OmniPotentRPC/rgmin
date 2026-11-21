@@ -59,7 +59,11 @@ fn norm2_slice(a: &[f64]) -> f64 {
             ssq += r * r;
         }
     }
-    if scale == 0.0 { 0.0 } else { scale * ssq.sqrt() }
+    if scale == 0.0 {
+        0.0
+    } else {
+        scale * ssq.sqrt()
+    }
 }
 
 fn all_finite(a: &[f64]) -> bool {
@@ -90,7 +94,9 @@ fn orthonormalize_vectors(vectors: &[Vec<f64>], dim: usize) -> Result<Vec<Vec<f6
         project_out_basis(&mut q, &basis);
         let nrm = norm2_slice(&q);
         if !nrm.is_finite() {
-            return Err(slq_err("non-finite norm while orthonormalizing deflation basis"));
+            return Err(slq_err(
+                "non-finite norm while orthonormalizing deflation basis",
+            ));
         }
         if nrm > 1e-12 {
             for slot in &mut q {
@@ -289,7 +295,9 @@ pub fn sym_eigh(a: &[f64], m: usize) -> Result<TridiagEigh> {
         return Err(slq_err("dense matrix length must equal m * m"));
     }
     if !all_finite(a) {
-        return Err(slq_err("dense symmetric matrix contains non-finite entries"));
+        return Err(slq_err(
+            "dense symmetric matrix contains non-finite entries",
+        ));
     }
     if m == 1 {
         return Ok(TridiagEigh {
@@ -535,7 +543,15 @@ pub fn lanczos_quadrature_log<F>(
 where
     F: FnMut(&[f64], &mut [f64]) -> Result<()>,
 {
-    lanczos_quadrature_log_inner(v, op, lower_bound, max_steps, quad_tol, check_every, v.len())
+    lanczos_quadrature_log_inner(
+        v,
+        op,
+        lower_bound,
+        max_steps,
+        quad_tol,
+        check_every,
+        v.len(),
+    )
 }
 
 fn lanczos_quadrature_log_inner<F>(
@@ -561,7 +577,9 @@ where
     if let Some(lb) = lower_bound
         && !(lb > 0.0 && lb.is_finite())
     {
-        return Err(slq_err("lower_bound for ln quadrature must be finite and positive"));
+        return Err(slq_err(
+            "lower_bound for ln quadrature must be finite and positive",
+        ));
     }
     if !(quad_tol >= 0.0 && quad_tol.is_finite()) {
         return Err(slq_err("quad_tol must be finite and non-negative"));
@@ -606,7 +624,9 @@ where
         op(&basis[j], &mut w)?;
         let matvecs = j + 1;
         if !all_finite(&w) {
-            return Err(slq_err("operator produced non-finite output in Lanczos quadrature"));
+            return Err(slq_err(
+                "operator produced non-finite output in Lanczos quadrature",
+            ));
         }
         let a_j = dot_slice(&basis[j], &w);
         if !a_j.is_finite() {
@@ -659,9 +679,7 @@ where
             let (gauss, ritz_min) = eval_gauss_ln(&alpha, &beta[..m - 1], norm_sq)?;
             if let Some(lb) = lower_bound {
                 if !ritz_min.is_finite() || lb >= ritz_min {
-                    return Err(slq_err(
-                        "lower_bound is not strictly below Ritz minimum",
-                    ));
+                    return Err(slq_err("lower_bound is not strictly below Ritz minimum"));
                 }
                 let (gr_d, gr_e) = gauss_radau_tridiag(&alpha, &beta[..m - 1], b_j, lb)?;
                 let (radau, _) = eval_gauss_ln(&gr_d, &gr_e, norm_sq)?;
@@ -673,7 +691,9 @@ where
                 } else if radau - gauss <= 1e-11 * (1.0 + gauss.abs()) {
                     (gauss, radau)
                 } else {
-                    return Err(slq_err("Gauss-Radau lower bound exceeded Gauss upper bound"));
+                    return Err(slq_err(
+                        "Gauss-Radau lower bound exceeded Gauss upper bound",
+                    ));
                 };
                 let value = 0.5 * (lower + upper);
                 let error_estimate = 0.5 * (upper - lower);
@@ -799,7 +819,9 @@ where
         op(&basis[j], &mut w)?;
         let matvecs = j + 1;
         if !all_finite(&w) {
-            return Err(slq_err("operator produced non-finite output in Lanczos quadrature"));
+            return Err(slq_err(
+                "operator produced non-finite output in Lanczos quadrature",
+            ));
         }
         let a_j = dot_slice(&basis[j], &w);
         if !a_j.is_finite() {
@@ -893,7 +915,9 @@ where
         basis.push(w.iter().map(|&x| x / b_j).collect());
     }
 
-    Err(slq_err("Lanczos quadrature exhausted without producing an estimate"))
+    Err(slq_err(
+        "Lanczos quadrature exhausted without producing an estimate",
+    ))
 }
 
 /// Configuration for [`pcg_solve`].
@@ -981,7 +1005,9 @@ where
     let mut p = z.clone();
     let mut rz = dot_slice(&r, &z);
     if !(rz > 0.0 && rz.is_finite()) {
-        return Err(slq_err("PCG preconditioner is not positive definite on residual"));
+        return Err(slq_err(
+            "PCG preconditioner is not positive definite on residual",
+        ));
     }
 
     let mut ap = vec![0.0; n];
@@ -1064,7 +1090,9 @@ where
         rz = rz_new;
     }
 
-    Err(slq_err("PCG exhausted iteration budget before meeting rel_tol"))
+    Err(slq_err(
+        "PCG exhausted iteration budget before meeting rel_tol",
+    ))
 }
 
 /// One deflated approximate eigenpair `(eigenvalue, vector)` with verified
@@ -1248,7 +1276,9 @@ where
             op(&basis[j], &mut w)?;
             matvecs += 1;
             if !all_finite(&w) {
-                return Err(slq_err("operator produced non-finite output in thick-restart Lanczos"));
+                return Err(slq_err(
+                    "operator produced non-finite output in thick-restart Lanczos",
+                ));
             }
             if !kernel.is_empty() {
                 project_out_basis(&mut w, kernel);
@@ -1416,7 +1446,9 @@ where
         final_low_bound_ok = low_bound_ok;
         final_target_pos_ok = target_pos_ok;
         final_span_exhausted = span_exhausted;
-        if (neg_ok && low_bound_ok && target_pos_ok) || span_exhausted || cycle == config.max_restarts
+        if (neg_ok && low_bound_ok && target_pos_ok)
+            || span_exhausted
+            || cycle == config.max_restarts
         {
             break;
         }
@@ -1501,15 +1533,9 @@ where
         }
     }
 
-    let min_positive_ritz = pos_candidates
-        .first()
-        .map(|p| p.eigenvalue)
-        .unwrap_or(1.0);
+    let min_positive_ritz = pos_candidates.first().map(|p| p.eigenvalue).unwrap_or(1.0);
     let min_positive_res = pos_candidates.first().map(|p| p.residual).unwrap_or(0.0);
-    let max_positive_ritz = pos_candidates
-        .last()
-        .map(|p| p.eigenvalue)
-        .unwrap_or(1.0);
+    let max_positive_ritz = pos_candidates.last().map(|p| p.eigenvalue).unwrap_or(1.0);
 
     let positive_lower_estimate = if pos_candidates.is_empty() {
         1.0
@@ -1550,12 +1576,7 @@ where
                         <= config.neg_log_tol
             })
             .collect();
-        eligible.sort_by(|a, b| {
-            b.eigenvalue
-                .ln()
-                .abs()
-                .total_cmp(&a.eigenvalue.ln().abs())
-        });
+        eligible.sort_by(|a, b| b.eigenvalue.ln().abs().total_cmp(&a.eigenvalue.ln().abs()));
         let cap = want_low.saturating_add(want_high);
         eligible.truncate(cap);
         positive_deflation = eligible;
@@ -1736,9 +1757,8 @@ fn reg_inc_beta(x: f64, a: f64, b: f64) -> f64 {
     if x >= 1.0 {
         return 1.0;
     }
-    let ln_bt = libm::lgamma(a + b) - libm::lgamma(a) - libm::lgamma(b)
-        + a * x.ln()
-        + b * (1.0 - x).ln();
+    let ln_bt =
+        libm::lgamma(a + b) - libm::lgamma(a) - libm::lgamma(b) + a * x.ln() + b * (1.0 - x).ln();
     let bt = ln_bt.exp();
     if x < (a + 1.0) / (a + b + 2.0) {
         bt * betacf(a, b, x) / a
@@ -2021,7 +2041,9 @@ where
         ProbeStrategy::Rademacher => (1usize, 1usize),
         ProbeStrategy::StridedColors { stride, block_size } => {
             if stride == 0 || block_size == 0 {
-                return Err(slq_err("StridedColors requires stride >= 1 and block_size >= 1"));
+                return Err(slq_err(
+                    "StridedColors requires stride >= 1 and block_size >= 1",
+                ));
             }
             (stride, block_size)
         }
@@ -2043,7 +2065,9 @@ where
             || denom_schur <= 0.0
             || !denom_schur.is_finite()
         {
-            return Err(slq_err("degenerate negative eigenvalue deflation denominator"));
+            return Err(slq_err(
+                "degenerate negative eigenvalue deflation denominator",
+            ));
         }
         deflation_error_estimate += (pair.residual * pair.residual) / denom_eig
             + (pair.residual * pair.residual) / denom_schur;
@@ -2053,7 +2077,9 @@ where
     let mut deflated_positive_logabs = 0.0;
     for pair in positive_deflation {
         if !(pair.eigenvalue > 0.0 && pair.eigenvalue.is_finite()) {
-            return Err(slq_err("positive_deflation contains a non-positive eigenvalue"));
+            return Err(slq_err(
+                "positive_deflation contains a non-positive eigenvalue",
+            ));
         }
         deflated_positive_logabs += pair.eigenvalue.ln();
         let denom_schur = pair.eigenvalue * deflation_lower_estimate;
@@ -2063,7 +2089,9 @@ where
             || denom_self <= 0.0
             || !denom_self.is_finite()
         {
-            return Err(slq_err("degenerate positive eigenvalue deflation denominator"));
+            return Err(slq_err(
+                "degenerate positive eigenvalue deflation denominator",
+            ));
         }
         deflation_error_estimate += (pair.residual * pair.residual) / denom_schur
             + (pair.residual * pair.residual) / denom_self;
@@ -2127,7 +2155,9 @@ where
     for u in &probe_deflate {
         let u_val = cv_quad(u)?;
         if !u_val.is_finite() {
-            return Err(slq_err("control variate returned non-finite value on deflation vector"));
+            return Err(slq_err(
+                "control variate returned non-finite value on deflation vector",
+            ));
         }
         cv_projected_trace -= u_val;
     }
@@ -2141,7 +2171,9 @@ where
     {
         (Some(tr_a), Some(tr_a2)) => {
             if !tr_a.is_finite() || !tr_a2.is_finite() {
-                return Err(slq_err("exact_trace_rem and exact_trace_sq_rem must be finite"));
+                return Err(slq_err(
+                    "exact_trace_rem and exact_trace_sq_rem must be finite",
+                ));
             }
             let tr_e = tr_a - rem_dim_f;
             let tr_e2 = tr_a2 - 2.0 * tr_a + rem_dim_f;
@@ -2190,7 +2222,9 @@ where
                 }
                 matvecs += 1;
                 if !all_finite(&s_nxt) {
-                    return Err(slq_err("Hutch++ sketch operator returned non-finite output"));
+                    return Err(slq_err(
+                        "Hutch++ sketch operator returned non-finite output",
+                    ));
                 }
                 if !probe_deflate.is_empty() {
                     project_out_basis(&mut s_nxt, &probe_deflate);
@@ -2231,7 +2265,9 @@ where
                 )?;
                 let cv_val = cv_quad(q)?;
                 if !cv_val.is_finite() {
-                    return Err(slq_err("control variate returned non-finite value on Hutch++ basis"));
+                    return Err(slq_err(
+                        "control variate returned non-finite value on Hutch++ basis",
+                    ));
                 }
                 let lin_val = if use_quad_sub {
                     let z2 = dot_slice(q, q);
@@ -2319,7 +2355,9 @@ where
             )?;
             let cv_val = cv_quad(&probe)?;
             if !cv_val.is_finite() {
-                return Err(slq_err("control variate returned non-finite value on probe"));
+                return Err(slq_err(
+                    "control variate returned non-finite value on probe",
+                ));
             }
             let lin_val = if use_quad_sub {
                 let z2 = dot_slice(&probe, &probe);
@@ -2343,8 +2381,8 @@ where
         let delta2 = sample_val - mean;
         m2 += delta * delta2;
 
-        let is_checkpoint = next_checkpoint_idx < checkpoints.len()
-            && samples == checkpoints[next_checkpoint_idx];
+        let is_checkpoint =
+            next_checkpoint_idx < checkpoints.len() && samples == checkpoints[next_checkpoint_idx];
         if is_checkpoint {
             next_checkpoint_idx += 1;
             let variance = m2 / ((samples - 1) as f64);
@@ -2444,7 +2482,11 @@ mod tests {
         for k in 1..=m {
             let exact = 2.0 - 2.0 * (std::f64::consts::PI * k as f64 / (m + 1) as f64).cos();
             let gap = (eig.values[k - 1] - exact).abs();
-            assert!(gap < 1e-13, "k={k} got {} exact {exact} gap {gap}", eig.values[k - 1]);
+            assert!(
+                gap < 1e-13,
+                "k={k} got {} exact {exact} gap {gap}",
+                eig.values[k - 1]
+            );
         }
         // Verify orthonormality.
         for i in 0..m {
@@ -2515,8 +2557,16 @@ mod tests {
 
         let est = lanczos_quadrature_log(&v, &mut op, Some(0.05), 38, 1e-10, 2).expect("quad");
         assert!(est.bracketed);
-        assert!(est.lower <= exact + 1e-13, "lower {} > exact {exact}", est.lower);
-        assert!(est.upper >= exact - 1e-13, "upper {} < exact {exact}", est.upper);
+        assert!(
+            est.lower <= exact + 1e-13,
+            "lower {} > exact {exact}",
+            est.lower
+        );
+        assert!(
+            est.upper >= exact - 1e-13,
+            "upper {} < exact {exact}",
+            est.upper
+        );
         assert!((est.value - exact).abs() <= est.error_estimate + 1e-13);
         assert!(
             est.error_estimate <= 1e-10,
@@ -2754,9 +2804,7 @@ mod tests {
             for c in 0..n {
                 let mut s = 0.0;
                 for k in 0..n {
-                    s += eig_b.vectors[r * n + k]
-                        * eig_b.values[k].ln()
-                        * eig_b.vectors[c * n + k];
+                    s += eig_b.vectors[r * n + k] * eig_b.values[k].ln() * eig_b.vectors[c * n + k];
                 }
                 l_cv[r * n + c] = s;
             }
@@ -2786,9 +2834,8 @@ mod tests {
             radau_lower_bound: Some(0.5),
         };
         let plain = slq_logdet_deflated(n, &mut op, defl, cfg).expect("plain");
-        let with_cv =
-            slq_logdet_deflated_with_cv(n, &mut op, defl, cv_trace, &mut cv_quad, cfg)
-                .expect("with_cv");
+        let with_cv = slq_logdet_deflated_with_cv(n, &mut op, defl, cv_trace, &mut cv_quad, cfg)
+            .expect("with_cv");
         assert!(
             with_cv.stochastic_se < 0.1 * plain.stochastic_se,
             "expected >10x SE reduction: cv={:.3e} plain={:.3e}",
@@ -3035,7 +3082,9 @@ mod tests {
     #[test]
     fn slq_stopping_rules_honor_fixed_and_alpha_spending_checkpoints() {
         let n = 32usize;
-        let diag: Vec<f64> = (0..n).map(|i| 1.0 + 0.2 * ((i as f64 * 0.3).sin())).collect();
+        let diag: Vec<f64> = (0..n)
+            .map(|i| 1.0 + 0.2 * ((i as f64 * 0.3).sin()))
+            .collect();
         let mut op = |x: &[f64], y: &mut [f64]| -> Result<()> {
             for i in 0..n {
                 y[i] = diag[i] * x[i];
