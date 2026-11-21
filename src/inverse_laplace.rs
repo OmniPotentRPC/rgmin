@@ -936,6 +936,15 @@ pub fn exterior_disk_modulus(
 
 /// Configuration for fixed-Talbot complex-contour inverse Laplace transform.
 ///
+/// The contour is `beta(theta) = shift + r (theta cot(theta) + i theta)` with
+/// `r = n / (5 E)` for each pass, so it crosses the real axis at `shift + n / (5 E)` and
+/// approaches `Im(beta) = ±pi n / (5 E)`, with `n = M/2` on the coarse pass and `n = M`
+/// on the fine one. Every singularity of `F` must lie strictly to the left of both
+/// contours. Nothing checks this: when the singularities lie to the right, both passes
+/// agree on a wrong value near zero and the result reports a small estimate. Raise
+/// [`Self::shift`] past the rightmost real singularity when it is not left of the
+/// coarse contour.
+///
 /// Non-exhaustive: start from [`TalbotConfig::default`] and chain the
 /// `with_*` setters, so a field added later is not a breaking change.
 #[non_exhaustive]
@@ -947,6 +956,9 @@ pub struct TalbotConfig {
     pub min_re_beta: f64,
     /// Maximum admissible `uncertainty_estimate()`.
     pub tolerance: f64,
+    /// Real Bromwich shift `sigma` added to every contour node (default `0`). The result
+    /// carries a factor `exp(sigma E)`, which scales the estimate with it.
+    pub shift: f64,
 }
 
 impl Default for TalbotConfig {
@@ -955,6 +967,7 @@ impl Default for TalbotConfig {
             nodes: 32,
             min_re_beta: -1.0e6,
             tolerance: 1.0e-6,
+            shift: 0.0,
         }
     }
 }
@@ -963,6 +976,7 @@ with_setters!(TalbotConfig {
     with_nodes => nodes: val usize,
     with_min_re_beta => min_re_beta: val f64,
     with_tolerance => tolerance: val f64,
+    with_shift => shift: val f64,
 });
 
 /// Typed refinement and roundoff estimate for fixed-Talbot contour inversion.
@@ -1096,6 +1110,7 @@ pub fn talbot_node(
 fn talbot_pass<F>(
     energy: f64,
     m: usize,
+    shift: f64,
     min_re_beta: f64,
     eval_f: &mut F,
 ) -> Result<(f64, f64, f64, f64, f64, f64), InverseLaplaceError>
@@ -1113,7 +1128,8 @@ where
 
     for k in 1..=m {
         let theta = ((k as f64) - 0.5) * h_nom;
-        let (beta, dbeta) = talbot_node(theta, m, energy)?;
+        let (node, dbeta) = talbot_node(theta, m, energy)?;
+        let beta = node + Complex64::new(shift, 0.0);
         if beta.re <= min_re_beta {
             return Err(InverseLaplaceError::ContourCrossesCrossover {
                 method: "fixed_talbot",
@@ -1163,7 +1179,10 @@ where
     let tail_est = mul_up(
         div_up(h, PI),
         mul_up(
-            mul_up((beta_end.re * energy).exp().next_up(), norm_up(dbeta_end)),
+            mul_up(
+                ((beta_end.re + shift) * energy).exp().next_up(),
+                norm_up(dbeta_end),
+            ),
             endpoint_abs,
         ),
     );
@@ -1172,6 +1191,10 @@ where
 }
 
 /// Invert a complex Laplace transform `F(beta)` at `energy > 0` along the fixed-Talbot contour.
+///
+/// Every singularity of `F` must lie strictly to the left of both the coarse and the fine
+/// contour described on [`TalbotConfig`]; this is a precondition the caller owns, not a
+/// condition the refinement estimate detects.
 pub fn talbot_invert<F>(
     energy: f64,
     config: TalbotConfig,
@@ -1188,6 +1211,12 @@ where
             value: config.min_re_beta,
         });
     }
+    if !config.shift.is_finite() {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "shift",
+            value: config.shift,
+        });
+    }
     if config.nodes < 8 || !config.nodes.is_multiple_of(2) {
         return Err(InverseLaplaceError::InvalidParameter {
             parameter: "nodes",
@@ -1197,10 +1226,20 @@ where
 
     let m_coarse = config.nodes / 2;
     let m_fine = config.nodes;
-    let (v_coarse, eval_coarse, round_coarse, _tail_coarse, min_re_c, max_im_c) =
-        talbot_pass(energy, m_coarse, config.min_re_beta, &mut eval_f)?;
-    let (v_fine, eval_fine, round_fine, tail_fine, min_re_f, max_im_f) =
-        talbot_pass(energy, m_fine, config.min_re_beta, &mut eval_f)?;
+    let (v_coarse, eval_coarse, round_coarse, _tail_coarse, min_re_c, max_im_c) = talbot_pass(
+        energy,
+        m_coarse,
+        config.shift,
+        config.min_re_beta,
+        &mut eval_f,
+    )?;
+    let (v_fine, eval_fine, round_fine, tail_fine, min_re_f, max_im_f) = talbot_pass(
+        energy,
+        m_fine,
+        config.shift,
+        config.min_re_beta,
+        &mut eval_f,
+    )?;
 
     let disc_est = add_up((v_fine - v_coarse).abs().next_up(), tail_fine);
     let eval_est = upward_sum(&[eval_coarse, eval_fine])?;

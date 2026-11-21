@@ -373,6 +373,42 @@ fn talbot_node_is_finite_and_accurate_at_tiny_angles() {
 }
 
 #[test]
+fn talbot_shift_encloses_a_pole_right_of_the_unshifted_contour() {
+    let energy = 5.0_f64;
+    let exact = (2.0 * energy).exp();
+    let gamma4 = higham_gamma(4).expect("gamma4");
+    let eval = |beta: Complex64| {
+        let val = Complex64::new(1.0, 0.0) / (beta - Complex64::new(2.0, 0.0));
+        Ok(ComplexSample::estimated(val, gamma4 * val.norm()))
+    };
+    // Both unshifted contours cross the real axis left of the pole at 2, so the
+    // refinement agrees on a value near zero. This is the documented precondition.
+    let unshifted = talbot_invert(energy, TalbotConfig::default().with_tolerance(1.0), eval)
+        .expect("unshifted contour still returns");
+    assert!(unshifted.value.abs() < 1.0e-6 * exact);
+
+    let shifted = talbot_invert(
+        energy,
+        TalbotConfig::default()
+            .with_shift(3.0)
+            .with_tolerance(1.0e-2),
+        eval,
+    )
+    .expect("shifted contour");
+    let err = (shifted.value - exact).abs();
+    assert!(err <= shifted.uncertainty_estimate(), "err {err:e}");
+    assert!(err <= 1.0e-9 * exact, "err {err:e}");
+
+    assert!(matches!(
+        talbot_invert(energy, TalbotConfig::default().with_shift(f64::NAN), eval),
+        Err(InverseLaplaceError::InvalidParameter {
+            parameter: "shift",
+            ..
+        })
+    ));
+}
+
+#[test]
 fn complex_division_of_large_finite_components_stays_finite() {
     let big = 1.5e308_f64;
     let quotient = Complex64::new(big, 0.0) / Complex64::new(big, big);
