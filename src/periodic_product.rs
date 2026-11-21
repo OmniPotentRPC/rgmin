@@ -20,7 +20,8 @@ pub enum PeriodicProductError {
         /// Requested matrix width.
         width: usize,
     },
-    /// The matrix width, precision, or derived work limit was unusable.
+    /// The matrix width was zero or odd, or the precision or derived work
+    /// limit was unusable.
     #[error("periodic product configuration was not representable")]
     InvalidConfiguration,
     /// Shifted QR did not isolate every multiplier.
@@ -433,7 +434,7 @@ fn verify_reciprocity(
     while let Some(left) = unused.iter().position(|present| *present) {
         let mut best: Option<(usize, Float)> = None;
         for (right, candidate) in eigenvalues.iter().enumerate() {
-            if !unused[right] {
+            if right == left || !unused[right] {
                 continue;
             }
             let defect = eigenvalues[left].mul(candidate).sub(&one).modulus();
@@ -469,6 +470,7 @@ pub fn periodic_product_spectrum(
 ) -> Result<PeriodicProductSpectrum, PeriodicProductError> {
     if factors.is_empty()
         || width == 0
+        || width % 2 != 0
         || precision_bits < f64::MANTISSA_DIGITS
         || i32::try_from(precision_bits).is_err()
     {
@@ -629,17 +631,11 @@ mod tests {
     }
 
     #[test]
-    fn zero_diagonal_reflection_keeps_plus_and_minus_one() {
-        let got = periodic_product_spectrum(&[vec![0.0, 1.0, 1.0, 0.0]], 2, 128)
-            .expect("reflection spectrum");
-        let mut arguments: Vec<_> = got
-            .multipliers
-            .iter()
-            .map(|value| value.argument.abs())
-            .collect();
-        arguments.sort_by(f64::total_cmp);
-        assert!(arguments[0] < 1e-14);
-        assert!((arguments[1] - std::f64::consts::PI).abs() < 1e-14);
+    fn zero_diagonal_reflection_is_not_a_reciprocal_spectrum() {
+        assert_eq!(
+            periodic_product_spectrum(&[vec![0.0, 1.0, 1.0, 0.0]], 2, 128),
+            Err(PeriodicProductError::ReciprocityFailed)
+        );
     }
 
     #[test]
@@ -655,6 +651,14 @@ mod tests {
         assert_eq!(
             periodic_product_spectrum(&[vec![2.0, 0.0, 0.0, 3.0]], 2, 128),
             Err(PeriodicProductError::ReciprocityFailed)
+        );
+        assert_eq!(
+            periodic_product_spectrum(&[vec![1.0, 0.0, 0.0, -1.0]], 2, 128),
+            Err(PeriodicProductError::ReciprocityFailed)
+        );
+        assert_eq!(
+            periodic_product_spectrum(&[vec![1.0]], 1, 128),
+            Err(PeriodicProductError::InvalidConfiguration)
         );
     }
 
