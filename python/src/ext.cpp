@@ -442,7 +442,11 @@ DLManagedTensorVersioned* borrow_x(Vector x, std::size_t n) {
     return tensor;
 }
 
-rgmin::Report step_python(rgmin::Solver& solver, nb::callable function, Vector x) {
+// `first_point`, when given, receives the first point the objective is
+// asked about. A fresh session projects its start onto the bounds before
+// it evaluates, so that point is the start a run is measured from.
+rgmin::Report step_recording(rgmin::Solver& solver, nb::callable function, Vector x,
+                             std::vector<double>* first_point) {
     std::size_t const n = solver.dim();
     check_vector(x, n, "x");
     rgbind::Claim claim(solver.busy(), "Solver");
@@ -452,6 +456,10 @@ rgmin::Report step_python(rgmin::Solver& solver, nb::callable function, Vector x
         if (coordinates == nullptr || gradient == nullptr || value == nullptr ||
             coordinates->dl_tensor.data == nullptr || gradient->dl_tensor.data == nullptr) {
             throw std::invalid_argument("f_and_grad received a null tensor");
+        }
+        if (first_point != nullptr && first_point->empty()) {
+            double const* const at = tensor_f64(coordinates);
+            first_point->assign(at, at + n);
         }
         nb::object point = owned_copy(tensor_f64(coordinates), n);
         nb::object result = function(point);
@@ -480,6 +488,10 @@ rgmin::Report step_python(rgmin::Solver& solver, nb::callable function, Vector x
     }
     rgmin_tensor_free(tensor);
     return finish_step(status, out, &context);
+}
+
+rgmin::Report step_python(rgmin::Solver& solver, nb::callable function, Vector x) {
+    return step_recording(solver, function, x, nullptr);
 }
 
 rgmin::Report step_hess_python(rgmin::Solver& solver, nb::callable function, nb::callable hessian,
@@ -737,9 +749,9 @@ NB_MODULE(_core, m) {
             if (budget == 0) {
                 report = zero_budget_report(function, x0, config.control(), config.method());
             } else {
-                std::vector<double> const start(x0.data(), x0.data() + n);
+                std::vector<double> start;
                 for (std::size_t i = 0; i < budget; ++i) {
-                    report = step_python(solver, function, x0);
+                    report = step_recording(solver, function, x0, &start);
                     if (report.stop != RGMIN_STOP_BUDGET) {
                         break;
                     }

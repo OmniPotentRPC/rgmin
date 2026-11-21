@@ -57,6 +57,34 @@ def test_a_no_move_lbfgs_run_is_line_search_like_the_c_one_shot() -> None:
     assert report.steps == 3
 
 
+def test_a_start_outside_the_box_is_measured_from_its_clipped_point() -> None:
+    seen: list[float] = []
+
+    def uphill(x: np.ndarray) -> tuple[float, np.ndarray]:
+        seen.append(float(x[0]))
+        return _uphill(x)
+
+    report, x = rgmin.minimize(
+        uphill, np.array([1e13]), "lbfgs", linesearch="wolfe", maxiter=3, gtol=1e-8
+    )
+    assert seen[0] == 1e12
+    assert x[0] == 1e12
+    assert report.stop == rgmin.Stop.LINE_SEARCH
+    assert report.converged() is False
+
+    with pytest.raises(rgmin.StopUnmetError) as raised:
+        rgmin.minimize(
+            _uphill,
+            np.array([1e13]),
+            "lbfgs",
+            linesearch="wolfe",
+            maxiter=3,
+            gtol=1e-8,
+            error_on_unmet=True,
+        )
+    assert raised.value.report.stop == rgmin.Stop.LINE_SEARCH
+
+
 def test_a_no_move_lbfgs_run_raises_when_the_stop_is_asked_for() -> None:
     with pytest.raises(RuntimeError, match="stop unmet"):
         rgmin.minimize(

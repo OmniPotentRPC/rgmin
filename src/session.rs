@@ -5761,7 +5761,8 @@ impl Solver {
     /// [`Status::NoiseFloor`] is kept rather than stepped past. A spent
     /// budget is [`Status::Budget`]. An L-BFGS run that spends it with `x`
     /// unmoved is [`crate::StopReason::LineSearchFailed`], as the one-shot
-    /// [`crate::minimize_method`] reports it. A zero `maxiter` takes no
+    /// [`crate::minimize_method`] reports it. Both measure the move from the
+    /// start clipped to the bounds. A zero `maxiter` takes no
     /// step: the report is `Self::assess` of `x`, so it says
     /// [`Status::Tolerance`] only when the gradient evaluated there is
     /// below `gtol`.
@@ -5804,7 +5805,7 @@ impl Solver {
             return self.run(obj, x);
         }
         let tol = self.control.gtol;
-        let start = x.clone();
+        let start = crate::step::clip_owned(obj.bounds(), x.clone());
         let mut gauged = false;
         let mut report = self.step(obj, x)?;
         for _ in 1..self.control.maxiter {
@@ -5849,7 +5850,7 @@ impl Solver {
         }
         self.brief = true;
         let tol = self.control.gtol;
-        let start = x.clone();
+        let start = crate::step::clip_owned(obj.bounds(), x.clone());
         let mut last = None;
         let mut stop: Result<()> = Ok(());
         for _ in 0..budget {
