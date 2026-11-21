@@ -1,4 +1,4 @@
-- `Control::with_require_convergence` opts into
+`Control::with_require_convergence` opts into
   `Error::NotConverged(Box<Report>)` when a finished run is still not
   below `gtol`. The default stays `Ok`. `Report.converged` records the
   result. The comparison is `grad_norm < gtol`, so a gradient exactly
