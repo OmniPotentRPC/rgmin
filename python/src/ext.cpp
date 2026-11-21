@@ -546,25 +546,6 @@ NB_MODULE(_core, m) {
     m.attr("__version__") = rgmin_version();
     m.doc() = "Free-threaded bindings for the rgmin geometry optimizer.";
     rgbind::install_policy(m);
-    nb::object not_converged = nb::steal(PyErr_NewExceptionWithDoc(
-        "rgmin._core.NotConverged",
-        "Raised when ``require_convergence`` is set and the gradient norm is "
-        "still above ``gtol``. ``report`` is the terminal ``Report``.",
-        PyExc_RuntimeError, nullptr));
-    if (!not_converged.is_valid()) {
-        throw nb::python_error();
-    }
-    m.attr("NotConverged") = not_converged;
-    nb::register_exception_translator([](std::exception_ptr const& ptr, void*) {
-        try {
-            std::rethrow_exception(ptr);
-        } catch (rgmin::NotConverged const& error) {
-            nb::object type = nb::module_::import_("rgmin._core").attr("NotConverged");
-            nb::object instance = type(error.what());
-            instance.attr("report") = nb::cast(error.report());
-            PyErr_SetObject(type.ptr(), instance.ptr());
-        }
-    });
 
     nb::enum_<rgmin_method_t>(m, "Method", nb::is_arithmetic(),
                               "Geometry-optimization method. Members are UPPER_SNAKE. "
@@ -654,6 +635,26 @@ NB_MODULE(_core, m) {
         .def("converged",
              [](rgmin::Report const& report) { return report.stop == RGMIN_STOP_TOLERANCE; },
              "True when ``stop`` is ``TOLERANCE``.");
+
+    nb::object not_converged = nb::steal(PyErr_NewExceptionWithDoc(
+        "rgmin._core.NotConverged",
+        "Raised when ``require_convergence`` is set and the gradient norm is "
+        "still above ``gtol``. ``report`` is the terminal ``Report``.",
+        PyExc_RuntimeError, nullptr));
+    if (!not_converged.is_valid()) {
+        throw nb::python_error();
+    }
+    m.attr("NotConverged") = not_converged;
+    nb::register_exception_translator([](std::exception_ptr const& ptr, void*) {
+        try {
+            std::rethrow_exception(ptr);
+        } catch (rgmin::NotConverged const& error) {
+            nb::object type = nb::module_::import_("rgmin._core").attr("NotConverged");
+            nb::object instance = type(error.what());
+            instance.attr("report") = nb::cast(error.report());
+            PyErr_SetObject(type.ptr(), instance.ptr());
+        }
+    });
 
     nb::class_<rgmin::SolverConfig>(m, "SolverConfig",
                                     "Validated, immutable optimizer options. Unknown keywords raise "

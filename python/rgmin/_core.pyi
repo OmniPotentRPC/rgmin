@@ -183,8 +183,6 @@ class NotConverged(RuntimeError):
     Raised when ``require_convergence`` is set and the gradient norm is still above ``gtol``. ``report`` is the terminal ``Report``.
     """
 
-    report: Report
-
 class SolverConfig:
     """
     Validated, immutable optimizer options. Unknown keywords raise ``ValueError`` listing the valid options. A Cartesian solver installs a per-atom cap of 0.2 (ASE maxstep, eOn max_move) unless the method already limits the step. BFGS, dogleg, and FIRE 2.0 start without that cap. ``maxstep`` or ``atom_maxmove`` replaces it on every method. A non-positive value clears it. A positive ``maxmove`` is the Euclidean step limit and leaves the per-atom default off.
