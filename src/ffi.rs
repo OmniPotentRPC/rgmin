@@ -1498,7 +1498,19 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
     method: rgmin_method_t,
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
-    unsafe { rgmin_minimize_eindir_opts(objective, stamp, x, ctrl, method, 0, 0, out) }
+    unsafe {
+        minimize_eindir_named(
+            "rgmin_minimize_eindir",
+            objective,
+            stamp,
+            x,
+            ctrl,
+            method,
+            0,
+            0,
+            out,
+        )
+    }
 }
 
 /// [`rgmin_minimize_eindir`] with the two opt-in controls. A nonzero
@@ -1519,30 +1531,58 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
     backward_polish: i32,
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
+    unsafe {
+        minimize_eindir_named(
+            "rgmin_minimize_eindir_opts",
+            objective,
+            stamp,
+            x,
+            ctrl,
+            method,
+            error_on_unmet,
+            backward_polish,
+            out,
+        )
+    }
+}
+
+/// The body of both eindir one-shots. `entry` is the symbol the host
+/// called, so an error names that entry and not the one that delegates.
+unsafe fn minimize_eindir_named(
+    entry: &str,
+    objective: *const eindir_objective_t,
+    stamp: *const eindir_abi_stamp_t,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    method: rgmin_method_t,
+    error_on_unmet: i32,
+    backward_polish: i32,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if objective.is_null() || stamp.is_null() || ctrl.is_null() || out.is_null() {
-            set_last_error("rgmin_minimize_eindir: null argument");
+            set_last_error(&format!("{entry}: null argument"));
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
         if unsafe { eindir_core_abi_compatible(stamp) } == 0 {
-            set_last_error("rgmin_minimize_eindir: incompatible eindir ABI stamp");
+            set_last_error(&format!("{entry}: incompatible eindir ABI stamp"));
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
         if unsafe { eindir_objective_has_grad(objective) } == 0 {
-            set_last_error("rgmin_minimize_eindir: objective has no gradient");
+            set_last_error(&format!("{entry}: objective has no gradient"));
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
         let init = match cpu_f64_slice_mut(x, "x") {
             Ok(s) => s.to_vec(),
             Err(st) => return st,
         };
-        if let Err(status) = reject_non_finite_initial("rgmin_minimize_eindir", &init) {
+        if let Err(status) = reject_non_finite_initial(entry, &init) {
             return status;
         }
         let dim = unsafe { (*objective).dim };
         if dim != init.len() {
             set_last_error(&format!(
-                "rgmin_minimize_eindir: x length {} != objective dim {}",
+                "{entry}: x length {} != objective dim {}",
                 init.len(),
                 dim
             ));
@@ -1563,7 +1603,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
             if eval_status != eindir_status_t::EINDIR_SUCCESS
                 || grad_status != eindir_status_t::EINDIR_SUCCESS
             {
-                set_last_error("rgmin_minimize_eindir: eindir evaluation failed");
+                set_last_error(&format!("{entry}: eindir evaluation failed"));
                 return (f64::INFINITY, Array1::from_elem(m, f64::NAN));
             }
             (value, gradient)
@@ -1581,7 +1621,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
     })) {
         Ok(s) => s,
         Err(_) => {
-            set_last_error("rgmin_minimize_eindir: panic");
+            set_last_error(&format!("{entry}: panic"));
             rgmin_status_t::RGMIN_INTERNAL_ERROR
         }
     }
