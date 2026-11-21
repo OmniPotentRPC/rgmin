@@ -31,6 +31,16 @@ fn c_header_reads_the_new_stops_through_the_xts_aliases() {
     consumer::compile_and_run("tests/c_xts_stops.c", "rgmin_c_xts_stops", &[]);
 }
 
+#[test]
+fn c_header_reads_riemannian_cg_through_the_xts_aliases() {
+    consumer::compile_and_run("tests/c_xts_rcg.c", "rgmin_c_xts_rcg", &[]);
+}
+
+#[test]
+fn c_header_steps_the_overlay_free_methods_through_the_fused_callback() {
+    consumer::compile_and_run("tests/c_step_fg_methods.c", "rgmin_c_step_fg_methods", &[]);
+}
+
 #[cfg(feature = "highs")]
 #[test]
 fn c_header_routes_and_clears_the_highs_callback() {

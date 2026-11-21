@@ -388,6 +388,7 @@ enum Overlay {
     Ode12r(crate::ode12r::Ode12rState),
     Diis(DiisState),
     GromacsSteep(GromacsSteep),
+    Rcg(crate::rcg::RcgMemory),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -610,14 +611,29 @@ impl Solver {
             Method::Ode12r => Overlay::Ode12r(crate::ode12r::Ode12rState::new(istep)),
             Method::Diis { memory } => Overlay::Diis(DiisState::new(*memory)),
             Method::GromacsSteep => Overlay::GromacsSteep(GromacsSteep::new(istep)),
+            Method::Rcg { beta, transport } => {
+                Overlay::Rcg(crate::rcg::RcgMemory::new(*beta, *transport, istep))
+            }
             _ => Overlay::None,
         };
+        if matches!(method, Method::Rcg { .. }) {
+            // The session default c2 is 0.9, a quasi-Newton value. Fletcher
+            // Reeves on a manifold needs c2 below one half.
+            solver.linesearch = LineSearch::wolfe(
+                crate::rcg::RCG_WOLFE_C1,
+                crate::rcg::RCG_WOLFE_C2,
+                crate::rcg::RCG_WOLFE_MAX_ITER,
+            );
+        }
         solver.apply_default_atom_cap();
         solver
     }
 
     /// [`Method::installs_default_atom_cap`] for the arm this session runs.
     fn installs_default_atom_cap(&self) -> bool {
+        if matches!(self.overlay, Overlay::Rcg(_)) {
+            return false;
+        }
         match &self.inner {
             Inner::Bfgs { .. } => Method::Bfgs.installs_default_atom_cap(),
             Inner::Dogleg { .. } => Method::Dogleg.installs_default_atom_cap(),
@@ -634,7 +650,8 @@ impl Solver {
     /// method has no step control of its own, when the caller has set
     /// neither a per-atom cap nor a positive Euclidean cap.
     ///
-    /// BFGS, dogleg, and FIRE 2.0 leave the default off. Dogleg would
+    /// BFGS, dogleg, Newton-CG, FIRE 2.0 and Riemannian CG leave the
+    /// default off. Dogleg would
     /// otherwise clip the trust step and feed that shorter length to
     /// the radius update, so a step on the trust boundary looks
     /// interior and the radius stays put.
@@ -665,7 +682,9 @@ impl Solver {
     pub fn optimizer_family(&self) -> crate::OptimizerFamily {
         if matches!(self.overlay, Overlay::Ode12r(_)) || matches!(self.inner, Inner::Fire(_)) {
             crate::OptimizerFamily::Fire
-        } else if matches!(self.inner, Inner::Nlcg { .. }) {
+        } else if matches!(self.inner, Inner::Nlcg { .. })
+            || matches!(self.overlay, Overlay::Rcg(_))
+        {
             crate::OptimizerFamily::Cg
         } else {
             crate::OptimizerFamily::QuasiNewton
@@ -1846,6 +1865,28 @@ impl Solver {
         g
     }
 
+    /// [`Self::horizontal_grad`], then the bond tangent of a constraint set.
+    ///
+    /// Riemannian CG steps on the manifold cut by the set, so its stops and
+    /// its report measure the gradient there. The step converts the
+    /// Euclidean gradient once; this projected gradient is not that input.
+    /// Every other method reads the horizontal gradient, as it did.
+    fn tangent_grad(&mut self, x: &Array1<f64>, raw: &Array1<f64>) -> Result<Array1<f64>> {
+        let horizontal = self.horizontal_grad(x, raw);
+        let Overlay::Rcg(_) = self.overlay else {
+            return Ok(horizontal);
+        };
+        let Some(set) = self.constraints.clone() else {
+            return Ok(horizontal);
+        };
+        let bonded = crate::rcg::BondedManifold::new(&self.manifold, &set);
+        let cut = bonded.cut_gradient(x, horizontal);
+        match crate::rcg::Failures::take(&bonded) {
+            Some(failure) => Err(failure),
+            None => Ok(cut),
+        }
+    }
+
     /// Vector transport. Quotient manifolds project at the arrival point.
     fn transport_vec(
         &mut self,
@@ -1900,6 +1941,17 @@ impl Solver {
         };
         let retracted =
             retract_to_level_set_fallible(cfg, x, |point| obj.step_value_and_gradient(point))?;
+        let moved = retracted
+            .point
+            .iter()
+            .zip(x.iter())
+            .any(|(a, b)| a.to_bits() != b.to_bits());
+        if moved && let Overlay::Rcg(memory) = &mut self.overlay {
+            // The held gradient and direction belong to the point before
+            // the retraction, and the next conjugacy test would mix them
+            // with a gradient from the new point.
+            memory.reset();
+        }
         *x = retracted.point;
         *value = retracted.value;
         *grad = retracted.gradient;
@@ -1953,7 +2005,7 @@ impl Solver {
         {
             return Ok(());
         }
-        grad = self.horizontal_grad(x, &grad);
+        grad = self.tangent_grad(x, &grad)?;
         self.remember(x, value, &grad);
         let grad_norm = self.stationarity_norm(x, &grad);
         let status = self.control.classify(grad_norm, self.noted_free_len());
@@ -1978,7 +2030,7 @@ impl Solver {
                 what: "non-finite value or gradient during level-set retraction",
             });
         }
-        let grad = self.horizontal_grad(x, &raw);
+        let grad = self.tangent_grad(x, &raw)?;
         self.remember(x, value, &grad);
         self.steps += 1;
         Ok(self.report(value, x, &grad))
@@ -2588,7 +2640,9 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
-        if self.constraints.is_some() {
+        // Riemannian CG retracts through the bond set itself. The
+        // constraint stepper's match does not know that overlay.
+        if self.constraints.is_some() && !matches!(self.overlay, Overlay::Rcg(_)) {
             return self.constrained_step(x, |s, x| s.step_constrained(obj, x));
         }
         if matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. }) {
@@ -4148,12 +4202,22 @@ impl Solver {
             return self.step_pso(obj, x);
         }
 
-        let (mut value, mut grad) = if cached {
+        let rcg = matches!(self.overlay, Overlay::Rcg(_));
+        // `remember` stores the projected gradient. On a manifold where
+        // `egrad2rgrad` is not a projection, a later step that converted
+        // that cache again would change the direction. Riemannian CG reads
+        // the Euclidean gradient and converts it once.
+        let (mut value, mut grad) = if cached && !rcg {
             (self.last_value, self.last_grad.clone())
         } else {
             obj.value_and_gradient(x.view())
         };
-        grad = self.horizontal_grad(x, &grad);
+        // An empty array, not an `Option`: a conditionally built `Option` that
+        // most methods drop unmoved at the end of this long function left
+        // optimized code testing a slot no path had written, which memcheck
+        // reports as an uninitialised jump.
+        let rcg_egrad = if rcg { grad.clone() } else { Array1::zeros(0) };
+        grad = self.tangent_grad(x, &grad)?;
         if !value.is_finite() || grad.iter().any(|g| !g.is_finite()) {
             return Err(Error::Oracle {
                 what: "non-finite value or gradient",
@@ -4415,6 +4479,7 @@ impl Solver {
                 diis_alpha,
                 diis_atom_cap,
                 diis_euclidean_cap,
+                rcg_egrad,
             )?;
         } else {
             let mut fire2_local = self.fire2.clone();
@@ -5012,7 +5077,11 @@ impl Solver {
                             | Inner::Sr2 { .. }
                             | Inner::Adam { .. }
                     )));
-        let y = if already_retracted || self.manifold.retract_is_translation() {
+        // Riemannian CG already retracted along its own curve. A second
+        // retraction of the chord would leave that curve. The level-set
+        // retraction below still runs.
+        let rcg_retracted = matches!(self.overlay, Overlay::Rcg(_));
+        let y = if already_retracted || rcg_retracted || self.manifold.retract_is_translation() {
             None
         } else {
             Some(self.manifold.retract(&start, &(&*x - &start)))
@@ -5026,7 +5095,7 @@ impl Solver {
         }
         self.retract_level_set_here(obj, x, &mut value, &mut grad)?;
         let level_grad = grad.clone();
-        grad = self.horizontal_grad(x, &grad);
+        grad = self.tangent_grad(x, &grad)?;
         if self.level_set.is_some()
             && let Inner::Fire(state) = &mut self.inner
         {
@@ -5250,6 +5319,7 @@ impl Solver {
             Overlay::Ode12r(state) => state.reset(),
             Overlay::Diis(state) => state.clear(),
             Overlay::GromacsSteep(state) => state.reset(self.control.istep),
+            Overlay::Rcg(state) => state.reset(),
             Overlay::None => {}
         }
     }
@@ -5716,7 +5786,8 @@ impl Solver {
     /// bounds, as a step clips it, and the method memory is untouched. The
     /// stationarity measure is the one a step opens with; a distance or
     /// equality constraint set does not project the gradient here, so
-    /// such a session reads the larger, unprojected norm.
+    /// such a session reads the larger, unprojected norm. Riemannian CG
+    /// is the exception: it reads the gradient cut by the bonds.
     pub(crate) fn assess<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -5741,7 +5812,7 @@ impl Solver {
             self.evals += 1;
             obj.value_and_gradient(x.view())
         };
-        let grad = self.horizontal_grad(x, &raw_grad);
+        let grad = self.tangent_grad(x, &raw_grad)?;
         if !value.is_finite() || grad.iter().any(|g| !g.is_finite()) {
             return Err(Error::Oracle {
                 what: "non-finite value or gradient",
@@ -6032,6 +6103,7 @@ impl Solver {
         diis_alpha: f64,
         diis_atom_cap: Option<f64>,
         diis_euclidean_cap: Option<f64>,
+        rcg_egrad: Array1<f64>,
     ) -> Result<()>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -6171,6 +6243,47 @@ impl Solver {
             Overlay::GromacsSteep(_) => {
                 unreachable!("GROMACS steep is dispatched before generic overlays")
             }
+            Overlay::Rcg(state) => {
+                let linesearch = self.linesearch;
+                let caps = crate::step::Caps {
+                    atom: self.atom_maxmove,
+                    euclid: self.control.maxmove_cap(),
+                };
+                // `grad` is already the projected gradient of the stop.
+                // The step converts this Euclidean gradient once.
+                let egrad = rcg_egrad;
+                let moved = if let Some(set) = self.constraints.as_deref() {
+                    let bonded = crate::rcg::BondedManifold::new(&self.manifold, set);
+                    crate::rcg::rcg_step(
+                        &bonded,
+                        &bonded,
+                        state,
+                        x,
+                        value,
+                        &egrad,
+                        linesearch,
+                        caps,
+                        |p| obj.value_and_gradient(p.view()),
+                    )
+                } else {
+                    crate::rcg::rcg_step(
+                        &self.manifold,
+                        &crate::rcg::Infallible,
+                        state,
+                        x,
+                        value,
+                        &egrad,
+                        linesearch,
+                        caps,
+                        |p| obj.value_and_gradient(p.view()),
+                    )
+                };
+                let moved = moved?;
+                *x = moved.x;
+                value = moved.value;
+                grad = moved.egrad;
+            }
+
             Overlay::None => {}
         }
         self.overlay = overlay;
@@ -6325,8 +6438,11 @@ impl Inner {
             Method::Fire { kind } => Inner::Fire(FireState::new(*kind, dim, istep)),
             // The overlay on Solver carries the real state. Inner stays a
             // variant the constraint stepper matches.
-            Method::QuickMin | Method::Ode12r | Method::Diis { .. } => Inner::Steepest,
-            Method::GromacsSteep => Inner::Steepest,
+            Method::QuickMin
+            | Method::Ode12r
+            | Method::Diis { .. }
+            | Method::Rcg { .. }
+            | Method::GromacsSteep => Inner::Steepest,
             Method::Bb => Inner::Bb {
                 prev_s: None,
                 prev_y: None,
@@ -6391,6 +6507,41 @@ mod tests {
             },
             2,
         )
+    }
+
+    fn rcg_holds_direction(solver: &Solver) -> bool {
+        match &solver.overlay {
+            Overlay::Rcg(memory) => memory.holds_direction(),
+            _ => panic!("not a Riemannian CG session"),
+        }
+    }
+
+    #[test]
+    fn a_level_set_retraction_clears_the_riemannian_cg_memory() {
+        let bowl = Oracle::unbounded(2, |x: ArrayView1<f64>| (x.dot(&x), x.mapv(|v| 2.0 * v)));
+        let mut free = Solver::new(Method::rcg(), Control::default(), 2);
+        let mut x = array![0.6, 0.8];
+        free.step(&bowl, &mut x).unwrap();
+        assert!(
+            rcg_holds_direction(&free),
+            "a plain step keeps its direction"
+        );
+
+        // The capped step runs inward off the circle, and the level-set
+        // retraction brings the point back.
+        let control = Control {
+            maxmove: Some(0.3),
+            ..Control::default()
+        };
+        let mut tied = Solver::new(Method::rcg(), control, 2);
+        tied.set_level_set(LevelSetConstraint::new(1.0)).unwrap();
+        let mut y = array![0.6, 0.8];
+        tied.step(&bowl, &mut y).unwrap();
+        assert!((y.dot(&y) - 1.0).abs() < 1e-6, "off the level set: {y}");
+        assert!(
+            !rcg_holds_direction(&tied),
+            "the direction was built at the point before the retraction"
+        );
     }
 
     fn fire_state(solver: &Solver) -> &FireState {
