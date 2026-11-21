@@ -33,8 +33,9 @@ An opening point :math:`C` is accepted immediately when its energy is lower
 than point :math:`A`, or when its directional derivative is still negative
 and its energy rise is below
 :math:`\sqrt{\epsilon}\lvert E_A\rvert`. Otherwise the search brackets between
-:math:`A` and :math:`C`. It interpolates the derivative zero when the endpoint
-derivatives have opposite signs, bisects otherwise, and stops at the
+:math:`A` and :math:`C`. It interpolates the derivative zero when the opening
+derivatives at :math:`A` and :math:`C` have opposite signs, bisects otherwise, and
+stops at the
 first point below both endpoints. The search makes at most 20 bracket
 trials (lines 2461--2618).
 
