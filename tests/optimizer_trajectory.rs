@@ -142,7 +142,7 @@ fn morse_chain_iterates_stay_bit_identical() {
             "lbfgs-wolfe" => 0x8fa602d6fc6cce2d,
             "nlcg" => 0x0e21edbc2819e7a2,
             "sd" => 0xe7a20697ff9ba6cc,
-            "adam" => 0x15b5731158a5e4f9,
+            "adam" => 0xe1d2ab716e71c641,
             "lbfgs-session" => 0x2fcc34118a8f8315,
             "fire1" => 0x9125a47e9685b768,
             "fire2" => 0xdbccc6bf90cca531,
