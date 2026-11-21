@@ -114,6 +114,8 @@ mod qn;
 /// Sella QuasiNewton / QuasiNewtonIRC restricted step.
 pub mod qn_irc;
 mod qn_step;
+/// Gauss–Legendre rules and Lobatto shape functions on `[-1, 1]`.
+pub mod quadrature;
 /// Quick-min projection and Euler step.
 pub mod quickmin;
 mod report;
@@ -122,6 +124,8 @@ mod restricted_trust;
 pub mod rigid;
 /// Cautious limited-memory Riemannian BFGS (Huang, Absil, Gallivan).
 pub mod rlbfgs;
+/// Bracketed scalar roots by bisection.
+pub mod root;
 /// Tangent-space truncated conjugate gradients and trust-radius updates.
 pub mod rtr;
 /// Moller scaled conjugate gradient (damped-model step, no line search).
