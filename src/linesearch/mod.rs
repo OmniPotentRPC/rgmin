@@ -401,6 +401,13 @@ fn bracket(phi: &mut impl FnMut(f64) -> f64, mut a: f64, mut b: f64, maxiter: us
     if a < c { (a, c) } else { (c, a) }
 }
 
+/// Brent keeps `tol1 = tol * |x| + zeps`, with
+/// `zeps = f64::EPSILON * (|x| + BRENT_ZEPS_FRACTION)`. The fraction
+/// keeps `tol1` positive at `x = 0` without swamping a small abscissa,
+/// and `f64::EPSILON * |x|` keeps `tol1` above half a unit in the last
+/// place when `tol` is zero.
+const BRENT_ZEPS_FRACTION: f64 = 1.0 / 1024.0;
+
 fn brent(
     phi: &mut impl FnMut(f64) -> f64,
     ax: f64,
@@ -421,7 +428,8 @@ fn brent(
     let mut d: f64 = 0.0;
     for _ in 0..maxiter {
         let xm = 0.5 * (a + b);
-        let tol1 = tol * x.abs() + 1e-12;
+        let zeps = f64::EPSILON * (x.abs() + BRENT_ZEPS_FRACTION);
+        let tol1 = tol * x.abs() + zeps;
         let tol2 = 2.0 * tol1;
         if (x - xm).abs() <= tol2 - 0.5 * (b - a) {
             return (x, fx);
@@ -488,4 +496,73 @@ fn brent(
         }
     }
     (x, fx)
+}
+
+#[cfg(test)]
+mod brent_tests {
+    use super::brent;
+
+    #[test]
+    fn brent_resolves_tiny_scale_quadratic() {
+        let target = 5.0e-14;
+        let mut phi = |x: f64| {
+            let d = x - target;
+            d * d
+        };
+        let (x, _f) = brent(&mut phi, 0.0, 1.0e-12, 1.0e-12, 128);
+        assert!((x - target).abs() < 1.0e-13, "x={x:e}");
+    }
+
+    #[test]
+    fn brent_keeps_tol1_positive_at_zero() {
+        let maxiter = 200;
+        let mut evals = 0usize;
+        let mut phi = |x: f64| {
+            evals += 1;
+            x.abs()
+        };
+        let (x, f) = brent(&mut phi, -0.3, 1.0, 0.0, maxiter);
+        assert_eq!(f, x.abs());
+        assert!(
+            evals < maxiter,
+            "tol1 stayed zero, so the run used {evals} of {maxiter} evaluations"
+        );
+        assert!(x.abs() < 1.0e-18, "the floor is too coarse: x={x:e}");
+    }
+
+    #[test]
+    fn brent_zero_tol_converges_at_0_37_and_1_0_well_below_maxiter() {
+        let maxiter = 200;
+        for (target, hi) in [(0.37, 2.0), (1.0, 3.0)] {
+            let mut evals = 0usize;
+            let mut phi = |x: f64| {
+                evals += 1;
+                let d = x - target;
+                d * d
+            };
+            let (x, f) = brent(&mut phi, 0.0, hi, 0.0, maxiter);
+            assert!(
+                (x - target).abs() <= 4.0 * f64::EPSILON * target,
+                "target={target} x={x:e}"
+            );
+            assert!(f <= 16.0 * f64::EPSILON * f64::EPSILON, "f={f:e}");
+            assert!(
+                evals < maxiter / 2,
+                "target={target} stalled for {evals} of {maxiter} evaluations"
+            );
+        }
+    }
+
+    #[test]
+    fn brent_finds_an_interior_minimum() {
+        let mut evals = 0usize;
+        let mut phi = |x: f64| {
+            evals += 1;
+            (x - 0.37) * (x - 0.37)
+        };
+        let (x, f) = brent(&mut phi, 0.0, 1.0, 1.0e-8, 100);
+        assert!((x - 0.37).abs() < 1.0e-7, "x={x}");
+        assert!(f < 1.0e-14, "f={f:e}");
+        assert!(evals > 2);
+    }
 }

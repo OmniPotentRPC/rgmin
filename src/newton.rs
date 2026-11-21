@@ -358,6 +358,19 @@ where
                 value = sval;
                 grad = sgrad;
                 accepted = true;
+            } else if control.require_convergence && !control.converged(gnorm) {
+                return finish_newton(
+                    obj,
+                    control,
+                    kind,
+                    one_shot_report(
+                        value,
+                        pos,
+                        step + 1,
+                        gnorm,
+                        crate::report::Status::StepTolerance,
+                    ),
+                );
             }
         } else {
             pos = npos;

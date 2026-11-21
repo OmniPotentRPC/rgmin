@@ -16,6 +16,7 @@ using rgmin::Method;
 using rgmin::method_from_name;
 using rgmin::Control;
 using rgmin::Report;
+using rgmin::NotConverged;
 using rgmin::ScalarType;
 using rgmin::OptimizeControl;
 using rgmin::OptimizeResult;

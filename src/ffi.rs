@@ -51,6 +51,9 @@ pub enum rgmin_status_t {
     /// An opt-in unmet stop. `x` and `out` still hold the report.
     /// ABI minor 49.
     RGMIN_UNMET_STOP = 6,
+    /// Strict convergence failed. `x` and `out` still hold the report.
+    /// ABI minor 58.
+    RGMIN_NOT_CONVERGED = 7,
 }
 
 fn status_from_error(e: &Error) -> rgmin_status_t {
@@ -65,6 +68,7 @@ fn status_from_error(e: &Error) -> rgmin_status_t {
             rgmin_status_t::RGMIN_CONSTRAINT_ERROR
         }
         Error::StopUnmet { .. } => rgmin_status_t::RGMIN_UNMET_STOP,
+        Error::NotConverged(_) => rgmin_status_t::RGMIN_NOT_CONVERGED,
         _ => rgmin_status_t::RGMIN_INVALID_PARAMETER,
     }
 }
@@ -82,8 +86,8 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 52;
-pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 58;
+pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
 #[repr(C)]
@@ -238,6 +242,10 @@ pub struct rgmin_control_t {
     pub noise_eps: f64,
     /// Floor factor. Non-positive selects 3.
     pub noise_c: f64,
+    /// Nonzero returns [`rgmin_status_t::RGMIN_NOT_CONVERGED`] when the
+    /// gradient norm is not below `gtol`. Zero keeps the `Ok` report.
+    /// ABI minor 58.
+    pub require_convergence: i32,
 }
 
 /// Result written by [`rgmin_minimize`].
@@ -252,6 +260,8 @@ pub struct rgmin_report_t {
     pub grad_norm: f64,
     /// Which stop produced this report.
     pub stop: rgmin_stop_t,
+    /// Nonzero when `grad_norm` is below `gtol`. ABI minor 58.
+    pub converged: i32,
 }
 
 /// `f(x)` callback. `x` is a rank-1 f64 DLPack tensor.
@@ -2000,6 +2010,22 @@ pub unsafe extern "C" fn rgmin_solver_set_error_on_unmet(solver: *mut rgmin_solv
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_set_backward_polish(solver: *mut rgmin_solver_t, on: i32) {
     unsafe { with_solver(solver, |s| s.set_backward_polish(on != 0)) };
+}
+
+/// Opt in to [`rgmin_status_t::RGMIN_NOT_CONVERGED`] from a later run
+/// that reads this session's control. A step stays success, except that
+/// a steepest, BFGS, nonlinear CG or Adam step which took no move and
+/// left its state unchanged reports
+/// [`rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE`]. ABI minor 58.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_require_convergence(
+    solver: *mut rgmin_solver_t,
+    on: i32,
+) {
+    unsafe { with_solver(solver, |s| s.set_require_convergence(on != 0)) };
 }
 
 /// First-order floor `n * eps * (1 + |value| + sum |x_i|)`, with
@@ -4130,6 +4156,7 @@ fn write_report(
             steps: rep.steps,
             grad_norm: rep.grad_norm,
             stop: stop_from_reason(rep.stop_reason()),
+            converged: i32::from(rep.converged),
         };
         (*solver).grad = rep.grad;
     }
@@ -4430,6 +4457,7 @@ fn control_with_flags(c: &rgmin_control_t, error_on_unmet: i32, backward_polish:
         backward_polish: backward_polish != 0,
         etol: None,
         max_evals: None,
+        require_convergence: c.require_convergence != 0,
     }
 }
 
@@ -4464,6 +4492,7 @@ fn write_one_shot(
             steps: rep.steps,
             grad_norm: rep.grad_norm,
             stop: stop_from_reason(rep.stop_reason()),
+            converged: i32::from(rep.converged),
         };
     }
     rgmin_status_t::RGMIN_SUCCESS
@@ -4477,7 +4506,7 @@ fn finish_one_shot(
     match result {
         Ok(rep) => write_one_shot(x, out, &rep),
         Err(err) => {
-            if let Error::StopUnmet { report, .. } = &err {
+            if let Error::StopUnmet { report, .. } | Error::NotConverged(report) = &err {
                 let wrote = write_one_shot(x, out, report);
                 if wrote != rgmin_status_t::RGMIN_SUCCESS {
                     return wrote;
@@ -6734,6 +6763,7 @@ impl Default for rgmin_control_t {
             maxmove: control.maxmove.unwrap_or(0.0),
             noise_eps: floor.map_or(0.0, |f| f.eps_g),
             noise_c: floor.unwrap_or_else(|| crate::NoiseFloor::new(0.0)).c,
+            require_convergence: 0,
         }
     }
 }
@@ -6895,6 +6925,7 @@ mod default_tests {
         bool,
         Option<u64>,
         Option<usize>,
+        bool,
     );
     type ExpBits = (u64, u64, Option<u64>, Option<u64>, Option<u64>, bool, Cell);
     type LindhBits = (u64, Option<u64>, bool, bool, Cell, Option<u64>, bool);
@@ -6927,6 +6958,7 @@ mod default_tests {
             backward_polish,
             etol,
             max_evals,
+            require_convergence,
         } = control;
         (
             maxiter,
@@ -6940,6 +6972,7 @@ mod default_tests {
             backward_polish,
             opt(etol),
             max_evals,
+            require_convergence,
         )
     }
 
@@ -7037,7 +7070,9 @@ mod default_tests {
             maxmove,
             noise_eps,
             noise_c,
+            require_convergence,
         } = rgmin_control_default();
+        assert_eq!(require_convergence, 0);
         assert_eq!(maxiter, want.maxiter);
         assert_eq!(gtol.to_bits(), want.gtol.to_bits());
         assert_eq!(istep.to_bits(), want.istep.to_bits());
