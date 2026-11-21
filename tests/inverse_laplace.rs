@@ -403,7 +403,7 @@ fn talbot_shift_encloses_a_pole_right_of_the_unshifted_contour() {
     let shifted = talbot_invert(
         energy,
         TalbotConfig::default()
-            .with_shift(3.0)
+            .with_sigma(3.0)
             .with_tolerance(1.0e-2),
         eval,
     )
@@ -413,12 +413,114 @@ fn talbot_shift_encloses_a_pole_right_of_the_unshifted_contour() {
     assert!(err <= 1.0e-9 * exact, "err {err:e}");
 
     assert!(matches!(
-        talbot_invert(energy, TalbotConfig::default().with_shift(f64::NAN), eval),
+        talbot_invert(energy, TalbotConfig::default().with_sigma(f64::NAN), eval),
         Err(InverseLaplaceError::InvalidParameter {
-            parameter: "shift",
+            parameter: "sigma",
             ..
         })
     ));
+}
+
+fn rational_sample(num: Complex64, den: Complex64) -> Result<ComplexSample, InverseLaplaceError> {
+    let val = num / den;
+    let gamma = higham_gamma(8).expect("gamma8");
+    Ok(ComplexSample::estimated(val, gamma * val.norm()))
+}
+
+#[test]
+fn talbot_refuses_declared_singularities_outside_the_contour() {
+    // cos(20 t) at t = 10 with M = 32: the coarse contour reaches |Im| ~ 1.0, the poles
+    // sit at ±20i.
+    let cos20 = |beta: Complex64| rational_sample(beta, beta * beta + Complex64::new(400.0, 0.0));
+    let declared = TalbotConfig::default()
+        .with_tolerance(1.0)
+        .with_singularity_re_max(0.0)
+        .with_singularity_im_max(20.0);
+    match talbot_invert(10.0, declared, cos20) {
+        Err(InverseLaplaceError::ContourMissesSingularity {
+            contour_re,
+            contour_im_limit,
+            ..
+        }) => {
+            assert_eq!(contour_re, f64::NEG_INFINITY);
+            assert!(contour_im_limit < 20.0);
+        }
+        other => panic!("cos(20t) must refuse, got {other:?}"),
+    }
+
+    let sin2 = |beta: Complex64| {
+        rational_sample(
+            Complex64::new(2.0, 0.0),
+            beta * beta + Complex64::new(4.0, 0.0),
+        )
+    };
+    assert!(matches!(
+        talbot_invert(
+            10.0,
+            TalbotConfig::default()
+                .with_tolerance(1.0)
+                .with_singularity_re_max(0.0)
+                .with_singularity_im_max(2.0),
+            sin2
+        ),
+        Err(InverseLaplaceError::ContourMissesSingularity { .. })
+    ));
+
+    let pole2 = |beta: Complex64| {
+        rational_sample(Complex64::new(1.0, 0.0), beta - Complex64::new(2.0, 0.0))
+    };
+    match talbot_invert(
+        5.0,
+        TalbotConfig::default()
+            .with_tolerance(1.0)
+            .with_singularity_re_max(2.0),
+        pole2,
+    ) {
+        Err(InverseLaplaceError::ContourMissesSingularity { contour_re, .. }) => {
+            assert!(contour_re < 2.0);
+        }
+        other => panic!("1/(s-2) at E=5 must refuse, got {other:?}"),
+    }
+    let shifted = talbot_invert(
+        5.0,
+        TalbotConfig::default()
+            .with_sigma(3.0)
+            .with_tolerance(1.0e-2)
+            .with_singularity_re_max(2.0),
+        pole2,
+    )
+    .expect("sigma = 3 encloses the pole at 2");
+    assert!((shifted.value - 10.0_f64.exp()).abs() <= 1.0e-9 * 10.0_f64.exp());
+
+    let cos2 = |beta: Complex64| rational_sample(beta, beta * beta + Complex64::new(4.0, 0.0));
+    let enclosed = talbot_invert(
+        1.0,
+        TalbotConfig::default()
+            .with_nodes(64)
+            .with_tolerance(1.0e-8)
+            .with_singularity_re_max(0.0)
+            .with_singularity_im_max(2.0),
+        cos2,
+    )
+    .expect("M = 64 at t = 1 encloses ±2i");
+    let err = (enclosed.value - 2.0_f64.cos()).abs();
+    assert!(
+        err <= enclosed.uncertainty_estimate() && err <= 1.0e-9,
+        "err {err:e}"
+    );
+
+    for (re, im, parameter) in [
+        (Some(f64::NAN), None, "singularity_re_max"),
+        (None, Some(-1.0), "singularity_im_max"),
+    ] {
+        let mut cfg = TalbotConfig::default();
+        cfg = cfg.with_singularity_re_max(re).with_singularity_im_max(im);
+        let got = talbot_invert(1.0, cfg, cos2);
+        assert!(
+            matches!(got, Err(InverseLaplaceError::InvalidParameter { parameter: p, .. }) if p == parameter),
+            "{parameter}: {got:?}"
+        );
+    }
 }
 
 #[test]

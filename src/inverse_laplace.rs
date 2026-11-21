@@ -65,6 +65,19 @@ pub enum InverseLaplaceError {
         /// Maximum admissible `|Im(beta)|`.
         max_imag_beta: f64,
     },
+    /// The contour cannot strictly enclose the caller-declared singularity box.
+    ContourMissesSingularity {
+        /// Contour method name.
+        method: &'static str,
+        /// Declared bound on the real part of every singularity.
+        re_bound: f64,
+        /// Declared bound on `|Im(s)|` of every singularity.
+        im_bound: f64,
+        /// Contour real part at height `im_bound` (`-inf` when the contour never reaches it).
+        contour_re: f64,
+        /// Asymptotic `|Im(beta)|` the contour approaches.
+        contour_im_limit: f64,
+    },
     /// A complex dense linear system encountered a singular or non-finite pivot.
     SingularLinearSystem {
         /// Solver stage name.
@@ -138,6 +151,16 @@ impl fmt::Display for InverseLaplaceError {
             } => write!(
                 f,
                 "{method} contour sampled |Im(beta)| = {imag_beta:.6e} > max_imag_beta = {max_imag_beta:.6e}"
+            ),
+            Self::ContourMissesSingularity {
+                method,
+                re_bound,
+                im_bound,
+                contour_re,
+                contour_im_limit,
+            } => write!(
+                f,
+                "{method} contour misses the declared singularities: Re <= {re_bound:.6e}, |Im| <= {im_bound:.6e}; contour Re at that height {contour_re:.6e}, |Im| limit {contour_im_limit:.6e}"
             ),
             Self::SingularLinearSystem { stage, pivot_abs } => write!(
                 f,
@@ -953,14 +976,20 @@ pub fn exterior_disk_modulus(
 
 /// Configuration for fixed-Talbot complex-contour inverse Laplace transform.
 ///
-/// The contour is `beta(theta) = shift + r (theta cot(theta) + i theta)` with
-/// `r = n / (5 E)` for each pass, so it crosses the real axis at `shift + n / (5 E)` and
+/// The contour is `beta(theta) = sigma + r (theta cot(theta) + i theta)` with
+/// `r = n / (5 E)` for each pass, so it crosses the real axis at `sigma + n / (5 E)` and
 /// approaches `Im(beta) = ±pi n / (5 E)`, with `n = M/2` on the coarse pass and `n = M`
 /// on the fine one. Every singularity of `F` must lie strictly to the left of both
-/// contours. Nothing checks this: when the singularities lie to the right, both passes
-/// agree on a wrong value near zero and the result reports a small estimate. Raise
-/// [`Self::shift`] past the rightmost real singularity when it is not left of the
-/// coarse contour.
+/// contours. When the singularities lie to the right, both passes agree on a wrong value
+/// near zero and the refinement reports a small estimate, so the estimate cannot detect
+/// a miss.
+///
+/// Declare [`Self::singularity_re_max`] and [`Self::singularity_im_max`] to have
+/// [`talbot_invert`] refuse with [`InverseLaplaceError::ContourMissesSingularity`]
+/// before any sample when the coarse contour (the inner one) does not strictly enclose
+/// the box `Re(s) <= re_max`, `|Im(s)| <= im_max`. With neither declared, enclosure is
+/// a precondition the caller owns. Raise [`Self::sigma`] past a real singularity, and
+/// [`Self::nodes`] for a singularity far off the real axis.
 ///
 /// Non-exhaustive: start from [`TalbotConfig::default`] and chain the
 /// `with_*` setters, so a field added later is not a breaking change.
@@ -975,7 +1004,14 @@ pub struct TalbotConfig {
     pub tolerance: f64,
     /// Real Bromwich shift `sigma` added to every contour node (default `0`). The result
     /// carries a factor `exp(sigma E)`, which scales the estimate with it.
-    pub shift: f64,
+    pub sigma: f64,
+    /// Caller-declared upper bound on the real part of every singularity of `F`.
+    /// `None` (default) skips the real-part enclosure check.
+    pub singularity_re_max: Option<f64>,
+    /// Caller-declared upper bound on `|Im(s)|` over every singularity of `F`.
+    /// `None` (default) is read as `0` when [`Self::singularity_re_max`] is set, and
+    /// skips the check when neither bound is set.
+    pub singularity_im_max: Option<f64>,
 }
 
 impl Default for TalbotConfig {
@@ -984,7 +1020,9 @@ impl Default for TalbotConfig {
             nodes: 32,
             min_re_beta: -1.0e6,
             tolerance: 1.0e-6,
-            shift: 0.0,
+            sigma: 0.0,
+            singularity_re_max: None,
+            singularity_im_max: None,
         }
     }
 }
@@ -993,8 +1031,55 @@ with_setters!(TalbotConfig {
     with_nodes => nodes: val usize,
     with_min_re_beta => min_re_beta: val f64,
     with_tolerance => tolerance: val f64,
-    with_shift => shift: val f64,
+    with_sigma => sigma: val f64,
+    with_singularity_re_max => singularity_re_max: opt f64,
+    with_singularity_im_max => singularity_im_max: opt f64,
 });
+
+/// Refuse unless the Talbot contour of scale `r` and shift `sigma` strictly encloses the
+/// declared singularity box. `theta cot(theta)` decreases on `(0, pi)`, so the corner
+/// `(re_max, im_max)` is the binding point: the contour reaches height `im_max` at
+/// `theta = im_max / r` with real part `sigma + r theta cot(theta)`.
+fn talbot_check_enclosure(config: &TalbotConfig, r: f64) -> Result<(), InverseLaplaceError> {
+    if config.singularity_re_max.is_none() && config.singularity_im_max.is_none() {
+        return Ok(());
+    }
+    if let Some(re) = config.singularity_re_max
+        && !re.is_finite()
+    {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "singularity_re_max",
+            value: re,
+        });
+    }
+    let im = config.singularity_im_max.unwrap_or(0.0);
+    if !im.is_finite() || im < 0.0 {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "singularity_im_max",
+            value: im,
+        });
+    }
+    let contour_im_limit = PI * r;
+    let theta = im / r;
+    let contour_re = if theta >= PI {
+        f64::NEG_INFINITY
+    } else if theta == 0.0 {
+        config.sigma + r
+    } else {
+        config.sigma + r * (theta.cos() * (theta / theta.sin()))
+    };
+    let re_bound = config.singularity_re_max.unwrap_or(f64::NEG_INFINITY);
+    if theta >= PI || re_bound >= contour_re {
+        return Err(InverseLaplaceError::ContourMissesSingularity {
+            method: "fixed_talbot",
+            re_bound,
+            im_bound: im,
+            contour_re,
+            contour_im_limit,
+        });
+    }
+    Ok(())
+}
 
 /// Typed refinement and roundoff estimate for fixed-Talbot contour inversion.
 ///
@@ -1127,7 +1212,7 @@ pub fn talbot_node(
 fn talbot_pass<F>(
     energy: f64,
     m: usize,
-    shift: f64,
+    sigma: f64,
     min_re_beta: f64,
     eval_f: &mut F,
 ) -> Result<(f64, f64, f64, f64, f64, f64), InverseLaplaceError>
@@ -1146,7 +1231,7 @@ where
     for k in 1..=m {
         let theta = ((k as f64) - 0.5) * h_nom;
         let (node, dbeta) = talbot_node(theta, m, energy)?;
-        let beta = node + Complex64::new(shift, 0.0);
+        let beta = node + Complex64::new(sigma, 0.0);
         if beta.re <= min_re_beta {
             return Err(InverseLaplaceError::ContourCrossesCrossover {
                 method: "fixed_talbot",
@@ -1197,7 +1282,7 @@ where
         div_up(h, PI),
         mul_up(
             mul_up(
-                ((beta_end.re + shift) * energy).exp().next_up(),
+                ((beta_end.re + sigma) * energy).exp().next_up(),
                 norm_up(dbeta_end),
             ),
             endpoint_abs,
@@ -1210,8 +1295,8 @@ where
 /// Invert a complex Laplace transform `F(beta)` at `energy > 0` along the fixed-Talbot contour.
 ///
 /// Every singularity of `F` must lie strictly to the left of both the coarse and the fine
-/// contour described on [`TalbotConfig`]; this is a precondition the caller owns, not a
-/// condition the refinement estimate detects.
+/// contour described on [`TalbotConfig`]. The refinement estimate does not detect a miss;
+/// declared singularity bounds turn it into a refusal before any sample.
 pub fn talbot_invert<F>(
     energy: f64,
     config: TalbotConfig,
@@ -1228,10 +1313,10 @@ where
             value: config.min_re_beta,
         });
     }
-    if !config.shift.is_finite() {
+    if !config.sigma.is_finite() {
         return Err(InverseLaplaceError::InvalidParameter {
-            parameter: "shift",
-            value: config.shift,
+            parameter: "sigma",
+            value: config.sigma,
         });
     }
     if config.nodes < 8 || !config.nodes.is_multiple_of(2) {
@@ -1243,17 +1328,25 @@ where
 
     let m_coarse = config.nodes / 2;
     let m_fine = config.nodes;
+    let r_coarse = (m_coarse as f64) / (5.0 * energy);
+    if !r_coarse.is_normal() {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "talbot_scale",
+            value: r_coarse,
+        });
+    }
+    talbot_check_enclosure(&config, r_coarse)?;
     let (v_coarse, eval_coarse, round_coarse, _tail_coarse, min_re_c, max_im_c) = talbot_pass(
         energy,
         m_coarse,
-        config.shift,
+        config.sigma,
         config.min_re_beta,
         &mut eval_f,
     )?;
     let (v_fine, eval_fine, round_fine, tail_fine, min_re_f, max_im_f) = talbot_pass(
         energy,
         m_fine,
-        config.shift,
+        config.sigma,
         config.min_re_beta,
         &mut eval_f,
     )?;
