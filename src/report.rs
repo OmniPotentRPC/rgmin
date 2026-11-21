@@ -46,9 +46,11 @@ pub enum Status {
 /// [`Status`] is the historical code. [`StopReason`] names the same
 /// stops in the vocabulary a caller uses to decide whether the point
 /// is stationary: [`Self::Converged`] is the `gtol` stop,
-/// [`Self::MaxIter`] is a spent budget, and [`Self::LineSearchFailed`]
-/// is a budget spent without accepting a step. A backward-error polish
-/// that does not meet its test is [`Self::PolishUnmet`].
+/// [`Self::MaxIter`] is a spent budget, [`Self::LineSearchFailed`] is a
+/// budget spent without accepting a step, and
+/// [`Self::LineSearchRounding`] is a Wolfe bracket blocked by machine
+/// precision. A backward-error polish that does not meet its test is
+/// [`Self::PolishUnmet`].
 ///
 /// [`Report::converged`] is true only for [`Self::Converged`].
 #[non_exhaustive]
@@ -61,6 +63,9 @@ pub enum StopReason {
     MaxIter,
     /// No step was accepted and the gradient is still above `gtol`.
     LineSearchFailed,
+    /// Strong-Wolfe zoom could no longer resolve its bracket or objective
+    /// differences at machine precision.
+    LineSearchRounding,
     /// [`Status::NoiseFloor`].
     NoiseFloor,
     /// [`Status::StepTolerance`].
@@ -92,18 +97,26 @@ impl StopReason {
     pub fn is_unmet(self) -> bool {
         matches!(
             self,
-            Self::MaxIter | Self::LineSearchFailed | Self::PolishUnmet | Self::EvalBudget
+            Self::MaxIter
+                | Self::LineSearchFailed
+                | Self::LineSearchRounding
+                | Self::PolishUnmet
+                | Self::EvalBudget
         )
     }
 
     /// Historical [`Status`] when this reason has one.
     ///
-    /// [`Self::LineSearchFailed`] and [`Self::PolishUnmet`] keep
-    /// [`Status::Budget`]: they are a spent stop, named more finely here.
+    /// [`Self::LineSearchFailed`], [`Self::LineSearchRounding`], and
+    /// [`Self::PolishUnmet`] keep [`Status::Budget`]: they are a spent
+    /// stop, named more finely here.
     pub fn status(self) -> Status {
         match self {
             Self::Converged => Status::Tolerance,
-            Self::MaxIter | Self::LineSearchFailed | Self::PolishUnmet => Status::Budget,
+            Self::MaxIter
+            | Self::LineSearchFailed
+            | Self::LineSearchRounding
+            | Self::PolishUnmet => Status::Budget,
             Self::NoiseFloor => Status::NoiseFloor,
             Self::StepTolerance => Status::StepTolerance,
             Self::MachinePrecision => Status::MachinePrecision,
@@ -133,6 +146,7 @@ impl std::fmt::Display for StopReason {
             Self::Converged => "converged",
             Self::MaxIter => "maxiter",
             Self::LineSearchFailed => "line search failed",
+            Self::LineSearchRounding => "line search rounding blocked",
             Self::NoiseFloor => "noise floor",
             Self::StepTolerance => "step tolerance",
             Self::MachinePrecision => "machine precision",

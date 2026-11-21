@@ -72,9 +72,12 @@ Objects
     ``rgmin_solver_set_backward_polish``, and the ``\*_opts`` one-shots,
     which include ``rgmin_minimize_eindir_opts``.
     ``xts.h`` aliases ``RGMIN_UNMET_STOP``, ``RGMIN_STOP_LINE_SEARCH``,
-    and ``RGMIN_STOP_POLISH_UNMET``. ``RGMIN_UNMET_STOP`` is status 6.
-    ``RGMIN_STOP_LINE_SEARCH`` is 4 and ``RGMIN_STOP_POLISH_UNMET`` is 5.
-    ``RGMIN_STOP_ENERGY_TOLERANCE`` is 6 and ``RGMIN_STOP_EVAL_BUDGET`` is 7.
+    ``RGMIN_STOP_POLISH_UNMET``, ``RGMIN_STOP_MACHINE_PRECISION``, and
+    ``RGMIN_STOP_LINE_SEARCH_ROUNDING``.
+    ``RGMIN_UNMET_STOP`` is status 6. ``RGMIN_STOP_LINE_SEARCH`` is 4,
+    ``RGMIN_STOP_POLISH_UNMET`` is 5, ``RGMIN_STOP_ENERGY_TOLERANCE`` is 6,
+    ``RGMIN_STOP_EVAL_BUDGET`` is 7, ``RGMIN_STOP_MACHINE_PRECISION`` is 8,
+    and ``RGMIN_STOP_LINE_SEARCH_ROUNDING`` is 9.
 
 ``minimize_method``
     Cold-start dispatch for every ``Method``.
@@ -100,7 +103,7 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 61 and ``layout_revision`` 5.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 62 and ``layout_revision`` 5.
     Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
     error, and the backward-error polish. A zero iteration budget
     follows the same unmet-stop policy. Minor 50 adds the energy and
@@ -112,6 +115,7 @@ Objects
     ``rgmin_minimize_eindir_opts``, the
     eindir one-shot with the same two flags. Minor 61 adds
     ``rgmin_solver_set_highs_time_limit`` and ``rgmin_solver_highs_timeouts``.
+    Minor 62 adds the line-search rounding stop.
     ``rgmin_control_t`` is unchanged.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 

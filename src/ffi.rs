@@ -82,7 +82,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 61;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 62;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -213,6 +213,8 @@ pub enum rgmin_stop_t {
     RGMIN_STOP_EVAL_BUDGET = 7,
     /// GROMACS steep could not represent another coordinate change. ABI minor 52.
     RGMIN_STOP_MACHINE_PRECISION = 8,
+    /// Wolfe zoom stopped when rounding blocked further progress. ABI minor 62.
+    RGMIN_STOP_LINE_SEARCH_ROUNDING = 9,
 }
 
 /// Iteration controls. `memory` is used only by L-BFGS (0 means 10).
@@ -4518,6 +4520,7 @@ fn finished_stop(reason: crate::StopReason) -> Option<rgmin_stop_t> {
         StopReason::MaxIter => Some(rgmin_stop_t::RGMIN_STOP_BUDGET),
         StopReason::LineSearchFailed => Some(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH),
         StopReason::MachinePrecision => Some(rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION),
+        StopReason::LineSearchRounding => Some(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING),
         StopReason::PolishUnmet => Some(rgmin_stop_t::RGMIN_STOP_POLISH_UNMET),
         StopReason::EnergyTolerance => Some(rgmin_stop_t::RGMIN_STOP_ENERGY_TOLERANCE),
         StopReason::EvalBudget => Some(rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET),
@@ -7310,7 +7313,7 @@ mod stop_mapping_tests {
     use super::*;
     use crate::{Report, StopReason};
 
-    const FINISHED: [(StopReason, rgmin_stop_t); 9] = [
+    const FINISHED: [(StopReason, rgmin_stop_t); 10] = [
         (StopReason::Converged, rgmin_stop_t::RGMIN_STOP_TOLERANCE),
         (StopReason::NoiseFloor, rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR),
         (
@@ -7334,6 +7337,10 @@ mod stop_mapping_tests {
         (
             StopReason::MachinePrecision,
             rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION,
+        ),
+        (
+            StopReason::LineSearchRounding,
+            rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING,
         ),
     ];
 
@@ -7365,6 +7372,7 @@ mod stop_mapping_tests {
         assert_eq!(rgmin_stop_t::RGMIN_STOP_ENERGY_TOLERANCE as i32, 6);
         assert_eq!(rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET as i32, 7);
         assert_eq!(rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION as i32, 8);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING as i32, 9);
     }
 
     #[test]
