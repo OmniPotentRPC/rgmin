@@ -1,0 +1,1 @@
+`rgmin_lowest_eigenpairs_projected` now runs behind the same unwind barrier as the other manifold entries and writes its mode and value tensors only after the solve, the projection and the Hessian callback have succeeded. A failing Hessian callback is reported as such, not as a projection failure, by the manifold eigenpair, block eigenpair and tCG entries.

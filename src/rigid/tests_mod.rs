@@ -4,4 +4,5 @@ mod tests {
 
     include!("tests_a.rs");
     include!("tests_b.rs");
+    include!("tests_c.rs");
 }

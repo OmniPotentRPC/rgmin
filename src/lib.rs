@@ -187,10 +187,10 @@ pub use lowest_mode::{
     ApplyBlockPreconditioner, ApplyHessian, ApplyPreconditioner, Block3Jacobi, DENSE_EIGEN_CUTOFF,
     DiagonalJacobi, EigenParams, Eigenpair, Eigenpairs, EigensolverKind, LowestMode,
     PreconditionerKind, TryApplyHessian, lowest_eigenpair, lowest_eigenpairs,
-    lowest_eigenpairs_precond, lowest_mode, lowest_mode_chase, lowest_mode_dense, lowest_mode_dlaf,
-    lowest_mode_eigenexa, lowest_mode_libkrylov, lowest_mode_precond, lowest_mode_precond_with,
-    lowest_mode_primme, lowest_mode_slepc, lowest_mode_with, try_lowest_eigenpairs,
-    try_lowest_eigenpairs_precond,
+    lowest_eigenpairs_precond, lowest_eigenpairs_projected, lowest_mode, lowest_mode_chase,
+    lowest_mode_dense, lowest_mode_dlaf, lowest_mode_eigenexa, lowest_mode_libkrylov,
+    lowest_mode_precond, lowest_mode_precond_with, lowest_mode_primme, lowest_mode_slepc,
+    lowest_mode_with, try_lowest_eigenpairs, try_lowest_eigenpairs_precond,
 };
 pub use manifold::{
     CenteredMatrix, ComplexCircle, Constant, EuclideanComplex, Grassmann, Hyperbolic, Manifold,

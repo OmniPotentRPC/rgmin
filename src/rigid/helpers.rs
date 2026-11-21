@@ -97,3 +97,52 @@ fn scale_cols(a: &mut [f64], n: usize, m: usize, req: &RigidRequest<'_>, up: boo
         }
     }
 }
+
+/// Fold `x` into a scaled sum of squares, `scale * sqrt(ssq)` being the
+/// running 2-norm. Squares never overflow or underflow, so the norm of a
+/// cluster stays finite and exact to rounding at any coordinate scale.
+fn accumulate_norm(ssq: &mut f64, scale: &mut f64, x: f64) {
+    let a = x.abs();
+    if a == 0.0 {
+        return;
+    }
+    if a > *scale {
+        let r = *scale / a;
+        *ssq = 1.0 + *ssq * r * r;
+        *scale = a;
+    } else {
+        let r = a / *scale;
+        *ssq += r * r;
+    }
+}
+
+fn scaled_norm(v: &[f64]) -> f64 {
+    let mut ssq = 0.0;
+    let mut scale = 0.0;
+    for x in v {
+        accumulate_norm(&mut ssq, &mut scale, *x);
+    }
+    scale * ssq.sqrt()
+}
+
+/// Divide a rigid-motion candidate by `reference`, the largest norm the
+/// motion could have for this geometry: the norm of a translation, or the
+/// norm of the lever arms for a rotation. The column then measures how much
+/// of the motion is realized, a number in `[0, 1]` that does not change
+/// when the coordinates are scaled. A column that is zero or whose
+/// reference is not a positive finite number is left alone.
+fn normalize_candidate(col: &mut [f64], reference: f64) {
+    if !(reference > 0.0 && reference.is_finite()) {
+        return;
+    }
+    for x in col.iter_mut() {
+        *x /= reference;
+    }
+}
+
+/// Eigenvalue of the frozen-row Gram matrix, relative to the largest, below
+/// which a combination of candidates counts as vanishing on the frozen
+/// coordinates. The eigenvalue is a squared norm and the Jacobi sweep leaves
+/// rounding noise near `1e-17` of the peak, so the bound sits above that
+/// noise: `1e-14` is a relative norm of `1e-7`.
+const NULLSPACE_TOL: f64 = 1.0e-14;

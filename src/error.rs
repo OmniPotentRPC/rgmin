@@ -99,6 +99,23 @@ pub enum Error {
         /// Closed-enum name of the requested backend.
         kind: &'static str,
     },
+    /// A projected eigensolve was asked of a backend that cannot honor the
+    /// projector. PRIMME, libkrylov and SLEPc solve the operator they are
+    /// given, so a projector other than the identity would leave a vertical
+    /// direction with eigenvalue zero or a stale value. Refused before the
+    /// backend is called, whether or not it is linked.
+    #[error("eigensolver {kind} cannot honor a projector; use a built-in solver")]
+    ProjectorUnsupported {
+        /// Closed-enum name of the refused backend.
+        kind: &'static str,
+    },
+    /// A projected eigensolve had no direction to search, or its vector did
+    /// not survive the projection. No eigenpair exists to report.
+    #[error("projected eigensolve: {what}")]
+    ProjectedSolve {
+        /// What went wrong.
+        what: &'static str,
+    },
     /// Block width is not in `1..=dim`.
     #[error("eigenpairs: k = {k} is outside 1..={dim}")]
     EigenBlock {

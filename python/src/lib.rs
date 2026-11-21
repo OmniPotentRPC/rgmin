@@ -767,7 +767,8 @@ fn lowest_eigenpairs(
     Ok((values, columns, residuals, converged))
 }
 
-/// Stiefel, SPD or product manifold over flat column-major lists.
+/// Stiefel, SPD, rigid-quotient or product manifold over flat column-major
+/// lists.
 ///
 /// `rgmin.manifold` wraps this class with NumPy arrays.
 #[pyclass(name = "RiemannianManifold", frozen)]
@@ -826,6 +827,17 @@ impl ManifoldPy {
             .map_err(value_error)
     }
 
+    /// `R^{3N}/SE(3)`, or `R^{3N}/T(3)` when `periodic` is true.
+    ///
+    /// The point is `3 * n_atoms` Cartesians, `x0, y0, z0, x1, ...`.
+    #[staticmethod]
+    #[pyo3(signature = (n_atoms, periodic=false))]
+    fn rigid_quotient(n_atoms: usize, periodic: bool) -> PyResult<Self> {
+        RiemannianManifold::rigid_quotient(n_atoms, periodic)
+            .map(|inner| Self { inner })
+            .map_err(value_error)
+    }
+
     /// Product of the factors in order.
     #[staticmethod]
     fn product(factors: Vec<PyRef<'_, Self>>) -> PyResult<Self> {
@@ -838,7 +850,8 @@ impl ManifoldPy {
         self.inner.packed_len()
     }
 
-    /// `(kind, rows, columns)` of each factor; kind is `stiefel` or `spd`.
+    /// `(kind, rows, columns)` of each factor; kind is `stiefel`, `spd` or
+    /// `rigid_quotient`.
     fn factors(&self) -> Vec<(&'static str, usize, usize)> {
         self.inner
             .factors()
@@ -848,6 +861,8 @@ impl ManifoldPy {
                 let kind = match f {
                     ManifoldFactor::Stiefel { .. } => "stiefel",
                     ManifoldFactor::Spd { .. } => "spd",
+                    ManifoldFactor::RigidQuotient { .. } => "rigid_quotient",
+                    _ => "unknown",
                 };
                 (kind, rows, cols)
             })

@@ -90,15 +90,14 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 52 and ``layout_revision`` 5.
-    Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
-    error, and the backward-error polish. A zero iteration budget
-    follows the same unmet-stop policy. Minor 50 adds the energy and
-    evaluation stops. Minor 51 adds ``rgmin_minimize_rlbfgs`` and
-    ``rgmin_rlbfgs_default``. Minor 52 adds ``RGMIN_GROMACS_STEEP``,
-    ``RGMIN_STOP_MACHINE_PRECISION``,
-    ``rgmin_solver_set_gromacs_steep``, and
-    ``rgmin_gromacs_steep_max_constraint_shrinks``. ``rgmin_control_t`` is unchanged.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 53 and ``layout_revision`` 5.
+    Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop error, and the backward-error polish.
+    A zero iteration budget follows the same unmet-stop policy.
+    Minor 50 adds the energy and evaluation stops.
+    Minor 51 adds ``rgmin_minimize_rlbfgs`` and ``rgmin_rlbfgs_default``.
+    Minor 52 adds ``RGMIN_GROMACS_STEEP``, ``RGMIN_STOP_MACHINE_PRECISION``, ``rgmin_solver_set_gromacs_steep``, and ``rgmin_gromacs_steep_max_constraint_shrinks``.
+    Minor 53 adds ``rgmin_manifold_rigid_quotient``, ``rgmin_rtr_tcg_solve``, ``rgmin_rtr_radius_update``, ``rgmin_lowest_eigenpair_on_manifold`` and ``rgmin_lowest_eigenpairs_projected``.
+    ``rgmin_control_t`` is unchanged.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``

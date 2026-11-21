@@ -26,9 +26,9 @@ use crate::{
     HessianVector, HvpOracle, LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method, NewtonKind,
     Oracle, QnStep, Restart, RiemannianManifold, Rlbfgs, ScgOptions, ScgParams, ScgStepTolerance,
     SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch, lowest_eigenpairs,
-    lowest_eigenpairs_precond, lowest_mode, minimize_method, minimize_method_hess,
-    minimize_method_hvp, minimize_rlbfgs, minimize_scg_exact_with_options,
-    minimize_scg_with_options,
+    lowest_eigenpairs_precond, lowest_eigenpairs_projected, lowest_mode, lowest_mode_precond_with,
+    minimize_method, minimize_method_hess, minimize_method_hvp, minimize_rlbfgs,
+    minimize_scg_exact_with_options, minimize_scg_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -69,6 +69,19 @@ fn status_from_error(e: &Error) -> rgmin_status_t {
     }
 }
 
+fn ffi_status<F>(label: &str, call: F) -> rgmin_status_t
+where
+    F: FnOnce() -> rgmin_status_t,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
+        Ok(status) => status,
+        Err(_) => {
+            set_last_error(&format!("{label}: panicked"));
+            rgmin_status_t::RGMIN_INTERNAL_ERROR
+        }
+    }
+}
+
 /// Compatibility identity for the rgmin C ABI.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,7 +95,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 52;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 53;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -694,12 +707,15 @@ fn eigen_params_from_c(raw: *const rgmin_eigen_params_t) -> Result<EigenParams, 
     })
 }
 
-struct CHvp {
+struct CHvp<'a> {
     hvp: rgmin_hvp_fn,
     user: *mut c_void,
+    /// Set when the callback returns a failure status. The product is then
+    /// NaN, so the caller can tell a failed callback from a failed projection.
+    failed: Option<&'a Cell<bool>>,
 }
 
-impl ApplyHessian for CHvp {
+impl ApplyHessian for CHvp<'_> {
     fn apply_hessian(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
         let n = x.len();
         let mut xbuf = x.to_owned();
@@ -715,6 +731,9 @@ impl ApplyHessian for CHvp {
             rgmin_tensor_free(ht);
         }
         if st != rgmin_status_t::RGMIN_SUCCESS {
+            if let Some(flag) = self.failed {
+                flag.set(true);
+            }
             return Array1::from_elem(n, f64::NAN);
         }
         hv
@@ -725,6 +744,14 @@ struct CPrecond<'a> {
     precond: rgmin_precond_fn,
     user: *mut c_void,
     failed: &'a Cell<bool>,
+}
+
+struct IdentityBlock;
+
+impl ApplyBlockPreconditioner for IdentityBlock {
+    fn apply_block_preconditioner(&self, block: ArrayView2<f64>) -> Array2<f64> {
+        block.to_owned()
+    }
 }
 
 impl ApplyBlockPreconditioner for CPrecond<'_> {
@@ -804,10 +831,10 @@ unsafe fn create_borrowed_f64_1d(
         drop(unsafe { Box::from_raw(ptr) });
     }
 
-    let mut ctx = Box::new(Ctx {
+    let ctx = Box::into_raw(Box::new(Ctx {
         shape: [len as i64],
         strides: [1],
-    });
+    }));
     let dl_tensor = DLTensor {
         data: data.cast(),
         device: DLDevice {
@@ -820,13 +847,13 @@ unsafe fn create_borrowed_f64_1d(
             bits: 64,
             lanes: 1,
         },
-        shape: ctx.shape.as_mut_ptr(),
-        strides: ctx.strides.as_mut_ptr(),
+        shape: unsafe { (*ctx).shape.as_mut_ptr() },
+        strides: unsafe { (*ctx).strides.as_mut_ptr() },
         byte_offset: 0,
     };
     let managed = Box::new(DLManagedTensorVersioned {
         version: DLPackVersion { major: 1, minor: 0 },
-        manager_ctx: Box::into_raw(ctx).cast(),
+        manager_ctx: ctx.cast(),
         deleter: Some(deleter),
         flags: 0,
         dl_tensor,
@@ -1004,10 +1031,10 @@ where
     }
 }
 
-fn cpu_f64_slice<'a>(
+fn cpu_f64_parts(
     t: *const DLManagedTensorVersioned,
     name: &str,
-) -> Result<&'a [f64], rgmin_status_t> {
+) -> Result<(*mut f64, usize), rgmin_status_t> {
     if t.is_null() {
         set_last_error(&format!("{name}: null tensor"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
@@ -1047,18 +1074,24 @@ fn cpu_f64_slice<'a>(
         set_last_error(&format!("{name}: non-unit stride"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
-    let ptr = unsafe { (dl.data as *const u8).add(dl.byte_offset as usize) as *const f64 };
-    Ok(unsafe { slice::from_raw_parts(ptr, n) })
+    let ptr = unsafe { (dl.data as *mut u8).add(dl.byte_offset as usize) as *mut f64 };
+    Ok((ptr, n))
+}
+
+fn cpu_f64_slice<'a>(
+    t: *const DLManagedTensorVersioned,
+    name: &str,
+) -> Result<&'a [f64], rgmin_status_t> {
+    let (ptr, len) = cpu_f64_parts(t, name)?;
+    Ok(unsafe { slice::from_raw_parts(ptr.cast_const(), len) })
 }
 
 fn cpu_f64_slice_mut<'a>(
     t: *mut DLManagedTensorVersioned,
     name: &str,
 ) -> Result<&'a mut [f64], rgmin_status_t> {
-    let s = cpu_f64_slice(t as *const _, name)?;
-    let n = s.len();
-    let p = s.as_ptr() as *mut f64;
-    Ok(unsafe { slice::from_raw_parts_mut(p, n) })
+    let (ptr, len) = cpu_f64_parts(t.cast_const(), name)?;
+    Ok(unsafe { slice::from_raw_parts_mut(ptr, len) })
 }
 
 /// The initial point check shared by the one shot C minimizers.
@@ -4565,6 +4598,17 @@ pub extern "C" fn rgmin_manifold_spd(p: usize, metric: i32) -> *mut rgmin_manifo
     boxed_manifold(RiemannianManifold::spd(p, metric))
 }
 
+/// Molecular or cluster quotient \(\mathbb{R}^{3N}/\mathrm{SE}(3)\)
+/// (`periodic == 0`) or \(\mathbb{R}^{3N}/\mathrm{T}(3)\) (`periodic != 0`).
+/// Packed length is `3 * n_atoms`. Null when `n_atoms == 0`. ABI minor 53.
+#[unsafe(no_mangle)]
+pub extern "C" fn rgmin_manifold_rigid_quotient(
+    n_atoms: usize,
+    periodic: i32,
+) -> *mut rgmin_manifold_handle {
+    boxed_manifold(RiemannianManifold::rigid_quotient(n_atoms, periodic != 0))
+}
+
 /// Product of `count` handles in order. The factors are copied; the caller
 /// still frees each one. A factor that is itself a product contributes its
 /// factors. Null on a null array, a null entry or `count = 0`.
@@ -4900,6 +4944,824 @@ mod device_tests {
         unsafe { rgmin_tensor_free(t) };
         assert_eq!(err, rgmin_status_t::RGMIN_UNSUPPORTED_DEVICE);
     }
+
+    // Plain runs pass either way. Under Miri, a shape pointer taken before
+    // its Box moved, or a mutable slice made from a shared one, is undefined
+    // behavior.
+    #[test]
+    fn borrowed_tensors_read_their_shape_and_write_through() {
+        let mut buf = [1.0_f64, 2.0, 3.0];
+        let t = unsafe { rgmin_tensor_borrow_cpu_f64(buf.as_mut_ptr(), buf.len()) };
+        cpu_f64_slice_mut(t, "t").unwrap()[1] = 7.0;
+        let read = cpu_f64_slice(t, "t").unwrap().to_vec();
+        unsafe { rgmin_tensor_free(t) };
+        assert_eq!(read, [1.0, 7.0, 3.0]);
+        assert_eq!(buf, [1.0, 7.0, 3.0]);
+
+        let mut block = [0.0_f64; 6];
+        let t = unsafe { borrow_f64_matrix(block.as_mut_ptr(), 2, 3) };
+        let (shape, strides) = unsafe {
+            let dl = &(*t).dl_tensor;
+            (
+                [*dl.shape, *dl.shape.add(1)],
+                [*dl.strides, *dl.strides.add(1)],
+            )
+        };
+        unsafe { rgmin_tensor_free(t) };
+        assert_eq!((shape, strides), ([2, 3], [3, 1]));
+    }
+}
+
+#[cfg(test)]
+mod manifold_alias_tests {
+    use super::*;
+
+    unsafe extern "C" fn stretch_hvp(
+        _user: *mut c_void,
+        _x: *const DLManagedTensorVersioned,
+        v: *const DLManagedTensorVersioned,
+        hv: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        let input = cpu_f64_slice(v, "v").unwrap();
+        let output = cpu_f64_slice_mut(hv, "hv").unwrap();
+        let stretch = [
+            -core::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+            0.0,
+            core::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+            0.0,
+        ];
+        let translation = [
+            core::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+            0.0,
+            core::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+            0.0,
+        ];
+        let along_stretch = input.iter().zip(stretch).map(|(a, b)| a * b).sum::<f64>();
+        let along_translation = input
+            .iter()
+            .zip(translation)
+            .map(|(a, b)| a * b)
+            .sum::<f64>();
+        for i in 0..output.len() {
+            output[i] =
+                -2.0 * along_stretch * stretch[i] - 100.0 * along_translation * translation[i];
+        }
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+
+    /// Where an entry writes its result.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Output {
+        Separate,
+        OverX,
+        OverSeed,
+    }
+
+    const POINT: [f64; 6] = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
+    const SEED: [f64; 6] = [0.2, 0.1, -0.3, 0.4, 0.0, 0.2];
+
+    fn lobpcg_params() -> rgmin_eigen_params_t {
+        let mut params = rgmin_eigen_params_default();
+        params.kind = rgmin_eigen_kind_t::RGMIN_EIGEN_LOBPCG as i32;
+        params.nev = 1;
+        params.max_iter = 30;
+        params.tol = 1e-10;
+        params
+    }
+
+    fn single_pair(output: Output) -> (Vec<f64>, rgmin_lowest_mode_t) {
+        let mut point = POINT.to_vec();
+        let mut seed = SEED.to_vec();
+        let mut mode = vec![0.0; 6];
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), point.len()) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), seed.len()) };
+        let mt = match output {
+            Output::Separate => unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), 6) },
+            Output::OverX => xt,
+            Output::OverSeed => st,
+        };
+        let params = lobpcg_params();
+        let mut result = rgmin_lowest_mode_t {
+            value: 0.0,
+            actions: 0,
+        };
+        let status = unsafe {
+            rgmin_lowest_eigenpair_on_manifold(
+                manifold,
+                Some(stretch_hvp),
+                std::ptr::null_mut(),
+                xt,
+                st,
+                mt,
+                &params,
+                std::ptr::null(),
+                &mut result,
+            )
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            if output == Output::Separate {
+                rgmin_tensor_free(mt);
+            }
+            rgmin_manifold_free(manifold);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        let vector = match output {
+            Output::Separate => mode,
+            Output::OverX => point,
+            Output::OverSeed => seed,
+        };
+        (vector, result)
+    }
+
+    fn block_pair(output: Output) -> (Vec<f64>, f64, rgmin_eigenpair_ex_t) {
+        let mut point = POINT.to_vec();
+        let mut seed = SEED.to_vec();
+        let mut modes = vec![0.0; 6];
+        let mut values = vec![0.0; 1];
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), point.len()) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), seed.len()) };
+        let (mt, vt) = match output {
+            Output::Separate => unsafe {
+                (
+                    rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), 6),
+                    rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), 1),
+                )
+            },
+            Output::OverX => (xt, unsafe {
+                rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 1)
+            }),
+            Output::OverSeed => (st, unsafe {
+                rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), 1)
+            }),
+        };
+        let params = lobpcg_params();
+        let mut pair = rgmin_eigenpair_ex_t {
+            value: 0.0,
+            actions: 0,
+            residual: 0.0,
+            converged: 0,
+        };
+        let status = unsafe {
+            rgmin_lowest_eigenpairs_projected(
+                manifold,
+                Some(stretch_hvp),
+                std::ptr::null_mut(),
+                None,
+                std::ptr::null_mut(),
+                xt,
+                st,
+                mt,
+                vt,
+                &params,
+                std::ptr::null(),
+                &mut pair,
+                1,
+            )
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(vt);
+            if output == Output::Separate {
+                rgmin_tensor_free(mt);
+            }
+            rgmin_manifold_free(manifold);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        match output {
+            Output::Separate => (modes, values[0], pair),
+            Output::OverX => (point, seed[0], pair),
+            Output::OverSeed => (seed, point[0], pair),
+        }
+    }
+
+    fn tcg_step(output: Output) -> (Vec<f64>, rgmin_rtr_tcg_result_t) {
+        let mut point = POINT.to_vec();
+        let mut grad = SEED.to_vec();
+        let mut eta = vec![0.0; 6];
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let eta_out = match output {
+            Output::Separate => eta.as_mut_ptr(),
+            Output::OverX => point.as_mut_ptr(),
+            Output::OverSeed => grad.as_mut_ptr(),
+        };
+        let mut result = rgmin_rtr_tcg_result_t {
+            model_decrease: 0.0,
+            eta_norm: 0.0,
+            stop: -1,
+            iterations: 0,
+        };
+        let status = unsafe {
+            rgmin_rtr_tcg_solve(
+                manifold,
+                Some(stretch_hvp),
+                std::ptr::null_mut(),
+                point.as_ptr(),
+                grad.as_ptr(),
+                0.5,
+                1.0,
+                0.1,
+                10,
+                eta_out,
+                6,
+                &mut result,
+            )
+        };
+        unsafe { rgmin_manifold_free(manifold) };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        let step = match output {
+            Output::Separate => eta,
+            Output::OverX => point,
+            Output::OverSeed => grad,
+        };
+        (step, result)
+    }
+
+    fn assert_same_bits(actual: &[f64], expected: &[f64]) {
+        assert_eq!(actual.len(), expected.len());
+        for (a, e) in actual.iter().zip(expected) {
+            assert_eq!(a.to_bits(), e.to_bits(), "{actual:?} != {expected:?}");
+        }
+    }
+
+    // An entry that holds a shared view of an input while it forms the
+    // mutable output over the same buffer is undefined behavior even when
+    // the bytes it writes are right. Plain tests cannot see that; run these
+    // under Miri (`cargo miri test --no-default-features --features capi
+    // --lib manifold_alias_tests`).
+
+    #[test]
+    fn single_pair_mode_out_may_be_x() {
+        let (expected, want) = single_pair(Output::Separate);
+        let (actual, got) = single_pair(Output::OverX);
+        assert_same_bits(&actual, &expected);
+        assert_eq!(
+            (got.value.to_bits(), got.actions),
+            (want.value.to_bits(), want.actions)
+        );
+    }
+
+    #[test]
+    fn single_pair_mode_out_may_be_seed() {
+        let (expected, want) = single_pair(Output::Separate);
+        let (actual, got) = single_pair(Output::OverSeed);
+        assert_same_bits(&actual, &expected);
+        assert_eq!(
+            (got.value.to_bits(), got.actions),
+            (want.value.to_bits(), want.actions)
+        );
+    }
+
+    #[test]
+    fn block_outputs_may_be_x_and_seed() {
+        let (expected, expected_value, want) = block_pair(Output::Separate);
+        for output in [Output::OverX, Output::OverSeed] {
+            let (actual, value, got) = block_pair(output);
+            assert_same_bits(&actual, &expected);
+            assert_eq!(value.to_bits(), expected_value.to_bits());
+            assert_eq!(got.value.to_bits(), want.value.to_bits());
+            assert_eq!(got.actions, want.actions);
+        }
+    }
+
+    #[test]
+    fn tcg_eta_out_may_be_x_or_grad() {
+        let (expected, want) = tcg_step(Output::Separate);
+        for output in [Output::OverX, Output::OverSeed] {
+            let (actual, got) = tcg_step(output);
+            assert_same_bits(&actual, &expected);
+            assert_eq!(got.model_decrease.to_bits(), want.model_decrease.to_bits());
+            assert_eq!((got.stop, got.iterations), (want.stop, want.iterations));
+        }
+    }
+
+    #[test]
+    fn manifold_calls_reject_non_finite_inputs_without_writing_output() {
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let point = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
+        let vector = [f64::NAN, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let mut output = [7.0; 6];
+        let status = unsafe {
+            rgmin_manifold_project(
+                manifold,
+                point.as_ptr(),
+                vector.as_ptr(),
+                output.as_mut_ptr(),
+                output.len(),
+            )
+        };
+        unsafe { rgmin_manifold_free(manifold) };
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+        assert_eq!(output, [7.0; 6]);
+    }
+
+    #[test]
+    fn manifold_eigenpair_rejects_non_finite_inputs_without_writing_output() {
+        let mut point = vec![f64::INFINITY, 0.0, 0.0, 2.0, 0.0, 0.0];
+        let mut seed = vec![0.2, 0.1, -0.3, 0.4, 0.0, 0.2];
+        let mut mode = vec![7.0; 6];
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), point.len()) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), seed.len()) };
+        let mt = unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), mode.len()) };
+        let mut result = rgmin_lowest_mode_t {
+            value: 7.0,
+            actions: 7,
+        };
+        let status = unsafe {
+            rgmin_lowest_eigenpair_on_manifold(
+                manifold,
+                Some(stretch_hvp),
+                std::ptr::null_mut(),
+                xt,
+                st,
+                mt,
+                std::ptr::null(),
+                std::ptr::null(),
+                &mut result,
+            )
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(mt);
+            rgmin_manifold_free(manifold);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+        assert_eq!(mode, vec![7.0; 6]);
+        assert_eq!((result.value, result.actions), (7.0, 7));
+    }
+}
+
+#[cfg(test)]
+mod rtr_entry_tests {
+    use super::*;
+
+    unsafe extern "C" fn scale_hvp(
+        user: *mut c_void,
+        _x: *const DLManagedTensorVersioned,
+        v: *const DLManagedTensorVersioned,
+        hv: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        let scale = unsafe { *(user as *const f64) };
+        let input = cpu_f64_slice(v, "v").unwrap();
+        let output = cpu_f64_slice_mut(hv, "hv").unwrap();
+        for (o, i) in output.iter_mut().zip(input) {
+            *o = scale * i;
+        }
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+
+    struct Counted {
+        calls: usize,
+        value: f64,
+    }
+
+    unsafe extern "C" fn counted_hvp(
+        user: *mut c_void,
+        _x: *const DLManagedTensorVersioned,
+        v: *const DLManagedTensorVersioned,
+        hv: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        let state = unsafe { &mut *(user as *mut Counted) };
+        state.calls += 1;
+        let input = cpu_f64_slice(v, "v").unwrap();
+        let output = cpu_f64_slice_mut(hv, "hv").unwrap();
+        for (o, i) in output.iter_mut().zip(input) {
+            *o = state.value * i;
+        }
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+
+    unsafe extern "C" fn failing_hvp(
+        user: *mut c_void,
+        _x: *const DLManagedTensorVersioned,
+        _v: *const DLManagedTensorVersioned,
+        _hv: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        let calls = unsafe { &mut *(user as *mut usize) };
+        *calls += 1;
+        rgmin_status_t::RGMIN_INTERNAL_ERROR
+    }
+
+    #[test]
+    fn tcg_on_spd_measures_the_step_in_the_manifold_metric() {
+        // SPD(1) at x = 4 under the affine-invariant metric: <u, v> = u v / 16.
+        // With gradient 2 and curvature 1 the Newton step is eta = -2, whose
+        // manifold length is 2 / 4 and whose Euclidean length is 2.
+        let manifold = rgmin_manifold_spd(1, 0);
+        let mut scale = 1.0_f64;
+        let x = [4.0];
+        let grad = [2.0];
+        let mut eta = [0.0];
+        let mut out = std::mem::MaybeUninit::<rgmin_rtr_tcg_result_t>::uninit();
+        let status = unsafe {
+            rgmin_rtr_tcg_solve(
+                manifold,
+                Some(scale_hvp),
+                &mut scale as *mut f64 as *mut c_void,
+                x.as_ptr(),
+                grad.as_ptr(),
+                10.0,
+                1.0,
+                0.1,
+                5,
+                eta.as_mut_ptr(),
+                1,
+                out.as_mut_ptr(),
+            )
+        };
+        let out = unsafe { out.assume_init() };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        assert!((eta[0] + 2.0).abs() < 1e-12, "eta {eta:?}");
+        assert!((out.eta_norm - 0.5).abs() < 1e-12, "norm {}", out.eta_norm);
+        assert!((out.model_decrease - 2.0).abs() < 1e-12);
+        assert_eq!(out.stop, rgmin_tcg_stop_t::RGMIN_TCG_RESIDUAL as i32);
+
+        let mut cut = std::mem::MaybeUninit::<rgmin_rtr_tcg_result_t>::uninit();
+        let status = unsafe {
+            rgmin_rtr_tcg_solve(
+                manifold,
+                Some(scale_hvp),
+                &mut scale as *mut f64 as *mut c_void,
+                x.as_ptr(),
+                grad.as_ptr(),
+                0.25,
+                1.0,
+                0.1,
+                5,
+                eta.as_mut_ptr(),
+                1,
+                cut.as_mut_ptr(),
+            )
+        };
+        let cut = unsafe { cut.assume_init() };
+        unsafe { rgmin_manifold_free(manifold) };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        assert_eq!(cut.stop, rgmin_tcg_stop_t::RGMIN_TCG_BOUNDARY as i32);
+        assert!((cut.eta_norm - 0.25).abs() < 1e-12, "norm {}", cut.eta_norm);
+        assert!((eta[0] + 1.0).abs() < 1e-12, "eta {eta:?}");
+    }
+
+    #[test]
+    fn tcg_stops_on_a_non_finite_hessian_action_and_keeps_the_output() {
+        let mut state = Counted {
+            calls: 0,
+            value: f64::NAN,
+        };
+        let x = [0.0, 0.0];
+        let grad = [1.0, 1.0];
+        let mut eta = [7.0, 7.0];
+        let status = unsafe {
+            rgmin_rtr_tcg_solve(
+                std::ptr::null(),
+                Some(counted_hvp),
+                &mut state as *mut Counted as *mut c_void,
+                x.as_ptr(),
+                grad.as_ptr(),
+                10.0,
+                1.0,
+                0.1,
+                50,
+                eta.as_mut_ptr(),
+                2,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        assert_eq!(state.calls, 1, "tCG kept calling a poisoned Hessian");
+        assert_eq!(eta, [7.0, 7.0]);
+    }
+
+    #[test]
+    fn tcg_stops_at_the_first_failing_hessian_callback() {
+        let mut calls = 0usize;
+        let x = [0.0, 0.0];
+        let grad = [1.0, 1.0];
+        let mut eta = [7.0, 7.0];
+        let status = unsafe {
+            rgmin_rtr_tcg_solve(
+                std::ptr::null(),
+                Some(failing_hvp),
+                &mut calls as *mut usize as *mut c_void,
+                x.as_ptr(),
+                grad.as_ptr(),
+                10.0,
+                1.0,
+                0.1,
+                50,
+                eta.as_mut_ptr(),
+                2,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        assert_eq!(calls, 1);
+        assert_eq!(eta, [7.0, 7.0]);
+    }
+
+    #[test]
+    fn radius_update_clamps_a_radius_above_the_maximum() {
+        let mut radius = 8.0_f64;
+        let mut accepted = -1_i32;
+        let status =
+            unsafe { rgmin_rtr_radius_update(&mut radius, 1.0, 0.5, 1.0, 0.0, &mut accepted) };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        assert_eq!(accepted, 1);
+        assert_eq!(radius, 1.0);
+
+        radius = 8.0;
+        let status =
+            unsafe { rgmin_rtr_radius_update(&mut radius, 1.0, 0.1, 1.0, 0.0, &mut accepted) };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        assert_eq!(accepted, 0);
+        assert!((radius - 0.25).abs() < 1e-15);
+    }
+}
+
+#[cfg(test)]
+mod projected_entry_tests {
+    use super::*;
+
+    unsafe extern "C" fn diagonal_hvp(
+        _user: *mut c_void,
+        _x: *const DLManagedTensorVersioned,
+        v: *const DLManagedTensorVersioned,
+        hv: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        let input = cpu_f64_slice(v, "v").unwrap();
+        let output = cpu_f64_slice_mut(hv, "hv").unwrap();
+        for (i, (o, a)) in output.iter_mut().zip(input).enumerate() {
+            *o = (i as f64 - 3.0) * a;
+        }
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+
+    struct PanicGuard;
+
+    impl PanicGuard {
+        fn armed() -> Self {
+            PANIC_IN_PROJECTION.with(|flag| flag.set(true));
+            PanicGuard
+        }
+    }
+
+    impl Drop for PanicGuard {
+        fn drop(&mut self) {
+            PANIC_IN_PROJECTION.with(|flag| flag.set(false));
+        }
+    }
+
+    fn last_error() -> String {
+        unsafe { CStr::from_ptr(rgmin_last_error()) }
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn single_entry_traps_a_panic_and_writes_nothing() {
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let mut point = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
+        let mut seed = [0.2, 0.1, -0.3, 0.4, 0.0, 0.2];
+        let mut mode = [7.0; 6];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), 6) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 6) };
+        let mt = unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), 6) };
+        let mut result = rgmin_lowest_mode_t {
+            value: 7.0,
+            actions: 7,
+        };
+        let status = {
+            let _armed = PanicGuard::armed();
+            unsafe {
+                rgmin_lowest_eigenpair_on_manifold(
+                    manifold,
+                    Some(diagonal_hvp),
+                    std::ptr::null_mut(),
+                    xt,
+                    st,
+                    mt,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    &mut result,
+                )
+            }
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(mt);
+            rgmin_manifold_free(manifold);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        assert!(last_error().ends_with("panicked"), "{}", last_error());
+        assert_eq!(mode, [7.0; 6]);
+        assert_eq!((result.value, result.actions), (7.0, 7));
+    }
+
+    #[test]
+    fn block_entry_traps_a_panic_and_writes_nothing() {
+        let manifold = rgmin_manifold_rigid_quotient(3, 0);
+        let mut point = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 0.8, 0.1];
+        let mut seed = [
+            0.2, 0.1, -0.3, 0.4, 0.0, 0.2, 0.1, 0.3, 0.2, 0.5, 0.0, 0.1, 0.3, 0.2, 0.4, 0.1, 0.1,
+            0.2,
+        ];
+        let mut modes = [7.0; 18];
+        let mut values = [7.0; 2];
+        let mut pairs = [rgmin_eigenpair_ex_t {
+            value: 7.0,
+            actions: 7,
+            residual: 7.0,
+            converged: 7,
+        }; 2];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), 9) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 18) };
+        let mt = unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), 18) };
+        let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), 2) };
+        let mut params = rgmin_eigen_params_default();
+        params.kind = rgmin_eigen_kind_t::RGMIN_EIGEN_LOBPCG as i32;
+        let status = {
+            let _armed = PanicGuard::armed();
+            unsafe {
+                rgmin_lowest_eigenpairs_projected(
+                    manifold,
+                    Some(diagonal_hvp),
+                    std::ptr::null_mut(),
+                    None,
+                    std::ptr::null_mut(),
+                    xt,
+                    st,
+                    mt,
+                    vt,
+                    &params,
+                    std::ptr::null(),
+                    pairs.as_mut_ptr(),
+                    2,
+                )
+            }
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(mt);
+            rgmin_tensor_free(vt);
+            rgmin_manifold_free(manifold);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        assert!(last_error().ends_with("panicked"), "{}", last_error());
+        assert_eq!(modes, [7.0; 18]);
+        assert_eq!(values, [7.0; 2]);
+        assert_eq!((pairs[0].value, pairs[0].actions), (7.0, 7));
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum BlockEntry {
+        Plain,
+        Extended,
+        Projected,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum BadModes {
+        ShortRank1,
+        LongRank1,
+        WrongRank2,
+    }
+
+    // `values_out` is valid and the solve succeeds, so only `modes_out`
+    // can refuse the call. The refusal has to come before any output is
+    // written: the buffers, the pair records and the error text are the
+    // three things a host looks at after a failed call.
+    fn refused_modes_leave_every_output_untouched(entry: BlockEntry, bad: BadModes) {
+        let mut point = [0.0, 1.0];
+        let mut seed = [0.3, 0.9];
+        let mut modes = [7.0; 3];
+        let mut values = [7.0];
+        let sentinel = rgmin_eigenpair_ex_t {
+            value: 7.0,
+            actions: 7,
+            residual: 7.0,
+            converged: 7,
+        };
+        let mut pair_ex = [sentinel];
+        let mut pair = [rgmin_eigenpair_t {
+            value: 7.0,
+            actions: 7,
+        }];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), 2) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 2) };
+        let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), 1) };
+        let mt = match bad {
+            BadModes::ShortRank1 => unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), 1) },
+            BadModes::LongRank1 => unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), 3) },
+            BadModes::WrongRank2 => unsafe { borrow_f64_matrix(modes.as_mut_ptr(), 1, 2) },
+        };
+        let mut params = rgmin_eigen_params_default();
+        params.kind = rgmin_eigen_kind_t::RGMIN_EIGEN_LOBPCG as i32;
+        params.nev = 1;
+        let hvp = Some(diagonal_hvp as rgmin_hvp_fn);
+        let status = unsafe {
+            match entry {
+                BlockEntry::Plain => rgmin_lowest_eigenpairs(
+                    hvp,
+                    std::ptr::null_mut(),
+                    xt,
+                    st,
+                    mt,
+                    vt,
+                    &params,
+                    std::ptr::null(),
+                    pair.as_mut_ptr(),
+                    1,
+                ),
+                BlockEntry::Extended => rgmin_lowest_eigenpairs_ex(
+                    hvp,
+                    std::ptr::null_mut(),
+                    None,
+                    std::ptr::null_mut(),
+                    xt,
+                    st,
+                    mt,
+                    vt,
+                    &params,
+                    std::ptr::null(),
+                    pair_ex.as_mut_ptr(),
+                    1,
+                ),
+                BlockEntry::Projected => rgmin_lowest_eigenpairs_projected(
+                    std::ptr::null(),
+                    hvp,
+                    std::ptr::null_mut(),
+                    None,
+                    std::ptr::null_mut(),
+                    xt,
+                    st,
+                    mt,
+                    vt,
+                    &params,
+                    std::ptr::null(),
+                    pair_ex.as_mut_ptr(),
+                    1,
+                ),
+            }
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(mt);
+            rgmin_tensor_free(vt);
+        }
+        let case = format!("{entry:?} {bad:?}");
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{case}");
+        assert!(
+            last_error().contains("modes_out"),
+            "{case}: {}",
+            last_error()
+        );
+        assert_eq!(values, [7.0], "{case}: values_out was written");
+        assert_eq!(modes, [7.0; 3], "{case}: modes_out was written");
+        assert_eq!(point, [0.0, 1.0], "{case}");
+        assert_eq!(seed, [0.3, 0.9], "{case}");
+        assert_eq!((pair[0].value, pair[0].actions), (7.0, 7), "{case}");
+        let after = pair_ex[0];
+        assert_eq!((after.value, after.actions), (7.0, 7), "{case}");
+        assert_eq!((after.residual, after.converged), (7.0, 7), "{case}");
+    }
+
+    fn assert_every_bad_modes_shape_is_refused_first(entry: BlockEntry) {
+        for bad in [
+            BadModes::ShortRank1,
+            BadModes::LongRank1,
+            BadModes::WrongRank2,
+        ] {
+            refused_modes_leave_every_output_untouched(entry, bad);
+        }
+    }
+
+    #[test]
+    fn lowest_eigenpairs_validates_modes_before_writing_values() {
+        assert_every_bad_modes_shape_is_refused_first(BlockEntry::Plain);
+    }
+
+    #[test]
+    fn lowest_eigenpairs_ex_validates_modes_before_writing_values() {
+        assert_every_bad_modes_shape_is_refused_first(BlockEntry::Extended);
+    }
+
+    #[test]
+    fn lowest_eigenpairs_projected_validates_modes_before_writing_values() {
+        assert_every_bad_modes_shape_is_refused_first(BlockEntry::Projected);
+    }
 }
 
 #[cfg(test)]
@@ -5176,7 +6038,11 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_with_options(
         Err(st) => return st,
     };
     apply_eigen_options(&mut typed, options);
-    let apply = CHvp { hvp, user };
+    let apply = CHvp {
+        hvp,
+        user,
+        failed: None,
+    };
     match lowest_mode(&apply, x_arr.view(), seed_arr.view(), &typed) {
         Ok(mode) => {
             mode_s.copy_from_slice(mode.vector.as_slice().unwrap_or(&[]));
@@ -6412,6 +7278,18 @@ fn read_block(
     Ok(out)
 }
 
+/// The checks [`write_block`] makes, without a write. A caller with more
+/// than one output runs this on each of them before it writes any.
+fn check_block(
+    tensor: *const DLManagedTensorVersioned,
+    n: usize,
+    k: usize,
+    name: &str,
+) -> Result<(), rgmin_status_t> {
+    let dl = cpu_dl(tensor, name)?;
+    block_strides(dl, n, k, name).map(|_| ())
+}
+
 fn write_block(
     tensor: *mut DLManagedTensorVersioned,
     block: &Array2<f64>,
@@ -6447,10 +7325,10 @@ unsafe fn borrow_f64_matrix(data: *mut f64, n: usize, m: usize) -> *mut DLManage
         drop(unsafe { Box::from_raw(ptr) });
     }
 
-    let mut ctx = Box::new(Ctx {
+    let ctx = Box::into_raw(Box::new(Ctx {
         shape: [n as i64, m as i64],
         strides: [m as i64, 1],
-    });
+    }));
     let dl_tensor = DLTensor {
         data: data.cast(),
         device: DLDevice {
@@ -6463,13 +7341,13 @@ unsafe fn borrow_f64_matrix(data: *mut f64, n: usize, m: usize) -> *mut DLManage
             bits: 64,
             lanes: 1,
         },
-        shape: ctx.shape.as_mut_ptr(),
-        strides: ctx.strides.as_mut_ptr(),
+        shape: unsafe { (*ctx).shape.as_mut_ptr() },
+        strides: unsafe { (*ctx).strides.as_mut_ptr() },
         byte_offset: 0,
     };
     let managed = Box::new(DLManagedTensorVersioned {
         version: DLPackVersion { major: 1, minor: 0 },
-        manager_ctx: Box::into_raw(ctx).cast(),
+        manager_ctx: ctx.cast(),
         deleter: Some(deleter),
         flags: 0,
         dl_tensor,
@@ -6491,6 +7369,9 @@ unsafe fn run_lowest_eigenpairs(
     params: *const rgmin_eigen_params_t,
     options: *const rgmin_eigen_options_t,
     k: usize,
+    project: &mut dyn FnMut(&mut Array1<f64>),
+    projected: bool,
+    projection_failed: &Cell<bool>,
 ) -> Result<crate::Eigenpairs, rgmin_status_t> {
     let Some(hvp) = hvp else {
         set_last_error(&format!("{label}: null hvp"));
@@ -6504,18 +7385,29 @@ unsafe fn run_lowest_eigenpairs(
         set_last_error(&format!("{label}: k = 0 is outside 1..=n"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
-    let xs = cpu_f64_slice(x, "x")?;
-    let n = xs.len();
+    // Own every input before borrowing output storage. C callers may use
+    // either output tensor as in-place storage for an input tensor.
+    let x_owned = cpu_f64_slice(x, "x")?.to_vec();
+    let n = x_owned.len();
     if k > n {
         set_last_error(&format!("{label}: k = {k} is outside 1..={n}"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
     let seed_block = read_block(seed, n, k, "seed")?;
+    if x_owned.iter().any(|value| !value.is_finite())
+        || seed_block.iter().any(|value| !value.is_finite())
+    {
+        set_last_error(&format!("{label}: non-finite x or seed"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
     let values = cpu_f64_slice_mut(values_out, "values_out")?;
     if values.len() != k {
         set_last_error(&format!("{label}: values_out length is not k"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
+    // Both outputs are refused here or not at all, so the writes after the
+    // solve cannot fail between the first and the second.
+    check_block(modes_out, n, k, "modes_out")?;
     let typed = eigen_params_from_c(params)?;
     if !typed.kind.is_linked() {
         return Err(status_from_error(&Error::EigenUnavailable {
@@ -6536,11 +7428,43 @@ unsafe fn run_lowest_eigenpairs(
     } else {
         typed.max_iter
     };
-    let apply = CHvp { hvp, user };
-    let x_arr = Array1::from(xs.to_vec());
+    let hvp_failed = Cell::new(false);
+    let apply = CHvp {
+        hvp,
+        user,
+        failed: Some(&hvp_failed),
+    };
+    let x_arr = Array1::from(x_owned);
     let failed = Cell::new(false);
     let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if let Some(callback) = precond {
+        if projected {
+            if let Some(callback) = precond {
+                let op = CPrecond {
+                    precond: callback,
+                    user: precond_user,
+                    failed: &failed,
+                };
+                lowest_eigenpairs_projected(
+                    &apply,
+                    Some(&op),
+                    x_arr.view(),
+                    seed_block.view(),
+                    tol,
+                    max_iter,
+                    project,
+                )
+            } else {
+                lowest_eigenpairs_projected(
+                    &apply,
+                    None::<&IdentityBlock>,
+                    x_arr.view(),
+                    seed_block.view(),
+                    tol,
+                    max_iter,
+                    project,
+                )
+            }
+        } else if let Some(callback) = precond {
             let op = CPrecond {
                 precond: callback,
                 user: precond_user,
@@ -6558,6 +7482,18 @@ unsafe fn run_lowest_eigenpairs(
             lowest_eigenpairs(&apply, x_arr.view(), seed_block.view(), tol, max_iter)
         }
     }));
+    if projected && solved.is_ok() {
+        // A failed callback hands NaN to the projector, so the projection
+        // flag is a symptom of it. Report the cause.
+        if hvp_failed.get() {
+            set_last_error(&format!("{label}: HVP callback failed"));
+            return Err(rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        }
+        if projection_failed.get() {
+            set_last_error(&format!("{label}: projection failed"));
+            return Err(rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        }
+    }
     let found = match solved {
         Ok(Ok(found)) => found,
         Ok(Err(err)) => {
@@ -6585,9 +7521,11 @@ unsafe fn run_lowest_eigenpairs(
         for i in 0..n {
             modes[(i, j)] = pair.vector[i];
         }
-        values[j] = pair.value;
     }
     write_block(modes_out, &modes, "modes_out")?;
+    for (slot, pair) in values.iter_mut().zip(&found.pairs) {
+        *slot = pair.value;
+    }
     Ok(found)
 }
 
@@ -6640,6 +7578,9 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpairs(
             params,
             options,
             k,
+            &mut |_| {},
+            false,
+            &Cell::new(false),
         )
     } {
         Ok(found) => found,
@@ -6700,6 +7641,9 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpairs_ex(
             params,
             options,
             k,
+            &mut |_| {},
+            false,
+            &Cell::new(false),
         )
     } {
         Ok(found) => found,
@@ -6716,6 +7660,488 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpairs_ex(
         }
     }
     rgmin_status_t::RGMIN_SUCCESS
+}
+
+/// Termination reason of [`rgmin_rtr_tcg_solve`]. ABI minor 53.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_tcg_stop_t {
+    /// The model has negative curvature. The step lies on the boundary.
+    RGMIN_TCG_NEGATIVE_CURVATURE = 0,
+    /// The step was cut where it met the trust sphere.
+    RGMIN_TCG_BOUNDARY = 1,
+    /// The residual met the inner stopping rule.
+    RGMIN_TCG_RESIDUAL = 2,
+    /// The iteration budget ran out.
+    RGMIN_TCG_MAX_ITER = 3,
+    /// The projected gradient is zero.
+    RGMIN_TCG_ZERO_GRADIENT = 4,
+}
+
+/// Output summary of [`rgmin_rtr_tcg_solve`]. ABI minor 53.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_rtr_tcg_result_t {
+    /// Model decrease `m(0) - m(eta)`.
+    pub model_decrease: f64,
+    /// Euclidean length of the returned step.
+    pub eta_norm: f64,
+    /// A [`rgmin_tcg_stop_t`] value.
+    pub stop: i32,
+    /// Conjugate-gradient iterations performed.
+    pub iterations: usize,
+}
+
+unsafe fn manifold_at<'a>(
+    manifold: *const rgmin_manifold_handle,
+    len: usize,
+    label: &str,
+) -> Result<Option<&'a RiemannianManifold>, rgmin_status_t> {
+    if manifold.is_null() {
+        return Ok(None);
+    }
+    let inner = unsafe { &(*manifold).manifold };
+    if inner.packed_len() != len {
+        set_last_error(&format!("{label}: manifold packed length mismatch"));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    }
+    Ok(Some(inner))
+}
+
+fn copy_contiguous(dst: &mut [f64], src: &Array1<f64>) -> bool {
+    match src.as_slice() {
+        Some(slice) if slice.len() == dst.len() => {
+            dst.copy_from_slice(slice);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Steihaug-Toint truncated CG on `manifold`'s tangent space at `x`.
+///
+/// A non-null manifold runs [`crate::rtr::truncated_cg_riemannian`]. `grad`
+/// is the Euclidean gradient and `hvp` the Euclidean Hessian action at `x`.
+/// The model is built in the metric of the manifold, so the gradient is
+/// `egrad2rgrad` of `grad`, the Hessian is `egrad2rgrad` of the action (the
+/// Gauss-Newton part, as the manifold supplies no Weingarten term), and
+/// the inner products, the trust ball, and `eta_norm` are all measured in
+/// that metric. This holds for every factor, the affine-invariant and
+/// log-Euclidean SPD ones included, and `eta_norm` is the value to pass to
+/// [`rgmin_rtr_radius_update`]. A null manifold is Euclidean and runs
+/// [`crate::rtr::truncated_cg_projected`] with the identity projector. A
+/// Hessian action that is not finite ends the iteration at once and the
+/// call returns `RGMIN_INTERNAL_ERROR` without writing `eta_out`. ABI
+/// minor 53.
+///
+/// # Safety
+/// `hvp` is callable with `user`. `x`, `grad`, and `eta_out` each address
+/// `len` doubles, and `eta_out` is writable and may alias either input.
+/// `out` may be null and must not overlap the buffers. `manifold` is null
+/// or a live handle whose packed length is `len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_rtr_tcg_solve(
+    manifold: *const rgmin_manifold_handle,
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    x: *const f64,
+    grad: *const f64,
+    radius: f64,
+    theta: f64,
+    kappa: f64,
+    maxiter: usize,
+    eta_out: *mut f64,
+    len: usize,
+    out: *mut rgmin_rtr_tcg_result_t,
+) -> rgmin_status_t {
+    ffi_status("rgmin_rtr_tcg_solve", || {
+        let Some(hvp) = hvp else {
+            set_last_error("rgmin_rtr_tcg_solve: null hvp");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        };
+        if x.is_null() || grad.is_null() || eta_out.is_null() || len == 0 {
+            set_last_error("rgmin_rtr_tcg_solve: null buffer or zero length");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let radius_ok = radius.is_finite() && radius > 0.0;
+        let theta_ok = theta.is_finite() && theta >= 0.0;
+        let kappa_ok = kappa.is_finite() && kappa > 0.0;
+        if !(radius_ok && theta_ok && kappa_ok) || maxiter == 0 {
+            set_last_error("rgmin_rtr_tcg_solve: invalid trust-region parameters");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let geometry = match unsafe { manifold_at(manifold, len, "rgmin_rtr_tcg_solve") } {
+            Ok(inner) => inner,
+            Err(status) => return status,
+        };
+        // Copy inputs before forming the output slice so an in-place call
+        // does not create overlapping shared and mutable Rust references.
+        let xs = unsafe { slice::from_raw_parts(x, len) }.to_vec();
+        let gs = unsafe { slice::from_raw_parts(grad, len) }.to_vec();
+        if xs.iter().any(|v| !v.is_finite()) || gs.iter().any(|v| !v.is_finite()) {
+            set_last_error("rgmin_rtr_tcg_solve: non-finite x or grad");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let x_arr = Array1::from(xs);
+        let g_arr = Array1::from(gs);
+        let hvp_failed = Cell::new(false);
+        let apply = CHvp {
+            hvp,
+            user,
+            failed: Some(&hvp_failed),
+        };
+        let hvp_at = |v: &Array1<f64>| apply.apply_hessian(x_arr.view(), v.view());
+        let options = crate::rtr::RtrOptions::default()
+            .with_theta(theta)
+            .with_kappa(kappa)
+            .with_cg_max(maxiter);
+        let res = match geometry {
+            Some(inner) => crate::rtr::truncated_cg_riemannian(
+                inner, &x_arr, &g_arr, &hvp_at, radius, &options,
+            ),
+            None => crate::rtr::truncated_cg_projected(
+                |v| v.clone(),
+                g_arr.view(),
+                hvp_at,
+                radius,
+                theta,
+                kappa,
+                maxiter,
+            ),
+        };
+        let eta_norm = match geometry {
+            Some(inner) => crate::manifold::Manifold::norm(inner, &x_arr, &res.eta),
+            None => crate::vecops::nrm2(res.eta.view()),
+        };
+        if !res.model_decrease.is_finite()
+            || !eta_norm.is_finite()
+            || res.eta.iter().any(|c| !c.is_finite())
+        {
+            set_last_error(if hvp_failed.get() {
+                "rgmin_rtr_tcg_solve: HVP callback failed"
+            } else {
+                "rgmin_rtr_tcg_solve: Hessian action or manifold projection is not finite"
+            });
+            return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+        }
+        let dst = unsafe { slice::from_raw_parts_mut(eta_out, len) };
+        if !copy_contiguous(dst, &res.eta) {
+            set_last_error("rgmin_rtr_tcg_solve: step is not contiguous");
+            return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+        }
+        if !out.is_null() {
+            unsafe {
+                *out = rgmin_rtr_tcg_result_t {
+                    model_decrease: res.model_decrease,
+                    eta_norm,
+                    stop: res.stop as i32,
+                    iterations: res.iterations,
+                };
+            }
+        }
+        rgmin_status_t::RGMIN_SUCCESS
+    })
+}
+
+/// Absil-Baker-Gallivan trust-region radius update. ABI minor 53.
+///
+/// Accepts when the ratio of actual to predicted decrease is above 1/10.
+/// Shrinks by 1/4 below 1/4, and doubles above 3/4 when the step lies on
+/// the trust boundary, never past `radius_max`. A `*radius` above
+/// `radius_max` is clamped to `radius_max` before the update, so a
+/// successful call never leaves the radius above its maximum. The call
+/// still succeeds in that case.
+///
+/// # Safety
+/// `radius` points at a finite positive double. `accepted_out` may be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_rtr_radius_update(
+    radius: *mut f64,
+    radius_max: f64,
+    actual_decrease: f64,
+    model_decrease: f64,
+    eta_norm: f64,
+    accepted_out: *mut i32,
+) -> rgmin_status_t {
+    if radius.is_null() || !radius_max.is_finite() || radius_max <= 0.0 {
+        set_last_error("rgmin_rtr_radius_update: invalid radius or radius_max");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let current = unsafe { *radius };
+    if !current.is_finite()
+        || current <= 0.0
+        || !eta_norm.is_finite()
+        || eta_norm < 0.0
+        || !actual_decrease.is_finite()
+        || !model_decrease.is_finite()
+    {
+        set_last_error("rgmin_rtr_radius_update: invalid state");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let mut state = crate::rtr::RtrRadius {
+        radius: current,
+        radius_max,
+    };
+    let accepted = state.update(actual_decrease, model_decrease, eta_norm);
+    unsafe {
+        *radius = state.radius;
+    }
+    if !accepted_out.is_null() {
+        unsafe {
+            *accepted_out = i32::from(accepted);
+        }
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Makes the next projection panic, to reach the unwind barrier of the
+    /// entries that build their projector with [`project_onto`].
+    static PANIC_IN_PROJECTION: Cell<bool> = const { Cell::new(false) };
+}
+
+fn project_onto<'a>(
+    manifold: Option<&'a RiemannianManifold>,
+    x: &'a [f64],
+    failed: &'a Cell<bool>,
+) -> impl FnMut(&mut Array1<f64>) + 'a {
+    move |v: &mut Array1<f64>| {
+        #[cfg(test)]
+        if PANIC_IN_PROJECTION.with(Cell::get) {
+            panic!("injected projection panic");
+        }
+        let Some(inner) = manifold else {
+            return;
+        };
+        let Some(src) = v.as_slice() else {
+            failed.set(true);
+            return;
+        };
+        let mut image = vec![0.0; src.len()];
+        if inner.project(x, src, &mut image).is_err() {
+            failed.set(true);
+            return;
+        }
+        v.assign(&Array1::from(image));
+    }
+}
+
+/// Lowest Hessian eigenpair on `manifold`'s tangent space at `x`.
+/// A null manifold is Euclidean.
+///
+/// The built-in solvers (Lanczos, Rayleigh-Ritz, Jacobi-Davidson, LOBPCG
+/// and the dimer) project the seed, every operator and preconditioner
+/// action, and the returned mode. PRIMME, libkrylov and SLEPc cannot honor
+/// a projector: a non-null manifold with one of those kinds returns
+/// [`rgmin_status_t::RGMIN_INVALID_PARAMETER`] with
+/// [`Error::ProjectorUnsupported`] as the message, before any backend is
+/// called and whether or not it is linked. A manifold that leaves no tangent
+/// direction returns the same status. `mode_out` and `out` are written only
+/// on success. ABI minor 53.
+///
+/// # Safety
+/// Same tensor rules as [`rgmin_lowest_eigenpair_with_options`]. `mode_out`
+/// may alias `x` or `seed`; the result record must not overlap tensor
+/// storage. `manifold` is null or a live handle whose packed length equals
+/// `x`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
+    manifold: *const rgmin_manifold_handle,
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    seed: *const DLManagedTensorVersioned,
+    mode_out: *mut DLManagedTensorVersioned,
+    params: *const rgmin_eigen_params_t,
+    options: *const rgmin_eigen_options_t,
+    out: *mut rgmin_lowest_mode_t,
+) -> rgmin_status_t {
+    ffi_status("rgmin_lowest_eigenpair_on_manifold", || {
+        let Some(hvp) = hvp else {
+            set_last_error("rgmin_lowest_eigenpair_on_manifold: null hvp");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        };
+        if out.is_null() {
+            set_last_error("rgmin_lowest_eigenpair_on_manifold: null out");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let x_owned = match cpu_f64_slice(x, "x") {
+            Ok(slice) => slice.to_vec(),
+            Err(status) => return status,
+        };
+        let seed_owned = match cpu_f64_slice(seed, "seed") {
+            Ok(slice) => slice.to_vec(),
+            Err(status) => return status,
+        };
+        if x_owned.iter().any(|value| !value.is_finite())
+            || seed_owned.iter().any(|value| !value.is_finite())
+        {
+            set_last_error("rgmin_lowest_eigenpair_on_manifold: non-finite x or seed");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        // Inputs are owned before the mutable output slice is formed. This
+        // is required even when all three DLPack handles describe one buffer.
+        let mode_s = match cpu_f64_slice_mut(mode_out, "mode_out") {
+            Ok(slice) => slice,
+            Err(status) => return status,
+        };
+        if x_owned.len() != seed_owned.len() || x_owned.len() != mode_s.len() {
+            set_last_error("rgmin_lowest_eigenpair_on_manifold: length mismatch");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let geometry = match unsafe {
+            manifold_at(
+                manifold,
+                x_owned.len(),
+                "rgmin_lowest_eigenpair_on_manifold",
+            )
+        } {
+            Ok(inner) => inner,
+            Err(status) => return status,
+        };
+        let mut typed = match eigen_params_from_c(params) {
+            Ok(parsed) => parsed,
+            Err(status) => return status,
+        };
+        apply_eigen_options(&mut typed, options);
+        let x_arr = Array1::from(x_owned.clone());
+        let seed_arr = Array1::from(seed_owned);
+        let hvp_failed = Cell::new(false);
+        let apply = CHvp {
+            hvp,
+            user,
+            failed: Some(&hvp_failed),
+        };
+        let failed = Cell::new(false);
+        let mut project = project_onto(geometry, &x_owned, &failed);
+        match lowest_mode_precond_with(
+            &apply,
+            x_arr.view(),
+            seed_arr.view(),
+            &typed,
+            &crate::hvp::IdentityPrecond,
+            &mut project,
+        ) {
+            Ok(mode) => {
+                let failure = if hvp_failed.get() {
+                    Some("HVP callback failed")
+                } else if failed.get() {
+                    Some("projection failed")
+                } else if !mode.value.is_finite() || mode.vector.iter().any(|v| !v.is_finite()) {
+                    Some("result is not finite")
+                } else {
+                    None
+                };
+                if let Some(what) = failure {
+                    set_last_error(&format!("rgmin_lowest_eigenpair_on_manifold: {what}"));
+                    return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+                }
+                if !copy_contiguous(mode_s, &mode.vector) {
+                    set_last_error("rgmin_lowest_eigenpair_on_manifold: mode is not contiguous");
+                    return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+                }
+                unsafe {
+                    *out = rgmin_lowest_mode_t {
+                        value: mode.value,
+                        actions: mode.actions,
+                    };
+                }
+                rgmin_status_t::RGMIN_SUCCESS
+            }
+            Err(err) => {
+                if hvp_failed.get() {
+                    set_last_error("rgmin_lowest_eigenpair_on_manifold: HVP callback failed");
+                    rgmin_status_t::RGMIN_INTERNAL_ERROR
+                } else if failed.get() {
+                    set_last_error("rgmin_lowest_eigenpair_on_manifold: projection failed");
+                    rgmin_status_t::RGMIN_INTERNAL_ERROR
+                } else {
+                    status_from_error(&err)
+                }
+            }
+        }
+    })
+}
+
+/// [`rgmin_lowest_eigenpairs_ex`] on `manifold`'s tangent space at `x`.
+/// A null manifold matches [`rgmin_lowest_eigenpairs_ex`]. ABI minor 53.
+///
+/// # Safety
+/// Same tensor and callback rules as [`rgmin_lowest_eigenpairs_ex`].
+/// `modes_out` and `values_out` may alias either input, but not each other
+/// or `pairs_out`. `manifold` is null or a live handle whose packed length
+/// equals `x`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_lowest_eigenpairs_projected(
+    manifold: *const rgmin_manifold_handle,
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    precond: Option<rgmin_precond_fn>,
+    precond_user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    seed: *const DLManagedTensorVersioned,
+    modes_out: *mut DLManagedTensorVersioned,
+    values_out: *mut DLManagedTensorVersioned,
+    params: *const rgmin_eigen_params_t,
+    options: *const rgmin_eigen_options_t,
+    pairs_out: *mut rgmin_eigenpair_ex_t,
+    k: usize,
+) -> rgmin_status_t {
+    ffi_status("rgmin_lowest_eigenpairs_projected", || {
+        if pairs_out.is_null() {
+            set_last_error("rgmin_lowest_eigenpairs_projected: null output");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let x_owned = match cpu_f64_slice(x, "x") {
+            Ok(slice) => slice.to_vec(),
+            Err(status) => return status,
+        };
+        let geometry = match unsafe {
+            manifold_at(manifold, x_owned.len(), "rgmin_lowest_eigenpairs_projected")
+        } {
+            Ok(inner) => inner,
+            Err(status) => return status,
+        };
+        let failed = Cell::new(false);
+        let mut project = project_onto(geometry, &x_owned, &failed);
+        // `run_lowest_eigenpairs` writes the mode and value tensors only after
+        // the solve, the projection and the Hessian callback have all
+        // succeeded, so a failure leaves every output as the caller had it.
+        let found = match unsafe {
+            run_lowest_eigenpairs(
+                "rgmin_lowest_eigenpairs_projected",
+                hvp,
+                user,
+                precond,
+                precond_user,
+                x,
+                seed,
+                modes_out,
+                values_out,
+                params,
+                options,
+                k,
+                &mut project,
+                geometry.is_some(),
+                &failed,
+            )
+        } {
+            Ok(found) => found,
+            Err(status) => return status,
+        };
+        for (j, pair) in found.pairs.iter().enumerate() {
+            unsafe {
+                *pairs_out.add(j) = rgmin_eigenpair_ex_t {
+                    value: pair.value,
+                    actions: found.actions,
+                    residual: pair.residual,
+                    converged: i32::from(pair.converged),
+                };
+            }
+        }
+        rgmin_status_t::RGMIN_SUCCESS
+    })
 }
 
 // --- Default initializers. ABI minor 46. ---
@@ -6880,6 +8306,14 @@ mod default_tests {
     // Every pattern below names each field, so a field added to a C
     // record or to its Rust struct does not compile until it is compared
     // here. Floats compare as bit patterns.
+
+    #[test]
+    fn ffi_status_maps_panics_to_internal_error() {
+        let status = ffi_status("rgmin_test", || panic!("callback panic"));
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        let message = unsafe { CStr::from_ptr(rgmin_last_error()) };
+        assert_eq!(message.to_str().unwrap(), "rgmin_test: panicked");
+    }
 
     type Cell = Option<[u64; 3]>;
     type FloorBits = (u64, u64, Option<u64>);

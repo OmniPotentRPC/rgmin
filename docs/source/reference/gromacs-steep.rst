@@ -103,10 +103,7 @@ The Python ``gromacs_mdp_options`` layer converts:
     | ``nsteps`` | -1                                     | no limit; otherwise ``maxiter`` |
     +------------+----------------------------------------+---------------------------------+
 
-The Rust stepper, C ABI, and C++ wrapper do no unit conversion. C and
-C++ expose both ``shrink`` and ``max_constraint_shrinks`` through
-``rgmin_solver_set_gromacs_steep`` / ``Solver::set_gromacs_steep``.
-``RGMIN_GROMACS_STEEP``, ``RGMIN_STOP_MACHINE_PRECISION``,
-``rgmin_solver_set_gromacs_steep``, and
-``rgmin_gromacs_steep_max_constraint_shrinks`` belong to
-ABI minor 52, the minor named by ``include/rgmin.h``.
+The Rust stepper, C ABI, and C++ wrapper do no unit conversion.
+C and C++ expose both ``shrink`` and ``max_constraint_shrinks`` through ``rgmin_solver_set_gromacs_steep`` / ``Solver::set_gromacs_steep``.
+``RGMIN_GROMACS_STEEP``, ``RGMIN_STOP_MACHINE_PRECISION``, ``rgmin_solver_set_gromacs_steep``, and ``rgmin_gromacs_steep_max_constraint_shrinks`` belong to ABI minor 52.
+``include/rgmin.h`` names minor 53.
