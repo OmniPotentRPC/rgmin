@@ -349,20 +349,24 @@ fn wilkinson_shift(matrix: &[Complex], width: usize, active: usize) -> Complex {
     }
 }
 
-fn eigenvalues(
+fn iteration_limit(precision: u32, width: usize) -> Result<usize, PeriodicProductError> {
+    usize::try_from(precision)
+        .ok()
+        .and_then(|bits| bits.checked_mul(width))
+        .and_then(|work| work.checked_mul(width))
+        .ok_or(PeriodicProductError::InvalidConfiguration)
+}
+
+fn eigenvalues_with_limit_unchecked(
     mut matrix: Vec<Complex>,
     width: usize,
     precision: u32,
+    limit: usize,
 ) -> Result<(Vec<Complex>, usize), PeriodicProductError> {
     hessenberg(&mut matrix, width);
     let mut active = width;
     let mut values = Vec::with_capacity(width);
     let mut iterations = 0usize;
-    let limit = usize::try_from(precision)
-        .ok()
-        .and_then(|bits| bits.checked_mul(width))
-        .and_then(|work| work.checked_mul(width))
-        .ok_or(PeriodicProductError::InvalidConfiguration)?;
     let exponent =
         i32::try_from(precision).map_err(|_| PeriodicProductError::InvalidConfiguration)?;
     let tolerance = Float::with_val(precision, 2).pow(1 - exponent);
@@ -421,6 +425,26 @@ fn eigenvalues(
     }
     values.reverse();
     Ok((values, iterations))
+}
+
+fn eigenvalues_with_limit(
+    matrix: Vec<Complex>,
+    width: usize,
+    precision: u32,
+    limit: usize,
+) -> Result<(Vec<Complex>, usize), PeriodicProductError> {
+    if limit != iteration_limit(precision, width)? {
+        return Err(PeriodicProductError::InvalidConfiguration);
+    }
+    eigenvalues_with_limit_unchecked(matrix, width, precision, limit)
+}
+
+fn eigenvalues(
+    matrix: Vec<Complex>,
+    width: usize,
+    precision: u32,
+) -> Result<(Vec<Complex>, usize), PeriodicProductError> {
+    eigenvalues_with_limit(matrix, width, precision, iteration_limit(precision, width)?)
 }
 
 fn verify_reciprocity(
@@ -612,6 +636,43 @@ mod tests {
             }
         }
         result
+    }
+
+    #[test]
+    fn qr_exhaustion_is_typed_and_iteration_cap_is_derived() {
+        let precision = 53;
+        let width = 2;
+        let expected = 212;
+        assert_eq!(iteration_limit(precision, width), Ok(expected));
+
+        let matrix = vec![
+            complex(precision, 0.0),
+            complex(precision, -1.0),
+            complex(precision, 1.0),
+            complex(precision, 0.0),
+        ];
+        let exhausted = eigenvalues_with_limit_unchecked(matrix, width, precision, 0);
+        assert_eq!(
+            exhausted,
+            Err(PeriodicProductError::NoConvergence { iterations: 0 })
+        );
+    }
+
+    #[test]
+    fn production_eigensolver_rejects_a_non_derived_iteration_cap() {
+        let precision = 53;
+        let width = 2;
+        let matrix = vec![
+            complex(precision, 0.0),
+            complex(precision, -1.0),
+            complex(precision, 1.0),
+            complex(precision, 0.0),
+        ];
+        assert_eq!(
+            eigenvalues_with_limit(matrix.clone(), width, precision, usize::MAX),
+            Err(PeriodicProductError::InvalidConfiguration)
+        );
+        assert!(eigenvalues(matrix, width, precision).is_ok());
     }
 
     #[test]
