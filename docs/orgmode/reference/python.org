@@ -76,11 +76,13 @@ Those differ from the Rust =Control::default= (=gtol= 1e-5, =istep= 1) and from 
 
 A count must be an int, and a flag must be a bool.
 A kind or constant that the method ignores raises =ValueError= rather than being dropped.
-Method names are =adam=, =bb=, =bfgs=, =cg=, =conjugate_descent=, =dai_yuan=, =diis=, =dogleg=, =fire=, =fire2=, =fletcher_reeves=, =fr_pr=, =hager_zhang=, =hestenes_stiefel=, =lbfgs=, =liu_storey=, =newton=, =polak_ribiere=, =pso=, =quickmin=, =rfo=, =sd=, =sr1=, =sr2= and =steepest=.
+Method names are =adam=, =bb=, =bfgs=, =cg=, =conjugate_descent=, =dai_yuan=, =diis=, =dogleg=, =fire=, =fire2=, =fletcher_reeves=, =fr_pr=, =hager_zhang=, =hestenes_stiefel=, =lbfgs=, =liu_storey=, =mdmin=, =newton=, =ode12r=, =polak_ribiere=, =pso=, =quickmin=, =rfo=, =sd=, =sr1=, =sr2= and =steepest=.
 
 * Module =rgmin= in the maturin package
 
-=Session(kind, n, **options)= is the stepper. =kind= is any gradient-only method token; =cg= is Polak-Ribiere-Plus, and =newton=, =rfo=, =dogleg= and =pso= are refused.
+=Session(kind, n, **options)= is the stepper. =kind= is any gradient-only method token, including =ode12r= and =mdmin=; =cg= is Polak-Ribiere-Plus, and =newton=, =rfo=, =dogleg= and =pso= are refused.
+=uncapped=True= clears the default per-atom cap. =set_exp(positions, i, j, r, lengths)= installs the exponential metric. =configure_ode12r_ase(rtol)= selects the ASE 3.29 step-length rule.
+=rgmin.optimize= adds =ODE12r=, =MDMin=, =PreconLBFGS= and =PreconFIRE= beside the classes already named on the ASE migration page. =PreconLBFGS= and =PreconFIRE= map =precon=None= and ~precon='Exp'~ to that metric on a Cartesian 3N layout and raise =ValueError= for any other kind.
 =step(x, callback)= takes one outer step and returns =(x, value, grad_norm)=, where =callback(x)= returns =(value, gradient)=.
 =push_pair(s, y)= stores an L-BFGS pair without an evaluation and returns whether the curvature gate kept it. =pair_count()=, =steps=, =forget()= and =set_level_set(target)= complete it.
 The options and their defaults are:

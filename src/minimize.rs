@@ -73,6 +73,7 @@ where
         | Method::Bb
         | Method::QuickMin
         | Method::Ode12r
+        | Method::MdMin
         | Method::Diis { .. }
         | Method::GromacsSteep
         | Method::NewtonCg

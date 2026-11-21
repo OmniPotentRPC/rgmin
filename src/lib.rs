@@ -101,6 +101,8 @@ pub mod slepc_kind;
 
 /// Embedded Riemannian manifolds (manopt_cpp proj / retr / transp).
 pub mod manifold;
+/// MDMin: velocity Verlet with the velocity reset onto the force.
+pub mod mdmin;
 mod minimize;
 /// Shifted Newton and Banerjee RFO on a dense Hessian.
 pub mod newton;
@@ -202,6 +204,7 @@ pub use manifold::{
     Oblique, PoincareBall, Positive, RiemannianManifold, SkewSymmetric, Spd, SpdMetric,
     SphereComplex, StiefelNp, StiefelRetraction, Symmetric, Unitary,
 };
+pub use mdmin::{ASE_DT as MDMIN_DT, ASE_MAXSTEP as MDMIN_MAXSTEP, MdMinState, mdmin_displacement};
 pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
 pub use newton::{
@@ -215,8 +218,8 @@ pub use noise::{
     sample_gradient_noise_k, sample_noise, sample_value_gradient_noise,
 };
 pub use ode12r::{
-    Ode12rState, Ode12rVerdict, inf_norm as ode12r_inf_norm, local_error as ode12r_local_error,
-    taken_step as ode12r_taken_step,
+    Ode12rScheme, Ode12rState, Ode12rVerdict, inf_norm as ode12r_inf_norm,
+    local_error as ode12r_local_error, taken_step as ode12r_taken_step,
 };
 pub use oracle::Oracle;
 pub use precon::exp_gate_open;

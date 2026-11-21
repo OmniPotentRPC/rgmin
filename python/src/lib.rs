@@ -14,10 +14,11 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use rgmin::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Control, DEFAULT_ATOM_MAXMOVE, Error,
-    FireConfig, FireKind, FirePreset, GromacsSteepConfig, LbfgsH0, LbfgsPairs, LbfgsStep,
-    LevelSetConstraint, LineSearch, ManifoldFactor, Method, Oracle, RiemannianManifold, SearchStep,
-    Solver, SpdMetric, Status, StiefelRetraction, StopNorm, SuppliedSearch,
-    lowest_eigenpairs as solve_lowest_eigenpairs, lowest_eigenpairs_precond,
+    ExpParams, FireConfig, FireKind, FirePreset, GromacsSteepConfig, LbfgsH0, LbfgsPairs,
+    LbfgsStep, LevelSetConstraint, LineSearch, ManifoldFactor, Method, Neighbours, Oracle,
+    PreconSpec, RiemannianManifold, SearchStep, Solver, SpdMetric, Status, StiefelRetraction,
+    StopNorm, SuppliedSearch, lowest_eigenpairs as solve_lowest_eigenpairs,
+    lowest_eigenpairs_precond,
 };
 
 #[pyclass]
@@ -98,6 +99,7 @@ impl Session {
         n,
         *,
         max_atom=None,
+        uncapped=false,
         wolfe=false,
         eon_cap=false,
         memory=8,
@@ -128,6 +130,7 @@ impl Session {
         kind: &str,
         n: usize,
         max_atom: Option<f64>,
+        uncapped: bool,
         wolfe: bool,
         eon_cap: bool,
         memory: usize,
@@ -263,7 +266,9 @@ impl Session {
                 .set_gromacs_steep_config(config)
                 .map_err(value_error)?;
         }
-        if atom_cap.is_finite() && atom_cap > 0.0 {
+        if uncapped {
+            solver.set_atom_maxmove(0.0);
+        } else if atom_cap.is_finite() && atom_cap > 0.0 {
             solver.set_atom_maxmove(atom_cap);
         }
         if let Some(cap) = maxmove.filter(|cap| cap.is_finite() && *cap > 0.0) {
@@ -279,6 +284,56 @@ impl Session {
         solver.set_etol(etol).map_err(value_error)?;
         solver.set_max_evals(max_evals).map_err(value_error)?;
         Ok(Self { solver, stop: None })
+    }
+
+    /// Install the exponential geometry metric from a caller neighbour list.
+    ///
+    /// `positions` has the session dimension, three coordinates per atom.
+    /// `i`, `j` and `r` are the same length. `lengths` is the orthorhombic
+    /// cell `(Lx, Ly, Lz)` for the sine probe, or omitted when the probe
+    /// should use the span of `positions`.
+    #[pyo3(signature = (positions, i, j, r, lengths=None))]
+    fn set_exp(
+        &mut self,
+        positions: Vec<f64>,
+        i: Vec<usize>,
+        j: Vec<usize>,
+        r: Vec<f64>,
+        lengths: Option<(f64, f64, f64)>,
+    ) -> PyResult<()> {
+        if i.len() != j.len() || i.len() != r.len() {
+            return Err(PyValueError::new_err(
+                "neighbour index and distance arrays must have the same length",
+            ));
+        }
+        if positions.len() != self.solver.dim() {
+            return Err(PyValueError::new_err(
+                "Exp positions must have the session dimension",
+            ));
+        }
+        let params = match lengths {
+            Some((x, y, z)) => ExpParams::default().with_lengths([x, y, z]),
+            None => ExpParams::default(),
+        };
+        let neighbours = Neighbours {
+            i,
+            j,
+            r,
+            anchor: Vec::new(),
+        };
+        let pos = ndarray::Array1::from(positions);
+        self.solver
+            .set_precon(PreconSpec::Exp {
+                positions: pos.view(),
+                neighbours: &neighbours,
+                params: &params,
+            })
+            .map_err(value_error)
+    }
+
+    /// Select the ASE 3.29 ODE12r step-length rule and residual tolerance.
+    fn configure_ode12r_ase(&mut self, rtol: f64) -> PyResult<()> {
+        self.solver.configure_ode12r_ase(rtol).map_err(value_error)
     }
 
     /// Store `s = x+ - x`, `y = g+ - g` in the L-BFGS memory without an
