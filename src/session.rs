@@ -4190,10 +4190,16 @@ impl Solver {
             c
         } else {
             let original_value = value;
+            // `do_lbfgs` computes gpa and gpc once and keeps interpolating
+            // with them after either endpoint is replaced.
+            let opening_a_derivative = a.derivative;
+            let opening_c_derivative = c.derivative;
             let mut line_trials = 0;
             let last_b = loop {
-                let mut b_alpha = if a.derivative < 0.0 && c.derivative > 0.0 {
-                    a.alpha + a.derivative * (a.alpha - c.alpha) / (c.derivative - a.derivative)
+                let mut b_alpha = if opening_a_derivative < 0.0 && opening_c_derivative > 0.0 {
+                    a.alpha
+                        + opening_a_derivative * (a.alpha - c.alpha)
+                            / (opening_c_derivative - opening_a_derivative)
                 } else {
                     0.5 * (a.alpha + c.alpha)
                 };

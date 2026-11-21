@@ -95,6 +95,62 @@ fn unresolved_line_search_clears_memory_and_counts_the_reset_iteration() {
     assert_abs_diff_eq!(point[0], 1.0);
 }
 
+/// One GROMACS L-BFGS step from the origin on a line profile `t -> (value, slope)`
+/// along `x[0]`; the opening force is 1, so trial alphas equal `t`.
+fn first_step_line_trials(profile: fn(f64) -> (f64, f64)) -> (Vec<f64>, f64, f64) {
+    let evaluated = std::sync::Mutex::new(Vec::new());
+    let objective = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+        evaluated.lock().unwrap().push(x[0]);
+        let (value, slope) = profile(x[0]);
+        (value, array![slope, 0.0, 0.0])
+    });
+    let mut solver = Solver::new(Method::GromacsLbfgs, control(1.0, 0.0, 10), 3);
+    let mut point = array![0.0, 0.0, 0.0];
+    let report = solver.step(&objective, &mut point).unwrap();
+    assert_eq!(report.status, Status::Iterating);
+    assert_eq!(solver.pair_count(), 1);
+    let trials = evaluated.into_inner().unwrap();
+    (trials, point[0], report.value)
+}
+
+#[test]
+fn bracket_interpolation_keeps_the_opening_c_derivative_after_replacing_c() {
+    let (trials, accepted, value) = first_step_line_trials(|t| {
+        if t <= 0.3 {
+            (-t + t * t, -1.0 + 2.0 * t)
+        } else if t < 0.75 {
+            (1.0 + 3.0 * (t - 0.5), 3.0)
+        } else {
+            (1.0 + (t - 1.0), 1.0)
+        }
+    });
+    // C = 1 is rejected and B = 0.5 replaces C; GROMACS still interpolates
+    // with gpa = -1 and gpc = +1, not the slope 3 at the new C.
+    assert_eq!(trials, vec![0.0, 1.0, 0.5, 0.25]);
+    assert_eq!(accepted, 0.25);
+    assert_abs_diff_eq!(value, -0.1875);
+}
+
+#[test]
+fn bracket_interpolation_keeps_the_opening_a_derivative_after_replacing_a() {
+    let (trials, accepted, value) = first_step_line_trials(|t| {
+        if t <= 0.25 {
+            (-t, -1.0)
+        } else if t < 0.625 {
+            (2.0 - 3.0 * (t - 0.5), -3.0)
+        } else if t <= 0.8 {
+            (-1.0 + (t - 0.75), 1.0)
+        } else {
+            (1.0 + (t - 1.0), 1.0)
+        }
+    });
+    // B = 0.5 replaces A; GROMACS still interpolates with gpa = -1, not the
+    // slope -3 at the new A.
+    assert_eq!(trials, vec![0.0, 1.0, 0.5, 0.75]);
+    assert_eq!(accepted, 0.75);
+    assert_abs_diff_eq!(value, -1.0);
+}
+
 #[test]
 fn rosenbrock_converges_to_emtol_and_reports_steps_and_evaluations() {
     let rosenbrock = Oracle::unbounded(3, |x: ArrayView1<f64>| {
