@@ -8,14 +8,20 @@ def quad(x):
     return z * z, [2.0 * z]
 
 
-def run(kind, istep):
-    search = LineSearch(kind, [0.0], [1.0], istep=istep, maxiter=20)
-    f, g = quad([0.0])
+def tiny_quad(x):
+    z = x[0] - 5e-14
+    return z * z, [2.0 * z]
+
+
+def run(kind, istep, fg=quad, **kw):
+    kw.setdefault("maxiter", 20)
+    search = LineSearch(kind, [0.0], [1.0], istep=istep, **kw)
+    f, g = fg([0.0])
     x, alpha, value, done = search.offer(f, g)
-    for _ in range(40):
+    for _ in range(10 * kw["maxiter"]):
         if done:
             return x, alpha, value
-        f, g = quad(x)
+        f, g = fg(x)
         x, alpha, value, done = search.offer(f, g)
     raise AssertionError("search did not finish")
 
@@ -31,3 +37,9 @@ def test_backtracking_reaches_the_minimum():
     x, _alpha, value = run("backtracking", 8.0)
     assert abs(x[0] - 1.0) < 1e-8
     assert value < 1e-14
+
+
+def test_brent_resolves_a_minimum_below_the_old_floor():
+    x, alpha, _value = run("brent", 1.0, tiny_quad, maxiter=128, tol=0.0)
+    assert x[0] == alpha
+    assert abs(alpha - 5e-14) < 1e-15
