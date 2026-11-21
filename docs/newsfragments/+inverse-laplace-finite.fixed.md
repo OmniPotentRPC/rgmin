@@ -1,1 +1,0 @@
-- Orthonormal Laguerre evaluation refuses a non-finite scaled argument, scale factor, value, or roundoff estimate. Complex division scales by the larger component, so two large finite denominator components do not overflow into a NaN quotient.
