@@ -169,9 +169,10 @@ impl Session {
         let lbfgs = matches!(method, Method::Lbfgs { .. });
         let nlcg = matches!(method, Method::Nlcg { .. });
         let steep = matches!(method, Method::GromacsSteep);
+        let rcg = matches!(method, Method::Rcg { .. });
         let atom_cap = match max_atom {
             Some(value) => value,
-            None if steep => 0.0,
+            None if steep || rcg => 0.0,
             None => DEFAULT_ATOM_MAXMOVE,
         };
         let istep = match istep {
@@ -242,6 +243,13 @@ impl Session {
         }
         if nlcg {
             solver.set_linesearch(LineSearch::wolfe(1e-4, 0.1, 20));
+        }
+        if rcg {
+            solver.set_linesearch(LineSearch::wolfe(
+                rgmin::RCG_WOLFE_C1,
+                rgmin::RCG_WOLFE_C2,
+                rgmin::RCG_WOLFE_MAX_ITER,
+            ));
         }
         if accept != Accept::None {
             solver.set_accept(accept);

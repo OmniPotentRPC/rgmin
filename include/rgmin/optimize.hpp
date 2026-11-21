@@ -63,6 +63,7 @@ enum class Method {
     PolakRibierePlus = RGMIN_POLAK_RIBIERE_PLUS,
     EonCg = RGMIN_EON_CG,
     GromacsSteep = RGMIN_GROMACS_STEEP,
+    Rcg = RGMIN_RCG,
 };
 
 /** Parse a method token. \c newton-cg and \c newton_cg are the same method. */
@@ -459,6 +460,7 @@ inline constexpr Method SR2Optimizer = Method::Sr2;
 inline constexpr Method ADAMOptimizer = Method::Adam;
 inline constexpr Method SteepestDescentOptimizer = Method::Steepest;
 inline constexpr Method GromacsSteepOptimizer = Method::GromacsSteep;
+inline constexpr Method RiemannianConjugateGradientOptimizer = Method::Rcg;
 inline constexpr Method ConjugateGradientOptimizer = Method::PolakRibiere;
 inline constexpr Method PSOptim = Method::Pso;
 
@@ -1164,7 +1166,7 @@ inline std::string SolverConfig::valid_methods() {
     return "adam, bb, bfgs, cg, conjugate_descent, dai_yuan, diis, dogleg, "
            "fire, fire2, fletcher_reeves, fr_pr, gromacs_steep, hager_zhang, "
            "hestenes_stiefel, lbfgs, liu_storey, newton, polak_ribiere, pso, "
-           "quickmin, rfo, sd, sr1, sr2, steepest";
+           "quickmin, rcg, rfo, sd, sr1, sr2, steepest";
 }
 
 namespace detail {
@@ -1191,6 +1193,7 @@ inline Method method_from_name(std::string const& name) {
     if (name == "quickmin") return Method::QuickMin;
     if (name == "ode12r") return Method::Ode12r;
     if (name == "gromacs_steep" || name == "gmx_steep") return Method::GromacsSteep;
+    if (name == "rcg") return Method::Rcg;
     if (name == "sd" || name == "steepest" || name == "steepest_descent") return Method::Steepest;
     if (name == "cg" || name == "pr" || name == "pr+" || name == "polak_ribiere") {
         return Method::PolakRibiere;
@@ -1477,7 +1480,7 @@ inline std::string SolverConfig::ignored_linesearch() const {
                       "linesearch='wolfe' opts into the strong Wolfe search";
     }
     if (method_ == Method::Steepest || method_ == Method::Bfgs || method_ == Method::Adam ||
-        method_ == Method::Diis || detail::is_cg(method_)) {
+        method_ == Method::Diis || method_ == Method::Rcg || detail::is_cg(method_)) {
         return {};
     }
     return head + " on " + method_name_ +

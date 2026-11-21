@@ -114,8 +114,8 @@ pub(crate) fn binding(cap: f64) -> bool {
 /// is capped at 0.2 Å. `scale_step_atom` limits the largest per-atom
 /// displacement. It does not limit the Euclidean norm of the whole step.
 ///
-/// BFGS, dogleg, and FIRE 2.0 do not install this value. See
-/// `Method::installs_default_atom_cap`.
+/// BFGS, dogleg, Newton-CG, Newton-PCG, FIRE 2.0 and Riemannian CG do
+/// not install this value. See `Method::installs_default_atom_cap`.
 pub const DEFAULT_ATOM_MAXMOVE: f64 = 0.2;
 
 /// Cap used when the caller has not set a per-atom value and the method
@@ -124,7 +124,8 @@ pub const DEFAULT_ATOM_MAXMOVE: f64 = 0.2;
 /// A positive finite Euclidean [`Control::maxmove`] is that caller's
 /// step limit, so this returns `None` and the Euclidean cap stays in
 /// force. Otherwise the cap is [`DEFAULT_ATOM_MAXMOVE`]. BFGS, dogleg,
-/// and FIRE 2.0 do not call this for their default.
+/// Newton-CG, Newton-PCG, FIRE 2.0 and Riemannian CG do not call this
+/// for their default.
 pub(crate) fn implicit_atom_cap(control: &Control) -> Option<f64> {
     match control.maxmove {
         Some(cap) if binding(cap) => None,
@@ -210,6 +211,56 @@ pub(crate) fn apply_caps(
     }
 }
 
+/// The displacement caps one trial move obeys.
+///
+/// [`apply_caps`] scales a move to them. The per-atom cap, when there is
+/// one, hides the Euclidean cap.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Caps {
+    pub(crate) atom: Option<f64>,
+    pub(crate) euclid: Option<f64>,
+}
+
+impl Caps {
+    /// Scale `trial` toward `origin` until it obeys the caps.
+    pub(crate) fn apply(self, origin: &Array1<f64>, trial: &mut Array1<f64>) {
+        apply_caps(origin, trial, self.atom, self.euclid);
+    }
+
+    /// The cap in force and the length of `origin -> trial` measured the
+    /// way that cap measures it. `None` when no cap is set.
+    pub(crate) fn reach(self, origin: &Array1<f64>, trial: &Array1<f64>) -> Option<(f64, f64)> {
+        match (self.atom, self.euclid) {
+            (Some(cap), _) => Some((cap, max_atom_motion(origin, trial))),
+            (None, Some(cap)) => Some((cap, crate::vecops::nrm2_diff(trial.view(), origin.view()))),
+            (None, None) => None,
+        }
+    }
+
+    /// Whether `trial` stays inside a cap that binds.
+    pub(crate) fn admits(self, origin: &Array1<f64>, trial: &Array1<f64>) -> bool {
+        self.reach(origin, trial)
+            .is_none_or(|(cap, length)| !binding(cap) || length <= cap * (1.0 + CAP_SLACK))
+    }
+
+    /// [`cap_alpha`] for these caps.
+    pub(crate) fn alpha(self, dir: ArrayView1<'_, f64>) -> f64 {
+        let (cap, len) = match (self.atom.filter(|c| binding(*c)), self.euclid) {
+            (Some(cap), _) => (cap, max_atom_norm(dir)),
+            (None, Some(cap)) if binding(cap) => (cap, crate::vecops::nrm2(dir)),
+            _ => return f64::INFINITY,
+        };
+        if len > 0.0 && len.is_finite() {
+            cap / len
+        } else {
+            f64::INFINITY
+        }
+    }
+}
+
+/// Relative rounding allowed on a move that sits on its cap.
+const CAP_SLACK: f64 = 1e-12;
+
 /// Largest per-atom (xyz triple) norm of `v`; a trailing partial triple
 /// counts as one more atom, matching [`scale_step_atom`].
 pub(crate) fn max_atom_norm(v: ArrayView1<'_, f64>) -> f64 {
@@ -294,16 +345,11 @@ pub(crate) fn cap_alpha(
     control: &Control,
     atom_maxmove: Option<f64>,
 ) -> f64 {
-    let (cap, len) = match (atom_maxmove.filter(|c| binding(*c)), control.maxmove_cap()) {
-        (Some(cap), _) => (cap, max_atom_norm(dir)),
-        (None, Some(cap)) => (cap, crate::vecops::nrm2(dir)),
-        _ => return f64::INFINITY,
-    };
-    if len > 0.0 && len.is_finite() {
-        cap / len
-    } else {
-        f64::INFINITY
+    Caps {
+        atom: atom_maxmove,
+        euclid: control.maxmove_cap(),
     }
+    .alpha(dir)
 }
 
 /// One line-searched move, with the oracle answer at its end.

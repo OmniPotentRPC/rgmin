@@ -66,6 +66,15 @@ static const field_t rlbfgs_fields[] = {
     FIELD(rgmin_rlbfgs_t, grad_ratio),
 };
 
+static const field_t rcg_options_fields[] = {
+    FIELD(rgmin_rcg_options_t, beta),
+    FIELD(rgmin_rcg_options_t, transport),
+    FIELD(rgmin_rcg_options_t, linesearch),
+    FIELD(rgmin_rcg_options_t, grad_tol),
+    FIELD(rgmin_rcg_options_t, max_iter),
+    FIELD(rgmin_rcg_options_t, initial_step),
+};
+
 static const field_t scg_params_fields[] = {
     FIELD(rgmin_scg_params_t, sigma0),
     FIELD(rgmin_scg_params_t, lambda),
@@ -241,6 +250,12 @@ static NOINLINE int check_rlbfgs(void) {
     return check("rgmin_rlbfgs_t", &c, sizeof c, rlbfgs_fields, COUNT(rlbfgs_fields));
 }
 
+static NOINLINE int check_rcg_options(void) {
+    rgmin_rcg_options_t c = rgmin_rcg_options_default();
+    return check("rgmin_rcg_options_t", &c, sizeof c, rcg_options_fields,
+                 COUNT(rcg_options_fields));
+}
+
 static NOINLINE int check_scg_params(void) {
     rgmin_scg_params_t c = rgmin_scg_params_default();
     return check("rgmin_scg_params_t", &c, sizeof c, scg_params_fields,
@@ -394,6 +409,8 @@ int main(int argc, char **argv) {
     failed |= check_exp();
     poison_stack();
     failed |= check_rlbfgs();
+    poison_stack();
+    failed |= check_rcg_options();
     poison_stack();
     failed |= check_scg_params();
     poison_stack();

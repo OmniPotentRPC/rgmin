@@ -484,10 +484,37 @@ def test_session_refuses_hessian_methods_and_misplaced_options():
         Session("sd", 3, accept="sometimes")
 
 
+def test_rcg_session_skips_the_default_atom_cap():
+    def shifted_bowl(point):
+        x = np.asarray(point)
+        delta = x - 10.0
+        return 0.5 * float(delta @ delta), delta.tolist()
+
+    start = [0.0]
+    default = Session("rcg", 1).step(start, shifted_bowl)[0]
+    uncapped = Session("rcg", 1, max_atom=0.0).step(start, shifted_bowl)[0]
+    capped = Session("rcg", 1, max_atom=0.2).step(start, shifted_bowl)[0]
+    assert default == uncapped
+    assert default != capped
+
+
 def test_every_gradient_session_method_has_a_class():
     kinds = {getattr(optimize, name).kind for name in optimize.__all__}
     tokens = {"lbfgs", "bfgs", "sr1", "sr2", "adam", "sd", "bb", "fire", "fire2", "newton-cg", "newton-pcg"}
-    tokens |= {"eon-cg", "pr", "prp", "fr", "hs", "dy", "cd", "hz", "ls", "fr-pr", "gromacs-steep"}
+    tokens |= {
+        "eon-cg",
+        "pr",
+        "prp",
+        "fr",
+        "hs",
+        "dy",
+        "cd",
+        "hz",
+        "ls",
+        "fr-pr",
+        "gromacs-steep",
+        "rcg",
+    }
     for token in tokens:
         Session(token, 3)
     assert tokens <= kinds
