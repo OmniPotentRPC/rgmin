@@ -9,10 +9,10 @@ use eindir_core::ffi::{eindir_core_abi_stamp, eindir_objective_t, eindir_status_
 use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_control_t, rgmin_eigen_kind_t,
     rgmin_eigen_params_t, rgmin_eigenpair_t, rgmin_last_error, rgmin_lowest_eigenpairs,
-    rgmin_method_from_name, rgmin_method_t, rgmin_minimize, rgmin_minimize_eindir,
-    rgmin_minimize_hess_opts, rgmin_minimize_hvp_opts, rgmin_minimize_scg_with_options,
-    rgmin_report_t, rgmin_scg_params_t, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
-    rgmin_tensor_free,
+    rgmin_manifold_t, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
+    rgmin_minimize_eindir, rgmin_minimize_hess_opts, rgmin_minimize_hvp_opts,
+    rgmin_minimize_rlbfgs, rgmin_minimize_scg_with_options, rgmin_report_t, rgmin_scg_params_t,
+    rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 
 unsafe extern "C" fn square_eval(
@@ -381,9 +381,9 @@ fn assert_refused(
     assert_eq!(value.to_bits(), initial.to_bits(), "{entry}");
 }
 
-/// The four entries that used to skip the check must refuse a nonfinite
+/// The entries that used to skip the check must refuse a nonfinite
 /// start the way `rgmin_minimize` does: `RGMIN_INVALID_PARAMETER`, an
-/// unchanged `x`, and no host evaluation. The message names the entry
+/// unchanged `x`, and no host evaluation. Each error names the entry
 /// point the host called, as the other messages of that entry do.
 #[test]
 fn remaining_entries_reject_a_nonfinite_start() {
@@ -393,6 +393,7 @@ fn remaining_entries_reject_a_nonfinite_start() {
         refuse_hvp(initial);
         refuse_eindir(initial);
         refuse_scg(initial);
+        refuse_rlbfgs(initial);
     }
 }
 
@@ -416,6 +417,29 @@ fn refuse_minimize(initial: f64) {
     };
     unsafe { rgmin_tensor_free(tensor) };
     assert_refused("rgmin_minimize", initial, status, &calls, value[0]);
+}
+
+fn refuse_rlbfgs(initial: f64) {
+    let calls = AtomicUsize::new(0);
+    let mut value = [initial];
+    let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+    let mut out = report();
+    let mut ctrl = control();
+    ctrl.maxiter = 1;
+    let status = unsafe {
+        rgmin_minimize_rlbfgs(
+            Some(counted_eval),
+            Some(counted_grad),
+            std::ptr::from_ref(&calls).cast_mut().cast(),
+            tensor,
+            &ctrl,
+            std::ptr::null(),
+            rgmin_manifold_t::RGMIN_MANIFOLD_EUCLIDEAN,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(tensor) };
+    assert_refused("rgmin_minimize_rlbfgs", initial, status, &calls, value[0]);
 }
 
 fn refuse_hess(initial: f64) {
