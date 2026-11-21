@@ -133,7 +133,9 @@ surrogate fails:
 - Non-positive-definite covariance matrices after applying the configured
   ``noise`` regularization return ``Error::GpMin`` in Rust (``ValueError`` in
   Python) naming the Cholesky failure.
+
 - Non-finite energies or gradients from the objective return
   ``Error::Oracle`` (``ValueError`` in Python).
+
 - Exhausting ``max_refinements`` without finding a descent step returns
   ``Error::GpMin`` (``ValueError`` in Python).
