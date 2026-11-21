@@ -1,0 +1,136 @@
+$ /tmp/rgmin-gromacs-2023.3/install-double/bin/gmx_d -quiet mdrun -v -s em.tpr -deffnm em -nt 1 -ntmpi 1 -c final.g96
+Compiled SIMD is AVX2_256, but CPU also supports AVX_512 (see log).
+Reading file em.tpr, VERSION 2023.3 (double precision)
+Using 1 MPI thread
+Using 1 OpenMP thread 
+
+
+NOTE: Thread affinity was not set.
+
+Polak-Ribiere Conjugate Gradients:
+   Tolerance (Fmax)   =  1.00000e-06
+   Number of steps    =          100
+   F-max             =  7.58904e+00 on atom 3
+   F-Norm            =  7.02609e+00
+
+
+Step 0, Epot=-1.253293e+01, Fnorm=8.103e-01, Fmax=8.753e-01 (atom 6)
+
+Step 1, Epot=-1.253484e+01, Fnorm=7.289e-01, Fmax=7.873e-01 (atom 2)
+
+Step 2, Epot=-1.253491e+01, Fnorm=8.501e-01, Fmax=9.183e-01 (atom 2)
+
+Step 3, Epot=-1.253735e+01, Fnorm=3.975e-01, Fmax=4.293e-01 (atom 6)
+
+Step 4, Epot=-1.253801e+01, Fnorm=3.227e-01, Fmax=3.485e-01 (atom 6)
+
+Step 5, Epot=-1.253901e+01, Fnorm=2.951e-01, Fmax=3.187e-01 (atom 5)
+
+Step 6, Epot=-1.254064e+01, Fnorm=2.856e-01, Fmax=3.085e-01 (atom 2)
+
+Step 7, Epot=-1.254246e+01, Fnorm=4.829e-01, Fmax=5.216e-01 (atom 2)
+
+Step 8, Epot=-1.254889e+01, Fnorm=1.090e-01, Fmax=1.177e-01 (atom 2)
+
+Step 9, Epot=-1.254894e+01, Fnorm=5.133e-03, Fmax=5.544e-03 (atom 2)
+
+Step 10, Epot=-1.254894e+01, Fnorm=1.983e-03, Fmax=2.141e-03 (atom 4)
+
+Step 11, Epot=-1.254894e+01, Fnorm=1.121e-03, Fmax=1.211e-03 (atom 4)
+
+Step 12, Epot=-1.254894e+01, Fnorm=3.282e-03, Fmax=3.545e-03 (atom 3)
+
+Step 13, Epot=-1.254894e+01, Fnorm=4.611e-04, Fmax=4.981e-04 (atom 3)
+
+Step 14, Epot=-1.254894e+01, Fnorm=4.396e-04, Fmax=4.748e-04 (atom 2)
+
+Step 15, Epot=-1.254894e+01, Fnorm=4.726e-04, Fmax=5.106e-04 (atom 5)
+
+Step 16, Epot=-1.254894e+01, Fnorm=1.558e-03, Fmax=1.684e-03 (atom 5)
+
+Step 17, Epot=-1.254894e+01, Fnorm=3.424e-04, Fmax=3.699e-04 (atom 2)
+
+Step 18, Epot=-1.254894e+01, Fnorm=3.260e-04, Fmax=3.522e-04 (atom 6)
+
+Step 19, Epot=-1.254894e+01, Fnorm=4.030e-04, Fmax=4.361e-04 (atom 6)
+
+Step 20, Epot=-1.254894e+01, Fnorm=1.441e-03, Fmax=1.564e-03 (atom 3)
+
+Step 21, Epot=-1.254894e+01, Fnorm=2.300e-04, Fmax=2.487e-04 (atom 4)
+
+Step 22, Epot=-1.254894e+01, Fnorm=2.194e-04, Fmax=2.381e-04 (atom 2)
+
+Step 23, Epot=-1.254894e+01, Fnorm=2.468e-04, Fmax=2.836e-04 (atom 5)
+
+Step 24, Epot=-1.254894e+01, Fnorm=8.828e-04, Fmax=1.149e-03 (atom 5)
+
+Step 25, Epot=-1.254894e+01, Fnorm=1.739e-04, Fmax=1.889e-04 (atom 7)
+
+Step 26, Epot=-1.254894e+01, Fnorm=2.050e-04, Fmax=2.433e-04 (atom 3)
+
+Step 27, Epot=-1.254894e+01, Fnorm=4.060e-04, Fmax=5.268e-04 (atom 4)
+
+Step 28, Epot=-1.254894e+01, Fnorm=9.110e-04, Fmax=1.192e-03 (atom 7)
+
+Step 29, Epot=-1.254894e+01, Fnorm=4.853e-04, Fmax=6.191e-04 (atom 3)
+
+Step 30, Epot=-1.254894e+01, Fnorm=5.031e-04, Fmax=6.304e-04 (atom 3)
+
+Step 31, Epot=-1.254894e+01, Fnorm=4.703e-04, Fmax=6.062e-04 (atom 7)
+
+Step 32, Epot=-1.254894e+01, Fnorm=1.137e-04, Fmax=1.489e-04 (atom 6)
+
+Step 33, Epot=-1.254894e+01, Fnorm=1.138e-04, Fmax=1.493e-04 (atom 4)
+
+Step 34, Epot=-1.254894e+01, Fnorm=6.126e-05, Fmax=7.903e-05 (atom 4)
+
+Step 35, Epot=-1.254894e+01, Fnorm=4.047e-05, Fmax=5.044e-05 (atom 6)
+
+Step 36, Epot=-1.254894e+01, Fnorm=2.364e-05, Fmax=2.566e-05 (atom 2)
+
+Step 37, Epot=-1.254894e+01, Fnorm=2.294e-05, Fmax=2.489e-05 (atom 2)
+
+Step 38, Epot=-1.254894e+01, Fnorm=2.283e-05, Fmax=2.533e-05 (atom 5)
+
+Step 39, Epot=-1.254894e+01, Fnorm=3.611e-05, Fmax=4.421e-05 (atom 2)
+
+Step 40, Epot=-1.254894e+01, Fnorm=1.151e-04, Fmax=1.352e-04 (atom 2)
+
+Step 41, Epot=-1.254894e+01, Fnorm=1.300e-05, Fmax=1.468e-05 (atom 6)
+
+Step 42, Epot=-1.254894e+01, Fnorm=1.671e-05, Fmax=1.916e-05 (atom 3)
+
+Step 43, Epot=-1.254894e+01, Fnorm=1.251e-05, Fmax=1.404e-05 (atom 4)
+
+Step 44, Epot=-1.254894e+01, Fnorm=4.019e-05, Fmax=4.721e-05 (atom 6)
+
+Step 45, Epot=-1.254894e+01, Fnorm=6.111e-06, Fmax=6.723e-06 (atom 6)
+
+Step 46, Epot=-1.254894e+01, Fnorm=6.990e-06, Fmax=7.946e-06 (atom 5)
+
+Step 47, Epot=-1.254894e+01, Fnorm=1.475e-05, Fmax=1.751e-05 (atom 2)
+
+Step 48, Epot=-1.254894e+01, Fnorm=5.160e-06, Fmax=5.661e-06 (atom 6)
+
+Step 49, Epot=-1.254894e+01, Fnorm=4.987e-06, Fmax=5.611e-06 (atom 5)
+
+Step 50, Epot=-1.254894e+01, Fnorm=6.011e-06, Fmax=7.261e-06 (atom 5)
+
+Step 51, Epot=-1.254894e+01, Fnorm=9.935e-06, Fmax=1.231e-05 (atom 5)
+
+Step 52, Epot=-1.254894e+01, Fnorm=1.121e-05, Fmax=1.481e-05 (atom 4)
+
+Step 53, Epot=-1.254894e+01, Fnorm=4.467e-06, Fmax=5.878e-06 (atom 3)
+
+Step 54, Epot=-1.254894e+01, Fnorm=4.726e-06, Fmax=5.680e-06 (atom 4)
+
+Step 56, Epot=-1.254894e+01, Fnorm=1.692e-06, Fmax=2.013e-06 (atom 6)
+
+Step 57, Epot=-1.254894e+01, Fnorm=2.956e-07, Fmax=3.481e-07 (atom 6)
+
+writing lowest energy coordinates.
+
+Polak-Ribiere Conjugate Gradients converged to Fmax < 1e-06 in 57 steps
+Potential Energy  = -1.25489377088303e+01
+Maximum force     =  3.48102157458076e-07 on atom 6
+Norm of force     =  2.95569608630693e-07

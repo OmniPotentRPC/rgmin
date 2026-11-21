@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 52
+#define RGMIN_ABI_VERSION_MINOR 53
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -91,7 +91,8 @@ typedef struct rgmin_abi_stamp_t {
  *    is unchanged.
  * 52 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
  *    rgmin_solver_set_gromacs_steep, and
- *    rgmin_gromacs_steep_max_constraint_shrinks. */
+ *    rgmin_gromacs_steep_max_constraint_shrinks.
+ * 53 RGMIN_GROMACS_CG and rgmin_solver_set_gromacs_cg. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -138,7 +139,9 @@ typedef enum rgmin_method_t {
     /** Polak-Ribiere with the eOn Powell restart at 0.5. Develop surface. */
     RGMIN_EON_CG = 27,
     /** GROMACS integrator = steep. ABI minor 52. */
-    RGMIN_GROMACS_STEEP = 28
+    RGMIN_GROMACS_STEEP = 28,
+    /** GROMACS integrator = cg. ABI minor 53. */
+    RGMIN_GROMACS_CG = 29
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.
@@ -181,8 +184,8 @@ typedef enum rgmin_stop_t {
     RGMIN_STOP_ENERGY_TOLERANCE = 6,
     /** The rgmin_solver_set_max_evals budget was spent. ABI minor 50. */
     RGMIN_STOP_EVAL_BUDGET = 7,
-    /** GROMACS steep could not represent another coordinate change.
-     *  ABI minor 52. */
+    /** GROMACS-style steep or conjugate-gradient minimization could not
+     *  represent another coordinate change. ABI minor 52. */
     RGMIN_STOP_MACHINE_PRECISION = 8
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
@@ -516,6 +519,11 @@ int32_t rgmin_solver_set_gromacs_steep(rgmin_solver_t *solver, double shrink,
  *  rgmin's displacement floor. Invalid input gives 0. The result is
  *  capped to bound construction time. ABI minor 52. */
 uint32_t rgmin_gromacs_steep_max_constraint_shrinks(double step_size, double shrink);
+/** GROMACS conjugate-gradient parameters on a RGMIN_GROMACS_CG session.
+ *  nstcgsteep == 0 turns the periodic steepest-descent restart off, as in
+ *  GROMACS. Returns 0, or 1 on a null session or a session that is not
+ *  RGMIN_GROMACS_CG. ABI minor 53. */
+int32_t rgmin_solver_set_gromacs_cg(rgmin_solver_t *solver, uint32_t nstcgsteep);
 
 /** FIRE schedule. */
 typedef enum rgmin_fire_variant_t {

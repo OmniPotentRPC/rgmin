@@ -1,0 +1,50 @@
+$ /tmp/rgmin-gromacs-2023.3/install-double/bin/gmx_d -quiet mdrun -v -s em.tpr -deffnm em -nt 1 -ntmpi 1 -c final.g96
+Compiled SIMD is AVX2_256, but CPU also supports AVX_512 (see log).
+Reading file em.tpr, VERSION 2023.3 (double precision)
+Using 1 MPI thread
+Using 1 OpenMP thread 
+
+
+NOTE: Thread affinity was not set.
+
+Polak-Ribiere Conjugate Gradients:
+   Tolerance (Fmax)   =  1.00000e-03
+   Number of steps    =          100
+   F-max             =  7.58904e+00 on atom 3
+   F-Norm            =  7.02609e+00
+
+
+Step 0, Epot=-1.253293e+01, Fnorm=8.103e-01, Fmax=8.753e-01 (atom 6)
+
+Step 1, Epot=-1.253484e+01, Fnorm=7.289e-01, Fmax=7.873e-01 (atom 2)
+
+Step 2, Epot=-1.253491e+01, Fnorm=8.501e-01, Fmax=9.183e-01 (atom 2)
+
+Step 3, Epot=-1.253735e+01, Fnorm=3.975e-01, Fmax=4.293e-01 (atom 6)
+
+Step 4, Epot=-1.253801e+01, Fnorm=3.227e-01, Fmax=3.485e-01 (atom 6)
+
+Step 5, Epot=-1.253901e+01, Fnorm=2.951e-01, Fmax=3.187e-01 (atom 5)
+
+Step 6, Epot=-1.254064e+01, Fnorm=2.856e-01, Fmax=3.085e-01 (atom 2)
+
+Step 7, Epot=-1.254246e+01, Fnorm=4.829e-01, Fmax=5.216e-01 (atom 2)
+
+Step 8, Epot=-1.254889e+01, Fnorm=1.090e-01, Fmax=1.177e-01 (atom 2)
+
+Step 9, Epot=-1.254894e+01, Fnorm=5.133e-03, Fmax=5.544e-03 (atom 2)
+
+Step 10, Epot=-1.254894e+01, Fnorm=1.983e-03, Fmax=2.141e-03 (atom 4)
+
+Step 11, Epot=-1.254894e+01, Fnorm=1.121e-03, Fmax=1.211e-03 (atom 4)
+
+Step 12, Epot=-1.254894e+01, Fnorm=3.282e-03, Fmax=3.545e-03 (atom 3)
+
+Step 13, Epot=-1.254894e+01, Fnorm=4.611e-04, Fmax=4.981e-04 (atom 3)
+
+writing lowest energy coordinates.
+
+Polak-Ribiere Conjugate Gradients converged to Fmax < 0.001 in 13 steps
+Potential Energy  = -1.25489376639539e+01
+Maximum force     =  4.98089785018483e-04 on atom 3
+Norm of force     =  4.61140359634033e-04

@@ -22,12 +22,12 @@ use crate::holonomic::{ConstraintError, ConstraintSolver, DistanceConstraints};
 use crate::precon::{ExpParams, ExpState, Neighbours};
 use crate::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Conjugacy, Control, DirectionalCurvature,
-    EigenParams, EigensolverKind, Error, GromacsSteepConfig, HessianObjective, HessianOracle,
-    HessianVector, HvpOracle, LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method, NewtonKind,
-    Oracle, QnStep, Restart, RiemannianManifold, Rlbfgs, ScgOptions, ScgParams, ScgStepTolerance,
-    SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch, lowest_eigenpairs,
-    lowest_eigenpairs_precond, lowest_mode, minimize_method, minimize_method_hess,
-    minimize_method_hvp, minimize_rlbfgs, minimize_scg_exact_with_options,
+    EigenParams, EigensolverKind, Error, GromacsCgConfig, GromacsSteepConfig, HessianObjective,
+    HessianOracle, HessianVector, HvpOracle, LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method,
+    NewtonKind, Oracle, QnStep, Restart, RiemannianManifold, Rlbfgs, ScgOptions, ScgParams,
+    ScgStepTolerance, SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch,
+    lowest_eigenpairs, lowest_eigenpairs_precond, lowest_mode, minimize_method,
+    minimize_method_hess, minimize_method_hvp, minimize_rlbfgs, minimize_scg_exact_with_options,
     minimize_scg_with_options,
 };
 
@@ -82,7 +82,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 52;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 53;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -147,6 +147,8 @@ pub enum rgmin_method_t {
     RGMIN_EON_CG = 27,
     /// GROMACS `integrator = steep`. ABI minor 52.
     RGMIN_GROMACS_STEEP = 28,
+    /// GROMACS `integrator = cg`. ABI minor 53.
+    RGMIN_GROMACS_CG = 29,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -210,7 +212,8 @@ pub enum rgmin_stop_t {
     /// The evaluation budget set by `rgmin_solver_set_max_evals` was spent.
     /// ABI minor 50.
     RGMIN_STOP_EVAL_BUDGET = 7,
-    /// GROMACS steep could not represent another coordinate change. ABI minor 52.
+    /// GROMACS-style steep or conjugate-gradient minimization could not
+    /// represent another coordinate change. ABI minor 52.
     RGMIN_STOP_MACHINE_PRECISION = 8,
 }
 
@@ -554,6 +557,7 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
         rgmin_method_t::RGMIN_POLAK_RIBIERE_PLUS => Method::polak_ribiere_plus(),
         rgmin_method_t::RGMIN_EON_CG => Method::eon_cg(),
         rgmin_method_t::RGMIN_GROMACS_STEEP => Method::GromacsSteep,
+        rgmin_method_t::RGMIN_GROMACS_CG => Method::GromacsCg,
     }
 }
 
@@ -582,6 +586,7 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
         Method::Adam { .. } => rgmin_method_t::RGMIN_ADAM,
         Method::Steepest => rgmin_method_t::RGMIN_STEEPEST,
         Method::GromacsSteep => rgmin_method_t::RGMIN_GROMACS_STEEP,
+        Method::GromacsCg => rgmin_method_t::RGMIN_GROMACS_CG,
         Method::Sr2 => rgmin_method_t::RGMIN_SR2,
         Method::Pso { .. } => rgmin_method_t::RGMIN_PSO,
         Method::Newton { kind } => match kind {
@@ -1940,6 +1945,27 @@ pub unsafe extern "C" fn rgmin_solver_set_gromacs_steep(
 #[unsafe(no_mangle)]
 pub extern "C" fn rgmin_gromacs_steep_max_constraint_shrinks(step_size: f64, shrink: f64) -> u32 {
     crate::gromacs_steep_max_constraint_shrinks(step_size, shrink)
+}
+
+/// GROMACS conjugate-gradient parameters on a `RGMIN_GROMACS_CG` session.
+///
+/// `nstcgsteep == 0` turns the periodic steepest-descent restart off, as
+/// in GROMACS. Returns 0 on success, or 1 when `solver` is null or is not
+/// a `RGMIN_GROMACS_CG` session. ABI minor 53.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_gromacs_cg(
+    solver: *mut rgmin_solver_t,
+    nstcgsteep: u32,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_gromacs_cg: null solver");
+        return 1;
+    }
+    let config = GromacsCgConfig::default().with_nstcgsteep(nstcgsteep);
+    flag(unsafe { (*solver).solver.set_gromacs_cg_config(config) })
 }
 
 /// Gradient norm a session compares to `gtol` and writes to
