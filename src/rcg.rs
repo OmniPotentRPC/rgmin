@@ -869,14 +869,51 @@ where
     }
 }
 
+/// Smallest `t` that [`velocity_span`] differences.
+///
+/// Below this the spacing `cbrt(eps) t` could fall in the subnormal range,
+/// where it no longer scales with `t`. There the retraction has moved the
+/// origin by less than `f64` can see, and its velocity is the tangent
+/// vector itself.
+const VELOCITY_MIN_T: f64 = f64::MIN_POSITIVE / f64::EPSILON;
+
+/// Parameters `(lo, hi)` around `t` where [`retraction_velocity`] samples.
+///
+/// The spacing is `h = cbrt(eps) t`, the relative step that balances the
+/// `O(h^2)` truncation of a central difference against the `O(eps / h)`
+/// rounding of the retraction. A step in `t` is a step of `h ||d||` in the
+/// tangent space, so a step proportional to `t` is one proportional to the
+/// displacement `t ||d||` and does not depend on how that displacement is
+/// split between `t` and `||d||`. [`opening_step`] sets `t` to the opening
+/// length over `||d||`, so `t` spans the whole `f64` range as the gradient
+/// norm does, and a step of fixed size either vanishes next to `t` or
+/// overshoots it.
+///
+/// For `VELOCITY_MIN_T <= t <= f64::MAX` the result satisfies
+/// `0 < lo < t <= hi` in `f64`. Here `h` is normal, `h >= 6e-6 t`,
+/// and `ulp(t) <= eps t = 2.2e-16 t < h`, so `t - h` and `t + h` round away
+/// from `t`, and `lo > 0` because `h < t`. When `t + h` overflows, `hi` is
+/// `t`, a backward difference.
+fn velocity_span(t: f64) -> Option<(f64, f64)> {
+    if !(t.is_finite() && t >= VELOCITY_MIN_T) {
+        return None;
+    }
+    let h = f64::EPSILON.cbrt() * t;
+    let lo = t - h;
+    let ahead = t + h;
+    let hi = if ahead.is_finite() { ahead } else { t };
+    (0.0 < lo && lo < t && t <= hi).then_some((lo, hi))
+}
+
 /// Velocity of `t |-> retract(origin, t dir)`.
 ///
 /// At the foot the velocity is `dir`, because a retraction's derivative
-/// there is the identity on the tangent space. Away from the foot the
-/// velocity is a central difference of [`Manifold::retract`] when the
-/// sample stays positive, and a forward difference otherwise, then
-/// [`Manifold::project`] at the arrival point. The spacing is the square
-/// root of machine epsilon.
+/// there is the identity on the tangent space. The same holds when `t` is
+/// too small to difference. Elsewhere it is the central difference of
+/// [`Manifold::retract`] over the span of [`velocity_span`], divided by the
+/// span as `f64` holds it, then [`Manifold::project`] at the arrival point.
+/// [`Manifold`] has no differential of its retraction, so the difference is
+/// the only velocity every manifold can give.
 fn retraction_velocity<M>(
     manifold: &M,
     origin: &Array1<f64>,
@@ -890,19 +927,15 @@ where
     if !t.is_finite() || t <= 0.0 {
         return dir.clone();
     }
-    let h = f64::EPSILON.sqrt();
-    let ahead = manifold.retract(origin, &dir.mapv(|c| c * (t + h)));
-    let vel = if t > h {
-        let behind = manifold.retract(origin, &dir.mapv(|c| c * (t - h)));
-        let mut diff = ahead;
-        crate::vecops::axpy(-1.0, behind.view(), &mut diff);
-        diff.mapv(|c| c / (2.0 * h))
-    } else {
-        let here = manifold.retract(origin, &dir.mapv(|c| c * t));
-        let mut diff = ahead;
-        crate::vecops::axpy(-1.0, here.view(), &mut diff);
-        diff.mapv(|c| c / h)
+    let Some((lo, hi)) = velocity_span(t) else {
+        return manifold.project(at, dir);
     };
+    let ahead = manifold.retract(origin, &dir.mapv(|c| c * hi));
+    let behind = manifold.retract(origin, &dir.mapv(|c| c * lo));
+    let mut diff = ahead;
+    crate::vecops::axpy(-1.0, behind.view(), &mut diff);
+    let span = hi - lo;
+    let vel = diff.mapv(|c| c / span);
     manifold.project(at, &vel)
 }
 
@@ -1261,5 +1294,263 @@ mod tests {
         assert!((distance - 1.0).abs() < 1e-8, "distance {distance}");
         let energy = fg(session_x.view()).0;
         assert!(energy < 0.5, "energy {energy}");
+    }
+
+    fn retract_path<'a, M: Manifold + ?Sized>(
+        manifold: &'a M,
+        origin: &Array1<f64>,
+        dir: &Array1<f64>,
+    ) -> RetractPath<'a, M> {
+        RetractPath {
+            manifold,
+            failures: &Infallible,
+            origin: origin.clone(),
+            dir: dir.clone(),
+            caps: Caps::default(),
+            failure: None,
+            placed: false,
+        }
+    }
+
+    /// `t |-> (x + t d) / |x + t d|` and its derivative, in closed form.
+    fn sphere_velocity(x: &Array1<f64>, dir: &Array1<f64>, t: f64) -> Array1<f64> {
+        let w = x + &dir.mapv(|c| c * t);
+        let norm = w.dot(&w).sqrt();
+        let y = w.mapv(|c| c / norm);
+        let along = y.dot(dir);
+        (dir - &y.mapv(|c| c * along)).mapv(|c| c / norm)
+    }
+
+    #[test]
+    fn the_velocity_span_holds_t_apart_over_every_step_the_opening_can_give() {
+        let fixed = f64::EPSILON.sqrt();
+        assert_eq!(
+            2f64.powi(28) + fixed,
+            2f64.powi(28),
+            "the old step vanished"
+        );
+        let mut ts = Vec::new();
+        for exp in -1022..=1023 {
+            let base = 2f64.powi(exp.max(-1022));
+            for frac in [0.0, 1e-16, 0.3, 0.5, 1.0 - 1e-15] {
+                ts.push(base * (1.0 + frac));
+            }
+        }
+        ts.extend([
+            f64::MAX,
+            f64::from_bits(f64::MAX.to_bits() - 1),
+            VELOCITY_MIN_T,
+        ]);
+        for speed_exp in -300..=300 {
+            let speed = 10f64.powi(speed_exp);
+            for initial in [1e-10, 1.0, 1e10] {
+                let t = opening_step(speed, initial, 0.0, 0.0);
+                if t.is_finite() && t > 0.0 {
+                    ts.push(t);
+                }
+                let carried = opening_step(speed, 1.0, initial, 1.0);
+                if carried.is_finite() && carried > 0.0 {
+                    ts.push(carried);
+                }
+            }
+        }
+        let mut spanned = 0usize;
+        for &t in &ts {
+            if !t.is_finite() || t <= 0.0 {
+                continue;
+            }
+            match velocity_span(t) {
+                Some((lo, hi)) => {
+                    spanned += 1;
+                    assert!(0.0 < lo && lo < t && t <= hi, "t = {t:e}: [{lo:e}, {hi:e}]");
+                    assert!(hi - lo > 0.0 && (t - lo) / t > 1e-6, "t = {t:e}");
+                    if t < f64::MAX / 2.0 {
+                        assert!(hi > t && (hi - t) / t > 1e-6, "t = {t:e}");
+                    }
+                }
+                None => assert!(t < VELOCITY_MIN_T, "t = {t:e} has no span"),
+            }
+        }
+        assert!(spanned > 4000, "{spanned}");
+        assert!(velocity_span(f64::MAX).is_some_and(|(lo, hi)| lo < hi && hi == f64::MAX));
+        assert!(velocity_span(VELOCITY_MIN_T / 2.0).is_none());
+        assert!(velocity_span(f64::from_bits(1)).is_none());
+        assert!(velocity_span(f64::NAN).is_none());
+        assert!(velocity_span(f64::INFINITY).is_none());
+        assert!(velocity_span(-1.0).is_none());
+    }
+
+    #[test]
+    fn the_slope_matches_the_analytic_slope_at_every_gradient_scale() {
+        let sphere = Sphere;
+        let x = array![0.0, 0.6, 0.8];
+        let pull = array![-1.0, 0.3, -0.2];
+        for exp in [-12, -10, -9, -8, -4, 0, 4, 8, 9] {
+            let scale = 10f64.powi(exp);
+            let egrad = pull.mapv(|c| c * scale);
+            let rgrad = sphere.egrad2rgrad(&x, &egrad);
+            let dir = rgrad.mapv(|c| -c);
+            let speed = sphere.norm(&x, &dir);
+            let t0 = 1.0 / speed;
+            let mut path = retract_path(&sphere, &x, &dir);
+            for factor in [0.01, 0.25, 1.0, 3.0] {
+                let t = t0 * factor;
+                let at = path.point(t).unwrap();
+                let got = path.slope(t, at.view(), egrad.view());
+                let want = egrad.dot(&sphere_velocity(&x, &dir, t));
+                assert!(want < 0.0 || factor > 1.0, "scale {scale:e} t {t:e}");
+                let denom = scale * scale * (pull.dot(&pull)).sqrt();
+                assert!(
+                    (got - want).abs() <= 1e-6 * want.abs().max(1e-6 * denom),
+                    "gradient scale {scale:e}, t {t:e}: slope {got:e}, analytic {want:e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_slope_near_the_default_tolerance_is_not_twenty_percent_off() {
+        let sphere = Sphere;
+        let x = array![0.0, 1.0];
+        let egrad = array![-2e-8, 0.0];
+        let dir = array![2e-8, 0.0];
+        let t = 5e7;
+        let mut path = retract_path(&sphere, &x, &dir);
+        let at = path.point(t).unwrap();
+        let got = path.slope(t, at.view(), egrad.view());
+        let want = egrad.dot(&sphere_velocity(&x, &dir, t));
+        assert!(
+            (want + std::f64::consts::SQRT_2 * 1e-16).abs() < 1e-20,
+            "{want:e}"
+        );
+        assert!(
+            (got - want).abs() <= 1e-6 * want.abs(),
+            "{got:e} vs {want:e}"
+        );
+    }
+
+    #[test]
+    fn the_slope_is_the_analytic_slope_when_the_step_is_tiny() {
+        let sphere = Sphere;
+        let x = array![0.0, 1.0];
+        let egrad = array![-1e9, 0.0];
+        let dir = array![1e9, 0.0];
+        let t = 1e-9;
+        let mut path = retract_path(&sphere, &x, &dir);
+        let at = path.point(t).unwrap();
+        let got = path.slope(t, at.view(), egrad.view());
+        let want = egrad.dot(&sphere_velocity(&x, &dir, t));
+        assert!(
+            (got - want).abs() <= 1e-6 * want.abs(),
+            "{got:e} vs {want:e}"
+        );
+    }
+
+    #[test]
+    fn a_euclidean_velocity_is_the_direction_at_any_step() {
+        let flat = crate::manifold::Euclidean;
+        let x = array![3.0, -2.0];
+        for (norm, t) in [(1e-10, 1e10), (1e-9, 1e9), (1.0, 1.0), (1e9, 1e-9)] {
+            let dir = array![norm, -0.5 * norm];
+            let at = &x + &dir.mapv(|c| c * t);
+            let vel = retraction_velocity(&flat, &x, &dir, t, &at);
+            for (v, d) in vel.iter().zip(dir.iter()) {
+                assert!((v - d).abs() <= 1e-6 * d.abs(), "{vel} vs {dir}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_slope_on_a_stiefel_frame_matches_a_wide_central_difference() {
+        // The QR retraction has no closed-form velocity here. The reference
+        // is a central difference of relative width 1e-4, far from both
+        // the rounding floor and the width the solver uses.
+        let stiefel = StiefelNp::new(4, 2).unwrap();
+        let minimizer = array![0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
+        let dir = stiefel.project(&minimizer, &array![0.0, 0.0, 0.3, 0.1, 0.0, 0.2, 0.0, 0.15]);
+        for scale in [1e-10, 1e-9, 1.0, 1e9] {
+            let d = dir.mapv(|c| c * scale);
+            let t = 1.0 / stiefel.norm(&minimizer, &d);
+            let at = stiefel.retract(&minimizer, &d.mapv(|c| c * t));
+            let vel = retraction_velocity(&stiefel, &minimizer, &d, t, &at);
+            let step = 1e-4;
+            let ahead = stiefel.retract(&minimizer, &d.mapv(|c| c * t * (1.0 + step)));
+            let behind = stiefel.retract(&minimizer, &d.mapv(|c| c * t * (1.0 - step)));
+            let span = t * 2.0 * step;
+            let reference = stiefel.project(&at, &((ahead - behind) / span));
+            let size = reference.dot(&reference).sqrt();
+            let miss = (&vel - &reference).mapv(|c| c * c).sum().sqrt();
+            assert!(
+                miss <= 1e-6 * size,
+                "scale {scale:e}: miss {miss:e} of {size:e}"
+            );
+        }
+    }
+
+    fn linear_pull(scale: f64) -> impl FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>) {
+        move |x| (-scale * x[0], array![-scale, 0.0])
+    }
+
+    #[test]
+    fn strong_wolfe_refuses_a_point_that_misses_curvature_at_a_tiny_gradient() {
+        let flat = crate::manifold::Euclidean;
+        let sphere = Sphere;
+        let search = LineSearch::wolfe(RCG_WOLFE_C1, RCG_WOLFE_C2, RCG_WOLFE_MAX_ITER);
+        for scale in [1e-9, 1e-10] {
+            let x = array![0.0, 1.0];
+            let dir = array![scale, 0.0];
+            let opening = 1.0 / scale;
+            // The slope of a linear cost along a straight line never
+            // changes, so curvature fails at every Armijo point.
+            let mut path = retract_path(&flat, &x, &dir);
+            let (_, _, alpha) = search.search_path(linear_pull(scale), &mut path, opening);
+            assert_eq!(alpha, 0.0, "euclidean, gradient {scale:e}");
+            // On the sphere from the pole the opening point has
+            // phi'(t) / phi'(0) = 2^(-3/2) > c2. A later point may pass, and
+            // then the analytic slope has to say so.
+            let mut path = retract_path(&sphere, &x, &dir);
+            let (_, _, alpha) = search.search_path(linear_pull(scale), &mut path, opening);
+            if alpha > 0.0 {
+                let ratio =
+                    array![-scale, 0.0].dot(&sphere_velocity(&x, &dir, alpha)) / (-scale * scale);
+                assert!(
+                    ratio.abs() <= RCG_WOLFE_C2 * (1.0 + 1e-6),
+                    "sphere, gradient {scale:e}: accepted t = {alpha:e} with ratio {ratio}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_large_cost_scale_does_not_stall_the_sphere_search() {
+        let start = array![0.1_f64, 0.7, std::f64::consts::FRAC_1_SQRT_2];
+        let start = &start / start.dot(&start).sqrt();
+        let out = minimize_rcg(
+            &Sphere,
+            start,
+            scaled_rayleigh(1e10),
+            &RcgOptions::default().with_grad_tol(1e2),
+        )
+        .unwrap();
+        assert!(
+            out.grad_norm <= 1e2,
+            "{:e} after {}",
+            out.grad_norm,
+            out.iterations
+        );
+        assert_eq!(out.restarts, 0);
+    }
+
+    fn scaled_rayleigh(scale: f64) -> impl FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>) {
+        move |x| {
+            let w = [1.0, 10.0, 100.0];
+            let mut f = 0.0;
+            let mut g = Array1::zeros(3);
+            for i in 0..3 {
+                f += 0.5 * scale * w[i] * x[i] * x[i];
+                g[i] = scale * w[i] * x[i];
+            }
+            (f, g)
+        }
     }
 }
