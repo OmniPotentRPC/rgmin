@@ -524,6 +524,35 @@ fn talbot_refuses_declared_singularities_outside_the_contour() {
 }
 
 #[test]
+fn weeks_refuses_a_mode_that_aliases_onto_both_grids() {
+    let cfg = WeeksConfig::default();
+    let (sigma, b, energy) = (0.5_f64, 1.5_f64, 0.8_f64);
+    for mode in [192_usize, 384] {
+        // Phi(w) = w^mode, so F(beta) = (1 - w) w^mode / sqrt(2b) inverts to
+        // exp(sigma E) phi_mode(E; b).
+        let mut coeffs = vec![0.0_f64; mode + 1];
+        coeffs[mode] = 1.0;
+        let (phi_mode, _) =
+            eval_orthonormal_laguerre_series(&coeffs, b, energy).expect("direct mode");
+        let exact = (sigma * energy).exp() * phi_mode;
+        assert!(exact.abs() > 1.0e-3, "mode {mode}: exact {exact}");
+        let got = weeks_invert(energy, cfg, |beta| {
+            let w = weeks_mobius_w(beta, sigma, b)?;
+            let mut wn = Complex64::new(1.0, 0.0);
+            for _ in 0..mode {
+                wn = wn * w;
+            }
+            let val = (Complex64::new(1.0, 0.0) - w) * wn / (2.0 * b).sqrt();
+            Ok(ComplexSample::estimated(val, 0.0))
+        });
+        assert!(
+            matches!(got, Err(InverseLaplaceError::AliasedLaguerreModes { .. })),
+            "mode {mode} (exact {exact}) must refuse, got {got:?}"
+        );
+    }
+}
+
+#[test]
 fn complex_sqrt_and_solver_edges_stay_typed() {
     let big = Complex64::new(1.0e308, 1.0e308);
     let root = big.sqrt();

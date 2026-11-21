@@ -33,6 +33,11 @@ pub const WEEKS_ALGEBRAIC_TAIL_FACTOR: f64 = 6.464_101_615_137_755;
 /// Laguerre series into the asymptotic infinite remainder `sum_{n >= N} |c_n|`.
 pub const WEEKS_DYADIC_TAIL_FACTOR: f64 = 3.414_213_562_373_095;
 
+/// Off-grid phase `(3 - sqrt(5)) / 2` of the Weeks aliasing samples
+/// `theta_j = 2 pi (j + phase) / M`. Irrational, so no Fourier mode is periodic on these
+/// points and on the `M` or `2M` DFT grids at once.
+const WEEKS_OFFGRID_PHASE: f64 = 0.381_966_011_250_105_1;
+
 /// Maximum permitted dyadic tail ratio `sum_{N <= n < 2N} |a_n| / sum_{N/2 <= n < N} |a_n| <= 2^{-1/2}`
 /// for an `O(n^{-3/2})` algebraic tail (`p >= 3/2`, where `2^{1 - p} <= 2^{-1/2}`).
 pub const WEEKS_MAX_DYADIC_TAIL_RATIO: f64 = FRAC_1_SQRT_2;
@@ -123,6 +128,14 @@ pub enum InverseLaplaceError {
         /// Requested disk radius. Certification would have required `modulus > outer_radius > 1`.
         outer_radius: f64,
     },
+    /// Off-grid Weeks samples disagree with the fine Laguerre series: a mode beyond the
+    /// retained range aliases onto both DFT grids.
+    AliasedLaguerreModes {
+        /// Largest off-grid residual `|Phi(w) - sum_{n<2M} c_n w^n|`.
+        residual: f64,
+        /// Residual allowed by the coefficient tail model and the noise at that sample.
+        allowed: f64,
+    },
     /// The integrand callback refused the sample. The caller keeps the detailed error.
     CallbackRefused,
 }
@@ -196,6 +209,10 @@ impl fmt::Display for InverseLaplaceError {
             } => write!(
                 f,
                 "Weeks singularity lies inside the disk: |w_pole| = {modulus:.6e} <= R = {outer_radius:.6e}"
+            ),
+            Self::AliasedLaguerreModes { residual, allowed } => write!(
+                f,
+                "Weeks off-grid residual {residual:.6e} exceeds {allowed:.6e}: a Laguerre mode beyond the retained range aliases onto the DFT grids"
             ),
             Self::CallbackRefused => f.write_str("inverse-Laplace callback refused the sample"),
         }
@@ -1464,6 +1481,11 @@ pub struct WeeksEstimate {
     /// floor: those coefficients are roundoff amplified by `r^{-n}`, and their ratio
     /// carries no decay information.
     pub observed_dyadic_ratio: Option<f64>,
+    /// Largest `|Phi(w) - sum_{n<2M} c_{2M,n} w^n|` over the `M` off-grid samples on
+    /// `|w| = r`. A diagnostic, never added to [`Self::estimate`]; the inversion refuses
+    /// with [`InverseLaplaceError::AliasedLaguerreModes`] when it exceeds twice the
+    /// coefficient tail model plus the sample and reconstruction noise.
+    pub aliasing_residual: f64,
 }
 
 /// Result of Weeks (Möbius–Laguerre) complex-contour inverse Laplace transform.
@@ -1476,7 +1498,8 @@ pub struct WeeksResult {
     pub accuracy: WeeksEstimate,
     /// Retained orthonormal Laguerre expansion coefficients `c_0, ..., c_{M-1}`.
     pub coefficients: Vec<f64>,
-    /// Total evaluations of the complex Laplace transform callback (`3 M`).
+    /// Total evaluations of the complex Laplace transform callback (`4 M`: `M` coarse,
+    /// `2M` fine, and `M` off-grid aliasing samples).
     pub evaluations: usize,
     /// Minimum `Re(beta)` sampled on the circle `|w| = r`.
     pub min_re_beta_sampled: f64,
@@ -1504,6 +1527,68 @@ impl WeeksResult {
     }
 }
 
+/// One Weeks sample at `w = r exp(i theta)`: `beta`, `Phi(w) = sqrt(2b) F(beta) / (1 - w)`,
+/// `|Phi|`, and its outward error estimate, after the strip checks.
+struct WeeksCircleSample {
+    beta: Complex64,
+    phi: Complex64,
+    phi_abs: f64,
+    phi_err: f64,
+}
+
+fn weeks_circle_sample<F>(
+    config: &WeeksConfig,
+    theta: f64,
+    eval_f: &mut F,
+) -> Result<WeeksCircleSample, InverseLaplaceError>
+where
+    F: FnMut(Complex64) -> Result<ComplexSample, InverseLaplaceError>,
+{
+    let b = config.scale_b;
+    let sqrt_2b = (2.0 * b).sqrt();
+    let sqrt_2b_up = mul_up(sqrt_up(2.0), sqrt_up(b));
+    let gamma_node = higham_gamma(12)?;
+    let w = Complex64::from_polar(config.circle_radius, theta);
+    let one = Complex64::new(1.0, 0.0);
+    let one_minus_w = one - w;
+    let one_plus_w = one + w;
+    let beta = Complex64::new(config.sigma, 0.0) + (one_plus_w / one_minus_w) * b;
+    if beta.re <= config.min_re_beta {
+        return Err(InverseLaplaceError::ContourCrossesCrossover {
+            method: "weeks_contour",
+            re_beta: beta.re,
+            beta_c: config.min_re_beta,
+        });
+    }
+    if beta.im.abs() > config.max_imag_beta {
+        return Err(InverseLaplaceError::ContourExceedsStrip {
+            method: "weeks_contour",
+            imag_beta: beta.im.abs(),
+            max_imag_beta: config.max_imag_beta,
+        });
+    }
+    let sample = eval_f(beta)?;
+    let f_val = sample.value();
+    let f_err = sample.uncertainty_estimate();
+    if !f_val.is_finite() || !f_err.is_finite() || f_err < 0.0 {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "weeks_sample",
+            value: f_err,
+        });
+    }
+    let pref = one / one_minus_w * sqrt_2b;
+    let phi = pref * f_val;
+    let pref_abs = div_up(sqrt_2b_up, one_minus_w.norm().next_down());
+    let phi_abs = norm_up(phi);
+    let phi_err = add_up(mul_up(pref_abs, f_err), mul_up(gamma_node, phi_abs));
+    Ok(WeeksCircleSample {
+        beta,
+        phi,
+        phi_abs,
+        phi_err,
+    })
+}
+
 struct WeeksCirclePass {
     coeffs: Vec<f64>,
     eval_est: f64,
@@ -1523,60 +1608,21 @@ where
     F: FnMut(Complex64) -> Result<ComplexSample, InverseLaplaceError>,
 {
     let r = config.circle_radius;
-    let sigma = config.sigma;
-    let b = config.scale_b;
-    let sqrt_2b = (2.0 * b).sqrt();
-    let sqrt_2b_up = mul_up(sqrt_up(2.0), sqrt_up(b));
     let mut phi_samples = Vec::with_capacity(quad_m);
     let mut max_sample_err = 0.0_f64;
     let mut max_phi_abs = 0.0_f64;
     let mut min_re = f64::INFINITY;
     let mut max_im = 0.0_f64;
-    let gamma_node = higham_gamma(12)?;
-
     for j in 0..quad_m {
         let theta = 2.0 * PI * ((j as f64) + 0.5) / (quad_m as f64);
-        let w = Complex64::from_polar(r, theta);
-        let one = Complex64::new(1.0, 0.0);
-        let one_minus_w = one - w;
-        let one_plus_w = one + w;
-        let beta = Complex64::new(sigma, 0.0) + (one_plus_w / one_minus_w) * b;
-        if beta.re <= config.min_re_beta {
-            return Err(InverseLaplaceError::ContourCrossesCrossover {
-                method: "weeks_contour",
-                re_beta: beta.re,
-                beta_c: config.min_re_beta,
-            });
+        let sample = weeks_circle_sample(config, theta, eval_f)?;
+        if sample.beta.re < min_re {
+            min_re = sample.beta.re;
         }
-        if beta.im.abs() > config.max_imag_beta {
-            return Err(InverseLaplaceError::ContourExceedsStrip {
-                method: "weeks_contour",
-                imag_beta: beta.im.abs(),
-                max_imag_beta: config.max_imag_beta,
-            });
-        }
-        if beta.re < min_re {
-            min_re = beta.re;
-        }
-        max_im = max_finite(max_im, beta.im.abs(), "weeks_max_im")?;
-
-        let sample = eval_f(beta)?;
-        let f_val = sample.value();
-        let f_err = sample.uncertainty_estimate();
-        if !f_val.is_finite() || !f_err.is_finite() || f_err < 0.0 {
-            return Err(InverseLaplaceError::InvalidParameter {
-                parameter: "weeks_sample",
-                value: f_err,
-            });
-        }
-        let pref = one / one_minus_w * sqrt_2b;
-        let phi = pref * f_val;
-        let pref_abs = div_up(sqrt_2b_up, one_minus_w.norm().next_down());
-        let phi_abs = norm_up(phi);
-        let phi_err = add_up(mul_up(pref_abs, f_err), mul_up(gamma_node, phi_abs));
-        max_sample_err = max_finite(max_sample_err, phi_err, "weeks_sample_err")?;
-        max_phi_abs = max_finite(max_phi_abs, phi_abs, "weeks_phi_abs")?;
-        phi_samples.push((theta, phi));
+        max_im = max_finite(max_im, sample.beta.im.abs(), "weeks_max_im")?;
+        max_sample_err = max_finite(max_sample_err, sample.phi_err, "weeks_sample_err")?;
+        max_phi_abs = max_finite(max_phi_abs, sample.phi_abs, "weeks_phi_abs")?;
+        phi_samples.push((theta, sample.phi));
     }
 
     let mut coeffs = vec![0.0_f64; num_coeffs];
@@ -1624,7 +1670,10 @@ where
 /// expansion on the circle `|w| = r <= 1`.
 ///
 /// Refuses with [`InverseLaplaceError::SlowAlgebraicTail`] when an observed dyadic
-/// block fails the finite-resolution `n^{-3/2}` model (ratio `> 2^{-1/2}`).
+/// block fails the finite-resolution `n^{-3/2}` model (ratio `> 2^{-1/2}`), and with
+/// [`InverseLaplaceError::AliasedLaguerreModes`] when `M` samples off both DFT grids
+/// disagree with the fine `2M`-term series beyond its tail model and noise, which is how
+/// a mode a multiple of `2M` above the retained range shows itself.
 pub fn weeks_invert<F>(
     energy: f64,
     config: WeeksConfig,
@@ -1732,6 +1781,50 @@ where
         let _ = verify_laguerre_tail_decay(&coarse.coeffs, coarse_floor)?;
     }
 
+    // The coarse and fine grids share every alias of a mode that is a multiple of
+    // `2M` away, so their agreement cannot see it. Off-grid samples at
+    // `theta_j = 2 pi (j + phi) / M`, with `phi` the irrational `(3 - sqrt 5) / 2`, are
+    // on neither grid: an aliased mode leaves a residual there that the truncation
+    // model and the sample noise do not account for.
+    let coef_tail_model = max_finite(
+        mul_up(WEEKS_ALGEBRAIC_TAIL_FACTOR, last_oct),
+        if fine_upper_dyadic > fine_upper_noise_floor {
+            mul_up(WEEKS_DYADIC_TAIL_FACTOR, fine_upper_dyadic)
+        } else {
+            0.0
+        },
+        "weeks_coefficient_tail_model",
+    )?;
+    let recon_noise = mul_up(fine_m as f64, fine.sample_noise_per_mode);
+    let gamma_recon = higham_gamma(checked_dim(
+        "weeks_recon_ops",
+        fine_m.checked_mul(4).and_then(|ops| ops.checked_add(4)),
+    )?)?;
+    let mut aliasing_residual = 0.0_f64;
+    for j in 0..m {
+        let theta = 2.0 * PI * ((j as f64) + WEEKS_OFFGRID_PHASE) / (m as f64);
+        let sample = weeks_circle_sample(&config, theta, &mut eval_f)?;
+        let w = Complex64::from_polar(r, theta);
+        let mut recon = Complex64::new(0.0, 0.0);
+        let mut recon_abs = 0.0_f64;
+        for &c in fine.coeffs.iter().rev() {
+            recon = recon * w + Complex64::new(c, 0.0);
+            recon_abs = add_up(mul_up(recon_abs, r), c.abs());
+        }
+        let residual = norm_up(sample.phi - recon);
+        let allowed = add_up(
+            mul_up(2.0, coef_tail_model),
+            mul_up(
+                4.0,
+                upward_sum(&[recon_noise, sample.phi_err, mul_up(gamma_recon, recon_abs)])?,
+            ),
+        );
+        if !residual.is_finite() || residual > allowed {
+            return Err(InverseLaplaceError::AliasedLaguerreModes { residual, allowed });
+        }
+        aliasing_residual = max_finite(aliasing_residual, residual, "weeks_aliasing_residual")?;
+    }
+
     let (series_coarse, series_round_coarse) =
         eval_orthonormal_laguerre_series(&coarse.coeffs, config.scale_b, energy)?;
     let (series_fine, series_round_fine) =
@@ -1809,9 +1902,10 @@ where
             roundoff_estimate,
             algebraic_tail_estimate,
             observed_dyadic_ratio,
+            aliasing_residual,
         },
         coefficients: fine.coeffs[..m].to_vec(),
-        evaluations: checked_dim("weeks_evaluations", m.checked_mul(3))?,
+        evaluations: checked_dim("weeks_evaluations", m.checked_mul(4))?,
         min_re_beta_sampled: min_re_sampled,
         max_imag_beta_sampled: max_imag_sampled,
     })
