@@ -266,6 +266,7 @@ pub use scg::{
 pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
 pub use session::Solver;
 pub use session::drive::EonFeat;
+pub use slepc_kind::{SlepcParams, SlepcPmat, SlepcStKind};
 pub use slq::{
     DeflatedPair, ExtremePairsConfig, ExtremePairsReport, HutchPpConfig, PcgConfig, PcgResult,
     ProbeStrategy, QuadratureEstimate, SlqConfig, SlqLogDetReport, TridiagEigh,
@@ -273,7 +274,6 @@ pub use slq::{
     pcg_solve, slq_logdet_deflated, slq_logdet_deflated_with_cv, slq_logdet_hutchpp, sym_eigh,
     tridiag_eigh,
 };
-pub use slepc_kind::{SlepcParams, SlepcPmat, SlepcStKind};
 pub use step::DEFAULT_ATOM_MAXMOVE;
 pub use stepper::Stepper;
 pub use trust::{RestrictedStep, TrustRegion};
