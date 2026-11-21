@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 52
+#define RGMIN_ABI_VERSION_MINOR 57
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -92,7 +92,7 @@ typedef struct rgmin_abi_stamp_t {
  * 52 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
  *    rgmin_solver_set_gromacs_steep, and
  *    rgmin_gromacs_steep_max_constraint_shrinks.
- * 52 Riemannian CG: RGMIN_RCG, rgmin_rcg_options_default and
+ * 57 Riemannian CG: RGMIN_RCG, rgmin_rcg_options_default and
  *    rgmin_minimize_rcg. rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
@@ -141,7 +141,7 @@ typedef enum rgmin_method_t {
     RGMIN_EON_CG = 27,
     /** GROMACS integrator = steep. ABI minor 52. */
     RGMIN_GROMACS_STEEP = 28,
-    /** Riemannian CG. PRP+ and the scaled transport. ABI minor 52.
+    /** Riemannian CG. PRP+ and the scaled transport. ABI minor 57.
      *  rgmin_minimize_rcg carries the other coefficients. */
     RGMIN_RCG = 29
 } rgmin_method_t;
@@ -1140,7 +1140,7 @@ rgmin_status_t rgmin_solver_search_direction(rgmin_solver_t *solver,
                                           size_t n);
 
 /** Riemannian CG coefficient, transport and line search.
- *  Start from \ref rgmin_rcg_options_default. ABI minor 52.
+ *  Start from \ref rgmin_rcg_options_default. ABI minor 57.
  *
  *  \c beta is 0 for Fletcher-Reeves, 1 for PRP+ (a negative Polak-Ribiere
  *  coefficient is replaced by zero) and 2 for Hager-Zhang.
@@ -1164,7 +1164,7 @@ typedef struct rgmin_rcg_options_t {
 
 /** Rust \c RcgOptions::default, which a NULL \a options selects:
  *  PRP+, the scaled transport, the strong Wolfe search, and the named
- *  gradient tolerance, iteration cap and opening length. ABI minor 52. */
+ *  gradient tolerance, iteration cap and opening length. ABI minor 57. */
 rgmin_rcg_options_t rgmin_rcg_options_default(void);
 
 /** Riemannian CG on Euclidean space. \a options NULL selects

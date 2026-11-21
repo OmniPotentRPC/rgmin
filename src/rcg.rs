@@ -51,7 +51,6 @@ use crate::error::{Error, Result};
 use crate::holonomic::DistanceConstraints;
 use crate::linesearch::{LineSearch, Path};
 use crate::manifold::Manifold;
-use crate::nlcg::div;
 use crate::step::Caps;
 
 /// Stop when the Riemannian gradient norm is at most this value.
@@ -691,15 +690,31 @@ where
     let old2 = manifold.inner(x_from, g_from, g_from);
     let new2 = manifold.inner(x_to, g_to, g_to);
     match kind {
-        RcgBeta::FletcherReeves => div(new2, old2),
+        RcgBeta::FletcherReeves => ratio(new2, old2),
         RcgBeta::PrpPlus => {
             let mut y = g_to.clone();
             crate::vecops::axpy(-1.0, g_carried.view(), &mut y);
-            div(manifold.inner(x_to, g_to, &y), old2).max(0.0)
+            ratio(manifold.inner(x_to, g_to, &y), old2).max(0.0)
         }
         RcgBeta::HagerZhang => hager_zhang(
             manifold, x_from, x_to, g_from, g_to, d_from, g_carried, d_carried,
         ),
+    }
+}
+
+/// `num / den`, or zero when the quotient is not finite or `den` is lost
+/// next to `num`.
+///
+/// The test is relative with no additive constant. [`crate::nlcg::div`]
+/// adds one to `|num|`, which is a length unit, and zeroes every
+/// coefficient once `||g||^2` falls below `f64::EPSILON`, so a run with a
+/// small cost scale would become steepest descent. A coefficient has no
+/// unit, and the same run in other units has the same coefficients.
+fn ratio(num: f64, den: f64) -> f64 {
+    if !num.is_finite() || !den.is_finite() || den.abs() <= f64::EPSILON * num.abs() {
+        0.0
+    } else {
+        num / den
     }
 }
 
@@ -722,7 +737,7 @@ where
     let y_g = manifold.inner(x_to, &y, g_to);
     let yy = manifold.inner(x_to, &y, &y);
     let d_g = manifold.inner(x_to, d_carried, g_to);
-    let scale = y_g.abs() + yy.abs() + d_g.abs() + 1.0;
+    let scale = y_g.abs() + yy.abs() + d_g.abs();
     let mut beta = if !y_d.is_finite() || y_d.abs() <= f64::EPSILON * scale {
         0.0
     } else {
@@ -1223,7 +1238,7 @@ mod tests {
             Inflate.inner(&to, &g_to, &dir)
         );
         let raw = Inflate.transport(&from, &to, &d_from);
-        let beta = div(g_to.dot(&g_to), g_from.dot(&g_from));
+        let beta = ratio(g_to.dot(&g_to), g_from.dot(&g_from));
         let mut raw_dir = negated(&g_to);
         crate::vecops::axpy(beta, raw.view(), &mut raw_dir);
         assert!(
@@ -1552,5 +1567,38 @@ mod tests {
             }
             (f, g)
         }
+    }
+
+    #[test]
+    fn a_scaled_cost_takes_the_steps_of_the_unscaled_one_on_the_sphere() {
+        let start = array![0.1_f64, 0.7, std::f64::consts::FRAC_1_SQRT_2];
+        let start = &start / start.dot(&start).sqrt();
+        let mut counts = Vec::new();
+        for scale in [1.0, 1e-10, 1e10] {
+            let out = minimize_rcg(
+                &Sphere,
+                start.clone(),
+                scaled_rayleigh(scale),
+                &RcgOptions::default().with_grad_tol(scale * 1e-8),
+            )
+            .unwrap();
+            assert!(
+                out.grad_norm <= scale * 1e-8,
+                "scale {scale:e}: gradient {:e} after {} iterations, {} restarts",
+                out.grad_norm,
+                out.iterations,
+                out.restarts
+            );
+            assert_eq!(out.restarts, 0, "scale {scale:e}");
+            counts.push((out.iterations, out.evals));
+        }
+        assert!(
+            counts[1].0 <= counts[0].0 + 4 && counts[2].0 <= counts[0].0 + 4,
+            "{counts:?}"
+        );
+        assert!(
+            counts[1].1 <= counts[0].1 + 40 && counts[2].1 <= counts[0].1 + 40,
+            "{counts:?}"
+        );
     }
 }

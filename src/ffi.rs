@@ -82,7 +82,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 52;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 57;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -148,7 +148,7 @@ pub enum rgmin_method_t {
     /// GROMACS `integrator = steep`. ABI minor 52.
     RGMIN_GROMACS_STEEP = 28,
     /// Riemannian CG. Default coefficient is PRP+, transport is scaled.
-    /// ABI minor 52. The options record carries the other coefficients.
+    /// ABI minor 57. The options record carries the other coefficients.
     RGMIN_RCG = 29,
 }
 
@@ -1180,7 +1180,7 @@ const RCG_TRANSPORT_IDENTITY: i32 = 1;
 const RCG_LINESEARCH_WOLFE: i32 = 0;
 const RCG_LINESEARCH_BRENT: i32 = 1;
 
-/// Riemannian CG coefficient, transport and line search. ABI minor 52.
+/// Riemannian CG coefficient, transport and line search. ABI minor 57.
 ///
 /// `beta` is 0 for Fletcher-Reeves, 1 for PRP+ and 2 for Hager-Zhang.
 /// `transport` is 0 for the scaled transport and 1 for the identity.
@@ -1303,7 +1303,7 @@ fn rcg_as_report(out: crate::RcgMin, grad_tol: f64, max_iter: usize) -> crate::R
     }
 }
 
-/// [`crate::RcgOptions::default`] as a C record. ABI minor 52.
+/// [`crate::RcgOptions::default`] as a C record. ABI minor 57.
 #[unsafe(no_mangle)]
 pub extern "C" fn rgmin_rcg_options_default() -> rgmin_rcg_options_t {
     rgmin_rcg_options_t::default()

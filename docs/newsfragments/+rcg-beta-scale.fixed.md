@@ -1,0 +1,1 @@
+The Riemannian CG coefficient no longer drops to zero once the squared gradient norm is below machine epsilon, so a cost of small scale takes the same conjugate steps as the same cost in other units instead of falling back to steepest descent.
