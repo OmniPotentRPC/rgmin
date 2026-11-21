@@ -724,6 +724,18 @@ mod tests {
     }
 
     #[test]
+    fn non_finite_factors_never_return_a_spectrum() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for position in 0..4 {
+                let mut factor = vec![1.0, 0.0, 0.0, 1.0];
+                factor[position] = value;
+                let got = periodic_product_spectrum(&[factor], 2, 128);
+                assert!(got.is_err(), "value={value} position={position}");
+            }
+        }
+    }
+
+    #[test]
     fn argument_is_formed_before_large_components_are_downcast() {
         let steps = 100;
         let radial = 10.0_f64.exp();
