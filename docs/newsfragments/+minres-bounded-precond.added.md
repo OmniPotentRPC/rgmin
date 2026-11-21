@@ -1,0 +1,1 @@
+Add a matrix-free preconditioned MINRES solver with an iteration bound, certified true preconditioned residuals, robust breakdown detection, and the last finite iterate on failure, for symmetric indefinite systems such as Newton steps on saddle surfaces.
