@@ -1,4 +1,0 @@
-- `rgmin.optimize.GromacsSteep.run` and `irun` now return `False` when the session stops with `stop == "EvalBudget"`, matching the other ASE-style optimizers in `rgmin.optimize`.
-- `Solver::try_step_hvp` now validates `etol` and `max_evals`, counts objective evaluations into `Solver::evals()` and `Report::evals`, and applies `etol` and `max_evals` at the end of a successful step while rolling back the evaluation count and stop state on `Error::Host`.
-- `polish_newton`, `polish_hvp`, and the `backward_polish` passes of `minimize_method_hess`, `minimize_method_hvp`, `minimize_newton`, and `minimize_newton_cg` now count the objective evaluations made during the polish into `Report::evals`.
-- `minimize_rlbfgs` now evaluates `etol` and `max_evals` at the end of each outer iteration rather than after each rejected Armijo trial.

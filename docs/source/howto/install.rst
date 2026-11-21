@@ -3,7 +3,7 @@
 Install rgmin
 -------------
 
-rgmin 0.6.0 is a Rust crate with a C ABI.
+rgmin 0.7.0 is a Rust crate with a C ABI.
 It needs Rust 1.88 or newer, the ``rust-version`` in ``Cargo.toml``.
 This page covers the crate, the C library from cargo-c or Meson, the two Python packages and the LAMMPS plugin.
 

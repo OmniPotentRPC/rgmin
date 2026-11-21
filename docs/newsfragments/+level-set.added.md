@@ -1,2 +1,0 @@
-- Added a generic level-set constraint `LevelSetConstraint` for `Solver` (`set_level_set` / `clear_level_set`) that projects trial directions onto the tangent space, retracts accepted points to `value(x)=target` by Newton along the oracle gradient, and reports explicit `Error::LevelSet*` failures when retraction data are invalid or Newton stalls.
-- Exposed level-set control through the C ABI (`rgmin_solver_set_level_set`, `rgmin_solver_clear_level_set`) and the Python session binding (`Session(..., level_set=...)`, `Session.set_level_set(...)`).

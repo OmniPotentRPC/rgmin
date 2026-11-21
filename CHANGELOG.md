@@ -8,6 +8,113 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.7.0] - 2026-11-21
+
+### Added
+
+- Added GROMACS `integrator = steep` semantics across the Rust, C, C++, and Python APIs, including MDP-unit mapping and explicit tolerance, budget, and machine-precision stop reports.
+- Added `HighsOptions::time_limit` and `HighsOptions::with_time_limit`. A value
+  replaces the time limit of both the projection and the feasible step HiGHS
+  solves, and `None`, the default, keeps the 0.05 s and 1.0 s limits they had.
+  The feasible step solve also reports a refused `parallel` or `threads` option
+  as `Error::Highs` instead of ignoring it.
+- An opt-in FIRE 2.0 stabilization caps `dt_max` when an uphill reset follows
+  one downhill move, which prevents repeated semi-implicit Euler overshoot
+  cycles on stiff systems. The schedule of Guénolé et al. (2020) leaves it off
+  by default.
+- C ABI minor 49 adds `RGMIN_STOP_LINE_SEARCH`, `RGMIN_STOP_POLISH_UNMET`, `RGMIN_UNMET_STOP`, `rgmin_solver_set_error_on_unmet`, `rgmin_solver_set_backward_polish`, `rgmin_backward_error_floor`, and the `rgmin_minimize*_opts` entries. `xts.h` aliases the new status and stop constants. `rgmin_control_t` is unchanged. Python `SolverConfig` accepts the same two flags, `Report.converged` follows `Stop.TOLERANCE`, and `backward_error_floor` is the floor helper.
+- CI checks that every C function in `include/rgmin.h` has a doc comment (`scripts/check_header_docs.py`), that every DOI and URL in the tracked sources resolves (`scripts/check_links.py`), and that rustdoc builds with warnings as errors.
+  The docs workflow builds with `-W` and fails when the tracked rst under `docs/source` is stale.
+- Cautious limited-memory Riemannian BFGS follows Algorithm 2 of Huang, Absil, and Gallivan (SIAM J. Optim. 28, 2018, doi:10.1137/17M1127582). `minimize_rlbfgs` takes a manifold, and `Rlbfgs` sets the memory, the cautious slope, the Armijo backtrack, and the relative gradient stop. The C entry is `rgmin_minimize_rlbfgs` with `rgmin_rlbfgs_default` at ABI minor 51. The default Euclidean L-BFGS step stays the capped eOn step.
+- New docs: how-tos and tutorials for the level-set constraint, the supplied line search and the caller-supplied L-BFGS `H0`, and a Python reference with every `SolverConfig` option and default and the maturin classes.
+  The tutorials include the example programs that CI runs, and the Python quickstart blocks run as a test. The 18 C functions that had no doc comment are documented.
+- Per-step FIRE tracing (`FireTrace`, `Solver::start_fire_trace`,
+  `Solver::take_fire_trace`) records `dt`, `dt_max`, `alpha`, `power`, `n_pos`,
+  `half_step_backs`, and `clipped_moves`.
+- The C ABI (`rgmin_solver_set_level_set`, `rgmin_solver_clear_level_set`) and the Python session binding (`Session(..., level_set=...)`, `Session.set_level_set(...)`) expose the level-set constraint.
+- The C ABI and Python toggle `cap_two_step_overshoot` through
+  `rgmin_solver_set_fire_cap_two_step_overshoot`, its `xts` alias, the C++
+  wrapper, and `Session(..., cap_two_step_overshoot=...)`.
+  `RGMIN_ABI_VERSION_MINOR` goes from 47 to 48 for it.
+- The C ABI exposes the energy and evaluation stops at minor 50 (`rgmin_solver_set_etol`, `rgmin_solver_clear_etol`, `rgmin_solver_set_max_evals`, `rgmin_solver_clear_max_evals`, `rgmin_solver_evals`, `RGMIN_STOP_ENERGY_TOLERANCE`, `RGMIN_STOP_EVAL_BUDGET`), and so do the C++ `Solver`, the Python `SolverConfig` (`etol=`, `max_evals=`), `Session`, the `rgmin.ase` and `rgmin.optimize` optimizers, and the LAMMPS `min_style rgmin` plugin, which passes `minimize etol` to the core. The new how-to page on stopping rules maps them to LAMMPS and SciPy.
+- `Control::etol` and `Control::max_evals` are the opt-in LAMMPS `minimize etol` and `maxeval` stops. `etol` stops a run when `|E_k - E_{k-1}| < etol * 0.5 * (|E_k| + |E_{k-1}| + sqrt(f64::EPSILON))` between accepted steps and reports `Status::EnergyTolerance`. `max_evals` counts objective evaluations, line-search trials included, and reports `Status::EvalBudget`. `Report::evals` and `Solver::evals()` hold the count. Both default to `None`, and every driver and session method honours them, with `Error::StopUnsupported` for `etol` on particle swarm and `Error::InvalidControl` for a negative or non-finite `etol` or a zero budget.
+- `Control::with_backward_polish` takes a shifted Newton or RFO step on a supplied Hessian or Hessian-vector product. The point is accepted only when the Newton decrement, every coordinate step, and the gradient norm sit under `backward_error_floor`. The floor is `n * f64::EPSILON * (1 + |V| + sum |x_i|)`. A tiny step that misses the gradient test is `PolishUnmet`.
+- `LevelSetConstraint` is a generic level-set constraint for `Solver` (`set_level_set` and `clear_level_set`). It projects trial directions onto the tangent space, retracts accepted points to `value(x) = target` by Newton steps along the oracle gradient, and reports an explicit `Error::LevelSet*` failure when the retraction data are invalid or Newton stalls.
+- `Report` carries a `StopReason` (`Converged`, `MaxIter`, `LineSearchFailed`, `NoiseFloor`, `StepTolerance`, `PolishUnmet`, `Iterating`) and `converged()`. A spent budget stays `Ok` with `Status::Budget`. `Control::with_error_on_unmet` returns `Error::StopUnmet` with the report, including when the iteration budget is zero. The gradient is tested after the last step as well as at the top of the loop. A budget in which no trial moves is `LineSearchFailed`.
+- `Solver::try_step_hvp` with the `TryHessianVector` trait, and
+  `try_lowest_eigenpairs` / `try_lowest_eigenpairs_precond` with the
+  `TryApplyHessian` trait, take host callbacks that can fail. On callbacks
+  that succeed they take the steps of `step_hvp` and `lowest_eigenpairs`
+  bit for bit. The first callback error ends the call as `Error::Host`,
+  nothing is evaluated after it, and `x` and the session stay as they
+  were before the step. A Newton-CG or Newton-PCG session with a chart or
+  distance constraints returns `Error::FallibleUnsupported`. Any other
+  method returns `Error::NeedHvp`. The C ABI and the Python binding are
+  unchanged.
+- `python -m pip install rgmin` installs the nanobind package from PyPI.
+  A `vX.Y.Z` tag builds the sdist and the wheels for Linux (`manylinux_2_28`) on x86_64 and aarch64, macOS 14 or newer on arm64 and x86_64, and Windows on x86_64, tests every wheel, and uploads them to PyPI through trusted publishing.
+  CPython 3.10 and 3.11 each get a wheel, one abi3 wheel serves 3.12 and newer, and the free-threaded 3.14t and 3.15t each get a wheel.
+  The package version comes from `Cargo.toml`, and the upload stops unless the tag names that version.
+- `rgmin_control_default`, `rgmin_exp_default`, `rgmin_scg_params_default`, `rgmin_scg_options_default`, `rgmin_eigen_params_default` and `rgmin_eigen_options_default` return the Rust defaults of the C records a caller fills in, bit for bit, at ABI minor 46. `xts.h` spells them `xts_*_default`.
+  A C caller must start each record from its initializer, and `rgmin_precon_t` from `rgmin_precon_init`, then assign only the fields it changes. A field added later then holds its default rather than stack bytes or zero.
+  The C++ wrappers, the LAMMPS plugin, the asv helper, the C tests and the C ABI docs start from them.
+  In `rgmin_minimize_scg` and `rgmin_minimize_scg_with_options`, a null params or options pointer stands for the default record, which holds the values a null pointer selected before.
+  `RGMIN_C_TEST_RUNNER` and `RGMIN_LAMMPS_RUNNER` put a runner such as valgrind in front of the C test consumers and the plugin tests' `lmp`, and CI runs both under valgrind.
+- Added a-posteriori nonlinear certificates built from caller-supplied majorants: a Newton-Kantorovich existence radius, an adjoint functional bound with nonlinear and quadratic remainders, and a residual-robust Morse-gap test that returns a typed error when the gap cannot be certified.
+
+### Changed
+
+- GROMACS steepest descent multiplies a rejected displacement by 0.5, matching `do_steep` in GROMACS 2025.4. `GromacsSteepConfig::with_shrink` selects another factor in `(0, 1)`, including the reference manual's 0.2.
+
+### Fixed
+
+- A GROMACS steep trial that misses its distance constraints is rejected and the displacement shrinks, matching `do_steep`. Crossing `GROMACS_STEEP_MIN_USTEP` stops with `Status::MachinePrecision`. An explicit `GromacsSteepConfig::max_constraint_shrinks` that runs out while the displacement is still at least that floor returns `Error::Constraint`.
+- A non-finite start or trial fails before any clip bookkeeping is recorded,
+  in the first-order session step and in its assessment, and the constrained
+  session keeps clipping finite coordinates only.
+- A zero-budget `gromacs-steep` report now fails when a per-atom gradient norm is not finite. The previous reduction kept a finite atom through `std::max` and dropped the NaN.
+- ABC-FIRE component clipping leaves the velocity unchanged when `vmax <= 0`
+  instead of setting every component to zero.
+- Constrained FIRE 2.0 adapts `dt`, `n_pos` and `alpha` once per step. The preparation step already applies that update, and the forward step no longer applies it again, so a rollback shrinks `dt` by `f_dec` once and a downhill step counts `n_pos` once.
+- Riemannian L-BFGS now rejects zero-curvature pairs, applies gradient
+  tolerances in the manifold metric, and covers retraction fallback behavior.
+- The C ABI bookkeeping agrees at minor 48: `tests/c_abi.rs`, the exported-name
+  baseline `scripts/abi_baseline.txt` and the architecture docs match
+  `include/rgmin.h` and `src/ffi.rs`.
+- The C header, `src/ffi.rs`, the manifold modules and the manifold how-tos no longer call `rgmin_manifold_t` tokens 7-10 reserved.
+  They are SPD, Grassmann, hyperboloid and Poincare ball, and token 23 is U(n). `rgmin_solver_set_manifold` has always mapped them.
+- The DIIS reference DOI in `Method::Diis` and `src/diis.rs` is `10.1016/S0022-2860(84)87198-7`, which resolves.
+  The Manopt links point at the JMLR page and the Holm reference at JSTOR, because the identifiers they used are not registered.
+  The relax-morse tutorial quotes what `examples/relax_morse.rs` prints.
+- The GROMACS steep symbols are ABI minor 52, and `xts.h` aliases `RGMIN_STOP_MACHINE_PRECISION`. The `1e-12` displacement floor and the default of 34 constraint shrinks are rgmin safeguards.
+- The IRC trust projection treats a mass weight equal to its floor as present
+  for both the degenerate axis and the radial divisor, so the two no longer
+  disagree about that coordinate.
+- The Python tests pass on macOS x86_64, where Apple's libm `exp` rounds one value on the Pt7 EMT trajectory down and glibc rounds it up.
+  The Pt7 EMT digest, like the LJ38 one, is pinned on glibc only, and every other platform compares the Pt7 frames and energies with `tests/python/data/pt7_golden.json` within 1e-12, absolute in positions and relative in energies.
+  Every platform still requires the Pt7 runs at 1, 2 and 8 Python threads and at 1, 2, 3 and 8 Rayon threads to match a reference run on the same machine bit for bit.
+  Windows takes the same comparison, so `PT7_EMT_WINDOWS` and the dispatch-only `windows-pt7-digest` CI job that recorded it are gone.
+- The shrink budget for a GROMACS steep session is now a closed-form logarithm, capped at `GROMACS_STEEP_SHRINK_BUDGET_CAP` (one million), so a shrink factor near one no longer walks a loop toward `u32::MAX` and hangs construction.
+- Use an energy safeguarded L BFGS step for ASE cell filters so scaled
+  cell deformation coordinates converge without accepting uphill steps.
+- `GromacsSteepConfig::default().with_shrink(...)` derived `max_constraint_shrinks` from the canonical `emstep = 0.01`, not the session's actual `istep`. `Solver::set_gromacs_steep_config` and `GromacsSteep::set_config` now rederive that budget from the session's own step size unless `with_max_constraint_shrinks` fixed it, so a noncanonical Rust session gets a budget sized for its own displacement instead of exhausting constraints too early or too late.
+- `Session("gromacs-steep")` no longer installs the generic per-atom displacement cap. An explicit `max_atom` still applies, and other methods keep that cap when the argument is omitted.
+- `Solver::try_step_hvp` validates `etol` and `max_evals`, counts objective evaluations into `Solver::evals()` and `Report::evals`, and applies `etol` and `max_evals` at the end of a successful step, rolling back the evaluation count and the stop state on `Error::Host`.
+- `minimize_rlbfgs` checks `etol` and `max_evals` at the end of each outer iteration instead of after each rejected Armijo trial.
+- `minimize_scg`, `minimize_scg_exact`, and `rgmin_minimize_scg` now apply a positive finite `Control::maxmove` to every trial step, including retries after non-finite values.
+  Bounded steps compare their measured change with the damped model at the shortened step; zero, negative, infinite, and NaN caps remain unbounded.
+- `polish_newton`, `polish_hvp`, and the `backward_polish` passes of `minimize_method_hess`, `minimize_method_hvp`, `minimize_newton`, and `minimize_newton_cg` count the objective evaluations of the polish into `Report::evals`.
+- `rgmin.optimize.GromacsSteep.run` and `irun` return `False` when the session stops with `stop == "EvalBudget"`, as the other ASE-style optimizers in `rgmin.optimize` do.
+- `rgmin_minimize_hess_opts`, `rgmin_minimize_hvp_opts`,
+  `rgmin_minimize_eindir` and `rgmin_minimize_scg_with_options` return
+  `RGMIN_INVALID_PARAMETER` when the initial `x` is not finite, as
+  `rgmin_minimize` does. A block tensor import such as the seed of
+  `rgmin_lowest_eigenpairs` rejects a DLPack version other than 1.0 with the
+  same status.
+- A nonnegative certificate majorant of `-0.0` is returned as `+0.0`. The acceptance test compared the value with zero and used to keep the sign bit.
+- Certificate radii, remainders, and the Morse-gap `certified` field are documented as IEEE 754 binary64 estimates in the default round-to-nearest, ties-to-even mode. `certified` was previously described as a strict lower bound on the exact gap.
+
+
 ## [0.6.0] - 2026-11-13
 
 ### Added
