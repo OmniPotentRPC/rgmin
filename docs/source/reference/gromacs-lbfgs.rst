@@ -12,12 +12,12 @@ GROMACS L-BFGS
 
 ``Method::GromacsLbfgs`` follows ``do_lbfgs`` in the tagged GROMACS 2025.4
 source,
-```src/gromacs/mdrun/minimize.cpp``, lines 2036--2858 <https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L2036-L2858>`_.
-The MDP defaults come from the same tag's
-```nsteps`` <https://github.com/gromacs/gromacs/blob/v2025.4/docs/user-guide/mdp-options.rst#L206-L210>`_,
-```emtol`` and ``emstep`` <https://github.com/gromacs/gromacs/blob/v2025.4/docs/user-guide/mdp-options.rst#L341-L350>`_, and
-```nbfgscorr`` <https://github.com/gromacs/gromacs/blob/v2025.4/docs/user-guide/mdp-options.rst#L358-L362>`_
-documentation.
+`minimize.cpp, lines 2036--2858 <https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L2036-L2858>`_
+(``src/gromacs/mdrun/minimize.cpp``). The MDP defaults come from the same
+tag's MDP option documentation for
+`nsteps <https://github.com/gromacs/gromacs/blob/v2025.4/docs/user-guide/mdp-options.rst#L206-L210>`_,
+`emtol and emstep <https://github.com/gromacs/gromacs/blob/v2025.4/docs/user-guide/mdp-options.rst#L341-L350>`_, and
+`nbfgscorr <https://github.com/gromacs/gromacs/blob/v2025.4/docs/user-guide/mdp-options.rst#L358-L362>`_.
 
 1.1 Algorithm
 ~~~~~~~~~~~~~
