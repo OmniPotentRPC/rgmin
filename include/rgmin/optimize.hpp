@@ -266,6 +266,7 @@ inline Report minimize_hess_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hes
     return detail::one_shot_report(st, out, "rgmin_minimize_hess failed");
 }
 
+/// Requires a library providing ABI minor 60.
 inline Report minimize_eindir(const eindir_objective_t* objective,
                               const eindir_abi_stamp_t* stamp,
                               DLManagedTensorVersioned* x, Control const& ctrl,

@@ -226,17 +226,22 @@ fn a_moving_run_that_spends_its_budget_stays_maxiter_everywhere() {
 #[test]
 fn out_of_bounds_starts_have_identical_session_and_one_shot_results() {
     for method in [Method::lbfgs(), Method::Bfgs] {
+        let control = if matches!(method, Method::Bfgs) {
+            control().with_etol(1e-6)
+        } else {
+            control()
+        };
         let one_shot = minimize_method(
             &BoundedUphill,
             array![2.0],
-            &control(),
+            &control,
             method.clone(),
             LineSearch::default(),
         )
         .unwrap();
 
         let mut x = array![2.0];
-        let mut solver = Solver::new(method.clone(), control(), 1);
+        let mut solver = Solver::new(method.clone(), control, 1);
         solver.set_accept(Accept::Energy);
         solver.set_geometry_step(false);
         if matches!(method, Method::Lbfgs { .. }) {

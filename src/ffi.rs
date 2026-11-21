@@ -82,7 +82,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 53;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 60;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -1487,7 +1487,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
 /// [`rgmin_minimize_eindir`] with the two opt-in controls. A nonzero
 /// `error_on_unmet` writes `x` and `out`, then returns
 /// [`rgmin_status_t::RGMIN_UNMET_STOP`]. `backward_polish` has no Hessian
-/// on this entry and does not change the step. ABI minor 51.
+/// on this entry and does not change the step. ABI minor 60.
 ///
 /// # Safety
 /// Same as [`rgmin_minimize_eindir`].
@@ -7227,7 +7227,7 @@ mod stop_mapping_tests {
     use super::*;
     use crate::{Report, StopReason};
 
-    const FINISHED: [(StopReason, rgmin_stop_t); 6] = [
+    const FINISHED: [(StopReason, rgmin_stop_t); 9] = [
         (StopReason::Converged, rgmin_stop_t::RGMIN_STOP_TOLERANCE),
         (StopReason::NoiseFloor, rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR),
         (
@@ -7242,6 +7242,15 @@ mod stop_mapping_tests {
         (
             StopReason::PolishUnmet,
             rgmin_stop_t::RGMIN_STOP_POLISH_UNMET,
+        ),
+        (
+            StopReason::EnergyTolerance,
+            rgmin_stop_t::RGMIN_STOP_ENERGY_TOLERANCE,
+        ),
+        (StopReason::EvalBudget, rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET),
+        (
+            StopReason::MachinePrecision,
+            rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION,
         ),
     ];
 
@@ -7270,6 +7279,9 @@ mod stop_mapping_tests {
         assert_eq!(rgmin_stop_t::RGMIN_STOP_BUDGET as i32, 3);
         assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH as i32, 4);
         assert_eq!(rgmin_stop_t::RGMIN_STOP_POLISH_UNMET as i32, 5);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_ENERGY_TOLERANCE as i32, 6);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET as i32, 7);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION as i32, 8);
     }
 
     #[test]
