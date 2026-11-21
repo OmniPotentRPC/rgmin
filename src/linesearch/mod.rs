@@ -401,12 +401,16 @@ fn bracket(phi: &mut impl FnMut(f64) -> f64, mut a: f64, mut b: f64, maxiter: us
     if a < c { (a, c) } else { (c, a) }
 }
 
-/// Brent keeps `tol1 = tol * |x| + zeps`, with
+/// Brent's `tol1 = tol * |x| + zeps`, with
 /// `zeps = f64::EPSILON * (|x| + BRENT_ZEPS_FRACTION)`. The fraction
 /// keeps `tol1` positive at `x = 0` without swamping a small abscissa,
 /// and `f64::EPSILON * |x|` keeps `tol1` above half a unit in the last
-/// place when `tol` is zero.
+/// place when `tol` is zero. Both Brent refinements read it.
 const BRENT_ZEPS_FRACTION: f64 = 1.0 / 1024.0;
+
+fn brent_tol1(tol: f64, x: f64) -> f64 {
+    tol * x.abs() + f64::EPSILON * (x.abs() + BRENT_ZEPS_FRACTION)
+}
 
 fn brent(
     phi: &mut impl FnMut(f64) -> f64,
@@ -428,8 +432,7 @@ fn brent(
     let mut d: f64 = 0.0;
     for _ in 0..maxiter {
         let xm = 0.5 * (a + b);
-        let zeps = f64::EPSILON * (x.abs() + BRENT_ZEPS_FRACTION);
-        let tol1 = tol * x.abs() + zeps;
+        let tol1 = brent_tol1(tol, x);
         let tol2 = 2.0 * tol1;
         if (x - xm).abs() <= tol2 - 0.5 * (b - a) {
             return (x, fx);
