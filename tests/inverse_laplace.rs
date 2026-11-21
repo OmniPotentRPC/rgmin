@@ -59,6 +59,8 @@ fn talbot_and_weeks_invert_exponential_and_report_typed_estimates() {
     let err_w = (got_w.value - exact).abs();
     assert!(err_w <= got_w.uncertainty_estimate());
     assert!(err_w <= 1.0e-11);
+    // The fine upper block of a pole at w = 13 is r^{-n}-amplified roundoff.
+    assert_eq!(got_w.accuracy.observed_dyadic_ratio, None);
 }
 
 #[test]
@@ -231,6 +233,17 @@ fn laguerre_refuses_a_non_finite_derived_scale_or_value() {
     let (value, roundoff) =
         eval_orthonormal_laguerre_series(&[1.0, 0.0], 1.0, 0.25).expect("finite laguerre");
     assert!(value.is_finite() && roundoff.is_finite());
+    // exp(-b E) = exp(-750) underflows, so mode 400 cannot be seeded.
+    let c400 = vec![1.0_f64; 400];
+    assert!(matches!(
+        eval_orthonormal_laguerre_series(&c400, 1.5, 500.0),
+        Err(InverseLaplaceError::InvalidParameter {
+            parameter: "laguerre_start",
+            ..
+        })
+    ));
+    let (edge, _) = eval_orthonormal_laguerre_series(&[1.0], 1.0, 700.0).expect("normal start");
+    assert!(edge > 0.0 && edge.is_normal());
 }
 
 fn binomial_taylor(alpha: f64, len: usize) -> Vec<f64> {

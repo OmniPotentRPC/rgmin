@@ -709,6 +709,11 @@ pub fn complex_matrix_inv_inf_norm(a: &[Complex64], n: usize) -> Result<f64, Inv
 /// Evaluate the orthonormal Laguerre function series
 /// `sum_{n=0}^{N-1} c_n phi_n(E; b)` where `phi_n(E; b) = sqrt(2b) exp(-b E) L_n(2b E)`.
 ///
+/// Uses the forward three-term recurrence started from `exp(-b E)`. Refuses with
+/// [`InverseLaplaceError::InvalidParameter`] (`laguerre_start`) when that start is below
+/// the normal range (`b E` above about `708`): the recurrence would carry a zero or
+/// subnormal seed into modes whose true values are of order one.
+///
 /// Returns `(value, roundoff_estimate)`.
 pub fn eval_orthonormal_laguerre_series(
     coeffs: &[f64],
@@ -757,6 +762,12 @@ pub fn eval_orthonormal_laguerre_series(
 
     let mut l_prev = 0.0_f64;
     let mut l_curr = (-half_x).exp();
+    if !l_curr.is_normal() {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "laguerre_start",
+            value: x,
+        });
+    }
     let mut sum = coeffs[0] * l_curr;
     let mut abs_sum = mul_up(coeffs[0].abs(), l_curr.abs().next_up());
 
@@ -1342,12 +1353,18 @@ pub struct WeeksEstimate {
     pub coefficient_shift: f64,
     /// Quadrature propagation of pointwise `ComplexSample::estimate` values amplified by `r^{-n}`.
     pub evaluation_estimate: f64,
-    /// Outward-directed floating-point DFT and Clenshaw recurrence roundoff estimate.
+    /// Outward-directed floating-point DFT and forward three-term Laguerre recurrence
+    /// roundoff estimate.
     pub roundoff_estimate: f64,
     /// Asymptotic `O(n^{-3/2})` Laguerre truncation estimate.
     pub algebraic_tail_estimate: f64,
-    /// Observed fine-grid dyadic tail ratio `sum_{M..2M} |c_{2M,n}| / sum_{M/2..M} |c_{2M,n}| <= 2^{-1/2}`.
-    pub observed_dyadic_ratio: f64,
+    /// Observed fine-grid dyadic tail ratio `sum_{M..2M} |c_{2M,n}| / sum_{M/2..M} |c_{2M,n}|`.
+    ///
+    /// `Some(ratio)` with `ratio <= 2^{-1/2}` when the upper block exceeds its sample-noise
+    /// floor and the dyadic check was applied. `None` when the upper block is within that
+    /// floor: those coefficients are roundoff amplified by `r^{-n}`, and their ratio
+    /// carries no decay information.
+    pub observed_dyadic_ratio: Option<f64>,
 }
 
 /// Result of Weeks (Möbius–Laguerre) complex-contour inverse Laplace transform.
@@ -1599,16 +1616,19 @@ where
             mul_up(4.0, mul_up(powi_inv_up(r, n), fine.sample_noise_per_mode)),
         );
     }
-    let observed_dyadic_ratio = block_ratio_up(fine_upper_dyadic, fine_lower_dyadic);
-    if fine_upper_dyadic > fine_upper_noise_floor
-        && observed_dyadic_ratio > WEEKS_MAX_DYADIC_TAIL_RATIO
-    {
-        return Err(InverseLaplaceError::SlowAlgebraicTail {
-            stage: "weeks_fine_dyadic_tail",
-            dyadic_ratio: observed_dyadic_ratio,
-            max_dyadic_ratio: WEEKS_MAX_DYADIC_TAIL_RATIO,
-        });
-    }
+    let observed_dyadic_ratio = if fine_upper_dyadic > fine_upper_noise_floor {
+        let ratio = block_ratio_up(fine_upper_dyadic, fine_lower_dyadic);
+        if ratio > WEEKS_MAX_DYADIC_TAIL_RATIO {
+            return Err(InverseLaplaceError::SlowAlgebraicTail {
+                stage: "weeks_fine_dyadic_tail",
+                dyadic_ratio: ratio,
+                max_dyadic_ratio: WEEKS_MAX_DYADIC_TAIL_RATIO,
+            });
+        }
+        Some(ratio)
+    } else {
+        None
+    };
     if r == 1.0 {
         let _ = verify_laguerre_tail_decay(&coarse.coeffs, coarse_floor)?;
     }
