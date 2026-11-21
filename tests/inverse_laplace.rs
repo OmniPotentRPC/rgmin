@@ -594,3 +594,243 @@ fn complex_division_of_large_finite_components_stays_finite() {
     assert!((ordinary.re - 0.44).abs() <= 1.0e-15);
     assert!((ordinary.im - 0.08).abs() <= 1.0e-15);
 }
+
+fn sampled(val: Complex64) -> Result<ComplexSample, InverseLaplaceError> {
+    let gamma = higham_gamma(16).expect("gamma16");
+    Ok(ComplexSample::estimated(val, gamma * val.norm()))
+}
+
+type Transform = fn(Complex64) -> Complex64;
+type KnownTransform = (&'static str, Transform, fn(f64) -> f64);
+
+fn known_transforms() -> Vec<KnownTransform> {
+    vec![
+        (
+            "exp(-1.25 E)",
+            |s| Complex64::new(1.0, 0.0) / (s + Complex64::new(1.25, 0.0)),
+            |e| (-1.25 * e).exp(),
+        ),
+        (
+            "cos(E)",
+            |s| s / (s * s + Complex64::new(1.0, 0.0)),
+            f64::cos,
+        ),
+        (
+            "sin(E)",
+            |s| Complex64::new(1.0, 0.0) / (s * s + Complex64::new(1.0, 0.0)),
+            f64::sin,
+        ),
+        (
+            "E exp(-1.25 E)",
+            |s| {
+                let z = s + Complex64::new(1.25, 0.0);
+                Complex64::new(1.0, 0.0) / (z * z)
+            },
+            |e| e * (-1.25 * e).exp(),
+        ),
+        (
+            "exp(-1.25 E) / sqrt(pi E)",
+            |s| Complex64::new(1.0, 0.0) / (s + Complex64::new(1.25, 0.0)).sqrt(),
+            |e| (-1.25 * e).exp() / (core::f64::consts::PI * e).sqrt(),
+        ),
+    ]
+}
+
+#[test]
+fn talbot_recovers_known_transforms_across_energies() {
+    for (name, f, exact) in known_transforms() {
+        for energy in [0.1_f64, 0.8, 3.0] {
+            let got = talbot_invert(
+                energy,
+                TalbotConfig::default()
+                    .with_nodes(48)
+                    .with_tolerance(1.0e-7),
+                |s| sampled(f(s)),
+            )
+            .unwrap_or_else(|e| panic!("{name} at E={energy}: {e}"));
+            let err = (got.value - exact(energy)).abs();
+            assert!(
+                err <= got.uncertainty_estimate() && err <= 1.0e-8,
+                "{name} at E={energy}: err {err:e}, estimate {:e}",
+                got.uncertainty_estimate()
+            );
+            assert_eq!(got.evaluations, 72);
+        }
+    }
+}
+
+#[test]
+fn weeks_recovers_known_transforms() {
+    for (name, f, exact) in known_transforms().into_iter().take(4) {
+        for energy in [0.4_f64, 0.8, 2.0] {
+            let got = weeks_invert(
+                energy,
+                WeeksConfig::default()
+                    .with_laguerre_degree(64)
+                    .with_tolerance(1.0e-6),
+                |s| sampled(f(s)),
+            )
+            .unwrap_or_else(|e| panic!("{name} at E={energy}: {e}"));
+            let err = (got.value - exact(energy)).abs();
+            assert!(
+                err <= got.uncertainty_estimate() && err <= 1.0e-7,
+                "{name} at E={energy}: err {err:e}, estimate {:e}",
+                got.uncertainty_estimate()
+            );
+            assert_eq!(got.evaluations, 4 * 64);
+            assert!(got.accuracy.aliasing_residual.is_finite());
+        }
+    }
+    // F ~ beta^{-1/2} makes Phi ~ (1 - w)^{-1/2}: an n^{-1/2} tail, refused.
+    let rsqrt = known_transforms()[4].1;
+    assert!(matches!(
+        weeks_invert(0.8, WeeksConfig::default().with_laguerre_degree(64), |s| {
+            sampled(rsqrt(s))
+        }),
+        Err(InverseLaplaceError::SlowAlgebraicTail { .. })
+    ));
+    // (beta + 1.25)^{-3/2} <-> 2 sqrt(E / pi) exp(-1.25 E): Phi ~ (1 - w)^{1/2}.
+    let branch = |s: Complex64| {
+        let z = s + Complex64::new(1.25, 0.0);
+        Complex64::new(1.0, 0.0) / (z * z.sqrt())
+    };
+    for energy in [0.4_f64, 0.8, 2.0] {
+        let exact = 2.0 * (energy / core::f64::consts::PI).sqrt() * (-1.25 * energy).exp();
+        let got = weeks_invert(
+            energy,
+            WeeksConfig::default()
+                .with_laguerre_degree(64)
+                .with_tolerance(1.0),
+            |s| sampled(branch(s)),
+        )
+        .unwrap_or_else(|e| panic!("branch at E={energy}: {e}"));
+        let err = (got.value - exact).abs();
+        assert!(
+            err <= got.uncertainty_estimate() && err <= 1.0e-3,
+            "branch at E={energy}: err {err:e}, estimate {:e}",
+            got.uncertainty_estimate()
+        );
+    }
+    let unit_circle = weeks_invert(
+        0.8,
+        WeeksConfig::default()
+            .with_circle_radius(1.0)
+            .with_laguerre_degree(32),
+        |s| sampled(Complex64::new(1.0, 0.0) / (s + Complex64::new(1.25, 0.0))),
+    )
+    .expect("r = 1 on a pole at w = 13");
+    assert!((unit_circle.value - (-1.0_f64).exp()).abs() <= unit_circle.uncertainty_estimate());
+}
+
+#[test]
+fn contour_refusal_paths_are_typed() {
+    let pole = |s: Complex64| sampled(Complex64::new(1.0, 0.0) / (s + Complex64::new(1.25, 0.0)));
+    assert!(matches!(
+        talbot_invert(0.8, TalbotConfig::default().with_min_re_beta(0.0), pole),
+        Err(InverseLaplaceError::ContourCrossesCrossover { .. })
+    ));
+    assert!(matches!(
+        weeks_invert(0.8, WeeksConfig::default().with_min_re_beta(1.0), pole),
+        Err(InverseLaplaceError::ContourCrossesCrossover { .. })
+    ));
+    assert!(matches!(
+        weeks_invert(0.8, WeeksConfig::default().with_max_imag_beta(1.0), pole),
+        Err(InverseLaplaceError::ContourExceedsStrip { .. })
+    ));
+    assert!(matches!(
+        talbot_invert(0.8, TalbotConfig::default().with_tolerance(1.0e-300), pole),
+        Err(InverseLaplaceError::ToleranceNotMet { .. })
+    ));
+    assert!(matches!(
+        weeks_invert(0.8, WeeksConfig::default().with_tolerance(1.0e-300), pole),
+        Err(InverseLaplaceError::ToleranceNotMet { .. })
+    ));
+    let refuse = |_: Complex64| Err(InverseLaplaceError::CallbackRefused);
+    assert_eq!(
+        talbot_invert(0.8, TalbotConfig::default(), refuse).err(),
+        Some(InverseLaplaceError::CallbackRefused)
+    );
+    assert_eq!(
+        weeks_invert(0.8, WeeksConfig::default(), refuse).err(),
+        Some(InverseLaplaceError::CallbackRefused)
+    );
+}
+
+#[test]
+fn dense_solver_pivots_refuses_singular_and_inverts_exactly() {
+    let c = |re: f64, im: f64| Complex64::new(re, im);
+    // A zero leading pivot forces a row swap.
+    let a = [
+        c(0.0, 0.0),
+        c(2.0, 1.0),
+        c(1.0, 0.0),
+        c(1.0, -1.0),
+        c(0.0, 0.0),
+        c(3.0, 0.0),
+        c(4.0, 0.0),
+        c(1.0, 0.0),
+        c(0.0, 2.0),
+    ];
+    let x_ref = [c(1.0, 2.0), c(-1.0, 0.5), c(0.25, -0.75)];
+    let b: Vec<Complex64> = (0..3)
+        .map(|i| (0..3).fold(c(0.0, 0.0), |acc, j| acc + a[i * 3 + j] * x_ref[j]))
+        .collect();
+    let x = solve_complex_dense(&a, &b, 3).expect("pivoted 3x3");
+    for i in 0..3 {
+        assert!((x[i] - x_ref[i]).norm() <= 1.0e-14, "x[{i}] = {:?}", x[i]);
+    }
+
+    let singular = [c(1.0, 1.0), c(2.0, 2.0), c(2.0, 2.0), c(4.0, 4.0)];
+    assert!(matches!(
+        solve_complex_dense(&singular, &[c(1.0, 0.0), c(1.0, 0.0)], 2),
+        Err(InverseLaplaceError::SingularLinearSystem { .. })
+    ));
+
+    // diag(2, 4i, -0.5): ||A^{-1}||_inf = max(0.5, 0.25, 2) = 2.
+    let diag = [
+        c(2.0, 0.0),
+        c(0.0, 0.0),
+        c(0.0, 0.0),
+        c(0.0, 0.0),
+        c(0.0, 4.0),
+        c(0.0, 0.0),
+        c(0.0, 0.0),
+        c(0.0, 0.0),
+        c(-0.5, 0.0),
+    ];
+    let norm = complex_matrix_inv_inf_norm(&diag, 3).expect("diagonal inverse norm");
+    assert!((norm - 2.0).abs() <= 4.0 * f64::EPSILON, "norm {norm}");
+
+    // [[3+i, 1-0.5i], [0.5+0.25i, 2-i]]: inverse is adj(A) / det(A).
+    let m = [c(3.0, 1.0), c(1.0, -0.5), c(0.5, 0.25), c(2.0, -1.0)];
+    let det = m[0] * m[3] - m[1] * m[2];
+    let row0 = (m[3] / det).norm() + (m[1] / det).norm();
+    let row1 = (m[2] / det).norm() + (m[0] / det).norm();
+    let exact = row0.max(row1);
+    let norm2 = complex_matrix_inv_inf_norm(&m, 2).expect("2x2 inverse norm");
+    assert!(
+        (norm2 - exact).abs() <= 1.0e-14 * exact,
+        "{norm2} vs {exact}"
+    );
+}
+
+#[test]
+fn laguerre_series_matches_closed_form_modes() {
+    let (b, e) = (0.75_f64, 1.6_f64);
+    let x = 2.0 * b * e;
+    let pref = (2.0 * b).sqrt() * (-b * e).exp();
+    let l = [1.0, 1.0 - x, 0.5 * (x * x - 4.0 * x + 2.0)];
+    for n in 0..3 {
+        let mut coeffs = vec![0.0_f64; n + 1];
+        coeffs[n] = 1.0;
+        let (val, round) = eval_orthonormal_laguerre_series(&coeffs, b, e).expect("mode");
+        let exact = pref * l[n];
+        assert!(
+            (val - exact).abs() <= 1.0e-15 + round,
+            "mode {n}: {val} vs {exact}"
+        );
+    }
+    let (mix, _) = eval_orthonormal_laguerre_series(&[0.5, -2.0, 3.0], b, e).expect("mix");
+    let exact = pref * (0.5 * l[0] - 2.0 * l[1] + 3.0 * l[2]);
+    assert!((mix - exact).abs() <= 1.0e-14);
+}
