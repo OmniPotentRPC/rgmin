@@ -5,14 +5,16 @@ use std::os::raw::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dlpk::sys::DLManagedTensorVersioned;
-use eindir_core::ffi::{eindir_core_abi_stamp, eindir_objective_t, eindir_status_t};
+use eindir_core::ffi::{
+    eindir_abi_stamp_t, eindir_core_abi_stamp, eindir_objective_t, eindir_status_t,
+};
 use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_control_t, rgmin_eigen_kind_t,
     rgmin_eigen_params_t, rgmin_eigenpair_t, rgmin_last_error, rgmin_lowest_eigenpairs,
     rgmin_method_from_name, rgmin_method_t, rgmin_minimize, rgmin_minimize_eindir,
-    rgmin_minimize_hess_opts, rgmin_minimize_hvp_opts, rgmin_minimize_scg_with_options,
-    rgmin_report_t, rgmin_scg_params_t, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
-    rgmin_tensor_free,
+    rgmin_minimize_eindir_opts, rgmin_minimize_hess_opts, rgmin_minimize_hvp_opts,
+    rgmin_minimize_scg_with_options, rgmin_report_t, rgmin_scg_params_t, rgmin_status_t,
+    rgmin_stop_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 
 unsafe extern "C" fn square_eval(
@@ -615,4 +617,109 @@ fn block_import_rejects_a_foreign_dlpack_version() {
             last_error()
         );
     }
+}
+
+/// Which eindir one-shot the host calls.
+#[derive(Clone, Copy)]
+enum Eindir {
+    Legacy,
+    Opts,
+}
+
+impl Eindir {
+    const ALL: [Self; 2] = [Self::Legacy, Self::Opts];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Legacy => "rgmin_minimize_eindir",
+            Self::Opts => "rgmin_minimize_eindir_opts",
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn call(
+        self,
+        objective: *const eindir_objective_t,
+        stamp: *const eindir_abi_stamp_t,
+        x: *mut DLManagedTensorVersioned,
+        ctrl: &rgmin_control_t,
+        out: *mut rgmin_report_t,
+    ) -> rgmin_status_t {
+        let method = rgmin_method_t::RGMIN_STEEPEST;
+        unsafe {
+            match self {
+                Self::Legacy => rgmin_minimize_eindir(objective, stamp, x, ctrl, method, out),
+                Self::Opts => {
+                    rgmin_minimize_eindir_opts(objective, stamp, x, ctrl, method, 0, 0, out)
+                }
+            }
+        }
+    }
+}
+
+fn eindir_objective(dim: usize, grad: bool, calls: &AtomicUsize) -> Box<eindir_objective_t> {
+    Box::new(eindir_objective_t {
+        dim,
+        low: std::ptr::null_mut(),
+        high: std::ptr::null_mut(),
+        eval_fn: counted_eindir_eval,
+        grad_fn: grad.then_some(counted_eindir_grad as _),
+        user_data: std::ptr::from_ref(calls).cast_mut().cast(),
+        free_fn: None,
+    })
+}
+
+/// A refusal from either eindir one-shot names the symbol the host
+/// called. `rgmin_minimize_eindir` delegates to the options entry, and
+/// its callers must still read their own name.
+#[test]
+fn each_eindir_entry_names_itself_in_its_errors() {
+    let calls = AtomicUsize::new(0);
+    let stamp = eindir_core_abi_stamp();
+    let mut late = stamp;
+    late.abi_minor = stamp.abi_minor + 1;
+    for entry in Eindir::ALL {
+        let name = entry.name();
+        let ctrl = control();
+        let mut out = report();
+        let mut value = [1.0];
+        let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+        let objective = eindir_objective(1, true, &calls);
+
+        let status = entry.call(&*objective, &stamp, tensor, &ctrl, std::ptr::null_mut());
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{name}");
+        assert_eq!(last_error(), format!("{name}: null argument"));
+
+        let status = entry.call(&*objective, &late, tensor, &ctrl, &mut out);
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{name}");
+        assert_eq!(
+            last_error(),
+            format!("{name}: incompatible eindir ABI stamp")
+        );
+
+        let no_grad = eindir_objective(1, false, &calls);
+        let status = entry.call(&*no_grad, &stamp, tensor, &ctrl, &mut out);
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{name}");
+        assert_eq!(last_error(), format!("{name}: objective has no gradient"));
+
+        let wide = eindir_objective(2, true, &calls);
+        let status = entry.call(&*wide, &stamp, tensor, &ctrl, &mut out);
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{name}");
+        assert_eq!(
+            last_error(),
+            format!("{name}: x length 1 != objective dim 2")
+        );
+        unsafe { rgmin_tensor_free(tensor) };
+
+        let mut bad = [f64::NAN];
+        let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(bad.as_mut_ptr(), bad.len()) };
+        let status = entry.call(&*objective, &stamp, tensor, &ctrl, &mut out);
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{name}");
+        assert_eq!(
+            last_error(),
+            format!("{name}: x contains a non-finite value")
+        );
+        unsafe { rgmin_tensor_free(tensor) };
+    }
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
 }

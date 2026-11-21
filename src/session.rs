@@ -5759,9 +5759,13 @@ impl Solver {
     /// The run ends on the first step whose status is not
     /// [`Status::Iterating`] and returns that status, so an energy-noise
     /// [`Status::NoiseFloor`] is kept rather than stepped past. A spent
-    /// budget is [`Status::Budget`]. A zero `maxiter` takes no step: the
-    /// report is `Self::assess` of `x`, so it says [`Status::Tolerance`]
-    /// only when the gradient evaluated there is below `gtol`.
+    /// budget is [`Status::Budget`]. An L-BFGS run that spends it with `x`
+    /// unmoved is [`crate::StopReason::LineSearchFailed`], as the one-shot
+    /// [`crate::minimize_method`] reports it. Both measure the move from the
+    /// start clipped to the bounds. A zero `maxiter` takes no
+    /// step: the report is `Self::assess` of `x`, so it says
+    /// [`Status::Tolerance`] only when the gradient evaluated there is
+    /// below `gtol`.
     pub fn run<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -5781,7 +5785,9 @@ impl Solver {
     /// returned report describes the point left in `x`. Every report
     /// carries its coordinates and gradient. The run ends as [`Self::run`]
     /// does, on the first step whose status is not [`Status::Iterating`],
-    /// and a spent budget is [`Status::Budget`].
+    /// and a spent budget is [`Status::Budget`]. An L-BFGS run that spends
+    /// it with `x` unmoved, and no gauge move, is
+    /// [`crate::StopReason::LineSearchFailed`].
     ///
     /// A move is not a step: the value and gradient before it belong to
     /// the old representation, where a plane rotates about the old pivot,
@@ -5799,6 +5805,8 @@ impl Solver {
             return self.run(obj, x);
         }
         let tol = self.control.gtol;
+        let start = crate::step::clip_owned(obj.bounds(), x.clone());
+        let mut gauged = false;
         let mut report = self.step(obj, x)?;
         for _ in 1..self.control.maxiter {
             if report.grad_norm < tol || report.status != Status::Iterating {
@@ -5807,6 +5815,7 @@ impl Solver {
             let before = x.clone();
             gauge(x);
             if *x != before {
+                gauged = true;
                 self.rebase();
             }
             report = self.step(obj, x)?;
@@ -5816,7 +5825,18 @@ impl Solver {
             Status::Iterating => Status::Budget,
             other => other,
         };
-        self.control.deliver(report)
+        let moved = gauged || *x != start;
+        self.control.deliver(self.name_budget(report, moved))
+    }
+
+    /// An L-BFGS run that spends its budget with the iterate unmoved is
+    /// [`crate::StopReason::LineSearchFailed`], as in the one-shot driver.
+    fn name_budget(&self, report: Report, moved: bool) -> Report {
+        if matches!(self.inner, Inner::Lbfgs(_)) {
+            report.with_budget_moved(moved)
+        } else {
+            report
+        }
     }
 
     fn run_plain<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
@@ -5830,6 +5850,7 @@ impl Solver {
         }
         self.brief = true;
         let tol = self.control.gtol;
+        let start = crate::step::clip_owned(obj.bounds(), x.clone());
         let mut last = None;
         let mut stop: Result<()> = Ok(());
         for _ in 0..budget {
@@ -5860,8 +5881,8 @@ impl Solver {
             other => other,
         };
         let g = self.reported_grad(x);
-        self.control
-            .deliver(self.finish(value, x, &g, grad_norm, status))
+        let report = self.finish(value, x, &g, grad_norm, status);
+        self.control.deliver(self.name_budget(report, *x != start))
     }
 
     /// The gradient a step report carries, for the report at the end of a

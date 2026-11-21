@@ -73,7 +73,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 52
+#define RGMIN_ABI_VERSION_MINOR 55
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -91,7 +91,8 @@ typedef struct rgmin_abi_stamp_t {
  *    is unchanged.
  * 52 RGMIN_GROMACS_STEEP, RGMIN_STOP_MACHINE_PRECISION,
  *    rgmin_solver_set_gromacs_steep, and
- *    rgmin_gromacs_steep_max_constraint_shrinks. */
+ *    rgmin_gromacs_steep_max_constraint_shrinks.
+ * 55 rgmin_minimize_eindir_opts. rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 5
 /* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
@@ -166,7 +167,10 @@ _Static_assert(sizeof(rgmin_conjugacy_t) == sizeof(int32_t),
                "rgmin_conjugacy_t is i32-wide; do not build this header with -fshort-enums");
 #endif
 
-/** Why a finished minimization stopped. */
+/**
+ * Why a finished minimization stopped. A session step that has not
+ * stopped reports \c RGMIN_STOP_BUDGET. No code names a run in progress.
+ */
 typedef enum rgmin_stop_t {
     RGMIN_STOP_TOLERANCE = 0,
     RGMIN_STOP_NOISE_FLOOR = 1,
@@ -314,6 +318,14 @@ rgmin_status_t rgmin_minimize_eindir(
     const eindir_objective_t *objective, const eindir_abi_stamp_t *stamp,
     DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, rgmin_method_t method,
     rgmin_report_t *out);
+/** \ref rgmin_minimize_eindir with the two opt-in flags. Nonzero
+ *  \a error_on_unmet writes \a x and \a out, then returns
+ *  \c RGMIN_UNMET_STOP. \a backward_polish does not change this entry:
+ *  it has no Hessian. ABI minor 55. */
+rgmin_status_t rgmin_minimize_eindir_opts(
+    const eindir_objective_t *objective, const eindir_abi_stamp_t *stamp,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, rgmin_method_t method,
+    int error_on_unmet, int backward_polish, rgmin_report_t *out);
 
 /**
  * Opaque session. Algorithm memory (L-BFGS pairs, NLCG directions,
