@@ -15,7 +15,7 @@
 //! - [`lanczos_extreme_pairs`]: deflated thick-restart Lanczos with full two-pass
 //!   reorthogonalization to locate negative and extreme positive eigenpairs and
 //!   estimate the bottom of the positive spectrum.
-//! - [`crate::slq::student_t_quantile`]: exact two-sided Student-t quantiles via the
+//! - [`student_t_quantile`]: exact two-sided Student-t quantiles via the
 //!   regularized incomplete beta function.
 //! - [`slq_logdet_deflated`], [`slq_logdet_deflated_with_cv`], and
 //!   [`slq_logdet_hutchpp`]: deflated stochastic Lanczos quadrature (Hutchinson
@@ -68,6 +68,67 @@ fn norm2_slice(a: &[f64]) -> f64 {
 
 fn all_finite(a: &[f64]) -> bool {
     a.iter().all(|v| v.is_finite())
+}
+
+/// Roundoff floor for a Lanczos subdiagonal at operator scale `scale`.
+///
+/// `scale` is `||A q||_2` before the three-term projection. The floor is
+/// `sqrt(n) * eps * scale`. An additive `1` would freeze that floor at unit
+/// scale and report an invariant breakdown when every entry of `A` lies far
+/// below one.
+fn lanczos_breakdown_tol(n: usize, scale: f64) -> f64 {
+    (n as f64).sqrt() * f64::EPSILON * scale
+}
+
+/// Unit direction of `vector` in the orthogonal complement of `basis`.
+///
+/// A direction already in `basis` is a repeated deflation vector: counting
+/// its logarithm again would double `logabs_det` while the projector keeps
+/// the direction once.
+fn independent_pair_direction(basis: &[Vec<f64>], vector: &[f64], dim: usize) -> Result<Vec<f64>> {
+    if vector.len() != dim {
+        return Err(slq_err("deflated pair vector dimension mismatch"));
+    }
+    if !all_finite(vector) {
+        return Err(slq_err("deflated pair vector contains non-finite entries"));
+    }
+    let mut q = vector.to_vec();
+    project_out_basis(&mut q, basis);
+    let nrm = norm2_slice(&q);
+    let orig = norm2_slice(vector);
+    if !nrm.is_finite() || !orig.is_finite() || orig == 0.0 {
+        return Err(slq_err("deflated pair vector must be finite and nonzero"));
+    }
+    if nrm <= 1e-8 * orig {
+        return Err(slq_err(
+            "duplicate deflated pair would double-count logabs_det",
+        ));
+    }
+    for slot in &mut q {
+        *slot /= nrm;
+    }
+    Ok(q)
+}
+
+/// Refuse a non-finite residual and any pair direction repeated in `kernel`,
+/// `negative_pairs`, or `positive_deflation`.
+fn screen_deflated_pairs(
+    dim: usize,
+    kernel: &[Vec<f64>],
+    negative_pairs: &[DeflatedPair],
+    positive_deflation: &[DeflatedPair],
+) -> Result<()> {
+    let mut basis = orthonormalize_vectors(kernel, dim)?;
+    for pair in negative_pairs.iter().chain(positive_deflation.iter()) {
+        if !(pair.residual >= 0.0 && pair.residual.is_finite()) {
+            return Err(slq_err(
+                "deflated pair residual must be finite and non-negative",
+            ));
+        }
+        let q = independent_pair_direction(&basis, &pair.vector, dim)?;
+        basis.push(q);
+    }
+    Ok(())
 }
 
 fn project_out_basis(v: &mut [f64], basis: &[Vec<f64>]) {
@@ -628,6 +689,10 @@ where
                 "operator produced non-finite output in Lanczos quadrature",
             ));
         }
+        let action_scale = norm2_slice(&w);
+        if !action_scale.is_finite() {
+            return Err(slq_err("non-finite Lanczos operator scale"));
+        }
         let a_j = dot_slice(&basis[j], &w);
         if !a_j.is_finite() {
             return Err(slq_err("non-finite Lanczos alpha"));
@@ -654,7 +719,7 @@ where
         }
 
         let m = j + 1;
-        let breakdown_tol = (n as f64).sqrt() * f64::EPSILON * (1.0 + a_j.abs());
+        let breakdown_tol = lanczos_breakdown_tol(n, action_scale);
         let invariant = b_j <= breakdown_tol || m == eff_dim;
 
         if invariant {
@@ -823,6 +888,10 @@ where
                 "operator produced non-finite output in Lanczos quadrature",
             ));
         }
+        let action_scale = norm2_slice(&w);
+        if !action_scale.is_finite() {
+            return Err(slq_err("non-finite Lanczos operator scale"));
+        }
         let a_j = dot_slice(&basis[j], &w);
         if !a_j.is_finite() {
             return Err(slq_err("non-finite Lanczos alpha"));
@@ -847,7 +916,7 @@ where
             second_moment = norm_sq * (a_j * a_j + b_j * b_j);
         }
         let m = j + 1;
-        let breakdown_tol = (n as f64).sqrt() * f64::EPSILON * (1.0 + a_j.abs());
+        let breakdown_tol = lanczos_breakdown_tol(n, action_scale);
         let invariant = b_j <= breakdown_tol || m == n;
 
         let eig = tridiag_eigh(&alpha, &beta[..m - 1])?;
@@ -921,12 +990,29 @@ where
 }
 
 /// Configuration for [`pcg_solve`].
+///
+/// The struct is non_exhaustive: build it from [`Default`] and the `with_*` setters.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub struct PcgConfig {
     /// Target relative true residual `||b - A x||_2 / ||b||_2`.
     pub rel_tol: f64,
     /// Maximum CG iterations.
     pub max_iter: usize,
+}
+
+with_setters!(PcgConfig {
+    with_rel_tol => rel_tol: val f64,
+    with_max_iter => max_iter: val usize,
+});
+
+impl Default for PcgConfig {
+    fn default() -> Self {
+        Self {
+            rel_tol: 1e-8,
+            max_iter: 1000,
+        }
+    }
 }
 
 /// Outcome of [`pcg_solve`].
@@ -944,6 +1030,10 @@ pub struct PcgResult {
 
 /// Preconditioned Conjugate Gradient for symmetric positive definite `A x = b`
 /// on the orthogonal complement of `deflate`.
+///
+/// `deflate` is orthonormalized before the projection. A vector whose length
+/// is not `rhs.len()`, or whose entries are not finite, is refused. Dependent
+/// vectors contribute one direction.
 ///
 /// Refuses non-positive curvature (`p^T A p <= 0`), non-positive preconditioner
 /// inner products (`r^T z <= 0`), non-finite outputs, or failure to meet the
@@ -969,15 +1059,11 @@ where
     if !(config.rel_tol > 0.0 && config.rel_tol.is_finite()) || config.max_iter == 0 {
         return Err(slq_err("invalid PCG tolerance or iteration budget"));
     }
-    for q in deflate {
-        if q.len() != n {
-            return Err(slq_err("PCG deflation vector length mismatch"));
-        }
-    }
+    let deflate_basis = orthonormalize_vectors(deflate, n)?;
 
     let mut b = rhs.to_vec();
-    if !deflate.is_empty() {
-        project_out_basis(&mut b, deflate);
+    if !deflate_basis.is_empty() {
+        project_out_basis(&mut b, &deflate_basis);
     }
     let b_norm = norm2_slice(&b);
     if !b_norm.is_finite() {
@@ -999,8 +1085,8 @@ where
     if !all_finite(&z) {
         return Err(slq_err("PCG preconditioner produced non-finite output"));
     }
-    if !deflate.is_empty() {
-        project_out_basis(&mut z, deflate);
+    if !deflate_basis.is_empty() {
+        project_out_basis(&mut z, &deflate_basis);
     }
     let mut p = z.clone();
     let mut rz = dot_slice(&r, &z);
@@ -1020,8 +1106,8 @@ where
         if !all_finite(&ap) {
             return Err(slq_err("PCG operator produced non-finite output"));
         }
-        if !deflate.is_empty() {
-            project_out_basis(&mut ap, deflate);
+        if !deflate_basis.is_empty() {
+            project_out_basis(&mut ap, &deflate_basis);
         }
         let pap = dot_slice(&p, &ap);
         if !(pap > 0.0 && pap.is_finite()) {
@@ -1035,8 +1121,8 @@ where
             x[i] += alpha * p[i];
             r[i] -= alpha * ap[i];
         }
-        if !deflate.is_empty() {
-            project_out_basis(&mut r, deflate);
+        if !deflate_basis.is_empty() {
+            project_out_basis(&mut r, &deflate_basis);
         }
         let r_norm = norm2_slice(&r);
         if !r_norm.is_finite() {
@@ -1050,8 +1136,8 @@ where
             if !all_finite(&ap) {
                 return Err(slq_err("PCG true-residual matvec was not finite"));
             }
-            if !deflate.is_empty() {
-                project_out_basis(&mut ap, deflate);
+            if !deflate_basis.is_empty() {
+                project_out_basis(&mut ap, &deflate_basis);
             }
             let mut true_r = vec![0.0; n];
             for i in 0..n {
@@ -1076,8 +1162,8 @@ where
         if !all_finite(&z) {
             return Err(slq_err("PCG preconditioner produced non-finite output"));
         }
-        if !deflate.is_empty() {
-            project_out_basis(&mut z, deflate);
+        if !deflate_basis.is_empty() {
+            project_out_basis(&mut z, &deflate_basis);
         }
         let rz_new = dot_slice(&r, &z);
         if !(rz_new >= 0.0 && rz_new.is_finite()) {
@@ -1108,6 +1194,9 @@ pub struct DeflatedPair {
 }
 
 /// Configuration for [`lanczos_extreme_pairs`].
+///
+/// The struct is non_exhaustive: build it from [`Default`] and the `with_*` setters.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub struct ExtremePairsConfig {
     /// Eigenvalues strictly below this threshold are classified as negative
@@ -1131,6 +1220,34 @@ pub struct ExtremePairsConfig {
     pub max_restarts: usize,
     /// Deterministic seed for initial and restart vectors.
     pub seed: u64,
+}
+
+with_setters!(ExtremePairsConfig {
+    with_neg_threshold => neg_threshold: val f64,
+    with_neg_abs_tol => neg_abs_tol: val f64,
+    with_neg_log_tol => neg_log_tol: val f64,
+    with_num_low_positive => num_low_positive: val usize,
+    with_num_high_positive => num_high_positive: val usize,
+    with_pos_residual_tol => pos_residual_tol: val f64,
+    with_subspace_dim => subspace_dim: val usize,
+    with_max_restarts => max_restarts: val usize,
+    with_seed => seed: val u64,
+});
+
+impl Default for ExtremePairsConfig {
+    fn default() -> Self {
+        Self {
+            neg_threshold: 0.0,
+            neg_abs_tol: 1e-8,
+            neg_log_tol: 1e-8,
+            num_low_positive: 1,
+            num_high_positive: 0,
+            pos_residual_tol: 1e-8,
+            subspace_dim: 16,
+            max_restarts: 20,
+            seed: 0,
+        }
+    }
 }
 
 /// Output of [`lanczos_extreme_pairs`].
@@ -1201,7 +1318,41 @@ fn fresh_orthogonal_unit(
     None
 }
 
+fn validate_extreme_pairs_config(config: ExtremePairsConfig) -> Result<()> {
+    if !config.neg_threshold.is_finite() {
+        return Err(slq_err("ExtremePairsConfig neg_threshold must be finite"));
+    }
+    if !(config.neg_abs_tol >= 0.0 && config.neg_abs_tol.is_finite()) {
+        return Err(slq_err(
+            "ExtremePairsConfig neg_abs_tol must be finite and non-negative",
+        ));
+    }
+    if !(config.neg_log_tol >= 0.0 && config.neg_log_tol.is_finite()) {
+        return Err(slq_err(
+            "ExtremePairsConfig neg_log_tol must be finite and non-negative",
+        ));
+    }
+    if config.num_low_positive == 0 {
+        return Err(slq_err(
+            "ExtremePairsConfig num_low_positive must be positive",
+        ));
+    }
+    if !(config.pos_residual_tol >= 0.0 && config.pos_residual_tol.is_finite()) {
+        return Err(slq_err(
+            "ExtremePairsConfig pos_residual_tol must be finite and non-negative",
+        ));
+    }
+    if config.subspace_dim == 0 {
+        return Err(slq_err("ExtremePairsConfig subspace_dim must be positive"));
+    }
+    Ok(())
+}
+
 /// Deflated thick-restart Lanczos on the orthogonal complement of `kernel`.
+///
+/// `kernel` is orthonormalized before the iteration, so a redundant or
+/// non-unit basis does not shrink the complement or leak into the Ritz
+/// values. A non-finite [`ExtremePairsConfig`] field is refused.
 ///
 /// Finds negative eigenvalues (with residual checks on `ln |lambda|`),
 /// estimates the bottom of the positive spectrum, and collects converged
@@ -1218,14 +1369,9 @@ where
     if dim == 0 {
         return Err(slq_err("operator dimension must be positive"));
     }
-    for q in kernel {
-        if q.len() != dim || !all_finite(q) {
-            return Err(slq_err("invalid kernel basis vector"));
-        }
-    }
-    let effective_dim = dim
-        .checked_sub(kernel.len())
-        .ok_or_else(|| slq_err("kernel dimension exceeds operator dimension"))?;
+    validate_extreme_pairs_config(config)?;
+    let kernel_basis = orthonormalize_vectors(kernel, dim)?;
+    let effective_dim = dim - kernel_basis.len();
     if effective_dim == 0 {
         return Ok(ExtremePairsReport {
             negative: Vec::new(),
@@ -1245,7 +1391,7 @@ where
     let want_high = config.num_high_positive;
 
     let mut basis: Vec<Vec<f64>> = Vec::with_capacity(m_max + 1);
-    let start = fresh_orthogonal_unit(dim, &mut rng, kernel, &[])
+    let start = fresh_orthogonal_unit(dim, &mut rng, &kernel_basis, &[])
         .ok_or_else(|| slq_err("failed to construct start vector orthogonal to kernel"))?;
     basis.push(start);
 
@@ -1280,8 +1426,12 @@ where
                     "operator produced non-finite output in thick-restart Lanczos",
                 ));
             }
-            if !kernel.is_empty() {
-                project_out_basis(&mut w, kernel);
+            if !kernel_basis.is_empty() {
+                project_out_basis(&mut w, &kernel_basis);
+            }
+            let action_scale = norm2_slice(&w);
+            if !action_scale.is_finite() {
+                return Err(slq_err("non-finite Lanczos operator scale"));
             }
 
             if j == kept && kept > 0 {
@@ -1309,8 +1459,8 @@ where
                     *slot -= b_prev * qprev;
                 }
             }
-            if !kernel.is_empty() {
-                project_out_basis(&mut w, kernel);
+            if !kernel_basis.is_empty() {
+                project_out_basis(&mut w, &kernel_basis);
             }
             project_out_basis(&mut w, &basis);
             let b_j = norm2_slice(&w);
@@ -1319,7 +1469,7 @@ where
             }
 
             let built = j + 1;
-            let breakdown_tol = (dim as f64).sqrt() * f64::EPSILON * (1.0 + a_j.abs());
+            let breakdown_tol = lanczos_breakdown_tol(dim, action_scale);
             if built == m_max || built == effective_dim {
                 if b_j > breakdown_tol && built < effective_dim {
                     final_beta = b_j;
@@ -1333,7 +1483,7 @@ where
 
             if b_j <= breakdown_tol {
                 betas.push(0.0);
-                if let Some(fresh) = fresh_orthogonal_unit(dim, &mut rng, kernel, &basis) {
+                if let Some(fresh) = fresh_orthogonal_unit(dim, &mut rng, &kernel_basis, &basis) {
                     basis.push(fresh);
                 } else {
                     final_beta = 0.0;
@@ -1486,8 +1636,8 @@ where
         let mut new_basis = Vec::with_capacity(m_max + 1);
         for &idx in &selected {
             let mut v = last_vecs[idx].clone();
-            if !kernel.is_empty() {
-                project_out_basis(&mut v, kernel);
+            if !kernel_basis.is_empty() {
+                project_out_basis(&mut v, &kernel_basis);
             }
             project_out_basis(&mut v, &new_basis);
             let nrm = norm2_slice(&v);
@@ -1502,8 +1652,8 @@ where
             Some(q) => q,
             None => break,
         };
-        if !kernel.is_empty() {
-            project_out_basis(&mut q_restart, kernel);
+        if !kernel_basis.is_empty() {
+            project_out_basis(&mut q_restart, &kernel_basis);
         }
         project_out_basis(&mut q_restart, &new_basis);
         let qn = norm2_slice(&q_restart);
@@ -1631,6 +1781,9 @@ pub enum SlqStoppingRule {
 }
 
 /// Configuration for [`slq_logdet_deflated`] and [`slq_logdet_hutchpp`].
+///
+/// The struct is non_exhaustive: build it from [`Default`] and the `with_*` setters.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub struct SlqConfig {
     /// Probe distribution.
@@ -1654,6 +1807,34 @@ pub struct SlqConfig {
     pub confidence_level: f64,
     /// Deterministic PRNG seed.
     pub seed: u64,
+}
+
+with_setters!(SlqConfig {
+    with_strategy => strategy: val ProbeStrategy,
+    with_stopping_rule => stopping_rule: val SlqStoppingRule,
+    with_min_samples => min_samples: val usize,
+    with_max_samples => max_samples: val usize,
+    with_max_lanczos_steps => max_lanczos_steps: val usize,
+    with_quad_check_every => quad_check_every: val usize,
+    with_target_tol => target_tol: val f64,
+    with_confidence_level => confidence_level: val f64,
+    with_seed => seed: val u64,
+});
+
+impl Default for SlqConfig {
+    fn default() -> Self {
+        Self {
+            strategy: ProbeStrategy::Rademacher,
+            stopping_rule: SlqStoppingRule::FixedSamples,
+            min_samples: 8,
+            max_samples: 32,
+            max_lanczos_steps: 32,
+            quad_check_every: 2,
+            target_tol: 1e-3,
+            confidence_level: 0.995,
+            seed: 0,
+        }
+    }
 }
 
 /// Output of [`slq_logdet_deflated`] and [`slq_logdet_hutchpp`].
@@ -1851,6 +2032,9 @@ fn build_checkpoints(min_samples: usize, max_samples: usize, rule: SlqStoppingRu
 
 /// Deflation subspace and spectral-scale inputs for [`slq_logdet_deflated`],
 /// [`slq_logdet_deflated_with_cv`], and [`slq_logdet_hutchpp`].
+///
+/// The struct is non_exhaustive: build it from [`Default`] and the `with_*` setters.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub struct SlqDeflation<'a> {
     /// Orthonormalized kernel basis vectors projected out before probing.
@@ -1868,8 +2052,70 @@ pub struct SlqDeflation<'a> {
     pub radau_lower_bound: Option<f64>,
 }
 
+impl<'a> Default for SlqDeflation<'a> {
+    fn default() -> Self {
+        Self {
+            kernel: &[],
+            negative_pairs: &[],
+            positive_deflation: &[],
+            deflation_lower_estimate: 1.0,
+            radau_lower_bound: None,
+        }
+    }
+}
+
+impl<'a> SlqDeflation<'a> {
+    /// Replace [`Self::kernel`].
+    ///
+    /// Chain it after `default()`.
+    #[must_use]
+    pub fn with_kernel(mut self, kernel: &'a [Vec<f64>]) -> Self {
+        self.kernel = kernel;
+        self
+    }
+
+    /// Replace [`Self::negative_pairs`].
+    ///
+    /// Chain it after `default()`.
+    #[must_use]
+    pub fn with_negative_pairs(mut self, negative_pairs: &'a [DeflatedPair]) -> Self {
+        self.negative_pairs = negative_pairs;
+        self
+    }
+
+    /// Replace [`Self::positive_deflation`].
+    ///
+    /// Chain it after `default()`.
+    #[must_use]
+    pub fn with_positive_deflation(mut self, positive_deflation: &'a [DeflatedPair]) -> Self {
+        self.positive_deflation = positive_deflation;
+        self
+    }
+
+    /// Replace [`Self::deflation_lower_estimate`].
+    ///
+    /// Chain it after `default()`.
+    #[must_use]
+    pub fn with_deflation_lower_estimate(mut self, deflation_lower_estimate: f64) -> Self {
+        self.deflation_lower_estimate = deflation_lower_estimate;
+        self
+    }
+
+    /// Replace [`Self::radau_lower_bound`].
+    ///
+    /// A bare value is `Some`; `None` clears it. Chain it after `default()`.
+    #[must_use]
+    pub fn with_radau_lower_bound(mut self, radau_lower_bound: impl Into<Option<f64>>) -> Self {
+        self.radau_lower_bound = radau_lower_bound.into();
+        self
+    }
+}
+
 /// Optional exact polynomial moments `tr(A_rem)` and `tr(A_rem^2)` on the
 /// non-deflated subspace for zero-extra-matvec variance reduction.
+///
+/// The struct is non_exhaustive: build it from [`Default`] and the `with_*` setters.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SlqMoments {
     /// Exact `tr(A_rem)` on the complement of the deflated subspace.
@@ -1878,8 +2124,16 @@ pub struct SlqMoments {
     pub trace_sq: Option<f64>,
 }
 
+with_setters!(SlqMoments {
+    with_trace => trace: opt f64,
+    with_trace_sq => trace_sq: opt f64,
+});
+
 /// Combined Hutch++, polynomial-moment, and control-variate trace options for
 /// [`slq_logdet_hutchpp`].
+///
+/// The struct is non_exhaustive: build it from [`Default`] and the `with_*` setters.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub struct SlqHutchPpOptions {
     /// Exact moments `tr(A_rem)` and `tr(A_rem^2)` when available.
@@ -1888,6 +2142,22 @@ pub struct SlqHutchPpOptions {
     pub cv_full_trace: f64,
     /// Hutch++ randomized range sketch parameters (`sketch_dim = 0` disables).
     pub hutchpp: HutchPpConfig,
+}
+
+with_setters!(SlqHutchPpOptions {
+    with_moments => moments: val SlqMoments,
+    with_cv_full_trace => cv_full_trace: val f64,
+    with_hutchpp => hutchpp: val HutchPpConfig,
+});
+
+impl Default for SlqHutchPpOptions {
+    fn default() -> Self {
+        Self {
+            moments: SlqMoments::default(),
+            cv_full_trace: 0.0,
+            hutchpp: HutchPpConfig::default(),
+        }
+    }
 }
 
 /// Deflated Stochastic Lanczos Quadrature for `ln |det'(A)|` on `kernel^perp`.
@@ -1912,6 +2182,9 @@ where
 
 /// Configuration for Hutch++ randomized subspace variance reduction inside
 /// [`slq_logdet_hutchpp`].
+///
+/// The struct is non_exhaustive: build it from [`Default`] and the `with_*` setters.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub struct HutchPpConfig {
     /// Number of independent Rademacher sketch vectors `r` used to build the
@@ -1922,6 +2195,22 @@ pub struct HutchPpConfig {
     pub power_iters: usize,
     /// Independent PRNG seed for the sketch matrix `S`.
     pub sketch_seed: u64,
+}
+
+with_setters!(HutchPpConfig {
+    with_sketch_dim => sketch_dim: val usize,
+    with_power_iters => power_iters: val usize,
+    with_sketch_seed => sketch_seed: val u64,
+});
+
+impl Default for HutchPpConfig {
+    fn default() -> Self {
+        Self {
+            sketch_dim: 0,
+            power_iters: 1,
+            sketch_seed: 0,
+        }
+    }
 }
 
 /// Deflated Stochastic Lanczos Quadrature for `ln |det'(A)|` on `kernel^perp`
@@ -1981,6 +2270,11 @@ where
 ///    deterministically via `lanczos_quadrature_log` (zero extra deflation error)
 ///    and the orthogonal complement `P_rem - Q Q^T` is estimated by independent
 ///    SLQ probes under `config.stopping_rule`.
+///
+/// A deflated pair whose residual is not a finite non-negative number is
+/// refused. A pair direction that repeats another pair, or the kernel, is
+/// refused: dropping it and still adding `ln |lambda|` would double-count
+/// `logabs_det`.
 pub fn slq_logdet_hutchpp<F, C, M>(
     dim: usize,
     op: &mut F,
@@ -2048,6 +2342,8 @@ where
             (stride, block_size)
         }
     };
+
+    screen_deflated_pairs(dim, kernel, negative_pairs, positive_deflation)?;
 
     // Contribution + first-order deflation residual estimate of deflated negative modes.
     let mut negative_logabs = 0.0;
@@ -3137,5 +3433,328 @@ mod tests {
         .expect("spend");
         assert_eq!(spend.samples, 8);
         assert_eq!(spend.stopping_rule, SlqStoppingRule::AlphaSpending);
+    }
+
+    fn slq_what<T: std::fmt::Debug>(result: Result<T>) -> &'static str {
+        match result {
+            Err(Error::Slq { what }) => what,
+            Err(other) => panic!("unexpected error {other}"),
+            Ok(value) => panic!("expected Slq error, got {value:?}"),
+        }
+    }
+
+    fn diag_apply(diag: &[f64]) -> impl FnMut(&[f64], &mut [f64]) -> Result<()> + '_ {
+        move |x: &[f64], y: &mut [f64]| {
+            for (slot, (&d, &xi)) in y.iter_mut().zip(diag.iter().zip(x.iter())) {
+                *slot = d * xi;
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn lanczos_breakdown_is_relative_to_matrix_scale() {
+        for &scale in &[1e-16_f64, 1.0, 1e16] {
+            let n = 4usize;
+            let diag: Vec<f64> = (0..n).map(|i| scale * (1.0 + i as f64)).collect();
+            let v = vec![1.0; n];
+            let exact_ln: f64 = diag.iter().zip(&v).map(|(&d, &x)| x * x * d.ln()).sum();
+            let exact_sq: f64 = diag.iter().zip(&v).map(|(&d, &x)| x * x * d * d).sum();
+            let mut op = diag_apply(&diag);
+            let est = lanczos_quadrature_log(&v, &mut op, Some(0.5 * scale), n, 0.0, 1)
+                .unwrap_or_else(|err| panic!("log scale {scale}: {err}"));
+            assert!(
+                !(est.invariant_breakdown && est.steps < n),
+                "log scale {scale}: bracketed breakdown at step {} of {n}",
+                est.steps
+            );
+            let rel = (est.value - exact_ln).abs() / (1.0 + exact_ln.abs());
+            assert!(
+                rel < 1e-6,
+                "log scale {scale}: got {} exact {exact_ln} rel {rel}",
+                est.value
+            );
+
+            let est_fn = lanczos_quadrature_fn(&v, &mut op, |x| Ok(x * x), n, 0.0)
+                .unwrap_or_else(|err| panic!("fn scale {scale}: {err}"));
+            assert!(
+                !(est_fn.invariant_breakdown && est_fn.steps < n),
+                "fn scale {scale}: breakdown at step {} of {n}",
+                est_fn.steps
+            );
+            let rel_fn = (est_fn.value - exact_sq).abs() / (1.0 + exact_sq.abs());
+            assert!(
+                rel_fn < 1e-6,
+                "fn scale {scale}: got {} exact {exact_sq} rel {rel_fn}",
+                est_fn.value
+            );
+
+            let pairs = lanczos_extreme_pairs(
+                n,
+                &mut op,
+                &[],
+                ExtremePairsConfig {
+                    neg_threshold: 0.0,
+                    neg_abs_tol: scale,
+                    neg_log_tol: 1e-6,
+                    num_low_positive: 1,
+                    num_high_positive: 0,
+                    pos_residual_tol: scale,
+                    subspace_dim: n,
+                    max_restarts: 2,
+                    seed: 3,
+                },
+            )
+            .unwrap_or_else(|err| panic!("pairs scale {scale}: {err}"));
+            let rel_min = (pairs.min_positive_ritz - scale).abs() / scale;
+            assert!(
+                rel_min < 1e-6,
+                "pairs scale {scale}: min Ritz {} expected {scale}",
+                pairs.min_positive_ritz
+            );
+        }
+    }
+
+    #[test]
+    fn pcg_validates_and_orthonormalizes_deflation() {
+        let n = 6usize;
+        let diag: Vec<f64> = (0..n).map(|i| 2.0 + i as f64).collect();
+        let mut op = diag_apply(&diag);
+        let mut precond = |r: &[f64], z: &mut [f64]| {
+            for i in 0..n {
+                z[i] = r[i] / diag[i];
+            }
+            Ok(())
+        };
+        let rhs = vec![1.0; n];
+        let cfg = PcgConfig {
+            rel_tol: 1e-12,
+            max_iter: 40,
+        };
+        let mut nan = vec![1.0; n];
+        nan[2] = f64::NAN;
+        let why = slq_what(pcg_solve(&rhs, &mut op, &mut precond, &[nan], cfg));
+        assert!(
+            why.contains("non-finite"),
+            "NaN deflation was not refused: {why}"
+        );
+        let why = slq_what(pcg_solve(
+            &rhs,
+            &mut op,
+            &mut precond,
+            &[vec![1.0; n - 1]],
+            cfg,
+        ));
+        assert!(
+            why.contains("dimension"),
+            "short deflation was not refused: {why}"
+        );
+
+        // Same direction twice, not unit length, plus a second direction that
+        // is not orthogonal to the first. The solution must miss both.
+        let mut q1 = vec![0.0; n];
+        q1[0] = 4.0;
+        q1[1] = 4.0;
+        let q1_again = q1.iter().map(|x| 2.0 * x).collect::<Vec<_>>();
+        let mut q2 = vec![0.0; n];
+        q2[0] = 3.0;
+        let solved = pcg_solve(&rhs, &mut op, &mut precond, &[q1, q1_again, q2], cfg)
+            .expect("orthonormalized deflation");
+        assert!(solved.rel_residual <= 1e-12);
+        assert!(solved.solution[0].abs() < 1e-8);
+        assert!(solved.solution[1].abs() < 1e-8);
+        assert!(solved.solution[2].abs() > 1e-3);
+    }
+
+    #[test]
+    fn extreme_pairs_validate_config_and_orthonormalize_kernel() {
+        let n = 5usize;
+        let diag: Vec<f64> = (1..=n).map(|i| i as f64).collect();
+        let mut op = diag_apply(&diag);
+        let mut cfg = ExtremePairsConfig {
+            neg_threshold: 0.0,
+            neg_abs_tol: 1e-8,
+            neg_log_tol: 1e-8,
+            num_low_positive: 1,
+            num_high_positive: 0,
+            pos_residual_tol: 1e-8,
+            subspace_dim: n,
+            max_restarts: 2,
+            seed: 1,
+        };
+        cfg.neg_threshold = f64::NAN;
+        let why = slq_what(lanczos_extreme_pairs(n, &mut op, &[], cfg));
+        assert!(
+            why.contains("neg_threshold"),
+            "NaN neg_threshold was not refused: {why}"
+        );
+        cfg.neg_threshold = 0.0;
+        cfg.neg_abs_tol = f64::NAN;
+        let why = slq_what(lanczos_extreme_pairs(n, &mut op, &[], cfg));
+        assert!(
+            why.contains("neg_abs_tol"),
+            "NaN neg_abs_tol was not refused: {why}"
+        );
+
+        cfg.neg_abs_tol = 1e-6;
+        let mut redundant = vec![0.0; n];
+        redundant[0] = 2.0;
+        let scaled = redundant.iter().map(|x| 5.0 * x).collect::<Vec<_>>();
+        let rep =
+            lanczos_extreme_pairs(n, &mut op, &[redundant, scaled], cfg).expect("redundant kernel");
+        assert!(
+            (rep.min_positive_ritz - 2.0).abs() < 1e-6,
+            "redundant kernel leaked eigenvalue 1: {}",
+            rep.min_positive_ritz
+        );
+
+        let mut tilt = vec![0.0; n];
+        tilt[0] = 1.0;
+        tilt[1] = 1.0;
+        let mut axis = vec![0.0; n];
+        axis[0] = 1.0;
+        let rep = lanczos_extreme_pairs(n, &mut op, &[tilt, axis], cfg).expect("tilted kernel");
+        assert!(
+            (rep.min_positive_ritz - 3.0).abs() < 1e-6,
+            "non-orthogonal kernel left a direction in: {}",
+            rep.min_positive_ritz
+        );
+    }
+
+    #[test]
+    fn hutchpp_rejects_nan_residual_and_duplicate_pairs() {
+        let n = 4usize;
+        let diag = vec![1.0, 2.0, 3.0, 4.0];
+        let mut op = diag_apply(&diag);
+        let mut cv = |_z: &[f64]| Ok(0.0);
+        let mut id = |x: &[f64], y: &mut [f64]| {
+            y.copy_from_slice(x);
+            Ok(())
+        };
+        let cfg = SlqConfig {
+            strategy: ProbeStrategy::Rademacher,
+            stopping_rule: SlqStoppingRule::FixedSamples,
+            min_samples: 2,
+            max_samples: 2,
+            max_lanczos_steps: 4,
+            quad_check_every: 1,
+            target_tol: 1.0,
+            confidence_level: 0.9,
+            seed: 1,
+        };
+        let options = SlqHutchPpOptions::default();
+        let mut axis = vec![0.0; n];
+        axis[0] = 1.0;
+        let nan_pair = DeflatedPair {
+            eigenvalue: -2.0,
+            vector: axis.clone(),
+            residual: f64::NAN,
+        };
+        let why = slq_what(slq_logdet_hutchpp(
+            n,
+            &mut op,
+            SlqDeflation {
+                kernel: &[],
+                negative_pairs: std::slice::from_ref(&nan_pair),
+                positive_deflation: &[],
+                deflation_lower_estimate: 1.0,
+                radau_lower_bound: None,
+            },
+            &mut cv,
+            &mut id,
+            options,
+            cfg,
+        ));
+        assert!(
+            why.contains("residual"),
+            "NaN residual was not refused: {why}"
+        );
+
+        let pair = DeflatedPair {
+            eigenvalue: -2.0,
+            vector: axis.clone(),
+            residual: 0.0,
+        };
+        let why = slq_what(slq_logdet_hutchpp(
+            n,
+            &mut op,
+            SlqDeflation {
+                kernel: &[],
+                negative_pairs: &[pair.clone(), pair.clone()],
+                positive_deflation: &[],
+                deflation_lower_estimate: 1.0,
+                radau_lower_bound: None,
+            },
+            &mut cv,
+            &mut id,
+            options,
+            cfg,
+        ));
+        assert!(
+            why.contains("double-count"),
+            "duplicate pair was not refused: {why}"
+        );
+
+        let positive = DeflatedPair {
+            eigenvalue: 8.0,
+            vector: axis.clone(),
+            residual: f64::INFINITY,
+        };
+        let why = slq_what(slq_logdet_hutchpp(
+            n,
+            &mut op,
+            SlqDeflation {
+                kernel: &[],
+                negative_pairs: &[],
+                positive_deflation: std::slice::from_ref(&positive),
+                deflation_lower_estimate: 1.0,
+                radau_lower_bound: None,
+            },
+            &mut cv,
+            &mut id,
+            options,
+            cfg,
+        ));
+        assert!(
+            why.contains("residual"),
+            "infinite residual was not refused: {why}"
+        );
+
+        let mut other = vec![0.0; n];
+        other[1] = 1.0;
+        let second = DeflatedPair {
+            eigenvalue: -3.0,
+            vector: other,
+            residual: 0.0,
+        };
+        let rep = slq_logdet_hutchpp(
+            n,
+            &mut op,
+            SlqDeflation {
+                kernel: &[],
+                negative_pairs: &[pair, second],
+                positive_deflation: &[],
+                deflation_lower_estimate: 1.0,
+                radau_lower_bound: None,
+            },
+            &mut cv,
+            &mut id,
+            options,
+            cfg,
+        )
+        .expect("independent pairs");
+        let expect = 2.0_f64.ln() + 3.0_f64.ln();
+        assert!((rep.negative_logabs - expect).abs() < 1e-12);
+    }
+
+    #[test]
+    fn slq_items_are_reexported_at_the_crate_root() {
+        let _ = crate::student_t_quantile;
+        let _ = std::any::type_name::<crate::SlqStoppingRule>();
+        let _ = std::any::type_name::<crate::SlqDeflation<'static>>();
+        let _ = std::any::type_name::<crate::SlqMoments>();
+        let _ = std::any::type_name::<crate::SlqHutchPpOptions>();
+        let built = crate::PcgConfig::default().with_rel_tol(1e-10);
+        assert_eq!(built.rel_tol, 1e-10);
     }
 }

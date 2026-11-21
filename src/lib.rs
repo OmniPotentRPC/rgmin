@@ -269,10 +269,10 @@ pub use session::drive::EonFeat;
 pub use slepc_kind::{SlepcParams, SlepcPmat, SlepcStKind};
 pub use slq::{
     DeflatedPair, ExtremePairsConfig, ExtremePairsReport, HutchPpConfig, PcgConfig, PcgResult,
-    ProbeStrategy, QuadratureEstimate, SlqConfig, SlqLogDetReport, TridiagEigh,
-    gauss_radau_tridiag, lanczos_extreme_pairs, lanczos_quadrature_fn, lanczos_quadrature_log,
-    pcg_solve, slq_logdet_deflated, slq_logdet_deflated_with_cv, slq_logdet_hutchpp, sym_eigh,
-    tridiag_eigh,
+    ProbeStrategy, QuadratureEstimate, SlqConfig, SlqDeflation, SlqHutchPpOptions, SlqLogDetReport,
+    SlqMoments, SlqStoppingRule, TridiagEigh, gauss_radau_tridiag, lanczos_extreme_pairs,
+    lanczos_quadrature_fn, lanczos_quadrature_log, pcg_solve, slq_logdet_deflated,
+    slq_logdet_deflated_with_cv, slq_logdet_hutchpp, student_t_quantile, sym_eigh, tridiag_eigh,
 };
 pub use step::DEFAULT_ATOM_MAXMOVE;
 pub use stepper::Stepper;
