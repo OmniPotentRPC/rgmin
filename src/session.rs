@@ -1453,6 +1453,39 @@ impl Solver {
         }
     }
 
+    /// Whether [`Self::step`] and [`Self::step_hess`] project onto the
+    /// session box. Distance constraints and Newton-CG never read it.
+    #[cfg(feature = "highs")]
+    fn boxes_steps(&self) -> bool {
+        self.has_coordinate_box()
+            && self.constraints.is_none()
+            && !matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. })
+    }
+
+    /// The box a step on a `dim`-coordinate objective with `bounds` keeps
+    /// its iterate in: `bounds` met with the session box where a step
+    /// projects onto it. Movement is read against this box, so a
+    /// projection is no move.
+    fn step_bounds<'b>(
+        &self,
+        bounds: &'b eindir_core::Bounds<f64>,
+        dim: usize,
+    ) -> Result<std::borrow::Cow<'b, eindir_core::Bounds<f64>>> {
+        #[cfg(feature = "highs")]
+        if self.boxes_steps() {
+            return crate::box_objective::session_box(
+                bounds,
+                dim,
+                self.box_lo.as_deref(),
+                self.box_hi.as_deref(),
+            )
+            .map(std::borrow::Cow::Owned);
+        }
+        #[cfg(not(feature = "highs"))]
+        let _ = dim;
+        Ok(std::borrow::Cow::Borrowed(bounds))
+    }
+
     fn note_bounds(&mut self, bounds: &eindir_core::Bounds<f64>) {
         if self.box_stationarity() {
             self.bound_low = Some(bounds.low.clone());
@@ -2409,23 +2442,13 @@ impl Solver {
     /// A zero iteration budget is the SCG reading. The plateau itself is
     /// `lbfgs_plateau`: this only asks it, and only for L-BFGS. A positive
     /// budget does not ask, so its trajectory is unchanged.
-    fn note_repeated_lbfgs_step(
-        &mut self,
-        before: &Array1<f64>,
-        x: &Array1<f64>,
-        report: &mut Report,
-    ) {
+    fn note_repeated_lbfgs_step(&mut self, moved: bool, report: &mut Report) {
         if self.control.maxiter != 0 || !matches!(self.inner, Inner::Lbfgs(_)) {
             return;
         }
         if report.status != Status::Iterating {
             return;
         }
-        let moved = before.len() == x.len()
-            && before
-                .iter()
-                .zip(x.iter())
-                .any(|(a, b)| a.to_bits() != b.to_bits());
         if self.lbfgs_plateau.observe(
             self.dim,
             moved,
@@ -2481,8 +2504,10 @@ impl Solver {
         let before = x.clone();
         let mut report = self.step_once(obj, x)?;
         self.finish_level_set(obj, x, &mut report)?;
-        self.note_repeated_lbfgs_step(&before, x, &mut report);
-        Ok((report, bounded_step_moved(obj.bounds(), &before, x)))
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        let moved = bounded_step_moved(&bounds, &before, x);
+        self.note_repeated_lbfgs_step(moved, &mut report);
+        Ok((report, moved))
     }
 
     /// Refuse a stop this session's method cannot read.
@@ -2602,7 +2627,7 @@ impl Solver {
             if let Inner::Lbfgs(solver) = &mut self.inner {
                 solver.coordinate_box = None;
             }
-            if self.has_coordinate_box() {
+            if self.boxes_steps() {
                 let bounded = crate::box_objective::BoxObjective::new(
                     obj,
                     self.box_lo.clone(),
@@ -2675,7 +2700,7 @@ impl Solver {
                 if let Inner::Lbfgs(solver) = &mut self.inner {
                     solver.coordinate_box = None;
                 }
-                if self.has_coordinate_box() {
+                if self.boxes_steps() {
                     let bounded = crate::box_objective::BoxObjective::new(
                         obj,
                         self.box_lo.clone(),
@@ -2699,7 +2724,8 @@ impl Solver {
             }
         };
         self.finish_level_set(obj, x, &mut report)?;
-        Ok((report, bounded_step_moved(obj.bounds(), &before, x)))
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        Ok((report, bounded_step_moved(&bounds, &before, x)))
     }
 
     /// One Steihaug-Toint iteration. `obj` supplies analytic products;
@@ -2747,7 +2773,8 @@ impl Solver {
             self.step_newton_cg(obj, x, &action)?
         };
         self.finish_level_set(obj, x, &mut report)?;
-        Ok((report, bounded_step_moved(obj.bounds(), &before, x)))
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        Ok((report, bounded_step_moved(&bounds, &before, x)))
     }
 
     /// [`Self::step_hvp`] on an objective whose callbacks can fail.
@@ -2805,7 +2832,8 @@ impl Solver {
             let before = x.clone();
             let mut report = self.step_newton_cg(&counted, x, &HostAction(obj))?;
             self.finish_level_set(&counted, x, &mut report)?;
-            Ok((report, bounded_step_moved(counted.bounds(), &before, x)))
+            let bounds = self.step_bounds(counted.bounds(), StepOracle::dim(&counted))?;
+            Ok((report, bounded_step_moved(&bounds, &before, x)))
         })();
         match result {
             Err(err @ Error::Host(_)) => {
@@ -5824,7 +5852,8 @@ impl Solver {
             Status::Iterating => Status::Budget,
             other => other,
         };
-        let moved = gauged || bounded_step_moved(obj.bounds(), &start, x);
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        let moved = gauged || bounded_step_moved(&bounds, &start, x);
         self.control.deliver(self.name_budget(report, moved))
     }
 
@@ -5881,7 +5910,8 @@ impl Solver {
         };
         let g = self.reported_grad(x);
         let report = self.finish(value, x, &g, grad_norm, status);
-        let moved = bounded_step_moved(obj.bounds(), &start, x);
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        let moved = bounded_step_moved(&bounds, &start, x);
         self.control.deliver(self.name_budget(report, moved))
     }
 
