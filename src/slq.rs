@@ -15,7 +15,7 @@
 //! - [`lanczos_extreme_pairs`]: deflated thick-restart Lanczos with full two-pass
 //!   reorthogonalization to locate negative and extreme positive eigenpairs and
 //!   estimate the bottom of the positive spectrum.
-//! - [`student_t_quantile`]: exact two-sided Student-t quantiles via the
+//! - [`crate::slq::student_t_quantile`]: exact two-sided Student-t quantiles via the
 //!   regularized incomplete beta function.
 //! - [`slq_logdet_deflated`], [`slq_logdet_deflated_with_cv`], and
 //!   [`slq_logdet_hutchpp`]: deflated stochastic Lanczos quadrature (Hutchinson
