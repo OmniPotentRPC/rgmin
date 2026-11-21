@@ -295,18 +295,58 @@ pub(crate) fn refuse_etol(control: &Control, method: &'static str) -> Result<()>
     Ok(())
 }
 
-/// Whether an iteration moved the point: any coordinate differs in its bits.
-pub(crate) fn moved(before: &Array1<f64>, after: &Array1<f64>) -> bool {
+/// Whether a bounded iteration physically moved the point.
+///
+/// An out-of-bounds input is projected before an optimizer can apply a step,
+/// so movement is measured from that projected point rather than from the
+/// caller's unprojected coordinates. Numeric equality makes signed zero the
+/// same point, matching the Python front end.
+pub(crate) fn bounded_step_moved(
+    bounds: &Bounds<f64>,
+    before: &Array1<f64>,
+    after: &Array1<f64>,
+) -> bool {
     before.len() != after.len()
+        || before.len() != bounds.dims
         || before
             .iter()
             .zip(after.iter())
-            .any(|(a, b)| a.to_bits() != b.to_bits())
+            .enumerate()
+            .any(|(i, (a, b))| a.max(bounds.low[i]).min(bounds.high[i]) != *b)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_movement_starts_after_projection() {
+        let bounds = Bounds::new(ndarray::array![-1.0], ndarray::array![1.0], 0.0);
+        assert!(!bounded_step_moved(
+            &bounds,
+            &ndarray::array![2.0],
+            &ndarray::array![1.0]
+        ));
+        assert!(bounded_step_moved(
+            &bounds,
+            &ndarray::array![2.0],
+            &ndarray::array![0.9]
+        ));
+    }
+
+    #[test]
+    fn signed_zero_is_not_movement() {
+        let bounds = Bounds::new(
+            ndarray::array![f64::NEG_INFINITY],
+            ndarray::array![f64::INFINITY],
+            0.0,
+        );
+        assert!(!bounded_step_moved(
+            &bounds,
+            &ndarray::array![-0.0],
+            &ndarray::array![0.0]
+        ));
+    }
 
     #[test]
     fn the_energy_test_is_the_lammps_formula() {
