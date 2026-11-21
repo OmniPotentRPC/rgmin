@@ -5623,6 +5623,145 @@ mod projected_entry_tests {
         assert_eq!(values, [7.0; 2]);
         assert_eq!((pairs[0].value, pairs[0].actions), (7.0, 7));
     }
+
+    #[derive(Clone, Copy, Debug)]
+    enum BlockEntry {
+        Plain,
+        Extended,
+        Projected,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum BadModes {
+        ShortRank1,
+        LongRank1,
+        WrongRank2,
+    }
+
+    // `values_out` is valid and the solve succeeds, so only `modes_out`
+    // can refuse the call. The refusal has to come before any output is
+    // written: the buffers, the pair records and the error text are the
+    // three things a host looks at after a failed call.
+    fn refused_modes_leave_every_output_untouched(entry: BlockEntry, bad: BadModes) {
+        let mut point = [0.0, 1.0];
+        let mut seed = [0.3, 0.9];
+        let mut modes = [7.0; 3];
+        let mut values = [7.0];
+        let sentinel = rgmin_eigenpair_ex_t {
+            value: 7.0,
+            actions: 7,
+            residual: 7.0,
+            converged: 7,
+        };
+        let mut pair_ex = [sentinel];
+        let mut pair = [rgmin_eigenpair_t {
+            value: 7.0,
+            actions: 7,
+        }];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), 2) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 2) };
+        let vt = unsafe { rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), 1) };
+        let mt = match bad {
+            BadModes::ShortRank1 => unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), 1) },
+            BadModes::LongRank1 => unsafe { rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), 3) },
+            BadModes::WrongRank2 => unsafe { borrow_f64_matrix(modes.as_mut_ptr(), 1, 2) },
+        };
+        let mut params = rgmin_eigen_params_default();
+        params.kind = rgmin_eigen_kind_t::RGMIN_EIGEN_LOBPCG as i32;
+        params.nev = 1;
+        let hvp = Some(diagonal_hvp as rgmin_hvp_fn);
+        let status = unsafe {
+            match entry {
+                BlockEntry::Plain => rgmin_lowest_eigenpairs(
+                    hvp,
+                    std::ptr::null_mut(),
+                    xt,
+                    st,
+                    mt,
+                    vt,
+                    &params,
+                    std::ptr::null(),
+                    pair.as_mut_ptr(),
+                    1,
+                ),
+                BlockEntry::Extended => rgmin_lowest_eigenpairs_ex(
+                    hvp,
+                    std::ptr::null_mut(),
+                    None,
+                    std::ptr::null_mut(),
+                    xt,
+                    st,
+                    mt,
+                    vt,
+                    &params,
+                    std::ptr::null(),
+                    pair_ex.as_mut_ptr(),
+                    1,
+                ),
+                BlockEntry::Projected => rgmin_lowest_eigenpairs_projected(
+                    std::ptr::null(),
+                    hvp,
+                    std::ptr::null_mut(),
+                    None,
+                    std::ptr::null_mut(),
+                    xt,
+                    st,
+                    mt,
+                    vt,
+                    &params,
+                    std::ptr::null(),
+                    pair_ex.as_mut_ptr(),
+                    1,
+                ),
+            }
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(mt);
+            rgmin_tensor_free(vt);
+        }
+        let case = format!("{entry:?} {bad:?}");
+        assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{case}");
+        assert!(
+            last_error().contains("modes_out"),
+            "{case}: {}",
+            last_error()
+        );
+        assert_eq!(values, [7.0], "{case}: values_out was written");
+        assert_eq!(modes, [7.0; 3], "{case}: modes_out was written");
+        assert_eq!(point, [0.0, 1.0], "{case}");
+        assert_eq!(seed, [0.3, 0.9], "{case}");
+        assert_eq!((pair[0].value, pair[0].actions), (7.0, 7), "{case}");
+        let after = pair_ex[0];
+        assert_eq!((after.value, after.actions), (7.0, 7), "{case}");
+        assert_eq!((after.residual, after.converged), (7.0, 7), "{case}");
+    }
+
+    fn assert_every_bad_modes_shape_is_refused_first(entry: BlockEntry) {
+        for bad in [
+            BadModes::ShortRank1,
+            BadModes::LongRank1,
+            BadModes::WrongRank2,
+        ] {
+            refused_modes_leave_every_output_untouched(entry, bad);
+        }
+    }
+
+    #[test]
+    fn lowest_eigenpairs_validates_modes_before_writing_values() {
+        assert_every_bad_modes_shape_is_refused_first(BlockEntry::Plain);
+    }
+
+    #[test]
+    fn lowest_eigenpairs_ex_validates_modes_before_writing_values() {
+        assert_every_bad_modes_shape_is_refused_first(BlockEntry::Extended);
+    }
+
+    #[test]
+    fn lowest_eigenpairs_projected_validates_modes_before_writing_values() {
+        assert_every_bad_modes_shape_is_refused_first(BlockEntry::Projected);
+    }
 }
 
 #[cfg(test)]
@@ -7139,6 +7278,18 @@ fn read_block(
     Ok(out)
 }
 
+/// The checks [`write_block`] makes, without a write. A caller with more
+/// than one output runs this on each of them before it writes any.
+fn check_block(
+    tensor: *const DLManagedTensorVersioned,
+    n: usize,
+    k: usize,
+    name: &str,
+) -> Result<(), rgmin_status_t> {
+    let dl = cpu_dl(tensor, name)?;
+    block_strides(dl, n, k, name).map(|_| ())
+}
+
 fn write_block(
     tensor: *mut DLManagedTensorVersioned,
     block: &Array2<f64>,
@@ -7254,6 +7405,9 @@ unsafe fn run_lowest_eigenpairs(
         set_last_error(&format!("{label}: values_out length is not k"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
+    // Both outputs are refused here or not at all, so the writes after the
+    // solve cannot fail between the first and the second.
+    check_block(modes_out, n, k, "modes_out")?;
     let typed = eigen_params_from_c(params)?;
     if !typed.kind.is_linked() {
         return Err(status_from_error(&Error::EigenUnavailable {
@@ -7367,9 +7521,11 @@ unsafe fn run_lowest_eigenpairs(
         for i in 0..n {
             modes[(i, j)] = pair.vector[i];
         }
-        values[j] = pair.value;
     }
     write_block(modes_out, &modes, "modes_out")?;
+    for (slot, pair) in values.iter_mut().zip(&found.pairs) {
+        *slot = pair.value;
+    }
     Ok(found)
 }
 
