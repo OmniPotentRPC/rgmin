@@ -422,6 +422,29 @@ fn talbot_shift_encloses_a_pole_right_of_the_unshifted_contour() {
 }
 
 #[test]
+fn complex_sqrt_and_solver_edges_stay_typed() {
+    let big = Complex64::new(1.0e308, 1.0e308);
+    let root = big.sqrt();
+    assert!(root.is_finite());
+    assert!(((root * root) - big).norm() <= 1.0e-12 * big.norm());
+
+    let eye = [
+        Complex64::new(1.0, 0.0),
+        Complex64::new(0.0, 0.0),
+        Complex64::new(0.0, 0.0),
+        Complex64::new(1.0, 0.0),
+    ];
+    let bad_rhs = [Complex64::new(f64::NAN, 0.0), Complex64::new(1.0, 0.0)];
+    assert!(matches!(
+        solve_complex_dense(&eye, &bad_rhs, 2),
+        Err(InverseLaplaceError::InvalidParameter {
+            parameter: "rhs_entry",
+            ..
+        })
+    ));
+}
+
+#[test]
 fn complex_division_of_large_finite_components_stays_finite() {
     let big = 1.5e308_f64;
     let quotient = Complex64::new(big, 0.0) / Complex64::new(big, big);

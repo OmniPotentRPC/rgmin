@@ -266,7 +266,7 @@ impl Complex64 {
         if r == 0.0 {
             return Self::new(0.0, 0.0);
         }
-        let u = (0.5 * (r + self.re.abs())).sqrt();
+        let u = (0.5 * r + 0.5 * self.re.abs()).sqrt();
         let v = 0.5 * self.im / u;
         if self.re >= 0.0 {
             Self::new(u, v)
@@ -614,6 +614,12 @@ pub fn solve_complex_dense(
             });
         }
         scale = max_finite(scale, z.norm(), "matrix_entry")?;
+    }
+    if rhs.iter().any(|z| !z.is_finite()) {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "rhs_entry",
+            value: f64::NAN,
+        });
     }
     // Relative to the matrix. An absolute floor of `64 ε` rejects a tiny
     // well-conditioned system whose entries are all far below 1.
@@ -1472,7 +1478,7 @@ where
         }
         let pref = one / one_minus_w * sqrt_2b;
         let phi = pref * f_val;
-        let pref_abs = div_up(sqrt_2b_up, norm_up(one_minus_w));
+        let pref_abs = div_up(sqrt_2b_up, one_minus_w.norm().next_down());
         let phi_abs = norm_up(phi);
         let phi_err = add_up(mul_up(pref_abs, f_err), mul_up(gamma_node, phi_abs));
         max_sample_err = max_finite(max_sample_err, phi_err, "weeks_sample_err")?;
