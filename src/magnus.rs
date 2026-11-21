@@ -71,7 +71,9 @@ const LOW_DEGREES: [(f64, &[f64]); 4] = [
     ),
     (
         9.504178996162932e-1,
-        &[17297280.0, 8648640.0, 1995840.0, 277200.0, 25200.0, 1512.0, 56.0, 1.0],
+        &[
+            17297280.0, 8648640.0, 1995840.0, 277200.0, 25200.0, 1512.0, 56.0, 1.0,
+        ],
     ),
     (
         2.097847961257068e0,
@@ -144,7 +146,10 @@ pub fn magnus_step(samples: [&[f64]; 3], h: f64, m: usize) -> Result<MagnusStep,
     if samples.iter().any(|sample| sample.len() != size) {
         return Err(MagnusError::Shape("a sample is not m x m"));
     }
-    if samples.iter().any(|sample| sample.iter().any(|v| !v.is_finite())) {
+    if samples
+        .iter()
+        .any(|sample| sample.iter().any(|v| !v.is_finite()))
+    {
         return Err(MagnusError::NonFinite);
     }
     let [a1, a2, a3] = samples;
@@ -206,7 +211,10 @@ pub fn expm(a: &[f64], m: usize) -> Result<Exponential, MagnusError> {
     if m == 0 {
         return Err(MagnusError::Shape("dimension is zero"));
     }
-    if a.len() != m.checked_mul(m).ok_or(MagnusError::Shape("dimension overflows"))? {
+    if a.len()
+        != m.checked_mul(m)
+            .ok_or(MagnusError::Shape("dimension overflows"))?
+    {
         return Err(MagnusError::Shape("the matrix is not m x m"));
     }
     let norm = norm1(a, m);
@@ -230,18 +238,25 @@ pub fn expm(a: &[f64], m: usize) -> Result<Exponential, MagnusError> {
     let eye = identity(m);
     let combine = |w: [f64; 4], terms: [&[f64]; 4]| -> Vec<f64> {
         (0..m * m)
-            .map(|k| w[0] * terms[0][k] + w[1] * terms[1][k] + w[2] * terms[2][k] + w[3] * terms[3][k])
+            .map(|k| {
+                w[0] * terms[0][k] + w[1] * terms[1][k] + w[2] * terms[2][k] + w[3] * terms[3][k]
+            })
             .collect()
     };
     let high_u = combine([B[13], B[11], B[9], 0.0], [&x6, &x4, &x2, &eye]);
     let low_u = combine([B[7], B[5], B[3], B[1]], [&x6, &x4, &x2, &eye]);
     let mut inner_u = multiply(&x6, &high_u, m);
-    inner_u.iter_mut().zip(&low_u).for_each(|(v, low)| *v += low);
+    inner_u
+        .iter_mut()
+        .zip(&low_u)
+        .for_each(|(v, low)| *v += low);
     let u = multiply(&x, &inner_u, m);
     let high_v = combine([B[12], B[10], B[8], 0.0], [&x6, &x4, &x2, &eye]);
     let low_v = combine([B[6], B[4], B[2], B[0]], [&x6, &x4, &x2, &eye]);
     let mut v = multiply(&x6, &high_v, m);
-    v.iter_mut().zip(&low_v).for_each(|(value, low)| *value += low);
+    v.iter_mut()
+        .zip(&low_v)
+        .for_each(|(value, low)| *value += low);
     let denominator: Vec<f64> = v.iter().zip(&u).map(|(p, q)| p - q).collect();
     let numerator: Vec<f64> = v.iter().zip(&u).map(|(p, q)| p + q).collect();
     let mut result = solve(denominator, numerator, m)?;
@@ -355,7 +370,10 @@ mod tests {
             let boost = expm(&[0.0, t, t, 0.0], 2).expect("boost");
             let exact = [t.cosh(), t.sinh(), t.sinh(), t.cosh()];
             let gap = max_gap(&boost.matrix, &exact);
-            assert!(gap <= 64.0 * f64::EPSILON * t.cosh() * (1.0 + t), "t {t} gap {gap}");
+            assert!(
+                gap <= 64.0 * f64::EPSILON * t.cosh() * (1.0 + t),
+                "t {t} gap {gap}"
+            );
         }
         let nilpotent = expm(&[0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0], 3).expect("nilpotent");
         let exact = [1.0, 2.0, 3.0, 0.0, 1.0, 3.0, 0.0, 0.0, 1.0];
@@ -383,7 +401,12 @@ mod tests {
     }
 
     fn mathieu(t: f64) -> [f64; 16] {
-        let w = [1.0 + 0.6 * t.cos(), 0.4 * (2.0 * t).sin(), 0.4 * (2.0 * t).sin(), -0.5 + 0.3 * t.sin()];
+        let w = [
+            1.0 + 0.6 * t.cos(),
+            0.4 * (2.0 * t).sin(),
+            0.4 * (2.0 * t).sin(),
+            -0.5 + 0.3 * t.sin(),
+        ];
         [
             0.0, 0.0, 1.0, 0.0, //
             0.0, 0.0, 0.0, 1.0, //
@@ -442,8 +465,14 @@ mod tests {
             if let Some((six, four)) = previous {
                 let order_six = (six / errors.0).log2();
                 let order_four = (four / errors.1).log2();
-                assert!((5.6..=6.6).contains(&order_six), "steps {steps} sixth order {order_six}");
-                assert!((3.7..=4.4).contains(&order_four), "steps {steps} fourth order {order_four}");
+                assert!(
+                    (5.6..=6.6).contains(&order_six),
+                    "steps {steps} sixth order {order_six}"
+                );
+                assert!(
+                    (3.7..=4.4).contains(&order_four),
+                    "steps {steps} fourth order {order_four}"
+                );
             }
             previous = Some(errors);
         }
@@ -456,9 +485,18 @@ mod tests {
             magnus_step([&a, &a, &a[..3]], 0.1, 2).unwrap_err(),
             MagnusError::Shape("a sample is not m x m")
         );
-        assert!(matches!(magnus_step([&a, &a, &a], 0.0, 2), Err(MagnusError::Shape(_))));
+        assert!(matches!(
+            magnus_step([&a, &a, &a], 0.0, 2),
+            Err(MagnusError::Shape(_))
+        ));
         let bad = [f64::NAN, 0.0, 0.0, 0.0];
-        assert_eq!(magnus_step([&a, &bad, &a], 0.1, 2).unwrap_err(), MagnusError::NonFinite);
-        assert_eq!(expm(&[f64::INFINITY, 0.0, 0.0, 0.0], 2).unwrap_err(), MagnusError::NonFinite);
+        assert_eq!(
+            magnus_step([&a, &bad, &a], 0.1, 2).unwrap_err(),
+            MagnusError::NonFinite
+        );
+        assert_eq!(
+            expm(&[f64::INFINITY, 0.0, 0.0, 0.0], 2).unwrap_err(),
+            MagnusError::NonFinite
+        );
     }
 }
