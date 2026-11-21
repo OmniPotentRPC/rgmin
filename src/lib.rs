@@ -97,6 +97,8 @@ mod slepc_eps;
 /// Closed options for optional lowest-mode backends.
 pub mod slepc_kind;
 
+/// Scalar majorant and radii-polynomial comparisons.
+pub mod majorant;
 /// Embedded Riemannian manifolds (manopt_cpp proj / retr / transp).
 pub mod manifold;
 mod minimize;
