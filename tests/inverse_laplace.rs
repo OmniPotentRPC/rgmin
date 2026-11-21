@@ -1,8 +1,8 @@
 use rgmin::inverse_laplace::{
     Complex64, ComplexSample, InverseLaplaceError, TalbotConfig, WeeksConfig,
     complex_matrix_inv_inf_norm, eval_orthonormal_laguerre_series, exterior_disk_modulus,
-    higham_gamma, solve_complex_dense, talbot_invert, verify_laguerre_tail_decay, weeks_invert,
-    weeks_mobius_w,
+    higham_gamma, solve_complex_dense, talbot_invert, talbot_node, verify_laguerre_tail_decay,
+    weeks_invert, weeks_mobius_w,
 };
 
 #[test]
@@ -322,6 +322,54 @@ fn weeks_degree_must_be_a_multiple_of_four() {
         .with_tolerance(1.0e-3);
     let got = weeks_invert(0.8, cfg, eval).expect("M=20");
     assert!((got.value - (-1.25_f64 * 0.8).exp()).abs() <= got.uncertainty_estimate());
+}
+
+#[test]
+fn talbot_node_refuses_collapsed_or_overflowing_scales() {
+    for energy in [f64::MAX, 1.0e-308] {
+        assert!(
+            matches!(
+                talbot_node(1.0, 32, energy),
+                Err(InverseLaplaceError::InvalidParameter {
+                    parameter: "talbot_scale",
+                    ..
+                })
+            ),
+            "E={energy:e}"
+        );
+    }
+    assert!(matches!(
+        talbot_node(core::f64::consts::PI.next_down(), 32, 6.4e-300),
+        Err(InverseLaplaceError::InvalidParameter {
+            parameter: "talbot_node",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn talbot_node_is_finite_and_accurate_at_tiny_angles() {
+    let r = 32.0 / 5.0;
+    for theta in [1.0e-200_f64, 1.0e-8, 1.0e-3] {
+        let (beta, dbeta) = talbot_node(theta, 32, 1.0).expect("tiny-angle node");
+        assert!(beta.is_finite() && dbeta.is_finite(), "theta={theta:e}");
+        let t2 = theta * theta;
+        let beta_re = r * (1.0 - t2 / 3.0 - t2 * t2 / 45.0);
+        let dbeta_re = -r * theta * (2.0 / 3.0 + 4.0 * t2 / 45.0 + 4.0 * t2 * t2 / 315.0);
+        assert!(
+            (beta.re / beta_re - 1.0).abs() <= 1.0e-15,
+            "theta={theta:e}"
+        );
+        assert!(
+            (dbeta.re / dbeta_re - 1.0).abs() <= 1.0e-14,
+            "theta={theta:e}: {} vs {dbeta_re}",
+            dbeta.re
+        );
+        assert_eq!(beta.im, r * theta);
+        assert_eq!(dbeta.im, r);
+    }
+    let (beta, dbeta) = talbot_node(1.0e-310, 32, 1.0).expect("subnormal angle");
+    assert!(beta.is_finite() && dbeta.is_finite() && dbeta.re <= 0.0);
 }
 
 #[test]

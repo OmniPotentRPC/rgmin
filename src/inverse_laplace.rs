@@ -1020,8 +1020,41 @@ impl TalbotResult {
     }
 }
 
+/// `cot(theta) - theta csc^2(theta) = -(2 theta - sin(2 theta)) / (2 sin^2(theta))` on `(0, pi)`.
+///
+/// For `theta <= 1/2` both terms are near `1/theta` and cancel, and `csc^2` overflows
+/// for tiny `theta`, so the form `-4 theta g(2 theta) (theta / sin theta)^2` with
+/// `g(x) = (x - sin x) / x^3 = sum_k (-1)^k x^{2k} / (2k+3)!` is used there.
+fn talbot_dbeta_re_unit(theta: f64, sin_t: f64, cos_t: f64) -> f64 {
+    if theta <= 0.5 {
+        const G: [f64; 10] = [
+            1.0 / 6.0,
+            -1.0 / 120.0,
+            1.0 / 5_040.0,
+            -1.0 / 362_880.0,
+            1.0 / 39_916_800.0,
+            -1.0 / 6_227_020_800.0,
+            1.0 / 1_307_674_368_000.0,
+            -1.0 / 355_687_428_096_000.0,
+            1.0 / 121_645_100_408_832_000.0,
+            -1.0 / 51_090_942_171_709_440_000.0,
+        ];
+        let x = 2.0 * theta;
+        let x2 = x * x;
+        let g = G.iter().rev().fold(0.0_f64, |acc, &c| acc * x2 + c);
+        let t_over_s = theta / sin_t;
+        -4.0 * theta * g * t_over_s * t_over_s
+    } else {
+        cos_t / sin_t - theta / (sin_t * sin_t)
+    }
+}
+
 /// Evaluate the fixed-Talbot contour node `(beta(theta), d beta / d theta)` at angle `theta in (0, pi)`
 /// with scale `r = M / (5 E)`.
+///
+/// Refuses with [`InverseLaplaceError::InvalidParameter`] when `r` is not a positive normal
+/// number (`E` so large that the contour collapses onto the origin, or so small that `r`
+/// overflows) or when the node or its derivative is not finite.
 pub fn talbot_node(
     theta: f64,
     nodes_m: usize,
@@ -1041,12 +1074,22 @@ pub fn talbot_node(
         });
     }
     let r = (nodes_m as f64) / (5.0 * energy);
+    if !r.is_normal() {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "talbot_scale",
+            value: r,
+        });
+    }
     let sin_t = theta.sin();
     let cos_t = theta.cos();
-    let cot_t = cos_t / sin_t;
-    let csc2_t = 1.0 / (sin_t * sin_t);
-    let beta = Complex64::new(r * theta * cot_t, r * theta);
-    let dbeta = Complex64::new(r * (cot_t - theta * csc2_t), r);
+    let beta = Complex64::new(r * (cos_t * (theta / sin_t)), r * theta);
+    let dbeta = Complex64::new(r * talbot_dbeta_re_unit(theta, sin_t, cos_t), r);
+    if !beta.is_finite() || !dbeta.is_finite() {
+        return Err(InverseLaplaceError::InvalidParameter {
+            parameter: "talbot_node",
+            value: theta,
+        });
+    }
     Ok((beta, dbeta))
 }
 
