@@ -75,6 +75,10 @@ pub enum LineSearch {
 
 /// Optional policy for objective values whose accuracy is lower than their gradients.
 /// Existing line-search entry points use the default four-epsilon window.
+///
+/// The struct is non-exhaustive: start from [`Default`] or
+/// [`Self::with_objective_roundoff`].
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LineSearchOptions {
     relative_objective_error: Option<f64>,

@@ -61,14 +61,22 @@ Types built this way
     +-------------------------------------------------------------------------------------------+----------------------------------------------------------------+
     | ``LindhSpec``                                                                             | ``LindhSpec::new(z, c_stab, cell)``                            |
     +-------------------------------------------------------------------------------------------+----------------------------------------------------------------+
+    | ``LineSearchOptions``                                                                     | ``default()``, ``with_objective_roundoff``                     |
+    +-------------------------------------------------------------------------------------------+----------------------------------------------------------------+
     | ``Report``                                                                                | ``Report::new(value, coords)``, for a host that writes its own |
+    +-------------------------------------------------------------------------------------------+----------------------------------------------------------------+
+    | ``DeflatedPair``                                                                          | ``DeflatedPair::new``, when supplying a pair to deflation      |
     +-------------------------------------------------------------------------------------------+----------------------------------------------------------------+
 
 Results (``LowestMode``, ``Eigenpair``, ``Eigenpairs``, ``RestrictedStep``,
-``TcgResult``, ``EonCgReport``, ``LineOutcome``, ``NoiseEstimate``,
+``TcgResult``, ``RtrMin``, ``EonCgReport``, ``LineOutcome``, ``NoiseEstimate``,
 ``ValueGradientNoise``, ``Ode12rVerdict``, ``ConstraintReport``,
-``ElpaSpectrum``) are non-exhaustive too. Read their fields; a
-destructuring pattern needs ``..``.
+``ElpaSpectrum``, ``FireTrace``, ``EonFeat``, ``KantorovichBall``,
+``AdjointFunctionalBar``, ``MorseGap``, ``TridiagEigh``,
+``QuadratureEstimate``, ``PcgResult``, ``DeflatedPair``,
+``ExtremePairsReport``, ``SlqLogDetReport``, ``GaussLegendre``,
+``LobattoShapes``, ``MagnusStep``, ``Exponential``) are non-exhaustive too.
+Read their fields; a destructuring pattern needs ``..``.
 
 Methods and step rules
 ~~~~~~~~~~~~~~~~~~~~~~

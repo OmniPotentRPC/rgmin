@@ -41,6 +41,10 @@ pub enum MagnusError {
 }
 
 /// Exponentials of the sixth- and embedded fourth-order Magnus exponents.
+///
+/// The struct is non-exhaustive, so a field added later is not a breaking
+/// change. [`magnus_step`] builds it.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct MagnusStep {
     /// `exp(Ω6)`, row-major `m x m`.
@@ -53,6 +57,10 @@ pub struct MagnusStep {
 }
 
 /// A matrix exponential and the `m x m` products it spent.
+///
+/// The struct is non-exhaustive, so a field added later is not a breaking
+/// change. [`expm`] builds it.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct Exponential {
     /// Row-major `m x m`.

@@ -17,6 +17,10 @@ use crate::lbfgs::{EON_FINITE_DIFFERENCE, EON_INVERSE_CURVATURE, EonSeed};
 use crate::report::{Report, Status};
 
 /// One eOn fill step, for the reset and cap study.
+///
+/// The struct is non-exhaustive, so a field added later is not a breaking
+/// change. [`Solver::take_eon_log`] returns the records a traced run kept.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
 pub struct EonFeat {
     /// `(g+ - g) · s / s·s`, the directional curvature.
