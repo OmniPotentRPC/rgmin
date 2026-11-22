@@ -70,6 +70,7 @@ _EXPORTS = [
     "SolverConfig",
     "Stiefel",
     "Stop",
+    "StopUnmetError",
     "__version__",
     "backward_error_floor",
     "lowest_eigenpairs",

@@ -209,6 +209,23 @@ class _RgminOptimizer(_ASEOptimizer):
             return True
         return cast(bool, cast(Any, super()).gradient_converged(gradient))
 
+    def irun(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, fmax: float = 0.05, steps: int | None = None
+    ) -> Iterator[bool]:
+        """Yield convergence after each step, as :meth:`run` returns it.
+
+        A spent ``max_evals`` budget ends the loop without converging, so
+        it yields ``False`` where ASE's loop, which asks :meth:`converged`
+        to stop, would yield ``True``.
+        """
+        self.stop = None
+        if steps is None:
+            stream = cast(Any, super()).irun(fmax=fmax)
+        else:
+            stream = cast(Any, super()).irun(fmax=fmax, steps=steps)
+        for converged in stream:
+            yield False if self.stop == "EvalBudget" else bool(converged)
+
     def run(self, fmax: float = 0.05, steps: int | None = None) -> bool:  # type: ignore[override]
         """Run to ``fmax``, an ``etol`` stop, or the ``max_evals`` budget.
 
@@ -770,7 +787,7 @@ class GromacsSteep(_RgminOptimizer):
         if steps is None:
             steps = sys.maxsize if self.gromacs_nsteps == -1 else self.gromacs_nsteps
         for converged in cast(Any, super()).irun(fmax=force_limit, steps=steps):
-            yield False if self.stop == "EvalBudget" else bool(converged)
+            yield converged
             if self._native is not None and self._native.stop == "MachinePrecision":
                 break
 

@@ -20,10 +20,13 @@ iteration. ``step_hess(f_and_grad, hessian, x)`` is the same for Newton,
 RFO, and dogleg.
 ``minimize(f_and_grad, x0, method``"lbfgs", \*\*options)= returns
 ``(report, x)``. ``x0`` must already be a contiguous float64 vector.
+An ``lbfgs`` run that spends its budget with ``x`` unmoved stops on
+``LINE_SEARCH``, as the C ``rgmin_minimize`` does, not on ``BUDGET``.
 ``error_on_unmet`` and ``backward_polish`` are flags and default to
-off. ``error_on_unmet`` raises ``RuntimeError`` when the run stops on
-``BUDGET``, ``LINE_SEARCH``, or ``POLISH_UNMET``. ``backward_polish`` is
-stored on the session. This step loop does not form a Hessian, so
+off. ``error_on_unmet`` raises ``StopUnmetError`` when the run stops on
+``BUDGET``, ``LINE_SEARCH``, or ``POLISH_UNMET``. It is a ``RuntimeError``
+whose ``report`` attribute is the ``Report`` of the stop.
+``backward_polish`` is stored on the session. This step loop does not form a Hessian, so
 the polish itself is the C ``rgmin_minimize_hess_opts`` and
 ``rgmin_minimize_hvp_opts`` entries.
 
