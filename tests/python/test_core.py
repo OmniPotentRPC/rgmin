@@ -360,3 +360,30 @@ def test_gromacs_zero_budget_accepts_large_finite_max_atom_gradient() -> None:
     )
     assert np.isfinite(report.grad_norm)
     assert report.grad_norm == pytest.approx(1e200)
+
+
+def test_gromacs_cg_minimize_step_counts_and_unlimited() -> None:
+    import sys
+
+    def quad_fn(v: np.ndarray) -> tuple[float, np.ndarray]:
+        return float(0.5 * (v[0] ** 2 + 4.0 * v[1] ** 2 + v[2] ** 2)), np.array(
+            [v[0], 4.0 * v[1], v[2]], dtype=np.float64
+        )
+
+    for budget in (0, 1, 2):
+        opts = rgmin.gromacs_mdp_options(
+            {"integrator": "cg", "emtol": 1e-6, "emstep": 0.05, "nsteps": budget}
+        )
+        method = opts.pop("method")
+        rep, _ = rgmin.minimize(quad_fn, np.array([4.0, 1.0, 0.0]), method, **opts)
+        assert rep.steps == budget
+        assert rep.stop == rgmin.Stop.BUDGET
+
+    opts_unlim = rgmin.gromacs_mdp_options(
+        {"integrator": "cg", "emtol": 1e-6, "emstep": 0.05, "nsteps": -1}
+    )
+    assert opts_unlim["maxiter"] == sys.maxsize
+    method_unlim = opts_unlim.pop("method")
+    rep_unlim, _ = rgmin.minimize(quad_fn, np.array([4.0, 1.0, 0.0]), method_unlim, **opts_unlim)
+    assert rep_unlim.stop == rgmin.Stop.TOLERANCE
+    assert rep_unlim.steps == 3
