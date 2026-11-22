@@ -5,8 +5,8 @@
 //! `epsilon + r kappa(r) < r` proves that `T` maps the closed ball into
 //! itself and is a contraction there.  This module only performs that scalar
 //! comparison.  Callers remain responsible for proving the supplied bounds.
-//! [`certify_radii_polynomial`] is the only constructor of a
-//! [`RadiiCertificate`].
+//! `certify_radii_polynomial` is the only constructor of a
+//! `RadiiCertificate`.
 
 use core::fmt;
 
