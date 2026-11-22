@@ -92,14 +92,19 @@ fn independent_pair_direction(basis: &[Vec<f64>], vector: &[f64], dim: usize) ->
     if !all_finite(vector) {
         return Err(slq_err("deflated pair vector contains non-finite entries"));
     }
-    let mut q = vector.to_vec();
-    project_out_basis(&mut q, basis);
-    let nrm = norm2_slice(&q);
     let orig = norm2_slice(vector);
-    if !nrm.is_finite() || !orig.is_finite() || orig == 0.0 {
+    if !orig.is_finite() || orig == 0.0 {
         return Err(slq_err("deflated pair vector must be finite and nonzero"));
     }
-    if nrm <= 1e-8 * orig {
+    let mut q: Vec<f64> = vector.iter().map(|&slot| slot / orig).collect();
+    project_out_basis(&mut q, basis);
+    let nrm = norm2_slice(&q);
+    if !nrm.is_finite() {
+        return Err(slq_err(
+            "non-finite norm while screening deflated pair vector",
+        ));
+    }
+    if nrm <= 1e-8 {
         return Err(slq_err(
             "duplicate deflated pair would double-count logabs_det",
         ));
@@ -117,7 +122,7 @@ fn screen_deflated_pairs(
     kernel: &[Vec<f64>],
     negative_pairs: &[DeflatedPair],
     positive_deflation: &[DeflatedPair],
-) -> Result<()> {
+) -> Result<Vec<Vec<f64>>> {
     let mut basis = orthonormalize_vectors(kernel, dim)?;
     for pair in negative_pairs.iter().chain(positive_deflation.iter()) {
         if !(pair.residual >= 0.0 && pair.residual.is_finite()) {
@@ -128,7 +133,7 @@ fn screen_deflated_pairs(
         let q = independent_pair_direction(&basis, &pair.vector, dim)?;
         basis.push(q);
     }
-    Ok(())
+    Ok(basis)
 }
 
 fn project_out_basis(v: &mut [f64], basis: &[Vec<f64>]) {
@@ -143,7 +148,7 @@ fn project_out_basis(v: &mut [f64], basis: &[Vec<f64>]) {
 }
 
 fn orthonormalize_vectors(vectors: &[Vec<f64>], dim: usize) -> Result<Vec<Vec<f64>>> {
-    let mut basis: Vec<Vec<f64>> = Vec::with_capacity(vectors.len());
+    let mut basis: Vec<Vec<f64>> = Vec::with_capacity(vectors.len().min(dim));
     for v in vectors {
         if v.len() != dim {
             return Err(slq_err("deflation vector dimension mismatch"));
@@ -151,17 +156,27 @@ fn orthonormalize_vectors(vectors: &[Vec<f64>], dim: usize) -> Result<Vec<Vec<f6
         if !all_finite(v) {
             return Err(slq_err("deflation vector contains non-finite entries"));
         }
-        let mut q = v.clone();
+        let orig = norm2_slice(v);
+        if !orig.is_finite() {
+            return Err(slq_err("non-finite norm in deflation basis"));
+        }
+        if orig == 0.0 {
+            continue;
+        }
+        if basis.len() == dim {
+            continue;
+        }
+        let mut q: Vec<f64> = v.iter().map(|&slot| slot / orig).collect();
         project_out_basis(&mut q, &basis);
-        let nrm = norm2_slice(&q);
-        if !nrm.is_finite() {
+        let relative_nrm = norm2_slice(&q);
+        if !relative_nrm.is_finite() {
             return Err(slq_err(
                 "non-finite norm while orthonormalizing deflation basis",
             ));
         }
-        if nrm > 1e-12 {
+        if relative_nrm > 1e-12 {
             for slot in &mut q {
-                *slot /= nrm;
+                *slot /= relative_nrm;
             }
             basis.push(q);
         }
@@ -200,6 +215,14 @@ impl SplitMix64 {
         let u = (bits as f64) * (1.0 / ((1u64 << 53) as f64));
         2.0 * u - 1.0
     }
+}
+
+const HUTCHPP_SKETCH_DOMAIN: u64 = 0x8f71_4498_5b62_37a1;
+const HUTCHPP_PROBE_DOMAIN: u64 = 0xd1b5_4a32_d192_ed03;
+
+fn domain_separated_seed(seed: u64, domain: u64) -> u64 {
+    let mut mixer = SplitMix64::new(seed ^ domain);
+    mixer.next_u64()
 }
 
 /// Symmetric eigendecomposition output: ascending eigenvalues and row-major
@@ -538,7 +561,8 @@ pub struct QuadratureEstimate {
     /// endpoint for general functions).
     pub upper: f64,
     /// Non-negative quadrature error estimate (`0.5 * (upper - lower)` when
-    /// bracketed; successive-step Gauss difference otherwise).
+    /// bracketed; successive-step Gauss difference otherwise). The latter is
+    /// a convergence heuristic and can understate the true quadrature error.
     pub error_estimate: f64,
     /// True if a caller-supplied `lower_bound` produced a Gauss / left
     /// Gauss-Radau bracket (which is a true two-sided enclosure in exact
@@ -589,7 +613,8 @@ fn eval_gauss_ln(diag: &[f64], offdiag: &[f64], norm_sq: f64) -> Result<(f64, f6
 /// - When `lower_bound` is `None`, computes adaptive Golub-Welsch Gauss
 ///   quadrature `G_m` (still refusing any non-positive Ritz value) and
 ///   estimates convergence from successive monotone Gauss differences
-///   `|G_m - G_{m_prev}|`.
+///   `|G_m - G_{m_prev}|`. This heuristic can understate the true quadrature
+///   error because it is not a two-sided enclosure.
 ///
 /// Uses full two-pass modified Gram-Schmidt reorthogonalization so finite
 /// precision does not introduce ghost Ritz values.
@@ -729,7 +754,7 @@ where
                 lower: gauss,
                 upper: gauss,
                 error_estimate: 0.0,
-                bracketed: true,
+                bracketed: lower_bound.is_some(),
                 first_moment,
                 second_moment,
                 steps: m,
@@ -1061,6 +1086,10 @@ where
     }
     let deflate_basis = orthonormalize_vectors(deflate, n)?;
 
+    let rhs_norm = norm2_slice(rhs);
+    if !rhs_norm.is_finite() {
+        return Err(slq_err("PCG right-hand side norm is not finite"));
+    }
     let mut b = rhs.to_vec();
     if !deflate_basis.is_empty() {
         project_out_basis(&mut b, &deflate_basis);
@@ -1069,7 +1098,7 @@ where
     if !b_norm.is_finite() {
         return Err(slq_err("PCG projected RHS norm is not finite"));
     }
-    if b_norm == 0.0 {
+    if b_norm <= 1e-12 * rhs_norm {
         return Ok(PcgResult {
             solution: vec![0.0; n],
             iterations: 0,
@@ -1187,9 +1216,11 @@ where
 pub struct DeflatedPair {
     /// Ritz eigenvalue.
     pub eigenvalue: f64,
-    /// Unit eigenvector orthogonal to the kernel and other deflated pairs.
+    /// Nonzero eigenvector direction. Screening normalizes it and removes
+    /// components in the kernel and previously accepted pair directions.
     pub vector: Vec<f64>,
-    /// Verified residual norm `||P_kernel A v - eigenvalue * v||_2`.
+    /// Verified residual norm for the normalized vector direction
+    /// `v_hat`: `||P_kernel A v_hat - eigenvalue * v_hat||_2`.
     pub residual: f64,
 }
 
@@ -1793,7 +1824,8 @@ pub struct SlqConfig {
     /// Minimum independent samples before the first stopping check (`>= 2`).
     /// Ignored when `stopping_rule == SlqStoppingRule::FixedSamples`.
     pub min_samples: usize,
-    /// Maximum independent samples before stopping (`>= min_samples`).
+    /// Maximum independent samples before stopping (`>= 2`; additionally
+    /// `>= min_samples` under [`SlqStoppingRule::AlphaSpending`]).
     pub max_samples: usize,
     /// Maximum Lanczos steps per probe vector.
     pub max_lanczos_steps: usize,
@@ -2193,7 +2225,7 @@ pub struct HutchPpConfig {
     /// Number of power iterations (`>= 1`) applied to the sketch operator
     /// (`1` forms `Y = B S`, `2` forms `Y = B^2 S`, etc.).
     pub power_iters: usize,
-    /// Independent PRNG seed for the sketch matrix `S`.
+    /// PRNG seed for the sketch matrix `S`, domain-separated from SLQ probes.
     pub sketch_seed: u64,
 }
 
@@ -2208,7 +2240,7 @@ impl Default for HutchPpConfig {
         Self {
             sketch_dim: 0,
             power_iters: 1,
-            sketch_seed: 0,
+            sketch_seed: 0x6a09_e667_f3bc_c909,
         }
     }
 }
@@ -2325,8 +2357,20 @@ where
             "SLQ confidence_level must lie strictly in (0.5, 1.0)",
         ));
     }
-    let min_samples = config.min_samples.max(2);
-    let max_samples = config.max_samples.max(min_samples);
+    if config.max_samples < 2 {
+        return Err(slq_err("SLQ max_samples must be at least 2"));
+    }
+    let (min_samples, max_samples) = match config.stopping_rule {
+        SlqStoppingRule::FixedSamples => (2, config.max_samples),
+        SlqStoppingRule::AlphaSpending => {
+            if config.min_samples < 2 || config.max_samples < config.min_samples {
+                return Err(slq_err(
+                    "SLQ AlphaSpending requires 2 <= min_samples <= max_samples",
+                ));
+            }
+            (config.min_samples, config.max_samples)
+        }
+    };
     let checkpoints = build_checkpoints(min_samples, max_samples, config.stopping_rule);
     let alpha_total = 1.0 - config.confidence_level;
     let alpha_per_check = alpha_total / (checkpoints.len() as f64);
@@ -2343,7 +2387,7 @@ where
         }
     };
 
-    screen_deflated_pairs(dim, kernel, negative_pairs, positive_deflation)?;
+    let probe_deflate = screen_deflated_pairs(dim, kernel, negative_pairs, positive_deflation)?;
 
     // Contribution + first-order deflation residual estimate of deflated negative modes.
     let mut negative_logabs = 0.0;
@@ -2392,20 +2436,6 @@ where
         deflation_error_estimate += (pair.residual * pair.residual) / denom_schur
             + (pair.residual * pair.residual) / denom_self;
     }
-
-    // Orthonormalize the full deflated basis: kernel + negative + positive_deflation.
-    let mut raw_deflate: Vec<Vec<f64>> =
-        Vec::with_capacity(kernel.len() + negative_pairs.len() + positive_deflation.len());
-    for q in kernel {
-        raw_deflate.push(q.clone());
-    }
-    for p in negative_pairs {
-        raw_deflate.push(p.vector.clone());
-    }
-    for p in positive_deflation {
-        raw_deflate.push(p.vector.clone());
-    }
-    let probe_deflate = orthonormalize_vectors(&raw_deflate, dim)?;
 
     let total_deflated = probe_deflate.len();
     if total_deflated >= dim {
@@ -2497,7 +2527,10 @@ where
     let mut det_quad_err = 0.0_f64;
 
     if sketch_r > 0 {
-        let mut s_rng = SplitMix64::new(hutchpp.sketch_seed);
+        let mut s_rng = SplitMix64::new(domain_separated_seed(
+            hutchpp.sketch_seed,
+            HUTCHPP_SKETCH_DOMAIN,
+        ));
         let mut s_cur = vec![0.0; dim];
         let mut s_nxt = vec![0.0; dim];
         let mut s_cv = vec![0.0; dim];
@@ -2618,7 +2651,7 @@ where
 
     let per_color_quad_tol = (0.1 * config.target_tol) / (stride as f64);
 
-    let mut rng = SplitMix64::new(config.seed);
+    let mut rng = SplitMix64::new(domain_separated_seed(config.seed, HUTCHPP_PROBE_DOMAIN));
     let mut mean = 0.0_f64;
     let mut m2 = 0.0_f64;
     let mut quad_err_sum = 0.0_f64;
@@ -2638,7 +2671,15 @@ where
                 }
             }
             if !stochastic_project.is_empty() {
+                let orig = norm2_slice(&probe);
                 project_out_basis(&mut probe, &stochastic_project);
+                let projected = norm2_slice(&probe);
+                if !projected.is_finite() {
+                    return Err(slq_err("non-finite projected SLQ probe norm"));
+                }
+                if projected <= 1e-12 * orig {
+                    probe.fill(0.0);
+                }
             }
             let est = lanczos_quadrature_log_inner(
                 &probe,
@@ -2873,7 +2914,7 @@ mod tests {
 
         // Adaptive Gauss mode (lower_bound = None) also converges accurately.
         let adapt = lanczos_quadrature_log(&v, &mut op, None, 38, 1e-10, 2).expect("adapt");
-        assert!(!adapt.bracketed || adapt.invariant_breakdown);
+        assert!(!adapt.bracketed);
         assert!(
             (adapt.value - exact).abs() < 1e-9,
             "adapt got {} exact {exact}",
@@ -2921,6 +2962,33 @@ mod tests {
         assert!(res.rel_residual <= 1e-12);
         assert!(dot_slice(&res.solution, &q0).abs() < 1e-12);
 
+        // A right-hand side entirely in the kernel is the zero vector in the
+        // projected problem, even when projection leaves roundoff behind.
+        let kernel = vec![vec![1.0, 1.0, 1.0]];
+        let kernel_rhs = vec![1.0, 1.0, 1.0];
+        let mut laplacian = |x: &[f64], y: &mut [f64]| {
+            let sum = x.iter().sum::<f64>();
+            for (slot, &xi) in y.iter_mut().zip(x) {
+                *slot = 3.0 * xi - sum;
+            }
+            Ok(())
+        };
+        let mut kernel_precond = |r: &[f64], z: &mut [f64]| {
+            z.copy_from_slice(r);
+            Ok(())
+        };
+        let kernel_result = pcg_solve(
+            &kernel_rhs,
+            &mut laplacian,
+            &mut kernel_precond,
+            &kernel,
+            PcgConfig::default(),
+        )
+        .expect("kernel RHS");
+        assert_eq!(kernel_result.iterations, 0);
+        assert_eq!(kernel_result.matvecs, 0);
+        assert_eq!(kernel_result.solution, vec![0.0; 3]);
+
         // Indefinite operator must be refused.
         let mut indef = a.clone();
         indef[0] = -10.0;
@@ -2942,6 +3010,39 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn projected_kernel_probes_are_counted_as_zero() {
+        let kernel = vec![vec![1.0, 1.0, 1.0]];
+        let seed = (0_u64..)
+            .find(|&candidate| {
+                let mut rng =
+                    SplitMix64::new(domain_separated_seed(candidate, HUTCHPP_PROBE_DOMAIN));
+                let first = rng.next_rademacher();
+                (0..2).all(|_| rng.next_rademacher() == first)
+            })
+            .expect("a constant Rademacher probe");
+        let mut laplacian = |x: &[f64], y: &mut [f64]| {
+            let sum = x.iter().sum::<f64>();
+            for (slot, &xi) in y.iter_mut().zip(x) {
+                *slot = 3.0 * xi - sum;
+            }
+            Ok(())
+        };
+        let report = slq_logdet_deflated(
+            3,
+            &mut laplacian,
+            SlqDeflation::default().with_kernel(&kernel),
+            SlqConfig::default()
+                .with_max_samples(2)
+                .with_max_lanczos_steps(3)
+                .with_target_tol(10.0)
+                .with_seed(seed),
+        )
+        .expect("projected Laplacian");
+        assert_eq!(report.samples, 2);
+        assert!(report.logabs_det.is_finite());
     }
 
     #[test]
@@ -3143,6 +3244,65 @@ mod tests {
             "got {} exact {exact} est {:.3e}",
             with_cv.logabs_det,
             with_cv.total_error_estimate
+        );
+    }
+
+    #[test]
+    fn hutchpp_domain_separates_default_and_matching_seeds() {
+        let n = 64usize;
+        let exact = (n as f64) * 2.0_f64.ln();
+        let run = |probe_seed: u64, sketch_seed: u64, samples: usize| {
+            let mut op = |x: &[f64], y: &mut [f64]| {
+                for (slot, &xi) in y.iter_mut().zip(x) {
+                    *slot = 2.0 * xi;
+                }
+                Ok(())
+            };
+            let mut zero_cv = |_z: &[f64]| Ok(0.0);
+            let mut id_cv = |x: &[f64], y: &mut [f64]| {
+                y.copy_from_slice(x);
+                Ok(())
+            };
+            slq_logdet_hutchpp(
+                n,
+                &mut op,
+                SlqDeflation::default(),
+                &mut zero_cv,
+                &mut id_cv,
+                SlqHutchPpOptions::default().with_hutchpp(
+                    HutchPpConfig::default()
+                        .with_sketch_dim(8)
+                        .with_sketch_seed(sketch_seed),
+                ),
+                SlqConfig::default()
+                    .with_max_samples(samples)
+                    .with_max_lanczos_steps(2)
+                    .with_seed(probe_seed),
+            )
+            .expect("Hutch++ diagonal estimate")
+        };
+
+        let default = run(
+            SlqConfig::default().seed,
+            HutchPpConfig::default().sketch_seed,
+            SlqConfig::default().max_samples,
+        );
+        assert!(
+            (default.logabs_det - exact).abs() <= default.total_error_estimate,
+            "default streams missed: got {}, exact {exact}, error {}",
+            default.logabs_det,
+            default.total_error_estimate
+        );
+
+        let covered = (0_u64..100)
+            .filter(|&seed| {
+                let report = run(seed, seed, 8);
+                (report.logabs_det - exact).abs() <= report.total_error_estimate
+            })
+            .count();
+        assert!(
+            covered >= 95,
+            "99.5% intervals covered only {covered} of 100 matching-seed runs"
         );
     }
 
@@ -3414,6 +3574,18 @@ mod tests {
         assert_eq!(fixed.samples, 12);
         assert_eq!(fixed.stopping_rule, SlqStoppingRule::FixedSamples);
 
+        let below_default_min = slq_logdet_deflated(
+            n,
+            &mut op,
+            defl,
+            SlqConfig::default()
+                .with_max_samples(4)
+                .with_target_tol(1e2)
+                .with_seed(11),
+        )
+        .expect("fixed below default min");
+        assert_eq!(below_default_min.samples, 4);
+
         let spend = slq_logdet_deflated(
             n,
             &mut op,
@@ -3433,6 +3605,12 @@ mod tests {
         .expect("spend");
         assert_eq!(spend.samples, 8);
         assert_eq!(spend.stopping_rule, SlqStoppingRule::AlphaSpending);
+
+        let invalid_spend = SlqConfig::default()
+            .with_stopping_rule(SlqStoppingRule::AlphaSpending)
+            .with_min_samples(8)
+            .with_max_samples(4);
+        assert!(slq_logdet_deflated(n, &mut op, defl, invalid_spend).is_err());
     }
 
     fn slq_what<T: std::fmt::Debug>(result: Result<T>) -> &'static str {
@@ -3450,6 +3628,25 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    fn hutchpp_rejection(deflation: SlqDeflation<'_>) -> &'static str {
+        let diag = [2.0, 3.0, 4.0, 5.0];
+        let mut op = diag_apply(&diag);
+        let mut cv = |_z: &[f64]| Ok(0.0);
+        let mut id = |x: &[f64], y: &mut [f64]| {
+            y.copy_from_slice(x);
+            Ok(())
+        };
+        slq_what(slq_logdet_hutchpp(
+            diag.len(),
+            &mut op,
+            deflation,
+            &mut cv,
+            &mut id,
+            SlqHutchPpOptions::default(),
+            SlqConfig::default().with_max_samples(2),
+        ))
     }
 
     #[test]
@@ -3516,6 +3713,41 @@ mod tests {
     }
 
     #[test]
+    fn orthonormalization_is_scale_relative() {
+        for scale in [1e-10_f64, 1e10] {
+            let mut v1 = vec![0.0; 4];
+            v1[0] = scale;
+            let mut v2 = vec![0.0; 4];
+            v2[1] = scale;
+            let redundant = v1
+                .iter()
+                .zip(&v2)
+                .map(|(&x, &y)| 0.7 * x + 1.3 * y)
+                .collect::<Vec<_>>();
+            let mut independent = vec![0.0; 4];
+            independent[2] = scale;
+
+            let basis = orthonormalize_vectors(&[v1, v2, redundant, independent, vec![0.0; 4]], 4)
+                .expect("scaled basis");
+            assert_eq!(
+                basis.len(),
+                3,
+                "scale {scale}: kept a redundant direction or dropped an independent one"
+            );
+            assert!(
+                basis[2][2].abs() > 1.0 - 1e-12,
+                "scale {scale}: independent direction was not retained"
+            );
+            for i in 0..basis.len() {
+                assert!((norm2_slice(&basis[i]) - 1.0).abs() < 1e-12);
+                for j in 0..i {
+                    assert!(dot_slice(&basis[i], &basis[j]).abs() < 1e-12);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn pcg_validates_and_orthonormalizes_deflation() {
         let n = 6usize;
         let diag: Vec<f64> = (0..n).map(|i| 2.0 + i as f64).collect();
@@ -3564,6 +3796,37 @@ mod tests {
         assert!(solved.solution[0].abs() < 1e-8);
         assert!(solved.solution[1].abs() < 1e-8);
         assert!(solved.solution[2].abs() > 1e-3);
+
+        let mut tiny = vec![0.0; n];
+        tiny[0] = 1e-13;
+        let tiny_solved =
+            pcg_solve(&rhs, &mut op, &mut precond, &[tiny], cfg).expect("tiny deflation vector");
+        assert!(
+            tiny_solved.solution[0].abs() < 1e-8,
+            "tiny deflation vector was dropped"
+        );
+
+        let mut v1 = vec![0.0; n];
+        v1[0] = 1e6;
+        let mut v2 = vec![0.0; n];
+        v2[1] = 1e6;
+        let v3 = v1
+            .iter()
+            .zip(&v2)
+            .map(|(&x, &y)| 0.7 * x + 1.3 * y)
+            .collect::<Vec<_>>();
+        let reference = pcg_solve(&rhs, &mut op, &mut precond, &[v1.clone(), v2.clone()], cfg)
+            .expect("two-vector basis");
+        let redundant = pcg_solve(&rhs, &mut op, &mut precond, &[v1, v2, v3], cfg)
+            .expect("large redundant basis");
+        let delta = reference
+            .solution
+            .iter()
+            .zip(&redundant.solution)
+            .map(|(&x, &y)| (x - y) * (x - y))
+            .sum::<f64>()
+            .sqrt();
+        assert!(delta < 1e-10, "redundant basis changed PCG by {delta}");
     }
 
     #[test]
@@ -3596,6 +3859,25 @@ mod tests {
             "NaN neg_abs_tol was not refused: {why}"
         );
 
+        cfg.neg_abs_tol = -1.0;
+        assert!(slq_what(lanczos_extreme_pairs(n, &mut op, &[], cfg)).contains("neg_abs_tol"));
+        cfg.neg_abs_tol = 1e-6;
+        cfg.neg_log_tol = f64::NAN;
+        assert!(slq_what(lanczos_extreme_pairs(n, &mut op, &[], cfg)).contains("neg_log_tol"));
+        cfg.neg_log_tol = -1.0;
+        assert!(slq_what(lanczos_extreme_pairs(n, &mut op, &[], cfg)).contains("neg_log_tol"));
+        cfg.neg_log_tol = 1e-8;
+        cfg.pos_residual_tol = f64::NAN;
+        assert!(slq_what(lanczos_extreme_pairs(n, &mut op, &[], cfg)).contains("pos_residual_tol"));
+        cfg.pos_residual_tol = -1.0;
+        assert!(slq_what(lanczos_extreme_pairs(n, &mut op, &[], cfg)).contains("pos_residual_tol"));
+        cfg.pos_residual_tol = 1e-8;
+        cfg.num_low_positive = 0;
+        assert!(slq_what(lanczos_extreme_pairs(n, &mut op, &[], cfg)).contains("num_low_positive"));
+        cfg.num_low_positive = 1;
+        cfg.subspace_dim = 0;
+        assert!(slq_what(lanczos_extreme_pairs(n, &mut op, &[], cfg)).contains("subspace_dim"));
+        cfg.subspace_dim = n;
         cfg.neg_abs_tol = 1e-6;
         let mut redundant = vec![0.0; n];
         redundant[0] = 2.0;
@@ -3607,6 +3889,41 @@ mod tests {
             "redundant kernel leaked eigenvalue 1: {}",
             rep.min_positive_ritz
         );
+
+        let mut tiny = vec![0.0; n];
+        tiny[0] = 1e-13;
+        let rep = lanczos_extreme_pairs(n, &mut op, &[tiny], cfg).expect("tiny kernel vector");
+        assert!(
+            (rep.min_positive_ritz - 2.0).abs() < 1e-6,
+            "tiny kernel vector was dropped: {}",
+            rep.min_positive_ritz
+        );
+
+        let mut v1 = vec![0.0; n];
+        v1[0] = 1e6;
+        let mut v2 = vec![0.0; n];
+        v2[1] = 1e6;
+        let v3 = v1
+            .iter()
+            .zip(&v2)
+            .map(|(&x, &y)| 0.7 * x + 1.3 * y)
+            .collect::<Vec<_>>();
+        let rep =
+            lanczos_extreme_pairs(n, &mut op, &[v1, v2, v3], cfg).expect("large redundant kernel");
+        assert!(
+            (rep.min_positive_ritz - 3.0).abs() < 1e-6,
+            "large redundant kernel invented a direction: {}",
+            rep.min_positive_ritz
+        );
+        let mut overcomplete = (0..n)
+            .map(|idx| {
+                let mut vector = vec![0.0; n];
+                vector[idx] = 1e6;
+                vector
+            })
+            .collect::<Vec<_>>();
+        overcomplete.push(vec![1e6; n]);
+        assert_eq!(orthonormalize_vectors(&overcomplete, n).unwrap().len(), n);
 
         let mut tilt = vec![0.0; n];
         tilt[0] = 1.0;
@@ -3624,7 +3941,7 @@ mod tests {
     #[test]
     fn hutchpp_rejects_nan_residual_and_duplicate_pairs() {
         let n = 4usize;
-        let diag = vec![1.0, 2.0, 3.0, 4.0];
+        let diag = vec![10.0, 2.0, 3.0, 4.0];
         let mut op = diag_apply(&diag);
         let mut cv = |_z: &[f64]| Ok(0.0);
         let mut id = |x: &[f64], y: &mut [f64]| {
@@ -3695,6 +4012,75 @@ mod tests {
             "duplicate pair was not refused: {why}"
         );
 
+        let mut tiny_axis = vec![0.0; n];
+        tiny_axis[0] = 1e-13;
+        let tiny_pair = DeflatedPair {
+            eigenvalue: 10.0,
+            vector: tiny_axis,
+            residual: 0.0,
+        };
+        let tiny = slq_logdet_hutchpp(
+            n,
+            &mut op,
+            SlqDeflation {
+                kernel: &[],
+                negative_pairs: &[],
+                positive_deflation: std::slice::from_ref(&tiny_pair),
+                deflation_lower_estimate: 1.0,
+                radau_lower_bound: None,
+            },
+            &mut cv,
+            &mut id,
+            options,
+            cfg,
+        )
+        .expect("tiny pair remains in projector");
+        let exact = 240.0_f64.ln();
+        assert!(
+            (tiny.logabs_det - exact).abs() < 1e-12,
+            "tiny pair gave {} instead of {exact}",
+            tiny.logabs_det
+        );
+
+        let mut near_duplicate = vec![0.0; n];
+        near_duplicate[0] = 9e-5;
+        near_duplicate[1] = 9.5e-13;
+        let near_pair = DeflatedPair {
+            eigenvalue: 2.0,
+            vector: near_duplicate,
+            residual: 0.0,
+        };
+        let unit_pair = DeflatedPair {
+            eigenvalue: 10.0,
+            vector: {
+                let mut vector = vec![0.0; n];
+                vector[0] = 1.0;
+                vector
+            },
+            residual: 0.0,
+        };
+        let near = slq_logdet_hutchpp(
+            n,
+            &mut op,
+            SlqDeflation {
+                kernel: &[],
+                negative_pairs: &[],
+                positive_deflation: &[unit_pair, near_pair],
+                deflation_lower_estimate: 1.0,
+                radau_lower_bound: None,
+            },
+            &mut cv,
+            &mut id,
+            options,
+            cfg,
+        )
+        .expect("near-duplicate pair remains in projector");
+        assert!(
+            (near.logabs_det - exact).abs() < 1e-12,
+            "near-duplicate pair gave {} instead of {exact}",
+            near.logabs_det
+        );
+
         let positive = DeflatedPair {
             eigenvalue: 8.0,
             vector: axis.clone(),
@@ -3745,6 +4131,98 @@ mod tests {
         .expect("independent pairs");
         let expect = 2.0_f64.ln() + 3.0_f64.ln();
         assert!((rep.negative_logabs - expect).abs() < 1e-12);
+
+        let mut v1 = vec![0.0; n];
+        v1[0] = 1e6;
+        let mut v2 = vec![0.0; n];
+        v2[1] = 1e6;
+        let v3 = v1
+            .iter()
+            .zip(&v2)
+            .map(|(&x, &y)| 0.7 * x + 1.3 * y)
+            .collect::<Vec<_>>();
+        let large_kernel = vec![v1, v2, v3];
+        let rep = slq_logdet_hutchpp(
+            n,
+            &mut op,
+            SlqDeflation::default().with_kernel(&large_kernel),
+            &mut cv,
+            &mut id,
+            options,
+            cfg,
+        )
+        .expect("large redundant kernel");
+        assert!(
+            (rep.logabs_det - 12.0_f64.ln()).abs() < 1e-12,
+            "large redundant kernel invented a direction: {}",
+            rep.logabs_det
+        );
+
+        let negative_residual = DeflatedPair {
+            eigenvalue: -2.0,
+            vector: axis.clone(),
+            residual: -1.0,
+        };
+        assert!(
+            hutchpp_rejection(
+                SlqDeflation::default()
+                    .with_negative_pairs(std::slice::from_ref(&negative_residual))
+            )
+            .contains("residual")
+        );
+
+        let kernel = vec![axis.clone()];
+        let repeated_kernel = DeflatedPair {
+            eigenvalue: -2.0,
+            vector: axis.clone(),
+            residual: 0.0,
+        };
+        assert!(
+            hutchpp_rejection(
+                SlqDeflation::default()
+                    .with_kernel(&kernel)
+                    .with_negative_pairs(std::slice::from_ref(&repeated_kernel))
+            )
+            .contains("double-count")
+        );
+
+        let cross_negative = DeflatedPair {
+            eigenvalue: -2.0,
+            vector: axis.clone(),
+            residual: 0.0,
+        };
+        let cross_positive = DeflatedPair {
+            eigenvalue: 2.0,
+            vector: axis.clone(),
+            residual: 0.0,
+        };
+        assert!(
+            hutchpp_rejection(
+                SlqDeflation::default()
+                    .with_negative_pairs(std::slice::from_ref(&cross_negative))
+                    .with_positive_deflation(std::slice::from_ref(&cross_positive))
+            )
+            .contains("double-count")
+        );
+
+        for vector in [
+            vec![0.0; n],
+            vec![f64::INFINITY, 0.0, 0.0, 0.0],
+            vec![f64::NAN, 0.0, 0.0, 0.0],
+        ] {
+            let invalid = DeflatedPair {
+                eigenvalue: 2.0,
+                vector,
+                residual: 0.0,
+            };
+            let why = hutchpp_rejection(
+                SlqDeflation::default().with_positive_deflation(std::slice::from_ref(&invalid)),
+            );
+            assert!(
+                why.contains("nonzero") || why.contains("non-finite"),
+                "invalid pair vector was not refused: {why}"
+            );
+        }
     }
 
     #[test]
