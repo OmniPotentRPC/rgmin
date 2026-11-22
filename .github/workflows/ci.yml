@@ -5,12 +5,18 @@ on:
     branches:
       - main
       - develop
-      - "feat/**"
-      - "fix/**"
-      - "ci/**"
-      - "perf/**"
+    paths-ignore:
+      - docs/**
+      - "**/*.md"
+      - newsfragments/**
+      - LICENSE
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - docs/**
+      - "**/*.md"
+      - newsfragments/**
+      - LICENSE
   workflow_dispatch:
 
 permissions:
@@ -470,3 +476,7 @@ jobs:
           cargo +1.89.0 install cargo-c --locked --version 0.10.17+cargo-0.92.0
       - name: Install into a prefix and compile C and C++
         run: tests/cinstall/smoke.sh
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')) }}
