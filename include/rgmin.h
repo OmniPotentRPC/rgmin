@@ -63,7 +63,8 @@ typedef enum rgmin_status_t {
     /** An opt-in unmet stop. \c x and \c out still hold the report.
      *  ABI minor 49. */
     RGMIN_UNMET_STOP = 6,
-    /** Strict convergence failed. \c x and \c out still hold the report. */
+    /** Strict convergence failed. \c x and \c out still hold the report.
+     *  ABI minor 55. */
     RGMIN_NOT_CONVERGED = 7
 } rgmin_status_t;
 
@@ -75,7 +76,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 54
+#define RGMIN_ABI_VERSION_MINOR 55
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -95,14 +96,18 @@ typedef struct rgmin_abi_stamp_t {
  *    rgmin_solver_set_gromacs_steep, and
  *    rgmin_gromacs_steep_max_constraint_shrinks.
  * 53 rgmin_minimize_eindir_opts. rgmin_control_t is unchanged.
- * 54 RGMIN_GROMACS_CG and rgmin_solver_set_gromacs_cg. */
-#define RGMIN_ABI_LAYOUT_REVISION 5
-/* Layout revision 5. rgmin_control_t is maxiter, gtol, istep, memory,
- * maxmove, noise_eps, noise_c. maxmove > 0 is the Euclidean cap; 0 keeps
- * the defaults, including the default per-atom cap; a negative value
- * leaves every step cap off. rgmin_report_t is value, steps, grad_norm,
- * stop. Both sides shipped these structs as revision 4 with different
- * fields, so the union is a new revision. */
+ * 54 RGMIN_GROMACS_CG and rgmin_solver_set_gromacs_cg.
+ * 55 require_convergence, the report converged flag,
+ *    RGMIN_NOT_CONVERGED, and rgmin_solver_set_require_convergence. */
+#define RGMIN_ABI_LAYOUT_REVISION 6
+/* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
+ * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the
+ * Euclidean cap; 0 keeps the defaults, including the default per-atom
+ * cap; a negative value leaves every step cap off.
+ * rgmin_report_t is value, steps, grad_norm, stop, converged.
+ * Revision 5 was value, steps, grad_norm, stop. Both sides shipped
+ * those structs as revision 4 with different fields, so the union was
+ * revision 5. */
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
@@ -220,18 +225,19 @@ typedef struct rgmin_control_t {
     /** Floor factor. <= 0 selects 3. */
     double noise_c;
     /** Nonzero returns RGMIN_NOT_CONVERGED when the gradient norm is
-     *  not below gtol. Zero keeps the report. */
+     *  not below gtol. Zero keeps the report. ABI minor 55. */
     int32_t require_convergence;
 } rgmin_control_t;
 /** \c sizeof(rgmin_control_t) for a layout revision 5 caller: the
- *  fields through \c noise_c. */
+ *  fields through \c noise_c. ABI minor 55. */
 #define RGMIN_CONTROL_REVISION5_SIZE offsetof(rgmin_control_t, require_convergence)
 /** Fill \a c with the Rust \c Control::default for a caller that
  *  compiled \a struct_size as \c sizeof(rgmin_control_t).
  *  \c RGMIN_CONTROL_REVISION5_SIZE writes the fields through
  *  \c noise_c. A size of at least this header's struct writes every
  *  field and leaves the bytes past them alone. A null \a c or any other
- *  size writes nothing and returns \c RGMIN_INVALID_PARAMETER. */
+ *  size writes nothing and returns \c RGMIN_INVALID_PARAMETER.
+ *  ABI minor 55. */
 rgmin_status_t rgmin_control_init(rgmin_control_t *c, size_t struct_size);
 /** Rust \c Control::default: maxiter 100, gtol 1e-5, istep 1, memory 0
  *  (10 L-BFGS pairs, 6 for DIIS), maxmove 0 (the default caps),
@@ -301,7 +307,7 @@ void rgmin_tensor_free(DLManagedTensorVersioned *tensor);
  *  \c RGMIN_CONTROL_REVISION5_SIZE reads the revision 5 fields and
  *  writes \a out up to \c stop. A size of at least this header's struct
  *  reads \c require_convergence and writes \c converged. Any other size
- *  returns \c RGMIN_INVALID_PARAMETER. */
+ *  returns \c RGMIN_INVALID_PARAMETER. ABI minor 55. */
 rgmin_status_t rgmin_minimize_opts_sized(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
                             DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
                             size_t ctrl_size, rgmin_method_t method, int error_on_unmet,
@@ -341,7 +347,7 @@ static inline rgmin_status_t rgmin_minimize_opts(rgmin_eval_fn eval, rgmin_grad_
                                      method, error_on_unmet, backward_polish, out);
 }
 /** \ref rgmin_minimize_hess_opts with \a ctrl_size read as in
- *  \ref rgmin_minimize_opts_sized. */
+ *  \ref rgmin_minimize_opts_sized. ABI minor 55. */
 rgmin_status_t rgmin_minimize_hess_opts_sized(rgmin_eval_fn eval, rgmin_grad_fn grad,
                                rgmin_hess_fn hess, void *user,
                                DLManagedTensorVersioned *x,
@@ -374,7 +380,7 @@ static inline rgmin_status_t rgmin_minimize_hess_opts(rgmin_eval_fn eval, rgmin_
 }
 
 /** \ref rgmin_minimize_eindir with \a ctrl_size read as in
- *  \ref rgmin_minimize_opts_sized. */
+ *  \ref rgmin_minimize_opts_sized. ABI minor 55. */
 rgmin_status_t rgmin_minimize_eindir_sized(
     const eindir_objective_t *objective, const eindir_abi_stamp_t *stamp,
     DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, size_t ctrl_size,
@@ -418,7 +424,8 @@ typedef struct rgmin_solver_t rgmin_solver_t;
 
 /** \ref rgmin_solver_create with \a ctrl_size read as in
  *  \ref rgmin_minimize_opts_sized. Each step of the session writes the
- *  \c rgmin_report_t of that layout. Null on any other size. */
+ *  \c rgmin_report_t of that layout. Null on any other size.
+ *  ABI minor 55. */
 rgmin_solver_t *rgmin_solver_create_sized(rgmin_method_t method, const rgmin_control_t *ctrl,
                                       size_t ctrl_size, size_t dim);
 /** Allocate a session. \a dim is the length of \c x. Null on error.
@@ -687,7 +694,7 @@ void rgmin_solver_set_backward_polish(rgmin_solver_t *solver, int32_t on);
 /** Nonzero opts a later run into \c RGMIN_NOT_CONVERGED. A step stays
  *  \c RGMIN_SUCCESS, except that a steepest, BFGS, nonlinear CG or Adam
  *  step that took no move and left its state unchanged reports
- *  \c RGMIN_STOP_STEP_TOLERANCE. */
+ *  \c RGMIN_STOP_STEP_TOLERANCE. ABI minor 55. */
 void rgmin_solver_set_require_convergence(rgmin_solver_t *solver, int32_t on);
 /** FIRE 2.0 parameter set. GUENOLE2020 is Table 1 of Guenole et al.,
  *  Comput. Mater. Sci. 175, 109584 (2020): dt_max 10 dt, dt_min
@@ -1288,7 +1295,7 @@ typedef struct rgmin_scg_options_t {
 rgmin_scg_options_t rgmin_scg_options_default(void);
 
 /** \ref rgmin_minimize_scg_with_options with \a ctrl_size read as in
- *  \ref rgmin_minimize_opts_sized. */
+ *  \ref rgmin_minimize_opts_sized. ABI minor 55. */
 rgmin_status_t rgmin_minimize_scg_with_options_sized(
     rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_curv_fn curv, void *user,
     DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, size_t ctrl_size,
@@ -1345,7 +1352,7 @@ typedef struct rgmin_rlbfgs_t {
 rgmin_rlbfgs_t rgmin_rlbfgs_default(void);
 
 /** \ref rgmin_minimize_rlbfgs with \a ctrl_size read as in
- *  \ref rgmin_minimize_opts_sized. */
+ *  \ref rgmin_minimize_opts_sized. ABI minor 55. */
 rgmin_status_t rgmin_minimize_rlbfgs_sized(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
                                      DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
                                      size_t ctrl_size, const rgmin_rlbfgs_t *params,
@@ -1430,7 +1437,7 @@ rgmin_status_t rgmin_lowest_eigenpair(rgmin_hvp_fn hvp, void *user,
                                     rgmin_lowest_mode_t *out);
 
 /** \ref rgmin_minimize_hvp_opts with \a ctrl_size read as in
- *  \ref rgmin_minimize_opts_sized. */
+ *  \ref rgmin_minimize_opts_sized. ABI minor 55. */
 rgmin_status_t rgmin_minimize_hvp_opts_sized(rgmin_eval_fn eval, rgmin_grad_fn grad,
                               rgmin_hvp_fn hvp, void *user,
                               DLManagedTensorVersioned *x,

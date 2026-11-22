@@ -52,6 +52,7 @@ pub enum rgmin_status_t {
     /// ABI minor 49.
     RGMIN_UNMET_STOP = 6,
     /// Strict convergence failed. `x` and `out` still hold the report.
+    /// ABI minor 55.
     RGMIN_NOT_CONVERGED = 7,
 }
 
@@ -85,8 +86,8 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 54;
-pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 55;
+pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
 #[repr(C)]
@@ -249,7 +250,7 @@ pub struct rgmin_control_t {
     /// gradient norm is not below `gtol`. Zero keeps the `Ok` report.
     /// Read only by an entry that is told the caller's size, such as
     /// [`rgmin_minimize_opts_sized`]. Every other entry reads the
-    /// revision 5 fields and leaves this at 0.
+    /// revision 5 fields and leaves this at 0. ABI minor 55.
     pub require_convergence: i32,
 }
 
@@ -303,7 +304,7 @@ pub struct rgmin_report_t {
     pub grad_norm: f64,
     /// Which stop produced this report.
     pub stop: rgmin_stop_t,
-    /// Nonzero when `grad_norm` is below `gtol`.
+    /// Nonzero when `grad_norm` is below `gtol`. ABI minor 55.
     pub converged: i32,
 }
 
@@ -1193,7 +1194,7 @@ pub unsafe extern "C" fn rgmin_minimize_opts(
 /// reads the revision 5 fields and writes a revision 5 report; a size
 /// of at least this build's struct reads `require_convergence` and
 /// writes `converged`. Any other size is
-/// [`rgmin_status_t::RGMIN_INVALID_PARAMETER`].
+/// [`rgmin_status_t::RGMIN_INVALID_PARAMETER`]. ABI minor 55.
 ///
 /// # Safety
 /// Same as [`rgmin_minimize`], with `ctrl` readable for `ctrl_size`
@@ -1340,7 +1341,7 @@ pub unsafe extern "C" fn rgmin_minimize_rlbfgs(
 
 /// [`rgmin_minimize_rlbfgs`] for a caller that states
 /// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
-/// [`rgmin_minimize_opts_sized`].
+/// [`rgmin_minimize_opts_sized`]. ABI minor 55.
 ///
 /// # Safety
 /// Same as [`rgmin_minimize_opts_sized`]. `params` may be null.
@@ -1490,7 +1491,7 @@ pub unsafe extern "C" fn rgmin_minimize_hess_opts(
 
 /// [`rgmin_minimize_hess_opts`] for a caller that states
 /// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
-/// [`rgmin_minimize_opts_sized`].
+/// [`rgmin_minimize_opts_sized`]. ABI minor 55.
 ///
 /// # Safety
 /// Same as [`rgmin_minimize_opts_sized`]. `hess` must be callable for
@@ -1629,7 +1630,7 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_opts(
 
 /// [`rgmin_minimize_hvp_opts`] for a caller that states
 /// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
-/// [`rgmin_minimize_opts_sized`].
+/// [`rgmin_minimize_opts_sized`]. ABI minor 55.
 ///
 /// # Safety
 /// Same as [`rgmin_minimize_opts_sized`]. `hvp` must be callable for
@@ -1779,7 +1780,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
 
 /// [`rgmin_minimize_eindir`] for a caller that states
 /// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
-/// [`rgmin_minimize_opts_sized`].
+/// [`rgmin_minimize_opts_sized`]. ABI minor 55.
 ///
 /// # Safety
 /// Same as [`rgmin_minimize_eindir`], with `ctrl` readable for
@@ -1930,7 +1931,7 @@ pub unsafe extern "C" fn rgmin_solver_create(
 /// `sizeof(rgmin_control_t)` as `ctrl_size`. The session's reports
 /// follow the same layout. A size that is neither
 /// [`RGMIN_CONTROL_REVISION5_SIZE`] nor at least this build's struct
-/// returns null.
+/// returns null. ABI minor 55.
 ///
 /// # Safety
 /// `ctrl` is null or readable for `ctrl_size` bytes.
@@ -2376,7 +2377,7 @@ pub unsafe extern "C" fn rgmin_solver_set_backward_polish(solver: *mut rgmin_sol
 /// that reads this session's control. A step stays success, except that
 /// a steepest, BFGS, nonlinear CG or Adam step which took no move and
 /// left its state unchanged reports
-/// [`rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE`].
+/// [`rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE`]. ABI minor 55.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
@@ -5706,7 +5707,7 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
 /// [`rgmin_minimize_scg_with_options`] for a caller that states
 /// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
 /// [`rgmin_minimize_opts_sized`]. Null `options` is the absolute
-/// infinity-norm rule.
+/// infinity-norm rule. ABI minor 55.
 ///
 /// # Safety
 /// Same as [`rgmin_minimize_scg_with_options`], with `ctrl` readable for
@@ -7372,7 +7373,7 @@ pub extern "C" fn rgmin_control_default() -> rgmin_control_revision5_t {
 /// [`RGMIN_CONTROL_REVISION5_SIZE`] writes the revision 5 fields. A size
 /// of at least this build's struct writes every field and leaves the
 /// bytes past them alone. A null `c` or any other size writes nothing
-/// and returns [`rgmin_status_t::RGMIN_INVALID_PARAMETER`].
+/// and returns [`rgmin_status_t::RGMIN_INVALID_PARAMETER`]. ABI minor 55.
 ///
 /// # Safety
 /// `c` is null or writable for `struct_size` bytes.

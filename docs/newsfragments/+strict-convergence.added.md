@@ -11,7 +11,11 @@ A strict run stops early as `StepTolerance` only when an accepted step
 leaves the point unchanged and the next iteration would repeat it. A
 rejected trust region trial or a rejected adaptive step is not a stall,
 so a run that converges by default converges identically when strict.
-The C ABI adds the control field, the report
+C ABI minor 55 and layout revision 6 add the control field, the report
 flag, `RGMIN_NOT_CONVERGED`, and `rgmin_solver_set_require_convergence`.
+A binary built against revision 5 keeps its 56-byte control and
+report through `stop`; `rgmin.h` routes each entry to a `_sized`
+symbol so a rebuilt caller has `require_convergence` read, and
+`rgmin_control_init` fills either layout.
 C++ throws `rgmin::NotConverged` and Python `minimize` raises
 `rgmin.NotConverged`; both carry the report.

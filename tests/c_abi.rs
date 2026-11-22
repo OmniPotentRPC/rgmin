@@ -1205,6 +1205,9 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 /// ABI minor 52 adds `RGMIN_GROMACS_STEEP`, `RGMIN_STOP_MACHINE_PRECISION`,
 /// `rgmin_solver_set_gromacs_steep`, and
 /// `rgmin_gromacs_steep_max_constraint_shrinks`.
+/// ABI minor 55 adds `require_convergence`, the report `converged` flag,
+/// `RGMIN_NOT_CONVERGED`, `rgmin_solver_set_require_convergence`,
+/// `rgmin_control_init`, and the `_sized` entries.
 /// ABI minor 51 adds `rgmin_minimize_rlbfgs` and `rgmin_rlbfgs_default`.
 /// ABI minor 53 adds `rgmin_minimize_eindir_opts`. Minor 50 adds
 /// `rgmin_solver_set_etol`, `rgmin_solver_set_max_evals`, their clear
@@ -1224,8 +1227,8 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 54);
-    assert_eq!(stamp.layout_revision, 5);
+    assert_eq!(stamp.abi_minor, 55);
+    assert_eq!(stamp.layout_revision, 6);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
 
