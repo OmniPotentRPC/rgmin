@@ -223,11 +223,33 @@ typedef struct rgmin_control_t {
      *  not below gtol. Zero keeps the report. */
     int32_t require_convergence;
 } rgmin_control_t;
+/** \c sizeof(rgmin_control_t) for a layout revision 5 caller: the
+ *  fields through \c noise_c. */
+#define RGMIN_CONTROL_REVISION5_SIZE offsetof(rgmin_control_t, require_convergence)
+/** Fill \a c with the Rust \c Control::default for a caller that
+ *  compiled \a struct_size as \c sizeof(rgmin_control_t).
+ *  \c RGMIN_CONTROL_REVISION5_SIZE writes the fields through
+ *  \c noise_c. A size of at least this header's struct writes every
+ *  field and leaves the bytes past them alone. A null \a c or any other
+ *  size writes nothing and returns \c RGMIN_INVALID_PARAMETER. */
+rgmin_status_t rgmin_control_init(rgmin_control_t *c, size_t struct_size);
 /** Rust \c Control::default: maxiter 100, gtol 1e-5, istep 1, memory 0
  *  (10 L-BFGS pairs, 6 for DIIS), maxmove 0 (the default caps),
  *  noise_eps 0 (no floor), noise_c 3, and require_convergence 0.
- *  ABI minor 46. */
-rgmin_control_t rgmin_control_default(void);
+ *  ABI minor 46.
+ *
+ *  Each entry that takes a \c rgmin_control_t is an inline function
+ *  here that passes \c sizeof(rgmin_control_t) to its \c _sized
+ *  symbol, so the library reads the fields this header declares and
+ *  writes the \c rgmin_report_t it declares. The exported symbol of
+ *  the plain name, which a binary built against layout revision 5
+ *  calls, reads and writes only the revision 5 fields, and
+ *  \c require_convergence keeps its default 0 there. */
+static inline rgmin_control_t rgmin_control_default(void) {
+    rgmin_control_t c;
+    (void)rgmin_control_init(&c, sizeof c);
+    return c;
+}
 
 /** First-order floor \c n * eps * (1 + |value| + sum |x_i|), with
  *  \c eps the IEEE-754 binary64 unit roundoff. A null \a x or \a n of
@@ -274,6 +296,16 @@ const char *rgmin_last_error_message(void);
 DLManagedTensorVersioned *rgmin_tensor_borrow_cpu_f64(double *data, size_t n);
 /** Free a tensor from rgmin_tensor_borrow_cpu_f64. */
 void rgmin_tensor_free(DLManagedTensorVersioned *tensor);
+/** \ref rgmin_minimize_opts for a caller that passes
+ *  \c sizeof(rgmin_control_t) as \a ctrl_size.
+ *  \c RGMIN_CONTROL_REVISION5_SIZE reads the revision 5 fields and
+ *  writes \a out up to \c stop. A size of at least this header's struct
+ *  reads \c require_convergence and writes \c converged. Any other size
+ *  returns \c RGMIN_INVALID_PARAMETER. */
+rgmin_status_t rgmin_minimize_opts_sized(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
+                            DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
+                            size_t ctrl_size, rgmin_method_t method, int error_on_unmet,
+                            int backward_polish, rgmin_report_t *out);
 /**
  * Minimize from \a x in place.
  *
@@ -291,52 +323,91 @@ void rgmin_tensor_free(DLManagedTensorVersioned *tensor);
  * the noise floor, else \c RGMIN_STOP_BUDGET. \ref rgmin_minimize_hess,
  * \ref rgmin_minimize_hvp and \ref rgmin_minimize_eindir do the same.
  */
-rgmin_status_t rgmin_minimize(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
+static inline rgmin_status_t rgmin_minimize(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
                             DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
-                            rgmin_method_t method, rgmin_report_t *out);
+                            rgmin_method_t method, rgmin_report_t *out) {
+    return rgmin_minimize_opts_sized(eval, grad, user, x, ctrl, sizeof(rgmin_control_t),
+                                     method, 0, 0, out);
+}
 /** \ref rgmin_minimize with the two opt-in flags. Nonzero
  *  \a error_on_unmet writes \a x and \a out, then returns
  *  \c RGMIN_UNMET_STOP. \a backward_polish does not change this entry:
  *  it has no Hessian. ABI minor 49. */
-rgmin_status_t rgmin_minimize_opts(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
+static inline rgmin_status_t rgmin_minimize_opts(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
                             DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
                             rgmin_method_t method, int error_on_unmet,
-                            int backward_polish, rgmin_report_t *out);
+                            int backward_polish, rgmin_report_t *out) {
+    return rgmin_minimize_opts_sized(eval, grad, user, x, ctrl, sizeof(rgmin_control_t),
+                                     method, error_on_unmet, backward_polish, out);
+}
+/** \ref rgmin_minimize_hess_opts with \a ctrl_size read as in
+ *  \ref rgmin_minimize_opts_sized. */
+rgmin_status_t rgmin_minimize_hess_opts_sized(rgmin_eval_fn eval, rgmin_grad_fn grad,
+                               rgmin_hess_fn hess, void *user,
+                               DLManagedTensorVersioned *x,
+                               const rgmin_control_t *ctrl, size_t ctrl_size,
+                               rgmin_method_t method, int error_on_unmet,
+                               int backward_polish, rgmin_report_t *out);
 /**
  * Newton / RFO. \a hess writes a length-\c n*n row-major Hessian.
  * \c method is \c RGMIN_NEWTON or \c RGMIN_RFO.
  */
-rgmin_status_t rgmin_minimize_hess(rgmin_eval_fn eval, rgmin_grad_fn grad,
+static inline rgmin_status_t rgmin_minimize_hess(rgmin_eval_fn eval, rgmin_grad_fn grad,
                                rgmin_hess_fn hess, void *user,
                                DLManagedTensorVersioned *x,
                                const rgmin_control_t *ctrl, rgmin_method_t method,
-                               rgmin_report_t *out);
+                               rgmin_report_t *out) {
+    return rgmin_minimize_hess_opts_sized(eval, grad, hess, user, x, ctrl,
+                                          sizeof(rgmin_control_t), method, 0, 0, out);
+}
 /** \ref rgmin_minimize_hess with the two opt-in flags. Nonzero
  *  \a backward_polish polishes on the supplied Hessian. ABI minor 49. */
-rgmin_status_t rgmin_minimize_hess_opts(rgmin_eval_fn eval, rgmin_grad_fn grad,
+static inline rgmin_status_t rgmin_minimize_hess_opts(rgmin_eval_fn eval, rgmin_grad_fn grad,
                                rgmin_hess_fn hess, void *user,
                                DLManagedTensorVersioned *x,
                                const rgmin_control_t *ctrl, rgmin_method_t method,
                                int error_on_unmet, int backward_polish,
-                               rgmin_report_t *out);
+                               rgmin_report_t *out) {
+    return rgmin_minimize_hess_opts_sized(eval, grad, hess, user, x, ctrl,
+                                          sizeof(rgmin_control_t), method, error_on_unmet,
+                                          backward_polish, out);
+}
 
+/** \ref rgmin_minimize_eindir with \a ctrl_size read as in
+ *  \ref rgmin_minimize_opts_sized. */
+rgmin_status_t rgmin_minimize_eindir_sized(
+    const eindir_objective_t *objective, const eindir_abi_stamp_t *stamp,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, size_t ctrl_size,
+    rgmin_method_t method, rgmin_report_t *out);
 /**
  * Minimize an eindir-compatible objective without taking ownership of it.
  * The stamp must be compatible with this build and include an analytic
  * gradient. The caller retains ownership of an objective.
  */
-rgmin_status_t rgmin_minimize_eindir(
+static inline rgmin_status_t rgmin_minimize_eindir(
     const eindir_objective_t *objective, const eindir_abi_stamp_t *stamp,
     DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, rgmin_method_t method,
-    rgmin_report_t *out);
+    rgmin_report_t *out) {
+    return rgmin_minimize_eindir_sized(objective, stamp, x, ctrl, sizeof(rgmin_control_t),
+                                       method, out);
+}
+/** \ref rgmin_minimize_eindir_opts with \a ctrl_size read as in
+ *  \ref rgmin_minimize_opts_sized. */
+rgmin_status_t rgmin_minimize_eindir_opts_sized(
+    const eindir_objective_t *objective, const eindir_abi_stamp_t *stamp,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, size_t ctrl_size,
+    rgmin_method_t method, int error_on_unmet, int backward_polish, rgmin_report_t *out);
 /** \ref rgmin_minimize_eindir with the two opt-in flags. Nonzero
  *  \a error_on_unmet writes \a x and \a out, then returns
  *  \c RGMIN_UNMET_STOP. \a backward_polish does not change this entry:
  *  it has no Hessian. ABI minor 53. */
-rgmin_status_t rgmin_minimize_eindir_opts(
+static inline rgmin_status_t rgmin_minimize_eindir_opts(
     const eindir_objective_t *objective, const eindir_abi_stamp_t *stamp,
     DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, rgmin_method_t method,
-    int error_on_unmet, int backward_polish, rgmin_report_t *out);
+    int error_on_unmet, int backward_polish, rgmin_report_t *out) {
+    return rgmin_minimize_eindir_opts_sized(objective, stamp, x, ctrl, sizeof(rgmin_control_t),
+                                            method, error_on_unmet, backward_polish, out);
+}
 
 /**
  * Opaque session. Algorithm memory (L-BFGS pairs, NLCG directions,
@@ -345,8 +416,13 @@ rgmin_status_t rgmin_minimize_eindir_opts(
  */
 typedef struct rgmin_solver_t rgmin_solver_t;
 
+/** \ref rgmin_solver_create with \a ctrl_size read as in
+ *  \ref rgmin_minimize_opts_sized. Each step of the session writes the
+ *  \c rgmin_report_t of that layout. Null on any other size. */
+rgmin_solver_t *rgmin_solver_create_sized(rgmin_method_t method, const rgmin_control_t *ctrl,
+                                      size_t ctrl_size, size_t dim);
 /** Allocate a session. \a dim is the length of \c x. Null on error.
- *  The exported symbol is \c rgmin_solver_create.
+ *  This inline function calls \ref rgmin_solver_create_sized.
  *
  *  Since 0.6.0 the session opens with \c RGMIN_ACCEPT_ENERGY, where 0.5
  *  opened with \c RGMIN_ACCEPT_NONE. The default L-BFGS step is the eOn
@@ -359,8 +435,10 @@ typedef struct rgmin_solver_t rgmin_solver_t;
  *  rescale their first step before the first update.
  *  Call \ref rgmin_solver_set_accept with \c RGMIN_ACCEPT_NONE after
  *  this for the 0.5 behaviour. */
-rgmin_solver_t *rgmin_solver_create(rgmin_method_t method, const rgmin_control_t *ctrl,
-                                size_t dim);
+static inline rgmin_solver_t *rgmin_solver_create(rgmin_method_t method,
+                                               const rgmin_control_t *ctrl, size_t dim) {
+    return rgmin_solver_create_sized(method, ctrl, sizeof(rgmin_control_t), dim);
+}
 /** Release a session from \ref rgmin_solver_create. */
 void rgmin_solver_free(rgmin_solver_t *solver);
 /** Drop method memory. The next step is a cold start from the current \c x. */
@@ -1191,30 +1269,6 @@ typedef struct rgmin_scg_params_t {
  *  1e-8) with \c RGMIN_CONJUGACY_POLAK_RIBIERE. ABI minor 46. */
 rgmin_scg_params_t rgmin_scg_params_default(void);
 
-/**
- * Møller SCG. \a curv may be NULL (finite-difference probe).
- * The exported symbol is \c rgmin_minimize_scg.
- *
- * \a params NULL selects ScgParams defaults, Polak-Ribiere, and
- * Restart::Never. A filled \a params takes \c conjugacy literally
- * (0 is Fletcher-Reeves). Restart is not a C token; the waist
- * passes Never. Møller n-success reset stays inside the Rust loop.
- * gpr_optim RgminScg.inl writes \c RGMIN_CONJUGACY_LIU_STOREY. In-tree
- * SCG.inl does not call this entry.
- *
- * A positive \c ctrl->maxmove is the Euclidean cap. Zero keeps the
- * defaults. A negative value leaves every step cap off.
- *
- * A zero \c ctrl->maxiter also stops, with \c RGMIN_STOP_STEP_TOLERANCE
- * while ||g|| is at or above gtol, after max(n, 2) consecutive accepted
- * steps that pass \c tol_func and never reduce ||g||. A positive
- * \c ctrl->maxiter is unaffected.
- */
-rgmin_status_t rgmin_minimize_scg(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_curv_fn curv,
-                                void *user, DLManagedTensorVersioned *x,
-                                const rgmin_control_t *ctrl,
-                                const rgmin_scg_params_t *params, rgmin_report_t *out);
-
 /** Accepted-step SCG convergence rule. Both require objective convergence. */
 typedef enum rgmin_scg_step_tolerance_t {
     /** ||alpha d||_inf < tol_sol. */
@@ -1233,12 +1287,48 @@ typedef struct rgmin_scg_options_t {
  *  \c RGMIN_SCG_ABSOLUTE_INFINITY. ABI minor 46. */
 rgmin_scg_options_t rgmin_scg_options_default(void);
 
+/** \ref rgmin_minimize_scg_with_options with \a ctrl_size read as in
+ *  \ref rgmin_minimize_opts_sized. */
+rgmin_status_t rgmin_minimize_scg_with_options_sized(
+    rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_curv_fn curv, void *user,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, size_t ctrl_size,
+    const rgmin_scg_params_t *params, const rgmin_scg_options_t *options,
+    rgmin_report_t *out);
+/**
+ * Møller SCG. \a curv may be NULL (finite-difference probe).
+ * This inline function calls \ref rgmin_minimize_scg_with_options_sized.
+ *
+ * \a params NULL selects ScgParams defaults, Polak-Ribiere, and
+ * Restart::Never. A filled \a params takes \c conjugacy literally
+ * (0 is Fletcher-Reeves). Restart is not a C token; the waist
+ * passes Never. Møller n-success reset stays inside the Rust loop.
+ * gpr_optim RgminScg.inl writes \c RGMIN_CONJUGACY_LIU_STOREY. In-tree
+ * SCG.inl does not call this entry.
+ *
+ * A positive \c ctrl->maxmove is the Euclidean cap. Zero keeps the
+ * defaults. A negative value leaves every step cap off.
+ *
+ * A zero \c ctrl->maxiter also stops, with \c RGMIN_STOP_STEP_TOLERANCE
+ * while ||g|| is at or above gtol, after max(n, 2) consecutive accepted
+ * steps that pass \c tol_func and never reduce ||g||. A positive
+ * \c ctrl->maxiter is unaffected.
+ */
+static inline rgmin_status_t rgmin_minimize_scg(rgmin_eval_fn eval, rgmin_grad_fn grad,
+                                rgmin_curv_fn curv, void *user, DLManagedTensorVersioned *x,
+                                const rgmin_control_t *ctrl,
+                                const rgmin_scg_params_t *params, rgmin_report_t *out) {
+    return rgmin_minimize_scg_with_options_sized(eval, grad, curv, user, x, ctrl,
+                                                 sizeof(rgmin_control_t), params, NULL, out);
+}
 /** SCG with explicit convergence policy. NULL options selects the legacy rule. */
-rgmin_status_t rgmin_minimize_scg_with_options(
+static inline rgmin_status_t rgmin_minimize_scg_with_options(
     rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_curv_fn curv, void *user,
     DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
     const rgmin_scg_params_t *params, const rgmin_scg_options_t *options,
-    rgmin_report_t *out);
+    rgmin_report_t *out) {
+    return rgmin_minimize_scg_with_options_sized(eval, grad, curv, user, x, ctrl,
+                                                 sizeof(rgmin_control_t), params, options, out);
+}
 
 /** Cautious limited-memory Riemannian BFGS. Start from
  *  \ref rgmin_rlbfgs_default. ABI minor 51. */
@@ -1254,15 +1344,25 @@ typedef struct rgmin_rlbfgs_t {
  *  ABI minor 51. */
 rgmin_rlbfgs_t rgmin_rlbfgs_default(void);
 
+/** \ref rgmin_minimize_rlbfgs with \a ctrl_size read as in
+ *  \ref rgmin_minimize_opts_sized. */
+rgmin_status_t rgmin_minimize_rlbfgs_sized(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
+                                     DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
+                                     size_t ctrl_size, const rgmin_rlbfgs_t *params,
+                                     rgmin_manifold_t manifold, rgmin_report_t *out);
 /** Cautious limited-memory Riemannian BFGS on \a manifold.
  *  NULL \a params selects \ref rgmin_rlbfgs_default. \a manifold uses
  *  the same default shapes as \ref rgmin_solver_set_manifold.
  *  A positive \c ctrl->maxmove caps the ambient trial length. Zero
  *  leaves that cap off. ABI minor 51. */
-rgmin_status_t rgmin_minimize_rlbfgs(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
-                                     DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
+static inline rgmin_status_t rgmin_minimize_rlbfgs(rgmin_eval_fn eval, rgmin_grad_fn grad,
+                                     void *user, DLManagedTensorVersioned *x,
+                                     const rgmin_control_t *ctrl,
                                      const rgmin_rlbfgs_t *params, rgmin_manifold_t manifold,
-                                     rgmin_report_t *out);
+                                     rgmin_report_t *out) {
+    return rgmin_minimize_rlbfgs_sized(eval, grad, user, x, ctrl, sizeof(rgmin_control_t),
+                                       params, manifold, out);
+}
 
 
 
@@ -1329,22 +1429,37 @@ rgmin_status_t rgmin_lowest_eigenpair(rgmin_hvp_fn hvp, void *user,
                                     const rgmin_eigen_params_t *params,
                                     rgmin_lowest_mode_t *out);
 
+/** \ref rgmin_minimize_hvp_opts with \a ctrl_size read as in
+ *  \ref rgmin_minimize_opts_sized. */
+rgmin_status_t rgmin_minimize_hvp_opts_sized(rgmin_eval_fn eval, rgmin_grad_fn grad,
+                              rgmin_hvp_fn hvp, void *user,
+                              DLManagedTensorVersioned *x,
+                              const rgmin_control_t *ctrl, size_t ctrl_size,
+                              rgmin_method_t method, int error_on_unmet,
+                              int backward_polish, rgmin_report_t *out);
 /** Steihaug-Toint Newton-CG. \a hvp writes \c H(x) v. \c method is
  *  \c RGMIN_NEWTON_CG or \c RGMIN_NEWTON_PCG. No dense Hessian is formed. */
-rgmin_status_t rgmin_minimize_hvp(rgmin_eval_fn eval, rgmin_grad_fn grad,
+static inline rgmin_status_t rgmin_minimize_hvp(rgmin_eval_fn eval, rgmin_grad_fn grad,
                               rgmin_hvp_fn hvp, void *user,
                               DLManagedTensorVersioned *x,
                               const rgmin_control_t *ctrl, rgmin_method_t method,
-                              rgmin_report_t *out);
+                              rgmin_report_t *out) {
+    return rgmin_minimize_hvp_opts_sized(eval, grad, hvp, user, x, ctrl,
+                                         sizeof(rgmin_control_t), method, 0, 0, out);
+}
 /** \ref rgmin_minimize_hvp with the two opt-in flags. Nonzero
  *  \a backward_polish polishes from the Hessian-vector product.
  *  ABI minor 49. */
-rgmin_status_t rgmin_minimize_hvp_opts(rgmin_eval_fn eval, rgmin_grad_fn grad,
+static inline rgmin_status_t rgmin_minimize_hvp_opts(rgmin_eval_fn eval, rgmin_grad_fn grad,
                               rgmin_hvp_fn hvp, void *user,
                               DLManagedTensorVersioned *x,
                               const rgmin_control_t *ctrl, rgmin_method_t method,
                               int error_on_unmet, int backward_polish,
-                              rgmin_report_t *out);
+                              rgmin_report_t *out) {
+    return rgmin_minimize_hvp_opts_sized(eval, grad, hvp, user, x, ctrl,
+                                         sizeof(rgmin_control_t), method, error_on_unmet,
+                                         backward_polish, out);
+}
 /** One Steihaug-Toint iteration. Legal on \c RGMIN_NEWTON_CG and
  *  \c RGMIN_NEWTON_PCG. \a hvp is a product, not a matrix. */
 rgmin_status_t rgmin_solver_step_hvp(rgmin_solver_t *solver, rgmin_eval_fn eval,

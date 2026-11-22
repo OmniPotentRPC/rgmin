@@ -247,8 +247,49 @@ pub struct rgmin_control_t {
     pub noise_c: f64,
     /// Nonzero returns [`rgmin_status_t::RGMIN_NOT_CONVERGED`] when the
     /// gradient norm is not below `gtol`. Zero keeps the `Ok` report.
+    /// Read only by an entry that is told the caller's size, such as
+    /// [`rgmin_minimize_opts_sized`]. Every other entry reads the
+    /// revision 5 fields and leaves this at 0.
     pub require_convergence: i32,
 }
+
+/// [`rgmin_control_t`] as a layout revision 5 caller compiled it, the
+/// fields through `noise_c`. The exported `rgmin_control_default`
+/// returns this struct, because a by-value return writes the whole
+/// struct into storage the caller sized.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_control_revision5_t {
+    /// Maximum iterations.
+    pub maxiter: usize,
+    /// Stop when `||g||_2 < gtol`.
+    pub gtol: f64,
+    /// Initial line-search step.
+    pub istep: f64,
+    /// L-BFGS correction pairs.
+    pub memory: usize,
+    /// Euclidean cap.
+    pub maxmove: f64,
+    /// Gradient-projection noise.
+    pub noise_eps: f64,
+    /// Floor factor.
+    pub noise_c: f64,
+}
+
+/// `sizeof(rgmin_control_t)` for a layout revision 5 caller, the offset
+/// of `require_convergence`.
+pub const RGMIN_CONTROL_REVISION5_SIZE: usize =
+    std::mem::offset_of!(rgmin_control_t, require_convergence);
+
+/// The bytes of [`rgmin_report_t`] a layout revision 5 caller owns
+/// fields in: everything before `converged`.
+pub const RGMIN_REPORT_REVISION5_SIZE: usize = std::mem::offset_of!(rgmin_report_t, converged);
+
+const _: () = assert!(RGMIN_CONTROL_REVISION5_SIZE == size_of::<rgmin_control_revision5_t>());
+const _: () = assert!(
+    RGMIN_REPORT_REVISION5_SIZE
+        == std::mem::offset_of!(rgmin_report_t, stop) + size_of::<rgmin_stop_t>()
+);
 
 /// Result written by [`rgmin_minimize`].
 #[repr(C)]
@@ -1114,6 +1155,9 @@ pub unsafe extern "C" fn rgmin_minimize(
 /// [`rgmin_status_t::RGMIN_UNMET_STOP`]. `backward_polish` has no Hessian
 /// on this entry and does not change the step. ABI minor 49.
 ///
+/// This symbol reads `ctrl` and writes `out` as layout revision 5.
+/// `include/rgmin.h` routes the name to [`rgmin_minimize_opts_sized`].
+///
 /// # Safety
 /// Same as [`rgmin_minimize`].
 #[unsafe(no_mangle)]
@@ -1123,6 +1167,45 @@ pub unsafe extern "C" fn rgmin_minimize_opts(
     user: *mut c_void,
     x: *mut DLManagedTensorVersioned,
     ctrl: *const rgmin_control_t,
+    method: rgmin_method_t,
+    error_on_unmet: i32,
+    backward_polish: i32,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    unsafe {
+        rgmin_minimize_opts_sized(
+            eval,
+            grad,
+            user,
+            x,
+            ctrl,
+            RGMIN_CONTROL_REVISION5_SIZE,
+            method,
+            error_on_unmet,
+            backward_polish,
+            out,
+        )
+    }
+}
+
+/// [`rgmin_minimize_opts`] for a caller that states
+/// `sizeof(rgmin_control_t)` as `ctrl_size`. [`RGMIN_CONTROL_REVISION5_SIZE`]
+/// reads the revision 5 fields and writes a revision 5 report; a size
+/// of at least this build's struct reads `require_convergence` and
+/// writes `converged`. Any other size is
+/// [`rgmin_status_t::RGMIN_INVALID_PARAMETER`].
+///
+/// # Safety
+/// Same as [`rgmin_minimize`], with `ctrl` readable for `ctrl_size`
+/// bytes and `out` writable for the layout that size names.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_opts_sized(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    ctrl_size: usize,
     method: rgmin_method_t,
     error_on_unmet: i32,
     backward_polish: i32,
@@ -1154,6 +1237,10 @@ pub unsafe extern "C" fn rgmin_minimize_opts(
             set_last_error("rgmin_minimize: ctrl/out null");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
+        let (c, layout) = match unsafe { load_control("rgmin_minimize", ctrl, ctrl_size) } {
+            Ok(loaded) => loaded,
+            Err(status) => return status,
+        };
         let init = match cpu_f64_slice_mut(x, "x") {
             Ok(s) => s.to_vec(),
             Err(st) => return st,
@@ -1163,8 +1250,7 @@ pub unsafe extern "C" fn rgmin_minimize_opts(
         }
         let n = init.len();
         let obj = c_oracle(eval, grad, user, n);
-        let c = unsafe { &*ctrl };
-        let control = control_with_flags(c, error_on_unmet, backward_polish);
+        let control = control_with_flags(&c, error_on_unmet, backward_polish);
         let outcome = minimize_method(
             &obj,
             Array1::from(init),
@@ -1172,7 +1258,7 @@ pub unsafe extern "C" fn rgmin_minimize_opts(
             method_from_c(method, c.memory),
             LineSearch::default(),
         );
-        finish_one_shot(x, out, outcome)
+        finish_one_shot(x, out, outcome, layout)
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -1220,6 +1306,9 @@ pub unsafe extern "C" fn rgmin_minimize_scg(
 /// Null `params` selects [`Rlbfgs::default`]. The token uses the same
 /// default shapes as [`rgmin_solver_set_manifold`]. ABI minor 51.
 ///
+/// This symbol reads `ctrl` and writes `out` as layout revision 5.
+/// `include/rgmin.h` routes the name to [`rgmin_minimize_rlbfgs_sized`].
+///
 /// # Safety
 ///
 /// Same as [`rgmin_minimize`]. `params` may be null.
@@ -1230,6 +1319,39 @@ pub unsafe extern "C" fn rgmin_minimize_rlbfgs(
     user: *mut c_void,
     x: *mut DLManagedTensorVersioned,
     ctrl: *const rgmin_control_t,
+    params: *const rgmin_rlbfgs_t,
+    manifold: rgmin_manifold_t,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    unsafe {
+        rgmin_minimize_rlbfgs_sized(
+            eval,
+            grad,
+            user,
+            x,
+            ctrl,
+            RGMIN_CONTROL_REVISION5_SIZE,
+            params,
+            manifold,
+            out,
+        )
+    }
+}
+
+/// [`rgmin_minimize_rlbfgs`] for a caller that states
+/// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
+/// [`rgmin_minimize_opts_sized`].
+///
+/// # Safety
+/// Same as [`rgmin_minimize_opts_sized`]. `params` may be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_rlbfgs_sized(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    ctrl_size: usize,
     params: *const rgmin_rlbfgs_t,
     manifold: rgmin_manifold_t,
     out: *mut rgmin_report_t,
@@ -1253,6 +1375,10 @@ pub unsafe extern "C" fn rgmin_minimize_rlbfgs(
             set_last_error("rgmin_minimize_rlbfgs: ctrl/out null");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
+        let (c, layout) = match unsafe { load_control("rgmin_minimize_rlbfgs", ctrl, ctrl_size) } {
+            Ok(loaded) => loaded,
+            Err(status) => return status,
+        };
         let rlbfgs = match rlbfgs_from_c(params) {
             Ok(params) => params,
             Err(status) => return status,
@@ -1267,11 +1393,10 @@ pub unsafe extern "C" fn rgmin_minimize_rlbfgs(
         }
         let n = init.len();
         let obj = c_oracle(eval, grad, user, n);
-        let c = unsafe { &*ctrl };
-        let control = control_from_c(c);
+        let control = control_from_c(&c);
         let kind = kind_from_token(manifold);
         let outcome = minimize_rlbfgs(&kind, &obj, Array1::from(init), &control, &rlbfgs);
-        finish_one_shot(x, out, outcome)
+        finish_one_shot(x, out, outcome, layout)
     })) {
         Ok(status) => status,
         Err(_) => {
@@ -1328,6 +1453,9 @@ pub unsafe extern "C" fn rgmin_minimize_hess(
 /// `backward_polish` runs the shifted Newton or RFO polish on the
 /// supplied Hessian. ABI minor 49.
 ///
+/// This symbol reads `ctrl` and writes `out` as layout revision 5.
+/// `include/rgmin.h` routes the name to [`rgmin_minimize_hess_opts_sized`].
+///
 /// # Safety
 /// Same as [`rgmin_minimize_hess`].
 #[unsafe(no_mangle)]
@@ -1338,6 +1466,44 @@ pub unsafe extern "C" fn rgmin_minimize_hess_opts(
     user: *mut c_void,
     x: *mut DLManagedTensorVersioned,
     ctrl: *const rgmin_control_t,
+    method: rgmin_method_t,
+    error_on_unmet: i32,
+    backward_polish: i32,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    unsafe {
+        rgmin_minimize_hess_opts_sized(
+            eval,
+            grad,
+            hess,
+            user,
+            x,
+            ctrl,
+            RGMIN_CONTROL_REVISION5_SIZE,
+            method,
+            error_on_unmet,
+            backward_polish,
+            out,
+        )
+    }
+}
+
+/// [`rgmin_minimize_hess_opts`] for a caller that states
+/// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
+/// [`rgmin_minimize_opts_sized`].
+///
+/// # Safety
+/// Same as [`rgmin_minimize_opts_sized`]. `hess` must be callable for
+/// the lifetime of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_hess_opts_sized(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    hess: Option<rgmin_hess_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    ctrl_size: usize,
     method: rgmin_method_t,
     error_on_unmet: i32,
     backward_polish: i32,
@@ -1369,6 +1535,10 @@ pub unsafe extern "C" fn rgmin_minimize_hess_opts(
             set_last_error("rgmin_minimize_hess: ctrl/out null");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
+        let (c, layout) = match unsafe { load_control("rgmin_minimize_hess", ctrl, ctrl_size) } {
+            Ok(loaded) => loaded,
+            Err(status) => return status,
+        };
         let init = match cpu_f64_slice_mut(x, "x") {
             Ok(s) => s.to_vec(),
             Err(st) => return st,
@@ -1378,8 +1548,7 @@ pub unsafe extern "C" fn rgmin_minimize_hess_opts(
         }
         let n = init.len();
         let obj = c_oracle_hess(eval, grad, hess, user, n);
-        let c = unsafe { &*ctrl };
-        let control = control_with_flags(c, error_on_unmet, backward_polish);
+        let control = control_with_flags(&c, error_on_unmet, backward_polish);
         let rust_method = method_from_c(method, c.memory);
         let outcome = minimize_method_hess(
             &obj,
@@ -1388,7 +1557,7 @@ pub unsafe extern "C" fn rgmin_minimize_hess_opts(
             rust_method,
             LineSearch::default(),
         );
-        finish_one_shot(x, out, outcome)
+        finish_one_shot(x, out, outcome, layout)
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -1423,6 +1592,9 @@ pub unsafe extern "C" fn rgmin_minimize_hvp(
 /// `backward_polish` assembles the product into a Hessian and polishes.
 /// ABI minor 49.
 ///
+/// This symbol reads `ctrl` and writes `out` as layout revision 5.
+/// `include/rgmin.h` routes the name to [`rgmin_minimize_hvp_opts_sized`].
+///
 /// # Safety
 /// Same as [`rgmin_minimize_hvp`].
 #[unsafe(no_mangle)]
@@ -1433,6 +1605,44 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_opts(
     user: *mut c_void,
     x: *mut DLManagedTensorVersioned,
     ctrl: *const rgmin_control_t,
+    method: rgmin_method_t,
+    error_on_unmet: i32,
+    backward_polish: i32,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    unsafe {
+        rgmin_minimize_hvp_opts_sized(
+            eval,
+            grad,
+            hvp,
+            user,
+            x,
+            ctrl,
+            RGMIN_CONTROL_REVISION5_SIZE,
+            method,
+            error_on_unmet,
+            backward_polish,
+            out,
+        )
+    }
+}
+
+/// [`rgmin_minimize_hvp_opts`] for a caller that states
+/// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
+/// [`rgmin_minimize_opts_sized`].
+///
+/// # Safety
+/// Same as [`rgmin_minimize_opts_sized`]. `hvp` must be callable for
+/// this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_hvp_opts_sized(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    hvp: Option<rgmin_hvp_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    ctrl_size: usize,
     method: rgmin_method_t,
     error_on_unmet: i32,
     backward_polish: i32,
@@ -1464,6 +1674,10 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_opts(
             set_last_error("rgmin_minimize_hvp: ctrl/out null");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
+        let (c, layout) = match unsafe { load_control("rgmin_minimize_hvp", ctrl, ctrl_size) } {
+            Ok(loaded) => loaded,
+            Err(status) => return status,
+        };
         let init = match cpu_f64_slice_mut(x, "x") {
             Ok(s) => s.to_vec(),
             Err(st) => return st,
@@ -1473,8 +1687,7 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_opts(
         }
         let n = init.len();
         let obj = c_oracle_hvp(eval, grad, hvp, user, n);
-        let c = unsafe { &*ctrl };
-        let control = control_with_flags(c, error_on_unmet, backward_polish);
+        let control = control_with_flags(&c, error_on_unmet, backward_polish);
         let outcome = minimize_method_hvp(
             &obj,
             Array1::from(init),
@@ -1482,7 +1695,7 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_opts(
             method_from_c(method, c.memory),
             LineSearch::default(),
         );
-        finish_one_shot(x, out, outcome)
+        finish_one_shot(x, out, outcome, layout)
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -1503,6 +1716,9 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_opts(
 /// `objective`, `stamp`, `x`, `ctrl`, and `out` must be valid for the duration
 /// of this call. `objective` and `stamp` must come from the same compatible
 /// eindir ABI family. `x` must be a writable rank-1 CPU f64 tensor.
+///
+/// This symbol reads `ctrl` and writes `out` as layout revision 5.
+/// `include/rgmin.h` routes the name to [`rgmin_minimize_eindir_sized`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_minimize_eindir(
     objective: *const eindir_objective_t,
@@ -1512,13 +1728,26 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
     method: rgmin_method_t,
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
-    unsafe { rgmin_minimize_eindir_opts(objective, stamp, x, ctrl, method, 0, 0, out) }
+    unsafe {
+        rgmin_minimize_eindir_sized(
+            objective,
+            stamp,
+            x,
+            ctrl,
+            RGMIN_CONTROL_REVISION5_SIZE,
+            method,
+            out,
+        )
+    }
 }
 
 /// [`rgmin_minimize_eindir`] with the two opt-in controls. A nonzero
 /// `error_on_unmet` writes `x` and `out`, then returns
 /// [`rgmin_status_t::RGMIN_UNMET_STOP`]. `backward_polish` has no Hessian
 /// on this entry and does not change the step. ABI minor 53.
+///
+/// This symbol reads `ctrl` and writes `out` as layout revision 5.
+/// `include/rgmin.h` routes the name to [`rgmin_minimize_eindir_opts_sized`].
 ///
 /// # Safety
 /// Same as [`rgmin_minimize_eindir`].
@@ -1533,11 +1762,71 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
     backward_polish: i32,
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
+    unsafe {
+        rgmin_minimize_eindir_opts_sized(
+            objective,
+            stamp,
+            x,
+            ctrl,
+            RGMIN_CONTROL_REVISION5_SIZE,
+            method,
+            error_on_unmet,
+            backward_polish,
+            out,
+        )
+    }
+}
+
+/// [`rgmin_minimize_eindir`] for a caller that states
+/// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
+/// [`rgmin_minimize_opts_sized`].
+///
+/// # Safety
+/// Same as [`rgmin_minimize_eindir`], with `ctrl` readable for
+/// `ctrl_size` bytes and `out` writable for the layout that size names.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_eindir_sized(
+    objective: *const eindir_objective_t,
+    stamp: *const eindir_abi_stamp_t,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    ctrl_size: usize,
+    method: rgmin_method_t,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    unsafe {
+        rgmin_minimize_eindir_opts_sized(objective, stamp, x, ctrl, ctrl_size, method, 0, 0, out)
+    }
+}
+
+/// [`rgmin_minimize_eindir_opts`] for a caller that states
+/// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
+/// [`rgmin_minimize_opts_sized`].
+///
+/// # Safety
+/// Same as [`rgmin_minimize_eindir`], with `ctrl` readable for
+/// `ctrl_size` bytes and `out` writable for the layout that size names.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_eindir_opts_sized(
+    objective: *const eindir_objective_t,
+    stamp: *const eindir_abi_stamp_t,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    ctrl_size: usize,
+    method: rgmin_method_t,
+    error_on_unmet: i32,
+    backward_polish: i32,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if objective.is_null() || stamp.is_null() || ctrl.is_null() || out.is_null() {
             set_last_error("rgmin_minimize_eindir: null argument");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
+        let (c, layout) = match unsafe { load_control("rgmin_minimize_eindir", ctrl, ctrl_size) } {
+            Ok(loaded) => loaded,
+            Err(status) => return status,
+        };
         if unsafe { eindir_core_abi_compatible(stamp) } == 0 {
             set_last_error("rgmin_minimize_eindir: incompatible eindir ABI stamp");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
@@ -1582,8 +1871,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
             }
             (value, gradient)
         });
-        let c = unsafe { &*ctrl };
-        let control = control_with_flags(c, error_on_unmet, backward_polish);
+        let control = control_with_flags(&c, error_on_unmet, backward_polish);
         let outcome = minimize_method(
             &obj,
             Array1::from(init),
@@ -1591,7 +1879,7 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
             method_from_c(method, c.memory),
             LineSearch::default(),
         );
-        finish_one_shot(x, out, outcome)
+        finish_one_shot(x, out, outcome, layout)
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -1606,6 +1894,8 @@ pub struct rgmin_solver_t {
     solver: Solver,
     /// Gradient behind the last successful step report.
     grad: Option<Array1<f64>>,
+    /// The report layout of the caller that created this session.
+    layout: CLayout,
 }
 
 /// Allocate a session. `dim` is the length of `x`. Null on bad arguments.
@@ -1621,32 +1911,55 @@ pub struct rgmin_solver_t {
 /// [`rgmin_solver_set_accept`] with `RGMIN_ACCEPT_NONE` restores the 0.5
 /// behaviour.
 ///
+/// This symbol reads `ctrl` as layout revision 5, and each step of the
+/// session writes a revision 5 report. `include/rgmin.h` routes the name
+/// to [`rgmin_solver_create_sized`].
+///
 /// # Safety
-/// `ctrl` is null or points to a readable [`rgmin_control_t`].
+/// `ctrl` is null or points to a readable [`rgmin_control_revision5_t`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_solver_create(
     method: rgmin_method_t,
     ctrl: *const rgmin_control_t,
     dim: usize,
 ) -> *mut rgmin_solver_t {
+    unsafe { rgmin_solver_create_sized(method, ctrl, RGMIN_CONTROL_REVISION5_SIZE, dim) }
+}
+
+/// [`rgmin_solver_create`] for a caller that states
+/// `sizeof(rgmin_control_t)` as `ctrl_size`. The session's reports
+/// follow the same layout. A size that is neither
+/// [`RGMIN_CONTROL_REVISION5_SIZE`] nor at least this build's struct
+/// returns null.
+///
+/// # Safety
+/// `ctrl` is null or readable for `ctrl_size` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_create_sized(
+    method: rgmin_method_t,
+    ctrl: *const rgmin_control_t,
+    ctrl_size: usize,
+    dim: usize,
+) -> *mut rgmin_solver_t {
     if ctrl.is_null() || dim == 0 {
         set_last_error("rgmin_solver_create: null ctrl or dim=0");
         return std::ptr::null_mut();
     }
-    if matches!(
-        method,
-        rgmin_method_t::RGMIN_NEWTON | rgmin_method_t::RGMIN_RFO
-    ) {
-        // Allowed: step_hess is the verb. Create still succeeds.
-    }
-    let c = unsafe { &*ctrl };
-    let control = control_from_c(c);
+    let (c, layout) = match unsafe { load_control("rgmin_solver_create", ctrl, ctrl_size) } {
+        Ok(loaded) => loaded,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let control = control_from_c(&c);
     let mut solver = Solver::new(method_from_c(method, c.memory), control, dim).with_gtol(c.gtol);
     solver.set_accept(Accept::Energy);
     if c.istep <= 0.0 {
         solver.set_unit_first_step();
     }
-    Box::into_raw(Box::new(rgmin_solver_t { solver, grad: None }))
+    Box::into_raw(Box::new(rgmin_solver_t {
+        solver,
+        grad: None,
+        layout,
+    }))
 }
 
 /// Release a session from [`rgmin_solver_create`].
@@ -4198,13 +4511,7 @@ fn write_report(
     };
     dest.copy_from_slice(rep.coords.as_slice().expect("contiguous"));
     unsafe {
-        *out = rgmin_report_t {
-            value: rep.value,
-            steps: rep.steps,
-            grad_norm: rep.grad_norm,
-            stop: step_stop(rep.stop_reason()),
-            converged: i32::from(rep.converged),
-        };
+        store_report(out, report_to_c(&rep), (*solver).layout);
         (*solver).grad = rep.grad;
     }
     rgmin_status_t::RGMIN_SUCCESS
@@ -4487,6 +4794,84 @@ fn noise_floor_from_c(c: &rgmin_control_t) -> Option<crate::NoiseFloor> {
     Some(floor)
 }
 
+/// The struct layout a caller compiled, from the size it declared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CLayout {
+    /// Layout revision 5: [`rgmin_control_revision5_t`] and a report
+    /// that ends at `stop`.
+    Revision5,
+    /// This build's [`rgmin_control_t`] and [`rgmin_report_t`].
+    Current,
+}
+
+/// Copy the caller's control into a local that starts from
+/// [`rgmin_control_t::default`].
+///
+/// `ctrl_size` is `sizeof(rgmin_control_t)` as the caller compiled it.
+/// [`RGMIN_CONTROL_REVISION5_SIZE`] reads only the revision 5 fields, so
+/// `require_convergence` keeps its default 0. A size of at least
+/// `size_of::<rgmin_control_t>()` reads every field, and bytes past them
+/// stay unread. Any other size is refused.
+///
+/// # Safety
+/// `ctrl` is non-null and readable for `ctrl_size` bytes.
+unsafe fn load_control(
+    name: &str,
+    ctrl: *const rgmin_control_t,
+    ctrl_size: usize,
+) -> std::result::Result<(rgmin_control_t, CLayout), rgmin_status_t> {
+    let full = std::mem::size_of::<rgmin_control_t>();
+    let (n, layout) = if ctrl_size >= full {
+        (full, CLayout::Current)
+    } else if ctrl_size == RGMIN_CONTROL_REVISION5_SIZE {
+        (RGMIN_CONTROL_REVISION5_SIZE, CLayout::Revision5)
+    } else {
+        set_last_error(&format!(
+            "{name}: ctrl_size {ctrl_size} is neither the layout revision 5 size \
+             {RGMIN_CONTROL_REVISION5_SIZE} nor at least sizeof(rgmin_control_t) {full}"
+        ));
+        return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    };
+    let mut local = rgmin_control_t::default();
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            ctrl.cast::<u8>(),
+            (&mut local as *mut rgmin_control_t).cast::<u8>(),
+            n,
+        );
+    }
+    Ok((local, layout))
+}
+
+/// Write `report` into the caller's `out` for the layout it compiled.
+/// A revision 5 caller's struct ends at `stop`, so `converged` and the
+/// bytes after `stop` are left alone.
+///
+/// # Safety
+/// `out` is non-null and writable for that layout.
+unsafe fn store_report(out: *mut rgmin_report_t, report: rgmin_report_t, layout: CLayout) {
+    match layout {
+        CLayout::Current => unsafe { out.write(report) },
+        CLayout::Revision5 => unsafe {
+            std::ptr::copy_nonoverlapping(
+                (&report as *const rgmin_report_t).cast::<u8>(),
+                out.cast::<u8>(),
+                RGMIN_REPORT_REVISION5_SIZE,
+            );
+        },
+    }
+}
+
+fn report_to_c(rep: &crate::Report) -> rgmin_report_t {
+    rgmin_report_t {
+        value: rep.value,
+        steps: rep.steps,
+        grad_norm: rep.grad_norm,
+        stop: step_stop(rep.stop_reason()),
+        converged: i32::from(rep.converged),
+    }
+}
+
 fn control_from_c(c: &rgmin_control_t) -> Control {
     control_with_flags(c, 0, 0)
 }
@@ -4539,6 +4924,7 @@ fn write_one_shot(
     x: *mut DLManagedTensorVersioned,
     out: *mut rgmin_report_t,
     rep: &crate::Report,
+    layout: CLayout,
 ) -> rgmin_status_t {
     let Some(stop) = finished_stop(rep.stop_reason()) else {
         set_last_error("a finished run reported a step still iterating");
@@ -4549,15 +4935,9 @@ fn write_one_shot(
         Err(st) => return st,
     };
     dest.copy_from_slice(rep.coords.as_slice().expect("contiguous"));
-    unsafe {
-        *out = rgmin_report_t {
-            value: rep.value,
-            steps: rep.steps,
-            grad_norm: rep.grad_norm,
-            stop,
-            converged: i32::from(rep.converged),
-        };
-    }
+    let mut report = report_to_c(rep);
+    report.stop = stop;
+    unsafe { store_report(out, report, layout) };
     rgmin_status_t::RGMIN_SUCCESS
 }
 
@@ -4565,12 +4945,13 @@ fn finish_one_shot(
     x: *mut DLManagedTensorVersioned,
     out: *mut rgmin_report_t,
     result: crate::Result<crate::Report>,
+    layout: CLayout,
 ) -> rgmin_status_t {
     match result {
-        Ok(rep) => write_one_shot(x, out, &rep),
+        Ok(rep) => write_one_shot(x, out, &rep, layout),
         Err(err) => {
             if let Error::StopUnmet { report, .. } | Error::NotConverged(report) = &err {
-                let wrote = write_one_shot(x, out, report);
+                let wrote = write_one_shot(x, out, report, layout);
                 if wrote != rgmin_status_t::RGMIN_SUCCESS {
                     return wrote;
                 }
@@ -5287,6 +5668,10 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_with_options(
 /// Møller SCG with an explicit accepted-step convergence rule.
 /// A null options pointer selects the absolute infinity-norm rule.
 ///
+/// This symbol reads `ctrl` and writes `out` as layout revision 5.
+/// `include/rgmin.h` routes the name to
+/// [`rgmin_minimize_scg_with_options_sized`].
+///
 /// # Safety
 /// The tensor and callback requirements are those of [`rgmin_minimize_scg`].
 /// A non-null options pointer refers to an initialized C options record.
@@ -5298,6 +5683,43 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
     user: *mut c_void,
     x: *mut DLManagedTensorVersioned,
     ctrl: *const rgmin_control_t,
+    params: *const rgmin_scg_params_t,
+    options: *const rgmin_scg_options_t,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    unsafe {
+        rgmin_minimize_scg_with_options_sized(
+            eval,
+            grad,
+            curv,
+            user,
+            x,
+            ctrl,
+            RGMIN_CONTROL_REVISION5_SIZE,
+            params,
+            options,
+            out,
+        )
+    }
+}
+
+/// [`rgmin_minimize_scg_with_options`] for a caller that states
+/// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
+/// [`rgmin_minimize_opts_sized`]. Null `options` is the absolute
+/// infinity-norm rule.
+///
+/// # Safety
+/// Same as [`rgmin_minimize_scg_with_options`], with `ctrl` readable for
+/// `ctrl_size` bytes and `out` writable for the layout that size names.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_scg_with_options_sized(
+    eval: Option<rgmin_eval_fn>,
+    grad: Option<rgmin_grad_fn>,
+    curv: Option<rgmin_curv_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    ctrl_size: usize,
     params: *const rgmin_scg_params_t,
     options: *const rgmin_scg_options_t,
     out: *mut rgmin_report_t,
@@ -5321,6 +5743,10 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
             set_last_error("rgmin_minimize_scg: ctrl/out null");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
+        let (c, layout) = match unsafe { load_control("rgmin_minimize_scg", ctrl, ctrl_size) } {
+            Ok(loaded) => loaded,
+            Err(status) => return status,
+        };
         let init = match cpu_f64_slice_mut(x, "x") {
             Ok(s) => s.to_vec(),
             Err(st) => return st,
@@ -5329,8 +5755,7 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
             return status;
         }
         let n = init.len();
-        let c = unsafe { &*ctrl };
-        let control = control_from_c(c);
+        let control = control_from_c(&c);
         let (scg, conjugacy) = match scg_params_from_c(params) {
             Ok(pair) => pair,
             Err(st) => return st,
@@ -5367,7 +5792,7 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options(
                 &options,
             )
         };
-        finish_one_shot(x, out, report)
+        finish_one_shot(x, out, report, layout)
     })) {
         Ok(s) => s,
         Err(_) => {
@@ -6922,10 +7347,65 @@ impl Default for rgmin_eigen_options_t {
     }
 }
 
-/// [`Control::default`] as a C record. ABI minor 46.
+/// [`Control::default`] as a layout revision 5 C record. ABI minor 46.
+///
+/// This symbol keeps the revision 5 return type, so a caller that
+/// compiled that struct gets no bytes past it. `include/rgmin.h` routes
+/// the name to [`rgmin_control_init`], and [`rgmin_control_t::default`]
+/// is the full record.
 #[unsafe(no_mangle)]
-pub extern "C" fn rgmin_control_default() -> rgmin_control_t {
-    rgmin_control_t::default()
+pub extern "C" fn rgmin_control_default() -> rgmin_control_revision5_t {
+    let c = rgmin_control_t::default();
+    rgmin_control_revision5_t {
+        maxiter: c.maxiter,
+        gtol: c.gtol,
+        istep: c.istep,
+        memory: c.memory,
+        maxmove: c.maxmove,
+        noise_eps: c.noise_eps,
+        noise_c: c.noise_c,
+    }
+}
+
+/// Fill `c` with [`rgmin_control_t::default`] for a caller that states
+/// `sizeof(rgmin_control_t)` as `struct_size`.
+/// [`RGMIN_CONTROL_REVISION5_SIZE`] writes the revision 5 fields. A size
+/// of at least this build's struct writes every field and leaves the
+/// bytes past them alone. A null `c` or any other size writes nothing
+/// and returns [`rgmin_status_t::RGMIN_INVALID_PARAMETER`].
+///
+/// # Safety
+/// `c` is null or writable for `struct_size` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_control_init(
+    c: *mut rgmin_control_t,
+    struct_size: usize,
+) -> rgmin_status_t {
+    if c.is_null() {
+        set_last_error("rgmin_control_init: null control");
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    }
+    let full = size_of::<rgmin_control_t>();
+    let n = if struct_size >= full {
+        full
+    } else if struct_size == RGMIN_CONTROL_REVISION5_SIZE {
+        RGMIN_CONTROL_REVISION5_SIZE
+    } else {
+        set_last_error(&format!(
+            "rgmin_control_init: struct_size {struct_size} is neither the layout revision 5 \
+             size {RGMIN_CONTROL_REVISION5_SIZE} nor at least sizeof(rgmin_control_t) {full}"
+        ));
+        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+    };
+    let value = rgmin_control_t::default();
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            (&value as *const rgmin_control_t).cast::<u8>(),
+            c.cast::<u8>(),
+            n,
+        );
+    }
+    rgmin_status_t::RGMIN_SUCCESS
 }
 
 /// [`ExpParams::default`] as a C record. ABI minor 46.
@@ -7122,6 +7602,34 @@ mod default_tests {
         (kind, nev, krylov, max_iter, tol.to_bits(), degree, extra)
     }
 
+    fn full_control_default() -> rgmin_control_t {
+        let mut c = std::mem::MaybeUninit::<rgmin_control_t>::uninit();
+        let status = unsafe { rgmin_control_init(c.as_mut_ptr(), size_of::<rgmin_control_t>()) };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        unsafe { c.assume_init() }
+    }
+
+    #[test]
+    fn control_default_is_the_revision_5_prefix_of_control_init() {
+        let full = full_control_default();
+        let rgmin_control_revision5_t {
+            maxiter,
+            gtol,
+            istep,
+            memory,
+            maxmove,
+            noise_eps,
+            noise_c,
+        } = rgmin_control_default();
+        assert_eq!(maxiter, full.maxiter);
+        assert_eq!(gtol.to_bits(), full.gtol.to_bits());
+        assert_eq!(istep.to_bits(), full.istep.to_bits());
+        assert_eq!(memory, full.memory);
+        assert_eq!(maxmove.to_bits(), full.maxmove.to_bits());
+        assert_eq!(noise_eps.to_bits(), full.noise_eps.to_bits());
+        assert_eq!(noise_c.to_bits(), full.noise_c.to_bits());
+    }
+
     #[test]
     fn control_default_is_control_default() {
         let want = Control::default();
@@ -7134,7 +7642,7 @@ mod default_tests {
             noise_eps,
             noise_c,
             require_convergence,
-        } = rgmin_control_default();
+        } = full_control_default();
         assert_eq!(require_convergence, 0);
         assert_eq!(maxiter, want.maxiter);
         assert_eq!(gtol.to_bits(), want.gtol.to_bits());
@@ -7156,12 +7664,12 @@ mod default_tests {
         assert_eq!(noise_c.to_bits(), NoiseFloor::new(0.0).c.to_bits());
 
         assert_eq!(
-            control_bits(control_from_c(&rgmin_control_default())),
+            control_bits(control_from_c(&full_control_default())),
             control_bits(want)
         );
         let floor_on = rgmin_control_t {
             noise_eps: 1e-3,
-            ..rgmin_control_default()
+            ..full_control_default()
         };
         assert_eq!(
             control_from_c(&floor_on).noise_floor.map(floor_bits),
@@ -7358,7 +7866,7 @@ mod stop_mapping_tests {
         let mut rep = Report::new(2.5, Array1::from(vec![1.0, 2.0])).with_stop_reason(reason);
         rep.steps = 4;
         rep.grad_norm = 0.5;
-        let st = write_one_shot(t, &mut out, &rep);
+        let st = write_one_shot(t, &mut out, &rep, CLayout::Current);
         unsafe { rgmin_tensor_free(t) };
         (st, x, out)
     }

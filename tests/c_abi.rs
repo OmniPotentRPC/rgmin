@@ -5239,10 +5239,12 @@ unsafe extern "C" fn slope_grad(
 
 #[test]
 fn gromacs_steep_runs_and_reports_machine_precision_across_c_abi() {
-    let mut ctrl = rgmin_control_default();
-    ctrl.maxiter = 10;
-    ctrl.gtol = 1e-12;
-    ctrl.istep = 0.25;
+    let mut ctrl = rgmin_control_t {
+        maxiter: 10,
+        gtol: 1e-12,
+        istep: 0.25,
+        ..rgmin_control_t::default()
+    };
     let mut x = [3.0_f64, -4.0, 1.5, 2.5, -2.0, 0.5];
     let mut out = rgmin_report_t {
         value: 0.0,
@@ -5381,7 +5383,11 @@ fn gromacs_cg_two_steps_across_c_abi(nstcgsteep: Option<u32>) -> [f64; 3] {
         converged: 0,
     };
     unsafe {
-        let solver = rgmin_solver_create(rgmin_method_t::RGMIN_GROMACS_CG, &ctrl, 3);
+        let solver = rgmin_solver_create(
+            rgmin_method_t::RGMIN_GROMACS_CG,
+            (&raw const ctrl).cast(),
+            3,
+        );
         assert!(!solver.is_null());
         if let Some(period) = nstcgsteep {
             assert_eq!(rgmin_solver_set_gromacs_cg(solver, period), 0);

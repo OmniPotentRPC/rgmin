@@ -62,6 +62,31 @@ default. A stray positive ``noise_eps`` turns the noise-floor stop on, and
 a session then stays at its start point. The ``rgmin_*_default`` functions
 are ``abi_minor`` 46, and ``xts.h`` names them ``xts_*_default``.
 
+Control layout
+~~~~~~~~~~~~~~
+
+Layout revision 6 adds ``require_convergence`` to ``rgmin_control_t``,
+which grows from 56 to 64 bytes on a 64-bit target, and ``converged`` to
+``rgmin_report_t``. A binary built against revision 5 passes the shorter
+struct, so each exported entry that takes a ``rgmin_control_t`` reads
+only the fields through ``noise_c``, ``require_convergence`` keeps its
+default 0, and the report is written only through ``stop``. The exported
+``rgmin_control_default`` still returns the revision 5 struct.
+
+``rgmin.h`` turns those names into inline functions that pass
+``sizeof(rgmin_control_t)`` to a ``_sized`` symbol, such as
+``rgmin_minimize_opts_sized`` and ``rgmin_solver_create_sized``, and
+``rgmin_control_default`` calls ``rgmin_control_init(&c, sizeof c)``. A
+program built against this header has every field read and the whole
+report written without a source change. The size has the meaning of
+``rgmin_precon_t.struct_size``: ``RGMIN_CONTROL_REVISION5_SIZE`` is the
+revision 5 struct, a larger size than this build's struct leaves the
+extra bytes unread, and any other size returns
+``RGMIN_INVALID_PARAMETER`` (a null session from
+``rgmin_solver_create_sized``) without a read. A caller that resolves
+symbols at run time calls the ``_sized`` names to have
+``require_convergence`` read.
+
 Session (eOn / ASE ``step``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -6,11 +6,14 @@ use std::os::raw::c_void;
 
 use dlpk::sys::DLManagedTensorVersioned;
 use rgmin::ffi::{
-    rgmin_control_t, rgmin_method_t, rgmin_minimize_hess_opts, rgmin_minimize_opts,
-    rgmin_minimize_scg, rgmin_report_t, rgmin_scg_params_default, rgmin_solver_create,
-    rgmin_solver_free, rgmin_solver_set_require_convergence, rgmin_solver_step, rgmin_status_t,
-    rgmin_stop_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+    rgmin_control_t, rgmin_method_t, rgmin_minimize_hess_opts_sized, rgmin_minimize_opts_sized,
+    rgmin_minimize_scg_with_options_sized, rgmin_report_t, rgmin_scg_params_default,
+    rgmin_solver_create_sized, rgmin_solver_free, rgmin_solver_set_require_convergence,
+    rgmin_solver_step, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
+    rgmin_tensor_free,
 };
+
+const CTRL_SIZE: usize = std::mem::size_of::<rgmin_control_t>();
 
 unsafe fn cpu_f64(t: *const DLManagedTensorVersioned) -> (*const f64, usize) {
     let dl = unsafe { &(*t).dl_tensor };
@@ -179,12 +182,13 @@ fn run(
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), x.len()) };
     let mut out = blank();
     let status = unsafe {
-        rgmin_minimize_opts(
+        rgmin_minimize_opts_sized(
             Some(eval),
             Some(grad),
             std::ptr::null_mut(),
             xt,
             ctrl,
+            CTRL_SIZE,
             method,
             0,
             0,
@@ -280,14 +284,16 @@ fn c_scg_step_tolerance_errors_only_when_strict() {
         let ctrl = control(0, 0.0, 0.0, strict);
         let mut out = blank();
         let status = unsafe {
-            rgmin_minimize_scg(
+            rgmin_minimize_scg_with_options_sized(
                 Some(flat_eval),
                 Some(flat_grad),
                 None,
                 std::ptr::null_mut(),
                 xt,
                 &ctrl,
+                CTRL_SIZE,
                 &params,
+                std::ptr::null(),
                 &mut out,
             )
         };
@@ -318,13 +324,14 @@ fn c_polish_unmet_errors_only_when_strict() {
         let ctrl = control(3, 1e-8, 0.0, strict);
         let mut out = blank();
         let status = unsafe {
-            rgmin_minimize_hess_opts(
+            rgmin_minimize_hess_opts_sized(
                 Some(saddle_eval),
                 Some(uphill_grad),
                 Some(saddle_hess),
                 std::ptr::null_mut(),
                 xt,
                 &ctrl,
+                CTRL_SIZE,
                 rgmin_method_t::RGMIN_NEWTON,
                 0,
                 1,
@@ -484,7 +491,8 @@ fn session_step(
 #[test]
 fn c_step_report_converged_follows_the_shared_comparison() {
     let ctrl = control(100, 1.0, 0.0, false);
-    let solver = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 1) };
+    let solver =
+        unsafe { rgmin_solver_create_sized(rgmin_method_t::RGMIN_STEEPEST, &ctrl, CTRL_SIZE, 1) };
     assert!(!solver.is_null());
     let mut x = [0.0];
     for _ in 0..3 {
@@ -497,7 +505,8 @@ fn c_step_report_converged_follows_the_shared_comparison() {
     unsafe { rgmin_solver_free(solver) };
 
     let ctrl = control(100, 1e-3, 0.0, false);
-    let solver = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 1) };
+    let solver =
+        unsafe { rgmin_solver_create_sized(rgmin_method_t::RGMIN_STEEPEST, &ctrl, CTRL_SIZE, 1) };
     let mut x = [0.5];
     let mut flags = Vec::new();
     for _ in 0..200 {
@@ -525,7 +534,8 @@ fn c_step_report_converged_follows_the_shared_comparison() {
 #[test]
 fn c_solver_setter_turns_the_session_stall_on() {
     let ctrl = control(100, 1e-8, 0.0, false);
-    let solver = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 1) };
+    let solver =
+        unsafe { rgmin_solver_create_sized(rgmin_method_t::RGMIN_STEEPEST, &ctrl, CTRL_SIZE, 1) };
     let mut x = [1.0];
     let (status, out) = session_step(solver, quad_eval, uphill_grad, &mut x);
     assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
@@ -550,7 +560,7 @@ fn c_solver_setter_turns_the_session_stall_on() {
         rgmin_method_t::RGMIN_STEEPEST,
         rgmin_method_t::RGMIN_POLAK_RIBIERE,
     ] {
-        let solver = unsafe { rgmin_solver_create(method, &ctrl, 1) };
+        let solver = unsafe { rgmin_solver_create_sized(method, &ctrl, CTRL_SIZE, 1) };
         let mut x = [1.0];
         let (_, out) = session_step(solver, quad_eval, uphill_grad, &mut x);
         assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE);
@@ -567,7 +577,7 @@ fn c_trust_region_session_steps_are_not_stalls() {
         ("ode12r", rgmin_method_t::RGMIN_ODE12R),
     ] {
         let ctrl = control(100, 1e-8, 0.0, true);
-        let solver = unsafe { rgmin_solver_create(method, &ctrl, 1) };
+        let solver = unsafe { rgmin_solver_create_sized(method, &ctrl, CTRL_SIZE, 1) };
         let mut x = [1.0];
         for _ in 0..3 {
             let (status, out) = session_step(solver, quad_eval, uphill_grad, &mut x);
