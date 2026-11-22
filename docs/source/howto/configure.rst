@@ -75,8 +75,8 @@ Results (``LowestMode``, ``Eigenpair``, ``Eigenpairs``, ``RestrictedStep``,
 ``AdjointFunctionalBar``, ``MorseGap``, ``TridiagEigh``,
 ``QuadratureEstimate``, ``PcgResult``, ``DeflatedPair``,
 ``ExtremePairsReport``, ``SlqLogDetReport``, ``GaussLegendre``,
-``LobattoShapes``, ``MagnusStep``, ``Exponential``) are non-exhaustive
-too. Read their fields; a destructuring pattern needs ``..``.
+``LobattoShapes``, ``MagnusStep``, ``Exponential``) are non-exhaustive too.
+Read their fields; a destructuring pattern needs ``..``.
 
 Methods and step rules
 ~~~~~~~~~~~~~~~~~~~~~~
