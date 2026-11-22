@@ -53,7 +53,7 @@ pub struct PeriodicMultiplier {
 /// Spectrum of a product `factors[last] ... factors[0]`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeriodicProductSpectrum {
-    /// Multipliers, in the order in which shifted QR deflated them.
+    /// Multipliers, in the diagonal order of the converged triangular form.
     pub multipliers: Vec<PeriodicMultiplier>,
     /// Binary working precision used for both product and eigensolve.
     pub precision_bits: u32,
@@ -364,67 +364,79 @@ fn eigenvalues_with_limit_unchecked(
     limit: usize,
 ) -> Result<(Vec<Complex>, usize), PeriodicProductError> {
     hessenberg(&mut matrix, width);
-    let mut active = width;
-    let mut values = Vec::with_capacity(width);
+    let mut high = width;
     let mut iterations = 0usize;
     let exponent =
         i32::try_from(precision).map_err(|_| PeriodicProductError::InvalidConfiguration)?;
     let tolerance = Float::with_val(precision, 2).pow(1 - exponent);
-    while active > 0 {
-        if active == 1 {
-            values.push(matrix[0].clone());
-            break;
-        }
-        for row in (1..active).rev() {
-            let index = row * width + row - 1;
-            let subdiagonal = matrix[index].modulus();
-            let mut scale = matrix[(row - 1) * width + row - 1].modulus();
-            scale += matrix[row * width + row].modulus();
-            if subdiagonal == 0
-                || (scale > 0 && subdiagonal <= Float::with_val(precision, &tolerance * &scale))
-            {
-                matrix[index] = complex(precision, 0.0);
-            }
-        }
-        if matrix[(active - 1) * width + active - 2].abs2() == 0 {
-            values.push(matrix[(active - 1) * width + active - 1].clone());
-            active -= 1;
+    while high > 0 {
+        let low = active_block_start(&mut matrix, width, high, &tolerance);
+        if high - low == 1 {
+            high -= 1;
             continue;
         }
         if iterations == limit {
             return Err(PeriodicProductError::NoConvergence { iterations });
         }
-        let shift = wilkinson_shift(&matrix, width, active);
-        let mut shifted = vec![complex(precision, 0.0); active * active];
-        for row in 0..active {
-            for column in 0..active {
-                let mut value = matrix[row * width + column].clone();
+        let size = high - low;
+        let shift = wilkinson_shift(&matrix, width, high);
+        let mut shifted = vec![complex(precision, 0.0); size * size];
+        for row in 0..size {
+            for column in 0..size {
+                let mut value = matrix[(low + row) * width + low + column].clone();
                 if row == column {
                     value = value.sub(&shift);
                 }
-                shifted[row * active + column] = value;
+                shifted[row * size + column] = value;
             }
         }
-        let (q, r) = qr_decompose(&shifted, active);
-        let mut next = multiply(&r, &q, active);
-        for diagonal in 0..active {
-            let index = diagonal * active + diagonal;
+        let (q, r) = qr_decompose(&shifted, size);
+        let mut next = multiply(&r, &q, size);
+        for diagonal in 0..size {
+            let index = diagonal * size + diagonal;
             next[index] = next[index].add(&shift);
         }
-        for row in 0..active {
-            for column in 0..active {
-                matrix[row * width + column] = next[row * active + column].clone();
-            }
-        }
-        for row in 0..active {
-            for column in 0..row.saturating_sub(1) {
-                matrix[row * width + column] = complex(precision, 0.0);
+        for row in 0..size {
+            for column in 0..size {
+                matrix[(low + row) * width + low + column] = if column + 1 < row {
+                    complex(precision, 0.0)
+                } else {
+                    next[row * size + column].clone()
+                };
             }
         }
         iterations += 1;
     }
-    values.reverse();
+    let values = (0..width)
+        .map(|diagonal| matrix[diagonal * width + diagonal].clone())
+        .collect();
     Ok((values, iterations))
+}
+
+/// Zero every negligible subdiagonal entry among the leading `high` rows and
+/// return the first row of the lowest unreduced block ending at `high`.
+fn active_block_start(
+    matrix: &mut [Complex],
+    width: usize,
+    high: usize,
+    tolerance: &Float,
+) -> usize {
+    let precision = matrix[0].prec().0;
+    for row in (1..high).rev() {
+        let index = row * width + row - 1;
+        let subdiagonal = matrix[index].modulus();
+        let mut scale = matrix[(row - 1) * width + row - 1].modulus();
+        scale += matrix[row * width + row].modulus();
+        if subdiagonal == 0
+            || (scale > 0 && subdiagonal <= Float::with_val(precision, tolerance * &scale))
+        {
+            matrix[index] = complex(precision, 0.0);
+        }
+    }
+    (1..high)
+        .rev()
+        .find(|row| matrix[row * width + row - 1].abs2() == 0)
+        .unwrap_or(0)
 }
 
 fn eigenvalues_with_limit(
@@ -673,6 +685,46 @@ mod tests {
             Err(PeriodicProductError::InvalidConfiguration)
         );
         assert!(eigenvalues(matrix, width, precision).is_ok());
+    }
+
+    fn block_sorted_log_moduli(factor: Vec<f64>, width: usize) -> Vec<f64> {
+        let got = periodic_product_spectrum(&[factor], width, 128).expect("verified spectrum");
+        let mut exponents: Vec<_> = got
+            .multipliers
+            .iter()
+            .map(|value| value.log_modulus)
+            .collect();
+        exponents.sort_by(f64::total_cmp);
+        exponents
+    }
+
+    #[test]
+    fn interior_deflation_splits_the_active_block_in_either_order() {
+        let big = 2.0_f64.powi(133);
+        let small = 2.0_f64.powi(-133);
+        #[rustfmt::skip]
+        let scales_first = vec![
+            big, 0.0, 0.0, 0.0,
+            0.0, small, 0.0, 0.0,
+            0.0, 0.0, 2.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+        ];
+        #[rustfmt::skip]
+        let scales_last = vec![
+            2.0, 1.0, 0.0, 0.0,
+            1.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, big, 0.0,
+            0.0, 0.0, 0.0, small,
+        ];
+        let golden = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let scale = 133.0 * std::f64::consts::LN_2;
+        let expected = [-scale, -2.0 * golden.ln(), 2.0 * golden.ln(), scale];
+        for factor in [scales_first, scales_last] {
+            let exponents = block_sorted_log_moduli(factor, 4);
+            for (value, wanted) in exponents.iter().zip(expected) {
+                assert!((value - wanted).abs() < 1e-12, "{exponents:?}");
+            }
+        }
     }
 
     #[test]
