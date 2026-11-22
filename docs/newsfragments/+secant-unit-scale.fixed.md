@@ -1,0 +1,1 @@
+Powell symmetric Broyden, SR1, and Bofill updates normalise the step and the residual and scale each outer product once by `|r|/|s|`. A step near `1e100` with a model near `1e-180`, and a step near `1e-80` with a model near `1e160`, meet the secant condition. A pair that cannot produce a finite correction returns an error or a skip and leaves the model unchanged.
