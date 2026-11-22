@@ -227,6 +227,10 @@ fn domain_separated_seed(seed: u64, domain: u64) -> u64 {
 
 /// Symmetric eigendecomposition output: ascending eigenvalues and row-major
 /// eigenvector columns (`vectors[row * m + col]`).
+///
+/// The struct is non-exhaustive, so a field added later is not a breaking
+/// change. [`tridiag_eigh`] and [`sym_eigh`] build it.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct TridiagEigh {
     /// Eigenvalues sorted in ascending order.
@@ -549,6 +553,10 @@ pub fn gauss_radau_tridiag(
 }
 
 /// Output of one Lanczos quadrature evaluation of `v^T f(A) v`.
+///
+/// The struct is non-exhaustive, so a field added later is not a breaking
+/// change. [`lanczos_quadrature_log`] and [`lanczos_quadrature_fn`] build it.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub struct QuadratureEstimate {
     /// Point estimate (midpoint of Gauss and Gauss-Radau when bracketed, or
@@ -1041,6 +1049,10 @@ impl Default for PcgConfig {
 }
 
 /// Outcome of [`pcg_solve`].
+///
+/// The struct is non-exhaustive, so a field added later is not a breaking
+/// change.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct PcgResult {
     /// Converged solution vector `x`.
@@ -1212,6 +1224,11 @@ where
 
 /// One deflated approximate eigenpair `(eigenvalue, vector)` with verified
 /// residual norm `||A v - eigenvalue * v||_2`.
+///
+/// The struct is non-exhaustive, so a field added later is not a breaking
+/// change. [`lanczos_extreme_pairs`] returns converged pairs. A caller that
+/// supplies its own pairs to [`SlqDeflation`] starts from [`Self::new`].
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct DeflatedPair {
     /// Ritz eigenvalue.
@@ -1222,6 +1239,27 @@ pub struct DeflatedPair {
     /// Verified residual norm for the normalized vector direction
     /// `v_hat`: `||P_kernel A v_hat - eigenvalue * v_hat||_2`.
     pub residual: f64,
+}
+
+impl DeflatedPair {
+    /// Eigenvalue, direction, and residual norm of one supplied pair.
+    ///
+    /// ```
+    /// use rgmin::DeflatedPair;
+    ///
+    /// let pair = DeflatedPair::new(1.5, vec![0.0, 1.0], 1e-8);
+    /// assert_eq!(pair.eigenvalue, 1.5);
+    /// assert_eq!(pair.vector, vec![0.0, 1.0]);
+    /// assert_eq!(pair.residual, 1e-8);
+    /// ```
+    #[must_use]
+    pub fn new(eigenvalue: f64, vector: Vec<f64>, residual: f64) -> Self {
+        Self {
+            eigenvalue,
+            vector,
+            residual,
+        }
+    }
 }
 
 /// Configuration for [`lanczos_extreme_pairs`].
@@ -1282,6 +1320,10 @@ impl Default for ExtremePairsConfig {
 }
 
 /// Output of [`lanczos_extreme_pairs`].
+///
+/// The struct is non-exhaustive, so a field added later is not a breaking
+/// change.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct ExtremePairsReport {
     /// Converged negative eigenpairs (`eigenvalue < neg_threshold`), sorted ascending.
@@ -1874,6 +1916,10 @@ impl Default for SlqConfig {
 /// The error fields represent a-posteriori stochastic confidence intervals
 /// combined with quadrature and first-order deflation error estimates; they
 /// are probabilistic estimates, not deterministic enclosures.
+///
+/// The struct is non-exhaustive, so a field added later is not a breaking
+/// change.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct SlqLogDetReport {
     /// Estimated `ln |det'(A)|` on `kernel^perp`.
