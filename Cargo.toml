@@ -31,6 +31,10 @@ libkrylov = ["dep:cc", "dep:pkg-config"]
 # other feature by name, so `--all-features` is not that row: this
 # dependency would otherwise be linked into the staticlib.
 readcon = ["dep:readcon-core"]
+# rug is LGPL-3.0+ and its gmp-mpfr-sys builds GMP, MPFR and MPC from source
+# with autotools (m4, make, diffutils and a C compiler). The crate always
+# builds a staticlib and a cdylib, so this feature must stay off the C ABI:
+# `capi` with it is a compile error, and `--all-features` is not a CI row.
 periodic-product = ["dep:rug"]
 
 [dependencies]

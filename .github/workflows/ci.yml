@@ -66,6 +66,12 @@ jobs:
           - name: readcon
             args: --features readcon
             readcon: "1"
+          # rug is LGPL-3.0+ and gmp-mpfr-sys builds GMP from source, so
+          # this is also a separate row and `capi` cannot join it.
+          - name: periodic-product
+            args: --features periodic-product
+            readcon: "0"
+            gmp: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -74,6 +80,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Python reference dependencies
         run: python -m pip install -q numpy scipy
+      - name: autotools for gmp-mpfr-sys
+        if: matrix.gmp == '1'
+        run: sudo apt-get update && sudo apt-get install -y m4
       # Before any `cargo build`, so the C and C++ tests link only the
       # library they build themselves.
       - run: cargo test --locked ${{ matrix.args }}
@@ -98,6 +107,14 @@ jobs:
             grep -q readcon_core "$syms"
           elif grep -E 'readcon_core|readcon-core' "$syms"; then
             echo "this row links readcon"
+            exit 1
+          fi
+          # `gmp_mpfr_sys` is the crate behind rug; only the
+          # periodic-product row may reference it.
+          if [ "${{ matrix.gmp }}" = "1" ]; then
+            grep -q gmp_mpfr_sys "$syms"
+          elif grep -E 'gmp_mpfr_sys|mpfr_init2' "$syms"; then
+            echo "this row links GMP or MPFR"
             exit 1
           fi
       - name: Public docs, C ABI names and header docs
@@ -125,6 +142,8 @@ jobs:
           toolchain: 1.88.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --locked --no-deps --features capi,par,highs,readcon
+      - run: sudo apt-get update && sudo apt-get install -y m4
+      - run: cargo doc --locked --no-deps --features periodic-product
 
   # rustc 1.93 and 1.94 ship LLVM 21, whose loop vectorizer segfaulted on
   # an f64::max reduction in session/drive.rs. Debug builds skip it.

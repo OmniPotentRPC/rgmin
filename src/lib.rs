@@ -116,6 +116,12 @@ pub mod periodic_block;
 /// Extended-precision products of short periodic transfer matrices.
 #[cfg(feature = "periodic-product")]
 pub mod periodic_product;
+#[cfg(all(feature = "periodic-product", feature = "capi"))]
+compile_error!(
+    "the `periodic-product` feature links rug and gmp-mpfr-sys (LGPL-3.0+) and cannot be \
+     combined with `capi`, which builds the C static library; name the features instead of \
+     passing `--all-features`"
+);
 /// Geometry preconditioners: Exp, Lindh, and the bonded FF metric.
 pub mod precon;
 mod pso;
