@@ -83,9 +83,11 @@ pub enum Method {
     /// per-atom force norm and adapt the maximum displacement after a
     /// strict energy-decrease test.
     GromacsSteep,
-    /// GROMACS `integrator = cg`: Polak-Ribiere conjugate gradients with a
-    /// steepest-descent step every `nstcgsteep` steps and convergence on
-    /// the largest per-atom force norm.
+    /// GROMACS-style `integrator = cg`: Polak-Ribiere conjugate-gradient
+    /// direction update (steepest-descent step every `nstcgsteep` steps,
+    /// `|beta| <= 5` cap, steepest-descent fallback) paired with `rgmin`'s
+    /// strong-Wolfe line search and convergence on the largest per-atom
+    /// force norm.
     GromacsCg,
     /// Shifted Newton on a caller-supplied dense Hessian.
     ///

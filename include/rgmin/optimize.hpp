@@ -694,7 +694,7 @@ public:
     int set_gromacs_steep(double shrink, std::uint32_t max_constraint_shrinks) {
         return rgmin_solver_set_gromacs_steep(ptr_, shrink, max_constraint_shrinks);
     }
-    /// GROMACS conjugate-gradient periodic steepest-descent interval; 0 turns it off.
+    /// Periodic steepest-descent interval for the GROMACS-style CG direction update; 0 turns it off.
     int set_gromacs_cg(std::uint32_t nstcgsteep) {
         return rgmin_solver_set_gromacs_cg(ptr_, nstcgsteep);
     }

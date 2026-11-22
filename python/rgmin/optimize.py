@@ -787,7 +787,15 @@ class GromacsSteep(_RgminOptimizer):
 
 
 class GromacsCg(_RgminOptimizer):
-    """GROMACS ``integrator = cg`` with MDP parameters and units."""
+    """GROMACS-style Polak-Ribiere direction update with strong-Wolfe line search.
+
+    Pairs the GROMACS ``do_cg`` Polak-Ribiere direction rules (periodic
+    ``nstcgsteep`` steepest-descent restart, ``|beta| <= 5`` cap, and
+    steepest-descent fallback) with rgmin's strong-Wolfe line search and
+    GROMACS MDP unit conversions (``emtol``, ``emstep``, ``nsteps``).
+    It does not implement GROMACS's own secant/bisection line search or
+    holonomic constraints.
+    """
 
     kind = "gromacs-cg"
 

@@ -78,6 +78,11 @@ const SESSION_LINESEARCH: LineSearch = LineSearch::Wolfe {
 /// Nocedal-Wright conjugate-gradient curvature parameter `c2 = 0.1` so
 /// cubic interpolation zooms close to the 1D directional stationary point
 /// before computing the Polak-Ribiere multiplier.
+///
+/// This pairs the GROMACS-style `do_cg` direction update (`nstcgsteep`,
+/// `|beta| <= 5`, steepest-descent fallback) with `rgmin`'s strong-Wolfe
+/// line search rather than GROMACS's golden-section/cubic-secant line
+/// search.
 const GROMACS_CG_LINESEARCH: LineSearch = LineSearch::Wolfe {
     c1: crate::gromacs::GROMACS_CG_WOLFE_C1,
     c2: crate::gromacs::GROMACS_CG_WOLFE_C2,

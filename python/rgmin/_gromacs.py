@@ -48,9 +48,12 @@ def gromacs_mdp_options(
     Defaults are ``integrator="steep"``, ``emtol=10.0`` kJ mol⁻¹ nm⁻¹,
     ``emstep=0.01`` nm, ``nsteps=-1`` (no limit), ``nstcgsteep=1000`` (for
     ``integrator="cg"``; ``0`` turns the periodic steepest-descent restart
-    off), and ``constraints="none"``. The returned mapping
-    can be passed to :func:`rgmin.minimize`; pop ``method`` for its
-    positional method argument.
+    off), and ``constraints="none"``. ``integrator="cg"`` selects
+    ``gromacs-cg``, which pairs the GROMACS-style Polak-Ribière direction
+    update with rgmin's strong-Wolfe line search rather than GROMACS's own
+    line search. The returned mapping can be passed to
+    :func:`rgmin.minimize`; pop ``method`` for its positional method
+    argument.
     """
     values: dict[str, object] = {
         "integrator": "steep",
