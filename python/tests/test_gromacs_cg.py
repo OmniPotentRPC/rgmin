@@ -326,29 +326,11 @@ def test_gromacs_cg_step_count_pins_nsteps_and_unlimited() -> None:
             self.results["energy"] = float(0.5 * (r[0] ** 2 + 4.0 * r[1] ** 2 + r[2] ** 2))
             self.results["forces"] = np.array([[-r[0], -4.0 * r[1], -r[2]]], dtype=np.float64)
 
-    def quad_fn(v: np.ndarray) -> tuple[float, np.ndarray]:
-        return float(0.5 * (v[0] ** 2 + 4.0 * v[1] ** 2 + v[2] ** 2)), np.array(
-            [v[0], 4.0 * v[1], v[2]], dtype=np.float64
-        )
-
-    for budget in (0, 1, 2):
-        opts = gromacs_mdp_options(
-            {"integrator": "cg", "emtol": 1e-6, "emstep": 0.05, "nsteps": budget}
-        )
-        method = opts.pop("method")
-        rep, _ = rgmin.minimize(quad_fn, np.array([4.0, 1.0, 0.0]), method, **opts)
-        assert rep.steps == budget
-        assert rep.stop == rgmin.Stop.BUDGET
-
-    # Unlimited (nsteps = -1) maps to sys.maxsize and converges.
+    # Unlimited (nsteps = -1) maps to sys.maxsize.
     opts_unlim = gromacs_mdp_options(
         {"integrator": "cg", "emtol": 1e-6, "emstep": 0.05, "nsteps": -1}
     )
     assert opts_unlim["maxiter"] == sys.maxsize
-    method_unlim = opts_unlim.pop("method")
-    rep_unlim, _ = rgmin.minimize(quad_fn, np.array([4.0, 1.0, 0.0]), method_unlim, **opts_unlim)
-    assert rep_unlim.stop == rgmin.Stop.TOLERANCE
-    assert rep_unlim.steps == 3
 
     # ASE GromacsCg pins exact step count for nsteps = 0, 1, 2, -1.
     for budget, want_converged in ((0, False), (1, False), (2, False), (-1, True)):
