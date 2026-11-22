@@ -144,6 +144,10 @@ where
         return control.deliver(report);
     }
     let mut last = None;
+    // `control.maxiter` counts the exact number of trial steps taken (`nsteps`),
+    // matching GROMACS `do_steep` (`count == nsteps`) rather than `do_cg`'s
+    // `step <= number_steps` (`nsteps + 1`); `-1` in MDP/Python maps to
+    // unlimited steps (`sys.maxsize`).
     for _ in 0..control.maxiter {
         let mut report = step(&mut solver, obj, &mut pos)?;
         if let Some(status) = control.halt(report.grad_norm, solver.free_len(obj.bounds())) {

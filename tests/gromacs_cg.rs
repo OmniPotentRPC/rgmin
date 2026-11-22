@@ -693,3 +693,47 @@ fn gromacs_cg_accepts_small_downhill_energy_increase_near_machine_precision() {
     assert_eq!(r_up.status, Status::MachinePrecision);
     assert_eq!(x_up[0], 0.0);
 }
+
+#[test]
+fn gromacs_cg_step_count_matches_maxiter_on_analytic_quadratic() {
+    // f(x, y, z) = x^2 + 5 y^2 from (1, 1, 0) with exact line search converges
+    // in 3 steps (step 1 SD, step 2 SD per nstcgsteep > 0, step 3 PR).
+    // Pin exact step counts across maxiter = 0, 1, 2, 3, and 10 via both
+    // minimize_method and Solver::run.
+    let objective = ellipse();
+    let start = array![1.0, 1.0, 0.0];
+    let ls = LineSearch::brent(80, 1e-15);
+
+    for (budget, want_steps, want_status) in [
+        (0usize, 0usize, Status::Budget),
+        (1, 1, Status::Budget),
+        (2, 2, Status::Budget),
+        (3, 3, Status::Tolerance),
+        (10, 3, Status::Tolerance),
+    ] {
+        let ctrl = control(0.1, 1e-10, budget);
+        let rep = minimize_method(&objective, start.clone(), &ctrl, Method::GromacsCg, ls).unwrap();
+        assert_eq!(rep.steps, want_steps, "minimize_method budget={budget}");
+        assert_eq!(rep.status, want_status, "minimize_method budget={budget}");
+
+        let mut x = start.clone();
+        let mut solver = Solver::new(Method::GromacsCg, ctrl, 3);
+        solver.set_linesearch(ls);
+        let rep_s = solver.run(&objective, &mut x).unwrap();
+        assert_eq!(rep_s.steps, want_steps, "Solver::run budget={budget}");
+        assert_eq!(rep_s.status, want_status, "Solver::run budget={budget}");
+    }
+
+    // Starting at a converged point takes 0 steps even with a positive budget.
+    let zero_start = array![0.0, 0.0, 0.0];
+    let rep_done = minimize_method(
+        &objective,
+        zero_start,
+        &control(0.1, 1e-10, 5),
+        Method::GromacsCg,
+        ls,
+    )
+    .unwrap();
+    assert_eq!(rep_done.steps, 0);
+    assert_eq!(rep_done.status, Status::Tolerance);
+}

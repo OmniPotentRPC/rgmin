@@ -311,3 +311,49 @@ def test_gromacs_cg_ase_refuses_holonomic_constraints_and_allows_subspace_masks(
     opt_frozen = GromacsCg(atoms_frozen, emtol=1.0, emstep=meta["emstep"], nsteps=5, logfile=None)
     opt_frozen.run()
     np.testing.assert_allclose(atoms_frozen.get_positions()[0], start_ang[0], atol=0.0)
+
+
+def test_gromacs_cg_step_count_pins_nsteps_and_unlimited() -> None:
+    class QuadAse(Calculator):
+        implemented_properties = ["energy", "forces"]
+
+        def calculate(
+            self, atoms=None, properties=("energy", "forces"), system_changes=all_changes
+        ):
+            super().calculate(atoms, properties, system_changes)
+            r = self.atoms.get_positions()[0]
+            # E = 0.5 * (x^2 + 4 y^2 + z^2) in eV, forces = -[x, 4 y, z] in eV/A
+            self.results["energy"] = float(0.5 * (r[0] ** 2 + 4.0 * r[1] ** 2 + r[2] ** 2))
+            self.results["forces"] = np.array([[-r[0], -4.0 * r[1], -r[2]]], dtype=np.float64)
+
+    def quad_fn(v: np.ndarray) -> tuple[float, np.ndarray]:
+        return float(0.5 * (v[0] ** 2 + 4.0 * v[1] ** 2 + v[2] ** 2)), np.array(
+            [v[0], 4.0 * v[1], v[2]], dtype=np.float64
+        )
+
+    for budget in (0, 1, 2):
+        opts = gromacs_mdp_options(
+            {"integrator": "cg", "emtol": 1e-6, "emstep": 0.05, "nsteps": budget}
+        )
+        method = opts.pop("method")
+        rep, _ = rgmin.minimize(quad_fn, np.array([4.0, 1.0, 0.0]), method, **opts)
+        assert rep.steps == budget
+        assert rep.stop == rgmin.Stop.BUDGET
+
+    # Unlimited (nsteps = -1) maps to sys.maxsize and converges.
+    opts_unlim = gromacs_mdp_options(
+        {"integrator": "cg", "emtol": 1e-6, "emstep": 0.05, "nsteps": -1}
+    )
+    assert opts_unlim["maxiter"] == sys.maxsize
+    method_unlim = opts_unlim.pop("method")
+    rep_unlim, _ = rgmin.minimize(quad_fn, np.array([4.0, 1.0, 0.0]), method_unlim, **opts_unlim)
+    assert rep_unlim.stop == rgmin.Stop.TOLERANCE
+    assert rep_unlim.steps == 3
+
+    # ASE GromacsCg pins exact step count for nsteps = 0, 1, 2, -1.
+    for budget, want_converged in ((0, False), (1, False), (2, False), (-1, True)):
+        atoms = Atoms("Ar", positions=[[4.0, 1.0, 0.0]])
+        atoms.calc = QuadAse()
+        opt = GromacsCg(atoms, emtol=1e-4, emstep=0.05, nsteps=budget, logfile=None)
+        assert opt.run() is want_converged
+        assert opt.nsteps == (3 if budget == -1 else budget)
