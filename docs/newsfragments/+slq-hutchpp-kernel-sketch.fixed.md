@@ -1,0 +1,1 @@
+`slq_logdet_hutchpp` now drops a Hutch++ sketch vector that lies in the deflated subspace. When projecting out the kernel and deflated pairs left at most `1e-12` of the vector's norm, the remainder was kept and the power iteration normalised that roundoff into a basis vector of the trace subspace. The vector is now discarded, as the stochastic probes already do.

@@ -1,0 +1,1 @@
+`lanczos_quadrature_fn` no longer reports `bracketed: true` when the Lanczos recurrence terminates early on an invariant subspace. The function takes no lower bound, so it never forms a Gauss-Radau bracket, and every other return path already reported `false`. The flag is `true` only when a caller-supplied `lower_bound` produced a bracket, as `lanczos_quadrature_log` reports it.
