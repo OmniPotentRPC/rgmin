@@ -804,6 +804,37 @@ fn gromacs_cg_keeps_downhill_rise_tolerance_after_set_objective_roundoff() {
 }
 
 #[test]
+fn set_objective_roundoff_keeps_the_gromacs_downhill_rise() {
+    // A zero approximate-Wolfe window rejects this rise on its own. The
+    // GROMACS tolerance, installed with the method, still accepts it.
+    let e0 = 100.0_f64;
+    let tol = f64::EPSILON.sqrt() * e0.abs();
+    let accepted_rise = 0.25 * tol;
+    let downhill_small_rise = Oracle::unbounded(3, move |x: ArrayView1<f64>| {
+        if x[0] == 0.0 {
+            (e0, array![-1.0, 0.0, 0.0])
+        } else if x[0] > 0.0 && x[0] <= 0.1 {
+            (e0 + accepted_rise, array![-0.5, 0.0, 0.0])
+        } else {
+            (e0 + 1.5 * tol, array![-0.5, 0.0, 0.0])
+        }
+    });
+    let mut x = array![0.0, 0.0, 0.0];
+    let mut solver = Solver::new(Method::GromacsCg, control(0.1, 1e-6, 5), 3);
+    assert!(solver.set_objective_roundoff(0.0));
+    let report = solver.step(&downhill_small_rise, &mut x).unwrap();
+    assert_eq!(report.status, Status::Iterating);
+    assert!(x[0] > 0.0, "the downhill rise was cleared: {x:?}");
+    assert_eq!(report.value, e0 + accepted_rise);
+
+    let mut plain = Solver::new(Method::polak_ribiere(), control(0.1, 1e-6, 5), 3);
+    assert!(plain.set_objective_roundoff(0.0));
+    let mut y = array![0.0, 0.0, 0.0];
+    plain.step(&downhill_small_rise, &mut y).unwrap();
+    assert_eq!(y[0], 0.0);
+}
+
+#[test]
 fn gromacs_cg_step_count_matches_maxiter_on_analytic_quadratic() {
     // f(x, y, z) = x^2 + 5 y^2 from (1, 1, 0) with exact line search converges
     // in 3 steps (step 1 SD, step 2 SD per nstcgsteep > 0, step 3 PR).

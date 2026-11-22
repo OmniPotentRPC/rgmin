@@ -90,7 +90,8 @@ impl LineSearchOptions {
     ///
     /// This is an acceptance policy, not a certified oracle error bound.
     /// Both slope conditions still apply; gradient stopping is independent.
-    /// Negative and nonfinite values are rejected. Zero permits no rise.
+    /// Negative and nonfinite values are rejected. Zero permits no rise
+    /// through this window.
     pub fn with_objective_roundoff(relative: f64) -> Option<Self> {
         (relative.is_finite() && relative >= 0.0).then_some(Self {
             relative_objective_error: Some(relative),
