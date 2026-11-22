@@ -4255,4 +4255,223 @@ mod tests {
         let built = crate::PcgConfig::default().with_rel_tol(1e-10);
         assert_eq!(built.rel_tol, 1e-10);
     }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ScalingCv {
+        Diagonal,
+        Exact,
+        KernelAligned,
+    }
+
+    type CvQuad = Box<dyn FnMut(&[f64]) -> Result<f64>>;
+    type CvMatvec = Box<dyn FnMut(&[f64], &mut [f64]) -> Result<()>>;
+
+    const SCALING_N: usize = 24;
+    const SCALING_SKETCH: usize = 6;
+    const SCALING_SAMPLES: usize = 16;
+    const SCALING_SKETCH_SEED: u64 = 91;
+
+    fn scaling_matrix() -> Vec<f64> {
+        let n = SCALING_N;
+        let mut a = vec![0.0; n * n];
+        for i in 0..n {
+            a[i * n + i] = 1.0 + 0.3 * ((i + 1) as f64 * 0.7).sin().abs() + 0.05 * (i as f64);
+        }
+        for r in 0..12 {
+            let weight = 3.0 / ((r + 1) * (r + 1)) as f64;
+            let mut v: Vec<f64> = (0..n)
+                .map(|i| (((i + 1) * (r + 1)) as f64 * 0.37).sin())
+                .collect();
+            let nrm = norm2_slice(&v);
+            for slot in &mut v {
+                *slot /= nrm;
+            }
+            for i in 0..n {
+                for j in 0..n {
+                    a[i * n + j] += weight * v[i] * v[j];
+                }
+            }
+        }
+        a
+    }
+
+    fn scaling_kernel() -> Vec<Vec<f64>> {
+        let n = SCALING_N;
+        let mut rng = SplitMix64::new(domain_separated_seed(
+            SCALING_SKETCH_SEED,
+            HUTCHPP_SKETCH_DOMAIN,
+        ));
+        let first_sketch: Vec<f64> = (0..n).map(|_| rng.next_rademacher()).collect();
+        let nrm = norm2_slice(&first_sketch);
+        let k0: Vec<f64> = first_sketch.iter().map(|&x| x / nrm).collect();
+        let mut k1: Vec<f64> = (0..n).map(|i| ((i + 3) as f64 * 1.3).cos()).collect();
+        project_out_basis(&mut k1, std::slice::from_ref(&k0));
+        let nrm = norm2_slice(&k1);
+        for slot in &mut k1 {
+            *slot /= nrm;
+        }
+        vec![k0, k1]
+    }
+
+    fn scaling_report(a: &[f64], c: f64, case: ScalingCv) -> SlqLogDetReport {
+        let n = SCALING_N;
+        let scaled: Vec<f64> = a.iter().map(|&v| c * v).collect();
+        let mut op = |x: &[f64], y: &mut [f64]| dense_apply(&scaled, n, x, y);
+        let kernel = if case == ScalingCv::KernelAligned {
+            scaling_kernel()
+        } else {
+            Vec::new()
+        };
+        let diag: Vec<f64> = (0..n).map(|i| a[i * n + i]).collect();
+        let eig = sym_eigh(a, n).expect("eigh");
+        let ln_c = c.ln();
+
+        let (mut cv_quad, mut cv_matvec, cv_full_trace): (CvQuad, CvMatvec, f64) =
+            if case == ScalingCv::Exact {
+                // ln(cA) = ln c * I + ln A, evaluated through the eigenpairs of A.
+                let values = eig.values.clone();
+                let vectors = eig.vectors.clone();
+                let trace: f64 = values.iter().map(|&l| ln_c + l.ln()).sum();
+                let reversed = scaled.clone();
+                (
+                    Box::new(move |z: &[f64]| {
+                        let mut total = 0.0;
+                        for (k, &lam) in values.iter().enumerate() {
+                            let coeff: f64 = (0..n).map(|i| vectors[i * n + k] * z[i]).sum();
+                            total += (ln_c + lam.ln()) * coeff * coeff;
+                        }
+                        Ok(total)
+                    }),
+                    Box::new(move |x: &[f64], y: &mut [f64]| {
+                        for i in 0..n {
+                            let mut s = 0.0;
+                            for j in (0..n).rev() {
+                                s += reversed[i * n + j] * x[j];
+                            }
+                            y[i] = s;
+                        }
+                        Ok(())
+                    }),
+                    trace,
+                )
+            } else {
+                let trace: f64 = diag.iter().map(|&d| ln_c + d.ln()).sum();
+                let quad_diag = diag.clone();
+                (
+                    Box::new(move |z: &[f64]| {
+                        Ok(quad_diag
+                            .iter()
+                            .zip(z)
+                            .map(|(&d, &zi)| (ln_c + d.ln()) * zi * zi)
+                            .sum())
+                    }),
+                    Box::new(move |x: &[f64], y: &mut [f64]| {
+                        for ((slot, &d), &xi) in y.iter_mut().zip(&diag).zip(x) {
+                            *slot = c * d * xi;
+                        }
+                        Ok(())
+                    }),
+                    trace,
+                )
+            };
+
+        slq_logdet_hutchpp(
+            n,
+            &mut op,
+            SlqDeflation::default()
+                .with_kernel(&kernel)
+                .with_deflation_lower_estimate(0.5 * c),
+            &mut cv_quad,
+            &mut cv_matvec,
+            SlqHutchPpOptions::default()
+                .with_cv_full_trace(cv_full_trace)
+                .with_hutchpp(
+                    HutchPpConfig::default()
+                        .with_sketch_dim(SCALING_SKETCH)
+                        .with_power_iters(2)
+                        .with_sketch_seed(SCALING_SKETCH_SEED),
+                ),
+            SlqConfig::default()
+                .with_max_samples(SCALING_SAMPLES)
+                .with_max_lanczos_steps(n)
+                .with_target_tol(1e-9)
+                .with_seed(5),
+        )
+        .unwrap_or_else(|err| panic!("{case:?} c={c:e}: {err}"))
+    }
+
+    #[test]
+    fn hutchpp_logdet_is_invariant_under_operator_scaling() {
+        let a = scaling_matrix();
+        let n = SCALING_N;
+        let exact: f64 = sym_eigh(&a, n)
+            .expect("eigh")
+            .values
+            .iter()
+            .map(|&l| l.ln())
+            .sum();
+
+        for case in [
+            ScalingCv::Diagonal,
+            ScalingCv::Exact,
+            ScalingCv::KernelAligned,
+        ] {
+            let rem_dim = if case == ScalingCv::KernelAligned {
+                n - 2
+            } else {
+                n
+            };
+            let expected_sketch = match case {
+                ScalingCv::Diagonal => SCALING_SKETCH,
+                ScalingCv::Exact => 0,
+                ScalingCv::KernelAligned => SCALING_SKETCH - 1,
+            };
+            let base = scaling_report(&a, 1.0, case);
+            assert_eq!(
+                base.probes,
+                expected_sketch + SCALING_SAMPLES,
+                "{case:?} c=1: probe count"
+            );
+            if case != ScalingCv::KernelAligned {
+                assert!(
+                    (base.logabs_det - exact).abs() <= 1e-6 + base.ci_halfwidth,
+                    "{case:?} c=1: got {} exact {exact}",
+                    base.logabs_det
+                );
+            }
+            if case == ScalingCv::Exact {
+                assert!(
+                    base.stochastic_se <= 1e-9,
+                    "{case:?} c=1: exact control variate left se {:e}",
+                    base.stochastic_se
+                );
+            } else {
+                assert!(base.stochastic_se > 1e-8, "{case:?} c=1: degenerate se");
+            }
+
+            for &c in &[1e-16_f64, 1e-8, 1e8, 1e16] {
+                let rep = scaling_report(&a, c, case);
+                let shift = (rem_dim as f64) * c.ln();
+                assert_eq!(
+                    rep.probes, base.probes,
+                    "{case:?} c={c:e}: probe count moved with the operator scale"
+                );
+                assert_eq!(rep.samples, base.samples, "{case:?} c={c:e}: samples");
+                let drift = (rep.logabs_det - (base.logabs_det + shift)).abs();
+                assert!(
+                    drift <= 1e-10 + 1e-12 * shift.abs(),
+                    "{case:?} c={c:e}: logdet {} vs {} + {shift}, drift {drift:e}",
+                    rep.logabs_det,
+                    base.logabs_det
+                );
+                let se_drift = (rep.stochastic_se - base.stochastic_se).abs();
+                assert!(
+                    se_drift <= 1e-9 * base.stochastic_se + 1e-9,
+                    "{case:?} c={c:e}: se {:e} vs {:e}",
+                    rep.stochastic_se,
+                    base.stochastic_se
+                );
+            }
+        }
+    }
 }
