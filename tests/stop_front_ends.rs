@@ -8,9 +8,10 @@
 #![cfg(feature = "capi")]
 
 use std::os::raw::c_void;
+use std::sync::OnceLock;
 
 use dlpk::sys::DLManagedTensorVersioned;
-use eindir_core::DifferentiableObjective;
+use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::ffi::{
     rgmin_control_t, rgmin_method_t, rgmin_minimize, rgmin_minimize_opts, rgmin_report_t,
@@ -20,6 +21,38 @@ use rgmin::{Accept, Control, LbfgsStep, LineSearch, Method, Solver, StopReason, 
 
 const BUDGET: usize = 3;
 const START: f64 = 1.0;
+
+struct BoundedUphill;
+
+impl Objective<f64> for BoundedUphill {
+    fn dim(&self) -> usize {
+        1
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        static BOUNDS: OnceLock<Bounds<f64>> = OnceLock::new();
+        BOUNDS.get_or_init(|| Bounds::new(array![-1.0], array![1.0], 0.0))
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        0.5 * x[0] * x[0]
+    }
+}
+impl Gradient<f64> for BoundedUphill {
+    fn dim(&self) -> usize {
+        1
+    }
+
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        array![-x[0]]
+    }
+}
+
+impl DifferentiableObjective<f64> for BoundedUphill {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        (self.eval(x), self.grad(x))
+    }
+}
 
 fn uphill() -> impl DifferentiableObjective<f64> {
     rgmin::Oracle::unbounded(1, |x: ArrayView1<f64>| (0.5 * x[0] * x[0], array![-x[0]]))
@@ -188,4 +221,31 @@ fn a_moving_run_that_spends_its_budget_stays_maxiter_everywhere() {
         .unwrap();
     assert_eq!(one_shot.stop_reason(), StopReason::MaxIter);
     assert_eq!(session.stop_reason(), StopReason::MaxIter);
+}
+
+#[test]
+fn out_of_bounds_starts_have_identical_session_and_one_shot_results() {
+    for method in [Method::lbfgs(), Method::Bfgs] {
+        let one_shot = minimize_method(
+            &BoundedUphill,
+            array![2.0],
+            &control(),
+            method.clone(),
+            LineSearch::default(),
+        )
+        .unwrap();
+
+        let mut x = array![2.0];
+        let mut solver = Solver::new(method.clone(), control(), 1);
+        solver.set_accept(Accept::Energy);
+        solver.set_geometry_step(false);
+        if matches!(method, Method::Lbfgs { .. }) {
+            solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+        }
+        let stepped = solver.run(&BoundedUphill, &mut x).unwrap();
+
+        assert_eq!(stepped.stop_reason(), one_shot.stop_reason(), "{method:?}");
+        assert_eq!(stepped.steps, one_shot.steps, "{method:?}");
+        assert_eq!(x, one_shot.coords, "{method:?}");
+    }
 }

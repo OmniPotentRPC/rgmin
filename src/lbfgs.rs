@@ -2490,7 +2490,8 @@ impl Lbfgs {
                     crate::report::Status::NoiseFloor,
                 ));
             }
-            let moved = before.is_none_or(|before| crate::stop::moved(&before, &pos));
+            let moved = before
+                .is_none_or(|before| crate::stop::bounded_step_moved(obj.bounds(), &before, &pos));
             if let Some(status) =
                 crate::stop::stop_after(&mut stops, control, obj, value, moved, &grad)
             {
@@ -2510,7 +2511,7 @@ impl Lbfgs {
         // via `finish_status`. A budget in which no trial moved is a
         // failed line search, not a generic maxiter stop.
         control.deliver(if control.maxiter > 0 {
-            report.with_budget_moved(pos != start)
+            report.with_budget_moved(crate::stop::bounded_step_moved(obj.bounds(), &start, &pos))
         } else {
             report
         })
