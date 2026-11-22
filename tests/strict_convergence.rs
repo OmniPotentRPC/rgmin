@@ -7,11 +7,11 @@ use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, Array2, ArrayView1, array};
 use rgmin::manifold::{ProductFactor, ProductManifold};
 use rgmin::{
-    Conjugacy, Control, Error, FireKind, HessianObjective, HessianOracle, HessianVector, Lbfgs,
-    LineSearch, ManifoldKind, Method, NewtonKind, NoiseFloor, Oracle, Report, Restart, Rlbfgs,
-    ScgParams, Solver, Status, StopReason, minimize, minimize_adam, minimize_bfgs, minimize_lbfgs,
-    minimize_method, minimize_method_hess, minimize_newton, minimize_newton_cg, minimize_pso,
-    minimize_rlbfgs, minimize_scg, minimize_sd, polish_hvp, polish_newton,
+    Conjugacy, Control, Error, FireKind, GpMin, GpMinConfig, HessianObjective, HessianOracle,
+    HessianVector, Lbfgs, LineSearch, ManifoldKind, Method, NewtonKind, NoiseFloor, Oracle, Report,
+    Restart, Rlbfgs, ScgParams, Solver, Status, StopReason, minimize, minimize_adam, minimize_bfgs,
+    minimize_lbfgs, minimize_method, minimize_method_hess, minimize_newton, minimize_newton_cg,
+    minimize_pso, minimize_rlbfgs, minimize_scg, minimize_sd, polish_hvp, polish_newton,
 };
 
 const ROSE_START: [f64; 2] = [0.5, 0.5];
@@ -1526,4 +1526,92 @@ fn not_converged_preserves_evals_and_counters_on_every_exit_path() {
             assert_eq!(second.steps, solver.steps(), "{method:?} {tag}");
         }
     }
+}
+
+fn gpmin_quad(x0: f64, control: &Control) -> rgmin::Result<Report> {
+    let mut x = array![x0];
+    let mut gpmin = GpMin::new(GpMinConfig::default(), 1).unwrap();
+    gpmin.run(&quad(), &mut x, control)
+}
+
+fn gpmin_session(x0: f64, control: &Control) -> rgmin::Result<Report> {
+    let mut x = array![x0];
+    let mut solver = Solver::new(Method::GpMin, control.clone(), 1);
+    solver.run(&quad(), &mut x)
+}
+
+/// GPMin stops on `grad_norm < gtol`. Equality is a spent budget, the
+/// flag stays false, and `require_convergence` refuses that report.
+/// A short capped step that stays above `gtol` does the same after the
+/// iteration loop, for the standalone stepper and the session.
+#[test]
+fn gpmin_uses_the_strict_convergence_check() {
+    let gtol = 1.0_f64;
+    let below = f64::from_bits(gtol.to_bits() - 1);
+    let zero = Control::default().with_maxiter(0).with_gtol(gtol);
+    let open = Control::default().with_maxiter(4).with_gtol(gtol);
+
+    for run in [gpmin_quad, gpmin_session] {
+        let under = run(below, &zero).unwrap();
+        assert!(under.grad_norm < gtol);
+        assert_eq!(under.status, Status::Tolerance);
+        assert!(under.converged && under.converged());
+        let under_strict = run(below, &strict(&zero)).unwrap();
+        same_run(&under, &under_strict);
+
+        let at = run(gtol, &zero).unwrap();
+        assert_eq!(at.grad_norm, gtol);
+        assert_eq!(at.status, Status::Budget);
+        assert_eq!(at.stop_reason(), StopReason::MaxIter);
+        assert!(!at.converged);
+        assert!(!at.converged());
+        let at_strict = refused(run(gtol, &strict(&zero)));
+        same_stop(&at, &at_strict);
+        assert_eq!(at_strict.grad_norm, gtol);
+    }
+
+    match gpmin_quad(gtol, &zero.clone().with_error_on_unmet(true)) {
+        Err(Error::StopUnmet { reason, report }) => {
+            assert_eq!(reason, StopReason::MaxIter);
+            assert_eq!(report.grad_norm, gtol);
+            assert!(!report.converged);
+        }
+        other => panic!("expected StopUnmet, got {other:?}"),
+    }
+
+    let early = gpmin_quad(below, &open).unwrap();
+    assert_eq!(early.status, Status::Tolerance);
+    assert!(early.converged && early.converged());
+    assert_eq!(early.steps, 0);
+    let early_strict = gpmin_quad(below, &strict(&open)).unwrap();
+    same_run(&early, &early_strict);
+
+    let capped = Control::default().with_maxiter(1).with_gtol(1e-8);
+    let cfg = GpMinConfig::default().with_max_step(Some(1e-3));
+    let start = array![1.0];
+    let mut x = start.clone();
+    let mut gpmin = GpMin::new(cfg, 1).unwrap();
+    let spent = gpmin.run(&quad(), &mut x, &capped).unwrap();
+    assert!(spent.steps >= 1);
+    assert!(spent.grad_norm >= capped.gtol);
+    assert_eq!(spent.status, Status::Budget);
+    assert!(!spent.converged);
+    let mut x = start.clone();
+    let mut gpmin = GpMin::new(cfg, 1).unwrap();
+    let spent_strict = refused(gpmin.run(&quad(), &mut x, &strict(&capped)));
+    same_stop(&spent, &spent_strict);
+
+    let mut x = start.clone();
+    let mut solver = Solver::new(Method::GpMin, capped.clone(), 1);
+    solver.set_gpmin_config(cfg).unwrap();
+    let session = solver.run(&quad(), &mut x).unwrap();
+    assert!(session.steps >= 1);
+    assert!(session.grad_norm >= capped.gtol);
+    assert_ne!(session.status, Status::Tolerance);
+    assert!(!session.converged);
+    let mut x = start;
+    let mut solver = Solver::new(Method::GpMin, strict(&capped), 1);
+    solver.set_gpmin_config(cfg).unwrap();
+    let session_strict = refused(solver.run(&quad(), &mut x));
+    same_stop(&session, &session_strict);
 }

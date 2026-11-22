@@ -4147,12 +4147,13 @@ impl Solver {
                         *x = obj.bounds().clip(out.x.view());
                         self.remember(x, out.value, &out.grad);
                         self.steps += 1;
-                        let status = if out.stalled_machine && out.grad_norm > self.control.gtol {
-                            Status::MachinePrecision
-                        } else {
-                            self.control
-                                .classify(out.grad_norm, self.free_len(obj.bounds()))
-                        };
+                        let status =
+                            if out.stalled_machine && !self.control.converged(out.grad_norm) {
+                                Status::MachinePrecision
+                            } else {
+                                self.control
+                                    .classify(out.grad_norm, self.free_len(obj.bounds()))
+                            };
                         Ok(self.finish(out.value, x, &out.grad, out.grad_norm, status))
                     }
                     Err(err) => Err(err),

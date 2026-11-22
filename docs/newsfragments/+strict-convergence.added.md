@@ -2,7 +2,11 @@
 `Error::NotConverged(Box<Report>)` when a finished run is still not
 below `gtol`. The default stays `Ok`. `Report.converged` records the
 result. The comparison is `grad_norm < gtol`, so a gradient exactly
-at `gtol` is not converged.
+at `gtol` is not converged. GPMin's standalone `run` uses that
+comparison and returns through the same path as the other minimizers,
+so `Report.converged` is set and `require_convergence` and
+`error_on_unmet` apply. Its session step uses the same comparison
+for a machine-precision stall.
 A strict run stops early as `StepTolerance` only when an accepted step
 leaves the point unchanged and the next iteration would repeat it. A
 rejected trust region trial or a rejected adaptive step is not a stall,
