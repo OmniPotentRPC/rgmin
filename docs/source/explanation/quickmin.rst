@@ -2,7 +2,6 @@
 Quick-min
 =========
 
-    :Author: Ubuntu
 
 Quick-min keeps a velocity and damps it by a projection before an
 explicit Euler step. Write ``F = -∇f`` and ``Δt`` for the time step. The

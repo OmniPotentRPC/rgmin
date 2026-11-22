@@ -2,7 +2,6 @@
 Pulay residual subspace
 =======================
 
-    :Author: Ubuntu
 
 The step stores positions and gradients, oldest first, and drops
 pairs past ``memory``. The coefficients ``c`` solve

@@ -2,7 +2,6 @@
 ECnoise
 =======
 
-    :Author: Ubuntu
 
 ``ecnoise`` reads ``m + 1`` values of one scalar function, with ``m + 1 >= 4``,
 and builds the forward-difference table. The default is ``m = 8`` (nine
