@@ -1,0 +1,1 @@
+`Method::GromacsCg` now keeps `-z + beta * d` unscaled in its Polak-Ribiere direction update under `Accept::Step` instead of multiplying `-z` by `istep`, and `Solver::set_objective_roundoff` updates only the objective-roundoff window while preserving the `sqrt(eps)` downhill-rise tolerance installed for `Method::GromacsCg`.

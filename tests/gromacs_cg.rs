@@ -730,6 +730,34 @@ fn gromacs_cg_accepts_small_downhill_energy_increase_near_machine_precision() {
 }
 
 #[test]
+fn gromacs_cg_keeps_downhill_rise_tolerance_after_set_objective_roundoff() {
+    let e0 = 100.0_f64;
+    let tol = f64::EPSILON.sqrt() * e0.abs();
+    let accepted_rise = 0.25 * tol;
+    let downhill_small_rise = Oracle::unbounded(3, move |x: ArrayView1<f64>| {
+        if x[0] == 0.0 {
+            (e0, array![-1.0, 0.0, 0.0])
+        } else {
+            (e0 + accepted_rise, array![-0.5, 0.0, 0.0])
+        }
+    });
+
+    for roundoff in [1e-12, 0.0] {
+        let mut x = array![0.0, 0.0, 0.0];
+        let mut solver = Solver::new(Method::GromacsCg, control(0.1, 1e-6, 5), 3);
+        assert!(solver.set_objective_roundoff(roundoff));
+        assert!(!solver.set_objective_roundoff(-1.0));
+        let report = solver.step(&downhill_small_rise, &mut x).unwrap();
+        assert_eq!(report.status, Status::Iterating, "roundoff={roundoff}");
+        assert!(
+            x[0] > 0.0,
+            "expected accepted step for roundoff={roundoff}, got x={x:?}"
+        );
+        assert_eq!(report.value, e0 + accepted_rise);
+    }
+}
+
+#[test]
 fn gromacs_cg_step_count_matches_maxiter_on_analytic_quadratic() {
     // f(x, y, z) = x^2 + 5 y^2 from (1, 1, 0) with exact line search converges
     // in 3 steps (step 1 SD, step 2 SD per nstcgsteep > 0, step 3 PR).
