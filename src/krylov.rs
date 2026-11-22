@@ -234,7 +234,8 @@ pub enum KrylovRefusal {
     Tolerance,
     /// A nonzero system was given no iteration budget.
     ZeroIterationBudget,
-    /// A right-hand side, operator image, or preconditioner image is non-finite.
+    /// A right-hand side, operator image, preconditioner image, rotation, or
+    /// projected coefficient is non-finite.
     NonFinite,
     /// Arnoldi produced a singular projected system.
     SingularProjectedSystem,
@@ -351,15 +352,18 @@ fn dot(left: &[f64], right: &[f64]) -> f64 {
 }
 
 fn norm(vector: &[f64]) -> f64 {
-    let mut largest = 0.0;
+    let mut largest = 0.0_f64;
     for value in vector {
-        let magnitude = value.abs();
-        if largest < magnitude {
-            largest = magnitude;
+        if value.is_nan() {
+            return f64::NAN;
         }
+        largest = largest.max(value.abs());
     }
     if largest == 0.0 {
         return 0.0;
+    }
+    if largest.is_infinite() {
+        return f64::INFINITY;
     }
     let unscaled_upper = f64::MAX.sqrt() / (vector.len() as f64).sqrt();
     let unscaled_lower = f64::MIN_POSITIVE.sqrt();
@@ -382,11 +386,10 @@ fn refusal<OE, PE>(reason: KrylovRefusal, record: KrylovRecord) -> GmresFailure<
     GmresFailure::Refused { reason, record }
 }
 
-fn projected_coefficients<OE, PE>(
+fn projected_coefficients(
     columns: &[Vec<f64>],
     transformed_rhs: &[f64],
-    record: KrylovRecord,
-) -> Result<Vec<f64>, GmresFailure<OE, PE>> {
+) -> Result<Vec<f64>, KrylovRefusal> {
     let count = columns.len();
     let mut coefficients = vec![0.0; count];
     for row in (0..count).rev() {
@@ -395,10 +398,17 @@ fn projected_coefficients<OE, PE>(
             value -= columns[column][row] * coefficients[column];
         }
         let diagonal = columns[row][row];
-        if !diagonal.is_finite() || diagonal == 0.0 {
-            return Err(refusal(KrylovRefusal::SingularProjectedSystem, record));
+        if !diagonal.is_finite() {
+            return Err(KrylovRefusal::NonFinite);
         }
-        coefficients[row] = value / diagonal;
+        if diagonal == 0.0 {
+            return Err(KrylovRefusal::SingularProjectedSystem);
+        }
+        let coefficient = value / diagonal;
+        if !coefficient.is_finite() {
+            return Err(KrylovRefusal::NonFinite);
+        }
+        coefficients[row] = coefficient;
     }
     Ok(coefficients)
 }
@@ -546,7 +556,10 @@ where
         transformed_rhs[column_index] = cosine * previous;
         transformed_rhs.push(-sine * previous);
         columns.push(hessenberg);
-        let coefficients = projected_coefficients(&columns, &transformed_rhs, record.clone())?;
+        let coefficients = match projected_coefficients(&columns, &transformed_rhs) {
+            Ok(coefficients) => coefficients,
+            Err(reason) => return Err(refusal(reason, record)),
+        };
         let absolute_residual =
             true_residual_norm(right_hand_side, &operator_images, &coefficients);
         if !absolute_residual.is_finite() {
@@ -827,22 +840,10 @@ where
             state.transformed_rhs[column_index] = cosine * previous;
             state.transformed_rhs.push(-sine * previous);
             state.columns.push(hessenberg);
-            let coefficients = match projected_coefficients::<BatchOperatorError<O::Error>, P::Error>(
-                &state.columns,
-                &state.transformed_rhs,
-                state.record.clone(),
-            ) {
+            let coefficients = match projected_coefficients(&state.columns, &state.transformed_rhs)
+            {
                 Ok(coefficients) => coefficients,
-                Err(GmresFailure::Refused { reason, .. }) => {
-                    return Err(block_refusal(reason, &states, index));
-                }
-                Err(_) => {
-                    return Err(block_refusal(
-                        KrylovRefusal::SingularProjectedSystem,
-                        &states,
-                        index,
-                    ));
-                }
+                Err(reason) => return Err(block_refusal(reason, &states, index)),
             };
             let absolute_residual = true_residual_norm(
                 &right_hand_sides[index],
@@ -1608,6 +1609,86 @@ mod tests {
         .map_err(|_| "finite stagnation was refused")?;
         assert_eq!(runs[0].status, GmresStatus::Stagnated);
         assert!(finite(&runs[0].solution));
+        Ok(())
+    }
+
+    #[test]
+    fn norm_propagates_nan_and_infinity() {
+        assert!(norm(&[f64::NAN]).is_nan());
+        assert!(norm(&[0.0, f64::NAN]).is_nan());
+        assert!(norm(&[1.0, f64::NAN, 3.0]).is_nan());
+        assert!(norm(&[f64::INFINITY, f64::NAN]).is_nan());
+        assert_eq!(norm(&[0.0, f64::NEG_INFINITY]), f64::INFINITY);
+        assert_eq!(norm(&[3.0, -4.0]), 5.0);
+        assert_eq!(norm(&[]), 0.0);
+    }
+
+    #[test]
+    fn projected_coefficients_refuses_non_finite_quotients() {
+        assert_eq!(
+            projected_coefficients(&[vec![1e-300]], &[1e300, 0.0]),
+            Err(KrylovRefusal::NonFinite)
+        );
+        assert_eq!(
+            projected_coefficients(&[vec![2.0]], &[f64::NAN, 0.0]),
+            Err(KrylovRefusal::NonFinite)
+        );
+        assert_eq!(
+            projected_coefficients(&[vec![f64::NAN]], &[1.0, 0.0]),
+            Err(KrylovRefusal::NonFinite)
+        );
+        assert_eq!(
+            projected_coefficients(&[vec![0.0]], &[1.0, 0.0]),
+            Err(KrylovRefusal::SingularProjectedSystem)
+        );
+        assert_eq!(
+            projected_coefficients(&[vec![2.0], vec![1.0, 4.0]], &[6.0, 8.0, 0.0]),
+            Ok(vec![2.0, 2.0])
+        );
+    }
+
+    #[test]
+    fn an_overflowing_coefficient_is_refused_before_any_iteration_is_observed()
+    -> Result<(), &'static str> {
+        let tiny_image =
+            |input: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
+                for (slot, value) in output.iter_mut().zip(input) {
+                    *slot = value * 1e-200;
+                }
+                Ok(())
+            };
+        let right_hand_side = vec![1e200, 0.0];
+        let mut streamed = Vec::new();
+        let scalar = gmres_right(
+            &mut { tiny_image },
+            &mut Identity,
+            &right_hand_side,
+            GmresOptions::unrestarted(1e-8),
+            &mut |iteration| streamed.push(iteration),
+        );
+        match scalar {
+            Err(GmresFailure::Refused { reason, record }) => {
+                assert_eq!(reason, KrylovRefusal::NonFinite);
+                assert!(record.iterations.is_empty());
+            }
+            _ => return Err("overflowing coefficient was not refused"),
+        }
+        assert!(streamed.is_empty());
+
+        let block = gmres_right_block(
+            &mut { tiny_image },
+            &mut [Identity],
+            &[right_hand_side],
+            GmresOptions::unrestarted(1e-8),
+            &mut [NoObserver],
+        );
+        match block {
+            Err(GmresFailure::BlockRefused { reason, record, .. }) => {
+                assert_eq!(reason, KrylovRefusal::NonFinite);
+                assert!(record.iterations.is_empty());
+            }
+            _ => return Err("block overflow was not refused"),
+        }
         Ok(())
     }
 }
