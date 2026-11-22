@@ -62,7 +62,7 @@ pub mod ffi;
 pub mod fire;
 /// Gaussian-process-accelerated local geometry optimizer (GPMin).
 pub mod gpmin;
-/// GROMACS `integrator = steep` adaptive maximum-displacement rule.
+/// GROMACS `integrator = steep` and `integrator = cg` rules.
 pub mod gromacs;
 /// Holonomic distance constraints (SHAKE, LINCS, SETTLE and RATTLE).
 pub mod holonomic;
@@ -188,9 +188,11 @@ pub use gpmin::{
     default_surrogate_gtol,
 };
 pub use gromacs::{
+    GROMACS_CG_BETA_CAP, GROMACS_CG_EMSTEP_DEFAULT, GROMACS_CG_NSTCGSTEEP_DEFAULT,
+    GROMACS_CG_WOLFE_C1, GROMACS_CG_WOLFE_C2, GROMACS_CG_WOLFE_MAXITER,
     GROMACS_STEEP_EMSTEP_DEFAULT, GROMACS_STEEP_GROW, GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS,
-    GROMACS_STEEP_MIN_USTEP, GROMACS_STEEP_SHRINK, GROMACS_STEEP_SHRINK_BUDGET_CAP, GromacsSteep,
-    GromacsSteepConfig, gromacs_steep_max_constraint_shrinks,
+    GROMACS_STEEP_MIN_USTEP, GROMACS_STEEP_SHRINK, GROMACS_STEEP_SHRINK_BUDGET_CAP, GromacsCg,
+    GromacsCgConfig, GromacsSteep, GromacsSteepConfig, gromacs_steep_max_constraint_shrinks,
 };
 pub use highs_kind::{
     HighsCCallback, HighsCallback, HighsCallbackKind, HighsCrossover, HighsOptions, HighsSolverKind,

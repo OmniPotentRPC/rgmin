@@ -78,6 +78,7 @@ pub enum LineSearch {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LineSearchOptions {
     relative_objective_error: Option<f64>,
+    downhill_rise_tolerance: Option<f64>,
 }
 
 impl LineSearchOptions {
@@ -89,12 +90,36 @@ impl LineSearchOptions {
     pub fn with_objective_roundoff(relative: f64) -> Option<Self> {
         (relative.is_finite() && relative >= 0.0).then_some(Self {
             relative_objective_error: Some(relative),
+            downhill_rise_tolerance: None,
         })
+    }
+
+    /// Permit a small energy rise `< relative * |f0|` when the directional
+    /// derivative `dphi < 0` remains downhill, matching GROMACS `do_cg`
+    /// (`src/gromacs/mdrun/minimize.cpp`, `tmp = std::sqrt(GMX_REAL_EPS) *
+    /// std::fabs(s_a->epot); if (s_c->epot < s_a->epot || (gpc < 0 &&
+    /// s_c->epot < (s_a->epot + tmp)))`).
+    pub(crate) fn with_downhill_rise_tolerance(mut self, relative: f64) -> Self {
+        if relative.is_finite() && relative >= 0.0 {
+            self.downhill_rise_tolerance = Some(relative);
+        }
+        self
     }
 
     /// Relative value window: the configured roundoff, else four epsilon.
     pub(crate) fn objective_window(self) -> f64 {
         self.relative_objective_error.unwrap_or(4.0 * f64::EPSILON)
+    }
+
+    pub(crate) fn accepts_downhill_rise(self, phi: f64, phi0: f64, dphi: f64) -> bool {
+        let Some(relative) = self.downhill_rise_tolerance else {
+            return false;
+        };
+        phi.is_finite()
+            && phi0.is_finite()
+            && dphi.is_finite()
+            && dphi < 0.0
+            && phi < phi0 + relative * phi0.abs()
     }
 
     pub(crate) fn accepts_approximate_wolfe(

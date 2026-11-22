@@ -282,6 +282,65 @@ def test_gromacs_steep_mdp_and_zero_budget() -> None:
     assert x_cfg.shape == (1,)
 
 
+def test_gromacs_cg_mdp_and_zero_budget() -> None:
+    options = rgmin.gromacs_mdp_options(
+        {"integrator": "cg", "emtol": 10.0, "emstep": 0.01, "nsteps": 25, "nstcgsteep": 4}
+    )
+    assert options["nstcgsteep"] == 4
+    method = options.pop("method")
+    assert method == "gromacs-cg"
+    x = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    report, out = rgmin.minimize(_quad, x, method, **options)
+    assert out is x
+    assert report.stop == rgmin.Stop.TOLERANCE
+    assert report.grad_norm < options["gtol"]
+
+    # Zero-budget check uses MaxAtom (per-atom max force), not Euclidean L2.
+    def two_atoms(v: np.ndarray) -> tuple[float, np.ndarray]:
+        return float(0.6 * (v[0] + v[3])), np.array([0.6, 0.0, 0.0, 0.6, 0.0, 0.0], dtype=np.float64)
+
+    rep_zero, _ = rgmin.minimize(
+        two_atoms, np.zeros(6, dtype=np.float64), "gromacs-cg", gtol=0.7, maxiter=0
+    )
+    assert rep_zero.grad_norm == pytest.approx(0.6)
+    assert rep_zero.stop == rgmin.Stop.TOLERANCE
+
+    def nan_after_a_finite_atom(v: np.ndarray) -> tuple[float, np.ndarray]:
+        gradient = np.zeros_like(v)
+        gradient[0] = 1.0
+        gradient[3] = np.nan
+        return 0.0, gradient
+
+    with pytest.raises(rgmin.NumericalError, match="non-finite max-atom gradient norm"):
+        rgmin.minimize(
+            nan_after_a_finite_atom,
+            np.zeros(6, dtype=np.float64),
+            "gromacs-cg",
+            maxiter=0,
+        )
+
+    def slope(v: np.ndarray) -> tuple[float, np.ndarray]:
+        return float(v[0]), np.array([1.0, 0.0, 0.0], dtype=np.float64)
+
+    rep_mp, x_mp = rgmin.minimize(
+        slope, np.array([1.0, 0.0, 0.0], dtype=np.float64), "gromacs-cg", gtol=0.0, istep=1e-18, maxiter=5
+    )
+    assert rep_mp.stop == rgmin.Stop.MACHINE_PRECISION
+    assert x_mp[0] == 1.0
+
+    zero_options = rgmin.gromacs_mdp_options(integrator="cg", nsteps=25, nstcgsteep=0)
+    assert zero_options.pop("method") == "gromacs-cg"
+    assert zero_options["nstcgsteep"] == 0
+    rep_zero_period, _ = rgmin.minimize(_quad, np.array([1.0, 0.0, 0.0], dtype=np.float64), "gromacs-cg", **zero_options)
+    assert rep_zero_period.stop == rgmin.Stop.TOLERANCE
+
+    with pytest.raises(ValueError, match="nstcgsteep"):
+        rgmin.minimize(_quad, np.array([0.3], dtype=np.float64), "gromacs-cg", nstcgsteep=-1)
+
+    with pytest.raises(ValueError, match="gromacs-cg"):
+        rgmin.minimize(_quad, np.array([0.3], dtype=np.float64), "gromacs-steep", nstcgsteep=10)
+
+
 def test_gromacs_shrink_budget_near_one_is_capped_and_fast() -> None:
     shrink = float(np.nextafter(1.0, 0.0))
     start = time.perf_counter()
@@ -301,3 +360,30 @@ def test_gromacs_zero_budget_accepts_large_finite_max_atom_gradient() -> None:
     )
     assert np.isfinite(report.grad_norm)
     assert report.grad_norm == pytest.approx(1e200)
+
+
+def test_gromacs_cg_minimize_step_counts_and_unlimited() -> None:
+    import sys
+
+    def quad_fn(v: np.ndarray) -> tuple[float, np.ndarray]:
+        return float(0.5 * (v[0] ** 2 + 4.0 * v[1] ** 2 + v[2] ** 2)), np.array(
+            [v[0], 4.0 * v[1], v[2]], dtype=np.float64
+        )
+
+    for budget in (0, 1, 2):
+        opts = rgmin.gromacs_mdp_options(
+            {"integrator": "cg", "emtol": 1e-6, "emstep": 0.05, "nsteps": budget}
+        )
+        method = opts.pop("method")
+        rep, _ = rgmin.minimize(quad_fn, np.array([4.0, 1.0, 0.0]), method, **opts)
+        assert rep.steps == budget
+        assert rep.stop == rgmin.Stop.BUDGET
+
+    opts_unlim = rgmin.gromacs_mdp_options(
+        {"integrator": "cg", "emtol": 1e-6, "emstep": 0.05, "nsteps": -1}
+    )
+    assert opts_unlim["maxiter"] == sys.maxsize
+    method_unlim = opts_unlim.pop("method")
+    rep_unlim, _ = rgmin.minimize(quad_fn, np.array([4.0, 1.0, 0.0]), method_unlim, **opts_unlim)
+    assert rep_unlim.stop == rgmin.Stop.TOLERANCE
+    assert rep_unlim.steps == 3

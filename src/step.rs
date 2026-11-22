@@ -464,21 +464,25 @@ where
     let accepted = match control.ftol_rel {
         Some(_) => f - value <= control.ftol_slack(value),
         None => {
+            // Bounds can change the line-search point. Check the measured
+            // gradient along the actual displacement. For GROMACS CG, also
+            // match `do_cg` (`src/gromacs/mdrun/minimize.cpp`, v2025.4 lines
+            // 1665-1672 / v2023.3 lines 1609-1616):
+            // `tmp = std::sqrt(GMX_REAL_EPS) * std::fabs(s_a->epot);`
+            // `if (s_c->epot < s_a->epot || (gpc < 0 && s_c->epot < (s_a->epot + tmp)))`
+            let displacement = &x - pos;
+            let dphi = crate::vecops::dot(g.view(), displacement.view());
             f < value
+                || options.accepts_downhill_rise(f, value, dphi)
                 || match linesearch {
-                    LineSearch::Wolfe { c1, c2, .. } => {
-                        // Bounds can change the line-search point. Check the
-                        // measured gradient along the actual displacement.
-                        let displacement = &x - pos;
-                        options.accepts_approximate_wolfe(
-                            f,
-                            value,
-                            crate::vecops::dot(g.view(), displacement.view()),
-                            crate::vecops::dot(grad.view(), displacement.view()),
-                            c1,
-                            c2,
-                        )
-                    }
+                    LineSearch::Wolfe { c1, c2, .. } => options.accepts_approximate_wolfe(
+                        f,
+                        value,
+                        dphi,
+                        crate::vecops::dot(grad.view(), displacement.view()),
+                        c1,
+                        c2,
+                    ),
                     _ => false,
                 }
         }

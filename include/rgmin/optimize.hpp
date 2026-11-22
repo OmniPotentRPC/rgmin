@@ -63,6 +63,7 @@ enum class Method {
     PolakRibierePlus = RGMIN_POLAK_RIBIERE_PLUS,
     EonCg = RGMIN_EON_CG,
     GromacsSteep = RGMIN_GROMACS_STEEP,
+    GromacsCg = RGMIN_GROMACS_CG,
 };
 
 /** Parse a method token. \c newton-cg and \c newton_cg are the same method. */
@@ -718,6 +719,10 @@ public:
     int set_gromacs_steep(double shrink, std::uint32_t max_constraint_shrinks) {
         return rgmin_solver_set_gromacs_steep(ptr_, shrink, max_constraint_shrinks);
     }
+    /// Periodic steepest-descent interval for the GROMACS-style CG direction update; 0 turns it off.
+    int set_gromacs_cg(std::uint32_t nstcgsteep) {
+        return rgmin_solver_set_gromacs_cg(ptr_, nstcgsteep);
+    }
 
     void forget_evaluation() { rgmin_solver_forget_evaluation(ptr_); }
     rgmin_status_t set_precon(Precon const& p) { return rgmin_solver_set_precon(ptr_, p.get()); }
@@ -1175,19 +1180,20 @@ private:
     std::optional<std::size_t> max_evals_;
     std::optional<double> gromacs_shrink_;
     std::optional<std::uint32_t> gromacs_max_constraint_shrinks_;
+    std::optional<std::uint32_t> gromacs_nstcgsteep_;
 };
 
 inline std::string SolverConfig::valid_options() {
     return "accept, atom_maxmove, backward_polish, beta, c1, c2, cautious_alpha, "
            "cautious_eps, error_on_unmet, etol, extra_updates, fire_variant, gtol, istep, "
            "linesearch, linesearch_maxiter, max_evals, maxiter, maxmove, maxstep, memory, "
-           "neb_guards, noise_c, noise_eps, objective_roundoff, periodic, "
+           "neb_guards, noise_c, noise_eps, nstcgsteep, objective_roundoff, periodic, "
            "project_rigid, qn_step, shrink, max_constraint_shrinks";
 }
 
 inline std::string SolverConfig::valid_methods() {
     return "adam, bb, bfgs, cg, conjugate_descent, dai_yuan, diis, dogleg, "
-           "fire, fire2, fletcher_reeves, fr_pr, gromacs_steep, hager_zhang, "
+           "fire, fire2, fletcher_reeves, fr_pr, gromacs_cg, gromacs_steep, hager_zhang, "
            "hestenes_stiefel, lbfgs, liu_storey, newton, polak_ribiere, pso, "
            "quickmin, rfo, sd, sr1, sr2, steepest";
 }
@@ -1216,6 +1222,7 @@ inline Method method_from_name(std::string const& name) {
     if (name == "quickmin") return Method::QuickMin;
     if (name == "ode12r") return Method::Ode12r;
     if (name == "gromacs_steep" || name == "gmx_steep") return Method::GromacsSteep;
+    if (name == "gromacs_cg" || name == "gmx_cg") return Method::GromacsCg;
     if (name == "sd" || name == "steepest" || name == "steepest_descent") return Method::Steepest;
     if (name == "cg" || name == "pr" || name == "pr+" || name == "polak_ribiere") {
         return Method::PolakRibiere;
@@ -1271,7 +1278,7 @@ inline bool known_option(std::string const& key) {
         "cautious_alpha", "cautious_eps", "error_on_unmet", "etol", "extra_updates",
         "fire_variant", "gtol", "istep", "linesearch", "linesearch_maxiter",
         "max_constraint_shrinks", "max_evals", "maxiter", "maxmove", "maxstep", "memory",
-        "neb_guards", "noise_c", "noise_eps", "objective_roundoff", "periodic",
+        "neb_guards", "noise_c", "noise_eps", "nstcgsteep", "objective_roundoff", "periodic",
         "project_rigid", "qn_step", "shrink"};
     for (char const* item : keys) {
         if (key == item) return true;
@@ -1295,7 +1302,8 @@ inline void require_finite(std::string const& key, double value) {
 
 inline bool is_count_option(std::string const& key) {
     return key == "memory" || key == "maxiter" || key == "linesearch_maxiter" ||
-           key == "extra_updates" || key == "max_evals" || key == "max_constraint_shrinks";
+           key == "extra_updates" || key == "max_evals" || key == "max_constraint_shrinks" ||
+           key == "nstcgsteep";
 }
 
 inline double require_etol(double value) {
@@ -1413,6 +1421,12 @@ inline SolverConfig SolverConfig::build(
                 throw std::invalid_argument("max_constraint_shrinks is out of range");
             }
             cfg.gromacs_max_constraint_shrinks_ = static_cast<std::uint32_t>(count);
+        } else if (key == "nstcgsteep") {
+            std::size_t count = detail::require_count(key, item.second, 0);
+            if (count > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+                throw std::invalid_argument("nstcgsteep is out of range");
+            }
+            cfg.gromacs_nstcgsteep_ = static_cast<std::uint32_t>(count);
         } else if (key == "gtol" || key == "istep" || key == "maxmove" || key == "noise_eps" ||
                    key == "noise_c" || key == "c1" || key == "c2" || key == "atom_maxmove" ||
                    key == "maxstep" || key == "cautious_eps" || key == "cautious_alpha" ||
@@ -1502,7 +1516,7 @@ inline std::string SolverConfig::ignored_linesearch() const {
                       "linesearch='wolfe' opts into the strong Wolfe search";
     }
     if (method_ == Method::Steepest || method_ == Method::Bfgs || method_ == Method::Adam ||
-        method_ == Method::Diis || detail::is_cg(method_)) {
+        method_ == Method::Diis || method_ == Method::GromacsCg || detail::is_cg(method_)) {
         return {};
     }
     return head + " on " + method_name_ +
@@ -1566,6 +1580,12 @@ inline void SolverConfig::apply(Solver& solver) const {
         if (solver.set_gromacs_steep(shrink, max_constraint_shrinks) != 0) {
             char const* msg = rgmin_last_error();
             throw std::invalid_argument(msg ? msg : "set_gromacs_steep failed");
+        }
+    }
+    if (gromacs_nstcgsteep_) {
+        if (solver.set_gromacs_cg(*gromacs_nstcgsteep_) != 0) {
+            char const* msg = rgmin_last_error();
+            throw std::invalid_argument(msg ? msg : "set_gromacs_cg failed");
         }
     }
 }

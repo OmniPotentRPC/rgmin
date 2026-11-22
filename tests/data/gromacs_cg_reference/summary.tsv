@@ -1,0 +1,6 @@
+case	precision	emtol	nsteps_limit	stop	steps	force_evals	final_epot	final_fmax	fmax_atom	final_fnorm
+f64-nsteps-12-emtol-1e-8	double	1e-8	12	budget	12	16	-1.25489376279604e+01	3.54506056338870e-03	3	3.28204766414723e-03
+f32-nsteps-12-emtol-1e-8	single	1e-8	12	machine-precision	11	25	-1.2548939e+01	4.3311492e-03	2	2.8122195e-03
+f64-emtol-1e-2	double	1e-2	100	tolerance	9	12	-1.25489364597334e+01	5.54402580304420e-03	2	5.13275563009360e-03
+f64-emtol-1e-3	double	1e-3	100	tolerance	13	18	-1.25489376639539e+01	4.98089785018483e-04	3	4.61140359634033e-04
+f64-emtol-1e-6	double	1e-6	100	tolerance	57	72	-1.25489377088303e+01	3.48102157458076e-07	6	2.95569608630693e-07

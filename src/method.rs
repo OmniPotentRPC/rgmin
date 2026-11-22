@@ -93,6 +93,12 @@ pub enum Method {
     /// for atomic structures*, Phys. Rev. B 100, 104103 (2019),
     /// <https://doi.org/10.1103/PhysRevB.100.104103>.
     GpMin,
+    /// GROMACS-style `integrator = cg`: Polak-Ribiere conjugate-gradient
+    /// direction update (steepest-descent step every `nstcgsteep` steps,
+    /// `|beta| <= 5` cap, steepest-descent fallback) paired with `rgmin`'s
+    /// strong-Wolfe line search and convergence on the largest per-atom
+    /// force norm.
+    GromacsCg,
     /// Shifted Newton on a caller-supplied dense Hessian.
     ///
     /// Banerjee, Adams, Simons, Shepard,
@@ -340,6 +346,7 @@ impl Method {
             Self::Bfgs
                 | Self::Dogleg
                 | Self::GromacsSteep
+                | Self::GromacsCg
                 | Self::NewtonCg
                 | Self::NewtonPcg
                 | Self::Fire {
@@ -380,6 +387,7 @@ impl Method {
             Self::Steepest => "steepest",
             Self::GromacsSteep => "gromacs-steep",
             Self::GpMin => "gpmin",
+            Self::GromacsCg => "gromacs-cg",
             Self::Newton { kind } => match kind {
                 crate::newton::NewtonKind::Shifted => "newton",
                 crate::newton::NewtonKind::Rfo => "rfo",
@@ -416,6 +424,7 @@ impl Method {
             "sd" | "steepest" | "steepest_descent" => Self::Steepest,
             "gromacs_steep" | "gmx_steep" => Self::GromacsSteep,
             "gpmin" | "gp_min" => Self::GpMin,
+            "gromacs_cg" | "gmx_cg" => Self::GromacsCg,
             "cg" | "pr" | "polak_ribiere" => Self::polak_ribiere(),
             "prp" | "pr_plus" | "polak_ribiere_plus" => Self::polak_ribiere_plus(),
             "eon_cg" | "eon_cg_pr" => Self::eon_cg(),
@@ -520,6 +529,9 @@ mod name_tests {
         assert_eq!(Method::from_name("gpmin").unwrap(), Method::GpMin);
         assert_eq!(Method::from_name("GP-Min").unwrap(), Method::GpMin);
         assert_eq!(Method::GpMin.as_str(), "gpmin");
+        assert_eq!(Method::from_name("gromacs-cg").unwrap(), Method::GromacsCg);
+        assert_eq!(Method::from_name("gmx_cg").unwrap(), Method::GromacsCg);
+        assert_eq!(Method::GromacsCg.as_str(), "gromacs-cg");
         assert_eq!(Method::from_name("fire2").unwrap().as_str(), "fire2");
         let err = Method::from_name("not-a-solver").unwrap_err();
         assert!(err.to_string().contains("not-a-solver"), "{err}");
@@ -543,6 +555,7 @@ mod tests {
         assert!(!Method::Bfgs.installs_default_atom_cap());
         assert!(!Method::Dogleg.installs_default_atom_cap());
         assert!(!Method::GromacsSteep.installs_default_atom_cap());
+        assert!(!Method::GromacsCg.installs_default_atom_cap());
         assert!(!Method::Fire { kind: FireKind::V2 }.installs_default_atom_cap());
         assert!(!Method::NewtonCg.installs_default_atom_cap());
         assert!(!Method::NewtonPcg.installs_default_atom_cap());

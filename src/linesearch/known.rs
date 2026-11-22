@@ -67,6 +67,7 @@ struct Line<'a, F> {
     f0: f64,
     evals: usize,
     best: Option<Probe>,
+    best_downhill: Option<Probe>,
     options: LineSearchOptions,
 }
 
@@ -90,6 +91,10 @@ where
         };
         if f.is_finite() && f < self.best.as_ref().map_or(self.f0, |b| b.f) {
             self.best = Some(p.clone());
+        } else if self.options.accepts_downhill_rise(f, self.f0, dphi)
+            && f < self.best_downhill.as_ref().map_or(f64::INFINITY, |b| b.f)
+        {
+            self.best_downhill = Some(p.clone());
         }
         p
     }
@@ -100,7 +105,10 @@ where
 
     fn take_best(&mut self) -> Option<LineOutcome> {
         let evals = self.evals;
-        self.best.take().map(|b| b.into_outcome(evals))
+        self.best
+            .take()
+            .or_else(|| self.best_downhill.take())
+            .map(|b| b.into_outcome(evals))
     }
 }
 
@@ -271,6 +279,7 @@ impl LineSearch {
             f0,
             evals: 0,
             best: None,
+            best_downhill: None,
             options,
         };
         match *self {

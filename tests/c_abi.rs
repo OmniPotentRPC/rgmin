@@ -19,7 +19,7 @@ use rgmin::ffi::{
     rgmin_precond_fn, rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp,
     rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls,
     rgmin_solver_hvp_calls, rgmin_solver_set_accept, rgmin_solver_set_exp,
-    rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
+    rgmin_solver_set_gromacs_cg, rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
     rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
     rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
     rgmin_tensor_free,
@@ -1172,6 +1172,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
+/// ABI minor 54 adds `RGMIN_GROMACS_CG` and `rgmin_solver_set_gromacs_cg`.
 /// ABI minor 52 adds `RGMIN_GROMACS_STEEP`, `RGMIN_STOP_MACHINE_PRECISION`,
 /// `rgmin_solver_set_gromacs_steep`, and
 /// `rgmin_gromacs_steep_max_constraint_shrinks`.
@@ -1194,7 +1195,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 53);
+    assert_eq!(stamp.abi_minor, 54);
     assert_eq!(stamp.layout_revision, 5);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -2690,6 +2691,12 @@ fn newton_cg_method_string_and_counters_cross_the_c_abi() {
         rgmin_status_t::RGMIN_SUCCESS
     );
     assert_eq!(tag, rgmin_method_t::RGMIN_GROMACS_STEEP);
+    let gromacs_cg = std::ffi::CString::new("gromacs-cg").unwrap();
+    assert_eq!(
+        unsafe { rgmin_method_from_name(gromacs_cg.as_ptr(), &mut tag) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    assert_eq!(tag, rgmin_method_t::RGMIN_GROMACS_CG);
     let cg = std::ffi::CString::new("newton-cg").unwrap();
     assert_eq!(
         unsafe { rgmin_method_from_name(cg.as_ptr(), &mut tag) },
@@ -5209,4 +5216,110 @@ fn gromacs_steep_runs_and_reports_machine_precision_across_c_abi() {
     assert_eq!(st_mp, rgmin_status_t::RGMIN_SUCCESS);
     assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION);
     assert_eq!(rounded[0], 1.0);
+
+    unsafe {
+        let cg_solver = rgmin_solver_create(rgmin_method_t::RGMIN_GROMACS_CG, &ctrl, 3);
+        assert!(!cg_solver.is_null());
+        assert_eq!(rgmin_solver_set_gromacs_cg(cg_solver, 100), 0);
+        assert_eq!(rgmin_solver_set_gromacs_cg(cg_solver, 0), 0);
+        assert_eq!(rgmin_solver_set_gromacs_cg(std::ptr::null_mut(), 10), 1);
+        assert_eq!(rgmin_solver_set_gromacs_steep(cg_solver, 0.5, 12), 1);
+        rgmin_solver_free(cg_solver);
+        let lbfgs_solver = rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 3);
+        assert!(!lbfgs_solver.is_null());
+        assert_eq!(rgmin_solver_set_gromacs_cg(lbfgs_solver, 100), 1);
+        rgmin_solver_free(lbfgs_solver);
+    }
+
+    let mut cg_rounded = [1.0_f64, 0.0, 0.0];
+    let st_cg_mp = unsafe {
+        let xt = rgmin_tensor_borrow_cpu_f64(cg_rounded.as_mut_ptr(), 3);
+        let st = rgmin_minimize(
+            Some(slope_eval),
+            Some(slope_grad),
+            std::ptr::null_mut(),
+            xt,
+            &ctrl,
+            rgmin_method_t::RGMIN_GROMACS_CG,
+            &mut out,
+        );
+        rgmin_tensor_free(xt);
+        st
+    };
+    assert_eq!(st_cg_mp, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION);
+    assert_eq!(cg_rounded[0], 1.0);
+}
+
+unsafe extern "C" fn ellipse_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let p = unsafe { cap_in(x) };
+    unsafe { *value_out = p[0] * p[0] + 5.0 * p[1] * p[1] };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn ellipse_grad(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let p = unsafe { cap_in(x) };
+    let gp = unsafe { cap_out(g) };
+    gp[0] = 2.0 * p[0];
+    gp[1] = 10.0 * p[1];
+    gp[2] = 0.0;
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+/// Two `RGMIN_GROMACS_CG` steps on `x^2 + 5 y^2` from `(1, 1, 0)`.
+fn gromacs_cg_two_steps_across_c_abi(nstcgsteep: Option<u32>) -> [f64; 3] {
+    let mut ctrl = rgmin_control_default();
+    ctrl.maxiter = 10;
+    ctrl.gtol = 1e-12;
+    ctrl.istep = 0.1;
+    let mut x = [1.0_f64, 1.0, 0.0];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+    };
+    unsafe {
+        let solver = rgmin_solver_create(rgmin_method_t::RGMIN_GROMACS_CG, &ctrl, 3);
+        assert!(!solver.is_null());
+        if let Some(period) = nstcgsteep {
+            assert_eq!(rgmin_solver_set_gromacs_cg(solver, period), 0);
+        }
+        for _ in 0..2 {
+            let xt = rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 3);
+            let st = rgmin_solver_step(
+                solver,
+                Some(ellipse_eval),
+                Some(ellipse_grad),
+                std::ptr::null_mut(),
+                xt,
+                &mut out,
+            );
+            rgmin_tensor_free(xt);
+            assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+        }
+        rgmin_solver_free(solver);
+    }
+    x
+}
+
+#[test]
+fn gromacs_cg_zero_nstcgsteep_keeps_the_second_conjugate_step_across_c_abi() {
+    // Any positive nstcgsteep restarts after GROMACS step 0, so the second
+    // step is steepest descent; zero keeps the Polak-Ribiere factor.
+    let default = gromacs_cg_two_steps_across_c_abi(None);
+    let one = gromacs_cg_two_steps_across_c_abi(Some(1));
+    let zero = gromacs_cg_two_steps_across_c_abi(Some(0));
+    assert_eq!(default, one);
+    assert_ne!(default, zero);
+    let energy = |p: [f64; 3]| p[0] * p[0] + 5.0 * p[1] * p[1];
+    assert!(energy(zero) < energy(default), "{zero:?} vs {default:?}");
 }

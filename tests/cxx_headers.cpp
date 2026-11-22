@@ -829,11 +829,32 @@ int main() {
                   "GromacsSteep keeps the C enumerator");
     static_assert(XTS_GROMACS_STEEP == RGMIN_GROMACS_STEEP,
                   "xts.h aliases the GROMACS steep selector");
+    static_assert(static_cast<int>(rgmin::Method::GromacsCg) == RGMIN_GROMACS_CG,
+                  "GromacsCg keeps the C enumerator");
+    static_assert(XTS_GROMACS_CG == RGMIN_GROMACS_CG,
+                  "xts.h aliases the GROMACS cg selector");
     if (rgmin::method_from_name("eon-cg") != rgmin::Method::EonCg ||
         rgmin::method_from_name("polak-ribiere-plus") != rgmin::Method::PolakRibierePlus ||
-        rgmin::method_from_name("gromacs-steep") != rgmin::Method::GromacsSteep) {
+        rgmin::method_from_name("gromacs-steep") != rgmin::Method::GromacsSteep ||
+        rgmin::method_from_name("gromacs-cg") != rgmin::Method::GromacsCg) {
         std::fprintf(stderr, "method_from_name missed a public method\n");
         return 6;
+    }
+    {
+        rgmin::SolverConfig const cfg =
+            rgmin::SolverConfig::build("gromacs_cg", {}, {}, {{"nstcgsteep", 0}}, {});
+        rgmin::Solver cg(cfg.method(), cfg.control(), 3);
+        cfg.apply(cg);
+        bool negative_refused = false;
+        try {
+            (void)rgmin::SolverConfig::build("gromacs_cg", {}, {}, {{"nstcgsteep", -1}}, {});
+        } catch (std::invalid_argument const&) {
+            negative_refused = true;
+        }
+        if (cg.set_gromacs_cg(0) != 0 || !negative_refused) {
+            std::fprintf(stderr, "nstcgsteep = 0 must turn the periodic restart off\n");
+            return 46;
+        }
     }
     bool refused = false;
     try {
