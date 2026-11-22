@@ -244,8 +244,22 @@ fn out_of_bounds_starts_have_identical_session_and_one_shot_results() {
         }
         let stepped = solver.run(&BoundedUphill, &mut x).unwrap();
 
+        let mut xg = array![2.0];
+        let mut gauged_solver = Solver::new(method.clone(), control(), 1);
+        gauged_solver.set_accept(Accept::Energy);
+        gauged_solver.set_geometry_step(false);
+        if matches!(method, Method::Lbfgs { .. }) {
+            gauged_solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+        }
+        let gauged = gauged_solver
+            .run_gauged(&BoundedUphill, &mut xg, |_| {})
+            .unwrap();
+
         assert_eq!(stepped.stop_reason(), one_shot.stop_reason(), "{method:?}");
+        assert_eq!(gauged.stop_reason(), one_shot.stop_reason(), "{method:?}");
         assert_eq!(stepped.steps, one_shot.steps, "{method:?}");
+        assert_eq!(gauged.steps, one_shot.steps, "{method:?}");
         assert_eq!(x, one_shot.coords, "{method:?}");
+        assert_eq!(xg, one_shot.coords, "{method:?}");
     }
 }
