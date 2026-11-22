@@ -353,6 +353,41 @@ fn accept_step_takes_the_session_step_length_not_a_unit_step() {
 }
 
 #[test]
+fn accept_step_follows_unscaled_polak_ribiere_direction() {
+    let quad = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+        let energy = 0.5 * (x[0] * x[0] + 400.0 * x[1] * x[1]);
+        (energy, array![x[0], 400.0 * x[1], 0.0])
+    });
+    let istep = 0.01_f64;
+    let mut x = array![1.0_f64, 0.005, 0.0];
+    let mut solver = Solver::new(Method::GromacsCg, control(istep, 1e-14, 10), 3);
+    solver
+        .set_gromacs_cg_config(GromacsCgConfig::default().with_nstcgsteep(0))
+        .unwrap();
+    solver.set_accept(Accept::Step);
+
+    let g0 = array![1.0_f64, 2.0, 0.0];
+    let d0 = -&g0;
+    let u0 = &d0 / d0.dot(&d0).sqrt();
+
+    solver.step(&quad, &mut x).unwrap();
+    let x1 = array![1.0_f64, 0.005, 0.0] + istep * &u0;
+    assert_abs_diff_eq!(x[0], x1[0], epsilon = 1e-12);
+    assert_abs_diff_eq!(x[1], x1[1], epsilon = 1e-12);
+
+    let g1 = array![x1[0], 400.0 * x1[1], 0.0];
+    let beta = g1.dot(&(&g1 - &g0)) / g0.dot(&g0);
+    let d1 = -&g1 + beta * &d0;
+    let u1 = &d1 / d1.dot(&d1).sqrt();
+    let x2 = &x1 + &(istep * &u1);
+
+    solver.step(&quad, &mut x).unwrap();
+    assert_abs_diff_eq!(x[0], x2[0], epsilon = 1e-12);
+    assert_abs_diff_eq!(x[1], x2[1], epsilon = 1e-12);
+    assert_abs_diff_eq!(x[2], 0.0, epsilon = 1e-15);
+}
+
+#[test]
 fn a_curved_manifold_takes_the_opening_step_length_not_a_unit_step() {
     let height = Oracle::unbounded(3, |x: ArrayView1<f64>| (x[2], array![0.0, 0.0, 1.0]));
     let mut x = array![1.0, 0.0, 0.0];
@@ -692,6 +727,34 @@ fn gromacs_cg_accepts_small_downhill_energy_increase_near_machine_precision() {
     let r_up = up_solver.step(&uphill, &mut x_up).unwrap();
     assert_eq!(r_up.status, Status::MachinePrecision);
     assert_eq!(x_up[0], 0.0);
+}
+
+#[test]
+fn gromacs_cg_keeps_downhill_rise_tolerance_after_set_objective_roundoff() {
+    let e0 = 100.0_f64;
+    let tol = f64::EPSILON.sqrt() * e0.abs();
+    let accepted_rise = 0.25 * tol;
+    let downhill_small_rise = Oracle::unbounded(3, move |x: ArrayView1<f64>| {
+        if x[0] == 0.0 {
+            (e0, array![-1.0, 0.0, 0.0])
+        } else {
+            (e0 + accepted_rise, array![-0.5, 0.0, 0.0])
+        }
+    });
+
+    for roundoff in [1e-12, 0.0] {
+        let mut x = array![0.0, 0.0, 0.0];
+        let mut solver = Solver::new(Method::GromacsCg, control(0.1, 1e-6, 5), 3);
+        assert!(solver.set_objective_roundoff(roundoff));
+        assert!(!solver.set_objective_roundoff(-1.0));
+        let report = solver.step(&downhill_small_rise, &mut x).unwrap();
+        assert_eq!(report.status, Status::Iterating, "roundoff={roundoff}");
+        assert!(
+            x[0] > 0.0,
+            "expected accepted step for roundoff={roundoff}, got x={x:?}"
+        );
+        assert_eq!(report.value, e0 + accepted_rise);
+    }
 }
 
 #[test]

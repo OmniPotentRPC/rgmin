@@ -98,6 +98,17 @@ impl LineSearchOptions {
         })
     }
 
+    /// Update only the relative objective roundoff window, preserving any
+    /// existing downhill-rise tolerance.
+    pub(crate) fn set_objective_roundoff(&mut self, relative: f64) -> bool {
+        if relative.is_finite() && relative >= 0.0 {
+            self.relative_objective_error = Some(relative);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Permit a small energy rise `< relative * |f0|` when the directional
     /// derivative `dphi < 0` remains downhill, matching GROMACS `do_cg`
     /// (`src/gromacs/mdrun/minimize.cpp`, `tmp = std::sqrt(GMX_REAL_EPS) *
