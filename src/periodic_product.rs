@@ -11,6 +11,7 @@ use thiserror::Error;
 
 /// Failure of an extended-precision periodic product.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PeriodicProductError {
     /// A factor did not have `width * width` finite entries.
     #[error("periodic factor {factor} is not a finite {width} by {width} matrix")]
@@ -20,8 +21,8 @@ pub enum PeriodicProductError {
         /// Requested matrix width.
         width: usize,
     },
-    /// The matrix width was zero or odd, or the precision or derived work
-    /// limit was unusable.
+    /// There were no factors, the matrix width was zero or odd, or the
+    /// precision or derived work limit was unusable.
     #[error("periodic product configuration was not representable")]
     InvalidConfiguration,
     /// Shifted QR did not isolate every multiplier.
@@ -30,8 +31,9 @@ pub enum PeriodicProductError {
         /// Number of QR steps attempted.
         iterations: usize,
     },
-    /// The product had no factors or produced a zero/non-finite multiplier.
-    #[error("periodic product has an empty or non-finite spectrum")]
+    /// The product matrix was singular or held a non-finite entry, or it
+    /// produced a zero or non-finite multiplier.
+    #[error("periodic product has a singular or non-finite spectrum")]
     InvalidSpectrum,
     /// The returned multipliers failed the determinant identity.
     #[error("periodic product eigenvalues failed a-posteriori verification")]
@@ -43,6 +45,7 @@ pub enum PeriodicProductError {
 
 /// One multiplier of a periodic matrix product.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct PeriodicMultiplier {
     /// Natural logarithm of the multiplier modulus.
     pub log_modulus: f64,
@@ -52,6 +55,7 @@ pub struct PeriodicMultiplier {
 
 /// Spectrum of a product `factors[last] ... factors[0]`.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct PeriodicProductSpectrum {
     /// Multipliers, in the diagonal order of the converged triangular form.
     pub multipliers: Vec<PeriodicMultiplier>,
