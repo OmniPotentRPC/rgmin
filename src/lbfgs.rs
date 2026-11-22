@@ -2555,10 +2555,12 @@ impl Lbfgs {
             LineSearchOptions::default(),
             &mut |_| {},
         )
+        .energy_noise
     }
 
     /// `project` acts on every trial direction before its line search:
-    /// the session's rigid-motion projector, or a no-op.
+    /// the session's rigid-motion projector, or a no-op. A failed ASE
+    /// search is not retried along the steepest direction.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn step_objective_with_direction<O>(
         &mut self,
@@ -2574,7 +2576,7 @@ impl Lbfgs {
         record_pair: bool,
         options: LineSearchOptions,
         project: &mut dyn FnMut(&mut Array1<f64>),
-    ) -> bool
+    ) -> DirectionStep
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
@@ -2609,7 +2611,7 @@ impl Lbfgs {
             atom_maxmove,
             options,
         );
-        let (t, stall) = if allow_restart && !t.moved && !self.memory.is_empty() {
+        let (t, stall) = if allow_restart && !t.moved && !t.line_failed && !self.memory.is_empty() {
             let first_noise = t.energy_noise;
             self.forget();
             let direction = self.direction(grad.view());
@@ -2644,12 +2646,24 @@ impl Lbfgs {
             let y = &t.g - &*grad;
             self.push(s, y);
         }
+        let line_failed = t.line_failed;
         *pos = t.x;
         *value = t.f;
         *grad = t.g;
         *istep = qn_istep(control);
-        stall
+        DirectionStep {
+            energy_noise: stall,
+            line_failed,
+        }
     }
+}
+
+/// How [`Lbfgs::step_objective_with_direction`] ended.
+pub(crate) struct DirectionStep {
+    /// Every search found no trial whose decrease cleared `c * eps_f`.
+    pub(crate) energy_noise: bool,
+    /// ASE's line search failed and the point did not move.
+    pub(crate) line_failed: bool,
 }
 
 #[cfg(test)]

@@ -1263,8 +1263,10 @@ def _restart_error(message: str) -> Exception:
 
 
 class _AseWolfe(Optimizer):
-    """Wolfe session that replays its own evaluation log.
+    """Session on ASE's line search that replays its own evaluation log.
 
+    A step whose line search fails raises ``RuntimeError("LineSearch
+    failed!")`` as ASE does, and the atoms stay where the step started.
     ``restart`` writes the coordinates, value, and gradient of every
     trial. A later constructor with the same file feeds that log back
     into a fresh session and leaves the atoms at the last accepted
@@ -1310,6 +1312,8 @@ class _AseWolfe(Optimizer):
         start = _Geometry(self.optimizable).positions().copy()
         self._step_evals = []
         super().step()
+        if self.stop == rgmin.Stop.LINE_SEARCH:
+            raise RuntimeError("LineSearch failed!")
         if self._replay_iter is not None:
             return
         self._history.append({"x": start.tolist(), "evals": self._step_evals})
@@ -1367,8 +1371,9 @@ class BFGSLineSearch(_AseWolfe):
     ``ase.utils.linesearch.LineSearch``, with ``c1``, ``c2``, and
     ``stpmax``. It opens at the full quasi-Newton step, and ``maxstep``
     limits how far an atom moves from one trial to the next, so one
-    step can move an atom further than ``maxstep``. ``damping`` is not
-    a parameter of this class.
+    step can move an atom further than ``maxstep``. A ``stpmax`` below 1
+    fails every step with ``RuntimeError``, as in ASE. ``damping`` is
+    not a parameter of this class.
 
     https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/bfgslinesearch.py
     https://gitlab.com/ase/ase/-/blob/3.29.0/ase/utils/linesearch.py
@@ -1393,7 +1398,7 @@ class BFGSLineSearch(_AseWolfe):
         if maxstep is None:
             maxstep = float(self.defaults["maxstep"])
         scale = _positive("alpha", alpha)
-        bound = _positive("stpmax", stpmax)
+        bound = float(stpmax)
         self.c1 = float(c1)
         self.c2 = float(c2)
         self.alpha = scale

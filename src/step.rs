@@ -320,6 +320,9 @@ pub(crate) struct Taken {
     pub moved: bool,
     /// No trial decreased the energy by `c * eps_f`. The point is the start.
     pub energy_noise: bool,
+    /// ASE's line search failed. The point is the start, and the session
+    /// stops on [`crate::StopReason::LineSearchFailed`].
+    pub line_failed: bool,
 }
 
 /// The report of a driver that runs no session: `||g||_2`, no gradient.
@@ -430,6 +433,7 @@ where
         alpha: 0.0,
         moved: false,
         energy_noise,
+        line_failed: false,
     };
     let Some(out) = linesearch.search_from_with_options(
         |x| {
@@ -501,6 +505,7 @@ where
             alpha: out.alpha,
             moved: true,
             energy_noise: false,
+            line_failed: false,
         }
     } else {
         unmoved(energy_noise)
@@ -514,7 +519,8 @@ where
 /// search ends on is the step whether or not it lowers the value, as
 /// ASE takes it. The search opens at the unit step, not at `istep`. A
 /// failed search, a search under another [`LineSearch`] kind, or an
-/// end point outside the objective's box leaves the start in place.
+/// end point outside the objective's box leaves the start in place and
+/// sets [`Taken::line_failed`].
 #[allow(clippy::too_many_arguments)]
 fn take_ase_step<O>(
     obj: &O,
@@ -536,6 +542,7 @@ where
         alpha: 0.0,
         moved: false,
         energy_noise: false,
+        line_failed: true,
     };
     let LineSearch::Wolfe { c1, c2, maxiter } = linesearch else {
         return unmoved();
@@ -564,6 +571,7 @@ where
         alpha: out.alpha,
         moved: true,
         energy_noise: false,
+        line_failed: false,
     }
 }
 
