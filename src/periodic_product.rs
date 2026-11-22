@@ -415,7 +415,7 @@ fn eigenvalues_with_limit_unchecked(
             stalled = 0;
         }
         let size = high - low;
-        let shift = if stalled > 0 && stalled % EXCEPTIONAL_SHIFT_PERIOD == 0 {
+        let shift = if stalled > 0 && stalled.checked_rem(EXCEPTIONAL_SHIFT_PERIOD) == Some(0) {
             exceptional_shift(&matrix, width, low, high, stalled)
         } else {
             wilkinson_shift(&matrix, width, high)
@@ -721,7 +721,7 @@ pub fn periodic_product_spectrum(
 ) -> Result<PeriodicProductSpectrum, PeriodicProductError> {
     if factors.is_empty()
         || width == 0
-        || width % 2 != 0
+        || width & 1 == 1
         || precision_bits < f64::MANTISSA_DIGITS
         || i32::try_from(precision_bits).is_err()
     {
