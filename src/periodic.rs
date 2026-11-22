@@ -33,13 +33,20 @@
 //! [`crate::periodic::CyclicFactor::solve_transpose`].
 //!
 //! Orthogonal transformations keep the 2-norm of every column of the
-//! stacked system, so no intermediate entry grows. The computed
-//! `log|det|` is the exact value for a matrix whose columns are
-//! perturbed by a few rounding units of their own 2-norm. How far that
-//! moves `log|det|` is `tr(A^{-1} ΔA)` to first order, which
-//! [`crate::periodic::CyclicFactor::inverse_norm1`] bounds through `|tr(A^{-1} ΔA)| <=
-//! ||A^{-1}||_1 Σ_c ||Δa_c||_1`. The estimate is Hager's method with
-//! Higham's safeguard vector, evaluated through the stored factors.
+//! stacked, equilibrated matrix `B = D_r A D_c`, so no intermediate entry
+//! grows. The QR backward error is therefore relative to `B`: the computed
+//! factorization is exact for `B + ΔB`, with each column of `ΔB` bounded by
+//! a few rounding units times that column's 2-norm. In unscaled coordinates
+//! the perturbation is `ΔA = D_r^{-1} ΔB D_c^{-1}`; it is not normalized by
+//! `||A||`.
+//!
+//! The public norm estimates instead describe the original, unscaled
+//! bordered matrix `A`. [`crate::periodic::CyclicFactor::norm1`] is
+//! `||A||_1`, and [`crate::periodic::CyclicFactor::inverse_norm1`] estimates
+//! `||A^{-1}||_1`. Their product estimates the normwise relative condition
+//! number `||A||_1 ||A^{-1}||_1`; neither field is a backward-error estimate.
+//! The inverse-norm estimate is Hager's method with Higham's safeguard
+//! vector, evaluated through the stored factors.
 
 use thiserror::Error;
 
@@ -53,6 +60,9 @@ pub enum CyclicError {
     /// An input entry is NaN or infinite.
     #[error("a cyclic block entry is not finite")]
     NonFinite,
+    /// A matrix or inverse-matrix 1-norm estimate overflowed or became NaN.
+    #[error("a cyclic norm estimate is not finite")]
+    NonFiniteNormEstimate,
     /// A triangular factor has an exactly zero diagonal entry.
     #[error("the bordered cyclic matrix is singular")]
     Singular,
@@ -183,10 +193,17 @@ pub struct CyclicFactor {
     last_r: Vec<f64>,
     /// `ln|det A|`.
     pub log_abs: f64,
-    /// `||A||_1`, the largest column 1-norm of the bordered matrix.
+    /// `||A||_1` for the original, unscaled bordered matrix `A`.
+    ///
+    /// This is the largest unscaled column 1-norm, not a backward error.
     pub norm1: f64,
-    /// Hager–Higham estimate of `||A^{-1}||_1`; a lower bound in exact
-    /// arithmetic that is usually within a factor of three of the value.
+    /// Hager–Higham estimate of `||A^{-1}||_1` for the original, unscaled
+    /// bordered matrix `A`.
+    ///
+    /// In exact arithmetic this is a lower bound that is usually within a
+    /// factor of three of the value. `norm1 * inverse_norm1` estimates the
+    /// normwise relative condition number; neither factor is a backward
+    /// error.
     pub inverse_norm1: f64,
 }
 
@@ -315,7 +332,7 @@ impl CyclicFactor {
         let mut previous: Option<usize> = None;
         for _ in 0..5 {
             let y = self.solve(&x)?;
-            let norm: f64 = y.iter().map(|value| value.abs()).sum();
+            let norm = finite_abs_sum(&y)?;
             if norm <= estimate {
                 break;
             }
@@ -325,6 +342,9 @@ impl CyclicFactor {
                 .map(|value| if *value >= 0.0 { 1.0 } else { -1.0 })
                 .collect();
             let z = self.solve_transpose(&signs)?;
+            if z.iter().any(|value| !value.is_finite()) {
+                return Err(CyclicError::NonFiniteNormEstimate);
+            }
             let mut best = 0usize;
             for (index, value) in z.iter().enumerate() {
                 if value.abs() > z[best].abs() {
@@ -332,6 +352,9 @@ impl CyclicFactor {
                 }
             }
             let projected: f64 = z.iter().zip(&x).map(|(a, b)| a * b).sum();
+            if !projected.is_finite() {
+                return Err(CyclicError::NonFiniteNormEstimate);
+            }
             if z[best].abs() <= projected || previous == Some(best) {
                 break;
             }
@@ -347,13 +370,25 @@ impl CyclicFactor {
             })
             .collect();
         let y = self.solve(&alternating)?;
-        let norm: f64 = y.iter().map(|value| value.abs()).sum();
-        estimate = estimate.max(2.0 * norm / (3.0 * n as f64));
-        if !estimate.is_finite() {
-            return Err(CyclicError::Singular);
+        let norm = finite_abs_sum(&y)?;
+        let safeguard = 2.0 * norm / (3.0 * n as f64);
+        if !safeguard.is_finite() {
+            return Err(CyclicError::NonFiniteNormEstimate);
         }
+        estimate = estimate.max(safeguard);
         Ok(estimate)
     }
+}
+
+fn finite_abs_sum(values: &[f64]) -> Result<f64, CyclicError> {
+    let mut sum = 0.0;
+    for value in values {
+        sum += value.abs();
+        if !sum.is_finite() {
+            return Err(CyclicError::NonFiniteNormEstimate);
+        }
+    }
+    Ok(sum)
 }
 
 fn subtract_product(rhs: &mut [f64], matrix: &[f64], rows: usize, cols: usize, x: &[f64]) {
@@ -613,10 +648,20 @@ pub fn bordered_cyclic_log_abs(
     if b == 0 || m == 0 {
         return Err(CyclicError::Shape("no blocks"));
     }
+    if p > m {
+        return Err(CyclicError::Shape("border count exceeds block size"));
+    }
     if row_border.len() != p {
         return Err(CyclicError::Shape("border row and column counts differ"));
     }
-    if transfers.iter().any(|block| block.len() != m * m) {
+    let block_len = m
+        .checked_mul(m)
+        .ok_or(CyclicError::Shape("dimensions overflow"))?;
+    let matrix_order = b
+        .checked_mul(m)
+        .and_then(|value| value.checked_add(p))
+        .ok_or(CyclicError::Shape("dimensions overflow"))?;
+    if transfers.iter().any(|block| block.len() != block_len) {
         return Err(CyclicError::Shape("a block is not m x m"));
     }
     if column_border
@@ -636,7 +681,7 @@ pub fn bordered_cyclic_log_abs(
         return Err(CyclicError::NonFinite);
     }
 
-    let mut column_norms1 = vec![0.0; b * m + p];
+    let mut column_norms1 = vec![0.0; matrix_order];
     for (block, transfer) in transfers.iter().enumerate() {
         for column in 0..m {
             let mut sum = 0.0;
@@ -646,21 +691,29 @@ pub fn bordered_cyclic_log_abs(
                     entry += 1.0;
                 }
                 sum += entry.abs();
+                if !sum.is_finite() {
+                    return Err(CyclicError::NonFiniteNormEstimate);
+                }
             }
             if b > 1 {
                 sum += 1.0;
+                if !sum.is_finite() {
+                    return Err(CyclicError::NonFiniteNormEstimate);
+                }
             }
             if block == 0 {
-                sum += row_border
-                    .iter()
-                    .map(|vector| vector[column].abs())
-                    .sum::<f64>();
+                for vector in row_border {
+                    sum += vector[column].abs();
+                    if !sum.is_finite() {
+                        return Err(CyclicError::NonFiniteNormEstimate);
+                    }
+                }
             }
             column_norms1[block * m + column] = sum;
         }
     }
     for (slot, vector) in column_border.iter().enumerate() {
-        column_norms1[b * m + slot] = vector.iter().map(|value| value.abs()).sum();
+        column_norms1[b * m + slot] = finite_abs_sum(vector)?;
     }
     let norm1 = column_norms1
         .iter()
@@ -1165,17 +1218,71 @@ mod tests {
             CyclicError::Shape("a block is not m x m")
         );
         assert_eq!(
+            bordered_cyclic_log_abs(&[vec![1.0; 4]], 2, &[vec![1.0]], &[vec![1.0]]).unwrap_err(),
+            CyclicError::Shape("a border vector is not length m")
+        );
+        assert_eq!(
             bordered_cyclic_log_abs(&[vec![0.0; 4]], 2, &[vec![1.0, 0.0]], &[]).unwrap_err(),
             CyclicError::Shape("border row and column counts differ")
         );
+        let two_borders = [vec![1.0], vec![2.0]];
         assert_eq!(
-            bordered_cyclic_log_abs(&[vec![f64::NAN, 0.0, 0.0, 1.0]], 2, &[], &[]).unwrap_err(),
-            CyclicError::NonFinite
+            bordered_cyclic_log_abs(&[vec![2.0]], 1, &two_borders, &two_borders).unwrap_err(),
+            CyclicError::Shape("border count exceeds block size")
+        );
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                bordered_cyclic_log_abs(&[vec![bad, 0.0, 0.0, 1.0]], 2, &[], &[]).unwrap_err(),
+                CyclicError::NonFinite
+            );
+            assert_eq!(
+                bordered_cyclic_log_abs(
+                    &[vec![2.0, 0.0, 0.0, 2.0]],
+                    2,
+                    &[vec![bad, 0.0]],
+                    &[vec![1.0, 0.0]],
+                )
+                .unwrap_err(),
+                CyclicError::NonFinite
+            );
+            assert_eq!(
+                bordered_cyclic_log_abs(
+                    &[vec![2.0, 0.0, 0.0, 2.0]],
+                    2,
+                    &[vec![1.0, 0.0]],
+                    &[vec![0.0, bad]],
+                )
+                .unwrap_err(),
+                CyclicError::NonFinite
+            );
+        }
+        assert_eq!(
+            bordered_cyclic_log_abs(&[vec![f64::MAX, 0.0, f64::MAX, 2.0]], 2, &[], &[],)
+                .unwrap_err(),
+            CyclicError::NonFiniteNormEstimate
         );
         let identity = vec![1.0, 0.0, 0.0, 1.0];
         assert_eq!(
             bordered_cyclic_log_abs(&[identity.clone(), identity], 2, &[], &[]).unwrap_err(),
             CyclicError::Singular
+        );
+    }
+
+    #[test]
+    fn a_nan_inverse_norm_estimate_is_not_silently_dropped() {
+        let mut factor = bordered_cyclic_log_abs(&[vec![2.0]], 1, &[], &[]).expect("factor");
+        assert_eq!(
+            factor.solve(&[]).unwrap_err(),
+            CyclicError::Shape("right-hand side length")
+        );
+        assert_eq!(
+            factor.solve_transpose(&[1.0, 2.0]).unwrap_err(),
+            CyclicError::Shape("right-hand side length")
+        );
+        factor.last_r[0] = f64::NAN;
+        assert_eq!(
+            factor.estimate_inverse_norm1().unwrap_err(),
+            CyclicError::NonFiniteNormEstimate
         );
     }
 }
