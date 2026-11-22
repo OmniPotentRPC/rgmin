@@ -139,8 +139,9 @@ pub struct FgmresReport {
 ///
 /// [`Error::Krylov`] for a non-positive or non-finite `rtol`, a zero
 /// restart or budget, mismatched lengths or a non-finite right-hand
-/// side, [`Error::Oracle`] for a non-finite operator or preconditioner
-/// image; otherwise any error of `apply` or `precondition`.
+/// side or starting iterate, [`Error::Oracle`] for a non-finite operator
+/// or preconditioner image; otherwise any error of `apply` or
+/// `precondition`.
 pub fn fgmres<A, M, O, E>(
     mut apply: A,
     mut precondition: M,
@@ -174,6 +175,18 @@ where
         }
         .into());
     }
+    if rhs.iter().any(|v| !v.is_finite()) {
+        return Err(Error::Krylov {
+            what: "the right-hand side is not finite",
+        }
+        .into());
+    }
+    if x0.is_some_and(|x| x.iter().any(|v| !v.is_finite())) {
+        return Err(Error::Krylov {
+            what: "x0 is not finite",
+        }
+        .into());
+    }
     let rhs_norm = nrm2(rhs);
     if !rhs_norm.is_finite() {
         return Err(Error::Krylov {
@@ -182,6 +195,12 @@ where
         .into());
     }
     let target = config.rtol * rhs_norm;
+    if !target.is_finite() {
+        return Err(Error::Krylov {
+            what: "the residual target overflowed",
+        }
+        .into());
+    }
     let mut x = x0.map_or_else(|| Array1::zeros(n), |x| x.to_owned());
     let mut products = 0usize;
     let mut r = rhs.to_owned();
@@ -207,6 +226,16 @@ where
         iterations,
         cycles,
     };
+    if !residual.is_finite() {
+        return Ok(finish(
+            x,
+            FgmresStatus::Breakdown,
+            residual,
+            products,
+            iterations,
+            cycles,
+        ));
+    }
     if residual <= target {
         return Ok(finish(
             x,
@@ -230,7 +259,18 @@ where
                 cycles,
             ));
         }
-        let mut basis = vec![&r / residual];
+        let unit = &r / residual;
+        if unit.iter().any(|v| !v.is_finite()) {
+            return Ok(finish(
+                best.0,
+                FgmresStatus::Breakdown,
+                best.1,
+                products,
+                iterations,
+                cycles,
+            ));
+        }
+        let mut basis = vec![unit];
         let mut directions: Vec<Array1<f64>> = Vec::new();
         let mut columns: Vec<Vec<f64>> = Vec::new();
         let mut rotations: Vec<(f64, f64)> = Vec::new();
@@ -249,6 +289,19 @@ where
                 }
             }
             let next = nrm2(w.view());
+            if !next.is_finite()
+                || w.iter().any(|v| !v.is_finite())
+                || h[..=j].iter().any(|v| !v.is_finite())
+            {
+                return Ok(finish(
+                    best.0,
+                    FgmresStatus::Breakdown,
+                    best.1,
+                    products,
+                    iterations,
+                    cycles,
+                ));
+            }
             h[j + 1] = next;
             for (i, &(c, s)) in rotations.iter().enumerate() {
                 let (a, b) = (h[i], h[i + 1]);
@@ -256,6 +309,16 @@ where
                 h[i + 1] = -s * a + c * b;
             }
             let radius = h[j].hypot(h[j + 1]);
+            if !radius.is_finite() || h.iter().any(|v| !v.is_finite()) {
+                return Ok(finish(
+                    best.0,
+                    FgmresStatus::Breakdown,
+                    best.1,
+                    products,
+                    iterations,
+                    cycles,
+                ));
+            }
             let (c, s) = if radius == 0.0 {
                 (1.0, 0.0)
             } else {
@@ -269,7 +332,11 @@ where
             iterations += 1;
             directions.push(z);
             columns.push(h);
-            let estimate = g[j + 1].abs();
+            let estimate = if radius == 0.0 {
+                g[j].abs()
+            } else {
+                g[j + 1].abs()
+            };
             observe(&FgmresStep {
                 iteration: iterations,
                 products,
@@ -279,17 +346,8 @@ where
             if estimate <= target || next == 0.0 {
                 break;
             }
-            basis.push(w / next);
-        }
-        let k = directions.len();
-        let mut y = vec![0.0; k];
-        for i in (0..k).rev() {
-            let mut s = g[i];
-            for (l, yl) in y.iter().enumerate().skip(i + 1) {
-                s -= columns[l][i] * yl;
-            }
-            let diag = columns[i][i];
-            if diag == 0.0 || diag.is_nan() {
+            let next_basis = &w / next;
+            if next_basis.iter().any(|v| !v.is_finite()) {
                 return Ok(finish(
                     best.0,
                     FgmresStatus::Breakdown,
@@ -299,10 +357,51 @@ where
                     cycles,
                 ));
             }
-            y[i] = s / diag;
+            basis.push(next_basis);
+        }
+        let k = directions.len();
+        let mut y = vec![0.0; k];
+        for i in (0..k).rev() {
+            let mut s = g[i];
+            for (l, yl) in y.iter().enumerate().skip(i + 1) {
+                s -= columns[l][i] * yl;
+            }
+            let diag = columns[i][i];
+            if !diag.is_finite() || diag == 0.0 {
+                return Ok(finish(
+                    best.0,
+                    FgmresStatus::Breakdown,
+                    best.1,
+                    products,
+                    iterations,
+                    cycles,
+                ));
+            }
+            let yi = s / diag;
+            if !yi.is_finite() {
+                return Ok(finish(
+                    best.0,
+                    FgmresStatus::Breakdown,
+                    best.1,
+                    products,
+                    iterations,
+                    cycles,
+                ));
+            }
+            y[i] = yi;
         }
         for (z, yi) in directions.iter().zip(&y) {
             axpy(*yi, z.view(), &mut x);
+        }
+        if x.iter().any(|v| !v.is_finite()) {
+            return Ok(finish(
+                best.0,
+                FgmresStatus::Breakdown,
+                best.1,
+                products,
+                iterations,
+                cycles,
+            ));
         }
         r = &rhs - &checked(apply(x.view())?, n, "A x")?;
         products += 1;
@@ -314,6 +413,16 @@ where
             residual,
             exact: true,
         });
+        if !residual.is_finite() {
+            return Ok(finish(
+                best.0,
+                FgmresStatus::Breakdown,
+                best.1,
+                products,
+                iterations,
+                cycles,
+            ));
+        }
         if residual <= target {
             return Ok(finish(
                 x,
