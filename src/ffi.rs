@@ -82,7 +82,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 53;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 54;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 5;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -147,7 +147,7 @@ pub enum rgmin_method_t {
     RGMIN_EON_CG = 27,
     /// GROMACS `integrator = steep`. ABI minor 52.
     RGMIN_GROMACS_STEEP = 28,
-    /// GROMACS `integrator = cg`.
+    /// GROMACS-style `integrator = cg` direction update with strong-Wolfe line search. ABI minor 54.
     RGMIN_GROMACS_CG = 29,
 }
 
@@ -1974,7 +1974,7 @@ pub extern "C" fn rgmin_gromacs_steep_max_constraint_shrinks(step_size: f64, shr
 ///
 /// `nstcgsteep == 0` turns the periodic steepest-descent restart off, as
 /// in GROMACS. Returns 0 on success, or 1 when `solver` is null or is not
-/// a `RGMIN_GROMACS_CG` session.
+/// a `RGMIN_GROMACS_CG` session. ABI minor 54.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
