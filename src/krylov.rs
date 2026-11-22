@@ -406,16 +406,49 @@ impl EisenstatWalker {
     /// The forcing term at residual `residual`, with `previous` the
     /// `(||F_{k-1}||, eta_{k-1})` of the same system.
     ///
-    /// `None` on the first step or when the value leaves `(0, 1)`, where
-    /// it gives no inexact-Newton contraction (Dembo, Eisenstat and
+    /// Returns `Ok(None)` on the first step or when the value leaves `(0, 1)`,
+    /// where it gives no inexact-Newton contraction (Dembo, Eisenstat and
     /// Steihaug, <https://doi.org/10.1137/0719025>); the caller keeps
     /// its own rule there.
-    pub fn forcing(&self, residual: f64, previous: Option<(f64, f64)>, target: f64) -> Option<f64> {
-        let (last, eta_last) = previous?;
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Krylov`] when `residual` or `last` is not finite and
+    /// positive, or when `eta_last` or `target` is not finite and
+    /// non-negative.
+    pub fn forcing(
+        &self,
+        residual: f64,
+        previous: Option<(f64, f64)>,
+        target: f64,
+    ) -> Result<Option<f64>> {
+        if !(residual.is_finite() && residual > 0.0) {
+            return Err(Error::Krylov {
+                what: "Eisenstat-Walker residual must be finite and positive",
+            });
+        }
+        if !(target.is_finite() && target >= 0.0) {
+            return Err(Error::Krylov {
+                what: "Eisenstat-Walker target must be finite and non-negative",
+            });
+        }
+        let Some((last, eta_last)) = previous else {
+            return Ok(None);
+        };
+        if !(last.is_finite() && last > 0.0) {
+            return Err(Error::Krylov {
+                what: "Eisenstat-Walker previous residual must be finite and positive",
+            });
+        }
+        if !(eta_last.is_finite() && eta_last >= 0.0) {
+            return Err(Error::Krylov {
+                what: "Eisenstat-Walker previous forcing term must be finite and non-negative",
+            });
+        }
         let eta = (self.gamma * (residual / last).powf(self.alpha))
             .max(self.gamma * eta_last.powf(self.alpha))
             .max(0.5 * target / residual);
-        (eta.is_finite() && eta > 0.0 && eta < 1.0).then_some(eta)
+        Ok((eta.is_finite() && eta > 0.0 && eta < 1.0).then_some(eta))
     }
 }
 
@@ -777,23 +810,23 @@ mod tests {
         assert!(EisenstatWalker::new(0.9, 1.0).is_err());
         assert!(EisenstatWalker::new(0.9, 2.5).is_err());
         let ew = EisenstatWalker::new(0.9, 2.0)?;
-        assert_eq!(ew.forcing(1e-2, None, 1e-10), None);
+        assert_eq!(ew.forcing(1e-2, None, 1e-10)?, None);
         let eta = ew
-            .forcing(1e-2, Some((1e-1, 0.5)), 1e-10)
+            .forcing(1e-2, Some((1e-1, 0.5)), 1e-10)?
             .ok_or(Error::Krylov { what: "no forcing" })?;
         assert_eq!(eta.to_bits(), (0.9f64 * 0.5f64.powf(2.0)).to_bits());
         let fast = ew
-            .forcing(1e-4, Some((1e-1, 1e-3)), 1e-10)
+            .forcing(1e-4, Some((1e-1, 1e-3)), 1e-10)?
             .ok_or(Error::Krylov { what: "no forcing" })?;
         let expected = (0.9f64 * (1e-4f64 / 1e-1).powf(2.0))
             .max(0.9 * 1e-3f64.powf(2.0))
             .max(0.5 * 1e-10 / 1e-4);
         assert_eq!(fast.to_bits(), expected.to_bits());
         let oversolve = ew
-            .forcing(1e-9, Some((1e-1, 1e-6)), 1e-9)
+            .forcing(1e-9, Some((1e-1, 1e-6)), 1e-9)?
             .ok_or(Error::Krylov { what: "no forcing" })?;
         assert_eq!(oversolve, 0.5);
-        assert_eq!(ew.forcing(1.0, Some((0.5, 0.9)), 1e-10), None);
+        assert_eq!(ew.forcing(1.0, Some((0.5, 0.9)), 1e-10)?, None);
         Ok(())
     }
 }
