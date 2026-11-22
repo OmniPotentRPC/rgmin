@@ -59,7 +59,7 @@ use crate::step::{
     Taken, apply_caps, cap_alpha, cap_displacement_atom, l2, max_atom_displacement,
     nlcg_opening_alpha, qn_istep, scale_displacement_to_atom_cap, take_step_with_options,
 };
-use crate::stop::{Counted, StopRules, moved as point_moved};
+use crate::stop::{Counted, StopRules, bounded_step_moved};
 use crate::trust::{
     accept_ratio, burdakov_radius, dogleg_direction, predicted_reduction, reduction_ratio,
     update_radius,
@@ -323,6 +323,7 @@ pub struct Solver {
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
+    last_step_moved: bool,
     /// Unlimited L-BFGS plateau. Unused by every other method, and unused
     /// when the iteration budget is positive.
     lbfgs_plateau: crate::lbfgs_plateau::RepeatedAcceptedStep,
@@ -595,6 +596,7 @@ impl Solver {
             last_pos: None,
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
+            last_step_moved: false,
             lbfgs_plateau: crate::lbfgs_plateau::RepeatedAcceptedStep::new(),
             gradient_calls: 0,
             hvp_calls: 0,
@@ -1491,6 +1493,39 @@ impl Solver {
         {
             false
         }
+    }
+
+    /// Whether [`Self::step`] and [`Self::step_hess`] project onto the
+    /// session box. Distance constraints and Newton-CG never read it.
+    #[cfg(feature = "highs")]
+    fn boxes_steps(&self) -> bool {
+        self.has_coordinate_box()
+            && self.constraints.is_none()
+            && !matches!(self.inner, Inner::NewtonCg { .. } | Inner::NewtonPcg { .. })
+    }
+
+    /// The box a step on a `dim`-coordinate objective with `bounds` keeps
+    /// its iterate in: `bounds` met with the session box where a step
+    /// projects onto it. Movement is read against this box, so a
+    /// projection is no move.
+    fn step_bounds<'b>(
+        &self,
+        bounds: &'b eindir_core::Bounds<f64>,
+        dim: usize,
+    ) -> Result<std::borrow::Cow<'b, eindir_core::Bounds<f64>>> {
+        #[cfg(feature = "highs")]
+        if self.boxes_steps() {
+            return crate::box_objective::session_box(
+                bounds,
+                dim,
+                self.box_lo.as_deref(),
+                self.box_hi.as_deref(),
+            )
+            .map(std::borrow::Cow::Owned);
+        }
+        #[cfg(not(feature = "highs"))]
+        let _ = dim;
+        Ok(std::borrow::Cow::Borrowed(bounds))
     }
 
     fn note_bounds(&mut self, bounds: &eindir_core::Bounds<f64>) {
@@ -2451,23 +2486,13 @@ impl Solver {
     /// A zero iteration budget is the SCG reading. The plateau itself is
     /// `lbfgs_plateau`: this only asks it, and only for L-BFGS. A positive
     /// budget does not ask, so its trajectory is unchanged.
-    fn note_repeated_lbfgs_step(
-        &mut self,
-        before: &Array1<f64>,
-        x: &Array1<f64>,
-        report: &mut Report,
-    ) {
+    fn note_repeated_lbfgs_step(&mut self, moved: bool, report: &mut Report) {
         if self.control.maxiter != 0 || !matches!(self.inner, Inner::Lbfgs(_)) {
             return;
         }
         if report.status != Status::Iterating {
             return;
         }
-        let moved = before.len() == x.len()
-            && before
-                .iter()
-                .zip(x.iter())
-                .any(|(a, b)| a.to_bits() != b.to_bits());
         if self.lbfgs_plateau.observe(
             self.dim,
             moved,
@@ -2511,6 +2536,7 @@ impl Solver {
         let outcome = self.step_counted(&counted, x);
         self.evals += counted.count();
         let (mut report, moved) = outcome?;
+        self.last_step_moved = moved;
         self.judge_stops(&mut report, moved, counted.start_value());
         Ok(report)
     }
@@ -2523,8 +2549,10 @@ impl Solver {
         let before = x.clone();
         let mut report = self.step_once(obj, x)?;
         self.finish_level_set(obj, x, &mut report)?;
-        self.note_repeated_lbfgs_step(&before, x, &mut report);
-        Ok((report, point_moved(&before, x)))
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        let moved = bounded_step_moved(&bounds, &before, x);
+        self.note_repeated_lbfgs_step(moved, &mut report);
+        Ok((report, moved))
     }
 
     /// Refuse a stop this session's method cannot read.
@@ -2644,7 +2672,7 @@ impl Solver {
             if let Inner::Lbfgs(solver) = &mut self.inner {
                 solver.coordinate_box = None;
             }
-            if self.has_coordinate_box() {
+            if self.boxes_steps() {
                 let bounded = crate::box_objective::BoxObjective::new(
                     obj,
                     self.box_lo.clone(),
@@ -2717,7 +2745,7 @@ impl Solver {
                 if let Inner::Lbfgs(solver) = &mut self.inner {
                     solver.coordinate_box = None;
                 }
-                if self.has_coordinate_box() {
+                if self.boxes_steps() {
                     let bounded = crate::box_objective::BoxObjective::new(
                         obj,
                         self.box_lo.clone(),
@@ -2741,7 +2769,8 @@ impl Solver {
             }
         };
         self.finish_level_set(obj, x, &mut report)?;
-        Ok((report, point_moved(&before, x)))
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        Ok((report, bounded_step_moved(&bounds, &before, x)))
     }
 
     /// One Steihaug-Toint iteration. `obj` supplies analytic products;
@@ -2789,7 +2818,8 @@ impl Solver {
             self.step_newton_cg(obj, x, &action)?
         };
         self.finish_level_set(obj, x, &mut report)?;
-        Ok((report, point_moved(&before, x)))
+        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
+        Ok((report, bounded_step_moved(&bounds, &before, x)))
     }
 
     /// [`Self::step_hvp`] on an objective whose callbacks can fail.
@@ -2847,7 +2877,8 @@ impl Solver {
             let before = x.clone();
             let mut report = self.step_newton_cg(&counted, x, &HostAction(obj))?;
             self.finish_level_set(&counted, x, &mut report)?;
-            Ok((report, point_moved(&before, x)))
+            let bounds = self.step_bounds(counted.bounds(), StepOracle::dim(&counted))?;
+            Ok((report, bounded_step_moved(&bounds, &before, x)))
         })();
         match result {
             Err(err @ Error::Host(_)) => {
@@ -6381,9 +6412,9 @@ impl Solver {
             return self.run(obj, x);
         }
         let tol = self.control.gtol;
-        let start = x.clone();
-        let mut gauged = false;
+        let mut moved = false;
         let mut report = self.step(obj, x)?;
+        moved |= self.last_step_moved;
         for _ in 1..self.control.maxiter {
             if report.grad_norm < tol || report.status != Status::Iterating {
                 break;
@@ -6391,17 +6422,17 @@ impl Solver {
             let before = x.clone();
             gauge(x);
             if *x != before {
-                gauged = true;
+                moved = true;
                 self.rebase();
             }
             report = self.step(obj, x)?;
+            moved |= self.last_step_moved;
         }
         report.status = match report.status {
             Status::Iterating if report.grad_norm < tol => Status::Tolerance,
             Status::Iterating => Status::Budget,
             other => other,
         };
-        let moved = gauged || *x != start;
         self.control.deliver(self.name_budget(report, moved))
     }
 
@@ -6426,12 +6457,13 @@ impl Solver {
         }
         self.brief = true;
         let tol = self.control.gtol;
-        let start = x.clone();
+        let mut moved = false;
         let mut last = None;
         let mut stop: Result<()> = Ok(());
         for _ in 0..budget {
             match self.step_plain(obj, x) {
                 Ok(rep) => {
+                    moved |= self.last_step_moved;
                     let status = match rep.status {
                         Status::Iterating if rep.grad_norm < tol => Status::Tolerance,
                         other => other,
@@ -6458,7 +6490,7 @@ impl Solver {
         };
         let g = self.reported_grad(x);
         let report = self.finish(value, x, &g, grad_norm, status);
-        self.control.deliver(self.name_budget(report, *x != start))
+        self.control.deliver(self.name_budget(report, moved))
     }
 
     /// The gradient a step report carries, for the report at the end of a
