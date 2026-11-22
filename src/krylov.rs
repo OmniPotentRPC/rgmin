@@ -627,9 +627,6 @@ where
                 record,
             });
         }
-        if !subdiagonal.is_finite() {
-            return Err(refusal(KrylovRefusal::SingularProjectedSystem, record));
-        }
         basis.push(image.iter().map(|value| value / subdiagonal).collect());
     }
     Err(refusal(KrylovRefusal::SingularProjectedSystem, record))
@@ -906,12 +903,6 @@ where
                     },
                     record: state.record.clone(),
                 });
-            } else if !subdiagonal.is_finite() {
-                return Err(block_refusal(
-                    KrylovRefusal::SingularProjectedSystem,
-                    &states,
-                    index,
-                ));
             } else {
                 state
                     .basis
@@ -1935,6 +1926,43 @@ mod tests {
                 return Err("block stagnation returned a non-finite solution");
             }
             _ => return Err("block stagnation refused for the wrong reason"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn an_overflowing_projection_is_refused_as_non_finite() -> Result<(), &'static str> {
+        let huge = |_: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
+            output.fill(f64::MAX);
+            Ok(())
+        };
+        let right_hand_side = vec![1.0, 1.0];
+        let options = GmresOptions::unrestarted(1e-8);
+        let scalar = gmres_right(
+            &mut { huge },
+            &mut Identity,
+            &right_hand_side,
+            options,
+            &mut NoObserver,
+        );
+        match scalar {
+            Err(GmresFailure::Refused { reason, .. }) => {
+                assert_eq!(reason, KrylovRefusal::NonFinite);
+            }
+            _ => return Err("overflowing projection was not refused as non-finite"),
+        }
+        let block = gmres_right_block(
+            &mut { huge },
+            &mut [Identity],
+            &[right_hand_side],
+            options,
+            &mut [NoObserver],
+        );
+        match block {
+            Err(GmresFailure::BlockRefused { reason, .. }) => {
+                assert_eq!(reason, KrylovRefusal::NonFinite);
+            }
+            _ => return Err("block overflowing projection was not non-finite"),
         }
         Ok(())
     }
