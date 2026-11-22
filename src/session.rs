@@ -536,12 +536,20 @@ impl Solver {
         } else {
             SESSION_LINESEARCH
         };
+        let line_options = if matches!(method, Method::GromacsCg) {
+            // Match GROMACS `do_cg` (`src/gromacs/mdrun/minimize.cpp`, v2025.4
+            // lines 1665-1672): accept `f < value + sqrt(GMX_REAL_EPS) * |value|`
+            // when the directional derivative stays negative (`gpc < 0`).
+            LineSearchOptions::default().with_downhill_rise_tolerance(f64::EPSILON.sqrt())
+        } else {
+            LineSearchOptions::default()
+        };
         let inner = Inner::from_method(&method, dim, istep);
         let mut solver = Self {
             dim,
             control,
             linesearch,
-            line_options: LineSearchOptions::default(),
+            line_options,
             istep,
             steps: 0,
             qn_step: QnStep::TwoLoop,
