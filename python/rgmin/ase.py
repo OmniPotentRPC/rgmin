@@ -23,7 +23,7 @@ import weakref
 from collections import deque
 from collections.abc import Callable
 from types import TracebackType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from ase.optimize.optimize import Optimizer as _ASEOptimizer
@@ -1273,6 +1273,10 @@ class _AseWolfe(Optimizer):
     point. The file is not ASE's Hessian JSON.
     """
 
+    if TYPE_CHECKING:
+        # ASE's Optimizer.load has no annotations. The method itself is inherited.
+        def load(self) -> object: ...
+
     def _restart_supported(self) -> bool:
         return True
 
@@ -1357,8 +1361,10 @@ class _AseWolfe(Optimizer):
             _Geometry(self.optimizable).write(final)
         self._history = list(steps)
 
-    def dump(self, data: Any) -> None:
-        _ASEOptimizer.dump(self, data)
+    def dump(self, data: object) -> None:
+        # Optimizer.dump refuses the file. ASE's dump writes it and has no annotations.
+        write = cast(Callable[[_AseWolfe, object], None], _ASEOptimizer.dump)
+        write(self, data)
 
 
 class BFGSLineSearch(_AseWolfe):
@@ -1453,7 +1459,7 @@ QuasiNewton = BFGSLineSearch
 
 
 def _bind_lbfgs_linesearch(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
-    names = (
+    names: tuple[str, ...] = (
         "atoms",
         "restart",
         "logfile",
@@ -1469,10 +1475,11 @@ def _bind_lbfgs_linesearch(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dic
             "LBFGS.__init__() takes from 2 to 10 positional arguments but "
             f"{len(args) + 1} were given"
         )
-    for name, _value in zip(names, args, strict=False):
+    bound: dict[str, Any] = {}
+    for name, value in zip(names, args, strict=False):
         if name in kwargs:
             raise TypeError(f"LBFGS.__init__() got multiple values for argument '{name}'")
-    bound = dict(zip(names, args, strict=False))
+        bound[name] = value
     bound.update(kwargs)
     bound["use_line_search"] = True
     if "atoms" not in bound:
