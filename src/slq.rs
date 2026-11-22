@@ -2544,7 +2544,18 @@ where
                 *slot = s_rng.next_rademacher();
             }
             if !probe_deflate.is_empty() {
+                let orig = norm2_slice(&s_cur);
                 project_out_basis(&mut s_cur, &probe_deflate);
+                let projected = norm2_slice(&s_cur);
+                if !projected.is_finite() {
+                    return Err(slq_err("non-finite projected Hutch++ sketch norm"));
+                }
+                if projected <= 1e-12 * orig {
+                    // What is left of a kernel-aligned sketch is roundoff; the
+                    // power iteration would normalise it into a basis vector.
+                    s_cur.fill(0.0);
+                    continue;
+                }
             }
             for _ in 0..power_iters {
                 s_nxt.fill(0.0);
