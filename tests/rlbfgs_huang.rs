@@ -294,6 +294,7 @@ mod capi {
             maxmove: 0.0,
             noise_eps: 0.0,
             noise_c: 0.0,
+            require_convergence: 0,
         };
         let params = rgmin_rlbfgs_t {
             memory: 4,
@@ -308,6 +309,7 @@ mod capi {
             steps: 0,
             grad_norm: 1.0,
             stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+            converged: 0,
         };
         let status = unsafe {
             rgmin_minimize_rlbfgs(

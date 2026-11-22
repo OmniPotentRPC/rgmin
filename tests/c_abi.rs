@@ -136,12 +136,14 @@ fn c_abi_lbfgs_rosenbrock() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize(
@@ -219,6 +221,7 @@ fn c_abi_scg_quadratic_bowl_with_exact_curvature() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let params = rgmin_scg_params_t {
         sigma0: 1e-4,
@@ -233,6 +236,7 @@ fn c_abi_scg_quadratic_bowl_with_exact_curvature() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize_scg(
@@ -262,6 +266,7 @@ fn scg_bowl_ctrl() -> rgmin_control_t {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     }
 }
 
@@ -292,6 +297,7 @@ fn c_abi_scg_null_params_uses_netlab_polak_ribiere() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize_scg(
@@ -363,6 +369,7 @@ fn c_abi_scg_unlimited_fit_stops_on_a_flat_plateau() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize_scg(
@@ -400,6 +407,7 @@ fn scg_one_step_length(maxmove: f64) -> f64 {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize_scg(
@@ -439,6 +447,7 @@ fn c_abi_scg_zero_conjugacy_is_fletcher_reeves() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize_scg(
@@ -470,6 +479,7 @@ fn c_abi_scg_unknown_conjugacy_is_invalid() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize_scg(
@@ -507,6 +517,7 @@ fn c_abi_scg_method_t_codes_are_not_conjugacy() {
             steps: 0,
             grad_norm: 0.0,
             stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
         };
         let st = unsafe {
             rgmin_minimize_scg(
@@ -548,12 +559,14 @@ fn c_abi_eindir_objective_minimizes_without_taking_ownership() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize_eindir(
@@ -587,12 +600,14 @@ fn c_abi_eindir_rejects_incompatible_stamp_before_evaluation() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize_eindir(
@@ -624,12 +639,14 @@ fn eindir_run(
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let stamp = eindir_core_abi_stamp();
     let st = unsafe {
@@ -750,12 +767,14 @@ fn c_abi_rgpot_potential_reaches_eindir_optimizer() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let stamp = rgpot_core::eindir::rgpot_eindir_abi_stamp();
     let status = unsafe {
@@ -794,12 +813,14 @@ fn cuda_tagged_tensor_is_unsupported() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize(
@@ -828,6 +849,7 @@ fn c_abi_solver_step_keeps_lbfgs_history() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -836,6 +858,7 @@ fn c_abi_solver_step_keeps_lbfgs_history() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     for _ in 0..80 {
         let xt = unsafe { rgmin_tensor_borrow_cpu_f64(warm.as_mut_ptr(), 2) };
@@ -907,6 +930,7 @@ fn c_abi_default_istep_leaves_the_rosenbrock_start() {
         maxmove: -1.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     for method in [
         rgmin_method_t::RGMIN_BFGS,
@@ -932,6 +956,7 @@ fn c_abi_default_istep_leaves_the_rosenbrock_start() {
             steps: 0,
             grad_norm: 0.0,
             stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
         };
         let mut first = f64::NAN;
         for k in 0..80 {
@@ -990,6 +1015,7 @@ fn c_session_opens_with_energy_acceptance() {
         maxmove: -1.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     for (accept, want) in [
         (None, -0.5),
@@ -1002,6 +1028,7 @@ fn c_session_opens_with_energy_acceptance() {
             steps: 0,
             grad_norm: 0.0,
             stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
         };
         let st = unsafe {
             let session = rgmin_solver_create(rgmin_method_t::RGMIN_BB, &ctrl, 1);
@@ -1046,6 +1073,7 @@ fn fused_evalgrad_is_one_callback_per_oracle() {
         maxmove: 0.2,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -1056,6 +1084,7 @@ fn fused_evalgrad_is_one_callback_per_oracle() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_solver_step_fg(
@@ -1212,12 +1241,14 @@ fn an_unmet_c_stop_writes_the_report_and_returns_the_typed_status() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let unmet = unsafe {
         rgmin_minimize_opts(
@@ -1279,6 +1310,7 @@ fn c_abi_burdakov_radius_is_off_until_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert_eq!(unsafe { rgmin_solver_lbfgs_trust_radius(session) }, 0.0);
@@ -1317,6 +1349,7 @@ fn stop_ctrl() -> rgmin_control_t {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     }
 }
 
@@ -1331,6 +1364,7 @@ fn run_to_stop(
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+        converged: 0,
     };
     let mut taken = 0;
     while out.stop == rgmin_stop_t::RGMIN_STOP_BUDGET && taken < 5000 {
@@ -1469,6 +1503,7 @@ fn c_abi_fire_preset_and_abc() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let guenole = rgmin_fire_preset_t::RGMIN_FIRE_PRESET_GUENOLE2020 as i32;
     let null = std::ptr::null_mut();
@@ -1501,6 +1536,7 @@ fn c_abi_fire_preset_and_abc() {
             steps: 0,
             grad_norm: 0.0,
             stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
         };
         let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
         let st = unsafe {
@@ -1542,6 +1578,7 @@ fn c_abi_stop_norm_and_report_gradient() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let max_atom = rgmin_stop_norm_t::RGMIN_STOP_NORM_MAX_ATOM as i32;
     assert_eq!(
@@ -1570,6 +1607,7 @@ fn c_abi_stop_norm_and_report_gradient() {
             steps: 0,
             grad_norm: 0.0,
             stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
         };
         let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
         let st = unsafe {
@@ -1630,12 +1668,14 @@ fn c_abi_default_lbfgs_step_respects_the_eon_cap() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize(
@@ -1676,8 +1716,8 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_maxmove, rgmin_solver_set_multinomial_ds,
         rgmin_solver_set_multinomial_sym, rgmin_solver_set_oblique, rgmin_solver_set_periodic,
         rgmin_solver_set_positive, rgmin_solver_set_power, rgmin_solver_set_project_rigid,
-        rgmin_solver_set_qn_step, rgmin_solver_set_sphere_complex, rgmin_solver_set_stiefel,
-        rgmin_solver_set_trust,
+        rgmin_solver_set_qn_step, rgmin_solver_set_require_convergence,
+        rgmin_solver_set_sphere_complex, rgmin_solver_set_stiefel, rgmin_solver_set_trust,
     };
     let ctrl = rgmin_control_t {
         maxiter: 20,
@@ -1687,6 +1727,7 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -1695,6 +1736,7 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_maxmove(session, 0.5);
         rgmin_solver_set_error_on_unmet(session, 0);
         rgmin_solver_set_backward_polish(session, 0);
+        rgmin_solver_set_require_convergence(session, 0);
         rgmin_solver_set_atom_maxmove(session, 0.2);
         rgmin_solver_set_qn_step(session, rgmin_qn_step_t::RGMIN_QN_LBFGS);
         rgmin_solver_set_extra_updates(session, 2);
@@ -1747,6 +1789,7 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
     let st = unsafe {
@@ -1770,6 +1813,7 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         rgmin_solver_set_maxmove(null, 0.5);
         rgmin_solver_set_error_on_unmet(null, 1);
         rgmin_solver_set_backward_polish(null, 1);
+        rgmin_solver_set_require_convergence(null, 1);
         rgmin_solver_set_atom_maxmove(null, 0.2);
         rgmin_solver_set_qn_step(null, rgmin_qn_step_t::RGMIN_QN_NEWTON);
         rgmin_solver_set_extra_updates(null, 2);
@@ -1894,6 +1938,7 @@ fn c_abi_euclidean_complex_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -1904,6 +1949,7 @@ fn c_abi_euclidean_complex_stays_on_the_set() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
     let st = unsafe {
@@ -1949,6 +1995,7 @@ fn c_abi_constant_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 3) };
     assert!(!session.is_null());
@@ -1960,6 +2007,7 @@ fn c_abi_constant_stays_on_the_set() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 3) };
     let st = unsafe {
@@ -2035,6 +2083,7 @@ fn c_abi_multinomial_ds_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -2045,6 +2094,7 @@ fn c_abi_multinomial_ds_stays_on_the_set() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
     let st = unsafe {
@@ -2093,6 +2143,7 @@ fn c_abi_multinomial_sym_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -2103,6 +2154,7 @@ fn c_abi_multinomial_sym_stays_on_the_set() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
     let st = unsafe {
@@ -2182,6 +2234,7 @@ fn c_abi_sphere_complex_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -2192,6 +2245,7 @@ fn c_abi_sphere_complex_stays_on_the_set() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
     let st = unsafe {
@@ -2258,6 +2312,7 @@ fn c_abi_power_keeps_each_copy_on_its_sphere() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 6) };
     assert!(!session.is_null());
@@ -2282,6 +2337,7 @@ fn c_abi_power_keeps_each_copy_on_its_sphere() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
     let st = unsafe {
@@ -2352,6 +2408,7 @@ fn c_abi_positive_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 3) };
     assert!(!session.is_null());
@@ -2363,6 +2420,7 @@ fn c_abi_positive_stays_on_the_set() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 3) };
     let st = unsafe {
@@ -2437,6 +2495,7 @@ fn c_abi_centered_matrix_stays_on_the_set() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -2448,6 +2507,7 @@ fn c_abi_centered_matrix_stays_on_the_set() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
     let st = unsafe {
@@ -2494,6 +2554,7 @@ fn c_abi_set_box_status_matches_highs_feature() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -2551,6 +2612,7 @@ fn c_abi_one_eval_search_direction_is_steepest_when_empty() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -2586,6 +2648,7 @@ fn c_abi_pair_count_tracks_accepted_curvature_and_forget() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -2626,6 +2689,7 @@ fn c_abi_rebase_keeps_pairs_and_forget_drops_them() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -2733,6 +2797,7 @@ fn newton_cg_method_string_and_counters_cross_the_c_abi() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let user = &count as *const BowlCount as *mut c_void;
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_NEWTON_CG, &ctrl, 4) };
@@ -2743,6 +2808,7 @@ fn newton_cg_method_string_and_counters_cross_the_c_abi() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     for _ in 0..20 {
         let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 4) };
@@ -2840,6 +2906,7 @@ fn c_abi_exp_installs_and_steps() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let bad = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     let params = rgmin_exp_t {
@@ -2897,6 +2964,7 @@ fn c_abi_exp_installs_and_steps() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
     let st = unsafe {
@@ -2968,6 +3036,7 @@ fn c_abi_a_refused_start_gradient_sends_no_nan_coordinate() {
             steps: 0,
             grad_norm: 0.0,
             stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
         };
         let st = unsafe {
             let session = rgmin_solver_create(method, &ctrl, 2);
@@ -3084,6 +3153,7 @@ fn constrained_report() -> rgmin_report_t {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+        converged: 0,
     }
 }
 
@@ -3137,6 +3207,7 @@ fn c_abi_every_method_reaches_the_constrained_minimum() {
         maxmove: 0.2,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     use rgmin_method_t::*;
     let methods = [
@@ -3315,6 +3386,7 @@ fn c_abi_constraint_failures_are_typed_and_leave_x() {
         maxmove: -1.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 6) };
     unsafe {
@@ -3429,6 +3501,7 @@ fn c_abi_capped_lbfgs_moves_one_atom_by_the_cap() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let fire = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE, &ctrl, 3) };
     assert_eq!(unsafe { rgmin_solver_set_lbfgs_capped(fire, 0.2) }, 1);
@@ -3443,6 +3516,7 @@ fn c_abi_capped_lbfgs_moves_one_atom_by_the_cap() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_solver_step_fg(
@@ -3493,6 +3567,7 @@ fn c_abi_quickmin_steps_and_splits_the_cell() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_QUICKMIN, &ctrl, 2) };
     assert!(!session.is_null());
@@ -3516,6 +3591,7 @@ fn c_abi_quickmin_steps_and_splits_the_cell() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
     let st = unsafe {
@@ -3548,6 +3624,7 @@ fn c_abi_diis_reduces_a_quadratic() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_DIIS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -3556,6 +3633,7 @@ fn c_abi_diis_reduces_a_quadratic() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let mut last = f64::INFINITY;
     // The default per-atom cap of 0.2 shortens the early DIIS steps.
@@ -3594,12 +3672,14 @@ fn c_abi_respects_maxmove_when_initial_step_is_larger() {
         maxmove: 0.1,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let mut out = rgmin_report_t {
         value: 0.0,
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let st = unsafe {
         rgmin_minimize(
@@ -3726,6 +3806,7 @@ fn c_abi_forget_evaluation_costs_one_call_and_keeps_memory() {
         maxmove: 0.2,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let run = |forget: bool| {
         let mut x = [-1.2_f64, 1.0];
@@ -3737,6 +3818,7 @@ fn c_abi_forget_evaluation_costs_one_call_and_keeps_memory() {
             steps: 0,
             grad_norm: 0.0,
             stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
         };
         let mut calls = Vec::new();
         for step in 0..3 {
@@ -3790,6 +3872,7 @@ fn c_abi_lbfgs_neb_guards_toggle_resets_pairs() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -3869,6 +3952,7 @@ fn c_abi_lindh_ff_and_auto_install_and_step() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let numbers = [1i32, 1];
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 6) };
@@ -3892,6 +3976,7 @@ fn c_abi_lindh_ff_and_auto_install_and_step() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
     };
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6) };
     let st = unsafe {
@@ -4031,6 +4116,7 @@ fn c_abi_quickmin_variants_relax_the_bowl() {
         maxmove: 0.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     for variant in [
         RGMIN_QUICKMIN_RGMIN,
@@ -4046,6 +4132,7 @@ fn c_abi_quickmin_variants_relax_the_bowl() {
             steps: 0,
             grad_norm: 0.0,
             stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
         };
         for _ in 0..2000 {
             let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
@@ -4958,6 +5045,7 @@ fn cap_session(
         maxmove: ctrl_maxmove,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     };
     let mut x = [3.0, -4.0, 1.5, 2.5, -2.0, 0.5];
     let mut seen = Vec::new();
@@ -4975,6 +5063,7 @@ fn cap_session(
             steps: 0,
             grad_norm: 0.0,
             stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
         };
         for _ in 0..6 {
             let xt = rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6);
@@ -5075,6 +5164,7 @@ fn c_abi_a_non_binding_maxmove_is_no_cap() {
             maxmove,
             noise_eps: 0.0,
             noise_c: 0.0,
+            require_convergence: 0,
         };
         let mut x = [3.0, -4.0, 1.5, 2.5, -2.0, 0.5];
         let mut out = rgmin_report_t {
@@ -5082,6 +5172,7 @@ fn c_abi_a_non_binding_maxmove_is_no_cap() {
             steps: 0,
             grad_norm: 0.0,
             stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
         };
         let st = unsafe {
             let xt = rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6);
@@ -5158,6 +5249,7 @@ fn gromacs_steep_runs_and_reports_machine_precision_across_c_abi() {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+        converged: 0,
     };
     let st = unsafe {
         let xt = rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 6);
@@ -5286,6 +5378,7 @@ fn gromacs_cg_two_steps_across_c_abi(nstcgsteep: Option<u32>) -> [f64; 3] {
         steps: 0,
         grad_norm: 0.0,
         stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+        converged: 0,
     };
     unsafe {
         let solver = rgmin_solver_create(rgmin_method_t::RGMIN_GROMACS_CG, &ctrl, 3);

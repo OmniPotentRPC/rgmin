@@ -81,6 +81,7 @@ fn main() {
             steps: 0,
             grad_norm: 0.0,
             stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
         };
         let st = unsafe {
             rgmin_minimize(
