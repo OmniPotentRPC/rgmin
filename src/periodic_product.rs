@@ -349,6 +349,36 @@ fn wilkinson_shift(matrix: &[Complex], width: usize, active: usize) -> Complex {
     }
 }
 
+/// Stalled iterations between ad-hoc shifts, as in LAPACK's `zlahqr`.
+const EXCEPTIONAL_SHIFT_PERIOD: usize = 10;
+
+/// Shift that breaks a stall of the Wilkinson shift, such as the zero
+/// shift of a unitary Hessenberg matrix whose trailing 2 by 2 block is zero.
+///
+/// The shift moves off the diagonal by three quarters of a subdiagonal
+/// modulus, alternating between the top and the bottom of the block so that
+/// repeated stalls do not retry the same value.
+fn exceptional_shift(
+    matrix: &[Complex],
+    width: usize,
+    low: usize,
+    high: usize,
+    stalled: usize,
+) -> Complex {
+    let precision = matrix[0].prec().0;
+    let top = (stalled / EXCEPTIONAL_SHIFT_PERIOD) % 2 == 1;
+    let (anchor, coupling) = if top {
+        (low, matrix[(low + 1) * width + low].modulus())
+    } else {
+        (high - 1, matrix[(high - 1) * width + high - 2].modulus())
+    };
+    let mut offset = coupling;
+    offset *= Float::with_val(precision, 0.75);
+    let mut shift = matrix[anchor * width + anchor].clone();
+    *shift.mut_real() += &offset;
+    shift
+}
+
 fn iteration_limit(precision: u32, width: usize) -> Result<usize, PeriodicProductError> {
     usize::try_from(precision)
         .ok()
@@ -366,6 +396,8 @@ fn eigenvalues_with_limit_unchecked(
     hessenberg(&mut matrix, width);
     let mut high = width;
     let mut iterations = 0usize;
+    let mut block = (0usize, width);
+    let mut stalled = 0usize;
     let exponent =
         i32::try_from(precision).map_err(|_| PeriodicProductError::InvalidConfiguration)?;
     let tolerance = Float::with_val(precision, 2).pow(1 - exponent);
@@ -378,8 +410,16 @@ fn eigenvalues_with_limit_unchecked(
         if iterations == limit {
             return Err(PeriodicProductError::NoConvergence { iterations });
         }
+        if block != (low, high) {
+            block = (low, high);
+            stalled = 0;
+        }
         let size = high - low;
-        let shift = wilkinson_shift(&matrix, width, high);
+        let shift = if stalled > 0 && stalled % EXCEPTIONAL_SHIFT_PERIOD == 0 {
+            exceptional_shift(&matrix, width, low, high, stalled)
+        } else {
+            wilkinson_shift(&matrix, width, high)
+        };
         let mut shifted = vec![complex(precision, 0.0); size * size];
         for row in 0..size {
             for column in 0..size {
@@ -406,6 +446,7 @@ fn eigenvalues_with_limit_unchecked(
             }
         }
         iterations += 1;
+        stalled += 1;
     }
     let values = (0..width)
         .map(|diagonal| matrix[diagonal * width + diagonal].clone())
@@ -427,6 +468,9 @@ fn active_block_start(
         let subdiagonal = matrix[index].modulus();
         let mut scale = matrix[(row - 1) * width + row - 1].modulus();
         scale += matrix[row * width + row].modulus();
+        if scale == 0 {
+            scale = matrix[(row - 1) * width + row].modulus();
+        }
         if subdiagonal == 0
             || (scale > 0 && subdiagonal <= Float::with_val(precision, tolerance * &scale))
         {
@@ -724,6 +768,32 @@ mod tests {
             for (value, wanted) in exponents.iter().zip(expected) {
                 assert!((value - wanted).abs() < 1e-12, "{exponents:?}");
             }
+        }
+    }
+
+    #[test]
+    fn cyclic_orthogonal_matrix_with_a_zero_trailing_block_converges() {
+        for width in [4usize, 6] {
+            let mut cyclic = vec![0.0; width * width];
+            for row in 1..width {
+                cyclic[row * width + row - 1] = 1.0;
+            }
+            cyclic[width - 1] = -1.0;
+            let got = periodic_product_spectrum(&[cyclic], width, 128).expect("cyclic spectrum");
+            assert!(got.qr_iterations < 200, "{}", got.qr_iterations);
+            let mut arguments: Vec<_> =
+                got.multipliers.iter().map(|value| value.argument).collect();
+            arguments.sort_by(f64::total_cmp);
+            let step = std::f64::consts::PI / width as f64;
+            for (index, value) in arguments.iter().enumerate() {
+                let wanted = (2.0 * index as f64 + 1.0 - width as f64) * step;
+                assert!((value - wanted).abs() < 1e-12, "{arguments:?}");
+            }
+            assert!(
+                got.multipliers
+                    .iter()
+                    .all(|value| value.log_modulus.abs() < 1e-12)
+            );
         }
     }
 
