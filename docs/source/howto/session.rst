@@ -225,3 +225,19 @@ Scripts that want a cold-start solve to ``gtol`` still call
 ``rgmin_minimize`` / ``minimize_method``. Hopping chains that own the
 pair history hold ``Lbfgs`` directly (see
 :doc:`embed in anneal <embed-anneal>`).
+
+Strict convergence
+~~~~~~~~~~~~~~~~~~
+
+``Control::with_require_convergence(true)`` makes ``Solver::run``,
+``Solver::run_gauged``, a zero iteration budget, and a spent budget
+return ``Err(Error::NotConverged(Box<Report>))`` when the gradient
+norm is not below ``gtol``. The boxed report is the terminal point.
+``Report.converged`` is ``grad_norm < gtol``, the comparison every driver
+uses to stop. The default is off, so the same stops stay ``Ok``.
+
+A strict run ends early as ``StepTolerance`` only when an accepted step
+leaves the point unchanged and the next iteration would repeat it. A
+rejected trust region trial or a rejected adaptive step changes the
+radius or the step length, so it is not a stall and the run goes on.
+A run that converges by default converges identically when strict.

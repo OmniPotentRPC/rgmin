@@ -14,6 +14,8 @@ CamelCase spellings are aliases of the same values.
 =backward_error_floor(value, x)= is the first-order stationarity
 floor =n * eps * (1 + |value| + sum |x_i|)=.
 =NumericalError= is an =ArithmeticError=.
+=NotConverged= is a =RuntimeError= with a =report= attribute holding
+the terminal =Report=.
 =SolverConfig(method="lbfgs", **options)= validates options.
 =Solver(n, config)= is the session. =step(f_and_grad, x)= takes one
 iteration. =step_hess(f_and_grad, hessian, x)= is the same for Newton,
@@ -22,10 +24,12 @@ RFO, and dogleg.
 =(report, x)=. =x0= must already be a contiguous float64 vector.
 An =lbfgs= run that spends its budget with =x= unmoved stops on
 =LINE_SEARCH=, as the C =rgmin_minimize= does, not on =BUDGET=.
-=error_on_unmet= and =backward_polish= are flags and default to
-off. =error_on_unmet= raises =StopUnmetError= when the run stops on
-=BUDGET=, =LINE_SEARCH=, or =POLISH_UNMET=. It is a =RuntimeError=
-whose =report= attribute is the =Report= of the stop.
+=require_convergence=, =error_on_unmet=, and =backward_polish= are flags
+and default to off. =require_convergence= raises =NotConverged= when the
+gradient norm is not below =gtol=. =error_on_unmet= raises
+=StopUnmetError= when the run stops on =BUDGET=, =LINE_SEARCH=, or
+=POLISH_UNMET=. It is a =RuntimeError= whose =report= attribute is the
+=Report= of the stop.
 =backward_polish= is stored on the session. This step loop does not form a Hessian, so
 the polish itself is the C =rgmin_minimize_hess_opts= and
 =rgmin_minimize_hvp_opts= entries.
@@ -42,7 +46,7 @@ no line search, and any kind but =wolfe= on =lbfgs=.
 * Two packages, one import name
 
 Both packages install the import package =rgmin=, so an environment holds one of them.
-The PyPI wheel (the repository root, nanobind) has =SolverConfig=, =Solver=, =minimize=, =Report=, =Stop=, =Method= and =rgmin.ase=.
+The PyPI wheel (the repository root, nanobind) has =SolverConfig=, =Solver=, =minimize=, =Report=, =Stop=, =Method=, =NotConverged= and =rgmin.ase=.
 It has no manifolds, no =Session= and no =lowest_eigenpairs=.
 The maturin package under =python/= is not on PyPI and has =Session=, =LineSearch=, =LbfgsPairs=, =Stiefel=, =SPD=, =Product=, =lowest_eigenpairs= and =rgmin.optimize=.
 @@rst::doc:`../howto/install`@@ shows how to build each one.
@@ -76,6 +80,7 @@ Those differ from the Rust =Control::default= (=gtol= 1e-5, =istep= 1) and from 
 | =cautious_eps=, =cautious_alpha= | float, set together                    | unset   | Li-Fukushima filter: a pair is dropped when s.y < eps * norm(s)^2 * norm(g)^alpha. |
 | =noise_eps=, =noise_c= | float                                            | 0, 0    | Gradient noise floor. =noise_eps= <= 0 leaves it off, and =noise_c= <= 0 selects 3. |
 | =objective_roundoff= | float                                              | unset   | Relative value window of the approximate Wolfe test, in place of the default four epsilon. Zero permits no rise, and a negative or non-finite value raises =ValueError=. |
+| =require_convergence= | bool                                              | False   | Raise =NotConverged= from =minimize= when the gradient norm is not below =gtol=. A first-order session step that took no move and left its state unchanged reports =STEP_TOLERANCE=. |
 
 A count must be an int, and a flag must be a bool.
 A kind or constant that the method ignores raises =ValueError= rather than being dropped.
@@ -130,6 +135,9 @@ library. =Solver.step= on Newton, RFO, or dogleg, with no Hessian
 callback, raises =RuntimeError=.
 =NumericalError= is an =ArithmeticError=. It means the value or the
 gradient was not finite.
+=NotConverged= is a =RuntimeError= raised by =minimize= when
+=require_convergence=True= and the final gradient norm is not below
+=gtol=. =error.report= is the terminal =Report=.
 An exception raised inside the objective is raised again on the
 calling thread.
 
