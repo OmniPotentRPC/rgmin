@@ -35,6 +35,10 @@ pub mod method;
 /// Nonlinear conjugate-gradient conjugacy and restart.
 pub mod nlcg;
 
+/// Complex-contour inverse Laplace transforms (fixed-Talbot and Weeks/Laguerre)
+/// and orthonormal Laguerre series evaluation.
+pub mod inverse_laplace;
+
 mod accept;
 mod adam;
 mod bb;
