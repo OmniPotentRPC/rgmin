@@ -4492,6 +4492,10 @@ impl Solver {
             ) {
                 beta = 0.0;
             }
+            // `d_old` is the unscaled direction (`nlcg_steepest(..., 1.0)`,
+            // then the same combination). `Accept::Step` applies `istep`
+            // when it walks the unit direction, so scaling only `-z` here
+            // would inflate `beta` by `1/istep`.
             *dir = Array1::from_iter(z_new.iter().zip(d_old.iter()).map(|(z, d)| -z + beta * d));
             let gd = crate::vecops::dot(new_grad.view(), dir.view());
             if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {

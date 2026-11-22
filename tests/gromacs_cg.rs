@@ -341,6 +341,52 @@ fn a_conjugate_direction_that_does_not_descend_falls_back_to_steepest_descent() 
     assert!(report.value < 0.125);
 }
 
+// `Accept::Step` walks `istep` times the unit direction. The direction
+// stored for Polak-Ribiere stays unscaled, so the next step is
+// `istep * unit(-g + beta d)` even when `istep` is not 1.
+//
+// From g0 = [1, 0, 0] and g1 = [0.5, 0.75, 0], beta = g1·(g1-g0)/||g0||^2
+// = 0.3125 and d0 = -g0, so -g1 + beta d0 = [-0.8125, -0.75, 0]. Its unit
+// vector is [-0.7348034446274879, -0.6782801027330658, 0], which rounds to
+// [-0.7348, -0.6783, 0]. Scaling only -g1 by the default istep 0.01 would
+// instead unit-normalize to about [-0.9997, -0.0236, 0]. Step 0 is a
+// multiple of the default `nstcgsteep`, which would zero beta, so the
+// period is off and this factor is the one the cap sees.
+#[test]
+fn gromacs_cg_direct_accept_takes_unit_scaled_steps() {
+    let istep = 0.01;
+    let g0 = array![1.0, 0.0, 0.0];
+    let g1 = array![0.5, 0.75, 0.0];
+    let objective = Oracle::unbounded(3, move |x: ArrayView1<f64>| {
+        let grad = if x[0] == 0.0 && x[1] == 0.0 && x[2] == 0.0 {
+            g0.clone()
+        } else {
+            g1.clone()
+        };
+        (0.0, grad)
+    });
+    let mut x = array![0.0, 0.0, 0.0];
+    let mut solver = Solver::new(Method::GromacsCg, control(istep, 1e-14, 10), 3);
+    solver.set_accept(Accept::Step);
+    solver
+        .set_gromacs_cg_config(GromacsCgConfig::default().with_nstcgsteep(0))
+        .unwrap();
+
+    solver.step(&objective, &mut x).unwrap();
+    assert_abs_diff_eq!(x[0], -istep, epsilon = 1e-15);
+    assert_abs_diff_eq!(x[1], 0.0, epsilon = 1e-15);
+    assert_abs_diff_eq!(x[2], 0.0, epsilon = 1e-15);
+    assert_eq!(solver.nlcg_descent_fallbacks(), 0);
+
+    let x1 = x.clone();
+    solver.step(&objective, &mut x).unwrap();
+    let taken = (&x - &x1) / istep;
+    assert_abs_diff_eq!(taken[0], -0.7348034446274879, epsilon = 1e-12);
+    assert_abs_diff_eq!(taken[1], -0.6782801027330658, epsilon = 1e-12);
+    assert_abs_diff_eq!(taken[2], 0.0, epsilon = 1e-15);
+    assert_eq!(solver.nlcg_descent_fallbacks(), 0);
+}
+
 #[test]
 fn accept_step_takes_the_session_step_length_not_a_unit_step() {
     let bowl = Oracle::unbounded(3, |x: ArrayView1<f64>| (0.5 * x.dot(&x), x.to_owned()));
