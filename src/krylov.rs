@@ -888,7 +888,8 @@ where
             let converged =
                 absolute_residual <= options.relative_tolerance * state.record.right_hand_side_norm;
             let exhausted = column_index + 1 == budget || column_index + 1 == dimension;
-            if converged || exhausted || subdiagonal == 0.0 {
+            let stagnated = subdiagonal == 0.0;
+            if converged || exhausted || stagnated {
                 let answer =
                     linear_combination(&coefficients, &state.preconditioned_basis, dimension);
                 if !finite(&answer) {
@@ -898,7 +899,7 @@ where
                     solution: answer,
                     status: if converged {
                         GmresStatus::Converged
-                    } else if subdiagonal == 0.0 {
+                    } else if stagnated {
                         GmresStatus::Stagnated
                     } else {
                         GmresStatus::Exhausted
@@ -1871,5 +1872,70 @@ mod tests {
             accepted.map(|row| (row.iteration, row.relative_residual)),
             Ok((3, 2.0))
         );
+    }
+
+    struct Scale(f64);
+
+    impl Preconditioner for Scale {
+        type Error = core::convert::Infallible;
+
+        fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {
+            for (slot, value) in output.iter_mut().zip(input) {
+                *slot = self.0 * value;
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn block_stagnation_refuses_a_non_finite_solution_like_the_scalar_solver()
+    -> Result<(), &'static str> {
+        let shrink = |input: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
+            for (slot, value) in output.iter_mut().zip(input) {
+                *slot = value / 1e300 / 2.9e11;
+            }
+            Ok(())
+        };
+        let right_hand_side = vec![1.0, 0.0, 0.0];
+        let options = GmresOptions::unrestarted(f64::MIN_POSITIVE);
+        let scalar = gmres_right(
+            &mut { shrink },
+            &mut Scale(1e308),
+            &right_hand_side,
+            options,
+            &mut NoObserver,
+        );
+        let scalar_record = match scalar {
+            Err(GmresFailure::Refused { reason, record }) => {
+                assert_eq!(reason, KrylovRefusal::NonFinite);
+                record
+            }
+            Ok(run) => {
+                assert_eq!(run.status, GmresStatus::Stagnated);
+                return Err("scalar stagnation returned a non-finite solution");
+            }
+            _ => return Err("scalar stagnation refused for the wrong reason"),
+        };
+        assert_eq!(scalar_record.iterations.len(), 1);
+
+        let block = gmres_right_block(
+            &mut { shrink },
+            &mut [Scale(1e308)],
+            &[right_hand_side],
+            options,
+            &mut [NoObserver],
+        );
+        match block {
+            Err(GmresFailure::BlockRefused { reason, record, .. }) => {
+                assert_eq!(reason, KrylovRefusal::NonFinite);
+                assert_eq!(record, scalar_record);
+            }
+            Ok(runs) => {
+                assert!(runs[0].solution.iter().any(|value| !value.is_finite()));
+                return Err("block stagnation returned a non-finite solution");
+            }
+            _ => return Err("block stagnation refused for the wrong reason"),
+        }
+        Ok(())
     }
 }
