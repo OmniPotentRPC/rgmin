@@ -353,6 +353,41 @@ fn accept_step_takes_the_session_step_length_not_a_unit_step() {
 }
 
 #[test]
+fn accept_step_follows_unscaled_polak_ribiere_direction() {
+    let quad = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+        let energy = 0.5 * (x[0] * x[0] + 400.0 * x[1] * x[1]);
+        (energy, array![x[0], 400.0 * x[1], 0.0])
+    });
+    let istep = 0.01_f64;
+    let mut x = array![1.0_f64, 0.005, 0.0];
+    let mut solver = Solver::new(Method::GromacsCg, control(istep, 1e-14, 10), 3);
+    solver
+        .set_gromacs_cg_config(GromacsCgConfig::default().with_nstcgsteep(0))
+        .unwrap();
+    solver.set_accept(Accept::Step);
+
+    let g0 = array![1.0_f64, 2.0, 0.0];
+    let d0 = -&g0;
+    let u0 = &d0 / d0.dot(&d0).sqrt();
+
+    solver.step(&quad, &mut x).unwrap();
+    let x1 = array![1.0_f64, 0.005, 0.0] + istep * &u0;
+    assert_abs_diff_eq!(x[0], x1[0], epsilon = 1e-12);
+    assert_abs_diff_eq!(x[1], x1[1], epsilon = 1e-12);
+
+    let g1 = array![x1[0], 400.0 * x1[1], 0.0];
+    let beta = g1.dot(&(&g1 - &g0)) / g0.dot(&g0);
+    let d1 = -&g1 + beta * &d0;
+    let u1 = &d1 / d1.dot(&d1).sqrt();
+    let x2 = &x1 + &(istep * &u1);
+
+    solver.step(&quad, &mut x).unwrap();
+    assert_abs_diff_eq!(x[0], x2[0], epsilon = 1e-12);
+    assert_abs_diff_eq!(x[1], x2[1], epsilon = 1e-12);
+    assert_abs_diff_eq!(x[2], 0.0, epsilon = 1e-15);
+}
+
+#[test]
 fn a_curved_manifold_takes_the_opening_step_length_not_a_unit_step() {
     let height = Oracle::unbounded(3, |x: ArrayView1<f64>| (x[2], array![0.0, 0.0, 1.0]));
     let mut x = array![1.0, 0.0, 0.0];
