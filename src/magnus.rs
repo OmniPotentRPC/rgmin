@@ -217,6 +217,9 @@ pub fn expm(a: &[f64], m: usize) -> Result<Exponential, MagnusError> {
     {
         return Err(MagnusError::Shape("the matrix is not m x m"));
     }
+    if a.iter().any(|v| !v.is_finite()) {
+        return Err(MagnusError::NonFinite);
+    }
     let norm = norm1(a, m);
     if !norm.is_finite() {
         return Err(MagnusError::NonFinite);
@@ -302,7 +305,12 @@ fn identity(m: usize) -> Vec<f64> {
 fn norm1(a: &[f64], m: usize) -> f64 {
     (0..m)
         .map(|column| (0..m).map(|row| a[row * m + column].abs()).sum::<f64>())
-        .fold(0.0, f64::max)
+        .fold(
+            0.0,
+            |acc, col| {
+                if col > acc || col.is_nan() { col } else { acc }
+            },
+        )
 }
 
 /// `a^{-1} b` by partial-pivoting LU, both row-major `m x m`.
@@ -494,6 +502,11 @@ mod tests {
             magnus_step([&a, &bad, &a], 0.1, 2).unwrap_err(),
             MagnusError::NonFinite
         );
+        assert_eq!(expm(&bad, 2).unwrap_err(), MagnusError::NonFinite);
+        let huge_nan = [f64::NAN, 0.0, 0.0, 1.0e308];
+        assert!(norm1(&huge_nan, 2).is_nan());
+        assert!(norm1(&[1.0e308, 0.0, 0.0, f64::NAN], 2).is_nan());
+        assert_eq!(expm(&huge_nan, 2).unwrap_err(), MagnusError::NonFinite);
         assert_eq!(
             expm(&[f64::INFINITY, 0.0, 0.0, 0.0], 2).unwrap_err(),
             MagnusError::NonFinite
