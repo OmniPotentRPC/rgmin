@@ -37,6 +37,10 @@ use crate::error::{Error, Result};
 use crate::vecops::{axpy, dot, nrm2};
 
 /// Controls of one [`fgmres`] solve.
+///
+/// Non-exhaustive: start from [`Self::default`] and chain the `with_*`
+/// setters.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Fgmres {
     /// Stop when the recomputed `||b - A x||` is at most `rtol * ||b||`.
@@ -55,6 +59,24 @@ pub struct Fgmres {
     /// proves nothing about the next: its residual direction differs and a
     /// flexible preconditioner may differ too.
     pub stagnation: Option<NonZeroUsize>,
+}
+
+with_setters!(Fgmres {
+    with_rtol => rtol: val f64,
+    with_restart => restart: val usize,
+    with_max_products => max_products: val usize,
+    with_stagnation => stagnation: opt NonZeroUsize,
+});
+
+impl Default for Fgmres {
+    fn default() -> Self {
+        Self {
+            rtol: 1e-8,
+            restart: 30,
+            max_products: 1000,
+            stagnation: None,
+        }
+    }
 }
 
 /// How an [`fgmres`] solve ended.
