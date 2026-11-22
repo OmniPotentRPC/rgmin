@@ -759,7 +759,7 @@ fn identity_csc(n: usize) -> (Vec<HighsInt>, Vec<HighsInt>, Vec<f64>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{FEASIBLE_STEP_TIME_LIMIT, PROJECTION_TIME_LIMIT, identity_csc};
+    use super::{FEASIBLE_STEP_TIME_LIMIT, PROJECTION_TIME_LIMIT, identity_csc, set_time_limit};
     use crate::HighsOptions;
 
     #[test]
@@ -786,5 +786,38 @@ mod tests {
             cleared.time_limit_or(FEASIBLE_STEP_TIME_LIMIT).unwrap(),
             1.0
         );
+    }
+
+    /// Read `time_limit` back from the model HiGHS holds.
+    fn highs_time_limit(model: &mut highs::Model) -> f64 {
+        let mut value = f64::NAN;
+        let status = unsafe {
+            highs_sys::Highs_getDoubleOptionValue(
+                model.as_mut_ptr(),
+                c"time_limit".as_ptr(),
+                &mut value,
+            )
+        };
+        assert_eq!(status, highs_sys::STATUS_OK);
+        value
+    }
+
+    #[test]
+    fn a_valid_time_limit_override_reaches_highs() {
+        let mut problem = highs::RowProblem::new();
+        problem.add_column(1.0, 0.0..=1.0);
+        let mut model = problem
+            .try_optimise(highs::Sense::Minimise)
+            .expect("one-column model");
+        let options = HighsOptions::default();
+
+        for default in [PROJECTION_TIME_LIMIT, FEASIBLE_STEP_TIME_LIMIT] {
+            set_time_limit(&mut model, &options, default).unwrap();
+            assert_eq!(highs_time_limit(&mut model), default);
+
+            let set = options.with_time_limit(2.5);
+            set_time_limit(&mut model, &set, default).unwrap();
+            assert_eq!(highs_time_limit(&mut model), 2.5);
+        }
     }
 }
