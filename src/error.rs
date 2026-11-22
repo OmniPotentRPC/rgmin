@@ -353,6 +353,12 @@ pub enum Error {
         /// What the routine refused.
         what: &'static str,
     },
+    /// AAA rejected its samples, its weights, or its pole search.
+    #[error("aaa: {what}")]
+    Aaa {
+        /// What was refused.
+        what: &'static str,
+    },
 }
 
 /// Result alias for this crate.
