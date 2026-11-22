@@ -1,5 +1,5 @@
 #+TITLE: Quick-min
-#+OPTIONS: toc:nil num:nil
+#+OPTIONS: toc:nil num:nil author:nil
 
 Quick-min keeps a velocity and damps it by a projection before an
 explicit Euler step. Write ~F = -∇f~ and ~Δt~ for the time step. The

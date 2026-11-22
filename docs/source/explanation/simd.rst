@@ -2,7 +2,6 @@
 SIMD paths and dispatch
 =======================
 
-    :Author: Ubuntu
 
 Contiguous ``dot``, ``sum``, ``nrm2`` (via ``dot``), ``axpy``, ``scale``,
 ``mul_assign``, and ``div_assign_floor`` use one reduction shape.

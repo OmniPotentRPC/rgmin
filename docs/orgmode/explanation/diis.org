@@ -1,5 +1,5 @@
 #+TITLE: Pulay residual subspace
-#+OPTIONS: toc:nil num:nil
+#+OPTIONS: toc:nil num:nil author:nil
 
 The step stores positions and gradients, oldest first, and drops
 pairs past ~memory~. The coefficients ~c~ solve

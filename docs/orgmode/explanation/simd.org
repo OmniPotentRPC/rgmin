@@ -1,5 +1,5 @@
 #+TITLE: SIMD paths and dispatch
-#+OPTIONS: toc:nil num:nil
+#+OPTIONS: toc:nil num:nil author:nil
 
 Contiguous ~dot~, ~sum~, ~nrm2~ (via ~dot~), ~axpy~, ~scale~,
 ~mul_assign~, and ~div_assign_floor~ use one reduction shape.
