@@ -57,10 +57,10 @@ Saddle, band, and IRC sessions live in ~rgsaddle~. They consume this
 crate's ~Solver~; they do not grow a second optimizer.
 
 #+begin_src bash
-cargo add rgmin@0.6 ndarray@0.17
+cargo add rgmin@0.8 ndarray@0.17
 #+end_src
 
-That installs the 0.6 release on Rust 1.88 or newer.
+That installs the 0.8 release on Rust 1.88 or newer.
 @@rst::doc:`howto/install`@@ covers the features, the ~develop~ branch, the C library from cargo-c or Meson, the Python packages and the LAMMPS plugin.
 
 #+begin_export rst

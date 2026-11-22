@@ -9,7 +9,7 @@ Get the entry
 ~~~~~~~~~~~~~
 
 ``CITATION.cff`` at the top of the repository is the citation record, in the Citation File Format (CFF).
-It names version 0.6.0, dated 13 November 2026.
+It names version 0.8.0, dated 22 November 2026.
 cffconvert turns it into BibTeX.
 Run it at the top of a checkout:
 
@@ -46,7 +46,7 @@ With the release from crates.io, it prints:
 
 ::
 
-    rgmin v0.6.0
+    rgmin v0.8.0
 
 With the ``develop`` branch, the short commit follows the ``#``:
 
@@ -75,7 +75,7 @@ Put the version in the entry
 Give the entry a key, and add the version.
 The ``plain`` style of BibTeX prints a ``note`` field, but it drops ``version`` and ``url``, so put the version in ``note``.
 Braces around ``rgmin`` in the title stop a style from capitalizing the name.
-For the 0.6.0 release:
+For the 0.8.0 release:
 
 .. code:: bibtex
 
@@ -83,7 +83,7 @@ For the 0.6.0 release:
     author = {Goswami, Rohit},
     title = {{rgmin}: local minimization over eindir differentiable objectives},
     url = {https://github.com/OmniPotentRPC/rgmin},
-    note = {Version 0.6.0},
+    note = {Version 0.8.0},
     year = {2026}
     }
 

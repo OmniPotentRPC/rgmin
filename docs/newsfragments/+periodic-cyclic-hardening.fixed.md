@@ -1,1 +1,0 @@
-The bordered cyclic solver now rejects invalid border dimensions, non-finite inputs, and overflowing or non-finite norm estimates with specific errors instead of returning misleading determinant or singularity results.

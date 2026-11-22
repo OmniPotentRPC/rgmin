@@ -13,7 +13,7 @@ Rust 1.88 or newer, and a new Cargo project with the release from crates.io:
 #+begin_src bash
 cargo new rosenbrock
 cd rosenbrock
-cargo add rgmin@0.6 ndarray@0.17 eindir-core@0.6
+cargo add rgmin@0.8 ndarray@0.17 eindir-core@0.6
 #+end_src
 
 Each sample below is a whole program. Put it in ~src/main.rs~ and run it with ~cargo run~.

@@ -1,1 +1,0 @@
-The bordered cyclic determinant in `rgmin::periodic` now scales `I - T_0` as one block for a single period. A transfer matrix with a unit diagonal entry and tiny couplings, such as `[[1, 1e-160], [1e-160, 2]]`, used to overflow two separately scaled terms into NaN. A non-finite triangular diagonal now returns a non-finite error instead of a NaN log-determinant.

@@ -3,7 +3,7 @@
 Install rgmin
 -------------
 
-rgmin 0.6.0 is a Rust crate with a C ABI.
+rgmin 0.8.0 is a Rust crate with a C ABI.
 It needs Rust 1.88 or newer, the ``rust-version`` in ``Cargo.toml``.
 This page covers the crate, the C library from cargo-c or Meson, the two Python packages and the LAMMPS plugin.
 
@@ -14,7 +14,7 @@ Add rgmin, the ``ndarray`` it takes, and ``eindir-core`` for the objective trait
 
 .. code:: bash
 
-    cargo add rgmin@0.6 ndarray@0.17 eindir-core@0.6
+    cargo add rgmin@0.8 ndarray@0.17 eindir-core@0.6
 
 rgmin takes ``eindir-core`` 0.6 from crates.io too, so Cargo builds one copy of it.
 
@@ -52,7 +52,7 @@ For example:
 
 .. code:: bash
 
-    cargo add rgmin@0.6 --features highs
+    cargo add rgmin@0.8 --features highs
 
 The ``slepc``, ``primme``, ``chase`` and ``libkrylov`` features each look for a library.
 They try pkg-config first.
