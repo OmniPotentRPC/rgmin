@@ -864,7 +864,7 @@ where
             let converged =
                 absolute_residual <= options.relative_tolerance * state.record.right_hand_side_norm;
             let exhausted = column_index + 1 == budget || column_index + 1 == dimension;
-            if converged || exhausted {
+            if converged || exhausted || subdiagonal == 0.0 {
                 let answer =
                     linear_combination(&coefficients, &state.preconditioned_basis, dimension);
                 if !finite(&answer) {
@@ -879,16 +879,6 @@ where
                     } else {
                         GmresStatus::Exhausted
                     },
-                    record: state.record.clone(),
-                });
-            } else if subdiagonal == 0.0 {
-                state.run = Some(GmresRun {
-                    solution: linear_combination(
-                        &coefficients,
-                        &state.preconditioned_basis,
-                        dimension,
-                    ),
-                    status: GmresStatus::Stagnated,
                     record: state.record.clone(),
                 });
             } else if !subdiagonal.is_finite() {
@@ -1524,6 +1514,100 @@ mod tests {
             }
             _ => return Err("block preconditioner failure lost sibling records"),
         }
+        Ok(())
+    }
+
+    struct TinyOperator;
+
+    impl LinearOperator for TinyOperator {
+        type Error = core::convert::Infallible;
+
+        fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {
+            for (slot, value) in output.iter_mut().zip(input) {
+                *slot = 3e-310 * value;
+            }
+            Ok(())
+        }
+    }
+
+    struct Amplify;
+
+    impl Preconditioner for Amplify {
+        type Error = core::convert::Infallible;
+
+        fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {
+            for (slot, value) in output.iter_mut().zip(input) {
+                *slot = 1e10 * value;
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn stagnation_with_a_non_finite_iterate_is_refused_by_scalar_and_block()
+    -> Result<(), &'static str> {
+        let options = GmresOptions::unrestarted(1e-16);
+        match gmres_right(
+            &mut TinyOperator,
+            &mut Amplify,
+            &[1.0, 1.0],
+            options,
+            &mut NoObserver,
+        ) {
+            Err(GmresFailure::Refused {
+                reason: KrylovRefusal::NonFinite,
+                record,
+            }) => {
+                assert_eq!(record.iterations.len(), 1);
+                assert!(record.iterations[0].relative_residual > options.relative_tolerance);
+            }
+            _ => return Err("scalar path did not refuse a non-finite iterate"),
+        }
+        match gmres_right_block(
+            &mut TinyOperator,
+            &mut [Amplify, Amplify],
+            &[vec![1.0, 1.0], vec![2.0, 2.0]],
+            options,
+            &mut [NoObserver, NoObserver],
+        ) {
+            Err(GmresFailure::BlockRefused {
+                reason: KrylovRefusal::NonFinite,
+                record,
+                sibling_records,
+            }) => {
+                assert_eq!(record.iterations.len(), 1);
+                assert!(record.iterations[0].relative_residual > options.relative_tolerance);
+                assert_eq!(sibling_records.len(), 1);
+            }
+            Ok(runs) => {
+                return if runs.iter().any(|run| !finite(&run.solution)) {
+                    Err("block path returned a non-finite solution")
+                } else {
+                    Err("block path accepted a system the scalar path refused")
+                };
+            }
+            Err(_) => return Err("block path refused with the wrong error"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn finite_block_stagnation_is_still_reported() -> Result<(), &'static str> {
+        let mut operator = Diagonal {
+            values: vec![0.3, 0.3],
+            scalar_calls: 0,
+            batch_calls: 0,
+        };
+        let runs = gmres_right_block(
+            &mut operator,
+            &mut [Identity],
+            &[vec![1.0, 2.0]],
+            GmresOptions::unrestarted(1e-16),
+            &mut [NoObserver],
+        )
+        .map_err(|_| "finite stagnation was refused")?;
+        assert_eq!(runs[0].status, GmresStatus::Stagnated);
+        assert!(finite(&runs[0].solution));
         Ok(())
     }
 }
