@@ -938,4 +938,365 @@ mod tests {
         assert_eq!(ew.forcing(1.0, Some((0.5, 0.9)), 1e-10)?, None);
         Ok(())
     }
+
+    #[test]
+    fn fgmres_config_defaults_and_setters() {
+        let cfg = Fgmres::default()
+            .with_rtol(1e-10)
+            .with_restart(12)
+            .with_max_products(50)
+            .with_stagnation(NonZeroUsize::new(3));
+        assert_eq!(cfg.rtol, 1e-10);
+        assert_eq!(cfg.restart, 12);
+        assert_eq!(cfg.max_products, 50);
+        assert_eq!(cfg.stagnation, NonZeroUsize::new(3));
+        let cleared = cfg.with_stagnation(None);
+        assert_eq!(cleared.stagnation, None);
+    }
+
+    #[test]
+    fn breakdown_reports_true_residual_and_returns_best_iterate() -> Result<()> {
+        // j = 0 zero operator: radius == 0.0 must not observe a false 0.0 residual.
+        let b = rhs(4);
+        let mut steps = Vec::new();
+        let zero_op = fgmres(
+            |v| Ok::<_, Error>(Array1::zeros(v.len())),
+            |v| Ok(v.to_owned()),
+            b.view(),
+            None,
+            &config(1e-8, 4, 10),
+            |s| steps.push(*s),
+        )?;
+        assert_eq!(zero_op.status, FgmresStatus::Breakdown);
+        assert_eq!(zero_op.x, Array1::zeros(4));
+        assert_eq!(zero_op.residual, zero_op.rhs_norm);
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].residual, zero_op.rhs_norm);
+        assert!(!steps[1].exact);
+        assert_eq!(steps[1].residual, zero_op.rhs_norm);
+
+        // j = 1 singular operator: radius == 0.0 mid-cycle reports |g[1]|, not 0.0.
+        let sing = Array2::from_diag(&Array1::from_vec(vec![1.0, 0.0]));
+        let b2 = Array1::from_vec(vec![3.0, 4.0]);
+        let mut mid_steps = Vec::new();
+        let mut mid_pre_calls = 0usize;
+        let mid = fgmres(
+            |v| Ok::<_, Error>(sing.dot(&v)),
+            |_| {
+                mid_pre_calls += 1;
+                Ok(if mid_pre_calls == 1 {
+                    Array1::from_vec(vec![1.0, 0.0])
+                } else {
+                    Array1::from_vec(vec![0.0, 1.0])
+                })
+            },
+            b2.view(),
+            None,
+            &config(1e-8, 2, 10),
+            |s| mid_steps.push(*s),
+        )?;
+        assert_eq!(mid.status, FgmresStatus::Breakdown);
+        assert_eq!(mid.x, Array1::zeros(2));
+        assert_eq!(mid.residual, mid.rhs_norm);
+        assert_eq!(mid_steps.len(), 3);
+        assert!(!mid_steps[2].exact);
+        assert_eq!(mid_steps[2].residual, 4.0);
+
+        // Back-substitution overflow in y.
+        let b_big = Array1::from_vec(vec![1e100, 0.0]);
+        let y_overflow = fgmres(
+            |v| Ok::<_, Error>(Array1::from_vec(vec![1e-250 * v[0], 0.0])),
+            |v| Ok(v.to_owned()),
+            b_big.view(),
+            None,
+            &config(1e-8, 2, 10),
+            |_| {},
+        )?;
+        assert_eq!(y_overflow.status, FgmresStatus::Breakdown);
+        assert_eq!(y_overflow.x, Array1::zeros(2));
+        assert_eq!(y_overflow.residual, y_overflow.rhs_norm);
+
+        // Finite y whose axpy update overflows x.
+        let b_mid = Array1::from_vec(vec![1e150, 0.0]);
+        let x_overflow = fgmres(
+            |v| Ok::<_, Error>(Array1::from_vec(vec![1e-200 * v[0], 0.0])),
+            |v| Ok(Array1::from_vec(vec![1e200 * v[0], 0.0])),
+            b_mid.view(),
+            None,
+            &config(1e-8, 2, 10),
+            |_| {},
+        )?;
+        assert_eq!(x_overflow.status, FgmresStatus::Breakdown);
+        assert_eq!(x_overflow.x, Array1::zeros(2));
+        assert_eq!(x_overflow.residual, x_overflow.rhs_norm);
+
+        // nrm2(w) overflow does not poison the basis or emit Error::Oracle.
+        let b_unit = Array1::from_vec(vec![1.0, 0.0]);
+        let w_overflow = fgmres(
+            |v| Ok::<_, Error>(Array1::from_vec(vec![0.0, 1e200 * v[0]])),
+            |v| Ok(v.to_owned()),
+            b_unit.view(),
+            None,
+            &config(1e-8, 2, 10),
+            |_| {},
+        )?;
+        assert_eq!(w_overflow.status, FgmresStatus::Breakdown);
+        assert_eq!(w_overflow.x, Array1::zeros(2));
+        assert_eq!(w_overflow.residual, w_overflow.rhs_norm);
+
+        // nrm2(r) overflow at cycle 2 close returns the earlier best iterate from cycle 1.
+        let b_two = Array1::from_vec(vec![1.0, 1.0]);
+        let mut apply_calls = 0usize;
+        let mut pre_calls = 0usize;
+        let r_overflow = fgmres(
+            |v| {
+                apply_calls += 1;
+                Ok::<_, Error>(if apply_calls <= 3 {
+                    v.to_owned()
+                } else {
+                    Array1::from_vec(vec![1e200, 0.0])
+                })
+            },
+            |_| {
+                pre_calls += 1;
+                Ok(if pre_calls == 1 {
+                    Array1::from_vec(vec![1.0, 0.0])
+                } else {
+                    Array1::from_vec(vec![0.0, 0.5])
+                })
+            },
+            b_two.view(),
+            None,
+            &config(1e-8, 1, 10),
+            |_| {},
+        )?;
+        assert_eq!(r_overflow.status, FgmresStatus::Breakdown);
+        assert!((r_overflow.x[0] - 1.0).abs() < 1e-14 && r_overflow.x[1] == 0.0);
+        assert!((r_overflow.residual - 1.0).abs() < 1e-14);
+
+        // nrm2(r) overflow on initial x0 ends in Breakdown without poisoning the basis.
+        let x0 = Array1::from_vec(vec![1.0, 0.0]);
+        let x0_overflow = fgmres(
+            |_| Ok::<_, Error>(Array1::from_vec(vec![1e200, 0.0])),
+            |v| Ok(v.to_owned()),
+            b_unit.view(),
+            Some(x0.view()),
+            &config(1e-8, 2, 10),
+            |_| {},
+        )?;
+        assert_eq!(x0_overflow.status, FgmresStatus::Breakdown);
+        assert_eq!(x0_overflow.x, x0);
+        assert!(x0_overflow.residual.is_infinite());
+        Ok(())
+    }
+
+    #[test]
+    fn non_finite_rhs_and_x0_are_refused_before_apply() {
+        let valid_rhs = Array1::from_vec(vec![1.0, 2.0]);
+        for bad_rhs in [
+            Array1::from_vec(vec![f64::NAN, 1.0]),
+            Array1::from_vec(vec![f64::INFINITY, 1.0]),
+            Array1::from_vec(vec![f64::NEG_INFINITY, 1.0]),
+            Array1::from_vec(vec![1e200, 0.0]),
+        ] {
+            let mut apply_calls = 0usize;
+            let mut pre_calls = 0usize;
+            let res = fgmres(
+                |v| {
+                    apply_calls += 1;
+                    Ok::<_, Error>(v.to_owned())
+                },
+                |v| {
+                    pre_calls += 1;
+                    Ok(v.to_owned())
+                },
+                bad_rhs.view(),
+                None,
+                &config(1e-8, 2, 10),
+                |_| {},
+            );
+            assert!(matches!(res, Err(Error::Krylov { .. })));
+            assert_eq!((apply_calls, pre_calls), (0, 0));
+        }
+
+        for bad_x0 in [
+            Array1::from_vec(vec![f64::NAN, 0.0]),
+            Array1::from_vec(vec![0.0, f64::INFINITY]),
+            Array1::from_vec(vec![0.0, f64::NEG_INFINITY]),
+            Array1::from_vec(vec![0.0]),
+        ] {
+            let mut apply_calls = 0usize;
+            let mut pre_calls = 0usize;
+            let res = fgmres(
+                |v| {
+                    apply_calls += 1;
+                    Ok::<_, Error>(v.to_owned())
+                },
+                |v| {
+                    pre_calls += 1;
+                    Ok(v.to_owned())
+                },
+                valid_rhs.view(),
+                Some(bad_x0.view()),
+                &config(1e-8, 2, 10),
+                |_| {},
+            );
+            assert!(matches!(res, Err(Error::Krylov { .. })));
+            assert_eq!((apply_calls, pre_calls), (0, 0));
+        }
+    }
+
+    #[test]
+    fn wrong_length_operator_and_preconditioner_are_refused() {
+        let b = rhs(3);
+        let x0 = Array1::from_vec(vec![1.0, 0.0, 0.0]);
+
+        let bad_x0_apply = fgmres(
+            |_| Ok::<_, Error>(Array1::zeros(2)),
+            |v| Ok(v.to_owned()),
+            b.view(),
+            Some(x0.view()),
+            &config(1e-8, 3, 10),
+            |_| {},
+        );
+        assert!(matches!(bad_x0_apply, Err(Error::Krylov { .. })));
+
+        let bad_pre = fgmres(
+            |v| Ok::<_, Error>(v.to_owned()),
+            |_| Ok(Array1::zeros(4)),
+            b.view(),
+            None,
+            &config(1e-8, 3, 10),
+            |_| {},
+        );
+        assert!(matches!(bad_pre, Err(Error::Krylov { .. })));
+
+        let bad_arnoldi_apply = fgmres(
+            |_| Ok::<_, Error>(Array1::zeros(4)),
+            |v| Ok(v.to_owned()),
+            b.view(),
+            None,
+            &config(1e-8, 3, 10),
+            |_| {},
+        );
+        assert!(matches!(bad_arnoldi_apply, Err(Error::Krylov { .. })));
+
+        let mut calls = 0usize;
+        let bad_close_apply = fgmres(
+            |v| {
+                calls += 1;
+                Ok::<_, Error>(if calls == 1 {
+                    Array1::from_vec(vec![v[0], 2.0 * v[1], 3.0 * v[2]])
+                } else {
+                    Array1::zeros(2)
+                })
+            },
+            |v| Ok(v.to_owned()),
+            b.view(),
+            None,
+            &config(1e-8, 1, 10),
+            |_| {},
+        );
+        assert!(matches!(bad_close_apply, Err(Error::Krylov { .. })));
+    }
+
+    #[test]
+    fn eisenstat_walker_forcing_edge_cases() -> Result<()> {
+        for bad in [f64::NAN, -0.5, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(EisenstatWalker::new(bad, 2.0).is_err());
+            assert!(EisenstatWalker::new(0.9, bad).is_err());
+        }
+
+        let ew = EisenstatWalker::new(0.9, 2.0)?;
+        for bad_pos in [f64::NAN, 0.0, -0.0, -1.0, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(matches!(
+                ew.forcing(bad_pos, None, 1e-8),
+                Err(Error::Krylov { .. })
+            ));
+            assert!(matches!(
+                ew.forcing(bad_pos, Some((1.0, 0.5)), 1e-8),
+                Err(Error::Krylov { .. })
+            ));
+            assert!(matches!(
+                ew.forcing(0.5, Some((bad_pos, 0.5)), 1e-8),
+                Err(Error::Krylov { .. })
+            ));
+        }
+        for bad_nonneg in [f64::NAN, -1e-12, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(matches!(
+                ew.forcing(0.5, None, bad_nonneg),
+                Err(Error::Krylov { .. })
+            ));
+            assert!(matches!(
+                ew.forcing(0.5, Some((1.0, 0.5)), bad_nonneg),
+                Err(Error::Krylov { .. })
+            ));
+            assert!(matches!(
+                ew.forcing(0.5, Some((1.0, bad_nonneg)), 1e-8),
+                Err(Error::Krylov { .. })
+            ));
+        }
+
+        assert_eq!(ew.forcing(1e-2, None, 0.0)?, None);
+        let zero_floor = ew
+            .forcing(1e-2, Some((1e-1, 0.0)), 0.0)?
+            .ok_or(Error::Krylov { what: "no forcing" })?;
+        assert_eq!(
+            zero_floor.to_bits(),
+            (0.9f64 * (1e-2f64 / 1e-1).powf(2.0)).to_bits()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stagnated_returns_the_earlier_best_iterate() -> Result<()> {
+        // Cycle 1 reaches x = [1.0, 0.0] with residual 1.0 < sqrt(2).
+        // Cycles 2 and 3 move x away along [0.0, 1.0] while the operator
+        // produces a worse residual (4.0), triggering Stagnated and returning
+        // the cycle-1 best iterate rather than x0 or the final iterate.
+        let b = Array1::from_vec(vec![1.0, 1.0]);
+        let mut apply_calls = 0usize;
+        let mut pre_calls = 0usize;
+        let mut steps = Vec::new();
+        let out = fgmres(
+            |v| {
+                apply_calls += 1;
+                Ok::<_, Error>(if apply_calls <= 3 || apply_calls == 5 {
+                    v.to_owned()
+                } else {
+                    Array1::from_vec(vec![1.0, 5.0])
+                })
+            },
+            |_| {
+                pre_calls += 1;
+                Ok(if pre_calls == 1 {
+                    Array1::from_vec(vec![1.0, 0.0])
+                } else {
+                    Array1::from_vec(vec![0.0, 1.0])
+                })
+            },
+            b.view(),
+            None,
+            &Fgmres::default()
+                .with_rtol(1e-12)
+                .with_restart(1)
+                .with_max_products(12)
+                .with_stagnation(NonZeroUsize::new(2)),
+            |s| steps.push(*s),
+        )?;
+        assert_eq!(out.status, FgmresStatus::Stagnated);
+        assert_eq!(out.cycles, 3);
+        assert!((out.x[0] - 1.0).abs() < 1e-14 && out.x[1] == 0.0);
+        assert!((out.residual - 1.0).abs() < 1e-14);
+        let exact_residuals: Vec<f64> = steps
+            .iter()
+            .filter(|s| s.exact)
+            .map(|s| s.residual)
+            .collect();
+        assert_eq!(exact_residuals.len(), 4);
+        assert_eq!(out.residual, exact_residuals[1]);
+        assert!(exact_residuals[2] > exact_residuals[1]);
+        assert!(exact_residuals[3] > exact_residuals[1]);
+        Ok(())
+    }
 }
