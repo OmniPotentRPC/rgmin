@@ -1352,6 +1352,11 @@ inline bool is_count_option(std::string const& key) {
            key == "nstcgsteep";
 }
 
+inline bool is_flag_option(std::string const& key) {
+    return key == "neb_guards" || key == "periodic" || key == "project_rigid" ||
+           key == "error_on_unmet" || key == "backward_polish" || key == "require_convergence";
+}
+
 inline double require_etol(double value) {
     if (!std::isfinite(value) || value < 0.0) {
         throw std::invalid_argument("etol must be finite and >= 0");
@@ -1430,6 +1435,8 @@ inline SolverConfig SolverConfig::build(
             else {
                 throw std::invalid_argument("qn_step must be lbfgs, newton, or rfo");
             }
+        } else if (detail::is_flag_option(key)) {
+            throw std::invalid_argument(key + " must be a bool");
         } else {
             throw std::invalid_argument(key + " must be a number or a flag");
         }
@@ -1492,8 +1499,8 @@ inline SolverConfig SolverConfig::build(
             else if (key == "cautious_eps") cfg.cautious_eps_ = value;
             else if (key == "cautious_alpha") cfg.cautious_alpha_ = value;
             else cfg.objective_roundoff_ = value;
-        } else if (key == "require_convergence") {
-            cfg.control_.require_convergence = item.second != 0;
+        } else if (detail::is_flag_option(key)) {
+            throw std::invalid_argument(key + " must be a bool");
         } else {
             throw std::invalid_argument(key + " must be a string or a flag");
         }
@@ -1501,6 +1508,9 @@ inline SolverConfig SolverConfig::build(
     for (auto const& item : numbers) {
         std::string key = detail::canon_token(item.first);
         detail::require_known(key);
+        if (detail::is_flag_option(key)) {
+            throw std::invalid_argument(key + " must be a bool");
+        }
         detail::require_finite(key, item.second);
         if (detail::is_count_option(key)) {
             throw std::invalid_argument(key + " must be an int");
@@ -1517,7 +1527,6 @@ inline SolverConfig SolverConfig::build(
         else if (key == "cautious_alpha") cfg.cautious_alpha_ = item.second;
         else if (key == "objective_roundoff") cfg.objective_roundoff_ = item.second;
         else if (key == "shrink") cfg.gromacs_shrink_ = item.second;
-        else if (key == "require_convergence") cfg.control_.require_convergence = item.second != 0.0;
         else {
             throw std::invalid_argument(key + " must be a string or a flag");
         }

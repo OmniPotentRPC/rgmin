@@ -783,6 +783,31 @@ int strict_convergence() {
         std::fprintf(stderr, "strict zero budget did not raise NotConverged\n");
         return 63;
     }
+    for (bool const on : {true, false}) {
+        if (rgmin::SolverConfig::build("sd", {}, {}, {}, {{"require_convergence", on}})
+                .require_convergence() != on) {
+            std::fprintf(stderr, "require_convergence flag %d was not kept\n", on);
+            return 64;
+        }
+    }
+    auto refused = [](auto build) {
+        try {
+            build();
+        } catch (std::invalid_argument const& error) {
+            return std::string(error.what()) == "require_convergence must be a bool";
+        }
+        return false;
+    };
+    if (!refused([] { rgmin::SolverConfig::build("sd", {}, {}, {{"require_convergence", 1}}, {}); }) ||
+        !refused([] { rgmin::SolverConfig::build("sd", {}, {}, {{"require_convergence", 0}}, {}); }) ||
+        !refused([] { rgmin::SolverConfig::build("sd", {}, {{"require_convergence", 1.0}}, {}, {}); }) ||
+        !refused([] {
+            rgmin::SolverConfig::build("sd", {}, {{"require_convergence", std::nan("")}}, {}, {});
+        }) ||
+        !refused([] { rgmin::SolverConfig::build("sd", {{"require_convergence", "true"}}, {}, {}, {}); })) {
+        std::fprintf(stderr, "require_convergence took a value that is not a bool\n");
+        return 65;
+    }
     std::printf("strict convergence ok\n");
     return 0;
 }

@@ -66,6 +66,31 @@ def test_both_flags_raise_not_converged() -> None:
     assert type(caught.value) is rgmin.NotConverged
 
 
+@pytest.mark.parametrize("value", [True, False])
+def test_require_convergence_takes_a_bool(value: bool) -> None:
+    assert rgmin.SolverConfig("sd", require_convergence=value).require_convergence() is value
+
+
+@pytest.mark.parametrize("value", [0, 1, 2, -1, 0.0, 1.0, float("nan"), "true", "1"])
+def test_require_convergence_refuses_an_int_a_float_or_a_string(value: object) -> None:
+    with pytest.raises(ValueError, match="require_convergence must be a bool"):
+        rgmin.SolverConfig("sd", require_convergence=value)
+    with pytest.raises(ValueError, match="require_convergence must be a bool"):
+        rgmin.minimize(quad, np.array([4.0]), "sd", maxiter=0, require_convergence=value)
+
+
+@pytest.mark.parametrize("value", [np.bool_(True), np.int64(1), None, [True]])
+def test_require_convergence_refuses_other_objects(value: object) -> None:
+    with pytest.raises(TypeError, match="require_convergence"):
+        rgmin.SolverConfig("sd", require_convergence=value)
+
+
+@pytest.mark.parametrize("key", ["error_on_unmet", "backward_polish", "periodic"])
+def test_every_flag_refuses_an_int(key: str) -> None:
+    with pytest.raises(ValueError, match=f"{key} must be a bool"):
+        rgmin.SolverConfig("sd", **{key: 1})
+
+
 def test_an_unmoved_step_is_step_tolerance_only_when_strict() -> None:
     def uphill(x: np.ndarray) -> tuple[float, np.ndarray]:
         return 0.5 * float(x[0]) * float(x[0]), np.array([-float(x[0])])
