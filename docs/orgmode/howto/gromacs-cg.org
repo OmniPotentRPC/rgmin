@@ -1,12 +1,17 @@
 #+TITLE: Run GROMACS conjugate-gradient minimization
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
 
-* Run GROMACS conjugate-gradient minimization
+* Run GROMACS-style conjugate-gradient minimization
 
-Use the ~gromacs-cg~ method when a setup should follow GROMACS
-~integrator = cg~ (Polak-Ribière conjugate gradient with a periodic
-steepest-descent restart every ~nstcgsteep~ steps and convergence on the
-largest per-atom force norm) alongside ~gromacs-steep~.
+Use ~gromacs-cg~ when a workflow uses GROMACS MDP parameters (~emtol~,
+~emstep~, ~nsteps~, ~nstcgsteep~) and wants the GROMACS ~do_cg~
+Polak-Ribière direction update (periodic steepest-descent restart every
+~nstcgsteep~ steps, $|\beta| \le 5$ cap, steepest-descent fallback, and
+largest per-atom force norm ~MaxAtom~) paired with ~rgmin~'s strong-Wolfe
+line search. It does not implement GROMACS's own secant/bisection line
+search or LINCS-constrained CG, so intermediate iterates differ from
+~gmx mdrun~; see @@rst::doc:`../reference/gromacs-cg`@@ for the exact
+differences and tested comparison.
 
 ** Python and MDP keys
 

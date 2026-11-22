@@ -93,9 +93,11 @@ pub enum Method {
     /// for atomic structures*, Phys. Rev. B 100, 104103 (2019),
     /// <https://doi.org/10.1103/PhysRevB.100.104103>.
     GpMin,
-    /// GROMACS `integrator = cg`: Polak-Ribiere conjugate gradients with a
-    /// steepest-descent step every `nstcgsteep` steps and convergence on
-    /// the largest per-atom force norm.
+    /// GROMACS-style `integrator = cg`: Polak-Ribiere conjugate-gradient
+    /// direction update (steepest-descent step every `nstcgsteep` steps,
+    /// `|beta| <= 5` cap, steepest-descent fallback) paired with `rgmin`'s
+    /// strong-Wolfe line search and convergence on the largest per-atom
+    /// force norm.
     GromacsCg,
     /// Shifted Newton on a caller-supplied dense Hessian.
     ///

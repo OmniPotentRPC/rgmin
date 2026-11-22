@@ -14,8 +14,9 @@
 //! The conjugate-gradient state [`GromacsCg`] tracks the periodic
 //! steepest-descent restart interval `nstcgsteep` and the `|beta| <= 5`
 //! guard of GROMACS [`do_cg`][cg_source] (`minimize.cpp` lines 1868-1887),
-//! paired with [`crate::nlcg::Conjugacy::PolakRibiere`] and the session line
-//! search.
+//! paired with [`crate::nlcg::Conjugacy::PolakRibiere`] and `rgmin`'s
+//! strong-Wolfe line search (rather than GROMACS's secant/bisection line
+//! search).
 //!
 //! [source]: https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L2861
 //! [cg_source]: https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L1313

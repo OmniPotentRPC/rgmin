@@ -140,7 +140,7 @@ typedef enum rgmin_method_t {
     RGMIN_EON_CG = 27,
     /** GROMACS integrator = steep. ABI minor 52. */
     RGMIN_GROMACS_STEEP = 28,
-    /** GROMACS integrator = cg. */
+    /** GROMACS-style Polak-Ribiere direction update with strong-Wolfe line search. */
     RGMIN_GROMACS_CG = 29
 } rgmin_method_t;
 
@@ -530,7 +530,8 @@ int32_t rgmin_solver_set_gromacs_steep(rgmin_solver_t *solver, double shrink,
  *  rgmin's displacement floor. Invalid input gives 0. The result is
  *  capped to bound construction time. ABI minor 52. */
 uint32_t rgmin_gromacs_steep_max_constraint_shrinks(double step_size, double shrink);
-/** GROMACS conjugate-gradient parameters on a RGMIN_GROMACS_CG session.
+/** Configure the GROMACS-style conjugate-gradient direction update on a
+ *  RGMIN_GROMACS_CG session (paired with rgmin's strong-Wolfe line search).
  *  nstcgsteep == 0 turns the periodic steepest-descent restart off, as in
  *  GROMACS. Returns 0, or 1 on a null session or a session that is not
  *  RGMIN_GROMACS_CG. */

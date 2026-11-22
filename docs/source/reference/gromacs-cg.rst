@@ -1,14 +1,14 @@
 
 
-GROMACS conjugate gradient
---------------------------
+GROMACS-style conjugate gradient
+--------------------------------
 
-``Method::GromacsCg`` implements the Polak-Ribière conjugate-gradient
-minimizer documented in the
-`GROMACS reference manual, Energy Minimization: Conjugate Gradient <https://manual.gromacs.org/current/reference-manual/algorithms/energy-minimization.html#conjugate-gradient>`_
-and in GROMACS 2025.4
+``Method::GromacsCg`` pairs the GROMACS-style Polak-Ribière
+conjugate-gradient direction update from GROMACS 2025.4
 `do\_cg <https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L1313>`_
-(``src/gromacs/mdrun/minimize.cpp``, lines 1313-2035):
+(``src/gromacs/mdrun/minimize.cpp``, lines 1313-2035) with ``rgmin``'s
+strong-Wolfe line search (``c1 = 1e-4``, ``c2 = 0.1``) rather than
+GROMACS's own golden-section/cubic-secant line search:
 
 
 
@@ -19,13 +19,18 @@ and in GROMACS 2025.4
 
 where :math:`\mathbf{g}_k = -\mathbf{F}_k` is the potential-energy gradient.
 
-Reuse of rgmin's NLCG and line-search machinery
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Because the line search differs from ``do_cg``, ``Method::GromacsCg`` is not
+a step-for-step clone of ``gmx mdrun`` under ``integrator = cg``. What matches
+``do_cg`` and what is ``rgmin``-specific is listed below.
 
-Rather than duplicating a custom line-search loop, ``Method::GromacsCg``
-runs on top of rgmin's existing ``Inner::Nlcg`` (``Conjugacy::PolakRibiere``)
-and ``LineSearch`` infrastructure (``take_session_step``), adding the
-GROMACS-specific rules from ``do_cg``:
+Direction update and strong-Wolfe line search
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Rather than duplicating ``do_cg``'s bracket/secant/bisection search loop,
+``Method::GromacsCg`` runs on top of ``rgmin``'s existing ``Inner::Nlcg``
+(``Conjugacy::PolakRibiere``) and ``LineSearch::Wolfe`` infrastructure
+(``take_session_step``), adding the direction and acceptance rules from
+``do_cg``:
 
 1. **Periodic steepest-descent restart (``nstcgsteep``)**: ``do_cg`` counts its
    iterations with ``for (step = 0; ...; step++)`` and, once iteration
@@ -71,11 +76,27 @@ GROMACS-specific rules from ``do_cg``:
    coordinate or decrease the energy, the session stops with
    ``Status::MachinePrecision`` (``RGMIN_STOP_MACHINE_PRECISION``).
 
-5. **Max-atom force norm (``Fmax``)**: ``Report::stop_norm`` defaults to
+5. **Downhill energy-rise tolerance near machine precision**: ``do_cg``
+   accepts a trial whose energy rises slightly below
+   :math:`\sqrt{\varepsilon_{\text{mach}}}\,|E_0|` when the directional
+   derivative remains negative (``minimize.cpp`` lines 1665-1672:
+   ``tmp = std::sqrt(GMX_REAL_EPS) * std::fabs(s_a->epot); if (s_c->epot < s_a->epot || (gpc < 0 && s_c->epot < (s_a->epot + tmp)))``).
+   ``Method::GromacsCg`` enables this same tolerance in ``LineSearchOptions``
+   and ``take_step_with_options``.
+
+6. **Max-atom force norm (``Fmax``)**: ``Report::stop_norm`` defaults to
    ``StopNorm::MaxAtom`` (:math:`\max_i \|\mathbf{F}_i\|_2` over consecutive xyz
    atom triples), matching ``gmx_f_norm_max`` in ``minimize.cpp`` and
    ``Method::GromacsSteep``. There is no implicit 0.2 per-atom displacement
    cap unless explicitly requested.
+
+7. **Step counting (``nsteps`` / ``maxiter``)**: ``rgmin`` takes ``Control::maxiter``
+   steps (``nsteps = 0`` evaluates only the initial point; Python/MDP
+   ``nsteps = -1`` maps to unlimited ``sys.maxsize``). By contrast, upstream
+   GROMACS ``do_cg`` loops ``for (step = 0; (number_steps < 0 || step <= number_steps) && !converged; step++)``
+   (``minimize.cpp`` line 1497), executing ``nsteps + 1`` iterations on a
+   budget stop (13 steps for ``nsteps = 12`` in the committed ``mdrun.txt``)
+   and decrementing ``step`` by one when converged.
 
 Refusal of holonomic constraints
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -191,17 +212,23 @@ and machine-readable summary are committed under
     +-----------------------------------+-------------------------+-------+-------------+------------------------------------------+------------------------------------------+
 
 Both solvers take steepest-descent steps at iterations 0 and 1 and
-conjugate steps after that. Because ``rgmin`` reuses its strong-Wolfe
+conjugate steps after that. Because ``rgmin`` uses its strong-Wolfe
 bracketing and cubic-zoom line search (:math:`c_1 = 10^{-4}, c_2 = 0.1`) rather
-than ``do_cg``'s midpoint/cubic secant heuristic, step-by-step intermediate
+than ``do_cg``'s midpoint/cubic secant heuristic (and stops at ``nsteps``
+steps rather than ``nsteps + 1``), step-by-step intermediate
 iterates differ while
 converging to the same potential-energy minimum
-(:math:`-12.548937708830\text{ kJ mol}^{-1}`). On this fixture, ``rgmin`` uses
-fewer outer iterations at each tested tolerance. It uses more force
-evaluations at ``emtol = 1e-2`` and ``1e-3``, but fewer at ``emtol = 1e-6``.
-At the 12-step cap it uses more force evaluations and reaches a lower
-:math:`F_{\max}`. The single-precision GROMACS run stops at machine precision
-after 11 steps.
+(:math:`-12.548937708830\text{ kJ mol}^{-1}`) on this fixture. Note also that in
+the ``nsteps = 12`` run below, ``summary.tsv`` records ``12`` (the ``nsteps``
+input / last step index ``Step 12``), while ``gmx_d mdrun`` actually executed
+13 steps (``Step 0`` through ``Step 12``) before reporting ``in 13 steps``.
+On this fixture, ``rgmin`` uses fewer outer iterations at each tested
+tolerance. It uses more force evaluations at ``emtol = 1e-2`` and ``1e-3``,
+but fewer at ``emtol = 1e-6``. At the 12-step cap it uses more force
+evaluations and reaches a lower :math:`F_{\max}`. The single-precision
+GROMACS run stops at machine precision after 11 steps. No GROMACS
+trajectory equivalence beyond these tested final-energy and force-norm
+comparisons is claimed.
 
 Minimization section of the raw ``gmx_d mdrun -v`` output for
 ``integrator = cg``, ``nsteps = 12``, ``emtol = 1e-8``, ``emstep = 0.02``,
