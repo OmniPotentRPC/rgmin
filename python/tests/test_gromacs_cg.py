@@ -357,3 +357,24 @@ def test_gromacs_cg_step_count_pins_nsteps_and_unlimited() -> None:
         opt = GromacsCg(atoms, emtol=1e-4, emstep=0.05, nsteps=budget, logfile=None)
         assert opt.run() is want_converged
         assert opt.nsteps == (3 if budget == -1 else budget)
+
+
+def test_gromacs_cg_stops_on_eval_budget_and_returns_false() -> None:
+    meta, _, start, _ = _load_argon_fixture()
+    natoms = start.size // 3
+    start_ang = start.reshape(natoms, 3) * GROMACS_NM_TO_ANGSTROM
+
+    atoms = Atoms(f"Ar{natoms}", positions=start_ang.copy())
+    atoms.calc = ArgonLjAse(meta["sigma"], meta["epsilon"], meta["cutoff"])
+    opt = GromacsCg(atoms, emtol=1e-6, emstep=meta["emstep"], nsteps=200, max_evals=3, logfile=None)
+    assert opt.run() is False
+    assert opt.stop == "EvalBudget"
+
+    atoms_irun = Atoms(f"Ar{natoms}", positions=start_ang.copy())
+    atoms_irun.calc = ArgonLjAse(meta["sigma"], meta["epsilon"], meta["cutoff"])
+    opt_irun = GromacsCg(
+        atoms_irun, emtol=1e-6, emstep=meta["emstep"], nsteps=200, max_evals=3, logfile=None
+    )
+    outcomes = list(opt_irun.irun())
+    assert outcomes[-1] is False
+    assert opt_irun.stop == "EvalBudget"

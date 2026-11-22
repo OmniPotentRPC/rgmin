@@ -860,11 +860,12 @@ class GromacsCg(_RgminOptimizer):
         self, fmax: float | None = None, steps: int | None = None
     ) -> Iterator[bool]:
         """Yield convergence after each step, stopping at machine precision."""
+        self.stop = None
         force_limit = self._fmax if fmax is None else float(fmax)
         if steps is None:
             steps = sys.maxsize if self.gromacs_nsteps == -1 else self.gromacs_nsteps
         for converged in cast(Any, super()).irun(fmax=force_limit, steps=steps):
-            yield converged
+            yield False if self.stop == "EvalBudget" else bool(converged)
             if self._native is not None and self._native.stop == "MachinePrecision":
                 break
 
@@ -875,6 +876,8 @@ class GromacsCg(_RgminOptimizer):
         converged = False
         for converged in self.irun(fmax=fmax, steps=steps):
             pass
+        if self.stop == "EvalBudget":
+            return False
         return bool(converged)
 
 
