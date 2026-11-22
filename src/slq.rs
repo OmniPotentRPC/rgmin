@@ -970,7 +970,7 @@ where
                 lower: val,
                 upper: val,
                 error_estimate: 0.0,
-                bracketed: true,
+                bracketed: false,
                 first_moment,
                 second_moment,
                 steps: m,
@@ -4473,5 +4473,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn invariant_breakdown_is_bracketed_only_with_a_lower_bound() {
+        let diag = [1.0, 2.0, 5.0, 5.0, 2.0, 1.0];
+        let v = [1.0, 1.0, 1.0, 0.0, 0.0, 0.0];
+        let mut op = diag_apply(&diag);
+
+        let fn_est = lanczos_quadrature_fn(&v, &mut op, |x| Ok(x.ln()), diag.len(), 1e-12)
+            .expect("fn quadrature");
+        assert!(
+            fn_est.invariant_breakdown,
+            "fn: expected invariant breakdown"
+        );
+        assert!(
+            fn_est.steps < diag.len(),
+            "fn: stopped at step {}",
+            fn_est.steps
+        );
+        assert!(
+            !fn_est.bracketed,
+            "fn: no lower bound was supplied, so nothing is bracketed"
+        );
+
+        let unbounded = lanczos_quadrature_log(&v, &mut op, None, diag.len(), 1e-12, 1)
+            .expect("log quadrature without a bound");
+        assert!(unbounded.invariant_breakdown);
+        assert!(!unbounded.bracketed);
+        assert!((unbounded.value - fn_est.value).abs() < 1e-12);
+
+        let bounded = lanczos_quadrature_log(&v, &mut op, Some(0.5), diag.len(), 1e-12, 1)
+            .expect("log quadrature with a bound");
+        assert!(bounded.invariant_breakdown);
+        assert!(bounded.bracketed);
     }
 }
