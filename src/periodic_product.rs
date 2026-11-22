@@ -503,37 +503,208 @@ fn eigenvalues(
     eigenvalues_with_limit(matrix, width, precision, iteration_limit(precision, width)?)
 }
 
+const NO_PARTNER: usize = usize::MAX;
+
+/// Maximum matching of a general graph by Edmonds' blossom algorithm.
+///
+/// `adjacent(left, right)` must be symmetric.  Returns the partner of each
+/// vertex, or `NO_PARTNER` when the vertex is left unmatched.
+fn maximum_matching(count: usize, adjacent: &dyn Fn(usize, usize) -> bool) -> Vec<usize> {
+    fn lca(
+        mut left: usize,
+        mut right: usize,
+        partner: &[usize],
+        parent: &[usize],
+        base: &[usize],
+    ) -> usize {
+        let mut seen = vec![false; partner.len()];
+        loop {
+            left = base[left];
+            seen[left] = true;
+            if partner[left] == NO_PARTNER {
+                break;
+            }
+            left = parent[partner[left]];
+        }
+        loop {
+            right = base[right];
+            if seen[right] {
+                return right;
+            }
+            right = parent[partner[right]];
+        }
+    }
+
+    fn mark_path(
+        mut vertex: usize,
+        ancestor: usize,
+        mut child: usize,
+        partner: &[usize],
+        parent: &mut [usize],
+        base: &[usize],
+        in_blossom: &mut [bool],
+    ) {
+        while base[vertex] != ancestor {
+            in_blossom[base[vertex]] = true;
+            in_blossom[base[partner[vertex]]] = true;
+            parent[vertex] = child;
+            child = partner[vertex];
+            vertex = parent[partner[vertex]];
+        }
+    }
+
+    fn augmenting_path(
+        root: usize,
+        count: usize,
+        adjacent: &dyn Fn(usize, usize) -> bool,
+        partner: &[usize],
+        parent: &mut Vec<usize>,
+    ) -> Option<usize> {
+        let mut base: Vec<usize> = (0..count).collect();
+        let mut used = vec![false; count];
+        parent.clear();
+        parent.resize(count, NO_PARTNER);
+        used[root] = true;
+        let mut queue = vec![root];
+        let mut head = 0;
+        while head < queue.len() {
+            let vertex = queue[head];
+            head += 1;
+            for target in 0..count {
+                if target == vertex
+                    || !adjacent(vertex, target)
+                    || base[vertex] == base[target]
+                    || partner[vertex] == target
+                {
+                    continue;
+                }
+                if target == root
+                    || (partner[target] != NO_PARTNER && parent[partner[target]] != NO_PARTNER)
+                {
+                    let ancestor = lca(vertex, target, partner, parent, &base);
+                    let mut in_blossom = vec![false; count];
+                    mark_path(
+                        vertex,
+                        ancestor,
+                        target,
+                        partner,
+                        parent,
+                        &base,
+                        &mut in_blossom,
+                    );
+                    mark_path(
+                        target,
+                        ancestor,
+                        vertex,
+                        partner,
+                        parent,
+                        &base,
+                        &mut in_blossom,
+                    );
+                    for index in 0..count {
+                        if in_blossom[base[index]] {
+                            base[index] = ancestor;
+                            if !used[index] {
+                                used[index] = true;
+                                queue.push(index);
+                            }
+                        }
+                    }
+                } else if parent[target] == NO_PARTNER {
+                    parent[target] = vertex;
+                    if partner[target] == NO_PARTNER {
+                        return Some(target);
+                    }
+                    let mate = partner[target];
+                    used[mate] = true;
+                    queue.push(mate);
+                }
+            }
+        }
+        None
+    }
+
+    let mut partner = vec![NO_PARTNER; count];
+    let mut parent = Vec::with_capacity(count);
+    for root in 0..count {
+        if partner[root] != NO_PARTNER {
+            continue;
+        }
+        let mut vertex = augmenting_path(root, count, adjacent, &partner, &mut parent);
+        while let Some(end) = vertex {
+            let previous = parent[end];
+            let next = partner[previous];
+            partner[end] = previous;
+            partner[previous] = end;
+            vertex = (next != NO_PARTNER).then_some(next);
+        }
+    }
+    partner
+}
+
+fn has_perfect_matching(count: usize, adjacent: &dyn Fn(usize, usize) -> bool) -> bool {
+    count & 1 == 0
+        && maximum_matching(count, adjacent)
+            .iter()
+            .all(|partner| *partner != NO_PARTNER)
+}
+
+/// Smallest `max |lambda * lambda' - 1|` over all perfect pairings, checked
+/// against `bound`.
+///
+/// The pairing minimizes the largest defect, found by bisection on the
+/// sorted defects with a general-graph perfect-matching test, so the verdict
+/// and the returned residual do not depend on the eigenvalue order.
 fn verify_reciprocity(
     eigenvalues: &[Complex],
     bound: &Float,
 ) -> Result<Float, PeriodicProductError> {
-    let precision = eigenvalues[0].prec().0;
+    let count = eigenvalues.len();
+    let Some(first) = eigenvalues.first() else {
+        return Err(PeriodicProductError::ReciprocityFailed);
+    };
+    let precision = first.prec().0;
     let one = complex(precision, 1.0);
-    let mut unused = vec![true; eigenvalues.len()];
-    let mut worst = Float::with_val(precision, 0);
-    while let Some(left) = unused.iter().position(|present| *present) {
-        let mut best: Option<(usize, Float)> = None;
-        for (right, candidate) in eigenvalues.iter().enumerate() {
-            if right == left || !unused[right] {
-                continue;
+    let mut defects = vec![Float::with_val(precision, f64::INFINITY); count * count];
+    let mut candidates = Vec::with_capacity(count * count.saturating_sub(1) / 2);
+    for left in 0..count {
+        for right in left + 1..count {
+            let defect = eigenvalues[left]
+                .mul(&eigenvalues[right])
+                .sub(&one)
+                .modulus();
+            if defect.is_finite() {
+                candidates.push(defect.clone());
             }
-            let defect = eigenvalues[left].mul(candidate).sub(&one).modulus();
-            if best
-                .as_ref()
-                .is_none_or(|(_, old_defect)| defect < *old_defect)
-            {
-                best = Some((right, defect));
-            }
+            defects[left * count + right] = defect.clone();
+            defects[right * count + left] = defect;
         }
-        let (right, defect) = best.ok_or(PeriodicProductError::ReciprocityFailed)?;
-        if !defect.is_finite() || defect > *bound {
-            return Err(PeriodicProductError::ReciprocityFailed);
+    }
+    candidates.sort_by(Float::total_cmp);
+    candidates.dedup();
+    let feasible = |threshold: &Float| {
+        has_perfect_matching(count, &|left, right| {
+            defects[left * count + right] <= *threshold
+        })
+    };
+    let Some(last) = candidates.last() else {
+        return Err(PeriodicProductError::ReciprocityFailed);
+    };
+    if !feasible(last) {
+        return Err(PeriodicProductError::ReciprocityFailed);
+    }
+    let (mut low, mut high) = (0, candidates.len() - 1);
+    while low < high {
+        let middle = low + (high - low) / 2;
+        if feasible(&candidates[middle]) {
+            high = middle;
+        } else {
+            low = middle + 1;
         }
-        if defect > worst {
-            worst = defect;
-        }
-        unused[left] = false;
-        unused[right] = false;
+    }
+    let worst = candidates.swap_remove(low);
+    if worst > *bound {
+        return Err(PeriodicProductError::ReciprocityFailed);
     }
     Ok(worst)
 }
@@ -795,6 +966,93 @@ mod tests {
                     .all(|value| value.log_modulus.abs() < 1e-12)
             );
         }
+    }
+
+    fn permutations(items: &[usize]) -> Vec<Vec<usize>> {
+        if items.len() <= 1 {
+            return vec![items.to_vec()];
+        }
+        let mut all = Vec::new();
+        for (position, head) in items.iter().enumerate() {
+            let mut rest = items.to_vec();
+            rest.remove(position);
+            for mut tail in permutations(&rest) {
+                tail.insert(0, *head);
+                all.push(tail);
+            }
+        }
+        all
+    }
+
+    #[test]
+    fn reciprocity_verdict_does_not_depend_on_eigenvalue_order() {
+        let precision = 128;
+        // The best partner of 2 is 0.5, which leaves 0.51 beside 2.04 with
+        // defect 0.0404; pairing 2 with 0.51 and 0.5 with 2.04 stays at 0.02.
+        let values = [2.0, 0.5, 0.51, 2.04];
+        let bound = Float::with_val(precision, 0.03);
+        for order in permutations(&[0, 1, 2, 3]) {
+            let eigenvalues: Vec<_> = order
+                .iter()
+                .map(|index| complex(precision, values[*index]))
+                .collect();
+            let worst = verify_reciprocity(&eigenvalues, &bound)
+                .unwrap_or_else(|error| panic!("order {order:?}: {error}"));
+            assert!((worst.to_f64() - 0.02).abs() < 1e-12, "order {order:?}");
+        }
+        let tight = Float::with_val(precision, 0.01);
+        for order in permutations(&[0, 1, 2, 3]) {
+            let eigenvalues: Vec<_> = order
+                .iter()
+                .map(|index| complex(precision, values[*index]))
+                .collect();
+            assert_eq!(
+                verify_reciprocity(&eigenvalues, &tight),
+                Err(PeriodicProductError::ReciprocityFailed),
+                "order {order:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn odd_groups_of_fixed_multipliers_are_not_reciprocal_pairs() {
+        let precision = 128;
+        let eigenvalues: Vec<_> = [1.0, 1.0, 1.0, -1.0, -1.0, -1.0]
+            .into_iter()
+            .map(|value| complex(precision, value))
+            .collect();
+        assert_eq!(
+            verify_reciprocity(&eigenvalues, &Float::with_val(precision, 1e-9)),
+            Err(PeriodicProductError::ReciprocityFailed)
+        );
+        let paired: Vec<_> = [1.0, 1.0, -1.0, -1.0, 2.0, 0.5]
+            .into_iter()
+            .map(|value| complex(precision, value))
+            .collect();
+        assert!(verify_reciprocity(&paired, &Float::with_val(precision, 1e-9)).is_ok());
+    }
+
+    #[test]
+    fn blossom_matching_pairs_an_odd_cycle_with_a_pendant_vertex() {
+        let edges = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 0), (4, 5)];
+        let adjacent = |left: usize, right: usize| {
+            edges
+                .iter()
+                .any(|edge| *edge == (left, right) || *edge == (right, left))
+        };
+        let partner = maximum_matching(6, &adjacent);
+        for (vertex, mate) in partner.iter().enumerate() {
+            assert_ne!(*mate, NO_PARTNER, "{partner:?}");
+            assert_eq!(partner[*mate], vertex, "{partner:?}");
+            assert!(adjacent(vertex, *mate), "{partner:?}");
+        }
+        let triangles = [(0, 1), (1, 2), (0, 2), (3, 4), (4, 5), (3, 5)];
+        let split = |left: usize, right: usize| {
+            triangles
+                .iter()
+                .any(|edge| *edge == (left, right) || *edge == (right, left))
+        };
+        assert!(!has_perfect_matching(6, &split));
     }
 
     #[test]
