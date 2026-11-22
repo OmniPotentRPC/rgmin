@@ -52,6 +52,10 @@ pub enum QuadratureError {
 }
 
 /// Nodes in ascending order and their weights on `[-1, 1]`.
+///
+/// The struct is non-exhaustive, so a field added later is not a breaking
+/// change. [`gauss_legendre`] builds it.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct GaussLegendre {
     /// Abscissae, ascending.
@@ -136,6 +140,10 @@ pub fn gauss_legendre(count: usize) -> Result<GaussLegendre, QuadratureError> {
 ///
 /// Index 0 is the left hat `(1 − ξ)/2`, index 1 the right hat `(1 + ξ)/2`,
 /// and index `k ≥ 2` the bubble `φ_k`.
+///
+/// The struct is non-exhaustive, so a field added later is not a breaking
+/// change. [`lobatto_shapes`] builds it.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct LobattoShapes {
     /// Shape values, `degree + 1` of them.
