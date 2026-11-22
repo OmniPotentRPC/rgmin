@@ -1,0 +1,1 @@
+- Added matrix-free stochastic Lanczos quadrature in `slq`: preconditioned CG, thick-restart extreme pairs, Gauss and Gauss-Radau quadratures, and deflated Hutch++ log-determinant estimates with Student-t intervals.

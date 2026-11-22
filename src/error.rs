@@ -341,6 +341,12 @@ pub enum Error {
         /// What failed in GPMin.
         what: &'static str,
     },
+    /// Matrix-free Krylov / SLQ routine rejected its input or failed to certify.
+    #[error("slq: {what}")]
+    Slq {
+        /// What the routine refused.
+        what: &'static str,
+    },
 }
 
 /// Result alias for this crate.
