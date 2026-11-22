@@ -363,10 +363,16 @@ mod tests {
     use super::*;
 
     fn max_gap(left: &[f64], right: &[f64]) -> f64 {
+        assert_eq!(left.len(), right.len(), "max_gap lengths differ");
         left.iter()
             .zip(right)
             .map(|(a, b)| (a - b).abs())
-            .fold(0.0, f64::max)
+            .fold(
+                0.0,
+                |acc, gap| {
+                    if gap > acc || gap.is_nan() { gap } else { acc }
+                },
+            )
     }
 
     #[test]
@@ -423,13 +429,32 @@ mod tests {
         ]
     }
 
-    fn rk4_reference(end: f64, steps: usize) -> Vec<f64> {
-        let m = 4;
+    fn noncommuting_three(t: f64) -> [f64; 9] {
+        [
+            -0.2 * t.cos(),
+            0.9 + 0.5 * t.sin(),
+            -0.4 * (2.0 * t).cos(),
+            -0.9 + 0.3 * (2.0 * t).cos(),
+            0.15 * (3.0 * t).sin(),
+            0.7 + 0.6 * t.cos(),
+            0.5 * (2.0 * t).sin(),
+            -0.7 + 0.4 * t.sin(),
+            -0.1 * (3.0 * t).cos(),
+        ]
+    }
+
+    fn rk4_reference<const N: usize>(
+        generator: fn(f64) -> [f64; N],
+        m: usize,
+        end: f64,
+        steps: usize,
+    ) -> Vec<f64> {
+        assert_eq!(m * m, N);
         let h = end / steps as f64;
         let mut y = identity(m);
         for step in 0..steps {
             let t = step as f64 * h;
-            let f = |t: f64, y: &[f64]| multiply(&mathieu(t), y, m);
+            let f = |t: f64, y: &[f64]| multiply(&generator(t), y, m);
             let k1 = f(t, &y);
             let y2: Vec<f64> = y.iter().zip(&k1).map(|(v, k)| v + 0.5 * h * k).collect();
             let k2 = f(t + 0.5 * h, &y2);
@@ -444,15 +469,20 @@ mod tests {
         y
     }
 
-    fn magnus_flow(end: f64, steps: usize) -> (Vec<f64>, Vec<f64>) {
-        let m = 4;
+    fn magnus_flow<const N: usize>(
+        generator: fn(f64) -> [f64; N],
+        m: usize,
+        end: f64,
+        steps: usize,
+    ) -> (Vec<f64>, Vec<f64>) {
+        assert_eq!(m * m, N);
         let h = end / steps as f64;
         let c = gauss_legendre_three();
         let mut sixth = identity(m);
         let mut fourth = identity(m);
         for step in 0..steps {
             let t = step as f64 * h;
-            let samples = c.map(|ci| mathieu(t + ci * h));
+            let samples = c.map(|ci| generator(t + ci * h));
             let local = magnus_step([&samples[0], &samples[1], &samples[2]], h, m).expect("step");
             sixth = multiply(&local.sixth, &sixth, m);
             fourth = multiply(&local.fourth, &fourth, m);
@@ -460,30 +490,76 @@ mod tests {
         (sixth, fourth)
     }
 
-    /// Non-commuting 4 x 4 Hill system: the global error falls by `2^6` per
-    /// halving for `Ω6` and by `2^4` for `Ω4`.
+    fn fitted_order(samples: &[(usize, f64)]) -> f64 {
+        assert!(samples.len() >= 2);
+        let xs: Vec<f64> = samples
+            .iter()
+            .map(|&(steps, _)| (steps as f64).log2())
+            .collect();
+        let ys: Vec<f64> = samples
+            .iter()
+            .map(
+                |&(_, error)| {
+                    if error > 0.0 { -error.log2() } else { f64::NAN }
+                },
+            )
+            .collect();
+        let count = samples.len() as f64;
+        let mean_x = xs.iter().sum::<f64>() / count;
+        let mean_y = ys.iter().sum::<f64>() / count;
+        let numerator: f64 = xs
+            .iter()
+            .zip(&ys)
+            .map(|(x, y)| (x - mean_x) * (y - mean_y))
+            .sum();
+        let denominator: f64 = xs.iter().map(|x| (x - mean_x).powi(2)).sum();
+        numerator / denominator
+    }
+
+    fn assert_convergence_orders<const N: usize>(
+        name: &str,
+        generator: fn(f64) -> [f64; N],
+        m: usize,
+        end: f64,
+    ) {
+        let reference = rk4_reference(generator, m, end, 1 << 15);
+        let mut sixth_errors = Vec::new();
+        let mut fourth_errors = Vec::new();
+        for steps in [6usize, 12, 24, 48] {
+            let (sixth, fourth) = magnus_flow(generator, m, end, steps);
+            sixth_errors.push((steps, max_gap(&sixth, &reference)));
+            fourth_errors.push((steps, max_gap(&fourth, &reference)));
+        }
+        let order_six = fitted_order(&sixth_errors);
+        let order_four = fitted_order(&fourth_errors);
+        assert!(
+            (5.8..=6.2).contains(&order_six),
+            "{name} sixth-order slope {order_six} from {sixth_errors:?}"
+        );
+        assert!(
+            (3.8..=4.2).contains(&order_four),
+            "{name} fourth-order slope {order_four} from {fourth_errors:?}"
+        );
+    }
+
+    /// Global error slopes over step halvings on the 4 x 4 Hill system and on a
+    /// non-commuting 3 x 3 generator where `[α2, α3] ≠ 0`.
     #[test]
     fn the_sixth_and_fourth_order_exponents_converge_at_their_orders() {
-        let end = 3.0;
-        let reference = rk4_reference(end, 1 << 15);
-        let mut previous: Option<(f64, f64)> = None;
-        for steps in [6usize, 12, 24, 48] {
-            let (sixth, fourth) = magnus_flow(end, steps);
-            let errors = (max_gap(&sixth, &reference), max_gap(&fourth, &reference));
-            if let Some((six, four)) = previous {
-                let order_six = (six / errors.0).log2();
-                let order_four = (four / errors.1).log2();
-                assert!(
-                    (5.6..=6.6).contains(&order_six),
-                    "steps {steps} sixth order {order_six}"
-                );
-                assert!(
-                    (3.7..=4.4).contains(&order_four),
-                    "steps {steps} fourth order {order_four}"
-                );
-            }
-            previous = Some(errors);
-        }
+        assert_convergence_orders("mathieu", mathieu, 4, 3.0);
+        assert_convergence_orders("noncommuting_three", noncommuting_three, 3, 3.0);
+    }
+
+    #[test]
+    fn max_gap_propagates_nan() {
+        assert!(max_gap(&[f64::NAN, 0.0], &[0.0, 1.0]).is_nan());
+        assert!(max_gap(&[1.0, 0.0], &[0.0, f64::NAN]).is_nan());
+    }
+
+    #[test]
+    #[should_panic(expected = "max_gap lengths differ")]
+    fn max_gap_rejects_mismatched_lengths() {
+        let _ = max_gap(&[1.0, 2.0], &[1.0]);
     }
 
     #[test]
