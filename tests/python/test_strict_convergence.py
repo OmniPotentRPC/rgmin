@@ -161,3 +161,24 @@ def test_a_gradient_exactly_at_gtol_is_not_converged() -> None:
     )
     assert report.stop == rgmin.Stop.TOLERANCE
     assert report.converged() is True
+
+
+def test_not_converged_report_is_a_read_only_property() -> None:
+    assert isinstance(rgmin.NotConverged.__dict__["report"], property)
+    with pytest.raises(rgmin.NotConverged) as caught:
+        rgmin.minimize(
+            quad, np.array([4.0]), "sd", maxiter=0, gtol=1e-8, require_convergence=True
+        )
+    error = caught.value
+    assert isinstance(error, RuntimeError)
+    assert isinstance(error.report, rgmin.Report)
+    assert error.report is error.report
+    with pytest.raises(AttributeError):
+        error.report = error.report  # type: ignore[misc]
+
+
+def test_a_bare_not_converged_has_no_report() -> None:
+    error = rgmin.NotConverged("not converged")
+    assert str(error) == "not converged"
+    with pytest.raises(AttributeError, match="report"):
+        _ = error.report

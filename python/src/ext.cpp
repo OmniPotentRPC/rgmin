@@ -557,15 +557,6 @@ NB_MODULE(_core, m) {
         throw nb::python_error();
     }
     m.attr("StopUnmetError") = unmet_type;
-    nb::object not_converged = nb::steal(PyErr_NewExceptionWithDoc(
-        "rgmin._core.NotConverged",
-        "Raised when ``require_convergence`` is set and the gradient norm is "
-        "still above ``gtol``. ``report`` is the terminal ``Report``.",
-        PyExc_RuntimeError, nullptr));
-    if (!not_converged.is_valid()) {
-        throw nb::python_error();
-    }
-    m.attr("NotConverged") = not_converged;
     nb::register_exception_translator([](std::exception_ptr const& ptr, void*) {
         try {
             std::rethrow_exception(ptr);
@@ -577,7 +568,7 @@ NB_MODULE(_core, m) {
         } catch (rgmin::NotConverged const& error) {
             nb::object type = nb::module_::import_("rgmin._core").attr("NotConverged");
             nb::object instance = type(error.what());
-            instance.attr("report") = nb::cast(error.report());
+            instance.attr("_report") = nb::cast(error.report());
             PyErr_SetObject(type.ptr(), instance.ptr());
         }
     });
@@ -672,6 +663,27 @@ NB_MODULE(_core, m) {
         .def("converged",
              [](rgmin::Report const& report) { return report.stop == RGMIN_STOP_TOLERANCE; },
              "True when ``stop`` is ``TOLERANCE``.");
+
+    nb::object not_converged = nb::steal(PyErr_NewExceptionWithDoc(
+        "rgmin._core.NotConverged",
+        "Raised when ``require_convergence`` is set and the gradient norm is "
+        "still above ``gtol``. ``report`` is the terminal ``Report``.",
+        PyExc_RuntimeError, nullptr));
+    if (!not_converged.is_valid()) {
+        throw nb::python_error();
+    }
+    m.attr("NotConverged") = not_converged;
+    nb::object not_converged_report = nb::cpp_function(
+        [](nb::handle self) -> nb::object {
+            if (!nb::hasattr(self, "_report")) {
+                throw nb::attribute_error("'NotConverged' object has no attribute 'report'");
+            }
+            return self.attr("_report");
+        },
+        nb::is_method(), nb::is_getter(), nb::scope(not_converged), nb::name("report"),
+        nb::sig("def report(self) -> Report"), "The terminal ``Report`` of the unconverged run.");
+    not_converged.attr("report") =
+        nb::module_::import_("builtins").attr("property")(not_converged_report);
 
     nb::class_<rgmin::SolverConfig>(m, "SolverConfig",
                                     "Validated, immutable optimizer options. Unknown keywords raise "

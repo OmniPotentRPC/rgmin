@@ -15,8 +15,6 @@ class StopUnmetError(RuntimeError):
     Raised when ``error_on_unmet`` is set and the run stops short of its criterion. ``report`` is the ``Report`` of that stop.
     """
 
-    report: Report
-
 class Method(enum.IntEnum):
     """
     Geometry-optimization method. Members are UPPER_SNAKE. CamelCase names are aliases of the same values.
@@ -194,7 +192,9 @@ class NotConverged(RuntimeError):
     Raised when ``require_convergence`` is set and the gradient norm is still above ``gtol``. ``report`` is the terminal ``Report``.
     """
 
-    report: Report
+    @property
+    def report(self) -> Report:
+        """The terminal ``Report`` of the unconverged run."""
 
 class SolverConfig:
     """
