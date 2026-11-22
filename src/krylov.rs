@@ -4,6 +4,9 @@
 //! remote calculation.  GMRES uses right preconditioning: Arnoldi sees
 //! `A M^-1`, while every reported residual is in the original system's norm.
 
+use std::error::Error;
+use std::fmt;
+
 /// Failure from a batched operator application.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BatchOperatorError<E> {
@@ -31,6 +34,35 @@ impl<E> BatchOperatorError<E> {
         match self {
             Self::Dimension { .. } => 0,
             Self::Operator { completed, .. } => *completed,
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for BatchOperatorError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Dimension {
+                inputs,
+                outputs,
+                vectors,
+            } => write!(
+                f,
+                "batched operator shape mismatch: {inputs} input entries and {outputs} output \
+                 entries for {vectors} vectors"
+            ),
+            Self::Operator { source, completed } => write!(
+                f,
+                "batched operator failed after {completed} completed directions: {source}"
+            ),
+        }
+    }
+}
+
+impl<E: Error + 'static> Error for BatchOperatorError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Dimension { .. } => None,
+            Self::Operator { source, .. } => Some(source),
         }
     }
 }
@@ -118,6 +150,18 @@ pub struct IdentityError {
     /// Number of output entries.
     pub output: usize,
 }
+
+impl fmt::Display for IdentityError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "identity preconditioner shape mismatch: {} input entries and {} output entries",
+            self.input, self.output
+        )
+    }
+}
+
+impl Error for IdentityError {}
 
 impl Preconditioner for Identity {
     type Error = IdentityError;
@@ -242,6 +286,21 @@ pub enum KrylovRefusal {
     SingularProjectedSystem,
 }
 
+impl fmt::Display for KrylovRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::EmptySystem => "the system has no entries",
+            Self::Dimension => "a vector length does not match the system",
+            Self::Tolerance => "the tolerance is not finite and strictly positive",
+            Self::ZeroIterationBudget => "a nonzero system was given no iteration budget",
+            Self::NonFinite => "a value in the solve is not finite",
+            Self::SingularProjectedSystem => "the projected least-squares system is singular",
+        })
+    }
+}
+
+impl Error for KrylovRefusal {}
+
 /// A GMRES refusal with all telemetry collected before it.
 #[derive(Debug)]
 pub enum GmresFailure<OperatorError, PreconditionerError> {
@@ -293,6 +352,37 @@ pub enum GmresFailure<OperatorError, PreconditionerError> {
         /// Partial solve record.
         record: KrylovRecord,
     },
+}
+
+impl<OE: fmt::Display, PE: fmt::Display> fmt::Display for GmresFailure<OE, PE> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Operator { source, .. } => write!(f, "operator application failed: {source}"),
+            Self::BlockOperator { source, .. } => {
+                write!(f, "batched operator application failed: {source}")
+            }
+            Self::Preconditioner { source, .. } => {
+                write!(f, "preconditioner application failed: {source}")
+            }
+            Self::BlockPreconditioner { source, .. } => {
+                write!(f, "block preconditioner application failed: {source}")
+            }
+            Self::Refused { reason, .. } => write!(f, "GMRES refused: {reason}"),
+            Self::BlockRefused { reason, .. } => write!(f, "block GMRES refused: {reason}"),
+        }
+    }
+}
+
+impl<OE: Error + 'static, PE: Error + 'static> Error for GmresFailure<OE, PE> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Operator { source, .. } | Self::BlockOperator { source, .. } => Some(source),
+            Self::Preconditioner { source, .. } | Self::BlockPreconditioner { source, .. } => {
+                Some(source)
+            }
+            Self::Refused { reason, .. } | Self::BlockRefused { reason, .. } => Some(reason),
+        }
+    }
 }
 
 /// Failure returned by batched independent-right-hand-side GMRES.
@@ -1964,6 +2054,116 @@ mod tests {
             }
             _ => return Err("block overflowing projection was not non-finite"),
         }
+        Ok(())
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct Boom;
+
+    impl fmt::Display for Boom {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("boom")
+        }
+    }
+
+    impl Error for Boom {}
+
+    struct BoomOperator;
+
+    impl LinearOperator for BoomOperator {
+        type Error = Boom;
+
+        fn apply(&mut self, _input: &[f64], _output: &mut [f64]) -> Result<(), Self::Error> {
+            Err(Boom)
+        }
+    }
+
+    #[test]
+    fn the_error_types_display_and_chain_their_sources() -> Result<(), &'static str> {
+        let shape: BatchOperatorError<Boom> = BatchOperatorError::Dimension {
+            inputs: 4,
+            outputs: 2,
+            vectors: 2,
+        };
+        assert_eq!(
+            shape.to_string(),
+            "batched operator shape mismatch: 4 input entries and 2 output entries for 2 vectors"
+        );
+        assert!(shape.source().is_none());
+        let failed = BatchOperatorError::Operator {
+            source: Boom,
+            completed: 1,
+        };
+        assert_eq!(
+            failed.to_string(),
+            "batched operator failed after 1 completed directions: boom"
+        );
+        assert_eq!(
+            failed.source().map(ToString::to_string).as_deref(),
+            Some("boom")
+        );
+
+        assert_eq!(
+            IdentityError {
+                input: 2,
+                output: 1
+            }
+            .to_string(),
+            "identity preconditioner shape mismatch: 2 input entries and 1 output entries"
+        );
+        assert_eq!(
+            KrylovRefusal::NonFinite.to_string(),
+            "a value in the solve is not finite"
+        );
+
+        let scalar = gmres_right(
+            &mut BoomOperator,
+            &mut Identity,
+            &[1.0],
+            GmresOptions::unrestarted(1e-8),
+            &mut NoObserver,
+        );
+        let scalar = match scalar {
+            Err(failure) => failure,
+            Ok(_) => return Err("failing operator succeeded"),
+        };
+        assert_eq!(scalar.to_string(), "operator application failed: boom");
+        assert_eq!(
+            scalar.source().map(ToString::to_string).as_deref(),
+            Some("boom")
+        );
+
+        let block = gmres_right_block(
+            &mut BoomOperator,
+            &mut [Identity],
+            &[vec![1.0]],
+            GmresOptions::unrestarted(1e-8),
+            &mut [NoObserver],
+        );
+        let block = match block {
+            Err(failure) => failure,
+            Ok(_) => return Err("failing batched operator succeeded"),
+        };
+        assert_eq!(
+            block.to_string(),
+            "batched operator application failed: batched operator failed after 0 completed \
+             directions: boom"
+        );
+        assert_eq!(
+            block.source().map(ToString::to_string).as_deref(),
+            Some("batched operator failed after 0 completed directions: boom")
+        );
+
+        let refused: GmresFailure<Boom, Boom> = GmresFailure::Refused {
+            reason: KrylovRefusal::Tolerance,
+            record: KrylovRecord::new(0.0),
+        };
+        assert_eq!(
+            refused.to_string(),
+            "GMRES refused: the tolerance is not finite and strictly positive"
+        );
+        let boxed: Box<dyn Error> = Box::new(refused);
+        assert!(boxed.source().is_some());
         Ok(())
     }
 }
