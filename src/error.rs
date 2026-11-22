@@ -161,6 +161,12 @@ pub enum Error {
         /// What the call refused.
         what: &'static str,
     },
+    /// A Krylov solve or its forcing term was given input it cannot use.
+    #[error("krylov: {what}")]
+    Krylov {
+        /// What the call refused.
+        what: &'static str,
+    },
     /// A geometry preconditioner rejected its inputs or its μ estimate.
     #[error("preconditioner: {what}")]
     Precon {
