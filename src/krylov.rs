@@ -179,7 +179,11 @@ impl Preconditioner for Identity {
 }
 
 /// One GMRES iteration.
-#[derive(Clone, Copy, Debug, PartialEq)]
+///
+/// Built by the solver; start from `default()` and the `with_*` setters to
+/// construct one by hand.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct KrylovIteration {
     /// One-based iteration number.
     pub iteration: usize,
@@ -192,6 +196,14 @@ pub struct KrylovIteration {
     /// Cumulative right-preconditioner applications.
     pub preconditioner_applications: usize,
 }
+
+with_setters!(KrylovIteration {
+    with_iteration => iteration: val usize,
+    with_absolute_residual => absolute_residual: val f64,
+    with_relative_residual => relative_residual: val f64,
+    with_operator_applications => operator_applications: val usize,
+    with_preconditioner_applications => preconditioner_applications: val usize,
+});
 
 /// Streaming sink for Krylov telemetry.
 pub trait KrylovObserver {
@@ -230,7 +242,11 @@ pub enum GmresStatus {
 }
 
 /// Complete GMRES telemetry, available on success and refusal.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// Built by the solver; start from `default()` and the `with_*` setters to
+/// construct one by hand.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct KrylovRecord {
     /// Norm of the original right-hand side.
     pub right_hand_side_norm: f64,
@@ -248,16 +264,25 @@ impl KrylovRecord {
     fn new(right_hand_side_norm: f64) -> Self {
         Self {
             right_hand_side_norm,
-            iterations: Vec::new(),
-            operator_applications: 0,
-            preconditioner_applications: 0,
-            operator_rounds: 0,
+            ..Self::default()
         }
     }
 }
 
+with_setters!(KrylovRecord {
+    with_right_hand_side_norm => right_hand_side_norm: val f64,
+    with_iterations => iterations: val Vec<KrylovIteration>,
+    with_operator_applications => operator_applications: val usize,
+    with_preconditioner_applications => preconditioner_applications: val usize,
+    with_operator_rounds => operator_rounds: val usize,
+});
+
 /// A completed GMRES solve.
+///
+/// Built by the solver. The default is the empty solve of a zero right-hand
+/// side, and the `with_*` setters replace its parts.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct GmresRun {
     /// Approximate solution.
     pub solution: Vec<f64>,
@@ -266,6 +291,22 @@ pub struct GmresRun {
     /// Iteration and application counts.
     pub record: KrylovRecord,
 }
+
+impl Default for GmresRun {
+    fn default() -> Self {
+        Self {
+            solution: Vec::new(),
+            status: GmresStatus::ZeroRightHandSide,
+            record: KrylovRecord::default(),
+        }
+    }
+}
+
+with_setters!(GmresRun {
+    with_solution => solution: val Vec<f64>,
+    with_status => status: val GmresStatus,
+    with_record => record: val KrylovRecord,
+});
 
 /// Typed numerical refusal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -420,7 +461,12 @@ impl<OE, PE> GmresFailure<OE, PE> {
 }
 
 /// Controls for unrestarted GMRES.
+///
+/// The default asks for a relative residual of `1e-8` with the iteration
+/// budget equal to the system dimension. Chain the `with_*` setters after
+/// `default()` or [`Self::unrestarted`].
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct GmresOptions {
     /// Relative residual tolerance in the original system.
     pub relative_tolerance: f64,
@@ -437,6 +483,17 @@ impl GmresOptions {
         }
     }
 }
+
+impl Default for GmresOptions {
+    fn default() -> Self {
+        Self::unrestarted(1e-8)
+    }
+}
+
+with_setters!(GmresOptions {
+    with_relative_tolerance => relative_tolerance: val f64,
+    with_max_iterations => max_iterations: opt usize,
+});
 
 fn dot(left: &[f64], right: &[f64]) -> f64 {
     left.iter().zip(right).map(|(a, b)| a * b).sum()
@@ -2165,5 +2222,47 @@ mod tests {
         let boxed: Box<dyn Error> = Box::new(refused);
         assert!(boxed.source().is_some());
         Ok(())
+    }
+
+    #[test]
+    fn options_and_results_have_defaults_and_setters() {
+        let options = GmresOptions::default();
+        assert_eq!(options, GmresOptions::unrestarted(1e-8));
+        let tuned = options.with_relative_tolerance(1e-3).with_max_iterations(5);
+        assert_eq!(tuned.relative_tolerance, 1e-3);
+        assert_eq!(tuned.max_iterations, Some(5));
+        assert_eq!(tuned.with_max_iterations(None).max_iterations, None);
+
+        let iteration = KrylovIteration::default()
+            .with_iteration(2)
+            .with_absolute_residual(0.5)
+            .with_relative_residual(0.25)
+            .with_operator_applications(2)
+            .with_preconditioner_applications(3);
+        assert_eq!(iteration.iteration, 2);
+        assert_eq!(iteration.relative_residual, 0.25);
+        assert_eq!(iteration.preconditioner_applications, 3);
+
+        let record = KrylovRecord::default()
+            .with_right_hand_side_norm(2.0)
+            .with_iterations(vec![iteration])
+            .with_operator_applications(2)
+            .with_preconditioner_applications(3)
+            .with_operator_rounds(1);
+        assert_eq!(record.iterations, vec![iteration]);
+        assert_eq!(record.operator_rounds, 1);
+        assert_eq!(KrylovRecord::new(2.0).right_hand_side_norm, 2.0);
+        assert_eq!(KrylovRecord::new(2.0).iterations, Vec::new());
+
+        let run = GmresRun::default();
+        assert_eq!(run.status, GmresStatus::ZeroRightHandSide);
+        assert!(run.solution.is_empty());
+        let run = run
+            .with_solution(vec![1.0])
+            .with_status(GmresStatus::Converged)
+            .with_record(record.clone());
+        assert_eq!(run.solution, vec![1.0]);
+        assert_eq!(run.status, GmresStatus::Converged);
+        assert_eq!(run.record, record);
     }
 }
