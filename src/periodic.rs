@@ -445,6 +445,9 @@ fn diagonal_log(r: &[f64], n: usize) -> Result<f64, CyclicError> {
     let mut total = 0.0;
     for index in 0..n {
         let value = r[index * n + index].abs();
+        if !value.is_finite() {
+            return Err(CyclicError::NonFinite);
+        }
         if value == 0.0 {
             return Err(CyclicError::Singular);
         }
@@ -483,7 +486,8 @@ fn sub_block(
 /// The bordered cyclic matrix after exact power-of-two scaling.
 struct Equilibrated {
     transfers: Vec<Vec<f64>>,
-    /// Diagonal of row block `i` in block column `(i + 1) mod b`.
+    /// Diagonal of row block `i` in block column `(i + 1) mod b`; zero for
+    /// one block, whose `transfers[0]` holds the scaled `T_0 - I`.
     coupling: Vec<Vec<f64>>,
     column_border: Vec<Vec<f64>>,
     row_border: Vec<Vec<f64>>,
@@ -579,6 +583,10 @@ fn equilibrate(
         column_scale[b * m + slot] = scale;
         exponent += power;
     }
+    // With one block the matrix is `I - T_0`. Scaling `T_0` and the
+    // identity apart overflows to `inf - inf` whenever a unit diagonal
+    // entry meets a large row and column scale, so the scaled difference
+    // goes into the single block and the coupling stays empty.
     let scaled_transfers = transfers
         .iter()
         .enumerate()
@@ -586,7 +594,14 @@ fn equilibrate(
             (0..m * m)
                 .map(|index| {
                     let (row, column) = (index / m, index % m);
-                    row_scale[block * m + row] * transfer[index] * column_scale[block * m + column]
+                    let scale = |value: f64| {
+                        row_scale[block * m + row] * value * column_scale[block * m + column]
+                    };
+                    if b == 1 {
+                        -scale(entry(block, row, column))
+                    } else {
+                        scale(transfer[index])
+                    }
                 })
                 .collect()
         })
@@ -595,7 +610,13 @@ fn equilibrate(
         .map(|block| {
             let next = (block + 1) % b;
             (0..m)
-                .map(|row| row_scale[block * m + row] * column_scale[next * m + row])
+                .map(|row| {
+                    if b == 1 {
+                        0.0
+                    } else {
+                        row_scale[block * m + row] * column_scale[next * m + row]
+                    }
+                })
                 .collect()
         })
         .collect();
@@ -1205,6 +1226,91 @@ mod tests {
                 "dense b {b}: {dense}"
             );
         }
+    }
+
+    /// The scaled `I - T_0` of a single block, read back from the
+    /// equilibrated block and coupling, and its `log|det|` with the
+    /// power-of-two scaling undone.
+    fn check_unit_diagonal_single_block(tiny: f64) {
+        let eq = equilibrate(&[vec![1.0, tiny, tiny, 2.0]], 2, &[], &[]);
+        let scaled: Vec<f64> = (0..4)
+            .map(|index| {
+                let diagonal = if index % 3 == 0 {
+                    eq.coupling[0][index / 3]
+                } else {
+                    0.0
+                };
+                diagonal - eq.transfers[0][index]
+            })
+            .collect();
+        assert!(
+            scaled.iter().all(|value| value.is_finite()),
+            "tiny {tiny:e}: scaled I - T {scaled:?}"
+        );
+        // det(I - T) = (1 - 1)(1 - 2) - tiny^2 = -tiny^2.
+        let det = scaled[0] * scaled[3] - scaled[1] * scaled[2];
+        let log_abs = det.abs().ln() - eq.exponent as f64 * std::f64::consts::LN_2;
+        let exact = 2.0 * tiny.ln();
+        assert!(
+            (log_abs - exact).abs() <= 1e-9 * exact.abs(),
+            "tiny {tiny:e}: log|det| {log_abs} exact {exact}"
+        );
+    }
+
+    /// With one block the matrix is `I - T_0`. A unit diagonal entry makes
+    /// that matrix entry exactly zero, and rows and columns that are scaled
+    /// up by large powers of two must not turn it into `inf - inf`.
+    #[test]
+    fn a_single_block_with_a_unit_diagonal_and_couplings_of_1e_160_scales_finitely() {
+        check_unit_diagonal_single_block(1e-160);
+    }
+
+    #[test]
+    fn a_single_block_with_a_unit_diagonal_and_couplings_of_1e_200_scales_finitely() {
+        check_unit_diagonal_single_block(1e-200);
+    }
+
+    #[test]
+    fn a_single_block_with_a_unit_diagonal_factors_end_to_end() {
+        let tiny = 1e-100_f64;
+        let factor =
+            bordered_cyclic_log_abs(&[vec![1.0, tiny, tiny, 2.0]], 2, &[], &[]).expect("factor");
+        let exact = 2.0 * tiny.ln();
+        assert!((factor.log_abs - exact).abs() <= 1e-9 * exact.abs());
+        assert!(factor.norm1.is_finite() && factor.inverse_norm1.is_finite());
+        // (I - T) x = y with y = (tiny, 0) gives x = (1 / tiny, -1).
+        let x = factor.solve(&[tiny, 0.0]).expect("solve");
+        assert!((x[0] * tiny - 1.0).abs() <= 1e-9, "{x:?}");
+        assert!((x[1] + 1.0).abs() <= 1e-9, "{x:?}");
+    }
+
+    /// The factorization of these matrices is finite, but the inverse of
+    /// `I - T_0` has entries near `1 / tiny^2`, beyond the range of `f64`.
+    /// The condition estimate reports that as a norm-estimate error, not
+    /// as a singular matrix and not as a NaN.
+    #[test]
+    fn an_overflowing_inverse_norm_of_a_single_block_is_a_typed_error() {
+        for tiny in [1e-160_f64, 1e-200] {
+            assert_eq!(
+                bordered_cyclic_log_abs(&[vec![1.0, tiny, tiny, 2.0]], 2, &[], &[]).unwrap_err(),
+                CyclicError::NonFiniteNormEstimate,
+                "tiny {tiny:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_nonfinite_triangular_diagonal_is_a_typed_error() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let r = [2.0, 0.5, 0.0, bad];
+            assert_eq!(diagonal_log(&r, 2), Err(CyclicError::NonFinite), "{bad}");
+        }
+        assert_eq!(
+            diagonal_log(&[2.0, 0.5, 0.0, 0.0], 2),
+            Err(CyclicError::Singular)
+        );
+        let good = diagonal_log(&[2.0, 0.5, 0.0, -4.0], 2).expect("finite");
+        assert!((good - 8.0_f64.ln()).abs() <= 4.0 * f64::EPSILON);
     }
 
     #[test]
