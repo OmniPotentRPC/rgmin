@@ -7,6 +7,10 @@ on:
       - "docs/**"
       - "README.md"
       - "CHANGELOG.md"
+      - "AGENTS.md"
+      - "llms.txt"
+      - "llms-full.txt"
+      - "scripts/generate_docs_inventory.py"
       - "scripts/check_links.py"
       - ".github/workflows/docs.yml"
   pull_request:
@@ -14,6 +18,10 @@ on:
       - "docs/**"
       - "README.md"
       - "CHANGELOG.md"
+      - "AGENTS.md"
+      - "llms.txt"
+      - "llms-full.txt"
+      - "scripts/generate_docs_inventory.py"
       - "scripts/check_links.py"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
@@ -35,6 +43,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: sudo apt-get install -y emacs-nox
+      - name: Public API coverage and generated LLM files
+        run: python3 scripts/generate_docs_inventory.py --check
       - name: Export the org sources to reStructuredText
         run: emacs --batch -l export.el
         working-directory: docs
