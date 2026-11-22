@@ -14,8 +14,10 @@
 //!   which is why they are used for saddle-point and instanton searches.
 //!
 //! No test compares `s` or `y` with an absolute size: every update is
-//! invariant under `(s, y) -> (α s, α y)`. Deciding whether a pair is above
-//! the noise of the gradient is the caller's job.
+//! invariant under `(s, y) -> (α s, α y)`. Products of two Gram factors are
+//! divided one factor at a time, so a very long or very short step does not
+//! overflow or underflow the weight. Deciding whether a pair is above the
+//! noise of the gradient is the caller's job.
 
 use thiserror::Error;
 
@@ -26,6 +28,11 @@ pub enum SecantKind {
     /// Powell symmetric Broyden.
     Psb,
     /// Symmetric rank one with the relative skip test.
+    ///
+    /// Build this variant with [`SecantKind::sr1`]. The variant is
+    /// non-exhaustive, so a struct literal cannot bypass the `[0, 1)` check
+    /// on the skip threshold.
+    #[non_exhaustive]
     Sr1 {
         /// The update is skipped when `|rᵀs| < skip ‖r‖ ‖s‖`.
         skip_bits: u64,
@@ -129,8 +136,10 @@ pub fn update_symmetric(
         return Ok(SecantOutcome::Satisfied);
     }
     // Weights of r rᵀ, (r sᵀ + s rᵀ) and s sᵀ in the increment.
+    // `ss * ss` and `rr * ss` overflow near a step of 1e100 and underflow
+    // near 1e-80. Divide one square at a time: `(rs / ss) / ss`.
     let (w_rr, w_rs, w_ss) = match kind {
-        SecantKind::Psb => (0.0, ss.recip(), -rs / (ss * ss)),
+        SecantKind::Psb => (0.0, ss.recip(), -((rs / ss) / ss)),
         SecantKind::Sr1 { skip_bits } => {
             let skip = f64::from_bits(skip_bits);
             if rs == 0.0 || rs.abs() < skip * rr.sqrt() * ss.sqrt() {
@@ -139,9 +148,9 @@ pub fn update_symmetric(
             (rs.recip(), 0.0, 0.0)
         }
         SecantKind::Bofill => {
-            let phi = rs * rs / (rr * ss);
+            let phi = (rs / rr) * (rs / ss);
             let psb = 1.0 - phi;
-            (rs / (rr * ss), psb / ss, -psb * rs / (ss * ss))
+            ((rs / rr) / ss, psb / ss, -((psb * (rs / ss)) / ss))
         }
     };
     if !(w_rr.is_finite() && w_rs.is_finite() && w_ss.is_finite()) {
@@ -362,5 +371,38 @@ mod tests {
             SecantKind::sr1(f64::NAN),
             Err(SecantError::Skip(_))
         ));
+    }
+
+    #[test]
+    fn extreme_scales_keep_the_secant_residual_at_roundoff() {
+        let n = 4;
+        let a = target(n);
+        let s0 = step(n, 1);
+        let y0 = matvec(&a, n, &s0);
+        for scale in [1e100, 1e-80] {
+            let s: Vec<f64> = s0.iter().map(|v| v * scale).collect();
+            let y: Vec<f64> = y0.iter().map(|v| v * scale).collect();
+            for kind in kinds() {
+                let mut b = vec![0.0; n * n];
+                for i in 0..n {
+                    b[i * n + i] = 1.0;
+                }
+                let outcome = update_symmetric(kind, &mut b, n, &s, &y);
+                assert_eq!(
+                    outcome,
+                    Ok(SecantOutcome::Applied),
+                    "{kind:?} scale {scale:e}"
+                );
+                let bs = matvec(&b, n, &s);
+                let bound = residual_bound(&b, n, &s, &y);
+                for i in 0..n {
+                    let residual = (bs[i] - y[i]).abs();
+                    assert!(
+                        residual <= bound,
+                        "{kind:?} scale {scale:e} component {i}: residual {residual:e} bound {bound:e}"
+                    );
+                }
+            }
+        }
     }
 }
