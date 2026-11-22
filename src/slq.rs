@@ -220,6 +220,11 @@ impl SplitMix64 {
 const HUTCHPP_SKETCH_DOMAIN: u64 = 0x8f71_4498_5b62_37a1;
 const HUTCHPP_PROBE_DOMAIN: u64 = 0xd1b5_4a32_d192_ed03;
 
+/// Relative cutoff for a Hutch++ sketch vector, as a fraction of the larger of
+/// `||A s||` and `||M_cv s||`. A residual below it is roundoff from the
+/// control-variate subtraction, whatever the scale of the operator.
+const HUTCHPP_SKETCH_REL_TOL: f64 = 1e-12;
+
 fn domain_separated_seed(seed: u64, domain: u64) -> u64 {
     let mut mixer = SplitMix64::new(seed ^ domain);
     mixer.next_u64()
@@ -2546,6 +2551,7 @@ where
                 a_pos(&s_cur, &mut s_nxt)?;
                 s_cv.fill(0.0);
                 cv_matvec(&s_cur, &mut s_cv)?;
+                let op_scale = norm2_slice(&s_nxt).max(norm2_slice(&s_cv));
                 for (dst, &cv_v) in s_nxt.iter_mut().zip(s_cv.iter()) {
                     *dst -= cv_v;
                 }
@@ -2559,7 +2565,10 @@ where
                     project_out_basis(&mut s_nxt, &probe_deflate);
                 }
                 let nrm = norm2_slice(&s_nxt);
-                if !(nrm.is_finite() && nrm > 1e-14) {
+                if !(nrm.is_finite() && op_scale.is_finite()) {
+                    return Err(slq_err("Hutch++ sketch operator scale is not finite"));
+                }
+                if op_scale == 0.0 || nrm <= HUTCHPP_SKETCH_REL_TOL * op_scale {
                     s_cur.fill(0.0);
                     break;
                 }
