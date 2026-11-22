@@ -1,0 +1,1 @@
+Add a strict radii-polynomial comparison for a scalar majorant. Every bound in the comparison rounds upward and the margin rounds downward. A non-positive radius, a negative or non-finite bound, or an image that is not strictly inside the radius returns a typed refusal. Certificate fields are private and are read through getters.
