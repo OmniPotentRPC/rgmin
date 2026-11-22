@@ -129,15 +129,10 @@ const PROJECTION_TIME_LIMIT: f64 = 0.05;
 /// Seconds the feasible step QP may run unless the options set a limit.
 const FEASIBLE_STEP_TIME_LIMIT: f64 = 1.0;
 
-/// The limit for one solve: the configured value, else that solve's default.
-fn time_limit_or(options: &HighsOptions, default: f64) -> f64 {
-    options.time_limit.unwrap_or(default)
-}
-
 /// Apply the time limit to one model.
 fn set_time_limit(model: &mut highs::Model, options: &HighsOptions, default: f64) -> Result<()> {
     model
-        .try_set_option("time_limit", time_limit_or(options, default))
+        .try_set_option("time_limit", options.time_limit_or(default)?)
         .map_err(|_| Error::Highs("cannot set time_limit".into()))
 }
 
@@ -764,7 +759,7 @@ fn identity_csc(n: usize) -> (Vec<HighsInt>, Vec<HighsInt>, Vec<f64>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{FEASIBLE_STEP_TIME_LIMIT, PROJECTION_TIME_LIMIT, identity_csc, time_limit_or};
+    use super::{FEASIBLE_STEP_TIME_LIMIT, PROJECTION_TIME_LIMIT, identity_csc};
     use crate::HighsOptions;
 
     #[test]
@@ -778,12 +773,18 @@ mod tests {
     #[test]
     fn each_solve_keeps_its_own_limit_until_one_is_set() {
         let options = HighsOptions::default();
-        assert_eq!(time_limit_or(&options, PROJECTION_TIME_LIMIT), 0.05);
-        assert_eq!(time_limit_or(&options, FEASIBLE_STEP_TIME_LIMIT), 1.0);
+        assert_eq!(options.time_limit_or(PROJECTION_TIME_LIMIT).unwrap(), 0.05);
+        assert_eq!(
+            options.time_limit_or(FEASIBLE_STEP_TIME_LIMIT).unwrap(),
+            1.0
+        );
         let set = options.with_time_limit(2.5);
-        assert_eq!(time_limit_or(&set, PROJECTION_TIME_LIMIT), 2.5);
-        assert_eq!(time_limit_or(&set, FEASIBLE_STEP_TIME_LIMIT), 2.5);
+        assert_eq!(set.time_limit_or(PROJECTION_TIME_LIMIT).unwrap(), 2.5);
+        assert_eq!(set.time_limit_or(FEASIBLE_STEP_TIME_LIMIT).unwrap(), 2.5);
         let cleared = set.with_time_limit(None);
-        assert_eq!(time_limit_or(&cleared, FEASIBLE_STEP_TIME_LIMIT), 1.0);
+        assert_eq!(
+            cleared.time_limit_or(FEASIBLE_STEP_TIME_LIMIT).unwrap(),
+            1.0
+        );
     }
 }

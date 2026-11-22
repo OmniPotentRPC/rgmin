@@ -12,30 +12,38 @@ fn automatic_engine_and_crossover_preserve_main_defaults() {
     assert!(options.time_limit.is_none());
 }
 
-/// HiGHS refuses a negative limit. The projection QP and the feasible
-/// step QP must both pass `HighsOptions::time_limit` through and
-/// surface that refusal, instead of keeping a private literal.
+/// Both QP paths reject an invalid override with the typed configuration
+/// error before passing it to HiGHS.
 #[test]
-fn both_solves_apply_the_configured_time_limit() {
+fn both_solves_reject_invalid_time_limits() {
     use ndarray::array;
-    let options = rgmin::HighsOptions::default().with_time_limit(-1.0);
     let direction = array![1.0, -1.0];
     let point = array![0.0, 0.0];
     let constraints = HighsStep::default().with_equalities(vec![(vec![(0, 1.0), (1, 1.0)], 0.0)]);
-    let projected =
-        rgmin::lbfgs_qp::highs_projected_step(&direction, point.view(), &constraints, &options);
-    let feasible = rgmin::lbfgs_qp::highs_feasible_step_with_options(
-        Some(&direction),
-        None,
-        &direction,
-        Some(1.0),
-        None,
-        None,
-        &options,
-    );
-    for (name, result) in [("projection", projected), ("feasible", feasible)] {
-        let err = result.expect_err(name);
-        assert!(err.to_string().contains("time_limit"), "{name}: {err}");
+    for limit in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let options = rgmin::HighsOptions::default().with_time_limit(limit);
+        let projected =
+            rgmin::lbfgs_qp::highs_projected_step(&direction, point.view(), &constraints, &options);
+        let feasible = rgmin::lbfgs_qp::highs_feasible_step_with_options(
+            Some(&direction),
+            None,
+            &direction,
+            Some(1.0),
+            None,
+            None,
+            &options,
+        );
+        for (name, result) in [("projection", projected), ("feasible", feasible)] {
+            let error = result.expect_err(name);
+            assert!(
+                matches!(
+                    error,
+                    rgmin::Error::HighsTimeLimit { limit: got }
+                        if got.to_bits() == limit.to_bits()
+                ),
+                "{name}: {error}"
+            );
+        }
     }
 }
 
