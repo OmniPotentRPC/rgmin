@@ -8,7 +8,8 @@ use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
 use crate::report::Report;
 use crate::step::{
-    energy_noise_report, implicit_atom_cap, l2, max_atom_norm, one_shot_report, take_step,
+    energy_noise_report, implicit_atom_cap, l2, max_atom_norm, one_shot_report, stop_if_unmoved,
+    take_step,
 };
 use crate::stop::{Counted, StopRules, counted, stop_after};
 
@@ -105,6 +106,10 @@ where
                 istep = t.alpha;
             }
         } else {
+            if let Some(stop) = stop_if_unmoved(control, true, value, pos.clone(), step + 1, gnorm)
+            {
+                return stop;
+            }
             m = m_old;
             v = v_old;
         }
@@ -221,6 +226,7 @@ mod tests {
             backward_polish: false,
             etol: None,
             max_evals: None,
+            require_convergence: false,
         };
         let linesearch = LineSearch::Backtracking {
             c: 1e-4,
