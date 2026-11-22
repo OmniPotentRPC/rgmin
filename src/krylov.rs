@@ -234,10 +234,11 @@ pub enum KrylovRefusal {
     Tolerance,
     /// A nonzero system was given no iteration budget.
     ZeroIterationBudget,
-    /// A right-hand side, operator image, preconditioner image, rotation, or
-    /// projected coefficient is non-finite.
+    /// A right-hand side, operator image, preconditioner image, Givens
+    /// rotation, projected coefficient, or residual is non-finite.
     NonFinite,
-    /// Arnoldi produced a singular projected system.
+    /// Arnoldi produced a singular projected system. The record ends with an
+    /// iteration that carries the true residual of the unchanged iterate.
     SingularProjectedSystem,
 }
 
@@ -423,6 +424,45 @@ fn linear_combination(coefficients: &[f64], vectors: &[Vec<f64>], dimension: usi
     result
 }
 
+fn completed_iteration(
+    iteration: usize,
+    absolute_residual: f64,
+    record: &KrylovRecord,
+) -> Result<KrylovIteration, KrylovRefusal> {
+    let relative_residual = absolute_residual / record.right_hand_side_norm;
+    if !absolute_residual.is_finite() || !relative_residual.is_finite() {
+        return Err(KrylovRefusal::NonFinite);
+    }
+    Ok(KrylovIteration {
+        iteration,
+        absolute_residual,
+        relative_residual,
+        operator_applications: record.operator_applications,
+        preconditioner_applications: record.preconditioner_applications,
+    })
+}
+
+/// True residual of the iterate that a breakdown leaves unchanged: the one
+/// recorded by the previous iteration, or the right-hand side for the first.
+fn breakdown_iteration(
+    iteration: usize,
+    record: &KrylovRecord,
+) -> Result<KrylovIteration, KrylovRefusal> {
+    let unchanged = match record.iterations.last() {
+        Some(previous) => previous.absolute_residual,
+        None => record.right_hand_side_norm,
+    };
+    completed_iteration(iteration, unchanged, record)
+}
+
+fn breakdown_reason(rotation_norm: f64) -> KrylovRefusal {
+    if rotation_norm.is_finite() {
+        KrylovRefusal::SingularProjectedSystem
+    } else {
+        KrylovRefusal::NonFinite
+    }
+}
+
 fn true_residual_norm(
     right_hand_side: &[f64],
     operator_images: &[Vec<f64>],
@@ -532,19 +572,18 @@ where
             hessenberg[row] = cosines[row] * upper + sines[row] * lower;
             hessenberg[row + 1] = -sines[row] * upper + cosines[row] * lower;
         }
+        // A non-finite subdiagonal makes the rotation norm non-finite, so the
+        // breakdown test below is also the finiteness test for Arnoldi.
         let rotation_norm = hessenberg[column_index].hypot(hessenberg[column_index + 1]);
         if !rotation_norm.is_finite() || rotation_norm == 0.0 {
-            let absolute_residual = transformed_rhs[column_index].abs();
-            let iteration = KrylovIteration {
-                iteration: column_index + 1,
-                absolute_residual,
-                relative_residual: absolute_residual / right_hand_side_norm,
-                operator_applications: record.operator_applications,
-                preconditioner_applications: record.preconditioner_applications,
+            let reason = breakdown_reason(rotation_norm);
+            let iteration = match breakdown_iteration(column_index + 1, &record) {
+                Ok(iteration) => iteration,
+                Err(reason) => return Err(refusal(reason, record)),
             };
             record.iterations.push(iteration);
             observer.observe(iteration);
-            return Err(refusal(KrylovRefusal::SingularProjectedSystem, record));
+            return Err(refusal(reason, record));
         }
         let cosine = hessenberg[column_index] / rotation_norm;
         let sine = hessenberg[column_index + 1] / rotation_norm;
@@ -562,15 +601,9 @@ where
         };
         let absolute_residual =
             true_residual_norm(right_hand_side, &operator_images, &coefficients);
-        if !absolute_residual.is_finite() {
-            return Err(refusal(KrylovRefusal::NonFinite, record));
-        }
-        let iteration = KrylovIteration {
-            iteration: column_index + 1,
-            absolute_residual,
-            relative_residual: absolute_residual / right_hand_side_norm,
-            operator_applications: record.operator_applications,
-            preconditioner_applications: record.preconditioner_applications,
+        let iteration = match completed_iteration(column_index + 1, absolute_residual, &record) {
+            Ok(iteration) => iteration,
+            Err(reason) => return Err(refusal(reason, record)),
         };
         record.iterations.push(iteration);
         observer.observe(iteration);
@@ -812,23 +845,18 @@ where
                 hessenberg[row] = state.cosines[row] * upper + state.sines[row] * lower;
                 hessenberg[row + 1] = -state.sines[row] * upper + state.cosines[row] * lower;
             }
+            // A non-finite subdiagonal makes the rotation norm non-finite, so
+            // the breakdown test below is also the finiteness test for Arnoldi.
             let rotation_norm = hessenberg[column_index].hypot(hessenberg[column_index + 1]);
             if !rotation_norm.is_finite() || rotation_norm == 0.0 {
-                let absolute_residual = state.transformed_rhs[column_index].abs();
-                let iteration = KrylovIteration {
-                    iteration: column_index + 1,
-                    absolute_residual,
-                    relative_residual: absolute_residual / state.record.right_hand_side_norm,
-                    operator_applications: state.record.operator_applications,
-                    preconditioner_applications: state.record.preconditioner_applications,
+                let reason = breakdown_reason(rotation_norm);
+                let iteration = match breakdown_iteration(column_index + 1, &state.record) {
+                    Ok(iteration) => iteration,
+                    Err(reason) => return Err(block_refusal(reason, &states, index)),
                 };
                 state.record.iterations.push(iteration);
                 observers[index].observe(iteration);
-                return Err(block_refusal(
-                    KrylovRefusal::SingularProjectedSystem,
-                    &states,
-                    index,
-                ));
+                return Err(block_refusal(reason, &states, index));
             }
             let cosine = hessenberg[column_index] / rotation_norm;
             let sine = hessenberg[column_index + 1] / rotation_norm;
@@ -850,16 +878,11 @@ where
                 &state.operator_images,
                 &coefficients,
             );
-            if !absolute_residual.is_finite() {
-                return Err(block_refusal(KrylovRefusal::NonFinite, &states, index));
-            }
-            let iteration = KrylovIteration {
-                iteration: column_index + 1,
-                absolute_residual,
-                relative_residual: absolute_residual / state.record.right_hand_side_norm,
-                operator_applications: state.record.operator_applications,
-                preconditioner_applications: state.record.preconditioner_applications,
-            };
+            let iteration =
+                match completed_iteration(column_index + 1, absolute_residual, &state.record) {
+                    Ok(iteration) => iteration,
+                    Err(reason) => return Err(block_refusal(reason, &states, index)),
+                };
             state.record.iterations.push(iteration);
             observers[index].observe(iteration);
             let converged =
@@ -1690,5 +1713,163 @@ mod tests {
             _ => return Err("block overflow was not refused"),
         }
         Ok(())
+    }
+
+    struct Degrading {
+        dimension: usize,
+        perturbation: f64,
+        working_calls: usize,
+        calls: usize,
+    }
+
+    impl LinearOperator for Degrading {
+        type Error = core::convert::Infallible;
+
+        fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {
+            self.calls += 1;
+            for row in 0..self.dimension {
+                output[row] = if self.calls > self.working_calls {
+                    0.0
+                } else {
+                    0.3 * input[row]
+                        + self.perturbation * input[(row + 1) % self.dimension] * (row as f64 + 1.0)
+                };
+            }
+            Ok(())
+        }
+    }
+
+    fn degrading(working_calls: usize) -> Degrading {
+        Degrading {
+            dimension: 4,
+            perturbation: 1e-12,
+            working_calls,
+            calls: 0,
+        }
+    }
+
+    #[test]
+    fn breakdown_reports_the_true_residual_of_the_unchanged_iterate() -> Result<(), &'static str> {
+        let right_hand_side = vec![1.0, 2.0, 3.0, 4.0];
+        let options = GmresOptions::unrestarted(1e-30);
+        let reference = gmres_right(
+            &mut degrading(usize::MAX),
+            &mut Identity,
+            &right_hand_side,
+            GmresOptions {
+                max_iterations: Some(2),
+                ..options
+            },
+            &mut NoObserver,
+        )
+        .map_err(|_| "two-iteration reference solve refused")?;
+        let true_residual = match reference.record.iterations.last() {
+            Some(iteration) => iteration.absolute_residual,
+            None => return Err("reference solve has no iterations"),
+        };
+        assert!(true_residual > 1e-19);
+
+        let mut streamed = Vec::new();
+        let scalar = gmres_right(
+            &mut degrading(2),
+            &mut Identity,
+            &right_hand_side,
+            options,
+            &mut |iteration| streamed.push(iteration),
+        );
+        let scalar_record = match scalar {
+            Err(GmresFailure::Refused { reason, record }) => {
+                assert_eq!(reason, KrylovRefusal::SingularProjectedSystem);
+                record
+            }
+            _ => return Err("scalar breakdown was not a singular refusal"),
+        };
+        assert_eq!(scalar_record.iterations.len(), 3);
+        assert_eq!(streamed, scalar_record.iterations);
+        let broken = scalar_record.iterations[2];
+        assert_eq!(broken.absolute_residual, true_residual);
+        assert_eq!(
+            broken.relative_residual,
+            true_residual / scalar_record.right_hand_side_norm
+        );
+
+        let block = gmres_right_block(
+            &mut degrading(2),
+            &mut [Identity],
+            &[right_hand_side],
+            options,
+            &mut [NoObserver],
+        );
+        match block {
+            Err(GmresFailure::BlockRefused { reason, record, .. }) => {
+                assert_eq!(reason, KrylovRefusal::SingularProjectedSystem);
+                assert_eq!(record, scalar_record);
+            }
+            _ => return Err("block breakdown was not a singular refusal"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_non_finite_rotation_is_not_a_singular_system() -> Result<(), &'static str> {
+        let overflow = |_: &[f64], output: &mut [f64]| -> Result<(), core::convert::Infallible> {
+            output.fill(f64::MAX);
+            Ok(())
+        };
+        let right_hand_side = vec![1.0, 0.0];
+        let options = GmresOptions::unrestarted(1e-8);
+        let mut streamed = Vec::new();
+        let scalar = gmres_right(
+            &mut { overflow },
+            &mut Identity,
+            &right_hand_side,
+            options,
+            &mut |iteration| streamed.push(iteration),
+        );
+        let scalar_record = match scalar {
+            Err(GmresFailure::Refused { reason, record }) => {
+                assert_eq!(reason, KrylovRefusal::NonFinite);
+                record
+            }
+            _ => return Err("overflowing rotation was not refused as non-finite"),
+        };
+        assert_eq!(scalar_record.iterations.len(), 1);
+        assert_eq!(streamed, scalar_record.iterations);
+        assert_eq!(scalar_record.iterations[0].absolute_residual, 1.0);
+        assert_eq!(scalar_record.iterations[0].relative_residual, 1.0);
+
+        let block = gmres_right_block(
+            &mut { overflow },
+            &mut [Identity],
+            &[right_hand_side],
+            options,
+            &mut [NoObserver],
+        );
+        match block {
+            Err(GmresFailure::BlockRefused { reason, record, .. }) => {
+                assert_eq!(reason, KrylovRefusal::NonFinite);
+                assert_eq!(record, scalar_record);
+            }
+            _ => return Err("block overflowing rotation was not non-finite"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_residual_ratio_that_overflows_is_refused() {
+        let record = KrylovRecord::new(1e-300);
+        assert_eq!(
+            completed_iteration(1, 1e300, &record),
+            Err(KrylovRefusal::NonFinite)
+        );
+        assert_eq!(
+            completed_iteration(1, f64::NAN, &record),
+            Err(KrylovRefusal::NonFinite)
+        );
+        let accepted = completed_iteration(3, 2e-300, &record);
+        assert_eq!(
+            accepted.map(|row| (row.iteration, row.relative_residual)),
+            Ok((3, 2.0))
+        );
     }
 }
