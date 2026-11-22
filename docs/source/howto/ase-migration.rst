@@ -42,15 +42,29 @@ match. The nanobind classes live in ``rgmin.ase`` and are a separate binding.
 ``rgmin.ase.BFGSLineSearch`` is also exported as ``QuasiNewton``.
 ``rgmin.ase.LBFGSLineSearch`` subclasses ``rgmin.ase.LBFGS``. Both match the
 ASE 3.29.0 constructors
-(`BFGSLineSearch <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/bfgslinesearch.py>`__,
-`LBFGSLineSearch <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/lbfgs.py>`__,
-`QuasiNewton <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/__init__.py>`__).
+(`BFGSLineSearch <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/bfgslinesearch.py>`_,
+`LBFGSLineSearch <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/lbfgs.py>`_,
+`QuasiNewton <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/__init__.py>`_).
 ``c1=0.23``, ``c2=0.46``, ``alpha``, ``stpmax=50``, ``memory=100``, and ``maxstep``
 are the ASE values. ``alpha`` is the fixed inverse-Hessian scale ``1/alpha``
-on the Rust BFGS or L-BFGS session. ``stpmax`` bounds the line-search
-multiplier when that bound is tighter than the per-atom cap. ``damping``
-is stored and, as in ASE, does not scale a line-search step. The first
-trial is the full quasi-Newton step. ``restart`` replays the rgmin
+on the Rust BFGS or L-BFGS session. The session runs a port of ASE's
+`LineSearch <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/utils/linesearch.py>`_.
+The first trial is the full quasi-Newton step and ``stpmax`` bounds the
+step multiplier. ``maxstep`` limits how far an atom moves from one trial
+to the next, so one step can move an atom further than ``maxstep``. A
+failed search leaves the atoms where they were and raises
+``RuntimeError("LineSearch failed!")``, as ASE does. An opening step above
+``stpmax``, so any ``stpmax`` below 1, fails that way. ASE 3.29 ends a
+search successfully on its warnings, including a trial at ``stpmax``, and
+so does rgmin. ``damping`` is stored and, as in ASE, does not scale a
+line-search step.
+
+Three differences remain. The search stops after ``linesearch_maxiter``
+trials, 20 by default, where ASE has no limit; running out raises the
+same ``RuntimeError``. The inverse-Hessian update keeps rgmin's curvature
+guards, so ASE's rule for skipping a BFGS update and its unconditional
+L-BFGS pair are not reproduced. A ``maxmove`` is refused, because it would
+cap the step outside ASE's search. ``restart`` replays the rgmin
 evaluation log; it does not read ASE's Hessian JSON, and
 ``replay_trajectory`` is not ASE's Hessian replay. The BFGS line-search
 log adds ASE's force-call column. The L-BFGS line-search log keeps the
