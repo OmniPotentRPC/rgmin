@@ -179,15 +179,22 @@ fn determinant(matrix: &[Complex], width: usize) -> Result<Complex, PeriodicProd
     let mut work = matrix.to_vec();
     let mut result = complex(precision, 1.0);
     for column in 0..width {
-        let pivot = (column..width)
-            .max_by(|left, right| {
-                work[*left * width + column]
-                    .abs2()
-                    .partial_cmp(&work[*right * width + column].abs2())
-                    .expect("finite multiprecision pivot")
-            })
-            .ok_or(PeriodicProductError::InvalidSpectrum)?;
-        if work[pivot * width + column].abs2() == 0 {
+        let mut pivot = column;
+        let mut largest = work[column * width + column].abs2();
+        if !largest.is_finite() {
+            return Err(PeriodicProductError::InvalidSpectrum);
+        }
+        for row in column + 1..width {
+            let size = work[row * width + column].abs2();
+            if !size.is_finite() {
+                return Err(PeriodicProductError::InvalidSpectrum);
+            }
+            if size > largest {
+                largest = size;
+                pivot = row;
+            }
+        }
+        if largest == 0 {
             return Err(PeriodicProductError::InvalidSpectrum);
         }
         if pivot != column {
@@ -206,17 +213,33 @@ fn determinant(matrix: &[Complex], width: usize) -> Result<Complex, PeriodicProd
             }
         }
     }
+    if !result.real().is_finite() || !result.imag().is_finite() {
+        return Err(PeriodicProductError::InvalidSpectrum);
+    }
     Ok(result)
 }
 
-fn householder_vector(values: &[Complex]) -> Option<(Vec<Complex>, Float)> {
+type Reflector = (Vec<Complex>, Float);
+
+/// Householder vector and squared norm that map `values` onto a multiple of
+/// the first basis vector, or `None` when the column is already zero.
+fn householder_vector(values: &[Complex]) -> Result<Option<Reflector>, PeriodicProductError> {
     let precision = values[0].prec().0;
+    if values
+        .iter()
+        .any(|value| !value.real().is_finite() || !value.imag().is_finite())
+    {
+        return Err(PeriodicProductError::InvalidSpectrum);
+    }
     let mut norm2 = Float::with_val(precision, 0);
     for value in values {
         norm2 += value.abs2();
     }
+    if !norm2.is_finite() {
+        return Err(PeriodicProductError::InvalidSpectrum);
+    }
     if norm2 == 0 {
-        return None;
+        return Ok(None);
     }
     let mut norm = norm2;
     norm.sqrt_mut();
@@ -233,16 +256,19 @@ fn householder_vector(values: &[Complex]) -> Option<(Vec<Complex>, Float)> {
     for value in &vector {
         denominator += value.abs2();
     }
+    if !denominator.is_finite() {
+        return Err(PeriodicProductError::InvalidSpectrum);
+    }
     if denominator == 0 {
-        None
+        Ok(None)
     } else {
-        Some((vector, denominator))
+        Ok(Some((vector, denominator)))
     }
 }
 
-fn hessenberg(matrix: &mut [Complex], width: usize) {
+fn hessenberg(matrix: &mut [Complex], width: usize) -> Result<(), PeriodicProductError> {
     if width < 3 {
-        return;
+        return Ok(());
     }
     let precision = matrix[0].prec().0;
     for column in 0..width - 2 {
@@ -250,7 +276,7 @@ fn hessenberg(matrix: &mut [Complex], width: usize) {
         let values: Vec<_> = (start..width)
             .map(|row| matrix[row * width + column].clone())
             .collect();
-        let Some((vector, denominator)) = householder_vector(&values) else {
+        let Some((vector, denominator)) = householder_vector(&values)? else {
             continue;
         };
         let two = Float::with_val(precision, 2);
@@ -284,9 +310,13 @@ fn hessenberg(matrix: &mut [Complex], width: usize) {
             matrix[row * width + column] = complex(precision, 0.0);
         }
     }
+    Ok(())
 }
 
-fn qr_decompose(matrix: &[Complex], width: usize) -> (Vec<Complex>, Vec<Complex>) {
+fn qr_decompose(
+    matrix: &[Complex],
+    width: usize,
+) -> Result<(Vec<Complex>, Vec<Complex>), PeriodicProductError> {
     let precision = matrix[0].prec().0;
     let mut q = identity(width, precision);
     let mut r = matrix.to_vec();
@@ -294,7 +324,7 @@ fn qr_decompose(matrix: &[Complex], width: usize) -> (Vec<Complex>, Vec<Complex>
         let values: Vec<_> = (column..width)
             .map(|row| r[row * width + column].clone())
             .collect();
-        let Some((vector, denominator)) = householder_vector(&values) else {
+        let Some((vector, denominator)) = householder_vector(&values)? else {
             continue;
         };
         let two = Float::with_val(precision, 2);
@@ -325,7 +355,7 @@ fn qr_decompose(matrix: &[Complex], width: usize) -> (Vec<Complex>, Vec<Complex>
             }
         }
     }
-    (q, r)
+    Ok((q, r))
 }
 
 fn wilkinson_shift(matrix: &[Complex], width: usize, active: usize) -> Complex {
@@ -394,7 +424,7 @@ fn eigenvalues_with_limit_unchecked(
     precision: u32,
     limit: usize,
 ) -> Result<(Vec<Complex>, usize), PeriodicProductError> {
-    hessenberg(&mut matrix, width);
+    hessenberg(&mut matrix, width)?;
     let mut high = width;
     let mut iterations = 0usize;
     let mut block = (0usize, width);
@@ -431,7 +461,7 @@ fn eigenvalues_with_limit_unchecked(
                 shifted[row * size + column] = value;
             }
         }
-        let (q, r) = qr_decompose(&shifted, size);
+        let (q, r) = qr_decompose(&shifted, size)?;
         let mut next = multiply(&r, &q, size);
         for diagonal in 0..size {
             let index = diagonal * size + diagonal;
@@ -1327,6 +1357,45 @@ mod tests {
             .collect();
         let large = perturbation_for(&scaled, 128);
         assert!(large > high * 1e6, "{large:e} {high:e}");
+    }
+
+    #[test]
+    fn determinant_and_householder_reject_non_finite_entries_without_panicking() {
+        let precision = 64;
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let matrix = vec![
+                complex(precision, 1.0),
+                complex(precision, 0.0),
+                complex(precision, bad),
+                complex(precision, 1.0),
+            ];
+            assert_eq!(
+                super::determinant(&matrix, 2),
+                Err(PeriodicProductError::InvalidSpectrum),
+                "{bad}"
+            );
+            let column = [complex(precision, bad), complex(precision, 1.0)];
+            assert!(
+                matches!(
+                    householder_vector(&column),
+                    Err(PeriodicProductError::InvalidSpectrum)
+                ),
+                "{bad}"
+            );
+            let mut hessenberg_input = identity(3, precision);
+            hessenberg_input[3] = complex(precision, bad);
+            assert_eq!(
+                hessenberg(&mut hessenberg_input, 3),
+                Err(PeriodicProductError::InvalidSpectrum),
+                "{bad}"
+            );
+        }
+        let unit = [complex(precision, 3.0), complex(precision, 4.0)];
+        assert!(matches!(householder_vector(&unit), Ok(Some(_))));
+        assert!(matches!(
+            householder_vector(&[complex(precision, 0.0), complex(precision, 0.0)]),
+            Ok(None)
+        ));
     }
 
     #[test]
