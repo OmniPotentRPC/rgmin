@@ -140,6 +140,7 @@ That installs the 0.6 release on Rust 1.88 or newer.
    reference/gromacs-cg
    reference/manifold
    reference/product-manifold
+   reference/periodic
    reference/sota
    reference/proofs
    reference/bibliography
