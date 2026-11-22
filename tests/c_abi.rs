@@ -19,7 +19,8 @@ use rgmin::ffi::{
     rgmin_precond_fn, rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp,
     rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls,
     rgmin_solver_hvp_calls, rgmin_solver_set_accept, rgmin_solver_set_exp,
-    rgmin_solver_set_gromacs_cg, rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
+    rgmin_solver_set_fixed_h0, rgmin_solver_set_gromacs_cg, rgmin_solver_set_gromacs_steep,
+    rgmin_solver_set_line_alpha_max, rgmin_solver_set_quickmin_cell,
     rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
     rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
     rgmin_tensor_free,
@@ -5322,4 +5323,37 @@ fn gromacs_cg_zero_nstcgsteep_keeps_the_second_conjugate_step_across_c_abi() {
     assert_ne!(default, zero);
     let energy = |p: [f64; 3]| p[0] * p[0] + 5.0 * p[1] * p[1];
     assert!(energy(zero) < energy(default), "{zero:?} vs {default:?}");
+}
+
+#[test]
+fn fixed_h0_and_line_alpha_max_are_opt_in() {
+    let ctrl = rgmin_control_t {
+        maxiter: 10,
+        gtol: 1e-8,
+        istep: 1.0,
+        memory: 5,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    };
+    let bfgs = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_BFGS, &ctrl, 2) };
+    assert!(!bfgs.is_null());
+    assert_eq!(unsafe { rgmin_solver_set_fixed_h0(bfgs, 0.1) }, 0);
+    assert_eq!(unsafe { rgmin_solver_set_line_alpha_max(bfgs, 50.0) }, 0);
+    assert_eq!(unsafe { rgmin_solver_set_line_alpha_max(bfgs, 0.0) }, 0);
+    assert_eq!(unsafe { rgmin_solver_set_fixed_h0(bfgs, 0.0) }, 1);
+    assert_eq!(
+        unsafe { rgmin_solver_set_line_alpha_max(bfgs, f64::NAN) },
+        1
+    );
+    unsafe { rgmin_solver_free(bfgs) };
+
+    let fire = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE, &ctrl, 2) };
+    assert!(!fire.is_null());
+    assert_eq!(unsafe { rgmin_solver_set_fixed_h0(fire, 0.1) }, 1);
+    unsafe { rgmin_solver_free(fire) };
+    assert_eq!(
+        unsafe { rgmin_solver_set_fixed_h0(std::ptr::null_mut(), 0.1) },
+        1
+    );
 }
