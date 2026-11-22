@@ -14,10 +14,15 @@
 //!   which is why they are used for saddle-point and instanton searches.
 //!
 //! No test compares `s` or `y` with an absolute size: every update is
-//! invariant under `(s, y) -> (α s, α y)`. Products of two Gram factors are
-//! divided one factor at a time, so a very long or very short step does not
-//! overflow or underflow the weight. Deciding whether a pair is above the
-//! noise of the gradient is the caller's job.
+//! invariant under `(s, y) -> (α s, α y)`. The step and the residual are
+//! normalised to unit vectors `u = s/‖s‖` and `v = r/‖r‖`, the cosine
+//! `c = (rᵀs/‖r‖)/‖s‖` stays `O(1)`, and the outer products are scaled once
+//! by `‖r‖/‖s‖`. A long step with a tiny model, or a short step with a huge
+//! model, therefore cannot overflow or underflow a squared Gram factor.
+//! Deciding whether a pair is above the noise of the gradient is the
+//! caller's job. A pair that cannot produce a finite correction returns
+//! [`SecantError::NonFinite`] or [`SecantOutcome::Skipped`] and leaves `B`
+//! unchanged.
 
 use thiserror::Error;
 
@@ -94,6 +99,84 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
+/// Peak-scaled direction of `x`.
+///
+/// `peak` is `‖x‖_∞` and `local` is `‖x‖₂/‖x‖_∞`, so `‖x‖₂ = peak * local`
+/// without squaring a huge or tiny entry. `u` is `x/‖x‖₂`, formed as
+/// `(x/peak)/local`, which is unchanged when `x` is scaled by a power of two.
+struct Unit {
+    peak: f64,
+    local: f64,
+    u: Vec<f64>,
+}
+
+/// `Ok(None)` is the zero vector. A non-finite norm is [`SecantError::NonFinite`].
+fn unit_vector(x: &[f64]) -> Result<Option<Unit>, SecantError> {
+    let mut peak = 0.0_f64;
+    for v in x {
+        peak = peak.max(v.abs());
+    }
+    if peak == 0.0 {
+        return Ok(None);
+    }
+    if !peak.is_finite() {
+        return Err(SecantError::NonFinite);
+    }
+    let mut sumsq = 0.0_f64;
+    for v in x {
+        let z = v / peak;
+        sumsq += z * z;
+    }
+    let local = sumsq.sqrt();
+    if !local.is_finite() || local == 0.0 || !(peak * local).is_finite() {
+        return Err(SecantError::NonFinite);
+    }
+    let u = x.iter().map(|v| (v / peak) / local).collect();
+    Ok(Some(Unit { peak, local, u }))
+}
+
+/// `‖r‖/‖s‖` as `(peak_r/peak_s) * (local_r/local_s)`.
+///
+/// Multiplying the peaks before dividing overflows when the norms themselves
+/// are finite and their ratio is not, and it is not invariant under a common
+/// power-of-two scaling of `r` and `s`.
+fn norm_ratio(num: &Unit, den: &Unit) -> f64 {
+    (num.peak / den.peak) * (num.local / den.local)
+}
+
+/// Coefficients of `v vᵀ`, `v uᵀ + u vᵀ` and `u uᵀ`, already multiplied by
+/// `‖r‖/‖s‖`. `None` is SR1's relative skip. The rank-one products of the
+/// unit vectors stay `O(1)`.
+fn scaled_coefficients(
+    kind: SecantKind,
+    c: f64,
+    scale: f64,
+) -> Result<Option<(f64, f64, f64)>, SecantError> {
+    let weights = match kind {
+        SecantKind::Psb => (0.0, scale, -(scale * c)),
+        SecantKind::Sr1 { skip_bits } => {
+            let skip = f64::from_bits(skip_bits);
+            // `|rᵀs| < skip ‖r‖ ‖s‖` is `|c| < skip` once both vectors are units.
+            if c == 0.0 || c.abs() < skip {
+                return Ok(None);
+            }
+            (scale / c, 0.0, 0.0)
+        }
+        SecantKind::Bofill => {
+            // `φ = c²`. The SR1 weight is `φ / c = c`, so a vanishing cosine
+            // drops that term instead of dividing by it.
+            let psb = 1.0 - c * c;
+            let vu = scale * psb;
+            (scale * c, vu, -(vu * c))
+        }
+    };
+    if weights.0.is_finite() && weights.1.is_finite() && weights.2.is_finite() {
+        Ok(Some(weights))
+    } else {
+        Err(SecantError::NonFinite)
+    }
+}
+
 /// Apply one symmetric secant update to the row-major model `b`.
 ///
 /// `b` is read as symmetric: `B s` uses the rows of `b`. The increment
@@ -117,51 +200,40 @@ pub fn update_symmetric(
     if b.iter().chain(s).chain(y).any(|v| !v.is_finite()) {
         return Err(SecantError::NonFinite);
     }
-    let ss = dot(s, s);
-    if !ss.is_finite() {
+    // `sᵀs` itself has to be a finite intermediate. A step near `1e300`
+    // makes that square overflow, and the secant product `B s` then cannot
+    // resolve an `O(1)` gradient change, so the pair is refused outright.
+    if !dot(s, s).is_finite() {
         return Err(SecantError::NonFinite);
     }
-    if ss == 0.0 {
+    let Some(step) = unit_vector(s)? else {
         return Ok(SecantOutcome::ZeroStep);
-    }
+    };
     let r: Vec<f64> = (0..n)
         .map(|i| y[i] - dot(&b[i * n..(i + 1) * n], s))
         .collect();
-    let rr = dot(&r, &r);
-    let rs = dot(&r, s);
-    if !(rr.is_finite() && rs.is_finite()) {
+    if r.iter().any(|v| !v.is_finite()) {
         return Err(SecantError::NonFinite);
     }
-    if rr == 0.0 {
+    let Some(residual) = unit_vector(&r)? else {
         return Ok(SecantOutcome::Satisfied);
-    }
-    // Weights of r rᵀ, (r sᵀ + s rᵀ) and s sᵀ in the increment.
-    // `ss * ss` and `rr * ss` overflow near a step of 1e100 and underflow
-    // near 1e-80. Divide one square at a time: `(rs / ss) / ss`.
-    let (w_rr, w_rs, w_ss) = match kind {
-        SecantKind::Psb => (0.0, ss.recip(), -((rs / ss) / ss)),
-        SecantKind::Sr1 { skip_bits } => {
-            let skip = f64::from_bits(skip_bits);
-            if rs == 0.0 || rs.abs() < skip * rr.sqrt() * ss.sqrt() {
-                return Ok(SecantOutcome::Skipped);
-            }
-            (rs.recip(), 0.0, 0.0)
-        }
-        SecantKind::Bofill => {
-            let phi = (rs / rr) * (rs / ss);
-            let psb = 1.0 - phi;
-            ((rs / rr) / ss, psb / ss, -((psb * (rs / ss)) / ss))
-        }
     };
-    if !(w_rr.is_finite() && w_rs.is_finite() && w_ss.is_finite()) {
+    // `c = (rᵀs / ‖r‖) / ‖s‖` and `scale = ‖r‖ / ‖s‖`.
+    let c = dot(&step.u, &residual.u);
+    let scale = norm_ratio(&residual, &step);
+    if !c.is_finite() || !scale.is_finite() || scale == 0.0 {
         return Err(SecantError::NonFinite);
     }
+    let Some((vv, vu, uu)) = scaled_coefficients(kind, c, scale)? else {
+        return Ok(SecantOutcome::Skipped);
+    };
     let mut next = b.to_vec();
     for i in 0..n {
         for j in 0..n {
-            let increment =
-                w_rr * (r[i] * r[j]) + w_rs * (r[i] * s[j] + r[j] * s[i]) + w_ss * (s[i] * s[j]);
-            next[i * n + j] += increment;
+            let outer = vv * (residual.u[i] * residual.u[j])
+                + vu * (residual.u[i] * step.u[j] + step.u[i] * residual.u[j])
+                + uu * (step.u[i] * step.u[j]);
+            next[i * n + j] += outer;
         }
     }
     if next.iter().any(|v| !v.is_finite()) {
@@ -401,6 +473,61 @@ mod tests {
                         residual <= bound,
                         "{kind:?} scale {scale:e} component {i}: residual {residual:e} bound {bound:e}"
                     );
+                }
+            }
+        }
+    }
+
+    /// `‖got - want‖ / ‖want‖`, with both vectors scaled by `‖want‖_∞` so a
+    /// gradient change near `1e80` or `1e-80` does not overflow the squares.
+    fn relative_residual(got: &[f64], want: &[f64]) -> f64 {
+        let peak = want.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+        let mut num = 0.0_f64;
+        let mut den = 0.0_f64;
+        for (g, w) in got.iter().zip(want) {
+            let diff = (g - w) / peak;
+            let scaled = w / peak;
+            num += diff * diff;
+            den += scaled * scaled;
+        }
+        num.sqrt() / den.sqrt()
+    }
+
+    #[test]
+    fn mismatched_step_and_model_scales_meet_the_secant_condition() {
+        let n = 4;
+        let a = target(n);
+        let s0 = step(n, 1);
+        let y0 = matvec(&a, n, &s0);
+        // Step near 1e100 with a model near 1e-180 used to underflow the
+        // second division by `sᵀs` and return Applied with a large residual.
+        // Step near 1e-80 with a model near 1e160 used to overflow that
+        // quotient and return NonFinite.
+        let cases = [(1.0e100, 1.0e-180), (1.0e-80, 1.0e160)];
+        for &(step_scale, model_scale) in &cases {
+            let s: Vec<f64> = s0.iter().map(|v| v * step_scale).collect();
+            let y: Vec<f64> = y0.iter().map(|v| v * step_scale * model_scale).collect();
+            for kind in kinds() {
+                let mut b = vec![0.0; n * n];
+                for i in 0..n {
+                    b[i * n + i] = model_scale;
+                }
+                let outcome = update_symmetric(kind, &mut b, n, &s, &y);
+                assert_eq!(
+                    outcome,
+                    Ok(SecantOutcome::Applied),
+                    "{kind:?} step {step_scale:e} model {model_scale:e}"
+                );
+                let bs = matvec(&b, n, &s);
+                let relative = relative_residual(&bs, &y);
+                assert!(
+                    relative <= 1e-10,
+                    "{kind:?} step {step_scale:e} model {model_scale:e}: relative residual {relative:e}"
+                );
+                for i in 0..n {
+                    for j in 0..n {
+                        assert_eq!(b[i * n + j].to_bits(), b[j * n + i].to_bits());
+                    }
                 }
             }
         }
