@@ -206,7 +206,13 @@ fn gromacs_cg_stops_at_machine_precision_when_step_rounds_away_or_energy_is_flat
     assert_eq!(report.status, Status::MachinePrecision);
     assert_eq!(x[0], 1.0);
 
-    let flat_energy = Oracle::unbounded(3, |_x: ArrayView1<f64>| (1.0, array![-1.0, 0.0, 0.0]));
+    let flat_energy = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+        if x[0] == 0.0 {
+            (1.0, array![-1.0, 0.0, 0.0])
+        } else {
+            (1.0, array![1.0, 0.0, 0.0])
+        }
+    });
     let mut x_flat = array![0.0, 0.0, 0.0];
     let mut flat_solver = Solver::new(Method::GromacsCg, control(0.01, 0.0, 5), 3);
     let flat_report = flat_solver.step(&flat_energy, &mut x_flat).unwrap();
@@ -440,4 +446,66 @@ fn argon_cluster_matches_gromacs_cg_reference_energy_and_force_scales() {
     assert!(report_tol6.grad_norm < 1e-6);
     assert_eq!(report_tol6.steps, 9);
     assert_abs_diff_eq!(report_tol6.value, -1.25489377088304e+01, epsilon = 1e-12);
+}
+
+#[test]
+fn gromacs_cg_accepts_small_downhill_energy_increase_near_machine_precision() {
+    // Match GROMACS `do_cg` (`src/gromacs/mdrun/minimize.cpp`):
+    // accept `f < f0 + sqrt(GMX_REAL_EPS) * |f0|` when `gpc < 0` (downhill),
+    // and reject at or above that threshold or when `gpc >= 0`.
+    let e0 = 100.0_f64;
+    let tol = f64::EPSILON.sqrt() * e0.abs();
+    let accepted_rise = 0.25 * tol;
+    let rejected_rise = 1.5 * tol;
+
+    let downhill_small_rise = Oracle::unbounded(3, move |x: ArrayView1<f64>| {
+        if x[0] == 0.0 {
+            (e0, array![-1.0, 0.0, 0.0])
+        } else if x[0] > 0.0 && x[0] <= 0.1 {
+            (e0 + accepted_rise, array![-0.5, 0.0, 0.0])
+        } else {
+            (e0 + rejected_rise, array![-0.5, 0.0, 0.0])
+        }
+    });
+
+    let mut x_cg = array![0.0, 0.0, 0.0];
+    let mut cg_solver = Solver::new(Method::GromacsCg, control(0.1, 1e-6, 5), 3);
+    let r_cg = cg_solver.step(&downhill_small_rise, &mut x_cg).unwrap();
+    assert_eq!(r_cg.status, Status::Iterating);
+    assert!(x_cg[0] > 0.0, "expected accepted step, got x={x_cg:?}");
+    assert_eq!(r_cg.value, e0 + accepted_rise);
+
+    // Without the GROMACS downhill-rise tolerance, standard NLCG rejects this rise.
+    let mut x_pr = array![0.0, 0.0, 0.0];
+    let mut pr_solver = Solver::new(Method::polak_ribiere(), control(0.1, 1e-6, 5), 3);
+    let _r_pr = pr_solver.step(&downhill_small_rise, &mut x_pr).unwrap();
+    assert_eq!(x_pr[0], 0.0);
+
+    // A rise above sqrt(eps) * |e0| is rejected even when downhill.
+    let too_high = Oracle::unbounded(3, move |x: ArrayView1<f64>| {
+        if x[0] == 0.0 {
+            (e0, array![-1.0, 0.0, 0.0])
+        } else {
+            (e0 + rejected_rise, array![-0.5, 0.0, 0.0])
+        }
+    });
+    let mut x_high = array![0.0, 0.0, 0.0];
+    let mut high_solver = Solver::new(Method::GromacsCg, control(0.1, 1e-6, 5), 3);
+    let r_high = high_solver.step(&too_high, &mut x_high).unwrap();
+    assert_eq!(r_high.status, Status::MachinePrecision);
+    assert_eq!(x_high[0], 0.0);
+
+    // An uphill directional derivative (gpc >= 0) is rejected even for a tiny rise.
+    let uphill = Oracle::unbounded(3, move |x: ArrayView1<f64>| {
+        if x[0] == 0.0 {
+            (e0, array![-1.0, 0.0, 0.0])
+        } else {
+            (e0 + accepted_rise, array![0.5, 0.0, 0.0])
+        }
+    });
+    let mut x_up = array![0.0, 0.0, 0.0];
+    let mut up_solver = Solver::new(Method::GromacsCg, control(0.1, 1e-6, 5), 3);
+    let r_up = up_solver.step(&uphill, &mut x_up).unwrap();
+    assert_eq!(r_up.status, Status::MachinePrecision);
+    assert_eq!(x_up[0], 0.0);
 }
