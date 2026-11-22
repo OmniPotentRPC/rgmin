@@ -61,7 +61,8 @@ pub struct PeriodicProductSpectrum {
     pub qr_iterations: usize,
     /// Relative defect in `product(eigenvalues) = det(product matrix)`.
     pub verification_residual: f64,
-    /// Largest defect `|lambda * lambda' - 1|` in reciprocal matching.
+    /// Largest defect `|lambda * lambda' - 1|` in the reciprocal pairing
+    /// that minimizes it.
     pub reciprocity_residual: f64,
 }
 
@@ -649,20 +650,26 @@ fn has_perfect_matching(count: usize, adjacent: &dyn Fn(usize, usize) -> bool) -
             .all(|partner| *partner != NO_PARTNER)
 }
 
-/// Smallest `max |lambda * lambda' - 1|` over all perfect pairings, checked
-/// against `bound`.
+/// Smallest `max |lambda * lambda' - 1|` over all perfect pairings, after
+/// checking that some perfect pairing keeps every pair within its allowance.
 ///
-/// The pairing minimizes the largest defect, found by bisection on the
-/// sorted defects with a general-graph perfect-matching test, so the verdict
-/// and the returned residual do not depend on the eigenvalue order.
+/// `errors[i]` is a bound on the relative error of `eigenvalues[i]`, so the
+/// pair `(i, j)` may miss `|lambda_i * lambda_j - 1| = 0` by `errors[i] +
+/// errors[j]` to first order.  The residual is the pairing that minimizes the
+/// largest defect, found by bisection on the sorted defects with a
+/// general-graph perfect-matching test.  The verdict and the residual do not
+/// depend on the eigenvalue order.
 fn verify_reciprocity(
     eigenvalues: &[Complex],
-    bound: &Float,
+    errors: &[Float],
 ) -> Result<Float, PeriodicProductError> {
     let count = eigenvalues.len();
     let Some(first) = eigenvalues.first() else {
         return Err(PeriodicProductError::ReciprocityFailed);
     };
+    if errors.len() != count {
+        return Err(PeriodicProductError::InvalidConfiguration);
+    }
     let precision = first.prec().0;
     let one = complex(precision, 1.0);
     let mut defects = vec![Float::with_val(precision, f64::INFINITY); count * count];
@@ -682,31 +689,223 @@ fn verify_reciprocity(
     }
     candidates.sort_by(Float::total_cmp);
     candidates.dedup();
-    let feasible = |threshold: &Float| {
-        has_perfect_matching(count, &|left, right| {
-            defects[left * count + right] <= *threshold
-        })
-    };
     let Some(last) = candidates.last() else {
         return Err(PeriodicProductError::ReciprocityFailed);
     };
-    if !feasible(last) {
+    if !has_perfect_matching(count, &|left, right| defects[left * count + right] <= *last) {
+        return Err(PeriodicProductError::ReciprocityFailed);
+    }
+    let within_allowance = |left: usize, right: usize| {
+        let allowance = Float::with_val(precision, &errors[left] + &errors[right]);
+        defects[left * count + right] <= allowance
+    };
+    if !has_perfect_matching(count, &within_allowance) {
         return Err(PeriodicProductError::ReciprocityFailed);
     }
     let (mut low, mut high) = (0, candidates.len() - 1);
     while low < high {
         let middle = low + (high - low) / 2;
-        if feasible(&candidates[middle]) {
+        let threshold = &candidates[middle];
+        if has_perfect_matching(count, &|left, right| {
+            defects[left * count + right] <= *threshold
+        }) {
             high = middle;
         } else {
             low = middle + 1;
         }
     }
-    let worst = candidates.swap_remove(low);
-    if worst > *bound {
-        return Err(PeriodicProductError::ReciprocityFailed);
+    Ok(candidates.swap_remove(low))
+}
+
+fn frobenius_norm(matrix: &[Complex], precision: u32) -> Float {
+    let mut total = Float::with_val(precision, 0);
+    for value in matrix {
+        total += value.abs2();
     }
-    Ok(worst)
+    total.sqrt_mut();
+    total
+}
+
+fn promote(factor: &[f64], precision: u32) -> Vec<Complex> {
+    factor
+        .iter()
+        .map(|value| complex(precision, *value))
+        .collect()
+}
+
+/// Solve `matrix * x = rhs` by Gaussian elimination with partial pivoting.
+///
+/// A zero pivot is replaced by `floor`, which turns an exactly singular
+/// shifted matrix into the large-but-finite solve that inverse iteration
+/// wants.
+fn solve_linear(
+    mut matrix: Vec<Complex>,
+    mut rhs: Vec<Complex>,
+    width: usize,
+    floor: &Float,
+) -> Vec<Complex> {
+    let precision = matrix[0].prec().0;
+    for column in 0..width {
+        let mut pivot = column;
+        let mut largest = matrix[column * width + column].abs2();
+        for row in column + 1..width {
+            let size = matrix[row * width + column].abs2();
+            if size > largest {
+                largest = size;
+                pivot = row;
+            }
+        }
+        if pivot != column {
+            for entry in 0..width {
+                matrix.swap(column * width + entry, pivot * width + entry);
+            }
+            rhs.swap(column, pivot);
+        }
+        if matrix[column * width + column].modulus() < *floor {
+            matrix[column * width + column] =
+                complex(precision, 0.0).add(&Complex::with_val(precision, (floor, 0)));
+        }
+        let diagonal = matrix[column * width + column].clone();
+        for row in column + 1..width {
+            let ratio = matrix[row * width + column].div(&diagonal);
+            for entry in column..width {
+                let index = row * width + entry;
+                matrix[index] = matrix[index].sub(&ratio.mul(&matrix[column * width + entry]));
+            }
+            rhs[row] = rhs[row].sub(&ratio.mul(&rhs[column]));
+        }
+    }
+    let mut solution = vec![complex(precision, 0.0); width];
+    for row in (0..width).rev() {
+        let mut value = rhs[row].clone();
+        for entry in row + 1..width {
+            value = value.sub(&matrix[row * width + entry].mul(&solution[entry]));
+        }
+        solution[row] = value.div(&matrix[row * width + row]);
+    }
+    solution
+}
+
+fn unit_vector(vector: &mut [Complex], precision: u32) -> bool {
+    let norm = frobenius_norm(vector, precision);
+    if norm == 0 || !norm.is_finite() {
+        return false;
+    }
+    for value in vector.iter_mut() {
+        *value = value.div_real(&norm);
+    }
+    true
+}
+
+/// `1 / |y^H x|` for unit right and left eigenvectors of one eigenvalue.
+///
+/// This is the first-order sensitivity of the eigenvalue to a perturbation of
+/// the matrix, at least one.  The vectors come from a few steps of inverse
+/// iteration with the shift moved off the eigenvalue by `sqrt(2^-precision)`
+/// of its modulus, so a defective or clustered eigenvalue gets a large
+/// finite value rather than a failed solve.
+fn eigenvalue_sensitivity(
+    matrix: &[Complex],
+    width: usize,
+    eigenvalue: &Complex,
+    precision: u32,
+) -> Float {
+    let one = Float::with_val(precision, 1);
+    let unit_work = Float::with_val(precision, 2).pow(-(precision as i32));
+    let scale = frobenius_norm(matrix, precision);
+    let floor = Float::with_val(precision, &unit_work * &scale);
+    let mut offset = eigenvalue.modulus();
+    offset *= Float::with_val(precision, 2).pow(-((precision / 2) as i32));
+    let mut shifted = matrix.to_vec();
+    let mut adjoint = vec![complex(precision, 0.0); width * width];
+    for diagonal in 0..width {
+        let index = diagonal * width + diagonal;
+        shifted[index] = shifted[index].sub(eigenvalue);
+        *shifted[index].mut_real() -= &offset;
+    }
+    for row in 0..width {
+        for column in 0..width {
+            adjoint[column * width + row] = shifted[row * width + column].conjugate();
+        }
+    }
+    let start: Vec<_> = (0..width)
+        .map(|index| {
+            complex(
+                precision,
+                ((index as f64 + 1.0) * 0.618_033_988_749_894_9).fract() + 0.25,
+            )
+        })
+        .collect();
+    let mut right = start.clone();
+    let mut left = start.clone();
+    for _ in 0..3 {
+        right = solve_linear(shifted.clone(), right, width, &floor);
+        left = solve_linear(adjoint.clone(), left, width, &floor);
+        if !unit_vector(&mut right, precision) || !unit_vector(&mut left, precision) {
+            return Float::with_val(precision, f64::INFINITY);
+        }
+    }
+    let mut overlap = complex(precision, 0.0);
+    for (left_entry, right_entry) in left.iter().zip(&right) {
+        overlap = overlap.add(&left_entry.conjugate().mul(right_entry));
+    }
+    let overlap = overlap.modulus();
+    if overlap == 0 {
+        return Float::with_val(precision, f64::INFINITY);
+    }
+    let sensitivity = Float::with_val(precision, &one / &overlap);
+    if sensitivity < one { one } else { sensitivity }
+}
+
+/// Bound on the Frobenius norm of the perturbation that explains every
+/// departure of the computed multipliers from a reciprocal spectrum.
+///
+/// Two sources add.  The factors are binary64 data that were meant to have a
+/// reciprocal spectrum, so each carries a normwise error of `width * 2^-53`
+/// times its norm, and a change `dF_k` of factor `k` moves the product by
+/// `|F_n ... F_{k+1}| |dF_k| |F_{k-1} ... F_1|`.  The arithmetic adds
+/// `2^-precision` times the size of the unsigned product for the multiplies
+/// and times the size of the product matrix for the QR steps.
+fn perturbation_bound(
+    factors: &[Vec<f64>],
+    width: usize,
+    precision: u32,
+    prefix_norms: &[Float],
+    product_norm: &Float,
+    qr_iterations: usize,
+) -> Float {
+    let unit_input = Float::with_val(precision, 2).pow(-(f64::MANTISSA_DIGITS as i32));
+    let unit_work = Float::with_val(precision, 2).pow(-(precision as i32));
+    let mut suffix = identity(width, precision);
+    let mut suffix_norm = Float::with_val(precision, 1);
+    let mut input_scale = Float::with_val(precision, 0);
+    for index in (0..factors.len()).rev() {
+        let promoted = promote(&factors[index], precision);
+        let mut term = Float::with_val(precision, &suffix_norm * &prefix_norms[index]);
+        term *= frobenius_norm(&promoted, precision);
+        input_scale += term;
+        suffix = multiply(&suffix, &promoted, width);
+        suffix_norm = frobenius_norm(&suffix, precision);
+    }
+    let mut magnitude = identity(width, precision);
+    for factor in factors {
+        let absolute: Vec<_> = factor
+            .iter()
+            .map(|value| complex(precision, value.abs()))
+            .collect();
+        magnitude = multiply(&absolute, &magnitude, width);
+    }
+    let mut work = frobenius_norm(&magnitude, precision);
+    work *= factors.len();
+    let mut qr_work = Float::with_val(precision, product_norm);
+    qr_work *= qr_iterations.saturating_add(width);
+    work += qr_work;
+    work *= width;
+    let mut input = input_scale;
+    input *= unit_input;
+    input *= width;
+    work *= unit_work;
+    input + work
 }
 
 /// Multiply short transfer factors and diagonalize their product.
@@ -731,6 +930,7 @@ pub fn periodic_product_spectrum(
         .checked_mul(width)
         .ok_or(PeriodicProductError::InvalidConfiguration)?;
     let mut product = identity(width, precision_bits);
+    let mut prefix_norms = Vec::with_capacity(factors.len());
     for (factor_index, factor) in factors.iter().enumerate() {
         if factor.len() != entries || factor.iter().any(|value| !value.is_finite()) {
             return Err(PeriodicProductError::InvalidFactor {
@@ -738,14 +938,16 @@ pub fn periodic_product_spectrum(
                 width,
             });
         }
-        let promoted: Vec<_> = factor
-            .iter()
-            .map(|value| complex(precision_bits, *value))
-            .collect();
-        product = multiply(&promoted, &product, width);
+        prefix_norms.push(if factor_index == 0 {
+            Float::with_val(precision_bits, 1)
+        } else {
+            frobenius_norm(&product, precision_bits)
+        });
+        product = multiply(&promote(factor, precision_bits), &product, width);
     }
     let product_determinant = determinant(&product, width)?;
-    let (eigenvalues, qr_iterations) = eigenvalues(product, width, precision_bits)?;
+    let product_norm = frobenius_norm(&product, precision_bits);
+    let (eigenvalues, qr_iterations) = eigenvalues(product.clone(), width, precision_bits)?;
     let mut eigenvalue_product = complex(precision_bits, 1.0);
     for value in &eigenvalues {
         eigenvalue_product = eigenvalue_product.mul(value);
@@ -767,19 +969,27 @@ pub fn periodic_product_spectrum(
         return Err(PeriodicProductError::VerificationFailed);
     }
     let verification_residual = verification_residual.to_f64();
-    let product_operations = factors
-        .len()
-        .checked_mul(width)
-        .and_then(|work| work.checked_mul(width))
-        .and_then(|work| work.checked_mul(width))
-        .ok_or(PeriodicProductError::InvalidConfiguration)?;
-    let reciprocity_bound =
-        width as f64 * f64::EPSILON.sqrt() + product_operations as f64 * f64::EPSILON;
-    let reciprocity_residual = verify_reciprocity(
-        &eigenvalues,
-        &Float::with_val(precision_bits, reciprocity_bound),
-    )?
-    .to_f64();
+    let perturbation = perturbation_bound(
+        factors,
+        width,
+        precision_bits,
+        &prefix_norms,
+        &product_norm,
+        qr_iterations,
+    );
+    let errors: Vec<_> = eigenvalues
+        .iter()
+        .map(|value| {
+            let mut error = eigenvalue_sensitivity(&product, width, value, precision_bits);
+            error *= &perturbation;
+            error / value.modulus()
+        })
+        .collect();
+    eprintln!(
+        "DBG errors={:?}",
+        errors.iter().map(|e| e.to_f64()).collect::<Vec<_>>()
+    );
+    let reciprocity_residual = verify_reciprocity(&eigenvalues, &errors)?.to_f64();
     let mut multipliers = Vec::with_capacity(width);
     for value in eigenvalues {
         let mut modulus = value.modulus();
@@ -990,7 +1200,7 @@ mod tests {
         // The best partner of 2 is 0.5, which leaves 0.51 beside 2.04 with
         // defect 0.0404; pairing 2 with 0.51 and 0.5 with 2.04 stays at 0.02.
         let values = [2.0, 0.5, 0.51, 2.04];
-        let bound = Float::with_val(precision, 0.03);
+        let bound = vec![Float::with_val(precision, 0.015); 4];
         for order in permutations(&[0, 1, 2, 3]) {
             let eigenvalues: Vec<_> = order
                 .iter()
@@ -1000,7 +1210,7 @@ mod tests {
                 .unwrap_or_else(|error| panic!("order {order:?}: {error}"));
             assert!((worst.to_f64() - 0.02).abs() < 1e-12, "order {order:?}");
         }
-        let tight = Float::with_val(precision, 0.01);
+        let tight = vec![Float::with_val(precision, 0.005); 4];
         for order in permutations(&[0, 1, 2, 3]) {
             let eigenvalues: Vec<_> = order
                 .iter()
@@ -1022,14 +1232,14 @@ mod tests {
             .map(|value| complex(precision, value))
             .collect();
         assert_eq!(
-            verify_reciprocity(&eigenvalues, &Float::with_val(precision, 1e-9)),
+            verify_reciprocity(&eigenvalues, &vec![Float::with_val(precision, 1e-9); 6]),
             Err(PeriodicProductError::ReciprocityFailed)
         );
         let paired: Vec<_> = [1.0, 1.0, -1.0, -1.0, 2.0, 0.5]
             .into_iter()
             .map(|value| complex(precision, value))
             .collect();
-        assert!(verify_reciprocity(&paired, &Float::with_val(precision, 1e-9)).is_ok());
+        assert!(verify_reciprocity(&paired, &vec![Float::with_val(precision, 1e-9); 6]).is_ok());
     }
 
     #[test]
@@ -1053,6 +1263,70 @@ mod tests {
                 .any(|edge| *edge == (left, right) || *edge == (right, left))
         };
         assert!(!has_perfect_matching(6, &split));
+    }
+
+    #[test]
+    fn reciprocity_bound_rejects_a_near_identity_non_symplectic_factor() {
+        for precision in [53, 128, 512] {
+            assert_eq!(
+                periodic_product_spectrum(&[vec![1.0 + 2e-8, 0.0, 0.0, 1.0]], 2, precision),
+                Err(PeriodicProductError::ReciprocityFailed),
+                "precision {precision}"
+            );
+        }
+    }
+
+    #[test]
+    fn reciprocity_bound_accepts_a_rounded_hyperbolic_factor() {
+        let argument = 12.0_f64;
+        let (c, s) = (argument.cosh(), argument.sinh());
+        for precision in [128, 256, 512] {
+            let got = periodic_product_spectrum(&[vec![c, s, s, c]], 2, precision)
+                .unwrap_or_else(|error| panic!("precision {precision}: {error}"));
+            let mut exponents: Vec<_> = got
+                .multipliers
+                .iter()
+                .map(|value| value.log_modulus)
+                .collect();
+            exponents.sort_by(f64::total_cmp);
+            assert!((exponents[0] + argument).abs() < 1e-5, "{exponents:?}");
+            assert!((exponents[1] - argument).abs() < 1e-5, "{exponents:?}");
+        }
+    }
+
+    fn perturbation_for(factors: &[Vec<f64>], precision: u32) -> f64 {
+        let mut product = identity(2, precision);
+        let mut prefix_norms = Vec::new();
+        for (index, factor) in factors.iter().enumerate() {
+            prefix_norms.push(if index == 0 {
+                Float::with_val(precision, 1)
+            } else {
+                frobenius_norm(&product, precision)
+            });
+            product = multiply(&promote(factor, precision), &product, 2);
+        }
+        let norm = frobenius_norm(&product, precision);
+        perturbation_bound(factors, 2, precision, &prefix_norms, &norm, 1).to_f64()
+    }
+
+    #[test]
+    fn perturbation_bound_follows_working_precision_and_factor_size() {
+        let (sine, cosine) = 0.1_f64.sin_cos();
+        let factors = vec![vec![cosine, -sine, sine, cosine]; 400];
+        let (low, high, huge) = (
+            perturbation_for(&factors, 53),
+            perturbation_for(&factors, 128),
+            perturbation_for(&factors, 1024),
+        );
+        assert!(low > high, "{low:e} {high:e}");
+        assert!(high >= huge, "{high:e} {huge:e}");
+        assert!(huge > 400.0 * f64::EPSILON / 4.0, "{huge:e}");
+        let scaled: Vec<Vec<f64>> = factors
+            .iter()
+            .map(|factor| factor.iter().map(|value| value * 1e6).collect())
+            .collect();
+        let large = perturbation_for(&scaled, 128);
+        assert!(large > high * 1e6, "{large:e} {high:e}");
     }
 
     #[test]
