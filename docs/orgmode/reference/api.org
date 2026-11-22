@@ -60,6 +60,11 @@ The generated Sphinx pages under ~crates/rgmin/~ (when the docs
 environment is built with ~sphinxcontrib-rust~) are the same
 rustdoc, exported.
 
+| Type | Role |
+|---+---|
+| ~magnus::magnus_step~ / ~magnus::MagnusStep~ | Sixth-order Magnus map with an embedded fourth-order exponential. |
+| ~magnus::expm~ / ~magnus::Exponential~ / ~magnus::gauss_legendre_three~ / ~magnus::MagnusError~ | Padé matrix exponential, Gauss-Legendre nodes and typed refusal. |
+
 ** C
 
 ~include/rgmin.h~ is the C ABI. ~cargo cinstall~ installs that
