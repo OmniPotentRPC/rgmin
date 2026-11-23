@@ -178,6 +178,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `slq_logdet_hutchpp` no longer decides whether a Hutch++ sketch vector joins the trace subspace with an absolute `1e-14` cutoff. The residual `(A - M_cv) s` is now compared with `1e-12` times the larger of `||A s||` and `||M_cv s||`, so rescaling the operator `A -> c * A` keeps the same sketch vectors. At `c <= 1e-16` the old cutoff emptied the subspace and inflated the standard error, and at `c = 1e16` it promoted roundoff left by an exactly cancelling control variate into the subspace. A sketch whose operator scale is zero is dropped, and one whose scale is not finite is refused with an error.
 - `slq_logdet_hutchpp` now drops a Hutch++ sketch vector that lies in the deflated subspace. When projecting out the kernel and deflated pairs left at most `1e-12` of the vector's norm, the remainder was kept and the power iteration normalised that roundoff into a basis vector of the trace subspace. The vector is now discarded, as the stochastic probes already do.
 
+## [0.7.0] - 2026-11-22
+
+### Changed
+
+- No separate release notes were built for this tag. Its news fragments were collected into the 0.8.0 section above.
+
 ## [0.6.0] - 2026-11-13
 
 ### Added
