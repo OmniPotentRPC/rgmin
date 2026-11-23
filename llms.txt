@@ -1,0 +1,96 @@
+# rgmin
+
+> Local first order, quasi Newton, trust region, and Riemannian optimization
+> in Rust with C, C++, and Python interfaces.
+
+The Org files are the canonical documentation sources. The generated
+reStructuredText tree is for Sphinx and must not be edited directly.
+
+## Tutorials
+
+- [BFGS](https://omnipotentrpc.github.io/rgmin/tutorials/bfgs.html)
+- [Conjugate gradients](https://omnipotentrpc.github.io/rgmin/tutorials/cg.html)
+- [Lowest eigenpairs](https://omnipotentrpc.github.io/rgmin/tutorials/eigenpairs.html)
+- [FIRE](https://omnipotentrpc.github.io/rgmin/tutorials/fire.html)
+- [One L-BFGS direction with your own H0](https://omnipotentrpc.github.io/rgmin/tutorials/lbfgs-direction.html)
+- [L-BFGS](https://omnipotentrpc.github.io/rgmin/tutorials/lbfgs.html)
+- [A line search on values you already have](https://omnipotentrpc.github.io/rgmin/tutorials/linesearch.html)
+- [Fit a point on St x SPD](https://omnipotentrpc.github.io/rgmin/tutorials/manifold-fit.html)
+- [From ASE, SciPy and eOn](https://omnipotentrpc.github.io/rgmin/tutorials/migration.html)
+- [Newton](https://omnipotentrpc.github.io/rgmin/tutorials/newton.html)
+- [Python quickstart](https://omnipotentrpc.github.io/rgmin/tutorials/python.html)
+- [Quickstart](https://omnipotentrpc.github.io/rgmin/tutorials/quickstart.html)
+- [Relax a platinum crystal with L-BFGS and FIRE](https://omnipotentrpc.github.io/rgmin/tutorials/relax-morse.html)
+- [Cautious Riemannian L-BFGS](https://omnipotentrpc.github.io/rgmin/tutorials/rlbfgs.html)
+- [Scaled conjugate gradient](https://omnipotentrpc.github.io/rgmin/tutorials/scg.html)
+
+## How to guides
+
+- [ASE drop-in benchmark](https://omnipotentrpc.github.io/rgmin/howto/ase-bench.html)
+- [Moving an ASE script to rgmin.optimize](https://omnipotentrpc.github.io/rgmin/howto/ase-migration.html)
+- [Compare repeated runs](https://omnipotentrpc.github.io/rgmin/howto/bench-gate.html)
+- [C and C++ ABI](https://omnipotentrpc.github.io/rgmin/howto/c-abi.html)
+- [Cite rgmin](https://omnipotentrpc.github.io/rgmin/howto/cite.html)
+- [Configure a solver](https://omnipotentrpc.github.io/rgmin/howto/configure.html)
+- [Keep bond lengths fixed while a session minimizes](https://omnipotentrpc.github.io/rgmin/howto/constraints.html)
+- [Doxygen with doxyYoda](https://omnipotentrpc.github.io/rgmin/howto/doxygen.html)
+- [Embed in anneal](https://omnipotentrpc.github.io/rgmin/howto/embed-anneal.html)
+- [Run fire2 with the published parameters or bias correction](https://omnipotentrpc.github.io/rgmin/howto/fire.html)
+- [Run Gaussian-process-accelerated optimization (GPMin)](https://omnipotentrpc.github.io/rgmin/howto/gpmin.html)
+- [Run GROMACS conjugate-gradient minimization](https://omnipotentrpc.github.io/rgmin/howto/gromacs-cg.html)
+- [Run GROMACS steepest descent](https://omnipotentrpc.github.io/rgmin/howto/gromacs-steep.html)
+- [L-BFGS quadratic model through HiGHS](https://omnipotentrpc.github.io/rgmin/howto/highs-qp.html)
+- [Install rgmin](https://omnipotentrpc.github.io/rgmin/howto/install.html)
+- [Constrain an IRC step to the mass-weighted sphere](https://omnipotentrpc.github.io/rgmin/howto/irc.html)
+- [Migrate from LAMMPS minimizers](https://omnipotentrpc.github.io/rgmin/howto/lammps-migration.html)
+- [Minimize inside a box](https://omnipotentrpc.github.io/rgmin/howto/lbfgs-box.html)
+- [Keep a session on a level set](https://omnipotentrpc.github.io/rgmin/howto/level-set.html)
+- [Retract onto an embedded manifold](https://omnipotentrpc.github.io/rgmin/howto/manifolds.html)
+- [Run every method family](https://omnipotentrpc.github.io/rgmin/howto/method-catalog.html)
+- [Estimate noise and stop on the floor](https://omnipotentrpc.github.io/rgmin/howto/noise.html)
+- [Choose and install a preconditioner](https://omnipotentrpc.github.io/rgmin/howto/precon.html)
+- [Python](https://omnipotentrpc.github.io/rgmin/howto/python.html)
+- [Hold a stateful solver](https://omnipotentrpc.github.io/rgmin/howto/session.html)
+- [Stop on energy change or an evaluation budget](https://omnipotentrpc.github.io/rgmin/howto/stopping.html)
+- [Measure CPU strong scaling](https://omnipotentrpc.github.io/rgmin/howto/strong-scaling.html)
+
+## Explanation
+
+- [Pulay residual subspace](https://omnipotentrpc.github.io/rgmin/explanation/diis.html)
+- [ECnoise](https://omnipotentrpc.github.io/rgmin/explanation/ecnoise.html)
+- [Why the line search terminates: brackets, cubics, and a guard](https://omnipotentrpc.github.io/rgmin/explanation/linesearch.html)
+- [Exp, Lindh, and the bonded metric](https://omnipotentrpc.github.io/rgmin/explanation/precon.html)
+- [Weighted product manifolds: metric, gradient, Hessian and geodesics](https://omnipotentrpc.github.io/rgmin/explanation/product-manifold.html)
+- [Thread safety](https://omnipotentrpc.github.io/rgmin/explanation/python-threads.html)
+- [The secant family: BFGS, its limited memory, and the session hooks](https://omnipotentrpc.github.io/rgmin/explanation/quasi-newton.html)
+- [Quick-min](https://omnipotentrpc.github.io/rgmin/explanation/quickmin.html)
+- [Randomness only in the clock: the Nystrom preconditioner](https://omnipotentrpc.github.io/rgmin/explanation/randomized.html)
+- [Scaled conjugate gradients: a trust region in disguise](https://omnipotentrpc.github.io/rgmin/explanation/scg.html)
+- [SIMD paths and dispatch](https://omnipotentrpc.github.io/rgmin/explanation/simd.html)
+- [Step bounds for log-hyperparameter fits](https://omnipotentrpc.github.io/rgmin/explanation/step-bounds.html)
+- [Trust regions and the Steihaug boundary](https://omnipotentrpc.github.io/rgmin/explanation/trust-region.html)
+
+## Reference
+
+- [API reference](https://omnipotentrpc.github.io/rgmin/reference/api.html)
+- [Architecture](https://omnipotentrpc.github.io/rgmin/reference/architecture.html)
+- [Bibliography](https://omnipotentrpc.github.io/rgmin/reference/bibliography.html)
+- [Distance constraints](https://omnipotentrpc.github.io/rgmin/reference/constraints.html)
+- [GROMACS conjugate gradient](https://omnipotentrpc.github.io/rgmin/reference/gromacs-cg.html)
+- [GROMACS steepest descent](https://omnipotentrpc.github.io/rgmin/reference/gromacs-steep.html)
+- [LAMMPS min_style rgmin](https://omnipotentrpc.github.io/rgmin/reference/lammps-min-style.html)
+- [Riemannian manifolds](https://omnipotentrpc.github.io/rgmin/reference/manifold.html)
+- [Product manifold](https://omnipotentrpc.github.io/rgmin/reference/product-manifold.html)
+- [The proof ledger: theorems, code, tests](https://omnipotentrpc.github.io/rgmin/reference/proofs.html)
+- [Public API inventory](https://omnipotentrpc.github.io/rgmin/reference/public-api.html)
+- [Python reference](https://omnipotentrpc.github.io/rgmin/reference/python.html)
+- [State of the art](https://omnipotentrpc.github.io/rgmin/reference/sota.html)
+
+## Development
+
+- [Contributing](https://omnipotentrpc.github.io/rgmin/contributing/index.html)
+
+## Optional
+
+- [Changelog](https://omnipotentrpc.github.io/rgmin/changelog.html)
+- [Repository](https://github.com/OmniPotentRPC/rgmin)
