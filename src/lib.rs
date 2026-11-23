@@ -28,6 +28,8 @@
 #[macro_use]
 mod config;
 
+/// AAA rational approximation and barycentric evaluation.
+pub mod aaa;
 /// Line-search strategies (Brent, Armijo, Goldstein, Wolfe/zoom).
 pub mod linesearch;
 /// Method selector (NLCG, BFGS family, Adam, steepest descent, PSO).
@@ -166,6 +168,7 @@ pub mod tune;
 /// The vector seam: solver algebra behind one interface.
 pub mod vecops;
 
+pub use aaa::{AaaParams, Barycentric, Pole, aaa, chebyshev_pade_poles};
 pub use accept::Accept;
 pub use adam::minimize_adam;
 pub use certificate::{
