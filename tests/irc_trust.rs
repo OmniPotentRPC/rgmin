@@ -38,8 +38,16 @@ fn zero_radius_and_zero_weights_return_the_sphere_center() {
 
 #[test]
 fn degenerate_projection_uses_an_axis_with_positive_weight() {
-    let trust = IrcTrust::new(array![0.0, 0.0], array![0.0, 2.0], 6.0);
-    let projected = trust.project(&array![0.0, 0.0]);
+    let trust = IrcTrust::new(array![1.0, -2.0, 3.0], array![0.0, 2.0, 3.0], 6.0);
+    let projected = trust.project(&array![-1.0, 2.0, -3.0]);
     assert!(trust.on_bound(&projected, 32.0 * f64::EPSILON));
-    assert_eq!(projected, array![0.0, 3.0]);
+    assert!(!trust.on_bound(&array![-1.0, 2.0, -3.0], 32.0 * f64::EPSILON));
+    assert_eq!(projected, array![-1.0, 5.0, -3.0]);
+
+    let below_floor = 0.5 * 1e-16;
+    let at_below_floor = IrcTrust::new(array![1.0, -2.0], array![below_floor, 2.0], 6.0);
+    assert_eq!(
+        at_below_floor.project(&array![-1.0, 2.0]),
+        array![-1.0, 5.0]
+    );
 }
