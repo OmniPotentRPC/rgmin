@@ -6,6 +6,7 @@ from numpy.typing import NDArray
 
 from rgmin import _core
 from rgmin._core import Method as Method
+from rgmin._core import NotConverged as NotConverged
 from rgmin._core import NumericalError as NumericalError
 from rgmin._core import Report as Report
 from rgmin._core import Solver as Solver

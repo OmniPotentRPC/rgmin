@@ -572,4 +572,40 @@ mod brent_tests {
         );
         assert!(x.abs() < 1.0e-18, "the floor is too coarse: x={x:e}");
     }
+
+    #[test]
+    fn brent_zero_tol_converges_at_0_37_and_1_0_well_below_maxiter() {
+        let maxiter = 200;
+        for (target, hi) in [(0.37, 2.0), (1.0, 3.0)] {
+            let mut evals = 0usize;
+            let mut phi = |x: f64| {
+                evals += 1;
+                let d = x - target;
+                d * d
+            };
+            let (x, f) = brent(&mut phi, 0.0, hi, 0.0, maxiter);
+            assert!(
+                (x - target).abs() <= 4.0 * f64::EPSILON * target,
+                "target={target} x={x:e}"
+            );
+            assert!(f <= 16.0 * f64::EPSILON * f64::EPSILON, "f={f:e}");
+            assert!(
+                evals < maxiter / 2,
+                "target={target} stalled for {evals} of {maxiter} evaluations"
+            );
+        }
+    }
+
+    #[test]
+    fn brent_finds_an_interior_minimum() {
+        let mut evals = 0usize;
+        let mut phi = |x: f64| {
+            evals += 1;
+            (x - 0.37) * (x - 0.37)
+        };
+        let (x, f) = brent(&mut phi, 0.0, 1.0, 1.0e-8, 100);
+        assert!((x - 0.37).abs() < 1.0e-7, "x={x}");
+        assert!(f < 1.0e-14, "f={f:e}");
+        assert!(evals > 2);
+    }
 }

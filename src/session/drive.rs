@@ -143,10 +143,9 @@ impl Solver {
             self.run_eon_fill(x, &mut counted, &calls)
         };
         self.evals = base + calls.get();
-        result.map(|mut report| {
-            report.evals = self.evals;
-            report
-        })
+        let mut report = result?;
+        report.evals = self.evals;
+        self.control.maybe_not_converged(report)
     }
 
     fn eon_fill_ok(&self) -> bool {
@@ -185,7 +184,10 @@ impl Solver {
             if !finite(value, self.last_grad.view()) {
                 return Err(non_finite());
             }
-            if self.stop_norm.of(self.last_grad.view()) < tol {
+            if self
+                .control
+                .converged(self.stop_norm.of(self.last_grad.view()))
+            {
                 break;
             }
             let use_cap = if self.trust {
@@ -445,7 +447,10 @@ impl Solver {
             if !finite(value, self.last_grad.view()) {
                 return Err(non_finite());
             }
-            if self.stop_norm.of(self.last_grad.view()) < tol {
+            if self
+                .control
+                .converged(self.stop_norm.of(self.last_grad.view()))
+            {
                 break;
             }
             value = self.fire_fill_step(x, fill)?;

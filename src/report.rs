@@ -180,6 +180,12 @@ pub struct Report {
     /// [`crate::Solver::run`] counts the whole run. This is the quantity
     /// [`crate::Control::max_evals`] limits.
     pub evals: usize,
+    /// `true` when `grad_norm` is below the run's `gtol`.
+    ///
+    /// `Report::converged()` is the stop reason. This flag is the `gtol`
+    /// comparison, so a polish that accepts a point above `gtol` can be
+    /// [`StopReason::Converged`] while this flag stays `false`.
+    pub converged: bool,
 }
 
 impl Report {
@@ -196,6 +202,7 @@ impl Report {
             status: Status::Iterating,
             reason: None,
             evals: 0,
+            converged: false,
         }
     }
 
@@ -214,6 +221,16 @@ impl Report {
     /// Whether [`Self::stop_reason`] is [`StopReason::Converged`].
     pub fn converged(&self) -> bool {
         self.stop_reason().converged()
+    }
+
+    /// Replace the `gtol` flag.
+    ///
+    /// Chain it after [`Self::new`]. Drivers set it from
+    /// `grad_norm < gtol` before they return.
+    #[must_use]
+    pub fn with_converged(mut self, converged: bool) -> Self {
+        self.converged = converged;
+        self
     }
 
     /// Record `reason` and the [`Status`] it corresponds to.

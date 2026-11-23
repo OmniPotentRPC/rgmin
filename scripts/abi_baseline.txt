@@ -12,6 +12,7 @@ rgmin_constraints_set_settle
 rgmin_constraints_set_solver
 rgmin_constraints_set_tolerance
 rgmin_control_default
+rgmin_control_init
 rgmin_eigen_options_default
 rgmin_eigen_params_default
 rgmin_exp_default
@@ -50,14 +51,21 @@ rgmin_method_from_name
 rgmin_minimize
 rgmin_minimize_eindir
 rgmin_minimize_eindir_opts
+rgmin_minimize_eindir_opts_sized
+rgmin_minimize_eindir_sized
 rgmin_minimize_hess
 rgmin_minimize_hess_opts
+rgmin_minimize_hess_opts_sized
 rgmin_minimize_hvp
 rgmin_minimize_hvp_opts
+rgmin_minimize_hvp_opts_sized
 rgmin_minimize_opts
+rgmin_minimize_opts_sized
 rgmin_minimize_rlbfgs
+rgmin_minimize_rlbfgs_sized
 rgmin_minimize_scg
 rgmin_minimize_scg_with_options
+rgmin_minimize_scg_with_options_sized
 rgmin_precon_init
 rgmin_rigid_align
 rgmin_rigid_project
@@ -77,6 +85,7 @@ rgmin_solver_clear_level_set
 rgmin_solver_clear_max_evals
 rgmin_solver_clear_precon
 rgmin_solver_create
+rgmin_solver_create_sized
 rgmin_solver_dim
 rgmin_solver_evals
 rgmin_solver_exp_mu
@@ -145,6 +154,7 @@ rgmin_solver_set_project_rigid
 rgmin_solver_set_qn_step
 rgmin_solver_set_quickmin_cell
 rgmin_solver_set_quickmin_variant
+rgmin_solver_set_require_convergence
 rgmin_solver_set_rigid_mass_metric
 rgmin_solver_set_rigid_mass_weighted
 rgmin_solver_set_rigid_mode

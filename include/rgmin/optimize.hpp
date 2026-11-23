@@ -145,6 +145,9 @@ struct Control {
     /// Polish a supplied Hessian or product. Default off. The first-order
     /// one-shot ignores this flag.
     bool backward_polish = false;
+    /// Nonzero returns RGMIN_NOT_CONVERGED when the gradient norm is not
+    /// below gtol. Default off, so the report stays a normal return.
+    bool require_convergence = false;
 };
 
 namespace detail {
@@ -159,6 +162,7 @@ inline rgmin_control_t c_control(Control const& ctrl) noexcept {
     c.maxmove = ctrl.maxmove;
     c.noise_eps = ctrl.noise_eps;
     c.noise_c = ctrl.noise_c;
+    c.require_convergence = ctrl.require_convergence ? 1 : 0;
     return c;
 }
 
@@ -169,6 +173,8 @@ struct Report {
     std::size_t steps = 0;
     double grad_norm = 0.0;
     rgmin_stop_t stop = RGMIN_STOP_BUDGET;
+    /// True when grad_norm is below gtol. Distinct from a tolerance stop.
+    bool converged = false;
 };
 
 /// Thrown by the one-shots when \c Control::error_on_unmet is set and the
@@ -187,15 +193,49 @@ private:
     Report report_;
 };
 
+/// Thrown when \c Control::require_convergence is set and the run ends
+/// with the gradient norm above \c gtol. It is a \c std::runtime_error.
+/// \c report() is the terminal point.
+class NotConverged : public std::runtime_error {
+public:
+    explicit NotConverged(Report const& report)
+        : std::runtime_error(describe(report)), report_(report) {}
+
+    Report const& report() const noexcept { return report_; }
+
+private:
+    static std::string describe(Report const& report) {
+        std::ostringstream msg;
+        msg << "not converged: stop " << static_cast<int>(report.stop) << " after " << report.steps
+            << " steps (grad_norm " << report.grad_norm << ")";
+        return msg.str();
+    }
+
+    Report report_;
+};
+
+inline Report report_from_c(rgmin_report_t const& out) {
+    return Report{out.value, out.steps, out.grad_norm, out.stop, out.converged != 0};
+}
+
+/// The report of a run, or the exception for its status. The C entries
+/// write \c out before they return \c RGMIN_UNMET_STOP or
+/// \c RGMIN_NOT_CONVERGED.
+inline Report finish_report(rgmin_status_t st, rgmin_report_t const& out, char const* fallback);
+
 namespace detail {
 
 /// The report of a one-shot, or the exception for its status. The C
-/// one-shots write \c out before they return \c RGMIN_UNMET_STOP.
+/// one-shots write \c out before they return \c RGMIN_UNMET_STOP or
+/// \c RGMIN_NOT_CONVERGED.
 inline Report one_shot_report(rgmin_status_t st, rgmin_report_t const& out,
                               char const* fallback) {
-    Report const report{out.value, out.steps, out.grad_norm, out.stop};
+    Report const report = report_from_c(out);
     if (st == RGMIN_SUCCESS) {
         return report;
+    }
+    if (st == RGMIN_NOT_CONVERGED) {
+        throw NotConverged(report);
     }
     char const* msg = rgmin_last_error();
     std::string const what = msg ? msg : fallback;
@@ -241,6 +281,9 @@ struct OptimizeResult {
         out.fun = r.value;
         out.nit = r.steps;
         out.grad_norm = r.grad_norm;
+        // `success` stays at its default. Strict mode reports failure by
+        // throwing NotConverged. Copying `r.converged` here would change
+        // callers that leave the flag off.
         return out;
     }
 };
@@ -392,6 +435,17 @@ namespace detail {
 }
 
 }  // namespace detail
+
+inline Report finish_report(rgmin_status_t st, rgmin_report_t const& out, char const* fallback) {
+    Report report = report_from_c(out);
+    if (st == RGMIN_SUCCESS) {
+        return report;
+    }
+    if (st == RGMIN_NOT_CONVERGED) {
+        throw NotConverged(report);
+    }
+    detail::raise(st, fallback);
+}
 
 enum class ConstraintSolver {
     Auto = RGMIN_CONSTRAINT_SOLVER_AUTO,
@@ -772,6 +826,12 @@ public:
     void set_error_on_unmet(bool on) {
         rgmin_solver_set_error_on_unmet(ptr_, on ? 1 : 0);
     }
+    /// Opt in to RGMIN_NOT_CONVERGED from a later run. A steepest, BFGS,
+    /// nonlinear CG or Adam step that took no move and left its state
+    /// unchanged reports RGMIN_STOP_STEP_TOLERANCE.
+    void set_require_convergence(bool on) {
+        rgmin_solver_set_require_convergence(ptr_, on ? 1 : 0);
+    }
     /// Record the backward-error polish flag. A session step does not form a Hessian.
     void set_backward_polish(bool on) {
         rgmin_solver_set_backward_polish(ptr_, on ? 1 : 0);
@@ -908,10 +968,7 @@ public:
                 DLManagedTensorVersioned* x) {
         rgmin_report_t out{};
         rgmin_status_t st = rgmin_solver_step(ptr_, eval, grad, user, x, &out);
-        if (st != RGMIN_SUCCESS) {
-            detail::raise(st, "rgmin_solver_step failed");
-        }
-        return Report{out.value, out.steps, out.grad_norm, out.stop};
+        return finish_report(st, out, "rgmin_solver_step failed");
     }
 
     Report step_fg(rgmin_evalgrad_fn evalgrad, void* user,
@@ -919,10 +976,7 @@ public:
         rgmin_report_t out{};
         rgmin_status_t st =
             rgmin_solver_step_fg(ptr_, evalgrad, user, x, &out);
-        if (st != RGMIN_SUCCESS) {
-            detail::raise(st, "rgmin_solver_step_fg failed");
-        }
-        return Report{out.value, out.steps, out.grad_norm, out.stop};
+        return finish_report(st, out, "rgmin_solver_step_fg failed");
     }
 
     Report step_hvp(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hvp_fn hvp,
@@ -930,10 +984,7 @@ public:
         rgmin_report_t out{};
         rgmin_status_t st =
             rgmin_solver_step_hvp(ptr_, eval, grad, hvp, user, x, &out);
-        if (st != RGMIN_SUCCESS) {
-            detail::raise(st, "rgmin_solver_step_hvp failed");
-        }
-        return Report{out.value, out.steps, out.grad_norm, out.stop};
+        return finish_report(st, out, "rgmin_solver_step_hvp failed");
     }
 
     Report step_hess(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hess_fn hess,
@@ -941,10 +992,7 @@ public:
         rgmin_report_t out{};
         rgmin_status_t st =
             rgmin_solver_step_hess(ptr_, eval, grad, hess, user, x, &out);
-        if (st != RGMIN_SUCCESS) {
-            detail::raise(st, "rgmin_solver_step_hess failed");
-        }
-        return Report{out.value, out.steps, out.grad_norm, out.stop};
+        return finish_report(st, out, "rgmin_solver_step_hess failed");
     }
 
     Report step_hess_fg(rgmin_evalgrad_fn evalgrad, rgmin_hess_fn hess,
@@ -952,10 +1000,7 @@ public:
         rgmin_report_t out{};
         rgmin_status_t st =
             rgmin_solver_step_hess_fg(ptr_, evalgrad, hess, user, x, &out);
-        if (st != RGMIN_SUCCESS) {
-            detail::raise(st, "rgmin_solver_step_hess_fg failed");
-        }
-        return Report{out.value, out.steps, out.grad_norm, out.stop};
+        return finish_report(st, out, "rgmin_solver_step_hess_fg failed");
     }
 };
 
@@ -1147,6 +1192,7 @@ public:
     Control const& control() const noexcept { return control_; }
     bool error_on_unmet() const noexcept { return error_on_unmet_; }
     bool backward_polish() const noexcept { return backward_polish_; }
+    bool require_convergence() const noexcept { return control_.require_convergence; }
     void apply(Solver& solver) const;
     /// Why a Euclidean session of this configuration ignores its line
     /// search, or an empty string when the session reads it or none is
@@ -1188,7 +1234,7 @@ inline std::string SolverConfig::valid_options() {
            "cautious_eps, error_on_unmet, etol, extra_updates, fire_variant, gtol, istep, "
            "linesearch, linesearch_maxiter, max_evals, maxiter, maxmove, maxstep, memory, "
            "neb_guards, noise_c, noise_eps, nstcgsteep, objective_roundoff, periodic, "
-           "project_rigid, qn_step, shrink, max_constraint_shrinks";
+           "project_rigid, qn_step, require_convergence, shrink, max_constraint_shrinks";
 }
 
 inline std::string SolverConfig::valid_methods() {
@@ -1279,7 +1325,7 @@ inline bool known_option(std::string const& key) {
         "fire_variant", "gtol", "istep", "linesearch", "linesearch_maxiter",
         "max_constraint_shrinks", "max_evals", "maxiter", "maxmove", "maxstep", "memory",
         "neb_guards", "noise_c", "noise_eps", "nstcgsteep", "objective_roundoff", "periodic",
-        "project_rigid", "qn_step", "shrink"};
+        "project_rigid", "qn_step", "require_convergence", "shrink"};
     for (char const* item : keys) {
         if (key == item) return true;
     }
@@ -1304,6 +1350,11 @@ inline bool is_count_option(std::string const& key) {
     return key == "memory" || key == "maxiter" || key == "linesearch_maxiter" ||
            key == "extra_updates" || key == "max_evals" || key == "max_constraint_shrinks" ||
            key == "nstcgsteep";
+}
+
+inline bool is_flag_option(std::string const& key) {
+    return key == "neb_guards" || key == "periodic" || key == "project_rigid" ||
+           key == "error_on_unmet" || key == "backward_polish" || key == "require_convergence";
 }
 
 inline double require_etol(double value) {
@@ -1384,6 +1435,8 @@ inline SolverConfig SolverConfig::build(
             else {
                 throw std::invalid_argument("qn_step must be lbfgs, newton, or rfo");
             }
+        } else if (detail::is_flag_option(key)) {
+            throw std::invalid_argument(key + " must be a bool");
         } else {
             throw std::invalid_argument(key + " must be a number or a flag");
         }
@@ -1396,6 +1449,7 @@ inline SolverConfig SolverConfig::build(
         else if (key == "project_rigid") cfg.project_rigid_ = item.second;
         else if (key == "error_on_unmet") cfg.error_on_unmet_ = item.second;
         else if (key == "backward_polish") cfg.backward_polish_ = item.second;
+        else if (key == "require_convergence") cfg.control_.require_convergence = item.second;
         else if (detail::is_count_option(key)) {
             throw std::invalid_argument(key + " must be an int");
         } else {
@@ -1445,6 +1499,8 @@ inline SolverConfig SolverConfig::build(
             else if (key == "cautious_eps") cfg.cautious_eps_ = value;
             else if (key == "cautious_alpha") cfg.cautious_alpha_ = value;
             else cfg.objective_roundoff_ = value;
+        } else if (detail::is_flag_option(key)) {
+            throw std::invalid_argument(key + " must be a bool");
         } else {
             throw std::invalid_argument(key + " must be a string or a flag");
         }
@@ -1452,6 +1508,9 @@ inline SolverConfig SolverConfig::build(
     for (auto const& item : numbers) {
         std::string key = detail::canon_token(item.first);
         detail::require_known(key);
+        if (detail::is_flag_option(key)) {
+            throw std::invalid_argument(key + " must be a bool");
+        }
         detail::require_finite(key, item.second);
         if (detail::is_count_option(key)) {
             throw std::invalid_argument(key + " must be an int");
@@ -1588,6 +1647,7 @@ inline void SolverConfig::apply(Solver& solver) const {
             throw std::invalid_argument(msg ? msg : "set_gromacs_cg failed");
         }
     }
+    solver.set_require_convergence(control_.require_convergence);
 }
 
 }  // namespace rgmin

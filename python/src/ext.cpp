@@ -384,7 +384,7 @@ rgmin::Report finish_step(rgmin_status_t status, rgmin_report_t const& out, rgbi
     if (!std::isfinite(out.value)) {
         throw rgbind::NumericalError("Solver produced a non-finite value");
     }
-    return rgmin::Report{out.value, out.steps, out.grad_norm, out.stop};
+    return rgmin::Report{out.value, out.steps, out.grad_norm, out.stop, out.converged != 0};
 }
 
 // A zero budget takes no step, and the C API has no evaluation without
@@ -422,8 +422,9 @@ rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control
         }
         grad_norm = std::sqrt(squares);
     }
+    bool const converged = grad_norm < control.gtol;
     rgmin_stop_t stop = RGMIN_STOP_BUDGET;
-    if (grad_norm < control.gtol) {
+    if (converged) {
         stop = RGMIN_STOP_TOLERANCE;
     } else if (std::isfinite(control.noise_eps) && control.noise_eps > 0.0) {
         double const c =
@@ -432,7 +433,7 @@ rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control
             stop = RGMIN_STOP_NOISE_FLOOR;
         }
     }
-    return rgmin::Report{value, 0, grad_norm, stop};
+    return rgmin::Report{value, 0, grad_norm, stop, converged};
 }
 
 DLManagedTensorVersioned* borrow_x(Vector x, std::size_t n) {
@@ -564,6 +565,11 @@ NB_MODULE(_core, m) {
             nb::object instance = type(error.what());
             instance.attr("report") = nb::cast(error.report());
             PyErr_SetObject(type.ptr(), instance.ptr());
+        } catch (rgmin::NotConverged const& error) {
+            nb::object type = nb::module_::import_("rgmin._core").attr("NotConverged");
+            nb::object instance = type(error.what());
+            instance.attr("_report") = nb::cast(error.report());
+            PyErr_SetObject(type.ptr(), instance.ptr());
         }
     });
 
@@ -658,6 +664,27 @@ NB_MODULE(_core, m) {
              [](rgmin::Report const& report) { return report.stop == RGMIN_STOP_TOLERANCE; },
              "True when ``stop`` is ``TOLERANCE``.");
 
+    nb::object not_converged = nb::steal(PyErr_NewExceptionWithDoc(
+        "rgmin._core.NotConverged",
+        "Raised when ``require_convergence`` is set and the gradient norm is "
+        "still above ``gtol``. ``report`` is the terminal ``Report``.",
+        PyExc_RuntimeError, nullptr));
+    if (!not_converged.is_valid()) {
+        throw nb::python_error();
+    }
+    m.attr("NotConverged") = not_converged;
+    nb::object not_converged_report = nb::cpp_function(
+        [](nb::handle self) -> nb::object {
+            if (!nb::hasattr(self, "_report")) {
+                throw nb::attribute_error("'NotConverged' object has no attribute 'report'");
+            }
+            return self.attr("_report");
+        },
+        nb::is_method(), nb::is_getter(), nb::scope(not_converged), nb::name("report"),
+        nb::sig("def report(self) -> Report"), "The terminal ``Report`` of the unconverged run.");
+    not_converged.attr("report") =
+        nb::module_::import_("builtins").attr("property")(not_converged_report);
+
     nb::class_<rgmin::SolverConfig>(m, "SolverConfig",
                                     "Validated, immutable optimizer options. Unknown keywords raise "
                                     "``ValueError`` listing the valid options. "
@@ -684,6 +711,8 @@ NB_MODULE(_core, m) {
              "Whether an unmet stop raises.")
         .def("backward_polish", &rgmin::SolverConfig::backward_polish,
              "Whether a Hessian one-shot polishes to the backward-error floor.")
+        .def("require_convergence", &rgmin::SolverConfig::require_convergence,
+             "Whether a run still above ``gtol`` raises ``NotConverged``.")
         .def_static("valid_options", &rgmin::SolverConfig::valid_options)
         .def_static("valid_methods", &rgmin::SolverConfig::valid_methods);
 
@@ -753,6 +782,9 @@ NB_MODULE(_core, m) {
                     report.stop = RGMIN_STOP_LINE_SEARCH;
                 }
             }
+            if (config.require_convergence() && !report.converged) {
+                throw rgmin::NotConverged(report);
+            }
             if (config.error_on_unmet() &&
                 (report.stop == RGMIN_STOP_BUDGET || report.stop == RGMIN_STOP_LINE_SEARCH ||
                  report.stop == RGMIN_STOP_POLISH_UNMET ||
@@ -768,6 +800,9 @@ NB_MODULE(_core, m) {
                 "tuple[float, ndarray[dtype=float64]]], x0: ndarray[dtype=float64], "
                 "method: object, **kwargs) -> tuple[Report, ndarray[dtype=float64]]"),
         "Minimize ``f_and_grad`` in place and return ``(report, x)``. "
+        "``require_convergence=True`` raises ``NotConverged``, a "
+        "``RuntimeError`` that carries the terminal ``Report`` as ``.report``, "
+        "when the gradient norm is still above ``gtol``. "
         "``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` "
         "that carries the ``Report`` as ``.report``, when the stop is "
         "``BUDGET``, ``LINE_SEARCH``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. "

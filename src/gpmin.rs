@@ -1857,7 +1857,9 @@ impl GpMin {
 
         let mut refinements = 0usize;
         while e1 >= e0 {
-            if gtol > 0.0 && gnorm1 <= gtol {
+            // `Control::converged`: a gradient at `gtol` is not a stop.
+            // A zero `gtol` (one `Stepper` step) never breaks here.
+            if gnorm1 < gtol {
                 break;
             }
             if refinements >= self.config.max_refinements {
@@ -1902,6 +1904,11 @@ impl GpMin {
     }
 
     /// Run GPMin until `control`'s stop criteria or iteration limit are met.
+    ///
+    /// The gradient stop is [`Control::converged`] (`grad_norm < gtol`).
+    /// [`Control::require_convergence`] returns
+    /// [`crate::Error::NotConverged`] when the finished run is not below
+    /// `gtol`.
     pub fn run<O>(
         &mut self,
         objective: &O,
@@ -1931,21 +1938,23 @@ impl GpMin {
                             steps: usize,
                             evals: usize,
                             status: Status| {
-            Report::new(val, coords)
-                .with_steps(steps)
-                .with_grad_norm(gn)
-                .with_stop_norm(control.stop_norm)
-                .with_grad(Some(g))
-                .with_evals(evals)
-                .with_status(status)
+            control.deliver(
+                Report::new(val, coords)
+                    .with_steps(steps)
+                    .with_grad_norm(gn)
+                    .with_stop_norm(control.stop_norm)
+                    .with_grad(Some(g))
+                    .with_evals(evals)
+                    .with_status(status),
+            )
         };
         if control.maxiter == 0 {
-            let status = if gnorm <= control.gtol {
+            let status = if control.converged(gnorm) {
                 Status::Tolerance
             } else {
                 Status::Budget
             };
-            return Ok(build_report(
+            return build_report(
                 value,
                 x.clone(),
                 grad,
@@ -1953,10 +1962,10 @@ impl GpMin {
                 self.steps,
                 self.evals,
                 status,
-            ));
+            );
         }
-        if gnorm <= control.gtol {
-            return Ok(build_report(
+        if control.converged(gnorm) {
+            return build_report(
                 value,
                 x.clone(),
                 grad,
@@ -1964,7 +1973,7 @@ impl GpMin {
                 self.steps,
                 self.evals,
                 Status::Tolerance,
-            ));
+            );
         }
 
         let mut iters = 0usize;
@@ -1995,8 +2004,8 @@ impl GpMin {
             self.last_value = value;
             self.last_grad = grad.clone();
 
-            if gnorm <= control.gtol {
-                return Ok(build_report(
+            if control.converged(gnorm) {
+                return build_report(
                     value,
                     x.clone(),
                     grad,
@@ -2004,10 +2013,10 @@ impl GpMin {
                     self.steps,
                     self.evals,
                     Status::Tolerance,
-                ));
+                );
             }
             if outcome.stalled_machine {
-                return Ok(build_report(
+                return build_report(
                     value,
                     x.clone(),
                     grad,
@@ -2015,11 +2024,11 @@ impl GpMin {
                     self.steps,
                     self.evals,
                     Status::MachinePrecision,
-                ));
+                );
             }
         }
 
-        Ok(build_report(
+        build_report(
             value,
             x.clone(),
             grad,
@@ -2027,7 +2036,7 @@ impl GpMin {
             self.steps,
             self.evals,
             Status::Budget,
-        ))
+        )
     }
 
     fn eval_or_cached<O>(&mut self, objective: &O, x: &Array1<f64>) -> Result<(f64, Array1<f64>)>
