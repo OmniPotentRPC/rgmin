@@ -17,6 +17,12 @@ pub enum Error {
     /// HiGHS rejected the L-BFGS quadratic model.
     #[error("HiGHS: {0}")]
     Highs(String),
+    /// A configured HiGHS solve limit was negative or non-finite.
+    #[error("HiGHS time_limit must be finite and non-negative, got {limit}")]
+    HighsTimeLimit {
+        /// Refused limit in seconds.
+        limit: f64,
+    },
     /// Newton / RFO / dogleg needs a Hessian oracle.
     #[error("Newton/RFO/dogleg needs a Hessian; call step_hess")]
     NeedHessian,
