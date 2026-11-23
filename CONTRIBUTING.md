@@ -17,10 +17,12 @@ cargo +1.88.0 test --locked --features highs
 cargo +1.88.0 test --locked --features capi,highs
 cargo +1.88.0 test --locked --features capi,par,highs,slepc,primme,chase,libkrylov
 cargo +1.88.0 test --locked --features readcon
+cargo +1.88.0 test --locked --features periodic-product
 ```
 
 CI calls the fifth row all-features.
-It names the features instead of passing `--all-features`, so the static library does not link `readcon-core`, which gets the last row.
+It names the features instead of passing `--all-features`, so the static library does not link `readcon-core` or the LGPL `gmp-mpfr-sys`, which get the last two rows.
+The `periodic-product` feature cannot be combined with `capi`, and its row needs `m4`, `make`, `diffutils` and a C compiler.
 
 The rows with `capi` also compile C and C++ programs against `include/` and run them.
 Those tests run `cargo build --lib` for the target, profile and features of the test run and link the library it reports, so no `cargo build` has to come first.
