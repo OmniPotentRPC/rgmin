@@ -968,7 +968,7 @@ mod tests {
             |s| steps.push(*s),
         )?;
         assert_eq!(zero_op.status, FgmresStatus::Breakdown);
-        assert_eq!(zero_op.x, Array1::zeros(4));
+        assert_eq!(zero_op.x, Array1::<f64>::zeros(4));
         assert_eq!(zero_op.residual, zero_op.rhs_norm);
         assert_eq!(steps.len(), 2);
         assert_eq!(steps[0].residual, zero_op.rhs_norm);
@@ -996,7 +996,7 @@ mod tests {
             |s| mid_steps.push(*s),
         )?;
         assert_eq!(mid.status, FgmresStatus::Breakdown);
-        assert_eq!(mid.x, Array1::zeros(2));
+        assert_eq!(mid.x, Array1::<f64>::zeros(2));
         assert_eq!(mid.residual, mid.rhs_norm);
         assert_eq!(mid_steps.len(), 3);
         assert!(!mid_steps[2].exact);
@@ -1013,7 +1013,7 @@ mod tests {
             |_| {},
         )?;
         assert_eq!(y_overflow.status, FgmresStatus::Breakdown);
-        assert_eq!(y_overflow.x, Array1::zeros(2));
+        assert_eq!(y_overflow.x, Array1::<f64>::zeros(2));
         assert_eq!(y_overflow.residual, y_overflow.rhs_norm);
 
         // Finite y whose axpy update overflows x.
@@ -1027,7 +1027,7 @@ mod tests {
             |_| {},
         )?;
         assert_eq!(x_overflow.status, FgmresStatus::Breakdown);
-        assert_eq!(x_overflow.x, Array1::zeros(2));
+        assert_eq!(x_overflow.x, Array1::<f64>::zeros(2));
         assert_eq!(x_overflow.residual, x_overflow.rhs_norm);
 
         // nrm2(w) overflow does not poison the basis or emit Error::Oracle.
@@ -1041,7 +1041,7 @@ mod tests {
             |_| {},
         )?;
         assert_eq!(w_overflow.status, FgmresStatus::Breakdown);
-        assert_eq!(w_overflow.x, Array1::zeros(2));
+        assert_eq!(w_overflow.x, Array1::<f64>::zeros(2));
         assert_eq!(w_overflow.residual, w_overflow.rhs_norm);
 
         // nrm2(r) overflow at cycle 2 close returns the earlier best iterate from cycle 1.
