@@ -89,6 +89,8 @@ pub mod lindh;
 pub mod lowest_mode;
 /// Sixth-order Magnus steps and the Padé matrix exponential.
 pub mod magnus;
+/// Matrix-free preconditioned MINRES with true-residual certification.
+pub mod minres;
 /// Moré and Wild computational-noise estimate and difference steps.
 pub mod noise;
 mod portable;
@@ -239,6 +241,10 @@ pub use manifold::{
 };
 pub use method::Method;
 pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
+pub use minres::{
+    BoundedKrylovSolve, MinresError, MinresFailure, MinresVector, minres_solve_bounded,
+    minres_solve_precond,
+};
 pub use newton::{
     HessianObjective, HessianOracle, NewtonKind, backward_error_floor, minimize_newton,
     newton_decrement_acceptable, polish_newton,
