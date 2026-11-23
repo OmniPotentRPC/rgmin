@@ -21,7 +21,8 @@
 //! model, therefore cannot overflow or underflow a squared Gram factor.
 //! Deciding whether a pair is above the noise of the gradient is the
 //! caller's job. A pair that cannot produce a finite correction returns
-//! [`SecantError::NonFinite`] or [`SecantOutcome::Skipped`] and leaves `B`
+//! [`SecantError::NonFinite`](crate::secant::SecantError::NonFinite) or
+//! [`SecantOutcome::Skipped`](crate::secant::SecantOutcome::Skipped) and leaves `B`
 //! unchanged.
 
 use thiserror::Error;
