@@ -919,10 +919,12 @@ impl Solver {
 
     /// Set the relative value window of the session's Euclidean line searches.
     /// It replaces the default four-epsilon window under every [`Accept`]
-    /// policy. Manifold searches keep their own acceptance, and the
+    /// policy and leaves a downhill-rise tolerance already on the session
+    /// in place. Manifold searches keep their own acceptance, and the
     /// [`Accept::Energy`] / [`Accept::Nonmonotone`] backtracking of a
     /// step that is not line-searched keeps its absolute `1e-8` rise.
-    /// Invalid values leave the session unchanged. Zero permits no objective rise.
+    /// Invalid values leave the session unchanged. Zero permits no rise
+    /// through this window.
     pub fn set_objective_roundoff(&mut self, relative: f64) -> bool {
         self.line_options.set_objective_roundoff(relative)
     }
@@ -4520,6 +4522,10 @@ impl Solver {
             ) {
                 beta = 0.0;
             }
+            // `d_old` is the unscaled direction (`nlcg_steepest(..., 1.0)`,
+            // then the same combination). `Accept::Step` applies `istep`
+            // when it walks the unit direction, so scaling only `-z` here
+            // would inflate `beta` by `1/istep`.
             *dir = Array1::from_iter(z_new.iter().zip(d_old.iter()).map(|(z, d)| -z + beta * d));
             let gd = crate::vecops::dot(new_grad.view(), dir.view());
             if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
