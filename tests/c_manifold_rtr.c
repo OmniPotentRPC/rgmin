@@ -196,6 +196,7 @@ static int check_projected_mode(void) {
     DLManagedTensorVersioned *vt;
     rgmin_eigen_params_t params = rgmin_eigen_params_default();
     rgmin_eigenpair_ex_t pair;
+    rgmin_lowest_mode_t single;
     rgmin_status_t st_code;
     int rc = 0;
     if (m == NULL) {
@@ -215,6 +216,29 @@ static int check_projected_mode(void) {
         fprintf(stderr, "projected value %g status %d converged %d\n", pair.value, st_code,
                 pair.converged);
         rc = 41;
+    }
+    x[0] = NAN;
+    mode[0] = 7.0;
+    st_code = rgmin_lowest_eigenpairs_projected(m, stretch_hvp, NULL, NULL, NULL, xt, st, mt, vt,
+                                                &params, NULL, &pair, 1);
+    if (st_code != RGMIN_INVALID_PARAMETER || mode[0] != 7.0) {
+        fprintf(stderr, "non-finite projected input status %d output %g\n", st_code, mode[0]);
+        rc = 42;
+    }
+    x[0] = 0.0;
+    for (size_t i = 0; i < 6; i++) {
+        seed[i] = i == 0 || i == 3 ? 0.7071067811865476 : 0.0;
+    }
+    params.kind = RGMIN_EIGEN_JACOBI_DAVIDSON;
+    single.value = 0.0;
+    single.actions = 0;
+    st_code = rgmin_lowest_eigenpair_on_manifold(m, stretch_hvp, NULL, xt, st, st, &params, NULL,
+                                                  &single);
+    if (st_code != RGMIN_SUCCESS || !close_to(single.value, -2.0) ||
+        fabs(seed[0] + seed[3]) > 1e-9) {
+        fprintf(stderr, "single projected value %g status %d mode (%g, %g)\n", single.value,
+                st_code, seed[0], seed[3]);
+        rc = 43;
     }
     rgmin_tensor_free(xt);
     rgmin_tensor_free(st);
