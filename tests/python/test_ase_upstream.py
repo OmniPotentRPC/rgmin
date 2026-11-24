@@ -29,6 +29,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
+ase = pytest.importorskip("ase")
 from ase import Atoms
 from ase.build import add_adsorbate, bulk, fcc100, molecule
 from ase.calculators.calculator import compare_atoms
