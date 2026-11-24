@@ -1750,6 +1750,9 @@ where
         curvature = dot(hn.view(), nvec.view());
         let mut frot = hn.clone();
         axpy(-curvature, nvec.view(), &mut frot);
+        // Near convergence the division by `frn` magnifies rounding in the
+        // removed directions, where the curvature may be lower.
+        project(&mut frot);
         let frn = nrm2(frot.view());
         if frn <= tol {
             break;
@@ -1771,6 +1774,7 @@ where
         };
         let mut next = nvec.mapv(|v| v * cuse);
         axpy(suse, theta.view(), &mut next);
+        project(&mut next);
         let mut hnext = hn.mapv(|v| v * cuse);
         axpy(suse, ht.view(), &mut hnext);
         hn = hnext / nrm2(next.view());
@@ -4072,6 +4076,171 @@ mod tests {
         assert_eq!(calls.get(), 1 + 2 + 2);
         for column in &q {
             assert_eq!(column[0], 0.0, "{column:?}");
+        }
+    }
+
+    /// A dense `H` that couples the two removed directions `t1` and `t2` to
+    /// the tangent space, so `H` and `P H P` have different lowest pairs.
+    /// `H` alone has eigenvalues near -50 and -30 along `t1` and `t2`; on
+    /// the tangent space every eigenvalue is positive. A solver that skips
+    /// the projector inside its iteration drifts into the removed directions
+    /// even though its start and its result are projected, and reports one
+    /// of the negative eigenvalues of `H`.
+    struct Coupled(Array2<f64>);
+
+    impl ApplyHessian for Coupled {
+        fn apply_hessian(&self, _x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {
+            self.0.dot(&v)
+        }
+    }
+
+    fn removed_directions() -> [Array1<f64>; 2] {
+        let r = std::f64::consts::FRAC_1_SQRT_2;
+        [
+            array![r, 0.0, 0.0, r, 0.0, 0.0],
+            array![0.0, r, 0.0, 0.0, r, 0.0],
+        ]
+    }
+
+    fn remove_directions(v: &mut Array1<f64>) {
+        for t in removed_directions() {
+            let along = dot(v.view(), t.view());
+            axpy(-along, t.view(), v);
+        }
+    }
+
+    fn coupled_hessian() -> Coupled {
+        let n = 6;
+        let [t1, t2] = removed_directions();
+        let mut h = Array2::zeros((n, n));
+        for i in 0..n {
+            for j in 0..n {
+                h[(i, j)] = 0.4 * (((i + 1) * (j + 1)) % 5) as f64;
+                h[(i, j)] += -50.0 * t1[i] * t1[j] - 30.0 * t2[i] * t2[j];
+            }
+            h[(i, i)] += 1.0 + i as f64;
+        }
+        Coupled(h)
+    }
+
+    /// Eigenpairs of `Q^T H Q` on an orthonormal basis `Q` of the tangent
+    /// space, ascending, with each vector lifted back to `R^6`.
+    fn tangent_reference(h: &Coupled) -> Vec<(f64, Array1<f64>)> {
+        let r = std::f64::consts::FRAC_1_SQRT_2;
+        let basis = [
+            array![r, 0.0, 0.0, -r, 0.0, 0.0],
+            array![0.0, r, 0.0, 0.0, -r, 0.0],
+            array![0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            array![0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+        ];
+        let mut t = vec![vec![0.0; basis.len()]; basis.len()];
+        for (i, qi) in basis.iter().enumerate() {
+            let hq = h.0.dot(qi);
+            for (j, qj) in basis.iter().enumerate() {
+                t[i][j] = dot(hq.view(), qj.view());
+            }
+        }
+        let (values, vectors) = jacobi_eigen(&mut t);
+        let mut pairs: Vec<(f64, Array1<f64>)> = (0..basis.len())
+            .map(|k| {
+                let mut lifted = Array1::zeros(6);
+                for (i, qi) in basis.iter().enumerate() {
+                    axpy(vectors[i][k], qi.view(), &mut lifted);
+                }
+                (values[k], lifted)
+            })
+            .collect();
+        pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        pairs
+    }
+
+    #[test]
+    fn the_coupled_hessian_separates_projected_and_unprojected_spectra() {
+        let h = coupled_hessian();
+        let reference = tangent_reference(&h);
+        assert!(reference[0].0 > 0.5, "tangent lowest {}", reference[0].0);
+        assert!(reference[1].0 - reference[0].0 > 0.1, "{reference:?}");
+        let mut full: Vec<Vec<f64>> = (0..6)
+            .map(|i| (0..6).map(|j| h.0[(i, j)]).collect())
+            .collect();
+        let (values, _) = jacobi_eigen(&mut full);
+        let lowest = values.iter().copied().fold(f64::INFINITY, f64::min);
+        assert!(lowest < -20.0, "unprojected lowest {lowest}");
+    }
+
+    #[test]
+    fn every_built_in_returns_the_tangent_pair_of_a_coupled_hessian() {
+        let h = coupled_hessian();
+        let (want, want_vector) = tangent_reference(&h)[0].clone();
+        let x = Array1::zeros(6);
+        let seed = array![0.3, -0.2, 0.5, 0.1, 0.4, -0.6];
+        for kind in [
+            EigensolverKind::Lanczos,
+            EigensolverKind::RayleighRitz,
+            EigensolverKind::JacobiDavidson,
+            EigensolverKind::Lobpcg,
+            EigensolverKind::Dimer,
+        ] {
+            let params = EigenParams {
+                kind,
+                tol: 1e-12,
+                max_iter: 200,
+                krylov: 6,
+                ..EigenParams::default()
+            };
+            let mode = lowest_mode_with(&h, x.view(), seed.view(), &params, &mut remove_directions)
+                .unwrap_or_else(|err| panic!("{kind:?}: {err:?}"));
+            assert!(
+                (mode.value - want).abs() <= 1e-8 * want.abs(),
+                "{kind:?} returned {}, the tangent lowest is {want}",
+                mode.value
+            );
+            let overlap = dot(mode.vector.view(), want_vector.view()).abs();
+            assert!(overlap > 1.0 - 1e-8, "{kind:?} overlap {overlap}");
+            for t in removed_directions() {
+                let leak = dot(mode.vector.view(), t.view()).abs();
+                assert!(leak < 1e-12, "{kind:?} removed component {leak}");
+            }
+        }
+    }
+
+    #[test]
+    fn block_lobpcg_returns_the_tangent_pairs_of_a_coupled_hessian() {
+        let h = coupled_hessian();
+        let reference = tangent_reference(&h);
+        let x = Array1::zeros(6);
+        let seed = array![
+            [0.3, 0.1],
+            [-0.2, 0.4],
+            [0.5, -0.3],
+            [0.1, 0.2],
+            [0.4, 0.6],
+            [-0.6, 0.1]
+        ];
+        let found = lowest_eigenpairs_projected(
+            &h,
+            None::<&IdentityPreconditioner>,
+            x.view(),
+            seed.view(),
+            1e-10,
+            200,
+            &mut remove_directions,
+        )
+        .unwrap();
+        assert_eq!(found.pairs.len(), 2);
+        for (pair, (want, want_vector)) in found.pairs.iter().zip(&reference) {
+            assert!(pair.converged, "{pair:?}");
+            assert!(
+                (pair.value - want).abs() <= 1e-8 * want.abs(),
+                "block pair {}, the tangent pair is {want}",
+                pair.value
+            );
+            let overlap = dot(pair.vector.view(), want_vector.view()).abs();
+            assert!(overlap > 1.0 - 1e-8, "block overlap {overlap}");
+            for t in removed_directions() {
+                let leak = dot(pair.vector.view(), t.view()).abs();
+                assert!(leak < 1e-10, "block removed component {leak}");
+            }
         }
     }
 }
