@@ -1073,7 +1073,7 @@ public:
     }
 };
 
-/// RAII Stiefel St(n, p), SPD(p) or product manifold. Every pointer
+/// RAII Stiefel St(n, p), SPD(p), rigid quotient or product manifold. Every pointer
 /// argument is a caller-owned column-major buffer of len() doubles; a
 /// product packs its factors in order. A refused call throws
 /// std::runtime_error with rgmin_last_error. ABI minor 41.
@@ -1098,6 +1098,10 @@ public:
     }
     static Manifold spd(std::size_t p, rgmin_spd_metric_t metric = RGMIN_SPD_AFFINE_INVARIANT) {
         return Manifold(rgmin_manifold_spd(p, static_cast<int32_t>(metric)));
+    }
+    /// R^{3N}/SE(3), or R^{3N}/T(3) when periodic is true.
+    static Manifold rigid_quotient(std::size_t n_atoms, bool periodic = false) {
+        return Manifold(rgmin_manifold_rigid_quotient(n_atoms, periodic ? 1 : 0));
     }
     /// Product of the factors in order. The factors stay usable.
     template <class... Factors>

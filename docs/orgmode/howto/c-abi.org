@@ -158,8 +158,9 @@ SCG takes the same one-shot shape. Conjugacy is a field on
 ~RGMIN_UNAVAILABLE~. ~rgmin_lowest_eigenpairs~ is the block LOBPCG
 solver for the k lowest pairs (Knyazev 2001). ~seed~ and ~modes_out~
 are row-major n-by-k. ~rgmin_lowest_eigenpairs~ is ~abi_minor~ 39.
-~rgmin_manifold_handle_t~ is a Stiefel, SPD or product manifold with
-column-major point buffers, ~abi_minor~ 41; see the manifold reference.
+~rgmin_manifold_handle_t~ is a Stiefel, SPD, rigid quotient or product
+manifold with column-major point buffers, ~abi_minor~ 41; see the
+manifold reference.
 ~rgmin_lowest_eigenpairs_ex~ adds each residual and a converged flag, and an
 optional preconditioner (null is the identity). It is ~abi_minor~ 42.
 ~rgmin_eigenpair_t~ is unchanged.
@@ -248,6 +249,34 @@ default shapes as ~rgmin_solver_set_manifold~. A positive
 off. ~xts_minimize_rlbfgs~ and ~xts_rlbfgs_default~ are the aliases.
 These are ~abi_minor~ 51. ~rgmin_control_t~ is unchanged, and the
 default Euclidean L-BFGS step stays the eOn cap.
+
+** Rigid quotient, trust region and projected modes
+
+~rgmin_control_t~ is unchanged.
+
+~rgmin_manifold_rigid_quotient(n_atoms, periodic)~ builds
+~R^{3N}/SE(3)~ when ~periodic~ is 0 and ~R^{3N}/T(3)~ otherwise.
+The packed length is ~3 * n_atoms~. Projection removes translations,
+and rotations as well when the quotient is ~SE(3)~.
+~xts_manifold_rigid_quotient~ is the alias.
+
+~rgmin_rtr_tcg_solve~ is one Steihaug-Toint truncated CG step on that
+tangent space, or in Euclidean space when the manifold pointer is null.
+It stops on negative curvature, on the trust boundary, on the residual
+test, on the iteration budget, or on a zero projected gradient.
+~rgmin_rtr_tcg_result_t~ reports the model decrease, the step length,
+the stop code and the iteration count.
+
+~rgmin_rtr_radius_update~ applies the Absil, Baker and Gallivan rule.
+The step is accepted when the ratio of actual to predicted decrease
+is above 1/10. The radius shrinks by 1/4 when the ratio is below 1/4,
+and it doubles, never past the supplied maximum, when the ratio is
+above 3/4 and the step lies on the trust boundary.
+
+~rgmin_lowest_eigenpair_on_manifold~ and
+~rgmin_lowest_eigenpairs_projected~ are the Lanczos or LOBPCG pair and
+the block LOBPCG pairs with each vector projected onto the tangent
+space. A null manifold matches the unprojected entries.
 
 ** C++
 
