@@ -1703,6 +1703,7 @@ typedef enum rgmin_tcg_stop_t {
 /** Result of \ref rgmin_rtr_tcg_solve. */
 typedef struct rgmin_rtr_tcg_result_t {
     double model_decrease;
+    /** Step length in the selected manifold metric; Euclidean for null. */
     double eta_norm;
     int32_t stop;
     size_t iterations;

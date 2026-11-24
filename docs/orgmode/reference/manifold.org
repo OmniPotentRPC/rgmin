@@ -47,17 +47,20 @@ The Stiefel geodesic is Edelman, Arias and Smith ([[https://doi.org/10.1137/S089
 
 ** The rigid quotient and its strata
 
-The factor is a manifold on the regular stratum, ~N >= 3~ atoms that are not collinear.
-The horizontal space has dimension ~3N - 6~, or ~3N - 3~ when ~periodic~ (translations only), and the projector has rank 6, or 3.
+For an isolated cluster, the factor is a manifold on the regular stratum, ~N >= 3~ atoms that are not collinear.
+The horizontal space has dimension ~3N - 6~ and the projector has rank 6.
 The projector is built from a rank-revealing factorization of the six rigid motions, with every column scaled to unit size, so the rank does not depend on the size of the cluster.
 
-At a singular configuration the quotient is not a manifold.
+At a singular isolated configuration the quotient is not a manifold.
 One atom, or atoms that all coincide, have rank 3: the three rotations move nothing.
 Collinear atoms have rank 5: the rotation about the line moves nothing.
 The horizontal space is then larger than ~3N - 6~, and its dimension changes with the configuration.
 The projection stays valid there and removes exactly the motions that move the atoms.
 The retraction ~X + V~ and the transport are well defined, but a step that bends a collinear cluster changes the dimension of the tangent space, so a method that keeps a subspace across the step gets no guarantee from the transport.
 Treat a singular configuration as the boundary of the manifold.
+
+When ~periodic~ is true, the factor quotients translations only.
+The translation action is free for every nonempty configuration, so the periodic quotient has dimension ~3N - 3~, projector rank 3, and no rotational singular strata.
 
 ** Refusals
 

@@ -12,10 +12,10 @@
 //!
 //! # Regular and singular strata of the rigid quotient
 //!
-//! The action of \(\mathrm{SE}(3)\) on \(\mathbb{R}^{3N}\) is free only on the
-//! regular stratum, the configurations of three or more atoms that are not
-//! collinear. There the quotient is a manifold of dimension \(3N-6\)
-//! (\(3N-3\) when periodic), the projector has rank 6 (3), and every
+//! For an isolated cluster, the action of \(\mathrm{SE}(3)\) on
+//! \(\mathbb{R}^{3N}\) is free only on the regular stratum, the configurations
+//! of three or more atoms that are not collinear. There the quotient is a
+//! manifold of dimension \(3N-6\), the projector has rank 6, and every
 //! operation is exact. At a singular configuration the stabilizer is not
 //! trivial and the orbit is smaller: one atom or coincident atoms have rank
 //! 3, and collinear atoms have rank 5, so the horizontal space is larger and
@@ -26,7 +26,11 @@
 //! example by bending a collinear cluster, changes the tangent dimension, and
 //! the transport and the retraction do not carry the history of a subspace
 //! method across the change. Treat a singular configuration as the boundary
-//! of the manifold, not as a point of it.
+//! of the isolated quotient, not as a point of it.
+//!
+//! In the periodic case only translations are quotiented out. Their action is
+//! free for every nonempty configuration, so the quotient has dimension
+//! \(3N-3\) and projector rank 3 without rotational singular strata.
 //!
 //! Every operation checks lengths and finiteness and returns
 //! [`Error::ManifoldArgument`] rather than guessing. An SPD point must be
@@ -390,14 +394,14 @@ impl RiemannianManifold {
     /// removes translations and, unless `periodic`, rotations. The
     /// retraction is the horizontal lift `x + v`.
     ///
-    /// The quotient is a manifold only on the regular stratum: three or
-    /// more atoms that are not collinear, where the horizontal space has
-    /// dimension `3 * n_atoms - 6` (`- 3` when `periodic`). At one atom,
-    /// coincident atoms or collinear atoms the projector removes fewer
-    /// motions (rank 3, 3 and 5), the horizontal space is larger, and its
-    /// dimension changes with the configuration. The call accepts such a
-    /// geometry and the projection stays valid there. See the module
-    /// documentation.
+    /// The isolated quotient is a manifold only on the regular stratum:
+    /// three or more atoms that are not collinear, where the horizontal
+    /// space has dimension `3 * n_atoms - 6`. At one atom, coincident atoms
+    /// or collinear atoms the projector removes fewer motions (rank 3, 3 and
+    /// 5), the horizontal space is larger, and its dimension changes with
+    /// the configuration. The periodic quotient removes translations only;
+    /// it has dimension `3 * n_atoms - 3` and no rotational singular strata.
+    /// The call accepts every nonempty geometry. See the module documentation.
     ///
     /// # Errors
     ///

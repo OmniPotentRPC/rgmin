@@ -6043,6 +6043,51 @@ mod projected_entry_tests {
     }
 
     #[test]
+    fn projected_external_backends_leave_single_outputs_untouched() {
+        for kind in [
+            rgmin_eigen_kind_t::RGMIN_EIGEN_PRIMME,
+            rgmin_eigen_kind_t::RGMIN_EIGEN_LIBKRYLOV,
+            rgmin_eigen_kind_t::RGMIN_EIGEN_SLEPC,
+        ] {
+            let manifold = rgmin_manifold_rigid_quotient(3, 0);
+            let mut point = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 0.8, 0.1];
+            let mut seed = [0.2, 0.1, -0.3, 0.4, 0.0, 0.2, 0.1, 0.3, 0.2];
+            let mut mode = [7.0; 9];
+            let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), 9) };
+            let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 9) };
+            let mt = unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), 9) };
+            let mut params = rgmin_eigen_params_default();
+            params.kind = kind as i32;
+            let mut result = rgmin_lowest_mode_t {
+                value: 7.0,
+                actions: 7,
+            };
+            let status = unsafe {
+                rgmin_lowest_eigenpair_on_manifold(
+                    manifold,
+                    Some(diagonal_hvp),
+                    std::ptr::null_mut(),
+                    xt,
+                    st,
+                    mt,
+                    &params,
+                    std::ptr::null(),
+                    &mut result,
+                )
+            };
+            unsafe {
+                rgmin_tensor_free(xt);
+                rgmin_tensor_free(st);
+                rgmin_tensor_free(mt);
+                rgmin_manifold_free(manifold);
+            }
+            assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+            assert_eq!(mode, [7.0; 9]);
+            assert_eq!((result.value, result.actions), (7.0, 7));
+        }
+    }
+
+    #[test]
     fn block_entry_traps_a_panic_and_writes_nothing() {
         let manifold = rgmin_manifold_rigid_quotient(3, 0);
         let mut point = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 0.8, 0.1];
@@ -6095,7 +6140,10 @@ mod projected_entry_tests {
         assert!(last_error().ends_with("panicked"), "{}", last_error());
         assert_eq!(modes, [7.0; 18]);
         assert_eq!(values, [7.0; 2]);
-        assert_eq!((pairs[0].value, pairs[0].actions), (7.0, 7));
+        for pair in pairs {
+            assert_eq!((pair.value, pair.actions), (7.0, 7));
+            assert_eq!((pair.residual, pair.converged), (7.0, 7));
+        }
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -8202,7 +8250,8 @@ pub enum rgmin_tcg_stop_t {
 pub struct rgmin_rtr_tcg_result_t {
     /// Model decrease `m(0) - m(eta)`.
     pub model_decrease: f64,
-    /// Euclidean length of the returned step.
+    /// Length of the returned step in the selected manifold metric.
+    /// Euclidean when the manifold handle is null.
     pub eta_norm: f64,
     /// A [`rgmin_tcg_stop_t`] value.
     pub stop: i32,
