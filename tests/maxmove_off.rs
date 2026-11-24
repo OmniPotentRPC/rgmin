@@ -390,6 +390,44 @@ fn set_atom_maxmove_takes_only_a_positive_finite_cap() {
     }
 }
 
+/// The off sentinel is the request for no cap at all, so it also clears
+/// a per-atom cap the caller set before it, not only the default one.
+#[test]
+fn an_off_maxmove_clears_a_per_atom_cap_set_before_it() {
+    let x0 = start();
+    let none = |s: &mut Solver| s.set_atom_maxmove(0.0);
+    let held = |s: &mut Solver| s.set_atom_maxmove(0.05);
+    let run = |setup: Setup| {
+        trajectory(
+            &Method::Steepest,
+            Oracle::Gradient,
+            control(None),
+            &x0,
+            setup,
+            false,
+        )
+    };
+    assert_ne!(
+        run(&held),
+        run(&none),
+        "a 0.05 per-atom cap must change the steepest descent run"
+    );
+    for (method, oracle) in methods() {
+        let free = trajectory(&method, oracle, control(None), &x0, &none, false);
+        for cap in ALL_OFF {
+            let set = |s: &mut Solver| {
+                s.set_atom_maxmove(0.05);
+                s.set_maxmove(cap);
+            };
+            let got = trajectory(&method, oracle, control(None), &x0, &set, false);
+            assert_eq!(
+                got, free,
+                "{method:?} set_atom_maxmove(0.05), set_maxmove({cap})"
+            );
+        }
+    }
+}
+
 #[test]
 fn eon_cg_runs_uncapped_under_a_non_binding_max_move() {
     let fill = |x: &[f64], g: &mut [f64]| {

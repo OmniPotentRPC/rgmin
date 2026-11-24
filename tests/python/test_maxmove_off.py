@@ -91,6 +91,44 @@ def test_a_non_finite_cap_is_refused(key: str, value: float) -> None:
         rgmin.SolverConfig("lbfgs", **{key: value})
 
 
+def _late_trajectory(method: str, off: float | None, **options: float) -> list[list[float]]:
+    solver = rgmin.Solver(START.size, rgmin.SolverConfig(method, gtol=1e-14, **options))
+    if off is not None:
+        solver.set_maxmove(off)
+    x = START.copy()
+    seen = []
+    for _ in range(4):
+        solver.step(_bowl, x)
+        seen.append(x.tolist())
+    return seen
+
+
+@pytest.mark.parametrize("method", METHODS)
+@pytest.mark.parametrize("off", [-1.0, -1e9, math.inf])
+def test_set_maxmove_off_clears_a_per_atom_cap_set_at_construction(method: str, off: float) -> None:
+    cleared = _late_trajectory(method, None, maxstep=0.0)
+    assert _late_trajectory(method, off, maxstep=0.05) == cleared
+
+
+def test_set_maxmove_off_changes_a_capped_run() -> None:
+    capped = _late_trajectory("sd", None, maxstep=0.05)
+    assert _late_trajectory("sd", -1.0, maxstep=0.05) != capped
+    assert _late_trajectory("sd", 0.0, maxstep=0.05) == capped
+
+
+def test_set_maxmove_off_clears_a_per_atom_cap_set_by_a_session_control() -> None:
+    cleared = _late_trajectory("sd", None, maxstep=0.0)
+    solver = rgmin.Solver(START.size, rgmin.SolverConfig("sd", gtol=1e-14))
+    solver.set_atom_maxmove(0.05)
+    solver.set_maxmove(-1.0)
+    x = START.copy()
+    seen = []
+    for _ in range(4):
+        solver.step(_bowl, x)
+        seen.append(x.tolist())
+    assert seen == cleared
+
+
 def test_a_negative_maxmove_steps_downhill() -> None:
     f0, g0 = _bowl(START)
     for method in METHODS:

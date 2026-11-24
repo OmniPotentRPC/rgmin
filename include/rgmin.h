@@ -466,7 +466,8 @@ void rgmin_solver_forget_evaluation(rgmin_solver_t *solver);
 
 /** Euclidean step cap for the next \ref rgmin_solver_step (saddle \c max_move).
  *  Positive and finite: the cap. Zero or NaN: the defaults. Negative or
- *  infinite: every step cap off, the default per-atom cap included. */
+ *  infinite: every step cap off, the default per-atom cap included and
+ *  one set by \ref rgmin_solver_set_atom_maxmove. */
 void rgmin_solver_set_maxmove(rgmin_solver_t *solver, double maxmove);
 /** How an L-BFGS session uses a caller Hessian (eOn \c lbfgs_step). */
 typedef enum rgmin_qn_step_t {
