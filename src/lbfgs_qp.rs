@@ -123,8 +123,10 @@ fn apply_engine(model: &mut highs::Model, options: &HighsOptions) -> Result<()> 
     Ok(())
 }
 
-/// Seconds the projection QP may run unless the options set a limit.
-const PROJECTION_TIME_LIMIT: f64 = 0.05;
+/// Iterations each projection-QP engine may run.
+///
+/// Unlike a wall-clock limit, this bound does not change with machine load.
+const PROJECTION_ITERATION_LIMIT: i32 = 100_000;
 
 /// Seconds the feasible step QP may run unless the options set a limit.
 const FEASIBLE_STEP_TIME_LIMIT: f64 = 1.0;
@@ -134,6 +136,26 @@ fn set_time_limit(model: &mut highs::Model, options: &HighsOptions, default: f64
     model
         .try_set_option("time_limit", options.time_limit_or(default)?)
         .map_err(|_| Error::Highs("cannot set time_limit".into()))
+}
+
+/// Bound projection work deterministically, plus any wall limit the caller
+/// explicitly requested.
+fn set_projection_limits(model: &mut highs::Model, options: &HighsOptions) -> Result<()> {
+    for name in [
+        "qp_iteration_limit",
+        "ipm_iteration_limit",
+        "simplex_iteration_limit",
+    ] {
+        model
+            .try_set_option(name, PROJECTION_ITERATION_LIMIT)
+            .map_err(|_| Error::Highs(format!("cannot set {name}")))?;
+    }
+    if options.time_limit.is_some() {
+        model
+            .try_set_option("time_limit", options.time_limit_or(0.0)?)
+            .map_err(|_| Error::Highs("cannot set time_limit".into()))?;
+    }
+    Ok(())
 }
 
 fn bind_callback(
@@ -401,7 +423,7 @@ fn project_qp(
     model
         .try_set_option("threads", 1_i32)
         .map_err(|_| Error::Highs("cannot set threads=1".into()))?;
-    set_time_limit(&mut model, options, PROJECTION_TIME_LIMIT)?;
+    set_projection_limits(&mut model, options)?;
 
     let (q_start, q_index, q_value) = identity_csc(n);
     let st = unsafe {
@@ -759,7 +781,7 @@ fn identity_csc(n: usize) -> (Vec<HighsInt>, Vec<HighsInt>, Vec<f64>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{FEASIBLE_STEP_TIME_LIMIT, PROJECTION_TIME_LIMIT, identity_csc, set_time_limit};
+    use super::{FEASIBLE_STEP_TIME_LIMIT, identity_csc, set_projection_limits, set_time_limit};
     use crate::HighsOptions;
 
     #[test]
@@ -771,15 +793,13 @@ mod tests {
     }
 
     #[test]
-    fn each_solve_keeps_its_own_limit_until_one_is_set() {
+    fn feasible_solve_keeps_its_limit_until_one_is_set() {
         let options = HighsOptions::default();
-        assert_eq!(options.time_limit_or(PROJECTION_TIME_LIMIT).unwrap(), 0.05);
         assert_eq!(
             options.time_limit_or(FEASIBLE_STEP_TIME_LIMIT).unwrap(),
             1.0
         );
         let set = options.with_time_limit(2.5);
-        assert_eq!(set.time_limit_or(PROJECTION_TIME_LIMIT).unwrap(), 2.5);
         assert_eq!(set.time_limit_or(FEASIBLE_STEP_TIME_LIMIT).unwrap(), 2.5);
         let cleared = set.with_time_limit(None);
         assert_eq!(
@@ -809,15 +829,18 @@ mod tests {
         let mut model = problem
             .try_optimise(highs::Sense::Minimise)
             .expect("one-column model");
+        let default_limit = highs_time_limit(&mut model);
         let options = HighsOptions::default();
+        let set = options.with_time_limit(2.5);
 
-        for default in [PROJECTION_TIME_LIMIT, FEASIBLE_STEP_TIME_LIMIT] {
-            set_time_limit(&mut model, &options, default).unwrap();
-            assert_eq!(highs_time_limit(&mut model), default);
+        set_projection_limits(&mut model, &options).unwrap();
+        assert_eq!(highs_time_limit(&mut model), default_limit);
+        set_projection_limits(&mut model, &set).unwrap();
+        assert_eq!(highs_time_limit(&mut model), 2.5);
 
-            let set = options.with_time_limit(2.5);
-            set_time_limit(&mut model, &set, default).unwrap();
-            assert_eq!(highs_time_limit(&mut model), 2.5);
-        }
+        set_time_limit(&mut model, &options, FEASIBLE_STEP_TIME_LIMIT).unwrap();
+        assert_eq!(highs_time_limit(&mut model), FEASIBLE_STEP_TIME_LIMIT);
+        set_time_limit(&mut model, &set, FEASIBLE_STEP_TIME_LIMIT).unwrap();
+        assert_eq!(highs_time_limit(&mut model), 2.5);
     }
 }
