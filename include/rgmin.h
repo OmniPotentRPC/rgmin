@@ -76,7 +76,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 56
+#define RGMIN_ABI_VERSION_MINOR 60
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -110,7 +110,9 @@ typedef struct rgmin_abi_stamp_t {
  * revision 5. */
 /* 56 rgmin_manifold_rigid_quotient, rgmin_rtr_tcg_solve,
  *    rgmin_rtr_radius_update, rgmin_lowest_eigenpair_on_manifold,
- *    rgmin_lowest_eigenpairs_projected. rgmin_control_t is unchanged. */
+ *    rgmin_lowest_eigenpairs_projected. rgmin_control_t is unchanged.
+ * 60 rgmin_solver_set_fire_config and
+ *    rgmin_solver_set_lbfgs_fixed_h0. */
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
@@ -727,7 +729,7 @@ int32_t rgmin_solver_set_fire_abc(rgmin_solver_t *solver, int32_t on);
  *  dt <= dt_max, f_inc finite and greater than 1, and f_dec, alpha and
  *  f_alpha finite and in (0, 1). n_min is the downhill count before dt
  *  grows. Returns 0, or 1 on a null session, a session that is not FIRE
- *  or FIRE 2.0, or a parameter outside that range. */
+ *  or FIRE 2.0, or a parameter outside that range. ABI minor 60. */
 int32_t rgmin_solver_set_fire_config(rgmin_solver_t *solver, double dt,
                                      double dt_max, size_t n_min, double f_inc,
                                      double f_dec, double alpha, double f_alpha);
@@ -750,7 +752,7 @@ int32_t rgmin_solver_set_lbfgs_scaled(rgmin_solver_t *solver, double max_atom);
 /** Fixed initial inverse-Hessian scale of an L-BFGS session, ASE's
  *  H0 = 1/alpha. A non-positive or non-finite h0 clears it and the
  *  two-loop uses the Nocedal-Wright scale again. Returns 0, or 1 on a
- *  null session or a session that is not L-BFGS. */
+ *  null session or a session that is not L-BFGS. ABI minor 60. */
 int32_t rgmin_solver_set_lbfgs_fixed_h0(rgmin_solver_t *solver, double h0);
 /** Opt into the strong Wolfe line search. The default L-BFGS session
  *  does not search a line. Returns 0, or 1 on a null session or a
