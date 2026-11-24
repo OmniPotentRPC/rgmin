@@ -5771,6 +5771,192 @@ mod manifold_alias_tests {
 }
 
 #[cfg(test)]
+mod rtr_entry_tests {
+    use super::*;
+
+    unsafe extern "C" fn scale_hvp(
+        user: *mut c_void,
+        _x: *const DLManagedTensorVersioned,
+        v: *const DLManagedTensorVersioned,
+        hv: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        let scale = unsafe { *(user as *const f64) };
+        let input = cpu_f64_slice(v, "v").unwrap();
+        let output = cpu_f64_slice_mut(hv, "hv").unwrap();
+        for (o, i) in output.iter_mut().zip(input) {
+            *o = scale * i;
+        }
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+
+    struct Counted {
+        calls: usize,
+        value: f64,
+    }
+
+    unsafe extern "C" fn counted_hvp(
+        user: *mut c_void,
+        _x: *const DLManagedTensorVersioned,
+        v: *const DLManagedTensorVersioned,
+        hv: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        let state = unsafe { &mut *(user as *mut Counted) };
+        state.calls += 1;
+        let input = cpu_f64_slice(v, "v").unwrap();
+        let output = cpu_f64_slice_mut(hv, "hv").unwrap();
+        for (o, i) in output.iter_mut().zip(input) {
+            *o = state.value * i;
+        }
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+
+    unsafe extern "C" fn failing_hvp(
+        user: *mut c_void,
+        _x: *const DLManagedTensorVersioned,
+        _v: *const DLManagedTensorVersioned,
+        _hv: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        let calls = unsafe { &mut *(user as *mut usize) };
+        *calls += 1;
+        rgmin_status_t::RGMIN_INTERNAL_ERROR
+    }
+
+    #[test]
+    fn tcg_on_spd_measures_the_step_in_the_manifold_metric() {
+        // SPD(1) at x = 4 under the affine-invariant metric: <u, v> = u v / 16.
+        // With gradient 2 and curvature 1 the Newton step is eta = -2, whose
+        // manifold length is 2 / 4 and whose Euclidean length is 2.
+        let manifold = rgmin_manifold_spd(1, 0);
+        let mut scale = 1.0_f64;
+        let x = [4.0];
+        let grad = [2.0];
+        let mut eta = [0.0];
+        let mut out = std::mem::MaybeUninit::<rgmin_rtr_tcg_result_t>::uninit();
+        let status = unsafe {
+            rgmin_rtr_tcg_solve(
+                manifold,
+                Some(scale_hvp),
+                &mut scale as *mut f64 as *mut c_void,
+                x.as_ptr(),
+                grad.as_ptr(),
+                10.0,
+                1.0,
+                0.1,
+                5,
+                eta.as_mut_ptr(),
+                1,
+                out.as_mut_ptr(),
+            )
+        };
+        let out = unsafe { out.assume_init() };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        assert!((eta[0] + 2.0).abs() < 1e-12, "eta {eta:?}");
+        assert!((out.eta_norm - 0.5).abs() < 1e-12, "norm {}", out.eta_norm);
+        assert!((out.model_decrease - 2.0).abs() < 1e-12);
+        assert_eq!(out.stop, rgmin_tcg_stop_t::RGMIN_TCG_RESIDUAL as i32);
+
+        let mut cut = std::mem::MaybeUninit::<rgmin_rtr_tcg_result_t>::uninit();
+        let status = unsafe {
+            rgmin_rtr_tcg_solve(
+                manifold,
+                Some(scale_hvp),
+                &mut scale as *mut f64 as *mut c_void,
+                x.as_ptr(),
+                grad.as_ptr(),
+                0.25,
+                1.0,
+                0.1,
+                5,
+                eta.as_mut_ptr(),
+                1,
+                cut.as_mut_ptr(),
+            )
+        };
+        let cut = unsafe { cut.assume_init() };
+        unsafe { rgmin_manifold_free(manifold) };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        assert_eq!(cut.stop, rgmin_tcg_stop_t::RGMIN_TCG_BOUNDARY as i32);
+        assert!((cut.eta_norm - 0.25).abs() < 1e-12, "norm {}", cut.eta_norm);
+        assert!((eta[0] + 1.0).abs() < 1e-12, "eta {eta:?}");
+    }
+
+    #[test]
+    fn tcg_stops_on_a_non_finite_hessian_action_and_keeps_the_output() {
+        let mut state = Counted {
+            calls: 0,
+            value: f64::NAN,
+        };
+        let x = [0.0, 0.0];
+        let grad = [1.0, 1.0];
+        let mut eta = [7.0, 7.0];
+        let status = unsafe {
+            rgmin_rtr_tcg_solve(
+                std::ptr::null(),
+                Some(counted_hvp),
+                &mut state as *mut Counted as *mut c_void,
+                x.as_ptr(),
+                grad.as_ptr(),
+                10.0,
+                1.0,
+                0.1,
+                50,
+                eta.as_mut_ptr(),
+                2,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        assert_eq!(state.calls, 1, "tCG kept calling a poisoned Hessian");
+        assert_eq!(eta, [7.0, 7.0]);
+    }
+
+    #[test]
+    fn tcg_stops_at_the_first_failing_hessian_callback() {
+        let mut calls = 0usize;
+        let x = [0.0, 0.0];
+        let grad = [1.0, 1.0];
+        let mut eta = [7.0, 7.0];
+        let status = unsafe {
+            rgmin_rtr_tcg_solve(
+                std::ptr::null(),
+                Some(failing_hvp),
+                &mut calls as *mut usize as *mut c_void,
+                x.as_ptr(),
+                grad.as_ptr(),
+                10.0,
+                1.0,
+                0.1,
+                50,
+                eta.as_mut_ptr(),
+                2,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        assert_eq!(calls, 1);
+        assert_eq!(eta, [7.0, 7.0]);
+    }
+
+    #[test]
+    fn radius_update_clamps_a_radius_above_the_maximum() {
+        let mut radius = 8.0_f64;
+        let mut accepted = -1_i32;
+        let status =
+            unsafe { rgmin_rtr_radius_update(&mut radius, 1.0, 0.5, 1.0, 0.0, &mut accepted) };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        assert_eq!(accepted, 1);
+        assert_eq!(radius, 1.0);
+
+        radius = 8.0;
+        let status =
+            unsafe { rgmin_rtr_radius_update(&mut radius, 1.0, 0.1, 1.0, 0.0, &mut accepted) };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        assert_eq!(accepted, 0);
+        assert!((radius - 0.25).abs() < 1e-15);
+    }
+}
+
+#[cfg(test)]
 mod conjugacy_abi_tests {
     use super::*;
     use std::mem::{offset_of, size_of};
@@ -7728,8 +7914,19 @@ fn copy_contiguous(dst: &mut [f64], src: &Array1<f64>) -> bool {
 }
 
 /// Steihaug-Toint truncated CG on `manifold`'s tangent space at `x`.
-/// A null manifold is Euclidean. The step is [`crate::rtr::truncated_cg`]
-/// or [`crate::rtr::truncated_cg_projected`].
+///
+/// A non-null manifold runs [`crate::rtr::truncated_cg_riemannian`]. `grad`
+/// is the Euclidean gradient and `hvp` the Euclidean Hessian action at `x`.
+/// The model is built in the metric of the manifold, so the gradient is
+/// `egrad2rgrad` of `grad`, the Hessian is `egrad2rgrad` of the action (the
+/// Gauss-Newton part, as the manifold supplies no Weingarten term), and
+/// the inner products, the trust ball, and `eta_norm` are all measured in
+/// that metric. This holds for every factor, the affine-invariant and
+/// log-Euclidean SPD ones included, and `eta_norm` is the value to pass to
+/// [`rgmin_rtr_radius_update`]. A null manifold is Euclidean and runs
+/// [`crate::rtr::truncated_cg_projected`] with the identity projector. A
+/// Hessian action that is not finite ends the iteration at once and the
+/// call returns `RGMIN_INTERNAL_ERROR` without writing `eta_out`.
 ///
 /// # Safety
 /// `hvp` is callable with `user`. `x`, `grad`, and `eta_out` each address
@@ -7783,16 +7980,13 @@ pub unsafe extern "C" fn rgmin_rtr_tcg_solve(
         let g_arr = Array1::from(gs);
         let apply = CHvp { hvp, user };
         let hvp_at = |v: &Array1<f64>| apply.apply_hessian(x_arr.view(), v.view());
+        let options = crate::rtr::RtrOptions::default()
+            .with_theta(theta)
+            .with_kappa(kappa)
+            .with_cg_max(maxiter);
         let res = match geometry {
-            Some(inner) => crate::rtr::truncated_cg(
-                inner,
-                x_arr.view(),
-                g_arr.view(),
-                hvp_at,
-                radius,
-                theta,
-                kappa,
-                maxiter,
+            Some(inner) => crate::rtr::truncated_cg_riemannian(
+                inner, &x_arr, &g_arr, &hvp_at, radius, &options,
             ),
             None => crate::rtr::truncated_cg_projected(
                 |v| v.clone(),
@@ -7804,7 +7998,10 @@ pub unsafe extern "C" fn rgmin_rtr_tcg_solve(
                 maxiter,
             ),
         };
-        let eta_norm = crate::vecops::nrm2(res.eta.view());
+        let eta_norm = match geometry {
+            Some(inner) => crate::manifold::Manifold::norm(inner, &x_arr, &res.eta),
+            None => crate::vecops::nrm2(res.eta.view()),
+        };
         if !res.model_decrease.is_finite()
             || !eta_norm.is_finite()
             || res.eta.iter().any(|c| !c.is_finite())
@@ -7835,7 +8032,10 @@ pub unsafe extern "C" fn rgmin_rtr_tcg_solve(
 ///
 /// Accepts when the ratio of actual to predicted decrease is above 1/10.
 /// Shrinks by 1/4 below 1/4, and doubles above 3/4 when the step lies on
-/// the trust boundary, never past `radius_max`.
+/// the trust boundary, never past `radius_max`. A `*radius` above
+/// `radius_max` is clamped to `radius_max` before the update, so a
+/// successful call never leaves the radius above its maximum. The call
+/// still succeeds in that case.
 ///
 /// # Safety
 /// `radius` points at a finite positive double. `accepted_out` may be null.
