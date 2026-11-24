@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from io import StringIO
 from typing import Any
@@ -190,6 +191,20 @@ def test_cell_filter_runs() -> None:
     opt = LBFGS(FrechetCellFilter(atoms), logfile=None, maxstep=0.05)
     assert isinstance(opt, ASEOptimizer)
     assert opt.run(fmax=0.05, steps=80) is True
+
+
+@pytest.mark.parametrize("alpha", [0.0, -0.0, -1.0, -70.0, math.nan, math.inf, -math.inf])
+def test_lbfgs_rejects_a_non_positive_alpha(alpha: float) -> None:
+    atoms = _pt7(3, scale=0.01)
+    atoms.calc = EMT()
+    with pytest.raises(ValueError, match="alpha must be positive and finite"):
+        LBFGS(atoms, logfile=None, alpha=alpha)
+
+
+def test_lbfgs_takes_a_positive_alpha() -> None:
+    atoms = _pt7(3, scale=0.01)
+    atoms.calc = EMT()
+    assert LBFGS(atoms, logfile=None, eon_cap=False, alpha=10.0).H0_scale == pytest.approx(0.1)
 
 
 def test_lbfgs_frechet_cell_filter_converges_near_ase_budget() -> None:

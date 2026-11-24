@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import math
 import os
 import threading
 import time
@@ -893,7 +894,10 @@ class LBFGS(Optimizer):
             )
         self.memory = int(memory)
         self.damping = float(damping)
-        self.H0_scale = 1.0 / float(alpha)
+        alpha = float(alpha)
+        if not (math.isfinite(alpha) and alpha > 0.0):
+            raise ValueError("alpha must be positive and finite, got %r" % alpha)
+        self.H0_scale = 1.0 / alpha
         self.use_line_search = bool(use_line_search)
         self.eon_cap = bool(eon_cap)
         _start(
