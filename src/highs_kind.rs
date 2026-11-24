@@ -153,10 +153,11 @@ pub struct HighsOptions {
     /// Optional host callback. Its context is borrowed from the host.
     pub callback: Option<HighsCallback>,
     /// Seconds one HiGHS solve may run, or `None` to keep each solve's own
-    /// limit.
+    /// default.
     ///
-    /// Left as `None`, the projection QP stops after 0.05 s and the
-    /// feasible step QP after 1.0 s. A value replaces both limits.
+    /// Left as `None`, projection QPs use deterministic iteration limits and
+    /// feasible step QPs stop after 1.0 s. A value adds a wall-clock limit to
+    /// projection QPs and replaces the feasible-step limit.
     pub time_limit: Option<f64>,
 }
 

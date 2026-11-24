@@ -111,7 +111,7 @@ jobs:
           - ase: "3.29.0"
             spec: "ase==3.29.0"
           - ase: "main"
-            spec: "ase @ git+https://gitlab.com/ase/ase.git@8d127bc9beff6fb4f3a38c7e439624d73904527c"
+            spec: "ase @ git+https://gitlab.com/ase/ase.git@3ee253f9038965e0c7d37a2025ae58e59e6cf61b"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 

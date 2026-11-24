@@ -47,6 +47,19 @@ fn both_solves_reject_invalid_time_limits() {
     }
 }
 
+#[test]
+fn projection_time_limit_is_not_an_accepted_solution() {
+    use ndarray::array;
+    let options = rgmin::HighsOptions::default().with_time_limit(0.0);
+    let direction = array![1.0, -1.0];
+    let point = array![0.0, 0.0];
+    let constraints = HighsStep::default().with_equalities(vec![(vec![(0, 1.0), (1, 1.0)], 0.0)]);
+    let err =
+        rgmin::lbfgs_qp::highs_projected_step(&direction, point.view(), &constraints, &options)
+            .expect_err("a time-limited projection must not return its incumbent");
+    assert!(err.to_string().contains("ReachedTimeLimit"), "{err}");
+}
+
 fn quad(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     let scales = [1.0, 10.0, 100.0, 1000.0];
     let mut f = 0.0;
