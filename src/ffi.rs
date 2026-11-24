@@ -883,10 +883,10 @@ unsafe fn create_borrowed_f64_1d(
         drop(unsafe { Box::from_raw(ptr) });
     }
 
-    let mut ctx = Box::new(Ctx {
+    let ctx = Box::into_raw(Box::new(Ctx {
         shape: [len as i64],
         strides: [1],
-    });
+    }));
     let dl_tensor = DLTensor {
         data: data.cast(),
         device: DLDevice {
@@ -899,13 +899,13 @@ unsafe fn create_borrowed_f64_1d(
             bits: 64,
             lanes: 1,
         },
-        shape: ctx.shape.as_mut_ptr(),
-        strides: ctx.strides.as_mut_ptr(),
+        shape: unsafe { (*ctx).shape.as_mut_ptr() },
+        strides: unsafe { (*ctx).strides.as_mut_ptr() },
         byte_offset: 0,
     };
     let managed = Box::new(DLManagedTensorVersioned {
         version: DLPackVersion { major: 1, minor: 0 },
-        manager_ctx: Box::into_raw(ctx).cast(),
+        manager_ctx: ctx.cast(),
         deleter: Some(deleter),
         flags: 0,
         dl_tensor,
@@ -1083,10 +1083,10 @@ where
     }
 }
 
-fn cpu_f64_slice<'a>(
+fn cpu_f64_parts(
     t: *const DLManagedTensorVersioned,
     name: &str,
-) -> Result<&'a [f64], rgmin_status_t> {
+) -> Result<(*mut f64, usize), rgmin_status_t> {
     if t.is_null() {
         set_last_error(&format!("{name}: null tensor"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
@@ -1126,18 +1126,24 @@ fn cpu_f64_slice<'a>(
         set_last_error(&format!("{name}: non-unit stride"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
-    let ptr = unsafe { (dl.data as *const u8).add(dl.byte_offset as usize) as *const f64 };
-    Ok(unsafe { slice::from_raw_parts(ptr, n) })
+    let ptr = unsafe { (dl.data as *mut u8).add(dl.byte_offset as usize) as *mut f64 };
+    Ok((ptr, n))
+}
+
+fn cpu_f64_slice<'a>(
+    t: *const DLManagedTensorVersioned,
+    name: &str,
+) -> Result<&'a [f64], rgmin_status_t> {
+    let (ptr, len) = cpu_f64_parts(t, name)?;
+    Ok(unsafe { slice::from_raw_parts(ptr.cast_const(), len) })
 }
 
 fn cpu_f64_slice_mut<'a>(
     t: *mut DLManagedTensorVersioned,
     name: &str,
 ) -> Result<&'a mut [f64], rgmin_status_t> {
-    let s = cpu_f64_slice(t as *const _, name)?;
-    let n = s.len();
-    let p = s.as_ptr() as *mut f64;
-    Ok(unsafe { slice::from_raw_parts_mut(p, n) })
+    let (ptr, len) = cpu_f64_parts(t.cast_const(), name)?;
+    Ok(unsafe { slice::from_raw_parts_mut(ptr, len) })
 }
 
 /// The initial point check shared by the one shot C minimizers.
@@ -5407,6 +5413,32 @@ mod device_tests {
         unsafe { rgmin_tensor_free(t) };
         assert_eq!(err, rgmin_status_t::RGMIN_UNSUPPORTED_DEVICE);
     }
+
+    // Plain runs pass either way. Under Miri, a shape pointer taken before
+    // its Box moved, or a mutable slice made from a shared one, is undefined
+    // behavior.
+    #[test]
+    fn borrowed_tensors_read_their_shape_and_write_through() {
+        let mut buf = [1.0_f64, 2.0, 3.0];
+        let t = unsafe { rgmin_tensor_borrow_cpu_f64(buf.as_mut_ptr(), buf.len()) };
+        cpu_f64_slice_mut(t, "t").unwrap()[1] = 7.0;
+        let read = cpu_f64_slice(t, "t").unwrap().to_vec();
+        unsafe { rgmin_tensor_free(t) };
+        assert_eq!(read, [1.0, 7.0, 3.0]);
+        assert_eq!(buf, [1.0, 7.0, 3.0]);
+
+        let mut block = [0.0_f64; 6];
+        let t = unsafe { borrow_f64_matrix(block.as_mut_ptr(), 2, 3) };
+        let (shape, strides) = unsafe {
+            let dl = &(*t).dl_tensor;
+            (
+                [*dl.shape, *dl.shape.add(1)],
+                [*dl.strides, *dl.strides.add(1)],
+            )
+        };
+        unsafe { rgmin_tensor_free(t) };
+        assert_eq!((shape, strides), ([2, 3], [3, 1]));
+    }
 }
 
 #[cfg(test)]
@@ -6998,10 +7030,10 @@ unsafe fn borrow_f64_matrix(data: *mut f64, n: usize, m: usize) -> *mut DLManage
         drop(unsafe { Box::from_raw(ptr) });
     }
 
-    let mut ctx = Box::new(Ctx {
+    let ctx = Box::into_raw(Box::new(Ctx {
         shape: [n as i64, m as i64],
         strides: [m as i64, 1],
-    });
+    }));
     let dl_tensor = DLTensor {
         data: data.cast(),
         device: DLDevice {
@@ -7014,13 +7046,13 @@ unsafe fn borrow_f64_matrix(data: *mut f64, n: usize, m: usize) -> *mut DLManage
             bits: 64,
             lanes: 1,
         },
-        shape: ctx.shape.as_mut_ptr(),
-        strides: ctx.strides.as_mut_ptr(),
+        shape: unsafe { (*ctx).shape.as_mut_ptr() },
+        strides: unsafe { (*ctx).strides.as_mut_ptr() },
         byte_offset: 0,
     };
     let managed = Box::new(DLManagedTensorVersioned {
         version: DLPackVersion { major: 1, minor: 0 },
-        manager_ctx: Box::into_raw(ctx).cast(),
+        manager_ctx: ctx.cast(),
         deleter: Some(deleter),
         flags: 0,
         dl_tensor,
