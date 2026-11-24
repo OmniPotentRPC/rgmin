@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rgmin import SPD, Product, Stiefel
+from rgmin import SPD, Product, RigidQuotient, Stiefel
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "data" / "riemannian_manifold.txt"
 
@@ -206,3 +206,84 @@ def test_bad_arguments_raise_value_error():
         Stiefel(3, 2).log(np.eye(3, 2), np.eye(3, 2))
     with pytest.raises(ValueError, match="sequence"):
         Product(Stiefel(3, 1), SPD(1)).project(np.zeros((3, 1)), np.zeros((3, 1)))
+
+
+TRIANGLE = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 0.8, 0.1]).reshape(-1, 1)
+
+
+def rigid_motions(x):
+    atoms = x.reshape(-1, 3)
+    centred = atoms - atoms.mean(axis=0)
+    motions = []
+    for axis in range(3):
+        t = np.zeros_like(atoms)
+        t[:, axis] = 1.0
+        motions.append(t.reshape(-1, 1))
+    for axis in range(3):
+        omega = np.zeros(3)
+        omega[axis] = 1.0
+        motions.append(np.cross(omega, centred).reshape(-1, 1))
+    return motions
+
+
+def test_rigid_quotient_removes_every_rigid_motion():
+    m = RigidQuotient(3)
+    assert m.size == 9
+    assert m.shapes == [(9, 1)]
+    for motion in rigid_motions(TRIANGLE):
+        assert np.linalg.norm(m.project(TRIANGLE, motion)) < 1e-12
+
+
+def test_rigid_quotient_projection_is_scale_invariant():
+    m = RigidQuotient(3)
+    for scale in (1e-12, 1e-6, 1e6, 1e12):
+        x = TRIANGLE * scale
+        for motion in rigid_motions(x):
+            assert np.linalg.norm(m.project(x, motion)) <= 1e-9 * np.linalg.norm(motion)
+
+
+def test_rigid_quotient_horizontal_space_has_dimension_three_n_minus_six():
+    m = RigidQuotient(3)
+    basis = []
+    for i in range(9):
+        e = np.zeros((9, 1))
+        e[i] = 1.0
+        w = m.project(TRIANGLE, e)
+        for q in basis:
+            w = w - q * np.vdot(q, w)
+        if np.linalg.norm(w) > 1e-10:
+            basis.append(w / np.linalg.norm(w))
+    assert len(basis) == 3
+
+
+def test_periodic_rigid_quotient_keeps_rotations():
+    m = RigidQuotient(3, periodic=True)
+    translation, rotation = rigid_motions(TRIANGLE)[0], rigid_motions(TRIANGLE)[3]
+    assert np.linalg.norm(m.project(TRIANGLE, translation)) < 1e-12
+    assert np.linalg.norm(m.project(TRIANGLE, rotation) - rotation) < 1e-12
+
+
+def test_rigid_quotient_retraction_transport_and_log():
+    m = RigidQuotient(3)
+    v = m.project(TRIANGLE, np.arange(9.0).reshape(-1, 1) ** 2)
+    assert np.allclose(m.retract(TRIANGLE, 0.1 * v), TRIANGLE + 0.1 * v)
+    moved = m.retract(TRIANGLE, 0.1 * v)
+    carried = m.transport(TRIANGLE, moved, v)
+    assert np.allclose(carried, m.project(moved, v))
+    assert np.linalg.norm(carried - m.project(moved, carried)) < 1e-12
+    with pytest.raises(ValueError, match="rigid quotient"):
+        m.log(TRIANGLE, moved)
+    with pytest.raises(ValueError):
+        RigidQuotient(0)
+    with pytest.raises(ValueError, match="shape"):
+        m.project(np.zeros((6, 1)), np.zeros((6, 1)))
+
+
+def test_rigid_quotient_composes_in_a_product():
+    m = Product(Stiefel(3, 1), RigidQuotient(3))
+    assert m.shapes == [(3, 1), (9, 1)]
+    x = (np.array([[0.0], [0.0], [1.0]]), TRIANGLE)
+    v = (np.array([[0.3], [0.1], [0.2]]), rigid_motions(TRIANGLE)[4])
+    out = m.project(x, v)
+    assert np.linalg.norm(out[1]) < 1e-12
+    assert abs(np.vdot(x[0], out[0])) < 1e-12

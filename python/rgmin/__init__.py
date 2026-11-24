@@ -67,6 +67,7 @@ _EXPORTS = [
     "NumericalError",
     "Product",
     "Report",
+    "RigidQuotient",
     "SPD",
     "Session",
     "Solver",
@@ -190,7 +191,7 @@ def __getattr__(name: str):
         from rgmin import optimize
 
         return getattr(optimize, name)
-    if name in {"Product", "SPD", "Stiefel"}:
+    if name in {"Product", "RigidQuotient", "SPD", "Stiefel"}:
         from rgmin import manifold
 
         return getattr(manifold, name)
