@@ -1,0 +1,19 @@
+# ThreadSanitizer suppressions for ci/tsan_native.sh.
+#
+# A suppression belongs here only for a race inside the CPython runtime,
+# with the upstream issue that tracks it. A race with an rgmin, nanobind or
+# NumPy frame is not suppressed: NumPy is built with the same sanitizer
+# flags as the extension, so its own locks and atomics are visible to
+# TSan, and an rgmin race is a bug to fix.
+#
+# No entry is active. The serial and the parallel run of the ASE contract
+# and threaded tests finish with zero reports against CPython 3.14.10.
+#
+# If a CPython-internal race appears, add one line per function, in the
+# form below, and say why above it:
+#
+#   race_top:<function>
+#
+# The function must be a CPython one, and the comment must name the
+# python/cpython issue. Do not suppress by module or with a bare `race:`
+# on a function that rgmin or NumPy can reach.
