@@ -918,6 +918,8 @@ class LBFGS(Optimizer):
             return False
         if "linesearch" in self._rgmin_options or "maxmove" in self._rgmin_options:
             return False
+        if _is_cell_filter(self.atoms):
+            return False
         return self.maxstep > 0.0
 
     def _config_options(self) -> dict[str, Any]:
