@@ -724,8 +724,13 @@ NB_MODULE(_core, m) {
             },
             nb::arg("n"), nb::arg("config"))
         .def_prop_ro("dim", &rgmin::Solver::dim)
-        .def_prop_ro("evals", &rgmin::Solver::evals,
-                     "Objective evaluations the steps of this solver have made.")
+        .def_prop_ro(
+            "evals",
+            [](rgmin::Solver& solver) {
+                rgbind::Claim claim(solver.busy(), "Solver");
+                return solver.evals();
+            },
+            "Objective evaluations the steps of this solver have made.")
         .def_prop_ro("method",
                      [](rgmin::Solver const& solver) {
                          return static_cast<rgmin_method_t>(solver.method());
