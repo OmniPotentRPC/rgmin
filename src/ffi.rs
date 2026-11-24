@@ -26,10 +26,9 @@ use crate::{
     HessianOracle, HessianVector, HvpOracle, LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method,
     NewtonKind, Oracle, QnStep, Restart, RiemannianManifold, Rlbfgs, ScgOptions, ScgParams,
     ScgStepTolerance, SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch,
-    lowest_eigenpairs_precond, lowest_eigenpairs_projected, lowest_mode, lowest_mode_precond_with,
-    minimize_method, minimize_method_hess, minimize_method_hvp, minimize_rlbfgs,
-    minimize_scg_exact_with_options, minimize_scg_with_options,
-    lowest_eigenpairs,
+    lowest_eigenpairs, lowest_eigenpairs_precond, lowest_eigenpairs_projected, lowest_mode,
+    lowest_mode_precond_with, minimize_method, minimize_method_hess, minimize_method_hvp,
+    minimize_rlbfgs, minimize_scg_exact_with_options, minimize_scg_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -8532,15 +8531,21 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
             failed: Some(&hvp_failed),
         };
         let failed = Cell::new(false);
+        let projected = geometry.is_some();
         let mut project = project_onto(geometry, &x_owned, &failed);
-        match lowest_mode_precond_with(
-            &apply,
-            x_arr.view(),
-            seed_arr.view(),
-            &typed,
-            &crate::hvp::IdentityPrecond,
-            &mut project,
-        ) {
+        let solved = if projected {
+            lowest_mode_precond_with(
+                &apply,
+                x_arr.view(),
+                seed_arr.view(),
+                &typed,
+                &crate::hvp::IdentityPrecond,
+                &mut project,
+            )
+        } else {
+            lowest_mode(&apply, x_arr.view(), seed_arr.view(), &typed)
+        };
+        match solved {
             Ok(mode) => {
                 let failure = if hvp_failed.get() {
                     Some("HVP callback failed")

@@ -433,7 +433,15 @@ pub fn lowest_mode<H: ApplyHessian + ?Sized>(
     seed: ArrayView1<f64>,
     params: &EigenParams,
 ) -> Result<LowestMode> {
-    lowest_mode_with(h, x, seed, params, &mut |_| {})
+    lowest_mode_precond_dispatch(
+        h,
+        x,
+        seed,
+        params,
+        &crate::hvp::IdentityPrecond,
+        &mut |_| {},
+        ProjectorProperty::Identity,
+    )
 }
 
 /// [`lowest_mode`], solving in the subspace selected by `project`.
@@ -445,10 +453,11 @@ pub fn lowest_mode<H: ApplyHessian + ?Sized>(
 /// PRIMME, libkrylov and SLEPc cannot. They solve the operator they are
 /// handed, and wrapping it as `P H P` would turn every vertical direction
 /// into an eigenvalue 0 that wins whenever the horizontal spectrum is
-/// positive. When `project` is not the identity these kinds are refused with
+/// positive. Supplying `project` declares a projected solve, so these kinds
+/// are refused with
 /// [`Error::ProjectorUnsupported`] before any backend is called, whether or
-/// not the backend is linked. A projector that leaves a vector unchanged is
-/// the identity for this test, so a call without a manifold is unaffected.
+/// not the backend is linked. Calls through [`lowest_mode`] explicitly
+/// declare the identity projector and can use those backends.
 ///
 /// A projector that leaves no direction at all, or a solve whose vector
 /// does not survive the projection, returns [`Error::ProjectedSolve`] and
@@ -467,7 +476,15 @@ where
     if seed.is_empty() {
         return Err(Error::Dim { got: 0, dim: 0 });
     }
-    lowest_mode_precond_with(h, x, seed, params, &crate::hvp::IdentityPrecond, project)
+    lowest_mode_precond_dispatch(
+        h,
+        x,
+        seed,
+        params,
+        &crate::hvp::IdentityPrecond,
+        project,
+        ProjectorProperty::Supplied,
+    )
 }
 
 /// SLEPc EPS arm of [`lowest_mode`]. `params.kind` is ignored.
@@ -780,7 +797,15 @@ where
     H: ApplyHessian + ?Sized,
     P: ApplyPreconditioner + ?Sized,
 {
-    lowest_mode_precond_with(h, x, seed, params, t, &mut |_| {})
+    lowest_mode_precond_dispatch(
+        h,
+        x,
+        seed,
+        params,
+        t,
+        &mut |_| {},
+        ProjectorProperty::Identity,
+    )
 }
 
 /// [`lowest_mode_precond`] with the projector of [`lowest_mode_with`].
@@ -797,10 +822,33 @@ where
     P: ApplyPreconditioner + ?Sized,
     F: FnMut(&mut Array1<f64>),
 {
+    lowest_mode_precond_dispatch(h, x, seed, params, t, project, ProjectorProperty::Supplied)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProjectorProperty {
+    Identity,
+    Supplied,
+}
+
+fn lowest_mode_precond_dispatch<H, P, F>(
+    h: &H,
+    x: ArrayView1<f64>,
+    seed: ArrayView1<f64>,
+    params: &EigenParams,
+    t: &P,
+    project: &mut F,
+    projector: ProjectorProperty,
+) -> Result<LowestMode>
+where
+    H: ApplyHessian + ?Sized,
+    P: ApplyPreconditioner + ?Sized,
+    F: FnMut(&mut Array1<f64>),
+{
     if seed.is_empty() {
         return Err(Error::Dim { got: 0, dim: 0 });
     }
-    if is_external(params.kind) && !projector_is_identity(project, seed) {
+    if is_external(params.kind) && projector == ProjectorProperty::Supplied {
         return Err(Error::ProjectorUnsupported {
             kind: params.kind.name(),
         });
@@ -910,39 +958,6 @@ fn is_external(kind: EigensolverKind) -> bool {
         kind,
         EigensolverKind::Primme | EigensolverKind::Libkrylov | EigensolverKind::Slepc
     )
-}
-
-/// Whether `project` leaves every vector unchanged.
-///
-/// A linear projector other than the identity moves a generic vector, so the
-/// seed and two fixed pseudo-random vectors decide it. The probes cost three
-/// projections and never depend on the dimension.
-fn projector_is_identity<F>(project: &mut F, seed: ArrayView1<f64>) -> bool
-where
-    F: FnMut(&mut Array1<f64>),
-{
-    let n = seed.len();
-    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
-    let mut probes = vec![seed.to_owned()];
-    for _ in 0..2 {
-        let mut v = Array1::zeros(n);
-        for value in v.iter_mut() {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            *value = ((state >> 11) as f64) / ((1u64 << 53) as f64) * 2.0 - 1.0;
-        }
-        probes.push(v);
-    }
-    probes.iter().all(|probe| {
-        let size = nrm2(probe.view());
-        if !size.is_finite() || size == 0.0 {
-            return true;
-        }
-        let mut moved = probe.clone();
-        project(&mut moved);
-        nrm2((&moved - probe).view()) <= 1e-12 * size
-    })
 }
 
 /// [`lanczos_from`] on the projected, reseeded start of `seed`. A projector
@@ -3926,6 +3941,48 @@ mod tests {
         EigensolverKind::Slepc,
     ];
 
+    fn former_identity_probes(seed: ArrayView1<f64>) -> Vec<Array1<f64>> {
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut probes = vec![seed.to_owned()];
+        for _ in 0..2 {
+            let mut v = Array1::zeros(seed.len());
+            for value in &mut v {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                *value = ((state >> 11) as f64) / ((1u64 << 53) as f64) * 2.0 - 1.0;
+            }
+            probes.push(v);
+        }
+        probes
+    }
+
+    fn direction_orthogonal_to(probes: &[Array1<f64>]) -> Array1<f64> {
+        let mut basis = Vec::<Array1<f64>>::new();
+        for probe in probes {
+            let mut q = probe.clone();
+            for b in &basis {
+                q = &q - &(b * q.dot(b));
+            }
+            let norm = nrm2(q.view());
+            if norm > 1e-12 {
+                basis.push(q / norm);
+            }
+        }
+        for i in 0..probes[0].len() {
+            let mut q = Array1::zeros(probes[0].len());
+            q[i] = 1.0;
+            for b in &basis {
+                q = &q - &(b * q.dot(b));
+            }
+            let norm = nrm2(q.view());
+            if norm > 1e-12 {
+                return q / norm;
+            }
+        }
+        panic!("the probes span the ambient space");
+    }
+
     #[test]
     fn external_backends_refuse_a_projector_that_is_not_the_identity() {
         let x = Array1::zeros(3);
@@ -3946,17 +4003,27 @@ mod tests {
     }
 
     #[test]
-    fn external_backends_refuse_a_projector_that_only_the_probes_move() {
-        let x = Array1::zeros(3);
-        let seed = array![0.0, 1.0, 1.0];
+    fn external_backends_refuse_a_nonidentity_projector_that_passes_the_former_probes() {
+        let x = Array1::zeros(4);
+        let seed = array![0.0, 1.0, 1.0, -0.5];
+        let probes = former_identity_probes(seed.view());
+        let hidden = direction_orthogonal_to(&probes);
+        for probe in &probes {
+            assert!(hidden.dot(probe).abs() < 1e-12);
+        }
         for kind in EXTERNAL {
             let params = EigenParams {
                 kind,
                 ..EigenParams::default()
             };
-            let mut project = |v: &mut Array1<f64>| v[0] = 0.0;
+            let mut project = |v: &mut Array1<f64>| {
+                *v = &*v - &(&hidden * hidden.dot(v));
+            };
+            let mut removed = hidden.clone();
+            project(&mut removed);
+            assert!(nrm2(removed.view()) < 1e-12);
             let err = lowest_mode_with(&Vertical, x.view(), seed.view(), &params, &mut project)
-                .expect_err("the seed is already horizontal, the operator is not");
+                .expect_err("an undeclared identity must not reach an external backend");
             assert!(matches!(err, Error::ProjectorUnsupported { .. }), "{err:?}");
         }
     }
