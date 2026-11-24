@@ -74,6 +74,19 @@ fn status_from_error(e: &Error) -> rgmin_status_t {
     }
 }
 
+fn ffi_status<F>(label: &str, call: F) -> rgmin_status_t
+where
+    F: FnOnce() -> rgmin_status_t,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
+        Ok(status) => status,
+        Err(_) => {
+            set_last_error(&format!("{label}: panicked"));
+            rgmin_status_t::RGMIN_INTERNAL_ERROR
+        }
+    }
+}
+
 /// Compatibility identity for the rgmin C ABI.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -7368,80 +7381,82 @@ pub unsafe extern "C" fn rgmin_rtr_tcg_solve(
     len: usize,
     out: *mut rgmin_rtr_tcg_result_t,
 ) -> rgmin_status_t {
-    let Some(hvp) = hvp else {
-        set_last_error("rgmin_rtr_tcg_solve: null hvp");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    };
-    if x.is_null() || grad.is_null() || eta_out.is_null() || len == 0 {
-        set_last_error("rgmin_rtr_tcg_solve: null buffer or zero length");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let radius_ok = radius.is_finite() && radius > 0.0;
-    let theta_ok = theta.is_finite() && theta >= 0.0;
-    let kappa_ok = kappa.is_finite() && kappa > 0.0;
-    if !(radius_ok && theta_ok && kappa_ok) || maxiter == 0 {
-        set_last_error("rgmin_rtr_tcg_solve: invalid trust-region parameters");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let geometry = match unsafe { manifold_at(manifold, len, "rgmin_rtr_tcg_solve") } {
-        Ok(inner) => inner,
-        Err(status) => return status,
-    };
-    let xs = unsafe { slice::from_raw_parts(x, len) };
-    let gs = unsafe { slice::from_raw_parts(grad, len) };
-    if xs.iter().any(|v| !v.is_finite()) || gs.iter().any(|v| !v.is_finite()) {
-        set_last_error("rgmin_rtr_tcg_solve: non-finite x or grad");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let x_arr = Array1::from(xs.to_vec());
-    let g_arr = Array1::from(gs.to_vec());
-    let apply = CHvp { hvp, user };
-    let hvp_at = |v: &Array1<f64>| apply.apply_hessian(x_arr.view(), v.view());
-    let res = match geometry {
-        Some(inner) => crate::rtr::truncated_cg(
-            inner,
-            x_arr.view(),
-            g_arr.view(),
-            hvp_at,
-            radius,
-            theta,
-            kappa,
-            maxiter,
-        ),
-        None => crate::rtr::truncated_cg_projected(
-            |v| v.clone(),
-            g_arr.view(),
-            hvp_at,
-            radius,
-            theta,
-            kappa,
-            maxiter,
-        ),
-    };
-    let eta_norm = crate::vecops::nrm2(res.eta.view());
-    if !res.model_decrease.is_finite()
-        || !eta_norm.is_finite()
-        || res.eta.iter().any(|c| !c.is_finite())
-    {
-        set_last_error("rgmin_rtr_tcg_solve: HVP or manifold projection failed");
-        return rgmin_status_t::RGMIN_INTERNAL_ERROR;
-    }
-    let dst = unsafe { slice::from_raw_parts_mut(eta_out, len) };
-    if !copy_contiguous(dst, &res.eta) {
-        set_last_error("rgmin_rtr_tcg_solve: step is not contiguous");
-        return rgmin_status_t::RGMIN_INTERNAL_ERROR;
-    }
-    if !out.is_null() {
-        unsafe {
-            *out = rgmin_rtr_tcg_result_t {
-                model_decrease: res.model_decrease,
-                eta_norm,
-                stop: res.stop as i32,
-                iterations: res.iterations,
-            };
+    ffi_status("rgmin_rtr_tcg_solve", || {
+        let Some(hvp) = hvp else {
+            set_last_error("rgmin_rtr_tcg_solve: null hvp");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        };
+        if x.is_null() || grad.is_null() || eta_out.is_null() || len == 0 {
+            set_last_error("rgmin_rtr_tcg_solve: null buffer or zero length");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
-    }
-    rgmin_status_t::RGMIN_SUCCESS
+        let radius_ok = radius.is_finite() && radius > 0.0;
+        let theta_ok = theta.is_finite() && theta >= 0.0;
+        let kappa_ok = kappa.is_finite() && kappa > 0.0;
+        if !(radius_ok && theta_ok && kappa_ok) || maxiter == 0 {
+            set_last_error("rgmin_rtr_tcg_solve: invalid trust-region parameters");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let geometry = match unsafe { manifold_at(manifold, len, "rgmin_rtr_tcg_solve") } {
+            Ok(inner) => inner,
+            Err(status) => return status,
+        };
+        let xs = unsafe { slice::from_raw_parts(x, len) };
+        let gs = unsafe { slice::from_raw_parts(grad, len) };
+        if xs.iter().any(|v| !v.is_finite()) || gs.iter().any(|v| !v.is_finite()) {
+            set_last_error("rgmin_rtr_tcg_solve: non-finite x or grad");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let x_arr = Array1::from(xs.to_vec());
+        let g_arr = Array1::from(gs.to_vec());
+        let apply = CHvp { hvp, user };
+        let hvp_at = |v: &Array1<f64>| apply.apply_hessian(x_arr.view(), v.view());
+        let res = match geometry {
+            Some(inner) => crate::rtr::truncated_cg(
+                inner,
+                x_arr.view(),
+                g_arr.view(),
+                hvp_at,
+                radius,
+                theta,
+                kappa,
+                maxiter,
+            ),
+            None => crate::rtr::truncated_cg_projected(
+                |v| v.clone(),
+                g_arr.view(),
+                hvp_at,
+                radius,
+                theta,
+                kappa,
+                maxiter,
+            ),
+        };
+        let eta_norm = crate::vecops::nrm2(res.eta.view());
+        if !res.model_decrease.is_finite()
+            || !eta_norm.is_finite()
+            || res.eta.iter().any(|c| !c.is_finite())
+        {
+            set_last_error("rgmin_rtr_tcg_solve: HVP or manifold projection failed");
+            return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+        }
+        let dst = unsafe { slice::from_raw_parts_mut(eta_out, len) };
+        if !copy_contiguous(dst, &res.eta) {
+            set_last_error("rgmin_rtr_tcg_solve: step is not contiguous");
+            return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+        }
+        if !out.is_null() {
+            unsafe {
+                *out = rgmin_rtr_tcg_result_t {
+                    model_decrease: res.model_decrease,
+                    eta_norm,
+                    stop: res.stop as i32,
+                    iterations: res.iterations,
+                };
+            }
+        }
+        rgmin_status_t::RGMIN_SUCCESS
+    })
 }
 
 /// Absil-Baker-Gallivan trust-region radius update.
@@ -7534,76 +7549,80 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
     options: *const rgmin_eigen_options_t,
     out: *mut rgmin_lowest_mode_t,
 ) -> rgmin_status_t {
-    let Some(hvp) = hvp else {
-        set_last_error("rgmin_lowest_eigenpair_on_manifold: null hvp");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    };
-    if out.is_null() {
-        set_last_error("rgmin_lowest_eigenpair_on_manifold: null out");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let xs = match cpu_f64_slice(x, "x") {
-        Ok(slice) => slice,
-        Err(status) => return status,
-    };
-    let seed_s = match cpu_f64_slice(seed, "seed") {
-        Ok(slice) => slice,
-        Err(status) => return status,
-    };
-    let mode_s = match cpu_f64_slice_mut(mode_out, "mode_out") {
-        Ok(slice) => slice,
-        Err(status) => return status,
-    };
-    if xs.len() != seed_s.len() || xs.len() != mode_s.len() {
-        set_last_error("rgmin_lowest_eigenpair_on_manifold: length mismatch");
-        return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-    }
-    let geometry =
-        match unsafe { manifold_at(manifold, xs.len(), "rgmin_lowest_eigenpair_on_manifold") } {
+    ffi_status("rgmin_lowest_eigenpair_on_manifold", || {
+        let Some(hvp) = hvp else {
+            set_last_error("rgmin_lowest_eigenpair_on_manifold: null hvp");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        };
+        if out.is_null() {
+            set_last_error("rgmin_lowest_eigenpair_on_manifold: null out");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let xs = match cpu_f64_slice(x, "x") {
+            Ok(slice) => slice,
+            Err(status) => return status,
+        };
+        let seed_s = match cpu_f64_slice(seed, "seed") {
+            Ok(slice) => slice,
+            Err(status) => return status,
+        };
+        let mode_s = match cpu_f64_slice_mut(mode_out, "mode_out") {
+            Ok(slice) => slice,
+            Err(status) => return status,
+        };
+        if xs.len() != seed_s.len() || xs.len() != mode_s.len() {
+            set_last_error("rgmin_lowest_eigenpair_on_manifold: length mismatch");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let geometry = match unsafe {
+            manifold_at(manifold, xs.len(), "rgmin_lowest_eigenpair_on_manifold")
+        } {
             Ok(inner) => inner,
             Err(status) => return status,
         };
-    let mut typed = match eigen_params_from_c(params) {
-        Ok(parsed) => parsed,
-        Err(status) => return status,
-    };
-    apply_eigen_options(&mut typed, options);
-    let x_owned = xs.to_vec();
-    let x_arr = Array1::from(x_owned.clone());
-    let seed_arr = Array1::from(seed_s.to_vec());
-    let apply = CHvp { hvp, user };
-    let failed = Cell::new(false);
-    let mut project = project_onto(geometry, &x_owned, &failed);
-    match lowest_mode_precond_with(
-        &apply,
-        x_arr.view(),
-        seed_arr.view(),
-        &typed,
-        &crate::hvp::IdentityPrecond,
-        &mut project,
-    ) {
-        Ok(mode) => {
-            if failed.get() || !copy_contiguous(mode_s, &mode.vector) || !mode.value.is_finite() {
-                set_last_error("rgmin_lowest_eigenpair_on_manifold: projection failed");
-                return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+        let mut typed = match eigen_params_from_c(params) {
+            Ok(parsed) => parsed,
+            Err(status) => return status,
+        };
+        apply_eigen_options(&mut typed, options);
+        let x_owned = xs.to_vec();
+        let x_arr = Array1::from(x_owned.clone());
+        let seed_arr = Array1::from(seed_s.to_vec());
+        let apply = CHvp { hvp, user };
+        let failed = Cell::new(false);
+        let mut project = project_onto(geometry, &x_owned, &failed);
+        match lowest_mode_precond_with(
+            &apply,
+            x_arr.view(),
+            seed_arr.view(),
+            &typed,
+            &crate::hvp::IdentityPrecond,
+            &mut project,
+        ) {
+            Ok(mode) => {
+                if failed.get() || !copy_contiguous(mode_s, &mode.vector) || !mode.value.is_finite()
+                {
+                    set_last_error("rgmin_lowest_eigenpair_on_manifold: projection failed");
+                    return rgmin_status_t::RGMIN_INTERNAL_ERROR;
+                }
+                unsafe {
+                    *out = rgmin_lowest_mode_t {
+                        value: mode.value,
+                        actions: mode.actions,
+                    };
+                }
+                rgmin_status_t::RGMIN_SUCCESS
             }
-            unsafe {
-                *out = rgmin_lowest_mode_t {
-                    value: mode.value,
-                    actions: mode.actions,
-                };
+            Err(err) => {
+                if failed.get() {
+                    set_last_error("rgmin_lowest_eigenpair_on_manifold: projection failed");
+                    rgmin_status_t::RGMIN_INTERNAL_ERROR
+                } else {
+                    status_from_error(&err)
+                }
             }
-            rgmin_status_t::RGMIN_SUCCESS
         }
-        Err(err) => {
-            if failed.get() {
-                set_last_error("rgmin_lowest_eigenpair_on_manifold: projection failed");
-                rgmin_status_t::RGMIN_INTERNAL_ERROR
-            } else {
-                status_from_error(&err)
-            }
-        }
-    }
+    })
 }
 
 /// [`rgmin_lowest_eigenpairs_ex`] on `manifold`'s tangent space at `x`.
@@ -7906,6 +7925,14 @@ mod default_tests {
     // Every pattern below names each field, so a field added to a C
     // record or to its Rust struct does not compile until it is compared
     // here. Floats compare as bit patterns.
+
+    #[test]
+    fn ffi_status_maps_panics_to_internal_error() {
+        let status = ffi_status("rgmin_test", || panic!("callback panic"));
+        assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+        let message = unsafe { CStr::from_ptr(rgmin_last_error()) };
+        assert_eq!(message.to_str().unwrap(), "rgmin_test: panicked");
+    }
 
     type Cell = Option<[u64; 3]>;
     type FloorBits = (u64, u64, Option<u64>);
