@@ -7515,8 +7515,9 @@ fn project_onto<'a>(
 }
 
 /// Lowest Hessian eigenpair on `manifold`'s tangent space at `x`.
-/// A null manifold is Euclidean. Lanczos and LOBPCG apply the projector.
-/// Other kinds ignore it.
+/// A null manifold is Euclidean. Every eigensolver applies the projector
+/// to its seed and returned mode; built-in iterative solvers also project
+/// their subspaces.
 ///
 /// # Safety
 /// Same tensor rules as [`rgmin_lowest_eigenpair_with_options`]. `manifold`
