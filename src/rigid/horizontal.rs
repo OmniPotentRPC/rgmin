@@ -5,8 +5,9 @@ pub(crate) fn project_out_rot_trans(vec: &mut Array1<f64>, pos: ArrayView1<f64>)
 
 /// Horizontal space of `R^{3N}/SE(3)` or `R^{3N}/T(3)`.
 ///
-/// `rotate` false keeps translations and drops rotations. Masses, when
-/// present, select the mass metric. A Cartesian force should pass `None`.
+/// `rotate` true removes translations and rotations. `rotate` false removes
+/// translations only and keeps rotations. Masses, when present, select the
+/// mass metric. A Cartesian force should pass `None`.
 pub(crate) fn project_horizontal(
     vec: &mut Array1<f64>,
     pos: ArrayView1<f64>,
