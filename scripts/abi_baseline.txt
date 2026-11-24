@@ -98,6 +98,7 @@ rgmin_solver_forget
 rgmin_solver_forget_evaluation
 rgmin_solver_free
 rgmin_solver_gradient_calls
+rgmin_solver_highs_timeouts
 rgmin_solver_hvp_calls
 rgmin_solver_lbfgs_trust_radius
 rgmin_solver_pair_count
@@ -134,6 +135,7 @@ rgmin_solver_set_highs
 rgmin_solver_set_highs_callback
 rgmin_solver_set_highs_crossover
 rgmin_solver_set_highs_solver
+rgmin_solver_set_highs_time_limit
 rgmin_solver_set_highs_trust
 rgmin_solver_set_lbfgs_capped
 rgmin_solver_set_lbfgs_neb_guards

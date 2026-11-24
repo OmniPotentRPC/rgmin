@@ -100,7 +100,7 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 56 and ``layout_revision`` 6.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 61 and ``layout_revision`` 6.
     Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop error, and the backward-error polish.
     A zero iteration budget follows the same unmet-stop policy.
     Minor 50 adds the energy and evaluation stops.
@@ -116,6 +116,7 @@ Objects
     ``_sized`` form of each entry that reads a ``rgmin_control_t``. The plain
     exported entries read and write the layout revision 5 structs.
     Minor 56 adds ``rgmin_manifold_rigid_quotient``, ``rgmin_rtr_tcg_solve``, ``rgmin_rtr_radius_update``, ``rgmin_lowest_eigenpair_on_manifold`` and ``rgmin_lowest_eigenpairs_projected``.
+    Minor 61 adds ``rgmin_solver_set_highs_time_limit`` and ``rgmin_solver_highs_timeouts``.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``
