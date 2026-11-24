@@ -304,8 +304,9 @@ class Optimizer(_ASEOptimizer):
 
     ``method`` selects the solver. ``maxstep`` is the per-atom cap in
     angstroms, except on :class:`FIRE` and :class:`FIRE2`, where it is
-    the Euclidean length of the whole step, and on :class:`LBFGS`, where
-    a positive value is ASE's length control. The default is 0.2.
+    the Euclidean length of the whole step. On :class:`LBFGS` it is the
+    cap of the eOn step by default, and ASE's length control only with
+    ``eon_cap=False`` outside a cell filter. The default is 0.2.
     ``accept`` overrides the acceptance rule. Remaining solver keywords
     are validated by :class:`rgmin.SolverConfig`. ``master``, ``comm``,
     and ``loginterval`` are forwarded to the ASE base class when that
@@ -849,7 +850,8 @@ class LBFGS(Optimizer):
     The default is the line-search-free eOn step, whose first step
     probes curvature. ``eon_cap=False`` opts into ASE's fixed
     ``H0 = I / alpha`` and length control, which keeps ``memory`` pairs
-    when it shortens a step to ``maxstep``.
+    when it shortens a step to ``maxstep``. ``alpha`` must be positive and
+    finite.
 
     Differences from ASE: ``damping`` multiplies ``maxstep`` (ASE
     damps after the cap; ``damping=1`` agrees). A pair with too little
