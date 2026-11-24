@@ -257,7 +257,7 @@ class Solver:
 
     def push_pair(self, s: object, y: object) -> None:
         """
-        Store one L-BFGS pair ``(s, y)``. A pair the curvature gate rejects is declined.
+        Store one L-BFGS pair ``(s, y)``. Each vector must be a C-contiguous float64 array of length ``dim``; any other dtype or layout raises ``TypeError``. A pair the curvature gate rejects is declined.
         """
 
     def set_maxmove(self, cap: float) -> None:
