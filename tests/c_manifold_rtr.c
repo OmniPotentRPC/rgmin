@@ -562,8 +562,10 @@ static int check_projected_failures(void) {
     /* PRIMME, libkrylov and SLEPc cannot honor a projector. */
     {
         const int32_t external[3] = {RGMIN_EIGEN_PRIMME, RGMIN_EIGEN_LIBKRYLOV, RGMIN_EIGEN_SLEPC};
+        params.max_iter = 64;
         for (i = 0; i < 3; i++) {
             params.kind = external[i];
+            mode[0] = 7.0;
             code = rgmin_lowest_eigenpair_on_manifold(m, stretch_hvp, NULL, xt, st, mt, &params,
                                                       NULL, &single);
             if (code != RGMIN_INVALID_PARAMETER || strstr(rgmin_last_error(), "projector") == NULL ||
@@ -613,8 +615,8 @@ int main(int argc, char **argv) {
         return 4;
     }
     stamp = rgmin_abi_stamp();
-    if (stamp.abi_minor != 52 || RGMIN_ABI_VERSION_MINOR != 52 ||
-        xts_abi_stamp().abi_minor != 52) {
+    if (stamp.abi_minor != 53 || RGMIN_ABI_VERSION_MINOR != 53 ||
+        xts_abi_stamp().abi_minor != 53) {
         fprintf(stderr, "abi minor %u\n", stamp.abi_minor);
         return 5;
     }
