@@ -326,6 +326,7 @@ jobs:
       - uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: backends
+          # yaml 0.2.6 ships libyaml-0.so.1, but petsc 3.26.1 links libyaml-0.so.2.
           create-args: >-
             petsc=3.26.1=real_*
             slepc=3.26.1=real_*
@@ -340,6 +341,7 @@ jobs:
             cmake=4.5.0
             make=4.4.1
             pkg-config=0.29.2
+            yaml=0.2.5
             python=3.12
             numpy=2.5.4
             scipy=1.18.1
