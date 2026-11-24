@@ -31,7 +31,7 @@ fn c_header_reads_the_new_stops_through_the_xts_aliases() {
     consumer::compile_and_run("tests/c_xts_stops.c", "rgmin_c_xts_stops", &[]);
 }
 
-/// The C record matches the Rust record, and the new entries
+/// ABI minor 55. The C record matches the Rust record, and the new entries
 /// answer the same quadratics, radius rule, and deflated mode as the Rust API.
 #[test]
 fn c_header_checks_rigid_quotient_tcg_and_projected_modes() {

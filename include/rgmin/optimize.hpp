@@ -1099,7 +1099,7 @@ public:
     static Manifold spd(std::size_t p, rgmin_spd_metric_t metric = RGMIN_SPD_AFFINE_INVARIANT) {
         return Manifold(rgmin_manifold_spd(p, static_cast<int32_t>(metric)));
     }
-    /// R^{3N}/SE(3), or R^{3N}/T(3) when periodic is true.
+    /// R^{3N}/SE(3), or R^{3N}/T(3) when periodic is true. ABI minor 55.
     static Manifold rigid_quotient(std::size_t n_atoms, bool periodic = false) {
         return Manifold(rgmin_manifold_rigid_quotient(n_atoms, periodic ? 1 : 0));
     }
