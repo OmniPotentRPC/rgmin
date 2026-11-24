@@ -66,6 +66,8 @@ impl RigidWorkspace {
                 self.cand[m * n + 3 * i + 1] = if d == 1 { s } else { 0.0 };
                 self.cand[m * n + 3 * i + 2] = if d == 2 { s } else { 0.0 };
             }
+            let own = scaled_norm(&self.cand[m * n..(m + 1) * n]);
+            normalize_candidate(&mut self.cand[m * n..(m + 1) * n], own);
             m += 1;
         }
         for d in 0..3 {
@@ -78,22 +80,29 @@ impl RigidWorkspace {
                 if w[1] { 1.0 } else { 0.0 },
                 if w[2] { 1.0 } else { 0.0 },
             ];
+            let mut lever = 0.0_f64;
+            let mut lever_scale = 0.0_f64;
             for i in 0..nat {
                 let rx = cart(&req, i, 0) - com[0];
                 let ry = cart(&req, i, 1) - com[1];
                 let rz = cart(&req, i, 2) - com[2];
-                let cx = ry * omega[2] - rz * omega[1];
-                let cy = rz * omega[0] - rx * omega[2];
-                let cz = rx * omega[1] - ry * omega[0];
                 let s = if weighted {
                     atom_mass(&req, i).sqrt()
                 } else {
                     1.0
                 };
+                for c in [rx, ry, rz] {
+                    accumulate_norm(&mut lever, &mut lever_scale, s * c);
+                }
+                let cx = ry * omega[2] - rz * omega[1];
+                let cy = rz * omega[0] - rx * omega[2];
+                let cz = rx * omega[1] - ry * omega[0];
                 self.cand[m * n + 3 * i] = s * cx;
                 self.cand[m * n + 3 * i + 1] = s * cy;
                 self.cand[m * n + 3 * i + 2] = s * cz;
             }
+            let lever = lever_scale * lever.sqrt();
+            normalize_candidate(&mut self.cand[m * n..(m + 1) * n], lever);
             m += 1;
         }
         if m == 0 {
@@ -157,7 +166,7 @@ impl RigidWorkspace {
         let mut keep = [0usize; 6];
         let mut nk = 0usize;
         for k in 0..m {
-            let small = peak == 0.0 || eval[k] <= 1.0e-20 * peak;
+            let small = peak == 0.0 || eval[k] <= NULLSPACE_TOL * peak;
             if small {
                 keep[nk] = k;
                 nk += 1;
