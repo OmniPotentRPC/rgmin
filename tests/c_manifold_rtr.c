@@ -1,4 +1,4 @@
-/* ABI minor 55: rigid quotient, Steihaug-Toint tCG, radius update,
+/* ABI minor 56: rigid quotient, Steihaug-Toint tCG, radius update,
  * and tangent-projected eigenpairs. argv[1] is sizeof(rgmin_rtr_tcg_result_t)
  * as Rust reports it. */
 #include <math.h>
