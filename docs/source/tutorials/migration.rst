@@ -31,53 +31,31 @@ The Rust default is the eOn L-BFGS cap (``EON_MAX_MOVE = 0.2``), not a line sear
 
 The nanobind classes in ``rgmin.ase`` are the drop-in for ``ase.optimize``. ASE 3.29.0's optimizer tests, parametrised over every class, live in ``tests/python/test_ase_upstream.py``. A restart file is an evaluation log (``rgmin-replay-1``). A file ASE wrote raises ``RestartError``. ``replay_trajectory`` is L-BFGS only; any other class raises ``TypeError``.
 
-.. list-table::
-   :header-rows: 1
+.. table::
 
-   * - ``rgmin.ase``
-     - ASE class
-     - ``maxstep``
-     - Difference
-   * - ``LBFGS``
-     - ``LBFGS``
-     - per atom, capped eOn step
-     - ``eon_cap=False`` selects ASE length control. ``use_line_search=True`` is strong Wolfe, not ASE ``LineSearch``. ``damping`` multiplies the cap.
-   * - ``BFGS``
-     - ``BFGS``
-     - per atom
-     - ``alpha`` scales the energy so the first step is ``-g / alpha``. A pair with negligible curvature is skipped. ``maxstep > 1`` warns.
-   * - ``FIRE``
-     - ``FIRE``
-     - Euclidean length of the step
-     - The session receives ``Nmin + 1``. After a downhill reset the time step is kept. ``maxmove`` warns and means ``maxstep``.
-   * - ``FIRE2``
-     - ``FIRE2``
-     - Euclidean, or each component with ``use_abc``
-     - ``dtmin`` must be ``0.02 * dt``. The position callback is accepted and not called.
-   * - ``QuickMin``
-     - ``MDMin``
-     - per atom
-     - ``dt`` is the Euler step. There is no ASE velocity file to read.
-   * - ``CG`` and the other conjugate-gradient classes
-     - none with that name
-     - per atom
-     - Not ASE's line-search CG.
-   * - ``SD``, ``Adam``, ``BB``, ``DIIS``, ``SR1``, ``SR2``
-     - none
-     - per atom
-     - Same log, trajectory, constraints, and cell filters as the named classes.
-   * - ``Newton``, ``RFO``, ``Dogleg``
-     - ``RFO`` only
-     - per atom
-     - An explicit ``hessian`` callable is required.
-   * - ``Optimizer``
-     - none
-     - per atom
-     - The raw session. The default method is the eOn L-BFGS step, not ASE length control.
-   * - ``PSO``
-     - none
-     - per atom
-     - Not a local force relaxation. The Au parity check does not use it.
+    +------------------------------------------------------+---------------------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+    | ``rgmin.ase``                                        | ASE class           | ``maxstep``                                   | Difference                                                                                                                                      |
+    +======================================================+=====================+===============================================+=================================================================================================================================================+
+    | ``LBFGS``                                            | ``LBFGS``           | per atom, capped eOn step                     | ``eon_cap=False`` selects ASE length control. ``use_line_search=True`` is strong Wolfe, not ASE ``LineSearch``. ``damping`` multiplies the cap. |
+    +------------------------------------------------------+---------------------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+    | ``BFGS``                                             | ``BFGS``            | per atom                                      | ``alpha`` scales the energy so the first step is ``-g / alpha``. A pair with negligible curvature is skipped. ``maxstep > 1`` warns.            |
+    +------------------------------------------------------+---------------------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+    | ``FIRE``                                             | ``FIRE``            | Euclidean length of the step                  | The session receives ``Nmin + 1``. After a downhill reset the time step is kept. ``maxmove`` warns and means ``maxstep``.                       |
+    +------------------------------------------------------+---------------------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+    | ``FIRE2``                                            | ``FIRE2``           | Euclidean, or each component with ``use_abc`` | The time step floor is ``0.02 * dt``; leave ``dtmin`` unset. The position callback is accepted and not called.                                  |
+    +------------------------------------------------------+---------------------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+    | ``QuickMin``                                         | ``MDMin``           | per atom                                      | ``dt`` is the Euler step. There is no ASE velocity file to read.                                                                                |
+    +------------------------------------------------------+---------------------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+    | ``CG`` and the other conjugate-gradient classes      | none with that name | per atom                                      | Not ASE's line-search CG.                                                                                                                       |
+    +------------------------------------------------------+---------------------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+    | ``SD``, ``Adam``, ``BB``, ``DIIS``, ``SR1``, ``SR2`` | none                | per atom                                      | Same log, trajectory, constraints, and cell filters as the named classes.                                                                       |
+    +------------------------------------------------------+---------------------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+    | ``Newton``, ``RFO``, ``Dogleg``                      | ``RFO`` only        | per atom                                      | An explicit ``hessian`` callable is required.                                                                                                   |
+    +------------------------------------------------------+---------------------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+    | ``Optimizer``                                        | none                | per atom                                      | The raw session. The default method is the eOn L-BFGS step, not ASE length control.                                                             |
+    +------------------------------------------------------+---------------------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+    | ``PSO``                                              | none                | per atom                                      | Not a local force relaxation. The Au parity check does not use it.                                                                              |
+    +------------------------------------------------------+---------------------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
 
 A non-positive ``maxstep`` clears the per-atom cap. On ``LBFGS`` that restores the eOn cap of 0.2. A negative ``maxmove`` turns every cap off.
 

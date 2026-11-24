@@ -213,8 +213,9 @@ not ASE's ``LineSearch``. ``maxstep > 1`` raises ``ValueError``.
 ``BFGS`` scales the energy by ``1 / alpha`` and takes a per-atom cap.
 ``maxstep > 1`` warns. ``FIRE`` and ``FIRE2`` take the ASE constructor
 keywords. Their ``maxstep`` is the Euclidean length of the step, or
-each component when ``FIRE2(use_abc=True)``. ``FIRE2`` refuses a ``dtmin``
-other than ``0.02 * dt``. ``QuickMin`` corresponds to ASE ``MDMin``: ``dt``
+each component when ``FIRE2(use_abc=True)``. ``FIRE2`` floors the time step
+at ``0.02 * dt``, which is ASE's ``dtmin`` default at ``dt=0.1``, and refuses
+a ``dtmin`` that says otherwise. ``QuickMin`` corresponds to ASE ``MDMin``: ``dt``
 is the Euler step and ``maxstep`` is per atom.
 ``Newton``, ``RFO``, and ``Dogleg`` require an explicit ``hessian`` callable.
 ``PSO`` is not a local force relaxation.
@@ -223,23 +224,35 @@ it is the eOn L-BFGS step, not ASE length control.
 
 The session gtol is 0, so ``fmax`` is the convergence test.
 
-================================================== ==================== ===============================================
-Class                                              ASE class            Step cap
-================================================== ==================== ===============================================
-``LBFGS``                                          ``LBFGS``            per atom, capped eOn step
-``BFGS``                                           ``BFGS``             per atom
-``FIRE``                                           ``FIRE``             Euclidean
-``FIRE2``                                          ``FIRE2``            Euclidean, or per component with ``use_abc``
-``QuickMin``                                       ``MDMin``            per atom
-``CG`` and the other conjugate-gradient classes    none                 per atom
-``SD``, ``Adam``, ``BB``, ``DIIS``, ``SR1``,       none                 per atom
-``SR2``
-``Newton``, ``RFO``, ``Dogleg``                    ``RFO`` only         per atom
-``Optimizer``                                      none                 per atom, eOn L-BFGS by default
-``PSO``                                            none                 per atom; not a local relaxation
-================================================== ==================== ===============================================
+.. table::
+
+    +------------------------------------------------------+--------------+----------------------------------------------+
+    | Class                                                | ASE class    | Step cap                                     |
+    +======================================================+==============+==============================================+
+    | ``LBFGS``                                            | ``LBFGS``    | per atom, capped eOn step                    |
+    +------------------------------------------------------+--------------+----------------------------------------------+
+    | ``BFGS``                                             | ``BFGS``     | per atom                                     |
+    +------------------------------------------------------+--------------+----------------------------------------------+
+    | ``FIRE``                                             | ``FIRE``     | Euclidean                                    |
+    +------------------------------------------------------+--------------+----------------------------------------------+
+    | ``FIRE2``                                            | ``FIRE2``    | Euclidean, or per component with ``use_abc`` |
+    +------------------------------------------------------+--------------+----------------------------------------------+
+    | ``QuickMin``                                         | ``MDMin``    | per atom                                     |
+    +------------------------------------------------------+--------------+----------------------------------------------+
+    | ``CG`` and the other conjugate-gradient classes      | none         | per atom                                     |
+    +------------------------------------------------------+--------------+----------------------------------------------+
+    | ``SD``, ``Adam``, ``BB``, ``DIIS``, ``SR1``, ``SR2`` | none         | per atom                                     |
+    +------------------------------------------------------+--------------+----------------------------------------------+
+    | ``Newton``, ``RFO``, ``Dogleg``                      | ``RFO`` only | per atom                                     |
+    +------------------------------------------------------+--------------+----------------------------------------------+
+    | ``Optimizer``                                        | none         | per atom, eOn L-BFGS by default              |
+    +------------------------------------------------------+--------------+----------------------------------------------+
+    | ``PSO``                                              | none         | per atom; not a local relaxation             |
+    +------------------------------------------------------+--------------+----------------------------------------------+
 
 ``rgmin_solver_set_fire_config`` and
 ``rgmin_solver_set_lbfgs_fixed_h0`` are new C entries. The Python session exposes those,
-plus ``forget``, ``push_pair``, ``set_maxmove``, ``set_atom_maxmove``,
-``set_lbfgs_scaled``, ``set_fire_preset``, and ``set_fire_abc``.
+plus ``forget``, ``pair_count``, ``push_pair``, ``set_maxmove``,
+``set_atom_maxmove``, ``set_lbfgs_scaled``, ``set_fire_preset``, and
+``set_fire_abc``. Each claims the session as ``step`` does, so a call while
+a step runs, or from inside its callback, raises ``RuntimeError``.
