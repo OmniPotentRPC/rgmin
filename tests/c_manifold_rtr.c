@@ -615,8 +615,8 @@ int main(int argc, char **argv) {
         return 4;
     }
     stamp = rgmin_abi_stamp();
-    if (stamp.abi_minor != 56 || RGMIN_ABI_VERSION_MINOR != 56 ||
-        xts_abi_stamp().abi_minor != 56) {
+    if (stamp.abi_minor != 61 || RGMIN_ABI_VERSION_MINOR != 61 ||
+        xts_abi_stamp().abi_minor != 61) {
         fprintf(stderr, "abi minor %u\n", stamp.abi_minor);
         return 5;
     }

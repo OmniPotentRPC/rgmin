@@ -71,3 +71,11 @@ The Hessian step can go on without the QP, so after a timeout it falls
 back to the shifted Newton, RFO or L-BFGS step and counts the timeout in
 ``Solver::highs_timeouts``. A step the box, the trust radius or the
 equalities must shape has no such fallback and returns the error.
+
+In C, ``rgmin_solver_set_highs_time_limit`` sets the limit and
+``rgmin_solver_highs_timeouts`` reads the count. A zero or negative value
+clears the limit, and NaN or an infinite value is refused with status 1
+and leaves the limit as it was. A step that cannot fall back returns
+``RGMIN_INVALID_PARAMETER``, and ``rgmin_last_error`` names the time limit,
+or the iteration limit when a projection QP used up its budget. Both
+entries are ABI minor 61.

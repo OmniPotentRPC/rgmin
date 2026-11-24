@@ -864,6 +864,14 @@ int main() {
     int st = solver.set_box(lo, hi, 2);
     int st_ipm = solver.set_highs_solver(RGMIN_HIGHS_IPM);
     int st_x = solver.set_highs_crossover(RGMIN_HIGHS_CROSSOVER_OFF);
+    int st_limit = solver.set_highs_time_limit(0.5);
+    int st_nan = solver.set_highs_time_limit(std::nan(""));
+    int st_inf = solver.set_highs_time_limit(HUGE_VAL);
+    if (st_nan != 1 || st_inf != 1 || solver.highs_timeouts() != 0 ||
+        (st_limit != 0 && st_limit != 1)) {
+        std::fprintf(stderr, "highs time limit wrappers: %d %d %d\n", st_limit, st_nan, st_inf);
+        return 24;
+    }
     solver.set_accept(RGMIN_ACCEPT_STEP);
     solver.set_fire_variant(RGMIN_FIRE_GUENOLE2020);
     if (solver.set_linesearch(RGMIN_LINESEARCH_WOLFE, 1e-4, 0.9, 20) != RGMIN_SUCCESS) {
