@@ -150,18 +150,18 @@ rgmin_report_t report;
 rgmin_status_t st = rgmin_minimize(eval, grad, user, x, &ctrl, RGMIN_LBFGS, &report);
 #+end_src
 
-SCG takes the same one-shot shape. Conjugacy is a field on
-~rgmin_scg_params_t~, not a different entry point. Stamp is 1.13.3
-(~xts_abi_compatible~ still checks major and layout only).
-~rgmin_lowest_eigenpair~ takes a typed ~rgmin_eigen_params_t~
-(closed ~rgmin_eigen_kind_t~, no string). Unlinked kinds return
-~RGMIN_UNAVAILABLE~. ~rgmin_lowest_eigenpairs~ is the block LOBPCG
-solver for the k lowest pairs (Knyazev 2001). ~seed~ and ~modes_out~
-are row-major n-by-k. ~rgmin_lowest_eigenpairs~ is ~abi_minor~ 39.
-~rgmin_manifold_handle_t~ is a Stiefel, SPD or product manifold with
-column-major point buffers, ~abi_minor~ 41; see the manifold reference.
-~rgmin_lowest_eigenpairs_ex~ adds each residual and a converged flag, and an
-optional preconditioner (null is the identity). It is ~abi_minor~ 42.
+SCG takes the same one-shot shape.
+Conjugacy is a field on ~rgmin_scg_params_t~, not a different entry point.
+Stamp is 1.13.3 (~xts_abi_compatible~ still checks major and layout only).
+~rgmin_lowest_eigenpair~ takes a typed ~rgmin_eigen_params_t~ (closed ~rgmin_eigen_kind_t~, no string).
+Unlinked kinds return ~RGMIN_UNAVAILABLE~.
+~rgmin_lowest_eigenpairs~ is the block LOBPCG solver for the k lowest pairs (Knyazev 2001).
+~seed~ and ~modes_out~ are row-major n-by-k.
+~rgmin_lowest_eigenpairs~ is ~abi_minor~ 39.
+~rgmin_manifold_handle_t~ is a Stiefel, SPD, rigid quotient or product manifold with column-major point buffers, ~abi_minor~ 41; see the manifold reference.
+~rgmin_manifold_rigid_quotient~ is ~abi_minor~ 56.
+~rgmin_lowest_eigenpairs_ex~ adds each residual and a converged flag, and an optional preconditioner (null is the identity).
+It is ~abi_minor~ 42.
 ~rgmin_eigenpair_t~ is unchanged.
 
 #+begin_src c
@@ -248,6 +248,35 @@ default shapes as ~rgmin_solver_set_manifold~. A positive
 off. ~xts_minimize_rlbfgs~ and ~xts_rlbfgs_default~ are the aliases.
 These are ~abi_minor~ 51. ~rgmin_control_t~ is unchanged, and the
 default Euclidean L-BFGS step stays the eOn cap.
+
+** Rigid quotient, trust region and projected modes
+
+ABI minor 56 adds five entries.
+Check ~rgmin_abi_stamp().abi_minor >= 56~ before calling them.
+~rgmin_control_t~ is unchanged.
+
+~rgmin_manifold_rigid_quotient(n_atoms, periodic)~ builds ~R^{3N}/SE(3)~ when ~periodic~ is 0 and ~R^{3N}/T(3)~ otherwise.
+The packed length is ~3 * n_atoms~.
+Projection removes translations, and rotations as well when the quotient is ~SE(3)~.
+~xts_manifold_rigid_quotient~ is the alias.
+
+~rgmin_rtr_tcg_solve~ is one Steihaug-Toint truncated CG step on the tangent space of any manifold handle, or in Euclidean space when the manifold pointer is null.
+The gradient and the Hessian action are the Euclidean ones.
+The model, the trust ball and the reported step length are in the metric of the manifold, so an SPD factor measures the step in its own metric.
+It stops on negative curvature, on the trust boundary, on the residual test, on the iteration budget, or on a zero projected gradient.
+A Hessian action that is not finite, or a failing callback, ends it at once with ~RGMIN_INTERNAL_ERROR~ and leaves the outputs alone.
+~rgmin_rtr_tcg_result_t~ reports the model decrease, the step length in that metric, the stop code and the iteration count.
+
+~rgmin_rtr_radius_update~ applies the Absil, Baker and Gallivan rule.
+The step is accepted when the ratio of actual to predicted decrease is above 1/10. The radius shrinks by 1/4 when the ratio is below 1/4, and it doubles, never past the supplied maximum, when the ratio is above 3/4 and the step lies on the trust boundary.
+A radius already above the maximum is clamped to it first.
+
+~rgmin_lowest_eigenpair_on_manifold~ and ~rgmin_lowest_eigenpairs_projected~ solve the tangent-projected operator.
+Lanczos, Rayleigh-Ritz, Jacobi-Davidson, LOBPCG and the dimer project the seed, every operator and preconditioner action, and the returned mode; the block entry uses projected LOBPCG.
+PRIMME, libkrylov and SLEPc cannot honor a projector.
+With a non-null manifold they return ~RGMIN_INVALID_PARAMETER~ before any backend is called, whether or not it is linked, and a manifold that leaves no tangent direction returns the same status.
+Neither output is written on failure.
+A null manifold matches the unprojected entries.
 
 ** C++
 

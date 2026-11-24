@@ -1202,6 +1202,9 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 }
 
 /// ABI minor 54 adds `RGMIN_GROMACS_CG` and `rgmin_solver_set_gromacs_cg`.
+/// ABI minor 56 adds `rgmin_manifold_rigid_quotient`, `rgmin_rtr_tcg_solve`,
+/// `rgmin_rtr_radius_update`, `rgmin_lowest_eigenpair_on_manifold` and
+/// `rgmin_lowest_eigenpairs_projected`.
 /// ABI minor 52 adds `RGMIN_GROMACS_STEEP`, `RGMIN_STOP_MACHINE_PRECISION`,
 /// `rgmin_solver_set_gromacs_steep`, and
 /// `rgmin_gromacs_steep_max_constraint_shrinks`.
@@ -1227,7 +1230,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 55);
+    assert_eq!(stamp.abi_minor, 56);
     assert_eq!(stamp.layout_revision, 6);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
@@ -4760,6 +4763,8 @@ mod manifold_handles {
                         }
                     }
                 }
+                rgmin::ManifoldFactor::RigidQuotient { .. } => x.extend(a),
+                _ => unreachable!("unknown manifold factor"),
             }
         }
         x

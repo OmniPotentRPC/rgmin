@@ -1,9 +1,11 @@
 # MIT License
 # Copyright 2026 Rohit Goswami
-"""Stiefel, SPD and product manifolds on NumPy arrays.
+"""Stiefel, SPD, rigid-quotient and product manifolds on NumPy arrays.
 
 A :class:`Stiefel` point is an ``(n, p)`` array with ``U.T @ U = I``. An
 :class:`SPD` point is a ``(p, p)`` symmetric positive definite array. A
+:class:`RigidQuotient` point is a ``(3 * n_atoms, 1)`` column of Cartesians,
+``x0, y0, z0, x1, ...``; ``x.reshape(-1, 3)`` gives one atom per row. A
 :class:`Product` point is a tuple with one array per factor, in factor
 order. Tangent vectors and Euclidean gradients have the shape of the
 point. Every method returns new arrays and raises ``ValueError`` on a
@@ -26,7 +28,7 @@ import numpy.typing as npt
 
 from rgmin._maturin import RiemannianManifold
 
-__all__ = ["Manifold", "Product", "SPD", "Stiefel"]
+__all__ = ["Manifold", "Product", "RigidQuotient", "SPD", "Stiefel"]
 
 Array = npt.NDArray[np.float64]
 Point = TypeVar("Point", Array, tuple[Array, ...])
@@ -35,7 +37,7 @@ SpdMetric = Literal["affine_invariant", "log_euclidean"]
 
 
 class Manifold(Generic[Point]):
-    """Operations shared by :class:`Stiefel`, :class:`SPD` and :class:`Product`."""
+    """Operations shared by :class:`Stiefel`, :class:`SPD`, :class:`RigidQuotient` and :class:`Product`."""
 
     def __init__(self, core: RiemannianManifold) -> None:
         self._core = core
@@ -73,14 +75,17 @@ class Manifold(Generic[Point]):
     def project(self, x: Point, v: Point) -> Point:
         """Orthogonal projection of the ambient ``v`` onto the tangent space at ``x``.
 
-        Stiefel: ``V - X sym(X^T V)``. SPD: ``sym(V)``.
+        Stiefel: ``V - X sym(X^T V)``. SPD: ``sym(V)``. Rigid quotient: the
+        horizontal part, with translations (and rotations unless periodic)
+        removed.
         """
         return self._unpack(self._core.project(self._pack(x, "x"), self._pack(v, "v")))
 
     def egrad_to_rgrad(self, x: Point, egrad: Point) -> Point:
         """Riemannian gradient at ``x`` from the Euclidean gradient ``egrad``.
 
-        Stiefel: the projection. SPD affine-invariant: ``X sym(G) X``.
+        Stiefel and rigid quotient: the projection. SPD affine-invariant:
+        ``X sym(G) X``.
         SPD log-Euclidean: ``Dlog(X)^-2 [sym(G)]``.
         """
         return self._unpack(
@@ -91,7 +96,7 @@ class Manifold(Generic[Point]):
         """Retraction of the step ``v`` at ``x``.
 
         Stiefel uses its QR or polar retraction. SPD uses the exponential
-        of its metric.
+        of its metric. A rigid quotient uses the horizontal lift ``x + v``.
         """
         return self._unpack(self._core.retract(self._pack(x, "x"), self._pack(v, "v")))
 
@@ -100,13 +105,17 @@ class Manifold(Generic[Point]):
         return self._unpack(self._core.exp(self._pack(x, "x"), self._pack(v, "v")))
 
     def log(self, x: Point, y: Point) -> Point:
-        """Riemannian logarithm of ``y`` at ``x``. SPD factors only."""
+        """Riemannian logarithm of ``y`` at ``x``. SPD factors only.
+
+        A Stiefel or rigid-quotient factor raises ``ValueError``.
+        """
         return self._unpack(self._core.log(self._pack(x, "x"), self._pack(y, "y")))
 
     def transport(self, x_from: Point, x_to: Point, v: Point) -> Point:
         """Vector transport of ``v`` from ``x_from`` to ``x_to``.
 
-        Stiefel: projection at ``x_to``. SPD: parallel transport of the metric.
+        Stiefel and rigid quotient: projection at ``x_to``. SPD: parallel
+        transport of the metric.
         """
         return self._unpack(
             self._core.transport(
@@ -163,15 +172,36 @@ class SPD(Manifold[Array]):
         self.metric = metric
 
 
+class RigidQuotient(Manifold[Array]):
+    """Cluster quotient ``R^(3N) / SE(3)``, or ``R^(3N) / T(3)`` when periodic.
+
+    A point is a ``(3 * n_atoms, 1)`` column of Cartesians. Projection
+    removes translations and, unless ``periodic``, rotations. The retraction
+    is the horizontal lift ``x + v`` and transport is projection at the
+    arrival point. There is no logarithm.
+
+    The quotient is a manifold on the regular stratum, three or more atoms
+    that are not collinear. At one atom, coincident atoms or collinear atoms
+    the horizontal space is larger and its dimension changes with the
+    configuration, though the projection stays valid. See
+    :mod:`rgmin.manifold` and the Rust ``RiemannianManifold::rigid_quotient``.
+    """
+
+    def __init__(self, n_atoms: int, periodic: bool = False) -> None:
+        super().__init__(RiemannianManifold.rigid_quotient(n_atoms, periodic))
+        self.n_atoms = n_atoms
+        self.periodic = periodic
+
+
 class Product(Manifold[tuple[Array, ...]]):
-    """Product of :class:`Stiefel` and :class:`SPD` factors.
+    """Product of :class:`Stiefel`, :class:`SPD` and :class:`RigidQuotient` factors.
 
     Points, tangents and gradients are tuples with one array per factor.
     The metric is the sum of the factor metrics. A nested product
     contributes its factors, so its point is one flat tuple.
     """
 
-    def __init__(self, *factors: Stiefel | SPD | Product) -> None:
+    def __init__(self, *factors: Stiefel | SPD | RigidQuotient | Product) -> None:
         super().__init__(RiemannianManifold.product([f._core for f in factors]))
         self.factors = factors
 

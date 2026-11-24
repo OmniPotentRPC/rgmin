@@ -1,0 +1,1 @@
+Made the rigid-motion projector scale invariant. Translation and rotation candidates are now normalized by their own reference norm before the rank test, so uniformly shrinking or growing a non-collinear cluster no longer drops its rotations or its translations from the projector.

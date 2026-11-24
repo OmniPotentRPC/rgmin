@@ -76,7 +76,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 55
+#define RGMIN_ABI_VERSION_MINOR 56
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -108,6 +108,9 @@ typedef struct rgmin_abi_stamp_t {
  * Revision 5 was value, steps, grad_norm, stop. Both sides shipped
  * those structs as revision 4 with different fields, so the union was
  * revision 5. */
+/* 56 rgmin_manifold_rigid_quotient, rgmin_rtr_tcg_solve,
+ *    rgmin_rtr_radius_update, rgmin_lowest_eigenpair_on_manifold,
+ *    rgmin_lowest_eigenpairs_projected. rgmin_control_t is unchanged. */
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
@@ -1631,6 +1634,10 @@ rgmin_manifold_handle_t *rgmin_manifold_stiefel(size_t n, size_t p, int32_t retr
  *  retraction is the exponential of the metric. Null on p = 0 or an
  *  unknown metric. */
 rgmin_manifold_handle_t *rgmin_manifold_spd(size_t p, int32_t metric);
+/** Molecular or cluster quotient R^{3N}/SE(3) (periodic == 0) or
+ *  R^{3N}/T(3) (periodic != 0). Packed length is 3 * n_atoms. Null when
+ *  n_atoms == 0. ABI minor 56. */
+rgmin_manifold_handle_t *rgmin_manifold_rigid_quotient(size_t n_atoms, int32_t periodic);
 /** Product of \a count handles in order. The factors are copied; the
  *  caller still frees each one. Null on a null array or entry, or
  *  \a count = 0. */
@@ -1681,6 +1688,90 @@ rgmin_status_t rgmin_manifold_inner(const rgmin_manifold_handle_t *manifold, con
 rgmin_status_t rgmin_manifold_gradient_step(const rgmin_manifold_handle_t *manifold,
                                             const double *x, const double *egrad, double t,
                                             double *rgrad_out, double *x_out, size_t len);
+
+/** Termination reason of \ref rgmin_rtr_tcg_solve. ABI minor 56. */
+typedef enum rgmin_tcg_stop_t {
+    /** Negative curvature. The step lies on the trust boundary. */
+    RGMIN_TCG_NEGATIVE_CURVATURE = 0,
+    /** The step was cut on the trust sphere. */
+    RGMIN_TCG_BOUNDARY = 1,
+    /** The residual met the inner stopping rule. */
+    RGMIN_TCG_RESIDUAL = 2,
+    /** The iteration budget ran out. */
+    RGMIN_TCG_MAX_ITER = 3,
+    /** The projected gradient is zero. */
+    RGMIN_TCG_ZERO_GRADIENT = 4
+} rgmin_tcg_stop_t;
+
+/** Result of \ref rgmin_rtr_tcg_solve. ABI minor 56. */
+typedef struct rgmin_rtr_tcg_result_t {
+    double model_decrease;
+    /** Step length in the selected manifold metric; Euclidean for null. */
+    double eta_norm;
+    int32_t stop;
+    size_t iterations;
+} rgmin_rtr_tcg_result_t;
+
+/** Steihaug-Toint truncated CG on \a manifold's tangent space at \a x.
+ *
+ *  \a grad is the Euclidean gradient and \a hvp the Euclidean Hessian
+ *  action at \a x. A non-null \a manifold builds the model in its own
+ *  metric: the gradient is the Riemannian gradient of \a grad, the Hessian
+ *  is the Riemannian gradient of the action (the Gauss-Newton part, with no
+ *  Weingarten term), and the inner products, the trust ball of radius
+ *  \a radius, and \c eta_norm are measured in that metric. This holds for
+ *  the affine-invariant and log-Euclidean SPD factors as well as Stiefel and
+ *  the rigid quotient, and \c eta_norm is the value to give
+ *  \ref rgmin_rtr_radius_update. A null manifold is Euclidean.
+ *
+ *  A Hessian action that is not finite, or an \a hvp that fails, ends the
+ *  iteration at once. The call then returns RGMIN_INTERNAL_ERROR and leaves
+ *  \a eta_out and \a out untouched. \a eta_out may alias \a x or \a grad;
+ *  \a out must not overlap any vector buffer. ABI minor 56. */
+rgmin_status_t rgmin_rtr_tcg_solve(const rgmin_manifold_handle_t *manifold, rgmin_hvp_fn hvp,
+                                   void *user, const double *x, const double *grad, double radius,
+                                   double theta, double kappa, size_t maxiter, double *eta_out,
+                                   size_t len, rgmin_rtr_tcg_result_t *out);
+
+/** Absil-Baker-Gallivan trust-region radius update. ABI minor 56.
+ *  Accepts when actual/predicted is above 1/10. Shrinks by 1/4 below
+ *  1/4. Doubles above 3/4 when the step lies on the boundary, never
+ *  past \a radius_max. A \c *radius above \a radius_max is clamped to
+ *  \a radius_max before the update and the call still succeeds, so the
+ *  radius it leaves never exceeds the maximum. \a accepted_out may be
+ *  null. */
+rgmin_status_t rgmin_rtr_radius_update(double *radius, double radius_max, double actual_decrease,
+                                       double model_decrease, double eta_norm,
+                                       int32_t *accepted_out);
+
+/** Lowest Hessian eigenpair on \a manifold's tangent space at \a x.
+ *  A null manifold is Euclidean. The built-in solvers (Lanczos,
+ *  Rayleigh-Ritz, Jacobi-Davidson, LOBPCG and the dimer) project the seed,
+ *  every operator and preconditioner action, and the returned mode.
+ *  PRIMME, libkrylov and SLEPc cannot honor a projector, so they are refused
+ *  with RGMIN_INVALID_PARAMETER on a non-null \a manifold, before any
+ *  backend is called and whether or not it is linked. A null \a manifold
+ *  reaches them as it does \ref rgmin_lowest_eigenpair_with_options. A
+ *  manifold that leaves no tangent direction also returns
+ *  RGMIN_INVALID_PARAMETER. \a mode_out may alias \a x or \a seed. \a out
+ *  must not overlap tensor storage. Neither is written on failure.
+ *  ABI minor 56. */
+rgmin_status_t rgmin_lowest_eigenpair_on_manifold(
+    const rgmin_manifold_handle_t *manifold, rgmin_hvp_fn hvp, void *user,
+    const DLManagedTensorVersioned *x, const DLManagedTensorVersioned *seed,
+    DLManagedTensorVersioned *mode_out, const rgmin_eigen_params_t *params,
+    const rgmin_eigen_options_t *options, rgmin_lowest_mode_t *out);
+
+/** \ref rgmin_lowest_eigenpairs_ex on \a manifold's tangent space at \a x.
+ *  A null manifold matches that entry. \a modes_out and \a values_out may
+ *  each alias \a x or \a seed, but must not overlap each other or
+ *  \a pairs_out. ABI minor 56. */
+rgmin_status_t rgmin_lowest_eigenpairs_projected(
+    const rgmin_manifold_handle_t *manifold, rgmin_hvp_fn hvp, void *user,
+    rgmin_precond_fn precond, void *precond_user, const DLManagedTensorVersioned *x,
+    const DLManagedTensorVersioned *seed, DLManagedTensorVersioned *modes_out,
+    DLManagedTensorVersioned *values_out, const rgmin_eigen_params_t *params,
+    const rgmin_eigen_options_t *options, rgmin_eigenpair_ex_t *pairs_out, size_t k);
 /** @} */
 
 #ifdef __cplusplus
