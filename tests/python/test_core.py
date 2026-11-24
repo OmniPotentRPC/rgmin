@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -23,6 +24,45 @@ def test_minimize_quadratic() -> None:
     assert report.grad_norm < 1e-8
     assert abs(report.value) < 1e-12
     assert report.stop == rgmin.Stop.Tolerance
+
+
+def test_push_pair_stores_a_contiguous_float64_pair() -> None:
+    solver = rgmin.Solver(3, rgmin.SolverConfig("lbfgs"))
+    s = np.array([0.1, 0.2, 0.3])
+    solver.push_pair(s, 2.0 * s)
+    assert solver.pair_count() == 1
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param(lambda: np.array([0.1, 0.2, 0.3], dtype=np.float32), id="float32"),
+        pytest.param(lambda: np.array([0.1, 0.2, 0.3], dtype=np.int64), id="int64"),
+        pytest.param(lambda: np.arange(0.1, 0.7, 0.1)[::2], id="strided"),
+        pytest.param(lambda: [0.1, 0.2, 0.3], id="list"),
+    ],
+)
+@pytest.mark.parametrize("position", ["s", "y"])
+def test_push_pair_refuses_anything_but_contiguous_float64(
+    bad: Callable[[], object], position: str
+) -> None:
+    solver = rgmin.Solver(3, rgmin.SolverConfig("lbfgs"))
+    good = np.array([0.1, 0.2, 0.3])
+    pair = {"s": good, "y": good}
+    pair[position] = bad()
+    with pytest.raises(TypeError, match=f"{position} must be a C-contiguous"):
+        solver.push_pair(pair["s"], pair["y"])
+    assert solver.pair_count() == 0
+
+
+def test_push_pair_does_not_copy_a_strided_view_into_the_session() -> None:
+    solver = rgmin.Solver(3, rgmin.SolverConfig("lbfgs"))
+    view = np.arange(0.1, 0.7, 0.1)[::2]
+    assert not view.flags["C_CONTIGUOUS"]
+    with pytest.raises(TypeError):
+        solver.push_pair(view, view)
+    solver.push_pair(np.ascontiguousarray(view), np.ascontiguousarray(view))
+    assert solver.pair_count() == 1
 
 
 def test_solver_config_round_trip() -> None:

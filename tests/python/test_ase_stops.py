@@ -46,6 +46,15 @@ def test_max_evals_ends_an_ase_run_and_reports_false() -> None:
     assert opt.stop == rgmin.Stop.EVAL_BUDGET
 
 
+def test_lbfgs_irun_does_not_report_convergence_when_max_evals_runs_out() -> None:
+    opt = LBFGS(_pt7(), logfile=None, max_evals=2)
+    flags = list(opt.irun(fmax=1e-9, steps=200))
+    assert opt.stop == rgmin.Stop.EVAL_BUDGET
+    assert flags
+    assert flags[-1] is not True
+    assert not any(flags)
+
+
 def test_stop_is_none_before_the_first_step_and_after_a_force_stop() -> None:
     opt = FIRE(_pt7(), logfile=None)
     assert opt.stop is None

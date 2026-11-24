@@ -93,6 +93,97 @@ def test_hammered_solver_raises_in_use() -> None:
         assert "Solver is in use by another thread" in str(error)
 
 
+# Every Solver method and property besides step. Each reads or writes the
+# Rust session, so each must claim it, as step does. A None entry is a
+# property, read without a call.
+_CONTROLS: dict[str, tuple[Any, ...] | None] = {
+    "evals": None,
+    "forget": (),
+    "pair_count": (),
+    "push_pair": (np.ones(2), np.ones(2)),
+    "set_maxmove": (0.1,),
+    "set_atom_maxmove": (0.1,),
+    "set_lbfgs_scaled": (0.2,),
+    "set_lbfgs_fixed_h0": (0.1,),
+    "set_fire_config": (0.1, 1.0, 5, 1.1, 0.5, 0.1, 0.99),
+    "set_fire_preset": ("default",),
+    "set_fire_abc": (True,),
+}
+
+
+def _use(solver: rgmin.Solver, name: str, args: tuple[Any, ...] | None) -> Any:
+    member = getattr(solver, name)
+    return member if args is None else member(*args)
+
+
+def test_session_controls_refuse_reentry_from_the_callback() -> None:
+    solver = rgmin.Solver(2, rgmin.SolverConfig("lbfgs", maxiter=1))
+    seen: dict[str, BaseException | None] = {}
+
+    def callback(x: np.ndarray) -> tuple[float, np.ndarray]:
+        for name, args in _CONTROLS.items():
+            try:
+                _use(solver, name, args)
+            except BaseException as exc:  # noqa: BLE001
+                seen[name] = exc
+            else:
+                seen[name] = None
+        return _quad(x)
+
+    solver.step(callback, np.array([1.0, -1.0]))
+    assert set(seen) == set(_CONTROLS)
+    for name, error in seen.items():
+        assert isinstance(error, RuntimeError), name
+        assert "Solver is in use by another thread" in str(error), name
+    assert solver.pair_count() >= 0
+    solver.forget()
+
+
+# Spawns threading.Thread. The marker keeps pytest-run-parallel from
+# nesting another pool around this test.
+@pytest.mark.thread_unsafe
+def test_session_controls_raise_in_use_while_a_step_runs() -> None:
+    solver = rgmin.Solver(2, rgmin.SolverConfig("lbfgs", maxiter=1))
+    entered = threading.Event()
+    release = threading.Event()
+
+    def hold(x: np.ndarray) -> tuple[float, np.ndarray]:
+        entered.set()
+        release.wait(timeout=10)
+        return _quad(x)
+
+    holder = threading.Thread(target=lambda: solver.step(hold, np.array([1.0, -1.0])))
+    holder.start()
+    assert entered.wait(timeout=10)
+    errors: list[tuple[str, BaseException | None]] = []
+
+    def clash() -> None:
+        for name, args in _CONTROLS.items():
+            try:
+                _use(solver, name, args)
+            except BaseException as exc:  # noqa: BLE001
+                errors.append((name, exc))
+            else:
+                errors.append((name, None))
+
+    workers = [threading.Thread(target=clash) for _ in range(4)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+    release.set()
+    holder.join(timeout=10)
+    assert len(errors) == 4 * len(_CONTROLS)
+    for name, error in errors:
+        assert isinstance(error, RuntimeError), name
+        assert "Solver is in use by another thread" in str(error), name
+    # The claim is gone once the step returns. A FIRE rule on an L-BFGS
+    # session is then refused for its method, not for the claim.
+    solver.forget()
+    with pytest.raises(ValueError):
+        solver.set_fire_abc(True)
+
+
 # Spawns a ThreadPoolExecutor. The marker keeps pytest-run-parallel from
 # nesting another pool around this test. The two atoms share one
 # calculator on purpose, to observe the adapter lock.
@@ -435,6 +526,11 @@ _HELD_GUARD_FINALIZER = textwrap.dedent(
 )
 
 
+# Starts a child interpreter. Repeating it, on threads or in turn, queues
+# that many interpreter start-ups, which a sanitizer build cannot finish
+# inside the timeout, and each child runs the same single-threaded path.
+@pytest.mark.thread_unsafe
+@pytest.mark.iterations(1)
 @pytest.mark.timeout(30)
 def test_finalizer_under_held_guard() -> None:
     """GC while the table lock is held must release the entry without blocking."""

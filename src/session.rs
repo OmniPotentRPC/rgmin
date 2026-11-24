@@ -964,7 +964,10 @@ impl Solver {
     /// A positive finite value is the step limit and the per-atom default
     /// stays off, unless [`Self::set_atom_maxmove`] was called. Zero and
     /// NaN keep the defaults. A negative or infinite value turns every cap
-    /// off, the per-atom default included.
+    /// off, the per-atom cap included whether it is the default or one
+    /// set by [`Self::set_atom_maxmove`]. An L-BFGS session that steps
+    /// with the eOn cap returns to [`crate::EON_MAX_MOVE`], the same as
+    /// [`Self::set_atom_maxmove`] with zero.
     pub fn set_maxmove(&mut self, maxmove: f64) {
         // A negative or infinite value is stored so that the per-atom
         // default stays off; every length read takes only a positive
@@ -974,7 +977,22 @@ impl Solver {
         } else {
             Some(maxmove)
         };
+        let off = self
+            .control
+            .maxmove
+            .is_some_and(|cap| cap < 0.0 || cap.is_infinite());
+        if off {
+            self.atom_maxmove_set = false;
+        }
         self.apply_default_atom_cap();
+        if off && let Inner::Lbfgs(solver) = &mut self.inner {
+            match &mut solver.step {
+                LbfgsStep::Capped { max_atom } | LbfgsStep::Scaled { max_atom } => {
+                    *max_atom = crate::lbfgs::EON_MAX_MOVE;
+                }
+                LbfgsStep::Wolfe => {}
+            }
+        }
     }
 
     /// eOn `maxAtomMotionAppliedV`. Preferred over the Euclidean cap.
@@ -5974,6 +5992,15 @@ impl Solver {
                 Ok(())
             }
             _ => Err(Error::NeedFire),
+        }
+    }
+
+    /// Whether a FIRE session caps `dt_max` after a two-step overshoot.
+    #[cfg(feature = "capi")]
+    pub(crate) fn fire_caps_two_step_overshoot(&self) -> bool {
+        match &self.inner {
+            Inner::Fire(state) => state.caps_two_step_overshoot(),
+            _ => false,
         }
     }
 
