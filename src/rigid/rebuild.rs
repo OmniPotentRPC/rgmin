@@ -41,20 +41,7 @@ impl RigidWorkspace {
             ..req
         };
         let (trans, rot) = axes_of(&req);
-        let mut com = [0.0; 3];
-        let mut mtot = 0.0;
-        for i in 0..nat {
-            let mi = com_mass(&req, i);
-            mtot += mi;
-            com[0] += mi * cart(&req, i, 0);
-            com[1] += mi * cart(&req, i, 1);
-            com[2] += mi * cart(&req, i, 2);
-        }
-        if mtot > 0.0 {
-            com[0] /= mtot;
-            com[1] /= mtot;
-            com[2] /= mtot;
-        }
+        let com = scaled_center(&req, nat);
         let mut m = 0usize;
         for d in 0..3 {
             if !trans[d] {

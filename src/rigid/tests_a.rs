@@ -59,6 +59,20 @@
     }
 
     #[test]
+    fn finite_coordinates_near_the_maximum_have_a_finite_center() {
+        let base = 1.0e308_f64;
+        let displaced = f64::from_bits(base.to_bits() + 4);
+        let pos = [
+            base, base, base, displaced, base, base, base, displaced, base,
+        ];
+        let mut v = [0.2, -0.3, 0.1, 0.4, 0.1, -0.2, -0.3, 0.5, 0.2];
+        let mut ws = RigidWorkspace::new();
+        ws.project(&mut v, &RigidRequest::cartesian(&pos, RigidMode::Auto));
+        assert_eq!(ws.rank(), 6);
+        assert!(v.iter().all(|value| value.is_finite()), "{v:?}");
+    }
+
+    #[test]
     fn projector_is_idempotent_and_symmetric() {
         let pos = [0.0, 0.0, 0.0, 1.0, 0.2, 0.0, 0.1, 1.3, 0.4, -0.4, 0.2, 1.1];
         let mut ws = RigidWorkspace::new();

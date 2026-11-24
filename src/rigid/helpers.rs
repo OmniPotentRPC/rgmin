@@ -125,6 +125,59 @@ fn scaled_norm(v: &[f64]) -> f64 {
     scale * ssq.sqrt()
 }
 
+fn compensated_add(sum: &mut f64, correction: &mut f64, value: f64) {
+    let adjusted = value - *correction;
+    let next = *sum + adjusted;
+    *correction = (next - *sum) - adjusted;
+    *sum = next;
+}
+
+/// Weighted Cartesian centre with both coordinates and weights scaled before
+/// accumulation. Finite coordinates near `f64::MAX` therefore never overflow
+/// merely because more than one atom contributes to the sum.
+fn scaled_center(req: &RigidRequest<'_>, nat: usize) -> [f64; 3] {
+    let weight_scale = (0..nat)
+        .map(|i| com_mass(req, i))
+        .fold(0.0_f64, f64::max);
+    if !(weight_scale > 0.0 && weight_scale.is_finite()) {
+        return [0.0; 3];
+    }
+
+    let mut coordinate_scale = [0.0_f64; 3];
+    for i in 0..nat {
+        for (d, scale) in coordinate_scale.iter_mut().enumerate() {
+            *scale = scale.max(cart(req, i, d).abs());
+        }
+    }
+
+    let mut total = 0.0;
+    let mut total_correction = 0.0;
+    let mut scaled_sum = [0.0; 3];
+    let mut sum_correction = [0.0; 3];
+    for i in 0..nat {
+        let weight = com_mass(req, i) / weight_scale;
+        compensated_add(&mut total, &mut total_correction, weight);
+        for d in 0..3 {
+            if coordinate_scale[d] > 0.0 {
+                compensated_add(
+                    &mut scaled_sum[d],
+                    &mut sum_correction[d],
+                    weight * (cart(req, i, d) / coordinate_scale[d]),
+                );
+            }
+        }
+    }
+
+    let mut center = [0.0; 3];
+    if total > 0.0 {
+        for d in 0..3 {
+            let average = (scaled_sum[d] / total).clamp(-1.0, 1.0);
+            center[d] = coordinate_scale[d] * average;
+        }
+    }
+    center
+}
+
 /// Divide a rigid-motion candidate by `reference`, the largest norm the
 /// motion could have for this geometry: the norm of a translation, or the
 /// norm of the lever arms for a rotation. The column then measures how much
