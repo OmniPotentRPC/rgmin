@@ -1570,6 +1570,77 @@ fn c_abi_fire_preset_and_abc() {
     }
 }
 
+/// `rgmin_solver_set_fire_config` refuses a null session, a session that
+/// is not FIRE or FIRE 2.0, and each parameter outside its range, and
+/// names the parameter. `rgmin_solver_set_lbfgs_fixed_h0` refuses a null
+/// session and a session that is not L-BFGS, and clears the scale on a
+/// non-positive or non-finite value.
+#[test]
+fn c_abi_fire_config_and_lbfgs_fixed_h0() {
+    use rgmin::ffi::{rgmin_solver_set_fire_config, rgmin_solver_set_lbfgs_fixed_h0};
+    let ctrl = rgmin_control_t {
+        maxiter: 10,
+        gtol: 1e-12,
+        istep: 0.1,
+        memory: 4,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+        require_convergence: 0,
+    };
+    let null = std::ptr::null_mut();
+    assert_eq!(
+        unsafe { rgmin_solver_set_fire_config(null, 0.1, 1.0, 5, 1.1, 0.5, 0.1, 0.99) },
+        1
+    );
+    assert_eq!(unsafe { rgmin_solver_set_lbfgs_fixed_h0(null, 0.1) }, 1);
+
+    let lbfgs = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert_eq!(
+        unsafe { rgmin_solver_set_fire_config(lbfgs, 0.1, 1.0, 5, 1.1, 0.5, 0.1, 0.99) },
+        1
+    );
+    assert_eq!(unsafe { rgmin_solver_set_lbfgs_fixed_h0(lbfgs, 0.25) }, 0);
+    for off in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(unsafe { rgmin_solver_set_lbfgs_fixed_h0(lbfgs, off) }, 0);
+    }
+    unsafe { rgmin_solver_free(lbfgs) };
+
+    for method in [rgmin_method_t::RGMIN_FIRE, rgmin_method_t::RGMIN_FIRE2] {
+        let session = unsafe { rgmin_solver_create(method, &ctrl, 2) };
+        assert_eq!(unsafe { rgmin_solver_set_lbfgs_fixed_h0(session, 0.25) }, 1);
+        assert_eq!(
+            unsafe { rgmin_solver_set_fire_config(session, 0.1, 1.0, 5, 1.1, 0.5, 0.1, 0.99) },
+            0
+        );
+        let nan = f64::NAN;
+        let refused = [
+            (nan, 1.0, 1.1, 0.5, 0.1, 0.99, "dt and dt_max"),
+            (0.0, 1.0, 1.1, 0.5, 0.1, 0.99, "dt and dt_max"),
+            (0.1, -1.0, 1.1, 0.5, 0.1, 0.99, "dt and dt_max"),
+            (0.1, 1.0, 1.0, 0.5, 0.1, 0.99, "f_inc"),
+            (0.1, 1.0, 1.1, 1.0, 0.1, 0.99, "f_dec"),
+            (0.1, 1.0, 1.1, 0.0, 0.1, 0.99, "f_dec"),
+            (0.1, 1.0, 1.1, 0.5, 0.0, 0.99, "alpha"),
+            (0.1, 1.0, 1.1, 0.5, nan, 0.99, "alpha"),
+            (0.1, 1.0, 1.1, 0.5, 0.1, 1.0, "f_alpha"),
+            (0.1, 1.0, 1.1, 0.5, 0.1, 0.0, "f_alpha"),
+        ];
+        for (dt, dt_max, f_inc, f_dec, alpha, f_alpha, name) in refused {
+            let status = unsafe {
+                rgmin_solver_set_fire_config(session, dt, dt_max, 5, f_inc, f_dec, alpha, f_alpha)
+            };
+            assert_eq!(
+                status, 1,
+                "{name}: {dt} {dt_max} {f_inc} {f_dec} {alpha} {f_alpha}"
+            );
+            let message = last_error_text();
+            assert!(message.contains(name), "{name}: {message}");
+        }
+        unsafe { rgmin_solver_free(session) };
+    }
+}
+
 /// Two atoms at force 0.9 each: max-atom 0.9, RMS 0.52, two-norm 1.27.
 /// At gtol 1 the max-atom and RMS sessions stop at the start and the
 /// default session moves. Both hand back the gradient their report measured.
