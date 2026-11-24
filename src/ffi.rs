@@ -5442,6 +5442,278 @@ mod device_tests {
 }
 
 #[cfg(test)]
+mod manifold_alias_tests {
+    use super::*;
+
+    unsafe extern "C" fn stretch_hvp(
+        _user: *mut c_void,
+        _x: *const DLManagedTensorVersioned,
+        v: *const DLManagedTensorVersioned,
+        hv: *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        let input = cpu_f64_slice(v, "v").unwrap();
+        let output = cpu_f64_slice_mut(hv, "hv").unwrap();
+        let stretch = [
+            -core::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+            0.0,
+            core::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+            0.0,
+        ];
+        let translation = [
+            core::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+            0.0,
+            core::f64::consts::FRAC_1_SQRT_2,
+            0.0,
+            0.0,
+        ];
+        let along_stretch = input.iter().zip(stretch).map(|(a, b)| a * b).sum::<f64>();
+        let along_translation = input
+            .iter()
+            .zip(translation)
+            .map(|(a, b)| a * b)
+            .sum::<f64>();
+        for i in 0..output.len() {
+            output[i] =
+                -2.0 * along_stretch * stretch[i] - 100.0 * along_translation * translation[i];
+        }
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+
+    /// Where an entry writes its result.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Output {
+        Separate,
+        OverX,
+        OverSeed,
+    }
+
+    const POINT: [f64; 6] = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
+    const SEED: [f64; 6] = [0.2, 0.1, -0.3, 0.4, 0.0, 0.2];
+
+    fn lobpcg_params() -> rgmin_eigen_params_t {
+        let mut params = rgmin_eigen_params_default();
+        params.kind = rgmin_eigen_kind_t::RGMIN_EIGEN_LOBPCG as i32;
+        params.nev = 1;
+        params.max_iter = 30;
+        params.tol = 1e-10;
+        params
+    }
+
+    fn single_pair(output: Output) -> (Vec<f64>, rgmin_lowest_mode_t) {
+        let mut point = POINT.to_vec();
+        let mut seed = SEED.to_vec();
+        let mut mode = vec![0.0; 6];
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), point.len()) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), seed.len()) };
+        let mt = match output {
+            Output::Separate => unsafe { rgmin_tensor_borrow_cpu_f64(mode.as_mut_ptr(), 6) },
+            Output::OverX => xt,
+            Output::OverSeed => st,
+        };
+        let params = lobpcg_params();
+        let mut result = rgmin_lowest_mode_t {
+            value: 0.0,
+            actions: 0,
+        };
+        let status = unsafe {
+            rgmin_lowest_eigenpair_on_manifold(
+                manifold,
+                Some(stretch_hvp),
+                std::ptr::null_mut(),
+                xt,
+                st,
+                mt,
+                &params,
+                std::ptr::null(),
+                &mut result,
+            )
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            if output == Output::Separate {
+                rgmin_tensor_free(mt);
+            }
+            rgmin_manifold_free(manifold);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        let vector = match output {
+            Output::Separate => mode,
+            Output::OverX => point,
+            Output::OverSeed => seed,
+        };
+        (vector, result)
+    }
+
+    fn block_pair(output: Output) -> (Vec<f64>, f64, rgmin_eigenpair_ex_t) {
+        let mut point = POINT.to_vec();
+        let mut seed = SEED.to_vec();
+        let mut modes = vec![0.0; 6];
+        let mut values = vec![0.0; 1];
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), point.len()) };
+        let st = unsafe { rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), seed.len()) };
+        let (mt, vt) = match output {
+            Output::Separate => unsafe {
+                (
+                    rgmin_tensor_borrow_cpu_f64(modes.as_mut_ptr(), 6),
+                    rgmin_tensor_borrow_cpu_f64(values.as_mut_ptr(), 1),
+                )
+            },
+            Output::OverX => (xt, unsafe {
+                rgmin_tensor_borrow_cpu_f64(seed.as_mut_ptr(), 1)
+            }),
+            Output::OverSeed => (st, unsafe {
+                rgmin_tensor_borrow_cpu_f64(point.as_mut_ptr(), 1)
+            }),
+        };
+        let params = lobpcg_params();
+        let mut pair = rgmin_eigenpair_ex_t {
+            value: 0.0,
+            actions: 0,
+            residual: 0.0,
+            converged: 0,
+        };
+        let status = unsafe {
+            rgmin_lowest_eigenpairs_projected(
+                manifold,
+                Some(stretch_hvp),
+                std::ptr::null_mut(),
+                None,
+                std::ptr::null_mut(),
+                xt,
+                st,
+                mt,
+                vt,
+                &params,
+                std::ptr::null(),
+                &mut pair,
+                1,
+            )
+        };
+        unsafe {
+            rgmin_tensor_free(xt);
+            rgmin_tensor_free(st);
+            rgmin_tensor_free(vt);
+            if output == Output::Separate {
+                rgmin_tensor_free(mt);
+            }
+            rgmin_manifold_free(manifold);
+        }
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        match output {
+            Output::Separate => (modes, values[0], pair),
+            Output::OverX => (point, seed[0], pair),
+            Output::OverSeed => (seed, point[0], pair),
+        }
+    }
+
+    fn tcg_step(output: Output) -> (Vec<f64>, rgmin_rtr_tcg_result_t) {
+        let mut point = POINT.to_vec();
+        let mut grad = SEED.to_vec();
+        let mut eta = vec![0.0; 6];
+        let manifold = rgmin_manifold_rigid_quotient(2, 0);
+        let eta_out = match output {
+            Output::Separate => eta.as_mut_ptr(),
+            Output::OverX => point.as_mut_ptr(),
+            Output::OverSeed => grad.as_mut_ptr(),
+        };
+        let mut result = rgmin_rtr_tcg_result_t {
+            model_decrease: 0.0,
+            eta_norm: 0.0,
+            stop: -1,
+            iterations: 0,
+        };
+        let status = unsafe {
+            rgmin_rtr_tcg_solve(
+                manifold,
+                Some(stretch_hvp),
+                std::ptr::null_mut(),
+                point.as_ptr(),
+                grad.as_ptr(),
+                0.5,
+                1.0,
+                0.1,
+                10,
+                eta_out,
+                6,
+                &mut result,
+            )
+        };
+        unsafe { rgmin_manifold_free(manifold) };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        let step = match output {
+            Output::Separate => eta,
+            Output::OverX => point,
+            Output::OverSeed => grad,
+        };
+        (step, result)
+    }
+
+    fn assert_same_bits(actual: &[f64], expected: &[f64]) {
+        assert_eq!(actual.len(), expected.len());
+        for (a, e) in actual.iter().zip(expected) {
+            assert_eq!(a.to_bits(), e.to_bits(), "{actual:?} != {expected:?}");
+        }
+    }
+
+    // An entry that holds a shared view of an input while it forms the
+    // mutable output over the same buffer is undefined behavior even when
+    // the bytes it writes are right. Plain tests cannot see that; run these
+    // under Miri (`cargo miri test --no-default-features --features capi
+    // --lib manifold_alias_tests`).
+
+    #[test]
+    fn single_pair_mode_out_may_be_x() {
+        let (expected, want) = single_pair(Output::Separate);
+        let (actual, got) = single_pair(Output::OverX);
+        assert_same_bits(&actual, &expected);
+        assert_eq!(
+            (got.value.to_bits(), got.actions),
+            (want.value.to_bits(), want.actions)
+        );
+    }
+
+    #[test]
+    fn single_pair_mode_out_may_be_seed() {
+        let (expected, want) = single_pair(Output::Separate);
+        let (actual, got) = single_pair(Output::OverSeed);
+        assert_same_bits(&actual, &expected);
+        assert_eq!(
+            (got.value.to_bits(), got.actions),
+            (want.value.to_bits(), want.actions)
+        );
+    }
+
+    #[test]
+    fn block_outputs_may_be_x_and_seed() {
+        let (expected, expected_value, want) = block_pair(Output::Separate);
+        for output in [Output::OverX, Output::OverSeed] {
+            let (actual, value, got) = block_pair(output);
+            assert_same_bits(&actual, &expected);
+            assert_eq!(value.to_bits(), expected_value.to_bits());
+            assert_eq!(got.value.to_bits(), want.value.to_bits());
+            assert_eq!(got.actions, want.actions);
+        }
+    }
+
+    #[test]
+    fn tcg_eta_out_may_be_x_or_grad() {
+        let (expected, want) = tcg_step(Output::Separate);
+        for output in [Output::OverX, Output::OverSeed] {
+            let (actual, got) = tcg_step(output);
+            assert_same_bits(&actual, &expected);
+            assert_eq!(got.model_decrease.to_bits(), want.model_decrease.to_bits());
+            assert_eq!((got.stop, got.iterations), (want.stop, want.iterations));
+        }
+    }
+}
+
+#[cfg(test)]
 mod conjugacy_abi_tests {
     use super::*;
     use std::mem::{offset_of, size_of};
@@ -7089,8 +7361,10 @@ unsafe fn run_lowest_eigenpairs(
         set_last_error(&format!("{label}: k = 0 is outside 1..=n"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     }
-    let xs = cpu_f64_slice(x, "x")?;
-    let n = xs.len();
+    // Own every input before borrowing output storage. C callers may use
+    // either output tensor as in-place storage for an input tensor.
+    let x_owned = cpu_f64_slice(x, "x")?.to_vec();
+    let n = x_owned.len();
     if k > n {
         set_last_error(&format!("{label}: k = {k} is outside 1..={n}"));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
@@ -7122,7 +7396,7 @@ unsafe fn run_lowest_eigenpairs(
         typed.max_iter
     };
     let apply = CHvp { hvp, user };
-    let x_arr = Array1::from(xs.to_vec());
+    let x_arr = Array1::from(x_owned);
     let failed = Cell::new(false);
     let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if projected {
@@ -7396,8 +7670,9 @@ fn copy_contiguous(dst: &mut [f64], src: &Array1<f64>) -> bool {
 ///
 /// # Safety
 /// `hvp` is callable with `user`. `x`, `grad`, and `eta_out` each address
-/// `len` doubles, and `eta_out` is writable. `out` may be null. `manifold`
-/// is null or a live handle whose packed length is `len`.
+/// `len` doubles, and `eta_out` is writable and may alias either input.
+/// `out` may be null and must not overlap the buffers. `manifold` is null
+/// or a live handle whose packed length is `len`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_rtr_tcg_solve(
     manifold: *const rgmin_manifold_handle,
@@ -7433,14 +7708,16 @@ pub unsafe extern "C" fn rgmin_rtr_tcg_solve(
             Ok(inner) => inner,
             Err(status) => return status,
         };
-        let xs = unsafe { slice::from_raw_parts(x, len) };
-        let gs = unsafe { slice::from_raw_parts(grad, len) };
+        // Copy inputs before forming the output slice so an in-place call
+        // does not create overlapping shared and mutable Rust references.
+        let xs = unsafe { slice::from_raw_parts(x, len) }.to_vec();
+        let gs = unsafe { slice::from_raw_parts(grad, len) }.to_vec();
         if xs.iter().any(|v| !v.is_finite()) || gs.iter().any(|v| !v.is_finite()) {
             set_last_error("rgmin_rtr_tcg_solve: non-finite x or grad");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
-        let x_arr = Array1::from(xs.to_vec());
-        let g_arr = Array1::from(gs.to_vec());
+        let x_arr = Array1::from(xs);
+        let g_arr = Array1::from(gs);
         let apply = CHvp { hvp, user };
         let hvp_at = |v: &Array1<f64>| apply.apply_hessian(x_arr.view(), v.view());
         let res = match geometry {
@@ -7567,8 +7844,10 @@ fn project_onto<'a>(
 /// their subspaces.
 ///
 /// # Safety
-/// Same tensor rules as [`rgmin_lowest_eigenpair_with_options`]. `manifold`
-/// is null or a live handle whose packed length equals `x`.
+/// Same tensor rules as [`rgmin_lowest_eigenpair_with_options`]. `mode_out`
+/// may alias `x` or `seed`; the result record must not overlap tensor
+/// storage. `manifold` is null or a live handle whose packed length equals
+/// `x`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
     manifold: *const rgmin_manifold_handle,
@@ -7590,24 +7869,30 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
             set_last_error("rgmin_lowest_eigenpair_on_manifold: null out");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
-        let xs = match cpu_f64_slice(x, "x") {
-            Ok(slice) => slice,
+        let x_owned = match cpu_f64_slice(x, "x") {
+            Ok(slice) => slice.to_vec(),
             Err(status) => return status,
         };
-        let seed_s = match cpu_f64_slice(seed, "seed") {
-            Ok(slice) => slice,
+        let seed_owned = match cpu_f64_slice(seed, "seed") {
+            Ok(slice) => slice.to_vec(),
             Err(status) => return status,
         };
+        // Inputs are owned before the mutable output slice is formed. This
+        // is required even when all three DLPack handles describe one buffer.
         let mode_s = match cpu_f64_slice_mut(mode_out, "mode_out") {
             Ok(slice) => slice,
             Err(status) => return status,
         };
-        if xs.len() != seed_s.len() || xs.len() != mode_s.len() {
+        if x_owned.len() != seed_owned.len() || x_owned.len() != mode_s.len() {
             set_last_error("rgmin_lowest_eigenpair_on_manifold: length mismatch");
             return rgmin_status_t::RGMIN_INVALID_PARAMETER;
         }
         let geometry = match unsafe {
-            manifold_at(manifold, xs.len(), "rgmin_lowest_eigenpair_on_manifold")
+            manifold_at(
+                manifold,
+                x_owned.len(),
+                "rgmin_lowest_eigenpair_on_manifold",
+            )
         } {
             Ok(inner) => inner,
             Err(status) => return status,
@@ -7617,9 +7902,8 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
             Err(status) => return status,
         };
         apply_eigen_options(&mut typed, options);
-        let x_owned = xs.to_vec();
         let x_arr = Array1::from(x_owned.clone());
-        let seed_arr = Array1::from(seed_s.to_vec());
+        let seed_arr = Array1::from(seed_owned);
         let apply = CHvp { hvp, user };
         let failed = Cell::new(false);
         let mut project = project_onto(geometry, &x_owned, &failed);
@@ -7662,7 +7946,9 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(
 ///
 /// # Safety
 /// Same tensor and callback rules as [`rgmin_lowest_eigenpairs_ex`].
-/// `manifold` is null or a live handle whose packed length equals `x`.
+/// `modes_out` and `values_out` may alias either input, but not each other
+/// or `pairs_out`. `manifold` is null or a live handle whose packed length
+/// equals `x`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_lowest_eigenpairs_projected(
     manifold: *const rgmin_manifold_handle,
