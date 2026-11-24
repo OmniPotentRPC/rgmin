@@ -6,7 +6,9 @@
 //! \(\mathrm{SPD}(p)\) is a `p x p` symmetric positive definite matrix
 //! under the affine-invariant or the log-Euclidean metric. A product packs
 //! its factors one after another, each column-major, in the order given.
-//! A manifold with one factor is that factor alone.
+//! A manifold with one factor is that factor alone. A rigid quotient
+//! factor is \(\mathbb{R}^{3N}/\mathrm{SE}(3)\), or \(\mathbb{R}^{3N}/\mathrm{T}(3)\)
+//! when the cell is periodic.
 //!
 //! Every operation checks lengths and finiteness and returns
 //! [`Error::ManifoldArgument`] rather than guessing. An SPD point must be
@@ -74,6 +76,7 @@ pub enum SpdMetric {
 
 /// One factor of a [`RiemannianManifold`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ManifoldFactor {
     /// \(\mathrm{St}(n,p)\), `1 <= p <= n`. Column-major `n x p`, length `n p`.
     Stiefel {
@@ -92,6 +95,16 @@ pub enum ManifoldFactor {
         /// Riemannian metric.
         metric: SpdMetric,
     },
+    /// Molecular or cluster quotient \(\mathbb{R}^{3N}/\mathrm{SE}(3)\)
+    /// (`periodic` false) or \(\mathbb{R}^{3N}/\mathrm{T}(3)\) (`periodic` true).
+    /// Packed length is `3 * n_atoms`. The metric is Euclidean on the
+    /// horizontal space.
+    RigidQuotient {
+        /// Number of atoms. At least 1.
+        n_atoms: usize,
+        /// When true, remove translations and keep rotations.
+        periodic: bool,
+    },
 }
 
 impl ManifoldFactor {
@@ -100,6 +113,7 @@ impl ManifoldFactor {
         match *self {
             Self::Stiefel { n, p, .. } => n * p,
             Self::Spd { p, .. } => p * p,
+            Self::RigidQuotient { n_atoms, .. } => 3 * n_atoms,
         }
     }
 
@@ -108,6 +122,7 @@ impl ManifoldFactor {
         match *self {
             Self::Stiefel { n, p, .. } => (n, p),
             Self::Spd { p, .. } => (p, p),
+            Self::RigidQuotient { n_atoms, .. } => (3 * n_atoms, 1),
         }
     }
 
@@ -115,12 +130,29 @@ impl ManifoldFactor {
         match *self {
             Self::Stiefel { n, p, .. } => stiefel_project(n, p, x, v, out),
             Self::Spd { p, .. } => out.copy_from_slice(&sym(p, v)),
+            Self::RigidQuotient { periodic, .. } => {
+                let mut w = Array1::from_vec(v.to_vec());
+                crate::rigid::project_horizontal(
+                    &mut w,
+                    ndarray::ArrayView1::from(x),
+                    None,
+                    !periodic,
+                );
+                if let Some(slice) = w.as_slice() {
+                    out.copy_from_slice(slice);
+                } else {
+                    for (slot, value) in out.iter_mut().zip(w.iter()) {
+                        *slot = *value;
+                    }
+                }
+            }
         }
     }
 
     fn egrad_to_rgrad(&self, x: &[f64], g: &[f64], out: &mut [f64]) -> Result<()> {
         match *self {
             Self::Stiefel { n, p, .. } => stiefel_project(n, p, x, g, out),
+            Self::RigidQuotient { .. } => self.project(x, g, out),
             Self::Spd { p, metric } => {
                 let pt = SpdPoint::new(p, x, "x")?;
                 let gs = sym(p, g);
@@ -159,6 +191,12 @@ impl ManifoldFactor {
                 out.copy_from_slice(&polar(n, p, &y)?);
                 Ok(())
             }
+            Self::RigidQuotient { .. } => {
+                for (slot, (xi, vi)) in out.iter_mut().zip(x.iter().zip(v.iter())) {
+                    *slot = xi + vi;
+                }
+                Ok(())
+            }
             Self::Spd { .. } => self.exp(x, v, out),
         }
     }
@@ -169,6 +207,13 @@ impl ManifoldFactor {
                 let mut t = vec![0.0; n * p];
                 stiefel_project(n, p, x, v, &mut t);
                 out.copy_from_slice(&stiefel_exp(n, p, x, &t));
+            }
+            Self::RigidQuotient { .. } => {
+                let mut tangent = vec![0.0; x.len()];
+                self.project(x, v, &mut tangent);
+                for (slot, (xi, ti)) in out.iter_mut().zip(x.iter().zip(tangent.iter())) {
+                    *slot = xi + ti;
+                }
             }
             Self::Spd { p, metric } => {
                 let pt = SpdPoint::new(p, x, "x")?;
@@ -204,6 +249,9 @@ impl ManifoldFactor {
             Self::Stiefel { .. } => Err(bad(
                 "log has no closed form on the Stiefel manifold".to_string()
             )),
+            Self::RigidQuotient { .. } => Err(bad(
+                "log has no closed form on the rigid quotient manifold".to_string(),
+            )),
             Self::Spd { p, metric } => {
                 let px = SpdPoint::new(p, x, "x")?;
                 let r = match metric {
@@ -234,6 +282,7 @@ impl ManifoldFactor {
     fn transport(&self, x_from: &[f64], x_to: &[f64], v: &[f64], out: &mut [f64]) -> Result<()> {
         match *self {
             Self::Stiefel { n, p, .. } => stiefel_project(n, p, x_to, v, out),
+            Self::RigidQuotient { .. } => self.project(x_to, v, out),
             Self::Spd { p, metric } => {
                 let px = SpdPoint::new(p, x_from, "x_from")?;
                 let py = SpdPoint::new(p, x_to, "x_to")?;
@@ -259,7 +308,7 @@ impl ManifoldFactor {
 
     fn inner(&self, x: &[f64], u: &[f64], v: &[f64]) -> Result<f64> {
         match *self {
-            Self::Stiefel { .. } => Ok(frob(u, v)),
+            Self::Stiefel { .. } | Self::RigidQuotient { .. } => Ok(frob(u, v)),
             Self::Spd { p, metric } => {
                 let pt = SpdPoint::new(p, x, "x")?;
                 let (us, vs) = (sym(p, u), sym(p, v));
@@ -309,6 +358,30 @@ impl RiemannianManifold {
             .ok_or_else(|| bad("stiefel: n * p overflows".to_string()))?;
         Ok(Self {
             factors: vec![ManifoldFactor::Stiefel { n, p, retraction }],
+            len,
+        })
+    }
+
+    /// \(\mathbb{R}^{3N}/\mathrm{SE}(3)\) when `periodic` is false, and
+    /// \(\mathbb{R}^{3N}/\mathrm{T}(3)\) when `periodic` is true.
+    ///
+    /// The packed point is `3 * n_atoms` Cartesian coordinates. Projection
+    /// removes translations and, unless `periodic`, rotations. The
+    /// retraction is the horizontal lift `x + v`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ManifoldArgument`] when `n_atoms` is 0 or `3 * n_atoms`
+    /// overflows.
+    pub fn rigid_quotient(n_atoms: usize, periodic: bool) -> Result<Self> {
+        if n_atoms == 0 {
+            return Err(bad("rigid_quotient needs n_atoms >= 1".to_string()));
+        }
+        let len = n_atoms
+            .checked_mul(3)
+            .ok_or_else(|| bad("rigid_quotient: 3 * n_atoms overflows".to_string()))?;
+        Ok(Self {
+            factors: vec![ManifoldFactor::RigidQuotient { n_atoms, periodic }],
             len,
         })
     }

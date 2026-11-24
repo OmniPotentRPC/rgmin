@@ -4760,6 +4760,8 @@ mod manifold_handles {
                         }
                     }
                 }
+                rgmin::ManifoldFactor::RigidQuotient { .. } => x.extend(a),
+                _ => unreachable!("unknown manifold factor"),
             }
         }
         x
