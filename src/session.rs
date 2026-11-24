@@ -5977,6 +5977,15 @@ impl Solver {
         }
     }
 
+    /// Whether a FIRE session caps `dt_max` after a two-step overshoot.
+    #[cfg(feature = "capi")]
+    pub(crate) fn fire_caps_two_step_overshoot(&self) -> bool {
+        match &self.inner {
+            Inner::Fire(state) => state.caps_two_step_overshoot(),
+            _ => false,
+        }
+    }
+
     /// Opt into capping `dt_max` after one downhill step followed by an uphill one.
     pub fn set_fire_cap_two_step_overshoot(&mut self, on: bool) -> Result<()> {
         match &mut self.inner {

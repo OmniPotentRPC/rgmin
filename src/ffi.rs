@@ -2488,9 +2488,11 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_abc(solver: *mut rgmin_solver_t, 
     flag(unsafe { (*solver).solver.set_fire_abc(on != 0) })
 }
 
-/// FIRE integrator parameters. Clears the velocity.
-/// Returns 0, or 1 on a null session, a session that is not FIRE, or a
-/// parameter outside the range [`crate::FireConfig`] keeps.
+/// FIRE integrator parameters. Clears the velocity and keeps the
+/// two-step overshoot cap as it was. Returns 0, or 1 on a
+/// null session, a session that is not FIRE, or a parameter outside its
+/// range: `dt` and `dt_max` finite and positive with `dt <= dt_max`,
+/// `f_inc` above 1, and `f_dec`, `alpha` and `f_alpha` in (0, 1).
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
@@ -2513,6 +2515,10 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_config(
         set_last_error("rgmin_solver_set_fire_config: dt and dt_max must be finite and positive");
         return 1;
     }
+    if dt > dt_max {
+        set_last_error("rgmin_solver_set_fire_config: dt must not exceed dt_max");
+        return 1;
+    }
     if !(f_inc.is_finite() && f_inc > 1.0) {
         set_last_error("rgmin_solver_set_fire_config: f_inc must be finite and greater than 1");
         return 1;
@@ -2521,8 +2527,8 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_config(
         set_last_error("rgmin_solver_set_fire_config: f_dec must be finite and in (0, 1)");
         return 1;
     }
-    if !(alpha.is_finite() && alpha > 0.0) {
-        set_last_error("rgmin_solver_set_fire_config: alpha must be finite and positive");
+    if !(alpha.is_finite() && alpha > 0.0 && alpha < 1.0) {
+        set_last_error("rgmin_solver_set_fire_config: alpha must be finite and in (0, 1)");
         return 1;
     }
     if !(f_alpha.is_finite() && f_alpha > 0.0 && f_alpha < 1.0) {
@@ -2537,7 +2543,7 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_config(
         f_dec,
         alpha,
         f_alpha,
-        cap_two_step_overshoot: false,
+        cap_two_step_overshoot: unsafe { (*solver).solver.fire_caps_two_step_overshoot() },
     };
     match unsafe { (*solver).solver.set_fire_config(config) } {
         Ok(()) => 0,
@@ -4076,6 +4082,9 @@ pub unsafe extern "C" fn rgmin_solver_push_pair(
             .solver
             .push_pair(ndarray::ArrayView1::from(sv), ndarray::ArrayView1::from(yv))
     };
+    if !ok {
+        set_last_error("rgmin_solver_push_pair: the session is not L-BFGS, or it refused the pair");
+    }
     i32::from(!ok)
 }
 
@@ -9506,5 +9515,56 @@ mod stop_mapping_tests {
         assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE);
         let message = unsafe { CStr::from_ptr(rgmin_last_error()) };
         assert!(message.to_string_lossy().contains("still iterating"));
+    }
+}
+
+#[cfg(test)]
+mod fire_config_tests {
+    use super::*;
+
+    fn control() -> rgmin_control_t {
+        rgmin_control_t::default()
+    }
+
+    #[test]
+    fn set_fire_config_keeps_the_two_step_overshoot_cap() {
+        let ctrl = control();
+        unsafe {
+            let session = rgmin_solver_create(rgmin_method_t::RGMIN_FIRE2, &ctrl, 2);
+            assert!(!session.is_null());
+            assert!(!(*session).solver.fire_caps_two_step_overshoot());
+            assert_eq!(rgmin_solver_set_fire_cap_two_step_overshoot(session, 1), 0);
+            assert!((*session).solver.fire_caps_two_step_overshoot());
+            assert_eq!(
+                rgmin_solver_set_fire_config(session, 0.1, 1.0, 20, 1.1, 0.5, 0.25, 0.99),
+                0
+            );
+            assert!((*session).solver.fire_caps_two_step_overshoot());
+            assert_eq!(rgmin_solver_set_fire_cap_two_step_overshoot(session, 0), 0);
+            assert_eq!(
+                rgmin_solver_set_fire_config(session, 0.1, 1.0, 20, 1.1, 0.5, 0.25, 0.99),
+                0
+            );
+            assert!(!(*session).solver.fire_caps_two_step_overshoot());
+            rgmin_solver_free(session);
+        }
+    }
+
+    #[test]
+    fn push_pair_names_the_refusal_on_a_session_that_is_not_lbfgs() {
+        let ctrl = control();
+        let vector = [1.0, 0.5];
+        unsafe {
+            let session = rgmin_solver_create(rgmin_method_t::RGMIN_FIRE, &ctrl, 2);
+            assert!(!session.is_null());
+            set_last_error("");
+            assert_eq!(
+                rgmin_solver_push_pair(session, vector.as_ptr(), vector.as_ptr(), 2),
+                1
+            );
+            let message = CStr::from_ptr(rgmin_last_error()).to_string_lossy();
+            assert!(message.contains("rgmin_solver_push_pair"), "{message}");
+            rgmin_solver_free(session);
+        }
     }
 }
