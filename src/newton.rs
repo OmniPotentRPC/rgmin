@@ -883,11 +883,11 @@ pub struct BunchKaufman {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LdlInertiaBound {
-    /// Number of eigenvalues of `D` whose outward-rounded enclosure lies strictly below `-eig_floor`.
+    /// Number of eigenvalues of `D` whose outward-rounded enclosure lies strictly below `0`.
     pub negative: usize,
-    /// Number of eigenvalues of `D` whose outward-rounded enclosure lies strictly above `+eig_floor`.
+    /// Number of eigenvalues of `D` whose outward-rounded enclosure lies strictly above `0`.
     pub positive: usize,
-    /// Number of `1x1` or `2x2` block eigenvalues of `D` whose outward-rounded enclosure intersects `[-eig_floor, +eig_floor]`.
+    /// Number of `1x1` or `2x2` block eigenvalues of `D` whose outward-rounded enclosure contains `0`.
     pub ambiguous_pivots: usize,
     /// Explicit-constant spectral/infinity backward-error bound `‖ΔA‖_2 <= ‖ΔA‖_∞`
     /// patterned after the structure of Higham (2002, Theorem 11.3, where the linear
@@ -1531,7 +1531,7 @@ pub struct ShiftedLdlCertificate {
     pub perturbation_bound: f64,
     /// Maximum `LDL^T` backward-error bound across the shifted factorizations.
     pub ldl_backward_error: f64,
-    /// Diagonal shift applied in `M̃ ± shift I`.
+    /// Effective diagonal shift applied in `M̃ ± shift_applied I`.
     pub shift_applied: f64,
     /// Maximum Schur-complement pivot-growth factor across the factorizations.
     pub pivot_growth: f64,
@@ -1554,7 +1554,7 @@ pub enum ShiftedLdlRefusal {
         /// Supplied perturbation bound.
         perturbation_bound: f64,
     },
-    /// At least one pivot eigenvalue of `D_-` or `D_+` fell inside `[-eig_floor, +eig_floor]`.
+    /// At least one pivot eigenvalue enclosure of `D_-` or `D_+` contained `0`.
     #[error(
         "shifted LDL^T encountered {ambiguous_pivots} ambiguous pivot(s) at shift {shift_applied:.3e}"
     )]
@@ -1734,7 +1734,7 @@ pub fn certify_shifted_ldlt_inertia(
     }
 
     let eval_pair = |shift: f64| -> std::result::Result<
-        (LdlInertiaBound, LdlInertiaBound, f64),
+        (LdlInertiaBound, LdlInertiaBound, f64, f64),
         ShiftedLdlRefusal,
     > {
         if !shift.is_finite() {
@@ -1781,12 +1781,11 @@ pub fn certify_shifted_ldlt_inertia(
         }
         let ldl_minus = ldl_inertia_with_backward_bound(&m_minus, n)?;
         let ldl_plus = ldl_inertia_with_backward_bound(&m_plus, n)?;
-        Ok((ldl_minus, ldl_plus, diag_roundoff))
+        Ok((ldl_minus, ldl_plus, diag_roundoff, shift_eff))
     };
 
-    let initial_shift = (work_pert + (2.0 * ldl_0.backward_error).next_up()).next_up();
-    let (mut ldl_minus, mut ldl_plus, mut diag_roundoff) = eval_pair(initial_shift)?;
-    let mut shift_applied = initial_shift;
+    let mut shift = (work_pert + (2.0 * ldl_0.backward_error).next_up()).next_up();
+    let (mut ldl_minus, mut ldl_plus, mut diag_roundoff, mut shift_eff) = eval_pair(shift)?;
 
     let max_three = |a: f64, b: f64, c: f64| -> f64 {
         let mut acc = a;
@@ -1811,14 +1810,15 @@ pub fn certify_shifted_ldlt_inertia(
     );
     let required_shift = ((work_pert + ldl_backward_error).next_up() + diag_roundoff).next_up();
 
-    if shift_applied < required_shift {
-        shift_applied = ((work_pert + (2.0 * ldl_backward_error).next_up()).next_up()
+    if shift < required_shift {
+        shift = ((work_pert + (2.0 * ldl_backward_error).next_up()).next_up()
             + (2.0 * diag_roundoff).next_up())
         .next_up();
-        let retry = eval_pair(shift_applied)?;
+        let retry = eval_pair(shift)?;
         ldl_minus = retry.0;
         ldl_plus = retry.1;
         diag_roundoff = retry.2;
+        shift_eff = retry.3;
         ldl_backward_error = max_three(
             ldl_backward_error,
             ldl_minus.backward_error,
@@ -1826,7 +1826,7 @@ pub fn certify_shifted_ldlt_inertia(
         );
         pivot_growth = max_three(pivot_growth, ldl_minus.pivot_growth, ldl_plus.pivot_growth);
         let recheck = ((work_pert + ldl_backward_error).next_up() + diag_roundoff).next_up();
-        if shift_applied < recheck {
+        if shift < recheck {
             return Err(ShiftedLdlRefusal::Factor(LdlError::NonFiniteFactor {
                 stage: "shift dominance verification",
             }));
@@ -1848,7 +1848,7 @@ pub fn certify_shifted_ldlt_inertia(
                 }))
             }
         };
-    let reported_shift = unscale_bound(shift_applied, "unscaled shift bound")?;
+    let reported_shift = unscale_bound(shift_eff, "unscaled shift bound")?;
     let reported_ldl_err = unscale_bound(ldl_backward_error, "unscaled backward error bound")?;
 
     let ambiguous_pivots = ldl_minus.ambiguous_pivots + ldl_plus.ambiguous_pivots;
@@ -2405,5 +2405,57 @@ mod tests {
                 pivot_growth: 1.0,
             })
         );
+    }
+
+    #[test]
+    fn shifted_ldlt_inertia_reports_effective_shift() {
+        let u = 0.5 * f64::EPSILON;
+
+        // 1. Single-pass path (2 * ldl_0.backward_error > ldl_backward_error + diag_roundoff):
+        // shift_applied must equal shift_eff > shift.
+        let mat = [-2.0, 0.0, 0.0, 2.0];
+        let op_scale = 2.0;
+        let pert = 1.0e-3;
+        let ldl_0 = ldl_inertia_with_backward_bound(&mat, 2).expect("ldl_0");
+        let shift = (pert + (2.0 * ldl_0.backward_error).next_up()).next_up();
+        let diag_roundoff = (u * (op_scale + shift).next_up()).next_up();
+        let expected_shift_eff = (shift + diag_roundoff).next_up();
+
+        let cert = certify_shifted_ldlt_inertia(&mat, 2, op_scale, pert)
+            .expect("separated spectrum with single-pass shift");
+        assert_eq!(cert.negative, 1);
+        assert_eq!(cert.positive, 1);
+        assert_eq!(cert.shift_applied, expected_shift_eff);
+        assert!(cert.shift_applied > shift);
+
+        // 2. Retry path (large operator_scale so diag_roundoff forces retry):
+        // shift_applied must equal the retried effective shift, strictly exceeding the retried base shift.
+        let retry_scale = 1.0e6;
+        let init_shift = (2.0 * ldl_0.backward_error).next_up();
+        let init_roundoff = (u * (retry_scale + init_shift).next_up()).next_up();
+        let init_eff = (init_shift + init_roundoff).next_up();
+        let mut m_minus = mat;
+        let mut m_plus = mat;
+        for i in 0..2 {
+            m_minus[i * 2 + i] = (m_minus[i * 2 + i] - init_eff).next_down();
+            m_plus[i * 2 + i] = (m_plus[i * 2 + i] + init_eff).next_up();
+        }
+        let ldl_m = ldl_inertia_with_backward_bound(&m_minus, 2).expect("ldl_m");
+        let ldl_p = ldl_inertia_with_backward_bound(&m_plus, 2).expect("ldl_p");
+        let max_be = ldl_0
+            .backward_error
+            .max(ldl_m.backward_error)
+            .max(ldl_p.backward_error);
+        let retry_shift = ((2.0 * max_be).next_up() + (2.0 * init_roundoff).next_up()).next_up();
+        let retry_roundoff = (u * (retry_scale + retry_shift).next_up()).next_up();
+        let expected_retry_eff = (retry_shift + retry_roundoff).next_up();
+
+        let retry_cert = certify_shifted_ldlt_inertia(&mat, 2, retry_scale, 0.0)
+            .expect("retry path certifies well-separated spectrum");
+        assert_eq!(retry_cert.negative, 1);
+        assert_eq!(retry_cert.positive, 1);
+        assert_eq!(retry_cert.shift_applied, expected_retry_eff);
+        assert!(retry_cert.shift_applied > retry_shift);
+        assert!(retry_cert.shift_applied > init_eff);
     }
 }
