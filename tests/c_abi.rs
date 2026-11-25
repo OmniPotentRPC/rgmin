@@ -5483,3 +5483,46 @@ fn fixed_h0_and_ase_linesearch_are_opt_in() {
         1
     );
 }
+
+/// A default L-BFGS session does not search a line. The ASE setter
+/// opts into the plain Wolfe step, so the following step runs.
+#[test]
+fn ase_linesearch_on_default_lbfgs_steps() {
+    let ctrl = rgmin_control_t {
+        maxiter: 10,
+        gtol: 1e-8,
+        istep: 1.0,
+        memory: 5,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+        require_convergence: 0,
+    };
+    let mut x = [1.0_f64];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
+    };
+    let st = unsafe {
+        let session = rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 1);
+        assert!(!session.is_null());
+        assert_eq!(rgmin_solver_set_ase_linesearch(session, 50.0), 0);
+        let xt = rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 1);
+        let st = rgmin_solver_step(
+            session,
+            Some(quad_eval),
+            Some(quad_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        );
+        rgmin_tensor_free(xt);
+        rgmin_solver_free(session);
+        st
+    };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(x[0] < 1.0, "default L-BFGS ASE step left x at {}", x[0]);
+}

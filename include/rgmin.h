@@ -754,8 +754,12 @@ int32_t rgmin_solver_set_fixed_h0(rgmin_solver_t *solver, double h0);
 /** Run the line search of ASE 3.29 on a BFGS or L-BFGS session with
  *  step-multiplier bound \c stpmax. It opens at the unit step, the
  *  per-atom cap limits each increment rather than the whole step, and
- *  a failed search moves nothing. \c c1, \c c2 and the evaluation
- *  budget come from the session's Wolfe search. A \c stpmax below 1 is
+ *  a failed search moves nothing. A non-positive finite per-atom cap
+ *  is ASE's maxstep, so zero scales each increment to zero. \c c1,
+ *  \c c2 and the evaluation budget come from the session's Wolfe
+ *  search. On L-BFGS this opts into that plain Wolfe step and turns
+ *  the geometry step off, as SolverConfig does for linesearch "ase",
+ *  so a default L-BFGS session can step. A \c stpmax below 1 is
  *  accepted and fails each search, as in ASE. Returns 0, or 1 on a null
  *  session, a NaN \c stpmax, or another method. ABI minor 53. */
 int32_t rgmin_solver_set_ase_linesearch(rgmin_solver_t *solver, double stpmax);

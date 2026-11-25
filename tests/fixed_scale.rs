@@ -83,8 +83,9 @@ fn the_ase_search_limits_each_increment_by_the_atom_cap() {
 
 #[test]
 fn the_ase_search_opens_at_the_unit_step_whatever_istep_is() {
+    // BFGS starts without a per-atom cap. Zero is ASE's maxstep and
+    // scales every increment to zero, so this search leaves the cap unset.
     let mut solver = Solver::new(Method::Bfgs, open_control().with_istep(0.1), 1);
-    solver.set_atom_maxmove(0.0);
     solver.set_accept(Accept::Energy);
     solver.set_linesearch(LineSearch::wolfe(0.23, 0.46, 20));
     solver.set_ase_linesearch(50.0).unwrap();
@@ -157,6 +158,33 @@ fn the_ase_search_is_refused_off_bfgs_and_lbfgs_and_for_nan() {
     assert!(steepest.set_ase_linesearch(50.0).is_err());
     let mut lbfgs = Solver::new(Method::lbfgs(), open_control(), 1);
     assert!(lbfgs.set_ase_linesearch(50.0).is_ok());
+}
+
+#[test]
+fn an_updated_bfgs_matrix_keeps_the_scale_that_produced_it() {
+    // h0 = 0.5 and Accept::Step on x^2 / 2: 1 -> 0.5, then the secant
+    // pair makes H = 1, so the next step is 0.5 -> 0. Setting the same
+    // scale again must leave that pair in place.
+    let mut solver = Solver::new(Method::Bfgs, open_control(), 1);
+    solver.set_atom_maxmove(0.0);
+    solver.set_accept(Accept::Step);
+    solver.set_fixed_h0(0.5).unwrap();
+    let mut x = Array1::from_elem(1, 1.0);
+    solver.step(&Quadratic, &mut x).unwrap();
+    assert_eq!(x[0], 0.5);
+    solver.set_fixed_h0(0.5).unwrap();
+    solver.step(&Quadratic, &mut x).unwrap();
+    assert_eq!(x[0], 0.0);
+}
+
+#[test]
+fn a_zero_ase_maxstep_does_not_leave_the_increments_unlimited() {
+    let mut solver = bfgs();
+    solver.set_linesearch(LineSearch::wolfe(0.23, 0.46, 20));
+    solver.set_ase_linesearch(50.0).unwrap();
+    let mut x = Array1::from_elem(1, 1.0);
+    solver.step(&Quadratic, &mut x).unwrap();
+    assert_eq!(x[0], 1.0);
 }
 
 #[test]
