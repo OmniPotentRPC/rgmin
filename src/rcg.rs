@@ -590,7 +590,7 @@ where
     if rgrad.len() != x.len() || rgrad.iter().any(|g| !g.is_finite()) {
         return Err(crate::step::non_finite());
     }
-    let mut dir = search_direction(manifold, memory, x, &rgrad);
+    let mut dir = search_direction(memory, x, egrad, &rgrad);
     let mut previous = memory.prev_alpha;
     let mut previous_speed = memory.prev_speed;
     let mut calls = 0usize;
@@ -644,6 +644,7 @@ where
                 &x_new,
                 &rgrad,
                 &rgrad_new,
+                &egrad_new,
                 &dir,
             );
             if let Some(failure) = failures.take() {
@@ -690,18 +691,17 @@ where
     })
 }
 
-fn search_direction<M>(
-    manifold: &M,
+/// The held direction when the value falls along it, else steepest
+/// descent. The slope is the differential `egrad . dir`, as in the search.
+fn search_direction(
     memory: &mut RcgMemory,
     x: &Array1<f64>,
+    egrad: &Array1<f64>,
     rgrad: &Array1<f64>,
-) -> Array1<f64>
-where
-    M: Manifold + ?Sized,
-{
+) -> Array1<f64> {
     if memory.ready && memory.dir.len() == x.len() {
         let dir = memory.dir.clone();
-        if dir.iter().all(|v| v.is_finite()) && manifold.inner(x, rgrad, &dir) < 0.0 {
+        if dir.iter().all(|v| v.is_finite()) && crate::vecops::dot(egrad.view(), dir.view()) < 0.0 {
             return dir;
         }
         memory.restarts += 1;
@@ -709,7 +709,10 @@ where
     negated(rgrad)
 }
 
-/// Conjugated direction at `x_to`, and whether it was replaced by steepest descent.
+/// Conjugated direction at `x_to`, and whether it was replaced by steepest
+/// descent. `egrad_to` is the Euclidean gradient there, whose product with
+/// the direction is the slope.
+#[allow(clippy::too_many_arguments)]
 fn next_direction<M>(
     manifold: &M,
     beta_kind: RcgBeta,
@@ -718,6 +721,7 @@ fn next_direction<M>(
     x_to: &Array1<f64>,
     g_from: &Array1<f64>,
     g_to: &Array1<f64>,
+    egrad_to: &Array1<f64>,
     d_from: &Array1<f64>,
 ) -> (Array1<f64>, bool)
 where
@@ -733,7 +737,7 @@ where
         crate::vecops::axpy(beta, d_carried.view(), &mut next);
     }
     next = manifold.project(x_to, &next);
-    let slope = manifold.inner(x_to, g_to, &next);
+    let slope = crate::vecops::dot(egrad_to.view(), next.view());
     if !beta.is_finite() || !slope.is_finite() || slope >= 0.0 {
         return (manifold.project(x_to, &negated(g_to)), true);
     }
@@ -1039,6 +1043,12 @@ where
         Some(point)
     }
 
+    /// The derivative of the value along the curve: the Euclidean gradient
+    /// `g` against the curve velocity. The metric product of the Riemannian
+    /// gradient with that velocity is the same number only where
+    /// [`Manifold::inner`] is the metric [`Manifold::egrad2rgrad`] raises
+    /// by. The Poincare ball and the hyperboloid keep the Euclidean
+    /// product, so it would scale or flip the Wolfe slopes there.
     fn slope(&mut self, t: f64, at: ArrayView1<'_, f64>, g: ArrayView1<'_, f64>) -> f64 {
         let at_owned = at.to_owned();
         let vel = match retraction_velocity(
@@ -1056,11 +1066,10 @@ where
                 return f64::NAN;
             }
         };
-        let rg = self.manifold.egrad2rgrad(&at_owned, &g.to_owned());
-        if self.failed() {
+        if self.failed() || vel.len() != g.len() {
             return f64::NAN;
         }
-        self.manifold.inner(&at_owned, &rg, &vel)
+        crate::vecops::dot(g, vel.view())
     }
 }
 
@@ -1257,6 +1266,69 @@ mod tests {
                 "t {t}: got {got}, want {want}, relative {relative}"
             );
         }
+    }
+
+    /// `path.slope` at the foot and at `t`, each against a five-point
+    /// stencil of the value along `t |-> retract(origin, t dir)`, with
+    /// `dir` the negative Riemannian gradient.
+    fn assert_wolfe_slope_is_the_derivative<M, F>(manifold: &M, origin: Array1<f64>, fg: F)
+    where
+        M: Manifold,
+        F: Fn(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    {
+        let (_, egrad) = fg(origin.view());
+        let dir = negated(&manifold.egrad2rgrad(&origin, &egrad));
+        let curve = |t: f64| manifold.retract(&origin, &dir.mapv(|c| c * t));
+        let value = |t: f64| fg(curve(t).view()).0;
+        let failures = Infallible;
+        let mut path = RetractPath {
+            manifold,
+            failures: &failures,
+            origin: origin.clone(),
+            dir: dir.clone(),
+            caps: Caps::default(),
+            bounds: None,
+            clip_stays: false,
+            failure: None,
+            slope_failure: None,
+            placed: false,
+        };
+        let h = 1e-4;
+        for t in [0.0, 0.4] {
+            let at = curve(t);
+            let got = path.slope(t, at.view(), fg(at.view()).1.view());
+            let want = (value(t - 2.0 * h) - 8.0 * value(t - h) + 8.0 * value(t + h)
+                - value(t + 2.0 * h))
+                / (12.0 * h);
+            assert!(want < 0.0, "t {t}: the curve does not descend, {want}");
+            assert!(
+                (got - want).abs() <= 1e-7 * want.abs(),
+                "t {t}: slope {got}, derivative of the value {want}"
+            );
+        }
+    }
+
+    /// At `x = (0.5, 0)` the conformal factor is `lambda = 8 / 3`. The
+    /// metric product of the Riemannian gradient `x / lambda^2` with the
+    /// velocity is the Euclidean one divided by `lambda^2 = 7.11`, so a
+    /// slope built from it is short by that factor.
+    #[test]
+    fn poincare_wolfe_slope_is_the_derivative_of_the_value() {
+        let ball = crate::manifold::PoincareBall;
+        let quad = |x: ArrayView1<'_, f64>| (0.5 * x.dot(&x), x.to_owned());
+        assert_wolfe_slope_is_the_derivative(&ball, array![0.5, 0.0], quad);
+    }
+
+    /// The hyperboloid raises the gradient in the Minkowski form, which
+    /// the Euclidean product does not undo.
+    #[test]
+    fn hyperboloid_wolfe_slope_is_the_derivative_of_the_value() {
+        let sheet = crate::manifold::Hyperbolic;
+        let a: f64 = 0.5;
+        let origin = array![a.cosh(), a.sinh(), 0.0];
+        let c = array![0.3, -1.0, 0.5];
+        let linear = move |x: ArrayView1<'_, f64>| (c.dot(&x), c.clone());
+        assert_wolfe_slope_is_the_derivative(&sheet, origin, linear);
     }
 
     #[test]
@@ -1565,6 +1637,7 @@ mod tests {
             &from,
             &to,
             &g_from,
+            &g_to,
             &g_to,
             &d_from,
         );
