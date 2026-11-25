@@ -1120,3 +1120,122 @@ fn eindir_callback_failure_is_recorded_only_when_unrecovered() {
     assert!(!state.pending.load(Ordering::Relaxed));
     assert_ne!(value[0], 1.0, "recovered trial stayed at the start");
 }
+
+struct FlakyGradTrial {
+    start: f64,
+    pending: AtomicBool,
+}
+
+unsafe extern "C" fn flaky_grad_trial_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value: *mut f64,
+) -> eindir_status_t {
+    let data = unsafe { *(*x).dl_tensor.data.cast::<f64>() };
+    unsafe { *value = data * data };
+    eindir_status_t::EINDIR_SUCCESS
+}
+
+unsafe extern "C" fn flaky_grad_trial_grad(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    grad: *mut DLManagedTensorVersioned,
+) -> eindir_status_t {
+    let data = unsafe { *(*x).dl_tensor.data.cast::<f64>() };
+    let state = unsafe { &*user.cast::<FlakyGradTrial>() };
+    if (data - state.start).abs() > 1e-8 && state.pending.swap(false, Ordering::Relaxed) {
+        return eindir_status_t::EINDIR_INTERNAL_ERROR;
+    }
+    let output = unsafe { (*grad).dl_tensor.data.cast::<f64>() };
+    unsafe { *output = 2.0 * data };
+    eindir_status_t::EINDIR_SUCCESS
+}
+
+fn flaky_grad_objective(state: &FlakyGradTrial) -> Box<eindir_objective_t> {
+    Box::new(eindir_objective_t {
+        dim: 1,
+        low: std::ptr::null_mut(),
+        high: std::ptr::null_mut(),
+        eval_fn: flaky_grad_trial_eval,
+        grad_fn: Some(flaky_grad_trial_grad),
+        user_data: std::ptr::from_ref(state).cast_mut().cast(),
+        free_fn: None,
+    })
+}
+
+unsafe extern "C" fn nan_eindir_eval(
+    _user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    value: *mut f64,
+) -> eindir_status_t {
+    unsafe { *value = f64::NAN };
+    eindir_status_t::EINDIR_SUCCESS
+}
+
+#[test]
+fn eindir_recovered_grad_failure_and_host_nan_oracle_errors() {
+    let stamp = eindir_core_abi_stamp();
+    for entry in Eindir::ALL {
+        let seeded = seed_last_error(entry);
+        let state = FlakyGradTrial {
+            start: 1.0,
+            pending: AtomicBool::new(true),
+        };
+        let objective = flaky_grad_objective(&state);
+        let mut value = [1.0];
+        let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+        let mut out = report();
+        let ctrl = search_control(30, 1e-8);
+        let status = entry.call(&*objective, &stamp, tensor, &ctrl, &mut out);
+        unsafe { rgmin_tensor_free(tensor) };
+
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS, "{}", entry.name());
+        assert_eq!(last_error(), seeded, "{}", entry.name());
+        assert!(!state.pending.load(Ordering::Relaxed), "{}", entry.name());
+        assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE);
+    }
+
+    let seeded = seed_last_error(Eindir::Opts);
+    let state = FlakyGradTrial {
+        start: 1.0,
+        pending: AtomicBool::new(true),
+    };
+    let objective = flaky_grad_objective(&state);
+    let mut value = [1.0];
+    let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+    let mut out = report();
+    let ctrl = search_control(1, 0.0);
+    let status = unsafe {
+        rgmin_minimize_eindir_opts(
+            &*objective,
+            &stamp,
+            tensor,
+            &ctrl,
+            rgmin_method_t::RGMIN_STEEPEST,
+            1,
+            0,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(tensor) };
+    assert_eq!(status, rgmin_status_t::RGMIN_UNMET_STOP, "{}", last_error());
+    assert!(last_error().contains("unmet"), "{}", last_error());
+    assert!(!last_error().contains("eindir evaluation failed"));
+    assert_ne!(last_error(), seeded);
+    assert!(!state.pending.load(Ordering::Relaxed));
+
+    // A successful callback returning NaN must keep the oracle non-finite
+    // message instead of reporting a callback status failure.
+    let calls = AtomicUsize::new(0);
+    let mut nan_obj = eindir_objective(1, true, &calls);
+    nan_obj.eval_fn = nan_eindir_eval;
+    let mut value = [1.0];
+    let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+    let mut out = report();
+    let status = Eindir::Opts.call(&*nan_obj, &stamp, tensor, &control(), &mut out);
+    unsafe { rgmin_tensor_free(tensor) };
+    assert_eq!(status, rgmin_status_t::RGMIN_INTERNAL_ERROR);
+    let err = last_error();
+    assert!(err.contains("non-finite"), "unexpected last_error: {err}");
+    assert!(!err.contains("eindir evaluation failed"), "{err}");
+}
