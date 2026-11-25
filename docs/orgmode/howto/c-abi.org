@@ -53,13 +53,26 @@ are ~abi_minor~ 46, and ~xts.h~ names them ~xts_*_default~.
 
 ** Control layout
 
-Layout revision 6 adds ~require_convergence~ to ~rgmin_control_t~,
-which grows from 56 to 64 bytes on a 64-bit target, and ~converged~ to
-~rgmin_report_t~. A binary built against revision 5 passes the shorter
-struct, so each exported entry that takes a ~rgmin_control_t~ reads
-only the fields through ~noise_c~, ~require_convergence~ keeps its
-default 0, and the report is written only through ~stop~. The exported
+Layout revision 7 adds ~observer~ and ~observer_user~ to
+~rgmin_control_t~ and keeps ~converged~ on ~rgmin_report_t~. Layout
+revision 6 already added ~require_convergence~. A binary built against
+revision 5 or 6 passes the shorter struct, so each exported entry that
+takes a ~rgmin_control_t~ reads only the fields that layout declares;
+missing fields keep defaults (observer off, strict convergence off), and
+a revision 5 report is written only through ~stop~. The exported
 ~rgmin_control_default~ still returns the revision 5 struct.
+The observer fields and ~RGMIN_STOP_OBSERVER~ are ~abi_minor~ 59.
+
+The observer is called by ~rgmin_minimize~, ~rgmin_minimize_opts~,
+~rgmin_minimize_eindir~, ~rgmin_minimize_eindir_opts~,
+~rgmin_minimize_scg~ and ~rgmin_minimize_scg_with_options~, through
+their ~_sized~ symbols with ~ctrl_size~ at ~sizeof(rgmin_control_t)~.
+It sees each accepted iterate, the one that ends the run included, and
+~x~ is valid only during the call. Returning ~RGMIN_OBSERVER_STOP~
+ends the run with ~RGMIN_SUCCESS~ and ~RGMIN_STOP_OBSERVER~, also when
+~require_convergence~ is set. ~rgmin_minimize_hess~,
+~rgmin_minimize_hvp~, ~rgmin_minimize_rlbfgs~, their ~_opts~ and
+~_sized~ forms, and ~rgmin_solver_create~ ignore the observer.
 
 ~rgmin.h~ turns those names into inline functions that pass
 ~sizeof(rgmin_control_t)~ to a ~_sized~ symbol, such as
@@ -68,12 +81,13 @@ default 0, and the report is written only through ~stop~. The exported
 program built against this header has every field read and the whole
 report written without a source change. The size has the meaning of
 ~rgmin_precon_t.struct_size~: ~RGMIN_CONTROL_REVISION5_SIZE~ is the
-revision 5 struct, a larger size than this build's struct leaves the
-extra bytes unread, and any other size returns
+revision 5 struct, ~RGMIN_CONTROL_REVISION6_SIZE~ is revision 6, a
+larger size than this build's struct leaves the extra bytes unread, and
+any other size returns
 ~RGMIN_INVALID_PARAMETER~ (a null session from
 ~rgmin_solver_create_sized~) without a read. A caller that resolves
 symbols at run time calls the ~_sized~ names to have
-~require_convergence~ read.
+~require_convergence~ and the observer fields read.
 
 ** Session (eOn / ASE ~step~)
 

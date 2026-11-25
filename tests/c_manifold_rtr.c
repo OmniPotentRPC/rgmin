@@ -615,9 +615,11 @@ int main(int argc, char **argv) {
         return 4;
     }
     stamp = rgmin_abi_stamp();
-    if (stamp.abi_minor != 56 || RGMIN_ABI_VERSION_MINOR != 56 ||
-        xts_abi_stamp().abi_minor != 56) {
-        fprintf(stderr, "abi minor %u\n", stamp.abi_minor);
+    if (stamp.abi_minor != 59 || RGMIN_ABI_VERSION_MINOR != 59 ||
+        xts_abi_stamp().abi_minor != 59 || stamp.layout_revision != 7 ||
+        RGMIN_ABI_LAYOUT_REVISION != 7) {
+        fprintf(stderr, "abi minor %u layout %u\n", stamp.abi_minor,
+                stamp.layout_revision);
         return 5;
     }
     rc = check_quadratics();

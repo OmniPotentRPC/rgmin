@@ -100,8 +100,8 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 56;
-pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 59;
+pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 7;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
 #[repr(C)]
@@ -234,7 +234,7 @@ pub enum rgmin_stop_t {
     /// GROMACS-style steep or conjugate-gradient minimization could not
     /// represent another coordinate change. ABI minor 52.
     RGMIN_STOP_MACHINE_PRECISION = 8,
-    /// A per-iteration observer requested stop.
+    /// A per-iteration observer requested stop. ABI minor 59.
     RGMIN_STOP_OBSERVER = 9,
 }
 
@@ -269,8 +269,9 @@ pub struct rgmin_control_t {
     /// revision 5 fields and leaves this at 0. ABI minor 55.
     pub require_convergence: i32,
     /// Optional per-iteration observer callback. Null leaves it off.
+    /// ABI minor 59.
     pub observer: Option<rgmin_observer_fn>,
-    /// Opaque pointer passed to [`Self::observer`].
+    /// Opaque pointer passed to [`Self::observer`]. ABI minor 59.
     pub observer_user: *mut c_void,
 }
 
