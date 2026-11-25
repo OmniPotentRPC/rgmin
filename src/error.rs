@@ -254,7 +254,8 @@ pub enum Error {
     },
     /// A FIRE step or an L-BFGS step under `Accept::None` on a curved
     /// kind found no retracted trial inside the box and the displacement
-    /// cap.
+    /// cap, or a Riemannian CG session found no retraction of its start
+    /// inside the box.
     #[error("no trial on {kind} fits the box and the displacement cap")]
     OffManifold {
         /// Manifold token.

@@ -940,19 +940,20 @@ where
 ///
 /// A coordinate clip is not used. On a manifold that does not fill the
 /// ambient coordinates the clip leaves the set, so the returned point is
-/// always a retraction.
+/// always a retraction. `None` when no retraction along that tangent lies
+/// in the box, so no point outside it is handed back to be evaluated.
 pub(crate) fn land_in_box<M>(
     manifold: &M,
     x: &Array1<f64>,
     bounds: &eindir_core::Bounds<f64>,
-) -> Array1<f64>
+) -> Option<Array1<f64>>
 where
     M: Manifold + ?Sized,
 {
     let zero = Array1::zeros(x.len());
     let on = manifold.retract(x, &zero);
     if !bounds_bind(bounds) || closed_in_box(bounds, &on) {
-        return on;
+        return Some(on);
     }
     let gap = &crate::step::clip_owned(bounds, on.clone()) - &on;
     let step = feasible_tangent(manifold, bounds, &on, &gap);
@@ -960,11 +961,11 @@ where
     for _ in 0..60 {
         let y = manifold.retract(&on, &step.mapv(|c| c * t));
         if closed_in_box(bounds, &y) {
-            return y;
+            return Some(y);
         }
         t *= 0.5;
     }
-    on
+    None
 }
 
 /// The curve `t |-> retract(origin, t dir)`, undefined where its point

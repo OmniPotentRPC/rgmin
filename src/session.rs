@@ -2011,12 +2011,16 @@ impl Solver {
     /// box only when the manifold fills the ambient coordinates. Every
     /// other Riemannian CG start is retracted onto the set. If that point
     /// lies outside the box it is pulled back along the tangent and
-    /// retracted again, so the caller's `x` stays on the manifold.
+    /// retracted again, so the caller's `x` stays on the manifold. A start
+    /// with no such point in the box is [`Error::OffManifold`], and `x` is
+    /// left as it was.
     fn enter_start(&self, bounds: &eindir_core::Bounds<f64>, x: &mut Array1<f64>) -> Result<()> {
         if matches!(self.overlay, Overlay::Rcg(_)) && !self.manifold.coordinate_clip_stays_on_set()
         {
             let field = field::ProjectedField::new(self);
-            *x = crate::rcg::land_in_box(&field, x, bounds);
+            *x = crate::rcg::land_in_box(&field, x, bounds).ok_or(Error::OffManifold {
+                kind: self.manifold.as_str(),
+            })?;
         } else {
             *x = bounds.clip(x.view());
         }

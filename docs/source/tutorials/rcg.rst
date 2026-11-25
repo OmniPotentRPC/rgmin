@@ -79,6 +79,7 @@ There it keeps the session's rules:
 - Every trial stays in the objective's box and on the manifold.
   Where the manifold fills the ambient coordinates, the trial is the retraction clipped to the box, which is the projection onto that intersection.
   On every other manifold the trial is the retraction of a tangent step in the box's tangent cone, and a retraction that would leave the box is refused so the search shortens.
+  A start with no retraction in the box returns ``Error::OffManifold`` before the objective reads a point.
 
 - Each Wolfe slope is the derivative of the value along the curve that is walked: the Euclidean gradient against the curve velocity.
   It does not go through ``Manifold::inner``, so the Poincare ball and the hyperboloid, whose ``inner`` is not the metric of their Riemannian gradient, get the strong Wolfe tests too.
