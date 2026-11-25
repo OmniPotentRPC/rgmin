@@ -270,6 +270,13 @@ pub enum Error {
         /// What was refused.
         what: &'static str,
     },
+    /// Riemannian CG could not form two distinct finite samples around a
+    /// line-search parameter, so accepting its curvature would be unsafe.
+    #[error("Riemannian CG could not resolve the retraction slope at t = {t}")]
+    RcgSlope {
+        /// Line-search parameter whose neighboring samples collapsed.
+        t: f64,
+    },
     /// [`crate::RiemannianManifold`] refused a shape, a point or a step.
     #[error("manifold: {0}")]
     ManifoldArgument(String),

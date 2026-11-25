@@ -341,6 +341,14 @@ impl ProductManifold {
         self.blocks.iter().all(|b| b.kind.is_flat())
     }
 
+    /// `true` when a coordinate clip stays on every factor, and so on the
+    /// product.
+    pub(crate) fn coordinate_clip_stays_on_set(&self) -> bool {
+        self.blocks
+            .iter()
+            .all(|b| b.kind.coordinate_clip_stays_on_set())
+    }
+
     /// Factor kinds and their slices, in packed order.
     pub(crate) fn kinds(&self) -> impl Iterator<Item = (&ManifoldKind, Range<usize>)> {
         self.blocks.iter().map(|b| (&b.kind, b.range()))

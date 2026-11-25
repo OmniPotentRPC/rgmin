@@ -39,6 +39,11 @@ fn c_header_checks_rigid_quotient_tcg_and_projected_modes() {
     consumer::compile_and_run("tests/c_manifold_rtr.c", "rgmin_c_manifold_rtr", &[size]);
 }
 
+#[test]
+fn c_header_steps_the_overlay_free_methods_through_the_fused_callback() {
+    consumer::compile_and_run("tests/c_step_fg_methods.c", "rgmin_c_step_fg_methods", &[]);
+}
+
 #[cfg(feature = "highs")]
 #[test]
 fn c_header_routes_and_clears_the_highs_callback() {
