@@ -1,0 +1,15 @@
+# rgmin
+
+> Rust local minimization (L-BFGS, BFGS, nonlinear conjugate gradients, Newton, FIRE) that takes one step per call while the host owns the loop, with a C ABI and Python bindings.
+
+- Documentation: https://omnipotentrpc.github.io/rgmin/
+- Repository: https://github.com/OmniPotentRPC/rgmin
+
+## Docs (org sources)
+
+- [index](https://github.com/OmniPotentRPC/rgmin/blob/develop/docs/orgmode/index.org)
+- [tutorials](https://github.com/OmniPotentRPC/rgmin/tree/develop/docs/orgmode/tutorials)
+- [howto](https://github.com/OmniPotentRPC/rgmin/tree/develop/docs/orgmode/howto)
+- [reference](https://github.com/OmniPotentRPC/rgmin/tree/develop/docs/orgmode/reference)
+- [explanation](https://github.com/OmniPotentRPC/rgmin/tree/develop/docs/orgmode/explanation)
+- [contributing](https://github.com/OmniPotentRPC/rgmin/tree/develop/docs/orgmode/contributing)
