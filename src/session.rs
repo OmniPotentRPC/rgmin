@@ -6434,10 +6434,11 @@ impl Solver {
         O: DifferentiableObjective<f64> + ?Sized,
         G: FnMut(&mut Array1<f64>),
     {
+        self.validate_run_dims(obj, x)?;
         if self.control.maxiter == 0 {
             return self.run(obj, x);
         }
-        let start = crate::step::clip_owned(obj.bounds(), x.clone());
+        let start = self.run_start(obj, x)?;
         let mut gauged = false;
         let mut report = self.step(obj, x)?;
         for _ in 1..self.control.maxiter {
@@ -6471,17 +6472,59 @@ impl Solver {
         }
     }
 
+    fn validate_run_dims<O>(&self, obj: &O, x: &Array1<f64>) -> Result<()>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        if x.len() != self.dim {
+            return Err(Error::Dim {
+                got: x.len(),
+                dim: self.dim,
+            });
+        }
+        let objective_dim = Objective::dim(obj);
+        if objective_dim != self.dim {
+            return Err(Error::Dim {
+                got: objective_dim,
+                dim: self.dim,
+            });
+        }
+        Ok(())
+    }
+
+    fn run_start<O>(&self, obj: &O, x: &Array1<f64>) -> Result<Array1<f64>>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        let start = crate::step::clip_owned(obj.bounds(), x.clone());
+        #[cfg(feature = "highs")]
+        let start = {
+            let mut start = start;
+            if self.has_coordinate_box() {
+                let bounded = crate::box_objective::BoxObjective::new(
+                    obj,
+                    self.box_lo.clone(),
+                    self.box_hi.clone(),
+                )?;
+                bounded.clip_start(&mut start)?;
+            }
+            start
+        };
+        Ok(start)
+    }
+
     fn run_plain<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        self.validate_run_dims(obj, x)?;
         let budget = self.control.maxiter;
         if budget == 0 {
             let report = self.assess(obj, x)?;
             return self.control.deliver(report);
         }
+        let start = self.run_start(obj, x)?;
         self.brief = true;
-        let start = crate::step::clip_owned(obj.bounds(), x.clone());
         let mut last = None;
         let mut stop: Result<()> = Ok(());
         for _ in 0..budget {

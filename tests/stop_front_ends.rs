@@ -16,7 +16,9 @@ use rgmin::ffi::{
     rgmin_control_t, rgmin_method_t, rgmin_minimize, rgmin_minimize_opts, rgmin_report_t,
     rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
-use rgmin::{Accept, Control, LbfgsStep, LineSearch, Method, Solver, StopReason, minimize_method};
+use rgmin::{
+    Accept, Control, Error, LbfgsStep, LineSearch, Method, Solver, StopReason, minimize_method,
+};
 
 const BUDGET: usize = 3;
 const START: f64 = 1.0;
@@ -251,4 +253,55 @@ fn a_gauge_move_from_a_clipped_start_is_still_a_move() {
         .run_gauged(&uphill(), &mut x, |x| x[0] = EDGE / 2.0)
         .unwrap();
     assert_ne!(report.stop_reason(), StopReason::LineSearchFailed);
+}
+
+#[test]
+fn session_runs_reject_mismatched_dimensions_before_clipping() {
+    let wide = rgmin::Oracle::unbounded(2, |x: ArrayView1<f64>| {
+        (x.dot(&x), array![2.0 * x[0], 2.0 * x[1]])
+    });
+    for gauged in [false, true] {
+        let mut point = array![1.0];
+        let err = if gauged {
+            session().run_gauged(&wide, &mut point, |_| {}).unwrap_err()
+        } else {
+            session().run(&wide, &mut point).unwrap_err()
+        };
+        assert!(matches!(err, Error::Dim { got: 2, dim: 1 }));
+
+        let mut point = array![1.0, 2.0];
+        let err = if gauged {
+            session()
+                .run_gauged(&uphill(), &mut point, |_| {})
+                .unwrap_err()
+        } else {
+            session().run(&uphill(), &mut point).unwrap_err()
+        };
+        assert!(matches!(err, Error::Dim { got: 2, dim: 1 }));
+    }
+}
+
+#[cfg(feature = "highs")]
+#[test]
+fn session_box_is_part_of_the_no_move_baseline() {
+    fn boxed_session() -> Solver {
+        let mut solver = session();
+        solver.set_highs(true);
+        assert!(solver.set_box(Some(vec![-1.0]), Some(vec![1.0])));
+        solver
+    }
+    let boxed_uphill =
+        rgmin::Oracle::unbounded(1, |x: ArrayView1<f64>| (-0.5 * x[0] * x[0], array![x[0]]));
+
+    let mut x = array![2.0];
+    let report = boxed_session().run(&boxed_uphill, &mut x).unwrap();
+    assert_eq!(x[0], 1.0);
+    assert_eq!(report.stop_reason(), StopReason::LineSearchFailed);
+
+    let mut x = array![2.0];
+    let report = boxed_session()
+        .run_gauged(&boxed_uphill, &mut x, |_| {})
+        .unwrap();
+    assert_eq!(x[0], 1.0);
+    assert_eq!(report.stop_reason(), StopReason::LineSearchFailed);
 }
