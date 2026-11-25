@@ -322,14 +322,20 @@ where
     /// tangent space. [`Manifold::egrad2rgrad`] is `base`'s map of an
     /// ambient gradient followed by this.
     pub(crate) fn cut_gradient(&self, x: &Array1<f64>, grad: Array1<f64>) -> Array1<f64> {
-        self.tangent(x, grad, |set, at, w| set.project_gradient(at, w).map(drop))
+        self.tangent(
+            x,
+            grad,
+            |set, at, w| set.project_gradient(at, w).map(drop),
+            |at, w| self.base.project(at, w),
+        )
     }
 
     /// `start` moved into both tangent spaces at `x`. `bond` is the bond
-    /// projection applied to it.
-    fn tangent<B>(&self, x: &Array1<f64>, start: Array1<f64>, bond: B) -> Array1<f64>
+    /// projection applied to it and `carry` the base manifold's.
+    fn tangent<B, C>(&self, x: &Array1<f64>, start: Array1<f64>, bond: B, carry: C) -> Array1<f64>
     where
         B: Fn(&DistanceConstraints, ArrayView1<'_, f64>, &mut Array1<f64>) -> Result<()>,
+        C: Fn(&Array1<f64>, &Array1<f64>) -> Array1<f64>,
     {
         let mut v = start;
         for _ in 0..MAX_SWEEPS {
@@ -338,7 +344,7 @@ where
                 self.fail(e);
                 return before;
             }
-            let carried = self.base.project(x, &v);
+            let carried = carry(x, &v);
             if agree(&carried, &v) {
                 return carried;
             }
@@ -371,7 +377,21 @@ where
     }
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        self.tangent(x, v.clone(), |set, at, w| set.project_vector(at, w))
+        self.tangent(
+            x,
+            v.clone(),
+            |set, at, w| set.project_vector(at, w),
+            |at, w| self.base.project(at, w),
+        )
+    }
+
+    fn to_tangent(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        self.tangent(
+            x,
+            v.clone(),
+            |set, at, w| set.project_vector(at, w),
+            |at, w| self.base.to_tangent(at, w),
+        )
     }
 
     fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
@@ -1064,7 +1084,7 @@ where
     crate::vecops::axpy(-1.0, origin.view(), &mut diff);
     let vel = diff.mapv(|c| c / h);
     if vel.iter().all(|v| v.is_finite()) {
-        manifold.project(origin, &vel)
+        manifold.to_tangent(origin, &vel)
     } else {
         dir.clone()
     }
@@ -1075,7 +1095,9 @@ where
 /// At the foot the velocity is `dir`, because a retraction's derivative
 /// there is the identity on the tangent space. Away from the foot the
 /// velocity is a central difference of [`Manifold::retract`], then
-/// [`Manifold::project`] at the arrival point. The relative spacing
+/// [`Manifold::to_tangent`] at the arrival point. A velocity is not a
+/// gradient, so [`Manifold::project`], which on the Poincare ball divides
+/// by the squared conformal factor, would rescale it. The relative spacing
 /// `eps^(1/3) * t` balances cancellation and truncation error for a central
 /// difference while scaling with every positive parameter produced by
 /// `opening_step`. Both rounded neighbors must remain finite and distinct
@@ -1124,7 +1146,7 @@ where
     let mut diff = ahead;
     crate::vecops::axpy(-1.0, behind.view(), &mut diff);
     let vel = diff.mapv(|c| c / width);
-    let projected = manifold.project(at, &vel);
+    let projected = manifold.to_tangent(at, &vel);
     if projected.len() != dir.len() || projected.iter().any(|v| !v.is_finite()) {
         Err(Error::RcgSlope { t })
     } else {
@@ -1179,6 +1201,42 @@ mod tests {
     fn retraction_velocity_resolves_tiny_and_large_parameters() {
         assert_sphere_velocity(1e9, 1e-9);
         assert_sphere_velocity(1e-9, 1e9);
+    }
+
+    /// The Poincare ball's `project` divides by `lambda^2 >= 4`, so a
+    /// velocity passed through it is short by that factor at every `t`.
+    #[test]
+    fn poincare_retraction_velocity_is_the_curve_derivative() {
+        let ball = crate::manifold::PoincareBall;
+        let origin = array![0.3, -0.2, 0.1];
+        let dir = array![0.4, 0.5, -0.3];
+        let curve = |t: f64| ball.retract(&origin, &dir.mapv(|c| c * t));
+
+        let foot = foot_velocity(&ball, None, false, &origin, &dir);
+        let at_zero = retraction_velocity(&ball, None, false, &origin, &dir, 0.0, &origin).unwrap();
+        assert_eq!(at_zero, foot);
+        // The curve bends by O(t), and the central difference rounds once
+        // its spacing nears an ulp of the point.
+        let t = 1e-4;
+        let near = retraction_velocity(&ball, None, false, &origin, &dir, t, &curve(t)).unwrap();
+        let relative =
+            crate::vecops::nrm2_diff(near.view(), foot.view()) / crate::vecops::nrm2(foot.view());
+        assert!(relative < 1e-3, "t {t}: {near} against the foot {foot}");
+
+        // Five-point stencil, independent of the central difference above.
+        let h = 1e-3;
+        for t in [0.25, 0.8, 1.5] {
+            let got = retraction_velocity(&ball, None, false, &origin, &dir, t, &curve(t)).unwrap();
+            let want = (&curve(t - 2.0 * h) - &(&curve(t - h) * 8.0) + &(&curve(t + h) * 8.0)
+                - &curve(t + 2.0 * h))
+                / (12.0 * h);
+            let relative = crate::vecops::nrm2_diff(got.view(), want.view())
+                / crate::vecops::nrm2(want.view());
+            assert!(
+                relative < 1e-8,
+                "t {t}: got {got}, want {want}, relative {relative}"
+            );
+        }
     }
 
     #[test]

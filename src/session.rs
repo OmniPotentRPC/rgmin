@@ -1771,14 +1771,35 @@ impl Solver {
         x: &Array1<f64>,
         v: &Array1<f64>,
     ) -> Array1<f64> {
+        self.session_vec_into(ws, x, v, |m, x, v| m.project(x, v))
+    }
+
+    /// [`Self::project_vec_into`] with [`Manifold::to_tangent`] in place of
+    /// [`Manifold::project`], for a vector that is not a gradient.
+    fn tangent_vec_into(
+        &self,
+        ws: &mut RigidWorkspace,
+        x: &Array1<f64>,
+        v: &Array1<f64>,
+    ) -> Array1<f64> {
+        self.session_vec_into(ws, x, v, |m, x, v| m.to_tangent(x, v))
+    }
+
+    fn session_vec_into(
+        &self,
+        ws: &mut RigidWorkspace,
+        x: &Array1<f64>,
+        v: &Array1<f64>,
+        map: impl Fn(&dyn Manifold, &Array1<f64>, &Array1<f64>) -> Array1<f64>,
+    ) -> Array1<f64> {
         let mut w = match &self.manifold {
             ManifoldKind::MwRigid | ManifoldKind::RigidQuotient => v.clone(),
             ManifoldKind::Product(product) if product.has_rigid() => {
-                let mut w = product.project(x, v);
+                let mut w = map(&**product, x, v);
                 self.project_rigid_blocks(product, x, v, &mut w);
                 w
             }
-            other => other.project(x, v),
+            other => map(other, x, v),
         };
         self.kill_at_into(ws, x, &mut w);
         w

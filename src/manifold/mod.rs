@@ -683,6 +683,15 @@ pub trait Manifold {
     }
     /// Tangent projection of an ambient vector at `x`. Same length as `v`.
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64>;
+    /// Tangent projection of an ambient vector that is not a gradient, such
+    /// as the velocity of a curve on the manifold. Same length as `v`.
+    ///
+    /// The default is [`Self::project`]. [`PoincareBall`] returns `v`: its
+    /// tangent space is the ambient space, and its [`Self::project`]
+    /// divides by the squared conformal factor, as a gradient needs.
+    fn to_tangent(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        self.project(x, v)
+    }
     /// Ambient Euclidean gradient to a Riemannian gradient at `x`.
     /// Embedded manifolds with a Euclidean ambient metric use [`Self::project`].
     fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
@@ -828,6 +837,10 @@ impl Manifold for ManifoldKind {
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         with_kind!(self, |f| f.project(x, v))
+    }
+
+    fn to_tangent(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        with_kind!(self, |f| f.to_tangent(x, v))
     }
 
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {

@@ -435,6 +435,14 @@ impl Manifold for ProductManifold {
             .unwrap_or_else(|| v.clone())
     }
 
+    fn to_tangent(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        if !self.fits(&[x, v]) {
+            return v.clone();
+        }
+        self.assemble(|b| Some(b.kind.to_tangent(&b.unscale(x), &b.part(v))))
+            .unwrap_or_else(|| v.clone())
+    }
+
     /// Blockwise \(c_i^{-1} G^{-1} \mathrm{grad}_i f\), with \(G = I\)
     /// on a factor without a [`TangentMetric`].
     fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
