@@ -485,6 +485,8 @@ impl WolfeStep {
 pub(crate) struct ObjectiveStep {
     pub(crate) energy_noise: bool,
     pub(crate) line_stop: Option<crate::linesearch::LineSearchStopReason>,
+    /// ASE's line search failed and the point did not move.
+    pub(crate) line_failed: bool,
 }
 
 /// Installed \(H_0 = P^{-1}\). An exponential factor and a geometry
@@ -2633,7 +2635,8 @@ impl Lbfgs {
     }
 
     /// `project` acts on every trial direction before its line search:
-    /// the session's rigid-motion projector, or a no-op.
+    /// the session's rigid-motion projector, or a no-op. A failed ASE
+    /// search is not retried along the steepest direction.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn step_objective_with_direction<O>(
         &mut self,
@@ -2687,6 +2690,7 @@ impl Lbfgs {
         let (t, stall) = if allow_restart
             && !t.moved
             && t.line_stop.is_none()
+            && !t.line_failed
             && !self.memory.is_empty()
         {
             let first_noise = t.energy_noise;
@@ -2723,6 +2727,7 @@ impl Lbfgs {
             let y = &t.g - &*grad;
             self.push(s, y);
         }
+        let line_failed = t.line_failed;
         *pos = t.x;
         *value = t.f;
         *grad = t.g;
@@ -2730,6 +2735,7 @@ impl Lbfgs {
         ObjectiveStep {
             energy_noise: stall,
             line_stop: t.line_stop,
+            line_failed,
         }
     }
 }
