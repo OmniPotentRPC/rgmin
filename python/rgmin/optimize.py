@@ -961,16 +961,14 @@ class GromacsLbfgs(_RgminOptimizer):
     def _refuse_constraints(target: Any) -> None:
         from ase.constraints import FixAtoms, FixCartesian, FixedLine, FixedPlane
 
+        from rgmin._gromacs import _LBFGS_CONSTRAINTS
+
         allowed = (FixAtoms, FixCartesian, FixedLine, FixedPlane)
         for holder in (target, getattr(target, "atoms", None)):
             items = getattr(holder, "constraints", None) or ()
             for item in items:
                 if not isinstance(item, allowed):
-                    raise ValueError(
-                        "The combination of constraints and L-BFGS minimization is not "
-                        "implemented. Either do not use constraints, or use another "
-                        "minimizer (e.g. steepest descent)."
-                    )
+                    raise ValueError(_LBFGS_CONSTRAINTS)
 
     def _before_step(self, native: Session) -> bool:
         self._refuse_constraints(self.atoms)
