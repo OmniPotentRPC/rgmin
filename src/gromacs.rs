@@ -591,6 +591,13 @@ impl GromacsLbfgs {
                 what: "accepted step has zero or non-finite curvature",
             });
         }
+        let rho = 1.0 / sy;
+        let diagonal = sy / yy;
+        if !(rho.is_finite() && diagonal.is_finite()) {
+            return Err(Error::GromacsLbfgs {
+                what: "accepted step curvature overflows 1 / s.y or s.y / y.y",
+            });
+        }
         let evicted = if self.pairs.len() == self.config.nbfgscorr {
             self.pairs.pop_front()
         } else {
@@ -599,8 +606,8 @@ impl GromacsLbfgs {
         self.pairs.push_back(GromacsLbfgsPair {
             displacement,
             gradient_change,
-            rho: 1.0 / sy,
-            diagonal: sy / yy,
+            rho,
+            diagonal,
         });
         match self.two_loop(new_force) {
             Ok(direction) => {
@@ -1087,6 +1094,33 @@ mod tests {
             kept,
             [ndarray::array![-1.0, 0.0], ndarray::array![0.0, 1.0e200]]
         );
+        assert_eq!(state.direction().to_owned(), direction);
+        assert_eq!(state.step_size().to_bits(), step_size.to_bits());
+    }
+
+    #[test]
+    fn an_lbfgs_accept_whose_curvature_reciprocal_overflows_stores_nothing() {
+        // s.y = y.y = 1e-320 is subnormal and nonzero, so 1 / s.y is infinite.
+        let mut state = GromacsLbfgs::new(2);
+        state.restart_steepest(ndarray::array![1.0, 0.0].view(), 1.0);
+        let direction = ndarray::array![1.0e-160, 0.0];
+        state.set_direction(direction.clone());
+        let step_size = state.step_size();
+
+        let result = state.accept(
+            ndarray::array![1.0e-160, 0.0].view(),
+            ndarray::array![0.0, 0.0].view(),
+            ndarray::array![1.0e-160, 0.0],
+        );
+
+        let Err(Error::GromacsLbfgs { what }) = result else {
+            panic!("expected a GROMACS L-BFGS error, got {result:?}");
+        };
+        assert_eq!(
+            what,
+            "accepted step curvature overflows 1 / s.y or s.y / y.y"
+        );
+        assert_eq!(state.pair_count(), 0);
         assert_eq!(state.direction().to_owned(), direction);
         assert_eq!(state.step_size().to_bits(), step_size.to_bits());
     }
