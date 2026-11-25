@@ -686,7 +686,8 @@ where
     let mut cosines: Vec<f64> = Vec::new();
     let mut sines: Vec<f64> = Vec::new();
     let mut transformed_rhs = vec![right_hand_side_norm];
-    for column_index in 0..budget {
+    let mut column_index = 0;
+    loop {
         let mut preconditioned = vec![0.0; dimension];
         if let Err(source) = preconditioner.apply(&basis[column_index], &mut preconditioned) {
             return Err(GmresFailure::Preconditioner { source, record });
@@ -780,8 +781,8 @@ where
             });
         }
         basis.push(image.iter().map(|value| value / subdiagonal).collect());
+        column_index += 1;
     }
-    Err(refusal(KrylovRefusal::SingularProjectedSystem, record))
 }
 
 struct BlockState {
@@ -1066,13 +1067,10 @@ where
             }
         }
     }
-    if let Some(index) = states.iter().position(|state| state.run.is_none()) {
-        return Err(block_refusal(
-            KrylovRefusal::SingularProjectedSystem,
-            &states,
-            index,
-        ));
-    }
+    debug_assert!(
+        states.iter().all(|state| state.run.is_some()),
+        "the last budgeted column finishes every active right-hand side"
+    );
     Ok(states.into_iter().filter_map(|state| state.run).collect())
 }
 
