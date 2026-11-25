@@ -1,3 +1,4 @@
+# ABI minor 57 adds a stop enum without adding a function export.
 rgmin_abi_compatible
 rgmin_abi_stamp
 rgmin_backward_error_floor

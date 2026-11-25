@@ -104,7 +104,11 @@ def main() -> int:
         print("\n".join(broken))
         return 1
     current = names()
-    expected = [line.strip() for line in BASELINE.read_text().splitlines() if line.strip()]
+    expected = [
+        line.strip()
+        for line in BASELINE.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
     missing = sorted(set(expected) - set(current))
     added = sorted(set(current) - set(expected))
     if missing:
