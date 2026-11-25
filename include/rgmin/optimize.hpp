@@ -865,7 +865,9 @@ public:
     /// Initial inverse-Hessian scale. Returns 0, or 1 when the session refuses it.
     int set_fixed_h0(double h0) { return rgmin_solver_set_fixed_h0(ptr_, h0); }
     /// ASE 3.29's line search with bound \c stpmax on BFGS or L-BFGS.
-    /// Returns 0, or 1 when the session refuses it.
+    /// On L-BFGS it also selects the Wolfe step.
+    /// Returns 0, or 1 when the session refuses it, leaving the session
+    /// as it was.
     int set_ase_linesearch(double stpmax) { return rgmin_solver_set_ase_linesearch(ptr_, stpmax); }
     /// Burdakov ray-truncation radius for session L-BFGS. A non-positive,
     /// NaN or infinite radius turns it off. Not the Newton-model radius.
