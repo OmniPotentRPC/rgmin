@@ -1628,6 +1628,11 @@ inline std::string SolverConfig::ignored_linesearch() const {
         method_ == Method::Diis || method_ == Method::GromacsCg || detail::is_cg(method_)) {
         return {};
     }
+    if (method_ == Method::GromacsLbfgs) {
+        return head + " on " + method_name_ +
+               ", which always runs the GROMACS do_lbfgs bracketing line search; "
+               "no linesearch kind replaces it";
+    }
     return head + " on " + method_name_ +
            ", which takes no line search. sd, the conjugate-gradient methods, bfgs, "
            "adam, and diis line search, and lbfgs does with linesearch='wolfe'";

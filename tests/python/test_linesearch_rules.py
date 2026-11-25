@@ -90,6 +90,15 @@ def test_a_method_without_a_line_search_rejects_every_kind(method: str, kind: st
         rgmin.SolverConfig(method, linesearch=kind)
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_gromacs_lbfgs_names_its_own_line_search_when_rejecting_a_kind(kind: str) -> None:
+    with pytest.raises(ValueError, match=rf"linesearch='{kind}' has no effect on gromacs_lbfgs") as raised:
+        rgmin.SolverConfig("gromacs_lbfgs", linesearch=kind)
+    message = str(raised.value)
+    assert "do_lbfgs bracketing line search" in message
+    assert "takes no line search" not in message
+
+
 @pytest.mark.parametrize("method", ("sd", "cg", "bfgs", "adam", "diis", "lbfgs"))
 @pytest.mark.parametrize("kind", KINDS)
 def test_accept_step_rejects_every_kind(method: str, kind: str) -> None:
