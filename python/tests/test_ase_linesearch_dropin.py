@@ -74,6 +74,13 @@ def _bowl(positions: np.ndarray) -> tuple[float, np.ndarray]:
     return 0.5 * shift * shift, gradient
 
 
+def _slope(positions: np.ndarray) -> tuple[float, np.ndarray]:
+    """``-x``, which descends at the same rate everywhere."""
+    gradient = np.zeros_like(positions)
+    gradient[0, 0] = -1.0
+    return -float(positions[0, 0]), gradient
+
+
 def _first_step(cls: type, surface, **kwargs: object) -> tuple[str, float, list[float]]:
     """Outcome, final x, and the evaluated x values of one optimizer step."""
     field = Field(surface)
@@ -223,6 +230,42 @@ def test_maxstep_limits_each_line_search_increment(ours: type, theirs: type) -> 
     assert outcome == "ok"
     assert x == pytest.approx(expected[1], abs=1e-12)
     assert trials == pytest.approx(expected[2], abs=1e-12)
+
+
+@pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
+@pytest.mark.parametrize("stpmax", [0.5, 0.0])
+def test_an_opening_step_above_stpmax_fails_as_in_ase(stpmax: float) -> None:
+    # ASE opens at 1 and rejects stpmax < 1 before any trial.
+    expected = _first_step(AseBFGSLineSearch, _bowl, alpha=1.0, maxstep=10.0, stpmax=stpmax)
+    assert expected == ("LineSearch failed!", 0.0, [0.0])
+    assert _first_step(BFGSLineSearch, _bowl, alpha=1.0, maxstep=10.0, stpmax=stpmax) == expected
+
+
+@pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
+@pytest.mark.parametrize(
+    ("ours", "theirs"),
+    [
+        (BFGSLineSearch, AseBFGSLineSearch),
+        (LBFGSLineSearch, AseLBFGSLineSearch),
+    ],
+)
+def test_a_spent_line_search_budget_fails_without_a_fallback(ours: type, theirs: type) -> None:
+    # ASE needs three trials on this step. Two leave the search unfinished,
+    # and the step fails instead of taking the best trial so far.
+    unbounded = _first_step(theirs, _bowl, alpha=1.0, maxstep=0.2)
+    assert len(unbounded[2]) - 1 > 2
+    outcome, x, trials = _first_step(ours, _bowl, alpha=1.0, maxstep=0.2, linesearch_maxiter=2)
+    assert outcome == "LineSearch failed!"
+    assert x == 0.0
+    assert trials == pytest.approx(unbounded[2][:3], abs=1e-12)
+
+
+@pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
+def test_a_descending_trial_at_stpmax_is_taken_as_in_ase() -> None:
+    # ASE ends on its "STP = maxstep" warning and keeps that trial.
+    expected = _first_step(AseBFGSLineSearch, _slope, alpha=1.0, maxstep=10.0, stpmax=1.0)
+    assert expected == ("ok", 1.0, [0.0, 1.0])
+    assert _first_step(BFGSLineSearch, _slope, alpha=1.0, maxstep=10.0, stpmax=1.0) == expected
 
 
 @pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")

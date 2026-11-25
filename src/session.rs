@@ -53,7 +53,7 @@ use crate::quickmin::{
     QuickMinOptions, QuickMinSession, QuickMinState, quickmin_rescale_velocity,
     quickmin_session_step,
 };
-use crate::report::{Report, Status};
+use crate::report::{Report, Status, StopReason};
 use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
     Taken, apply_caps, cap_alpha, cap_displacement_atom, l2, max_atom_displacement,
@@ -979,14 +979,16 @@ impl Solver {
     /// `[1e-8, stpmax]`, and it ends only on ASE's strong-Wolfe test or
     /// one of its warnings. An opening step above `stpmax`, a spent
     /// evaluation budget or a non-finite trial fails the search; there
-    /// is no fallback point. `c1`, `c2` and the budget are those of the
-    /// session's [`LineSearch::Wolfe`]. A step under this search refuses
-    /// another line-search kind, the step-acceptance rule, a manifold,
-    /// constraints, an overlay, a Euclidean `maxmove`, and on L-BFGS any
-    /// step but [`LbfgsStep::Wolfe`]. `stpmax` must not be NaN; any other
-    /// value is ASE's, including one below 1 that fails every search.
-    /// Other methods return an error. Without this call the session
-    /// keeps rgmin's own search.
+    /// is no fallback point. The step then leaves `x` where it was and
+    /// reports [`StopReason::LineSearchFailed`].
+    ///
+    /// `c1`, `c2` and the budget are those of the session's
+    /// [`LineSearch::Wolfe`]. A step refuses another line-search kind,
+    /// [`Accept::Step`], a manifold, constraints, an overlay, a Euclidean
+    /// `maxmove`, and on L-BFGS any step but [`LbfgsStep::Wolfe`].
+    /// `stpmax` must not be NaN. Any other value is used as ASE uses it,
+    /// so one below 1 fails every search. Other methods return an error.
+    /// Without this call the session keeps rgmin's own search.
     pub fn set_ase_linesearch(&mut self, stpmax: f64) -> Result<()> {
         if stpmax.is_nan() {
             return Err(Error::InvalidControl {
@@ -4524,6 +4526,7 @@ impl Solver {
                 moved: false,
                 energy_noise: false,
                 line_stop: None,
+                line_failed: false,
             }
         } else {
             take_session_step(
@@ -5082,6 +5085,7 @@ impl Solver {
         let boxed = self.has_coordinate_box();
         let mut energy_stall = false;
         let mut line_stop = None;
+        let mut line_failed = false;
         let mut sr_secant: Option<(Array1<f64>, Array1<f64>)> = None;
         let diis_alpha = self.istep;
         let diis_atom_cap = self.atom_maxmove;
@@ -5148,6 +5152,7 @@ impl Solver {
                     );
                     energy_stall = outcome.energy_noise;
                     line_stop = outcome.line_stop;
+                    line_failed = outcome.line_failed;
                 }
                 Inner::Steepest => {
                     let dir = grad.mapv(|g| -g);
@@ -5316,6 +5321,7 @@ impl Solver {
                         line_options,
                     )?;
                     energy_stall = t.energy_noise;
+                    line_failed = t.line_failed;
                     let moved = t.moved;
                     let istep_before = self.istep;
                     *x = t.x;
@@ -5775,6 +5781,9 @@ impl Solver {
             status = Status::NoiseFloor;
         }
         let report = self.finish(value, x, &grad, grad_norm, status);
+        if line_failed && status == Status::Iterating {
+            return Ok(report.with_stop_reason(StopReason::LineSearchFailed));
+        }
         if line_stop.is_some() && status == Status::Iterating {
             Ok(report.with_stop_reason(crate::StopReason::LineSearchRounding))
         } else {
@@ -7076,6 +7085,7 @@ where
         moved,
         energy_noise: false,
         line_stop: None,
+        line_failed: false,
     })
 }
 
