@@ -6818,18 +6818,9 @@ fn load_precon(p: *const rgmin_precon_t) -> std::result::Result<rgmin_precon_t, 
     Ok(local)
 }
 
-/// Install the geometry preconditioner described by `params`.
-///
-/// Every neighbour, anchor, bond, and angle index is checked against
-/// `dim / 3` before the session stores the list. A bad index does not
-/// wait for the next step.
-///
-/// # Safety
-///
-/// `solver` is null or a live session. `params` is null or readable
-/// for `params->struct_size` bytes, and every pointer it holds is null
-/// or valid for the count beside it.
-#[unsafe(no_mangle)]
+/// Install the preconditioner [`crate::select_precon`] picks for
+/// `RGMIN_PRECON_AUTO`. [`rgmin_solver_set_precon`] has checked
+/// `solver` and read `p`.
 fn install_auto(solver: *mut rgmin_solver_t, p: &rgmin_precon_t, atoms: usize) -> rgmin_status_t {
     if p.numbers.is_null() || p.natoms != atoms {
         set_last_error("rgmin_solver_set_precon: AUTO needs one atomic number per free atom");
