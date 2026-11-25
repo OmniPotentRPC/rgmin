@@ -14,49 +14,14 @@ pub(crate) struct BoxObjective<'a, O: ?Sized> {
 
 impl<'a, O: DifferentiableObjective<f64> + ?Sized> BoxObjective<'a, O> {
     pub(crate) fn new(inner: &'a O, lo: Option<Vec<f64>>, hi: Option<Vec<f64>>) -> Result<Self> {
-        let dim = Objective::dim(inner);
-        for side in [&lo, &hi].into_iter().flatten() {
-            if !side.is_empty() && side.len() != 1 && side.len() != dim {
-                return Err(Error::Dim {
-                    got: side.len(),
-                    dim,
-                });
-            }
-        }
-        let mut low = inner.bounds().low.clone();
-        let mut high = inner.bounds().high.clone();
-        if low.len() != dim || high.len() != dim {
-            return Err(Error::Dim {
-                got: low.len(),
-                dim,
-            });
-        }
-        for k in 0..dim {
-            let requested_low = side_at(lo.as_deref(), k).unwrap_or(f64::NEG_INFINITY);
-            let requested_high = side_at(hi.as_deref(), k).unwrap_or(f64::INFINITY);
-            if !matches!(
-                requested_low.partial_cmp(&requested_high),
-                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
-            ) || !matches!(
-                low[k].partial_cmp(&high[k]),
-                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
-            ) {
-                return Err(Error::Highs("invalid coordinate box".into()));
-            }
-            low[k] = low[k].max(requested_low);
-            high[k] = high[k].min(requested_high);
-            if !matches!(
-                low[k].partial_cmp(&high[k]),
-                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
-            ) || low[k] == f64::INFINITY
-                || high[k] == f64::NEG_INFINITY
-            {
-                return Err(Error::Highs("invalid coordinate box".into()));
-            }
-        }
         Ok(Self {
             inner,
-            bounds: Bounds::new(low, high, 0.0),
+            bounds: session_box(
+                inner.bounds(),
+                Objective::dim(inner),
+                lo.as_deref(),
+                hi.as_deref(),
+            )?,
         })
     }
 
@@ -143,6 +108,55 @@ impl<O: HessianObjective + ?Sized> HessianObjective for BoxObjective<'_, O> {
             Array2::from_elem((x.len(), x.len()), f64::NAN)
         }
     }
+}
+
+/// The session box `lo`..`hi` intersected with an objective's `bounds`.
+pub(crate) fn session_box(
+    bounds: &Bounds<f64>,
+    dim: usize,
+    lo: Option<&[f64]>,
+    hi: Option<&[f64]>,
+) -> Result<Bounds<f64>> {
+    for side in [lo, hi].into_iter().flatten() {
+        if !side.is_empty() && side.len() != 1 && side.len() != dim {
+            return Err(Error::Dim {
+                got: side.len(),
+                dim,
+            });
+        }
+    }
+    let mut low = bounds.low.clone();
+    let mut high = bounds.high.clone();
+    if low.len() != dim || high.len() != dim {
+        return Err(Error::Dim {
+            got: low.len(),
+            dim,
+        });
+    }
+    for k in 0..dim {
+        let requested_low = side_at(lo, k).unwrap_or(f64::NEG_INFINITY);
+        let requested_high = side_at(hi, k).unwrap_or(f64::INFINITY);
+        if !matches!(
+            requested_low.partial_cmp(&requested_high),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        ) || !matches!(
+            low[k].partial_cmp(&high[k]),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        ) {
+            return Err(Error::Highs("invalid coordinate box".into()));
+        }
+        low[k] = low[k].max(requested_low);
+        high[k] = high[k].min(requested_high);
+        if !matches!(
+            low[k].partial_cmp(&high[k]),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        ) || low[k] == f64::INFINITY
+            || high[k] == f64::NEG_INFINITY
+        {
+            return Err(Error::Highs("invalid coordinate box".into()));
+        }
+    }
+    Ok(Bounds::new(low, high, 0.0))
 }
 
 /// A missing or empty side is unbounded; length one broadcasts.
