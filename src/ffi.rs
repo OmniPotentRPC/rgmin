@@ -1821,15 +1821,6 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
     }
 }
 
-/// [`rgmin_minimize_eindir`] for a caller that states
-/// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
-/// [`rgmin_minimize_opts_sized`]. ABI minor 55.
-///
-/// # Safety
-/// Same as [`rgmin_minimize_eindir`], with `ctrl` readable for
-/// `ctrl_size` bytes and `out` writable for the layout that size names.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rgmin_minimize_eindir_sized(
 /// The body of both eindir one-shots. `entry` is the symbol the host
 /// called, so an error names that entry and not the one that delegates.
 unsafe fn minimize_eindir_named(
@@ -1839,7 +1830,6 @@ unsafe fn minimize_eindir_named(
     x: *mut DLManagedTensorVersioned,
     ctrl: *const rgmin_control_t,
     ctrl_size: usize,
-    method: rgmin_method_t,
     method: rgmin_method_t,
     error_on_unmet: i32,
     backward_polish: i32,

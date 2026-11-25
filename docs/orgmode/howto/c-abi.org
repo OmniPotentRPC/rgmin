@@ -172,7 +172,8 @@ if (st == RGMIN_UNMET_STOP) {
 ~rgmin_minimize_eindir~ is that call with both flags off. An eindir
 objective has no Hessian, so ~backward_polish~ does not change this
 entry. Its errors name the symbol the host called, in
-~rgmin_last_error~.
+~rgmin_last_error~, from ~abi_minor~ 64. Check
+~rgmin_abi_stamp().abi_minor >= 64~ before you rely on that.
 
 SCG takes the same one-shot shape.
 Conjugacy is a field on ~rgmin_scg_params_t~, not a different entry point.
