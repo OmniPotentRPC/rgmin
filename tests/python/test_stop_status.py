@@ -109,6 +109,20 @@ def test_unmet_error_carries_the_line_search_stop_of_a_no_move_run() -> None:
     assert raised.value.report.grad_norm == 1.0
 
 
+def test_unmet_error_carries_the_eval_budget_stop() -> None:
+    with pytest.raises(rgmin.StopUnmetError) as raised:
+        rgmin.minimize(
+            _rose,
+            np.array([-1.2, 1.0]),
+            "lbfgs",
+            maxiter=500,
+            max_evals=1,
+            gtol=1e-12,
+            error_on_unmet=True,
+        )
+    assert raised.value.report.stop == rgmin.Stop.EVAL_BUDGET
+
+
 def test_a_converged_run_does_not_raise_the_unmet_error() -> None:
     report, _ = rgmin.minimize(
         _rose, np.array([-1.2, 1.0]), "lbfgs", maxiter=500, gtol=1e-6, error_on_unmet=True
