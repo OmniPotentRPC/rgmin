@@ -371,6 +371,33 @@ fn a_zero_budget_run_projects_an_off_manifold_start() {
     assert_eq!(report.value, obj.value_and_gradient(x.view()).0);
 }
 
+/// `f = x0 x1` is stationary at the zero start, which is not on the
+/// circle. A zero-budget run reads the start on the circle instead, where
+/// the gradient has a tangent part, and reports the budget.
+#[test]
+fn a_zero_start_is_read_on_the_sphere() {
+    let seen = std::sync::Mutex::new(Vec::new());
+    let obj = Oracle::unbounded(2, |x: ArrayView1<f64>| {
+        seen.lock().unwrap().push(x.to_owned());
+        (x[0] * x[1], array![x[1], x[0]])
+    });
+    let control = Control::default().with_gtol(1e-8).with_maxiter(0);
+    let mut solver = Solver::new(Method::rcg(), control, 2);
+    solver.set_manifold(ManifoldKind::Sphere);
+    let mut x = array![0.0, 0.0];
+    let report = solver.run(&obj, &mut x).unwrap();
+    assert_eq!(report.status, Status::Budget, "{report:?}");
+    assert_eq!(x, array![1.0, 0.0]);
+    let seen = seen.lock().unwrap();
+    assert!(!seen.is_empty());
+    for p in seen.iter() {
+        assert!(
+            (p.dot(p).sqrt() - 1.0).abs() < 1e-15,
+            "read off the circle at {p}"
+        );
+    }
+}
+
 /// The box clips every trial of the step, so the objective is never read
 /// outside it and the line search measures the curve that is walked.
 struct Boxed {
