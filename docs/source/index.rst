@@ -103,6 +103,7 @@ That installs the 0.8 release on Rust 1.88 or newer.
    howto/gromacs-steep
    howto/gpmin
    howto/gromacs-cg
+   howto/gromacs-lbfgs
    howto/precon
    howto/doxygen
    howto/bench-gate
@@ -138,6 +139,7 @@ That installs the 0.8 release on Rust 1.88 or newer.
    reference/lammps-min-style
    reference/gromacs-steep
    reference/gromacs-cg
+   reference/gromacs-lbfgs
    reference/manifold
    reference/product-manifold
    reference/periodic
