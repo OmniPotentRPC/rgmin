@@ -48,6 +48,46 @@ class Counted(Calculator):
         self.results = dict(self.inner.results)
 
 
+class Field(Calculator):
+    """One-atom analytic surface that records each geometry it evaluates."""
+
+    implemented_properties = ["energy", "forces"]
+
+    def __init__(self, surface) -> None:
+        super().__init__()
+        self.surface = surface
+        self.trials: list[float] = []
+
+    def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
+        Calculator.calculate(self, atoms, properties, system_changes)
+        positions = self.atoms.positions.copy()
+        self.trials.append(float(positions[0, 0]))
+        energy, gradient = self.surface(positions)
+        self.results = {"energy": energy, "forces": -gradient}
+
+
+def _bowl(positions: np.ndarray) -> tuple[float, np.ndarray]:
+    """``(x - 1)^2 / 2`` along x, with its minimum one angstrom away."""
+    shift = positions[0, 0] - 1.0
+    gradient = np.zeros_like(positions)
+    gradient[0, 0] = shift
+    return 0.5 * shift * shift, gradient
+
+
+def _first_step(cls: type, surface, **kwargs: object) -> tuple[str, float, list[float]]:
+    """Outcome, final x, and the evaluated x values of one optimizer step."""
+    field = Field(surface)
+    atoms = Atoms("H", positions=[[0.0, 0.0, 0.0]])
+    atoms.calc = field
+    opt = cls(atoms, logfile=None, **kwargs)
+    try:
+        opt.step()
+        outcome = "ok"
+    except RuntimeError as err:
+        outcome = str(err)
+    return outcome, float(atoms.positions[0, 0]), field.trials
+
+
 def _have_solver() -> bool:
     return hasattr(rgmin, "Solver") and hasattr(rgmin, "SolverConfig")
 
@@ -166,6 +206,26 @@ def test_relaxed_energy_and_positions_match_ase(
 
 
 @pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
+@pytest.mark.parametrize(
+    ("ours", "theirs"),
+    [
+        (BFGSLineSearch, AseBFGSLineSearch),
+        (LBFGSLineSearch, AseLBFGSLineSearch),
+    ],
+)
+def test_maxstep_limits_each_line_search_increment(ours: type, theirs: type) -> None:
+    # ASE limits each increment from the previous trial to maxstep, so
+    # one step reaches 0.2, 0.4, then the strong-Wolfe point 0.6.
+    expected = _first_step(theirs, _bowl, alpha=1.0, maxstep=0.2)
+    assert expected[0] == "ok"
+    assert expected[1] == pytest.approx(0.6, abs=1e-12)
+    outcome, x, trials = _first_step(ours, _bowl, alpha=1.0, maxstep=0.2)
+    assert outcome == "ok"
+    assert x == pytest.approx(expected[1], abs=1e-12)
+    assert trials == pytest.approx(expected[2], abs=1e-12)
+
+
+@pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
 def test_trajectory_logfile_and_restart(tmp_path: Path) -> None:
     start = _cu_cluster()
     counted = Counted(EMT())
@@ -211,5 +271,9 @@ def test_h0_and_stpmax_are_refused_when_unused() -> None:
         rgmin.SolverConfig("fire", stpmax=50.0)
     with pytest.raises(ValueError, match="stpmax"):
         rgmin.SolverConfig("lbfgs", stpmax=50.0)
-    config = rgmin.SolverConfig("bfgs", linesearch="wolfe", h0=0.1, stpmax=50.0, c1=0.23, c2=0.46)
+    with pytest.raises(ValueError, match="stpmax"):
+        rgmin.SolverConfig("bfgs", linesearch="wolfe", stpmax=50.0)
+    with pytest.raises(ValueError, match="ase"):
+        rgmin.SolverConfig("fire", linesearch="ase")
+    config = rgmin.SolverConfig("bfgs", linesearch="ase", h0=0.1, stpmax=50.0, c1=0.23, c2=0.46)
     assert config.method_name == "bfgs"

@@ -108,6 +108,7 @@ rgmin_solver_rebase
 rgmin_solver_report_gradient
 rgmin_solver_search_direction
 rgmin_solver_set_accept
+rgmin_solver_set_ase_linesearch
 rgmin_solver_set_atom_maxmove
 rgmin_solver_set_backward_polish
 rgmin_solver_set_box
@@ -143,7 +144,6 @@ rgmin_solver_set_lbfgs_scaled
 rgmin_solver_set_lbfgs_trust
 rgmin_solver_set_lbfgs_wolfe
 rgmin_solver_set_level_set
-rgmin_solver_set_line_alpha_max
 rgmin_solver_set_linesearch
 rgmin_solver_set_manifold
 rgmin_solver_set_masses
