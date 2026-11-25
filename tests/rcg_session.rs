@@ -218,6 +218,31 @@ fn rcg_reports_the_projected_gradient_after_a_constrained_move() {
         "reported gradient is not tangent: {along}"
     );
 }
+
+/// `f = |x|^2 / 2` on two atoms of the x axis pulls along the bond, so
+/// its gradient cut by the bond tangent is zero wherever they sit. A
+/// start twice the bond length apart is stationary only once it is put
+/// on the bond, by a zero-budget run and by a step alike.
+#[test]
+fn rcg_puts_a_start_on_its_bonds_before_it_reports_tolerance() {
+    let set = DistanceConstraints::new(vec![(0, 1)], vec![1.0]).unwrap();
+    let start = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let obj = Oracle::unbounded(6, |x: ArrayView1<f64>| (0.5 * x.dot(&x), x.to_owned()));
+    for maxiter in [0, 50] {
+        let control = Control::default().with_gtol(1e-8).with_maxiter(maxiter);
+        let mut solver = Solver::new(Method::rcg(), control, 6);
+        solver.set_distance_constraints(set.clone()).unwrap();
+        let mut x = start.clone();
+        let report = solver.run(&obj, &mut x).unwrap();
+        assert_eq!(report.status, Status::Tolerance, "maxiter {maxiter}");
+        assert!(
+            set.excess(x.view()) <= 1.0,
+            "maxiter {maxiter}: bond length {}",
+            bond_length(&x)
+        );
+        assert_eq!(report.value, 0.5 * x.dot(&x), "maxiter {maxiter}");
+    }
+}
 #[test]
 fn session_projects_the_euclidean_gradient_once_on_the_positive_orthant() {
     // f = 0.5 * ||x - (1, 1)||^2. At x = (2, 0.5) the Euclidean gradient

@@ -64,6 +64,7 @@ There it keeps the session's rules:
   A set with masses steps along the cut gradient raised by the inverse masses, which is tangent to the bonds, and its line search measures that direction in the mass metric.
 
 - The stop and the report read the gradient cut by the bonds, so a constrained minimum with a pure constraint force meets the tolerance.
+  A start that misses its bonds is retracted onto them first, so a reported tolerance holds at a point that keeps every bond.
 
 - A level-set retraction that moves the point clears the held direction.
   The next step opens on steepest descent.
