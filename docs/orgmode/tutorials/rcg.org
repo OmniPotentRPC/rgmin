@@ -1,0 +1,27 @@
+#+TITLE: Riemannian conjugate gradients
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+
+* Riemannian conjugate gradients
+
+~minimize_rcg~ runs Fletcher-Reeves, PRP+ or Hager-Zhang on a manifold the crate already retracts. The vector transport is that manifold's, scaled back to its original length when the image is longer (Sato and Iwai, [[https://doi.org/10.1080/02331934.2013.836650][10.1080/02331934.2013.836650]]). ~RcgTransport::Identity~ is the Euclidean case. The default line search is strong Wolfe with curvature constant 0.1. ~LineSearch::default~ selects Brent instead.
+
+The listing is ~examples/tutorial_rcg.rs~, whole. Continuous integration runs it, so it is the program as it builds.
+
+#+INCLUDE: "../../../examples/tutorial_rcg.rs" src rust
+
+The example calls ~minimize_rcg~ on a quadratic and checks both coordinates.
+
+~RcgOptions::validate~ refuses a gradient tolerance that is not finite or is negative, and an initial step that is not finite and positive, with ~Error::InvalidControl~. ~minimize_rcg~ calls it before the first evaluation. A projection or retraction that cannot be carried out is returned as its typed error rather than skipped. A start off the manifold is retracted by a zero step, so the run begins on the manifold.
+
+** In a session
+
+~Method::rcg()~ runs the same step inside a ~Solver~. There it keeps the session's rules:
+
+- ~Control::maxmove~ and the per-atom cap bound the move that is taken. A trial beyond a cap lies outside the line-search domain, so the search contracts to the cap. The default per-atom cap stays off for this method.
+- A distance constraint set composes with the configured manifold. The tangent space is the intersection of the manifold's and the bonds', and the retraction alternates between the two until both hold.
+- The stop and the report read the gradient cut by the bonds, so a constrained minimum with a pure constraint force meets the tolerance.
+- A level-set retraction that moves the point clears the held direction. The next step opens on steepest descent.
+- The step reads the field the stop reads. The gradient, the tangent projection and the transport are the session's: on a rigid quotient, a product with rigid blocks, or a periodic session they carry the session masses, the periodic flag and the removal of the declared rigid motion. The Wolfe slopes, the conjugacy coefficient and the stop are formed in that one field.
+- A start off the manifold is projected onto it, as ~minimize_rcg~ does with a zero retraction, so the first evaluation, the held value and the point handed back are on the manifold. Nothing is refused for it.
+- Every trial stays in the objective's box and on the manifold. Where the manifold fills the ambient coordinates, the trial is the retraction clipped to the box, which is the projection onto that intersection. On every other manifold the trial is the retraction of a tangent step in the box's tangent cone, and a retraction that would leave the box is refused so the search shortens. The slope is the slope of the curve that is walked.
+- A step whose best finite decrease misses the energy noise of ~NoiseFloor::with_eps_f~ keeps its start and reports ~Status::NoiseFloor~, as the other methods do.

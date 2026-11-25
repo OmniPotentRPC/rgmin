@@ -561,6 +561,17 @@ rank-1 f64 vector.
   reference
   (`10.1515/9781400830244 <https://doi.org/10.1515/9781400830244>`_).
 
+- Riemannian conjugate gradients use that retraction and that
+  transport. The transport is scaled when the image is longer than
+  the vector it carried (Ring and Wirth 2012,
+  `10.1137/11082885X <https://doi.org/10.1137/11082885X>`_;
+  Sato and Iwai 2015,
+  `10.1080/02331934.2013.836650 <https://doi.org/10.1080/02331934.2013.836650>`_;
+  Sato 2016,
+  `10.1007/s10589-015-9801-1 <https://doi.org/10.1007/s10589-015-9801-1>`_;
+  Sato 2022,
+  `10.1007/978-3-030-62391-3 <https://doi.org/10.1007/978-3-030-62391-3>`_).
+
 - Boumal 2023 is the smooth-manifold course
   (`10.1017/9781009166164 <https://doi.org/10.1017/9781009166164>`_).
 
