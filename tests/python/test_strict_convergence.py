@@ -182,3 +182,70 @@ def test_a_bare_not_converged_has_no_report() -> None:
     assert str(error) == "not converged"
     with pytest.raises(AttributeError, match="report"):
         _ = error.report
+
+
+def _level_set_retract_oracle(drift: bool):
+    saw_trial = False
+    origin_after_trial = 0
+
+    def oracle(x: np.ndarray) -> tuple[float, np.ndarray]:
+        nonlocal saw_trial, origin_after_trial
+        x0 = float(x[0])
+        if drift and origin_after_trial >= 1:
+            residual = x0 - 0.25
+            slope = 0.25 if abs(residual) <= float(np.finfo(float).eps) else 1.0
+            return residual, np.array([slope])
+        if x0 != 0.0:
+            saw_trial = True
+        elif saw_trial:
+            origin_after_trial += 1
+        return 0.0, np.array([1.0])
+
+    return oracle
+
+
+def test_level_set_retraction_converged_satisfies_require_convergence() -> None:
+    assert "level_set" in rgmin.SolverConfig.valid_options()
+
+    report, point = rgmin.minimize(
+        _level_set_retract_oracle(True),
+        np.array([0.0]),
+        "lbfgs",
+        maxiter=1,
+        gtol=0.5,
+        linesearch="wolfe",
+        level_set=0.0,
+        require_convergence=True,
+    )
+    assert point[0] == pytest.approx(0.25)
+    assert report.stop == rgmin.Stop.TOLERANCE
+    assert report.grad_norm < 0.5
+    assert report.converged() is True
+
+    with pytest.raises(rgmin.NotConverged) as caught:
+        rgmin.minimize(
+            _level_set_retract_oracle(True),
+            np.array([0.0]),
+            "lbfgs",
+            maxiter=1,
+            gtol=0.1,
+            linesearch="wolfe",
+            level_set=0.0,
+            require_convergence=True,
+        )
+    assert caught.value.report.stop == rgmin.Stop.BUDGET
+    assert caught.value.report.converged() is False
+
+    with pytest.raises(rgmin.NotConverged) as caught:
+        rgmin.minimize(
+            _level_set_retract_oracle(False),
+            np.array([0.0]),
+            "lbfgs",
+            maxiter=1,
+            gtol=0.5,
+            linesearch="wolfe",
+            level_set=0.0,
+            require_convergence=True,
+        )
+    assert caught.value.report.stop == rgmin.Stop.LINE_SEARCH_ROUNDING
+    assert caught.value.report.converged() is False

@@ -2008,7 +2008,10 @@ impl Solver {
         }
         report.grad_norm = grad_norm;
         report.grad = Some(grad);
-        *report = report.clone().with_status(status);
+        *report = report
+            .clone()
+            .with_status(status)
+            .with_converged(self.control.converged(grad_norm));
         Ok(())
     }
 

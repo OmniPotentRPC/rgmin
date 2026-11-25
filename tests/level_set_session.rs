@@ -373,7 +373,7 @@ impl DifferentiableObjective<f64> for FinishLevelSetRounding {
         }
         if x[0] != 0.0 {
             self.saw_trial.store(true, Ordering::Relaxed);
-            return (f64::EPSILON, array![1.0]);
+            return (0.0, array![1.0]);
         }
         if self.saw_trial.load(Ordering::Relaxed) {
             self.origin_after_trial.fetch_add(1, Ordering::Relaxed);
@@ -384,32 +384,86 @@ impl DifferentiableObjective<f64> for FinishLevelSetRounding {
 
 #[test]
 fn finish_level_set_clears_stale_line_search_rounding_reason() {
-    let run = |drift: bool, gtol: f64| {
+    let run = |drift: bool, gtol: f64, require_convergence: bool| {
         let objective = FinishLevelSetRounding::new(drift);
         let mut x = array![0.0];
-        let mut solver = Solver::new(Method::lbfgs(), Control::default().with_gtol(gtol), 1);
+        let mut solver = Solver::new(
+            Method::lbfgs(),
+            Control::default()
+                .with_gtol(gtol)
+                .with_require_convergence(require_convergence),
+            1,
+        );
         solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
         solver.set_level_set(LevelSetConstraint::new(0.0)).unwrap();
         let report = solver.step(&objective, &mut x).unwrap();
         (report, x)
     };
 
-    let (kept, x_kept) = run(false, 0.5);
-    assert_eq!(x_kept, array![0.0]);
-    assert_eq!(kept.coords, x_kept);
-    assert_eq!(kept.status, Status::Budget);
-    assert_eq!(kept.stop_reason(), StopReason::LineSearchRounding);
+    for strict in [false, true] {
+        let (kept, x_kept) = run(false, 0.5, strict);
+        assert_eq!(x_kept, array![0.0]);
+        assert_eq!(kept.coords, x_kept);
+        assert_eq!(kept.status, Status::Budget);
+        assert_eq!(kept.stop_reason(), StopReason::LineSearchRounding);
+        assert!(!kept.converged);
 
-    let (converged, x_conv) = run(true, 0.5);
-    assert_eq!(x_conv, array![0.25]);
-    assert_eq!(converged.coords, x_conv);
-    assert_eq!(converged.status, Status::Tolerance);
-    assert_eq!(converged.stop_reason(), StopReason::Converged);
-    assert!(converged.converged());
+        let (converged, x_conv) = run(true, 0.5, strict);
+        assert_eq!(x_conv, array![0.25]);
+        assert_eq!(converged.coords, x_conv);
+        assert_eq!(converged.status, Status::Tolerance);
+        assert_eq!(converged.stop_reason(), StopReason::Converged);
+        assert!(converged.converged());
+        assert!(converged.converged);
 
-    let (iterating, x_iter) = run(true, 0.1);
-    assert_eq!(x_iter, array![0.25]);
-    assert_eq!(iterating.coords, x_iter);
-    assert_eq!(iterating.status, Status::Iterating);
-    assert_eq!(iterating.stop_reason(), StopReason::Iterating);
+        let (iterating, x_iter) = run(true, 0.1, strict);
+        assert_eq!(x_iter, array![0.25]);
+        assert_eq!(iterating.coords, x_iter);
+        assert_eq!(iterating.status, Status::Iterating);
+        assert_eq!(iterating.stop_reason(), StopReason::Iterating);
+        assert!(!iterating.converged);
+    }
+
+    let objective = FinishLevelSetRounding::new(true);
+    let mut x = array![0.0];
+    let mut solver = Solver::new(
+        Method::lbfgs(),
+        Control::default()
+            .with_maxiter(1)
+            .with_gtol(0.5)
+            .with_require_convergence(true),
+        1,
+    );
+    solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+    solver.set_level_set(LevelSetConstraint::new(0.0)).unwrap();
+    let run_report = solver.run(&objective, &mut x).unwrap();
+    assert_eq!(x, array![0.25]);
+    assert_eq!(run_report.status, Status::Tolerance);
+    assert!(run_report.converged());
+    assert!(run_report.converged);
+
+    let unmet_objective = FinishLevelSetRounding::new(true);
+    let mut x_unmet = array![0.0];
+    let mut unmet_solver = Solver::new(
+        Method::lbfgs(),
+        Control::default()
+            .with_maxiter(1)
+            .with_gtol(0.1)
+            .with_require_convergence(true),
+        1,
+    );
+    unmet_solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+    unmet_solver
+        .set_level_set(LevelSetConstraint::new(0.0))
+        .unwrap();
+    let err = unmet_solver
+        .run(&unmet_objective, &mut x_unmet)
+        .unwrap_err();
+    match err {
+        Error::NotConverged(report) => {
+            assert!(!report.converged);
+            assert_eq!(report.status, Status::Budget);
+        }
+        other => panic!("unexpected error {other}"),
+    }
 }
