@@ -12,9 +12,10 @@ use rgmin::ffi::{
     rgmin_abi_compatible, rgmin_abi_stamp, rgmin_control_t, rgmin_eigen_kind_t,
     rgmin_eigen_params_t, rgmin_eigenpair_t, rgmin_last_error, rgmin_lowest_eigenpairs,
     rgmin_method_from_name, rgmin_method_t, rgmin_minimize, rgmin_minimize_eindir,
-    rgmin_minimize_eindir_opts, rgmin_minimize_hess_opts, rgmin_minimize_hvp_opts,
-    rgmin_minimize_scg_with_options, rgmin_report_t, rgmin_scg_params_t, rgmin_status_t,
-    rgmin_stop_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
+    rgmin_minimize_eindir_opts, rgmin_minimize_hess, rgmin_minimize_hess_opts, rgmin_minimize_hvp,
+    rgmin_minimize_hvp_opts, rgmin_minimize_scg, rgmin_minimize_scg_with_options, rgmin_report_t,
+    rgmin_scg_params_t, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
+    rgmin_tensor_free,
 };
 
 unsafe extern "C" fn square_eval(
@@ -850,8 +851,8 @@ fn eindir_objective(dim: usize, grad: bool, calls: &AtomicUsize) -> Box<eindir_o
 }
 
 /// A refusal from either eindir one-shot names the symbol the host
-/// called. `rgmin_minimize_eindir` delegates to the options entry, and
-/// its callers must still read their own name.
+/// called. Both entries share `minimize_eindir_named`, and each entry's
+/// callers must still read their own name.
 #[test]
 fn each_eindir_entry_names_itself_in_its_errors() {
     let calls = AtomicUsize::new(0);
@@ -933,6 +934,7 @@ fn each_eindir_entry_preserves_callback_failure_errors() {
                 last_error(),
                 format!("{}: eindir evaluation failed", entry.name())
             );
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
         }
     }
 }
@@ -988,6 +990,7 @@ fn search_control(maxiter: usize, gtol: f64) -> rgmin_control_t {
         maxmove: -1.0,
         noise_eps: 0.0,
         noise_c: 0.0,
+        require_convergence: 0,
     }
 }
 

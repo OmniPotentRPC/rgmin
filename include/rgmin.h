@@ -98,7 +98,9 @@ typedef struct rgmin_abi_stamp_t {
  * 53 rgmin_minimize_eindir_opts. rgmin_control_t is unchanged.
  * 54 RGMIN_GROMACS_CG and rgmin_solver_set_gromacs_cg.
  * 55 require_convergence, the report converged flag,
- *    RGMIN_NOT_CONVERGED, and rgmin_solver_set_require_convergence.
+ *    RGMIN_NOT_CONVERGED, rgmin_solver_set_require_convergence,
+ *    and eindir one-shots that name the called entry in
+ *    rgmin_last_error while preserving callback-failure errors.
  * 56 rgmin_manifold_rigid_quotient, rgmin_rtr_tcg_solve,
  *    rgmin_rtr_radius_update, rgmin_lowest_eigenpair_on_manifold,
  *    rgmin_lowest_eigenpairs_projected. rgmin_control_t is unchanged.

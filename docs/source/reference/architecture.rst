@@ -120,7 +120,9 @@ Objects
     ``rgmin_report_t``, ``RGMIN_NOT_CONVERGED``,
     ``rgmin_solver_set_require_convergence``, ``rgmin_control_init``, and a
     ``_sized`` form of each entry that reads a ``rgmin_control_t``. The plain
-    exported entries read and write the layout revision 5 structs.
+    exported entries read and write the layout revision 5 structs. It
+    also makes both eindir one-shots name the called entry in
+    ``rgmin_last_error`` while preserving callback-failure errors.
     Minor 56 adds ``rgmin_manifold_rigid_quotient``, ``rgmin_rtr_tcg_solve``, ``rgmin_rtr_radius_update``, ``rgmin_lowest_eigenpair_on_manifold`` and ``rgmin_lowest_eigenpairs_projected``.
     Minor 57 adds ``RGMIN_STOP_LINE_SEARCH_ROUNDING``. ``rgmin_control_t`` is
     unchanged.
