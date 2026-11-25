@@ -3,7 +3,7 @@
 Riemannian conjugate gradients
 ------------------------------
 
-``minimize_rcg`` runs Fletcher-Reeves, PRP+ :cite:`gilbertGlobalConvergenceProperties1992` or Hager-Zhang on a manifold the crate already retracts.
+``minimize_rcg`` runs Fletcher-Reeves, PRP+ :cite:`Gilbert_1992` or Hager-Zhang on a manifold the crate already retracts.
 The vector transport is that manifold's, scaled back to its original length when the image is longer (Sato and Iwai, `10.1080/02331934.2013.836650 <https://doi.org/10.1080/02331934.2013.836650>`_).
 ``RcgTransport::Identity`` is the Euclidean case.
 The default line search is strong Wolfe with curvature constant 0.1.
