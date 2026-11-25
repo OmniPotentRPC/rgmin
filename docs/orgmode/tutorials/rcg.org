@@ -35,9 +35,10 @@ There it keeps the session's rules:
   A start that misses its bonds is retracted onto them first, so a reported tolerance holds at a point that keeps every bond.
 - A level-set retraction that moves the point clears the held direction.
   The next step opens on steepest descent.
-- The step reads the field the stop reads.
+- The step and the stop read the session's field.
   The gradient, the tangent projection and the transport are the session's: on a rigid quotient, a product with rigid blocks, or a periodic session they carry the session masses, the periodic flag and the removal of the declared rigid motion.
-  The Wolfe slopes, the conjugacy coefficient and the stop are formed in that one field.
+  The conjugacy coefficient and the stop are formed in that field.
+  A distance constraint set with masses is the exception: its step follows the cut gradient raised by the inverse masses, while the stop and the report read the cut gradient.
 - A start off the manifold is projected onto it, as ~minimize_rcg~ does with a zero retraction, so the first evaluation, the held value and the point handed back are on the manifold.
   A zero-budget run judges the start at that same point.
   Nothing is refused for it.
