@@ -1,0 +1,1 @@
+Riemannian CG sends a conjugate direction, a restarted steepest direction, and a box-feasible tangent through the tangent projection. On the Poincare ball that projection is the identity, so those directions keep their length, and the factor \(1/\lambda_x^2\) stays on the Riemannian gradient.

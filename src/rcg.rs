@@ -736,10 +736,13 @@ where
     if beta.is_finite() {
         crate::vecops::axpy(beta, d_carried.view(), &mut next);
     }
-    next = manifold.project(x_to, &next);
+    // The combination is a tangent vector. `project` on the Poincare ball
+    // divides by lambda^2, the conversion a Euclidean gradient needs, and
+    // the tangent space there is the whole ambient space.
+    next = manifold.to_tangent(x_to, &next);
     let slope = crate::vecops::dot(egrad_to.view(), next.view());
     if !beta.is_finite() || !slope.is_finite() || slope >= 0.0 {
-        return (manifold.project(x_to, &negated(g_to)), true);
+        return (manifold.to_tangent(x_to, &negated(g_to)), true);
     }
     (next, false)
 }
@@ -894,9 +897,11 @@ pub(crate) fn closed_in_box(bounds: &eindir_core::Bounds<f64>, point: &Array1<f6
 /// cone of the box, by Dykstra's alternating projections.
 ///
 /// The cone projection zeros the outward component of a coordinate that
-/// sits on a wall. The tangent projection is [`Manifold::project`]. Their
-/// intersection is the first-order feasible set: a step along it stays on
-/// the manifold to first order and does not immediately leave the box.
+/// sits on a wall. The tangent projection is [`Manifold::to_tangent`].
+/// On the Poincare ball that map is the identity, and only the Riemannian
+/// gradient carries the conformal factor. Their intersection is the
+/// first-order feasible set: a step along it stays on the manifold to
+/// first order and does not immediately leave the box.
 fn feasible_tangent<M>(
     manifold: &M,
     bounds: &eindir_core::Bounds<f64>,
@@ -922,7 +927,7 @@ where
             }
         }
         p = &v + &p - &y;
-        let next = manifold.project(x, &(&y + &q));
+        let next = manifold.to_tangent(x, &(&y + &q));
         if next.len() != dir.len() || next.iter().any(|c| !c.is_finite()) {
             return dir.clone();
         }
@@ -1680,6 +1685,105 @@ mod tests {
         assert!(
             Inflate.inner(&to, &g_to, &raw_dir) > 0.0,
             "the unscaled direction was expected to ascend"
+        );
+    }
+
+    /// A conjugate direction on the Poincare ball is the tangent vector
+    /// `-g + beta T(d)`. The tangent projection is the identity, so the
+    /// stored direction keeps that vector. Dividing by `lambda^2` is the
+    /// gradient conversion and shortens it.
+    #[test]
+    fn poincare_conjugate_direction_keeps_its_tangent_vector() {
+        let ball = crate::manifold::PoincareBall;
+        let x_from = array![0.0, 0.0];
+        let x_to = array![0.5, 0.0];
+        let g_from = array![1.0, 0.0];
+        let g_to = array![0.4, -0.2];
+        let d_from = negated(&g_from);
+        let lambda = 2.0 / (1.0 - x_to.dot(&x_to));
+        let egrad_to = &g_to * (lambda * lambda);
+        let (dir, restarted) = next_direction(
+            &ball,
+            RcgBeta::FletcherReeves,
+            RcgTransport::Scaled,
+            &x_from,
+            &x_to,
+            &g_from,
+            &g_to,
+            &egrad_to,
+            &d_from,
+        );
+        assert!(!restarted, "a descending combination was replaced");
+        let g_carried = scaled_transport(&ball, &x_from, &x_to, &g_from, RcgTransport::Scaled);
+        let d_carried = scaled_transport(&ball, &x_from, &x_to, &d_from, RcgTransport::Scaled);
+        let beta = coefficient(
+            &ball,
+            RcgBeta::FletcherReeves,
+            &x_from,
+            &x_to,
+            &g_from,
+            &g_to,
+            &d_from,
+            &g_carried,
+            &d_carried,
+        );
+        let mut expect = negated(&g_to);
+        crate::vecops::axpy(beta, d_carried.view(), &mut expect);
+        let scale = crate::vecops::nrm2(expect.view());
+        let gap = crate::vecops::nrm2_diff(dir.view(), expect.view()) / scale;
+        assert!(gap <= 1e-9, "direction {dir} want {expect}, relative {gap}");
+        let scaled = ball.project(&x_to, &expect);
+        let collapsed = crate::vecops::nrm2_diff(dir.view(), scaled.view()) / scale;
+        assert!(
+            collapsed > 1e-2,
+            "direction matches the gradient scaling {scaled}"
+        );
+    }
+
+    /// A conjugate step that does not descend restarts at `-g`. That
+    /// vector is already the Riemannian gradient, so the restart must
+    /// not divide it by `lambda^2` again.
+    #[test]
+    fn poincare_restart_keeps_the_negative_riemannian_gradient() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.5, 0.0];
+        let g = array![1.0, 0.3];
+        let lambda = 2.0 / (1.0 - 0.25);
+        let egrad = &g * (lambda * lambda);
+        let (dir, restarted) = next_direction(
+            &ball,
+            RcgBeta::FletcherReeves,
+            RcgTransport::Identity,
+            &x,
+            &x,
+            &g,
+            &g,
+            &egrad,
+            &g,
+        );
+        assert!(restarted);
+        let expect = negated(&g);
+        let gap = crate::vecops::nrm2_diff(dir.view(), expect.view())
+            / crate::vecops::nrm2(expect.view());
+        assert!(gap <= 1e-9, "restart {dir} want {expect}, relative {gap}");
+    }
+
+    /// With one coordinate on a wall, the feasible tangent zeros the
+    /// outward component and leaves the free component alone. Scaling by
+    /// `1/lambda^2` is not that projection.
+    #[test]
+    fn poincare_feasible_tangent_keeps_the_free_component() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.0, 0.2];
+        let bounds = eindir_core::Bounds::new(array![0.0, -0.5], array![0.8, 0.8], 0.0);
+        let dir = array![-0.3, 0.4];
+        let got = feasible_tangent(&ball, &bounds, &x, &dir);
+        let expect = array![0.0, 0.4];
+        let gap = crate::vecops::nrm2_diff(got.view(), expect.view())
+            / crate::vecops::nrm2(expect.view());
+        assert!(
+            gap <= 1e-9,
+            "feasible tangent {got} want {expect}, relative {gap}"
         );
     }
 
