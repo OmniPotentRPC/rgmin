@@ -146,6 +146,12 @@ def test_unmet_report_outlives_the_caught_exception() -> None:
     assert report.grad_norm > 1e-12
 
 
+def test_a_directly_built_unmet_error_has_a_report() -> None:
+    error = rgmin.StopUnmetError("msg")
+    assert str(error) == "msg"
+    assert isinstance(error.report, rgmin.Report)
+
+
 def test_unmet_error_carries_the_line_search_stop_of_a_no_move_run() -> None:
     with pytest.raises(rgmin.StopUnmetError) as raised:
         rgmin.minimize(
