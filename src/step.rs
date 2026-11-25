@@ -444,7 +444,13 @@ pub(crate) fn take_step_with_options<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let amax = cap_alpha(dir, control, atom_maxmove);
+    let cap = cap_alpha(dir, control, atom_maxmove);
+    // An unset bound leaves `cap` as the only limit, which is the
+    // historical search. A positive finite bound that is tighter replaces it.
+    let amax = match options.alpha_max() {
+        Some(limit) if limit < cap => limit,
+        _ => cap,
+    };
     let mut best_decrease = f64::NEG_INFINITY;
     let mut saw_trial = false;
     let stalled = |saw: bool, best: f64| {
