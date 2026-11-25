@@ -200,7 +200,9 @@ typedef enum rgmin_stop_t {
     RGMIN_STOP_EVAL_BUDGET = 7,
     /** GROMACS-style steep or conjugate-gradient minimization could not
      *  represent another coordinate change. ABI minor 52. */
-    RGMIN_STOP_MACHINE_PRECISION = 8
+    RGMIN_STOP_MACHINE_PRECISION = 8,
+    /** Wolfe zoom stopped when rounding blocked progress. ABI minor 57. */
+    RGMIN_STOP_LINE_SEARCH_ROUNDING = 9
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),

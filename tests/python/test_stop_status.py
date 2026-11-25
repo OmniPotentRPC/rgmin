@@ -10,6 +10,11 @@ import pytest
 import rgmin
 
 
+def test_rounding_stop_has_stable_names_and_value() -> None:
+    assert rgmin.Stop.LINE_SEARCH_ROUNDING == 9
+    assert rgmin.Stop.LineSearchRounding == rgmin.Stop.LINE_SEARCH_ROUNDING
+
+
 def _rose(x: np.ndarray) -> tuple[float, np.ndarray]:
     a, b = float(x[0]), float(x[1])
     value = (1.0 - a) ** 2 + 100.0 * (b - a * a) ** 2

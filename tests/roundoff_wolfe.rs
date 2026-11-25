@@ -2,7 +2,9 @@
 
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Control, LineSearch, Method, Solver};
+use rgmin::{
+    Control, Error, Lbfgs, LbfgsStep, LineSearch, LineSearchStopReason, Method, Solver, StopReason,
+};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const OFFSET: f64 = 6.000000000000001;
@@ -174,4 +176,133 @@ fn standalone_zoom_uses_the_same_precision_limit() {
     );
     assert_eq!(alpha, 1.0);
     assert_eq!(objective.calls.load(Ordering::Relaxed), 2);
+}
+
+struct RoundedBowl {
+    scale: f64,
+    offset: f64,
+    bounds: Bounds<f64>,
+    calls: AtomicUsize,
+}
+
+impl RoundedBowl {
+    fn new() -> Self {
+        Self {
+            scale: f64::EPSILON.sqrt().sqrt(),
+            offset: OFFSET,
+            bounds: Bounds::new(array![f64::NEG_INFINITY], array![f64::INFINITY], 0.0),
+            calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl Objective<f64> for RoundedBowl {
+    fn dim(&self) -> usize {
+        1
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        let exact = self.offset + 0.5 * self.scale * x[0] * x[0];
+        let cancellation = x[0] / f64::EPSILON.sqrt();
+        (exact + cancellation) - cancellation
+    }
+}
+
+impl Gradient<f64> for RoundedBowl {
+    fn dim(&self) -> usize {
+        1
+    }
+
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        array![self.scale * x[0]]
+    }
+}
+
+impl DifferentiableObjective<f64> for RoundedBowl {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        (self.eval(x), self.grad(x))
+    }
+}
+
+#[test]
+fn a_rounding_flat_bracket_stops_without_the_steepest_retry_tail() {
+    let objective = RoundedBowl::new();
+    let mut point = array![2.0 * f64::EPSILON.sqrt()];
+    let base_gradient = objective.grad(point.view());
+    let mut solver = Solver::new(Method::lbfgs(), Control::default().with_gtol(0.0), 1);
+    solver.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
+
+    let report = solver.run(&objective, &mut point).unwrap();
+
+    assert_eq!(report.stop_reason(), StopReason::LineSearchRounding);
+    assert_eq!(point, array![2.0 * f64::EPSILON.sqrt()]);
+    assert_eq!(report.grad.as_ref(), Some(&base_gradient));
+    assert!(objective.calls.load(Ordering::Relaxed) <= 16);
+    assert_eq!(solver.pair_count(), 0);
+}
+
+#[test]
+fn the_detailed_search_reports_a_typed_rounding_stop() {
+    let objective = RoundedBowl::new();
+    let start = array![2.0 * f64::EPSILON.sqrt()];
+    let value = objective.eval(start.view());
+    let gradient = objective.grad(start.view());
+    let direction = -&gradient;
+    let result = wolfe().search_from_result(
+        |x| objective.value_and_gradient(x),
+        start.view(),
+        value,
+        gradient.view(),
+        direction.view(),
+        1.0,
+        f64::INFINITY,
+    );
+
+    assert_eq!(
+        result.stop_reason,
+        Some(LineSearchStopReason::RoundingBlocked)
+    );
+    assert!(result.step.is_none());
+    assert!(objective.calls.load(Ordering::Relaxed) <= 10);
+}
+
+#[test]
+fn direct_lbfgs_stops_the_rounding_tail_without_changing_the_gradient() {
+    let objective = RoundedBowl::new();
+    let start = array![2.0 * f64::EPSILON.sqrt()];
+    let base_gradient = objective.grad(start.view());
+    let mut solver = Lbfgs::default();
+    solver.step = LbfgsStep::Wolfe;
+    solver.gtol = 0.0;
+
+    let (_, point, evals) =
+        solver.minimize(start.view(), 100, |x| Some(objective.value_and_gradient(x)));
+
+    assert_eq!(point, start);
+    assert_eq!(objective.grad(point.view()), base_gradient);
+    assert!(evals <= 10);
+}
+
+#[test]
+fn error_on_unmet_carries_the_rounding_stop() {
+    let objective = RoundedBowl::new();
+    let mut point = array![2.0 * f64::EPSILON.sqrt()];
+    let control = Control::default().with_gtol(0.0).with_error_on_unmet(true);
+    let mut solver = Solver::new(Method::lbfgs(), control, 1);
+    solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+
+    let error = solver.run(&objective, &mut point).unwrap_err();
+
+    match error {
+        Error::StopUnmet { reason, report } => {
+            assert_eq!(reason, StopReason::LineSearchRounding);
+            assert_eq!(report.stop_reason(), reason);
+        }
+        other => panic!("unexpected error {other}"),
+    }
 }

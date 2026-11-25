@@ -1232,6 +1232,7 @@ fn abi_stamp_identifies_this_optimizer_layout() {
     assert_eq!(stamp.abi_major, 1);
     assert_eq!(stamp.abi_minor, 56);
     assert_eq!(stamp.layout_revision, 6);
+    assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING as i32, 9);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }
 

@@ -37,6 +37,41 @@ pub struct LineOutcome {
     pub evals: usize,
 }
 
+/// Why a line search stopped without its usual acceptance test.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineSearchStopReason {
+    /// The Wolfe bracket could no longer resolve a step or objective
+    /// difference at machine precision.
+    RoundingBlocked,
+}
+
+/// A line-search result with an optional typed early stop.
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub struct LineSearchResult {
+    /// Best accepted step, or `None` when the start remains the answer.
+    pub step: Option<LineOutcome>,
+    /// Early stop that ended the search. `None` is ordinary completion.
+    pub stop_reason: Option<LineSearchStopReason>,
+}
+
+impl LineSearchResult {
+    fn complete(step: Option<LineOutcome>) -> Self {
+        Self {
+            step,
+            stop_reason: None,
+        }
+    }
+
+    fn rounding_blocked(step: Option<LineOutcome>) -> Self {
+        Self {
+            step,
+            stop_reason: Some(LineSearchStopReason::RoundingBlocked),
+        }
+    }
+}
+
 /// One evaluated trial on the line.
 #[derive(Clone)]
 struct Probe {
@@ -206,11 +241,38 @@ impl LineSearch {
         )
     }
 
+    /// [`Self::search_from`] with a typed Wolfe rounding stop.
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_from_result<F>(
+        &self,
+        oracle: F,
+        pos: ArrayView1<'_, f64>,
+        f0: f64,
+        g0: ArrayView1<'_, f64>,
+        dir: ArrayView1<'_, f64>,
+        istep: f64,
+        alpha_max: f64,
+    ) -> LineSearchResult
+    where
+        F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    {
+        self.search_from_result_with_options(
+            oracle,
+            pos,
+            f0,
+            g0,
+            dir,
+            istep,
+            alpha_max,
+            LineSearchOptions::default(),
+        )
+    }
+
     /// Search from cached values with an explicit objective accuracy policy.
     /// The option affects Wolfe acceptance only; all trial caps remain in force.
     pub fn search_from_with_options<F>(
         &self,
-        mut oracle: F,
+        oracle: F,
         pos: ArrayView1<'_, f64>,
         f0: f64,
         g0: ArrayView1<'_, f64>,
@@ -222,7 +284,28 @@ impl LineSearch {
     where
         F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
     {
-        self.search_traced(
+        self.search_from_result_with_options(oracle, pos, f0, g0, dir, istep, alpha_max, options)
+            .step
+    }
+
+    /// Cached-start search with a typed reason when Wolfe rounding blocks
+    /// further progress.
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_from_result_with_options<F>(
+        &self,
+        mut oracle: F,
+        pos: ArrayView1<'_, f64>,
+        f0: f64,
+        g0: ArrayView1<'_, f64>,
+        dir: ArrayView1<'_, f64>,
+        istep: f64,
+        alpha_max: f64,
+        options: LineSearchOptions,
+    ) -> LineSearchResult
+    where
+        F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    {
+        self.search_result_traced(
             |_, x| oracle(x),
             pos,
             f0,
@@ -239,7 +322,7 @@ impl LineSearch {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn search_traced<F>(
         &self,
-        mut oracle: F,
+        oracle: F,
         pos: ArrayView1<'_, f64>,
         f0: f64,
         g0: ArrayView1<'_, f64>,
@@ -251,6 +334,25 @@ impl LineSearch {
     where
         F: FnMut(f64, ArrayView1<'_, f64>) -> (f64, Array1<f64>),
     {
+        self.search_result_traced(oracle, pos, f0, g0, dir, istep, alpha_max, options)
+            .step
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn search_result_traced<F>(
+        &self,
+        mut oracle: F,
+        pos: ArrayView1<'_, f64>,
+        f0: f64,
+        g0: ArrayView1<'_, f64>,
+        dir: ArrayView1<'_, f64>,
+        istep: f64,
+        alpha_max: f64,
+        options: LineSearchOptions,
+    ) -> LineSearchResult
+    where
+        F: FnMut(f64, ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    {
         let mut dphi0 = crate::vecops::dot(g0, dir);
         let amax = if alpha_max > 0.0 {
             alpha_max
@@ -258,7 +360,7 @@ impl LineSearch {
             f64::INFINITY
         };
         if !f0.is_finite() || !dphi0.is_finite() || amax.is_nan() || dphi0 == 0.0 {
-            return None;
+            return LineSearchResult::complete(None);
         }
         // An uphill direction (an indefinite SR1 or SR2 model) is
         // searched backwards: -dir descends and obeys the same cap.
@@ -287,13 +389,15 @@ impl LineSearch {
                 let amax = amax.min(64.0_f64.max(64.0 * istep.abs()));
                 wolfe(&mut line, f0, dphi0, open.min(amax), amax, c1, c2, maxiter)
             }
-            Self::Backtracking { c, beta, maxiter } => {
-                backtrack(&mut line, f0, dphi0, open, amax, c, beta, maxiter, false)
+            Self::Backtracking { c, beta, maxiter } => LineSearchResult::complete(backtrack(
+                &mut line, f0, dphi0, open, amax, c, beta, maxiter, false,
+            )),
+            Self::Goldstein { c, beta, maxiter } => LineSearchResult::complete(backtrack(
+                &mut line, f0, dphi0, open, amax, c, beta, maxiter, true,
+            )),
+            Self::Brent { maxiter, tol } => {
+                LineSearchResult::complete(brent(&mut line, f0, open, amax, maxiter, tol))
             }
-            Self::Goldstein { c, beta, maxiter } => {
-                backtrack(&mut line, f0, dphi0, open, amax, c, beta, maxiter, true)
-            }
-            Self::Brent { maxiter, tol } => brent(&mut line, f0, open, amax, maxiter, tol),
         }
     }
 }
@@ -308,7 +412,7 @@ fn wolfe<F>(
     c1: f64,
     c2: f64,
     maxiter: usize,
-) -> Option<LineOutcome>
+) -> LineSearchResult
 where
     F: FnMut(f64, ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
@@ -326,7 +430,7 @@ where
             .options
             .accepts_approximate_wolfe(f, f0, d, dphi0, c1, c2)
         {
-            return cur.p.and_then(|p| line.accept(p));
+            return LineSearchResult::complete(cur.p.and_then(|p| line.accept(p)));
         }
         if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || (i > 0 && f >= prev.f) {
             return zoom(line, f0, dphi0, prev, cur, c1, c2, maxiter);
@@ -334,7 +438,7 @@ where
         if strong_curvature(d, dphi0, c2) || (d < 0.0 && alpha >= amax) {
             // A strong-Wolfe point, or an Armijo point still descending
             // at the cap: the cap, not the curvature, ends the step.
-            return cur.p.and_then(|p| line.accept(p));
+            return LineSearchResult::complete(cur.p.and_then(|p| line.accept(p)));
         }
         if d >= 0.0 {
             return zoom(line, f0, dphi0, cur, prev, c1, c2, maxiter);
@@ -352,10 +456,11 @@ where
     }
     // Expansion budget spent while still descending: `prev` is the
     // furthest Armijo point.
-    match prev.p {
+    let step = match prev.p {
         Some(p) => line.accept(p),
         None => line.take_best(),
-    }
+    };
+    LineSearchResult::complete(step)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -368,14 +473,22 @@ fn zoom<F>(
     c1: f64,
     c2: f64,
     maxiter: usize,
-) -> Option<LineOutcome>
+) -> LineSearchResult
 where
     F: FnMut(f64, ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
+    let mut unresolved_failures = 0;
     for _ in 0..maxiter {
-        let width = (hi.a - lo.a).abs();
-        if width.is_nan() || width <= 4.0 * f64::EPSILON * lo.a.abs().max(hi.a.abs()) {
+        if !lo.a.is_finite() || !hi.a.is_finite() {
             break;
+        }
+        if super::bracket_rounding_blocked(lo.a, hi.a) {
+            let step = match lo.p {
+                Some(p) if p.f < f0 => line.accept(p),
+                None => None,
+                Some(_) => None,
+            };
+            return LineSearchResult::rounding_blocked(step);
         }
         let alpha = zoom_trial(&lo, &hi);
         let cur = End::of(line.probe(alpha));
@@ -384,14 +497,33 @@ where
             .options
             .accepts_approximate_wolfe(f, f0, d, dphi0, c1, c2)
         {
-            return cur.p.and_then(|p| line.accept(p));
+            return LineSearchResult::complete(cur.p.and_then(|p| line.accept(p)));
         }
-        if !f.is_finite() || !armijo(f, f0, alpha, dphi0, c1) || f >= lo.f {
+        let armijo_holds = armijo(f, f0, alpha, dphi0, c1);
+        if armijo_holds && strong_curvature(d, dphi0, c2) {
+            return LineSearchResult::complete(cur.p.and_then(|p| line.accept(p)));
+        }
+        if !armijo_holds && super::value_rounding_blocked(f, lo.f) {
+            unresolved_failures += 1;
+        } else {
+            unresolved_failures = 0;
+        }
+        if super::rounding_stalled(unresolved_failures) {
+            if super::resolvable_slope_crossing(d, lo.d, dphi0) {
+                unresolved_failures = 0;
+                hi = cur;
+                continue;
+            }
+            let step = match lo.p {
+                Some(p) if p.f < f0 => line.accept(p),
+                None => None,
+                Some(_) => None,
+            };
+            return LineSearchResult::rounding_blocked(step);
+        }
+        if !f.is_finite() || !armijo_holds || f >= lo.f {
             hi = cur;
         } else {
-            if strong_curvature(d, dphi0, c2) {
-                return cur.p.and_then(|p| line.accept(p));
-            }
             if d * (hi.a - lo.a) >= 0.0 {
                 hi = lo;
             }
@@ -400,10 +532,11 @@ where
     }
     // The zoom ran out: `lo` is the lowest Armijo point found. With
     // `lo` still at the origin, fall back to the lowest trial.
-    match lo.p {
+    let step = match lo.p {
         Some(p) => line.accept(p),
         None => line.take_best(),
-    }
+    };
+    LineSearchResult::complete(step)
 }
 
 #[allow(clippy::too_many_arguments)]

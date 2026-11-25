@@ -87,9 +87,9 @@ The default step stays the eOn cap, and this table does not time it.
     +---------------------------------------------------+----------------------------+---------------------+-------+----------------------+
     | arm                                               | evaluations per relaxation | to ``gmax <= 1e-5`` | after | worst final ``gmax`` |
     +===================================================+============================+=====================+=======+======================+
-    | ``Lbfgs::minimize`` with ``LbfgsStep::Wolfe``     |                      371.2 |               252.3 | 118.8 |              2.11e-5 |
+    | ``Lbfgs::minimize`` with ``LbfgsStep::Wolfe``     |                      314.4 |               291.5 |  22.9 |              1.94e-5 |
     +---------------------------------------------------+----------------------------+---------------------+-------+----------------------+
-    | ``Lbfgs::minimize_box``                           |                      371.0 |               251.8 | 119.2 |              2.67e-5 |
+    | ``Lbfgs::minimize_box``                           |                      314.3 |               291.1 |  23.1 |              1.87e-5 |
     +---------------------------------------------------+----------------------------+---------------------+-------+----------------------+
     | L-BFGS-B, ``maxcor 8``, ``gtol 1e-6``, ``ftol 0`` |                      278.5 |               252.6 |  25.9 |              1.29e-5 |
     +---------------------------------------------------+----------------------------+---------------------+-------+----------------------+
@@ -105,16 +105,23 @@ Of the other 18, SciPy finds the lower minimum on 9 and rgmin on 9.
 
 This page used to give 386.1 against 273.
 Those runs used anneal's pinned rgmin, and the SciPy options were not recorded.
-The re-measured gap, for the Wolfe search, is 371.2 against 278.5, 1.33 times.
+The Wolfe search now takes 314.4 evaluations against SciPy's recorded
+278.5, 1.13 times.
 
 Bound handling is not the cause.
 LJ75 has no bounds.
 SciPy skips its Cauchy point when a problem has none (``mainlb`` in ``scipy/optimize/src/lbfgsb.c``, SciPy 1.18.1, commit e4e854ea), and ``minimize_box`` costs what the Wolfe ``minimize`` costs.
-All three converged arms reach ``gmax <= 1e-5`` after about 252 evaluations.
-The difference is the end of the run.
+All three converged arms reach ``gmax <= 1e-5``; the two rgmin arms now
+take about 291 evaluations to get there.
+The remaining difference is the end of the run.
 Near ``gmax = 1e-6`` the energy, about -380, changes only in its last bits, so the strong Wolfe zoom cannot meet its tests.
-It spends up to 40 evaluations, drops the pairs, and spends up to 40 more from steepest descent before it stops.
-On average 68.3 evaluations per relaxation come after the last accepted iterate.
+Before the rounding stop it spent up to 40 evaluations, dropped the
+pairs, and spent up to 40 more from steepest descent.
+The search now follows the relative-bracket warning of More and Thuente
+1994 (`10.1145/192115.192132 <https://doi.org/10.1145/192115.192132>`_) and stops when the step or value
+cannot be resolved at machine precision.
+On the measured 400-run trace, 5.9 evaluations per relaxation come
+after the last accepted iterate.
 SciPy's More-Thuente search (``dcsrch``) returns a warning once rounding blocks progress, and ``lnsrlb`` takes that point as the step.
 With ``ftol = 0`` the run then stops at the first step that does not lower f (115 of 400 runs), on the gradient test (284), or on a failed line search (1).
 It spends 0.1 evaluations per relaxation after its last accepted iterate.
