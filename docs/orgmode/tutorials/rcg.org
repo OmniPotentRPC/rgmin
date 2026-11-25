@@ -48,5 +48,6 @@ There it keeps the session's rules:
   A start with no retraction in the box returns ~Error::OffManifold~ before the objective reads a point.
   So does a start that a distance constraint set moves out of the box when it puts the start on its bonds.
 - Each Wolfe slope is the derivative of the value along the curve that is walked: the Euclidean gradient against the curve velocity.
-  It does not go through ~Manifold::inner~, so the Poincare ball and the hyperboloid, whose ~inner~ is not the metric of their Riemannian gradient, get the strong Wolfe tests too.
+  It does not go through ~Manifold::inner~, so a manifold whose ~inner~ is not the metric of its Riemannian gradient still gets the strong Wolfe tests.
+  The norms, the transport scaling and the conjugacy coefficient do read ~Manifold::inner~, which is the conformal metric on the Poincare ball and the Minkowski form on the hyperboloid.
 - A step whose best finite decrease misses the energy noise of ~NoiseFloor::with_eps_f~ keeps its start and reports ~Status::NoiseFloor~, as the other methods do.

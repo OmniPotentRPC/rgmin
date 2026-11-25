@@ -6,6 +6,8 @@
 //! factor \(2 / (1 - \|x\|^2)\), and the retraction is the Riemannian
 //! exponential via Mobius addition.
 //!
+//! [`PoincareBall::inner`] is that metric, \(\lambda_x^2\, u^\top v\) with
+//! \(\lambda_x = 2 / (1 - \|x\|^2)\).
 //! [`PoincareBall::project`] converts a Euclidean ambient vector to a
 //! Riemannian gradient, \(v \cdot (1 - \|x\|^2)^2 / 4\).
 //! [`PoincareBall::to_tangent`] is the identity, the tangent projection
@@ -101,6 +103,13 @@ impl Manifold for PoincareBall {
         v.clone()
     }
 
+    /// The conformal metric \(\lambda_x^2\, u^\top v\), in which
+    /// [`Self::project`] of a Euclidean gradient is the Riemannian gradient.
+    fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {
+        let factor = conformal_factor(x);
+        factor * factor * dot(u.view(), v.view())
+    }
+
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         if x.len() != v.len() {
             return interiorize(x);
@@ -152,6 +161,25 @@ mod tests {
         assert!((p[0] - v[0]).abs() > 1e-6);
         let s = Sphere.project(&x, &v);
         assert!((&p - &s).mapv(f64::abs).sum() > 1e-6);
+    }
+
+    #[test]
+    fn inner_is_the_conformal_metric_of_the_gradient() {
+        let x = array![0.3, -0.2, 0.1];
+        let u = array![1.0, 2.0, 3.0];
+        let t = array![-0.4, 0.5, 0.2];
+        let lambda = 2.0 / (1.0 - 0.14);
+        let want = lambda * lambda * dot(u.view(), t.view());
+        let got = PoincareBall.inner(&x, &u, &t);
+        assert!((got - want).abs() < 1e-13 * want.abs(), "{got} want {want}");
+        // The metric product of the Riemannian gradient with a tangent
+        // vector is the differential of the value along it.
+        let rgrad = PoincareBall.egrad2rgrad(&x, &u);
+        let slope = PoincareBall.inner(&x, &rgrad, &t);
+        let euclid = dot(u.view(), t.view());
+        assert!((slope - euclid).abs() < 1e-14, "{slope} want {euclid}");
+        let speed = PoincareBall.norm(&x, &t);
+        assert!((speed - lambda * nrm2(t.view())).abs() < 1e-14);
     }
 
     #[test]

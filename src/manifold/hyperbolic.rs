@@ -7,6 +7,7 @@
 //! the unit sphere and not a 3N cluster packing: a molecule lives on
 //! [`super::RigidQuotient`].
 //!
+//! The metric is the Minkowski form restricted to the tangent space.
 //! Projection \(v + \langle x,v\rangle_L\, x\). Retraction is the
 //! exponential map \(\cosh\|v\|_L\, x + \sinh(\|v\|_L)/\|v\|_L\, v\).
 //! Transport is projection at the arrival point. Ambient reductions
@@ -97,6 +98,12 @@ impl Manifold for Hyperbolic {
         self.project(x_to, v)
     }
 
+    /// The Minkowski form, positive definite on the tangent space, in which
+    /// [`Self::egrad2rgrad`] is the Riemannian gradient.
+    fn inner(&self, _x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {
+        minkowski(u.view(), v.view())
+    }
+
     fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
         if egrad.is_empty() {
             return egrad.clone();
@@ -165,6 +172,26 @@ mod tests {
         assert!(minkowski(x.view(), r.view()).abs() < 1e-14);
         let naive = Hyperbolic.project(&x, &egrad);
         assert!(vecops::nrm2((&r - &naive).view()) > 1e-8);
+    }
+
+    #[test]
+    fn inner_is_the_minkowski_metric_of_the_gradient() {
+        let x = onto_sheet(array![2.0, 1.0, 1.0]);
+        let u = Hyperbolic.project(&x, &array![0.4, -0.2, 0.7]);
+        let t = Hyperbolic.project(&x, &array![0.1, 0.3, -0.5]);
+        let want = minkowski(u.view(), t.view());
+        assert!((Hyperbolic.inner(&x, &u, &t) - want).abs() < 1e-15);
+        assert!((Hyperbolic.inner(&x, &u, &t) - vecops::dot(u.view(), t.view())).abs() > 1e-3);
+        // The metric product of the Riemannian gradient with a tangent
+        // vector is the differential of the value along it.
+        let egrad = array![0.5, 0.1, -0.2];
+        let rgrad = Hyperbolic.egrad2rgrad(&x, &egrad);
+        let slope = Hyperbolic.inner(&x, &rgrad, &t);
+        let euclid = vecops::dot(egrad.view(), t.view());
+        assert!((slope - euclid).abs() < 1e-14, "{slope} want {euclid}");
+        // Positive definite on the tangent space, though the form is not.
+        assert!(Hyperbolic.norm(&x, &t) > 0.0);
+        assert!(minkowski(x.view(), x.view()) < 0.0);
     }
 
     #[test]
