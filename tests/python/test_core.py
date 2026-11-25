@@ -36,6 +36,15 @@ def test_solver_config_round_trip() -> None:
     assert np.isfinite(report.value)
 
 
+def test_riemannian_cg_round_trip() -> None:
+    config = rgmin.SolverConfig("rcg", maxiter=2)
+    solver = rgmin.Solver(4, config)
+    assert solver.method == rgmin.Method.Rcg
+    assert rgmin.Method.RCG == rgmin.Method.Rcg
+    assert config.method_name == "rcg"
+    assert "rcg" in rgmin.SolverConfig.valid_methods()
+
+
 def test_unknown_option_lists_valid_names() -> None:
     with pytest.raises(ValueError, match="valid options") as exc:
         rgmin.SolverConfig("lbfgs", not_an_option=1.0)
