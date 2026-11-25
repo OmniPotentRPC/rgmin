@@ -33,7 +33,9 @@
 //! a fixed right preconditioner, fallible operators and a per-iteration
 //! [`KrylovObserver`]. They return a [`GmresRun`] or a typed
 //! [`GmresFailure`], each carrying the [`KrylovRecord`] of every
-//! iteration taken. [`fgmres`] and its types are unchanged by them.
+//! iteration taken. Both start at zero, so the initial relative residual
+//! is 1, and a tolerance of 1 or more accepts that residual with no
+//! application. [`fgmres`] and its types are unchanged by them.
 
 use std::num::NonZeroUsize;
 

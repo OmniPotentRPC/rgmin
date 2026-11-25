@@ -631,6 +631,10 @@ fn true_residual_norm(
 /// Every reported residual is recomputed as `‖b - A x_k‖` from the operator
 /// images already produced by Arnoldi. This adds no operator applications and
 /// prevents a small Givens estimate from accepting an inaccurate solution.
+///
+/// The starting iterate is zero, so the initial relative residual is 1. A
+/// tolerance of 1 or more returns that iterate as [`GmresStatus::Converged`]
+/// with no operator or preconditioner application.
 pub fn gmres_right<O, P, B>(
     operator: &mut O,
     preconditioner: &mut P,
@@ -663,6 +667,16 @@ where
         return Ok(GmresRun {
             solution: vec![0.0; dimension],
             status: GmresStatus::ZeroRightHandSide,
+            record,
+        });
+    }
+    // The initial iterate is zero, so its relative residual is exactly 1.
+    // Accepting it here skips Arnoldi: a zero operator would otherwise make
+    // the first column singular.
+    if options.relative_tolerance >= 1.0 {
+        return Ok(GmresRun {
+            solution: vec![0.0; dimension],
+            status: GmresStatus::Converged,
             record,
         });
     }
@@ -821,11 +835,32 @@ fn block_refusal<OE, PE>(
     }
 }
 
+fn idle_block_state(dimension: usize, status: GmresStatus, record: KrylovRecord) -> BlockState {
+    let right_hand_side_norm = record.right_hand_side_norm;
+    BlockState {
+        basis: Vec::new(),
+        preconditioned_basis: Vec::new(),
+        columns: Vec::new(),
+        cosines: Vec::new(),
+        sines: Vec::new(),
+        transformed_rhs: Vec::new(),
+        operator_images: Vec::new(),
+        run: Some(GmresRun {
+            solution: vec![0.0; dimension],
+            status,
+            record,
+        }),
+        record: KrylovRecord::new(right_hand_side_norm),
+    }
+}
+
 /// Block GMRES for several independent right-hand sides.
 ///
 /// Every active Arnoldi direction at an iteration is passed to
 /// [`LinearOperator::apply_batch`] in one call. Each column otherwise follows
 /// the scalar algorithm exactly, so batching does not change its trajectory.
+/// A column whose tolerance is at least 1, or whose right-hand side is zero,
+/// is finished before that loop and is not part of the batch.
 /// `operator_rounds` counts batch calls and `operator_applications` counts
 /// directions. The result ordering matches `right_hand_sides`.
 pub fn gmres_right_block<O, P, B>(
@@ -874,21 +909,14 @@ where
             return Err(refusal(KrylovRefusal::NonFinite, record));
         }
         if right_hand_side_norm == 0.0 {
-            states.push(BlockState {
-                basis: Vec::new(),
-                preconditioned_basis: Vec::new(),
-                columns: Vec::new(),
-                cosines: Vec::new(),
-                sines: Vec::new(),
-                transformed_rhs: Vec::new(),
-                operator_images: Vec::new(),
-                run: Some(GmresRun {
-                    solution: vec![0.0; dimension],
-                    status: GmresStatus::ZeroRightHandSide,
-                    record,
-                }),
-                record: KrylovRecord::new(right_hand_side_norm),
-            });
+            states.push(idle_block_state(
+                dimension,
+                GmresStatus::ZeroRightHandSide,
+                record,
+            ));
+        } else if options.relative_tolerance >= 1.0 {
+            // The initial iterate is zero, so its relative residual is exactly 1.
+            states.push(idle_block_state(dimension, GmresStatus::Converged, record));
         } else {
             states.push(BlockState {
                 basis: vec![
@@ -2076,6 +2104,167 @@ mod tests {
         }
         assert_eq!(operator.batch_calls, 0);
         Ok(())
+    }
+
+    struct ZeroOperator {
+        calls: usize,
+    }
+
+    impl LinearOperator for ZeroOperator {
+        type Error = core::convert::Infallible;
+
+        fn apply(&mut self, _input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {
+            self.calls += 1;
+            output.fill(0.0);
+            Ok(())
+        }
+    }
+
+    struct CountingPreconditioner {
+        calls: usize,
+    }
+
+    impl Preconditioner for CountingPreconditioner {
+        type Error = core::convert::Infallible;
+
+        fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {
+            self.calls += 1;
+            output.copy_from_slice(input);
+            Ok(())
+        }
+    }
+
+    fn assert_initial_acceptance(run: &GmresRun, right_hand_side_norm: f64) {
+        assert_eq!(run.status, GmresStatus::Converged);
+        assert_eq!(run.solution, vec![0.0; run.solution.len()]);
+        assert_eq!(run.record.right_hand_side_norm, right_hand_side_norm);
+        assert!(run.record.iterations.is_empty());
+        assert_eq!(run.record.operator_applications, 0);
+        assert_eq!(run.record.preconditioner_applications, 0);
+        assert_eq!(run.record.operator_rounds, 0);
+    }
+
+    fn refused_line(
+        solver: &str,
+        tolerance: f64,
+        failure: &impl std::fmt::Display,
+        applications: usize,
+    ) -> String {
+        format!(
+            "{solver} GMRES with a zero operator, b = [1] and rtol {tolerance} returned {failure} \
+             after {applications} operator applications"
+        )
+    }
+
+    #[test]
+    fn a_tolerance_of_at_least_one_accepts_the_initial_residual() {
+        let mut operator = ZeroOperator { calls: 0 };
+        let mut preconditioner = CountingPreconditioner { calls: 0 };
+        let mut observed = 0usize;
+        let below = gmres_right(
+            &mut operator,
+            &mut preconditioner,
+            &[1.0],
+            GmresOptions::unrestarted(1.0_f64.next_down()),
+            &mut |_| observed += 1,
+        );
+        match below {
+            Err(GmresFailure::Refused {
+                reason: KrylovRefusal::SingularProjectedSystem,
+                record,
+            }) => {
+                assert_eq!(record.iterations.len(), 1);
+                assert_eq!(record.operator_applications, 1);
+                assert_eq!(record.preconditioner_applications, 1);
+                assert_eq!(operator.calls, 1);
+                assert_eq!(preconditioner.calls, 1);
+                assert_eq!(observed, 1);
+            }
+            other => panic!("a tolerance just below 1 did not stay singular, got {other:?}"),
+        }
+
+        let mut problems = Vec::new();
+        for tolerance in [2.0, 1.0] {
+            let mut operator = ZeroOperator { calls: 0 };
+            let mut preconditioner = CountingPreconditioner { calls: 0 };
+            let mut observed = 0usize;
+            match gmres_right(
+                &mut operator,
+                &mut preconditioner,
+                &[1.0],
+                GmresOptions::unrestarted(tolerance),
+                &mut |_| observed += 1,
+            ) {
+                Ok(run) => {
+                    assert_initial_acceptance(&run, 1.0);
+                    assert_eq!(operator.calls, 0);
+                    assert_eq!(preconditioner.calls, 0);
+                    assert_eq!(observed, 0);
+                }
+                Err(failure) => problems.push(refused_line(
+                    "scalar",
+                    tolerance,
+                    &failure,
+                    failure.record().operator_applications,
+                )),
+            }
+
+            let mut operator = ZeroOperator { calls: 0 };
+            let mut preconditioners = [CountingPreconditioner { calls: 0 }];
+            match gmres_right_block(
+                &mut operator,
+                &mut preconditioners,
+                &[vec![1.0]],
+                GmresOptions::unrestarted(tolerance),
+                &mut [NoObserver],
+            ) {
+                Ok(runs) => {
+                    assert_eq!(runs.len(), 1);
+                    assert_initial_acceptance(&runs[0], 1.0);
+                    assert_eq!(operator.calls, 0);
+                    assert_eq!(preconditioners[0].calls, 0);
+                }
+                Err(failure) => problems.push(refused_line(
+                    "block",
+                    tolerance,
+                    &failure,
+                    failure.record().operator_applications,
+                )),
+            }
+        }
+
+        let mut operator = ZeroOperator { calls: 0 };
+        let mut preconditioners = [
+            CountingPreconditioner { calls: 0 },
+            CountingPreconditioner { calls: 0 },
+        ];
+        match gmres_right_block(
+            &mut operator,
+            &mut preconditioners,
+            &[vec![0.0], vec![1.0]],
+            GmresOptions::unrestarted(2.0),
+            &mut [NoObserver, NoObserver],
+        ) {
+            Ok(runs) => {
+                assert_eq!(runs[0].status, GmresStatus::ZeroRightHandSide);
+                assert_eq!(runs[0].solution, vec![0.0]);
+                assert!(runs[0].record.iterations.is_empty());
+                assert_initial_acceptance(&runs[1], 1.0);
+                assert_eq!(operator.calls, 0);
+                assert_eq!(preconditioners[0].calls, 0);
+                assert_eq!(preconditioners[1].calls, 0);
+            }
+            Err(failure) => problems.push(format!(
+                "block GMRES refused a zero column beside b = [1] at rtol 2: {failure} after {} \
+                 operator applications",
+                failure.record().operator_applications
+            )),
+        }
+        assert!(
+            problems.is_empty(),
+            "the initial relative residual of 1 was refused:\n{}",
+            problems.join("\n")
+        );
     }
 
     #[test]
