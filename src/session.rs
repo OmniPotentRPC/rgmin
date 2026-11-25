@@ -2003,6 +2003,30 @@ impl Solver {
         }
     }
 
+    /// Put a Riemannian CG start that misses its bonds on them, by the
+    /// bonded retraction of a zero step, so a stop measured there holds
+    /// for a point that keeps every bond. The other methods enter the set
+    /// in their constraint stepper. On an error `x` is left as it was.
+    fn rcg_enter_bonds(&self, x: &mut Array1<f64>) -> Result<()> {
+        let Overlay::Rcg(_) = self.overlay else {
+            return Ok(());
+        };
+        let Some(set) = self.constraints.as_deref() else {
+            return Ok(());
+        };
+        if set.excess(x.view()) <= 1.0 {
+            return Ok(());
+        }
+        let field = field::ProjectedField::new(self);
+        let bonded = crate::rcg::BondedManifold::new(&field, set);
+        let entered = bonded.retract(x, &Array1::zeros(x.len()));
+        if let Some(failure) = crate::rcg::Failures::take(&bonded) {
+            return Err(failure);
+        }
+        *x = entered;
+        Ok(())
+    }
+
     /// Vector transport. Quotient manifolds project at the arrival point.
     fn transport_vec(
         &mut self,
@@ -4819,6 +4843,7 @@ impl Solver {
             } else {
                 *x = obj.bounds().clip(x.view());
             }
+            self.rcg_enter_bonds(x)?;
         }
 
         if let Inner::Pso { .. } = &self.inner {
@@ -6511,7 +6536,8 @@ impl Solver {
     /// stationarity measure is the one a step opens with; a distance or
     /// equality constraint set does not project the gradient here, so
     /// such a session reads the larger, unprojected norm. Riemannian CG
-    /// is the exception: it reads the gradient cut by the bonds.
+    /// is the exception: it puts `x` on the bonds, as its step does, and
+    /// reads the gradient cut by them there.
     pub(crate) fn assess<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -6532,6 +6558,7 @@ impl Solver {
                 return Err(crate::step::non_finite());
             }
             *x = obj.bounds().clip(x.view());
+            self.rcg_enter_bonds(x)?;
             self.gradient_calls += 1;
             self.evals += 1;
             obj.value_and_gradient(x.view())
