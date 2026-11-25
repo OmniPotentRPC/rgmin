@@ -2011,20 +2011,28 @@ impl Solver {
     /// box only when the manifold fills the ambient coordinates. Every
     /// other Riemannian CG start is retracted onto the set. If that point
     /// lies outside the box it is pulled back along the tangent and
-    /// retracted again, so the caller's `x` stays on the manifold. A start
-    /// with no such point in the box is [`Error::OffManifold`], and `x` is
-    /// left as it was.
+    /// retracted again, so the caller's `x` stays on the manifold. The
+    /// bonds are entered last, and a bonded start outside the box is
+    /// refused as well, since entering the box again could break a bond.
+    /// A start with no such point in the box is [`Error::OffManifold`], and
+    /// `x` is left as it was.
     fn enter_start(&self, bounds: &eindir_core::Bounds<f64>, x: &mut Array1<f64>) -> Result<()> {
-        if matches!(self.overlay, Overlay::Rcg(_)) && !self.manifold.coordinate_clip_stays_on_set()
-        {
+        let rcg = matches!(self.overlay, Overlay::Rcg(_));
+        let off = || Error::OffManifold {
+            kind: self.manifold.as_str(),
+        };
+        let mut entered = if rcg && !self.manifold.coordinate_clip_stays_on_set() {
             let field = field::ProjectedField::new(self);
-            *x = crate::rcg::land_in_box(&field, x, bounds).ok_or(Error::OffManifold {
-                kind: self.manifold.as_str(),
-            })?;
+            crate::rcg::land_in_box(&field, x, bounds).ok_or_else(off)?
         } else {
-            *x = bounds.clip(x.view());
+            bounds.clip(x.view())
+        };
+        self.rcg_enter_bonds(&mut entered)?;
+        if rcg && !crate::rcg::closed_in_box(bounds, &entered) {
+            return Err(off());
         }
-        self.rcg_enter_bonds(x)
+        *x = entered;
+        Ok(())
     }
 
     /// Put a Riemannian CG start that misses its bonds on them, by the

@@ -628,6 +628,37 @@ fn a_start_with_no_retraction_in_the_box_is_refused() {
     }
 }
 
+/// Two atoms twice the bond length apart, in a box that keeps each one at
+/// least 0.9 from the origin. Putting them on the bond moves them closer,
+/// out of the box, so a step and a zero-budget run both refuse the start
+/// before the objective reads a point.
+#[test]
+fn a_start_whose_bonds_leave_the_box_is_refused() {
+    let set = DistanceConstraints::new(vec![(0, 1)], vec![1.0]).unwrap();
+    let lo = array![-2.0, -1.0, -1.0, 0.9, -1.0, -1.0];
+    let hi = array![-0.9, 1.0, 1.0, 2.0, 1.0, 1.0];
+    let start = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    assert!(in_closed_box(&lo, &hi, &start));
+    for maxiter in [0, 6] {
+        let obj = Seen::new(lo.clone(), hi.clone(), Array1::zeros(6));
+        let control = Control::default().with_maxiter(maxiter);
+        let mut solver = Solver::new(Method::rcg(), control, 6);
+        solver.set_distance_constraints(set.clone()).unwrap();
+        let mut x = start.clone();
+        let error = solver.run(&obj, &mut x).unwrap_err();
+        assert!(
+            matches!(error, Error::OffManifold { kind: "euclidean" }),
+            "maxiter {maxiter}: {error:?}"
+        );
+        assert_eq!(x, start, "maxiter {maxiter}");
+        assert!(
+            obj.points().is_empty(),
+            "maxiter {maxiter}: {:?}",
+            obj.points()
+        );
+    }
+}
+
 /// A box that cuts the Stiefel manifold. Every accepted trial stays
 /// orthonormal: the columns of `X` obey `X^T X = I`.
 #[test]

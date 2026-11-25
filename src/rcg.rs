@@ -884,7 +884,7 @@ fn bounds_bind(bounds: &eindir_core::Bounds<f64>) -> bool {
 ///
 /// A retraction that lands on a wall is in the closed box. One that
 /// overshoots by more than the tolerance is not a point of the curve.
-fn closed_in_box(bounds: &eindir_core::Bounds<f64>, point: &Array1<f64>) -> bool {
+pub(crate) fn closed_in_box(bounds: &eindir_core::Bounds<f64>, point: &Array1<f64>) -> bool {
     let clipped = crate::step::clip_owned(bounds, point.clone());
     let scale = 1.0 + crate::vecops::nrm2(point.view());
     crate::vecops::nrm2_diff(clipped.view(), point.view()) <= 1e-10 * scale
