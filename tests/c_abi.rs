@@ -1643,6 +1643,35 @@ fn c_abi_fire_config_and_lbfgs_fixed_h0() {
         }
         unsafe { rgmin_solver_free(session) };
     }
+
+    let fire2 = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE2, &ctrl, 2) };
+    assert_eq!(
+        unsafe { rgmin_solver_set_fire_config(fire2, 0.08, 0.8, 7, 1.2, 0.4, 0.2, 0.95) },
+        0
+    );
+    let mut x = [0.5, -0.25];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
+    };
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let st = unsafe {
+        rgmin_solver_step(
+            fire2,
+            Some(quad_eval),
+            Some(quad_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert_ne!(x, [0.5, -0.25], "config did not change the trajectory");
+    unsafe { rgmin_solver_free(fire2) };
 }
 
 /// Two atoms at force 0.9 each: max-atom 0.9, RMS 0.52, two-norm 1.27.

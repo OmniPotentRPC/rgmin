@@ -90,6 +90,48 @@ const GROMACS_CG_LINESEARCH: LineSearch = LineSearch::Wolfe {
     maxiter: crate::gromacs::GROMACS_CG_WOLFE_MAXITER,
 };
 
+fn validate_fire_config(config: &FireConfig) -> Result<()> {
+    if !config.dt.is_finite() || config.dt <= 0.0 {
+        return Err(Error::InvalidControl {
+            what: "fire config dt must be finite and positive",
+        });
+    }
+    if !config.dt_max.is_finite() || config.dt_max <= 0.0 {
+        return Err(Error::InvalidControl {
+            what: "fire config dt_max must be finite and positive",
+        });
+    }
+    if config.dt > config.dt_max {
+        return Err(Error::InvalidControl {
+            what: "fire config dt must not exceed dt_max",
+        });
+    }
+    if !config.f_inc.is_finite() || config.f_inc <= 1.0 {
+        return Err(Error::InvalidControl {
+            what: "fire config f_inc must be finite and > 1",
+        });
+    }
+    // Ordered comparisons are false for NaN, and infinities sit outside
+    // (0, 1), so this rejects non-finite values as well as the closed
+    // endpoints. `x <= 0 || x >= 1` would accept NaN.
+    if !(0.0 < config.f_dec && config.f_dec < 1.0) {
+        return Err(Error::InvalidControl {
+            what: "fire config f_dec must be finite and in (0, 1)",
+        });
+    }
+    if !(0.0 < config.alpha && config.alpha < 1.0) {
+        return Err(Error::InvalidControl {
+            what: "fire config alpha must be finite and in (0, 1)",
+        });
+    }
+    if !(0.0 < config.f_alpha && config.f_alpha < 1.0) {
+        return Err(Error::InvalidControl {
+            what: "fire config f_alpha must be finite and in (0, 1)",
+        });
+    }
+    Ok(())
+}
+
 /// Why a capped trial did not move.
 enum CappedMiss {
     /// The quasi-Newton trial was non-finite. Try the force once.
@@ -5982,13 +6024,12 @@ impl Solver {
 
     /// Integrator parameters of a FIRE session. The velocity is cleared.
     pub fn set_fire_config(&mut self, config: FireConfig) -> Result<()> {
+        validate_fire_config(&config)?;
         match &mut self.inner {
             Inner::Fire(state) => {
                 state.apply_config(&config);
-                if config.dt.is_finite() && config.dt > 0.0 {
-                    self.control.istep = config.dt;
-                    self.istep = config.dt;
-                }
+                self.control.istep = config.dt;
+                self.istep = config.dt;
                 Ok(())
             }
             _ => Err(Error::NeedFire),
@@ -7238,6 +7279,66 @@ mod tests {
         let trace = solver.take_fire_trace();
         assert_eq!(trace.len(), 5);
         assert_eq!(trace.last().unwrap().clipped_moves, 5);
+    }
+
+    #[test]
+    fn fire_config_rejects_nan_zero_one_and_inf() {
+        let mut solver = fire_solver(FireKind::V1);
+        let bad = [f64::NAN, 0.0, 1.0, f64::INFINITY, f64::NEG_INFINITY];
+        for value in bad {
+            let err = solver
+                .set_fire_config(FireConfig::default().with_f_dec(value))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config f_dec must be finite and in (0, 1)",
+                    }
+                ),
+                "{value}: {err}"
+            );
+            let err = solver
+                .set_fire_config(FireConfig::default().with_alpha(value))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config alpha must be finite and in (0, 1)",
+                    }
+                ),
+                "{value}: {err}"
+            );
+            let err = solver
+                .set_fire_config(FireConfig::default().with_f_alpha(value))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config f_alpha must be finite and in (0, 1)",
+                    }
+                ),
+                "{value}: {err}"
+            );
+        }
+        let err = solver
+            .set_fire_config(FireConfig::default().with_dt(2.0).with_dt_max(1.0))
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::InvalidControl {
+                    what: "fire config dt must not exceed dt_max",
+                }
+            ),
+            "{err}"
+        );
+        solver.set_fire_config(FireConfig::default()).unwrap();
+        assert_eq!(fire_state(&solver).f_dec, 0.5);
+        assert_eq!(fire_state(&solver).alpha, 0.1);
+        assert_eq!(fire_state(&solver).f_alpha, 0.99);
     }
 
     #[test]

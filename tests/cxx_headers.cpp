@@ -903,7 +903,10 @@ int main() {
     rgmin::Solver fire2(rgmin::Method::Fire2, stop_ctrl, 2);
     rgmin::Solver steep(rgmin::Method::GromacsSteep, stop_ctrl, 2);
     if (stopper.set_fire_abc(true) != 1 ||
+        stopper.set_fire_config(0.1, 1.0, 5, 1.1, 0.5, 0.1, 0.99) != 0 ||
+        steep.set_fire_config(0.1, 1.0, 20, 1.1, 0.5, 0.25, 0.99) != 1 ||
         fire2.set_fire_preset(RGMIN_FIRE_PRESET_GUENOLE2020) != 0 ||
+        fire2.set_fire_config(0.1, 1.0, 20, 1.1, 0.5, 0.25, 0.99) != 0 ||
         fire2.set_fire_abc(true) != 0 ||
         steep.set_gromacs_steep(0.5, 8) != 0 ||
         stopper.set_gromacs_steep(0.5, 8) != 1) {
