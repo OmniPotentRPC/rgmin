@@ -7090,6 +7090,7 @@ impl Solver {
                     }
                     (f, g)
                 };
+                let held = state.clone();
                 let moved = if let Some(set) = self.constraints.as_deref() {
                     let bonded = crate::rcg::BondedManifold::new(&field, set);
                     crate::rcg::rcg_step(
@@ -7129,10 +7130,13 @@ impl Solver {
                 // The caller converts the gradient returned here, and
                 // `egrad2rgrad` is not idempotent on the Poincare ball, the
                 // positive orthant or SPD. A kept start returns its
-                // Euclidean gradient, as a moved step does.
+                // Euclidean gradient, as a moved step does. Its memory is
+                // the one held before the step: the step built its
+                // direction and step length at the refused point.
                 if noise {
                     energy_stall = true;
                     grad = egrad;
+                    *state = held;
                 } else {
                     *x = moved.x;
                     value = moved.value;
@@ -7390,6 +7394,35 @@ mod tests {
             Overlay::Rcg(memory) => memory.holds_direction(),
             _ => panic!("not a Riemannian CG session"),
         }
+    }
+
+    fn rcg_memory(solver: &Solver) -> String {
+        match &solver.overlay {
+            Overlay::Rcg(memory) => format!("{memory:?}"),
+            _ => panic!("not a Riemannian CG session"),
+        }
+    }
+
+    /// A step refused at the energy noise floor keeps its start, and the
+    /// memory the next step reads is the one held at that start.
+    #[test]
+    fn a_noise_floor_refusal_keeps_the_riemannian_cg_memory() {
+        let quad = Oracle::unbounded(1, |x: ArrayView1<f64>| (0.5 * x[0] * x[0], array![x[0]]));
+        let control = Control::default()
+            .with_maxiter(20)
+            .with_gtol(1e-8)
+            .with_noise_floor(crate::NoiseFloor::new(0.0).with_eps_f(1.0));
+        let mut solver = Solver::new(Method::rcg(), control, 1);
+        let before = rcg_memory(&solver);
+        let mut x = array![0.5];
+        let report = solver.step(&quad, &mut x).unwrap();
+        assert_eq!(report.status, Status::NoiseFloor);
+        assert_eq!(x, array![0.5]);
+        assert!(
+            !rcg_holds_direction(&solver),
+            "the direction was built at the refused point"
+        );
+        assert_eq!(rcg_memory(&solver), before);
     }
 
     #[test]

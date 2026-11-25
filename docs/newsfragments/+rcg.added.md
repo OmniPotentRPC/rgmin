@@ -7,7 +7,7 @@ In a session the method honours `maxmove` and the per-atom cap, composes a dista
 A distance constraint set with masses steps along the cut gradient raised by the inverse masses, and its stop and report read the cut gradient.
 A start with no retraction in the box, or one that putting on its bonds moves out of the box, returns `Error::OffManifold` before the objective reads a point.
 Each Wolfe slope is the Euclidean gradient against the velocity of the retraction curve, the derivative of the value along it, so the strong Wolfe tests hold on the Poincare ball and the hyperboloid as well.
-A step that stalls on the energy noise floor keeps its start and reports `NoiseFloor`.
+A step that stalls on the energy noise floor keeps its start and the direction and step memory held there, and reports `NoiseFloor`.
 `RcgOptions::validate` refuses a non-finite or negative tolerance and a non-finite or non-positive initial step with `Error::InvalidControl`, and a projection or retraction that fails, or a retraction slope that cannot be resolved, is returned as a typed error.
 The Python session accepts `rcg`, and `rgmin.optimize.RiemannianCG` runs it from ASE with the default per-atom cap off unless `maxstep` is set.
 `Manifold::to_tangent` projects a vector that is not a gradient, such as the velocity of a curve, and is the identity on the Poincare ball, whose `project` converts a gradient.
