@@ -3,7 +3,7 @@
   "projectTitle": "rgmin",
   "description": "Rust local-minimization steppers (L-BFGS, NLCG, Newton, FIRE) with a C ABI and Python bindings.",
   "folders": [
-    "docs/orgmode",
+    "docs",
     "examples",
     "include",
     "python"
