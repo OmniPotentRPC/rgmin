@@ -150,6 +150,30 @@ rgmin_report_t report;
 rgmin_status_t st = rgmin_minimize(eval, grad, user, x, &ctrl, RGMIN_LBFGS, &report);
 #+end_src
 
+A run that spends its budget, fails its line search, reaches line-search rounding, leaves a backward
+polish unmet or spends the evaluation budget still returns
+~RGMIN_SUCCESS~, with the stop in ~rgmin_report_t.stop~. The one-shots
+whose names end in ~_opts~ add ~error_on_unmet~ and ~backward_polish~
+before ~out~. A
+nonzero ~error_on_unmet~ writes ~x~ and ~out~ for those five stops and
+then returns ~RGMIN_UNMET_STOP~, so the host reads the report and still
+sees the run as unmet. ~rgmin_minimize_eindir_opts~ is the same for an
+~eindir_objective_t~:
+
+#+begin_src c
+rgmin_status_t st = rgmin_minimize_eindir_opts(
+    objective, &stamp, x, &ctrl, RGMIN_LBFGS, /* error_on_unmet */ 1,
+    /* backward_polish */ 0, &report);
+if (st == RGMIN_UNMET_STOP) {
+    /* x holds the last iterate and report.stop names the unmet stop */
+}
+#+end_src
+
+~rgmin_minimize_eindir~ is that call with both flags off. An eindir
+objective has no Hessian, so ~backward_polish~ does not change this
+entry. Its errors name the symbol the host called, in
+~rgmin_last_error~.
+
 SCG takes the same one-shot shape.
 Conjugacy is a field on ~rgmin_scg_params_t~, not a different entry point.
 Stamp is 1.13.3 (~xts_abi_compatible~ still checks major and layout only).
