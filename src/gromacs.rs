@@ -538,7 +538,7 @@ impl GromacsLbfgs {
         if !self.initialized {
             self.restart_steepest(force, force_norm);
         } else if self.rebase_pending {
-            self.apply_pairs(force)?;
+            self.direction = self.two_loop(force)?;
             self.step_size = inverse_force_norm(force_norm);
             self.rebase_pending = false;
         }
@@ -570,7 +570,8 @@ impl GromacsLbfgs {
     ///
     /// `displacement` is the move the session applied, `x_new - x_old`
     /// after retraction and bound clipping, not the line step times the
-    /// search direction.
+    /// search direction. An error leaves the pairs, direction, and line
+    /// step as they were.
     pub(crate) fn accept(
         &mut self,
         old_force: ArrayView1<'_, f64>,
@@ -590,31 +591,43 @@ impl GromacsLbfgs {
                 what: "accepted step has zero or non-finite curvature",
             });
         }
-        if self.pairs.len() == self.config.nbfgscorr {
-            let _ = self.pairs.pop_front();
-        }
+        let evicted = if self.pairs.len() == self.config.nbfgscorr {
+            self.pairs.pop_front()
+        } else {
+            None
+        };
         self.pairs.push_back(GromacsLbfgsPair {
             displacement,
             gradient_change,
             rho: 1.0 / sy,
             diagonal: sy / yy,
         });
-        self.apply_pairs(new_force)?;
-        self.step_size = GROMACS_LBFGS_RESET_STEP;
-        Ok(())
+        match self.two_loop(new_force) {
+            Ok(direction) => {
+                self.direction = direction;
+                self.step_size = GROMACS_LBFGS_RESET_STEP;
+                Ok(())
+            }
+            Err(error) => {
+                let _ = self.pairs.pop_back();
+                if let Some(pair) = evicted {
+                    self.pairs.push_front(pair);
+                }
+                Err(error)
+            }
+        }
     }
 
-    fn apply_pairs(&mut self, force: ArrayView1<'_, f64>) -> Result<()> {
-        self.direction.assign(&force);
+    fn two_loop(&self, force: ArrayView1<'_, f64>) -> Result<Array1<f64>> {
+        let mut direction = force.to_owned();
         if self.pairs.is_empty() {
-            return Ok(());
+            return Ok(direction);
         }
         let mut alpha = Vec::with_capacity(self.pairs.len());
         for pair in self.pairs.iter().rev() {
-            let coefficient = pair.rho * pair.displacement.dot(&self.direction);
+            let coefficient = pair.rho * pair.displacement.dot(&direction);
             alpha.push(coefficient);
-            self.direction
-                .scaled_add(-coefficient, &pair.gradient_change);
+            direction.scaled_add(-coefficient, &pair.gradient_change);
         }
         let diagonal = self
             .pairs
@@ -623,22 +636,17 @@ impl GromacsLbfgs {
             .ok_or(Error::GromacsLbfgs {
                 what: "accepted correction was not retained",
             })?;
-        self.direction *= diagonal;
+        direction *= diagonal;
         for (pair, coefficient) in self.pairs.iter().zip(alpha.into_iter().rev()) {
-            let beta = pair.rho * pair.gradient_change.dot(&self.direction);
-            self.direction
-                .scaled_add(coefficient - beta, &pair.displacement);
+            let beta = pair.rho * pair.gradient_change.dot(&direction);
+            direction.scaled_add(coefficient - beta, &pair.displacement);
         }
-        if self
-            .direction
-            .iter()
-            .any(|component| !component.is_finite())
-        {
+        if direction.iter().any(|component| !component.is_finite()) {
             return Err(Error::GromacsLbfgs {
                 what: "two-loop recursion produced a non-finite direction",
             });
         }
-        Ok(())
+        Ok(direction)
     }
 
     #[cfg(test)]
@@ -1021,6 +1029,60 @@ mod tests {
             assert_eq!(state.filter_beta(GROMACS_CG_BETA_CAP + 0.1), 0.0);
             state.advance();
         }
+    }
+
+    fn lbfgs_pair(displacement: Array1<f64>, gradient_change: Array1<f64>) -> GromacsLbfgsPair {
+        GromacsLbfgsPair {
+            displacement,
+            gradient_change,
+            rho: 1.0,
+            diagonal: 1.0,
+        }
+    }
+
+    #[test]
+    fn a_failed_lbfgs_accept_keeps_the_pairs_direction_and_line_step() {
+        let mut state = GromacsLbfgs::new(2);
+        state
+            .set_config(GromacsLbfgsConfig::default().with_nbfgscorr(2))
+            .unwrap();
+        state.restart_steepest(ndarray::array![1.0, 0.0].view(), 1.0);
+        // The newer retained pair overflows the first two-loop pass on
+        // `x1`, so the accept below fails after evicting the older pair.
+        state.pairs.push_back(lbfgs_pair(
+            ndarray::array![-1.0, 0.0],
+            ndarray::array![-1.0, 0.0],
+        ));
+        state.pairs.push_back(lbfgs_pair(
+            ndarray::array![0.0, 1.0e200],
+            ndarray::array![0.0, 1.0e200],
+        ));
+        let direction = ndarray::array![0.25, -0.5];
+        state.set_direction(direction.clone());
+        let step_size = state.step_size();
+
+        let result = state.accept(
+            ndarray::array![1.0, 1.0].view(),
+            ndarray::array![0.5, 1.0].view(),
+            ndarray::array![0.5, 0.0],
+        );
+
+        assert!(
+            matches!(result, Err(Error::GromacsLbfgs { .. })),
+            "{result:?}"
+        );
+        assert_eq!(state.pair_count(), 2);
+        let kept: Vec<Array1<f64>> = state
+            .pairs
+            .iter()
+            .map(|pair| pair.displacement.clone())
+            .collect();
+        assert_eq!(
+            kept,
+            [ndarray::array![-1.0, 0.0], ndarray::array![0.0, 1.0e200]]
+        );
+        assert_eq!(state.direction().to_owned(), direction);
+        assert_eq!(state.step_size().to_bits(), step_size.to_bits());
     }
 
     #[test]
