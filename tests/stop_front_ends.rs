@@ -242,18 +242,28 @@ fn out_of_bounds_starts_have_identical_session_and_one_shot_results() {
         )
         .unwrap();
 
+        let session = || {
+            let mut solver = Solver::new(method.clone(), control.clone(), 1);
+            solver.set_accept(Accept::Energy);
+            solver.set_geometry_step(false);
+            if matches!(method, Method::Lbfgs { .. }) {
+                solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+            }
+            solver
+        };
         let mut x = array![2.0];
-        let mut solver = Solver::new(method.clone(), control, 1);
-        solver.set_accept(Accept::Energy);
-        solver.set_geometry_step(false);
-        if matches!(method, Method::Lbfgs { .. }) {
-            solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
-        }
-        let stepped = solver.run(&BoundedUphill, &mut x).unwrap();
+        let stepped = session().run(&BoundedUphill, &mut x).unwrap();
+        let mut xg = array![2.0];
+        let gauged = session()
+            .run_gauged(&BoundedUphill, &mut xg, |_| {})
+            .unwrap();
 
         assert_eq!(stepped.stop_reason(), one_shot.stop_reason(), "{method:?}");
+        assert_eq!(gauged.stop_reason(), one_shot.stop_reason(), "{method:?}");
         assert_eq!(stepped.steps, one_shot.steps, "{method:?}");
+        assert_eq!(gauged.steps, one_shot.steps, "{method:?}");
         assert_eq!(x, one_shot.coords, "{method:?}");
+        assert_eq!(xg, one_shot.coords, "{method:?}");
     }
 }
 
