@@ -7035,8 +7035,13 @@ impl Solver {
                         .control
                         .noise_floor
                         .is_some_and(|floor| floor.stalled_on_energy(best_decrease.get()));
+                // The caller converts the gradient returned here, and
+                // `egrad2rgrad` is not idempotent on the Poincare ball, the
+                // positive orthant or SPD. A kept start returns its
+                // Euclidean gradient, as a moved step does.
                 if noise {
                     energy_stall = true;
+                    grad = egrad;
                 } else {
                     *x = moved.x;
                     value = moved.value;
