@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import gc
+
 import numpy as np
 import pytest
 
@@ -62,6 +64,34 @@ def test_a_no_move_lbfgs_run_is_line_search_like_the_c_one_shot() -> None:
     assert report.steps == 3
 
 
+def test_a_start_outside_the_box_is_measured_from_its_clipped_point() -> None:
+    seen: list[float] = []
+
+    def uphill(x: np.ndarray) -> tuple[float, np.ndarray]:
+        seen.append(float(x[0]))
+        return _uphill(x)
+
+    report, x = rgmin.minimize(
+        uphill, np.array([1e13]), "lbfgs", linesearch="wolfe", maxiter=3, gtol=1e-8
+    )
+    assert seen[0] == 1e12
+    assert x[0] == 1e12
+    assert report.stop == rgmin.Stop.LINE_SEARCH
+    assert report.converged() is False
+
+    with pytest.raises(rgmin.StopUnmetError) as raised:
+        rgmin.minimize(
+            _uphill,
+            np.array([1e13]),
+            "lbfgs",
+            linesearch="wolfe",
+            maxiter=3,
+            gtol=1e-8,
+            error_on_unmet=True,
+        )
+    assert raised.value.report.stop == rgmin.Stop.LINE_SEARCH
+
+
 def test_a_no_move_lbfgs_run_raises_when_the_stop_is_asked_for() -> None:
     with pytest.raises(RuntimeError, match="stop unmet"):
         rgmin.minimize(
@@ -91,6 +121,35 @@ def test_unmet_error_is_a_runtime_error_that_carries_the_report() -> None:
     assert error.report.grad_norm == spent.grad_norm
     assert error.report.grad_norm > 1e-12
     assert str(error).startswith("stop unmet after 6 steps")
+
+
+def test_unmet_report_outlives_the_caught_exception() -> None:
+    def catch_report() -> rgmin.Report:
+        try:
+            rgmin.minimize(
+                _rose,
+                np.array([-1.2, 1.0]),
+                "lbfgs",
+                maxiter=6,
+                gtol=1e-12,
+                error_on_unmet=True,
+            )
+        except rgmin.StopUnmetError as error:
+            return error.report
+        raise AssertionError("the unmet run did not raise")
+
+    report = catch_report()
+    gc.collect()
+    assert report.stop == rgmin.Stop.BUDGET
+    assert report.steps == 6
+    assert np.isfinite(report.value)
+    assert report.grad_norm > 1e-12
+
+
+def test_a_directly_built_unmet_error_has_a_report() -> None:
+    error = rgmin.StopUnmetError("msg")
+    assert str(error) == "msg"
+    assert isinstance(error.report, rgmin.Report)
 
 
 def test_unmet_error_carries_the_line_search_stop_of_a_no_move_run() -> None:

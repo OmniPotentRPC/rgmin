@@ -76,7 +76,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 57
+#define RGMIN_ABI_VERSION_MINOR 64
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -102,7 +102,10 @@ typedef struct rgmin_abi_stamp_t {
  * 56 rgmin_manifold_rigid_quotient, rgmin_rtr_tcg_solve,
  *    rgmin_rtr_radius_update, rgmin_lowest_eigenpair_on_manifold,
  *    rgmin_lowest_eigenpairs_projected. rgmin_control_t is unchanged.
- * 57 RGMIN_STOP_LINE_SEARCH_ROUNDING. rgmin_control_t is unchanged. */
+ * 57 RGMIN_STOP_LINE_SEARCH_ROUNDING. rgmin_control_t is unchanged.
+ * 64 stop-reporting fixes and eindir one-shots that name the called
+ *    entry in rgmin_last_error while preserving callback-failure errors.
+ *    No C symbols or struct layouts change. */
 #define RGMIN_ABI_LAYOUT_REVISION 6
 /* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the

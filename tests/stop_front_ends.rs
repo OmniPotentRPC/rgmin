@@ -17,7 +17,9 @@ use rgmin::ffi::{
     rgmin_control_t, rgmin_method_t, rgmin_minimize, rgmin_minimize_opts, rgmin_report_t,
     rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
-use rgmin::{Accept, Control, LbfgsStep, LineSearch, Method, Solver, StopReason, minimize_method};
+use rgmin::{
+    Accept, Control, Error, LbfgsStep, LineSearch, Method, Solver, StopReason, minimize_method,
+};
 
 const BUDGET: usize = 3;
 const START: f64 = 1.0;
@@ -330,5 +332,31 @@ fn returning_to_the_start_after_moving_stays_maxiter() {
         } else {
             assert!(xg[0].abs() < 0.01 && xg[0] != 0.0, "xg={xg:?}");
         }
+    }
+}
+
+#[test]
+fn session_runs_reject_mismatched_dimensions_before_clipping() {
+    let wide = rgmin::Oracle::unbounded(2, |x: ArrayView1<f64>| {
+        (x.dot(&x), array![2.0 * x[0], 2.0 * x[1]])
+    });
+    for gauged in [false, true] {
+        let mut point = array![1.0];
+        let err = if gauged {
+            session().run_gauged(&wide, &mut point, |_| {}).unwrap_err()
+        } else {
+            session().run(&wide, &mut point).unwrap_err()
+        };
+        assert!(matches!(err, Error::Dim { got: 2, dim: 1 }));
+
+        let mut point = array![1.0, 2.0];
+        let err = if gauged {
+            session()
+                .run_gauged(&uphill(), &mut point, |_| {})
+                .unwrap_err()
+        } else {
+            session().run(&uphill(), &mut point).unwrap_err()
+        };
+        assert!(matches!(err, Error::Dim { got: 2, dim: 1 }));
     }
 }
