@@ -45,6 +45,7 @@ _OPTIMIZERS = frozenset(
         "NewtonCG",
         "NewtonPCG",
         "PolakRibiere",
+        "RiemannianCG",
         "SR1",
         "SR2",
         "SteepestDescent",

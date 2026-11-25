@@ -484,6 +484,39 @@ def test_session_refuses_hessian_methods_and_misplaced_options():
         Session("sd", 3, accept="sometimes")
 
 
+def test_rcg_session_skips_the_default_atom_cap():
+    def shifted_bowl(point):
+        x = np.asarray(point)
+        delta = x - 10.0
+        return 0.5 * float(delta @ delta), delta.tolist()
+
+    start = [0.0]
+    default = Session("rcg", 1).step(start, shifted_bowl)[0]
+    uncapped = Session("rcg", 1, max_atom=0.0).step(start, shifted_bowl)[0]
+    capped = Session("rcg", 1, max_atom=0.2).step(start, shifted_bowl)[0]
+    assert default == uncapped
+    assert default != capped
+
+
+def test_rcg_session_moves_every_atom_past_the_default_cap():
+    target = np.array([10.0, 0.0, 0.0, 0.0, 12.0, 0.0])
+
+    def far_bowl(point):
+        delta = np.asarray(point) - target
+        return 0.5 * float(delta @ delta), delta.tolist()
+
+    def longest_atom_move(session):
+        x = [0.0] * 6
+        before = np.array(x)
+        for _ in range(3):
+            x = session.step(x, far_bowl)[0]
+        return float(np.linalg.norm((np.array(x) - before).reshape(2, 3), axis=1).max())
+
+    assert longest_atom_move(Session("rcg", 6)) > 1.0
+    assert longest_atom_move(Session("rcg", 6, max_atom=0.2)) <= 3 * 0.2 + 1e-9
+    assert longest_atom_move(Session("sd", 6)) <= 3 * 0.2 + 1e-9
+
+
 def test_every_gradient_session_method_has_a_class():
     kinds = {getattr(optimize, name).kind for name in optimize.__all__}
     tokens = {"lbfgs", "bfgs", "sr1", "sr2", "adam", "sd", "bb", "fire", "fire2", "newton-cg", "newton-pcg"}
@@ -500,6 +533,7 @@ def test_every_gradient_session_method_has_a_class():
         "fr-pr",
         "gromacs-steep",
         "gromacs-cg",
+        "rcg",
     }
     for token in tokens:
         Session(token, 3)
