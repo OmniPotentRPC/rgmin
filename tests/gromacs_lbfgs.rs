@@ -204,6 +204,31 @@ fn machine_precision_stops_on_a_rounded_step_or_an_empty_memory_search() {
     assert_eq!(report.coords, Array1::<f64>::zeros(3));
 }
 
+#[test]
+fn error_on_unmet_counts_a_machine_precision_stop_as_unmet() {
+    assert!(rgmin::StopReason::MachinePrecision.is_unmet());
+    let flat = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+        if x[0] > 0.0 {
+            (1.0, array![1.0, 0.0, 0.0])
+        } else {
+            (1.0, array![-1.0, 0.0, 0.0])
+        }
+    });
+    let mut solver = Solver::new(
+        Method::GromacsLbfgs,
+        control(1.0, 0.0, 10).with_error_on_unmet(true),
+        3,
+    );
+    let mut point = Array1::zeros(3);
+    let error = solver.run(&flat, &mut point).unwrap_err();
+    let Error::StopUnmet { reason, report } = error else {
+        panic!("expected StopUnmet, got {error:?}");
+    };
+    assert_eq!(reason, rgmin::StopReason::MachinePrecision);
+    assert_eq!(report.status, Status::MachinePrecision);
+    assert_eq!(report.coords, point);
+}
+
 /// One GROMACS L-BFGS step from the origin on a line profile `t -> (value, slope)`
 /// along `x[0]`; the opening force is 1, so trial alphas equal `t`.
 fn first_step_line_trials(profile: fn(f64) -> (f64, f64)) -> (Vec<f64>, f64, f64) {

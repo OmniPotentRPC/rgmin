@@ -30,7 +30,8 @@ An ``lbfgs`` run that spends its budget with ``x`` unmoved stops on
 and default to off. ``require_convergence`` raises ``NotConverged`` when the
 gradient norm is not below ``gtol``. ``error_on_unmet`` raises
 ``StopUnmetError`` when the run stops on ``BUDGET``, ``LINE_SEARCH``,
-``LINE_SEARCH_ROUNDING``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. It is a
+``LINE_SEARCH_ROUNDING``, ``MACHINE_PRECISION``, ``POLISH_UNMET``, or
+``EVAL_BUDGET``. It is a
 ``RuntimeError`` whose ``report`` attribute is the ``Report`` of the stop.
 ``backward_polish`` is stored on the session. This step loop does not form
 a Hessian, so

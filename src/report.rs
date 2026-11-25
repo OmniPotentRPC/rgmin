@@ -93,13 +93,17 @@ impl StopReason {
     ///
     /// [`Self::NoiseFloor`], [`Self::StepTolerance`] and
     /// [`Self::EnergyTolerance`] are stops that held.
-    /// [`Self::Iterating`] is a step still in progress.
+    /// [`Self::MachinePrecision`] is unmet: like GROMACS, which reports
+    /// that it converged to machine precision but not to the requested
+    /// `Fmax`, the step can no longer move while the gradient is still
+    /// above `gtol`. [`Self::Iterating`] is a step still in progress.
     pub fn is_unmet(self) -> bool {
         matches!(
             self,
             Self::MaxIter
                 | Self::LineSearchFailed
                 | Self::LineSearchRounding
+                | Self::MachinePrecision
                 | Self::PolishUnmet
                 | Self::EvalBudget
         )

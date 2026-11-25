@@ -269,6 +269,18 @@ def test_gromacs_steep_mdp_and_zero_budget() -> None:
     assert rep_mp.stop == rgmin.Stop.MACHINE_PRECISION
     assert x_mp[0] == 1.0
 
+    with pytest.raises(rgmin.StopUnmetError) as unmet:
+        rgmin.minimize(
+            slope,
+            np.array([1.0, 0.0, 0.0], dtype=np.float64),
+            "gromacs-steep",
+            gtol=0.0,
+            istep=1e-18,
+            maxiter=5,
+            error_on_unmet=True,
+        )
+    assert unmet.value.report.stop == rgmin.Stop.MACHINE_PRECISION
+
     rep_cfg, x_cfg = rgmin.minimize(
         _quad,
         np.array([0.3], dtype=np.float64),

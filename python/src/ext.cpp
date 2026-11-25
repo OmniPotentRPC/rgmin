@@ -795,6 +795,7 @@ NB_MODULE(_core, m) {
             if (config.error_on_unmet() &&
                 (report.stop == RGMIN_STOP_BUDGET || report.stop == RGMIN_STOP_LINE_SEARCH ||
                  report.stop == RGMIN_STOP_LINE_SEARCH_ROUNDING ||
+                 report.stop == RGMIN_STOP_MACHINE_PRECISION ||
                  report.stop == RGMIN_STOP_POLISH_UNMET ||
                  report.stop == RGMIN_STOP_EVAL_BUDGET)) {
                 std::ostringstream message;
@@ -813,8 +814,8 @@ NB_MODULE(_core, m) {
         "when the gradient norm is still above ``gtol``. "
         "``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` "
         "that carries the ``Report`` as ``.report``, when the stop is "
-        "``BUDGET``, ``LINE_SEARCH``, ``LINE_SEARCH_ROUNDING``, ``POLISH_UNMET``, "
-        "or ``EVAL_BUDGET``. "
+        "``BUDGET``, ``LINE_SEARCH``, ``LINE_SEARCH_ROUNDING``, ``MACHINE_PRECISION``, "
+        "``POLISH_UNMET``, or ``EVAL_BUDGET``. "
         "``backward_polish`` "
         "is stored on the session and is not used by this step loop, which "
         "does not form a Hessian.");
