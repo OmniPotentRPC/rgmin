@@ -13,7 +13,7 @@
 use ndarray::{Array1, ArrayView1};
 
 use super::axpy;
-use super::conditions::{armijo, roundoff_strong_wolfe, strong_curvature};
+use super::conditions::{armijo, roundoff_strong_wolfe, strong_curvature, strong_wolfe};
 use super::{Path, scored, unusable};
 
 /// Evaluate `φ(α) = f(x + α d)` and `φ'(α) = ∇f(x + α d) · d`.
@@ -98,7 +98,7 @@ where
         let pair = phi_pair(oracle, pos, dir, alpha);
         let phi_a = pair.0;
         let dphi_a = pair.1;
-        if !phi_a.is_finite() {
+        if !phi_a.is_finite() || !dphi_a.is_finite() {
             hi = alpha;
             continue;
         }
@@ -192,7 +192,7 @@ where
         let pair = phi_on_path(oracle, path, alpha);
         let phi_a = pair.0;
         let dphi_a = pair.1;
-        if !phi_a.is_finite() {
+        if !phi_a.is_finite() || !dphi_a.is_finite() {
             hi = alpha;
             continue;
         }
@@ -259,9 +259,6 @@ where
     let mut alpha_prev = 0.0;
     let mut phi_prev = f0;
     let mut alpha = istep.abs().max(1e-16);
-    let mut best_x = pos.clone();
-    let mut best_f = f0;
-    let mut best_a = 0.0;
     let wolfe = Wolfe {
         c1,
         c2,
@@ -278,22 +275,17 @@ where
             }
             None => (pos.clone(), f64::INFINITY, f64::NAN),
         };
-        if phi.is_finite() && phi < best_f {
-            best_f = phi;
-            best_x = x.clone();
-            best_a = alpha;
-        }
         let fail_armijo = !phi.is_finite() || !armijo(phi, f0, alpha, dphi0, c1);
         if !fail_armijo && strong_curvature(dphi, dphi0, c2) {
             return (x, phi, alpha.abs());
         }
-        if fail_armijo || (i > 0 && phi >= phi_prev) {
+        if fail_armijo || !dphi.is_finite() || (i > 0 && phi >= phi_prev) {
             let zoomed = zoom_on_path(oracle, path, alpha_prev, alpha, maxiter, wolfe);
-            return finish(oracle, path, &pos, zoomed, wolfe, (best_x, best_f, best_a));
+            return finish(oracle, path, &pos, zoomed, wolfe);
         }
         if dphi >= 0.0 {
             let zoomed = zoom_on_path(oracle, path, alpha, alpha_prev, maxiter, wolfe);
-            return finish(oracle, path, &pos, zoomed, wolfe, (best_x, best_f, best_a));
+            return finish(oracle, path, &pos, zoomed, wolfe);
         }
         if (alpha - alpha_max).abs() < 1e-16 {
             break;
@@ -315,7 +307,6 @@ fn finish<F, P>(
     pos: &Array1<f64>,
     zoomed: (f64, f64),
     wolfe: Wolfe,
-    best: (Array1<f64>, f64, f64),
 ) -> (Array1<f64>, f64, f64)
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
@@ -327,27 +318,19 @@ where
         phi0: f0,
         dphi0,
     } = wolfe;
-    let (best_x, best_f, best_a) = best;
-    let (t, mut ft) = zoomed;
-    if t.is_finite() && t.abs() > 0.0 {
-        if !ft.is_finite() {
-            ft = phi_on_path(oracle, path, t).0;
-        }
-        let tied_wolfe = ft == f0
-            && armijo(ft, f0, t, dphi0, c1)
-            && strong_curvature(phi_on_path(oracle, path, t).1, dphi0, c2);
-        if ft.is_finite()
-            && (ft < f0 || tied_wolfe)
+    let (t, _) = zoomed;
+    // A bracket endpoint can meet Armijo and still miss strong curvature.
+    // That point, and any decreasing trial that only formed the bracket,
+    // is not a Wolfe step.
+    if t.is_finite() && t > 0.0 {
+        let (ft, dphi) = phi_on_path(oracle, path, t);
+        if strong_wolfe(ft, f0, t, dphi, dphi0, c1, c2)
             && let Some(x) = path.point(t)
         {
-            return (x, ft, t.abs());
+            return (x, ft, t);
         }
     }
-    if best_f < f0 {
-        (best_x, best_f, best_a.abs())
-    } else {
-        (pos.clone(), f0, 0.0)
-    }
+    (pos.clone(), f0, 0.0)
 }
 
 #[cfg(test)]
@@ -365,6 +348,52 @@ mod tests {
 
     fn quadratic(x: ArrayView1<'_, f64>) -> (f64, Array1<f64>) {
         (0.5 * x[0] * x[0], array![x[0]])
+    }
+
+    struct NanAtOne {
+        start: Array1<f64>,
+        direction: Array1<f64>,
+    }
+
+    impl Path for NanAtOne {
+        fn start(&self) -> Array1<f64> {
+            self.start.clone()
+        }
+
+        fn direction(&self) -> ArrayView1<'_, f64> {
+            self.direction.view()
+        }
+
+        fn point(&mut self, t: f64) -> Option<Array1<f64>> {
+            Some(array![t])
+        }
+
+        fn slope(&mut self, t: f64, _at: ArrayView1<'_, f64>, _g: ArrayView1<'_, f64>) -> f64 {
+            if t == 1.0 { f64::NAN } else { t - 1.0 }
+        }
+    }
+
+    #[test]
+    fn zoom_contracts_away_from_an_unresolved_slope() {
+        let mut path = NanAtOne {
+            start: array![0.0],
+            direction: array![1.0],
+        };
+        let mut shifted_bowl = |x: ArrayView1<'_, f64>| {
+            let d = x[0] - 1.0;
+            (0.5 * d * d, array![d])
+        };
+        let wolfe = Wolfe {
+            c1: C1,
+            c2: C2,
+            phi0: 0.5,
+            dphi0: -1.0,
+        };
+        let (alpha, _) = zoom_on_path(&mut shifted_bowl, &mut path, 0.0, 2.0, 20, wolfe);
+        assert!(
+            alpha > 0.0 && alpha < 1.0,
+            "zoom crossed the unresolved slope at alpha = {alpha}"
+        );
     }
 
     #[test]
@@ -400,5 +429,45 @@ mod tests {
             slope.abs() <= C2 * slope0.abs(),
             "curvature slope = {slope}"
         );
+    }
+
+    /// `phi(a) = (a - 10)^2 / 2` from 0 with direction +1.
+    /// `phi(0) = 50`, `phi'(0) = -10`. Strong curvature at `c2 = 0.1`
+    /// needs `|a - 10| <= 1`.
+    fn bowl(x: ArrayView1<'_, f64>) -> (f64, Array1<f64>) {
+        let d = x[0] - 10.0;
+        (0.5 * d * d, array![d])
+    }
+
+    #[test]
+    fn zoom_does_not_accept_an_armijo_point_that_misses_curvature() {
+        // One bisection of the bracket [16, 0] lands at 8. Armijo holds
+        // there and `|phi'(8)| = 2 > 1`. The expansion trial at 16
+        // decreases and also misses curvature. Neither is returned.
+        let start = array![0.0];
+        let dir = array![1.0];
+        let mut path = Line {
+            pos: start.view(),
+            dir: dir.view(),
+        };
+        let (x, f, alpha) = wolfe_search(&mut bowl, &mut path, 16.0, C1, C2, 1);
+        assert_eq!(alpha, 0.0, "accepted alpha = {alpha}, x = {x}, f = {f}");
+        assert_eq!(x, start);
+        assert_eq!(f, 50.0);
+    }
+
+    #[test]
+    fn zoom_accepts_a_point_that_meets_strong_wolfe() {
+        let start = array![0.0];
+        let dir = array![1.0];
+        let mut path = Line {
+            pos: start.view(),
+            dir: dir.view(),
+        };
+        let (x, f, alpha) = wolfe_search(&mut bowl, &mut path, 16.0, C1, C2, 20);
+        assert!(alpha > 0.0, "refused a step that meets both conditions");
+        let slope = x[0] - 10.0;
+        assert!(f <= 50.0 + C1 * alpha * -10.0, "Armijo f = {f}");
+        assert!(slope.abs() <= C2 * 10.0, "curvature slope = {slope}");
     }
 }
