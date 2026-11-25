@@ -51,3 +51,4 @@ There it keeps the session's rules:
   It does not go through ~Manifold::inner~, so a manifold whose ~inner~ is not the metric of its Riemannian gradient still gets the strong Wolfe tests.
   The norms, the transport scaling and the conjugacy coefficient do read ~Manifold::inner~, which is the conformal metric on the Poincare ball and the Minkowski form on the hyperboloid.
 - A step whose best finite decrease misses the energy noise of ~NoiseFloor::with_eps_f~ keeps its start and reports ~Status::NoiseFloor~, as the other methods do.
+  The direction and step memory are the ones held at that start, not the ones the step built at the refused point.
