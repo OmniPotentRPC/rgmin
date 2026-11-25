@@ -823,6 +823,51 @@ int strict_convergence() {
         std::fprintf(stderr, "require_convergence took a value that is not a bool\n");
         return 65;
     }
+    struct LevelSetRetract {
+        bool saw_trial = false;
+        std::size_t origin_after_trial = 0;
+    };
+    auto retract_eval = [](void* user, const DLManagedTensorVersioned* x, double* out) {
+        auto* state = static_cast<LevelSetRetract*>(user);
+        double const x0 = static_cast<double const*>(x->dl_tensor.data)[0];
+        if (state->origin_after_trial >= 1) {
+            *out = x0 - 0.25;
+            return RGMIN_SUCCESS;
+        }
+        if (x0 != 0.0) {
+            state->saw_trial = true;
+        } else if (state->saw_trial) {
+            state->origin_after_trial += 1;
+        }
+        *out = 0.0;
+        return RGMIN_SUCCESS;
+    };
+    auto retract_grad = [](void* user, const DLManagedTensorVersioned* x,
+                           DLManagedTensorVersioned* g) {
+        auto const* state = static_cast<LevelSetRetract const*>(user);
+        double const x0 = static_cast<double const*>(x->dl_tensor.data)[0];
+        double const slope =
+            (state->origin_after_trial >= 1 && std::fabs(x0 - 0.25) <= 1e-15) ? 0.25 : 1.0;
+        static_cast<double*>(g->dl_tensor.data)[0] = slope;
+        return RGMIN_SUCCESS;
+    };
+    {
+        rgmin::SolverConfig cfg = rgmin::SolverConfig::build(
+            "lbfgs", {{"linesearch", "wolfe"}}, {{"gtol", 0.5}, {"level_set", 0.0}}, {},
+            {{"require_convergence", true}});
+        rgmin::Solver solver(cfg.method(), cfg.control(), 1);
+        cfg.apply(solver);
+        LevelSetRetract state{};
+        std::vector<double> lx{0.0};
+        DLManagedTensorVersioned* lt = rgmin::borrow_cpu_f64(lx.data(), 1);
+        rgmin::Report lr = solver.step(retract_eval, retract_grad, &state, lt);
+        rgmin_tensor_free(lt);
+        if (lr.stop != RGMIN_STOP_TOLERANCE || !lr.converged || std::fabs(lx[0] - 0.25) > 1e-12) {
+            std::fprintf(stderr, "level-set retraction converged mismatch stop=%d conv=%d x=%g\n",
+                         static_cast<int>(lr.stop), lr.converged ? 1 : 0, lx[0]);
+            return 66;
+        }
+    }
     std::printf("strict convergence ok\n");
     return 0;
 }

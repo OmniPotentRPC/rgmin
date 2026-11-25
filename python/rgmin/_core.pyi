@@ -139,6 +139,8 @@ class Stop(enum.IntEnum):
 
     LINE_SEARCH = 4
 
+    LINE_SEARCH_ROUNDING = 9
+
     POLISH_UNMET = 5
 
     ENERGY_TOLERANCE = 6
@@ -156,6 +158,8 @@ class Stop(enum.IntEnum):
     Budget = 3
 
     LineSearch = 4
+
+    LineSearchRounding = 9
 
     PolishUnmet = 5
 
@@ -249,7 +253,7 @@ class Solver:
 
 def minimize(f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], x0: NDArray[numpy.float64], method: object, **kwargs) -> tuple[Report, NDArray[numpy.float64]]:
     """
-    Minimize ``f_and_grad`` in place and return ``(report, x)``. ``require_convergence=True`` raises ``NotConverged``, a ``RuntimeError`` that carries the terminal ``Report`` as ``.report``, when the gradient norm is still above ``gtol``. ``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` that carries the ``Report`` as ``.report``, when the stop is ``BUDGET``, ``LINE_SEARCH``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. ``backward_polish`` is stored on the session and is not used by this step loop, which does not form a Hessian.
+    Minimize ``f_and_grad`` in place and return ``(report, x)``. ``require_convergence=True`` raises ``NotConverged``, a ``RuntimeError`` that carries the terminal ``Report`` as ``.report``, when the gradient norm is still above ``gtol``. ``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` that carries the ``Report`` as ``.report``, when the stop is ``BUDGET``, ``LINE_SEARCH``, ``LINE_SEARCH_ROUNDING``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. ``backward_polish`` is stored on the session and is not used by this step loop, which does not form a Hessian.
     """
 
 def backward_error_floor(value: float, x: object) -> float:

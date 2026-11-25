@@ -1,0 +1,5 @@
+Strong-Wolfe zoom now stops with `LineSearchRounding` when machine precision
+can no longer resolve its bracket or objective values. L-BFGS keeps the best
+measured Armijo decrease and does not retry from steepest descent. C ABI minor
+57 adds `RGMIN_STOP_LINE_SEARCH_ROUNDING`; Python exposes
+`Stop.LINE_SEARCH_ROUNDING`.

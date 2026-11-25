@@ -24,7 +24,12 @@ BASELINE = ROOT / "scripts" / "abi_baseline.txt"
 FFI = ROOT / "src" / "ffi.rs"
 VERSION_FIELDS = ("MAJOR", "MINOR", "LAYOUT_REVISION")
 # Stop reasons the compatibility header must alias, as ``XTS_STOP_<name>``.
-REQUIRED_STOP_ALIASES = ("ENERGY_TOLERANCE", "EVAL_BUDGET", "MACHINE_PRECISION")
+REQUIRED_STOP_ALIASES = (
+    "ENERGY_TOLERANCE",
+    "EVAL_BUDGET",
+    "MACHINE_PRECISION",
+    "LINE_SEARCH_ROUNDING",
+)
 ALIAS = re.compile(r"^#define\s+(XTS_[A-Z0-9_]+|xts_[a-z0-9_]+)\s+(RGMIN_[A-Z0-9_]+|rgmin_[a-z0-9_]+)\s*$", re.M)
 # A return type ending in `*` may sit against the name: `T *rgmin_f(`.
 DECL = re.compile(r"^[A-Za-z_][\w \t\*]*?[\s\*](rgmin_[A-Za-z0-9_]+)\s*\(", re.M)
@@ -99,7 +104,11 @@ def main() -> int:
         print("\n".join(broken))
         return 1
     current = names()
-    expected = [line.strip() for line in BASELINE.read_text().splitlines() if line.strip()]
+    expected = [
+        line.strip()
+        for line in BASELINE.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
     missing = sorted(set(expected) - set(current))
     added = sorted(set(current) - set(expected))
     if missing:

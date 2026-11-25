@@ -5,7 +5,7 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::control::{Control, StopNorm};
 use crate::error::{Error, Result};
-use crate::linesearch::{LineSearch, LineSearchOptions};
+use crate::linesearch::{LineSearch, LineSearchOptions, LineSearchStopReason};
 use crate::report::Report;
 
 pub(crate) fn l2(g: &Array1<f64>) -> f64 {
@@ -320,6 +320,8 @@ pub(crate) struct Taken {
     pub moved: bool,
     /// No trial decreased the energy by `c * eps_f`. The point is the start.
     pub energy_noise: bool,
+    /// Typed line-search stop, when the search ended early.
+    pub line_stop: Option<LineSearchStopReason>,
 }
 
 /// The report of a driver that runs no session: `||g||_2`, no gradient.
@@ -450,15 +452,16 @@ where
             .noise_floor
             .is_some_and(|floor| floor.stalled_on_energy(best))
     };
-    let unmoved = |energy_noise: bool| Taken {
+    let unmoved = |energy_noise: bool, line_stop| Taken {
         x: pos.clone(),
         f: value,
         g: grad.clone(),
         alpha: 0.0,
         moved: false,
         energy_noise,
+        line_stop,
     };
-    let Some(out) = linesearch.search_from_with_options(
+    let result = linesearch.search_from_result_with_options(
         |x| {
             let (f, g) = obj.value_and_gradient(x);
             if f.is_finite() {
@@ -474,8 +477,10 @@ where
         istep,
         amax,
         options,
-    ) else {
-        return unmoved(stalled(saw_trial, best_decrease));
+    );
+    let line_stop = result.stop_reason;
+    let Some(out) = result.step else {
+        return unmoved(stalled(saw_trial, best_decrease), line_stop);
     };
     let trial = obj.bounds().clip(out.x.view());
     let (x, f, g) = if trial == out.x {
@@ -489,7 +494,7 @@ where
         (trial, f, g)
     };
     if !f.is_finite() || g.iter().any(|value| !value.is_finite()) {
-        return unmoved(stalled(saw_trial, best_decrease));
+        return unmoved(stalled(saw_trial, best_decrease), line_stop);
     }
     let accepted = match control.ftol_rel {
         Some(_) => f - value <= control.ftol_slack(value),
@@ -528,9 +533,10 @@ where
             alpha: out.alpha,
             moved: true,
             energy_noise: false,
+            line_stop,
         }
     } else {
-        unmoved(energy_noise)
+        unmoved(energy_noise, line_stop)
     }
 }
 

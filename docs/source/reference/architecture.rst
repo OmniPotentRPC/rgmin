@@ -72,9 +72,12 @@ Objects
     ``rgmin_solver_set_backward_polish``, and the ``\*_opts`` one-shots,
     which include ``rgmin_minimize_eindir_opts``.
     ``xts.h`` aliases ``RGMIN_UNMET_STOP``, ``RGMIN_STOP_LINE_SEARCH``,
-    and ``RGMIN_STOP_POLISH_UNMET``. ``RGMIN_UNMET_STOP`` is status 6.
-    ``RGMIN_STOP_LINE_SEARCH`` is 4 and ``RGMIN_STOP_POLISH_UNMET`` is 5.
-    ``RGMIN_STOP_ENERGY_TOLERANCE`` is 6 and ``RGMIN_STOP_EVAL_BUDGET`` is 7.
+    ``RGMIN_STOP_POLISH_UNMET``, ``RGMIN_STOP_MACHINE_PRECISION``, and
+    ``RGMIN_STOP_LINE_SEARCH_ROUNDING``.
+    ``RGMIN_UNMET_STOP`` is status 6. ``RGMIN_STOP_LINE_SEARCH`` is 4,
+    ``RGMIN_STOP_POLISH_UNMET`` is 5, ``RGMIN_STOP_ENERGY_TOLERANCE`` is 6,
+    ``RGMIN_STOP_EVAL_BUDGET`` is 7, ``RGMIN_STOP_MACHINE_PRECISION`` is 8,
+    and ``RGMIN_STOP_LINE_SEARCH_ROUNDING`` is 9.
 
 ``minimize_method``
     Cold-start dispatch for every ``Method``.
@@ -100,14 +103,17 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 56 and ``layout_revision`` 6.
-    Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop error, and the backward-error polish.
-    A zero iteration budget follows the same unmet-stop policy.
-    Minor 50 adds the energy and evaluation stops.
-    Minor 51 adds ``rgmin_minimize_rlbfgs`` and ``rgmin_rlbfgs_default``.
-    Minor 52 adds ``RGMIN_GROMACS_STEEP``, ``RGMIN_STOP_MACHINE_PRECISION``, ``rgmin_solver_set_gromacs_steep``, and ``rgmin_gromacs_steep_max_constraint_shrinks``.
-    Minor 53 adds ``rgmin_minimize_eindir_opts``, the eindir one-shot with the same two flags.
-    ``rgmin_control_t`` is unchanged.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 57 and ``layout_revision`` 6.
+    Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
+    error, and the backward-error polish. A zero iteration budget
+    follows the same unmet-stop policy. Minor 50 adds the energy and
+    evaluation stops. Minor 51 adds ``rgmin_minimize_rlbfgs`` and
+    ``rgmin_rlbfgs_default``. Minor 52 adds ``RGMIN_GROMACS_STEEP``,
+    ``RGMIN_STOP_MACHINE_PRECISION``,
+    ``rgmin_solver_set_gromacs_steep``, and
+    ``rgmin_gromacs_steep_max_constraint_shrinks``. Minor 53 adds
+    ``rgmin_minimize_eindir_opts``, the
+    eindir one-shot with the same two flags. ``rgmin_control_t`` is unchanged.
     Minor 54 adds ``RGMIN_GROMACS_CG`` and ``rgmin_solver_set_gromacs_cg``.
     Minor 55 adds
     ``require_convergence`` on ``rgmin_control_t``, ``converged`` on
@@ -116,6 +122,8 @@ Objects
     ``_sized`` form of each entry that reads a ``rgmin_control_t``. The plain
     exported entries read and write the layout revision 5 structs.
     Minor 56 adds ``rgmin_manifold_rigid_quotient``, ``rgmin_rtr_tcg_solve``, ``rgmin_rtr_radius_update``, ``rgmin_lowest_eigenpair_on_manifold`` and ``rgmin_lowest_eigenpairs_projected``.
+    Minor 57 adds ``RGMIN_STOP_LINE_SEARCH_ROUNDING``. ``rgmin_control_t`` is
+    unchanged.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``

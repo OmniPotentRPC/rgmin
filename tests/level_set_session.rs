@@ -1,6 +1,10 @@
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Accept, Control, Error, LevelSetConstraint, Method, Solver, StopNorm};
+use rgmin::{
+    Accept, Control, Error, LbfgsStep, LevelSetConstraint, Method, Solver, Status, StopNorm,
+    StopReason,
+};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 struct CircularForce {
     bounds: Bounds<f64>,
@@ -308,4 +312,158 @@ fn session_reports_retraction_failure() {
     solver.set_level_set(LevelSetConstraint::new(0.0)).unwrap();
     let err = solver.step(&objective, &mut x).unwrap_err();
     assert!(matches!(err, Error::LevelSetStalled { .. }), "{err:?}");
+}
+
+struct FinishLevelSetRounding {
+    bounds: Bounds<f64>,
+    drift: bool,
+    saw_trial: AtomicBool,
+    origin_after_trial: AtomicUsize,
+}
+
+impl FinishLevelSetRounding {
+    fn new(drift: bool) -> Self {
+        Self {
+            bounds: Bounds::new(array![-f64::INFINITY], array![f64::INFINITY], 0.0),
+            drift,
+            saw_trial: AtomicBool::new(false),
+            origin_after_trial: AtomicUsize::new(0),
+        }
+    }
+
+    fn shifted(x: f64) -> (f64, Array1<f64>) {
+        let residual = x - 0.25;
+        let slope = if residual.abs() <= f64::EPSILON {
+            0.25
+        } else {
+            1.0
+        };
+        (residual, array![slope])
+    }
+}
+
+impl Objective<f64> for FinishLevelSetRounding {
+    fn dim(&self) -> usize {
+        1
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.value_and_gradient(x).0
+    }
+}
+
+impl Gradient<f64> for FinishLevelSetRounding {
+    fn dim(&self) -> usize {
+        1
+    }
+
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        self.value_and_gradient(x).1
+    }
+}
+
+impl DifferentiableObjective<f64> for FinishLevelSetRounding {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        if self.drift && self.origin_after_trial.load(Ordering::Relaxed) >= 1 {
+            return Self::shifted(x[0]);
+        }
+        if x[0] != 0.0 {
+            self.saw_trial.store(true, Ordering::Relaxed);
+            return (0.0, array![1.0]);
+        }
+        if self.saw_trial.load(Ordering::Relaxed) {
+            self.origin_after_trial.fetch_add(1, Ordering::Relaxed);
+        }
+        (0.0, array![1.0])
+    }
+}
+
+#[test]
+fn finish_level_set_clears_stale_line_search_rounding_reason() {
+    let run = |drift: bool, gtol: f64, require_convergence: bool| {
+        let objective = FinishLevelSetRounding::new(drift);
+        let mut x = array![0.0];
+        let mut solver = Solver::new(
+            Method::lbfgs(),
+            Control::default()
+                .with_gtol(gtol)
+                .with_require_convergence(require_convergence),
+            1,
+        );
+        solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+        solver.set_level_set(LevelSetConstraint::new(0.0)).unwrap();
+        let report = solver.step(&objective, &mut x).unwrap();
+        (report, x)
+    };
+
+    for strict in [false, true] {
+        let (kept, x_kept) = run(false, 0.5, strict);
+        assert_eq!(x_kept, array![0.0]);
+        assert_eq!(kept.coords, x_kept);
+        assert_eq!(kept.status, Status::Budget);
+        assert_eq!(kept.stop_reason(), StopReason::LineSearchRounding);
+        assert!(!kept.converged);
+
+        let (converged, x_conv) = run(true, 0.5, strict);
+        assert_eq!(x_conv, array![0.25]);
+        assert_eq!(converged.coords, x_conv);
+        assert_eq!(converged.status, Status::Tolerance);
+        assert_eq!(converged.stop_reason(), StopReason::Converged);
+        assert!(converged.converged());
+        assert!(converged.converged);
+
+        let (iterating, x_iter) = run(true, 0.1, strict);
+        assert_eq!(x_iter, array![0.25]);
+        assert_eq!(iterating.coords, x_iter);
+        assert_eq!(iterating.status, Status::Iterating);
+        assert_eq!(iterating.stop_reason(), StopReason::Iterating);
+        assert!(!iterating.converged);
+    }
+
+    let objective = FinishLevelSetRounding::new(true);
+    let mut x = array![0.0];
+    let mut solver = Solver::new(
+        Method::lbfgs(),
+        Control::default()
+            .with_maxiter(1)
+            .with_gtol(0.5)
+            .with_require_convergence(true),
+        1,
+    );
+    solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+    solver.set_level_set(LevelSetConstraint::new(0.0)).unwrap();
+    let run_report = solver.run(&objective, &mut x).unwrap();
+    assert_eq!(x, array![0.25]);
+    assert_eq!(run_report.status, Status::Tolerance);
+    assert!(run_report.converged());
+    assert!(run_report.converged);
+
+    let unmet_objective = FinishLevelSetRounding::new(true);
+    let mut x_unmet = array![0.0];
+    let mut unmet_solver = Solver::new(
+        Method::lbfgs(),
+        Control::default()
+            .with_maxiter(1)
+            .with_gtol(0.1)
+            .with_require_convergence(true),
+        1,
+    );
+    unmet_solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+    unmet_solver
+        .set_level_set(LevelSetConstraint::new(0.0))
+        .unwrap();
+    let err = unmet_solver
+        .run(&unmet_objective, &mut x_unmet)
+        .unwrap_err();
+    match err {
+        Error::NotConverged(report) => {
+            assert!(!report.converged);
+            assert_eq!(report.status, Status::Budget);
+        }
+        other => panic!("unexpected error {other}"),
+    }
 }

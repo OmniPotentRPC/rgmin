@@ -9,9 +9,58 @@ mod known;
 mod supplied;
 mod zoom;
 
-pub use known::LineOutcome;
+pub use known::{LineOutcome, LineSearchResult, LineSearchStopReason};
 pub use supplied::{SearchStep, SuppliedSearch};
 pub use zoom::zoom;
+
+/// Floating-point slack for deciding that a Wolfe bracket carries no
+/// resolvable step or value change.
+///
+/// More and Thuente stop `dcsrch` when a bracket's relative width falls
+/// below `xtol`; their warning exits also cover a trial pinned at a bracket
+/// bound. Eight machine epsilons allow endpoint arithmetic and one objective
+/// subtraction to round without treating a resolved decrease as blocked.
+///
+/// More and Thuente, *Line Search Algorithms with Guaranteed Sufficient
+/// Decrease*, <https://doi.org/10.1145/192115.192132>.
+const WOLFE_BRACKET_ROUNDING_FACTOR: f64 = 8.0;
+const WOLFE_VALUE_ROUNDING_FACTOR: f64 = 8.0;
+const WOLFE_SLOPE_GROWTH_FACTOR: f64 = 32.0;
+const WOLFE_ROUNDING_TRIALS: usize = 8;
+
+pub(crate) fn bracket_rounding_blocked(lo: f64, hi: f64) -> bool {
+    let scale = lo.abs().max(hi.abs());
+    let width = (hi - lo).abs();
+    width.is_finite()
+        && scale.is_finite()
+        && width <= WOLFE_BRACKET_ROUNDING_FACTOR * f64::EPSILON * scale
+}
+
+pub(crate) fn value_rounding_blocked(f: f64, reference: f64) -> bool {
+    if !f.is_finite() || !reference.is_finite() {
+        return false;
+    }
+    let scale = f.abs().max(reference.abs());
+    if scale == 0.0 {
+        return true;
+    }
+    let diff = (f - reference).abs();
+    diff.is_finite() && diff <= WOLFE_VALUE_ROUNDING_FACTOR * f64::EPSILON * scale
+}
+
+pub(crate) fn resolvable_slope_crossing(slope: f64, endpoint: f64, initial: f64) -> bool {
+    slope.is_finite()
+        && endpoint.is_finite()
+        && initial.is_finite()
+        && slope != 0.0
+        && endpoint != 0.0
+        && slope.is_sign_positive() != endpoint.is_sign_positive()
+        && slope.abs() > WOLFE_SLOPE_GROWTH_FACTOR * initial.abs()
+}
+
+pub(crate) fn rounding_stalled(trials: usize) -> bool {
+    trials >= WOLFE_ROUNDING_TRIALS
+}
 
 /// How to pick α such that `x + α d` decreases `f`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -62,6 +111,8 @@ pub enum LineSearch {
     /// <https://doi.org/10.1137/1011036>.
     /// Nocedal and Wright, *Numerical Optimization*,
     /// <https://doi.org/10.1007/978-0-387-40065-5>.
+    /// More and Thuente, *Line Search Algorithms with Guaranteed
+    /// Sufficient Decrease*, <https://doi.org/10.1145/192115.192132>.
     #[non_exhaustive]
     Wolfe {
         /// Armijo `c1` (default 1e-4).

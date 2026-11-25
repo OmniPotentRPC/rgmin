@@ -8,9 +8,9 @@ use dlpk::sys::DLManagedTensorVersioned;
 use rgmin::ffi::{
     rgmin_control_t, rgmin_method_t, rgmin_minimize_hess_opts_sized, rgmin_minimize_opts_sized,
     rgmin_minimize_scg_with_options_sized, rgmin_report_t, rgmin_scg_params_default,
-    rgmin_solver_create_sized, rgmin_solver_free, rgmin_solver_set_require_convergence,
-    rgmin_solver_step, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
-    rgmin_tensor_free,
+    rgmin_solver_create_sized, rgmin_solver_free, rgmin_solver_set_lbfgs_wolfe,
+    rgmin_solver_set_level_set, rgmin_solver_set_require_convergence, rgmin_solver_step,
+    rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 
 const CTRL_SIZE: usize = std::mem::size_of::<rgmin_control_t>();
@@ -586,4 +586,106 @@ fn c_trust_region_session_steps_are_not_stalls() {
         }
         unsafe { rgmin_solver_free(solver) };
     }
+}
+
+struct LevelSetRetractState {
+    drift: bool,
+    saw_trial: bool,
+    origin_after_trial: usize,
+}
+
+unsafe extern "C" fn level_set_retract_eval(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let state = unsafe { &mut *(user as *mut LevelSetRetractState) };
+    let (p, _) = unsafe { cpu_f64(x) };
+    let x0 = unsafe { *p };
+    if state.drift && state.origin_after_trial >= 1 {
+        unsafe { *value_out = x0 - 0.25 };
+        return rgmin_status_t::RGMIN_SUCCESS;
+    }
+    if x0 != 0.0 {
+        state.saw_trial = true;
+    } else if state.saw_trial {
+        state.origin_after_trial += 1;
+    }
+    unsafe { *value_out = 0.0 };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn level_set_retract_grad(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let state = unsafe { &*(user as *const LevelSetRetractState) };
+    let (p, _) = unsafe { cpu_f64(x) };
+    let (gp, _) = unsafe { cpu_f64(g as *const _) };
+    let x0 = unsafe { *p };
+    let slope = if state.drift && state.origin_after_trial >= 1 && (x0 - 0.25).abs() <= f64::EPSILON
+    {
+        0.25
+    } else {
+        1.0
+    };
+    unsafe { *(gp as *mut f64) = slope };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn c_level_set_retraction_refreshes_report_converged_flag() {
+    let step_with = |drift: bool, gtol: f64| {
+        let ctrl = control(10, gtol, 0.0, true);
+        let solver =
+            unsafe { rgmin_solver_create_sized(rgmin_method_t::RGMIN_LBFGS, &ctrl, CTRL_SIZE, 1) };
+        assert!(!solver.is_null());
+        assert_eq!(unsafe { rgmin_solver_set_lbfgs_wolfe(solver) }, 0);
+        assert_eq!(
+            unsafe { rgmin_solver_set_level_set(solver, 0.0) },
+            rgmin_status_t::RGMIN_SUCCESS
+        );
+        unsafe { rgmin_solver_set_require_convergence(solver, 1) };
+        let mut state = LevelSetRetractState {
+            drift,
+            saw_trial: false,
+            origin_after_trial: 0,
+        };
+        let mut x = [0.0];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 1) };
+        let mut out = blank();
+        let status = unsafe {
+            rgmin_solver_step(
+                solver,
+                Some(level_set_retract_eval),
+                Some(level_set_retract_grad),
+                (&mut state as *mut LevelSetRetractState).cast(),
+                xt,
+                &mut out,
+            )
+        };
+        unsafe { rgmin_tensor_free(xt) };
+        unsafe { rgmin_solver_free(solver) };
+        (status, out, x)
+    };
+
+    let (status, converged, x_conv) = step_with(true, 0.5);
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(x_conv, [0.25]);
+    assert_eq!(converged.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE);
+    assert!(converged.grad_norm < 0.5);
+    assert_eq!(converged.converged, 1);
+
+    let (status, iterating, x_iter) = step_with(true, 0.1);
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(x_iter, [0.25]);
+    assert_eq!(iterating.stop, rgmin_stop_t::RGMIN_STOP_BUDGET);
+    assert_eq!(iterating.converged, 0);
+
+    let (status, kept, x_kept) = step_with(false, 0.5);
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(x_kept, [0.0]);
+    assert_eq!(kept.stop, rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING);
+    assert_eq!(kept.converged, 0);
 }

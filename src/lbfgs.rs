@@ -466,6 +466,27 @@ enum CappedProbe {
     Stop,
 }
 
+enum WolfeStep {
+    Accepted { evals: usize },
+    RoundingBlocked { evals: usize },
+    Failed { evals: usize },
+}
+
+impl WolfeStep {
+    fn evals(&self) -> usize {
+        match *self {
+            Self::Accepted { evals } | Self::RoundingBlocked { evals } | Self::Failed { evals } => {
+                evals
+            }
+        }
+    }
+}
+
+pub(crate) struct ObjectiveStep {
+    pub(crate) energy_noise: bool,
+    pub(crate) line_stop: Option<crate::linesearch::LineSearchStopReason>,
+}
+
 /// Installed \(H_0 = P^{-1}\). An exponential factor and a geometry
 /// metric share the two-loop middle product.
 enum InitialInverse {
@@ -1824,8 +1845,8 @@ impl Lbfgs {
 
     /// Strong Wolfe line search by bracketing then cubic-interpolated zoom.
     ///
-    /// Nocedal and Wright algorithms 3.5 and 3.6. Returns whether a step
-    /// was accepted and how many evaluations it cost. A probe answered with
+    /// Nocedal and Wright algorithms 3.5 and 3.6. Returns its typed outcome
+    /// and evaluation count. A probe answered with
     /// a non-finite value or gradient fails the decrease test, so it caps
     /// the bracket and the zoom bisects back toward the accepted end.
     /// No trial exceeds `a_max`; a decrease at `a_max` that has not
@@ -1846,7 +1867,7 @@ impl Lbfgs {
         g: &mut Array1<f64>,
         ray: Ray<'_>,
         fg: &mut F,
-    ) -> (bool, usize)
+    ) -> WolfeStep
     where
         F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
     {
@@ -1891,18 +1912,23 @@ impl Lbfgs {
         let flat = -self.curvature * slope;
         let in_error = |fa: f64| f_err > 0.0 && fa <= f0 + f_err;
         let approx_wolfe = |fa: f64, slope_a: f64| in_error(fa) && slope_a.abs() <= flat;
+        let mut best_armijo: Option<(f64, f64, Array1<f64>)> = None;
 
         for i in 0..bracket_cap {
             let (fa, ga) = match probe(a, fg, &mut evals, &mut scratch) {
                 Some(v) => v,
-                None => return (false, evals),
+                None => return WolfeStep::Failed { evals },
             };
             let (fa, slope_a) = probed(fa, d, &ga);
+            let armijo_holds = crate::linesearch::conditions::armijo(fa, f0, a, slope, self.armijo);
+            if armijo_holds && fa < f0 && best_armijo.as_ref().is_none_or(|best| fa < best.1) {
+                best_armijo = Some((a, fa, ga.clone()));
+            }
             let descending = slope_a < 0.0 && in_error(fa);
             if (fa > f0 + self.armijo * a * slope || (i > 0 && fa >= f_prev)) && !descending {
                 if approx_wolfe(fa, slope_a) {
                     self.accept(x, f, g, d, a, (fa, ga));
-                    return (true, evals);
+                    return WolfeStep::Accepted { evals };
                 }
                 lo = a_prev;
                 f_lo = f_prev;
@@ -1915,7 +1941,7 @@ impl Lbfgs {
             }
             if slope_a.abs() <= -self.curvature * slope {
                 self.accept(x, f, g, d, a, (fa, ga));
-                return (true, evals);
+                return WolfeStep::Accepted { evals };
             }
             if slope_a >= 0.0 {
                 lo = a;
@@ -1929,7 +1955,7 @@ impl Lbfgs {
             }
             if a >= a_max {
                 self.accept(x, f, g, d, a, (fa, ga));
-                return (true, evals);
+                return WolfeStep::Accepted { evals };
             }
             a_prev = a;
             f_prev = fa;
@@ -1938,10 +1964,14 @@ impl Lbfgs {
         }
 
         if !bracketed {
-            return (false, evals);
+            return WolfeStep::Failed { evals };
         }
 
+        let mut unresolved_failures = 0;
         while evals < total_cap {
+            if crate::linesearch::bracket_rounding_blocked(lo, hi) {
+                return self.rounding_stop(x, f, g, d, best_armijo, evals);
+            }
             let width = hi - lo;
             let mut trial = lo + 0.5 * width;
             // Cubic Hermite minimizer over the bracket (Nocedal-Wright
@@ -1977,13 +2007,34 @@ impl Lbfgs {
             }
             let (ft, gt) = match probe(trial, fg, &mut evals, &mut scratch) {
                 Some(v) => v,
-                None => return (false, evals),
+                None => return WolfeStep::Failed { evals },
             };
             let (ft, slope_t) = probed(ft, d, &gt);
+            let armijo_holds =
+                crate::linesearch::conditions::armijo(ft, f0, trial, slope, self.armijo);
+            if armijo_holds && ft < f0 && best_armijo.as_ref().is_none_or(|best| ft < best.1) {
+                best_armijo = Some((trial, ft, gt.clone()));
+            }
+            if f_err == 0.0 && !armijo_holds && crate::linesearch::value_rounding_blocked(ft, f_lo)
+            {
+                unresolved_failures += 1;
+            } else {
+                unresolved_failures = 0;
+            }
+            if crate::linesearch::rounding_stalled(unresolved_failures) {
+                if crate::linesearch::resolvable_slope_crossing(slope_t, slope_lo, slope) {
+                    unresolved_failures = 0;
+                    hi = trial;
+                    f_hi = ft;
+                    slope_hi = slope_t;
+                    continue;
+                }
+                return self.rounding_stop(x, f, g, d, best_armijo, evals);
+            }
             if ft > f0 + self.armijo * trial * slope || ft >= f_lo {
                 if approx_wolfe(ft, slope_t) {
                     self.accept(x, f, g, d, trial, (ft, gt));
-                    return (true, evals);
+                    return WolfeStep::Accepted { evals };
                 }
                 if slope_t * (hi - lo) < 0.0 && in_error(ft) {
                     lo = trial;
@@ -1997,7 +2048,7 @@ impl Lbfgs {
             } else {
                 if slope_t.abs() <= -self.curvature * slope {
                     self.accept(x, f, g, d, trial, (ft, gt));
-                    return (true, evals);
+                    return WolfeStep::Accepted { evals };
                 }
                 if slope_t * (hi - lo) >= 0.0 {
                     hi = lo;
@@ -2008,11 +2059,23 @@ impl Lbfgs {
                 f_lo = ft;
                 slope_lo = slope_t;
             }
-            if (hi - lo).abs() < 1e-14 {
-                break;
-            }
         }
-        (false, evals)
+        WolfeStep::Failed { evals }
+    }
+
+    fn rounding_stop(
+        &mut self,
+        x: &mut Array1<f64>,
+        f: &mut f64,
+        g: &mut Array1<f64>,
+        d: &Array1<f64>,
+        best: Option<(f64, f64, Array1<f64>)>,
+        evals: usize,
+    ) -> WolfeStep {
+        if let Some((step, value, grad)) = best {
+            self.accept(x, f, g, d, step, (value, grad));
+        }
+        WolfeStep::RoundingBlocked { evals }
     }
 
     fn accept(
@@ -2148,14 +2211,13 @@ impl Lbfgs {
                 slope,
                 a_max: f64::INFINITY,
             };
-            let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, ray, &mut fg);
-            evals += evals_used;
-            stalled = ok && self.stalled(f_old, f);
-            if !ok {
-                if self.memory.is_empty() {
-                    break;
-                }
-                self.forget();
+            let outcome = self.line_search(&mut x, &mut f, &mut g, ray, &mut fg);
+            evals += outcome.evals();
+            match outcome {
+                WolfeStep::Accepted { .. } => stalled = self.stalled(f_old, f),
+                WolfeStep::RoundingBlocked { .. } => break,
+                WolfeStep::Failed { .. } if self.memory.is_empty() => break,
+                WolfeStep::Failed { .. } => self.forget(),
             }
         }
         (f, x, evals)
@@ -2246,14 +2308,13 @@ impl Lbfgs {
                 slope,
                 a_max: f64::INFINITY,
             };
-            let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, ray, &mut fg);
-            evals += evals_used;
-            stalled = ok && self.stalled(f_old, f);
-            if !ok {
-                if self.memory.is_empty() {
-                    break;
-                }
-                self.forget();
+            let outcome = self.line_search(&mut x, &mut f, &mut g, ray, &mut fg);
+            evals += outcome.evals();
+            match outcome {
+                WolfeStep::Accepted { .. } => stalled = self.stalled(f_old, f),
+                WolfeStep::RoundingBlocked { .. } => break,
+                WolfeStep::Failed { .. } if self.memory.is_empty() => break,
+                WolfeStep::Failed { .. } => self.forget(),
             }
         }
         (f, x, evals, false)
@@ -2407,15 +2468,14 @@ impl Lbfgs {
                 a_max,
             };
             let f_old = f;
-            let (ok, used) = self.line_search(&mut x, &mut f, &mut g, ray, &mut box_fg);
-            evals += used;
+            let outcome = self.line_search(&mut x, &mut f, &mut g, ray, &mut box_fg);
+            evals += outcome.evals();
             x = clip(x.view());
-            stalled = ok && self.stalled(f_old, f);
-            if !ok {
-                if self.memory.is_empty() {
-                    break;
-                }
-                self.forget();
+            match outcome {
+                WolfeStep::Accepted { .. } => stalled = self.stalled(f_old, f),
+                WolfeStep::RoundingBlocked { .. } => break,
+                WolfeStep::Failed { .. } if self.memory.is_empty() => break,
+                WolfeStep::Failed { .. } => self.forget(),
             }
         }
         (f, x, evals)
@@ -2471,7 +2531,7 @@ impl Lbfgs {
                 return control.deliver(one_shot_report(value, pos, step, gnorm, status));
             }
             let before = track.then(|| pos.clone());
-            let stall = self.step_objective(
+            let outcome = self.step_objective_with_direction(
                 obj,
                 &mut pos,
                 &mut value,
@@ -2480,8 +2540,12 @@ impl Lbfgs {
                 linesearch,
                 control,
                 crate::step::implicit_atom_cap(control),
+                None,
+                true,
+                LineSearchOptions::default(),
+                &mut |_| {},
             );
-            if stall {
+            if outcome.energy_noise {
                 return control.deliver(one_shot_report(
                     value,
                     pos,
@@ -2495,6 +2559,15 @@ impl Lbfgs {
                 crate::stop::stop_after(&mut stops, control, obj, value, moved, &grad)
             {
                 return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));
+            }
+            if outcome.line_stop.is_some() {
+                let gnorm = l2(&grad);
+                let status = control.classify(gnorm, grad.len());
+                let mut report = one_shot_report(value, pos, step + 1, gnorm, status);
+                if status == crate::report::Status::Iterating {
+                    report = report.with_stop_reason(crate::StopReason::LineSearchRounding);
+                }
+                return control.deliver(report);
             }
         }
         let gnorm = l2(&grad);
@@ -2555,6 +2628,7 @@ impl Lbfgs {
             LineSearchOptions::default(),
             &mut |_| {},
         )
+        .energy_noise
     }
 
     /// `project` acts on every trial direction before its line search:
@@ -2574,7 +2648,7 @@ impl Lbfgs {
         record_pair: bool,
         options: LineSearchOptions,
         project: &mut dyn FnMut(&mut Array1<f64>),
-    ) -> bool
+    ) -> ObjectiveStep
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
@@ -2609,7 +2683,11 @@ impl Lbfgs {
             atom_maxmove,
             options,
         );
-        let (t, stall) = if allow_restart && !t.moved && !self.memory.is_empty() {
+        let (t, stall) = if allow_restart
+            && !t.moved
+            && t.line_stop.is_none()
+            && !self.memory.is_empty()
+        {
             let first_noise = t.energy_noise;
             self.forget();
             let direction = self.direction(grad.view());
@@ -2648,7 +2726,10 @@ impl Lbfgs {
         *value = t.f;
         *grad = t.g;
         *istep = qn_istep(control);
-        stall
+        ObjectiveStep {
+            energy_noise: stall,
+            line_stop: t.line_stop,
+        }
     }
 }
 

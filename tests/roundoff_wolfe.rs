@@ -2,7 +2,9 @@
 
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Control, LineSearch, Method, Solver};
+use rgmin::{
+    Control, Error, Lbfgs, LbfgsStep, LineSearch, LineSearchStopReason, Method, Solver, StopReason,
+};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const OFFSET: f64 = 6.000000000000001;
@@ -174,4 +176,400 @@ fn standalone_zoom_uses_the_same_precision_limit() {
     );
     assert_eq!(alpha, 1.0);
     assert_eq!(objective.calls.load(Ordering::Relaxed), 2);
+}
+
+struct RoundedBowl {
+    scale: f64,
+    offset: f64,
+    bounds: Bounds<f64>,
+    calls: AtomicUsize,
+}
+
+impl RoundedBowl {
+    fn new() -> Self {
+        Self {
+            scale: f64::EPSILON.sqrt().sqrt(),
+            offset: OFFSET,
+            bounds: Bounds::new(array![f64::NEG_INFINITY], array![f64::INFINITY], 0.0),
+            calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl Objective<f64> for RoundedBowl {
+    fn dim(&self) -> usize {
+        1
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        let exact = self.offset + 0.5 * self.scale * x[0] * x[0];
+        let cancellation = x[0] / f64::EPSILON.sqrt();
+        (exact + cancellation) - cancellation
+    }
+}
+
+impl Gradient<f64> for RoundedBowl {
+    fn dim(&self) -> usize {
+        1
+    }
+
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        array![self.scale * x[0]]
+    }
+}
+
+impl DifferentiableObjective<f64> for RoundedBowl {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        (self.eval(x), self.grad(x))
+    }
+}
+
+#[test]
+fn a_rounding_flat_bracket_stops_without_the_steepest_retry_tail() {
+    let objective = RoundedBowl::new();
+    let mut point = array![2.0 * f64::EPSILON.sqrt()];
+    let base_gradient = objective.grad(point.view());
+    let mut solver = Solver::new(Method::lbfgs(), Control::default().with_gtol(0.0), 1);
+    solver.set_lbfgs_step(rgmin::LbfgsStep::Wolfe).unwrap();
+    assert!(solver.push_pair(array![1.0].view(), array![1.0].view()));
+    assert_eq!(solver.pair_count(), 1);
+
+    let report = solver.run(&objective, &mut point).unwrap();
+
+    assert_eq!(report.stop_reason(), StopReason::LineSearchRounding);
+    assert_eq!(point, array![2.0 * f64::EPSILON.sqrt()]);
+    assert_eq!(report.grad.as_ref(), Some(&base_gradient));
+    assert!(objective.calls.load(Ordering::Relaxed) <= 16);
+    assert_eq!(solver.pair_count(), 1);
+}
+
+#[test]
+fn the_detailed_search_reports_a_typed_rounding_stop() {
+    let objective = RoundedBowl::new();
+    let start = array![2.0 * f64::EPSILON.sqrt()];
+    let value = objective.eval(start.view());
+    let gradient = objective.grad(start.view());
+    let direction = -&gradient;
+    let result = wolfe().search_from_result(
+        |x| objective.value_and_gradient(x),
+        start.view(),
+        value,
+        gradient.view(),
+        direction.view(),
+        1.0,
+        f64::INFINITY,
+    );
+
+    assert_eq!(
+        result.stop_reason,
+        Some(LineSearchStopReason::RoundingBlocked)
+    );
+    assert!(result.step.is_none());
+    assert!(objective.calls.load(Ordering::Relaxed) <= 10);
+}
+
+#[test]
+fn direct_lbfgs_stops_the_rounding_tail_without_changing_the_gradient() {
+    let objective = RoundedBowl::new();
+    let start = array![2.0 * f64::EPSILON.sqrt()];
+    let base_gradient = objective.grad(start.view());
+    let mut solver = Lbfgs::default();
+    solver.step = LbfgsStep::Wolfe;
+    solver.gtol = 0.0;
+    solver.record(array![1.0], array![2.0]);
+    assert_eq!(solver.len(), 1);
+
+    let (_, point, evals) =
+        solver.minimize(start.view(), 100, |x| Some(objective.value_and_gradient(x)));
+
+    assert_eq!(point, start);
+    assert_eq!(objective.grad(point.view()), base_gradient);
+    assert_eq!(solver.len(), 1);
+    assert!(evals <= 10);
+}
+
+#[test]
+fn error_on_unmet_carries_the_rounding_stop() {
+    let objective = RoundedBowl::new();
+    let mut point = array![2.0 * f64::EPSILON.sqrt()];
+    let control = Control::default().with_gtol(0.0).with_error_on_unmet(true);
+    let mut solver = Solver::new(Method::lbfgs(), control, 1);
+    solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+    assert!(solver.push_pair(array![1.0].view(), array![1.0].view()));
+
+    let error = solver.run(&objective, &mut point).unwrap_err();
+
+    match error {
+        Error::StopUnmet { reason, report } => {
+            assert_eq!(reason, StopReason::LineSearchRounding);
+            assert_eq!(report.stop_reason(), reason);
+        }
+        other => panic!("unexpected error {other}"),
+    }
+    assert_eq!(solver.pair_count(), 1);
+}
+
+#[test]
+fn a_kinked_valley_stops_when_the_bracket_width_hits_rounding() {
+    let kink = 4.0;
+    let calls = AtomicUsize::new(0);
+    let result = LineSearch::wolfe(1e-4, 0.1, 80).search_from_result(
+        |x| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            if x[0] <= kink {
+                (-x[0], array![-1.0])
+            } else {
+                (-kink + (x[0] - kink), array![1.0])
+            }
+        },
+        array![0.0].view(),
+        0.0,
+        array![-1.0].view(),
+        array![1.0].view(),
+        3.0,
+        f64::INFINITY,
+    );
+
+    assert_eq!(
+        result.stop_reason,
+        Some(LineSearchStopReason::RoundingBlocked)
+    );
+    let step = result.step.expect("best Armijo point kept");
+    assert!((step.alpha - kink).abs() <= 64.0 * f64::EPSILON);
+    assert!(step.f < -3.9);
+    assert!(calls.load(Ordering::Relaxed) < 65);
+}
+
+#[test]
+fn standalone_zoom_respects_the_relative_bracket_rounding_width() {
+    let lo = 4.0;
+    let blocked_hi = lo + 32.0 * f64::EPSILON;
+    let blocked_mid = 0.5 * (lo + blocked_hi);
+    let blocked_calls = AtomicUsize::new(0);
+    let blocked_alpha = rgmin::linesearch::zoom(
+        &mut |x| {
+            blocked_calls.fetch_add(1, Ordering::Relaxed);
+            if x[0] == blocked_mid {
+                (-x[0], array![0.0])
+            } else {
+                (-x[0], array![-1.0])
+            }
+        },
+        array![0.0].view(),
+        array![1.0].view(),
+        lo,
+        blocked_hi,
+        1e-4,
+        0.9,
+        20,
+    );
+    assert_eq!(blocked_alpha, lo);
+    assert_eq!(blocked_calls.load(Ordering::Relaxed), 2);
+
+    let open_hi = lo + 64.0 * f64::EPSILON;
+    let open_mid = 0.5 * (lo + open_hi);
+    let open_calls = AtomicUsize::new(0);
+    let open_alpha = rgmin::linesearch::zoom(
+        &mut |x| {
+            open_calls.fetch_add(1, Ordering::Relaxed);
+            if x[0] == open_mid {
+                (-x[0], array![0.0])
+            } else {
+                (-x[0], array![-1.0])
+            }
+        },
+        array![0.0].view(),
+        array![1.0].view(),
+        lo,
+        open_hi,
+        1e-4,
+        0.9,
+        20,
+    );
+    assert_eq!(open_alpha, open_mid);
+    assert_eq!(open_calls.load(Ordering::Relaxed), 3);
+}
+
+#[test]
+fn a_sharp_slope_crossing_keeps_a_rounded_wolfe_bracket_alive() {
+    let basin_edge = 2.0_f64.powi(-28);
+    let minimizer = 0.5 * basin_edge;
+    let curvature = 2.0 / minimizer;
+    let search = LineSearch::wolfe(1e-4, 0.9, 80);
+    let run = |wall_slope: f64| {
+        let calls = AtomicUsize::new(0);
+        let result = search.search_from_result(
+            |x| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                if x[0] <= basin_edge {
+                    let f = 1.0 - 2.0 * x[0] + 0.5 * curvature * x[0] * x[0];
+                    (f, array![-2.0 + curvature * x[0]])
+                } else {
+                    (1.0, array![wall_slope])
+                }
+            },
+            array![0.0].view(),
+            1.0,
+            array![-2.0].view(),
+            array![1.0].view(),
+            1.0,
+            f64::INFINITY,
+        );
+        (result, calls.load(Ordering::Relaxed))
+    };
+
+    let (crossed, _) = run(100.0);
+    assert_eq!(crossed.stop_reason, None);
+    let accepted = crossed.step.expect("narrow basin minimum found");
+    assert!(accepted.f < 1.0);
+    assert!(accepted.g[0].abs() <= 1.8);
+
+    for unresolvable_wall in [64.0, 48.0, -100.0] {
+        let (blocked, evals) = run(unresolvable_wall);
+        assert_eq!(
+            blocked.stop_reason,
+            Some(LineSearchStopReason::RoundingBlocked),
+            "wall slope {unresolvable_wall} should stop on rounding"
+        );
+        assert!(blocked.step.is_none());
+        assert!(evals <= 10, "wall slope {unresolvable_wall} took {evals}");
+    }
+}
+
+#[test]
+fn direct_lbfgs_zooms_through_rounded_trials_into_a_narrow_basin() {
+    let basin_edge = 2.0_f64.powi(-28);
+    let minimizer = 0.5 * basin_edge;
+    let curvature = 2.0 / minimizer;
+    let run = |wall_slope: f64| {
+        let mut solver = Lbfgs::default();
+        solver.step = LbfgsStep::Wolfe;
+        solver.max_line_evals = 40;
+        solver.minimize(array![0.0].view(), 1, |x| {
+            if x[0] <= basin_edge {
+                let f = 1.0 - 2.0 * x[0] + 0.5 * curvature * x[0] * x[0];
+                Some((f, array![-2.0 + curvature * x[0]]))
+            } else {
+                Some((1.0, array![wall_slope]))
+            }
+        })
+    };
+
+    let (value, point, _) = run(100.0);
+    assert!(value < 1.0, "stalled at f={value}, x={}", point[0]);
+    assert!(point[0] > 0.0 && point[0] <= basin_edge, "x={}", point[0]);
+
+    for unresolvable_wall in [64.0, -100.0] {
+        let (value, point, evals) = run(unresolvable_wall);
+        assert_eq!(point, array![0.0], "wall slope {unresolvable_wall}");
+        assert_eq!(value, 1.0);
+        assert!(evals <= 10, "wall slope {unresolvable_wall} took {evals}");
+    }
+}
+
+#[test]
+fn wolfe_value_rounding_is_invariant_under_objective_scaling() {
+    let basin_edge = 1e-12;
+    let curvature = 2.0 / basin_edge;
+    let run = |scale: f64| {
+        let calls = AtomicUsize::new(0);
+        let result = LineSearch::wolfe(1e-4, 0.9, 80).search_from_result(
+            |x| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                if x[0] <= basin_edge {
+                    let f = scale * (1.0 - x[0] + 0.5 * curvature * x[0] * x[0]);
+                    let g = scale * (-1.0 + curvature * x[0]);
+                    (f, array![g])
+                } else {
+                    (scale * (1.0 + 1e-6), array![-scale])
+                }
+            },
+            array![0.0].view(),
+            scale,
+            array![-scale].view(),
+            array![1.0].view(),
+            1.0,
+            f64::INFINITY,
+        );
+        (result, calls.load(Ordering::Relaxed))
+    };
+
+    let (unscaled, unscaled_calls) = run(1.0);
+    let (tiny, tiny_calls) = run(1e-20);
+
+    assert_eq!(unscaled.stop_reason, None);
+    assert_eq!(tiny.stop_reason, unscaled.stop_reason);
+    let unscaled_step = unscaled.step.expect("unscaled problem accepts a step");
+    let tiny_step = tiny.step.expect("1e-20 scaled problem accepts a step");
+    assert!(unscaled_step.evals > 9);
+    assert_eq!(tiny_step.evals, unscaled_step.evals);
+    assert_eq!(tiny_calls, unscaled_calls);
+    assert!(
+        (tiny_step.alpha - unscaled_step.alpha).abs() <= 1e-9 * unscaled_step.alpha,
+        "alpha mismatch: unscaled={} tiny={}",
+        unscaled_step.alpha,
+        tiny_step.alpha
+    );
+    assert!(
+        (tiny_step.x[0] - unscaled_step.x[0]).abs() <= 1e-9 * unscaled_step.x[0].abs(),
+        "x mismatch: unscaled={} tiny={}",
+        unscaled_step.x[0],
+        tiny_step.x[0]
+    );
+}
+
+#[test]
+fn wolfe_value_rounding_handles_exact_zero_objective_safely() {
+    let flat_calls = AtomicUsize::new(0);
+    let flat = LineSearch::wolfe(1e-4, 0.9, 80).search_from_result(
+        |_| {
+            flat_calls.fetch_add(1, Ordering::Relaxed);
+            (0.0, array![-1.0])
+        },
+        array![0.0].view(),
+        0.0,
+        array![-1.0].view(),
+        array![1.0].view(),
+        1.0,
+        f64::INFINITY,
+    );
+    assert_eq!(
+        flat.stop_reason,
+        Some(LineSearchStopReason::RoundingBlocked)
+    );
+    assert!(flat.step.is_none());
+    assert_eq!(flat_calls.load(Ordering::Relaxed), 9);
+
+    let basin_edge = 1e-12;
+    let curvature = 2.0 / basin_edge;
+    let descent_calls = AtomicUsize::new(0);
+    let descent = LineSearch::wolfe(1e-4, 0.9, 80).search_from_result(
+        |x| {
+            descent_calls.fetch_add(1, Ordering::Relaxed);
+            if x[0] <= basin_edge {
+                let f = -x[0] + 0.5 * curvature * x[0] * x[0];
+                let g = -1.0 + curvature * x[0];
+                (f, array![g])
+            } else {
+                (1e-26, array![-1.0])
+            }
+        },
+        array![0.0].view(),
+        0.0,
+        array![-1.0].view(),
+        array![1.0].view(),
+        1.0,
+        f64::INFINITY,
+    );
+    assert_eq!(descent.stop_reason, None);
+    let step = descent
+        .step
+        .expect("tiny rise over zero start zooms into basin");
+    assert!(step.evals > 9);
+    assert_eq!(descent_calls.load(Ordering::Relaxed), step.evals);
 }

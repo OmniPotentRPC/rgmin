@@ -836,6 +836,12 @@ public:
     void set_backward_polish(bool on) {
         rgmin_solver_set_backward_polish(ptr_, on ? 1 : 0);
     }
+    /// Keep points on the level set `value(x) = target`.
+    rgmin_status_t set_level_set(double target) {
+        return rgmin_solver_set_level_set(ptr_, target);
+    }
+    /// Drop the session's level-set constraint.
+    void clear_level_set() { rgmin_solver_clear_level_set(ptr_); }
     /// FIRE 2.0 parameter set. Returns 0, or 1 on an unknown preset or a non-FIRE 2.0 session.
     int set_fire_preset(rgmin_fire_preset_t preset) {
         return rgmin_solver_set_fire_preset(ptr_, preset);
@@ -1226,6 +1232,7 @@ private:
     std::optional<double> objective_roundoff_;
     bool error_on_unmet_ = false;
     bool backward_polish_ = false;
+    std::optional<double> level_set_;
     std::optional<double> etol_;
     std::optional<std::size_t> max_evals_;
     std::optional<double> gromacs_shrink_;
@@ -1236,9 +1243,10 @@ private:
 inline std::string SolverConfig::valid_options() {
     return "accept, atom_maxmove, backward_polish, beta, c1, c2, cautious_alpha, "
            "cautious_eps, error_on_unmet, etol, extra_updates, fire_variant, gtol, istep, "
-           "linesearch, linesearch_maxiter, max_evals, maxiter, maxmove, maxstep, memory, "
-           "neb_guards, noise_c, noise_eps, nstcgsteep, objective_roundoff, periodic, "
-           "project_rigid, qn_step, require_convergence, shrink, max_constraint_shrinks";
+           "level_set, linesearch, linesearch_maxiter, max_evals, maxiter, maxmove, maxstep, "
+           "memory, neb_guards, noise_c, noise_eps, nstcgsteep, objective_roundoff, "
+           "periodic, project_rigid, qn_step, require_convergence, shrink, "
+           "max_constraint_shrinks";
 }
 
 inline std::string SolverConfig::valid_methods() {
@@ -1326,7 +1334,7 @@ inline bool known_option(std::string const& key) {
     static constexpr char const* const keys[] = {
         "accept", "atom_maxmove", "backward_polish", "beta", "c1", "c2",
         "cautious_alpha", "cautious_eps", "error_on_unmet", "etol", "extra_updates",
-        "fire_variant", "gtol", "istep", "linesearch", "linesearch_maxiter",
+        "fire_variant", "gtol", "istep", "level_set", "linesearch", "linesearch_maxiter",
         "max_constraint_shrinks", "max_evals", "maxiter", "maxmove", "maxstep", "memory",
         "neb_guards", "noise_c", "noise_eps", "nstcgsteep", "objective_roundoff", "periodic",
         "project_rigid", "qn_step", "require_convergence", "shrink"};
@@ -1485,15 +1493,16 @@ inline SolverConfig SolverConfig::build(
                 throw std::invalid_argument("nstcgsteep is out of range");
             }
             cfg.gromacs_nstcgsteep_ = static_cast<std::uint32_t>(count);
-        } else if (key == "gtol" || key == "istep" || key == "maxmove" || key == "noise_eps" ||
-                   key == "noise_c" || key == "c1" || key == "c2" || key == "atom_maxmove" ||
-                   key == "maxstep" || key == "cautious_eps" || key == "cautious_alpha" ||
-                   key == "objective_roundoff" || key == "etol") {
+        } else if (key == "gtol" || key == "istep" || key == "level_set" || key == "maxmove" ||
+                   key == "noise_eps" || key == "noise_c" || key == "c1" || key == "c2" ||
+                   key == "atom_maxmove" || key == "maxstep" || key == "cautious_eps" ||
+                   key == "cautious_alpha" || key == "objective_roundoff" || key == "etol") {
             double value = static_cast<double>(item.second);
             detail::require_finite(key, value);
             if (key == "etol") cfg.etol_ = detail::require_etol(value);
             else if (key == "gtol") cfg.control_.gtol = value;
             else if (key == "istep") cfg.control_.istep = value;
+            else if (key == "level_set") cfg.level_set_ = value;
             else if (key == "maxmove") cfg.control_.maxmove = value;
             else if (key == "noise_eps") cfg.control_.noise_eps = value;
             else if (key == "noise_c") cfg.control_.noise_c = value;
@@ -1521,6 +1530,7 @@ inline SolverConfig SolverConfig::build(
         } else if (key == "etol") cfg.etol_ = detail::require_etol(item.second);
         else if (key == "gtol") cfg.control_.gtol = item.second;
         else if (key == "istep") cfg.control_.istep = item.second;
+        else if (key == "level_set") cfg.level_set_ = item.second;
         else if (key == "maxmove") cfg.control_.maxmove = item.second;
         else if (key == "noise_eps") cfg.control_.noise_eps = item.second;
         else if (key == "noise_c") cfg.control_.noise_c = item.second;
@@ -1622,6 +1632,13 @@ inline void SolverConfig::apply(Solver& solver) const {
     }
     solver.set_error_on_unmet(error_on_unmet_);
     solver.set_backward_polish(backward_polish_);
+    if (level_set_) {
+        rgmin_status_t st = solver.set_level_set(*level_set_);
+        if (st != RGMIN_SUCCESS) {
+            char const* msg = rgmin_last_error();
+            throw std::invalid_argument(msg ? msg : "set_level_set failed");
+        }
+    }
     if (etol_) {
         rgmin_status_t st = solver.set_etol(*etol_);
         if (st != RGMIN_SUCCESS) {

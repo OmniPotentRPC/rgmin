@@ -102,7 +102,43 @@ requested tolerance regardless of what the cubic does. The Rust test
 ``tests/lbfgs_state.rs`` holds the crate to that budget on a quadratic
 bowl.
 
-5 When the interpolant is not used
+5 When rounding closes the bracket
+----------------------------------
+
+Geometric contraction is not useful after floating-point arithmetic
+can no longer distinguish the bracket. Following the relative-width
+warning in More and Thuente's ``dcsrch``
+(`10.1145/192115.192132 <https://doi.org/10.1145/192115.192132>`_), Wolfe zoom stops when either the bracket
+width is at most eight machine epsilons times its endpoint scale or a
+sequence of eight trial values differ from the Armijo endpoint by
+at most eight epsilons times
+``max(abs(f_trial), abs(f_lo))`` while Armijo fails. One unresolved
+trial is not enough: an ordinary Wolfe search can cross a short run of
+rounded values before finding curvature. A trial derivative that
+crosses zero and grows past thirty-two times the initial descent slope
+also keeps the bracket active; its sharp transition still carries
+resolvable information. The named factors allow endpoint arithmetic
+and one subtraction to round.
+
+The reusable line search and the dedicated strict ``Lbfgs::minimize``
+Wolfe loop both wait for the sequence and honor the slope crossing:
+callers may have non-smooth objectives, and a narrow basin can sit
+past a run of rounded values. When the L-BFGS loop does stop, it keeps
+its pairs instead of letting its fallback discard them and repeat a
+full search from steepest descent. An explicit approximate-Wolfe
+accuracy window remains the acceptance policy and does not take this
+strict-value stop.
+
+The search returns the lowest measured Armijo decrease, when one
+exists, together with ``LineSearchStopReason::RoundingBlocked``. If no
+trial has a resolved decrease, the start remains the answer. An
+L-BFGS session reports ``StopReason::LineSearchRounding`` and ends there;
+it does not discard the curvature pairs and spend another Wolfe
+budget along steepest descent. The rule depends only on the
+one-dimensional step, value, and slope, so the line-search API remains
+independent of the objective's physical system.
+
+6 When the interpolant is not used
 ----------------------------------
 
 The cubic and the quadratic model the objective on the bracket
@@ -128,7 +164,7 @@ rather than a point chosen by the objective. Bisection halves the
 bracket until the values become comparable, after which the
 interpolant resumes.
 
-6 What the accept layer adds
+7 What the accept layer adds
 ----------------------------
 
 Above the line search, ``src/accept.rs`` offers three policies: take the
@@ -141,7 +177,7 @@ machinery owns what happens next. The test
 ``accept_energy_uphill_does_not_take_ten_steepest_retries`` pins the
 oracle count of that path.
 
-7 A search the caller evaluates
+8 A search the caller evaluates
 -------------------------------
 
 ``SuppliedSearch`` takes the energy and gradient the caller already
