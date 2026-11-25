@@ -1967,6 +1967,7 @@ impl Lbfgs {
             return WolfeStep::Failed { evals };
         }
 
+        let mut unresolved_failures = 0;
         while evals < total_cap {
             if crate::linesearch::bracket_rounding_blocked(lo, hi) {
                 return self.rounding_stop(x, f, g, d, best_armijo, evals);
@@ -2016,6 +2017,18 @@ impl Lbfgs {
             }
             if f_err == 0.0 && !armijo_holds && crate::linesearch::value_rounding_blocked(ft, f_lo)
             {
+                unresolved_failures += 1;
+            } else {
+                unresolved_failures = 0;
+            }
+            if crate::linesearch::rounding_stalled(unresolved_failures) {
+                if crate::linesearch::resolvable_slope_crossing(slope_t, slope_lo, slope) {
+                    unresolved_failures = 0;
+                    hi = trial;
+                    f_hi = ft;
+                    slope_hi = slope_t;
+                    continue;
+                }
                 return self.rounding_stop(x, f, g, d, best_armijo, evals);
             }
             if ft > f0 + self.armijo * trial * slope || ft >= f_lo {

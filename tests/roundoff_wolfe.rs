@@ -290,7 +290,7 @@ fn direct_lbfgs_stops_the_rounding_tail_without_changing_the_gradient() {
     assert_eq!(point, start);
     assert_eq!(objective.grad(point.view()), base_gradient);
     assert_eq!(solver.len(), 1);
-    assert!(evals <= 4);
+    assert!(evals <= 10);
 }
 
 #[test]
@@ -437,6 +437,37 @@ fn a_sharp_slope_crossing_keeps_a_rounded_wolfe_bracket_alive() {
             "wall slope {unresolvable_wall} should stop on rounding"
         );
         assert!(blocked.step.is_none());
+        assert!(evals <= 10, "wall slope {unresolvable_wall} took {evals}");
+    }
+}
+
+#[test]
+fn direct_lbfgs_zooms_through_rounded_trials_into_a_narrow_basin() {
+    let basin_edge = 2.0_f64.powi(-28);
+    let minimizer = 0.5 * basin_edge;
+    let curvature = 2.0 / minimizer;
+    let run = |wall_slope: f64| {
+        let mut solver = Lbfgs::default();
+        solver.step = LbfgsStep::Wolfe;
+        solver.max_line_evals = 40;
+        solver.minimize(array![0.0].view(), 1, |x| {
+            if x[0] <= basin_edge {
+                let f = 1.0 - 2.0 * x[0] + 0.5 * curvature * x[0] * x[0];
+                Some((f, array![-2.0 + curvature * x[0]]))
+            } else {
+                Some((1.0, array![wall_slope]))
+            }
+        })
+    };
+
+    let (value, point, _) = run(100.0);
+    assert!(value < 1.0, "stalled at f={value}, x={}", point[0]);
+    assert!(point[0] > 0.0 && point[0] <= basin_edge, "x={}", point[0]);
+
+    for unresolvable_wall in [64.0, -100.0] {
+        let (value, point, evals) = run(unresolvable_wall);
+        assert_eq!(point, array![0.0], "wall slope {unresolvable_wall}");
+        assert_eq!(value, 1.0);
         assert!(evals <= 10, "wall slope {unresolvable_wall} took {evals}");
     }
 }

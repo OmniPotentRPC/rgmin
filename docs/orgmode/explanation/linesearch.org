@@ -110,12 +110,14 @@ also keeps the bracket active; its sharp transition still carries
 resolvable information. The named factors allow endpoint arithmetic
 and one subtraction to round.
 
-The reusable line search waits for the sequence because callers may have
-non-smooth objectives. The dedicated strict ~Lbfgs::minimize~ Wolfe
-loop stops on the first unresolved failed-Armijo value: its fallback would
-otherwise discard the pairs and repeat a full search from steepest
-descent. An explicit approximate-Wolfe accuracy window remains the
-acceptance policy and does not take this strict-value stop.
+The reusable line search and the dedicated strict ~Lbfgs::minimize~
+Wolfe loop both wait for the sequence and honor the slope crossing:
+callers may have non-smooth objectives, and a narrow basin can sit
+past a run of rounded values. When the L-BFGS loop does stop, it keeps
+its pairs instead of letting its fallback discard them and repeat a
+full search from steepest descent. An explicit approximate-Wolfe
+accuracy window remains the acceptance policy and does not take this
+strict-value stop.
 
 The search returns the lowest measured Armijo decrease, when one
 exists, together with ~LineSearchStopReason::RoundingBlocked~. If no
