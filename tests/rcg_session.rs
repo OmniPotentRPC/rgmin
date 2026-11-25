@@ -346,6 +346,31 @@ fn an_off_manifold_start_is_projected_onto_the_sphere() {
     );
 }
 
+/// `f = (x0 - 2)^2 / 2 + 4 (x1 - 2)^2` is stationary at the off-sphere
+/// start `(2, 2)`. Its projection `(1, 1) / sqrt(2)` carries a gradient
+/// with a tangent part, so a zero-budget run that reads the start where a
+/// step would read it reports the budget at a point on the sphere.
+#[test]
+fn a_zero_budget_run_projects_an_off_manifold_start() {
+    let obj = Oracle::unbounded(2, |x: ArrayView1<f64>| {
+        let (a, b) = (x[0] - 2.0, x[1] - 2.0);
+        (0.5 * a * a + 4.0 * b * b, array![a, 8.0 * b])
+    });
+    let control = Control::default().with_gtol(1e-8).with_maxiter(0);
+    let mut solver = Solver::new(Method::rcg(), control, 2);
+    solver.set_manifold(ManifoldKind::Sphere);
+    let mut x = array![2.0, 2.0];
+    let report = solver.run(&obj, &mut x).unwrap();
+    assert_eq!(report.status, Status::Budget, "{report:?}");
+    let side = std::f64::consts::FRAC_1_SQRT_2;
+    assert!(
+        (x[0] - side).abs() < 1e-14 && (x[1] - side).abs() < 1e-14,
+        "x = {x} is not the closest point on the sphere"
+    );
+    assert!(report.grad_norm > 1.0, "grad_norm {}", report.grad_norm);
+    assert_eq!(report.value, obj.value_and_gradient(x.view()).0);
+}
+
 /// The box clips every trial of the step, so the objective is never read
 /// outside it and the line search measures the curve that is walked.
 struct Boxed {
