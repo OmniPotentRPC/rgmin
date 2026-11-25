@@ -575,6 +575,32 @@ fn bounded_sphere_iterates_stay_on_the_sphere() {
     }
 }
 
+/// A box beside the unit circle holds no point of it. A step and a
+/// zero-budget run both refuse the start before the objective reads a
+/// point, and leave the caller's `x` as it was.
+#[test]
+fn a_start_with_no_retraction_in_the_box_is_refused() {
+    for maxiter in [0, 6] {
+        let obj = Seen::new(array![2.0, -1.0], array![3.0, 1.0], array![2.0, 0.0]);
+        let control = Control::default().with_maxiter(maxiter);
+        let mut solver = Solver::new(Method::rcg(), control, 2);
+        solver.set_manifold(ManifoldKind::Sphere);
+        let start = array![1.0, 0.0];
+        let mut x = start.clone();
+        let error = solver.run(&obj, &mut x).unwrap_err();
+        assert!(
+            matches!(error, Error::OffManifold { kind: "sphere" }),
+            "maxiter {maxiter}: {error:?}"
+        );
+        assert_eq!(x, start, "maxiter {maxiter}");
+        assert!(
+            obj.points().is_empty(),
+            "maxiter {maxiter}: {:?}",
+            obj.points()
+        );
+    }
+}
+
 /// A box that cuts the Stiefel manifold. Every accepted trial stays
 /// orthonormal: the columns of `X` obey `X^T X = I`.
 #[test]
