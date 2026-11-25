@@ -567,13 +567,21 @@ impl GromacsLbfgs {
     }
 
     /// Store the accepted GROMACS pair and form the next two-loop direction.
+    ///
+    /// `displacement` is the move the session applied, `x_new - x_old`
+    /// after retraction and bound clipping, not the line step times the
+    /// search direction.
     pub(crate) fn accept(
         &mut self,
         old_force: ArrayView1<'_, f64>,
         new_force: ArrayView1<'_, f64>,
-        step_taken: f64,
+        displacement: Array1<f64>,
     ) -> Result<()> {
-        let displacement = self.direction.mapv(|component| step_taken * component);
+        if displacement.len() != self.direction.len() {
+            return Err(Error::GromacsLbfgs {
+                what: "accepted displacement has the wrong length",
+            });
+        }
         let gradient_change = &old_force - &new_force;
         let sy = displacement.dot(&gradient_change);
         let yy = gradient_change.dot(&gradient_change);
@@ -631,6 +639,11 @@ impl GromacsLbfgs {
             });
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn newest_displacement(&self) -> Option<ArrayView1<'_, f64>> {
+        self.pairs.back().map(|pair| pair.displacement.view())
     }
 
     /// Drop all algorithm state. The next evaluation starts from its force.
