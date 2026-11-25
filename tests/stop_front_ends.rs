@@ -20,6 +20,9 @@ use rgmin::{Accept, Control, LbfgsStep, LineSearch, Method, Solver, StopReason, 
 
 const BUDGET: usize = 3;
 const START: f64 = 1.0;
+/// Outside the +-1e12 box of `Oracle::unbounded`, which clips it.
+const OUTSIDE: f64 = 1e13;
+const EDGE: f64 = 1e12;
 
 fn uphill() -> impl DifferentiableObjective<f64> {
     rgmin::Oracle::unbounded(1, |x: ArrayView1<f64>| (0.5 * x[0] * x[0], array![-x[0]]))
@@ -77,8 +80,8 @@ fn c_control() -> rgmin_control_t {
     }
 }
 
-fn c_run(error_on_unmet: i32) -> (rgmin_status_t, rgmin_report_t, f64) {
-    let mut x = [START];
+fn c_run(start: f64, error_on_unmet: i32) -> (rgmin_status_t, rgmin_report_t, f64) {
+    let mut x = [start];
     let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 1) };
     assert!(!xt.is_null());
     let ctrl = c_control();
@@ -150,12 +153,12 @@ fn every_front_end_names_a_no_move_lbfgs_run_the_same_way() {
         assert!(!report.converged(), "{front_end}");
     }
 
-    let (status, out, moved) = c_run(0);
+    let (status, out, moved) = c_run(START, 0);
     assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
     assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_LINE_SEARCH);
     assert_eq!(moved, START);
 
-    let (status, out, moved) = c_run(1);
+    let (status, out, moved) = c_run(START, 1);
     assert_eq!(status, rgmin_status_t::RGMIN_UNMET_STOP);
     assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_LINE_SEARCH);
     assert_eq!(moved, START);
@@ -190,4 +193,62 @@ fn a_moving_run_that_spends_its_budget_stays_maxiter_everywhere() {
         .unwrap();
     assert_eq!(one_shot.stop_reason(), StopReason::MaxIter);
     assert_eq!(session.stop_reason(), StopReason::MaxIter);
+}
+
+/// A start outside the box is projected onto it before the first step.
+/// Every front end measures movement from that projected point, so a run
+/// that never leaves the edge is `LineSearchFailed` everywhere, as it is
+/// for a start inside the box.
+#[test]
+fn a_start_outside_the_box_is_measured_from_its_clipped_point_everywhere() {
+    let one_shot = minimize_method(
+        &uphill(),
+        array![OUTSIDE],
+        &control(),
+        Method::lbfgs(),
+        LineSearch::default(),
+    )
+    .unwrap();
+
+    let mut x: Array1<f64> = array![OUTSIDE];
+    let stepped = session().run(&uphill(), &mut x).unwrap();
+    assert_eq!(x[0], EDGE);
+
+    let mut xg: Array1<f64> = array![OUTSIDE];
+    let gauged = session().run_gauged(&uphill(), &mut xg, |_| {}).unwrap();
+    assert_eq!(xg[0], EDGE);
+
+    for (front_end, report) in [
+        ("minimize_method", &one_shot),
+        ("Solver::run", &stepped),
+        ("Solver::run_gauged", &gauged),
+    ] {
+        assert_eq!(
+            report.stop_reason(),
+            StopReason::LineSearchFailed,
+            "{front_end}"
+        );
+        assert!(!report.converged(), "{front_end}");
+    }
+
+    let (status, out, at) = c_run(OUTSIDE, 0);
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_LINE_SEARCH);
+    assert_eq!(at, EDGE);
+
+    let (status, out, at) = c_run(OUTSIDE, 1);
+    assert_eq!(status, rgmin_status_t::RGMIN_UNMET_STOP);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_LINE_SEARCH);
+    assert_eq!(at, EDGE);
+}
+
+/// A gauge that moves the clipped start is a move even when the steps
+/// do not.
+#[test]
+fn a_gauge_move_from_a_clipped_start_is_still_a_move() {
+    let mut x: Array1<f64> = array![OUTSIDE];
+    let report = session()
+        .run_gauged(&uphill(), &mut x, |x| x[0] = EDGE / 2.0)
+        .unwrap();
+    assert_ne!(report.stop_reason(), StopReason::LineSearchFailed);
 }
