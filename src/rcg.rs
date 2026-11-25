@@ -292,7 +292,8 @@ const SWEEP_TOL: f64 = 1e-13;
 /// [`DistanceConstraints::project_gradient`] the bond part of the
 /// Riemannian gradient, and [`DistanceConstraints::constrain`] the return
 /// to the bonds. A failure in any of them is recorded and read through
-/// [`Failures`].
+/// [`Failures`]. A set with masses measures tangent vectors in the mass
+/// metric, the one its projections are orthogonal in.
 pub(crate) struct BondedManifold<'a, M: ?Sized> {
     base: &'a M,
     constraints: &'a DistanceConstraints,
@@ -319,8 +320,9 @@ where
     }
 
     /// The Riemannian gradient `grad` of `base` at `x`, cut by the bond
-    /// tangent space. [`Manifold::egrad2rgrad`] is `base`'s map of an
-    /// ambient gradient followed by this.
+    /// tangent space. With masses the cut is a covector, whose `M^-1`
+    /// image is tangent. [`Manifold::egrad2rgrad`] is `base`'s map of an
+    /// ambient gradient, this, and that raise.
     pub(crate) fn cut_gradient(&self, x: &Array1<f64>, grad: Array1<f64>) -> Array1<f64> {
         self.tangent(
             x,
@@ -328,6 +330,15 @@ where
             |set, at, w| set.project_gradient(at, w).map(drop),
             |at, w| self.base.project(at, w),
         )
+    }
+
+    /// `v` with each atom scaled by its mass to the power `power`, or
+    /// `None` for a set without masses.
+    fn by_mass(&self, v: &Array1<f64>, power: i32) -> Option<Array1<f64>> {
+        let masses = self.constraints.masses()?;
+        Some(Array1::from_shape_fn(v.len(), |k| {
+            v[k] * masses[k / 3].powi(power)
+        }))
     }
 
     /// `start` moved into both tangent spaces at `x`. `bond` is the bond
@@ -395,7 +406,11 @@ where
     }
 
     fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
-        self.cut_gradient(x, self.base.egrad2rgrad(x, egrad))
+        let cut = self.cut_gradient(x, self.base.egrad2rgrad(x, egrad));
+        match self.by_mass(&cut, -1) {
+            Some(raised) => self.project(x, &raised),
+            None => cut,
+        }
     }
 
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
@@ -422,8 +437,13 @@ where
         self.project(x_to, &self.base.transport(x_from, x_to, v))
     }
 
+    /// `base`'s metric weighted by the masses, so the slope of a raised
+    /// gradient along a tangent vector is the derivative of the value.
     fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {
-        self.base.inner(x, u, v)
+        match self.by_mass(v, 1) {
+            Some(weighted) => self.base.inner(x, u, &weighted),
+            None => self.base.inner(x, u, v),
+        }
     }
 }
 
@@ -1370,6 +1390,33 @@ mod tests {
         let y = bonded.retract(&x, &rgrad.mapv(|c| -0.3 * c));
         assert!((y.dot(&y).sqrt() - 1.0).abs() < 1e-12);
         assert!(set.excess(y.view()) <= 1.0);
+        assert!(bonded.take().is_none());
+    }
+
+    /// A dimer of masses 1 and 16 on the x axis. The bond part of the
+    /// gradient is removed in the mass metric, and the covector left has
+    /// a bond component of 15/17 until `M^-1` raises it.
+    #[test]
+    fn a_mass_weighted_bonded_gradient_is_a_tangent_direction() {
+        let x = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], x.view())
+            .unwrap()
+            .with_masses(vec![1.0, 16.0])
+            .unwrap();
+        let bonded = BondedManifold::new(&crate::manifold::Euclidean, &set);
+        let egrad = array![1.0, 0.5, 0.0, 0.0, 0.0, -0.25];
+        let rgrad = bonded.egrad2rgrad(&x, &egrad);
+        let along: f64 = (0..3)
+            .map(|k| (x[3 + k] - x[k]) * (rgrad[3 + k] - rgrad[k]))
+            .sum();
+        assert!(along.abs() < 1e-12, "bond part {along}");
+        let v = bonded.project(&x, &array![0.3, -0.7, 0.2, 0.4, 0.1, -0.5]);
+        let slope = bonded.inner(&x, &rgrad, &v);
+        assert!(
+            (slope - egrad.dot(&v)).abs() < 1e-12,
+            "slope {slope} against {}",
+            egrad.dot(&v)
+        );
         assert!(bonded.take().is_none());
     }
 
