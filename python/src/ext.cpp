@@ -575,7 +575,8 @@ NB_MODULE(_core, m) {
         } catch (rgmin::StopUnmetError const& error) {
             nb::object type = nb::module_::import_("rgmin._core").attr("StopUnmetError");
             nb::object instance = type(error.what());
-            instance.attr("report") = nb::cast(error.report());
+            rgmin::Report report = error.report();
+            instance.attr("report") = nb::cast(std::move(report));
             PyErr_SetObject(type.ptr(), instance.ptr());
         } catch (rgmin::NotConverged const& error) {
             nb::object type = nb::module_::import_("rgmin._core").attr("NotConverged");
@@ -677,6 +678,7 @@ NB_MODULE(_core, m) {
         .def("converged",
              [](rgmin::Report const& report) { return report.stop == RGMIN_STOP_TOLERANCE; },
              "True when ``stop`` is ``TOLERANCE``.");
+    unmet_type.attr("report") = nb::cast(rgmin::Report{});
 
     nb::object not_converged = nb::steal(PyErr_NewExceptionWithDoc(
         "rgmin._core.NotConverged",
