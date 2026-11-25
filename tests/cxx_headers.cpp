@@ -974,6 +974,8 @@ int main() {
                   "EonCg keeps the C enumerator");
     static_assert(static_cast<int>(rgmin::Method::GromacsSteep) == RGMIN_GROMACS_STEEP,
                   "GromacsSteep keeps the C enumerator");
+    static_assert(static_cast<int>(rgmin::Method::Rcg) == RGMIN_RCG,
+                  "Rcg keeps the C enumerator");
     static_assert(XTS_GROMACS_STEEP == RGMIN_GROMACS_STEEP,
                   "xts.h aliases the GROMACS steep selector");
     static_assert(static_cast<int>(rgmin::Method::GromacsCg) == RGMIN_GROMACS_CG,
@@ -983,9 +985,17 @@ int main() {
     if (rgmin::method_from_name("eon-cg") != rgmin::Method::EonCg ||
         rgmin::method_from_name("polak-ribiere-plus") != rgmin::Method::PolakRibierePlus ||
         rgmin::method_from_name("gromacs-steep") != rgmin::Method::GromacsSteep ||
-        rgmin::method_from_name("gromacs-cg") != rgmin::Method::GromacsCg) {
+        rgmin::method_from_name("gromacs-cg") != rgmin::Method::GromacsCg ||
+        rgmin::method_from_name("rcg") != rgmin::Method::Rcg) {
         std::fprintf(stderr, "method_from_name missed a public method\n");
         return 6;
+    }
+    auto const rcg_config = rgmin::SolverConfig::build("rcg", {}, {}, {}, {});
+    if (rcg_config.method() != rgmin::Method::Rcg ||
+        rcg_config.method_name() != "rcg" ||
+        rcg_config.valid_methods().find("rcg") == std::string::npos) {
+        std::fprintf(stderr, "SolverConfig missed rcg\n");
+        return 47;
     }
     {
         rgmin::SolverConfig const cfg =
