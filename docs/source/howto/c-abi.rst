@@ -164,18 +164,44 @@ One-shot
     rgmin_report_t report;
     rgmin_status_t st = rgmin_minimize(eval, grad, user, x, &ctrl, RGMIN_LBFGS, &report);
 
-SCG takes the same one-shot shape.
-Conjugacy is a field on ``rgmin_scg_params_t``, not a different entry point.
-Stamp is 1.13.3 (``xts_abi_compatible`` still checks major and layout only).
-``rgmin_lowest_eigenpair`` takes a typed ``rgmin_eigen_params_t`` (closed ``rgmin_eigen_kind_t``, no string).
-Unlinked kinds return ``RGMIN_UNAVAILABLE``.
-``rgmin_lowest_eigenpairs`` is the block LOBPCG solver for the k lowest pairs (Knyazev 2001).
-``seed`` and ``modes_out`` are row-major n-by-k.
-``rgmin_lowest_eigenpairs`` is ``abi_minor`` 39.
-``rgmin_manifold_handle_t`` is a Stiefel, SPD, rigid quotient or product manifold with column-major point buffers, ``abi_minor`` 41; see the manifold reference.
+A run that spends its budget, fails its line search, leaves a backward
+polish unmet or spends the evaluation budget still returns
+``RGMIN_SUCCESS``, with the stop in ``rgmin_report_t.stop``. The one-shots
+whose names end in ``_opts`` add ``error_on_unmet`` and ``backward_polish``
+before ``out``. A
+nonzero ``error_on_unmet`` writes ``x`` and ``out`` for those four stops and
+then returns ``RGMIN_UNMET_STOP``, so the host reads the report and still
+sees the run as unmet. ``rgmin_minimize_eindir_opts`` is the same for an
+``eindir_objective_t``:
+
+.. code:: c
+
+    rgmin_status_t st = rgmin_minimize_eindir_opts(
+        objective, &stamp, x, &ctrl, RGMIN_LBFGS, /* error_on_unmet */ 1,
+        /* backward_polish */ 0, &report);
+    if (st == RGMIN_UNMET_STOP) {
+        /* x holds the last iterate and report.stop names the unmet stop */
+    }
+
+``rgmin_minimize_eindir`` is that call with both flags off. An eindir
+objective has no Hessian, so ``backward_polish`` does not change this
+entry. Its errors name the symbol the host called, in
+``rgmin_last_error``.
+
+SCG takes the same one-shot shape. Conjugacy is a field on
+``rgmin_scg_params_t``, not a different entry point. Stamp is 1.13.3
+(``xts_abi_compatible`` still checks major and layout only).
+``rgmin_lowest_eigenpair`` takes a typed ``rgmin_eigen_params_t``
+(closed ``rgmin_eigen_kind_t``, no string). Unlinked kinds return
+``RGMIN_UNAVAILABLE``. ``rgmin_lowest_eigenpairs`` is the block LOBPCG
+solver for the k lowest pairs (Knyazev 2001). ``seed`` and ``modes_out``
+are row-major n-by-k. ``rgmin_lowest_eigenpairs`` is ``abi_minor`` 39.
+``rgmin_manifold_handle_t`` is a Stiefel, SPD, rigid quotient or product
+manifold with
+column-major point buffers, ``abi_minor`` 41; see the manifold reference.
 ``rgmin_manifold_rigid_quotient`` is ``abi_minor`` 56.
-``rgmin_lowest_eigenpairs_ex`` adds each residual and a converged flag, and an optional preconditioner (null is the identity).
-It is ``abi_minor`` 42.
+``rgmin_lowest_eigenpairs_ex`` adds each residual and a converged flag, and an
+optional preconditioner (null is the identity). It is ``abi_minor`` 42.
 ``rgmin_eigenpair_t`` is unchanged.
 
 .. code:: c
