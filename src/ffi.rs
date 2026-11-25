@@ -1765,13 +1765,16 @@ pub unsafe extern "C" fn rgmin_minimize_eindir(
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
     unsafe {
-        rgmin_minimize_eindir_sized(
+        minimize_eindir_named(
+            "rgmin_minimize_eindir",
             objective,
             stamp,
             x,
             ctrl,
             RGMIN_CONTROL_REVISION5_SIZE,
             method,
+            0,
+            0,
             out,
         )
     }
@@ -1799,7 +1802,8 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
     unsafe {
-        rgmin_minimize_eindir_opts_sized(
+        minimize_eindir_named(
+            "rgmin_minimize_eindir_opts",
             objective,
             stamp,
             x,
@@ -1822,6 +1826,101 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts(
 /// `ctrl_size` bytes and `out` writable for the layout that size names.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rgmin_minimize_eindir_sized(
+/// The body of both eindir one-shots. `entry` is the symbol the host
+/// called, so an error names that entry and not the one that delegates.
+unsafe fn minimize_eindir_named(
+    entry: &str,
+    objective: *const eindir_objective_t,
+    stamp: *const eindir_abi_stamp_t,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    ctrl_size: usize,
+    method: rgmin_method_t,
+    method: rgmin_method_t,
+    error_on_unmet: i32,
+    backward_polish: i32,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if objective.is_null() || stamp.is_null() || ctrl.is_null() || out.is_null() {
+            set_last_error(&format!("{entry}: null argument"));
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let (c, layout) = match unsafe { load_control(entry, ctrl, ctrl_size) } {
+            Ok(loaded) => loaded,
+            Err(status) => return status,
+        };
+        if unsafe { eindir_core_abi_compatible(stamp) } == 0 {
+            set_last_error(&format!("{entry}: incompatible eindir ABI stamp"));
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        if unsafe { eindir_objective_has_grad(objective) } == 0 {
+            set_last_error(&format!("{entry}: objective has no gradient"));
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let init = match cpu_f64_slice_mut(x, "x") {
+            Ok(s) => s.to_vec(),
+            Err(st) => return st,
+        };
+        if let Err(status) = reject_non_finite_initial(entry, &init) {
+            return status;
+        }
+        let dim = unsafe { (*objective).dim };
+        if dim != init.len() {
+            set_last_error(&format!(
+                "{entry}: x length {} != objective dim {}",
+                init.len(),
+                dim
+            ));
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let objective_addr = objective as usize;
+        let scratch = Scratch::new();
+        let obj = Oracle::unbounded(dim, move |xv| {
+            let objective = objective_addr as *const eindir_objective_t;
+            let m = xv.len();
+            let mut s = scratch.lock().expect("ffi scratch");
+            let xt = s.x_tensor(xv);
+            let mut value = 0.0;
+            let eval_status = unsafe { eindir_objective_eval(objective, xt, &mut value) };
+            let mut gradient = Array1::zeros(m);
+            let gt = s.out.point_at(gradient.as_mut_ptr(), m);
+            let grad_status = unsafe { eindir_objective_grad(objective, xt, gt) };
+            if eval_status != eindir_status_t::EINDIR_SUCCESS
+                || grad_status != eindir_status_t::EINDIR_SUCCESS
+            {
+                set_last_error(&format!("{entry}: eindir evaluation failed"));
+                return (f64::INFINITY, Array1::from_elem(m, f64::NAN));
+            }
+            (value, gradient)
+        });
+        let control = control_with_flags(&c, error_on_unmet, backward_polish);
+        let outcome = minimize_method(
+            &obj,
+            Array1::from(init),
+            &control,
+            method_from_c(method, c.memory),
+            LineSearch::default(),
+        );
+        finish_one_shot(x, out, outcome, layout)
+    })) {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error(&format!("{entry}: panic"));
+            rgmin_status_t::RGMIN_INTERNAL_ERROR
+        }
+    }
+}
+
+/// [`rgmin_minimize_eindir`] for a caller that states
+/// `sizeof(rgmin_control_t)` as `ctrl_size`, read as in
+/// [`rgmin_minimize_opts_sized`]. ABI minor 55.
+///
+/// # Safety
+/// Same as [`rgmin_minimize_eindir`], with `ctrl` readable for
+/// `ctrl_size` bytes and `out` writable for the layout that size names.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_eindir_sized(
     objective: *const eindir_objective_t,
     stamp: *const eindir_abi_stamp_t,
     x: *mut DLManagedTensorVersioned,
@@ -1831,7 +1930,18 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_sized(
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
     unsafe {
-        rgmin_minimize_eindir_opts_sized(objective, stamp, x, ctrl, ctrl_size, method, 0, 0, out)
+        minimize_eindir_named(
+            "rgmin_minimize_eindir_sized",
+            objective,
+            stamp,
+            x,
+            ctrl,
+            ctrl_size,
+            method,
+            0,
+            0,
+            out,
+        )
     }
 }
 
@@ -1854,74 +1964,19 @@ pub unsafe extern "C" fn rgmin_minimize_eindir_opts_sized(
     backward_polish: i32,
     out: *mut rgmin_report_t,
 ) -> rgmin_status_t {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if objective.is_null() || stamp.is_null() || ctrl.is_null() || out.is_null() {
-            set_last_error("rgmin_minimize_eindir: null argument");
-            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-        }
-        let (c, layout) = match unsafe { load_control("rgmin_minimize_eindir", ctrl, ctrl_size) } {
-            Ok(loaded) => loaded,
-            Err(status) => return status,
-        };
-        if unsafe { eindir_core_abi_compatible(stamp) } == 0 {
-            set_last_error("rgmin_minimize_eindir: incompatible eindir ABI stamp");
-            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-        }
-        if unsafe { eindir_objective_has_grad(objective) } == 0 {
-            set_last_error("rgmin_minimize_eindir: objective has no gradient");
-            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-        }
-        let init = match cpu_f64_slice_mut(x, "x") {
-            Ok(s) => s.to_vec(),
-            Err(st) => return st,
-        };
-        if let Err(status) = reject_non_finite_initial("rgmin_minimize_eindir", &init) {
-            return status;
-        }
-        let dim = unsafe { (*objective).dim };
-        if dim != init.len() {
-            set_last_error(&format!(
-                "rgmin_minimize_eindir: x length {} != objective dim {}",
-                init.len(),
-                dim
-            ));
-            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
-        }
-        let objective_addr = objective as usize;
-        let scratch = Scratch::new();
-        let obj = Oracle::unbounded(dim, move |xv| {
-            let objective = objective_addr as *const eindir_objective_t;
-            let m = xv.len();
-            let mut s = scratch.lock().expect("ffi scratch");
-            let xt = s.x_tensor(xv);
-            let mut value = 0.0;
-            let eval_status = unsafe { eindir_objective_eval(objective, xt, &mut value) };
-            let mut gradient = Array1::zeros(m);
-            let gt = s.out.point_at(gradient.as_mut_ptr(), m);
-            let grad_status = unsafe { eindir_objective_grad(objective, xt, gt) };
-            if eval_status != eindir_status_t::EINDIR_SUCCESS
-                || grad_status != eindir_status_t::EINDIR_SUCCESS
-            {
-                set_last_error("rgmin_minimize_eindir: eindir evaluation failed");
-                return (f64::INFINITY, Array1::from_elem(m, f64::NAN));
-            }
-            (value, gradient)
-        });
-        let control = control_with_flags(&c, error_on_unmet, backward_polish);
-        let outcome = minimize_method(
-            &obj,
-            Array1::from(init),
-            &control,
-            method_from_c(method, c.memory),
-            LineSearch::default(),
-        );
-        finish_one_shot(x, out, outcome, layout)
-    })) {
-        Ok(s) => s,
-        Err(_) => {
-            set_last_error("rgmin_minimize_eindir: panic");
-            rgmin_status_t::RGMIN_INTERNAL_ERROR
-        }
+    unsafe {
+        minimize_eindir_named(
+            "rgmin_minimize_eindir_opts_sized",
+            objective,
+            stamp,
+            x,
+            ctrl,
+            ctrl_size,
+            method,
+            error_on_unmet,
+            backward_polish,
+            out,
+        )
     }
 }
 
