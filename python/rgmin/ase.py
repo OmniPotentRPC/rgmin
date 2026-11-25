@@ -1528,7 +1528,7 @@ class LBFGSLineSearch(_AseWolfe, LBFGS):
                 "maximum step size: %.1f Angstrom" % maxstep
             )
         scale = _positive("alpha", alpha)
-        self.memory = int(memory)
+        self.memory = memory
         self.damping = float(damping)
         self.alpha = scale
         self.use_line_search = True

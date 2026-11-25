@@ -551,12 +551,16 @@ where
 /// ASE's line search from the known `(value, grad)` at `pos`.
 ///
 /// `atom_maxmove` limits each increment of the search, not the step,
-/// and the Euclidean `control.maxmove` is not read. The trial the
-/// search ends on is the step whether or not it lowers the value, as
-/// ASE takes it. The search opens at the unit step, not at `istep`. A
-/// failed search, a search under another [`LineSearch`] kind, or an
-/// end point outside the objective's box leaves the start in place and
-/// sets [`Taken::line_failed`].
+/// and the Euclidean `control.maxmove` is not read. A positive finite
+/// cap shortens an increment that would move an atom farther. A
+/// non-positive finite cap is ASE's `maxstep`: zero scales the
+/// increment to zero, and a negative cap scales and can reverse it.
+/// `None` and a non-finite cap leave the increments unlimited. The
+/// trial the search ends on is the step whether or not it lowers the
+/// value, as ASE takes it. The search opens at the unit step, not at
+/// `istep`. A failed search, a search under another [`LineSearch`]
+/// kind, or an end point outside the objective's box leaves the start
+/// in place and sets [`Taken::line_failed`].
 #[allow(clippy::too_many_arguments)]
 fn take_ase_step<O>(
     obj: &O,
@@ -590,7 +594,9 @@ where
         value,
         grad.view(),
         dir,
-        atom_maxmove.filter(|cap| binding(*cap)),
+        // `binding` treats a non-positive cap as no cap. ASE scales by
+        // that value, including zero.
+        atom_maxmove.filter(|cap| cap.is_finite()),
         search,
         c1,
         c2,

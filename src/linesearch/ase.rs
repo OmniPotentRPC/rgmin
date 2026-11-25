@@ -326,11 +326,16 @@ fn trial_point(pos: ArrayView1<'_, f64>, dir: ArrayView1<'_, f64>, stp: f64) -> 
 /// Run ASE's search from `pos` along `dir` with the known `f0` and `g0`.
 ///
 /// `maxstep` limits the largest per-atom move of each increment; `None`
-/// leaves the increments unlimited. `budget` bounds the evaluations.
-/// A direction shorter than ASE's floor `sqrt(n / 3 * 1e-10)` is
-/// lengthened to it first, as ASE's optimizers do before their search.
-/// Returns the trial the search ended on, or `None` when the search
-/// failed: an input error, a spent budget, or a non-finite trial.
+/// leaves the increments unlimited. A finite value, including zero and
+/// negative, is ASE's `maxstep`: zero scales each increment to zero.
+/// `budget` bounds the evaluations. A direction shorter than ASE's
+/// floor `sqrt(n / 3 * 1e-10)` is lengthened to it first, as ASE's
+/// optimizers do before their search. A zero direction, or an empty
+/// `pos` (that floor is then zero), fails before any evaluation: the
+/// lengthening quotient is not finite and would hand the oracle NaN
+/// coordinates. Returns the trial the search ended on, or `None` when
+/// the search failed: an input error, a spent budget, a non-finite
+/// trial, a zero direction, or an empty position.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn search<F>(
     mut oracle: F,
@@ -349,6 +354,11 @@ where
 {
     let floor = (pos.len() as f64 / 3.0 * 1e-10).sqrt();
     let size = dir.iter().map(|v| v * v).sum::<f64>().sqrt();
+    // `size / floor` is NaN when the direction is zero, `pos` is empty,
+    // or either length is not finite.
+    if !size.is_finite() || !floor.is_finite() || size <= 0.0 || floor <= 0.0 {
+        return None;
+    }
     let dir = if size <= floor {
         dir.mapv(|v| v / (size / floor))
     } else {
@@ -388,7 +398,16 @@ where
         if evals >= budget {
             return None;
         }
+        // A zero `maxstep` scales a later zero increment by `0/0`. ASE
+        // evaluates that NaN and the search never reaches a warning.
+        // Stop before the oracle sees a non-finite coordinate.
+        if !stp.is_finite() {
+            return None;
+        }
         let x = trial_point(pos, dir.view(), stp);
+        if x.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
         let (f, g) = oracle(x.view());
         evals += 1;
         if !crate::step::finite(f, g.view()) {
@@ -488,5 +507,76 @@ mod tests {
         let (out, seen) = run(1.0, Some(0.2), 50.0, 2);
         assert!(out.is_none());
         assert_eq!(seen.len(), 2);
+    }
+
+    #[test]
+    fn a_zero_maxstep_scales_the_first_increment_to_zero() {
+        let (out, seen) = run(1.0, Some(0.0), 50.0, 8);
+        assert!(out.is_none());
+        assert!(!seen.is_empty());
+        assert!(
+            seen.iter().all(|x| x.is_finite() && x.abs() < 1e-12),
+            "{seen:?}"
+        );
+    }
+
+    #[test]
+    fn a_negative_maxstep_scales_the_increment_by_that_value() {
+        // ASE: dr *= maxstep / longest when the atom move is at least maxstep.
+        let (_out, seen) = run(1.0, Some(-0.2), 50.0, 1);
+        assert_eq!(seen.len(), 1);
+        assert!((seen[0] - (-0.2)).abs() < 1e-12, "{seen:?}");
+    }
+
+    #[test]
+    fn a_zero_direction_fails_before_any_evaluation() {
+        let seen = RefCell::new(0usize);
+        let oracle = |x: ArrayView1<'_, f64>| {
+            *seen.borrow_mut() += 1;
+            bowl(1.0, x)
+        };
+        let pos = array![0.0, 0.0, 0.0];
+        let (f0, g0) = bowl(1.0, pos.view());
+        let dir = array![0.0, 0.0, 0.0];
+        let out = search(
+            oracle,
+            pos.view(),
+            f0,
+            g0.view(),
+            dir.view(),
+            Some(0.2),
+            AseSearch { stpmax: 50.0 },
+            0.23,
+            0.46,
+            20,
+        );
+        assert!(out.is_none());
+        assert_eq!(*seen.borrow(), 0);
+    }
+
+    #[test]
+    fn an_empty_position_fails_before_any_evaluation() {
+        let seen = RefCell::new(0usize);
+        let oracle = |x: ArrayView1<'_, f64>| {
+            *seen.borrow_mut() += 1;
+            (0.0, Array1::zeros(x.len()))
+        };
+        let pos = Array1::zeros(0);
+        let dir = Array1::zeros(0);
+        let g0 = Array1::zeros(0);
+        let out = search(
+            oracle,
+            pos.view(),
+            0.0,
+            g0.view(),
+            dir.view(),
+            Some(0.2),
+            AseSearch { stpmax: 50.0 },
+            0.23,
+            0.46,
+            20,
+        );
+        assert!(out.is_none());
+        assert_eq!(*seen.borrow(), 0);
     }
 }
