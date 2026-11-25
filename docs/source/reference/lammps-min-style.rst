@@ -141,4 +141,4 @@ Errors
     | ``replicated rgmin sessions diverged across ranks``                                 | ranks that reached different step energies               |
     +-------------------------------------------------------------------------------------+----------------------------------------------------------+
 
-Keywords with a bad value (``memory 0``, ``linesearch armijo``, ``accept maybe``) and settings that need another method (``trust`` or ``linesearch wolfe`` without ``lbfgs``, ``abcfire yes`` without ``fire2``) also stop with an error that names them.
+Keywords with a bad value (``memory 0``, ``delaystep -1``, ``linesearch armijo``, ``accept maybe``) and settings that need another method (``trust`` or ``linesearch wolfe`` without ``lbfgs``, ``abcfire yes`` without ``fire2``) also stop with an error that names them.
