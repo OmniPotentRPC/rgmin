@@ -1009,8 +1009,10 @@ class RiemannianCG(_Scaled):
 
     The coefficient is PRP+ and the transport is scaled. The line search
     is the strong Wolfe search. ``maxstep`` still caps the longest atomic
-    displacement when the caller sets it. The default per-atom cap stays
-    off, because the line search chooses the length.
+    displacement when the caller sets it, and it must then be positive
+    and finite: the session leaves a zero, negative or non-finite cap off.
+    The default per-atom cap stays off, because the line search chooses
+    the length.
     """
 
     kind = "rcg"
