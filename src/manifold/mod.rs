@@ -585,6 +585,26 @@ impl ManifoldKind {
         }
     }
 
+    /// `true` when every ambient point is a point of the manifold, so the
+    /// Euclidean projection onto the manifold cut by a coordinate box is
+    /// the box clip itself.
+    ///
+    /// Euclidean space, complex Euclidean space and the rigid quotients
+    /// are open pieces of the packed coordinates, and a product is only
+    /// when every factor is. A clip leaves every other set: a sphere loses
+    /// its unit norm, a symmetric matrix loses symmetry, a centered matrix
+    /// loses its zero mean.
+    pub(crate) fn coordinate_clip_stays_on_set(&self) -> bool {
+        match self {
+            Self::Product(product) => product.coordinate_clip_stays_on_set(),
+            Self::Euclidean
+            | Self::EuclideanComplex { .. }
+            | Self::RigidQuotient
+            | Self::MwRigid => true,
+            _ => false,
+        }
+    }
+
     /// `true` when the retraction keeps a straight step on the set, so a
     /// chord can be capped and clipped after it. A curved kind caps the
     /// tangent step before the retraction instead.

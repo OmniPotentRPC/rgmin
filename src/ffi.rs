@@ -671,6 +671,7 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
         Method::Diis { .. } => rgmin_method_t::RGMIN_DIIS,
         Method::NewtonCg => rgmin_method_t::RGMIN_NEWTON_CG,
         Method::NewtonPcg => rgmin_method_t::RGMIN_NEWTON_PCG,
+        Method::Rcg { .. } => return Err(()),
     };
     Ok(tag)
 }

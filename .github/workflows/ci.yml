@@ -93,6 +93,14 @@ jobs:
           sudo apt-get update && sudo apt-get install -y valgrind
           RGMIN_C_TEST_RUNNER="valgrind --error-exitcode=99 --track-origins=yes --quiet" \
             cargo test --locked --features capi --test c_headers --test cxx_headers
+      # Optimization decides which stack slots a step reads, so the
+      # session steps are checked again against a release library.
+      - name: C consumers under valgrind, release library
+        if: matrix.name == 'capi'
+        run: |
+          set -euo pipefail
+          RGMIN_C_TEST_RUNNER="valgrind --error-exitcode=99 --track-origins=yes --quiet" \
+            cargo test --locked --release --features capi --test c_headers
       - name: Build the libraries the readcon and ABI checks read
         run: cargo build --locked ${{ matrix.args }}
       - name: Staticlib readcon link
@@ -126,7 +134,7 @@ jobs:
       - name: Tutorial examples
         if: matrix.name == 'default'
         run: |
-          for ex in tutorial_quickstart tutorial_session tutorial_lbfgs tutorial_fire tutorial_cg tutorial_bfgs tutorial_newton tutorial_scg tutorial_linesearch tutorial_lbfgs_direction howto_level_set; do
+          for ex in tutorial_quickstart tutorial_session tutorial_lbfgs tutorial_fire tutorial_cg tutorial_bfgs tutorial_newton tutorial_scg tutorial_rcg tutorial_linesearch tutorial_lbfgs_direction howto_level_set; do
             cargo run --locked --quiet --example "$ex"
           done
 
