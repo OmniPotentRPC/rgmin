@@ -200,8 +200,8 @@ Named classes: ``LBFGS``, ``FIRE``, ``FIRE2``, ``QuickMin``, ``BFGS``, ``SD``,
 ``HagerZhang``, ``LiuStorey``, ``FrPr``, and ``CG``.
 ``BFGSLineSearch`` is also exported as ``QuasiNewton``, and
 ``LBFGSLineSearch`` subclasses ``LBFGS``. Their constructors match ASE 3.29.0
-(`BFGSLineSearch <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/bfgslinesearch.py>`__,
-`LBFGS <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/lbfgs.py>`__).
+(`BFGSLineSearch <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/bfgslinesearch.py>`_,
+`LBFGS <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/lbfgs.py>`_).
 ``CG`` defaults to Polak-Ribiere. The C ABI has no separate
 Polak-Ribiere+ value.
 
@@ -210,7 +210,10 @@ met.
 ``NotImplementedError`` means ``restart``, ``read``, or ``dump`` on a class
 other than ``BFGSLineSearch`` and ``LBFGSLineSearch``, or a Hessian
 optimizer called without ``hessian``. Those two classes replay an rgmin
-evaluation log from ``restart``. ``h0`` and ``stpmax`` are opt-in
-``SolverConfig`` options: ``h0`` scales the initial inverse Hessian of
-``bfgs`` and ``lbfgs``, and ``stpmax`` bounds a line-search multiplier where
-a line search runs. Omitting either leaves the session defaults.
+evaluation log from ``restart``. Both run ``linesearch``"ase"``, a port of ASE's =LineSearch``, and raise ``RuntimeError("LineSearch failed!")`` when
+a search fails. ``h0`` and ``linesearch``"ase"= are opt-in ``SolverConfig``
+options: ``h0`` scales the initial inverse Hessian of ``bfgs`` and ``lbfgs``,
+and ``linesearch``"ase"= runs ASE's search on those two methods, with
+``maxstep`` limiting each trial increment of an atom. ``stpmax``, 50 by
+default, bounds its step multiplier and requires ``linesearch``"ase"``. A failed search stops the step with =Stop.LINE_SEARCH``. Omitting both
+leaves the session defaults.
