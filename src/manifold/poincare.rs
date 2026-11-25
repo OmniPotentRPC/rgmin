@@ -8,6 +8,8 @@
 //!
 //! [`PoincareBall::project`] converts a Euclidean ambient vector to a
 //! Riemannian gradient, \(v \cdot (1 - \|x\|^2)^2 / 4\).
+//! [`PoincareBall::to_tangent`] is the identity, the tangent projection
+//! of a vector that is not a gradient.
 
 use ndarray::Array1;
 
@@ -95,6 +97,10 @@ impl Manifold for PoincareBall {
         v * (1.0 / (factor * factor))
     }
 
+    fn to_tangent(&self, _x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        v.clone()
+    }
+
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         if x.len() != v.len() {
             return interiorize(x);
@@ -146,6 +152,14 @@ mod tests {
         assert!((p[0] - v[0]).abs() > 1e-6);
         let s = Sphere.project(&x, &v);
         assert!((&p - &s).mapv(f64::abs).sum() > 1e-6);
+    }
+
+    #[test]
+    fn to_tangent_is_the_identity() {
+        let x = array![0.3, -0.2, 0.1];
+        let v = array![1.0, 2.0, 3.0];
+        assert_eq!(PoincareBall.to_tangent(&x, &v), v);
+        assert_ne!(PoincareBall.project(&x, &v), v);
     }
 
     #[test]

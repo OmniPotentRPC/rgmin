@@ -7,3 +7,4 @@ In a session the method honours `maxmove` and the per-atom cap, composes a dista
 A step that stalls on the energy noise floor keeps its start and reports `NoiseFloor`.
 `RcgOptions::validate` refuses a non-finite or negative tolerance and a non-finite or non-positive initial step with `Error::InvalidControl`, and a projection or retraction that fails, or a retraction slope that cannot be resolved, is returned as a typed error.
 The Python session accepts `rcg`, and `rgmin.optimize.RiemannianCG` runs it from ASE with the default per-atom cap off unless `maxstep` is set.
+`Manifold::to_tangent` projects a vector that is not a gradient, such as the velocity of a curve, and is the identity on the Poincare ball, whose `project` converts a gradient.

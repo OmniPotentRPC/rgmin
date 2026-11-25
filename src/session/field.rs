@@ -21,8 +21,9 @@ use crate::rigid::RigidWorkspace;
 /// The session manifold with the session's rigid-motion handling.
 ///
 /// `retract`, `inner` and `norm` are the manifold's own. `project`,
-/// `egrad2rgrad` and `transport` are the session's tangent projection,
-/// horizontal gradient and vector transport.
+/// `to_tangent`, `egrad2rgrad` and `transport` are the session's tangent
+/// projection, its projection of a vector that is not a gradient, its
+/// horizontal gradient and its vector transport.
 pub(crate) struct ProjectedField<'a> {
     solver: &'a Solver,
     ws: RefCell<RigidWorkspace>,
@@ -45,6 +46,11 @@ impl Manifold for ProjectedField<'_> {
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         self.solver
             .project_vec_into(&mut self.ws.borrow_mut(), x, v)
+    }
+
+    fn to_tangent(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        self.solver
+            .tangent_vec_into(&mut self.ws.borrow_mut(), x, v)
     }
 
     fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
