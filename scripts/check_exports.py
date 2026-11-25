@@ -7,6 +7,9 @@
 toolchain or belong to the C ABI of a dependency crate in
 ``DEPENDENCY_CRATES``, which rustc exports from every cdylib that links
 it. ``librgmin.a`` from the same build tells which crate defines a name.
+The eindir-core names are public API of librgmin: each name in
+``EINDIR_REEXPORTS`` must be exported, and eindir-core may export no
+other.
 
 A static archive cannot hide a symbol, so in ``librgmin.a`` the check
 reads the objects rustc wrote for the rgmin crate. An unmangled global
@@ -32,10 +35,29 @@ from check_abi import BASELINE, ROOT, names
 # its _opts and _sized forms take an eindir_objective_t and an
 # eindir_abi_stamp_t, and include/rgmin.h has no rgmin_ name that builds
 # either, so a C caller linked against librgmin alone gets them from
-# eindir_objective_new and eindir_core_abi_stamp here. tests/cxx_headers.cpp
-# links that way. v0.7.0 and v0.8.0 shipped these names, so hiding them
-# would break released callers. readcon-core: linked only with `readcon`.
+# eindir_objective_new and eindir_core_abi_stamp here. tests/c_eindir.c
+# and tests/cxx_headers.cpp link that way. v0.7.0 and v0.8.0 shipped
+# these names, so hiding them would break released callers.
+# readcon-core: linked only with `readcon`.
 DEPENDENCY_CRATES = ("eindir_core", "readcon_core")
+# A name eindir-core adds becomes public only once it is listed here.
+EINDIR_REEXPORTS = frozenset(
+    {
+        "eindir_core_abi_compatible",
+        "eindir_core_abi_family",
+        "eindir_core_abi_stamp",
+        "eindir_core_version",
+        "eindir_last_error",
+        "eindir_objective_bounds_high",
+        "eindir_objective_bounds_low",
+        "eindir_objective_dim",
+        "eindir_objective_eval",
+        "eindir_objective_free",
+        "eindir_objective_grad",
+        "eindir_objective_has_grad",
+        "eindir_objective_new",
+    }
+)
 # Linker and unwinder names. A leading underscore is reserved to the
 # implementation, which also covers Rust (`_ZN`, `_R`) mangling.
 TOOLCHAIN = ("rust_eh_personality", "DW.ref.rust_eh_personality")
@@ -96,6 +118,8 @@ def shared_problems(
             continue
         if name.startswith("rgmin_"):
             problem = abi_problem(name, declared, baseline)
+        elif owners.get(name) == "eindir_core" and name not in EINDIR_REEXPORTS:
+            problem = f"  {name} (eindir_core) is not in EINDIR_REEXPORTS"
         elif owners.get(name) in DEPENDENCY_CRATES:
             # Public through the dependency's C ABI; see DEPENDENCY_CRATES.
             problem = None
@@ -104,6 +128,8 @@ def shared_problems(
             problem = f"  {name} ({owner}) is outside the rgmin_ namespace"
         if problem:
             found.append(problem)
+    for name in sorted(EINDIR_REEXPORTS - exported):
+        found.append(f"  {name} is re-exported eindir-core API and is missing")
     return found
 
 

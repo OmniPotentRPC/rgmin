@@ -83,7 +83,8 @@ the ~eindir_objective_~ functions ~new~, ~free~, ~eval~, ~grad~,
 ~has_grad~, ~dim~, ~bounds_low~ and ~bounds_high~. A C caller that links
 only librgmin builds the objective with ~eindir_objective_new~ and the
 stamp with ~eindir_core_abi_stamp~. These names have been exported
-since 0.7.0.
+since 0.7.0, and ~scripts/check_exports.py~ fails if one goes missing
+or if eindir-core exports a name not on this list.
 
 ** What belongs next door
 
