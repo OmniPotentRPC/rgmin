@@ -133,6 +133,8 @@ std::string method_name_from_code(int code) {
         return "gromacs_steep";
     case RGMIN_GROMACS_CG:
         return "gromacs_cg";
+    case RGMIN_RCG:
+        return "rcg";
     default:
         throw nb::value_error("unknown method");
     }
@@ -602,6 +604,7 @@ NB_MODULE(_core, m) {
         .value("ODE12R", RGMIN_ODE12R)
         .value("GROMACS_STEEP", RGMIN_GROMACS_STEEP)
         .value("GROMACS_CG", RGMIN_GROMACS_CG)
+        .value("RCG", RGMIN_RCG)
         .value("PolakRibiere", RGMIN_POLAK_RIBIERE)
         .value("FletcherReeves", RGMIN_FLETCHER_REEVES)
         .value("Bfgs", RGMIN_BFGS)
@@ -627,7 +630,8 @@ NB_MODULE(_core, m) {
         .value("Diis", RGMIN_DIIS)
         .value("Ode12r", RGMIN_ODE12R)
         .value("GromacsSteep", RGMIN_GROMACS_STEEP)
-        .value("GromacsCg", RGMIN_GROMACS_CG);
+        .value("GromacsCg", RGMIN_GROMACS_CG)
+        .value("Rcg", RGMIN_RCG);
 
     nb::enum_<rgmin_stop_t>(m, "Stop", nb::is_arithmetic(),
                             "Why a step or a run ended. Members are UPPER_SNAKE. "

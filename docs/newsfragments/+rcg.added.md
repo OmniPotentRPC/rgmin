@@ -8,3 +8,4 @@ A step that stalls on the energy noise floor keeps its start and reports `NoiseF
 `RcgOptions::validate` refuses a non-finite or negative tolerance and a non-finite or non-positive initial step with `Error::InvalidControl`, and a projection or retraction that fails, or a retraction slope that cannot be resolved, is returned as a typed error.
 The Python session accepts `rcg`, and `rgmin.optimize.RiemannianCG` runs it from ASE with the default per-atom cap off unless `maxstep` is set.
 `Manifold::to_tangent` projects a vector that is not a gradient, such as the velocity of a curve, and is the identity on the Poincare ball, whose `project` converts a gradient.
+The C ABI adds `RGMIN_RCG`, `rgmin_rcg_options_t`, `rgmin_rcg_options_default` and `rgmin_minimize_rcg` at minor 58 with the layout revision left at 6, `xts.h` aliases them as `XTS_RCG`, `xts_rcg_options_t`, `xts_rcg_options_default` and `xts_minimize_rcg`, and the C++ and nanobind method enums list `Rcg`.

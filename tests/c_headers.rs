@@ -9,11 +9,12 @@ use std::ptr::null;
 
 use rgmin::ffi::{
     RGMIN_PRECON_EXP, rgmin_conjugacy_t, rgmin_control_t, rgmin_eigen_options_t,
-    rgmin_eigen_params_t, rgmin_exp_t, rgmin_precon_t, rgmin_rlbfgs_t, rgmin_rtr_tcg_result_t,
-    rgmin_scg_options_t, rgmin_scg_params_t, rgmin_scg_step_tolerance_t,
+    rgmin_eigen_params_t, rgmin_exp_t, rgmin_precon_t, rgmin_rcg_options_t, rgmin_rlbfgs_t,
+    rgmin_rtr_tcg_result_t, rgmin_scg_options_t, rgmin_scg_params_t, rgmin_scg_step_tolerance_t,
 };
 use rgmin::{
-    Control, EigenParams, ExpParams, NoiseFloor, Rlbfgs, ScgOptions, ScgParams, ScgStepTolerance,
+    Control, EigenParams, ExpParams, NoiseFloor, RcgOptions, Rlbfgs, ScgOptions, ScgParams,
+    ScgStepTolerance,
 };
 
 #[test]
@@ -37,6 +38,11 @@ fn c_header_reads_the_new_stops_through_the_xts_aliases() {
 fn c_header_checks_rigid_quotient_tcg_and_projected_modes() {
     let size = size_of::<rgmin_rtr_tcg_result_t>().to_string();
     consumer::compile_and_run("tests/c_manifold_rtr.c", "rgmin_c_manifold_rtr", &[size]);
+}
+
+#[test]
+fn c_header_reads_riemannian_cg_through_the_xts_aliases() {
+    consumer::compile_and_run("tests/c_xts_rcg.c", "rgmin_c_xts_rcg", &[]);
 }
 
 #[test]
@@ -122,6 +128,7 @@ fn c_initializers_hold_the_rust_defaults() {
     let exp = ExpParams::default();
     let lengths = exp.lengths.unwrap_or([0.0; 3]);
     let rlbfgs = Rlbfgs::default();
+    let rcg = RcgOptions::default();
     let scg = ScgParams::default();
     let eigen = EigenParams::default();
     let mut args = record!(rgmin_control_t {
@@ -152,6 +159,14 @@ fn c_initializers_hold_the_rust_defaults() {
         backtrack: rlbfgs.backtrack,
         linesearch_max: rlbfgs.linesearch_max,
         grad_ratio: rlbfgs.grad_ratio,
+    }));
+    args.extend(record!(rgmin_rcg_options_t {
+        beta: 1,
+        transport: 0,
+        linesearch: 0,
+        grad_tol: rcg.grad_tol,
+        max_iter: rcg.max_iter,
+        initial_step: rcg.initial_step,
     }));
     args.extend(record!(rgmin_scg_params_t {
         sigma0: scg.sigma0,
