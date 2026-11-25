@@ -2,7 +2,7 @@
 
 use std::ffi::CStr;
 use std::os::raw::c_void;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use dlpk::sys::DLManagedTensorVersioned;
 use eindir_core::ffi::{
@@ -518,6 +518,23 @@ unsafe extern "C" fn counted_eindir_grad(
     eindir_status_t::EINDIR_SUCCESS
 }
 
+unsafe extern "C" fn failing_eindir_eval(
+    user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    _value: *mut f64,
+) -> eindir_status_t {
+    count_call(user);
+    eindir_status_t::EINDIR_INTERNAL_ERROR
+}
+
+unsafe extern "C" fn failing_eindir_grad(
+    _user: *mut c_void,
+    _x: *const DLManagedTensorVersioned,
+    _grad: *mut DLManagedTensorVersioned,
+) -> eindir_status_t {
+    eindir_status_t::EINDIR_INTERNAL_ERROR
+}
+
 fn last_error() -> String {
     unsafe { CStr::from_ptr(rgmin_last_error()) }
         .to_string_lossy()
@@ -908,4 +925,198 @@ fn each_eindir_entry_names_itself_in_its_errors() {
         unsafe { rgmin_tensor_free(tensor) };
     }
     assert_eq!(calls.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn each_eindir_entry_preserves_callback_failure_errors() {
+    let stamp = eindir_core_abi_stamp();
+    for entry in Eindir::ALL {
+        for fail_eval in [true, false] {
+            let calls = AtomicUsize::new(0);
+            let mut objective = eindir_objective(1, true, &calls);
+            if fail_eval {
+                objective.eval_fn = failing_eindir_eval;
+            } else {
+                objective.grad_fn = Some(failing_eindir_grad);
+            }
+            let mut value = [1.0];
+            let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+            let mut out = report();
+            let status = entry.call(&*objective, &stamp, tensor, &control(), &mut out);
+            unsafe { rgmin_tensor_free(tensor) };
+
+            assert_eq!(
+                status,
+                rgmin_status_t::RGMIN_INTERNAL_ERROR,
+                "{} ({})",
+                entry.name(),
+                if fail_eval { "eval" } else { "grad" }
+            );
+            assert_eq!(
+                last_error(),
+                format!("{}: eindir evaluation failed", entry.name())
+            );
+        }
+    }
+}
+
+struct FlakyTrial {
+    start: f64,
+    pending: AtomicBool,
+}
+
+unsafe extern "C" fn flaky_trial_eval(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value: *mut f64,
+) -> eindir_status_t {
+    let data = unsafe { *(*x).dl_tensor.data.cast::<f64>() };
+    let state = unsafe { &*user.cast::<FlakyTrial>() };
+    if (data - state.start).abs() > 1e-8 && state.pending.swap(false, Ordering::Relaxed) {
+        return eindir_status_t::EINDIR_INTERNAL_ERROR;
+    }
+    unsafe { *value = data * data };
+    eindir_status_t::EINDIR_SUCCESS
+}
+
+unsafe extern "C" fn flaky_trial_grad(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    grad: *mut DLManagedTensorVersioned,
+) -> eindir_status_t {
+    let data = unsafe { *(*x).dl_tensor.data.cast::<f64>() };
+    let output = unsafe { (*grad).dl_tensor.data.cast::<f64>() };
+    unsafe { *output = 2.0 * data };
+    eindir_status_t::EINDIR_SUCCESS
+}
+
+fn flaky_objective(state: &FlakyTrial) -> Box<eindir_objective_t> {
+    Box::new(eindir_objective_t {
+        dim: 1,
+        low: std::ptr::null_mut(),
+        high: std::ptr::null_mut(),
+        eval_fn: flaky_trial_eval,
+        grad_fn: Some(flaky_trial_grad),
+        user_data: std::ptr::from_ref(state).cast_mut().cast(),
+        free_fn: None,
+    })
+}
+
+fn search_control(maxiter: usize, gtol: f64) -> rgmin_control_t {
+    rgmin_control_t {
+        maxiter,
+        gtol,
+        istep: 1.0,
+        memory: 1,
+        maxmove: -1.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+    }
+}
+
+fn seed_last_error(entry: Eindir) -> String {
+    let calls = AtomicUsize::new(0);
+    let stamp = eindir_core_abi_stamp();
+    let objective = eindir_objective(1, true, &calls);
+    let mut value = [1.0];
+    let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+    let status = entry.call(
+        &*objective,
+        &stamp,
+        tensor,
+        &control(),
+        std::ptr::null_mut(),
+    );
+    unsafe { rgmin_tensor_free(tensor) };
+    assert_eq!(status, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    let seeded = last_error();
+    assert_eq!(seeded, format!("{}: null argument", entry.name()));
+    seeded
+}
+
+/// A line-search trial the callback refuses, and a later trial accepts,
+/// leaves `LAST_ERROR` as the caller left it, including when the run
+/// returns `RGMIN_UNMET_STOP`. An oracle failure that does not recover
+/// names the entry.
+#[test]
+fn eindir_callback_failure_is_recorded_only_when_unrecovered() {
+    let stamp = eindir_core_abi_stamp();
+    let method = rgmin_method_t::RGMIN_STEEPEST;
+    for entry in Eindir::ALL {
+        let seeded = seed_last_error(entry);
+        let state = FlakyTrial {
+            start: 1.0,
+            pending: AtomicBool::new(true),
+        };
+        let objective = flaky_objective(&state);
+        let mut value = [1.0];
+        let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+        let mut out = report();
+        let ctrl = search_control(30, 1e-8);
+        let status = entry.call(&*objective, &stamp, tensor, &ctrl, &mut out);
+        unsafe { rgmin_tensor_free(tensor) };
+
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS, "{}", entry.name());
+        assert_eq!(last_error(), seeded, "{}", entry.name());
+        assert!(!state.pending.load(Ordering::Relaxed), "{}", entry.name());
+        assert!(
+            value[0].abs() < 1e-6,
+            "{} ended at {}",
+            entry.name(),
+            value[0]
+        );
+        assert_eq!(
+            out.stop,
+            rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            "{}",
+            entry.name()
+        );
+
+        let calls = AtomicUsize::new(0);
+        let mut failing = eindir_objective(1, true, &calls);
+        failing.eval_fn = failing_eindir_eval;
+        let seeded = seed_last_error(entry);
+        let mut value = [1.0];
+        let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+        let mut out = report();
+        let status = entry.call(&*failing, &stamp, tensor, &control(), &mut out);
+        unsafe { rgmin_tensor_free(tensor) };
+        assert_eq!(
+            status,
+            rgmin_status_t::RGMIN_INTERNAL_ERROR,
+            "{}",
+            entry.name()
+        );
+        assert_eq!(
+            last_error(),
+            format!("{}: eindir evaluation failed", entry.name())
+        );
+        assert_ne!(last_error(), seeded);
+        assert_eq!(value[0], 1.0, "{}", entry.name());
+    }
+
+    let seeded = seed_last_error(Eindir::Opts);
+    let state = FlakyTrial {
+        start: 1.0,
+        pending: AtomicBool::new(true),
+    };
+    let objective = flaky_objective(&state);
+    let mut value = [1.0];
+    let tensor = unsafe { rgmin_tensor_borrow_cpu_f64(value.as_mut_ptr(), value.len()) };
+    let mut out = report();
+    let ctrl = search_control(1, 0.0);
+    let status = unsafe {
+        rgmin_minimize_eindir_opts(&*objective, &stamp, tensor, &ctrl, method, 1, 0, &mut out)
+    };
+    unsafe { rgmin_tensor_free(tensor) };
+    assert_eq!(status, rgmin_status_t::RGMIN_UNMET_STOP, "{}", last_error());
+    assert!(last_error().contains("unmet"), "{}", last_error());
+    assert!(
+        !last_error().contains("eindir evaluation failed"),
+        "{}",
+        last_error()
+    );
+    assert_ne!(last_error(), seeded);
+    assert!(!state.pending.load(Ordering::Relaxed));
+    assert_ne!(value[0], 1.0, "recovered trial stayed at the start");
 }
