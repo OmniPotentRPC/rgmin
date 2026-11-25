@@ -28,6 +28,12 @@
 //! <https://doi.org/10.1137/0917003>, with the oversolving bound of
 //! Kelley, *Iterative Methods for Linear and Nonlinear Equations*, eq.
 //! (6.20), <https://doi.org/10.1137/1.9781611970944>.
+//!
+//! [`gmres_right`] and [`gmres_right_block`] are unrestarted GMRES with
+//! a fixed right preconditioner, fallible operators and a per-iteration
+//! [`KrylovObserver`]. They return a [`GmresRun`] or a typed
+//! [`GmresFailure`], each carrying the [`KrylovRecord`] of every
+//! iteration taken. [`fgmres`] and its types are unchanged by them.
 
 use std::num::NonZeroUsize;
 
@@ -35,6 +41,14 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::error::{Error, Result};
 use crate::vecops::{axpy, dot, nrm2};
+
+mod gmres;
+
+pub use gmres::{
+    BatchOperatorError, BlockGmresFailure, GmresFailure, GmresOptions, GmresRun, GmresStatus,
+    Identity, IdentityError, KrylovIteration, KrylovObserver, KrylovRecord, KrylovRefusal,
+    LinearOperator, NoObserver, Preconditioner, gmres_right, gmres_right_block,
+};
 
 /// Controls of one [`fgmres`] solve.
 ///
