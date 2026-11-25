@@ -302,11 +302,11 @@ where
         phi_prev = phi;
         alpha = (2.0 * alpha).min(alpha_max);
     }
-    if best_f < f0 {
-        (best_x, best_f, best_a.abs())
-    } else {
-        (pos, f0, 0.0)
-    }
+    // Every trial passed Armijo and still descended, so the expansion ran
+    // out of budget or reached `alpha_max` with no bracket and no point
+    // meeting strong curvature. A point that fails the configured
+    // conditions is not returned as a step.
+    (pos, f0, 0.0)
 }
 
 fn finish<F, P>(
@@ -347,5 +347,58 @@ where
         (best_x, best_f, best_a.abs())
     } else {
         (pos.clone(), f0, 0.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::linesearch::Line;
+    use ndarray::array;
+
+    const C1: f64 = 1e-4;
+    const C2: f64 = 0.1;
+
+    fn linear(x: ArrayView1<'_, f64>) -> (f64, Array1<f64>) {
+        (-x[0], array![-1.0])
+    }
+
+    fn quadratic(x: ArrayView1<'_, f64>) -> (f64, Array1<f64>) {
+        (0.5 * x[0] * x[0], array![x[0]])
+    }
+
+    #[test]
+    fn exhausted_expansion_does_not_accept_a_point_that_fails_curvature() {
+        let start = array![0.0];
+        let dir = array![1.0];
+        let mut path = Line {
+            pos: start.view(),
+            dir: dir.view(),
+        };
+        let (x, f, alpha) = wolfe_search(&mut linear, &mut path, 1.0, C1, C2, 20);
+        // The slope is -1 everywhere: curvature ratio 1 > c2 at every step.
+        assert_eq!(alpha, 0.0, "accepted alpha = {alpha}, x = {x}");
+        assert_eq!(x, start);
+        assert_eq!(f, 0.0);
+    }
+
+    #[test]
+    fn an_accepted_step_meets_both_wolfe_conditions() {
+        let start = array![-3.0];
+        let dir = array![1.0];
+        let mut path = Line {
+            pos: start.view(),
+            dir: dir.view(),
+        };
+        let (x, f, alpha) = wolfe_search(&mut quadratic, &mut path, 1.0, C1, C2, 20);
+        assert!(alpha > 0.0);
+        let (f0, g0) = quadratic(start.view());
+        let slope0 = g0[0] * dir[0];
+        let slope = x[0] * dir[0];
+        assert!(f <= f0 + C1 * alpha * slope0, "Armijo f = {f}");
+        assert!(
+            slope.abs() <= C2 * slope0.abs(),
+            "curvature slope = {slope}"
+        );
     }
 }
