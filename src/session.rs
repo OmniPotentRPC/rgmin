@@ -6464,6 +6464,7 @@ impl Solver {
         O: DifferentiableObjective<f64> + ?Sized,
         G: FnMut(&mut Array1<f64>),
     {
+        self.validate_run_dims(obj, x)?;
         if self.control.maxiter == 0 {
             return self.run(obj, x);
         }
@@ -6501,10 +6502,31 @@ impl Solver {
         }
     }
 
+    fn validate_run_dims<O>(&self, obj: &O, x: &Array1<f64>) -> Result<()>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
+        if x.len() != self.dim {
+            return Err(Error::Dim {
+                got: x.len(),
+                dim: self.dim,
+            });
+        }
+        let objective_dim = Objective::dim(obj);
+        if objective_dim != self.dim {
+            return Err(Error::Dim {
+                got: objective_dim,
+                dim: self.dim,
+            });
+        }
+        Ok(())
+    }
+
     fn run_plain<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        self.validate_run_dims(obj, x)?;
         let budget = self.control.maxiter;
         if budget == 0 {
             let report = self.assess(obj, x)?;
