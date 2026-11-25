@@ -7315,6 +7315,32 @@ mod tests {
     #[test]
     fn fire_config_rejects_nan_zero_one_and_inf() {
         let mut solver = fire_solver(FireKind::V1);
+        for bad in [f64::NAN, 0.0, -0.1, f64::INFINITY, f64::NEG_INFINITY] {
+            let err = solver
+                .set_fire_config(FireConfig::default().with_dt(bad))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config dt must be finite and positive",
+                    }
+                ),
+                "{bad}: {err}"
+            );
+            let err = solver
+                .set_fire_config(FireConfig::default().with_dt_max(bad))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config dt_max must be finite and positive",
+                    }
+                ),
+                "{bad}: {err}"
+            );
+        }
         let bad = [f64::NAN, 0.0, 1.0, f64::INFINITY, f64::NEG_INFINITY];
         for value in bad {
             let err = solver

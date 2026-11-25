@@ -484,6 +484,15 @@ def test_session_refuses_hessian_methods_and_misplaced_options():
         Session("sd", 3, accept="sometimes")
 
 
+def test_fire_sessions_refuse_out_of_range_dt_and_dtmax():
+    with pytest.raises(ValueError, match="dt must be finite and positive"):
+        Session("fire", 3, dt=0.0)
+    with pytest.raises(ValueError, match="dt_max must be finite and positive"):
+        Session("fire2", 3, dt_max=0.0)
+    with pytest.raises(ValueError, match="dt must not exceed dt_max"):
+        Session("fire", 3, dt=1.1, dt_max=1.0)
+
+
 def test_every_gradient_session_method_has_a_class():
     kinds = {getattr(optimize, name).kind for name in optimize.__all__}
     tokens = {"lbfgs", "bfgs", "sr1", "sr2", "adam", "sd", "bb", "fire", "fire2", "newton-cg", "newton-pcg"}
