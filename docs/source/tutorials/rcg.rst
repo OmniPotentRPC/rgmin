@@ -74,6 +74,7 @@ There it keeps the session's rules:
   The Wolfe slopes, the conjugacy coefficient and the stop are formed in that one field.
 
 - A start off the manifold is projected onto it, as ``minimize_rcg`` does with a zero retraction, so the first evaluation, the held value and the point handed back are on the manifold.
+  A zero-budget run judges the start at that same point.
   Nothing is refused for it.
 
 - Every trial stays in the objective's box and on the manifold.

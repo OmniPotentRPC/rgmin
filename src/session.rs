@@ -2003,6 +2003,26 @@ impl Solver {
         }
     }
 
+    /// Place a fresh start in the objective's box, and for Riemannian CG
+    /// on the manifold and its bonds, as a step and a zero-budget
+    /// assessment both read it.
+    ///
+    /// A coordinate clip is the projection onto the manifold cut by the
+    /// box only when the manifold fills the ambient coordinates. Every
+    /// other Riemannian CG start is retracted onto the set. If that point
+    /// lies outside the box it is pulled back along the tangent and
+    /// retracted again, so the caller's `x` stays on the manifold.
+    fn enter_start(&self, bounds: &eindir_core::Bounds<f64>, x: &mut Array1<f64>) -> Result<()> {
+        if matches!(self.overlay, Overlay::Rcg(_)) && !self.manifold.coordinate_clip_stays_on_set()
+        {
+            let field = field::ProjectedField::new(self);
+            *x = crate::rcg::land_in_box(&field, x, bounds);
+        } else {
+            *x = bounds.clip(x.view());
+        }
+        self.rcg_enter_bonds(x)
+    }
+
     /// Put a Riemannian CG start that misses its bonds on them, by the
     /// bonded retraction of a zero step, so a stop measured there holds
     /// for a point that keeps every bond. The other methods enter the set
@@ -4832,18 +4852,7 @@ impl Solver {
             if x.iter().any(|v| !v.is_finite()) {
                 return Err(crate::step::non_finite());
             }
-            // A coordinate clip is the projection onto the manifold cut by
-            // the box only when the manifold fills the ambient coordinates.
-            // Every other start is retracted onto the set. If that point
-            // lies outside the box it is pulled back along the tangent and
-            // retracted again, so the caller's `x` stays on the manifold.
-            if rcg && !self.manifold.coordinate_clip_stays_on_set() {
-                let field = field::ProjectedField::new(self);
-                *x = crate::rcg::land_in_box(&field, x, obj.bounds());
-            } else {
-                *x = obj.bounds().clip(x.view());
-            }
-            self.rcg_enter_bonds(x)?;
+            self.enter_start(obj.bounds(), x)?;
         }
 
         if let Inner::Pso { .. } = &self.inner {
@@ -6536,8 +6545,9 @@ impl Solver {
     /// stationarity measure is the one a step opens with; a distance or
     /// equality constraint set does not project the gradient here, so
     /// such a session reads the larger, unprojected norm. Riemannian CG
-    /// is the exception: it puts `x` on the bonds, as its step does, and
-    /// reads the gradient cut by them there.
+    /// is the exception: it puts `x` on the manifold, in the box and on
+    /// the bonds, as its step does, and reads the gradient cut by them
+    /// there.
     pub(crate) fn assess<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -6557,8 +6567,7 @@ impl Solver {
             if x.iter().any(|v| !v.is_finite()) {
                 return Err(crate::step::non_finite());
             }
-            *x = obj.bounds().clip(x.view());
-            self.rcg_enter_bonds(x)?;
+            self.enter_start(obj.bounds(), x)?;
             self.gradient_calls += 1;
             self.evals += 1;
             obj.value_and_gradient(x.view())
