@@ -61,6 +61,7 @@ There it keeps the session's rules:
 
 - A distance constraint set composes with the configured manifold.
   The tangent space is the intersection of the manifold's and the bonds', and the retraction alternates between the two until both hold.
+  A set with masses steps along the cut gradient raised by the inverse masses, which is tangent to the bonds, and its line search measures that direction in the mass metric.
 
 - The stop and the report read the gradient cut by the bonds, so a constrained minimum with a pure constraint force meets the tolerance.
 
