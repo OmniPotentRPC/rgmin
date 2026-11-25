@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import gc
+
 import numpy as np
 import pytest
 
@@ -119,6 +121,29 @@ def test_unmet_error_is_a_runtime_error_that_carries_the_report() -> None:
     assert error.report.grad_norm == spent.grad_norm
     assert error.report.grad_norm > 1e-12
     assert str(error).startswith("stop unmet after 6 steps")
+
+
+def test_unmet_report_outlives_the_caught_exception() -> None:
+    def catch_report() -> rgmin.Report:
+        try:
+            rgmin.minimize(
+                _rose,
+                np.array([-1.2, 1.0]),
+                "lbfgs",
+                maxiter=6,
+                gtol=1e-12,
+                error_on_unmet=True,
+            )
+        except rgmin.StopUnmetError as error:
+            return error.report
+        raise AssertionError("the unmet run did not raise")
+
+    report = catch_report()
+    gc.collect()
+    assert report.stop == rgmin.Stop.BUDGET
+    assert report.steps == 6
+    assert np.isfinite(report.value)
+    assert report.grad_norm > 1e-12
 
 
 def test_unmet_error_carries_the_line_search_stop_of_a_no_move_run() -> None:
