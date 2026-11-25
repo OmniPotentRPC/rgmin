@@ -9,8 +9,7 @@ The vector transport is that manifold's, scaled back to its original length when
 The default line search is strong Wolfe with curvature constant 0.1.
 ~LineSearch::default~ selects Brent instead.
 
-The listing is ~examples/tutorial_rcg.rs~, whole.
-Continuous integration runs it, so it is the program as it builds.
+The listing is ~examples/tutorial_rcg.rs~, whole. Continuous integration runs it, so it is the program as it builds.
 
 #+INCLUDE: "../../../examples/tutorial_rcg.rs" src rust
 
