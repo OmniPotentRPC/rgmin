@@ -41,7 +41,8 @@ typedef struct eindir_abi_stamp_t eindir_abi_stamp_t;
  *  Every struct a caller fills in starts from its initializer, which
  *  returns the Rust defaults: \ref rgmin_control_default,
  *  \ref rgmin_exp_default, \ref rgmin_scg_params_default,
- *  \ref rgmin_scg_options_default, \ref rgmin_eigen_params_default,
+ *  \ref rgmin_scg_options_default, \ref rgmin_rcg_options_default,
+ *  \ref rgmin_rlbfgs_default, \ref rgmin_eigen_params_default,
  *  \ref rgmin_eigen_options_default and \ref rgmin_precon_init. Assign
  *  only the fields to change. A field added in a later revision then
  *  holds its default. In an uninitialised struct it holds stack bytes,
