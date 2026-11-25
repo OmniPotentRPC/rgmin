@@ -1898,6 +1898,7 @@ unsafe fn minimize_eindir_named(
                 failed_in_callback.store(true, Ordering::Relaxed);
                 return (f64::INFINITY, Array1::from_elem(m, f64::NAN));
             }
+            failed_in_callback.store(false, Ordering::Relaxed);
             (value, gradient)
         });
         let control = control_with_flags(&c, error_on_unmet, backward_polish);
@@ -1908,13 +1909,12 @@ unsafe fn minimize_eindir_named(
             method_from_c(method, c.memory),
             LineSearch::default(),
         );
-        // A refused trial is a non-finite answer the line search can
-        // reject. A later trial may still be accepted, so the entry is
-        // named only when that refusal is the oracle error returned.
-        let callback_oracle =
-            callback_failed.load(Ordering::Relaxed) && matches!(outcome, Err(Error::Oracle { .. }));
+        let oracle_failed = matches!(outcome, Err(Error::Oracle { .. }));
         let status = finish_one_shot(x, out, outcome, layout);
-        if callback_oracle {
+        if oracle_failed
+            && status == rgmin_status_t::RGMIN_INTERNAL_ERROR
+            && callback_failed.load(Ordering::Relaxed)
+        {
             set_last_error(&format!("{entry}: eindir evaluation failed"));
         }
         status
