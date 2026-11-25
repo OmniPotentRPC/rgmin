@@ -99,7 +99,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 60;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 62;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -2489,11 +2489,11 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_abc(solver: *mut rgmin_solver_t, 
 }
 
 /// FIRE integrator parameters. Clears the velocity and keeps the
-/// two-step overshoot cap as it was. ABI minor 60. Returns 0, or 1 on a
-/// null session, a session that is not FIRE, or a parameter outside its
-/// range: `dt` and `dt_max` finite and positive with `dt <= dt_max`,
-/// `n_min` at most `isize::MAX`, `f_inc` above 1, and `f_dec`, `alpha`
-/// and `f_alpha` in (0, 1).
+/// two-step overshoot cap as it was. ABI minor 60; the `n_min` bound is
+/// minor 62. Returns 0, or 1 on a null session, a session that is not
+/// FIRE, or a parameter outside its range: `dt` and `dt_max` finite and
+/// positive with `dt <= dt_max`, `n_min` at most `isize::MAX`, `f_inc`
+/// above 1, and `f_dec`, `alpha` and `f_alpha` in (0, 1).
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].

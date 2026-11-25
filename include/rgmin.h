@@ -76,7 +76,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 60
+#define RGMIN_ABI_VERSION_MINOR 62
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -112,7 +112,8 @@ typedef struct rgmin_abi_stamp_t {
  *    rgmin_rtr_radius_update, rgmin_lowest_eigenpair_on_manifold,
  *    rgmin_lowest_eigenpairs_projected. rgmin_control_t is unchanged.
  * 60 rgmin_solver_set_fire_config and
- *    rgmin_solver_set_lbfgs_fixed_h0. */
+ *    rgmin_solver_set_lbfgs_fixed_h0.
+ * 62 rgmin_solver_set_fire_config refuses an n_min above PTRDIFF_MAX. */
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
@@ -731,7 +732,7 @@ int32_t rgmin_solver_set_fire_abc(rgmin_solver_t *solver, int32_t on);
  *  grows; it must not exceed PTRDIFF_MAX, so a negative integer
  *  converted to size_t is refused. Returns 0, or 1 on a null session, a
  *  session that is not FIRE or FIRE 2.0, or a parameter outside that
- *  range. ABI minor 60. */
+ *  range. ABI minor 60; the n_min bound is minor 62. */
 int32_t rgmin_solver_set_fire_config(rgmin_solver_t *solver, double dt,
                                      double dt_max, size_t n_min, double f_inc,
                                      double f_dec, double alpha, double f_alpha);
