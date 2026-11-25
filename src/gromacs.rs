@@ -20,8 +20,10 @@
 //!
 //! The L-BFGS state [`GromacsLbfgs`] keeps the correction ring, two-loop
 //! recursion, and opening step of GROMACS [`do_lbfgs`][lbfgs_source]
-//! (`minimize.cpp` lines 2036-2858). The bracket search keeps the
-//! directional derivatives of the opening endpoints, as `do_lbfgs` does.
+//! (`minimize.cpp` lines 2036-2858). `do_lbfgs` is the same algorithm in
+//! the tagged 2023.3 and 2025.4 sources; the line numbers in this file
+//! follow 2025.4. The bracket search keeps the directional derivatives
+//! of the opening endpoints, as `do_lbfgs` does.
 //!
 //! [source]: https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L2861
 //! [cg_source]: https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L1313
@@ -550,7 +552,12 @@ impl GromacsLbfgs {
         }
     }
 
-    /// Drop correction memory and prepare a force direction.
+    /// Drop every stored pair and take the next direction from `force`.
+    ///
+    /// Clearing the deque is deliberate. GROMACS sets `ncorr = 0` on this
+    /// reset and leaves `point` unchanged, so the two-loop later wraps a
+    /// negative index to `ncorr - 1` and can read pairs stored before the
+    /// reset (`minimize.cpp` 2023.3, lines 2524-2533 and 2600-2609).
     pub(crate) fn restart_steepest(&mut self, force: ArrayView1<'_, f64>, force_norm: f64) {
         self.pairs.clear();
         self.direction.assign(&force);
