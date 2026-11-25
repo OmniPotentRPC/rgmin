@@ -95,6 +95,9 @@ jobs:
             cargo test --locked --features capi --test c_headers --test cxx_headers
       - name: Build the libraries the readcon and ABI checks read
         run: cargo build --locked ${{ matrix.args }}
+      # Each row's features change the export list, so every row checks it.
+      - name: Exported C names stay in the rgmin_ namespace
+        run: python3 scripts/check_exports.py
       - name: Staticlib readcon link
         run: |
           lib=target/debug/librgmin.a

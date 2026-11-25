@@ -26,6 +26,18 @@ fn c_header_reads_the_noise_floor_stop() {
     consumer::compile_and_run("tests/c_noise_floor.c", "rgmin_c_noise_floor", &[]);
 }
 
+/// librgmin re-exports the eindir-core C ABI, so a C caller of
+/// `rgmin_minimize_eindir` links it alone.
+#[test]
+fn c_caller_builds_eindir_objectives_through_librgmin_alone() {
+    let ran = consumer::compile_and_run("tests/c_eindir.c", "rgmin_c_eindir", &[]);
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    assert!(
+        stdout.contains("eindir re-export ok"),
+        "the eindir consumer did not finish: {stdout}"
+    );
+}
+
 #[test]
 fn c_header_reads_the_new_stops_through_the_xts_aliases() {
     consumer::compile_and_run("tests/c_xts_stops.c", "rgmin_c_xts_stops", &[]);

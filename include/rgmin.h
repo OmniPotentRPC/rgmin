@@ -19,7 +19,12 @@ extern "C" {
 typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 
 /* The direct eindir entry point only needs opaque handles here. Consumers
- * that use eindir_core's constructors can include its full header first. */
+ * that use eindir_core's constructors can include its full header first.
+ * librgmin re-exports eindir-core's C ABI (eindir_core_abi_*,
+ * eindir_core_version, eindir_last_error and eindir_objective_*), so a
+ * caller of rgmin_minimize_eindir that links only librgmin builds the
+ * objective with eindir_objective_new and the stamp with
+ * eindir_core_abi_stamp. eindir-core's header declares them. */
 #if defined(__has_include)
 #  if __has_include(<eindir-core.h>)
 #    include <eindir-core.h>
