@@ -469,6 +469,133 @@ fn session_equality_and_trust_reach_the_constrained_model_solution() {
     assert!(report.grad_norm < 1e-10);
 }
 
+/// An uphill gradient with every trial rejected leaves the start where
+/// the session box put it. That projection is not a move, so the spent
+/// budget is a failed line search, as with the objective's own bounds.
+/// The reported gradient points into the box at the upper wall, so the
+/// projected gradient there is not zero.
+#[test]
+fn projection_onto_the_session_box_is_not_movement() {
+    use ndarray::array;
+    use rgmin::{Accept, Control, LbfgsStep, Method, Oracle, Solver, StopReason};
+
+    let uphill = Oracle::unbounded(1, |x| (-0.5 * x[0] * x[0], array![x[0]]));
+    let control = Control::default().with_maxiter(3).with_gtol(1e-8);
+    let session = || {
+        let mut solver = Solver::new(Method::lbfgs(), control.clone(), 1);
+        solver.set_accept(Accept::Energy);
+        solver.set_lbfgs_step(LbfgsStep::Wolfe).unwrap();
+        solver.set_geometry_step(false);
+        solver.set_highs(true);
+        assert!(solver.set_box(Some(vec![-1.0]), Some(vec![1.0])));
+        solver
+    };
+
+    let mut x = array![2.0];
+    let run = session().run(&uphill, &mut x).unwrap();
+    assert_eq!(run.stop_reason(), StopReason::LineSearchFailed, "{run:?}");
+    assert_eq!(x, array![1.0]);
+
+    let mut xg = array![2.0];
+    let gauged = session().run_gauged(&uphill, &mut xg, |_| {}).unwrap();
+    assert_eq!(
+        gauged.stop_reason(),
+        StopReason::LineSearchFailed,
+        "{gauged:?}"
+    );
+    assert_eq!(xg, array![1.0]);
+}
+
+/// Through the C session, a step that only projects a re-submitted point
+/// back onto the session box records no energy, so the energy test never
+/// reads two equal values at one point as an accepted step.
+#[cfg(feature = "capi")]
+#[test]
+fn c_abi_projection_onto_the_session_box_is_not_an_energy_step() {
+    use rgmin::ffi::{
+        rgmin_accept_t, rgmin_control_t, rgmin_method_t, rgmin_report_t, rgmin_solver_create,
+        rgmin_solver_free, rgmin_solver_set_accept, rgmin_solver_set_box, rgmin_solver_set_etol,
+        rgmin_solver_set_geometry_step, rgmin_solver_set_highs, rgmin_solver_set_lbfgs_wolfe,
+        rgmin_solver_step, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
+        rgmin_tensor_free,
+    };
+    use std::os::raw::c_void;
+
+    unsafe fn point(t: *const dlpk::sys::DLManagedTensorVersioned) -> *mut f64 {
+        let dl = unsafe { &(*t).dl_tensor };
+        unsafe { (dl.data as *mut u8).add(dl.byte_offset as usize) as *mut f64 }
+    }
+    unsafe extern "C" fn ev(
+        _user: *mut c_void,
+        x: *const dlpk::sys::DLManagedTensorVersioned,
+        value_out: *mut f64,
+    ) -> rgmin_status_t {
+        let v = unsafe { *point(x) };
+        unsafe { *value_out = -0.5 * v * v };
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+    unsafe extern "C" fn gd(
+        _user: *mut c_void,
+        x: *const dlpk::sys::DLManagedTensorVersioned,
+        g: *mut dlpk::sys::DLManagedTensorVersioned,
+    ) -> rgmin_status_t {
+        unsafe { *point(g) = *point(x) };
+        rgmin_status_t::RGMIN_SUCCESS
+    }
+
+    let ctrl = rgmin_control_t {
+        maxiter: 3,
+        gtol: 1e-8,
+        istep: 1.0,
+        memory: 10,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+        require_convergence: 0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 1) };
+    assert!(!session.is_null());
+    assert_eq!(unsafe { rgmin_solver_set_highs(session, 1) }, 0);
+    let (lo, hi) = ([-1.0_f64], [1.0_f64]);
+    assert_eq!(
+        unsafe { rgmin_solver_set_box(session, lo.as_ptr(), hi.as_ptr(), 1) },
+        0
+    );
+    unsafe { rgmin_solver_set_accept(session, rgmin_accept_t::RGMIN_ACCEPT_ENERGY) };
+    assert_eq!(unsafe { rgmin_solver_set_lbfgs_wolfe(session) }, 0);
+    unsafe { rgmin_solver_set_geometry_step(session, 0) };
+    assert_eq!(
+        unsafe { rgmin_solver_set_etol(session, 1e-6) },
+        rgmin_status_t::RGMIN_SUCCESS
+    );
+    for _ in 0..2 {
+        let mut x = [2.0_f64];
+        let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 1) };
+        let mut out = rgmin_report_t {
+            value: 0.0,
+            steps: 0,
+            grad_norm: 0.0,
+            stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+            converged: 0,
+        };
+        let status = unsafe {
+            rgmin_solver_step(
+                session,
+                Some(ev),
+                Some(gd),
+                std::ptr::null_mut(),
+                xt,
+                &mut out,
+            )
+        };
+        unsafe { rgmin_tensor_free(xt) };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        assert_eq!(x, [1.0]);
+        assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_BUDGET, "{:?}", out.stop);
+    }
+    unsafe { rgmin_solver_free(session) };
+}
+
 #[test]
 fn a_rounded_wall_does_not_halve_the_free_step() {
     use ndarray::array;
