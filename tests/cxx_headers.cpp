@@ -980,10 +980,15 @@ int main() {
                   "GromacsCg keeps the C enumerator");
     static_assert(XTS_GROMACS_CG == RGMIN_GROMACS_CG,
                   "xts.h aliases the GROMACS cg selector");
+    static_assert(static_cast<int>(rgmin::Method::GromacsLbfgs) == RGMIN_GROMACS_LBFGS,
+                  "GromacsLbfgs keeps the C enumerator");
+    static_assert(XTS_GROMACS_LBFGS == RGMIN_GROMACS_LBFGS,
+                  "xts.h aliases the GROMACS L-BFGS selector");
     if (rgmin::method_from_name("eon-cg") != rgmin::Method::EonCg ||
         rgmin::method_from_name("polak-ribiere-plus") != rgmin::Method::PolakRibierePlus ||
         rgmin::method_from_name("gromacs-steep") != rgmin::Method::GromacsSteep ||
-        rgmin::method_from_name("gromacs-cg") != rgmin::Method::GromacsCg) {
+        rgmin::method_from_name("gromacs-cg") != rgmin::Method::GromacsCg ||
+        rgmin::method_from_name("gromacs-lbfgs") != rgmin::Method::GromacsLbfgs) {
         std::fprintf(stderr, "method_from_name missed a public method\n");
         return 6;
     }
@@ -1001,6 +1006,25 @@ int main() {
         if (cg.set_gromacs_cg(0) != 0 || !negative_refused) {
             std::fprintf(stderr, "nstcgsteep = 0 must turn the periodic restart off\n");
             return 46;
+        }
+    }
+    {
+        rgmin::SolverConfig cfg = rgmin::SolverConfig::with_gromacs_lbfgs(4);
+        if (cfg.method() != rgmin::Method::GromacsLbfgs) {
+            std::fprintf(stderr, "with_gromacs_lbfgs must select GROMACS L-BFGS\n");
+            return 47;
+        }
+        rgmin::Solver session(cfg.method(), cfg.control(), 3);
+        cfg.apply(session);
+        bool zero_refused = false;
+        try {
+            (void)rgmin::SolverConfig::with_gromacs_lbfgs(0);
+        } catch (std::invalid_argument const&) {
+            zero_refused = true;
+        }
+        if (!zero_refused || session.set_gromacs_lbfgs(0) == 0) {
+            std::fprintf(stderr, "nbfgscorr = 0 must be refused\n");
+            return 47;
         }
     }
     bool refused = false;
