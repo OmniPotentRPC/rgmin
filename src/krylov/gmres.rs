@@ -319,8 +319,9 @@ pub enum KrylovRefusal {
     Tolerance,
     /// A nonzero system was given no iteration budget.
     ZeroIterationBudget,
-    /// A right-hand side, operator image, preconditioner image, Givens
-    /// rotation, projected coefficient, or residual is non-finite.
+    /// A right-hand side, residual target `rtol ‖b‖`, operator image,
+    /// preconditioner image, Givens rotation, projected coefficient, or
+    /// residual is non-finite.
     NonFinite,
     /// Arnoldi produced a singular projected system. The record ends with an
     /// iteration that carries the true residual of the unchanged iterate.
@@ -654,6 +655,10 @@ where
     if !(options.relative_tolerance.is_finite() && options.relative_tolerance > 0.0) {
         return Err(refusal(KrylovRefusal::Tolerance, record));
     }
+    let residual_target = options.relative_tolerance * right_hand_side_norm;
+    if !residual_target.is_finite() {
+        return Err(refusal(KrylovRefusal::NonFinite, record));
+    }
     if right_hand_side_norm == 0.0 {
         return Ok(GmresRun {
             solution: vec![0.0; dimension],
@@ -754,7 +759,7 @@ where
         };
         record.iterations.push(iteration);
         observer.observe(iteration);
-        let converged = absolute_residual <= options.relative_tolerance * right_hand_side_norm;
+        let converged = absolute_residual <= residual_target;
         let exhausted = column_index + 1 == budget || column_index + 1 == dimension;
         if converged || exhausted || subdiagonal == 0.0 {
             let status = if converged {
@@ -861,6 +866,9 @@ where
         let right_hand_side_norm = norm(right_hand_side);
         let record = KrylovRecord::new(right_hand_side_norm);
         if !finite(right_hand_side) || !right_hand_side_norm.is_finite() {
+            return Err(refusal(KrylovRefusal::NonFinite, record));
+        }
+        if !(options.relative_tolerance * right_hand_side_norm).is_finite() {
             return Err(refusal(KrylovRefusal::NonFinite, record));
         }
         if right_hand_side_norm == 0.0 {
@@ -2010,6 +2018,65 @@ mod tests {
             accepted.map(|row| (row.iteration, row.relative_residual)),
             Ok((3, 2.0))
         );
+    }
+
+    #[test]
+    fn an_overflowing_residual_target_is_refused_before_iterating() -> Result<(), &'static str> {
+        let right_hand_side = vec![1e200, 1e200];
+        let options = GmresOptions {
+            relative_tolerance: 1e200,
+            max_iterations: Some(1),
+        };
+        let expected_norm = norm(&right_hand_side);
+        assert!(expected_norm.is_finite());
+        assert!((options.relative_tolerance * expected_norm).is_infinite());
+        let mut operator = Diagonal {
+            values: vec![1.0, 1000.0],
+            scalar_calls: 0,
+            batch_calls: 0,
+        };
+        let mut observed = 0usize;
+        let scalar = gmres_right(
+            &mut operator,
+            &mut Identity,
+            &right_hand_side,
+            options,
+            &mut |_| observed += 1,
+        );
+        let scalar_record = match scalar {
+            Err(GmresFailure::Refused { reason, record }) => {
+                assert_eq!(reason, KrylovRefusal::NonFinite);
+                record
+            }
+            Ok(_) => return Err("scalar solve accepted an infinite residual target"),
+            Err(_) => return Err("scalar solve failed for the wrong reason"),
+        };
+        assert_eq!(scalar_record.right_hand_side_norm, expected_norm);
+        assert!(scalar_record.iterations.is_empty());
+        assert_eq!(scalar_record.operator_applications, 0);
+        assert_eq!(scalar_record.preconditioner_applications, 0);
+        assert_eq!(operator.scalar_calls, 0);
+        assert_eq!(observed, 0);
+
+        let mut preconditioners = [Identity];
+        let mut observers = [NoObserver];
+        let block = gmres_right_block(
+            &mut operator,
+            &mut preconditioners,
+            std::slice::from_ref(&right_hand_side),
+            options,
+            &mut observers,
+        );
+        match block {
+            Err(GmresFailure::Refused { reason, record }) => {
+                assert_eq!(reason, KrylovRefusal::NonFinite);
+                assert_eq!(record, scalar_record);
+            }
+            Ok(_) => return Err("block solve accepted an infinite residual target"),
+            Err(_) => return Err("block solve failed for the wrong reason"),
+        }
+        assert_eq!(operator.batch_calls, 0);
+        Ok(())
     }
 
     struct Scale(f64);
