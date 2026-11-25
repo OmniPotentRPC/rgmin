@@ -1,6 +1,8 @@
 //! Unit sphere \(S^{n-1}\). manopt_cpp `Sphere`.
 //!
-//! Projection \(v - (x\cdot v)x\). Retraction \((x+v)/\|x+v\|\).
+//! Projection \(v - (x\cdot v)x\). Retraction \((x+v)/\|x+v\|\), and
+//! \(x/\|x\|\) when \(x+v\) vanishes. A zero \(x\) retracts to the first
+//! coordinate axis, so the retraction always returns a unit vector.
 //! Transport is projection at the arrival point.
 //!
 //! The geodesic quantities are manopt `spherefactory`: the exponential
@@ -125,6 +127,16 @@ fn same_len(a: &Array1<f64>, b: &Array1<f64>) -> bool {
     !a.is_empty() && a.len() == b.len()
 }
 
+/// The first coordinate axis, where a zero point retracts. Every unit
+/// vector is equally close to zero, and zero itself is not on the sphere.
+fn pole(n: usize) -> Array1<f64> {
+    let mut e = Array1::zeros(n);
+    if n > 0 {
+        e[0] = 1.0;
+    }
+    e
+}
+
 impl Manifold for Sphere {
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         #[cfg(feature = "par")]
@@ -147,7 +159,7 @@ impl Manifold for Sphere {
             if norm <= 1e-16 {
                 let initial_norm = crate::vecops::nrm2(x.view());
                 if initial_norm <= 1e-16 {
-                    return x.clone();
+                    return pole(x.len());
                 }
                 let mut initial = x.clone();
                 crate::vecops::scale(1.0 / initial_norm, &mut initial);
@@ -161,7 +173,7 @@ impl Manifold for Sphere {
         if n <= 1e-16 {
             let n0 = nrm(x);
             if n0 <= 1e-16 {
-                return x.clone();
+                return pole(x.len());
             }
             return x / n0;
         }
@@ -235,6 +247,20 @@ mod tests {
     #[test]
     fn par_retract_stays_on_the_sphere() {
         retract_stays_on_the_sphere();
+    }
+
+    #[test]
+    fn a_zero_point_retracts_onto_the_sphere() {
+        let zero = Array1::zeros(3);
+        assert_eq!(Sphere.retract(&zero, &zero), array![1.0, 0.0, 0.0]);
+        #[cfg(feature = "par")]
+        {
+            let n = crate::vecops::PAR_MIN_LEN;
+            let zero = Array1::zeros(n);
+            let y = Sphere.retract(&zero, &zero);
+            assert_eq!(y[0], 1.0);
+            assert!((nrm(&y) - 1.0).abs() < 1e-15);
+        }
     }
 
     #[test]

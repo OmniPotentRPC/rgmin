@@ -1410,6 +1410,27 @@ mod tests {
         }
     }
 
+    /// `f = x0 x1` is stationary at the zero start, which is not on the
+    /// circle. Its retraction is, and there the gradient has a tangent part.
+    #[test]
+    fn a_zero_start_is_read_on_the_sphere() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let saddle = |x: ArrayView1<f64>| {
+            seen.borrow_mut().push(x.to_owned());
+            (x[0] * x[1], array![x[1], x[0]])
+        };
+        let opts = RcgOptions::default().with_grad_tol(1e-8).with_max_iter(0);
+        let out = minimize_rcg(&Sphere, Array1::zeros(2), saddle, &opts).unwrap();
+        assert_eq!(out.x, array![1.0, 0.0]);
+        assert!(out.grad_norm > 0.5, "grad_norm {}", out.grad_norm);
+        for p in seen.borrow().iter() {
+            assert!(
+                (p.dot(p).sqrt() - 1.0).abs() < 1e-15,
+                "read off the circle at {p}"
+            );
+        }
+    }
+
     #[test]
     fn a_cap_bounds_the_retracted_move_on_a_curved_manifold() {
         let sphere = Sphere;
