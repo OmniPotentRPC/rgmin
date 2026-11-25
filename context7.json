@@ -1,0 +1,43 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "rgmin",
+  "description": "Rust local-minimization steppers (L-BFGS, NLCG, Newton, FIRE) with a C ABI and Python bindings.",
+  "folders": [
+    "docs/orgmode",
+    "examples",
+    "include",
+    "python"
+  ],
+  "excludeFolders": [
+    "docs/source",
+    "docs/build",
+    "docs/newsfragments",
+    "newsfragments",
+    "changelog.d",
+    "benches",
+    "benchmarks",
+    "bench",
+    "benchflow",
+    "subprojects",
+    "third_party",
+    "tests",
+    "scripts",
+    "ci",
+    ".github",
+    "branding",
+    ".pixi",
+    "formal",
+    "proofs",
+    "validation",
+    "lammps"
+  ],
+  "excludeFiles": [
+    "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
+    "LICENSE"
+  ],
+  "rules": [
+    "A Solver takes one step per call; the host owns the iteration loop.",
+    "Objectives come from eindir differentiable traits."
+  ]
+}
