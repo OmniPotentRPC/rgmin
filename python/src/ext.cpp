@@ -794,7 +794,7 @@ NB_MODULE(_core, m) {
                     }
                 }
                 if (report.stop == RGMIN_STOP_BUDGET && config.method() == rgmin::Method::Lbfgs &&
-                    std::equal(start.begin(), start.end(), x0.data())) {
+                    start.size() == n && std::equal(start.begin(), start.end(), x0.data())) {
                     report.stop = RGMIN_STOP_LINE_SEARCH;
                 }
             }
