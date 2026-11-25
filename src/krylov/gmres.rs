@@ -839,19 +839,20 @@ where
     P: Preconditioner,
     B: KrylovObserver,
 {
+    let first_record = || KrylovRecord::new(right_hand_sides.first().map_or(0.0, |b| norm(b)));
     if preconditioners.len() != right_hand_sides.len() || observers.len() != right_hand_sides.len()
     {
-        return Err(refusal(KrylovRefusal::Dimension, KrylovRecord::new(0.0)));
+        return Err(refusal(KrylovRefusal::Dimension, first_record()));
     }
     if !(options.relative_tolerance.is_finite() && options.relative_tolerance > 0.0) {
-        return Err(refusal(KrylovRefusal::Tolerance, KrylovRecord::new(0.0)));
+        return Err(refusal(KrylovRefusal::Tolerance, first_record()));
     }
     if right_hand_sides.is_empty() {
         return Ok(Vec::new());
     }
     let dimension = right_hand_sides[0].len();
     if dimension == 0 {
-        return Err(refusal(KrylovRefusal::EmptySystem, KrylovRecord::new(0.0)));
+        return Err(refusal(KrylovRefusal::EmptySystem, first_record()));
     }
     let requested = match options.max_iterations {
         Some(limit) => limit,
@@ -860,11 +861,11 @@ where
     let budget = requested.min(dimension);
     let mut states = Vec::with_capacity(right_hand_sides.len());
     for right_hand_side in right_hand_sides {
-        if right_hand_side.len() != dimension {
-            return Err(refusal(KrylovRefusal::Dimension, KrylovRecord::new(0.0)));
-        }
         let right_hand_side_norm = norm(right_hand_side);
         let record = KrylovRecord::new(right_hand_side_norm);
+        if right_hand_side.len() != dimension {
+            return Err(refusal(KrylovRefusal::Dimension, record));
+        }
         if !finite(right_hand_side) || !right_hand_side_norm.is_finite() {
             return Err(refusal(KrylovRefusal::NonFinite, record));
         }
@@ -2077,6 +2078,69 @@ mod tests {
         }
         assert_eq!(operator.batch_calls, 0);
         Ok(())
+    }
+
+    #[test]
+    fn block_argument_refusals_record_the_measured_right_hand_side_norm() {
+        let mut operator = Diagonal {
+            values: vec![3.0, 4.0],
+            scalar_calls: 0,
+            batch_calls: 0,
+        };
+        let first = vec![3.0, 4.0];
+        let refused_norm = |result: Result<Vec<GmresRun>, BlockGmresFailure<(), ()>>| match result {
+            Err(GmresFailure::Refused { reason, record }) => {
+                Some((reason, record.right_hand_side_norm))
+            }
+            _ => None,
+        };
+
+        let mut too_few: [DiagonalInverse; 0] = [];
+        let mut observers = [NoObserver];
+        let mismatched_slots = gmres_right_block(
+            &mut operator,
+            &mut too_few,
+            std::slice::from_ref(&first),
+            GmresOptions::unrestarted(1e-8),
+            &mut observers,
+        );
+        assert_eq!(
+            refused_norm(mismatched_slots),
+            Some((KrylovRefusal::Dimension, 5.0))
+        );
+
+        let inverse = || DiagonalInverse {
+            values: vec![1.0, 1.0],
+        };
+        let bad_tolerance = gmres_right_block(
+            &mut operator,
+            &mut [inverse()],
+            std::slice::from_ref(&first),
+            GmresOptions::unrestarted(0.0),
+            &mut observers,
+        );
+        assert_eq!(
+            refused_norm(bad_tolerance),
+            Some((KrylovRefusal::Tolerance, 5.0))
+        );
+
+        let empty = gmres_right_block(
+            &mut operator,
+            &mut [inverse()],
+            &[Vec::new()],
+            GmresOptions::unrestarted(1e-8),
+            &mut observers,
+        );
+        assert_eq!(refused_norm(empty), Some((KrylovRefusal::EmptySystem, 0.0)));
+
+        let short = gmres_right_block(
+            &mut operator,
+            &mut [inverse(), inverse()],
+            &[first.clone(), vec![12.0]],
+            GmresOptions::unrestarted(1e-8),
+            &mut [NoObserver, NoObserver],
+        );
+        assert_eq!(refused_norm(short), Some((KrylovRefusal::Dimension, 12.0)));
     }
 
     struct Scale(f64);
