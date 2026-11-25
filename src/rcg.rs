@@ -1048,8 +1048,8 @@ where
     /// `g` against the curve velocity. The metric product of the Riemannian
     /// gradient with that velocity is the same number only where
     /// [`Manifold::inner`] is the metric [`Manifold::egrad2rgrad`] raises
-    /// by. The Poincare ball and the hyperboloid keep the Euclidean
-    /// product, so it would scale or flip the Wolfe slopes there.
+    /// by. The Euclidean form needs no metric, so it also holds for a
+    /// caller's manifold whose two maps disagree.
     fn slope(&mut self, t: f64, at: ArrayView1<'_, f64>, g: ArrayView1<'_, f64>) -> f64 {
         let at_owned = at.to_owned();
         let vel = match retraction_velocity(
@@ -1310,9 +1310,9 @@ mod tests {
     }
 
     /// At `x = (0.5, 0)` the conformal factor is `lambda = 8 / 3`. The
-    /// metric product of the Riemannian gradient `x / lambda^2` with the
-    /// velocity is the Euclidean one divided by `lambda^2 = 7.11`, so a
-    /// slope built from it is short by that factor.
+    /// Euclidean product of the Riemannian gradient `x / lambda^2` with the
+    /// velocity is the slope divided by `lambda^2 = 7.11`, so a slope built
+    /// from it would be short by that factor.
     #[test]
     fn poincare_wolfe_slope_is_the_derivative_of_the_value() {
         let ball = crate::manifold::PoincareBall;
@@ -1681,6 +1681,20 @@ mod tests {
             Inflate.inner(&to, &g_to, &raw_dir) > 0.0,
             "the unscaled direction was expected to ascend"
         );
+    }
+
+    /// The ball's transport is the identity, so a vector carried outward
+    /// lengthens by `lambda(to) / lambda(from) = (8 / 3) / 2` in the
+    /// conformal metric, and the scaled transport shortens it back.
+    #[test]
+    fn scaled_transport_on_the_poincare_ball_reads_the_conformal_metric() {
+        let ball = crate::manifold::PoincareBall;
+        let from = array![0.0, 0.0];
+        let to = array![0.5, 0.0];
+        let v = array![1.0, 0.0];
+        let carried = scaled_transport(&ball, &from, &to, &v, RcgTransport::Scaled);
+        assert!((carried[0] - 0.75).abs() < 1e-14, "{carried}");
+        assert!((ball.norm(&to, &carried) - ball.norm(&from, &v)).abs() < 1e-14);
     }
 
     #[test]
