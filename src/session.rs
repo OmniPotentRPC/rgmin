@@ -2022,6 +2022,7 @@ impl Solver {
             .any(|(a, b)| a.to_bits() != b.to_bits())
         {
             self.last_pos = None;
+            self.rebase_gromacs_lbfgs();
             self.remember(x, value, &grad);
         }
         Ok(())
@@ -2054,6 +2055,7 @@ impl Solver {
             return Ok(());
         }
         grad = self.horizontal_grad(x, &grad);
+        self.rebase_gromacs_lbfgs();
         self.remember(x, value, &grad);
         let grad_norm = self.stationarity_norm(x, &grad);
         let status = self.control.classify(grad_norm, self.noted_free_len());
@@ -2713,6 +2715,12 @@ impl Solver {
     #[cfg(feature = "highs")]
     fn forget_clipped_start(&mut self) {
         self.last_pos = None;
+        self.rebase_gromacs_lbfgs();
+    }
+
+    /// The session moved `x` after GROMACS L-BFGS formed its direction, so
+    /// the next step rebuilds that direction from the retained pairs.
+    fn rebase_gromacs_lbfgs(&mut self) {
         if let Overlay::GromacsLbfgs(state) = &mut self.overlay {
             state.mark_rebase();
         }
