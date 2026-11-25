@@ -444,13 +444,10 @@ pub(crate) fn take_step_with_options<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let cap = cap_alpha(dir, control, atom_maxmove);
-    // An unset bound leaves `cap` as the only limit, which is the
-    // historical search. A positive finite bound that is tighter replaces it.
-    let amax = match options.alpha_max() {
-        Some(limit) if limit < cap => limit,
-        _ => cap,
-    };
+    if let Some(search) = options.ase() {
+        return take_ase_step(obj, pos, value, grad, dir, linesearch, atom_maxmove, search);
+    }
+    let amax = cap_alpha(dir, control, atom_maxmove);
     let mut best_decrease = f64::NEG_INFINITY;
     let mut saw_trial = false;
     let stalled = |saw: bool, best: f64| {
@@ -543,6 +540,66 @@ where
         }
     } else {
         unmoved(energy_noise, line_stop)
+    }
+}
+
+/// ASE's line search from the known `(value, grad)` at `pos`.
+///
+/// `atom_maxmove` limits each increment of the search, not the step,
+/// and the Euclidean `control.maxmove` is not read. The trial the
+/// search ends on is the step whether or not it lowers the value, as
+/// ASE takes it. The search opens at the unit step, not at `istep`. A
+/// failed search, a search under another [`LineSearch`] kind, or an
+/// end point outside the objective's box leaves the start in place.
+#[allow(clippy::too_many_arguments)]
+fn take_ase_step<O>(
+    obj: &O,
+    pos: &Array1<f64>,
+    value: f64,
+    grad: &Array1<f64>,
+    dir: ArrayView1<'_, f64>,
+    linesearch: LineSearch,
+    atom_maxmove: Option<f64>,
+    search: crate::linesearch::ase::AseSearch,
+) -> Taken
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let unmoved = || Taken {
+        x: pos.clone(),
+        f: value,
+        g: grad.clone(),
+        alpha: 0.0,
+        moved: false,
+        energy_noise: false,
+    };
+    let LineSearch::Wolfe { c1, c2, maxiter } = linesearch else {
+        return unmoved();
+    };
+    let Some(out) = crate::linesearch::ase::search(
+        |x| obj.value_and_gradient(x),
+        pos.view(),
+        value,
+        grad.view(),
+        dir,
+        atom_maxmove.filter(|cap| binding(*cap)),
+        search,
+        c1,
+        c2,
+        maxiter,
+    ) else {
+        return unmoved();
+    };
+    if obj.bounds().clip(out.x.view()) != out.x {
+        return unmoved();
+    }
+    Taken {
+        x: out.x,
+        f: out.f,
+        g: out.g,
+        alpha: out.alpha,
+        moved: true,
+        energy_noise: false,
     }
 }
 
