@@ -1,0 +1,29 @@
+{
+  "title": "rgmin",
+  "version": "0.8.0",
+  "upload_type": "software",
+  "description": "rgmin finds a local minimum of a smooth function from its value and gradient. It is built for geometry optimization. There, a host program such as eOn owns the loop, and a Solver takes one step per call. The step can stay on a manifold, such as the unit sphere or Cartesians with the rigid-body motions removed.",
+  "creators": [
+    {
+      "name": "Goswami, Rohit",
+      "orcid": "0000-0002-2393-8056",
+      "affiliation": "TurtleTech ehf"
+    }
+  ],
+  "license": "MIT",
+  "keywords": [
+    "optimization",
+    "conjugate-gradient",
+    "L-BFGS",
+    "trust-region",
+    "line-search",
+    "Rust"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/OmniPotentRPC/rgmin/tree/v0.8.0",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}

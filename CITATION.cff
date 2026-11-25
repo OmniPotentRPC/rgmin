@@ -1,15 +1,25 @@
 cff-version: 1.2.0
 message: "If you use rgmin, please cite it as below."
 type: software
-title: "rgmin: local minimization over eindir differentiable objectives"
+title: rgmin
 authors:
   - family-names: Goswami
     given-names: Rohit
+    email: rgoswami@ieee.org
     orcid: "https://orcid.org/0000-0002-2393-8056"
+    affiliation: "TurtleTech ehf"
 repository-code: "https://github.com/OmniPotentRPC/rgmin"
 version: "0.8.0"
 date-released: 2026-11-22
 license: MIT
+doi: 10.5281/zenodo.24437655
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.24437655
+    description: Concept DOI for the Zenodo archive; resolves to the latest release.
+  - type: doi
+    value: 10.5281/zenodo.24469714
+    description: Zenodo record for v0.8.0.
 keywords:
   - optimization
   - conjugate-gradient
@@ -18,9 +28,8 @@ keywords:
   - line-search
   - Rust
 abstract: >-
-  Local first-order and matrix-free second-order minimization in Rust
-  over eindir differentiable objectives, with a DLPack-carrying C ABI.
-  Line searches, quasi-Newton methods, trust regions with
-  Steihaug-Toint CG, and a randomized Nystrom preconditioner, each
-  pinned by Lean proofs of its exact algebra and by tests holding the
-  implementation to them.
+  rgmin finds a local minimum of a smooth function from its value and
+  gradient. It is built for geometry optimization. There, a host program
+  such as eOn owns the loop, and a Solver takes one step per call. The
+  step can stay on a manifold, such as the unit sphere or Cartesians with
+  the rigid-body motions removed.

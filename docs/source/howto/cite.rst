@@ -24,13 +24,17 @@ cffconvert 2.0.0 prints:
 
     @misc{YourReferenceHere,
     author = {Goswami, Rohit},
+    doi = {10.5281/zenodo.24437655},
     month = {11},
-    title = {rgmin: local minimization over eindir differentiable objectives},
+    title = {rgmin},
     url = {https://github.com/OmniPotentRPC/rgmin},
     year = {2026}
     }
 
 The month and year come from the release date, and the entry has no version.
+Its DOI is the Zenodo concept DOI, `https://doi.org/10.5281/zenodo.24437655 <https://doi.org/10.5281/zenodo.24437655>`_, which resolves to the latest release.
+The record for 0.8.0 is `https://doi.org/10.5281/zenodo.24469714 <https://doi.org/10.5281/zenodo.24469714>`_.
+``codemeta.json`` (CodeMeta 2.0) and ``.zenodo.json`` carry the same metadata for software indexes and for the Zenodo archive.
 The "Cite this repository" button on GitHub reads the record on the default branch, ``main``.
 
 Find the version you ran
@@ -81,8 +85,9 @@ For the 0.8.0 release:
 
     @misc{rgmin,
     author = {Goswami, Rohit},
-    title = {{rgmin}: local minimization over eindir differentiable objectives},
+    title = {{rgmin}},
     url = {https://github.com/OmniPotentRPC/rgmin},
+    doi = {10.5281/zenodo.24469714},
     note = {Version 0.8.0},
     year = {2026}
     }
