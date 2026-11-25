@@ -46,6 +46,13 @@ def test_max_evals_ends_an_ase_run_and_reports_false() -> None:
     assert opt.stop == rgmin.Stop.EVAL_BUDGET
 
 
+def test_max_evals_ends_ase_irun_and_yields_false() -> None:
+    opt = FIRE(_pt7(), logfile=None, max_evals=6)
+    flags = list(opt.irun(fmax=1e-9, steps=200))
+    assert flags[-1] is False
+    assert opt.stop == rgmin.Stop.EVAL_BUDGET
+
+
 def test_stop_is_none_before_the_first_step_and_after_a_force_stop() -> None:
     opt = FIRE(_pt7(), logfile=None)
     assert opt.stop is None
