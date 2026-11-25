@@ -22,13 +22,14 @@ use crate::holonomic::{ConstraintError, ConstraintSolver, DistanceConstraints};
 use crate::precon::{ExpParams, ExpState, Neighbours};
 use crate::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Conjugacy, Control, DirectionalCurvature,
-    EigenParams, EigensolverKind, Error, GromacsCgConfig, GromacsSteepConfig, HessianObjective,
-    HessianOracle, HessianVector, HvpOracle, LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method,
-    NewtonKind, Oracle, QnStep, Restart, RiemannianManifold, Rlbfgs, ScgOptions, ScgParams,
-    ScgStepTolerance, SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch,
-    lowest_eigenpairs, lowest_eigenpairs_precond, lowest_eigenpairs_projected, lowest_mode,
-    lowest_mode_precond_with, minimize_method, minimize_method_hess, minimize_method_hvp,
-    minimize_rlbfgs, minimize_scg_exact_with_options, minimize_scg_with_options,
+    EigenParams, EigensolverKind, Error, GromacsCgConfig, GromacsLbfgsConfig, GromacsSteepConfig,
+    HessianObjective, HessianOracle, HessianVector, HvpOracle, LbfgsH0, LbfgsPairs, LineSearch,
+    ManifoldKind, Method, NewtonKind, Oracle, QnStep, Restart, RiemannianManifold, Rlbfgs,
+    ScgOptions, ScgParams, ScgStepTolerance, SearchStep, Solver, SpdMetric, StiefelRetraction,
+    StopNorm, SuppliedSearch, lowest_eigenpairs, lowest_eigenpairs_precond,
+    lowest_eigenpairs_projected, lowest_mode, lowest_mode_precond_with, minimize_method,
+    minimize_method_hess, minimize_method_hvp, minimize_rlbfgs, minimize_scg_exact_with_options,
+    minimize_scg_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -166,6 +167,8 @@ pub enum rgmin_method_t {
     RGMIN_GROMACS_STEEP = 28,
     /// GROMACS-style `integrator = cg` direction update with strong-Wolfe line search. ABI minor 54.
     RGMIN_GROMACS_CG = 29,
+    /// GROMACS `integrator = l-bfgs`.
+    RGMIN_GROMACS_LBFGS = 30,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -624,6 +627,7 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
         rgmin_method_t::RGMIN_EON_CG => Method::eon_cg(),
         rgmin_method_t::RGMIN_GROMACS_STEEP => Method::GromacsSteep,
         rgmin_method_t::RGMIN_GROMACS_CG => Method::GromacsCg,
+        rgmin_method_t::RGMIN_GROMACS_LBFGS => Method::GromacsLbfgs,
     }
 }
 
@@ -654,6 +658,7 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
         Method::GromacsSteep => rgmin_method_t::RGMIN_GROMACS_STEEP,
         Method::GpMin => return Err(()),
         Method::GromacsCg => rgmin_method_t::RGMIN_GROMACS_CG,
+        Method::GromacsLbfgs => rgmin_method_t::RGMIN_GROMACS_LBFGS,
         Method::Sr2 => rgmin_method_t::RGMIN_SR2,
         Method::Pso { .. } => rgmin_method_t::RGMIN_PSO,
         Method::Newton { kind } => match kind {
@@ -2346,6 +2351,27 @@ pub unsafe extern "C" fn rgmin_solver_set_gromacs_cg(
     }
     let config = GromacsCgConfig::default().with_nstcgsteep(nstcgsteep);
     flag(unsafe { (*solver).solver.set_gromacs_cg_config(config) })
+}
+
+/// GROMACS L-BFGS correction count on a `RGMIN_GROMACS_LBFGS` session.
+///
+/// `nbfgscorr` is the number of stored displacement and gradient pairs.
+/// Zero is rejected. Returns 0 on success, or 1 when `solver` is null,
+/// `nbfgscorr` is zero, or the session is not `RGMIN_GROMACS_LBFGS`.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_gromacs_lbfgs(
+    solver: *mut rgmin_solver_t,
+    nbfgscorr: u32,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_gromacs_lbfgs: null solver");
+        return 1;
+    }
+    let config = GromacsLbfgsConfig::default().with_nbfgscorr(nbfgscorr as usize);
+    flag(unsafe { (*solver).solver.set_gromacs_lbfgs_config(config) })
 }
 
 /// Gradient norm a session compares to `gtol` and writes to
