@@ -59,7 +59,7 @@ use crate::step::{
     Taken, apply_caps, cap_alpha, cap_displacement_atom, l2, max_atom_displacement,
     nlcg_opening_alpha, qn_istep, scale_displacement_to_atom_cap, take_step_with_options,
 };
-use crate::stop::{Counted, StopRules, moved as point_moved};
+use crate::stop::{Counted, StopRules, bounded_step_moved};
 use crate::trust::{
     accept_ratio, burdakov_radius, dogleg_direction, predicted_reduction, reduction_ratio,
     update_radius,
@@ -2552,7 +2552,7 @@ impl Solver {
         self.finish_level_set(obj, x, &mut report)?;
         self.note_repeated_lbfgs_step(&before, x, &mut report);
         self.note_strict_stall(&before, x, &mut report);
-        Ok((report, point_moved(&before, x)))
+        Ok((report, bounded_step_moved(obj.bounds(), &before, x)))
     }
 
     /// Refuse a stop this session's method cannot read.
@@ -2769,7 +2769,7 @@ impl Solver {
             }
         };
         self.finish_level_set(obj, x, &mut report)?;
-        Ok((report, point_moved(&before, x)))
+        Ok((report, bounded_step_moved(obj.bounds(), &before, x)))
     }
 
     /// One Steihaug-Toint iteration. `obj` supplies analytic products;
@@ -2817,7 +2817,7 @@ impl Solver {
             self.step_newton_cg(obj, x, &action)?
         };
         self.finish_level_set(obj, x, &mut report)?;
-        Ok((report, point_moved(&before, x)))
+        Ok((report, bounded_step_moved(obj.bounds(), &before, x)))
     }
 
     /// [`Self::step_hvp`] on an objective whose callbacks can fail.
@@ -2875,7 +2875,7 @@ impl Solver {
             let before = x.clone();
             let mut report = self.step_newton_cg(&counted, x, &HostAction(obj))?;
             self.finish_level_set(&counted, x, &mut report)?;
-            Ok((report, point_moved(&before, x)))
+            Ok((report, bounded_step_moved(counted.bounds(), &before, x)))
         })();
         match result {
             Err(err @ Error::Host(_)) => {
@@ -6456,7 +6456,7 @@ impl Solver {
             Status::Iterating => Status::Budget,
             other => other,
         };
-        let moved = gauged || *x != start;
+        let moved = gauged || bounded_step_moved(obj.bounds(), &start, x);
         self.control.deliver(self.name_budget(report, moved))
     }
 
@@ -6516,7 +6516,8 @@ impl Solver {
         let report = self
             .finish(value, x, &g, grad_norm, reason.status())
             .with_stop_reason(reason);
-        self.control.deliver(self.name_budget(report, *x != start))
+        let moved = bounded_step_moved(obj.bounds(), &start, x);
+        self.control.deliver(self.name_budget(report, moved))
     }
 
     /// The gradient a step report carries, for the report at the end of a
