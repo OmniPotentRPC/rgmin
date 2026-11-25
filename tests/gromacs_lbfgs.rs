@@ -1,5 +1,10 @@
 mod common;
 
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU8, Ordering},
+};
+
 use approx::assert_abs_diff_eq;
 use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1, array};
@@ -286,9 +291,15 @@ fn parse_argon_fixture() -> ArgonFixture {
     }
 }
 
-fn lennard_jones(positions: ArrayView1<'_, f64>, sigma: f64, epsilon: f64) -> (f64, Array1<f64>) {
+fn lennard_jones(
+    positions: ArrayView1<'_, f64>,
+    sigma: f64,
+    epsilon: f64,
+    cutoff: f64,
+) -> (f64, Array1<f64>) {
     let c6 = 4.0 * epsilon * sigma.powi(6);
     let c12 = 4.0 * epsilon * sigma.powi(12);
+    let cutoff_sq = cutoff * cutoff;
     let mut energy = 0.0;
     let mut gradient = Array1::zeros(positions.len());
     for i in 0..positions.len() / 3 {
@@ -299,6 +310,9 @@ fn lennard_jones(positions: ArrayView1<'_, f64>, sigma: f64, epsilon: f64) -> (f
                 positions[3 * i + 2] - positions[3 * j + 2],
             ];
             let r2 = delta.dot(&delta);
+            if r2 >= cutoff_sq {
+                continue;
+            }
             let inv_r2 = 1.0 / r2;
             let inv_r6 = inv_r2.powi(3);
             let inv_r12 = inv_r6 * inv_r6;
@@ -320,19 +334,15 @@ fn argon_cluster_reaches_emtol_with_default_correction_count() {
     let dim = fixture.initial_positions.len();
     let sigma = fixture.sigma;
     let epsilon = fixture.epsilon;
-    let objective = Oracle::unbounded(dim, move |x| lennard_jones(x, sigma, epsilon));
+    let objective = Oracle::unbounded(dim, move |x| {
+        lennard_jones(x, sigma, epsilon, f64::INFINITY)
+    });
     let mut comparison_solver =
         Solver::new(Method::GromacsLbfgs, control(fixture.emstep, 1e-8, 12), dim);
     let mut comparison_point = Array1::from(fixture.initial_positions.clone());
     let comparison = comparison_solver
         .run(&objective, &mut comparison_point)
         .unwrap();
-    eprintln!(
-        "argon l-bfgs comparison: rgmin steps={} force_evaluations={} Epot={:.14e} Fmax={:.14e}; \
-         gmx 2023.3 steps_reported=-1 accepted_step_lines=12 force_evaluations=13 \
-         Epot=-1.2548940e1 Fmax=2.0878734e-4",
-        comparison.steps, comparison.evals, comparison.value, comparison.grad_norm
-    );
     assert_eq!(comparison.steps, 12);
     assert_eq!(comparison.status, Status::Budget);
     let mut solver = Solver::new(
@@ -457,7 +467,7 @@ fn median_run(
     for _ in 0..3 {
         let dim = start.len();
         let objective = Oracle::unbounded(dim, move |x: ArrayView1<f64>| {
-            lennard_jones(x, sigma, epsilon)
+            lennard_jones(x, sigma, epsilon, f64::INFINITY)
         });
         let selected = match method {
             "gromacs-lbfgs" => Method::GromacsLbfgs,
@@ -475,6 +485,345 @@ fn median_run(
     }
     samples.sort_by(|left, right| left.total_cmp(right));
     (last.0, last.1, samples[1])
+}
+
+fn rosenbrock_value(x: ArrayView1<'_, f64>) -> (f64, Array1<f64>) {
+    let u = 1.0 - x[0];
+    let v = x[1] - x[0] * x[0];
+    (
+        u * u + 100.0 * v * v + 0.5 * x[2] * x[2],
+        array![-2.0 * u - 400.0 * x[0] * v, 200.0 * v, x[2]],
+    )
+}
+
+struct CleanPair {
+    s: Array1<f64>,
+    y: Array1<f64>,
+    rho: f64,
+    diag: f64,
+}
+
+/// Two-loop over a deque that holds only the pairs stored since the last
+/// clear. This is the direction `apply_pairs` builds, not the GROMACS ring
+/// that keeps `point` across a reset.
+fn clean_direction(force: &Array1<f64>, pairs: &[CleanPair]) -> Array1<f64> {
+    let mut direction = force.clone();
+    if pairs.is_empty() {
+        return direction;
+    }
+    let mut alpha = Vec::with_capacity(pairs.len());
+    for pair in pairs.iter().rev() {
+        let coefficient = pair.rho * pair.s.dot(&direction);
+        alpha.push(coefficient);
+        direction.scaled_add(-coefficient, &pair.y);
+    }
+    direction *= pairs.last().expect("pairs").diag;
+    for (pair, coefficient) in pairs.iter().zip(alpha.into_iter().rev()) {
+        let beta = pair.rho * pair.y.dot(&direction);
+        direction.scaled_add(coefficient - beta, &pair.s);
+    }
+    direction
+}
+
+fn same_ray(displacement: &Array1<f64>, direction: &Array1<f64>) {
+    let disp_norm = displacement.dot(displacement).sqrt();
+    let dir_norm = direction.dot(direction).sqrt();
+    assert!(
+        disp_norm > 0.0 && dir_norm > 0.0,
+        "disp {displacement:?} dir {direction:?}"
+    );
+    let cosine = displacement.dot(direction) / (disp_norm * dir_norm);
+    assert!(
+        cosine > 1.0 - 1e-8,
+        "cosine {cosine}, displacement {displacement:?}, direction {direction:?}"
+    );
+}
+
+/// After a failed line search the correction deque is empty, and later
+/// displacements follow a two-loop over only the pairs stored since that
+/// clear. GROMACS leaves `point` unchanged and can reread older slots.
+#[test]
+fn line_search_reset_continues_on_a_clean_correction_ring() {
+    let phase = Arc::new(AtomicU8::new(0));
+    let trap = Arc::new(Mutex::new(Array1::zeros(3)));
+    let objective = Oracle::unbounded(3, {
+        let phase = Arc::clone(&phase);
+        let trap = Arc::clone(&trap);
+        move |x: ArrayView1<f64>| {
+            if phase.load(Ordering::SeqCst) == 1 {
+                let origin = trap.lock().expect("trap").clone();
+                let (value, gradient) = rosenbrock_value(origin.view());
+                if x.iter()
+                    .zip(origin.iter())
+                    .all(|(left, right)| left.to_bits() == right.to_bits())
+                {
+                    return (value, gradient);
+                }
+                return (value + 1.0, &x.to_owned() - &origin);
+            }
+            rosenbrock_value(x)
+        }
+    });
+    let nbfgscorr = 2;
+    let mut solver = Solver::new(Method::GromacsLbfgs, control(1.0, 0.0, 40), 3);
+    solver
+        .set_gromacs_lbfgs_config(GromacsLbfgsConfig::default().with_nbfgscorr(nbfgscorr))
+        .unwrap();
+    let mut point = array![-1.2, 1.0, 0.5];
+    for _ in 0..4 {
+        let report = solver.step(&objective, &mut point).unwrap();
+        assert_eq!(report.status, Status::Iterating, "{report:?}");
+    }
+    assert_eq!(solver.pair_count(), nbfgscorr);
+
+    *trap.lock().expect("trap") = point.clone();
+    phase.store(1, Ordering::SeqCst);
+    let trapped = point.clone();
+    let reset = solver.step(&objective, &mut point).unwrap();
+    assert_eq!(reset.status, Status::Iterating, "{reset:?}");
+    assert_eq!(solver.pair_count(), 0);
+    assert_eq!(point, trapped);
+    phase.store(0, Ordering::SeqCst);
+
+    let mut pairs = Vec::new();
+    let mut gradient = reset.grad.expect("gradient");
+    for step in 0..5 {
+        let force = gradient.mapv(|component| -component);
+        let predicted = clean_direction(&force, &pairs);
+        let previous = point.clone();
+        let previous_gradient = gradient.clone();
+        let report = solver.step(&objective, &mut point).unwrap();
+        assert_eq!(
+            report.status,
+            Status::Iterating,
+            "post-reset step {step}: {report:?}"
+        );
+        same_ray(&(&point - &previous), &predicted);
+        let displacement = &point - &previous;
+        let gradient_change = &report.grad.clone().expect("gradient") - &previous_gradient;
+        let curvature = displacement.dot(&gradient_change);
+        let yy = gradient_change.dot(&gradient_change);
+        assert!(curvature.abs() > 0.0 && yy > 0.0, "step {step}");
+        if pairs.len() == nbfgscorr {
+            pairs.remove(0);
+        }
+        pairs.push(CleanPair {
+            s: displacement,
+            y: gradient_change,
+            rho: 1.0 / curvature,
+            diag: curvature / yy,
+        });
+        assert_eq!(solver.pair_count(), pairs.len());
+        gradient = report.grad.expect("gradient");
+    }
+    assert_eq!(pairs.len(), nbfgscorr);
+}
+
+/// A frozen atom still moves: the L-BFGS force keeps that atom's
+/// component. GROMACS zeros the stored search direction there instead.
+#[test]
+fn frozen_atom_force_stays_in_the_lbfgs_step() {
+    let start = array![0.0, 0.0, 0.0, 1.2, 0.2, -0.4];
+    let target = array![0.4, -0.3, 0.2, 1.0, 0.8, 0.1];
+    let harmonic = Oracle::unbounded(6, {
+        let target = target.clone();
+        move |x: ArrayView1<f64>| {
+            let gradient = &x.to_owned() - &target;
+            (0.5 * gradient.dot(&gradient), gradient)
+        }
+    });
+    let zeroed_gradient = Oracle::unbounded(6, {
+        let target = target.clone();
+        move |x: ArrayView1<f64>| {
+            let mut gradient = &x.to_owned() - &target;
+            let value = 0.5 * gradient.dot(&gradient);
+            gradient[0] = 0.0;
+            gradient[1] = 0.0;
+            gradient[2] = 0.0;
+            (value, gradient)
+        }
+    });
+
+    let mut frozen = Solver::new(Method::GromacsLbfgs, control(0.2, 0.0, 4), 6);
+    frozen.set_frozen(&[1, 1, 1, 0, 0, 0]);
+    let mut masked = start.clone();
+    frozen.step(&harmonic, &mut masked).unwrap();
+    // The mask does not zero the frozen atom's force, so atom 0 moves on
+    // the first iteration. These coordinates pin that step.
+    assert_abs_diff_eq!(masked[0], 0.067_377_981_474_241_66, epsilon = 1e-12);
+    assert_abs_diff_eq!(masked[1], -0.050_533_486_105_681_25, epsilon = 1e-12);
+    assert_abs_diff_eq!(masked[2], 0.033_688_990_737_120_83, epsilon = 1e-12);
+    assert_abs_diff_eq!(masked[3], 1.160_559_230_356_541_5, epsilon = 1e-12);
+    assert_abs_diff_eq!(masked[4], 0.193_426_538_392_756_92, epsilon = 1e-12);
+    assert_abs_diff_eq!(masked[5], -0.386_853_076_785_513_84, epsilon = 1e-12);
+
+    let mut cleared = Solver::new(Method::GromacsLbfgs, control(0.2, 0.0, 4), 6);
+    let mut cleared_point = start.clone();
+    cleared.step(&zeroed_gradient, &mut cleared_point).unwrap();
+    assert_eq!(cleared_point[0], 0.0);
+    assert!((masked[3] - cleared_point[3]).abs() > 1e-3);
+
+    let mut raw = Solver::new(Method::GromacsLbfgs, control(0.2, 0.0, 4), 6);
+    let mut raw_point = start;
+    raw.step(&harmonic, &mut raw_point).unwrap();
+    assert!((masked[0] - raw_point[0]).abs() > 1e-3);
+    assert!((masked[3] - raw_point[3]).abs() > 1e-3);
+
+    frozen.step(&harmonic, &mut masked).unwrap();
+    cleared.step(&zeroed_gradient, &mut cleared_point).unwrap();
+    assert!((masked[3] - cleared_point[3]).abs() > 1e-3);
+}
+
+struct LbfgsArgonRow {
+    k: usize,
+    evals: usize,
+    energy: f64,
+    fmax: f64,
+}
+
+struct LbfgsArgonCase {
+    nbfgscorr: usize,
+    emstep: f64,
+    rows: Vec<LbfgsArgonRow>,
+}
+
+struct LbfgsArgonReference {
+    sigma: f64,
+    epsilon: f64,
+    cutoff: f64,
+    emtol: f64,
+    cases: Vec<LbfgsArgonCase>,
+}
+
+fn load_lbfgs_argon() -> LbfgsArgonReference {
+    let text = include_str!("data/gromacs_lbfgs_argon.txt");
+    let mut sigma = None;
+    let mut epsilon = None;
+    let mut cutoff = None;
+    let mut emtol = None;
+    let mut cases: Vec<LbfgsArgonCase> = Vec::new();
+    let mut rows: Option<Vec<LbfgsArgonRow>> = None;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("case ") {
+            if let Some(finished) = rows.take() {
+                cases.last_mut().expect("case").rows = finished;
+            }
+            let mut parts = rest.split_whitespace();
+            let nbfgscorr = parts.next().expect("nbfgscorr").parse().expect("nbfgscorr");
+            let emstep = parts.next().expect("emstep").parse().expect("emstep");
+            let _nsteps: usize = parts.next().expect("nsteps").parse().expect("nsteps");
+            cases.push(LbfgsArgonCase {
+                nbfgscorr,
+                emstep,
+                rows: Vec::new(),
+            });
+            rows = Some(Vec::new());
+            continue;
+        }
+        if rows.is_some() {
+            let mut parts = line.split_whitespace();
+            let k = parts.next().expect("k").parse().expect("k");
+            let evals = parts.next().expect("evals").parse().expect("evals");
+            let energy = parts.next().expect("energy").parse().expect("energy");
+            let fmax = parts.next().expect("fmax").parse().expect("fmax");
+            rows.as_mut().expect("rows").push(LbfgsArgonRow {
+                k,
+                evals,
+                energy,
+                fmax,
+            });
+            continue;
+        }
+        let (key, value) = line.split_once(' ').expect("field");
+        match key {
+            "sigma" => sigma = Some(value.parse().expect("sigma")),
+            "epsilon" => epsilon = Some(value.parse().expect("epsilon")),
+            "cutoff" => cutoff = Some(value.parse().expect("cutoff")),
+            "emtol" => emtol = Some(value.parse().expect("emtol")),
+            other => panic!("unknown field {other}"),
+        }
+    }
+    if let Some(finished) = rows.take() {
+        cases.last_mut().expect("case").rows = finished;
+    }
+    LbfgsArgonReference {
+        sigma: sigma.expect("sigma"),
+        epsilon: epsilon.expect("epsilon"),
+        cutoff: cutoff.expect("cutoff"),
+        emtol: emtol.expect("emtol"),
+        cases,
+    }
+}
+
+/// Seven-atom argon against `gmx_d` 2023.3 double precision.
+///
+/// `tests/data/gromacs_lbfgs_argon.txt` is that build. Row `k` is GROMACS
+/// `nsteps = k`, which runs the inclusive iterations `step = 0..=k`.
+/// rgmin's step `k + 1` matches the evaluation count and stays within
+/// `1e-11` of the footer energy. The maximum atomic force is compared
+/// to `1e-6`: near the minimum a last-bit coordinate difference moves
+/// `Fmax` by more than one unit in the last place of the footer.
+#[test]
+fn argon_matches_double_precision_gmx_lbfgs() {
+    let reference = load_lbfgs_argon();
+    assert!(reference.cases.len() >= 4);
+    let start = Array1::from(parse_argon_fixture().initial_positions);
+    let sigma = reference.sigma;
+    let epsilon = reference.epsilon;
+    let cutoff = reference.cutoff;
+    for case in &reference.cases {
+        let objective = Oracle::unbounded(start.len(), move |x: ArrayView1<f64>| {
+            lennard_jones(x, sigma, epsilon, cutoff)
+        });
+        let mut solver = Solver::new(
+            Method::GromacsLbfgs,
+            control(case.emstep, reference.emtol, case.rows.len()),
+            start.len(),
+        );
+        solver
+            .set_gromacs_lbfgs_config(GromacsLbfgsConfig::default().with_nbfgscorr(case.nbfgscorr))
+            .unwrap();
+        let mut point = start.clone();
+        for row in &case.rows {
+            let report = solver.step(&objective, &mut point).unwrap();
+            assert_eq!(
+                report.status,
+                Status::Iterating,
+                "nbfgscorr={} emstep={} k={}",
+                case.nbfgscorr,
+                case.emstep,
+                row.k
+            );
+            assert_eq!(report.steps, row.k + 1);
+            assert_eq!(
+                report.evals, row.evals,
+                "nbfgscorr={} emstep={} k={}",
+                case.nbfgscorr, case.emstep, row.k
+            );
+            assert!(
+                (report.value - row.energy).abs() <= 1e-11,
+                "nbfgscorr={} emstep={} k={} energy {} vs {}",
+                case.nbfgscorr,
+                case.emstep,
+                row.k,
+                report.value,
+                row.energy
+            );
+            assert!(
+                (report.grad_norm - row.fmax).abs() <= 1e-6,
+                "nbfgscorr={} emstep={} k={} Fmax {} vs {}",
+                case.nbfgscorr,
+                case.emstep,
+                row.k,
+                report.grad_norm,
+                row.fmax
+            );
+        }
+    }
 }
 
 #[test]
