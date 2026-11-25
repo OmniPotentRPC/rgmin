@@ -28,8 +28,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from check_abi import BASELINE, ROOT, names
 
-# eindir-core: the objective constructors callers of
-# rgmin_minimize_eindir use. readcon-core: linked only with `readcon`.
+# eindir-core: a deliberate public re-export. rgmin_minimize_eindir and
+# its _opts and _sized forms take an eindir_objective_t and an
+# eindir_abi_stamp_t, and include/rgmin.h has no rgmin_ name that builds
+# either, so a C caller linked against librgmin alone gets them from
+# eindir_objective_new and eindir_core_abi_stamp here. tests/cxx_headers.cpp
+# links that way. v0.7.0 and v0.8.0 shipped these names, so hiding them
+# would break released callers. readcon-core: linked only with `readcon`.
 DEPENDENCY_CRATES = ("eindir_core", "readcon_core")
 # Linker and unwinder names. A leading underscore is reserved to the
 # implementation, which also covers Rust (`_ZN`, `_R`) mangling.
@@ -92,6 +97,7 @@ def shared_problems(
         if name.startswith("rgmin_"):
             problem = abi_problem(name, declared, baseline)
         elif owners.get(name) in DEPENDENCY_CRATES:
+            # Public through the dependency's C ABI; see DEPENDENCY_CRATES.
             problem = None
         else:
             owner = owners.get(name) or "no rust crate"

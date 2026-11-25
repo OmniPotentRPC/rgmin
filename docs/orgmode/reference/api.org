@@ -74,6 +74,17 @@ alias. The hourglass is ~rgmin_solver_create~ /
 Tensors are dlpk ~DLManagedTensorVersioned~. HTML for this waist
 is Doxygen plus doxyYoda; see @@rst::doc:`howto/doxygen <../howto/doxygen>`@@.
 
+~rgmin_minimize_eindir~ takes an ~eindir_objective_t~ and an
+~eindir_abi_stamp_t~ that no ~rgmin_~ function builds. librgmin
+therefore re-exports the C ABI of eindir-core as public API:
+~eindir_core_abi_compatible~, ~eindir_core_abi_family~,
+~eindir_core_abi_stamp~, ~eindir_core_version~, ~eindir_last_error~ and
+the ~eindir_objective_~ functions ~new~, ~free~, ~eval~, ~grad~,
+~has_grad~, ~dim~, ~bounds_low~ and ~bounds_high~. A C caller that links
+only librgmin builds the objective with ~eindir_objective_new~ and the
+stamp with ~eindir_core_abi_stamp~. These names have been exported
+since 0.7.0.
+
 ** What belongs next door
 
 Band, min-mode, and IRC *sessions* are [[https://github.com/OmniPotentRPC/rgsaddle][rgsaddle]]. Potentials
