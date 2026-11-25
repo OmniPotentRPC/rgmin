@@ -1,1 +1,5 @@
-GROMACS `integrator = l-bfgs` energy minimization through `Method::GromacsLbfgs` with `GromacsLbfgsConfig` and `GromacsLbfgs`, including the `do_lbfgs` correction recursion, line search and memory reset, direction rebuild across rebase or external coordinate moves, `nbfgscorr`, `emtol`, `emstep` and `nsteps` MDP mapping, max-atom force stopping, C/C++ `RGMIN_GROMACS_LBFGS` and `rgmin_solver_set_gromacs_lbfgs`, and Python `GromacsLbfgs`.
+GROMACS `integrator = l-bfgs` energy minimization is available as `Method::GromacsLbfgs`, with `GromacsLbfgsConfig` and `GromacsLbfgs`.
+It includes the `do_lbfgs` correction recursion, line search, and memory reset, and it rebuilds the direction across rebase or external coordinate moves.
+`nbfgscorr`, `emtol`, `emstep`, and `nsteps` map from the MDP options, and the stop is the maximum atomic force.
+C ABI minor 63 adds `RGMIN_GROMACS_LBFGS` and `rgmin_solver_set_gromacs_lbfgs`.
+Python exposes `GromacsLbfgs`.
