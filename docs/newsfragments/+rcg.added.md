@@ -3,7 +3,8 @@ The retraction, tangent projection and vector transport are the ones the manifol
 The coefficient is Fletcher-Reeves, PRP+ or Hager-Zhang.
 The transport is scaled when it lengthens a vector, or the identity in the Euclidean case.
 A direction that loses descent is replaced by the negative Riemannian gradient.
-In a session the method honours `maxmove` and the per-atom cap, composes a distance constraint set with the configured manifold, steps and stops on the field the session reports, including rigid quotients, products with rigid blocks and periodic sessions, keeps every trial in the objective's box, and clears its direction when a level-set retraction moves the point.
+In a session the method honours `maxmove` and the per-atom cap, composes a distance constraint set with the configured manifold, takes its gradient, tangent projection and transport from the session, including rigid quotients, products with rigid blocks and periodic sessions, keeps every trial in the objective's box, and clears its direction when a level-set retraction moves the point.
+A distance constraint set with masses steps along the cut gradient raised by the inverse masses, and its stop and report read the cut gradient.
 A start with no retraction in the box returns `Error::OffManifold` before the objective reads a point.
 Each Wolfe slope is the Euclidean gradient against the velocity of the retraction curve, the derivative of the value along it, so the strong Wolfe tests hold on the Poincare ball and the hyperboloid as well.
 A step that stalls on the energy noise floor keeps its start and reports `NoiseFloor`.
