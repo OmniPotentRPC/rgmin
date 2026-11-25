@@ -418,6 +418,33 @@ fn rcg_reports_the_energy_noise_floor() {
     assert_eq!(report.value, 0.125);
 }
 
+/// The Poincare ball divides a Euclidean gradient by `lambda^2`, with
+/// `lambda = 2 / (1 - |x|^2)`. At `x = (0.5, 0)` one conversion of
+/// `g = x` has norm `0.5 / lambda^2 = 0.0703` and two have `0.0099`. A
+/// kept start converts once, so it stays above `gtol = 0.03` and reports
+/// the noise floor, not the gradient tolerance.
+#[test]
+fn rcg_noise_floor_on_the_poincare_ball_converts_the_gradient_once() {
+    let quad = Oracle::unbounded(2, |x: ArrayView1<f64>| (0.5 * x.dot(&x), x.to_owned()));
+    let control = Control::default()
+        .with_maxiter(20)
+        .with_gtol(0.03)
+        .with_noise_floor(NoiseFloor::new(0.0).with_eps_f(1.0));
+    let mut solver = Solver::new(Method::rcg(), control, 2);
+    solver.set_manifold(ManifoldKind::PoincareBall);
+    let mut x = array![0.5, 0.0];
+    let report = solver.step(&quad, &mut x).unwrap();
+    assert_eq!(x, array![0.5, 0.0], "a noise-floor step keeps its start");
+    assert_eq!(report.status, Status::NoiseFloor, "{report:?}");
+    let lambda = 2.0 / (1.0 - 0.25);
+    let once = 0.5 / (lambda * lambda);
+    assert!(
+        (report.grad_norm - once).abs() <= 1e-12 * once,
+        "grad_norm {} want {once}",
+        report.grad_norm
+    );
+}
+
 /// Records every point the objective is asked to read.
 struct Seen {
     bounds: Bounds<f64>,
