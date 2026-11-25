@@ -256,3 +256,69 @@ fn out_of_bounds_starts_have_identical_session_and_one_shot_results() {
         assert_eq!(x, one_shot.coords, "{method:?}");
     }
 }
+
+/// An L-BFGS run whose accepted steps move away and return to (or near)
+/// the start did move during the run, so its spent budget stays `MaxIter`
+/// rather than `LineSearchFailed`.
+#[test]
+fn returning_to_the_start_after_moving_stays_maxiter() {
+    let exact_return = rgmin::Oracle::unbounded(1, |x: ArrayView1<f64>| {
+        if x[0] < 0.25 {
+            (-x[0], array![-1.0])
+        } else {
+            (x[0] - 0.5, array![1.0])
+        }
+    });
+    let near_return = rgmin::Oracle::unbounded(1, |x: ArrayView1<f64>| {
+        if x[0] < 0.25 {
+            (-x[0], array![-1.0])
+        } else if (x[0] - 0.5).abs() < 0.1 {
+            (1.01 * (x[0] - 0.5), array![1.01])
+        } else {
+            (x[0] - 0.5, array![1.0])
+        }
+    });
+    let control = Control::default()
+        .with_maxiter(3)
+        .with_gtol(1e-12)
+        .with_istep(1.0)
+        .with_maxmove(None);
+    let make_solver = || {
+        let mut solver = Solver::new(Method::lbfgs(), control.clone(), 1);
+        solver.set_accept(Accept::Step);
+        solver.set_atom_maxmove(0.0);
+        solver.set_geometry_step(false);
+        solver
+    };
+
+    for (label, obj, expect_exact) in [
+        (
+            "exact",
+            &exact_return as &dyn DifferentiableObjective<f64>,
+            true,
+        ),
+        (
+            "near",
+            &near_return as &dyn DifferentiableObjective<f64>,
+            false,
+        ),
+    ] {
+        let mut x = array![0.0];
+        let run = make_solver().run(obj, &mut x).unwrap();
+        assert_eq!(run.stop_reason(), StopReason::MaxIter, "{label}");
+        if expect_exact {
+            assert_eq!(x[0], 0.0);
+        } else {
+            assert!(x[0].abs() < 0.01 && x[0] != 0.0, "x={x:?}");
+        }
+
+        let mut xg = array![0.0];
+        let gauged = make_solver().run_gauged(obj, &mut xg, |_| {}).unwrap();
+        assert_eq!(gauged.stop_reason(), StopReason::MaxIter, "{label}");
+        if expect_exact {
+            assert_eq!(xg[0], 0.0);
+        } else {
+            assert!(xg[0].abs() < 0.01 && xg[0] != 0.0, "xg={xg:?}");
+        }
+    }
+}

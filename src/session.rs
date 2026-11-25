@@ -323,6 +323,7 @@ pub struct Solver {
     last_pos: Option<Array1<f64>>,
     last_value: f64,
     last_grad: Array1<f64>,
+    last_step_moved: bool,
     /// Unlimited L-BFGS plateau. Unused by every other method, and unused
     /// when the iteration budget is positive.
     lbfgs_plateau: crate::lbfgs_plateau::RepeatedAcceptedStep,
@@ -598,6 +599,7 @@ impl Solver {
             last_pos: None,
             last_value: 0.0,
             last_grad: Array1::zeros(dim),
+            last_step_moved: false,
             lbfgs_plateau: crate::lbfgs_plateau::RepeatedAcceptedStep::new(),
             unmoved_fixed: false,
             gradient_calls: 0,
@@ -2560,6 +2562,7 @@ impl Solver {
         let outcome = self.step_counted(&counted, x);
         self.evals += counted.count();
         let (mut report, moved) = outcome?;
+        self.last_step_moved = moved;
         self.judge_stops(&mut report, moved, counted.start_value());
         Ok(report)
     }
@@ -6464,9 +6467,9 @@ impl Solver {
         if self.control.maxiter == 0 {
             return self.run(obj, x);
         }
-        let start = x.clone();
-        let mut gauged = false;
+        let mut moved = false;
         let mut report = self.step(obj, x)?;
+        moved |= self.last_step_moved;
         for _ in 1..self.control.maxiter {
             if self.control.converged(report.grad_norm) || report.status != Status::Iterating {
                 break;
@@ -6474,18 +6477,17 @@ impl Solver {
             let before = x.clone();
             gauge(x);
             if *x != before {
-                gauged = true;
+                moved = true;
                 self.rebase();
             }
             report = self.step(obj, x)?;
+            moved |= self.last_step_moved;
         }
         report.status = match report.status {
             Status::Iterating if self.control.converged(report.grad_norm) => Status::Tolerance,
             Status::Iterating => Status::Budget,
             other => other,
         };
-        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
-        let moved = gauged || bounded_step_moved(&bounds, &start, x);
         self.control.deliver(self.name_budget(report, moved))
     }
 
@@ -6509,12 +6511,13 @@ impl Solver {
             return self.control.deliver(report);
         }
         self.brief = true;
-        let start = x.clone();
+        let mut moved = false;
         let mut last = None;
         let mut stop: Result<()> = Ok(());
         for _ in 0..budget {
             match self.step_plain(obj, x) {
                 Ok(rep) => {
+                    moved |= self.last_step_moved;
                     let reason = match rep.status {
                         Status::Iterating if self.control.converged(rep.grad_norm) => {
                             crate::StopReason::Converged
@@ -6545,8 +6548,6 @@ impl Solver {
         let report = self
             .finish(value, x, &g, grad_norm, reason.status())
             .with_stop_reason(reason);
-        let bounds = self.step_bounds(obj.bounds(), Objective::dim(obj))?;
-        let moved = bounded_step_moved(&bounds, &start, x);
         self.control.deliver(self.name_budget(report, moved))
     }
 
