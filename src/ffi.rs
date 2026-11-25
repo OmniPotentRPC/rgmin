@@ -100,7 +100,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 57;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 63;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -167,7 +167,7 @@ pub enum rgmin_method_t {
     RGMIN_GROMACS_STEEP = 28,
     /// GROMACS-style `integrator = cg` direction update with strong-Wolfe line search. ABI minor 54.
     RGMIN_GROMACS_CG = 29,
-    /// GROMACS `integrator = l-bfgs`.
+    /// GROMACS `integrator = l-bfgs`. ABI minor 63.
     RGMIN_GROMACS_LBFGS = 30,
 }
 
@@ -2358,6 +2358,7 @@ pub unsafe extern "C" fn rgmin_solver_set_gromacs_cg(
 /// `nbfgscorr` is the number of stored displacement and gradient pairs.
 /// Zero is rejected. Returns 0 on success, or 1 when `solver` is null,
 /// `nbfgscorr` is zero, or the session is not `RGMIN_GROMACS_LBFGS`.
+/// ABI minor 63.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].

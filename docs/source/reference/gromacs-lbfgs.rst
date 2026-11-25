@@ -115,7 +115,7 @@ differences are deliberate and documented:
   coordinates, so their iterates are extensions rather than an exact
   GROMACS trajectory.
 
-The C ABI selector is ``RGMIN_GROMACS_LBFGS`` and
+The C ABI selector is ``RGMIN_GROMACS_LBFGS``. ABI minor 63 adds it and
 ``rgmin_solver_set_gromacs_lbfgs``.
 
 1.4 GROMACS comparison
