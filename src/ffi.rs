@@ -6,6 +6,10 @@ use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use std::slice;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use dlpk::sys::{
     DLDataType, DLDataTypeCode, DLDevice, DLDeviceType, DLManagedTensorVersioned, DLPackVersion,
@@ -1876,6 +1880,8 @@ unsafe fn minimize_eindir_named(
         }
         let objective_addr = objective as usize;
         let scratch = Scratch::new();
+        let callback_failed = Arc::new(AtomicBool::new(false));
+        let failed_in_callback = Arc::clone(&callback_failed);
         let obj = Oracle::unbounded(dim, move |xv| {
             let objective = objective_addr as *const eindir_objective_t;
             let m = xv.len();
@@ -1889,7 +1895,7 @@ unsafe fn minimize_eindir_named(
             if eval_status != eindir_status_t::EINDIR_SUCCESS
                 || grad_status != eindir_status_t::EINDIR_SUCCESS
             {
-                set_last_error(&format!("{entry}: eindir evaluation failed"));
+                failed_in_callback.store(true, Ordering::Relaxed);
                 return (f64::INFINITY, Array1::from_elem(m, f64::NAN));
             }
             (value, gradient)
@@ -1902,7 +1908,16 @@ unsafe fn minimize_eindir_named(
             method_from_c(method, c.memory),
             LineSearch::default(),
         );
-        finish_one_shot(x, out, outcome, layout)
+        // A refused trial is a non-finite answer the line search can
+        // reject. A later trial may still be accepted, so the entry is
+        // named only when that refusal is the oracle error returned.
+        let callback_oracle =
+            callback_failed.load(Ordering::Relaxed) && matches!(outcome, Err(Error::Oracle { .. }));
+        let status = finish_one_shot(x, out, outcome, layout);
+        if callback_oracle {
+            set_last_error(&format!("{entry}: eindir evaluation failed"));
+        }
+        status
     })) {
         Ok(s) => s,
         Err(_) => {
