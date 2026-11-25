@@ -1641,6 +1641,29 @@ fn c_abi_fire_config_and_lbfgs_fixed_h0() {
             let message = last_error_text();
             assert!(message.contains(name), "{name}: {message}");
         }
+        assert_eq!(
+            unsafe {
+                rgmin_solver_set_fire_config(
+                    session,
+                    0.1,
+                    1.0,
+                    isize::MAX as usize,
+                    1.1,
+                    0.5,
+                    0.1,
+                    0.99,
+                )
+            },
+            0
+        );
+        for bad_n in [(-1_i64) as usize, isize::MAX as usize + 1] {
+            let status = unsafe {
+                rgmin_solver_set_fire_config(session, 0.1, 1.0, bad_n, 1.1, 0.5, 0.1, 0.99)
+            };
+            assert_eq!(status, 1, "n_min={bad_n}");
+            let message = last_error_text();
+            assert!(message.contains("n_min"), "n_min={bad_n}: {message}");
+        }
         unsafe { rgmin_solver_free(session) };
     }
 

@@ -91,6 +91,13 @@ const GROMACS_CG_LINESEARCH: LineSearch = LineSearch::Wolfe {
 };
 
 fn validate_fire_config(config: &FireConfig) -> Result<()> {
+    // A negative C `int` widened to `size_t` lands above `isize::MAX`. It
+    // would read as a delay no run reaches, so refuse it instead.
+    if isize::try_from(config.n_min).is_err() {
+        return Err(Error::InvalidControl {
+            what: "fire config n_min must not exceed the largest signed size",
+        });
+    }
     if !config.dt.is_finite() || config.dt <= 0.0 {
         return Err(Error::InvalidControl {
             what: "fire config dt must be finite and positive",
@@ -7279,6 +7286,30 @@ mod tests {
         let trace = solver.take_fire_trace();
         assert_eq!(trace.len(), 5);
         assert_eq!(trace.last().unwrap().clipped_moves, 5);
+    }
+
+    #[test]
+    fn fire_config_rejects_an_out_of_range_n_min() {
+        let mut solver = fire_solver(FireKind::V1);
+        let largest = isize::MAX as usize;
+        solver
+            .set_fire_config(FireConfig::default().with_n_min(largest))
+            .unwrap();
+        for n_min in [largest + 1, (-1_i64) as usize, usize::MAX] {
+            let err = solver
+                .set_fire_config(FireConfig::default().with_n_min(n_min))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config n_min must not exceed the largest signed size",
+                    }
+                ),
+                "{n_min}: {err}"
+            );
+        }
+        assert_eq!(fire_state(&solver).n_min, largest);
     }
 
     #[test]

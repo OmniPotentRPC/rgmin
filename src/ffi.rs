@@ -2492,7 +2492,8 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_abc(solver: *mut rgmin_solver_t, 
 /// two-step overshoot cap as it was. ABI minor 60. Returns 0, or 1 on a
 /// null session, a session that is not FIRE, or a parameter outside its
 /// range: `dt` and `dt_max` finite and positive with `dt <= dt_max`,
-/// `f_inc` above 1, and `f_dec`, `alpha` and `f_alpha` in (0, 1).
+/// `n_min` at most `isize::MAX`, `f_inc` above 1, and `f_dec`, `alpha`
+/// and `f_alpha` in (0, 1).
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
