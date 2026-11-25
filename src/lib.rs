@@ -120,6 +120,7 @@ pub mod manifold;
 mod minimize;
 /// Shifted Newton and Banerjee RFO on a dense Hessian.
 pub mod newton;
+mod observer;
 /// ODE12r: adaptive first-order integration of the force.
 pub mod ode12r;
 mod oracle;
@@ -181,7 +182,7 @@ pub mod vecops;
 
 pub use aaa::{AaaParams, Barycentric, Pole, aaa, chebyshev_pade_poles};
 pub use accept::Accept;
-pub use adam::minimize_adam;
+pub use adam::{minimize_adam, minimize_adam_observed};
 pub use certificate::{
     AdjointFunctionalBar, CertificateError, KantorovichBall, MorseGap, adjoint_functional_bar,
     certify_morse_gap, kantorovich_ball,
@@ -249,7 +250,9 @@ pub use manifold::{
     SphereComplex, StiefelNp, StiefelRetraction, Symmetric, Unitary,
 };
 pub use method::Method;
-pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
+pub use minimize::{
+    minimize, minimize_method, minimize_method_hess, minimize_method_hvp, minimize_method_observed,
+};
 pub use minres::{
     BoundedKrylovSolve, MinresError, MinresFailure, MinresVector, minres_solve_bounded,
     minres_solve_precond,
@@ -265,6 +268,7 @@ pub use noise::{
     estimate_third, forward_step, gradient_dr, line_values, next_spacing, sample_gradient_noise,
     sample_gradient_noise_k, sample_noise, sample_value_gradient_noise,
 };
+pub use observer::{IterationObserver, IterationView, ObserverSignal};
 pub use ode12r::{
     Ode12rState, Ode12rVerdict, inf_norm as ode12r_inf_norm, local_error as ode12r_local_error,
     taken_step as ode12r_taken_step,
@@ -278,7 +282,7 @@ pub use precon::{
     bonded_terms, estimate_mu, max_atom_displacement, nearest_neighbour_distance, needs_rebuild,
     select_precon, sine_probe,
 };
-pub use pso::minimize_pso;
+pub use pso::{minimize_pso, minimize_pso_observed};
 pub use qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 pub use qn_irc::{
     BfgsModel, bfgs_hessian_update, mw_pair, qn_get_s, qn_irc_get_s, qn_irc_restricted,
@@ -297,7 +301,8 @@ pub use rlbfgs::{
 };
 pub use scg::{
     DirectionalCurvature, ScgOptions, ScgParams, ScgStepTolerance, minimize_scg,
-    minimize_scg_exact, minimize_scg_exact_with_options, minimize_scg_with_options,
+    minimize_scg_exact, minimize_scg_exact_with_options, minimize_scg_exact_with_options_observed,
+    minimize_scg_with_options, minimize_scg_with_options_observed,
 };
 pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
 pub use session::Solver;

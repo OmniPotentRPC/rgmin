@@ -146,7 +146,13 @@ def minimize(
     method: str | Any = "lbfgs",
     **options: Any,
 ) -> tuple[Any, np.ndarray]:
-    """Minimize ``f_and_grad`` in place and return ``(report, x)``."""
+    """Minimize ``f_and_grad`` in place and return ``(report, x)``.
+
+    ``callback`` may be passed as a keyword. It receives an intermediate
+    result object with ``x``, ``fun``, ``nit``, ``grad_norm`` and
+    ``step_length`` after each accepted iterate. Raising ``StopIteration``
+    from the callback stops cleanly with ``Stop.OBSERVER``.
+    """
     native = getattr(_core, "minimize", None)
     if native is None:
         raise AttributeError("this rgmin build has no minimize")

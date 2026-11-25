@@ -17,15 +17,15 @@ use std::os::raw::c_void;
 use dlpk::sys::DLManagedTensorVersioned;
 use eindir_core::ffi::{eindir_core_abi_stamp, eindir_objective_t, eindir_status_t};
 use rgmin::ffi::{
-    RGMIN_CONTROL_REVISION5_SIZE, RGMIN_REPORT_REVISION5_SIZE, rgmin_control_default,
-    rgmin_control_init, rgmin_control_revision5_t, rgmin_control_t, rgmin_last_error,
-    rgmin_manifold_t, rgmin_method_t, rgmin_minimize, rgmin_minimize_eindir,
-    rgmin_minimize_eindir_sized, rgmin_minimize_hess, rgmin_minimize_hess_opts,
-    rgmin_minimize_hess_opts_sized, rgmin_minimize_hvp, rgmin_minimize_hvp_opts,
-    rgmin_minimize_hvp_opts_sized, rgmin_minimize_opts, rgmin_minimize_opts_sized,
-    rgmin_minimize_rlbfgs, rgmin_minimize_rlbfgs_sized, rgmin_minimize_scg,
-    rgmin_minimize_scg_with_options, rgmin_minimize_scg_with_options_sized, rgmin_report_t,
-    rgmin_solver_create, rgmin_solver_create_sized, rgmin_solver_free,
+    RGMIN_CONTROL_REVISION5_SIZE, RGMIN_CONTROL_REVISION6_SIZE, RGMIN_REPORT_REVISION5_SIZE,
+    rgmin_control_default, rgmin_control_init, rgmin_control_revision5_t,
+    rgmin_control_revision6_t, rgmin_control_t, rgmin_last_error, rgmin_manifold_t, rgmin_method_t,
+    rgmin_minimize, rgmin_minimize_eindir, rgmin_minimize_eindir_sized, rgmin_minimize_hess,
+    rgmin_minimize_hess_opts, rgmin_minimize_hess_opts_sized, rgmin_minimize_hvp,
+    rgmin_minimize_hvp_opts, rgmin_minimize_hvp_opts_sized, rgmin_minimize_opts,
+    rgmin_minimize_opts_sized, rgmin_minimize_rlbfgs, rgmin_minimize_rlbfgs_sized,
+    rgmin_minimize_scg, rgmin_minimize_scg_with_options, rgmin_minimize_scg_with_options_sized,
+    rgmin_report_t, rgmin_solver_create, rgmin_solver_create_sized, rgmin_solver_free,
     rgmin_solver_set_require_convergence, rgmin_solver_step, rgmin_status_t, rgmin_stop_t,
     rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
@@ -205,11 +205,27 @@ fn revision5() -> rgmin_control_revision5_t {
     }
 }
 
+fn revision6(strict: bool) -> rgmin_control_revision6_t {
+    let c = revision5();
+    rgmin_control_revision6_t {
+        maxiter: c.maxiter,
+        gtol: c.gtol,
+        istep: c.istep,
+        memory: c.memory,
+        maxmove: c.maxmove,
+        noise_eps: c.noise_eps,
+        noise_c: c.noise_c,
+        require_convergence: i32::from(strict),
+    }
+}
+
 fn full(strict: bool) -> rgmin_control_t {
     rgmin_control_t {
         maxiter: 1,
         gtol: 0.0,
         require_convergence: i32::from(strict),
+        observer: None,
+        observer_user: std::ptr::null_mut(),
         ..rgmin_control_t::default()
     }
 }
@@ -410,7 +426,7 @@ fn revision_5_sizes_are_the_released_layout() {
     #[cfg(target_pointer_width = "64")]
     {
         assert_eq!(RGMIN_CONTROL_REVISION5_SIZE, 56);
-        assert_eq!(FULL, 64);
+        assert_eq!(FULL, 80);
         assert_eq!(RGMIN_REPORT_REVISION5_SIZE, 28);
         assert_eq!(REPORT_BYTES, 32);
     }
@@ -493,6 +509,58 @@ fn the_current_size_reads_require_convergence_and_writes_converged() {
 }
 
 #[test]
+fn revision_6_size_ends_at_the_observer_fields() {
+    assert_eq!(
+        size_of::<rgmin_control_revision6_t>(),
+        RGMIN_CONTROL_REVISION6_SIZE
+    );
+    assert_eq!(
+        RGMIN_CONTROL_REVISION6_SIZE,
+        offset_of!(rgmin_control_t, observer)
+    );
+    assert_eq!(
+        FULL,
+        RGMIN_CONTROL_REVISION6_SIZE + 2 * size_of::<*mut c_void>()
+    );
+    #[cfg(target_pointer_width = "64")]
+    assert_eq!(RGMIN_CONTROL_REVISION6_SIZE, 64);
+}
+
+#[test]
+fn a_declared_revision_6_size_reads_require_convergence_and_no_observer() {
+    for entry in ENTRIES {
+        for strict in [false, true] {
+            let mut guard = Guarded::new();
+            let ctrl = place(&mut guard, revision6(strict));
+            let mut out_guard = Guarded::new();
+            let out = report(&mut out_guard);
+            let status = call_sized(entry, ctrl, RGMIN_CONTROL_REVISION6_SIZE, out);
+            let want = if strict {
+                rgmin_status_t::RGMIN_NOT_CONVERGED
+            } else {
+                rgmin_status_t::RGMIN_SUCCESS
+            };
+            assert_eq!(status, want, "{entry:?} strict {strict}");
+            let written = unsafe { std::ptr::read(out) };
+            assert_eq!(written.converged, 0, "{entry:?} strict {strict}");
+            assert_eq!(written.steps, 1, "{entry:?} strict {strict}");
+        }
+    }
+    let mut guard = Guarded::new();
+    let ctrl = place(&mut guard, revision6(false));
+    let solver = unsafe {
+        rgmin_solver_create_sized(
+            rgmin_method_t::RGMIN_STEEPEST,
+            ctrl,
+            RGMIN_CONTROL_REVISION6_SIZE,
+            1,
+        )
+    };
+    assert!(!solver.is_null());
+    unsafe { rgmin_solver_free(solver) };
+}
+
+#[test]
 fn a_larger_declared_size_reads_the_known_fields_and_ignores_the_rest() {
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -520,6 +588,8 @@ fn any_other_declared_size_is_refused_before_a_read() {
         8,
         RGMIN_CONTROL_REVISION5_SIZE - 1,
         RGMIN_CONTROL_REVISION5_SIZE + 1,
+        RGMIN_CONTROL_REVISION6_SIZE - 1,
+        RGMIN_CONTROL_REVISION6_SIZE + 1,
         FULL - 1,
     ] {
         for entry in ENTRIES {
@@ -657,6 +727,15 @@ fn control_init_writes_only_the_declared_layout() {
     assert_eq!(got.noise_c.to_bits(), want.noise_c.to_bits());
 
     let mut guard = Guarded::new();
+    let p = guard.tail(RGMIN_CONTROL_REVISION6_SIZE);
+    unsafe { p.write_bytes(SENTINEL, RGMIN_CONTROL_REVISION6_SIZE) };
+    let st = unsafe { rgmin_control_init(p.cast(), RGMIN_CONTROL_REVISION6_SIZE) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let got = unsafe { p.cast::<rgmin_control_revision6_t>().read() };
+    assert_eq!(got.maxiter, want.maxiter);
+    assert_eq!(got.require_convergence, 0);
+
+    let mut guard = Guarded::new();
     let p = guard.tail(FULL).cast::<rgmin_control_t>();
     unsafe { p.cast::<u8>().write_bytes(SENTINEL, FULL) };
     let st = unsafe { rgmin_control_init(p, FULL) };
@@ -667,6 +746,7 @@ fn control_init_writes_only_the_declared_layout() {
         0,
         RGMIN_CONTROL_REVISION5_SIZE - 8,
         RGMIN_CONTROL_REVISION5_SIZE + 4,
+        RGMIN_CONTROL_REVISION6_SIZE + 4,
     ] {
         let mut guard = Guarded::new();
         let p = guard.tail(FULL);
