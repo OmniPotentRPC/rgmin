@@ -6,6 +6,10 @@ reference from it. A declaration counts as documented when a ``/** */``
 or ``///`` comment ends on the line above it. A comment above an enum
 typedef documents the enum and not the setter declared after it, so that
 setter needs a comment of its own.
+
+The ``\\file`` comment lists the initializer of every struct a caller
+fills in, so each ``rgmin_*_default(void)`` must appear there as a
+``\\ref``.
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 HEADER = ROOT / "include" / "rgmin.h"
 DECL = re.compile(r"^[A-Za-z_][\w\s\*]*?\b(rgmin_\w+)\s*\(")
 SKIP = ("#", "typedef", "extern", "_Static_assert", "static_assert", "}")
+INITIALIZER = re.compile(r"^[A-Za-z_][\w\s\*]*?\b(rgmin_\w+_default)\s*\(void\)")
+FILE_BLOCK = re.compile(r"/\*\*\s*\\file rgmin\.h.*?\*/", re.S)
 
 
 def undocumented(lines: list[str]) -> list[tuple[int, str]]:
@@ -50,12 +56,26 @@ def undocumented(lines: list[str]) -> list[tuple[int, str]]:
     return missing
 
 
+def unlisted_initializers(text: str) -> list[tuple[int, str]]:
+    block = FILE_BLOCK.search(text)
+    listed = set(re.findall(r"\\ref (rgmin_\w+)", block.group(0))) if block else set()
+    unlisted: list[tuple[int, str]] = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        match = INITIALIZER.match(line)
+        if match and match.group(1) not in listed:
+            unlisted.append((number, match.group(1)))
+    return unlisted
+
+
 def main() -> int:
-    lines = HEADER.read_text().splitlines()
-    missing = undocumented(lines)
+    text = HEADER.read_text()
+    missing = undocumented(text.splitlines())
     for number, name in missing:
         print(f"include/rgmin.h:{number}: {name} has no doc comment")
-    return 1 if missing else 0
+    unlisted = unlisted_initializers(text)
+    for number, name in unlisted:
+        print(f"include/rgmin.h:{number}: {name} is not in the \\file initializer list")
+    return 1 if missing or unlisted else 0
 
 
 if __name__ == "__main__":
