@@ -1,0 +1,2 @@
+A strong Wolfe zoom no longer accepts a bracket endpoint that meets Armijo and misses the curvature condition, and it no longer falls back to a decreasing trial that only formed the bracket.
+A trial whose slope is not finite contracts the bracket as a non-finite value does.
