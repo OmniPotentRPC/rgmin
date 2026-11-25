@@ -93,15 +93,15 @@ fn jacobi_eigs(a: &mut [Vec<f64>]) -> Vec<f64> {
                 a[j][j] = s * s * aii + 2.0 * s * c * aij + c * c * ajj;
                 a[i][j] = 0.0;
                 a[j][i] = 0.0;
-                for k in 0..n {
-                    if k != i && k != j {
-                        let aik = a[i][k];
-                        let ajk = a[j][k];
-                        a[i][k] = c * aik - s * ajk;
-                        a[k][i] = a[i][k];
-                        a[j][k] = s * aik + c * ajk;
-                        a[k][j] = a[j][k];
-                    }
+                for k in (0..n).filter(|&k| k != i && k != j) {
+                    let aik = a[i][k];
+                    let ajk = a[j][k];
+                    let ik = c * aik - s * ajk;
+                    let jk = s * aik + c * ajk;
+                    a[i][k] = ik;
+                    a[k][i] = ik;
+                    a[j][k] = jk;
+                    a[k][j] = jk;
                 }
             }
         }
