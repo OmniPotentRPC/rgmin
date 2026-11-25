@@ -1298,8 +1298,9 @@ rgmin_rcg_options_t rgmin_rcg_options_default(void);
  *  is written on success. A non-finite \a x, a NULL \a x, \a eval,
  *  \a grad or \a out, an unknown tag, or a tolerance or step that
  *  \ref rgmin_rcg_options_t refuses returns
- *  \c RGMIN_INVALID_PARAMETER and leaves \a x as it was. A panic is
- *  \c RGMIN_INTERNAL_ERROR. */
+ *  \c RGMIN_INVALID_PARAMETER and leaves \a x as it was. So does a
+ *  line-search trial whose retraction slope cannot be resolved. A panic
+ *  is \c RGMIN_INTERNAL_ERROR. */
 rgmin_status_t rgmin_minimize_rcg(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
                                   DLManagedTensorVersioned *x,
                                   const rgmin_rcg_options_t *options, rgmin_report_t *out);

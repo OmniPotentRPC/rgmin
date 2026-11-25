@@ -290,6 +290,7 @@ The strong Wolfe search has ~c1 = 1e-4~, ~c2 = 0.1~ and at most 20 trials.
 ~report.converged~ is nonzero when the final gradient norm is at most ~grad_tol~, and ~report.stop~ is then ~RGMIN_STOP_TOLERANCE~.
 A run that ends before ~max_iter~ without meeting ~grad_tol~ reports ~RGMIN_STOP_STEP_TOLERANCE~, and one that spends ~max_iter~ reports ~RGMIN_STOP_BUDGET~.
 A null ~eval~, ~grad~, ~x~ or ~report~, an unknown tag, a tolerance or step that the record refuses, and a non-finite start return ~RGMIN_INVALID_PARAMETER~.
+So does a line-search trial whose retraction slope cannot be resolved, ~Error::RcgSlope~ in Rust, which refuses the slope rather than accept its curvature.
 ~x~ is then left as it was, and ~rgmin_last_error~ names the reason.
 A panic inside the run returns ~RGMIN_INTERNAL_ERROR~, and ~rgmin_last_error~ names ~rgmin_minimize_rcg~.
 

@@ -1448,7 +1448,9 @@ pub extern "C" fn rgmin_rcg_options_default() -> rgmin_rcg_options_t {
 }
 
 /// Riemannian CG in Euclidean space. `options` null selects
-/// [`rgmin_rcg_options_default`].
+/// [`rgmin_rcg_options_default`]. A line-search trial whose retraction
+/// slope cannot be resolved, [`Error::RcgSlope`], returns
+/// [`rgmin_status_t::RGMIN_INVALID_PARAMETER`] and leaves `x` as it was.
 ///
 /// # Safety
 ///
