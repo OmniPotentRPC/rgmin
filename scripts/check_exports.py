@@ -1,35 +1,42 @@
 #!/usr/bin/env python3
 """Fail when librgmin exports a C name outside the rgmin_ namespace.
 
-``nm -D --defined-only`` lists what the shared library exports. Every
+``nm -D --defined-only`` lists what ``librgmin.so`` exports. Every
 ``rgmin_`` name there must be declared in ``include/rgmin.h`` and listed in
-``scripts/abi_baseline.txt``. The only other names allowed are the
-``eindir_`` C ABI of eindir-core, which librgmin carries for callers of
-``rgmin_minimize_eindir``, and names the toolchain reserves.
+``scripts/abi_baseline.txt``. Any other name must be reserved to the
+toolchain or belong to the C ABI of a dependency crate in
+``DEPENDENCY_CRATES``, which rustc exports from every cdylib that links
+it. ``librgmin.a`` from the same build tells which crate defines a name.
 
-A static archive cannot hide a symbol, so for ``librgmin.a`` the check
-reads the members rustc wrote for the rgmin crate. An unmangled global
-there is a ``no_mangle`` item of this crate.
+A static archive cannot hide a symbol, so in ``librgmin.a`` the check
+reads the objects rustc wrote for the rgmin crate. An unmangled global
+there is a ``no_mangle`` item of this crate and must be an ``rgmin_``
+name of the C ABI.
 
-With no arguments the check reads ``target/debug/librgmin.so`` and
-``target/debug/librgmin.a``.
+The argument is the directory that holds both libraries, by default
+``target/debug``.
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from check_abi import BASELINE, ROOT, names  # noqa: E402
+from check_abi import BASELINE, ROOT, names
 
-DEFAULT = (ROOT / "target" / "debug" / "librgmin.so", ROOT / "target" / "debug" / "librgmin.a")
-DEPENDENCY_PREFIXES = ("eindir_",)
+# eindir-core: the objective constructors callers of
+# rgmin_minimize_eindir use. readcon-core: linked only with `readcon`.
+DEPENDENCY_CRATES = ("eindir_core", "readcon_core")
 # Linker and unwinder names. A leading underscore is reserved to the
 # implementation, which also covers Rust (`_ZN`, `_R`) mangling.
 TOOLCHAIN = ("rust_eh_personality", "DW.ref.rust_eh_personality")
+# rustc names a crate's objects `<crate>-<hash>.<crate>.<cgu>.rcgu.o`,
+# and the library's own crate `<crate>.<cgu>.rcgu.o`.
+MEMBER = re.compile(r"^([A-Za-z0-9_]+)[-.].*\.rcgu\.o$")
 
 
 def toolchain(name: str) -> bool:
@@ -50,41 +57,80 @@ def shared_exports(path: Path) -> set[str]:
     return exported
 
 
-def archive_exports(path: Path) -> set[str]:
-    """Unmangled globals that the rgmin crate's own objects define."""
-    exported = set()
+def archive_owners(path: Path) -> dict[str, str]:
+    """Each global the archive defines, and the crate whose object defines it.
+
+    Objects that are not rustc's, such as HiGHS or GMP, have no crate.
+    """
+    owners = {}
     for line in nm("-A", "-g", "--defined-only", str(path)):
         # `archive:member:address type name`
         fields = line.rsplit(None, 2)
         if len(fields) != 3:
             continue
         member = fields[0].rsplit(":", 2)[-2]
-        if member.startswith(("rgmin.", "rgmin-")):
-            exported.add(fields[2])
-    return exported
+        crate = MEMBER.match(member)
+        owners[fields[2]] = crate.group(1) if crate else ""
+    return owners
 
 
-def problems(path: Path, declared: set[str], baseline: set[str]) -> list[str]:
-    shared = path.suffix != ".a"
-    exported = shared_exports(path) if shared else archive_exports(path)
+def abi_problem(name: str, declared: set[str], baseline: set[str]) -> str | None:
+    if name not in declared:
+        return f"  {name} is not declared in include/rgmin.h"
+    if name not in baseline:
+        return f"  {name} is not in scripts/abi_baseline.txt"
+    return None
+
+
+def shared_problems(
+    exported: set[str], owners: dict[str, str], declared: set[str], baseline: set[str]
+) -> list[str]:
     found = []
     for name in sorted(exported):
         if toolchain(name):
             continue
         if name.startswith("rgmin_"):
-            if name not in declared:
-                found.append(f"  {name} is not declared in include/rgmin.h")
-            elif name not in baseline:
-                found.append(f"  {name} is not in scripts/abi_baseline.txt")
-        elif not (shared and name.startswith(DEPENDENCY_PREFIXES)):
-            found.append(f"  {name} is outside the rgmin_ namespace")
+            problem = abi_problem(name, declared, baseline)
+        elif owners.get(name) in DEPENDENCY_CRATES:
+            problem = None
+        else:
+            owner = owners.get(name) or "no rust crate"
+            problem = f"  {name} ({owner}) is outside the rgmin_ namespace"
+        if problem:
+            found.append(problem)
     return found
 
 
+def archive_problems(owners: dict[str, str], declared: set[str], baseline: set[str]) -> list[str]:
+    found = []
+    for name, crate in sorted(owners.items()):
+        if crate != "rgmin" or toolchain(name):
+            continue
+        if name.startswith("rgmin_"):
+            problem = abi_problem(name, declared, baseline)
+        else:
+            problem = f"  {name} is outside the rgmin_ namespace"
+        if problem:
+            found.append(problem)
+    return found
+
+
+def report(path: Path, found: list[str]) -> bool:
+    if found:
+        print(f"{path} exports names outside the C ABI:")
+        print("\n".join(found))
+        return False
+    print(f"{path}: every exported name is in the C ABI")
+    return True
+
+
 def main(argv: list[str]) -> int:
-    paths = [Path(arg) for arg in argv] or [path for path in DEFAULT if path.is_file()]
-    if not paths:
-        print("no library to check; run cargo build first or name one")
+    directory = Path(argv[0]) if argv else ROOT / "target" / "debug"
+    shared = directory / "librgmin.so"
+    archive = directory / "librgmin.a"
+    missing = [str(path) for path in (shared, archive) if not path.is_file()]
+    if missing:
+        print(f"missing {', '.join(missing)}; run cargo build first")
         return 1
     declared = set(names())
     baseline = {
@@ -92,16 +138,10 @@ def main(argv: list[str]) -> int:
         for line in BASELINE.read_text().splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     }
-    failed = False
-    for path in paths:
-        found = problems(path, declared, baseline)
-        if found:
-            failed = True
-            print(f"{path} exports names outside the C ABI:")
-            print("\n".join(found))
-        else:
-            print(f"{path}: every exported name is in the C ABI")
-    return 1 if failed else 0
+    owners = archive_owners(archive)
+    ok = report(shared, shared_problems(shared_exports(shared), owners, declared, baseline))
+    ok = report(archive, archive_problems(owners, declared, baseline)) and ok
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
