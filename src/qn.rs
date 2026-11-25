@@ -6,6 +6,7 @@ use ndarray::{Array1, Array2};
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
+use crate::observer::{IterationObserver, IterationView, ObserverSignal};
 use crate::report::Report;
 use crate::step::{
     apply_caps, energy_noise_report, implicit_atom_cap, l2, next_istep, one_shot_report, qn_istep,
@@ -40,8 +41,22 @@ pub fn minimize_bfgs<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    minimize_bfgs_observed(obj, init, control, linesearch, None)
+}
+
+/// BFGS with an optional per-iteration observer callback.
+pub fn minimize_bfgs_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    linesearch: LineSearch,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     counted(obj, control, |obj| {
-        bfgs_counted(obj, init, control, linesearch)
+        bfgs_counted(obj, init, control, linesearch, observer)
     })
 }
 
@@ -50,6 +65,7 @@ fn bfgs_counted<O>(
     init: impl Into<Array1<f64>>,
     control: &Control,
     linesearch: LineSearch,
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -92,9 +108,31 @@ where
             return stop;
         }
         let moved = t.moved;
+        let step_length = if moved { l2(&(&t.x - &old)) } else { 0.0 };
         pos = t.x;
         value = t.f;
         grad = t.g;
+        if moved
+            && let Some(obs) = observer.as_deref_mut()
+            && obs.observe(IterationView {
+                iteration: step,
+                x: pos.view(),
+                value,
+                grad_norm: l2(&grad),
+                step_length,
+            }) == ObserverSignal::Stop
+        {
+            return control.deliver(
+                one_shot_report(
+                    value,
+                    pos,
+                    step + 1,
+                    l2(&grad),
+                    crate::report::Status::ObserverStop,
+                )
+                .with_stop_reason(crate::StopReason::ObserverRequested),
+            );
+        }
         if moved {
             let s = &pos - &old;
             let y = &grad - &gold;
@@ -135,10 +173,25 @@ pub fn minimize_lbfgs<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    minimize_lbfgs_observed(obj, init, control, linesearch, memory, None)
+}
+
+/// L-BFGS with an optional per-iteration observer callback.
+pub fn minimize_lbfgs_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    linesearch: LineSearch,
+    memory: usize,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let mut solver = crate::lbfgs::Lbfgs::with_capacity(memory);
     solver.norm = crate::lbfgs::GradNorm::Euclidean;
     solver.gtol = control.gtol;
-    solver.minimize_objective(obj, init, control, linesearch)
+    solver.minimize_objective_observed(obj, init, control, linesearch, observer)
 }
 
 /// SR1 in a trust region (Nocedal-Wright 6.24 and algorithm 4.1).
@@ -162,8 +215,22 @@ pub fn minimize_sr1<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    minimize_sr1_observed(obj, init, control, linesearch, None)
+}
+
+/// SR1 trust-region solver with an optional per-iteration observer callback.
+pub fn minimize_sr1_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    linesearch: LineSearch,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let _ = linesearch;
-    minimize_sr_trust(obj, init, control, sr1_hessian_update)
+    minimize_sr_trust(obj, init, control, sr1_hessian_update, observer)
 }
 
 /// Powell symmetric Broyden in the same trust region as SR1.
@@ -185,8 +252,22 @@ pub fn minimize_sr2<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    minimize_sr2_observed(obj, init, control, linesearch, None)
+}
+
+/// SR2 trust-region solver with an optional per-iteration observer callback.
+pub fn minimize_sr2_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    linesearch: LineSearch,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let _ = linesearch;
-    minimize_sr_trust(obj, init, control, sr2_hessian_update)
+    minimize_sr_trust(obj, init, control, sr2_hessian_update, observer)
 }
 
 fn minimize_sr_trust<O>(
@@ -194,12 +275,13 @@ fn minimize_sr_trust<O>(
     init: impl Into<Array1<f64>>,
     control: &Control,
     update: fn(&mut Array2<f64>, &Array1<f64>, &Array1<f64>),
+    observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     counted(obj, control, |obj| {
-        sr_trust_counted(obj, init, control, update)
+        sr_trust_counted(obj, init, control, update, observer)
     })
 }
 
@@ -208,6 +290,7 @@ fn sr_trust_counted<O>(
     init: impl Into<Array1<f64>>,
     control: &Control,
     update: fn(&mut Array2<f64>, &Array1<f64>, &Array1<f64>),
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -231,6 +314,7 @@ where
         apply_caps(&pos, &mut trial, atom_cap, control.maxmove_cap());
         trial = obj.bounds().clip(trial.view());
         let mut moved = false;
+        let mut step_length = 0.0;
         'attempt: {
             let p = &trial - &pos;
             let pnorm = l2(&p);
@@ -257,11 +341,33 @@ where
                 let s = &trial - &pos;
                 let y = &gt - &grad;
                 update(&mut b, &s, &y);
+                step_length = l2(&s);
                 pos = trial;
                 value = ft;
                 grad = gt;
                 moved = true;
             }
+        }
+        if moved
+            && let Some(obs) = observer.as_deref_mut()
+            && obs.observe(IterationView {
+                iteration: step,
+                x: pos.view(),
+                value,
+                grad_norm: l2(&grad),
+                step_length,
+            }) == ObserverSignal::Stop
+        {
+            return control.deliver(
+                one_shot_report(
+                    value,
+                    pos,
+                    step + 1,
+                    l2(&grad),
+                    crate::report::Status::ObserverStop,
+                )
+                .with_stop_reason(crate::StopReason::ObserverRequested),
+            );
         }
         if let Some(status) = stop_after(&mut stops, control, obj, value, moved, &grad) {
             return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));
@@ -291,8 +397,22 @@ pub fn minimize_sd<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    minimize_sd_observed(obj, init, control, linesearch, None)
+}
+
+/// Steepest descent with an optional per-iteration observer callback.
+pub fn minimize_sd_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    linesearch: LineSearch,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     counted(obj, control, |obj| {
-        sd_counted(obj, init, control, linesearch)
+        sd_counted(obj, init, control, linesearch, observer)
     })
 }
 
@@ -301,6 +421,7 @@ fn sd_counted<O>(
     init: impl Into<Array1<f64>>,
     control: &Control,
     linesearch: LineSearch,
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -332,6 +453,7 @@ where
         }
         let next = next_istep(t.alpha, control);
         let moved = t.moved;
+        let step_length = if moved { l2(&(&t.x - &pos)) } else { 0.0 };
         let fixed = !moved && next == istep;
         if let Some(stop) = stop_if_unmoved(control, fixed, value, pos.clone(), step + 1, gnorm) {
             return stop;
@@ -340,6 +462,27 @@ where
         value = t.f;
         grad = t.g;
         istep = next;
+        if moved
+            && let Some(obs) = observer.as_deref_mut()
+            && obs.observe(IterationView {
+                iteration: step,
+                x: pos.view(),
+                value,
+                grad_norm: l2(&grad),
+                step_length,
+            }) == ObserverSignal::Stop
+        {
+            return control.deliver(
+                one_shot_report(
+                    value,
+                    pos,
+                    step + 1,
+                    l2(&grad),
+                    crate::report::Status::ObserverStop,
+                )
+                .with_stop_reason(crate::StopReason::ObserverRequested),
+            );
+        }
         if let Some(status) = stop_after(&mut stops, control, obj, value, moved, &grad) {
             return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));
         }

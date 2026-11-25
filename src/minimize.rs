@@ -3,7 +3,7 @@
 use eindir_core::{DifferentiableObjective, Objective};
 use ndarray::Array1;
 
-use crate::adam::minimize_adam;
+use crate::adam::minimize_adam_observed;
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::hvp::HessianVector;
@@ -11,9 +11,13 @@ use crate::linesearch::LineSearch;
 use crate::method::Method;
 use crate::newton::{HessianObjective, minimize_newton};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
-use crate::pso::minimize_pso;
-use crate::qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
-use crate::report::{Report, Status};
+use crate::observer::{IterationObserver, IterationView, ObserverSignal};
+use crate::pso::minimize_pso_observed;
+use crate::qn::{
+    minimize_bfgs_observed, minimize_lbfgs_observed, minimize_sd_observed, minimize_sr1_observed,
+    minimize_sr2_observed,
+};
+use crate::report::{Report, Status, StopReason};
 use crate::session::Solver;
 use crate::step::{implicit_atom_cap, l2, next_istep, one_shot_report, stop_if_unmoved, take_step};
 use crate::stop::{Counted, StopRules, counted, stop_after};
@@ -50,24 +54,41 @@ pub fn minimize_method<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    minimize_method_observed(obj, init, control, method, linesearch, None)
+}
+
+/// Minimize with any [`Method`], observing each accepted iterate.
+pub fn minimize_method_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    method: Method,
+    linesearch: LineSearch,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     match method {
         Method::Nlcg { conjugacy, restart } => {
-            minimize_nlcg(obj, init, control, conjugacy, restart, linesearch)
+            minimize_nlcg(obj, init, control, conjugacy, restart, linesearch, observer)
         }
-        Method::Bfgs => minimize_bfgs(obj, init, control, linesearch),
-        Method::Lbfgs { memory } => minimize_lbfgs(obj, init, control, linesearch, memory),
-        Method::Sr1 => minimize_sr1(obj, init, control, linesearch),
-        Method::Sr2 => minimize_sr2(obj, init, control, linesearch),
+        Method::Bfgs => minimize_bfgs_observed(obj, init, control, linesearch, observer),
+        Method::Lbfgs { memory } => {
+            minimize_lbfgs_observed(obj, init, control, linesearch, memory, observer)
+        }
+        Method::Sr1 => minimize_sr1_observed(obj, init, control, linesearch, observer),
+        Method::Sr2 => minimize_sr2_observed(obj, init, control, linesearch, observer),
         Method::Adam { beta1, beta2, eps } => {
-            minimize_adam(obj, init, control, linesearch, beta1, beta2, eps)
+            minimize_adam_observed(obj, init, control, linesearch, beta1, beta2, eps, observer)
         }
-        Method::Steepest => minimize_sd(obj, init, control, linesearch),
+        Method::Steepest => minimize_sd_observed(obj, init, control, linesearch, observer),
         Method::Pso {
             n_particles,
             inertia,
             c1,
             c2,
-        } => minimize_pso(obj, init, control, n_particles, inertia, c1, c2),
+        } => minimize_pso_observed(obj, init, control, n_particles, inertia, c1, c2, observer),
         Method::Newton { kind: _ } | Method::Dogleg => Err(Error::NeedHessian),
         Method::Fire { .. }
         | Method::Bb
@@ -77,8 +98,10 @@ where
         | Method::GromacsSteep
         | Method::GpMin
         | Method::NewtonCg
-        | Method::NewtonPcg => run_session(obj, init, control, method),
-        Method::GromacsCg => run_session_linesearch(obj, init, control, method, linesearch),
+        | Method::NewtonPcg => run_session(obj, init, control, method, observer),
+        Method::GromacsCg => {
+            run_session_linesearch(obj, init, control, method, linesearch, observer)
+        }
     }
 }
 
@@ -87,13 +110,20 @@ fn run_session<O>(
     init: impl Into<Array1<f64>>,
     control: &Control,
     method: Method,
+    observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    drive_session(obj, init, control, method, None, |solver, obj, pos| {
-        solver.step(obj, pos)
-    })
+    drive_session(
+        obj,
+        init,
+        control,
+        method,
+        None,
+        observer,
+        |solver, obj, pos| solver.step(obj, pos),
+    )
 }
 
 fn run_session_linesearch<O>(
@@ -102,6 +132,7 @@ fn run_session_linesearch<O>(
     control: &Control,
     method: Method,
     linesearch: LineSearch,
+    observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -112,6 +143,7 @@ where
         control,
         method,
         Some(linesearch),
+        observer,
         |solver, obj, pos| solver.step(obj, pos),
     )
 }
@@ -121,13 +153,16 @@ where
 /// A zero budget takes no step and judges the evaluated start. The first
 /// step whose status is not [`Status::Iterating`], or whose gradient meets
 /// [`Control::halt`], ends the run with that status; a spent budget is
-/// [`Status::Budget`].
+/// [`Status::Budget`]. The observer sees every step that moves the
+/// iterate, the one that ends the run included, and its stop replaces
+/// that status.
 fn drive_session<O, S>(
     obj: &O,
     init: impl Into<Array1<f64>>,
     control: &Control,
     method: Method,
     linesearch: Option<LineSearch>,
+    mut observer: Option<&mut dyn IterationObserver>,
     mut step: S,
 ) -> Result<Report>
 where
@@ -148,10 +183,25 @@ where
     // matching GROMACS `do_steep` (`count == nsteps`) rather than `do_cg`'s
     // `step <= number_steps` (`nsteps + 1`); `-1` in MDP/Python maps to
     // unlimited steps (`sys.maxsize`).
-    for _ in 0..control.maxiter {
+    for it in 0..control.maxiter {
+        let before = pos.clone();
         let mut report = step(&mut solver, obj, &mut pos)?;
         if let Some(status) = control.halt(report.grad_norm, solver.free_len(obj.bounds())) {
             report.status = status;
+        }
+        let dx = &report.coords - &before;
+        let step_length = crate::vecops::nrm2(dx.view());
+        if crate::stop::moved(&before, &report.coords)
+            && let Some(obs) = observer.as_deref_mut()
+            && obs.observe(IterationView {
+                iteration: it,
+                x: report.coords.view(),
+                value: report.value,
+                grad_norm: report.grad_norm,
+                step_length,
+            }) == ObserverSignal::Stop
+        {
+            report = report.with_stop_reason(StopReason::ObserverRequested);
         }
         let stopped = report.status != Status::Iterating;
         last = Some(report);
@@ -232,9 +282,15 @@ fn run_session_hess<O>(
 where
     O: HessianObjective + ?Sized,
 {
-    drive_session(obj, init, control, method, None, |solver, obj, pos| {
-        solver.step_hess(obj, pos)
-    })
+    drive_session(
+        obj,
+        init,
+        control,
+        method,
+        None,
+        None,
+        |solver, obj, pos| solver.step_hess(obj, pos),
+    )
 }
 
 /// Minimize with any [`Method`]. Newton-CG and Newton-PCG use analytic
@@ -285,9 +341,15 @@ fn run_session_hvp<O>(
 where
     O: HessianVector + ?Sized,
 {
-    drive_session(obj, init, control, method, None, |solver, obj, pos| {
-        solver.step_hvp(obj, pos)
-    })
+    drive_session(
+        obj,
+        init,
+        control,
+        method,
+        None,
+        None,
+        |solver, obj, pos| solver.step_hvp(obj, pos),
+    )
 }
 
 fn minimize_nlcg<O>(
@@ -297,12 +359,13 @@ fn minimize_nlcg<O>(
     conjugacy: Conjugacy,
     restart: Restart,
     linesearch: LineSearch,
+    observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     counted(obj, control, |obj| {
-        nlcg_counted(obj, init, control, conjugacy, restart, linesearch)
+        nlcg_counted(obj, init, control, conjugacy, restart, linesearch, observer)
     })
 }
 
@@ -313,6 +376,7 @@ fn nlcg_counted<O>(
     conjugacy: Conjugacy,
     restart: Restart,
     linesearch: LineSearch,
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -364,6 +428,20 @@ where
         pos = t.x;
         value = t.f;
         grad = t.g;
+        if let Some(obs) = observer.as_deref_mut()
+            && obs.observe(IterationView {
+                iteration: step,
+                x: pos.view(),
+                value,
+                grad_norm: l2(&grad),
+                step_length: lsstep.abs() * crate::vecops::nrm2(dir.view()),
+            }) == ObserverSignal::Stop
+        {
+            return control.deliver(
+                one_shot_report(value, pos, step + 1, l2(&grad), Status::ObserverStop)
+                    .with_stop_reason(StopReason::ObserverRequested),
+            );
+        }
         if let Some(status) = stop_after(&mut stops, control, obj, value, moved, &grad) {
             return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));
         }

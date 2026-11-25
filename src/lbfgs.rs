@@ -34,9 +34,11 @@
 
 use ndarray::{Array1, ArrayView1};
 
+use crate::StopReason;
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::{LineSearch, LineSearchOptions};
+use crate::observer::{IterationObserver, IterationView, ObserverSignal};
 use crate::qn::solve_spd;
 use crate::report::Report;
 use crate::step::{
@@ -2435,8 +2437,23 @@ impl Lbfgs {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        self.minimize_objective_observed(obj, init, control, linesearch, None)
+    }
+
+    /// [`Self::minimize_objective`] with an optional per-iteration observer.
+    pub fn minimize_objective_observed<O>(
+        &mut self,
+        obj: &O,
+        init: impl Into<Array1<f64>>,
+        control: &Control,
+        linesearch: LineSearch,
+        observer: Option<&mut dyn IterationObserver>,
+    ) -> Result<Report>
+    where
+        O: DifferentiableObjective<f64> + ?Sized,
+    {
         crate::stop::counted(obj, control, |obj| {
-            self.objective_counted(obj, init, control, linesearch)
+            self.objective_counted(obj, init, control, linesearch, observer)
         })
     }
 
@@ -2446,6 +2463,7 @@ impl Lbfgs {
         init: impl Into<Array1<f64>>,
         control: &Control,
         linesearch: LineSearch,
+        mut observer: Option<&mut dyn IterationObserver>,
     ) -> Result<Report>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -2463,14 +2481,13 @@ impl Lbfgs {
         let mut istep = control.istep;
         let start = pos.clone();
         let mut stops = crate::stop::StopRules::from_start(value);
-        let track = control.etol.is_some() || control.max_evals.is_some();
 
         for step in 0..control.maxiter {
             let gnorm = l2(&grad);
             if let Some(status) = control.halt(gnorm, grad.len()) {
                 return control.deliver(one_shot_report(value, pos, step, gnorm, status));
             }
-            let before = track.then(|| pos.clone());
+            let before = pos.clone();
             let stall = self.step_objective(
                 obj,
                 &mut pos,
@@ -2490,7 +2507,28 @@ impl Lbfgs {
                     crate::report::Status::NoiseFloor,
                 ));
             }
-            let moved = before.is_none_or(|before| crate::stop::moved(&before, &pos));
+            let moved = crate::stop::moved(&before, &pos);
+            if moved
+                && let Some(obs) = observer.as_deref_mut()
+                && obs.observe(IterationView {
+                    iteration: step,
+                    x: pos.view(),
+                    value,
+                    grad_norm: l2(&grad),
+                    step_length: crate::vecops::nrm2((&pos - &before).view()),
+                }) == ObserverSignal::Stop
+            {
+                return control.deliver(
+                    one_shot_report(
+                        value,
+                        pos,
+                        step + 1,
+                        l2(&grad),
+                        crate::report::Status::ObserverStop,
+                    )
+                    .with_stop_reason(StopReason::ObserverRequested),
+                );
+            }
             if let Some(status) =
                 crate::stop::stop_after(&mut stops, control, obj, value, moved, &grad)
             {

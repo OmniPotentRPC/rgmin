@@ -7,8 +7,9 @@ Module ``rgmin``
 UPPER\ :sub:`SNAKE`\, for example ``LBFGS`` and ``POLAK_RIBIERE``. The older
 CamelCase spellings are aliases of the same values.
 ``Stop`` is why a step ended. Its members are ``TOLERANCE``,
-``NOISE_FLOOR``, ``STEP_TOLERANCE``, ``BUDGET``, ``LINE_SEARCH``, and
-``POLISH_UNMET``, again with CamelCase aliases.
+``NOISE_FLOOR``, ``STEP_TOLERANCE``, ``BUDGET``, ``LINE_SEARCH``,
+``POLISH_UNMET``, ``EVAL_BUDGET``, ``MACHINE_PRECISION``, and ``OBSERVER``,
+again with CamelCase aliases.
 ``Report`` has ``value``, ``steps``, ``grad_norm``, and ``stop``.
 ``Report.converged`` is true when ``stop`` is ``TOLERANCE``.
 ``backward_error_floor(value, x)`` is the first-order stationarity
@@ -33,6 +34,12 @@ gradient norm is not below ``gtol``. ``error_on_unmet`` raises
 ``backward_polish`` is stored on the session. This step loop does not form a Hessian, so
 the polish itself is the C ``rgmin_minimize_hess_opts`` and
 ``rgmin_minimize_hvp_opts`` entries.
+Passing ``callback=callable`` makes ``minimize`` call it after each
+accepted iterate with an intermediate-result object carrying ``x``,
+``fun``, ``nit``, ``grad_norm`` and ``step_length``; a ``pso`` run calls it
+after each swarm pass. Raising
+``StopIteration`` stops cleanly with ``Stop.OBSERVER``, which
+``require_convergence`` does not turn into ``NotConverged``.
 
 ``__version__`` is the version string of the extension.
 

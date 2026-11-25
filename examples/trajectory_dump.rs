@@ -893,6 +893,8 @@ mod c_waist {
                     noise_c: 0.0,
 
                     require_convergence: 0,
+                    observer: None,
+                    observer_user: std::ptr::null_mut(),
                 };
                 let solver = unsafe { rgmin_solver_create(method, &ctrl, N) };
                 assert!(!solver.is_null());

@@ -12,7 +12,7 @@ _Static_assert(RGMIN_CONTROL_REVISION5_SIZE == offsetof(rgmin_control_t, require
                "revision 5 ends before require_convergence");
 #if SIZE_MAX == UINT64_MAX
 _Static_assert(RGMIN_CONTROL_REVISION5_SIZE == 56, "revision 5 control is 56 bytes");
-_Static_assert(sizeof(rgmin_control_t) == 64, "control is 64 bytes");
+_Static_assert(sizeof(rgmin_control_t) == 80, "control is 80 bytes");
 _Static_assert(offsetof(rgmin_report_t, converged) == 28, "converged follows stop");
 _Static_assert(sizeof(rgmin_report_t) == 32, "report is 32 bytes");
 #endif

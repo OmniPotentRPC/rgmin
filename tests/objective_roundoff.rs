@@ -231,6 +231,8 @@ fn c_setter_rejects_bad_inputs_without_replacing_the_session() {
             noise_eps: 0.0,
             noise_c: 0.0,
             require_convergence: 0,
+            observer: None,
+            observer_user: std::ptr::null_mut(),
         };
         let session = rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &control, 1);
         assert!(!session.is_null());
@@ -309,6 +311,8 @@ mod capi {
                 noise_eps: 0.0,
                 noise_c: 0.0,
                 require_convergence: 0,
+                observer: None,
+                observer_user: std::ptr::null_mut(),
             };
             let mut x = [START];
             let mut out = rgmin_report_t {

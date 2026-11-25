@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 import enum
+import types
 
 import numpy
 from numpy.typing import NDArray
@@ -147,6 +148,8 @@ class Stop(enum.IntEnum):
 
     MACHINE_PRECISION = 8
 
+    OBSERVER = 9
+
     Tolerance = 0
 
     NoiseFloor = 1
@@ -164,6 +167,8 @@ class Stop(enum.IntEnum):
     EvalBudget = 7
 
     MachinePrecision = 8
+
+    Observer = 9
 
 class Report:
     """Result of one optimizer step or of ``minimize``."""
@@ -247,9 +252,9 @@ class Solver:
         One Newton, RFO, or dogleg step. ``hessian(x)`` returns an ``(n, n)`` matrix.
         """
 
-def minimize(f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], x0: NDArray[numpy.float64], method: object, **kwargs) -> tuple[Report, NDArray[numpy.float64]]:
+def minimize(f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]], x0: NDArray[numpy.float64], method: object, *, callback: Callable[[types.SimpleNamespace], object] | None = None, **kwargs) -> tuple[Report, NDArray[numpy.float64]]:
     """
-    Minimize ``f_and_grad`` in place and return ``(report, x)``. ``require_convergence=True`` raises ``NotConverged``, a ``RuntimeError`` that carries the terminal ``Report`` as ``.report``, when the gradient norm is still above ``gtol``. ``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` that carries the ``Report`` as ``.report``, when the stop is ``BUDGET``, ``LINE_SEARCH``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. ``backward_polish`` is stored on the session and is not used by this step loop, which does not form a Hessian.
+    Minimize ``f_and_grad`` in place and return ``(report, x)``. ``callback``, when given, is called after each accepted iterate with an object carrying ``x``, ``fun``, ``nit``, ``grad_norm`` and ``step_length``; raising ``StopIteration`` from it ends the run with ``Stop.OBSERVER``. ``require_convergence=True`` raises ``NotConverged``, a ``RuntimeError`` that carries the terminal ``Report`` as ``.report``, when the gradient norm is still above ``gtol`` and the stop is not ``OBSERVER``. ``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` that carries the ``Report`` as ``.report``, when the stop is ``BUDGET``, ``LINE_SEARCH``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. ``backward_polish`` is stored on the session and is not used by this step loop, which does not form a Hessian.
     """
 
 def backward_error_floor(value: float, x: object) -> float:

@@ -15,14 +15,15 @@ use rgmin::ffi::{
     rgmin_exp_t, rgmin_gromacs_steep_max_constraint_shrinks, rgmin_last_error,
     rgmin_lowest_eigenpair, rgmin_lowest_eigenpairs, rgmin_lowest_eigenpairs_ex,
     rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
-    rgmin_minimize_eindir, rgmin_minimize_eindir_opts, rgmin_minimize_opts, rgmin_minimize_scg,
-    rgmin_precond_fn, rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp,
-    rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls,
-    rgmin_solver_hvp_calls, rgmin_solver_set_accept, rgmin_solver_set_exp,
-    rgmin_solver_set_gromacs_cg, rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
-    rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
-    rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
-    rgmin_tensor_free,
+    rgmin_minimize_eindir, rgmin_minimize_eindir_opts, rgmin_minimize_eindir_opts_sized,
+    rgmin_minimize_opts, rgmin_minimize_opts_sized, rgmin_minimize_scg, rgmin_observer_action_t,
+    rgmin_observer_fn, rgmin_precond_fn, rgmin_report_t, rgmin_scg_params_t,
+    rgmin_solver_clear_exp, rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free,
+    rgmin_solver_gradient_calls, rgmin_solver_hvp_calls, rgmin_solver_set_accept,
+    rgmin_solver_set_exp, rgmin_solver_set_gromacs_cg, rgmin_solver_set_gromacs_steep,
+    rgmin_solver_set_quickmin_cell, rgmin_solver_set_quickmin_variant, rgmin_solver_step,
+    rgmin_solver_step_fg, rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t,
+    rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free,
 };
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
 use rgpot_core::status::rgpot_status_t;
@@ -53,6 +54,61 @@ unsafe extern "C" fn quadratic_grad(
         *(gp as *mut f64).add(1) = 2.0 * *p.add(1);
     }
     eindir_status_t::EINDIR_SUCCESS
+}
+
+unsafe extern "C" fn quadratic_eval_rgmin(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 2);
+    unsafe { *value_out = *p * *p + *p.add(1) * *p.add(1) };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn quadratic_grad_rgmin(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 2);
+    let (gp, gn) = unsafe { cpu_f64(g) };
+    assert_eq!(gn, 2);
+    unsafe {
+        *(gp as *mut f64) = 2.0 * *p;
+        *(gp as *mut f64).add(1) = 2.0 * *p.add(1);
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[repr(C)]
+struct ObserverProbe {
+    calls: usize,
+    projection: [[f64; 2]; 8],
+}
+
+unsafe extern "C" fn stop_after_three_observer(
+    user: *mut c_void,
+    _iteration: usize,
+    x: *const f64,
+    n: usize,
+    _value: f64,
+    _grad_norm: f64,
+    _step_length: f64,
+) -> rgmin_observer_action_t {
+    let probe = unsafe { &mut *(user as *mut ObserverProbe) };
+    if probe.calls < probe.projection.len() {
+        let xs = unsafe { std::slice::from_raw_parts(x, n) };
+        probe.projection[probe.calls] = [xs[0], xs[1] - xs[0]];
+    }
+    probe.calls += 1;
+    if probe.calls >= 3 {
+        rgmin_observer_action_t::RGMIN_OBSERVER_STOP
+    } else {
+        rgmin_observer_action_t::RGMIN_OBSERVER_CONTINUE
+    }
 }
 
 fn quadratic_objective() -> Box<eindir_objective_t> {
@@ -137,6 +193,8 @@ fn c_abi_lbfgs_rosenbrock() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let mut out = rgmin_report_t {
         value: 0.0,
@@ -222,6 +280,8 @@ fn c_abi_scg_quadratic_bowl_with_exact_curvature() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let params = rgmin_scg_params_t {
         sigma0: 1e-4,
@@ -267,6 +327,8 @@ fn scg_bowl_ctrl() -> rgmin_control_t {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     }
 }
 
@@ -560,6 +622,8 @@ fn c_abi_eindir_objective_minimizes_without_taking_ownership() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let mut out = rgmin_report_t {
         value: 0.0,
@@ -601,6 +665,8 @@ fn c_abi_eindir_rejects_incompatible_stamp_before_evaluation() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let mut out = rgmin_report_t {
         value: 0.0,
@@ -640,6 +706,8 @@ fn eindir_run(
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let mut out = rgmin_report_t {
         value: 0.0,
@@ -768,6 +836,8 @@ fn c_abi_rgpot_potential_reaches_eindir_optimizer() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let mut out = rgmin_report_t {
         value: 0.0,
@@ -814,6 +884,8 @@ fn cuda_tagged_tensor_is_unsupported() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let mut out = rgmin_report_t {
         value: 0.0,
@@ -850,6 +922,8 @@ fn c_abi_solver_step_keeps_lbfgs_history() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -931,6 +1005,8 @@ fn c_abi_default_istep_leaves_the_rosenbrock_start() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     for method in [
         rgmin_method_t::RGMIN_BFGS,
@@ -1016,6 +1092,8 @@ fn c_session_opens_with_energy_acceptance() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     for (accept, want) in [
         (None, -0.5),
@@ -1074,6 +1152,8 @@ fn fused_evalgrad_is_one_callback_per_oracle() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -1201,6 +1281,8 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
+/// ABI minor 59 adds `rgmin_control_t` observer fields and
+/// `RGMIN_STOP_OBSERVER`.
 /// ABI minor 54 adds `RGMIN_GROMACS_CG` and `rgmin_solver_set_gromacs_cg`.
 /// ABI minor 56 adds `rgmin_manifold_rigid_quotient`, `rgmin_rtr_tcg_solve`,
 /// `rgmin_rtr_radius_update`, `rgmin_lowest_eigenpair_on_manifold` and
@@ -1230,9 +1312,313 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 56);
-    assert_eq!(stamp.layout_revision, 6);
+    assert_eq!(stamp.abi_minor, 59);
+    assert_eq!(stamp.layout_revision, 7);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
+}
+
+#[test]
+fn c_observer_can_stop_and_record_a_two_coordinate_projection() {
+    let mut probe = ObserverProbe {
+        calls: 0,
+        projection: [[0.0; 2]; 8],
+    };
+    let mut x = [-1.2, 1.0];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let ctrl = rgmin_control_t {
+        maxiter: 64,
+        gtol: 1e-12,
+        istep: 1.0,
+        memory: 10,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+        require_convergence: 0,
+        observer: Some(stop_after_three_observer as rgmin_observer_fn),
+        observer_user: (&mut probe as *mut ObserverProbe).cast(),
+    };
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
+    };
+    let status = unsafe {
+        rgmin_minimize_opts_sized(
+            Some(quadratic_eval_rgmin),
+            Some(quadratic_grad_rgmin),
+            std::ptr::null_mut(),
+            xt,
+            &ctrl,
+            std::mem::size_of::<rgmin_control_t>(),
+            rgmin_method_t::RGMIN_LBFGS,
+            0,
+            0,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_OBSERVER);
+    assert_eq!(probe.calls, 3);
+    assert_ne!(probe.projection[0][0], probe.projection[2][0]);
+}
+
+fn observed_ctrl(
+    maxiter: usize,
+    gtol: f64,
+    observer: rgmin_observer_fn,
+    user: *mut c_void,
+) -> rgmin_control_t {
+    rgmin_control_t {
+        maxiter,
+        gtol,
+        istep: 0.25,
+        memory: 10,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+        require_convergence: 0,
+        observer: Some(observer),
+        observer_user: user,
+    }
+}
+
+fn run_observed(
+    x: &mut [f64; 2],
+    ctrl: &rgmin_control_t,
+    method: rgmin_method_t,
+) -> (rgmin_status_t, rgmin_report_t) {
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
+    };
+    let status = unsafe {
+        rgmin_minimize_opts_sized(
+            Some(quadratic_eval_rgmin),
+            Some(quadratic_grad_rgmin),
+            std::ptr::null_mut(),
+            xt,
+            ctrl,
+            std::mem::size_of::<rgmin_control_t>(),
+            method,
+            0,
+            0,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    (status, out)
+}
+
+#[test]
+fn c_observer_runs_and_stops_under_adam_and_pso() {
+    for method in [rgmin_method_t::RGMIN_ADAM, rgmin_method_t::RGMIN_PSO] {
+        let mut probe = ObserverProbe {
+            calls: 0,
+            projection: [[0.0; 2]; 8],
+        };
+        let ctrl = observed_ctrl(
+            64,
+            1e-16,
+            stop_after_three_observer,
+            (&mut probe as *mut ObserverProbe).cast(),
+        );
+        let mut x = [1.0, -0.5];
+        let (status, out) = run_observed(&mut x, &ctrl, method);
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS, "{method:?}");
+        assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_OBSERVER, "{method:?}");
+        assert_eq!(probe.calls, 3, "{method:?}");
+        assert_eq!(out.steps, 3, "{method:?}");
+    }
+}
+
+#[repr(C)]
+struct LastIterateProbe {
+    calls: usize,
+    iteration: usize,
+    x: [f64; 2],
+    grad_norm: f64,
+}
+
+unsafe extern "C" fn record_last_observer(
+    user: *mut c_void,
+    iteration: usize,
+    x: *const f64,
+    n: usize,
+    _value: f64,
+    grad_norm: f64,
+    _step_length: f64,
+) -> rgmin_observer_action_t {
+    let probe = unsafe { &mut *(user as *mut LastIterateProbe) };
+    let xs = unsafe { std::slice::from_raw_parts(x, n) };
+    probe.calls += 1;
+    probe.iteration = iteration;
+    probe.x = [xs[0], xs[1]];
+    probe.grad_norm = grad_norm;
+    rgmin_observer_action_t::RGMIN_OBSERVER_CONTINUE
+}
+
+#[test]
+fn c_one_shot_and_session_observers_see_the_converged_iterate() {
+    for method in [
+        rgmin_method_t::RGMIN_LBFGS,
+        rgmin_method_t::RGMIN_BFGS,
+        rgmin_method_t::RGMIN_BB,
+        rgmin_method_t::RGMIN_FIRE,
+        rgmin_method_t::RGMIN_FIRE2,
+        rgmin_method_t::RGMIN_QUICKMIN,
+        rgmin_method_t::RGMIN_DIIS,
+        rgmin_method_t::RGMIN_ODE12R,
+        rgmin_method_t::RGMIN_NEWTON_CG,
+        rgmin_method_t::RGMIN_NEWTON_PCG,
+        rgmin_method_t::RGMIN_GROMACS_STEEP,
+        rgmin_method_t::RGMIN_GROMACS_CG,
+    ] {
+        let mut probe = LastIterateProbe {
+            calls: 0,
+            iteration: 0,
+            x: [f64::NAN; 2],
+            grad_norm: f64::NAN,
+        };
+        let ctrl = observed_ctrl(
+            500,
+            1e-6,
+            record_last_observer,
+            (&mut probe as *mut LastIterateProbe).cast(),
+        );
+        let mut x = [1.0, -0.5];
+        let (status, out) = run_observed(&mut x, &ctrl, method);
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS, "{method:?}");
+        assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE, "{method:?}");
+        assert!(probe.calls > 0, "{method:?}");
+        assert_eq!(probe.x, x, "{method:?}");
+        assert_eq!(probe.grad_norm, out.grad_norm, "{method:?}");
+        assert!(probe.grad_norm < 1e-6, "{method:?}");
+    }
+}
+
+#[repr(C)]
+struct StepLengthProbe {
+    calls: usize,
+    previous: [f64; 2],
+    worst: f64,
+}
+
+unsafe extern "C" fn check_step_length_observer(
+    user: *mut c_void,
+    _iteration: usize,
+    x: *const f64,
+    n: usize,
+    _value: f64,
+    _grad_norm: f64,
+    step_length: f64,
+) -> rgmin_observer_action_t {
+    let probe = unsafe { &mut *(user as *mut StepLengthProbe) };
+    let xs = unsafe { std::slice::from_raw_parts(x, n) };
+    let moved = ((xs[0] - probe.previous[0]).powi(2) + (xs[1] - probe.previous[1]).powi(2)).sqrt();
+    let error = if step_length > 0.0 {
+        (step_length - moved).abs() / moved.max(1.0)
+    } else {
+        f64::INFINITY
+    };
+    probe.worst = probe.worst.max(error);
+    probe.calls += 1;
+    probe.previous = [xs[0], xs[1]];
+    rgmin_observer_action_t::RGMIN_OBSERVER_CONTINUE
+}
+
+#[test]
+fn c_lbfgs_observer_receives_the_accepted_step_length() {
+    let mut x = [1.0, -0.5];
+    let mut probe = StepLengthProbe {
+        calls: 0,
+        previous: x,
+        worst: 0.0,
+    };
+    let ctrl = observed_ctrl(
+        64,
+        1e-10,
+        check_step_length_observer,
+        (&mut probe as *mut StepLengthProbe).cast(),
+    );
+    let (status, out) = run_observed(&mut x, &ctrl, rgmin_method_t::RGMIN_LBFGS);
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_TOLERANCE);
+    assert!(probe.calls > 0);
+    assert!(
+        probe.worst <= 1e-12,
+        "worst step length error {}",
+        probe.worst
+    );
+}
+
+#[test]
+fn c_observer_stop_under_require_convergence_keeps_the_observer_stop() {
+    let mut probe = ObserverProbe {
+        calls: 0,
+        projection: [[0.0; 2]; 8],
+    };
+    let mut ctrl = observed_ctrl(
+        64,
+        1e-16,
+        stop_after_three_observer,
+        (&mut probe as *mut ObserverProbe).cast(),
+    );
+    ctrl.require_convergence = 1;
+    let mut x = [1.0, -0.5];
+    let (status, out) = run_observed(&mut x, &ctrl, rgmin_method_t::RGMIN_LBFGS);
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_OBSERVER);
+    assert_eq!(out.converged, 0);
+    assert_eq!(probe.calls, 3);
+}
+
+#[test]
+fn c_eindir_entry_honours_the_observer() {
+    let mut probe = ObserverProbe {
+        calls: 0,
+        projection: [[0.0; 2]; 8],
+    };
+    let ctrl = observed_ctrl(
+        64,
+        1e-16,
+        stop_after_three_observer,
+        (&mut probe as *mut ObserverProbe).cast(),
+    );
+    let objective = quadratic_objective();
+    let stamp = eindir_core_abi_stamp();
+    let mut x = [1.0, -0.5];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
+    };
+    let status = unsafe {
+        rgmin_minimize_eindir_opts_sized(
+            &*objective,
+            &stamp,
+            xt,
+            &ctrl,
+            std::mem::size_of::<rgmin_control_t>(),
+            rgmin_method_t::RGMIN_STEEPEST,
+            0,
+            0,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_OBSERVER);
+    assert_eq!(probe.calls, 3);
 }
 
 #[test]
@@ -1248,6 +1634,8 @@ fn an_unmet_c_stop_writes_the_report_and_returns_the_typed_status() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let mut out = rgmin_report_t {
         value: 0.0,
@@ -1317,6 +1705,8 @@ fn c_abi_burdakov_radius_is_off_until_set() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert_eq!(unsafe { rgmin_solver_lbfgs_trust_radius(session) }, 0.0);
@@ -1356,6 +1746,8 @@ fn stop_ctrl() -> rgmin_control_t {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     }
 }
 
@@ -1510,6 +1902,8 @@ fn c_abi_fire_preset_and_abc() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let guenole = rgmin_fire_preset_t::RGMIN_FIRE_PRESET_GUENOLE2020 as i32;
     let null = std::ptr::null_mut();
@@ -1585,6 +1979,8 @@ fn c_abi_stop_norm_and_report_gradient() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let max_atom = rgmin_stop_norm_t::RGMIN_STOP_NORM_MAX_ATOM as i32;
     assert_eq!(
@@ -1675,6 +2071,8 @@ fn c_abi_default_lbfgs_step_respects_the_eon_cap() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let mut out = rgmin_report_t {
         value: 0.0,
@@ -1734,6 +2132,8 @@ fn c_abi_every_setter_survives_live_and_null_sessions() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -1945,6 +2345,8 @@ fn c_abi_euclidean_complex_stays_on_the_set() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -2002,6 +2404,8 @@ fn c_abi_constant_stays_on_the_set() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 3) };
     assert!(!session.is_null());
@@ -2090,6 +2494,8 @@ fn c_abi_multinomial_ds_stays_on_the_set() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -2150,6 +2556,8 @@ fn c_abi_multinomial_sym_stays_on_the_set() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -2241,6 +2649,8 @@ fn c_abi_sphere_complex_stays_on_the_set() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -2319,6 +2729,8 @@ fn c_abi_power_keeps_each_copy_on_its_sphere() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 6) };
     assert!(!session.is_null());
@@ -2415,6 +2827,8 @@ fn c_abi_positive_stays_on_the_set() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 3) };
     assert!(!session.is_null());
@@ -2502,6 +2916,8 @@ fn c_abi_centered_matrix_stays_on_the_set() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 4) };
     assert!(!session.is_null());
@@ -2561,6 +2977,8 @@ fn c_abi_set_box_status_matches_highs_feature() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -2619,6 +3037,8 @@ fn c_abi_one_eval_search_direction_is_steepest_when_empty() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -2655,6 +3075,8 @@ fn c_abi_pair_count_tracks_accepted_curvature_and_forget() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -2696,6 +3118,8 @@ fn c_abi_rebase_keeps_pairs_and_forget_drops_them() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -2804,6 +3228,8 @@ fn newton_cg_method_string_and_counters_cross_the_c_abi() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let user = &count as *const BowlCount as *mut c_void;
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_NEWTON_CG, &ctrl, 4) };
@@ -2913,6 +3339,8 @@ fn c_abi_exp_installs_and_steps() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let bad = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     let params = rgmin_exp_t {
@@ -3214,6 +3642,8 @@ fn c_abi_every_method_reaches_the_constrained_minimum() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     use rgmin_method_t::*;
     let methods = [
@@ -3393,6 +3823,8 @@ fn c_abi_constraint_failures_are_typed_and_leave_x() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 6) };
     unsafe {
@@ -3508,6 +3940,8 @@ fn c_abi_capped_lbfgs_moves_one_atom_by_the_cap() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let fire = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE, &ctrl, 3) };
     assert_eq!(unsafe { rgmin_solver_set_lbfgs_capped(fire, 0.2) }, 1);
@@ -3574,6 +4008,8 @@ fn c_abi_quickmin_steps_and_splits_the_cell() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_QUICKMIN, &ctrl, 2) };
     assert!(!session.is_null());
@@ -3631,6 +4067,8 @@ fn c_abi_diis_reduces_a_quadratic() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_DIIS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -3679,6 +4117,8 @@ fn c_abi_respects_maxmove_when_initial_step_is_larger() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let mut out = rgmin_report_t {
         value: 0.0,
@@ -3813,6 +4253,8 @@ fn c_abi_forget_evaluation_costs_one_call_and_keeps_memory() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let run = |forget: bool| {
         let mut x = [-1.2_f64, 1.0];
@@ -3879,6 +4321,8 @@ fn c_abi_lbfgs_neb_guards_toggle_resets_pairs() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -3959,6 +4403,8 @@ fn c_abi_lindh_ff_and_auto_install_and_step() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let numbers = [1i32, 1];
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 6) };
@@ -4123,6 +4569,8 @@ fn c_abi_quickmin_variants_relax_the_bowl() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     for variant in [
         RGMIN_QUICKMIN_RGMIN,
@@ -5054,6 +5502,8 @@ fn cap_session(
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let mut x = [3.0, -4.0, 1.5, 2.5, -2.0, 0.5];
     let mut seen = Vec::new();
@@ -5173,6 +5623,8 @@ fn c_abi_a_non_binding_maxmove_is_no_cap() {
             noise_eps: 0.0,
             noise_c: 0.0,
             require_convergence: 0,
+            observer: None,
+            observer_user: std::ptr::null_mut(),
         };
         let mut x = [3.0, -4.0, 1.5, 2.5, -2.0, 0.5];
         let mut out = rgmin_report_t {

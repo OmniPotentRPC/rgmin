@@ -9,8 +9,8 @@ use std::ptr::null;
 
 use rgmin::ffi::{
     RGMIN_PRECON_EXP, rgmin_conjugacy_t, rgmin_control_t, rgmin_eigen_options_t,
-    rgmin_eigen_params_t, rgmin_exp_t, rgmin_precon_t, rgmin_rlbfgs_t, rgmin_rtr_tcg_result_t,
-    rgmin_scg_options_t, rgmin_scg_params_t, rgmin_scg_step_tolerance_t,
+    rgmin_eigen_params_t, rgmin_exp_t, rgmin_observer_fn, rgmin_precon_t, rgmin_rlbfgs_t,
+    rgmin_rtr_tcg_result_t, rgmin_scg_options_t, rgmin_scg_params_t, rgmin_scg_step_tolerance_t,
 };
 use rgmin::{
     Control, EigenParams, ExpParams, NoiseFloor, Rlbfgs, ScgOptions, ScgParams, ScgStepTolerance,
@@ -80,6 +80,18 @@ impl<T> Words for *const T {
     }
 }
 
+impl<T> Words for *mut T {
+    fn words(&self) -> Vec<u64> {
+        vec![*self as usize as u64]
+    }
+}
+
+impl Words for Option<rgmin_observer_fn> {
+    fn words(&self) -> Vec<u64> {
+        vec![self.map_or(0, |f| f as usize as u64)]
+    }
+}
+
 impl<const N: usize> Words for [f64; N] {
     fn words(&self) -> Vec<u64> {
         self.iter().map(|v| v.to_bits()).collect()
@@ -128,6 +140,8 @@ fn c_initializers_hold_the_rust_defaults() {
         noise_eps: control.noise_floor.map_or(0.0, |floor| floor.eps_g),
         noise_c: NoiseFloor::new(0.0).c,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     });
     args.extend(record!(rgmin_exp_t {
         a: exp.a,

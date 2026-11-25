@@ -8,7 +8,8 @@ use rand::rngs::StdRng;
 
 use crate::control::Control;
 use crate::error::{Error, Result};
-use crate::report::{Report, Status};
+use crate::observer::{IterationObserver, IterationView, ObserverSignal};
+use crate::report::{Report, Status, StopReason};
 use crate::step::{l2, one_shot_report};
 use crate::stop::{Counted, counted};
 
@@ -46,10 +47,30 @@ pub fn minimize_pso<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    minimize_pso_observed(obj, init, control, n_particles, inertia, c1, c2, None)
+}
+
+/// [`minimize_pso`] with an optional per-iteration observer.
+///
+/// Each swarm pass is one iteration. The observer sees the global best
+/// after the pass.
+pub fn minimize_pso_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    n_particles: usize,
+    inertia: f64,
+    c1: f64,
+    c2: f64,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     control.validate()?;
     crate::stop::refuse_etol(control, "particle swarm")?;
     counted(obj, control, |obj| {
-        pso_counted(obj, init, control, n_particles, inertia, c1, c2)
+        pso_counted(obj, init, control, n_particles, inertia, c1, c2, observer)
     })
 }
 
@@ -61,6 +82,7 @@ fn pso_counted<O>(
     inertia: f64,
     c1: f64,
     c2: f64,
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -107,7 +129,9 @@ where
     let mut iteration = 0;
     let mut stagnant_iterations = 0;
     let mut spent = false;
+    let mut observed: Option<(Array1<f64>, f64)> = None;
     while iteration < control.maxiter {
+        let before = gbest_position.clone();
         update_swarm(
             obj,
             bounds,
@@ -117,6 +141,35 @@ where
             (inertia, c1, c2),
             &mut rng,
         );
+        if let Some(obs) = observer.as_deref_mut() {
+            // The swarm itself never needs a gradient. Taking it from the
+            // uncounted objective, once per new best, keeps an observed run
+            // on the same evaluation budget as an unobserved one.
+            let grad_norm = match &observed {
+                Some((at, norm)) if *at == gbest_position => *norm,
+                _ => l2(&obj.inner().value_and_gradient(gbest_position.view()).1),
+            };
+            observed = Some((gbest_position.clone(), grad_norm));
+            if obs.observe(IterationView {
+                iteration,
+                x: gbest_position.view(),
+                value: gbest_value,
+                grad_norm,
+                step_length: l2(&(&gbest_position - &before)),
+            }) == ObserverSignal::Stop
+            {
+                return control.deliver(
+                    one_shot_report(
+                        gbest_value,
+                        gbest_position,
+                        iteration + 1,
+                        grad_norm,
+                        Status::ObserverStop,
+                    )
+                    .with_stop_reason(StopReason::ObserverRequested),
+                );
+            }
+        }
         let avg_velocity = average_velocity(&swarm);
         if gbest_value == prev_gbest_value {
             stagnant_iterations += 1;
