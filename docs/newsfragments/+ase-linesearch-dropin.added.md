@@ -1,2 +1,2 @@
 `rgmin.ase.BFGSLineSearch`, its `QuasiNewton` alias, and `rgmin.ase.LBFGSLineSearch` match the ASE 3.29.0 constructors and run a port of ASE's line search on the Rust BFGS and L-BFGS sessions. `maxstep` limits each trial increment of an atom, `stpmax` bounds the step multiplier, and a failed search raises `RuntimeError("LineSearch failed!")` as in ASE.
-`h0` and `linesearch="ase"` are opt-in `SolverConfig` keys, and `stpmax` requires `linesearch="ase"`. Existing defaults are unchanged.
+`h0` and `linesearch="ase"` are opt-in `SolverConfig` keys, and `stpmax` requires `linesearch="ase"`. Existing defaults are unchanged. The C entries `rgmin_solver_set_fixed_h0` and `rgmin_solver_set_ase_linesearch` are ABI minor 66.
