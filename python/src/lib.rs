@@ -14,11 +14,11 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use rgmin::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Control, DEFAULT_ATOM_MAXMOVE, Error,
-    FireConfig, FireKind, FirePreset, GpMinConfig, GromacsCgConfig, GromacsSteepConfig, LbfgsH0,
-    LbfgsPairs, LbfgsStep, LevelSetConstraint, LineSearch, ManifoldFactor, Method, Oracle,
-    PriorStrategy, RiemannianManifold, SearchStep, Solver, SpdMetric, Status, StiefelRetraction,
-    StopNorm, SuppliedSearch, lowest_eigenpairs as solve_lowest_eigenpairs,
-    lowest_eigenpairs_precond,
+    FireConfig, FireKind, FirePreset, GpMinConfig, GromacsCgConfig, GromacsLbfgsConfig,
+    GromacsSteepConfig, LbfgsH0, LbfgsPairs, LbfgsStep, LevelSetConstraint, LineSearch,
+    ManifoldFactor, Method, Oracle, PriorStrategy, RiemannianManifold, SearchStep, Solver,
+    SpdMetric, Status, StiefelRetraction, StopNorm, SuppliedSearch,
+    lowest_eigenpairs as solve_lowest_eigenpairs, lowest_eigenpairs_precond,
 };
 
 #[pyclass]
@@ -77,10 +77,10 @@ impl Session {
     ///
     /// `max_atom` caps the longest per-atom displacement and `maxmove`
     /// the Euclidean length of the whole step; a non-positive value
-    /// leaves that cap off. Omitted, every method except `gromacs-steep`
-    /// and `gromacs-cg` uses the generic per-atom cap. Those two leave it
-    /// off, so the step scale `h` and the line search are the only
-    /// displacement limits. `h0` is the fixed L-BFGS inverse-Hessian
+    /// leaves that cap off. Omitted, every method except `gromacs-steep`,
+    /// `gromacs-cg`, and `gromacs-lbfgs` uses the generic per-atom cap.
+    /// Those three leave it off, so the step scale and the line search
+    /// are the only displacement limits. `h0` is the fixed L-BFGS inverse-Hessian
     /// scale. `preset="guenole2020"` and `abc` select the FIRE 2.0
     /// parameter set and ABC-FIRE. `accept` is `none`, `energy` or
     /// `nonmonotone`; `downhill` is `energy`. `istep` is the step scale
@@ -124,6 +124,7 @@ impl Session {
         shrink=None,
         max_constraint_shrinks=None,
         nstcgsteep=None,
+        nbfgscorr=None,
         level_set=None,
         error_on_unmet=false,
         backward_polish=false,
@@ -165,6 +166,7 @@ impl Session {
         shrink: Option<f64>,
         max_constraint_shrinks: Option<u32>,
         nstcgsteep: Option<u32>,
+        nbfgscorr: Option<usize>,
         level_set: Option<f64>,
         error_on_unmet: bool,
         backward_polish: bool,
@@ -198,9 +200,10 @@ impl Session {
         let steep = matches!(method, Method::GromacsSteep);
         let gpmin = matches!(method, Method::GpMin);
         let gromacs_cg = matches!(method, Method::GromacsCg);
+        let gromacs_lbfgs = matches!(method, Method::GromacsLbfgs);
         let atom_cap = match max_atom {
             Some(value) => value,
-            None if steep || gromacs_cg => 0.0,
+            None if steep || gromacs_cg || gromacs_lbfgs => 0.0,
             None => DEFAULT_ATOM_MAXMOVE,
         };
         let istep = match istep {
@@ -359,6 +362,16 @@ impl Session {
                 .set_gromacs_cg_config(GromacsCgConfig::default().with_nstcgsteep(period))
                 .map_err(value_error)?;
         }
+        if let Some(pairs) = nbfgscorr {
+            if !gromacs_lbfgs {
+                return Err(PyValueError::new_err(
+                    "nbfgscorr applies to a gromacs-lbfgs session only",
+                ));
+            }
+            solver
+                .set_gromacs_lbfgs_config(GromacsLbfgsConfig::default().with_nbfgscorr(pairs))
+                .map_err(value_error)?;
+        }
         if atom_cap.is_finite() && atom_cap > 0.0 {
             solver.set_atom_maxmove(atom_cap);
         }
@@ -461,6 +474,15 @@ impl Session {
         self.solver
             .gromacs_cg_config()
             .map(|config| config.nstcgsteep)
+    }
+
+    /// Correction pairs retained by a `gromacs-lbfgs` session, or `None`
+    /// for other methods.
+    #[getter]
+    fn nbfgscorr(&self) -> Option<usize> {
+        self.solver
+            .gromacs_lbfgs_config()
+            .map(|config| config.nbfgscorr)
     }
 
     /// Drop the method memory. The next step is a cold start.
