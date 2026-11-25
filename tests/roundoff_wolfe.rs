@@ -440,3 +440,105 @@ fn a_sharp_slope_crossing_keeps_a_rounded_wolfe_bracket_alive() {
         assert!(evals <= 10, "wall slope {unresolvable_wall} took {evals}");
     }
 }
+
+#[test]
+fn wolfe_value_rounding_is_invariant_under_objective_scaling() {
+    let basin_edge = 1e-12;
+    let curvature = 2.0 / basin_edge;
+    let run = |scale: f64| {
+        let calls = AtomicUsize::new(0);
+        let result = LineSearch::wolfe(1e-4, 0.9, 80).search_from_result(
+            |x| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                if x[0] <= basin_edge {
+                    let f = scale * (1.0 - x[0] + 0.5 * curvature * x[0] * x[0]);
+                    let g = scale * (-1.0 + curvature * x[0]);
+                    (f, array![g])
+                } else {
+                    (scale * (1.0 + 1e-6), array![-scale])
+                }
+            },
+            array![0.0].view(),
+            scale,
+            array![-scale].view(),
+            array![1.0].view(),
+            1.0,
+            f64::INFINITY,
+        );
+        (result, calls.load(Ordering::Relaxed))
+    };
+
+    let (unscaled, unscaled_calls) = run(1.0);
+    let (tiny, tiny_calls) = run(1e-20);
+
+    assert_eq!(unscaled.stop_reason, None);
+    assert_eq!(tiny.stop_reason, unscaled.stop_reason);
+    let unscaled_step = unscaled.step.expect("unscaled problem accepts a step");
+    let tiny_step = tiny.step.expect("1e-20 scaled problem accepts a step");
+    assert!(unscaled_step.evals > 9);
+    assert_eq!(tiny_step.evals, unscaled_step.evals);
+    assert_eq!(tiny_calls, unscaled_calls);
+    assert!(
+        (tiny_step.alpha - unscaled_step.alpha).abs() <= 1e-9 * unscaled_step.alpha,
+        "alpha mismatch: unscaled={} tiny={}",
+        unscaled_step.alpha,
+        tiny_step.alpha
+    );
+    assert!(
+        (tiny_step.x[0] - unscaled_step.x[0]).abs() <= 1e-9 * unscaled_step.x[0].abs(),
+        "x mismatch: unscaled={} tiny={}",
+        unscaled_step.x[0],
+        tiny_step.x[0]
+    );
+}
+
+#[test]
+fn wolfe_value_rounding_handles_exact_zero_objective_safely() {
+    let flat_calls = AtomicUsize::new(0);
+    let flat = LineSearch::wolfe(1e-4, 0.9, 80).search_from_result(
+        |_| {
+            flat_calls.fetch_add(1, Ordering::Relaxed);
+            (0.0, array![-1.0])
+        },
+        array![0.0].view(),
+        0.0,
+        array![-1.0].view(),
+        array![1.0].view(),
+        1.0,
+        f64::INFINITY,
+    );
+    assert_eq!(
+        flat.stop_reason,
+        Some(LineSearchStopReason::RoundingBlocked)
+    );
+    assert!(flat.step.is_none());
+    assert_eq!(flat_calls.load(Ordering::Relaxed), 9);
+
+    let basin_edge = 1e-12;
+    let curvature = 2.0 / basin_edge;
+    let descent_calls = AtomicUsize::new(0);
+    let descent = LineSearch::wolfe(1e-4, 0.9, 80).search_from_result(
+        |x| {
+            descent_calls.fetch_add(1, Ordering::Relaxed);
+            if x[0] <= basin_edge {
+                let f = -x[0] + 0.5 * curvature * x[0] * x[0];
+                let g = -1.0 + curvature * x[0];
+                (f, array![g])
+            } else {
+                (1e-26, array![-1.0])
+            }
+        },
+        array![0.0].view(),
+        0.0,
+        array![-1.0].view(),
+        array![1.0].view(),
+        1.0,
+        f64::INFINITY,
+    );
+    assert_eq!(descent.stop_reason, None);
+    let step = descent
+        .step
+        .expect("tiny rise over zero start zooms into basin");
+    assert!(step.evals > 9);
+    assert_eq!(descent_calls.load(Ordering::Relaxed), step.evals);
+}

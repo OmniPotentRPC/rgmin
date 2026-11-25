@@ -37,10 +37,15 @@ pub(crate) fn bracket_rounding_blocked(lo: f64, hi: f64) -> bool {
 }
 
 pub(crate) fn value_rounding_blocked(f: f64, reference: f64) -> bool {
-    let scale = f.abs().max(reference.abs()).max(1.0);
-    f.is_finite()
-        && reference.is_finite()
-        && (f - reference).abs() <= WOLFE_VALUE_ROUNDING_FACTOR * f64::EPSILON * scale
+    if !f.is_finite() || !reference.is_finite() {
+        return false;
+    }
+    let scale = f.abs().max(reference.abs());
+    if scale == 0.0 {
+        return true;
+    }
+    let diff = (f - reference).abs();
+    diff.is_finite() && diff <= WOLFE_VALUE_ROUNDING_FACTOR * f64::EPSILON * scale
 }
 
 pub(crate) fn resolvable_slope_crossing(slope: f64, endpoint: f64, initial: f64) -> bool {

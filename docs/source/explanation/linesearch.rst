@@ -112,7 +112,7 @@ warning in More and Thuente's ``dcsrch``
 width is at most eight machine epsilons times its endpoint scale or a
 sequence of eight trial values differ from the Armijo endpoint by
 at most eight epsilons times
-``max(abs(f_trial), abs(f_lo), 1)`` while Armijo fails. One unresolved
+``max(abs(f_trial), abs(f_lo))`` while Armijo fails. One unresolved
 trial is not enough: an ordinary Wolfe search can cross a short run of
 rounded values before finding curvature. A trial derivative that
 crosses zero and grows past thirty-two times the initial descent slope
