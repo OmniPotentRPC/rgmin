@@ -254,7 +254,8 @@ pub enum Error {
     },
     /// A FIRE step or an L-BFGS step under `Accept::None` on a curved
     /// kind found no retracted trial inside the box and the displacement
-    /// cap.
+    /// cap, or a Riemannian CG session found no retraction of its start,
+    /// on its bonds when it has a distance constraint set, inside the box.
     #[error("no trial on {kind} fits the box and the displacement cap")]
     OffManifold {
         /// Manifold token.
@@ -269,6 +270,13 @@ pub enum Error {
     LbfgsDirection {
         /// What was refused.
         what: &'static str,
+    },
+    /// Riemannian CG could not form two distinct finite samples around a
+    /// line-search parameter, so accepting its curvature would be unsafe.
+    #[error("Riemannian CG could not resolve the retraction slope at t = {t}")]
+    RcgSlope {
+        /// Line-search parameter whose neighboring samples collapsed.
+        t: f64,
     },
     /// [`crate::RiemannianManifold`] refused a shape, a point or a step.
     #[error("manifold: {0}")]

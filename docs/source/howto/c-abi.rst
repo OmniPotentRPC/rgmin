@@ -51,6 +51,8 @@ assign only the fields it changes.
     +---------------------------+-----------------------------------+
     | ``rgmin_eigen_options_t`` | ``rgmin_eigen_options_default()`` |
     +---------------------------+-----------------------------------+
+    | ``rgmin_rcg_options_t``   | ``rgmin_rcg_options_default()``   |
+    +---------------------------+-----------------------------------+
     | ``rgmin_precon_t``        | ``rgmin_precon_init(&p, kind)``   |
     +---------------------------+-----------------------------------+
 
@@ -61,6 +63,7 @@ designated initializer sets them to zero, which is not every field's
 default. A stray positive ``noise_eps`` turns the noise-floor stop on, and
 a session then stays at its start point. The ``rgmin_*_default`` functions
 are ``abi_minor`` 46, and ``xts.h`` names them ``xts_*_default``.
+``rgmin_rcg_options_default`` is ``abi_minor`` 65.
 
 Control layout
 ~~~~~~~~~~~~~~
@@ -191,7 +194,7 @@ entry. Its errors name the symbol the host called, in
 
 SCG takes the same one-shot shape.
 Conjugacy is a field on ``rgmin_scg_params_t``, not a different entry point.
-Stamp is 1.13.3 (``xts_abi_compatible`` still checks major and layout only).
+Stamp is 1.65.6 (``xts_abi_compatible`` still checks major and layout only).
 ``rgmin_lowest_eigenpair`` takes a typed ``rgmin_eigen_params_t`` (closed ``rgmin_eigen_kind_t``, no string).
 Unlinked kinds return ``RGMIN_UNAVAILABLE``.
 ``rgmin_lowest_eigenpairs`` is the block LOBPCG solver for the k lowest pairs (Knyazev 2001).
@@ -290,6 +293,62 @@ default shapes as ``rgmin_solver_set_manifold``. A positive
 off. ``xts_minimize_rlbfgs`` and ``xts_rlbfgs_default`` are the aliases.
 These are ``abi_minor`` 51. ``rgmin_control_t`` is unchanged, and the
 default Euclidean L-BFGS step stays the eOn cap.
+
+Riemannian conjugate gradients
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+ABI minor 65 adds ``RGMIN_RCG``, ``rgmin_rcg_options_t``, ``rgmin_rcg_options_default`` and ``rgmin_minimize_rcg``.
+Check ``rgmin_abi_stamp().abi_minor >= 65`` before using them.
+``rgmin_rcg_options_t`` is a new struct and no existing struct changes, so the layout revision stays 6.
+
+``RGMIN_RCG`` is a ``rgmin_method_t`` token.
+``rgmin_solver_create(RGMIN_RCG, &ctrl, n)`` runs Riemannian CG as a session method, with PRP+ and the scaled transport, on the manifold that ``rgmin_solver_set_manifold`` selects.
+``rgmin_minimize_rcg`` is the one-shot run on Euclidean space, and its options record selects the other coefficients.
+
+.. code:: c
+
+    #include "rgmin.h"
+
+    rgmin_rcg_options_t opts = rgmin_rcg_options_default();
+    opts.beta = 2;       /* Hager-Zhang */
+    opts.grad_tol = 1e-8;
+    rgmin_report_t report;
+    rgmin_status_t st = rgmin_minimize_rcg(eval, grad, user, x, &opts, &report);
+
+.. table::
+
+    +------------------+---------------------------------------------------+----------+
+    | Field            | Meaning                                           |  Default |
+    +==================+===================================================+==========+
+    | ``beta``         | 0 Fletcher-Reeves, 1 PRP+, 2 Hager-Zhang          |        1 |
+    +------------------+---------------------------------------------------+----------+
+    | ``transport``    | 0 scaled, 1 identity                              |        0 |
+    +------------------+---------------------------------------------------+----------+
+    | ``linesearch``   | 0 strong Wolfe, 1 Brent (``LineSearch::default``) |        0 |
+    +------------------+---------------------------------------------------+----------+
+    | ``grad_tol``     | Riemannian gradient norm that stops the run       | ``1e-5`` |
+    +------------------+---------------------------------------------------+----------+
+    | ``max_iter``     | Iteration cap                                     |      200 |
+    +------------------+---------------------------------------------------+----------+
+    | ``initial_step`` | Length of the first trial displacement            |        1 |
+    +------------------+---------------------------------------------------+----------+
+
+``rgmin_rcg_options_default`` returns the Rust ``RcgOptions::default``, and a null ``options`` pointer selects the same record.
+PRP+ replaces a negative Polak-Ribiere coefficient by zero.
+The scaled transport shortens a transported vector that the transport made longer, back to its length before the transport.
+The strong Wolfe search has ``c1 = 1e-4``, ``c2 = 0.1`` and at most 20 trials.
+``grad_tol`` must be finite and not negative, and ``initial_step`` finite and positive.
+
+``x`` is updated in place, and ``report`` is written on success.
+``report.converged`` is nonzero when the final gradient norm is at most ``grad_tol``, and ``report.stop`` is then ``RGMIN_STOP_TOLERANCE``.
+A run that ends before ``max_iter`` without meeting ``grad_tol`` reports ``RGMIN_STOP_STEP_TOLERANCE``, and one that spends ``max_iter`` reports ``RGMIN_STOP_BUDGET``.
+A null ``eval``, ``grad``, ``x`` or ``report``, an unknown tag, a tolerance or step that the record refuses, and a non-finite start return ``RGMIN_INVALID_PARAMETER``.
+So does a line-search trial whose retraction slope cannot be resolved, ``Error::RcgSlope`` in Rust, which refuses the slope rather than accept its curvature.
+``x`` is then left as it was, and ``rgmin_last_error`` names the reason.
+A panic inside the run returns ``RGMIN_INTERNAL_ERROR``, and ``rgmin_last_error`` names ``rgmin_minimize_rcg``.
+
+``xts.h`` aliases the four names as ``XTS_RCG``, ``xts_rcg_options_t``, ``xts_rcg_options_default`` and ``xts_minimize_rcg``.
+The C++ wrapper names the method ``rgmin::Method::Rcg``.
 
 Rigid quotient, trust region and projected modes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

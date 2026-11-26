@@ -69,6 +69,7 @@ That installs the 0.8 release on Rust 1.88 or newer.
    tutorials/newton
    tutorials/scg
    tutorials/rlbfgs
+   tutorials/rcg
    tutorials/linesearch
    tutorials/lbfgs-direction
    tutorials/eigenpairs

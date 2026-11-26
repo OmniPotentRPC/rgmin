@@ -77,10 +77,10 @@ impl Session {
     ///
     /// `max_atom` caps the longest per-atom displacement and `maxmove`
     /// the Euclidean length of the whole step; a non-positive value
-    /// leaves that cap off. Omitted, every method except `gromacs-steep`
-    /// and `gromacs-cg` uses the generic per-atom cap. Those two leave it
-    /// off, so the step scale `h` and the line search are the only
-    /// displacement limits. `h0` is the fixed L-BFGS inverse-Hessian
+    /// leaves that cap off. Omitted, every method except `gromacs-steep`,
+    /// `gromacs-cg` and `rcg` uses the generic per-atom cap. Those three
+    /// leave it off, so the step scale `h` and the line search are the
+    /// only displacement limits. `h0` is the fixed L-BFGS inverse-Hessian
     /// scale. `preset="guenole2020"` and `abc` select the FIRE 2.0
     /// parameter set and ABC-FIRE. `accept` is `none`, `energy` or
     /// `nonmonotone`; `downhill` is `energy`. `istep` is the step scale
@@ -198,9 +198,10 @@ impl Session {
         let steep = matches!(method, Method::GromacsSteep);
         let gpmin = matches!(method, Method::GpMin);
         let gromacs_cg = matches!(method, Method::GromacsCg);
+        let rcg = matches!(method, Method::Rcg { .. });
         let atom_cap = match max_atom {
             Some(value) => value,
-            None if steep || gromacs_cg => 0.0,
+            None if steep || gromacs_cg || rcg => 0.0,
             None => DEFAULT_ATOM_MAXMOVE,
         };
         let istep = match istep {
@@ -271,6 +272,13 @@ impl Session {
         }
         if nlcg {
             solver.set_linesearch(LineSearch::wolfe(1e-4, 0.1, 20));
+        }
+        if rcg {
+            solver.set_linesearch(LineSearch::wolfe(
+                rgmin::RCG_WOLFE_C1,
+                rgmin::RCG_WOLFE_C2,
+                rgmin::RCG_WOLFE_MAX_ITER,
+            ));
         }
         if accept != Accept::None {
             solver.set_accept(accept);

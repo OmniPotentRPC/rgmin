@@ -585,6 +585,26 @@ impl ManifoldKind {
         }
     }
 
+    /// `true` when every ambient point is a point of the manifold, so the
+    /// Euclidean projection onto the manifold cut by a coordinate box is
+    /// the box clip itself.
+    ///
+    /// Euclidean space, complex Euclidean space and the rigid quotients
+    /// are open pieces of the packed coordinates, and a product is only
+    /// when every factor is. A clip leaves every other set: a sphere loses
+    /// its unit norm, a symmetric matrix loses symmetry, a centered matrix
+    /// loses its zero mean.
+    pub(crate) fn coordinate_clip_stays_on_set(&self) -> bool {
+        match self {
+            Self::Product(product) => product.coordinate_clip_stays_on_set(),
+            Self::Euclidean
+            | Self::EuclideanComplex { .. }
+            | Self::RigidQuotient
+            | Self::MwRigid => true,
+            _ => false,
+        }
+    }
+
     /// `true` when the retraction keeps a straight step on the set, so a
     /// chord can be capped and clipped after it. A curved kind caps the
     /// tangent step before the retraction instead.
@@ -663,6 +683,15 @@ pub trait Manifold {
     }
     /// Tangent projection of an ambient vector at `x`. Same length as `v`.
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64>;
+    /// Tangent projection of an ambient vector that is not a gradient, such
+    /// as the velocity of a curve on the manifold. Same length as `v`.
+    ///
+    /// The default is [`Self::project`]. [`PoincareBall`] returns `v`: its
+    /// tangent space is the ambient space, and its [`Self::project`]
+    /// divides by the squared conformal factor, as a gradient needs.
+    fn to_tangent(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        self.project(x, v)
+    }
     /// Ambient Euclidean gradient to a Riemannian gradient at `x`.
     /// Embedded manifolds with a Euclidean ambient metric use [`Self::project`].
     fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
@@ -808,6 +837,10 @@ impl Manifold for ManifoldKind {
 
     fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
         with_kind!(self, |f| f.project(x, v))
+    }
+
+    fn to_tangent(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        with_kind!(self, |f| f.to_tangent(x, v))
     }
 
     fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {

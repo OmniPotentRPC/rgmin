@@ -433,6 +433,8 @@ rank-1 f64 vector.
 - Absil, Mahony, Sepulchre 2008 is the matrix-manifold
   reference
   ([[https://doi.org/10.1515/9781400830244][10.1515/9781400830244]]).
+- Riemannian conjugate gradients use that retraction and that transport.
+  The transport is scaled when the image is longer than the vector it carried (Ring and Wirth 2012, [[https://doi.org/10.1137/11082885X][10.1137/11082885X]]; Sato and Iwai 2015, [[https://doi.org/10.1080/02331934.2013.836650][10.1080/02331934.2013.836650]]; Sato 2016, [[https://doi.org/10.1007/s10589-015-9801-1][10.1007/s10589-015-9801-1]]; Sato 2022, [[https://doi.org/10.1007/978-3-030-62391-3][10.1007/978-3-030-62391-3]]).
 - Boumal 2023 is the smooth-manifold course
   ([[https://doi.org/10.1017/9781009166164][10.1017/9781009166164]]).
 - Manopt (Boumal, Mishra, Absil, Sepulchre 2014) is the

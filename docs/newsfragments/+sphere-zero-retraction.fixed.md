@@ -1,0 +1,1 @@
+The sphere retraction of a zero point returns the first coordinate axis instead of the zero vector, so it always lands on the sphere. A Riemannian CG run from a zero start, including a zero-budget run, reads the objective there instead of at the origin, off the sphere.

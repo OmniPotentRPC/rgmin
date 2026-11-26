@@ -216,6 +216,21 @@ class BoothFunctionOptimizable(Optimizable):
         return np.linalg.norm(gradient)
 
 
+def test_riemannian_cg_leaves_the_default_atom_cap_off():
+    opt = optimize.RiemannianCG(BoothFunctionOptimizable([1.234, 2.345]), logfile=None)
+    assert opt._session_options()["max_atom"] == 0.0
+    capped = optimize.RiemannianCG(
+        BoothFunctionOptimizable([1.234, 2.345]), logfile=None, maxstep=0.05
+    )
+    assert capped._session_options()["max_atom"] == 0.05
+
+
+def test_riemannian_cg_documents_a_positive_finite_maxstep():
+    doc = " ".join(optimize.RiemannianCG.__doc__.split())
+    assert "``maxstep``" in doc
+    assert "must then be positive and finite" in doc
+
+
 @pytest.mark.parametrize("optcls", ALL)
 def test_booth(optcls):
     target = BoothFunctionOptimizable([1.234, 2.345])

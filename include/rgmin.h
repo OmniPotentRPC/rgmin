@@ -46,7 +46,8 @@ typedef struct eindir_abi_stamp_t eindir_abi_stamp_t;
  *  Every struct a caller fills in starts from its initializer, which
  *  returns the Rust defaults: \ref rgmin_control_default,
  *  \ref rgmin_exp_default, \ref rgmin_scg_params_default,
- *  \ref rgmin_scg_options_default, \ref rgmin_eigen_params_default,
+ *  \ref rgmin_scg_options_default, \ref rgmin_rcg_options_default,
+ *  \ref rgmin_rlbfgs_default, \ref rgmin_eigen_params_default,
  *  \ref rgmin_eigen_options_default and \ref rgmin_precon_init. Assign
  *  only the fields to change. A field added in a later revision then
  *  holds its default. In an uninitialised struct it holds stack bytes,
@@ -81,7 +82,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 64
+#define RGMIN_ABI_VERSION_MINOR 65
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -110,7 +111,10 @@ typedef struct rgmin_abi_stamp_t {
  * 57 RGMIN_STOP_LINE_SEARCH_ROUNDING. rgmin_control_t is unchanged.
  * 64 stop-reporting fixes and eindir one-shots that name the called
  *    entry in rgmin_last_error while preserving callback-failure errors.
- *    No C symbols or struct layouts change. */
+ *    No C symbols or struct layouts change.
+ * 65 RGMIN_RCG, rgmin_rcg_options_t, rgmin_rcg_options_default and
+ *    rgmin_minimize_rcg. rgmin_rcg_options_t is a new struct, so the
+ *    layout revision stays 6. */
 #define RGMIN_ABI_LAYOUT_REVISION 6
 /* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the
@@ -161,7 +165,10 @@ typedef enum rgmin_method_t {
     /** GROMACS integrator = steep. ABI minor 52. */
     RGMIN_GROMACS_STEEP = 28,
     /** GROMACS-style Polak-Ribiere direction update with strong-Wolfe line search. ABI minor 54. */
-    RGMIN_GROMACS_CG = 29
+    RGMIN_GROMACS_CG = 29,
+    /** Riemannian CG. PRP+ and the scaled transport. ABI minor 65.
+     *  rgmin_minimize_rcg carries the other coefficients. */
+    RGMIN_RCG = 30
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.
@@ -1266,6 +1273,46 @@ rgmin_status_t rgmin_lbfgs_direction(const rgmin_lbfgs_pairs_t *pairs,
 rgmin_status_t rgmin_solver_search_direction(rgmin_solver_t *solver,
                                           const double *grad, double *dir,
                                           size_t n);
+
+/** Riemannian CG coefficient, transport and line search.
+ *  Start from \ref rgmin_rcg_options_default. ABI minor 65.
+ *
+ *  \c beta is 0 for Fletcher-Reeves, 1 for PRP+ (a negative Polak-Ribiere
+ *  coefficient is replaced by zero) and 2 for Hager-Zhang.
+ *  \c transport is 0 for the scaled transport and 1 for the identity.
+ *  \c linesearch is 0 for the strong Wolfe search and 1 for Brent
+ *  (\c LineSearch::default). Any other integer is
+ *  \c RGMIN_INVALID_PARAMETER.
+ *  \c grad_tol is the Riemannian gradient norm that stops the run. It
+ *  must be finite and not negative. \c max_iter is the iteration cap.
+ *  \c initial_step is the length of the first trial displacement. It
+ *  must be finite and positive. Anything else is
+ *  \c RGMIN_INVALID_PARAMETER. */
+typedef struct rgmin_rcg_options_t {
+    int32_t beta;
+    int32_t transport;
+    int32_t linesearch;
+    double grad_tol;
+    size_t max_iter;
+    double initial_step;
+} rgmin_rcg_options_t;
+
+/** Rust \c RcgOptions::default, which a NULL \a options selects:
+ *  PRP+, the scaled transport, the strong Wolfe search, and the named
+ *  gradient tolerance, iteration cap and opening length. ABI minor 65. */
+rgmin_rcg_options_t rgmin_rcg_options_default(void);
+
+/** Riemannian CG on Euclidean space. \a options NULL selects
+ *  \ref rgmin_rcg_options_default. \a x is updated in place and \a out
+ *  is written on success. A non-finite \a x, a NULL \a x, \a eval,
+ *  \a grad or \a out, an unknown tag, or a tolerance or step that
+ *  \ref rgmin_rcg_options_t refuses returns
+ *  \c RGMIN_INVALID_PARAMETER and leaves \a x as it was. So does a
+ *  line-search trial whose retraction slope cannot be resolved. A panic
+ *  is \c RGMIN_INTERNAL_ERROR. */
+rgmin_status_t rgmin_minimize_rcg(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
+                                  DLManagedTensorVersioned *x,
+                                  const rgmin_rcg_options_t *options, rgmin_report_t *out);
 
 /** Directional curvature `d^T H(x) d`. Non-success falls back to the probe. */
 typedef rgmin_status_t (*rgmin_curv_fn)(void *user, const DLManagedTensorVersioned *x,

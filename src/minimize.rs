@@ -77,7 +77,8 @@ where
         | Method::GromacsSteep
         | Method::GpMin
         | Method::NewtonCg
-        | Method::NewtonPcg => run_session(obj, init, control, method),
+        | Method::NewtonPcg
+        | Method::Rcg { .. } => run_session(obj, init, control, method),
         Method::GromacsCg => run_session_linesearch(obj, init, control, method, linesearch),
     }
 }

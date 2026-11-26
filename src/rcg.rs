@@ -1,0 +1,2169 @@
+//! Riemannian nonlinear conjugate gradient.
+//!
+//! The retraction, the tangent projection and the vector transport are
+//! the ones on [`Manifold`]. The session uses
+//! those same maps for an embedded kind, retracts a level set through
+//! the session, and returns a holonomic bond to its length with
+//! [`crate::holonomic`]. This solver does not define a second copy of
+//! either map. Chill, Welborn, Terrell, Zhang, Berthet, Pedersen, Jónsson
+//! and Henkelman describe the eOn client whose local step the session
+//! replaces,
+//! <https://doi.org/10.1088/0965-0393/22/5/055002>.
+//! Goswami, Masterov, Kamath, Peña-Torres and Jónsson, Goswami and
+//! Jónsson, and Goswami, Gunde and Jónsson drive that session as the
+//! local step of a Gaussian-process saddle search,
+//! <https://doi.org/10.1021/acs.jctc.5c00866>,
+//! <https://doi.org/10.1002/cphc.202500730>,
+//! <https://doi.org/10.3389/fchem.2026.1807063>.
+//! Absil, Mahony and Sepulchre define the retraction and the transport,
+//! <https://doi.org/10.1515/9781400830244>.
+//!
+//! The coefficient is Fletcher-Reeves, Polak-Ribiere-Polyak with a
+//! negative value replaced by zero, or Hager-Zhang. Inner products are
+//! the manifold metric at the new point, after the previous gradient and
+//! the previous direction have been transported there. Sato,
+//! *Riemannian Optimization and Its Applications*,
+//! <https://doi.org/10.1007/978-3-030-62391-3>.
+//! Fletcher and Reeves, <https://doi.org/10.1093/comjnl/7.2.149>.
+//! Gilbert and Nocedal, <https://doi.org/10.1137/0802003>.
+//! Hager and Zhang, <https://doi.org/10.1137/030601880>.
+//!
+//! Ring and Wirth need a transport that does not increase length,
+//! <https://doi.org/10.1137/11082885X>.
+//! Sato and Iwai scale a transported vector back to the length it had
+//! when the transport made it longer, and prove global convergence of
+//! Fletcher-Reeves under the strong Wolfe conditions with
+//! `0 < c1 < c2 < 1/2`,
+//! <https://doi.org/10.1080/02331934.2013.836650>.
+//! Sato uses that scaled transport for Dai-Yuan under the weak Wolfe
+//! conditions, <https://doi.org/10.1007/s10589-015-9801-1>.
+//! [`RcgTransport::Identity`] leaves the vector unchanged, which is the
+//! Euclidean transport.
+//!
+//! A direction whose slope is not negative is replaced by the negative
+//! Riemannian gradient.
+
+use std::cell::RefCell;
+
+use ndarray::{Array1, ArrayView1};
+
+use crate::error::{Error, Result};
+use crate::holonomic::DistanceConstraints;
+use crate::linesearch::{LineSearch, Path};
+use crate::manifold::Manifold;
+use crate::nlcg::div;
+use crate::step::Caps;
+
+/// Stop when the Riemannian gradient norm is at most this value.
+///
+/// Same number as [`crate::Control::default`]'s `gtol`.
+pub const RCG_GRAD_TOL: f64 = 1e-5;
+
+/// Iteration cap of [`RcgOptions::default`].
+pub const RCG_MAX_ITER: usize = 200;
+
+/// Length of the first trial displacement along the search direction.
+///
+/// The opening α is this length divided by the norm of the direction.
+/// A later trial reuses the previous accepted displacement length.
+/// Same number as [`crate::Control::default`]'s `istep`.
+pub const RCG_INITIAL_STEP: f64 = 1.0;
+
+/// Armijo constant of the default strong Wolfe search.
+///
+/// Sato and Iwai require `0 < c1 < c2 < 1/2`.
+pub const RCG_WOLFE_C1: f64 = 1e-4;
+
+/// Curvature constant of the default strong Wolfe search.
+///
+/// Below one half, as the Fletcher-Reeves argument requires.
+pub const RCG_WOLFE_C2: f64 = 0.1;
+
+/// Expand and zoom budget of the default strong Wolfe search.
+pub const RCG_WOLFE_MAX_ITER: usize = 20;
+
+/// Hager-Zhang lower-bound parameter η.
+///
+/// The coefficient is at least `-1 / (||d|| min(η, ||g_old||))`.
+pub const RCG_HAGER_ZHANG_ETA: f64 = 0.01;
+
+/// Which β multiplies the transported previous direction.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RcgBeta {
+    /// `||g_k||^2 / ||g_{k-1}||^2`, with the previous norm taken before transport.
+    FletcherReeves,
+    /// `max(0, <g_k, g_k - T g_{k-1}> / ||g_{k-1}||^2)`.
+    #[default]
+    PrpPlus,
+    /// Hager-Zhang, with the gradient difference and the direction transported.
+    HagerZhang,
+}
+
+/// How a tangent vector moves to the next point.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RcgTransport {
+    /// [`Manifold::transport`], shortened to its original length when that
+    /// image is longer. Sato and Iwai's `T^{(k)}`.
+    #[default]
+    Scaled,
+    /// Copy the vector. The Euclidean transport.
+    Identity,
+}
+
+/// Controls for [`minimize_rcg`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct RcgOptions {
+    /// Coefficient.
+    pub beta: RcgBeta,
+    /// Vector transport.
+    pub transport: RcgTransport,
+    /// Line search along the retraction. The default is strong Wolfe with
+    /// [`RCG_WOLFE_C1`], [`RCG_WOLFE_C2`] and [`RCG_WOLFE_MAX_ITER`].
+    /// [`LineSearch::default`] is Brent, the derivative-free search.
+    pub linesearch: LineSearch,
+    /// Stop when the Riemannian gradient norm is at most this value.
+    /// [`RCG_GRAD_TOL`] in [`Self::default`].
+    pub grad_tol: f64,
+    /// Iteration cap. [`RCG_MAX_ITER`] in [`Self::default`].
+    pub max_iter: usize,
+    /// First trial displacement length. [`RCG_INITIAL_STEP`] in [`Self::default`].
+    pub initial_step: f64,
+}
+
+with_setters!(RcgOptions {
+    with_beta => beta: val RcgBeta,
+    with_transport => transport: val RcgTransport,
+    with_linesearch => linesearch: val LineSearch,
+    with_grad_tol => grad_tol: val f64,
+    with_max_iter => max_iter: val usize,
+    with_initial_step => initial_step: val f64,
+});
+
+impl Default for RcgOptions {
+    fn default() -> Self {
+        Self {
+            beta: RcgBeta::default(),
+            transport: RcgTransport::default(),
+            linesearch: LineSearch::wolfe(RCG_WOLFE_C1, RCG_WOLFE_C2, RCG_WOLFE_MAX_ITER),
+            grad_tol: RCG_GRAD_TOL,
+            max_iter: RCG_MAX_ITER,
+            initial_step: RCG_INITIAL_STEP,
+        }
+    }
+}
+
+impl RcgOptions {
+    /// Refuse a tolerance or step no run could read.
+    ///
+    /// [`Self::grad_tol`] must be finite and not negative, and
+    /// [`Self::initial_step`] finite and positive. A NaN tolerance would
+    /// compare false against every gradient norm and run to the iteration
+    /// cap; a negative one could never be met.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidControl`] names the setting.
+    pub fn validate(&self) -> Result<()> {
+        if !(self.grad_tol.is_finite() && self.grad_tol >= 0.0) {
+            return Err(Error::InvalidControl {
+                what: "rcg grad_tol must be finite and not negative",
+            });
+        }
+        if !(self.initial_step.is_finite() && self.initial_step > 0.0) {
+            return Err(Error::InvalidControl {
+                what: "rcg initial_step must be finite and positive",
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Point returned by [`minimize_rcg`].
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct RcgMin {
+    /// Accepted point, on the manifold.
+    pub x: Array1<f64>,
+    /// Objective value at [`Self::x`].
+    pub value: f64,
+    /// Riemannian gradient norm at [`Self::x`].
+    pub grad_norm: f64,
+    /// Outer iterations. A start that already meets [`RcgOptions::grad_tol`]
+    /// reports zero.
+    pub iterations: usize,
+    /// Times the search direction was replaced by the negative gradient.
+    pub restarts: usize,
+    /// Objective evaluations, including the line search.
+    pub evals: usize,
+}
+
+/// Session memory for one Riemannian CG run.
+#[derive(Clone, Debug)]
+pub(crate) struct RcgMemory {
+    beta: RcgBeta,
+    transport: RcgTransport,
+    initial_step: f64,
+    dir: Array1<f64>,
+    prev_alpha: f64,
+    prev_speed: f64,
+    ready: bool,
+    restarts: usize,
+}
+
+impl RcgMemory {
+    pub(crate) fn new(beta: RcgBeta, transport: RcgTransport, initial_step: f64) -> Self {
+        Self {
+            beta,
+            transport,
+            initial_step,
+            dir: Array1::zeros(0),
+            prev_alpha: 0.0,
+            prev_speed: 0.0,
+            ready: false,
+            restarts: 0,
+        }
+    }
+
+    fn from_options(opts: &RcgOptions) -> Self {
+        Self::new(opts.beta, opts.transport, opts.initial_step)
+    }
+
+    /// Whether a conjugate direction is held for the next step.
+    #[cfg(test)]
+    pub(crate) fn holds_direction(&self) -> bool {
+        self.ready
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.dir = Array1::zeros(0);
+        self.prev_alpha = 0.0;
+        self.prev_speed = 0.0;
+        self.ready = false;
+    }
+}
+
+/// One accepted step, still in the ambient coordinates.
+pub(crate) struct RcgMoved {
+    pub x: Array1<f64>,
+    pub value: f64,
+    pub egrad: Array1<f64>,
+    pub evals: usize,
+    pub alpha: f64,
+}
+
+/// Failures of the maps a [`Manifold`] cannot report.
+///
+/// [`Manifold`] returns vectors, not results. A manifold that can fail
+/// records the first failure and returns the vector it was given, and the
+/// step reads the record after the calls that matter.
+pub(crate) trait Failures {
+    /// The first failure recorded since the last call. The call clears it.
+    fn take(&self) -> Option<Error>;
+}
+
+/// A manifold whose maps cannot fail.
+pub(crate) struct Infallible;
+
+impl Failures for Infallible {
+    fn take(&self) -> Option<Error> {
+        None
+    }
+}
+
+/// Alternating projections between the tangent spaces, and between the
+/// two sets, stop at this many sweeps.
+const MAX_SWEEPS: usize = 200;
+
+/// Relative gap under which two projections of one vector agree.
+const SWEEP_TOL: f64 = 1e-13;
+
+/// A manifold cut by a holonomic bond set.
+///
+/// The tangent space at a point is the intersection of the tangent space
+/// of `base` and the null space of the bond Jacobian. The retraction
+/// returns a trial to the bonds along those of the point it leaves, then to
+/// `base`, until both hold. A flat `base` such as Euclidean space needs no
+/// second sweep, so the bond set alone is the one-pass case.
+///
+/// [`DistanceConstraints::project_vector`] is the bond tangent projection,
+/// [`DistanceConstraints::project_gradient`] the bond part of the
+/// Riemannian gradient, and [`DistanceConstraints::constrain`] the return
+/// to the bonds. A failure in any of them is recorded and read through
+/// [`Failures`]. A set with masses measures tangent vectors in the mass
+/// metric, the one its projections are orthogonal in.
+pub(crate) struct BondedManifold<'a, M: ?Sized> {
+    base: &'a M,
+    constraints: &'a DistanceConstraints,
+    failure: RefCell<Option<Error>>,
+}
+
+impl<'a, M> BondedManifold<'a, M>
+where
+    M: Manifold + ?Sized,
+{
+    pub(crate) fn new(base: &'a M, constraints: &'a DistanceConstraints) -> Self {
+        Self {
+            base,
+            constraints,
+            failure: RefCell::new(None),
+        }
+    }
+
+    fn fail(&self, error: Error) {
+        let mut slot = self.failure.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(error);
+        }
+    }
+
+    /// The Riemannian gradient `grad` of `base` at `x`, cut by the bond
+    /// tangent space. With masses the cut is a covector, whose `M^-1`
+    /// image is tangent. [`Manifold::egrad2rgrad`] is `base`'s map of an
+    /// ambient gradient, this, and that raise. `grad` is already
+    /// Riemannian, so the carry is [`Manifold::to_tangent`].
+    pub(crate) fn cut_gradient(&self, x: &Array1<f64>, grad: Array1<f64>) -> Array1<f64> {
+        self.tangent(
+            x,
+            grad,
+            |set, at, w| set.project_gradient(at, w).map(drop),
+            |at, w| self.base.to_tangent(at, w),
+        )
+    }
+
+    /// `v` with each atom scaled by its mass to the power `power`, or
+    /// `None` for a set without masses.
+    fn by_mass(&self, v: &Array1<f64>, power: i32) -> Option<Array1<f64>> {
+        let masses = self.constraints.masses()?;
+        Some(Array1::from_shape_fn(v.len(), |k| {
+            v[k] * masses[k / 3].powi(power)
+        }))
+    }
+
+    /// `start` moved into both tangent spaces at `x`. `bond` is the bond
+    /// projection applied to it and `carry` the base manifold's.
+    fn tangent<B, C>(&self, x: &Array1<f64>, start: Array1<f64>, bond: B, carry: C) -> Array1<f64>
+    where
+        B: Fn(&DistanceConstraints, ArrayView1<'_, f64>, &mut Array1<f64>) -> Result<()>,
+        C: Fn(&Array1<f64>, &Array1<f64>) -> Array1<f64>,
+    {
+        let mut v = start;
+        for _ in 0..MAX_SWEEPS {
+            let before = v.clone();
+            if let Err(e) = bond(self.constraints, x.view(), &mut v) {
+                self.fail(e);
+                return before;
+            }
+            let carried = carry(x, &v);
+            if agree(&carried, &v) {
+                return carried;
+            }
+            v = carried;
+        }
+        self.fail(crate::holonomic::unsupported(
+            "a manifold whose tangent space does not meet the bond tangent space",
+        ));
+        v
+    }
+}
+
+impl<M> Failures for BondedManifold<'_, M> {
+    fn take(&self) -> Option<Error> {
+        self.failure.borrow_mut().take()
+    }
+}
+
+fn agree(a: &Array1<f64>, b: &Array1<f64>) -> bool {
+    let scale = 1.0 + crate::vecops::nrm2(a.view()).max(crate::vecops::nrm2(b.view()));
+    crate::vecops::nrm2_diff(a.view(), b.view()) <= SWEEP_TOL * scale
+}
+
+impl<M> Manifold for BondedManifold<'_, M>
+where
+    M: Manifold + ?Sized,
+{
+    fn required_dim(&self, n: usize) -> std::result::Result<(), usize> {
+        self.base.required_dim(n)
+    }
+
+    fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        self.tangent(
+            x,
+            v.clone(),
+            |set, at, w| set.project_vector(at, w),
+            |at, w| self.base.project(at, w),
+        )
+    }
+
+    fn to_tangent(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        self.tangent(
+            x,
+            v.clone(),
+            |set, at, w| set.project_vector(at, w),
+            |at, w| self.base.to_tangent(at, w),
+        )
+    }
+
+    fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
+        let cut = self.cut_gradient(x, self.base.egrad2rgrad(x, egrad));
+        match self.by_mass(&cut, -1) {
+            // The raised covector is a tangent velocity.
+            Some(raised) => self.to_tangent(x, &raised),
+            None => cut,
+        }
+    }
+
+    fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        let zero = Array1::zeros(x.len());
+        let mut y = self.base.retract(x, v);
+        for _ in 0..MAX_SWEEPS {
+            if let Err(e) = self.constraints.constrain(x.view(), &mut y) {
+                self.fail(e);
+                return x.clone();
+            }
+            let on_base = self.base.retract(&y, &zero);
+            if self.constraints.excess(on_base.view()) <= 1.0 {
+                return on_base;
+            }
+            y = on_base;
+        }
+        self.fail(crate::holonomic::unsupported(
+            "a manifold that does not meet the bond set near the trial",
+        ));
+        x.clone()
+    }
+
+    fn transport(&self, x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+        // The carried vector is tangent. `project` on the Poincare ball
+        // would divide it by the squared conformal factor.
+        self.to_tangent(x_to, &self.base.transport(x_from, x_to, v))
+    }
+
+    /// `base`'s metric weighted by the masses, so the slope of a raised
+    /// gradient along a tangent vector is the derivative of the value.
+    fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {
+        match self.by_mass(v, 1) {
+            Some(weighted) => self.base.inner(x, u, &weighted),
+            None => self.base.inner(x, u, v),
+        }
+    }
+}
+
+/// Transport `v` from `x_from` to `x_to`.
+///
+/// [`RcgTransport::Scaled`] calls [`Manifold::transport`] and, when the
+/// image is longer than `v` and both lengths are finite and positive,
+/// multiplies by `||v|| / ||T v||`. A collapsed image is returned as the
+/// transport produced it. [`RcgTransport::Identity`] returns a copy.
+pub fn scaled_transport<M>(
+    manifold: &M,
+    x_from: &Array1<f64>,
+    x_to: &Array1<f64>,
+    v: &Array1<f64>,
+    kind: RcgTransport,
+) -> Array1<f64>
+where
+    M: Manifold + ?Sized,
+{
+    if matches!(kind, RcgTransport::Identity) {
+        return v.clone();
+    }
+    let carried = manifold.transport(x_from, x_to, v);
+    let from = manifold.norm(x_from, v);
+    let to = manifold.norm(x_to, &carried);
+    if from > 0.0 && to > from && from.is_finite() && to.is_finite() {
+        let scale = from / to;
+        carried.mapv(|c| c * scale)
+    } else {
+        carried
+    }
+}
+
+/// Minimize `fg` on `manifold` from `x0`.
+///
+/// `fg` returns the value and the Euclidean gradient. The Riemannian
+/// gradient is [`Manifold::egrad2rgrad`]. The start is retracted by a
+/// zero tangent step so it lies on the manifold.
+///
+/// # Errors
+///
+/// [`Error::InvalidControl`] from [`RcgOptions::validate`],
+/// [`Error::ManifoldDim`] for a start the manifold cannot hold,
+/// [`Error::Oracle`] for a non-finite value or gradient, and the typed
+/// failure of a projection or retraction that could not be carried out.
+pub fn minimize_rcg<M, F>(
+    manifold: &M,
+    x0: Array1<f64>,
+    mut fg: F,
+    opts: &RcgOptions,
+) -> Result<RcgMin>
+where
+    M: Manifold + ?Sized,
+    F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+{
+    opts.validate()?;
+    if manifold.required_dim(x0.len()).is_err() {
+        return Err(Error::ManifoldDim {
+            kind: "rcg",
+            got: x0.len(),
+        });
+    }
+    let zero = Array1::zeros(x0.len());
+    let mut x = manifold.retract(&x0, &zero);
+    let mut memory = RcgMemory::from_options(opts);
+    let mut evals = 0usize;
+    let (mut value, mut egrad) = evaluate(&mut fg, x.view(), &mut evals)?;
+    let mut grad_norm = rgrad_norm(manifold, &x, &egrad)?;
+    let mut iterations = 0usize;
+    while iterations < opts.max_iter && grad_norm > opts.grad_tol {
+        let moved = rcg_step(
+            manifold,
+            &Infallible,
+            &mut memory,
+            &x,
+            value,
+            &egrad,
+            opts.linesearch,
+            Caps::default(),
+            None,
+            false,
+            &mut fg,
+        )?;
+        evals += moved.evals;
+        iterations += 1;
+        let stalled = !moved.alpha.is_finite() || moved.alpha <= 0.0;
+        x = moved.x;
+        value = moved.value;
+        egrad = moved.egrad;
+        grad_norm = rgrad_norm(manifold, &x, &egrad)?;
+        if stalled {
+            break;
+        }
+    }
+    Ok(RcgMin {
+        x,
+        value,
+        grad_norm,
+        iterations,
+        restarts: memory.restarts,
+        evals,
+    })
+}
+
+/// One Riemannian CG step from `x`. `egrad` is the Euclidean gradient there.
+///
+/// `caps` bound the displacement of every trial, measured on the retracted
+/// point, the way the session bounds the step of every other method.
+/// `bounds` is the objective's box, and every accepted trial lies in it.
+///
+/// `clip_stays` says a coordinate clip stays on the manifold. The box clip
+/// is then the projection onto the manifold cut by the box, so the trial is
+/// the clipped retraction. On any other manifold the search direction is
+/// projected into the tangent space cut by the box's tangent cone, the
+/// trial is the retraction of that tangent step, and a retraction that
+/// leaves the box is not a point of the curve. The line search then
+/// shortens the step. The accepted point is a retraction, so it lies on
+/// the manifold.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn rcg_step<M, F>(
+    manifold: &M,
+    failures: &dyn Failures,
+    memory: &mut RcgMemory,
+    x: &Array1<f64>,
+    value: f64,
+    egrad: &Array1<f64>,
+    linesearch: LineSearch,
+    caps: Caps,
+    bounds: Option<&eindir_core::Bounds<f64>>,
+    clip_stays: bool,
+    mut fg: F,
+) -> Result<RcgMoved>
+where
+    M: Manifold + ?Sized,
+    F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+{
+    if egrad.len() != x.len() || egrad.iter().any(|g| !g.is_finite()) || !value.is_finite() {
+        return Err(crate::step::non_finite());
+    }
+    let rgrad = manifold.egrad2rgrad(x, egrad);
+    if let Some(failure) = failures.take() {
+        return Err(failure);
+    }
+    if rgrad.len() != x.len() || rgrad.iter().any(|g| !g.is_finite()) {
+        return Err(crate::step::non_finite());
+    }
+    let mut dir = search_direction(memory, x, egrad, &rgrad);
+    let mut previous = memory.prev_alpha;
+    let mut previous_speed = memory.prev_speed;
+    let mut calls = 0usize;
+    let mut counted = |p: ArrayView1<'_, f64>| {
+        calls += 1;
+        fg(p)
+    };
+    for attempt in 0..2 {
+        if let Some(bounds) = bounds
+            && !clip_stays
+            && bounds_bind(bounds)
+        {
+            dir = feasible_tangent(manifold, bounds, x, &dir);
+        }
+        let speed = manifold.norm(x, &dir);
+        let alpha0 = opening_step(speed, memory.initial_step, previous, previous_speed)
+            .min(caps.alpha(dir.view()));
+        if !alpha0.is_finite() || alpha0 <= 0.0 {
+            break;
+        }
+        let mut path = RetractPath {
+            manifold,
+            failures,
+            origin: x.clone(),
+            dir: dir.clone(),
+            caps,
+            bounds,
+            clip_stays,
+            failure: None,
+            slope_failure: None,
+            placed: false,
+        };
+        let (x_new, _f_new, alpha) = linesearch.search_path(&mut counted, &mut path, alpha0);
+        if let Some(failure) = path.slope_failure.take() {
+            return Err(failure);
+        }
+        if alpha > 0.0 {
+            let (value_new, egrad_new) = counted(x_new.view());
+            if !value_new.is_finite()
+                || egrad_new.len() != x_new.len()
+                || egrad_new.iter().any(|g| !g.is_finite())
+            {
+                return Err(crate::step::non_finite());
+            }
+            let rgrad_new = manifold.egrad2rgrad(&x_new, &egrad_new);
+            let (next, restarted) = next_direction(
+                manifold,
+                memory.beta,
+                memory.transport,
+                x,
+                &x_new,
+                &rgrad,
+                &rgrad_new,
+                &egrad_new,
+                &dir,
+            );
+            if let Some(failure) = failures.take() {
+                return Err(failure);
+            }
+            if restarted {
+                memory.restarts += 1;
+            }
+            memory.dir = next;
+            memory.prev_alpha = alpha;
+            memory.prev_speed = speed;
+            memory.ready = true;
+            return Ok(RcgMoved {
+                x: x_new,
+                value: value_new,
+                egrad: egrad_new,
+                evals: calls,
+                alpha,
+            });
+        }
+        if !path.placed
+            && let Some(failure) = path.failure.take()
+        {
+            return Err(failure);
+        }
+        if attempt == 1 || steepest(manifold, x, &rgrad, &dir) {
+            break;
+        }
+        dir = negated(&rgrad);
+        memory.restarts += 1;
+        previous = 0.0;
+        previous_speed = 0.0;
+    }
+    memory.ready = false;
+    memory.prev_alpha = 0.0;
+    memory.prev_speed = 0.0;
+    memory.dir = negated(&rgrad);
+    Ok(RcgMoved {
+        x: x.clone(),
+        value,
+        egrad: egrad.clone(),
+        evals: calls,
+        alpha: 0.0,
+    })
+}
+
+/// The held direction when the value falls along it, else steepest
+/// descent. The slope is the differential `egrad . dir`, as in the search.
+fn search_direction(
+    memory: &mut RcgMemory,
+    x: &Array1<f64>,
+    egrad: &Array1<f64>,
+    rgrad: &Array1<f64>,
+) -> Array1<f64> {
+    if memory.ready && memory.dir.len() == x.len() {
+        let dir = memory.dir.clone();
+        if dir.iter().all(|v| v.is_finite()) && crate::vecops::dot(egrad.view(), dir.view()) < 0.0 {
+            return dir;
+        }
+        memory.restarts += 1;
+    }
+    negated(rgrad)
+}
+
+/// Conjugated direction at `x_to`, and whether it was replaced by steepest
+/// descent. `egrad_to` is the Euclidean gradient there, whose product with
+/// the direction is the slope.
+///
+/// The combination is already Riemannian, so it is returned through
+/// [`Manifold::to_tangent`]. On the Poincare ball [`Manifold::project`]
+/// divides by the squared conformal factor and would rescale it.
+#[allow(clippy::too_many_arguments)]
+fn next_direction<M>(
+    manifold: &M,
+    beta_kind: RcgBeta,
+    transport: RcgTransport,
+    x_from: &Array1<f64>,
+    x_to: &Array1<f64>,
+    g_from: &Array1<f64>,
+    g_to: &Array1<f64>,
+    egrad_to: &Array1<f64>,
+    d_from: &Array1<f64>,
+) -> (Array1<f64>, bool)
+where
+    M: Manifold + ?Sized,
+{
+    let g_carried = scaled_transport(manifold, x_from, x_to, g_from, transport);
+    let d_carried = scaled_transport(manifold, x_from, x_to, d_from, transport);
+    let beta = coefficient(
+        manifold, beta_kind, x_from, x_to, g_from, g_to, d_from, &g_carried, &d_carried,
+    );
+    let mut next = negated(g_to);
+    if beta.is_finite() {
+        crate::vecops::axpy(beta, d_carried.view(), &mut next);
+    }
+    // The combination is a tangent vector. `project` on the Poincare ball
+    // divides by lambda^2, the conversion a Euclidean gradient needs, and
+    // the tangent space there is the whole ambient space.
+    next = manifold.to_tangent(x_to, &next);
+    let slope = crate::vecops::dot(egrad_to.view(), next.view());
+    if !beta.is_finite() || !slope.is_finite() || slope >= 0.0 {
+        return (manifold.to_tangent(x_to, &negated(g_to)), true);
+    }
+    (next, false)
+}
+
+fn coefficient<M>(
+    manifold: &M,
+    kind: RcgBeta,
+    x_from: &Array1<f64>,
+    x_to: &Array1<f64>,
+    g_from: &Array1<f64>,
+    g_to: &Array1<f64>,
+    d_from: &Array1<f64>,
+    g_carried: &Array1<f64>,
+    d_carried: &Array1<f64>,
+) -> f64
+where
+    M: Manifold + ?Sized,
+{
+    let old2 = manifold.inner(x_from, g_from, g_from);
+    let new2 = manifold.inner(x_to, g_to, g_to);
+    match kind {
+        RcgBeta::FletcherReeves => div(new2, old2),
+        RcgBeta::PrpPlus => {
+            let mut y = g_to.clone();
+            crate::vecops::axpy(-1.0, g_carried.view(), &mut y);
+            div(manifold.inner(x_to, g_to, &y), old2).max(0.0)
+        }
+        RcgBeta::HagerZhang => hager_zhang(
+            manifold, x_from, x_to, g_from, g_to, d_from, g_carried, d_carried,
+        ),
+    }
+}
+
+fn hager_zhang<M>(
+    manifold: &M,
+    x_from: &Array1<f64>,
+    x_to: &Array1<f64>,
+    g_from: &Array1<f64>,
+    g_to: &Array1<f64>,
+    d_from: &Array1<f64>,
+    g_carried: &Array1<f64>,
+    d_carried: &Array1<f64>,
+) -> f64
+where
+    M: Manifold + ?Sized,
+{
+    let mut y = g_to.clone();
+    crate::vecops::axpy(-1.0, g_carried.view(), &mut y);
+    let y_d = manifold.inner(x_to, d_carried, &y);
+    let y_g = manifold.inner(x_to, &y, g_to);
+    let yy = manifold.inner(x_to, &y, &y);
+    let d_g = manifold.inner(x_to, d_carried, g_to);
+    let scale = y_g.abs() + yy.abs() + d_g.abs() + 1.0;
+    let mut beta = if !y_d.is_finite() || y_d.abs() <= f64::EPSILON * scale {
+        0.0
+    } else {
+        y_g / y_d - 2.0 * yy * d_g / (y_d * y_d)
+    };
+    let ng = manifold.norm(x_from, g_from);
+    let nd = manifold.norm(x_from, d_from);
+    let cap = if ng < RCG_HAGER_ZHANG_ETA {
+        ng
+    } else {
+        RCG_HAGER_ZHANG_ETA
+    };
+    if nd > 0.0 && cap > 0.0 && nd.is_finite() && cap.is_finite() {
+        let floor = -1.0 / (nd * cap);
+        if floor.is_finite() && beta < floor {
+            beta = floor;
+        }
+    }
+    if beta.is_finite() { beta } else { 0.0 }
+}
+
+fn opening_step(speed: f64, initial: f64, previous: f64, previous_speed: f64) -> f64 {
+    if !speed.is_finite() || speed <= 0.0 {
+        return 0.0;
+    }
+    if previous > 0.0 && previous.is_finite() && previous_speed > 0.0 && previous_speed.is_finite()
+    {
+        let carried = previous * previous_speed / speed;
+        if carried.is_finite() && carried > 0.0 {
+            return carried;
+        }
+    }
+    if initial.is_finite() && initial > 0.0 {
+        initial / speed
+    } else {
+        0.0
+    }
+}
+
+fn steepest<M>(manifold: &M, x: &Array1<f64>, rgrad: &Array1<f64>, dir: &Array1<f64>) -> bool
+where
+    M: Manifold + ?Sized,
+{
+    let g2 = manifold.inner(x, rgrad, rgrad);
+    let d2 = manifold.inner(x, dir, dir);
+    let gd = manifold.inner(x, rgrad, dir);
+    let tol = f64::EPSILON * (g2.abs() + 1.0);
+    (gd + g2).abs() <= tol && (d2 - g2).abs() <= tol
+}
+
+fn negated(v: &Array1<f64>) -> Array1<f64> {
+    v.mapv(|c| -c)
+}
+
+fn rgrad_norm<M>(manifold: &M, x: &Array1<f64>, egrad: &Array1<f64>) -> Result<f64>
+where
+    M: Manifold + ?Sized,
+{
+    if egrad.len() != x.len() || egrad.iter().any(|g| !g.is_finite()) {
+        return Err(crate::step::non_finite());
+    }
+    let g = manifold.egrad2rgrad(x, egrad);
+    let n = manifold.norm(x, &g);
+    if n.is_finite() {
+        Ok(n)
+    } else {
+        Err(crate::step::non_finite())
+    }
+}
+
+fn evaluate<F>(fg: &mut F, x: ArrayView1<'_, f64>, evals: &mut usize) -> Result<(f64, Array1<f64>)>
+where
+    F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+{
+    *evals += 1;
+    let (value, grad) = fg(x);
+    if !value.is_finite() || grad.len() != x.len() || grad.iter().any(|g| !g.is_finite()) {
+        return Err(crate::step::non_finite());
+    }
+    Ok((value, grad))
+}
+
+/// `true` when a coordinate of the box is a finite wall.
+fn bounds_bind(bounds: &eindir_core::Bounds<f64>) -> bool {
+    bounds.low.iter().any(|v| v.is_finite()) || bounds.high.iter().any(|v| v.is_finite())
+}
+
+/// `true` when clipping `point` does not move it, up to a few ulps.
+///
+/// A retraction that lands on a wall is in the closed box. One that
+/// overshoots by more than the tolerance is not a point of the curve.
+pub(crate) fn closed_in_box(bounds: &eindir_core::Bounds<f64>, point: &Array1<f64>) -> bool {
+    let clipped = crate::step::clip_owned(bounds, point.clone());
+    let scale = 1.0 + crate::vecops::nrm2(point.view());
+    crate::vecops::nrm2_diff(clipped.view(), point.view()) <= 1e-10 * scale
+}
+
+/// Euclidean projection of `dir` onto the tangent space cut by the tangent
+/// cone of the box, by Dykstra's alternating projections.
+///
+/// The cone projection zeros the outward component of a coordinate that
+/// sits on a wall. The tangent projection is [`Manifold::to_tangent`].
+/// On the Poincare ball that map is the identity, and only the Riemannian
+/// gradient carries the conformal factor. Their intersection is the
+/// first-order feasible set: a step along it stays on the manifold to
+/// first order and does not immediately leave the box.
+fn feasible_tangent<M>(
+    manifold: &M,
+    bounds: &eindir_core::Bounds<f64>,
+    x: &Array1<f64>,
+    dir: &Array1<f64>,
+) -> Array1<f64>
+where
+    M: Manifold + ?Sized,
+{
+    if dir.len() != x.len() || bounds.low.len() != x.len() || bounds.high.len() != x.len() {
+        return dir.clone();
+    }
+    let mut v = dir.clone();
+    let mut p = Array1::zeros(dir.len());
+    let mut q = Array1::zeros(dir.len());
+    for _ in 0..16 {
+        let mut y = &v + &p;
+        for k in 0..y.len() {
+            let outward =
+                (x[k] <= bounds.low[k] && y[k] < 0.0) || (x[k] >= bounds.high[k] && y[k] > 0.0);
+            if outward {
+                y[k] = 0.0;
+            }
+        }
+        p = &v + &p - &y;
+        let next = manifold.to_tangent(x, &(&y + &q));
+        if next.len() != dir.len() || next.iter().any(|c| !c.is_finite()) {
+            return dir.clone();
+        }
+        q = &y + &q - &next;
+        if agree(&next, &v) {
+            return next;
+        }
+        v = next;
+    }
+    v
+}
+
+/// Retract `x` onto the manifold and, when that point lies outside the
+/// box, pull it back along the tangent until the retraction lies in both.
+///
+/// A coordinate clip is not used. On a manifold that does not fill the
+/// ambient coordinates the clip leaves the set, so the returned point is
+/// always a retraction. `None` when no retraction along that tangent lies
+/// in the box, so no point outside it is handed back to be evaluated.
+pub(crate) fn land_in_box<M>(
+    manifold: &M,
+    x: &Array1<f64>,
+    bounds: &eindir_core::Bounds<f64>,
+) -> Option<Array1<f64>>
+where
+    M: Manifold + ?Sized,
+{
+    let zero = Array1::zeros(x.len());
+    let on = manifold.retract(x, &zero);
+    if !bounds_bind(bounds) || closed_in_box(bounds, &on) {
+        return Some(on);
+    }
+    let gap = &crate::step::clip_owned(bounds, on.clone()) - &on;
+    let step = feasible_tangent(manifold, bounds, &on, &gap);
+    let mut t = 1.0;
+    for _ in 0..60 {
+        let y = manifold.retract(&on, &step.mapv(|c| c * t));
+        if closed_in_box(bounds, &y) {
+            return Some(y);
+        }
+        t *= 0.5;
+    }
+    None
+}
+
+/// The curve `t |-> retract(origin, t dir)`, undefined where its point
+/// is farther from `origin` than `caps` allow.
+///
+/// A trial the manifold failed to retract is undefined too. The first such
+/// failure is kept, and the step reports it when no trial was ever placed.
+/// On a manifold a coordinate clip would leave, a retraction outside the
+/// box is undefined as well, so the line search shortens `t`.
+struct RetractPath<'a, M: ?Sized> {
+    manifold: &'a M,
+    failures: &'a dyn Failures,
+    origin: Array1<f64>,
+    dir: Array1<f64>,
+    caps: Caps,
+    bounds: Option<&'a eindir_core::Bounds<f64>>,
+    clip_stays: bool,
+    failure: Option<Error>,
+    slope_failure: Option<Error>,
+    placed: bool,
+}
+
+impl<M: ?Sized> RetractPath<'_, M> {
+    /// `point` inside the objective's box, when it has one.
+    fn clipped(&self, point: Array1<f64>) -> Array1<f64> {
+        match self.bounds {
+            Some(bounds) => crate::step::clip_owned(bounds, point),
+            None => point,
+        }
+    }
+
+    /// `true` when the manifold failed since the last call.
+    fn failed(&mut self) -> bool {
+        match self.failures.take() {
+            Some(failure) => {
+                self.failure.get_or_insert(failure);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+impl<M> Path for RetractPath<'_, M>
+where
+    M: Manifold + ?Sized,
+{
+    fn start(&self) -> Array1<f64> {
+        self.origin.clone()
+    }
+
+    fn direction(&self) -> ArrayView1<'_, f64> {
+        self.dir.view()
+    }
+
+    fn point(&mut self, t: f64) -> Option<Array1<f64>> {
+        if !t.is_finite() {
+            return None;
+        }
+        let step = self.dir.mapv(|c| c * t);
+        let point = self.manifold.retract(&self.origin, &step);
+        if self.failed() {
+            return None;
+        }
+        let point = match self.bounds {
+            Some(bounds) if bounds_bind(bounds) && self.clip_stays => self.clipped(point),
+            Some(bounds) if bounds_bind(bounds) && !closed_in_box(bounds, &point) => {
+                return None;
+            }
+            _ => point,
+        };
+        if !self.caps.admits(&self.origin, &point) {
+            return None;
+        }
+        self.placed = true;
+        Some(point)
+    }
+
+    /// The derivative of the value along the curve: the Euclidean gradient
+    /// `g` against the curve velocity. The metric product of the Riemannian
+    /// gradient with that velocity is the same number only where
+    /// [`Manifold::inner`] is the metric [`Manifold::egrad2rgrad`] raises
+    /// by. The Euclidean form needs no metric, so it also holds for a
+    /// caller's manifold whose two maps disagree.
+    fn slope(&mut self, t: f64, at: ArrayView1<'_, f64>, g: ArrayView1<'_, f64>) -> f64 {
+        let at_owned = at.to_owned();
+        let vel = match retraction_velocity(
+            self.manifold,
+            self.bounds,
+            self.clip_stays,
+            &self.origin,
+            &self.dir,
+            t,
+            &at_owned,
+        ) {
+            Ok(vel) => vel,
+            Err(error) => {
+                self.slope_failure.get_or_insert(error);
+                return f64::NAN;
+            }
+        };
+        if self.failed() || vel.len() != g.len() {
+            return f64::NAN;
+        }
+        crate::vecops::dot(g, vel.view())
+    }
+}
+
+/// Velocity of the curve at its foot.
+///
+/// Without a box, and on a manifold a coordinate clip would leave, this is
+/// `dir`: the curve is the retraction and its derivative at the foot is the
+/// tangent step. Against a box on a manifold the clip stays on, a coordinate
+/// pushed into a wall does not move along the clipped curve, so the velocity
+/// is a forward difference of that curve over a displacement short of the
+/// box scale.
+fn foot_velocity<M>(
+    manifold: &M,
+    bounds: Option<&eindir_core::Bounds<f64>>,
+    clip_stays: bool,
+    origin: &Array1<f64>,
+    dir: &Array1<f64>,
+) -> Array1<f64>
+where
+    M: Manifold + ?Sized,
+{
+    // Off a clip-stable manifold the curve is the retraction, whose
+    // derivative at the foot is the tangent step itself.
+    if !clip_stays {
+        return dir.clone();
+    }
+    let Some(bounds) = bounds else {
+        return dir.clone();
+    };
+    let reach = dir.iter().fold(0.0f64, |m, c| m.max(c.abs()));
+    if !(reach.is_finite() && reach > 0.0) {
+        return dir.clone();
+    }
+    let h = f64::EPSILON.cbrt() / reach;
+    let free = manifold.retract(origin, &dir.mapv(|c| c * h));
+    let ahead = crate::step::clip_owned(bounds, free.clone());
+    if ahead == free {
+        return dir.clone();
+    }
+    let mut diff = ahead;
+    crate::vecops::axpy(-1.0, origin.view(), &mut diff);
+    let vel = diff.mapv(|c| c / h);
+    if vel.iter().all(|v| v.is_finite()) {
+        manifold.to_tangent(origin, &vel)
+    } else {
+        dir.clone()
+    }
+}
+
+/// Velocity of `t |-> retract(origin, t dir)`.
+///
+/// At the foot the velocity is `dir`, because a retraction's derivative
+/// there is the identity on the tangent space. Away from the foot the
+/// velocity is a central difference of [`Manifold::retract`], then
+/// [`Manifold::to_tangent`] at the arrival point. A velocity is not a
+/// gradient, so [`Manifold::project`], which on the Poincare ball divides
+/// by the squared conformal factor, would rescale it. The relative spacing
+/// `eps^(1/3) * t` balances cancellation and truncation error for a central
+/// difference while scaling with every positive parameter produced by
+/// `opening_step`. Both rounded neighbors must remain finite and distinct
+/// from `t`; otherwise [`Error::RcgSlope`] refuses the unresolved slope.
+fn retraction_velocity<M>(
+    manifold: &M,
+    bounds: Option<&eindir_core::Bounds<f64>>,
+    clip_stays: bool,
+    origin: &Array1<f64>,
+    dir: &Array1<f64>,
+    t: f64,
+    at: &Array1<f64>,
+) -> Result<Array1<f64>>
+where
+    M: Manifold + ?Sized,
+{
+    if !t.is_finite() || t <= 0.0 {
+        return Ok(foot_velocity(manifold, bounds, clip_stays, origin, dir));
+    }
+    let h = f64::EPSILON.cbrt() * t;
+    let behind_t = t - h;
+    let ahead_t = t + h;
+    let width = ahead_t - behind_t;
+    if !(behind_t.is_finite()
+        && ahead_t.is_finite()
+        && behind_t < t
+        && t < ahead_t
+        && width.is_finite()
+        && width > 0.0)
+    {
+        return Err(Error::RcgSlope { t });
+    }
+    let on_curve = |t: f64| {
+        let point = manifold.retract(origin, &dir.mapv(|c| c * t));
+        if clip_stays {
+            match bounds {
+                Some(bounds) => crate::step::clip_owned(bounds, point),
+                None => point,
+            }
+        } else {
+            point
+        }
+    };
+    let ahead = on_curve(ahead_t);
+    let behind = on_curve(behind_t);
+    let mut diff = ahead;
+    crate::vecops::axpy(-1.0, behind.view(), &mut diff);
+    let vel = diff.mapv(|c| c / width);
+    let projected = manifold.to_tangent(at, &vel);
+    if projected.len() != dir.len() || projected.iter().any(|v| !v.is_finite()) {
+        Err(Error::RcgSlope { t })
+    } else {
+        Ok(projected)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::manifold::{Sphere, StiefelNp};
+    use crate::{Control, DistanceConstraints, Method, Oracle, Solver};
+    use ndarray::array;
+
+    #[test]
+    fn options_refuse_a_tolerance_or_step_no_run_could_read() {
+        let bowl = |x: ArrayView1<f64>| (x.dot(&x), x.mapv(|v| 2.0 * v));
+        let bad = [
+            RcgOptions::default().with_grad_tol(f64::NAN),
+            RcgOptions::default().with_grad_tol(f64::INFINITY),
+            RcgOptions::default().with_grad_tol(-1e-8),
+            RcgOptions::default().with_initial_step(f64::NAN),
+            RcgOptions::default().with_initial_step(f64::INFINITY),
+            RcgOptions::default().with_initial_step(0.0),
+            RcgOptions::default().with_initial_step(-1.0),
+        ];
+        for opts in &bad {
+            assert!(matches!(opts.validate(), Err(Error::InvalidControl { .. })));
+            let got = minimize_rcg(&crate::manifold::Euclidean, array![1.0, 2.0], bowl, opts);
+            assert!(matches!(got, Err(Error::InvalidControl { .. })), "{opts:?}");
+        }
+        assert!(RcgOptions::default().validate().is_ok());
+        assert!(RcgOptions::default().with_grad_tol(0.0).validate().is_ok());
+    }
+
+    fn assert_sphere_velocity(scale: f64, t: f64) {
+        let origin = array![0.0, 1.0];
+        let dir = array![scale, 0.0];
+        let at = Sphere.retract(&origin, &dir.mapv(|c| c * t));
+        let got = retraction_velocity(&Sphere, None, false, &origin, &dir, t, &at).unwrap();
+        let denom = (1.0 + (scale * t).powi(2)).powf(1.5);
+        let want = array![scale / denom, -t * scale * scale / denom];
+        let relative =
+            crate::vecops::nrm2_diff(got.view(), want.view()) / crate::vecops::nrm2(want.view());
+        assert!(
+            relative < 1e-6,
+            "scale {scale} t {t}: got {got}, want {want}, relative error {relative}"
+        );
+    }
+
+    #[test]
+    fn retraction_velocity_resolves_tiny_and_large_parameters() {
+        assert_sphere_velocity(1e9, 1e-9);
+        assert_sphere_velocity(1e-9, 1e9);
+    }
+
+    /// The Poincare ball's `project` divides by `lambda^2 >= 4`, so a
+    /// velocity passed through it is short by that factor at every `t`.
+    #[test]
+    fn poincare_retraction_velocity_is_the_curve_derivative() {
+        let ball = crate::manifold::PoincareBall;
+        let origin = array![0.3, -0.2, 0.1];
+        let dir = array![0.4, 0.5, -0.3];
+        let curve = |t: f64| ball.retract(&origin, &dir.mapv(|c| c * t));
+
+        let foot = foot_velocity(&ball, None, false, &origin, &dir);
+        let at_zero = retraction_velocity(&ball, None, false, &origin, &dir, 0.0, &origin).unwrap();
+        assert_eq!(at_zero, foot);
+        // The curve bends by O(t), and the central difference rounds once
+        // its spacing nears an ulp of the point.
+        let t = 1e-4;
+        let near = retraction_velocity(&ball, None, false, &origin, &dir, t, &curve(t)).unwrap();
+        let relative =
+            crate::vecops::nrm2_diff(near.view(), foot.view()) / crate::vecops::nrm2(foot.view());
+        assert!(relative < 1e-3, "t {t}: {near} against the foot {foot}");
+
+        // Five-point stencil, independent of the central difference above.
+        let h = 1e-3;
+        for t in [0.25, 0.8, 1.5] {
+            let got = retraction_velocity(&ball, None, false, &origin, &dir, t, &curve(t)).unwrap();
+            let want = (&curve(t - 2.0 * h) - &(&curve(t - h) * 8.0) + &(&curve(t + h) * 8.0)
+                - &curve(t + 2.0 * h))
+                / (12.0 * h);
+            let relative = crate::vecops::nrm2_diff(got.view(), want.view())
+                / crate::vecops::nrm2(want.view());
+            assert!(
+                relative < 1e-8,
+                "t {t}: got {got}, want {want}, relative {relative}"
+            );
+        }
+    }
+
+    /// `path.slope` at the foot and at `t`, each against a five-point
+    /// stencil of the value along `t |-> retract(origin, t dir)`, with
+    /// `dir` the negative Riemannian gradient.
+    fn assert_wolfe_slope_is_the_derivative<M, F>(manifold: &M, origin: Array1<f64>, fg: F)
+    where
+        M: Manifold,
+        F: Fn(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
+    {
+        let (_, egrad) = fg(origin.view());
+        let dir = negated(&manifold.egrad2rgrad(&origin, &egrad));
+        let curve = |t: f64| manifold.retract(&origin, &dir.mapv(|c| c * t));
+        let value = |t: f64| fg(curve(t).view()).0;
+        let failures = Infallible;
+        let mut path = RetractPath {
+            manifold,
+            failures: &failures,
+            origin: origin.clone(),
+            dir: dir.clone(),
+            caps: Caps::default(),
+            bounds: None,
+            clip_stays: false,
+            failure: None,
+            slope_failure: None,
+            placed: false,
+        };
+        let h = 1e-4;
+        for t in [0.0, 0.4] {
+            let at = curve(t);
+            let got = path.slope(t, at.view(), fg(at.view()).1.view());
+            let want = (value(t - 2.0 * h) - 8.0 * value(t - h) + 8.0 * value(t + h)
+                - value(t + 2.0 * h))
+                / (12.0 * h);
+            assert!(want < 0.0, "t {t}: the curve does not descend, {want}");
+            assert!(
+                (got - want).abs() <= 1e-7 * want.abs(),
+                "t {t}: slope {got}, derivative of the value {want}"
+            );
+        }
+    }
+
+    /// At `x = (0.5, 0)` the conformal factor is `lambda = 8 / 3`. The
+    /// Euclidean product of the Riemannian gradient `x / lambda^2` with the
+    /// velocity is the slope divided by `lambda^2 = 7.11`, so a slope built
+    /// from it would be short by that factor.
+    #[test]
+    fn poincare_wolfe_slope_is_the_derivative_of_the_value() {
+        let ball = crate::manifold::PoincareBall;
+        let quad = |x: ArrayView1<'_, f64>| (0.5 * x.dot(&x), x.to_owned());
+        assert_wolfe_slope_is_the_derivative(&ball, array![0.5, 0.0], quad);
+    }
+
+    /// The hyperboloid raises the gradient in the Minkowski form, which
+    /// the Euclidean product does not undo.
+    #[test]
+    fn hyperboloid_wolfe_slope_is_the_derivative_of_the_value() {
+        let sheet = crate::manifold::Hyperbolic;
+        let a: f64 = 0.5;
+        let origin = array![a.cosh(), a.sinh(), 0.0];
+        let c = array![0.3, -1.0, 0.5];
+        let linear = move |x: ArrayView1<'_, f64>| (c.dot(&x), c.clone());
+        assert_wolfe_slope_is_the_derivative(&sheet, origin, linear);
+    }
+
+    #[test]
+    fn large_parameter_does_not_fake_strong_wolfe_curvature() {
+        let manifold = crate::manifold::Euclidean;
+        let failures = Infallible;
+        let start = array![0.0];
+        let mut path = RetractPath {
+            manifold: &manifold,
+            failures: &failures,
+            origin: start.clone(),
+            dir: array![1e-9],
+            caps: Caps::default(),
+            bounds: None,
+            clip_stays: false,
+            failure: None,
+            slope_failure: None,
+            placed: false,
+        };
+        let mut linear = |x: ArrayView1<'_, f64>| (-x[0], array![-1.0]);
+        let (x, value, alpha) =
+            LineSearch::wolfe(1e-4, 0.1, 20).search_path(&mut linear, &mut path, 1e9);
+        assert_eq!(alpha, 0.0, "accepted alpha {alpha} at {x}");
+        assert_eq!(x, start);
+        assert_eq!(value, 0.0);
+    }
+
+    #[test]
+    fn unresolved_retraction_slope_is_a_typed_error() {
+        let origin = array![0.0, 1.0];
+        let dir = array![1.0, 0.0];
+        let t = f64::from_bits(1);
+        let at = Sphere.retract(&origin, &dir.mapv(|c| c * t));
+        let error = retraction_velocity(&Sphere, None, false, &origin, &dir, t, &at).unwrap_err();
+        assert!(matches!(error, Error::RcgSlope { t: got } if got == t));
+    }
+
+    fn rayleigh(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let a = [3.0, 1.0, 2.0];
+        let mut f = 0.0;
+        let mut g = Array1::zeros(3);
+        for i in 0..3 {
+            f += a[i] * x[i] * x[i];
+            g[i] = 2.0 * a[i] * x[i];
+        }
+        (f, g)
+    }
+
+    #[test]
+    fn sphere_rayleigh_reaches_the_smallest_eigenvalue() {
+        let sphere = Sphere;
+        let x = array![0.6, 0.48, 0.64];
+        for beta in [
+            RcgBeta::FletcherReeves,
+            RcgBeta::PrpPlus,
+            RcgBeta::HagerZhang,
+        ] {
+            let out = minimize_rcg(
+                &sphere,
+                x.clone(),
+                rayleigh,
+                &RcgOptions::default()
+                    .with_beta(beta)
+                    .with_grad_tol(1e-6)
+                    .with_max_iter(80),
+            )
+            .unwrap();
+            assert!(
+                (out.value - 1.0).abs() < 1e-6,
+                "{beta:?} f = {} after {}",
+                out.value,
+                out.iterations
+            );
+            assert!(out.grad_norm <= 1e-6, "{beta:?} grad {}", out.grad_norm);
+            assert!(out.x[1].abs() > 0.99, "{beta:?} x = {}", out.x);
+            let n = out.x.dot(&out.x).sqrt();
+            assert!((n - 1.0).abs() < 1e-8, "{beta:?} norm {n}");
+        }
+    }
+
+    /// `f = x0 x1` is stationary at the zero start, which is not on the
+    /// circle. Its retraction is, and there the gradient has a tangent part.
+    #[test]
+    fn a_zero_start_is_read_on_the_sphere() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let saddle = |x: ArrayView1<f64>| {
+            seen.borrow_mut().push(x.to_owned());
+            (x[0] * x[1], array![x[1], x[0]])
+        };
+        let opts = RcgOptions::default().with_grad_tol(1e-8).with_max_iter(0);
+        let out = minimize_rcg(&Sphere, Array1::zeros(2), saddle, &opts).unwrap();
+        assert_eq!(out.x, array![1.0, 0.0]);
+        assert!(out.grad_norm > 0.5, "grad_norm {}", out.grad_norm);
+        for p in seen.borrow().iter() {
+            assert!(
+                (p.dot(p).sqrt() - 1.0).abs() < 1e-15,
+                "read off the circle at {p}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cap_bounds_the_retracted_move_on_a_curved_manifold() {
+        let sphere = Sphere;
+        let x = array![0.6, 0.48, 0.64];
+        let (value, egrad) = rayleigh(x.view());
+        let caps = Caps {
+            atom: None,
+            euclid: Some(0.05),
+        };
+        let mut memory = RcgMemory::from_options(&RcgOptions::default());
+        // Strong Wolfe cannot meet curvature inside this cap. Armijo
+        // backtracking takes the opening trial, which the cap still bounds.
+        let moved = rcg_step(
+            &sphere,
+            &Infallible,
+            &mut memory,
+            &x,
+            value,
+            &egrad,
+            LineSearch::backtracking(1e-4, 0.5, 8),
+            caps,
+            None,
+            false,
+            rayleigh,
+        )
+        .unwrap();
+        let length = crate::vecops::nrm2_diff(moved.x.view(), x.view());
+        assert!(moved.alpha > 0.0, "no step");
+        assert!(length <= 0.05 * (1.0 + 1e-9), "moved {length}");
+        assert!(moved.value < value);
+    }
+
+    #[test]
+    fn a_bonded_sphere_is_tangent_to_both_and_retracts_onto_both() {
+        let x = array![0.6, 0.0, 0.0, 0.0, 0.8, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], x.view()).unwrap();
+        let bonded = BondedManifold::new(&Sphere, &set);
+        let egrad = array![0.3, -0.2, 1.0, 0.1, 0.5, 2.0];
+        let rgrad = bonded.egrad2rgrad(&x, &egrad);
+        let bond = |v: &Array1<f64>, w: &Array1<f64>| {
+            (0..3)
+                .map(|k| (v[k] - v[3 + k]) * (w[k] - w[3 + k]))
+                .sum::<f64>()
+        };
+        assert!(x.dot(&rgrad).abs() < 1e-12, "normal part {}", x.dot(&rgrad));
+        assert!(
+            bond(&x, &rgrad).abs() < 1e-12,
+            "bond part {}",
+            bond(&x, &rgrad)
+        );
+        let y = bonded.retract(&x, &rgrad.mapv(|c| -0.3 * c));
+        assert!((y.dot(&y).sqrt() - 1.0).abs() < 1e-12);
+        assert!(set.excess(y.view()) <= 1.0);
+        assert!(bonded.take().is_none());
+    }
+
+    /// A dimer of masses 1 and 16 on the x axis. The bond part of the
+    /// gradient is removed in the mass metric, and the covector left has
+    /// a bond component of 15/17 until `M^-1` raises it.
+    #[test]
+    fn a_mass_weighted_bonded_gradient_is_a_tangent_direction() {
+        let x = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], x.view())
+            .unwrap()
+            .with_masses(vec![1.0, 16.0])
+            .unwrap();
+        let bonded = BondedManifold::new(&crate::manifold::Euclidean, &set);
+        let egrad = array![1.0, 0.5, 0.0, 0.0, 0.0, -0.25];
+        let rgrad = bonded.egrad2rgrad(&x, &egrad);
+        let along: f64 = (0..3)
+            .map(|k| (x[3 + k] - x[k]) * (rgrad[3 + k] - rgrad[k]))
+            .sum();
+        assert!(along.abs() < 1e-12, "bond part {along}");
+        let v = bonded.project(&x, &array![0.3, -0.7, 0.2, 0.4, 0.1, -0.5]);
+        let slope = bonded.inner(&x, &rgrad, &v);
+        assert!(
+            (slope - egrad.dot(&v)).abs() < 1e-12,
+            "slope {slope} against {}",
+            egrad.dot(&v)
+        );
+        assert!(bonded.take().is_none());
+    }
+
+    fn brockett(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let a = [1.0, 2.0, 3.0, 4.0];
+        let nmu = [1.0, 2.0];
+        let mut f = 0.0;
+        let mut g = Array1::zeros(8);
+        for j in 0..2 {
+            let mut q = 0.0;
+            for i in 0..4 {
+                let xi = x[j * 4 + i];
+                q += a[i] * xi * xi;
+                g[j * 4 + i] = a[i] * nmu[j] * xi;
+            }
+            f += 0.5 * nmu[j] * q;
+        }
+        (f, g)
+    }
+
+    #[test]
+    fn stiefel_brockett_reaches_the_known_minimum() {
+        let stiefel = StiefelNp::new(4, 2).unwrap();
+        // The cost is the Brockett function from the retained-step test.
+        // The minimizer puts the larger weight on the smaller eigenvalue.
+        // A short retraction off that frame stays in its basin. The frame
+        // used as a cold start in that test is one retraction away from a
+        // different critical point.
+        let minimizer = array![0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
+        let step = stiefel.project(&minimizer, &array![0.0, 0.0, 0.3, 0.1, 0.0, 0.2, 0.0, 0.15]);
+        let x = stiefel.retract(&minimizer, &step);
+        let (start_value, _) = brockett(x.view());
+        assert!(start_value > 2.05, "start f {start_value}");
+        let out = minimize_rcg(
+            &stiefel,
+            x,
+            brockett,
+            &RcgOptions::default()
+                .with_beta(RcgBeta::HagerZhang)
+                .with_grad_tol(1e-6)
+                .with_max_iter(120),
+        )
+        .unwrap();
+        assert!(
+            (out.value - 2.0).abs() < 1e-4,
+            "f = {} after {}",
+            out.value,
+            out.iterations
+        );
+        assert!(out.grad_norm <= 1e-5, "grad {}", out.grad_norm);
+        let mut gram = [[0.0; 2]; 2];
+        for j in 0..2 {
+            for k in 0..2 {
+                let mut dot = 0.0;
+                for i in 0..4 {
+                    dot += out.x[j * 4 + i] * out.x[k * 4 + i];
+                }
+                gram[j][k] = dot;
+            }
+        }
+        assert!((gram[0][0] - 1.0).abs() < 1e-6, "{gram:?}");
+        assert!((gram[1][1] - 1.0).abs() < 1e-6, "{gram:?}");
+        assert!(gram[0][1].abs() < 1e-6, "{gram:?}");
+    }
+
+    fn rosenbrock(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let t = x[1] - x[0] * x[0];
+        let f = 100.0 * t * t + (1.0 - x[0]) * (1.0 - x[0]);
+        let g = array![-400.0 * x[0] * t + 2.0 * (x[0] - 1.0), 200.0 * t];
+        (f, g)
+    }
+
+    #[test]
+    fn euclidean_rosenbrock_with_identity_transport() {
+        let out = minimize_rcg(
+            &crate::manifold::Euclidean,
+            array![-1.2, 1.0],
+            rosenbrock,
+            &RcgOptions::default()
+                .with_transport(RcgTransport::Identity)
+                .with_grad_tol(1e-6)
+                .with_max_iter(300),
+        )
+        .unwrap();
+        assert!(
+            out.value < 1e-8,
+            "f = {} after {} restarts {}",
+            out.value,
+            out.iterations,
+            out.restarts
+        );
+        assert!((out.x[0] - 1.0).abs() < 1e-4, "{}", out.x);
+        assert!((out.x[1] - 1.0).abs() < 1e-4, "{}", out.x);
+    }
+
+    /// A transport that multiplies every vector by 20.
+    ///
+    /// Orthogonal projections never lengthen a vector, so the sphere cannot
+    /// show the scale. Sato and Iwai scale only when the image is longer.
+    struct Inflate;
+
+    const INFLATE: f64 = 20.0;
+
+    impl Manifold for Inflate {
+        fn project(&self, _x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+            v.clone()
+        }
+        fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+            let mut y = x.clone();
+            crate::vecops::axpy(1.0, v.view(), &mut y);
+            y
+        }
+        fn transport(
+            &self,
+            _x_from: &Array1<f64>,
+            _x_to: &Array1<f64>,
+            v: &Array1<f64>,
+        ) -> Array1<f64> {
+            v.mapv(|c| c * INFLATE)
+        }
+    }
+
+    #[test]
+    fn scaled_transport_keeps_the_fletcher_reeves_direction_in_descent() {
+        // g_old = (1, 0), d = -g_old, g_new = (-0.1, 0). The raw image has
+        // length 20. Fletcher-Reeves then gives beta = 0.01, and
+        // -g_new + beta * T_raw(d) = (-0.1, 0) has a positive slope.
+        // The scaled image keeps the length, and the slope stays negative,
+        // so the update is not restarted.
+        let from = array![0.0, 0.0];
+        let to = array![1.0, 0.0];
+        let g_from = array![1.0, 0.0];
+        let g_to = array![-0.1, 0.0];
+        let d_from = array![-1.0, 0.0];
+        let carried = scaled_transport(&Inflate, &from, &to, &d_from, RcgTransport::Scaled);
+        let carried_norm = Inflate.norm(&to, &carried);
+        let from_norm = Inflate.norm(&from, &d_from);
+        assert!(
+            carried_norm <= from_norm + 1e-12,
+            "scaled length {carried_norm} exceeds {from_norm}"
+        );
+        let (dir, restarted) = next_direction(
+            &Inflate,
+            RcgBeta::FletcherReeves,
+            RcgTransport::Scaled,
+            &from,
+            &to,
+            &g_from,
+            &g_to,
+            &g_to,
+            &d_from,
+        );
+        assert!(
+            !restarted,
+            "scaled update was restarted; slope {}",
+            Inflate.inner(&to, &g_to, &dir)
+        );
+        assert!(
+            Inflate.inner(&to, &g_to, &dir) < 0.0,
+            "slope {}",
+            Inflate.inner(&to, &g_to, &dir)
+        );
+        let raw = Inflate.transport(&from, &to, &d_from);
+        let beta = div(g_to.dot(&g_to), g_from.dot(&g_from));
+        let mut raw_dir = negated(&g_to);
+        crate::vecops::axpy(beta, raw.view(), &mut raw_dir);
+        assert!(
+            Inflate.inner(&to, &g_to, &raw_dir) > 0.0,
+            "the unscaled direction was expected to ascend"
+        );
+    }
+
+    /// A conjugate direction on the Poincare ball is the tangent vector
+    /// `-g + beta T(d)`. The tangent projection is the identity, so the
+    /// stored direction keeps that vector. Dividing by `lambda^2` is the
+    /// gradient conversion and shortens it.
+    #[test]
+    fn poincare_conjugate_direction_keeps_its_tangent_vector() {
+        let ball = crate::manifold::PoincareBall;
+        let x_from = array![0.0, 0.0];
+        let x_to = array![0.5, 0.0];
+        let g_from = array![1.0, 0.0];
+        let g_to = array![0.4, -0.2];
+        let d_from = negated(&g_from);
+        let lambda = 2.0 / (1.0 - x_to.dot(&x_to));
+        let egrad_to = &g_to * (lambda * lambda);
+        let (dir, restarted) = next_direction(
+            &ball,
+            RcgBeta::FletcherReeves,
+            RcgTransport::Scaled,
+            &x_from,
+            &x_to,
+            &g_from,
+            &g_to,
+            &egrad_to,
+            &d_from,
+        );
+        assert!(!restarted, "a descending combination was replaced");
+        let g_carried = scaled_transport(&ball, &x_from, &x_to, &g_from, RcgTransport::Scaled);
+        let d_carried = scaled_transport(&ball, &x_from, &x_to, &d_from, RcgTransport::Scaled);
+        let beta = coefficient(
+            &ball,
+            RcgBeta::FletcherReeves,
+            &x_from,
+            &x_to,
+            &g_from,
+            &g_to,
+            &d_from,
+            &g_carried,
+            &d_carried,
+        );
+        let mut expect = negated(&g_to);
+        crate::vecops::axpy(beta, d_carried.view(), &mut expect);
+        let scale = crate::vecops::nrm2(expect.view());
+        let gap = crate::vecops::nrm2_diff(dir.view(), expect.view()) / scale;
+        assert!(gap <= 1e-9, "direction {dir} want {expect}, relative {gap}");
+        let scaled = ball.project(&x_to, &expect);
+        let collapsed = crate::vecops::nrm2_diff(dir.view(), scaled.view()) / scale;
+        assert!(
+            collapsed > 1e-2,
+            "direction matches the gradient scaling {scaled}"
+        );
+    }
+
+    /// A conjugate step that does not descend restarts at `-g`. That
+    /// vector is already the Riemannian gradient, so the restart must
+    /// not divide it by `lambda^2` again.
+    #[test]
+    fn poincare_restart_keeps_the_negative_riemannian_gradient() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.5, 0.0];
+        let g = array![1.0, 0.3];
+        let lambda = 2.0 / (1.0 - 0.25);
+        let egrad = &g * (lambda * lambda);
+        let (dir, restarted) = next_direction(
+            &ball,
+            RcgBeta::FletcherReeves,
+            RcgTransport::Identity,
+            &x,
+            &x,
+            &g,
+            &g,
+            &egrad,
+            &g,
+        );
+        assert!(restarted);
+        let expect = negated(&g);
+        let gap = crate::vecops::nrm2_diff(dir.view(), expect.view())
+            / crate::vecops::nrm2(expect.view());
+        assert!(gap <= 1e-9, "restart {dir} want {expect}, relative {gap}");
+    }
+
+    /// With one coordinate on a wall, the feasible tangent zeros the
+    /// outward component and leaves the free component alone. Scaling by
+    /// `1/lambda^2` is not that projection.
+    #[test]
+    fn poincare_feasible_tangent_keeps_the_free_component() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.0, 0.2];
+        let bounds = eindir_core::Bounds::new(array![0.0, -0.5], array![0.8, 0.8], 0.0);
+        let dir = array![-0.3, 0.4];
+        let got = feasible_tangent(&ball, &bounds, &x, &dir);
+        let expect = array![0.0, 0.4];
+        let gap = crate::vecops::nrm2_diff(got.view(), expect.view())
+            / crate::vecops::nrm2(expect.view());
+        assert!(
+            gap <= 1e-9,
+            "feasible tangent {got} want {expect}, relative {gap}"
+        );
+    }
+
+    /// The ball's transport is the identity, so a vector carried outward
+    /// lengthens by `lambda(to) / lambda(from) = (8 / 3) / 2` in the
+    /// conformal metric, and the scaled transport shortens it back.
+    #[test]
+    fn scaled_transport_on_the_poincare_ball_reads_the_conformal_metric() {
+        let ball = crate::manifold::PoincareBall;
+        let from = array![0.0, 0.0];
+        let to = array![0.5, 0.0];
+        let v = array![1.0, 0.0];
+        let carried = scaled_transport(&ball, &from, &to, &v, RcgTransport::Scaled);
+        assert!((carried[0] - 0.75).abs() < 1e-14, "{carried}");
+        assert!((ball.norm(&to, &carried) - ball.norm(&from, &v)).abs() < 1e-14);
+    }
+
+    #[test]
+    fn identity_transport_copies_the_vector() {
+        let from = array![0.0, 0.0];
+        let to = array![1.0, 0.0];
+        let v = array![-1.0, 0.0];
+        let copied = scaled_transport(&Inflate, &from, &to, &v, RcgTransport::Identity);
+        assert_eq!(copied, v);
+    }
+
+    #[test]
+    fn session_on_a_bond_matches_the_bond_manifold_step() {
+        let start = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let constraints = DistanceConstraints::at(vec![(0, 1)], start.view()).unwrap();
+        let fg = |x: ArrayView1<f64>| {
+            let f = 0.5 * (x[1] * x[1] + (x[4] - 1.0) * (x[4] - 1.0));
+            let mut g = Array1::zeros(6);
+            g[1] = x[1];
+            g[4] = x[4] - 1.0;
+            (f, g)
+        };
+        let mut session_x = start.clone();
+        let mut solver = Solver::new(
+            Method::rcg(),
+            Control::default().with_gtol(1e-12).with_maxiter(4),
+            6,
+        );
+        solver
+            .set_distance_constraints(DistanceConstraints::at(vec![(0, 1)], start.view()).unwrap())
+            .unwrap();
+        let obj = Oracle::unbounded(6, fg);
+        let mut direct = start.clone();
+        let mut memory = RcgMemory::from_options(&RcgOptions::default());
+        let bond = BondedManifold::new(&crate::manifold::Euclidean, &constraints);
+        for _ in 0..2 {
+            let (value, grad) = fg(direct.view());
+            let moved = rcg_step(
+                &bond,
+                &bond,
+                &mut memory,
+                &direct,
+                value,
+                &grad,
+                RcgOptions::default().linesearch,
+                Caps::default(),
+                None,
+                false,
+                fg,
+            )
+            .unwrap();
+            direct = moved.x;
+            solver.step(&obj, &mut session_x).unwrap();
+        }
+        for (a, b) in session_x.iter().zip(direct.iter()) {
+            assert!((a - b).abs() < 1e-8, "session {session_x} direct {direct}");
+        }
+        let bond_vec = array![
+            session_x[3] - session_x[0],
+            session_x[4] - session_x[1],
+            session_x[5] - session_x[2],
+        ];
+        let distance = bond_vec.dot(&bond_vec).sqrt();
+        assert!((distance - 1.0).abs() < 1e-8, "distance {distance}");
+        let energy = fg(session_x.view()).0;
+        assert!(energy < 0.5, "energy {energy}");
+    }
+
+    fn assert_same(got: &Array1<f64>, want: &Array1<f64>) {
+        let scale = 1.0 + crate::vecops::nrm2(want.view());
+        let gap = crate::vecops::nrm2_diff(got.view(), want.view());
+        assert!(gap <= 1e-12 * scale, "got {got}, want {want}, gap {gap}");
+    }
+
+    /// `-g_to + beta * T d_from`, then the tangent projection. This is the
+    /// Riemannian recurrence. It does not call [`Manifold::project`].
+    fn tangent_combination<M>(
+        manifold: &M,
+        beta_kind: RcgBeta,
+        x_from: &Array1<f64>,
+        x_to: &Array1<f64>,
+        g_from: &Array1<f64>,
+        g_to: &Array1<f64>,
+        d_from: &Array1<f64>,
+    ) -> Array1<f64>
+    where
+        M: Manifold + ?Sized,
+    {
+        let g_carried = scaled_transport(manifold, x_from, x_to, g_from, RcgTransport::Scaled);
+        let d_carried = scaled_transport(manifold, x_from, x_to, d_from, RcgTransport::Scaled);
+        let beta = coefficient(
+            manifold, beta_kind, x_from, x_to, g_from, g_to, d_from, &g_carried, &d_carried,
+        );
+        let mut next = negated(g_to);
+        if beta.is_finite() {
+            crate::vecops::axpy(beta, d_carried.view(), &mut next);
+        }
+        manifold.to_tangent(x_to, &next)
+    }
+
+    fn assert_direction_is_riemannian<M>(
+        manifold: &M,
+        beta: RcgBeta,
+        x_from: &Array1<f64>,
+        x_to: &Array1<f64>,
+        e_from: &Array1<f64>,
+        e_to: &Array1<f64>,
+    ) where
+        M: Manifold + ?Sized,
+    {
+        let g_from = manifold.egrad2rgrad(x_from, e_from);
+        let g_to = manifold.egrad2rgrad(x_to, e_to);
+        let d_from = negated(&g_from);
+        let want = tangent_combination(manifold, beta, x_from, x_to, &g_from, &g_to, &d_from);
+        let (dir, restarted) = next_direction(
+            manifold,
+            beta,
+            RcgTransport::Scaled,
+            x_from,
+            x_to,
+            &g_from,
+            &g_to,
+            e_to,
+            &d_from,
+        );
+        assert!(!restarted, "{beta:?} replaced the direction with {dir}");
+        assert_same(&dir, &want);
+        let tangent = manifold.to_tangent(x_to, &dir);
+        assert_same(&dir, &tangent);
+        // The gradient conversion of an already Riemannian vector is a
+        // different map on these metrics.
+        let converted = manifold.egrad2rgrad(x_to, &want);
+        let scale = 1.0 + crate::vecops::nrm2(want.view());
+        let gap = crate::vecops::nrm2_diff(dir.view(), converted.view());
+        assert!(
+            gap > 1e-8 * scale,
+            "{beta:?} applied the gradient map: {dir} against {converted}"
+        );
+    }
+
+    /// PRP+ and Fletcher-Reeves on a two-step chain. Dividing the stored
+    /// direction by `lambda^2` reverses the first component of the second
+    /// step. The Riemannian directions keep both components negative, and
+    /// the Fletcher-Reeves component ratio is 1.57.
+    #[test]
+    fn poincare_conjugate_directions_keep_the_riemannian_components() {
+        let ball = crate::manifold::PoincareBall;
+        let points = [array![0.3, -0.2], array![0.5, 0.0], array![0.3, -0.2]];
+        let egrads = [array![1.5, -0.5], array![1.5, -0.5], array![-0.2, 1.0]];
+        let grads: Vec<_> = points
+            .iter()
+            .zip(egrads.iter())
+            .map(|(x, e)| ball.egrad2rgrad(x, e))
+            .collect();
+        for beta in [RcgBeta::PrpPlus, RcgBeta::FletcherReeves] {
+            let mut stored = negated(&grads[0]);
+            for step in 0..2 {
+                let want = tangent_combination(
+                    &ball,
+                    beta,
+                    &points[step],
+                    &points[step + 1],
+                    &grads[step],
+                    &grads[step + 1],
+                    &stored,
+                );
+                let (dir, restarted) = next_direction(
+                    &ball,
+                    beta,
+                    RcgTransport::Scaled,
+                    &points[step],
+                    &points[step + 1],
+                    &grads[step],
+                    &grads[step + 1],
+                    &egrads[step + 1],
+                    &stored,
+                );
+                assert!(!restarted, "{beta:?} step {step} restarted at {dir}");
+                assert_same(&dir, &want);
+                stored = dir;
+            }
+            assert!(
+                stored[0] < 0.0 && stored[1] < 0.0,
+                "{beta:?} reversed a component: {stored}"
+            );
+            if beta == RcgBeta::FletcherReeves {
+                let ratio = stored[0].abs() / stored[1].abs();
+                assert!(
+                    (ratio - 1.5700135074290853).abs() < 1e-9,
+                    "Fletcher-Reeves component ratio {ratio}, direction {stored}"
+                );
+            }
+        }
+    }
+
+    /// A non-descent coefficient is replaced by minus the Riemannian
+    /// gradient, not by that vector divided by `lambda^2`.
+    #[test]
+    fn poincare_steepest_fallback_is_minus_the_riemannian_gradient() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.4, -0.2];
+        let g = array![1.0, -0.25];
+        let (dir, restarted) = next_direction(
+            &ball,
+            RcgBeta::FletcherReeves,
+            RcgTransport::Scaled,
+            &x,
+            &x,
+            &g,
+            &g,
+            &g,
+            &g,
+        );
+        assert!(restarted);
+        assert_same(&dir, &negated(&g));
+        let scaled = ball.project(&x, &negated(&g));
+        let gap = crate::vecops::nrm2_diff(dir.view(), scaled.view());
+        assert!(gap > 1e-6, "fallback was the gradient map: {dir}");
+    }
+
+    /// Dykstra's projection of a tangent vector onto the tangent cone is
+    /// idempotent. `project` on the ball is not.
+    #[test]
+    fn poincare_dykstra_projection_is_idempotent() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.3, -0.2];
+        let bounds = eindir_core::Bounds::new(array![-1.0e6, x[1]], array![1.0e6, 1.0e6], 0.0);
+        let dir = array![0.4, -0.5];
+        let once = feasible_tangent(&ball, &bounds, &x, &dir);
+        let twice = feasible_tangent(&ball, &bounds, &x, &once);
+        assert_same(&once, &twice);
+        assert!((once[0] - 0.4).abs() <= 1e-12, "{once}");
+        assert!(once[1].abs() <= 1e-12, "{once}");
+    }
+
+    #[test]
+    fn hyperbolic_positive_and_spd_directions_stay_riemannian() {
+        let from = crate::manifold::pack(0.2_f64.cosh(), array![0.2_f64.sinh()].view());
+        let to = crate::manifold::pack(0.5_f64.cosh(), array![0.5_f64.sinh()].view());
+        let e_from = array![0.3, -0.2];
+        let e_to = array![-0.1, -0.3];
+        for beta in [RcgBeta::PrpPlus, RcgBeta::FletcherReeves] {
+            assert_direction_is_riemannian(
+                &crate::manifold::Hyperbolic,
+                beta,
+                &from,
+                &to,
+                &e_from,
+                &e_to,
+            );
+            let (dir, _) = next_direction(
+                &crate::manifold::Hyperbolic,
+                beta,
+                RcgTransport::Scaled,
+                &from,
+                &to,
+                &crate::manifold::Hyperbolic.egrad2rgrad(&from, &e_from),
+                &crate::manifold::Hyperbolic.egrad2rgrad(&to, &e_to),
+                &e_to,
+                &negated(&crate::manifold::Hyperbolic.egrad2rgrad(&from, &e_from)),
+            );
+            assert!(
+                crate::manifold::minkowski(to.view(), dir.view()).abs() <= 1e-12,
+                "left the tangent space {dir}"
+            );
+        }
+
+        let positive = crate::manifold::Positive { n: 2 };
+        let x_from = array![2.0, 0.5];
+        let x_to = array![1.2, 0.8];
+        for beta in [RcgBeta::PrpPlus, RcgBeta::FletcherReeves] {
+            assert_direction_is_riemannian(
+                &positive,
+                beta,
+                &x_from,
+                &x_to,
+                &array![0.4, -0.3],
+                &array![-0.2, 0.5],
+            );
+        }
+
+        let spd_from = crate::manifold::pack_spd(2, vec![2.0, 0.1, 0.1, 3.0]);
+        let spd_to = crate::manifold::pack_spd(2, vec![1.4, -0.2, -0.2, 2.2]);
+        let spd_e_from = crate::manifold::pack_spd(2, vec![0.3, -0.1, -0.1, 0.5]);
+        let spd_e_to = crate::manifold::pack_spd(2, vec![-0.2, 0.4, 0.4, 0.1]);
+        for beta in [RcgBeta::PrpPlus, RcgBeta::FletcherReeves] {
+            assert_direction_is_riemannian(
+                &crate::manifold::Spd,
+                beta,
+                &spd_from,
+                &spd_to,
+                &spd_e_from,
+                &spd_e_to,
+            );
+            let g_from = crate::manifold::Spd.egrad2rgrad(&spd_from, &spd_e_from);
+            let g_to = crate::manifold::Spd.egrad2rgrad(&spd_to, &spd_e_to);
+            let (dir, _) = next_direction(
+                &crate::manifold::Spd,
+                beta,
+                RcgTransport::Scaled,
+                &spd_from,
+                &spd_to,
+                &g_from,
+                &g_to,
+                &spd_e_to,
+                &negated(&g_from),
+            );
+            assert_same(&dir, &crate::manifold::Spd.project(&spd_to, &dir));
+        }
+    }
+
+    #[test]
+    fn hyperbolic_dykstra_projection_is_idempotent() {
+        let x = crate::manifold::pack(0.3_f64.cosh(), array![0.3_f64.sinh()].view());
+        let bounds = eindir_core::Bounds::new(array![-1.0e6, x[1]], array![1.0e6, 1.0e6], 0.0);
+        let dir = array![0.2, -0.4];
+        let once = feasible_tangent(&crate::manifold::Hyperbolic, &bounds, &x, &dir);
+        let twice = feasible_tangent(&crate::manifold::Hyperbolic, &bounds, &x, &once);
+        assert_same(&once, &twice);
+        assert!(crate::manifold::minkowski(x.view(), once.view()).abs() <= 1e-12);
+    }
+
+    #[test]
+    fn a_bonded_poincare_gradient_is_converted_once() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.2, 0.0, 0.0, 0.3, 0.0, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], x.view())
+            .unwrap()
+            .with_masses(vec![1.0, 4.0])
+            .unwrap();
+        let bonded = BondedManifold::new(&ball, &set);
+        let egrad = array![0.4, -0.2, 0.1, 0.05, 0.3, -0.15];
+        let rgrad = bonded.egrad2rgrad(&x, &egrad);
+        let v = bonded.to_tangent(&x, &array![0.02, 0.01, -0.01, -0.03, 0.02, 0.0]);
+        let slope = bonded.inner(&x, &rgrad, &v);
+        let deriv = egrad.dot(&v);
+        assert!(
+            (slope - deriv).abs() <= 1e-12 * (1.0 + deriv.abs()),
+            "slope {slope} against {deriv}"
+        );
+        assert!(bonded.take().is_none());
+    }
+
+    #[test]
+    fn a_bonded_poincare_transport_does_not_rescale() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.2, 0.0, 0.0, 0.3, 0.0, 0.0];
+        let y = array![0.1, 0.05, 0.0, 0.2, -0.05, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], x.view()).unwrap();
+        let bonded = BondedManifold::new(&ball, &set);
+        let v = bonded.to_tangent(&x, &array![0.02, 0.01, -0.01, -0.03, 0.02, 0.01]);
+        let carried = bonded.transport(&x, &y, &v);
+        let want = bonded.to_tangent(&y, &ball.transport(&x, &y, &v));
+        assert_same(&carried, &want);
+        assert!(bonded.take().is_none());
+        let scaled = ball.project(&y, &want);
+        let gap = crate::vecops::nrm2_diff(carried.view(), scaled.view());
+        assert!(gap > 1e-6, "transport divided by lambda squared: {carried}");
+    }
+}

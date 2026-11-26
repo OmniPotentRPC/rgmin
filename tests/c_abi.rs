@@ -15,11 +15,12 @@ use rgmin::ffi::{
     rgmin_exp_t, rgmin_gromacs_steep_max_constraint_shrinks, rgmin_last_error,
     rgmin_lowest_eigenpair, rgmin_lowest_eigenpairs, rgmin_lowest_eigenpairs_ex,
     rgmin_lowest_mode_t, rgmin_method_from_name, rgmin_method_t, rgmin_minimize,
-    rgmin_minimize_eindir, rgmin_minimize_eindir_opts, rgmin_minimize_opts, rgmin_minimize_scg,
-    rgmin_precond_fn, rgmin_report_t, rgmin_scg_params_t, rgmin_solver_clear_exp,
-    rgmin_solver_create, rgmin_solver_exp_mu, rgmin_solver_free, rgmin_solver_gradient_calls,
-    rgmin_solver_hvp_calls, rgmin_solver_set_accept, rgmin_solver_set_exp,
-    rgmin_solver_set_gromacs_cg, rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
+    rgmin_minimize_eindir, rgmin_minimize_eindir_opts, rgmin_minimize_opts, rgmin_minimize_rcg,
+    rgmin_minimize_scg, rgmin_precond_fn, rgmin_rcg_options_default, rgmin_report_t,
+    rgmin_scg_params_t, rgmin_solver_clear_exp, rgmin_solver_create, rgmin_solver_exp_mu,
+    rgmin_solver_free, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
+    rgmin_solver_set_accept, rgmin_solver_set_exp, rgmin_solver_set_gromacs_cg,
+    rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
     rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
     rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
     rgmin_tensor_free,
@@ -1201,6 +1202,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
     assert_eq!(status, rgmin_status_t::RGMIN_UNAVAILABLE);
 }
 
+/// ABI minor 65 adds `rgmin_rcg_options_default` and `rgmin_minimize_rcg`.
 /// ABI minor 57 adds `RGMIN_STOP_LINE_SEARCH_ROUNDING`.
 /// ABI minor 54 adds `RGMIN_GROMACS_CG` and `rgmin_solver_set_gromacs_cg`.
 /// ABI minor 56 adds `rgmin_manifold_rigid_quotient`, `rgmin_rtr_tcg_solve`,
@@ -1232,7 +1234,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 64);
+    assert_eq!(stamp.abi_minor, 65);
     assert_eq!(stamp.layout_revision, 6);
     assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING as i32, 9);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
@@ -5446,4 +5448,268 @@ fn gromacs_cg_zero_nstcgsteep_keeps_the_second_conjugate_step_across_c_abi() {
     assert_ne!(default, zero);
     let energy = |p: [f64; 3]| p[0] * p[0] + 5.0 * p[1] * p[1];
     assert!(energy(zero) < energy(default), "{zero:?} vs {default:?}");
+}
+
+unsafe extern "C" fn rcg_quad_eval(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 2);
+    unsafe {
+        let x0 = *p;
+        let x1 = *p.add(1);
+        *value_out = x0 * x0 + x1 * x1;
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn rcg_quad_grad(
+    _user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    let (p, n) = unsafe { cpu_f64(x) };
+    assert_eq!(n, 2);
+    let (gp, gn) = unsafe { cpu_f64(g as *const _) };
+    assert_eq!(gn, 2);
+    unsafe {
+        *(gp as *mut f64) = 2.0 * *p;
+        *(gp as *mut f64).add(1) = 2.0 * *p.add(1);
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+#[test]
+fn c_abi_rcg_matches_the_rust_quadratic() {
+    let defaults = rgmin_rcg_options_default();
+    assert_eq!(defaults.beta, 1);
+    assert_eq!(defaults.transport, 0);
+    assert_eq!(defaults.linesearch, 0);
+    let mut x = [1.5, -0.75];
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    assert!(!xt.is_null());
+    let mut options = defaults;
+    options.grad_tol = 1e-8;
+    options.max_iter = 40;
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+        converged: 0,
+    };
+    let st = unsafe {
+        rgmin_minimize_rcg(
+            Some(rcg_quad_eval),
+            Some(rcg_quad_grad),
+            std::ptr::null_mut(),
+            xt,
+            &options,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(out.value < 1e-12, "C value {}", out.value);
+    assert!(out.grad_norm <= 1e-8, "C grad {}", out.grad_norm);
+    let rust = rgmin::minimize_rcg(
+        &rgmin::manifold::Euclidean,
+        ndarray::array![1.5, -0.75],
+        |p: ndarray::ArrayView1<f64>| {
+            let f = p[0] * p[0] + p[1] * p[1];
+            let g = ndarray::array![2.0 * p[0], 2.0 * p[1]];
+            (f, g)
+        },
+        &rgmin::RcgOptions::default()
+            .with_grad_tol(1e-8)
+            .with_max_iter(40),
+    )
+    .unwrap();
+    assert!((x[0] - rust.x[0]).abs() < 1e-8, "x {x:?} rust {}", rust.x);
+    assert!((x[1] - rust.x[1]).abs() < 1e-8, "x {x:?} rust {}", rust.x);
+    assert_eq!(out.steps, rust.iterations);
+    let mut bad = options;
+    bad.beta = 9;
+    let mut y = [1.0, 1.0];
+    let yt = unsafe { rgmin_tensor_borrow_cpu_f64(y.as_mut_ptr(), 2) };
+    let bad_st = unsafe {
+        rgmin_minimize_rcg(
+            Some(rcg_quad_eval),
+            Some(rcg_quad_grad),
+            std::ptr::null_mut(),
+            yt,
+            &bad,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(yt) };
+    assert_eq!(bad_st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+}
+
+fn rcg_report() -> rgmin_report_t {
+    rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_BUDGET,
+        converged: 0,
+    }
+}
+
+type RcgEval = Option<
+    unsafe extern "C" fn(*mut c_void, *const DLManagedTensorVersioned, *mut f64) -> rgmin_status_t,
+>;
+type RcgGrad = Option<
+    unsafe extern "C" fn(
+        *mut c_void,
+        *const DLManagedTensorVersioned,
+        *mut DLManagedTensorVersioned,
+    ) -> rgmin_status_t,
+>;
+
+/// One call of the C entry point on a borrowed two-vector. A null
+/// `x_ptr` passes a null tensor.
+fn rcg_call(
+    eval: RcgEval,
+    grad: RcgGrad,
+    start: Option<[f64; 2]>,
+    options: Option<&rgmin::ffi::rgmin_rcg_options_t>,
+    out: Option<&mut rgmin_report_t>,
+) -> (rgmin_status_t, [f64; 2]) {
+    let mut x = start.unwrap_or([0.0; 2]);
+    let xt = match start {
+        Some(_) => unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) },
+        None => std::ptr::null_mut(),
+    };
+    let status = unsafe {
+        rgmin_minimize_rcg(
+            eval,
+            grad,
+            std::ptr::null_mut(),
+            xt,
+            options.map_or(std::ptr::null(), |o| o as *const _),
+            out.map_or(std::ptr::null_mut(), |o| o as *mut _),
+        )
+    };
+    if !xt.is_null() {
+        unsafe { rgmin_tensor_free(xt) };
+    }
+    (status, x)
+}
+
+#[test]
+fn c_abi_rcg_refuses_null_pointers() {
+    let mut out = rcg_report();
+    let (st, _) = rcg_call(
+        None,
+        Some(rcg_quad_grad),
+        Some([1.0, 1.0]),
+        None,
+        Some(&mut out),
+    );
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    assert!(
+        last_error_text().contains("eval is NULL"),
+        "{}",
+        last_error_text()
+    );
+
+    let (st, _) = rcg_call(
+        Some(rcg_quad_eval),
+        None,
+        Some([1.0, 1.0]),
+        None,
+        Some(&mut out),
+    );
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    assert!(
+        last_error_text().contains("grad is NULL"),
+        "{}",
+        last_error_text()
+    );
+
+    let (st, x) = rcg_call(
+        Some(rcg_quad_eval),
+        Some(rcg_quad_grad),
+        Some([1.0, 1.0]),
+        None,
+        None,
+    );
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    assert!(
+        last_error_text().contains("out is NULL"),
+        "{}",
+        last_error_text()
+    );
+    assert_eq!(x, [1.0, 1.0]);
+
+    let (st, _) = rcg_call(
+        Some(rcg_quad_eval),
+        Some(rcg_quad_grad),
+        None,
+        None,
+        Some(&mut out),
+    );
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+}
+
+#[test]
+fn c_abi_rcg_takes_null_options_as_the_defaults() {
+    let mut out = rcg_report();
+    let (st, x) = rcg_call(
+        Some(rcg_quad_eval),
+        Some(rcg_quad_grad),
+        Some([1.5, -0.75]),
+        None,
+        Some(&mut out),
+    );
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(x[0].abs() < 1e-6 && x[1].abs() < 1e-6, "{x:?}");
+}
+
+#[test]
+fn c_abi_rcg_refuses_options_and_starts_it_cannot_read() {
+    let base = rgmin_rcg_options_default();
+    let mut tags = [base; 3];
+    tags[0].beta = 3;
+    tags[1].transport = 2;
+    tags[2].linesearch = 2;
+    let mut numbers = [base; 7];
+    numbers[0].grad_tol = f64::NAN;
+    numbers[1].grad_tol = f64::INFINITY;
+    numbers[2].grad_tol = -1e-8;
+    numbers[3].initial_step = f64::NAN;
+    numbers[4].initial_step = f64::INFINITY;
+    numbers[5].initial_step = 0.0;
+    numbers[6].initial_step = -1.0;
+    for options in tags.iter().chain(numbers.iter()) {
+        let mut out = rcg_report();
+        let (st, x) = rcg_call(
+            Some(rcg_quad_eval),
+            Some(rcg_quad_grad),
+            Some([1.0, 1.0]),
+            Some(options),
+            Some(&mut out),
+        );
+        assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{options:?}");
+        assert_eq!(x, [1.0, 1.0], "a refused call leaves x alone: {options:?}");
+    }
+    for start in [[f64::NAN, 1.0], [1.0, f64::INFINITY]] {
+        let mut out = rcg_report();
+        let (st, _) = rcg_call(
+            Some(rcg_quad_eval),
+            Some(rcg_quad_grad),
+            Some(start),
+            None,
+            Some(&mut out),
+        );
+        assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER, "{start:?}");
+        assert!(
+            last_error_text().contains("non-finite"),
+            "{}",
+            last_error_text()
+        );
+    }
 }

@@ -45,9 +45,7 @@ use crate::qn::{
 use crate::qn_step::QnStep;
 use crate::report::{Report, Status};
 use crate::rigid::project_horizontal;
-use crate::step::{
-    apply_caps, finite, l2, max_atom_motion, next_istep, non_finite, scale_displacement_to_atom_cap,
-};
+use crate::step::{Caps, finite, l2, next_istep, non_finite, scale_displacement_to_atom_cap};
 use crate::trust::{
     accept_ratio, dogleg_direction, predicted_reduction, reduction_ratio, update_radius,
 };
@@ -60,19 +58,6 @@ const CURVE_BACKTRACK: LineSearch = LineSearch::Backtracking {
     beta: 0.5,
     maxiter: HALVINGS,
 };
-
-/// Displacement caps an unconstrained trial would take.
-#[derive(Clone, Copy)]
-struct Caps {
-    atom: Option<f64>,
-    euclid: Option<f64>,
-}
-
-impl Caps {
-    fn apply(self, origin: &Array1<f64>, trial: &mut Array1<f64>) {
-        apply_caps(origin, trial, self.atom, self.euclid);
-    }
-}
 
 /// The set at one point, with the mass weights of `q`.
 struct Space<'a> {
@@ -639,7 +624,8 @@ impl Solver {
     /// The settings a constrained step cannot honour, as typed errors.
     pub(super) fn refuse_constraint_settings(&self, set: &DistanceConstraints) -> Result<()> {
         set.fits(self.dim)?;
-        if self.manifold != ManifoldKind::Euclidean {
+        // Riemannian CG cuts its manifold by the set instead of leaving it.
+        if self.manifold != ManifoldKind::Euclidean && !matches!(self.overlay, Overlay::Rcg(_)) {
             return Err(unsupported("a manifold other than Euclidean coordinates"));
         }
         if self.exp.is_some() {
@@ -936,12 +922,7 @@ impl Solver {
         clip_free(&space.bonded, obj.bounds(), &mut trial);
         let mut t = lsstep;
         let caps = self.caps();
-        let reach = match (caps.atom, caps.euclid) {
-            (Some(cap), _) => Some((cap, max_atom_motion(x, &trial))),
-            (None, Some(cap)) => Some((cap, crate::vecops::nrm2_diff(trial.view(), x.view()))),
-            (None, None) => None,
-        };
-        if let Some((cap, length)) = reach.filter(|&(cap, length)| length > cap) {
+        if let Some((cap, length)) = caps.reach(x, &trial).filter(|&(cap, length)| length > cap) {
             t *= cap / length;
             trial = x + &(dir * t);
             space.finish(obj.bounds(), &mut trial)?;
