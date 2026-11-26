@@ -138,6 +138,17 @@ pub trait Preconditioner {
     fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error>;
 }
 
+impl<E, F> Preconditioner for F
+where
+    F: FnMut(&[f64], &mut [f64]) -> Result<(), E>,
+{
+    type Error = E;
+
+    fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {
+        self(input, output)
+    }
+}
+
 /// Identity right preconditioner.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Identity;
@@ -2328,6 +2339,38 @@ mod tests {
             &mut [NoObserver, NoObserver],
         );
         assert_eq!(refused_norm(short), Some((KrylovRefusal::Dimension, 12.0)));
+    }
+
+    #[test]
+    fn a_closure_solves_as_a_preconditioner() -> Result<(), &'static str> {
+        let mut operator = Diagonal {
+            values: vec![4.0],
+            scalar_calls: 0,
+            batch_calls: 0,
+        };
+        let mut preconditioner = |input: &[f64], output: &mut [f64]| -> Result<(), ()> {
+            for (slot, value) in output.iter_mut().zip(input) {
+                *slot = 0.25 * value;
+            }
+            Ok(())
+        };
+        let run = match gmres_right(
+            &mut operator,
+            &mut preconditioner,
+            &[4.0],
+            GmresOptions::unrestarted(1e-12),
+            &mut NoObserver,
+        ) {
+            Ok(run) => run,
+            Err(_) => return Err("a closure preconditioner was refused"),
+        };
+        if run.status != GmresStatus::Converged {
+            return Err("a closure preconditioner did not converge");
+        }
+        if (run.solution[0] - 1.0).abs() > 1e-12 {
+            return Err("a closure preconditioner produced the wrong solution");
+        }
+        Ok(())
     }
 
     struct Scale(f64);
