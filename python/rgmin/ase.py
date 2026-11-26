@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import os
 import threading
 import time
 import warnings
@@ -103,7 +104,7 @@ def _restart_error(message: str) -> Exception:
     loaded = _import_attr("ase.optimize.optimize", "RestartError")
     if loaded is None:
         return RuntimeError(message)
-    return loaded(message)
+    return cast(Exception, loaded(message))
 
 
 def _ase_passthrough(options: dict[str, Any]) -> dict[str, Any]:
@@ -505,6 +506,14 @@ class Optimizer(_ASEOptimizer):
             return np.array(self._x_session, dtype=np.float64, copy=True)
         return x
 
+    def _locked(self, call: Callable[[], Any]) -> Any:
+        """Run ``call`` under the calculator lock, as :meth:`_evaluate` does."""
+        lock = self._calculator_lock()
+        if lock is None:
+            return call()
+        with lock:
+            return call()
+
     def _evaluate(self, x: np.ndarray, record: list[list[Any]] | None = None) -> tuple[float, np.ndarray]:
         geom = _Geometry(self.optimizable)
         point = np.asarray(x, dtype=np.float64).reshape(-1)
@@ -520,11 +529,7 @@ class Optimizer(_ASEOptimizer):
             scale = self._scale
             return value * scale, gradient * scale
 
-        lock = self._calculator_lock()
-        if lock is None:
-            return once()
-        with lock:
-            return once()
+        return cast(tuple[float, np.ndarray], self._locked(once))
 
     def _hessian_of(self, x: np.ndarray) -> np.ndarray:
         if self._hessian is None:
@@ -559,11 +564,12 @@ class Optimizer(_ASEOptimizer):
 
             if entry.get("forget"):
                 solver.forget()
-            updated = np.asarray(entry["x"], dtype=np.float64).copy()
+            start = np.asarray(entry["x"], dtype=np.float64).copy()
             if self._rgmin_method in _HESSIAN_METHODS:
-                solver.step_hess(answer, self._hessian_of, updated)
+                solver.step_hess(answer, self._hessian_of, start)
             else:
-                solver.step(answer, updated)
+                solver.step(answer, start)
+            updated = start
             if next(cursor, None) is not None:
                 raise _restart_error(
                     f"{self.restart}: step {index} recorded more evaluations than it replays"
@@ -589,7 +595,7 @@ class Optimizer(_ASEOptimizer):
         orig = getattr(self.atoms, "orig_cell", None)
         if orig is not None:
             data["orig_cell"] = np.asarray(orig, dtype=np.float64).tolist()
-        self.dump(data)
+        cast(Any, self).dump(data)
 
     def step(self, forces: Any = None) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         solver = self._open()
@@ -634,10 +640,8 @@ class Optimizer(_ASEOptimizer):
         if gradient is None:
             return bool(parent.converged())
         forces = -np.asarray(gradient, dtype=np.float64)
-        get_forces = getattr(self.optimizable, "get_forces", None)
-        if callable(get_forces):
-            shape = np.asarray(get_forces(), dtype=np.float64).shape
-            forces = forces.reshape(shape)
+        if forces.ndim == 1 and forces.size % 3 == 0:
+            forces = forces.reshape(-1, 3)
         return bool(parent.converged(forces=forces))
 
     def irun(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -722,7 +726,7 @@ class Optimizer(_ASEOptimizer):
         cast(Any, self.logfile).flush()
 
     def read(self) -> None:
-        data = self.load()
+        data = cast(Any, self).load()
         self.initialize()
         if not isinstance(data, dict) or data.get("format") != RESTART_FORMAT:
             raise _restart_error(
@@ -739,11 +743,13 @@ class Optimizer(_ASEOptimizer):
             )
         orig = data.get("orig_cell")
         if orig is not None and hasattr(self.atoms, "orig_cell"):
-            self.atoms.orig_cell = np.asarray(orig, dtype=np.float64)
-        self._history = list(data.get("steps", []))
-        self._pending = list(self._history)
+            cast(Any, self.atoms).orig_cell = np.asarray(orig, dtype=np.float64)
+        steps: list[dict[str, Any]] = list(cast(Any, data.get("steps", [])))
+        self._history = steps
+        self._pending = list(steps)
         wrapper = data.get("wrapper", {})
-        self._load_wrapper_state(wrapper if isinstance(wrapper, dict) else {})
+        state: dict[str, Any] = cast(dict[str, Any], wrapper) if isinstance(wrapper, dict) else {}
+        self._load_wrapper_state(state)
 
     def replay_trajectory(self, traj: Any) -> Any:
         """Reinitialize supported optimizer state from an ASE trajectory."""
@@ -755,8 +761,8 @@ class Optimizer(_ASEOptimizer):
         if replay is None:
             raise TypeError("This optimizer does not provide _replay_trajectory()")
         with ExitStack() as stack:
-            if isinstance(traj, str):
-                traj = stack.enter_context(Trajectory(traj, "r"))
+            if isinstance(traj, (str, os.PathLike)):
+                traj = stack.enter_context(cast(Any, Trajectory)(os.fspath(traj), "r"))
             return replay(traj)
 
     def todict(self) -> dict[str, Any]:
@@ -1013,7 +1019,7 @@ class FIRE(Optimizer):
         )
 
     def _euclidean_cap(self) -> bool:
-        return self.maxstep > 0.0 and "maxmove" not in self._rgmin_options
+        return self.maxstep > 0.0
 
     def _config_options(self) -> dict[str, Any]:
         opts = super()._config_options()
@@ -1032,20 +1038,21 @@ class FIRE(Optimizer):
     def _before_step(self, solver: rgmin.Solver) -> bool:
         if not self.downhill_check:
             return False
+        geom = _Geometry(self.optimizable)
         reset = False
         if self._e_last is not None and self._r_last is not None:
-            energy = float(_Geometry(self.optimizable).value())
+            energy = float(self._locked(geom.value))
             if energy > self._e_last:
+                last = self._r_last
                 if self.position_reset_callback is not None:
-                    self.position_reset_callback(self.optimizable, self._r_last, energy, self._e_last)
-                _Geometry(self.optimizable).write(self._r_last)
+                    self.position_reset_callback(self.optimizable, last, energy, self._e_last)
+                self._locked(lambda: geom.write(last))
                 solver.forget()
                 self._x_session = None
                 self._x_placed = None
                 reset = True
-        geom = _Geometry(self.optimizable)
-        self._e_last = float(geom.value())
-        self._r_last = np.array(geom.positions(), dtype=np.float64, copy=True)
+        self._e_last = float(self._locked(geom.value))
+        self._r_last = np.array(self._locked(geom.positions), dtype=np.float64, copy=True)
         return reset
 
     def _wrapper_state(self) -> dict[str, Any]:
@@ -1066,7 +1073,8 @@ class FIRE2(Optimizer):
     ``maxstep`` caps the Euclidean length of the displacement, or each
     component of it with ``use_abc=True``. ``position_reset_callback``
     is accepted and, as in ASE, not called. The time-step floor is
-    ``0.02 * dt``; another ``dtmin`` is a ``ValueError``. A non-positive
+    ``0.02 * dt``, which is ASE's ``dtmin`` default at ``dt=0.1``. Leave
+    ``dtmin`` unset; any other value is a ``ValueError``. A non-positive
     ``maxstep`` clears the per-atom cap instead of installing a
     Euclidean one.
 
@@ -1084,7 +1092,7 @@ class FIRE2(Optimizer):
         dt: float = 0.1,
         maxstep: float | None = None,
         dtmax: float = 1.0,
-        dtmin: float = 2e-3,
+        dtmin: float | None = None,
         Nmin: int = 20,
         finc: float = 1.1,
         fdec: float = 0.5,
@@ -1099,11 +1107,10 @@ class FIRE2(Optimizer):
     ) -> None:
         self.dt = float(dt)
         self.dtmax = float(dtmax)
-        self.dtmin = float(dtmin)
-        if not np.isclose(self.dtmin, 0.02 * self.dt, rtol=_PARAMETER_RTOL, atol=0.0):
-            raise ValueError(
-                f"rgmin FIRE2 floors the time step at 0.02 * dt = {0.02 * self.dt:g}, not dtmin={dtmin:g}"
-            )
+        floor = 0.02 * self.dt
+        self.dtmin = floor if dtmin is None else float(dtmin)
+        if not np.isclose(self.dtmin, floor, rtol=_PARAMETER_RTOL, atol=0.0):
+            raise ValueError(f"rgmin FIRE2 floors the time step at 0.02 * dt = {floor:g}, not dtmin={self.dtmin:g}")
         self.Nmin = int(Nmin)
         self.finc = float(finc)
         self.fdec = float(fdec)
