@@ -93,7 +93,7 @@ Those differ from the Rust =Control::default= (=gtol= 1e-5, =istep= 1) and from 
 | =nstcgsteep= | int >= 0 | unset | Steepest-descent restart interval of a =gromacs_cg= session. Omitted keeps 1000. Zero turns the periodic restart off. Another method raises =ValueError=. |
 | =shrink= | float | unset | Refused-trial factor of a =gromacs_steep= session. Omitted keeps 0.5. The session accepts a finite value in the open interval (0, 1). |
 | =max_constraint_shrinks= | int >= 0 | unset | Consecutive constraint-failure budget of a =gromacs_steep= session. Omitted derives it from the step size and the shrink factor. |
-| =error_on_unmet= | bool | false | Raise =StopUnmetError= when the run stops on =BUDGET=, =LINE_SEARCH=, =LINE_SEARCH_ROUNDING=, =POLISH_UNMET=, or =EVAL_BUDGET=. |
+| =error_on_unmet= | bool | false | Raise =StopUnmetError= when the run stops on =BUDGET=, =LINE_SEARCH=, =LINE_SEARCH_ROUNDING=, =MACHINE_PRECISION=, =POLISH_UNMET=, or =EVAL_BUDGET=. =MACHINE_PRECISION= is unmet: the step can no longer move while the gradient is still above =gtol=. |
 | =backward_polish= | bool | false | Record the backward-error polish request. This step loop does not form a Hessian. |
 | =require_convergence= | bool                                              | False   | Raise =NotConverged= from =minimize= when the gradient norm is not below =gtol=. A first-order session step that took no move and left its state unchanged reports =STEP_TOLERANCE=. |
 
@@ -139,7 +139,7 @@ The options and their defaults are:
 | =max_evals= | =None= | Objective evaluation budget. =None= disables it. |
 
 =rgmin.optimize.GPMin= (also re-exported as =rgmin.GPMin=) wraps =Session("gpmin", ...)= with =ase.optimize.GPMin='s constructor signature, defaults, and =run(fmax, steps)= convergence flag, plus =maxstep= (default =0.2=, or =0.0= for ASE's uncapped steps) and =hyperparameters= property. =Session.set_gtol(gtol)= updates the session gradient tolerance and =Session.gpmin_hyperparameters= reports =(weight, scale, noise)=.
-The other ASE-style classes in =rgmin.optimize= are =BFGS=, =LBFGS=, =LBFGSLineSearch=, =FIRE=, =FIRE2=, =SR1=, =SR2=, =SteepestDescent=, =GromacsSteep=, =GromacsCg=, =BarzilaiBorwein=, =Adam=, =CG=, =PolakRibiere=, =FletcherReeves=, =HestenesStiefel=, =DaiYuan=, =ConjugateDescent=, =HagerZhang=, =LiuStorey=, =FRPR=, =EonCG=, =RiemannianCG=, =NewtonCG=, and =NewtonPCG=.
+The other ASE-style classes in =rgmin.optimize= are =BFGS=, =LBFGS=, =LBFGSLineSearch=, =FIRE=, =FIRE2=, =SR1=, =SR2=, =SteepestDescent=, =GromacsSteep=, =GromacsCg=, =GromacsLbfgs=, =BarzilaiBorwein=, =Adam=, =CG=, =PolakRibiere=, =FletcherReeves=, =HestenesStiefel=, =DaiYuan=, =ConjugateDescent=, =HagerZhang=, =LiuStorey=, =FRPR=, =EonCG=, =RiemannianCG=, =NewtonCG=, and =NewtonPCG=.
 =CG= there is Polak-Ribiere-Plus. =RiemannianCG= is =rcg=, and its per-atom cap stays off unless =maxstep= is set.
 
 =LineSearch(kind, x, direction, istep=1.0, c1=1e-4, c2=0.9, beta=0.5, maxiter=40, tol=1e-10)= is the supplied search. =offer(f, gradient)= takes the value and gradient at =x=, then at each trial, and returns =(x, alpha, value, done)=. =done= is False when =x= is the next trial.
