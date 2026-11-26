@@ -627,7 +627,18 @@ class Optimizer(_ASEOptimizer):
         """The ``converged`` of ASE 3.2x and later, which its run loop calls."""
         if self._stop_requested():
             return True
-        return bool(cast(Any, super()).gradient_converged(gradient))
+        parent = cast(Any, super())
+        check = getattr(parent, "gradient_converged", None)
+        if callable(check):
+            return bool(check(gradient))
+        if gradient is None:
+            return bool(parent.converged())
+        forces = -np.asarray(gradient, dtype=np.float64)
+        get_forces = getattr(self.optimizable, "get_forces", None)
+        if callable(get_forces):
+            shape = np.asarray(get_forces(), dtype=np.float64).shape
+            forces = forces.reshape(shape)
+        return bool(parent.converged(forces=forces))
 
     def irun(  # type: ignore[override]  # pyright: ignore[reportIncompatibleMethodOverride]
         self, fmax: float = 0.05, steps: int | None = None
@@ -733,6 +744,20 @@ class Optimizer(_ASEOptimizer):
         self._pending = list(self._history)
         wrapper = data.get("wrapper", {})
         self._load_wrapper_state(wrapper if isinstance(wrapper, dict) else {})
+
+    def replay_trajectory(self, traj: Any) -> Any:
+        """Reinitialize supported optimizer state from an ASE trajectory."""
+        from contextlib import ExitStack
+
+        from ase.io.trajectory import Trajectory
+
+        replay = getattr(self, "_replay_trajectory", None)
+        if replay is None:
+            raise TypeError("This optimizer does not provide _replay_trajectory()")
+        with ExitStack() as stack:
+            if isinstance(traj, str):
+                traj = stack.enter_context(Trajectory(traj, "r"))
+            return replay(traj)
 
     def todict(self) -> dict[str, Any]:
         description = dict(cast(Any, super()).todict())
