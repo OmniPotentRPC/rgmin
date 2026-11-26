@@ -212,7 +212,9 @@ is implemented on ``LBFGS`` only. Any other class raises ``TypeError``.
 ``LBFGS`` defaults to the line-search-free eOn step and a per-atom cap.
 ``eon_cap=False`` selects ASE length control with fixed ``H0 = I / alpha``
 and ``memory`` pairs. ``use_line_search=True`` is the strong Wolfe search,
-not ASE's ``LineSearch``. ``maxstep > 1`` raises ``ValueError``.
+not ASE's ``LineSearch``. ``maxstep > 1`` raises ``ValueError``, and so
+does an ``alpha`` that is not positive and finite. A cell filter keeps the
+strong Wolfe search, so ``eon_cap=False`` leaves its step rule alone.
 ``BFGS`` scales the energy by ``1 / alpha`` and takes a per-atom cap.
 ``maxstep > 1`` warns. ``FIRE`` and ``FIRE2`` take the ASE constructor
 keywords. Their ``maxstep`` is the Euclidean length of the step, or
