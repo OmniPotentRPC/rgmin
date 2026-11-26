@@ -32,7 +32,7 @@ python -m pytest python/tests -q --import-mode=importlib
 
 ## Documentation
 
-Edit Org sources, then regenerate every derived documentation file:
+Edit Org sources, then rebuild every derived documentation file:
 
 ```console
 cd docs

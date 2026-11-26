@@ -6,9 +6,9 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
-
 
 SCRIPT = Path(__file__).with_name("generate_docs_inventory.py")
 SPEC = importlib.util.spec_from_file_location("generate_docs_inventory", SCRIPT)
@@ -68,9 +68,8 @@ class DocsUrlTests(unittest.TestCase):
     def test_page_url_rejects_a_path_that_would_leave_the_site(self) -> None:
         site = inventory.documentation_site()
         for page in ("", "/howto/stopping", "../stopping", "howto//stopping", "a b"):
-            with self.subTest(page=page):
-                with self.assertRaises(RuntimeError):
-                    inventory.docs_page(site, page)
+            with self.subTest(page=page), self.assertRaises(RuntimeError):
+                inventory.docs_page(site, page)
         with self.assertRaises(RuntimeError):
             inventory.docs_page("http://example.com/", "howto/stopping")
 
@@ -88,6 +87,190 @@ class DocsUrlTests(unittest.TestCase):
             self.assertNotIn("{", url)
         self.assertNotIn("rgmin.rgoswami.me", text)
         self.assertNotIn("rgmin.rgoswami.me", SCRIPT.read_text())
+
+
+class ReachableRustTests(unittest.TestCase):
+    def test_private_module_items_stay_hidden_unless_reexported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "src"
+            source.mkdir()
+            (source / "lib.rs").write_text(
+                "mod hidden;\n"
+                "pub mod open;\n"
+                '#[cfg(feature = "capi")]\n'
+                "pub mod gated;\n"
+                "pub use hidden::{\n"
+                "    Exported,\n"
+                "};\n"
+                "#[cfg(test)]\n"
+                "mod tests {\n"
+                "    pub fn not_user() {}\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            (source / "hidden.rs").write_text(
+                "pub fn secret() {}\n"
+                "pub struct Exported {\n"
+                "    pub field: i32,\n"
+                "}\n"
+                "impl Exported {\n"
+                "    pub fn method(&self) {}\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            (source / "open.rs").write_text(
+                "pub fn open() {}\n"
+                "pub(crate) fn crate_only() {}\n"
+                '#[cfg(feature = "extra")]\n'
+                "pub fn feature_kept() {}\n",
+                encoding="utf-8",
+            )
+            (source / "gated.rs").write_text(
+                "pub fn kept() {}\n",
+                encoding="utf-8",
+            )
+            items = inventory.rust_items(root)
+        names = {item.name for item in items}
+        self.assertIn("Exported", names)
+        self.assertIn("field", names)
+        self.assertIn("method", names)
+        self.assertIn("open", names)
+        self.assertIn("kept", names)
+        self.assertIn("feature_kept", names)
+        self.assertNotIn("secret", names)
+        self.assertNotIn("crate_only", names)
+        self.assertNotIn("not_user", names)
+        self.assertTrue(
+            any(item.kind == "mod" and item.name == "open" for item in items)
+        )
+        self.assertTrue(
+            any(item.kind == "mod" and item.name == "gated" for item in items)
+        )
+        self.assertFalse(any(item.name == "hidden" for item in items))
+
+    def test_crate_hides_private_modules_and_keeps_reexports(self) -> None:
+        items = inventory.rust_items()
+        names = {item.name for item in items}
+        self.assertNotIn("bb1_alpha", names)
+        self.assertNotIn("bb_direction", names)
+        self.assertNotIn("DiisState", names)
+        for name in ("Solver", "Control", "KrylovIteration", "minimize"):
+            self.assertIn(name, names)
+
+
+class HeaderDeclarationTests(unittest.TestCase):
+    def test_uses_inside_bodies_and_macros_are_not_declarations(self) -> None:
+        text = """
+        #define xts_solver_create rgmin_solver_create
+        enum class Method { PolakRibiere = RGMIN_POLAK_RIBIERE };
+        void clear_etol() { rgmin_solver_clear_etol(ptr_); }
+        static inline rgmin_solver_t *rgmin_solver_create(int method) {
+            return rgmin_solver_create_sized(method);
+        }
+        typedef rgmin_status_t (*rgmin_eval_fn)(int);
+        void rgmin_tensor_free(int n);
+        int digits = 1'000;
+        """
+        found = {name for _line, name, _decl in inventory.header_declared_names(text)}
+        self.assertIn("xts_solver_create", found)
+        self.assertIn("rgmin_solver_create", found)
+        self.assertIn("rgmin_eval_fn", found)
+        self.assertIn("rgmin_tensor_free", found)
+        self.assertNotIn("rgmin_solver_create_sized", found)
+        self.assertNotIn("rgmin_solver_clear_etol", found)
+        self.assertNotIn("RGMIN_POLAK_RIBIERE", found)
+
+    def test_installed_headers_keep_the_defining_line(self) -> None:
+        items = inventory.header_items()
+        created = [item for item in items if item.name == "rgmin_solver_create"]
+        self.assertEqual([item.source for item in created], ["include/rgmin.h"])
+        self.assertIn("static inline", created[0].declaration)
+        self.assertNotIn("ptr_", created[0].declaration)
+        leaked = [
+            item
+            for item in items
+            if item.source.endswith("xtensor.hpp") and item.kind != "header"
+        ]
+        self.assertEqual(leaked, [])
+        self.assertTrue(
+            any(
+                item.name == "xts_solver_create" and item.source == "include/xts.h"
+                for item in items
+            )
+        )
+        self.assertFalse(
+            any(
+                item.name == "rgmin_solver_create" and item.source == "include/xts.h"
+                for item in items
+            )
+        )
+        self.assertTrue(
+            any(
+                item.name == "RGMIN_SUCCESS" and item.source == "include/rgmin.h"
+                for item in items
+            )
+        )
+
+
+class PythonExportTests(unittest.TestCase):
+    def test_underscore_modules_and_unlisted_names_are_omitted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "python" / "rgmin"
+            package.mkdir(parents=True)
+            (package / "_core.py").write_text(
+                "def hidden():\n    return 1\n", encoding="utf-8"
+            )
+            (package / "__init__.py").write_text(
+                "_EXPORTS = ['visible_export', 'lazy_name']\n"
+                "__all__ = _EXPORTS\n"
+                "def visible_export():\n"
+                "    return 1\n"
+                "def skipped():\n"
+                "    return 0\n"
+                "class Kept:\n"
+                "    def run(self):\n"
+                "        return 1\n",
+                encoding="utf-8",
+            )
+            items = inventory.python_items(root)
+        names = {item.name for item in items}
+        modules = {item.name for item in items if item.kind == "module"}
+        self.assertIn("visible_export", names)
+        self.assertIn("lazy_name", names)
+        self.assertIn("rgmin.__init__", modules)
+        self.assertNotIn("skipped", names)
+        self.assertNotIn("Kept", names)
+        self.assertNotIn("hidden", names)
+        self.assertNotIn("rgmin._core", modules)
+
+    def test_package_skips_private_modules(self) -> None:
+        items = inventory.python_items()
+        modules = {item.name for item in items if item.kind == "module"}
+        self.assertNotIn("rgmin._core", modules)
+        self.assertNotIn("rgmin._gromacs", modules)
+        self.assertNotIn("rgmin._maturin", modules)
+        sources = {item.source for item in items}
+        for source in (
+            "python/rgmin/_gromacs.py",
+            "python/rgmin/_core.pyi",
+            "python/rgmin/_maturin.py",
+            "python/rgmin/_maturin.pyi",
+        ):
+            self.assertNotIn(source, sources)
+        self.assertTrue(any(item.name == "minimize" for item in items))
+        self.assertTrue(any(item.name == "gromacs_mdp_options" for item in items))
+
+
+class InventoryWordingTests(unittest.TestCase):
+    def test_rendered_text_has_no_blocked_wording(self) -> None:
+        text = inventory.render_inventory([], {}).lower()
+        self.assertNotIn("regenerate", text)
+        self.assertNotIn("landed", text)
+        guide = (inventory.ROOT / "AGENTS.md").read_text().lower()
+        self.assertNotIn("regenerate", guide)
+        self.assertNotIn("landed", guide)
 
 
 if __name__ == "__main__":
