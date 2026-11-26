@@ -1250,6 +1250,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 }
 
 /// ABI minor 65 adds `rgmin_rcg_options_default` and `rgmin_minimize_rcg`.
+/// ABI minor 63 adds `RGMIN_GROMACS_LBFGS` and `rgmin_solver_set_gromacs_lbfgs`.
 /// ABI minor 57 adds `RGMIN_STOP_LINE_SEARCH_ROUNDING`.
 /// ABI minor 54 adds `RGMIN_GROMACS_CG` and `rgmin_solver_set_gromacs_cg`.
 /// ABI minor 56 adds `rgmin_manifold_rigid_quotient`, `rgmin_rtr_tcg_solve`,
