@@ -194,7 +194,7 @@ entry. Its errors name the symbol the host called, in
 
 SCG takes the same one-shot shape.
 Conjugacy is a field on ``rgmin_scg_params_t``, not a different entry point.
-Stamp is 1.66.6 (``xts_abi_compatible`` still checks major and layout only).
+Stamp is 1.68.6 (``xts_abi_compatible`` still checks major and layout only).
 ``rgmin_lowest_eigenpair`` takes a typed ``rgmin_eigen_params_t`` (closed ``rgmin_eigen_kind_t``, no string).
 Unlinked kinds return ``RGMIN_UNAVAILABLE``.
 ``rgmin_lowest_eigenpairs`` is the block LOBPCG solver for the k lowest pairs (Knyazev 2001).
@@ -293,6 +293,37 @@ default shapes as ``rgmin_solver_set_manifold``. A positive
 off. ``xts_minimize_rlbfgs`` and ``xts_rlbfgs_default`` are the aliases.
 These are ``abi_minor`` 51. ``rgmin_control_t`` is unchanged, and the
 default Euclidean L-BFGS step stays the eOn cap.
+
+Newton-CG under a caller preconditioner
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+ABI minor 66 adds ``rgmin_vec_precond_fn`` and ``rgmin_minimize_hvp_precond``, with ``rgmin_minimize_hvp_precond_sized`` behind it.
+Check ``rgmin_abi_stamp().abi_minor >= 66`` before using them.
+No struct changes, so the layout revision stays 6.
+
+``RGMIN_NEWTON_PCG`` builds its own rank-16 Nystrom preconditioner at every outer step.
+``rgmin_minimize_hvp_precond`` runs the trust-region Newton-CG minimizer under a preconditioner that you supply: ``precond`` applies ``P^-1`` to one residual of length ``n``, and a null ``precond`` is the identity.
+The three callbacks are ``evalgrad`` (value and gradient in one call), ``hvp`` (the Hessian action, as ``rgmin_minimize_hvp`` takes it) and ``precond``.
+One ``user`` pointer reaches all three.
+``P`` takes no iterate and stays fixed for the solve, so it must be symmetric positive definite wherever the solve goes; keep any iterate-dependent state behind ``user``.
+CG under any such ``P`` reaches the same step as plain CG, in fewer Hessian actions when ``P`` approximates the Hessian.
+
+.. code:: c
+
+    #include "rgmin.h"
+
+    rgmin_report_t report;
+    rgmin_status_t st = rgmin_minimize_hvp_precond(
+        evalgrad, hvp, precond, user, x, &ctrl, 0, 0, &report);
+
+``ctrl.istep`` seeds the trust radius and ``ctrl.maxmove`` caps it.
+A callback that returns a status other than ``RGMIN_SUCCESS`` aborts the solve.
+Later callbacks do not run, ``x`` and ``report`` stay as they were, the entry returns that status, and ``rgmin_last_error`` names the callback.
+Negative curvature is not a failure: the step follows it to the trust boundary.
+
+The callback tensors point at solver storage and are valid for that call only.
+One outer iteration allocates 10 arrays of length ``n`` and one inner CG iteration allocates 2, the Hessian action and the preconditioner application, because the Rust ``HessianVector`` and ``Preconditioner`` traits return owned arrays.
+``xts_minimize_hvp_precond`` and ``xts_vec_precond_fn`` are the aliases.
 
 Riemannian conjugate gradients
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

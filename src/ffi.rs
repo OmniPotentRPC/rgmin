@@ -28,11 +28,12 @@ use crate::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Conjugacy, Control, DirectionalCurvature,
     EigenParams, EigensolverKind, Error, GromacsCgConfig, GromacsSteepConfig, HessianObjective,
     HessianOracle, HessianVector, HvpOracle, LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method,
-    NewtonKind, Oracle, QnStep, Restart, RiemannianManifold, Rlbfgs, ScgOptions, ScgParams,
-    ScgStepTolerance, SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch,
-    lowest_eigenpairs, lowest_eigenpairs_precond, lowest_eigenpairs_projected, lowest_mode,
-    lowest_mode_precond_with, minimize_method, minimize_method_hess, minimize_method_hvp,
-    minimize_rlbfgs, minimize_scg_exact_with_options, minimize_scg_with_options,
+    NewtonKind, Oracle, Preconditioner, QnStep, Restart, RiemannianManifold, Rlbfgs, ScgOptions,
+    ScgParams, ScgStepTolerance, SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm,
+    SuppliedSearch, lowest_eigenpairs, lowest_eigenpairs_precond, lowest_eigenpairs_projected,
+    lowest_mode, lowest_mode_precond_with, minimize_method, minimize_method_hess,
+    minimize_method_hvp, minimize_newton_cg, minimize_newton_cg_precond, minimize_rlbfgs,
+    minimize_scg_exact_with_options, minimize_scg_with_options,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -103,7 +104,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 66;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 68;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -473,6 +474,17 @@ pub type rgmin_precond_fn = unsafe extern "C" fn(
     user: *mut c_void,
     block: *const DLManagedTensorVersioned,
     out: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t;
+
+/// Apply the inverse of a preconditioner `P` to one vector: `z_out = P^{-1} r`
+/// for symmetric positive definite `P`. `r` and `z_out` are rank-1 f64
+/// tensors of length `n`, valid for this call only. A null function pointer
+/// at [`rgmin_minimize_hvp_precond`] is the identity and is not called.
+/// ABI minor 66.
+pub type rgmin_vec_precond_fn = unsafe extern "C" fn(
+    user: *mut c_void,
+    r: *const DLManagedTensorVersioned,
+    z_out: *mut DLManagedTensorVersioned,
 ) -> rgmin_status_t;
 
 thread_local! {
@@ -1955,6 +1967,215 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_opts_sized(
     }
 }
 
+/// First callback failure of a solve. Once set, later callbacks are
+/// skipped and answer NaN, so the solver winds down in a few cheap
+/// iterations and the entry reports the first status.
+struct CallbackFailure(std::sync::Mutex<Option<(rgmin_status_t, &'static str)>>);
+
+impl CallbackFailure {
+    fn new() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+
+    fn is_set(&self) -> bool {
+        self.0.lock().expect("ffi failure").is_some()
+    }
+
+    fn record(&self, status: rgmin_status_t, which: &'static str) {
+        let mut slot = self.0.lock().expect("ffi failure");
+        if slot.is_none() {
+            *slot = Some((status, which));
+        }
+    }
+
+    fn get(&self) -> Option<(rgmin_status_t, &'static str)> {
+        *self.0.lock().expect("ffi failure")
+    }
+}
+
+/// A caller's vector preconditioner behind [`Preconditioner`]. The
+/// residual is handed to the callback in place and the output is the one
+/// length-`n` allocation of an application; the tensor shells are standing.
+struct CVecPrecond<'a> {
+    precond: rgmin_vec_precond_fn,
+    user: *mut c_void,
+    scratch: std::sync::Mutex<Scratch>,
+    failure: &'a CallbackFailure,
+}
+
+impl Preconditioner for CVecPrecond<'_> {
+    fn solve(&self, r: ArrayView1<f64>) -> Array1<f64> {
+        let m = r.len();
+        if self.failure.is_set() {
+            return Array1::from_elem(m, f64::NAN);
+        }
+        let mut s = self.scratch.lock().expect("ffi scratch");
+        let rt = s.x_tensor(r);
+        let mut z = Array1::zeros(m);
+        let zt = s.out.point_at(z.as_mut_ptr(), m);
+        let status = unsafe { (self.precond)(self.user, rt, zt) };
+        if status != rgmin_status_t::RGMIN_SUCCESS {
+            self.failure.record(status, "precond");
+            return Array1::from_elem(m, f64::NAN);
+        }
+        z
+    }
+}
+
+/// Newton-CG over a fused value-and-gradient callback and a Hessian action,
+/// both recording their first failure in `failure`. `x` and `v` reach the
+/// action as standing tensors over the solver's own storage; the result is
+/// the one length-`n` allocation of an action.
+fn c_oracle_hvp_fg<'a>(
+    evalgrad: rgmin_evalgrad_fn,
+    hvp: rgmin_hvp_fn,
+    user: *mut c_void,
+    n: usize,
+    failure: &'a CallbackFailure,
+) -> impl HessianVector + 'a {
+    let fg_ptr = evalgrad as usize;
+    let hvp_ptr = hvp as usize;
+    let user_addr = user as usize;
+    let fg_scratch = Scratch::new();
+    let hvp_x = Scratch::new();
+    let hvp_v = Scratch::new();
+    HvpOracle::unbounded(
+        n,
+        move |xv| {
+            let fg_fn: rgmin_evalgrad_fn = unsafe { std::mem::transmute(fg_ptr) };
+            let m = xv.len();
+            if failure.is_set() {
+                return (f64::INFINITY, Array1::from_elem(m, f64::NAN));
+            }
+            let mut s = fg_scratch.lock().expect("ffi scratch");
+            let xt = s.x_tensor(xv);
+            let mut value = 0.0;
+            let mut g = Array1::zeros(m);
+            let gt = s.out.point_at(g.as_mut_ptr(), m);
+            let status = unsafe { fg_fn(user_addr as *mut c_void, xt, &mut value, gt) };
+            if status != rgmin_status_t::RGMIN_SUCCESS {
+                failure.record(status, "evalgrad");
+                return (f64::INFINITY, Array1::from_elem(m, f64::NAN));
+            }
+            (value, g)
+        },
+        move |xv, vv| {
+            let hvp_fn: rgmin_hvp_fn = unsafe { std::mem::transmute(hvp_ptr) };
+            let m = vv.len();
+            if failure.is_set() {
+                return Array1::from_elem(m, f64::NAN);
+            }
+            let mut s = hvp_x.lock().expect("ffi scratch");
+            let xt = s.x_tensor(xv);
+            let mut vs = hvp_v.lock().expect("ffi scratch");
+            let vt = vs.x_tensor(vv);
+            let mut hv = Array1::zeros(m);
+            let ht = vs.out.point_at(hv.as_mut_ptr(), m);
+            let status = unsafe { hvp_fn(user_addr as *mut c_void, xt, vt, ht) };
+            if status != rgmin_status_t::RGMIN_SUCCESS {
+                failure.record(status, "hvp");
+                return Array1::from_elem(m, f64::NAN);
+            }
+            hv
+        },
+    )
+}
+
+/// Trust-region Newton-CG under a caller's preconditioner. `evalgrad`
+/// computes `f(x)` and its gradient in one call, `hvp` computes `H(x) v`,
+/// and `precond` applies `P^{-1}` to one residual; a null `precond` is the
+/// identity and runs plain Steihaug-Toint CG. `user` reaches all three
+/// callbacks. `P` takes no iterate and stays fixed for the solve, so it
+/// must be symmetric positive definite wherever the solve goes; a caller
+/// that wants it to follow the iterate keeps that state behind `user`.
+///
+/// `ctrl` is read as in [`rgmin_minimize_opts_sized`]: `istep` seeds the
+/// trust radius and `maxmove` caps it. Nonzero `error_on_unmet` and
+/// `backward_polish` act as in [`rgmin_minimize_hvp_opts_sized`].
+///
+/// A callback that returns a status other than
+/// [`rgmin_status_t::RGMIN_SUCCESS`] aborts the solve: later callbacks are
+/// skipped, `x` and `out` stay as they were, that status is returned, and
+/// `rgmin_last_error` names the callback. Negative curvature is not a
+/// failure; the step follows it to the trust boundary.
+///
+/// Allocations of length `n`: one outer iteration makes 10 and one inner CG
+/// iteration makes 2, the Hessian action and the preconditioner
+/// application, because the Rust traits return owned arrays. The
+/// callback tensors point at solver storage in standing shells, so no
+/// copy of `x`, `v` or `r` is made.
+/// ABI minor 66.
+///
+/// # Safety
+/// `evalgrad`, `hvp` and, when non-null, `precond` must be callable for
+/// this call and write only their output tensor. `x` is a writable rank-1
+/// CPU f64 tensor; `ctrl` is readable for `ctrl_size` bytes; `out` is
+/// writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_minimize_hvp_precond_sized(
+    evalgrad: Option<rgmin_evalgrad_fn>,
+    hvp: Option<rgmin_hvp_fn>,
+    precond: Option<rgmin_vec_precond_fn>,
+    user: *mut c_void,
+    x: *mut DLManagedTensorVersioned,
+    ctrl: *const rgmin_control_t,
+    ctrl_size: usize,
+    error_on_unmet: i32,
+    backward_polish: i32,
+    out: *mut rgmin_report_t,
+) -> rgmin_status_t {
+    guarded("rgmin_minimize_hvp_precond", || {
+        let Some(evalgrad) = evalgrad else {
+            set_last_error("rgmin_minimize_hvp_precond: evalgrad is NULL");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        };
+        let Some(hvp) = hvp else {
+            set_last_error("rgmin_minimize_hvp_precond: hvp is NULL");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        };
+        if ctrl.is_null() || out.is_null() {
+            set_last_error("rgmin_minimize_hvp_precond: ctrl/out null");
+            return rgmin_status_t::RGMIN_INVALID_PARAMETER;
+        }
+        let (c, layout) =
+            match unsafe { load_control("rgmin_minimize_hvp_precond", ctrl, ctrl_size) } {
+                Ok(loaded) => loaded,
+                Err(status) => return status,
+            };
+        let init = match cpu_f64_slice_mut(x, "x") {
+            Ok(s) => s.to_vec(),
+            Err(st) => return st,
+        };
+        if let Err(status) = reject_non_finite_initial("rgmin_minimize_hvp_precond", &init) {
+            return status;
+        }
+        let n = init.len();
+        let failure = CallbackFailure::new();
+        let obj = c_oracle_hvp_fg(evalgrad, hvp, user, n, &failure);
+        let control = control_with_flags(&c, error_on_unmet, backward_polish);
+        let outcome = match precond {
+            Some(precond) => {
+                let pc = CVecPrecond {
+                    precond,
+                    user,
+                    scratch: Scratch::new(),
+                    failure: &failure,
+                };
+                minimize_newton_cg_precond(&obj, Array1::from(init), &control, &pc)
+            }
+            None => minimize_newton_cg(&obj, Array1::from(init), &control),
+        };
+        if let Some((status, which)) = failure.get() {
+            set_last_error(&format!(
+                "rgmin_minimize_hvp_precond: {which} callback returned status {}",
+                status as i32
+            ));
+            return status;
+        }
+        finish_one_shot(x, out, outcome, layout)
+    })
+}
+
 /// Minimize an eindir-compatible objective without taking ownership of it.
 ///
 /// The objective must provide an analytic gradient and the producer's ABI
@@ -2848,7 +3069,7 @@ pub unsafe extern "C" fn rgmin_solver_set_lbfgs_wolfe(solver: *mut rgmin_solver_
 /// Initial inverse-Hessian scale on a BFGS or L-BFGS session.
 /// See [`crate::Solver::set_fixed_h0`]. Returns 0, or 1 on a null
 /// session, a non-positive or non-finite scale, or another method.
-/// ABI minor 66. Unset, the session keeps its previous scale.
+/// ABI minor 68. Unset, the session keeps its previous scale.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
@@ -2869,7 +3090,7 @@ pub unsafe extern "C" fn rgmin_solver_set_fixed_h0(solver: *mut rgmin_solver_t, 
 /// including to zero. Returns 0, or 1 on a null session, a NaN
 /// `stpmax`, or another method, leaving the session as it was. A
 /// `stpmax` below 1 is accepted and fails each search, as in ASE. ABI
-/// minor 66.
+/// minor 68.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].

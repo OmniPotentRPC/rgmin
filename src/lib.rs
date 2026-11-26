@@ -220,7 +220,8 @@ pub use holonomic::{
 };
 pub use hvp::{
     FdHvp, HessianVector, HvpOracle, IdentityPrecond, NystromPrecond, Preconditioner,
-    TryHessianVector, minimize_newton_cg, polish_hvp, steihaug_cg, steihaug_pcg,
+    TryHessianVector, minimize_newton_cg, minimize_newton_cg_precond, polish_hvp, steihaug_cg,
+    steihaug_pcg,
 };
 pub use irc_trust::{IrcTrust, sqrt_masses_3n};
 pub use krylov::{

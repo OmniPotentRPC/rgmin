@@ -147,6 +147,9 @@ stay as they were before the step. A chart or distance
 constraints on a Newton-CG or Newton-PCG session return
 ``Error::FallibleUnsupported``. ``try_lowest_eigenpairs`` and
 ``try_lowest_eigenpairs_precond`` are the same split for one product.
+``minimize_newton_cg_precond`` runs the trust-region Newton-CG loop under a
+caller ``Preconditioner`` in place of the identity; ``minimize_newton_cg`` is the
+same loop with ``IdentityPrecond``. The C entry is ``rgmin_minimize_hvp_precond``.
 The central-difference
 wrapper ``FdHvp`` is unchanged and still costs two gradients; it is
 not what the session uses.

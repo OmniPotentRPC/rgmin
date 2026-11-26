@@ -1,4 +1,4 @@
-# ABI minor 66 adds rgmin_solver_set_fixed_h0 and rgmin_solver_set_ase_linesearch.
+# ABI minor 68 adds rgmin_solver_set_fixed_h0 and rgmin_solver_set_ase_linesearch.
 rgmin_abi_compatible
 rgmin_abi_stamp
 rgmin_backward_error_floor
@@ -63,6 +63,8 @@ rgmin_minimize_hess_opts_sized
 rgmin_minimize_hvp
 rgmin_minimize_hvp_opts
 rgmin_minimize_hvp_opts_sized
+rgmin_minimize_hvp_precond
+rgmin_minimize_hvp_precond_sized
 rgmin_minimize_opts
 rgmin_minimize_opts_sized
 rgmin_minimize_rcg
