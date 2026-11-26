@@ -251,7 +251,7 @@ where
                 energy,
                 grad,
                 evals,
-                converged: false,
+                converged: grad < opts.gtol,
                 observer_stop: true,
             };
         }
@@ -446,5 +446,27 @@ mod tests {
         let rep = minimize_eon_cg(&mut x, spring, &opts);
         assert!(rep.grad >= 1e-8, "{rep:?}");
         assert!(!rep.converged, "{rep:?}");
+    }
+
+    /// A stop on the step that lands under `gtol` uses that same test.
+    /// The flag is not cleared because the observer asked to stop.
+    #[test]
+    fn observer_stop_keeps_the_gradient_test() {
+        let mut x = [0.1, 0.0, 0.0];
+        let opts = EonCg {
+            max_iter: 1,
+            gtol: 1e-8,
+            max_move: 0.2,
+            ..EonCg::default()
+        };
+        let rep = minimize_eon_cg_observed(
+            &mut x,
+            spring,
+            &opts,
+            Some(&mut |_state: crate::observer::IterationView<'_>| ObserverSignal::Stop),
+        );
+        assert!(rep.observer_stop, "{rep:?}");
+        assert!(rep.grad < opts.gtol, "{rep:?} x {x:?}");
+        assert!(rep.converged, "{rep:?}");
     }
 }

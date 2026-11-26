@@ -9278,7 +9278,8 @@ pub extern "C" fn rgmin_control_default() -> rgmin_control_revision5_t {
 
 /// Fill `c` with [`rgmin_control_t::default`] for a caller that states
 /// `sizeof(rgmin_control_t)` as `struct_size`.
-/// [`RGMIN_CONTROL_REVISION5_SIZE`] writes the revision 5 fields. A size
+/// [`RGMIN_CONTROL_REVISION5_SIZE`] writes the revision 5 fields.
+/// [`RGMIN_CONTROL_REVISION6_SIZE`] writes the revision 6 fields. A size
 /// of at least this build's struct writes every field and leaves the
 /// bytes past them alone. A null `c` or any other size writes nothing
 /// and returns [`rgmin_status_t::RGMIN_INVALID_PARAMETER`]. ABI minor 55.

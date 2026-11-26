@@ -234,6 +234,10 @@ typedef enum rgmin_observer_action_t {
     RGMIN_OBSERVER_CONTINUE = 0,
     RGMIN_OBSERVER_STOP = 1
 } rgmin_observer_action_t;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(rgmin_observer_action_t) == sizeof(int32_t),
+               "rgmin_observer_action_t is i32-wide; do not build this header with -fshort-enums");
+#endif
 /** Per-iteration observer for every minimizer.
  *  Called with the accepted iterate of each outer iteration. \a x is a
  *  flat vector of \a n doubles, valid only during the callback; copy it
@@ -296,9 +300,11 @@ typedef struct rgmin_control_t {
 /** Fill \a c with the Rust \c Control::default for a caller that
  *  compiled \a struct_size as \c sizeof(rgmin_control_t).
  *  \c RGMIN_CONTROL_REVISION5_SIZE writes the fields through
- *  \c noise_c. A size of at least this header's struct writes every
- *  field and leaves the bytes past them alone. A null \a c or any other
- *  size writes nothing and returns \c RGMIN_INVALID_PARAMETER.
+ *  \c noise_c. \c RGMIN_CONTROL_REVISION6_SIZE writes the fields
+ *  through \c require_convergence. A size of at least this header's
+ *  struct writes every field and leaves the bytes past them alone. A
+ *  null \a c or any other size writes nothing and returns
+ *  \c RGMIN_INVALID_PARAMETER.
  *  ABI minor 55. */
 rgmin_status_t rgmin_control_init(rgmin_control_t *c, size_t struct_size);
 /** Rust \c Control::default: maxiter 100, gtol 1e-5, istep 1, memory 0

@@ -24,7 +24,8 @@ pub struct IterationView<'a> {
     pub grad_norm: f64,
     /// Step length from the previous iterate to `x`.
     ///
-    /// The first observed accepted iterate uses `0.0`.
+    /// The first observed iterate measures the distance from the initial
+    /// point.
     pub step_length: f64,
 }
 
