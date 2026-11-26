@@ -1093,9 +1093,12 @@ impl Solver {
             let refused = self.accept != Accept::None || self.searches_on_the_set();
             match &mut self.inner {
                 Inner::Nlcg { initialized, .. } if refused => *initialized = false,
-                Inner::Bfgs { h, fresh } | Inner::Sr1 { h, fresh } | Inner::Sr2 { b: h, fresh }
-                    if refused =>
-                {
+                Inner::Bfgs { h, fresh } if refused => {
+                    let scale = self.bfgs_h0.unwrap_or(1.0);
+                    *h = Array2::eye(self.dim) * scale;
+                    *fresh = true;
+                }
+                Inner::Sr1 { h, fresh } | Inner::Sr2 { b: h, fresh } if refused => {
                     *h = Array2::eye(self.dim);
                     *fresh = true;
                 }
@@ -1900,6 +1903,40 @@ mod tests {
                 raw_normal > threshold,
                 "{accept:?}: raw chords {raw_normal}"
             );
+        }
+    }
+
+    #[test]
+    fn a_refused_constrained_bfgs_step_restores_the_fixed_scale() {
+        let start = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], start.view()).unwrap();
+        let origin = start.clone();
+        let obj = Oracle::unbounded(6, move |x: ArrayView1<f64>| {
+            let at_start = x.iter().zip(origin.iter()).all(|(a, b)| *a == *b);
+            let mut g = Array1::zeros(6);
+            g[1] = 1.0;
+            (if at_start { 0.0 } else { 1.0 }, g)
+        });
+        let mut solver = Solver::new(Method::Bfgs, Control::default().with_gtol(0.0), 6);
+        solver.set_accept(Accept::Energy);
+        solver.set_fixed_h0(0.5).unwrap();
+        solver.set_distance_constraints(set).unwrap();
+        let mut x = start.clone();
+        solver.step(&obj, &mut x).unwrap();
+        assert_eq!(x, start);
+        let Inner::Bfgs { h, fresh } = &solver.inner else {
+            unreachable!("BFGS session");
+        };
+        assert!(*fresh);
+        for i in 0..6 {
+            for j in 0..6 {
+                let want = if i == j { 0.5 } else { 0.0 };
+                assert!(
+                    (h[(i, j)] - want).abs() < 1e-12,
+                    "H[{i},{j}] = {}",
+                    h[(i, j)]
+                );
+            }
         }
     }
 
