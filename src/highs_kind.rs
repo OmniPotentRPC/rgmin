@@ -155,9 +155,16 @@ pub struct HighsOptions {
     /// Seconds one HiGHS solve may run, or `None` to keep each solve's own
     /// default.
     ///
-    /// Left as `None`, projection QPs use deterministic iteration limits and
-    /// feasible step QPs stop after 1.0 s. A value adds a wall-clock limit to
-    /// projection QPs and replaces the feasible-step limit.
+    /// Left as `None`, projection QPs have no wall-clock limit and stop on a
+    /// fixed iteration budget, and feasible step QPs stop after 1.0 s. A
+    /// value adds a wall-clock limit to projection QPs and replaces the
+    /// feasible-step limit. It must be finite and non-negative, or the solve
+    /// returns [`crate::Error::HighsTimeLimit`].
+    ///
+    /// A solve that reaches a wall-clock limit returns
+    /// [`crate::Error::HighsTimedOut`] with that limit. A projection QP that
+    /// spends its iteration budget returns [`crate::Error::HighsIterationLimit`]
+    /// instead, so only a limit the caller set can be reported as a timeout.
     pub time_limit: Option<f64>,
 }
 

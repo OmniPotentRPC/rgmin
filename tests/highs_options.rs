@@ -60,6 +60,44 @@ fn projection_time_limit_is_not_an_accepted_solution() {
     assert!(err.to_string().contains("ReachedTimeLimit"), "{err}");
 }
 
+/// A projection that stops on the caller's limit is the typed timeout, and it
+/// carries that limit.
+#[test]
+fn projection_reports_the_limit_the_caller_set() {
+    use ndarray::array;
+    let options = rgmin::HighsOptions::default().with_time_limit(0.0);
+    let direction = array![1.0, -1.0];
+    let point = array![0.0, 0.0];
+    let constraints = HighsStep::default().with_equalities(vec![(vec![(0, 1.0), (1, 1.0)], 0.0)]);
+    let err =
+        rgmin::lbfgs_qp::highs_projected_step(&direction, point.view(), &constraints, &options)
+            .expect_err("a limit of zero seconds cannot be met");
+    assert!(
+        matches!(err, rgmin::Error::HighsTimedOut { seconds } if seconds == 0.0),
+        "{err}"
+    );
+    let text = err.to_string();
+    assert!(
+        text.contains("ReachedTimeLimit") && text.contains("time limit of 0 s"),
+        "{text}"
+    );
+}
+
+/// With no wall-clock limit the projection has no hidden time cap, so a
+/// small problem finishes and is never reported as a timeout.
+#[test]
+fn projection_without_a_limit_has_no_time_cap() {
+    use ndarray::array;
+    let options = rgmin::HighsOptions::default();
+    let direction = array![1.0, -1.0];
+    let point = array![0.0, 0.0];
+    let constraints = HighsStep::default().with_equalities(vec![(vec![(0, 1.0), (1, 1.0)], 0.0)]);
+    let step =
+        rgmin::lbfgs_qp::highs_projected_step(&direction, point.view(), &constraints, &options)
+            .expect("an unlimited projection finishes");
+    assert!((step[0] + step[1]).abs() < 1e-7, "{step:?}");
+}
+
 fn quad(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     let scales = [1.0, 10.0, 100.0, 1000.0];
     let mut f = 0.0;
@@ -505,4 +543,120 @@ fn a_zero_hessian_preserves_the_linear_model() {
     )
     .unwrap();
     assert!((step[0] - 1.0).abs() < 1e-7, "linear minimum {step:?}");
+}
+
+mod time_limit {
+    use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+    use ndarray::{Array1, Array2, ArrayView1, array};
+    use rgmin::{Control, Error, HessianObjective, Method, QnStep, Solver};
+
+    struct Quad;
+
+    impl Objective<f64> for Quad {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            static BOUNDS: std::sync::OnceLock<Bounds<f64>> = std::sync::OnceLock::new();
+            BOUNDS.get_or_init(|| Bounds::new(array![-10.0, -10.0], array![10.0, 10.0], 0.0))
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            0.5 * x.dot(&x)
+        }
+    }
+    impl Gradient<f64> for Quad {
+        fn dim(&self) -> usize {
+            2
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            x.to_owned()
+        }
+    }
+    impl DifferentiableObjective<f64> for Quad {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            (self.eval(x), self.grad(x))
+        }
+    }
+    impl HessianObjective for Quad {
+        fn hessian(&self, _x: ArrayView1<f64>) -> Array2<f64> {
+            Array2::eye(2)
+        }
+    }
+
+    /// Newton steps through the feasible Hessian QP: HiGHS on, a step cap
+    /// to bound the step, and no box, trust radius or equality.
+    fn hessian_qp_session() -> Solver {
+        let mut solver = Solver::new(Method::lbfgs(), Control::default().with_maxmove(0.5), 2);
+        solver.set_qn_step(QnStep::Newton);
+        solver.set_highs(true);
+        solver
+    }
+
+    /// A Hessian QP that reaches its limit used to vanish: the session
+    /// took the unbounded Newton step and nothing said HiGHS had not
+    /// answered. The timeout is now counted, and the fallback still moves.
+    #[test]
+    fn a_hessian_qp_that_times_out_is_recorded_and_the_fallback_runs() {
+        let mut solver = hessian_qp_session();
+        assert_eq!(solver.highs_timeouts(), 0);
+        assert!(solver.set_highs_time_limit(Some(1e-12)));
+        let mut x = array![2.0, -1.0];
+        let start_value = 0.5 * x.dot(&x);
+        let report = solver.step_hess(&Quad, &mut x).unwrap();
+        assert_eq!(solver.highs_timeouts(), 1);
+        assert!(report.value < start_value, "{report:?}");
+        assert_ne!(x, array![2.0, -1.0]);
+    }
+
+    /// With the default limit the same step is solved by HiGHS and nothing
+    /// is recorded.
+    #[test]
+    fn the_default_limit_lets_the_hessian_qp_finish() {
+        let mut solver = hessian_qp_session();
+        let mut x = array![2.0, -1.0];
+        solver.step_hess(&Quad, &mut x).unwrap();
+        assert_eq!(solver.highs_timeouts(), 0);
+        let moved = ((x[0] - 2.0).powi(2) + (x[1] + 1.0).powi(2)).sqrt();
+        assert!((moved - 0.5).abs() < 1e-7, "{x:?}");
+    }
+
+    #[test]
+    fn clearing_the_limit_stops_the_timeouts() {
+        let mut solver = hessian_qp_session();
+        assert!(solver.set_highs_time_limit(Some(1e-12)));
+        let mut x = array![2.0, -1.0];
+        solver.step_hess(&Quad, &mut x).unwrap();
+        assert_eq!(solver.highs_timeouts(), 1);
+        assert!(solver.set_highs_time_limit(None));
+        solver.step_hess(&Quad, &mut x).unwrap();
+        assert_eq!(solver.highs_timeouts(), 1);
+    }
+
+    #[test]
+    fn the_setter_refuses_a_limit_that_is_not_a_finite_positive_number() {
+        let mut solver = hessian_qp_session();
+        for bad in [f64::NAN, 0.0, -1.0, f64::NEG_INFINITY, f64::INFINITY] {
+            assert!(!solver.set_highs_time_limit(Some(bad)), "{bad}");
+        }
+        assert!(solver.set_highs_time_limit(Some(30.0)));
+        let mut x = array![2.0, -1.0];
+        solver.step_hess(&Quad, &mut x).unwrap();
+        assert_eq!(solver.highs_timeouts(), 0);
+    }
+
+    /// A step the constraints must shape cannot fall back, so its timeout
+    /// is the distinct error instead of a counter.
+    #[test]
+    fn a_constrained_step_that_times_out_is_an_error() {
+        let mut solver = hessian_qp_session();
+        assert!(solver.set_trust(0.1));
+        assert!(solver.set_highs_time_limit(Some(1e-12)));
+        let mut x = array![2.0, -1.0];
+        let result = solver.step_hess(&Quad, &mut x);
+        assert!(
+            matches!(result, Err(Error::HighsTimedOut { seconds }) if seconds == 1e-12),
+            "{result:?}"
+        );
+        assert_eq!(x, array![2.0, -1.0]);
+    }
 }

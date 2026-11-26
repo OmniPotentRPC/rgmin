@@ -131,16 +131,26 @@ const PROJECTION_ITERATION_LIMIT: i32 = 100_000;
 /// Seconds the feasible step QP may run unless the options set a limit.
 const FEASIBLE_STEP_TIME_LIMIT: f64 = 1.0;
 
-/// Apply the time limit to one model.
-fn set_time_limit(model: &mut highs::Model, options: &HighsOptions, default: f64) -> Result<()> {
+/// Limits one HiGHS solve runs under. A field is `None` when the solve has
+/// no such limit, so a stop cannot be blamed on it.
+#[derive(Clone, Copy, Debug)]
+struct SolveLimits {
+    seconds: Option<f64>,
+    iterations: Option<i32>,
+}
+
+/// Apply the time limit to one model and return the seconds it was given.
+fn set_time_limit(model: &mut highs::Model, options: &HighsOptions, default: f64) -> Result<f64> {
+    let seconds = options.time_limit_or(default)?;
     model
-        .try_set_option("time_limit", options.time_limit_or(default)?)
-        .map_err(|_| Error::Highs("cannot set time_limit".into()))
+        .try_set_option("time_limit", seconds)
+        .map_err(|_| Error::Highs("cannot set time_limit".into()))?;
+    Ok(seconds)
 }
 
 /// Bound projection work deterministically, plus any wall limit the caller
-/// explicitly requested.
-fn set_projection_limits(model: &mut highs::Model, options: &HighsOptions) -> Result<()> {
+/// explicitly requested. Returns the limits the solve now runs under.
+fn set_projection_limits(model: &mut highs::Model, options: &HighsOptions) -> Result<SolveLimits> {
     for name in [
         "qp_iteration_limit",
         "ipm_iteration_limit",
@@ -150,12 +160,49 @@ fn set_projection_limits(model: &mut highs::Model, options: &HighsOptions) -> Re
             .try_set_option(name, PROJECTION_ITERATION_LIMIT)
             .map_err(|_| Error::Highs(format!("cannot set {name}")))?;
     }
-    if options.time_limit.is_some() {
+    let seconds = if options.time_limit.is_some() {
+        let seconds = options.time_limit_or(0.0)?;
         model
-            .try_set_option("time_limit", options.time_limit_or(0.0)?)
+            .try_set_option("time_limit", seconds)
             .map_err(|_| Error::Highs("cannot set time_limit".into()))?;
+        Some(seconds)
+    } else {
+        None
+    };
+    Ok(SolveLimits {
+        seconds,
+        iterations: Some(PROJECTION_ITERATION_LIMIT),
+    })
+}
+
+/// `Ok` when the solve is optimal, else the error for its status. A solve
+/// that stopped on a limit the caller or this module set is named by it:
+/// [`Error::HighsTimedOut`] for the wall clock, [`Error::HighsIterationLimit`]
+/// for the iteration budget. A limit that was never set cannot be what
+/// stopped the solve, so that status stays a generic [`Error::Highs`].
+fn status_result(status: HighsModelStatus, limits: SolveLimits) -> Result<()> {
+    match (status, limits) {
+        (HighsModelStatus::Optimal, _) => Ok(()),
+        (
+            HighsModelStatus::ReachedTimeLimit,
+            SolveLimits {
+                seconds: Some(seconds),
+                ..
+            },
+        ) => Err(Error::HighsTimedOut { seconds }),
+        (
+            HighsModelStatus::ReachedIterationLimit,
+            SolveLimits {
+                iterations: Some(iterations),
+                ..
+            },
+        ) => Err(Error::HighsIterationLimit { iterations }),
+        (status, _) => Err(Error::Highs(format!("status {status:?}"))),
     }
-    Ok(())
+}
+
+fn require_optimal(solved: &highs::SolvedModel, limits: SolveLimits) -> Result<()> {
+    status_result(solved.status(), limits)
 }
 
 fn bind_callback(
@@ -423,7 +470,7 @@ fn project_qp(
     model
         .try_set_option("threads", 1_i32)
         .map_err(|_| Error::Highs("cannot set threads=1".into()))?;
-    set_projection_limits(&mut model, options)?;
+    let limits = set_projection_limits(&mut model, options)?;
 
     let (q_start, q_index, q_value) = identity_csc(n);
     let st = unsafe {
@@ -445,9 +492,7 @@ fn project_qp(
     let solved = model
         .try_solve()
         .map_err(|e| Error::Highs(format!("solve {e:?}")))?;
-    if solved.status() != HighsModelStatus::Optimal {
-        return Err(Error::Highs(format!("status {:?}", solved.status())));
-    }
+    require_optimal(&solved, limits)?;
     let sol = solved.get_solution();
     let p = sol.columns();
     if p.len() != n {
@@ -687,7 +732,14 @@ pub(crate) fn highs_feasible_step_boxed(
     model
         .try_set_option("threads", 1_i32)
         .map_err(|_| Error::Highs("cannot set threads=1".into()))?;
-    set_time_limit(&mut model, options, FEASIBLE_STEP_TIME_LIMIT)?;
+    let limits = SolveLimits {
+        seconds: Some(set_time_limit(
+            &mut model,
+            options,
+            FEASIBLE_STEP_TIME_LIMIT,
+        )?),
+        iterations: None,
+    };
     if !equalities.is_empty() {
         model
             .try_set_option(
@@ -719,9 +771,7 @@ pub(crate) fn highs_feasible_step_boxed(
     let solved = model
         .try_solve()
         .map_err(|e| Error::Highs(format!("solve {e:?}")))?;
-    if solved.status() != HighsModelStatus::Optimal {
-        return Err(Error::Highs(format!("status {:?}", solved.status())));
-    }
+    require_optimal(&solved, limits)?;
     let sol = solved.get_solution();
     let p = sol.columns();
     if p.len() != n {
@@ -781,8 +831,12 @@ fn identity_csc(n: usize) -> (Vec<HighsInt>, Vec<HighsInt>, Vec<f64>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{FEASIBLE_STEP_TIME_LIMIT, identity_csc, set_projection_limits, set_time_limit};
-    use crate::HighsOptions;
+    use super::{
+        FEASIBLE_STEP_TIME_LIMIT, PROJECTION_ITERATION_LIMIT, SolveLimits, identity_csc,
+        set_projection_limits, set_time_limit, status_result,
+    };
+    use crate::{Error, HighsOptions};
+    use highs::HighsModelStatus;
 
     #[test]
     fn identity_hessian_has_terminal_column_pointer() {
@@ -833,14 +887,60 @@ mod tests {
         let options = HighsOptions::default();
         let set = options.with_time_limit(2.5);
 
-        set_projection_limits(&mut model, &options).unwrap();
+        let none = set_projection_limits(&mut model, &options).unwrap();
         assert_eq!(highs_time_limit(&mut model), default_limit);
-        set_projection_limits(&mut model, &set).unwrap();
+        assert_eq!(none.seconds, None);
+        assert_eq!(none.iterations, Some(PROJECTION_ITERATION_LIMIT));
+        let timed = set_projection_limits(&mut model, &set).unwrap();
         assert_eq!(highs_time_limit(&mut model), 2.5);
+        assert_eq!(timed.seconds, Some(2.5));
 
-        set_time_limit(&mut model, &options, FEASIBLE_STEP_TIME_LIMIT).unwrap();
+        let seconds = set_time_limit(&mut model, &options, FEASIBLE_STEP_TIME_LIMIT).unwrap();
         assert_eq!(highs_time_limit(&mut model), FEASIBLE_STEP_TIME_LIMIT);
-        set_time_limit(&mut model, &set, FEASIBLE_STEP_TIME_LIMIT).unwrap();
+        assert_eq!(seconds, FEASIBLE_STEP_TIME_LIMIT);
+        let seconds = set_time_limit(&mut model, &set, FEASIBLE_STEP_TIME_LIMIT).unwrap();
         assert_eq!(highs_time_limit(&mut model), 2.5);
+        assert_eq!(seconds, 2.5);
+    }
+
+    #[test]
+    fn a_stop_is_named_by_the_limit_that_was_set() {
+        let timed = SolveLimits {
+            seconds: Some(2.5),
+            iterations: Some(PROJECTION_ITERATION_LIMIT),
+        };
+        let counted = SolveLimits {
+            seconds: None,
+            iterations: Some(PROJECTION_ITERATION_LIMIT),
+        };
+        assert!(status_result(HighsModelStatus::Optimal, counted).is_ok());
+        assert!(matches!(
+            status_result(HighsModelStatus::ReachedTimeLimit, timed),
+            Err(Error::HighsTimedOut { seconds }) if seconds == 2.5
+        ));
+        assert!(matches!(
+            status_result(HighsModelStatus::ReachedIterationLimit, counted),
+            Err(Error::HighsIterationLimit { iterations }) if iterations == PROJECTION_ITERATION_LIMIT
+        ));
+        assert!(matches!(
+            status_result(HighsModelStatus::ReachedIterationLimit, timed),
+            Err(Error::HighsIterationLimit { .. })
+        ));
+    }
+
+    #[test]
+    fn a_time_stop_without_a_time_limit_is_not_a_timeout() {
+        let counted = SolveLimits {
+            seconds: None,
+            iterations: Some(PROJECTION_ITERATION_LIMIT),
+        };
+        let error = status_result(HighsModelStatus::ReachedTimeLimit, counted).unwrap_err();
+        assert!(matches!(error, Error::Highs(_)), "{error}");
+        let feasible = SolveLimits {
+            seconds: Some(1.0),
+            iterations: None,
+        };
+        let error = status_result(HighsModelStatus::ReachedIterationLimit, feasible).unwrap_err();
+        assert!(matches!(error, Error::Highs(_)), "{error}");
     }
 }

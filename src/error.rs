@@ -23,6 +23,29 @@ pub enum Error {
         /// Refused limit in seconds.
         limit: f64,
     },
+    /// A HiGHS solve reached its wall-clock limit before it finished.
+    ///
+    /// [`crate::HighsOptions::time_limit`] sets the limit, and this error
+    /// carries the one the solve ran under. The projection QP has no
+    /// wall-clock limit of its own, so it reports this only when the caller
+    /// set one and reports [`Error::HighsIterationLimit`] when its fixed
+    /// iteration budget runs out. The feasible step QP runs under 1.0 s
+    /// unless the caller set another limit. A session that can still take a
+    /// step without the solve counts the timeout in
+    /// [`crate::Solver::highs_timeouts`] and takes that step. A step the
+    /// constraints must shape returns this error.
+    #[error("HiGHS reached its time limit of {seconds} s (ReachedTimeLimit)")]
+    HighsTimedOut {
+        /// The limit the solve ran under, in seconds.
+        seconds: f64,
+    },
+    /// A HiGHS projection QP used up its fixed iteration budget before it
+    /// finished. Machine load does not change this outcome.
+    #[error("HiGHS reached its iteration limit of {iterations} (ReachedIterationLimit)")]
+    HighsIterationLimit {
+        /// Iterations each engine was allowed to run.
+        iterations: i32,
+    },
     /// Newton / RFO / dogleg needs a Hessian oracle.
     #[error("Newton/RFO/dogleg needs a Hessian; call step_hess")]
     NeedHessian,
