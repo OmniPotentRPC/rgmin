@@ -58,6 +58,7 @@ typedef rgmin_exp_t xts_exp_t;
 typedef rgmin_lowest_mode_t xts_lowest_mode_t;
 typedef rgmin_hvp_fn xts_hvp_fn;
 typedef rgmin_precond_fn xts_precond_fn;
+typedef rgmin_vec_precond_fn xts_vec_precond_fn;
 typedef rgmin_constraint_error_t xts_constraint_error_t;
 typedef rgmin_constraint_solver_t xts_constraint_solver_t;
 typedef rgmin_constraints_t xts_constraints_t;
@@ -147,6 +148,7 @@ typedef rgmin_constraints_t xts_constraints_t;
 #define xts_minimize_opts rgmin_minimize_opts
 #define xts_minimize_hess_opts rgmin_minimize_hess_opts
 #define xts_minimize_hvp_opts rgmin_minimize_hvp_opts
+#define xts_minimize_hvp_precond rgmin_minimize_hvp_precond
 #define xts_minimize_eindir_opts rgmin_minimize_eindir_opts
 #define xts_solver_set_fire_preset rgmin_solver_set_fire_preset
 #define xts_solver_set_fire_abc rgmin_solver_set_fire_abc
