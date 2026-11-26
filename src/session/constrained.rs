@@ -662,6 +662,9 @@ impl Solver {
                 "GROMACS conjugate gradient, which has no constrained line search",
             ));
         }
+        if matches!(self.overlay, Overlay::GromacsLbfgs(_)) {
+            return Err(unsupported("GROMACS L-BFGS, which rejects constraints"));
+        }
         Ok(())
     }
 

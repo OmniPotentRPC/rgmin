@@ -209,9 +209,13 @@ pub use gpmin::{
 pub use gromacs::{
     GROMACS_CG_BETA_CAP, GROMACS_CG_EMSTEP_DEFAULT, GROMACS_CG_NSTCGSTEEP_DEFAULT,
     GROMACS_CG_WOLFE_C1, GROMACS_CG_WOLFE_C2, GROMACS_CG_WOLFE_MAXITER,
-    GROMACS_STEEP_EMSTEP_DEFAULT, GROMACS_STEEP_GROW, GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS,
-    GROMACS_STEEP_MIN_USTEP, GROMACS_STEEP_SHRINK, GROMACS_STEEP_SHRINK_BUDGET_CAP, GromacsCg,
-    GromacsCgConfig, GromacsSteep, GromacsSteepConfig, gromacs_steep_max_constraint_shrinks,
+    GROMACS_LBFGS_LINESEARCH_MAXITER, GROMACS_LBFGS_MINSTEP_CHARACTERISTIC,
+    GROMACS_LBFGS_NCORR_DEFAULT, GROMACS_LBFGS_REAL_EPS, GROMACS_LBFGS_RESET_STEP,
+    GROMACS_LBFGS_STEP_REDUCTION, GROMACS_STEEP_EMSTEP_DEFAULT, GROMACS_STEEP_GROW,
+    GROMACS_STEEP_MAX_CONSTRAINT_SHRINKS, GROMACS_STEEP_MIN_USTEP, GROMACS_STEEP_SHRINK,
+    GROMACS_STEEP_SHRINK_BUDGET_CAP, GromacsCg, GromacsCgConfig, GromacsLbfgs, GromacsLbfgsConfig,
+    GromacsSteep, GromacsSteepConfig, gromacs_lbfgs_energy_rise,
+    gromacs_steep_max_constraint_shrinks,
 };
 pub use highs_kind::{
     HighsCCallback, HighsCallback, HighsCallbackKind, HighsCrossover, HighsOptions, HighsSolverKind,
@@ -259,7 +263,9 @@ pub use manifold::{
     SphereComplex, StiefelNp, StiefelRetraction, Symmetric, Unitary,
 };
 pub use method::Method;
-pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
+pub use minimize::{
+    minimize, minimize_gromacs_lbfgs, minimize_method, minimize_method_hess, minimize_method_hvp,
+};
 pub use minres::{
     BoundedKrylovSolve, MinresError, MinresFailure, MinresVector, minres_solve_bounded,
     minres_solve_precond,
