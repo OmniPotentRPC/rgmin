@@ -1,11 +1,11 @@
-//! Opt-in inverse-Hessian scale and line-search multiplier bound.
+//! Opt-in inverse-Hessian scale and ASE line search.
 //! Unset, both leave the session step that shipped before they existed.
 
 use std::sync::OnceLock;
 
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
-use rgmin::{Accept, Control, Method, Solver};
+use rgmin::{Accept, Control, LineSearch, Method, Solver};
 
 struct Quadratic;
 
@@ -49,51 +49,75 @@ fn bfgs() -> Solver {
 }
 
 #[test]
-fn an_unset_multiplier_bound_takes_the_full_quadratic_step() {
+fn an_unset_ase_search_takes_the_full_quadratic_step() {
     let mut solver = bfgs();
     let mut x = Array1::from_elem(1, 1.0);
     solver.step(&Quadratic, &mut x).unwrap();
     assert_eq!(x[0], 0.0);
 }
 
-#[test]
-fn a_tighter_multiplier_bound_shortens_that_step() {
+fn ase_bfgs(cap: f64) -> Solver {
     let mut solver = bfgs();
-    solver.set_line_alpha_max(0.25).unwrap();
+    solver.set_atom_maxmove(cap);
+    solver.set_linesearch(LineSearch::wolfe(0.23, 0.46, 20));
+    solver.set_ase_linesearch(50.0).unwrap();
+    solver
+}
+
+#[test]
+fn the_ase_search_limits_each_increment_by_the_atom_cap() {
+    // ASE evaluates 0.8, 0.6 and 0.4 and stops on its strong-Wolfe test.
+    // rgmin's own search under the same cap stops at the cap, 0.8.
+    let mut ase = ase_bfgs(0.2);
     let mut x = Array1::from_elem(1, 1.0);
-    solver.step(&Quadratic, &mut x).unwrap();
-    assert_eq!(x[0], 0.75);
+    ase.step(&Quadratic, &mut x).unwrap();
+    assert!((x[0] - 0.4).abs() < 1e-12, "{}", x[0]);
+
+    let mut own = bfgs();
+    own.set_atom_maxmove(0.2);
+    own.set_linesearch(LineSearch::wolfe(0.23, 0.46, 20));
+    let mut y = Array1::from_elem(1, 1.0);
+    own.step(&Quadratic, &mut y).unwrap();
+    assert!((y[0] - 0.8).abs() < 1e-12, "{}", y[0]);
 }
 
 #[test]
-fn a_looser_multiplier_bound_matches_the_unset_step() {
-    let mut loose = bfgs();
-    loose.set_line_alpha_max(10.0).unwrap();
-    let mut bounded = Array1::from_elem(1, 1.0);
-    loose.step(&Quadratic, &mut bounded).unwrap();
-    let mut open = bfgs();
-    let mut plain = Array1::from_elem(1, 1.0);
-    open.step(&Quadratic, &mut plain).unwrap();
-    assert_eq!(bounded[0], plain[0]);
-}
-
-#[test]
-fn clearing_the_multiplier_bound_matches_the_unset_step() {
-    let mut cleared = bfgs();
-    cleared.set_line_alpha_max(0.25).unwrap();
-    cleared.set_line_alpha_max(0.0).unwrap();
-    let mut x = Array1::from_elem(1, 1.0);
-    cleared.step(&Quadratic, &mut x).unwrap();
-    assert_eq!(x[0], 0.0);
-}
-
-#[test]
-fn a_non_finite_multiplier_bound_is_refused() {
-    let mut solver = bfgs();
-    assert!(solver.set_line_alpha_max(f64::NAN).is_err());
+fn the_ase_search_opens_at_the_unit_step_whatever_istep_is() {
+    let mut solver = Solver::new(Method::Bfgs, open_control().with_istep(0.1), 1);
+    solver.set_atom_maxmove(0.0);
+    solver.set_accept(Accept::Energy);
+    solver.set_linesearch(LineSearch::wolfe(0.23, 0.46, 20));
+    solver.set_ase_linesearch(50.0).unwrap();
     let mut x = Array1::from_elem(1, 1.0);
     solver.step(&Quadratic, &mut x).unwrap();
     assert_eq!(x[0], 0.0);
+}
+
+#[test]
+fn the_ase_search_refuses_a_step_it_would_not_run() {
+    let mut solver = ase_bfgs(0.2);
+    solver.set_linesearch(LineSearch::default());
+    let mut x = Array1::from_elem(1, 1.0);
+    assert!(solver.step(&Quadratic, &mut x).is_err());
+    assert_eq!(x[0], 1.0);
+
+    let mut capped = Solver::new(Method::Bfgs, open_control().with_maxmove(Some(0.5)), 1);
+    capped.set_linesearch(LineSearch::wolfe(0.23, 0.46, 20));
+    capped.set_ase_linesearch(50.0).unwrap();
+    assert!(capped.step(&Quadratic, &mut x).is_err());
+}
+
+#[test]
+fn the_ase_search_is_refused_off_bfgs_and_lbfgs_and_for_nan() {
+    let mut solver = bfgs();
+    assert!(solver.set_ase_linesearch(f64::NAN).is_err());
+    let mut x = Array1::from_elem(1, 1.0);
+    solver.step(&Quadratic, &mut x).unwrap();
+    assert_eq!(x[0], 0.0);
+    let mut steepest = Solver::new(Method::Steepest, open_control(), 1);
+    assert!(steepest.set_ase_linesearch(50.0).is_err());
+    let mut lbfgs = Solver::new(Method::lbfgs(), open_control(), 1);
+    assert!(lbfgs.set_ase_linesearch(50.0).is_ok());
 }
 
 #[test]
