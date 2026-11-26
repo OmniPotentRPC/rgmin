@@ -132,7 +132,6 @@ typedef struct rgmin_abi_stamp_t {
  * Revision 5 was value, steps, grad_norm, stop. Both sides shipped
  * those structs as revision 4 with different fields, so the union was
  * revision 5. */
-
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
     RGMIN_POLAK_RIBIERE = 0,
@@ -936,6 +935,22 @@ _Static_assert(sizeof(rgmin_highs_crossover_t) == sizeof(int32_t),
 /** Set HiGHS `run_crossover`. Unknown integers return 1. */
 int32_t rgmin_solver_set_highs_crossover(rgmin_solver_t *solver,
                                          rgmin_highs_crossover_t kind);
+/** Seconds one HiGHS solve may run. A finite positive value adds a
+ *  wall-clock limit to the L-BFGS projection QP and replaces the 1.0 s of
+ *  the feasible step QP. Zero or a negative value clears it, so the
+ *  projection QP has no wall-clock limit again and runs on its fixed
+ *  iteration budget. NaN or an infinite value returns 1 and leaves the
+ *  limit as it was. Returns 0, or 1 on a NULL solver or a build without
+ *  the highs feature. A step the constraints must shape that reaches the
+ *  limit returns \c RGMIN_INVALID_PARAMETER, and \ref rgmin_last_error
+ *  names the time limit. A projection QP that uses up its iteration
+ *  budget fails the same way, and \ref rgmin_last_error names the
+ *  iteration limit. */
+int32_t rgmin_solver_set_highs_time_limit(rgmin_solver_t *solver, double seconds);
+/** Hessian steps whose HiGHS solve reached its time limit and fell back
+ *  to the step the session takes without HiGHS. Zero for a NULL solver,
+ *  a session that takes no Hessian step, and a build without highs. */
+size_t rgmin_solver_highs_timeouts(const rgmin_solver_t *solver);
 /** HiGHS callback kind. Integers match HiGHS `HighsCallbackType`. */
 typedef enum rgmin_highs_cb_kind_t {
     RGMIN_HIGHS_CB_LOGGING = 0,

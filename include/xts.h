@@ -183,6 +183,8 @@ typedef rgmin_constraints_t xts_constraints_t;
 #define xts_solver_set_highs_solver rgmin_solver_set_highs_solver
 #define xts_solver_set_highs_crossover rgmin_solver_set_highs_crossover
 #define xts_solver_set_highs_callback rgmin_solver_set_highs_callback
+#define xts_solver_set_highs_time_limit rgmin_solver_set_highs_time_limit
+#define xts_solver_highs_timeouts rgmin_solver_highs_timeouts
 #define XTS_HIGHS_CHOOSE RGMIN_HIGHS_CHOOSE
 #define XTS_HIGHS_SIMPLEX RGMIN_HIGHS_SIMPLEX
 #define XTS_HIGHS_IPM RGMIN_HIGHS_IPM

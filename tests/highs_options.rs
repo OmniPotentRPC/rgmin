@@ -179,6 +179,47 @@ fn c_abi_set_highs_solver_is_closed() {
     );
 }
 
+#[cfg(feature = "capi")]
+#[test]
+fn c_abi_set_highs_time_limit_refuses_non_finite_and_clears_on_non_positive() {
+    use rgmin::ffi::{
+        rgmin_control_t, rgmin_method_t, rgmin_solver_create, rgmin_solver_free,
+        rgmin_solver_highs_timeouts, rgmin_solver_set_highs_time_limit,
+    };
+    let ctrl = rgmin_control_t {
+        maxiter: 1,
+        gtol: 1e-8,
+        istep: 0.1,
+        memory: 4,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+        require_convergence: 0,
+        noise_eps_f: 0.0,
+    };
+    let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert!(!session.is_null());
+    for accepted in [0.5, 0.0, -1.0] {
+        assert_eq!(
+            unsafe { rgmin_solver_set_highs_time_limit(session, accepted) },
+            0,
+            "{accepted}"
+        );
+    }
+    for refused in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            unsafe { rgmin_solver_set_highs_time_limit(session, refused) },
+            1,
+            "{refused}"
+        );
+    }
+    assert_eq!(unsafe { rgmin_solver_highs_timeouts(session) }, 0);
+    unsafe { rgmin_solver_free(session) };
+    let null = std::ptr::null_mut();
+    assert_eq!(unsafe { rgmin_solver_set_highs_time_limit(null, 1.0) }, 1);
+    assert_eq!(unsafe { rgmin_solver_highs_timeouts(null) }, 0);
+}
+
 fn scipy_qp_gold(payload: &str) -> Vec<f64> {
     use std::io::Write;
     use std::process::{Command, Stdio};
