@@ -1,10 +1,11 @@
 mod common;
 
 use approx::assert_abs_diff_eq;
+use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::{
     Control, DistanceConstraints, Error, GROMACS_LBFGS_NCORR_DEFAULT, GromacsLbfgsConfig, Method,
-    Oracle, Solver, Status, StopNorm,
+    Oracle, Report, Solver, Status, StopNorm,
 };
 
 fn control(emstep: f64, emtol: f64, nsteps: usize) -> Control {
@@ -93,6 +94,59 @@ fn unresolved_line_search_clears_memory_and_counts_the_reset_iteration() {
     assert_eq!(reset.steps, 2);
     assert_eq!(solver.pair_count(), 0);
     assert_abs_diff_eq!(point[0], 1.0);
+}
+
+#[test]
+fn machine_precision_stops_on_a_rounded_step_or_an_empty_memory_search() {
+    fn run<O: DifferentiableObjective<f64>>(objective: &O, start: Array1<f64>) -> (Report, usize) {
+        let mut solver = Solver::new(Method::GromacsLbfgs, control(1.0, 0.0, 10), 3);
+        let mut point = start;
+        let report = solver.run(objective, &mut point).unwrap();
+        assert_eq!(report.status, Status::MachinePrecision, "{report:?}");
+        assert_eq!(report.stop_reason(), rgmin::StopReason::MachinePrecision);
+        assert!(!report.converged);
+        assert_eq!(report.coords, point);
+        (report, solver.pair_count())
+    }
+
+    // The first step lands one ulp of 2^20 from the minimum. The reset
+    // line step 1 along the next direction, 2^-32, is below
+    // GMX_REAL_EPS / rms(p_i / |x_i|) = sqrt(3), so no trial follows.
+    let centre = 2.0_f64.powi(20);
+    let ulp = 2.0_f64.powi(-32);
+    let bowl = Oracle::unbounded(3, move |x: ArrayView1<f64>| {
+        let d = x[0] - centre;
+        (0.5 * d * d, array![d, 0.0, 0.0])
+    });
+    let (report, pairs) = run(&bowl, array![centre + 1.0 + ulp, 0.0, 0.0]);
+    assert_eq!((report.steps, report.evals, pairs), (1, 2, 1));
+    assert_eq!(report.coords, array![centre + ulp, 0.0, 0.0]);
+
+    // Every trial on the force side rises, so the bracket spends all 20
+    // trials with no stored pair to discard.
+    let kink = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+        if x[0] > 0.0 {
+            (x[0], array![1.0, 0.0, 0.0])
+        } else {
+            (0.0, array![-1.0, 0.0, 0.0])
+        }
+    });
+    let (report, pairs) = run(&kink, Array1::zeros(3));
+    assert_eq!((report.steps, report.evals, pairs), (0, 2 + 20, 0));
+    assert_eq!(report.coords, Array1::<f64>::zeros(3));
+
+    // A flat energy ends the bracket after one trial with an energy change
+    // below GMX_REAL_EPS.
+    let flat = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+        if x[0] > 0.0 {
+            (1.0, array![1.0, 0.0, 0.0])
+        } else {
+            (1.0, array![-1.0, 0.0, 0.0])
+        }
+    });
+    let (report, pairs) = run(&flat, Array1::zeros(3));
+    assert_eq!((report.steps, report.evals, pairs), (0, 2 + 1, 0));
+    assert_eq!(report.coords, Array1::<f64>::zeros(3));
 }
 
 /// One GROMACS L-BFGS step from the origin on a line profile `t -> (value, slope)`
