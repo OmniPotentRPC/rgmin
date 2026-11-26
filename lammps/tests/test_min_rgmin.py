@@ -156,11 +156,12 @@ def test_etol_stops_before_ftol_with_fewer_iterations(tmp_path, modify):
 def test_fire_large_etol_waits_past_the_delay(tmp_path):
     """A loose ``etol`` still waits out FIRE's delay.
 
-    ``min_style fire`` in rgmin uses ``n_min`` of 5, and the energy test
-    stays off until the power has been positive for longer than that.
-    The plugin used to apply ``minimize etol`` on every moved step, so
-    ``etol`` 0.1 stopped on the first step of this rattled cell. The
-    count of iterations separates that behaviour from a delay.
+    ``min_style fire`` in rgmin uses LAMMPS's default ``delaystep`` of
+    20 (``n_min`` of 20), and the energy test stays off until the power
+    has been positive for longer than that. The plugin used to apply
+    ``minimize etol`` on every moved step, so ``etol`` 0.1 stopped on
+    the first step of this rattled cell. The count of iterations
+    separates that behaviour from a delay.
     """
     res = rgmin(
         tmp_path,
@@ -173,7 +174,7 @@ def test_fire_large_etol_waits_past_the_delay(tmp_path):
     )
     assert res.returncode == 0, res.error or res.log[-2000:]
     assert res.stop == "energy tolerance", res.stop
-    assert res.iterations > 5, res.iterations
+    assert res.iterations > 20, res.iterations
 
 
 def test_etol_zero_leaves_the_run_unchanged(tmp_path):
@@ -203,6 +204,51 @@ def test_maxeval_and_maxiter(tmp_path):
     # the atoms hold rgmin's last iterate, whose energy thermo printed
     assert res.thermo[-1][0] == 5
     assert res.pe == res.thermo[-1][1]
+
+def test_fire2_keyword_mapping_changes_the_run(tmp_path):
+    base = rgmin(tmp_path / "base", "cu-sia-vac", "min_modify method fire2", thermo=1)
+    tuned = rgmin(
+        tmp_path / "tuned",
+        "cu-sia-vac",
+        "min_modify method fire2 delaystep 8 dtgrow 1.2 dtshrink 0.4 alpha0 0.2 alphashrink 0.97 tmax 6.0",
+        thermo=1,
+    )
+    assert_converged(base)
+    assert_converged(tuned)
+    assert (tuned.iterations, tuned.evaluations) != (base.iterations, base.evaluations)
+
+
+def test_fire_keyword_mapping_changes_the_run(tmp_path):
+    base = rgmin(tmp_path / "base", "cu-sia-vac", "min_modify method fire")
+    tuned = rgmin(
+        tmp_path / "tuned",
+        "cu-sia-vac",
+        "min_modify method fire delaystep 3 dtgrow 1.3 dtshrink 0.4 alpha0 0.2 alphashrink 0.95 tmax 6.0",
+    )
+    assert_converged(base)
+    assert_converged(tuned)
+    assert (tuned.iterations, tuned.evaluations) != (base.iterations, base.evaluations)
+
+
+def test_fire2_default_keywords_keep_the_base_trajectory(tmp_path):
+    base = rgmin(tmp_path / "base", "cu-sia-vac", "min_modify method fire2", thermo=1)
+    defaults = rgmin(
+        tmp_path / "defaults",
+        "cu-sia-vac",
+        (
+            "min_modify method fire2 delaystep 20 dtgrow 1.1 dtshrink 0.5 "
+            "alpha0 0.25 alphashrink 0.99 tmax 10.0"
+        ),
+        thermo=1,
+    )
+    assert_converged(base)
+    assert_converged(defaults)
+    assert (base.iterations, base.evaluations, base.pe, base.thermo) == (
+        defaults.iterations,
+        defaults.evaluations,
+        defaults.pe,
+        defaults.thermo,
+    )
 
 
 def test_thermo_norm_yes(tmp_path):
@@ -237,7 +283,19 @@ def test_second_minimize_starts_converged(tmp_path):
         ("min_modify method fire linesearch wolfe", "", "linesearch wolfe needs"),
         ("min_modify abcfire yes", "", "abcfire yes needs min_modify method fire2"),
         ("min_modify line backtrack", "", "does not take min_modify line"),
-        ("min_modify method fire2 tmax 4.0", "", "keeps the Guenole 2020 FIRE parameters"),
+        ("min_modify delaystep -1", "", "min_modify delaystep must be non-negative"),
+        ("min_modify method fire delaystep -1", "", "min_modify delaystep must be non-negative"),
+        ("min_modify method fire2 delaystep -1", "", "min_modify delaystep must be non-negative"),
+        ("min_modify tmin 0.01", "", "min_modify tmin is unsupported"),
+        ("min_modify initialdelay no", "", "min_modify initialdelay is unsupported"),
+        ("min_modify halfstepback no", "", "min_modify halfstepback is unsupported"),
+        ("min_modify vdfmax 10", "", "min_modify vdfmax is unsupported"),
+        ("min_modify integrator verlet", "", "min_modify integrator is unsupported"),
+        ("min_modify method fire2 tmin 0.01", "", "min_modify tmin is unsupported"),
+        ("min_modify method fire2 initialdelay no", "", "min_modify initialdelay is unsupported"),
+        ("min_modify method fire2 halfstepback no", "", "min_modify halfstepback is unsupported"),
+        ("min_modify method fire2 vdfmax 10", "", "min_modify vdfmax is unsupported"),
+        ("min_modify method fire2 integrator verlet", "", "min_modify integrator is unsupported"),
         ("", "fix relax all box/relax iso 0.0\n", "fix box/relax"),
     ],
 )

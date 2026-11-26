@@ -4,9 +4,11 @@
 
 from __future__ import annotations
 
+import math
 import os
+from collections.abc import Callable
 from io import StringIO
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -159,18 +161,23 @@ def test_first_evaluation_hits_calculator_cache() -> None:
     assert calc.calls > warmed
 
 
-def test_todict_and_restart_refusal(tmp_path: Any) -> None:
+def test_todict_and_restart_file(tmp_path: Any) -> None:
+    from ase.optimize.optimize import RestartError
+
     atoms = _pt7(7)
     opt = FIRE(atoms, logfile=None, trajectory=None, memory=5)
     data = opt.todict()
     assert data["type"] == "optimization"
     assert data["optimizer"] == "FIRE"
     assert data["method"] == "fire"
-    with pytest.raises(NotImplementedError, match="FIRE"):
-        opt.dump(data)
+    # No restart path: ASE's dump leaves the call as a no-op.
+    opt.dump(data)
     restart = tmp_path / "restart.json"
-    restart.write_text("{}\n", encoding="utf-8")
-    with pytest.raises(NotImplementedError, match=r"FIRE\.read is not implemented"):
+    restart.write_text("hello world\n", encoding="utf-8")
+    with pytest.raises(RestartError, match="Could not decode"):
+        FIRE(atoms, restart=str(restart), logfile=None)
+    restart.write_text('{"optimizer": "BFGS"}\n', encoding="utf-8")
+    with pytest.raises(RestartError, match="not an rgmin restart file"):
         FIRE(atoms, restart=str(restart), logfile=None)
 
 
@@ -185,6 +192,54 @@ def test_cell_filter_runs() -> None:
     opt = LBFGS(FrechetCellFilter(atoms), logfile=None, maxstep=0.05)
     assert isinstance(opt, ASEOptimizer)
     assert opt.run(fmax=0.05, steps=80) is True
+
+
+class _SessionSpy:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __getattr__(self, name: str) -> Callable[..., None]:
+        def record(*args: object) -> None:
+            self.calls.append(name)
+
+        return record
+
+
+def test_ase_scale_applies_without_a_cell_filter() -> None:
+    atoms = _pt7(3, scale=0.01)
+    atoms.calc = EMT()
+    spy = _SessionSpy()
+    LBFGS(atoms, logfile=None, eon_cap=False)._apply_session(cast(Any, spy))
+    assert spy.calls == ["set_lbfgs_scaled", "set_lbfgs_fixed_h0"]
+
+
+def test_cell_filter_keeps_wolfe_when_eon_cap_and_line_search_are_off() -> None:
+    from ase.build import bulk
+    from ase.filters import FrechetCellFilter
+
+    atoms = bulk("Cu", cubic=True)
+    atoms.rattle(0.01, seed=1)
+    atoms.calc = EMT()
+    opt = LBFGS(FrechetCellFilter(atoms), logfile=None, eon_cap=False, use_line_search=False, maxstep=0.05)
+    assert opt._config_options()["linesearch"] == "wolfe"
+    spy = _SessionSpy()
+    opt._apply_session(cast(Any, spy))
+    assert spy.calls == []
+    assert opt.run(fmax=0.05, steps=80) is True
+
+
+@pytest.mark.parametrize("alpha", [0.0, -0.0, -1.0, -70.0, math.nan, math.inf, -math.inf])
+def test_lbfgs_rejects_a_non_positive_alpha(alpha: float) -> None:
+    atoms = _pt7(3, scale=0.01)
+    atoms.calc = EMT()
+    with pytest.raises(ValueError, match="alpha must be positive and finite"):
+        LBFGS(atoms, logfile=None, alpha=alpha)
+
+
+def test_lbfgs_takes_a_positive_alpha() -> None:
+    atoms = _pt7(3, scale=0.01)
+    atoms.calc = EMT()
+    assert LBFGS(atoms, logfile=None, eon_cap=False, alpha=10.0).H0_scale == pytest.approx(0.1)
 
 
 def test_lbfgs_frechet_cell_filter_converges_near_ase_budget() -> None:
@@ -360,19 +415,22 @@ def test_fire_calculator_calls_match_ase() -> None:
 
 
 def test_lbfgs_cache_hit_and_curvature_probe_calls() -> None:
-    """The first new EMT call is not the start geometry.
+    """The ASE length-control step does not probe curvature.
 
-    The default eOn step spends one call on its finite-difference probe,
-    0.01 along the unit force, to set the initial inverse curvature.
-    ``extra`` is that call. The strong Wolfe opt-in adds none on this
-    Pt7 start.
+    The default eOn step spends one call on its curvature probe, 0.01
+    along the unit force, to set the initial inverse curvature.
     """
     from ase.optimize import LBFGS as AseLBFGS
 
     ours, theirs, moved = _iteration_calls(LBFGS, AseLBFGS)
-    extra = ours - theirs
     assert moved
-    assert extra == 1
+    assert ours - theirs == 1
+    scaled, _, scaled_moved = _iteration_calls(
+        lambda *args, **kwargs: LBFGS(*args, eon_cap=False, **kwargs),
+        AseLBFGS,
+    )
+    assert scaled_moved
+    assert scaled == theirs
 
 
 def test_lbfgs_probe_is_spent_on_the_first_step_only() -> None:
@@ -445,10 +503,10 @@ def test_hessian_methods_step() -> None:
         sample.calc = Harmonic()
         opt = cls(sample, logfile=None, hessian=hessian, maxstep=0.2)
         assert opt.run(fmax=1e-6, steps=12) is True
-    bare = atoms.copy()
-    bare.calc = Harmonic()
-    with pytest.raises(NotImplementedError, match=r"Newton\.step"):
-        Newton(bare, logfile=None).step()
+        bare = atoms.copy()
+        bare.calc = Harmonic()
+        with pytest.raises(ValueError, match=rf"{cls.__name__} requires hessian"):
+            cls(bare, logfile=None).step()
 
 
 # Spawns a ThreadPoolExecutor. The marker keeps pytest-run-parallel from

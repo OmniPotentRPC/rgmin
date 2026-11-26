@@ -52,7 +52,7 @@ LBFGS(atoms, logfile=None, linesearch="wolfe").run(fmax=0.05)
 
 =linesearch= is accepted only where the step reads it. =sd=, the conjugate-gradient methods, =bfgs=, =adam=, and =diis= take every kind, and =lbfgs= takes =wolfe=. ~accept="step"~ takes each step without a line search, and FIRE, QuickMin, ODE12r, BB, SR1, SR2, PSO, Newton, RFO, dogleg, and Newton-CG never search a line. A =linesearch= on any of those raises =ValueError= and names the reason, rather than leaving the run unchanged. =rgmin.ase= takes ~accept="step"~ on a non-conservative optimizable (NEB, dimer, min-mode), so a =linesearch= there raises unless =accept= is =energy= or =nonmonotone=.
 
-=rgmin.ase.FIRE=, =LBFGS=, =CG=, and the other method classes are ASE optimizers. Each =step= is one rgmin iteration. =maxstep= is the per-atom cap in angstroms. The ASE classes pass it explicitly, and their default is 0.2. ASE calculators are not thread-safe. Each thread that builds an optimizer needs its own calculator. rgmin still guarantees a shareable config, one solver per thread, and an owned copy of the coordinates. The thread-safety page records the details.
+=rgmin.ase.FIRE=, =LBFGS=, =CG=, and the other method classes are ASE optimizers. Each =step= is one rgmin iteration. =LBFGS= uses the capped eOn step unless =eon_cap=False= selects ASE length control. =FIRE= and =FIRE2= cap the Euclidean length of the step. The other classes cap each atom. The default cap is 0.2. ASE calculators are not thread-safe. Each thread that builds an optimizer needs its own calculator. rgmin still guarantees a shareable config, one solver per thread, and an owned copy of the coordinates. The thread-safety page records the details.
 
 #+begin_src python
 from ase.calculators.emt import EMT
@@ -62,8 +62,8 @@ atoms.calc = EMT()
 FIRE(atoms, logfile=None).run(fmax=0.05)
 #+end_src
 
-Newton, RFO, and dogleg need =hessian(x)=, a callable that returns the =(n, n)= matrix. A band or a min-mode run accepts the step rather than the energy. Pass =accept== to choose the rule yourself.
+Newton, RFO, and dogleg require =hessian(x)=, a callable that returns the =(n, n)= matrix. The adapter does not synthesize a Hessian with finite differences. A band or a min-mode run accepts the step rather than the energy. Pass =accept== to choose the rule yourself.
 
-=restart= is refused. =read= and =dump= raise =NotImplementedError=.
+=restart= is an evaluation log (~rgmin-replay-1~). =read= replays it. A file ASE wrote raises =RestartError=. =dump= writes that log through ASE's JSON writer.
 
 C and C++ use ~include/rgmin.h~ and ~include/rgmin/optimize.hpp~. @@rst::doc:`c-abi`@@ has the short C programs: a session handle, and one ~rgmin_minimize~ call.

@@ -56,13 +56,18 @@ fn c_header_checks_rigid_quotient_tcg_and_projected_modes() {
 
 #[test]
 fn c_header_reads_riemannian_cg_through_the_xts_aliases() {
-    assert_eq!(RGMIN_ABI_VERSION_MINOR, 66);
+    assert_eq!(RGMIN_ABI_VERSION_MINOR, 70);
     consumer::compile_and_run("tests/c_xts_rcg.c", "rgmin_c_xts_rcg", &[]);
 }
 
 #[test]
 fn c_header_steps_the_overlay_free_methods_through_the_fused_callback() {
     consumer::compile_and_run("tests/c_step_fg_methods.c", "rgmin_c_step_fg_methods", &[]);
+}
+
+#[test]
+fn c_header_steps_a_fire_session_with_lammps_alpha0_zero() {
+    consumer::compile_and_run("tests/c_fire_alpha0.c", "rgmin_c_fire_alpha0", &[]);
 }
 
 #[cfg(feature = "highs")]

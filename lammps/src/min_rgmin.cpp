@@ -21,14 +21,8 @@
 
 using namespace LAMMPS_NS;
 
-// LAMMPS min_style fire defaults (Guenole et al. 2020, Table 1), which
-// rgmin's RGMIN_FIRE_PRESET_GUENOLE2020 also holds.
-static constexpr int FIRE_DELAYSTEP = 20;
-static constexpr double FIRE_DTGROW = 1.1;
-static constexpr double FIRE_DTSHRINK = 0.5;
-static constexpr double FIRE_ALPHA0 = 0.25;
-static constexpr double FIRE_ALPHASHRINK = 0.99;
-static constexpr double FIRE_TMAX = 10.0;
+// LAMMPS min_style fire defaults (Guenole et al. 2020, Table 1) for the
+// unmapped FIRE keywords that min_style rgmin rejects when changed.
 static constexpr double FIRE_TMIN = 0.02;
 static constexpr int FIRE_VDFMAX = 2000;
 
@@ -105,14 +99,21 @@ void MinRgmin::setup_style()
     error->all(FLERR,
                "min_style rgmin does not take min_modify line; use min_modify linesearch "
                "none or wolfe");
-  if (delaystep != FIRE_DELAYSTEP || dtgrow != FIRE_DTGROW || dtshrink != FIRE_DTSHRINK ||
-      alpha0 != FIRE_ALPHA0 || alphashrink != FIRE_ALPHASHRINK || tmax != FIRE_TMAX ||
-      tmin != FIRE_TMIN || integrator != EULERIMPLICIT || halfstepback_flag != 1 ||
-      delaystep_start_flag != 1 || max_vdotf_negatif != FIRE_VDFMAX)
+  if (delaystep < 0)
+    error->all(FLERR, "min_modify delaystep must be non-negative with min_style rgmin");
+  if (integrator != EULERIMPLICIT)
     error->all(FLERR,
-               "min_style rgmin keeps the Guenole 2020 FIRE parameters; min_modify delaystep, "
-               "dtgrow, dtshrink, alpha0, alphashrink, tmax, tmin, integrator, halfstepback, "
-               "initialdelay and vdfmax must stay at their defaults");
+               "min_modify integrator is unsupported with min_style rgmin; use eulerimplicit");
+  // FIRE 2.0 in rgmin always takes the Guenole 2020 half-step back.
+  if (halfstepback_flag != 1)
+    error->all(FLERR, "min_modify halfstepback is unsupported with min_style rgmin");
+  // FIRE 2.0 in rgmin keeps the Guenole 2020 initial-delay branch.
+  if (delaystep_start_flag != 1)
+    error->all(FLERR, "min_modify initialdelay is unsupported with min_style rgmin");
+  if (tmin != FIRE_TMIN)
+    error->all(FLERR, "min_modify tmin is unsupported with min_style rgmin");
+  if (max_vdotf_negatif != FIRE_VDFMAX)
+    error->all(FLERR, "min_modify vdfmax is unsupported with min_style rgmin");
   if (abcflag && method != RGMIN_FIRE2)
     error->all(FLERR, "min_modify abcfire yes needs min_modify method fire2 with min_style rgmin");
   if (wolfe && method != RGMIN_LBFGS)
@@ -263,9 +264,19 @@ void MinRgmin::start_session()
   // steps and reports RGMIN_STOP_ENERGY_TOLERANCE. etol 0 is LAMMPS's "off".
   if (update->etol > 0.0 && rgmin_solver_set_etol(solver, update->etol) != RGMIN_SUCCESS)
     error->all(FLERR, "rgmin_solver_set_etol failed: {}", rgmin_last_error());
+  if (is_fire(method)) {
+    if (delaystep < 0)
+      error->all(FLERR, "min_modify delaystep must be non-negative with min_style rgmin");
+    if (method == RGMIN_FIRE2) {
+      if (rgmin_solver_set_fire_preset(solver, RGMIN_FIRE_PRESET_GUENOLE2020) != 0)
+        error->all(FLERR, "rgmin_solver_set_fire_preset failed: {}", rgmin_last_error());
+    }
+    if (rgmin_solver_set_fire_config(solver, ctrl.istep, tmax * ctrl.istep,
+                                     static_cast<size_t>(delaystep), dtgrow, dtshrink, alpha0,
+                                     alphashrink) != 0)
+      error->all(FLERR, "rgmin_solver_set_fire_config failed: {}", rgmin_last_error());
+  }
   if (method == RGMIN_FIRE2) {
-    if (rgmin_solver_set_fire_preset(solver, RGMIN_FIRE_PRESET_GUENOLE2020) != 0)
-      error->all(FLERR, "rgmin_solver_set_fire_preset failed: {}", rgmin_last_error());
     if (abcflag && rgmin_solver_set_fire_abc(solver, 1) != 0)
       error->all(FLERR, "rgmin_solver_set_fire_abc failed: {}", rgmin_last_error());
   }

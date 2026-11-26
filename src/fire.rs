@@ -321,8 +321,16 @@ impl FireState {
         self.preset
     }
 
-    /// Replace the integrator parameters and cold-start the velocity.
-    /// A non-positive `dt` or `dt_max` is left as it was.
+    /// Apply `config` and reset the velocity and step counters (`n_pos`,
+    /// `n_neg`, `steps`) to zero.
+    ///
+    /// Updates `n_min` and `cap_two_step_overshoot` unconditionally, and
+    /// updates each guarded floating-point parameter only when it is
+    /// finite and in range (`dt > 0`, `dt_max > 0`, `f_inc > 1`,
+    /// `0 < f_dec < 1`, `0 <= alpha < 1`, `0 < f_alpha < 1`), leaving any
+    /// out-of-range or non-finite field at its prior value. Updating `dt`,
+    /// `dt_max`, or `alpha` also updates `dt_start`, `dt_max_start`, or
+    /// `alpha_start`.
     pub fn apply_config(&mut self, config: &FireConfig) {
         if config.dt.is_finite() && config.dt > 0.0 {
             self.dt = config.dt;
@@ -339,7 +347,7 @@ impl FireState {
         if config.f_dec.is_finite() && config.f_dec > 0.0 && config.f_dec < 1.0 {
             self.f_dec = config.f_dec;
         }
-        if config.alpha.is_finite() && config.alpha > 0.0 {
+        if config.alpha.is_finite() && (0.0..1.0).contains(&config.alpha) {
             self.alpha_start = config.alpha;
             self.alpha = config.alpha;
         }
@@ -351,6 +359,11 @@ impl FireState {
         self.n_pos = 0;
         self.n_neg = 0;
         self.steps = 0;
+    }
+
+    #[cfg(feature = "capi")]
+    pub(crate) fn caps_two_step_overshoot(&self) -> bool {
+        self.cap_two_step_overshoot
     }
 
     /// Opt into lowering `dt_max` after one downhill step followed by an uphill one.
@@ -401,7 +414,8 @@ fn mix_toward(state: &mut FireState, direction: &Array1<f64>, mix: Option<FireMi
     }
     // The mix is a convex combination only for alpha in [0, 1]; the
     // norm bound |1 - 2 alpha| |v| <= |v'| <= |v| needs it, so the
-    // public field is clamped where it is used.
+    // public field is clamped where it is used. Zero leaves the
+    // velocity unchanged: the scale multiplies by alpha.
     let alpha = clamped_alpha(state.alpha);
     let scale = alpha * vnorm / dnorm;
     for i in 0..state.vel.len() {
@@ -1300,6 +1314,75 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn alpha_zero_mixes_by_multiplication_and_does_not_grow() {
+        let mut state = FireState::new(FireKind::V2, 2, 0.1);
+        let zero = FireConfig::ase()
+            .with_dt(0.1)
+            .with_dt_max(1.0)
+            .with_n_min(0)
+            .with_alpha(0.0)
+            .with_f_alpha(0.99);
+        state.apply_config(&zero);
+        assert_eq!((state.alpha, state.alpha_start), (0.0, 0.0));
+        state.apply_config(&FireConfig::ase().with_alpha(1.0));
+        assert_eq!(state.alpha, 0.0, "one is outside [0, 1)");
+        state.apply_config(&FireConfig::ase().with_alpha(-0.2));
+        assert_eq!(state.alpha, 0.0, "a negative alpha stays out");
+        state.apply_config(&zero);
+
+        // Downhill, past n_min, so the decay line runs. Zero times
+        // f_alpha is still zero, and the mix multiplies by alpha.
+        state.vel = array![1.0, 0.0];
+        let force = array![1.0, 0.0];
+        assert!(matches!(
+            fire_prepare_v2(&mut state, &force),
+            FirePreparation::Ready
+        ));
+        assert_eq!(state.alpha, 0.0);
+        assert!((state.dt - 0.11).abs() < 1e-15, "dt {}", state.dt);
+        let kicked = &state.vel + &force * state.dt;
+        let mut dx = Array1::zeros(2);
+        fire_displacement_into(&mut state, &force, &mut dx);
+        for i in 0..2 {
+            assert!(
+                (state.vel[i] - kicked[i]).abs() < 1e-12,
+                "mix changed a zero-alpha velocity: {}",
+                state.vel
+            );
+        }
+        assert!(dx.iter().all(|v| v.is_finite()));
+        assert_eq!(state.alpha, 0.0);
+
+        state.vel = array![-1.0, 0.0];
+        let _ = fire_prepare_v2(&mut state, &force);
+        assert_eq!(state.alpha, 0.0);
+        assert!(state.vel.iter().all(|v| *v == 0.0));
+
+        let (mut published, mut ext) = guenole2020(2, 0.1);
+        published.apply_config(&zero);
+        ext.n_delay = 0;
+        ext.initial_delay = false;
+        published.vel = array![1.0, 0.0];
+        let before = published.vel.clone();
+        let step = fire2_displacement(&mut published, &mut ext, &force).unwrap();
+        let want = &before + &force * 0.11;
+        assert_eq!(published.alpha, 0.0);
+        assert!((published.dt - 0.11).abs() < 1e-15, "dt {}", published.dt);
+        for i in 0..2 {
+            assert!(
+                (published.vel[i] - want[i]).abs() < 1e-12,
+                "{}",
+                published.vel
+            );
+            assert!((step[i] - published.dt * want[i]).abs() < 1e-12);
+        }
+        published.vel = array![-1.0, 0.0];
+        let _ = fire2_displacement(&mut published, &mut ext, &force).unwrap();
+        assert_eq!(published.alpha, 0.0);
+        assert!(published.vel.iter().all(|v| v.is_finite()));
     }
 
     #[test]

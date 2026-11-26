@@ -37,4 +37,6 @@ on its own schedule. ~LBFGS~ on the same filters keeps ASE's iterates.
 
 A restart file replays the recorded evaluations into a fresh session and
 refuses a file written by another class or with parameters that no longer
-match. The nanobind classes live in ~rgmin.ase~ and are a separate binding.
+match. The nanobind classes live in ~rgmin.ase~. They use the same
+evaluation log (~rgmin-replay-1~), and the same ASE constructor contract,
+as this package. The conformance table is on the migration page.

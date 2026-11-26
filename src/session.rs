@@ -91,6 +91,58 @@ const GROMACS_CG_LINESEARCH: LineSearch = LineSearch::Wolfe {
     maxiter: crate::gromacs::GROMACS_CG_WOLFE_MAXITER,
 };
 
+fn validate_fire_config(config: &FireConfig) -> Result<()> {
+    // A negative C `int` widened to `size_t` lands above `isize::MAX`. It
+    // would read as a delay no run reaches, so refuse it instead.
+    if isize::try_from(config.n_min).is_err() {
+        return Err(Error::InvalidControl {
+            what: "fire config n_min must not exceed the largest signed size",
+        });
+    }
+    if !config.dt.is_finite() || config.dt <= 0.0 {
+        return Err(Error::InvalidControl {
+            what: "fire config dt must be finite and positive",
+        });
+    }
+    if !config.dt_max.is_finite() || config.dt_max <= 0.0 {
+        return Err(Error::InvalidControl {
+            what: "fire config dt_max must be finite and positive",
+        });
+    }
+    if config.dt > config.dt_max {
+        return Err(Error::InvalidControl {
+            what: "fire config dt must not exceed dt_max",
+        });
+    }
+    if !config.f_inc.is_finite() || config.f_inc <= 1.0 {
+        return Err(Error::InvalidControl {
+            what: "fire config f_inc must be finite and > 1",
+        });
+    }
+    // Ordered comparisons are false for NaN, and infinities sit outside
+    // (0, 1), so this rejects non-finite values as well as the closed
+    // endpoints. `x <= 0 || x >= 1` would accept NaN.
+    if !(0.0 < config.f_dec && config.f_dec < 1.0) {
+        return Err(Error::InvalidControl {
+            what: "fire config f_dec must be finite and in (0, 1)",
+        });
+    }
+    // [0, 1). Zero is LAMMPS min_modify alpha0 0. The mix multiplies by
+    // alpha, and a reset writes alpha_start back, so zero does not grow.
+    // `alpha < 0.0 || alpha >= 1.0` would accept NaN.
+    if !(0.0..1.0).contains(&config.alpha) {
+        return Err(Error::InvalidControl {
+            what: "fire config alpha must be finite and in [0, 1)",
+        });
+    }
+    if !(0.0 < config.f_alpha && config.f_alpha < 1.0) {
+        return Err(Error::InvalidControl {
+            what: "fire config f_alpha must be finite and in (0, 1)",
+        });
+    }
+    Ok(())
+}
+
 /// Why a capped trial did not move.
 enum CappedMiss {
     /// The quasi-Newton trial was non-finite. Try the force once.
@@ -986,7 +1038,10 @@ impl Solver {
     /// A positive finite value is the step limit and the per-atom default
     /// stays off, unless [`Self::set_atom_maxmove`] was called. Zero and
     /// NaN keep the defaults. A negative or infinite value turns every cap
-    /// off, the per-atom default included.
+    /// off, the per-atom cap included whether it is the default or one
+    /// set by [`Self::set_atom_maxmove`]. An L-BFGS session that steps
+    /// with the eOn cap returns to [`crate::EON_MAX_MOVE`], the same as
+    /// [`Self::set_atom_maxmove`] with zero.
     pub fn set_maxmove(&mut self, maxmove: f64) {
         // A negative or infinite value is stored so that the per-atom
         // default stays off; every length read takes only a positive
@@ -996,7 +1051,22 @@ impl Solver {
         } else {
             Some(maxmove)
         };
+        let off = self
+            .control
+            .maxmove
+            .is_some_and(|cap| cap < 0.0 || cap.is_infinite());
+        if off {
+            self.atom_maxmove_set = false;
+        }
         self.apply_default_atom_cap();
+        if off && let Inner::Lbfgs(solver) = &mut self.inner {
+            match &mut solver.step {
+                LbfgsStep::Capped { max_atom } | LbfgsStep::Scaled { max_atom } => {
+                    *max_atom = crate::lbfgs::EON_MAX_MOVE;
+                }
+                LbfgsStep::Wolfe => {}
+            }
+        }
     }
 
     /// eOn `maxAtomMotionAppliedV`. Preferred over the Euclidean cap.
@@ -6183,16 +6253,24 @@ impl Solver {
 
     /// Integrator parameters of a FIRE session. The velocity is cleared.
     pub fn set_fire_config(&mut self, config: FireConfig) -> Result<()> {
+        validate_fire_config(&config)?;
         match &mut self.inner {
             Inner::Fire(state) => {
                 state.apply_config(&config);
-                if config.dt.is_finite() && config.dt > 0.0 {
-                    self.control.istep = config.dt;
-                    self.istep = config.dt;
-                }
+                self.control.istep = config.dt;
+                self.istep = config.dt;
                 Ok(())
             }
             _ => Err(Error::NeedFire),
+        }
+    }
+
+    /// Whether a FIRE session caps `dt_max` after a two-step overshoot.
+    #[cfg(feature = "capi")]
+    pub(crate) fn fire_caps_two_step_overshoot(&self) -> bool {
+        match &self.inner {
+            Inner::Fire(state) => state.caps_two_step_overshoot(),
+            _ => false,
         }
     }
 
@@ -7609,6 +7687,161 @@ mod tests {
         let trace = solver.take_fire_trace();
         assert_eq!(trace.len(), 5);
         assert_eq!(trace.last().unwrap().clipped_moves, 5);
+    }
+
+    #[test]
+    fn fire_config_rejects_an_out_of_range_n_min() {
+        let mut solver = fire_solver(FireKind::V1);
+        let largest = isize::MAX as usize;
+        solver
+            .set_fire_config(FireConfig::default().with_n_min(largest))
+            .unwrap();
+        for n_min in [largest + 1, (-1_i64) as usize, usize::MAX] {
+            let err = solver
+                .set_fire_config(FireConfig::default().with_n_min(n_min))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config n_min must not exceed the largest signed size",
+                    }
+                ),
+                "{n_min}: {err}"
+            );
+        }
+        assert_eq!(fire_state(&solver).n_min, largest);
+    }
+
+    #[test]
+    fn fire_config_rejects_nan_zero_one_and_inf() {
+        let mut solver = fire_solver(FireKind::V1);
+        for bad in [f64::NAN, 0.0, -0.1, f64::INFINITY, f64::NEG_INFINITY] {
+            let err = solver
+                .set_fire_config(FireConfig::default().with_dt(bad))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config dt must be finite and positive",
+                    }
+                ),
+                "{bad}: {err}"
+            );
+            let err = solver
+                .set_fire_config(FireConfig::default().with_dt_max(bad))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config dt_max must be finite and positive",
+                    }
+                ),
+                "{bad}: {err}"
+            );
+        }
+        let bad = [f64::NAN, 0.0, 1.0, f64::INFINITY, f64::NEG_INFINITY];
+        for value in bad {
+            let err = solver
+                .set_fire_config(FireConfig::default().with_f_dec(value))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config f_dec must be finite and in (0, 1)",
+                    }
+                ),
+                "{value}: {err}"
+            );
+            let err = solver
+                .set_fire_config(FireConfig::default().with_f_alpha(value))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config f_alpha must be finite and in (0, 1)",
+                    }
+                ),
+                "{value}: {err}"
+            );
+        }
+        for value in [f64::NAN, -0.1, 1.0, f64::INFINITY, f64::NEG_INFINITY] {
+            let err = solver
+                .set_fire_config(FireConfig::default().with_alpha(value))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config alpha must be finite and in [0, 1)",
+                    }
+                ),
+                "{value}: {err}"
+            );
+        }
+        solver
+            .set_fire_config(FireConfig::default().with_alpha(0.0))
+            .unwrap();
+        assert_eq!(fire_state(&solver).alpha, 0.0);
+        assert_eq!(fire_state(&solver).alpha_start, 0.0);
+        let err = solver
+            .set_fire_config(FireConfig::default().with_dt(2.0).with_dt_max(1.0))
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::InvalidControl {
+                    what: "fire config dt must not exceed dt_max",
+                }
+            ),
+            "{err}"
+        );
+        solver.set_fire_config(FireConfig::default()).unwrap();
+        assert_eq!(fire_state(&solver).f_dec, 0.5);
+        assert_eq!(fire_state(&solver).alpha, 0.1);
+        assert_eq!(fire_state(&solver).f_alpha, 0.99);
+    }
+
+    /// LAMMPS `min_modify` fire defaults from `doc/src/min_modify.rst`,
+    /// with `alpha0` 0. The session starts, steps, and the mixing weight
+    /// stays at that zero.
+    #[test]
+    fn lammps_alpha0_zero_session_starts_and_steps() {
+        let obj = Oracle::unbounded(2, |x: ArrayView1<f64>| (0.5 * x.dot(&x), x.to_owned()));
+        let config = FireConfig::ase()
+            .with_dt(0.1)
+            .with_dt_max(1.0)
+            .with_n_min(20)
+            .with_f_inc(1.1)
+            .with_f_dec(0.5)
+            .with_alpha(0.0)
+            .with_f_alpha(0.99);
+        for kind in [FireKind::V1, FireKind::V2] {
+            let mut solver = Solver::new(
+                Method::Fire { kind },
+                Control::default().with_istep(0.1).with_gtol(1e-12),
+                2,
+            );
+            if kind == FireKind::V2 {
+                solver.set_fire_preset(FirePreset::Guenole2020).unwrap();
+            }
+            solver.set_fire_config(config).unwrap();
+            assert_eq!(fire_state(&solver).alpha, 0.0);
+            assert_eq!(fire_state(&solver).alpha_start, 0.0);
+            let mut x = array![1.0, -0.5];
+            let start = x.clone();
+            for _ in 0..4 {
+                solver.step(&obj, &mut x).unwrap();
+                assert!(x.iter().all(|v| v.is_finite()), "{kind:?} {x:?}");
+                assert_eq!(fire_state(&solver).alpha, 0.0, "{kind:?}");
+                assert_eq!(fire_state(&solver).alpha_start, 0.0, "{kind:?}");
+            }
+            assert_ne!(x, start, "{kind:?} did not move");
+        }
     }
 
     #[test]

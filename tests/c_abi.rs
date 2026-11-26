@@ -1215,6 +1215,9 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 /// `RGMIN_NOT_CONVERGED`, `rgmin_solver_set_require_convergence`,
 /// `rgmin_control_init`, and the `_sized` entries.
 /// ABI minor 51 adds `rgmin_minimize_rlbfgs` and `rgmin_rlbfgs_default`.
+/// ABI minor 70 adds `rgmin_solver_set_fire_config` and
+/// `rgmin_solver_set_lbfgs_fixed_h0`, and refuses an `n_min` above
+/// `isize::MAX`.
 /// ABI minor 64 makes the eindir one-shots name the entry that was called
 /// in their errors. Minor 53 adds `rgmin_minimize_eindir_opts`. Minor 50 adds
 /// `rgmin_solver_set_etol`, `rgmin_solver_set_max_evals`, their clear
@@ -1234,7 +1237,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 66);
+    assert_eq!(stamp.abi_minor, 70);
     assert_eq!(stamp.layout_revision, 6);
     assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING as i32, 9);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
@@ -1587,6 +1590,136 @@ fn c_abi_fire_preset_and_abc() {
         assert!((x[0] - 0.5 * shrink).abs() <= tol, "abc={abc} x={x:?}");
         assert!((x[1] + 0.25 * shrink).abs() <= tol, "abc={abc} x={x:?}");
     }
+}
+
+/// `rgmin_solver_set_fire_config` refuses a null session, a session that
+/// is not FIRE or FIRE 2.0, and each parameter outside its range, and
+/// names the parameter. `rgmin_solver_set_lbfgs_fixed_h0` refuses a null
+/// session and a session that is not L-BFGS, and clears the scale on a
+/// non-positive or non-finite value. ABI minor 70.
+#[test]
+fn c_abi_fire_config_and_lbfgs_fixed_h0() {
+    use rgmin::ffi::{rgmin_solver_set_fire_config, rgmin_solver_set_lbfgs_fixed_h0};
+    let ctrl = rgmin_control_t {
+        maxiter: 10,
+        gtol: 1e-12,
+        istep: 0.1,
+        memory: 4,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+        require_convergence: 0,
+    };
+    let null = std::ptr::null_mut();
+    assert_eq!(
+        unsafe { rgmin_solver_set_fire_config(null, 0.1, 1.0, 5, 1.1, 0.5, 0.1, 0.99) },
+        1
+    );
+    assert_eq!(unsafe { rgmin_solver_set_lbfgs_fixed_h0(null, 0.1) }, 1);
+
+    let lbfgs = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
+    assert_eq!(
+        unsafe { rgmin_solver_set_fire_config(lbfgs, 0.1, 1.0, 5, 1.1, 0.5, 0.1, 0.99) },
+        1
+    );
+    assert_eq!(unsafe { rgmin_solver_set_lbfgs_fixed_h0(lbfgs, 0.25) }, 0);
+    for off in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(unsafe { rgmin_solver_set_lbfgs_fixed_h0(lbfgs, off) }, 0);
+    }
+    unsafe { rgmin_solver_free(lbfgs) };
+
+    for method in [rgmin_method_t::RGMIN_FIRE, rgmin_method_t::RGMIN_FIRE2] {
+        let session = unsafe { rgmin_solver_create(method, &ctrl, 2) };
+        assert_eq!(unsafe { rgmin_solver_set_lbfgs_fixed_h0(session, 0.25) }, 1);
+        assert_eq!(
+            unsafe { rgmin_solver_set_fire_config(session, 0.1, 1.0, 5, 1.1, 0.5, 0.1, 0.99) },
+            0
+        );
+        let nan = f64::NAN;
+        let refused = [
+            (nan, 1.0, 1.1, 0.5, 0.1, 0.99, "dt and dt_max"),
+            (0.0, 1.0, 1.1, 0.5, 0.1, 0.99, "dt and dt_max"),
+            (0.1, -1.0, 1.1, 0.5, 0.1, 0.99, "dt and dt_max"),
+            (0.1, 1.0, 1.0, 0.5, 0.1, 0.99, "f_inc"),
+            (0.1, 1.0, 1.1, 1.0, 0.1, 0.99, "f_dec"),
+            (0.1, 1.0, 1.1, 0.0, 0.1, 0.99, "f_dec"),
+            (2.0, 1.0, 1.1, 0.5, 0.1, 0.99, "dt must not exceed dt_max"),
+            (0.1, 1.0, 1.1, 0.5, -0.1, 0.99, "alpha"),
+            (0.1, 1.0, 1.1, 0.5, 1.0, 0.99, "alpha"),
+            (0.1, 1.0, 1.1, 0.5, nan, 0.99, "alpha"),
+            (0.1, 1.0, 1.1, 0.5, 0.1, 1.0, "f_alpha"),
+            (0.1, 1.0, 1.1, 0.5, 0.1, 0.0, "f_alpha"),
+        ];
+        for (dt, dt_max, f_inc, f_dec, alpha, f_alpha, name) in refused {
+            let status = unsafe {
+                rgmin_solver_set_fire_config(session, dt, dt_max, 5, f_inc, f_dec, alpha, f_alpha)
+            };
+            assert_eq!(
+                status, 1,
+                "{name}: {dt} {dt_max} {f_inc} {f_dec} {alpha} {f_alpha}"
+            );
+            let message = last_error_text();
+            assert!(message.contains(name), "{name}: {message}");
+        }
+        assert_eq!(
+            unsafe { rgmin_solver_set_fire_config(session, 0.1, 1.0, 5, 1.1, 0.5, 0.0, 0.99) },
+            0,
+            "alpha 0"
+        );
+        assert_eq!(
+            unsafe {
+                rgmin_solver_set_fire_config(
+                    session,
+                    0.1,
+                    1.0,
+                    isize::MAX as usize,
+                    1.1,
+                    0.5,
+                    0.1,
+                    0.99,
+                )
+            },
+            0
+        );
+        for bad_n in [(-1_i64) as usize, isize::MAX as usize + 1] {
+            let status = unsafe {
+                rgmin_solver_set_fire_config(session, 0.1, 1.0, bad_n, 1.1, 0.5, 0.1, 0.99)
+            };
+            assert_eq!(status, 1, "n_min={bad_n}");
+            let message = last_error_text();
+            assert!(message.contains("n_min"), "n_min={bad_n}: {message}");
+        }
+        unsafe { rgmin_solver_free(session) };
+    }
+
+    let fire2 = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE2, &ctrl, 2) };
+    assert_eq!(
+        unsafe { rgmin_solver_set_fire_config(fire2, 0.08, 0.8, 7, 1.2, 0.4, 0.2, 0.95) },
+        0
+    );
+    let mut x = [0.5, -0.25];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
+    };
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 2) };
+    let st = unsafe {
+        rgmin_solver_step(
+            fire2,
+            Some(quad_eval),
+            Some(quad_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert_ne!(x, [0.5, -0.25], "config did not change the trajectory");
+    unsafe { rgmin_solver_free(fire2) };
 }
 
 /// Two atoms at force 0.9 each: max-atom 0.9, RMS 0.52, two-norm 1.27.
