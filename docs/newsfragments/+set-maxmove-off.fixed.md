@@ -1,0 +1,1 @@
+A negative or infinite `Solver::set_maxmove`, `rgmin_solver_set_maxmove` and Python `Solver.set_maxmove` now turn off a per-atom cap that was set earlier, as well as the default one. Before, a cap set with `set_atom_maxmove` or at construction stayed in force. An L-BFGS session that steps with the eOn cap returns to 0.2.
