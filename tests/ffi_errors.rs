@@ -101,6 +101,7 @@ fn control() -> rgmin_control_t {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        noise_eps_f: 0.0,
     }
 }
 
@@ -1013,6 +1014,7 @@ fn search_control(maxiter: usize, gtol: f64) -> rgmin_control_t {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        noise_eps_f: 0.0,
     }
 }
 

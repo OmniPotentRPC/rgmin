@@ -1,7 +1,9 @@
 //! A caller compiled against layout revision 5 passes a 56-byte
 //! `rgmin_control_t` and owns a report that ends at `stop`. The library
 //! reads and writes no byte past either struct, and `require_convergence`
-//! takes its default 0 for that caller.
+//! takes its default 0 for that caller. A caller compiled against layout
+//! revision 6 passes 64 bytes, has `require_convergence` read and
+//! `converged` written, and `noise_eps_f` takes its default 0.
 //!
 //! Each struct sits flush against a page mapped with no access, so a
 //! read or write past it faults, and a canary tail shows a byte that
@@ -17,9 +19,9 @@ use std::os::raw::c_void;
 use dlpk::sys::DLManagedTensorVersioned;
 use eindir_core::ffi::{eindir_core_abi_stamp, eindir_objective_t, eindir_status_t};
 use rgmin::ffi::{
-    RGMIN_CONTROL_REVISION5_SIZE, RGMIN_REPORT_REVISION5_SIZE, rgmin_control_default,
-    rgmin_control_init, rgmin_control_revision5_t, rgmin_control_t, rgmin_last_error,
-    rgmin_manifold_t, rgmin_method_t, rgmin_minimize, rgmin_minimize_eindir,
+    RGMIN_CONTROL_REVISION5_SIZE, RGMIN_CONTROL_REVISION6_SIZE, RGMIN_REPORT_REVISION5_SIZE,
+    rgmin_control_default, rgmin_control_init, rgmin_control_revision5_t, rgmin_control_t,
+    rgmin_last_error, rgmin_manifold_t, rgmin_method_t, rgmin_minimize, rgmin_minimize_eindir,
     rgmin_minimize_eindir_sized, rgmin_minimize_hess, rgmin_minimize_hess_opts,
     rgmin_minimize_hess_opts_sized, rgmin_minimize_hvp, rgmin_minimize_hvp_opts,
     rgmin_minimize_hvp_opts_sized, rgmin_minimize_opts, rgmin_minimize_opts_sized,
@@ -205,11 +207,28 @@ fn revision5() -> rgmin_control_revision5_t {
     }
 }
 
+/// `rgmin_control_t` as a layout revision 6 caller compiled it: the
+/// fields through `require_convergence`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Revision6 {
+    prefix: rgmin_control_revision5_t,
+    require_convergence: i32,
+}
+
+fn revision6(strict: bool) -> Revision6 {
+    Revision6 {
+        prefix: revision5(),
+        require_convergence: i32::from(strict),
+    }
+}
+
 fn full(strict: bool) -> rgmin_control_t {
     rgmin_control_t {
         maxiter: 1,
         gtol: 0.0,
         require_convergence: i32::from(strict),
+        noise_eps_f: 0.0,
         ..rgmin_control_t::default()
     }
 }
@@ -407,10 +426,20 @@ fn revision_5_sizes_are_the_released_layout() {
         RGMIN_REPORT_REVISION5_SIZE,
         offset_of!(rgmin_report_t, converged)
     );
+    assert_eq!(
+        RGMIN_CONTROL_REVISION6_SIZE,
+        offset_of!(rgmin_control_t, noise_eps_f)
+    );
+    assert_eq!(size_of::<Revision6>(), RGMIN_CONTROL_REVISION6_SIZE);
+    assert_eq!(
+        offset_of!(Revision6, require_convergence),
+        offset_of!(rgmin_control_t, require_convergence)
+    );
     #[cfg(target_pointer_width = "64")]
     {
         assert_eq!(RGMIN_CONTROL_REVISION5_SIZE, 56);
-        assert_eq!(FULL, 64);
+        assert_eq!(RGMIN_CONTROL_REVISION6_SIZE, 64);
+        assert_eq!(FULL, 72);
         assert_eq!(RGMIN_REPORT_REVISION5_SIZE, 28);
         assert_eq!(REPORT_BYTES, 32);
     }
@@ -493,6 +522,28 @@ fn the_current_size_reads_require_convergence_and_writes_converged() {
 }
 
 #[test]
+fn a_declared_revision_6_size_reads_require_convergence_and_no_byte_past_it() {
+    for entry in ENTRIES {
+        for strict in [false, true] {
+            let mut guard = Guarded::new();
+            let ctrl = place(&mut guard, revision6(strict));
+            let mut out_guard = Guarded::new();
+            let out = report(&mut out_guard);
+            let status = call_sized(entry, ctrl, RGMIN_CONTROL_REVISION6_SIZE, out);
+            let want = if strict {
+                rgmin_status_t::RGMIN_NOT_CONVERGED
+            } else {
+                rgmin_status_t::RGMIN_SUCCESS
+            };
+            assert_eq!(status, want, "{entry:?} strict {strict}");
+            let written = unsafe { std::ptr::read(out) };
+            assert_eq!(written.converged, 0, "{entry:?} strict {strict}");
+            assert_eq!(written.steps, 1, "{entry:?} strict {strict}");
+        }
+    }
+}
+
+#[test]
 fn a_larger_declared_size_reads_the_known_fields_and_ignores_the_rest() {
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -520,6 +571,8 @@ fn any_other_declared_size_is_refused_before_a_read() {
         8,
         RGMIN_CONTROL_REVISION5_SIZE - 1,
         RGMIN_CONTROL_REVISION5_SIZE + 1,
+        RGMIN_CONTROL_REVISION6_SIZE - 1,
+        RGMIN_CONTROL_REVISION6_SIZE + 1,
         FULL - 1,
     ] {
         for entry in ENTRIES {
@@ -662,6 +715,17 @@ fn control_init_writes_only_the_declared_layout() {
     let st = unsafe { rgmin_control_init(p, FULL) };
     assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
     assert_eq!(unsafe { p.read() }.require_convergence, 0);
+    assert_eq!(unsafe { p.read() }.noise_eps_f.to_bits(), 0.0_f64.to_bits());
+
+    let mut guard = Guarded::new();
+    let p = guard.tail(RGMIN_CONTROL_REVISION6_SIZE);
+    unsafe { p.write_bytes(SENTINEL, RGMIN_CONTROL_REVISION6_SIZE) };
+    let st = unsafe { rgmin_control_init(p.cast(), RGMIN_CONTROL_REVISION6_SIZE) };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    let got = unsafe { p.cast::<Revision6>().read() };
+    assert_eq!(got.prefix.maxiter, want.maxiter);
+    assert_eq!(got.prefix.noise_c.to_bits(), want.noise_c.to_bits());
+    assert_eq!(got.require_convergence, 0);
 
     for size in [
         0,

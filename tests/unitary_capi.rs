@@ -86,6 +86,7 @@ fn c_abi_unitary_step_stays_on_the_set() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        noise_eps_f: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_STEEPEST, &ctrl, 8) };
     assert!(!session.is_null());

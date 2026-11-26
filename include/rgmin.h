@@ -82,7 +82,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 67
+#define RGMIN_ABI_VERSION_MINOR 68
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -119,10 +119,13 @@ typedef struct rgmin_abi_stamp_t {
  *    rgmin_minimize_hvp_precond_sized. No struct changes, so the layout
  *    revision stays 6.
  * 67 RGMIN_GROMACS_LBFGS and rgmin_solver_set_gromacs_lbfgs.
- *    rgmin_control_t is unchanged. */
-#define RGMIN_ABI_LAYOUT_REVISION 6
-/* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
- * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the
+ *    rgmin_control_t is unchanged.
+ * 68 noise_eps_f on rgmin_control_t and RGMIN_CONTROL_REVISION6_SIZE.
+ *    The struct grows, so the layout revision becomes 7. */
+#define RGMIN_ABI_LAYOUT_REVISION 7
+/* Layout revision 7. rgmin_control_t is maxiter, gtol, istep, memory,
+ * maxmove, noise_eps, noise_c, require_convergence, noise_eps_f.
+ * Revision 6 ended at require_convergence. maxmove > 0 is the
  * Euclidean cap; 0 keeps the defaults, including the default per-atom
  * cap; a negative value leaves every step cap off.
  * rgmin_report_t is value, steps, grad_norm, stop, converged.
@@ -255,22 +258,37 @@ typedef struct rgmin_control_t {
     /** Nonzero returns RGMIN_NOT_CONVERGED when the gradient norm is
      *  not below gtol. Zero keeps the report. ABI minor 55. */
     int32_t require_convergence;
+    /** Noise of the objective value. <= 0 leaves the value test off.
+     *  With \c c the floor factor \c noise_c, a line search that finds
+     *  no trial whose decrease clears \c c * noise_eps_f, and a
+     *  Newton-CG trust region trial that is refused while its model
+     *  predicts a reduction of at most \c c * noise_eps_f, stop with
+     *  \c RGMIN_STOP_NOISE_FLOOR at the last accepted point, which is
+     *  written to \c x. It acts with or without a positive
+     *  \c noise_eps. A few units in the last place of the objective
+     *  value is the rounding noise of a value computed in double
+     *  precision. ABI minor 68, layout revision 7. */
+    double noise_eps_f;
 } rgmin_control_t;
 /** \c sizeof(rgmin_control_t) for a layout revision 5 caller: the
  *  fields through \c noise_c. ABI minor 55. */
 #define RGMIN_CONTROL_REVISION5_SIZE offsetof(rgmin_control_t, require_convergence)
+/** \c sizeof(rgmin_control_t) for a layout revision 6 caller: the
+ *  fields through \c require_convergence. ABI minor 68. */
+#define RGMIN_CONTROL_REVISION6_SIZE offsetof(rgmin_control_t, noise_eps_f)
 /** Fill \a c with the Rust \c Control::default for a caller that
  *  compiled \a struct_size as \c sizeof(rgmin_control_t).
  *  \c RGMIN_CONTROL_REVISION5_SIZE writes the fields through
- *  \c noise_c. A size of at least this header's struct writes every
- *  field and leaves the bytes past them alone. A null \a c or any other
- *  size writes nothing and returns \c RGMIN_INVALID_PARAMETER.
- *  ABI minor 55. */
+ *  \c noise_c and \c RGMIN_CONTROL_REVISION6_SIZE the fields through
+ *  \c require_convergence. A size of at least this header's struct
+ *  writes every field and leaves the bytes past them alone. A null
+ *  \a c or any other size writes nothing and returns
+ *  \c RGMIN_INVALID_PARAMETER. ABI minor 55. */
 rgmin_status_t rgmin_control_init(rgmin_control_t *c, size_t struct_size);
 /** Rust \c Control::default: maxiter 100, gtol 1e-5, istep 1, memory 0
  *  (10 L-BFGS pairs, 6 for DIIS), maxmove 0 (the default caps),
- *  noise_eps 0 (no floor), noise_c 3, and require_convergence 0.
- *  ABI minor 46.
+ *  noise_eps 0 (no floor), noise_c 3, require_convergence 0, and
+ *  noise_eps_f 0 (no value test). ABI minor 46.
  *
  *  Each entry that takes a \c rgmin_control_t is an inline function
  *  here that passes \c sizeof(rgmin_control_t) to its \c _sized
@@ -333,9 +351,10 @@ void rgmin_tensor_free(DLManagedTensorVersioned *tensor);
 /** \ref rgmin_minimize_opts for a caller that passes
  *  \c sizeof(rgmin_control_t) as \a ctrl_size.
  *  \c RGMIN_CONTROL_REVISION5_SIZE reads the revision 5 fields and
- *  writes \a out up to \c stop. A size of at least this header's struct
- *  reads \c require_convergence and writes \c converged. Any other size
- *  returns \c RGMIN_INVALID_PARAMETER. ABI minor 55. */
+ *  writes \a out up to \c stop. \c RGMIN_CONTROL_REVISION6_SIZE reads
+ *  through \c require_convergence and writes \c converged. A size of
+ *  at least this header's struct also reads \c noise_eps_f. Any other
+ *  size returns \c RGMIN_INVALID_PARAMETER. ABI minor 55. */
 rgmin_status_t rgmin_minimize_opts_sized(rgmin_eval_fn eval, rgmin_grad_fn grad, void *user,
                             DLManagedTensorVersioned *x, const rgmin_control_t *ctrl,
                             size_t ctrl_size, rgmin_method_t method, int error_on_unmet,

@@ -215,6 +215,7 @@ mod capi {
             noise_eps: 0.0,
             noise_c: 0.0,
             require_convergence: 0,
+            noise_eps_f: 0.0,
         };
         let params = rgmin_scg_params_t {
             sigma0: 1e-4,

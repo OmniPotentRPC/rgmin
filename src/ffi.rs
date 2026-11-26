@@ -104,8 +104,8 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 67;
-pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 68;
+pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 7;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
 #[repr(C)]
@@ -224,7 +224,8 @@ pub enum rgmin_highs_crossover_t {
 pub enum rgmin_stop_t {
     /// `||g||` fell below `gtol`.
     RGMIN_STOP_TOLERANCE = 0,
-    /// The stationarity measure fell below `c * sqrt(n_free) * noise_eps`.
+    /// The stationarity measure fell below `c * sqrt(n_free) * noise_eps`,
+    /// or no step could lower the value by more than `c * noise_eps_f`.
     RGMIN_STOP_NOISE_FLOOR = 1,
     /// SCG stopped on its step or objective test with `||g||` still above `gtol`.
     RGMIN_STOP_STEP_TOLERANCE = 2,
@@ -277,6 +278,16 @@ pub struct rgmin_control_t {
     /// [`rgmin_minimize_opts_sized`]. Every other entry reads the
     /// revision 5 fields and leaves this at 0. ABI minor 55.
     pub require_convergence: i32,
+    /// Noise of the objective value, [`crate::NoiseFloor::eps_f`].
+    /// Non-positive leaves the value test off. With `noise_c` as the
+    /// factor `c`, a line search that finds no trial whose decrease
+    /// clears `c * noise_eps_f`, and a Newton-CG trust region trial
+    /// refused while its model predicts at most that reduction, stop
+    /// with [`rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR`] at the last
+    /// accepted point. It acts with or without a positive `noise_eps`.
+    /// Read only by an entry that is told a size of at least this
+    /// struct. ABI minor 68, layout revision 7.
+    pub noise_eps_f: f64,
 }
 
 /// [`rgmin_control_t`] as a layout revision 5 caller compiled it, the
@@ -307,11 +318,17 @@ pub struct rgmin_control_revision5_t {
 pub const RGMIN_CONTROL_REVISION5_SIZE: usize =
     std::mem::offset_of!(rgmin_control_t, require_convergence);
 
+/// `sizeof(rgmin_control_t)` for a layout revision 6 caller, the offset
+/// of `noise_eps_f`. The report of that revision is this build's.
+pub const RGMIN_CONTROL_REVISION6_SIZE: usize = std::mem::offset_of!(rgmin_control_t, noise_eps_f);
+
 /// The bytes of [`rgmin_report_t`] a layout revision 5 caller owns
 /// fields in: everything before `converged`.
 pub const RGMIN_REPORT_REVISION5_SIZE: usize = std::mem::offset_of!(rgmin_report_t, converged);
 
 const _: () = assert!(RGMIN_CONTROL_REVISION5_SIZE == size_of::<rgmin_control_revision5_t>());
+const _: () = assert!(RGMIN_CONTROL_REVISION5_SIZE < RGMIN_CONTROL_REVISION6_SIZE);
+const _: () = assert!(RGMIN_CONTROL_REVISION6_SIZE < size_of::<rgmin_control_t>());
 const _: () = assert!(
     RGMIN_REPORT_REVISION5_SIZE
         == std::mem::offset_of!(rgmin_report_t, stop) + size_of::<rgmin_stop_t>()
@@ -1251,9 +1268,10 @@ pub unsafe extern "C" fn rgmin_minimize_opts(
 
 /// [`rgmin_minimize_opts`] for a caller that states
 /// `sizeof(rgmin_control_t)` as `ctrl_size`. [`RGMIN_CONTROL_REVISION5_SIZE`]
-/// reads the revision 5 fields and writes a revision 5 report; a size
-/// of at least this build's struct reads `require_convergence` and
-/// writes `converged`. Any other size is
+/// reads the revision 5 fields and writes a revision 5 report;
+/// [`RGMIN_CONTROL_REVISION6_SIZE`] reads through `require_convergence`
+/// and writes `converged`; a size of at least this build's struct also
+/// reads `noise_eps_f`. Any other size is
 /// [`rgmin_status_t::RGMIN_INVALID_PARAMETER`]. ABI minor 55.
 ///
 /// # Safety
@@ -2459,9 +2477,9 @@ pub unsafe extern "C" fn rgmin_solver_create(
 
 /// [`rgmin_solver_create`] for a caller that states
 /// `sizeof(rgmin_control_t)` as `ctrl_size`. The session's reports
-/// follow the same layout. A size that is neither
-/// [`RGMIN_CONTROL_REVISION5_SIZE`] nor at least this build's struct
-/// returns null. ABI minor 55.
+/// follow the same layout. A size that is none of
+/// [`RGMIN_CONTROL_REVISION5_SIZE`], [`RGMIN_CONTROL_REVISION6_SIZE`]
+/// and at least this build's struct returns null. ABI minor 55.
 ///
 /// # Safety
 /// `ctrl` is null or readable for `ctrl_size` bytes.
@@ -5336,13 +5354,21 @@ fn maxmove_from_c(maxmove: f64) -> Option<f64> {
     }
 }
 
+/// The floor of `noise_eps`, `noise_c` and `noise_eps_f`. A positive
+/// finite `noise_eps` is the gradient noise and a positive finite
+/// `noise_eps_f` the value noise; either one turns the floor on. A
+/// value noise alone keeps the gradient test off with `eps_g = 0`,
+/// which no norm is below.
 fn noise_floor_from_c(c: &rgmin_control_t) -> Option<crate::NoiseFloor> {
-    if !(c.noise_eps.is_finite() && c.noise_eps > 0.0) {
+    let positive = |v: f64| (v.is_finite() && v > 0.0).then_some(v);
+    let eps_g = positive(c.noise_eps);
+    let eps_f = positive(c.noise_eps_f);
+    if eps_g.is_none() && eps_f.is_none() {
         return None;
     }
-    let mut floor = crate::NoiseFloor::new(c.noise_eps);
-    if c.noise_c.is_finite() && c.noise_c > 0.0 {
-        floor = floor.with_c(c.noise_c);
+    let mut floor = crate::NoiseFloor::new(eps_g.unwrap_or(0.0)).with_eps_f(eps_f);
+    if let Some(factor) = positive(c.noise_c) {
+        floor = floor.with_c(factor);
     }
     Some(floor)
 }
@@ -5353,7 +5379,8 @@ enum CLayout {
     /// Layout revision 5: [`rgmin_control_revision5_t`] and a report
     /// that ends at `stop`.
     Revision5,
-    /// This build's [`rgmin_control_t`] and [`rgmin_report_t`].
+    /// This build's [`rgmin_report_t`], with this build's
+    /// [`rgmin_control_t`] or its layout revision 6 prefix.
     Current,
 }
 
@@ -5362,9 +5389,12 @@ enum CLayout {
 ///
 /// `ctrl_size` is `sizeof(rgmin_control_t)` as the caller compiled it.
 /// [`RGMIN_CONTROL_REVISION5_SIZE`] reads only the revision 5 fields, so
-/// `require_convergence` keeps its default 0. A size of at least
-/// `size_of::<rgmin_control_t>()` reads every field, and bytes past them
-/// stay unread. Any other size is refused.
+/// `require_convergence` keeps its default 0.
+/// [`RGMIN_CONTROL_REVISION6_SIZE`] reads through `require_convergence`,
+/// so `noise_eps_f` keeps its default 0; the report of that revision is
+/// this build's. A size of at least `size_of::<rgmin_control_t>()` reads
+/// every field, and bytes past them stay unread. Any other size is
+/// refused.
 ///
 /// # Safety
 /// `ctrl` is non-null and readable for `ctrl_size` bytes.
@@ -5376,12 +5406,15 @@ unsafe fn load_control(
     let full = std::mem::size_of::<rgmin_control_t>();
     let (n, layout) = if ctrl_size >= full {
         (full, CLayout::Current)
+    } else if ctrl_size == RGMIN_CONTROL_REVISION6_SIZE {
+        (RGMIN_CONTROL_REVISION6_SIZE, CLayout::Current)
     } else if ctrl_size == RGMIN_CONTROL_REVISION5_SIZE {
         (RGMIN_CONTROL_REVISION5_SIZE, CLayout::Revision5)
     } else {
         set_last_error(&format!(
-            "{name}: ctrl_size {ctrl_size} is neither the layout revision 5 size \
-             {RGMIN_CONTROL_REVISION5_SIZE} nor at least sizeof(rgmin_control_t) {full}"
+            "{name}: ctrl_size {ctrl_size} is not the layout revision 5 size \
+             {RGMIN_CONTROL_REVISION5_SIZE}, the layout revision 6 size \
+             {RGMIN_CONTROL_REVISION6_SIZE}, or at least sizeof(rgmin_control_t) {full}"
         ));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     };
@@ -9255,7 +9288,8 @@ pub unsafe extern "C" fn rgmin_lowest_eigenpairs_projected(
 
 impl Default for rgmin_control_t {
     /// [`Control::default`]. `memory` 0 is each method's own pair count,
-    /// and `noise_c` is the factor of [`crate::NoiseFloor::new`].
+    /// `noise_c` is the factor of [`crate::NoiseFloor::new`], and an
+    /// unset `eps_f` is `noise_eps_f` 0.
     fn default() -> Self {
         let control = Control::default();
         let floor = control.noise_floor;
@@ -9268,6 +9302,7 @@ impl Default for rgmin_control_t {
             noise_eps: floor.map_or(0.0, |f| f.eps_g),
             noise_c: floor.unwrap_or_else(|| crate::NoiseFloor::new(0.0)).c,
             require_convergence: 0,
+            noise_eps_f: floor.and_then(|f| f.eps_f).unwrap_or(0.0),
         }
     }
 }
@@ -9385,10 +9420,12 @@ pub extern "C" fn rgmin_control_default() -> rgmin_control_revision5_t {
 
 /// Fill `c` with [`rgmin_control_t::default`] for a caller that states
 /// `sizeof(rgmin_control_t)` as `struct_size`.
-/// [`RGMIN_CONTROL_REVISION5_SIZE`] writes the revision 5 fields. A size
-/// of at least this build's struct writes every field and leaves the
-/// bytes past them alone. A null `c` or any other size writes nothing
-/// and returns [`rgmin_status_t::RGMIN_INVALID_PARAMETER`]. ABI minor 55.
+/// [`RGMIN_CONTROL_REVISION5_SIZE`] writes the revision 5 fields and
+/// [`RGMIN_CONTROL_REVISION6_SIZE`] the fields through
+/// `require_convergence`. A size of at least this build's struct writes
+/// every field and leaves the bytes past them alone. A null `c` or any
+/// other size writes nothing and returns
+/// [`rgmin_status_t::RGMIN_INVALID_PARAMETER`]. ABI minor 55.
 ///
 /// # Safety
 /// `c` is null or writable for `struct_size` bytes.
@@ -9404,12 +9441,15 @@ pub unsafe extern "C" fn rgmin_control_init(
     let full = size_of::<rgmin_control_t>();
     let n = if struct_size >= full {
         full
+    } else if struct_size == RGMIN_CONTROL_REVISION6_SIZE {
+        RGMIN_CONTROL_REVISION6_SIZE
     } else if struct_size == RGMIN_CONTROL_REVISION5_SIZE {
         RGMIN_CONTROL_REVISION5_SIZE
     } else {
         set_last_error(&format!(
-            "rgmin_control_init: struct_size {struct_size} is neither the layout revision 5 \
-             size {RGMIN_CONTROL_REVISION5_SIZE} nor at least sizeof(rgmin_control_t) {full}"
+            "rgmin_control_init: struct_size {struct_size} is not the layout revision 5 size \
+             {RGMIN_CONTROL_REVISION5_SIZE}, the layout revision 6 size \
+             {RGMIN_CONTROL_REVISION6_SIZE}, or at least sizeof(rgmin_control_t) {full}"
         ));
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     };
@@ -9666,8 +9706,16 @@ mod default_tests {
             noise_eps,
             noise_c,
             require_convergence,
+            noise_eps_f,
         } = full_control_default();
         assert_eq!(require_convergence, 0);
+        assert_eq!(
+            noise_eps_f.to_bits(),
+            want.noise_floor
+                .and_then(|f| f.eps_f)
+                .unwrap_or(0.0)
+                .to_bits()
+        );
         assert_eq!(maxiter, want.maxiter);
         assert_eq!(gtol.to_bits(), want.gtol.to_bits());
         assert_eq!(istep.to_bits(), want.istep.to_bits());
@@ -9699,6 +9747,91 @@ mod default_tests {
             control_from_c(&floor_on).noise_floor.map(floor_bits),
             Some(floor_bits(NoiseFloor::new(1e-3)))
         );
+    }
+
+    #[test]
+    fn noise_eps_f_is_the_energy_noise_of_the_floor() {
+        let with = |noise_eps: f64, noise_c: f64, noise_eps_f: f64| {
+            let c = rgmin_control_t {
+                noise_eps,
+                noise_c,
+                noise_eps_f,
+                ..full_control_default()
+            };
+            control_from_c(&c).noise_floor.map(floor_bits)
+        };
+        // The value noise alone turns the floor on with the gradient
+        // test off: no norm is below `c * sqrt(n) * 0`.
+        assert_eq!(
+            with(0.0, 3.0, 2e-8),
+            Some(floor_bits(NoiseFloor::new(0.0).with_eps_f(2e-8)))
+        );
+        assert_eq!(
+            Control::default()
+                .with_noise_floor(NoiseFloor::new(0.0).with_eps_f(2e-8))
+                .classify(1.0, 4),
+            crate::Status::Iterating
+        );
+        assert_eq!(
+            with(1e-3, 5.0, 2e-8),
+            Some(floor_bits(
+                NoiseFloor::new(1e-3).with_c(5.0).with_eps_f(2e-8)
+            ))
+        );
+        // A non-positive factor keeps the default 3 for both tests.
+        assert_eq!(
+            with(-1.0, 0.0, 2e-8),
+            Some(floor_bits(NoiseFloor::new(0.0).with_eps_f(2e-8)))
+        );
+        for off in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(with(0.0, 3.0, off), None, "noise_eps_f {off}");
+            assert_eq!(
+                with(1e-3, 3.0, off),
+                Some(floor_bits(NoiseFloor::new(1e-3))),
+                "noise_eps_f {off}"
+            );
+        }
+    }
+
+    #[test]
+    fn control_init_at_the_revision_6_size_stops_before_noise_eps_f() {
+        const MARK: f64 = 32.5;
+        let mut c = rgmin_control_t {
+            maxiter: 7,
+            gtol: MARK,
+            istep: MARK,
+            memory: 7,
+            maxmove: MARK,
+            noise_eps: MARK,
+            noise_c: MARK,
+            require_convergence: 7,
+            noise_eps_f: MARK,
+        };
+        let status = unsafe { rgmin_control_init(&mut c, RGMIN_CONTROL_REVISION6_SIZE) };
+        assert_eq!(status, rgmin_status_t::RGMIN_SUCCESS);
+        let full = full_control_default();
+        assert_eq!(c.maxiter, full.maxiter);
+        assert_eq!(c.gtol.to_bits(), full.gtol.to_bits());
+        assert_eq!(c.noise_c.to_bits(), full.noise_c.to_bits());
+        assert_eq!(c.require_convergence, 0);
+        assert_eq!(c.noise_eps_f.to_bits(), MARK.to_bits());
+
+        // A revision 6 caller's bytes past its struct are not read.
+        let (loaded, layout) = unsafe {
+            load_control("test", &c, RGMIN_CONTROL_REVISION6_SIZE).expect("revision 6 size")
+        };
+        assert_eq!(layout, CLayout::Current);
+        assert_eq!(loaded.noise_eps_f.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(control_from_c(&loaded).noise_floor.map(floor_bits), None);
+        let (loaded, _) = unsafe {
+            load_control("test", &c, size_of::<rgmin_control_t>()).expect("current size")
+        };
+        assert_eq!(loaded.noise_eps_f.to_bits(), MARK.to_bits());
+        #[cfg(target_pointer_width = "64")]
+        {
+            assert_eq!(RGMIN_CONTROL_REVISION6_SIZE, 64);
+            assert_eq!(size_of::<rgmin_control_t>(), 72);
+        }
     }
 
     #[test]

@@ -56,7 +56,7 @@ fn c_header_checks_rigid_quotient_tcg_and_projected_modes() {
 
 #[test]
 fn c_header_reads_riemannian_cg_through_the_xts_aliases() {
-    assert_eq!(RGMIN_ABI_VERSION_MINOR, 67);
+    assert_eq!(RGMIN_ABI_VERSION_MINOR, 68);
     consumer::compile_and_run("tests/c_xts_rcg.c", "rgmin_c_xts_rcg", &[]);
 }
 
@@ -155,6 +155,10 @@ fn c_initializers_hold_the_rust_defaults() {
         noise_eps: control.noise_floor.map_or(0.0, |floor| floor.eps_g),
         noise_c: NoiseFloor::new(0.0).c,
         require_convergence: 0,
+        noise_eps_f: control
+            .noise_floor
+            .and_then(|floor| floor.eps_f)
+            .unwrap_or(0.0),
     });
     args.extend(record!(rgmin_exp_t {
         a: exp.a,

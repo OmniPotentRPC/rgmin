@@ -275,6 +275,7 @@ fn c_abi_set_box_keeps_the_trial_inside() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        noise_eps_f: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 2) };
     assert!(!session.is_null());
@@ -552,6 +553,7 @@ fn c_abi_projection_onto_the_session_box_is_not_an_energy_step() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        noise_eps_f: 0.0,
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 1) };
     assert!(!session.is_null());

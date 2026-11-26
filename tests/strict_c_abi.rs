@@ -159,6 +159,7 @@ fn control(maxiter: usize, gtol: f64, noise_eps: f64, strict: bool) -> rgmin_con
         noise_eps,
         noise_c: 0.0,
         require_convergence: i32::from(strict),
+        noise_eps_f: 0.0,
     }
 }
 
