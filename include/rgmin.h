@@ -114,7 +114,9 @@ typedef struct rgmin_abi_stamp_t {
  *    No C symbols or struct layouts change.
  * 65 RGMIN_RCG, rgmin_rcg_options_t, rgmin_rcg_options_default and
  *    rgmin_minimize_rcg. rgmin_rcg_options_t is a new struct, so the
- *    layout revision stays 6. */
+ *    layout revision stays 6.
+ * 63 RGMIN_GROMACS_LBFGS and rgmin_solver_set_gromacs_lbfgs.
+ *    rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 6
 /* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the
@@ -169,7 +171,7 @@ typedef enum rgmin_method_t {
     /** Riemannian CG. PRP+ and the scaled transport. ABI minor 65.
      *  rgmin_minimize_rcg carries the other coefficients. */
     RGMIN_RCG = 30,
-    /** GROMACS integrator = l-bfgs. */
+    /** GROMACS integrator = l-bfgs. ABI minor 63. */
     RGMIN_GROMACS_LBFGS = 31
 } rgmin_method_t;
 
@@ -657,7 +659,7 @@ int32_t rgmin_solver_set_gromacs_cg(rgmin_solver_t *solver, uint32_t nstcgsteep)
  *  RGMIN_GROMACS_LBFGS session. nbfgscorr is the number of stored
  *  displacement and gradient pairs; zero is rejected. Returns 0, or 1
  *  on a null session, a zero count, or a session that is not
- *  RGMIN_GROMACS_LBFGS. */
+ *  RGMIN_GROMACS_LBFGS. ABI minor 63. */
 int32_t rgmin_solver_set_gromacs_lbfgs(rgmin_solver_t *solver, uint32_t nbfgscorr);
 
 /** FIRE schedule. */

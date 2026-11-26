@@ -174,7 +174,7 @@ pub enum rgmin_method_t {
     /// Riemannian CG. Default coefficient is PRP+, transport is scaled.
     /// ABI minor 65. The options record carries the other coefficients.
     RGMIN_RCG = 30,
-    /// GROMACS `integrator = l-bfgs`.
+    /// GROMACS `integrator = l-bfgs`. ABI minor 63.
     RGMIN_GROMACS_LBFGS = 31,
 }
 
@@ -2628,6 +2628,7 @@ pub unsafe extern "C" fn rgmin_solver_set_gromacs_cg(
 /// `nbfgscorr` is the number of stored displacement and gradient pairs.
 /// Zero is rejected. Returns 0 on success, or 1 when `solver` is null,
 /// `nbfgscorr` is zero, or the session is not `RGMIN_GROMACS_LBFGS`.
+/// ABI minor 63.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
