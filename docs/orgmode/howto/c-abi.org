@@ -152,12 +152,12 @@ rgmin_report_t report;
 rgmin_status_t st = rgmin_minimize(eval, grad, user, x, &ctrl, RGMIN_LBFGS, &report);
 #+end_src
 
-A run that spends its budget, fails its line search, reaches line-search rounding, leaves a backward
-polish unmet or spends the evaluation budget still returns
+A run that spends its budget, fails its line search, reaches line-search rounding, reaches machine
+precision, leaves a backward polish unmet or spends the evaluation budget still returns
 ~RGMIN_SUCCESS~, with the stop in ~rgmin_report_t.stop~. The one-shots
 whose names end in ~_opts~ add ~error_on_unmet~ and ~backward_polish~
 before ~out~. A
-nonzero ~error_on_unmet~ writes ~x~ and ~out~ for those five stops and
+nonzero ~error_on_unmet~ writes ~x~ and ~out~ for those six stops and
 then returns ~RGMIN_UNMET_STOP~, so the host reads the report and still
 sees the run as unmet. ~rgmin_minimize_eindir_opts~ is the same for an
 ~eindir_objective_t~:

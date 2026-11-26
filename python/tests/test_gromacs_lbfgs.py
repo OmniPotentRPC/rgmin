@@ -96,6 +96,35 @@ class HarmonicCalculator(Calculator):
         self.results["forces"] = -positions
 
 
+def test_ase_wrapper_stops_early_at_machine_precision() -> None:
+    centre = 2.0**20
+    ulp = 2.0**-32
+
+    class ShiftedBowl(Calculator):
+        implemented_properties = ["energy", "forces"]
+
+        def calculate(
+            self, atoms=None, properties=("energy", "forces"), system_changes=all_changes
+        ):
+            super().calculate(atoms, properties, system_changes)
+            positions = self.atoms.get_positions()
+            delta = float(positions[0, 0]) - centre
+            self.results["energy"] = 0.5 * delta * delta
+            forces = np.zeros_like(positions)
+            forces[0, 0] = -delta
+            self.results["forces"] = forces
+
+    atoms = Atoms("H", positions=[[centre + 1.0 + ulp, 0.0, 0.0]])
+    atoms.calc = ShiftedBowl()
+    optimizer = GromacsLbfgs(atoms, emtol=1e-8, emstep=0.1, nsteps=10, logfile=None)
+    assert optimizer.run() is False
+    assert optimizer.stop == "MachinePrecision"
+    assert optimizer.nsteps == 2
+    assert optimizer._native is not None
+    assert optimizer._native.pair_count() == 1
+    assert atoms.positions[0, 0] == centre + ulp
+
+
 def test_ase_wrapper_uses_mdp_stops_and_rejects_holonomic_constraints() -> None:
     atoms = Atoms("Ar2", positions=[[0.5, 0.0, 0.0], [-0.5, 0.2, 0.0]])
     atoms.calc = HarmonicCalculator()

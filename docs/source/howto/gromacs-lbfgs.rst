@@ -72,7 +72,7 @@ The Rust core is unit-agnostic:
 The C selector is ``RGMIN_GROMACS_LBFGS`` and
 ``rgmin_solver_set_gromacs_lbfgs`` sets the correction count. C++ uses
 ``rgmin::Method::GromacsLbfgs``, ``Solver::set_gromacs_lbfgs``, and
-``SolverConfig::with_gromacs_lbfgs``. The ``nbfgscorr`` build option
+``SolverConfig::with_gromacs_lbfgs``. The ``nbfgscorr`` runtime setting
 selects the same count.
 
 The exact line search, restart, stopping rules, and documented
