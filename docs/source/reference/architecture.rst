@@ -103,7 +103,7 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 65 and
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 66 and
     ``layout_revision`` 6.
     Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
     error, and the backward-error polish. A zero iteration budget
@@ -128,6 +128,8 @@ Objects
     callback-error fixes without a layout change.
     Minor 65 adds ``RGMIN_RCG``, ``rgmin_rcg_options_t``, ``rgmin_rcg_options_default`` and ``rgmin_minimize_rcg``.
     The new struct leaves every existing struct as it was, so the layout revision stays 6.
+    Minor 66 adds ``rgmin_solver_set_fixed_h0`` and
+    ``rgmin_solver_set_ase_linesearch``.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``
