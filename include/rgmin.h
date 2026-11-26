@@ -773,7 +773,8 @@ int32_t rgmin_solver_set_fixed_h0(rgmin_solver_t *solver, double h0);
  *  the geometry step off, as SolverConfig does for linesearch "ase",
  *  so a default L-BFGS session can step. A \c stpmax below 1 is
  *  accepted and fails each search, as in ASE. Returns 0, or 1 on a null
- *  session, a NaN \c stpmax, or another method. ABI minor 53. */
+ *  session, a NaN \c stpmax, or another method, leaving the session as
+ *  it was. ABI minor 53. */
 int32_t rgmin_solver_set_ase_linesearch(rgmin_solver_t *solver, double stpmax);
 /** Burdakov ray-truncation radius for session L-BFGS. A non-positive,
  *  NaN or infinite radius turns it off and still returns 0. This is
