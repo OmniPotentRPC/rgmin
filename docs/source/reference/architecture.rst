@@ -103,7 +103,7 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 64 and
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 67 and
     ``layout_revision`` 6.
     Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
     error, and the backward-error polish. A zero iteration budget
@@ -126,6 +126,8 @@ Objects
     Minor 57 adds ``RGMIN_STOP_LINE_SEARCH_ROUNDING``. ``rgmin_control_t`` is
     unchanged. Minor 64 covers this branch's stop-reporting and eindir
     callback-error fixes without a layout change.
+    Minor 67 adds ``RGMIN_GROMACS_LBFGS`` and
+    ``rgmin_solver_set_gromacs_lbfgs``. ``rgmin_control_t`` is unchanged.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``
