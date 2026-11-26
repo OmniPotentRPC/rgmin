@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import math
 import os
+from collections.abc import Callable
 from io import StringIO
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -190,6 +191,40 @@ def test_cell_filter_runs() -> None:
     atoms.calc = EMT()
     opt = LBFGS(FrechetCellFilter(atoms), logfile=None, maxstep=0.05)
     assert isinstance(opt, ASEOptimizer)
+    assert opt.run(fmax=0.05, steps=80) is True
+
+
+class _SessionSpy:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __getattr__(self, name: str) -> Callable[..., None]:
+        def record(*args: object) -> None:
+            self.calls.append(name)
+
+        return record
+
+
+def test_ase_scale_applies_without_a_cell_filter() -> None:
+    atoms = _pt7(3, scale=0.01)
+    atoms.calc = EMT()
+    spy = _SessionSpy()
+    LBFGS(atoms, logfile=None, eon_cap=False)._apply_session(cast(Any, spy))
+    assert spy.calls == ["set_lbfgs_scaled", "set_lbfgs_fixed_h0"]
+
+
+def test_cell_filter_keeps_wolfe_when_eon_cap_and_line_search_are_off() -> None:
+    from ase.build import bulk
+    from ase.filters import FrechetCellFilter
+
+    atoms = bulk("Cu", cubic=True)
+    atoms.rattle(0.01, seed=1)
+    atoms.calc = EMT()
+    opt = LBFGS(FrechetCellFilter(atoms), logfile=None, eon_cap=False, use_line_search=False, maxstep=0.05)
+    assert opt._config_options()["linesearch"] == "wolfe"
+    spy = _SessionSpy()
+    opt._apply_session(cast(Any, spy))
+    assert spy.calls == []
     assert opt.run(fmax=0.05, steps=80) is True
 
 
