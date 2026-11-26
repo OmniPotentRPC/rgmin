@@ -239,7 +239,9 @@ typedef enum rgmin_observer_action_t {
  *  flat vector of \a n doubles, valid only during the callback; copy it
  *  to keep it. \a grad_norm is the stationarity measure that the minimizer
  *  already reports, and \a step_length is the Euclidean length of the
- *  accepted coordinate change. Neither field assumes an atom layout.
+ *  accepted coordinate change. Particle swarm passes a non-finite
+ *  \a grad_norm, because that callback does not form a gradient.
+ *  Neither field assumes an atom layout.
  *  Returning \c RGMIN_OBSERVER_STOP ends the run with
  *  \c RGMIN_STOP_OBSERVER. A null function pointer leaves the hook off
  *  and does not call back.

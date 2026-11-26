@@ -419,7 +419,9 @@ pub enum rgmin_observer_action_t {
 /// `x` points at `n` doubles that are valid only during the callback.
 /// `grad_norm` is the stationarity measure the minimizer already reports,
 /// and `step_length` is the Euclidean length of the accepted coordinate
-/// change. A null pointer leaves the hook off and is not called.
+/// change. Particle swarm passes a non-finite `grad_norm`, because that
+/// callback does not form a gradient. A null pointer leaves the hook off
+/// and is not called.
 /// The one-shot, Hessian, Hessian-vector, eindir, SCG and Riemannian
 /// L-BFGS entries read it when `ctrl_size` covers the observer fields,
 /// as the `rgmin.h` inline wrappers pass.

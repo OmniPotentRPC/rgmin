@@ -53,7 +53,12 @@ where
 /// [`minimize_pso`] with an optional per-iteration observer.
 ///
 /// Each swarm pass is one iteration. The observer sees the global best
-/// after the pass.
+/// after the pass. The swarm does not form a gradient, so `grad_norm`
+/// on that view is not finite, and an observed run evaluates the
+/// objective as often as a run with no observer. The returned report
+/// still evaluates the gradient once at the global best. An observer
+/// stop returns before that evaluation, and its report carries a
+/// non-finite gradient norm.
 pub fn minimize_pso_observed<O>(
     obj: &O,
     init: impl Into<Array1<f64>>,
@@ -129,7 +134,6 @@ where
     let mut iteration = 0;
     let mut stagnant_iterations = 0;
     let mut spent = false;
-    let mut observed: Option<(Array1<f64>, f64)> = None;
     while iteration < control.maxiter {
         let before = observer.is_some().then(|| gbest_position.clone());
         update_swarm(
@@ -142,22 +146,17 @@ where
             &mut rng,
         );
         if let Some(obs) = observer.as_deref_mut() {
-            // The swarm itself never needs a gradient. Taking it from the
-            // uncounted objective, once per new best, keeps an observed run
-            // on the same evaluation budget as an unobserved one.
-            let grad_norm = match &observed {
-                Some((at, norm)) if *at == gbest_position => *norm,
-                _ => l2(&obj.inner().value_and_gradient(gbest_position.view()).1),
-            };
-            observed = Some((gbest_position.clone(), grad_norm));
+            // The swarm stores values only. The gradient is not formed,
+            // so the observer does not evaluate the objective to supply one.
+            let step_length = before.as_ref().map_or(0.0, |before| {
+                crate::observer::separation(gbest_position.view(), before.view())
+            });
             if obs.observe(IterationView {
                 iteration,
                 x: gbest_position.view(),
                 value: gbest_value,
-                grad_norm,
-                step_length: before.as_ref().map_or(0.0, |before| {
-                    crate::observer::separation(gbest_position.view(), before.view())
-                }),
+                grad_norm: f64::NAN,
+                step_length,
             }) == ObserverSignal::Stop
             {
                 return control.deliver(
@@ -165,7 +164,7 @@ where
                         gbest_value,
                         gbest_position,
                         iteration + 1,
-                        grad_norm,
+                        f64::NAN,
                         Status::ObserverStop,
                     )
                     .with_stop_reason(StopReason::ObserverRequested),
