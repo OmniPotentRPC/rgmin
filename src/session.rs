@@ -4597,7 +4597,7 @@ impl Solver {
             if (last_b.value - original_value).abs() < GROMACS_LBFGS_REAL_EPS
                 || line_trials >= GROMACS_LBFGS_LINESEARCH_MAXITER
             {
-                if state.pair_count() == 0 {
+                if state.pair_count() == 0 || !(force_norm.is_finite() && force_norm > 0.0) {
                     let norm = norm_of(self, state, x, &grad);
                     self.remember(x, value, &grad);
                     self.overlay = Overlay::GromacsLbfgs(std::mem::replace(
@@ -4612,8 +4612,7 @@ impl Solver {
                     }
                     return Ok(report);
                 }
-                let restart_norm = crate::gromacs::euclidean_norm_stable(last_b.force.view());
-                state.restart_steepest(force.view(), restart_norm);
+                state.restart_steepest(force.view(), force_norm);
                 self.steps += 1;
                 let norm = norm_of(self, state, x, &grad);
                 self.remember(x, value, &grad);

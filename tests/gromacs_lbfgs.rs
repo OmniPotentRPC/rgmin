@@ -102,6 +102,29 @@ fn unresolved_line_search_clears_memory_and_counts_the_reset_iteration() {
 }
 
 #[test]
+fn the_reset_line_step_is_scaled_by_the_current_force_not_the_rejected_trial() {
+    // The bracket ends at x0 = 0.5, where the force is zero. The restart
+    // line step is 1 / |F| at x0 = 1, where the force is (-1, 0, 0).
+    let objective = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+        if x[0] >= 0.75 {
+            (0.5 * x[0] * x[0], array![x[0], 0.0, 0.0])
+        } else if x[0] <= 0.25 {
+            (0.5, array![-1.0, 0.0, 0.0])
+        } else {
+            (0.5, Array1::zeros(3))
+        }
+    });
+    let mut solver = Solver::new(Method::GromacsLbfgs, control(1.0, 0.0, 10), 3);
+    let mut point = array![2.0, 0.0, 0.0];
+    solver.step(&objective, &mut point).unwrap();
+    let reset = solver.step(&objective, &mut point).unwrap();
+    assert_eq!(reset.status, Status::Iterating);
+    assert_eq!(solver.pair_count(), 0);
+    assert_eq!(point, array![1.0, 0.0, 0.0]);
+    assert_eq!(solver.gromacs_lbfgs_step_size(), Some(1.0));
+}
+
+#[test]
 fn machine_precision_stops_on_a_rounded_step_or_an_empty_memory_search() {
     fn run<O: DifferentiableObjective<f64>>(objective: &O, start: Array1<f64>) -> (Report, usize) {
         let mut solver = Solver::new(Method::GromacsLbfgs, control(1.0, 0.0, 10), 3);
@@ -565,7 +588,7 @@ fn line_search_reset_continues_on_a_clean_correction_ring() {
         }
     });
     let nbfgscorr = 2;
-    let mut solver = Solver::new(Method::GromacsLbfgs, control(1.0, 0.0, 40), 3);
+    let mut solver = Solver::new(Method::GromacsLbfgs, control(0.1, 0.0, 40), 3);
     solver
         .set_gromacs_lbfgs_config(GromacsLbfgsConfig::default().with_nbfgscorr(nbfgscorr))
         .unwrap();
