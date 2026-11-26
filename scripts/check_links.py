@@ -34,7 +34,7 @@ SKIP_PREFIXES = ("bench/", "benches/", "target/", "docs/source/crates/")
 SKIP_FILES = {"Cargo.lock"}
 SKIP_HOSTS = {"crates.io", "localhost", "127.0.0.1", "example.com"}
 URL = re.compile(r"https?://[^\s<>\"')\]}`~|]+")
-DOI_URL = re.compile(r"https?://(?:dx\.)?doi\.org/(10\.\d{4,9}/[^\s\[\]<>\"'`|]+)", re.I)
+DOI_URL = re.compile(r"https?://(?:dx\.)?doi\.org/(10\.\d{4,9}/[^\s\[\]<>\"'`|}]+)", re.I)
 DOI_ROLE = re.compile(r"\bdoi:(10\.\d{4,9}/[^\s,;\]\)]+)")
 BIB_DOI = re.compile(r"^\s*doi\s*=\s*\{([^}]+)\}", re.M | re.I)
 AGENT = "Mozilla/5.0 (compatible; rgmin-link-check)"
