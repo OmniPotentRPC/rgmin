@@ -33,8 +33,9 @@ libkrylov = ["dep:cc", "dep:pkg-config"]
 readcon = ["dep:readcon-core"]
 # rug is LGPL-3.0+ and its gmp-mpfr-sys builds GMP, MPFR and MPC from source
 # with autotools (m4, make, diffutils and a C compiler). The crate always
-# builds a staticlib and a cdylib, so this feature must stay off the C ABI:
-# `capi` with it is a compile error, and `--all-features` is not a CI row.
+# builds a staticlib and a cdylib. When `capi` is also enabled, including
+# under `--all-features`, the module is omitted so the static library does
+# not link GMP. `--all-features` is not a CI row.
 periodic-product = ["dep:rug"]
 
 [dependencies]

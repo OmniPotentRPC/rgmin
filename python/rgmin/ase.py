@@ -23,7 +23,7 @@ import weakref
 from collections import deque
 from collections.abc import Callable, Iterator
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
 from ase.optimize.optimize import Optimizer as _ASEOptimizer
@@ -50,7 +50,9 @@ _ASE_LINESEARCH_RESTART = "rgmin-ase-linesearch-1"
 # holds it. They queue a release instead. The calculator lock is
 # acquired only after this one is released.
 _calc_guard = threading.Lock()
-_calc_locks: weakref.WeakKeyDictionary[Any, threading.Lock] = weakref.WeakKeyDictionary()
+_calc_locks: weakref.WeakKeyDictionary[Any, threading.Lock] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 class _IdEntry:
@@ -61,7 +63,7 @@ class _IdEntry:
     using it. The entry is removed when that count reaches zero.
     """
 
-    __slots__ = ("calc", "lock", "holders")
+    __slots__ = ("calc", "holders", "lock")
 
     def __init__(self, calc: Any) -> None:
         self.calc = calc
@@ -143,7 +145,12 @@ def _nonconservative_types() -> tuple[type, ...]:
 
 def _cell_filter_types() -> tuple[type, ...]:
     found: list[type] = []
-    for name in ("FrechetCellFilter", "UnitCellFilter", "ExpCellFilter", "StrainFilter"):
+    for name in (
+        "FrechetCellFilter",
+        "UnitCellFilter",
+        "ExpCellFilter",
+        "StrainFilter",
+    ):
         cls = _import_attr("ase.filters", name)
         if isinstance(cls, type):
             found.append(cls)
@@ -169,7 +176,11 @@ def _minmode(obj: Any) -> Any | None:
     cls = _import_attr("ase.mep", "MinModeAtoms")
     if not isinstance(cls, type):
         return None
-    for candidate in (obj, getattr(obj, "atoms", None), getattr(obj, "dimeratoms", None)):
+    for candidate in (
+        obj,
+        getattr(obj, "atoms", None),
+        getattr(obj, "dimeratoms", None),
+    ):
         if isinstance(candidate, cls):
             return candidate
     return None
@@ -327,7 +338,7 @@ class Optimizer(_ASEOptimizer):
     calculator safe.
     """
 
-    defaults = {"maxstep": 0.2}
+    defaults: ClassVar[dict[str, float]] = {"maxstep": 0.2}
 
     def _restart_supported(self) -> bool:
         return False
@@ -421,7 +432,11 @@ class Optimizer(_ASEOptimizer):
     def _config_options(self) -> dict[str, Any]:
         opts = dict(self._rgmin_options)
         opts["maxstep"] = self.maxstep
-        if self._rgmin_method == "lbfgs" and "linesearch" not in opts and _is_cell_filter(self.atoms):
+        if (
+            self._rgmin_method == "lbfgs"
+            and "linesearch" not in opts
+            and _is_cell_filter(self.atoms)
+        ):
             opts["linesearch"] = "wolfe"
         if self._rgmin_accept is not None:
             opts["accept"] = self._rgmin_accept
@@ -460,7 +475,9 @@ class Optimizer(_ASEOptimizer):
 
     def _hessian_of(self, x: np.ndarray) -> np.ndarray:
         if self._hessian is None:
-            raise NotImplementedError(f"{type(self).__name__}.step requires a hessian callable")
+            raise NotImplementedError(
+                f"{type(self).__name__}.step requires a hessian callable"
+            )
         return np.asarray(self._hessian(x), dtype=np.float64)
 
     def step(self) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -469,7 +486,9 @@ class Optimizer(_ASEOptimizer):
             self.initialize()
         assert self._solver is not None
         if self._rgmin_method in _HESSIAN_METHODS and self._hessian is None:
-            raise NotImplementedError(f"{type(self).__name__}.step requires a hessian callable")
+            raise NotImplementedError(
+                f"{type(self).__name__}.step requires a hessian callable"
+            )
         x = np.array(geom.positions(), dtype=np.float64, copy=True)
         if self._rgmin_method in _HESSIAN_METHODS:
             report = self._solver.step_hess(self._evaluate, self._hessian_of, x)
@@ -484,7 +503,9 @@ class Optimizer(_ASEOptimizer):
 
     def converged(self, *args: Any, **kwargs: Any) -> bool:
         """ASE's force test, or ``True`` once ``etol`` or ``max_evals`` stopped the solver."""
-        return self._stop_requested() or bool(cast(Any, super()).converged(*args, **kwargs))
+        return self._stop_requested() or bool(
+            cast(Any, super()).converged(*args, **kwargs)
+        )
 
     def gradient_converged(self, gradient: Any = None) -> bool:
         """The ``converged`` of ASE 3.2x and later, which its run loop calls."""
@@ -553,22 +574,11 @@ class Optimizer(_ASEOptimizer):
         name = type(self).__name__
         write = cast(Any, self.logfile).write
         if self.nsteps == 0:
-            header = "%s  %4s %8s %15s  %12s\n" % (
-                " " * len(name),
-                "Step",
-                "Time",
-                "Energy",
-                "fmax",
-            )
+            header = f"{' ' * len(name)}  {'Step':>4} {'Time':>8} {'Energy':>15}  {'fmax':>12}\n"
             write(header)
-        line = "%s:  %3d %02d:%02d:%02d %15.6f %15.6f\n" % (
-            name,
-            self.nsteps,
-            now.tm_hour,
-            now.tm_min,
-            now.tm_sec,
-            energy,
-            fmax,
+        line = (
+            f"{name}:  {self.nsteps:3d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d} "
+            f"{energy:15.6f} {fmax:15.6f}\n"
         )
         write(line)
         cast(Any, self.logfile).flush()
@@ -681,7 +691,16 @@ class LBFGS(Optimizer):
         **options: Any,
     ) -> None:
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "lbfgs", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "lbfgs",
+            maxstep,
+            accept,
+            options,
         )
 
 
@@ -704,7 +723,16 @@ class FIRE(Optimizer):
         **options: Any,
     ) -> None:
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "fire", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "fire",
+            maxstep,
+            accept,
+            options,
         )
 
 
@@ -728,7 +756,16 @@ class FIRE2(Optimizer):
         **options: Any,
     ) -> None:
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "fire2", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "fire2",
+            maxstep,
+            accept,
+            options,
         )
 
 
@@ -782,7 +819,16 @@ class BFGS(Optimizer):
         **options: Any,
     ) -> None:
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "bfgs", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "bfgs",
+            maxstep,
+            accept,
+            options,
         )
 
 
@@ -804,7 +850,18 @@ class SD(Optimizer):
         accept: str | None = None,
         **options: Any,
     ) -> None:
-        _start(self, atoms, restart, logfile, trajectory, append_trajectory, "sd", maxstep, accept, options)
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "sd",
+            maxstep,
+            accept,
+            options,
+        )
 
 
 class Adam(Optimizer):
@@ -825,7 +882,16 @@ class Adam(Optimizer):
         **options: Any,
     ) -> None:
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "adam", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "adam",
+            maxstep,
+            accept,
+            options,
         )
 
 
@@ -916,7 +982,16 @@ class SR1(Optimizer):
         **options: Any,
     ) -> None:
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "sr1", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "sr1",
+            maxstep,
+            accept,
+            options,
         )
 
 
@@ -939,7 +1014,16 @@ class SR2(Optimizer):
         **options: Any,
     ) -> None:
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "sr2", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "sr2",
+            maxstep,
+            accept,
+            options,
         )
 
 
@@ -961,7 +1045,18 @@ class BB(Optimizer):
         accept: str | None = None,
         **options: Any,
     ) -> None:
-        _start(self, atoms, restart, logfile, trajectory, append_trajectory, "bb", maxstep, accept, options)
+        _start(
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "bb",
+            maxstep,
+            accept,
+            options,
+        )
 
 
 class Dogleg(Optimizer):
@@ -1017,7 +1112,16 @@ class DIIS(Optimizer):
         **options: Any,
     ) -> None:
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "diis", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "diis",
+            maxstep,
+            accept,
+            options,
         )
 
 
@@ -1045,7 +1149,16 @@ class PSO(Optimizer):
         **options: Any,
     ) -> None:
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "pso", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "pso",
+            maxstep,
+            accept,
+            options,
         )
 
 
@@ -1262,7 +1375,16 @@ class FrPr(Optimizer):
         **options: Any,
     ) -> None:
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "fr_pr", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "fr_pr",
+            maxstep,
+            accept,
+            options,
         )
 
 
@@ -1310,13 +1432,19 @@ class _AseWolfe(Optimizer):
         self._opening_open = False
 
     def _flat_point(self, x: np.ndarray) -> np.ndarray:
-        return np.array(np.asarray(x, dtype=np.float64).reshape(-1), dtype=np.float64, copy=True)
+        return np.array(
+            np.asarray(x, dtype=np.float64).reshape(-1), dtype=np.float64, copy=True
+        )
 
     def _same_point(self, left: np.ndarray, right: np.ndarray) -> bool:
         if left.shape != right.shape:
             return False
         scale = np.maximum(np.abs(left), np.abs(right))
-        return bool(np.all(np.abs(left - right) <= 4.0 * np.finfo(np.float64).eps * scale + 1e-15))
+        return bool(
+            np.all(
+                np.abs(left - right) <= 4.0 * np.finfo(np.float64).eps * scale + 1e-15
+            )
+        )
 
     def _begin_step_counts(self, start: np.ndarray) -> None:
         self._step_start = self._flat_point(start)
@@ -1343,7 +1471,9 @@ class _AseWolfe(Optimizer):
             self.function_calls += 1
         self._opening_open = False
 
-    def _store_cached_point(self, point: np.ndarray, stop: Any, evaluations: int) -> None:
+    def _store_cached_point(
+        self, point: np.ndarray, stop: Any, evaluations: int
+    ) -> None:
         flat = self._flat_point(point)
         # A gradient stop before the search does not store the point.
         held = stop in (rgmin.Stop.TOLERANCE, rgmin.Stop.NOISE_FLOOR)
@@ -1362,7 +1492,9 @@ class _AseWolfe(Optimizer):
             asked = np.asarray(x, dtype=np.float64).reshape(-1)
             recorded = np.asarray(point, dtype=np.float64).reshape(-1)
             if asked.shape != recorded.shape or not np.array_equal(asked, recorded):
-                raise _restart_error(f"{self.restart} does not replay under these parameters")
+                raise _restart_error(
+                    f"{self.restart} does not replay under these parameters"
+                )
             self._tally_evaluation(asked)
             return float(value), np.asarray(gradient, dtype=np.float64).reshape(-1)
         value, gradient = super()._evaluate(x)
@@ -1430,7 +1562,9 @@ class _AseWolfe(Optimizer):
             self._finish_step_counts()
             if next(self._replay_iter, None) is not None:
                 self._replay_iter = None
-                raise _restart_error(f"{self.restart} recorded more evaluations than it replays")
+                raise _restart_error(
+                    f"{self.restart} recorded more evaluations than it replays"
+                )
             self._store_cached_point(point, report.stop, len(evals))
             final = point
         self._replay_iter = None
@@ -1520,12 +1654,13 @@ class BFGSLineSearch(_AseWolfe):
         write = cast(Any, self.logfile).write
         if self.nsteps == 0:
             write(
-                "%s  %4s[%3s] %8s %15s  %12s\n"
-                % (" " * len(name), "Step", "FC", "Time", "Energy", "fmax")
+                f"{' ' * len(name)}  {'Step':>4}[{'FC':>3}] {'Time':>8} "
+                f"{'Energy':>15}  {'fmax':>12}\n"
             )
         write(
-            "%s:  %3d[%3d] %02d:%02d:%02d %15.6f %12.4f\n"
-            % (name, self.nsteps, self.force_calls, now.tm_hour, now.tm_min, now.tm_sec, energy, fmax)
+            f"{name}:  {self.nsteps:3d}[{self.force_calls:3d}] "
+            f"{now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d} "
+            f"{energy:15.6f} {fmax:12.4f}\n"
         )
         cast(Any, self.logfile).flush()
 
@@ -1535,7 +1670,9 @@ class BFGSLineSearch(_AseWolfe):
 QuasiNewton = BFGSLineSearch
 
 
-def _bind_lbfgs_linesearch(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
+def _bind_lbfgs_linesearch(
+    args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> dict[str, Any]:
     names: tuple[str, ...] = (
         "atoms",
         "restart",
@@ -1559,11 +1696,15 @@ def _bind_lbfgs_linesearch(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dic
     bound: dict[str, Any] = {}
     for name, value in zip(names, args, strict=False):
         if name in supplied:
-            raise TypeError(f"LBFGS.__init__() got multiple values for argument '{name}'")
+            raise TypeError(
+                f"LBFGS.__init__() got multiple values for argument '{name}'"
+            )
         bound[name] = value
     bound.update(supplied)
     if "atoms" not in bound:
-        raise TypeError("LBFGS.__init__() missing 1 required positional argument: 'atoms'")
+        raise TypeError(
+            "LBFGS.__init__() missing 1 required positional argument: 'atoms'"
+        )
     return bound
 
 
@@ -1606,7 +1747,7 @@ class LBFGSLineSearch(_AseWolfe, LBFGS):
         if maxstep > _ASE_LBFGS_MAXSTEP_LIMIT:
             raise ValueError(
                 "You are using a much too large value for the "
-                "maximum step size: %.1f Angstrom" % maxstep
+                f"maximum step size: {maxstep:.1f} Angstrom"
             )
         scale = _positive("alpha", alpha)
         self.memory = memory
@@ -1636,31 +1777,31 @@ class LBFGSLineSearch(_AseWolfe, LBFGS):
 
 
 __all__ = [
-    "Adam",
     "BB",
     "BFGS",
-    "BFGSLineSearch",
     "CG",
-    "ConjugateDescent",
     "DIIS",
-    "DaiYuan",
-    "Dogleg",
     "FIRE",
     "FIRE2",
-    "FletcherReeves",
-    "FrPr",
-    "HagerZhang",
-    "HestenesStiefel",
     "LBFGS",
-    "LBFGSLineSearch",
-    "LiuStorey",
-    "Newton",
-    "Optimizer",
     "PSO",
-    "QuasiNewton",
-    "QuickMin",
     "RFO",
     "SD",
     "SR1",
     "SR2",
+    "Adam",
+    "BFGSLineSearch",
+    "ConjugateDescent",
+    "DaiYuan",
+    "Dogleg",
+    "FletcherReeves",
+    "FrPr",
+    "HagerZhang",
+    "HestenesStiefel",
+    "LBFGSLineSearch",
+    "LiuStorey",
+    "Newton",
+    "Optimizer",
+    "QuasiNewton",
+    "QuickMin",
 ]
