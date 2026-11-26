@@ -724,13 +724,13 @@ fn load_lbfgs_argon() -> LbfgsArgonReference {
             rows = Some(Vec::new());
             continue;
         }
-        if rows.is_some() {
+        if let Some(rows) = rows.as_mut() {
             let mut parts = line.split_whitespace();
             let k = parts.next().expect("k").parse().expect("k");
             let evals = parts.next().expect("evals").parse().expect("evals");
             let energy = parts.next().expect("energy").parse().expect("energy");
             let fmax = parts.next().expect("fmax").parse().expect("fmax");
-            rows.as_mut().expect("rows").push(LbfgsArgonRow {
+            rows.push(LbfgsArgonRow {
                 k,
                 evals,
                 energy,
