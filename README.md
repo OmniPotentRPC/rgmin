@@ -121,7 +121,7 @@ Install the 0.8 release from crates.io with `cargo add rgmin@0.8 ndarray@0.17` o
 [`docs/orgmode/howto/install.org`](https://github.com/OmniPotentRPC/rgmin/blob/main/docs/orgmode/howto/install.org) covers the features, the `develop` branch, the C library from cargo-c or Meson, the Python packages and the LAMMPS plugin.
 
 The optional `periodic-product` feature pulls in `rug` and `gmp-mpfr-sys`, which are LGPL-3.0 or later rather than MIT and build GMP, MPFR and MPC from source with autotools, so they need `m4`, `make`, `diffutils` and a C compiler.
-It cannot be combined with `capi`, and `--all-features` stops with a compile error for that reason.
+When `capi` is also enabled, including under `--all-features`, the module is left out so the C static library does not link GMP. `--features periodic-product` is the build that includes it.
 
 ## Python
 
