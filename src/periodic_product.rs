@@ -12,8 +12,8 @@
 //! `gmp-mpfr-sys`.  Both are LGPL-3.0 or later, not MIT like this crate, and
 //! `gmp-mpfr-sys` compiles GMP, MPFR and MPC from source with autotools, so
 //! the build needs `m4`, `make`, `diffutils` and a C compiler.  A binary that
-//! links either crate statically must meet the LGPL terms for it.  The feature
-//! cannot be combined with `capi`, because the C static library would then
+//! links either crate statically must meet the LGPL terms for it.  The module
+//! is left out when `capi` is also enabled, so the C static library does not
 //! carry GMP and MPFR.
 
 use rug::{Complex, Float, ops::Pow};

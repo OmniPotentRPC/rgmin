@@ -22,7 +22,7 @@ cargo +1.88.0 test --locked --features periodic-product
 
 CI calls the fifth row all-features.
 It names the features instead of passing `--all-features`, so the static library does not link `readcon-core` or the LGPL `gmp-mpfr-sys`, which get the last two rows.
-The `periodic-product` feature cannot be combined with `capi`, and its row needs `m4`, `make`, `diffutils` and a C compiler.
+When `capi` is also enabled the periodic-product module is omitted, so that build does not link GMP into the C static library. The periodic-product row is the one that builds the module, and it needs `m4`, `make`, `diffutils` and a C compiler.
 
 The rows with `capi` also compile C and C++ programs against `include/` and run them.
 Those tests run `cargo build --lib` for the target, profile and features of the test run and link the library it reports, so no `cargo build` has to come first.

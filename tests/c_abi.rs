@@ -19,8 +19,9 @@ use rgmin::ffi::{
     rgmin_minimize_scg, rgmin_precond_fn, rgmin_rcg_options_default, rgmin_report_t,
     rgmin_scg_params_t, rgmin_solver_clear_exp, rgmin_solver_create, rgmin_solver_exp_mu,
     rgmin_solver_free, rgmin_solver_gradient_calls, rgmin_solver_hvp_calls,
-    rgmin_solver_set_accept, rgmin_solver_set_exp, rgmin_solver_set_gromacs_cg,
-    rgmin_solver_set_gromacs_lbfgs, rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
+    rgmin_solver_set_accept, rgmin_solver_set_ase_linesearch, rgmin_solver_set_exp,
+    rgmin_solver_set_fixed_h0, rgmin_solver_set_gromacs_cg, rgmin_solver_set_gromacs_lbfgs,
+    rgmin_solver_set_gromacs_steep, rgmin_solver_set_quickmin_cell,
     rgmin_solver_set_quickmin_variant, rgmin_solver_step, rgmin_solver_step_fg,
     rgmin_solver_step_hvp, rgmin_status_t, rgmin_stop_t, rgmin_tensor_borrow_cpu_f64,
     rgmin_tensor_free,
@@ -1266,6 +1267,8 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 /// `rgmin_control_t` and `RGMIN_CONTROL_REVISION6_SIZE`.
 /// ABI minor 65 adds `rgmin_rcg_options_default` and `rgmin_minimize_rcg`.
 /// ABI minor 67 adds `RGMIN_GROMACS_LBFGS` and `rgmin_solver_set_gromacs_lbfgs`.
+/// ABI minor 69 adds `rgmin_solver_set_fixed_h0` and
+/// `rgmin_solver_set_ase_linesearch`.
 /// ABI minor 57 adds `RGMIN_STOP_LINE_SEARCH_ROUNDING`.
 /// ABI minor 54 adds `RGMIN_GROMACS_CG` and `rgmin_solver_set_gromacs_cg`.
 /// ABI minor 56 adds `rgmin_manifold_rigid_quotient`, `rgmin_rtr_tcg_solve`,
@@ -1297,7 +1300,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 68);
+    assert_eq!(stamp.abi_minor, 69);
     assert_eq!(stamp.layout_revision, 7);
     assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING as i32, 9);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
@@ -5821,4 +5824,84 @@ fn c_abi_rcg_refuses_options_and_starts_it_cannot_read() {
             last_error_text()
         );
     }
+}
+
+#[test]
+fn fixed_h0_and_ase_linesearch_are_opt_in() {
+    let ctrl = rgmin_control_t {
+        maxiter: 10,
+        gtol: 1e-8,
+        istep: 1.0,
+        memory: 5,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+        require_convergence: 0,
+        noise_eps_f: 0.0,
+    };
+    let bfgs = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_BFGS, &ctrl, 2) };
+    assert!(!bfgs.is_null());
+    assert_eq!(unsafe { rgmin_solver_set_fixed_h0(bfgs, 0.1) }, 0);
+    assert_eq!(unsafe { rgmin_solver_set_ase_linesearch(bfgs, 50.0) }, 0);
+    assert_eq!(unsafe { rgmin_solver_set_ase_linesearch(bfgs, 0.5) }, 0);
+    assert_eq!(unsafe { rgmin_solver_set_fixed_h0(bfgs, 0.0) }, 1);
+    assert_eq!(
+        unsafe { rgmin_solver_set_ase_linesearch(bfgs, f64::NAN) },
+        1
+    );
+    unsafe { rgmin_solver_free(bfgs) };
+
+    let fire = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_FIRE, &ctrl, 2) };
+    assert!(!fire.is_null());
+    assert_eq!(unsafe { rgmin_solver_set_fixed_h0(fire, 0.1) }, 1);
+    assert_eq!(unsafe { rgmin_solver_set_ase_linesearch(fire, 50.0) }, 1);
+    unsafe { rgmin_solver_free(fire) };
+    assert_eq!(
+        unsafe { rgmin_solver_set_fixed_h0(std::ptr::null_mut(), 0.1) },
+        1
+    );
+}
+
+/// A default L-BFGS session does not search a line. The ASE setter
+/// opts into the plain Wolfe step, so the following step runs.
+#[test]
+fn ase_linesearch_on_default_lbfgs_steps() {
+    let ctrl = rgmin_control_t {
+        maxiter: 10,
+        gtol: 1e-8,
+        istep: 1.0,
+        memory: 5,
+        maxmove: 0.0,
+        noise_eps: 0.0,
+        noise_c: 0.0,
+        require_convergence: 0,
+        noise_eps_f: 0.0,
+    };
+    let mut x = [1.0_f64];
+    let mut out = rgmin_report_t {
+        value: 0.0,
+        steps: 0,
+        grad_norm: 0.0,
+        stop: rgmin_stop_t::RGMIN_STOP_TOLERANCE,
+        converged: 0,
+    };
+    let st = unsafe {
+        let session = rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 1);
+        assert!(!session.is_null());
+        assert_eq!(rgmin_solver_set_ase_linesearch(session, 50.0), 0);
+        let xt = rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), 1);
+        let st = rgmin_solver_step(
+            session,
+            Some(quad_eval),
+            Some(quad_grad),
+            std::ptr::null_mut(),
+            xt,
+            &mut out,
+        );
+        rgmin_tensor_free(xt);
+        rgmin_solver_free(session);
+        st
+    };
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS);
+    assert!(x[0] < 1.0, "default L-BFGS ASE step left x at {}", x[0]);
 }

@@ -140,3 +140,8 @@ jobs:
       - name: ASE contract tests
         shell: bash
         run: python -m pytest -q tests/python/test_ase.py --timeout=180 -o faulthandler_timeout=120
+
+      - name: ASE line-search drop-in tests
+        if: matrix.ase == '3.29.0'
+        shell: bash
+        run: python -m pytest -q python/tests/test_ase_linesearch_dropin.py --timeout=180 -o faulthandler_timeout=120

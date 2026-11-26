@@ -2,6 +2,7 @@
 
 use ndarray::{Array1, ArrayView1};
 
+pub(crate) mod ase;
 /// Accept conditions (Armijo, Wolfe, Goldstein).
 pub mod conditions;
 mod interp;
@@ -126,6 +127,7 @@ pub enum LineSearch {
 
 /// Optional policy for objective values whose accuracy is lower than their gradients.
 /// Existing line-search entry points use the default four-epsilon window.
+/// `ase` is unset until a BFGS or L-BFGS session opts into ASE's search.
 ///
 /// The struct is non-exhaustive: start from [`Default`] or
 /// [`Self::with_objective_roundoff`].
@@ -134,6 +136,7 @@ pub enum LineSearch {
 pub struct LineSearchOptions {
     relative_objective_error: Option<f64>,
     downhill_rise_tolerance: Option<f64>,
+    ase: Option<ase::AseSearch>,
 }
 
 impl LineSearchOptions {
@@ -147,6 +150,7 @@ impl LineSearchOptions {
         (relative.is_finite() && relative >= 0.0).then_some(Self {
             relative_objective_error: Some(relative),
             downhill_rise_tolerance: None,
+            ase: None,
         })
     }
 
@@ -171,6 +175,19 @@ impl LineSearchOptions {
             self.downhill_rise_tolerance = Some(relative);
         }
         self
+    }
+
+    /// Keep the value window and run ASE's search in place of Wolfe.
+    pub(crate) fn with_ase(self, search: ase::AseSearch) -> Self {
+        Self {
+            ase: Some(search),
+            ..self
+        }
+    }
+
+    /// ASE's search, if a session selected it.
+    pub(crate) fn ase(self) -> Option<ase::AseSearch> {
+        self.ase
     }
 
     /// Relative value window: the configured roundoff, else four epsilon.

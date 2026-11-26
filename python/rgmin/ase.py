@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import math
 import threading
 import time
 import weakref
 from collections import deque
 from collections.abc import Callable, Iterator
 from types import TracebackType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from ase.optimize.optimize import Optimizer as _ASEOptimizer
@@ -31,6 +32,19 @@ import rgmin
 
 _ASE_KEYS = frozenset({"master", "comm", "loginterval", "force_consistent"})
 _HESSIAN_METHODS = frozenset({"newton", "rfo", "dogleg"})
+# ASE 3.29.0 line-search constants. See
+# https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/bfgslinesearch.py
+# and https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/lbfgs.py
+_ASE_WOLFE_C1 = 0.23
+_ASE_WOLFE_C2 = 0.46
+_ASE_BFGS_LINESEARCH_ALPHA = 10.0
+_ASE_BFGS_LINESEARCH_STPMAX = 50.0
+_ASE_LBFGS_ALPHA = 70.0
+_ASE_LBFGS_MEMORY = 100
+_ASE_LBFGS_DAMPING = 1.0
+_ASE_LBFGS_STPMAX = 50.0
+_ASE_LBFGS_MAXSTEP_LIMIT = 1.0
+_ASE_LINESEARCH_RESTART = "rgmin-ase-linesearch-1"
 # Serialises _calc_locks and _id_locks. Finalizers must not block on
 # this lock: a collection can run while the creating thread already
 # holds it. They queue a release instead. The calculator lock is
@@ -315,6 +329,9 @@ class Optimizer(_ASEOptimizer):
 
     defaults = {"maxstep": 0.2}
 
+    def _restart_supported(self) -> bool:
+        return False
+
     def __init__(
         self,
         atoms: Any,
@@ -328,7 +345,7 @@ class Optimizer(_ASEOptimizer):
         hessian: Callable[..., Any] | None = None,
         **options: Any,
     ) -> None:
-        if restart is not None:
+        if restart is not None and not self._restart_supported():
             raise NotImplementedError(f"{type(self).__name__}.read is not implemented")
         self._rgmin_method = method
         self._rgmin_accept = accept
@@ -1249,10 +1266,380 @@ class FrPr(Optimizer):
         )
 
 
+def _positive(name: str, value: float) -> float:
+    number = float(value)
+    if not math.isfinite(number) or number <= 0.0:
+        raise ValueError(f"{name} must be finite and > 0")
+    return number
+
+
+def _restart_error(message: str) -> Exception:
+    from ase.optimize.optimize import RestartError
+
+    return RestartError(message)
+
+
+class _AseWolfe(Optimizer):
+    """Session on ASE's line search that replays its own evaluation log.
+
+    A step whose line search fails raises ``RuntimeError("LineSearch
+    failed!")`` as ASE does, and the atoms stay where the step started.
+    ``restart`` writes the coordinates, value, and gradient of every
+    trial. A later constructor with the same file feeds that log back
+    into a fresh session and leaves the atoms at the last accepted
+    point. The file is not ASE's Hessian JSON.
+    """
+
+    if TYPE_CHECKING:
+        # ASE's Optimizer.load has no annotations. The method itself is inherited.
+        def load(self) -> object: ...
+
+    def _restart_supported(self) -> bool:
+        return True
+
+    def _prepare_wolfe(self) -> None:
+        self._history: list[dict[str, Any]] = []
+        self._step_evals: list[list[Any]] = []
+        self._replay_iter: Any = None
+        self.force_calls = 0
+        self.function_calls = 0
+        # Point the session last stored. The next step reuses that value.
+        self._cached_x: np.ndarray | None = None
+        self._step_start = np.zeros(0, dtype=np.float64)
+        self._opening_cached = False
+        self._opening_open = False
+
+    def _flat_point(self, x: np.ndarray) -> np.ndarray:
+        return np.array(np.asarray(x, dtype=np.float64).reshape(-1), dtype=np.float64, copy=True)
+
+    def _same_point(self, left: np.ndarray, right: np.ndarray) -> bool:
+        if left.shape != right.shape:
+            return False
+        scale = np.maximum(np.abs(left), np.abs(right))
+        return bool(np.all(np.abs(left - right) <= 4.0 * np.finfo(np.float64).eps * scale + 1e-15))
+
+    def _begin_step_counts(self, start: np.ndarray) -> None:
+        self._step_start = self._flat_point(start)
+        self._opening_cached = self._cached_x is not None and self._same_point(
+            self._step_start, self._cached_x
+        )
+        # A fresh point is evaluated once up front. ASE counts that call as
+        # ``func`` and does not count it as ``fprime``.
+        self._opening_open = not self._opening_cached
+
+    def _tally_evaluation(self, x: np.ndarray) -> None:
+        point = self._flat_point(x)
+        if self._opening_open and self._same_point(point, self._step_start):
+            self._opening_open = False
+            self.function_calls += 1
+            return
+        self.function_calls += 1
+        self.force_calls += 1
+
+    def _finish_step_counts(self) -> None:
+        # ASE calls ``func`` at the start of every step. A cached value is
+        # not requested again, so that call is counted here.
+        if self._opening_cached or self._opening_open:
+            self.function_calls += 1
+        self._opening_open = False
+
+    def _store_cached_point(self, point: np.ndarray, stop: Any, evaluations: int) -> None:
+        flat = self._flat_point(point)
+        # A gradient stop before the search does not store the point.
+        held = stop in (rgmin.Stop.TOLERANCE, rgmin.Stop.NOISE_FLOOR)
+        if held and self._same_point(flat, self._step_start) and evaluations <= 1:
+            return
+        self._cached_x = flat.copy()
+
+    def _evaluate(self, x: np.ndarray) -> tuple[float, np.ndarray]:
+        if self._replay_iter is not None:
+            try:
+                point, value, gradient = next(self._replay_iter)
+            except StopIteration:
+                raise _restart_error(
+                    f"{self.restart} asks for more evaluations than were recorded"
+                ) from None
+            asked = np.asarray(x, dtype=np.float64).reshape(-1)
+            recorded = np.asarray(point, dtype=np.float64).reshape(-1)
+            if asked.shape != recorded.shape or not np.array_equal(asked, recorded):
+                raise _restart_error(f"{self.restart} does not replay under these parameters")
+            self._tally_evaluation(asked)
+            return float(value), np.asarray(gradient, dtype=np.float64).reshape(-1)
+        value, gradient = super()._evaluate(x)
+        self._tally_evaluation(x)
+        self._step_evals.append(
+            [
+                np.asarray(x, dtype=np.float64).reshape(-1).tolist(),
+                float(value),
+                np.asarray(gradient, dtype=np.float64).reshape(-1).tolist(),
+            ]
+        )
+        return value, gradient
+
+    def step(self) -> None:
+        start = _Geometry(self.optimizable).positions().copy()
+        self._step_evals = []
+        self._begin_step_counts(start)
+        super().step()
+        self._finish_step_counts()
+        end = _Geometry(self.optimizable).positions()
+        self._store_cached_point(end, self.stop, len(self._step_evals))
+        if self.stop == rgmin.Stop.LINE_SEARCH:
+            raise RuntimeError("LineSearch failed!")
+        if self._replay_iter is not None:
+            return
+        self._history.append({"x": start.tolist(), "evals": self._step_evals})
+        self.dump(
+            {
+                "format": _ASE_LINESEARCH_RESTART,
+                "optimizer": type(self).__name__,
+                "steps": self._history,
+            }
+        )
+
+    def read(self) -> None:
+        data = self.load()
+        if not isinstance(data, dict) or data.get("format") != _ASE_LINESEARCH_RESTART:
+            raise _restart_error(
+                f"{self.restart} is not an rgmin line-search restart file. "
+                "These classes replay their own evaluation log, not ASE's arrays."
+            )
+        if data.get("optimizer") != type(self).__name__:
+            raise _restart_error(
+                f"{self.restart} was written by {data.get('optimizer')}, not {type(self).__name__}"
+            )
+        steps = data.get("steps", [])
+        if not isinstance(steps, list):
+            raise _restart_error(f"{self.restart} has no evaluation log")
+        self.initialize()
+        self._cached_x = None
+        self.force_calls = 0
+        self.function_calls = 0
+        final: np.ndarray | None = None
+        assert self._solver is not None
+        for entry in steps:
+            if not isinstance(entry, dict) or "x" not in entry or "evals" not in entry:
+                raise _restart_error(f"{self.restart} has a truncated evaluation log")
+            evals = entry["evals"]
+            if not isinstance(evals, list):
+                raise _restart_error(f"{self.restart} has a truncated evaluation log")
+            self._replay_iter = iter(evals)
+            point = np.array(entry["x"], dtype=np.float64)
+            self._begin_step_counts(point)
+            report = self._solver.step(self._evaluate, point)
+            self._finish_step_counts()
+            if next(self._replay_iter, None) is not None:
+                self._replay_iter = None
+                raise _restart_error(f"{self.restart} recorded more evaluations than it replays")
+            self._store_cached_point(point, report.stop, len(evals))
+            final = point
+        self._replay_iter = None
+        if final is not None:
+            _Geometry(self.optimizable).write(final)
+        self._history = list(steps)
+
+    def dump(self, data: object) -> None:
+        # Optimizer.dump refuses the file. ASE's dump writes it and has no annotations.
+        write = cast(Callable[[_AseWolfe, object], None], _ASEOptimizer.dump)
+        write(self, data)
+
+
+class BFGSLineSearch(_AseWolfe):
+    """ASE ``BFGSLineSearch`` on the rgmin BFGS session.
+
+    The constructor matches ASE 3.29.0, including the positional order
+    ``maxstep`` then ``trajectory``. ``alpha`` is the initial inverse
+    Hessian scale ``1/alpha`` (ASE scales the objective by ``1/alpha``
+    and starts from ``I``). The session runs ASE's own line search,
+    ``ase.utils.linesearch.LineSearch``, with ``c1``, ``c2``, and
+    ``stpmax``. It opens at the full quasi-Newton step, and ``maxstep``
+    limits how far an atom moves from one trial to the next, so one
+    step can move an atom further than ``maxstep``. A ``stpmax`` below 1
+    fails every step with ``RuntimeError``, as in ASE. ``damping`` is
+    not a parameter of this class.
+
+    https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/bfgslinesearch.py
+    https://gitlab.com/ase/ase/-/blob/3.29.0/ase/utils/linesearch.py
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: str | None = None,
+        logfile: Any = "-",
+        maxstep: float | None = None,
+        trajectory: Any = None,
+        c1: float = _ASE_WOLFE_C1,
+        c2: float = _ASE_WOLFE_C2,
+        alpha: float = _ASE_BFGS_LINESEARCH_ALPHA,
+        stpmax: float = _ASE_BFGS_LINESEARCH_STPMAX,
+        **kwargs: Any,
+    ) -> None:
+        self._prepare_wolfe()
+        append_trajectory = bool(kwargs.pop("append_trajectory", False))
+        accept = kwargs.pop("accept", None)
+        if maxstep is None:
+            maxstep = float(self.defaults["maxstep"])
+        scale = _positive("alpha", alpha)
+        bound = float(stpmax)
+        self.c1 = float(c1)
+        self.c2 = float(c2)
+        self.alpha = scale
+        self.stpmax = bound
+        options = dict(kwargs)
+        options["linesearch"] = "ase"
+        options["c1"] = self.c1
+        options["c2"] = self.c2
+        options["h0"] = 1.0 / scale
+        options["stpmax"] = bound
+        Optimizer.__init__(
+            self,
+            atoms,
+            restart=restart,
+            logfile=logfile,
+            trajectory=trajectory,
+            append_trajectory=append_trajectory,
+            method="bfgs",
+            maxstep=float(maxstep),
+            accept=accept,
+            **options,
+        )
+
+    def log(self, *args: Any, **kwargs: Any) -> None:
+        """ASE's BFGSLineSearch line, including the force-call column."""
+        if self.logfile is None:
+            return
+        gradient = args[0] if args else kwargs.get("gradient")
+        forces = kwargs.get("forces")
+        if gradient is None and forces is None and not args:
+            gradient = _Geometry(self.optimizable).gradient()
+        fmax = self._log_fmax(gradient, forces)
+        energy = _Geometry(self.optimizable).value()
+        now = time.localtime()
+        name = type(self).__name__
+        write = cast(Any, self.logfile).write
+        if self.nsteps == 0:
+            write(
+                "%s  %4s[%3s] %8s %15s  %12s\n"
+                % (" " * len(name), "Step", "FC", "Time", "Energy", "fmax")
+            )
+        write(
+            "%s:  %3d[%3d] %02d:%02d:%02d %15.6f %12.4f\n"
+            % (name, self.nsteps, self.force_calls, now.tm_hour, now.tm_min, now.tm_sec, energy, fmax)
+        )
+        cast(Any, self.logfile).flush()
+
+
+# ASE exports this name as the BFGS line-search class.
+# https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/__init__.py
+QuasiNewton = BFGSLineSearch
+
+
+def _bind_lbfgs_linesearch(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
+    names: tuple[str, ...] = (
+        "atoms",
+        "restart",
+        "logfile",
+        "trajectory",
+        "maxstep",
+        "memory",
+        "damping",
+        "alpha",
+        "use_line_search",
+    )
+    if len(args) > len(names):
+        raise TypeError(
+            "LBFGS.__init__() takes from 2 to 10 positional arguments but "
+            f"{len(args) + 1} were given"
+        )
+    # The keyword is set before the positional arguments are bound, as
+    # ``LBFGSLineSearch`` does. A positional ``use_line_search`` collides.
+    supplied = dict(kwargs)
+    supplied["use_line_search"] = True
+    bound: dict[str, Any] = {}
+    for name, value in zip(names, args, strict=False):
+        if name in supplied:
+            raise TypeError(f"LBFGS.__init__() got multiple values for argument '{name}'")
+        bound[name] = value
+    bound.update(supplied)
+    if "atoms" not in bound:
+        raise TypeError("LBFGS.__init__() missing 1 required positional argument: 'atoms'")
+    return bound
+
+
+class LBFGSLineSearch(_AseWolfe, LBFGS):
+    """ASE ``LBFGSLineSearch`` on the rgmin L-BFGS Wolfe session.
+
+    The constructor is ``LBFGSLineSearch(*args, **kwargs)`` and forces
+    ``use_line_search=True``, including when the keyword was false.
+    A positional ``use_line_search`` raises ``TypeError``, as ASE's
+    ``LBFGSLineSearch`` does when it passes that keyword to ``LBFGS``.
+    ``memory`` defaults to 100,
+    ``alpha`` to 70, and ``damping`` to 1. ``damping`` is stored and,
+    as in ASE, does not scale a line-search step. ``maxstep`` above 1
+    angstrom raises ``ValueError``. The inverse Hessian starts at
+    ``I/alpha`` and stays there. The session runs ASE's own line
+    search with ASE's ``c1=0.23``, ``c2=0.46``, and ``stpmax=50``. As in
+    ASE, ``maxstep`` limits each increment between trials, not the step.
+
+    https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/lbfgs.py
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._prepare_wolfe()
+        bound = _bind_lbfgs_linesearch(args, kwargs)
+        atoms = bound.pop("atoms")
+        restart = bound.pop("restart", None)
+        logfile = bound.pop("logfile", "-")
+        trajectory = bound.pop("trajectory", None)
+        maxstep = bound.pop("maxstep", None)
+        memory = bound.pop("memory", _ASE_LBFGS_MEMORY)
+        damping = bound.pop("damping", _ASE_LBFGS_DAMPING)
+        alpha = bound.pop("alpha", _ASE_LBFGS_ALPHA)
+        bound.pop("use_line_search")
+        append_trajectory = bool(bound.pop("append_trajectory", False))
+        accept = bound.pop("accept", None)
+        if maxstep is None:
+            maxstep = float(self.defaults["maxstep"])
+        else:
+            maxstep = float(maxstep)
+        if maxstep > _ASE_LBFGS_MAXSTEP_LIMIT:
+            raise ValueError(
+                "You are using a much too large value for the "
+                "maximum step size: %.1f Angstrom" % maxstep
+            )
+        scale = _positive("alpha", alpha)
+        self.memory = memory
+        self.damping = float(damping)
+        self.alpha = scale
+        self.use_line_search = True
+        self.stpmax = _ASE_LBFGS_STPMAX
+        options = dict(bound)
+        options["linesearch"] = "ase"
+        options["c1"] = _ASE_WOLFE_C1
+        options["c2"] = _ASE_WOLFE_C2
+        options["h0"] = 1.0 / scale
+        options["stpmax"] = _ASE_LBFGS_STPMAX
+        options["memory"] = self.memory
+        Optimizer.__init__(
+            self,
+            atoms,
+            restart=restart,
+            logfile=logfile,
+            trajectory=trajectory,
+            append_trajectory=append_trajectory,
+            method="lbfgs",
+            maxstep=maxstep,
+            accept=accept,
+            **options,
+        )
+
+
 __all__ = [
     "Adam",
     "BB",
     "BFGS",
+    "BFGSLineSearch",
     "CG",
     "ConjugateDescent",
     "DIIS",
@@ -1265,10 +1652,12 @@ __all__ = [
     "HagerZhang",
     "HestenesStiefel",
     "LBFGS",
+    "LBFGSLineSearch",
     "LiuStorey",
     "Newton",
     "Optimizer",
     "PSO",
+    "QuasiNewton",
     "QuickMin",
     "RFO",
     "SD",

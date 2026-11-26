@@ -104,7 +104,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 68;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 69;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 7;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -3108,6 +3108,46 @@ pub unsafe extern "C" fn rgmin_solver_set_lbfgs_wolfe(solver: *mut rgmin_solver_
         return 1;
     }
     flag(unsafe { (*solver).solver.set_lbfgs_step(crate::LbfgsStep::Wolfe) })
+}
+
+/// Initial inverse-Hessian scale on a BFGS or L-BFGS session.
+/// See [`crate::Solver::set_fixed_h0`]. Returns 0, or 1 on a null
+/// session, a non-positive or non-finite scale, or another method.
+/// ABI minor 69. Unset, the session keeps its previous scale.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_fixed_h0(solver: *mut rgmin_solver_t, h0: f64) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_fixed_h0: null solver");
+        return 1;
+    }
+    flag(unsafe { (*solver).solver.set_fixed_h0(h0) })
+}
+
+/// ASE 3.29's line search with step-multiplier bound `stpmax` on a
+/// BFGS or L-BFGS session. See [`crate::Solver::set_ase_linesearch`].
+/// On L-BFGS this opts into the plain Wolfe step and turns the geometry
+/// step off, so a default L-BFGS session can step. A non-positive
+/// finite per-atom cap is ASE's `maxstep` and scales each increment,
+/// including to zero. Returns 0, or 1 on a null session, a NaN
+/// `stpmax`, or another method, leaving the session as it was. A
+/// `stpmax` below 1 is accepted and fails each search, as in ASE. ABI
+/// minor 69.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_ase_linesearch(
+    solver: *mut rgmin_solver_t,
+    stpmax: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_ase_linesearch: null solver");
+        return 1;
+    }
+    flag(unsafe { (*solver).solver.set_ase_linesearch(stpmax) })
 }
 
 /// Burdakov ray-truncation radius for session L-BFGS. A non-positive,
