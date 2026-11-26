@@ -70,9 +70,16 @@ LAMMPS keywords the plugin reads
     | ``abcfire`` | ``no``  | ``rgmin_solver_set_fire_abc`` on a ``fire2`` session                                                      |
     +-------------+---------+-----------------------------------------------------------------------------------------------------------+
 
-``method fire2`` selects ``RGMIN_FIRE_PRESET_GUENOLE2020``, the parameter set of the LAMMPS ``min_style fire`` defaults.
-``delaystep``, ``dtgrow``, ``dtshrink``, ``alpha0``, ``alphashrink``, ``tmax``, ``tmin``, ``integrator``, ``halfstepback``, ``initialdelay`` and ``vdfmax`` must keep those defaults, and ``line`` must stay ``quadratic``.
-The ``minimize`` command checks them and stops with an error otherwise.
+For ``method fire`` and ``method fire2``, the plugin maps the FIRE keywords
+``delaystep`` → ``n_min``, ``dtgrow`` → ``f_inc``, ``dtshrink`` → ``f_dec``,
+``alpha0`` → ``alpha``, ``alphashrink`` → ``f_alpha`` and
+``tmax`` → ``dt_max = tmax * dt`` through ``rgmin_solver_set_fire_config``.
+For ``method fire2``, the session starts from ``RGMIN_FIRE_PRESET_GUENOLE2020``
+before that override.
+
+``integrator`` values other than ``eulerimplicit``, and the keywords ``tmin``,
+``halfstepback``, ``initialdelay`` and ``vdfmax``, are rejected with one-keyword
+errors on ``min_style rgmin``.
 
 Stopping rules
 ~~~~~~~~~~~~~~
@@ -100,30 +107,38 @@ Errors
 
 .. table::
 
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
-    | message contains                                                                    | cause                                                |
-    +=====================================================================================+======================================================+
-    | ``Unknown min_modify keyword X for min_style rgmin``                                | a keyword that neither LAMMPS nor the plugin defines |
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
-    | ``Unknown rgmin method X``                                                          | a name ``rgmin_method_from_name`` refuses            |
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
-    | ``stores a dense 3N x 3N matrix``                                                   | ``bfgs``, ``sr1`` or ``sr2``                         |
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
-    | ``needs a dense Hessian``                                                           | ``newton``, ``rfo`` or ``dogleg``                    |
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
-    | ``is not available with min_style rgmin``                                           | any other rgmin method                               |
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
-    | ``does not support fixes that add global degrees of freedom such as fix box/relax`` | ``fix box/relax`` or another fix with ``min_dof``    |
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
-    | ``does not support pair styles that add per-atom degrees of freedom``               | for example ``pair_style eff/cut``                   |
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
-    | ``requires consecutive atom IDs 1 to N``                                            | gaps in the atom IDs                                 |
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
-    | ``does not take min_modify line``                                                   | ``min_modify line`` other than ``quadratic``         |
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
-    | ``keeps the Guenole 2020 FIRE parameters``                                          | a LAMMPS FIRE keyword changed from its default       |
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
-    | ``replicated rgmin sessions diverged across ranks``                                 | ranks that reached different step energies           |
-    +-------------------------------------------------------------------------------------+------------------------------------------------------+
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | message contains                                                                    | cause                                                    |
+    +=====================================================================================+==========================================================+
+    | ``Unknown min_modify keyword X for min_style rgmin``                                | a keyword that neither LAMMPS nor the plugin defines     |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``Unknown rgmin method X``                                                          | a name ``rgmin_method_from_name`` refuses                |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``stores a dense 3N x 3N matrix``                                                   | ``bfgs``, ``sr1`` or ``sr2``                             |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``needs a dense Hessian``                                                           | ``newton``, ``rfo`` or ``dogleg``                        |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``is not available with min_style rgmin``                                           | any other rgmin method                                   |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``does not support fixes that add global degrees of freedom such as fix box/relax`` | ``fix box/relax`` or another fix with ``min_dof``        |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``does not support pair styles that add per-atom degrees of freedom``               | for example ``pair_style eff/cut``                       |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``requires consecutive atom IDs 1 to N``                                            | gaps in the atom IDs                                     |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``does not take min_modify line``                                                   | ``min_modify line`` other than ``quadratic``             |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``min_modify tmin is unsupported``                                                  | ``tmin`` was set to a non-default value                  |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``min_modify halfstepback is unsupported``                                          | ``halfstepback no`` was requested                        |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``min_modify initialdelay is unsupported``                                          | ``initialdelay no`` was requested                        |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``min_modify vdfmax is unsupported``                                                | ``vdfmax`` was set to a non-default value                |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``min_modify integrator is unsupported``                                            | an integrator other than ``eulerimplicit`` was requested |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
+    | ``replicated rgmin sessions diverged across ranks``                                 | ranks that reached different step energies               |
+    +-------------------------------------------------------------------------------------+----------------------------------------------------------+
 
 Keywords with a bad value (``memory 0``, ``linesearch armijo``, ``accept maybe``) and settings that need another method (``trust`` or ``linesearch wolfe`` without ``lbfgs``, ``abcfire yes`` without ``fire2``) also stop with an error that names them.

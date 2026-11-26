@@ -140,7 +140,10 @@ Differences
 
 - rgmin's FIRE integrators use unit masses and a step scale ``istep`` (default 0.1), not the atom masses and the LAMMPS ``timestep`` of ``min_style fire``.
   ``min_modify abcfire yes`` selects ABC-FIRE on ``fire2``.
-  The other LAMMPS FIRE keywords must stay at their defaults, which are the FIRE 2.0 parameters the plugin uses; a changed value is an error.
+  The plugin maps ``delaystep``, ``dtgrow``, ``dtshrink``, ``alpha0``, ``alphashrink``
+  and ``tmax`` to rgmin's FIRE parameters.
+  ``integrator`` values other than ``eulerimplicit``, and ``tmin``, ``halfstepback``,
+  ``initialdelay`` and ``vdfmax``, are still rejected.
 
 - ``min_modify line`` belongs to the LAMMPS line-search styles and is an error with ``min_style rgmin``.
 
