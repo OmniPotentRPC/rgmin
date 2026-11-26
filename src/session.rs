@@ -282,8 +282,8 @@ pub struct Solver {
     line_options: LineSearchOptions,
     /// Inverse-Hessian scale for a fresh BFGS matrix. `None` keeps `I`.
     bfgs_h0: Option<f64>,
-    /// Line-search step-multiplier bound. `None` keeps the displacement cap.
-    line_alpha_max: Option<f64>,
+    /// ASE's line search in place of Wolfe. `None` keeps rgmin's search.
+    ase_search: Option<crate::linesearch::ase::AseSearch>,
     istep: f64,
     steps: usize,
     qn_step: QnStep,
@@ -584,7 +584,7 @@ impl Solver {
             linesearch,
             line_options,
             bfgs_h0: None,
-            line_alpha_max: None,
+            ase_search: None,
             istep,
             steps: 0,
             qn_step: QnStep::TwoLoop,
@@ -1010,19 +1010,76 @@ impl Solver {
         }
     }
 
-    /// Bound the line-search step multiplier.
+    /// Run the line search of ASE 3.29 on this BFGS or L-BFGS session.
     ///
-    /// A positive finite value is applied only when it is tighter than
-    /// the displacement cap the search already had. A non-positive
-    /// finite value clears the bound, which is the default. A non-finite
-    /// value is an error and leaves the session unchanged.
-    pub fn set_line_alpha_max(&mut self, limit: f64) -> Result<()> {
-        if !limit.is_finite() {
+    /// The search is `ase.utils.linesearch.LineSearch` as ASE's
+    /// `BFGSLineSearch` and `LBFGSLineSearch` call it: it opens at the
+    /// unit step, the per-atom cap limits each increment from the
+    /// previous trial rather than the whole step, trials stay in
+    /// `[1e-8, stpmax]`, and it ends only on ASE's strong-Wolfe test or
+    /// one of its warnings. An opening step above `stpmax`, a spent
+    /// evaluation budget or a non-finite trial fails the search; there
+    /// is no fallback point. `c1`, `c2` and the budget are those of the
+    /// session's [`LineSearch::Wolfe`]. A step under this search refuses
+    /// another line-search kind, the step-acceptance rule, a manifold,
+    /// constraints, an overlay, a Euclidean `maxmove`, and on L-BFGS any
+    /// step but [`LbfgsStep::Wolfe`]. `stpmax` must not be NaN; any other
+    /// value is ASE's, including one below 1 that fails every search.
+    /// Other methods return an error. Without this call the session
+    /// keeps rgmin's own search.
+    pub fn set_ase_linesearch(&mut self, stpmax: f64) -> Result<()> {
+        if stpmax.is_nan() {
             return Err(Error::InvalidControl {
-                what: "line alpha max must be finite",
+                what: "ASE stpmax must not be NaN",
             });
         }
-        self.line_alpha_max = (limit > 0.0).then_some(limit);
+        if !matches!(self.inner, Inner::Bfgs { .. } | Inner::Lbfgs(_)) {
+            return Err(Error::InvalidControl {
+                what: "the ASE line search requires a BFGS or L-BFGS session",
+            });
+        }
+        self.ase_search = Some(crate::linesearch::ase::AseSearch { stpmax });
+        Ok(())
+    }
+
+    /// Refuse a step on which ASE's line search would not run.
+    fn check_ase_search(&self) -> Result<()> {
+        if self.ase_search.is_none() {
+            return Ok(());
+        }
+        let refuse = |what| Err(Error::InvalidControl { what });
+        if !matches!(self.linesearch, LineSearch::Wolfe { .. }) {
+            return refuse("the ASE line search takes c1, c2 and its budget from a Wolfe search");
+        }
+        #[cfg(feature = "highs")]
+        let equalities = !self.equalities.is_empty();
+        #[cfg(not(feature = "highs"))]
+        let equalities = false;
+        if self.accept == Accept::Step
+            || self.manifold != ManifoldKind::Euclidean
+            || self.level_set.is_some()
+            || self.constraints.is_some()
+            || equalities
+            || !matches!(self.overlay, Overlay::None)
+            || self.has_coordinate_box()
+        {
+            return refuse(
+                "the ASE line search runs only on an unconstrained Euclidean session \
+                 with energy acceptance",
+            );
+        }
+        if self.control.maxmove_cap().is_some() {
+            return refuse(
+                "the ASE line search limits increments by the per-atom cap, not maxmove",
+            );
+        }
+        if matches!(self.inner, Inner::Lbfgs(_))
+            && (!matches!(self.lbfgs_step(), LbfgsStep::Wolfe)
+                || self.geometry_step == Some(true)
+                || self.use_lbfgs_burdakov())
+        {
+            return refuse("the ASE line search on L-BFGS requires the plain Wolfe step");
+        }
         Ok(())
     }
 
@@ -2730,8 +2787,8 @@ impl Solver {
     /// window it replaces does.
     fn search_options(&self) -> LineSearchOptions {
         if self.manifold == ManifoldKind::Euclidean {
-            match self.line_alpha_max {
-                Some(limit) => self.line_options.with_alpha_max(limit),
+            match self.ase_search {
+                Some(search) => self.line_options.with_ase(search),
                 None => self.line_options,
             }
         } else {
@@ -2952,6 +3009,7 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        self.check_ase_search()?;
         // Riemannian CG retracts through the bond set itself. The
         // constraint stepper's match does not know that overlay.
         if self.constraints.is_some() && !matches!(self.overlay, Overlay::Rcg(_)) {
@@ -3808,7 +3866,8 @@ impl Solver {
             && self.geometry_step.is_none()
             && self.atom_maxmove_set
             && self.atom_maxmove.is_some()
-            && self.accept != Accept::Step;
+            && self.accept != Accept::Step
+            && self.ase_search.is_none();
         if self.geometry_step != Some(true) && !wolfe_cap {
             return false;
         }
