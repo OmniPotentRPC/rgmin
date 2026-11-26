@@ -3,8 +3,9 @@
 //! ASE `ase.optimize.mdmin.MDMin` (3.29) integrates `F = -∇E`. The first
 //! call starts from a zero velocity and takes only the second half-kick.
 //! Later calls half-kick, replace the velocity by its projection onto `F`
-//! when that projection is uphill, half-kick again, and advance
-//! `Δx = dt v`. A per-atom displacement longer than `maxstep` is scaled
+//! when that projection is downhill, clear it when the projection is uphill,
+//! half-kick again, and advance `Δx = dt v`. A per-atom displacement longer
+//! than `maxstep` is scaled
 //! by `maxstep / (offset + longest)` and clipped into `[0, 1]`. The
 //! velocity is left at the value that produced `Δx`, including when the
 //! displacement was scaled.
