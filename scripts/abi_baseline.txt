@@ -132,6 +132,7 @@ rgmin_solver_set_fire_abc
 rgmin_solver_set_fire_cap_two_step_overshoot
 rgmin_solver_set_fire_preset
 rgmin_solver_set_fire_variant
+rgmin_solver_set_fixed_h0
 rgmin_solver_set_gromacs_cg
 rgmin_solver_set_gromacs_lbfgs
 rgmin_solver_set_gromacs_steep
@@ -148,6 +149,7 @@ rgmin_solver_set_lbfgs_scaled
 rgmin_solver_set_lbfgs_trust
 rgmin_solver_set_lbfgs_wolfe
 rgmin_solver_set_level_set
+rgmin_solver_set_line_alpha_max
 rgmin_solver_set_linesearch
 rgmin_solver_set_manifold
 rgmin_solver_set_masses

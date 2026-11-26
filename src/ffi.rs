@@ -3110,6 +3110,42 @@ pub unsafe extern "C" fn rgmin_solver_set_lbfgs_wolfe(solver: *mut rgmin_solver_
     flag(unsafe { (*solver).solver.set_lbfgs_step(crate::LbfgsStep::Wolfe) })
 }
 
+/// Initial inverse-Hessian scale on a BFGS or L-BFGS session.
+/// See [`crate::Solver::set_fixed_h0`]. Returns 0, or 1 on a null
+/// session, a non-positive or non-finite scale, or another method.
+/// ABI minor 53. Unset, the session keeps its previous scale.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_fixed_h0(solver: *mut rgmin_solver_t, h0: f64) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_fixed_h0: null solver");
+        return 1;
+    }
+    flag(unsafe { (*solver).solver.set_fixed_h0(h0) })
+}
+
+/// Line-search step-multiplier bound.
+/// See [`crate::Solver::set_line_alpha_max`]. A positive finite value
+/// is the tighter of this bound and the displacement cap. A
+/// non-positive finite value clears it. A non-finite value returns 1
+/// and leaves the session unchanged. ABI minor 53.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_line_alpha_max(
+    solver: *mut rgmin_solver_t,
+    limit: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_line_alpha_max: null solver");
+        return 1;
+    }
+    flag(unsafe { (*solver).solver.set_line_alpha_max(limit) })
+}
+
 /// Burdakov ray-truncation radius for session L-BFGS. A non-positive,
 /// NaN or infinite radius turns it off and still returns 0. This is
 /// not [`crate::Solver::set_lbfgs_trust`]. ABI minor 45.

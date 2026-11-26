@@ -64,6 +64,8 @@ FIRE(atoms, logfile=None).run(fmax=0.05)
 
 Newton, RFO, and dogleg need =hessian(x)=, a callable that returns the =(n, n)= matrix. A band or a min-mode run accepts the step rather than the energy. Pass =accept== to choose the rule yourself.
 
-=restart= is refused. =read= and =dump= raise =NotImplementedError=.
+=h0= and =stpmax= are opt-in. =h0= scales the initial inverse Hessian of =bfgs= and =lbfgs=. =stpmax= bounds a line-search multiplier where a line search runs. Omitting either leaves the session defaults. A value the method would ignore raises =ValueError=.
+
+=restart= is refused, and =read= and =dump= raise =NotImplementedError=, except =BFGSLineSearch= and =LBFGSLineSearch=, which replay an rgmin evaluation log.
 
 C and C++ use ~include/rgmin.h~ and ~include/rgmin/optimize.hpp~. @@rst::doc:`c-abi`@@ has the short C programs: a session handle, and one ~rgmin_minimize~ call.
