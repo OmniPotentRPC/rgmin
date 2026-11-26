@@ -899,6 +899,37 @@ where
     O: StepOracle + ?Sized,
     A: StepAction,
 {
+    newton_cg_step_with(
+        obj,
+        x,
+        value,
+        grad,
+        fd_grad,
+        req,
+        action,
+        None::<&IdentityPrecond>,
+    )
+}
+
+/// [`newton_cg_step`] with an optional caller preconditioner. `Some`
+/// runs the inner CG under it and takes precedence over
+/// `req.precondition`; `None` is [`newton_cg_step`] exactly.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn newton_cg_step_with<O, A, P>(
+    obj: &O,
+    x: &Array1<f64>,
+    value: f64,
+    grad: &Array1<f64>,
+    fd_grad: &Array1<f64>,
+    req: &NewtonCgRequest,
+    action: &A,
+    caller_precond: Option<&P>,
+) -> Result<NewtonCgTaken>
+where
+    O: StepOracle + ?Sized,
+    A: StepAction,
+    P: Preconditioner + ?Sized,
+{
     let hvps = AtomicUsize::new(0);
     let adapter = SessionAction {
         obj,
@@ -906,7 +937,7 @@ where
         hvps: &hvps,
         action,
         tangent: req.manifold.as_ref().map(|kind| (kind, x)),
-        whole_model: req.precondition,
+        whole_model: req.precondition || caller_precond.is_some(),
     };
     let n = x.len();
     let gnorm = nrm2(grad.view());
@@ -914,7 +945,9 @@ where
     let radius = req.radius;
     let rmax = req.rmax.max(radius);
     let product = |xv: ArrayView1<f64>, v: ArrayView1<f64>| adapter.product(xv, v);
-    let (p_cg, mut pred) = if req.precondition {
+    let (p_cg, mut pred) = if let Some(pre) = caller_precond {
+        steihaug_pcg_with(&product, x.view(), grad, radius, rtol, 2 * n, pre)?
+    } else if req.precondition {
         let pre = NystromPrecond::build_with(&product, x.view(), NYSTROM_RANK, req.seed)?;
         steihaug_pcg_with(&product, x.view(), grad, radius, rtol, 2 * n, &pre)?
     } else {
@@ -1040,18 +1073,63 @@ where
     O: HessianVector + ?Sized,
 {
     counted(obj, control, |obj| {
-        newton_cg_counted(obj, init, control, observer)
+        newton_cg_counted(obj, init, control, observer, None::<&IdentityPrecond>)
     })
 }
 
-fn newton_cg_counted<O>(
+/// [`minimize_newton_cg`] with the inner Steihaug-Toint CG running under
+/// the caller's `precond` ([`steihaug_pcg`]). The preconditioner takes
+/// only the residual and stays fixed for the solve, so it must be
+/// symmetric positive definite wherever the solve goes. CG under any such
+/// `P` reaches the same step as plain CG in fewer actions when `P`
+/// approximates the Hessian; with [`IdentityPrecond`] the iterates match
+/// [`minimize_newton_cg`] bit for bit.
+///
+/// Allocations of length `n`: one outer iteration makes 10 (five in the
+/// CG setup, the copy of the CG step, the trial point, its clip, the
+/// displacement and the trial gradient) and one inner CG iteration makes 2, the Hessian action and the preconditioner
+/// application, because [`HessianVector::hessian_vector`] and
+/// [`Preconditioner::solve`] return owned arrays.
+pub fn minimize_newton_cg_precond<O, P>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    precond: &P,
+) -> Result<Report>
+where
+    O: HessianVector + ?Sized,
+    P: Preconditioner + ?Sized,
+{
+    minimize_newton_cg_precond_observed(obj, init, control, precond, None)
+}
+
+/// [`minimize_newton_cg_precond`] with an optional per-iteration observer.
+pub fn minimize_newton_cg_precond_observed<O, P>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    precond: &P,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: HessianVector + ?Sized,
+    P: Preconditioner + ?Sized,
+{
+    counted(obj, control, |obj| {
+        newton_cg_counted(obj, init, control, observer, Some(precond))
+    })
+}
+
+fn newton_cg_counted<O, P>(
     obj: &Counted<'_, O>,
     init: impl Into<Array1<f64>>,
     control: &Control,
     mut observer: Option<&mut dyn IterationObserver>,
+    caller_precond: Option<&P>,
 ) -> Result<Report>
 where
     O: HessianVector + ?Sized,
+    P: Preconditioner + ?Sized,
 {
     let mut pos = init.into();
     if pos.len() != eindir_core::Objective::dim(obj) {
@@ -1092,7 +1170,7 @@ where
         // superlinear (Nocedal-Wright eq 7.3). The shared step also
         // applies `maxmove` as a Euclidean clip; with the radius
         // already inside that ceiling the clip does not move `p`.
-        let taken = newton_cg_step(
+        let taken = newton_cg_step_with(
             obj,
             &pos,
             value,
@@ -1109,6 +1187,7 @@ where
                 manifold: None,
             },
             &action,
+            caller_precond,
         )?;
         radius = taken.radius;
         if taken.collapsed {

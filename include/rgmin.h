@@ -82,7 +82,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 68
+#define RGMIN_ABI_VERSION_MINOR 69
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -115,8 +115,13 @@ typedef struct rgmin_abi_stamp_t {
  * 65 RGMIN_RCG, rgmin_rcg_options_t, rgmin_rcg_options_default and
  *    rgmin_minimize_rcg. rgmin_rcg_options_t is a new struct, so minor
  *    65 left the layout revision at 6.
+ * 66 rgmin_vec_precond_fn, rgmin_minimize_hvp_precond and
+ *    rgmin_minimize_hvp_precond_sized. No struct changes, so the layout
+ *    revision stays 6.
  * 68 observer and observer_user on rgmin_control_t, and
- *    RGMIN_STOP_OBSERVER. Layout revision 7. */
+ *    RGMIN_STOP_OBSERVER. Layout revision 7.
+ * 69 keeps the minor 66 preconditioner entries and the minor 68
+ *    observer fields. Layout revision 7. */
 #define RGMIN_ABI_LAYOUT_REVISION 7
 /* Layout revision 7. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c, require_convergence, observer and
@@ -1574,6 +1579,39 @@ static inline rgmin_status_t rgmin_minimize_hvp_opts(rgmin_eval_fn eval, rgmin_g
     return rgmin_minimize_hvp_opts_sized(eval, grad, hvp, user, x, ctrl,
                                          sizeof(rgmin_control_t), method, error_on_unmet,
                                          backward_polish, out);
+}
+/** Apply the inverse of a preconditioner P to one vector: \a z_out = P^{-1}
+ *  \a r for symmetric positive definite P. Both tensors are rank 1 and
+ *  length n, valid for this call only. A null pointer at
+ *  \ref rgmin_minimize_hvp_precond is the identity and is not called.
+ *  ABI minor 66. */
+typedef rgmin_status_t (*rgmin_vec_precond_fn)(void *user, const DLManagedTensorVersioned *r,
+                                               DLManagedTensorVersioned *z_out);
+/** \ref rgmin_minimize_hvp_precond with \a ctrl_size read as in
+ *  \ref rgmin_minimize_opts_sized. ABI minor 66. */
+rgmin_status_t rgmin_minimize_hvp_precond_sized(
+    rgmin_evalgrad_fn evalgrad, rgmin_hvp_fn hvp, rgmin_vec_precond_fn precond, void *user,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, size_t ctrl_size,
+    int error_on_unmet, int backward_polish, rgmin_report_t *out);
+/**
+ * Trust-region Newton-CG under a caller preconditioner. \a evalgrad writes
+ * the value and gradient, \a hvp writes H(x) v, and \a precond applies P^{-1}
+ * to one residual; NULL is the identity. \a user reaches all three
+ * callbacks. P takes no iterate and stays fixed for the solve. \a ctrl
+ * \c istep seeds the trust radius and \c maxmove caps it. A callback that
+ * returns a non-success status aborts the solve with that status and
+ * leaves \a x and \a out as they were; \ref rgmin_last_error names the
+ * callback. Negative curvature is followed to the trust boundary, not
+ * refused. One outer iteration allocates 10 length-n arrays and one inner CG
+ * iteration 2. ABI minor 66.
+ */
+static inline rgmin_status_t rgmin_minimize_hvp_precond(
+    rgmin_evalgrad_fn evalgrad, rgmin_hvp_fn hvp, rgmin_vec_precond_fn precond, void *user,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, int error_on_unmet,
+    int backward_polish, rgmin_report_t *out) {
+    return rgmin_minimize_hvp_precond_sized(evalgrad, hvp, precond, user, x, ctrl,
+                                            sizeof(rgmin_control_t), error_on_unmet,
+                                            backward_polish, out);
 }
 /** One Steihaug-Toint iteration. Legal on \c RGMIN_NEWTON_CG and
  *  \c RGMIN_NEWTON_PCG. \a hvp is a product, not a matrix. */
