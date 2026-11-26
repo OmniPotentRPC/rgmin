@@ -1303,6 +1303,53 @@ class _AseWolfe(Optimizer):
         self._replay_iter: Any = None
         self.force_calls = 0
         self.function_calls = 0
+        # Point the session last stored. The next step reuses that value.
+        self._cached_x: np.ndarray | None = None
+        self._step_start = np.zeros(0, dtype=np.float64)
+        self._opening_cached = False
+        self._opening_open = False
+
+    def _flat_point(self, x: np.ndarray) -> np.ndarray:
+        return np.array(np.asarray(x, dtype=np.float64).reshape(-1), dtype=np.float64, copy=True)
+
+    def _same_point(self, left: np.ndarray, right: np.ndarray) -> bool:
+        if left.shape != right.shape:
+            return False
+        scale = np.maximum(np.abs(left), np.abs(right))
+        return bool(np.all(np.abs(left - right) <= 4.0 * np.finfo(np.float64).eps * scale + 1e-15))
+
+    def _begin_step_counts(self, start: np.ndarray) -> None:
+        self._step_start = self._flat_point(start)
+        self._opening_cached = self._cached_x is not None and self._same_point(
+            self._step_start, self._cached_x
+        )
+        # A fresh point is evaluated once up front. ASE counts that call as
+        # ``func`` and does not count it as ``fprime``.
+        self._opening_open = not self._opening_cached
+
+    def _tally_evaluation(self, x: np.ndarray) -> None:
+        point = self._flat_point(x)
+        if self._opening_open and self._same_point(point, self._step_start):
+            self._opening_open = False
+            self.function_calls += 1
+            return
+        self.function_calls += 1
+        self.force_calls += 1
+
+    def _finish_step_counts(self) -> None:
+        # ASE calls ``func`` at the start of every step. A cached value is
+        # not requested again, so that call is counted here.
+        if self._opening_cached or self._opening_open:
+            self.function_calls += 1
+        self._opening_open = False
+
+    def _store_cached_point(self, point: np.ndarray, stop: Any, evaluations: int) -> None:
+        flat = self._flat_point(point)
+        # A gradient stop before the search does not store the point.
+        held = stop in (rgmin.Stop.TOLERANCE, rgmin.Stop.NOISE_FLOOR)
+        if held and self._same_point(flat, self._step_start) and evaluations <= 1:
+            return
+        self._cached_x = flat.copy()
 
     def _evaluate(self, x: np.ndarray) -> tuple[float, np.ndarray]:
         if self._replay_iter is not None:
@@ -1316,12 +1363,10 @@ class _AseWolfe(Optimizer):
             recorded = np.asarray(point, dtype=np.float64).reshape(-1)
             if asked.shape != recorded.shape or not np.array_equal(asked, recorded):
                 raise _restart_error(f"{self.restart} does not replay under these parameters")
-            self.force_calls += 1
-            self.function_calls += 1
+            self._tally_evaluation(asked)
             return float(value), np.asarray(gradient, dtype=np.float64).reshape(-1)
         value, gradient = super()._evaluate(x)
-        self.force_calls += 1
-        self.function_calls += 1
+        self._tally_evaluation(x)
         self._step_evals.append(
             [
                 np.asarray(x, dtype=np.float64).reshape(-1).tolist(),
@@ -1334,7 +1379,11 @@ class _AseWolfe(Optimizer):
     def step(self) -> None:
         start = _Geometry(self.optimizable).positions().copy()
         self._step_evals = []
+        self._begin_step_counts(start)
         super().step()
+        self._finish_step_counts()
+        end = _Geometry(self.optimizable).positions()
+        self._store_cached_point(end, self.stop, len(self._step_evals))
         if self.stop == rgmin.Stop.LINE_SEARCH:
             raise RuntimeError("LineSearch failed!")
         if self._replay_iter is not None:
@@ -1363,17 +1412,26 @@ class _AseWolfe(Optimizer):
         if not isinstance(steps, list):
             raise _restart_error(f"{self.restart} has no evaluation log")
         self.initialize()
+        self._cached_x = None
+        self.force_calls = 0
+        self.function_calls = 0
         final: np.ndarray | None = None
         assert self._solver is not None
         for entry in steps:
             if not isinstance(entry, dict) or "x" not in entry or "evals" not in entry:
                 raise _restart_error(f"{self.restart} has a truncated evaluation log")
-            self._replay_iter = iter(entry["evals"])
+            evals = entry["evals"]
+            if not isinstance(evals, list):
+                raise _restart_error(f"{self.restart} has a truncated evaluation log")
+            self._replay_iter = iter(evals)
             point = np.array(entry["x"], dtype=np.float64)
-            self._solver.step(self._evaluate, point)
+            self._begin_step_counts(point)
+            report = self._solver.step(self._evaluate, point)
+            self._finish_step_counts()
             if next(self._replay_iter, None) is not None:
                 self._replay_iter = None
                 raise _restart_error(f"{self.restart} recorded more evaluations than it replays")
+            self._store_cached_point(point, report.stop, len(evals))
             final = point
         self._replay_iter = None
         if final is not None:
@@ -1494,13 +1552,16 @@ def _bind_lbfgs_linesearch(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dic
             "LBFGS.__init__() takes from 2 to 10 positional arguments but "
             f"{len(args) + 1} were given"
         )
+    # The keyword is set before the positional arguments are bound, as
+    # ``LBFGSLineSearch`` does. A positional ``use_line_search`` collides.
+    supplied = dict(kwargs)
+    supplied["use_line_search"] = True
     bound: dict[str, Any] = {}
     for name, value in zip(names, args, strict=False):
-        if name in kwargs:
+        if name in supplied:
             raise TypeError(f"LBFGS.__init__() got multiple values for argument '{name}'")
         bound[name] = value
-    bound.update(kwargs)
-    bound["use_line_search"] = True
+    bound.update(supplied)
     if "atoms" not in bound:
         raise TypeError("LBFGS.__init__() missing 1 required positional argument: 'atoms'")
     return bound
@@ -1511,8 +1572,9 @@ class LBFGSLineSearch(_AseWolfe, LBFGS):
 
     The constructor is ``LBFGSLineSearch(*args, **kwargs)`` and forces
     ``use_line_search=True``, including when the keyword was false.
-    A positional value and the same keyword together raise
-    ``TypeError``, as ASE's ``LBFGS`` does. ``memory`` defaults to 100,
+    A positional ``use_line_search`` raises ``TypeError``, as ASE's
+    ``LBFGSLineSearch`` does when it passes that keyword to ``LBFGS``.
+    ``memory`` defaults to 100,
     ``alpha`` to 70, and ``damping`` to 1. ``damping`` is stored and,
     as in ASE, does not scale a line-search step. ``maxstep`` above 1
     angstrom raises ``ValueError``. The inverse Hessian starts at

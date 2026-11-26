@@ -59,12 +59,17 @@ search successfully on its warnings, including a trial at ``stpmax``, and
 so does rgmin. ``damping`` is stored and, as in ASE, does not scale a
 line-search step.
 
-Three differences remain. The search stops after ``linesearch_maxiter``
+Four differences remain. The search stops after ``linesearch_maxiter``
 trials, 20 by default, where ASE has no limit; running out raises the
-same ``RuntimeError``. The inverse-Hessian update keeps rgmin's curvature
-guards, so ASE's rule for skipping a BFGS update and its unconditional
-L-BFGS pair are not reproduced. A ``maxmove`` is refused, because it would
-cap the step outside ASE's search. ``restart`` replays the rgmin
+same ``RuntimeError``. A ``maxstep`` of zero is a safety stop: ASE scales a
+later zero increment by 0/0 and the search does not finish, while rgmin
+keeps the first trial at the start and stops before the oracle sees a
+non-finite coordinate. The BFGS update skips a pair when ASE does, on
+``no_update``, a nonpositive step length, or a directional derivative
+whose magnitude did not fall, and it still declines a pair with
+nonpositive curvature. ASE's unconditional L-BFGS pair is not
+reproduced. A ``maxmove`` is refused, because it would cap the step
+outside ASE's search. ``restart`` replays the rgmin
 evaluation log; it does not read ASE's Hessian JSON, and
 ``replay_trajectory`` is not ASE's Hessian replay. The BFGS line-search
 log adds ASE's force-call column. The L-BFGS line-search log keeps the
