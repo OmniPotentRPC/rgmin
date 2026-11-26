@@ -1,3 +1,4 @@
+# ABI minor 66 adds rgmin_minimize_hvp_precond and rgmin_minimize_hvp_precond_sized.
 # ABI minor 67 adds rgmin_solver_set_gromacs_lbfgs.
 rgmin_abi_compatible
 rgmin_abi_stamp
@@ -63,6 +64,8 @@ rgmin_minimize_hess_opts_sized
 rgmin_minimize_hvp
 rgmin_minimize_hvp_opts
 rgmin_minimize_hvp_opts_sized
+rgmin_minimize_hvp_precond
+rgmin_minimize_hvp_precond_sized
 rgmin_minimize_opts
 rgmin_minimize_opts_sized
 rgmin_minimize_rcg

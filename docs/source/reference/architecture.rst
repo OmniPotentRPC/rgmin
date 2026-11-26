@@ -128,6 +128,8 @@ Objects
     callback-error fixes without a layout change.
     Minor 65 adds ``RGMIN_RCG``, ``rgmin_rcg_options_t``, ``rgmin_rcg_options_default`` and ``rgmin_minimize_rcg``.
     The new struct leaves every existing struct as it was, so the layout revision stays 6.
+    Minor 66 adds ``rgmin_vec_precond_fn``, ``rgmin_minimize_hvp_precond`` and
+    ``rgmin_minimize_hvp_precond_sized``. No struct changes, so the layout revision stays 6.
     Minor 67 adds ``RGMIN_GROMACS_LBFGS`` and
     ``rgmin_solver_set_gromacs_lbfgs``. ``rgmin_control_t`` is unchanged.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
