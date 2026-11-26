@@ -2760,6 +2760,66 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_abc(solver: *mut rgmin_solver_t, 
     flag(unsafe { (*solver).solver.set_fire_abc(on != 0) })
 }
 
+/// FIRE integrator parameters. Clears the velocity.
+/// Returns 0, or 1 on a null session, a session that is not FIRE, or a
+/// parameter outside the range [`crate::FireConfig`] keeps.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_fire_config(
+    solver: *mut rgmin_solver_t,
+    dt: f64,
+    dt_max: f64,
+    n_min: usize,
+    f_inc: f64,
+    f_dec: f64,
+    alpha: f64,
+    f_alpha: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_fire_config: null solver");
+        return 1;
+    }
+    if !(dt.is_finite() && dt > 0.0 && dt_max.is_finite() && dt_max > 0.0) {
+        set_last_error("rgmin_solver_set_fire_config: dt and dt_max must be finite and positive");
+        return 1;
+    }
+    if !(f_inc.is_finite() && f_inc > 1.0) {
+        set_last_error("rgmin_solver_set_fire_config: f_inc must be finite and greater than 1");
+        return 1;
+    }
+    if !(f_dec.is_finite() && f_dec > 0.0 && f_dec < 1.0) {
+        set_last_error("rgmin_solver_set_fire_config: f_dec must be finite and in (0, 1)");
+        return 1;
+    }
+    if !(alpha.is_finite() && alpha > 0.0) {
+        set_last_error("rgmin_solver_set_fire_config: alpha must be finite and positive");
+        return 1;
+    }
+    if !(f_alpha.is_finite() && f_alpha > 0.0 && f_alpha < 1.0) {
+        set_last_error("rgmin_solver_set_fire_config: f_alpha must be finite and in (0, 1)");
+        return 1;
+    }
+    let config = crate::FireConfig {
+        dt,
+        dt_max,
+        n_min,
+        f_inc,
+        f_dec,
+        alpha,
+        f_alpha,
+        cap_two_step_overshoot: false,
+    };
+    match unsafe { (*solver).solver.set_fire_config(config) } {
+        Ok(()) => 0,
+        Err(error) => {
+            set_last_error(&error.to_string());
+            1
+        }
+    }
+}
+
 /// Opt into capping `dt_max` after one downhill step followed by an uphill one,
 /// on a FIRE 2.0 session. Returns 0, or 1 on a null session or a session
 /// that is not `RGMIN_FIRE2`.
@@ -2828,6 +2888,35 @@ pub unsafe extern "C" fn rgmin_solver_set_lbfgs_scaled(
         },
     };
     flag(unsafe { (*solver).solver.set_lbfgs_step(step) })
+}
+
+/// Fixed initial inverse-Hessian scale, ASE's `H0 = 1/alpha`.
+/// A non-positive or non-finite value clears it.
+/// Returns 0, or 1 on a null session or a session that is not L-BFGS.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_lbfgs_fixed_h0(
+    solver: *mut rgmin_solver_t,
+    h0: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_lbfgs_fixed_h0: null solver");
+        return 1;
+    }
+    let scale = if h0.is_finite() && h0 > 0.0 {
+        Some(h0)
+    } else {
+        None
+    };
+    match unsafe { (*solver).solver.set_lbfgs_fixed_h0(scale) } {
+        Ok(()) => 0,
+        Err(error) => {
+            set_last_error(&error.to_string());
+            1
+        }
+    }
 }
 
 /// Opt into the strong Wolfe line search on an L-BFGS session.
