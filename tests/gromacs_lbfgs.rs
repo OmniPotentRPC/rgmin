@@ -9,8 +9,8 @@ use approx::assert_abs_diff_eq;
 use eindir_core::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::{
-    Control, DistanceConstraints, Error, GROMACS_LBFGS_NCORR_DEFAULT, GromacsLbfgsConfig, Method,
-    Oracle, Report, Solver, Status, StopNorm,
+    Control, DistanceConstraints, Error, GROMACS_LBFGS_NCORR_DEFAULT, GromacsLbfgsConfig,
+    LevelSetConstraint, Method, Oracle, Report, Solver, Status, StopNorm,
 };
 
 fn control(emstep: f64, emtol: f64, nsteps: usize) -> Control {
@@ -122,6 +122,56 @@ fn the_reset_line_step_is_scaled_by_the_current_force_not_the_rejected_trial() {
     assert_eq!(solver.pair_count(), 0);
     assert_eq!(point, array![1.0, 0.0, 0.0]);
     assert_eq!(solver.gromacs_lbfgs_step_size(), Some(1.0));
+}
+
+fn anisotropic_bowl() -> Oracle<impl Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync> {
+    Oracle::unbounded(3, |x: ArrayView1<f64>| {
+        (
+            0.5 * (x[0] * x[0] + 4.0 * x[1] * x[1] + x[2] * x[2]),
+            array![x[0], 4.0 * x[1], x[2]],
+        )
+    })
+}
+
+#[test]
+fn a_level_set_start_retraction_rebuilds_the_direction() {
+    let bowl = anisotropic_bowl();
+    let run = |rebase: bool| {
+        let mut solver = Solver::new(Method::GromacsLbfgs, control(10.0, 0.0, 10), 3);
+        let mut point = array![2.0, 1.0, 0.5];
+        solver.step(&bowl, &mut point).unwrap();
+        assert_eq!(solver.pair_count(), 1);
+        let before = point.clone();
+        solver.set_level_set(LevelSetConstraint::new(0.5)).unwrap();
+        if rebase {
+            solver.rebase();
+        }
+        solver.step(&bowl, &mut point).unwrap();
+        assert_ne!(point, before);
+        (point, solver.gromacs_lbfgs_step_size())
+    };
+    assert_eq!(run(false), run(true));
+}
+
+#[test]
+fn a_level_set_retraction_after_a_step_rebuilds_the_next_direction() {
+    let bowl = anisotropic_bowl();
+    let run = |rebase: bool| {
+        let mut solver = Solver::new(Method::GromacsLbfgs, control(10.0, 0.0, 10), 3);
+        let mut point = array![2.0, 1.0, 0.5];
+        let on_level = bowl.value_and_gradient(point.view()).0;
+        solver
+            .set_level_set(LevelSetConstraint::new(on_level))
+            .unwrap();
+        solver.step(&bowl, &mut point).unwrap();
+        assert_eq!(solver.pair_count(), 1);
+        if rebase {
+            solver.rebase();
+        }
+        solver.step(&bowl, &mut point).unwrap();
+        (point, solver.gromacs_lbfgs_step_size())
+    };
+    assert_eq!(run(false), run(true));
 }
 
 #[cfg(feature = "highs")]
