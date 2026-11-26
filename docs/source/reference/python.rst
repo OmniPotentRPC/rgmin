@@ -203,5 +203,46 @@ Polak-Ribiere+ value.
 
 ``run`` returns a Python ``bool``. ``True`` means the force criterion was
 met.
-``NotImplementedError`` means ``restart``, ``read``, ``dump``, or a Hessian
-optimizer called without ``hessian``.
+
+``restart`` writes an evaluation log, format ``rgmin-replay-1``, and
+``read`` replays it. A file ASE wrote, or a log from another class,
+raises ``RestartError``. ``dump`` is ASE's JSON writer. ``replay_trajectory``
+is implemented on ``LBFGS`` only. Any other class raises ``TypeError``.
+
+``LBFGS`` defaults to the line-search-free eOn step and a per-atom cap.
+``eon_cap=False`` selects ASE length control with fixed ``H0 = I / alpha``
+and ``memory`` pairs. ``use_line_search=True`` is the strong Wolfe search,
+not ASE's ``LineSearch``. ``maxstep > 1`` raises ``ValueError``.
+``BFGS`` scales the energy by ``1 / alpha`` and takes a per-atom cap.
+``maxstep > 1`` warns. ``FIRE`` and ``FIRE2`` take the ASE constructor
+keywords. Their ``maxstep`` is the Euclidean length of the step, or
+each component when ``FIRE2(use_abc=True)``. ``FIRE2`` refuses a ``dtmin``
+other than ``0.02 * dt``. ``QuickMin`` corresponds to ASE ``MDMin``: ``dt``
+is the Euler step and ``maxstep`` is per atom.
+``Newton``, ``RFO``, and ``Dogleg`` require an explicit ``hessian`` callable.
+``PSO`` is not a local force relaxation.
+``Optimizer(method=...)`` is the raw session. With the default method
+it is the eOn L-BFGS step, not ASE length control.
+
+The session gtol is 0, so ``fmax`` is the convergence test.
+
+================================================== ==================== ===============================================
+Class                                              ASE class            Step cap
+================================================== ==================== ===============================================
+``LBFGS``                                          ``LBFGS``            per atom, capped eOn step
+``BFGS``                                           ``BFGS``             per atom
+``FIRE``                                           ``FIRE``             Euclidean
+``FIRE2``                                          ``FIRE2``            Euclidean, or per component with ``use_abc``
+``QuickMin``                                       ``MDMin``            per atom
+``CG`` and the other conjugate-gradient classes    none                 per atom
+``SD``, ``Adam``, ``BB``, ``DIIS``, ``SR1``,       none                 per atom
+``SR2``
+``Newton``, ``RFO``, ``Dogleg``                    ``RFO`` only         per atom
+``Optimizer``                                      none                 per atom, eOn L-BFGS by default
+``PSO``                                            none                 per atom; not a local relaxation
+================================================== ==================== ===============================================
+
+``rgmin_solver_set_fire_config`` and
+``rgmin_solver_set_lbfgs_fixed_h0`` are new C entries. The Python session exposes those,
+plus ``forget``, ``push_pair``, ``set_maxmove``, ``set_atom_maxmove``,
+``set_lbfgs_scaled``, ``set_fire_preset``, and ``set_fire_abc``.
