@@ -20,6 +20,8 @@ on:
       - "tests/python/**"
       - "examples/**"
       - "ci/limit_pe_exports.py"
+      - "ci/tsan_native.sh"
+      - "ci/tsan_suppressions.txt"
       - ".github/workflows/py-ci.yml"
   pull_request:
     paths:
@@ -37,6 +39,8 @@ on:
       - "tests/python/**"
       - "examples/**"
       - "ci/limit_pe_exports.py"
+      - "ci/tsan_native.sh"
+      - "ci/tsan_suppressions.txt"
       - ".github/workflows/py-ci.yml"
   workflow_dispatch:
 
@@ -81,6 +85,63 @@ jobs:
       rust-toolchain: nightly-2026-01-20
       tsan-cmake-args: -DRGMIN_TSAN=ON
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || contains(github.event.pull_request.labels.*.name, 'ci:full')
+
+  # The tsan job above runs in a container image. This one needs none: it
+  # builds a free-threaded CPython and NumPy with ThreadSanitizer on the
+  # runner, then rgmin with -fsanitize=thread and a Rust staticlib built
+  # with -Zsanitizer=thread, and runs the ASE contract and threaded tests
+  # with halt_on_error=1. ci/tsan_suppressions.txt lists each suppression
+  # and why it is there.
+  tsan-native:
+    name: TSan native (CPython 3.14t)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      CPYTHON_VERSION: "3.14.10"
+      RUST_TOOLCHAIN: nightly-2026-01-20
+      TSAN_WORK: ${{ github.workspace }}/.tsan-work
+      TSAN_LOG: ${{ github.workspace }}/tsan.log
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Lower vm.mmap_rnd_bits for TSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo sysctl -w vm.mmap_rnd_bits=28
+          sudo sysctl -n vm.mmap_rnd_bits
+
+      - name: Install build packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang g++ pkg-config libffi-dev libssl-dev \
+            zlib1g-dev libsqlite3-dev libbz2-dev liblzma-dev libreadline-dev libopenblas-dev \
+            ca-certificates curl xz-utils binutils
+          major="$(clang -dumpversion | cut -d. -f1)"
+          sudo apt-get install -y "libclang-rt-${major}-dev" "llvm-${major}"
+          echo "SYMBOLIZER=$(ls /usr/lib/llvm-${major}/bin/llvm-symbolizer)" >> "${GITHUB_ENV}"
+
+      - name: Cache the TSan interpreter and NumPy
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .tsan-work/python
+            .tsan-work/venv
+          key: tsan-native-${{ runner.os }}-${{ runner.arch }}-${{ env.CPYTHON_VERSION }}-${{ hashFiles('ci/tsan_native.sh') }}
+
+      - name: Build under ThreadSanitizer and run the tests
+        shell: bash
+        run: ci/tsan_native.sh
+
+      - name: Keep the TSan log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tsan-native-log
+          path: tsan.log
+          if-no-files-found: ignore
 
   typing:
     uses: OmniPotentRPC/rgpot/.github/workflows/py-typing.yml@e34a43b63a69ccc88bc63692001cafc273992082
