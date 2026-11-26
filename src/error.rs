@@ -190,6 +190,12 @@ pub enum Error {
         /// What the call refused.
         what: &'static str,
     },
+    /// ODE12r was asked for something its session does not hold.
+    #[error("ode12r: {what}")]
+    Ode12r {
+        /// What the call refused.
+        what: &'static str,
+    },
     /// A geometry preconditioner rejected its inputs or its μ estimate.
     #[error("preconditioner: {what}")]
     Precon {

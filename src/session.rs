@@ -405,13 +405,14 @@ pub struct Solver {
 /// Methods added after the constraint stepper's match was written.
 enum Overlay {
     None,
-    QuickMin(QuickMinState, QuickMinSession),
-    Ode12r(crate::ode12r::Ode12rState),
-    Diis(DiisState),
-    GromacsSteep(GromacsSteep),
+    QuickMin(Box<QuickMinState>, Box<QuickMinSession>),
+    Ode12r(Box<crate::ode12r::Ode12rState>),
+    MdMin(Box<crate::mdmin::MdMinState>),
+    Diis(Box<DiisState>),
+    GromacsSteep(Box<GromacsSteep>),
     GpMin(Option<Box<GpMin>>),
-    GromacsCg(GromacsCg),
-    Rcg(crate::rcg::RcgMemory),
+    GromacsCg(Box<GromacsCg>),
+    Rcg(Box<crate::rcg::RcgMemory>),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -643,12 +644,14 @@ impl Solver {
             inner,
         };
         solver.overlay = match &method {
-            Method::QuickMin => {
-                Overlay::QuickMin(QuickMinState::new(dim, istep), QuickMinSession::new(istep))
-            }
-            Method::Ode12r => Overlay::Ode12r(crate::ode12r::Ode12rState::new(istep)),
-            Method::Diis { memory } => Overlay::Diis(DiisState::new(*memory)),
-            Method::GromacsSteep => Overlay::GromacsSteep(GromacsSteep::new(istep)),
+            Method::QuickMin => Overlay::QuickMin(
+                Box::new(QuickMinState::new(dim, istep)),
+                Box::new(QuickMinSession::new(istep)),
+            ),
+            Method::Ode12r => Overlay::Ode12r(Box::new(crate::ode12r::Ode12rState::new(istep))),
+            Method::MdMin => Overlay::MdMin(Box::new(crate::mdmin::MdMinState::new(dim, istep))),
+            Method::Diis { memory } => Overlay::Diis(Box::new(DiisState::new(*memory))),
+            Method::GromacsSteep => Overlay::GromacsSteep(Box::new(GromacsSteep::new(istep))),
             Method::GpMin => {
                 let state = match GpMin::new(GpMinConfig::default(), dim) {
                     Ok(gp) => Some(Box::new(gp)),
@@ -656,10 +659,10 @@ impl Solver {
                 };
                 Overlay::GpMin(state)
             }
-            Method::GromacsCg => Overlay::GromacsCg(GromacsCg::new()),
-            Method::Rcg { beta, transport } => {
-                Overlay::Rcg(crate::rcg::RcgMemory::new(*beta, *transport, istep))
-            }
+            Method::GromacsCg => Overlay::GromacsCg(Box::default()),
+            Method::Rcg { beta, transport } => Overlay::Rcg(Box::new(crate::rcg::RcgMemory::new(
+                *beta, *transport, istep,
+            ))),
             _ => Overlay::None,
         };
         if matches!(method, Method::Rcg { .. }) {
@@ -672,6 +675,7 @@ impl Solver {
             );
         }
         solver.apply_default_atom_cap();
+        solver.sync_mdmin_cap();
         solver
     }
 
@@ -718,6 +722,7 @@ impl Solver {
         if self.steps == 0 {
             self.reset_sr_radius();
         }
+        self.sync_mdmin_cap();
     }
 
     /// Family used by [`crate::select_precon`] when the caller asks for auto.
@@ -895,6 +900,20 @@ impl Solver {
         self.precon.as_ref().and_then(Slot::scale)
     }
 
+    /// Whether the installed exponential metric still applies at `positions`.
+    ///
+    /// True when an Exp matrix and its energy scale are already built and
+    /// the largest atomic move since that assembly is at most half the
+    /// nearest-neighbour distance, which is the preconditioner's rebuild
+    /// rule. A missing metric or a move past that threshold returns false.
+    #[must_use]
+    pub fn exp_holds(&self, positions: ArrayView1<f64>) -> bool {
+        match &self.precon {
+            Some(Slot::Exp(state)) => state.hold(positions),
+            _ => false,
+        }
+    }
+
     fn refresh_exp<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
     where
         O: DifferentiableObjective<f64> + ?Sized,
@@ -1020,6 +1039,42 @@ impl Solver {
         }
         if self.steps == 0 {
             self.reset_sr_radius();
+        }
+        self.sync_mdmin_cap();
+    }
+
+    /// Copy the session per-atom cap onto an MDMin stepper. `None` leaves
+    /// that displacement unscaled.
+    fn sync_mdmin_cap(&mut self) {
+        if let Overlay::MdMin(state) = &mut self.overlay {
+            state.maxstep = self.atom_maxmove;
+        }
+    }
+
+    /// ASE 3.29 ODE12r: `rtol` and the extrapolate-3 step length. The
+    /// opening step is then taken from the force infinity norm. A
+    /// non-positive or non-finite `rtol` is refused, and so is a session
+    /// that is not ODE12r.
+    pub fn configure_ode12r_ase(&mut self, rtol: f64) -> Result<()> {
+        if !(rtol.is_finite() && rtol > 0.0) {
+            return Err(Error::Ode12r {
+                what: "rtol must be finite and positive",
+            });
+        }
+        match &mut self.overlay {
+            Overlay::Ode12r(state) => {
+                let applied = state.configure_ase(rtol);
+                if applied {
+                    Ok(())
+                } else {
+                    Err(Error::Ode12r {
+                        what: "rtol must be finite and positive",
+                    })
+                }
+            }
+            _ => Err(Error::Ode12r {
+                what: "ASE settings apply to an ODE12r session",
+            }),
         }
     }
 
@@ -4441,8 +4496,9 @@ impl Solver {
             }
         }
 
-        let Overlay::GromacsCg(mut cg_state) = self.overlay else {
-            unreachable!("GROMACS cg overlay");
+        let mut cg_state = match &self.overlay {
+            Overlay::GromacsCg(state) => **state,
+            _ => unreachable!("GROMACS cg overlay"),
         };
         self.refresh_exp(obj, x, &grad)?;
         let z_now = metric_vector(&self.precon, &grad)?;
@@ -4544,7 +4600,7 @@ impl Solver {
         };
         let opening_rounds_away = opening_trial == *x;
         if opening_rounds_away && cg_state.is_steepest_direction() {
-            self.overlay = Overlay::GromacsCg(cg_state);
+            self.overlay = Overlay::GromacsCg(Box::new(cg_state));
             let norm = self.stationarity_norm(x, &grad);
             self.remember(x, value, &grad);
             return Ok(self.finish(value, x, &grad, norm, Status::MachinePrecision));
@@ -4655,7 +4711,7 @@ impl Solver {
             }
         }
         if !t.moved {
-            self.overlay = Overlay::GromacsCg(cg_state);
+            self.overlay = Overlay::GromacsCg(Box::new(cg_state));
             if !probe
                 .saw_finite_trial
                 .load(std::sync::atomic::Ordering::Relaxed)
@@ -4740,7 +4796,7 @@ impl Solver {
                 *prev_gd = gd_unit;
             }
         }
-        self.overlay = Overlay::GromacsCg(cg_state);
+        self.overlay = Overlay::GromacsCg(Box::new(cg_state));
         self.remember(x, new_value, &new_grad);
         let grad_norm = self.stationarity_norm(x, &new_grad);
         let mut status = self
@@ -6010,6 +6066,7 @@ impl Solver {
                 session.forget_last();
             }
             Overlay::Ode12r(state) => state.reset(),
+            Overlay::MdMin(state) => state.reset(),
             Overlay::Diis(state) => state.clear(),
             Overlay::GromacsSteep(state) => state.reset(self.control.istep),
             Overlay::GpMin(Some(state)) => {
@@ -6031,7 +6088,7 @@ impl Solver {
     ///
     /// Other methods return `None`.
     pub fn gromacs_step_size(&self) -> Option<f64> {
-        match self.overlay {
+        match &self.overlay {
             Overlay::GromacsSteep(state) => Some(state.step_size()),
             _ => None,
         }
@@ -6041,7 +6098,7 @@ impl Solver {
     ///
     /// Other methods return `None`.
     pub fn gromacs_steep_config(&self) -> Option<GromacsSteepConfig> {
-        match self.overlay {
+        match &self.overlay {
             Overlay::GromacsSteep(state) => Some(state.config()),
             _ => None,
         }
@@ -6969,7 +7026,11 @@ impl Solver {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
                 }
-                let h = state.open();
+                let h = if state.scheme == crate::ode12r::Ode12rScheme::AseMin {
+                    state.open_from_force(crate::ode12r::inf_norm(&steepest))
+                } else {
+                    state.open()
+                };
                 let dx = steepest.mapv(|v| h * v);
                 let proposed = &*x + &dx;
                 let mut trial = proposed.clone();
@@ -7005,6 +7066,31 @@ impl Solver {
                     *x = trial;
                     value = trial_value;
                     grad = trial_grad;
+                }
+            }
+            Overlay::MdMin(state) => {
+                #[allow(unused_mut)]
+                let mut force = grad.mapv(|g| -g);
+                #[cfg(feature = "highs")]
+                if boxed {
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                }
+                let dx = crate::mdmin::mdmin_displacement(state, &force);
+                let mut trial = &*x + &dx;
+                // The stepper applied the per-atom cap; an explicit
+                // Euclidean cap binds as well.
+                if let Some(cap) = self.control.maxmove_cap() {
+                    crate::step::scale_step(x, &mut trial, cap);
+                }
+                trial = obj.bounds().clip(trial.view());
+                *x = trial;
+                let ev = obj.value_and_gradient(x.view());
+                value = ev.0;
+                grad = ev.1;
+                #[cfg(feature = "highs")]
+                if boxed {
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
             }
             Overlay::Diis(state) => {
@@ -7301,6 +7387,7 @@ impl Inner {
             // variant the constraint stepper matches.
             Method::QuickMin
             | Method::Ode12r
+            | Method::MdMin
             | Method::Diis { .. }
             | Method::Rcg { .. }
             | Method::GromacsSteep
@@ -7356,6 +7443,15 @@ mod tests {
     use crate::fire::FireKind;
     use crate::oracle::Oracle;
     use ndarray::{ArrayView1, array};
+
+    #[test]
+    fn overlay_keeps_method_state_out_of_the_step_stack_frame() {
+        assert!(
+            std::mem::size_of::<Overlay>() <= 3 * std::mem::size_of::<usize>(),
+            "overlay grew to {} bytes",
+            std::mem::size_of::<Overlay>()
+        );
+    }
 
     /// A steep well under a tiny Euclidean cap: every FIRE step is
     /// clamped, and the velocity has to describe the clamped move.
@@ -7712,8 +7808,8 @@ mod tests {
     }
 
     fn gromacs_cg_state(solver: &Solver) -> GromacsCg {
-        match solver.overlay {
-            Overlay::GromacsCg(state) => state,
+        match &solver.overlay {
+            Overlay::GromacsCg(state) => **state,
             _ => unreachable!("GROMACS cg session"),
         }
     }

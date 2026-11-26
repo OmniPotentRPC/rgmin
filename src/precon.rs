@@ -526,7 +526,7 @@ impl ExpState {
         Ok(true)
     }
 
-    fn hold(&self, positions: ArrayView1<f64>) -> bool {
+    pub(crate) fn hold(&self, positions: ArrayView1<f64>) -> bool {
         if self.r_nn_pending || self.matrix.is_none() || self.mu.is_none() || self.params.recalc_mu
         {
             return false;

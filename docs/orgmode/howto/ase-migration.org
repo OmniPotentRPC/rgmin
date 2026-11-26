@@ -15,9 +15,17 @@ with
 from rgmin.optimize import BFGS, LBFGS, FIRE
 #+end_src
 
-~LBFGSLineSearch~, ~FIRE2~, and ~GPMin~ match those ASE names (see
-@@rst::doc:`gpmin`@@ for GPMin hyperparameters and step-cap behavior).
-The other gradient methods of ~Session~ are ~SR1~, ~SR2~, ~SteepestDescent~,
+~LBFGSLineSearch~, ~FIRE2~, ~GPMin~, ~ODE12r~, ~MDMin~, ~PreconLBFGS~ and
+~PreconFIRE~ match those ASE names (see @@rst::doc:`gpmin`@@ for GPMin
+hyperparameters and step-cap behavior). ~ODE12r~ uses the ASE 3.29 class
+tolerance and has no per-atom cap. ~MDMin~ takes ~dt~ and ~maxstep~ with
+ASE's defaults. ~PreconLBFGS~ and ~PreconFIRE~ follow the ASE 3.29 names. ~None~ and
+~'ID'~ leave the metric off, and ~'Exp'~ installs rgmin's exponential
+metric when the coordinates are a Cartesian ~3N~ vector. ~precon='auto'~
+keeps ASE's rule for systems under 100 atoms, and any other kind raises
+~ValueError~. On a cell filter the metric stays off and the underlying
+L-BFGS or FIRE step runs. The other
+gradient methods of ~Session~ are ~SR1~, ~SR2~, ~SteepestDescent~,
 ~BarzilaiBorwein~, ~Adam~, the nonlinear CG family, ~EonCG~, ~NewtonCG~
 and ~NewtonPCG~.
 Importing ~rgmin~ does not import ASE. The classes do, when they are constructed.

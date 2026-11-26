@@ -36,6 +36,8 @@ jobs:
           toolchain: 1.88.0
           components: rustfmt
       - run: cargo fmt --all -- --check
+      # The maturin crate is not a workspace member of the root manifest.
+      - run: cargo fmt --manifest-path python/Cargo.toml -- --check
 
   test:
     name: cargo test (${{ matrix.name }})

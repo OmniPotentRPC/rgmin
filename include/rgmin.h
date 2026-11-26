@@ -82,7 +82,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 66
+#define RGMIN_ABI_VERSION_MINOR 71
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -117,7 +117,10 @@ typedef struct rgmin_abi_stamp_t {
  *    layout revision stays 6.
  * 66 rgmin_vec_precond_fn, rgmin_minimize_hvp_precond and
  *    rgmin_minimize_hvp_precond_sized. No struct changes, so the layout
- *    revision stays 6. */
+ *    revision stays 6.
+ * 71 RGMIN_MDMIN. The time step is rgmin_control_t.istep, the per-atom
+ *    cap is the session atom cap, and a positive maxmove also caps the
+ *    Euclidean step. rgmin_control_t is unchanged. */
 #define RGMIN_ABI_LAYOUT_REVISION 6
 /* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the
@@ -171,7 +174,10 @@ typedef enum rgmin_method_t {
     RGMIN_GROMACS_CG = 29,
     /** Riemannian CG. PRP+ and the scaled transport. ABI minor 65.
      *  rgmin_minimize_rcg carries the other coefficients. */
-    RGMIN_RCG = 30
+    RGMIN_RCG = 30,
+    /** MDMin. ABI minor 71. The time step is the control istep; the per-atom cap is the session atom cap.
+     *  A positive maxmove also caps the Euclidean length of the step. */
+    RGMIN_MDMIN = 31
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.

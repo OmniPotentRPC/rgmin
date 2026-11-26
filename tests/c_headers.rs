@@ -18,7 +18,7 @@ use rgmin::{
     ScgStepTolerance,
 };
 
-/// The public header's ABI minor is 65.
+/// The public header's ABI minor is 71.
 #[test]
 fn public_c_header_compiles_and_checks_the_abi() {
     consumer::compile_and_run("tests/ffi_smoke.c", "rgmin_public_c_header", &[]);
@@ -56,7 +56,7 @@ fn c_header_checks_rigid_quotient_tcg_and_projected_modes() {
 
 #[test]
 fn c_header_reads_riemannian_cg_through_the_xts_aliases() {
-    assert_eq!(RGMIN_ABI_VERSION_MINOR, 66);
+    assert_eq!(RGMIN_ABI_VERSION_MINOR, 71);
     consumer::compile_and_run("tests/c_xts_rcg.c", "rgmin_c_xts_rcg", &[]);
 }
 

@@ -10,6 +10,7 @@ class Session:
         n: int,
         *,
         max_atom: float | None = None,
+        uncapped: bool = False,
         wolfe: bool = False,
         eon_cap: bool = False,
         memory: int = 8,
@@ -47,6 +48,16 @@ class Session:
         unbounded_hyperparams: bool = False,
         max_refinements: int | None = None,
     ) -> None: ...
+    def set_exp(
+        self,
+        positions: list[float],
+        i: list[int],
+        j: list[int],
+        r: list[float],
+        lengths: tuple[float, float, float] | None = None,
+    ) -> None: ...
+    def exp_holds(self, positions: list[float]) -> bool: ...
+    def configure_ode12r_ase(self, rtol: float) -> None: ...
     def push_pair(self, s: list[float], y: list[float]) -> bool: ...
     def pair_count(self) -> int: ...
     @property

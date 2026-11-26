@@ -171,6 +171,11 @@ SLOW_ON_STRAIN = ("SteepestDescent", "EonCG", "HagerZhang", "LiuStorey")
 @pytest.mark.parametrize("name", list(optimize.__all__))
 @pytest.mark.parametrize("filter_cls", [FrechetCellFilter, UnitCellFilter, StrainFilter])
 def test_cell_filters_relax_the_cell(name, filter_cls, relaxed_cells):
+    # ASE's StrainFilter says MDMin's dt has to shrink with the cell
+    # length (about 0.01 over a typical dimension). The class default
+    # is ASE's 0.2, and with that both ASE and rgmin leave this vacancy.
+    if name == "MDMin" and filter_cls is StrainFilter:
+        pytest.skip("MDMin's default dt does not relax a StrainFilter")
     system = _vacancy_cell(filter_cls)
     start = system.atoms.cell.volume
     opt = getattr(optimize, name)(system, logfile=None)
@@ -519,7 +524,21 @@ def test_rcg_session_moves_every_atom_past_the_default_cap():
 
 def test_every_gradient_session_method_has_a_class():
     kinds = {getattr(optimize, name).kind for name in optimize.__all__}
-    tokens = {"lbfgs", "bfgs", "sr1", "sr2", "adam", "sd", "bb", "fire", "fire2", "newton-cg", "newton-pcg"}
+    tokens = {
+        "lbfgs",
+        "bfgs",
+        "sr1",
+        "sr2",
+        "adam",
+        "sd",
+        "bb",
+        "fire",
+        "fire2",
+        "newton-cg",
+        "newton-pcg",
+        "ode12r",
+        "mdmin",
+    }
     tokens |= {
         "eon-cg",
         "pr",
