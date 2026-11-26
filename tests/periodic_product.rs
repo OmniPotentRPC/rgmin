@@ -1,4 +1,4 @@
-#![cfg(feature = "periodic-product")]
+#![cfg(all(feature = "periodic-product", not(feature = "capi")))]
 
 use rgmin::periodic_product::{PeriodicProductError, periodic_product_spectrum};
 

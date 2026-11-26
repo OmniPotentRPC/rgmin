@@ -395,13 +395,18 @@ pub(crate) fn secant_scale(s: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {
     (sy > CURVATURE && yy > 0.0).then(|| sy / yy)
 }
 
+/// Whether the BFGS update accepts the pair. A rejected pair leaves `H` as it was.
+pub(crate) fn bfgs_accepts_pair(s: &Array1<f64>, y: &Array1<f64>) -> bool {
+    y.dot(s) > CURVATURE
+}
+
 /// Inverse BFGS, Nocedal-Wright 6.17:
 /// `H+ = (I - ρ s y^T) H (I - ρ y s^T) + ρ s s^T`, `ρ = 1/(y·s)`.
 pub(crate) fn bfgs_inverse_update(h: &mut Array2<f64>, s: &Array1<f64>, y: &Array1<f64>) {
-    let ys = y.dot(s);
-    if ys <= CURVATURE {
+    if !bfgs_accepts_pair(s, y) {
         return;
     }
+    let ys = y.dot(s);
     let rho = 1.0 / ys;
     let hy = h.dot(y);
     let yhy = y.dot(&hy);

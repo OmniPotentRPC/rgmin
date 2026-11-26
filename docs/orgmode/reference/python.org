@@ -42,10 +42,11 @@ the polish itself is the C =rgmin_minimize_hess_opts= and
 
 =c1=, =c2=, and =linesearch_maxiter= are the line-search constants.
 They are accepted only together with =linesearch=, one of =brent=,
-=backtracking=, =goldstein=, or =wolfe=. Passing a non-default
+=backtracking=, =goldstein=, =wolfe=, or =ase=. Passing a non-default
 constant alone raises =ValueError=. So does a =linesearch= the chosen
 step ignores: any kind with ~accept="step"~ or on a method that takes
-no line search, and any kind but =wolfe= on =lbfgs=.
+no line search, any kind but =wolfe= and =ase= on =lbfgs=, and =ase=
+on a method other than =bfgs= and =lbfgs=.
 
 * Two packages, one import name
 
@@ -72,7 +73,9 @@ Those differ from the Rust =Control::default= (=gtol= 1e-5, =istep= 1) and from 
 | =maxmove=            | float                                              | 0       | Euclidean cap on the step. Zero keeps the method's own caps, and a negative value leaves every cap off. |
 | =atom_maxmove=       | float                                              | unset   | Per-atom cap on the longest atom displacement. =maxstep= is the same option. Unset keeps the method's default, 0.2 for L-BFGS. |
 | =accept=             | =none=, =energy=, =nonmonotone=, =step=            | unset   | How a step is taken. Unset keeps the C session's =energy=. |
-| =linesearch=         | =brent=, =backtracking= (=armijo=), =goldstein=, =wolfe= | unset | Line search. L-BFGS searches none unless this is =wolfe=. |
+| =linesearch=         | =brent=, =backtracking= (=armijo=), =goldstein=, =wolfe=, =ase= | unset | Line search. L-BFGS searches none unless this is =wolfe= or =ase=. =ase= is ASE 3.29's search, on =bfgs= and =lbfgs= only. |
+| =h0=                 | finite float > 0                                  | unset   | Initial inverse-Hessian scale of =bfgs= and =lbfgs=. Unset keeps the identity BFGS matrix and the Nocedal-Wright L-BFGS scale. |
+| =stpmax=             | float                                              | unset   | Step-multiplier bound of the ASE line search. Requires ~linesearch="ase"~. A value below 1 fails each search, as in ASE. |
 | =c1=, =c2=           | float                                              | 1e-4, 0.9 | Wolfe and Armijo constants. Need =linesearch=. |
 | =linesearch_maxiter= | int >= 1                                           | 20      | Trial budget of the line search. Needs =linesearch=. |
 | =beta=               | a CG variant name, or =cg=                         | unset   | Conjugacy coefficient. Only for a CG method. =cg= is Polak-Ribiere. |
@@ -108,9 +111,9 @@ The options and their defaults are:
 | =nbfgscorr=       | =None=  | Correction pairs for a =gromacs-lbfgs= session. Omitted keeps 10. Other methods reject it. |
 | =h0=              | =None=  | Fixed L-BFGS inverse-Hessian scale. |
 | =dt=, =dt_max=, =n_min=, =f_inc=, =f_dec=, =alpha=, =f_alpha= | 0.1, 1.0, 5, 1.1, 0.5, 0.1, 0.99 | FIRE parameters, the ASE set. |
-| =preset=, =abc=   | =None=, False | =preset="guenole2020"= and =abc= select FIRE 2.0 parameters and ABC-FIRE. |
+| =preset=, =abc=   | =None=, False | ~preset="guenole2020"~ and =abc= select FIRE 2.0 parameters and ABC-FIRE. |
 | =accept=          | =None=  | =none=, =energy= or =nonmonotone=. =step= is not accepted here. |
-| =downhill=        | False   | The same as =accept="energy"=. |
+| =downhill=        | False   | The same as ~accept="energy"~. |
 | =istep=           | =None=  | Step scale of a method other than FIRE, whose scale is =dt=. |
 | =level_set=       | =None=  | Target of the level-set constraint, as in @@rst::doc:`../howto/level-set`@@. |
 | =scale=, =weight=, =noise= | =0.4=, =1.0=, =0.001= (or =0.3=, =2.0=, =0.004= when updating) | GPMin kernel length scale, weight, and observation noise. |
@@ -154,10 +157,24 @@ Named classes: =LBFGS=, =FIRE=, =FIRE2=, =QuickMin=, =BFGS=, =SD=,
 =Adam=, =Newton=, =RFO=, =SR1=, =SR2=, =BB=, =Dogleg=, =DIIS=, =PSO=,
 =FletcherReeves=, =HestenesStiefel=, =DaiYuan=, =ConjugateDescent=,
 =HagerZhang=, =LiuStorey=, =FrPr=, and =CG=.
+=BFGSLineSearch= is also exported as =QuasiNewton=, and
+=LBFGSLineSearch= subclasses =LBFGS=. Their constructors match ASE 3.29.0
+([[https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/bfgslinesearch.py][BFGSLineSearch]],
+[[https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/lbfgs.py][LBFGS]]).
 =CG= defaults to Polak-Ribiere. The C ABI has no separate
 Polak-Ribiere+ value.
 
 =run= returns a Python =bool=. =True= means the force criterion was
 met.
-=NotImplementedError= means =restart=, =read=, =dump=, or a Hessian
-optimizer called without =hessian=.
+=NotImplementedError= means =restart=, =read=, or =dump= on a class
+other than =BFGSLineSearch= and =LBFGSLineSearch=, or a Hessian
+optimizer called without =hessian=. Those two classes replay an rgmin
+evaluation log from =restart=. Both run ~linesearch="ase"~, a port of
+ASE's =LineSearch=, and raise =RuntimeError("LineSearch failed!")= when
+a search fails. =h0= and ~linesearch="ase"~ are opt-in =SolverConfig=
+options: =h0= scales the initial inverse Hessian of =bfgs= and =lbfgs=,
+and ~linesearch="ase"~ runs ASE's search on those two methods, with
+=maxstep= limiting each trial increment of an atom. =stpmax=, 50 by
+default, bounds its step multiplier and requires ~linesearch="ase"~.
+A failed search stops the step with =Stop.LINE_SEARCH=. Omitting both
+leaves the session defaults.

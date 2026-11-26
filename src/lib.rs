@@ -129,14 +129,11 @@ pub mod periodic;
 /// Linear-storage factorization of periodic block-tridiagonal matrices.
 pub mod periodic_block;
 /// Extended-precision products of short periodic transfer matrices.
-#[cfg(feature = "periodic-product")]
+///
+/// Omitted when `capi` is also enabled, so the C static library does
+/// not link GMP and MPFR. `--features periodic-product` builds it.
+#[cfg(all(feature = "periodic-product", not(feature = "capi")))]
 pub mod periodic_product;
-#[cfg(all(feature = "periodic-product", feature = "capi"))]
-compile_error!(
-    "the `periodic-product` feature links rug and gmp-mpfr-sys (LGPL-3.0+) and cannot be \
-     combined with `capi`, which builds the C static library; name the features instead of \
-     passing `--all-features`"
-);
 /// Geometry preconditioners: Exp, Lindh, and the bonded FF metric.
 pub mod precon;
 mod pso;

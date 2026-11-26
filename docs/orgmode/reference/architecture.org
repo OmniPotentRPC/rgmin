@@ -116,6 +116,8 @@ python3 docs/figures/architecture/draw_hourglass.py
   Minor 67 adds =RGMIN_GROMACS_LBFGS= and
   =rgmin_solver_set_gromacs_lbfgs=. =rgmin_control_t= is unchanged.
   Minor 68 adds =noise_eps_f= on =rgmin_control_t= and =RGMIN_CONTROL_REVISION6_SIZE=; the struct grows, so the layout revision becomes 7.
+  Minor 69 adds =rgmin_solver_set_fixed_h0= and
+  =rgmin_solver_set_ase_linesearch=.
   Minor 72 adds =rgmin_solver_set_highs_time_limit= and =rgmin_solver_highs_timeouts=.
   No struct changes, so the layout revision stays 7.
   =rgmin_abi_compatible= checks the major version and the layout revision only.

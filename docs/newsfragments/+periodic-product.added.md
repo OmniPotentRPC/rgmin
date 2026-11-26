@@ -1,3 +1,3 @@
 The optional `periodic-product` feature adds `periodic_product::periodic_product_spectrum`, which multiplies short real transfer matrices at a chosen binary precision and returns the multipliers of the product as log-moduli and arguments.
 It checks the determinant identity and pairs the multipliers into reciprocal pairs, with an allowance for each pair taken from the working precision, the size of the factors and the sensitivity of each eigenvalue.
-The feature pulls in `rug` and `gmp-mpfr-sys`, which are LGPL-3.0 or later and build GMP and MPFR with autotools, and it cannot be combined with `capi`.
+The feature pulls in `rug` and `gmp-mpfr-sys`, which are LGPL-3.0 or later and build GMP and MPFR with autotools. When `capi` is also enabled the module is left out, so the C static library does not link GMP.

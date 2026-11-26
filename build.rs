@@ -1,6 +1,13 @@
 use std::path::Path;
 
 fn main() {
+    if std::env::var_os("CARGO_FEATURE_CAPI").is_some()
+        && std::env::var_os("CARGO_FEATURE_PERIODIC_PRODUCT").is_some()
+    {
+        println!(
+            "cargo:warning=periodic-product is omitted because capi is enabled, so the C static library does not link GMP"
+        );
+    }
     println!("cargo:rerun-if-changed=cbindgen.toml");
     println!("cargo:rerun-if-changed=include/");
     println!("cargo:rerun-if-changed=Cargo.toml");

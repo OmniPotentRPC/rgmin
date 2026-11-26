@@ -18,7 +18,7 @@ use rgmin::{
     ScgStepTolerance,
 };
 
-/// The public header's ABI minor is 65.
+/// The public header's ABI minor is 72.
 #[test]
 fn public_c_header_compiles_and_checks_the_abi() {
     consumer::compile_and_run("tests/ffi_smoke.c", "rgmin_public_c_header", &[]);

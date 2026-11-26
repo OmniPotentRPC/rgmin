@@ -50,15 +50,15 @@ use crate::precon::{
 };
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{
-    bfgs_inverse_update, sr_trust_direction, sr_trust_limits, sr1_hessian_update,
-    sr2_hessian_update,
+    bfgs_accepts_pair, bfgs_inverse_update, sr_trust_direction, sr_trust_limits,
+    sr1_hessian_update, sr2_hessian_update,
 };
 use crate::qn_step::QnStep;
 use crate::quickmin::{
     QuickMinOptions, QuickMinSession, QuickMinState, quickmin_rescale_velocity,
     quickmin_session_step,
 };
-use crate::report::{Report, Status};
+use crate::report::{Report, Status, StopReason};
 use crate::rigid::{RigidMode, RigidWorkspace, project_out_rot_trans};
 use crate::step::{
     Taken, apply_caps, cap_alpha, cap_displacement_atom, l2, max_atom_displacement,
@@ -280,6 +280,10 @@ pub struct Solver {
     control: Control,
     linesearch: LineSearch,
     line_options: LineSearchOptions,
+    /// Inverse-Hessian scale for a fresh BFGS matrix. `None` keeps `I`.
+    bfgs_h0: Option<f64>,
+    /// ASE's line search in place of Wolfe. `None` keeps rgmin's search.
+    ase_search: Option<crate::linesearch::ase::AseSearch>,
     istep: f64,
     steps: usize,
     qn_step: QnStep,
@@ -287,6 +291,9 @@ pub struct Solver {
     e_hist: VecDeque<f64>,
     /// Per-atom cap in force. `None` is no per-atom cap.
     atom_maxmove: Option<f64>,
+    /// Finite value last passed to [`Self::set_atom_maxmove`], including a
+    /// non-positive one. The ASE line search reads it as `maxstep`.
+    atom_maxmove_request: Option<f64>,
     /// `set_atom_maxmove` has been called. The default cap is then left alone.
     atom_maxmove_set: bool,
     project_rigid: bool,
@@ -550,6 +557,26 @@ fn max_atom_norm_stable(g: ArrayView1<f64>) -> f64 {
     worst
 }
 
+/// ASE `BFGSLineSearch.update` accepts a pair only when the step length
+/// is positive and the absolute directional derivative along the search
+/// direction fell. `no_update` is a separate skip. The curvature guard
+/// in `bfgs_inverse_update` still applies afterwards.
+fn ase_bfgs_pair_allowed(
+    alpha: f64,
+    gradient: ArrayView1<'_, f64>,
+    previous: ArrayView1<'_, f64>,
+    direction: ArrayView1<'_, f64>,
+) -> bool {
+    // Python `(alpha_k or 0) > 0` is false for None, NaN, and a
+    // nonpositive length. NaN is unordered, so it is not a positive step.
+    if alpha.is_nan() || alpha <= 0.0 {
+        return false;
+    }
+    let slope = crate::vecops::dot(gradient, direction).abs();
+    let previous_slope = crate::vecops::dot(previous, direction).abs();
+    slope - previous_slope < 0.0
+}
+
 impl Solver {
     /// Fresh session for `method` in dimension `dim`.
     pub fn new(method: Method, control: Control, dim: usize) -> Self {
@@ -581,12 +608,15 @@ impl Solver {
             control,
             linesearch,
             line_options,
+            bfgs_h0: None,
+            ase_search: None,
             istep,
             steps: 0,
             qn_step: QnStep::TwoLoop,
             accept: Accept::None,
             e_hist: VecDeque::new(),
             atom_maxmove: None,
+            atom_maxmove_request: None,
             atom_maxmove_set: false,
             project_rigid: false,
             rigid_mode: RigidMode::Auto,
@@ -975,6 +1005,128 @@ impl Solver {
         self.line_options.set_objective_roundoff(relative)
     }
 
+    /// Initial inverse-Hessian scale.
+    ///
+    /// On L-BFGS this is the fixed scale of [`Self::set_lbfgs_fixed_h0`].
+    /// On BFGS it replaces the fresh inverse Hessian with `h0 I`, and
+    /// [`Self::forget`] or a refused constrained step restores that
+    /// scale. A BFGS matrix that has already been updated keeps its
+    /// pairs until then. Other
+    /// methods return an error. `h0` must be finite and positive.
+    /// Leaving this unset keeps the identity BFGS matrix and the
+    /// Nocedal-Wright L-BFGS scale.
+    pub fn set_fixed_h0(&mut self, h0: f64) -> Result<()> {
+        if !(h0.is_finite() && h0 > 0.0) {
+            return Err(Error::InvalidControl {
+                what: "h0 must be finite and positive",
+            });
+        }
+        match &mut self.inner {
+            Inner::Lbfgs(solver) => {
+                solver.fixed_h0 = Some(h0);
+                Ok(())
+            }
+            Inner::Bfgs { h, fresh } => {
+                self.bfgs_h0 = Some(h0);
+                if *fresh {
+                    *h = Array2::<f64>::eye(self.dim) * h0;
+                }
+                Ok(())
+            }
+            _ => Err(Error::InvalidControl {
+                what: "h0 requires a BFGS or L-BFGS session",
+            }),
+        }
+    }
+
+    /// Run the line search of ASE 3.29 on this BFGS or L-BFGS session.
+    ///
+    /// The search is `ase.utils.linesearch.LineSearch` as ASE's
+    /// `BFGSLineSearch` and `LBFGSLineSearch` call it: it opens at the
+    /// unit step, the per-atom cap limits each increment from the
+    /// previous trial rather than the whole step, trials stay in
+    /// `[1e-8, stpmax]`, and it ends only on ASE's strong-Wolfe test or
+    /// one of its warnings. An opening step above `stpmax`, a spent
+    /// evaluation budget or a non-finite trial fails the search; there
+    /// is no fallback point. The step then leaves `x` where it was and
+    /// reports [`StopReason::LineSearchFailed`].
+    ///
+    /// `c1`, `c2` and the budget are those of the session's
+    /// [`LineSearch::Wolfe`]. A step refuses another line-search kind,
+    /// [`Accept::Step`], a manifold, constraints, an overlay, a Euclidean
+    /// `maxmove`, and on L-BFGS any step but [`LbfgsStep::Wolfe`].
+    /// On L-BFGS this call selects that plain Wolfe step and turns the
+    /// geometry step off, the same choice the C++ `SolverConfig` apply
+    /// path makes for `linesearch="ase"`, so a default L-BFGS session
+    /// can step.
+    /// The per-atom cap is ASE's `maxstep`: a positive value limits each
+    /// increment, and a negative finite value scales and can reverse it,
+    /// as ASE does. Zero scales the first increment to zero and then
+    /// stops. ASE would scale the next zero increment by `0/0` and
+    /// evaluate that non-finite coordinate, and this search does not.
+    /// `stpmax` must not be NaN. Any other value is used as ASE uses it, so one below
+    /// 1 fails every search. Other methods return an error. Without this
+    /// call the session keeps rgmin's own search.
+    pub fn set_ase_linesearch(&mut self, stpmax: f64) -> Result<()> {
+        if stpmax.is_nan() {
+            return Err(Error::InvalidControl {
+                what: "ASE stpmax must not be NaN",
+            });
+        }
+        if !matches!(self.inner, Inner::Bfgs { .. } | Inner::Lbfgs(_)) {
+            return Err(Error::InvalidControl {
+                what: "the ASE line search requires a BFGS or L-BFGS session",
+            });
+        }
+        if matches!(self.inner, Inner::Lbfgs(_)) {
+            self.set_lbfgs_step(LbfgsStep::Wolfe)?;
+            self.set_geometry_step(false);
+        }
+        self.ase_search = Some(crate::linesearch::ase::AseSearch { stpmax });
+        Ok(())
+    }
+
+    /// Refuse a step on which ASE's line search would not run.
+    fn check_ase_search(&self) -> Result<()> {
+        if self.ase_search.is_none() {
+            return Ok(());
+        }
+        let refuse = |what| Err(Error::InvalidControl { what });
+        if !matches!(self.linesearch, LineSearch::Wolfe { .. }) {
+            return refuse("the ASE line search takes c1, c2 and its budget from a Wolfe search");
+        }
+        #[cfg(feature = "highs")]
+        let equalities = !self.equalities.is_empty();
+        #[cfg(not(feature = "highs"))]
+        let equalities = false;
+        if self.accept == Accept::Step
+            || self.manifold != ManifoldKind::Euclidean
+            || self.level_set.is_some()
+            || self.constraints.is_some()
+            || equalities
+            || !matches!(self.overlay, Overlay::None)
+            || self.has_coordinate_box()
+        {
+            return refuse(
+                "the ASE line search runs only on an unconstrained Euclidean session \
+                 with energy acceptance",
+            );
+        }
+        if self.control.maxmove_cap().is_some() {
+            return refuse(
+                "the ASE line search limits increments by the per-atom cap, not maxmove",
+            );
+        }
+        if matches!(self.inner, Inner::Lbfgs(_))
+            && (!matches!(self.lbfgs_step(), LbfgsStep::Wolfe)
+                || self.geometry_step == Some(true)
+                || self.use_lbfgs_burdakov())
+        {
+            return refuse("the ASE line search on L-BFGS requires the plain Wolfe step");
+        }
+        Ok(())
+    }
+
     /// The configured line search.
     pub fn linesearch(&self) -> LineSearch {
         self.linesearch
@@ -1029,10 +1181,14 @@ impl Solver {
     /// when `Method::installs_default_atom_cap` is set. BFGS, dogleg,
     /// and FIRE 2.0 start without that cap. A positive `maxmove`
     /// replaces the value in force. A non-positive or non-finite value
-    /// clears the cap.
+    /// clears the cap. The ASE line search still reads a finite
+    /// non-positive value as ASE's `maxstep`.
     pub fn set_atom_maxmove(&mut self, maxmove: f64) {
         self.atom_maxmove_set = true;
-        self.atom_maxmove = Some(maxmove).filter(|&cap| crate::step::binding(cap));
+        self.atom_maxmove_request = Some(maxmove).filter(|cap| cap.is_finite());
+        self.atom_maxmove = self
+            .atom_maxmove_request
+            .filter(|cap| crate::step::binding(*cap));
         if let Inner::Lbfgs(solver) = &mut self.inner {
             let cap = self.atom_maxmove.unwrap_or(crate::lbfgs::EON_MAX_MOVE);
             match &mut solver.step {
@@ -1044,6 +1200,18 @@ impl Solver {
         }
         if self.steps == 0 {
             self.reset_sr_radius();
+        }
+    }
+
+    /// Per-atom cap a line search should apply.
+    ///
+    /// Every method but the ASE search treats a non-positive request as
+    /// no cap. That search is ASE's `maxstep` and scales the request.
+    fn search_atom_cap(&self) -> Option<f64> {
+        if self.ase_search.is_some() && self.atom_maxmove_set {
+            self.atom_maxmove_request.filter(|cap| cap.is_finite())
+        } else {
+            self.atom_maxmove
         }
     }
 
@@ -2620,7 +2788,11 @@ impl Solver {
                 *prev_gd = 0.0;
             }
             Inner::Bfgs { h, fresh } => {
+                let scale = self.bfgs_h0;
                 *h = Array2::<f64>::eye(self.dim);
+                if let Some(scale) = scale {
+                    *h *= scale;
+                }
                 *fresh = true;
             }
             Inner::Sr1 { h, fresh } => {
@@ -2724,7 +2896,10 @@ impl Solver {
     /// window it replaces does.
     fn search_options(&self) -> LineSearchOptions {
         if self.manifold == ManifoldKind::Euclidean {
-            self.line_options
+            match self.ase_search {
+                Some(search) => self.line_options.with_ase(search),
+                None => self.line_options,
+            }
         } else {
             LineSearchOptions::default()
         }
@@ -2943,6 +3118,7 @@ impl Solver {
     where
         O: DifferentiableObjective<f64> + ?Sized,
     {
+        self.check_ase_search()?;
         // Riemannian CG retracts through the bond set itself. The
         // constraint stepper's match does not know that overlay.
         if self.constraints.is_some() && !matches!(self.overlay, Overlay::Rcg(_)) {
@@ -3799,7 +3975,8 @@ impl Solver {
             && self.geometry_step.is_none()
             && self.atom_maxmove_set
             && self.atom_maxmove.is_some()
-            && self.accept != Accept::Step;
+            && self.accept != Accept::Step
+            && self.ase_search.is_none();
         if self.geometry_step != Some(true) && !wolfe_cap {
             return false;
         }
@@ -4933,6 +5110,8 @@ impl Solver {
                 moved: false,
                 energy_noise: false,
                 line_stop: None,
+                line_failed: false,
+                no_update: false,
             }
         } else {
             take_session_step(
@@ -5507,10 +5686,13 @@ impl Solver {
         let boxed = self.has_coordinate_box();
         let mut energy_stall = false;
         let mut line_stop = None;
+        let mut line_failed = false;
         let mut sr_secant: Option<(Array1<f64>, Array1<f64>)> = None;
         let diis_alpha = self.istep;
         let diis_atom_cap = self.atom_maxmove;
         let diis_euclidean_cap = self.control.maxmove_cap();
+        // Copied before the rigid workspace is taken out of `self`.
+        let search_atom_cap = self.search_atom_cap();
         if matches!(&self.inner, Inner::Sr1 { .. } | Inner::Sr2 { .. }) {
             self.sr_trust_attempt(obj, x, &mut value, &mut grad, &start, &gold, &mut sr_secant);
         }
@@ -5566,7 +5748,7 @@ impl Solver {
                         &mut self.istep,
                         self.linesearch,
                         &self.control,
-                        self.atom_maxmove,
+                        search_atom_cap,
                         constrained_direction,
                         false,
                         line_options,
@@ -5574,6 +5756,7 @@ impl Solver {
                     );
                     energy_stall = outcome.energy_noise;
                     line_stop = outcome.line_stop;
+                    line_failed = outcome.line_failed;
                 }
                 Inner::Steepest => {
                     let dir = grad.mapv(|g| -g);
@@ -5720,7 +5903,7 @@ impl Solver {
                     };
                     self.unmoved_fixed = !t.moved && *dir == dir_used && next_alpha0 == alpha0;
                 }
-                Inner::Bfgs { h, .. } => {
+                Inner::Bfgs { h, fresh } => {
                     let direction = -h.dot(&grad);
                     let old = x.clone();
                     let gold = grad.clone();
@@ -5733,7 +5916,7 @@ impl Solver {
                         self.istep,
                         self.linesearch,
                         &self.control,
-                        self.atom_maxmove,
+                        search_atom_cap,
                         self.accept,
                         &mut self.e_hist,
                         &self.manifold,
@@ -5742,13 +5925,28 @@ impl Solver {
                         line_options,
                     )?;
                     energy_stall = t.energy_noise;
+                    line_failed = t.line_failed;
                     let moved = t.moved;
                     let istep_before = self.istep;
                     *x = t.x;
                     value = t.f;
                     grad = t.g;
-                    if moved {
-                        bfgs_inverse_update(h, &(&*x - &old), &(&grad - &gold));
+                    // ASE `BFGSLineSearch.update` skips the pair when
+                    // `no_update` is set, the step length is not positive,
+                    // or the absolute directional derivative did not fall.
+                    // A session that is not on that search keeps the
+                    // curvature guard alone.
+                    let slope_fell =
+                        ase_bfgs_pair_allowed(t.alpha, grad.view(), gold.view(), direction.view());
+                    if moved && !t.no_update && (line_options.ase().is_none() || slope_fell) {
+                        let s = &*x - &old;
+                        let y = &grad - &gold;
+                        bfgs_inverse_update(h, &s, &y);
+                        // A later set_fixed_h0 replaces only a matrix that
+                        // has not yet taken a pair.
+                        if bfgs_accepts_pair(&s, &y) {
+                            *fresh = false;
+                        }
                     }
                     if self.accept != Accept::Step {
                         self.istep = qn_istep(&self.control);
@@ -6205,6 +6403,9 @@ impl Solver {
             status = Status::NoiseFloor;
         }
         let report = self.finish(value, x, &grad, grad_norm, status);
+        if line_failed && status == Status::Iterating {
+            return Ok(report.with_stop_reason(StopReason::LineSearchFailed));
+        }
         if line_stop.is_some() && status == Status::Iterating {
             Ok(report.with_stop_reason(crate::StopReason::LineSearchRounding))
         } else {
@@ -7647,6 +7848,8 @@ where
         moved,
         energy_noise: false,
         line_stop: None,
+        line_failed: false,
+        no_update: false,
     })
 }
 
@@ -7765,7 +7968,8 @@ mod tests {
     use super::*;
     use crate::fire::FireKind;
     use crate::oracle::Oracle;
-    use ndarray::{ArrayView1, array};
+    use crate::qn::bfgs_accepts_pair;
+    use ndarray::{Array2, ArrayView1, array};
 
     /// A steep well under a tiny Euclidean cap: every FIRE step is
     /// clamped, and the velocity has to describe the clamped move.
@@ -7811,6 +8015,144 @@ mod tests {
             Overlay::Rcg(memory) => format!("{memory:?}"),
             _ => panic!("not a Riemannian CG session"),
         }
+    }
+
+    /// `-ln(1 + x)` with a tight curvature constant. ASE's `step` sets
+    /// `no_update` at `stpmax` and `BFGSLineSearch.update` then leaves
+    /// the inverse Hessian alone. The pair still has positive curvature.
+    fn log_barrier(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let t = x[0];
+        let mut g = Array1::zeros(x.len());
+        g[0] = -1.0 / (1.0 + t);
+        (-(1.0 + t).ln(), g)
+    }
+
+    #[test]
+    fn an_ase_no_update_leaves_the_bfgs_hessian_unchanged() {
+        let obj = Oracle::unbounded(3, log_barrier);
+        let mut solver = Solver::new(
+            Method::Bfgs,
+            Control::default().with_istep(1.0).with_maxmove(None),
+            3,
+        );
+        solver.set_accept(Accept::Energy);
+        solver.set_atom_maxmove(10.0);
+        solver.set_linesearch(LineSearch::wolfe(0.23, 0.1, 20));
+        solver.set_ase_linesearch(5.0).unwrap();
+        let mut x = array![0.0, 0.0, 0.0];
+        solver.step(&obj, &mut x).unwrap();
+        assert!(
+            (x[0] - 5.0).abs() < 1e-8 && x[1] == 0.0 && x[2] == 0.0,
+            "expected the stpmax trial, got {x}"
+        );
+        let s = array![x[0], 0.0, 0.0];
+        let y = array![log_barrier(x.view()).1[0] - (-1.0), 0.0, 0.0];
+        assert!(
+            bfgs_accepts_pair(&s, &y),
+            "the pair would not replace the identity"
+        );
+        let Inner::Bfgs { h, fresh } = &solver.inner else {
+            unreachable!("BFGS session");
+        };
+        for i in 0..3 {
+            for j in 0..3 {
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (h[(i, j)] - want).abs() < 1e-12,
+                    "H[{i},{j}] = {}",
+                    h[(i, j)]
+                );
+            }
+        }
+        assert!(*fresh);
+    }
+
+    fn ase_bfgs(maxmove: f64) -> Solver {
+        let mut solver = Solver::new(
+            Method::Bfgs,
+            Control::default().with_istep(1.0).with_maxmove(None),
+            3,
+        );
+        solver.set_accept(Accept::Energy);
+        solver.set_atom_maxmove(maxmove);
+        solver.set_linesearch(LineSearch::wolfe(0.23, 0.46, 20));
+        solver.set_ase_linesearch(50.0).unwrap();
+        solver
+    }
+
+    fn bfgs_matrix(solver: &Solver) -> (Array2<f64>, bool) {
+        let Inner::Bfgs { h, fresh } = &solver.inner else {
+            unreachable!("BFGS session");
+        };
+        (h.clone(), *fresh)
+    }
+
+    /// The first trial sits on ASE's minimum step, where the slope has
+    /// flipped and grown. The curvature is positive, so a guard on `s·y`
+    /// would accept the pair. ASE skips it because the absolute
+    /// directional derivative did not fall.
+    fn rising_slope(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let mut g = Array1::zeros(x.len());
+        if x[0] > 0.0 {
+            g[0] = 2.0;
+            (2.0 * x[0], g)
+        } else {
+            g[0] = -1.0;
+            (-x[0], g)
+        }
+    }
+
+    #[test]
+    fn an_ase_step_with_a_rising_slope_leaves_the_bfgs_hessian_unchanged() {
+        let obj = Oracle::unbounded(3, rising_slope);
+        let mut solver = ase_bfgs(1e-8);
+        let mut x = array![0.0, 0.0, 0.0];
+        solver.step(&obj, &mut x).unwrap();
+        assert!(
+            (x[0] - 1e-8).abs() < 1e-14 && x[1] == 0.0 && x[2] == 0.0,
+            "expected the minimum-step trial, got {x}"
+        );
+        let s = array![x[0], 0.0, 0.0];
+        let y = array![2.0 - (-1.0), 0.0, 0.0];
+        assert!(
+            bfgs_accepts_pair(&s, &y),
+            "the pair would not replace the identity"
+        );
+        let (h, fresh) = bfgs_matrix(&solver);
+        for i in 0..3 {
+            for j in 0..3 {
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (h[(i, j)] - want).abs() < 1e-12,
+                    "H[{i},{j}] = {}",
+                    h[(i, j)]
+                );
+            }
+        }
+        assert!(fresh);
+    }
+
+    /// A convex step still replaces the identity. The slope fell and the
+    /// curvature is positive, which is the pair ASE's update accepts.
+    #[test]
+    fn an_ase_descent_updates_the_bfgs_hessian() {
+        let obj = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+            let d = x[0] - 1.0;
+            let mut g = Array1::zeros(x.len());
+            g[0] = 2.0 * d;
+            (d * d, g)
+        });
+        let mut solver = ase_bfgs(0.2);
+        let mut x = array![0.0, 0.0, 0.0];
+        solver.step(&obj, &mut x).unwrap();
+        assert!(x[0] > 0.0, "the step did not move, got {x}");
+        let (h, fresh) = bfgs_matrix(&solver);
+        assert!(!fresh, "the accepted pair left the initial Hessian");
+        assert!(
+            (h[(0, 0)] - 1.0).abs() > 1e-8,
+            "H stayed the identity: {}",
+            h[(0, 0)]
+        );
     }
 
     /// A step refused at the energy noise floor keeps its start, and the
