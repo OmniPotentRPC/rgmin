@@ -849,13 +849,13 @@ fn load_lbfgs_argon() -> LbfgsArgonReference {
             rows = Some(Vec::new());
             continue;
         }
-        if rows.is_some() {
+        if let Some(rows) = rows.as_mut() {
             let mut parts = line.split_whitespace();
             let k = parts.next().expect("k").parse().expect("k");
             let evals = parts.next().expect("evals").parse().expect("evals");
             let energy = parts.next().expect("energy").parse().expect("energy");
             let fmax = parts.next().expect("fmax").parse().expect("fmax");
-            rows.as_mut().expect("rows").push(LbfgsArgonRow {
+            rows.push(LbfgsArgonRow {
                 k,
                 evals,
                 energy,
@@ -881,6 +881,38 @@ fn load_lbfgs_argon() -> LbfgsArgonReference {
         cutoff: cutoff.expect("cutoff"),
         emtol: emtol.expect("emtol"),
         cases,
+    }
+}
+
+/// Each case keeps the rows parsed while its buffer was open.
+///
+/// Those rows stay on that case, in file order, with contiguous `k`.
+#[test]
+fn loaded_argon_rows_stay_on_the_case_that_opened_them() {
+    let reference = load_lbfgs_argon();
+    assert_eq!(reference.sigma, 0.34);
+    assert_eq!(reference.epsilon, 1.0);
+    assert_eq!(reference.cutoff, 3.0);
+    assert_eq!(reference.emtol, 1e-8);
+    let expected: [(usize, f64, usize, f64, f64); 5] = [
+        (10, 0.02, 13, -1.25489377088304e1, 7.27914686102068e-8),
+        (1, 0.02, 9, -1.25489318250017e1, 5.94016206047351e-3),
+        (3, 0.01, 11, -1.25489377043119e1, 1.40219868201663e-3),
+        (5, 0.05, 9, -1.25489377022797e1, 7.60948279512165e-4),
+        (10, 0.1, 7, -1.25481519742873e1, 3.65732325029629e-1),
+    ];
+    assert_eq!(reference.cases.len(), expected.len());
+    for (case, (nbfgscorr, emstep, nrows, energy, fmax)) in reference.cases.iter().zip(expected) {
+        assert_eq!(case.nbfgscorr, nbfgscorr);
+        assert_eq!(case.emstep, emstep);
+        assert_eq!(case.rows.len(), nrows);
+        for (i, row) in case.rows.iter().enumerate() {
+            assert_eq!(row.k, i);
+        }
+        let last = case.rows.last().expect("row");
+        assert_eq!(last.k, nrows - 1);
+        assert_eq!(last.energy, energy);
+        assert_eq!(last.fmax, fmax);
     }
 }
 
