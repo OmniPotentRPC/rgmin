@@ -2867,6 +2867,16 @@ impl Solver {
         Ok(())
     }
 
+    /// The session box moved the start, so the cached point is gone and a
+    /// GROMACS L-BFGS direction formed at the old point is stale.
+    #[cfg(feature = "highs")]
+    fn forget_clipped_start(&mut self) {
+        self.last_pos = None;
+        if let Overlay::GromacsLbfgs(state) = &mut self.overlay {
+            state.mark_rebase();
+        }
+    }
+
     /// One iteration, without the unlimited-budget plateau check.
     fn step_once<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report>
     where
@@ -2895,7 +2905,7 @@ impl Solver {
                     self.box_hi.clone(),
                 )?;
                 if bounded.clip_start(x)? {
-                    self.last_pos = None;
+                    self.forget_clipped_start();
                 }
                 if let Inner::Lbfgs(solver) = &mut self.inner {
                     // `StepOracle::bounds` is also in scope on every
@@ -2968,7 +2978,7 @@ impl Solver {
                         self.box_hi.clone(),
                     )?;
                     if bounded.clip_start(x)? {
-                        self.last_pos = None;
+                        self.forget_clipped_start();
                     }
                     if let Inner::Lbfgs(solver) = &mut self.inner {
                         solver.coordinate_box =

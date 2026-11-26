@@ -124,6 +124,33 @@ fn the_reset_line_step_is_scaled_by_the_current_force_not_the_rejected_trial() {
     assert_eq!(solver.gromacs_lbfgs_step_size(), Some(1.0));
 }
 
+#[cfg(feature = "highs")]
+#[test]
+fn a_session_box_clip_rebuilds_the_direction_at_the_clipped_start() {
+    let bowl = Oracle::unbounded(3, |x: ArrayView1<f64>| (0.5 * x.dot(&x), x.to_owned()));
+    let run = |rebase: bool| {
+        let mut solver = Solver::new(Method::GromacsLbfgs, control(10.0, 0.0, 10), 3);
+        solver.set_highs(true);
+        let mut point = array![2.0, 1.0, 0.0];
+        solver.step(&bowl, &mut point).unwrap();
+        assert_eq!(solver.pair_count(), 1);
+        assert!(point[1] > 0.5, "{point:?}");
+        assert!(solver.set_box(Some(vec![-10.0; 3]), Some(vec![10.0, 0.1, 10.0])));
+        if rebase {
+            solver.rebase();
+        }
+        solver.step(&bowl, &mut point).unwrap();
+        point
+    };
+    let clipped = run(false);
+    let rebased = run(true);
+    assert_eq!(clipped, rebased);
+    // On this bowl the stored pair has `s = y`, so the rebuilt direction
+    // is the force at the clipped start and the step stays on its ray.
+    // The stale direction from before the clip drives `x1` below zero.
+    assert!(clipped[1] > 0.0, "{clipped:?}");
+}
+
 #[test]
 fn machine_precision_stops_on_a_rounded_step_or_an_empty_memory_search() {
     fn run<O: DifferentiableObjective<f64>>(objective: &O, start: Array1<f64>) -> (Report, usize) {
