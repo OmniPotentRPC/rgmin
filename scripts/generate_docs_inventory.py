@@ -386,6 +386,15 @@ class _Reexport:
     record: int
 
 
+@dataclasses.dataclass
+class _GlobUse:
+    module: tuple[str, ...]
+    segments: tuple[str, ...]
+    source: str
+    line: int
+    declaration: str
+
+
 def _balanced_delimiters(text: str) -> tuple[int, int, int]:
     paren = bracket = brace = 0
     for char in text:
@@ -417,6 +426,7 @@ def rust_items(root: Path | None = None) -> list[Item]:
         return []
     records: list[_RustRec] = []
     reexports: list[_Reexport] = []
+    globs: list[_GlobUse] = []
     children: dict[tuple[str, ...], dict[str, tuple[tuple[str, ...], bool]]] = {}
     defined: dict[tuple[str, ...], dict[str, list[int]]] = {}
     types: dict[tuple[tuple[str, ...], str], int] = {}
@@ -673,13 +683,26 @@ def rust_items(root: Path | None = None) -> list[Item]:
                 body = header_blank.split("pub use", 1)[1]
                 body = body.rsplit(";", 1)[0]
                 for segments, alias in parse_use_tree(body):
+                    declaration = _collapse(header_raw)
+                    if segments and segments[-1] == "*":
+                        globs.append(
+                            _GlobUse(
+                                scope.module,
+                                segments,
+                                first_source,
+                                first_line,
+                                declaration,
+                            )
+                        )
+                        reexports.append(_Reexport(scope.module, segments, alias, -1))
+                        continue
                     record_id = add_record(
                         _RustRec(
                             "reexport",
                             alias,
                             first_source,
                             first_line,
-                            _collapse(header_raw),
+                            declaration,
                             scope.module,
                             "reexport",
                             "",
@@ -758,27 +781,32 @@ def rust_items(root: Path | None = None) -> list[Item]:
                         stack.append(_Scope(kind, depth, scope.module, name))
                     elif body_open:
                         stack.append(_Scope("fn", depth, scope.module, ""))
-                elif (
-                    identity
-                    and scope.kind == "impl"
-                    and identity[0] in {"fn", "const", "type"}
-                    and public
-                ):
-                    add_record(
-                        _RustRec(
-                            "function",
-                            identity[1],
-                            first_source,
-                            first_line,
-                            _collapse(header_raw),
-                            scope.module,
-                            "method",
-                            scope.name,
-                            True,
+                elif scope.kind == "impl" and public:
+                    parsed = rust_declaration(_collapse(header_raw))
+                    if parsed and parsed[0] in {
+                        "function",
+                        "C export",
+                        "const",
+                        "type",
+                    }:
+                        kind, name = parsed
+                        add_record(
+                            _RustRec(
+                                kind,
+                                name,
+                                first_source,
+                                first_line,
+                                _collapse(header_raw),
+                                scope.module,
+                                "method",
+                                scope.name,
+                                True,
+                            )
                         )
-                    )
-                    if body_open:
-                        stack.append(_Scope("fn", depth, scope.module, identity[1]))
+                        if body_open and kind in {"function", "C export"}:
+                            stack.append(_Scope("fn", depth, scope.module, name))
+                        elif body_open:
+                            stack.append(_Scope("fn", depth, scope.module, ""))
                 elif identity and scope.kind == "trait" and public:
                     add_record(
                         _RustRec(
@@ -932,6 +960,7 @@ def rust_items(root: Path | None = None) -> list[Item]:
         return output
 
     changed = True
+    expanded_globs: set[int] = set()
     while changed:
         changed = False
         for module in tuple(reachable_mods):
@@ -946,13 +975,63 @@ def rust_items(root: Path | None = None) -> list[Item]:
             for rex in reexports:
                 if rex.module != module:
                     continue
-                if mark_item(rex.record):
+                if rex.record >= 0 and mark_item(rex.record):
                     changed = True
                 for kind, value in resolve(module, rex.segments, set()):
                     if kind == "module" and value not in reachable_mods:
                         reachable_mods.add(value)
                         changed = True
                     elif kind == "item" and mark_item(value):
+                        changed = True
+            for index, glob in enumerate(globs):
+                if glob.module not in reachable_mods or index in expanded_globs:
+                    continue
+                names: list[str] = []
+                seen_names: set[str] = set()
+                item_ids: list[int] = []
+                module_paths: list[tuple[str, ...]] = []
+                for kind, value in resolve(glob.module, glob.segments, set()):
+                    if kind == "item":
+                        item_ids.append(value)
+                        name = records[value].name
+                        if name != "*" and name not in seen_names:
+                            seen_names.add(name)
+                            names.append(name)
+                    elif kind == "module":
+                        module_paths.append(value)
+                        name = value[-1] if value else ""
+                        if name and name != "*" and name not in seen_names:
+                            seen_names.add(name)
+                            names.append(name)
+                if not names:
+                    raise SystemExit(
+                        f"{glob.source}:{glob.line}: pub use glob expanded to no "
+                        f"public names: {glob.declaration}"
+                    )
+                expanded_globs.add(index)
+                for name in names:
+                    mark_item(
+                        add_record(
+                            _RustRec(
+                                "reexport",
+                                name,
+                                glob.source,
+                                glob.line,
+                                glob.declaration,
+                                glob.module,
+                                "reexport",
+                                "",
+                                True,
+                            )
+                        )
+                    )
+                    changed = True
+                for record_id in item_ids:
+                    if mark_item(record_id):
+                        changed = True
+                for path in module_paths:
+                    if path not in reachable_mods:
+                        reachable_mods.add(path)
                         changed = True
     for record in records:
         if record.role not in {"method", "field", "setter", "variant", "trait_member"}:

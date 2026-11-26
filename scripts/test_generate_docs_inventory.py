@@ -149,6 +149,65 @@ class ReachableRustTests(unittest.TestCase):
         )
         self.assertFalse(any(item.name == "hidden" for item in items))
 
+    def test_glob_reexport_expands_public_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "src"
+            nested = source / "outer"
+            nested.mkdir(parents=True)
+            (source / "lib.rs").write_text(
+                "mod outer;\npub use outer::*;\npub use missing::*;\n",
+                encoding="utf-8",
+            )
+            (source / "outer.rs").write_text(
+                "mod inner;\npub use inner::*;\npub fn outer_fn() {}\n",
+                encoding="utf-8",
+            )
+            (nested / "inner.rs").write_text(
+                "pub fn inner_fn() {}\npub struct Inner {\n    pub value: i32,\n}\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(SystemExit) as caught:
+                inventory.rust_items(root)
+            self.assertIn("pub use glob", str(caught.exception))
+            (source / "lib.rs").write_text(
+                "mod outer;\npub use outer::*;\n",
+                encoding="utf-8",
+            )
+            items = inventory.rust_items(root)
+        names = {item.name for item in items}
+        self.assertIn("outer_fn", names)
+        self.assertIn("inner_fn", names)
+        self.assertIn("Inner", names)
+        self.assertIn("value", names)
+        self.assertNotIn("*", names)
+        self.assertTrue(
+            any(item.kind == "reexport" and item.name == "inner_fn" for item in items)
+        )
+        self.assertTrue(
+            any(item.kind == "function" and item.name == "inner_fn" for item in items)
+        )
+
+    def test_associated_const_is_const(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "src"
+            source.mkdir()
+            (source / "lib.rs").write_text(
+                "pub struct Owner;\n"
+                "impl Owner {\n"
+                "    pub const LIMIT: i32 = 1;\n"
+                "    pub const fn make() -> Self { Owner }\n"
+                "    pub fn method(&self) {}\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            items = inventory.rust_items(root)
+        kinds = {item.name: item.kind for item in items}
+        self.assertEqual(kinds["LIMIT"], "const")
+        self.assertEqual(kinds["make"], "function")
+        self.assertEqual(kinds["method"], "function")
+
     def test_crate_hides_private_modules_and_keeps_reexports(self) -> None:
         items = inventory.rust_items()
         names = {item.name for item in items}
