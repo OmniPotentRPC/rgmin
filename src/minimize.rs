@@ -463,16 +463,22 @@ where
         let lsstep = t.alpha;
         let moved = t.moved;
         let unmoved = !moved;
+        let step_length = if moved && observer.is_some() {
+            crate::observer::separation(t.x.view(), pos.view())
+        } else {
+            0.0
+        };
         pos = t.x;
         value = t.f;
         grad = t.g;
-        if let Some(obs) = observer.as_deref_mut()
+        if moved
+            && let Some(obs) = observer.as_deref_mut()
             && obs.observe(IterationView {
                 iteration: step,
                 x: pos.view(),
                 value,
                 grad_norm: l2(&grad),
-                step_length: lsstep.abs() * crate::vecops::nrm2(dir.view()),
+                step_length,
             }) == ObserverSignal::Stop
         {
             return control.deliver(

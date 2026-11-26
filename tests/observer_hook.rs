@@ -1,9 +1,11 @@
-use ndarray::array;
+use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
+use ndarray::{Array1, ArrayView1, array};
 use rgmin::{
-    Control, EonCg, HessianOracle, HvpOracle, IterationView, LineSearch, ManifoldKind, Method,
-    NewtonKind, ObserverSignal, Oracle, Rlbfgs, StopReason, minimize_eon_cg_observed,
-    minimize_method, minimize_method_hess_observed, minimize_method_hvp_observed,
-    minimize_method_observed, minimize_newton_observed, minimize_rlbfgs_observed,
+    Conjugacy, Control, EonCg, HessianOracle, HvpOracle, IterationView, LineSearch, ManifoldKind,
+    Method, NewtonKind, ObserverSignal, Oracle, Restart, Rlbfgs, StopReason,
+    minimize_eon_cg_observed, minimize_method, minimize_method_hess_observed,
+    minimize_method_hvp_observed, minimize_method_observed, minimize_newton_observed,
+    minimize_rlbfgs_observed,
 };
 
 fn quadratic()
@@ -586,4 +588,96 @@ fn observer_stop_covers_the_second_order_and_manifold_solvers() {
     );
     assert!(eon.observer_stop);
     assert!(!eon.converged);
+}
+
+/// Bowl `0.5 x^2` on `[0.2, 5]`. The unconstrained step from `1.5` lands
+/// at `0`, and the box clips it to the bound. Later steps point outside
+/// that bound and are rejected.
+struct ClippedBowl {
+    bounds: Bounds<f64>,
+}
+
+impl ClippedBowl {
+    fn new() -> Self {
+        Self {
+            bounds: Bounds::new(array![0.2], array![5.0], 0.0),
+        }
+    }
+}
+
+impl Objective<f64> for ClippedBowl {
+    fn dim(&self) -> usize {
+        1
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        0.5 * x[0] * x[0]
+    }
+}
+
+impl Gradient<f64> for ClippedBowl {
+    fn dim(&self) -> usize {
+        1
+    }
+
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        x.to_owned()
+    }
+}
+
+impl DifferentiableObjective<f64> for ClippedBowl {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        (0.5 * x[0] * x[0], x.to_owned())
+    }
+}
+
+#[test]
+fn nlcg_reports_the_clipped_separation_and_skips_rejected_steps() {
+    let obj = ClippedBowl::new();
+    let start = array![1.5];
+    let control = Control::default()
+        .with_maxiter(4)
+        .with_gtol(1e-12)
+        .with_istep(1.0)
+        .with_maxmove(10.0);
+    let mut previous = start.clone();
+    let mut seen = Vec::new();
+    let report = minimize_method_observed(
+        &obj,
+        start,
+        &control,
+        Method::nlcg_with_restart(Conjugacy::PolakRibiere, Restart::njws_at(0.0)),
+        LineSearch::backtracking(1e-4, 0.5, 20),
+        Some(&mut |state: IterationView<'_>| {
+            let moved = (&state.x - &previous).dot(&(&state.x - &previous)).sqrt();
+            assert!(
+                (state.step_length - moved).abs() <= 1e-9 * moved.max(1.0),
+                "step_length {} is not the separation {moved}",
+                state.step_length
+            );
+            seen.push(state.x.to_owned());
+            previous = state.x.to_owned();
+            ObserverSignal::Continue
+        }),
+    )
+    .expect("bounded nlcg");
+    assert!(!seen.is_empty(), "an accepted step was not reported");
+    assert!(
+        (seen[0][0] - 0.2).abs() <= 1e-8,
+        "the accepted step was not clipped to the bound, got {}",
+        seen[0][0]
+    );
+    assert!(
+        seen.len() < report.steps,
+        "a rejected step was reported: {} observations in {} steps",
+        seen.len(),
+        report.steps
+    );
+    for pair in seen.windows(2) {
+        assert_ne!(pair[0], pair[1], "a repeated point is a rejected step");
+    }
 }
