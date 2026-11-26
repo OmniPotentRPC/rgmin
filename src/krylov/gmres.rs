@@ -891,10 +891,12 @@ where
     {
         return Err(refusal(KrylovRefusal::Dimension, first_record()));
     }
-    if !(options.relative_tolerance.is_finite() && options.relative_tolerance > 0.0) {
-        return Err(refusal(KrylovRefusal::Tolerance, first_record()));
-    }
     if right_hand_sides.is_empty() {
+        // No column is present, so the tolerance is checked here.
+        // A bad tolerance refuses the call.
+        if !(options.relative_tolerance.is_finite() && options.relative_tolerance > 0.0) {
+            return Err(refusal(KrylovRefusal::Tolerance, first_record()));
+        }
         return Ok(Vec::new());
     }
     let dimension = right_hand_sides[0].len();
@@ -915,6 +917,9 @@ where
         }
         if !finite(right_hand_side) || !right_hand_side_norm.is_finite() {
             return Err(refusal(KrylovRefusal::NonFinite, record));
+        }
+        if !(options.relative_tolerance.is_finite() && options.relative_tolerance > 0.0) {
+            return Err(refusal(KrylovRefusal::Tolerance, record));
         }
         if !(options.relative_tolerance * right_hand_side_norm).is_finite() {
             return Err(refusal(KrylovRefusal::NonFinite, record));
@@ -2371,6 +2376,91 @@ mod tests {
             return Err("a closure preconditioner produced the wrong solution");
         }
         Ok(())
+    }
+
+    #[test]
+    fn empty_and_nan_right_hand_sides_with_zero_tolerance_match() {
+        let mut operator = Diagonal {
+            values: vec![1.0],
+            scalar_calls: 0,
+            batch_calls: 0,
+        };
+        let options = GmresOptions::unrestarted(0.0);
+        let scalar_empty = gmres_right(&mut operator, &mut Identity, &[], options, &mut NoObserver);
+        let block_empty = gmres_right_block(
+            &mut operator,
+            &mut [Identity],
+            &[Vec::new()],
+            options,
+            &mut [NoObserver],
+        );
+        let scalar_nan = gmres_right(
+            &mut operator,
+            &mut Identity,
+            &[f64::NAN],
+            options,
+            &mut NoObserver,
+        );
+        let block_nan = gmres_right_block(
+            &mut operator,
+            &mut [Identity],
+            &[vec![f64::NAN]],
+            options,
+            &mut [NoObserver],
+        );
+        assert_eq!(
+            refused_parts(scalar_empty),
+            Some((KrylovRefusal::EmptySystem, 0.0))
+        );
+        assert_eq!(
+            refused_parts(block_empty),
+            Some((KrylovRefusal::EmptySystem, 0.0))
+        );
+        match (refused_parts(scalar_nan), refused_parts(block_nan)) {
+            (Some((scalar_reason, scalar_norm)), Some((block_reason, block_norm))) => {
+                assert_eq!(scalar_reason, KrylovRefusal::NonFinite);
+                assert_eq!(block_reason, scalar_reason);
+                assert!(scalar_norm.is_nan());
+                assert!(block_norm.is_nan());
+            }
+            _ => panic!("a NaN right-hand side with rtol 0 was accepted"),
+        }
+    }
+
+    #[test]
+    fn empty_block_with_bad_tolerance_is_refused() {
+        let mut operator = Diagonal {
+            values: vec![1.0],
+            scalar_calls: 0,
+            batch_calls: 0,
+        };
+        let mut no_preconditioners: [Identity; 0] = [];
+        let mut no_observers: [NoObserver; 0] = [];
+        for tolerance in [0.0, f64::NAN, f64::INFINITY, -1.0] {
+            let result = gmres_right_block(
+                &mut operator,
+                &mut no_preconditioners,
+                &[],
+                GmresOptions::unrestarted(tolerance),
+                &mut no_observers,
+            );
+            assert_eq!(
+                refused_parts(result),
+                Some((KrylovRefusal::Tolerance, 0.0)),
+                "an empty block with tolerance {tolerance} was not refused"
+            );
+        }
+    }
+
+    fn refused_parts<T, OE, PE>(
+        result: Result<T, GmresFailure<OE, PE>>,
+    ) -> Option<(KrylovRefusal, f64)> {
+        match result {
+            Err(GmresFailure::Refused { reason, record }) => {
+                Some((reason, record.right_hand_side_norm))
+            }
+            _ => None,
+        }
     }
 
     struct Scale(f64);
