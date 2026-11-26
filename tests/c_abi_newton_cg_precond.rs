@@ -7,9 +7,9 @@ use std::os::raw::c_void;
 
 use dlpk::sys::DLManagedTensorVersioned;
 use rgmin::ffi::{
-    rgmin_control_t, rgmin_evalgrad_fn, rgmin_hvp_fn, rgmin_last_error,
-    rgmin_minimize_hvp_precond_sized, rgmin_report_t, rgmin_status_t, rgmin_stop_t,
-    rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free, rgmin_vec_precond_fn,
+    RGMIN_CONTROL_REVISION6_SIZE, rgmin_control_t, rgmin_evalgrad_fn, rgmin_hvp_fn,
+    rgmin_last_error, rgmin_minimize_hvp_precond_sized, rgmin_report_t, rgmin_status_t,
+    rgmin_stop_t, rgmin_tensor_borrow_cpu_f64, rgmin_tensor_free, rgmin_vec_precond_fn,
 };
 
 /// The one-shot entry at the layout this test file compiles.
@@ -500,4 +500,143 @@ fn a_failing_precond_callback_aborts_with_its_status() {
         "callbacks after the failure must be skipped"
     );
     assert!(x.iter().all(|v| *v == 1.0), "x is untouched on failure");
+}
+
+// f = OFFSET + STIFF / 4 * sum x_i^4. Near the origin the quartic is
+// under half a unit in the last place of OFFSET, so the value is OFFSET
+// at the point and at every trial while the gradient is of order one.
+const OFFSET: f64 = 1e8;
+const STIFF: f64 = 1e24;
+/// One unit in the last place of `OFFSET`, `2^-26`.
+const OFFSET_ULP: f64 = 1.0 / 67_108_864.0;
+
+unsafe extern "C" fn quartic_evalgrad(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    value_out: *mut f64,
+    g: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    unsafe { probe(user) }.evalgrad_calls += 1;
+    let x = unsafe { view(x) };
+    let g = unsafe { view_mut(g) };
+    let mut quartic = 0.0;
+    for (gi, xi) in g.iter_mut().zip(x.iter()) {
+        quartic += 0.25 * STIFF * xi.powi(4);
+        *gi = STIFF * xi.powi(3);
+    }
+    unsafe { *value_out = OFFSET + quartic };
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+unsafe extern "C" fn quartic_hvp(
+    user: *mut c_void,
+    x: *const DLManagedTensorVersioned,
+    v: *const DLManagedTensorVersioned,
+    hv: *mut DLManagedTensorVersioned,
+) -> rgmin_status_t {
+    unsafe { probe(user) }.hvp_calls += 1;
+    let x = unsafe { view(x) };
+    let v = unsafe { view(v) };
+    let hv = unsafe { view_mut(hv) };
+    for ((out, xi), vi) in hv.iter_mut().zip(x.iter()).zip(v.iter()) {
+        *out = 3.0 * STIFF * xi * xi * vi;
+    }
+    rgmin_status_t::RGMIN_SUCCESS
+}
+
+const QUARTIC_START: [f64; 3] = [1e-3, -1e-3, 1e-3];
+
+/// The quartic from `QUARTIC_START` with `noise_eps_f`, the control
+/// passed as `ctrl_size` bytes.
+fn quartic_solve(noise_eps_f: f64, ctrl_size: usize) -> ([f64; 3], rgmin_status_t, rgmin_report_t) {
+    let mut x = QUARTIC_START;
+    let xt = unsafe { rgmin_tensor_borrow_cpu_f64(x.as_mut_ptr(), x.len()) };
+    assert!(!xt.is_null());
+    let ctrl = rgmin_control_t {
+        noise_eps_f,
+        ..control(200, 1e-6)
+    };
+    let mut out = blank_report();
+    let mut pr = Probe::new();
+    let st = unsafe {
+        rgmin_minimize_hvp_precond_sized(
+            Some(quartic_evalgrad),
+            Some(quartic_hvp),
+            None,
+            &mut pr as *mut Probe as *mut c_void,
+            xt,
+            &ctrl,
+            ctrl_size,
+            0,
+            0,
+            &mut out,
+        )
+    };
+    unsafe { rgmin_tensor_free(xt) };
+    (x, st, out)
+}
+
+const CURRENT: usize = std::mem::size_of::<rgmin_control_t>();
+
+#[test]
+fn a_collapse_at_the_value_floor_leaves_x_at_the_start() {
+    for off in [0.0, -1.0, f64::NAN] {
+        let (x, st, out) = quartic_solve(off, CURRENT);
+        assert_eq!(
+            st,
+            rgmin_status_t::RGMIN_INVALID_PARAMETER,
+            "noise_eps_f {off}"
+        );
+        assert!(
+            last_error().contains("trust region collapsed"),
+            "{}",
+            last_error()
+        );
+        assert_eq!(x, QUARTIC_START, "noise_eps_f {off}");
+        assert_eq!(out.steps, 0, "the report is not written");
+    }
+}
+
+#[test]
+fn noise_eps_f_stops_at_the_floor_and_writes_the_last_accepted_point() {
+    let (x, st, out) = quartic_solve(4.0 * OFFSET_ULP, CURRENT);
+    assert_eq!(st, rgmin_status_t::RGMIN_SUCCESS, "{}", last_error());
+    assert_eq!(out.stop, rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR);
+    assert_eq!(out.converged, 0);
+    assert!(
+        (out.value - OFFSET).abs() <= 2.0 * OFFSET_ULP,
+        "value {:e}",
+        out.value
+    );
+    let start_norm = 3f64.sqrt() * STIFF * 1e-9;
+    assert!(
+        out.grad_norm < 1e-12 * start_norm && out.grad_norm > 1e-3,
+        "grad_norm {:e}",
+        out.grad_norm
+    );
+    for (xi, start) in x.iter().zip(QUARTIC_START) {
+        assert!(xi.abs() < 1e-7 && xi.abs() > 0.0, "x = {xi:e}");
+        assert_eq!(xi.signum(), start.signum());
+    }
+    // `x` is the point the report describes.
+    let norm = x
+        .iter()
+        .map(|v| (STIFF * v.powi(3)).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert_eq!(norm.to_bits(), out.grad_norm.to_bits());
+}
+
+#[test]
+fn a_revision_6_caller_does_not_have_noise_eps_f_read() {
+    // The struct holds a positive noise_eps_f, and the declared size
+    // ends before it, so the run collapses as it does with the test off.
+    let (x, st, _) = quartic_solve(4.0 * OFFSET_ULP, RGMIN_CONTROL_REVISION6_SIZE);
+    assert_eq!(st, rgmin_status_t::RGMIN_INVALID_PARAMETER);
+    assert!(
+        last_error().contains("trust region collapsed"),
+        "{}",
+        last_error()
+    );
+    assert_eq!(x, QUARTIC_START);
 }
