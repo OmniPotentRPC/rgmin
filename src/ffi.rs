@@ -103,7 +103,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 65;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 70;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -174,8 +174,9 @@ pub enum rgmin_method_t {
     /// ABI minor 65. The options record carries the other coefficients.
     RGMIN_RCG = 30,
     /// MDMin: velocity Verlet with the velocity reset onto the force.
-    /// The time step is the control istep. The per-atom cap is the session
-    /// atom cap, and a positive maxmove also caps the Euclidean length.
+    /// ABI minor 70. The time step is the control istep. The per-atom cap
+    /// is the session atom cap, and a positive maxmove also caps the
+    /// Euclidean length.
     RGMIN_MDMIN = 31,
 }
 
