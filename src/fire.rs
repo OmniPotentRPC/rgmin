@@ -321,8 +321,16 @@ impl FireState {
         self.preset
     }
 
-    /// Replace the integrator parameters and cold-start the velocity.
-    /// A non-positive `dt` or `dt_max` is left as it was.
+    /// Apply `config` and reset the velocity and step counters (`n_pos`,
+    /// `n_neg`, `steps`) to zero.
+    ///
+    /// Updates `n_min` and `cap_two_step_overshoot` unconditionally, and
+    /// updates each guarded floating-point parameter only when it is
+    /// finite and in range (`dt > 0`, `dt_max > 0`, `f_inc > 1`,
+    /// `0 < f_dec < 1`, `alpha > 0`, `0 < f_alpha < 1`), leaving any
+    /// out-of-range or non-finite field at its prior value. Updating `dt`,
+    /// `dt_max`, or `alpha` also updates `dt_start`, `dt_max_start`, or
+    /// `alpha_start`.
     pub fn apply_config(&mut self, config: &FireConfig) {
         if config.dt.is_finite() && config.dt > 0.0 {
             self.dt = config.dt;
