@@ -435,6 +435,11 @@ _HELD_GUARD_FINALIZER = textwrap.dedent(
 )
 
 
+# Starts a child interpreter. Repeating it, on threads or in turn, queues
+# that many interpreter start-ups, which a sanitizer build cannot finish
+# inside the timeout, and each child runs the same single-threaded path.
+@pytest.mark.thread_unsafe
+@pytest.mark.iterations(1)
 @pytest.mark.timeout(30)
 def test_finalizer_under_held_guard() -> None:
     """GC while the table lock is held must release the entry without blocking."""
