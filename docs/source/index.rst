@@ -85,6 +85,7 @@ That installs the 0.8 release on Rust 1.88 or newer.
    howto/install
    howto/session
    howto/configure
+   howto/method-catalog
    howto/fire
    howto/strong-scaling
    howto/constraints
@@ -135,6 +136,7 @@ That installs the 0.8 release on Rust 1.88 or newer.
 
    reference/architecture
    reference/api
+   reference/public-api
    reference/constraints
    reference/python
    reference/lammps-min-style
