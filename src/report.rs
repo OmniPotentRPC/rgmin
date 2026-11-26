@@ -14,12 +14,15 @@ pub enum Status {
     Tolerance,
     /// The stationarity measure fell below `c * sqrt(n_free) * eps_g`
     /// and was still at or above `gtol`, or the line search found no
-    /// trial whose decrease cleared `c * eps_f`.
+    /// trial whose decrease cleared `c * eps_f`, or a Newton-CG trust
+    /// region trial was refused while its model predicted a reduction
+    /// of at most `c * eps_f`.
     ///
     /// One projection `g · w` with `w` uniform on the sphere has variance
     /// `tr(Σ) / n`. The Euclidean noise is `sqrt(n)` times that, so the
     /// comparison uses `sqrt(n_free)`. The energy test keeps the point
-    /// from before that search.
+    /// from before that search, and the trust region test keeps the
+    /// last accepted point.
     NoiseFloor,
     /// SCG, or an L-BFGS session stepped with no iteration budget, stopped
     /// on its step or objective test while `||g||` was still at or above

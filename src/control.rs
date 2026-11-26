@@ -11,7 +11,9 @@ use ndarray::ArrayView1;
 /// `eps_g` alone sits `sqrt(n)` too low. The stop uses
 /// `c * sqrt(n_free) * eps_g`. `eps_f` is the energy noise on the same
 /// stencil. A line search that finds no trial whose decrease clears
-/// `c * eps_f` is the same stop.
+/// `c * eps_f` is the same stop, and so is a Newton-CG trust region
+/// trial that is refused while its model predicts a reduction of at
+/// most `c * eps_f`.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NoiseFloor {
@@ -19,7 +21,8 @@ pub struct NoiseFloor {
     pub eps_g: f64,
     /// Factor in front of `sqrt(n_free) * eps_g` and of `eps_f`. The default is 3.
     pub c: f64,
-    /// Noise of the energy. `None` leaves the decrease test off.
+    /// Noise of the energy. `None` leaves the decrease test and the
+    /// trust region model test off.
     pub eps_f: Option<f64>,
 }
 
@@ -60,11 +63,28 @@ impl NoiseFloor {
     /// A non-positive or non-finite `eps_f`, and a non-positive `c`, leave
     /// the test off. A decrease equal to `c * eps_f` clears it.
     pub fn stalled_on_energy(self, best_decrease: f64) -> bool {
+        self.energy_threshold()
+            .is_some_and(|threshold| best_decrease < threshold)
+    }
+
+    /// Whether a trust region model that predicts the reduction
+    /// `predicted` promises no decrease the energy can resolve:
+    /// `predicted <= c * eps_f`.
+    ///
+    /// The test is off under the conditions that leave
+    /// [`Self::stalled_on_energy`] off, and a NaN `predicted` fails it.
+    pub fn model_below_energy_noise(self, predicted: f64) -> bool {
+        self.energy_threshold()
+            .is_some_and(|threshold| predicted <= threshold)
+    }
+
+    /// `c * eps_f` when both are positive and finite.
+    fn energy_threshold(self) -> Option<f64> {
         match self.eps_f {
             Some(eps) if eps.is_finite() && eps > 0.0 && self.c.is_finite() && self.c > 0.0 => {
-                best_decrease < self.c * eps
+                Some(self.c * eps)
             }
-            _ => false,
+            _ => None,
         }
     }
 }

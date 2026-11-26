@@ -29,7 +29,7 @@ use crate::manifold::ManifoldKind;
 use crate::report::Report;
 use crate::rigid::project_out_rot_trans;
 use crate::scg::DirectionalCurvature;
-use crate::step::{apply_caps, one_shot_report};
+use crate::step::{apply_caps, energy_noise_report, one_shot_report};
 use crate::stop::{Counted, StopRules, counted, stop_after};
 use crate::trust::{reduction_ratio, update_radius};
 use crate::vecops::{axpy, dot, nrm2};
@@ -661,6 +661,26 @@ pub(crate) struct NewtonCgTaken {
     pub hvps: usize,
     /// The radius hit [`RADIUS_FLOOR`].
     pub collapsed: bool,
+    /// Reduction the model predicted for the trial, when the objective
+    /// answered it with a finite value. `None` when the model step is
+    /// refused before the objective is touched, or the trial value is
+    /// not finite.
+    pub predicted: Option<f64>,
+}
+
+impl NewtonCgTaken {
+    /// The trial was refused and its model promised no decrease above
+    /// the energy noise of `control`
+    /// ([`crate::NoiseFloor::model_below_energy_noise`]). A smaller radius
+    /// only lowers the prediction, so no later trial from this point can
+    /// be told from noise either. Always `false` without an `eps_f`.
+    pub(crate) fn refused_below_energy_noise(&self, control: &Control) -> bool {
+        !self.moved
+            && control.noise_floor.is_some_and(|floor| {
+                self.predicted
+                    .is_some_and(|pred| floor.model_below_energy_noise(pred))
+            })
+    }
 }
 
 /// Objective with a Hessian action whose callbacks can fail.
@@ -983,6 +1003,7 @@ where
             trial_gradients: 0,
             hvps: hvps.load(Ordering::Relaxed),
             collapsed: radius < RADIUS_FLOOR,
+            predicted: None,
         }
     };
     let (trial, step) = if let Some(kind) = &req.manifold {
@@ -1021,6 +1042,7 @@ where
     let radius = update_radius(radius, rho, boundary_norm, rmax);
     let moved = rho > ETA_ACCEPT && ft.is_finite();
     let collapsed = radius < RADIUS_FLOOR;
+    let predicted = ft.is_finite().then_some(pred);
     Ok(if moved {
         NewtonCgTaken {
             pos: trial,
@@ -1031,6 +1053,7 @@ where
             trial_gradients: 1,
             hvps: hvps.load(Ordering::Relaxed),
             collapsed,
+            predicted,
         }
     } else {
         NewtonCgTaken {
@@ -1042,6 +1065,7 @@ where
             trial_gradients: 1,
             hvps: hvps.load(Ordering::Relaxed),
             collapsed,
+            predicted,
         }
     })
 }
@@ -1050,6 +1074,15 @@ where
 /// region. `control.maxmove` caps the trust radius, so the region
 /// plays the role the step clip plays elsewhere; `control.istep` seeds
 /// the initial radius when positive.
+///
+/// A radius that falls to its floor without an accepted step is
+/// [`Error::TrustCollapsed`]. With an energy noise in
+/// [`Control::noise_floor`] ([`crate::NoiseFloor::with_eps_f`]), a
+/// refused trial whose model predicts a reduction of at most `c * eps_f`
+/// ends the run at the last accepted point with
+/// [`crate::Status::NoiseFloor`] instead: the value cannot resolve that
+/// step or any shorter one. The report carries the gradient norm there,
+/// and [`Report::converged`] stays `false` unless it is below `gtol`.
 pub fn minimize_newton_cg<O>(
     obj: &O,
     init: impl Into<Array1<f64>>,
@@ -1160,6 +1193,16 @@ where
             caller_precond,
         )?;
         radius = taken.radius;
+        if taken.refused_below_energy_noise(control) {
+            // The value cannot tell this trial, or any shorter one, from
+            // the current point. Stop here with the last accepted point
+            // rather than shrink the radius to its floor.
+            return finish_newton_cg(
+                obj,
+                control,
+                energy_noise_report(value, pos, step + 1, gnorm),
+            );
+        }
         if taken.collapsed {
             return Err(Error::TrustCollapsed { steps: step });
         }

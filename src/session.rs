@@ -3256,7 +3256,10 @@ impl Solver {
         if let Inner::NewtonCg { radius } | Inner::NewtonPcg { radius } = &mut self.inner {
             *radius = taken.radius;
         }
-        if taken.collapsed {
+        // A refused trial the energy noise cannot tell from the current
+        // point is the noise-floor stop, ahead of the radius floor.
+        let energy_noise = taken.refused_below_energy_noise(&self.control);
+        if taken.collapsed && !energy_noise {
             // The free-function loop reports the attempt and keeps the
             // previous point when the radius hits the floor.
             self.remember(x, value, &raw_grad);
@@ -3273,13 +3276,11 @@ impl Solver {
         self.remember(x, taken.value, &raw_out);
         self.steps += 1;
         let gnorm = self.stationarity_norm(x, &report_grad);
-        Ok(self.finish(
-            taken.value,
-            x,
-            &report_grad,
-            gnorm,
-            self.control.classify(gnorm, self.free_len(bounds)),
-        ))
+        let mut status = self.control.classify(gnorm, self.free_len(bounds));
+        if energy_noise && status == Status::Iterating {
+            status = Status::NoiseFloor;
+        }
+        Ok(self.finish(taken.value, x, &report_grad, gnorm, status))
     }
 
     /// `P^{-1} force` when an exponential preconditioner is installed.
