@@ -10,6 +10,7 @@ cluster. The calculator supplies the derivatives.
 from __future__ import annotations
 
 import inspect
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -346,6 +347,34 @@ def test_trajectory_logfile_and_restart(tmp_path: Path) -> None:
 
     with pytest.raises(RestartError):
         BFGSLineSearch(start, restart=str(logfile), logfile=None)
+
+
+@pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
+@pytest.mark.parametrize("cls", [BFGSLineSearch, LBFGSLineSearch])
+def test_restart_carries_the_force_call_count(tmp_path: Path, cls: type) -> None:
+    start = _cu_cluster()
+    restart = tmp_path / "count.json"
+    first = cls(_copy(start, EMT()), restart=str(restart), logfile=None)
+    first.run(fmax=1e-6, steps=3)
+    recorded = first.force_calls
+    assert recorded > 0
+    assert first.function_calls == recorded
+    snapshot = tmp_path / "snapshot.json"
+    shutil.copyfile(restart, snapshot)
+    first.run(fmax=1e-6, steps=2)
+    assert first.force_calls > recorded
+
+    logfile = tmp_path / "count.log"
+    again = cls(_copy(start, EMT()), restart=str(snapshot), logfile=str(logfile))
+    assert again.force_calls == recorded
+    assert again.function_calls == recorded
+    again.run(fmax=1e-6, steps=2)
+    assert again.force_calls == first.force_calls
+    assert again.function_calls == first.function_calls
+    if cls is BFGSLineSearch:
+        lines = logfile.read_text().splitlines()
+        assert f"[{recorded:3d}]" in lines[1]
+        assert f"[{first.force_calls:3d}]" in lines[-1]
 
 
 @pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
