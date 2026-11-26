@@ -985,8 +985,9 @@ impl Solver {
     ///
     /// On L-BFGS this is the fixed scale of [`Self::set_lbfgs_fixed_h0`].
     /// On BFGS it replaces the fresh inverse Hessian with `h0 I`, and
-    /// [`Self::forget`] restores that scale. A BFGS matrix that has
-    /// already been updated keeps its pairs until `forget`. Other
+    /// [`Self::forget`] or a refused constrained step restores that
+    /// scale. A BFGS matrix that has already been updated keeps its
+    /// pairs until then. Other
     /// methods return an error. `h0` must be finite and positive.
     /// Leaving this unset keeps the identity BFGS matrix and the
     /// Nocedal-Wright L-BFGS scale.

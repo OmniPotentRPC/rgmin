@@ -3132,8 +3132,9 @@ pub unsafe extern "C" fn rgmin_solver_set_fixed_h0(solver: *mut rgmin_solver_t, 
 /// step off, so a default L-BFGS session can step. A non-positive
 /// finite per-atom cap is ASE's `maxstep` and scales each increment,
 /// including to zero. Returns 0, or 1 on a null session, a NaN
-/// `stpmax`, or another method. A `stpmax` below 1 is accepted and
-/// fails each search, as in ASE. ABI minor 53.
+/// `stpmax`, or another method, leaving the session as it was. A
+/// `stpmax` below 1 is accepted and fails each search, as in ASE. ABI
+/// minor 53.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
