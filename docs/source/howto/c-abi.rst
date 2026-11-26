@@ -295,7 +295,7 @@ These are ``abi_minor`` 51. ``rgmin_control_t`` is unchanged, and the
 default Euclidean L-BFGS step stays the eOn cap.
 
 Newton-CG under a caller preconditioner
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ABI minor 66 adds ``rgmin_vec_precond_fn`` and ``rgmin_minimize_hvp_precond``, with ``rgmin_minimize_hvp_precond_sized`` behind it.
 Check ``rgmin_abi_stamp().abi_minor >= 66`` before using them.
@@ -307,7 +307,6 @@ The three callbacks are ``evalgrad`` (value and gradient in one call), ``hvp`` (
 One ``user`` pointer reaches all three.
 ``P`` takes no iterate and stays fixed for the solve, so it must be symmetric positive definite wherever the solve goes; keep any iterate-dependent state behind ``user``.
 CG under any such ``P`` reaches the same step as plain CG, in fewer Hessian actions when ``P`` approximates the Hessian.
-
 
 .. code:: c
 
