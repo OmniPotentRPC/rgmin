@@ -134,7 +134,11 @@ it. The line search then stops with ~Status::NoiseFloor~, and keeps
 the pre-step point, when no trial decreases the energy by at least
 ~c * eps_f~. A gradient floor does not see that stall: the gradient
 can sit far above ~3 sqrt(n) eps_g~ while every trial is inside the
-energy roundoff.
+energy roundoff. Newton-CG reads the same ~eps_f~ in its trust region:
+a trial that is refused while the model predicts a reduction of at most
+~c * eps_f~ is that stop, at the last accepted point, where the run
+would otherwise shrink its radius to the floor and return
+~Error::TrustCollapsed~.
 
 The stop is ~Status::NoiseFloor~. Spending the iteration budget
 above both tests is ~Status::Budget~. SCG's own step and objective

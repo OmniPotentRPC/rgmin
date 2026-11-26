@@ -90,6 +90,36 @@ extra bytes unread, and any other size returns
 symbols at run time calls the ``_sized`` names to have
 ``require_convergence`` read.
 
+Layout revision 7, at ``abi_minor`` 68, adds ``noise_eps_f`` after
+``require_convergence``, and the struct grows from 64 to 72 bytes on a
+64-bit target. ``RGMIN_CONTROL_REVISION6_SIZE`` is the revision 6 struct:
+an entry told that size reads the fields through ``require_convergence``,
+writes the whole report, and leaves ``noise_eps_f`` at its default 0.
+``rgmin_control_init`` fills any of the three layouts.
+
+``noise_eps_f`` is the noise of the objective value, and a value that is
+not positive leaves the test off. With ``c`` the factor ``noise_c``, a line
+search that finds no trial whose decrease clears ``c * noise_eps_f``
+stops with ``RGMIN_STOP_NOISE_FLOOR``, and so does a Newton-CG run
+(``rgmin_minimize_hvp``, ``rgmin_minimize_hvp_precond``, ``RGMIN_NEWTON_CG``,
+``RGMIN_NEWTON_PCG``) when a trust region trial is refused while the
+model predicts a reduction of at most ``c * noise_eps_f``. The entry
+returns ``RGMIN_SUCCESS`` and writes the last accepted point to ``x``.
+Without it, that Newton-CG run shrinks its radius to the floor and
+returns ``RGMIN_INVALID_PARAMETER`` with "trust region collapsed" in
+``rgmin_last_error``, and ``x`` stays at the start. Set it to a few units
+in the last place of the objective value when the value is large
+against the decrease a step can still make:
+
+.. code:: c
+
+    rgmin_control_t ctrl = rgmin_control_default();
+    ctrl.gtol = 1e-10;
+    ctrl.noise_eps_f = 4.0 * DBL_EPSILON * fabs(value_at_start);
+
+``report.converged`` is 0 at that stop unless the gradient norm is below
+``gtol``, and ``require_convergence`` still returns ``RGMIN_NOT_CONVERGED``.
+
 Session (eOn / ASE ``step``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

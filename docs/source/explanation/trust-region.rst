@@ -46,7 +46,42 @@ make this loop honest, each proved in
   accepted. The acceptance test cannot be talked into an uphill step
   by a large denominator.
 
-2 Steihaug-Toint: conjugate gradients under a leash
+2 The value noise floor
+-----------------------
+
+The ratio needs the difference f - f(x + p) to carry information. A
+value near 6e7 in double precision resolves differences of about
+1e-8, so once the model predicts less than that, the numerator is
+rounding and rho is noise. Every trial is then refused, the radius
+decays by the ``collapse`` recursion, and the run ends in
+``TrustCollapsed`` with the gradient still above ``gtol``, although
+nothing is wrong with the model or the curvature action.
+
+``NoiseFloor::with_eps_f`` states the noise of the value, and
+``minimize_newton_cg``, ``minimize_newton_cg_precond`` and the ``newton-cg``
+and ``newton-pcg`` sessions read it. When a trial is refused and the
+model predicted a reduction of at most ``c * eps_f``, the run stops at the
+last accepted point with ``Status::NoiseFloor``. A smaller radius only
+lowers the predicted reduction, so no later trial from that point could
+clear the noise either; the 24 shrinks from a unit radius to the floor
+would buy nothing. A few units in the last place of the value is the
+rounding noise of an objective summed in double precision.
+
+The stop reports no convergence it does not have. The report carries
+the gradient norm at that point, ``converged`` stays false unless the
+norm is below ``gtol``, and ``Control::with_require_convergence`` still
+returns ``Error::NotConverged``. No uphill step is taken: the test reads
+only refused trials and leaves ``reduction_ratio`` and the acceptance
+threshold alone. An accepted step whose predicted reduction is
+under the noise does not stop the run. Without ``eps_f`` nothing
+changes, and a collapse is still ``TrustCollapsed``: that error keeps
+meaning a non-finite gradient, a broken curvature action, or an
+objective that rejects every trial for a reason the caller has not
+named. Through the C ABI the field is ``noise_eps_f`` on
+``rgmin_control_t`` and the stop is ``RGMIN_STOP_NOISE_FLOOR``, with ``x``
+holding the last accepted point.
+
+3 Steihaug-Toint: conjugate gradients under a leash
 ---------------------------------------------------
 
 For large ``n`` the dense subproblem solve is the whole bill, so the
@@ -88,7 +123,7 @@ construction, both in ``Steihaug.lean``:
 The Rust test ``negative_curvature_walks_to_the_trust_boundary`` pins
 the implemented step to the sphere at 1e-10 on an indefinite model.
 
-3 The metric bookkeeping under a preconditioner
+4 The metric bookkeeping under a preconditioner
 -----------------------------------------------
 
 ``steihaug_pcg`` runs the same loop under a preconditioner ``M``, and the
@@ -101,7 +136,7 @@ linearity that makes the tracked comparison scale-consistent, and the
 Rust test ``the_preconditioned_boundary_lives_in_the_sketch_metric``
 holds the identity-preconditioner run bit-equal to the plain one.
 
-4 Dogleg, for when the Hessian is cheap
+5 Dogleg, for when the Hessian is cheap
 ---------------------------------------
 
 When a dense Hessian is affordable (``HessianObjective``), the dogleg
@@ -111,7 +146,7 @@ radius allows. It is the classical picture the Steihaug path
 generalizes: CG's first iterate is the Cauchy step, its limit is the
 Newton step, and truncation by the boundary lands in between.
 
-5 Newton and dogleg leave a saddle
+6 Newton and dogleg leave a saddle
 ----------------------------------
 
 A small force is not a positive Hessian, so dense Newton and dogleg
@@ -128,7 +163,7 @@ evaluated the Hessian, so a converged Newton or dogleg report costs
 one extra Hessian. ``newton-cg`` and ``newton-pcg`` do not take this
 path, and neither does a HiGHS feasible set.
 
-6 Selecting it: ``newton-cg`` and ``newton-pcg``
+7 Selecting it: ``newton-cg`` and ``newton-pcg``
 ------------------------------------------------
 
 ``Method::NewtonCg`` (token ``newton-cg``) and ``Method::NewtonPcg``

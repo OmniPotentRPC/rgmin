@@ -98,13 +98,14 @@ Objects
     projection has variance ``tr(Σ) / n``. ``Control::noise_floor`` stops at
     ``c * sqrt(n_free) * eps_g`` with ``Status::NoiseFloor``, after the
     ``gtol`` test. The same stop fires when a line search finds no trial
-    whose decrease clears ``c * eps_f``.
+    whose decrease clears ``c * eps_f``, and when a Newton-CG trust region
+    trial is refused while its model predicts at most ``c * eps_f``.
 
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 67 and
-    ``layout_revision`` 6.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 68 and
+    ``layout_revision`` 7.
     Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
     error, and the backward-error polish. A zero iteration budget
     follows the same unmet-stop policy. Minor 50 adds the energy and
@@ -132,6 +133,7 @@ Objects
     ``rgmin_minimize_hvp_precond_sized``. No struct changes, so the layout revision stays 6.
     Minor 67 adds ``RGMIN_GROMACS_LBFGS`` and
     ``rgmin_solver_set_gromacs_lbfgs``. ``rgmin_control_t`` is unchanged.
+    Minor 68 adds ``noise_eps_f`` on ``rgmin_control_t`` and ``RGMIN_CONTROL_REVISION6_SIZE``; the struct grows, so the layout revision becomes 7.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``
