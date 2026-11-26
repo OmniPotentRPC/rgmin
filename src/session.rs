@@ -4475,6 +4475,13 @@ impl Solver {
                 norm
             };
 
+        // `project_vec` removes rigid modes that already vanish on frozen
+        // coordinates. It leaves the remaining frozen-atom force in this
+        // direction, in the stored pairs, and in the curvature, so a frozen
+        // atom moves. GROMACS writes zero into the stored search direction
+        // on frozen components (`minimize.cpp` 2023.3, lines 2205-2216 and
+        // 2654-2663) while keeping the raw force in `p`, `dg`, and `dgdg`
+        // (lines 2570-2598).
         let force = self.project_vec(x, &grad.mapv(|component| -component));
         let force_norm = crate::gromacs::euclidean_norm_stable(force.view());
         state.initialize(force.view(), force_norm)?;
