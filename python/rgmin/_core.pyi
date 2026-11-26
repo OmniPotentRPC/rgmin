@@ -258,13 +258,17 @@ class Solver:
         """
 
     def forget(self) -> None:
-        """Drop the method memory. The next step starts from the point it is given."""
+        """
+        Drop the method memory. The next step starts from the point it is given.
+        """
 
     def pair_count(self) -> int:
         """Stored L-BFGS pairs."""
 
-    def push_pair(self, s: NDArray[numpy.float64], y: NDArray[numpy.float64]) -> None:
-        """Store one L-BFGS pair. A pair the curvature gate rejects is declined."""
+    def push_pair(self, s: object, y: object) -> None:
+        """
+        Store one L-BFGS pair ``(s, y)``. A pair the curvature gate rejects is declined.
+        """
 
     def set_maxmove(self, cap: float) -> None:
         """Euclidean step cap. A negative value clears every cap."""

@@ -761,13 +761,24 @@ NB_MODULE(_core, m) {
                      "ndarray[dtype=float64]], ndarray[dtype=float64]], "
                      "x: ndarray[dtype=float64]) -> Report"),
              "One Newton, RFO, or dogleg step. ``hessian(x)`` returns an ``(n, n)`` matrix.")
-        .def("forget", [](rgmin::Solver& solver) { solver.forget(); },
-             "Drop the method memory. The next step starts from the point it is given.")
-        .def("pair_count", [](rgmin::Solver const& solver) { return solver.pair_count(); },
-             "Stored L-BFGS pairs.")
+        .def(
+            "forget",
+            [](rgmin::Solver& solver) {
+                rgbind::Claim claim(solver.busy(), "Solver");
+                solver.forget();
+            },
+            "Drop the method memory. The next step starts from the point it is given.")
+        .def(
+            "pair_count",
+            [](rgmin::Solver& solver) {
+                rgbind::Claim claim(solver.busy(), "Solver");
+                return solver.pair_count();
+            },
+            "Stored L-BFGS pairs.")
         .def(
             "push_pair",
             [](rgmin::Solver& solver, nb::handle s_obj, nb::handle y_obj) {
+                rgbind::Claim claim(solver.busy(), "Solver");
                 auto take = [](nb::handle obj, char const* name) {
                     std::vector<double> out;
                     try {
@@ -785,21 +796,30 @@ NB_MODULE(_core, m) {
                 }
                 if (solver.push_pair(s.data(), y.data(), s.size()) != 0) {
                     char const* msg = rgmin_last_error();
-                    throw nb::value_error(msg ? msg : "push_pair failed");
+                    throw nb::value_error(msg != nullptr && *msg != '\0' ? msg : "push_pair failed");
                 }
             },
             nb::arg("s"), nb::arg("y"),
             "Store one L-BFGS pair ``(s, y)``. A pair the curvature gate rejects is declined.")
         .def(
-            "set_maxmove", [](rgmin::Solver& solver, double cap) { solver.set_maxmove(cap); },
+            "set_maxmove",
+            [](rgmin::Solver& solver, double cap) {
+                rgbind::Claim claim(solver.busy(), "Solver");
+                solver.set_maxmove(cap);
+            },
             nb::arg("cap"), "Euclidean step cap. A negative value clears every cap.")
         .def(
             "set_atom_maxmove",
-            [](rgmin::Solver& solver, double cap) { solver.set_atom_maxmove(cap); }, nb::arg("cap"),
+            [](rgmin::Solver& solver, double cap) {
+                rgbind::Claim claim(solver.busy(), "Solver");
+                solver.set_atom_maxmove(cap);
+            },
+            nb::arg("cap"),
             "Per-atom step cap. A non-positive value clears it.")
         .def(
             "set_lbfgs_scaled",
             [](rgmin::Solver& solver, double cap) {
+                rgbind::Claim claim(solver.busy(), "Solver");
                 if (solver.set_lbfgs_scaled(cap) != 0) {
                     char const* msg = rgmin_last_error();
                     throw nb::value_error(msg ? msg : "set_lbfgs_scaled failed");
@@ -810,6 +830,7 @@ NB_MODULE(_core, m) {
         .def(
             "set_lbfgs_fixed_h0",
             [](rgmin::Solver& solver, double h0) {
+                rgbind::Claim claim(solver.busy(), "Solver");
                 if (solver.set_lbfgs_fixed_h0(h0) != 0) {
                     char const* msg = rgmin_last_error();
                     throw nb::value_error(msg ? msg : "set_lbfgs_fixed_h0 failed");
@@ -820,6 +841,7 @@ NB_MODULE(_core, m) {
             "set_fire_config",
             [](rgmin::Solver& solver, double dt, double dt_max, std::size_t n_min, double f_inc,
                double f_dec, double alpha, double f_alpha) {
+                rgbind::Claim claim(solver.busy(), "Solver");
                 if (solver.set_fire_config(dt, dt_max, n_min, f_inc, f_dec, alpha, f_alpha) != 0) {
                     char const* msg = rgmin_last_error();
                     throw nb::value_error(msg ? msg : "set_fire_config failed");
@@ -831,6 +853,7 @@ NB_MODULE(_core, m) {
         .def(
             "set_fire_preset",
             [](rgmin::Solver& solver, std::string const& name) {
+                rgbind::Claim claim(solver.busy(), "Solver");
                 rgmin_fire_preset_t preset = RGMIN_FIRE_PRESET_DEFAULT;
                 if (name == "guenole2020" || name == "fire2") {
                     preset = RGMIN_FIRE_PRESET_GUENOLE2020;
@@ -846,6 +869,7 @@ NB_MODULE(_core, m) {
         .def(
             "set_fire_abc",
             [](rgmin::Solver& solver, bool on) {
+                rgbind::Claim claim(solver.busy(), "Solver");
                 if (solver.set_fire_abc(on) != 0) {
                     char const* msg = rgmin_last_error();
                     throw nb::value_error(msg ? msg : "set_fire_abc failed");
