@@ -46,10 +46,12 @@ fn dense_solve(matrix: &[f64], n: usize, rhs: &[f64]) -> Vec<f64> {
             augmented.swap(best, pivot);
         }
         let diagonal = augmented[pivot][pivot];
-        for row in (pivot + 1)..n {
-            let scale = augmented[row][pivot] / diagonal;
-            for column in pivot..=n {
-                augmented[row][column] -= scale * augmented[pivot][column];
+        let (upper, lower) = augmented.split_at_mut(pivot + 1);
+        let pivot_row = &upper[pivot];
+        for row in lower.iter_mut().take(n - pivot - 1) {
+            let scale = row[pivot] / diagonal;
+            for (entry, above) in row[pivot..=n].iter_mut().zip(&pivot_row[pivot..=n]) {
+                *entry -= scale * above;
             }
         }
     }
