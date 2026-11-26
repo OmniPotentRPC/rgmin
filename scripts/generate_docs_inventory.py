@@ -1089,8 +1089,125 @@ _C_KEYWORDS = {
 }
 
 
+_CXX_KEYWORDS = _C_KEYWORDS | {
+    "if",
+    "else",
+    "for",
+    "while",
+    "do",
+    "switch",
+    "case",
+    "break",
+    "continue",
+    "return",
+    "goto",
+    "try",
+    "catch",
+    "throw",
+    "new",
+    "delete",
+    "sizeof",
+    "decltype",
+    "typeid",
+    "static_assert",
+    "noexcept",
+    "operator",
+    "public",
+    "private",
+    "protected",
+    "namespace",
+    "using",
+    "this",
+    "true",
+    "false",
+    "nullptr",
+    "auto",
+    "concept",
+    "requires",
+}
+
+
 def _header_name(name: str) -> bool:
     return _HEADER_NAME.match(name) is not None
+
+
+def _include_guard(text: str) -> str | None:
+    """Macro that guards this header, if the file has one."""
+    pending: str | None = None
+    for line in _blank_c(text).splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if pending is None:
+            match = re.match(r"#\s*ifndef\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", stripped)
+            if match is None:
+                match = re.match(
+                    r"#\s*if\s+!\s*defined\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*$",
+                    stripped,
+                )
+            if match:
+                pending = match.group(1)
+                continue
+            if stripped.startswith("#"):
+                return None
+            continue
+        if re.match(rf"#\s*define\s+{re.escape(pending)}\s*$", stripped):
+            return pending
+        return None
+    return None
+
+
+def _namespace_public(stmt: str) -> bool:
+    text = _strip_c_prefixes(_strip_template(stmt.strip()))
+    match = re.match(r"namespace\b(.*)$", text)
+    if not match:
+        return False
+    name = match.group(1).strip().split("{", 1)[0].strip()
+    if not name or "=" in name:
+        return False
+    parts = [part.strip() for part in name.split("::") if part.strip()]
+    return bool(parts) and all(part != "detail" for part in parts)
+
+
+def _type_kind(stmt: str) -> str:
+    text = _strip_c_prefixes(_strip_template(stmt.strip()))
+    if re.match(r"enum\b", text):
+        return "enum"
+    if re.match(r"struct\b", text):
+        return "struct"
+    if re.match(r"union\b", text):
+        return "union"
+    if re.match(r"class\b", text):
+        return "class"
+    return "type"
+
+
+def _using_bindings(stmt: str) -> list[tuple[str, str]]:
+    body = stmt.strip()
+    if not body.startswith("using"):
+        return []
+    body = body[len("using") :].strip()
+    if not body or body.startswith("namespace"):
+        return []
+    depth = 0
+    equals = -1
+    for index, char in enumerate(body):
+        if char in "<(":
+            depth += 1
+        elif char in ">)":
+            depth = max(0, depth - 1)
+        elif char == "=" and depth == 0:
+            equals = index
+            break
+    if equals >= 0:
+        ident = body[:equals].strip().split("::")[-1].strip()
+        return [(ident, "type")] if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ident) else []
+    found: list[tuple[str, str]] = []
+    for part in body.split(","):
+        ident = part.strip().split("::")[-1].strip()
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ident):
+            found.append((ident, "reexport"))
+    return found
 
 
 def _strip_c_prefixes(text: str) -> str:
@@ -1139,9 +1256,10 @@ def _strip_template(text: str) -> str:
 
 
 def _c_tag(stmt: str) -> str | None:
-    match = re.search(
-        r"\b(?:enum(?:\s+class|\s+struct)?|struct|union|class)\s+([A-Za-z_][A-Za-z0-9_]*)",
-        stmt,
+    stripped = _strip_c_prefixes(_strip_template(stmt.strip()))
+    match = re.match(
+        r"(?:enum(?:\s+class|\s+struct)?|struct|union|class)\s+([A-Za-z_][A-Za-z0-9_]*)",
+        stripped,
     )
     if match:
         return match.group(1)
@@ -1151,8 +1269,10 @@ def _c_tag(stmt: str) -> str | None:
 def _open_kind(stmt: str) -> str:
     text = _strip_template(stmt.strip())
     text = _strip_c_prefixes(text)
-    if re.match(r"(?:extern\s*$|namespace\b)", text):
+    if re.match(r"extern\s*$", text):
         return "link"
+    if re.match(r"namespace\b", text):
+        return "namespace"
     if re.match(r"enum\b", text):
         return "enum"
     if re.match(r"(?:class|struct|union)\b", text) and "(" not in stmt:
@@ -1217,22 +1337,51 @@ def _typedef_names(stmt: str) -> list[str]:
     return [names[-1]]
 
 
-def header_declared_names(text: str) -> list[tuple[int, str, str]]:
-    """Line, name, and source line of each prototype, typedef, enumerator, or macro."""
+def header_declared_names(
+    text: str, *, cxx: bool = False
+) -> list[tuple[int, str, str, str]]:
+    """Line, name, source line, and kind of each inventoried declaration.
+
+    Prefixed C names stay. A C++ header also records public namespace types
+    and free functions. The macro that guards its own header is omitted.
+    """
     blank = _blank_c(text)
     original = text.splitlines()
     masked = blank.splitlines()
     if len(masked) < len(original):
         masked.extend([""] * (len(original) - len(masked)))
     stream: list[tuple[str, int]] = []
-    found: list[tuple[int, str, str]] = []
+    found: list[tuple[int, str, str, str]] = []
     seen: set[str] = set()
+    guard = _include_guard(text)
 
     def add(name: str, line_index: int) -> None:
-        if name in seen or not _header_name(name) or line_index >= len(original):
+        if (
+            not name
+            or name == guard
+            or name in seen
+            or not _header_name(name)
+            or line_index >= len(original)
+        ):
             return
         seen.add(name)
-        found.append((line_index + 1, name, _collapse(original[line_index])))
+        kind = "constant" if name.isupper() else "symbol"
+        found.append((line_index + 1, name, _collapse(original[line_index]), kind))
+
+    def add_cxx(name: str, line_index: int, kind: str) -> None:
+        if (
+            not cxx
+            or not name
+            or name == guard
+            or name in seen
+            or name in _CXX_KEYWORDS
+            or line_index >= len(original)
+            or top() not in {"file", "namespace"}
+            or not scopes[-1][3]
+        ):
+            return
+        seen.add(name)
+        found.append((line_index + 1, name, _collapse(original[line_index]), kind))
 
     index = 0
     total = len(original)
@@ -1253,7 +1402,7 @@ def header_declared_names(text: str) -> list[tuple[int, str, str]]:
 
     brace = 0
     paren = 0
-    scopes: list[tuple[str, int, bool]] = [("file", 0, False)]
+    scopes: list[tuple[str, int, bool, bool]] = [("file", 0, False, True)]
     stmt: list[str] = []
     stmt_line = 0
     cursor = 0
@@ -1263,11 +1412,22 @@ def header_declared_names(text: str) -> list[tuple[int, str, str]]:
         return scopes[-1][0]
 
     def declaration_scope() -> bool:
-        return top() in {"file", "link", "class"}
+        return top() in {"file", "link", "class", "namespace"}
+
+    def push(kind: str, depth: int, typedef_tail: bool, opened: str) -> None:
+        parent_public = bool(scopes[-1][3])
+        public = False
+        if kind == "namespace":
+            public = parent_public and _namespace_public(opened)
+            if not public:
+                kind = "private"
+        elif kind == "link":
+            public = parent_public
+        scopes.append((kind, depth, typedef_tail, public))
 
     while cursor < limit:
         char, line_index = stream[cursor]
-        if top() in {"fn", "skip"}:
+        if top() in {"fn", "skip", "private"}:
             if char == "{":
                 brace += 1
             elif char == "}":
@@ -1290,7 +1450,7 @@ def header_declared_names(text: str) -> list[tuple[int, str, str]]:
                 continue
             if char == "{":
                 brace += 1
-                scopes.append(("skip", brace, False))
+                scopes.append(("skip", brace, False, False))
                 cursor += 1
                 continue
             if char == "}":
@@ -1379,8 +1539,14 @@ def header_declared_names(text: str) -> list[tuple[int, str, str]]:
             continue
         if paren == 0 and char in ";{":
             text = "".join(stmt).strip()
-            if text:
-                if text.lstrip().startswith("typedef") and char == ";":
+            if char == "{" and not text:
+                brace += 1
+                push("skip", brace, False, "")
+            elif text:
+                if char == ";" and text.lstrip().startswith("using"):
+                    for uname, ukind in _using_bindings(text):
+                        add_cxx(uname, stmt_line, ukind)
+                elif text.lstrip().startswith("typedef") and char == ";":
                     for name in _typedef_names(text):
                         add(name, stmt_line)
                 elif char == "{":
@@ -1388,16 +1554,19 @@ def header_declared_names(text: str) -> list[tuple[int, str, str]]:
                     tag = _c_tag(text)
                     if tag:
                         add(tag, stmt_line)
+                        if kind in {"enum", "class"}:
+                            add_cxx(tag, stmt_line, _type_kind(text))
                     if kind == "fn" and not _assigned_before_call(text):
                         name = _declarator_name(text)
                         if name:
                             add(name, stmt_line)
+                            add_cxx(name, stmt_line, "function")
                     brace += 1
                     typedef_tail = text.lstrip().startswith("typedef") and kind in {
                         "enum",
                         "class",
                     }
-                    scopes.append((kind, brace, typedef_tail))
+                    push(kind, brace, typedef_tail, text)
                 elif (
                     not _assigned_before_call(text)
                     and "typedef" not in text.split()[:1]
@@ -1406,6 +1575,7 @@ def header_declared_names(text: str) -> list[tuple[int, str, str]]:
                     name = _declarator_name(text)
                     if name:
                         add(name, stmt_line)
+                        add_cxx(name, stmt_line, "function")
             stmt = []
             cursor += 1
             continue
@@ -1441,8 +1611,8 @@ def header_items(root: Path | None = None) -> list[Item]:
         rel = path.relative_to(base).as_posix()
         items.append(Item("C and C++", "header", rel, rel, 1, f"Public header {rel}"))
         text = path.read_text(encoding="utf-8")
-        for line, name, declaration in header_declared_names(text):
-            kind = "constant" if name.isupper() else "symbol"
+        declared = header_declared_names(text, cxx=path.suffix == ".hpp")
+        for line, name, declaration, kind in declared:
             items.append(Item("C and C++", kind, name, rel, line, declaration))
     return items
 

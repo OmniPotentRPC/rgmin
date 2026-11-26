@@ -231,7 +231,10 @@ class HeaderDeclarationTests(unittest.TestCase):
         void rgmin_tensor_free(int n);
         int digits = 1'000;
         """
-        found = {name for _line, name, _decl in inventory.header_declared_names(text)}
+        found = {
+            name
+            for _line, name, _decl, _kind in inventory.header_declared_names(text)
+        }
         self.assertIn("xts_solver_create", found)
         self.assertIn("rgmin_solver_create", found)
         self.assertIn("rgmin_eval_fn", found)
@@ -249,7 +252,14 @@ class HeaderDeclarationTests(unittest.TestCase):
         leaked = [
             item
             for item in items
-            if item.source.endswith("xtensor.hpp") and item.kind != "header"
+            if item.source.endswith("xtensor.hpp")
+            and item.kind != "header"
+            and (
+                item.name.startswith("rgmin_")
+                or item.name.startswith("xts_")
+                or item.name.startswith("RGMIN_")
+                or item.name.startswith("XTS_")
+            )
         ]
         self.assertEqual(leaked, [])
         self.assertTrue(
@@ -270,6 +280,100 @@ class HeaderDeclarationTests(unittest.TestCase):
                 for item in items
             )
         )
+
+    def test_include_guards_are_not_declarations(self) -> None:
+        text = """
+        #ifndef RGMIN_H
+        #define RGMIN_H
+        #define RGMIN_H_MAJOR 0
+        #define RGMIN_SUCCESS 0
+        #endif
+        """
+        found = {
+            name
+            for _line, name, _decl, _kind in inventory.header_declared_names(text)
+        }
+        self.assertNotIn("RGMIN_H", found)
+        self.assertIn("RGMIN_H_MAJOR", found)
+        self.assertIn("RGMIN_SUCCESS", found)
+        items = inventory.header_items()
+        installed = {(item.source, item.name) for item in items}
+        self.assertNotIn(("include/rgmin.h", "RGMIN_H"), installed)
+        self.assertNotIn(("include/xts.h", "XTS_OPTIMIZE_H"), installed)
+        self.assertIn(("include/rgmin.h", "RGMIN_H_MAJOR"), installed)
+
+    def test_public_cxx_namespace_types_and_functions(self) -> None:
+        text = """
+        namespace rgmin {
+        enum class Method { Bfgs = 1 };
+        struct Control { int maxiter; };
+        class Solver { void step(); };
+        class LbfgsPairs { void push(); };
+        inline const char* version() { return "v"; }
+        inline void minimize_fn(int n);
+        namespace detail {
+            struct Hidden {};
+            inline void helper() {}
+        }
+        using ScalarType = double;
+        }
+        namespace xts { namespace optimize {
+        using rgmin::Method;
+        using rgmin::Solver;
+        using rgmin::LbfgsPairs;
+        }}
+        """
+        found = {
+            (name, kind)
+            for _line, name, _decl, kind in inventory.header_declared_names(
+                text, cxx=True
+            )
+        }
+        self.assertIn(("Method", "enum"), found)
+        self.assertIn(("Control", "struct"), found)
+        self.assertIn(("Solver", "class"), found)
+        self.assertIn(("LbfgsPairs", "class"), found)
+        self.assertIn(("version", "function"), found)
+        self.assertIn(("minimize_fn", "function"), found)
+        self.assertIn(("ScalarType", "type"), found)
+        names = {name for name, _kind in found}
+        self.assertNotIn("Hidden", names)
+        self.assertNotIn("helper", names)
+        self.assertNotIn("step", names)
+        self.assertNotIn("push", names)
+        self.assertNotIn("Bfgs", names)
+        items = inventory.header_items()
+
+        def kinds(source: str) -> dict[str, str]:
+            return {
+                item.name: item.kind
+                for item in items
+                if item.source == source and item.kind != "header"
+            }
+
+        opt = kinds("include/rgmin/optimize.hpp")
+        for name, kind in (
+            ("Method", "enum"),
+            ("Control", "struct"),
+            ("Solver", "class"),
+            ("LbfgsPairs", "class"),
+            ("version", "function"),
+            ("ScalarType", "type"),
+        ):
+            self.assertEqual(opt.get(name), kind)
+        for hidden in (
+            "c_control",
+            "to_control",
+            "canon_token",
+            "one_shot_report",
+            "BFGSOptimizer",
+        ):
+            self.assertNotIn(hidden, opt)
+        alias = kinds("include/xts/optimize.hpp")
+        self.assertEqual(alias.get("Method"), "reexport")
+        self.assertEqual(alias.get("Solver"), "reexport")
+        self.assertEqual(alias.get("LbfgsPairs"), "reexport")
+        self.assertEqual(kinds("include/xts/xtensor.hpp"), {"minimize": "function"})
 
 
 class PythonExportTests(unittest.TestCase):
