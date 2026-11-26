@@ -8,9 +8,10 @@ use std::mem::{offset_of, size_of, size_of_val};
 use std::ptr::null;
 
 use rgmin::ffi::{
-    RGMIN_PRECON_EXP, rgmin_conjugacy_t, rgmin_control_t, rgmin_eigen_options_t,
-    rgmin_eigen_params_t, rgmin_exp_t, rgmin_precon_t, rgmin_rcg_options_t, rgmin_rlbfgs_t,
-    rgmin_rtr_tcg_result_t, rgmin_scg_options_t, rgmin_scg_params_t, rgmin_scg_step_tolerance_t,
+    RGMIN_ABI_VERSION_MINOR, RGMIN_PRECON_EXP, rgmin_conjugacy_t, rgmin_control_t,
+    rgmin_eigen_options_t, rgmin_eigen_params_t, rgmin_exp_t, rgmin_precon_t, rgmin_rcg_options_t,
+    rgmin_rlbfgs_t, rgmin_rtr_tcg_result_t, rgmin_scg_options_t, rgmin_scg_params_t,
+    rgmin_scg_step_tolerance_t,
 };
 use rgmin::{
     Control, EigenParams, ExpParams, NoiseFloor, RcgOptions, Rlbfgs, ScgOptions, ScgParams,
@@ -40,8 +41,10 @@ fn c_header_checks_rigid_quotient_tcg_and_projected_modes() {
     consumer::compile_and_run("tests/c_manifold_rtr.c", "rgmin_c_manifold_rtr", &[size]);
 }
 
+/// The public header's ABI minor is 65.
 #[test]
 fn c_header_reads_riemannian_cg_through_the_xts_aliases() {
+    assert_eq!(RGMIN_ABI_VERSION_MINOR, 65);
     consumer::compile_and_run("tests/c_xts_rcg.c", "rgmin_c_xts_rcg", &[]);
 }
 
