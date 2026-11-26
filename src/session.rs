@@ -4630,7 +4630,11 @@ impl Solver {
             if c.value < a.value { c } else { a }
         };
 
-        state.accept(force.view(), accepted.force.view(), accepted.alpha)?;
+        state.accept(
+            force.view(),
+            accepted.force.view(),
+            &accepted.coords - &origin,
+        )?;
         let next_direction = self.project_vec(&accepted.coords, &state.direction().to_owned());
         state.set_direction(next_direction);
         *x = accepted.coords;
@@ -8209,6 +8213,84 @@ mod tests {
                 .search_options()
                 .accepts_downhill_rise(e0 + accepted_rise, e0, 0.5)
         );
+    }
+}
+
+#[cfg(test)]
+mod gromacs_lbfgs_pair_tests {
+    use super::*;
+    use eindir_core::{Bounds, Gradient};
+    use ndarray::{ArrayView1, array};
+
+    /// `0.5 |x - (-2, 0, 0)|^2` with `x0 >= 1.5`.
+    struct ClippedBowl {
+        bounds: Bounds<f64>,
+    }
+
+    impl ClippedBowl {
+        fn new() -> Self {
+            Self {
+                bounds: Bounds::new(array![1.5, -10.0, -10.0], array![10.0, 10.0, 10.0], 0.0),
+            }
+        }
+
+        fn gradient(x: ArrayView1<f64>) -> Array1<f64> {
+            array![x[0] + 2.0, x[1], x[2]]
+        }
+    }
+
+    impl Objective<f64> for ClippedBowl {
+        fn dim(&self) -> usize {
+            3
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            let g = Self::gradient(x);
+            0.5 * g.dot(&g)
+        }
+    }
+
+    impl Gradient<f64> for ClippedBowl {
+        fn dim(&self) -> usize {
+            3
+        }
+
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            Self::gradient(x)
+        }
+    }
+
+    impl DifferentiableObjective<f64> for ClippedBowl {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let g = Self::gradient(x);
+            (0.5 * g.dot(&g), g)
+        }
+    }
+
+    #[test]
+    fn the_stored_pair_is_the_clipped_move_not_the_line_step() {
+        let objective = ClippedBowl::new();
+        let control = Control::default()
+            .with_istep(10.0)
+            .with_gtol(0.0)
+            .with_maxiter(10)
+            .with_maxmove(None);
+        let mut solver = Solver::new(Method::GromacsLbfgs, control, 3);
+        let start = array![2.0, 0.0, 0.0];
+        let mut x = start.clone();
+        // The opening line step 1 / |F| = 1/4 along F = (-4, 0, 0) reaches
+        // x0 = 1, which the bound clips back to 1.5.
+        let report = solver.step(&objective, &mut x).unwrap();
+        assert_eq!(report.status, Status::Iterating);
+        assert_eq!(x, array![1.5, 0.0, 0.0]);
+        let Overlay::GromacsLbfgs(state) = &solver.overlay else {
+            panic!("GROMACS L-BFGS overlay");
+        };
+        assert_eq!(state.newest_displacement().unwrap().to_owned(), &x - &start);
     }
 }
 
