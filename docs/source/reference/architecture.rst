@@ -103,8 +103,8 @@ Objects
 ``rgmin_solver_create`` / ``rgmin_solver_step`` / ``rgmin_solver_free``
     The session half of the waist.
     Callbacks are arguments of each step, not stored on the handle.
-    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 66 and
-    ``layout_revision`` 6.
+    ``include/rgmin.h`` sets ``abi_major`` 1, ``abi_minor`` 69 and
+    ``layout_revision`` 7.
     Minor 49 adds ``StopReason`` on the report, the opt-in unmet-stop
     error, and the backward-error polish. A zero iteration budget
     follows the same unmet-stop policy. Minor 50 adds the energy and
@@ -127,7 +127,13 @@ Objects
     unchanged. Minor 64 covers this branch's stop-reporting and eindir
     callback-error fixes without a layout change.
     Minor 65 adds ``RGMIN_RCG``, ``rgmin_rcg_options_t``, ``rgmin_rcg_options_default`` and ``rgmin_minimize_rcg``.
-    The new struct leaves every existing struct as it was, so the layout revision stays 6.
+    The new struct leaves every existing struct as it was, so minor 65 left the layout revision at 6.
+    Minor 66 adds ``rgmin_vec_precond_fn``, ``rgmin_minimize_hvp_precond``
+    and ``rgmin_minimize_hvp_precond_sized``, with no struct change.
+    Minor 68 adds optional ``observer`` and ``observer_user`` fields on
+    ``rgmin_control_t``, ``RGMIN_STOP_OBSERVER``, and the observer action
+    enum. The control layout revision is 7. Minor 69 keeps both of those
+    additions, so the stamp minor is 69 and the layout revision stays 7.
     ``rgmin_abi_compatible`` checks the major version and the layout revision only.
 
 ``DistanceConstraints``

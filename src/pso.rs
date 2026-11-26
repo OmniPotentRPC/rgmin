@@ -8,7 +8,8 @@ use rand::rngs::StdRng;
 
 use crate::control::Control;
 use crate::error::{Error, Result};
-use crate::report::{Report, Status};
+use crate::observer::{IterationObserver, IterationView, ObserverSignal};
+use crate::report::{Report, Status, StopReason};
 use crate::step::{l2, one_shot_report};
 use crate::stop::{Counted, counted};
 
@@ -46,10 +47,35 @@ pub fn minimize_pso<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    minimize_pso_observed(obj, init, control, n_particles, inertia, c1, c2, None)
+}
+
+/// [`minimize_pso`] with an optional per-iteration observer.
+///
+/// Each swarm pass is one iteration. The observer sees the global best
+/// after the pass. The swarm does not form a gradient, so `grad_norm`
+/// on that view is not finite, and an observed run evaluates the
+/// objective as often as a run with no observer. The returned report
+/// still evaluates the gradient once at the global best. An observer
+/// stop returns before that evaluation, and its report carries a
+/// non-finite gradient norm.
+pub fn minimize_pso_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    n_particles: usize,
+    inertia: f64,
+    c1: f64,
+    c2: f64,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     control.validate()?;
     crate::stop::refuse_etol(control, "particle swarm")?;
     counted(obj, control, |obj| {
-        pso_counted(obj, init, control, n_particles, inertia, c1, c2)
+        pso_counted(obj, init, control, n_particles, inertia, c1, c2, observer)
     })
 }
 
@@ -61,6 +87,7 @@ fn pso_counted<O>(
     inertia: f64,
     c1: f64,
     c2: f64,
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -108,6 +135,7 @@ where
     let mut stagnant_iterations = 0;
     let mut spent = false;
     while iteration < control.maxiter {
+        let before = observer.is_some().then(|| gbest_position.clone());
         update_swarm(
             obj,
             bounds,
@@ -117,6 +145,32 @@ where
             (inertia, c1, c2),
             &mut rng,
         );
+        if let Some(obs) = observer.as_deref_mut() {
+            // The swarm stores values only. The gradient is not formed,
+            // so the observer does not evaluate the objective to supply one.
+            let step_length = before.as_ref().map_or(0.0, |before| {
+                crate::observer::separation(gbest_position.view(), before.view())
+            });
+            if obs.observe(IterationView {
+                iteration,
+                x: gbest_position.view(),
+                value: gbest_value,
+                grad_norm: f64::NAN,
+                step_length,
+            }) == ObserverSignal::Stop
+            {
+                return control.deliver(
+                    one_shot_report(
+                        gbest_value,
+                        gbest_position,
+                        iteration + 1,
+                        f64::NAN,
+                        Status::ObserverStop,
+                    )
+                    .with_stop_reason(StopReason::ObserverRequested),
+                );
+            }
+        }
         let avg_velocity = average_velocity(&swarm);
         if gbest_value == prev_gbest_value {
             stagnant_iterations += 1;

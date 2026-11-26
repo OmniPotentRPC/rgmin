@@ -27,10 +27,18 @@ __version__: str
 class SolverConfig(_core.SolverConfig):
     def __init__(self, method: str | Method = "lbfgs", **options: Any) -> None: ...
 
+class IntermediateResult:
+    x: NDArray[numpy.float64]
+    fun: float
+    nit: int
+    grad_norm: float
+    step_length: float
+
 def minimize(
     f_and_grad: Callable[[NDArray[numpy.float64]], tuple[float, NDArray[numpy.float64]]],
     x0: NDArray[numpy.float64],
     method: str | Method = "lbfgs",
+    callback: Callable[[IntermediateResult], Any] | None = None,
     **options: Any,
 ) -> tuple[Report, NDArray[numpy.float64]]: ...
 

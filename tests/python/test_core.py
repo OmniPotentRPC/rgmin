@@ -103,6 +103,106 @@ def test_callback_exception_is_reraised() -> None:
         rgmin.minimize(boom, x, method="sd", maxiter=1)
 
 
+def test_iteration_callback_can_stop_with_stopiteration() -> None:
+    projection: list[tuple[float, float]] = []
+
+    def cb(state: object) -> None:
+        s = state
+        projection.append((float(s.x[0]), float(s.x[1] - s.x[0])))
+        if len(projection) >= 3:
+            raise StopIteration
+
+    report, _ = rgmin.minimize(_quad, np.array([1.0, -0.5]), method="sd", maxiter=30, callback=cb)
+    assert report.stop == rgmin.Stop.OBSERVER
+    assert len(projection) == 3
+
+
+@pytest.mark.parametrize("method", ("adam", "pso"))
+def test_adam_and_pso_callbacks_run_and_stop(method: str) -> None:
+    seen: list[int] = []
+
+    def cb(state: object) -> None:
+        seen.append(int(state.nit))
+        if len(seen) >= 3:
+            raise StopIteration
+
+    report, _ = rgmin.minimize(
+        _quad, np.array([1.0, -0.5]), method=method, maxiter=50, gtol=1e-16, callback=cb
+    )
+    assert report.stop == rgmin.Stop.OBSERVER
+    assert seen == [1, 2, 3]
+
+
+def test_callback_sees_only_accepted_trust_region_iterates() -> None:
+    def rosen(x: np.ndarray) -> tuple[float, np.ndarray]:
+        a, b = float(x[0]), float(x[1])
+        value = 100.0 * (b - a * a) ** 2 + (1.0 - a) ** 2
+        grad = np.array([-400.0 * a * (b - a * a) - 2.0 * (1.0 - a), 200.0 * (b - a * a)])
+        return value, grad
+
+    states: list[tuple[np.ndarray, float]] = []
+
+    def cb(state: object) -> None:
+        states.append((np.array(state.x, copy=True), float(state.step_length)))
+
+    report, _ = rgmin.minimize(
+        rosen, np.array([0.0, 3.0]), method="sr1", maxiter=300, gtol=1e-8, istep=0.1, callback=cb
+    )
+    assert report.stop == rgmin.Stop.TOLERANCE
+    assert 2 <= len(states) < report.steps
+    assert all(length > 0.0 for _, length in states)
+    for (before, _), (after, _) in zip(states, states[1:]):
+        assert not np.array_equal(before, after)
+
+
+def test_callback_stop_is_not_a_convergence_failure() -> None:
+    def cb(state: object) -> None:
+        raise StopIteration
+
+    report, _ = rgmin.minimize(
+        _quad,
+        np.array([1.0, -0.5]),
+        method="lbfgs",
+        maxiter=30,
+        gtol=1e-12,
+        require_convergence=True,
+        callback=cb,
+    )
+    assert report.stop == rgmin.Stop.OBSERVER
+    assert not report.converged()
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "fire",
+        "fire2",
+        "bb",
+        "quickmin",
+        "ode12r",
+        "diis",
+        "gromacs-steep",
+        "newton-cg",
+        "newton-pcg",
+        "gromacs-cg",
+    ],
+)
+def test_session_callback_sees_the_iterate_that_ends_the_run(method: str) -> None:
+    states: list[tuple[np.ndarray, float]] = []
+
+    def cb(state: object) -> None:
+        states.append((np.array(state.x, copy=True), float(state.grad_norm)))
+
+    report, x = rgmin.minimize(
+        _quad, np.array([1.0, -0.5]), method=method, maxiter=500, gtol=1e-6, callback=cb
+    )
+    assert report.stop == rgmin.Stop.TOLERANCE
+    last_x, last_grad_norm = states[-1]
+    np.testing.assert_array_equal(last_x, x)
+    assert last_grad_norm == report.grad_norm
+    assert last_grad_norm < 1e-6
+
+
 def test_negative_zero_and_subnormal_are_finite() -> None:
     def fg(x: np.ndarray) -> tuple[float, np.ndarray]:
         return 0.5 * float(x @ x), np.array(x, dtype=np.float64, copy=True)

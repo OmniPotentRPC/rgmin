@@ -82,7 +82,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 66
+#define RGMIN_ABI_VERSION_MINOR 69
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -113,20 +113,25 @@ typedef struct rgmin_abi_stamp_t {
  *    entry in rgmin_last_error while preserving callback-failure errors.
  *    No C symbols or struct layouts change.
  * 65 RGMIN_RCG, rgmin_rcg_options_t, rgmin_rcg_options_default and
- *    rgmin_minimize_rcg. rgmin_rcg_options_t is a new struct, so the
- *    layout revision stays 6.
+ *    rgmin_minimize_rcg. rgmin_rcg_options_t is a new struct, so minor
+ *    65 left the layout revision at 6.
  * 66 rgmin_vec_precond_fn, rgmin_minimize_hvp_precond and
  *    rgmin_minimize_hvp_precond_sized. No struct changes, so the layout
- *    revision stays 6. */
-#define RGMIN_ABI_LAYOUT_REVISION 6
-/* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
- * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the
+ *    revision stays 6.
+ * 68 observer and observer_user on rgmin_control_t, and
+ *    RGMIN_STOP_OBSERVER. Layout revision 7.
+ * 69 keeps the minor 66 preconditioner entries and the minor 68
+ *    observer fields. Layout revision 7. */
+#define RGMIN_ABI_LAYOUT_REVISION 7
+/* Layout revision 7. rgmin_control_t is maxiter, gtol, istep, memory,
+ * maxmove, noise_eps, noise_c, require_convergence, observer and
+ * observer_user. maxmove > 0 is the
  * Euclidean cap; 0 keeps the defaults, including the default per-atom
  * cap; a negative value leaves every step cap off.
  * rgmin_report_t is value, steps, grad_norm, stop, converged.
- * Revision 5 was value, steps, grad_norm, stop. Both sides shipped
- * those structs as revision 4 with different fields, so the union was
- * revision 5. */
+ * Revision 6 was maxiter through require_convergence. Revision 5 was
+ * value, steps, grad_norm, stop. Both sides shipped those structs as
+ * revision 4 with different fields, so the union was revision 5. */
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
@@ -221,12 +226,46 @@ typedef enum rgmin_stop_t {
      *  represent another coordinate change. ABI minor 52. */
     RGMIN_STOP_MACHINE_PRECISION = 8,
     /** Wolfe zoom stopped when rounding blocked progress. ABI minor 57. */
-    RGMIN_STOP_LINE_SEARCH_ROUNDING = 9
+    RGMIN_STOP_LINE_SEARCH_ROUNDING = 9,
+    /** A per-iteration observer requested stop. ABI minor 68. */
+    RGMIN_STOP_OBSERVER = 10
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),
                "rgmin_stop_t is i32-wide; do not build this header with -fshort-enums");
 #endif
+/** Observer action from \ref rgmin_observer_fn. */
+typedef enum rgmin_observer_action_t {
+    RGMIN_OBSERVER_CONTINUE = 0,
+    RGMIN_OBSERVER_STOP = 1
+} rgmin_observer_action_t;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(rgmin_observer_action_t) == sizeof(int32_t),
+               "rgmin_observer_action_t is i32-wide; do not build this header with -fshort-enums");
+#endif
+/** Per-iteration observer for every minimizer.
+ *  Called with the accepted iterate of each outer iteration. \a x is a
+ *  flat vector of \a n doubles, valid only during the callback; copy it
+ *  to keep it. \a grad_norm is the stationarity measure that the minimizer
+ *  already reports, and \a step_length is the Euclidean length of the
+ *  accepted coordinate change. Particle swarm passes a non-finite
+ *  \a grad_norm, because that callback does not form a gradient.
+ *  Neither field assumes an atom layout.
+ *  Returning \c RGMIN_OBSERVER_STOP ends the run with
+ *  \c RGMIN_STOP_OBSERVER. A null function pointer leaves the hook off
+ *  and does not call back.
+ *  Read by \c rgmin_minimize, \c rgmin_minimize_opts,
+ *  \c rgmin_minimize_hess, \c rgmin_minimize_hess_opts,
+ *  \c rgmin_minimize_hvp, \c rgmin_minimize_hvp_opts,
+ *  \c rgmin_minimize_eindir, \c rgmin_minimize_eindir_opts,
+ *  \c rgmin_minimize_scg, \c rgmin_minimize_scg_with_options,
+ *  \c rgmin_minimize_rlbfgs and their \c _sized entries given
+ *  \c sizeof(rgmin_control_t). */
+
+typedef rgmin_observer_action_t (*rgmin_observer_fn)(void *user, size_t iteration,
+                                                     const double *x, size_t n,
+                                                     double value, double grad_norm,
+                                                     double step_length);
 
 /** Outer-loop controls. Start from \ref rgmin_control_default and assign
  *  the fields to change. Neither an uninitialised nor a zeroed struct is
@@ -251,16 +290,26 @@ typedef struct rgmin_control_t {
     /** Nonzero returns RGMIN_NOT_CONVERGED when the gradient norm is
      *  not below gtol. Zero keeps the report. ABI minor 55. */
     int32_t require_convergence;
+    /** Optional per-iteration observer. NULL leaves it off.
+     *  ABI minor 68. */
+    rgmin_observer_fn observer;
+    /** Opaque pointer passed to observer. ABI minor 68. */
+    void *observer_user;
 } rgmin_control_t;
 /** \c sizeof(rgmin_control_t) for a layout revision 5 caller: the
  *  fields through \c noise_c. ABI minor 55. */
 #define RGMIN_CONTROL_REVISION5_SIZE offsetof(rgmin_control_t, require_convergence)
+/** \c sizeof(rgmin_control_t) for a layout revision 6 caller: the
+ *  fields through \c require_convergence. ABI minor 68. */
+#define RGMIN_CONTROL_REVISION6_SIZE offsetof(rgmin_control_t, observer)
 /** Fill \a c with the Rust \c Control::default for a caller that
  *  compiled \a struct_size as \c sizeof(rgmin_control_t).
  *  \c RGMIN_CONTROL_REVISION5_SIZE writes the fields through
- *  \c noise_c. A size of at least this header's struct writes every
- *  field and leaves the bytes past them alone. A null \a c or any other
- *  size writes nothing and returns \c RGMIN_INVALID_PARAMETER.
+ *  \c noise_c. \c RGMIN_CONTROL_REVISION6_SIZE writes the fields
+ *  through \c require_convergence. A size of at least this header's
+ *  struct writes every field and leaves the bytes past them alone. A
+ *  null \a c or any other size writes nothing and returns
+ *  \c RGMIN_INVALID_PARAMETER.
  *  ABI minor 55. */
 rgmin_status_t rgmin_control_init(rgmin_control_t *c, size_t struct_size);
 /** Rust \c Control::default: maxiter 100, gtol 1e-5, istep 1, memory 0

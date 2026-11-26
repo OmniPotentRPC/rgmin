@@ -160,30 +160,42 @@ struct Options {
     std::vector<std::pair<std::string, bool>> flags;
 };
 
+void parse_option_entry(Options& out, std::string const& key, nb::handle value) {
+    if (nb::isinstance<nb::bool_>(value)) {
+        out.flags.emplace_back(key, nb::cast<bool>(value));
+    } else if (nb::isinstance<nb::int_>(value)) {
+        // nanobind 3.1 load_i64 returns false on overflow without
+        // setting a Python error, so cast throws cast_error.
+        long long integer = 0;
+        try {
+            integer = nb::cast<long long>(value);
+        } catch (nb::cast_error const&) {
+            throw nb::value_error((key + " is out of range").c_str());
+        }
+        out.integers.emplace_back(key, integer);
+    } else if (nb::isinstance<nb::float_>(value)) {
+        out.numbers.emplace_back(key, nb::cast<double>(value));
+    } else if (nb::isinstance<nb::str>(value)) {
+        out.text.emplace_back(key, nb::cast<std::string>(value));
+    } else {
+        throw nb::type_error(("option '" + key + "' has an unsupported type").c_str());
+    }
+}
+
 Options parse_options(nb::kwargs const& kwargs) {
     Options out;
     for (auto item : kwargs) {
         std::string key = nb::cast<std::string>(item.first);
-        nb::handle value = item.second;
-        if (nb::isinstance<nb::bool_>(value)) {
-            out.flags.emplace_back(key, nb::cast<bool>(value));
-        } else if (nb::isinstance<nb::int_>(value)) {
-            // nanobind 3.1 load_i64 returns false on overflow without
-            // setting a Python error, so cast throws cast_error.
-            long long integer = 0;
-            try {
-                integer = nb::cast<long long>(value);
-            } catch (nb::cast_error const&) {
-                throw nb::value_error((key + " is out of range").c_str());
-            }
-            out.integers.emplace_back(key, integer);
-        } else if (nb::isinstance<nb::float_>(value)) {
-            out.numbers.emplace_back(key, nb::cast<double>(value));
-        } else if (nb::isinstance<nb::str>(value)) {
-            out.text.emplace_back(key, nb::cast<std::string>(value));
-        } else {
-            throw nb::type_error(("option '" + key + "' has an unsupported type").c_str());
-        }
+        parse_option_entry(out, key, item.second);
+    }
+    return out;
+}
+
+Options parse_options_dict(nb::dict const& dict) {
+    Options out;
+    for (auto item : dict) {
+        std::string key = nb::cast<std::string>(item.first);
+        parse_option_entry(out, key, item.second);
     }
     return out;
 }
@@ -659,6 +671,7 @@ NB_MODULE(_core, m) {
         .value("ENERGY_TOLERANCE", RGMIN_STOP_ENERGY_TOLERANCE)
         .value("EVAL_BUDGET", RGMIN_STOP_EVAL_BUDGET)
         .value("MACHINE_PRECISION", RGMIN_STOP_MACHINE_PRECISION)
+        .value("OBSERVER", RGMIN_STOP_OBSERVER)
         .value("Tolerance", RGMIN_STOP_TOLERANCE)
         .value("NoiseFloor", RGMIN_STOP_NOISE_FLOOR)
         .value("StepTolerance", RGMIN_STOP_STEP_TOLERANCE)
@@ -668,7 +681,8 @@ NB_MODULE(_core, m) {
         .value("PolishUnmet", RGMIN_STOP_POLISH_UNMET)
         .value("EnergyTolerance", RGMIN_STOP_ENERGY_TOLERANCE)
         .value("EvalBudget", RGMIN_STOP_EVAL_BUDGET)
-        .value("MachinePrecision", RGMIN_STOP_MACHINE_PRECISION);
+        .value("MachinePrecision", RGMIN_STOP_MACHINE_PRECISION)
+        .value("Observer", RGMIN_STOP_OBSERVER);
 
     nb::class_<rgmin::Report>(m, "Report", "Result of one optimizer step or of ``minimize``.")
         .def_prop_ro("value", [](rgmin::Report const& report) { return report.value; },
@@ -765,6 +779,20 @@ NB_MODULE(_core, m) {
     m.def(
         "minimize",
         [](nb::callable function, nb::handle x0_obj, nb::handle method, nb::kwargs kwargs) {
+            nb::object callback = nb::none();
+            nb::dict filtered;
+            for (auto item : kwargs) {
+                std::string key = nb::cast<std::string>(item.first);
+                if (key == "callback") {
+                    callback = nb::borrow(item.second);
+                } else {
+                    filtered[item.first] = item.second;
+                }
+            }
+            bool const has_callback = !callback.is_none();
+            if (has_callback && !nb::isinstance<nb::callable>(callback)) {
+                throw nb::type_error("callback must be callable");
+            }
             Vector x0;
             try {
                 x0 = nb::cast<Vector>(x0_obj, false);
@@ -777,7 +805,8 @@ NB_MODULE(_core, m) {
                         << shape_text(x0);
                 throw nb::value_error(message.str().c_str());
             }
-            rgmin::SolverConfig config = config_from(method_name(method), parse_options(kwargs));
+            rgmin::SolverConfig config =
+                config_from(method_name(method), parse_options_dict(filtered));
             std::size_t const n = static_cast<std::size_t>(x0.shape(0));
             rgmin::Solver solver(config.method(), config.control(), n);
             try {
@@ -791,8 +820,42 @@ NB_MODULE(_core, m) {
                 report = zero_budget_report(function, x0, config.control(), config.method());
             } else {
                 std::vector<double> start;
+                std::vector<double> previous;
+                nb::object simple_namespace;
+                if (has_callback) {
+                    previous.assign(x0.data(), x0.data() + n);
+                    simple_namespace = nb::module_::import_("types").attr("SimpleNamespace");
+                }
+                // A swarm pass is an iteration even when the global best holds.
+                bool const every_step = has_callback && config.method() == rgmin::Method::Pso;
                 for (std::size_t i = 0; i < budget; ++i) {
                     report = step_recording(solver, function, x0, &start);
+                    if (has_callback &&
+                        (every_step ||
+                         std::memcmp(previous.data(), x0.data(), n * sizeof(double)) != 0)) {
+                        double step_length = 0.0;
+                        for (std::size_t k = 0; k < n; ++k) {
+                            double const delta = x0.data()[k] - previous[k];
+                            step_length += delta * delta;
+                        }
+                        step_length = std::sqrt(step_length);
+                        previous.assign(x0.data(), x0.data() + n);
+                        nb::object state = simple_namespace();
+                        state.attr("x") = owned_copy(x0.data(), n);
+                        state.attr("fun") = nb::float_(report.value);
+                        state.attr("nit") = nb::int_(i + 1);
+                        state.attr("grad_norm") = nb::float_(report.grad_norm);
+                        state.attr("step_length") = nb::float_(step_length);
+                        try {
+                            callback(state);
+                        } catch (nb::python_error& error) {
+                            if (error.matches(PyExc_StopIteration)) {
+                                report.stop = RGMIN_STOP_OBSERVER;
+                                break;
+                            }
+                            throw;
+                        }
+                    }
                     if (report.stop != RGMIN_STOP_BUDGET) {
                         break;
                     }
@@ -802,7 +865,8 @@ NB_MODULE(_core, m) {
                     report.stop = RGMIN_STOP_LINE_SEARCH;
                 }
             }
-            if (config.require_convergence() && !report.converged) {
+            if (config.require_convergence() && !report.converged &&
+                report.stop != RGMIN_STOP_OBSERVER) {
                 throw rgmin::NotConverged(report);
             }
             if (config.error_on_unmet() &&
@@ -819,11 +883,17 @@ NB_MODULE(_core, m) {
         },
         nb::sig("def minimize(f_and_grad: collections.abc.Callable[[ndarray[dtype=float64]], "
                 "tuple[float, ndarray[dtype=float64]]], x0: ndarray[dtype=float64], "
-                "method: object, **kwargs) -> tuple[Report, ndarray[dtype=float64]]"),
+                "method: object, *, callback: collections.abc.Callable[[types.SimpleNamespace], "
+                "object] | None = None, **kwargs) -> tuple[Report, ndarray[dtype=float64]]"),
         "Minimize ``f_and_grad`` in place and return ``(report, x)``. "
+        "``callback``, when given, is called after each accepted iterate with "
+        "an object carrying ``x``, ``fun``, ``nit``, ``grad_norm`` and "
+        "``step_length``; raising ``StopIteration`` from it ends the run with "
+        "``Stop.OBSERVER``. "
         "``require_convergence=True`` raises ``NotConverged``, a "
         "``RuntimeError`` that carries the terminal ``Report`` as ``.report``, "
-        "when the gradient norm is still above ``gtol``. "
+        "when the gradient norm is still above ``gtol`` and the stop is not "
+        "``OBSERVER``. "
         "``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` "
         "that carries the ``Report`` as ``.report``, when the stop is "
         "``BUDGET``, ``LINE_SEARCH``, ``LINE_SEARCH_ROUNDING``, ``POLISH_UNMET``, "

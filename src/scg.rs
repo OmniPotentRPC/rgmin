@@ -12,9 +12,11 @@
 use eindir_core::{DifferentiableObjective, Objective};
 use ndarray::Array1;
 
+use crate::StopReason;
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::nlcg::{Conjugacy, ConjugacyContext, Restart};
+use crate::observer::{IterationObserver, IterationView, ObserverSignal};
 use crate::report::Report;
 use crate::step::one_shot_report;
 use crate::stop::{Counted, StopRules, counted, stop_after};
@@ -182,6 +184,25 @@ pub fn minimize_scg_with_options<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    minimize_scg_with_options_observed(
+        obj, init, control, params, conjugacy, restart, options, None,
+    )
+}
+
+/// [`minimize_scg_with_options`] with an optional per-iteration observer.
+pub fn minimize_scg_with_options_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    params: &ScgParams,
+    conjugacy: Conjugacy,
+    restart: Restart,
+    options: &ScgOptions,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     run_scg(
         obj,
         init.into(),
@@ -191,6 +212,7 @@ where
         restart,
         options,
         |_, _| None,
+        observer,
     )
 }
 
@@ -234,6 +256,25 @@ pub fn minimize_scg_exact_with_options<O>(
 where
     O: DirectionalCurvature + ?Sized,
 {
+    minimize_scg_exact_with_options_observed(
+        obj, init, control, params, conjugacy, restart, options, None,
+    )
+}
+
+/// [`minimize_scg_exact_with_options`] with an optional per-iteration observer.
+pub fn minimize_scg_exact_with_options_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    params: &ScgParams,
+    conjugacy: Conjugacy,
+    restart: Restart,
+    options: &ScgOptions,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: DirectionalCurvature + ?Sized,
+{
     run_scg(
         obj,
         init.into(),
@@ -243,6 +284,7 @@ where
         restart,
         options,
         |x, d| obj.directional_curvature(x, d),
+        observer,
     )
 }
 
@@ -286,13 +328,14 @@ fn run_scg<O>(
     restart: Restart,
     options: &ScgOptions,
     curvature: impl Fn(ArrayView1<f64>, ArrayView1<f64>) -> Option<f64>,
+    observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     counted(obj, control, |obj| {
         scg_counted(
-            obj, init, control, params, conjugacy, restart, options, curvature,
+            obj, init, control, params, conjugacy, restart, options, curvature, observer,
         )
     })
 }
@@ -306,6 +349,7 @@ fn scg_counted<O>(
     restart: Restart,
     options: &ScgOptions,
     curvature: impl Fn(ArrayView1<f64>, ArrayView1<f64>) -> Option<f64>,
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -451,6 +495,26 @@ where
             let objective_converged =
                 (f_new - f_old).abs() < params.tol_func * (1.0 + (objective_max - objective_min));
             w = trial;
+            if let Some(obs) = observer.as_deref_mut()
+                && obs.observe(IterationView {
+                    iteration: step,
+                    x: w.view(),
+                    value: f_new,
+                    grad_norm: l2_ordered(&grad_new),
+                    step_length: alpha.abs() * l2_ordered(&dir),
+                }) == ObserverSignal::Stop
+            {
+                return control.deliver(
+                    one_shot_report(
+                        f_new,
+                        w,
+                        step + 1,
+                        l2_ordered(&grad_new),
+                        crate::report::Status::ObserverStop,
+                    )
+                    .with_stop_reason(StopReason::ObserverRequested),
+                );
+            }
             if solution_converged && objective_converged {
                 let grad_norm = l2_ordered(&grad_new);
                 return control.deliver(one_shot_report(

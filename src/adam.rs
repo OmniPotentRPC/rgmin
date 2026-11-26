@@ -6,7 +6,8 @@ use ndarray::Array1;
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::linesearch::LineSearch;
-use crate::report::Report;
+use crate::observer::{IterationObserver, IterationView, ObserverSignal};
+use crate::report::{Report, Status, StopReason};
 use crate::step::{
     energy_noise_report, implicit_atom_cap, l2, max_atom_norm, one_shot_report, stop_if_unmoved,
     take_step,
@@ -38,8 +39,25 @@ pub fn minimize_adam<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    minimize_adam_observed(obj, init, control, linesearch, beta1, beta2, eps, None)
+}
+
+/// [`minimize_adam`] with an optional per-iteration observer.
+pub fn minimize_adam_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    linesearch: LineSearch,
+    beta1: f64,
+    beta2: f64,
+    eps: f64,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     counted(obj, control, |obj| {
-        adam_counted(obj, init, control, linesearch, beta1, beta2, eps)
+        adam_counted(obj, init, control, linesearch, beta1, beta2, eps, observer)
     })
 }
 
@@ -51,6 +69,7 @@ fn adam_counted<O>(
     beta1: f64,
     beta2: f64,
     eps: f64,
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -96,6 +115,11 @@ where
         if t.energy_noise {
             return control.deliver(energy_noise_report(value, pos, step + 1, gnorm));
         }
+        let step_length = if t.moved && observer.is_some() {
+            crate::observer::separation(t.x.view(), pos.view())
+        } else {
+            0.0
+        };
         if t.moved {
             pos = t.x;
             value = t.f;
@@ -112,6 +136,21 @@ where
             }
             m = m_old;
             v = v_old;
+        }
+        if t.moved
+            && let Some(obs) = observer.as_deref_mut()
+            && obs.observe(IterationView {
+                iteration: step,
+                x: pos.view(),
+                value,
+                grad_norm: l2(&grad),
+                step_length,
+            }) == ObserverSignal::Stop
+        {
+            return control.deliver(
+                one_shot_report(value, pos, step + 1, l2(&grad), Status::ObserverStop)
+                    .with_stop_reason(StopReason::ObserverRequested),
+            );
         }
         if let Some(status) = stop_after(&mut stops, control, obj, value, t.moved, &grad) {
             return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));

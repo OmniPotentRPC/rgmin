@@ -27,13 +27,14 @@ use crate::precon::{ExpParams, ExpState, Neighbours};
 use crate::{
     Accept, ApplyBlockPreconditioner, ApplyHessian, Conjugacy, Control, DirectionalCurvature,
     EigenParams, EigensolverKind, Error, GromacsCgConfig, GromacsSteepConfig, HessianObjective,
-    HessianOracle, HessianVector, HvpOracle, LbfgsH0, LbfgsPairs, LineSearch, ManifoldKind, Method,
-    NewtonKind, Oracle, Preconditioner, QnStep, Restart, RiemannianManifold, Rlbfgs, ScgOptions,
-    ScgParams, ScgStepTolerance, SearchStep, Solver, SpdMetric, StiefelRetraction, StopNorm,
-    SuppliedSearch, lowest_eigenpairs, lowest_eigenpairs_precond, lowest_eigenpairs_projected,
-    lowest_mode, lowest_mode_precond_with, minimize_method, minimize_method_hess,
-    minimize_method_hvp, minimize_newton_cg, minimize_newton_cg_precond, minimize_rlbfgs,
-    minimize_scg_exact_with_options, minimize_scg_with_options,
+    HessianOracle, HessianVector, HvpOracle, IterationObserver, IterationView, LbfgsH0, LbfgsPairs,
+    LineSearch, ManifoldKind, Method, NewtonKind, ObserverSignal, Oracle, Preconditioner, QnStep,
+    Restart, RiemannianManifold, Rlbfgs, ScgOptions, ScgParams, ScgStepTolerance, SearchStep,
+    Solver, SpdMetric, StiefelRetraction, StopNorm, SuppliedSearch, lowest_eigenpairs,
+    lowest_eigenpairs_precond, lowest_eigenpairs_projected, lowest_mode, lowest_mode_precond_with,
+    minimize_method_hess_observed, minimize_method_hvp_observed, minimize_method_observed,
+    minimize_newton_cg_observed, minimize_newton_cg_precond_observed, minimize_rlbfgs_observed,
+    minimize_scg_exact_with_options_observed, minimize_scg_with_options_observed,
 };
 
 /// Status codes. 0 is success, matching metatensor / eindir.
@@ -104,8 +105,8 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 66;
-pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 69;
+pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 7;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
 #[repr(C)]
@@ -243,6 +244,8 @@ pub enum rgmin_stop_t {
     RGMIN_STOP_MACHINE_PRECISION = 8,
     /// Wolfe zoom stopped when rounding blocked further progress. ABI minor 57.
     RGMIN_STOP_LINE_SEARCH_ROUNDING = 9,
+    /// A per-iteration observer requested stop. ABI minor 68.
+    RGMIN_STOP_OBSERVER = 10,
 }
 
 /// Iteration controls. `memory` is used only by L-BFGS (0 means 10).
@@ -275,6 +278,11 @@ pub struct rgmin_control_t {
     /// [`rgmin_minimize_opts_sized`]. Every other entry reads the
     /// revision 5 fields and leaves this at 0. ABI minor 55.
     pub require_convergence: i32,
+    /// Optional per-iteration observer callback. Null leaves it off.
+    /// ABI minor 68.
+    pub observer: Option<rgmin_observer_fn>,
+    /// Opaque pointer passed to [`Self::observer`]. ABI minor 68.
+    pub observer_user: *mut c_void,
 }
 
 /// [`rgmin_control_t`] as a layout revision 5 caller compiled it, the
@@ -300,16 +308,43 @@ pub struct rgmin_control_revision5_t {
     pub noise_c: f64,
 }
 
+/// [`rgmin_control_t`] as a layout revision 6 caller compiled it, through
+/// `require_convergence`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct rgmin_control_revision6_t {
+    /// Maximum iterations.
+    pub maxiter: usize,
+    /// Stop when `||g||_2 < gtol`.
+    pub gtol: f64,
+    /// Initial line-search step.
+    pub istep: f64,
+    /// L-BFGS correction pairs.
+    pub memory: usize,
+    /// Euclidean cap.
+    pub maxmove: f64,
+    /// Gradient-projection noise.
+    pub noise_eps: f64,
+    /// Floor factor.
+    pub noise_c: f64,
+    /// Strict-convergence flag.
+    pub require_convergence: i32,
+}
+
 /// `sizeof(rgmin_control_t)` for a layout revision 5 caller, the offset
 /// of `require_convergence`.
 pub const RGMIN_CONTROL_REVISION5_SIZE: usize =
     std::mem::offset_of!(rgmin_control_t, require_convergence);
+/// `sizeof(rgmin_control_t)` for a layout revision 6 caller, the offset
+/// of `observer`.
+pub const RGMIN_CONTROL_REVISION6_SIZE: usize = std::mem::offset_of!(rgmin_control_t, observer);
 
 /// The bytes of [`rgmin_report_t`] a layout revision 5 caller owns
 /// fields in: everything before `converged`.
 pub const RGMIN_REPORT_REVISION5_SIZE: usize = std::mem::offset_of!(rgmin_report_t, converged);
 
 const _: () = assert!(RGMIN_CONTROL_REVISION5_SIZE == size_of::<rgmin_control_revision5_t>());
+const _: () = assert!(RGMIN_CONTROL_REVISION6_SIZE == size_of::<rgmin_control_revision6_t>());
 const _: () = assert!(
     RGMIN_REPORT_REVISION5_SIZE
         == std::mem::offset_of!(rgmin_report_t, stop) + size_of::<rgmin_stop_t>()
@@ -368,6 +403,37 @@ pub type rgmin_curv_fn = unsafe extern "C" fn(
     d: *const DLManagedTensorVersioned,
     curv_out: *mut f64,
 ) -> rgmin_status_t;
+
+/// Observer action from [`rgmin_observer_fn`].
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum rgmin_observer_action_t {
+    /// Continue minimization.
+    RGMIN_OBSERVER_CONTINUE = 0,
+    /// Stop minimization with `RGMIN_STOP_OBSERVER`.
+    RGMIN_OBSERVER_STOP = 1,
+}
+
+/// Per-iteration observer callback for every minimizer.
+///
+/// `x` points at `n` doubles that are valid only during the callback.
+/// `grad_norm` is the stationarity measure the minimizer already reports,
+/// and `step_length` is the Euclidean length of the accepted coordinate
+/// change. Particle swarm passes a non-finite `grad_norm`, because that
+/// callback does not form a gradient. A null pointer leaves the hook off
+/// and is not called.
+/// The one-shot, Hessian, Hessian-vector, eindir, SCG and Riemannian
+/// L-BFGS entries read it when `ctrl_size` covers the observer fields,
+/// as the `rgmin.h` inline wrappers pass.
+pub type rgmin_observer_fn = unsafe extern "C" fn(
+    user: *mut c_void,
+    iteration: usize,
+    x: *const f64,
+    n: usize,
+    value: f64,
+    grad_norm: f64,
+    step_length: f64,
+) -> rgmin_observer_action_t;
 
 /// Møller SCG damping / tolerances. Null at the C entry selects
 /// [`ScgParams::default`] plus [`Conjugacy::PolakRibiere`].
@@ -1308,12 +1374,16 @@ pub unsafe extern "C" fn rgmin_minimize_opts_sized(
         let n = init.len();
         let obj = c_oracle(eval, grad, user, n);
         let control = control_with_flags(&c, error_on_unmet, backward_polish);
-        let outcome = minimize_method(
+        let mut observer = observer_from_c(&c, n);
+        let outcome = minimize_method_observed(
             &obj,
             Array1::from(init),
             &control,
             method_from_c(method, c.memory),
             LineSearch::default(),
+            observer
+                .as_mut()
+                .map(|obs| obs as &mut dyn IterationObserver),
         );
         finish_one_shot(x, out, outcome, layout)
     })) {
@@ -1657,7 +1727,17 @@ pub unsafe extern "C" fn rgmin_minimize_rlbfgs_sized(
         let obj = c_oracle(eval, grad, user, n);
         let control = control_from_c(&c);
         let kind = kind_from_token(manifold);
-        let outcome = minimize_rlbfgs(&kind, &obj, Array1::from(init), &control, &rlbfgs);
+        let mut observer = observer_from_c(&c, n);
+        let outcome = minimize_rlbfgs_observed(
+            &kind,
+            &obj,
+            Array1::from(init),
+            &control,
+            &rlbfgs,
+            observer
+                .as_mut()
+                .map(|obs| obs as &mut dyn IterationObserver),
+        );
         finish_one_shot(x, out, outcome, layout)
     })) {
         Ok(status) => status,
@@ -1812,12 +1892,16 @@ pub unsafe extern "C" fn rgmin_minimize_hess_opts_sized(
         let obj = c_oracle_hess(eval, grad, hess, user, n);
         let control = control_with_flags(&c, error_on_unmet, backward_polish);
         let rust_method = method_from_c(method, c.memory);
-        let outcome = minimize_method_hess(
+        let mut observer = observer_from_c(&c, n);
+        let outcome = minimize_method_hess_observed(
             &obj,
             Array1::from(init),
             &control,
             rust_method,
             LineSearch::default(),
+            observer
+                .as_mut()
+                .map(|obs| obs as &mut dyn IterationObserver),
         );
         finish_one_shot(x, out, outcome, layout)
     })) {
@@ -1950,12 +2034,16 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_opts_sized(
         let n = init.len();
         let obj = c_oracle_hvp(eval, grad, hvp, user, n);
         let control = control_with_flags(&c, error_on_unmet, backward_polish);
-        let outcome = minimize_method_hvp(
+        let mut observer = observer_from_c(&c, n);
+        let outcome = minimize_method_hvp_observed(
             &obj,
             Array1::from(init),
             &control,
             method_from_c(method, c.memory),
             LineSearch::default(),
+            observer
+                .as_mut()
+                .map(|obs| obs as &mut dyn IterationObserver),
         );
         finish_one_shot(x, out, outcome, layout)
     })) {
@@ -2092,6 +2180,7 @@ fn c_oracle_hvp_fg<'a>(
 /// `ctrl` is read as in [`rgmin_minimize_opts_sized`]: `istep` seeds the
 /// trust radius and `maxmove` caps it. Nonzero `error_on_unmet` and
 /// `backward_polish` act as in [`rgmin_minimize_hvp_opts_sized`].
+/// A non-null `observer` on `ctrl` runs after each accepted step.
 ///
 /// A callback that returns a status other than
 /// [`rgmin_status_t::RGMIN_SUCCESS`] aborts the solve: later callbacks are
@@ -2153,6 +2242,7 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_precond_sized(
         let failure = CallbackFailure::new();
         let obj = c_oracle_hvp_fg(evalgrad, hvp, user, n, &failure);
         let control = control_with_flags(&c, error_on_unmet, backward_polish);
+        let mut observer = observer_from_c(&c, n);
         let outcome = match precond {
             Some(precond) => {
                 let pc = CVecPrecond {
@@ -2161,9 +2251,24 @@ pub unsafe extern "C" fn rgmin_minimize_hvp_precond_sized(
                     scratch: Scratch::new(),
                     failure: &failure,
                 };
-                minimize_newton_cg_precond(&obj, Array1::from(init), &control, &pc)
+                minimize_newton_cg_precond_observed(
+                    &obj,
+                    Array1::from(init),
+                    &control,
+                    &pc,
+                    observer
+                        .as_mut()
+                        .map(|obs| obs as &mut dyn IterationObserver),
+                )
             }
-            None => minimize_newton_cg(&obj, Array1::from(init), &control),
+            None => minimize_newton_cg_observed(
+                &obj,
+                Array1::from(init),
+                &control,
+                observer
+                    .as_mut()
+                    .map(|obs| obs as &mut dyn IterationObserver),
+            ),
         };
         if let Some((status, which)) = failure.get() {
             set_last_error(&format!(
@@ -2323,12 +2428,16 @@ unsafe fn minimize_eindir_named(
             (value, gradient)
         });
         let control = control_with_flags(&c, error_on_unmet, backward_polish);
-        let outcome = minimize_method(
+        let mut observer = observer_from_c(&c, dim);
+        let outcome = minimize_method_observed(
             &obj,
             Array1::from(init),
             &control,
             method_from_c(method, c.memory),
             LineSearch::default(),
+            observer
+                .as_mut()
+                .map(|obs| obs as &mut dyn IterationObserver),
         );
         let oracle_failed = matches!(outcome, Err(Error::Oracle { .. }));
         let status = finish_one_shot(x, out, outcome, layout);
@@ -5350,12 +5459,15 @@ unsafe fn load_control(
     let full = std::mem::size_of::<rgmin_control_t>();
     let (n, layout) = if ctrl_size >= full {
         (full, CLayout::Current)
+    } else if ctrl_size == RGMIN_CONTROL_REVISION6_SIZE {
+        (RGMIN_CONTROL_REVISION6_SIZE, CLayout::Current)
     } else if ctrl_size == RGMIN_CONTROL_REVISION5_SIZE {
         (RGMIN_CONTROL_REVISION5_SIZE, CLayout::Revision5)
     } else {
         set_last_error(&format!(
             "{name}: ctrl_size {ctrl_size} is neither the layout revision 5 size \
-             {RGMIN_CONTROL_REVISION5_SIZE} nor at least sizeof(rgmin_control_t) {full}"
+             {RGMIN_CONTROL_REVISION5_SIZE}, the layout revision 6 size \
+             {RGMIN_CONTROL_REVISION6_SIZE}, nor at least sizeof(rgmin_control_t) {full}"
         ));
         return Err(rgmin_status_t::RGMIN_INVALID_PARAMETER);
     };
@@ -5420,6 +5532,41 @@ fn control_with_flags(c: &rgmin_control_t, error_on_unmet: i32, backward_polish:
     }
 }
 
+struct CObserver {
+    callback: rgmin_observer_fn,
+    user: *mut c_void,
+    dim: usize,
+}
+
+impl IterationObserver for CObserver {
+    fn observe(&mut self, iteration: IterationView<'_>) -> ObserverSignal {
+        let action = unsafe {
+            (self.callback)(
+                self.user,
+                iteration.iteration,
+                iteration.x.as_ptr(),
+                self.dim,
+                iteration.value,
+                iteration.grad_norm,
+                iteration.step_length,
+            )
+        };
+        if action == rgmin_observer_action_t::RGMIN_OBSERVER_STOP {
+            ObserverSignal::Stop
+        } else {
+            ObserverSignal::Continue
+        }
+    }
+}
+
+fn observer_from_c(c: &rgmin_control_t, dim: usize) -> Option<CObserver> {
+    c.observer.map(|callback| CObserver {
+        callback,
+        user: c.observer_user,
+        dim,
+    })
+}
+
 /// The C stop of a finished run. [`crate::StopReason::Iterating`] is a
 /// step still in progress, not a stop, so it has none.
 fn finished_stop(reason: crate::StopReason) -> Option<rgmin_stop_t> {
@@ -5435,6 +5582,7 @@ fn finished_stop(reason: crate::StopReason) -> Option<rgmin_stop_t> {
         StopReason::PolishUnmet => Some(rgmin_stop_t::RGMIN_STOP_POLISH_UNMET),
         StopReason::EnergyTolerance => Some(rgmin_stop_t::RGMIN_STOP_ENERGY_TOLERANCE),
         StopReason::EvalBudget => Some(rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET),
+        StopReason::ObserverRequested => Some(rgmin_stop_t::RGMIN_STOP_OBSERVER),
         StopReason::Iterating => None,
     }
 }
@@ -7197,6 +7345,10 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options_sized(
             Err(st) => return st,
         };
         let restart = Restart::Never;
+        let mut observer = observer_from_c(&c, n);
+        let observer = observer
+            .as_mut()
+            .map(|obs| obs as &mut dyn IterationObserver);
         let obj = ScgFfiOracle {
             inner: c_oracle(eval, grad, user, n),
             curv: curv.map(|f| f as usize),
@@ -7204,7 +7356,7 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options_sized(
             scratch: Scratch::new(),
         };
         let report = if obj.curv.is_some() {
-            minimize_scg_exact_with_options(
+            minimize_scg_exact_with_options_observed(
                 &obj,
                 Array1::from(init),
                 &control,
@@ -7212,9 +7364,10 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options_sized(
                 conjugacy,
                 restart,
                 &options,
+                observer,
             )
         } else {
-            minimize_scg_with_options(
+            minimize_scg_with_options_observed(
                 &obj.inner,
                 Array1::from(init),
                 &control,
@@ -7222,6 +7375,7 @@ pub unsafe extern "C" fn rgmin_minimize_scg_with_options_sized(
                 conjugacy,
                 restart,
                 &options,
+                observer,
             )
         };
         finish_one_shot(x, out, report, layout)
@@ -9242,6 +9396,8 @@ impl Default for rgmin_control_t {
             noise_eps: floor.map_or(0.0, |f| f.eps_g),
             noise_c: floor.unwrap_or_else(|| crate::NoiseFloor::new(0.0)).c,
             require_convergence: 0,
+            observer: None,
+            observer_user: std::ptr::null_mut(),
         }
     }
 }
@@ -9359,7 +9515,8 @@ pub extern "C" fn rgmin_control_default() -> rgmin_control_revision5_t {
 
 /// Fill `c` with [`rgmin_control_t::default`] for a caller that states
 /// `sizeof(rgmin_control_t)` as `struct_size`.
-/// [`RGMIN_CONTROL_REVISION5_SIZE`] writes the revision 5 fields. A size
+/// [`RGMIN_CONTROL_REVISION5_SIZE`] writes the revision 5 fields.
+/// [`RGMIN_CONTROL_REVISION6_SIZE`] writes the revision 6 fields. A size
 /// of at least this build's struct writes every field and leaves the
 /// bytes past them alone. A null `c` or any other size writes nothing
 /// and returns [`rgmin_status_t::RGMIN_INVALID_PARAMETER`]. ABI minor 55.
@@ -9378,12 +9535,15 @@ pub unsafe extern "C" fn rgmin_control_init(
     let full = size_of::<rgmin_control_t>();
     let n = if struct_size >= full {
         full
+    } else if struct_size == RGMIN_CONTROL_REVISION6_SIZE {
+        RGMIN_CONTROL_REVISION6_SIZE
     } else if struct_size == RGMIN_CONTROL_REVISION5_SIZE {
         RGMIN_CONTROL_REVISION5_SIZE
     } else {
         set_last_error(&format!(
             "rgmin_control_init: struct_size {struct_size} is neither the layout revision 5 \
-             size {RGMIN_CONTROL_REVISION5_SIZE} nor at least sizeof(rgmin_control_t) {full}"
+             size {RGMIN_CONTROL_REVISION5_SIZE}, the layout revision 6 size \
+             {RGMIN_CONTROL_REVISION6_SIZE}, nor at least sizeof(rgmin_control_t) {full}"
         ));
         return rgmin_status_t::RGMIN_INVALID_PARAMETER;
     };
@@ -9640,8 +9800,12 @@ mod default_tests {
             noise_eps,
             noise_c,
             require_convergence,
+            observer,
+            observer_user,
         } = full_control_default();
         assert_eq!(require_convergence, 0);
+        assert!(observer.is_none());
+        assert!(observer_user.is_null());
         assert_eq!(maxiter, want.maxiter);
         assert_eq!(gtol.to_bits(), want.gtol.to_bits());
         assert_eq!(istep.to_bits(), want.istep.to_bits());
@@ -9824,7 +9988,7 @@ mod stop_mapping_tests {
     use super::*;
     use crate::{Report, StopReason};
 
-    const FINISHED: [(StopReason, rgmin_stop_t); 10] = [
+    const FINISHED: [(StopReason, rgmin_stop_t); 11] = [
         (StopReason::Converged, rgmin_stop_t::RGMIN_STOP_TOLERANCE),
         (StopReason::NoiseFloor, rgmin_stop_t::RGMIN_STOP_NOISE_FLOOR),
         (
@@ -9852,6 +10016,10 @@ mod stop_mapping_tests {
         (
             StopReason::MachinePrecision,
             rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION,
+        ),
+        (
+            StopReason::ObserverRequested,
+            rgmin_stop_t::RGMIN_STOP_OBSERVER,
         ),
     ];
 
@@ -9885,6 +10053,7 @@ mod stop_mapping_tests {
         assert_eq!(rgmin_stop_t::RGMIN_STOP_EVAL_BUDGET as i32, 7);
         assert_eq!(rgmin_stop_t::RGMIN_STOP_MACHINE_PRECISION as i32, 8);
         assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING as i32, 9);
+        assert_eq!(rgmin_stop_t::RGMIN_STOP_OBSERVER as i32, 10);
     }
 
     #[test]

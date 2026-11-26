@@ -27,6 +27,7 @@ use ndarray::Array1;
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::manifold::Manifold;
+use crate::observer::IterationObserver;
 use crate::report::{Report, Status, StopReason};
 use crate::step::one_shot_report;
 use crate::stop::{Counted, StopRules, counted};
@@ -340,6 +341,22 @@ where
     M: Manifold + ?Sized,
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    minimize_rlbfgs_observed(manifold, obj, init, control, params, None)
+}
+
+/// [`minimize_rlbfgs`] with an optional per-iteration observer.
+pub fn minimize_rlbfgs_observed<M, O>(
+    manifold: &M,
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    params: &Rlbfgs,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    M: Manifold + ?Sized,
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     params.check()?;
     let init = init.into();
     if eindir_core::Objective::dim(obj) != init.len() {
@@ -355,7 +372,7 @@ where
         });
     }
     counted(obj, control, |obj| {
-        drive(manifold, obj, init, control, params)
+        drive(manifold, obj, init, control, params, observer)
     })
 }
 
@@ -365,6 +382,7 @@ fn drive<M, O>(
     mut pos: Array1<f64>,
     control: &Control,
     params: &Rlbfgs,
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     M: Manifold + ?Sized,
@@ -413,10 +431,32 @@ where
             }
             Armijo::Accepted(accepted) => accepted,
         };
+        let step_length = if observer.is_some() {
+            crate::observer::separation(accepted.point.view(), pos.view())
+        } else {
+            0.0
+        };
         let left = gnorm;
         pos = accepted.point;
         value = accepted.value;
         grad = accepted.grad;
+        if observer.is_some() {
+            let gnow = manifold.norm(&pos, &grad);
+            if crate::observer::request_stop(
+                &mut observer,
+                step,
+                pos.view(),
+                value,
+                gnow,
+                step_length,
+            ) {
+                return control.deliver(
+                    one_shot_report(value, pos, step + 1, gnow, Status::ObserverStop)
+                        .with_stop_reason(StopReason::ObserverRequested)
+                        .with_grad(Some(grad)),
+                );
+            }
+        }
         pairs = accepted.transported;
         if accept_pair(params, manifold, &pos, &accepted.s, &accepted.y, left) {
             let ys = manifold.inner(&pos, &accepted.s, &accepted.y);
