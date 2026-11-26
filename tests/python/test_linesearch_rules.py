@@ -79,14 +79,16 @@ def _options(accept: str | None, **options: object) -> dict[str, object]:
 @pytest.mark.parametrize("accept", SEARCHED_ACCEPTS)
 @pytest.mark.parametrize("kind", ("brent", "backtracking", "goldstein"))
 def test_lbfgs_rejects_a_kind_its_eon_step_ignores(kind: str, accept: str | None) -> None:
-    with pytest.raises(ValueError, match=rf"linesearch='{kind}' has no effect on lbfgs.*'wolfe'"):
+    with pytest.raises(ValueError, match=rf"linesearch='{kind}' has no effect on lbfgs.*'wolfe'.*'ase'"):
         rgmin.SolverConfig("lbfgs", **_options(accept, linesearch=kind))
 
 
 @pytest.mark.parametrize("method", UNSEARCHED)
 @pytest.mark.parametrize("kind", KINDS)
 def test_a_method_without_a_line_search_rejects_every_kind(method: str, kind: str) -> None:
-    with pytest.raises(ValueError, match=rf"linesearch='{kind}' has no effect on {method}"):
+    with pytest.raises(
+        ValueError, match=rf"linesearch='{kind}' has no effect on {method}.*run the {kind} line"
+    ):
         rgmin.SolverConfig(method, linesearch=kind)
 
 

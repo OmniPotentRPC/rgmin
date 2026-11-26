@@ -1654,8 +1654,9 @@ inline std::string SolverConfig::ignored_linesearch() const {
     }
     if (method_ == Method::Lbfgs) {
         if (*linesearch_ == RGMIN_LINESEARCH_WOLFE) return {};
-        return head + " on lbfgs: its default eOn step searches no line, and "
-                      "linesearch='wolfe' opts into the strong Wolfe search";
+        return head + " on lbfgs: its default eOn step searches no line, and only "
+                      "linesearch='wolfe' (strong Wolfe) or linesearch='ase' (ASE's "
+                      "LineSearch) opts it into one";
     }
     if (method_ == Method::Steepest || method_ == Method::Bfgs || method_ == Method::Adam ||
         method_ == Method::Diis || method_ == Method::GromacsCg || method_ == Method::Rcg || detail::is_cg(method_)) {
@@ -1668,7 +1669,8 @@ inline std::string SolverConfig::ignored_linesearch() const {
     }
     return head + " on " + method_name_ +
            ", which takes no line search. sd, the conjugate-gradient methods, bfgs, "
-           "adam, and diis line search, and lbfgs does with linesearch='wolfe'";
+           "adam, and diis run the " + kind +
+           " line search, and lbfgs runs only linesearch='wolfe' or linesearch='ase'";
 }
 
 inline std::string SolverConfig::ignored_scale() const {
