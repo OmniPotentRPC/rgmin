@@ -59,7 +59,7 @@ search successfully on its warnings, including a trial at ``stpmax``, and
 so does rgmin. ``damping`` is stored and, as in ASE, does not scale a
 line-search step.
 
-Four differences remain. The search stops after ``linesearch_maxiter``
+Five differences remain. The search stops after ``linesearch_maxiter``
 trials, 20 by default, where ASE has no limit; running out raises the
 same ``RuntimeError``. A ``maxstep`` of zero is a safety stop: ASE scales a
 later zero increment by 0/0 and the search does not finish, while rgmin
