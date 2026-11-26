@@ -82,7 +82,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 68
+#define RGMIN_ABI_VERSION_MINOR 72
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -121,7 +121,9 @@ typedef struct rgmin_abi_stamp_t {
  * 67 RGMIN_GROMACS_LBFGS and rgmin_solver_set_gromacs_lbfgs.
  *    rgmin_control_t is unchanged.
  * 68 noise_eps_f on rgmin_control_t and RGMIN_CONTROL_REVISION6_SIZE.
- *    The struct grows, so the layout revision becomes 7. */
+ *    The struct grows, so the layout revision becomes 7.
+ * 72 rgmin_solver_set_highs_time_limit and rgmin_solver_highs_timeouts.
+ *    No struct changes, so the layout revision stays 7. */
 #define RGMIN_ABI_LAYOUT_REVISION 7
 /* Layout revision 7. rgmin_control_t is maxiter, gtol, istep, memory,
  * maxmove, noise_eps, noise_c, require_convergence, noise_eps_f.
@@ -945,11 +947,12 @@ int32_t rgmin_solver_set_highs_crossover(rgmin_solver_t *solver,
  *  limit returns \c RGMIN_INVALID_PARAMETER, and \ref rgmin_last_error
  *  names the time limit. A projection QP that uses up its iteration
  *  budget fails the same way, and \ref rgmin_last_error names the
- *  iteration limit. */
+ *  iteration limit. ABI minor 72. */
 int32_t rgmin_solver_set_highs_time_limit(rgmin_solver_t *solver, double seconds);
 /** Hessian steps whose HiGHS solve reached its time limit and fell back
  *  to the step the session takes without HiGHS. Zero for a NULL solver,
- *  a session that takes no Hessian step, and a build without highs. */
+ *  a session that takes no Hessian step, and a build without highs.
+ *  ABI minor 72. */
 size_t rgmin_solver_highs_timeouts(const rgmin_solver_t *solver);
 /** HiGHS callback kind. Integers match HiGHS `HighsCallbackType`. */
 typedef enum rgmin_highs_cb_kind_t {

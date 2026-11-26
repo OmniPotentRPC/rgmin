@@ -104,7 +104,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 68;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 72;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 7;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -3431,6 +3431,7 @@ pub unsafe extern "C" fn rgmin_solver_set_highs_crossover(
 /// limit returns `RGMIN_INVALID_PARAMETER`, and [`rgmin_last_error`] names
 /// the time limit. A projection QP that uses up its iteration budget fails
 /// the same way, and [`rgmin_last_error`] names the iteration limit.
+/// ABI minor 72.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
@@ -3464,7 +3465,7 @@ pub unsafe extern "C" fn rgmin_solver_set_highs_time_limit(
 /// Hessian steps whose HiGHS solve reached its time limit and fell back
 /// to the step the session takes without HiGHS. A null solver, a session
 /// that takes no Hessian step, and a build without the `highs` feature
-/// return zero.
+/// return zero. ABI minor 72.
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].

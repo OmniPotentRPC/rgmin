@@ -154,6 +154,12 @@ A HiGHS feasible set is ~rgmin_solver_set_highs~ plus
 returns 0, or 1 when the build has no ~highs~ feature. Stamp
 1.22.4.
 
+~rgmin_solver_set_highs_time_limit~ sets the seconds one HiGHS solve
+may run. A finite positive value is the limit, and zero or a negative
+value clears it. NaN or an infinite value returns 1 and leaves the
+limit as it was. ~rgmin_solver_highs_timeouts~ reads how many Hessian
+steps fell back after a solve reached that limit. Both are ~abi_minor~ 72.
+
 A Cartesian session starts with a per-atom cap of 0.2.
 ~rgmin_solver_set_atom_maxmove~ replaces it. A non-positive argument
 clears it. A positive ~maxmove~ on ~rgmin_control_t~, with no call to

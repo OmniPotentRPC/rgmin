@@ -6,3 +6,4 @@ limit. A step that cannot fall back returns `RGMIN_INVALID_PARAMETER`, and
 `rgmin_last_error` names the time limit, or the iteration limit when a
 projection QP used up its budget. The C++ `Solver` wraps both as
 `set_highs_time_limit` and `highs_timeouts`, and `xts.h` aliases them.
+ABI minor 72.
