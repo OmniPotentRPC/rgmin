@@ -322,13 +322,14 @@ where
     /// The Riemannian gradient `grad` of `base` at `x`, cut by the bond
     /// tangent space. With masses the cut is a covector, whose `M^-1`
     /// image is tangent. [`Manifold::egrad2rgrad`] is `base`'s map of an
-    /// ambient gradient, this, and that raise.
+    /// ambient gradient, this, and that raise. `grad` is already
+    /// Riemannian, so the carry is [`Manifold::to_tangent`].
     pub(crate) fn cut_gradient(&self, x: &Array1<f64>, grad: Array1<f64>) -> Array1<f64> {
         self.tangent(
             x,
             grad,
             |set, at, w| set.project_gradient(at, w).map(drop),
-            |at, w| self.base.project(at, w),
+            |at, w| self.base.to_tangent(at, w),
         )
     }
 
@@ -408,7 +409,8 @@ where
     fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {
         let cut = self.cut_gradient(x, self.base.egrad2rgrad(x, egrad));
         match self.by_mass(&cut, -1) {
-            Some(raised) => self.project(x, &raised),
+            // The raised covector is a tangent velocity.
+            Some(raised) => self.to_tangent(x, &raised),
             None => cut,
         }
     }
@@ -434,7 +436,9 @@ where
     }
 
     fn transport(&self, x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
-        self.project(x_to, &self.base.transport(x_from, x_to, v))
+        // The carried vector is tangent. `project` on the Poincare ball
+        // would divide it by the squared conformal factor.
+        self.to_tangent(x_to, &self.base.transport(x_from, x_to, v))
     }
 
     /// `base`'s metric weighted by the masses, so the slope of a raised
@@ -712,6 +716,10 @@ fn search_direction(
 /// Conjugated direction at `x_to`, and whether it was replaced by steepest
 /// descent. `egrad_to` is the Euclidean gradient there, whose product with
 /// the direction is the slope.
+///
+/// The combination is already Riemannian, so it is returned through
+/// [`Manifold::to_tangent`]. On the Poincare ball [`Manifold::project`]
+/// divides by the squared conformal factor and would rescale it.
 #[allow(clippy::too_many_arguments)]
 fn next_direction<M>(
     manifold: &M,
@@ -1865,5 +1873,297 @@ mod tests {
         assert!((distance - 1.0).abs() < 1e-8, "distance {distance}");
         let energy = fg(session_x.view()).0;
         assert!(energy < 0.5, "energy {energy}");
+    }
+
+    fn assert_same(got: &Array1<f64>, want: &Array1<f64>) {
+        let scale = 1.0 + crate::vecops::nrm2(want.view());
+        let gap = crate::vecops::nrm2_diff(got.view(), want.view());
+        assert!(gap <= 1e-12 * scale, "got {got}, want {want}, gap {gap}");
+    }
+
+    /// `-g_to + beta * T d_from`, then the tangent projection. This is the
+    /// Riemannian recurrence. It does not call [`Manifold::project`].
+    fn tangent_combination<M>(
+        manifold: &M,
+        beta_kind: RcgBeta,
+        x_from: &Array1<f64>,
+        x_to: &Array1<f64>,
+        g_from: &Array1<f64>,
+        g_to: &Array1<f64>,
+        d_from: &Array1<f64>,
+    ) -> Array1<f64>
+    where
+        M: Manifold + ?Sized,
+    {
+        let g_carried = scaled_transport(manifold, x_from, x_to, g_from, RcgTransport::Scaled);
+        let d_carried = scaled_transport(manifold, x_from, x_to, d_from, RcgTransport::Scaled);
+        let beta = coefficient(
+            manifold, beta_kind, x_from, x_to, g_from, g_to, d_from, &g_carried, &d_carried,
+        );
+        let mut next = negated(g_to);
+        if beta.is_finite() {
+            crate::vecops::axpy(beta, d_carried.view(), &mut next);
+        }
+        manifold.to_tangent(x_to, &next)
+    }
+
+    fn assert_direction_is_riemannian<M>(
+        manifold: &M,
+        beta: RcgBeta,
+        x_from: &Array1<f64>,
+        x_to: &Array1<f64>,
+        e_from: &Array1<f64>,
+        e_to: &Array1<f64>,
+    ) where
+        M: Manifold + ?Sized,
+    {
+        let g_from = manifold.egrad2rgrad(x_from, e_from);
+        let g_to = manifold.egrad2rgrad(x_to, e_to);
+        let d_from = negated(&g_from);
+        let want = tangent_combination(manifold, beta, x_from, x_to, &g_from, &g_to, &d_from);
+        let (dir, restarted) = next_direction(
+            manifold,
+            beta,
+            RcgTransport::Scaled,
+            x_from,
+            x_to,
+            &g_from,
+            &g_to,
+            e_to,
+            &d_from,
+        );
+        assert!(!restarted, "{beta:?} replaced the direction with {dir}");
+        assert_same(&dir, &want);
+        let tangent = manifold.to_tangent(x_to, &dir);
+        assert_same(&dir, &tangent);
+        // The gradient conversion of an already Riemannian vector is a
+        // different map on these metrics.
+        let converted = manifold.egrad2rgrad(x_to, &want);
+        let scale = 1.0 + crate::vecops::nrm2(want.view());
+        let gap = crate::vecops::nrm2_diff(dir.view(), converted.view());
+        assert!(
+            gap > 1e-8 * scale,
+            "{beta:?} applied the gradient map: {dir} against {converted}"
+        );
+    }
+
+    /// PRP+ and Fletcher-Reeves on a two-step chain. Dividing the stored
+    /// direction by `lambda^2` reverses the first component of the second
+    /// step. The Riemannian directions keep both components negative, and
+    /// the Fletcher-Reeves component ratio is 1.57.
+    #[test]
+    fn poincare_conjugate_directions_keep_the_riemannian_components() {
+        let ball = crate::manifold::PoincareBall;
+        let points = [array![0.3, -0.2], array![0.5, 0.0], array![0.3, -0.2]];
+        let egrads = [array![1.5, -0.5], array![1.5, -0.5], array![-0.2, 1.0]];
+        let grads: Vec<_> = points
+            .iter()
+            .zip(egrads.iter())
+            .map(|(x, e)| ball.egrad2rgrad(x, e))
+            .collect();
+        for beta in [RcgBeta::PrpPlus, RcgBeta::FletcherReeves] {
+            let mut stored = negated(&grads[0]);
+            for step in 0..2 {
+                let want = tangent_combination(
+                    &ball,
+                    beta,
+                    &points[step],
+                    &points[step + 1],
+                    &grads[step],
+                    &grads[step + 1],
+                    &stored,
+                );
+                let (dir, restarted) = next_direction(
+                    &ball,
+                    beta,
+                    RcgTransport::Scaled,
+                    &points[step],
+                    &points[step + 1],
+                    &grads[step],
+                    &grads[step + 1],
+                    &egrads[step + 1],
+                    &stored,
+                );
+                assert!(!restarted, "{beta:?} step {step} restarted at {dir}");
+                assert_same(&dir, &want);
+                stored = dir;
+            }
+            assert!(
+                stored[0] < 0.0 && stored[1] < 0.0,
+                "{beta:?} reversed a component: {stored}"
+            );
+            if beta == RcgBeta::FletcherReeves {
+                let ratio = stored[0].abs() / stored[1].abs();
+                assert!(
+                    (ratio - 1.5700135074290853).abs() < 1e-9,
+                    "Fletcher-Reeves component ratio {ratio}, direction {stored}"
+                );
+            }
+        }
+    }
+
+    /// A non-descent coefficient is replaced by minus the Riemannian
+    /// gradient, not by that vector divided by `lambda^2`.
+    #[test]
+    fn poincare_steepest_fallback_is_minus_the_riemannian_gradient() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.4, -0.2];
+        let g = array![1.0, -0.25];
+        let (dir, restarted) = next_direction(
+            &ball,
+            RcgBeta::FletcherReeves,
+            RcgTransport::Scaled,
+            &x,
+            &x,
+            &g,
+            &g,
+            &g,
+            &g,
+        );
+        assert!(restarted);
+        assert_same(&dir, &negated(&g));
+        let scaled = ball.project(&x, &negated(&g));
+        let gap = crate::vecops::nrm2_diff(dir.view(), scaled.view());
+        assert!(gap > 1e-6, "fallback was the gradient map: {dir}");
+    }
+
+    /// Dykstra's projection of a tangent vector onto the tangent cone is
+    /// idempotent. `project` on the ball is not.
+    #[test]
+    fn poincare_dykstra_projection_is_idempotent() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.3, -0.2];
+        let bounds = eindir_core::Bounds::new(array![-1.0e6, x[1]], array![1.0e6, 1.0e6], 0.0);
+        let dir = array![0.4, -0.5];
+        let once = feasible_tangent(&ball, &bounds, &x, &dir);
+        let twice = feasible_tangent(&ball, &bounds, &x, &once);
+        assert_same(&once, &twice);
+        assert!((once[0] - 0.4).abs() <= 1e-12, "{once}");
+        assert!(once[1].abs() <= 1e-12, "{once}");
+    }
+
+    #[test]
+    fn hyperbolic_positive_and_spd_directions_stay_riemannian() {
+        let from = crate::manifold::pack(0.2_f64.cosh(), array![0.2_f64.sinh()].view());
+        let to = crate::manifold::pack(0.5_f64.cosh(), array![0.5_f64.sinh()].view());
+        let e_from = array![0.3, -0.2];
+        let e_to = array![-0.1, -0.3];
+        for beta in [RcgBeta::PrpPlus, RcgBeta::FletcherReeves] {
+            assert_direction_is_riemannian(
+                &crate::manifold::Hyperbolic,
+                beta,
+                &from,
+                &to,
+                &e_from,
+                &e_to,
+            );
+            let (dir, _) = next_direction(
+                &crate::manifold::Hyperbolic,
+                beta,
+                RcgTransport::Scaled,
+                &from,
+                &to,
+                &crate::manifold::Hyperbolic.egrad2rgrad(&from, &e_from),
+                &crate::manifold::Hyperbolic.egrad2rgrad(&to, &e_to),
+                &e_to,
+                &negated(&crate::manifold::Hyperbolic.egrad2rgrad(&from, &e_from)),
+            );
+            assert!(
+                crate::manifold::minkowski(to.view(), dir.view()).abs() <= 1e-12,
+                "left the tangent space {dir}"
+            );
+        }
+
+        let positive = crate::manifold::Positive { n: 2 };
+        let x_from = array![2.0, 0.5];
+        let x_to = array![1.2, 0.8];
+        for beta in [RcgBeta::PrpPlus, RcgBeta::FletcherReeves] {
+            assert_direction_is_riemannian(
+                &positive,
+                beta,
+                &x_from,
+                &x_to,
+                &array![0.4, -0.3],
+                &array![-0.2, 0.5],
+            );
+        }
+
+        let spd_from = crate::manifold::pack_spd(2, vec![2.0, 0.1, 0.1, 3.0]);
+        let spd_to = crate::manifold::pack_spd(2, vec![1.4, -0.2, -0.2, 2.2]);
+        let spd_e_from = crate::manifold::pack_spd(2, vec![0.3, -0.1, -0.1, 0.5]);
+        let spd_e_to = crate::manifold::pack_spd(2, vec![-0.2, 0.4, 0.4, 0.1]);
+        for beta in [RcgBeta::PrpPlus, RcgBeta::FletcherReeves] {
+            assert_direction_is_riemannian(
+                &crate::manifold::Spd,
+                beta,
+                &spd_from,
+                &spd_to,
+                &spd_e_from,
+                &spd_e_to,
+            );
+            let g_from = crate::manifold::Spd.egrad2rgrad(&spd_from, &spd_e_from);
+            let g_to = crate::manifold::Spd.egrad2rgrad(&spd_to, &spd_e_to);
+            let (dir, _) = next_direction(
+                &crate::manifold::Spd,
+                beta,
+                RcgTransport::Scaled,
+                &spd_from,
+                &spd_to,
+                &g_from,
+                &g_to,
+                &spd_e_to,
+                &negated(&g_from),
+            );
+            assert_same(&dir, &crate::manifold::Spd.project(&spd_to, &dir));
+        }
+    }
+
+    #[test]
+    fn hyperbolic_dykstra_projection_is_idempotent() {
+        let x = crate::manifold::pack(0.3_f64.cosh(), array![0.3_f64.sinh()].view());
+        let bounds = eindir_core::Bounds::new(array![-1.0e6, x[1]], array![1.0e6, 1.0e6], 0.0);
+        let dir = array![0.2, -0.4];
+        let once = feasible_tangent(&crate::manifold::Hyperbolic, &bounds, &x, &dir);
+        let twice = feasible_tangent(&crate::manifold::Hyperbolic, &bounds, &x, &once);
+        assert_same(&once, &twice);
+        assert!(crate::manifold::minkowski(x.view(), once.view()).abs() <= 1e-12);
+    }
+
+    #[test]
+    fn a_bonded_poincare_gradient_is_converted_once() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.2, 0.0, 0.0, 0.3, 0.0, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], x.view())
+            .unwrap()
+            .with_masses(vec![1.0, 4.0])
+            .unwrap();
+        let bonded = BondedManifold::new(&ball, &set);
+        let egrad = array![0.4, -0.2, 0.1, 0.05, 0.3, -0.15];
+        let rgrad = bonded.egrad2rgrad(&x, &egrad);
+        let v = bonded.to_tangent(&x, &array![0.02, 0.01, -0.01, -0.03, 0.02, 0.0]);
+        let slope = bonded.inner(&x, &rgrad, &v);
+        let deriv = egrad.dot(&v);
+        assert!(
+            (slope - deriv).abs() <= 1e-12 * (1.0 + deriv.abs()),
+            "slope {slope} against {deriv}"
+        );
+        assert!(bonded.take().is_none());
+    }
+
+    #[test]
+    fn a_bonded_poincare_transport_does_not_rescale() {
+        let ball = crate::manifold::PoincareBall;
+        let x = array![0.2, 0.0, 0.0, 0.3, 0.0, 0.0];
+        let y = array![0.1, 0.05, 0.0, 0.2, -0.05, 0.0];
+        let set = DistanceConstraints::at(vec![(0, 1)], x.view()).unwrap();
+        let bonded = BondedManifold::new(&ball, &set);
+        let v = bonded.to_tangent(&x, &array![0.02, 0.01, -0.01, -0.03, 0.02, 0.01]);
+        let carried = bonded.transport(&x, &y, &v);
+        let want = bonded.to_tangent(&y, &ball.transport(&x, &y, &v));
+        assert_same(&carried, &want);
+        assert!(bonded.take().is_none());
+        let scaled = ball.project(&y, &want);
+        let gap = crate::vecops::nrm2_diff(carried.view(), scaled.view());
+        assert!(gap > 1e-6, "transport divided by lambda squared: {carried}");
     }
 }

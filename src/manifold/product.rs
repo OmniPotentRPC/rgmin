@@ -54,10 +54,10 @@ use super::{Manifold, ManifoldKind};
 /// \(w\, g(u, G_x v)\), where \(g\) is the factor's own metric. At every
 /// factor point `x`, \(G_x\) must map the tangent space to itself and be
 /// self-adjoint and positive definite in \(g\), and [`Self::solve`] must
-/// invert [`Self::apply`] there. The product projects both results onto
-/// the tangent space; that removes rounding, not a wrong operator. Both
-/// methods receive the factor point and tangent vectors in the factor's
-/// own packing.
+/// invert [`Self::apply`] there. The product returns both results through
+/// the factor's tangent projection; that removes rounding, not a wrong
+/// operator. Both methods receive the factor point and tangent vectors
+/// in the factor's own packing.
 pub trait TangentMetric: Send + Sync {
     /// \(G_x v\) for a tangent vector `v` at the factor point `x`.
     fn apply(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64>;
@@ -200,18 +200,22 @@ impl Block {
     }
 
     /// \(G_x v\) at the factor point `x`, or `v` without a tangent metric.
+    ///
+    /// The image is a tangent vector, so this uses
+    /// [`Manifold::to_tangent`]. On the Poincare ball
+    /// [`Manifold::project`] divides by the squared conformal factor.
     fn apply_tangent(&self, x: &Array1<f64>, v: Array1<f64>) -> Array1<f64> {
         match &self.tangent {
-            Some(m) => self.kind.project(x, &m.0.apply(x, &v)),
+            Some(m) => self.kind.to_tangent(x, &m.0.apply(x, &v)),
             None => v,
         }
     }
 
     /// \(G_x^{-1} r\) at the factor point `x`, or `r` without a tangent
-    /// metric.
+    /// metric. Same projection as [`Self::apply_tangent`].
     fn solve_tangent(&self, x: &Array1<f64>, r: Array1<f64>) -> Array1<f64> {
         match &self.tangent {
-            Some(m) => self.kind.project(x, &m.0.solve(x, &r)),
+            Some(m) => self.kind.to_tangent(x, &m.0.solve(x, &r)),
             None => r,
         }
     }
@@ -809,6 +813,38 @@ mod tests {
             ProductManifold::new([wrapped]),
             Err(Error::ProductFactor { index: 0, .. })
         ));
+    }
+
+    /// \(G = \tfrac12 I\) on a Poincare factor. Passing the metric image
+    /// through `project` would divide the gradient by `lambda^2` again.
+    struct Half;
+
+    impl TangentMetric for Half {
+        fn apply(&self, _x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {
+            v * 0.5
+        }
+
+        fn solve(&self, _x: &Array1<f64>, r: &Array1<f64>) -> Array1<f64> {
+            r * 2.0
+        }
+    }
+
+    #[test]
+    fn a_poincare_tangent_metric_converts_the_gradient_once() {
+        let m = ProductManifold::new([
+            ProductFactor::new(ManifoldKind::PoincareBall, 2).with_metric(Arc::new(Half))
+        ])
+        .unwrap();
+        let x = array![0.5, 0.0];
+        let egrad = array![0.4, 0.8];
+        let r = m.egrad2rgrad(&x, &egrad);
+        let t = array![0.1, -0.2];
+        let deriv = dot(egrad.view(), t.view());
+        assert!((m.inner(&x, &r, &t) - deriv).abs() <= 1e-12 * (1.0 + deriv.abs()));
+        let lambda = 2.0 / (1.0 - 0.25);
+        let scale = 2.0 / (lambda * lambda);
+        assert!((r[0] - 0.4 * scale).abs() <= 1e-12, "{r}");
+        assert!((r[1] - 0.8 * scale).abs() <= 1e-12, "{r}");
     }
 
     #[test]
