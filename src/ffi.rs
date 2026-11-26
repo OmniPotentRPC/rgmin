@@ -498,7 +498,7 @@ pub type rgmin_precond_fn = unsafe extern "C" fn(
 /// Apply the inverse of a preconditioner `P` to one vector: `z_out = P^{-1} r`
 /// for symmetric positive definite `P`. `r` and `z_out` are rank-1 f64
 /// tensors of length `n`, valid for this call only. A null function pointer
-/// at [`rgmin_minimize_hvp_precond`] is the identity and is not called.
+/// at [`rgmin_minimize_hvp_precond_sized`] is the identity and is not called.
 /// ABI minor 66.
 pub type rgmin_vec_precond_fn = unsafe extern "C" fn(
     user: *mut c_void,
