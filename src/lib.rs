@@ -121,6 +121,7 @@ pub mod manifold;
 mod minimize;
 /// Shifted Newton and Banerjee RFO on a dense Hessian.
 pub mod newton;
+mod observer;
 /// ODE12r: adaptive first-order integration of the force.
 pub mod ode12r;
 mod oracle;
@@ -184,7 +185,7 @@ pub mod vecops;
 
 pub use aaa::{AaaParams, Barycentric, Pole, aaa, chebyshev_pade_poles};
 pub use accept::Accept;
-pub use adam::minimize_adam;
+pub use adam::{minimize_adam, minimize_adam_observed};
 pub use certificate::{
     AdjointFunctionalBar, CertificateError, KantorovichBall, MorseGap, adjoint_functional_bar,
     certify_morse_gap, kantorovich_ball,
@@ -195,7 +196,7 @@ pub use control::{Control, NoiseFloor, StopNorm};
 pub use dlaf_kind::DlaFutureParams;
 pub use eigenexa_kind::{EigenExaAlgo, EigenExaParams};
 pub use elpa_kind::{ElpaParams, ElpaSpectrum, ElpaStage, elpa_config, elpa_spectrum};
-pub use eon_cg::{EonCg, EonCgReport, minimize_eon_cg};
+pub use eon_cg::{EonCg, EonCgReport, minimize_eon_cg, minimize_eon_cg_observed};
 pub use error::{Error, Result};
 pub use fire::{
     Fire2Extras, FireConfig, FireKind, FirePreset, FireTrace, FireVariant, guenole2020,
@@ -223,7 +224,8 @@ pub use holonomic::{
 };
 pub use hvp::{
     FdHvp, HessianVector, HvpOracle, IdentityPrecond, NystromPrecond, Preconditioner,
-    TryHessianVector, minimize_newton_cg, polish_hvp, steihaug_cg, steihaug_pcg,
+    TryHessianVector, minimize_newton_cg, minimize_newton_cg_observed, polish_hvp, steihaug_cg,
+    steihaug_pcg,
 };
 pub use irc_trust::{IrcTrust, sqrt_masses_3n};
 pub use krylov::{
@@ -261,7 +263,10 @@ pub use manifold::{
     SphereComplex, StiefelNp, StiefelRetraction, Symmetric, Unitary,
 };
 pub use method::Method;
-pub use minimize::{minimize, minimize_method, minimize_method_hess, minimize_method_hvp};
+pub use minimize::{
+    minimize, minimize_method, minimize_method_hess, minimize_method_hess_observed,
+    minimize_method_hvp, minimize_method_hvp_observed, minimize_method_observed,
+};
 pub use minres::{
     BoundedKrylovSolve, MinresError, MinresFailure, MinresVector, minres_solve_bounded,
     minres_solve_precond,
@@ -269,7 +274,8 @@ pub use minres::{
 pub use newton::{
     BunchKaufman, HessianObjective, HessianOracle, LdlError, LdlInertiaBound, NewtonKind,
     ShiftedLdlCertificate, ShiftedLdlRefusal, backward_error_floor, certify_shifted_ldlt_inertia,
-    ldl_inertia_with_backward_bound, minimize_newton, newton_decrement_acceptable, polish_newton,
+    ldl_inertia_with_backward_bound, minimize_newton, minimize_newton_observed,
+    newton_decrement_acceptable, polish_newton,
 };
 pub use nlcg::{Conjugacy, ConjugacyContext, Restart};
 pub use noise::{
@@ -277,6 +283,7 @@ pub use noise::{
     estimate_third, forward_step, gradient_dr, line_values, next_spacing, sample_gradient_noise,
     sample_gradient_noise_k, sample_noise, sample_value_gradient_noise,
 };
+pub use observer::{IterationObserver, IterationView, ObserverSignal};
 pub use ode12r::{
     Ode12rState, Ode12rVerdict, inf_norm as ode12r_inf_norm, local_error as ode12r_local_error,
     taken_step as ode12r_taken_step,
@@ -290,7 +297,7 @@ pub use precon::{
     bonded_terms, estimate_mu, max_atom_displacement, nearest_neighbour_distance, needs_rebuild,
     select_precon, sine_probe,
 };
-pub use pso::minimize_pso;
+pub use pso::{minimize_pso, minimize_pso_observed};
 pub use qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 pub use qn_irc::{
     BfgsModel, bfgs_hessian_update, mw_pair, qn_get_s, qn_irc_get_s, qn_irc_restricted,
@@ -309,11 +316,12 @@ pub use report::{Report, Status, StopReason};
 pub use rigid::{RigidMode, RigidRequest, RigidWorkspace, align_rigid};
 pub use rlbfgs::{
     HUANG_ARMIJO, HUANG_BACKTRACK, HUANG_CAUTIOUS_SLOPE, HUANG_GRADIENT_RATIO,
-    HUANG_LINESEARCH_MAX, HUANG_MEMORY, Rlbfgs, minimize_rlbfgs,
+    HUANG_LINESEARCH_MAX, HUANG_MEMORY, Rlbfgs, minimize_rlbfgs, minimize_rlbfgs_observed,
 };
 pub use scg::{
     DirectionalCurvature, ScgOptions, ScgParams, ScgStepTolerance, minimize_scg,
-    minimize_scg_exact, minimize_scg_exact_with_options, minimize_scg_with_options,
+    minimize_scg_exact, minimize_scg_exact_with_options, minimize_scg_exact_with_options_observed,
+    minimize_scg_with_options, minimize_scg_with_options_observed,
 };
 pub use sella_step::{prfo_restricted, ras_clip, rfo_get_s, rfo_restricted, ts_bfgs_update};
 pub use session::Solver;

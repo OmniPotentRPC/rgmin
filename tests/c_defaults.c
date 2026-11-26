@@ -44,6 +44,8 @@ static const field_t control_fields[] = {
     FIELD(rgmin_control_t, noise_eps),
     FIELD(rgmin_control_t, noise_c),
     FIELD(rgmin_control_t, require_convergence),
+    FIELD(rgmin_control_t, observer),
+    FIELD(rgmin_control_t, observer_user),
 };
 
 static const field_t exp_fields[] = {

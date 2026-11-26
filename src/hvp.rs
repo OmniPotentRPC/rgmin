@@ -26,7 +26,8 @@ use crate::accept::retract_within_bounds;
 use crate::control::Control;
 use crate::error::{Error, Result};
 use crate::manifold::ManifoldKind;
-use crate::report::Report;
+use crate::observer::IterationObserver;
+use crate::report::{Report, StopReason};
 use crate::rigid::project_out_rot_trans;
 use crate::scg::DirectionalCurvature;
 use crate::step::{apply_caps, one_shot_report};
@@ -1025,13 +1026,29 @@ pub fn minimize_newton_cg<O>(
 where
     O: HessianVector + ?Sized,
 {
-    counted(obj, control, |obj| newton_cg_counted(obj, init, control))
+    minimize_newton_cg_observed(obj, init, control, None)
+}
+
+/// [`minimize_newton_cg`] with an optional per-iteration observer.
+pub fn minimize_newton_cg_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: HessianVector + ?Sized,
+{
+    counted(obj, control, |obj| {
+        newton_cg_counted(obj, init, control, observer)
+    })
 }
 
 fn newton_cg_counted<O>(
     obj: &Counted<'_, O>,
     init: impl Into<Array1<f64>>,
     control: &Control,
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: HessianVector + ?Sized,
@@ -1098,10 +1115,36 @@ where
             return Err(Error::TrustCollapsed { steps: step });
         }
         let moved = taken.moved;
+        let step_length = if moved && observer.is_some() {
+            crate::observer::separation(taken.pos.view(), pos.view())
+        } else {
+            0.0
+        };
         if moved {
             pos = taken.pos;
             value = taken.value;
             grad = taken.grad;
+        }
+        if moved
+            && crate::observer::request_stop(
+                &mut observer,
+                step,
+                pos.view(),
+                value,
+                nrm2(grad.view()),
+                step_length,
+            )
+        {
+            return control.deliver(
+                one_shot_report(
+                    value,
+                    pos,
+                    step + 1,
+                    nrm2(grad.view()),
+                    crate::report::Status::ObserverStop,
+                )
+                .with_stop_reason(StopReason::ObserverRequested),
+            );
         }
         if let Some(status) = stop_after(&mut stops, control, obj, value, moved, &grad) {
             return control.deliver(one_shot_report(

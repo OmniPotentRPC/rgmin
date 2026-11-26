@@ -12,6 +12,11 @@
 //! Operationnelle 16 (1969).
 //!
 //! The buffers live for the whole solve. A step does not allocate.
+//! An unset observer adds no allocation and no callback.
+
+use ndarray::ArrayView1;
+
+use crate::observer::{IterationObserver, IterationView, ObserverSignal};
 
 /// Controls for [`minimize_eon_cg`].
 #[non_exhaustive]
@@ -77,6 +82,8 @@ pub struct EonCgReport {
     /// The gradient test holds at the returned point, including a start
     /// that meets it with no iteration and a last iteration that reaches it.
     pub converged: bool,
+    /// The observer asked the loop to stop at the returned point.
+    pub observer_stop: bool,
 }
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
@@ -123,7 +130,22 @@ fn grad_norm(g: &[f64], cluster: bool) -> f64 {
 ///
 /// `fill` writes the gradient of the energy it returns into `g`.
 /// The solve allocates its workspace once.
-pub fn minimize_eon_cg<F>(x: &mut [f64], mut fill: F, opts: &EonCg) -> EonCgReport
+pub fn minimize_eon_cg<F>(x: &mut [f64], fill: F, opts: &EonCg) -> EonCgReport
+where
+    F: FnMut(&[f64], &mut [f64]) -> f64,
+{
+    minimize_eon_cg_observed(x, fill, opts, None)
+}
+
+/// [`minimize_eon_cg`] with an optional per-iteration observer.
+///
+/// The unset path does not allocate and does not call the observer.
+pub fn minimize_eon_cg_observed<F>(
+    x: &mut [f64],
+    mut fill: F,
+    opts: &EonCg,
+    mut observer: Option<&mut dyn IterationObserver>,
+) -> EonCgReport
 where
     F: FnMut(&[f64], &mut [f64]) -> f64,
 {
@@ -139,7 +161,7 @@ where
     let mut evals = 1usize;
     let fd = crate::EON_FINITE_DIFFERENCE;
     let cap = Some(opts.max_move).filter(|&cap| crate::step::binding(cap));
-    for _ in 0..opts.max_iter {
+    for iteration in 0..opts.max_iter {
         let gnorm = grad_norm(&g, opts.cluster);
         if gnorm < opts.gtol {
             break;
@@ -205,11 +227,34 @@ where
                 }
             }
         }
+        let step_length = if observer.is_some() {
+            dot(&direction, &direction).sqrt()
+        } else {
+            0.0
+        };
         for i in 0..n {
             x[i] += direction[i];
         }
         energy = fill(x, &mut g);
         evals += 1;
+        if let Some(obs) = observer.as_deref_mut()
+            && obs.observe(IterationView {
+                iteration,
+                x: ArrayView1::from(&x[..]),
+                value: energy,
+                grad_norm: grad_norm(&g, opts.cluster),
+                step_length,
+            }) == ObserverSignal::Stop
+        {
+            let grad = grad_norm(&g, opts.cluster);
+            return EonCgReport {
+                energy,
+                grad,
+                evals,
+                converged: false,
+                observer_stop: true,
+            };
+        }
         if cap.map_or(!modelled, |cap| step >= cap) {
             direction_old.fill(0.0);
             force_old.fill(0.0);
@@ -221,6 +266,7 @@ where
         grad,
         evals,
         converged: grad < opts.gtol,
+        observer_stop: false,
     }
 }
 

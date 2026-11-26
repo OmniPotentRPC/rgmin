@@ -13,6 +13,9 @@ _Static_assert(XTS_STOP_EVAL_BUDGET == 7, "evaluation budget is stop 7");
 _Static_assert(XTS_STOP_MACHINE_PRECISION == RGMIN_STOP_MACHINE_PRECISION,
                "XTS_STOP_MACHINE_PRECISION aliases RGMIN_STOP_MACHINE_PRECISION");
 _Static_assert(XTS_STOP_MACHINE_PRECISION == 8, "machine precision is stop 8");
+_Static_assert(XTS_STOP_OBSERVER == RGMIN_STOP_OBSERVER,
+               "XTS_STOP_OBSERVER aliases RGMIN_STOP_OBSERVER");
+_Static_assert(XTS_STOP_OBSERVER == 10, "observer is stop 10");
 
 static xts_status_t bowl_eval(void *user, const DLManagedTensorVersioned *x, double *value_out) {
     const double *p = (const double *)x->dl_tensor.data;

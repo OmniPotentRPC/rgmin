@@ -36,6 +36,8 @@ fn dim_and_steps_read_a_const_session() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let solver = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &ctrl, 3) };
     assert!(!solver.is_null());

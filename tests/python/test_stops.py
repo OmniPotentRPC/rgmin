@@ -45,8 +45,10 @@ def test_the_new_options_are_listed() -> None:
 def test_new_stops_have_stop_members() -> None:
     assert rgmin.Stop.ENERGY_TOLERANCE == rgmin.Stop.EnergyTolerance
     assert rgmin.Stop.EVAL_BUDGET == rgmin.Stop.EvalBudget
+    assert rgmin.Stop.OBSERVER == rgmin.Stop.Observer
     assert int(rgmin.Stop.ENERGY_TOLERANCE) == 6
     assert int(rgmin.Stop.EVAL_BUDGET) == 7
+    assert int(rgmin.Stop.OBSERVER) == 10
 
 
 @pytest.mark.parametrize("method", ["lbfgs", "cg", "sd", "bfgs", "fire", "bb", "quickmin"])

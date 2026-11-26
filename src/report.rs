@@ -39,6 +39,8 @@ pub enum Status {
     /// [`crate::Control::max_evals`] objective evaluations were spent above
     /// every other stop, the LAMMPS `minimize maxeval` stop.
     EvalBudget,
+    /// A host observer requested an early stop.
+    ObserverStop,
 }
 
 /// Typed stop of a finished minimization.
@@ -81,6 +83,8 @@ pub enum StopReason {
     EnergyTolerance,
     /// [`Status::EvalBudget`]: [`crate::Control::max_evals`] was spent.
     EvalBudget,
+    /// [`Status::ObserverStop`]: a per-iteration observer requested stop.
+    ObserverRequested,
 }
 
 impl StopReason {
@@ -123,6 +127,7 @@ impl StopReason {
             Self::Iterating => Status::Iterating,
             Self::EnergyTolerance => Status::EnergyTolerance,
             Self::EvalBudget => Status::EvalBudget,
+            Self::ObserverRequested => Status::ObserverStop,
         }
     }
 
@@ -136,6 +141,7 @@ impl StopReason {
             Status::Iterating => Self::Iterating,
             Status::EnergyTolerance => Self::EnergyTolerance,
             Status::EvalBudget => Self::EvalBudget,
+            Status::ObserverStop => Self::ObserverRequested,
         }
     }
 }
@@ -154,6 +160,7 @@ impl std::fmt::Display for StopReason {
             Self::Iterating => "iterating",
             Self::EnergyTolerance => "energy tolerance",
             Self::EvalBudget => "evaluation budget",
+            Self::ObserverRequested => "observer stop",
         })
     }
 }

@@ -218,12 +218,40 @@ typedef enum rgmin_stop_t {
      *  represent another coordinate change. ABI minor 52. */
     RGMIN_STOP_MACHINE_PRECISION = 8,
     /** Wolfe zoom stopped when rounding blocked progress. ABI minor 57. */
-    RGMIN_STOP_LINE_SEARCH_ROUNDING = 9
+    RGMIN_STOP_LINE_SEARCH_ROUNDING = 9,
+    /** A per-iteration observer requested stop. */
+    RGMIN_STOP_OBSERVER = 10
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(rgmin_stop_t) == sizeof(int32_t),
                "rgmin_stop_t is i32-wide; do not build this header with -fshort-enums");
 #endif
+/** Observer action from \ref rgmin_observer_fn. */
+typedef enum rgmin_observer_action_t {
+    RGMIN_OBSERVER_CONTINUE = 0,
+    RGMIN_OBSERVER_STOP = 1
+} rgmin_observer_action_t;
+/** Per-iteration observer for every minimizer.
+ *  Called with the accepted iterate of each outer iteration. \a x is a
+ *  flat vector of \a n doubles, valid only during the callback; copy it
+ *  to keep it. \a grad_norm is the stationarity measure that the minimizer
+ *  already reports, and \a step_length is the Euclidean length of the
+ *  accepted coordinate change. Neither field assumes an atom layout.
+ *  Returning \c RGMIN_OBSERVER_STOP ends the run with
+ *  \c RGMIN_STOP_OBSERVER. A null function pointer leaves the hook off
+ *  and does not call back.
+ *  Read by \c rgmin_minimize, \c rgmin_minimize_opts,
+ *  \c rgmin_minimize_hess, \c rgmin_minimize_hess_opts,
+ *  \c rgmin_minimize_hvp, \c rgmin_minimize_hvp_opts,
+ *  \c rgmin_minimize_eindir, \c rgmin_minimize_eindir_opts,
+ *  \c rgmin_minimize_scg, \c rgmin_minimize_scg_with_options,
+ *  \c rgmin_minimize_rlbfgs and their \c _sized entries given
+ *  \c sizeof(rgmin_control_t). */
+
+typedef rgmin_observer_action_t (*rgmin_observer_fn)(void *user, size_t iteration,
+                                                     const double *x, size_t n,
+                                                     double value, double grad_norm,
+                                                     double step_length);
 
 /** Outer-loop controls. Start from \ref rgmin_control_default and assign
  *  the fields to change. Neither an uninitialised nor a zeroed struct is
@@ -248,10 +276,17 @@ typedef struct rgmin_control_t {
     /** Nonzero returns RGMIN_NOT_CONVERGED when the gradient norm is
      *  not below gtol. Zero keeps the report. ABI minor 55. */
     int32_t require_convergence;
+    /** Optional per-iteration observer. NULL leaves it off. */
+    rgmin_observer_fn observer;
+    /** Opaque pointer passed to observer. */
+    void *observer_user;
 } rgmin_control_t;
 /** \c sizeof(rgmin_control_t) for a layout revision 5 caller: the
  *  fields through \c noise_c. ABI minor 55. */
 #define RGMIN_CONTROL_REVISION5_SIZE offsetof(rgmin_control_t, require_convergence)
+/** \c sizeof(rgmin_control_t) for a layout revision 6 caller: the
+ *  fields through \c require_convergence. */
+#define RGMIN_CONTROL_REVISION6_SIZE offsetof(rgmin_control_t, observer)
 /** Fill \a c with the Rust \c Control::default for a caller that
  *  compiled \a struct_size as \c sizeof(rgmin_control_t).
  *  \c RGMIN_CONTROL_REVISION5_SIZE writes the fields through

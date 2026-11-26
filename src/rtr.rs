@@ -46,6 +46,7 @@
 use ndarray::{Array1, ArrayView1};
 
 use crate::manifold::Manifold;
+use crate::observer::IterationObserver;
 use crate::vecops::dot;
 
 /// Why the truncated CG iteration stopped.
@@ -391,6 +392,8 @@ pub struct RtrMin {
     pub accepted: usize,
     /// Conjugate-gradient iterations over all subproblems.
     pub inner_iterations: usize,
+    /// The observer asked the loop to stop at the returned point.
+    pub observer_stop: bool,
 }
 
 /// Solve the trust-region subproblem at `x` in the metric of `manifold`.
@@ -484,7 +487,26 @@ where
     GG: FnMut(&Array1<f64>) -> Array1<f64>,
     HH: FnMut(&Array1<f64>, &Array1<f64>) -> Array1<f64>,
 {
-    rtr(manifold, x0, value, egrad, ehess, |_| false, opts)
+    minimize_rtr_observed(manifold, x0, value, egrad, ehess, opts, None)
+}
+
+/// [`minimize_rtr`] with an optional per-iteration observer.
+pub fn minimize_rtr_observed<M, FV, GG, HH>(
+    manifold: &M,
+    x0: Array1<f64>,
+    value: FV,
+    egrad: GG,
+    ehess: HH,
+    opts: RtrOptions,
+    observer: Option<&mut dyn IterationObserver>,
+) -> RtrMin
+where
+    M: Manifold + ?Sized,
+    FV: FnMut(&Array1<f64>) -> f64,
+    GG: FnMut(&Array1<f64>) -> Array1<f64>,
+    HH: FnMut(&Array1<f64>, &Array1<f64>) -> Array1<f64>,
+{
+    rtr(manifold, x0, value, egrad, ehess, |_| false, opts, observer)
 }
 
 /// [`minimize_rtr`] with a gauge move after every accepted step.
@@ -502,8 +524,29 @@ pub fn minimize_rtr_gauged<M, FV, GG, HH, GA>(
     value: FV,
     egrad: GG,
     ehess: HH,
+    gauge: GA,
+    opts: RtrOptions,
+) -> RtrMin
+where
+    M: Manifold + ?Sized,
+    FV: FnMut(&Array1<f64>) -> f64,
+    GG: FnMut(&Array1<f64>) -> Array1<f64>,
+    HH: FnMut(&Array1<f64>, &Array1<f64>) -> Array1<f64>,
+    GA: FnMut(&mut Array1<f64>),
+{
+    minimize_rtr_gauged_observed(manifold, x0, value, egrad, ehess, gauge, opts, None)
+}
+
+/// [`minimize_rtr_gauged`] with an optional per-iteration observer.
+pub fn minimize_rtr_gauged_observed<M, FV, GG, HH, GA>(
+    manifold: &M,
+    x0: Array1<f64>,
+    value: FV,
+    egrad: GG,
+    ehess: HH,
     mut gauge: GA,
     opts: RtrOptions,
+    observer: Option<&mut dyn IterationObserver>,
 ) -> RtrMin
 where
     M: Manifold + ?Sized,
@@ -517,7 +560,7 @@ where
         gauge(x);
         *x != before
     };
-    rtr(manifold, x0, value, egrad, ehess, moved, opts)
+    rtr(manifold, x0, value, egrad, ehess, moved, opts, observer)
 }
 
 /// The trust-region loop. `moved(x)` applies the gauge after an accepted
@@ -530,6 +573,7 @@ fn rtr<M, FV, GG, HH, GA>(
     mut ehess: HH,
     mut moved: GA,
     opts: RtrOptions,
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> RtrMin
 where
     M: Manifold + ?Sized,
@@ -555,6 +599,7 @@ where
     let mut iterations = 0;
     let mut accepted = 0;
     let mut inner_iterations = 0;
+    let mut observer_stop = false;
     while iterations < opts.max_iter && gnorm.is_finite() && gnorm > opts.grad_tol {
         iterations += 1;
         let step = tcg_in_metric(
@@ -577,12 +622,30 @@ where
         };
         let predicted = step.model_decrease + shift;
         if radius.update(actual, predicted, manifold.norm(&x, &step.eta)) {
+            let step_length = if observer.is_some() {
+                crate::observer::separation(x_try.view(), x.view())
+            } else {
+                0.0
+            };
             x = x_try;
             f = if moved(&mut x) { value(&x) } else { f_try };
             g = egrad(&x);
             rgrad = manifold.egrad2rgrad(&x, &g);
             gnorm = manifold.norm(&x, &rgrad);
             accepted += 1;
+            if observer.is_some()
+                && crate::observer::request_stop(
+                    &mut observer,
+                    iterations - 1,
+                    x.view(),
+                    f,
+                    gnorm,
+                    step_length,
+                )
+            {
+                observer_stop = true;
+                break;
+            }
         }
     }
     RtrMin {
@@ -592,6 +655,7 @@ where
         iterations,
         accepted,
         inner_iterations,
+        observer_stop,
     }
 }
 

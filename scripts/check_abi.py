@@ -29,6 +29,7 @@ REQUIRED_STOP_ALIASES = (
     "EVAL_BUDGET",
     "MACHINE_PRECISION",
     "LINE_SEARCH_ROUNDING",
+    "OBSERVER",
 )
 ALIAS = re.compile(r"^#define\s+(XTS_[A-Z0-9_]+|xts_[a-z0-9_]+)\s+(RGMIN_[A-Z0-9_]+|rgmin_[a-z0-9_]+)\s*$", re.M)
 # A return type ending in `*` may sit against the name: `T *rgmin_f(`.

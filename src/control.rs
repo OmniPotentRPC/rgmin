@@ -263,13 +263,17 @@ impl Control {
     /// [`crate::Report::grad_norm`].
     ///
     /// The flag on the report is set from that comparison. The default
-    /// leaves the report as `Ok`.
+    /// leaves the report as `Ok`, and so does an observer stop, which
+    /// keeps [`crate::StopReason::ObserverRequested`].
     pub(crate) fn maybe_not_converged(
         &self,
         mut report: crate::report::Report,
     ) -> crate::Result<crate::report::Report> {
         report.converged = self.converged(report.grad_norm);
-        if self.require_convergence && !report.converged {
+        if self.require_convergence
+            && !report.converged
+            && report.stop_reason() != crate::StopReason::ObserverRequested
+        {
             Err(crate::Error::NotConverged(Box::new(report)))
         } else {
             Ok(report)
@@ -280,7 +284,8 @@ impl Control {
     /// still above [`Self::gtol`].
     ///
     /// The default is off. Noise floor, step tolerance, a spent budget,
-    /// a failed line search, and an unmet polish then stay `Ok`. When on,
+    /// a failed line search, and an unmet polish then stay `Ok`. An
+    /// observer stop stays `Ok` either way. When on,
     /// a driver that can prove its next iteration repeats the last,
     /// because the step took no move and no state changed, ends with
     /// [`crate::StopReason::StepTolerance`] in place of the rest of the

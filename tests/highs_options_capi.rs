@@ -13,6 +13,8 @@ fn optional_highs_policy_setters_report_build_availability() {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     };
     let session = unsafe { rgmin_solver_create(rgmin_method_t::RGMIN_LBFGS, &control, 2) };
     assert!(!session.is_null());

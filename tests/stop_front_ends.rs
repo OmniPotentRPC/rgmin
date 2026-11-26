@@ -109,6 +109,8 @@ fn c_control() -> rgmin_control_t {
         noise_eps: 0.0,
         noise_c: 0.0,
         require_convergence: 0,
+        observer: None,
+        observer_user: std::ptr::null_mut(),
     }
 }
 

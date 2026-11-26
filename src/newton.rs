@@ -17,7 +17,8 @@ use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::control::Control;
 use crate::error::{Error, Result};
-use crate::report::Report;
+use crate::observer::IterationObserver;
+use crate::report::{Report, StopReason};
 use crate::step::{apply_caps, implicit_atom_cap, l2, one_shot_report};
 use crate::stop::{Counted, StopRules, counted, stop_after};
 
@@ -312,7 +313,23 @@ pub fn minimize_newton<O>(
 where
     O: HessianObjective + ?Sized,
 {
-    counted(obj, control, |obj| newton_counted(obj, init, control, kind))
+    minimize_newton_observed(obj, init, control, kind, None)
+}
+
+/// [`minimize_newton`] with an optional per-iteration observer.
+pub fn minimize_newton_observed<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    kind: NewtonKind,
+    observer: Option<&mut dyn IterationObserver>,
+) -> Result<Report>
+where
+    O: HessianObjective + ?Sized,
+{
+    counted(obj, control, |obj| {
+        newton_counted(obj, init, control, kind, observer)
+    })
 }
 
 fn newton_counted<O>(
@@ -320,6 +337,7 @@ fn newton_counted<O>(
     init: impl Into<Array1<f64>>,
     control: &Control,
     kind: NewtonKind,
+    mut observer: Option<&mut dyn IterationObserver>,
 ) -> Result<Report>
 where
     O: HessianObjective + ?Sized,
@@ -350,10 +368,14 @@ where
         let dir = newton_direction(kind, &hess, &grad);
         let (npos, nval, ngrad, moved) = energy_backtrack(obj, &pos, value, &dir, control);
         let mut accepted = moved;
+        let mut step_length = 0.0;
         if !moved {
             let sd = grad.mapv(|g| -g);
             let (spos, sval, sgrad, sok) = energy_backtrack(obj, &pos, value, &sd, control);
             if sok {
+                if observer.is_some() {
+                    step_length = crate::observer::separation(spos.view(), pos.view());
+                }
                 pos = spos;
                 value = sval;
                 grad = sgrad;
@@ -373,9 +395,33 @@ where
                 );
             }
         } else {
+            if observer.is_some() {
+                step_length = crate::observer::separation(npos.view(), pos.view());
+            }
             pos = npos;
             value = nval;
             grad = ngrad;
+        }
+        if accepted
+            && crate::observer::request_stop(
+                &mut observer,
+                step,
+                pos.view(),
+                value,
+                l2(&grad),
+                step_length,
+            )
+        {
+            return control.deliver(
+                one_shot_report(
+                    value,
+                    pos,
+                    step + 1,
+                    l2(&grad),
+                    crate::report::Status::ObserverStop,
+                )
+                .with_stop_reason(StopReason::ObserverRequested),
+            );
         }
         if let Some(status) = stop_after(&mut stops, control, obj, value, accepted, &grad) {
             return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));
