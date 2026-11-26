@@ -1644,7 +1644,7 @@ fn c_abi_fire_config_and_lbfgs_fixed_h0() {
             (0.1, 1.0, 1.1, 1.0, 0.1, 0.99, "f_dec"),
             (0.1, 1.0, 1.1, 0.0, 0.1, 0.99, "f_dec"),
             (2.0, 1.0, 1.1, 0.5, 0.1, 0.99, "dt must not exceed dt_max"),
-            (0.1, 1.0, 1.1, 0.5, 0.0, 0.99, "alpha"),
+            (0.1, 1.0, 1.1, 0.5, -0.1, 0.99, "alpha"),
             (0.1, 1.0, 1.1, 0.5, 1.0, 0.99, "alpha"),
             (0.1, 1.0, 1.1, 0.5, nan, 0.99, "alpha"),
             (0.1, 1.0, 1.1, 0.5, 0.1, 1.0, "f_alpha"),
@@ -1661,6 +1661,11 @@ fn c_abi_fire_config_and_lbfgs_fixed_h0() {
             let message = last_error_text();
             assert!(message.contains(name), "{name}: {message}");
         }
+        assert_eq!(
+            unsafe { rgmin_solver_set_fire_config(session, 0.1, 1.0, 5, 1.1, 0.5, 0.0, 0.99) },
+            0,
+            "alpha 0"
+        );
         assert_eq!(
             unsafe {
                 rgmin_solver_set_fire_config(

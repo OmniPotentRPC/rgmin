@@ -2764,8 +2764,8 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_abc(solver: *mut rgmin_solver_t, 
 /// two-step overshoot cap as it was. ABI minor 69. Returns 0, or 1 on a
 /// null session, a session that is not FIRE, or a parameter outside its
 /// range: `dt` and `dt_max` finite and positive with `dt <= dt_max`,
-/// `n_min` at most `isize::MAX`, `f_inc` above 1, and `f_dec`, `alpha`
-/// and `f_alpha` in (0, 1).
+/// `n_min` at most `isize::MAX`, `f_inc` above 1, `f_dec` and `f_alpha`
+/// in (0, 1), and `alpha` in [0, 1).
 ///
 /// # Safety
 /// `solver` is null or a live session from [`rgmin_solver_create`].
@@ -2800,8 +2800,8 @@ pub unsafe extern "C" fn rgmin_solver_set_fire_config(
         set_last_error("rgmin_solver_set_fire_config: f_dec must be finite and in (0, 1)");
         return 1;
     }
-    if !(alpha.is_finite() && alpha > 0.0 && alpha < 1.0) {
-        set_last_error("rgmin_solver_set_fire_config: alpha must be finite and in (0, 1)");
+    if !(alpha.is_finite() && (0.0..1.0).contains(&alpha)) {
+        set_last_error("rgmin_solver_set_fire_config: alpha must be finite and in [0, 1)");
         return 1;
     }
     if !(f_alpha.is_finite() && f_alpha > 0.0 && f_alpha < 1.0) {

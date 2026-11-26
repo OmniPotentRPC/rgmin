@@ -127,9 +127,12 @@ fn validate_fire_config(config: &FireConfig) -> Result<()> {
             what: "fire config f_dec must be finite and in (0, 1)",
         });
     }
-    if !(0.0 < config.alpha && config.alpha < 1.0) {
+    // [0, 1). Zero is LAMMPS min_modify alpha0 0. The mix multiplies by
+    // alpha, and a reset writes alpha_start back, so zero does not grow.
+    // `alpha < 0.0 || alpha >= 1.0` would accept NaN.
+    if !(0.0..1.0).contains(&config.alpha) {
         return Err(Error::InvalidControl {
-            what: "fire config alpha must be finite and in (0, 1)",
+            what: "fire config alpha must be finite and in [0, 1)",
         });
     }
     if !(0.0 < config.f_alpha && config.f_alpha < 1.0) {
@@ -7754,18 +7757,6 @@ mod tests {
                 "{value}: {err}"
             );
             let err = solver
-                .set_fire_config(FireConfig::default().with_alpha(value))
-                .unwrap_err();
-            assert!(
-                matches!(
-                    err,
-                    Error::InvalidControl {
-                        what: "fire config alpha must be finite and in (0, 1)",
-                    }
-                ),
-                "{value}: {err}"
-            );
-            let err = solver
                 .set_fire_config(FireConfig::default().with_f_alpha(value))
                 .unwrap_err();
             assert!(
@@ -7778,6 +7769,25 @@ mod tests {
                 "{value}: {err}"
             );
         }
+        for value in [f64::NAN, -0.1, 1.0, f64::INFINITY, f64::NEG_INFINITY] {
+            let err = solver
+                .set_fire_config(FireConfig::default().with_alpha(value))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::InvalidControl {
+                        what: "fire config alpha must be finite and in [0, 1)",
+                    }
+                ),
+                "{value}: {err}"
+            );
+        }
+        solver
+            .set_fire_config(FireConfig::default().with_alpha(0.0))
+            .unwrap();
+        assert_eq!(fire_state(&solver).alpha, 0.0);
+        assert_eq!(fire_state(&solver).alpha_start, 0.0);
         let err = solver
             .set_fire_config(FireConfig::default().with_dt(2.0).with_dt_max(1.0))
             .unwrap_err();
@@ -7794,6 +7804,44 @@ mod tests {
         assert_eq!(fire_state(&solver).f_dec, 0.5);
         assert_eq!(fire_state(&solver).alpha, 0.1);
         assert_eq!(fire_state(&solver).f_alpha, 0.99);
+    }
+
+    /// LAMMPS `min_modify` fire defaults from `doc/src/min_modify.rst`,
+    /// with `alpha0` 0. The session starts, steps, and the mixing weight
+    /// stays at that zero.
+    #[test]
+    fn lammps_alpha0_zero_session_starts_and_steps() {
+        let obj = Oracle::unbounded(2, |x: ArrayView1<f64>| (0.5 * x.dot(&x), x.to_owned()));
+        let config = FireConfig::ase()
+            .with_dt(0.1)
+            .with_dt_max(1.0)
+            .with_n_min(20)
+            .with_f_inc(1.1)
+            .with_f_dec(0.5)
+            .with_alpha(0.0)
+            .with_f_alpha(0.99);
+        for kind in [FireKind::V1, FireKind::V2] {
+            let mut solver = Solver::new(
+                Method::Fire { kind },
+                Control::default().with_istep(0.1).with_gtol(1e-12),
+                2,
+            );
+            if kind == FireKind::V2 {
+                solver.set_fire_preset(FirePreset::Guenole2020).unwrap();
+            }
+            solver.set_fire_config(config).unwrap();
+            assert_eq!(fire_state(&solver).alpha, 0.0);
+            assert_eq!(fire_state(&solver).alpha_start, 0.0);
+            let mut x = array![1.0, -0.5];
+            let start = x.clone();
+            for _ in 0..4 {
+                solver.step(&obj, &mut x).unwrap();
+                assert!(x.iter().all(|v| v.is_finite()), "{kind:?} {x:?}");
+                assert_eq!(fire_state(&solver).alpha, 0.0, "{kind:?}");
+                assert_eq!(fire_state(&solver).alpha_start, 0.0, "{kind:?}");
+            }
+            assert_ne!(x, start, "{kind:?} did not move");
+        }
     }
 
     #[test]

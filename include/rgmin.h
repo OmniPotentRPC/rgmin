@@ -746,12 +746,12 @@ int32_t rgmin_solver_set_fire_abc(rgmin_solver_t *solver, int32_t on);
 /** Replace the FIRE integrator parameters and clear the velocity. The
  *  two-step overshoot cap of rgmin_solver_set_fire_cap_two_step_overshoot
  *  stays as it was. dt and dt_max must be finite and positive with
- *  dt <= dt_max, f_inc finite and greater than 1, and f_dec, alpha and
- *  f_alpha finite and in (0, 1). n_min is the downhill count before dt
- *  grows; it must not exceed PTRDIFF_MAX, so a negative integer
- *  converted to size_t is refused. Returns 0, or 1 on a null session, a
- *  session that is not FIRE or FIRE 2.0, or a parameter outside that
- *  range. ABI minor 69. */
+ *  dt <= dt_max, f_inc finite and greater than 1, f_dec and f_alpha
+ *  finite and in (0, 1), and alpha finite and in [0, 1). n_min is the
+ *  downhill count before dt grows; it must not exceed PTRDIFF_MAX, so a
+ *  negative integer converted to size_t is refused. Returns 0, or 1 on
+ *  a null session, a session that is not FIRE or FIRE 2.0, or a
+ *  parameter outside that range. ABI minor 69. */
 int32_t rgmin_solver_set_fire_config(rgmin_solver_t *solver, double dt,
                                      double dt_max, size_t n_min, double f_inc,
                                      double f_dec, double alpha, double f_alpha);

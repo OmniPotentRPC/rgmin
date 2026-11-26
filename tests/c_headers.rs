@@ -65,6 +65,11 @@ fn c_header_steps_the_overlay_free_methods_through_the_fused_callback() {
     consumer::compile_and_run("tests/c_step_fg_methods.c", "rgmin_c_step_fg_methods", &[]);
 }
 
+#[test]
+fn c_header_steps_a_fire_session_with_lammps_alpha0_zero() {
+    consumer::compile_and_run("tests/c_fire_alpha0.c", "rgmin_c_fire_alpha0", &[]);
+}
+
 #[cfg(feature = "highs")]
 #[test]
 fn c_header_routes_and_clears_the_highs_callback() {
