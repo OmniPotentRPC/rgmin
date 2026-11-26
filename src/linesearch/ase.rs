@@ -333,9 +333,12 @@ fn trial_point(pos: ArrayView1<'_, f64>, dir: ArrayView1<'_, f64>, stp: f64) -> 
 /// optimizers do before their search. A zero direction, or an empty
 /// `pos` (that floor is then zero), fails before any evaluation: the
 /// lengthening quotient is not finite and would hand the oracle NaN
-/// coordinates. Returns the trial the search ended on, or `None` when
-/// the search failed: an input error, a spent budget, a non-finite
-/// trial, a zero direction, or an empty position.
+/// coordinates. A non-finite opening slope fails the same way. The
+/// comparisons that start the search do not treat NaN as an error, so
+/// the first trial would otherwise be evaluated. Returns the trial the
+/// search ended on, or `None` when the search failed: an input error, a
+/// spent budget, a non-finite trial, a zero direction, an empty
+/// position, or a non-finite opening slope.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn search<F>(
     mut oracle: F,
@@ -365,6 +368,12 @@ where
         dir.to_owned()
     };
     let derphi0 = crate::vecops::dot(g0, dir.view());
+    // `start` rejects `g >= 0`. NaN comparisons are false, and a
+    // negative infinity is not positive, so neither stops the search
+    // before the oracle is called.
+    if !derphi0.is_finite() {
+        return None;
+    }
     let mut state = State {
         dir: dir.view(),
         maxstep: maxstep.unwrap_or(f64::INFINITY),
@@ -578,5 +587,34 @@ mod tests {
         );
         assert!(out.is_none());
         assert_eq!(*seen.borrow(), 0);
+    }
+
+    #[test]
+    fn a_non_finite_opening_slope_fails_before_any_evaluation() {
+        let pos = array![1.0, 0.0, 0.0];
+        let dir = array![1.0, 0.0, 0.0];
+        let (f0, _) = bowl(1.0, pos.view());
+        for slope in [f64::NAN, f64::NEG_INFINITY] {
+            let g0 = array![slope, 0.0, 0.0];
+            let seen = RefCell::new(0usize);
+            let oracle = |x: ArrayView1<'_, f64>| {
+                *seen.borrow_mut() += 1;
+                bowl(1.0, x)
+            };
+            let out = search(
+                oracle,
+                pos.view(),
+                f0,
+                g0.view(),
+                dir.view(),
+                Some(0.2),
+                AseSearch { stpmax: 50.0 },
+                0.23,
+                0.46,
+                20,
+            );
+            assert!(out.is_none(), "{slope}");
+            assert_eq!(*seen.borrow(), 0, "{slope}");
+        }
     }
 }
