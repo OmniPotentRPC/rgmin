@@ -93,9 +93,11 @@ def test_hammered_solver_raises_in_use() -> None:
         assert "Solver is in use by another thread" in str(error)
 
 
-# Every Solver method besides step. Each reads or writes the Rust session,
-# so each must claim it, as step does.
-_CONTROLS: dict[str, tuple[Any, ...]] = {
+# Every Solver method and property besides step. Each reads or writes the
+# Rust session, so each must claim it, as step does. A None entry is a
+# property, read without a call.
+_CONTROLS: dict[str, tuple[Any, ...] | None] = {
+    "evals": None,
     "forget": (),
     "pair_count": (),
     "push_pair": (np.ones(2), np.ones(2)),
@@ -109,6 +111,11 @@ _CONTROLS: dict[str, tuple[Any, ...]] = {
 }
 
 
+def _use(solver: rgmin.Solver, name: str, args: tuple[Any, ...] | None) -> Any:
+    member = getattr(solver, name)
+    return member if args is None else member(*args)
+
+
 def test_session_controls_refuse_reentry_from_the_callback() -> None:
     solver = rgmin.Solver(2, rgmin.SolverConfig("lbfgs", maxiter=1))
     seen: dict[str, BaseException | None] = {}
@@ -116,7 +123,7 @@ def test_session_controls_refuse_reentry_from_the_callback() -> None:
     def callback(x: np.ndarray) -> tuple[float, np.ndarray]:
         for name, args in _CONTROLS.items():
             try:
-                getattr(solver, name)(*args)
+                _use(solver, name, args)
             except BaseException as exc:  # noqa: BLE001
                 seen[name] = exc
             else:
@@ -153,7 +160,7 @@ def test_session_controls_raise_in_use_while_a_step_runs() -> None:
     def clash() -> None:
         for name, args in _CONTROLS.items():
             try:
-                getattr(solver, name)(*args)
+                _use(solver, name, args)
             except BaseException as exc:  # noqa: BLE001
                 errors.append((name, exc))
             else:
