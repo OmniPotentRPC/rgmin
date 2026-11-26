@@ -1316,6 +1316,8 @@ class _AseWolfe(Optimizer):
             recorded = np.asarray(point, dtype=np.float64).reshape(-1)
             if asked.shape != recorded.shape or not np.array_equal(asked, recorded):
                 raise _restart_error(f"{self.restart} does not replay under these parameters")
+            self.force_calls += 1
+            self.function_calls += 1
             return float(value), np.asarray(gradient, dtype=np.float64).reshape(-1)
         value, gradient = super()._evaluate(x)
         self.force_calls += 1
