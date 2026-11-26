@@ -163,6 +163,15 @@ def test_names_are_exported() -> None:
     assert rgmin.ase.LBFGSLineSearch is LBFGSLineSearch
 
 
+@pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
+def test_lbfgs_line_search_memory_is_not_coerced() -> None:
+    atoms = Atoms("H", positions=[[0.0, 0.0, 0.0]])
+    with pytest.raises(ValueError, match="memory must be an int"):
+        LBFGSLineSearch(atoms, logfile=None, memory=1.5)
+    with pytest.raises(ValueError, match="memory must be an int"):
+        LBFGSLineSearch(atoms, logfile=None, memory=True)
+
+
 def test_lbfgs_line_search_rejects_a_duplicate_flag_and_a_large_step() -> None:
     atoms = Atoms("Cu", positions=[[0.0, 0.0, 0.0]])
     with pytest.raises(TypeError, match="use_line_search"):
@@ -230,6 +239,39 @@ def test_maxstep_limits_each_line_search_increment(ours: type, theirs: type) -> 
     assert outcome == "ok"
     assert x == pytest.approx(expected[1], abs=1e-12)
     assert trials == pytest.approx(expected[2], abs=1e-12)
+
+
+@pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
+@pytest.mark.parametrize(
+    ("ours", "theirs"),
+    [
+        (BFGSLineSearch, AseBFGSLineSearch),
+        (LBFGSLineSearch, AseLBFGSLineSearch),
+    ],
+)
+def test_negative_maxstep_matches_ase(ours: type, theirs: type) -> None:
+    expected = _first_step(theirs, _bowl, alpha=1.0, maxstep=-0.2)
+    outcome, x, trials = _first_step(ours, _bowl, alpha=1.0, maxstep=-0.2)
+    assert outcome == expected[0]
+    assert x == pytest.approx(expected[1], abs=1e-8)
+    assert trials == pytest.approx(expected[2], abs=1e-8)
+
+
+@pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
+@pytest.mark.parametrize("cls", [BFGSLineSearch, LBFGSLineSearch])
+def test_zero_maxstep_scales_the_increment_and_stops(cls: type) -> None:
+    # ASE scales a zero increment by ``0/0`` and the search does not finish.
+    # The port keeps the first trial at the start and stops before that NaN.
+    field = Field(_bowl)
+    atoms = Atoms("H", positions=[[0.0, 0.0, 0.0]])
+    atoms.calc = field
+    opt = cls(atoms, logfile=None, alpha=1.0, maxstep=0.0)
+    with pytest.raises(RuntimeError, match="LineSearch failed!"):
+        opt.step()
+    assert atoms.positions[0, 0] == pytest.approx(0.0)
+    assert field.trials
+    assert field.trials[0] == pytest.approx(0.0)
+    assert all(np.isfinite(trial) for trial in field.trials)
 
 
 @pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")

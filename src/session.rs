@@ -50,8 +50,8 @@ use crate::precon::{
 };
 use crate::pso::{Particle, RNG_SEED, random_velocity, update_swarm};
 use crate::qn::{
-    bfgs_inverse_update, sr_trust_direction, sr_trust_limits, sr1_hessian_update,
-    sr2_hessian_update,
+    bfgs_accepts_pair, bfgs_inverse_update, sr_trust_direction, sr_trust_limits,
+    sr1_hessian_update, sr2_hessian_update,
 };
 use crate::qn_step::QnStep;
 use crate::quickmin::{
@@ -291,6 +291,9 @@ pub struct Solver {
     e_hist: VecDeque<f64>,
     /// Per-atom cap in force. `None` is no per-atom cap.
     atom_maxmove: Option<f64>,
+    /// Finite value last passed to [`Self::set_atom_maxmove`], including a
+    /// non-positive one. The ASE line search reads it as `maxstep`.
+    atom_maxmove_request: Option<f64>,
     /// `set_atom_maxmove` has been called. The default cap is then left alone.
     atom_maxmove_set: bool,
     project_rigid: bool,
@@ -591,6 +594,7 @@ impl Solver {
             accept: Accept::None,
             e_hist: VecDeque::new(),
             atom_maxmove: None,
+            atom_maxmove_request: None,
             atom_maxmove_set: false,
             project_rigid: false,
             rigid_mode: RigidMode::Auto,
@@ -1026,9 +1030,16 @@ impl Solver {
     /// [`LineSearch::Wolfe`]. A step refuses another line-search kind,
     /// [`Accept::Step`], a manifold, constraints, an overlay, a Euclidean
     /// `maxmove`, and on L-BFGS any step but [`LbfgsStep::Wolfe`].
-    /// `stpmax` must not be NaN. Any other value is used as ASE uses it,
-    /// so one below 1 fails every search. Other methods return an error.
-    /// Without this call the session keeps rgmin's own search.
+    /// On L-BFGS this call selects that plain Wolfe step and turns the
+    /// geometry step off, the same choice the C++ `SolverConfig` apply
+    /// path makes for `linesearch="ase"`, so a default L-BFGS session
+    /// can step.
+    /// The per-atom cap is ASE's `maxstep`: a positive value limits each
+    /// increment, and a non-positive finite value is applied as ASE
+    /// applies it, so zero scales every increment to zero. `stpmax` must
+    /// not be NaN. Any other value is used as ASE uses it, so one below
+    /// 1 fails every search. Other methods return an error. Without this
+    /// call the session keeps rgmin's own search.
     pub fn set_ase_linesearch(&mut self, stpmax: f64) -> Result<()> {
         if stpmax.is_nan() {
             return Err(Error::InvalidControl {
@@ -1039,6 +1050,10 @@ impl Solver {
             return Err(Error::InvalidControl {
                 what: "the ASE line search requires a BFGS or L-BFGS session",
             });
+        }
+        if matches!(self.inner, Inner::Lbfgs(_)) {
+            self.set_lbfgs_step(LbfgsStep::Wolfe)?;
+            self.set_geometry_step(false);
         }
         self.ase_search = Some(crate::linesearch::ase::AseSearch { stpmax });
         Ok(())
@@ -1139,10 +1154,14 @@ impl Solver {
     /// when `Method::installs_default_atom_cap` is set. BFGS, dogleg,
     /// and FIRE 2.0 start without that cap. A positive `maxmove`
     /// replaces the value in force. A non-positive or non-finite value
-    /// clears the cap.
+    /// clears the cap. The ASE line search still reads a finite
+    /// non-positive value as ASE's `maxstep`.
     pub fn set_atom_maxmove(&mut self, maxmove: f64) {
         self.atom_maxmove_set = true;
-        self.atom_maxmove = Some(maxmove).filter(|&cap| crate::step::binding(cap));
+        self.atom_maxmove_request = Some(maxmove).filter(|cap| cap.is_finite());
+        self.atom_maxmove = self
+            .atom_maxmove_request
+            .filter(|cap| crate::step::binding(*cap));
         if let Inner::Lbfgs(solver) = &mut self.inner {
             let cap = self.atom_maxmove.unwrap_or(crate::lbfgs::EON_MAX_MOVE);
             match &mut solver.step {
@@ -1154,6 +1173,18 @@ impl Solver {
         }
         if self.steps == 0 {
             self.reset_sr_radius();
+        }
+    }
+
+    /// Per-atom cap a line search should apply.
+    ///
+    /// Every method but the ASE search treats a non-positive request as
+    /// no cap. That search is ASE's `maxstep` and scales the request.
+    fn search_atom_cap(&self) -> Option<f64> {
+        if self.ase_search.is_some() && self.atom_maxmove_set {
+            self.atom_maxmove_request.filter(|cap| cap.is_finite())
+        } else {
+            self.atom_maxmove
         }
     }
 
@@ -5576,6 +5607,8 @@ impl Solver {
         let diis_alpha = self.istep;
         let diis_atom_cap = self.atom_maxmove;
         let diis_euclidean_cap = self.control.maxmove_cap();
+        // Copied before the rigid workspace is taken out of `self`.
+        let search_atom_cap = self.search_atom_cap();
         if matches!(&self.inner, Inner::Sr1 { .. } | Inner::Sr2 { .. }) {
             self.sr_trust_attempt(obj, x, &mut value, &mut grad, &start, &gold, &mut sr_secant);
         }
@@ -5631,7 +5664,7 @@ impl Solver {
                         &mut self.istep,
                         self.linesearch,
                         &self.control,
-                        self.atom_maxmove,
+                        search_atom_cap,
                         constrained_direction,
                         false,
                         line_options,
@@ -5786,7 +5819,7 @@ impl Solver {
                     };
                     self.unmoved_fixed = !t.moved && *dir == dir_used && next_alpha0 == alpha0;
                 }
-                Inner::Bfgs { h, .. } => {
+                Inner::Bfgs { h, fresh } => {
                     let direction = -h.dot(&grad);
                     let old = x.clone();
                     let gold = grad.clone();
@@ -5799,7 +5832,7 @@ impl Solver {
                         self.istep,
                         self.linesearch,
                         &self.control,
-                        self.atom_maxmove,
+                        search_atom_cap,
                         self.accept,
                         &mut self.e_hist,
                         &self.manifold,
@@ -5815,7 +5848,14 @@ impl Solver {
                     value = t.f;
                     grad = t.g;
                     if moved {
-                        bfgs_inverse_update(h, &(&*x - &old), &(&grad - &gold));
+                        let s = &*x - &old;
+                        let y = &grad - &gold;
+                        bfgs_inverse_update(h, &s, &y);
+                        // A later set_fixed_h0 replaces only a matrix that
+                        // has not yet taken a pair.
+                        if bfgs_accepts_pair(&s, &y) {
+                            *fresh = false;
+                        }
                     }
                     if self.accept != Accept::Step {
                         self.istep = qn_istep(&self.control);

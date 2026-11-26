@@ -172,8 +172,13 @@ class SolverConfig(_SolverConfigBase):
 
     The default ``"lbfgs"`` step is the line-search-free eOn step.
     ``linesearch="wolfe"`` opts into the strong Wolfe search. Both
-    keep every atom move within ``maxstep``. A ``linesearch`` the chosen
-    step ignores raises ``ValueError``.
+    keep every atom move within ``maxstep``. ``h0`` scales the initial
+    inverse Hessian of ``bfgs`` and ``lbfgs``. ``linesearch="ase"``
+    runs a port of ASE's line search on those two methods, and
+    ``stpmax`` bounds its step multiplier. ``h0``, ``linesearch="ase"``
+    and ``stpmax`` are opt-in. A finite non-positive ``maxstep`` then
+    scales each increment, including to zero. A ``linesearch`` the
+    chosen step ignores raises ``ValueError``.
 
     ``Solver`` takes the native configuration type, so this class
     derives from it rather than wrapping it.

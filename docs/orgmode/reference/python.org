@@ -42,10 +42,10 @@ the polish itself is the C =rgmin_minimize_hess_opts= and
 
 =c1=, =c2=, and =linesearch_maxiter= are the line-search constants.
 They are accepted only together with =linesearch=, one of =brent=,
-=backtracking=, =goldstein=, or =wolfe=. Passing a non-default
+=backtracking=, =goldstein=, =wolfe=, or =ase=. Passing a non-default
 constant alone raises =ValueError=. So does a =linesearch= the chosen
 step ignores: any kind with ~accept="step"~ or on a method that takes
-no line search, and any kind but =wolfe= on =lbfgs=.
+no line search, and any kind but =wolfe= or =ase= on =lbfgs=.
 
 * Two packages, one import name
 
@@ -72,7 +72,9 @@ Those differ from the Rust =Control::default= (=gtol= 1e-5, =istep= 1) and from 
 | =maxmove=            | float                                              | 0       | Euclidean cap on the step. Zero keeps the method's own caps, and a negative value leaves every cap off. |
 | =atom_maxmove=       | float                                              | unset   | Per-atom cap on the longest atom displacement. =maxstep= is the same option. Unset keeps the method's default, 0.2 for L-BFGS. |
 | =accept=             | =none=, =energy=, =nonmonotone=, =step=            | unset   | How a step is taken. Unset keeps the C session's =energy=. |
-| =linesearch=         | =brent=, =backtracking= (=armijo=), =goldstein=, =wolfe= | unset | Line search. L-BFGS searches none unless this is =wolfe=. |
+| =linesearch=         | =brent=, =backtracking= (=armijo=), =goldstein=, =wolfe=, =ase= | unset | Line search. L-BFGS searches none unless this is =wolfe= or =ase=. |
+| =h0=                 | finite float > 0                                  | unset   | Initial inverse-Hessian scale of =bfgs= and =lbfgs=. |
+| =stpmax=             | float                                              | unset   | Step-multiplier bound of the ASE line search. Requires ~linesearch="ase"~. A value below 1 fails each search, as in ASE. |
 | =c1=, =c2=           | float                                              | 1e-4, 0.9 | Wolfe and Armijo constants. Need =linesearch=. |
 | =linesearch_maxiter= | int >= 1                                           | 20      | Trial budget of the line search. Needs =linesearch=. |
 | =beta=               | a CG variant name, or =cg=                         | unset   | Conjugacy coefficient. Only for a CG method. =cg= is Polak-Ribiere. |
@@ -166,12 +168,12 @@ met.
 =NotImplementedError= means =restart=, =read=, or =dump= on a class
 other than =BFGSLineSearch= and =LBFGSLineSearch=, or a Hessian
 optimizer called without =hessian=. Those two classes replay an rgmin
-evaluation log from =restart=. Both run =linesearch="ase"=, a port of
+evaluation log from =restart=. Both run ~linesearch="ase"~, a port of
 ASE's =LineSearch=, and raise =RuntimeError("LineSearch failed!")= when
-a search fails. =h0= and =linesearch="ase"= are opt-in =SolverConfig=
+a search fails. =h0= and ~linesearch="ase"~ are opt-in =SolverConfig=
 options: =h0= scales the initial inverse Hessian of =bfgs= and =lbfgs=,
-and =linesearch="ase"= runs ASE's search on those two methods, with
+and ~linesearch="ase"~ runs ASE's search on those two methods, with
 =maxstep= limiting each trial increment of an atom. =stpmax=, 50 by
-default, bounds its step multiplier and requires =linesearch="ase"=.
+default, bounds its step multiplier and requires ~linesearch="ase"~.
 A failed search stops the step with =Stop.LINE_SEARCH=. Omitting both
 leaves the session defaults.
