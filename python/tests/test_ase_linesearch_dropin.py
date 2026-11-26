@@ -14,9 +14,11 @@ import io
 import re
 import shutil
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 import pytest
+import rgmin
 from ase import Atoms
 from ase.build import bulk
 from ase.calculators.calculator import Calculator, all_changes
@@ -27,9 +29,7 @@ from ase.optimize import BFGSLineSearch as AseBFGSLineSearch
 from ase.optimize import LBFGSLineSearch as AseLBFGSLineSearch
 from ase.optimize import QuasiNewton as AseQuasiNewton
 from ase.optimize.optimize import RestartError
-
-import rgmin
-from rgmin.ase import BFGSLineSearch, LBFGS, LBFGSLineSearch, QuasiNewton
+from rgmin.ase import LBFGS, BFGSLineSearch, LBFGSLineSearch, QuasiNewton
 
 _FMAX = 0.05
 _STEPS = 80
@@ -54,7 +54,7 @@ class Counted(Calculator):
 class Field(Calculator):
     """One-atom analytic surface that records each geometry it evaluates."""
 
-    implemented_properties = ["energy", "forces"]
+    implemented_properties: ClassVar[list[str]] = ["energy", "forces"]
 
     def __init__(self, surface) -> None:
         super().__init__()
@@ -94,7 +94,12 @@ def _call_counts(cls: type, steps: int) -> tuple[int, int, int, list[int]]:
     log = io.StringIO()
     opt = cls(atoms, logfile=log, alpha=1.0, maxstep=0.2)
     opt.run(fmax=1e-8, steps=steps)
-    return opt.force_calls, opt.function_calls, opt.nsteps, _logged_force_calls(log.getvalue())
+    return (
+        opt.force_calls,
+        opt.function_calls,
+        opt.nsteps,
+        _logged_force_calls(log.getvalue()),
+    )
 
 
 def _first_step(cls: type, surface, **kwargs: object) -> tuple[str, float, list[float]]:
@@ -191,7 +196,9 @@ def test_lbfgs_line_search_memory_is_not_coerced() -> None:
 def test_lbfgs_line_search_rejects_a_duplicate_flag_and_a_large_step() -> None:
     atoms = Atoms("Cu", positions=[[0.0, 0.0, 0.0]])
     with pytest.raises(TypeError, match="use_line_search"):
-        LBFGSLineSearch(atoms, None, "-", None, None, 100, 1.0, 70.0, False, use_line_search=True)
+        LBFGSLineSearch(
+            atoms, None, "-", None, None, 100, 1.0, 70.0, False, use_line_search=True
+        )
 
 
 def test_a_positional_use_line_search_is_a_duplicate_argument() -> None:
@@ -244,7 +251,9 @@ def test_relaxed_energy_and_positions_match_ase(
     _relax(theirs, right)
     assert np.linalg.norm(left.get_forces(), axis=1).max() <= _FMAX
     assert np.linalg.norm(right.get_forces(), axis=1).max() <= _FMAX
-    assert left.get_potential_energy() == pytest.approx(right.get_potential_energy(), rel=1e-4, abs=1e-4)
+    assert left.get_potential_energy() == pytest.approx(
+        right.get_potential_energy(), rel=1e-4, abs=1e-4
+    )
     assert np.allclose(left.positions, right.positions, rtol=1e-3, atol=1e-3)
 
 
@@ -305,9 +314,14 @@ def test_zero_maxstep_scales_the_increment_and_stops(cls: type) -> None:
 @pytest.mark.parametrize("stpmax", [0.5, 0.0])
 def test_an_opening_step_above_stpmax_fails_as_in_ase(stpmax: float) -> None:
     # ASE opens at 1 and rejects stpmax < 1 before any trial.
-    expected = _first_step(AseBFGSLineSearch, _bowl, alpha=1.0, maxstep=10.0, stpmax=stpmax)
+    expected = _first_step(
+        AseBFGSLineSearch, _bowl, alpha=1.0, maxstep=10.0, stpmax=stpmax
+    )
     assert expected == ("LineSearch failed!", 0.0, [0.0])
-    assert _first_step(BFGSLineSearch, _bowl, alpha=1.0, maxstep=10.0, stpmax=stpmax) == expected
+    assert (
+        _first_step(BFGSLineSearch, _bowl, alpha=1.0, maxstep=10.0, stpmax=stpmax)
+        == expected
+    )
 
 
 @pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
@@ -318,12 +332,16 @@ def test_an_opening_step_above_stpmax_fails_as_in_ase(stpmax: float) -> None:
         (LBFGSLineSearch, AseLBFGSLineSearch),
     ],
 )
-def test_a_spent_line_search_budget_fails_without_a_fallback(ours: type, theirs: type) -> None:
+def test_a_spent_line_search_budget_fails_without_a_fallback(
+    ours: type, theirs: type
+) -> None:
     # ASE needs three trials on this step. Two leave the search unfinished,
     # and the step fails instead of taking the best trial so far.
     unbounded = _first_step(theirs, _bowl, alpha=1.0, maxstep=0.2)
     assert len(unbounded[2]) - 1 > 2
-    outcome, x, trials = _first_step(ours, _bowl, alpha=1.0, maxstep=0.2, linesearch_maxiter=2)
+    outcome, x, trials = _first_step(
+        ours, _bowl, alpha=1.0, maxstep=0.2, linesearch_maxiter=2
+    )
     assert outcome == "LineSearch failed!"
     assert x == 0.0
     assert trials == pytest.approx(unbounded[2][:3], abs=1e-12)
@@ -332,9 +350,14 @@ def test_a_spent_line_search_budget_fails_without_a_fallback(ours: type, theirs:
 @pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
 def test_a_descending_trial_at_stpmax_is_taken_as_in_ase() -> None:
     # ASE ends on its "STP = maxstep" warning and keeps that trial.
-    expected = _first_step(AseBFGSLineSearch, _slope, alpha=1.0, maxstep=10.0, stpmax=1.0)
+    expected = _first_step(
+        AseBFGSLineSearch, _slope, alpha=1.0, maxstep=10.0, stpmax=1.0
+    )
     assert expected == ("ok", 1.0, [0.0, 1.0])
-    assert _first_step(BFGSLineSearch, _slope, alpha=1.0, maxstep=10.0, stpmax=1.0) == expected
+    assert (
+        _first_step(BFGSLineSearch, _slope, alpha=1.0, maxstep=10.0, stpmax=1.0)
+        == expected
+    )
 
 
 @pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
@@ -368,7 +391,9 @@ def test_trajectory_logfile_and_restart(tmp_path: Path) -> None:
     calls = Counted(EMT())
     fresh.calc = calls
     BFGSLineSearch(fresh, logfile=None).run(fmax=_FMAX, steps=_STEPS)
-    assert fresh.get_potential_energy() == pytest.approx(resumed.get_potential_energy(), abs=1e-4)
+    assert fresh.get_potential_energy() == pytest.approx(
+        resumed.get_potential_energy(), abs=1e-4
+    )
     assert np.allclose(fresh.positions, resumed.positions, rtol=1e-3, atol=1e-3)
 
     with pytest.raises(RestartError):
@@ -437,5 +462,7 @@ def test_h0_and_stpmax_are_refused_when_unused() -> None:
         rgmin.SolverConfig("bfgs", linesearch="wolfe", stpmax=50.0)
     with pytest.raises(ValueError, match="ase"):
         rgmin.SolverConfig("fire", linesearch="ase")
-    config = rgmin.SolverConfig("bfgs", linesearch="ase", h0=0.1, stpmax=50.0, c1=0.23, c2=0.46)
+    config = rgmin.SolverConfig(
+        "bfgs", linesearch="ase", h0=0.1, stpmax=50.0, c1=0.23, c2=0.46
+    )
     assert config.method_name == "bfgs"
