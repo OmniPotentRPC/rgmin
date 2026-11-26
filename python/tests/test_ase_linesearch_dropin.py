@@ -10,6 +10,8 @@ cluster. The calculator supplies the derivatives.
 from __future__ import annotations
 
 import inspect
+import io
+import re
 import shutil
 from pathlib import Path
 
@@ -80,6 +82,19 @@ def _slope(positions: np.ndarray) -> tuple[float, np.ndarray]:
     gradient = np.zeros_like(positions)
     gradient[0, 0] = -1.0
     return -float(positions[0, 0]), gradient
+
+
+def _logged_force_calls(text: str) -> list[int]:
+    return [int(item) for item in re.findall(r"\[\s*(\d+)\]", text)]
+
+
+def _call_counts(cls: type, steps: int) -> tuple[int, int, int, list[int]]:
+    atoms = Atoms("H", positions=[[0.0, 0.0, 0.0]])
+    atoms.calc = Field(_bowl)
+    log = io.StringIO()
+    opt = cls(atoms, logfile=log, alpha=1.0, maxstep=0.2)
+    opt.run(fmax=1e-8, steps=steps)
+    return opt.force_calls, opt.function_calls, opt.nsteps, _logged_force_calls(log.getvalue())
 
 
 def _first_step(cls: type, surface, **kwargs: object) -> tuple[str, float, list[float]]:
@@ -177,6 +192,17 @@ def test_lbfgs_line_search_rejects_a_duplicate_flag_and_a_large_step() -> None:
     atoms = Atoms("Cu", positions=[[0.0, 0.0, 0.0]])
     with pytest.raises(TypeError, match="use_line_search"):
         LBFGSLineSearch(atoms, None, "-", None, None, 100, 1.0, 70.0, False, use_line_search=True)
+
+
+def test_a_positional_use_line_search_is_a_duplicate_argument() -> None:
+    # ASE sets the keyword before calling LBFGS, so the ninth positional
+    # argument collides even when the caller passed no keyword.
+    atoms = Atoms("H", positions=[[0.0, 0.0, 0.0]])
+    message = "multiple values for argument 'use_line_search'"
+    with pytest.raises(TypeError, match=re.escape(message)):
+        AseLBFGSLineSearch(atoms, None, "-", None, None, 100, 1.0, 70.0, False)
+    with pytest.raises(TypeError, match=re.escape(message)):
+        LBFGSLineSearch(atoms, None, "-", None, None, 100, 1.0, 70.0, False)
     with pytest.raises(ValueError, match="maximum step size"):
         LBFGSLineSearch(atoms, logfile=None, maxstep=2.0)
 
@@ -350,6 +376,27 @@ def test_trajectory_logfile_and_restart(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
+@pytest.mark.parametrize(
+    ("ours", "theirs"),
+    [
+        (BFGSLineSearch, AseBFGSLineSearch),
+        (LBFGSLineSearch, AseLBFGSLineSearch),
+    ],
+)
+def test_force_and_function_calls_match_ase(ours: type, theirs: type) -> None:
+    # The opening value is ASE's ``func`` call. Line-search trials count
+    # as both ``func`` and ``fprime``. The opening gradient does not.
+    left = _call_counts(ours, 2)
+    right = _call_counts(theirs, 2)
+    assert left[2] == right[2]
+    assert left[0] == right[0]
+    assert left[1] == right[1]
+    assert left[1] == left[0] + left[2]
+    if ours is BFGSLineSearch:
+        assert left[3] == right[3]
+
+
+@pytest.mark.skipif(not _have_solver(), reason="nanobind Solver is not in this build")
 @pytest.mark.parametrize("cls", [BFGSLineSearch, LBFGSLineSearch])
 def test_restart_carries_the_force_call_count(tmp_path: Path, cls: type) -> None:
     start = _cu_cluster()
@@ -357,8 +404,9 @@ def test_restart_carries_the_force_call_count(tmp_path: Path, cls: type) -> None
     first = cls(_copy(start, EMT()), restart=str(restart), logfile=None)
     first.run(fmax=1e-6, steps=3)
     recorded = first.force_calls
+    recorded_values = first.function_calls
     assert recorded > 0
-    assert first.function_calls == recorded
+    assert recorded_values == recorded + first.nsteps
     snapshot = tmp_path / "snapshot.json"
     shutil.copyfile(restart, snapshot)
     first.run(fmax=1e-6, steps=2)
@@ -367,7 +415,7 @@ def test_restart_carries_the_force_call_count(tmp_path: Path, cls: type) -> None
     logfile = tmp_path / "count.log"
     again = cls(_copy(start, EMT()), restart=str(snapshot), logfile=str(logfile))
     assert again.force_calls == recorded
-    assert again.function_calls == recorded
+    assert again.function_calls == recorded_values
     again.run(fmax=1e-6, steps=2)
     assert again.force_calls == first.force_calls
     assert again.function_calls == first.function_calls
