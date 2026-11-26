@@ -350,6 +350,30 @@ def test_gromacs_cg_mdp_and_zero_budget() -> None:
         rgmin.minimize(_quad, np.array([0.3], dtype=np.float64), "gromacs-steep", nstcgsteep=10)
 
 
+def test_gromacs_lbfgs_mdp_memory_and_method_enum() -> None:
+    options = rgmin.gromacs_mdp_options(
+        {
+            "integrator": "l-bfgs",
+            "emtol": 1e-3,
+            "emstep": 0.1,
+            "nsteps": 100,
+            "nbfgscorr": 3,
+        }
+    )
+    method = options.pop("method")
+    point = np.array([3.0, -4.0, 1.0], dtype=np.float64)
+    report, out = rgmin.minimize(_quad, point, method, **options)
+    assert out is point
+    assert report.stop == rgmin.Stop.TOLERANCE
+    assert report.grad_norm < options["gtol"]
+    assert rgmin.Method.GROMACS_LBFGS == rgmin.Method.GromacsLbfgs
+
+    with pytest.raises(ValueError, match="nbfgscorr"):
+        rgmin.minimize(_quad, np.array([0.3], dtype=np.float64), method, nbfgscorr=0)
+    with pytest.raises(ValueError, match="mystery_key"):
+        rgmin.gromacs_mdp_options({"integrator": "l-bfgs", "mystery_key": 1})
+
+
 def test_gromacs_shrink_budget_near_one_is_capped_and_fast() -> None:
     shrink = float(np.nextafter(1.0, 0.0))
     start = time.perf_counter()
