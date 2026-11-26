@@ -255,7 +255,7 @@ The session gtol is 0, so ``fmax`` is the convergence test.
     | ``PSO``                                              | none         | per atom; not a local relaxation             |
     +------------------------------------------------------+--------------+----------------------------------------------+
 
-ABI minor 69 adds ``rgmin_solver_set_fire_config`` and
+ABI minor 70 adds ``rgmin_solver_set_fire_config`` and
 ``rgmin_solver_set_lbfgs_fixed_h0``. The Python session exposes those,
 plus ``forget``, ``pair_count``, ``push_pair``, ``set_maxmove``,
 ``set_atom_maxmove``, ``set_lbfgs_scaled``, ``set_fire_preset``, and

@@ -1215,7 +1215,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 /// `RGMIN_NOT_CONVERGED`, `rgmin_solver_set_require_convergence`,
 /// `rgmin_control_init`, and the `_sized` entries.
 /// ABI minor 51 adds `rgmin_minimize_rlbfgs` and `rgmin_rlbfgs_default`.
-/// ABI minor 69 adds `rgmin_solver_set_fire_config` and
+/// ABI minor 70 adds `rgmin_solver_set_fire_config` and
 /// `rgmin_solver_set_lbfgs_fixed_h0`, and refuses an `n_min` above
 /// `isize::MAX`.
 /// ABI minor 64 makes the eindir one-shots name the entry that was called
@@ -1237,7 +1237,7 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 69);
+    assert_eq!(stamp.abi_minor, 70);
     assert_eq!(stamp.layout_revision, 6);
     assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING as i32, 9);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
@@ -1596,7 +1596,7 @@ fn c_abi_fire_preset_and_abc() {
 /// is not FIRE or FIRE 2.0, and each parameter outside its range, and
 /// names the parameter. `rgmin_solver_set_lbfgs_fixed_h0` refuses a null
 /// session and a session that is not L-BFGS, and clears the scale on a
-/// non-positive or non-finite value. ABI minor 69.
+/// non-positive or non-finite value. ABI minor 70.
 #[test]
 fn c_abi_fire_config_and_lbfgs_fixed_h0() {
     use rgmin::ffi::{rgmin_solver_set_fire_config, rgmin_solver_set_lbfgs_fixed_h0};

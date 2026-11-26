@@ -82,7 +82,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 69
+#define RGMIN_ABI_VERSION_MINOR 70
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -115,8 +115,10 @@ typedef struct rgmin_abi_stamp_t {
  * 65 RGMIN_RCG, rgmin_rcg_options_t, rgmin_rcg_options_default and
  *    rgmin_minimize_rcg. rgmin_rcg_options_t is a new struct, so the
  *    layout revision stays 6.
- * 66, 67 and 68 stay reserved.
- * 69 rgmin_solver_set_fire_config and
+ * 66 rgmin_vec_precond_fn, rgmin_minimize_hvp_precond and
+ *    rgmin_minimize_hvp_precond_sized. No struct changes, so the layout
+ *    revision stays 6.
+ * 70 rgmin_solver_set_fire_config and
  *    rgmin_solver_set_lbfgs_fixed_h0. set_fire_config refuses an n_min
  *    above PTRDIFF_MAX. */
 #define RGMIN_ABI_LAYOUT_REVISION 6
@@ -751,7 +753,7 @@ int32_t rgmin_solver_set_fire_abc(rgmin_solver_t *solver, int32_t on);
  *  downhill count before dt grows; it must not exceed PTRDIFF_MAX, so a
  *  negative integer converted to size_t is refused. Returns 0, or 1 on
  *  a null session, a session that is not FIRE or FIRE 2.0, or a
- *  parameter outside that range. ABI minor 69. */
+ *  parameter outside that range. ABI minor 70. */
 int32_t rgmin_solver_set_fire_config(rgmin_solver_t *solver, double dt,
                                      double dt_max, size_t n_min, double f_inc,
                                      double f_dec, double alpha, double f_alpha);
@@ -774,7 +776,7 @@ int32_t rgmin_solver_set_lbfgs_scaled(rgmin_solver_t *solver, double max_atom);
 /** Fixed initial inverse-Hessian scale of an L-BFGS session, ASE's
  *  H0 = 1/alpha. A non-positive or non-finite h0 clears it and the
  *  two-loop uses the Nocedal-Wright scale again. Returns 0, or 1 on a
- *  null session or a session that is not L-BFGS. ABI minor 69. */
+ *  null session or a session that is not L-BFGS. ABI minor 70. */
 int32_t rgmin_solver_set_lbfgs_fixed_h0(rgmin_solver_t *solver, double h0);
 /** Opt into the strong Wolfe line search. The default L-BFGS session
  *  does not search a line. Returns 0, or 1 on a null session or a
@@ -1549,6 +1551,39 @@ static inline rgmin_status_t rgmin_minimize_hvp_opts(rgmin_eval_fn eval, rgmin_g
     return rgmin_minimize_hvp_opts_sized(eval, grad, hvp, user, x, ctrl,
                                          sizeof(rgmin_control_t), method, error_on_unmet,
                                          backward_polish, out);
+}
+/** Apply the inverse of a preconditioner P to one vector: \a z_out = P^{-1}
+ *  \a r for symmetric positive definite P. Both tensors are rank 1 and
+ *  length n, valid for this call only. A null pointer at
+ *  \ref rgmin_minimize_hvp_precond is the identity and is not called.
+ *  ABI minor 66. */
+typedef rgmin_status_t (*rgmin_vec_precond_fn)(void *user, const DLManagedTensorVersioned *r,
+                                               DLManagedTensorVersioned *z_out);
+/** \ref rgmin_minimize_hvp_precond with \a ctrl_size read as in
+ *  \ref rgmin_minimize_opts_sized. ABI minor 66. */
+rgmin_status_t rgmin_minimize_hvp_precond_sized(
+    rgmin_evalgrad_fn evalgrad, rgmin_hvp_fn hvp, rgmin_vec_precond_fn precond, void *user,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, size_t ctrl_size,
+    int error_on_unmet, int backward_polish, rgmin_report_t *out);
+/**
+ * Trust-region Newton-CG under a caller preconditioner. \a evalgrad writes
+ * the value and gradient, \a hvp writes H(x) v, and \a precond applies P^{-1}
+ * to one residual; NULL is the identity. \a user reaches all three
+ * callbacks. P takes no iterate and stays fixed for the solve. \a ctrl
+ * \c istep seeds the trust radius and \c maxmove caps it. A callback that
+ * returns a non-success status aborts the solve with that status and
+ * leaves \a x and \a out as they were; \ref rgmin_last_error names the
+ * callback. Negative curvature is followed to the trust boundary, not
+ * refused. One outer iteration allocates 10 length-n arrays and one inner CG
+ * iteration 2. ABI minor 66.
+ */
+static inline rgmin_status_t rgmin_minimize_hvp_precond(
+    rgmin_evalgrad_fn evalgrad, rgmin_hvp_fn hvp, rgmin_vec_precond_fn precond, void *user,
+    DLManagedTensorVersioned *x, const rgmin_control_t *ctrl, int error_on_unmet,
+    int backward_polish, rgmin_report_t *out) {
+    return rgmin_minimize_hvp_precond_sized(evalgrad, hvp, precond, user, x, ctrl,
+                                            sizeof(rgmin_control_t), error_on_unmet,
+                                            backward_polish, out);
 }
 /** One Steihaug-Toint iteration. Legal on \c RGMIN_NEWTON_CG and
  *  \c RGMIN_NEWTON_PCG. \a hvp is a product, not a matrix. */

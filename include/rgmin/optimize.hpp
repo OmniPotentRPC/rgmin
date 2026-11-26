@@ -853,7 +853,7 @@ public:
     int set_fire_abc(bool on) { return rgmin_solver_set_fire_abc(ptr_, on ? 1 : 0); }
     /// FIRE integrator parameters, range-checked as in rgmin_solver_set_fire_config.
     /// Returns 0, or 1 on a session that is not FIRE or a refused value.
-    /// ABI minor 69.
+    /// ABI minor 70.
     int set_fire_config(double dt, double dt_max, std::size_t n_min, double f_inc, double f_dec,
                         double alpha, double f_alpha) {
         return rgmin_solver_set_fire_config(ptr_, dt, dt_max, n_min, f_inc, f_dec, alpha, f_alpha);
