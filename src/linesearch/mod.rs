@@ -126,6 +126,7 @@ pub enum LineSearch {
 
 /// Optional policy for objective values whose accuracy is lower than their gradients.
 /// Existing line-search entry points use the default four-epsilon window.
+/// `alpha_max` is unset until a caller opts into a step-multiplier bound.
 ///
 /// The struct is non-exhaustive: start from [`Default`] or
 /// [`Self::with_objective_roundoff`].
@@ -134,6 +135,7 @@ pub enum LineSearch {
 pub struct LineSearchOptions {
     relative_objective_error: Option<f64>,
     downhill_rise_tolerance: Option<f64>,
+    alpha_max: Option<f64>,
 }
 
 impl LineSearchOptions {
@@ -147,6 +149,7 @@ impl LineSearchOptions {
         (relative.is_finite() && relative >= 0.0).then_some(Self {
             relative_objective_error: Some(relative),
             downhill_rise_tolerance: None,
+            alpha_max: None,
         })
     }
 
@@ -171,6 +174,22 @@ impl LineSearchOptions {
             self.downhill_rise_tolerance = Some(relative);
         }
         self
+    }
+
+    /// Keep the value window and set the step-multiplier bound.
+    ///
+    /// A non-positive or non-finite limit is not stored. The search then
+    /// uses only the displacement cap it already had.
+    pub(crate) fn with_alpha_max(self, limit: f64) -> Self {
+        Self {
+            alpha_max: (limit.is_finite() && limit > 0.0).then_some(limit),
+            ..self
+        }
+    }
+
+    /// Step-multiplier bound, if one was set.
+    pub(crate) fn alpha_max(self) -> Option<f64> {
+        self.alpha_max
     }
 
     /// Relative value window: the configured roundoff, else four epsilon.

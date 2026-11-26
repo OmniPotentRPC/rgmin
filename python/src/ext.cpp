@@ -202,6 +202,10 @@ rgmin::SolverConfig config_from(std::string const& method, Options const& option
     if (!ignored.empty()) {
         throw nb::value_error(ignored.c_str());
     }
+    std::string const ignored_scale = config.ignored_scale();
+    if (!ignored_scale.empty()) {
+        throw nb::value_error(ignored_scale.c_str());
+    }
     return config;
 }
 

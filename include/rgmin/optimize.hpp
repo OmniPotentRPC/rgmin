@@ -864,6 +864,10 @@ public:
     int set_lbfgs_scaled(double max_atom) { return rgmin_solver_set_lbfgs_scaled(ptr_, max_atom); }
     /// Strong Wolfe line search. The default session does not search a line.
     int set_lbfgs_wolfe() { return rgmin_solver_set_lbfgs_wolfe(ptr_); }
+    /// Initial inverse-Hessian scale. Returns 0, or 1 when the session refuses it.
+    int set_fixed_h0(double h0) { return rgmin_solver_set_fixed_h0(ptr_, h0); }
+    /// Line-search step-multiplier bound. Returns 0, or 1 when the value is not finite.
+    int set_line_alpha_max(double limit) { return rgmin_solver_set_line_alpha_max(ptr_, limit); }
     /// Burdakov ray-truncation radius for session L-BFGS. A non-positive,
     /// NaN or infinite radius turns it off. Not the Newton-model radius.
     int set_lbfgs_trust(double radius) { return rgmin_solver_set_lbfgs_trust(ptr_, radius); }
@@ -1213,6 +1217,10 @@ public:
     /// L-BFGS session under energy or nonmonotone acceptance reads every
     /// kind. The Python binding raises ValueError with this message.
     std::string ignored_linesearch() const;
+    /// Why \c h0 or \c stpmax would be ignored, or an empty string when
+    /// each set option is read. apply() does not reject an ignored scale.
+    /// The Python binding raises ValueError with this message.
+    std::string ignored_scale() const;
 
 private:
     Method method_ = Method::Lbfgs;
@@ -1241,14 +1249,16 @@ private:
     std::optional<double> gromacs_shrink_;
     std::optional<std::uint32_t> gromacs_max_constraint_shrinks_;
     std::optional<std::uint32_t> gromacs_nstcgsteep_;
+    std::optional<double> h0_;
+    std::optional<double> stpmax_;
 };
 
 inline std::string SolverConfig::valid_options() {
     return "accept, atom_maxmove, backward_polish, beta, c1, c2, cautious_alpha, "
-           "cautious_eps, error_on_unmet, etol, extra_updates, fire_variant, gtol, istep, "
+           "cautious_eps, error_on_unmet, etol, extra_updates, fire_variant, gtol, h0, istep, "
            "level_set, linesearch, linesearch_maxiter, max_evals, maxiter, maxmove, maxstep, "
            "memory, neb_guards, noise_c, noise_eps, nstcgsteep, objective_roundoff, "
-           "periodic, project_rigid, qn_step, require_convergence, shrink, "
+           "periodic, project_rigid, qn_step, require_convergence, shrink, stpmax, "
            "max_constraint_shrinks";
 }
 
@@ -1338,10 +1348,10 @@ inline bool known_option(std::string const& key) {
     static constexpr char const* const keys[] = {
         "accept", "atom_maxmove", "backward_polish", "beta", "c1", "c2",
         "cautious_alpha", "cautious_eps", "error_on_unmet", "etol", "extra_updates",
-        "fire_variant", "gtol", "istep", "level_set", "linesearch", "linesearch_maxiter",
+        "fire_variant", "gtol", "h0", "istep", "level_set", "linesearch", "linesearch_maxiter",
         "max_constraint_shrinks", "max_evals", "maxiter", "maxmove", "maxstep", "memory",
         "neb_guards", "noise_c", "noise_eps", "nstcgsteep", "objective_roundoff", "periodic",
-        "project_rigid", "qn_step", "require_convergence", "shrink"};
+        "project_rigid", "qn_step", "require_convergence", "shrink", "stpmax"};
     for (char const* item : keys) {
         if (key == item) return true;
     }
@@ -1500,7 +1510,8 @@ inline SolverConfig SolverConfig::build(
         } else if (key == "gtol" || key == "istep" || key == "level_set" || key == "maxmove" ||
                    key == "noise_eps" || key == "noise_c" || key == "c1" || key == "c2" ||
                    key == "atom_maxmove" || key == "maxstep" || key == "cautious_eps" ||
-                   key == "cautious_alpha" || key == "objective_roundoff" || key == "etol") {
+                   key == "cautious_alpha" || key == "objective_roundoff" || key == "etol" ||
+                   key == "h0" || key == "stpmax") {
             double value = static_cast<double>(item.second);
             detail::require_finite(key, value);
             if (key == "etol") cfg.etol_ = detail::require_etol(value);
@@ -1515,6 +1526,8 @@ inline SolverConfig SolverConfig::build(
             else if (key == "atom_maxmove" || key == "maxstep") cfg.atom_maxmove_ = value;
             else if (key == "cautious_eps") cfg.cautious_eps_ = value;
             else if (key == "cautious_alpha") cfg.cautious_alpha_ = value;
+            else if (key == "h0") cfg.h0_ = value;
+            else if (key == "stpmax") cfg.stpmax_ = value;
             else cfg.objective_roundoff_ = value;
         } else if (detail::is_flag_option(key)) {
             throw std::invalid_argument(key + " must be a bool");
@@ -1545,6 +1558,8 @@ inline SolverConfig SolverConfig::build(
         else if (key == "cautious_alpha") cfg.cautious_alpha_ = item.second;
         else if (key == "objective_roundoff") cfg.objective_roundoff_ = item.second;
         else if (key == "shrink") cfg.gromacs_shrink_ = item.second;
+        else if (key == "h0") cfg.h0_ = item.second;
+        else if (key == "stpmax") cfg.stpmax_ = item.second;
         else {
             throw std::invalid_argument(key + " must be a string or a flag");
         }
@@ -1570,6 +1585,12 @@ inline SolverConfig SolverConfig::build(
         throw std::invalid_argument(
             "c1, c2, and linesearch_maxiter require linesearch "
             "(brent, backtracking, goldstein, or wolfe)");
+    }
+    if (cfg.h0_ && !(*cfg.h0_ > 0.0)) {
+        throw std::invalid_argument("h0 must be finite and > 0");
+    }
+    if (cfg.stpmax_ && !(*cfg.stpmax_ > 0.0)) {
+        throw std::invalid_argument("stpmax must be finite and > 0");
     }
     return cfg;
 }
@@ -1601,6 +1622,29 @@ inline std::string SolverConfig::ignored_linesearch() const {
            "adam, and diis line search, and lbfgs does with linesearch='wolfe'";
 }
 
+inline std::string SolverConfig::ignored_scale() const {
+    if (h0_ && method_ != Method::Bfgs && method_ != Method::Lbfgs) {
+        return "h0 has no effect on " + method_name_ +
+               ": only bfgs and lbfgs scale the initial inverse Hessian";
+    }
+    if (!stpmax_) return {};
+    std::string const head = "stpmax has no effect";
+    if (accept_ == RGMIN_ACCEPT_STEP) {
+        return head + " with accept='step', which takes each step without a line search";
+    }
+    if (method_ == Method::Lbfgs) {
+        if (linesearch_ == RGMIN_LINESEARCH_WOLFE) return {};
+        return head + " on lbfgs unless linesearch='wolfe'";
+    }
+    if (method_ == Method::Steepest || method_ == Method::Bfgs || method_ == Method::Adam ||
+        method_ == Method::Diis || detail::is_cg(method_)) {
+        return {};
+    }
+    return head + " on " + method_name_ +
+           ", which takes no line search. sd, the conjugate-gradient methods, bfgs, "
+           "adam, and diis line search, and lbfgs does with linesearch='wolfe'";
+}
+
 inline void SolverConfig::apply(Solver& solver) const {
     // The default L-BFGS step searches no line. Strong Wolfe is opt-in.
     // Geometry off keeps that search under an explicit per-atom cap.
@@ -1620,6 +1664,18 @@ inline void SolverConfig::apply(Solver& solver) const {
         if (st != RGMIN_SUCCESS) {
             char const* msg = rgmin_last_error();
             throw std::invalid_argument(msg ? msg : "set_linesearch failed");
+        }
+    }
+    if (h0_) {
+        if (solver.set_fixed_h0(*h0_) != 0) {
+            char const* msg = rgmin_last_error();
+            throw std::invalid_argument(msg ? msg : "set_fixed_h0 failed");
+        }
+    }
+    if (stpmax_) {
+        if (solver.set_line_alpha_max(*stpmax_) != 0) {
+            char const* msg = rgmin_last_error();
+            throw std::invalid_argument(msg ? msg : "set_line_alpha_max failed");
         }
     }
     if (qn_step_) solver.set_qn_step(*qn_step_);
