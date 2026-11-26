@@ -917,7 +917,7 @@ cap-consistent velocity. An installed exponential preconditioner uses
 ``P^{-1} F``.
 
 Steihaug-Toint Newton-CG is a session method: tokens ``newton-cg``
-and ``newton-pcg`` (``RGMIN_NEWTON_CG`` = 21, ``RGMIN_NEWTON_PCG`` = 22).
+and ``newton-pcg`` (``RGMIN_NEWTON_CG`` = 24, ``RGMIN_NEWTON_PCG`` = 25).
 Hessian access is a product, analytic from ``rgmin_solver_step_hvp``
 / ``rgmin_minimize_hvp`` and a one-gradient forward difference from
 ``rgmin_solver_step``. ``maxmove`` caps the Euclidean trust radius; a
@@ -1195,7 +1195,7 @@ A lowest eigenvalue below minus that floor steps along the mode, scaled to the p
 The dogleg radius restarts from the initial step.
 A converged report costs one extra Hessian.
 
-Steihaug-Toint Newton-CG is a session method: tokens ``newton-cg`` and ``newton-pcg`` (``RGMIN_NEWTON_CG`` = 21, ``RGMIN_NEWTON_PCG`` = 22).
+Steihaug-Toint Newton-CG is a session method: tokens ``newton-cg`` and ``newton-pcg`` (``RGMIN_NEWTON_CG`` = 24, ``RGMIN_NEWTON_PCG`` = 25).
 Hessian access is a product, analytic from ``rgmin_solver_step_hvp`` / ``rgmin_minimize_hvp`` and a one-gradient forward difference from ``rgmin_solver_step``.
 ``maxmove`` caps the Euclidean trust radius.
 A per-atom cap clips the trial, and the boundary test uses the pre-clip length.
