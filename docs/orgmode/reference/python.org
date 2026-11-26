@@ -195,8 +195,8 @@ The session gtol is 0, so =fmax= is the convergence test.
 | =Optimizer= | none | per atom, eOn L-BFGS by default |
 | =PSO= | none | per atom; not a local relaxation |
 
-=rgmin_solver_set_fire_config= and
-=rgmin_solver_set_lbfgs_fixed_h0= are new C entries. The Python session exposes those,
+ABI minor 69 adds =rgmin_solver_set_fire_config= and
+=rgmin_solver_set_lbfgs_fixed_h0=. The Python session exposes those,
 plus =forget=, =pair_count=, =push_pair=, =set_maxmove=,
 =set_atom_maxmove=, =set_lbfgs_scaled=, =set_fire_preset=, and
 =set_fire_abc=. Each claims the session as =step= does, so a call while
