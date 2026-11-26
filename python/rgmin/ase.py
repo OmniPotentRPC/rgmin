@@ -18,6 +18,7 @@ import importlib
 import inspect
 import threading
 import time
+import warnings
 import weakref
 from collections import deque
 from collections.abc import Callable, Iterator
@@ -31,6 +32,11 @@ import rgmin
 
 _ASE_KEYS = frozenset({"master", "comm", "loginterval", "force_consistent"})
 _HESSIAN_METHODS = frozenset({"newton", "rfo", "dogleg"})
+# Evaluation log written by dump(). Not ASE's Hessian or velocity arrays.
+RESTART_FORMAT = "rgmin-replay-1"
+_RESTART_POSITION_ATOL = float.fromhex("0x1.b7cdfd9d7bdbbp-34")
+_RESTART_REPLAY_ATOL = float.fromhex("0x1.19799812dea11p-40")
+_PARAMETER_RTOL = float.fromhex("0x1.19799812dea11p-40")
 # Serialises _calc_locks and _id_locks. Finalizers must not block on
 # this lock: a collection can run while the creating thread already
 # holds it. They queue a release instead. The calculator lock is
@@ -90,6 +96,14 @@ class _CalcTable:
 
 
 _calc_table = _CalcTable()
+
+
+def _restart_error(message: str) -> Exception:
+    """ASE's ``RestartError`` when that class exists."""
+    loaded = _import_attr("ase.optimize.optimize", "RestartError")
+    if loaded is None:
+        return RuntimeError(message)
+    return loaded(message)
 
 
 def _ase_passthrough(options: dict[str, Any]) -> dict[str, Any]:
@@ -287,12 +301,19 @@ class Optimizer(_ASEOptimizer):
     """One rgmin iteration per :meth:`step`.
 
     ``method`` selects the solver. ``maxstep`` is the per-atom cap in
-    angstroms. The default is 0.2, the same value as ASE
-    ``Optimizer.defaults`` and as the core session. ``accept`` overrides
-    the acceptance rule. Remaining
-    solver keywords are validated by :class:`rgmin.SolverConfig`.
-    ``master``, ``comm``, and ``loginterval`` are forwarded to the ASE
-    base class when that class accepts them.
+    angstroms, except on :class:`FIRE` and :class:`FIRE2`, where it is
+    the Euclidean length of the whole step, and on :class:`LBFGS`, where
+    a positive value is ASE's length control. The default is 0.2.
+    ``accept`` overrides the acceptance rule. Remaining solver keywords
+    are validated by :class:`rgmin.SolverConfig`. ``master``, ``comm``,
+    and ``loginterval`` are forwarded to the ASE base class when that
+    class accepts them.
+
+    ``restart`` is an evaluation log (``rgmin-replay-1``), not ASE's
+    Hessian or velocity arrays. A file ASE wrote raises
+    ``RestartError``. The log replays under the same parameters; a
+    step that asks for a point the log does not contain raises
+    ``RestartError`` as well.
 
     A non-conservative optimizable (NEB, dimer, min-mode) uses
     ``accept="step"`` and the L-BFGS NEB guards. A plain atoms object
@@ -328,8 +349,6 @@ class Optimizer(_ASEOptimizer):
         hessian: Callable[..., Any] | None = None,
         **options: Any,
     ) -> None:
-        if restart is not None:
-            raise NotImplementedError(f"{type(self).__name__}.read is not implemented")
         self._rgmin_method = method
         self._rgmin_accept = accept
         self._hessian = hessian
@@ -340,6 +359,12 @@ class Optimizer(_ASEOptimizer):
         self.maxstep = float(maxstep)
         self._solver: rgmin.Solver | None = None
         self.stop: rgmin.Stop | None = None
+        self._history: list[dict[str, Any]] = []
+        self._pending: list[dict[str, Any]] | None = None
+        self._x_session: np.ndarray | None = None
+        self._x_placed: np.ndarray | None = None
+        self._e_last: float | None = None
+        self._r_last: np.ndarray | None = None
         self._id_entry: _IdEntry | None = None
         self._id_finalizer: weakref.finalize[[_IdEntry], Optimizer] | None = None
         super().__init__(
@@ -351,6 +376,8 @@ class Optimizer(_ASEOptimizer):
             **ase_options,
         )
         self._calculator_lock()
+        # Solver keywords are refused here, not on the first step.
+        rgmin.SolverConfig(self._rgmin_method, **self._config_options())
 
     def close(self) -> None:
         """Release the id-keyed hold, then close ASE's logfile and trajectory."""
@@ -404,6 +431,10 @@ class Optimizer(_ASEOptimizer):
     def _config_options(self) -> dict[str, Any]:
         opts = dict(self._rgmin_options)
         opts["maxstep"] = self.maxstep
+        # ASE decides convergence with fmax. A positive session gtol
+        # would refuse a step while the unscaled force is still above
+        # that fmax, which is what stalls BFGS at alpha=70.
+        opts.setdefault("gtol", 0.0)
         if self._rgmin_method == "lbfgs" and "linesearch" not in opts and _is_cell_filter(self.atoms):
             opts["linesearch"] = "wolfe"
         if self._rgmin_accept is not None:
@@ -420,20 +451,74 @@ class Optimizer(_ASEOptimizer):
         return opts
 
     def initialize(self) -> None:
-        opts = self._config_options()
-        config = rgmin.SolverConfig(self._rgmin_method, **opts)
-        self._solver = rgmin.Solver(_Geometry(self.optimizable).ndofs(), config)
+        self._solver = None
+        self._history = []
+        self._pending = None
+        self._x_session = None
+        self._x_placed = None
+        self._e_last = None
+        self._r_last = None
 
-    def _evaluate(self, x: np.ndarray) -> tuple[float, np.ndarray]:
+    @property
+    def _scale(self) -> float:
+        """Factor applied to the value and gradient the session sees."""
+        return 1.0
+
+    def _apply_session(self, solver: rgmin.Solver) -> None:
+        """Set step rules that are not :class:`~rgmin.SolverConfig` keys."""
+
+    def _before_step(self, solver: rgmin.Solver) -> bool:
+        """Return true after clearing the session memory for this step."""
+        return False
+
+    def _wrapper_state(self) -> dict[str, Any]:
+        return {}
+
+    def _load_wrapper_state(self, state: dict[str, Any]) -> None:
+        return None
+
+    def _open(self) -> rgmin.Solver:
         geom = _Geometry(self.optimizable)
+        if self._solver is None or self._solver.dim != geom.ndofs():
+            config = rgmin.SolverConfig(self._rgmin_method, **self._config_options())
+            self._solver = rgmin.Solver(geom.ndofs(), config)
+            self._apply_session(self._solver)
+            pending = self._pending
+            self._pending = None
+            if pending:
+                self._replay(pending)
+        assert self._solver is not None
+        return self._solver
+
+    def _start_vector(self) -> np.ndarray:
+        geom = _Geometry(self.optimizable)
+        x = np.array(geom.positions(), dtype=np.float64, copy=True)
+        expected = self._x_placed
+        if expected is None and self._x_session is not None:
+            expected = self._x_session
+        if (
+            self._x_session is not None
+            and expected is not None
+            and expected.shape == x.shape
+            and np.allclose(x, expected, rtol=0.0, atol=_RESTART_POSITION_ATOL)
+        ):
+            return np.array(self._x_session, dtype=np.float64, copy=True)
+        return x
+
+    def _evaluate(self, x: np.ndarray, record: list[list[Any]] | None = None) -> tuple[float, np.ndarray]:
+        geom = _Geometry(self.optimizable)
+        point = np.asarray(x, dtype=np.float64).reshape(-1)
 
         def once() -> tuple[float, np.ndarray]:
             current = geom.positions()
-            if x.shape != current.shape or not np.array_equal(x, current):
-                geom.write(x)
+            if point.shape != current.shape or not np.array_equal(point, current):
+                geom.write(point)
             value = geom.value()
             gradient = np.array(geom.gradient(), dtype=np.float64, copy=True)
-            return value, gradient
+            if record is not None:
+                record.append([point.tolist(), value, gradient.tolist()])
+            scale = self._scale
+            return value * scale, gradient * scale
 
         lock = self._calculator_lock()
         if lock is None:
@@ -443,24 +528,93 @@ class Optimizer(_ASEOptimizer):
 
     def _hessian_of(self, x: np.ndarray) -> np.ndarray:
         if self._hessian is None:
-            raise NotImplementedError(f"{type(self).__name__}.step requires a hessian callable")
-        return np.asarray(self._hessian(x), dtype=np.float64)
+            raise ValueError(
+                f"{type(self).__name__} requires hessian(x); "
+                "the calculator and rgmin adapter do not provide a Hessian"
+            )
+        return np.asarray(self._hessian(np.asarray(x, dtype=np.float64)), dtype=np.float64)
 
-    def step(self) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def _replay(self, steps: list[dict[str, Any]]) -> None:
+        solver = self._solver
+        assert solver is not None
+        scale = self._scale
+        updated: np.ndarray | None = None
+        for index, entry in enumerate(steps):
+            cursor = iter(entry["evals"])
+
+            def answer(
+                x: np.ndarray, cursor: Any = cursor, index: int = index
+            ) -> tuple[float, np.ndarray]:
+                try:
+                    point, value, gradient = next(cursor)
+                except StopIteration:
+                    raise _restart_error(
+                        f"{self.restart}: step {index} asks for more evaluations than were recorded"
+                    ) from None
+                if not np.allclose(x, point, rtol=0.0, atol=_RESTART_REPLAY_ATOL):
+                    raise _restart_error(
+                        f"{self.restart}: step {index} does not replay under these parameters"
+                    )
+                return float(value) * scale, np.asarray(gradient, dtype=np.float64) * scale
+
+            if entry.get("forget"):
+                solver.forget()
+            updated = np.asarray(entry["x"], dtype=np.float64).copy()
+            if self._rgmin_method in _HESSIAN_METHODS:
+                solver.step_hess(answer, self._hessian_of, updated)
+            else:
+                solver.step(answer, updated)
+            if next(cursor, None) is not None:
+                raise _restart_error(
+                    f"{self.restart}: step {index} recorded more evaluations than it replays"
+                )
+        if updated is None:
+            return
         geom = _Geometry(self.optimizable)
-        if self._solver is None or self._solver.dim != geom.ndofs():
-            self.initialize()
-        assert self._solver is not None
-        if self._rgmin_method in _HESSIAN_METHODS and self._hessian is None:
-            raise NotImplementedError(f"{type(self).__name__}.step requires a hessian callable")
-        x = np.array(geom.positions(), dtype=np.float64, copy=True)
+        if not np.allclose(geom.positions(), updated, rtol=0.0, atol=_RESTART_POSITION_ATOL):
+            geom.write(updated)
+        self._x_session = np.array(updated, dtype=np.float64, copy=True)
+        self._x_placed = np.array(geom.positions(), dtype=np.float64, copy=True)
+
+    def _dump_history(self) -> None:
+        if self.restart is None:
+            return
+        data: dict[str, Any] = {
+            "format": RESTART_FORMAT,
+            "optimizer": type(self).__name__,
+            "method": self._rgmin_method,
+            "steps": self._history,
+            "wrapper": self._wrapper_state(),
+        }
+        orig = getattr(self.atoms, "orig_cell", None)
+        if orig is not None:
+            data["orig_cell"] = np.asarray(orig, dtype=np.float64).tolist()
+        self.dump(data)
+
+    def step(self, forces: Any = None) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+        solver = self._open()
+        reset = self._before_step(solver)
+        geom = _Geometry(self.optimizable)
+        x = self._start_vector()
+        x0 = x.tolist()
+        record: list[list[Any]] = []
         if self._rgmin_method in _HESSIAN_METHODS:
-            report = self._solver.step_hess(self._evaluate, self._hessian_of, x)
+            report = solver.step_hess(
+                lambda point: self._evaluate(point, record), self._hessian_of, x
+            )
         else:
-            report = self._solver.step(self._evaluate, x)
+            report = solver.step(lambda point: self._evaluate(point, record), x)
         self.stop = report.stop
         if not np.array_equal(x, geom.positions()):
             geom.write(x)
+        self._x_session = np.array(x, dtype=np.float64, copy=True)
+        self._x_placed = np.array(geom.positions(), dtype=np.float64, copy=True)
+        if self.restart is not None:
+            entry: dict[str, Any] = {"x": x0, "evals": record}
+            if reset:
+                entry["forget"] = True
+            self._history.append(entry)
+            self._dump_history()
 
     def _stop_requested(self) -> bool:
         return self.stop in (rgmin.Stop.ENERGY_TOLERANCE, rgmin.Stop.EVAL_BUDGET)
@@ -557,10 +711,28 @@ class Optimizer(_ASEOptimizer):
         cast(Any, self.logfile).flush()
 
     def read(self) -> None:
-        raise NotImplementedError(f"{type(self).__name__}.read is not implemented")
-
-    def dump(self, data: Any) -> None:
-        raise NotImplementedError(f"{type(self).__name__}.dump is not implemented")
+        data = self.load()
+        self.initialize()
+        if not isinstance(data, dict) or data.get("format") != RESTART_FORMAT:
+            raise _restart_error(
+                f"{self.restart} is not an rgmin restart file. "
+                "rgmin optimizers replay their own evaluation log, not ASE's arrays."
+            )
+        if data.get("optimizer") != type(self).__name__:
+            raise _restart_error(
+                f"{self.restart} was written by {data.get('optimizer')}, not {type(self).__name__}"
+            )
+        if data.get("method") != self._rgmin_method:
+            raise _restart_error(
+                f"{self.restart} was written for method {data.get('method')}, not {self._rgmin_method}"
+            )
+        orig = data.get("orig_cell")
+        if orig is not None and hasattr(self.atoms, "orig_cell"):
+            self.atoms.orig_cell = np.asarray(orig, dtype=np.float64)
+        self._history = list(data.get("steps", []))
+        self._pending = list(self._history)
+        wrapper = data.get("wrapper", {})
+        self._load_wrapper_state(wrapper if isinstance(wrapper, dict) else {})
 
     def todict(self) -> dict[str, Any]:
         description = dict(cast(Any, super()).todict())
@@ -640,7 +812,19 @@ class CG(Optimizer):
 
 
 class LBFGS(Optimizer):
-    """Limited-memory BFGS.
+    """Limited-memory BFGS with the ASE ``LBFGS`` constructor.
+
+    The default is the line-search-free eOn step, whose first step
+    probes curvature. ``eon_cap=False`` opts into ASE's fixed
+    ``H0 = I / alpha`` and length control, which keeps ``memory`` pairs
+    when it shortens a step to ``maxstep``.
+
+    Differences from ASE: ``damping`` multiplies ``maxstep`` (ASE
+    damps after the cap; ``damping=1`` agrees). A pair with too little
+    curvature is dropped. ``use_line_search=True`` is rgmin's strong
+    Wolfe search, not ASE's ``LineSearch``. A non-positive ``maxstep``
+    restores the eOn cap of 0.2, and a negative ``maxmove`` turns every
+    cap off.
 
     ASE cell filters use strong Wolfe search because their final
     coordinates are scaled cell deformations rather than Cartesian
@@ -658,18 +842,91 @@ class LBFGS(Optimizer):
         restart: str | None = None,
         logfile: Any = "-",
         trajectory: Any = None,
-        append_trajectory: bool = False,
         maxstep: float | None = None,
+        memory: int = 100,
+        damping: float = 1.0,
+        alpha: float = 70.0,
+        use_line_search: bool = False,
+        *,
+        append_trajectory: bool = False,
         accept: str | None = None,
+        eon_cap: bool = True,
         **options: Any,
     ) -> None:
+        if maxstep is None:
+            maxstep = float(self.defaults["maxstep"])
+        self.maxstep = float(maxstep)
+        if self.maxstep > 1.0:
+            raise ValueError(
+                "You are using a much too large value for the maximum step size: %.1f Angstrom" % self.maxstep
+            )
+        self.memory = int(memory)
+        self.damping = float(damping)
+        self.H0_scale = 1.0 / float(alpha)
+        self.use_line_search = bool(use_line_search)
+        self.eon_cap = bool(eon_cap)
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "lbfgs", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "lbfgs",
+            self.maxstep,
+            accept,
+            options,
         )
+
+    def _ase_scaled(self) -> bool:
+        if self.eon_cap or self.use_line_search:
+            return False
+        if "linesearch" in self._rgmin_options or "maxmove" in self._rgmin_options:
+            return False
+        return self.maxstep > 0.0
+
+    def _config_options(self) -> dict[str, Any]:
+        opts = super()._config_options()
+        opts["memory"] = self.memory
+        if self.use_line_search:
+            opts.setdefault("linesearch", "wolfe")
+        if self._ase_scaled():
+            opts.pop("maxstep", None)
+        return opts
+
+    def _apply_session(self, solver: rgmin.Solver) -> None:
+        if not self._ase_scaled():
+            return
+        cap = self.maxstep * self.damping if self.damping > 0.0 else self.maxstep
+        solver.set_lbfgs_scaled(cap)
+        solver.set_lbfgs_fixed_h0(self.H0_scale)
+
+    def _replay_trajectory(self, traj: Any) -> None:
+        """Push the secant pairs of a trajectory into a fresh memory."""
+        self.initialize()
+        solver = self._open()
+        frames = list(traj)
+        for before, after in zip(frames[:-1], frames[1:]):
+            s = (np.asarray(after.get_positions()) - np.asarray(before.get_positions())).reshape(-1)
+            y = (np.asarray(before.get_forces()) - np.asarray(after.get_forces())).reshape(-1)
+            solver.push_pair(np.ascontiguousarray(s, dtype=np.float64), np.ascontiguousarray(y, dtype=np.float64))
 
 
 class FIRE(Optimizer):
-    """FIRE inertial relaxation.
+    """FIRE with the ASE ``FIRE`` constructor.
+
+    ``maxstep`` caps the Euclidean length of the whole displacement.
+    ``maxmove`` is ASE's deprecated alias and warns the same way. The
+    session counts the current downhill step before comparing with
+    ``Nmin`` and ASE after, so the session receives ``Nmin + 1``.
+
+    ``downhill_check=True`` compares the energy with the last kept one
+    at the start of each step. After a rise it calls
+    ``position_reset_callback(optimizable, r_last, e, e_last)``, moves
+    back to ``r_last`` and clears the velocity. The time step is kept,
+    where ASE halves it. ``a`` other than ``astart`` warns and is not
+    used. A non-positive ``maxstep`` clears the per-atom cap instead of
+    installing a Euclidean one.
 
     Bitzek, Koskinen, Gaehler, Moseler, and Gumbsch, Phys. Rev. Lett. 97,
     170201 (2006), https://doi.org/10.1103/PhysRevLett.97.170201.
@@ -681,18 +938,112 @@ class FIRE(Optimizer):
         restart: str | None = None,
         logfile: Any = "-",
         trajectory: Any = None,
-        append_trajectory: bool = False,
+        dt: float = 0.1,
         maxstep: float | None = None,
+        maxmove: float | None = None,
+        dtmax: float = 1.0,
+        Nmin: int = 5,
+        finc: float = 1.1,
+        fdec: float = 0.5,
+        astart: float = 0.1,
+        fa: float = 0.99,
+        a: float = 0.1,
+        downhill_check: bool = False,
+        position_reset_callback: Any = None,
+        *,
+        append_trajectory: bool = False,
         accept: str | None = None,
         **options: Any,
     ) -> None:
+        if maxmove is not None:
+            warnings.warn("Use of `maxmove` is deprecated. Use `maxstep` instead.", FutureWarning, stacklevel=2)
+            if maxstep is None:
+                maxstep = maxmove
+        self.dt = float(dt)
+        self.dtmax = float(dtmax)
+        self.Nmin = int(Nmin)
+        self.finc = float(finc)
+        self.fdec = float(fdec)
+        self.astart = float(astart)
+        self.fa = float(fa)
+        self.a = float(a)
+        if self.a != self.astart:
+            warnings.warn(
+                f"rgmin FIRE starts the mixing at astart={self.astart}; a={self.a} is not used",
+                stacklevel=2,
+            )
+        self.downhill_check = bool(downhill_check)
+        self.position_reset_callback = position_reset_callback
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "fire", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "fire",
+            maxstep,
+            accept,
+            options,
         )
+
+    def _euclidean_cap(self) -> bool:
+        return self.maxstep > 0.0 and "maxmove" not in self._rgmin_options
+
+    def _config_options(self) -> dict[str, Any]:
+        opts = super()._config_options()
+        if self._euclidean_cap():
+            opts.pop("maxstep", None)
+        if self.downhill_check and "accept" not in opts:
+            opts["accept"] = "energy"
+        return opts
+
+    def _apply_session(self, solver: rgmin.Solver) -> None:
+        if self._euclidean_cap():
+            solver.set_atom_maxmove(0.0)
+            solver.set_maxmove(self.maxstep)
+        solver.set_fire_config(self.dt, self.dtmax, self.Nmin + 1, self.finc, self.fdec, self.astart, self.fa)
+
+    def _before_step(self, solver: rgmin.Solver) -> bool:
+        if not self.downhill_check:
+            return False
+        reset = False
+        if self._e_last is not None and self._r_last is not None:
+            energy = float(_Geometry(self.optimizable).value())
+            if energy > self._e_last:
+                if self.position_reset_callback is not None:
+                    self.position_reset_callback(self.optimizable, self._r_last, energy, self._e_last)
+                _Geometry(self.optimizable).write(self._r_last)
+                solver.forget()
+                self._x_session = None
+                self._x_placed = None
+                reset = True
+        geom = _Geometry(self.optimizable)
+        self._e_last = float(geom.value())
+        self._r_last = np.array(geom.positions(), dtype=np.float64, copy=True)
+        return reset
+
+    def _wrapper_state(self) -> dict[str, Any]:
+        if self._e_last is None or self._r_last is None:
+            return {}
+        return {"e_last": self._e_last, "r_last": self._r_last.tolist()}
+
+    def _load_wrapper_state(self, state: dict[str, Any]) -> None:
+        if "e_last" in state:
+            self._e_last = float(state["e_last"])
+            self._r_last = np.asarray(state["r_last"], dtype=np.float64)
 
 
 class FIRE2(Optimizer):
-    """FIRE 2.0.
+    """FIRE 2.0 with the ASE ``FIRE2`` constructor.
+
+    The session runs Guénolé's semi-implicit Euler integrator.
+    ``maxstep`` caps the Euclidean length of the displacement, or each
+    component of it with ``use_abc=True``. ``position_reset_callback``
+    is accepted and, as in ASE, not called. The time-step floor is
+    ``0.02 * dt``; another ``dtmin`` is a ``ValueError``. A non-positive
+    ``maxstep`` clears the per-atom cap instead of installing a
+    Euclidean one.
 
     Guenole, Noehring, Vaid, Houlle, Xie, Prakash, and Bitzek, Comput.
     Mater. Sci. 175, 109584 (2020),
@@ -705,18 +1056,75 @@ class FIRE2(Optimizer):
         restart: str | None = None,
         logfile: Any = "-",
         trajectory: Any = None,
-        append_trajectory: bool = False,
+        dt: float = 0.1,
         maxstep: float | None = None,
+        dtmax: float = 1.0,
+        dtmin: float = 2e-3,
+        Nmin: int = 20,
+        finc: float = 1.1,
+        fdec: float = 0.5,
+        astart: float = 0.25,
+        fa: float = 0.99,
+        position_reset_callback: Any = None,
+        use_abc: bool = False,
+        *,
+        append_trajectory: bool = False,
         accept: str | None = None,
         **options: Any,
     ) -> None:
+        self.dt = float(dt)
+        self.dtmax = float(dtmax)
+        self.dtmin = float(dtmin)
+        if not np.isclose(self.dtmin, 0.02 * self.dt, rtol=_PARAMETER_RTOL, atol=0.0):
+            raise ValueError(
+                f"rgmin FIRE2 floors the time step at 0.02 * dt = {0.02 * self.dt:g}, not dtmin={dtmin:g}"
+            )
+        self.Nmin = int(Nmin)
+        self.finc = float(finc)
+        self.fdec = float(fdec)
+        self.astart = float(astart)
+        self.fa = float(fa)
+        self.position_reset_callback = position_reset_callback
+        self.use_abc = bool(use_abc)
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "fire2", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "fire2",
+            maxstep,
+            accept,
+            options,
         )
+
+    def _euclidean_cap(self) -> bool:
+        return self.maxstep > 0.0 and "maxmove" not in self._rgmin_options
+
+    def _config_options(self) -> dict[str, Any]:
+        opts = super()._config_options()
+        if self._euclidean_cap():
+            opts.pop("maxstep", None)
+        return opts
+
+    def _apply_session(self, solver: rgmin.Solver) -> None:
+        solver.set_fire_preset("guenole2020")
+        if self._euclidean_cap():
+            solver.set_atom_maxmove(0.0)
+            solver.set_maxmove(self.maxstep)
+        solver.set_fire_config(self.dt, self.dtmax, self.Nmin, self.finc, self.fdec, self.astart, self.fa)
+        solver.set_fire_abc(self.use_abc)
 
 
 class QuickMin(Optimizer):
-    """Quick-min: project the velocity onto the force, then an Euler step.
+    """Quick-min, the session analogue of ASE ``MDMin``.
+
+    ``dt`` is the Euler time step (the session ``istep``). ``maxstep``
+    is the per-atom cap, which is how ASE ``MDMin`` clips. ASE has no
+    ``QuickMin`` class and no velocity file this class can read; a
+    restart is the evaluation log, and an ASE file raises
+    ``RestartError``.
 
     https://doi.org/10.1142/9789812839664_0016.
     """
@@ -730,8 +1138,11 @@ class QuickMin(Optimizer):
         append_trajectory: bool = False,
         maxstep: float | None = None,
         accept: str | None = None,
+        dt: float | None = None,
         **options: Any,
     ) -> None:
+        if dt is not None:
+            options["istep"] = float(dt)
         _start(
             self,
             atoms,
@@ -747,11 +1158,19 @@ class QuickMin(Optimizer):
 
 
 class BFGS(Optimizer):
-    """Dense BFGS.
+    """Dense BFGS with the ASE ``BFGS`` constructor.
+
+    ``alpha`` is ASE's initial Hessian ``alpha * I``. The session runs
+    inverse BFGS on ``E / alpha`` from the identity, so the first step
+    is ``-g / alpha``. ``maxstep`` is the per-atom cap. A value above
+    1 Å warns, as ASE does. A pair with negligible curvature in the
+    scaled energy is skipped, where ASE updates the Hessian anyway.
 
     Nocedal and Wright, *Numerical Optimization*,
     https://doi.org/10.1007/978-0-387-40065-5.
     """
+
+    defaults = {"maxstep": 0.2, "alpha": 70.0}
 
     def __init__(
         self,
@@ -761,12 +1180,41 @@ class BFGS(Optimizer):
         trajectory: Any = None,
         append_trajectory: bool = False,
         maxstep: float | None = None,
+        alpha: float | None = None,
+        *,
         accept: str | None = None,
         **options: Any,
     ) -> None:
+        if maxstep is None:
+            maxstep = float(self.defaults["maxstep"])
+        self.maxstep = float(maxstep)
+        if self.maxstep > 1.0:
+            warnings.warn(
+                "You are using a *very* large value for the maximum step size: %.1f Å" % self.maxstep,
+                stacklevel=2,
+            )
+        self.alpha = self.defaults["alpha"] if alpha is None else float(alpha)
         _start(
-            self, atoms, restart, logfile, trajectory, append_trajectory, "bfgs", maxstep, accept, options
+            self,
+            atoms,
+            restart,
+            logfile,
+            trajectory,
+            append_trajectory,
+            "bfgs",
+            self.maxstep,
+            accept,
+            options,
         )
+
+    @property
+    def _scale(self) -> float:
+        return 1.0 / self.alpha
+
+    def _config_options(self) -> dict[str, Any]:
+        opts = super()._config_options()
+        opts["istep"] = 1.0
+        return opts
 
 
 class SD(Optimizer):

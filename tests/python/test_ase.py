@@ -159,18 +159,23 @@ def test_first_evaluation_hits_calculator_cache() -> None:
     assert calc.calls > warmed
 
 
-def test_todict_and_restart_refusal(tmp_path: Any) -> None:
+def test_todict_and_restart_file(tmp_path: Any) -> None:
+    from ase.optimize.optimize import RestartError
+
     atoms = _pt7(7)
     opt = FIRE(atoms, logfile=None, trajectory=None, memory=5)
     data = opt.todict()
     assert data["type"] == "optimization"
     assert data["optimizer"] == "FIRE"
     assert data["method"] == "fire"
-    with pytest.raises(NotImplementedError, match="FIRE"):
-        opt.dump(data)
+    # No restart path: ASE's dump leaves the call as a no-op.
+    opt.dump(data)
     restart = tmp_path / "restart.json"
-    restart.write_text("{}\n", encoding="utf-8")
-    with pytest.raises(NotImplementedError, match=r"FIRE\.read is not implemented"):
+    restart.write_text("hello world\n", encoding="utf-8")
+    with pytest.raises(RestartError, match="Could not decode"):
+        FIRE(atoms, restart=str(restart), logfile=None)
+    restart.write_text('{"optimizer": "BFGS"}\n', encoding="utf-8")
+    with pytest.raises(RestartError, match="not an rgmin restart file"):
         FIRE(atoms, restart=str(restart), logfile=None)
 
 
@@ -360,19 +365,22 @@ def test_fire_calculator_calls_match_ase() -> None:
 
 
 def test_lbfgs_cache_hit_and_curvature_probe_calls() -> None:
-    """The first new EMT call is not the start geometry.
+    """The ASE length-control step does not probe curvature.
 
-    The default eOn step spends one call on its finite-difference probe,
-    0.01 along the unit force, to set the initial inverse curvature.
-    ``extra`` is that call. The strong Wolfe opt-in adds none on this
-    Pt7 start.
+    The default eOn step spends one call on its curvature probe, 0.01
+    along the unit force, to set the initial inverse curvature.
     """
     from ase.optimize import LBFGS as AseLBFGS
 
     ours, theirs, moved = _iteration_calls(LBFGS, AseLBFGS)
-    extra = ours - theirs
     assert moved
-    assert extra == 1
+    assert ours - theirs == 1
+    scaled, _, scaled_moved = _iteration_calls(
+        lambda *args, **kwargs: LBFGS(*args, eon_cap=False, **kwargs),
+        AseLBFGS,
+    )
+    assert scaled_moved
+    assert scaled == theirs
 
 
 def test_lbfgs_probe_is_spent_on_the_first_step_only() -> None:
@@ -445,10 +453,10 @@ def test_hessian_methods_step() -> None:
         sample.calc = Harmonic()
         opt = cls(sample, logfile=None, hessian=hessian, maxstep=0.2)
         assert opt.run(fmax=1e-6, steps=12) is True
-    bare = atoms.copy()
-    bare.calc = Harmonic()
-    with pytest.raises(NotImplementedError, match=r"Newton\.step"):
-        Newton(bare, logfile=None).step()
+        bare = atoms.copy()
+        bare.calc = Harmonic()
+        with pytest.raises(ValueError, match=rf"{cls.__name__} requires hessian"):
+            cls(bare, logfile=None).step()
 
 
 # Spawns a ThreadPoolExecutor. The marker keeps pytest-run-parallel from
