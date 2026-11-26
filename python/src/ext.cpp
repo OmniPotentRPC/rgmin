@@ -723,7 +723,12 @@ NB_MODULE(_core, m) {
                                     "that cap. ``maxstep`` or ``atom_maxmove`` replaces it on "
                                     "every method. A non-positive value clears it. A positive "
                                     "``maxmove`` is the Euclidean step limit and leaves the "
-                                    "per-atom default off.")
+                                    "per-atom default off. ``h0`` and ``linesearch=\"ase\"`` "
+                                    "are opt-in: ``h0`` scales the initial inverse Hessian of "
+                                    "BFGS and L-BFGS, and ``linesearch=\"ase\"`` runs a port of "
+                                    "ASE's line search on those two methods, with ``stpmax`` "
+                                    "bounding its step multiplier. Omitting both leaves the "
+                                    "session defaults.")
         .def(
             "__init__",
             [](rgmin::SolverConfig* self, nb::object method, nb::kwargs kwargs) {
