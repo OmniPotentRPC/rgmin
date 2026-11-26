@@ -38,9 +38,11 @@ $H_0=(\mathbf s^T\mathbf y)/(\mathbf y^T\mathbf y) I$ as lines
 2559--2663. The default correction count is 10.
 
 If the line search cannot resolve a lower energy, nonempty correction
-memory is cleared and the next direction is the force. Failure with
-empty memory stops at machine precision (lines 2510--2534). Every
-accepted step resets the opening scalar step to 1 (line 2725).
+memory is cleared and the next direction is the force. That clear drops
+every stored pair. GROMACS leaves the ring index in place; the
+difference is documented below. Failure with empty memory stops at
+machine precision (lines 2510--2534). Every accepted step resets the
+opening scalar step to 1 (line 2725).
 Calling ~Solver::rebase~, ~Solver::forget_evaluation~, or supplying
 externally moved coordinates retains the correction pairs and rebuilds
 the two-loop direction at the new point with opening step
@@ -63,14 +65,33 @@ all objective/force evaluations, including line-search trials.
 ** Exactness and differences
 
 For an unconstrained Euclidean objective without active coordinate
-bounds, the correction recursion, displacement check, line search,
-reset, and force stop reproduce GROMACS 2023.3 ~do_lbfgs~. The following
-differences are deliberate and documented:
+bounds, no frozen coordinates, and no line-search reset, the correction
+recursion, displacement check, line search, and force stop reproduce
+GROMACS 2023.3 ~do_lbfgs~. ~do_lbfgs~ is the same algorithm in the tagged
+2023.3 and 2025.4 sources. The following differences are deliberate:
 
+- After a line search that cannot lower the energy, GROMACS sets
+  ~ncorr = 0~ and leaves the ring index ~point~ unchanged (lines
+  2524--2533). The two-loop recursion then wraps a negative index to
+  ~ncorr - 1~, not to ~nbfgscorr - 1~ (lines 2600--2609). Once new
+  corrections fill past the end of the buffer, that walk reads pairs
+  stored before the reset. rgmin clears the correction deque in
+  ~restart_steepest~, and ~apply_pairs~ walks only pairs stored since
+  that clear.
+- rgmin leaves the frozen-coordinate force in the L-BFGS direction, the
+  stored pairs, and the curvature, so a frozen atom moves on the first
+  iteration. ~project_vec~ removes only rigid modes that already vanish
+  on the frozen coordinates. GROMACS writes zero into the stored search
+  direction on frozen components (lines 2205--2216 and 2654--2663) but
+  keeps the raw force in ~p~, ~dg~, and ~dgdg~ (lines 2570--2598).
+  ~get_f_norm_max~ excludes frozen components from ~fnorm~ and ~fmax~
+  (lines 279--298). A GROMACS reset copies the raw force, frozen
+  components included, into the next direction (line 2529). The two
+  trajectories therefore differ from iteration 1.
 - GROMACS refuses L-BFGS with domain decomposition, multiple ranks, or
   constraints (lines 1993--2008). rgmin has no rank/domain-decomposition
-  state and refuses holonomic distance constraints, while frozen linear
-  coordinate masks remain available.
+  state and refuses holonomic distance constraints. Frozen linear
+  coordinate masks stay available, with the force treatment above.
 - rgmin uses binary64 ~f64::EPSILON~. A single-precision GROMACS build
   uses its larger ~GMX_REAL_EPS~.
 - GROMACS uses 1 nm as the characteristic coordinate in its
@@ -98,14 +119,25 @@ The C ABI selector is ~RGMIN_GROMACS_LBFGS~. ABI minor 67 adds it and
 ** GROMACS comparison
 
 The seven-atom argon fixture in ~tests/data/gromacs_steep_argon.*~ was
-run for ~nsteps = 12~, ~emtol = 1e-8~, ~emstep = 0.02~ and
-~nbfgscorr = 10~:
+minimized with double-precision ~gmx_d~ from Ubuntu's ~gromacs~ 2023.3
+package (~2023.3-Ubuntu_2023.3_1ubuntu3~, SSE4.1, one thread). The run
+uses ~integrator = l-bfgs~, ~emtol = 1e-8~, ~emstep = 0.02~,
+~nbfgscorr = 10~, and ~nsteps = 12~. GROMACS treats that limit as
+inclusive (~step <= nsteps~), so the footer is the state after 13
+accepted iterations:
 
-| solver | reported steps | accepted step lines | force evaluations | final energy | final Fmax |
-|--------+----------------+---------------------+-------------------+--------------+------------|
-| ~gmx mdrun~ 2023.3 Ubuntu, single precision | -1 (the upstream machine-precision reporting bug) | 12 | 13 | -1.2548940e1 | 2.0878734e-4 |
-| rgmin ~GromacsLbfgs~ | 12 | 12 | 14 | -1.25489377088264e1 | 2.73745712994804e-5 |
+| solver | accepted steps | force evaluations | final energy | final Fmax |
+|--------+----------------+-------------------+--------------+------------|
+| ~gmx_d~ 2023.3 double | 13 | 15 | -1.25489377088304e+01 | 7.27914686102068e-08 |
+| rgmin ~GromacsLbfgs~, ~maxiter = 13~ | 13 | 15 | -1.25489377088303e+01 | 7.28008804951526e-08 |
 
-The compared ~gmx~ build is single precision, so its ~GMX_REAL_EPS~
-line-search and machine-precision decisions differ from rgmin's
-binary64 decisions.
+The evaluation counts match. The energies agree to ~1e-11~, which is
+tighter than the change of the last accepted step. ~Fmax~ differs in
+the last digits because a coordinate difference far below the printed
+energy moves the force. ~tests/data/gromacs_lbfgs_argon.txt~, produced
+by ~tests/data/gromacs_lbfgs_argon_driver.py~, records the same footer
+energy, maximum force, and evaluation count at every inclusive
+~nsteps~ for several ~nbfgscorr~ and ~emstep~ settings.
+~tests/gromacs_lbfgs.rs~ asserts that file. A single-precision GROMACS
+build still uses a larger ~GMX_REAL_EPS~ than ~f64::EPSILON~, so this
+table does not describe that build.
