@@ -785,14 +785,15 @@ NB_MODULE(_core, m) {
             [](rgmin::Solver& solver, nb::handle s_obj, nb::handle y_obj) {
                 rgbind::Claim claim(solver.busy(), "Solver");
                 auto take = [](nb::handle obj, char const* name) {
-                    std::vector<double> out;
-                    try {
-                        auto array = nb::cast<nb::ndarray<double, nb::ndim<1>, nb::c_contig>>(obj);
-                        out.assign(array.data(), array.data() + array.size());
-                    } catch (nb::cast_error const&) {
-                        throw nb::type_error((std::string(name) + " must be a contiguous float64 vector").c_str());
+                    // convert=false: a float32 array or a strided view is refused
+                    // rather than silently copied into a float64 vector.
+                    nb::ndarray<double, nb::ndim<1>, nb::c_contig> array;
+                    if (!nb::try_cast(obj, array, false)) {
+                        throw nb::type_error((std::string(name) +
+                                              " must be a C-contiguous one-dimensional float64 array")
+                                                 .c_str());
                     }
-                    return out;
+                    return std::vector<double>(array.data(), array.data() + array.size());
                 };
                 std::vector<double> s = take(s_obj, "s");
                 std::vector<double> y = take(y_obj, "y");
@@ -805,7 +806,9 @@ NB_MODULE(_core, m) {
                 }
             },
             nb::arg("s"), nb::arg("y"),
-            "Store one L-BFGS pair ``(s, y)``. A pair the curvature gate rejects is declined.")
+            "Store one L-BFGS pair ``(s, y)``. Each vector must be a C-contiguous float64 "
+            "array of length ``dim``; any other dtype or layout raises ``TypeError``. "
+            "A pair the curvature gate rejects is declined.")
         .def(
             "set_maxmove",
             [](rgmin::Solver& solver, double cap) {
