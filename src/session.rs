@@ -5029,6 +5029,7 @@ impl Solver {
                 energy_noise: false,
                 line_stop: None,
                 line_failed: false,
+                no_update: false,
             }
         } else {
             take_session_step(
@@ -5848,7 +5849,9 @@ impl Solver {
                     *x = t.x;
                     value = t.f;
                     grad = t.g;
-                    if moved {
+                    // `LineSearch._line_search` returns `no_update` from
+                    // `step`. `BFGSLineSearch.update` then skips the pair.
+                    if moved && !t.no_update {
                         let s = &*x - &old;
                         let y = &grad - &gold;
                         bfgs_inverse_update(h, &s, &y);
@@ -7759,6 +7762,7 @@ where
         energy_noise: false,
         line_stop: None,
         line_failed: false,
+        no_update: false,
     })
 }
 
@@ -7877,6 +7881,7 @@ mod tests {
     use super::*;
     use crate::fire::FireKind;
     use crate::oracle::Oracle;
+    use crate::qn::bfgs_accepts_pair;
     use ndarray::{ArrayView1, array};
 
     /// A steep well under a tiny Euclidean cap: every FIRE step is
@@ -7923,6 +7928,56 @@ mod tests {
             Overlay::Rcg(memory) => format!("{memory:?}"),
             _ => panic!("not a Riemannian CG session"),
         }
+    }
+
+    /// `-ln(1 + x)` with a tight curvature constant. ASE's `step` sets
+    /// `no_update` at `stpmax` and `BFGSLineSearch.update` then leaves
+    /// the inverse Hessian alone. The pair still has positive curvature.
+    fn log_barrier(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let t = x[0];
+        let mut g = Array1::zeros(x.len());
+        g[0] = -1.0 / (1.0 + t);
+        (-(1.0 + t).ln(), g)
+    }
+
+    #[test]
+    fn an_ase_no_update_leaves_the_bfgs_hessian_unchanged() {
+        let obj = Oracle::unbounded(3, log_barrier);
+        let mut solver = Solver::new(
+            Method::Bfgs,
+            Control::default().with_istep(1.0).with_maxmove(None),
+            3,
+        );
+        solver.set_accept(Accept::Energy);
+        solver.set_atom_maxmove(10.0);
+        solver.set_linesearch(LineSearch::wolfe(0.23, 0.1, 20));
+        solver.set_ase_linesearch(5.0).unwrap();
+        let mut x = array![0.0, 0.0, 0.0];
+        solver.step(&obj, &mut x).unwrap();
+        assert!(
+            (x[0] - 5.0).abs() < 1e-8 && x[1] == 0.0 && x[2] == 0.0,
+            "expected the stpmax trial, got {x}"
+        );
+        let s = array![x[0], 0.0, 0.0];
+        let y = array![log_barrier(x.view()).1[0] - (-1.0), 0.0, 0.0];
+        assert!(
+            bfgs_accepts_pair(&s, &y),
+            "the pair would not replace the identity"
+        );
+        let Inner::Bfgs { h, fresh } = &solver.inner else {
+            unreachable!("BFGS session");
+        };
+        for i in 0..3 {
+            for j in 0..3 {
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (h[(i, j)] - want).abs() < 1e-12,
+                    "H[{i},{j}] = {}",
+                    h[(i, j)]
+                );
+            }
+        }
+        assert!(*fresh);
     }
 
     /// A step refused at the energy noise floor keeps its start, and the

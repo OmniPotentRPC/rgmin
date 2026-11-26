@@ -371,6 +371,9 @@ pub(crate) struct Taken {
     /// ASE's line search failed. The point is the start, and the session
     /// stops on [`crate::StopReason::LineSearchFailed`].
     pub line_failed: bool,
+    /// ASE's search set `no_update`. The trial is kept and the BFGS
+    /// inverse Hessian is left unchanged.
+    pub no_update: bool,
 }
 
 /// The report of a driver that runs no session: `||g||_2`, no gradient.
@@ -513,6 +516,7 @@ where
         energy_noise,
         line_stop,
         line_failed: false,
+        no_update: false,
     };
     let result = linesearch.search_from_result_with_options(
         |x| {
@@ -588,6 +592,7 @@ where
             energy_noise: false,
             line_stop,
             line_failed: false,
+            no_update: false,
         }
     } else {
         unmoved(energy_noise, line_stop)
@@ -630,11 +635,12 @@ where
         energy_noise: false,
         line_stop: None,
         line_failed: true,
+        no_update: false,
     };
     let LineSearch::Wolfe { c1, c2, maxiter } = linesearch else {
         return unmoved();
     };
-    let Some(out) = crate::linesearch::ase::search(
+    let result = crate::linesearch::ase::search(
         |x| obj.value_and_gradient(x),
         pos.view(),
         value,
@@ -647,7 +653,8 @@ where
         c1,
         c2,
         maxiter,
-    ) else {
+    );
+    let Some(out) = result.step else {
         return unmoved();
     };
     if obj.bounds().clip(out.x.view()) != out.x {
@@ -662,6 +669,7 @@ where
         energy_noise: false,
         line_stop: None,
         line_failed: false,
+        no_update: result.no_update,
     }
 }
 
