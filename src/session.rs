@@ -900,6 +900,20 @@ impl Solver {
         self.precon.as_ref().and_then(Slot::scale)
     }
 
+    /// Whether the installed exponential metric still applies at `positions`.
+    ///
+    /// True when an Exp matrix and its energy scale are already built and
+    /// the largest atomic move since that assembly is at most half the
+    /// nearest-neighbour distance, which is the preconditioner's rebuild
+    /// rule. A missing metric or a move past that threshold returns false.
+    #[must_use]
+    pub fn exp_holds(&self, positions: ArrayView1<f64>) -> bool {
+        match &self.precon {
+            Some(Slot::Exp(state)) => state.hold(positions),
+            _ => false,
+        }
+    }
+
     fn refresh_exp<O>(&mut self, obj: &O, x: &Array1<f64>, grad: &Array1<f64>) -> Result<()>
     where
         O: DifferentiableObjective<f64> + ?Sized,

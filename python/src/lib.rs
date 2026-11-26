@@ -434,6 +434,15 @@ impl Session {
             .map_err(value_error)
     }
 
+    /// Whether the installed Exp metric still applies at `positions`.
+    ///
+    /// False when no exponential metric is installed, or when the
+    /// preconditioner's rebuild rule wants a new assembly and a new `μ`.
+    fn exp_holds(&self, positions: Vec<f64>) -> bool {
+        self.solver
+            .exp_holds(ndarray::ArrayView1::from(positions.as_slice()))
+    }
+
     /// Select the ASE 3.29 ODE12r step-length rule and residual tolerance.
     fn configure_ode12r_ase(&mut self, rtol: f64) -> PyResult<()> {
         self.solver.configure_ode12r_ase(rtol).map_err(value_error)

@@ -221,3 +221,71 @@ def test_unsupported_preconditioner_is_refused():
         ODE12r(system, logfile=None, precon="C1")
     with pytest.raises(ValueError, match="rigid_units"):
         PreconLBFGS(system, logfile=None, rigid_units=[[0, 1]])
+
+
+def test_ode12r_accepts_ase_preconditioner_instances():
+    """ASE passes a Precon instance through. Exp and identity follow that."""
+    from ase.optimize.precon import C1
+    from ase.optimize.precon.precon import IdentityPrecon
+
+    atoms, calc = _lj()
+    system = _counted(atoms, calc)
+    assert ODE12r(system, logfile=None, precon=Exp())._precon_mode == "exp"
+    assert ODE12r(system, logfile=None, precon=IdentityPrecon())._precon_mode == "off"
+    with pytest.raises(ValueError, match="unsupported ODE12r"):
+        ODE12r(system, logfile=None, precon=C1())
+
+
+def test_preconfire_builds_exp_after_a_downhill_reset(monkeypatch):
+    """A rejected step must not be the geometry the Exp metric is built on."""
+    import rgmin.optimize as optmod
+
+    class _Outward(Calculator):
+        implemented_properties = ["energy", "forces"]
+
+        def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
+            Calculator.calculate(self, atoms, properties, system_changes)
+            pos = np.asarray(atoms.get_positions(), dtype=float)
+            self.results["energy"] = float(np.sum(pos * pos))
+            self.results["forces"] = pos.copy()
+
+    bond = 1.2
+    atoms = Atoms(
+        "He3",
+        positions=[[0.2, 0.1, 0.0], [bond, 0.0, 0.0], [0.4, bond, 0.0]],
+        cell=[8.0, 8.0, 8.0],
+        pbc=False,
+    )
+    atoms.calc = _Outward()
+    installed: list[np.ndarray] = []
+    rejected: list[np.ndarray] = []
+    real_install = optmod._install_exp
+
+    def spy(native, optimizable, x=None):
+        installed.append(np.asarray(optimizable.get_x(), dtype=float).copy())
+        return real_install(native, optimizable, x)
+
+    def on_reset(optimizable, _r_last, _e, _e_last):
+        rejected.append(np.asarray(optimizable.get_x(), dtype=float).copy())
+
+    monkeypatch.setattr(optmod, "_install_exp", spy)
+    PreconFIRE(
+        atoms,
+        logfile=None,
+        precon="Exp",
+        downhill_check=True,
+        position_reset_callback=on_reset,
+    ).run(fmax=0.0, steps=2)
+    assert rejected, "the outward force should raise the energy and reset"
+    for bad in rejected:
+        assert not any(np.allclose(bad, got, rtol=0.0, atol=1e-8) for got in installed)
+
+
+def test_exp_estimates_mu_once_while_the_matrix_holds():
+    """A held Exp matrix pays for one mu probe, not one probe on every step."""
+    atoms, calc = _lj()
+    plain = _counted(atoms, calc)
+    ODE12r(plain, logfile=None).run(fmax=1e-12, steps=6)
+    metric = _counted(atoms, calc)
+    ODE12r(metric, logfile=None, precon="Exp").run(fmax=1e-12, steps=6)
+    assert metric.calc.calls == plain.calc.calls + 1

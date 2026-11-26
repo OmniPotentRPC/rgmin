@@ -1324,16 +1324,20 @@ def _resolve_precon(precon: Any, *, allow_auto: bool, natoms: int | None) -> str
 
 
 def _resolve_ode_precon(precon: Any) -> str:
-    """ASE identity for ``None`` and ``'ID'``, rgmin Exp for ``'Exp'``."""
-    if precon is None:
+    """ASE identity for ``None``, ``'ID'`` and an identity instance.
+
+    ``'Exp'`` and an ``Exp`` instance install the exponential metric.
+    An ASE preconditioner instance is named the way ASE names it, and
+    every other kind is refused.
+    """
+    name = _precon_name(precon)
+    if name in {None, "id", "identityprecon", "none"}:
         return "off"
-    if isinstance(precon, str):
-        token = precon.lower()
-        if token in {"id", "none"}:
-            return "off"
-        if token == "exp":
-            return "exp"
-    raise ValueError(f"unsupported ODE12r preconditioner {precon!r}; rgmin accepts None, 'ID' or 'Exp'")
+    if name == "exp":
+        return "exp"
+    raise ValueError(
+        f"unsupported ODE12r preconditioner {precon!r}; rgmin accepts None, 'ID' or 'Exp'"
+    )
 
 
 def _cartesian_atoms(optimizable: Any) -> Any | None:
@@ -1411,6 +1415,11 @@ def _install_exp(native: Session, optimizable: Any, x: list[float] | None = None
         atoms = atoms.copy()
         atoms.set_positions(np.asarray(x, dtype=np.float64).reshape(-1, 3), apply_constraint=False)
     positions = np.asarray(atoms.get_positions(), dtype=np.float64).reshape(-1)
+    # The session estimates mu when it assembles. Calling set_exp again
+    # drops that scale, so a held matrix keeps the previous estimate and
+    # a move past the rebuild rule assembles, and estimates, once more.
+    if native.exp_holds(positions.tolist()):
+        return
     index_i, index_j, distance = _exp_pairs(atoms)
     native.set_exp(
         positions.tolist(),
@@ -1427,10 +1436,10 @@ class ODE12r(_RgminOptimizer):
     The constructor follows ASE 3.29. ``rtol`` defaults to 0.01, the
     class value, and the first step length is
     ``0.5 * sqrt(rtol) / ||F||_inf``. There is no per-atom cap: ASE's
-    class has no ``maxstep``. ``precon=None`` and ``'ID'`` leave the
-    metric as the identity. ``precon='Exp'`` installs rgmin's
-    exponential metric on a Cartesian ``3N`` layout and is refused for
-    any other kind.
+    class has no ``maxstep``. ``precon=None``, ``'ID'`` and an identity
+    preconditioner leave the metric off. ``precon='Exp'`` and an
+    ``Exp`` instance install rgmin's exponential metric on a Cartesian
+    ``3N`` layout. Any other kind is refused.
 
     ``alpha`` scales the value and the gradient the session sees, as
     ASE's ``fprime`` divides by ``H0``. ``callback_always`` and
@@ -1662,9 +1671,12 @@ class PreconFIRE(FIRE):
         self.maxmove = self.maxstep
 
     def _before_step(self, native: Session) -> bool:
+        # The downhill check may move back to the last kept point.
+        # The metric has to be built there, not at the rejected point.
+        reset = super()._before_step(native)
         if self._precon_mode == "exp":
             _install_exp(native, self.optimizable)
-        return super()._before_step(native)
+        return reset
 
     def _replay_step(self, native: Session, x: list[float]) -> None:
         if self._precon_mode == "exp":
