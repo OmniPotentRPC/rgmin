@@ -1283,6 +1283,8 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 }
 
 /// ABI minor 65 adds `rgmin_rcg_options_default` and `rgmin_minimize_rcg`.
+/// ABI minor 68 adds `observer` and `observer_user` on `rgmin_control_t`
+/// and `RGMIN_STOP_OBSERVER`. Layout revision 7.
 /// ABI minor 57 adds `RGMIN_STOP_LINE_SEARCH_ROUNDING`.
 /// ABI minor 54 adds `RGMIN_GROMACS_CG` and `rgmin_solver_set_gromacs_cg`.
 /// ABI minor 56 adds `rgmin_manifold_rigid_quotient`, `rgmin_rtr_tcg_solve`,
@@ -1314,8 +1316,8 @@ fn lowest_eigenpair_elpa_is_unavailable() {
 fn abi_stamp_identifies_this_optimizer_layout() {
     let stamp = rgmin_abi_stamp();
     assert_eq!(stamp.abi_major, 1);
-    assert_eq!(stamp.abi_minor, 65);
-    assert_eq!(stamp.layout_revision, 6);
+    assert_eq!(stamp.abi_minor, 68);
+    assert_eq!(stamp.layout_revision, 7);
     assert_eq!(rgmin_stop_t::RGMIN_STOP_LINE_SEARCH_ROUNDING as i32, 9);
     assert_eq!(unsafe { rgmin_abi_compatible(&stamp) }, 1);
 }

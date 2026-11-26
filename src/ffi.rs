@@ -105,8 +105,8 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 65;
-pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 6;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 68;
+pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 7;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
 #[repr(C)]
@@ -244,7 +244,7 @@ pub enum rgmin_stop_t {
     RGMIN_STOP_MACHINE_PRECISION = 8,
     /// Wolfe zoom stopped when rounding blocked further progress. ABI minor 57.
     RGMIN_STOP_LINE_SEARCH_ROUNDING = 9,
-    /// A per-iteration observer requested stop.
+    /// A per-iteration observer requested stop. ABI minor 68.
     RGMIN_STOP_OBSERVER = 10,
 }
 
@@ -279,8 +279,9 @@ pub struct rgmin_control_t {
     /// revision 5 fields and leaves this at 0. ABI minor 55.
     pub require_convergence: i32,
     /// Optional per-iteration observer callback. Null leaves it off.
+    /// ABI minor 68.
     pub observer: Option<rgmin_observer_fn>,
-    /// Opaque pointer passed to [`Self::observer`].
+    /// Opaque pointer passed to [`Self::observer`]. ABI minor 68.
     pub observer_user: *mut c_void,
 }
 

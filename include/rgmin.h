@@ -82,7 +82,7 @@ typedef struct rgmin_abi_stamp_t {
 } rgmin_abi_stamp_t;
 
 #define RGMIN_ABI_VERSION_MAJOR 1
-#define RGMIN_ABI_VERSION_MINOR 65
+#define RGMIN_ABI_VERSION_MINOR 68
 /* 37 linesearch, 38 lbfgs_direction, 39 rgmin_lowest_eigenpairs.
  * 40 is the 0.6.0 union with the 0.5.2 C surface.
  * 41 rgmin_manifold_handle_t, 42 rgmin_lowest_eigenpairs_ex,
@@ -113,17 +113,20 @@ typedef struct rgmin_abi_stamp_t {
  *    entry in rgmin_last_error while preserving callback-failure errors.
  *    No C symbols or struct layouts change.
  * 65 RGMIN_RCG, rgmin_rcg_options_t, rgmin_rcg_options_default and
- *    rgmin_minimize_rcg. rgmin_rcg_options_t is a new struct, so the
- *    layout revision stays 6. */
-#define RGMIN_ABI_LAYOUT_REVISION 6
-/* Layout revision 6. rgmin_control_t is maxiter, gtol, istep, memory,
- * maxmove, noise_eps, noise_c, require_convergence. maxmove > 0 is the
+ *    rgmin_minimize_rcg. rgmin_rcg_options_t is a new struct, so minor
+ *    65 left the layout revision at 6.
+ * 68 observer and observer_user on rgmin_control_t, and
+ *    RGMIN_STOP_OBSERVER. Layout revision 7. */
+#define RGMIN_ABI_LAYOUT_REVISION 7
+/* Layout revision 7. rgmin_control_t is maxiter, gtol, istep, memory,
+ * maxmove, noise_eps, noise_c, require_convergence, observer and
+ * observer_user. maxmove > 0 is the
  * Euclidean cap; 0 keeps the defaults, including the default per-atom
  * cap; a negative value leaves every step cap off.
  * rgmin_report_t is value, steps, grad_norm, stop, converged.
- * Revision 5 was value, steps, grad_norm, stop. Both sides shipped
- * those structs as revision 4 with different fields, so the union was
- * revision 5. */
+ * Revision 6 was maxiter through require_convergence. Revision 5 was
+ * value, steps, grad_norm, stop. Both sides shipped those structs as
+ * revision 4 with different fields, so the union was revision 5. */
 
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
@@ -219,7 +222,7 @@ typedef enum rgmin_stop_t {
     RGMIN_STOP_MACHINE_PRECISION = 8,
     /** Wolfe zoom stopped when rounding blocked progress. ABI minor 57. */
     RGMIN_STOP_LINE_SEARCH_ROUNDING = 9,
-    /** A per-iteration observer requested stop. */
+    /** A per-iteration observer requested stop. ABI minor 68. */
     RGMIN_STOP_OBSERVER = 10
 } rgmin_stop_t;
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
@@ -276,16 +279,17 @@ typedef struct rgmin_control_t {
     /** Nonzero returns RGMIN_NOT_CONVERGED when the gradient norm is
      *  not below gtol. Zero keeps the report. ABI minor 55. */
     int32_t require_convergence;
-    /** Optional per-iteration observer. NULL leaves it off. */
+    /** Optional per-iteration observer. NULL leaves it off.
+     *  ABI minor 68. */
     rgmin_observer_fn observer;
-    /** Opaque pointer passed to observer. */
+    /** Opaque pointer passed to observer. ABI minor 68. */
     void *observer_user;
 } rgmin_control_t;
 /** \c sizeof(rgmin_control_t) for a layout revision 5 caller: the
  *  fields through \c noise_c. ABI minor 55. */
 #define RGMIN_CONTROL_REVISION5_SIZE offsetof(rgmin_control_t, require_convergence)
 /** \c sizeof(rgmin_control_t) for a layout revision 6 caller: the
- *  fields through \c require_convergence. */
+ *  fields through \c require_convergence. ABI minor 68. */
 #define RGMIN_CONTROL_REVISION6_SIZE offsetof(rgmin_control_t, observer)
 /** Fill \a c with the Rust \c Control::default for a caller that
  *  compiled \a struct_size as \c sizeof(rgmin_control_t).
