@@ -54,13 +54,17 @@ pub struct LineSearchResult {
     pub step: Option<LineOutcome>,
     /// Early stop that ended the search. `None` is ordinary completion.
     pub stop_reason: Option<LineSearchStopReason>,
+    /// ASE's `LineSearch.step` set `no_update` for this trial.
+    /// The trial stands. A BFGS session does not apply the pair.
+    pub(crate) no_update: bool,
 }
 
 impl LineSearchResult {
-    fn complete(step: Option<LineOutcome>) -> Self {
+    pub(crate) fn complete(step: Option<LineOutcome>) -> Self {
         Self {
             step,
             stop_reason: None,
+            no_update: false,
         }
     }
 
@@ -68,6 +72,16 @@ impl LineSearchResult {
         Self {
             step,
             stop_reason: Some(LineSearchStopReason::RoundingBlocked),
+            no_update: false,
+        }
+    }
+
+    /// The trial ASE returns when `step` sets `no_update`.
+    pub(crate) fn ase_no_update(step: LineOutcome) -> Self {
+        Self {
+            step: Some(step),
+            stop_reason: None,
+            no_update: true,
         }
     }
 }

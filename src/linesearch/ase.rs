@@ -23,7 +23,7 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use super::LineOutcome;
+use super::{LineOutcome, LineSearchResult};
 
 const STPMIN: f64 = 1e-8;
 const XTOL: f64 = 1e-14;
@@ -336,9 +336,10 @@ fn trial_point(pos: ArrayView1<'_, f64>, dir: ArrayView1<'_, f64>, stp: f64) -> 
 /// coordinates. A non-finite opening slope fails the same way. The
 /// comparisons that start the search do not treat NaN as an error, so
 /// the first trial would otherwise be evaluated. Returns the trial the
-/// search ended on, or `None` when the search failed: an input error, a
-/// spent budget, a non-finite trial, a zero direction, an empty
-/// position, or a non-finite opening slope.
+/// search ended on, or no step when the search failed: an input error,
+/// a spent budget, a non-finite trial, a zero direction, an empty
+/// position, or a non-finite opening slope. When `step` sets
+/// `no_update`, the result carries that flag and the trial.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn search<F>(
     mut oracle: F,
@@ -351,7 +352,7 @@ pub(crate) fn search<F>(
     c1: f64,
     c2: f64,
     budget: usize,
-) -> Option<LineOutcome>
+) -> LineSearchResult
 where
     F: FnMut(ArrayView1<'_, f64>) -> (f64, Array1<f64>),
 {
@@ -360,7 +361,7 @@ where
     // `size / floor` is NaN when the direction is zero, `pos` is empty,
     // or either length is not finite.
     if !size.is_finite() || !floor.is_finite() || size <= 0.0 || floor <= 0.0 {
-        return None;
+        return LineSearchResult::complete(None);
     }
     let dir = if size <= floor {
         dir.mapv(|v| v / (size / floor))
@@ -372,7 +373,7 @@ where
     // negative infinity is not positive, so neither stops the search
     // before the oracle is called.
     if !derphi0.is_finite() {
-        return None;
+        return LineSearchResult::complete(None);
     }
     let mut state = State {
         dir: dir.view(),
@@ -400,27 +401,27 @@ where
     };
     let (mut stp, task) = state.start(1.0, f0, derphi0);
     if task == Task::Error {
-        return None;
+        return LineSearchResult::complete(None);
     }
     let mut evals = 0;
     loop {
         if evals >= budget {
-            return None;
+            return LineSearchResult::complete(None);
         }
         // A zero `maxstep` scales a later zero increment by `0/0`. ASE
         // evaluates that NaN and the search never reaches a warning.
         // Stop before the oracle sees a non-finite coordinate.
         if !stp.is_finite() {
-            return None;
+            return LineSearchResult::complete(None);
         }
         let x = trial_point(pos, dir.view(), stp);
         if x.iter().any(|v| !v.is_finite()) {
-            return None;
+            return LineSearchResult::complete(None);
         }
         let (f, g) = oracle(x.view());
         evals += 1;
         if !crate::step::finite(f, g.view()) {
-            return None;
+            return LineSearchResult::complete(None);
         }
         let dphi = crate::vecops::dot(g.view(), dir.view());
         state.old_stp = stp;
@@ -432,11 +433,11 @@ where
             evals,
         };
         if state.no_update {
-            return Some(end);
+            return LineSearchResult::ase_no_update(end);
         }
         let (next, task) = state.next(stp, f, dphi);
         if task != Task::Fg {
-            return Some(end);
+            return LineSearchResult::complete(Some(end));
         }
         stp = next;
     }
@@ -480,7 +481,7 @@ mod tests {
             0.46,
             budget,
         );
-        (out, seen.into_inner())
+        (out.step, seen.into_inner())
     }
 
     #[test]
@@ -559,7 +560,7 @@ mod tests {
             0.46,
             20,
         );
-        assert!(out.is_none());
+        assert!(out.step.is_none());
         assert_eq!(*seen.borrow(), 0);
     }
 
@@ -585,7 +586,7 @@ mod tests {
             0.46,
             20,
         );
-        assert!(out.is_none());
+        assert!(out.step.is_none());
         assert_eq!(*seen.borrow(), 0);
     }
 
@@ -613,7 +614,7 @@ mod tests {
                 0.46,
                 20,
             );
-            assert!(out.is_none(), "{slope}");
+            assert!(out.step.is_none(), "{slope}");
             assert_eq!(*seen.borrow(), 0, "{slope}");
         }
     }
