@@ -1,5 +1,6 @@
 # ABI minor 66 adds rgmin_minimize_hvp_precond and rgmin_minimize_hvp_precond_sized.
 # ABI minor 67 adds rgmin_solver_set_gromacs_lbfgs.
+# ABI minor 69 adds rgmin_solver_set_fixed_h0 and rgmin_solver_set_ase_linesearch.
 rgmin_abi_compatible
 rgmin_abi_stamp
 rgmin_backward_error_floor

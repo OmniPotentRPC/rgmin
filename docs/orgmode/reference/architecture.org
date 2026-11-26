@@ -86,7 +86,7 @@ python3 docs/figures/architecture/draw_hourglass.py
 - =rgmin_solver_create= / =rgmin_solver_step= / =rgmin_solver_free= ::
   The session half of the waist.
   Callbacks are arguments of each step, not stored on the handle.
-  =include/rgmin.h= sets =abi_major= 1, =abi_minor= 68 and
+  =include/rgmin.h= sets =abi_major= 1, =abi_minor= 69 and
   =layout_revision= 7.
   Minor 49 adds =StopReason= on the report, the opt-in unmet-stop
   error, and the backward-error polish. A zero iteration budget
@@ -116,6 +116,8 @@ python3 docs/figures/architecture/draw_hourglass.py
   Minor 67 adds =RGMIN_GROMACS_LBFGS= and
   =rgmin_solver_set_gromacs_lbfgs=. =rgmin_control_t= is unchanged.
   Minor 68 adds =noise_eps_f= on =rgmin_control_t= and =RGMIN_CONTROL_REVISION6_SIZE=; the struct grows, so the layout revision becomes 7.
+  Minor 69 adds =rgmin_solver_set_fixed_h0= and
+  =rgmin_solver_set_ase_linesearch=.
   =rgmin_abi_compatible= checks the major version and the layout revision only.
 - =DistanceConstraints= :: Holonomic atom-pair distances for a session.
   SHAKE, LINCS and SETTLE return each trial to the set.
