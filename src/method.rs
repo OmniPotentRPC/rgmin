@@ -99,6 +99,10 @@ pub enum Method {
     /// strong-Wolfe line search and convergence on the largest per-atom
     /// force norm.
     GromacsCg,
+    /// GROMACS `integrator = l-bfgs`: limited-memory BFGS with
+    /// `nbfgscorr` correction pairs, the `do_lbfgs` line search, and
+    /// convergence on the largest per-atom force norm.
+    GromacsLbfgs,
     /// Shifted Newton on a caller-supplied dense Hessian.
     ///
     /// Banerjee, Adams, Simons, Shepard,
@@ -375,6 +379,7 @@ impl Method {
                 | Self::Dogleg
                 | Self::GromacsSteep
                 | Self::GromacsCg
+                | Self::GromacsLbfgs
                 | Self::NewtonCg
                 | Self::NewtonPcg
                 | Self::Rcg { .. }
@@ -417,6 +422,7 @@ impl Method {
             Self::GromacsSteep => "gromacs-steep",
             Self::GpMin => "gpmin",
             Self::GromacsCg => "gromacs-cg",
+            Self::GromacsLbfgs => "gromacs-lbfgs",
             Self::Newton { kind } => match kind {
                 crate::newton::NewtonKind::Shifted => "newton",
                 crate::newton::NewtonKind::Rfo => "rfo",
@@ -455,6 +461,7 @@ impl Method {
             "gromacs_steep" | "gmx_steep" => Self::GromacsSteep,
             "gpmin" | "gp_min" => Self::GpMin,
             "gromacs_cg" | "gmx_cg" => Self::GromacsCg,
+            "gromacs_lbfgs" | "gmx_lbfgs" | "gromacs_l_bfgs" => Self::GromacsLbfgs,
             "cg" | "pr" | "polak_ribiere" => Self::polak_ribiere(),
             "prp" | "pr_plus" | "polak_ribiere_plus" => Self::polak_ribiere_plus(),
             "eon_cg" | "eon_cg_pr" => Self::eon_cg(),
@@ -563,6 +570,15 @@ mod name_tests {
         assert_eq!(Method::from_name("gromacs-cg").unwrap(), Method::GromacsCg);
         assert_eq!(Method::from_name("gmx_cg").unwrap(), Method::GromacsCg);
         assert_eq!(Method::GromacsCg.as_str(), "gromacs-cg");
+        assert_eq!(
+            Method::from_name("gromacs-lbfgs").unwrap(),
+            Method::GromacsLbfgs
+        );
+        assert_eq!(
+            Method::from_name("gromacs_l_bfgs").unwrap(),
+            Method::GromacsLbfgs
+        );
+        assert_eq!(Method::GromacsLbfgs.as_str(), "gromacs-lbfgs");
         assert_eq!(Method::from_name("fire2").unwrap().as_str(), "fire2");
         let err = Method::from_name("not-a-solver").unwrap_err();
         assert!(err.to_string().contains("not-a-solver"), "{err}");
@@ -587,6 +603,7 @@ mod tests {
         assert!(!Method::Dogleg.installs_default_atom_cap());
         assert!(!Method::GromacsSteep.installs_default_atom_cap());
         assert!(!Method::GromacsCg.installs_default_atom_cap());
+        assert!(!Method::GromacsLbfgs.installs_default_atom_cap());
         assert!(!Method::Fire { kind: FireKind::V2 }.installs_default_atom_cap());
         assert!(!Method::NewtonCg.installs_default_atom_cap());
         assert!(!Method::NewtonPcg.installs_default_atom_cap());

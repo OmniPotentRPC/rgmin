@@ -30,7 +30,8 @@ An ``lbfgs`` run that spends its budget with ``x`` unmoved stops on
 and default to off. ``require_convergence`` raises ``NotConverged`` when the
 gradient norm is not below ``gtol``. ``error_on_unmet`` raises
 ``StopUnmetError`` when the run stops on ``BUDGET``, ``LINE_SEARCH``,
-``LINE_SEARCH_ROUNDING``, ``POLISH_UNMET``, or ``EVAL_BUDGET``. It is a
+``LINE_SEARCH_ROUNDING``, ``MACHINE_PRECISION``, ``POLISH_UNMET``, or
+``EVAL_BUDGET``. It is a
 ``RuntimeError`` whose ``report`` attribute is the ``Report`` of the stop.
 ``backward_polish`` is stored on the session. This step loop does not form
 a Hessian, so
@@ -76,6 +77,8 @@ Those differ from the Rust ``Control::default`` (``gtol`` 1e-5, ``istep`` 1) and
     +--------------------------------------+--------------------------------------------------------------------+-----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
     | ``memory``                           | int >= 0                                                           | 10        | L-BFGS pairs.                                                                                                                                                                                |
     +--------------------------------------+--------------------------------------------------------------------+-----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+    | ``nbfgscorr``                        | int >= 1                                                           | 10        | Correction pairs for ``gromacs_lbfgs``. Other methods reject it.                                                                                                                             |
+    +--------------------------------------+--------------------------------------------------------------------+-----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
     | ``maxmove``                          | float                                                              | 0         | Euclidean cap on the step. Zero keeps the method's own caps, and a negative value leaves every cap off.                                                                                      |
     +--------------------------------------+--------------------------------------------------------------------+-----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
     | ``atom_maxmove``                     | float                                                              | unset     | Per-atom cap on the longest atom displacement. ``maxstep`` is the same option. Unset keeps the method's default, 0.2 for L-BFGS.                                                             |
@@ -113,7 +116,7 @@ Those differ from the Rust ``Control::default`` (``gtol`` 1e-5, ``istep`` 1) and
 
 A count must be an int, and a flag must be a bool.
 A kind or constant that the method ignores raises ``ValueError`` rather than being dropped.
-Method names are ``adam``, ``bb``, ``bfgs``, ``cg``, ``conjugate_descent``, ``dai_yuan``, ``diis``, ``dogleg``, ``fire``, ``fire2``, ``fletcher_reeves``, ``fr_pr``, ``hager_zhang``, ``hestenes_stiefel``, ``lbfgs``, ``liu_storey``, ``newton``, ``polak_ribiere``, ``pso``, ``quickmin``, ``rfo``, ``sd``, ``sr1``, ``sr2`` and ``steepest``.
+Method names are ``adam``, ``bb``, ``bfgs``, ``cg``, ``conjugate_descent``, ``dai_yuan``, ``diis``, ``dogleg``, ``fire``, ``fire2``, ``fletcher_reeves``, ``fr_pr``, ``gromacs_lbfgs``, ``hager_zhang``, ``hestenes_stiefel``, ``lbfgs``, ``liu_storey``, ``newton``, ``polak_ribiere``, ``pso``, ``quickmin``, ``rfo``, ``sd``, ``sr1``, ``sr2`` and ``steepest``.
 
 Module ``rgmin`` in the maturin package
 ---------------------------------------
@@ -137,6 +140,8 @@ The options and their defaults are:
     | ``eon_cap``                                                                                        | False                                                                      | L-BFGS takes the eOn capped step.                                                                        |
     +----------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------+----------------------------------------------------------------------------------------------------------+
     | ``memory``                                                                                         | 8                                                                          | L-BFGS pairs.                                                                                            |
+    +----------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------+----------------------------------------------------------------------------------------------------------+
+    | ``nbfgscorr``                                                                                      | ``None``                                                                   | Correction pairs for a ``gromacs-lbfgs`` session. Omitted keeps 10. Other methods reject it.             |
     +----------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------+----------------------------------------------------------------------------------------------------------+
     | ``h0``                                                                                             | ``None``                                                                   | Fixed L-BFGS inverse-Hessian scale.                                                                      |
     +----------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------+----------------------------------------------------------------------------------------------------------+

@@ -167,12 +167,12 @@ One-shot
     rgmin_report_t report;
     rgmin_status_t st = rgmin_minimize(eval, grad, user, x, &ctrl, RGMIN_LBFGS, &report);
 
-A run that spends its budget, fails its line search, reaches line-search rounding, leaves a backward
-polish unmet or spends the evaluation budget still returns
+A run that spends its budget, fails its line search, reaches line-search rounding, reaches machine
+precision, leaves a backward polish unmet or spends the evaluation budget still returns
 ``RGMIN_SUCCESS``, with the stop in ``rgmin_report_t.stop``. The one-shots
 whose names end in ``_opts`` add ``error_on_unmet`` and ``backward_polish``
 before ``out``. A
-nonzero ``error_on_unmet`` writes ``x`` and ``out`` for those five stops and
+nonzero ``error_on_unmet`` writes ``x`` and ``out`` for those six stops and
 then returns ``RGMIN_UNMET_STOP``, so the host reads the report and still
 sees the run as unmet. ``rgmin_minimize_eindir_opts`` is the same for an
 ``eindir_objective_t``:
@@ -295,7 +295,7 @@ These are ``abi_minor`` 51. ``rgmin_control_t`` is unchanged, and the
 default Euclidean L-BFGS step stays the eOn cap.
 
 Newton-CG under a caller preconditioner
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ABI minor 66 adds ``rgmin_vec_precond_fn`` and ``rgmin_minimize_hvp_precond``, with ``rgmin_minimize_hvp_precond_sized`` behind it.
 Check ``rgmin_abi_stamp().abi_minor >= 66`` before using them.
@@ -307,7 +307,6 @@ The three callbacks are ``evalgrad`` (value and gradient in one call), ``hvp`` (
 One ``user`` pointer reaches all three.
 ``P`` takes no iterate and stays fixed for the solve, so it must be symmetric positive definite wherever the solve goes; keep any iterate-dependent state behind ``user``.
 CG under any such ``P`` reaches the same step as plain CG, in fewer Hessian actions when ``P`` approximates the Hessian.
-
 
 .. code:: c
 

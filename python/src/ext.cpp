@@ -135,6 +135,8 @@ std::string method_name_from_code(int code) {
         return "gromacs_cg";
     case RGMIN_RCG:
         return "rcg";
+    case RGMIN_GROMACS_LBFGS:
+        return "gromacs_lbfgs";
     default:
         throw nb::value_error("unknown method");
     }
@@ -408,7 +410,8 @@ rgmin::Report zero_budget_report(nb::callable function, Vector x, rgmin::Control
     }
     std::vector<double> gradient(n);
     double grad_norm = 0.0;
-    if (method == rgmin::Method::GromacsSteep || method == rgmin::Method::GromacsCg) {
+    if (method == rgmin::Method::GromacsSteep || method == rgmin::Method::GromacsCg ||
+        method == rgmin::Method::GromacsLbfgs) {
         // read_gradient rejects a non-finite component before the
         // reduction, which would hide a max that drops NaN.
         copy_gradient(result[1], n, gradient.data());
@@ -618,6 +621,7 @@ NB_MODULE(_core, m) {
         .value("GROMACS_STEEP", RGMIN_GROMACS_STEEP)
         .value("GROMACS_CG", RGMIN_GROMACS_CG)
         .value("RCG", RGMIN_RCG)
+        .value("GROMACS_LBFGS", RGMIN_GROMACS_LBFGS)
         .value("PolakRibiere", RGMIN_POLAK_RIBIERE)
         .value("FletcherReeves", RGMIN_FLETCHER_REEVES)
         .value("Bfgs", RGMIN_BFGS)
@@ -644,7 +648,8 @@ NB_MODULE(_core, m) {
         .value("Ode12r", RGMIN_ODE12R)
         .value("GromacsSteep", RGMIN_GROMACS_STEEP)
         .value("GromacsCg", RGMIN_GROMACS_CG)
-        .value("Rcg", RGMIN_RCG);
+        .value("Rcg", RGMIN_RCG)
+        .value("GromacsLbfgs", RGMIN_GROMACS_LBFGS);
 
     nb::enum_<rgmin_stop_t>(m, "Stop", nb::is_arithmetic(),
                             "Why a step or a run ended. Members are UPPER_SNAKE. "
@@ -808,6 +813,7 @@ NB_MODULE(_core, m) {
             if (config.error_on_unmet() &&
                 (report.stop == RGMIN_STOP_BUDGET || report.stop == RGMIN_STOP_LINE_SEARCH ||
                  report.stop == RGMIN_STOP_LINE_SEARCH_ROUNDING ||
+                 report.stop == RGMIN_STOP_MACHINE_PRECISION ||
                  report.stop == RGMIN_STOP_POLISH_UNMET ||
                  report.stop == RGMIN_STOP_EVAL_BUDGET)) {
                 std::ostringstream message;
@@ -826,8 +832,8 @@ NB_MODULE(_core, m) {
         "when the gradient norm is still above ``gtol``. "
         "``error_on_unmet=True`` raises ``StopUnmetError``, a ``RuntimeError`` "
         "that carries the ``Report`` as ``.report``, when the stop is "
-        "``BUDGET``, ``LINE_SEARCH``, ``LINE_SEARCH_ROUNDING``, ``POLISH_UNMET``, "
-        "or ``EVAL_BUDGET``. "
+        "``BUDGET``, ``LINE_SEARCH``, ``LINE_SEARCH_ROUNDING``, ``MACHINE_PRECISION``, "
+        "``POLISH_UNMET``, or ``EVAL_BUDGET``. "
         "``backward_polish`` "
         "is stored on the session and is not used by this step loop, which "
         "does not form a Hessian.");

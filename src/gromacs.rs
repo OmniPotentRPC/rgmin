@@ -1,4 +1,4 @@
-//! GROMACS steepest-descent and conjugate-gradient state.
+//! GROMACS steepest-descent, conjugate-gradient, and L-BFGS state.
 //!
 //! The state is deliberately independent of coordinates, units, and the
 //! objective. A session supplies the projected force and applies its usual
@@ -18,8 +18,18 @@
 //! strong-Wolfe line search (rather than GROMACS's secant/bisection line
 //! search).
 //!
+//! The L-BFGS state [`GromacsLbfgs`] keeps the correction ring, two-loop
+//! recursion, and opening step of GROMACS [`do_lbfgs`][lbfgs_source]
+//! (`minimize.cpp` lines 2036-2858). `do_lbfgs` is the same algorithm in
+//! the tagged 2023.3 and 2025.4 sources; the line numbers in this file
+//! follow 2025.4. The bracket search keeps the directional derivatives
+//! of the opening endpoints, as `do_lbfgs` does.
+//!
 //! [source]: https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L2861
 //! [cg_source]: https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L1313
+//! [lbfgs_source]: https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L2036
+
+use std::collections::VecDeque;
 
 use ndarray::{Array1, ArrayView1};
 
@@ -369,6 +379,311 @@ pub const GROMACS_CG_WOLFE_C2: f64 = 0.1;
 
 /// Default trial budget per [`GromacsCg`] strong-Wolfe line search.
 pub const GROMACS_CG_WOLFE_MAXITER: usize = 20;
+
+/// Default correction count for GROMACS `integrator = l-bfgs`.
+///
+/// GROMACS 2025.4 documents `nbfgscorr = 10` and passes that capacity
+/// directly to `do_lbfgs` (`minimize.cpp` lines 2068-2084).
+pub const GROMACS_LBFGS_NCORR_DEFAULT: usize = 10;
+
+/// Maximum number of interpolation or bisection trials after the opening
+/// GROMACS L-BFGS trial did not lower the energy.
+///
+/// `do_lbfgs` stops the bracket after 20 trials (`minimize.cpp` lines
+/// 2563-2569).
+pub const GROMACS_LBFGS_LINESEARCH_MAXITER: usize = 20;
+
+/// Factor used by GROMACS L-BFGS while bringing an opening displacement
+/// below `emstep` (`minimize.cpp` lines 2409-2435).
+pub const GROMACS_LBFGS_STEP_REDUCTION: f64 = 0.1;
+
+/// `GMX_REAL_EPS` for a binary64 build of GROMACS `do_lbfgs`.
+///
+/// GROMACS 2025.4 reads `std::numeric_limits<real>::epsilon()`. A
+/// double-precision build uses the IEEE-754 binary64 epsilon.
+pub const GROMACS_LBFGS_REAL_EPS: f64 = f64::EPSILON;
+
+/// Energy rise `sqrt(GMX_REAL_EPS) * |energy|` from `do_lbfgs`
+/// (`minimize.cpp` line 2464).
+///
+/// A trial whose directional derivative is still negative is accepted
+/// when its energy is below the start energy plus this rise.
+pub fn gromacs_lbfgs_energy_rise(energy: f64) -> f64 {
+    GROMACS_LBFGS_REAL_EPS.sqrt() * energy.abs()
+}
+
+/// Coordinate floor in the `do_lbfgs` minimum-step test
+/// (`minimize.cpp` lines 2356-2358).
+///
+/// A coordinate whose absolute value is below this floor is treated as
+/// this value. GROMACS uses 1 nm. The unit-agnostic API uses 1 in the
+/// objective's coordinate unit.
+pub const GROMACS_LBFGS_MINSTEP_CHARACTERISTIC: f64 = 1.0;
+
+/// Scalar line step restored after an accepted `do_lbfgs` update
+/// (`minimize.cpp` line 2786).
+pub const GROMACS_LBFGS_RESET_STEP: f64 = 1.0;
+
+/// Parameters of [`GromacsLbfgs`].
+///
+/// The struct is [`non_exhaustive`](https://doc.rust-lang.org/reference/attributes/type_system.html#the-non_exhaustive-attribute):
+/// build it with [`Default`] and [`Self::with_nbfgscorr`].
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GromacsLbfgsConfig {
+    /// Correction pairs retained (`nbfgscorr`).
+    pub nbfgscorr: usize,
+}
+
+impl Default for GromacsLbfgsConfig {
+    fn default() -> Self {
+        Self {
+            nbfgscorr: GROMACS_LBFGS_NCORR_DEFAULT,
+        }
+    }
+}
+
+impl GromacsLbfgsConfig {
+    /// Replace [`Self::nbfgscorr`].
+    #[must_use]
+    pub fn with_nbfgscorr(mut self, nbfgscorr: usize) -> Self {
+        self.nbfgscorr = nbfgscorr;
+        self
+    }
+
+    pub(crate) fn validate(self) -> Result<Self> {
+        if self.nbfgscorr > 0 {
+            Ok(self)
+        } else {
+            Err(Error::GromacsLbfgs {
+                what: "nbfgscorr must be at least 1",
+            })
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct GromacsLbfgsPair {
+    displacement: Array1<f64>,
+    gradient_change: Array1<f64>,
+    rho: f64,
+    diagonal: f64,
+}
+
+/// State of the GROMACS 2025.4 `do_lbfgs` two-loop recursion.
+///
+/// The session owns the line search because it needs the objective. This
+/// state owns only the correction ring, current search direction, and
+/// opening line step. Unlike rgmin's general [`crate::Lbfgs`], correction
+/// pairs are not filtered: GROMACS stores every finite, nonzero-curvature
+/// pair and uses `s·y / y·y` as the scalar initial inverse Hessian.
+#[derive(Clone, Debug)]
+pub struct GromacsLbfgs {
+    config: GromacsLbfgsConfig,
+    pairs: VecDeque<GromacsLbfgsPair>,
+    direction: Array1<f64>,
+    step_size: f64,
+    initialized: bool,
+    rebase_pending: bool,
+}
+
+impl GromacsLbfgs {
+    /// Empty correction memory for a coordinate vector of length `dim`.
+    pub fn new(dim: usize) -> Self {
+        Self {
+            config: GromacsLbfgsConfig::default(),
+            pairs: VecDeque::new(),
+            direction: Array1::zeros(dim),
+            step_size: 0.0,
+            initialized: false,
+            rebase_pending: false,
+        }
+    }
+
+    /// Current parameters.
+    pub fn config(&self) -> GromacsLbfgsConfig {
+        self.config
+    }
+
+    /// Replace `nbfgscorr` and restart from steepest descent.
+    pub fn set_config(&mut self, config: GromacsLbfgsConfig) -> Result<()> {
+        self.config = config.validate()?;
+        self.reset();
+        Ok(())
+    }
+
+    /// Number of retained correction pairs.
+    pub fn pair_count(&self) -> usize {
+        self.pairs.len()
+    }
+
+    /// Current scalar line step.
+    pub fn step_size(&self) -> f64 {
+        self.step_size
+    }
+
+    /// Current unnormalised search direction.
+    pub(crate) fn direction(&self) -> ArrayView1<'_, f64> {
+        self.direction.view()
+    }
+
+    /// Replace the direction after the session applies frozen-coordinate
+    /// or tangent-space projection.
+    pub(crate) fn set_direction(&mut self, direction: Array1<f64>) {
+        self.direction = direction;
+    }
+
+    /// Prepare the first force direction and `1 / ||force||` line step.
+    pub(crate) fn initialize(&mut self, force: ArrayView1<'_, f64>, force_norm: f64) -> Result<()> {
+        if !self.initialized {
+            self.restart_steepest(force, force_norm);
+        } else if self.rebase_pending {
+            self.direction = self.two_loop(force)?;
+            self.step_size = inverse_force_norm(force_norm);
+            self.rebase_pending = false;
+        }
+        Ok(())
+    }
+
+    /// Keep correction pairs but rebuild the direction at the next point.
+    pub(crate) fn mark_rebase(&mut self) {
+        if self.initialized {
+            self.rebase_pending = true;
+        }
+    }
+
+    /// Drop every stored pair and take the next direction from `force`.
+    ///
+    /// Clearing the deque is deliberate. GROMACS sets `ncorr = 0` on this
+    /// reset and leaves `point` unchanged, so the two-loop later wraps a
+    /// negative index to `ncorr - 1` and can read pairs stored before the
+    /// reset (`minimize.cpp` 2023.3, lines 2524-2533 and 2600-2609).
+    pub(crate) fn restart_steepest(&mut self, force: ArrayView1<'_, f64>, force_norm: f64) {
+        self.pairs.clear();
+        self.direction.assign(&force);
+        self.step_size = inverse_force_norm(force_norm);
+        self.initialized = true;
+        self.rebase_pending = false;
+    }
+
+    /// Store the accepted GROMACS pair and form the next two-loop direction.
+    ///
+    /// `displacement` is the move the session applied, `x_new - x_old`
+    /// after retraction and bound clipping, not the line step times the
+    /// search direction. An error leaves the pairs, direction, and line
+    /// step as they were.
+    pub(crate) fn accept(
+        &mut self,
+        old_force: ArrayView1<'_, f64>,
+        new_force: ArrayView1<'_, f64>,
+        displacement: Array1<f64>,
+    ) -> Result<()> {
+        if displacement.len() != self.direction.len() {
+            return Err(Error::GromacsLbfgs {
+                what: "accepted displacement has the wrong length",
+            });
+        }
+        let gradient_change = &old_force - &new_force;
+        let sy = displacement.dot(&gradient_change);
+        let yy = gradient_change.dot(&gradient_change);
+        if !(sy.is_finite() && sy != 0.0 && yy.is_finite() && yy > 0.0) {
+            return Err(Error::GromacsLbfgs {
+                what: "accepted step has zero or non-finite curvature",
+            });
+        }
+        let rho = 1.0 / sy;
+        let diagonal = sy / yy;
+        if !(rho.is_finite() && diagonal.is_finite()) {
+            return Err(Error::GromacsLbfgs {
+                what: "accepted step curvature overflows 1 / s.y or s.y / y.y",
+            });
+        }
+        let evicted = if self.pairs.len() == self.config.nbfgscorr {
+            self.pairs.pop_front()
+        } else {
+            None
+        };
+        self.pairs.push_back(GromacsLbfgsPair {
+            displacement,
+            gradient_change,
+            rho,
+            diagonal,
+        });
+        match self.two_loop(new_force) {
+            Ok(direction) => {
+                self.direction = direction;
+                self.step_size = GROMACS_LBFGS_RESET_STEP;
+                Ok(())
+            }
+            Err(error) => {
+                let _ = self.pairs.pop_back();
+                if let Some(pair) = evicted {
+                    self.pairs.push_front(pair);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn two_loop(&self, force: ArrayView1<'_, f64>) -> Result<Array1<f64>> {
+        let mut direction = force.to_owned();
+        if self.pairs.is_empty() {
+            return Ok(direction);
+        }
+        let mut alpha = Vec::with_capacity(self.pairs.len());
+        for pair in self.pairs.iter().rev() {
+            let coefficient = pair.rho * pair.displacement.dot(&direction);
+            alpha.push(coefficient);
+            direction.scaled_add(-coefficient, &pair.gradient_change);
+        }
+        let diagonal = self
+            .pairs
+            .back()
+            .map(|pair| pair.diagonal)
+            .ok_or(Error::GromacsLbfgs {
+                what: "accepted correction was not retained",
+            })?;
+        direction *= diagonal;
+        for (pair, coefficient) in self.pairs.iter().zip(alpha.into_iter().rev()) {
+            let beta = pair.rho * pair.gradient_change.dot(&direction);
+            direction.scaled_add(coefficient - beta, &pair.displacement);
+        }
+        if direction.iter().any(|component| !component.is_finite()) {
+            return Err(Error::GromacsLbfgs {
+                what: "two-loop recursion produced a non-finite direction",
+            });
+        }
+        Ok(direction)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn newest_displacement(&self) -> Option<ArrayView1<'_, f64>> {
+        self.pairs.back().map(|pair| pair.displacement.view())
+    }
+
+    /// Drop all algorithm state. The next evaluation starts from its force.
+    pub fn reset(&mut self) {
+        self.pairs.clear();
+        self.direction.fill(0.0);
+        self.step_size = 0.0;
+        self.initialized = false;
+        self.rebase_pending = false;
+    }
+}
+
+/// `1 / force_norm`, or zero when that is not a finite positive step.
+///
+/// A norm below `1 / f64::MAX` has no finite reciprocal and is treated as
+/// a zero force, so the next iteration stops on the line-step precision
+/// test instead of opening an infinite line step.
+fn inverse_force_norm(force_norm: f64) -> f64 {
+    let inverse = 1.0 / force_norm;
+    if force_norm.is_finite() && force_norm > 0.0 && inverse.is_finite() {
+        inverse
+    } else {
+        0.0
+    }
+}
 
 /// Parameters of [`GromacsCg`].
 ///
@@ -727,6 +1042,105 @@ mod tests {
             assert_eq!(state.filter_beta(GROMACS_CG_BETA_CAP + 0.1), 0.0);
             state.advance();
         }
+    }
+
+    fn lbfgs_pair(displacement: Array1<f64>, gradient_change: Array1<f64>) -> GromacsLbfgsPair {
+        GromacsLbfgsPair {
+            displacement,
+            gradient_change,
+            rho: 1.0,
+            diagonal: 1.0,
+        }
+    }
+
+    #[test]
+    fn a_failed_lbfgs_accept_keeps_the_pairs_direction_and_line_step() {
+        let mut state = GromacsLbfgs::new(2);
+        state
+            .set_config(GromacsLbfgsConfig::default().with_nbfgscorr(2))
+            .unwrap();
+        state.restart_steepest(ndarray::array![1.0, 0.0].view(), 1.0);
+        // The newer retained pair overflows the first two-loop pass on
+        // `x1`, so the accept below fails after evicting the older pair.
+        state.pairs.push_back(lbfgs_pair(
+            ndarray::array![-1.0, 0.0],
+            ndarray::array![-1.0, 0.0],
+        ));
+        state.pairs.push_back(lbfgs_pair(
+            ndarray::array![0.0, 1.0e200],
+            ndarray::array![0.0, 1.0e200],
+        ));
+        let direction = ndarray::array![0.25, -0.5];
+        state.set_direction(direction.clone());
+        let step_size = state.step_size();
+
+        let result = state.accept(
+            ndarray::array![1.0, 1.0].view(),
+            ndarray::array![0.5, 1.0].view(),
+            ndarray::array![0.5, 0.0],
+        );
+
+        assert!(
+            matches!(result, Err(Error::GromacsLbfgs { .. })),
+            "{result:?}"
+        );
+        assert_eq!(state.pair_count(), 2);
+        let kept: Vec<Array1<f64>> = state
+            .pairs
+            .iter()
+            .map(|pair| pair.displacement.clone())
+            .collect();
+        assert_eq!(
+            kept,
+            [ndarray::array![-1.0, 0.0], ndarray::array![0.0, 1.0e200]]
+        );
+        assert_eq!(state.direction().to_owned(), direction);
+        assert_eq!(state.step_size().to_bits(), step_size.to_bits());
+    }
+
+    #[test]
+    fn an_lbfgs_accept_whose_curvature_reciprocal_overflows_stores_nothing() {
+        // s.y = y.y = 1e-320 is subnormal and nonzero, so 1 / s.y is infinite.
+        let mut state = GromacsLbfgs::new(2);
+        state.restart_steepest(ndarray::array![1.0, 0.0].view(), 1.0);
+        let direction = ndarray::array![1.0e-160, 0.0];
+        state.set_direction(direction.clone());
+        let step_size = state.step_size();
+
+        let result = state.accept(
+            ndarray::array![1.0e-160, 0.0].view(),
+            ndarray::array![0.0, 0.0].view(),
+            ndarray::array![1.0e-160, 0.0],
+        );
+
+        let Err(Error::GromacsLbfgs { what }) = result else {
+            panic!("expected a GROMACS L-BFGS error, got {result:?}");
+        };
+        assert_eq!(
+            what,
+            "accepted step curvature overflows 1 / s.y or s.y / y.y"
+        );
+        assert_eq!(state.pair_count(), 0);
+        assert_eq!(state.direction().to_owned(), direction);
+        assert_eq!(state.step_size().to_bits(), step_size.to_bits());
+    }
+
+    #[test]
+    fn a_force_norm_without_a_finite_reciprocal_opens_no_line_step() {
+        let tiny = 1.0e-310_f64;
+        assert!((1.0 / tiny).is_infinite());
+        let mut state = GromacsLbfgs::new(2);
+        state.restart_steepest(ndarray::array![tiny, 0.0].view(), tiny);
+        assert_eq!(state.step_size(), 0.0);
+
+        state.mark_rebase();
+        state
+            .initialize(ndarray::array![tiny, 0.0].view(), tiny)
+            .unwrap();
+        assert_eq!(state.step_size(), 0.0);
+
+        state.restart_steepest(ndarray::array![4.0, 0.0].view(), 4.0);
+        assert_eq!(state.step_size(), 0.25);
     }
 
     #[test]

@@ -6,6 +6,7 @@ use ndarray::Array1;
 use crate::adam::minimize_adam;
 use crate::control::Control;
 use crate::error::{Error, Result};
+use crate::gromacs::GromacsLbfgsConfig;
 use crate::hvp::HessianVector;
 use crate::linesearch::LineSearch;
 use crate::method::Method;
@@ -75,12 +76,56 @@ where
         | Method::Ode12r
         | Method::Diis { .. }
         | Method::GromacsSteep
+        | Method::GromacsLbfgs
         | Method::GpMin
         | Method::NewtonCg
         | Method::NewtonPcg
         | Method::Rcg { .. } => run_session(obj, init, control, method),
         Method::GromacsCg => run_session_linesearch(obj, init, control, method, linesearch),
     }
+}
+
+/// Minimize with GROMACS `integrator = l-bfgs`.
+///
+/// `config.nbfgscorr` is the correction-pair capacity. The default is
+/// [`crate::GROMACS_LBFGS_NCORR_DEFAULT`]. `control.istep` is `emstep`,
+/// `control.gtol` is `emtol`, and `control.maxiter` is the exact outer
+/// step budget shared with the other GROMACS front ends.
+pub fn minimize_gromacs_lbfgs<O>(
+    obj: &O,
+    init: impl Into<Array1<f64>>,
+    control: &Control,
+    config: GromacsLbfgsConfig,
+) -> Result<Report>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut pos = init.into();
+    let mut solver = Solver::new(Method::GromacsLbfgs, control.clone(), pos.len());
+    solver.set_gromacs_lbfgs_config(config)?;
+    if control.maxiter == 0 {
+        let report = solver.assess(obj, &mut pos)?;
+        return control.deliver(report);
+    }
+    let mut last = None;
+    for _ in 0..control.maxiter {
+        let mut report = solver.step(obj, &mut pos)?;
+        if let Some(status) = control.halt(report.grad_norm, solver.free_len(obj.bounds())) {
+            report.status = status;
+        }
+        let stopped = report.status != Status::Iterating;
+        last = Some(report);
+        if stopped {
+            break;
+        }
+    }
+    let Some(mut last) = last else {
+        unreachable!("a positive budget takes a step or returns its error");
+    };
+    if last.status == Status::Iterating {
+        last.status = Status::Budget;
+    }
+    control.deliver(last)
 }
 
 fn run_session<O>(

@@ -278,6 +278,18 @@ def test_gromacs_steep_mdp_and_zero_budget() -> None:
     assert rep_mp.stop == rgmin.Stop.MACHINE_PRECISION
     assert x_mp[0] == 1.0
 
+    with pytest.raises(rgmin.StopUnmetError) as unmet:
+        rgmin.minimize(
+            slope,
+            np.array([1.0, 0.0, 0.0], dtype=np.float64),
+            "gromacs-steep",
+            gtol=0.0,
+            istep=1e-18,
+            maxiter=5,
+            error_on_unmet=True,
+        )
+    assert unmet.value.report.stop == rgmin.Stop.MACHINE_PRECISION
+
     rep_cfg, x_cfg = rgmin.minimize(
         _quad,
         np.array([0.3], dtype=np.float64),
@@ -348,6 +360,30 @@ def test_gromacs_cg_mdp_and_zero_budget() -> None:
 
     with pytest.raises(ValueError, match="gromacs-cg"):
         rgmin.minimize(_quad, np.array([0.3], dtype=np.float64), "gromacs-steep", nstcgsteep=10)
+
+
+def test_gromacs_lbfgs_mdp_memory_and_method_enum() -> None:
+    options = rgmin.gromacs_mdp_options(
+        {
+            "integrator": "l-bfgs",
+            "emtol": 1e-3,
+            "emstep": 0.1,
+            "nsteps": 100,
+            "nbfgscorr": 3,
+        }
+    )
+    method = options.pop("method")
+    point = np.array([3.0, -4.0, 1.0], dtype=np.float64)
+    report, out = rgmin.minimize(_quad, point, method, **options)
+    assert out is point
+    assert report.stop == rgmin.Stop.TOLERANCE
+    assert report.grad_norm < options["gtol"]
+    assert rgmin.Method.GROMACS_LBFGS == rgmin.Method.GromacsLbfgs
+
+    with pytest.raises(ValueError, match="nbfgscorr"):
+        rgmin.minimize(_quad, np.array([0.3], dtype=np.float64), method, nbfgscorr=0)
+    with pytest.raises(ValueError, match="mystery_key"):
+        rgmin.gromacs_mdp_options({"integrator": "l-bfgs", "mystery_key": 1})
 
 
 def test_gromacs_shrink_budget_near_one_is_capped_and_fast() -> None:

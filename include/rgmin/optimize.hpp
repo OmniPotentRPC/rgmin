@@ -65,6 +65,7 @@ enum class Method {
     GromacsSteep = RGMIN_GROMACS_STEEP,
     GromacsCg = RGMIN_GROMACS_CG,
     Rcg = RGMIN_RCG,
+    GromacsLbfgs = RGMIN_GROMACS_LBFGS,
 };
 
 /** Parse a method token. \c newton-cg and \c newton_cg are the same method. */
@@ -542,6 +543,7 @@ inline constexpr Method ADAMOptimizer = Method::Adam;
 inline constexpr Method SteepestDescentOptimizer = Method::Steepest;
 inline constexpr Method GromacsSteepOptimizer = Method::GromacsSteep;
 inline constexpr Method RiemannianConjugateGradientOptimizer = Method::Rcg;
+inline constexpr Method GromacsLbfgsOptimizer = Method::GromacsLbfgs;
 inline constexpr Method ConjugateGradientOptimizer = Method::PolakRibiere;
 inline constexpr Method PSOptim = Method::Pso;
 
@@ -779,6 +781,10 @@ public:
     /// Periodic steepest-descent interval for the GROMACS-style CG direction update; 0 turns it off.
     int set_gromacs_cg(std::uint32_t nstcgsteep) {
         return rgmin_solver_set_gromacs_cg(ptr_, nstcgsteep);
+    }
+    /// Correction count for GROMACS L-BFGS. Zero is rejected.
+    int set_gromacs_lbfgs(std::uint32_t nbfgscorr) {
+        return rgmin_solver_set_gromacs_lbfgs(ptr_, nbfgscorr);
     }
 
     void forget_evaluation() { rgmin_solver_forget_evaluation(ptr_); }
@@ -1200,6 +1206,11 @@ public:
                               std::vector<std::pair<std::string, long long>> const& integers,
                               std::vector<std::pair<std::string, bool>> const& flags);
 
+    /// GROMACS `integrator = l-bfgs` with `nbfgscorr` stored pairs.
+    /// `nbfgscorr` of 10 matches the GROMACS default. Zero is rejected.
+    /// Control stays at the `build()` defaults.
+    static SolverConfig with_gromacs_lbfgs(std::size_t nbfgscorr = 10);
+
     Method method() const noexcept { return method_; }
     std::string const& method_name() const noexcept { return method_name_; }
     Control const& control() const noexcept { return control_; }
@@ -1241,20 +1252,34 @@ private:
     std::optional<double> gromacs_shrink_;
     std::optional<std::uint32_t> gromacs_max_constraint_shrinks_;
     std::optional<std::uint32_t> gromacs_nstcgsteep_;
+    std::optional<std::uint32_t> gromacs_nbfgscorr_;
 };
+
+inline SolverConfig SolverConfig::with_gromacs_lbfgs(std::size_t nbfgscorr) {
+    if (nbfgscorr == 0 ||
+        nbfgscorr > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+        throw std::invalid_argument("nbfgscorr must be in 1..=uint32 max");
+    }
+    SolverConfig cfg;
+    cfg.method_ = Method::GromacsLbfgs;
+    cfg.method_name_ = "gromacs_lbfgs";
+    cfg.gromacs_nbfgscorr_ = static_cast<std::uint32_t>(nbfgscorr);
+    return cfg;
+}
 
 inline std::string SolverConfig::valid_options() {
     return "accept, atom_maxmove, backward_polish, beta, c1, c2, cautious_alpha, "
            "cautious_eps, error_on_unmet, etol, extra_updates, fire_variant, gtol, istep, "
            "level_set, linesearch, linesearch_maxiter, max_evals, maxiter, maxmove, maxstep, "
-           "memory, neb_guards, noise_c, noise_eps, nstcgsteep, objective_roundoff, "
+           "memory, nbfgscorr, neb_guards, noise_c, noise_eps, nstcgsteep, objective_roundoff, "
            "periodic, project_rigid, qn_step, require_convergence, shrink, "
            "max_constraint_shrinks";
 }
 
 inline std::string SolverConfig::valid_methods() {
     return "adam, bb, bfgs, cg, conjugate_descent, dai_yuan, diis, dogleg, "
-           "fire, fire2, fletcher_reeves, fr_pr, gromacs_cg, gromacs_steep, hager_zhang, "
+           "fire, fire2, fletcher_reeves, fr_pr, gromacs_cg, gromacs_lbfgs, gromacs_steep, "
+           "hager_zhang, "
            "hestenes_stiefel, lbfgs, liu_storey, newton, polak_ribiere, pso, "
            "quickmin, rcg, rfo, sd, sr1, sr2, steepest";
 }
@@ -1285,6 +1310,9 @@ inline Method method_from_name(std::string const& name) {
     if (name == "gromacs_steep" || name == "gmx_steep") return Method::GromacsSteep;
     if (name == "gromacs_cg" || name == "gmx_cg") return Method::GromacsCg;
     if (name == "rcg") return Method::Rcg;
+    if (name == "gromacs_lbfgs" || name == "gmx_lbfgs" || name == "gromacs_l_bfgs") {
+        return Method::GromacsLbfgs;
+    }
     if (name == "sd" || name == "steepest" || name == "steepest_descent") return Method::Steepest;
     if (name == "cg" || name == "pr" || name == "pr+" || name == "polak_ribiere") {
         return Method::PolakRibiere;
@@ -1340,7 +1368,8 @@ inline bool known_option(std::string const& key) {
         "cautious_alpha", "cautious_eps", "error_on_unmet", "etol", "extra_updates",
         "fire_variant", "gtol", "istep", "level_set", "linesearch", "linesearch_maxiter",
         "max_constraint_shrinks", "max_evals", "maxiter", "maxmove", "maxstep", "memory",
-        "neb_guards", "noise_c", "noise_eps", "nstcgsteep", "objective_roundoff", "periodic",
+        "nbfgscorr", "neb_guards", "noise_c", "noise_eps", "nstcgsteep", "objective_roundoff",
+        "periodic",
         "project_rigid", "qn_step", "require_convergence", "shrink"};
     for (char const* item : keys) {
         if (key == item) return true;
@@ -1365,7 +1394,7 @@ inline void require_finite(std::string const& key, double value) {
 inline bool is_count_option(std::string const& key) {
     return key == "memory" || key == "maxiter" || key == "linesearch_maxiter" ||
            key == "extra_updates" || key == "max_evals" || key == "max_constraint_shrinks" ||
-           key == "nstcgsteep";
+           key == "nstcgsteep" || key == "nbfgscorr";
 }
 
 inline bool is_flag_option(std::string const& key) {
@@ -1497,6 +1526,12 @@ inline SolverConfig SolverConfig::build(
                 throw std::invalid_argument("nstcgsteep is out of range");
             }
             cfg.gromacs_nstcgsteep_ = static_cast<std::uint32_t>(count);
+        } else if (key == "nbfgscorr") {
+            std::size_t count = detail::require_count(key, item.second, 1);
+            if (count > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+                throw std::invalid_argument("nbfgscorr is out of range");
+            }
+            cfg.gromacs_nbfgscorr_ = static_cast<std::uint32_t>(count);
         } else if (key == "gtol" || key == "istep" || key == "level_set" || key == "maxmove" ||
                    key == "noise_eps" || key == "noise_c" || key == "c1" || key == "c2" ||
                    key == "atom_maxmove" || key == "maxstep" || key == "cautious_eps" ||
@@ -1596,6 +1631,11 @@ inline std::string SolverConfig::ignored_linesearch() const {
         method_ == Method::Diis || method_ == Method::GromacsCg || method_ == Method::Rcg || detail::is_cg(method_)) {
         return {};
     }
+    if (method_ == Method::GromacsLbfgs) {
+        return head + " on " + method_name_ +
+               ", which always runs the GROMACS do_lbfgs bracketing line search; "
+               "no linesearch kind replaces it";
+    }
     return head + " on " + method_name_ +
            ", which takes no line search. sd, the conjugate-gradient methods, bfgs, "
            "adam, and diis line search, and lbfgs does with linesearch='wolfe'";
@@ -1670,6 +1710,12 @@ inline void SolverConfig::apply(Solver& solver) const {
         if (solver.set_gromacs_cg(*gromacs_nstcgsteep_) != 0) {
             char const* msg = rgmin_last_error();
             throw std::invalid_argument(msg ? msg : "set_gromacs_cg failed");
+        }
+    }
+    if (gromacs_nbfgscorr_) {
+        if (solver.set_gromacs_lbfgs(*gromacs_nbfgscorr_) != 0) {
+            char const* msg = rgmin_last_error();
+            throw std::invalid_argument(msg ? msg : "set_gromacs_lbfgs failed");
         }
     }
     solver.set_require_convergence(control_.require_convergence);
