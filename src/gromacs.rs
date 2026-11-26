@@ -664,9 +664,15 @@ impl GromacsLbfgs {
     }
 }
 
+/// `1 / force_norm`, or zero when that is not a finite positive step.
+///
+/// A norm below `1 / f64::MAX` has no finite reciprocal and is treated as
+/// a zero force, so the next iteration stops on the line-step precision
+/// test instead of opening an infinite line step.
 fn inverse_force_norm(force_norm: f64) -> f64 {
-    if force_norm.is_finite() && force_norm > 0.0 {
-        1.0 / force_norm
+    let inverse = 1.0 / force_norm;
+    if force_norm.is_finite() && force_norm > 0.0 && inverse.is_finite() {
+        inverse
     } else {
         0.0
     }
@@ -1083,6 +1089,24 @@ mod tests {
         );
         assert_eq!(state.direction().to_owned(), direction);
         assert_eq!(state.step_size().to_bits(), step_size.to_bits());
+    }
+
+    #[test]
+    fn a_force_norm_without_a_finite_reciprocal_opens_no_line_step() {
+        let tiny = 1.0e-310_f64;
+        assert!((1.0 / tiny).is_infinite());
+        let mut state = GromacsLbfgs::new(2);
+        state.restart_steepest(ndarray::array![tiny, 0.0].view(), tiny);
+        assert_eq!(state.step_size(), 0.0);
+
+        state.mark_rebase();
+        state
+            .initialize(ndarray::array![tiny, 0.0].view(), tiny)
+            .unwrap();
+        assert_eq!(state.step_size(), 0.0);
+
+        state.restart_steepest(ndarray::array![4.0, 0.0].view(), 4.0);
+        assert_eq!(state.step_size(), 0.25);
     }
 
     #[test]
