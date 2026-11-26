@@ -43,6 +43,12 @@ from ase.utils.abc import Optimizable
 
 import rgmin.ase as rgmin_ase
 
+# ASE's upstream contract suite is serial. Running its parametrized
+# calculator and trajectory cases concurrently introduces races in ASE
+# and NumPy before the adapter is exercised.  Repeating those serialized
+# cases adds no concurrency coverage.
+pytestmark = [pytest.mark.thread_unsafe, pytest.mark.iterations(1)]
+
 # A local force relaxation reaches the rattled Au8 EMT minimum inside
 # this budget. PSO does not: it is a swarm search, not a local step.
 _RELAX_STEPS = 120
