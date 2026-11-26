@@ -67,8 +67,7 @@ The ``periodic-product`` feature adds ``periodic_product::periodic_product_spect
 It pulls in ``rug``, which links ``gmp-mpfr-sys``.
 Both crates are LGPL-3.0 or later, unlike the MIT licence of rgmin, and a binary that links either one statically must meet the LGPL terms for it.
 ``gmp-mpfr-sys`` builds GMP, MPFR and MPC from source with autotools, so it needs ``m4``, ``make``, ``diffutils`` and a C compiler.
-The crate always builds a static library, so the feature cannot be combined with ``capi``.
-``--features capi,periodic-product`` and ``--all-features`` both stop with a compile error, so name the features you want.
+The crate always builds a static library. When ``capi`` is also enabled, including under ``--all-features``, the module is left out so that library does not link GMP. ``--features periodic-product`` is the build that includes it.
 
 From git
 ~~~~~~~~
