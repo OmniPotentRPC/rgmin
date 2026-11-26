@@ -168,7 +168,10 @@ typedef enum rgmin_method_t {
     RGMIN_GROMACS_CG = 29,
     /** Riemannian CG. PRP+ and the scaled transport. ABI minor 65.
      *  rgmin_minimize_rcg carries the other coefficients. */
-    RGMIN_RCG = 30
+    RGMIN_RCG = 30,
+    /** MDMin. The time step is the control istep; the per-atom cap is the session atom cap.
+     *  A positive maxmove also caps the Euclidean length of the step. */
+    RGMIN_MDMIN = 31
 } rgmin_method_t;
 
 /** Parse a method token. Case is ignored; hyphens and spaces match underscores.

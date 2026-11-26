@@ -158,6 +158,15 @@ pub enum Method {
     /// default per-atom cap, and the stepper judges a capped move at
     /// the length it took.
     Ode12r,
+    /// MDMin: half-kick velocity Verlet with the velocity projected onto
+    /// the force, then a per-atom displacement cap.
+    ///
+    /// ASE `ase.optimize.mdmin.MDMin`. The rule is [`crate::mdmin`].
+    /// `Control::istep` is the time step and the session's per-atom cap
+    /// is `maxstep`. A positive `Control::maxmove` also caps the
+    /// Euclidean length of every step. The velocity is not rescaled
+    /// when either cap shortens the move.
+    MdMin,
     /// GDIIS geometry step.
     ///
     /// Pulay, *Convergence acceleration of iterative sequences. The
@@ -430,6 +439,7 @@ impl Method {
             Self::Dogleg => "dogleg",
             Self::QuickMin => "quickmin",
             Self::Ode12r => "ode12r",
+            Self::MdMin => "mdmin",
             Self::Diis { .. } => "diis",
             Self::NewtonCg => "newton-cg",
             Self::NewtonPcg => "newton-pcg",
@@ -482,6 +492,7 @@ impl Method {
             "dogleg" => Self::Dogleg,
             "quickmin" | "quick_min" => Self::QuickMin,
             "ode12r" => Self::Ode12r,
+            "mdmin" | "md_min" => Self::MdMin,
             "diis" | "gdiis" => Self::diis(),
             "newton_cg" => Self::NewtonCg,
             "newton_pcg" => Self::NewtonPcg,
@@ -546,6 +557,8 @@ mod name_tests {
         assert_eq!(Method::from_name("eon-cg").unwrap(), Method::eon_cg());
         assert_eq!(Method::eon_cg().as_str(), "eon-cg");
         assert_eq!(Method::from_name("ode12r").unwrap(), Method::Ode12r);
+        assert_eq!(Method::from_name("md-min").unwrap(), Method::MdMin);
+        assert_eq!(Method::MdMin.as_str(), "mdmin");
         assert_eq!(Method::from_name("quick-min").unwrap(), Method::QuickMin);
         assert_eq!(Method::from_name("gdiis").unwrap(), Method::diis());
         assert_eq!(Method::Ode12r.as_str(), "ode12r");
@@ -609,6 +622,7 @@ mod tests {
             Method::Bb,
             Method::QuickMin,
             Method::Ode12r,
+            Method::MdMin,
             Method::diis(),
             Method::pso(),
             Method::eon_cg(),

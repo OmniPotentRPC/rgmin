@@ -76,6 +76,8 @@ class Method(enum.IntEnum):
 
     RCG = 30
 
+    MDMIN = 31
+
     PolakRibiere = 0
 
     FletcherReeves = 1
@@ -129,6 +131,8 @@ class Method(enum.IntEnum):
     GromacsCg = 29
 
     Rcg = 30
+
+    MdMin = 31
 
 class Stop(enum.IntEnum):
     """

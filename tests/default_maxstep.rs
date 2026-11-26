@@ -307,6 +307,7 @@ fn default_cap_bounds_the_first_step_of_every_cartesian_arm() {
         Method::polak_ribiere(),
         Method::fire(FireKind::V1),
         Method::QuickMin,
+        Method::MdMin,
         Method::Steepest,
         Method::adam(),
     ];

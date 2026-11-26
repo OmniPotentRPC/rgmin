@@ -90,6 +90,7 @@ fn first_order() -> Vec<Method> {
         Method::Bb,
         Method::QuickMin,
         Method::Ode12r,
+        Method::MdMin,
         Method::diis(),
         Method::NewtonCg,
         Method::NewtonPcg,
@@ -371,6 +372,7 @@ mod capi {
             RGMIN_QUICKMIN,
             RGMIN_DIIS,
             RGMIN_ODE12R,
+            RGMIN_MDMIN,
             RGMIN_NEWTON_CG,
         ];
         let cases: Vec<(Entry, rgmin_method_t)> = plain

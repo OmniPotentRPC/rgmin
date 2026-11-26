@@ -58,7 +58,7 @@ Conjugacy: Fletcher-Reeves, Polak-Ribiere, Polak-Ribiere-plus,
 Hestenes-Stiefel, Dai-Yuan, conjugate descent, Hager-Zhang, Liu-Storey,
 FR-PR, and `Conjugacy::Hybrid`, the max or min of two of these.
 Line search: Brent, Armijo backtracking, Goldstein, strong Wolfe with zoom.
-Methods: nonlinear conjugate gradients (NLCG), Riemannian conjugate gradients (`rcg`), BFGS, L-BFGS, SR1, SR2, Newton, RFO, Adam, steepest descent, PSO, FIRE and FIRE 2.0, quick-min, Barzilai-Borwein, ODE12r, DIIS, Powell dogleg, Steihaug-Toint Newton-CG (`newton-cg`, `newton-pcg`).
+Methods: nonlinear conjugate gradients (NLCG), Riemannian conjugate gradients (`rcg`), BFGS, L-BFGS, SR1, SR2, Newton, RFO, Adam, steepest descent, PSO, FIRE and FIRE 2.0, quick-min, MDMin, Barzilai-Borwein, ODE12r, DIIS, Powell dogleg, Steihaug-Toint Newton-CG (`newton-cg`, `newton-pcg`).
 Newton, RFO and the dogleg also take a Hessian from the host.
 `Solver::set_exp` installs the exponential preconditioner of
 Packwood et al., J. Chem. Phys. 144, 164109 (2016).

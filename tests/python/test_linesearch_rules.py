@@ -40,6 +40,7 @@ UNSEARCHED = (
     "fire",
     "fire2",
     "quickmin",
+    "mdmin",
     "ode12r",
     "bb",
     "sr1",

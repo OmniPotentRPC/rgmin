@@ -30,10 +30,11 @@ from __future__ import annotations
 
 import sys
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 from rgmin._gromacs import (
     GROMACS_KJMOL_NM_TO_EV_ANGSTROM,
@@ -130,6 +131,7 @@ class _RgminOptimizer(_ASEOptimizer):
             self._native = Session(
                 self.kind, self.optimizable.ndofs(), **{**self._session_options(), **self._stops}
             )
+            self._configure(self._native)
             if self._pending:
                 self._replay(self._pending)
             self._pending = None
@@ -245,9 +247,15 @@ class _RgminOptimizer(_ASEOptimizer):
             return False
         return cast(bool, converged)
 
+    def _configure(self, native: Session) -> None:
+        """Settings a new session needs before its first step or a replay."""
+
     def _before_step(self, native: Session) -> bool:
         """Return true after clearing the session memory for this step."""
         return False
+
+    def _replay_step(self, native: Session, x: list[float]) -> None:
+        """What :meth:`_before_step` installs, rebuilt at the recorded start ``x``."""
 
     def _forget(self, native: Session) -> None:
         native.forget()
@@ -314,6 +322,7 @@ class _RgminOptimizer(_ASEOptimizer):
                     )
                 return value * scale, [g * scale for g in gradient]
 
+            self._replay_step(native, list(entry["x"]))
             if entry.get("forget"):
                 native.forget()
             updated, _value, _gnorm = native.step(list(entry["x"]), answer)
@@ -1242,6 +1251,427 @@ class GPMin(_RgminOptimizer):
         return (self.weight, self.scale, self.noise)
 
 
+# ASE 3.29 ``ODE12r`` class default. The free function's default is looser.
+_ODE12R_ASE_RTOL = 1.0 / 100.0
+_PRECON_LBFGS_MAXSTEP = 0.04
+_PRECON_AUTO_ATOMS = 100
+_EXP_SEARCH = 12.0
+_EXP_CUTOFF_FACTOR = 2.0
+_CELL_OFF_DIAGONAL_TOL = 1.0 / 1_000_000_000.0
+_AUTO_PRECON_WARNING = (
+    "The system is likely too small to benefit from "
+    "the standard preconditioner, hence it is "
+    "disabled. To re-enable preconditioning, call "
+    "`PreconLBFGS` by explicitly providing the "
+    "kwarg `precon`"
+)
+
+
+def _ase_or(value: float | None, default: float, name: str) -> float:
+    """ASE's ``value or default``, refusing a negative or non-finite number."""
+    if value is None or value == 0:
+        return default
+    number = float(value)
+    if not np.isfinite(number) or number < 0.0:
+        raise ValueError(f"{name} must be finite and positive, not {value!r}")
+    return number
+
+
+def _natoms(atoms: Any) -> int | None:
+    try:
+        return len(atoms)
+    except TypeError:
+        return None
+
+
+def _precon_name(precon: Any) -> str | None:
+    """ASE preconditioner name. ``None`` is the identity."""
+    if precon is None:
+        return None
+    if isinstance(precon, str):
+        return precon.lower()
+    cls = type(precon)
+    module = getattr(cls, "__module__", "")
+    if isinstance(module, str) and (
+        module == "ase.optimize.precon" or module.startswith("ase.optimize.precon.")
+    ):
+        return cls.__name__.lower()
+    return ""
+
+
+def _resolve_precon(precon: Any, *, allow_auto: bool, natoms: int | None) -> str:
+    """Map an ASE 3.29 preconditioner argument onto rgmin's metric.
+
+    ``None``, ``'ID'`` and an identity preconditioner leave the metric
+    off. ``'Exp'`` and an ``Exp`` instance install the exponential
+    metric. ``'auto'`` is the PreconLBFGS default: fewer than 100 atoms
+    leave the metric off and emit ASE's warning, and a larger system
+    installs Exp. Every other kind is refused.
+    """
+    name = _precon_name(precon)
+    if name in {None, "id", "identityprecon", "none"}:
+        return "off"
+    if name == "exp":
+        return "exp"
+    if name == "auto" and allow_auto:
+        count = natoms if natoms is not None else 0
+        if count < _PRECON_AUTO_ATOMS:
+            warnings.warn(_AUTO_PRECON_WARNING, stacklevel=3)
+            return "off"
+        return "exp"
+    accepted = "None, 'ID' or 'Exp'" + (" or 'auto'" if allow_auto else "")
+    raise ValueError(f"unsupported preconditioner {precon!r}; rgmin accepts {accepted}")
+
+
+def _resolve_ode_precon(precon: Any) -> str:
+    """ASE identity for ``None`` and ``'ID'``, rgmin Exp for ``'Exp'``."""
+    if precon is None:
+        return "off"
+    if isinstance(precon, str):
+        token = precon.lower()
+        if token in {"id", "none"}:
+            return "off"
+        if token == "exp":
+            return "exp"
+    raise ValueError(f"unsupported ODE12r preconditioner {precon!r}; rgmin accepts None, 'ID' or 'Exp'")
+
+
+def _cartesian_atoms(optimizable: Any) -> Any | None:
+    """Atoms whose positions are the whole coordinate vector, or ``None``."""
+    atoms = getattr(optimizable, "atoms", optimizable)
+    get_positions = getattr(atoms, "get_positions", None)
+    if get_positions is None:
+        return None
+    positions = np.asarray(get_positions(), dtype=np.float64)
+    if positions.ndim != 2 or positions.shape[1] != 3:
+        return None
+    if positions.size != int(optimizable.ndofs()):
+        return None
+    return atoms
+
+
+def _orthorhombic_lengths(atoms: Any) -> tuple[float, float, float] | None:
+    cell = np.asarray(getattr(atoms, "cell", np.zeros((3, 3))), dtype=np.float64)
+    if cell.shape != (3, 3):
+        return None
+    off = cell.copy()
+    np.fill_diagonal(off, 0.0)
+    if float(np.max(np.abs(off))) > _CELL_OFF_DIAGONAL_TOL:
+        return None
+    pbc = np.asarray(getattr(atoms, "pbc", False), dtype=bool).reshape(-1)
+    if not bool(np.any(pbc)):
+        return None
+    lengths = np.diag(cell)
+    if not bool(np.all(np.isfinite(lengths))) or bool(np.any(lengths <= 0.0)):
+        return None
+    return (float(lengths[0]), float(lengths[1]), float(lengths[2]))
+
+
+def _ase_neighbor_list(
+    quantities: str, atoms: Any, cutoff: float
+) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.float64]]:
+    from ase.neighborlist import neighbor_list as ase_neighbor_list
+
+    call = cast(
+        Callable[[str, Any, float], tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.float64]]],
+        ase_neighbor_list,
+    )
+    return call(quantities, atoms, cutoff)
+
+
+def _ase_unit_cell_filter(atoms: Any) -> Any:
+    from ase.filters import UnitCellFilter as ASEUnitCellFilter
+
+    factory = cast(Callable[[Any], Any], ASEUnitCellFilter)
+    return factory(atoms)
+
+
+def _exp_pairs(atoms: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    index_i, index_j, distance = _ase_neighbor_list("ijd", atoms, _EXP_SEARCH)
+    if distance.size == 0:
+        raise ValueError("Exp preconditioner found no neighbours within the search radius")
+    nearest = float(np.min(distance))
+    if not np.isfinite(nearest) or nearest <= 0.0:
+        raise ValueError("Exp preconditioner nearest-neighbour distance is not positive")
+    cutoff = _EXP_CUTOFF_FACTOR * nearest
+    if cutoff > _EXP_SEARCH:
+        index_i, index_j, distance = _ase_neighbor_list("ijd", atoms, cutoff)
+    keep = (distance < cutoff) & (index_i < index_j)
+    if not bool(np.any(keep)):
+        raise ValueError("Exp preconditioner neighbour list is empty inside the cutoff")
+    return index_i[keep].astype(np.int64), index_j[keep].astype(np.int64), distance[keep]
+
+
+def _install_exp(native: Session, optimizable: Any, x: list[float] | None = None) -> None:
+    """Install Exp at the current positions, or at ``x`` on a copy of the atoms."""
+    atoms = _cartesian_atoms(optimizable)
+    if atoms is None:
+        return
+    if x is not None:
+        atoms = atoms.copy()
+        atoms.set_positions(np.asarray(x, dtype=np.float64).reshape(-1, 3), apply_constraint=False)
+    positions = np.asarray(atoms.get_positions(), dtype=np.float64).reshape(-1)
+    index_i, index_j, distance = _exp_pairs(atoms)
+    native.set_exp(
+        positions.tolist(),
+        index_i.tolist(),
+        index_j.tolist(),
+        distance.tolist(),
+        _orthorhombic_lengths(atoms),
+    )
+
+
+class ODE12r(_RgminOptimizer):
+    """ASE ``ode.ODE12r``: adaptive Euler on the preconditioned force.
+
+    The constructor follows ASE 3.29. ``rtol`` defaults to 0.01, the
+    class value, and the first step length is
+    ``0.5 * sqrt(rtol) / ||F||_inf``. There is no per-atom cap: ASE's
+    class has no ``maxstep``. ``precon=None`` and ``'ID'`` leave the
+    metric as the identity. ``precon='Exp'`` installs rgmin's
+    exponential metric on a Cartesian ``3N`` layout and is refused for
+    any other kind.
+
+    ``alpha`` scales the value and the gradient the session sees, as
+    ASE's ``fprime`` divides by ``H0``. ``callback_always`` and
+    ``verbose`` are stored. The session does not print the ODE log.
+    """
+
+    kind = "ode12r"
+
+    def __init__(
+        self,
+        atoms: Any,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        callback_always: bool = False,
+        alpha: float = 1.0,
+        precon: Any = None,
+        verbose: int = 0,
+        rtol: float = _ODE12R_ASE_RTOL,
+        **kwargs: Any,
+    ) -> None:
+        self.callback_always = bool(callback_always)
+        self.alpha = float(alpha)
+        if not np.isfinite(self.alpha) or self.alpha == 0.0:
+            raise ValueError(f"ODE12r alpha must be finite and nonzero, not {alpha!r}")
+        self.verbose = int(verbose)
+        self.rtol = float(rtol)
+        if not np.isfinite(self.rtol) or self.rtol <= 0.0:
+            raise ValueError(f"ODE12r rtol must be finite and positive, not {rtol!r}")
+        self._precon_mode = _resolve_ode_precon(precon)
+        self.precon = precon
+        super().__init__(atoms, logfile=logfile, trajectory=trajectory, **kwargs)
+
+    @property
+    def _scale(self) -> float:
+        return 1.0 / self.alpha
+
+    def _session_options(self) -> dict[str, Any]:
+        return {"uncapped": True, "max_atom": 0.0}
+
+    def _configure(self, native: Session) -> None:
+        native.configure_ode12r_ase(self.rtol)
+
+    def _before_step(self, native: Session) -> bool:
+        if self._precon_mode == "exp":
+            _install_exp(native, self.optimizable)
+        return False
+
+    def _replay_step(self, native: Session, x: list[float]) -> None:
+        if self._precon_mode == "exp":
+            _install_exp(native, self.optimizable, x)
+
+
+class MDMin(_RgminOptimizer):
+    """ASE ``MDMin``: velocity Verlet with the velocity reset onto the force.
+
+    ``dt`` and ``maxstep`` follow ASE. ``None`` and ``0`` select the
+    defaults, 0.2 and 0.2. A negative or non-finite value is a
+    ``ValueError``. The displacement scale is
+    ``maxstep / (1/1_000_000 + longest)`` clipped into ``[0, 1]``, and
+    the velocity is not rescaled when that shortens the move.
+    """
+
+    kind = "mdmin"
+    defaults = {"dt": 0.2, "maxstep": 0.2}
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        dt: float | None = None,
+        maxstep: float | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self.dt = _ase_or(dt, self.defaults["dt"], "dt")
+        self.maxstep = _ase_or(maxstep, self.defaults["maxstep"], "maxstep")
+        super().__init__(
+            atoms,
+            restart=restart,
+            logfile=logfile,
+            trajectory=trajectory,
+            **kwargs,
+        )
+
+    def _session_options(self) -> dict[str, Any]:
+        return {"max_atom": self.maxstep, "istep": self.dt}
+
+
+class PreconLBFGS(LBFGS):
+    """ASE ``PreconLBFGS`` on rgmin's exponential metric.
+
+    ``precon=None`` and ``precon='ID'`` leave the metric off, as in
+    ASE 3.29. ``precon='Exp'`` and an ``Exp`` instance install that
+    metric on a Cartesian ``3N`` layout. A cell filter or any other
+    layout keeps the underlying L-BFGS step. ``precon='auto'`` is ASE's
+    rule: fewer than 100 atoms leaves the metric off, with ASE's
+    warning, and a larger system installs Exp. Any other kind,
+    including ``'C1'``, ``'FF'`` and ``'Pfrommer'``, raises
+    ``ValueError``.
+
+    ``use_armijo``, ``c1``, ``c2`` and ``a_min`` are stored. The step
+    is rgmin's scaled L-BFGS with ``H0 = P^{-1}`` when the metric is
+    installed, not ASE's Armijo line search. ``rigid_units``,
+    ``rotation_factors`` and ``Hinv`` are refused. ``variable_cell``
+    wraps a ``UnitCellFilter``, and on that layout the metric stays off.
+    ``maxstep`` defaults to 0.04.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        maxstep: float | None = None,
+        memory: int = 100,
+        damping: float = 1.0,
+        alpha: float = 70.0,
+        precon: Any = "auto",
+        variable_cell: bool = False,
+        use_armijo: bool = True,
+        c1: float = 0.23,
+        c2: float = 0.46,
+        a_min: float | None = None,
+        rigid_units: Any = None,
+        rotation_factors: Any = None,
+        Hinv: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        if rigid_units is not None or rotation_factors is not None or Hinv is not None:
+            raise ValueError("rigid_units, rotation_factors and Hinv are not available on rgmin PreconLBFGS")
+        if variable_cell:
+            atoms = _ase_unit_cell_filter(atoms)
+        self.variable_cell = bool(variable_cell)
+        self.use_armijo = bool(use_armijo)
+        self.c1 = float(c1)
+        self.c2 = float(c2)
+        if a_min is None:
+            self.a_min = 1e-10 if use_armijo else 1e-8
+        else:
+            self.a_min = a_min
+        self.precon = precon
+        self._precon_mode = _resolve_precon(precon, allow_auto=True, natoms=_natoms(atoms))
+        if maxstep is None:
+            maxstep = _PRECON_LBFGS_MAXSTEP
+        super().__init__(
+            atoms,
+            restart=restart,
+            logfile=logfile,
+            trajectory=trajectory,
+            maxstep=maxstep,
+            memory=memory,
+            damping=damping,
+            alpha=alpha,
+            use_line_search=False,
+            **kwargs,
+        )
+
+    def _before_step(self, native: Session) -> bool:
+        if self._precon_mode == "exp":
+            _install_exp(native, self.optimizable)
+        return False
+
+    def _replay_step(self, native: Session, x: list[float]) -> None:
+        if self._precon_mode == "exp":
+            _install_exp(native, self.optimizable, x)
+
+
+class PreconFIRE(FIRE):
+    """ASE ``PreconFIRE`` parameters on rgmin's FIRE step.
+
+    ``precon=None`` and ``precon='ID'`` leave the metric off, as in
+    ASE 3.29. ``precon='Exp'`` and an ``Exp`` instance install the
+    exponential metric when the coordinates are a Cartesian ``3N``
+    layout. A cell filter or any other layout runs FIRE without that
+    metric. Any other kind raises ``ValueError``.
+
+    ``use_armijo`` and ``theta`` are stored. The integrator is rgmin
+    FIRE, whose metric is ``P`` when Exp is installed, not ASE's Armijo
+    velocity mix. ``variable_cell`` wraps a ``UnitCellFilter``.
+    ``maxmove`` is FIRE's Euclidean ``maxstep``.
+    """
+
+    def __init__(
+        self,
+        atoms: Any,
+        restart: Any = None,
+        logfile: Any = "-",
+        trajectory: Any = None,
+        dt: float = 0.1,
+        maxmove: float = 0.2,
+        dtmax: float = 1.0,
+        Nmin: int = 5,
+        finc: float = 1.1,
+        fdec: float = 0.5,
+        astart: float = 0.1,
+        fa: float = 0.99,
+        a: float = 0.1,
+        theta: float = 0.1,
+        precon: Any = None,
+        use_armijo: bool = True,
+        variable_cell: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        if variable_cell:
+            atoms = _ase_unit_cell_filter(atoms)
+        self.variable_cell = bool(variable_cell)
+        self.theta = float(theta)
+        self.use_armijo = bool(use_armijo)
+        self.precon = precon
+        self._precon_mode = _resolve_precon(precon, allow_auto=False, natoms=_natoms(atoms))
+        super().__init__(
+            atoms,
+            restart=restart,
+            logfile=logfile,
+            trajectory=trajectory,
+            dt=dt,
+            maxstep=maxmove,
+            dtmax=dtmax,
+            Nmin=Nmin,
+            finc=finc,
+            fdec=fdec,
+            astart=astart,
+            fa=fa,
+            a=a,
+            **kwargs,
+        )
+        self.maxmove = self.maxstep
+
+    def _before_step(self, native: Session) -> bool:
+        if self._precon_mode == "exp":
+            _install_exp(native, self.optimizable)
+        return super()._before_step(native)
+
+    def _replay_step(self, native: Session, x: list[float]) -> None:
+        if self._precon_mode == "exp":
+            _install_exp(native, self.optimizable, x)
+        super()._replay_step(native, x)
+
+
 __all__ = [
     "BFGS",
     "CG",
@@ -1264,9 +1694,13 @@ __all__ = [
     "HestenesStiefel",
     "LBFGSLineSearch",
     "LiuStorey",
+    "MDMin",
     "NewtonCG",
     "NewtonPCG",
+    "ODE12r",
     "PolakRibiere",
+    "PreconFIRE",
+    "PreconLBFGS",
     "RiemannianCG",
     "SteepestDescent",
 ]

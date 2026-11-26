@@ -173,6 +173,10 @@ pub enum rgmin_method_t {
     /// Riemannian CG. Default coefficient is PRP+, transport is scaled.
     /// ABI minor 65. The options record carries the other coefficients.
     RGMIN_RCG = 30,
+    /// MDMin: velocity Verlet with the velocity reset onto the force.
+    /// The time step is the control istep. The per-atom cap is the session
+    /// atom cap, and a positive maxmove also caps the Euclidean length.
+    RGMIN_MDMIN = 31,
 }
 
 /// Closed leaf conjugacy. Integers match dest [`Conjugacy`] declaration
@@ -632,6 +636,7 @@ fn method_from_c(m: rgmin_method_t, memory: usize) -> Method {
         rgmin_method_t::RGMIN_GROMACS_STEEP => Method::GromacsSteep,
         rgmin_method_t::RGMIN_GROMACS_CG => Method::GromacsCg,
         rgmin_method_t::RGMIN_RCG => Method::rcg(),
+        rgmin_method_t::RGMIN_MDMIN => Method::MdMin,
     }
 }
 
@@ -680,6 +685,7 @@ fn method_to_c(method: &Method) -> Result<rgmin_method_t, ()> {
         Method::NewtonCg => rgmin_method_t::RGMIN_NEWTON_CG,
         Method::NewtonPcg => rgmin_method_t::RGMIN_NEWTON_PCG,
         Method::Rcg { .. } => rgmin_method_t::RGMIN_RCG,
+        Method::MdMin => rgmin_method_t::RGMIN_MDMIN,
     };
     Ok(tag)
 }

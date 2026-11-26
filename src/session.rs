@@ -407,6 +407,7 @@ enum Overlay {
     None,
     QuickMin(Box<QuickMinState>, Box<QuickMinSession>),
     Ode12r(Box<crate::ode12r::Ode12rState>),
+    MdMin(Box<crate::mdmin::MdMinState>),
     Diis(Box<DiisState>),
     GromacsSteep(Box<GromacsSteep>),
     GpMin(Option<Box<GpMin>>),
@@ -648,6 +649,7 @@ impl Solver {
                 Box::new(QuickMinSession::new(istep)),
             ),
             Method::Ode12r => Overlay::Ode12r(Box::new(crate::ode12r::Ode12rState::new(istep))),
+            Method::MdMin => Overlay::MdMin(Box::new(crate::mdmin::MdMinState::new(dim, istep))),
             Method::Diis { memory } => Overlay::Diis(Box::new(DiisState::new(*memory))),
             Method::GromacsSteep => Overlay::GromacsSteep(Box::new(GromacsSteep::new(istep))),
             Method::GpMin => {
@@ -673,6 +675,7 @@ impl Solver {
             );
         }
         solver.apply_default_atom_cap();
+        solver.sync_mdmin_cap();
         solver
     }
 
@@ -719,6 +722,7 @@ impl Solver {
         if self.steps == 0 {
             self.reset_sr_radius();
         }
+        self.sync_mdmin_cap();
     }
 
     /// Family used by [`crate::select_precon`] when the caller asks for auto.
@@ -1021,6 +1025,42 @@ impl Solver {
         }
         if self.steps == 0 {
             self.reset_sr_radius();
+        }
+        self.sync_mdmin_cap();
+    }
+
+    /// Copy the session per-atom cap onto an MDMin stepper. `None` leaves
+    /// that displacement unscaled.
+    fn sync_mdmin_cap(&mut self) {
+        if let Overlay::MdMin(state) = &mut self.overlay {
+            state.maxstep = self.atom_maxmove;
+        }
+    }
+
+    /// ASE 3.29 ODE12r: `rtol` and the extrapolate-3 step length. The
+    /// opening step is then taken from the force infinity norm. A
+    /// non-positive or non-finite `rtol` is refused, and so is a session
+    /// that is not ODE12r.
+    pub fn configure_ode12r_ase(&mut self, rtol: f64) -> Result<()> {
+        if !(rtol.is_finite() && rtol > 0.0) {
+            return Err(Error::Ode12r {
+                what: "rtol must be finite and positive",
+            });
+        }
+        match &mut self.overlay {
+            Overlay::Ode12r(state) => {
+                let applied = state.configure_ase(rtol);
+                if applied {
+                    Ok(())
+                } else {
+                    Err(Error::Ode12r {
+                        what: "rtol must be finite and positive",
+                    })
+                }
+            }
+            _ => Err(Error::Ode12r {
+                what: "ASE settings apply to an ODE12r session",
+            }),
         }
     }
 
@@ -6012,6 +6052,7 @@ impl Solver {
                 session.forget_last();
             }
             Overlay::Ode12r(state) => state.reset(),
+            Overlay::MdMin(state) => state.reset(),
             Overlay::Diis(state) => state.clear(),
             Overlay::GromacsSteep(state) => state.reset(self.control.istep),
             Overlay::GpMin(Some(state)) => {
@@ -6971,7 +7012,11 @@ impl Solver {
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
                     crate::box_objective::project_tangent(obj.bounds(), x, &mut steepest);
                 }
-                let h = state.open();
+                let h = if state.scheme == crate::ode12r::Ode12rScheme::AseMin {
+                    state.open_from_force(crate::ode12r::inf_norm(&steepest))
+                } else {
+                    state.open()
+                };
                 let dx = steepest.mapv(|v| h * v);
                 let proposed = &*x + &dx;
                 let mut trial = proposed.clone();
@@ -7007,6 +7052,31 @@ impl Solver {
                     *x = trial;
                     value = trial_value;
                     grad = trial_grad;
+                }
+            }
+            Overlay::MdMin(state) => {
+                #[allow(unused_mut)]
+                let mut force = grad.mapv(|g| -g);
+                #[cfg(feature = "highs")]
+                if boxed {
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut force);
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
+                }
+                let dx = crate::mdmin::mdmin_displacement(state, &force);
+                let mut trial = &*x + &dx;
+                // The stepper applied the per-atom cap; an explicit
+                // Euclidean cap binds as well.
+                if let Some(cap) = self.control.maxmove_cap() {
+                    crate::step::scale_step(x, &mut trial, cap);
+                }
+                trial = obj.bounds().clip(trial.view());
+                *x = trial;
+                let ev = obj.value_and_gradient(x.view());
+                value = ev.0;
+                grad = ev.1;
+                #[cfg(feature = "highs")]
+                if boxed {
+                    crate::box_objective::project_tangent(obj.bounds(), x, &mut state.vel);
                 }
             }
             Overlay::Diis(state) => {
@@ -7303,6 +7373,7 @@ impl Inner {
             // variant the constraint stepper matches.
             Method::QuickMin
             | Method::Ode12r
+            | Method::MdMin
             | Method::Diis { .. }
             | Method::Rcg { .. }
             | Method::GromacsSteep
