@@ -136,6 +136,7 @@ typedef struct rgmin_abi_stamp_t {
  * Revision 5 was value, steps, grad_norm, stop. Both sides shipped
  * those structs as revision 4 with different fields, so the union was
  * revision 5. */
+
 /** Solver selector. \c RGMIN_LBFGS is the production unconstrained method. */
 typedef enum rgmin_method_t {
     RGMIN_POLAK_RIBIERE = 0,
