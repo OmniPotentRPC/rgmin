@@ -5572,6 +5572,7 @@ fn control_with_flags(c: &rgmin_control_t, error_on_unmet: i32, backward_polish:
         etol: None,
         max_evals: None,
         require_convergence: c.require_convergence != 0,
+        cg_slope_opening: false,
     }
 }
 
@@ -9628,7 +9629,7 @@ mod default_tests {
         bool,
         Option<u64>,
         Option<usize>,
-        bool,
+        (bool, bool),
     );
     type ExpBits = (u64, u64, Option<u64>, Option<u64>, Option<u64>, bool, Cell);
     type LindhBits = (u64, Option<u64>, bool, bool, Cell, Option<u64>, bool);
@@ -9662,6 +9663,7 @@ mod default_tests {
             etol,
             max_evals,
             require_convergence,
+            cg_slope_opening,
         } = control;
         (
             maxiter,
@@ -9675,7 +9677,7 @@ mod default_tests {
             backward_polish,
             opt(etol),
             max_evals,
-            require_convergence,
+            (require_convergence, cg_slope_opening),
         )
     }
 

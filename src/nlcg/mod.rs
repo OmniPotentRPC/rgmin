@@ -47,7 +47,8 @@ pub enum Conjugacy {
     ///
     /// Hager and Zhang, *A New Conjugate Gradient Method with Guaranteed
     /// Descent and an Efficient Line Search*,
-    /// <https://doi.org/10.1137/030601880>.
+    /// <https://doi.org/10.1137/030601880>. A non-finite value of the
+    /// formula is 0, the same restart the other formulas take.
     HagerZhang,
     /// Liu-Storey (1991): `- g·y / (d_old·g_old)`.
     ///
@@ -179,6 +180,26 @@ impl Conjugacy {
         }
     }
 
+    /// True when β reads the previous search direction.
+    ///
+    /// Fletcher-Reeves, Polak-Ribiere and FR-PR do not. A stored direction
+    /// that already includes a step scale can be passed to them unchanged.
+    pub(crate) fn coefficient_uses_direction(&self) -> bool {
+        match self {
+            Self::FletcherReeves | Self::PolakRibiere | Self::PolakRibierePlus | Self::FrPr => {
+                false
+            }
+            Self::Hybrid { a, b, .. } => {
+                a.coefficient_uses_direction() || b.coefficient_uses_direction()
+            }
+            Self::HestenesStiefel
+            | Self::DaiYuan
+            | Self::ConjugateDescent
+            | Self::HagerZhang
+            | Self::LiuStorey => true,
+        }
+    }
+
     /// β for this method. Degenerate denominators return 0.
     pub fn beta(&self, ctx: &ConjugacyContext<'_>) -> f64 {
         let g = ctx.current_gradient;
@@ -207,7 +228,7 @@ impl Conjugacy {
                 let y_g = dot(g, y.view());
                 let yy = dot(y.view(), y.view());
                 let d_g = dot(d, g);
-                y_g / y_d - 2.0 * yy * d_g / (y_d * y_d)
+                hager_zhang_beta(y_g, y_d, yy, d_g)
             }
             Self::LiuStorey => div(-dot_diff(g, g, gold), dot(d, gold)),
             Self::FrPr => {
@@ -274,7 +295,7 @@ impl Conjugacy {
                 let yz = &z - &z_old;
                 let yy = dot(y.view(), yz.view());
                 let d_g = dot(d, g);
-                zy / y_d - 2.0 * yy * d_g / (y_d * y_d)
+                hager_zhang_beta(zy, y_d, yy, d_g)
             }
             Self::LiuStorey => div(-zy, dot(d, gold)),
             Self::FrPr => {
@@ -322,6 +343,15 @@ fn dot_diff(a: ArrayView1<'_, f64>, b: ArrayView1<'_, f64>, c: ArrayView1<'_, f6
 /// term dominates, so the test is relative and a genuine ratio is kept.
 /// β is already dimensionless, so the floor does not have to be scaled
 /// by a length unit.
+/// Hager-Zhang equation 1.3. A non-finite product is a restart.
+fn hager_zhang_beta(numer: f64, y_d: f64, yy: f64, d_g: f64) -> f64 {
+    if !(numer.is_finite() && y_d.is_finite() && yy.is_finite() && d_g.is_finite()) {
+        return 0.0;
+    }
+    let beta = numer / y_d - 2.0 * yy * d_g / (y_d * y_d);
+    if beta.is_finite() { beta } else { 0.0 }
+}
+
 pub(crate) fn div(num: f64, den: f64) -> f64 {
     if !num.is_finite() || !den.is_finite() || den.abs() <= f64::EPSILON * (num.abs() + 1.0) {
         0.0

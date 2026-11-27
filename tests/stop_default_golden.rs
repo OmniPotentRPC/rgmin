@@ -154,7 +154,7 @@ const GOLDEN: &[&str] = &[
     "morse/lbfgs steps=7 status=Tolerance value=c000ff6a3210c7a6 grad=3dfa6e4a52001777 coords=6a8c1841aee2e43f",
     "rosenbrock/lbfgs steps=27 status=Tolerance value=3b23169e72000000 grad=3ddfeb03cfb93815 coords=b80c3a7c8624f6e3",
     "morse/pr steps=300 status=Budget value=c000ff6a3210c7a6 grad=3e5c0e56c87bdb53 coords=affd5abda9f0b255",
-    "rosenbrock/pr steps=37 status=Tolerance value=3aacc96280000000 grad=3da412138b45e651 coords=f71c60710e03754b",
+    "rosenbrock/pr steps=35 status=Tolerance value=3af2ebf120000000 grad=3db1bab1b4a69a66 coords=621e1a33a9989162",
     "morse/sd steps=300 status=Budget value=c000ff6a3210c7a6 grad=3e54271f7fe84c07 coords=42c75a34b1e9d91e",
     "rosenbrock/sd steps=48 status=Tolerance value=3c56e3f15264fd00 grad=3e211a9151071e56 coords=28fc4ccfd726b152",
     "morse/bfgs steps=300 status=Budget value=c000ff6a3210c7a6 grad=3e582acc505626b1 coords=108f554976f2473a",

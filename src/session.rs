@@ -5851,46 +5851,76 @@ impl Solver {
                     grad = t.g;
                     if t.moved || self.accept != Accept::Step {
                         let z_new = metric_vector(&self.precon, &grad)?;
-                        let ctx = ConjugacyContext {
-                            current_gradient: grad.view(),
-                            previous_gradient: g_old.view(),
-                            previous_direction: d_old.view(),
-                        };
-                        let mut beta = if *z_epoch != self.metric_epoch {
-                            0.0
-                        } else {
-                            conjugacy.beta_metric(&ctx, z_new.view(), z_old.view())
-                        };
-                        if restart.should_restart_metric(
-                            grad.view(),
-                            z_new.view(),
-                            g_old.view(),
-                            z_old.view(),
-                        ) {
-                            beta = 0.0;
-                        }
-                        *dir = if self.accept == Accept::Step {
-                            Array1::from_iter(
-                                z_new
-                                    .iter()
-                                    .zip(d_old.iter())
-                                    .map(|(z, d)| -z * self.istep + beta * d),
-                            )
-                        } else {
-                            Array1::from_iter(
-                                z_new.iter().zip(d_old.iter()).map(|(z, d)| -z + beta * d),
-                            )
-                        };
-                        // A non-descent direction is not a valid conjugate step.
-                        let gd = crate::vecops::dot(grad.view(), dir.view());
-                        if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
-                            self.nlcg_descent_fallbacks += 1;
+                        if !t.moved {
                             *dir = nlcg_steepest(&z_new, self.accept, self.istep);
+                            g_old.assign(&grad);
+                            z_old.assign(&z_new);
+                            d_old.assign(dir);
+                            *z_epoch = self.metric_epoch;
+                        } else {
+                            let scale = if self.accept == Accept::Step {
+                                self.istep
+                            } else {
+                                1.0
+                            };
+                            let rescale = scale.is_finite()
+                                && scale != 0.0
+                                && scale != 1.0
+                                && conjugacy.coefficient_uses_direction();
+                            let d_owned = if rescale {
+                                Some(d_old.mapv(|v| v / scale))
+                            } else {
+                                None
+                            };
+                            let d_beta = d_owned.as_ref().map(|d| d.view()).unwrap_or(d_old.view());
+                            let ctx = ConjugacyContext {
+                                current_gradient: grad.view(),
+                                previous_gradient: g_old.view(),
+                                previous_direction: d_beta,
+                            };
+                            let mut beta = if *z_epoch != self.metric_epoch {
+                                0.0
+                            } else {
+                                conjugacy.beta_metric(&ctx, z_new.view(), z_old.view())
+                            };
+                            if restart.should_restart_metric(
+                                grad.view(),
+                                z_new.view(),
+                                g_old.view(),
+                                z_old.view(),
+                            ) {
+                                beta = 0.0;
+                            }
+                            *dir = if rescale {
+                                Array1::from_iter(
+                                    z_new
+                                        .iter()
+                                        .zip(d_beta.iter())
+                                        .map(|(z, d)| scale * (-z + beta * d)),
+                                )
+                            } else if self.accept == Accept::Step {
+                                Array1::from_iter(
+                                    z_new
+                                        .iter()
+                                        .zip(d_old.iter())
+                                        .map(|(z, d)| -z * self.istep + beta * d),
+                                )
+                            } else {
+                                Array1::from_iter(
+                                    z_new.iter().zip(d_old.iter()).map(|(z, d)| -z + beta * d),
+                                )
+                            };
+                            // A non-descent direction is not a valid conjugate step.
+                            let gd = crate::vecops::dot(grad.view(), dir.view());
+                            if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+                                self.nlcg_descent_fallbacks += 1;
+                                *dir = nlcg_steepest(&z_new, self.accept, self.istep);
+                            }
+                            g_old.assign(&grad);
+                            z_old.assign(&z_new);
+                            d_old.assign(dir);
+                            *z_epoch = self.metric_epoch;
                         }
-                        g_old.assign(&grad);
-                        z_old.assign(&z_new);
-                        d_old.assign(dir);
-                        *z_epoch = self.metric_epoch;
                     }
                     if self.accept != Accept::Step {
                         *prev_alpha = t.alpha;
@@ -7997,6 +8027,7 @@ mod tests {
                 etol: None,
                 max_evals: None,
                 require_convergence: false,
+                cg_slope_opening: false,
                 stop_norm: StopNorm::Two,
             },
             2,
@@ -8288,6 +8319,7 @@ mod tests {
                     etol: None,
                     max_evals: None,
                     require_convergence: false,
+                    cg_slope_opening: false,
                     stop_norm: StopNorm::Two,
                 },
                 2,
@@ -8785,6 +8817,7 @@ mod retained_neb_guard_tests {
                 etol: None,
                 max_evals: None,
                 require_convergence: false,
+                cg_slope_opening: false,
                 stop_norm: StopNorm::Two,
             },
             3,
@@ -8828,6 +8861,7 @@ mod retained_neb_guard_tests {
                 etol: None,
                 max_evals: None,
                 require_convergence: false,
+                cg_slope_opening: false,
                 stop_norm: StopNorm::Two,
             },
             3,
@@ -8938,6 +8972,7 @@ mod retained_neb_guard_tests {
                 etol: None,
                 max_evals: None,
                 require_convergence: false,
+                cg_slope_opening: false,
                 stop_norm: StopNorm::Two,
             },
             n,
