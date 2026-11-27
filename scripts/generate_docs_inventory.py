@@ -63,6 +63,31 @@ def rust_declaration(line: str) -> tuple[str, str] | None:
     return None
 
 
+def rust_trait_impl_member(line: str) -> tuple[str, str] | None:
+    """Item in a trait impl. The trait sets the visibility, so `pub` is optional."""
+    if re.match(r"\s*pub\s*\(", line):
+        return None
+    function = re.match(
+        r"^\s*(?:pub\s+(?!\())?"
+        r"(?P<qualifiers>(?:const\s+)?(?:async\s+)?(?:unsafe\s+)?"
+        r'(?:extern\s+"[^"]+"\s+)?)'
+        r"fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+        line,
+    )
+    if function:
+        qualifiers = function["qualifiers"] or ""
+        kind = "C export" if re.search(r'extern\s+"C"', qualifiers) else "function"
+        return kind, function["name"]
+    item = re.match(
+        r"^\s*(?:pub\s+(?!\())?(?P<kind>type|const|static)\s+"
+        r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+        line,
+    )
+    if item:
+        return item["kind"], item["name"]
+    return None
+
+
 def _collapse(text: str) -> str:
     return " ".join(text.strip().split())
 
@@ -307,6 +332,25 @@ def _impl_owner(header: str) -> str:
     return names[-1] if names else ""
 
 
+def _impl_trait(header: str) -> str:
+    """Trait name of ``impl Trait for Type``, or empty for an inherent impl."""
+    text = _strip_generics(header)
+    text = re.sub(
+        r"^\s*(?:pub(?:\s*\([^)]*\))?\s+)?(?:unsafe\s+)?(?:async\s+)?impl\b",
+        "",
+        text,
+    )
+    text = re.split(r"\bwhere\b", text, maxsplit=1)[0]
+    text = text.split("{", 1)[0]
+    if " for " not in text:
+        return ""
+    trait = text.rsplit(" for ", 1)[0]
+    names = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", trait)
+    skip = {"mut", "const", "dyn", "for", "where", "impl", "unsafe", "async"}
+    names = [name for name in names if name not in skip]
+    return names[-1] if names else ""
+
+
 def _item_identity(header: str) -> tuple[str, str] | None:
     if re.search(r"\bfn\s+[A-Za-z_]", header):
         match = re.search(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)", header)
@@ -363,6 +407,7 @@ class _Scope:
     depth: int
     module: tuple[str, ...]
     name: str = ""
+    trait: str = ""
 
 
 @dataclasses.dataclass
@@ -376,6 +421,7 @@ class _RustRec:
     role: str
     owner: str
     public: bool
+    trait: str = ""
 
 
 @dataclasses.dataclass
@@ -430,6 +476,7 @@ def rust_items(root: Path | None = None) -> list[Item]:
     children: dict[tuple[str, ...], dict[str, tuple[tuple[str, ...], bool]]] = {}
     defined: dict[tuple[str, ...], dict[str, list[int]]] = {}
     types: dict[tuple[tuple[str, ...], str], int] = {}
+    local_traits: set[str] = set()
     seen_files: set[Path] = set()
 
     def add_record(record: _RustRec) -> int:
@@ -750,13 +797,21 @@ def rust_items(root: Path | None = None) -> list[Item]:
             ):
                 if body_open:
                     stack.append(
-                        _Scope("impl", depth, scope.module, _impl_owner(header_blank))
+                        _Scope(
+                            "impl",
+                            depth,
+                            scope.module,
+                            _impl_owner(header_blank),
+                            _impl_trait(header_blank),
+                        )
                     )
             else:
                 identity = _item_identity(header_blank)
                 public = _unrestricted_pub(header_blank)
                 if identity and scope.kind == "module":
                     kind, name = identity
+                    if kind == "trait":
+                        local_traits.add(name)
                     if kind == "fn":
                         parsed = rust_declaration(_collapse(header_raw))
                         kind = parsed[0] if parsed else "function"
@@ -781,8 +836,13 @@ def rust_items(root: Path | None = None) -> list[Item]:
                         stack.append(_Scope(kind, depth, scope.module, name))
                     elif body_open:
                         stack.append(_Scope("fn", depth, scope.module, ""))
-                elif scope.kind == "impl" and public:
-                    parsed = rust_declaration(_collapse(header_raw))
+                elif scope.kind == "impl" and (public or scope.trait):
+                    header = _collapse(header_raw)
+                    parsed = (
+                        rust_trait_impl_member(header)
+                        if scope.trait
+                        else rust_declaration(header)
+                    )
                     if parsed and parsed[0] in {
                         "function",
                         "C export",
@@ -796,17 +856,20 @@ def rust_items(root: Path | None = None) -> list[Item]:
                                 name,
                                 first_source,
                                 first_line,
-                                _collapse(header_raw),
+                                header,
                                 scope.module,
                                 "method",
                                 scope.name,
                                 True,
+                                scope.trait,
                             )
                         )
                         if body_open and kind in {"function", "C export"}:
                             stack.append(_Scope("fn", depth, scope.module, name))
                         elif body_open:
                             stack.append(_Scope("fn", depth, scope.module, ""))
+                    elif body_open:
+                        stack.append(_Scope("fn", depth, scope.module, ""))
                 elif identity and scope.kind == "trait" and public:
                     add_record(
                         _RustRec(
@@ -1033,8 +1096,17 @@ def rust_items(root: Path | None = None) -> list[Item]:
                     if path not in reachable_mods:
                         reachable_mods.add(path)
                         changed = True
-    for record in records:
+    reachable_traits = {
+        record.name
+        for record_id, record in enumerate(records)
+        if record_id in reachable and record.kind == "trait"
+    }
+    for record_id, record in enumerate(records):
         if record.role not in {"method", "field", "setter", "variant", "trait_member"}:
+            continue
+        if record.trait and (
+            record.trait in local_traits and record.trait not in reachable_traits
+        ):
             continue
         owner_id = types.get((record.module, record.owner))
         if owner_id is None:
@@ -1043,7 +1115,7 @@ def rust_items(root: Path | None = None) -> list[Item]:
             ]
             owner_id = matches[0] if len(matches) == 1 else None
         if owner_id is not None and owner_id in reachable:
-            mark_item(records.index(record))
+            mark_item(record_id)
     items: list[Item] = []
     for record_id, record in enumerate(records):
         if record_id not in reachable:
@@ -1337,14 +1409,64 @@ def _typedef_names(stmt: str) -> list[str]:
     return [names[-1]]
 
 
+_DLPACK_TYPE = re.compile(r"^DL[A-Z][A-Za-z0-9]*$")
+_PREPROCESSOR_IF = re.compile(r"#\s*(?:if|ifdef|ifndef)\b")
+_PREPROCESSOR_ELIF = re.compile(r"#\s*elif\b")
+_PREPROCESSOR_ELSE = re.compile(r"#\s*else\b")
+_PREPROCESSOR_ENDIF = re.compile(r"#\s*endif\b")
+
+
+def _mask_else_branches(text: str) -> str:
+    """Blank ``#else`` and ``#elif`` regions, keeping line numbers.
+
+    A header that spells the same declaration in both arms, such as the
+    DLPack device enum, would otherwise be parsed twice and the second
+    arm would swallow the typedefs that follow.
+    """
+    lines = text.splitlines()
+    kept = [True]
+    output: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if _PREPROCESSOR_IF.match(stripped):
+            kept.append(kept[-1])
+            output.append("")
+            continue
+        if _PREPROCESSOR_ELIF.match(stripped) or _PREPROCESSOR_ELSE.match(stripped):
+            if len(kept) > 1:
+                kept[-1] = False
+            output.append("")
+            continue
+        if _PREPROCESSOR_ENDIF.match(stripped):
+            if len(kept) > 1:
+                kept.pop()
+            output.append("")
+            continue
+        output.append(line if kept[-1] else "")
+    return "\n".join(output)
+
+
+@dataclasses.dataclass
+class _CScope:
+    kind: str
+    depth: int
+    typedef_tail: bool
+    exposed: bool
+    access: bool
+    name: str = ""
+
+
 def header_declared_names(
     text: str, *, cxx: bool = False
 ) -> list[tuple[int, str, str, str]]:
     """Line, name, source line, and kind of each inventoried declaration.
 
-    Prefixed C names stay. A C++ header also records public namespace types
-    and free functions. The macro that guards its own header is omitted.
+    Prefixed C names stay. A C++ header also records public namespace types,
+    free functions, and public class and struct members. Shipped DLPack
+    typedefs are kept. The macro that guards its own header is omitted.
     """
+    guard = _include_guard(text)
+    text = _mask_else_branches(text)
     blank = _blank_c(text)
     original = text.splitlines()
     masked = blank.splitlines()
@@ -1353,14 +1475,15 @@ def header_declared_names(
     stream: list[tuple[str, int]] = []
     found: list[tuple[int, str, str, str]] = []
     seen: set[str] = set()
-    guard = _include_guard(text)
+    seen_members: set[tuple[tuple[str, ...], str]] = set()
 
-    def add(name: str, line_index: int) -> None:
+    def add(name: str, line_index: int, *, type_name: bool = False) -> None:
+        shipped = type_name and _DLPACK_TYPE.match(name) is not None
         if (
             not name
             or name == guard
             or name in seen
-            or not _header_name(name)
+            or not (_header_name(name) or shipped)
             or line_index >= len(original)
         ):
             return
@@ -1368,19 +1491,40 @@ def header_declared_names(
         kind = "constant" if name.isupper() else "symbol"
         found.append((line_index + 1, name, _collapse(original[line_index]), kind))
 
+    def member_path() -> tuple[str, ...]:
+        return tuple(
+            scope.name
+            for scope in scopes
+            if scope.kind in {"namespace", "class"} and scope.name
+        )
+
     def add_cxx(name: str, line_index: int, kind: str) -> None:
+        scope = scopes[-1]
+        visible = scope.exposed and scope.access and scope.kind in {
+            "file",
+            "namespace",
+            "class",
+        }
         if (
             not cxx
             or not name
             or name == guard
-            or name in seen
             or name in _CXX_KEYWORDS
             or line_index >= len(original)
-            or top() not in {"file", "namespace"}
-            or not scopes[-1][3]
+            or not visible
         ):
             return
-        seen.add(name)
+        if scope.kind == "class":
+            if name == scope.name:
+                return
+            token = (member_path(), name)
+            if token in seen_members:
+                return
+            seen_members.add(token)
+        elif name in seen:
+            return
+        else:
+            seen.add(name)
         found.append((line_index + 1, name, _collapse(original[line_index]), kind))
 
     index = 0
@@ -1402,28 +1546,59 @@ def header_declared_names(
 
     brace = 0
     paren = 0
-    scopes: list[tuple[str, int, bool, bool]] = [("file", 0, False, True)]
+    scopes: list[_CScope] = [_CScope("file", 0, False, True, True)]
     stmt: list[str] = []
     stmt_line = 0
     cursor = 0
     limit = len(stream)
 
     def top() -> str:
-        return scopes[-1][0]
+        return scopes[-1].kind
 
     def declaration_scope() -> bool:
         return top() in {"file", "link", "class", "namespace"}
 
-    def push(kind: str, depth: int, typedef_tail: bool, opened: str) -> None:
-        parent_public = bool(scopes[-1][3])
-        public = False
+    def scope_name(kind: str, opened: str) -> str:
         if kind == "namespace":
-            public = parent_public and _namespace_public(opened)
-            if not public:
+            text = _strip_c_prefixes(_strip_template(opened.strip()))
+            match = re.match(r"namespace\b(.*)$", text)
+            if not match:
+                return ""
+            name = match.group(1).strip().split("{", 1)[0].strip()
+            if not name or "=" in name:
+                return ""
+            return name.split("::")[-1].strip()
+        if kind in {"class", "enum"}:
+            return _c_tag(opened) or ""
+        return ""
+
+    def push(kind: str, depth: int, typedef_tail: bool, opened: str) -> None:
+        parent = scopes[-1]
+        parent_public = parent.exposed and parent.access
+        exposed = False
+        access = False
+        if kind == "namespace":
+            exposed = parent_public and _namespace_public(opened)
+            access = exposed
+            if not exposed:
                 kind = "private"
         elif kind == "link":
-            public = parent_public
-        scopes.append((kind, depth, typedef_tail, public))
+            exposed = parent_public
+            access = exposed
+        elif kind == "class":
+            exposed = parent_public
+            text = _strip_c_prefixes(_strip_template(opened.strip()))
+            access = exposed and re.match(r"class\b", text) is None
+        scopes.append(
+            _CScope(
+                kind,
+                depth,
+                typedef_tail,
+                exposed,
+                access,
+                scope_name(kind, opened),
+            )
+        )
 
     while cursor < limit:
         char, line_index = stream[cursor]
@@ -1432,7 +1607,7 @@ def header_declared_names(
                 brace += 1
             elif char == "}":
                 brace -= 1
-                while len(scopes) > 1 and brace < scopes[-1][1]:
+                while len(scopes) > 1 and brace < scopes[-1].depth:
                     scopes.pop()
             elif char == "(":
                 paren += 1
@@ -1450,13 +1625,13 @@ def header_declared_names(
                 continue
             if char == "{":
                 brace += 1
-                scopes.append(("skip", brace, False, False))
+                scopes.append(_CScope("skip", brace, False, False, False))
                 cursor += 1
                 continue
             if char == "}":
                 closed = scopes.pop()
                 brace -= 1
-                if closed[2]:
+                if closed.typedef_tail:
                     tail: list[str] = []
                     tail_line = line_index
                     cursor += 1
@@ -1465,7 +1640,7 @@ def header_declared_names(
                         if nxt == ";" and paren == 0:
                             names = _typedef_names("typedef " + "".join(tail))
                             for name in names:
-                                add(name, tail_line)
+                                add(name, tail_line, type_name=True)
                             cursor += 1
                             break
                         if not nxt.isspace() and tail_line == line_index:
@@ -1509,7 +1684,7 @@ def header_declared_names(
                 closed = scopes.pop()
                 brace -= 1
                 stmt = []
-                if closed[2]:
+                if closed.typedef_tail:
                     tail: list[str] = []
                     tail_line = line_index
                     cursor += 1
@@ -1517,7 +1692,7 @@ def header_declared_names(
                         nxt, nxt_line = stream[cursor]
                         if nxt == ";" and paren == 0:
                             for name in _typedef_names("typedef " + "".join(tail)):
-                                add(name, tail_line)
+                                add(name, tail_line, type_name=True)
                             cursor += 1
                             break
                         if nxt.strip() and tail_line == line_index:
@@ -1527,6 +1702,13 @@ def header_declared_names(
                     continue
             cursor += 1
             continue
+        if top() == "class" and paren == 0 and char == ":":
+            label = "".join(stmt).strip()
+            if label in {"public", "private", "protected"}:
+                scopes[-1].access = scopes[-1].exposed and label == "public"
+                stmt = []
+                cursor += 1
+                continue
         if char == "(":
             paren += 1
             stmt.append(char)
@@ -1548,12 +1730,12 @@ def header_declared_names(
                         add_cxx(uname, stmt_line, ukind)
                 elif text.lstrip().startswith("typedef") and char == ";":
                     for name in _typedef_names(text):
-                        add(name, stmt_line)
+                        add(name, stmt_line, type_name=True)
                 elif char == "{":
                     kind = _open_kind(text)
                     tag = _c_tag(text)
                     if tag:
-                        add(tag, stmt_line)
+                        add(tag, stmt_line, type_name=True)
                         if kind in {"enum", "class"}:
                             add_cxx(tag, stmt_line, _type_kind(text))
                     if kind == "fn" and not _assigned_before_call(text):
@@ -1674,10 +1856,90 @@ def _export_allows(name: str, exported: set[str] | None) -> bool:
     return not name.startswith("_") or name == "__version__"
 
 
+def _import_is_private(node: ast.ImportFrom) -> bool:
+    parts = [part for part in (node.module or "").split(".") if part]
+    return any(_private_module(part) for part in parts)
+
+
+def _append_class_members(items: list[Item], node: ast.ClassDef, path: Path, rel: str) -> None:
+    for member in node.body:
+        if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if member.name.startswith("_") and member.name not in {
+                "__init__",
+                "__len__",
+            }:
+                continue
+            items.append(
+                Item(
+                    "Python",
+                    "method",
+                    f"{node.name}.{member.name}",
+                    rel,
+                    member.lineno,
+                    signature(member),
+                )
+            )
+        elif isinstance(member, (ast.Assign, ast.AnnAssign)):
+            for assigned in assigned_names(member):
+                if not assigned.startswith("_"):
+                    items.append(
+                        Item(
+                            "Python",
+                            "class attribute",
+                            f"{node.name}.{assigned}",
+                            rel,
+                            member.lineno,
+                            source_segment(path, member),
+                        )
+                    )
+
+
+def _append_reexported_bindings(
+    items: list[Item], package: Path, base: Path, names: set[str]
+) -> None:
+    """Public members of binding classes re-exported from a private module."""
+    if not names:
+        return
+    stubs = {
+        path.stem
+        for path in package.glob("*.pyi")
+        if _private_module(path.stem)
+    }
+    emitted: set[str] = set()
+    for path in sorted(package.glob("*")):
+        if path.suffix not in {".py", ".pyi"} or not _private_module(path.stem):
+            continue
+        if path.suffix == ".py" and path.stem in stubs:
+            continue
+        rel = path.relative_to(base).as_posix()
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
+        except SyntaxError as error:
+            raise SystemExit(f"{rel}: cannot inventory Python API: {error}") from error
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef) or node.name not in names:
+                continue
+            if node.name in emitted:
+                continue
+            emitted.add(node.name)
+            items.append(
+                Item(
+                    "Python",
+                    "class",
+                    node.name,
+                    rel,
+                    node.lineno,
+                    f"class {node.name}",
+                )
+            )
+            _append_class_members(items, node, path, rel)
+
+
 def python_items(root: Path | None = None) -> list[Item]:
     base = root or ROOT
     package = base / "python" / "rgmin"
     items: list[Item] = []
+    reexported: set[str] = set()
     if not package.is_dir():
         return items
     for path in sorted(package.glob("*")):
@@ -1729,36 +1991,7 @@ def python_items(root: Path | None = None) -> list[Item]:
                         f"class {node.name}",
                     )
                 )
-                for member in node.body:
-                    if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        if member.name.startswith("_") and member.name not in {
-                            "__init__",
-                            "__len__",
-                        }:
-                            continue
-                        items.append(
-                            Item(
-                                "Python",
-                                "method",
-                                f"{node.name}.{member.name}",
-                                rel,
-                                member.lineno,
-                                signature(member),
-                            )
-                        )
-                    elif isinstance(member, (ast.Assign, ast.AnnAssign)):
-                        for assigned in assigned_names(member):
-                            if not assigned.startswith("_"):
-                                items.append(
-                                    Item(
-                                        "Python",
-                                        "class attribute",
-                                        f"{node.name}.{assigned}",
-                                        rel,
-                                        member.lineno,
-                                        source_segment(path, member),
-                                    )
-                                )
+                _append_class_members(items, node, path, rel)
             elif isinstance(node, (ast.Assign, ast.AnnAssign)):
                 for assigned in assigned_names(node):
                     emit(
@@ -1768,19 +2001,24 @@ def python_items(root: Path | None = None) -> list[Item]:
                         source_segment(path, node),
                     )
             elif isinstance(node, ast.ImportFrom):
+                private_binding = _import_is_private(node)
                 for alias in node.names:
                     name = alias.asname or alias.name
                     if name == "*":
                         continue
+                    if private_binding and _export_allows(name, exported):
+                        reexported.add(name)
                     emit("reexport", name, node.lineno, source_segment(path, node))
         if exported is not None:
             for name in exported:
                 if name in defined:
                     continue
+                reexported.add(name)
                 line = _string_line(tree, name) or 1
                 items.append(
                     Item("Python", "reexport", name, rel, line, f"public name {name}")
                 )
+    _append_reexported_bindings(items, package, base, reexported)
     return items
 
 

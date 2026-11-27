@@ -208,6 +208,35 @@ class ReachableRustTests(unittest.TestCase):
         self.assertEqual(kinds["make"], "function")
         self.assertEqual(kinds["method"], "function")
 
+    def test_public_trait_impl_methods_are_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "src"
+            source.mkdir()
+            (source / "lib.rs").write_text(
+                "pub struct Control;\n"
+                "impl Default for Control {\n"
+                "    fn default() -> Self { Control }\n"
+                "}\n"
+                "impl Control {\n"
+                "    fn hidden(&self) {}\n"
+                "    pub fn shown(&self) {}\n"
+                "}\n"
+                "trait Secret {\n"
+                "    fn leak(&self);\n"
+                "}\n"
+                "impl Secret for Control {\n"
+                "    fn leak(&self) {}\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            items = inventory.rust_items(root)
+        names = {item.name for item in items}
+        self.assertIn("default", names)
+        self.assertIn("shown", names)
+        self.assertNotIn("hidden", names)
+        self.assertNotIn("leak", names)
+
     def test_crate_hides_private_modules_and_keeps_reexports(self) -> None:
         items = inventory.rust_items()
         names = {item.name for item in items}
@@ -306,8 +335,8 @@ class HeaderDeclarationTests(unittest.TestCase):
         text = """
         namespace rgmin {
         enum class Method { Bfgs = 1 };
-        struct Control { int maxiter; };
-        class Solver { void step(); };
+        struct Control { int maxiter; void run(); };
+        class Solver { void step(); public: void solve(); };
         class LbfgsPairs { void push(); };
         inline const char* version() { return "v"; }
         inline void minimize_fn(int n);
@@ -336,6 +365,8 @@ class HeaderDeclarationTests(unittest.TestCase):
         self.assertIn(("version", "function"), found)
         self.assertIn(("minimize_fn", "function"), found)
         self.assertIn(("ScalarType", "type"), found)
+        self.assertIn(("run", "function"), found)
+        self.assertIn(("solve", "function"), found)
         names = {name for name, _kind in found}
         self.assertNotIn("Hidden", names)
         self.assertNotIn("helper", names)
@@ -361,9 +392,10 @@ class HeaderDeclarationTests(unittest.TestCase):
             ("ScalarType", "type"),
         ):
             self.assertEqual(opt.get(name), kind)
+        self.assertEqual(opt.get("to_control"), "function")
+        self.assertEqual(opt.get("push"), "function")
         for hidden in (
             "c_control",
-            "to_control",
             "canon_token",
             "one_shot_report",
             "BFGSOptimizer",
@@ -415,15 +447,51 @@ class PythonExportTests(unittest.TestCase):
         self.assertNotIn("rgmin._gromacs", modules)
         self.assertNotIn("rgmin._maturin", modules)
         sources = {item.source for item in items}
-        for source in (
-            "python/rgmin/_gromacs.py",
-            "python/rgmin/_core.pyi",
-            "python/rgmin/_maturin.py",
-            "python/rgmin/_maturin.pyi",
-        ):
-            self.assertNotIn(source, sources)
+        self.assertNotIn("python/rgmin/_gromacs.py", sources)
+        self.assertNotIn("python/rgmin/_maturin.py", sources)
+        self.assertIn("python/rgmin/_core.pyi", sources)
+        self.assertIn("python/rgmin/_maturin.pyi", sources)
         self.assertTrue(any(item.name == "minimize" for item in items))
         self.assertTrue(any(item.name == "gromacs_mdp_options" for item in items))
+        self.assertTrue(any(item.name == "LbfgsPairs.push" for item in items))
+
+
+class InventorySurfaceTests(unittest.TestCase):
+    def test_generator_keeps_four_public_surfaces(self) -> None:
+        rust = inventory.rust_items()
+        headers = inventory.header_items()
+        python = inventory.python_items()
+        self.assertTrue(
+            any(
+                item.name == "default"
+                and item.source == "src/control.rs"
+                and item.declaration.startswith("fn default")
+                for item in rust
+            )
+        )
+        self.assertTrue(
+            any(
+                item.name == "push"
+                and item.kind == "function"
+                and item.source == "include/rgmin/optimize.hpp"
+                and "push(" in item.declaration
+                for item in headers
+            )
+        )
+        self.assertTrue(
+            any(
+                item.name == "DLTensor"
+                and item.source == "include/dlpack/dlpack.h"
+                for item in headers
+            )
+        )
+        self.assertTrue(
+            any(
+                item.name == "LbfgsPairs.push"
+                and item.source == "python/rgmin/_maturin.pyi"
+                for item in python
+            )
+        )
 
 
 class InventoryWordingTests(unittest.TestCase):
