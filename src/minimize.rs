@@ -414,21 +414,26 @@ where
         if let Some(status) = stop_after(&mut stops, control, obj, value, moved, &grad) {
             return control.deliver(one_shot_report(value, pos, step + 1, l2(&grad), status));
         }
-        let ctx = ConjugacyContext {
-            current_gradient: grad.view(),
-            previous_gradient: g_old.view(),
-            previous_direction: d_old.view(),
+        let next_dir = if !moved {
+            grad.mapv(|g| -g)
+        } else {
+            let ctx = ConjugacyContext {
+                current_gradient: grad.view(),
+                previous_gradient: g_old.view(),
+                previous_direction: d_old.view(),
+            };
+            let mut beta = conjugacy.beta(&ctx);
+            if restart.should_restart(&ctx) {
+                beta = 0.0;
+            }
+            let mut next_dir =
+                Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d));
+            let gd = crate::vecops::dot(grad.view(), next_dir.view());
+            if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+                next_dir = grad.mapv(|g| -g);
+            }
+            next_dir
         };
-        let mut beta = conjugacy.beta(&ctx);
-        if restart.should_restart(&ctx) {
-            beta = 0.0;
-        }
-        let mut next_dir =
-            Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d));
-        let gd = crate::vecops::dot(grad.view(), next_dir.view());
-        if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
-            next_dir = grad.mapv(|g| -g);
-        }
         let next_slope = crate::vecops::dot(grad.view(), next_dir.view());
         let cap = crate::step::cap_alpha(next_dir.view(), control, implicit_atom_cap(control));
         let next = crate::step::nlcg_opening_alpha(
