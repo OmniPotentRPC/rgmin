@@ -14,7 +14,7 @@
 //! all-pairs scan would have kept.
 //!
 //! `P⁻¹ rhs` is Jacobi-preconditioned conjugate gradients. The iteration
-//! stops at [`SOLVE_RTOL`](crate::lindh::SOLVE_RTOL) or after `SOLVE_MAXIT` steps, both
+//! stops at [`crate::lindh::SOLVE_RTOL`] or after `SOLVE_MAXIT` steps, both
 //! independent of the atom count, so one application is linear in the
 //! number of atoms. An incomplete factor of this sparsity cost more
 //! than the matvecs it saved at a few thousand atoms, so the solve
