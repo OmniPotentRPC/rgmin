@@ -140,7 +140,7 @@ The options and their defaults are:
 
 =rgmin.optimize.GPMin= (also re-exported as =rgmin.GPMin=) wraps =Session("gpmin", ...)= with =ase.optimize.GPMin='s constructor signature, defaults, and =run(fmax, steps)= convergence flag, plus =maxstep= (default =0.2=, or =0.0= for ASE's uncapped steps) and =hyperparameters= property. =Session.set_gtol(gtol)= updates the session gradient tolerance and =Session.gpmin_hyperparameters= reports =(weight, scale, noise)=.
 The other ASE-style classes in =rgmin.optimize= are =BFGS=, =LBFGS=, =LBFGSLineSearch=, =FIRE=, =FIRE2=, =SR1=, =SR2=, =SteepestDescent=, =GromacsSteep=, =GromacsCg=, =GromacsLbfgs=, =BarzilaiBorwein=, =Adam=, =CG=, =PolakRibiere=, =FletcherReeves=, =HestenesStiefel=, =DaiYuan=, =ConjugateDescent=, =HagerZhang=, =LiuStorey=, =FRPR=, =EonCG=, =RiemannianCG=, =NewtonCG=, and =NewtonPCG=.
-=rgmin.ase= adds =BFGSLineSearch=, =LBFGSLineSearch=, and =QuasiNewton=.
+=rgmin.ase= names =BFGSLineSearch=, =LBFGSLineSearch=, and =QuasiNewton=.
 =CG= there is Polak-Ribiere-Plus. =RiemannianCG= is =rcg=, and its per-atom cap stays off unless =maxstep= is set.
 
 =LineSearch(kind, x, direction, istep=1.0, c1=1e-4, c2=0.9, beta=0.5, maxiter=40, tol=1e-10)= is the supplied search. =offer(f, gradient)= takes the value and gradient at =x=, then at each trial, and returns =(x, alpha, value, done)=. =done= is False when =x= is the next trial.
