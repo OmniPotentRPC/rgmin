@@ -1357,7 +1357,8 @@ impl Lbfgs {
                 }
                 if uphill || (distance >= max_atom && !self.keep_long) {
                     self.forget_txn(txn);
-                    let step = self.apply_cap(&(h0 * &force), max_atom);
+                    let seeded = self.seeded_force(&force, h0);
+                    let step = self.apply_cap(&seeded, max_atom);
                     self.work.assign(&step);
                     Some(true)
                 } else {
@@ -1676,15 +1677,23 @@ impl Lbfgs {
         }
     }
 
-    /// `work = cap(h0 * force)`.
-    fn prepare_force_cap(&mut self, g: ArrayView1<f64>, h0: f64, max_atom: f64) {
-        let n = g.len();
-        self.ensure_work(n);
-        if let (Some(w), Some(gv)) = (self.work.as_slice_mut(), g.as_slice()) {
-            for i in 0..n {
-                w[i] = h0 * -gv[i];
-            }
+    /// `P^{-1} force` when that solve succeeds, otherwise `h0 * force`.
+    ///
+    /// An installed geometry inverse is `H0`. The scalar curvature is
+    /// the substitute used when no inverse is installed or the solve fails.
+    fn seeded_force(&self, force: &Array1<f64>, h0: f64) -> Array1<f64> {
+        match self.exp_apply(force.view()) {
+            Some(pre) => pre,
+            None => h0 * force,
         }
+    }
+
+    /// `work = cap(H0 force)`. The installed inverse replaces `h0`.
+    fn prepare_force_cap(&mut self, g: ArrayView1<f64>, h0: f64, max_atom: f64) {
+        let force = g.mapv(|v| -v);
+        let seeded = self.seeded_force(&force, h0);
+        self.ensure_work(g.len());
+        self.work.assign(&seeded);
         self.cap_work(max_atom);
     }
 

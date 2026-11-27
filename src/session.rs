@@ -3845,7 +3845,13 @@ impl Solver {
                     solver.forget_txn(&mut txn);
                 }
                 let force = grad.mapv(|v| -v);
-                let step = self.shape_step(x, cap_displacement_atom(&(h0 * &force), cap));
+                let seeded = match &self.inner {
+                    Inner::Lbfgs(solver) => solver
+                        .exp_apply(force.view())
+                        .unwrap_or_else(|| h0 * &force),
+                    _ => h0 * &force,
+                };
+                let step = self.shape_step(x, cap_displacement_atom(&seeded, cap));
                 let step = match self.tangent_displacement(&grad, step) {
                     Ok(Some(step)) => step,
                     Ok(None) => {

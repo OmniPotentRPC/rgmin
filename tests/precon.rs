@@ -2,8 +2,8 @@
 //! when H0 is that matrix.
 
 use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
-use ndarray::{Array1, ArrayView1};
-use rgmin::{Control, Exp, ExpParams, Method, Neighbours, Solver, estimate_mu};
+use ndarray::{Array1, ArrayView1, array};
+use rgmin::{Control, Exp, ExpParams, Method, Neighbours, Oracle, Solver, estimate_mu};
 
 struct FixedMetric {
     p: Exp,
@@ -662,5 +662,80 @@ fn geometry_lbfgs_caps_along_the_preconditioned_force() {
     assert!(
         gap > 1e-3,
         "scalar geometry step matched the preconditioned cap ({gap})"
+    );
+}
+
+fn longest_atom(step: &Array1<f64>) -> f64 {
+    let mut best = 0.0_f64;
+    let mut i = 0;
+    while i + 3 <= step.len() {
+        let r = (step[i] * step[i] + step[i + 1] * step[i + 1] + step[i + 2] * step[i + 2]).sqrt();
+        best = best.max(r);
+        i += 3;
+    }
+    best
+}
+
+fn cap_atoms(step: &Array1<f64>, cap: f64) -> Array1<f64> {
+    let motion = longest_atom(step);
+    if motion > cap && motion > 0.0 && cap > 0.0 {
+        step * (cap / motion)
+    } else {
+        step.clone()
+    }
+}
+
+/// Two atoms and one bond. `A = 0` makes the pair weight 1 at any distance.
+fn dimer() -> (Array1<f64>, Neighbours, ExpParams) {
+    let mut pos = Array1::zeros(6);
+    pos[3] = 1.5;
+    let neigh = Neighbours {
+        i: vec![0],
+        j: vec![1],
+        r: vec![1.5],
+        anchor: Vec::new(),
+    };
+    let params = ExpParams::default().with_a(0.0).with_mu(1.0).with_r_nn(1.5);
+    (pos, neigh, params)
+}
+
+/// A long eOn proposal clears the pairs and steps along `H0` times the
+/// force. With an exponential metric that `H0` is `P^{-1}`, so the cap
+/// shortens `P^{-1} F` and not the scalar curvature times `F`.
+#[test]
+fn capped_eon_resets_along_the_installed_inverse() {
+    let (geom, neigh, params) = dimer();
+    let metric = Exp::assemble(geom.view(), &neigh, &params, 1.0, 1.5).unwrap();
+    let grad = array![0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+    let force = grad.mapv(|v| -v);
+    let cap = 0.2;
+    let expect = cap_atoms(&metric.solve(force.view()).expect("solve"), cap);
+    assert!(
+        longest_atom(&expect) > 0.1,
+        "the fixture must exercise the cap"
+    );
+    assert!(
+        expect[4].abs() > 1e-3,
+        "the inverse must move the unloaded atom"
+    );
+    let obj = Oracle::unbounded(6, move |x: ArrayView1<f64>| (grad.dot(&x), grad.clone()));
+    let control = Control::default()
+        .with_gtol(0.0)
+        .with_maxmove(None)
+        .with_istep(1.0);
+    let mut solver = Solver::new(Method::lbfgs(), control, 6);
+    solver.set_lbfgs_capped(cap).unwrap();
+    solver.set_exp(geom.view(), &neigh, &params).unwrap();
+    let mut x = geom.clone();
+    solver.step(&obj, &mut x).unwrap();
+    let step = &x - &geom;
+    let err = step
+        .iter()
+        .zip(expect.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        err < 1e-9,
+        "capped eOn step left the installed inverse, err {err}, step {step:?}"
     );
 }
