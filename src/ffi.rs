@@ -104,7 +104,7 @@ pub struct rgmin_abi_stamp_t {
 }
 
 pub const RGMIN_ABI_VERSION_MAJOR: u16 = 1;
-pub const RGMIN_ABI_VERSION_MINOR: u16 = 69;
+pub const RGMIN_ABI_VERSION_MINOR: u16 = 72;
 pub const RGMIN_ABI_LAYOUT_REVISION: u16 = 7;
 
 /// Method tag. Keep this a closed C enum; Rust [`Method`] is the source.
@@ -3459,6 +3459,62 @@ pub unsafe extern "C" fn rgmin_solver_set_highs_crossover(
         set_last_error("rgmin_solver_set_highs_crossover: build has no highs feature");
         1
     }
+}
+
+/// Seconds one HiGHS solve may run. A finite positive value adds a
+/// wall-clock limit to the L-BFGS projection QP and replaces the 1.0 s of
+/// the feasible step QP. Zero or a negative value clears it, so the
+/// projection QP has no wall-clock limit again and runs on its fixed
+/// iteration budget. NaN or an infinite value returns 1 and leaves the
+/// limit as it was. Returns 0, or 1 on a null solver or a build without
+/// the `highs` feature. A step the constraints must shape that reaches the
+/// limit returns `RGMIN_INVALID_PARAMETER`, and [`rgmin_last_error`] names
+/// the time limit. A projection QP that uses up its iteration budget fails
+/// the same way, and [`rgmin_last_error`] names the iteration limit.
+/// ABI minor 72.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_set_highs_time_limit(
+    solver: *mut rgmin_solver_t,
+    seconds: f64,
+) -> i32 {
+    if solver.is_null() {
+        set_last_error("rgmin_solver_set_highs_time_limit: null solver");
+        return 1;
+    }
+    #[cfg(feature = "highs")]
+    {
+        if !seconds.is_finite() {
+            set_last_error("rgmin_solver_set_highs_time_limit: seconds is not finite");
+            return 1;
+        }
+        let limit = (seconds > 0.0).then_some(seconds);
+        let _ = unsafe { (*solver).solver.set_highs_time_limit(limit) };
+        0
+    }
+    #[cfg(not(feature = "highs"))]
+    {
+        let _ = seconds;
+        set_last_error("rgmin_solver_set_highs_time_limit: build has no highs feature");
+        1
+    }
+}
+
+/// Hessian steps whose HiGHS solve reached its time limit and fell back
+/// to the step the session takes without HiGHS. A null solver, a session
+/// that takes no Hessian step, and a build without the `highs` feature
+/// return zero. ABI minor 72.
+///
+/// # Safety
+/// `solver` is null or a live session from [`rgmin_solver_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rgmin_solver_highs_timeouts(solver: *const rgmin_solver_t) -> usize {
+    if solver.is_null() {
+        return 0;
+    }
+    unsafe { (*solver).solver.highs_timeouts() }
 }
 
 /// HiGHS user callback. NULL `cb` clears it.

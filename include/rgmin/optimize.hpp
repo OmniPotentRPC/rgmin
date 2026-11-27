@@ -945,6 +945,12 @@ public:
     int set_highs_callback(rgmin_highs_callback_t cb, void* user) {
         return rgmin_solver_set_highs_callback(ptr_, cb, user);
     }
+    /// HiGHS time limit in seconds. Zero or negative clears it. Returns 0, or 1 on NaN or infinity.
+    int set_highs_time_limit(double seconds) {
+        return rgmin_solver_set_highs_time_limit(ptr_, seconds);
+    }
+    /// Hessian steps whose HiGHS solve reached its time limit and fell back.
+    std::size_t highs_timeouts() const noexcept { return rgmin_solver_highs_timeouts(ptr_); }
     void set_manifold(rgmin_manifold_t m) { rgmin_solver_set_manifold(ptr_, m); }
     void set_oblique(std::size_t n, std::size_t m) {
         rgmin_solver_set_oblique(ptr_, n, m);

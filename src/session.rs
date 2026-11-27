@@ -335,6 +335,8 @@ pub struct Solver {
     #[cfg(feature = "highs")]
     highs_options: crate::HighsOptions,
     #[cfg(feature = "highs")]
+    highs_timeouts: usize,
+    #[cfg(feature = "highs")]
     box_lo: Option<Vec<f64>>,
     #[cfg(feature = "highs")]
     box_hi: Option<Vec<f64>>,
@@ -638,6 +640,8 @@ impl Solver {
             highs: false,
             #[cfg(feature = "highs")]
             highs_options: crate::HighsOptions::default(),
+            #[cfg(feature = "highs")]
+            highs_timeouts: 0,
             #[cfg(feature = "highs")]
             box_lo: None,
             #[cfg(feature = "highs")]
@@ -1588,6 +1592,55 @@ impl Solver {
         {
             let _ = crossover;
             false
+        }
+    }
+
+    /// Seconds one HiGHS solve may run, or `None` to keep each solve's
+    /// default.
+    ///
+    /// Left as `None`, the L-BFGS projection QP has no wall-clock limit and
+    /// stops on a fixed iteration budget, and the feasible step QP, Hessian
+    /// or not, stops after 1.0 s. A value adds a wall-clock limit to the
+    /// projection QP and replaces the feasible step limit.
+    ///
+    /// Returns false, and leaves the limit as it was, when this build has no
+    /// `highs` feature or `seconds` is not a finite positive number. A solve
+    /// that reaches the limit is counted in [`Self::highs_timeouts`] when
+    /// the step can go on without it, and is [`Error::HighsTimedOut`] when
+    /// it cannot. A projection QP that uses up its iteration budget is
+    /// [`Error::HighsIterationLimit`].
+    pub fn set_highs_time_limit(&mut self, seconds: Option<f64>) -> bool {
+        #[cfg(feature = "highs")]
+        {
+            if seconds.is_some_and(|limit| !limit.is_finite() || limit <= 0.0) {
+                return false;
+            }
+            self.highs_options.time_limit = seconds;
+            self.set_highs(self.highs);
+            true
+        }
+        #[cfg(not(feature = "highs"))]
+        {
+            let _ = seconds;
+            false
+        }
+    }
+
+    /// Hessian steps whose HiGHS solve reached its time limit.
+    ///
+    /// Each one fell back to the shifted Newton, RFO or L-BFGS step the
+    /// session takes without HiGHS, so the direction did not come from the
+    /// bounded QP. The acceptance rule still applies its own step cap.
+    /// Always zero in a build without `highs`.
+    #[must_use]
+    pub fn highs_timeouts(&self) -> usize {
+        #[cfg(feature = "highs")]
+        {
+            self.highs_timeouts
+        }
+        #[cfg(not(feature = "highs"))]
+        {
+            0
         }
     }
 
@@ -4359,7 +4412,14 @@ impl Solver {
                     &self.highs_options,
                 )
             };
-            if let Ok(dir) = feasible {
+            let feasible = match feasible {
+                Err(Error::HighsTimedOut { .. }) => {
+                    self.highs_timeouts += 1;
+                    None
+                }
+                other => other.ok(),
+            };
+            if let Some(dir) = feasible {
                 let old = x.clone();
                 let gold = grad.clone();
                 let allow_gradient_fallback = !self.has_coordinate_box()

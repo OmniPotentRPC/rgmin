@@ -168,6 +168,12 @@ A HiGHS feasible set is ``rgmin_solver_set_highs`` plus
 returns 0, or 1 when the build has no ``highs`` feature. Stamp
 1.22.4.
 
+``rgmin_solver_set_highs_time_limit`` sets the seconds one HiGHS solve
+may run. A finite positive value is the limit, and zero or a negative
+value clears it. NaN or an infinite value returns 1 and leaves the
+limit as it was. ``rgmin_solver_highs_timeouts`` reads how many Hessian
+steps fell back after a solve reached that limit. Both are ``abi_minor`` 72.
+
 A Cartesian session starts with a per-atom cap of 0.2.
 ``rgmin_solver_set_atom_maxmove`` replaces it. A non-positive argument
 clears it. A positive ``maxmove`` on ``rgmin_control_t``, with no call to
@@ -224,7 +230,7 @@ entry. Its errors name the symbol the host called, in
 
 SCG takes the same one-shot shape.
 Conjugacy is a field on ``rgmin_scg_params_t``, not a different entry point.
-Stamp is 1.69.7 (``xts_abi_compatible`` still checks major and layout only).
+Stamp is 1.72.7 (``xts_abi_compatible`` still checks major and layout only).
 ``rgmin_lowest_eigenpair`` takes a typed ``rgmin_eigen_params_t`` (closed ``rgmin_eigen_kind_t``, no string).
 Unlinked kinds return ``RGMIN_UNAVAILABLE``.
 ``rgmin_lowest_eigenpairs`` is the block LOBPCG solver for the k lowest pairs (Knyazev 2001).

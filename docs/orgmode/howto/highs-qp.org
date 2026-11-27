@@ -50,3 +50,32 @@ opt.highs = Some(
 ~Solver::set_box~ takes one bound per coordinate.
 
 landfold =--highs= is this step on chi, not sequential LP.
+
+* Time limit
+
+The L-BFGS projection QP has no wall-clock limit. It stops on a fixed
+iteration budget of 100000 per engine, so machine load does not change
+its answer. The feasible step QP, with or without a Hessian, stops after
+1.0 s. =Solver::set_highs_time_limit(Some(seconds))= and
+=HighsOptions::with_time_limit= add a wall-clock limit to the projection
+QP and replace the feasible step limit. The session setter refuses a
+value that is not finite and positive and keeps the limit it had.
+=HighsOptions::with_time_limit= is checked when a solve starts, and
+=Error::HighsTimeLimit= names a negative, NaN or infinite value.
+
+A solve that reaches a wall-clock limit is =Error::HighsTimedOut=, and
+it carries the limit the solve ran under: the caller's, or the 1.0 s of
+the feasible step QP. A projection QP that uses up its iteration budget
+is =Error::HighsIterationLimit=, so it is not mistaken for a timeout.
+The Hessian step can go on without the QP, so after a timeout it falls
+back to the shifted Newton, RFO or L-BFGS step and counts the timeout in
+=Solver::highs_timeouts=. A step the box, the trust radius or the
+equalities must shape has no such fallback and returns the error.
+
+In C, =rgmin_solver_set_highs_time_limit= sets the limit and
+=rgmin_solver_highs_timeouts= reads the count. A zero or negative value
+clears the limit, and NaN or an infinite value is refused with status 1
+and leaves the limit as it was. A step that cannot fall back returns
+=RGMIN_INVALID_PARAMETER=, and =rgmin_last_error= names the time limit,
+or the iteration limit when a projection QP used up its budget. Both
+entries are ABI minor 72.
