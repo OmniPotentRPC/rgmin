@@ -9,10 +9,15 @@ import inspect
 import io
 import os
 import re
-import resource
+import signal
 import sys
 import tempfile
 import unittest
+
+try:
+    import resource
+except ImportError:
+    resource = None
 from pathlib import Path
 from unittest import mock
 
@@ -859,16 +864,22 @@ class CheckLeavesTrackedFilesTests(unittest.TestCase):
         self.assertNotIn("Traceback", "\n".join(output))
 
     def test_file_size_limit_leaves_the_original_intact(self) -> None:
+        if resource is None or not hasattr(signal, "SIGXFSZ"):
+            self.skipTest("resource is unavailable")
         path = inventory.INVENTORY
         before = path.read_bytes()
         stamp = path.stat().st_mtime_ns
+        previous = signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
         soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
-        resource.setrlimit(resource.RLIMIT_FSIZE, (0, hard))
         try:
-            with self.assertRaises(OSError):
-                inventory._atomic_write(path, "replacement that must not land\n")
+            resource.setrlimit(resource.RLIMIT_FSIZE, (0, hard))
+            try:
+                with self.assertRaises(OSError):
+                    inventory._atomic_write(path, "replacement that must not land\n")
+            finally:
+                resource.setrlimit(resource.RLIMIT_FSIZE, (soft, hard))
         finally:
-            resource.setrlimit(resource.RLIMIT_FSIZE, (soft, hard))
+            signal.signal(signal.SIGXFSZ, previous)
         self.assertEqual(path.read_bytes(), before)
         self.assertEqual(path.stat().st_mtime_ns, stamp)
         leftovers = list(path.parent.glob(f".{path.name}.*.tmp"))
