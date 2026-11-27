@@ -16,7 +16,7 @@ use crate::pso::minimize_pso;
 use crate::qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 use crate::report::{Report, Status};
 use crate::session::Solver;
-use crate::step::{implicit_atom_cap, l2, next_istep, one_shot_report, stop_if_unmoved, take_step};
+use crate::step::{implicit_atom_cap, l2, one_shot_report, stop_if_unmoved, take_step};
 use crate::stop::{Counted, StopRules, counted, stop_after};
 
 /// Minimize `obj` from `init` with the chosen conjugacy, restart, and line search.
@@ -384,6 +384,7 @@ where
         if let Some(status) = control.halt(gnorm, grad.len()) {
             return control.deliver(one_shot_report(value, pos, step, gnorm, status));
         }
+        let slope = crate::vecops::dot(grad.view(), dir.view());
         let t = take_step(
             obj,
             &pos,
@@ -423,7 +424,15 @@ where
             beta = 0.0;
         }
         let next_dir = Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d));
-        let next = next_istep(lsstep, control);
+        let next_slope = crate::vecops::dot(grad.view(), next_dir.view());
+        let cap = crate::step::cap_alpha(next_dir.view(), control, implicit_atom_cap(control));
+        let next = crate::step::nlcg_opening_alpha(
+            if moved { lsstep } else { 0.0 },
+            slope,
+            next_slope,
+            cap,
+            control.istep,
+        );
         let fixed = unmoved && next_dir == dir && next == istep;
         if let Some(stop) = stop_if_unmoved(control, fixed, value, pos.clone(), step + 1, gnorm) {
             return stop;
