@@ -95,8 +95,8 @@ pub enum LineSearch {
     /// Armijo failure shrinks α; a failed lower bound expands α.
     /// `c` belongs in `(0, 0.5)`.
     ///
-    /// Goldstein, *Multiplier and gradient methods*,
-    /// <https://doi.org/10.1007/BF00927673>.
+    /// Goldstein, *On Steepest Descent*,
+    /// <https://doi.org/10.1137/0303013>.
     #[non_exhaustive]
     Goldstein {
         /// Goldstein / Armijo `c`.

@@ -5983,7 +5983,7 @@ cargo run --locked --example tutorial_newton
 | GROMACS L-BFGS | `Method::GromacsLbfgs` | @@rst::doc:`gromacs-lbfgs`@@ | GROMACS 2023.3 `do_lbfgs`. The correction-pair default is 10. |
 | Gaussian process minimizer | `Method::GpMin` | @@rst::doc:`gpmin`@@ | Garijo del Río, Mortensen, and Jacobsen, [10.1103/PhysRevB.100.104103](https://doi.org/10.1103/PhysRevB.100.104103) |
 | Riemannian conjugate gradient | `Method::rcg()` | @@rst::doc:`../tutorials/rcg`@@ | Sato, [10.1007/978-3-030-62391-3](https://doi.org/10.1007/978-3-030-62391-3) |
-| Riemannian L-BFGS | `minimize_rlbfgs` | @@rst::doc:`../tutorials/rlbfgs`@@ | Huang, Absil, and Gallivan, [10.1137/17M1127582](https://doi.org/10.1137/17M1127582) |
+| Riemannian L-BFGS | `minimize_rlbfgs` | @@rst::doc:`../tutorials/rlbfgs`@@ | Huang, Absil, and Gallivan, [10.1137/17M1127582](https://doi.org/10.1137/17M1127582); limited-memory two-loop, Huang, Gallivan, and Absil, [10.1137/140955483](https://doi.org/10.1137/140955483) |
 | L-BFGS | `Method::lbfgs()` | @@rst::doc:`../tutorials/lbfgs`@@ | Nocedal, [10.1090/S0025-5718-1980-0572855-7](https://doi.org/10.1090/S0025-5718-1980-0572855-7) |
 | BFGS | `Method::Bfgs` | @@rst::doc:`../tutorials/bfgs`@@ | Fletcher, [10.1093/comjnl/13.3.317](https://doi.org/10.1093/comjnl/13.3.317) |
 | SR1 | `Method::Sr1` | `cargo test --test quasi` | Nocedal and Wright, [10.1007/978-0-387-40065-5](https://doi.org/10.1007/978-0-387-40065-5) |
@@ -5994,11 +5994,11 @@ cargo run --locked --example tutorial_newton
 | FIRE 2.0 | `Method::fire(FireKind::V2)` | @@rst::doc:`fire`@@ | Guénolé et al., [10.1016/j.commatsci.2020.109584](https://doi.org/10.1016/j.commatsci.2020.109584) |
 | ABC-FIRE | `Solver::set_fire_abc(true)` | @@rst::doc:`fire`@@ | Echeverri Restrepo and Andric, [10.1016/j.commatsci.2022.111978](https://doi.org/10.1016/j.commatsci.2022.111978) |
 | Barzilai-Borwein | `Method::Bb` | `cargo test --test first_order_step_policy` | Barzilai and Borwein, [10.1093/imanum/8.1.141](https://doi.org/10.1093/imanum/8.1.141) |
-| Quick-min | `Method::QuickMin` | `cargo test --test quickmin_options` | Bitzek et al., [10.1103/PhysRevLett.97.170201](https://doi.org/10.1103/PhysRevLett.97.170201) |
+| Quick-min | `Method::QuickMin` | `cargo test --test quickmin_options` | Projects the velocity onto the force when that inner product is non-negative, and sets the velocity to zero otherwise, then takes an Euler step. |
 | ODE12r | `Method::Ode12r` | `cargo test --test ode12r_session` | Makri, Ortner, and Kermode, [10.1063/1.5064465](https://doi.org/10.1063/1.5064465) |
 | GDIIS | `Method::diis()` | `cargo test --features capi --test c_abi` | Császár and Pulay, [10.1016/S0022-2860(84)87198-7](https://doi.org/10.1016/S0022-2860(84)87198-7) |
 | Scaled conjugate gradient | `minimize_scg` | @@rst::doc:`../tutorials/scg`@@ | Møller, [10.1016/S0893-6080(05)80056-5](https://doi.org/10.1016/S0893-6080(05)80056-5) |
-| eOn secant CG | `Method::eon_cg()` | @@rst::doc:`../tutorials/cg`@@ | Hestenes and Stiefel, [10.6028/jres.049.044](https://doi.org/10.6028/jres.049.044) |
+| eOn secant CG | `Method::eon_cg()` | @@rst::doc:`../tutorials/cg`@@ | Polak and Ribiere, [10.1051/m2an/196903r100351](https://doi.org/10.1051/m2an/196903r100351) |
 
 `examples/tutorial_cg.rs` starts from `EonCg::default()`, sets the
 gradient tolerance and the iteration cap, and calls `minimize_eon_cg`.
@@ -6008,15 +6008,15 @@ The file names no `Conjugacy` value. Run it with
 | Coefficient | Rust value | Literature |
 |---+---+---|
 | Fletcher-Reeves | `Conjugacy::FletcherReeves` | Fletcher and Reeves, [10.1093/comjnl/7.2.149](https://doi.org/10.1093/comjnl/7.2.149) |
-| Polak-Ribiere | `Conjugacy::PolakRibiere` | Nocedal and Wright, [10.1007/978-0-387-40065-5](https://doi.org/10.1007/978-0-387-40065-5) |
-| Polak-Ribiere plus | `Conjugacy::PolakRibierePlus` | Nocedal and Wright, [10.1007/978-0-387-40065-5](https://doi.org/10.1007/978-0-387-40065-5) |
+| Polak-Ribiere | `Conjugacy::PolakRibiere` | Polak and Ribiere, [10.1051/m2an/196903r100351](https://doi.org/10.1051/m2an/196903r100351); Nocedal and Wright, [10.1007/978-0-387-40065-5](https://doi.org/10.1007/978-0-387-40065-5) |
+| Polak-Ribiere plus | `Conjugacy::PolakRibierePlus` | Gilbert and Nocedal, [10.1137/0802003](https://doi.org/10.1137/0802003); Nocedal and Wright, [10.1007/978-0-387-40065-5](https://doi.org/10.1007/978-0-387-40065-5) |
 | Hestenes-Stiefel | `Conjugacy::HestenesStiefel` | Hestenes and Stiefel, [10.6028/jres.049.044](https://doi.org/10.6028/jres.049.044) |
 | Dai-Yuan | `Conjugacy::DaiYuan` | Dai and Yuan, [10.1137/S1052623497318992](https://doi.org/10.1137/S1052623497318992) |
 | Conjugate descent | `Conjugacy::ConjugateDescent` | Fletcher, Practical Methods of Optimization, 2nd ed., Wiley, 1987, reissued as [10.1002/9781118723203](https://doi.org/10.1002/9781118723203), whose record is dated 2000 |
 | Hager-Zhang | `Conjugacy::HagerZhang` | Hager and Zhang, [10.1137/030601880](https://doi.org/10.1137/030601880) |
 | Liu-Storey | `Conjugacy::LiuStorey` | Liu and Storey, [10.1007/BF00940464](https://doi.org/10.1007/BF00940464) |
 | FR-PR hybrid | `Conjugacy::FrPr` | Nocedal and Wright, [10.1007/978-0-387-40065-5](https://doi.org/10.1007/978-0-387-40065-5) |
-| Bounded hybrid | `Conjugacy::hybrid(a, b, take_max)` | Dai and Yuan, [10.1137/0802003](https://doi.org/10.1137/0802003) |
+| Bounded hybrid | `Conjugacy::hybrid(a, b, take_max)` | The larger or the smaller of the two child coefficients. Not the Gilbert-Nocedal hybrid. |
 
 ## Line searches
 
@@ -6029,9 +6029,9 @@ cargo run --locked --example tutorial_linesearch
 
 | Search | Constructor | Literature |
 |---+---+---|
-| Brent | `LineSearch::brent(maxiter, tol)` | Nocedal and Wright, [10.1007/978-0-387-40065-5](https://doi.org/10.1007/978-0-387-40065-5) |
+| Brent | `LineSearch::brent(maxiter, tol)` | Brent, Algorithms for Minimization without Derivatives (1973). |
 | Armijo backtracking | `LineSearch::backtracking(c, beta, maxiter)` | Nocedal and Wright, [10.1007/978-0-387-40065-5](https://doi.org/10.1007/978-0-387-40065-5) |
-| Goldstein | `LineSearch::goldstein(c, beta, maxiter)` | Goldstein, [10.1007/BF00927673](https://doi.org/10.1007/BF00927673) |
+| Goldstein | `LineSearch::goldstein(c, beta, maxiter)` | Goldstein, [10.1137/0303013](https://doi.org/10.1137/0303013) |
 | Strong Wolfe | `LineSearch::wolfe(c1, c2, maxiter)` | Armijo and strong curvature. Wolfe, [10.1137/1011036](https://doi.org/10.1137/1011036), states the one-sided curvature test. |
 
 @@rst::doc:`../tutorials/linesearch`@@ is the runnable walk through.
@@ -6156,7 +6156,7 @@ Run the implementations with `cargo test --locked --test holonomic`.
 | Algorithm | Selection | Literature |
 |---+---+---|
 | SHAKE | `ConstraintSolver::Shake` | Ryckaert, Ciccotti, and Berendsen, [10.1016/0021-9991(77)90098-5](https://doi.org/10.1016/0021-9991(77)90098-5) |
-| LINCS | `ConstraintSolver::Lincs` | Hess, [10.1021/ct700200b](https://doi.org/10.1021/ct700200b) |
+| LINCS | `ConstraintSolver::Lincs` | Hess, Bekker, Berendsen, and Fraaije, [J. Comput. Chem. 18, 1463 (1997)](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12%3C1463::AID-JCC4%3E3.0.CO;2-H) |
 | SETTLE | `with_settle(true)` | Miyamoto and Kollman, [10.1002/jcc.540130805](https://doi.org/10.1002/jcc.540130805) |
 | RATTLE projection | `ConstraintAlgorithm::Rattle` | Andersen, [10.1016/0021-9991(83)90014-1](https://doi.org/10.1016/0021-9991(83)90014-1) |
 
