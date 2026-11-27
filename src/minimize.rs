@@ -423,7 +423,12 @@ where
         if restart.should_restart(&ctx) {
             beta = 0.0;
         }
-        let next_dir = Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d));
+        let mut next_dir =
+            Array1::from_iter(grad.iter().zip(d_old.iter()).map(|(g, d)| -g + beta * d));
+        let gd = crate::vecops::dot(grad.view(), next_dir.view());
+        if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+            next_dir = grad.mapv(|g| -g);
+        }
         let next_slope = crate::vecops::dot(grad.view(), next_dir.view());
         let cap = crate::step::cap_alpha(next_dir.view(), control, implicit_atom_cap(control));
         let next = crate::step::nlcg_opening_alpha(

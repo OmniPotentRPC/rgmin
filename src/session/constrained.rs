@@ -1155,6 +1155,11 @@ impl Solver {
                 }
                 let mut d = &gq_new.mapv(|g| -g * istep) + &(&*d_old * beta);
                 next.project(&mut d)?;
+                let gd = crate::vecops::dot(gq_new.view(), d.view());
+                if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
+                    d = gq_new.mapv(|g| -g * istep);
+                    next.project(&mut d)?;
+                }
                 *dir = d;
                 g_old.assign(&gq_new);
                 z_old.assign(&gq_new);
