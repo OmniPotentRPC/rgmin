@@ -769,7 +769,7 @@ cap-consistent velocity. An installed exponential preconditioner uses
 `P^{-1} F`.
 
 Steihaug-Toint Newton-CG is a session method: tokens `newton-cg`
-and `newton-pcg` (`RGMIN_NEWTON_CG` ` 24, ~RGMIN_NEWTON_PCG~ ` 25).
+and `newton-pcg` (`RGMIN_NEWTON_CG` = 24, `RGMIN_NEWTON_PCG` = 25).
 Hessian access is a product, analytic from `rgmin_solver_step_hvp`
 / `rgmin_minimize_hvp` and a one-gradient forward difference from
 `rgmin_solver_step`. `maxmove` caps the Euclidean trust radius; a
@@ -854,7 +854,7 @@ L-BFGS session `Accept::None` takes the clipped two-loop
 direction. Wolfe line search stays on Energy / Nonmonotone.
 
 SCG C waist: closed `xts_conjugacy_t` on `xts_scg_params_t`
-(FR`0 .. FrPr`7, dest leaf order). `params==NULL` is Netlab
+(FR=0 .. FrPr=7, dest leaf order). `params==NULL` is Netlab
 Polak-Ribiere. Unknown codes are `RGMIN_INVALID_PARAMETER`.
 Stamp 1.13.3. Hybrid and Restart stay Rust-only.
 
@@ -1047,7 +1047,7 @@ A lowest eigenvalue below minus that floor steps along the mode, scaled to the p
 The dogleg radius restarts from the initial step.
 A converged report costs one extra Hessian.
 
-Steihaug-Toint Newton-CG is a session method: tokens `newton-cg` and `newton-pcg` (`RGMIN_NEWTON_CG` ` 24, ~RGMIN_NEWTON_PCG~ ` 25).
+Steihaug-Toint Newton-CG is a session method: tokens `newton-cg` and `newton-pcg` (`RGMIN_NEWTON_CG` = 24, `RGMIN_NEWTON_PCG` = 25).
 Hessian access is a product, analytic from `rgmin_solver_step_hvp` / `rgmin_minimize_hvp` and a one-gradient forward difference from `rgmin_solver_step`.
 `maxmove` caps the Euclidean trust radius.
 A per-atom cap clips the trial, and the boundary test uses the pre-clip length.
@@ -1086,7 +1086,7 @@ Not the real sphere and not `(S^1)^n`.
 Tokens 7-10 stay reserved.
 `abi_minor` 19.
 
-Symmetric doubly-stochastic matrices (`multinomialsymmetric` / `RGMIN_MANIFOLD_MULTINOMIAL_SYM` ` 19) and doubly-stochastic matrices (~multinomialdoublystochastic~ / ~RGMIN_MANIFOLD_MULTINOMIAL_DS~ ` 18): manopt `multinomialsymmetricfactory` and `multinomialdoublystochasticfactory`.
+Symmetric doubly-stochastic matrices (`multinomialsymmetric` / `RGMIN_MANIFOLD_MULTINOMIAL_SYM` = 19) and doubly-stochastic matrices (`multinomialdoublystochastic` / `RGMIN_MANIFOLD_MULTINOMIAL_DS` = 18): manopt `multinomialsymmetricfactory` and `multinomialdoublystochasticfactory`.
 Both are packed row-major `n^2`, `n >= 2`, with Fisher projection and transport at arrival.
 The retraction is Sinkhorn, and on the symmetric manifold it then symmetrizes.
 A 3N cluster is rejected.
@@ -1107,7 +1107,7 @@ A 3N cluster is rejected.
 Tokens 7-10 stay reserved.
 `abi_minor` 15.
 
-Skew-symmetric matrices (`skewsymmetric` / `RGMIN_MANIFOLD_SKEWSYMMETRIC` ` 15) and symmetric matrices (~symmetric~ / ~RGMIN_MANIFOLD_SYMMETRIC~ ` 14): manopt `skewsymmetricfactory` and `symmetricfactory`.
+Skew-symmetric matrices (`skewsymmetric` / `RGMIN_MANIFOLD_SKEWSYMMETRIC` = 15) and symmetric matrices (`symmetric` / `RGMIN_MANIFOLD_SYMMETRIC` = 14): manopt `skewsymmetricfactory` and `symmetricfactory`.
 Both are packed row-major `n^2`, and the skew-symmetric one needs `n >= 2`.
 Projection is `multiskew` (`0.5 (A - A^T)`) or symmetrization, retraction is `X + U`, transport is the identity.
 A 3N cluster is rejected.
@@ -1116,13 +1116,13 @@ The symmetric manifold raised the ABI layout revision to 4.
 L-BFGS session `Accept::None` takes the clipped two-loop direction.
 Wolfe line search stays on Energy / Nonmonotone.
 
-Scaled conjugate gradient (SCG) C waist: closed `xts_conjugacy_t` on `xts_scg_params_t` (FR`0 .. FrPr`7, dest leaf order).
+Scaled conjugate gradient (SCG) C waist: closed `xts_conjugacy_t` on `xts_scg_params_t` (FR=0 .. FrPr=7, dest leaf order).
 `params==NULL` is Netlab Polak-Ribiere.
 Unknown codes are `RGMIN_INVALID_PARAMETER`.
 The ABI version is 1.13.3.
 Hybrid and Restart stay Rust-only.
 
-Typed lowest-mode waist: closed `EigensolverKind` (Lanczos`0 through EigenExa`13, `schema/eigen.capnp`) and `EigenParams` (`nev`, `krylov`, `max_iter`, `tol`).
+Typed lowest-mode waist: closed `EigensolverKind` (Lanczos=0 through EigenExa=13, `schema/eigen.capnp`) and `EigenParams` (`nev`, `krylov`, `max_iter`, `tol`).
 No Text.
 C `rgmin_lowest_eigenpair` plus `rgmin_eigen_params_t`.
 Unlinked backends return `RGMIN_UNAVAILABLE`.
@@ -1264,7 +1264,7 @@ With such a LAMMPS tree in `$LAMMPS`:
 ```bash
 cargo +1.88.0 build --release --locked --lib --features capi
 cmake -S lammps -B build-lammps -D LAMMPS_SOURCE_DIR=$LAMMPS/src \
-  -D RGMIN_LIBRARY`$PWD/target/release/librgmin.a -D RGMIN_LAMMPS_LMP`$LAMMPS/build/lmp
+  -D RGMIN_LIBRARY=$PWD/target/release/librgmin.a -D RGMIN_LAMMPS_LMP=$LAMMPS/build/lmp
 cmake --build build-lammps
 LAMMPS_POTENTIALS=$LAMMPS/potentials ctest --test-dir build-lammps --output-on-failure
 ```
@@ -1349,7 +1349,7 @@ Source: `docs/orgmode/explanation/ecnoise.org`
 and builds the forward-difference table. The default is `m = 8` (nine
 samples). The level-`k` estimate is
 
-: σ_k ` sqrt( γ_k * mean_i (Δ^k f_i)^2 ),    γ_k ` (k!)^2 / (2k)!
+: σ_k = sqrt( γ_k * mean_i (Δ^k f_i)^2 ),    γ_k = (k!)^2 / (2k)!
 
 The returned noise is the smallest `k` whose column changes sign and
 whose three estimates `σ_k`, `σ_{k+1}`, `σ_{k+2}` lie within a factor
@@ -1682,7 +1682,7 @@ restarts the recurrence at steepest descent because the stored
 
 Source: `docs/orgmode/explanation/product-manifold.org`
 
-A point of a product manifold \(\mathcal{M} ` \mathcal{M}_1 \times \cdots \times \mathcal{M}_k\) is a tuple \(x ` (x_1, \dots, x_k)\) of factor points.
+A point of a product manifold \(\mathcal{M} = \mathcal{M}_1 \times \cdots \times \mathcal{M}_k\) is a tuple \(x = (x_1, \dots, x_k)\) of factor points.
 `ProductManifold` (`src/manifold/product.rs`) packs the tuple end to end in one vector and gives it the metric \(g = \sum_i w_i\, g_i\) with constant weights \(w_i > 0\).
 This page derives every operation the solvers call from that one choice, shows where the weights enter and where they cancel, and compares the result with the products of manopt, Manifolds.jl, pymanopt and geomstats.
 The first consumer is the optimal dividing hyperplane of transition-state theory in `rgsaddle`: a point and a unit normal in \(\mathbb{R}^n \times S^{n-1}\), or a unit normal and a signed offset in \(S(U) \times \mathbb{R}\), with \(U\) the directions a sampler moves in.
@@ -1698,7 +1698,7 @@ The function optimized is the restriction \(f = \bar f|_{\mathcal{M}}\).
 
 # Why a product, and why weights
 
-A dividing hyperplane in mass-weighted coordinates \(y ` M^{1/2} r\) is \(\{y : n^\top (y - p) ` 0\}\), named by a point \(p \in \mathbb{R}^n\) and a unit normal \(n \in S^{n-1}\).
+A dividing hyperplane in mass-weighted coordinates \(y = M^{1/2} r\) is \(\{y : n^\top (y - p) = 0\}\), named by a point \(p \in \mathbb{R}^n\) and a unit normal \(n \in S^{n-1}\).
 The pair \((p, n)\) lives on \(\mathbb{R}^n \times S^{n-1}\), a flat factor times a curved one.
 Both factors are already kinds of `ManifoldKind`; what has to be derived is their product.
 
@@ -1715,7 +1715,7 @@ A point \(y = p + r e\) of the plane, \(e \perp n\) a unit vector, is displaced 
 The shift moves every point of the plane by at most \(|\delta p|\), and the turn moves points at distance \(r\) by up to \(r |\delta n|\).
 If the objective feels the plane out to a distance \(\ell\), in the units of \(p\), the two are comparable when \(|\delta p| \approx \ell |\delta n|\), and the natural size of a step is
 \[
-\|(\delta p, \delta n)\|^2 ` \ell^{-2} |\delta p|^2 + |\delta n|^2, \qquad w_p ` \ell^{-2}, \quad w_n = 1.
+\|(\delta p, \delta n)\|^2 = \ell^{-2} |\delta p|^2 + |\delta n|^2, \qquad w_p = \ell^{-2}, \quad w_n = 1.
 \]
 Two scales are natural.
 The geometric one is the mass-weighted radius of gyration of the system about \(p\).
@@ -1732,7 +1732,7 @@ A caller that wants a minimal parameterization writes \(p = s\, n\) and optimize
 
 For tangent vectors \(u = (u_1, \dots, u_k)\) and \(v\) at \(x\),
 \[
-g_x(u, v) ` \sum_{i`1}^k w_i\, g_{i, x_i}(u_i, v_i), \qquad w_i > 0.
+g_x(u, v) = \sum_{i=1}^k w_i\, g_{i, x_i}(u_i, v_i), \qquad w_i > 0.
 \]
 The tangent space is the direct sum \(T_x \mathcal{M} = T_{x_1} \mathcal{M}_1 \oplus \cdots \oplus T_{x_k} \mathcal{M}_k\) (Absil, Mahony and Sepulchre, section 3.1.6; Boumal, equation 3.31) @@rst::cite:`absilOptimizationAlgorithmsMatrix2008,boumalIntroductionOptimizationSmooth2023`@@, and \(g\) makes the blocks orthogonal.
 At \(w_i = 1\) this is the product metric of Boumal, Example 3.57.
@@ -1757,7 +1757,7 @@ The Koszul formula,
 \]
 is linear in \(g\) on both sides, so a constant factor leaves the connection unchanged, and with it geodesics, the exponential, the logarithm and parallel transport.
 Lengths of curves scale by \(\sqrt{w}\), and so do distances and the injectivity radius.
-The gradient solves \(w\, g(\mathrm{grad}_w f, u) ` \mathrm{D} f[u]\), so \(\mathrm{grad}_w f ` w^{-1} \mathrm{grad} f\), and the Hessian \(\nabla_u \mathrm{grad}_w f\) uses the same connection.
+The gradient solves \(w\, g(\mathrm{grad}_w f, u) = \mathrm{D} f[u]\), so \(\mathrm{grad}_w f = w^{-1} \mathrm{grad} f\), and the Hessian \(\nabla_u \mathrm{grad}_w f\) uses the same connection.
 The curvature tensor depends on the connection alone, so the sectional curvature \(\langle R(u, v) v, u \rangle / (\|u\|^2 \|v\|^2 - \langle u, v \rangle^2)\) gains \(w\) above and \(w^2\) below.
 geomstats' `ScalarProductMetric` rescales the methods of a metric by exactly these rules.
 
@@ -1771,7 +1771,7 @@ Then
 \]
 because
 \[
-g_x(\mathrm{grad} f(x), u) ` \sum_i w_i\, g_i\bigl(w_i^{-1} \mathrm{grad}_i f(x), u_i\bigr) ` \sum_i \mathrm{D}_i f(x)[u_i] = \mathrm{D} f(x)[u],
+g_x(\mathrm{grad} f(x), u) = \sum_i w_i\, g_i\bigl(w_i^{-1} \mathrm{grad}_i f(x), u_i\bigr) = \sum_i \mathrm{D}_i f(x)[u_i] = \mathrm{D} f(x)[u],
 \]
 and the representer is unique because \(g_x\) is nondegenerate.
 At unit weights this is Boumal, Exercise 3.67.
@@ -1781,7 +1781,7 @@ A heavy factor gets a short gradient: its coordinates are expensive in the metri
 
 When every \(g_i\) is induced by \(\mathcal{E}_i\), \(g\) is induced by the weighted inner product
 \[
-\langle a, b \rangle_W ` \sum_i w_i\, a_i^\top b_i ` a^\top W b, \qquad W = \mathrm{diag}(w_1 I_{n_1}, \dots, w_k I_{n_k}),
+\langle a, b \rangle_W = \sum_i w_i\, a_i^\top b_i = a^\top W b, \qquad W = \mathrm{diag}(w_1 I_{n_1}, \dots, w_k I_{n_k}),
 \]
 on \(\mathcal{E} = \mathcal{E}_1 \times \cdots \times \mathcal{E}_k\), and \((\mathcal{M}, g)\) is a Riemannian submanifold of the Euclidean space \((\mathcal{E}, \langle \cdot, \cdot \rangle_W)\).
 Two facts follow.
@@ -1790,10 +1790,10 @@ The \(W\)-orthogonal projector onto \(T_x \mathcal{M}\) is \(P(x) = \mathrm{diag
 The normal space of the product is the product of the factor normal spaces, and a vector normal to \(T_{x_i} \mathcal{M}_i\) in \(\mathcal{E}_i\) stays \(W\)-normal because \(W\) acts on block \(i\) as the scalar \(w_i\).
 `ProductManifold::project` applies the factor projections block by block.
 
-The \(W\)-gradient of \(\bar f\) is \(\nabla_W \bar f ` W^{-1} \nabla \bar f\), since \(\langle W^{-1} \nabla \bar f, b \rangle_W ` \nabla \bar f^\top b\) for every \(b\).
+The \(W\)-gradient of \(\bar f\) is \(\nabla_W \bar f = W^{-1} \nabla \bar f\), since \(\langle W^{-1} \nabla \bar f, b \rangle_W = \nabla \bar f^\top b\) for every \(b\).
 On a Riemannian submanifold the Riemannian gradient is the projected ambient gradient (Absil, Mahony and Sepulchre, section 3.6), so
 \[
-\mathrm{grad} f(x) ` P(x)\, W^{-1} \nabla \bar f(x) ` \bigl( w_i^{-1} P_i(x_i) \nabla_i \bar f(x) \bigr)_i,
+\mathrm{grad} f(x) = P(x)\, W^{-1} \nabla \bar f(x) = \bigl( w_i^{-1} P_i(x_i) \nabla_i \bar f(x) \bigr)_i,
 \]
 the gradient of the previous section with \(\mathrm{grad}_i f = P_i \nabla_i \bar f\).
 A factor with its own metric enters the same way through its own `egrad2rgrad`, because the Riesz argument holds for any \(g_i\).
@@ -1802,19 +1802,19 @@ Of the two maps a caller's gradient passes through, the projection and the gradi
 
 # The product retraction
 
-A retraction is a smooth map \(R : T \mathcal{M} \to \mathcal{M}\) with \(R_x(0_x) ` x\) and \(\mathrm{D} R_x(0_x) ` \mathrm{id}_{T_x \mathcal{M}}\) (Absil, Mahony and Sepulchre, Definition 4.1.1; Boumal, Definition 3.47).
+A retraction is a smooth map \(R : T \mathcal{M} \to \mathcal{M}\) with \(R_x(0_x) = x\) and \(\mathrm{D} R_x(0_x) = \mathrm{id}_{T_x \mathcal{M}}\) (Absil, Mahony and Sepulchre, Definition 4.1.1; Boumal, Definition 3.47).
 The product retraction applies each factor's retraction to its block (Boumal, Exercise 3.50):
 \[
 R_x(v) = \bigl( R^{(1)}_{x_1}(v_1), \dots, R^{(k)}_{x_k}(v_k) \bigr).
 \]
 
 /First-order agreement./
-Each block is smooth in \((x_i, v_i)\), so \(R\) is smooth on \(T \mathcal{M} ` T \mathcal{M}_1 \times \cdots \times T \mathcal{M}_k\), and \(R_x(0_x) ` (R^{(i)}_{x_i}(0))_i = x\).
-For \(v \in T_x \mathcal{M}\) the curve \(c(t) ` R_x(t v)\) has the blocks \(c_i(t) ` R^{(i)}_{x_i}(t v_i)\), so
+Each block is smooth in \((x_i, v_i)\), so \(R\) is smooth on \(T \mathcal{M} = T \mathcal{M}_1 \times \cdots \times T \mathcal{M}_k\), and \(R_x(0_x) = (R^{(i)}_{x_i}(0))_i = x\).
+For \(v \in T_x \mathcal{M}\) the curve \(c(t) = R_x(t v)\) has the blocks \(c_i(t) = R^{(i)}_{x_i}(t v_i)\), so
 \[
-c'(0) ` \bigl( \mathrm{D} R^{(i)}_{x_i}(0)[v_i] \bigr)_i ` (v_i)_i = v.
+c'(0) = \bigl( \mathrm{D} R^{(i)}_{x_i}(0)[v_i] \bigr)_i = (v_i)_i = v.
 \]
-Hence \(\mathrm{D} R_x(0_x) ` \mathrm{id}\), and in the packed coordinates \(R_x(t v) ` x + t v + O(t^2)\): the retraction agrees with the step to first order.
+Hence \(\mathrm{D} R_x(0_x) = \mathrm{id}\), and in the packed coordinates \(R_x(t v) = x + t v + O(t^2)\): the retraction agrees with the step to first order.
 The weights appear nowhere, since neither condition involves the metric.
 
 A retraction is second order when its curves also start with zero covariant acceleration, \(\frac{\mathrm{D}}{\mathrm{d}t} c'(0) = 0\) (Absil, Mahony and Sepulchre, equation 5.33; Boumal, Definition 5.42).
@@ -1828,9 +1828,9 @@ That is why the tests run the check along the exponential wherever a retraction 
 
 Geodesics of the product are tuples of factor geodesics (Boumal, Exercise 5.39), and the weights leave them alone, so (Boumal, Exercise 10.32)
 \[
-\exp_x(v) ` \bigl( \exp_{x_i}(v_i) \bigr)_i, \qquad \log_x(y) ` \bigl( \log_{x_i}(y_i) \bigr)_i.
+\exp_x(v) = \bigl( \exp_{x_i}(v_i) \bigr)_i, \qquad \log_x(y) = \bigl( \log_{x_i}(y_i) \bigr)_i.
 \]
-If \(\exp_x(v) ` y\) then \(\exp_{x_i}(v_i) ` y_i\) for every \(i\), and \(\|v\|_x^2 = \sum_i w_i \|v_i\|_{x_i}^2\) is smallest when every block is.
+If \(\exp_x(v) = y\) then \(\exp_{x_i}(v_i) = y_i\) for every \(i\), and \(\|v\|_x^2 = \sum_i w_i \|v_i\|_{x_i}^2\) is smallest when every block is.
 So, where each factor logarithm is defined, the tuple of factor logarithms is the logarithm of the product for every choice of positive weights.
 The distance follows from Boumal, Exercise 10.14, applied to the scaled factors:
 \[
@@ -1860,14 +1860,14 @@ The blockwise transport
 \mathcal{T}_\eta \xi = \bigl( \mathcal{T}^{(i)}_{\eta_i} \xi_i \bigr)_i
 \]
 satisfies the three conditions because each block does.
-It lands in \(\bigoplus_i T_{R_{x_i}(\eta_i)} \mathcal{M}_i ` T_{R_x(\eta)} \mathcal{M}\), it is the identity at \(\eta ` 0\), and it is linear.
+It lands in \(\bigoplus_i T_{R_{x_i}(\eta_i)} \mathcal{M}_i = T_{R_x(\eta)} \mathcal{M}\), it is the identity at \(\eta = 0\), and it is linear.
 Its associated retraction is the product retraction, and it does not involve the metric.
 For a Riemannian submanifold factor `transport` is projection onto the arrival tangent space (Absil, Mahony and Sepulchre, section 8.1.3), so on a product of them it is \(P(y)\), the \(W\)-orthogonal projection.
 
 The product transport is an isometry of \(g\) exactly when every factor transport is an isometry of its \(g_i\).
 If each is, then
 \[
-g_y(\mathcal{T} \xi, \mathcal{T} \zeta) ` \sum_i w_i\, g_i(\mathcal{T}^{(i)} \xi_i, \mathcal{T}^{(i)} \zeta_i) ` \sum_i w_i\, g_i(\xi_i, \zeta_i) = g_x(\xi, \zeta).
+g_y(\mathcal{T} \xi, \mathcal{T} \zeta) = \sum_i w_i\, g_i(\mathcal{T}^{(i)} \xi_i, \mathcal{T}^{(i)} \zeta_i) = \sum_i w_i\, g_i(\xi_i, \zeta_i) = g_x(\xi, \zeta).
 \]
 If one is not, vectors supported on that block break the identity.
 The weights can neither repair nor break isometry, so `transport_is_isometric` is the conjunction over the factors.
@@ -1878,16 +1878,16 @@ On \(\mathbb{R}^n \times S^{n-1}\) it is not.
 
 Parallel transport along a curve \(c = (c_1, \dots, c_k)\) is the tuple of factor parallel transports (Boumal, Exercise 10.39), unchanged by the weights because the connection is.
 It is an isometry of \(g\): each block is an isometry of \(g_i\), and so of \(w_i g_i\).
-`parallel_transport_along(x, d, v)` carries \(v\) along \(t \mapsto \exp_x(t d)\) from \(t ` 0\) to \(t ` 1\), and `parallel_transport(x, y, v)` takes \(d = \log_x(y)\).
+`parallel_transport_along(x, d, v)` carries \(v\) along \(t \mapsto \exp_x(t d)\) from \(t = 0\) to \(t = 1\), and `parallel_transport(x, y, v)` takes \(d = \log_x(y)\).
 
 The Riemannian Broyden class of Huang, Gallivan and Absil ([SIAM J. Optim. 25, 1660 (2015)](https://doi.org/10.1137/140955483)) pairs a retraction \(R\) with an isometric transport \(\mathcal{T}_S\) under the locking condition
 \[
 \mathcal{T}_{S_\xi} \xi = \beta\, \mathcal{T}_{R_\xi} \xi, \qquad
 \beta = \frac{\|\xi\|}{\|\mathcal{T}_{R_\xi} \xi\|}, \qquad
-\mathcal{T}_{R_\xi} \xi ` \frac{\mathrm{d}}{\mathrm{d}t} R_x(t \xi) \Big|_{t ` 1}.
+\mathcal{T}_{R_\xi} \xi = \frac{\mathrm{d}}{\mathrm{d}t} R_x(t \xi) \Big|_{t = 1}.
 \]
 Take \(R = \exp\) and \(\mathcal{T}_S\) parallel transport along the geodesic.
-The velocity of a geodesic is parallel along it, so \(\mathcal{T}_{R_\xi} \xi ` P_{0 \to 1} \xi\), its length is \(\|\xi\|\), \(\beta ` 1\), and the condition holds with equality.
+The velocity of a geodesic is parallel along it, so \(\mathcal{T}_{R_\xi} \xi = P_{0 \to 1} \xi\), its length is \(\|\xi\|\), \(\beta = 1\), and the condition holds with equality.
 On the product it holds block by block and so for the tuple, for every choice of weights.
 A product whose factors all supply the exponential and parallel transport therefore carries a retraction and transport pair that meets the hypotheses of that theory.
 The session's L-BFGS moves its pairs with `transport`, projection, and does not rely on them.
@@ -1953,15 +1953,15 @@ The factor values follow the manopt factories: \(\pi\) for a sphere, \(\pi \sqrt
 It runs in the metric of the manifold: the gradient by `egrad2rgrad`, the Hessian by `ehess2rhess`, and every inner product, norm and the trust ball by `inner`.
 `RtrOptions` takes the defaults of manopt `trustregions`:
 - \(\bar\Delta\) the typical distance and \(\Delta_0 = \bar\Delta / 8\);
-- acceptance above \(\rho' ` 0.1\), the radius quartered below \(\rho ` 1/4\) and doubled, up to \(\bar\Delta\), above \(\rho = 3/4\) on the boundary;
-- the inner rule \(\|r_j\| \le \|r_0\| \min(\|r_0\|^\theta, \kappa)\) with \(\theta ` 1\) and \(\kappa ` 0.1\) (Absil, Mahony and Sepulchre, equation 7.10), and an inner budget of the packed length, which bounds the dimension;
+- acceptance above \(\rho' = 0.1\), the radius quartered below \(\rho = 1/4\) and doubled, up to \(\bar\Delta\), above \(\rho = 3/4\) on the boundary;
+- the inner rule \(\|r_j\| \le \|r_0\| \min(\|r_0\|^\theta, \kappa)\) with \(\theta = 1\) and \(\kappa = 0.1\) (Absil, Mahony and Sepulchre, equation 7.10), and an inner budget of the packed length, which bounds the dimension;
 - `rho_regularization` \(10^3\), which adds \(10^3 \varepsilon \max(1, |f|)\) to both decreases so that steps below the rounding of \(f\) read \(\rho \approx 1\).
 With the exact Hessian the local rate is \(\min(\theta + 1, 2)\) (Absil, Mahony and Sepulchre, Theorem 7.4.11), quadratic at \(\theta = 1\).
 A factor without `ehess2rhess` makes the product fall back to `egrad2rgrad` of the ambient action, the Gauss-Newton part of the Hessian, which loses that rate.
 
 The typical distance of a flat factor is the one place a unit enters again.
 \(\pi\) is intrinsic to a sphere, but \(\sqrt{n}\) for \(\mathbb{R}^n\) counts coordinates in whatever unit they are written in.
-Under \(p' ` c\, p\) and \(w_p' ` w_p / c^2\) the term \(w_p\, n\) becomes \(w_p\, n / c^2\), and the default \(\bar\Delta\) moves.
+Under \(p' = c\, p\) and \(w_p' = w_p / c^2\) the term \(w_p\, n\) becomes \(w_p\, n / c^2\), and the default \(\bar\Delta\) moves.
 A run that must not depend on the unit sets \(\bar\Delta\) from a physical length with `RtrOptions::with_radius_max`, for instance \(\bar\Delta = (w_p L^2 + w_n \pi^2)^{1/2}\) with \(L\) the largest shift of \(p\) worth trusting.
 
 # The metric chart and unit invariance
@@ -1970,14 +1970,14 @@ The session steppers, L-BFGS, conjugate gradients, FIRE, the Newton-CG trust reg
 On a weighted product that is not \(g\).
 Rather than thread \(g\) through every stepper, a session stores a weighted product in the coordinates where \(g\) is the dot product.
 
-The map \(\phi(x) ` (\sqrt{w_1}\, x_1, \dots, \sqrt{w_k}\, x_k)\) is a diffeomorphism from \(\mathcal{M}\) onto the product of the scaled sets \(\sqrt{w_i}\, \mathcal{M}_i\), with \(\mathrm{D} \phi(x)[u] ` (\sqrt{w_i}\, u_i)_i\).
+The map \(\phi(x) = (\sqrt{w_1}\, x_1, \dots, \sqrt{w_k}\, x_k)\) is a diffeomorphism from \(\mathcal{M}\) onto the product of the scaled sets \(\sqrt{w_i}\, \mathcal{M}_i\), with \(\mathrm{D} \phi(x)[u] = (\sqrt{w_i}\, u_i)_i\).
 For Riemannian submanifold factors
 \[
-\mathrm{D} \phi(x)[u]^\top \mathrm{D} \phi(x)[v] ` \sum_i w_i\, u_i^\top v_i ` g_x(u, v),
+\mathrm{D} \phi(x)[u]^\top \mathrm{D} \phi(x)[v] = \sum_i w_i\, u_i^\top v_i = g_x(u, v),
 \]
 so \(\phi\) is an isometry onto \(\prod_i \sqrt{w_i}\, \mathcal{M}_i\) with the Euclidean metric of the packed vector, and a stepper that measures with dot products in \(z = \phi(x)\) measures in \(g\).
 `ProductManifold::chart` is that product and `ProductManifold::chart_scales` is \(d\), equal to \(\sqrt{w_i}\) on the coordinates of factor \(i\).
-A block stores \(s_i x_i\) for a factor point \(x_i\) and carries the metric \(c_i\, g_i\), with \(c_i s_i^2 ` w_i\): \(s_i ` 1\) and \(c_i ` w_i\) in natural coordinates, \(s_i ` \sqrt{w_i}\) and \(c_i = 1\) in the chart.
+A block stores \(s_i x_i\) for a factor point \(x_i\) and carries the metric \(c_i\, g_i\), with \(c_i s_i^2 = w_i\): \(s_i = 1\) and \(c_i = w_i\) in natural coordinates, \(s_i = \sqrt{w_i}\) and \(c_i = 1\) in the chart.
 Every operation divides the block by \(s_i\), calls the factor and scales back.
 The Weingarten term of the scaled factor \(s_i \mathcal{M}_i\) is \(1 / s_i\) times the unit one, which the code obtains by passing the factor \(\nabla_i \bar f / s_i\).
 
@@ -2000,8 +2000,8 @@ Rigid factors (`MwRigid`, `RigidQuotient`) inside a product are projected block 
 `MwRigid` blocks read the masses as one molecule reused on every block, or as the concatenation over the `MwRigid` blocks.
 
 /Unit invariance./
-Change the unit of a factor, \(x_i' ` c\, x_i\), and its weight with it, \(w_i' ` w_i / c^2\).
-The chart coordinate does not change, \(\sqrt{w_i'}\, x_i' ` \sqrt{w_i}\, x_i\), and the objective written in the new unit, \(\bar f'(x') ` \bar f(x)\), reads in the chart as the same function \(\tilde f\).
+Change the unit of a factor, \(x_i' = c\, x_i\), and its weight with it, \(w_i' = w_i / c^2\).
+The chart coordinate does not change, \(\sqrt{w_i'}\, x_i' = \sqrt{w_i}\, x_i\), and the objective written in the new unit, \(\bar f'(x') = \bar f(x)\), reads in the chart as the same function \(\tilde f\).
 A deterministic stepper started at the same chart point therefore produces the same chart iterates, and mapping back gives \(x_i' = c\, x_i\) at every step.
 The iterates do not depend on the unit once the weight carries it; in floating point they agree to rounding.
 The test `iterates_do_not_depend_on_the_length_unit_once_the_weight_carries_it` runs fifteen L-BFGS steps on the hyperplane in ångström with \(w_p\) and in bohr with \(w_p / c^2\), and finds them equal to \(10^{-9}\).
@@ -2013,7 +2013,7 @@ The same test runs `minimize_rtr` in both units with \(\bar\Delta\) set explicit
 A sampler that fixes the centre of mass, or holds some atoms still, moves only in a linear subspace \(U \subset \mathbb{R}^n\), and the normal of a plane it samples must lie in \(U\) too.
 The normal is then a point of the unit sphere of \(U\),
 \[
-S(U) ` \{ x \in U : \|x\| ` 1 \}.
+S(U) = \{ x \in U : \|x\| = 1 \}.
 \]
 `SubspaceSphere` (`src/manifold/subspace_sphere.rs`) takes \(U\) as the span of the rows of a matrix, `SubspaceSphere::within`, or as the orthogonal complement of that span, `SubspaceSphere::excluding`.
 The caller passes the smaller basis: the centre-of-mass directions and the coordinates of fixed atoms are excluded, a rotation subspace of a few modes is kept.
@@ -2024,7 +2024,7 @@ The rows are orthonormalized once into \(Q\), so that \(P_U\) is \(Q^\top Q\) or
 Its tangent space at \(x\) is \(\{v \in U : x^\top v = 0\}\).
 Since \(P_U x = x\), the projectors \(P_U\) and \(x x^\top\) commute, and
 \[
-P_x ` (I - x x^\top) P_U ` P_U - x x^\top
+P_x = (I - x x^\top) P_U = P_U - x x^\top
 \]
 is symmetric and idempotent with range \(U \cap x^\perp\): it is the orthogonal projector onto the tangent space.
 The Riemannian gradient is \(P_x \nabla \bar f = P_U \nabla \bar f - (x^\top \nabla \bar f)\, x\).
@@ -2087,14 +2087,14 @@ H_G[u] = w_i^{-1} G_x^{-1}\, \mathrm{Hess}_i f(x)[u],
 with \(\mathrm{Hess}_i\) the factor's Hessian in \(g_i\).
 It has the three properties the trust region needs.
 It is self-adjoint in the new metric, since \(w_i\, g_i(H_G u, G_x v) = g_i(\mathrm{Hess}_i f(x)[u], v)\).
-It is exact at a critical point, where the Hessian depends on the metric only through the inner product on the tangent space (Boumal, Proposition 5.45 and the remark after it): there \(g_G(\mathrm{Hess}_G f(x)[u], v) ` g(\mathrm{Hess} f(x)[u], v) ` g_G(H_G u, v)\).
+It is exact at a critical point, where the Hessian depends on the metric only through the inner product on the tangent space (Boumal, Proposition 5.45 and the remark after it): there \(g_G(\mathrm{Hess}_G f(x)[u], v) = g(\mathrm{Hess} f(x)[u], v) = g_G(H_G u, v)\).
 Away from critical points the bilinear forms of two Riemannian Hessians of one function differ by \(\mathrm{D} f(x)[\Gamma_x(u, v)]\), with \(\Gamma\) the difference of the two Levi-Civita connections, and the Hessian of the pullback \(\hat f_x = f \circ R_x\) at \(0\) differs from either by another term linear in \(\mathrm{D} f(x)\).
 \(H_G\) thus meets the condition \(\|H_k - \mathrm{Hess} \hat f_{x_k}(0)\| \le \beta_H \|\mathrm{grad} f(x_k)\|\) of Absil, Mahony and Sepulchre, Theorem 7.4.11, and `minimize_rtr` keeps its local rate \(\min(\theta + 1, 2)\) in the new metric.
 
 /Preconditioned truncated CG./
 In this metric the truncated conjugate gradients of `minimize_rtr` are manopt's preconditioned `trs_tCG` in the unweighted metric \(\langle \cdot, \cdot \rangle\), with the preconditioner \(P\) equal to \((w_i G_x)^{-1}\) on block \(i\).
 The residual of the model in the new metric is \(P r\), with \(r\) the residual in the unweighted metric.
-The step length \(\langle P r, P r \rangle_G / \langle \delta, H_G \delta \rangle_G ` \langle r, P r \rangle / \langle \delta, \mathrm{Hess} f\, \delta \rangle\) is manopt's ~z_r / d_Hd~, and the trust ball \(\|\eta\|_G^2 ` \langle \eta, P^{-1} \eta \rangle \le \Delta^2\) is manopt's, so the iterates are the same.
+The step length \(\langle P r, P r \rangle_G / \langle \delta, H_G \delta \rangle_G = \langle r, P r \rangle / \langle \delta, \mathrm{Hess} f\, \delta \rangle\) is manopt's `z_r / d_Hd`, and the trust ball \(\|\eta\|_G^2 = \langle \eta, P^{-1} \eta \rangle \le \Delta^2\) is manopt's, so the iterates are the same.
 Two tests differ.
 The inner rule here reads the residual in the new metric, \(\langle r, P r \rangle^{1/2}\), where manopt reads \(\|r\|\); manopt's source calls the choice arbitrary and notes that Conn, Gould and Toint accept both (@@rst::cite:`connTrustRegionMethods2000`@@, page 206).
 The outer test here reads \(\|\mathrm{grad}_G f\|_G = \langle \mathrm{grad} f, P\, \mathrm{grad} f \rangle^{1/2}\), where manopt reads \(\|\mathrm{grad} f\|\).
@@ -2163,12 +2163,12 @@ The caller's \(\bar f\) is defined on \(\mathbb{R}^n\), and many functions agree
 \]
 and every embedded kind that supplies `ehess2rhess` keeps its own term the same way.
 The result does not depend on the extension.
-If \(\bar f_1\) and \(\bar f_2\) agree on the sphere, then \(h ` \bar f_1 - \bar f_2\) vanishes there, so its gradient is normal: \(\nabla h(x) ` \mu(x)\, x\) with \(\mu = x^\top \nabla h\).
-Differentiating along a curve on the sphere with velocity \(u\) gives \(\nabla^2 h(x)\, u ` (\mathrm{D} \mu(x)[u])\, x + \mu(x)\, u\), so \((I - x x^\top) \nabla^2 h(x)\, u ` \mu(x)\, u\), which the Weingarten term \(-(x^\top \nabla h(x))\, u = -\mu(x)\, u\) cancels.
+If \(\bar f_1\) and \(\bar f_2\) agree on the sphere, then \(h = \bar f_1 - \bar f_2\) vanishes there, so its gradient is normal: \(\nabla h(x) = \mu(x)\, x\) with \(\mu = x^\top \nabla h\).
+Differentiating along a curve on the sphere with velocity \(u\) gives \(\nabla^2 h(x)\, u = (\mathrm{D} \mu(x)[u])\, x + \mu(x)\, u\), so \((I - x x^\top) \nabla^2 h(x)\, u = \mu(x)\, u\), which the Weingarten term \(-(x^\top \nabla h(x))\, u = -\mu(x)\, u\) cancels.
 Boumal's Corollary 5.47 states the general fact: the correction depends on the extension only through the normal part of its gradient.
 On `SubspaceSphere` the gradient of \(h\) also has a part in \(U^\perp\), whose derivative stays in \(U^\perp\), and \(P_x\) removes both.
 
-The degree-zero extension \(\bar f(x) ` f(x / \|x\|)\) is constant along rays, so \(x^\top \nabla \bar f ` 0\) on the sphere and the term vanishes: the projected Hessian alone is the Riemannian Hessian.
+The degree-zero extension \(\bar f(x) = f(x / \|x\|)\) is constant along rays, so \(x^\top \nabla \bar f = 0\) on the sphere and the term vanishes: the projected Hessian alone is the Riemannian Hessian.
 The session's dogleg step models the Hessian as \(Z^\top \nabla^2 \bar f\, Z\), with \(Z\) an orthonormal basis of the tangent space, and its Newton-CG and Newton-PCG steps as \(P \nabla^2 \bar f\, P + (I - P)\).
 Neither has the Weingarten term, so both are exact for the degree-zero extension.
 For another extension the model is off by \(x^\top \nabla \bar f\) times the identity on the tangent space, which at a minimizer is the Lagrange multiplier and does not vanish, and the steps converge linearly.
@@ -2180,7 +2180,7 @@ For \(\bar f(x) = x^\top A x\) the model is \(2A\) on the tangent space where th
 
 Section 4.6 of the optimal-hyperplane (OH-TST) design in `rgsaddle` lists what it needs from rgmin.
 Its plane is a unit normal \(n\) on the sphere of the subspace the sampler moves in and a signed offset \(d\) from a pivot \(c\), so the manifold is \(S(U) \times \mathbb{R}\), and the drivers minimize \(f = -A\) for the free energy \(A\) of the plane.
-`tests/plane_free_energy.rs` solves its harmonic model, \(A ` r^2 / (2s) + \tfrac{k_B T}{2} \ln(-s)\) with \(s ` n^\top H^+ n\) and \(r ` d - n \cdot (q^\ddagger - c)\), whose optimum is the unstable mode through the saddle \(q^\ddagger\), with \(f^* ` \tfrac{k_B T}{2} \ln |\lambda_1|\).
+`tests/plane_free_energy.rs` solves its harmonic model, \(A = r^2 / (2s) + \tfrac{k_B T}{2} \ln(-s)\) with \(s = n^\top H^+ n\) and \(r = d - n \cdot (q^\ddagger - c)\), whose optimum is the unstable mode through the saddle \(q^\ddagger\), with \(f^* = \tfrac{k_B T}{2} \ln |\lambda_1|\).
 The items of section 4.6 map onto the crate as follows.
 1. /A Euclidean factor./
    `ProductFactor::new(ManifoldKind::Euclidean, 1)` carries the offset.
@@ -2199,7 +2199,7 @@ The items of section 4.6 map onto the crate as follows.
 7. /A convention for sphere Hessians./
    Both options of the design hold: `ehess2rhess` keeps the explicit Weingarten term for any extension, and the session steppers are exact for the degree-zero extension.
 
-On the harmonic model with \(D ` 24\) coordinates, \(k_B T ` 0.3\), \(\lambda_1 = -1.5\) and in-plane curvatures from 0.05 to 8, `minimize_rtr` from a normal a few degrees off the unstable mode reaches the optimal plane in every metric, to \(10^{-10}\) in the gradient norm, the normal and \(f\):
+On the harmonic model with \(D = 24\) coordinates, \(k_B T = 0.3\), \(\lambda_1 = -1.5\) and in-plane curvatures from 0.05 to 8, `minimize_rtr` from a normal a few degrees off the unstable mode reaches the optimal plane in every metric, to \(10^{-10}\) in the gradient norm, the normal and \(f\):
 
 | Metric on \((n, d)\)                                         | Outer iterations | Inner iterations |
 |--------------------------------------------------------------+------------------+------------------|
@@ -2367,8 +2367,8 @@ Oblique stays its own kind, the power of spheres with column loops of its own.
 - \(g(\mathrm{grad} f, v) = \nabla \bar f^\top v\), tangency of the gradient and of the Hessian action, and symmetry of the Hessian in \(g\);
 - the retraction and the exponential stay on the manifold for steps from \(10^{-3}\) to \(10\);
 - transport lands in the target tangent space, parallel transport preserves \(g\), and a product of flat factors with weights 2, 1/4 and 1 transports isometrically;
-- the locking condition with \(\beta ` 1\): the velocity of \(t \mapsto \exp_x(t d)\) at \(t ` 1\), by central differences, equals `parallel_transport_along(x, d, d)`;
-- \(\log_x(\exp_x(v)) ` v\), \(\mathrm{dist}(x, \exp_x(v)) ` \|v\|\) and the weighted typical distance;
+- the locking condition with \(\beta = 1\): the velocity of \(t \mapsto \exp_x(t d)\) at \(t = 1\), by central differences, equals `parallel_transport_along(x, d, d)`;
+- \(\log_x(\exp_x(v)) = v\), \(\mathrm{dist}(x, \exp_x(v)) = \|v\|\) and the weighted typical distance;
 - L-BFGS, steepest descent, the session Newton-CG trust region and `minimize_rtr` reach the minimum of a coupled Rayleigh quotient and quadratic on the hyperplane, \(\tfrac12 (p - c)^\top B (p - c) + n^\top A n + \kappa ((p - c)^\top n)^2\), whose value is the lowest eigenvalue of \(A\);
 - the unit test of the chart section, and the rigid factors keep their mass-weighted centres.
 
@@ -2468,7 +2468,7 @@ preserving.
 After a step `s = x_new - x_old` with gradient change
 `y = g_new - g_old`, any model Hessian `B` worth keeping should
 reproduce the observed curvature: B s = y. In inverse form, with
-H ` B^-1, the condition reads H y ` s. One equation cannot determine a
+H = B^-1, the condition reads H y = s. One equation cannot determine a
 matrix, so each method adds a minimality principle. BFGS chooses the
 inverse update closest to the old `H` in a weighted Frobenius norm
 subject to the secant condition and symmetry, which lands on
@@ -2493,9 +2493,9 @@ formula `m` times around a seed matrix H0 gives the two-loop
 recursion (Nocedal and Wright 7.4):
 
   q = g
-  for i ` m-1 .. 0:   alpha_i ` rho_i (s_i . q);  q = q - alpha_i y_i
+  for i = m-1 .. 0:   alpha_i = rho_i (s_i . q);  q = q - alpha_i y_i
   r = H0 q
-  for i ` 0 .. m-1:   beta ` rho_i (y_i . r);     r = r + (alpha_i - beta) s_i
+  for i = 0 .. m-1:   beta = rho_i (y_i . r);     r = r + (alpha_i - beta) s_i
   direction = -r
 
 with the standard scalar seed H0 = (s . y) / (y . y) I from the most
@@ -2597,7 +2597,7 @@ Byrd, Lu, Nocedal and Zhu, /A limited memory algorithm for bound constrained opt
 The step needs `B` rather than `H`, so it uses the compact form of Byrd, Nocedal and Schnabel, Mathematical Programming 63, 129 (1994) ([10.1007/BF01582063](https://doi.org/10.1007/BF01582063); @@rst::cite:`byrdRepresentationsQuasinewtonMatrices1994`@@):
 
 #+begin_example
-B ` theta I - W M W^T,   W ` [Y, theta S],
+B = theta I - W M W^T,   W = [Y, theta S],
 M^-1 = [[-D, L^T], [L, theta S^T S]],
 #+end_example
 
@@ -2783,7 +2783,7 @@ entries, +-1, drawn from a seeded generator so a rebuild at the same
 point is reproducible) and pay `k` Hessian actions for Y = H Omega.
 With the stabilizing shift nu, the Nystrom approximation is
 
-  H_nys ` Y_nu (Omega^T Y_nu)^-1 Y_nu^T,   Y_nu ` Y + nu Omega,
+  H_nys = Y_nu (Omega^T Y_nu)^-1 Y_nu^T,   Y_nu = Y + nu Omega,
 
 a rank-k surrogate that agrees with `H` on the sketched subspace.
 Factoring the small k x k core by a Jacobi eigensolve and thin-
@@ -2854,9 +2854,9 @@ that is what its damping parameter is.
 
 Along the current conjugate direction `d`, SCG builds the quadratic
 model from the directional derivative mu = d . g and a curvature
-estimate gamma ` d . H d, then damps the curvature with lambda >` 0:
+estimate gamma = d . H d, then damps the curvature with lambda >= 0:
 
-  delta ` gamma + lambda norm(d)^2,     alpha ` -mu / delta.
+  delta = gamma + lambda norm(d)^2,     alpha = -mu / delta.
 
 The damping plays exactly the role of the trust radius: lambda = 0
 trusts the quadratic model fully (a Newton-like step along the ray);
@@ -3024,7 +3024,7 @@ The kernel still fixes the norm of the bound, and the likelihood fixes a unit fo
 Take the value block of the inverse-distance squared-exponential kernel of Koistinen et al. @@rst::cite:`koistinenNudgedElasticBand2019`@@, with `u_p = ln l_p` for pair type `p`:
 
 #+begin_example
-k ` sigma_c^2 + sigma_m^2 c,   c ` exp(-S / 2),   S ` sum_p s_p,   s_p ` Q_p exp(-2 u_p)
+k = sigma_c^2 + sigma_m^2 c,   c = exp(-S / 2),   S = sum_p s_p,   s_p = Q_p exp(-2 u_p)
 #+end_example
 
 Here `Q_p >= 0` sums the squared differences of inverse distances of pair type `p`.
@@ -3051,7 +3051,7 @@ The problem does not supply one.
 
 # A unit from the likelihood
 
-The likelihood gives the Fisher information `F_ij = tr(K^-1 dK_i K^-1 dK_j) / 2` for `y ` N(0, K(theta))` with `n~ rows.
+The likelihood gives the Fisher information `F_ij = tr(K^-1 dK_i K^-1 dK_j) / 2` for `y ` N(0, K(theta))~ with `n` rows.
 
 - Theorem 3 :: If `K = exp(v) C + B` with `C` and `B` positive semidefinite and free of `v = ln sigma_m^2`, then `F_vv <= n / 2`, with equality when `B = 0`.
 
@@ -3303,7 +3303,7 @@ not the drop-in and not `alpha` by itself, is what produced −0.01.
 The runs below do not use that lattice. LJ13 starts from the Mackay
 icosahedron and LJ38 from the Oh truncated octahedron in the Cambridge
 Cluster Database
-(`https://www-wales.ch.cam.ac.uk/`jon/structures/LJ/points/13~ and
+(~https://www-wales.ch.cam.ac.uk/~jon/structures/LJ/points/13~ and
 `.../38`). The database energies are −44.326801 and −173.928427. With
 ASE's Lennard-Jones calculator (`epsilon = 1`, `sigma = 1`, `rc = 10`,
 potential shifted to zero at the cutoff) those geometries evaluate to
@@ -3455,7 +3455,7 @@ Install and run it with the pixi environment `gate` (numpy 2.2.6, scipy
 1.15.3). Matplotlib is optional and is used only for `--plot`.
 
 ```bash
-pixi run -e gate gate results.csv --pair lbfgs-exp`lbfgs-wolfe --pair fire-exp`fire --pair cg-exp=cg-wolfe
+pixi run -e gate gate results.csv --pair lbfgs-exp=lbfgs-wolfe --pair fire-exp=fire --pair cg-exp=cg-wolfe
 ```
 
 Exit 0 is a pass, 1 is a fail, 2 is undecided, and 3 is a contract or
@@ -4092,7 +4092,7 @@ grep -A2 '^name = "rgmin"' Cargo.lock
 #+begin_example
 name = "rgmin"
 version = "0.6.0"
-source ` "git+https://github.com/OmniPotentRPC/rgmin?branch`develop#113fb592707406a6d621e4da6d8eea243abce968"
+source = "git+https://github.com/OmniPotentRPC/rgmin?branch=develop#113fb592707406a6d621e4da6d8eea243abce968"
 #+end_example
 
 In the rgmin checkout that `Cargo.lock` names, `git rev-parse HEAD` prints the same full commit.
@@ -4298,7 +4298,7 @@ const uint32_t pi[3] = {0, 0, 1};
 const uint32_t pj[3] = {1, 2, 2};
 const double masses[3] = {15.999, 1.008, 1.008};
 rgmin_constraints_t *set = rgmin_constraints_create_at(pi, pj, 3, x, 9);
-if (set =` NULL || rgmin_constraints_set_masses(set, masses, 3) !` RGMIN_SUCCESS) {
+if (set == NULL || rgmin_constraints_set_masses(set, masses, 3) != RGMIN_SUCCESS) {
     /* rgmin_last_error() says why, rgmin_last_constraint_error() names it */
 }
 rgmin_control_t ctrl = rgmin_control_default();
@@ -4613,7 +4613,7 @@ opt = GPMin(
     update_prior_strategy="maximum",
     update_hyperparams=False,
 )
-converged ` opt.run(fmax`0.01, steps=100)
+converged = opt.run(fmax=0.01, steps=100)
 ```
 
 To enable bounded marginal log-likelihood hyperparameter updates on a
@@ -4626,7 +4626,7 @@ opt = GPMin(
     batch_size=1,
     bounds=0.1,
 )
-converged ` opt.run(fmax`0.01)
+converged = opt.run(fmax=0.01)
 weight, scale, noise = opt.hyperparameters
 ```
 
@@ -4752,7 +4752,7 @@ For an ASE `Atoms` or cell filter, use `GromacsCg` in `rgmin.optimize`:
 ```python
 from rgmin.optimize import GromacsCg
 
-opt ` GromacsCg(atoms, emtol`10.0, emstep`0.01, nsteps`500, nstcgsteep=1000)
+opt = GromacsCg(atoms, emtol=10.0, emstep=0.01, nsteps=500, nstcgsteep=1000)
 opt.run()
 ```
 
@@ -4895,7 +4895,7 @@ For an ASE `Atoms` or filter, use the class in `rgmin.optimize`:
 ```python
 from rgmin.optimize import GromacsSteep
 
-opt ` GromacsSteep(atoms, emtol`10.0, emstep`0.01, nsteps`500)
+opt = GromacsSteep(atoms, emtol=10.0, emstep=0.01, nsteps=500)
 opt.run()
 ```
 
@@ -4947,7 +4947,7 @@ The two-loop recursion is the unconstrained L-BFGS step. HiGHS is
 used only when that step must sit in a feasible set: an L_inf trust
 region, a box on `x + p`, and optional linear equalities.
 
-The QP is `min 1/2 ||p - d||^2` with `d ` -H g` and `Q ` I`. A dense
+The QP is `min 1/2 ||p - d||^2` with `d = -H g` and `Q = I`. A dense
 compact Hessian is not formed; that matrix is indefinite after a tiny
 accepted step and `Highs_run` does not return.
 
@@ -4961,7 +4961,7 @@ When a host Hessian is present (`rgmin_solver_step_hess`) and
 `rgmin_solver_set_box` (a NULL side is unbounded) and, if no box
 was set, from atom maxmove. `rgmin_solver_set_trust` sets the
 L_inf radius on the step; `rgmin_solver_add_equality` appends
-`a · p ` rhs=. That is the path eOn / rgpot / any eindir
+`a · p = rhs`. That is the path eOn / rgpot / any eindir
 objective share. Without the `highs` cargo feature every setter
 returns 1.
 
@@ -5323,7 +5323,7 @@ The 2Aug2023 and 29Aug2024 releases log `Loading plugins for min styles not yet 
 
 ```bash
 cmake -S lammps-stable_30Sep2026_update1/cmake -B build-lammps \
-  -D BUILD_MPI`on -D PKG_PLUGIN`on -D PKG_MANYBODY=on
+  -D BUILD_MPI=on -D PKG_PLUGIN=on -D PKG_MANYBODY=on
 cmake --build build-lammps -j
 
 cmake -S rgmin/lammps -B build-rgmin-lammps \
@@ -5542,7 +5542,7 @@ Source: `docs/orgmode/howto/level-set.org`
 
 # Keep a session on a level set
 
-A level-set constraint keeps every accepted point on the surface `value(x) ` target`, where `value= is the energy the objective reports.
+A level-set constraint keeps every accepted point on the surface `value(x) = target`, where `value` is the energy the objective reports.
 The session uses the objective's gradient as the normal of that surface.
 It projects each trial direction, the capped eOn L-BFGS displacement included, and the FIRE velocity onto the tangent plane.
 Then it retracts each accepted point onto the surface by Newton steps along the gradient.
@@ -5578,7 +5578,7 @@ The nanobind wheel on PyPI has no level-set option.
 import numpy as np
 import rgmin
 
-session ` rgmin.Session("lbfgs", 2, level_set`1.0)
+session = rgmin.Session("lbfgs", 2, level_set=1.0)
 x = [2.0, 0.0]
 x, value, grad_norm = session.step(x, lambda p: (float(np.dot(p, p)), [2.0 * v for v in p]))
 assert abs(value - 1.0) < 1e-6
@@ -6444,10 +6444,10 @@ from rgmin import FIRE, LBFGS
 atoms = molecule("H2")
 atoms.calc = EMT()
 seen = []
-opt ` LBFGS(atoms, trajectory`"opt.traj", logfile=None)
+opt = LBFGS(atoms, trajectory="opt.traj", logfile=None)
 opt.attach(lambda: seen.append(atoms.get_potential_energy()))
 opt.run(fmax=0.05)
-FIRE(atoms, logfile`None).run(fmax`0.05, steps=20)
+FIRE(atoms, logfile=None).run(fmax=0.05, steps=20)
 ```
 
 This binding's L-BFGS follows ASE's length control and keeps the pairs. `LBFGS(eon_cap=True)` selects the crate default, the line-search-free eOn cap. `LBFGS(use_line_search=True)`, or `LBFGSLineSearch`, selects rgmin's strong Wolfe search. Stubs live in `python/rgmin/*.pyi` and `py.typed` marks the package.
@@ -6471,8 +6471,8 @@ A Cartesian solver starts with a per-atom cap of 0.2 (ASE `maxstep`, eOn `max_mo
 ```python
 from rgmin.ase import LBFGS
 
-LBFGS(atoms, logfile`None, maxstep`0.1).run(fmax=0.05)
-LBFGS(atoms, logfile`None, linesearch`"wolfe").run(fmax=0.05)
+LBFGS(atoms, logfile=None, maxstep=0.1).run(fmax=0.05)
+LBFGS(atoms, logfile=None, linesearch="wolfe").run(fmax=0.05)
 ```
 
 `linesearch` is accepted only where the step reads it. `sd`, the conjugate-gradient methods, `adam`, and `diis` take `brent`, `backtracking`, `goldstein`, and `wolfe`. `bfgs` takes those and `ase`. `lbfgs` takes `wolfe` and `ase`. `accept="step"` takes each step without a line search, and FIRE, QuickMin, ODE12r, BB, SR1, SR2, PSO, Newton, RFO, dogleg, and Newton-CG never search a line. A `linesearch` on any of those raises `ValueError` and names the reason, rather than leaving the run unchanged. `rgmin.ase` takes `accept="step"` on a non-conservative optimizable (NEB, dimer, min-mode), so a `linesearch` there raises unless `accept` is `energy` or `nonmonotone`.
@@ -6484,10 +6484,10 @@ from ase.calculators.emt import EMT
 from rgmin.ase import FIRE
 
 atoms.calc = EMT()
-FIRE(atoms, logfile`None).run(fmax`0.05)
+FIRE(atoms, logfile=None).run(fmax=0.05)
 ```
 
-Newton, RFO, and dogleg need `hessian(x)`, a callable that returns the `(n, n)` matrix. A band or a min-mode run accepts the step rather than the energy. Pass `accept`= to choose the rule yourself.
+Newton, RFO, and dogleg need `hessian(x)`, a callable that returns the `(n, n)` matrix. A band or a min-mode run accepts the step rather than the energy. Pass `accept=` to choose the rule yourself.
 
 `h0` and `linesearch="ase"` are opt-in. `h0` scales the initial inverse Hessian of `bfgs` and `lbfgs`. `linesearch="ase"` runs a port of ASE's line search on those two methods, and `stpmax` bounds its step multiplier. Omitting both leaves the session defaults. A value the method would ignore raises `ValueError`.
 
@@ -6860,7 +6860,7 @@ Every bond sits at the Morse minimum in the ideal lattice.
 Two methods run on every pool.
 The first is `lbfgs` with m = 10.
 Each step takes the two-loop direction and the strong Wolfe search,
-with c1 ` 1e-4, c2 ` 0.9 and at most 40 trials.
+with c1 = 1e-4, c2 = 0.9 and at most 40 trials.
 The session sets `Accept::Energy` and clears the per-atom cap that a
 Cartesian session installs by default.
 A per-atom cap would bound every trial of the search, and
@@ -7191,7 +7191,7 @@ python3 docs/figures/architecture/draw_hourglass.py
 
 | C kind | Rust | role |
 |---+---|---|
-| `RGMIN_PRECON_EXP` | `PreconSpec::Exp` | `H_0 ` P^{-1}= for L-BFGS, metric for CG and FIRE |
+| `RGMIN_PRECON_EXP` | `PreconSpec::Exp` | `H_0 = P^{-1}` for L-BFGS, metric for CG and FIRE |
 | `RGMIN_PRECON_LINDH` | `PreconSpec::Lindh` | model Hessian, same solve |
 | `RGMIN_PRECON_FF` | `PreconSpec::Ff` | bonded metric, harmonic terms on the C struct |
 | `RGMIN_PRECON_AUTO` | `select_precon` | the session method plus the how-to table |
@@ -7515,8 +7515,8 @@ expose `nstcgsteep` through `rgmin_solver_set_gromacs_cg` /
 
 The 7-atom Lennard-Jones argon cluster fixture
 (`tests/data/gromacs_steep_argon.txt`, $\sigma = 0.34\text{ nm}$,
-$\epsilon ` 1.0\text{ kJ mol}^{-1}$, $r_c ` 3.0\text{ nm}$,
-$\text{emstep} ` 0.02\text{ nm}$, $\text{nstcgsteep} ` 1000$) was run with
+$\epsilon = 1.0\text{ kJ mol}^{-1}$, $r_c = 3.0\text{ nm}$,
+$\text{emstep} = 0.02\text{ nm}$, $\text{nstcgsteep} = 1000$) was run with
 both double-precision `gmx_d mdrun` and single-precision `gmx mdrun`
 (GROMACS 2023.3 built from source with GCC 13.3.0 and AVX2_256 SIMD,
 `-nt 1 -ntmpi 1`) under `integrator = cg` and compared against `rgmin`
@@ -7538,7 +7538,7 @@ and machine-readable summary are committed under
 
 Both solvers take steepest-descent steps at iterations 0 and 1 and
 conjugate steps after that. Because `rgmin` uses its strong-Wolfe
-bracketing and cubic-zoom line search ($c_1 ` 10^{-4}, c_2 ` 0.1$) rather
+bracketing and cubic-zoom line search ($c_1 = 10^{-4}, c_2 = 0.1$) rather
 than `do_cg`'s midpoint/cubic secant heuristic (and stops at `nsteps`
 steps rather than `nsteps + 1`), step-by-step intermediate
 iterates differ while
@@ -7566,19 +7566,19 @@ Polak-Ribiere Conjugate Gradients:
    F-max             =  7.58904e+00 on atom 3
    F-Norm            =  7.02609e+00
 
-Step 0, Epot`-1.253293e+01, Fnorm`8.103e-01, Fmax=8.753e-01 (atom 6)
-Step 1, Epot`-1.253484e+01, Fnorm`7.289e-01, Fmax=7.873e-01 (atom 2)
-Step 2, Epot`-1.253491e+01, Fnorm`8.501e-01, Fmax=9.183e-01 (atom 2)
-Step 3, Epot`-1.253735e+01, Fnorm`3.975e-01, Fmax=4.293e-01 (atom 6)
-Step 4, Epot`-1.253801e+01, Fnorm`3.227e-01, Fmax=3.485e-01 (atom 6)
-Step 5, Epot`-1.253901e+01, Fnorm`2.951e-01, Fmax=3.187e-01 (atom 5)
-Step 6, Epot`-1.254064e+01, Fnorm`2.856e-01, Fmax=3.085e-01 (atom 2)
-Step 7, Epot`-1.254246e+01, Fnorm`4.829e-01, Fmax=5.216e-01 (atom 2)
-Step 8, Epot`-1.254889e+01, Fnorm`1.090e-01, Fmax=1.177e-01 (atom 2)
-Step 9, Epot`-1.254894e+01, Fnorm`5.133e-03, Fmax=5.544e-03 (atom 2)
-Step 10, Epot`-1.254894e+01, Fnorm`1.983e-03, Fmax=2.141e-03 (atom 4)
-Step 11, Epot`-1.254894e+01, Fnorm`1.121e-03, Fmax=1.211e-03 (atom 4)
-Step 12, Epot`-1.254894e+01, Fnorm`3.282e-03, Fmax=3.545e-03 (atom 3)
+Step 0, Epot=-1.253293e+01, Fnorm=8.103e-01, Fmax=8.753e-01 (atom 6)
+Step 1, Epot=-1.253484e+01, Fnorm=7.289e-01, Fmax=7.873e-01 (atom 2)
+Step 2, Epot=-1.253491e+01, Fnorm=8.501e-01, Fmax=9.183e-01 (atom 2)
+Step 3, Epot=-1.253735e+01, Fnorm=3.975e-01, Fmax=4.293e-01 (atom 6)
+Step 4, Epot=-1.253801e+01, Fnorm=3.227e-01, Fmax=3.485e-01 (atom 6)
+Step 5, Epot=-1.253901e+01, Fnorm=2.951e-01, Fmax=3.187e-01 (atom 5)
+Step 6, Epot=-1.254064e+01, Fnorm=2.856e-01, Fmax=3.085e-01 (atom 2)
+Step 7, Epot=-1.254246e+01, Fnorm=4.829e-01, Fmax=5.216e-01 (atom 2)
+Step 8, Epot=-1.254889e+01, Fnorm=1.090e-01, Fmax=1.177e-01 (atom 2)
+Step 9, Epot=-1.254894e+01, Fnorm=5.133e-03, Fmax=5.544e-03 (atom 2)
+Step 10, Epot=-1.254894e+01, Fnorm=1.983e-03, Fmax=2.141e-03 (atom 4)
+Step 11, Epot=-1.254894e+01, Fnorm=1.121e-03, Fmax=1.211e-03 (atom 4)
+Step 12, Epot=-1.254894e+01, Fnorm=3.282e-03, Fmax=3.545e-03 (atom 3)
 
 Energy minimization reached the maximum number of steps before the forces
 reached the requested precision Fmax < 1e-08.
@@ -8040,7 +8040,7 @@ Source: `docs/orgmode/reference/periodic.org`
 # Periodic block determinants
 
 `rgmin::periodic` computes \(\ln|\det A|\) of a bordered cyclic block matrix, and factors it so that linear systems with \(A\) can be solved afterwards.
-The matrix is what multiple shooting builds for a periodic orbit \(x_{k+1} ` T_k x_k\), \(k ` 0, \dots, b-1\), whose monodromy is \(M = T_{b-1} \cdots T_0\).
+The matrix is what multiple shooting builds for a periodic orbit \(x_{k+1} = T_k x_k\), \(k = 0, \dots, b-1\), whose monodromy is \(M = T_{b-1} \cdots T_0\).
 The determinant \(\det(I - M)\) equals the determinant of the cyclic block matrix without ever forming \(M\), so the product of the period never overflows or drops the decaying multipliers.
 
 ## The matrix
@@ -8112,7 +8112,7 @@ A unit diagonal entry of \(T_0\) makes the matrix entry exactly zero, and scalin
 | `Singular`                 | a triangular diagonal entry is exactly zero                                                                                                  |
 
 A singular matrix is an expected outcome: the identity transfers of the unbordered periodic problem, for example, have \(\det(I - M) = 0\) and are reported as `Singular`.
-A matrix that is finite and nonsingular but whose inverse has entries beyond the range of `f64` is reported as `NonFiniteNormEstimate`, not as `Singular`: for one block \(T_0 ` [[1, \epsilon], [\epsilon, 2]]\) the inverse of \(I - T_0\) is of order \(\epsilon^{-2}\), so ~epsilon ` 1e-150` factors and `epsilon ` 1e-160~ and ~epsilon ` 1e-200` return `NonFiniteNormEstimate~.
+A matrix that is finite and nonsingular but whose inverse has entries beyond the range of `f64` is reported as `NonFiniteNormEstimate`, not as `Singular`: for one block \(T_0 = [[1, \epsilon], [\epsilon, 2]]\) the inverse of \(I - T_0\) is of order \(\epsilon^{-2}\), so `epsilon = 1e-150` factors and `epsilon = 1e-160` and `epsilon = 1e-200` return `NonFiniteNormEstimate`.
 No error is turned into a default value.
 
 ---
@@ -8234,7 +8234,7 @@ Arrays of the wrong length leave the input unchanged: `project`, `egrad2rgrad` a
 
 ## Subspace sphere
 
-`rgmin::manifold::SubspaceSphere` is the unit sphere \(S(U) ` \{x \in U : \|x\| ` 1\}\) of a linear subspace \(U \subset \mathbb{R}^n\), in the ambient Euclidean metric.
+`rgmin::manifold::SubspaceSphere` is the unit sphere \(S(U) = \{x \in U : \|x\| = 1\}\) of a linear subspace \(U \subset \mathbb{R}^n\), in the ambient Euclidean metric.
 - `SubspaceSphere::within(basis: Array2<f64>) -> Result<Self>` takes \(U\) as the span of the rows of `basis`, each of length \(n\).
 - `SubspaceSphere::excluding(basis: Array2<f64>) -> Result<Self>` takes \(U\) as the orthogonal complement of that span; no row gives the whole sphere \(S^{n-1}\).
 `ManifoldKind::sphere_within(basis)` and `ManifoldKind::sphere_excluding(basis)` wrap them in `ManifoldKind::SubspaceSphere(Arc<SubspaceSphere>)`, whose `as_str` is `"subspace_sphere"`.
@@ -8346,7 +8346,7 @@ The Hessian is `ehess2rhess`, or `egrad2rgrad` of the action when that returns `
 | `kappa`              | `0.1`    | `with_kappa`              | \(\kappa\) of the inner rule                                                  |
 | `rho_regularization` | `1e3`    | `with_rho_regularization` | both decreases gain \(\max(1, \lvert f \rvert)\, \varepsilon\) times this     |
 
-A step is accepted when \(\rho > 0.1\); the radius is quartered below \(\rho ` 1/4\) and doubled, up to \(\bar\Delta\), above \(\rho ` 3/4\) on the boundary.
+A step is accepted when \(\rho > 0.1\); the radius is quartered below \(\rho = 1/4\) and doubled, up to \(\bar\Delta\), above \(\rho = 3/4\) on the boundary.
 A non-finite or non-positive \(\bar\Delta\) is replaced by 1.
 `RtrMin` is `#[non_exhaustive]` and holds `x`, `value`, `grad_norm` (in the manifold metric), `iterations`, `accepted` and `inner_iterations`, the conjugate-gradient iterations over all subproblems.
 
@@ -13885,11 +13885,11 @@ Those differ from the Rust `Control::default` (`gtol` 1e-5, `istep` 1) and from 
 
 | Option               | Value                                              | Default | Meaning |
 |----------------------+----------------------------------------------------+---------+---------|
-| `maxiter`            | int >` 0                                           | 100     | Steps `minimize` takes. Zero returns a report without a step. A `Solver` takes one step per `step= call. |
+| `maxiter`            | int >= 0                                           | 100     | Steps `minimize` takes. Zero returns a report without a step. A `Solver` takes one step per `step` call. |
 | `gtol`               | float                                              | 1e-8    | Stop when the gradient norm is below it. |
 | `istep`              | float                                              | 0.1     | Initial step scale. For FIRE it is the initial time step. |
 | `memory`             | int >= 0                                           | 10      | L-BFGS pairs. |
-| `nbfgscorr`          | int >` 1                                           | 10      | Correction pairs for `gromacs_lbfgs=. Other methods reject it. |
+| `nbfgscorr`          | int >= 1                                           | 10      | Correction pairs for `gromacs_lbfgs`. Other methods reject it. |
 | `maxmove`            | float                                              | 0       | Euclidean cap on the step. Zero keeps the method's own caps, and a negative value leaves every cap off. |
 | `atom_maxmove`       | float                                              | unset   | Per-atom cap on the longest atom displacement. `maxstep` is the same option. Unset keeps the method's default, 0.2 for L-BFGS. |
 | `accept`             | `none`, `energy`, `nonmonotone`, `step`            | unset   | How a step is taken. Unset keeps the C session's `energy`. |
@@ -13897,7 +13897,7 @@ Those differ from the Rust `Control::default` (`gtol` 1e-5, `istep` 1) and from 
 | `h0`                 | finite float > 0                                  | unset   | Initial inverse-Hessian scale of `bfgs` and `lbfgs`. Unset keeps the identity BFGS matrix and the Nocedal-Wright L-BFGS scale. |
 | `stpmax`             | float                                              | unset   | Step-multiplier bound of the ASE line search. Requires `linesearch="ase"`. A value below 1 fails each search, as in ASE. |
 | `c1`, `c2`           | float                                              | 1e-4, 0.9 | Wolfe and Armijo constants. Need `linesearch`. |
-| `linesearch_maxiter` | int >` 1                                           | 20      | Trial budget of the line search. Needs `linesearch=. |
+| `linesearch_maxiter` | int >= 1                                           | 20      | Trial budget of the line search. Needs `linesearch`. |
 | `beta`               | a CG variant name, or `cg`                         | unset   | Conjugacy coefficient. Only for a CG method. `cg` is Polak-Ribiere. |
 | `fire_variant`       | `rgmin`, `guenole2020` (`fire2`)                   | unset   | FIRE schedule. |
 | `qn_step`            | `lbfgs`, `newton`, `rfo`                           | unset   | Quasi-Newton step. Newton and RFO need `Solver.step_hess`. |
@@ -13906,13 +13906,13 @@ Those differ from the Rust `Control::default` (`gtol` 1e-5, `istep` 1) and from 
 | `project_rigid`      | bool                                               | unset   | eOn `lbfgs_project_rigid`. |
 | `extra_updates`      | int >= 0                                           | unset   | Al-Baali extra updates. Accepted and without effect. |
 | `cautious_eps`, `cautious_alpha` | float, set together                    | unset   | Li-Fukushima filter: a pair is dropped when s.y < eps * norm(s)^2 * norm(g)^alpha. |
-| `noise_eps`, `noise_c` | float                                            | 0, 0    | Gradient noise floor. `noise_eps` <` 0 leaves it off, and `noise_c` <` 0 selects 3. |
+| `noise_eps`, `noise_c` | float                                            | 0, 0    | Gradient noise floor. `noise_eps` <= 0 leaves it off, and `noise_c` <= 0 selects 3. |
 | `objective_roundoff` | float                                              | unset   | Relative value window of the approximate Wolfe test, in place of the default four epsilon. Zero permits no rise, and a negative or non-finite value raises `ValueError`. |
-| `etol` | float >` 0 | unset | Relative accepted-energy change stop. Unset disables it. A negative or non-finite value raises `ValueError=. |
+| `etol` | float >= 0 | unset | Relative accepted-energy change stop. Unset disables it. A negative or non-finite value raises `ValueError`. |
 | `max_evals` | int >= 1 | unset | Objective evaluation budget, including line-search trials. Unset disables it. |
-| `nstcgsteep` | int >` 0 | unset | Steepest-descent restart interval of a `gromacs_cg` session. Omitted keeps 1000. Zero turns the periodic restart off. Another method raises `ValueError=. |
+| `nstcgsteep` | int >= 0 | unset | Steepest-descent restart interval of a `gromacs_cg` session. Omitted keeps 1000. Zero turns the periodic restart off. Another method raises `ValueError`. |
 | `shrink` | float | unset | Refused-trial factor of a `gromacs_steep` session. Omitted keeps 0.5. The session accepts a finite value in the open interval (0, 1). |
-| `max_constraint_shrinks` | int >` 0 | unset | Consecutive constraint-failure budget of a `gromacs_steep= session. Omitted derives it from the step size and the shrink factor. |
+| `max_constraint_shrinks` | int >= 0 | unset | Consecutive constraint-failure budget of a `gromacs_steep` session. Omitted derives it from the step size and the shrink factor. |
 | `error_on_unmet` | bool | false | Raise `StopUnmetError` when the run stops on `BUDGET`, `LINE_SEARCH`, `LINE_SEARCH_ROUNDING`, `MACHINE_PRECISION`, `POLISH_UNMET`, or `EVAL_BUDGET`. `MACHINE_PRECISION` is unmet: the step can no longer move while the gradient is still above `gtol`. |
 | `backward_polish` | bool | false | Record the backward-error polish request. This step loop does not form a Hessian. |
 | `require_convergence` | bool                                              | False   | Raise `NotConverged` from `minimize` when the gradient norm is not below `gtol`. A first-order session step that took no move and left its state unchanged reports `STEP_TOLERANCE`. |
@@ -13963,10 +13963,10 @@ The other ASE-style classes in `rgmin.optimize` are `BFGS`, `LBFGS`, `LBFGSLineS
 `rgmin.ase` names `BFGSLineSearch`, `LBFGSLineSearch`, and `QuasiNewton`.
 `CG` in `rgmin.optimize` is Polak-Ribiere-Plus. `CG` in `rgmin.ase` defaults to Polak-Ribiere. `RiemannianCG` is `rcg`, and its per-atom cap stays off unless `maxstep` is set.
 
-`LineSearch(kind, x, direction, istep`1.0, c1`1e-4, c2`0.9, beta`0.5, maxiter`40, tol`1e-10)` is the supplied search. `offer(f, gradient)` takes the value and gradient at `x`, then at each trial, and returns `(x, alpha, value, done)`. `done` is False when `x` is the next trial.
-`LbfgsPairs(n, capacity`10)` is the pair memory. `push(s, y, rho`None)` returns whether the pair was stored, and `direction(gradient, h0)` returns `-H g` for `h0` a float, an array or a callable. `clear()`, `dim()` and `len()` complete it.
+`LineSearch(kind, x, direction, istep=1.0, c1=1e-4, c2=0.9, beta=0.5, maxiter=40, tol=1e-10)` is the supplied search. `offer(f, gradient)` takes the value and gradient at `x`, then at each trial, and returns `(x, alpha, value, done)`. `done` is False when `x` is the next trial.
+`LbfgsPairs(n, capacity=10)` is the pair memory. `push(s, y, rho=None)` returns whether the pair was stored, and `direction(gradient, h0)` returns `-H g` for `h0` a float, an array or a callable. `clear()`, `dim()` and `len()` complete it.
 `Stiefel`, `SPD` and `Product` are the manifold classes of @@rst::doc:`manifold`@@.
-`lowest_eigenpairs(hvp, x0_block, *, x`None, tol`1e-8, max_iter`None, precond`None, strict`True)` is block LOBPCG, as @@rst::doc:`../tutorials/eigenpairs`@@ shows. It raises `RuntimeError` for a pair that misses `tol` unless `strict`False`.
+`lowest_eigenpairs(hvp, x0_block, *, x=None, tol=1e-8, max_iter=None, precond=None, strict=True)` is block LOBPCG, as @@rst::doc:`../tutorials/eigenpairs`@@ shows. It raises `RuntimeError` for a pair that misses `tol` unless `strict=False`.
 
 # Errors
 
@@ -13986,7 +13986,7 @@ callback, raises `RuntimeError`.
 `NumericalError` is an `ArithmeticError`. It means the value or the
 gradient was not finite.
 `NotConverged` is a `RuntimeError` raised by `minimize` when
-`require_convergence`True= and the final gradient norm is not below
+`require_convergence=True` and the final gradient norm is not below
 `gtol`. `error.report` is the terminal `Report`.
 An exception raised inside the objective is raised again on the
 calling thread.
@@ -14056,7 +14056,7 @@ The force counts are `bench/results.md`.
 - Liu and Nocedal 1989 is the method used in practice
   ([10.1007/BF01589116](https://doi.org/10.1007/BF01589116)).
 - Nocedal and Wright, *Numerical Optimization*, chapter 7, records the
-  two-loop recursion (algorithm 7.4) and the `H0 ` ((s.y)/(y.y)) I=
+  two-loop recursion (algorithm 7.4) and the `H0 = ((s.y)/(y.y)) I`
   scale (7.20) ([10.1007/978-0-387-40065-5](https://doi.org/10.1007/978-0-387-40065-5)).
 - Wolfe 1969 is the curvature condition
   ([10.1137/1011036](https://doi.org/10.1137/1011036)). Algorithms 3.5 and 3.6 of Nocedal and Wright are
@@ -14072,7 +14072,7 @@ the sign.
 
 `Lbfgs.highs` keeps the two-loop direction and asks HiGHS only to
 project it onto the trust region, the box, and any equalities
-(`min 1/2 norm(p - d)^2`, `Q ` I=;
+(`min 1/2 norm(p - d)^2`, `Q = I`;
 [10.1007/s12532-017-0130-5](https://doi.org/10.1007/s12532-017-0130-5)).
 A dense compact Hessian is not a production QP: after a short accepted
 step it is indefinite and the HiGHS QP solver does not return.
@@ -14363,7 +14363,7 @@ tokens do not converge on these cluster / bulk geometries.
 | sphere | 12/12 misuse | impl correct, `S^{3N-1}` | `sphere.rs:22-39`; cluster not on the unit sphere |
 | Stiefel | 12/12 alias | `St(n,1)` = sphere | `stiefel.rs:11-23`; `stiefel_p` is always 1 |
 | HiGHS | 9/12 wrong QP | `step_hess` solves dense Newton QP | `session.rs:322-336`; Morse `n=768` times out |
-| PSO | 10/12 wrong tool | swarm on `[-1e12,1e12]` | `oracle.rs` unbounded; `230021 = 10000 x `23~ |
+| PSO | 10/12 wrong tool | swarm on `[-1e12,1e12]` | `oracle.rs` unbounded; ~230021 = 10000 x `23` |
 | SR2 | fixed | Powell symmetric Broyden in the SR1 trust region | `qn.rs` `sr2_hessian_update` |
 | model Hessians | 11/12 wrong chemistry | covalent `B^T k B` vs pair | pair is the rematch `P` |
 
@@ -14736,8 +14736,8 @@ import rgmin
 def f_and_grad(x):
     return 0.5 * float(x @ x), np.array(x, copy=True)
 
-x0 ` np.array([1.0, -2.0, 0.5], dtype`np.float64)
-report, x ` rgmin.minimize(f_and_grad, x0, method`"lbfgs", gtol=1e-12)
+x0 = np.array([1.0, -2.0, 0.5], dtype=np.float64)
+report, x = rgmin.minimize(f_and_grad, x0, method="lbfgs", gtol=1e-12)
 assert report.grad_norm < 1e-8
 ```
 
@@ -14747,7 +14747,7 @@ in place, and `minimize` also returns it.
 One iteration at a time uses a solver:
 
 ```python
-config ` rgmin.SolverConfig("lbfgs", memory`20)
+config = rgmin.SolverConfig("lbfgs", memory=20)
 solver = rgmin.Solver(x0.shape[0], config)
 report = solver.step(f_and_grad, x0)
 ```
@@ -14880,7 +14880,7 @@ At the end you have the relaxed energy from each method and a plot of how many f
 ## The system
 
 The start is `tests/data/morse_pos_0000.con`: 256 Pt atoms in a cubic cell of side 16.387907 Å.
-The atoms interact through a Morse pair potential with \(D_0 ` 0.7102\) eV, \(\alpha ` 1.6047\) Å^{-1}, and \(r_0 = 2.897\) Å, cut at 7.0 Å and shifted to zero there, the same potential the Morse tests use.
+The atoms interact through a Morse pair potential with \(D_0 = 0.7102\) eV, \(\alpha = 1.6047\) Å^{-1}, and \(r_0 = 2.897\) Å, cut at 7.0 Å and shifted to zero there, the same potential the Morse tests use.
 At the start the energy is -1392.989740 eV and the largest force on any atom is 1.556715 eV/Å.
 
 ## Run the example
@@ -14892,9 +14892,9 @@ cargo run --release --example relax_morse > trace.csv
 The program prints one line per method when it stops:
 
 #+begin_example
-lbfgs: 9 steps, 11 force calls, E ` -1396.173007 eV, fmax ` 0.006474 eV/Å
-fire: 50 steps, 51 force calls, E ` -1396.172302 eV, fmax ` 0.009318 eV/Å
-fire2: 42 steps, 46 force calls, E ` -1396.172349 eV, fmax ` 0.009145 eV/Å
+lbfgs: 9 steps, 11 force calls, E = -1396.173007 eV, fmax = 0.006474 eV/Å
+fire: 50 steps, 51 force calls, E = -1396.172302 eV, fmax = 0.009318 eV/Å
+fire2: 42 steps, 46 force calls, E = -1396.172349 eV, fmax = 0.009145 eV/Å
 #+end_example
 
 `trace.csv` holds one row per step: method, step, force calls so far, energy, and the largest per-atom force.

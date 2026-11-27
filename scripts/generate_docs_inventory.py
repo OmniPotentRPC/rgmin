@@ -2463,6 +2463,22 @@ def _org_code(match: re.Match[str]) -> str:
     return f"`{match.group(1) or match.group(2)}`"
 
 
+# '=' may occur inside a code span. The opener needs an Org pre
+# border, the body does not start or end on whitespace or '=', and
+# the closer is the earliest '=' before an Org post border.
+_ORG_PRE = r"(?<![^\s\-\(\'\"\{])"
+_ORG_POST = r"(?=$|[\s\-.,:;!?'\")}\\\[]|\\])"
+_ORG_CODE = re.compile(
+    _ORG_PRE
+    + r"~([^~\n]+)~"
+    + _ORG_POST
+    + r"|"
+    + _ORG_PRE
+    + r"=([^\s=\n](?:[^\n]*?[^\s\n])??)="
+    + _ORG_POST
+)
+
+
 def _org_link(match: re.Match[str]) -> str:
     return f"[{match.group(2)}]({match.group(1)})"
 
@@ -2471,7 +2487,7 @@ def org_to_markdown(text: str) -> str:
     flags = re.MULTILINE | re.IGNORECASE
     text = re.sub(r"^#\+(?:TITLE|OPTIONS|STARTUP|AUTHOR):.*\n?", "", text, flags=flags)
     text = re.sub(r"^(\*+)\s+", _org_heading, text, flags=re.MULTILINE)
-    text = re.sub(r"~([^~\n]+)~|=([^=\n]+)=", _org_code, text)
+    text = _ORG_CODE.sub(_org_code, text)
     text = re.sub(r"\[\[([^\]]+)\]\[([^\]]+)\]\]", _org_link, text)
     text = re.sub(r"^#\+begin_src\s+(\S+)", r"```\1", text, flags=flags)
     text = re.sub(r"^#\+end_src", "```", text, flags=flags)

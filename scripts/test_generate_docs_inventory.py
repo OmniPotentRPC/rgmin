@@ -715,6 +715,42 @@ class AmbiguousNameTests(unittest.TestCase):
         )
 
 
+class OrgMarkdownTests(unittest.TestCase):
+    def test_code_span_keeps_an_equals_sign(self) -> None:
+        text = (
+            "=LineSearch(kind, x, direction, istep=1.0, c1=1e-4)= "
+            "is the supplied search.\n"
+        )
+        out = inventory.org_to_markdown(text)
+        self.assertIn(
+            "`LineSearch(kind, x, direction, istep=1.0, c1=1e-4)`",
+            out,
+        )
+        self.assertNotIn("`LineSearch(kind, x, direction, istep`", out)
+
+    def test_adjacent_code_spans_stay_separate(self) -> None:
+        text = "=offer(f, gradient)= takes the value at =x=.\n"
+        out = inventory.org_to_markdown(text)
+        self.assertIn("`offer(f, gradient)` takes the value at `x`.", out)
+
+    def test_verbatim_span_keeps_an_equals_sign(self) -> None:
+        text = "which is ~RGMIN_POLAK_RIBIERE_PLUS = 26~.\n"
+        out = inventory.org_to_markdown(text)
+        self.assertIn("`RGMIN_POLAK_RIBIERE_PLUS = 26`", out)
+
+    def test_code_span_keeps_an_internal_equals_sign(self) -> None:
+        text = "=H_0 = P^{-1}= for L-BFGS\n"
+        out = inventory.org_to_markdown(text)
+        self.assertIn("`H_0 = P^{-1}`", out)
+
+    def test_operator_equals_is_left_in_place(self) -> None:
+        text = "if (set == NULL || ready != 0) {\n"
+        out = inventory.org_to_markdown(text)
+        self.assertIn("set == NULL", out)
+        self.assertIn("ready != 0", out)
+        self.assertNotIn("`", out)
+
+
 class InventoryWordingTests(unittest.TestCase):
     def test_rendered_text_has_no_blocked_wording(self) -> None:
         items = (
