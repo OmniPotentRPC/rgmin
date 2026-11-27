@@ -2,7 +2,7 @@
 //!
 //! Armijo, weak/strong curvature, weak/strong Wolfe, and Goldstein.
 //! Goldstein is Nocedal-Wright 3.11 (two-sided), not the xtsci pair of
-//! upper bounds. [`goldstein_upper`](crate::linesearch::conditions::goldstein_upper)
+//! upper bounds. [`crate::linesearch::conditions::goldstein_upper`]
 //! keeps the xtsci named condition.
 
 /// Armijo sufficient decrease: `φ(α) <= φ(0) + c α φ'(0)`.

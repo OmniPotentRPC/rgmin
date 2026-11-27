@@ -13,9 +13,9 @@
 //!
 //! Every floating-point evaluation of a complex Laplace transform `F(beta)` using standard
 //! `f64` elementary functions is represented as a typed
-//! [`ComplexSample`](crate::inverse_laplace::ComplexSample) estimate, and contour inversions
-//! return typed [`TalbotEstimate`](crate::inverse_laplace::TalbotEstimate) and
-//! [`WeeksEstimate`](crate::inverse_laplace::WeeksEstimate) diagnostics
+//! [`crate::inverse_laplace::ComplexSample`] estimate, and contour inversions
+//! return typed [`crate::inverse_laplace::TalbotEstimate`] and
+//! [`crate::inverse_laplace::WeeksEstimate`] diagnostics
 //! (`is_certified() == false`, `certified_bar() == None`). All non-negative estimate
 //! accumulations use outward-directed IEEE-754 `.next_up()` arithmetic on every elementary step.
 

@@ -9,11 +9,11 @@
 //! Fast Inertial Relaxation Engine*,
 //! <https://doi.org/10.1016/j.commatsci.2022.111978>.
 //!
-//! [`fire_displacement`](crate::fire::fire_displacement) is the rgmin integrator: a downhill step mixes
+//! [`crate::fire::fire_displacement`] is the rgmin integrator: a downhill step mixes
 //! first, then adapts, then takes a semi-implicit Euler kick. FIRE 1.0
-//! takes the kick here and mixes afterwards in [`fire_after_v1`](crate::fire::fire_after_v1).
-//! [`fire2_displacement`](crate::fire::fire2_displacement) is Guénolé algorithm 2. `fire_prepare_v2`
-//! followed by [`fire_displacement_into`](crate::fire::fire_displacement_into) is that same published step
+//! takes the kick here and mixes afterwards in [`crate::fire::fire_after_v1`].
+//! [`crate::fire::fire2_displacement`] is Guénolé algorithm 2. `fire_prepare_v2`
+//! followed by [`crate::fire::fire_displacement_into`] is that same published step
 //! split so a session can roll the half-step back before the kick, and
 //! it is where ABC-FIRE and [`FirePreset`] apply.
 

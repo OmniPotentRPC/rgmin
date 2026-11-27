@@ -29,8 +29,8 @@
 //! gives the same decision as the same pair scaled to `O(1)`, and the pair is
 //! refused only when the correction itself is not a finite, nonzero `f64`.
 //! A pair that cannot produce a finite correction returns
-//! [`SecantError::NonFinite`](crate::secant::SecantError::NonFinite) or
-//! [`SecantOutcome::Skipped`](crate::secant::SecantOutcome::Skipped) and leaves `B`
+//! [`crate::secant::SecantError::NonFinite`] or
+//! [`crate::secant::SecantOutcome::Skipped`] and leaves `B`
 //! unchanged.
 
 use thiserror::Error;
