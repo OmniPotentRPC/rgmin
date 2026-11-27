@@ -1,0 +1,1155 @@
+{
+  "bootstrap_samples": 10000,
+  "bootstrap_seed": 20261123,
+  "budget": 2000,
+  "miss_score": 2001,
+  "protocol": {
+    "atom_cap": 0.2,
+    "base": "0df557c2355011419b4fa60ead390f300940b361",
+    "budget": 2000,
+    "core": 0,
+    "cycles": 5,
+    "energies": [
+      "repo",
+      "rgpot"
+    ],
+    "eon_cap": 0.2,
+    "fire_istep": 0.1,
+    "fmax": 0.01,
+    "kick": "set_fire_metric_kick(true) on the candidate only, for fire2-exp-kick",
+    "methods": [
+      "fire2-exp",
+      "fire2-exp-kick",
+      "eon",
+      "fire2"
+    ],
+    "neighbours": "linkcell::pairs_open 0.6.0",
+    "optimizer_a": "0df557c2355011419b4fa60ead390f300940b361",
+    "optimizer_b": "839364e0ac2c33abe113841e1997f83f7babfe80",
+    "order": [
+      "A",
+      "B",
+      "B",
+      "A"
+    ],
+    "potential": "pairwise Lennard-Jones epsilon=1 sigma=1 from tests/gpmin.rs",
+    "rgpot": "3.7.0",
+    "rgpot_error": "",
+    "rgpot_pes": "rgpot::LJClusterPot default constructor",
+    "seeds": [
+      2000,
+      2001,
+      2002,
+      2003,
+      2004,
+      2005,
+      2006,
+      2007,
+      2008,
+      2009,
+      2010,
+      2011
+    ],
+    "sigma": 0.02,
+    "systems": [
+      "lj38",
+      "lj75"
+    ],
+    "wall_repeats": 10
+  },
+  "ratio_limit": 1.1,
+  "verdicts": [
+    {
+      "aa": {
+        "band_s": [
+          0.006930432,
+          0.006995785
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.006930432,
+        "mwu_p": 0.9769702553219757,
+        "n": 12,
+        "relative_width": 0.009385607017325633,
+        "second_median_s": 0.006995785
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "repo",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 84.5,
+      "median_evals_b": 84.5,
+      "median_iterations_a": 71.5,
+      "median_iterations_b": 71.5,
+      "method": "fire2-exp",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj38",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.0069023374999999994,
+      "wall_s_median_b": 0.006804932
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.021653341,
+          0.0218681875
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.0218681875,
+        "mwu_p": 0.8852339144732017,
+        "n": 12,
+        "relative_width": 0.009873113716582858,
+        "second_median_s": 0.021653341
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "repo",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 85.5,
+      "median_evals_b": 85.5,
+      "median_iterations_a": 72.5,
+      "median_iterations_b": 72.5,
+      "method": "fire2-exp",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj75",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.021533154,
+      "wall_s_median_b": 0.0215613335
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.006898399,
+          0.0069153375
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.006898399,
+        "mwu_p": 0.8398599725400034,
+        "n": 12,
+        "relative_width": 0.0024524139431789413,
+        "second_median_s": 0.0069153375
+      },
+      "bit_identical": false,
+      "ci95": [
+        1.293654990085922,
+        1.3717948717948718
+      ],
+      "energy": "repo",
+      "first_differing_seed": {
+        "a_pass": 1,
+        "b_pass": 2,
+        "field": "evals",
+        "seed": 2000
+      },
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.3416666666666668,
+      "median_evals_a": 84.5,
+      "median_evals_b": 113.0,
+      "median_iterations_a": 71.5,
+      "median_iterations_b": 106.0,
+      "method": "fire2-exp-kick",
+      "mwu_p": 3.545646695827148e-05,
+      "mwu_u": 144.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 0,
+      "same_evals": 0,
+      "same_iterations": 0,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj38",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "FLAG",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.0068897,
+      "wall_s_median_b": 0.009913578499999999
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.0213220425,
+          0.021427281
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.0213220425,
+        "mwu_p": 0.7508318840891169,
+        "n": 12,
+        "relative_width": 0.004923516508980559,
+        "second_median_s": 0.021427281
+      },
+      "bit_identical": false,
+      "ci95": [
+        1.2675865800865802,
+        1.348449979694057
+      ],
+      "energy": "repo",
+      "first_differing_seed": {
+        "a_pass": 1,
+        "b_pass": 2,
+        "field": "evals",
+        "seed": 2000
+      },
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.306599509234147,
+      "median_evals_a": 85.5,
+      "median_evals_b": 111.0,
+      "median_iterations_a": 72.5,
+      "median_iterations_b": 103.5,
+      "method": "fire2-exp-kick",
+      "mwu_p": 3.462842221038823e-05,
+      "mwu_u": 144.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 0,
+      "same_evals": 0,
+      "same_iterations": 0,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj75",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "FLAG",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.0215007845,
+      "wall_s_median_b": 0.0305944625
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.0012926525,
+          0.0013117365000000001
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.0013117365000000001,
+        "mwu_p": 0.40250382378200356,
+        "n": 12,
+        "relative_width": 0.014655260792454702,
+        "second_median_s": 0.0012926525
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "repo",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 22.5,
+      "median_evals_b": 22.5,
+      "median_iterations_a": 19.5,
+      "median_iterations_b": 19.5,
+      "method": "eon",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj38",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.0012922635,
+      "wall_s_median_b": 0.001285977
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.0036108565,
+          0.003628491
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.0036108565,
+        "mwu_p": 0.623604884395689,
+        "n": 12,
+        "relative_width": 0.004871847911707526,
+        "second_median_s": 0.003628491
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "repo",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 20.0,
+      "median_evals_b": 20.0,
+      "median_iterations_a": 17.0,
+      "median_iterations_b": 17.0,
+      "method": "eon",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj75",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.0036132845,
+      "wall_s_median_b": 0.0035785484999999997
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.0005175215,
+          0.0005175955
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.0005175955,
+        "mwu_p": 0.8852339144732017,
+        "n": 12,
+        "relative_width": 0.0001429790062378891,
+        "second_median_s": 0.0005175215
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "repo",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 83.5,
+      "median_evals_b": 83.5,
+      "median_iterations_a": 71.5,
+      "median_iterations_b": 71.5,
+      "method": "fire2",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj38",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.0004942015000000001,
+      "wall_s_median_b": 0.0005065720000000001
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.00135513,
+          0.0014546049999999999
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.0014546049999999999,
+        "mwu_p": 0.06060196971200614,
+        "n": 12,
+        "relative_width": 0.07080738930895612,
+        "second_median_s": 0.00135513
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "repo",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 84.5,
+      "median_evals_b": 84.5,
+      "median_iterations_a": 72.5,
+      "median_iterations_b": 72.5,
+      "method": "fire2",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj75",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.0013792605,
+      "wall_s_median_b": 0.001358646
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.008279027,
+          0.008471843
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.008279027,
+        "mwu_p": 0.8398599725400034,
+        "n": 12,
+        "relative_width": 0.02302161022084228,
+        "second_median_s": 0.008471843
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "rgpot",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 84.5,
+      "median_evals_b": 84.5,
+      "median_iterations_a": 71.5,
+      "median_iterations_b": 71.5,
+      "method": "fire2-exp",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj38",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.008359598499999999,
+      "wall_s_median_b": 0.008280923499999999
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.025953003500000002,
+          0.026013632000000002
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.025953003500000002,
+        "mwu_p": 0.9769702553219757,
+        "n": 12,
+        "relative_width": 0.002333362528347628,
+        "second_median_s": 0.026013632000000002
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "rgpot",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 85.5,
+      "median_evals_b": 85.5,
+      "median_iterations_a": 72.5,
+      "median_iterations_b": 72.5,
+      "method": "fire2-exp",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj75",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.02600361,
+      "wall_s_median_b": 0.0258467945
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.008339688500000001,
+          0.0083562815
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.008339688500000001,
+        "mwu_p": 0.8852339144732017,
+        "n": 12,
+        "relative_width": 0.0019876652868924386,
+        "second_median_s": 0.0083562815
+      },
+      "bit_identical": false,
+      "ci95": [
+        1.293654990085922,
+        1.3717948717948718
+      ],
+      "energy": "rgpot",
+      "first_differing_seed": {
+        "a_pass": 1,
+        "b_pass": 2,
+        "field": "evals",
+        "seed": 2000
+      },
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.3416666666666668,
+      "median_evals_a": 84.5,
+      "median_evals_b": 113.0,
+      "median_iterations_a": 71.5,
+      "median_iterations_b": 106.0,
+      "method": "fire2-exp-kick",
+      "mwu_p": 3.545646695827148e-05,
+      "mwu_u": 144.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 0,
+      "same_evals": 0,
+      "same_iterations": 0,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj38",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "FLAG",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.008345987499999999,
+      "wall_s_median_b": 0.011897841499999999
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.027299116499999998,
+          0.0273638135
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.0273638135,
+        "mwu_p": 0.9309874465595671,
+        "n": 12,
+        "relative_width": 0.0023671252163029845,
+        "second_median_s": 0.027299116499999998
+      },
+      "bit_identical": false,
+      "ci95": [
+        1.2675865800865802,
+        1.348449979694057
+      ],
+      "energy": "rgpot",
+      "first_differing_seed": {
+        "a_pass": 1,
+        "b_pass": 2,
+        "field": "evals",
+        "seed": 2000
+      },
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.306599509234147,
+      "median_evals_a": 85.5,
+      "median_evals_b": 111.0,
+      "median_iterations_a": 72.5,
+      "median_iterations_b": 103.5,
+      "method": "fire2-exp-kick",
+      "mwu_p": 3.462842221038823e-05,
+      "mwu_u": 144.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 0,
+      "same_evals": 0,
+      "same_iterations": 0,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj75",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "FLAG",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.027438420499999998,
+      "wall_s_median_b": 0.0385245625
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.00169877,
+          0.001803184
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.001803184,
+        "mwu_p": 0.06896433333905408,
+        "n": 12,
+        "relative_width": 0.059631851246475506,
+        "second_median_s": 0.00169877
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "rgpot",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 22.5,
+      "median_evals_b": 22.5,
+      "median_iterations_a": 19.5,
+      "median_iterations_b": 19.5,
+      "method": "eon",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj38",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.0017439905000000001,
+      "wall_s_median_b": 0.001724603
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.0050270325000000005,
+          0.005143688
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.0050270325000000005,
+        "mwu_p": 0.8398599725400034,
+        "n": 12,
+        "relative_width": 0.022939476116760844,
+        "second_median_s": 0.005143688
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "rgpot",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 20.0,
+      "median_evals_b": 20.0,
+      "median_iterations_a": 17.0,
+      "median_iterations_b": 17.0,
+      "method": "eon",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj75",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.005079873,
+      "wall_s_median_b": 0.0050293905
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.0019806959999999997,
+          0.002035386
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.0019806959999999997,
+        "mwu_p": 0.5833604667027033,
+        "n": 12,
+        "relative_width": 0.027235499673562678,
+        "second_median_s": 0.002035386
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "rgpot",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 83.5,
+      "median_evals_b": 83.5,
+      "median_iterations_a": 71.5,
+      "median_iterations_b": 71.5,
+      "method": "fire2",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj38",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.00200907,
+      "wall_s_median_b": 0.0019964145
+    },
+    {
+      "aa": {
+        "band_s": [
+          0.006303577,
+          0.0063167925
+        ],
+        "eval_median_ratio": 1.0,
+        "first_median_s": 0.0063167925,
+        "mwu_p": 0.9309874465595671,
+        "n": 12,
+        "relative_width": 0.0020943126902899824,
+        "second_median_s": 0.006303577
+      },
+      "bit_identical": true,
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "energy": "rgpot",
+      "first_differing_seed": null,
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 84.5,
+      "median_evals_b": 84.5,
+      "median_iterations_a": 72.5,
+      "median_iterations_b": 72.5,
+      "method": "fire2",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_errors": 0,
+      "n_seeds": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "same_iterations": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj75",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "IDENTICAL",
+      "wall_repeats": 10,
+      "wall_s_median_a": 0.0063544815,
+      "wall_s_median_b": 0.0063554045
+    }
+  ]
+}

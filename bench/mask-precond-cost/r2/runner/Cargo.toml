@@ -1,0 +1,25 @@
+[package]
+name = "mask-precond-r2"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT"
+description = "Cost of preconditioned FIRE 2.0 with the metric kick off and on."
+
+[workspace]
+
+[features]
+metric-kick = []
+rgpot = []
+
+[dependencies]
+eindir-core = "0.6.0"
+ndarray = "0.17"
+rgmin = { path = "../../../.." }
+linkcell = { version = "0.6.0", default-features = false }
+libc = "0.2"
+sha2 = "0.10"
+serde_json = "1"
+
+[build-dependencies]
+cc = "1"
