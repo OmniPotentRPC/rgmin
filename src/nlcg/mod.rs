@@ -180,6 +180,26 @@ impl Conjugacy {
         }
     }
 
+    /// True when β reads the previous search direction.
+    ///
+    /// Fletcher-Reeves, Polak-Ribiere and FR-PR do not. A stored direction
+    /// that already includes a step scale can be passed to them unchanged.
+    pub(crate) fn coefficient_uses_direction(&self) -> bool {
+        match self {
+            Self::FletcherReeves | Self::PolakRibiere | Self::PolakRibierePlus | Self::FrPr => {
+                false
+            }
+            Self::Hybrid { a, b, .. } => {
+                a.coefficient_uses_direction() || b.coefficient_uses_direction()
+            }
+            Self::HestenesStiefel
+            | Self::DaiYuan
+            | Self::ConjugateDescent
+            | Self::HagerZhang
+            | Self::LiuStorey => true,
+        }
+    }
+
     /// β for this method. Degenerate denominators return 0.
     pub fn beta(&self, ctx: &ConjugacyContext<'_>) -> f64 {
         let g = ctx.current_gradient;

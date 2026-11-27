@@ -5858,10 +5858,25 @@ impl Solver {
                             d_old.assign(dir);
                             *z_epoch = self.metric_epoch;
                         } else {
+                            let scale = if self.accept == Accept::Step {
+                                self.istep
+                            } else {
+                                1.0
+                            };
+                            let rescale = scale.is_finite()
+                                && scale != 0.0
+                                && scale != 1.0
+                                && conjugacy.coefficient_uses_direction();
+                            let d_owned = if rescale {
+                                Some(d_old.mapv(|v| v / scale))
+                            } else {
+                                None
+                            };
+                            let d_beta = d_owned.as_ref().map(|d| d.view()).unwrap_or(d_old.view());
                             let ctx = ConjugacyContext {
                                 current_gradient: grad.view(),
                                 previous_gradient: g_old.view(),
-                                previous_direction: d_old.view(),
+                                previous_direction: d_beta,
                             };
                             let mut beta = if *z_epoch != self.metric_epoch {
                                 0.0
@@ -5876,7 +5891,14 @@ impl Solver {
                             ) {
                                 beta = 0.0;
                             }
-                            *dir = if self.accept == Accept::Step {
+                            *dir = if rescale {
+                                Array1::from_iter(
+                                    z_new
+                                        .iter()
+                                        .zip(d_beta.iter())
+                                        .map(|(z, d)| scale * (-z + beta * d)),
+                                )
+                            } else if self.accept == Accept::Step {
                                 Array1::from_iter(
                                     z_new
                                         .iter()

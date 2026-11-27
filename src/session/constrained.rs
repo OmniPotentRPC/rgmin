@@ -1144,16 +1144,35 @@ impl Solver {
                 d_old,
                 ..
             } => {
+                let rescale = istep.is_finite()
+                    && istep != 0.0
+                    && istep != 1.0
+                    && conjugacy.coefficient_uses_direction();
+                let d_owned = if rescale {
+                    Some(d_old.mapv(|v| v / istep))
+                } else {
+                    None
+                };
+                let d_beta = d_owned.as_ref().map(|d| d.view()).unwrap_or(d_old.view());
                 let ctx = ConjugacyContext {
                     current_gradient: gq_new.view(),
                     previous_gradient: g_old.view(),
-                    previous_direction: d_old.view(),
+                    previous_direction: d_beta,
                 };
                 let mut beta = conjugacy.beta(&ctx);
                 if restart.should_restart(&ctx) {
                     beta = 0.0;
                 }
-                let mut d = &gq_new.mapv(|g| -g * istep) + &(&*d_old * beta);
+                let mut d = if rescale {
+                    Array1::from_iter(
+                        gq_new
+                            .iter()
+                            .zip(d_beta.iter())
+                            .map(|(g, d)| istep * (-g + beta * d)),
+                    )
+                } else {
+                    &gq_new.mapv(|g| -g * istep) + &(&*d_old * beta)
+                };
                 next.project(&mut d)?;
                 let gd = crate::vecops::dot(gq_new.view(), d.view());
                 if gd.partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) {
