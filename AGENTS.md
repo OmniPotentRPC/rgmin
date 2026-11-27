@@ -32,13 +32,13 @@ python -m pytest python/tests -q --import-mode=importlib
 
 ## Documentation
 
-Edit Org sources, then rebuild every derived documentation file:
+Edit Org sources, then write the inventory before the Org export:
 
 ```console
+python scripts/generate_docs_inventory.py --write
 cd docs
 emacs --batch -l export.el
 cd ..
-python scripts/generate_docs_inventory.py --write
 python scripts/generate_docs_inventory.py --check
 sphinx-build -b html -n -W --keep-going docs/source docs/build
 ```

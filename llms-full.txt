@@ -6113,7 +6113,7 @@ EigensolverKind layer.
 | Backend | Token | Literature |
 |---+---+---|
 | Lanczos | `EigensolverKind::Lanczos` | Lanczos, [10.6028/jres.045.026](https://doi.org/10.6028/jres.045.026) |
-| Rayleigh-Ritz | `EigensolverKind::RayleighRitz` | Residual-expanded projection, the gpr_optim lowestEigenpairRayleighRitz routine. |
+| Rayleigh-Ritz | `EigensolverKind::RayleighRitz` | Residual-expanded projection, the `gpr_optim` `lowestEigenpairRayleighRitz` routine. |
 | Jacobi-Davidson | `EigensolverKind::JacobiDavidson` | Sleijpen and Van der Vorst, [10.1137/S0895479894270427](https://doi.org/10.1137/S0895479894270427) |
 | LOBPCG | `EigensolverKind::Lobpcg` | Knyazev, [10.1137/S1064827500366124](https://doi.org/10.1137/S1064827500366124) |
 | PRIMME | `EigensolverKind::Primme` | Stathopoulos and McCombs, [10.1145/1731022.1731031](https://doi.org/10.1145/1731022.1731031) |
@@ -8466,7 +8466,7 @@ entry elsewhere. Run the script to update this file. Do not edit it by hand.
 
 # Coverage
 
-Before this inventory, 1209 of 5332 source items had an exact
+Before this inventory, 1204 of 5335 source items had an exact
 marked-up name in an Org source. After this inventory, every item has a
 reference entry and a documentation location.
 
@@ -8487,11 +8487,11 @@ reference entry and a documentation location.
 | `rgmin_constraints_set_settle` | C export | `pub unsafe extern "C" fn rgmin_constraints_set_settle(` | `src/ffi.rs:4103` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_constraints_set_solver` | C export | `pub unsafe extern "C" fn rgmin_constraints_set_solver(` | `src/ffi.rs:4077` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_constraints_set_tolerance` | C export | `pub unsafe extern "C" fn rgmin_constraints_set_tolerance(` | `src/ffi.rs:4121` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_control_default` | C export | `pub extern "C" fn rgmin_control_default() -> rgmin_control_revision5_t {` | `src/ffi.rs:9504` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
-| `rgmin_control_init` | C export | `pub unsafe extern "C" fn rgmin_control_init(` | `src/ffi.rs:9529` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_eigen_options_default` | C export | `pub extern "C" fn rgmin_eigen_options_default() -> rgmin_eigen_options_t {` | `src/ffi.rs:9595` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
-| `rgmin_eigen_params_default` | C export | `pub extern "C" fn rgmin_eigen_params_default() -> rgmin_eigen_params_t {` | `src/ffi.rs:9589` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
-| `rgmin_exp_default` | C export | `pub extern "C" fn rgmin_exp_default() -> rgmin_exp_t {` | `src/ffi.rs:9565` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
+| `rgmin_control_default` | C export | `pub extern "C" fn rgmin_control_default() -> rgmin_control_revision5_t {` | `src/ffi.rs:9505` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
+| `rgmin_control_init` | C export | `pub unsafe extern "C" fn rgmin_control_init(` | `src/ffi.rs:9530` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
+| `rgmin_eigen_options_default` | C export | `pub extern "C" fn rgmin_eigen_options_default() -> rgmin_eigen_options_t {` | `src/ffi.rs:9596` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
+| `rgmin_eigen_params_default` | C export | `pub extern "C" fn rgmin_eigen_params_default() -> rgmin_eigen_params_t {` | `src/ffi.rs:9590` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
+| `rgmin_exp_default` | C export | `pub extern "C" fn rgmin_exp_default() -> rgmin_exp_t {` | `src/ffi.rs:9566` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_gromacs_steep_max_constraint_shrinks` | C export | `pub extern "C" fn rgmin_gromacs_steep_max_constraint_shrinks(step_size: f64, shrink: f64) -> u32 {` | `src/ffi.rs:2839` | `docs/orgmode/reference/architecture.org`, `docs/orgmode/reference/gromacs-steep.org` |
 | `rgmin_last_constraint_error` | C export | `pub extern "C" fn rgmin_last_constraint_error() -> rgmin_constraint_error_t {` | `src/ffi.rs:3901` | `docs/orgmode/howto/gromacs-steep.org`, `docs/orgmode/reference/gromacs-cg.org`, `docs/orgmode/reference/gromacs-steep.org` |
 | `rgmin_last_error` | C export | `pub extern "C" fn rgmin_last_error() -> *const c_char {` | `src/ffi.rs:558` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/gromacs-steep.org` |
@@ -8507,25 +8507,25 @@ reference entry and a documentation location.
 | `rgmin_linesearch_create` | C export | `pub unsafe extern "C" fn rgmin_linesearch_create(` | `src/ffi.rs:4774` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_linesearch_free` | C export | `pub unsafe extern "C" fn rgmin_linesearch_free(search: *mut rgmin_linesearch) {` | `src/ffi.rs:4860` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_lowest_eigenpair` | C export | `pub unsafe extern "C" fn rgmin_lowest_eigenpair(` | `src/ffi.rs:890` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
-| `rgmin_lowest_eigenpair_on_manifold` | C export | `pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(` | `src/ffi.rs:9179` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_lowest_eigenpair_with_options` | C export | `pub unsafe extern "C" fn rgmin_lowest_eigenpair_with_options(` | `src/ffi.rs:7194` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_lowest_eigenpairs` | C export | `pub unsafe extern "C" fn rgmin_lowest_eigenpairs(` | `src/ffi.rs:8780` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
-| `rgmin_lowest_eigenpairs_ex` | C export | `pub unsafe extern "C" fn rgmin_lowest_eigenpairs_ex(` | `src/ffi.rs:8841` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
-| `rgmin_lowest_eigenpairs_projected` | C export | `pub unsafe extern "C" fn rgmin_lowest_eigenpairs_projected(` | `src/ffi.rs:9312` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_manifold_egrad_to_rgrad` | C export | `pub unsafe extern "C" fn rgmin_manifold_egrad_to_rgrad(` | `src/ffi.rs:5879` | `docs/orgmode/reference/manifold.org` |
-| `rgmin_manifold_exp` | C export | `pub unsafe extern "C" fn rgmin_manifold_exp(` | `src/ffi.rs:5926` | `docs/orgmode/reference/manifold.org` |
-| `rgmin_manifold_free` | C export | `pub unsafe extern "C" fn rgmin_manifold_free(manifold: *mut rgmin_manifold_handle) {` | `src/ffi.rs:5769` | `docs/orgmode/explanation/product-manifold.org` |
-| `rgmin_manifold_gradient_step` | C export | `pub unsafe extern "C" fn rgmin_manifold_gradient_step(` | `src/ffi.rs:6036` | `docs/orgmode/reference/manifold.org`, `docs/orgmode/tutorials/manifold-fit.org` |
-| `rgmin_manifold_inner` | C export | `pub unsafe extern "C" fn rgmin_manifold_inner(` | `src/ffi.rs:5997` | `docs/orgmode/reference/manifold.org` |
-| `rgmin_manifold_len` | C export | `pub unsafe extern "C" fn rgmin_manifold_len(manifold: *const rgmin_manifold_handle) -> usize {` | `src/ffi.rs:5781` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_manifold_log` | C export | `pub unsafe extern "C" fn rgmin_manifold_log(` | `src/ffi.rs:5949` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_manifold_product` | C export | `pub unsafe extern "C" fn rgmin_manifold_product(` | `src/ffi.rs:5744` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/tutorials/manifold-fit.org` |
-| `rgmin_manifold_project` | C export | `pub unsafe extern "C" fn rgmin_manifold_project(` | `src/ffi.rs:5855` | `docs/orgmode/reference/manifold.org` |
-| `rgmin_manifold_retract` | C export | `pub unsafe extern "C" fn rgmin_manifold_retract(` | `src/ffi.rs:5903` | `docs/orgmode/reference/manifold.org` |
-| `rgmin_manifold_rigid_quotient` | C export | `pub extern "C" fn rgmin_manifold_rigid_quotient(` | `src/ffi.rs:5728` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_manifold_spd` | C export | `pub extern "C" fn rgmin_manifold_spd(p: usize, metric: i32) -> *mut rgmin_manifold_handle {` | `src/ffi.rs:5712` | `docs/orgmode/explanation/product-manifold.org` |
-| `rgmin_manifold_stiefel` | C export | `pub extern "C" fn rgmin_manifold_stiefel(` | `src/ffi.rs:5690` | `docs/orgmode/explanation/product-manifold.org` |
-| `rgmin_manifold_transport` | C export | `pub unsafe extern "C" fn rgmin_manifold_transport(` | `src/ffi.rs:5972` | `docs/orgmode/reference/manifold.org` |
+| `rgmin_lowest_eigenpair_on_manifold` | C export | `pub unsafe extern "C" fn rgmin_lowest_eigenpair_on_manifold(` | `src/ffi.rs:9180` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
+| `rgmin_lowest_eigenpair_with_options` | C export | `pub unsafe extern "C" fn rgmin_lowest_eigenpair_with_options(` | `src/ffi.rs:7195` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_lowest_eigenpairs` | C export | `pub unsafe extern "C" fn rgmin_lowest_eigenpairs(` | `src/ffi.rs:8781` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
+| `rgmin_lowest_eigenpairs_ex` | C export | `pub unsafe extern "C" fn rgmin_lowest_eigenpairs_ex(` | `src/ffi.rs:8842` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
+| `rgmin_lowest_eigenpairs_projected` | C export | `pub unsafe extern "C" fn rgmin_lowest_eigenpairs_projected(` | `src/ffi.rs:9313` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
+| `rgmin_manifold_egrad_to_rgrad` | C export | `pub unsafe extern "C" fn rgmin_manifold_egrad_to_rgrad(` | `src/ffi.rs:5880` | `docs/orgmode/reference/manifold.org` |
+| `rgmin_manifold_exp` | C export | `pub unsafe extern "C" fn rgmin_manifold_exp(` | `src/ffi.rs:5927` | `docs/orgmode/reference/manifold.org` |
+| `rgmin_manifold_free` | C export | `pub unsafe extern "C" fn rgmin_manifold_free(manifold: *mut rgmin_manifold_handle) {` | `src/ffi.rs:5770` | `docs/orgmode/explanation/product-manifold.org` |
+| `rgmin_manifold_gradient_step` | C export | `pub unsafe extern "C" fn rgmin_manifold_gradient_step(` | `src/ffi.rs:6037` | `docs/orgmode/reference/manifold.org`, `docs/orgmode/tutorials/manifold-fit.org` |
+| `rgmin_manifold_inner` | C export | `pub unsafe extern "C" fn rgmin_manifold_inner(` | `src/ffi.rs:5998` | `docs/orgmode/reference/manifold.org` |
+| `rgmin_manifold_len` | C export | `pub unsafe extern "C" fn rgmin_manifold_len(manifold: *const rgmin_manifold_handle) -> usize {` | `src/ffi.rs:5782` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_manifold_log` | C export | `pub unsafe extern "C" fn rgmin_manifold_log(` | `src/ffi.rs:5950` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_manifold_product` | C export | `pub unsafe extern "C" fn rgmin_manifold_product(` | `src/ffi.rs:5745` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/tutorials/manifold-fit.org` |
+| `rgmin_manifold_project` | C export | `pub unsafe extern "C" fn rgmin_manifold_project(` | `src/ffi.rs:5856` | `docs/orgmode/reference/manifold.org` |
+| `rgmin_manifold_retract` | C export | `pub unsafe extern "C" fn rgmin_manifold_retract(` | `src/ffi.rs:5904` | `docs/orgmode/reference/manifold.org` |
+| `rgmin_manifold_rigid_quotient` | C export | `pub extern "C" fn rgmin_manifold_rigid_quotient(` | `src/ffi.rs:5729` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
+| `rgmin_manifold_spd` | C export | `pub extern "C" fn rgmin_manifold_spd(p: usize, metric: i32) -> *mut rgmin_manifold_handle {` | `src/ffi.rs:5713` | `docs/orgmode/explanation/product-manifold.org` |
+| `rgmin_manifold_stiefel` | C export | `pub extern "C" fn rgmin_manifold_stiefel(` | `src/ffi.rs:5691` | `docs/orgmode/explanation/product-manifold.org` |
+| `rgmin_manifold_transport` | C export | `pub unsafe extern "C" fn rgmin_manifold_transport(` | `src/ffi.rs:5973` | `docs/orgmode/reference/manifold.org` |
 | `rgmin_method_from_name` | C export | `pub unsafe extern "C" fn rgmin_method_from_name(` | `src/ffi.rs:727` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/reference/lammps-min-style.org` |
 | `rgmin_minimize` | C export | `pub unsafe extern "C" fn rgmin_minimize(` | `src/ffi.rs:1219` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/python.org` |
 | `rgmin_minimize_eindir` | C export | `pub unsafe extern "C" fn rgmin_minimize_eindir(` | `src/ffi.rs:2216` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/api.org` |
@@ -8545,21 +8545,21 @@ reference entry and a documentation location.
 | `rgmin_minimize_rlbfgs` | C export | `pub unsafe extern "C" fn rgmin_minimize_rlbfgs(` | `src/ffi.rs:1600` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
 | `rgmin_minimize_rlbfgs_sized` | C export | `pub unsafe extern "C" fn rgmin_minimize_rlbfgs_sized(` | `src/ffi.rs:1632` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_minimize_scg` | C export | `pub unsafe extern "C" fn rgmin_minimize_scg(` | `src/ffi.rs:1563` | `docs/orgmode/changelog.org` |
-| `rgmin_minimize_scg_with_options` | C export | `pub unsafe extern "C" fn rgmin_minimize_scg_with_options(` | `src/ffi.rs:7266` | `docs/orgmode/changelog.org` |
-| `rgmin_minimize_scg_with_options_sized` | C export | `pub unsafe extern "C" fn rgmin_minimize_scg_with_options_sized(` | `src/ffi.rs:7302` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_precon_init` | C export | `pub unsafe extern "C" fn rgmin_precon_init(p: *mut rgmin_precon_t, kind: u32) {` | `src/ffi.rs:7462` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/precon.org` |
+| `rgmin_minimize_scg_with_options` | C export | `pub unsafe extern "C" fn rgmin_minimize_scg_with_options(` | `src/ffi.rs:7267` | `docs/orgmode/changelog.org` |
+| `rgmin_minimize_scg_with_options_sized` | C export | `pub unsafe extern "C" fn rgmin_minimize_scg_with_options_sized(` | `src/ffi.rs:7303` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_precon_init` | C export | `pub unsafe extern "C" fn rgmin_precon_init(p: *mut rgmin_precon_t, kind: u32) {` | `src/ffi.rs:7463` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/precon.org` |
 | `rgmin_rcg_options_default` | C export | `pub extern "C" fn rgmin_rcg_options_default() -> rgmin_rcg_options_t {` | `src/ffi.rs:1484` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_rigid_align` | C export | `pub unsafe extern "C" fn rgmin_rigid_align(` | `src/ffi.rs:8280` | `docs/orgmode/changelog.org` |
-| `rgmin_rigid_project` | C export | `pub unsafe extern "C" fn rgmin_rigid_project(` | `src/ffi.rs:8161` | `docs/orgmode/changelog.org` |
-| `rgmin_rigid_project_hessian` | C export | `pub unsafe extern "C" fn rgmin_rigid_project_hessian(` | `src/ffi.rs:8220` | `docs/orgmode/changelog.org` |
-| `rgmin_rigid_workspace_free` | C export | `pub unsafe extern "C" fn rgmin_rigid_workspace_free(ws: *mut rgmin_rigid_workspace_t) {` | `src/ffi.rs:8135` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_rigid_workspace_new` | C export | `pub unsafe extern "C" fn rgmin_rigid_workspace_new() -> *mut rgmin_rigid_workspace_t {` | `src/ffi.rs:8123` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_rigid_workspace_rank` | C export | `pub unsafe extern "C" fn rgmin_rigid_workspace_rank(ws: *const rgmin_rigid_workspace_t) -> usize {` | `src/ffi.rs:8147` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_rlbfgs_default` | C export | `pub extern "C" fn rgmin_rlbfgs_default() -> rgmin_rlbfgs_t {` | `src/ffi.rs:9571` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_rtr_radius_update` | C export | `pub unsafe extern "C" fn rgmin_rtr_radius_update(` | `src/ffi.rs:9088` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_rtr_tcg_solve` | C export | `pub unsafe extern "C" fn rgmin_rtr_tcg_solve(` | `src/ffi.rs:8973` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_scg_options_default` | C export | `pub extern "C" fn rgmin_scg_options_default() -> rgmin_scg_options_t {` | `src/ffi.rs:9583` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
-| `rgmin_scg_params_default` | C export | `pub extern "C" fn rgmin_scg_params_default() -> rgmin_scg_params_t {` | `src/ffi.rs:9577` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
+| `rgmin_rigid_align` | C export | `pub unsafe extern "C" fn rgmin_rigid_align(` | `src/ffi.rs:8281` | `docs/orgmode/changelog.org` |
+| `rgmin_rigid_project` | C export | `pub unsafe extern "C" fn rgmin_rigid_project(` | `src/ffi.rs:8162` | `docs/orgmode/changelog.org` |
+| `rgmin_rigid_project_hessian` | C export | `pub unsafe extern "C" fn rgmin_rigid_project_hessian(` | `src/ffi.rs:8221` | `docs/orgmode/changelog.org` |
+| `rgmin_rigid_workspace_free` | C export | `pub unsafe extern "C" fn rgmin_rigid_workspace_free(ws: *mut rgmin_rigid_workspace_t) {` | `src/ffi.rs:8136` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_rigid_workspace_new` | C export | `pub unsafe extern "C" fn rgmin_rigid_workspace_new() -> *mut rgmin_rigid_workspace_t {` | `src/ffi.rs:8124` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_rigid_workspace_rank` | C export | `pub unsafe extern "C" fn rgmin_rigid_workspace_rank(ws: *const rgmin_rigid_workspace_t) -> usize {` | `src/ffi.rs:8148` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_rlbfgs_default` | C export | `pub extern "C" fn rgmin_rlbfgs_default() -> rgmin_rlbfgs_t {` | `src/ffi.rs:9572` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
+| `rgmin_rtr_radius_update` | C export | `pub unsafe extern "C" fn rgmin_rtr_radius_update(` | `src/ffi.rs:9089` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
+| `rgmin_rtr_tcg_solve` | C export | `pub unsafe extern "C" fn rgmin_rtr_tcg_solve(` | `src/ffi.rs:8974` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
+| `rgmin_scg_options_default` | C export | `pub extern "C" fn rgmin_scg_options_default() -> rgmin_scg_options_t {` | `src/ffi.rs:9584` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
+| `rgmin_scg_params_default` | C export | `pub extern "C" fn rgmin_scg_params_default() -> rgmin_scg_params_t {` | `src/ffi.rs:9578` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_solver_add_equality` | C export | `pub unsafe extern "C" fn rgmin_solver_add_equality(` | `src/ffi.rs:3340` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/highs-qp.org` |
 | `rgmin_solver_clear_distance_constraints` | C export | `pub unsafe extern "C" fn rgmin_solver_clear_distance_constraints(solver: *mut rgmin_solver_t) {` | `src/ffi.rs:4230` | `docs/orgmode/howto/constraints.org` |
 | `rgmin_solver_clear_equalities` | C export | `pub unsafe extern "C" fn rgmin_solver_clear_equalities(solver: *mut rgmin_solver_t) -> i32 {` | `src/ffi.rs:3387` | `docs/orgmode/changelog.org` |
@@ -8567,21 +8567,21 @@ reference entry and a documentation location.
 | `rgmin_solver_clear_exp` | C export | `pub unsafe extern "C" fn rgmin_solver_clear_exp(solver: *mut rgmin_solver_t) {` | `src/ffi.rs:2750` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_solver_clear_level_set` | C export | `pub unsafe extern "C" fn rgmin_solver_clear_level_set(solver: *mut rgmin_solver_t) {` | `src/ffi.rs:4264` | `docs/orgmode/changelog.org` |
 | `rgmin_solver_clear_max_evals` | C export | `pub unsafe extern "C" fn rgmin_solver_clear_max_evals(solver: *mut rgmin_solver_t) {` | `src/ffi.rs:4334` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/stopping.org` |
-| `rgmin_solver_clear_precon` | C export | `pub unsafe extern "C" fn rgmin_solver_clear_precon(solver: *mut rgmin_solver_t) {` | `src/ffi.rs:7775` | `docs/orgmode/howto/c-abi.org` |
+| `rgmin_solver_clear_precon` | C export | `pub unsafe extern "C" fn rgmin_solver_clear_precon(solver: *mut rgmin_solver_t) {` | `src/ffi.rs:7776` | `docs/orgmode/howto/c-abi.org` |
 | `rgmin_solver_create` | C export | `pub unsafe extern "C" fn rgmin_solver_create(` | `src/ffi.rs:2470` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/api.org` |
 | `rgmin_solver_create_sized` | C export | `pub unsafe extern "C" fn rgmin_solver_create_sized(` | `src/ffi.rs:2487` | `docs/orgmode/howto/c-abi.org` |
 | `rgmin_solver_dim` | C export | `pub unsafe extern "C" fn rgmin_solver_dim(solver: *const rgmin_solver_t) -> usize {` | `src/ffi.rs:4631` | `docs/orgmode/changelog.org` |
 | `rgmin_solver_evals` | C export | `pub unsafe extern "C" fn rgmin_solver_evals(solver: *const rgmin_solver_t) -> usize {` | `src/ffi.rs:4346` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/stopping.org` |
 | `rgmin_solver_exp_mu` | C export | `pub unsafe extern "C" fn rgmin_solver_exp_mu(solver: *const rgmin_solver_t) -> f64 {` | `src/ffi.rs:2762` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_solver_forget` | C export | `pub unsafe extern "C" fn rgmin_solver_forget(solver: *mut rgmin_solver_t) {` | `src/ffi.rs:2531` | `docs/orgmode/howto/c-abi.org` |
-| `rgmin_solver_forget_evaluation` | C export | `pub unsafe extern "C" fn rgmin_solver_forget_evaluation(solver: *mut rgmin_solver_t) {` | `src/ffi.rs:8323` | `docs/orgmode/howto/session.org` |
+| `rgmin_solver_forget_evaluation` | C export | `pub unsafe extern "C" fn rgmin_solver_forget_evaluation(solver: *mut rgmin_solver_t) {` | `src/ffi.rs:8324` | `docs/orgmode/howto/session.org` |
 | `rgmin_solver_free` | C export | `pub unsafe extern "C" fn rgmin_solver_free(solver: *mut rgmin_solver_t) {` | `src/ffi.rs:2520` | `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
 | `rgmin_solver_gradient_calls` | C export | `pub unsafe extern "C" fn rgmin_solver_gradient_calls(solver: *const rgmin_solver_t) -> usize {` | `src/ffi.rs:4656` | `docs/orgmode/changelog.org` |
 | `rgmin_solver_highs_timeouts` | C export | `pub unsafe extern "C" fn rgmin_solver_highs_timeouts(solver: *const rgmin_solver_t) -> usize {` | `src/ffi.rs:3513` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/highs-qp.org`, `docs/orgmode/reference/architecture.org` |
 | `rgmin_solver_hvp_calls` | C export | `pub unsafe extern "C" fn rgmin_solver_hvp_calls(solver: *const rgmin_solver_t) -> usize {` | `src/ffi.rs:4669` | `docs/orgmode/changelog.org` |
 | `rgmin_solver_lbfgs_trust_radius` | C export | `pub unsafe extern "C" fn rgmin_solver_lbfgs_trust_radius(solver: *const rgmin_solver_t) -> f64 {` | `src/ffi.rs:3177` | `docs/orgmode/changelog.org` |
 | `rgmin_solver_pair_count` | C export | `pub unsafe extern "C" fn rgmin_solver_pair_count(solver: *const rgmin_solver_t) -> usize {` | `src/ffi.rs:4681` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_solver_precon_scale` | C export | `pub unsafe extern "C" fn rgmin_solver_precon_scale(solver: *const rgmin_solver_t) -> f64 {` | `src/ffi.rs:7785` | `docs/orgmode/reference/architecture.org` |
+| `rgmin_solver_precon_scale` | C export | `pub unsafe extern "C" fn rgmin_solver_precon_scale(solver: *const rgmin_solver_t) -> f64 {` | `src/ffi.rs:7786` | `docs/orgmode/reference/architecture.org` |
 | `rgmin_solver_push_pair` | C export | `pub unsafe extern "C" fn rgmin_solver_push_pair(` | `src/ffi.rs:4601` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_rebase` | C export | `pub unsafe extern "C" fn rgmin_solver_rebase(solver: *mut rgmin_solver_t) {` | `src/ffi.rs:2543` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_report_gradient` | C export | `pub unsafe extern "C" fn rgmin_solver_report_gradient(` | `src/ffi.rs:4694` | `docs/orgmode/changelog.org` |
@@ -8591,7 +8591,7 @@ reference entry and a documentation location.
 | `rgmin_solver_set_atom_maxmove` | C export | `pub unsafe extern "C" fn rgmin_solver_set_atom_maxmove(solver: *mut rgmin_solver_t, maxmove: f64) {` | `src/ffi.rs:3201` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/lammps-min-style.org` |
 | `rgmin_solver_set_backward_polish` | C export | `pub unsafe extern "C" fn rgmin_solver_set_backward_polish(solver: *mut rgmin_solver_t, on: i32) {` | `src/ffi.rs:2942` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/architecture.org` |
 | `rgmin_solver_set_box` | C export | `pub unsafe extern "C" fn rgmin_solver_set_box(` | `src/ffi.rs:3267` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/highs-qp.org` |
-| `rgmin_solver_set_broken_axes` | C export | `pub unsafe extern "C" fn rgmin_solver_set_broken_axes(` | `src/ffi.rs:8058` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_solver_set_broken_axes` | C export | `pub unsafe extern "C" fn rgmin_solver_set_broken_axes(` | `src/ffi.rs:8059` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_set_cautious` | C export | `pub unsafe extern "C" fn rgmin_solver_set_cautious(` | `src/ffi.rs:3228` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_set_centered_matrix` | C export | `pub unsafe extern "C" fn rgmin_solver_set_centered_matrix(` | `src/ffi.rs:3757` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
 | `rgmin_solver_set_complex_circle` | C export | `pub unsafe extern "C" fn rgmin_solver_set_complex_circle(solver: *mut rgmin_solver_t, n: usize) {` | `src/ffi.rs:3688` | `docs/orgmode/reference/public-api.org` |
@@ -8602,14 +8602,14 @@ reference entry and a documentation location.
 | `rgmin_solver_set_euclidean_complex` | C export | `pub unsafe extern "C" fn rgmin_solver_set_euclidean_complex(solver: *mut rgmin_solver_t, n: usize) {` | `src/ffi.rs:3697` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
 | `rgmin_solver_set_exp` | C export | `pub unsafe extern "C" fn rgmin_solver_set_exp(` | `src/ffi.rs:2633` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_solver_set_extra_updates` | C export | `pub unsafe extern "C" fn rgmin_solver_set_extra_updates(solver: *mut rgmin_solver_t, extra: usize) {` | `src/ffi.rs:3219` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_solver_set_factor_shape` | C export | `pub unsafe extern "C" fn rgmin_solver_set_factor_shape(` | `src/ffi.rs:8095` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `rgmin_solver_set_factor_shape` | C export | `pub unsafe extern "C" fn rgmin_solver_set_factor_shape(` | `src/ffi.rs:8096` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
 | `rgmin_solver_set_fire_abc` | C export | `pub unsafe extern "C" fn rgmin_solver_set_fire_abc(solver: *mut rgmin_solver_t, on: i32) -> i32 {` | `src/ffi.rs:3020` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/lammps-min-style.org` |
 | `rgmin_solver_set_fire_cap_two_step_overshoot` | C export | `pub unsafe extern "C" fn rgmin_solver_set_fire_cap_two_step_overshoot(` | `src/ffi.rs:3035` | `docs/orgmode/changelog.org` |
 | `rgmin_solver_set_fire_preset` | C export | `pub unsafe extern "C" fn rgmin_solver_set_fire_preset(` | `src/ffi.rs:2994` | `docs/orgmode/changelog.org` |
-| `rgmin_solver_set_fire_variant` | C export | `pub unsafe extern "C" fn rgmin_solver_set_fire_variant(` | `src/ffi.rs:7808` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_solver_set_fire_variant` | C export | `pub unsafe extern "C" fn rgmin_solver_set_fire_variant(` | `src/ffi.rs:7809` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_set_fixed_h0` | C export | `pub unsafe extern "C" fn rgmin_solver_set_fixed_h0(solver: *mut rgmin_solver_t, h0: f64) -> i32 {` | `src/ffi.rs:3121` | `docs/orgmode/reference/architecture.org` |
-| `rgmin_solver_set_frozen` | C export | `pub unsafe extern "C" fn rgmin_solver_set_frozen(` | `src/ffi.rs:8036` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_solver_set_geometry_step` | C export | `pub unsafe extern "C" fn rgmin_solver_set_geometry_step(solver: *mut rgmin_solver_t, enabled: i32) {` | `src/ffi.rs:7968` | `docs/orgmode/changelog.org` |
+| `rgmin_solver_set_frozen` | C export | `pub unsafe extern "C" fn rgmin_solver_set_frozen(` | `src/ffi.rs:8037` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_solver_set_geometry_step` | C export | `pub unsafe extern "C" fn rgmin_solver_set_geometry_step(solver: *mut rgmin_solver_t, enabled: i32) {` | `src/ffi.rs:7969` | `docs/orgmode/changelog.org` |
 | `rgmin_solver_set_gromacs_cg` | C export | `pub unsafe extern "C" fn rgmin_solver_set_gromacs_cg(` | `src/ffi.rs:2852` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/gromacs-cg.org`, `docs/orgmode/reference/architecture.org` |
 | `rgmin_solver_set_gromacs_lbfgs` | C export | `pub unsafe extern "C" fn rgmin_solver_set_gromacs_lbfgs(` | `src/ffi.rs:2874` | `docs/orgmode/howto/gromacs-lbfgs.org`, `docs/orgmode/reference/architecture.org`, `docs/orgmode/reference/gromacs-lbfgs.org` |
 | `rgmin_solver_set_gromacs_steep` | C export | `pub unsafe extern "C" fn rgmin_solver_set_gromacs_steep(` | `src/ffi.rs:2819` | `docs/orgmode/reference/architecture.org`, `docs/orgmode/reference/gromacs-steep.org` |
@@ -8618,40 +8618,40 @@ reference entry and a documentation location.
 | `rgmin_solver_set_highs_crossover` | C export | `pub unsafe extern "C" fn rgmin_solver_set_highs_crossover(` | `src/ffi.rs:3439` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_set_highs_solver` | C export | `pub unsafe extern "C" fn rgmin_solver_set_highs_solver(` | `src/ffi.rs:3409` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_set_highs_time_limit` | C export | `pub unsafe extern "C" fn rgmin_solver_set_highs_time_limit(` | `src/ffi.rs:3479` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/highs-qp.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_solver_set_highs_trust` | C export | `pub unsafe extern "C" fn rgmin_solver_set_highs_trust(` | `src/ffi.rs:8082` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_solver_set_highs_trust` | C export | `pub unsafe extern "C" fn rgmin_solver_set_highs_trust(` | `src/ffi.rs:8083` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_set_lbfgs_capped` | C export | `pub unsafe extern "C" fn rgmin_solver_set_lbfgs_capped(` | `src/ffi.rs:3054` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
-| `rgmin_solver_set_lbfgs_neb_guards` | C export | `pub unsafe extern "C" fn rgmin_solver_set_lbfgs_neb_guards(` | `src/ffi.rs:8336` | `docs/orgmode/howto/session.org` |
+| `rgmin_solver_set_lbfgs_neb_guards` | C export | `pub unsafe extern "C" fn rgmin_solver_set_lbfgs_neb_guards(` | `src/ffi.rs:8337` | `docs/orgmode/howto/session.org` |
 | `rgmin_solver_set_lbfgs_scaled` | C export | `pub unsafe extern "C" fn rgmin_solver_set_lbfgs_scaled(` | `src/ffi.rs:3080` | `docs/orgmode/changelog.org` |
 | `rgmin_solver_set_lbfgs_trust` | C export | `pub unsafe extern "C" fn rgmin_solver_set_lbfgs_trust(` | `src/ffi.rs:3160` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/lammps-min-style.org` |
 | `rgmin_solver_set_lbfgs_wolfe` | C export | `pub unsafe extern "C" fn rgmin_solver_set_lbfgs_wolfe(solver: *mut rgmin_solver_t) -> i32 {` | `src/ffi.rs:3105` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/lammps-min-style.org` |
 | `rgmin_solver_set_level_set` | C export | `pub unsafe extern "C" fn rgmin_solver_set_level_set(` | `src/ffi.rs:4241` | `docs/orgmode/changelog.org` |
-| `rgmin_solver_set_linesearch` | C export | `pub unsafe extern "C" fn rgmin_solver_set_linesearch(` | `src/ffi.rs:7887` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_solver_set_linesearch` | C export | `pub unsafe extern "C" fn rgmin_solver_set_linesearch(` | `src/ffi.rs:7888` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_set_manifold` | C export | `pub unsafe extern "C" fn rgmin_solver_set_manifold(` | `src/ffi.rs:3652` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
 | `rgmin_solver_set_masses` | C export | `pub unsafe extern "C" fn rgmin_solver_set_masses(` | `src/ffi.rs:3825` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/product-manifold.org` |
 | `rgmin_solver_set_max_evals` | C export | `pub unsafe extern "C" fn rgmin_solver_set_max_evals(` | `src/ffi.rs:4315` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/stopping.org` |
 | `rgmin_solver_set_maxmove` | C export | `pub unsafe extern "C" fn rgmin_solver_set_maxmove(solver: *mut rgmin_solver_t, maxmove: f64) {` | `src/ffi.rs:2554` | `docs/orgmode/changelog.org` |
 | `rgmin_solver_set_multinomial_ds` | C export | `pub unsafe extern "C" fn rgmin_solver_set_multinomial_ds(solver: *mut rgmin_solver_t, n: usize) {` | `src/ffi.rs:3716` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
 | `rgmin_solver_set_multinomial_sym` | C export | `pub unsafe extern "C" fn rgmin_solver_set_multinomial_sym(solver: *mut rgmin_solver_t, n: usize) {` | `src/ffi.rs:3726` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
-| `rgmin_solver_set_objective_roundoff` | C export | `pub unsafe extern "C" fn rgmin_solver_set_objective_roundoff(` | `src/ffi.rs:7941` | `docs/orgmode/changelog.org` |
+| `rgmin_solver_set_objective_roundoff` | C export | `pub unsafe extern "C" fn rgmin_solver_set_objective_roundoff(` | `src/ffi.rs:7942` | `docs/orgmode/changelog.org` |
 | `rgmin_solver_set_oblique` | C export | `pub unsafe extern "C" fn rgmin_solver_set_oblique(solver: *mut rgmin_solver_t, n: usize, m: usize) {` | `src/ffi.rs:3669` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_solver_set_pbc_axes` | C export | `pub unsafe extern "C" fn rgmin_solver_set_pbc_axes(` | `src/ffi.rs:8021` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_solver_set_pbc_axes` | C export | `pub unsafe extern "C" fn rgmin_solver_set_pbc_axes(` | `src/ffi.rs:8022` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_set_periodic` | C export | `pub unsafe extern "C" fn rgmin_solver_set_periodic(solver: *mut rgmin_solver_t, enabled: i32) {` | `src/ffi.rs:3846` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/manifolds.org` |
 | `rgmin_solver_set_positive` | C export | `pub unsafe extern "C" fn rgmin_solver_set_positive(solver: *mut rgmin_solver_t, n: usize) {` | `src/ffi.rs:3746` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
 | `rgmin_solver_set_power` | C export | `pub unsafe extern "C" fn rgmin_solver_set_power(` | `src/ffi.rs:3777` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org` |
-| `rgmin_solver_set_precon` | C export | `pub unsafe extern "C" fn rgmin_solver_set_precon(` | `src/ffi.rs:7732` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/precon.org` |
+| `rgmin_solver_set_precon` | C export | `pub unsafe extern "C" fn rgmin_solver_set_precon(` | `src/ffi.rs:7733` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/precon.org` |
 | `rgmin_solver_set_project_rigid` | C export | `pub unsafe extern "C" fn rgmin_solver_set_project_rigid(solver: *mut rgmin_solver_t, enabled: i32) {` | `src/ffi.rs:3210` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_set_qn_step` | C export | `pub unsafe extern "C" fn rgmin_solver_set_qn_step(` | `src/ffi.rs:2575` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_solver_set_quickmin_cell` | C export | `pub unsafe extern "C" fn rgmin_solver_set_quickmin_cell(` | `src/ffi.rs:7828` | `docs/orgmode/explanation/quickmin.org` |
-| `rgmin_solver_set_quickmin_variant` | C export | `pub unsafe extern "C" fn rgmin_solver_set_quickmin_variant(` | `src/ffi.rs:7860` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/architecture.org` |
+| `rgmin_solver_set_quickmin_cell` | C export | `pub unsafe extern "C" fn rgmin_solver_set_quickmin_cell(` | `src/ffi.rs:7829` | `docs/orgmode/explanation/quickmin.org` |
+| `rgmin_solver_set_quickmin_variant` | C export | `pub unsafe extern "C" fn rgmin_solver_set_quickmin_variant(` | `src/ffi.rs:7861` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/architecture.org` |
 | `rgmin_solver_set_require_convergence` | C export | `pub unsafe extern "C" fn rgmin_solver_set_require_convergence(` | `src/ffi.rs:2955` | `docs/orgmode/reference/architecture.org` |
-| `rgmin_solver_set_rigid_mass_metric` | C export | `pub unsafe extern "C" fn rgmin_solver_set_rigid_mass_metric(` | `src/ffi.rs:7995` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_solver_set_rigid_mass_weighted` | C export | `pub unsafe extern "C" fn rgmin_solver_set_rigid_mass_weighted(` | `src/ffi.rs:8008` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_solver_set_rigid_mode` | C export | `pub unsafe extern "C" fn rgmin_solver_set_rigid_mode(solver: *mut rgmin_solver_t, mode: i32) {` | `src/ffi.rs:7978` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_solver_set_rigid_mass_metric` | C export | `pub unsafe extern "C" fn rgmin_solver_set_rigid_mass_metric(` | `src/ffi.rs:7996` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_solver_set_rigid_mass_weighted` | C export | `pub unsafe extern "C" fn rgmin_solver_set_rigid_mass_weighted(` | `src/ffi.rs:8009` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_solver_set_rigid_mode` | C export | `pub unsafe extern "C" fn rgmin_solver_set_rigid_mode(solver: *mut rgmin_solver_t, mode: i32) {` | `src/ffi.rs:7979` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_solver_set_sphere_complex` | C export | `pub unsafe extern "C" fn rgmin_solver_set_sphere_complex(solver: *mut rgmin_solver_t, n: usize) {` | `src/ffi.rs:3736` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
 | `rgmin_solver_set_stiefel` | C export | `pub unsafe extern "C" fn rgmin_solver_set_stiefel(solver: *mut rgmin_solver_t, n: usize, p: usize) {` | `src/ffi.rs:3679` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_solver_set_stop_norm` | C export | `pub unsafe extern "C" fn rgmin_solver_set_stop_norm(solver: *mut rgmin_solver_t, norm: i32) -> i32 {` | `src/ffi.rs:2907` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/lammps-min-style.org` |
 | `rgmin_solver_set_trust` | C export | `pub unsafe extern "C" fn rgmin_solver_set_trust(solver: *mut rgmin_solver_t, radius: f64) -> i32 {` | `src/ffi.rs:3315` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/highs-qp.org` |
-| `rgmin_solver_set_unitary` | C export | `pub unsafe extern "C" fn rgmin_solver_set_unitary(solver: *mut rgmin_solver_t, n: usize) {` | `src/ffi.rs:8108` | `docs/orgmode/howto/c-abi.org` |
+| `rgmin_solver_set_unitary` | C export | `pub unsafe extern "C" fn rgmin_solver_set_unitary(solver: *mut rgmin_solver_t, n: usize) {` | `src/ffi.rs:8109` | `docs/orgmode/howto/c-abi.org` |
 | `rgmin_solver_step` | C export | `pub unsafe extern "C" fn rgmin_solver_step(` | `src/ffi.rs:4361` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/linesearch.org`, `docs/orgmode/reference/api.org` |
 | `rgmin_solver_step_fg` | C export | `pub unsafe extern "C" fn rgmin_solver_step_fg(` | `src/ffi.rs:4552` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/lammps-min-style.org` |
 | `rgmin_solver_step_hess` | C export | `pub unsafe extern "C" fn rgmin_solver_step_hess(` | `src/ffi.rs:4420` | `docs/orgmode/howto/highs-qp.org`, `docs/orgmode/reference/sota.org` |
@@ -8725,15 +8725,15 @@ reference entry and a documentation location.
 | `RGMIN_ABI_VERSION_MINOR` | const | `pub const RGMIN_ABI_VERSION_MINOR: u16 = 72;` | `src/ffi.rs:107` | `docs/orgmode/changelog.org` |
 | `RGMIN_CONTROL_REVISION5_SIZE` | const | `pub const RGMIN_CONTROL_REVISION5_SIZE: usize =` | `src/ffi.rs:318` | `docs/orgmode/howto/c-abi.org` |
 | `RGMIN_CONTROL_REVISION6_SIZE` | const | `pub const RGMIN_CONTROL_REVISION6_SIZE: usize = std::mem::offset_of!(rgmin_control_t, noise_eps_f);` | `src/ffi.rs:323` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `RGMIN_GEOM_BULK` | const | `pub const RGMIN_GEOM_BULK: i32 = 0;` | `src/ffi.rs:7051` | `docs/orgmode/reference/public-api.org` |
-| `RGMIN_GEOM_CLUSTER` | const | `pub const RGMIN_GEOM_CLUSTER: i32 = 3;` | `src/ffi.rs:7057` | `docs/orgmode/reference/public-api.org` |
-| `RGMIN_GEOM_MOLECULE` | const | `pub const RGMIN_GEOM_MOLECULE: i32 = 2;` | `src/ffi.rs:7055` | `docs/orgmode/reference/public-api.org` |
-| `RGMIN_GEOM_SURFACE` | const | `pub const RGMIN_GEOM_SURFACE: i32 = 1;` | `src/ffi.rs:7053` | `docs/orgmode/reference/public-api.org` |
-| `RGMIN_PRECON_AUTO` | const | `pub const RGMIN_PRECON_AUTO: u32 = 4;` | `src/ffi.rs:7048` | `docs/orgmode/explanation/precon.org`, `docs/orgmode/howto/precon.org`, `docs/orgmode/reference/architecture.org` |
-| `RGMIN_PRECON_EXP` | const | `pub const RGMIN_PRECON_EXP: u32 = 1;` | `src/ffi.rs:7042` | `docs/orgmode/reference/architecture.org` |
-| `RGMIN_PRECON_FF` | const | `pub const RGMIN_PRECON_FF: u32 = 3;` | `src/ffi.rs:7046` | `docs/orgmode/reference/architecture.org` |
-| `RGMIN_PRECON_LINDH` | const | `pub const RGMIN_PRECON_LINDH: u32 = 2;` | `src/ffi.rs:7044` | `docs/orgmode/reference/architecture.org` |
-| `RGMIN_PRECON_NONE` | const | `pub const RGMIN_PRECON_NONE: u32 = 0;` | `src/ffi.rs:7040` | `docs/orgmode/reference/architecture.org` |
+| `RGMIN_GEOM_BULK` | const | `pub const RGMIN_GEOM_BULK: i32 = 0;` | `src/ffi.rs:7052` | `docs/orgmode/reference/public-api.org` |
+| `RGMIN_GEOM_CLUSTER` | const | `pub const RGMIN_GEOM_CLUSTER: i32 = 3;` | `src/ffi.rs:7058` | `docs/orgmode/reference/public-api.org` |
+| `RGMIN_GEOM_MOLECULE` | const | `pub const RGMIN_GEOM_MOLECULE: i32 = 2;` | `src/ffi.rs:7056` | `docs/orgmode/reference/public-api.org` |
+| `RGMIN_GEOM_SURFACE` | const | `pub const RGMIN_GEOM_SURFACE: i32 = 1;` | `src/ffi.rs:7054` | `docs/orgmode/reference/public-api.org` |
+| `RGMIN_PRECON_AUTO` | const | `pub const RGMIN_PRECON_AUTO: u32 = 4;` | `src/ffi.rs:7049` | `docs/orgmode/explanation/precon.org`, `docs/orgmode/howto/precon.org`, `docs/orgmode/reference/architecture.org` |
+| `RGMIN_PRECON_EXP` | const | `pub const RGMIN_PRECON_EXP: u32 = 1;` | `src/ffi.rs:7043` | `docs/orgmode/reference/architecture.org` |
+| `RGMIN_PRECON_FF` | const | `pub const RGMIN_PRECON_FF: u32 = 3;` | `src/ffi.rs:7047` | `docs/orgmode/reference/architecture.org` |
+| `RGMIN_PRECON_LINDH` | const | `pub const RGMIN_PRECON_LINDH: u32 = 2;` | `src/ffi.rs:7045` | `docs/orgmode/reference/architecture.org` |
+| `RGMIN_PRECON_NONE` | const | `pub const RGMIN_PRECON_NONE: u32 = 0;` | `src/ffi.rs:7041` | `docs/orgmode/reference/architecture.org` |
 | `RGMIN_REPORT_REVISION5_SIZE` | const | `pub const RGMIN_REPORT_REVISION5_SIZE: usize = std::mem::offset_of!(rgmin_report_t, converged);` | `src/ffi.rs:327` | `docs/orgmode/reference/public-api.org` |
 | `SOLVE_RTOL` | const | `pub const SOLVE_RTOL: f64 = 1.0e-2;` | `src/lindh.rs:46` | `docs/orgmode/reference/public-api.org` |
 | `STEP_CLAMP_MAX` | const | `pub const STEP_CLAMP_MAX: f64 = 1.0;` | `src/noise.rs:46` | `docs/orgmode/reference/public-api.org` |
@@ -8793,7 +8793,7 @@ reference entry and a documentation location.
 | `QuadratureError` | enum | `pub enum QuadratureError {` | `src/quadrature.rs:23` | `docs/orgmode/reference/public-api.org` |
 | `RcgBeta` | enum | `pub enum RcgBeta {` | `src/rcg.rs:93` | `docs/orgmode/reference/public-api.org` |
 | `RcgTransport` | enum | `pub enum RcgTransport {` | `src/rcg.rs:106` | `docs/orgmode/reference/public-api.org` |
-| `Restart` | enum | `pub enum Restart {` | `src/nlcg/mod.rs:88` | `docs/orgmode/reference/public-api.org` |
+| `Restart` | enum | `pub enum Restart {` | `src/nlcg/mod.rs:89` | `docs/orgmode/reference/public-api.org` |
 | `RigidMode` | enum | `pub enum RigidMode {` | `src/rigid/mode.rs:6` | `docs/orgmode/reference/public-api.org` |
 | `RootError` | enum | `pub enum RootError<E> {` | `src/root.rs:13` | `docs/orgmode/reference/public-api.org` |
 | `ScgStepTolerance` | enum | `pub enum ScgStepTolerance {` | `src/scg.rs:86` | `docs/orgmode/reference/public-api.org` |
@@ -8807,7 +8807,7 @@ reference entry and a documentation location.
 | `SpdMetric` | enum | `pub enum SpdMetric {` | `src/manifold/riemannian.rs:91` | `docs/orgmode/reference/public-api.org` |
 | `Status` | enum | `pub enum Status {` | `src/report.rs:10` | `docs/orgmode/reference/public-api.org` |
 | `StiefelRetraction` | enum | `pub enum StiefelRetraction {` | `src/manifold/riemannian.rs:81` | `docs/orgmode/reference/public-api.org` |
-| `StopNorm` | enum | `pub enum StopNorm {` | `src/control.rs:229` | `docs/orgmode/reference/public-api.org` |
+| `StopNorm` | enum | `pub enum StopNorm {` | `src/control.rs:242` | `docs/orgmode/reference/public-api.org` |
 | `StopReason` | enum | `pub enum StopReason {` | `src/report.rs:61` | `docs/orgmode/reference/public-api.org` |
 | `TcgStop` | enum | `pub enum TcgStop {` | `src/rtr.rs:53` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_accept_t` | enum | `pub enum rgmin_accept_t {` | `src/ffi.rs:2772` | `docs/orgmode/reference/public-api.org` |
@@ -8816,21 +8816,21 @@ reference entry and a documentation location.
 | `rgmin_constraint_solver_t` | enum | `pub enum rgmin_constraint_solver_t {` | `src/ffi.rs:3909` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_eigen_kind_t` | enum | `pub enum rgmin_eigen_kind_t {` | `src/ffi.rs:433` | `docs/orgmode/howto/c-abi.org` |
 | `rgmin_fire_preset_t` | enum | `pub enum rgmin_fire_preset_t {` | `src/ffi.rs:2980` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_fire_variant_t` | enum | `pub enum rgmin_fire_variant_t {` | `src/ffi.rs:7795` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_fire_variant_t` | enum | `pub enum rgmin_fire_variant_t {` | `src/ffi.rs:7796` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_highs_crossover_t` | enum | `pub enum rgmin_highs_crossover_t {` | `src/ffi.rs:214` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_highs_solver_t` | enum | `pub enum rgmin_highs_solver_t {` | `src/ffi.rs:200` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_linesearch_kind_t` | enum | `pub enum rgmin_linesearch_kind_t {` | `src/ffi.rs:4721` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_manifold_t` | enum | `pub enum rgmin_manifold_t {` | `src/ffi.rs:3553` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `rgmin_method_t` | enum | `pub enum rgmin_method_t {` | `src/ffi.rs:113` | `docs/orgmode/howto/c-abi.org` |
 | `rgmin_qn_step_t` | enum | `pub enum rgmin_qn_step_t {` | `src/ffi.rs:2561` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_quickmin_variant_t` | enum | `pub enum rgmin_quickmin_variant_t {` | `src/ffi.rs:7844` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_scg_step_tolerance_t` | enum | `pub enum rgmin_scg_step_tolerance_t {` | `src/ffi.rs:7129` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_spd_metric_t` | enum | `pub enum rgmin_spd_metric_t {` | `src/ffi.rs:5662` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_quickmin_variant_t` | enum | `pub enum rgmin_quickmin_variant_t {` | `src/ffi.rs:7845` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_scg_step_tolerance_t` | enum | `pub enum rgmin_scg_step_tolerance_t {` | `src/ffi.rs:7130` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_spd_metric_t` | enum | `pub enum rgmin_spd_metric_t {` | `src/ffi.rs:5663` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_status_t` | enum | `pub enum rgmin_status_t {` | `src/ffi.rs:42` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_stiefel_retraction_t` | enum | `pub enum rgmin_stiefel_retraction_t {` | `src/ffi.rs:5651` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_stiefel_retraction_t` | enum | `pub enum rgmin_stiefel_retraction_t {` | `src/ffi.rs:5652` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_stop_norm_t` | enum | `pub enum rgmin_stop_norm_t {` | `src/ffi.rs:2890` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_stop_t` | enum | `pub enum rgmin_stop_t {` | `src/ffi.rs:224` | `docs/orgmode/changelog.org` |
-| `rgmin_tcg_stop_t` | enum | `pub enum rgmin_tcg_stop_t {` | `src/ffi.rs:8897` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_tcg_stop_t` | enum | `pub enum rgmin_tcg_stop_t {` | `src/ffi.rs:8898` | `docs/orgmode/reference/public-api.org` |
 | `Accept::Energy` | enum variant | `Energy,` | `src/accept.rs:29` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/linesearch.org`, `docs/orgmode/howto/ase-migration.org` |
 | `Accept::None` | enum variant | `None,` | `src/accept.rs:27` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/constraints.org`, `docs/orgmode/howto/manifolds.org` |
 | `Accept::Nonmonotone` | enum variant | `Nonmonotone,` | `src/accept.rs:31` | `docs/orgmode/howto/constraints.org`, `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/constraints.org` |
@@ -8845,13 +8845,13 @@ reference entry and a documentation location.
 | `Conjugacy::ConjugateDescent` | enum variant | `ConjugateDescent,` | `src/nlcg/mod.rs:45` | `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/reference/python.org` |
 | `Conjugacy::DaiYuan` | enum variant | `DaiYuan,` | `src/nlcg/mod.rs:39` | `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/reference/python.org` |
 | `Conjugacy::FletcherReeves` | enum variant | `FletcherReeves,` | `src/nlcg/mod.rs:24` | `docs/orgmode/howto/method-catalog.org` |
-| `Conjugacy::FrPr` | enum variant | `FrPr,` | `src/nlcg/mod.rs:61` | `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/reference/python.org` |
-| `Conjugacy::HagerZhang` | enum variant | `HagerZhang,` | `src/nlcg/mod.rs:51` | `docs/orgmode/howto/method-catalog.org` |
+| `Conjugacy::FrPr` | enum variant | `FrPr,` | `src/nlcg/mod.rs:62` | `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/reference/python.org` |
+| `Conjugacy::HagerZhang` | enum variant | `HagerZhang,` | `src/nlcg/mod.rs:52` | `docs/orgmode/howto/method-catalog.org` |
 | `Conjugacy::HestenesStiefel` | enum variant | `HestenesStiefel,` | `src/nlcg/mod.rs:34` | `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/reference/python.org` |
-| `Conjugacy::Hybrid` | enum variant | `Hybrid {` | `src/nlcg/mod.rs:73` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/configure.org` |
-| `Conjugacy::LiuStorey` | enum variant | `LiuStorey,` | `src/nlcg/mod.rs:56` | `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/reference/python.org` |
+| `Conjugacy::Hybrid` | enum variant | `Hybrid {` | `src/nlcg/mod.rs:74` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/configure.org` |
+| `Conjugacy::LiuStorey` | enum variant | `LiuStorey,` | `src/nlcg/mod.rs:57` | `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/reference/python.org` |
 | `Conjugacy::PolakRibiere` | enum variant | `PolakRibiere,` | `src/nlcg/mod.rs:29` | `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/reference/gromacs-cg.org`, `docs/orgmode/reference/python.org` |
-| `Conjugacy::PolakRibierePlus` | enum variant | `PolakRibierePlus,` | `src/nlcg/mod.rs:68` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/method-catalog.org` |
+| `Conjugacy::PolakRibierePlus` | enum variant | `PolakRibierePlus,` | `src/nlcg/mod.rs:69` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/method-catalog.org` |
 | `ConstraintAlgorithm::Lincs` | enum variant | `Lincs,` | `src/holonomic/mod.rs:71` | `docs/orgmode/reference/public-api.org` |
 | `ConstraintAlgorithm::Rattle` | enum variant | `Rattle,` | `src/holonomic/mod.rs:75` | `docs/orgmode/howto/method-catalog.org` |
 | `ConstraintAlgorithm::Settle` | enum variant | `Settle,` | `src/holonomic/mod.rs:73` | `docs/orgmode/reference/public-api.org` |
@@ -9154,9 +9154,9 @@ reference entry and a documentation location.
 | `RcgBeta::PrpPlus` | enum variant | `PrpPlus,` | `src/rcg.rs:98` | `docs/orgmode/reference/public-api.org` |
 | `RcgTransport::Identity` | enum variant | `Identity,` | `src/rcg.rs:112` | `docs/orgmode/tutorials/rcg.org` |
 | `RcgTransport::Scaled` | enum variant | `Scaled,` | `src/rcg.rs:110` | `docs/orgmode/reference/public-api.org` |
-| `Restart::Never` | enum variant | `Never,` | `src/nlcg/mod.rs:90` | `docs/orgmode/reference/public-api.org` |
-| `Restart::Njws` | enum variant | `Njws {` | `src/nlcg/mod.rs:96` | `docs/orgmode/howto/configure.org` |
-| `Restart::Powell` | enum variant | `Powell {` | `src/nlcg/mod.rs:103` | `docs/orgmode/howto/configure.org` |
+| `Restart::Never` | enum variant | `Never,` | `src/nlcg/mod.rs:91` | `docs/orgmode/reference/public-api.org` |
+| `Restart::Njws` | enum variant | `Njws {` | `src/nlcg/mod.rs:97` | `docs/orgmode/howto/configure.org` |
+| `Restart::Powell` | enum variant | `Powell {` | `src/nlcg/mod.rs:104` | `docs/orgmode/howto/configure.org` |
 | `RigidMode::Auto` | enum variant | `Auto = 1,` | `src/rigid/mode.rs:13` | `docs/orgmode/reference/public-api.org` |
 | `RigidMode::Off` | enum variant | `Off = 0,` | `src/rigid/mode.rs:8` | `docs/orgmode/reference/public-api.org` |
 | `RigidMode::Translation` | enum variant | `Translation = 2,` | `src/rigid/mode.rs:15` | `docs/orgmode/changelog.org` |
@@ -9203,10 +9203,10 @@ reference entry and a documentation location.
 | `Status::Tolerance` | enum variant | `Tolerance,` | `src/report.rs:14` | `docs/orgmode/howto/noise.org` |
 | `StiefelRetraction::Polar` | enum variant | `Polar,` | `src/manifold/riemannian.rs:86` | `docs/orgmode/howto/method-catalog.org` |
 | `StiefelRetraction::Qr` | enum variant | `Qr,` | `src/manifold/riemannian.rs:84` | `docs/orgmode/howto/method-catalog.org` |
-| `StopNorm::Inf` | enum variant | `Inf,` | `src/control.rs:238` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
-| `StopNorm::MaxAtom` | enum variant | `MaxAtom,` | `src/control.rs:236` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/gromacs-cg.org`, `docs/orgmode/howto/session.org` |
-| `StopNorm::Rms` | enum variant | `Rms,` | `src/control.rs:240` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
-| `StopNorm::Two` | enum variant | `Two,` | `src/control.rs:232` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
+| `StopNorm::Inf` | enum variant | `Inf,` | `src/control.rs:251` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
+| `StopNorm::MaxAtom` | enum variant | `MaxAtom,` | `src/control.rs:249` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/gromacs-cg.org`, `docs/orgmode/howto/session.org` |
+| `StopNorm::Rms` | enum variant | `Rms,` | `src/control.rs:253` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
+| `StopNorm::Two` | enum variant | `Two,` | `src/control.rs:245` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
 | `StopReason::Converged` | enum variant | `Converged,` | `src/report.rs:64` | `docs/orgmode/reference/public-api.org` |
 | `StopReason::EnergyTolerance` | enum variant | `EnergyTolerance,` | `src/report.rs:84` | `docs/orgmode/reference/public-api.org` |
 | `StopReason::EvalBudget` | enum variant | `EvalBudget,` | `src/report.rs:86` | `docs/orgmode/reference/public-api.org` |
@@ -9269,8 +9269,8 @@ reference entry and a documentation location.
 | `rgmin_eigen_kind_t::RGMIN_EIGEN_SLEPC` | enum variant | `RGMIN_EIGEN_SLEPC = 5,` | `src/ffi.rs:439` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_fire_preset_t::RGMIN_FIRE_PRESET_DEFAULT` | enum variant | `RGMIN_FIRE_PRESET_DEFAULT = 0,` | `src/ffi.rs:2982` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_fire_preset_t::RGMIN_FIRE_PRESET_GUENOLE2020` | enum variant | `RGMIN_FIRE_PRESET_GUENOLE2020 = 1,` | `src/ffi.rs:2984` | `docs/orgmode/reference/lammps-min-style.org` |
-| `rgmin_fire_variant_t::RGMIN_FIRE_GUENOLE2020` | enum variant | `RGMIN_FIRE_GUENOLE2020 = 1,` | `src/ffi.rs:7799` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_fire_variant_t::RGMIN_FIRE_RGMIN` | enum variant | `RGMIN_FIRE_RGMIN = 0,` | `src/ffi.rs:7797` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_fire_variant_t::RGMIN_FIRE_GUENOLE2020` | enum variant | `RGMIN_FIRE_GUENOLE2020 = 1,` | `src/ffi.rs:7800` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_fire_variant_t::RGMIN_FIRE_RGMIN` | enum variant | `RGMIN_FIRE_RGMIN = 0,` | `src/ffi.rs:7798` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_highs_crossover_t::RGMIN_HIGHS_CROSSOVER_CHOOSE` | enum variant | `RGMIN_HIGHS_CROSSOVER_CHOOSE = 0,` | `src/ffi.rs:215` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_highs_crossover_t::RGMIN_HIGHS_CROSSOVER_OFF` | enum variant | `RGMIN_HIGHS_CROSSOVER_OFF = 2,` | `src/ffi.rs:217` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_highs_crossover_t::RGMIN_HIGHS_CROSSOVER_ON` | enum variant | `RGMIN_HIGHS_CROSSOVER_ON = 1,` | `src/ffi.rs:216` | `docs/orgmode/reference/public-api.org` |
@@ -9345,13 +9345,13 @@ reference entry and a documentation location.
 | `rgmin_qn_step_t::RGMIN_QN_LBFGS` | enum variant | `RGMIN_QN_LBFGS = 0,` | `src/ffi.rs:2563` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_qn_step_t::RGMIN_QN_NEWTON` | enum variant | `RGMIN_QN_NEWTON = 1,` | `src/ffi.rs:2565` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_qn_step_t::RGMIN_QN_RFO` | enum variant | `RGMIN_QN_RFO = 2,` | `src/ffi.rs:2567` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_quickmin_variant_t::RGMIN_QUICKMIN_EON` | enum variant | `RGMIN_QUICKMIN_EON = 1,` | `src/ffi.rs:7848` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_quickmin_variant_t::RGMIN_QUICKMIN_PER_ATOM` | enum variant | `RGMIN_QUICKMIN_PER_ATOM = 2,` | `src/ffi.rs:7850` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_quickmin_variant_t::RGMIN_QUICKMIN_RGMIN` | enum variant | `RGMIN_QUICKMIN_RGMIN = 0,` | `src/ffi.rs:7846` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_scg_step_tolerance_t::RGMIN_SCG_ABSOLUTE_INFINITY` | enum variant | `RGMIN_SCG_ABSOLUTE_INFINITY = 0,` | `src/ffi.rs:7130` | `docs/orgmode/changelog.org` |
-| `rgmin_scg_step_tolerance_t::RGMIN_SCG_RELATIVE_EUCLIDEAN` | enum variant | `RGMIN_SCG_RELATIVE_EUCLIDEAN = 1,` | `src/ffi.rs:7131` | `docs/orgmode/changelog.org` |
-| `rgmin_spd_metric_t::RGMIN_SPD_AFFINE_INVARIANT` | enum variant | `RGMIN_SPD_AFFINE_INVARIANT = 0,` | `src/ffi.rs:5664` | `docs/orgmode/reference/manifold.org` |
-| `rgmin_spd_metric_t::RGMIN_SPD_LOG_EUCLIDEAN` | enum variant | `RGMIN_SPD_LOG_EUCLIDEAN = 1,` | `src/ffi.rs:5666` | `docs/orgmode/reference/manifold.org` |
+| `rgmin_quickmin_variant_t::RGMIN_QUICKMIN_EON` | enum variant | `RGMIN_QUICKMIN_EON = 1,` | `src/ffi.rs:7849` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/architecture.org` |
+| `rgmin_quickmin_variant_t::RGMIN_QUICKMIN_PER_ATOM` | enum variant | `RGMIN_QUICKMIN_PER_ATOM = 2,` | `src/ffi.rs:7851` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/architecture.org` |
+| `rgmin_quickmin_variant_t::RGMIN_QUICKMIN_RGMIN` | enum variant | `RGMIN_QUICKMIN_RGMIN = 0,` | `src/ffi.rs:7847` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/architecture.org` |
+| `rgmin_scg_step_tolerance_t::RGMIN_SCG_ABSOLUTE_INFINITY` | enum variant | `RGMIN_SCG_ABSOLUTE_INFINITY = 0,` | `src/ffi.rs:7131` | `docs/orgmode/changelog.org` |
+| `rgmin_scg_step_tolerance_t::RGMIN_SCG_RELATIVE_EUCLIDEAN` | enum variant | `RGMIN_SCG_RELATIVE_EUCLIDEAN = 1,` | `src/ffi.rs:7132` | `docs/orgmode/changelog.org` |
+| `rgmin_spd_metric_t::RGMIN_SPD_AFFINE_INVARIANT` | enum variant | `RGMIN_SPD_AFFINE_INVARIANT = 0,` | `src/ffi.rs:5665` | `docs/orgmode/reference/manifold.org` |
+| `rgmin_spd_metric_t::RGMIN_SPD_LOG_EUCLIDEAN` | enum variant | `RGMIN_SPD_LOG_EUCLIDEAN = 1,` | `src/ffi.rs:5667` | `docs/orgmode/reference/manifold.org` |
 | `rgmin_status_t::RGMIN_CONSTRAINT_ERROR` | enum variant | `RGMIN_CONSTRAINT_ERROR = 5,` | `src/ffi.rs:55` | `docs/orgmode/howto/gromacs-steep.org`, `docs/orgmode/reference/gromacs-cg.org`, `docs/orgmode/reference/gromacs-steep.org` |
 | `rgmin_status_t::RGMIN_INTERNAL_ERROR` | enum variant | `RGMIN_INTERNAL_ERROR = 2,` | `src/ffi.rs:48` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/gromacs-steep.org` |
 | `rgmin_status_t::RGMIN_INVALID_PARAMETER` | enum variant | `RGMIN_INVALID_PARAMETER = 1,` | `src/ffi.rs:46` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/highs-qp.org` |
@@ -9360,8 +9360,8 @@ reference entry and a documentation location.
 | `rgmin_status_t::RGMIN_UNAVAILABLE` | enum variant | `RGMIN_UNAVAILABLE = 4,` | `src/ffi.rs:52` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_status_t::RGMIN_UNMET_STOP` | enum variant | `RGMIN_UNMET_STOP = 6,` | `src/ffi.rs:58` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
 | `rgmin_status_t::RGMIN_UNSUPPORTED_DEVICE` | enum variant | `RGMIN_UNSUPPORTED_DEVICE = 3,` | `src/ffi.rs:50` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_stiefel_retraction_t::RGMIN_STIEFEL_POLAR` | enum variant | `RGMIN_STIEFEL_POLAR = 1,` | `src/ffi.rs:5655` | `docs/orgmode/reference/manifold.org` |
-| `rgmin_stiefel_retraction_t::RGMIN_STIEFEL_QR` | enum variant | `RGMIN_STIEFEL_QR = 0,` | `src/ffi.rs:5653` | `docs/orgmode/reference/manifold.org` |
+| `rgmin_stiefel_retraction_t::RGMIN_STIEFEL_POLAR` | enum variant | `RGMIN_STIEFEL_POLAR = 1,` | `src/ffi.rs:5656` | `docs/orgmode/reference/manifold.org` |
+| `rgmin_stiefel_retraction_t::RGMIN_STIEFEL_QR` | enum variant | `RGMIN_STIEFEL_QR = 0,` | `src/ffi.rs:5654` | `docs/orgmode/reference/manifold.org` |
 | `rgmin_stop_norm_t::RGMIN_STOP_NORM_INF` | enum variant | `RGMIN_STOP_NORM_INF = 2,` | `src/ffi.rs:2896` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_stop_norm_t::RGMIN_STOP_NORM_MAX_ATOM` | enum variant | `RGMIN_STOP_NORM_MAX_ATOM = 1,` | `src/ffi.rs:2894` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_stop_norm_t::RGMIN_STOP_NORM_RMS` | enum variant | `RGMIN_STOP_NORM_RMS = 3,` | `src/ffi.rs:2898` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
@@ -9376,11 +9376,11 @@ reference entry and a documentation location.
 | `rgmin_stop_t::RGMIN_STOP_POLISH_UNMET` | enum variant | `RGMIN_STOP_POLISH_UNMET = 5,` | `src/ffi.rs:237` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/architecture.org` |
 | `rgmin_stop_t::RGMIN_STOP_STEP_TOLERANCE` | enum variant | `RGMIN_STOP_STEP_TOLERANCE = 2,` | `src/ffi.rs:231` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_stop_t::RGMIN_STOP_TOLERANCE` | enum variant | `RGMIN_STOP_TOLERANCE = 0,` | `src/ffi.rs:226` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/gromacs-cg.org`, `docs/orgmode/reference/gromacs-steep.org` |
-| `rgmin_tcg_stop_t::RGMIN_TCG_BOUNDARY` | enum variant | `RGMIN_TCG_BOUNDARY = 1,` | `src/ffi.rs:8901` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_tcg_stop_t::RGMIN_TCG_MAX_ITER` | enum variant | `RGMIN_TCG_MAX_ITER = 3,` | `src/ffi.rs:8905` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_tcg_stop_t::RGMIN_TCG_NEGATIVE_CURVATURE` | enum variant | `RGMIN_TCG_NEGATIVE_CURVATURE = 0,` | `src/ffi.rs:8899` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_tcg_stop_t::RGMIN_TCG_RESIDUAL` | enum variant | `RGMIN_TCG_RESIDUAL = 2,` | `src/ffi.rs:8903` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_tcg_stop_t::RGMIN_TCG_ZERO_GRADIENT` | enum variant | `RGMIN_TCG_ZERO_GRADIENT = 4,` | `src/ffi.rs:8907` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_tcg_stop_t::RGMIN_TCG_BOUNDARY` | enum variant | `RGMIN_TCG_BOUNDARY = 1,` | `src/ffi.rs:8902` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_tcg_stop_t::RGMIN_TCG_MAX_ITER` | enum variant | `RGMIN_TCG_MAX_ITER = 3,` | `src/ffi.rs:8906` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_tcg_stop_t::RGMIN_TCG_NEGATIVE_CURVATURE` | enum variant | `RGMIN_TCG_NEGATIVE_CURVATURE = 0,` | `src/ffi.rs:8900` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_tcg_stop_t::RGMIN_TCG_RESIDUAL` | enum variant | `RGMIN_TCG_RESIDUAL = 2,` | `src/ffi.rs:8904` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_tcg_stop_t::RGMIN_TCG_ZERO_GRADIENT` | enum variant | `RGMIN_TCG_ZERO_GRADIENT = 4,` | `src/ffi.rs:8908` | `docs/orgmode/reference/public-api.org` |
 | `aaa` | function | `pub fn aaa(samples: &[f64], values: &[f64], params: AaaParams) -> Result<Barycentric> {` | `src/aaa.rs:218` | `docs/orgmode/reference/public-api.org` |
 | `abs` | function | `pub fn abs(self) -> f64 {` | `src/inverse_laplace.rs:282` | `docs/orgmode/reference/public-api.org` |
 | `accept_ratio` | function | `pub fn accept_ratio(rho: f64) -> bool {` | `src/trust.rs:121` | `docs/orgmode/reference/public-api.org` |
@@ -9422,8 +9422,8 @@ reference entry and a documentation location.
 | `backward_error_floor` | function | `pub fn backward_error_floor(value: f64, x: ArrayView1<f64>) -> f64 {` | `src/newton.rs:132` | `docs/orgmode/reference/public-api.org` |
 | `basis` | function | `pub fn basis(&self) -> &Array2<f64> {` | `src/manifold/subspace_sphere.rs:123` | `docs/orgmode/reference/public-api.org` |
 | `basis` | function | `pub fn basis(&self) -> &[f64] {` | `src/rigid/project.rs:13` | `docs/orgmode/reference/public-api.org` |
-| `beta` | function | `pub fn beta(&self, ctx: &ConjugacyContext<'_>) -> f64 {` | `src/nlcg/mod.rs:183` | `docs/orgmode/reference/public-api.org` |
-| `beta_metric` | function | `pub fn beta_metric( &self, ctx: &ConjugacyContext<'_>, z: ArrayView1<'_, f64>, z_old: ArrayView1<'_, f64>, ) -> f64 {` | `src/nlcg/mod.rs:239` | `docs/orgmode/reference/public-api.org` |
+| `beta` | function | `pub fn beta(&self, ctx: &ConjugacyContext<'_>) -> f64 {` | `src/nlcg/mod.rs:204` | `docs/orgmode/reference/public-api.org` |
+| `beta_metric` | function | `pub fn beta_metric( &self, ctx: &ConjugacyContext<'_>, z: ArrayView1<'_, f64>, z_old: ArrayView1<'_, f64>, ) -> f64 {` | `src/nlcg/mod.rs:260` | `docs/orgmode/reference/public-api.org` |
 | `bfgs_hessian_update` | function | `pub fn bfgs_hessian_update(b: &mut Array2<f64>, s: &Array1<f64>, y: &Array1<f64>) {` | `src/qn_irc.rs:112` | `docs/orgmode/reference/public-api.org` |
 | `bisect` | function | `pub fn bisect<E, F>(mut f: F, lower: f64, upper: f64) -> Result<f64, RootError<E>>` | `src/root.rs:49` | `docs/orgmode/reference/public-api.org` |
 | `block` | function | `pub fn block(&self, x1: ArrayView1<'_, f64>, x2: ArrayView1<'_, f64>) -> Array2<f64> {` | `src/gpmin.rs:418` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/product-manifold.org` |
@@ -9459,13 +9459,13 @@ reference entry and a documentation location.
 | `chase_iterations` | function | `pub fn chase_iterations(self) -> usize {` | `src/lowest_mode.rs:220` | `docs/orgmode/reference/public-api.org` |
 | `chebyshev_pade_poles` | function | `pub fn chebyshev_pade_poles(` | `src/aaa.rs:873` | `docs/orgmode/reference/public-api.org` |
 | `check` | function | `pub fn check(&self) -> Result<()> {` | `src/rlbfgs.rs:100` | `docs/orgmode/reference/public-api.org` |
-| `classify` | function | `pub fn classify(&self, grad: f64, n_free: usize) -> crate::report::Status {` | `src/control.rs:385` | `docs/orgmode/reference/public-api.org` |
+| `classify` | function | `pub fn classify(&self, grad: f64, n_free: usize) -> crate::report::Status {` | `src/control.rs:409` | `docs/orgmode/reference/public-api.org` |
 | `clear` | function | `pub fn clear(&mut self) {` | `src/lbfgs/direction.rs:112` | `docs/orgmode/reference/python.org` |
 | `clear_constraint_shrinks` | function | `pub fn clear_constraint_shrinks(&mut self) {` | `src/gromacs.rs:329` | `docs/orgmode/reference/public-api.org` |
-| `clear_distance_constraints` | function | `pub fn clear_distance_constraints(&mut self) {` | `src/session.rs:7123` | `docs/orgmode/howto/session.org` |
+| `clear_distance_constraints` | function | `pub fn clear_distance_constraints(&mut self) {` | `src/session.rs:7153` | `docs/orgmode/howto/session.org` |
 | `clear_equalities` | function | `pub fn clear_equalities(&mut self) -> bool {` | `src/session.rs:1726` | `docs/orgmode/howto/session.org` |
-| `clear_exp` | function | `pub fn clear_exp(&mut self) {` | `src/session.rs:7098` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
-| `clear_level_set` | function | `pub fn clear_level_set(&mut self) {` | `src/session.rs:7147` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/level-set.org` |
+| `clear_exp` | function | `pub fn clear_exp(&mut self) {` | `src/session.rs:7128` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
+| `clear_level_set` | function | `pub fn clear_level_set(&mut self) {` | `src/session.rs:7177` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/level-set.org` |
 | `clear_precon` | function | `pub fn clear_precon(&mut self) {` | `src/session.rs:928` | `docs/orgmode/howto/precon.org`, `docs/orgmode/reference/architecture.org` |
 | `clear_simd_path` | function | `pub fn clear_simd_path() {` | `src/vecops.rs:193` | `docs/orgmode/reference/public-api.org` |
 | `closest_point` | function | `pub fn closest_point(&self, x: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/subspace_sphere.rs:143` | `docs/orgmode/reference/public-api.org` |
@@ -9485,7 +9485,7 @@ reference entry and a documentation location.
 | `constant` | function | `pub fn constant(n: usize) -> Self {` | `src/manifold/mod.rs:544` | `docs/orgmode/changelog.org` |
 | `constrain` | function | `pub fn constrain( &self, anchor: ArrayView1<f64>, x: &mut Array1<f64>, ) -> Result<ConstraintReport> {` | `src/holonomic/mod.rs:434` | `docs/orgmode/reference/public-api.org` |
 | `contraction` | function | `pub const fn contraction(&self) -> f64 {` | `src/majorant.rs:78` | `docs/orgmode/reference/public-api.org` |
-| `converged` | function | `pub fn converged(&self, grad: f64) -> bool {` | `src/control.rs:277` | `docs/orgmode/reference/public-api.org` |
+| `converged` | function | `pub fn converged(&self, grad: f64) -> bool {` | `src/control.rs:290` | `docs/orgmode/reference/public-api.org` |
 | `converged` | function | `pub fn converged(self) -> bool {` | `src/report.rs:91` | `docs/orgmode/reference/public-api.org` |
 | `converged` | function | `pub fn converged(&self) -> bool {` | `src/report.rs:243` | `docs/orgmode/reference/public-api.org` |
 | `cos` | function | `pub fn cos(self) -> Self {` | `src/inverse_laplace.rs:329` | `docs/orgmode/reference/public-api.org` |
@@ -9496,17 +9496,17 @@ reference entry and a documentation location.
 | `d_weight_block` | function | `pub fn d_weight_block(&self, x1: ArrayView1<'_, f64>, x2: ArrayView1<'_, f64>) -> Array2<f64> {` | `src/gpmin.rs:448` | `docs/orgmode/reference/public-api.org` |
 | `declared` | function | `pub fn declared(eps: f64) -> Self {` | `src/noise.rs:98` | `docs/orgmode/changelog.org` |
 | `default` | function | `fn default() -> Self {` | `src/aaa.rs:49` | `docs/orgmode/reference/public-api.org` |
-| `default` | function | `fn default() -> Self {` | `src/control.rs:209` | `docs/orgmode/howto/configure.org`, `docs/orgmode/reference/python.org` |
+| `default` | function | `fn default() -> Self {` | `src/control.rs:221` | `docs/orgmode/howto/configure.org`, `docs/orgmode/reference/python.org` |
 | `default` | function | `fn default() -> Self {` | `src/eigenexa_kind.rs:47` | `docs/orgmode/reference/public-api.org` |
 | `default` | function | `fn default() -> Self {` | `src/eon_cg.rs:56` | `docs/orgmode/howto/configure.org`, `docs/orgmode/howto/method-catalog.org` |
 | `default` | function | `fn default() -> Self {` | `src/ffi.rs:1381` | `docs/orgmode/reference/public-api.org` |
-| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9389` | `docs/orgmode/reference/public-api.org` |
-| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9408` | `docs/orgmode/reference/public-api.org` |
-| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9427` | `docs/orgmode/reference/public-api.org` |
-| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9442` | `docs/orgmode/reference/public-api.org` |
-| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9457` | `docs/orgmode/reference/public-api.org` |
-| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9474` | `docs/orgmode/reference/public-api.org` |
-| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9488` | `docs/orgmode/reference/public-api.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9390` | `docs/orgmode/reference/public-api.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9409` | `docs/orgmode/reference/public-api.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9428` | `docs/orgmode/reference/public-api.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9443` | `docs/orgmode/reference/public-api.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9458` | `docs/orgmode/reference/public-api.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9475` | `docs/orgmode/reference/public-api.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9489` | `docs/orgmode/reference/public-api.org` |
 | `default` | function | `fn default() -> Self {` | `src/fire.rs:140` | `docs/orgmode/reference/public-api.org` |
 | `default` | function | `fn default() -> Self {` | `src/gpmin.rs:201` | `docs/orgmode/reference/public-api.org` |
 | `default` | function | `fn default() -> Self {` | `src/gpmin.rs:368` | `docs/orgmode/reference/public-api.org` |
@@ -9584,7 +9584,7 @@ reference entry and a documentation location.
 | `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/sphere_complex.rs:153` | `docs/orgmode/reference/public-api.org` |
 | `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/stiefel.rs:68` | `docs/orgmode/reference/public-api.org` |
 | `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/subspace_sphere.rs:208` | `docs/orgmode/reference/public-api.org` |
-| `distance_constraints` | function | `pub fn distance_constraints(&self) -> Option<&DistanceConstraints> {` | `src/session.rs:7130` | `docs/orgmode/reference/public-api.org` |
+| `distance_constraints` | function | `pub fn distance_constraints(&self) -> Option<&DistanceConstraints> {` | `src/session.rs:7160` | `docs/orgmode/reference/public-api.org` |
 | `div` | function | `fn div(self, rhs: Self) -> Self::Output {` | `src/inverse_laplace.rs:433` | `docs/orgmode/reference/public-api.org` |
 | `div` | function | `fn div(self, rhs: f64) -> Self::Output {` | `src/inverse_laplace.rs:455` | `docs/orgmode/reference/public-api.org` |
 | `div_assign_floor` | function | `pub fn div_assign_floor(x: ArrayView1<f64>, y: &mut Array1<f64>, floor: f64) {` | `src/vecops.rs:829` | `docs/orgmode/explanation/simd.org` |
@@ -9620,7 +9620,7 @@ reference entry and a documentation location.
 | `elpa_config` | function | `pub fn elpa_config(kind: EigensolverKind, elpa: &ElpaParams) -> Option<(i32, u32)> {` | `src/elpa_kind.rs:70` | `docs/orgmode/reference/public-api.org` |
 | `elpa_solver` | function | `pub const fn elpa_solver(self) -> i32 {` | `src/elpa_kind.rs:45` | `docs/orgmode/reference/public-api.org` |
 | `elpa_spectrum` | function | `pub fn elpa_spectrum(n: usize, nev: usize) -> crate::error::Result<ElpaSpectrum> {` | `src/elpa_kind.rs:93` | `docs/orgmode/reference/public-api.org` |
-| `energy_converged` | function | `pub fn energy_converged(&self, previous: f64, current: f64) -> bool {` | `src/control.rs:442` | `docs/orgmode/reference/public-api.org` |
+| `energy_converged` | function | `pub fn energy_converged(&self, previous: f64, current: f64) -> bool {` | `src/control.rs:466` | `docs/orgmode/reference/public-api.org` |
 | `eon` | function | `pub fn eon() -> Self {` | `src/quickmin.rs:311` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/quickmin.org`, `docs/orgmode/howto/configure.org` |
 | `eon_cg` | function | `pub fn eon_cg() -> Self {` | `src/method.rs:255` | `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/reference/python.org`, `docs/orgmode/tutorials/cg.org` |
 | `eq` | function | `fn eq(&self, other: &MinresError<E>) -> bool {` | `src/minres.rs:191` | `docs/orgmode/reference/public-api.org` |
@@ -9656,7 +9656,7 @@ reference entry and a documentation location.
 | `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/stiefel.rs:60` | `docs/orgmode/reference/public-api.org` |
 | `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/subspace_sphere.rs:200` | `docs/orgmode/reference/public-api.org` |
 | `exp_gate_open` | function | `pub fn exp_gate_open(c_force: f64, c_bond: f64, max_spread: f64) -> bool {` | `src/precon.rs:1381` | `docs/orgmode/reference/public-api.org` |
-| `exp_mu` | function | `pub fn exp_mu(&self) -> Option<f64> {` | `src/session.rs:7106` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
+| `exp_mu` | function | `pub fn exp_mu(&self) -> Option<f64> {` | `src/session.rs:7136` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
 | `expm` | function | `pub fn expm(a: &[f64], m: usize) -> Result<Exponential, MagnusError> {` | `src/magnus.rs:201` | `docs/orgmode/reference/api.org` |
 | `exterior_disk_modulus` | function | `pub fn exterior_disk_modulus(` | `src/inverse_laplace.rs:970` | `docs/orgmode/reference/public-api.org` |
 | `factor` | function | `pub fn factor(a: &[f64], n: usize) -> std::result::Result<Self, LdlError> {` | `src/newton.rs:947` | `docs/orgmode/reference/public-api.org` |
@@ -9731,8 +9731,8 @@ reference entry and a documentation location.
 | `goldstein` | function | `pub const fn goldstein(c: f64, beta: f64, maxiter: usize) -> Self {` | `src/linesearch/mod.rs:248` | `docs/orgmode/reference/public-api.org` |
 | `goldstein_lower` | function | `pub fn goldstein_lower(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> bool {` | `src/linesearch/conditions.rs:141` | `docs/orgmode/reference/public-api.org` |
 | `goldstein_upper` | function | `pub fn goldstein_upper(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> bool {` | `src/linesearch/conditions.rs:130` | `docs/orgmode/reference/public-api.org` |
-| `gpmin_config` | function | `pub fn gpmin_config(&self) -> Option<GpMinConfig> {` | `src/session.rs:6631` | `docs/orgmode/reference/public-api.org` |
-| `gpmin_hyperparameters` | function | `pub fn gpmin_hyperparameters(&self) -> Option<(f64, f64, f64)> {` | `src/session.rs:6641` | `docs/orgmode/reference/public-api.org` |
+| `gpmin_config` | function | `pub fn gpmin_config(&self) -> Option<GpMinConfig> {` | `src/session.rs:6661` | `docs/orgmode/reference/public-api.org` |
+| `gpmin_hyperparameters` | function | `pub fn gpmin_hyperparameters(&self) -> Option<(f64, f64, f64)> {` | `src/session.rs:6671` | `docs/orgmode/reference/public-api.org` |
 | `grad` | function | `fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {` | `src/hvp.rs:112` | `docs/orgmode/reference/public-api.org` |
 | `grad` | function | `fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {` | `src/hvp.rs:169` | `docs/orgmode/reference/public-api.org` |
 | `grad` | function | `fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {` | `src/newton.rs:102` | `docs/orgmode/reference/public-api.org` |
@@ -9741,16 +9741,16 @@ reference entry and a documentation location.
 | `gradient_dr` | function | `pub fn gradient_dr(eps_g: f64, third: Option<f64>, point_scale: f64) -> f64 {` | `src/noise.rs:691` | `docs/orgmode/reference/public-api.org` |
 | `gradient_step` | function | `pub fn gradient_step( &self, x: &[f64], egrad: &[f64], t: f64, rgrad_out: &mut [f64], x_out: &mut [f64], ) -> Result<()> {` | `src/manifold/riemannian.rs:603` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `grassmann` | function | `pub fn grassmann(shape: Option<(usize, usize)>, len: usize) -> Grassmann {` | `src/manifold/mod.rs:434` | `docs/orgmode/reference/public-api.org` |
-| `gromacs_cg_config` | function | `pub fn gromacs_cg_config(&self) -> Option<GromacsCgConfig> {` | `src/session.rs:6671` | `docs/orgmode/reference/public-api.org` |
-| `gromacs_lbfgs_config` | function | `pub fn gromacs_lbfgs_config(&self) -> Option<GromacsLbfgsConfig> {` | `src/session.rs:6651` | `docs/orgmode/reference/public-api.org` |
+| `gromacs_cg_config` | function | `pub fn gromacs_cg_config(&self) -> Option<GromacsCgConfig> {` | `src/session.rs:6701` | `docs/orgmode/reference/public-api.org` |
+| `gromacs_lbfgs_config` | function | `pub fn gromacs_lbfgs_config(&self) -> Option<GromacsLbfgsConfig> {` | `src/session.rs:6681` | `docs/orgmode/reference/public-api.org` |
 | `gromacs_lbfgs_energy_rise` | function | `pub fn gromacs_lbfgs_energy_rise(energy: f64) -> f64 {` | `src/gromacs.rs:411` | `docs/orgmode/reference/public-api.org` |
-| `gromacs_lbfgs_step_size` | function | `pub fn gromacs_lbfgs_step_size(&self) -> Option<f64> {` | `src/session.rs:6661` | `docs/orgmode/reference/public-api.org` |
-| `gromacs_steep_config` | function | `pub fn gromacs_steep_config(&self) -> Option<GromacsSteepConfig> {` | `src/session.rs:6621` | `docs/orgmode/reference/public-api.org` |
+| `gromacs_lbfgs_step_size` | function | `pub fn gromacs_lbfgs_step_size(&self) -> Option<f64> {` | `src/session.rs:6691` | `docs/orgmode/reference/public-api.org` |
+| `gromacs_steep_config` | function | `pub fn gromacs_steep_config(&self) -> Option<GromacsSteepConfig> {` | `src/session.rs:6651` | `docs/orgmode/reference/public-api.org` |
 | `gromacs_steep_max_constraint_shrinks` | function | `pub fn gromacs_steep_max_constraint_shrinks(step_size: f64, shrink: f64) -> u32 {` | `src/gromacs.rs:80` | `docs/orgmode/reference/public-api.org` |
-| `gromacs_step_size` | function | `pub fn gromacs_step_size(&self) -> Option<f64> {` | `src/session.rs:6611` | `docs/orgmode/reference/gromacs-steep.org` |
+| `gromacs_step_size` | function | `pub fn gromacs_step_size(&self) -> Option<f64> {` | `src/session.rs:6641` | `docs/orgmode/reference/gromacs-steep.org` |
 | `guenole2020` | function | `pub fn guenole2020(dim: usize, dt0: f64) -> (FireState, Fire2Extras) {` | `src/fire.rs:782` | `docs/orgmode/reference/public-api.org` |
 | `h` | function | `pub const fn h(&self) -> f64 {` | `src/certificate.rs:104` | `docs/orgmode/reference/public-api.org` |
-| `halt` | function | `pub fn halt(&self, grad: f64, n_free: usize) -> Option<crate::report::Status> {` | `src/control.rs:406` | `docs/orgmode/reference/public-api.org` |
+| `halt` | function | `pub fn halt(&self, grad: f64, n_free: usize) -> Option<crate::report::Status> {` | `src/control.rs:430` | `docs/orgmode/reference/public-api.org` |
 | `hessian` | function | `fn hessian(&self, x: ArrayView1<f64>) -> Array2<f64> {` | `src/newton.rs:122` | `docs/orgmode/reference/public-api.org` |
 | `hessian` | function | `pub fn hessian(&self) -> &Array2<f64> {` | `src/qn_irc.rs:83` | `docs/orgmode/reference/public-api.org` |
 | `hessian_vector` | function | `fn hessian_vector(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {` | `src/hvp.rs:132` | `docs/orgmode/reference/public-api.org` |
@@ -9765,7 +9765,7 @@ reference entry and a documentation location.
 | `host_mut` | function | `pub fn host_mut(&mut self) -> &mut Array1<f64> {` | `src/vecops.rs:951` | `docs/orgmode/reference/public-api.org` |
 | `host_view` | function | `pub fn host_view(&self) -> ArrayView1<'_, f64> {` | `src/vecops.rs:946` | `docs/orgmode/reference/public-api.org` |
 | `hvp_calls` | function | `pub fn hvp_calls(&self) -> usize {` | `src/session.rs:1156` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/reference/api.org` |
-| `hybrid` | function | `pub fn hybrid(a: Conjugacy, b: Conjugacy, take_max: bool) -> Self {` | `src/nlcg/mod.rs:174` | `docs/orgmode/changelog.org` |
+| `hybrid` | function | `pub fn hybrid(a: Conjugacy, b: Conjugacy, take_max: bool) -> Self {` | `src/nlcg/mod.rs:175` | `docs/orgmode/changelog.org` |
 | `hyperparameters` | function | `pub fn hyperparameters(&self) -> (f64, f64, f64) {` | `src/gpmin.rs:864` | `docs/orgmode/reference/public-api.org` |
 | `hyperparameters` | function | `pub fn hyperparameters(&self) -> (f64, f64, f64) {` | `src/gpmin.rs:1769` | `docs/orgmode/reference/public-api.org` |
 | `identity` | function | `pub fn identity(n: usize) -> Self {` | `src/qn_irc.rs:36` | `docs/orgmode/reference/public-api.org` |
@@ -9832,7 +9832,7 @@ reference entry and a documentation location.
 | `lanczos_quadrature_log` | function | `pub fn lanczos_quadrature_log<F>(` | `src/slq.rs:634` | `docs/orgmode/reference/public-api.org` |
 | `lbfgs` | function | `pub fn lbfgs() -> Self {` | `src/method.rs:268` | `docs/orgmode/howto/configure.org`, `docs/orgmode/howto/method-catalog.org` |
 | `lbfgs_direction` | function | `pub fn lbfgs_direction(` | `src/lbfgs/direction.rs:251` | `docs/orgmode/reference/public-api.org` |
-| `lbfgs_step` | function | `pub fn lbfgs_step(&self) -> LbfgsStep {` | `src/session.rs:6918` | `docs/orgmode/reference/public-api.org` |
+| `lbfgs_step` | function | `pub fn lbfgs_step(&self) -> LbfgsStep {` | `src/session.rs:6948` | `docs/orgmode/reference/public-api.org` |
 | `lbfgs_trust_radius` | function | `pub fn lbfgs_trust_radius(&self) -> Option<f64> {` | `src/session.rs:3581` | `docs/orgmode/reference/public-api.org` |
 | `lbfgs_with_memory` | function | `pub const fn lbfgs_with_memory(memory: usize) -> Self {` | `src/method.rs:297` | `docs/orgmode/changelog.org` |
 | `ldl_inertia_with_backward_bound` | function | `pub fn ldl_inertia_with_backward_bound(` | `src/newton.rs:1512` | `docs/orgmode/reference/public-api.org` |
@@ -9841,7 +9841,7 @@ reference entry and a documentation location.
 | `len` | function | `pub fn len(&self) -> usize {` | `src/lbfgs.rs:898` | `docs/orgmode/reference/public-api.org` |
 | `len` | function | `pub fn len(&self) -> usize {` | `src/lbfgs/direction.rs:102` | `docs/orgmode/reference/public-api.org` |
 | `lengths` | function | `pub fn lengths(&self) -> &[f64] {` | `src/holonomic/mod.rs:347` | `docs/orgmode/reference/public-api.org` |
-| `level_set` | function | `pub fn level_set(&self) -> Option<LevelSetConstraint> {` | `src/session.rs:7152` | `docs/orgmode/howto/level-set.org`, `docs/orgmode/reference/python.org` |
+| `level_set` | function | `pub fn level_set(&self) -> Option<LevelSetConstraint> {` | `src/session.rs:7182` | `docs/orgmode/howto/level-set.org`, `docs/orgmode/reference/python.org` |
 | `lincs_order` | function | `pub fn lincs_order(&self) -> Option<usize> {` | `src/holonomic/mod.rs:372` | `docs/orgmode/reference/public-api.org` |
 | `line_values` | function | `pub fn line_values<O>(` | `src/noise.rs:213` | `docs/orgmode/reference/public-api.org` |
 | `linesearch` | function | `pub fn linesearch(&self) -> LineSearch {` | `src/session.rs:1131` | `docs/orgmode/reference/public-api.org` |
@@ -9988,8 +9988,8 @@ reference entry and a documentation location.
 | `newton_decrement_acceptable` | function | `pub fn newton_decrement_acceptable(` | `src/newton.rs:152` | `docs/orgmode/reference/public-api.org` |
 | `newton_step` | function | `pub const fn newton_step(&self) -> f64 {` | `src/certificate.rs:98` | `docs/orgmode/reference/public-api.org` |
 | `next_spacing` | function | `pub fn next_spacing(h: f64, flag: NoiseFlag) -> Option<f64> {` | `src/noise.rs:184` | `docs/orgmode/reference/public-api.org` |
-| `njws` | function | `pub fn njws() -> Self {` | `src/nlcg/mod.rs:111` | `docs/orgmode/reference/public-api.org` |
-| `njws_at` | function | `pub const fn njws_at(threshold: f64) -> Self {` | `src/nlcg/mod.rs:121` | `docs/orgmode/changelog.org` |
+| `njws` | function | `pub fn njws() -> Self {` | `src/nlcg/mod.rs:112` | `docs/orgmode/reference/public-api.org` |
+| `njws_at` | function | `pub const fn njws_at(threshold: f64) -> Self {` | `src/nlcg/mod.rs:122` | `docs/orgmode/changelog.org` |
 | `nlcg` | function | `pub fn nlcg(conjugacy: Conjugacy) -> Self {` | `src/method.rs:345` | `docs/orgmode/reference/public-api.org` |
 | `nlcg_descent_fallbacks` | function | `pub fn nlcg_descent_fallbacks(&self) -> u64 {` | `src/session.rs:940` | `docs/orgmode/reference/public-api.org` |
 | `nlcg_with_restart` | function | `pub const fn nlcg_with_restart(conjugacy: Conjugacy, restart: Restart) -> Self {` | `src/method.rs:292` | `docs/orgmode/changelog.org` |
@@ -10008,7 +10008,7 @@ reference entry and a documentation location.
 | `oblique` | function | `pub fn oblique(n: usize, m: usize) -> Self {` | `src/manifold/mod.rs:529` | `docs/orgmode/reference/public-api.org` |
 | `observations` | function | `pub fn observations(&self) -> usize {` | `src/gpmin.rs:1763` | `docs/orgmode/reference/public-api.org` |
 | `observe` | function | `fn observe(&mut self, _iteration: KrylovIteration) {}` | `src/krylov/gmres.rs:239` | `docs/orgmode/reference/public-api.org` |
-| `of` | function | `pub fn of(self, g: ArrayView1<f64>) -> f64 {` | `src/control.rs:247` | `docs/orgmode/reference/public-api.org` |
+| `of` | function | `pub fn of(self, g: ArrayView1<f64>) -> f64 {` | `src/control.rs:260` | `docs/orgmode/reference/public-api.org` |
 | `offer` | function | `pub fn offer(&mut self, f: f64, g: ArrayView1<'_, f64>) -> SearchStep {` | `src/linesearch/supplied.rs:108` | `docs/orgmode/explanation/linesearch.org` |
 | `on_bound` | function | `pub fn on_bound(&self, s: &Array1<f64>, tol: f64) -> bool {` | `src/irc_trust.rs:119` | `docs/orgmode/reference/public-api.org` |
 | `open` | function | `pub fn open(&mut self) -> f64 {` | `src/ode12r.rs:114` | `docs/orgmode/reference/public-api.org` |
@@ -10078,8 +10078,8 @@ reference entry and a documentation location.
 | `polish_hvp` | function | `pub fn polish_hvp<O>(obj: &O, init: impl Into<Array1<f64>>, control: &Control) -> Result<Report>` | `src/hvp.rs:1259` | `docs/orgmode/reference/public-api.org` |
 | `polish_newton` | function | `pub fn polish_newton<O>(` | `src/newton.rs:210` | `docs/orgmode/reference/public-api.org` |
 | `positive` | function | `pub fn positive(n: usize) -> Self {` | `src/manifold/mod.rs:567` | `docs/orgmode/reference/public-api.org` |
-| `powell` | function | `pub fn powell() -> Self {` | `src/nlcg/mod.rs:116` | `docs/orgmode/changelog.org` |
-| `powell_at` | function | `pub const fn powell_at(threshold: f64) -> Self {` | `src/nlcg/mod.rs:126` | `docs/orgmode/changelog.org` |
+| `powell` | function | `pub fn powell() -> Self {` | `src/nlcg/mod.rs:117` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/tutorials/cg.org` |
+| `powell_at` | function | `pub const fn powell_at(threshold: f64) -> Self {` | `src/nlcg/mod.rs:127` | `docs/orgmode/changelog.org` |
 | `power` | function | `pub fn power(factor: Self, block: usize, count: usize) -> crate::Result<Self> {` | `src/manifold/mod.rs:495` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org` |
 | `power` | function | `pub fn power(kind: ManifoldKind, block: usize, count: usize) -> Result<Self> {` | `src/manifold/product.rs:301` | `docs/orgmode/explanation/product-manifold.org` |
 | `powi_inv_up` | function | `pub fn powi_inv_up(r: f64, n: usize) -> f64 {` | `src/inverse_laplace.rs:495` | `docs/orgmode/reference/public-api.org` |
@@ -10240,9 +10240,9 @@ reference entry and a documentation location.
 | `rows` | function | `pub fn rows(self) -> usize {` | `src/manifold/stiefel.rs:28` | `docs/orgmode/reference/public-api.org` |
 | `rows` | function | `pub fn rows(self) -> usize {` | `src/manifold/stiefel.rs:97` | `docs/orgmode/reference/public-api.org` |
 | `run` | function | `pub fn run<O>( &mut self, objective: &O, x: &mut Array1<f64>, control: &Control, ) -> Result<Report> where O: DifferentiableObjective<f64> + ?Sized, {` | `src/gpmin.rs:1912` | `docs/orgmode/reference/public-api.org` |
-| `run` | function | `pub fn run<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report> where O: DifferentiableObjective<f64> + ?Sized, {` | `src/session.rs:7221` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/architecture.org` |
+| `run` | function | `pub fn run<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report> where O: DifferentiableObjective<f64> + ?Sized, {` | `src/session.rs:7251` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/architecture.org` |
 | `run_fill` | function | `pub fn run_fill<F>(&mut self, x: &mut Array1<f64>, mut fill: F) -> Result<Report> where F: FnMut(ArrayView1<f64>, &mut Array1<f64>) -> f64, {` | `src/session/drive.rs:123` | `docs/orgmode/changelog.org` |
-| `run_gauged` | function | `pub fn run_gauged<O, G>(&mut self, obj: &O, x: &mut Array1<f64>, mut gauge: G) -> Result<Report> where O: DifferentiableObjective<f64> + ?Sized, G: FnMut(&mut Array1<f64>), {` | `src/session.rs:7251` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/session.org` |
+| `run_gauged` | function | `pub fn run_gauged<O, G>(&mut self, obj: &O, x: &mut Array1<f64>, mut gauge: G) -> Result<Report> where O: DifferentiableObjective<f64> + ?Sized, G: FnMut(&mut Array1<f64>), {` | `src/session.rs:7281` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/session.org` |
 | `sample_gradient_noise` | function | `pub fn sample_gradient_noise<O>(` | `src/noise.rs:236` | `docs/orgmode/reference/public-api.org` |
 | `sample_gradient_noise_k` | function | `pub fn sample_gradient_noise_k<O>(` | `src/noise.rs:261` | `docs/orgmode/reference/public-api.org` |
 | `sample_noise` | function | `pub fn sample_noise<O>(` | `src/noise.rs:197` | `docs/orgmode/reference/public-api.org` |
@@ -10265,7 +10265,7 @@ reference entry and a documentation location.
 | `set_anchor` | function | `pub fn set_anchor(&mut self, pos: &[f64]) {` | `src/rigid/project.rs:19` | `docs/orgmode/reference/public-api.org` |
 | `set_ase_linesearch` | function | `pub fn set_ase_linesearch(&mut self, stpmax: f64) -> Result<()> {` | `src/session.rs:1070` | `docs/orgmode/reference/public-api.org` |
 | `set_atom_maxmove` | function | `pub fn set_atom_maxmove(&mut self, maxmove: f64) {` | `src/session.rs:1186` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/diis.org`, `docs/orgmode/explanation/quasi-newton.org` |
-| `set_backward_polish` | function | `pub fn set_backward_polish(&mut self, on: bool) {` | `src/session.rs:6707` | `docs/orgmode/reference/public-api.org` |
+| `set_backward_polish` | function | `pub fn set_backward_polish(&mut self, on: bool) {` | `src/session.rs:6737` | `docs/orgmode/reference/public-api.org` |
 | `set_box` | function | `pub fn set_box(&mut self, lo: Option<Vec<f64>>, hi: Option<Vec<f64>>) -> bool {` | `src/session.rs:1664` | `docs/orgmode/howto/highs-qp.org`, `docs/orgmode/howto/session.org` |
 | `set_broken_axes` | function | `pub fn set_broken_axes( &mut self, trans_x: bool, trans_y: bool, trans_z: bool, rot_x: bool, rot_y: bool, rot_z: bool, ) {` | `src/session.rs:1324` | `docs/orgmode/changelog.org` |
 | `set_cautious` | function | `pub fn set_cautious(&mut self, eps: f64, alpha: f64) {` | `src/session.rs:1520` | `docs/orgmode/howto/session.org` |
@@ -10276,48 +10276,48 @@ reference entry and a documentation location.
 | `set_config` | function | `pub fn set_config(&mut self, config: GromacsLbfgsConfig) -> Result<()> {` | `src/gromacs.rs:509` | `docs/orgmode/reference/public-api.org` |
 | `set_config` | function | `pub fn set_config(&mut self, config: GromacsCgConfig) {` | `src/gromacs.rs:754` | `docs/orgmode/reference/public-api.org` |
 | `set_constant` | function | `pub fn set_constant(&mut self, n: usize) {` | `src/session.rs:1442` | `docs/orgmode/reference/public-api.org` |
-| `set_distance_constraints` | function | `pub fn set_distance_constraints(&mut self, set: DistanceConstraints) -> Result<()> {` | `src/session.rs:7115` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/constraints.org`, `docs/orgmode/howto/gromacs-cg.org` |
-| `set_error_on_unmet` | function | `pub fn set_error_on_unmet(&mut self, on: bool) {` | `src/session.rs:6687` | `docs/orgmode/reference/public-api.org` |
+| `set_distance_constraints` | function | `pub fn set_distance_constraints(&mut self, set: DistanceConstraints) -> Result<()> {` | `src/session.rs:7145` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/constraints.org`, `docs/orgmode/howto/gromacs-cg.org` |
+| `set_error_on_unmet` | function | `pub fn set_error_on_unmet(&mut self, on: bool) {` | `src/session.rs:6717` | `docs/orgmode/reference/public-api.org` |
 | `set_etol` | function | `pub fn set_etol(&mut self, etol: Option<f64>) -> Result<()> {` | `src/session.rs:3072` | `docs/orgmode/howto/stopping.org` |
 | `set_euclidean_complex` | function | `pub fn set_euclidean_complex(&mut self, n: usize) {` | `src/session.rs:1437` | `docs/orgmode/reference/public-api.org` |
 | `set_exp` | function | `pub fn set_exp( &mut self, positions: ArrayView1<f64>, neighbours: &Neighbours, params: &ExpParams, ) -> Result<()> {` | `src/session.rs:857` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/precon.org`, `docs/orgmode/howto/session.org` |
 | `set_extra_updates` | function | `pub fn set_extra_updates(&mut self, extra: usize) {` | `src/session.rs:1513` | `docs/orgmode/howto/session.org` |
 | `set_factor_shape` | function | `pub fn set_factor_shape(&mut self, n: usize, p: usize) {` | `src/session.rs:1477` | `docs/orgmode/howto/manifolds.org` |
 | `set_ff` | function | `pub fn set_ff( &mut self, positions: ArrayView1<f64>, terms: FfTerms<'_>, params: &FfParams, ) -> Result<()> {` | `src/session.rs:896` | `docs/orgmode/howto/precon.org` |
-| `set_fire_abc` | function | `pub fn set_fire_abc(&mut self, on: bool) -> Result<()> {` | `src/session.rs:6822` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/fire.org`, `docs/orgmode/howto/method-catalog.org` |
-| `set_fire_cap_two_step_overshoot` | function | `pub fn set_fire_cap_two_step_overshoot(&mut self, on: bool) -> Result<()> {` | `src/session.rs:6810` | `docs/orgmode/reference/public-api.org` |
-| `set_fire_config` | function | `pub fn set_fire_config(&mut self, config: FireConfig) -> Result<()> {` | `src/session.rs:6795` | `docs/orgmode/changelog.org` |
-| `set_fire_preset` | function | `pub fn set_fire_preset(&mut self, preset: FirePreset) -> Result<()> {` | `src/session.rs:6719` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/fire.org`, `docs/orgmode/howto/session.org` |
+| `set_fire_abc` | function | `pub fn set_fire_abc(&mut self, on: bool) -> Result<()> {` | `src/session.rs:6852` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/fire.org`, `docs/orgmode/howto/method-catalog.org` |
+| `set_fire_cap_two_step_overshoot` | function | `pub fn set_fire_cap_two_step_overshoot(&mut self, on: bool) -> Result<()> {` | `src/session.rs:6840` | `docs/orgmode/reference/public-api.org` |
+| `set_fire_config` | function | `pub fn set_fire_config(&mut self, config: FireConfig) -> Result<()> {` | `src/session.rs:6825` | `docs/orgmode/changelog.org` |
+| `set_fire_preset` | function | `pub fn set_fire_preset(&mut self, preset: FirePreset) -> Result<()> {` | `src/session.rs:6749` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/fire.org`, `docs/orgmode/howto/session.org` |
 | `set_fire_variant` | function | `pub fn set_fire_variant(&mut self, variant: FireVariant) {` | `src/session.rs:2542` | `docs/orgmode/howto/session.org` |
 | `set_fire_vdfmax` | function | `pub fn set_fire_vdfmax(&mut self, limit: usize) {` | `src/session.rs:2579` | `docs/orgmode/reference/public-api.org` |
 | `set_fixed_h0` | function | `pub fn set_fixed_h0(&mut self, h0: f64) -> Result<()> {` | `src/session.rs:1018` | `docs/orgmode/reference/public-api.org` |
 | `set_frozen` | function | `pub fn set_frozen(&mut self, frozen: &[u8]) {` | `src/session.rs:1313` | `docs/orgmode/changelog.org` |
 | `set_geometry_step` | function | `pub fn set_geometry_step(&mut self, on: bool) {` | `src/session.rs:1227` | `docs/orgmode/changelog.org` |
-| `set_gpmin_config` | function | `pub fn set_gpmin_config(&mut self, config: GpMinConfig) -> Result<()> {` | `src/session.rs:6753` | `docs/orgmode/reference/public-api.org` |
+| `set_gpmin_config` | function | `pub fn set_gpmin_config(&mut self, config: GpMinConfig) -> Result<()> {` | `src/session.rs:6783` | `docs/orgmode/reference/public-api.org` |
 | `set_grassmann` | function | `pub fn set_grassmann(&mut self, n: usize, p: usize) {` | `src/session.rs:1421` | `docs/orgmode/reference/public-api.org` |
-| `set_gromacs_cg_config` | function | `pub fn set_gromacs_cg_config(&mut self, config: GromacsCgConfig) -> Result<()> {` | `src/session.rs:6782` | `docs/orgmode/reference/public-api.org` |
-| `set_gromacs_lbfgs_config` | function | `pub fn set_gromacs_lbfgs_config(&mut self, config: GromacsLbfgsConfig) -> Result<()> {` | `src/session.rs:6768` | `docs/orgmode/reference/public-api.org` |
-| `set_gromacs_steep_config` | function | `pub fn set_gromacs_steep_config(&mut self, config: GromacsSteepConfig) -> Result<()> {` | `src/session.rs:6742` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/gromacs-steep.org` |
-| `set_gtol` | function | `pub fn set_gtol(&mut self, gtol: f64) {` | `src/session.rs:7958` | `docs/orgmode/reference/public-api.org` |
+| `set_gromacs_cg_config` | function | `pub fn set_gromacs_cg_config(&mut self, config: GromacsCgConfig) -> Result<()> {` | `src/session.rs:6812` | `docs/orgmode/reference/public-api.org` |
+| `set_gromacs_lbfgs_config` | function | `pub fn set_gromacs_lbfgs_config(&mut self, config: GromacsLbfgsConfig) -> Result<()> {` | `src/session.rs:6798` | `docs/orgmode/reference/public-api.org` |
+| `set_gromacs_steep_config` | function | `pub fn set_gromacs_steep_config(&mut self, config: GromacsSteepConfig) -> Result<()> {` | `src/session.rs:6772` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/gromacs-steep.org` |
+| `set_gtol` | function | `pub fn set_gtol(&mut self, gtol: f64) {` | `src/session.rs:7988` | `docs/orgmode/reference/public-api.org` |
 | `set_highs` | function | `pub fn set_highs(&mut self, enabled: bool) {` | `src/session.rs:1542` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
 | `set_highs_callback` | function | `pub fn set_highs_callback(&mut self, callback: Option<crate::HighsCallback>) -> bool {` | `src/session.rs:1648` | `docs/orgmode/reference/public-api.org` |
 | `set_highs_crossover` | function | `pub fn set_highs_crossover(&mut self, crossover: crate::HighsCrossover) -> bool {` | `src/session.rs:1584` | `docs/orgmode/reference/public-api.org` |
 | `set_highs_solver` | function | `pub fn set_highs_solver(&mut self, solver: crate::HighsSolverKind) -> bool {` | `src/session.rs:1569` | `docs/orgmode/reference/public-api.org` |
 | `set_highs_time_limit` | function | `pub fn set_highs_time_limit(&mut self, seconds: Option<f64>) -> bool {` | `src/session.rs:1612` | `docs/orgmode/reference/public-api.org` |
 | `set_highs_trust` | function | `pub fn set_highs_trust(&mut self, radius: f64) -> bool {` | `src/session.rs:1695` | `docs/orgmode/reference/public-api.org` |
-| `set_lbfgs_capped` | function | `pub fn set_lbfgs_capped(&mut self, max_atom: f64) -> Result<()> {` | `src/session.rs:6912` | `docs/orgmode/changelog.org` |
-| `set_lbfgs_compact_tr` | function | `pub fn set_lbfgs_compact_tr(&mut self, on: bool) -> Result<()> {` | `src/session.rs:6985` | `docs/orgmode/reference/public-api.org` |
-| `set_lbfgs_euclidean_cap` | function | `pub fn set_lbfgs_euclidean_cap(&mut self, on: bool) -> Result<()> {` | `src/session.rs:6939` | `docs/orgmode/reference/public-api.org` |
-| `set_lbfgs_fixed_h0` | function | `pub fn set_lbfgs_fixed_h0(&mut self, h0: Option<f64>) -> Result<()> {` | `src/session.rs:6926` | `docs/orgmode/reference/public-api.org` |
-| `set_lbfgs_model_atom` | function | `pub fn set_lbfgs_model_atom(&mut self, on: bool) -> Result<()> {` | `src/session.rs:6972` | `docs/orgmode/reference/public-api.org` |
+| `set_lbfgs_capped` | function | `pub fn set_lbfgs_capped(&mut self, max_atom: f64) -> Result<()> {` | `src/session.rs:6942` | `docs/orgmode/changelog.org` |
+| `set_lbfgs_compact_tr` | function | `pub fn set_lbfgs_compact_tr(&mut self, on: bool) -> Result<()> {` | `src/session.rs:7015` | `docs/orgmode/reference/public-api.org` |
+| `set_lbfgs_euclidean_cap` | function | `pub fn set_lbfgs_euclidean_cap(&mut self, on: bool) -> Result<()> {` | `src/session.rs:6969` | `docs/orgmode/reference/public-api.org` |
+| `set_lbfgs_fixed_h0` | function | `pub fn set_lbfgs_fixed_h0(&mut self, h0: Option<f64>) -> Result<()> {` | `src/session.rs:6956` | `docs/orgmode/reference/public-api.org` |
+| `set_lbfgs_model_atom` | function | `pub fn set_lbfgs_model_atom(&mut self, on: bool) -> Result<()> {` | `src/session.rs:7002` | `docs/orgmode/reference/public-api.org` |
 | `set_lbfgs_neb_guards` | function | `pub fn set_lbfgs_neb_guards(&mut self, enabled: bool) {` | `src/session.rs:1529` | `docs/orgmode/howto/session.org` |
-| `set_lbfgs_skip_bad` | function | `pub fn set_lbfgs_skip_bad(&mut self, on: bool) -> Result<()> {` | `src/session.rs:6998` | `docs/orgmode/reference/public-api.org` |
-| `set_lbfgs_step` | function | `pub fn set_lbfgs_step(&mut self, step: LbfgsStep) -> Result<()> {` | `src/session.rs:6852` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
-| `set_lbfgs_trust` | function | `pub fn set_lbfgs_trust(&mut self, on: bool) -> Result<()> {` | `src/session.rs:6952` | `docs/orgmode/changelog.org` |
+| `set_lbfgs_skip_bad` | function | `pub fn set_lbfgs_skip_bad(&mut self, on: bool) -> Result<()> {` | `src/session.rs:7028` | `docs/orgmode/reference/public-api.org` |
+| `set_lbfgs_step` | function | `pub fn set_lbfgs_step(&mut self, step: LbfgsStep) -> Result<()> {` | `src/session.rs:6882` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
+| `set_lbfgs_trust` | function | `pub fn set_lbfgs_trust(&mut self, on: bool) -> Result<()> {` | `src/session.rs:6982` | `docs/orgmode/changelog.org` |
 | `set_lbfgs_trust_radius` | function | `pub fn set_lbfgs_trust_radius(&mut self, radius: f64) {` | `src/session.rs:3572` | `docs/orgmode/changelog.org` |
-| `set_level_set` | function | `pub fn set_level_set(&mut self, level_set: LevelSetConstraint) -> Result<()> {` | `src/session.rs:7141` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/level-set.org` |
+| `set_level_set` | function | `pub fn set_level_set(&mut self, level_set: LevelSetConstraint) -> Result<()> {` | `src/session.rs:7171` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/level-set.org` |
 | `set_lindh` | function | `pub fn set_lindh( &mut self, positions: ArrayView1<f64>, z: &[i32], ghosts: &[Ghost], params: &LindhParams, ) -> Result<()> {` | `src/session.rs:876` | `docs/orgmode/howto/precon.org` |
-| `set_lindh_model` | function | `pub fn set_lindh_model(&mut self, spec: Option<LindhSpec>) -> Result<()> {` | `src/session.rs:7012` | `docs/orgmode/reference/public-api.org` |
+| `set_lindh_model` | function | `pub fn set_lindh_model(&mut self, spec: Option<LindhSpec>) -> Result<()> {` | `src/session.rs:7042` | `docs/orgmode/reference/public-api.org` |
 | `set_linesearch` | function | `pub fn set_linesearch(&mut self, linesearch: LineSearch) {` | `src/session.rs:992` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/gromacs-cg.org` |
 | `set_manifold` | function | `pub fn set_manifold(&mut self, kind: ManifoldKind) {` | `src/session.rs:1372` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org`, `docs/orgmode/howto/session.org` |
 | `set_masses` | function | `pub fn set_masses(&mut self, masses: Array1<f64>) {` | `src/session.rs:1502` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/product-manifold.org` |
@@ -10339,19 +10339,19 @@ reference entry and a documentation location.
 | `set_quickmin_adapt` | function | `pub fn set_quickmin_adapt(&mut self, enabled: bool) {` | `src/session.rs:2609` | `docs/orgmode/reference/public-api.org` |
 | `set_quickmin_cell` | function | `pub fn set_quickmin_cell(&mut self, at: usize) -> Result<()> {` | `src/session.rs:2589` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/quickmin.org` |
 | `set_quickmin_options` | function | `pub fn set_quickmin_options(&mut self, options: QuickMinOptions) {` | `src/session.rs:2619` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/quickmin.org` |
-| `set_require_convergence` | function | `pub fn set_require_convergence(&mut self, on: bool) {` | `src/session.rs:6698` | `docs/orgmode/reference/public-api.org` |
+| `set_require_convergence` | function | `pub fn set_require_convergence(&mut self, on: bool) {` | `src/session.rs:6728` | `docs/orgmode/reference/public-api.org` |
 | `set_rigid_mass_metric` | function | `pub fn set_rigid_mass_metric(&mut self, enabled: bool) {` | `src/session.rs:1267` | `docs/orgmode/changelog.org` |
 | `set_rigid_mass_weighted` | function | `pub fn set_rigid_mass_weighted(&mut self, enabled: bool) {` | `src/session.rs:1277` | `docs/orgmode/changelog.org` |
 | `set_rigid_mode` | function | `pub fn set_rigid_mode(&mut self, mode: RigidMode) {` | `src/session.rs:1251` | `docs/orgmode/changelog.org` |
 | `set_sphere_complex` | function | `pub fn set_sphere_complex(&mut self, n: usize) {` | `src/session.rs:1460` | `docs/orgmode/reference/public-api.org` |
 | `set_stiefel` | function | `pub fn set_stiefel(&mut self, n: usize, p: usize) {` | `src/session.rs:1416` | `docs/orgmode/reference/public-api.org` |
-| `set_stop_norm` | function | `pub fn set_stop_norm(&mut self, norm: StopNorm) {` | `src/session.rs:6679` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/gromacs-steep.org` |
+| `set_stop_norm` | function | `pub fn set_stop_norm(&mut self, norm: StopNorm) {` | `src/session.rs:6709` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/gromacs-steep.org` |
 | `set_trust` | function | `pub fn set_trust(&mut self, radius: f64) -> bool {` | `src/session.rs:1680` | `docs/orgmode/howto/session.org` |
 | `set_unitary` | function | `pub fn set_unitary(&mut self, n: usize) {` | `src/session.rs:1495` | `docs/orgmode/reference/public-api.org` |
 | `settle` | function | `pub fn settle(&self) -> bool {` | `src/holonomic/mod.rs:362` | `docs/orgmode/reference/public-api.org` |
 | `shape` | function | `pub fn shape(&self) -> (usize, usize) {` | `src/manifold/riemannian.rs:145` | `docs/orgmode/reference/public-api.org` |
-| `should_restart` | function | `pub fn should_restart(&self, ctx: &ConjugacyContext<'_>) -> bool {` | `src/nlcg/mod.rs:131` | `docs/orgmode/reference/public-api.org` |
-| `should_restart_metric` | function | `pub fn should_restart_metric( &self, g: ArrayView1<'_, f64>, z: ArrayView1<'_, f64>, g_old: ArrayView1<'_, f64>, z_old: ArrayView1<'_, f64>, ) -> bool {` | `src/nlcg/mod.rs:141` | `docs/orgmode/reference/public-api.org` |
+| `should_restart` | function | `pub fn should_restart(&self, ctx: &ConjugacyContext<'_>) -> bool {` | `src/nlcg/mod.rs:132` | `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/tutorials/cg.org` |
+| `should_restart_metric` | function | `pub fn should_restart_metric( &self, g: ArrayView1<'_, f64>, z: ArrayView1<'_, f64>, g_old: ArrayView1<'_, f64>, z_old: ArrayView1<'_, f64>, ) -> bool {` | `src/nlcg/mod.rs:142` | `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/tutorials/cg.org` |
 | `sibling_records` | function | `pub fn sibling_records(&self) -> &[KrylovRecord] {` | `src/krylov/gmres.rs:459` | `docs/orgmode/reference/public-api.org` |
 | `side` | function | `pub fn side(len: usize) -> Option<usize> {` | `src/manifold/multinomial_ds.rs:30` | `docs/orgmode/reference/public-api.org` |
 | `side` | function | `pub fn side(len: usize) -> Option<usize> {` | `src/manifold/multinomial_sym.rs:31` | `docs/orgmode/reference/public-api.org` |
@@ -10396,7 +10396,7 @@ reference entry and a documentation location.
 | `sr1` | function | `pub fn sr1(skip: f64) -> Result<Self, SecantError> {` | `src/secant.rs:60` | `docs/orgmode/howto/lammps-migration.org`, `docs/orgmode/reference/lammps-min-style.org`, `docs/orgmode/reference/python.org` |
 | `stalled_on_energy` | function | `pub fn stalled_on_energy(self, best_decrease: f64) -> bool {` | `src/control.rs:65` | `docs/orgmode/reference/public-api.org` |
 | `start_eon_log` | function | `pub fn start_eon_log(&mut self) {` | `src/session/drive.rs:110` | `docs/orgmode/reference/public-api.org` |
-| `start_fire_trace` | function | `pub fn start_fire_trace(&mut self) {` | `src/session.rs:6833` | `docs/orgmode/changelog.org` |
+| `start_fire_trace` | function | `pub fn start_fire_trace(&mut self) {` | `src/session.rs:6863` | `docs/orgmode/changelog.org` |
 | `status` | function | `pub fn status(self) -> Status {` | `src/report.rs:120` | `docs/orgmode/reference/public-api.org` |
 | `steihaug_cg` | function | `pub fn steihaug_cg<O>(` | `src/hvp.rs:219` | `docs/orgmode/reference/public-api.org` |
 | `steihaug_pcg` | function | `pub fn steihaug_pcg<O, P>(` | `src/hvp.rs:237` | `docs/orgmode/explanation/product-manifold.org` |
@@ -10411,11 +10411,11 @@ reference entry and a documentation location.
 | `step_size` | function | `pub fn step_size(self) -> f64 {` | `src/gromacs.rs:282` | `docs/orgmode/reference/public-api.org` |
 | `step_size` | function | `pub fn step_size(&self) -> f64 {` | `src/gromacs.rs:521` | `docs/orgmode/reference/public-api.org` |
 | `steps` | function | `pub fn steps(&self) -> usize {` | `src/gpmin.rs:1781` | `docs/orgmode/reference/public-api.org` |
-| `steps` | function | `pub fn steps(&self) -> usize {` | `src/session.rs:6604` | `docs/orgmode/reference/public-api.org` |
+| `steps` | function | `pub fn steps(&self) -> usize {` | `src/session.rs:6634` | `docs/orgmode/reference/public-api.org` |
 | `stiefel` | function | `pub fn stiefel(n: usize, p: usize) -> Self {` | `src/manifold/mod.rs:512` | `docs/orgmode/reference/public-api.org` |
 | `stiefel` | function | `pub fn stiefel(n: usize, p: usize, retraction: StiefelRetraction) -> Result<Self> {` | `src/manifold/riemannian.rs:375` | `docs/orgmode/reference/public-api.org` |
 | `stiefel_p` | function | `pub fn stiefel_p(&self) -> usize {` | `src/manifold/mod.rs:521` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/sota.org` |
-| `stop_norm` | function | `pub fn stop_norm(&self) -> StopNorm {` | `src/session.rs:6712` | `docs/orgmode/reference/public-api.org` |
+| `stop_norm` | function | `pub fn stop_norm(&self) -> StopNorm {` | `src/session.rs:6742` | `docs/orgmode/reference/public-api.org` |
 | `stop_reason` | function | `pub fn stop_reason(&self) -> StopReason {` | `src/report.rs:235` | `docs/orgmode/reference/public-api.org` |
 | `strong_curvature` | function | `pub fn strong_curvature(dphi: f64, dphi0: f64, c2: f64) -> bool {` | `src/linesearch/conditions.rs:31` | `docs/orgmode/reference/public-api.org` |
 | `strong_wolfe` | function | `pub fn strong_wolfe(` | `src/linesearch/conditions.rs:57` | `docs/orgmode/reference/public-api.org` |
@@ -10426,7 +10426,7 @@ reference entry and a documentation location.
 | `support` | function | `pub fn support(&self) -> &[f64] {` | `src/aaa.rs:115` | `docs/orgmode/reference/public-api.org` |
 | `sym_eigh` | function | `pub fn sym_eigh(a: &[f64], m: usize) -> Result<TridiagEigh> {` | `src/slq.rs:374` | `docs/orgmode/reference/public-api.org` |
 | `take_eon_log` | function | `pub fn take_eon_log(&mut self) -> Vec<EonFeat> {` | `src/session/drive.rs:115` | `docs/orgmode/reference/public-api.org` |
-| `take_fire_trace` | function | `pub fn take_fire_trace(&mut self) -> Vec<FireTrace> {` | `src/session.rs:6839` | `docs/orgmode/changelog.org` |
+| `take_fire_trace` | function | `pub fn take_fire_trace(&mut self) -> Vec<FireTrace> {` | `src/session.rs:6869` | `docs/orgmode/changelog.org` |
 | `taken_step` | function | `pub fn taken_step(h: f64, proposed: &Array1<f64>, taken: &Array1<f64>) -> f64 {` | `src/ode12r.rs:195` | `docs/orgmode/reference/public-api.org` |
 | `talbot_invert` | function | `pub fn talbot_invert<F>(` | `src/inverse_laplace.rs:1317` | `docs/orgmode/changelog.org` |
 | `talbot_node` | function | `pub fn talbot_node(` | `src/inverse_laplace.rs:1191` | `docs/orgmode/reference/public-api.org` |
@@ -10550,7 +10550,7 @@ reference entry and a documentation location.
 | `update_symmetric` | function | `pub fn update_symmetric(` | `src/secant.rs:243` | `docs/orgmode/changelog.org` |
 | `update_ts` | function | `pub fn update_ts(&mut self, s: &Array1<f64>, y: &Array1<f64>) {` | `src/qn_irc.rs:99` | `docs/orgmode/reference/public-api.org` |
 | `upward_sum` | function | `pub fn upward_sum(components: &[f64]) -> Result<f64, InverseLaplaceError> {` | `src/inverse_laplace.rs:505` | `docs/orgmode/reference/public-api.org` |
-| `validate` | function | `pub fn validate(&self) -> crate::error::Result<()> {` | `src/control.rs:435` | `docs/orgmode/reference/public-api.org` |
+| `validate` | function | `pub fn validate(&self) -> crate::error::Result<()> {` | `src/control.rs:459` | `docs/orgmode/reference/public-api.org` |
 | `validate` | function | `pub fn validate(&self) -> Result<()> {` | `src/gpmin.rs:245` | `docs/orgmode/reference/public-api.org` |
 | `validate` | function | `pub fn validate(&self) -> Result<()> {` | `src/rcg.rs:169` | `docs/orgmode/tutorials/rcg.org` |
 | `value` | function | `pub fn value(&self, x1: ArrayView1<'_, f64>, x2: ArrayView1<'_, f64>) -> f64 {` | `src/gpmin.rs:404` | `docs/orgmode/reference/public-api.org` |
@@ -10570,16 +10570,17 @@ reference entry and a documentation location.
 | `weeks_invert` | function | `pub fn weeks_invert<F>(` | `src/inverse_laplace.rs:1677` | `docs/orgmode/changelog.org` |
 | `weeks_mobius_w` | function | `pub fn weeks_mobius_w(` | `src/inverse_laplace.rs:933` | `docs/orgmode/reference/public-api.org` |
 | `weights` | function | `pub fn weights(&self) -> &[f64] {` | `src/aaa.rs:125` | `docs/orgmode/reference/public-api.org` |
-| `with_backward_polish` | function | `pub fn with_backward_polish(mut self, on: bool) -> Self {` | `src/control.rs:342` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/architecture.org` |
+| `with_backward_polish` | function | `pub fn with_backward_polish(mut self, on: bool) -> Self {` | `src/control.rs:366` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/architecture.org` |
 | `with_c` | function | `pub fn with_c(mut self, c: f64) -> Self {` | `src/control.rs:41` | `docs/orgmode/reference/public-api.org` |
 | `with_capacity` | function | `pub fn with_capacity(max_pairs: usize) -> Self {` | `src/lbfgs.rs:627` | `docs/orgmode/reference/public-api.org` |
 | `with_cg_max` | function | `pub fn with_cg_max(mut self, cg_max: usize) -> Self {` | `src/rtr.rs:364` | `docs/orgmode/reference/product-manifold.org` |
+| `with_cg_slope_opening` | function | `pub fn with_cg_slope_opening(mut self, on: bool) -> Self {` | `src/control.rs:334` | `docs/orgmode/reference/public-api.org` |
 | `with_converged` | function | `pub fn with_converged(mut self, converged: bool) -> Self {` | `src/report.rs:252` | `docs/orgmode/reference/public-api.org` |
 | `with_deflation_lower_estimate` | function | `pub fn with_deflation_lower_estimate(mut self, deflation_lower_estimate: f64) -> Self {` | `src/slq.rs:2182` | `docs/orgmode/reference/public-api.org` |
 | `with_eps_f` | function | `pub fn with_eps_f(mut self, eps_f: impl Into<Option<f64>>) -> Self {` | `src/control.rs:56` | `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/howto/noise.org`, `docs/orgmode/tutorials/rcg.org` |
 | `with_eps_g` | function | `pub fn with_eps_g(mut self, eps_g: f64) -> Self {` | `src/control.rs:48` | `docs/orgmode/reference/public-api.org` |
-| `with_error_on_unmet` | function | `pub fn with_error_on_unmet(mut self, on: bool) -> Self {` | `src/control.rs:328` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/architecture.org` |
-| `with_gtol` | function | `pub fn with_gtol(mut self, gtol: f64) -> Self {` | `src/session.rs:7952` | `docs/orgmode/reference/public-api.org` |
+| `with_error_on_unmet` | function | `pub fn with_error_on_unmet(mut self, on: bool) -> Self {` | `src/control.rs:352` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/architecture.org` |
+| `with_gtol` | function | `pub fn with_gtol(mut self, gtol: f64) -> Self {` | `src/session.rs:7982` | `docs/orgmode/reference/public-api.org` |
 | `with_hyperparam_updates` | function | `pub fn with_hyperparam_updates() -> Self {` | `src/gpmin.rs:224` | `docs/orgmode/reference/public-api.org` |
 | `with_kernel` | function | `pub fn with_kernel(mut self, kernel: &'a [Vec<f64>]) -> Self {` | `src/slq.rs:2155` | `docs/orgmode/reference/public-api.org` |
 | `with_kind` | function | `pub fn with_kind(mut self, kind: ManifoldKind) -> Self {` | `src/manifold/product.rs:122` | `docs/orgmode/reference/public-api.org` |
@@ -10591,14 +10592,14 @@ reference entry and a documentation location.
 | `with_mode` | function | `pub fn with_mode(m: usize, n: usize, mode: CenterMode) -> Self {` | `src/manifold/centered.rs:55` | `docs/orgmode/reference/public-api.org` |
 | `with_nbfgscorr` | function | `pub fn with_nbfgscorr(mut self, nbfgscorr: usize) -> Self {` | `src/gromacs.rs:449` | `docs/orgmode/reference/public-api.org` |
 | `with_negative_pairs` | function | `pub fn with_negative_pairs(mut self, negative_pairs: &'a [DeflatedPair]) -> Self {` | `src/slq.rs:2164` | `docs/orgmode/reference/public-api.org` |
-| `with_noise_floor` | function | `pub fn with_noise_floor(mut self, floor: impl Into<Option<NoiseFloor>>) -> Self {` | `src/control.rs:374` | `docs/orgmode/reference/public-api.org` |
+| `with_noise_floor` | function | `pub fn with_noise_floor(mut self, floor: impl Into<Option<NoiseFloor>>) -> Self {` | `src/control.rs:398` | `docs/orgmode/reference/public-api.org` |
 | `with_nstcgsteep` | function | `pub fn with_nstcgsteep(mut self, nstcgsteep: u32) -> Self {` | `src/gromacs.rs:714` | `docs/orgmode/reference/public-api.org` |
 | `with_objective_roundoff` | function | `pub fn with_objective_roundoff(relative: f64) -> Option<Self> {` | `src/linesearch/mod.rs:149` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/configure.org` |
 | `with_order` | function | `pub fn with_order(mut self, order: usize) -> Self {` | `src/restricted_trust.rs:71` | `docs/orgmode/reference/public-api.org` |
 | `with_positive_deflation` | function | `pub fn with_positive_deflation(mut self, positive_deflation: &'a [DeflatedPair]) -> Self {` | `src/slq.rs:2173` | `docs/orgmode/reference/public-api.org` |
 | `with_radau_lower_bound` | function | `pub fn with_radau_lower_bound(mut self, radau_lower_bound: impl Into<Option<f64>>) -> Self {` | `src/slq.rs:2191` | `docs/orgmode/reference/public-api.org` |
 | `with_radius_max` | function | `pub fn with_radius_max(mut self, radius_max: f64) -> Self {` | `src/rtr.rs:357` | `docs/orgmode/explanation/product-manifold.org` |
-| `with_require_convergence` | function | `pub fn with_require_convergence(mut self, on: bool) -> Self {` | `src/control.rs:310` | `docs/orgmode/explanation/trust-region.org` |
+| `with_require_convergence` | function | `pub fn with_require_convergence(mut self, on: bool) -> Self {` | `src/control.rs:323` | `docs/orgmode/explanation/trust-region.org` |
 | `with_settle` | function | `pub fn with_settle(mut self, settle: bool) -> Self {` | `src/holonomic/mod.rs:318` | `docs/orgmode/reference/public-api.org` |
 | `with_shrink` | function | `pub fn with_shrink(mut self, shrink: f64) -> Self {` | `src/gromacs.rs:180` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/gromacs-steep.org` |
 | `with_solver` | function | `pub fn with_solver(mut self, solver: ConstraintSolver) -> Self {` | `src/holonomic/mod.rs:311` | `docs/orgmode/reference/public-api.org` |
@@ -10654,19 +10655,19 @@ reference entry and a documentation location.
 | `with_dt_max` | generated method | `with_dt_max => dt_max: val f64,` | `src/fire.rs:167` | `docs/orgmode/reference/public-api.org` |
 | `with_dx` | generated method | `with_dx => dx: val f64,` | `src/irc_trust.rs:39` | `docs/orgmode/reference/public-api.org` |
 | `with_equalities` | generated method | `with_equalities => equalities: val Vec<(Vec<(usize, f64)>, f64)>,` | `src/lbfgs_qp.rs:61` | `docs/orgmode/reference/public-api.org` |
-| `with_etol` | generated method | `with_etol => etol: opt f64,` | `src/control.rs:204` | `docs/orgmode/reference/public-api.org` |
+| `with_etol` | generated method | `with_etol => etol: opt f64,` | `src/control.rs:216` | `docs/orgmode/reference/public-api.org` |
 | `with_evals` | generated method | `with_evals => evals: val usize,` | `src/report.rs:296` | `docs/orgmode/reference/public-api.org` |
 | `with_extra` | generated method | `with_extra => extra: val usize,` | `src/lowest_mode.rs:165` | `docs/orgmode/reference/public-api.org` |
 | `with_f_alpha` | generated method | `with_f_alpha => f_alpha: val f64,` | `src/fire.rs:118` | `docs/orgmode/reference/public-api.org` |
 | `with_f_dec` | generated method | `with_f_dec => f_dec: val f64,` | `src/fire.rs:116` | `docs/orgmode/reference/public-api.org` |
 | `with_f_inc` | generated method | `with_f_inc => f_inc: val f64,` | `src/fire.rs:115` | `docs/orgmode/reference/public-api.org` |
-| `with_ftol_rel` | generated method | `with_ftol_rel => ftol_rel: opt f64,` | `src/control.rs:203` | `docs/orgmode/reference/public-api.org` |
+| `with_ftol_rel` | generated method | `with_ftol_rel => ftol_rel: opt f64,` | `src/control.rs:215` | `docs/orgmode/reference/public-api.org` |
 | `with_grad` | generated method | `with_grad => grad: opt Array1<f64>,` | `src/report.rs:295` | `docs/orgmode/reference/public-api.org` |
 | `with_grad_norm` | generated method | `with_grad_norm => grad_norm: val f64,` | `src/report.rs:293` | `docs/orgmode/reference/public-api.org` |
 | `with_grad_ratio` | generated method | `with_grad_ratio => grad_ratio: val f64,` | `src/rlbfgs.rs:82` | `docs/orgmode/reference/public-api.org` |
 | `with_grad_tol` | generated method | `with_grad_tol => grad_tol: val f64,` | `src/rcg.rs:140` | `docs/orgmode/reference/public-api.org` |
 | `with_grad_tol` | generated method | `with_grad_tol => grad_tol: val f64,` | `src/rtr.rs:371` | `docs/orgmode/reference/public-api.org` |
-| `with_gtol` | generated method | `with_gtol => gtol: val f64,` | `src/control.rs:199` | `docs/orgmode/reference/public-api.org` |
+| `with_gtol` | generated method | `with_gtol => gtol: val f64,` | `src/control.rs:211` | `docs/orgmode/reference/public-api.org` |
 | `with_gtol` | generated method | `with_gtol => gtol: val f64,` | `src/eon_cg.rs:49` | `docs/orgmode/reference/public-api.org` |
 | `with_half_step_backs` | generated method | `with_half_step_backs => half_step_backs: val usize,` | `src/fire.rs:171` | `docs/orgmode/reference/public-api.org` |
 | `with_hi` | generated method | `with_hi => hi: opt f64,` | `src/lbfgs_qp.rs:60` | `docs/orgmode/reference/public-api.org` |
@@ -10675,7 +10676,7 @@ reference entry and a documentation location.
 | `with_hyperparam_maxiter` | generated method | `with_hyperparam_maxiter => hyperparam_maxiter: val usize,` | `src/gpmin.rs:197` | `docs/orgmode/reference/public-api.org` |
 | `with_hyperparam_tol` | generated method | `with_hyperparam_tol => hyperparam_tol: val f64,` | `src/gpmin.rs:196` | `docs/orgmode/reference/public-api.org` |
 | `with_initial_step` | generated method | `with_initial_step => initial_step: val f64,` | `src/rcg.rs:142` | `docs/orgmode/reference/public-api.org` |
-| `with_istep` | generated method | `with_istep => istep: val f64,` | `src/control.rs:200` | `docs/orgmode/reference/public-api.org` |
+| `with_istep` | generated method | `with_istep => istep: val f64,` | `src/control.rs:212` | `docs/orgmode/reference/public-api.org` |
 | `with_iteration` | generated method | `with_iteration => iteration: val usize,` | `src/krylov/gmres.rs:212` | `docs/orgmode/reference/public-api.org` |
 | `with_iterations` | generated method | `with_iterations => iterations: val Vec<KrylovIteration>,` | `src/krylov/gmres.rs:285` | `docs/orgmode/reference/public-api.org` |
 | `with_kappa` | generated method | `with_kappa => kappa: val f64,` | `src/rtr.rs:374` | `docs/orgmode/reference/product-manifold.org` |
@@ -10690,7 +10691,7 @@ reference entry and a documentation location.
 | `with_linesearch` | generated method | `with_linesearch => linesearch: val LineSearch,` | `src/rcg.rs:139` | `docs/orgmode/reference/public-api.org` |
 | `with_linesearch_max` | generated method | `with_linesearch_max => linesearch_max: val usize,` | `src/rlbfgs.rs:81` | `docs/orgmode/reference/public-api.org` |
 | `with_lo` | generated method | `with_lo => lo: opt f64,` | `src/lbfgs_qp.rs:59` | `docs/orgmode/reference/public-api.org` |
-| `with_max_evals` | generated method | `with_max_evals => max_evals: opt usize,` | `src/control.rs:205` | `docs/orgmode/reference/public-api.org` |
+| `with_max_evals` | generated method | `with_max_evals => max_evals: opt usize,` | `src/control.rs:217` | `docs/orgmode/reference/public-api.org` |
 | `with_max_imag_beta` | generated method | `with_max_imag_beta => max_imag_beta: val f64,` | `src/inverse_laplace.rs:1451` | `docs/orgmode/reference/public-api.org` |
 | `with_max_iter` | generated method | `with_max_iter => max_iter: val usize,` | `src/eon_cg.rs:50` | `docs/orgmode/reference/public-api.org` |
 | `with_max_iter` | generated method | `with_max_iter => max_iter: val usize,` | `src/lowest_mode.rs:162` | `docs/orgmode/reference/public-api.org` |
@@ -10706,9 +10707,9 @@ reference entry and a documentation location.
 | `with_max_samples` | generated method | `with_max_samples => max_samples: val usize,` | `src/slq.rs:1895` | `docs/orgmode/reference/public-api.org` |
 | `with_max_step` | generated method | `with_max_step => max_step: opt f64,` | `src/gpmin.rs:191` | `docs/orgmode/reference/public-api.org` |
 | `with_max_support` | generated method | `with_max_support => max_support: val usize,` | `src/aaa.rs:73` | `docs/orgmode/reference/public-api.org` |
-| `with_maxiter` | generated method | `with_maxiter => maxiter: val usize,` | `src/control.rs:198` | `docs/orgmode/reference/public-api.org` |
+| `with_maxiter` | generated method | `with_maxiter => maxiter: val usize,` | `src/control.rs:210` | `docs/orgmode/reference/public-api.org` |
 | `with_maxiter` | generated method | `with_maxiter => maxiter: val usize,` | `src/restricted_trust.rs:32` | `docs/orgmode/reference/public-api.org` |
-| `with_maxmove` | generated method | `with_maxmove => maxmove: opt f64,` | `src/control.rs:201` | `docs/orgmode/reference/public-api.org` |
+| `with_maxmove` | generated method | `with_maxmove => maxmove: opt f64,` | `src/control.rs:213` | `docs/orgmode/reference/public-api.org` |
 | `with_memory` | generated method | `with_memory => memory: val usize,` | `src/rlbfgs.rs:77` | `docs/orgmode/reference/public-api.org` |
 | `with_min_re_beta` | generated method | `with_min_re_beta => min_re_beta: val f64,` | `src/inverse_laplace.rs:1049` | `docs/orgmode/reference/public-api.org` |
 | `with_min_re_beta` | generated method | `with_min_re_beta => min_re_beta: val f64,` | `src/inverse_laplace.rs:1450` | `docs/orgmode/reference/public-api.org` |
@@ -10778,7 +10779,7 @@ reference entry and a documentation location.
 | `with_status` | generated method | `with_status => status: val GmresStatus,` | `src/krylov/gmres.rs:318` | `docs/orgmode/reference/public-api.org` |
 | `with_step_tolerance` | generated method | `with_step_tolerance => step_tolerance: val ScgStepTolerance,` | `src/scg.rs:103` | `docs/orgmode/reference/public-api.org` |
 | `with_steps` | generated method | `with_steps => steps: val usize,` | `src/report.rs:292` | `docs/orgmode/reference/public-api.org` |
-| `with_stop_norm` | generated method | `with_stop_norm => stop_norm: val StopNorm,` | `src/control.rs:202` | `docs/orgmode/changelog.org` |
+| `with_stop_norm` | generated method | `with_stop_norm => stop_norm: val StopNorm,` | `src/control.rs:214` | `docs/orgmode/changelog.org` |
 | `with_stop_norm` | generated method | `with_stop_norm => stop_norm: val StopNorm,` | `src/report.rs:294` | `docs/orgmode/reference/public-api.org` |
 | `with_stopping_rule` | generated method | `with_stopping_rule => stopping_rule: val SlqStoppingRule,` | `src/slq.rs:1893` | `docs/orgmode/reference/public-api.org` |
 | `with_strategy` | generated method | `with_strategy => strategy: val ProbeStrategy,` | `src/slq.rs:1892` | `docs/orgmode/reference/public-api.org` |
@@ -10871,8 +10872,8 @@ reference entry and a documentation location.
 | `accuracy` | public field | `pub accuracy: TalbotEstimate,` | `src/inverse_laplace.rs:1125` | `docs/orgmode/reference/public-api.org` |
 | `accuracy` | public field | `pub accuracy: WeeksEstimate,` | `src/inverse_laplace.rs:1498` | `docs/orgmode/reference/public-api.org` |
 | `actions` | public field | `pub actions: usize,` | `src/ffi.rs:478` | `docs/orgmode/reference/public-api.org` |
-| `actions` | public field | `pub actions: usize,` | `src/ffi.rs:8371` | `docs/orgmode/reference/public-api.org` |
-| `actions` | public field | `pub actions: usize,` | `src/ffi.rs:8383` | `docs/orgmode/reference/public-api.org` |
+| `actions` | public field | `pub actions: usize,` | `src/ffi.rs:8372` | `docs/orgmode/reference/public-api.org` |
+| `actions` | public field | `pub actions: usize,` | `src/ffi.rs:8384` | `docs/orgmode/reference/public-api.org` |
 | `actions` | public field | `pub actions: usize,` | `src/lowest_mode.rs:406` | `docs/orgmode/reference/public-api.org` |
 | `actions` | public field | `pub actions: usize,` | `src/lowest_mode.rs:1143` | `docs/orgmode/reference/public-api.org` |
 | `adapt_dt` | public field | `pub adapt_dt: bool,` | `src/quickmin.rs:70` | `docs/orgmode/reference/public-api.org` |
@@ -10888,10 +10889,10 @@ reference entry and a documentation location.
 | `alpha_start` | public field | `pub alpha_start: f64,` | `src/fire.rs:196` | `docs/orgmode/reference/public-api.org` |
 | `ambiguous_pivots` | public field | `pub ambiguous_pivots: usize,` | `src/newton.rs:891` | `docs/orgmode/reference/public-api.org` |
 | `anchor` | public field | `pub anchor: Vec<(usize, f64)>,` | `src/precon.rs:109` | `docs/orgmode/reference/public-api.org` |
-| `anchor_i` | public field | `pub anchor_i: *const usize,` | `src/ffi.rs:7097` | `docs/orgmode/reference/public-api.org` |
-| `anchor_r` | public field | `pub anchor_r: *const f64,` | `src/ffi.rs:7099` | `docs/orgmode/reference/public-api.org` |
+| `anchor_i` | public field | `pub anchor_i: *const usize,` | `src/ffi.rs:7098` | `docs/orgmode/reference/public-api.org` |
+| `anchor_r` | public field | `pub anchor_r: *const f64,` | `src/ffi.rs:7100` | `docs/orgmode/reference/public-api.org` |
 | `angle_reset` | public field | `pub angle_reset: bool,` | `src/lbfgs.rs:563` | `docs/orgmode/reference/sota.org` |
-| `angles` | public field | `pub angles: *const rgmin_angle_t,` | `src/ffi.rs:7109` | `docs/orgmode/reference/public-api.org` |
+| `angles` | public field | `pub angles: *const rgmin_angle_t,` | `src/ffi.rs:7110` | `docs/orgmode/reference/public-api.org` |
 | `angles` | public field | `pub angles: &'a [AngleTerm],` | `src/precon/ff.rs:101` | `docs/orgmode/reference/public-api.org` |
 | `angles` | public field | `pub angles: bool,` | `src/precon/lindh.rs:126` | `docs/orgmode/reference/public-api.org` |
 | `approx_wolfe` | public field | `pub approx_wolfe: f64,` | `src/lbfgs.rs:545` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/linesearch.org` |
@@ -10905,21 +10906,21 @@ reference entry and a documentation location.
 | `backtrack` | public field | `pub backtrack: f64,` | `src/ffi.rs:423` | `docs/orgmode/reference/public-api.org` |
 | `backtrack` | public field | `pub backtrack: f64,` | `src/rlbfgs.rs:68` | `docs/orgmode/reference/public-api.org` |
 | `backward_error` | public field | `pub backward_error: f64,` | `src/newton.rs:907` | `docs/orgmode/reference/public-api.org` |
-| `backward_polish` | public field | `pub backward_polish: bool,` | `src/control.rs:160` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
+| `backward_polish` | public field | `pub backward_polish: bool,` | `src/control.rs:162` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
 | `batch_size` | public field | `pub batch_size: usize,` | `src/gpmin.rs:152` | `docs/orgmode/howto/gpmin.org`, `docs/orgmode/reference/python.org` |
 | `begin` | public field | `pub begin: usize,` | `src/dlaf_kind.rs:10` | `docs/orgmode/reference/public-api.org` |
 | `beta` | public field | `pub beta: i32,` | `src/ffi.rs:1367` | `docs/orgmode/reference/public-api.org` |
 | `beta` | public field | `pub beta: RcgBeta,` | `src/rcg.rs:120` | `docs/orgmode/reference/public-api.org` |
-| `bonds` | public field | `pub bonds: *const rgmin_bond_t,` | `src/ffi.rs:7105` | `docs/orgmode/reference/public-api.org` |
+| `bonds` | public field | `pub bonds: *const rgmin_bond_t,` | `src/ffi.rs:7106` | `docs/orgmode/reference/public-api.org` |
 | `bonds` | public field | `pub bonds: &'a [BondTerm],` | `src/precon/ff.rs:99` | `docs/orgmode/reference/public-api.org` |
 | `bracketed` | public field | `pub bracketed: bool,` | `src/slq.rs:583` | `docs/orgmode/reference/public-api.org` |
 | `broken_rotation` | public field | `pub broken_rotation: [bool; 3],` | `src/rigid/mode.rs:62` | `docs/orgmode/reference/public-api.org` |
 | `broken_translation` | public field | `pub broken_translation: [bool; 3],` | `src/rigid/mode.rs:59` | `docs/orgmode/reference/public-api.org` |
-| `c` | public field | `pub c: f64,` | `src/control.rs:23` | `docs/orgmode/explanation/diis.org`, `docs/orgmode/explanation/quickmin.org`, `docs/orgmode/explanation/step-bounds.org` |
+| `c` | public field | `pub c: f64,` | `src/control.rs:23` | `docs/orgmode/reference/public-api.org` |
 | `c1` | public field | `pub c1: f64,` | `src/ode12r.rs:55` | `docs/orgmode/explanation/linesearch.org`, `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/howto/python.org` |
 | `c2` | public field | `pub c2: f64,` | `src/ode12r.rs:57` | `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/howto/python.org`, `docs/orgmode/reference/python.org` |
 | `c_stab` | public field | `pub c_stab: f64,` | `src/ffi.rs:2601` | `docs/orgmode/reference/public-api.org` |
-| `c_stab` | public field | `pub c_stab: f64,` | `src/ffi.rs:7071` | `docs/orgmode/reference/public-api.org` |
+| `c_stab` | public field | `pub c_stab: f64,` | `src/ffi.rs:7072` | `docs/orgmode/reference/public-api.org` |
 | `c_stab` | public field | `pub c_stab: f64,` | `src/lindh.rs:58` | `docs/orgmode/reference/public-api.org` |
 | `c_stab` | public field | `pub c_stab: f64,` | `src/precon.rs:123` | `docs/orgmode/reference/public-api.org` |
 | `c_stab` | public field | `pub c_stab: f64,` | `src/precon/ff.rs:113` | `docs/orgmode/reference/public-api.org` |
@@ -10932,12 +10933,13 @@ reference entry and a documentation location.
 | `cautious_eps` | public field | `pub cautious_eps: f64,` | `src/lbfgs.rs:557` | `docs/orgmode/reference/python.org` |
 | `cautious_slope` | public field | `pub cautious_slope: f64,` | `src/ffi.rs:419` | `docs/orgmode/reference/public-api.org` |
 | `cautious_slope` | public field | `pub cautious_slope: f64,` | `src/rlbfgs.rs:64` | `docs/orgmode/reference/public-api.org` |
-| `cell` | public field | `pub cell: [f64; 3],` | `src/ffi.rs:7077` | `docs/orgmode/reference/public-api.org` |
+| `cell` | public field | `pub cell: [f64; 3],` | `src/ffi.rs:7078` | `docs/orgmode/reference/public-api.org` |
 | `cell` | public field | `pub cell: [f64; 3],` | `src/lindh.rs:60` | `docs/orgmode/reference/public-api.org` |
 | `cell_at` | public field | `pub cell_at: Option<usize>,` | `src/quickmin.rs:68` | `docs/orgmode/reference/public-api.org` |
 | `center_axes` | public field | `pub center_axes: Option<(usize, usize)>,` | `src/lbfgs_qp.rs:54` | `docs/orgmode/reference/public-api.org` |
 | `certified` | public field | `pub certified: f64,` | `src/certificate.rs:167` | `docs/orgmode/changelog.org` |
 | `cg_max` | public field | `pub cg_max: Option<usize>,` | `src/rtr.rs:329` | `docs/orgmode/reference/product-manifold.org` |
+| `cg_slope_opening` | public field | `pub cg_slope_opening: bool,` | `src/control.rs:206` | `docs/orgmode/reference/public-api.org` |
 | `ci_halfwidth` | public field | `pub ci_halfwidth: f64,` | `src/slq.rs:1947` | `docs/orgmode/reference/public-api.org` |
 | `circle_radius` | public field | `pub circle_radius: f64,` | `src/inverse_laplace.rs:1419` | `docs/orgmode/reference/public-api.org` |
 | `cleanup` | public field | `pub cleanup: bool,` | `src/aaa.rs:40` | `docs/orgmode/reference/public-api.org` |
@@ -10953,7 +10955,7 @@ reference entry and a documentation location.
 | `cons` | public field | `pub cons: f64,` | `src/restricted_trust.rs:45` | `docs/orgmode/reference/public-api.org` |
 | `converged` | public field | `pub converged: bool,` | `src/eon_cg.rs:79` | `docs/orgmode/reference/public-api.org` |
 | `converged` | public field | `pub converged: i32,` | `src/ffi.rs:350` | `docs/orgmode/reference/public-api.org` |
-| `converged` | public field | `pub converged: i32,` | `src/ffi.rs:8387` | `docs/orgmode/reference/public-api.org` |
+| `converged` | public field | `pub converged: i32,` | `src/ffi.rs:8388` | `docs/orgmode/reference/public-api.org` |
 | `converged` | public field | `pub converged: bool,` | `src/lowest_mode.rs:1133` | `docs/orgmode/reference/public-api.org` |
 | `converged` | public field | `pub converged: bool,` | `src/report.rs:209` | `docs/orgmode/reference/public-api.org` |
 | `converged` | public field | `pub converged: bool,` | `src/slq.rs:1353` | `docs/orgmode/reference/public-api.org` |
@@ -10968,17 +10970,17 @@ reference entry and a documentation location.
 | `curvature_reset` | public field | `pub curvature_reset: bool,` | `src/lbfgs.rs:565` | `docs/orgmode/reference/public-api.org` |
 | `cv_full_trace` | public field | `pub cv_full_trace: f64,` | `src/slq.rs:2225` | `docs/orgmode/reference/public-api.org` |
 | `cycles` | public field | `pub cycles: usize,` | `src/krylov.rs:142` | `docs/orgmode/reference/public-api.org` |
-| `d` | public field | `pub d: f64,` | `src/precon/ff.rs:73` | `docs/orgmode/explanation/linesearch.org`, `docs/orgmode/explanation/scg.org`, `docs/orgmode/explanation/step-bounds.org` |
+| `d` | public field | `pub d: f64,` | `src/precon/ff.rs:73` | `docs/orgmode/reference/public-api.org` |
 | `d1` | public field | `pub d1: Array1<f64>,` | `src/irc_trust.rs:29` | `docs/orgmode/reference/public-api.org` |
 | `d_inf_norm` | public field | `pub d_inf_norm: f64,` | `src/newton.rs:916` | `docs/orgmode/reference/public-api.org` |
 | `deflated_positive_logabs` | public field | `pub deflated_positive_logabs: f64,` | `src/slq.rs:1935` | `docs/orgmode/reference/public-api.org` |
 | `deflation_error_estimate` | public field | `pub deflation_error_estimate: f64,` | `src/slq.rs:1940` | `docs/orgmode/reference/public-api.org` |
 | `deflation_lower_estimate` | public field | `pub deflation_lower_estimate: f64,` | `src/slq.rs:2131` | `docs/orgmode/reference/public-api.org` |
-| `degree` | public field | `pub degree: u32,` | `src/ffi.rs:7139` | `docs/orgmode/reference/public-api.org` |
+| `degree` | public field | `pub degree: u32,` | `src/ffi.rs:7140` | `docs/orgmode/reference/public-api.org` |
 | `degree` | public field | `pub degree: usize,` | `src/lowest_mode.rs:153` | `docs/orgmode/reference/public-api.org` |
 | `delta` | public field | `pub delta: f64,` | `src/restricted_trust.rs:19` | `docs/orgmode/explanation/step-bounds.org` |
 | `derivatives` | public field | `pub derivatives: Vec<f64>,` | `src/quadrature.rs:152` | `docs/orgmode/reference/public-api.org` |
-| `dihedrals` | public field | `pub dihedrals: i32,` | `src/ffi.rs:7113` | `docs/orgmode/reference/public-api.org` |
+| `dihedrals` | public field | `pub dihedrals: i32,` | `src/ffi.rs:7114` | `docs/orgmode/reference/public-api.org` |
 | `dihedrals` | public field | `pub dihedrals: &'a [DihedralTerm],` | `src/precon/ff.rs:105` | `docs/orgmode/reference/public-api.org` |
 | `dihedrals` | public field | `pub dihedrals: bool,` | `src/precon/lindh.rs:128` | `docs/orgmode/reference/public-api.org` |
 | `dimension` | public field | `pub dimension: usize,` | `src/newton.rs:1529` | `docs/orgmode/reference/public-api.org` |
@@ -11006,13 +11008,13 @@ reference entry and a documentation location.
 | `error` | public field | `pub error: MinresError<E>,` | `src/minres.rs:148` | `docs/orgmode/reference/public-api.org` |
 | `error` | public field | `pub error: f64,` | `src/ode12r.rs:75` | `docs/orgmode/reference/public-api.org` |
 | `error_estimate` | public field | `pub error_estimate: f64,` | `src/slq.rs:579` | `docs/orgmode/reference/public-api.org` |
-| `error_on_unmet` | public field | `pub error_on_unmet: bool,` | `src/control.rs:157` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
+| `error_on_unmet` | public field | `pub error_on_unmet: bool,` | `src/control.rs:159` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
 | `estimate` | public field | `pub estimate: f64,` | `src/inverse_laplace.rs:598` | `docs/orgmode/reference/public-api.org` |
 | `estimate` | public field | `pub estimate: f64,` | `src/inverse_laplace.rs:1109` | `docs/orgmode/reference/public-api.org` |
 | `estimate` | public field | `pub estimate: f64,` | `src/inverse_laplace.rs:1464` | `docs/orgmode/reference/public-api.org` |
 | `eta` | public field | `pub eta: Array1<f64>,` | `src/rtr.rs:73` | `docs/orgmode/reference/product-manifold.org` |
-| `eta_norm` | public field | `pub eta_norm: f64,` | `src/ffi.rs:8918` | `docs/orgmode/reference/public-api.org` |
-| `etol` | public field | `pub etol: Option<f64>,` | `src/control.rs:179` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/lammps-migration.org` |
+| `eta_norm` | public field | `pub eta_norm: f64,` | `src/ffi.rs:8919` | `docs/orgmode/reference/public-api.org` |
+| `etol` | public field | `pub etol: Option<f64>,` | `src/control.rs:181` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/lammps-migration.org` |
 | `evals` | public field | `pub evals: usize,` | `src/eon_cg.rs:76` | `docs/orgmode/reference/public-api.org` |
 | `evals` | public field | `pub evals: usize,` | `src/linesearch/known.rs:37` | `docs/orgmode/reference/public-api.org` |
 | `evals` | public field | `pub evals: usize,` | `src/rcg.rs:200` | `docs/orgmode/reference/public-api.org` |
@@ -11023,12 +11025,12 @@ reference entry and a documentation location.
 | `evaluations` | public field | `pub evaluations: usize,` | `src/inverse_laplace.rs:1129` | `docs/orgmode/reference/public-api.org` |
 | `evaluations` | public field | `pub evaluations: usize,` | `src/inverse_laplace.rs:1503` | `docs/orgmode/reference/public-api.org` |
 | `exact` | public field | `pub exact: bool,` | `src/krylov.rs:123` | `docs/orgmode/reference/public-api.org` |
-| `exp_a` | public field | `pub exp_a: f64,` | `src/ffi.rs:7103` | `docs/orgmode/reference/public-api.org` |
-| `extra` | public field | `pub extra: u32,` | `src/ffi.rs:7141` | `docs/orgmode/reference/public-api.org` |
+| `exp_a` | public field | `pub exp_a: f64,` | `src/ffi.rs:7104` | `docs/orgmode/reference/public-api.org` |
+| `extra` | public field | `pub extra: u32,` | `src/ffi.rs:7142` | `docs/orgmode/reference/public-api.org` |
 | `extra` | public field | `pub extra: usize,` | `src/lowest_mode.rs:155` | `docs/orgmode/reference/public-api.org` |
 | `extra_updates` | public field | `pub extra_updates: usize,` | `src/lbfgs.rs:555` | `docs/orgmode/howto/python.org`, `docs/orgmode/reference/python.org` |
 | `extrapolate` | public field | `pub extrapolate: f64,` | `src/ode12r.rs:59` | `docs/orgmode/reference/public-api.org` |
-| `f` | public field | `pub f: f64,` | `src/linesearch/known.rs:31` | `docs/orgmode/howto/noise.org`, `docs/orgmode/reference/sota.org` |
+| `f` | public field | `pub f: f64,` | `src/linesearch/known.rs:31` | `docs/orgmode/reference/public-api.org` |
 | `f_alpha` | public field | `pub f_alpha: f64,` | `src/fire.rs:103` | `docs/orgmode/reference/public-api.org` |
 | `f_alpha` | public field | `pub f_alpha: f64,` | `src/fire.rs:213` | `docs/orgmode/reference/public-api.org` |
 | `f_dec` | public field | `pub f_dec: f64,` | `src/fire.rs:99` | `docs/orgmode/reference/public-api.org` |
@@ -11045,12 +11047,12 @@ reference entry and a documentation location.
 | `fourth` | public field | `pub fourth: Vec<f64>,` | `src/magnus.rs:53` | `docs/orgmode/reference/public-api.org` |
 | `frozen` | public field | `pub frozen: Option<&'a [u8]>,` | `src/rigid/mode.rs:56` | `docs/orgmode/reference/public-api.org` |
 | `ftol` | public field | `pub ftol: f64,` | `src/lbfgs.rs:538` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/quasi-newton.org`, `docs/orgmode/reference/sota.org` |
-| `ftol_rel` | public field | `pub ftol_rel: Option<f64>,` | `src/control.rs:150` | `docs/orgmode/reference/public-api.org` |
+| `ftol_rel` | public field | `pub ftol_rel: Option<f64>,` | `src/control.rs:152` | `docs/orgmode/reference/public-api.org` |
 | `full` | public field | `pub full: bool,` | `src/elpa_kind.rs:89` | `docs/orgmode/reference/public-api.org` |
-| `g` | public field | `pub g: Array1<f64>,` | `src/linesearch/known.rs:33` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/constraints.org` |
-| `geometry_kind` | public field | `pub geometry_kind: i32,` | `src/ffi.rs:7115` | `docs/orgmode/reference/public-api.org` |
-| `ghost_pos` | public field | `pub ghost_pos: *const f64,` | `src/ffi.rs:7085` | `docs/orgmode/reference/public-api.org` |
-| `ghost_z` | public field | `pub ghost_z: *const i32,` | `src/ffi.rs:7083` | `docs/orgmode/reference/public-api.org` |
+| `g` | public field | `pub g: Array1<f64>,` | `src/linesearch/known.rs:33` | `docs/orgmode/reference/public-api.org` |
+| `geometry_kind` | public field | `pub geometry_kind: i32,` | `src/ffi.rs:7116` | `docs/orgmode/reference/public-api.org` |
+| `ghost_pos` | public field | `pub ghost_pos: *const f64,` | `src/ffi.rs:7086` | `docs/orgmode/reference/public-api.org` |
+| `ghost_z` | public field | `pub ghost_z: *const i32,` | `src/ffi.rs:7084` | `docs/orgmode/reference/public-api.org` |
 | `grad` | public field | `pub grad: f64,` | `src/eon_cg.rs:74` | `docs/orgmode/reference/public-api.org` |
 | `grad` | public field | `pub grad: Option<Array1<f64>>,` | `src/report.rs:193` | `docs/orgmode/changelog.org` |
 | `grad_norm` | public field | `pub grad_norm: f64,` | `src/ffi.rs:346` | `docs/orgmode/reference/public-api.org` |
@@ -11080,8 +11082,8 @@ reference entry and a documentation location.
 | `hyperparam_bounds` | public field | `pub hyperparam_bounds: Option<f64>,` | `src/gpmin.rs:157` | `docs/orgmode/reference/public-api.org` |
 | `hyperparam_maxiter` | public field | `pub hyperparam_maxiter: usize,` | `src/gpmin.rs:180` | `docs/orgmode/reference/public-api.org` |
 | `hyperparam_tol` | public field | `pub hyperparam_tol: f64,` | `src/gpmin.rs:177` | `docs/orgmode/reference/public-api.org` |
-| `i` | public field | `pub i: u32,` | `src/ffi.rs:7405` | `docs/orgmode/reference/public-api.org` |
-| `i` | public field | `pub i: u32,` | `src/ffi.rs:7417` | `docs/orgmode/reference/public-api.org` |
+| `i` | public field | `pub i: u32,` | `src/ffi.rs:7406` | `docs/orgmode/reference/public-api.org` |
+| `i` | public field | `pub i: u32,` | `src/ffi.rs:7418` | `docs/orgmode/reference/public-api.org` |
 | `i` | public field | `pub i: Vec<usize>,` | `src/precon.rs:103` | `docs/orgmode/reference/public-api.org` |
 | `i` | public field | `pub i: usize,` | `src/precon/ff.rs:45` | `docs/orgmode/reference/public-api.org` |
 | `i` | public field | `pub i: usize,` | `src/precon/ff.rs:56` | `docs/orgmode/reference/public-api.org` |
@@ -11100,13 +11102,13 @@ reference entry and a documentation location.
 | `invariant_breakdown` | public field | `pub invariant_breakdown: bool,` | `src/slq.rs:593` | `docs/orgmode/reference/public-api.org` |
 | `inverse_curvature` | public field | `pub inverse_curvature: f64,` | `src/lbfgs.rs:568` | `docs/orgmode/reference/sota.org` |
 | `inverse_norm1` | public field | `pub inverse_norm1: f64,` | `src/periodic.rs:207` | `docs/orgmode/reference/periodic.org` |
-| `istep` | public field | `pub istep: f64,` | `src/control.rs:123` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/gromacs-cg.org` |
+| `istep` | public field | `pub istep: f64,` | `src/control.rs:125` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/gromacs-cg.org` |
 | `istep` | public field | `pub istep: f64,` | `src/ffi.rs:263` | `docs/orgmode/howto/gromacs-steep.org`, `docs/orgmode/reference/lammps-min-style.org` |
 | `istep` | public field | `pub istep: f64,` | `src/ffi.rs:305` | `docs/orgmode/reference/public-api.org` |
 | `iteration` | public field | `pub iteration: usize,` | `src/krylov.rs:116` | `docs/orgmode/reference/public-api.org` |
 | `iteration` | public field | `pub iteration: usize,` | `src/krylov/gmres.rs:200` | `docs/orgmode/reference/public-api.org` |
 | `iteration_bound` | public field | `pub iteration_bound: usize,` | `src/minres.rs:35` | `docs/orgmode/reference/public-api.org` |
-| `iterations` | public field | `pub iterations: usize,` | `src/ffi.rs:8922` | `docs/orgmode/reference/public-api.org` |
+| `iterations` | public field | `pub iterations: usize,` | `src/ffi.rs:8923` | `docs/orgmode/reference/public-api.org` |
 | `iterations` | public field | `pub iterations: usize,` | `src/holonomic/mod.rs:198` | `docs/orgmode/reference/public-api.org` |
 | `iterations` | public field | `pub iterations: usize,` | `src/krylov.rs:140` | `docs/orgmode/reference/public-api.org` |
 | `iterations` | public field | `pub iterations: Vec<KrylovIteration>,` | `src/krylov/gmres.rs:265` | `docs/orgmode/reference/public-api.org` |
@@ -11117,29 +11119,29 @@ reference entry and a documentation location.
 | `iterations` | public field | `pub iterations: usize,` | `src/rtr.rs:389` | `docs/orgmode/reference/public-api.org` |
 | `iterations` | public field | `pub iterations: usize,` | `src/slq.rs:1066` | `docs/orgmode/reference/public-api.org` |
 | `iu` | public field | `pub iu: u32,` | `src/elpa_kind.rs:85` | `docs/orgmode/reference/public-api.org` |
-| `j` | public field | `pub j: u32,` | `src/ffi.rs:7407` | `docs/orgmode/reference/public-api.org` |
+| `j` | public field | `pub j: u32,` | `src/ffi.rs:7408` | `docs/orgmode/reference/public-api.org` |
 | `j` | public field | `pub j: Vec<usize>,` | `src/precon.rs:105` | `docs/orgmode/reference/public-api.org` |
 | `j` | public field | `pub j: usize,` | `src/precon/ff.rs:47` | `docs/orgmode/reference/public-api.org` |
 | `j` | public field | `pub j: usize,` | `src/precon/ff.rs:71` | `docs/orgmode/reference/public-api.org` |
 | `j` | public field | `pub j: usize,` | `src/precon/ff.rs:86` | `docs/orgmode/reference/public-api.org` |
-| `k` | public field | `pub k: f64,` | `src/ffi.rs:7409` | `docs/orgmode/reference/public-api.org` |
-| `k` | public field | `pub k: u32,` | `src/ffi.rs:7421` | `docs/orgmode/reference/public-api.org` |
+| `k` | public field | `pub k: f64,` | `src/ffi.rs:7410` | `docs/orgmode/reference/public-api.org` |
+| `k` | public field | `pub k: u32,` | `src/ffi.rs:7422` | `docs/orgmode/reference/public-api.org` |
 | `k` | public field | `pub k: f64,` | `src/precon/ff.rs:49` | `docs/orgmode/reference/public-api.org` |
 | `k` | public field | `pub k: usize,` | `src/precon/ff.rs:60` | `docs/orgmode/reference/public-api.org` |
 | `k` | public field | `pub k: usize,` | `src/precon/ff.rs:88` | `docs/orgmode/reference/public-api.org` |
 | `k_phi` | public field | `pub k_phi: f64,` | `src/precon/ff.rs:92` | `docs/orgmode/reference/public-api.org` |
-| `k_theta` | public field | `pub k_theta: f64,` | `src/ffi.rs:7423` | `docs/orgmode/reference/public-api.org` |
+| `k_theta` | public field | `pub k_theta: f64,` | `src/ffi.rs:7424` | `docs/orgmode/reference/public-api.org` |
 | `k_theta` | public field | `pub k_theta: f64,` | `src/precon/ff.rs:62` | `docs/orgmode/reference/public-api.org` |
 | `kappa` | public field | `pub kappa: f64,` | `src/rtr.rs:333` | `docs/orgmode/reference/product-manifold.org` |
 | `kernel` | public field | `pub kernel: &'a [Vec<f64>],` | `src/slq.rs:2124` | `docs/orgmode/reference/public-api.org` |
 | `kind` | public field | `pub kind: i32,` | `src/ffi.rs:459` | `docs/orgmode/reference/public-api.org` |
-| `kind` | public field | `pub kind: u32,` | `src/ffi.rs:7069` | `docs/orgmode/reference/public-api.org` |
+| `kind` | public field | `pub kind: u32,` | `src/ffi.rs:7070` | `docs/orgmode/reference/public-api.org` |
 | `kind` | public field | `pub kind: FireKind,` | `src/fire.rs:179` | `docs/orgmode/reference/public-api.org` |
 | `kind` | public field | `pub kind: EigensolverKind,` | `src/lowest_mode.rs:143` | `docs/orgmode/reference/public-api.org` |
 | `kind` | public field | `pub kind: ManifoldKind,` | `src/manifold/product.rs:91` | `docs/orgmode/reference/public-api.org` |
 | `krylov` | public field | `pub krylov: u32,` | `src/ffi.rs:463` | `docs/orgmode/reference/public-api.org` |
 | `krylov` | public field | `pub krylov: usize,` | `src/lowest_mode.rs:147` | `docs/orgmode/reference/public-api.org` |
-| `l` | public field | `pub l: usize,` | `src/precon/ff.rs:90` | `docs/orgmode/explanation/step-bounds.org` |
+| `l` | public field | `pub l: usize,` | `src/precon/ff.rs:90` | `docs/orgmode/reference/public-api.org` |
 | `l_inf_norm` | public field | `pub l_inf_norm: f64,` | `src/newton.rs:912` | `docs/orgmode/reference/public-api.org` |
 | `l_one_norm` | public field | `pub l_one_norm: f64,` | `src/newton.rs:914` | `docs/orgmode/reference/public-api.org` |
 | `laguerre_degree` | public field | `pub laguerre_degree: usize,` | `src/inverse_laplace.rs:1422` | `docs/orgmode/changelog.org` |
@@ -11179,7 +11181,7 @@ reference entry and a documentation location.
 | `matvecs` | public field | `pub matvecs: usize,` | `src/slq.rs:1350` | `docs/orgmode/reference/public-api.org` |
 | `matvecs` | public field | `pub matvecs: usize,` | `src/slq.rs:1960` | `docs/orgmode/reference/public-api.org` |
 | `max_constraint_shrinks` | public field | `pub max_constraint_shrinks: u32,` | `src/gromacs.rs:138` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/gromacs-steep.org`, `docs/orgmode/reference/python.org` |
-| `max_evals` | public field | `pub max_evals: Option<usize>,` | `src/control.rs:190` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/python.org` |
+| `max_evals` | public field | `pub max_evals: Option<usize>,` | `src/control.rs:192` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/python.org` |
 | `max_imag_beta` | public field | `pub max_imag_beta: f64,` | `src/inverse_laplace.rs:1426` | `docs/orgmode/reference/public-api.org` |
 | `max_imag_beta_sampled` | public field | `pub max_imag_beta_sampled: f64,` | `src/inverse_laplace.rs:1133` | `docs/orgmode/reference/public-api.org` |
 | `max_imag_beta_sampled` | public field | `pub max_imag_beta_sampled: f64,` | `src/inverse_laplace.rs:1507` | `docs/orgmode/reference/public-api.org` |
@@ -11206,7 +11208,7 @@ reference entry and a documentation location.
 | `maxiter` | public field | `pub maxiter: usize,` | `src/ffi.rs:256` | `docs/orgmode/reference/public-api.org` |
 | `maxiter` | public field | `pub maxiter: usize,` | `src/ffi.rs:301` | `docs/orgmode/reference/public-api.org` |
 | `maxiter` | public field | `pub maxiter: usize,` | `src/restricted_trust.rs:26` | `docs/orgmode/reference/public-api.org` |
-| `maxmove` | public field | `pub maxmove: Option<f64>,` | `src/control.rs:133` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/diis.org`, `docs/orgmode/explanation/quickmin.org` |
+| `maxmove` | public field | `pub maxmove: Option<f64>,` | `src/control.rs:135` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/diis.org`, `docs/orgmode/explanation/quickmin.org` |
 | `maxmove` | public field | `pub maxmove: f64,` | `src/ffi.rs:270` | `docs/orgmode/reference/public-api.org` |
 | `maxmove` | public field | `pub maxmove: f64,` | `src/ffi.rs:309` | `docs/orgmode/reference/public-api.org` |
 | `memory` | public field | `pub memory: usize,` | `src/ffi.rs:265` | `docs/orgmode/reference/lammps-min-style.org` |
@@ -11221,12 +11223,12 @@ reference entry and a documentation location.
 | `min_re_beta_sampled` | public field | `pub min_re_beta_sampled: f64,` | `src/inverse_laplace.rs:1505` | `docs/orgmode/reference/public-api.org` |
 | `min_samples` | public field | `pub min_samples: usize,` | `src/slq.rs:1873` | `docs/orgmode/reference/public-api.org` |
 | `mode` | public field | `pub mode: RigidMode,` | `src/rigid/mode.rs:50` | `docs/orgmode/reference/public-api.org` |
-| `model_decrease` | public field | `pub model_decrease: f64,` | `src/ffi.rs:8915` | `docs/orgmode/reference/public-api.org` |
+| `model_decrease` | public field | `pub model_decrease: f64,` | `src/ffi.rs:8916` | `docs/orgmode/reference/public-api.org` |
 | `model_decrease` | public field | `pub model_decrease: f64,` | `src/rtr.rs:80` | `docs/orgmode/reference/public-api.org` |
 | `moments` | public field | `pub moments: SlqMoments,` | `src/slq.rs:2223` | `docs/orgmode/reference/public-api.org` |
 | `morses` | public field | `pub morses: &'a [MorseTerm],` | `src/precon/ff.rs:103` | `docs/orgmode/reference/public-api.org` |
 | `mu` | public field | `pub mu: f64,` | `src/ffi.rs:2603` | `docs/orgmode/reference/public-api.org` |
-| `mu` | public field | `pub mu: f64,` | `src/ffi.rs:7073` | `docs/orgmode/reference/public-api.org` |
+| `mu` | public field | `pub mu: f64,` | `src/ffi.rs:7074` | `docs/orgmode/reference/public-api.org` |
 | `mu` | public field | `pub mu: Option<f64>,` | `src/precon.rs:125` | `docs/orgmode/reference/public-api.org` |
 | `mu` | public field | `pub mu: Option<f64>,` | `src/precon/ff.rs:119` | `docs/orgmode/reference/public-api.org` |
 | `mu` | public field | `pub mu: Option<f64>,` | `src/precon/lindh.rs:133` | `docs/orgmode/reference/public-api.org` |
@@ -11252,15 +11254,15 @@ reference entry and a documentation location.
 | `n_pos` | public field | `pub n_pos: usize,` | `src/fire.rs:158` | `docs/orgmode/reference/public-api.org` |
 | `n_pos` | public field | `pub n_pos: usize,` | `src/fire.rs:198` | `docs/orgmode/reference/public-api.org` |
 | `n_pos` | public field | `pub n_pos: usize,` | `src/quickmin.rs:59` | `docs/orgmode/reference/public-api.org` |
-| `nanchor` | public field | `pub nanchor: usize,` | `src/ffi.rs:7101` | `docs/orgmode/reference/public-api.org` |
-| `nangles` | public field | `pub nangles: usize,` | `src/ffi.rs:7111` | `docs/orgmode/reference/public-api.org` |
-| `natoms` | public field | `pub natoms: usize,` | `src/ffi.rs:7081` | `docs/orgmode/reference/public-api.org` |
+| `nanchor` | public field | `pub nanchor: usize,` | `src/ffi.rs:7102` | `docs/orgmode/reference/public-api.org` |
+| `nangles` | public field | `pub nangles: usize,` | `src/ffi.rs:7112` | `docs/orgmode/reference/public-api.org` |
+| `natoms` | public field | `pub natoms: usize,` | `src/ffi.rs:7082` | `docs/orgmode/reference/public-api.org` |
 | `nbfgscorr` | public field | `pub nbfgscorr: usize,` | `src/gromacs.rs:435` | `docs/orgmode/howto/gromacs-lbfgs.org`, `docs/orgmode/reference/gromacs-lbfgs.org`, `docs/orgmode/reference/python.org` |
 | `nblk` | public field | `pub nblk: u32,` | `src/elpa_kind.rs:55` | `docs/orgmode/reference/public-api.org` |
-| `nbonds` | public field | `pub nbonds: usize,` | `src/ffi.rs:7107` | `docs/orgmode/reference/public-api.org` |
-| `nbr_i` | public field | `pub nbr_i: *const usize,` | `src/ffi.rs:7089` | `docs/orgmode/reference/public-api.org` |
-| `nbr_j` | public field | `pub nbr_j: *const usize,` | `src/ffi.rs:7091` | `docs/orgmode/reference/public-api.org` |
-| `nbr_r` | public field | `pub nbr_r: *const f64,` | `src/ffi.rs:7093` | `docs/orgmode/reference/public-api.org` |
+| `nbonds` | public field | `pub nbonds: usize,` | `src/ffi.rs:7108` | `docs/orgmode/reference/public-api.org` |
+| `nbr_i` | public field | `pub nbr_i: *const usize,` | `src/ffi.rs:7090` | `docs/orgmode/reference/public-api.org` |
+| `nbr_j` | public field | `pub nbr_j: *const usize,` | `src/ffi.rs:7092` | `docs/orgmode/reference/public-api.org` |
+| `nbr_r` | public field | `pub nbr_r: *const f64,` | `src/ffi.rs:7094` | `docs/orgmode/reference/public-api.org` |
 | `neg_abs_tol` | public field | `pub neg_abs_tol: f64,` | `src/slq.rs:1280` | `docs/orgmode/reference/public-api.org` |
 | `neg_log_tol` | public field | `pub neg_log_tol: f64,` | `src/slq.rs:1283` | `docs/orgmode/reference/public-api.org` |
 | `neg_threshold` | public field | `pub neg_threshold: f64,` | `src/slq.rs:1278` | `docs/orgmode/reference/public-api.org` |
@@ -11271,7 +11273,7 @@ reference entry and a documentation location.
 | `negative_pairs` | public field | `pub negative_pairs: &'a [DeflatedPair],` | `src/slq.rs:2126` | `docs/orgmode/reference/public-api.org` |
 | `nev` | public field | `pub nev: u32,` | `src/ffi.rs:461` | `docs/orgmode/reference/public-api.org` |
 | `nev` | public field | `pub nev: usize,` | `src/lowest_mode.rs:145` | `docs/orgmode/reference/public-api.org` |
-| `nghost` | public field | `pub nghost: usize,` | `src/ffi.rs:7087` | `docs/orgmode/reference/public-api.org` |
+| `nghost` | public field | `pub nghost: usize,` | `src/ffi.rs:7088` | `docs/orgmode/reference/public-api.org` |
 | `nodes` | public field | `pub nodes: usize,` | `src/inverse_laplace.rs:1017` | `docs/orgmode/reference/public-api.org` |
 | `nodes` | public field | `pub nodes: Vec<f64>,` | `src/quadrature.rs:62` | `docs/orgmode/reference/public-api.org` |
 | `nodes_used` | public field | `pub nodes_used: usize,` | `src/inverse_laplace.rs:1127` | `docs/orgmode/reference/public-api.org` |
@@ -11281,14 +11283,14 @@ reference entry and a documentation location.
 | `noise_eps` | public field | `pub noise_eps: f64,` | `src/ffi.rs:272` | `docs/orgmode/reference/public-api.org` |
 | `noise_eps` | public field | `pub noise_eps: f64,` | `src/ffi.rs:311` | `docs/orgmode/reference/public-api.org` |
 | `noise_eps_f` | public field | `pub noise_eps_f: f64,` | `src/ffi.rs:290` | `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `noise_floor` | public field | `pub noise_floor: Option<NoiseFloor>,` | `src/control.rs:152` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/noise.org` |
+| `noise_floor` | public field | `pub noise_floor: Option<NoiseFloor>,` | `src/control.rs:154` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/noise.org` |
 | `norm` | public field | `pub norm: GradNorm,` | `src/lbfgs.rs:528` | `docs/orgmode/reference/public-api.org` |
 | `norm1` | public field | `pub norm1: f64,` | `src/periodic.rs:199` | `docs/orgmode/reference/periodic.org` |
-| `npairs` | public field | `pub npairs: usize,` | `src/ffi.rs:7095` | `docs/orgmode/reference/public-api.org` |
+| `npairs` | public field | `pub npairs: usize,` | `src/ffi.rs:7096` | `docs/orgmode/reference/public-api.org` |
 | `nstcgsteep` | public field | `pub nstcgsteep: u32,` | `src/gromacs.rs:700` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/gromacs-cg.org`, `docs/orgmode/reference/gromacs-cg.org` |
 | `num_high_positive` | public field | `pub num_high_positive: usize,` | `src/slq.rs:1288` | `docs/orgmode/reference/public-api.org` |
 | `num_low_positive` | public field | `pub num_low_positive: usize,` | `src/slq.rs:1286` | `docs/orgmode/reference/public-api.org` |
-| `numbers` | public field | `pub numbers: *const i32,` | `src/ffi.rs:7079` | `docs/orgmode/reference/public-api.org` |
+| `numbers` | public field | `pub numbers: *const i32,` | `src/ffi.rs:7080` | `docs/orgmode/reference/public-api.org` |
 | `observed_dyadic_ratio` | public field | `pub observed_dyadic_ratio: Option<f64>,` | `src/inverse_laplace.rs:1483` | `docs/orgmode/reference/public-api.org` |
 | `ok` | public field | `pub ok: NoiseFlag,` | `src/noise.rs:93` | `docs/orgmode/reference/public-api.org` |
 | `operator_applications` | public field | `pub operator_applications: usize,` | `src/krylov/gmres.rs:206` | `docs/orgmode/reference/public-api.org` |
@@ -11329,10 +11331,10 @@ reference entry and a documentation location.
 | `qr_iterations` | public field | `pub qr_iterations: usize,` | `src/periodic_product.rs:75` | `docs/orgmode/reference/public-api.org` |
 | `quad_check_every` | public field | `pub quad_check_every: usize,` | `src/slq.rs:1880` | `docs/orgmode/reference/public-api.org` |
 | `quadrature_error_estimate` | public field | `pub quadrature_error_estimate: f64,` | `src/slq.rs:1943` | `docs/orgmode/reference/public-api.org` |
-| `r` | public field | `pub r: Vec<f64>,` | `src/precon.rs:107` | `docs/orgmode/howto/noise.org`, `docs/orgmode/reference/manifold.org` |
+| `r` | public field | `pub r: Vec<f64>,` | `src/precon.rs:107` | `docs/orgmode/reference/public-api.org` |
 | `r0` | public field | `pub r0: f64,` | `src/precon/ff.rs:77` | `docs/orgmode/reference/public-api.org` |
 | `r_cut` | public field | `pub r_cut: f64,` | `src/ffi.rs:2607` | `docs/orgmode/reference/public-api.org` |
-| `r_cut` | public field | `pub r_cut: f64,` | `src/ffi.rs:7075` | `docs/orgmode/reference/public-api.org` |
+| `r_cut` | public field | `pub r_cut: f64,` | `src/ffi.rs:7076` | `docs/orgmode/reference/public-api.org` |
 | `r_cut` | public field | `pub r_cut: Option<f64>,` | `src/precon.rs:129` | `docs/orgmode/reference/public-api.org` |
 | `r_cut` | public field | `pub r_cut: Option<f64>,` | `src/precon/ff.rs:115` | `docs/orgmode/reference/public-api.org` |
 | `r_cut` | public field | `pub r_cut: Option<f64>,` | `src/precon/lindh.rs:124` | `docs/orgmode/reference/public-api.org` |
@@ -11357,11 +11359,11 @@ reference entry and a documentation location.
 | `relative_residual` | public field | `pub relative_residual: f64,` | `src/minres.rs:38` | `docs/orgmode/reference/public-api.org` |
 | `relative_tolerance` | public field | `pub relative_tolerance: f64,` | `src/krylov/gmres.rs:484` | `docs/orgmode/reference/public-api.org` |
 | `remainder` | public field | `pub remainder: f64,` | `src/certificate.rs:140` | `docs/orgmode/reference/public-api.org` |
-| `require_convergence` | public field | `pub require_convergence: bool,` | `src/control.rs:194` | `docs/orgmode/reference/public-api.org` |
+| `require_convergence` | public field | `pub require_convergence: bool,` | `src/control.rs:196` | `docs/orgmode/reference/public-api.org` |
 | `require_convergence` | public field | `pub require_convergence: i32,` | `src/ffi.rs:280` | `docs/orgmode/reference/public-api.org` |
 | `rescale_on_clamp` | public field | `pub rescale_on_clamp: bool,` | `src/quickmin.rs:277` | `docs/orgmode/reference/public-api.org` |
 | `reset` | public field | `pub reset: u8,` | `src/session/drive.rs:43` | `docs/orgmode/reference/public-api.org` |
-| `residual` | public field | `pub residual: f64,` | `src/ffi.rs:8385` | `docs/orgmode/reference/public-api.org` |
+| `residual` | public field | `pub residual: f64,` | `src/ffi.rs:8386` | `docs/orgmode/reference/public-api.org` |
 | `residual` | public field | `pub residual: f64,` | `src/krylov.rs:120` | `docs/orgmode/reference/public-api.org` |
 | `residual` | public field | `pub residual: f64,` | `src/krylov.rs:134` | `docs/orgmode/reference/public-api.org` |
 | `residual` | public field | `pub residual: f64,` | `src/lowest_mode.rs:1131` | `docs/orgmode/reference/public-api.org` |
@@ -11414,7 +11416,7 @@ reference entry and a documentation location.
 | `step` | public field | `pub step: Option<LineOutcome>,` | `src/linesearch/known.rs:54` | `docs/orgmode/reference/public-api.org` |
 | `step` | public field | `pub step: Array1<f64>,` | `src/restricted_trust.rs:43` | `docs/orgmode/reference/public-api.org` |
 | `step_len` | public field | `pub step_len: f64,` | `src/session/drive.rs:41` | `docs/orgmode/reference/public-api.org` |
-| `step_tolerance` | public field | `pub step_tolerance: i32,` | `src/ffi.rs:7123` | `docs/orgmode/reference/public-api.org` |
+| `step_tolerance` | public field | `pub step_tolerance: i32,` | `src/ffi.rs:7124` | `docs/orgmode/reference/public-api.org` |
 | `step_tolerance` | public field | `pub step_tolerance: ScgStepTolerance,` | `src/scg.rs:99` | `docs/orgmode/reference/public-api.org` |
 | `steps` | public field | `pub steps: usize,` | `src/ffi.rs:344` | `docs/orgmode/reference/public-api.org` |
 | `steps` | public field | `pub steps: usize,` | `src/fire.rs:749` | `docs/orgmode/reference/public-api.org` |
@@ -11423,15 +11425,15 @@ reference entry and a documentation location.
 | `stochastic_se` | public field | `pub stochastic_se: f64,` | `src/slq.rs:1945` | `docs/orgmode/reference/public-api.org` |
 | `stochastic_trace` | public field | `pub stochastic_trace: f64,` | `src/slq.rs:1937` | `docs/orgmode/reference/public-api.org` |
 | `stop` | public field | `pub stop: rgmin_stop_t,` | `src/ffi.rs:348` | `docs/orgmode/howto/c-abi.org` |
-| `stop` | public field | `pub stop: i32,` | `src/ffi.rs:8920` | `docs/orgmode/reference/public-api.org` |
+| `stop` | public field | `pub stop: i32,` | `src/ffi.rs:8921` | `docs/orgmode/reference/public-api.org` |
 | `stop` | public field | `pub stop: TcgStop,` | `src/rtr.rs:82` | `docs/orgmode/reference/public-api.org` |
-| `stop_norm` | public field | `pub stop_norm: StopNorm,` | `src/control.rs:137` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/sota.org` |
+| `stop_norm` | public field | `pub stop_norm: StopNorm,` | `src/control.rs:139` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/sota.org` |
 | `stop_norm` | public field | `pub stop_norm: StopNorm,` | `src/report.rs:190` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/gromacs-cg.org` |
 | `stop_reason` | public field | `pub stop_reason: Option<LineSearchStopReason>,` | `src/linesearch/known.rs:56` | `docs/orgmode/reference/public-api.org` |
 | `stopping_rule` | public field | `pub stopping_rule: SlqStoppingRule,` | `src/slq.rs:1870` | `docs/orgmode/reference/public-api.org` |
 | `stopping_rule` | public field | `pub stopping_rule: SlqStoppingRule,` | `src/slq.rs:1954` | `docs/orgmode/reference/public-api.org` |
 | `strategy` | public field | `pub strategy: ProbeStrategy,` | `src/slq.rs:1868` | `docs/orgmode/reference/public-api.org` |
-| `struct_size` | public field | `pub struct_size: u32,` | `src/ffi.rs:7067` | `docs/orgmode/howto/c-abi.org` |
+| `struct_size` | public field | `pub struct_size: u32,` | `src/ffi.rs:7068` | `docs/orgmode/howto/c-abi.org` |
 | `subspace_dim` | public field | `pub subspace_dim: usize,` | `src/slq.rs:1292` | `docs/orgmode/reference/public-api.org` |
 | `surrogate_gtol` | public field | `pub surrogate_gtol: f64,` | `src/gpmin.rs:174` | `docs/orgmode/reference/public-api.org` |
 | `surrogate_maxiter` | public field | `pub surrogate_maxiter: usize,` | `src/gpmin.rs:168` | `docs/orgmode/reference/public-api.org` |
@@ -11462,8 +11464,8 @@ reference entry and a documentation location.
 | `upper` | public field | `pub upper: f64,` | `src/slq.rs:575` | `docs/orgmode/reference/public-api.org` |
 | `value` | public field | `pub value: f64,` | `src/ffi.rs:342` | `docs/orgmode/reference/public-api.org` |
 | `value` | public field | `pub value: f64,` | `src/ffi.rs:476` | `docs/orgmode/reference/public-api.org` |
-| `value` | public field | `pub value: f64,` | `src/ffi.rs:8369` | `docs/orgmode/reference/public-api.org` |
-| `value` | public field | `pub value: f64,` | `src/ffi.rs:8381` | `docs/orgmode/reference/public-api.org` |
+| `value` | public field | `pub value: f64,` | `src/ffi.rs:8370` | `docs/orgmode/reference/public-api.org` |
+| `value` | public field | `pub value: f64,` | `src/ffi.rs:8382` | `docs/orgmode/reference/public-api.org` |
 | `value` | public field | `pub value: Complex64,` | `src/inverse_laplace.rs:596` | `docs/orgmode/reference/public-api.org` |
 | `value` | public field | `pub value: f64,` | `src/inverse_laplace.rs:1123` | `docs/orgmode/reference/public-api.org` |
 | `value` | public field | `pub value: f64,` | `src/inverse_laplace.rs:1496` | `docs/orgmode/reference/public-api.org` |
@@ -11484,7 +11486,7 @@ reference entry and a documentation location.
 | `vel` | public field | `pub vel: f64,` | `src/fire.rs:381` | `docs/orgmode/reference/public-api.org` |
 | `vel` | public field | `pub vel: Array1<f64>,` | `src/quickmin.rs:53` | `docs/orgmode/reference/public-api.org` |
 | `verification_residual` | public field | `pub verification_residual: f64,` | `src/periodic_product.rs:77` | `docs/orgmode/reference/public-api.org` |
-| `vertex` | public field | `pub vertex: u32,` | `src/ffi.rs:7419` | `docs/orgmode/reference/public-api.org` |
+| `vertex` | public field | `pub vertex: u32,` | `src/ffi.rs:7420` | `docs/orgmode/reference/public-api.org` |
 | `vertex` | public field | `pub vertex: usize,` | `src/precon/ff.rs:58` | `docs/orgmode/reference/public-api.org` |
 | `weight` | public field | `pub weight: f64,` | `src/gpmin.rs:141` | `docs/orgmode/reference/public-api.org` |
 | `weight` | public field | `pub weight: f64,` | `src/gpmin.rs:348` | `docs/orgmode/reference/public-api.org` |
@@ -12199,27 +12201,27 @@ reference entry and a documentation location.
 | `WeeksEstimate` | struct | `pub struct WeeksEstimate {` | `src/inverse_laplace.rs:1461` | `docs/orgmode/reference/public-api.org` |
 | `WeeksResult` | struct | `pub struct WeeksResult {` | `src/inverse_laplace.rs:1494` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_abi_stamp_t` | struct | `pub struct rgmin_abi_stamp_t {` | `src/ffi.rs:97` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_angle_t` | struct | `pub struct rgmin_angle_t {` | `src/ffi.rs:7415` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_bond_t` | struct | `pub struct rgmin_bond_t {` | `src/ffi.rs:7403` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_angle_t` | struct | `pub struct rgmin_angle_t {` | `src/ffi.rs:7416` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_bond_t` | struct | `pub struct rgmin_bond_t {` | `src/ffi.rs:7404` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_constraints_t` | struct | `pub struct rgmin_constraints_t {` | `src/ffi.rs:3920` | `docs/orgmode/reference/architecture.org` |
 | `rgmin_control_revision5_t` | struct | `pub struct rgmin_control_revision5_t {` | `src/ffi.rs:299` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_control_t` | struct | `pub struct rgmin_control_t {` | `src/ffi.rs:254` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/howto/c-abi.org` |
-| `rgmin_eigen_options_t` | struct | `pub struct rgmin_eigen_options_t {` | `src/ffi.rs:7137` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
+| `rgmin_eigen_options_t` | struct | `pub struct rgmin_eigen_options_t {` | `src/ffi.rs:7138` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_eigen_params_t` | struct | `pub struct rgmin_eigen_params_t {` | `src/ffi.rs:456` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
-| `rgmin_eigenpair_ex_t` | struct | `pub struct rgmin_eigenpair_ex_t {` | `src/ffi.rs:8379` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_eigenpair_t` | struct | `pub struct rgmin_eigenpair_t {` | `src/ffi.rs:8367` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
+| `rgmin_eigenpair_ex_t` | struct | `pub struct rgmin_eigenpair_ex_t {` | `src/ffi.rs:8380` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_eigenpair_t` | struct | `pub struct rgmin_eigenpair_t {` | `src/ffi.rs:8368` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_exp_t` | struct | `pub struct rgmin_exp_t {` | `src/ffi.rs:2597` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_lbfgs_pairs` | struct | `pub struct rgmin_lbfgs_pairs {` | `src/ffi.rs:5189` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_linesearch` | struct | `pub struct rgmin_linesearch {` | `src/ffi.rs:4738` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_lowest_mode_t` | struct | `pub struct rgmin_lowest_mode_t {` | `src/ffi.rs:474` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_manifold_handle` | struct | `pub struct rgmin_manifold_handle {` | `src/ffi.rs:5672` | `docs/orgmode/reference/public-api.org` |
-| `rgmin_precon_t` | struct | `pub struct rgmin_precon_t {` | `src/ffi.rs:7065` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/precon.org` |
+| `rgmin_manifold_handle` | struct | `pub struct rgmin_manifold_handle {` | `src/ffi.rs:5673` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_precon_t` | struct | `pub struct rgmin_precon_t {` | `src/ffi.rs:7066` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/precon.org` |
 | `rgmin_rcg_options_t` | struct | `pub struct rgmin_rcg_options_t {` | `src/ffi.rs:1365` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
 | `rgmin_report_t` | struct | `pub struct rgmin_report_t {` | `src/ffi.rs:340` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org` |
-| `rgmin_rigid_workspace_t` | struct | `pub struct rgmin_rigid_workspace_t {` | `src/ffi.rs:8113` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_rigid_workspace_t` | struct | `pub struct rgmin_rigid_workspace_t {` | `src/ffi.rs:8114` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_rlbfgs_t` | struct | `pub struct rgmin_rlbfgs_t {` | `src/ffi.rs:415` | `docs/orgmode/tutorials/rlbfgs.org` |
-| `rgmin_rtr_tcg_result_t` | struct | `pub struct rgmin_rtr_tcg_result_t {` | `src/ffi.rs:8913` | `docs/orgmode/howto/c-abi.org` |
-| `rgmin_scg_options_t` | struct | `pub struct rgmin_scg_options_t {` | `src/ffi.rs:7121` | `docs/orgmode/howto/c-abi.org` |
+| `rgmin_rtr_tcg_result_t` | struct | `pub struct rgmin_rtr_tcg_result_t {` | `src/ffi.rs:8914` | `docs/orgmode/howto/c-abi.org` |
+| `rgmin_scg_options_t` | struct | `pub struct rgmin_scg_options_t {` | `src/ffi.rs:7122` | `docs/orgmode/howto/c-abi.org` |
 | `rgmin_scg_params_t` | struct | `pub struct rgmin_scg_params_t {` | `src/ffi.rs:395` | `docs/orgmode/howto/c-abi.org` |
 | `rgmin_solver_t` | struct | `pub struct rgmin_solver_t {` | `src/ffi.rs:2442` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/session.org` |
 | `ApplyBlockPreconditioner` | trait | `pub trait ApplyBlockPreconditioner {` | `src/lowest_mode.rs:1160` | `docs/orgmode/reference/public-api.org` |
@@ -12696,7 +12698,7 @@ reference entry and a documentation location.
 | `direction_diagonal` | function | `void direction_diagonal(double const* grad, double const* h0, double* dir,` | `include/rgmin/optimize.hpp:1087` | `docs/orgmode/howto/c-abi.org` |
 | `echo_f64` | function | `inline nb::ndarray<nb::numpy, double> echo_f64(const F64Array &arr) {` | `include/rgbind/rgbind.hpp:917` | `docs/orgmode/reference/public-api.org` |
 | `egrad_to_rgrad` | function | `void egrad_to_rgrad(double const* x, double const* egrad, double* out) const {` | `include/rgmin/optimize.hpp:1161` | `docs/orgmode/reference/manifold.org` |
-| `entry` | function | `template <typename... Args>` | `include/rgbind/rgbind.hpp:683` | `docs/orgmode/reference/public-api.org` |
+| `entry` | function | `template <typename... Args> static int entry(void *user, Args... args) noexcept {` | `include/rgbind/rgbind.hpp:683` | `docs/orgmode/reference/public-api.org` |
 | `error_kind_name` | function | `inline const char *error_kind_name(ErrorKind kind) noexcept {` | `include/rgbind/rgbind.hpp:270` | `docs/orgmode/reference/public-api.org` |
 | `error_on_unmet` | function | `bool error_on_unmet() const noexcept { return error_on_unmet_; }` | `include/rgmin/optimize.hpp:1230` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
 | `evals` | function | `std::size_t evals() const noexcept { return rgmin_solver_evals(ptr_); }` | `include/rgmin/optimize.hpp:898` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/stopping.org` |
@@ -12731,13 +12733,13 @@ reference entry and a documentation location.
 | `lowest_eigenpair` | function | `inline rgmin_lowest_mode_t lowest_eigenpair(` | `include/rgmin/optimize.hpp:113` | `docs/orgmode/reference/public-api.org` |
 | `lowest_eigenpairs` | function | `inline void lowest_eigenpairs(rgmin_hvp_fn hvp, void* user, double const* x,` | `include/rgmin/optimize.hpp:345` | `docs/orgmode/changelog.org` |
 | `lowest_eigenpairs_ex` | function | `inline void lowest_eigenpairs_ex(rgmin_hvp_fn hvp, void* user, rgmin_precond_fn precond,` | `include/rgmin/optimize.hpp:382` | `docs/orgmode/reference/public-api.org` |
-| `map_status` | function | `template <typename Enum>` | `include/rgbind/rgbind.hpp:367` | `docs/orgmode/reference/public-api.org` |
+| `map_status` | function | `template <typename Enum> inline MappedStatus map_status(Enum code, std::string_view last_error,` | `include/rgbind/rgbind.hpp:367` | `docs/orgmode/reference/public-api.org` |
 | `map_status_code` | function | `inline MappedStatus map_status_code(int code, std::string_view last_error,` | `include/rgbind/rgbind.hpp:302` | `docs/orgmode/reference/public-api.org` |
 | `method` | function | `Method method() const noexcept { return method_; }` | `include/rgmin/optimize.hpp:747` | `docs/orgmode/reference/public-api.org` |
 | `method` | function | `Method method() const noexcept { return method_; }` | `include/rgmin/optimize.hpp:1227` | `docs/orgmode/reference/public-api.org` |
 | `method_from_name` | function | `inline Method method_from_name(std::string const& name) {` | `include/rgmin/optimize.hpp:72` | `docs/orgmode/reference/public-api.org` |
 | `method_name` | function | `std::string const& method_name() const noexcept { return method_name_; }` | `include/rgmin/optimize.hpp:1228` | `docs/orgmode/reference/public-api.org` |
-| `minimize` | function | `template <class E, class G>` | `include/xts/xtensor.hpp:19` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/lammps-migration.org`, `docs/orgmode/howto/lbfgs-box.org` |
+| `minimize` | function | `template <class E, class G> inline Report minimize(E&& eval, G&& grad, ::xt::xarray<double>& x,` | `include/xts/xtensor.hpp:19` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/lammps-migration.org`, `docs/orgmode/howto/lbfgs-box.org` |
 | `minimize_eindir` | function | `inline Report minimize_eindir(const eindir_objective_t* objective,` | `include/rgmin/optimize.hpp:316` | `docs/orgmode/changelog.org` |
 | `minimize_fn` | function | `inline Report minimize_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,` | `include/rgmin/optimize.hpp:293` | `docs/orgmode/changelog.org` |
 | `minimize_hess_fn` | function | `inline Report minimize_hess_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hess_fn hess,` | `include/rgmin/optimize.hpp:304` | `docs/orgmode/reference/public-api.org` |
@@ -12747,7 +12749,7 @@ reference entry and a documentation location.
 | `owns` | function | `bool owns() const noexcept { return busy_ != nullptr; }` | `include/rgbind/rgbind.hpp:504` | `docs/orgmode/reference/public-api.org` |
 | `pair_count` | function | `std::size_t pair_count() const noexcept { return rgmin_solver_pair_count(ptr_); }` | `include/rgmin/optimize.hpp:753` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/python.org` |
 | `precon_scale` | function | `double precon_scale() const { return rgmin_solver_precon_scale(ptr_); }` | `include/rgmin/optimize.hpp:793` | `docs/orgmode/howto/precon.org` |
-| `product` | function | `template <class... Factors>` | `include/rgmin/optimize.hpp:1135` | `docs/orgmode/reference/public-api.org` |
+| `product` | function | `template <class... Factors> static Manifold product(Manifold const& first, Factors const&... rest) {` | `include/rgmin/optimize.hpp:1135` | `docs/orgmode/reference/public-api.org` |
 | `project` | function | `void project(double const* x, double const* v, double* out) const {` | `include/rgmin/optimize.hpp:1158` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
 | `push` | function | `bool push(double const* s, double const* y, std::size_t n) {` | `include/rgmin/optimize.hpp:1064` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/tutorials/lbfgs-direction.org` |
 | `push_pair` | function | `int push_pair(double const* s, double const* y, std::size_t n) {` | `include/rgmin/optimize.hpp:927` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
@@ -12896,6 +12898,10 @@ reference entry and a documentation location.
 | `OwnerRow` | struct | `struct OwnerRow {` | `include/rgbind/rgbind.hpp:80` | `docs/orgmode/reference/public-api.org` |
 | `Report` | struct | `struct Report {` | `include/rgmin/optimize.hpp:173` | `docs/orgmode/reference/public-api.org` |
 | `Schedule` | struct | `struct Schedule {` | `include/rgbind/rgbind.hpp:105` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_lbfgs_pairs` | struct | `typedef struct rgmin_lbfgs_pairs rgmin_lbfgs_pairs_t;` | `include/rgmin.h:1301` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_linesearch` | struct | `typedef struct rgmin_linesearch rgmin_linesearch_t;` | `include/rgmin.h:1276` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_manifold_handle` | struct | `typedef struct rgmin_manifold_handle rgmin_manifold_handle_t;` | `include/rgmin.h:1773` | `docs/orgmode/reference/public-api.org` |
+| `rgmin_rigid_workspace` | struct | `typedef struct rgmin_rigid_workspace rgmin_rigid_workspace_t;` | `include/rgmin.h:1721` | `docs/orgmode/reference/public-api.org` |
 | `status_traits` | struct | `template <typename Enum> struct status_traits {` | `include/rgbind/rgbind.hpp:253` | `docs/orgmode/reference/public-api.org` |
 | `DLDataType` | symbol | `} DLDataType;` | `include/dlpack/dlpack.h:213` | `docs/orgmode/reference/public-api.org` |
 | `DLDataTypeCode` | symbol | `} DLDataTypeCode;` | `include/dlpack/dlpack.h:180` | `docs/orgmode/reference/public-api.org` |
@@ -12957,7 +12963,6 @@ reference entry and a documentation location.
 | `rgmin_last_error` | symbol | `const char *rgmin_last_error(void);` | `include/rgmin.h:348` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/gromacs-steep.org` |
 | `rgmin_last_error_message` | symbol | `const char *rgmin_last_error_message(void);` | `include/rgmin.h:350` | `docs/orgmode/changelog.org` |
 | `rgmin_lbfgs_direction` | symbol | `rgmin_status_t rgmin_lbfgs_direction(const rgmin_lbfgs_pairs_t *pairs,` | `include/rgmin.h:1337` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
-| `rgmin_lbfgs_pairs` | symbol | `typedef struct rgmin_lbfgs_pairs rgmin_lbfgs_pairs_t;` | `include/rgmin.h:1301` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_lbfgs_pairs_clear` | symbol | `void rgmin_lbfgs_pairs_clear(rgmin_lbfgs_pairs_t *pairs);` | `include/rgmin.h:1328` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_lbfgs_pairs_count` | symbol | `size_t rgmin_lbfgs_pairs_count(const rgmin_lbfgs_pairs_t *pairs);` | `include/rgmin.h:1326` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_lbfgs_pairs_create` | symbol | `rgmin_lbfgs_pairs_t *rgmin_lbfgs_pairs_create(size_t n, size_t capacity);` | `include/rgmin.h:1310` | `docs/orgmode/changelog.org` |
@@ -12965,7 +12970,7 @@ reference entry and a documentation location.
 | `rgmin_lbfgs_pairs_push` | symbol | `rgmin_status_t rgmin_lbfgs_pairs_push(rgmin_lbfgs_pairs_t *pairs, const double *s,` | `include/rgmin.h:1314` | `docs/orgmode/howto/c-abi.org` |
 | `rgmin_lbfgs_pairs_push_rho` | symbol | `rgmin_status_t rgmin_lbfgs_pairs_push_rho(rgmin_lbfgs_pairs_t *pairs, const double *s,` | `include/rgmin.h:1322` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org` |
 | `rgmin_lbfgs_pairs_t` | symbol | `typedef struct rgmin_lbfgs_pairs rgmin_lbfgs_pairs_t;` | `include/rgmin.h:1301` | `docs/orgmode/howto/c-abi.org` |
-| `rgmin_linesearch` | symbol | `typedef struct rgmin_linesearch rgmin_linesearch_t;` | `include/rgmin.h:1276` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/linesearch.org`, `docs/orgmode/tutorials/linesearch.org` |
+| `rgmin_linesearch` | symbol | `int32_t rgmin_linesearch(rgmin_linesearch_t *search, double f, const double *g,` | `include/rgmin.h:1293` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_linesearch_create` | symbol | `rgmin_linesearch_t *rgmin_linesearch_create(rgmin_linesearch_kind_t kind,` | `include/rgmin.h:1282` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_linesearch_free` | symbol | `void rgmin_linesearch_free(rgmin_linesearch_t *search);` | `include/rgmin.h:1297` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_linesearch_kind_t` | symbol | `typedef enum rgmin_linesearch_kind_t {` | `include/rgmin.h:1253` | `docs/orgmode/reference/public-api.org` |
@@ -12981,7 +12986,6 @@ reference entry and a documentation location.
 | `rgmin_manifold_exp` | symbol | `rgmin_status_t rgmin_manifold_exp(const rgmin_manifold_handle_t *manifold, const double *x,` | `include/rgmin.h:1830` | `docs/orgmode/reference/manifold.org` |
 | `rgmin_manifold_free` | symbol | `void rgmin_manifold_free(rgmin_manifold_handle_t *manifold);` | `include/rgmin.h:1809` | `docs/orgmode/explanation/product-manifold.org` |
 | `rgmin_manifold_gradient_step` | symbol | `rgmin_status_t rgmin_manifold_gradient_step(const rgmin_manifold_handle_t *manifold,` | `include/rgmin.h:1850` | `docs/orgmode/reference/manifold.org`, `docs/orgmode/tutorials/manifold-fit.org` |
-| `rgmin_manifold_handle` | symbol | `typedef struct rgmin_manifold_handle rgmin_manifold_handle_t;` | `include/rgmin.h:1773` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_manifold_handle_t` | symbol | `typedef struct rgmin_manifold_handle rgmin_manifold_handle_t;` | `include/rgmin.h:1773` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/manifold.org` |
 | `rgmin_manifold_inner` | symbol | `rgmin_status_t rgmin_manifold_inner(const rgmin_manifold_handle_t *manifold, const double *x,` | `include/rgmin.h:1844` | `docs/orgmode/reference/manifold.org` |
 | `rgmin_manifold_len` | symbol | `size_t rgmin_manifold_len(const rgmin_manifold_handle_t *manifold);` | `include/rgmin.h:1811` | `docs/orgmode/reference/public-api.org` |
@@ -13030,7 +13034,6 @@ reference entry and a documentation location.
 | `rgmin_rigid_mode_t` | symbol | `typedef enum rgmin_rigid_mode_t {` | `include/rgmin.h:875` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_rigid_project` | symbol | `rgmin_status_t rgmin_rigid_project(` | `include/rgmin.h:1731` | `docs/orgmode/changelog.org` |
 | `rgmin_rigid_project_hessian` | symbol | `rgmin_status_t rgmin_rigid_project_hessian(` | `include/rgmin.h:1738` | `docs/orgmode/changelog.org` |
-| `rgmin_rigid_workspace` | symbol | `typedef struct rgmin_rigid_workspace rgmin_rigid_workspace_t;` | `include/rgmin.h:1721` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_rigid_workspace_free` | symbol | `void rgmin_rigid_workspace_free(rgmin_rigid_workspace_t *ws);` | `include/rgmin.h:1726` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_rigid_workspace_new` | symbol | `rgmin_rigid_workspace_t *rgmin_rigid_workspace_new(void);` | `include/rgmin.h:1724` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_rigid_workspace_rank` | symbol | `size_t rgmin_rigid_workspace_rank(const rgmin_rigid_workspace_t *ws);` | `include/rgmin.h:1729` | `docs/orgmode/reference/public-api.org` |
@@ -14555,7 +14558,7 @@ Source: `docs/orgmode/tutorials/cg.org`
 
 # Conjugate gradients
 
-Two steps share the Polak-Ribière coefficient. `Method::eon_cg` selects that coefficient and `Restart::powell` at threshold 0.5, and the session still line-searches. `should_restart` compares the gradient with the previous gradient. A session step calls `should_restart_metric` with `z = P^{-1} g` when a metric is installed, and with `z = g` otherwise. `minimize_eon_cg` is the client step: the previous direction is kept only when |g_k . g_{k-1}| < 0.5 |g_{k-1}|^2, one curvature probe, no line search, then the per-atom cap.
+Two steps share the Polak-Ribière coefficient. `Method::eon_cg` selects that coefficient and `Restart::powell` at threshold 0.5, and the session still line-searches. `should_restart` compares the gradient with the previous gradient. A session step calls `should_restart_metric` with `z = P^{-1} g` when a metric is installed, and with `z = g` otherwise. `minimize_eon_cg` is the client step: the previous direction is kept only when `|g_k . g_{k-1}| < 0.5 |g_{k-1}|^2`, one curvature probe, no line search, then the per-atom cap.
 
 The listing is `examples/tutorial_cg.rs`, whole. Continuous integration runs it, so it is the program as it builds.
 
