@@ -140,7 +140,7 @@ fn morse_chain_iterates_stay_bit_identical() {
         let want = match name {
             "lbfgs" => 0x8fa602d6fc6cce2d,
             "lbfgs-wolfe" => 0x8fa602d6fc6cce2d,
-            "nlcg" => 0x0e21edbc2819e7a2,
+            "nlcg" => 0xab2d0b205f448831,
             "sd" => 0xe7a20697ff9ba6cc,
             "adam" => 0xe1d2ab716e71c641,
             "lbfgs-session" => 0x2fcc34118a8f8315,

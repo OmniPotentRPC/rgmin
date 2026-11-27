@@ -434,15 +434,13 @@ where
             }
             next_dir
         };
-        let next_slope = crate::vecops::dot(grad.view(), next_dir.view());
-        let cap = crate::step::cap_alpha(next_dir.view(), control, implicit_atom_cap(control));
-        let next = crate::step::nlcg_opening_alpha(
-            if moved { lsstep } else { 0.0 },
-            slope,
-            next_slope,
-            cap,
-            control.istep,
-        );
+        let next = if moved {
+            let next_slope = crate::vecops::dot(grad.view(), next_dir.view());
+            let cap = crate::step::cap_alpha(next_dir.view(), control, implicit_atom_cap(control));
+            crate::step::nlcg_opening_alpha(lsstep, slope, next_slope, cap, control.istep)
+        } else {
+            control.istep
+        };
         let fixed = unmoved && next_dir == dir && next == istep;
         if let Some(stop) = stop_if_unmoved(control, fixed, value, pos.clone(), step + 1, gnorm) {
             return stop;
