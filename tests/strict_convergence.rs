@@ -651,12 +651,12 @@ fn steepest_descent_waits_for_the_opening_step_to_repeat() {
     assert_eq!(tight.coords[0], 0.0);
 }
 
-/// CG keeps its direction between steps, so an unmoved step is a repeat
-/// only when the next direction equals this one. Fletcher-Reeves grows
-/// it by the previous direction every time, so it never repeats.
+/// A rejected Fletcher-Reeves step is replaced by steepest descent.
+/// On a wall that direction is the one just searched, so the next
+/// iteration repeats and strict mode stops.
 #[test]
-fn a_growing_cg_direction_is_not_a_stall() {
-    let run = |control: &Control| {
+fn a_rejected_fletcher_reeves_step_stalls_when_strict() {
+    assert_pinned_stall("fr", |control| {
         minimize(
             &wall(),
             array![0.0],
@@ -665,13 +665,7 @@ fn a_growing_cg_direction_is_not_a_stall() {
             Restart::Never,
             LineSearch::default(),
         )
-    };
-    let lax = run(&pinned_control()).unwrap();
-    assert_eq!(lax.status, Status::Budget);
-    assert_eq!(lax.steps, PINNED_BUDGET);
-    let tight = refused(run(&strict(&pinned_control())));
-    assert_eq!(tight.status, Status::Budget);
-    assert_eq!(tight.steps, PINNED_BUDGET);
+    });
 }
 
 #[test]
@@ -797,6 +791,10 @@ fn session_stalls_stop_a_strict_run_only_for_first_order_methods() {
         ("bfgs", Method::Bfgs),
         ("adam", Method::adam()),
         ("nlcg", Method::nlcg(Conjugacy::PolakRibiere)),
+        (
+            "nlcg-fr",
+            Method::nlcg_with_restart(Conjugacy::FletcherReeves, Restart::Never),
+        ),
     ] {
         let mut solver = Solver::new(method.clone(), pinned_control(), 1);
         let mut x = array![0.0];
@@ -813,22 +811,6 @@ fn session_stalls_stop_a_strict_run_only_for_first_order_methods() {
         assert!(tight.evals > 0 && tight.evals < lax.evals, "{name}");
         assert!(!tight.converged, "{name}");
     }
-}
-
-/// Session Fletcher-Reeves without restart grows its direction on an
-/// unmoved step, so the next step is not a repeat of this one.
-#[test]
-fn a_growing_session_cg_direction_is_not_a_stall() {
-    let method = Method::nlcg_with_restart(Conjugacy::FletcherReeves, Restart::Never);
-    let mut lax_solver = Solver::new(method.clone(), pinned_control(), 1);
-    let mut x = array![0.0];
-    let lax = lax_solver.run(&wall(), &mut x).unwrap();
-    assert_eq!(lax.status, Status::Budget);
-    assert_eq!(lax.steps, PINNED_BUDGET);
-    let mut tight_solver = Solver::new(method, strict(&pinned_control()), 1);
-    let mut x = array![0.0];
-    let tight = refused(tight_solver.run(&wall(), &mut x));
-    same_stop(&lax, &tight);
 }
 
 /// Trust region and adaptive step methods change their radius or step
