@@ -227,6 +227,7 @@ mod tests {
             etol: None,
             max_evals: None,
             require_convergence: false,
+            cg_slope_opening: false,
         };
         let linesearch = LineSearch::Backtracking {
             c: 1e-4,

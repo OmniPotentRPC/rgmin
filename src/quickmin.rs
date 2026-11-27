@@ -558,6 +558,7 @@ mod tests {
                 etol: None,
                 max_evals: None,
                 require_convergence: false,
+                cg_slope_opening: false,
             },
             1,
         );

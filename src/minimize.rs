@@ -16,7 +16,7 @@ use crate::pso::minimize_pso;
 use crate::qn::{minimize_bfgs, minimize_lbfgs, minimize_sd, minimize_sr1, minimize_sr2};
 use crate::report::{Report, Status};
 use crate::session::Solver;
-use crate::step::{implicit_atom_cap, l2, one_shot_report, stop_if_unmoved, take_step};
+use crate::step::{implicit_atom_cap, l2, next_istep, one_shot_report, stop_if_unmoved, take_step};
 use crate::stop::{Counted, StopRules, counted, stop_after};
 
 /// Minimize `obj` from `init` with the chosen conjugacy, restart, and line search.
@@ -384,7 +384,11 @@ where
         if let Some(status) = control.halt(gnorm, grad.len()) {
             return control.deliver(one_shot_report(value, pos, step, gnorm, status));
         }
-        let slope = crate::vecops::dot(grad.view(), dir.view());
+        let slope = if control.cg_slope_opening {
+            Some(crate::vecops::dot(grad.view(), dir.view()))
+        } else {
+            None
+        };
         let t = take_step(
             obj,
             &pos,
@@ -434,12 +438,17 @@ where
             }
             next_dir
         };
-        let next = if moved {
-            let next_slope = crate::vecops::dot(grad.view(), next_dir.view());
-            let cap = crate::step::cap_alpha(next_dir.view(), control, implicit_atom_cap(control));
-            crate::step::nlcg_opening_alpha(lsstep, slope, next_slope, cap, control.istep)
+        let next = if let Some(slope) = slope {
+            if moved {
+                let next_slope = crate::vecops::dot(grad.view(), next_dir.view());
+                let cap =
+                    crate::step::cap_alpha(next_dir.view(), control, implicit_atom_cap(control));
+                crate::step::nlcg_opening_alpha(lsstep, slope, next_slope, cap, control.istep)
+            } else {
+                control.istep
+            }
         } else {
-            control.istep
+            next_istep(lsstep, control)
         };
         let fixed = unmoved && next_dir == dir && next == istep;
         if let Some(stop) = stop_if_unmoved(control, fixed, value, pos.clone(), step + 1, gnorm) {

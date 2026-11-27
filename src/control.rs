@@ -116,10 +116,12 @@ pub struct Control {
     /// when no per-atom cap is set (`max(istep, 1)`). BFGS and the session
     /// steepest-descent search open every line search here. L-BFGS opens
     /// here while it holds no pairs and at 1.0 once it does. `minimize_sd`
-    /// opens here once and then at half the step last accepted. Nonlinear
-    /// CG opens from Nocedal-Wright equation 3.60. Adam opens here once
-    /// and then at the step last accepted, along a direction scaled to
-    /// unit per-atom length. SR1 and SR2 do not line search.
+    /// opens here once and then at half the step last accepted. The
+    /// one-shot nonlinear CG driver does the same unless
+    /// [`Self::cg_slope_opening`] is set. A session's nonlinear CG opens
+    /// from Nocedal-Wright equation 3.60. Adam opens here once and then
+    /// at the step last accepted, along a direction scaled to unit
+    /// per-atom length. SR1 and SR2 do not line search.
     pub istep: f64,
     /// Optional Euclidean cap on a proposed step (xtsci `maxmove`).
     /// Only a positive finite `c` in `Some(c)` limits a step or a trust
@@ -192,6 +194,16 @@ pub struct Control {
     /// [`Self::gtol`] returns [`crate::Error::NotConverged`]. The
     /// default is off, so a spent budget or a stall stays `Ok`.
     pub require_convergence: bool,
+    /// One-shot nonlinear CG opening length.
+    ///
+    /// Off, the default: half the step last accepted, or [`Self::istep`]
+    /// when that step did not move. On: Nocedal-Wright equation 3.60,
+    /// the ratio of successive directional derivatives, clamped to the
+    /// step cap, with [`Self::istep`] after a step that did not move.
+    /// The ratio stays off because on Rosenbrock it spends more
+    /// line-search evaluations than the half step. A session already
+    /// opens from that ratio and does not read this flag.
+    pub cg_slope_opening: bool,
 }
 
 with_setters!(Control {
@@ -220,6 +232,7 @@ impl Default for Control {
             etol: None,
             max_evals: None,
             require_convergence: false,
+            cg_slope_opening: false,
         }
     }
 }
@@ -309,6 +322,17 @@ impl Control {
     #[must_use]
     pub fn with_require_convergence(mut self, on: bool) -> Self {
         self.require_convergence = on;
+        self
+    }
+
+    /// Open one-shot nonlinear CG from Nocedal-Wright equation 3.60.
+    ///
+    /// The default is off, so that driver keeps half the step last
+    /// accepted. The ratio costs line-search evaluations on Rosenbrock.
+    /// A session does not read this flag.
+    #[must_use]
+    pub fn with_cg_slope_opening(mut self, on: bool) -> Self {
+        self.cg_slope_opening = on;
         self
     }
 

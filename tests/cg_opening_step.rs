@@ -1,4 +1,4 @@
-//! The one-shot nonlinear CG opening step is Nocedal-Wright equation 3.60.
+//! The slope-ratio opening is Nocedal-Wright equation 3.60 when requested.
 
 use std::sync::{Arc, Mutex};
 
@@ -20,7 +20,8 @@ fn the_second_opening_step_follows_the_slope_ratio() {
         .with_maxiter(2)
         .with_gtol(1e-14)
         .with_istep(0.25)
-        .with_maxmove(Some(-1.0));
+        .with_maxmove(Some(-1.0))
+        .with_cg_slope_opening(true);
     let report = minimize(
         &obj,
         array![1.0],
