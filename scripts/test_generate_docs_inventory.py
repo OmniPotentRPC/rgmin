@@ -651,6 +651,69 @@ class AmbiguousNameTests(unittest.TestCase):
             ["docs/orgmode/howto/fire.org"],
         )
 
+    def test_one_letter_token_needs_a_qualifier(self) -> None:
+        algo = _make_item(
+            "Rust",
+            "enum variant",
+            "EigenExaAlgo::S",
+            "src/eigenexa_kind.rs",
+            10,
+            "S = 0,",
+            ("rgmin", "EigenExaAlgo"),
+        )
+        fire_a = _make_item(
+            "Python",
+            "class attribute",
+            "FIRE.a",
+            "python/rgmin/__init__.pyi",
+            239,
+            "a: float",
+            ("rgmin", "FIRE"),
+        )
+        bare = {
+            "S": ["docs/orgmode/explanation/step-bounds.org"],
+            "a": ["docs/orgmode/explanation/linesearch.org"],
+        }
+        self.assertEqual(_documented_at(algo, bare, [algo]), [])
+        self.assertEqual(_documented_at(fire_a, bare, [fire_a]), [])
+        qualified = {
+            "EigenExaAlgo::S": ["docs/orgmode/reference/eigen.org"],
+            "FIRE.a": ["docs/orgmode/tutorials/fire.org"],
+        }
+        self.assertEqual(
+            _documented_at(algo, qualified, [algo]),
+            ["docs/orgmode/reference/eigen.org"],
+        )
+        self.assertEqual(
+            _documented_at(fire_a, qualified, [fire_a]),
+            ["docs/orgmode/tutorials/fire.org"],
+        )
+        factor = _make_item(
+            "Rust",
+            "public field",
+            "c",
+            "src/control.rs",
+            23,
+            "pub c: f64,",
+            ("rgmin", "NoiseFloor"),
+        )
+        self.assertEqual(
+            _documented_at(
+                factor,
+                {"c": ["docs/orgmode/howto/c-abi.org"]},
+                [factor],
+            ),
+            [],
+        )
+        self.assertEqual(
+            _documented_at(
+                factor,
+                {"NoiseFloor.c": ["docs/orgmode/howto/c-abi.org"]},
+                [factor],
+            ),
+            ["docs/orgmode/howto/c-abi.org"],
+        )
+
 
 class InventoryWordingTests(unittest.TestCase):
     def test_rendered_text_has_no_blocked_wording(self) -> None:

@@ -2250,6 +2250,8 @@ def documented_at(
     """Org pages that document this item.
 
     A bare token is enough when the name occurs once on that surface.
+    A one letter bare token does not credit a name. EigenExaAlgo::S,
+    FIRE.a, and NoiseFloor.c count when the mark names the type or the class.
     A repeated name needs a type or module path that selects this item,
     or the item's own reference page.
     """
@@ -2267,6 +2269,8 @@ def documented_at(
     pages: list[str] = []
     for token, locations in index.get(bare, []):
         if not _qualified_token(token):
+            if len(token) == 1:
+                continue
             if not ambiguous:
                 pages.extend(locations)
             else:
