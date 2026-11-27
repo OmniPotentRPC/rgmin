@@ -25,6 +25,8 @@ class Item:
     source: str
     line: int
     declaration: str
+    # Crate, module, and type path in front of the bare name.
+    scope: tuple[str, ...] = dataclasses.field(default=(), compare=False)
 
 
 RUST_FUNCTION = re.compile(
@@ -44,7 +46,8 @@ TRAIT_MEMBER = re.compile(
 )
 ENUM_VARIANT = re.compile(r"^\s*(?P<name>[A-Z][A-Za-z0-9_]*)\s*(?:[,({=]|$)")
 WITH_SETTER = re.compile(r"^\s*(?P<name>with_[A-Za-z0-9_]+)\s*=>")
-MARKUP = re.compile(r"[~=]([A-Za-z_][A-Za-z0-9_:.-]*)[~=]")
+# A trailing () stays outside the path, so ~Control::default()~ is Control::default.
+MARKUP = re.compile(r"[~=]([A-Za-z_][A-Za-z0-9_:.-]*)(?:\(\))?[~=]")
 
 
 def relative(path: Path) -> str:
@@ -482,6 +485,17 @@ def _balanced_delimiters(text: str) -> tuple[int, int, int]:
         elif char == "}":
             brace -= 1
     return paren, bracket, brace
+
+
+def _rust_scope(record: _RustRec) -> tuple[str, ...]:
+    """Crate, module, and owning type in front of the bare name."""
+    module = tuple(part for part in record.module if part)
+    if "::" in record.name:
+        head = tuple(part for part in record.name.split("::")[:-1] if part)
+        return ("rgmin",) + module + head
+    if record.owner:
+        return ("rgmin",) + module + (record.owner,)
+    return ("rgmin",) + module
 
 
 def rust_items(root: Path | None = None) -> list[Item]:
@@ -1153,6 +1167,7 @@ def rust_items(root: Path | None = None) -> list[Item]:
                 record.source,
                 record.line,
                 record.declaration,
+                _rust_scope(record),
             )
         )
     return items
@@ -1501,7 +1516,7 @@ class _CScope:
 
 def header_declared_names(
     text: str, *, cxx: bool = False
-) -> list[tuple[int, str, str, str]]:
+) -> list[tuple[int, str, str, str, tuple[str, ...]]]:
     """Line, name, source line, and kind of each inventoried declaration.
 
     Prefixed C names stay. A C++ header also records public namespace types,
@@ -1516,23 +1531,33 @@ def header_declared_names(
     if len(masked) < len(original):
         masked.extend([""] * (len(original) - len(masked)))
     stream: list[tuple[str, int]] = []
-    found: list[tuple[int, str, str, str]] = []
-    seen: set[str] = set()
+    found: list[tuple[int, str, str, str, tuple[str, ...]]] = []
+    seen: set[tuple[str, str]] = set()
     seen_members: set[tuple[tuple[str, ...], str]] = set()
 
-    def add(name: str, line_index: int, *, type_name: bool = False) -> None:
+    def add(
+        name: str, line_index: int, *, type_name: bool = False, kind: str | None = None
+    ) -> None:
         shipped = type_name and _DLPACK_TYPE.match(name) is not None
+        resolved = kind if kind is not None else ("constant" if name.isupper() else "symbol")
         if (
             not name
             or name == guard
-            or name in seen
+            or (name, resolved) in seen
             or not (_header_name(name) or shipped)
             or line_index >= len(original)
         ):
             return
-        seen.add(name)
-        kind = "constant" if name.isupper() else "symbol"
-        found.append((line_index + 1, name, _collapse(original[line_index]), kind))
+        seen.add((name, resolved))
+        found.append(
+            (
+                line_index + 1,
+                name,
+                _recorded_declaration(original, line_index),
+                resolved,
+                (),
+            )
+        )
 
     def member_path() -> tuple[str, ...]:
         return tuple(
@@ -1564,11 +1589,19 @@ def header_declared_names(
             if token in seen_members:
                 return
             seen_members.add(token)
-        elif name in seen:
+        elif any(existing == name for existing, _kind in seen):
             return
         else:
-            seen.add(name)
-        found.append((line_index + 1, name, _collapse(original[line_index]), kind))
+            seen.add((name, kind))
+        found.append(
+            (
+                line_index + 1,
+                name,
+                _recorded_declaration(original, line_index),
+                kind,
+                member_path(),
+            )
+        )
 
     index = 0
     total = len(original)
@@ -1683,7 +1716,7 @@ def header_declared_names(
                         if nxt == ";" and paren == 0:
                             names = _typedef_entries("typedef " + "".join(tail))
                             for name, entry_kind in names:
-                                add(name, tail_line, type_name=True)
+                                add(name, tail_line, type_name=True, kind=entry_kind)
                             cursor += 1
                             break
                         if not nxt.isspace() and tail_line == line_index:
@@ -1737,7 +1770,7 @@ def header_declared_names(
                             for name, entry_kind in _typedef_entries(
                                 "typedef " + "".join(tail)
                             ):
-                                add(name, tail_line, type_name=True)
+                                add(name, tail_line, type_name=True, kind=entry_kind)
                             cursor += 1
                             break
                         if nxt.strip() and tail_line == line_index:
@@ -1775,7 +1808,7 @@ def header_declared_names(
                         add_cxx(uname, stmt_line, ukind)
                 elif text.lstrip().startswith("typedef") and char == ";":
                     for name, entry_kind in _typedef_entries(text):
-                        add(name, stmt_line, type_name=True)
+                        add(name, stmt_line, type_name=True, kind=entry_kind)
                 elif char == "{":
                     kind = _open_kind(text)
                     tag = _c_tag(text)
@@ -1839,8 +1872,8 @@ def header_items(root: Path | None = None) -> list[Item]:
         items.append(Item("C and C++", "header", rel, rel, 1, f"Public header {rel}"))
         text = path.read_text(encoding="utf-8")
         declared = header_declared_names(text, cxx=path.suffix == ".hpp")
-        for line, name, declaration, kind in declared:
-            items.append(Item("C and C++", kind, name, rel, line, declaration))
+        for line, name, declaration, kind, scope in declared:
+            items.append(Item("C and C++", kind, name, rel, line, declaration, scope))
     return items
 
 
@@ -1922,6 +1955,7 @@ def _append_class_members(items: list[Item], node: ast.ClassDef, path: Path, rel
                     rel,
                     member.lineno,
                     signature(member),
+                    ("rgmin", node.name),
                 )
             )
         elif isinstance(member, (ast.Assign, ast.AnnAssign)):
@@ -1935,6 +1969,7 @@ def _append_class_members(items: list[Item], node: ast.ClassDef, path: Path, rel
                             rel,
                             member.lineno,
                             source_segment(path, member),
+                            ("rgmin", node.name),
                         )
                     )
 
@@ -2099,18 +2134,150 @@ def org_documents() -> dict[str, list[str]]:
     return found
 
 
-def lookup_names(item: Item) -> list[str]:
-    names = [item.name]
-    if "." in item.name:
-        names.append(item.name.rsplit(".", 1)[-1])
-    return names
+def _token_parts(token: str) -> tuple[str, ...]:
+    if "::" in token:
+        return tuple(part for part in token.split("::") if part)
+    if "." in token and "/" not in token:
+        return tuple(part for part in token.split(".") if part)
+    return (token,)
 
 
-def documented_at(item: Item, documents: dict[str, list[str]]) -> list[str]:
-    locations: list[str] = []
-    for name in lookup_names(item):
-        locations.extend(documents.get(name, []))
-    return sorted(set(locations))
+def _bare_name(item: Item) -> str:
+    if item.kind == "header" or "/" in item.name:
+        return item.name
+    return _token_parts(item.name)[-1]
+
+
+def _qualified_token(token: str) -> bool:
+    return "::" in token or ("." in token and "/" not in token)
+
+
+def _prefixes(item: Item) -> tuple[tuple[str, ...], ...]:
+    """Type and module paths that may stand in front of the bare name."""
+    prefixes: list[tuple[str, ...]] = []
+    scope = item.scope
+    bare = _bare_name(item)
+    if scope:
+        prefixes.append(scope)
+        if item.name == bare and scope[-1][:1].isupper():
+            prefixes.append((scope[-1],))
+            if scope[0] == "rgmin" and len(scope) > 1:
+                prefixes.append(("rgmin", scope[-1]))
+            module = scope[:-1]
+            if module:
+                prefixes.append(module)
+        elif item.name == bare:
+            prefixes.append((scope[-1],))
+    parts = _token_parts(item.name)
+    if len(parts) > 1:
+        prefixes.append(parts[:-1])
+    unique: list[tuple[str, ...]] = []
+    seen: set[tuple[str, ...]] = set()
+    for prefix in prefixes:
+        if prefix and prefix not in seen:
+            seen.add(prefix)
+            unique.append(prefix)
+    return tuple(unique)
+
+
+def _prefix_matches(item: Item, prefix: tuple[str, ...]) -> bool:
+    if not prefix:
+        return False
+    for candidate in _prefixes(item):
+        if len(prefix) <= len(candidate) and candidate[-len(prefix) :] == prefix:
+            return True
+    return False
+
+
+def _slug(text: str) -> str:
+    parts = re.findall(r"[A-Za-z0-9]+", text)
+    return "-".join(part.lower() for part in parts)
+
+
+def _reference_pages(item: Item) -> set[str]:
+    """Reference pages that name this item's type, module, or source file."""
+    slugs: set[str] = set()
+    scope = item.scope
+    if scope:
+        slugs.add(_slug(scope[-1]))
+        body = scope[1:] if scope[0] == "rgmin" else scope
+        if body and item.name == _bare_name(item) and body[-1][:1].isupper():
+            body = body[:-1]
+        if body:
+            slugs.add(_slug(body[-1]))
+            if len(body) > 1:
+                slugs.add(_slug("-".join(body)))
+    stem = Path(item.source).stem
+    if stem not in {"mod", "lib", "__init__"} and not stem.startswith("_"):
+        slugs.add(stem.replace("_", "-"))
+    return {f"docs/orgmode/reference/{slug}.org" for slug in slugs if slug}
+
+
+def _item_key(item: Item) -> tuple[str, str, str, str, int]:
+    return (item.surface, item.kind, item.name, item.source, item.line)
+
+
+def _own_reference_pages(item: Item, peers: list[Item]) -> set[str]:
+    """Reference pages that belong to this item and not to another peer."""
+    mine = _reference_pages(item)
+    shared: set[str] = set()
+    key = _item_key(item)
+    for peer in peers:
+        if _item_key(peer) == key:
+            continue
+        shared |= _reference_pages(peer)
+    return mine - shared
+
+
+def _index_documents(
+    documents: dict[str, list[str]],
+) -> dict[str, list[tuple[str, list[str]]]]:
+    indexed: dict[str, list[tuple[str, list[str]]]] = {}
+    for token, locations in documents.items():
+        indexed.setdefault(_token_parts(token)[-1], []).append((token, locations))
+    return indexed
+
+
+def documented_at(
+    item: Item,
+    documents: dict[str, list[str]],
+    peers: list[Item] | None = None,
+    index: dict[str, list[tuple[str, list[str]]]] | None = None,
+) -> list[str]:
+    """Org pages that document this item.
+
+    A bare token is enough when the name occurs once on that surface.
+    A repeated name needs a type or module path that selects this item,
+    or the item's own reference page.
+    """
+    group = peers if peers is not None else [item]
+    bare = _bare_name(item)
+    same = [
+        peer
+        for peer in group
+        if peer.surface == item.surface and _bare_name(peer) == bare
+    ]
+    ambiguous = len(same) > 1
+    own = _own_reference_pages(item, same) if ambiguous else set()
+    if index is None:
+        index = _index_documents(documents)
+    pages: list[str] = []
+    for token, locations in index.get(bare, []):
+        if not _qualified_token(token):
+            if not ambiguous:
+                pages.extend(locations)
+            else:
+                pages.extend(page for page in locations if page in own)
+            continue
+        matched = [
+            peer
+            for peer in same
+            if peer.name == token or _prefix_matches(peer, _token_parts(token)[:-1])
+        ]
+        keys = {_item_key(peer) for peer in matched}
+        if len(keys) == 1 and _item_key(item) in keys:
+            pages.extend(locations)
+    return sorted(set(pages))
 
 
 def clean_cell(value: str) -> str:
@@ -2118,7 +2285,10 @@ def clean_cell(value: str) -> str:
 
 
 def render_inventory(items: list[Item], documents: dict[str, list[str]]) -> str:
-    before = sum(bool(documented_at(item, documents)) for item in items)
+    index = _index_documents(documents)
+    before = sum(
+        bool(documented_at(item, documents, items, index)) for item in items
+    )
     lines = [
         "#+TITLE: Public API inventory",
         "#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil",
@@ -2148,7 +2318,7 @@ def render_inventory(items: list[Item], documents: dict[str, list[str]]) -> str:
             ]
         )
         for item in sorted(i for i in items if i.surface == surface):
-            locations = documented_at(item, documents)
+            locations = documented_at(item, documents, items, index)
             docs = ", ".join(f"~{loc}~" for loc in locations[:3])
             if not docs:
                 docs = "~docs/orgmode/reference/public-api.org~"

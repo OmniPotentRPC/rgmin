@@ -262,7 +262,9 @@ class HeaderDeclarationTests(unittest.TestCase):
         """
         found = {
             name
-            for _line, name, _decl, _kind in inventory.header_declared_names(text)
+            for _line, name, _decl, _kind, *_scope in inventory.header_declared_names(
+                text
+            )
         }
         self.assertIn("xts_solver_create", found)
         self.assertIn("rgmin_solver_create", found)
@@ -332,7 +334,9 @@ class HeaderDeclarationTests(unittest.TestCase):
         """
         found = {
             name
-            for _line, name, _decl, _kind in inventory.header_declared_names(text)
+            for _line, name, _decl, _kind, *_scope in inventory.header_declared_names(
+                text
+            )
         }
         self.assertNotIn("RGMIN_H", found)
         self.assertIn("RGMIN_H_MAJOR", found)
@@ -366,10 +370,20 @@ class HeaderDeclarationTests(unittest.TestCase):
         """
         found = {
             (name, kind)
-            for _line, name, _decl, kind in inventory.header_declared_names(
+            for _line, name, _decl, kind, *_scope in inventory.header_declared_names(
                 text, cxx=True
             )
         }
+        scoped = {
+            (name, scope)
+            for _line, name, _decl, kind, scope in inventory.header_declared_names(
+                text, cxx=True
+            )
+            if kind == "function"
+        }
+        self.assertIn(("run", ("rgmin", "Control")), scoped)
+        self.assertIn(("solve", ("rgmin", "Solver")), scoped)
+        self.assertIn(("version", ("rgmin",)), scoped)
         self.assertIn(("Method", "enum"), found)
         self.assertIn(("Control", "struct"), found)
         self.assertIn(("Solver", "class"), found)
@@ -503,6 +517,104 @@ class InventorySurfaceTests(unittest.TestCase):
                 and item.source == "python/rgmin/_maturin.pyi"
                 for item in python
             )
+        )
+
+
+class AmbiguousNameTests(unittest.TestCase):
+    def test_control_default_is_not_credited_to_lammps_page(self) -> None:
+        items = (
+            inventory.rust_items()
+            + inventory.header_items()
+            + inventory.python_items()
+        )
+        documents = inventory.org_documents()
+        matches = [
+            item
+            for item in items
+            if item.name == "default"
+            and item.source == "src/control.rs"
+            and item.line == 221
+        ]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0].scope, ("rgmin", "control", "Control"))
+        places = inventory.documented_at(matches[0], documents, items)
+        self.assertNotIn("docs/orgmode/reference/lammps-min-style.org", places)
+        self.assertIn("docs/orgmode/reference/python.org", places)
+
+    def test_bare_name_counts_only_on_the_items_reference_page(self) -> None:
+        control = inventory.Item(
+            "Rust",
+            "function",
+            "default",
+            "src/control.rs",
+            209,
+            "fn default() -> Self {",
+            ("rgmin", "control", "Control"),
+        )
+        fire = inventory.Item(
+            "Rust",
+            "function",
+            "default",
+            "src/fire.rs",
+            140,
+            "fn default() -> Self {",
+            ("rgmin", "fire", "Fire"),
+        )
+        documents = {
+            "default": [
+                "docs/orgmode/reference/lammps-min-style.org",
+                "docs/orgmode/reference/control.org",
+            ]
+        }
+        places = inventory.documented_at(control, documents, [control, fire])
+        self.assertEqual(places, ["docs/orgmode/reference/control.org"])
+        self.assertEqual(
+            inventory.documented_at(fire, documents, [control, fire]),
+            [],
+        )
+
+    def test_type_or_module_path_selects_one_item(self) -> None:
+        control = inventory.Item(
+            "Rust",
+            "function",
+            "default",
+            "src/control.rs",
+            209,
+            "fn default() -> Self {",
+            ("rgmin", "control", "Control"),
+        )
+        other = inventory.Item(
+            "Rust",
+            "function",
+            "default",
+            "src/control.rs",
+            40,
+            "fn default() -> Self {",
+            ("rgmin", "control", "StopNorm"),
+        )
+        fire = inventory.Item(
+            "Rust",
+            "function",
+            "default",
+            "src/fire.rs",
+            140,
+            "fn default() -> Self {",
+            ("rgmin", "fire", "Fire"),
+        )
+        peers = [control, other, fire]
+        typed = {"Control::default": ["docs/orgmode/howto/configure.org"]}
+        self.assertEqual(
+            inventory.documented_at(control, typed, peers),
+            ["docs/orgmode/howto/configure.org"],
+        )
+        self.assertEqual(inventory.documented_at(other, typed, peers), [])
+        shared = {"control::default": ["docs/orgmode/howto/configure.org"]}
+        self.assertEqual(inventory.documented_at(control, shared, peers), [])
+        self.assertEqual(inventory.documented_at(other, shared, peers), [])
+        lone = {"fire::default": ["docs/orgmode/howto/fire.org"]}
+        self.assertEqual(
+            inventory.documented_at(fire, lone, peers),
+            ["docs/orgmode/howto/fire.org"],
         )
 
 
