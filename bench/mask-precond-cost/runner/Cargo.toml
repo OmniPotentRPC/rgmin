@@ -1,0 +1,19 @@
+[package]
+name = "mask-precond-cost"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT"
+description = "Cost of the mask-precond guards on LJ38 and LJ75."
+
+# Standalone: not a member of the parent package.
+[workspace]
+
+[dependencies]
+eindir-core = "0.6.0"
+ndarray = "0.17"
+rgmin = { path = "../../.." }
+linkcell = { version = "0.6.0", default-features = false }
+libc = "0.2"
+sha2 = "0.10"
+serde_json = "1"

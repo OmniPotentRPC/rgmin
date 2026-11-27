@@ -1,0 +1,244 @@
+{
+  "bit_identity": "IDENTICAL",
+  "bit_identity_detail": {
+    "compared": 96,
+    "first_differing_seed": null,
+    "result": "IDENTICAL"
+  },
+  "bootstrap_samples": 10000,
+  "bootstrap_seed": 20261123,
+  "budget": 2000,
+  "miss_score": 2001,
+  "protocol": {
+    "atom_cap": 0.2,
+    "base": "0df557c2355011419b4fa60ead390f300940b361",
+    "budget": 2000,
+    "core": 0,
+    "eon_cap": 0.2,
+    "fire_istep": 0.1,
+    "fmax": 0.01,
+    "methods": [
+      "fire2-exp",
+      "eon",
+      "fire2"
+    ],
+    "neighbours": "linkcell::pairs_open 0.6.0",
+    "optimizer_a": "0df557c2355011419b4fa60ead390f300940b361",
+    "optimizer_b": "6630fbcc904def63d99a6615b8260bcf07307fab",
+    "order": [
+      "A",
+      "B",
+      "B",
+      "A"
+    ],
+    "potential": "pairwise Lennard-Jones epsilon=1 sigma=1 from tests/gpmin.rs",
+    "seeds": [
+      2000,
+      2001,
+      2002,
+      2003,
+      2004,
+      2005,
+      2006,
+      2007,
+      2008,
+      2009,
+      2010,
+      2011
+    ],
+    "sigma": 0.02,
+    "systems": [
+      "lj38",
+      "lj75"
+    ]
+  },
+  "ratio_limit": 1.1,
+  "replicate_mismatches": [],
+  "start_mismatches": [],
+  "verdicts": [
+    {
+      "ci95": [
+        1.293654990085922,
+        1.3717948717948718
+      ],
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.3416666666666668,
+      "median_evals_a": 84.5,
+      "median_evals_b": 113.0,
+      "method": "fire2-exp",
+      "mwu_p": 3.545646695827148e-05,
+      "mwu_u": 144.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_seeds": 12,
+      "same_coord": 0,
+      "same_energy_bits": 0,
+      "same_evals": 0,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj38",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "FLAG"
+    },
+    {
+      "ci95": [
+        1.2675865800865802,
+        1.348449979694057
+      ],
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.306599509234147,
+      "median_evals_a": 85.5,
+      "median_evals_b": 111.0,
+      "method": "fire2-exp",
+      "mwu_p": 3.462842221038823e-05,
+      "mwu_u": 144.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_seeds": 12,
+      "same_coord": 0,
+      "same_energy_bits": 0,
+      "same_evals": 0,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj75",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "FLAG"
+    },
+    {
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 22.5,
+      "median_evals_b": 22.5,
+      "method": "eon",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_seeds": 12,
+      "same_coord": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj38",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "PASS"
+    },
+    {
+      "ci95": [
+        1.0,
+        1.0
+      ],
+      "fisher_odds_ratio": null,
+      "fisher_p": 1.0,
+      "median_eval_ratio_b_over_a": 1.0,
+      "median_evals_a": 20.0,
+      "median_evals_b": 20.0,
+      "method": "eon",
+      "mwu_p": 1.0,
+      "mwu_u": 72.0,
+      "n_conv_a": 12,
+      "n_conv_b": 12,
+      "n_seeds": 12,
+      "same_coord": 12,
+      "same_energy_bits": 12,
+      "same_evals": 12,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "system": "lj75",
+      "table_conv_miss": [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          0
+        ]
+      ],
+      "verdict": "PASS"
+    }
+  ]
+}
