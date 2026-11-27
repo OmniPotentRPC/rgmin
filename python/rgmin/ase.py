@@ -338,7 +338,7 @@ class Optimizer(_ASEOptimizer):
     calculator safe.
     """
 
-    defaults: dict[str, float] = {"maxstep": 0.2}
+    defaults: dict[str, float] = {"maxstep": 0.2}  # noqa: RUF012 ASE base unannotated
 
     def _restart_supported(self) -> bool:
         return False
