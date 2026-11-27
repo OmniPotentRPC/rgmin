@@ -248,9 +248,9 @@ Named classes: ``LBFGS``, ``LBFGSLineSearch``, ``FIRE``, ``FIRE2``, ``QuickMin``
 ``LBFGSLineSearch`` subclasses ``LBFGS``. Their constructors match ASE 3.29.0
 (`BFGSLineSearch <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/bfgslinesearch.py>`_,
 `LBFGS <https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/lbfgs.py>`_).
-``CG`` defaults to Polak-Ribiere, the C method ``RGMIN_POLAK_RIBIERE``.
-``beta`` can name another conjugacy token, including ``polak_ribiere_plus``,
-which is ``RGMIN_POLAK_RIBIERE_PLUS``.
+``CG`` defaults to Polak-Ribiere, the C method ``RGMIN_POLAK_RIBIERE`` (0).
+``beta`` stores another conjugate-gradient method name. ``polak_ribiere_plus``
+is ``RGMIN_POLAK_RIBIERE_PLUS`` (26).
 
 ``run`` returns a Python ``bool``. ``True`` means the force criterion was
 met.
