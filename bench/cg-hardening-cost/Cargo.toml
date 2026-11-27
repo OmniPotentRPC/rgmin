@@ -1,0 +1,19 @@
+[package]
+name = "cg-hardening-cost"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "Paired cost of the nonlinear CG restart and reset guards."
+
+# Standalone: not a member of any parent workspace.
+[workspace]
+
+[dependencies]
+linkcell = { version = "0.6.0", default-features = false }
+ndarray = "0.17"
+rgmin = { path = "../.." }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
