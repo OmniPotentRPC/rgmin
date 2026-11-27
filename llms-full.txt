@@ -8423,7 +8423,7 @@ entry elsewhere. Run the script to update this file. Do not edit it by hand.
 
 # Coverage
 
-Before this inventory, 1854 of 4681 source items had an exact
+Before this inventory, 2328 of 5320 source items had an exact
 marked-up name in an Org source. After this inventory, every item has a
 reference entry and a documentation location.
 
@@ -9340,6 +9340,7 @@ reference entry and a documentation location.
 | `active_simd_path` | function | `pub fn active_simd_path() -> &'static str {` | `src/vecops.rs:205` | `docs/orgmode/reference/public-api.org` |
 | `adam` | function | `pub fn adam() -> Self {` | `src/method.rs:273` | `docs/orgmode/howto/python.org`, `docs/orgmode/reference/python.org` |
 | `adam_with` | function | `pub const fn adam_with(beta1: f64, beta2: f64, eps: f64) -> Self {` | `src/method.rs:307` | `docs/orgmode/reference/public-api.org` |
+| `add` | function | `fn add(self, rhs: Self) -> Self::Output {` | `src/inverse_laplace.rs:363` | `docs/orgmode/reference/public-api.org` |
 | `add_equality` | function | `pub fn add_equality(&mut self, coefficients: Vec<(usize, f64)>, rhs: f64) -> bool {` | `src/session.rs:1651` | `docs/orgmode/howto/session.org` |
 | `add_up` | function | `pub fn add_up(a: f64, b: f64) -> f64 {` | `src/inverse_laplace.rs:465` | `docs/orgmode/reference/public-api.org` |
 | `adjoint_functional_bar` | function | `pub fn adjoint_functional_bar(` | `src/certificate.rs:281` | `docs/orgmode/reference/api.org`, `docs/orgmode/reference/sota.org` |
@@ -9347,11 +9348,15 @@ reference entry and a documentation location.
 | `align_rigid` | function | `pub fn align_rigid(` | `src/rigid/align.rs:7` | `docs/orgmode/changelog.org` |
 | `alpha` | function | `pub fn alpha(&self) -> f64 {` | `src/krylov.rs:527` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/step-bounds.org`, `docs/orgmode/howto/ase-bench.org` |
 | `ambient_dim` | function | `pub fn ambient_dim(&self) -> usize {` | `src/manifold/subspace_sphere.rs:108` | `docs/orgmode/reference/public-api.org` |
+| `apply` | function | `fn apply(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Self::Error> {` | `src/krylov/gmres.rs:180` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `apply` | function | `pub fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {` | `src/precon.rs:360` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `apply` | function | `pub fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {` | `src/precon/ff.rs:217` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `apply` | function | `pub fn apply(&self, v: ArrayView1<f64>) -> Array1<f64> {` | `src/precon/lindh.rs:259` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `apply_config` | function | `pub fn apply_config(&mut self, config: &FireConfig) {` | `src/fire.rs:326` | `docs/orgmode/reference/public-api.org` |
 | `apply_inverse` | function | `pub fn apply_inverse(` | `src/lindh.rs:105` | `docs/orgmode/reference/public-api.org` |
+| `apply_preconditioner` | function | `fn apply_preconditioner(&self, _x: ArrayView1<f64>, r: ArrayView1<f64>) -> Array1<f64> {` | `src/lowest_mode.rs:282` | `docs/orgmode/reference/public-api.org` |
+| `apply_preconditioner` | function | `fn apply_preconditioner(&self, _x: ArrayView1<f64>, r: ArrayView1<f64>) -> Array1<f64> {` | `src/lowest_mode.rs:307` | `docs/orgmode/reference/public-api.org` |
+| `apply_preconditioner` | function | `fn apply_preconditioner(&self, _x: ArrayView1<f64>, r: ArrayView1<f64>) -> Array1<f64> {` | `src/lowest_mode.rs:323` | `docs/orgmode/reference/public-api.org` |
 | `approximate_strong_wolfe` | function | `pub fn approximate_strong_wolfe(` | `src/linesearch/conditions.rs:97` | `docs/orgmode/reference/public-api.org` |
 | `armijo` | function | `pub fn armijo(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> bool {` | `src/linesearch/conditions.rs:13` | `docs/orgmode/reference/python.org` |
 | `as_highs` | function | `pub fn as_highs(self) -> Option<&'static str> {` | `src/highs_kind.rs:43` | `docs/orgmode/reference/public-api.org` |
@@ -9379,6 +9384,10 @@ reference entry and a documentation location.
 | `bordered_cyclic_log_abs` | function | `pub fn bordered_cyclic_log_abs(` | `src/periodic.rs:661` | `docs/orgmode/reference/public-api.org` |
 | `bordered_log_abs_determinant` | function | `pub fn bordered_log_abs_determinant( &self, border: &[f64], ) -> Result<(i8, f64), PeriodicBlockError> {` | `src/periodic_block.rs:482` | `docs/orgmode/reference/public-api.org` |
 | `bordered_log_abs_determinant_many` | function | `pub fn bordered_log_abs_determinant_many( &self, border: &[f64], rank: usize, ) -> Result<(i8, f64), PeriodicBlockError> {` | `src/periodic_block.rs:493` | `docs/orgmode/reference/public-api.org` |
+| `bounds` | function | `fn bounds(&self) -> &eindir_core::Bounds<f64> {` | `src/hvp.rs:94` | `docs/orgmode/howto/gpmin.org`, `docs/orgmode/reference/python.org` |
+| `bounds` | function | `fn bounds(&self) -> &eindir_core::Bounds<f64> {` | `src/hvp.rs:157` | `docs/orgmode/howto/gpmin.org`, `docs/orgmode/reference/python.org` |
+| `bounds` | function | `fn bounds(&self) -> &eindir_core::Bounds<f64> {` | `src/newton.rs:84` | `docs/orgmode/howto/gpmin.org`, `docs/orgmode/reference/python.org` |
+| `bounds` | function | `fn bounds(&self) -> &Bounds<f64> {` | `src/oracle.rs:38` | `docs/orgmode/howto/gpmin.org`, `docs/orgmode/reference/python.org` |
 | `brent` | function | `pub const fn brent(maxiter: usize, tol: f64) -> Self {` | `src/linesearch/mod.rs:238` | `docs/orgmode/howto/python.org`, `docs/orgmode/reference/python.org` |
 | `build` | function | `pub fn build<O>(obj: &O, x: ArrayView1<f64>, rank: usize, seed: u64) -> Self where O: HessianVector + ?Sized, {` | `src/hvp.rs:393` | `docs/orgmode/reference/public-api.org` |
 | `build` | function | `pub fn build(self) -> Lbfgs {` | `src/lbfgs.rs:228` | `docs/orgmode/reference/public-api.org` |
@@ -9439,6 +9448,61 @@ reference entry and a documentation location.
 | `d_scale_block` | function | `pub fn d_scale_block(&self, x1: ArrayView1<'_, f64>, x2: ArrayView1<'_, f64>) -> Array2<f64> {` | `src/gpmin.rs:458` | `docs/orgmode/reference/public-api.org` |
 | `d_weight_block` | function | `pub fn d_weight_block(&self, x1: ArrayView1<'_, f64>, x2: ArrayView1<'_, f64>) -> Array2<f64> {` | `src/gpmin.rs:448` | `docs/orgmode/reference/public-api.org` |
 | `declared` | function | `pub fn declared(eps: f64) -> Self {` | `src/noise.rs:98` | `docs/orgmode/reference/public-api.org` |
+| `default` | function | `fn default() -> Self {` | `src/aaa.rs:49` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/control.rs:209` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/eigenexa_kind.rs:47` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/eon_cg.rs:56` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:1381` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9333` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9352` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9371` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9386` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9401` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9418` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/ffi.rs:9432` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/fire.rs:140` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/gpmin.rs:201` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/gpmin.rs:368` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/gromacs.rs:151` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/gromacs.rs:439` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/gromacs.rs:704` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/gromacs.rs:733` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/highs_kind.rs:172` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/inverse_laplace.rs:1035` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/inverse_laplace.rs:1432` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/krylov.rs:88` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/krylov/gmres.rs:307` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/krylov/gmres.rs:500` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/lbfgs.rs:102` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/lbfgs.rs:620` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/linesearch/mod.rs:228` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/lowest_mode.rs:169` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/manifold/centered.rs:44` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/manifold/complex_circle.rs:28` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/manifold/constant.rs:26` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/manifold/euclidean_complex.rs:29` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/manifold/grassmann.rs:161` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/manifold/oblique.rs:75` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/manifold/positive.rs:31` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/manifold/product.rs:100` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/manifold/sphere_complex.rs:30` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/manifold/unitary.rs:81` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/method.rs:589` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/precon.rs:149` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/precon/ff.rs:133` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/precon/lindh.rs:149` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/quickmin.rs:333` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/rcg.rs:146` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/rlbfgs.rs:86` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/rtr.rs:341` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/scg.rs:73` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/slepc_kind.rs:93` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/slq.rs:1048` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/slq.rs:1312` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/slq.rs:1904` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/slq.rs:2139` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/slq.rs:2237` | `docs/orgmode/reference/lammps-min-style.org` |
+| `default` | function | `fn default() -> Self {` | `src/slq.rs:2290` | `docs/orgmode/reference/lammps-min-style.org` |
 | `default_surrogate_gtol` | function | `pub fn default_surrogate_gtol() -> f64 {` | `src/gpmin.rs:89` | `docs/orgmode/reference/public-api.org` |
 | `determinant_sign` | function | `pub fn determinant_sign(&self) -> i8 {` | `src/periodic_block.rs:336` | `docs/orgmode/reference/public-api.org` |
 | `determinant_sign` | function | `pub fn determinant_sign(&self) -> i8 {` | `src/periodic_block.rs:467` | `docs/orgmode/reference/public-api.org` |
@@ -9447,22 +9511,64 @@ reference entry and a documentation location.
 | `diis_with_memory` | function | `pub const fn diis_with_memory(memory: usize) -> Self {` | `src/method.rs:302` | `docs/orgmode/reference/public-api.org` |
 | `dim` | function | `pub fn dim(&self) -> usize {` | `src/gpmin.rs:840` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
 | `dim` | function | `pub fn dim(&self) -> usize {` | `src/gpmin.rs:1732` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
+| `dim` | function | `fn dim(&self) -> usize {` | `src/hvp.rs:90` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
+| `dim` | function | `fn dim(&self) -> usize {` | `src/hvp.rs:108` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
+| `dim` | function | `fn dim(&self) -> usize {` | `src/hvp.rs:154` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
+| `dim` | function | `fn dim(&self) -> usize {` | `src/hvp.rs:166` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
 | `dim` | function | `pub fn dim(&self) -> usize {` | `src/lbfgs/direction.rs:97` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
 | `dim` | function | `pub fn dim(self) -> usize {` | `src/manifold/grassmann.rs:155` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
+| `dim` | function | `fn dim(&self) -> usize {` | `src/newton.rs:80` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
+| `dim` | function | `fn dim(&self) -> usize {` | `src/newton.rs:98` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
+| `dim` | function | `fn dim(&self) -> usize {` | `src/oracle.rs:34` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
+| `dim` | function | `fn dim(&self) -> usize {` | `src/oracle.rs:51` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
 | `dim` | function | `pub fn dim(&self) -> usize {` | `src/precon.rs:354` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
 | `dim` | function | `pub fn dim(&self) -> usize {` | `src/precon/ff.rs:211` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
 | `dim` | function | `pub fn dim(&self) -> usize {` | `src/precon/lindh.rs:253` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
 | `dim` | function | `pub fn dim(&self) -> usize {` | `src/session.rs:1132` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
 | `direction` | function | `pub fn direction(&self, gradient: ArrayView1<'_, f64>, h0: LbfgsH0<'_>) -> Result<Array1<f64>> {` | `src/lbfgs/direction.rs:211` | `docs/orgmode/reference/public-api.org` |
 | `displacement` | function | `pub fn displacement(self, gradient: ArrayView1<'_, f64>) -> Array1<f64> {` | `src/gromacs.rs:334` | `docs/orgmode/reference/public-api.org` |
+| `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/complex_circle.rs:165` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/mod.rs:884` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/oblique.rs:205` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/product.rs:552` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/se3.rs:81` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/so3.rs:179` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/sphere.rs:206` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/sphere_complex.rs:153` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/stiefel.rs:68` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `dist` | function | `fn dist(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<f64> {` | `src/manifold/subspace_sphere.rs:208` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `distance_constraints` | function | `pub fn distance_constraints(&self) -> Option<&DistanceConstraints> {` | `src/session.rs:7070` | `docs/orgmode/reference/public-api.org` |
+| `div` | function | `fn div(self, rhs: Self) -> Self::Output {` | `src/inverse_laplace.rs:433` | `docs/orgmode/reference/public-api.org` |
+| `div` | function | `fn div(self, rhs: f64) -> Self::Output {` | `src/inverse_laplace.rs:455` | `docs/orgmode/reference/public-api.org` |
 | `div_assign_floor` | function | `pub fn div_assign_floor(x: ArrayView1<f64>, y: &mut Array1<f64>, floor: f64) {` | `src/vecops.rs:829` | `docs/orgmode/explanation/simd.org` |
 | `div_up` | function | `pub fn div_up(a: f64, b: f64) -> f64 {` | `src/inverse_laplace.rs:477` | `docs/orgmode/reference/public-api.org` |
 | `dogleg_direction` | function | `pub fn dogleg_direction(hess: &Array2<f64>, grad: &Array1<f64>, delta: f64) -> Array1<f64> {` | `src/trust.rs:21` | `docs/orgmode/explanation/trust-region.org` |
 | `dot` | function | `pub fn dot(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {` | `src/vecops.rs:723` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/simd.org`, `docs/orgmode/reference/architecture.org` |
 | `dot_ordered` | function | `pub fn dot_ordered(x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {` | `src/vecops.rs:713` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/simd.org` |
 | `ecnoise` | function | `pub fn ecnoise(values: &[f64]) -> Result<NoiseEstimate> {` | `src/noise.rs:111` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/ecnoise.org`, `docs/orgmode/reference/architecture.org` |
+| `egrad2rgrad` | function | `fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {` | `src/manifold/hyperbolic.rs:107` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org` |
+| `egrad2rgrad` | function | `fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {` | `src/manifold/mod.rs:854` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org` |
+| `egrad2rgrad` | function | `fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {` | `src/manifold/multinomial_ds.rs:253` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org` |
+| `egrad2rgrad` | function | `fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {` | `src/manifold/multinomial_sym.rs:254` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org` |
+| `egrad2rgrad` | function | `fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {` | `src/manifold/positive.rs:111` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org` |
+| `egrad2rgrad` | function | `fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {` | `src/manifold/product.rs:452` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org` |
+| `egrad2rgrad` | function | `fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {` | `src/manifold/riemannian.rs:637` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org` |
+| `egrad2rgrad` | function | `fn egrad2rgrad(&self, x: &Array1<f64>, egrad: &Array1<f64>) -> Array1<f64> {` | `src/manifold/spd.rs:210` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org` |
 | `egrad_to_rgrad` | function | `pub fn egrad_to_rgrad(&self, x: &[f64], egrad: &[f64], out: &mut [f64]) -> Result<()> {` | `src/manifold/riemannian.rs:531` | `docs/orgmode/reference/manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/complex_circle.rs:147` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, _x: &Array1<f64>, _egrad: &Array1<f64>, ehess: &Array1<f64>, _v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/euclidean.rs:35` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/mod.rs:866` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/oblique.rs:177` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/positive.rs:164` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/product.rs:519` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/se3.rs:51` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/so3.rs:137` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/spd.rs:250` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/sphere.rs:187` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/sphere_complex.rs:135` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/stiefel.rs:50` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/stiefel.rs:246` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `ehess2rhess` | function | `fn ehess2rhess( &self, x: &Array1<f64>, egrad: &Array1<f64>, ehess: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/subspace_sphere.rs:186` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `eigh` | function | `pub fn eigh(&self) -> (Array1<f64>, Array2<f64>) {` | `src/qn_irc.rs:105` | `docs/orgmode/reference/public-api.org` |
 | `elpa_config` | function | `pub fn elpa_config(kind: EigensolverKind, elpa: &ElpaParams) -> Option<(i32, u32)> {` | `src/elpa_kind.rs:70` | `docs/orgmode/reference/public-api.org` |
 | `elpa_solver` | function | `pub const fn elpa_solver(self) -> i32 {` | `src/elpa_kind.rs:45` | `docs/orgmode/reference/public-api.org` |
@@ -9470,6 +9576,7 @@ reference entry and a documentation location.
 | `energy_converged` | function | `pub fn energy_converged(&self, previous: f64, current: f64) -> bool {` | `src/control.rs:442` | `docs/orgmode/reference/public-api.org` |
 | `eon` | function | `pub fn eon() -> Self {` | `src/quickmin.rs:311` | `docs/orgmode/reference/public-api.org` |
 | `eon_cg` | function | `pub fn eon_cg() -> Self {` | `src/method.rs:255` | `docs/orgmode/reference/python.org` |
+| `eq` | function | `fn eq(&self, other: &MinresError<E>) -> bool {` | `src/minres.rs:191` | `docs/orgmode/reference/public-api.org` |
 | `estimate_mu` | function | `pub fn estimate_mu<G>(` | `src/precon.rs:723` | `docs/orgmode/explanation/precon.org` |
 | `estimate_second` | function | `pub fn estimate_second<O>(` | `src/noise.rs:509` | `docs/orgmode/reference/public-api.org` |
 | `estimate_third` | function | `pub fn estimate_third<O>(` | `src/noise.rs:560` | `docs/orgmode/howto/noise.org` |
@@ -9477,6 +9584,10 @@ reference entry and a documentation location.
 | `euclidean_cap` | function | `pub fn euclidean_cap(mut self, on: bool) -> Self {` | `src/lbfgs.rs:200` | `docs/orgmode/reference/public-api.org` |
 | `euclidean_complex` | function | `pub fn euclidean_complex(n: usize) -> Self {` | `src/manifold/mod.rs:539` | `docs/orgmode/changelog.org` |
 | `eval` | function | `pub fn eval(&self, x: f64) -> Option<f64> {` | `src/aaa.rs:148` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/api.org` |
+| `eval` | function | `fn eval(&self, x: ArrayView1<f64>) -> f64 {` | `src/hvp.rs:98` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/api.org` |
+| `eval` | function | `fn eval(&self, x: ArrayView1<f64>) -> f64 {` | `src/hvp.rs:160` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/api.org` |
+| `eval` | function | `fn eval(&self, x: ArrayView1<f64>) -> f64 {` | `src/newton.rs:88` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/api.org` |
+| `eval` | function | `fn eval(&self, x: ArrayView1<f64>) -> f64 {` | `src/oracle.rs:42` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/api.org` |
 | `eval_orthonormal_laguerre_series` | function | `pub fn eval_orthonormal_laguerre_series(` | `src/inverse_laplace.rs:764` | `docs/orgmode/reference/public-api.org` |
 | `evals` | function | `pub fn evals(&self) -> usize {` | `src/gpmin.rs:1787` | `docs/orgmode/reference/public-api.org` |
 | `evals` | function | `pub fn evals(&self) -> usize {` | `src/session.rs:3009` | `docs/orgmode/reference/public-api.org` |
@@ -9484,7 +9595,19 @@ reference entry and a documentation location.
 | `excludes` | function | `pub fn excludes(&self) -> bool {` | `src/manifold/subspace_sphere.rs:128` | `docs/orgmode/reference/public-api.org` |
 | `excluding` | function | `pub fn excluding(basis: Array2<f64>) -> Result<Self> {` | `src/manifold/subspace_sphere.rs:96` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `exp` | function | `pub fn exp(self) -> Self {` | `src/inverse_laplace.rs:294` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/complex_circle.rs:157` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/euclidean.rs:45` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/mod.rs:876` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/oblique.rs:197` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/positive.rs:179` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/product.rs:538` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `exp` | function | `pub fn exp(&self, x: &[f64], v: &[f64], out: &mut [f64]) -> Result<()> {` | `src/manifold/riemannian.rs:552` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/se3.rs:65` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/so3.rs:162` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/sphere.rs:198` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/sphere_complex.rs:145` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/stiefel.rs:60` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `fn exp(&self, x: &Array1<f64>, v: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/subspace_sphere.rs:200` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `exp_gate_open` | function | `pub fn exp_gate_open(c_force: f64, c_bond: f64, max_spread: f64) -> bool {` | `src/precon.rs:1381` | `docs/orgmode/reference/public-api.org` |
 | `exp_mu` | function | `pub fn exp_mu(&self) -> Option<f64> {` | `src/session.rs:7046` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
 | `expm` | function | `pub fn expm(a: &[f64], m: usize) -> Result<Exponential, MagnusError> {` | `src/magnus.rs:201` | `docs/orgmode/reference/public-api.org` |
@@ -9509,6 +9632,20 @@ reference entry and a documentation location.
 | `fit_hyperparameters` | function | `pub fn fit_hyperparameters(&mut self, config: &GpMinConfig) -> Result<bool> {` | `src/gpmin.rs:1115` | `docs/orgmode/reference/public-api.org` |
 | `fits` | function | `pub fn fits(&self, dim: usize) -> Result<()> {` | `src/holonomic/mod.rs:377` | `docs/orgmode/reference/public-api.org` |
 | `fixed_scale` | function | `pub fn fixed_scale(mut self, h0: f64) -> Self {` | `src/lbfgs.rs:193` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/certificate.rs:61` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {` | `src/holonomic/mod.rs:91` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/inverse_laplace.rs:144` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/krylov/gmres.rs:42` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/krylov/gmres.rs:166` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/krylov/gmres.rs:343` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/krylov/gmres.rs:411` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/lbfgs/direction.rs:48` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/lbfgs/direction.rs:57` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/majorant.rs:36` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/minres.rs:55` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/minres.rs:197` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {` | `src/minres.rs:253` | `docs/orgmode/reference/public-api.org` |
+| `fmt` | function | `fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {` | `src/report.rs:151` | `docs/orgmode/reference/public-api.org` |
 | `for_step_size` | function | `pub fn for_step_size(step_size: f64) -> Self {` | `src/gromacs.rs:158` | `docs/orgmode/reference/public-api.org` |
 | `force_simd_path` | function | `pub fn force_simd_path(name: &str) -> bool {` | `src/vecops.rs:182` | `docs/orgmode/reference/public-api.org` |
 | `forcing` | function | `pub fn forcing( &self, residual: f64, previous: Option<(f64, f64)>, target: f64, ) -> Result<Option<f64>> {` | `src/krylov.rs:544` | `docs/orgmode/reference/public-api.org` |
@@ -9517,6 +9654,8 @@ reference entry and a documentation location.
 | `forget` | function | `pub fn forget(&mut self) {` | `src/session.rs:2715` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/howto/manifolds.org` |
 | `forget_evaluation` | function | `pub fn forget_evaluation(&mut self) {` | `src/session.rs:2592` | `docs/orgmode/howto/session.org` |
 | `forward_step` | function | `pub fn forward_step(eps_f: f64, second: Option<f64>, point_scale: f64) -> f64 {` | `src/noise.rs:682` | `docs/orgmode/reference/public-api.org` |
+| `from` | function | `fn from((re, im): (f64, f64)) -> Self {` | `src/inverse_laplace.rs:348` | `docs/orgmode/reference/public-api.org` |
+| `from` | function | `fn from(error: MinresError<E>) -> Self {` | `src/minres.rs:185` | `docs/orgmode/reference/public-api.org` |
 | `from_atom_masses` | function | `pub fn from_atom_masses(d1: Array1<f64>, masses: &[f64], dx: f64) -> Self {` | `src/irc_trust.rs:61` | `docs/orgmode/howto/configure.org` |
 | `from_diag` | function | `pub fn from_diag(diag: ArrayView1<f64>) -> Self {` | `src/lowest_mode.rs:299` | `docs/orgmode/reference/public-api.org` |
 | `from_host` | function | `pub fn from_host(data: Array1<f64>) -> Self {` | `src/vecops.rs:923` | `docs/orgmode/reference/public-api.org` |
@@ -9547,6 +9686,10 @@ reference entry and a documentation location.
 | `goldstein_upper` | function | `pub fn goldstein_upper(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> bool {` | `src/linesearch/conditions.rs:130` | `docs/orgmode/reference/public-api.org` |
 | `gpmin_config` | function | `pub fn gpmin_config(&self) -> Option<GpMinConfig> {` | `src/session.rs:6571` | `docs/orgmode/reference/public-api.org` |
 | `gpmin_hyperparameters` | function | `pub fn gpmin_hyperparameters(&self) -> Option<(f64, f64, f64)> {` | `src/session.rs:6581` | `docs/orgmode/reference/public-api.org` |
+| `grad` | function | `fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {` | `src/hvp.rs:112` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/api.org` |
+| `grad` | function | `fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {` | `src/hvp.rs:169` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/api.org` |
+| `grad` | function | `fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {` | `src/newton.rs:102` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/api.org` |
+| `grad` | function | `fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {` | `src/oracle.rs:55` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/api.org` |
 | `gradient_calls` | function | `pub fn gradient_calls(&self) -> usize {` | `src/session.rs:1142` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/api.org` |
 | `gradient_dr` | function | `pub fn gradient_dr(eps_g: f64, third: Option<f64>, point_scale: f64) -> f64 {` | `src/noise.rs:691` | `docs/orgmode/reference/public-api.org` |
 | `gradient_step` | function | `pub fn gradient_step( &self, x: &[f64], egrad: &[f64], t: f64, rgrad_out: &mut [f64], x_out: &mut [f64], ) -> Result<()> {` | `src/manifold/riemannian.rs:603` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
@@ -9561,7 +9704,10 @@ reference entry and a documentation location.
 | `guenole2020` | function | `pub fn guenole2020(dim: usize, dt0: f64) -> (FireState, Fire2Extras) {` | `src/fire.rs:782` | `docs/orgmode/reference/python.org` |
 | `h` | function | `pub const fn h(&self) -> f64 {` | `src/certificate.rs:104` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/ecnoise.org`, `docs/orgmode/howto/noise.org` |
 | `halt` | function | `pub fn halt(&self, grad: f64, n_free: usize) -> Option<crate::report::Status> {` | `src/control.rs:406` | `docs/orgmode/reference/public-api.org` |
+| `hessian` | function | `fn hessian(&self, x: ArrayView1<f64>) -> Array2<f64> {` | `src/newton.rs:122` | `docs/orgmode/explanation/precon.org`, `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/reference/python.org` |
 | `hessian` | function | `pub fn hessian(&self) -> &Array2<f64> {` | `src/qn_irc.rs:83` | `docs/orgmode/explanation/precon.org`, `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/reference/python.org` |
+| `hessian_vector` | function | `fn hessian_vector(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {` | `src/hvp.rs:132` | `docs/orgmode/reference/public-api.org` |
+| `hessian_vector` | function | `fn hessian_vector(&self, x: ArrayView1<f64>, v: ArrayView1<f64>) -> Array1<f64> {` | `src/hvp.rs:181` | `docs/orgmode/reference/public-api.org` |
 | `higham_gamma` | function | `pub fn higham_gamma(n: usize) -> Result<f64, InverseLaplaceError> {` | `src/inverse_laplace.rs:529` | `docs/orgmode/reference/public-api.org` |
 | `highs_feasible_step` | function | `pub fn highs_feasible_step(` | `src/lbfgs_qp.rs:560` | `docs/orgmode/reference/public-api.org` |
 | `highs_feasible_step_with_options` | function | `pub fn highs_feasible_step_with_options(` | `src/lbfgs_qp.rs:580` | `docs/orgmode/reference/public-api.org` |
@@ -9582,11 +9728,20 @@ reference entry and a documentation location.
 | `inner` | function | `pub fn inner(u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/centered.rs:128` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `inner` | function | `pub fn inner(u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/constant.rs:57` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `inner` | function | `pub fn inner(u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/euclidean_complex.rs:77` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `inner` | function | `fn inner(&self, _x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/hyperbolic.rs:103` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `inner` | function | `fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/mod.rs:858` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `inner` | function | `pub fn inner(x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/multinomial_ds.rs:54` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `inner` | function | `fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/multinomial_ds.rs:292` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `inner` | function | `pub fn inner(x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/multinomial_sym.rs:55` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `inner` | function | `fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/multinomial_sym.rs:293` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `inner` | function | `fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/poincare.rs:108` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `inner` | function | `pub fn inner(x: &Array1<f64>, eta: &Array1<f64>, zeta: &Array1<f64>) -> f64 {` | `src/manifold/positive.rs:63` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `inner` | function | `fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/positive.rs:158` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `inner` | function | `fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/product.rs:490` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `inner` | function | `pub fn inner(&self, x: &[f64], u: &[f64], v: &[f64]) -> Result<f64> {` | `src/manifold/riemannian.rs:590` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `inner` | function | `fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/riemannian.rs:648` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `inner` | function | `pub fn inner(u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/skewsymmetric.rs:48` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `inner` | function | `fn inner(&self, x: &Array1<f64>, u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/spd.rs:226` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `inner` | function | `pub fn inner(u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/sphere_complex.rs:79` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `inner` | function | `pub fn inner(u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/symmetric.rs:47` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `inner` | function | `pub fn inner(u: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/unitary.rs:321` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
@@ -9620,6 +9775,9 @@ reference entry and a documentation location.
 | `is_unmet` | function | `pub fn is_unmet(self) -> bool {` | `src/report.rs:103` | `docs/orgmode/reference/public-api.org` |
 | `judge` | function | `pub fn judge( &mut self, force: &Array1<f64>, steepest: &Array1<f64>, force_new: &Array1<f64>, steepest_new: &Array1<f64>, h: f64, ) -> Ode12rVerdict {` | `src/ode12r.rs:126` | `docs/orgmode/reference/public-api.org` |
 | `kantorovich_ball` | function | `pub fn kantorovich_ball(` | `src/certificate.rs:226` | `docs/orgmode/reference/api.org`, `docs/orgmode/reference/sota.org` |
+| `kind` | function | `fn kind(&self) -> PreconditionerKind {` | `src/lowest_mode.rs:285` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
+| `kind` | function | `fn kind(&self) -> PreconditionerKind {` | `src/lowest_mode.rs:310` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
+| `kind` | function | `fn kind(&self) -> PreconditionerKind {` | `src/lowest_mode.rs:339` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
 | `l_matrix` | function | `pub fn l_matrix(&self) -> &[f64] {` | `src/newton.rs:1272` | `docs/orgmode/reference/public-api.org` |
 | `lanczos_extreme_pairs` | function | `pub fn lanczos_extreme_pairs<F>(` | `src/slq.rs:1438` | `docs/orgmode/reference/public-api.org` |
 | `lanczos_quadrature_fn` | function | `pub fn lanczos_quadrature_fn<F, G>(` | `src/slq.rs:869` | `docs/orgmode/changelog.org` |
@@ -9641,7 +9799,19 @@ reference entry and a documentation location.
 | `linesearch` | function | `pub fn linesearch(&self) -> LineSearch {` | `src/session.rs:1127` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/python.org` |
 | `lobatto_shapes` | function | `pub fn lobatto_shapes(degree: usize, xi: f64) -> Result<LobattoShapes, QuadratureError> {` | `src/quadrature.rs:156` | `docs/orgmode/reference/public-api.org` |
 | `local_error` | function | `pub fn local_error(h: f64, y: &Array1<f64>) -> f64 {` | `src/ode12r.rs:188` | `docs/orgmode/reference/public-api.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/complex_circle.rs:161` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/euclidean.rs:49` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/mod.rs:880` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/oblique.rs:201` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/positive.rs:183` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/product.rs:545` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `log` | function | `pub fn log(&self, x: &[f64], y: &[f64], out: &mut [f64]) -> Result<()> {` | `src/manifold/riemannian.rs:562` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/se3.rs:73` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/so3.rs:171` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/sphere.rs:202` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/sphere_complex.rs:149` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/stiefel.rs:64` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `log` | function | `fn log(&self, x: &Array1<f64>, y: &Array1<f64>) -> Option<Array1<f64>> {` | `src/manifold/subspace_sphere.rs:204` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `log_abs_determinant` | function | `pub fn log_abs_determinant(&self) -> f64 {` | `src/periodic_block.rs:341` | `docs/orgmode/reference/public-api.org` |
 | `log_abs_determinant` | function | `pub fn log_abs_determinant(&self) -> f64 {` | `src/periodic_block.rs:472` | `docs/orgmode/reference/public-api.org` |
 | `lowest_eigenpair` | function | `pub fn lowest_eigenpair<H: ApplyHessian + ?Sized>(` | `src/lowest_mode.rs:414` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/configure.org`, `docs/orgmode/howto/irc.org` |
@@ -9706,6 +9876,8 @@ reference entry and a documentation location.
 | `model_atom` | function | `pub fn model_atom(mut self, on: bool) -> Self {` | `src/lbfgs.rs:207` | `docs/orgmode/reference/public-api.org` |
 | `model_below_energy_noise` | function | `pub fn model_below_energy_noise(self, predicted: f64) -> bool {` | `src/control.rs:76` | `docs/orgmode/reference/public-api.org` |
 | `mu` | function | `pub fn mu(&self) -> f64 {` | `src/precon.rs:342` | `docs/orgmode/explanation/step-bounds.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/constraints.org` |
+| `mul` | function | `fn mul(self, rhs: Self) -> Self::Output {` | `src/inverse_laplace.rs:396` | `docs/orgmode/reference/public-api.org` |
+| `mul` | function | `fn mul(self, rhs: f64) -> Self::Output {` | `src/inverse_laplace.rs:407` | `docs/orgmode/reference/public-api.org` |
 | `mul_assign` | function | `pub fn mul_assign(x: ArrayView1<f64>, y: &mut Array1<f64>) {` | `src/vecops.rs:804` | `docs/orgmode/explanation/simd.org` |
 | `mul_up` | function | `pub fn mul_up(a: f64, b: f64) -> f64 {` | `src/inverse_laplace.rs:471` | `docs/orgmode/reference/public-api.org` |
 | `multinomial_ds` | function | `pub fn multinomial_ds(n: usize) -> Self {` | `src/manifold/mod.rs:550` | `docs/orgmode/reference/public-api.org` |
@@ -9720,6 +9892,7 @@ reference entry and a documentation location.
 | `nearest_neighbour_distance` | function | `pub fn nearest_neighbour_distance(` | `src/precon.rs:643` | `docs/orgmode/reference/public-api.org` |
 | `needs_pmat` | function | `pub const fn needs_pmat(self) -> bool {` | `src/slepc_kind.rs:47` | `docs/orgmode/reference/public-api.org` |
 | `needs_rebuild` | function | `pub fn needs_rebuild(max_atom_displacement: f64, scale: f64) -> bool {` | `src/precon.rs:588` | `docs/orgmode/reference/public-api.org` |
+| `neg` | function | `fn neg(self) -> Self::Output {` | `src/inverse_laplace.rs:385` | `docs/orgmode/reference/public-api.org` |
 | `neg_log_marginal_likelihood` | function | `pub fn neg_log_marginal_likelihood( &self, weight: f64, scale: f64, noise: f64, ) -> Result<(f64, [f64; 2])> {` | `src/gpmin.rs:1057` | `docs/orgmode/reference/public-api.org` |
 | `new` | function | `pub fn new(tol: f64, max_support: usize) -> Self {` | `src/aaa.rs:62` | `docs/orgmode/reference/api.org`, `docs/orgmode/reference/product-manifold.org` |
 | `new` | function | `pub fn new(eps_g: f64) -> Self {` | `src/control.rs:31` | `docs/orgmode/reference/api.org`, `docs/orgmode/reference/product-manifold.org` |
@@ -9775,6 +9948,8 @@ reference entry and a documentation location.
 | `nonlinear_remainder` | function | `pub const fn nonlinear_remainder(&self) -> f64 {` | `src/certificate.rs:122` | `docs/orgmode/reference/public-api.org` |
 | `norm` | function | `pub fn norm(self) -> f64 {` | `src/inverse_laplace.rs:276` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/session.org` |
 | `norm` | function | `pub fn norm(mut self, norm: GradNorm) -> Self {` | `src/lbfgs.rs:150` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/session.org` |
+| `norm` | function | `fn norm(&self, x: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/mod.rs:862` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/session.org` |
+| `norm` | function | `fn norm(&self, x: &Array1<f64>, v: &Array1<f64>) -> f64 {` | `src/manifold/product.rs:508` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/session.org` |
 | `norm_sqr` | function | `pub fn norm_sqr(self) -> f64 {` | `src/inverse_laplace.rs:270` | `docs/orgmode/reference/public-api.org` |
 | `norm_up` | function | `pub fn norm_up(z: Complex64) -> f64 {` | `src/inverse_laplace.rs:489` | `docs/orgmode/reference/public-api.org` |
 | `note_direction` | function | `pub fn note_direction(&mut self, beta: f64) {` | `src/gromacs.rs:784` | `docs/orgmode/reference/public-api.org` |
@@ -9784,6 +9959,7 @@ reference entry and a documentation location.
 | `nrminf` | function | `pub fn nrminf(x: ArrayView1<f64>) -> f64 {` | `src/vecops.rs:855` | `docs/orgmode/reference/public-api.org` |
 | `oblique` | function | `pub fn oblique(n: usize, m: usize) -> Self {` | `src/manifold/mod.rs:529` | `docs/orgmode/reference/public-api.org` |
 | `observations` | function | `pub fn observations(&self) -> usize {` | `src/gpmin.rs:1763` | `docs/orgmode/reference/public-api.org` |
+| `observe` | function | `fn observe(&mut self, _iteration: KrylovIteration) {}` | `src/krylov/gmres.rs:239` | `docs/orgmode/reference/public-api.org` |
 | `of` | function | `pub fn of(self, g: ArrayView1<f64>) -> f64 {` | `src/control.rs:247` | `docs/orgmode/reference/public-api.org` |
 | `offer` | function | `pub fn offer(&mut self, f: f64, g: ArrayView1<'_, f64>) -> SearchStep {` | `src/linesearch/supplied.rs:108` | `docs/orgmode/explanation/linesearch.org` |
 | `on_bound` | function | `pub fn on_bound(&self, s: &Array1<f64>, tol: f64) -> bool {` | `src/irc_trust.rs:119` | `docs/orgmode/reference/public-api.org` |
@@ -9829,6 +10005,20 @@ reference entry and a documentation location.
 | `pair_count` | function | `pub fn pair_count(&self) -> usize {` | `src/gromacs.rs:516` | `docs/orgmode/changelog.org` |
 | `pair_count` | function | `pub fn pair_count(&self) -> usize {` | `src/session.rs:2647` | `docs/orgmode/changelog.org` |
 | `pairs` | function | `pub fn pairs(&self) -> &[(usize, usize)] {` | `src/holonomic/mod.rs:342` | `docs/orgmode/reference/public-api.org` |
+| `parallel_transport` | function | `fn parallel_transport( &self, x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/mod.rs:897` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport` | function | `fn parallel_transport( &self, x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/product.rs:579` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, x: &Array1<f64>, d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/complex_circle.rs:169` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, _x: &Array1<f64>, _d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/euclidean.rs:53` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, x: &Array1<f64>, d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/mod.rs:888` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, x: &Array1<f64>, d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/oblique.rs:219` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, x: &Array1<f64>, d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/positive.rs:190` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, x: &Array1<f64>, d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/product.rs:564` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, x: &Array1<f64>, d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/se3.rs:90` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, x: &Array1<f64>, d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/so3.rs:187` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, x: &Array1<f64>, d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/sphere.rs:210` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, x: &Array1<f64>, d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/sphere_complex.rs:157` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, x: &Array1<f64>, d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/stiefel.rs:72` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
+| `parallel_transport_along` | function | `fn parallel_transport_along( &self, x: &Array1<f64>, d: &Array1<f64>, v: &Array1<f64>, ) -> Option<Array1<f64>> {` | `src/manifold/subspace_sphere.rs:212` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/product-manifold.org` |
 | `pcg_solve` | function | `pub fn pcg_solve<F, P>(` | `src/slq.rs:1083` | `docs/orgmode/reference/public-api.org` |
 | `per_atom` | function | `pub fn per_atom() -> Self {` | `src/quickmin.rs:324` | `docs/orgmode/reference/public-api.org` |
 | `periodic_product_spectrum` | function | `pub fn periodic_product_spectrum(` | `src/periodic_product.rs:960` | `docs/orgmode/reference/public-api.org` |
@@ -9857,7 +10047,36 @@ reference entry and a documentation location.
 | `product` | function | `pub fn product<I>(factors: I) -> crate::Result<Self> where I: IntoIterator<Item = ProductFactor>, {` | `src/manifold/mod.rs:485` | `docs/orgmode/reference/public-api.org` |
 | `product` | function | `pub fn product(parts: impl IntoIterator<Item = Self>) -> Result<Self> {` | `src/manifold/riemannian.rs:439` | `docs/orgmode/reference/public-api.org` |
 | `project` | function | `pub fn project(&self, s: &Array1<f64>) -> Array1<f64> {` | `src/irc_trust.rs:84` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/centered.rs:246` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/complex_circle.rs:88` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/constant.rs:85` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, _x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/euclidean.rs:12` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/euclidean_complex.rs:100` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/grassmann.rs:175` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/hyperbolic.rs:74` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/mod.rs:838` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/multinomial.rs:55` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/multinomial_ds.rs:243` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/multinomial_sym.rs:244` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/mw_rigid.rs:31` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/oblique.rs:159` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/poincare.rs:93` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/positive.rs:104` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/product.rs:434` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
 | `project` | function | `pub fn project(&self, x: &[f64], v: &[f64], out: &mut [f64]) -> Result<()> {` | `src/manifold/riemannian.rs:517` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/riemannian.rs:629` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/rigid_quotient.rs:31` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/se3.rs:19` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/skewsymmetric.rs:92` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/so3.rs:107` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/spd.rs:175` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/sphere.rs:141` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/sphere_complex.rs:102` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/stiefel.rs:38` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/stiefel.rs:205` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/subspace_sphere.rs:163` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/symmetric.rs:90` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `project` | function | `fn project(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/unitary.rs:369` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
 | `project` | function | `pub fn project(&mut self, v: &mut [f64], req: &RigidRequest<'_>) {` | `src/rigid/project.rs:28` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
 | `project_at_anchor` | function | `pub fn project_at_anchor( &mut self, v: &mut [f64], masses: Option<&[f64]>, frozen: Option<&[u8]>, mass_weighted_coords: bool, mass_metric: bool, mode: RigidMode, pbc: [bool; 3], broken_translation: [bool; 3], broken_rotation: [bool; 3], ) {` | `src/rigid/project.rs:46` | `docs/orgmode/reference/public-api.org` |
 | `project_gradient` | function | `pub fn project_gradient(&self, at: ArrayView1<f64>, g: &mut Array1<f64>) -> Result<Vec<f64>> {` | `src/holonomic/mod.rs:452` | `docs/orgmode/reference/public-api.org` |
@@ -9899,6 +10118,31 @@ reference entry and a documentation location.
 | `reduction_ratio` | function | `pub fn reduction_ratio(ared: f64, pred: f64) -> f64 {` | `src/trust.rs:84` | `docs/orgmode/explanation/trust-region.org` |
 | `reference` | function | `pub fn reference(dim: usize, dt: f64) -> Self {` | `src/quickmin.rs:92` | `docs/orgmode/howto/bench-gate.org` |
 | `reject_constraint` | function | `pub fn reject_constraint(&mut self) -> bool {` | `src/gromacs.rs:319` | `docs/orgmode/reference/public-api.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/centered.rs:238` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/complex_circle.rs:80` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/constant.rs:77` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/euclidean_complex.rs:92` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/grassmann.rs:167` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/hyperbolic.rs:70` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/mod.rs:834` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/multinomial.rs:51` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/multinomial_ds.rs:235` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/multinomial_sym.rs:236` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/mw_rigid.rs:23` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, dim: usize) -> Result<(), usize> {` | `src/manifold/oblique.rs:151` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/positive.rs:96` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> std::result::Result<(), usize> {` | `src/manifold/product.rs:430` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> std::result::Result<(), usize> {` | `src/manifold/riemannian.rs:625` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/rigid_quotient.rs:23` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/se3.rs:15` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/skewsymmetric.rs:88` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/so3.rs:103` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/spd.rs:171` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/sphere_complex.rs:94` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/stiefel.rs:197` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> std::result::Result<(), usize> {` | `src/manifold/subspace_sphere.rs:158` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, n: usize) -> Result<(), usize> {` | `src/manifold/symmetric.rs:86` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
+| `required_dim` | function | `fn required_dim(&self, dim: usize) -> Result<(), usize> {` | `src/manifold/unitary.rs:361` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/sota.org` |
 | `reset` | function | `pub fn reset(&mut self) {` | `src/fire.rs:363` | `docs/orgmode/reference/public-api.org` |
 | `reset` | function | `pub fn reset(&mut self, config: &GpMinConfig) -> Result<()> {` | `src/gpmin.rs:869` | `docs/orgmode/reference/public-api.org` |
 | `reset` | function | `pub fn reset(&mut self) -> Result<()> {` | `src/gpmin.rs:1751` | `docs/orgmode/reference/public-api.org` |
@@ -9909,7 +10153,36 @@ reference entry and a documentation location.
 | `reset` | function | `pub fn reset(&mut self) {` | `src/quickmin.rs:100` | `docs/orgmode/reference/public-api.org` |
 | `residual` | function | `pub fn residual(&self, x: ArrayView1<f64>) -> f64 {` | `src/holonomic/mod.rs:404` | `docs/orgmode/reference/public-api.org` |
 | `restrict_qn` | function | `pub fn restrict_qn(&self, hess: &Array2<f64>, grad: &Array1<f64>) -> Result<RestrictedStep> {` | `src/restricted_trust.rs:81` | `docs/orgmode/reference/public-api.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/centered.rs:253` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/complex_circle.rs:114` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/constant.rs:92` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/euclidean.rs:16` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/euclidean_complex.rs:107` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/grassmann.rs:194` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/hyperbolic.rs:84` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/mod.rs:846` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/multinomial.rs:66` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/multinomial_ds.rs:265` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/multinomial_sym.rs:266` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/mw_rigid.rs:37` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/oblique.rs:166` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/poincare.rs:113` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/positive.rs:125` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/product.rs:464` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
 | `retract` | function | `pub fn retract(&self, x: &[f64], v: &[f64], out: &mut [f64]) -> Result<()> {` | `src/manifold/riemannian.rs:541` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/riemannian.rs:652` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/rigid_quotient.rs:37` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/se3.rs:33` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/skewsymmetric.rs:102` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/so3.rs:118` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/spd.rs:185` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/sphere.rs:153` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/sphere_complex.rs:112` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/stiefel.rs:42` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/stiefel.rs:225` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/subspace_sphere.rs:173` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/symmetric.rs:100` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `retract` | function | `fn retract(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/unitary.rs:382` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
 | `retract_shaped` | function | `pub fn retract_shaped( &self, shape: Option<(usize, usize)>, x: &Array1<f64>, v: &Array1<f64>, ) -> Array1<f64> {` | `src/manifold/mod.rs:445` | `docs/orgmode/reference/public-api.org` |
 | `rfo_get_s` | function | `pub fn rfo_get_s(h: &Array2<f64>, g: &Array1<f64>, order: usize, alpha: f64) -> Array1<f64> {` | `src/sella_step.rs:21` | `docs/orgmode/reference/public-api.org` |
 | `rfo_restricted` | function | `pub fn rfo_restricted(h: &Array2<f64>, g: &Array1<f64>, order: usize, delta: f64) -> Array1<f64> {` | `src/sella_step.rs:69` | `docs/orgmode/reference/public-api.org` |
@@ -10045,6 +10318,8 @@ reference entry and a documentation location.
 | `slq_logdet_deflated` | function | `pub fn slq_logdet_deflated<F>(` | `src/slq.rs:2253` | `docs/orgmode/reference/public-api.org` |
 | `slq_logdet_deflated_with_cv` | function | `pub fn slq_logdet_deflated_with_cv<F, C>(` | `src/slq.rs:2306` | `docs/orgmode/reference/public-api.org` |
 | `slq_logdet_hutchpp` | function | `pub fn slq_logdet_hutchpp<F, C, M>(` | `src/slq.rs:2361` | `docs/orgmode/changelog.org` |
+| `solve` | function | `fn solve(&self, r: ArrayView1<f64>) -> Array1<f64> {` | `src/hvp.rs:210` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `solve` | function | `fn solve(&self, r: ArrayView1<f64>) -> Array1<f64> {` | `src/hvp.rs:489` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `solve` | function | `pub fn solve(&self, y: &[f64]) -> Result<Vec<f64>, CyclicError> {` | `src/periodic.rs:217` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `solve` | function | `pub fn solve(&self, rhs: &[f64]) -> Result<Vec<f64>, PeriodicBlockError> {` | `src/periodic_block.rs:527` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `solve` | function | `pub fn solve(&self, rhs: ArrayView1<f64>) -> Option<Array1<f64>> {` | `src/precon.rs:368` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
@@ -10057,6 +10332,10 @@ reference entry and a documentation location.
 | `solve_many` | function | `pub fn solve_many(&self, rhs: &[f64], columns: usize) -> Result<Vec<f64>, PeriodicBlockError> {` | `src/periodic_block.rs:532` | `docs/orgmode/reference/public-api.org` |
 | `solve_transpose` | function | `pub fn solve_transpose(&self, w: &[f64]) -> Result<Vec<f64>, CyclicError> {` | `src/periodic.rs:230` | `docs/orgmode/reference/public-api.org` |
 | `solver` | function | `pub fn solver(&self) -> ConstraintSolver {` | `src/holonomic/mod.rs:357` | `docs/orgmode/reference/public-api.org` |
+| `source` | function | `fn source(&self) -> Option<&(dyn Error + 'static)> {` | `src/krylov/gmres.rs:62` | `docs/orgmode/reference/public-api.org` |
+| `source` | function | `fn source(&self) -> Option<&(dyn Error + 'static)> {` | `src/krylov/gmres.rs:430` | `docs/orgmode/reference/public-api.org` |
+| `source` | function | `fn source(&self) -> Option<&(dyn StdError + 'static)> {` | `src/minres.rs:259` | `docs/orgmode/reference/public-api.org` |
+| `source` | function | `fn source(&self) -> Option<&(dyn StdError + 'static)> {` | `src/minres.rs:268` | `docs/orgmode/reference/public-api.org` |
 | `spd` | function | `pub fn spd(p: usize, metric: SpdMetric) -> Result<Self> {` | `src/manifold/riemannian.rs:424` | `docs/orgmode/reference/public-api.org` |
 | `spectrum` | function | `pub fn spectrum(&self) -> ArrayView1<'_, f64> {` | `src/hvp.rs:483` | `docs/orgmode/reference/public-api.org` |
 | `sphere_complex` | function | `pub fn sphere_complex(n: usize) -> Self {` | `src/manifold/mod.rs:562` | `docs/orgmode/reference/public-api.org` |
@@ -10072,9 +10351,11 @@ reference entry and a documentation location.
 | `status` | function | `pub fn status(self) -> Status {` | `src/report.rs:120` | `docs/orgmode/changelog.org` |
 | `steihaug_cg` | function | `pub fn steihaug_cg<O>(` | `src/hvp.rs:219` | `docs/orgmode/reference/public-api.org` |
 | `steihaug_pcg` | function | `pub fn steihaug_pcg<O, P>(` | `src/hvp.rs:237` | `docs/orgmode/explanation/randomized.org`, `docs/orgmode/explanation/trust-region.org` |
+| `step` | function | `fn step<O>(&mut self, objective: &O, x: &mut Array1<f64>) -> Result<Report> where O: DifferentiableObjective<f64> + ?Sized, {` | `src/gpmin.rs:2066` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/c-abi.org` |
 | `step` | function | `pub fn step(self) -> usize {` | `src/gromacs.rs:766` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/c-abi.org` |
 | `step` | function | `pub fn step(mut self, step: LbfgsStep) -> Self {` | `src/lbfgs.rs:164` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/c-abi.org` |
 | `step` | function | `pub fn step<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report> where O: DifferentiableObjective<f64> + ?Sized, {` | `src/session.rs:2909` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/c-abi.org` |
+| `step` | function | `fn step<O>(&mut self, objective: &O, x: &mut Array1<f64>) -> Result<Report> where O: DifferentiableObjective<f64> + ?Sized, {` | `src/stepper.rs:50` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/c-abi.org` |
 | `step_hess` | function | `pub fn step_hess<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report> where O: HessianObjective + ?Sized, {` | `src/session.rs:3106` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/session.org` |
 | `step_hvp` | function | `pub fn step_hvp<O>(&mut self, obj: &O, x: &mut Array1<f64>) -> Result<Report> where O: HessianVector + ?Sized, {` | `src/session.rs:3192` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/sota.org` |
 | `step_objective` | function | `pub fn step_objective<O>( &mut self, obj: &O, pos: &mut Array1<f64>, value: &mut f64, grad: &mut Array1<f64>, istep: &mut f64, linesearch: LineSearch, control: &Control, atom_maxmove: Option<f64>, ) -> bool where O: DifferentiableObjective<f64> + ?Sized, {` | `src/lbfgs.rs:2606` | `docs/orgmode/reference/public-api.org` |
@@ -10090,6 +10371,7 @@ reference entry and a documentation location.
 | `strong_curvature` | function | `pub fn strong_curvature(dphi: f64, dphi0: f64, c2: f64) -> bool {` | `src/linesearch/conditions.rs:31` | `docs/orgmode/reference/public-api.org` |
 | `strong_wolfe` | function | `pub fn strong_wolfe(` | `src/linesearch/conditions.rs:57` | `docs/orgmode/reference/public-api.org` |
 | `student_t_quantile` | function | `pub fn student_t_quantile(df: usize, alpha: f64) -> Result<f64> {` | `src/slq.rs:2046` | `docs/orgmode/reference/public-api.org` |
+| `sub` | function | `fn sub(self, rhs: Self) -> Self::Output {` | `src/inverse_laplace.rs:374` | `docs/orgmode/reference/public-api.org` |
 | `subspace_dim` | function | `pub fn subspace_dim(&self) -> usize {` | `src/manifold/subspace_sphere.rs:113` | `docs/orgmode/reference/public-api.org` |
 | `sum` | function | `pub fn sum(x: ArrayView1<f64>) -> f64 {` | `src/vecops.rs:761` | `docs/orgmode/explanation/simd.org` |
 | `support` | function | `pub fn support(&self) -> &[f64] {` | `src/aaa.rs:115` | `docs/orgmode/reference/public-api.org` |
@@ -10104,10 +10386,45 @@ reference entry and a documentation location.
 | `to_dense` | function | `pub fn to_dense(&self) -> ndarray::Array2<f64> {` | `src/precon/ff.rs:235` | `docs/orgmode/reference/public-api.org` |
 | `to_dense` | function | `pub fn to_dense(&self) -> ndarray::Array2<f64> {` | `src/precon/lindh.rs:277` | `docs/orgmode/reference/public-api.org` |
 | `to_mw` | function | `pub fn to_mw(v: &Array1<f64>, sqrtm: &Array1<f64>, invert: bool) -> Array1<f64> {` | `src/qn_irc.rs:239` | `docs/orgmode/reference/public-api.org` |
+| `to_tangent` | function | `fn to_tangent(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/mod.rs:842` | `docs/orgmode/reference/public-api.org` |
+| `to_tangent` | function | `fn to_tangent(&self, _x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/poincare.rs:102` | `docs/orgmode/reference/public-api.org` |
+| `to_tangent` | function | `fn to_tangent(&self, x: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/product.rs:442` | `docs/orgmode/reference/public-api.org` |
 | `tolerance` | function | `pub fn tolerance(&self) -> f64 {` | `src/holonomic/mod.rs:367` | `docs/orgmode/reference/public-api.org` |
 | `tolerance` | function | `pub fn tolerance(mut self, gtol: f64) -> Self {` | `src/lbfgs.rs:143` | `docs/orgmode/reference/public-api.org` |
 | `train` | function | `pub fn train(&mut self) -> Result<()> {` | `src/gpmin.rs:953` | `docs/orgmode/reference/public-api.org` |
+| `transport` | function | `fn transport( &self, _x_from: &Array1<f64>, _x_to: &Array1<f64>, v: &Array1<f64>, ) -> Array1<f64> {` | `src/manifold/centered.rs:268` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/complex_circle.rs:143` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport( &self, _x_from: &Array1<f64>, _x_to: &Array1<f64>, v: &Array1<f64>, ) -> Array1<f64> {` | `src/manifold/constant.rs:99` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport( &self, _x_from: &Array1<f64>, _x_to: &Array1<f64>, v: &Array1<f64>, ) -> Array1<f64> {` | `src/manifold/euclidean.rs:26` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport( &self, _x_from: &Array1<f64>, _x_to: &Array1<f64>, v: &Array1<f64>, ) -> Array1<f64> {` | `src/manifold/euclidean_complex.rs:116` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/grassmann.rs:206` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/hyperbolic.rs:97` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/mod.rs:850` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/multinomial.rs:84` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/multinomial_ds.rs:288` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/multinomial_sym.rs:289` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/mw_rigid.rs:41` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/oblique.rs:173` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport( &self, _x_from: &Array1<f64>, _x_to: &Array1<f64>, v: &Array1<f64>, ) -> Array1<f64> {` | `src/manifold/poincare.rs:120` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport( &self, _x_from: &Array1<f64>, _x_to: &Array1<f64>, v: &Array1<f64>, ) -> Array1<f64> {` | `src/manifold/positive.rs:149` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/product.rs:475` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
 | `transport` | function | `pub fn transport( &self, x_from: &[f64], x_to: &[f64], v: &[f64], out: &mut [f64], ) -> Result<()> {` | `src/manifold/riemannian.rs:572` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/riemannian.rs:660` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/rigid_quotient.rs:41` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/se3.rs:47` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport( &self, _x_from: &Array1<f64>, _x_to: &Array1<f64>, v: &Array1<f64>, ) -> Array1<f64> {` | `src/manifold/skewsymmetric.rs:115` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/so3.rs:133` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/spd.rs:206` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/sphere.rs:183` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/sphere_complex.rs:131` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/stiefel.rs:46` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/stiefel.rs:241` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/subspace_sphere.rs:182` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport( &self, _x_from: &Array1<f64>, _x_to: &Array1<f64>, v: &Array1<f64>, ) -> Array1<f64> {` | `src/manifold/symmetric.rs:113` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport` | function | `fn transport(&self, _x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>) -> Array1<f64> {` | `src/manifold/unitary.rs:398` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `transport_is_isometric` | function | `fn transport_is_isometric(&self) -> bool {` | `src/manifold/euclidean.rs:62` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `transport_is_isometric` | function | `fn transport_is_isometric(&self) -> bool {` | `src/manifold/mod.rs:906` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `transport_is_isometric` | function | `fn transport_is_isometric(&self) -> bool {` | `src/manifold/product.rs:594` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `transport_shaped` | function | `pub fn transport_shaped( &self, shape: Option<(usize, usize)>, x_from: &Array1<f64>, x_to: &Array1<f64>, v: &Array1<f64>, ) -> Array1<f64> {` | `src/manifold/mod.rs:471` | `docs/orgmode/reference/public-api.org` |
 | `tridiag_eigh` | function | `pub fn tridiag_eigh(diag: &[f64], offdiag: &[f64]) -> Result<TridiagEigh> {` | `src/slq.rs:253` | `docs/orgmode/reference/public-api.org` |
 | `trim` | function | `pub fn trim(&mut self) {` | `src/lbfgs.rs:908` | `docs/orgmode/reference/public-api.org` |
@@ -10122,13 +10439,27 @@ reference entry and a documentation location.
 | `two_loop` | function | `pub fn two_loop(&self, g: ArrayView1<f64>) -> Array1<f64> {` | `src/lbfgs.rs:1124` | `docs/orgmode/reference/public-api.org` |
 | `two_loop_h0` | function | `pub fn two_loop_h0( &self, gradient: ArrayView1<'_, f64>, h0: LbfgsH0<'_>, ) -> Result<Array1<f64>> {` | `src/lbfgs/direction.rs:229` | `docs/orgmode/reference/public-api.org` |
 | `typical_dist` | function | `pub fn typical_dist(m: usize, n: usize, rows: bool) -> f64 {` | `src/manifold/centered.rs:133` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/centered.rs:277` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/complex_circle.rs:178` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `typical_dist` | function | `pub fn typical_dist() -> f64 {` | `src/manifold/constant.rs:63` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/constant.rs:108` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `typical_dist` | function | `pub fn typical_dist(n: usize) -> f64 {` | `src/manifold/euclidean_complex.rs:82` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/euclidean_complex.rs:125` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, n: usize) -> f64 {` | `src/manifold/mod.rs:910` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `typical_dist` | function | `pub fn typical_dist(n: usize) -> f64 {` | `src/manifold/multinomial_ds.rs:67` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `typical_dist` | function | `pub fn typical_dist(n: usize) -> f64 {` | `src/manifold/multinomial_sym.rs:68` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/oblique.rs:238` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `typical_dist` | function | `pub fn typical_dist(n: usize) -> f64 {` | `src/manifold/positive.rs:86` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/product.rs:602` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/se3.rs:103` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `typical_dist` | function | `pub fn typical_dist(n: usize) -> f64 {` | `src/manifold/skewsymmetric.rs:53` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/so3.rs:209` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/sphere.rs:220` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `typical_dist` | function | `pub fn typical_dist() -> f64 {` | `src/manifold/sphere_complex.rs:84` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/sphere_complex.rs:166` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, n: usize) -> f64 {` | `src/manifold/stiefel.rs:81` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/stiefel.rs:275` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `typical_dist` | function | `fn typical_dist(&self, _n: usize) -> f64 {` | `src/manifold/subspace_sphere.rs:222` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `typical_dist` | function | `pub fn typical_dist(n: usize) -> f64 {` | `src/manifold/symmetric.rs:52` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `typical_dist` | function | `pub fn typical_dist(n: usize) -> f64 {` | `src/manifold/unitary.rs:326` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `typical_dist_mode` | function | `pub fn typical_dist_mode(m: usize, n: usize, mode: CenterMode) -> f64 {` | `src/manifold/centered.rs:153` | `docs/orgmode/reference/public-api.org` |
@@ -10175,6 +10506,10 @@ reference entry and a documentation location.
 | `validate` | function | `pub fn validate(&self) -> Result<()> {` | `src/rcg.rs:169` | `docs/orgmode/reference/public-api.org` |
 | `value` | function | `pub fn value(&self, x1: ArrayView1<'_, f64>, x2: ArrayView1<'_, f64>) -> f64 {` | `src/gpmin.rs:404` | `docs/orgmode/howto/level-set.org`, `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/product-manifold.org` |
 | `value` | function | `pub const fn value(self) -> Complex64 {` | `src/inverse_laplace.rs:610` | `docs/orgmode/howto/level-set.org`, `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/product-manifold.org` |
+| `value_and_gradient` | function | `fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {` | `src/hvp.rs:122` | `docs/orgmode/howto/noise.org`, `docs/orgmode/howto/stopping.org` |
+| `value_and_gradient` | function | `fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {` | `src/hvp.rs:175` | `docs/orgmode/howto/noise.org`, `docs/orgmode/howto/stopping.org` |
+| `value_and_gradient` | function | `fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {` | `src/newton.rs:112` | `docs/orgmode/howto/noise.org`, `docs/orgmode/howto/stopping.org` |
+| `value_and_gradient` | function | `fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {` | `src/oracle.rs:64` | `docs/orgmode/howto/noise.org`, `docs/orgmode/howto/stopping.org` |
 | `values` | function | `pub fn values(&self) -> &[f64] {` | `src/aaa.rs:120` | `docs/orgmode/reference/public-api.org` |
 | `vaxpy` | function | `pub fn vaxpy(a: f64, x: &Vector, y: &mut Vector) {` | `src/vecops.rs:967` | `docs/orgmode/reference/public-api.org` |
 | `vdot` | function | `pub fn vdot(x: &Vector, y: &Vector) -> f64 {` | `src/vecops.rs:962` | `docs/orgmode/reference/public-api.org` |
@@ -11894,7 +12229,15 @@ reference entry and a documentation location.
 | `TryApplyHessian::Error` | trait type | `type Error: std::error::Error + Send + Sync + 'static;` | `src/lowest_mode.rs:365` | `docs/orgmode/reference/public-api.org` |
 | `TryHessianVector::Error` | trait type | `type Error: std::error::Error + Send + Sync + 'static;` | `src/hvp.rs:693` | `docs/orgmode/reference/public-api.org` |
 | `BlockGmresFailure` | type | `pub type BlockGmresFailure<OperatorError, PreconditionerError> =` | `src/krylov/gmres.rs:442` | `docs/orgmode/reference/public-api.org` |
+| `Error` | type | `type Error = IdentityError;` | `src/krylov/gmres.rs:178` | `docs/orgmode/howto/configure.org` |
 | `HighsCCallback` | type | `pub type HighsCCallback = unsafe extern "C" fn(` | `src/highs_kind.rs:114` | `docs/orgmode/reference/public-api.org` |
+| `Output` | type | `type Output = Self;` | `src/inverse_laplace.rs:361` | `docs/orgmode/reference/public-api.org` |
+| `Output` | type | `type Output = Self;` | `src/inverse_laplace.rs:372` | `docs/orgmode/reference/public-api.org` |
+| `Output` | type | `type Output = Self;` | `src/inverse_laplace.rs:383` | `docs/orgmode/reference/public-api.org` |
+| `Output` | type | `type Output = Self;` | `src/inverse_laplace.rs:394` | `docs/orgmode/reference/public-api.org` |
+| `Output` | type | `type Output = Self;` | `src/inverse_laplace.rs:405` | `docs/orgmode/reference/public-api.org` |
+| `Output` | type | `type Output = Self;` | `src/inverse_laplace.rs:427` | `docs/orgmode/reference/public-api.org` |
+| `Output` | type | `type Output = Self;` | `src/inverse_laplace.rs:453` | `docs/orgmode/reference/public-api.org` |
 | `Result` | type | `pub type Result<T> = std::result::Result<T, Error>;` | `src/error.rs:424` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/trust-region.org` |
 | `rgmin_curv_fn` | type | `pub type rgmin_curv_fn = unsafe extern "C" fn(` | `src/ffi.rs:384` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_eval_fn` | type | `pub type rgmin_eval_fn = unsafe extern "C" fn(` | `src/ffi.rs:354` | `docs/orgmode/reference/public-api.org` |
@@ -12268,30 +12611,194 @@ reference entry and a documentation location.
 | `Method` | enum | `enum class Method {` | `include/rgmin/optimize.hpp:36` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
 | `Status` | enum | `enum class Status : int {` | `include/rgbind/rgbind.hpp:235` | `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/architecture.org`, `docs/orgmode/reference/gromacs-cg.org` |
 | `TrampolineStatus` | enum | `enum class TrampolineStatus : int {` | `include/rgbind/rgbind.hpp:641` | `docs/orgmode/reference/public-api.org` |
+| `add_equality` | function | `int add_equality(std::size_t const* idx, double const* coef, std::size_t nnz,` | `include/rgmin/optimize.hpp:934` | `docs/orgmode/howto/session.org` |
+| `angles` | function | `Precon& angles(std::vector<rgmin_angle_t> angles) {` | `include/rgmin/optimize.hpp:696` | `docs/orgmode/reference/public-api.org` |
+| `apply` | function | `void apply(Solver& solver) const;` | `include/rgmin/optimize.hpp:1227` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `apply_status` | function | `inline bool apply_status(const MappedStatus &mapped, CallContext *ctx) {` | `include/rgbind/rgbind.hpp:741` | `docs/orgmode/reference/public-api.org` |
+| `at` | function | `static DistanceConstraints at(std::uint32_t const* pair_i, std::uint32_t const* pair_j,` | `include/rgmin/optimize.hpp:485` | `docs/orgmode/explanation/quickmin.org` |
+| `automatic` | function | `static Precon automatic(std::vector<int32_t> numbers, int32_t geometry_kind) {` | `include/rgmin/optimize.hpp:647` | `docs/orgmode/reference/public-api.org` |
+| `backward_polish` | function | `bool backward_polish() const noexcept { return backward_polish_; }` | `include/rgmin/optimize.hpp:1225` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
 | `borrow_cpu_f64` | function | `inline DLManagedTensorVersioned* borrow_cpu_f64(double* data, std::size_t n) {` | `include/rgmin/optimize.hpp:338` | `docs/orgmode/reference/public-api.org` |
+| `build` | function | `static SolverConfig build(std::string_view method,` | `include/rgmin/optimize.hpp:1210` | `docs/orgmode/reference/public-api.org` |
+| `busy` | function | `std::atomic<bool>& busy() noexcept { return busy_; }` | `include/rgmin/optimize.hpp:744` | `docs/orgmode/reference/public-api.org` |
+| `c_stab` | function | `Precon& c_stab(double v) {` | `include/rgmin/optimize.hpp:672` | `docs/orgmode/reference/public-api.org` |
+| `canonical` | function | `std::string canonical() const {` | `include/rgbind/rgbind.hpp:112` | `docs/orgmode/reference/public-api.org` |
+| `capture` | function | `void capture(nb::python_error &err) {` | `include/rgbind/rgbind.hpp:539` | `docs/orgmode/reference/public-api.org` |
+| `cell` | function | `Precon& cell(double a, double b, double c) & {` | `include/rgmin/optimize.hpp:656` | `docs/orgmode/howto/bench-gate.org` |
 | `check_f64_1d` | function | `inline void check_f64_1d(const F64Array &arr, std::size_t n, const char *name) {` | `include/rgbind/rgbind.hpp:874` | `docs/orgmode/reference/public-api.org` |
 | `check_f64_2d` | function | `inline void check_f64_2d(const F64Array &arr, std::size_t rows, std::size_t cols,` | `include/rgbind/rgbind.hpp:887` | `docs/orgmode/reference/public-api.org` |
 | `check_f64_3d` | function | `inline void check_f64_3d(const F64Array &arr, std::size_t d0, std::size_t d1,` | `include/rgbind/rgbind.hpp:902` | `docs/orgmode/reference/public-api.org` |
 | `check_f64_rank` | function | `inline void check_f64_rank(const F64Array &arr, std::size_t rank,` | `include/rgbind/rgbind.hpp:851` | `docs/orgmode/reference/public-api.org` |
+| `clear` | function | `void clear() noexcept { rgmin_lbfgs_pairs_clear(ptr_); }` | `include/rgmin/optimize.hpp:1078` | `docs/orgmode/reference/public-api.org` |
+| `clear_distance_constraints` | function | `void clear_distance_constraints() { rgmin_solver_clear_distance_constraints(ptr_); }` | `include/rgmin/optimize.hpp:987` | `docs/orgmode/howto/session.org` |
+| `clear_equalities` | function | `int clear_equalities() { return rgmin_solver_clear_equalities(ptr_); }` | `include/rgmin/optimize.hpp:938` | `docs/orgmode/howto/session.org` |
+| `clear_etol` | function | `void clear_etol() { rgmin_solver_clear_etol(ptr_); }` | `include/rgmin/optimize.hpp:889` | `docs/orgmode/reference/public-api.org` |
+| `clear_exp` | function | `void clear_exp() { rgmin_solver_clear_exp(ptr_); }` | `include/rgmin/optimize.hpp:773` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
+| `clear_level_set` | function | `void clear_level_set() { rgmin_solver_clear_level_set(ptr_); }` | `include/rgmin/optimize.hpp:853` | `docs/orgmode/changelog.org` |
+| `clear_max_evals` | function | `void clear_max_evals() { rgmin_solver_clear_max_evals(ptr_); }` | `include/rgmin/optimize.hpp:896` | `docs/orgmode/reference/public-api.org` |
+| `clear_precon` | function | `void clear_precon() { rgmin_solver_clear_precon(ptr_); }` | `include/rgmin/optimize.hpp:792` | `docs/orgmode/howto/precon.org`, `docs/orgmode/reference/architecture.org` |
+| `code` | function | `static int code(Enum value) { return static_cast<int>(value); }` | `include/rgbind/rgbind.hpp:254` | `docs/orgmode/reference/public-api.org` |
+| `constrain` | function | `void constrain(double const* anchor, double* x, std::size_t n) const {` | `include/rgmin/optimize.hpp:527` | `docs/orgmode/reference/public-api.org` |
+| `control` | function | `Control const& control() const noexcept { return control_; }` | `include/rgmin/optimize.hpp:1223` | `docs/orgmode/reference/public-api.org` |
+| `count` | function | `std::size_t count() const noexcept { return rgmin_lbfgs_pairs_count(ptr_); }` | `include/rgmin/optimize.hpp:1077` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/product-manifold.org` |
+| `dihedrals` | function | `Precon& dihedrals(bool on) {` | `include/rgmin/optimize.hpp:684` | `docs/orgmode/howto/precon.org` |
+| `dim` | function | `std::size_t dim() const noexcept { return dim_; }` | `include/rgmin/optimize.hpp:746` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
+| `direction_apply` | function | `void direction_apply(double const* grad, rgmin_h0_fn apply, void* user, double* dir,` | `include/rgmin/optimize.hpp:1089` | `docs/orgmode/howto/c-abi.org` |
+| `direction_diagonal` | function | `void direction_diagonal(double const* grad, double const* h0, double* dir,` | `include/rgmin/optimize.hpp:1081` | `docs/orgmode/howto/c-abi.org` |
 | `echo_f64` | function | `inline nb::ndarray<nb::numpy, double> echo_f64(const F64Array &arr) {` | `include/rgbind/rgbind.hpp:917` | `docs/orgmode/reference/public-api.org` |
+| `egrad_to_rgrad` | function | `void egrad_to_rgrad(double const* x, double const* egrad, double* out) const {` | `include/rgmin/optimize.hpp:1155` | `docs/orgmode/reference/manifold.org` |
+| `entry` | function | `template <typename... Args>` | `include/rgbind/rgbind.hpp:683` | `docs/orgmode/reference/public-api.org` |
 | `error_kind_name` | function | `inline const char *error_kind_name(ErrorKind kind) noexcept {` | `include/rgbind/rgbind.hpp:270` | `docs/orgmode/reference/public-api.org` |
+| `error_on_unmet` | function | `bool error_on_unmet() const noexcept { return error_on_unmet_; }` | `include/rgmin/optimize.hpp:1224` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
+| `evals` | function | `std::size_t evals() const noexcept { return rgmin_solver_evals(ptr_); }` | `include/rgmin/optimize.hpp:898` | `docs/orgmode/reference/public-api.org` |
+| `excess` | function | `double excess(double const* x, std::size_t n) const noexcept {` | `include/rgmin/optimize.hpp:523` | `docs/orgmode/howto/constraints.org`, `docs/orgmode/reference/constraints.org` |
+| `exp` | function | `static Precon exp() {` | `include/rgmin/optimize.hpp:633` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp` | function | `void exp(double const* x, double const* v, double* out) const {` | `include/rgmin/optimize.hpp:1162` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `exp_a` | function | `Precon& exp_a(double v) {` | `include/rgmin/optimize.hpp:680` | `docs/orgmode/reference/public-api.org` |
+| `exp_mu` | function | `double exp_mu() const noexcept { return rgmin_solver_exp_mu(ptr_); }` | `include/rgmin/optimize.hpp:775` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
+| `ff` | function | `static Precon ff(std::vector<rgmin_bond_t> bonds) {` | `include/rgmin/optimize.hpp:639` | `docs/orgmode/reference/public-api.org` |
 | `finish_report` | function | `inline Report finish_report(rgmin_status_t st, rgmin_report_t const& out, char const* fallback);` | `include/rgmin/optimize.hpp:226` | `docs/orgmode/reference/public-api.org` |
+| `flag` | function | `std::atomic<bool> &flag() noexcept { return flag_; }` | `include/rgbind/rgbind.hpp:442` | `docs/orgmode/reference/public-api.org` |
+| `forget` | function | `void forget() { rgmin_solver_forget(ptr_); }` | `include/rgmin/optimize.hpp:750` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/howto/manifolds.org` |
+| `forget_evaluation` | function | `void forget_evaluation() { rgmin_solver_forget_evaluation(ptr_); }` | `include/rgmin/optimize.hpp:790` | `docs/orgmode/howto/session.org` |
+| `from_report` | function | `static OptimizeResult from_report(Report const& r) {` | `include/rgmin/optimize.hpp:281` | `docs/orgmode/reference/public-api.org` |
+| `get` | function | `rgmin_constraints_t const* get() const noexcept { return ptr_; }` | `include/rgmin/optimize.hpp:533` | `docs/orgmode/reference/public-api.org` |
+| `get` | function | `rgmin_precon_t const* get() const noexcept { return &raw_; }` | `include/rgmin/optimize.hpp:701` | `docs/orgmode/reference/public-api.org` |
+| `get` | function | `rgmin_manifold_handle_t const* get() const noexcept { return ptr_; }` | `include/rgmin/optimize.hpp:1148` | `docs/orgmode/reference/public-api.org` |
+| `gradient_calls` | function | `std::size_t gradient_calls() const noexcept {` | `include/rgmin/optimize.hpp:755` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/api.org` |
+| `gradient_step` | function | `void gradient_step(double const* x, double const* egrad, double t, double* rgrad_out,` | `include/rgmin/optimize.hpp:1179` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `has_error` | function | `bool has_error() const noexcept {` | `include/rgbind/rgbind.hpp:581` | `docs/orgmode/reference/public-api.org` |
+| `hvp_calls` | function | `std::size_t hvp_calls() const noexcept { return rgmin_solver_hvp_calls(ptr_); }` | `include/rgmin/optimize.hpp:759` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/reference/api.org` |
+| `ignored_linesearch` | function | `std::string ignored_linesearch() const;` | `include/rgmin/optimize.hpp:1233` | `docs/orgmode/reference/public-api.org` |
+| `ignored_scale` | function | `std::string ignored_scale() const;` | `include/rgmin/optimize.hpp:1237` | `docs/orgmode/reference/public-api.org` |
+| `inner` | function | `double inner(double const* x, double const* u, double const* v) const {` | `include/rgmin/optimize.hpp:1172` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `install_policy` | function | `inline void install_policy(nb::module_ &m) {` | `include/rgbind/rgbind.hpp:779` | `docs/orgmode/reference/public-api.org` |
+| `kind` | function | `rgmin_constraint_error_t kind() const noexcept { return kind_; }` | `include/rgmin/optimize.hpp:425` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
+| `lbfgs_trust_radius` | function | `double lbfgs_trust_radius() const noexcept { return rgmin_solver_lbfgs_trust_radius(ptr_); }` | `include/rgmin/optimize.hpp:884` | `docs/orgmode/reference/public-api.org` |
+| `len` | function | `std::size_t len() const noexcept { return rgmin_manifold_len(ptr_); }` | `include/rgmin/optimize.hpp:1150` | `docs/orgmode/reference/manifold.org` |
+| `lindh` | function | `static Precon lindh(std::vector<int32_t> numbers) {` | `include/rgmin/optimize.hpp:625` | `docs/orgmode/reference/public-api.org` |
+| `log` | function | `void log(double const* x, double const* y, double* out) const {` | `include/rgmin/optimize.hpp:1165` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
 | `lowest_eigenpair` | function | `inline rgmin_lowest_mode_t lowest_eigenpair(` | `include/rgmin/optimize.hpp:113` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/configure.org`, `docs/orgmode/howto/irc.org` |
 | `lowest_eigenpairs` | function | `inline void lowest_eigenpairs(rgmin_hvp_fn hvp, void* user, double const* x,` | `include/rgmin/optimize.hpp:345` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/configure.org`, `docs/orgmode/howto/irc.org` |
 | `lowest_eigenpairs_ex` | function | `inline void lowest_eigenpairs_ex(rgmin_hvp_fn hvp, void* user, rgmin_precond_fn precond,` | `include/rgmin/optimize.hpp:382` | `docs/orgmode/reference/public-api.org` |
 | `map_status` | function | `template <typename Enum>` | `include/rgbind/rgbind.hpp:367` | `docs/orgmode/reference/public-api.org` |
 | `map_status_code` | function | `inline MappedStatus map_status_code(int code, std::string_view last_error,` | `include/rgbind/rgbind.hpp:302` | `docs/orgmode/reference/public-api.org` |
+| `method` | function | `Method method() const noexcept { return method_; }` | `include/rgmin/optimize.hpp:747` | `docs/orgmode/howto/lammps-migration.org`, `docs/orgmode/howto/lbfgs-box.org`, `docs/orgmode/reference/lammps-min-style.org` |
+| `method` | function | `Method method() const noexcept { return method_; }` | `include/rgmin/optimize.hpp:1221` | `docs/orgmode/howto/lammps-migration.org`, `docs/orgmode/howto/lbfgs-box.org`, `docs/orgmode/reference/lammps-min-style.org` |
 | `method_from_name` | function | `inline Method method_from_name(std::string const& name) {` | `include/rgmin/optimize.hpp:72` | `docs/orgmode/reference/public-api.org` |
+| `method_name` | function | `std::string const& method_name() const noexcept { return method_name_; }` | `include/rgmin/optimize.hpp:1222` | `docs/orgmode/reference/public-api.org` |
 | `minimize` | function | `template <class E, class G>` | `include/xts/xtensor.hpp:19` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/lammps-migration.org`, `docs/orgmode/howto/lbfgs-box.org` |
 | `minimize_eindir` | function | `inline Report minimize_eindir(const eindir_objective_t* objective,` | `include/rgmin/optimize.hpp:316` | `docs/orgmode/changelog.org` |
 | `minimize_fn` | function | `inline Report minimize_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,` | `include/rgmin/optimize.hpp:293` | `docs/orgmode/changelog.org` |
 | `minimize_hess_fn` | function | `inline Report minimize_hess_fn(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hess_fn hess,` | `include/rgmin/optimize.hpp:304` | `docs/orgmode/changelog.org` |
+| `mu` | function | `Precon& mu(double v) {` | `include/rgmin/optimize.hpp:668` | `docs/orgmode/explanation/step-bounds.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/constraints.org` |
+| `neighbours` | function | `Precon& neighbours(std::vector<std::size_t> i, std::vector<std::size_t> j,` | `include/rgmin/optimize.hpp:688` | `docs/orgmode/reference/public-api.org` |
 | `optimize` | function | `inline OptimizeResult optimize(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,` | `include/rgmin/optimize.hpp:331` | `docs/orgmode/howto/c-abi.org` |
+| `owns` | function | `bool owns() const noexcept { return busy_ != nullptr; }` | `include/rgbind/rgbind.hpp:504` | `docs/orgmode/reference/public-api.org` |
+| `pair_count` | function | `std::size_t pair_count() const noexcept { return rgmin_solver_pair_count(ptr_); }` | `include/rgmin/optimize.hpp:753` | `docs/orgmode/changelog.org` |
+| `precon_scale` | function | `double precon_scale() const { return rgmin_solver_precon_scale(ptr_); }` | `include/rgmin/optimize.hpp:793` | `docs/orgmode/howto/precon.org` |
+| `product` | function | `template <class... Factors>` | `include/rgmin/optimize.hpp:1129` | `docs/orgmode/reference/public-api.org` |
+| `project` | function | `void project(double const* x, double const* v, double* out) const {` | `include/rgmin/optimize.hpp:1152` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `push` | function | `bool push(double const* s, double const* y, std::size_t n) {` | `include/rgmin/optimize.hpp:1058` | `docs/orgmode/howto/c-abi.org` |
+| `push_pair` | function | `int push_pair(double const* s, double const* y, std::size_t n) {` | `include/rgmin/optimize.hpp:927` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `push_rho` | function | `bool push_rho(double const* s, double const* y, double rho, std::size_t n) {` | `include/rgmin/optimize.hpp:1069` | `docs/orgmode/howto/c-abi.org` |
+| `r_cut` | function | `Precon& r_cut(double v) {` | `include/rgmin/optimize.hpp:676` | `docs/orgmode/reference/public-api.org` |
+| `raw` | function | `rgmin_solver_t* raw() noexcept { return ptr_; }` | `include/rgmin/optimize.hpp:748` | `docs/orgmode/reference/public-api.org` |
+| `rebase` | function | `void rebase() { rgmin_solver_rebase(ptr_); }` | `include/rgmin/optimize.hpp:752` | `docs/orgmode/reference/public-api.org` |
+| `report` | function | `Report const& report() const noexcept { return report_; }` | `include/rgmin/optimize.hpp:192` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
+| `report` | function | `Report const& report() const noexcept { return report_; }` | `include/rgmin/optimize.hpp:206` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
 | `report_from_c` | function | `inline Report report_from_c(rgmin_report_t const& out) {` | `include/rgmin/optimize.hpp:219` | `docs/orgmode/reference/public-api.org` |
+| `report_gradient` | function | `rgmin_status_t report_gradient(double* out, std::size_t n) const {` | `include/rgmin/optimize.hpp:900` | `docs/orgmode/reference/public-api.org` |
+| `require_convergence` | function | `bool require_convergence() const noexcept { return control_.require_convergence; }` | `include/rgmin/optimize.hpp:1226` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/architecture.org`, `docs/orgmode/reference/python.org` |
+| `rethrow_if_set` | function | `void rethrow_if_set() {` | `include/rgbind/rgbind.hpp:594` | `docs/orgmode/reference/public-api.org` |
+| `retract` | function | `void retract(double const* x, double const* v, double* out) const {` | `include/rgmin/optimize.hpp:1159` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
+| `rigid_quotient` | function | `static Manifold rigid_quotient(std::size_t n_atoms, bool periodic = false) {` | `include/rgmin/optimize.hpp:1125` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/sota.org` |
+| `search_direction` | function | `int search_direction(double const* grad, double* dir, std::size_t n) {` | `include/rgmin/optimize.hpp:930` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
 | `serialise_by_owner` | function | `inline Schedule serialise_by_owner(const std::vector<OwnerRow> &rows,` | `include/rgbind/rgbind.hpp:143` | `docs/orgmode/reference/public-api.org` |
+| `set_accept` | function | `void set_accept(rgmin_accept_t accept) { rgmin_solver_set_accept(ptr_, accept); }` | `include/rgmin/optimize.hpp:776` | `docs/orgmode/explanation/quasi-newton.org`, `docs/orgmode/howto/session.org` |
+| `set_ase_linesearch` | function | `int set_ase_linesearch(double stpmax) { return rgmin_solver_set_ase_linesearch(ptr_, stpmax); }` | `include/rgmin/optimize.hpp:879` | `docs/orgmode/reference/public-api.org` |
+| `set_atom_maxmove` | function | `void set_atom_maxmove(double m) { rgmin_solver_set_atom_maxmove(ptr_, m); }` | `include/rgmin/optimize.hpp:913` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/quasi-newton.org`, `docs/orgmode/explanation/trust-region.org` |
+| `set_backward_polish` | function | `void set_backward_polish(bool on) {` | `include/rgmin/optimize.hpp:845` | `docs/orgmode/reference/public-api.org` |
+| `set_box` | function | `int set_box(double const* lower, double const* upper, std::size_t n) {` | `include/rgmin/optimize.hpp:924` | `docs/orgmode/howto/session.org` |
+| `set_broken_axes` | function | `void set_broken_axes(bool tx, bool ty, bool tz, bool rx, bool ry, bool rz) {` | `include/rgmin/optimize.hpp:821` | `docs/orgmode/changelog.org` |
+| `set_cautious` | function | `void set_cautious(double eps, double alpha) {` | `include/rgmin/optimize.hpp:920` | `docs/orgmode/howto/session.org` |
+| `set_centered_matrix` | function | `void set_centered_matrix(std::size_t m, std::size_t n, bool center_rows) {` | `include/rgmin/optimize.hpp:972` | `docs/orgmode/reference/public-api.org` |
+| `set_complex_circle` | function | `void set_complex_circle(std::size_t n) {` | `include/rgmin/optimize.hpp:955` | `docs/orgmode/reference/public-api.org` |
+| `set_constant` | function | `void set_constant(std::size_t n) { rgmin_solver_set_constant(ptr_, n); }` | `include/rgmin/optimize.hpp:961` | `docs/orgmode/reference/public-api.org` |
+| `set_distance_constraints` | function | `void set_distance_constraints(DistanceConstraints const& set) {` | `include/rgmin/optimize.hpp:981` | `docs/orgmode/howto/constraints.org`, `docs/orgmode/howto/session.org` |
+| `set_error_on_unmet` | function | `void set_error_on_unmet(bool on) {` | `include/rgmin/optimize.hpp:835` | `docs/orgmode/reference/public-api.org` |
+| `set_etol` | function | `rgmin_status_t set_etol(double etol) { return rgmin_solver_set_etol(ptr_, etol); }` | `include/rgmin/optimize.hpp:887` | `docs/orgmode/howto/stopping.org` |
+| `set_euclidean_complex` | function | `void set_euclidean_complex(std::size_t n) {` | `include/rgmin/optimize.hpp:958` | `docs/orgmode/reference/public-api.org` |
+| `set_exp` | function | `rgmin_status_t set_exp(rgmin_exp_t const* params, std::uint32_t const* pair_i,` | `include/rgmin/optimize.hpp:765` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/precon.org`, `docs/orgmode/howto/session.org` |
+| `set_extra_updates` | function | `void set_extra_updates(std::size_t n) {` | `include/rgmin/optimize.hpp:917` | `docs/orgmode/howto/session.org` |
+| `set_factor_shape` | function | `void set_factor_shape(std::size_t n, std::size_t p) { rgmin_solver_set_factor_shape(ptr_, n, p); }` | `include/rgmin/optimize.hpp:826` | `docs/orgmode/howto/manifolds.org` |
+| `set_fire_abc` | function | `int set_fire_abc(bool on) { return rgmin_solver_set_fire_abc(ptr_, on ? 1 : 0); }` | `include/rgmin/optimize.hpp:859` | `docs/orgmode/howto/fire.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/sota.org` |
+| `set_fire_cap_two_step_overshoot` | function | `int set_fire_cap_two_step_overshoot(bool on) {` | `include/rgmin/optimize.hpp:862` | `docs/orgmode/reference/public-api.org` |
+| `set_fire_preset` | function | `int set_fire_preset(rgmin_fire_preset_t preset) {` | `include/rgmin/optimize.hpp:855` | `docs/orgmode/howto/fire.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/reference/sota.org` |
+| `set_fire_variant` | function | `void set_fire_variant(rgmin_fire_variant_t variant) {` | `include/rgmin/optimize.hpp:794` | `docs/orgmode/howto/session.org` |
+| `set_fixed_h0` | function | `int set_fixed_h0(double h0) { return rgmin_solver_set_fixed_h0(ptr_, h0); }` | `include/rgmin/optimize.hpp:874` | `docs/orgmode/reference/public-api.org` |
+| `set_frozen` | function | `void set_frozen(std::uint8_t const* frozen, std::size_t len) {` | `include/rgmin/optimize.hpp:818` | `docs/orgmode/changelog.org` |
+| `set_geometry_step` | function | `void set_geometry_step(bool on) { rgmin_solver_set_geometry_step(ptr_, on ? 1 : 0); }` | `include/rgmin/optimize.hpp:810` | `docs/orgmode/reference/public-api.org` |
+| `set_gromacs_cg` | function | `int set_gromacs_cg(std::uint32_t nstcgsteep) {` | `include/rgmin/optimize.hpp:782` | `docs/orgmode/reference/public-api.org` |
+| `set_gromacs_lbfgs` | function | `int set_gromacs_lbfgs(std::uint32_t nbfgscorr) {` | `include/rgmin/optimize.hpp:786` | `docs/orgmode/reference/public-api.org` |
+| `set_gromacs_steep` | function | `int set_gromacs_steep(double shrink, std::uint32_t max_constraint_shrinks) {` | `include/rgmin/optimize.hpp:778` | `docs/orgmode/reference/public-api.org` |
+| `set_highs` | function | `int set_highs(bool on) { return rgmin_solver_set_highs(ptr_, on ? 1 : 0); }` | `include/rgmin/optimize.hpp:923` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
+| `set_highs_callback` | function | `int set_highs_callback(rgmin_highs_callback_t cb, void* user) {` | `include/rgmin/optimize.hpp:945` | `docs/orgmode/reference/public-api.org` |
+| `set_highs_crossover` | function | `int set_highs_crossover(rgmin_highs_crossover_t kind) {` | `include/rgmin/optimize.hpp:942` | `docs/orgmode/reference/public-api.org` |
+| `set_highs_solver` | function | `int set_highs_solver(rgmin_highs_solver_t kind) {` | `include/rgmin/optimize.hpp:939` | `docs/orgmode/reference/public-api.org` |
+| `set_highs_trust` | function | `int set_highs_trust(double radius) { return rgmin_solver_set_highs_trust(ptr_, radius); }` | `include/rgmin/optimize.hpp:825` | `docs/orgmode/reference/public-api.org` |
+| `set_lbfgs_capped` | function | `int set_lbfgs_capped(double max_atom) { return rgmin_solver_set_lbfgs_capped(ptr_, max_atom); }` | `include/rgmin/optimize.hpp:867` | `docs/orgmode/changelog.org` |
+| `set_lbfgs_neb_guards` | function | `void set_lbfgs_neb_guards(bool on) { rgmin_solver_set_lbfgs_neb_guards(ptr_, on ? 1 : 0); }` | `include/rgmin/optimize.hpp:811` | `docs/orgmode/howto/session.org` |
+| `set_lbfgs_scaled` | function | `int set_lbfgs_scaled(double max_atom) { return rgmin_solver_set_lbfgs_scaled(ptr_, max_atom); }` | `include/rgmin/optimize.hpp:870` | `docs/orgmode/reference/public-api.org` |
+| `set_lbfgs_trust` | function | `int set_lbfgs_trust(double radius) { return rgmin_solver_set_lbfgs_trust(ptr_, radius); }` | `include/rgmin/optimize.hpp:882` | `docs/orgmode/changelog.org` |
+| `set_lbfgs_wolfe` | function | `int set_lbfgs_wolfe() { return rgmin_solver_set_lbfgs_wolfe(ptr_); }` | `include/rgmin/optimize.hpp:872` | `docs/orgmode/reference/public-api.org` |
+| `set_level_set` | function | `rgmin_status_t set_level_set(double target) {` | `include/rgmin/optimize.hpp:849` | `docs/orgmode/changelog.org` |
+| `set_linesearch` | function | `rgmin_status_t set_linesearch(rgmin_linesearch_kind_t kind, double c1, double c2,` | `include/rgmin/optimize.hpp:803` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
+| `set_manifold` | function | `void set_manifold(rgmin_manifold_t m) { rgmin_solver_set_manifold(ptr_, m); }` | `include/rgmin/optimize.hpp:948` | `docs/orgmode/howto/session.org`, `docs/orgmode/tutorials/quickstart.org` |
+| `set_masses` | function | `void set_masses(double const* masses, std::size_t n_atoms) {` | `include/rgmin/optimize.hpp:828` | `docs/orgmode/howto/manifolds.org`, `docs/orgmode/howto/session.org` |
+| `set_max_evals` | function | `rgmin_status_t set_max_evals(std::size_t max_evals) {` | `include/rgmin/optimize.hpp:892` | `docs/orgmode/howto/stopping.org` |
+| `set_maxmove` | function | `void set_maxmove(double m) { rgmin_solver_set_maxmove(ptr_, m); }` | `include/rgmin/optimize.hpp:760` | `docs/orgmode/howto/session.org` |
+| `set_multinomial_ds` | function | `void set_multinomial_ds(std::size_t n) {` | `include/rgmin/optimize.hpp:962` | `docs/orgmode/reference/public-api.org` |
+| `set_multinomial_sym` | function | `void set_multinomial_sym(std::size_t n) {` | `include/rgmin/optimize.hpp:965` | `docs/orgmode/reference/public-api.org` |
+| `set_objective_roundoff` | function | `rgmin_status_t set_objective_roundoff(double relative) {` | `include/rgmin/optimize.hpp:807` | `docs/orgmode/changelog.org` |
+| `set_oblique` | function | `void set_oblique(std::size_t n, std::size_t m) {` | `include/rgmin/optimize.hpp:949` | `docs/orgmode/reference/public-api.org` |
+| `set_pbc_axes` | function | `void set_pbc_axes(bool x, bool y, bool z) {` | `include/rgmin/optimize.hpp:815` | `docs/orgmode/changelog.org` |
+| `set_periodic` | function | `void set_periodic(bool periodic) { rgmin_solver_set_periodic(ptr_, periodic ? 1 : 0); }` | `include/rgmin/optimize.hpp:831` | `docs/orgmode/reference/public-api.org` |
+| `set_positive` | function | `void set_positive(std::size_t n) { rgmin_solver_set_positive(ptr_, n); }` | `include/rgmin/optimize.hpp:971` | `docs/orgmode/reference/public-api.org` |
+| `set_power` | function | `int set_power(rgmin_manifold_t factor, std::size_t block, std::size_t count) {` | `include/rgmin/optimize.hpp:977` | `docs/orgmode/reference/public-api.org` |
+| `set_precon` | function | `rgmin_status_t set_precon(Precon const& p) { return rgmin_solver_set_precon(ptr_, p.get()); }` | `include/rgmin/optimize.hpp:791` | `docs/orgmode/reference/public-api.org` |
+| `set_project_rigid` | function | `void set_project_rigid(bool on) {` | `include/rgmin/optimize.hpp:914` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/manifolds.org`, `docs/orgmode/howto/session.org` |
+| `set_qn_step` | function | `void set_qn_step(rgmin_qn_step_t step) { rgmin_solver_set_qn_step(ptr_, step); }` | `include/rgmin/optimize.hpp:761` | `docs/orgmode/howto/session.org` |
+| `set_quickmin_cell` | function | `rgmin_status_t set_quickmin_cell(std::size_t at) {` | `include/rgmin/optimize.hpp:797` | `docs/orgmode/reference/public-api.org` |
+| `set_quickmin_variant` | function | `void set_quickmin_variant(rgmin_quickmin_variant_t variant) {` | `include/rgmin/optimize.hpp:800` | `docs/orgmode/reference/public-api.org` |
+| `set_require_convergence` | function | `void set_require_convergence(bool on) {` | `include/rgmin/optimize.hpp:841` | `docs/orgmode/reference/public-api.org` |
+| `set_rigid_mass_metric` | function | `void set_rigid_mass_metric(bool on) { rgmin_solver_set_rigid_mass_metric(ptr_, on ? 1 : 0); }` | `include/rgmin/optimize.hpp:813` | `docs/orgmode/changelog.org` |
+| `set_rigid_mass_weighted` | function | `void set_rigid_mass_weighted(bool on) { rgmin_solver_set_rigid_mass_weighted(ptr_, on ? 1 : 0); }` | `include/rgmin/optimize.hpp:814` | `docs/orgmode/changelog.org` |
+| `set_rigid_mode` | function | `void set_rigid_mode(int32_t mode) { rgmin_solver_set_rigid_mode(ptr_, mode); }` | `include/rgmin/optimize.hpp:812` | `docs/orgmode/reference/public-api.org` |
+| `set_sphere_complex` | function | `void set_sphere_complex(std::size_t n) {` | `include/rgmin/optimize.hpp:968` | `docs/orgmode/reference/public-api.org` |
+| `set_stiefel` | function | `void set_stiefel(std::size_t n, std::size_t p) {` | `include/rgmin/optimize.hpp:952` | `docs/orgmode/reference/public-api.org` |
+| `set_stop_norm` | function | `int set_stop_norm(rgmin_stop_norm_t norm) { return rgmin_solver_set_stop_norm(ptr_, norm); }` | `include/rgmin/optimize.hpp:833` | `docs/orgmode/howto/session.org` |
+| `set_trust` | function | `int set_trust(double radius) { return rgmin_solver_set_trust(ptr_, radius); }` | `include/rgmin/optimize.hpp:933` | `docs/orgmode/howto/session.org` |
+| `set_unitary` | function | `void set_unitary(std::size_t n) { rgmin_solver_set_unitary(ptr_, n); }` | `include/rgmin/optimize.hpp:827` | `docs/orgmode/reference/public-api.org` |
+| `spd` | function | `static Manifold spd(std::size_t p, rgmin_spd_metric_t metric = RGMIN_SPD_AFFINE_INVARIANT) {` | `include/rgmin/optimize.hpp:1121` | `docs/orgmode/reference/public-api.org` |
+| `step` | function | `Report step(rgmin_eval_fn eval, rgmin_grad_fn grad, void* user,` | `include/rgmin/optimize.hpp:989` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/c-abi.org` |
+| `step_fg` | function | `Report step_fg(rgmin_evalgrad_fn evalgrad, void* user,` | `include/rgmin/optimize.hpp:996` | `docs/orgmode/changelog.org` |
+| `step_hess` | function | `Report step_hess(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hess_fn hess,` | `include/rgmin/optimize.hpp:1012` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/session.org` |
+| `step_hess_fg` | function | `Report step_hess_fg(rgmin_evalgrad_fn evalgrad, rgmin_hess_fn hess,` | `include/rgmin/optimize.hpp:1020` | `docs/orgmode/howto/session.org` |
+| `step_hvp` | function | `Report step_hvp(rgmin_eval_fn eval, rgmin_grad_fn grad, rgmin_hvp_fn hvp,` | `include/rgmin/optimize.hpp:1004` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/sota.org` |
+| `stiefel` | function | `static Manifold stiefel(std::size_t n, std::size_t p,` | `include/rgmin/optimize.hpp:1117` | `docs/orgmode/reference/public-api.org` |
+| `to_control` | function | `Control to_control() const {` | `include/rgmin/optimize.hpp:269` | `docs/orgmode/reference/public-api.org` |
+| `transport` | function | `void transport(double const* x_from, double const* x_to, double const* v, double* out) const {` | `include/rgmin/optimize.hpp:1168` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
+| `type_name` | function | `const std::string &type_name() const noexcept { return type_name_; }` | `include/rgbind/rgbind.hpp:405` | `docs/orgmode/reference/public-api.org` |
+| `valid_methods` | function | `static std::string valid_methods();` | `include/rgmin/optimize.hpp:1208` | `docs/orgmode/reference/public-api.org` |
+| `valid_options` | function | `static std::string valid_options();` | `include/rgmin/optimize.hpp:1207` | `docs/orgmode/reference/public-api.org` |
 | `version` | function | `inline const char* version() noexcept { return rgmin_version(); }` | `include/rgmin/optimize.hpp:34` | `docs/orgmode/howto/cite.org` |
+| `with_gromacs_lbfgs` | function | `static SolverConfig with_gromacs_lbfgs(std::size_t nbfgscorr = 10);` | `include/rgmin/optimize.hpp:1219` | `docs/orgmode/reference/public-api.org` |
+| `with_lincs_order` | function | `DistanceConstraints& with_lincs_order(std::size_t order) {` | `include/rgmin/optimize.hpp:519` | `docs/orgmode/reference/constraints.org` |
+| `with_masses` | function | `DistanceConstraints& with_masses(double const* masses, std::size_t n_atoms) {` | `include/rgmin/optimize.hpp:503` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/constraints.org`, `docs/orgmode/reference/constraints.org` |
+| `with_settle` | function | `DistanceConstraints& with_settle(bool on) {` | `include/rgmin/optimize.hpp:511` | `docs/orgmode/reference/public-api.org` |
+| `with_solver` | function | `DistanceConstraints& with_solver(ConstraintSolver solver) {` | `include/rgmin/optimize.hpp:506` | `docs/orgmode/howto/constraints.org` |
+| `with_tolerance` | function | `DistanceConstraints& with_tolerance(double tolerance) {` | `include/rgmin/optimize.hpp:515` | `docs/orgmode/reference/constraints.org` |
 | `include/dlpack/dlpack.h` | header | `Public header include/dlpack/dlpack.h` | `include/dlpack/dlpack.h:1` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/ecnoise.org`, `docs/orgmode/howto/noise.org` |
 | `include/rgbind/rgbind.hpp` | header | `Public header include/rgbind/rgbind.hpp` | `include/rgbind/rgbind.hpp:1` | `docs/orgmode/reference/public-api.org` |
 | `include/rgmin.h` | header | `Public header include/rgmin.h` | `include/rgmin.h:1` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/ecnoise.org`, `docs/orgmode/howto/noise.org` |
@@ -12339,6 +12846,15 @@ reference entry and a documentation location.
 | `Report` | struct | `struct Report {` | `include/rgmin/optimize.hpp:173` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/configure.org`, `docs/orgmode/reference/architecture.org` |
 | `Schedule` | struct | `struct Schedule {` | `include/rgbind/rgbind.hpp:105` | `docs/orgmode/reference/public-api.org` |
 | `status_traits` | struct | `template <typename Enum> struct status_traits {` | `include/rgbind/rgbind.hpp:253` | `docs/orgmode/reference/public-api.org` |
+| `DLDataType` | symbol | `} DLDataType;` | `include/dlpack/dlpack.h:213` | `docs/orgmode/reference/public-api.org` |
+| `DLDataTypeCode` | symbol | `} DLDataTypeCode;` | `include/dlpack/dlpack.h:180` | `docs/orgmode/reference/public-api.org` |
+| `DLDevice` | symbol | `} DLDevice;` | `include/dlpack/dlpack.h:134` | `docs/orgmode/reference/public-api.org` |
+| `DLDeviceType` | symbol | `} DLDeviceType;` | `include/dlpack/dlpack.h:121` | `docs/orgmode/reference/public-api.org` |
+| `DLManagedTensor` | symbol | `typedef struct DLManagedTensor {` | `include/dlpack/dlpack.h:280` | `docs/orgmode/reference/public-api.org` |
+| `DLManagedTensorVersioned` | symbol | `struct DLManagedTensorVersioned {` | `include/dlpack/dlpack.h:327` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/index.org`, `docs/orgmode/reference/api.org` |
+| `DLManagedTensorVersioned` | symbol | `typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;` | `include/rgmin.h:19` | `docs/orgmode/howto/c-abi.org`, `docs/orgmode/index.org`, `docs/orgmode/reference/api.org` |
+| `DLPackVersion` | symbol | `} DLPackVersion;` | `include/dlpack/dlpack.h:66` | `docs/orgmode/reference/public-api.org` |
+| `DLTensor` | symbol | `} DLTensor;` | `include/dlpack/dlpack.h:264` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_abi_compatible` | symbol | `int32_t rgmin_abi_compatible(const rgmin_abi_stamp_t *stamp);` | `include/rgmin.h:341` | `docs/orgmode/reference/architecture.org` |
 | `rgmin_abi_stamp` | symbol | `rgmin_abi_stamp_t rgmin_abi_stamp(void);` | `include/rgmin.h:339` | `docs/orgmode/reference/public-api.org` |
 | `rgmin_abi_stamp_t` | symbol | `typedef struct rgmin_abi_stamp_t {` | `include/rgmin.h:78` | `docs/orgmode/reference/public-api.org` |
@@ -12864,18 +13380,24 @@ reference entry and a documentation location.
 | `LBFGS` | class | `class LBFGS` | `python/rgmin/optimize.py:381` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/howto/python.org` |
 | `LBFGSLineSearch` | class | `class LBFGSLineSearch` | `python/rgmin/ase.py:1711` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/howto/python.org` |
 | `LBFGSLineSearch` | class | `class LBFGSLineSearch` | `python/rgmin/optimize.py:459` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/howto/python.org` |
+| `LbfgsPairs` | class | `class LbfgsPairs` | `python/rgmin/_maturin.pyi:94` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/python.org`, `docs/orgmode/tutorials/lbfgs-direction.org` |
+| `LineSearch` | class | `class LineSearch` | `python/rgmin/_maturin.pyi:78` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/python.org` |
 | `LiuStorey` | class | `class LiuStorey` | `python/rgmin/ase.py:1327` | `docs/orgmode/reference/python.org` |
 | `LiuStorey` | class | `class LiuStorey` | `python/rgmin/optimize.py:1089` | `docs/orgmode/reference/python.org` |
 | `Manifold` | class | `class Manifold` | `python/rgmin/manifold.py:39` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/manifold.org` |
+| `Method` | class | `class Method` | `python/rgmin/_core.pyi:20` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/architecture.org` |
 | `Newton` | class | `class Newton` | `python/rgmin/ase.py:898` | `docs/orgmode/reference/python.org` |
 | `NewtonCG` | class | `class NewtonCG` | `python/rgmin/optimize.py:1150` | `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/reference/python.org` |
 | `NewtonPCG` | class | `class NewtonPCG` | `python/rgmin/optimize.py:1162` | `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/reference/python.org` |
+| `NotConverged` | class | `class NotConverged` | `python/rgmin/_core.pyi:202` | `docs/orgmode/howto/constraints.org`, `docs/orgmode/reference/python.org` |
+| `NumericalError` | class | `class NumericalError` | `python/rgmin/_core.pyi:10` | `docs/orgmode/reference/python.org` |
 | `Optimizer` | class | `class Optimizer` | `python/rgmin/ase.py:311` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/python.org` |
 | `PSO` | class | `class PSO` | `python/rgmin/ase.py:1128` | `docs/orgmode/reference/python.org` |
 | `PolakRibiere` | class | `class PolakRibiere` | `python/rgmin/optimize.py:1053` | `docs/orgmode/reference/python.org` |
 | `Product` | class | `class Product` | `python/rgmin/manifold.py:196` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org` |
 | `QuickMin` | class | `class QuickMin` | `python/rgmin/ase.py:772` | `docs/orgmode/reference/python.org` |
 | `RFO` | class | `class RFO` | `python/rgmin/ase.py:932` | `docs/orgmode/reference/python.org` |
+| `Report` | class | `class Report` | `python/rgmin/_core.pyi:180` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/configure.org`, `docs/orgmode/reference/architecture.org` |
 | `RiemannianCG` | class | `class RiemannianCG` | `python/rgmin/optimize.py:1107` | `docs/orgmode/reference/python.org` |
 | `RigidQuotient` | class | `class RigidQuotient` | `python/rgmin/manifold.py:175` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org` |
 | `SD` | class | `class SD` | `python/rgmin/ase.py:835` | `docs/orgmode/reference/python.org` |
@@ -12884,11 +13406,15 @@ reference entry and a documentation location.
 | `SR1` | class | `class SR1` | `python/rgmin/optimize.py:709` | `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/reference/python.org` |
 | `SR2` | class | `class SR2` | `python/rgmin/ase.py:998` | `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/reference/python.org` |
 | `SR2` | class | `class SR2` | `python/rgmin/optimize.py:715` | `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/reference/python.org` |
+| `Session` | class | `class Session` | `python/rgmin/_maturin.pyi:6` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/howto/stopping.org` |
+| `Solver` | class | `class Solver` | `python/rgmin/_core.pyi:239` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/explanation/quasi-newton.org` |
 | `SolverConfig` | class | `class SolverConfig` | `python/rgmin/__init__.py:163` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/python.org` |
 | `SolverConfig` | class | `class SolverConfig` | `python/rgmin/__init__.pyi:27` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/python.org` |
 | `SteepestDescent` | class | `class SteepestDescent` | `python/rgmin/optimize.py:721` | `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/reference/python.org` |
 | `Stiefel` | class | `class Stiefel` | `python/rgmin/manifold.py:146` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/product-manifold.org` |
+| `Stop` | class | `class Stop` | `python/rgmin/_core.pyi:135` | `docs/orgmode/reference/python.org` |
 | `StopUnmetError` | class | `class StopUnmetError` | `python/rgmin/__init__.pyi:22` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/python.org` |
+| `StopUnmetError` | class | `class StopUnmetError` | `python/rgmin/_core.pyi:13` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/python.org` |
 | `Adam.default_accept` | class attribute | `default_accept = "none"` | `python/rgmin/optimize.py:1035` | `docs/orgmode/reference/public-api.org` |
 | `Adam.kind` | class attribute | `kind = "adam"` | `python/rgmin/optimize.py:1034` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
 | `BFGS.alpha` | class attribute | `alpha: float` | `python/rgmin/__init__.pyi:60` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/step-bounds.org`, `docs/orgmode/howto/ase-bench.org` |
@@ -12954,6 +13480,62 @@ reference entry and a documentation location.
 | `LBFGS.memory` | class attribute | `memory: int` | `python/rgmin/__init__.pyi:200` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/diis.org`, `docs/orgmode/howto/ase-migration.org` |
 | `LBFGS.use_line_search` | class attribute | `use_line_search: bool` | `python/rgmin/__init__.pyi:203` | `docs/orgmode/tutorials/migration.org` |
 | `LiuStorey.kind` | class attribute | `kind = "ls"` | `python/rgmin/optimize.py:1092` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
+| `Method.ADAM` | class attribute | `ADAM = 5` | `python/rgmin/_core.pyi:35` | `docs/orgmode/reference/public-api.org` |
+| `Method.Adam` | class attribute | `Adam = 5` | `python/rgmin/_core.pyi:90` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/reference/python.org` |
+| `Method.BB` | class attribute | `BB = 18` | `python/rgmin/_core.pyi:61` | `docs/orgmode/reference/python.org` |
+| `Method.BFGS` | class attribute | `BFGS = 2` | `python/rgmin/_core.pyi:29` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/howto/stopping.org` |
+| `Method.Bb` | class attribute | `Bb = 18` | `python/rgmin/_core.pyi:116` | `docs/orgmode/reference/public-api.org` |
+| `Method.Bfgs` | class attribute | `Bfgs = 2` | `python/rgmin/_core.pyi:84` | `docs/orgmode/reference/public-api.org` |
+| `Method.CONJUGATE_DESCENT` | class attribute | `CONJUGATE_DESCENT = 11` | `python/rgmin/_core.pyi:47` | `docs/orgmode/reference/public-api.org` |
+| `Method.ConjugateDescent` | class attribute | `ConjugateDescent = 11` | `python/rgmin/_core.pyi:102` | `docs/orgmode/reference/python.org` |
+| `Method.DAI_YUAN` | class attribute | `DAI_YUAN = 10` | `python/rgmin/_core.pyi:45` | `docs/orgmode/reference/public-api.org` |
+| `Method.DIIS` | class attribute | `DIIS = 22` | `python/rgmin/_core.pyi:69` | `docs/orgmode/reference/python.org` |
+| `Method.DOGLEG` | class attribute | `DOGLEG = 19` | `python/rgmin/_core.pyi:63` | `docs/orgmode/reference/public-api.org` |
+| `Method.DaiYuan` | class attribute | `DaiYuan = 10` | `python/rgmin/_core.pyi:100` | `docs/orgmode/reference/python.org` |
+| `Method.Diis` | class attribute | `Diis = 22` | `python/rgmin/_core.pyi:124` | `docs/orgmode/reference/public-api.org` |
+| `Method.Dogleg` | class attribute | `Dogleg = 19` | `python/rgmin/_core.pyi:118` | `docs/orgmode/reference/python.org` |
+| `Method.FIRE` | class attribute | `FIRE = 17` | `python/rgmin/_core.pyi:59` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/reference/python.org` |
+| `Method.FIRE2` | class attribute | `FIRE2 = 20` | `python/rgmin/_core.pyi:65` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/reference/python.org` |
+| `Method.FLETCHER_REEVES` | class attribute | `FLETCHER_REEVES = 1` | `python/rgmin/_core.pyi:27` | `docs/orgmode/reference/public-api.org` |
+| `Method.FR_PR` | class attribute | `FR_PR = 14` | `python/rgmin/_core.pyi:53` | `docs/orgmode/reference/public-api.org` |
+| `Method.Fire` | class attribute | `Fire = 17` | `python/rgmin/_core.pyi:114` | `docs/orgmode/howto/precon.org` |
+| `Method.Fire2` | class attribute | `Fire2 = 20` | `python/rgmin/_core.pyi:120` | `docs/orgmode/reference/public-api.org` |
+| `Method.FletcherReeves` | class attribute | `FletcherReeves = 1` | `python/rgmin/_core.pyi:82` | `docs/orgmode/reference/python.org` |
+| `Method.FrPr` | class attribute | `FrPr = 14` | `python/rgmin/_core.pyi:108` | `docs/orgmode/reference/python.org` |
+| `Method.GROMACS_CG` | class attribute | `GROMACS_CG = 29` | `python/rgmin/_core.pyi:75` | `docs/orgmode/reference/public-api.org` |
+| `Method.GROMACS_LBFGS` | class attribute | `GROMACS_LBFGS = 31` | `python/rgmin/_core.pyi:78` | `docs/orgmode/reference/public-api.org` |
+| `Method.GROMACS_STEEP` | class attribute | `GROMACS_STEEP = 28` | `python/rgmin/_core.pyi:73` | `docs/orgmode/reference/public-api.org` |
+| `Method.GromacsCg` | class attribute | `GromacsCg = 29` | `python/rgmin/_core.pyi:130` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/gromacs-cg.org`, `docs/orgmode/reference/gromacs-cg.org` |
+| `Method.GromacsLbfgs` | class attribute | `GromacsLbfgs = 31` | `python/rgmin/_core.pyi:133` | `docs/orgmode/reference/gromacs-lbfgs.org`, `docs/orgmode/reference/python.org` |
+| `Method.GromacsSteep` | class attribute | `GromacsSteep = 28` | `python/rgmin/_core.pyi:128` | `docs/orgmode/reference/python.org` |
+| `Method.HAGER_ZHANG` | class attribute | `HAGER_ZHANG = 12` | `python/rgmin/_core.pyi:49` | `docs/orgmode/reference/public-api.org` |
+| `Method.HESTENES_STIEFEL` | class attribute | `HESTENES_STIEFEL = 9` | `python/rgmin/_core.pyi:43` | `docs/orgmode/reference/public-api.org` |
+| `Method.HagerZhang` | class attribute | `HagerZhang = 12` | `python/rgmin/_core.pyi:104` | `docs/orgmode/reference/python.org` |
+| `Method.HestenesStiefel` | class attribute | `HestenesStiefel = 9` | `python/rgmin/_core.pyi:98` | `docs/orgmode/reference/python.org` |
+| `Method.LBFGS` | class attribute | `LBFGS = 3` | `python/rgmin/_core.pyi:31` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/howto/python.org` |
+| `Method.LIU_STOREY` | class attribute | `LIU_STOREY = 13` | `python/rgmin/_core.pyi:51` | `docs/orgmode/reference/public-api.org` |
+| `Method.Lbfgs` | class attribute | `Lbfgs = 3` | `python/rgmin/_core.pyi:86` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org`, `docs/orgmode/index.org` |
+| `Method.LiuStorey` | class attribute | `LiuStorey = 13` | `python/rgmin/_core.pyi:106` | `docs/orgmode/reference/python.org` |
+| `Method.NEWTON` | class attribute | `NEWTON = 15` | `python/rgmin/_core.pyi:55` | `docs/orgmode/reference/public-api.org` |
+| `Method.Newton` | class attribute | `Newton = 15` | `python/rgmin/_core.pyi:110` | `docs/orgmode/reference/python.org` |
+| `Method.ODE12R` | class attribute | `ODE12R = 23` | `python/rgmin/_core.pyi:71` | `docs/orgmode/reference/public-api.org` |
+| `Method.Ode12r` | class attribute | `Ode12r = 23` | `python/rgmin/_core.pyi:126` | `docs/orgmode/reference/public-api.org` |
+| `Method.POLAK_RIBIERE` | class attribute | `POLAK_RIBIERE = 0` | `python/rgmin/_core.pyi:25` | `docs/orgmode/reference/python.org` |
+| `Method.PSO` | class attribute | `PSO = 8` | `python/rgmin/_core.pyi:41` | `docs/orgmode/reference/python.org` |
+| `Method.PolakRibiere` | class attribute | `PolakRibiere = 0` | `python/rgmin/_core.pyi:80` | `docs/orgmode/reference/python.org` |
+| `Method.Pso` | class attribute | `Pso = 8` | `python/rgmin/_core.pyi:96` | `docs/orgmode/reference/public-api.org` |
+| `Method.QUICK_MIN` | class attribute | `QUICK_MIN = 21` | `python/rgmin/_core.pyi:67` | `docs/orgmode/reference/public-api.org` |
+| `Method.QuickMin` | class attribute | `QuickMin = 21` | `python/rgmin/_core.pyi:122` | `docs/orgmode/reference/python.org` |
+| `Method.RCG` | class attribute | `RCG = 30` | `python/rgmin/_core.pyi:77` | `docs/orgmode/reference/public-api.org` |
+| `Method.RFO` | class attribute | `RFO = 16` | `python/rgmin/_core.pyi:57` | `docs/orgmode/reference/python.org` |
+| `Method.Rcg` | class attribute | `Rcg = 30` | `python/rgmin/_core.pyi:132` | `docs/orgmode/reference/public-api.org` |
+| `Method.Rfo` | class attribute | `Rfo = 16` | `python/rgmin/_core.pyi:112` | `docs/orgmode/reference/public-api.org` |
+| `Method.SR1` | class attribute | `SR1 = 4` | `python/rgmin/_core.pyi:33` | `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/reference/python.org` |
+| `Method.SR2` | class attribute | `SR2 = 7` | `python/rgmin/_core.pyi:39` | `docs/orgmode/howto/ase-migration.org`, `docs/orgmode/reference/python.org` |
+| `Method.STEEPEST` | class attribute | `STEEPEST = 6` | `python/rgmin/_core.pyi:37` | `docs/orgmode/reference/public-api.org` |
+| `Method.Sr1` | class attribute | `Sr1 = 4` | `python/rgmin/_core.pyi:88` | `docs/orgmode/reference/public-api.org` |
+| `Method.Sr2` | class attribute | `Sr2 = 7` | `python/rgmin/_core.pyi:94` | `docs/orgmode/reference/public-api.org` |
+| `Method.Steepest` | class attribute | `Steepest = 6` | `python/rgmin/_core.pyi:92` | `docs/orgmode/reference/public-api.org` |
 | `NewtonCG.default_accept` | class attribute | `default_accept = "none"` | `python/rgmin/optimize.py:1159` | `docs/orgmode/reference/public-api.org` |
 | `NewtonCG.kind` | class attribute | `kind = "newton-cg"` | `python/rgmin/optimize.py:1158` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
 | `NewtonPCG.kind` | class attribute | `kind = "newton-pcg"` | `python/rgmin/optimize.py:1165` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
@@ -12963,7 +13545,28 @@ reference entry and a documentation location.
 | `SR1.kind` | class attribute | `kind = "sr1"` | `python/rgmin/optimize.py:712` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
 | `SR2.kind` | class attribute | `kind = "sr2"` | `python/rgmin/optimize.py:718` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
 | `SteepestDescent.kind` | class attribute | `kind = "sd"` | `python/rgmin/optimize.py:730` | `docs/orgmode/reference/product-manifold.org`, `docs/orgmode/reference/python.org` |
+| `Stop.BUDGET` | class attribute | `BUDGET = 3` | `python/rgmin/_core.pyi:146` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/python.org` |
+| `Stop.Budget` | class attribute | `Budget = 3` | `python/rgmin/_core.pyi:166` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/gromacs-cg.org` |
+| `Stop.ENERGY_TOLERANCE` | class attribute | `ENERGY_TOLERANCE = 6` | `python/rgmin/_core.pyi:154` | `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/python.org` |
+| `Stop.EVAL_BUDGET` | class attribute | `EVAL_BUDGET = 7` | `python/rgmin/_core.pyi:156` | `docs/orgmode/howto/stopping.org`, `docs/orgmode/reference/python.org` |
+| `Stop.EnergyTolerance` | class attribute | `EnergyTolerance = 6` | `python/rgmin/_core.pyi:174` | `docs/orgmode/howto/stopping.org` |
+| `Stop.EvalBudget` | class attribute | `EvalBudget = 7` | `python/rgmin/_core.pyi:176` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/stopping.org` |
+| `Stop.LINE_SEARCH` | class attribute | `LINE_SEARCH = 4` | `python/rgmin/_core.pyi:148` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/python.org` |
+| `Stop.LINE_SEARCH_ROUNDING` | class attribute | `LINE_SEARCH_ROUNDING = 9` | `python/rgmin/_core.pyi:150` | `docs/orgmode/reference/python.org` |
+| `Stop.LineSearch` | class attribute | `LineSearch = 4` | `python/rgmin/_core.pyi:168` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/api.org`, `docs/orgmode/reference/python.org` |
+| `Stop.LineSearchRounding` | class attribute | `LineSearchRounding = 9` | `python/rgmin/_core.pyi:170` | `docs/orgmode/reference/public-api.org` |
+| `Stop.MACHINE_PRECISION` | class attribute | `MACHINE_PRECISION = 8` | `python/rgmin/_core.pyi:158` | `docs/orgmode/reference/python.org` |
+| `Stop.MachinePrecision` | class attribute | `MachinePrecision = 8` | `python/rgmin/_core.pyi:178` | `docs/orgmode/reference/gromacs-cg.org`, `docs/orgmode/reference/gromacs-lbfgs.org`, `docs/orgmode/reference/gromacs-steep.org` |
+| `Stop.NOISE_FLOOR` | class attribute | `NOISE_FLOOR = 1` | `python/rgmin/_core.pyi:142` | `docs/orgmode/reference/python.org` |
+| `Stop.NoiseFloor` | class attribute | `NoiseFloor = 1` | `python/rgmin/_core.pyi:162` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/configure.org` |
+| `Stop.POLISH_UNMET` | class attribute | `POLISH_UNMET = 5` | `python/rgmin/_core.pyi:152` | `docs/orgmode/reference/python.org` |
+| `Stop.PolishUnmet` | class attribute | `PolishUnmet = 5` | `python/rgmin/_core.pyi:172` | `docs/orgmode/changelog.org` |
+| `Stop.STEP_TOLERANCE` | class attribute | `STEP_TOLERANCE = 2` | `python/rgmin/_core.pyi:144` | `docs/orgmode/reference/python.org` |
+| `Stop.StepTolerance` | class attribute | `StepTolerance = 2` | `python/rgmin/_core.pyi:164` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/session.org` |
+| `Stop.TOLERANCE` | class attribute | `TOLERANCE = 0` | `python/rgmin/_core.pyi:140` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/python.org` |
+| `Stop.Tolerance` | class attribute | `Tolerance = 0` | `python/rgmin/_core.pyi:160` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/method-catalog.org`, `docs/orgmode/howto/stopping.org` |
 | `StopUnmetError.report` | class attribute | `report: Report` | `python/rgmin/__init__.pyi:23` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
+| `StopUnmetError.report` | class attribute | `report: Report = ...` | `python/rgmin/_core.pyi:18` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
 | `gromacs_mdp_options` | function | `gromacs_mdp_options(mdp, **overrides)` | `python/rgmin/__init__.pyi:45` | `docs/orgmode/howto/gromacs-cg.org`, `docs/orgmode/howto/gromacs-steep.org`, `docs/orgmode/reference/gromacs-cg.org` |
 | `lowest_eigenpairs` | function | `lowest_eigenpairs(hvp, x0_block, x, tol, max_iter, precond, strict)` | `python/rgmin/__init__.py:89` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/configure.org`, `docs/orgmode/howto/irc.org` |
 | `lowest_eigenpairs` | function | `lowest_eigenpairs(hvp, x0_block, x, tol, max_iter, precond, strict)` | `python/rgmin/__init__.pyi:47` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/configure.org`, `docs/orgmode/howto/irc.org` |
@@ -13034,6 +13637,14 @@ reference entry and a documentation location.
 | `LBFGS.step` | method | `step(self, forces)` | `python/rgmin/__init__.pyi:220` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/c-abi.org` |
 | `LBFGSLineSearch.__init__` | method | `__init__(self, *args, **kwargs)` | `python/rgmin/ase.py:1729` | `docs/orgmode/reference/public-api.org` |
 | `LBFGSLineSearch.__init__` | method | `__init__(self, *args, **kwargs)` | `python/rgmin/optimize.py:462` | `docs/orgmode/reference/public-api.org` |
+| `LbfgsPairs.__init__` | method | `__init__(self, n, capacity)` | `python/rgmin/_maturin.pyi:95` | `docs/orgmode/reference/public-api.org` |
+| `LbfgsPairs.__len__` | method | `__len__(self)` | `python/rgmin/_maturin.pyi:96` | `docs/orgmode/reference/public-api.org` |
+| `LbfgsPairs.clear` | method | `clear(self)` | `python/rgmin/_maturin.pyi:99` | `docs/orgmode/reference/public-api.org` |
+| `LbfgsPairs.dim` | method | `dim(self)` | `python/rgmin/_maturin.pyi:97` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
+| `LbfgsPairs.direction` | method | `direction(self, gradient, h0)` | `python/rgmin/_maturin.pyi:100` | `docs/orgmode/reference/public-api.org` |
+| `LbfgsPairs.push` | method | `push(self, s, y, rho)` | `python/rgmin/_maturin.pyi:98` | `docs/orgmode/howto/c-abi.org` |
+| `LineSearch.__init__` | method | `__init__(self, kind, x, direction, istep, c1, c2, beta, maxiter, tol)` | `python/rgmin/_maturin.pyi:79` | `docs/orgmode/reference/public-api.org` |
+| `LineSearch.offer` | method | `offer(self, f, gradient)` | `python/rgmin/_maturin.pyi:92` | `docs/orgmode/explanation/linesearch.org` |
 | `LiuStorey.__init__` | method | `__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, accept, **options)` | `python/rgmin/ase.py:1334` | `docs/orgmode/reference/public-api.org` |
 | `Manifold.__init__` | method | `__init__(self, core)` | `python/rgmin/manifold.py:42` | `docs/orgmode/reference/public-api.org` |
 | `Manifold.egrad_to_rgrad` | method | `egrad_to_rgrad(self, x, egrad)` | `python/rgmin/manifold.py:84` | `docs/orgmode/reference/manifold.org` |
@@ -13048,6 +13659,7 @@ reference entry and a documentation location.
 | `Manifold.size` | method | `size(self)` | `python/rgmin/manifold.py:52` | `docs/orgmode/reference/public-api.org` |
 | `Manifold.transport` | method | `transport(self, x_from, x_to, v)` | `python/rgmin/manifold.py:114` | `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/howto/manifolds.org` |
 | `Newton.__init__` | method | `__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, accept, hessian, **options)` | `python/rgmin/ase.py:905` | `docs/orgmode/reference/public-api.org` |
+| `NotConverged.report` | method | `report(self)` | `python/rgmin/_core.pyi:208` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/python.org` |
 | `Optimizer.__init__` | method | `__init__(self, atoms, restart, logfile, trajectory, append_trajectory, method, maxstep, accept, hessian, **options)` | `python/rgmin/ase.py:346` | `docs/orgmode/reference/public-api.org` |
 | `Optimizer.close` | method | `close(self)` | `python/rgmin/ase.py:383` | `docs/orgmode/reference/public-api.org` |
 | `Optimizer.converged` | method | `converged(self, *args, **kwargs)` | `python/rgmin/ase.py:504` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/howto/c-abi.org` |
@@ -13064,12 +13676,39 @@ reference entry and a documentation location.
 | `Product.__init__` | method | `__init__(self, *factors)` | `python/rgmin/manifold.py:204` | `docs/orgmode/reference/public-api.org` |
 | `QuickMin.__init__` | method | `__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, accept, **options)` | `python/rgmin/ase.py:778` | `docs/orgmode/reference/public-api.org` |
 | `RFO.__init__` | method | `__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, accept, hessian, **options)` | `python/rgmin/ase.py:939` | `docs/orgmode/reference/public-api.org` |
+| `Report.converged` | method | `converged(self)` | `python/rgmin/_core.pyi:199` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/howto/c-abi.org` |
+| `Report.grad_norm` | method | `grad_norm(self)` | `python/rgmin/_core.pyi:192` | `docs/orgmode/howto/constraints.org`, `docs/orgmode/reference/constraints.org`, `docs/orgmode/reference/lammps-min-style.org` |
+| `Report.steps` | method | `steps(self)` | `python/rgmin/_core.pyi:188` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/gromacs-cg.org`, `docs/orgmode/howto/gromacs-steep.org` |
+| `Report.stop` | method | `stop(self)` | `python/rgmin/_core.pyi:196` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/product-manifold.org` |
+| `Report.value` | method | `value(self)` | `python/rgmin/_core.pyi:184` | `docs/orgmode/howto/level-set.org`, `docs/orgmode/howto/manifolds.org`, `docs/orgmode/reference/product-manifold.org` |
 | `RiemannianCG.__init__` | method | `__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, alpha, accept, **kwargs)` | `python/rgmin/optimize.py:1120` | `docs/orgmode/reference/public-api.org` |
 | `RigidQuotient.__init__` | method | `__init__(self, n_atoms, periodic)` | `python/rgmin/manifold.py:190` | `docs/orgmode/reference/public-api.org` |
 | `SD.__init__` | method | `__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, accept, **options)` | `python/rgmin/ase.py:842` | `docs/orgmode/reference/public-api.org` |
 | `SPD.__init__` | method | `__init__(self, p, metric)` | `python/rgmin/manifold.py:169` | `docs/orgmode/reference/public-api.org` |
 | `SR1.__init__` | method | `__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, accept, **options)` | `python/rgmin/ase.py:973` | `docs/orgmode/reference/public-api.org` |
 | `SR2.__init__` | method | `__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, accept, **options)` | `python/rgmin/ase.py:1005` | `docs/orgmode/reference/public-api.org` |
+| `Session.__init__` | method | `__init__(self, kind, n, max_atom, wolfe, eon_cap, memory, dt, dt_max, n_min, f_inc, f_dec, alpha, f_alpha, cap_two_step_overshoot, downhill, h0, maxmove, preset, abc, accept, istep, shrink, max_constraint_shrinks, nstcgsteep, nbfgscorr, level_set, error_on_unmet, backward_polish, etol, max_evals, scale, weight, noise, prior, update_prior_strategy, update_hyperparams, batch_size, bounds, unbounded_hyperparams, max_refinements)` | `python/rgmin/_maturin.pyi:7` | `docs/orgmode/reference/public-api.org` |
+| `Session.evals` | method | `evals(self)` | `python/rgmin/_maturin.pyi:56` | `docs/orgmode/howto/stopping.org` |
+| `Session.forget` | method | `forget(self)` | `python/rgmin/_maturin.pyi:70` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/trust-region.org`, `docs/orgmode/howto/manifolds.org` |
+| `Session.gpmin_hyperparameters` | method | `gpmin_hyperparameters(self)` | `python/rgmin/_maturin.pyi:63` | `docs/orgmode/reference/python.org` |
+| `Session.max_constraint_shrinks` | method | `max_constraint_shrinks(self)` | `python/rgmin/_maturin.pyi:65` | `docs/orgmode/changelog.org`, `docs/orgmode/reference/gromacs-steep.org`, `docs/orgmode/reference/python.org` |
+| `Session.nbfgscorr` | method | `nbfgscorr(self)` | `python/rgmin/_maturin.pyi:69` | `docs/orgmode/howto/gromacs-lbfgs.org`, `docs/orgmode/reference/gromacs-lbfgs.org`, `docs/orgmode/reference/python.org` |
+| `Session.nstcgsteep` | method | `nstcgsteep(self)` | `python/rgmin/_maturin.pyi:67` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/gromacs-cg.org`, `docs/orgmode/reference/gromacs-cg.org` |
+| `Session.pair_count` | method | `pair_count(self)` | `python/rgmin/_maturin.pyi:52` | `docs/orgmode/changelog.org` |
+| `Session.push_pair` | method | `push_pair(self, s, y)` | `python/rgmin/_maturin.pyi:51` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/product-manifold.org`, `docs/orgmode/reference/product-manifold.org` |
+| `Session.set_etol` | method | `set_etol(self, etol)` | `python/rgmin/_maturin.pyi:59` | `docs/orgmode/howto/stopping.org` |
+| `Session.set_gtol` | method | `set_gtol(self, gtol)` | `python/rgmin/_maturin.pyi:61` | `docs/orgmode/reference/public-api.org` |
+| `Session.set_level_set` | method | `set_level_set(self, target)` | `python/rgmin/_maturin.pyi:71` | `docs/orgmode/changelog.org` |
+| `Session.set_max_evals` | method | `set_max_evals(self, max_evals)` | `python/rgmin/_maturin.pyi:60` | `docs/orgmode/howto/stopping.org` |
+| `Session.step` | method | `step(self, x, callback)` | `python/rgmin/_maturin.pyi:72` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/c-abi.org` |
+| `Session.steps` | method | `steps(self)` | `python/rgmin/_maturin.pyi:54` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/gromacs-cg.org`, `docs/orgmode/howto/gromacs-steep.org` |
+| `Session.stop` | method | `stop(self)` | `python/rgmin/_maturin.pyi:58` | `docs/orgmode/changelog.org`, `docs/orgmode/howto/c-abi.org`, `docs/orgmode/reference/product-manifold.org` |
+| `Solver.__init__` | method | `__init__(self, n, config)` | `python/rgmin/_core.pyi:242` | `docs/orgmode/reference/public-api.org` |
+| `Solver.dim` | method | `dim(self)` | `python/rgmin/_core.pyi:245` | `docs/orgmode/howto/bench-gate.org`, `docs/orgmode/reference/api.org` |
+| `Solver.evals` | method | `evals(self)` | `python/rgmin/_core.pyi:248` | `docs/orgmode/howto/stopping.org` |
+| `Solver.method` | method | `method(self)` | `python/rgmin/_core.pyi:252` | `docs/orgmode/howto/lammps-migration.org`, `docs/orgmode/howto/lbfgs-box.org`, `docs/orgmode/reference/lammps-min-style.org` |
+| `Solver.step` | method | `step(self, f_and_grad, x)` | `python/rgmin/_core.pyi:254` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/c-abi.org` |
+| `Solver.step_hess` | method | `step_hess(self, f_and_grad, hessian, x)` | `python/rgmin/_core.pyi:257` | `docs/orgmode/changelog.org`, `docs/orgmode/explanation/python-threads.org`, `docs/orgmode/howto/session.org` |
 | `SolverConfig.__init__` | method | `__init__(self, method, **options)` | `python/rgmin/__init__.py:187` | `docs/orgmode/reference/public-api.org` |
 | `SolverConfig.__init__` | method | `__init__(self, method, **options)` | `python/rgmin/__init__.pyi:36` | `docs/orgmode/reference/public-api.org` |
 | `Stiefel.__init__` | method | `__init__(self, n, p, retraction)` | `python/rgmin/manifold.py:154` | `docs/orgmode/reference/public-api.org` |
