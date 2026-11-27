@@ -75,6 +75,7 @@ class Method(enum.IntEnum):
     GROMACS_CG = 29
 
     RCG = 30
+
     GROMACS_LBFGS = 31
 
     PolakRibiere = 0
@@ -130,6 +131,7 @@ class Method(enum.IntEnum):
     GromacsCg = 29
 
     Rcg = 30
+
     GromacsLbfgs = 31
 
 class Stop(enum.IntEnum):

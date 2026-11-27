@@ -23,7 +23,7 @@ import weakref
 from collections import deque
 from collections.abc import Callable, Iterator
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from ase.optimize.optimize import Optimizer as _ASEOptimizer
@@ -338,7 +338,7 @@ class Optimizer(_ASEOptimizer):
     calculator safe.
     """
 
-    defaults: ClassVar[dict[str, float]] = {"maxstep": 0.2}
+    defaults: dict[str, float] = {"maxstep": 0.2}  # noqa: RUF012 ASE base unannotated
 
     def _restart_supported(self) -> bool:
         return False
