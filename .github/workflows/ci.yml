@@ -135,6 +135,9 @@ jobs:
           python3 scripts/check_abi.py
           python3 scripts/check_header_docs.py
           python3 scripts/generate_docs_inventory.py --check
+      - name: Docs inventory unit tests
+        if: matrix.name == 'default'
+        run: python3 scripts/test_generate_docs_inventory.py
       - name: Tutorial examples
         if: matrix.name == 'default'
         run: |

@@ -6,8 +6,11 @@ from __future__ import annotations
 import argparse
 import ast
 import dataclasses
+import difflib
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -2108,7 +2111,7 @@ def assigned_names(node: ast.Assign | ast.AnnAssign) -> list[str]:
 
 
 def source_segment(path: Path, node: ast.AST) -> str:
-    text = ast.get_source_segment(path.read_text(), node) or ""
+    text = ast.get_source_segment(path.read_text(encoding="utf-8"), node) or ""
     return " ".join(text.split())
 
 
@@ -2127,7 +2130,7 @@ def org_documents() -> dict[str, list[str]]:
     for path in sorted(ORG.rglob("*.org")):
         if path == INVENTORY:
             continue
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         rel = relative(path)
         for token in set(MARKUP.findall(text)):
             found.setdefault(token, []).append(rel)
@@ -2331,13 +2334,17 @@ def render_inventory(items: list[Item], documents: dict[str, list[str]]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def org_title(path: Path) -> str:
+def _title_text(text: str, stem: str) -> str:
     match = re.search(
         r"^#\+TITLE:\s*(.+)$",
-        path.read_text(),
+        text,
         re.MULTILINE | re.IGNORECASE,
     )
-    return match.group(1).strip() if match else path.stem.replace("-", " ").title()
+    return match.group(1).strip() if match else stem.replace("-", " ").title()
+
+
+def org_title(path: Path) -> str:
+    return _title_text(path.read_text(encoding="utf-8"), path.stem)
 
 
 def documentation_site() -> str:
@@ -2346,7 +2353,7 @@ def documentation_site() -> str:
     The page links are built from this URL alone. A missing entry, or a
     value that is not a plain absolute https URL, is an error.
     """
-    lines = (ROOT / "pyproject.toml").read_text().splitlines()
+    lines = (ROOT / "pyproject.toml").read_text(encoding="utf-8").splitlines()
     in_urls = False
     for line in lines:
         stripped = line.strip()
@@ -2389,7 +2396,15 @@ def docs_page(site: str, page: str) -> str:
     return f"{site}{page}.html"
 
 
-def render_llms() -> str:
+def _text_for(path: Path, overrides: dict[Path, str] | None) -> str:
+    if overrides:
+        for key, value in overrides.items():
+            if key == path or key.resolve() == path.resolve():
+                return value
+    return path.read_text(encoding="utf-8")
+
+
+def render_llms(overrides: dict[Path, str] | None = None) -> str:
     site = documentation_site()
     lines = [
         "# rgmin",
@@ -2410,9 +2425,19 @@ def render_llms() -> str:
     ]
     for heading, directory in groups:
         lines.extend([f"## {heading}", ""])
-        for path in sorted((ORG / directory).glob("*.org")):
+        paths = list(sorted((ORG / directory).glob("*.org")))
+        if (
+            overrides
+            and directory == "reference"
+            and INVENTORY in overrides
+            and all(path.resolve() != INVENTORY.resolve() for path in paths)
+        ):
+            paths.append(INVENTORY)
+            paths.sort()
+        for path in paths:
             rel = path.relative_to(ORG).with_suffix("").as_posix()
-            lines.append(f"- [{org_title(path)}]({docs_page(site, rel)})")
+            title = _title_text(_text_for(path, overrides), path.stem)
+            lines.append(f"- [{title}]({docs_page(site, rel)})")
         lines.append("")
     lines.extend(
         [
@@ -2461,19 +2486,25 @@ def org_to_markdown(text: str) -> str:
     return text.strip()
 
 
-def render_llms_full() -> str:
+def render_llms_full(overrides: dict[Path, str] | None = None) -> str:
     parts = [
         "# rgmin full documentation",
         "",
         "> Generated from the canonical Org sources by `scripts/generate_docs_inventory.py`.",
     ]
-    for path in sorted(ORG.rglob("*.org")):
+    paths = list(sorted(ORG.rglob("*.org")))
+    if overrides and INVENTORY in overrides and all(
+        path.resolve() != INVENTORY.resolve() for path in paths
+    ):
+        paths.append(INVENTORY)
+        paths.sort()
+    for path in paths:
         parts.extend(
             [
                 "",
                 f"---\n\nSource: `{relative(path)}`",
                 "",
-                org_to_markdown(path.read_text()),
+                org_to_markdown(_text_for(path, overrides)),
             ]
         )
     return "\n".join(parts).rstrip() + "\n"
@@ -2483,18 +2514,71 @@ def generated() -> dict[Path, str]:
     items = sorted(set(rust_items() + header_items() + python_items()))
     documents = org_documents()
     inventory = render_inventory(items, documents)
-    previous = INVENTORY.read_text() if INVENTORY.exists() else None
-    INVENTORY.parent.mkdir(parents=True, exist_ok=True)
-    INVENTORY.write_text(inventory)
-    try:
-        full = render_llms_full()
-        short = render_llms()
-    finally:
-        if previous is None:
-            INVENTORY.unlink()
-        else:
-            INVENTORY.write_text(previous)
+    overrides = {INVENTORY: inventory}
+    full = render_llms_full(overrides)
+    short = render_llms(overrides)
     return {INVENTORY: inventory, LLMS: short, LLMS_FULL: full}
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Replace ``path`` by writing a temporary file in its directory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def _inventory_bytes(path: Path) -> bytes | None:
+    """Read the inventory. A non-UTF-8 file is a one-line error."""
+    data = path.read_bytes()
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        print(f"{relative(path)} is not valid UTF-8", file=sys.stderr)
+        return None
+    return data
+
+
+def _diff_summary(path: Path, current: bytes, expected: str) -> str:
+    rel = relative(path)
+    expected_bytes = expected.encode("utf-8")
+    try:
+        current_text = current.decode("utf-8")
+    except UnicodeDecodeError:
+        return (
+            f"{rel} differs ({len(current)} bytes on disk, "
+            f"{len(expected_bytes)} bytes generated)"
+        )
+    diff = list(
+        difflib.unified_diff(
+            current_text.splitlines(keepends=True),
+            expected.splitlines(keepends=True),
+            fromfile=rel,
+            tofile=f"{rel} generated",
+            n=1,
+        )
+    )
+    changed = sum(
+        1
+        for line in diff
+        if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+    )
+    preview = diff[:24]
+    lines = [f"{rel} differs ({changed} changed lines)"]
+    lines.extend(line.rstrip("\n") for line in preview)
+    if len(diff) > len(preview):
+        lines.append(f"... {len(diff) - len(preview)} more diff lines")
+    return "\n".join(lines)
 
 
 def main() -> int:
@@ -2509,16 +2593,29 @@ def main() -> int:
     outputs = generated()
     if args.write:
         for path, text in outputs.items():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
+            encoded = text.encode("utf-8")
+            if path.exists() and path.read_bytes() == encoded:
+                continue
+            _atomic_write(path, text)
         print(f"wrote {len(outputs)} generated documentation files")
         return 0
-    stale = []
+    stale = False
     for path, text in outputs.items():
-        if not path.exists() or path.read_text() != text:
-            stale.append(relative(path))
-    for name in stale:
-        print(f"{name} is stale; run scripts/generate_docs_inventory.py --write")
+        rel = relative(path)
+        if not path.exists():
+            print(f"{rel} is stale; run scripts/generate_docs_inventory.py --write")
+            stale = True
+            continue
+        if path == INVENTORY:
+            current = _inventory_bytes(path)
+            if current is None:
+                return 1
+        else:
+            current = path.read_bytes()
+        if current != text.encode("utf-8"):
+            print(f"{rel} is stale; run scripts/generate_docs_inventory.py --write")
+            print(_diff_summary(path, current, text))
+            stale = True
     return 1 if stale else 0
 
 
