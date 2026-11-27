@@ -11,7 +11,7 @@ entry elsewhere. Run the script to update this file. Do not edit it by hand.
 
 * Coverage
 
-Before this inventory, 1209 of 5332 source items had an exact
+Before this inventory, 1211 of 5332 source items had an exact
 marked-up name in an Org source. After this inventory, every item has a
 reference entry and a documentation location.
 
@@ -650,7 +650,7 @@ reference entry and a documentation location.
 | ~MinresVector::RightHandSide~ | enum variant | ~RightHandSide,~ | ~src/minres.rs:45~ | ~docs/orgmode/reference/public-api.org~ |
 | ~MinresVector::RightPreconditioner~ | enum variant | ~RightPreconditioner,~ | ~src/minres.rs:49~ | ~docs/orgmode/reference/public-api.org~ |
 | ~NewtonKind::Rfo~ | enum variant | ~Rfo,~ | ~src/newton.rs:40~ | ~docs/orgmode/reference/public-api.org~ |
-| ~NewtonKind::Shifted~ | enum variant | ~Shifted,~ | ~src/newton.rs:38~ | ~docs/orgmode/reference/public-api.org~ |
+| ~NewtonKind::Shifted~ | enum variant | ~Shifted,~ | ~src/newton.rs:38~ | ~docs/orgmode/howto/method-catalog.org~ |
 | ~NoiseFlag::Declared~ | enum variant | ~Declared,~ | ~src/noise.rs:68~ | ~docs/orgmode/reference/public-api.org~ |
 | ~NoiseFlag::Detected~ | enum variant | ~Detected,~ | ~src/noise.rs:58~ | ~docs/orgmode/reference/public-api.org~ |
 | ~NoiseFlag::StepTooLarge~ | enum variant | ~StepTooLarge,~ | ~src/noise.rs:65~ | ~docs/orgmode/reference/public-api.org~ |
@@ -1043,7 +1043,7 @@ reference entry and a documentation location.
 | ~default~ | function | ~fn default() -> Self {~ | ~src/aaa.rs:49~ | ~docs/orgmode/reference/public-api.org~ |
 | ~default~ | function | ~fn default() -> Self {~ | ~src/control.rs:209~ | ~docs/orgmode/howto/configure.org~, ~docs/orgmode/reference/python.org~ |
 | ~default~ | function | ~fn default() -> Self {~ | ~src/eigenexa_kind.rs:47~ | ~docs/orgmode/reference/public-api.org~ |
-| ~default~ | function | ~fn default() -> Self {~ | ~src/eon_cg.rs:56~ | ~docs/orgmode/howto/configure.org~ |
+| ~default~ | function | ~fn default() -> Self {~ | ~src/eon_cg.rs:56~ | ~docs/orgmode/howto/configure.org~, ~docs/orgmode/howto/method-catalog.org~ |
 | ~default~ | function | ~fn default() -> Self {~ | ~src/ffi.rs:1381~ | ~docs/orgmode/reference/public-api.org~ |
 | ~default~ | function | ~fn default() -> Self {~ | ~src/ffi.rs:9389~ | ~docs/orgmode/reference/public-api.org~ |
 | ~default~ | function | ~fn default() -> Self {~ | ~src/ffi.rs:9408~ | ~docs/orgmode/reference/public-api.org~ |
@@ -1829,7 +1829,7 @@ reference entry and a documentation location.
 | ~set_extra_updates~ | function | ~pub fn set_extra_updates(&mut self, extra: usize) {~ | ~src/session.rs:1513~ | ~docs/orgmode/howto/session.org~ |
 | ~set_factor_shape~ | function | ~pub fn set_factor_shape(&mut self, n: usize, p: usize) {~ | ~src/session.rs:1477~ | ~docs/orgmode/howto/manifolds.org~ |
 | ~set_ff~ | function | ~pub fn set_ff( &mut self, positions: ArrayView1<f64>, terms: FfTerms<'_>, params: &FfParams, ) -> Result<()> {~ | ~src/session.rs:896~ | ~docs/orgmode/howto/precon.org~ |
-| ~set_fire_abc~ | function | ~pub fn set_fire_abc(&mut self, on: bool) -> Result<()> {~ | ~src/session.rs:6822~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/fire.org~, ~docs/orgmode/howto/session.org~ |
+| ~set_fire_abc~ | function | ~pub fn set_fire_abc(&mut self, on: bool) -> Result<()> {~ | ~src/session.rs:6822~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/fire.org~, ~docs/orgmode/howto/method-catalog.org~ |
 | ~set_fire_cap_two_step_overshoot~ | function | ~pub fn set_fire_cap_two_step_overshoot(&mut self, on: bool) -> Result<()> {~ | ~src/session.rs:6810~ | ~docs/orgmode/reference/public-api.org~ |
 | ~set_fire_config~ | function | ~pub fn set_fire_config(&mut self, config: FireConfig) -> Result<()> {~ | ~src/session.rs:6795~ | ~docs/orgmode/changelog.org~ |
 | ~set_fire_preset~ | function | ~pub fn set_fire_preset(&mut self, preset: FirePreset) -> Result<()> {~ | ~src/session.rs:6719~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/fire.org~, ~docs/orgmode/howto/session.org~ |
@@ -2153,7 +2153,7 @@ reference entry and a documentation location.
 | ~with_weight~ | function | ~pub fn with_weight(mut self, weight: f64) -> Self {~ | ~src/manifold/product.rs:134~ | ~docs/orgmode/explanation/product-manifold.org~ |
 | ~within~ | function | ~pub fn within(basis: Array2<f64>) -> Result<Self> {~ | ~src/manifold/subspace_sphere.rs:78~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/reference/product-manifold.org~ |
 | ~wolfe~ | function | ~pub fn wolfe(self) -> Self {~ | ~src/lbfgs.rs:175~ | ~docs/orgmode/reference/public-api.org~ |
-| ~wolfe~ | function | ~pub const fn wolfe(c1: f64, c2: f64, maxiter: usize) -> Self {~ | ~src/linesearch/mod.rs:253~ | ~docs/orgmode/reference/public-api.org~ |
+| ~wolfe~ | function | ~pub const fn wolfe(c1: f64, c2: f64, maxiter: usize) -> Self {~ | ~src/linesearch/mod.rs:253~ | ~docs/orgmode/howto/method-catalog.org~ |
 | ~write_checkpoint~ | function | ~pub fn write_checkpoint<S>(~ | ~src/con_checkpoint.rs:47~ | ~docs/orgmode/reference/public-api.org~ |
 | ~zeros_cpu~ | function | ~pub fn zeros_cpu(n: usize) -> Self {~ | ~src/vecops.rs:915~ | ~docs/orgmode/reference/public-api.org~ |
 | ~zoom~ | function | ~pub fn zoom<F>(~ | ~src/linesearch/zoom.rs:52~ | ~docs/orgmode/reference/public-api.org~ |
@@ -4327,7 +4327,7 @@ reference entry and a documentation location.
 | ~set_exp~ | function | ~rgmin_status_t set_exp(rgmin_exp_t const* params, std::uint32_t const* pair_i,~ | ~include/rgmin/optimize.hpp:765~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/precon.org~, ~docs/orgmode/howto/session.org~ |
 | ~set_extra_updates~ | function | ~void set_extra_updates(std::size_t n) {~ | ~include/rgmin/optimize.hpp:917~ | ~docs/orgmode/howto/session.org~ |
 | ~set_factor_shape~ | function | ~void set_factor_shape(std::size_t n, std::size_t p) { rgmin_solver_set_factor_shape(ptr_, n, p); }~ | ~include/rgmin/optimize.hpp:826~ | ~docs/orgmode/howto/manifolds.org~ |
-| ~set_fire_abc~ | function | ~int set_fire_abc(bool on) { return rgmin_solver_set_fire_abc(ptr_, on ? 1 : 0); }~ | ~include/rgmin/optimize.hpp:859~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/fire.org~, ~docs/orgmode/howto/session.org~ |
+| ~set_fire_abc~ | function | ~int set_fire_abc(bool on) { return rgmin_solver_set_fire_abc(ptr_, on ? 1 : 0); }~ | ~include/rgmin/optimize.hpp:859~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/fire.org~, ~docs/orgmode/howto/method-catalog.org~ |
 | ~set_fire_cap_two_step_overshoot~ | function | ~int set_fire_cap_two_step_overshoot(bool on) {~ | ~include/rgmin/optimize.hpp:862~ | ~docs/orgmode/reference/public-api.org~ |
 | ~set_fire_preset~ | function | ~int set_fire_preset(rgmin_fire_preset_t preset) {~ | ~include/rgmin/optimize.hpp:855~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/fire.org~, ~docs/orgmode/howto/session.org~ |
 | ~set_fire_variant~ | function | ~void set_fire_variant(rgmin_fire_variant_t variant) {~ | ~include/rgmin/optimize.hpp:794~ | ~docs/orgmode/howto/session.org~ |
@@ -4989,7 +4989,7 @@ reference entry and a documentation location.
 | ~Newton~ | class | ~class Newton~ | ~python/rgmin/ase.py:898~ | ~docs/orgmode/reference/public-api.org~ |
 | ~NewtonCG~ | class | ~class NewtonCG~ | ~python/rgmin/optimize.py:1150~ | ~docs/orgmode/howto/ase-migration.org~, ~docs/orgmode/reference/python.org~ |
 | ~NewtonPCG~ | class | ~class NewtonPCG~ | ~python/rgmin/optimize.py:1162~ | ~docs/orgmode/howto/ase-migration.org~, ~docs/orgmode/reference/python.org~ |
-| ~NotConverged~ | class | ~class NotConverged~ | ~python/rgmin/_core.pyi:202~ | ~docs/orgmode/reference/public-api.org~ |
+| ~NotConverged~ | class | ~class NotConverged~ | ~python/rgmin/_core.pyi:204~ | ~docs/orgmode/reference/public-api.org~ |
 | ~NumericalError~ | class | ~class NumericalError~ | ~python/rgmin/_core.pyi:10~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Optimizer~ | class | ~class Optimizer~ | ~python/rgmin/ase.py:311~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/python.org~ |
 | ~PSO~ | class | ~class PSO~ | ~python/rgmin/ase.py:1128~ | ~docs/orgmode/reference/public-api.org~ |
@@ -4997,7 +4997,7 @@ reference entry and a documentation location.
 | ~Product~ | class | ~class Product~ | ~python/rgmin/manifold.py:196~ | ~docs/orgmode/reference/public-api.org~ |
 | ~QuickMin~ | class | ~class QuickMin~ | ~python/rgmin/ase.py:772~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RFO~ | class | ~class RFO~ | ~python/rgmin/ase.py:932~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Report~ | class | ~class Report~ | ~python/rgmin/_core.pyi:180~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Report~ | class | ~class Report~ | ~python/rgmin/_core.pyi:182~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RiemannianCG~ | class | ~class RiemannianCG~ | ~python/rgmin/optimize.py:1107~ | ~docs/orgmode/reference/python.org~ |
 | ~RigidQuotient~ | class | ~class RigidQuotient~ | ~python/rgmin/manifold.py:175~ | ~docs/orgmode/reference/public-api.org~ |
 | ~SD~ | class | ~class SD~ | ~python/rgmin/ase.py:835~ | ~docs/orgmode/reference/python.org~ |
@@ -5007,12 +5007,12 @@ reference entry and a documentation location.
 | ~SR2~ | class | ~class SR2~ | ~python/rgmin/ase.py:998~ | ~docs/orgmode/reference/public-api.org~ |
 | ~SR2~ | class | ~class SR2~ | ~python/rgmin/optimize.py:715~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Session~ | class | ~class Session~ | ~python/rgmin/_maturin.pyi:6~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Solver~ | class | ~class Solver~ | ~python/rgmin/_core.pyi:239~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Solver~ | class | ~class Solver~ | ~python/rgmin/_core.pyi:241~ | ~docs/orgmode/reference/public-api.org~ |
 | ~SolverConfig~ | class | ~class SolverConfig~ | ~python/rgmin/__init__.py:163~ | ~docs/orgmode/reference/public-api.org~ |
 | ~SolverConfig~ | class | ~class SolverConfig~ | ~python/rgmin/__init__.pyi:27~ | ~docs/orgmode/reference/public-api.org~ |
 | ~SteepestDescent~ | class | ~class SteepestDescent~ | ~python/rgmin/optimize.py:721~ | ~docs/orgmode/howto/ase-migration.org~, ~docs/orgmode/reference/python.org~ |
 | ~Stiefel~ | class | ~class Stiefel~ | ~python/rgmin/manifold.py:146~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Stop~ | class | ~class Stop~ | ~python/rgmin/_core.pyi:135~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Stop~ | class | ~class Stop~ | ~python/rgmin/_core.pyi:137~ | ~docs/orgmode/reference/public-api.org~ |
 | ~StopUnmetError~ | class | ~class StopUnmetError~ | ~python/rgmin/__init__.pyi:22~ | ~docs/orgmode/reference/public-api.org~ |
 | ~StopUnmetError~ | class | ~class StopUnmetError~ | ~python/rgmin/_core.pyi:13~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Adam.default_accept~ | class attribute | ~default_accept = "none"~ | ~python/rgmin/optimize.py:1035~ | ~docs/orgmode/reference/public-api.org~ |
@@ -5081,90 +5081,90 @@ reference entry and a documentation location.
 | ~LBFGS.use_line_search~ | class attribute | ~use_line_search: bool~ | ~python/rgmin/__init__.pyi:203~ | ~docs/orgmode/tutorials/migration.org~ |
 | ~LiuStorey.kind~ | class attribute | ~kind = "ls"~ | ~python/rgmin/optimize.py:1092~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.ADAM~ | class attribute | ~ADAM = 5~ | ~python/rgmin/_core.pyi:35~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.Adam~ | class attribute | ~Adam = 5~ | ~python/rgmin/_core.pyi:90~ | ~docs/orgmode/howto/configure.org~ |
+| ~Method.Adam~ | class attribute | ~Adam = 5~ | ~python/rgmin/_core.pyi:91~ | ~docs/orgmode/howto/configure.org~ |
 | ~Method.BB~ | class attribute | ~BB = 18~ | ~python/rgmin/_core.pyi:61~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.BFGS~ | class attribute | ~BFGS = 2~ | ~python/rgmin/_core.pyi:29~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.Bb~ | class attribute | ~Bb = 18~ | ~python/rgmin/_core.pyi:116~ | ~docs/orgmode/howto/method-catalog.org~ |
-| ~Method.Bfgs~ | class attribute | ~Bfgs = 2~ | ~python/rgmin/_core.pyi:84~ | ~docs/orgmode/howto/method-catalog.org~ |
+| ~Method.Bb~ | class attribute | ~Bb = 18~ | ~python/rgmin/_core.pyi:117~ | ~docs/orgmode/howto/method-catalog.org~ |
+| ~Method.Bfgs~ | class attribute | ~Bfgs = 2~ | ~python/rgmin/_core.pyi:85~ | ~docs/orgmode/howto/method-catalog.org~ |
 | ~Method.CONJUGATE_DESCENT~ | class attribute | ~CONJUGATE_DESCENT = 11~ | ~python/rgmin/_core.pyi:47~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.ConjugateDescent~ | class attribute | ~ConjugateDescent = 11~ | ~python/rgmin/_core.pyi:102~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Method.ConjugateDescent~ | class attribute | ~ConjugateDescent = 11~ | ~python/rgmin/_core.pyi:103~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.DAI_YUAN~ | class attribute | ~DAI_YUAN = 10~ | ~python/rgmin/_core.pyi:45~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.DIIS~ | class attribute | ~DIIS = 22~ | ~python/rgmin/_core.pyi:69~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.DOGLEG~ | class attribute | ~DOGLEG = 19~ | ~python/rgmin/_core.pyi:63~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.DaiYuan~ | class attribute | ~DaiYuan = 10~ | ~python/rgmin/_core.pyi:100~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.Diis~ | class attribute | ~Diis = 22~ | ~python/rgmin/_core.pyi:124~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/configure.org~ |
-| ~Method.Dogleg~ | class attribute | ~Dogleg = 19~ | ~python/rgmin/_core.pyi:118~ | ~docs/orgmode/howto/method-catalog.org~ |
+| ~Method.DaiYuan~ | class attribute | ~DaiYuan = 10~ | ~python/rgmin/_core.pyi:101~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Method.Diis~ | class attribute | ~Diis = 22~ | ~python/rgmin/_core.pyi:125~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/configure.org~ |
+| ~Method.Dogleg~ | class attribute | ~Dogleg = 19~ | ~python/rgmin/_core.pyi:119~ | ~docs/orgmode/howto/method-catalog.org~ |
 | ~Method.FIRE~ | class attribute | ~FIRE = 17~ | ~python/rgmin/_core.pyi:59~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.FIRE2~ | class attribute | ~FIRE2 = 20~ | ~python/rgmin/_core.pyi:65~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.FLETCHER_REEVES~ | class attribute | ~FLETCHER_REEVES = 1~ | ~python/rgmin/_core.pyi:27~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.FR_PR~ | class attribute | ~FR_PR = 14~ | ~python/rgmin/_core.pyi:53~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.Fire~ | class attribute | ~Fire = 17~ | ~python/rgmin/_core.pyi:114~ | ~docs/orgmode/howto/configure.org~, ~docs/orgmode/howto/manifolds.org~, ~docs/orgmode/howto/precon.org~ |
-| ~Method.Fire2~ | class attribute | ~Fire2 = 20~ | ~python/rgmin/_core.pyi:120~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.FletcherReeves~ | class attribute | ~FletcherReeves = 1~ | ~python/rgmin/_core.pyi:82~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.FrPr~ | class attribute | ~FrPr = 14~ | ~python/rgmin/_core.pyi:108~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Method.Fire~ | class attribute | ~Fire = 17~ | ~python/rgmin/_core.pyi:115~ | ~docs/orgmode/howto/configure.org~, ~docs/orgmode/howto/manifolds.org~, ~docs/orgmode/howto/precon.org~ |
+| ~Method.Fire2~ | class attribute | ~Fire2 = 20~ | ~python/rgmin/_core.pyi:121~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Method.FletcherReeves~ | class attribute | ~FletcherReeves = 1~ | ~python/rgmin/_core.pyi:83~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Method.FrPr~ | class attribute | ~FrPr = 14~ | ~python/rgmin/_core.pyi:109~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.GROMACS_CG~ | class attribute | ~GROMACS_CG = 29~ | ~python/rgmin/_core.pyi:75~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.GROMACS_LBFGS~ | class attribute | ~GROMACS_LBFGS = 31~ | ~python/rgmin/_core.pyi:78~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Method.GROMACS_LBFGS~ | class attribute | ~GROMACS_LBFGS = 31~ | ~python/rgmin/_core.pyi:79~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.GROMACS_STEEP~ | class attribute | ~GROMACS_STEEP = 28~ | ~python/rgmin/_core.pyi:73~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.GromacsCg~ | class attribute | ~GromacsCg = 29~ | ~python/rgmin/_core.pyi:130~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/gromacs-cg.org~, ~docs/orgmode/howto/method-catalog.org~ |
-| ~Method.GromacsLbfgs~ | class attribute | ~GromacsLbfgs = 31~ | ~python/rgmin/_core.pyi:133~ | ~docs/orgmode/howto/gromacs-lbfgs.org~, ~docs/orgmode/howto/method-catalog.org~, ~docs/orgmode/reference/gromacs-lbfgs.org~ |
-| ~Method.GromacsSteep~ | class attribute | ~GromacsSteep = 28~ | ~python/rgmin/_core.pyi:128~ | ~docs/orgmode/howto/gromacs-steep.org~, ~docs/orgmode/howto/method-catalog.org~, ~docs/orgmode/reference/gromacs-cg.org~ |
+| ~Method.GromacsCg~ | class attribute | ~GromacsCg = 29~ | ~python/rgmin/_core.pyi:131~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/gromacs-cg.org~, ~docs/orgmode/howto/method-catalog.org~ |
+| ~Method.GromacsLbfgs~ | class attribute | ~GromacsLbfgs = 31~ | ~python/rgmin/_core.pyi:135~ | ~docs/orgmode/howto/gromacs-lbfgs.org~, ~docs/orgmode/howto/method-catalog.org~, ~docs/orgmode/reference/gromacs-lbfgs.org~ |
+| ~Method.GromacsSteep~ | class attribute | ~GromacsSteep = 28~ | ~python/rgmin/_core.pyi:129~ | ~docs/orgmode/howto/gromacs-steep.org~, ~docs/orgmode/howto/method-catalog.org~, ~docs/orgmode/reference/gromacs-cg.org~ |
 | ~Method.HAGER_ZHANG~ | class attribute | ~HAGER_ZHANG = 12~ | ~python/rgmin/_core.pyi:49~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.HESTENES_STIEFEL~ | class attribute | ~HESTENES_STIEFEL = 9~ | ~python/rgmin/_core.pyi:43~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.HagerZhang~ | class attribute | ~HagerZhang = 12~ | ~python/rgmin/_core.pyi:104~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.HestenesStiefel~ | class attribute | ~HestenesStiefel = 9~ | ~python/rgmin/_core.pyi:98~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Method.HagerZhang~ | class attribute | ~HagerZhang = 12~ | ~python/rgmin/_core.pyi:105~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Method.HestenesStiefel~ | class attribute | ~HestenesStiefel = 9~ | ~python/rgmin/_core.pyi:99~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.LBFGS~ | class attribute | ~LBFGS = 3~ | ~python/rgmin/_core.pyi:31~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.LIU_STOREY~ | class attribute | ~LIU_STOREY = 13~ | ~python/rgmin/_core.pyi:51~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.Lbfgs~ | class attribute | ~Lbfgs = 3~ | ~python/rgmin/_core.pyi:86~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/configure.org~, ~docs/orgmode/howto/session.org~ |
-| ~Method.LiuStorey~ | class attribute | ~LiuStorey = 13~ | ~python/rgmin/_core.pyi:106~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Method.Lbfgs~ | class attribute | ~Lbfgs = 3~ | ~python/rgmin/_core.pyi:87~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/configure.org~, ~docs/orgmode/howto/session.org~ |
+| ~Method.LiuStorey~ | class attribute | ~LiuStorey = 13~ | ~python/rgmin/_core.pyi:107~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.NEWTON~ | class attribute | ~NEWTON = 15~ | ~python/rgmin/_core.pyi:55~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.Newton~ | class attribute | ~Newton = 15~ | ~python/rgmin/_core.pyi:110~ | ~docs/orgmode/howto/configure.org~ |
+| ~Method.Newton~ | class attribute | ~Newton = 15~ | ~python/rgmin/_core.pyi:111~ | ~docs/orgmode/howto/configure.org~ |
 | ~Method.ODE12R~ | class attribute | ~ODE12R = 23~ | ~python/rgmin/_core.pyi:71~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.Ode12r~ | class attribute | ~Ode12r = 23~ | ~python/rgmin/_core.pyi:126~ | ~docs/orgmode/howto/method-catalog.org~ |
+| ~Method.Ode12r~ | class attribute | ~Ode12r = 23~ | ~python/rgmin/_core.pyi:127~ | ~docs/orgmode/howto/method-catalog.org~ |
 | ~Method.POLAK_RIBIERE~ | class attribute | ~POLAK_RIBIERE = 0~ | ~python/rgmin/_core.pyi:25~ | ~docs/orgmode/reference/python.org~ |
 | ~Method.PSO~ | class attribute | ~PSO = 8~ | ~python/rgmin/_core.pyi:41~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.PolakRibiere~ | class attribute | ~PolakRibiere = 0~ | ~python/rgmin/_core.pyi:80~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.Pso~ | class attribute | ~Pso = 8~ | ~python/rgmin/_core.pyi:96~ | ~docs/orgmode/howto/configure.org~ |
+| ~Method.PolakRibiere~ | class attribute | ~PolakRibiere = 0~ | ~python/rgmin/_core.pyi:81~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Method.Pso~ | class attribute | ~Pso = 8~ | ~python/rgmin/_core.pyi:97~ | ~docs/orgmode/howto/configure.org~ |
 | ~Method.QUICK_MIN~ | class attribute | ~QUICK_MIN = 21~ | ~python/rgmin/_core.pyi:67~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.QuickMin~ | class attribute | ~QuickMin = 21~ | ~python/rgmin/_core.pyi:122~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/method-catalog.org~, ~docs/orgmode/howto/session.org~ |
+| ~Method.QuickMin~ | class attribute | ~QuickMin = 21~ | ~python/rgmin/_core.pyi:123~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/method-catalog.org~, ~docs/orgmode/howto/session.org~ |
 | ~Method.RCG~ | class attribute | ~RCG = 30~ | ~python/rgmin/_core.pyi:77~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.RFO~ | class attribute | ~RFO = 16~ | ~python/rgmin/_core.pyi:57~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.Rcg~ | class attribute | ~Rcg = 30~ | ~python/rgmin/_core.pyi:132~ | ~docs/orgmode/howto/c-abi.org~ |
-| ~Method.Rfo~ | class attribute | ~Rfo = 16~ | ~python/rgmin/_core.pyi:112~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Method.Rcg~ | class attribute | ~Rcg = 30~ | ~python/rgmin/_core.pyi:133~ | ~docs/orgmode/howto/c-abi.org~ |
+| ~Method.Rfo~ | class attribute | ~Rfo = 16~ | ~python/rgmin/_core.pyi:113~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.SR1~ | class attribute | ~SR1 = 4~ | ~python/rgmin/_core.pyi:33~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.SR2~ | class attribute | ~SR2 = 7~ | ~python/rgmin/_core.pyi:39~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Method.STEEPEST~ | class attribute | ~STEEPEST = 6~ | ~python/rgmin/_core.pyi:37~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Method.Sr1~ | class attribute | ~Sr1 = 4~ | ~python/rgmin/_core.pyi:88~ | ~docs/orgmode/howto/method-catalog.org~ |
-| ~Method.Sr2~ | class attribute | ~Sr2 = 7~ | ~python/rgmin/_core.pyi:94~ | ~docs/orgmode/howto/method-catalog.org~ |
-| ~Method.Steepest~ | class attribute | ~Steepest = 6~ | ~python/rgmin/_core.pyi:92~ | ~docs/orgmode/howto/method-catalog.org~ |
+| ~Method.Sr1~ | class attribute | ~Sr1 = 4~ | ~python/rgmin/_core.pyi:89~ | ~docs/orgmode/howto/method-catalog.org~ |
+| ~Method.Sr2~ | class attribute | ~Sr2 = 7~ | ~python/rgmin/_core.pyi:95~ | ~docs/orgmode/howto/method-catalog.org~ |
+| ~Method.Steepest~ | class attribute | ~Steepest = 6~ | ~python/rgmin/_core.pyi:93~ | ~docs/orgmode/howto/method-catalog.org~ |
 | ~NewtonCG.default_accept~ | class attribute | ~default_accept = "none"~ | ~python/rgmin/optimize.py:1159~ | ~docs/orgmode/reference/public-api.org~ |
 | ~NewtonCG.kind~ | class attribute | ~kind = "newton-cg"~ | ~python/rgmin/optimize.py:1158~ | ~docs/orgmode/reference/public-api.org~ |
 | ~NewtonPCG.kind~ | class attribute | ~kind = "newton-pcg"~ | ~python/rgmin/optimize.py:1165~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Optimizer.defaults~ | class attribute | ~defaults: ClassVar[dict[str, float]] = {"maxstep": 0.2}~ | ~python/rgmin/ase.py:341~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/session.org~ |
+| ~Optimizer.defaults~ | class attribute | ~defaults: dict[str, float] = {"maxstep": 0.2}~ | ~python/rgmin/ase.py:341~ | ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/session.org~ |
 | ~PolakRibiere.kind~ | class attribute | ~kind = "pr"~ | ~python/rgmin/optimize.py:1056~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RiemannianCG.kind~ | class attribute | ~kind = "rcg"~ | ~python/rgmin/optimize.py:1118~ | ~docs/orgmode/reference/public-api.org~ |
 | ~SR1.kind~ | class attribute | ~kind = "sr1"~ | ~python/rgmin/optimize.py:712~ | ~docs/orgmode/reference/public-api.org~ |
 | ~SR2.kind~ | class attribute | ~kind = "sr2"~ | ~python/rgmin/optimize.py:718~ | ~docs/orgmode/reference/public-api.org~ |
 | ~SteepestDescent.kind~ | class attribute | ~kind = "sd"~ | ~python/rgmin/optimize.py:730~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Stop.BUDGET~ | class attribute | ~BUDGET = 3~ | ~python/rgmin/_core.pyi:146~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/python.org~ |
-| ~Stop.Budget~ | class attribute | ~Budget = 3~ | ~python/rgmin/_core.pyi:166~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/gromacs-cg.org~ |
-| ~Stop.ENERGY_TOLERANCE~ | class attribute | ~ENERGY_TOLERANCE = 6~ | ~python/rgmin/_core.pyi:154~ | ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/python.org~ |
-| ~Stop.EVAL_BUDGET~ | class attribute | ~EVAL_BUDGET = 7~ | ~python/rgmin/_core.pyi:156~ | ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/python.org~ |
-| ~Stop.EnergyTolerance~ | class attribute | ~EnergyTolerance = 6~ | ~python/rgmin/_core.pyi:174~ | ~docs/orgmode/howto/stopping.org~ |
-| ~Stop.EvalBudget~ | class attribute | ~EvalBudget = 7~ | ~python/rgmin/_core.pyi:176~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/stopping.org~ |
-| ~Stop.LINE_SEARCH~ | class attribute | ~LINE_SEARCH = 4~ | ~python/rgmin/_core.pyi:148~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/python.org~ |
-| ~Stop.LINE_SEARCH_ROUNDING~ | class attribute | ~LINE_SEARCH_ROUNDING = 9~ | ~python/rgmin/_core.pyi:150~ | ~docs/orgmode/reference/python.org~ |
-| ~Stop.LineSearch~ | class attribute | ~LineSearch = 4~ | ~python/rgmin/_core.pyi:168~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Stop.LineSearchRounding~ | class attribute | ~LineSearchRounding = 9~ | ~python/rgmin/_core.pyi:170~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Stop.MACHINE_PRECISION~ | class attribute | ~MACHINE_PRECISION = 8~ | ~python/rgmin/_core.pyi:158~ | ~docs/orgmode/reference/python.org~ |
-| ~Stop.MachinePrecision~ | class attribute | ~MachinePrecision = 8~ | ~python/rgmin/_core.pyi:178~ | ~docs/orgmode/reference/gromacs-cg.org~, ~docs/orgmode/reference/gromacs-lbfgs.org~, ~docs/orgmode/reference/gromacs-steep.org~ |
-| ~Stop.NOISE_FLOOR~ | class attribute | ~NOISE_FLOOR = 1~ | ~python/rgmin/_core.pyi:142~ | ~docs/orgmode/reference/python.org~ |
-| ~Stop.NoiseFloor~ | class attribute | ~NoiseFloor = 1~ | ~python/rgmin/_core.pyi:162~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/howto/configure.org~ |
-| ~Stop.POLISH_UNMET~ | class attribute | ~POLISH_UNMET = 5~ | ~python/rgmin/_core.pyi:152~ | ~docs/orgmode/reference/python.org~ |
-| ~Stop.PolishUnmet~ | class attribute | ~PolishUnmet = 5~ | ~python/rgmin/_core.pyi:172~ | ~docs/orgmode/changelog.org~ |
-| ~Stop.STEP_TOLERANCE~ | class attribute | ~STEP_TOLERANCE = 2~ | ~python/rgmin/_core.pyi:144~ | ~docs/orgmode/reference/python.org~ |
-| ~Stop.StepTolerance~ | class attribute | ~StepTolerance = 2~ | ~python/rgmin/_core.pyi:164~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/session.org~ |
-| ~Stop.TOLERANCE~ | class attribute | ~TOLERANCE = 0~ | ~python/rgmin/_core.pyi:140~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/python.org~ |
-| ~Stop.Tolerance~ | class attribute | ~Tolerance = 0~ | ~python/rgmin/_core.pyi:160~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/method-catalog.org~, ~docs/orgmode/howto/stopping.org~ |
+| ~Stop.BUDGET~ | class attribute | ~BUDGET = 3~ | ~python/rgmin/_core.pyi:148~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/python.org~ |
+| ~Stop.Budget~ | class attribute | ~Budget = 3~ | ~python/rgmin/_core.pyi:168~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/gromacs-cg.org~ |
+| ~Stop.ENERGY_TOLERANCE~ | class attribute | ~ENERGY_TOLERANCE = 6~ | ~python/rgmin/_core.pyi:156~ | ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/python.org~ |
+| ~Stop.EVAL_BUDGET~ | class attribute | ~EVAL_BUDGET = 7~ | ~python/rgmin/_core.pyi:158~ | ~docs/orgmode/howto/stopping.org~, ~docs/orgmode/reference/python.org~ |
+| ~Stop.EnergyTolerance~ | class attribute | ~EnergyTolerance = 6~ | ~python/rgmin/_core.pyi:176~ | ~docs/orgmode/howto/stopping.org~ |
+| ~Stop.EvalBudget~ | class attribute | ~EvalBudget = 7~ | ~python/rgmin/_core.pyi:178~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/stopping.org~ |
+| ~Stop.LINE_SEARCH~ | class attribute | ~LINE_SEARCH = 4~ | ~python/rgmin/_core.pyi:150~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/python.org~ |
+| ~Stop.LINE_SEARCH_ROUNDING~ | class attribute | ~LINE_SEARCH_ROUNDING = 9~ | ~python/rgmin/_core.pyi:152~ | ~docs/orgmode/reference/python.org~ |
+| ~Stop.LineSearch~ | class attribute | ~LineSearch = 4~ | ~python/rgmin/_core.pyi:170~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Stop.LineSearchRounding~ | class attribute | ~LineSearchRounding = 9~ | ~python/rgmin/_core.pyi:172~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Stop.MACHINE_PRECISION~ | class attribute | ~MACHINE_PRECISION = 8~ | ~python/rgmin/_core.pyi:160~ | ~docs/orgmode/reference/python.org~ |
+| ~Stop.MachinePrecision~ | class attribute | ~MachinePrecision = 8~ | ~python/rgmin/_core.pyi:180~ | ~docs/orgmode/reference/gromacs-cg.org~, ~docs/orgmode/reference/gromacs-lbfgs.org~, ~docs/orgmode/reference/gromacs-steep.org~ |
+| ~Stop.NOISE_FLOOR~ | class attribute | ~NOISE_FLOOR = 1~ | ~python/rgmin/_core.pyi:144~ | ~docs/orgmode/reference/python.org~ |
+| ~Stop.NoiseFloor~ | class attribute | ~NoiseFloor = 1~ | ~python/rgmin/_core.pyi:164~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/howto/configure.org~ |
+| ~Stop.POLISH_UNMET~ | class attribute | ~POLISH_UNMET = 5~ | ~python/rgmin/_core.pyi:154~ | ~docs/orgmode/reference/python.org~ |
+| ~Stop.PolishUnmet~ | class attribute | ~PolishUnmet = 5~ | ~python/rgmin/_core.pyi:174~ | ~docs/orgmode/changelog.org~ |
+| ~Stop.STEP_TOLERANCE~ | class attribute | ~STEP_TOLERANCE = 2~ | ~python/rgmin/_core.pyi:146~ | ~docs/orgmode/reference/python.org~ |
+| ~Stop.StepTolerance~ | class attribute | ~StepTolerance = 2~ | ~python/rgmin/_core.pyi:166~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/session.org~ |
+| ~Stop.TOLERANCE~ | class attribute | ~TOLERANCE = 0~ | ~python/rgmin/_core.pyi:142~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/reference/python.org~ |
+| ~Stop.Tolerance~ | class attribute | ~Tolerance = 0~ | ~python/rgmin/_core.pyi:162~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/method-catalog.org~, ~docs/orgmode/howto/stopping.org~ |
 | ~StopUnmetError.report~ | class attribute | ~report: Report~ | ~python/rgmin/__init__.pyi:23~ | ~docs/orgmode/reference/public-api.org~ |
 | ~StopUnmetError.report~ | class attribute | ~report: Report = ...~ | ~python/rgmin/_core.pyi:18~ | ~docs/orgmode/reference/public-api.org~ |
 | ~gromacs_mdp_options~ | function | ~gromacs_mdp_options(mdp, **overrides)~ | ~python/rgmin/__init__.pyi:45~ | ~docs/orgmode/reference/public-api.org~ |
@@ -5259,7 +5259,7 @@ reference entry and a documentation location.
 | ~Manifold.size~ | method | ~size(self)~ | ~python/rgmin/manifold.py:52~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Manifold.transport~ | method | ~transport(self, x_from, x_to, v)~ | ~python/rgmin/manifold.py:114~ | ~docs/orgmode/explanation/product-manifold.org~, ~docs/orgmode/howto/c-abi.org~, ~docs/orgmode/howto/manifolds.org~ |
 | ~Newton.__init__~ | method | ~__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, accept, hessian, **options)~ | ~python/rgmin/ase.py:905~ | ~docs/orgmode/reference/public-api.org~ |
-| ~NotConverged.report~ | method | ~report(self)~ | ~python/rgmin/_core.pyi:208~ | ~docs/orgmode/reference/public-api.org~ |
+| ~NotConverged.report~ | method | ~report(self)~ | ~python/rgmin/_core.pyi:210~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Optimizer.__init__~ | method | ~__init__(self, atoms, restart, logfile, trajectory, append_trajectory, method, maxstep, accept, hessian, **options)~ | ~python/rgmin/ase.py:346~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Optimizer.close~ | method | ~close(self)~ | ~python/rgmin/ase.py:383~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Optimizer.converged~ | method | ~converged(self, *args, **kwargs)~ | ~python/rgmin/ase.py:504~ | ~docs/orgmode/reference/public-api.org~ |
@@ -5276,11 +5276,11 @@ reference entry and a documentation location.
 | ~Product.__init__~ | method | ~__init__(self, *factors)~ | ~python/rgmin/manifold.py:204~ | ~docs/orgmode/reference/public-api.org~ |
 | ~QuickMin.__init__~ | method | ~__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, accept, **options)~ | ~python/rgmin/ase.py:778~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RFO.__init__~ | method | ~__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, accept, hessian, **options)~ | ~python/rgmin/ase.py:939~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Report.converged~ | method | ~converged(self)~ | ~python/rgmin/_core.pyi:199~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/session.org~, ~docs/orgmode/reference/python.org~ |
-| ~Report.grad_norm~ | method | ~grad_norm(self)~ | ~python/rgmin/_core.pyi:192~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/constraints.org~, ~docs/orgmode/howto/session.org~ |
-| ~Report.steps~ | method | ~steps(self)~ | ~python/rgmin/_core.pyi:188~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Report.stop~ | method | ~stop(self)~ | ~python/rgmin/_core.pyi:196~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Report.value~ | method | ~value(self)~ | ~python/rgmin/_core.pyi:184~ | ~docs/orgmode/howto/level-set.org~, ~docs/orgmode/howto/manifolds.org~, ~docs/orgmode/reference/product-manifold.org~ |
+| ~Report.converged~ | method | ~converged(self)~ | ~python/rgmin/_core.pyi:201~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/session.org~, ~docs/orgmode/reference/python.org~ |
+| ~Report.grad_norm~ | method | ~grad_norm(self)~ | ~python/rgmin/_core.pyi:194~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/constraints.org~, ~docs/orgmode/howto/session.org~ |
+| ~Report.steps~ | method | ~steps(self)~ | ~python/rgmin/_core.pyi:190~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Report.stop~ | method | ~stop(self)~ | ~python/rgmin/_core.pyi:198~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Report.value~ | method | ~value(self)~ | ~python/rgmin/_core.pyi:186~ | ~docs/orgmode/howto/level-set.org~, ~docs/orgmode/howto/manifolds.org~, ~docs/orgmode/reference/product-manifold.org~ |
 | ~RiemannianCG.__init__~ | method | ~__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, alpha, accept, **kwargs)~ | ~python/rgmin/optimize.py:1120~ | ~docs/orgmode/reference/public-api.org~ |
 | ~RigidQuotient.__init__~ | method | ~__init__(self, n_atoms, periodic)~ | ~python/rgmin/manifold.py:190~ | ~docs/orgmode/reference/public-api.org~ |
 | ~SD.__init__~ | method | ~__init__(self, atoms, restart, logfile, trajectory, append_trajectory, maxstep, accept, **options)~ | ~python/rgmin/ase.py:842~ | ~docs/orgmode/reference/public-api.org~ |
@@ -5303,12 +5303,12 @@ reference entry and a documentation location.
 | ~Session.step~ | method | ~step(self, x, callback)~ | ~python/rgmin/_maturin.pyi:72~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Session.steps~ | method | ~steps(self)~ | ~python/rgmin/_maturin.pyi:54~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Session.stop~ | method | ~stop(self)~ | ~python/rgmin/_maturin.pyi:58~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Solver.__init__~ | method | ~__init__(self, n, config)~ | ~python/rgmin/_core.pyi:242~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Solver.dim~ | method | ~dim(self)~ | ~python/rgmin/_core.pyi:245~ | ~docs/orgmode/reference/public-api.org~ |
-| ~Solver.evals~ | method | ~evals(self)~ | ~python/rgmin/_core.pyi:248~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/stopping.org~ |
-| ~Solver.method~ | method | ~method(self)~ | ~python/rgmin/_core.pyi:252~ | ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/howto/lbfgs-box.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
-| ~Solver.step~ | method | ~step(self, f_and_grad, x)~ | ~python/rgmin/_core.pyi:254~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/trust-region.org~, ~docs/orgmode/reference/python.org~ |
-| ~Solver.step_hess~ | method | ~step_hess(self, f_and_grad, hessian, x)~ | ~python/rgmin/_core.pyi:257~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/python-threads.org~, ~docs/orgmode/explanation/trust-region.org~ |
+| ~Solver.__init__~ | method | ~__init__(self, n, config)~ | ~python/rgmin/_core.pyi:244~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Solver.dim~ | method | ~dim(self)~ | ~python/rgmin/_core.pyi:247~ | ~docs/orgmode/reference/public-api.org~ |
+| ~Solver.evals~ | method | ~evals(self)~ | ~python/rgmin/_core.pyi:250~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/howto/stopping.org~ |
+| ~Solver.method~ | method | ~method(self)~ | ~python/rgmin/_core.pyi:254~ | ~docs/orgmode/howto/lammps-migration.org~, ~docs/orgmode/howto/lbfgs-box.org~, ~docs/orgmode/reference/lammps-min-style.org~ |
+| ~Solver.step~ | method | ~step(self, f_and_grad, x)~ | ~python/rgmin/_core.pyi:256~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/trust-region.org~, ~docs/orgmode/reference/python.org~ |
+| ~Solver.step_hess~ | method | ~step_hess(self, f_and_grad, hessian, x)~ | ~python/rgmin/_core.pyi:259~ | ~docs/orgmode/changelog.org~, ~docs/orgmode/explanation/python-threads.org~, ~docs/orgmode/explanation/trust-region.org~ |
 | ~SolverConfig.__init__~ | method | ~__init__(self, method, **options)~ | ~python/rgmin/__init__.py:187~ | ~docs/orgmode/reference/public-api.org~ |
 | ~SolverConfig.__init__~ | method | ~__init__(self, method, **options)~ | ~python/rgmin/__init__.pyi:36~ | ~docs/orgmode/reference/public-api.org~ |
 | ~Stiefel.__init__~ | method | ~__init__(self, n, p, retraction)~ | ~python/rgmin/manifold.py:154~ | ~docs/orgmode/reference/public-api.org~ |
