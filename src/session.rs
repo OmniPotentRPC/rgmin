@@ -22,8 +22,8 @@ use crate::error::{Error, Result};
 use crate::fire::{
     Fire2Extras, FireConfig, FireKind, FireMix, FirePreparation, FirePreset, FireState, FireTrace,
     FireVariant, fire_abc_clipped, fire_after_v1_metric, fire_clip_components,
-    fire_displacement_into, fire_move_clipped, fire_prepare_v2, fire_rescale_velocity,
-    fire2_displacement_metric, guenole2020,
+    fire_displacement_into, fire_displacement_metric, fire_move_clipped, fire_prepare_v2,
+    fire_rescale_velocity, fire2_displacement_metric, guenole2020,
 };
 use crate::gpmin::{GpMin, GpMinConfig};
 use crate::gromacs::{
@@ -138,6 +138,30 @@ fn metric_vector(precon: &Option<Slot>, v: &Array1<f64>) -> Result<Array1<f64>> 
                 what: "linear solve failed",
             })
         }
+    }
+}
+
+/// rgmin FIRE displacement.
+///
+/// With `metric_kick`, FIRE 2.0 and a geometry metric kick and mix along
+/// `steepest` (`P^{-1} F`). Otherwise the kick and the mix use the raw
+/// force, which is the default. FIRE 1.0 keeps the raw kick either way.
+/// With no metric the raw integrator is unchanged.
+fn fire_default_displacement(
+    state: &mut FireState,
+    precon: &Option<Slot>,
+    raw: &Array1<f64>,
+    steepest: &Array1<f64>,
+    metric_kick: bool,
+) -> Array1<f64> {
+    if metric_kick && precon.is_some() && matches!(state.kind, FireKind::V2) {
+        fire_displacement_metric(state, raw, steepest, |vel| {
+            fire_mix(precon, vel, raw, steepest)
+        })
+    } else {
+        let mut dx = Array1::zeros(state.vel.len());
+        fire_displacement_into(state, raw, &mut dx);
+        dx
     }
 }
 
@@ -395,6 +419,9 @@ pub struct Solver {
     eon_log: Option<Vec<drive::EonFeat>>,
     /// Whether per-step FIRE tracing is active.
     fire_trace_on: bool,
+    /// FIRE 2.0 kicks along `P^{-1} F` when a geometry metric is installed.
+    /// Off by default, so the kick stays the raw force.
+    fire_metric_kick: bool,
     /// Recorded per-step trace of a FIRE session.
     fire_trace: Vec<FireTrace>,
     /// Ratio test on a capped two-loop fill. Off by default.
@@ -675,6 +702,7 @@ impl Solver {
             brief: false,
             eon_log: None,
             fire_trace_on: false,
+            fire_metric_kick: false,
             fire_trace: Vec::new(),
             trust: false,
             trust_delta: 0.0,
@@ -3845,7 +3873,13 @@ impl Solver {
                     solver.forget_txn(&mut txn);
                 }
                 let force = grad.mapv(|v| -v);
-                let step = self.shape_step(x, cap_displacement_atom(&(h0 * &force), cap));
+                let seeded = match &self.inner {
+                    Inner::Lbfgs(solver) => solver
+                        .exp_apply(force.view())
+                        .unwrap_or_else(|| h0 * &force),
+                    _ => h0 * &force,
+                };
+                let step = self.shape_step(x, cap_displacement_atom(&seeded, cap));
                 let step = match self.tangent_displacement(&grad, step) {
                     Ok(Some(step)) => step,
                     Ok(None) => {
@@ -6103,15 +6137,34 @@ impl Solver {
                                 value = ev.0;
                                 grad = ev.1;
                                 raw = grad.mapv(|g| -g);
-                                let mut dx = Array1::zeros(x.len());
-                                fire_displacement_into(state, &raw, &mut dx);
-                                Ok(dx)
+                                if self.fire_metric_kick
+                                    && self.precon.is_some()
+                                    && matches!(state.kind, FireKind::V2)
+                                {
+                                    match metric_vector(&self.precon, &raw) {
+                                        Ok(image) => steepest = image,
+                                        Err(err) => {
+                                            state.restore(saved);
+                                            *x = start;
+                                            return Err(err);
+                                        }
+                                    }
+                                }
+                                Ok(fire_default_displacement(
+                                    state,
+                                    &self.precon,
+                                    &raw,
+                                    &steepest,
+                                    self.fire_metric_kick,
+                                ))
                             }
-                            FirePreparation::Ready => {
-                                let mut dx = Array1::zeros(x.len());
-                                fire_displacement_into(state, &raw, &mut dx);
-                                Ok(dx)
-                            }
+                            FirePreparation::Ready => Ok(fire_default_displacement(
+                                state,
+                                &self.precon,
+                                &raw,
+                                &steepest,
+                                self.fire_metric_kick,
+                            )),
                         },
                     };
                     let mut dx = match displacement {
@@ -6844,6 +6897,23 @@ impl Solver {
                 Ok(())
             }
             _ => Err(Error::NeedFire2),
+        }
+    }
+
+    /// Kick and mix FIRE 2.0 along the metric image of the force.
+    ///
+    /// Off by default. The default kick is the raw force. From rest that
+    /// kick is the whole step, so an atom the inverse couples stays put.
+    /// Turning this on follows the image for the kick and the mix. Power
+    /// stays the raw force dotted with the velocity. FIRE 1.0 is unchanged.
+    /// A session that is not FIRE 2.0 returns [`Error::NeedFire2`].
+    pub fn set_fire_metric_kick(&mut self, on: bool) -> Result<()> {
+        let fire2 = matches!(&self.inner, Inner::Fire(state) if state.kind == FireKind::V2);
+        if fire2 {
+            self.fire_metric_kick = on;
+            Ok(())
+        } else {
+            Err(Error::NeedFire2)
         }
     }
 
