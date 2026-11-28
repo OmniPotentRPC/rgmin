@@ -151,6 +151,7 @@ That installs the 0.8 release on Rust 1.88 or newer.
    reference/manifold
    reference/product-manifold
    reference/periodic
+   reference/cell-filter
    reference/sota
    reference/proofs
    reference/bibliography

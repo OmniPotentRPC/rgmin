@@ -46,6 +46,8 @@ mod adam;
 mod bb;
 #[cfg(feature = "highs")]
 mod box_objective;
+/// Opt-in cell and position objective in ASE cell-filter coordinates.
+pub mod cell_filter;
 /// A-posteriori Newton--Kantorovich, adjoint, and Morse-gap bounds.
 pub mod certificate;
 mod compact_tr;
@@ -182,6 +184,7 @@ pub mod vecops;
 pub use aaa::{AaaParams, Barycentric, Pole, aaa, chebyshev_pade_poles};
 pub use accept::Accept;
 pub use adam::minimize_adam;
+pub use cell_filter::{CellCoordinates, CellFilter, CellFilterError, CellSample};
 pub use certificate::{
     AdjointFunctionalBar, CertificateError, KantorovichBall, MorseGap, adjoint_functional_bar,
     certify_morse_gap, kantorovich_ball,
