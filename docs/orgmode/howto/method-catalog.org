@@ -1,0 +1,201 @@
+#+TITLE: Run every method family
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Run every method family
+
+This is the routing table for the complete method surface. Each row names
+the constructor or token, a runnable example, and the primary literature.
+The linked focused page explains the parameters without repeating that
+material here.
+
+** Optimizers
+
+The session driver in ~examples/tutorial_session.rs~ is the minimal
+runnable host loop. Replace its ~Method::lbfgs()~ expression with the
+constructor in the second column. Dense Hessian methods use
+~examples/tutorial_newton.rs~. The command for each is:
+
+#+begin_src console
+cargo run --locked --example tutorial_session
+cargo run --locked --example tutorial_newton
+#+end_src
+
+| Method | Constructor or token | Runnable guide | Literature |
+|---+---+---+---|
+| Steepest descent | ~Method::Steepest~ | @@rst::doc:`../tutorials/quickstart`@@ | Nocedal and Wright, [[https://doi.org/10.1007/978-0-387-40065-5][10.1007/978-0-387-40065-5]] |
+| GROMACS conjugate gradient | ~Method::GromacsCg~ | @@rst::doc:`gromacs-cg`@@ | GROMACS 2025.4 ~do_cg~, [[https://manual.gromacs.org/current/user-guide/mdp-options.html#mdp-nstcgsteep][nstcgsteep]] |
+| GROMACS steepest descent | ~Method::GromacsSteep~ | @@rst::doc:`gromacs-steep`@@ | GROMACS integrator steep. The refused-trial factor defaults to 0.5. |
+| GROMACS L-BFGS | ~Method::GromacsLbfgs~ | @@rst::doc:`gromacs-lbfgs`@@ | GROMACS 2023.3 ~do_lbfgs~. The correction-pair default is 10. |
+| Gaussian process minimizer | ~Method::GpMin~ | @@rst::doc:`gpmin`@@ | Garijo del Río, Mortensen, and Jacobsen, [[https://doi.org/10.1103/PhysRevB.100.104103][10.1103/PhysRevB.100.104103]] |
+| Riemannian conjugate gradient | ~Method::rcg()~ | @@rst::doc:`../tutorials/rcg`@@ | Sato, [[https://doi.org/10.1007/978-3-030-62391-3][10.1007/978-3-030-62391-3]] |
+| Riemannian L-BFGS | ~minimize_rlbfgs~ | @@rst::doc:`../tutorials/rlbfgs`@@ | Huang, Absil, and Gallivan, [[https://doi.org/10.1137/17M1127582][10.1137/17M1127582]] |
+| L-BFGS | ~Method::lbfgs()~ | @@rst::doc:`../tutorials/lbfgs`@@ | Nocedal, [[https://doi.org/10.1090/S0025-5718-1980-0572855-7][10.1090/S0025-5718-1980-0572855-7]] |
+| BFGS | ~Method::Bfgs~ | @@rst::doc:`../tutorials/bfgs`@@ | Fletcher, [[https://doi.org/10.1093/comjnl/13.3.317][10.1093/comjnl/13.3.317]] |
+| SR1 | ~Method::Sr1~ | ~cargo test --test quasi~ | Nocedal and Wright, [[https://doi.org/10.1007/978-0-387-40065-5][10.1007/978-0-387-40065-5]] |
+| SR2 | ~Method::Sr2~ | ~cargo test --test quasi~ | Powell, A new algorithm for unconstrained optimization, in Nonlinear Programming, Academic Press, 1970. |
+| Adam | ~Method::adam()~ | ~cargo test --test first_order_step_policy~ | Kingma and Ba, [[https://doi.org/10.48550/arXiv.1412.6980][10.48550/arXiv.1412.6980]] |
+| Particle swarm | ~Method::pso()~ | ~cargo test --test pso~ | Kennedy and Eberhart, [[https://doi.org/10.1109/ICNN.1995.488968][10.1109/ICNN.1995.488968]] |
+| FIRE 1.0 | ~Method::fire(FireKind::V1)~ | @@rst::doc:`../tutorials/fire`@@ | Bitzek et al., [[https://doi.org/10.1103/PhysRevLett.97.170201][10.1103/PhysRevLett.97.170201]] |
+| FIRE 2.0 | ~Method::fire(FireKind::V2)~ | @@rst::doc:`fire`@@ | Guénolé et al., [[https://doi.org/10.1016/j.commatsci.2020.109584][10.1016/j.commatsci.2020.109584]] |
+| ABC-FIRE | ~Solver::set_fire_abc(true)~ | @@rst::doc:`fire`@@ | Echeverri Restrepo and Andric, [[https://doi.org/10.1016/j.commatsci.2022.111978][10.1016/j.commatsci.2022.111978]] |
+| Barzilai-Borwein | ~Method::Bb~ | ~cargo test --test first_order_step_policy~ | Barzilai and Borwein, [[https://doi.org/10.1093/imanum/8.1.141][10.1093/imanum/8.1.141]] |
+| Quick-min | ~Method::QuickMin~ | ~cargo test --test quickmin_options~ | Bitzek et al., [[https://doi.org/10.1103/PhysRevLett.97.170201][10.1103/PhysRevLett.97.170201]] |
+| ODE12r | ~Method::Ode12r~ | ~cargo test --test first_order_step_policy~ | Makri, Ortner, and Kermode, [[https://doi.org/10.1063/1.5064465][10.1063/1.5064465]] |
+| GDIIS | ~Method::diis()~ | ~cargo test --features capi --test c_abi~ | Császár and Pulay, [[https://doi.org/10.1016/S0022-2860(84)87198-7][10.1016/S0022-2860(84)87198-7]] |
+| Scaled conjugate gradient | ~minimize_scg~ | @@rst::doc:`../tutorials/scg`@@ | Møller, [[https://doi.org/10.1016/S0893-6080(05)80056-5][10.1016/S0893-6080(05)80056-5]] |
+| eOn secant CG | ~Method::eon_cg()~ | @@rst::doc:`../tutorials/cg`@@ | Hestenes and Stiefel, [[https://doi.org/10.6028/jres.049.044][10.6028/jres.049.044]] |
+
+Every nonlinear CG coefficient runs through
+~examples/tutorial_cg.rs~. Set the ~Conjugacy~ value in that file and
+run ~cargo run --locked --example tutorial_cg~.
+
+| Coefficient | Rust value | Literature |
+|---+---+---|
+| Fletcher-Reeves | ~Conjugacy::FletcherReeves~ | Fletcher and Reeves, [[https://doi.org/10.1093/comjnl/7.2.149][10.1093/comjnl/7.2.149]] |
+| Polak-Ribiere | ~Conjugacy::PolakRibiere~ | Nocedal and Wright, [[https://doi.org/10.1007/978-0-387-40065-5][10.1007/978-0-387-40065-5]] |
+| Polak-Ribiere plus | ~Conjugacy::PolakRibierePlus~ | Nocedal and Wright, [[https://doi.org/10.1007/978-0-387-40065-5][10.1007/978-0-387-40065-5]] |
+| Hestenes-Stiefel | ~Conjugacy::HestenesStiefel~ | Hestenes and Stiefel, [[https://doi.org/10.6028/jres.049.044][10.6028/jres.049.044]] |
+| Dai-Yuan | ~Conjugacy::DaiYuan~ | Dai and Yuan, [[https://doi.org/10.1137/S1052623497318992][10.1137/S1052623497318992]] |
+| Conjugate descent | ~Conjugacy::ConjugateDescent~ | Fletcher and Reeves, [[https://doi.org/10.1093/comjnl/7.2.149][10.1093/comjnl/7.2.149]] |
+| Hager-Zhang | ~Conjugacy::HagerZhang~ | Hager and Zhang, [[https://doi.org/10.1137/030601880][10.1137/030601880]] |
+| Liu-Storey | ~Conjugacy::LiuStorey~ | Liu and Storey, [[https://doi.org/10.1007/BF00940464][10.1007/BF00940464]] |
+| FR-PR hybrid | ~Conjugacy::FrPr~ | Nocedal and Wright, [[https://doi.org/10.1007/978-0-387-40065-5][10.1007/978-0-387-40065-5]] |
+| Bounded hybrid | ~Conjugacy::hybrid(a, b, take_max)~ | Dai and Yuan, [[https://doi.org/10.1137/0802003][10.1137/0802003]] |
+
+** Line searches
+
+~examples/tutorial_linesearch.rs~ runs all four searches through the
+same supplied value and gradient protocol:
+
+#+begin_src console
+cargo run --locked --example tutorial_linesearch
+#+end_src
+
+| Search | Constructor | Literature |
+|---+---+---|
+| Brent | ~LineSearch::brent(maxiter, tol)~ | Nocedal and Wright, [[https://doi.org/10.1007/978-0-387-40065-5][10.1007/978-0-387-40065-5]] |
+| Armijo backtracking | ~LineSearch::backtracking(c, beta, maxiter)~ | Nocedal and Wright, [[https://doi.org/10.1007/978-0-387-40065-5][10.1007/978-0-387-40065-5]] |
+| Goldstein | ~LineSearch::goldstein(c, beta, maxiter)~ | Goldstein, [[https://doi.org/10.1007/BF00927673][10.1007/BF00927673]] |
+| Strong Wolfe | ~LineSearch::wolfe(c1, c2, maxiter)~ | Wolfe, [[https://doi.org/10.1137/1011036][10.1137/1011036]] |
+
+@@rst::doc:`../tutorials/linesearch`@@ is the runnable walk through.
+@@rst::doc:`../explanation/linesearch`@@ explains termination and
+interpolation.
+
+** Trust regions
+
+~examples/tutorial_newton.rs~ runs dense shifted Newton, RFO, and
+dogleg. ~cargo test --test newton_cg_morse~ runs the two matrix free
+forms. ~cargo test --test irc_trust~ runs the mass weighted IRC sphere.
+
+| Method | Entry | Literature |
+|---+---+---|
+| Shifted Newton | ~Method::newton(NewtonKind::Shifted)~ | Banerjee et al., [[https://doi.org/10.1021/j100247a015][10.1021/j100247a015]] |
+| Rational function optimization | ~Method::newton(NewtonKind::Rfo)~ | Baker, [[https://doi.org/10.1002/jcc.540070402][10.1002/jcc.540070402]] |
+| Dense dogleg | ~Method::Dogleg~ | Nocedal and Wright, [[https://doi.org/10.1007/978-0-387-40065-5][10.1007/978-0-387-40065-5]] |
+| Newton-CG | ~Method::NewtonCg~ | Steihaug, [[https://doi.org/10.1137/0720042][10.1137/0720042]] |
+| Nyström Newton-PCG | ~Method::NewtonPcg~ | Frangella, Tropp, and Udell, [[https://doi.org/10.1137/21M1466244][10.1137/21M1466244]] |
+| Riemannian trust region | ~rtr::minimize_rtr~ | Absil, Mahony, and Sepulchre, [[https://doi.org/10.1515/9781400830244][10.1515/9781400830244]] |
+| IRC trust sphere | ~IrcTrust~ | Gonzalez and Schlegel, [[https://doi.org/10.1063/1.456010][10.1063/1.456010]] |
+
+@@rst::doc:`../explanation/trust-region`@@ gives the model and radius
+rules.
+
+** Manifolds and retractions
+
+@@rst::doc:`manifolds`@@ lists every ~ManifoldKind~ token, its packing,
+projection, retraction, transport, Rust setup, and C setup. Run all
+factory examples with:
+
+#+begin_src console
+cargo test --locked --test manifold_factories --test manifold_public_helpers
+python -m pytest python/tests/test_manifold.py -q
+#+end_src
+
+The QR and polar Stiefel retractions are ~StiefelRetraction::Qr~ and
+~StiefelRetraction::Polar~. SPD uses
+~SpdMetric::AffineInvariant~ or ~SpdMetric::LogEuclidean~. Products,
+powers, subspace spheres, rigid quotients, and all token factories use
+the same runnable page. The primary references are Absil, Mahony, and
+Sepulchre, [[https://doi.org/10.1515/9781400830244][10.1515/9781400830244]],
+and Boumal, [[https://doi.org/10.1017/9781009166164][10.1017/9781009166164]].
+For the mass weighted rigid layer, read Goswami et al. first,
+[[https://doi.org/10.1021/acs.jctc.5c00866][10.1021/acs.jctc.5c00866]],
+then Page and McIver,
+[[https://doi.org/10.1063/1.454172][10.1063/1.454172]].
+
+** Preconditioners
+
+@@rst::doc:`precon`@@ gives a runnable ~Solver::set_precon~ example.
+Run the complete examples with ~cargo test --locked --test precon~.
+
+| Method | Entry | Literature |
+|---+---+---|
+| Identity | ~PreconChoice::Identity~ | Nocedal and Wright, [[https://doi.org/10.1007/978-0-387-40065-5][10.1007/978-0-387-40065-5]] |
+| Exponential geometry | ~PreconSpec::Exp~ | Packwood et al., [[https://doi.org/10.1063/1.4947024][10.1063/1.4947024]] |
+| Lindh model | ~PreconSpec::Lindh~ | Lindh et al., [[https://doi.org/10.1016/0009-2614(95)00646-L][10.1016/0009-2614(95)00646-L]] |
+| Bonded force field | ~PreconSpec::Ff~ | Makri, Ortner, and Kermode, [[https://doi.org/10.1063/1.5064465][10.1063/1.5064465]] |
+| Diagonal Jacobi | ~DiagonalJacobi~ | Davidson, [[https://doi.org/10.1016/0021-9991(75)90065-0][10.1016/0021-9991(75)90065-0]] |
+| Three by three block Jacobi | ~Block3Jacobi~ | Davidson, [[https://doi.org/10.1016/0021-9991(75)90065-0][10.1016/0021-9991(75)90065-0]] |
+| Nyström | ~NystromPrecond~ | Frangella, Tropp, and Udell, [[https://doi.org/10.1137/21M1466244][10.1137/21M1466244]] |
+
+** Eigensolver backends
+
+~examples/tutorial_lowest_eigenpairs.py~ is the runnable LOBPCG
+example. ~cargo test --locked --test eigen_options_capi~ exercises every
+closed backend token and typed option. Linked backend integration runs
+through the ~backends~ CI job.
+
+For the eigenmode layer developed with rgmin, read Goswami, Gunde, and
+Jónsson first,
+[[https://doi.org/10.3389/fchem.2026.1807063][10.3389/fchem.2026.1807063]],
+then Goswami et al.,
+[[https://doi.org/10.1021/acs.jctc.5c00866][10.1021/acs.jctc.5c00866]].
+
+| Backend | Token | Literature |
+|---+---+---|
+| Lanczos | ~EigensolverKind::Lanczos~ | Nocedal and Wright, [[https://doi.org/10.1007/978-0-387-40065-5][10.1007/978-0-387-40065-5]] |
+| Rayleigh-Ritz | ~EigensolverKind::RayleighRitz~ | Goswami et al., [[https://doi.org/10.1021/acs.jctc.5c00866][10.1021/acs.jctc.5c00866]] |
+| Jacobi-Davidson | ~EigensolverKind::JacobiDavidson~ | Sleijpen and Van der Vorst, [[https://doi.org/10.1137/S0895479894270427][10.1137/S0895479894270427]] |
+| LOBPCG | ~EigensolverKind::Lobpcg~ | Knyazev, [[https://doi.org/10.1137/S1064827500366124][10.1137/S1064827500366124]] |
+| PRIMME | ~EigensolverKind::Primme~ | Davidson, [[https://doi.org/10.1016/0021-9991(75)90065-0][10.1016/0021-9991(75)90065-0]] |
+| SLEPc | ~EigensolverKind::Slepc~ | Sleijpen and Van der Vorst, [[https://doi.org/10.1137/S0895479894270427][10.1137/S0895479894270427]] |
+| ChASE | ~EigensolverKind::Chase~ | Winkelmann, Springer, and Di Napoli, [[https://doi.org/10.1145/3313828][10.1145/3313828]] |
+| ELPA and ELPA2 | ~EigensolverKind::Elpa~, ~EigensolverKind::Elpa2~ | Marek et al., [[https://doi.org/10.1088/0953-8984/26/21/213201][10.1088/0953-8984/26/21/213201]] |
+| SLATE, MAGMA, and cuSOLVER | ~EigensolverKind::Slate~, ~EigensolverKind::Magma~, ~EigensolverKind::Cusolver~ | Davidson, [[https://doi.org/10.1016/0021-9991(75)90065-0][10.1016/0021-9991(75)90065-0]] |
+| DLA-Future | ~EigensolverKind::DlaFuture~ | Knyazev, [[https://doi.org/10.1137/S1064827500366124][10.1137/S1064827500366124]] |
+| EigenExa | ~EigensolverKind::EigenExa~ | Marek et al., [[https://doi.org/10.1088/0953-8984/26/21/213201][10.1088/0953-8984/26/21/213201]] |
+| Dimer | ~EigensolverKind::Dimer~ | Goswami, Gunde, and Jónsson, [[https://doi.org/10.3389/fchem.2026.1807063][10.3389/fchem.2026.1807063]] |
+| libkrylov | ~EigensolverKind::Libkrylov~ | Davidson, [[https://doi.org/10.1016/0021-9991(75)90065-0][10.1016/0021-9991(75)90065-0]] |
+
+** Krylov linear solvers
+
+~gmres_right~ and ~gmres_right_block~ are unrestarted right-preconditioned
+GMRES. ~GmresOptions::default~ is ~unrestarted(1e-8)~: the relative residual
+tolerance is 1e-8, and ~max_iterations~ is unset, so the cap is the system
+dimension. ~GmresStatus~ is ~Converged~, ~ZeroRightHandSide~, ~Exhausted~, or
+~Stagnated~. A refusal is ~GmresFailure~ and carries a ~KrylovRefusal~ of
+~EmptySystem~, ~Dimension~, ~Tolerance~, ~ZeroIterationBudget~, ~NonFinite~,
+or ~SingularProjectedSystem~.
+
+~fgmres~ is restarted flexible GMRES. ~Fgmres::default~ uses ~rtol~ 1e-8,
+~restart~ 30, ~max_products~ 1000, and ~stagnation~ ~None~. ~FgmresStatus~ is
+~Converged~, ~Exhausted~, ~Stagnated~, or ~Breakdown~.
+
+~minres_solve_bounded~ and ~minres_solve_precond~ are matrix-free MINRES.
+The bounded solve stops on a recomputed true preconditioned residual.
+Saad and Schultz, [[https://doi.org/10.1137/0907058][10.1137/0907058]].
+Saad, [[https://doi.org/10.1137/0914028][10.1137/0914028]].
+
+** Constraints
+
+@@rst::doc:`constraints`@@ contains runnable Rust, C, and C++ examples.
+Run the implementations with ~cargo test --locked --test holonomic~.
+
+| Algorithm | Selection | Literature |
+|---+---+---|
+| SHAKE | ~ConstraintSolver::Shake~ | Ryckaert, Ciccotti, and Berendsen, [[https://doi.org/10.1016/0021-9991(77)90098-5][10.1016/0021-9991(77)90098-5]] |
+| LINCS | ~ConstraintSolver::Lincs~ | Hess, [[https://doi.org/10.1021/ct700200b][10.1021/ct700200b]] |
+| SETTLE | ~with_settle(true)~ | Miyamoto and Kollman, [[https://doi.org/10.1002/jcc.540130805][10.1002/jcc.540130805]] |
+| RATTLE projection | ~ConstraintAlgorithm::Rattle~ | Andersen, [[https://doi.org/10.1016/0021-9991(83)90014-1][10.1016/0021-9991(83)90014-1]] |
