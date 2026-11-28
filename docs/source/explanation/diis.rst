@@ -10,6 +10,7 @@ pairs past ``memory``. The coefficients ``c`` solve
 
     min || sum_i c_i g_i ||    subject to sum_i c_i = 1
 
+
 which is the bordered Gram system of Pulay, Chem. Phys. Lett. 73,
 393 (1980). Wood and Zunger, J. Phys. A, 1343 (1985), name the
 residual form. No DOI is attached for that line.

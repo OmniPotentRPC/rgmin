@@ -33,6 +33,7 @@ accepted steps:
 
     |E_k - E_{k-1}| < etol * 0.5 * (|E_k| + |E_{k-1}| + eps_E)
 
+
 This is the test of ``MinCG::iterate`` in LAMMPS ``src/min_cg.cpp``. The code
 compares with a strict ``<``, where the documentation says "less than or
 equal", and rgmin follows the code. LAMMPS writes ``EPS_ENERGY = 1.0e-8``

@@ -11,6 +11,7 @@ samples). The level-``k`` estimate is
 
     σ_k = sqrt( γ_k * mean_i (Δ^k f_i)^2 ),    γ_k = (k!)^2 / (2k)!
 
+
 The returned noise is the smallest ``k`` whose column changes sign and
 whose three estimates ``σ_k``, ``σ_{k+1}``, ``σ_{k+2}`` lie within a factor
 of 4. Moré and Wild, SIAM J. Sci. Comput. 33, 1292 (2011),

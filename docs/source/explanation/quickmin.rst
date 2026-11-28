@@ -14,6 +14,7 @@ reference update is
     v ← v + Δt F
     Δx = Δt v
 
+
 ``quickmin_baseline`` is that update and nothing else. A negative
 projection takes the second branch, so the velocity that enters the
 Euler kick has no component opposing ``F``. A zero force has no
@@ -30,6 +31,7 @@ own cap. The next projection then sees the motion that happened. On
 ::
 
     E = ½ (y - 0.2 x)² + 0.02 x²
+
 
 from ``(2, 0)`` with ``Δt = 0.2`` and cap ``0.08``, eighty reference steps
 that keep the uncapped velocity stay above ``10⁻⁷``, and the same steps
