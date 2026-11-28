@@ -1,0 +1,80 @@
+
+
+# L-BFGS quadratic model through HiGHS
+
+The two-loop recursion is the unconstrained L-BFGS step. HiGHS is
+used only when that step must sit in a feasible set: an L<sub>inf</sub> trust
+region, a box on `x + p`, and optional linear equalities.
+
+The QP is `min 1/2 ||p - d||^2` with `d = -H g` and `Q = I`. A dense
+compact Hessian is not formed; that matrix is indefinite after a tiny
+accepted step and `Highs_run` does not return.
+
+Unconstrained, `highs_step` is the two-loop direction. A box or trust
+region scales the whole increment (direction preserved). Packed
+centering is a mean subtract. Arbitrary equalities still go to HiGHS.
+
+When a host Hessian is present (`rgmin_solver_step_hess`) and
+`rgmin_solver_set_highs` is on, HiGHS solves the convex Newton QP
+`min 1/2 p^T P p + g^T p` with per-coordinate boxes from
+`rgmin_solver_set_box` (a NULL side is unbounded) and, if no box
+was set, from atom maxmove. `rgmin_solver_set_trust` sets the
+L<sub>inf</sub> radius on the step; `rgmin_solver_add_equality` appends
+`a · p = rhs`. That is the path eOn / rgpot / any eindir
+objective share. Without the `highs` cargo feature every setter
+returns 1.
+
+Enable the feature.
+Its `highs-sys` crate builds HiGHS from source with CMake and a C++ compiler.
+The tests also need SciPy ():
+
+```bash
+cargo test --features highs
+```
+
+```rust
+use rgmin::{HighsStep, Lbfgs};
+
+let mut opt = Lbfgs::default();
+opt.highs = Some(
+    HighsStep::default()
+        .with_trust(0.5)
+        .with_lo(-1.0)
+        .with_hi(1.0),
+);
+```
+
+`lo` and `hi` are one bound for every coordinate.
+`Solver::set_box` takes one bound per coordinate.
+
+landfold `--highs` is this step on chi, not sequential LP.
+
+
+# Time limit
+
+The L-BFGS projection QP has no wall-clock limit. It stops on a fixed
+iteration budget of 100000 per engine, so machine load does not change
+its answer. The feasible step QP, with or without a Hessian, stops after
+1.0 s. `Solver::set_highs_time_limit(Some(seconds))` and
+`HighsOptions::with_time_limit` add a wall-clock limit to the projection
+QP and replace the feasible step limit. The session setter refuses a
+value that is not finite and positive and keeps the limit it had.
+`HighsOptions::with_time_limit` is checked when a solve starts, and
+`Error::HighsTimeLimit` names a negative, NaN or infinite value.
+
+A solve that reaches a wall-clock limit is `Error::HighsTimedOut`, and
+it carries the limit the solve ran under: the caller's, or the 1.0 s of
+the feasible step QP. A projection QP that uses up its iteration budget
+is `Error::HighsIterationLimit`, so it is not mistaken for a timeout.
+The Hessian step can go on without the QP, so after a timeout it falls
+back to the shifted Newton, RFO or L-BFGS step and counts the timeout in
+`Solver::highs_timeouts`. A step the box, the trust radius or the
+equalities must shape has no such fallback and returns the error.
+
+In C, `rgmin_solver_set_highs_time_limit` sets the limit and
+`rgmin_solver_highs_timeouts` reads the count. A zero or negative value
+clears the limit, and NaN or an infinite value is refused with status 1
+and leaves the limit as it was. A step that cannot fall back returns
+`RGMIN_INVALID_PARAMETER`, and `rgmin_last_error` names the time limit,
+or the iteration limit when a projection QP used up its budget. Both
+entries are ABI minor 72.

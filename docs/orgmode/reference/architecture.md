@@ -1,0 +1,202 @@
+
+
+# Architecture
+
+`rgmin` has an hourglass interface, the design in [Stefanus Du Toit's "Hourglass Interfaces for C++ APIs" (CppCon 2014)](https://github.com/CppCon/CppCon2014/tree/master/Presentations/Hourglass%20Interfaces%20for%20C%2B%2B%20APIs).
+The core of [metatensor](https://docs.metatensor.org/latest/devdoc/architecture.html) has the same layout: Rust behind a C interface, with a header-only C++ wrapper on top.
+The wide top is the code that calls the solvers, the wide bottom is the Rust code that implements them, and the narrow middle, the *waist*, is one small C application binary interface (ABI) between them.
+The waist is the only way from C and C++ to the solvers.
+No solver is written a second time above it.
+Rust hosts such as rgsaddle use the crate directly and never cross the waist.
+
+
+## Layer diagram
+
+![img](../../figures/architecture/hourglass.png "C and C++ headers at the top, the C ABI in the middle, and the Rust modules it calls at the bottom.")
+
+The top row is the public headers under `include/` and the `#include` edges between them.
+`include/rgmin.h` declares the functions of the waist and `src/ffi.rs` defines the same ones.
+The bottom box lists the modules `src/ffi.rs` takes types and functions from.
+Every vector that crosses the waist is a DLPack `DLManagedTensorVersioned` from the **dlpk** crate, so a later device path keeps the same functions.
+
+`docs/figures/architecture/draw_hourglass.py` draws the figure from the headers and `src/` with Graphviz `dot`.
+It stops if the header and the Rust source name different functions.
+Redraw the figure after changing a header or the C ABI:
+
+```bash
+python3 docs/figures/architecture/draw_hourglass.py
+```
+
+
+## Objects
+
+-   **`Lbfgs`:** Persistent pair history, two-loop recursion, eOn cap by default. `LbfgsStep::Wolfe` opts into the line search.
+    Hopping chains hold this type (anneal `WarmLbfgs` is a handle).
+-   **`Solver`:** Method-agnostic session. One `step` is one outer
+    iteration. The C type `rgmin_solver_t` is a pointer to this.
+-   **`StopReason`:** Typed stop on `Report`, beside `Status`.
+    `converged()` is the `gtol` stop, including a last step that
+    meets it. `MaxIter` is a spent budget and stays `Ok` unless
+    `Control::with_error_on_unmet` is set, in which case the error
+    is `Error::StopUnmet` and carries the report. A zero iteration
+    budget is that same unmet stop. `LineSearchFailed` is a budget
+    spent without accepting a step. An L-BFGS run that never moves
+    reports it from `minimize_method`, `Solver::run`,
+    `Solver::run_gauged`, `rgmin_minimize` and Python `minimize` alike.
+    The C++ one-shots throw `rgmin::StopUnmetError` and Python
+    `minimize` raises `rgmin.StopUnmetError`. Each is a runtime error
+    that carries the report of the stop, as `report()` and `.report`.
+    `StopReason::Iterating` is a step still in progress and has no C
+    code of its own. A session step that has not stopped reports
+    `RGMIN_STOP_BUDGET`. A finished one-shot never reports it, and the C
+    one-shots return `RGMIN_INTERNAL_ERROR` if one did.
+-   **`backward_error_floor`:** `n * eps * (1 + |V| + sum |x_i|)` with
+    `eps` equal to `f64::EPSILON`. `with_backward_polish` takes a
+    shifted Newton or RFO step from a supplied Hessian or
+    Hessian-vector product. The point is accepted only when the
+    Newton decrement, every coordinate step, and the gradient norm
+    sit under that scale. A tiny step that misses the gradient test
+    is not converged. An unmet polish is `StopReason::PolishUnmet`.
+    The C names are `rgmin_backward_error_floor`,
+    `rgmin_solver_set_error_on_unmet`,
+    `rgmin_solver_set_backward_polish`, and the `*_opts` one-shots,
+    which include `rgmin_minimize_eindir_opts`.
+    `xts.h` aliases `RGMIN_UNMET_STOP`, `RGMIN_STOP_LINE_SEARCH`,
+    `RGMIN_STOP_POLISH_UNMET`, `RGMIN_STOP_MACHINE_PRECISION`, and
+    `RGMIN_STOP_LINE_SEARCH_ROUNDING`.
+    `RGMIN_UNMET_STOP` is status 6. `RGMIN_STOP_LINE_SEARCH` is 4,
+    `RGMIN_STOP_POLISH_UNMET` is 5, `RGMIN_STOP_ENERGY_TOLERANCE` is 6,
+    `RGMIN_STOP_EVAL_BUDGET` is 7, `RGMIN_STOP_MACHINE_PRECISION` is 8,
+    and `RGMIN_STOP_LINE_SEARCH_ROUNDING` is 9.
+-   **`minimize_method`:** Cold-start dispatch for every `Method`.
+-   **`LineSearch::Wolfe`:** Nocedal-Wright 3.5 / 3.6. The default line
+    search of a session's line-searched methods, BFGS among them. The
+    default L-BFGS step does not search a line.
+-   **`Oracle`:** Closure adapter that implements
+    `DifferentiableObjective` for a fused `(f, g)` function.
+-   **`ecnoise`:** Moré–Wild difference table for the noise in an energy
+    or in one projection of the gradient, plus the 2012 forward and
+    gradient steps (Algorithm 5.1, not the noise table). One uniform
+    projection has variance `tr(Σ) / n`. `Control::noise_floor` stops at
+    `c * sqrt(n_free) * eps_g` with `Status::NoiseFloor`, after the
+    `gtol` test. The same stop fires when a line search finds no trial
+    whose decrease clears `c * eps_f`, and when a Newton-CG trust region
+    trial is refused while its model predicts at most `c * eps_f`.
+-   **`rgmin_solver_create` / `rgmin_solver_step` / `rgmin_solver_free`:** The session half of the waist.
+    Callbacks are arguments of each step, not stored on the handle.
+    `include/rgmin.h` sets `abi_major` 1, `abi_minor` 72 and
+    `layout_revision` 7.
+    Minor 49 adds `StopReason` on the report, the opt-in unmet-stop
+    error, and the backward-error polish. A zero iteration budget
+    follows the same unmet-stop policy. Minor 50 adds the energy and
+    evaluation stops. Minor 51 adds `rgmin_minimize_rlbfgs` and
+    `rgmin_rlbfgs_default`. Minor 52 adds `RGMIN_GROMACS_STEEP`,
+    `RGMIN_STOP_MACHINE_PRECISION`,
+    `rgmin_solver_set_gromacs_steep`, and
+    `rgmin_gromacs_steep_max_constraint_shrinks`. Minor 53 adds
+    `rgmin_minimize_eindir_opts`, the
+    eindir one-shot with the same two flags. `rgmin_control_t` is unchanged.
+    Minor 54 adds `RGMIN_GROMACS_CG` and `rgmin_solver_set_gromacs_cg`.
+    Minor 55 adds
+    `require_convergence` on `rgmin_control_t`, `converged` on
+    `rgmin_report_t`, `RGMIN_NOT_CONVERGED`,
+    `rgmin_solver_set_require_convergence`, `rgmin_control_init`, and a
+    `_sized` form of each entry that reads a `rgmin_control_t`. The plain
+    exported entries read and write the layout revision 5 structs.
+    Minor 56 adds `rgmin_manifold_rigid_quotient`, `rgmin_rtr_tcg_solve`, `rgmin_rtr_radius_update`, `rgmin_lowest_eigenpair_on_manifold` and `rgmin_lowest_eigenpairs_projected`.
+    Minor 57 adds `RGMIN_STOP_LINE_SEARCH_ROUNDING`. `rgmin_control_t` is
+    unchanged. Minor 64 covers this branch's stop-reporting and eindir
+    callback-error fixes without a layout change.
+    Minor 65 adds `RGMIN_RCG`, `rgmin_rcg_options_t`, `rgmin_rcg_options_default` and `rgmin_minimize_rcg`.
+    The new struct leaves every existing struct as it was, so the layout revision stays 6.
+    Minor 66 adds `rgmin_vec_precond_fn`, `rgmin_minimize_hvp_precond` and
+    `rgmin_minimize_hvp_precond_sized`. No struct changes, so the layout revision stays 6.
+    Minor 67 adds `RGMIN_GROMACS_LBFGS` and
+    `rgmin_solver_set_gromacs_lbfgs`. `rgmin_control_t` is unchanged.
+    Minor 68 adds `noise_eps_f` on `rgmin_control_t` and `RGMIN_CONTROL_REVISION6_SIZE`; the struct grows, so the layout revision becomes 7.
+    Minor 69 adds `rgmin_solver_set_fixed_h0` and
+    `rgmin_solver_set_ase_linesearch`.
+    Minor 72 adds `rgmin_solver_set_highs_time_limit` and `rgmin_solver_highs_timeouts`.
+    No struct changes, so the layout revision stays 7.
+    `rgmin_abi_compatible` checks the major version and the layout revision only.
+-   **`DistanceConstraints`:** Holonomic atom-pair distances for a session.
+    SHAKE, LINCS and SETTLE return each trial to the set.
+    The C type `rgmin_constraints_t` is a pointer to this.
+-   **`ManifoldKind`:** Embedded geometry. Euclidean is the identity.
+    Every kind implements `project` / `retract` / `transport`, for
+    example Sphere, SO(3), Stiefel `St(n,1)`, SE(3), Spd and a product.
+    lists the kinds.
+-   **`rgmin_minimize`:** First-order / quasi-Newton C entry. CPU f64
+    tensors only; other devices return `RGMIN_UNSUPPORTED_DEVICE`.
+-   **`rgmin_minimize_hess`:** Newton / RFO C entry. Caller supplies a
+    dense row-major Hessian. This is a different solver, not an
+    L-BFGS option.
+-   **`Solver::set_precon` / `rgmin_solver_set_precon`:** Exp, Lindh, the
+    bonded metric, or `select_precon`. ABI minor 32.
+-   **`rgmin_solver_set_quickmin_variant`:** Quick-min options from C:
+    `RGMIN_QUICKMIN_RGMIN`, `RGMIN_QUICKMIN_EON`,
+    `RGMIN_QUICKMIN_PER_ATOM`. ABI minor 33.
+    `rgmin_solver_precon_scale` is `μ` after the sine probe.
+-   **`select_precon`:** L-BFGS and CG: Exp at 100 atoms for bulk,
+    surface, and a metal cluster (ASE `PreconLBFGS`). Lindh for a
+    covalent molecule or cluster up to `N_LINDH`. Bonded metric when
+    that caller has a force field and every element is covalent.
+    FIRE auto is the identity.
+
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">C kind</th>
+<th scope="col" class="org-left">Rust</th>
+<th scope="col" class="org-left">role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left"><code>RGMIN_PRECON_EXP</code></td>
+<td class="org-left"><code>PreconSpec::Exp</code></td>
+<td class="org-left"><code>H_0 = P^{-1}</code> for L-BFGS, metric for CG and FIRE</td>
+</tr>
+
+<tr>
+<td class="org-left"><code>RGMIN_PRECON_LINDH</code></td>
+<td class="org-left"><code>PreconSpec::Lindh</code></td>
+<td class="org-left">model Hessian, same solve</td>
+</tr>
+
+<tr>
+<td class="org-left"><code>RGMIN_PRECON_FF</code></td>
+<td class="org-left"><code>PreconSpec::Ff</code></td>
+<td class="org-left">bonded metric, harmonic terms on the C struct</td>
+</tr>
+
+<tr>
+<td class="org-left"><code>RGMIN_PRECON_AUTO</code></td>
+<td class="org-left"><code>select_precon</code></td>
+<td class="org-left">the session method plus the how-to table</td>
+</tr>
+
+<tr>
+<td class="org-left"><code>RGMIN_PRECON_NONE</code></td>
+<td class="org-left"><code>clear_precon</code></td>
+<td class="org-left">drop the metric</td>
+</tr>
+</tbody>
+</table>
+
+
+## What does not live here
+
+-   Simulated annealing, basin hopping, and catalogue logic stay in
+    anneal.
+-   Objective algebra stays in eindir.
+-   Sketch-map style collective variables stay in landfold.

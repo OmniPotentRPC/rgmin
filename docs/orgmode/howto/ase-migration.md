@@ -1,0 +1,75 @@
+
+
+# Moving an ASE script to rgmin.optimize
+
+The maturin package `python/` provides `rgmin.optimize`. Replace
+
+```python
+from ase.optimize import BFGS, LBFGS, FIRE
+```
+
+with
+
+```python
+from rgmin.optimize import BFGS, LBFGS, FIRE
+```
+
+`LBFGSLineSearch`, `FIRE2`, and `GPMin` match those ASE names (see
+for GPMin hyperparameters and step-cap behavior).
+The other gradient methods of `Session` are `SR1`, `SR2`, `SteepestDescent`,
+`BarzilaiBorwein`, `Adam`, the nonlinear CG family, `EonCG`, `NewtonCG`
+and `NewtonPCG`.
+Importing `rgmin` does not import ASE. The classes do, when they are constructed.
+
+Each class is an `ase.optimize.optimize.Optimizer`. `run`, `irun`, `attach`,
+`trajectory` and `logfile` are ASE's. The step reads and writes
+`self.optimizable`, so `FixAtoms`, `FixedLine`, `FixCartesian`, `FixedPlane`
+and the cell filters work.
+
+`LBFGS` uses ASE's length control unless `eon_cap=True`. `Adam` takes
+`learning_rate` (default 0.02) as the session step scale. On this line the
+session normalizes Adam's direction to unit per-atom length before that
+scale, and `maxstep` still caps the longest atom. `BFGS` and `FIRE` on a
+cell filter reach the same minimum as ASE; their iterates are not ASE's,
+because the 0.6.0 session rescales the first BFGS step and integrates FIRE
+on its own schedule. `LBFGS` on the same filters keeps ASE's iterates.
+
+A restart file replays the recorded evaluations into a fresh session and
+refuses a file written by another class or with parameters that no longer
+match. The nanobind classes live in `rgmin.ase` and are a separate binding.
+
+`rgmin.ase.BFGSLineSearch` is also exported as `QuasiNewton`.
+`rgmin.ase.LBFGSLineSearch` subclasses `rgmin.ase.LBFGS`. Both match the
+ASE 3.29.0 constructors
+([BFGSLineSearch](https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/bfgslinesearch.py),
+[LBFGSLineSearch](https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/lbfgs.py),
+[QuasiNewton](https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/__init__.py)).
+`c1=0.23`, `c2=0.46`, `alpha`, `stpmax=50`, `memory=100`, and `maxstep`
+are the ASE values. `alpha` is the fixed inverse-Hessian scale `1/alpha`
+on the Rust BFGS or L-BFGS session. The session runs a port of ASE's
+[LineSearch](https://gitlab.com/ase/ase/-/blob/3.29.0/ase/utils/linesearch.py).
+The first trial is the full quasi-Newton step and `stpmax` bounds the
+step multiplier. `maxstep` limits how far an atom moves from one trial
+to the next, so one step can move an atom further than `maxstep`. A
+failed search leaves the atoms where they were and raises
+`RuntimeError("LineSearch failed!")`, as ASE does. An opening step above
+`stpmax`, so any `stpmax` below 1, fails that way. ASE 3.29 ends a
+search successfully on its warnings, including a trial at `stpmax`, and
+so does rgmin. `damping` is stored and, as in ASE, does not scale a
+line-search step.
+
+Five differences remain. The search stops after `linesearch_maxiter`
+trials, 20 by default, where ASE has no limit; running out raises the
+same `RuntimeError`. A `maxstep` of zero is a safety stop: ASE scales a
+later zero increment by 0/0 and the search does not finish, while rgmin
+keeps the first trial at the start and stops before the oracle sees a
+non-finite coordinate. The BFGS update skips a pair when ASE does, on
+`no_update`, a nonpositive step length, or a directional derivative
+whose magnitude did not fall, and it still declines a pair with
+nonpositive curvature. ASE's unconditional L-BFGS pair is not
+reproduced. A `maxmove` is refused, because it would cap the step
+outside ASE's search. `restart` replays the rgmin
+evaluation log; it does not read ASE's Hessian JSON, and
+`replay_trajectory` is not ASE's Hessian replay. The BFGS line-search
+log adds ASE's force-call column. The L-BFGS line-search log keeps the
+shared `Step`, `Time`, `Energy`, `fmax` columns.

@@ -1,0 +1,1166 @@
+
+
+# Changelog
+
+
+## Unreleased
+
+
+## 0.8.0 (2026-11-22)
+
+The notes match the 0.8.0 section of `CHANGELOG.md`.
+
+
+### Added
+
+-   Added `rgmin::krylov`: restarted, right-preconditioned flexible GMRES
+    (`fgmres`) with a caller-chosen product budget, an optional
+    multi-cycle stagnation rule and a per-step observer, and the
+    Eisenstat-Walker choice-2 forcing term (`EisenstatWalker`). Every
+    cycle closes on a recomputed `b - A x`; only that residual converges
+    a solve, is reported and restarts the next cycle.
+-   Added a generic level-set constraint `LevelSetConstraint` for `Solver` (`set_level_set` / `clear_level_set`) that projects trial directions onto the tangent space, retracts accepted points to `value(x)=target` by Newton along the oracle gradient, and reports explicit `Error::LevelSet*` failures when retraction data are invalid or Newton stalls.
+    -   Exposed level-set control through the C ABI (`rgmin_solver_set_level_set`, `rgmin_solver_clear_level_set`) and the Python session binding (`Session(..., level_set=...)`, `Session.set_level_set(...)`).
+-   Added an opt-in FIRE 2.0 stabilization that caps `dt_max` when an uphill
+    reset follows one downhill move, preventing repeated semi-implicit-Euler
+    overshoot cycles on stiff systems. The Guénolé 2020 schedule leaves it
+    off by default.
+    -   Added per-step FIRE diagnostic tracing (`FireTrace`,
+        `Solver::start_fire_trace`, `Solver::take_fire_trace`) recording `dt`,
+        `dt_max`, `alpha`, `power`, `n_pos`, `half_step_backs`, and
+        `clipped_moves`.
+    -   Added C ABI and Python toggles for `cap_two_step_overshoot`
+        (`rgmin_solver_set_fire_cap_two_step_overshoot`, `xts` alias, C++
+        wrapper, and `Session(..., cap_two_step_overshoot=...)`), and bumped
+        `RGMIN_ABI_VERSION_MINOR` from 47 to 48.
+-   Added cautious limited-memory Riemannian BFGS, Algorithm 2 of Huang, Absil, and Gallivan (SIAM J. Optim. 28, 2018, https://doi.org/10.1137/17M1127582). `minimize_rlbfgs` takes a manifold, and `Rlbfgs` sets the memory, the cautious slope, the Armijo backtrack, and the relative gradient stop. The C entry is `rgmin_minimize_rlbfgs` with `rgmin_rlbfgs_default` at ABI minor 51. The default Euclidean L-BFGS step stays the capped eOn step.
+-   Added matrix-free stochastic Lanczos quadrature in `slq`: preconditioned CG, thick-restart extreme pairs, Gauss and Gauss-Radau quadratures, and deflated Hutch++ log-determinant estimates with Student-t intervals.
+-   Added opt-in `Control::etol` and `Control::max_evals`, the LAMMPS `minimize etol` and `maxeval` stops. `etol` stops a run when `|E_k - E_{k-1}| < etol * 0.5 * (|E_k| + |E_{k-1}| + sqrt(f64::EPSILON))` between accepted steps and reports `Status::EnergyTolerance`. `max_evals` counts objective evaluations, line-search trials included, and reports `Status::EvalBudget`. `Report::evals` and `Solver::evals()` hold the count. Both default to `None`, and every driver and session method honours them, with `Error::StopUnsupported` for `etol` on particle swarm and `Error::InvalidControl` for a negative or non-finite `etol` or a zero budget.
+    -   Exposed the stops through the C ABI (`rgmin_solver_set_etol`, `rgmin_solver_clear_etol`, `rgmin_solver_set_max_evals`, `rgmin_solver_clear_max_evals`, `rgmin_solver_evals`, `RGMIN_STOP_ENERGY_TOLERANCE`, `RGMIN_STOP_EVAL_BUDGET`, ABI minor 50), the C++ `Solver`, the Python `SolverConfig` (`etol=`, `max_evals=`), `Session`, and the `rgmin.ase` and `rgmin.optimize` optimizers, and the LAMMPS `min_style rgmin` plugin, which passes `minimize etol` to the core. The new how-to page on stopping rules maps them to LAMMPS and SciPy.
+-   The unmet stop now carries its report. C++ `minimize_fn`,
+    `minimize_hess_fn` and `minimize_eindir` throw `rgmin::StopUnmetError`
+    with `report()`, and Python `minimize` raises `rgmin.StopUnmetError`
+    with `.report`. Both derive from the exception they threw before,
+    `std::runtime_error` and `RuntimeError`, and keep the message.
+-   `Report` now carries a `StopReason` (`Converged`, `MaxIter`, `LineSearchFailed`, `NoiseFloor`, `StepTolerance`, `PolishUnmet`, `Iterating`) and `converged()`. A spent budget stays `Ok` with `Status::Budget`. `Control::with_error_on_unmet` returns `Error::StopUnmet` with the report, including when the iteration budget is zero. The gradient is tested after the last step as well as at the top of the loop. A budget in which no trial moves is `LineSearchFailed`.
+    -   `Control::with_backward_polish` takes a shifted Newton or RFO step on a supplied Hessian or Hessian-vector product. The point is accepted only when the Newton decrement, every coordinate step, and the gradient norm sit under `backward_error_floor`. The floor is `n * f64::EPSILON * (1 + |V| + sum |x_i|)`. A tiny step that misses the gradient test is `PolishUnmet`.
+    -   C ABI minor 49 adds `RGMIN_STOP_LINE_SEARCH`, `RGMIN_STOP_POLISH_UNMET`, `RGMIN_UNMET_STOP`, `rgmin_solver_set_error_on_unmet`, `rgmin_solver_set_backward_polish`, `rgmin_backward_error_floor`, and the `rgmin_minimize*_opts` entries. `xts.h` aliases the new status and stop constants. `rgmin_control_t` is unchanged. Python `SolverConfig` accepts the same two flags, `Report.converged` follows `Stop.TOLERANCE`, and `backward_error_floor` is the floor helper.
+-   Add a strict radii-polynomial comparison for a scalar majorant. Every bound in the comparison rounds upward and the margin rounds downward. A non-positive radius, a negative or non-finite bound, or an image that is not strictly inside the radius returns a typed refusal. Certificate fields are private and are read through getters.
+-   Add a-posteriori nonlinear certificates built from caller-supplied majorants: a Newton-Kantorovich existence radius, an adjoint functional bound with nonlinear and quadratic remainders, and a residual-robust Morse-gap test that returns a typed error when the gap cannot be certified.
+-   Added GPMin, the Gaussian-process-accelerated local geometry optimizer of Garijo del Río, Mortensen, and Jacobsen (Phys. Rev. B 100, 104103, 2019), as a general system-agnostic Rust stepper (`rgmin::GpMin`, `Method::GpMin`) with a matching `rgmin.optimize.GPMin` ASE drop-in and how-to documentation.
+    `GpMinConfig` and `SquaredExponentialKernel` are non-exhaustive and are built from `Default` with `with_*` setters.
+    The kernel default is ASE `GPMin` with `update_hyperparams` false: weight 1 and scale 0.4.
+-   Added GROMACS `integrator = steep` semantics across the Rust, C, C++, and Python APIs, including MDP-unit mapping and explicit tolerance, budget, and machine-precision stop reports.
+-   Added GROMACS-style `integrator = cg` energy minimization as `Method::GromacsCg` with `GromacsCgConfig` and `GromacsCg`, the C selector `RGMIN_GROMACS_CG` with `rgmin_solver_set_gromacs_cg`, C++ `rgmin::Method::GromacsCg` with `Solver::set_gromacs_cg`, and Python `gromacs_mdp_options(integrator="cg")` with `rgmin.optimize.GromacsCg`. It pairs the `do_cg` Polak-Ribière direction rules (`nstcgsteep` periodic restart, `|beta| <= 5` cap, steepest-descent fallback, `sqrt(eps) * |E|` downhill energy-rise tolerance, `MaxAtom` force norm) with `rgmin`'s strong-Wolfe line search (rather than GROMACS's own line search) and refuses holonomic constraints.
+-   Added `HighsOptions::time_limit` and `HighsOptions::with_time_limit`. A value
+    replaces the time limit of both the projection and the feasible step HiGHS
+    solves, and `None`, the default, keeps the 0.05 s and 1.0 s limits they had.
+    The feasible step solve also reports a refused `parallel` or `threads` option
+    as `Error::Highs` instead of ignoring it.
+-   Added a sixth-order Magnus propagator with an embedded fourth-order estimate and Padé matrix exponential.
+-   Added the `inverse_laplace` module: fixed-Talbot and Weeks (Möbius–Laguerre) complex-contour inverse Laplace kernels, orthonormal Laguerre series evaluation, and complex dense Gaussian elimination with an inverse infinity norm. Contour results are typed estimates, never certified bars. `TalbotConfig` and `WeeksConfig` are `non_exhaustive`, start from `Default`, and take chainable `with_*` setters. `TalbotConfig::sigma` shifts the Talbot contour, and the optional `singularity_re_max` and `singularity_im_max` bounds make `talbot_invert` refuse with `ContourMissesSingularity` when the contour cannot enclose them. `weeks_invert` samples off both DFT grids and refuses a Laguerre mode that aliases onto them with `AliasedLaguerreModes`, and `WeeksConfig::laguerre_degree` must be a multiple of 4. A disk majorant whose singularity lies inside the disk is refused, an observed dyadic Laguerre block that fails the finite-resolution `n^{-3/2}` model is refused, and collapsed or non-finite Talbot nodes, underflowed Laguerre seeds, and non-finite inputs are refused with typed errors.
+-   CI checks that every C function in `include/rgmin.h` has a doc comment (`scripts/check_header_docs.py`), that every DOI and URL in the tracked sources resolves (`scripts/check_links.py`), and that rustdoc builds with warnings as errors.
+    The docs workflow builds with `-W` and fails when the tracked rst under `docs/source` is stale.
+-   New docs: how-tos and tutorials for the level-set constraint, the supplied line search and the caller-supplied L-BFGS `H0`, and a Python reference with every `SolverConfig` option and default and the maturin classes.
+    The tutorials include the example programs that CI runs, and the Python quickstart blocks run as a test. The 18 C functions that had no doc comment are documented.
+-   The GROMACS cg symbols `RGMIN_GROMACS_CG` and `rgmin_solver_set_gromacs_cg` are ABI minor 54.
+-   `Solver::try_step_hvp` with the `TryHessianVector` trait, and
+    `try_lowest_eigenpairs` / `try_lowest_eigenpairs_precond` with the
+    `TryApplyHessian` trait, take host callbacks that can fail. On callbacks
+    that succeed they take the steps of `step_hvp` and `lowest_eigenpairs`
+    bit for bit. The first callback error ends the call as `Error::Host`,
+    nothing is evaluated after it, and `x` and the session stay as they
+    were before the step. A Newton-CG or Newton-PCG session with a chart or
+    distance constraints returns `Error::FallibleUnsupported`. Any other
+    method returns `Error::NeedHvp`. The C ABI and the Python binding are
+    unchanged.
+-   `python -m pip install rgmin` installs the nanobind package from PyPI.
+    A `vX.Y.Z` tag builds the sdist and the wheels for Linux (`manylinux_2_28`) on x86<sub>64</sub> and aarch64, macOS 14 or newer on arm64 and x86<sub>64</sub>, and Windows on x86<sub>64</sub>, tests every wheel, and uploads them to PyPI through trusted publishing.
+    CPython 3.10 and 3.11 each get a wheel, one abi3 wheel serves 3.12 and newer, and the free-threaded 3.14t and 3.15t each get a wheel.
+    The package version comes from `Cargo.toml`, and the upload stops unless the tag names that version.
+-   `rgmin::secant::update_symmetric` applies a Powell symmetric Broyden, SR1 or Bofill update to a dense row-major symmetric model, invariant under scaling of the step and gradient change.
+-   `rgmin_control_default`, `rgmin_exp_default`, `rgmin_scg_params_default`, `rgmin_scg_options_default`, `rgmin_eigen_params_default` and `rgmin_eigen_options_default` return the Rust defaults of the C records a caller fills in, bit for bit, at ABI minor 46. `xts.h` spells them `xts_*_default`.
+    A C caller must start each record from its initializer, and `rgmin_precon_t` from `rgmin_precon_init`, then assign only the fields it changes. A field added later then holds its default rather than stack bytes or zero.
+    The C++ wrappers, the LAMMPS plugin, the asv helper, the C tests and the C ABI docs start from them.
+    In `rgmin_minimize_scg` and `rgmin_minimize_scg_with_options`, a null params or options pointer stands for the default record, which holds the values a null pointer selected before.
+    `RGMIN_C_TEST_RUNNER` and `RGMIN_LAMMPS_RUNNER` put a runner such as valgrind in front of the C test consumers and the plugin tests' `lmp`, and CI runs both under valgrind.
+
+
+### Changed
+
+-   The Brent line search now keeps its tolerance floor proportional to
+    the abscissa, `f64::EPSILON * (|x| + 1 / 1024)`, instead of the fixed
+    absolute `1e-12`. Searches whose minimum lies below `1e-12` in step
+    length resolve it. Only Brent searches move: `LineSearch::search`,
+    `search_from` and the one-shot `minimize` steps with
+    `LineSearch::brent` or `LineSearch::default()`, the C one-shot
+    `rgmin_minimize` family, which passes `LineSearch::default()`, a
+    session after `set_linesearch` with Brent, including the constrained
+    L-BFGS curve search, and the caller-driven `SuppliedSearch`,
+    `rgmin_linesearch` and Python `LineSearch("brent", ...)`. The session
+    default stays strong Wolfe and does not change. Results that were
+    already resolved agree to rounding.
+-   GROMACS steepest descent multiplies a rejected displacement by 0.5, matching `do_steep` in GROMACS 2025.4. `GromacsSteepConfig::with_shrink` selects another factor in `(0, 1)`, including the reference manual's 0.2.
+-   Public output structs are non-exhaustive, so a later field stays compatible for callers that read the fields and match with `..`. This covers the matrix-free Lanczos outputs (`TridiagEigh`, `QuadratureEstimate`, `PcgResult`, `DeflatedPair`, `ExtremePairsReport`, `SlqLogDetReport`), the Gauss–Legendre and Lobatto results, the Magnus step and matrix exponential, and the eOn step record `EonFeat`. A caller that supplies its own deflation pair uses `DeflatedPair::new`. `LineSearchOptions` is non-exhaustive as well and still starts from `Default` or `with_objective_roundoff`. The C ABI is unchanged.
+
+
+### Fixed
+
+-   An L-BFGS run that spends its budget without moving `x` is now
+    `StopReason::LineSearchFailed` from `Solver::run` and
+    `Solver::run_gauged`, as `minimize_method` and `rgmin_minimize`
+    already reported it. Python `minimize` reports `Stop.LINE_SEARCH`
+    for the same run, where it reported `Stop.BUDGET`.
+-   Non-finite starts and trials now fail before any clip bookkeeping is
+    recorded in `step_first_order` (`src/session.rs:3710`) and `assess`
+    (`src/session.rs:5237`), and `clip_free` (`src/session/constrained.rs:97`)
+    keeps its finite-only coordinate clipping.
+    -   ABC-FIRE component clipping now leaves the velocity unchanged when
+        `vmax <= 0` in `fire_clip_components` (`src/fire.rs:609`) instead of
+        forcing every component to zero.
+-   Synced C ABI bookkeeping at minor 48: `tests/c_abi.rs`, the exported-name
+    baseline (`scripts/abi_baseline.txt`), and the architecture docs now agree
+    with `include/rgmin.h` / `src/ffi.rs`.
+-   The C ABI no longer folds `StopReason::Iterating` into
+    `RGMIN_STOP_BUDGET` for a finished run. `Iterating` is a step in
+    progress, so it has no `rgmin_stop_t` of its own and no code is
+    renumbered. A session step that has not stopped still reports
+    `RGMIN_STOP_BUDGET`, as documented. The one-shots now return
+    `RGMIN_INTERNAL_ERROR` and write nothing if a finished run ever
+    carried `Iterating`, which no driver does today.
+-   `irun` on every `rgmin.optimize` optimizer now yields `False` for a run that stopped with `stop == "EvalBudget"`, as `run` returns it. It yielded `True` there before, because the ASE loop stops by asking `converged`.
+-   `rgmin.optimize.GromacsSteep.run` and `irun` now return `False` when the session stops with `stop == "EvalBudget"`, matching the other ASE-style optimizers in `rgmin.optimize`.
+    -   `Solver::try_step_hvp` now validates `etol` and `max_evals`, counts objective evaluations into `Solver::evals()` and `Report::evals`, and applies `etol` and `max_evals` at the end of a successful step while rolling back the evaluation count and stop state on `Error::Host`.
+    -   `polish_newton`, `polish_hvp`, and the `backward_polish` passes of `minimize_method_hess`, `minimize_method_hvp`, `minimize_newton`, and `minimize_newton_cg` now count the objective evaluations made during the polish into `Report::evals`.
+    -   `minimize_rlbfgs` now evaluates `etol` and `max_evals` at the end of each outer iteration rather than after each rejected Armijo trial.
+-   `rgmin::minimize_eindir` ignored `Control::error_on_unmet`, so a spent
+    budget came back as a report. It now throws, as `minimize_fn` and
+    `minimize_hess_fn` do. The C ABI gains `rgmin_minimize_eindir_opts`,
+    the eindir one-shot with the `error_on_unmet` and `backward_polish`
+    flags, at ABI minor 53. `rgmin_minimize_eindir` is unchanged.
+-   A GROMACS steep trial that misses its distance constraints is rejected and the displacement shrinks, matching `do_steep`. Crossing `GROMACS_STEEP_MIN_USTEP` stops with `Status::MachinePrecision`. An explicit `GromacsSteepConfig::max_constraint_shrinks` that runs out while the displacement is still at least that floor returns `Error::Constraint`.
+-   A nonnegative certificate majorant of `-0.0` is returned as `+0.0`. The acceptance test compared the value with zero and used to keep the sign bit.
+-   A zero-budget `gromacs-steep` report now fails when a per-atom gradient norm is not finite. The previous reduction kept a finite atom through `std::max` and dropped the NaN.
+-   Certificate radii, remainders, and the Morse-gap `certified` field are documented as IEEE 754 binary64 estimates in the default round-to-nearest, ties-to-even mode. `certified` was previously described as a strict lower bound on the exact gap.
+-   Constrained FIRE 2.0 adapts `dt`, `n_pos` and `alpha` once per step. The preparation step already applies that update, and the forward step no longer applies it again, so a rollback shrinks `dt` by `f_dec` once and a downhill step counts `n_pos` once.
+-   Riemannian L-BFGS now rejects zero-curvature pairs, applies gradient
+    tolerances in the manifold metric, and covers retraction fallback behavior.
+-   The C header, `src/ffi.rs`, the manifold modules and the manifold how-tos no longer call `rgmin_manifold_t` tokens 7-10 reserved.
+    They are SPD, Grassmann, hyperboloid and Poincare ball, and token 23 is U(n). `rgmin_solver_set_manifold` has always mapped them.
+-   The DIIS reference DOI in `Method::Diis` and `src/diis.rs` is `10.1016/S0022-2860(84)87198-7`, which resolves.
+    The Manopt links point at the JMLR page and the Holm reference at JSTOR, because the identifiers they used are not registered.
+    The relax-morse tutorial quotes what `examples/relax_morse.rs` prints.
+-   The GROMACS steep symbols are ABI minor 52, and `xts.h` aliases `RGMIN_STOP_MACHINE_PRECISION`. The `1e-12` displacement floor and the default of 34 constraint shrinks are rgmin safeguards.
+-   The IRC trust projection treats a mass weight equal to its floor as present
+    for both the degenerate axis and the radial divisor, so the two no longer
+    disagree about that coordinate.
+-   The Python tests pass on macOS x86<sub>64</sub>, where Apple's libm `exp` rounds one value on the Pt7 EMT trajectory down and glibc rounds it up.
+    The Pt7 EMT digest, like the LJ38 one, is pinned on glibc only, and every other platform compares the Pt7 frames and energies with `tests/python/data/pt7_golden.json` within 1e-12, absolute in positions and relative in energies.
+    Every platform still requires the Pt7 runs at 1, 2 and 8 Python threads and at 1, 2, 3 and 8 Rayon threads to match a reference run on the same machine bit for bit.
+    Windows takes the same comparison, so `PT7_EMT_WINDOWS` and the dispatch-only `windows-pt7-digest` CI job that recorded it are gone.
+-   The bordered cyclic determinant in `rgmin::periodic` now scales `I - T_0` as one block for a single period. A transfer matrix with a unit diagonal entry and tiny couplings, such as `[[1, 1e-160], [1e-160, 2]]`, used to overflow two separately scaled terms into NaN. A non-finite triangular diagonal now returns a non-finite error instead of a NaN log-determinant.
+-   The bordered cyclic solver now rejects invalid border dimensions, non-finite inputs, and overflowing or non-finite norm estimates with specific errors instead of returning misleading determinant or singularity results.
+-   The public `StopUnmetError` stub keeps its `report` attribute typed without
+    diverging from the generated extension stub.
+-   The shrink budget for a GROMACS steep session is now a closed-form logarithm, capped at `GROMACS_STEEP_SHRINK_BUDGET_CAP` (one million), so a shrink factor near one no longer walks a loop toward `u32::MAX` and hangs construction.
+-   Use an energy safeguarded L BFGS step for ASE cell filters so scaled
+    cell deformation coordinates converge without accepting uphill steps.
+-   `GromacsSteepConfig::default().with_shrink(...)` derived `max_constraint_shrinks` from the canonical `emstep = 0.01`, not the session's actual `istep`. `Solver::set_gromacs_steep_config` and `GromacsSteep::set_config` now rederive that budget from the session's own step size unless `with_max_constraint_shrinks` fixed it, so a noncanonical Rust session gets a budget sized for its own displacement instead of exhausting constraints too early or too late.
+-   `Method::GromacsCg` now keeps `-z + beta * d` unscaled in its Polak-Ribiere direction update under `Accept::Step` instead of multiplying `-z` by `istep`, and `Solver::set_objective_roundoff` updates only the objective-roundoff window while preserving the `sqrt(eps)` downhill-rise tolerance installed for `Method::GromacsCg`.
+-   `Method::GromacsCg` now matches GROMACS `do_cg`'s `sqrt(GMX_REAL_EPS) * |E|` downhill energy-increase tolerance near machine precision, `rgmin.optimize.GromacsCg.run` and `irun` return `False` on an `EvalBudget` stop, `nsteps` step counting is pinned by analytic tests, and documentation and docstrings accurately state that `gromacs-cg` pairs the GROMACS-style direction update with `rgmin`'s strong-Wolfe line search.
+-   `Session("gromacs-steep")` no longer installs the generic per-atom displacement cap. An explicit `max_atom` still applies, and other methods keep that cap when the argument is omitted.
+-   `lanczos_quadrature_fn` no longer reports `bracketed: true` when the Lanczos recurrence terminates early on an invariant subspace. The function takes no lower bound, so it never forms a Gauss-Radau bracket, and every other return path already reported `false`. The flag is `true` only when a caller-supplied `lower_bound` produced a bracket, as `lanczos_quadrature_log` reports it.
+-   `minimize_scg`, `minimize_scg_exact`, and `rgmin_minimize_scg` now apply a positive finite `Control::maxmove` to every trial step, including retries after non-finite values.
+    Bounded steps compare their measured change with the damped model at the shortened step; zero, negative, infinite, and NaN caps remain unbounded.
+-   `rgmin_minimize_hess_opts`, `rgmin_minimize_hvp_opts`,
+    `rgmin_minimize_eindir` and `rgmin_minimize_scg_with_options` return
+    `RGMIN_INVALID_PARAMETER` when the initial `x` is not finite, as
+    `rgmin_minimize` does. A block tensor import such as the seed of
+    `rgmin_lowest_eigenpairs` rejects a DLPack version other than 1.0 with the
+    same status.
+-   `slq_logdet_hutchpp` no longer decides whether a Hutch++ sketch vector joins the trace subspace with an absolute `1e-14` cutoff. The residual `(A - M_cv) s` is now compared with `1e-12` times the larger of `||A s||` and `||M_cv s||`, so rescaling the operator `A -> c * A` keeps the same sketch vectors. At `c <= 1e-16` the old cutoff emptied the subspace and inflated the standard error, and at `c = 1e16` it promoted roundoff left by an exactly cancelling control variate into the subspace. A sketch whose operator scale is zero is dropped, and one whose scale is not finite is refused with an error.
+-   `slq_logdet_hutchpp` now drops a Hutch++ sketch vector that lies in the deflated subspace. When projecting out the kernel and deflated pairs left at most `1e-12` of the vector's norm, the remainder was kept and the power iteration normalised that roundoff into a basis vector of the trace subspace. The vector is now discarded, as the stochastic probes already do.
+
+
+## 0.6.0 (2026-11-13)
+
+The notes match the 0.6.0 section of `CHANGELOG.md`.
+
+
+### Added
+
+-   `Report::grad` is the gradient that `Report::grad_norm` measures. Sessions fill it, and one-shot drivers leave it `None`.
+-   The combined C surface is ABI minor 40. Minor 37 is linesearch, 38 is `rgmin_lbfgs_direction`, and 39 is `rgmin_lowest_eigenpairs`. The symbols new at 40 are the 0.5.2 C functions develop did not have, including `rgmin_minimize_scg_with_options` and `rgmin_solver_set_objective_roundoff`. `rgmin_control_t` gains `noise_eps` and `noise_c`. `rgmin_report_t` gains `stop`.
+-   `rgmin_minimize_scg_with_options` takes an explicit SCG step rule. Null options and `RGMIN_SCG_ABSOLUTE_INFINITY` keep the absolute infinity-norm rule. `RGMIN_SCG_RELATIVE_EUCLIDEAN` stops on `||alpha d||_2 < tol_sol * (1 + ||x||_2)`. `Solver::set_objective_roundoff` sets the relative value window of a Euclidean Wolfe search. A positive window can accept a rise inside that window and stop at a stationary point that the strict test refuses.
+-   `Lbfgs::ftol` turns on the relative-decrease stop of L-BFGS-B.
+    A line-search step that passes the test ends `minimize`,
+    `minimize_watched` and `minimize_recognized`.
+    A step from `f_k` to `f_{k+1}` passes when `f_k - f_{k+1}` is at most
+    `ftol` times the largest of `|f_k|`, `|f_{k+1}|` and 1.
+    The default of zero turns the test off, so a default `Lbfgs` takes the
+    same steps as before.
+    `LBFGSB_FTOL` is the SciPy default, `LBFGSB_FACTR` (1e7) times the
+    machine epsilon.
+    On a 38-atom Lennard-Jones cluster from a jittered grid, `LBFGSB_FTOL`
+    cuts the evaluations of a default `Lbfgs` from 415 to 316 and leaves the
+    largest gradient component at 3.4e-3.
+    `cargo run --release --example lbfgs_ftol` prints these runs. ([#8](https://github.com/OmniPotentRPC/rgmin/issues/8))
+-   `Lbfgs::minimize_on` and `Lbfgs::minimize_box_on` offer each accepted iterate to a callback as the iteration, the value, and the coordinates.
+    Returning false ends the run at that point, as `minimize_watched` does.
+    A caller can project those coordinates, a bond length or a height above a slab, without the solver storing that map.
+    `minimize_watched` and `minimize_box_watched` keep their two-argument callbacks and call these methods.
+    A start outside the box is clipped before the first `minimize_box_on` call. ([#15](https://github.com/OmniPotentRPC/rgmin/issues/15))
+-   Opt-in steps beside the eOn cap: per-atom-only CG, a quasi-Newton step that keeps its direction under the per-atom cap, a compact trust-region solve, a curvature gate on the exponential preconditioner, and a sparse Lindh model Hessian.
+    None of them replaces the default. The cap stays the eOn client step.
+-   The Lindh model Hessian is built from a linked cell list and applied with Jacobi-preconditioned CG, so the factor is not refused above 700 atoms.
+    It stays opt-in. On the held-out set it does not win every problem in the same basin as the eOn cap.
+-   The `strong_scale` example, behind the `par` feature, measures CPU
+    strong scaling on one fixed FCC Morse crystal.
+    It runs L-BFGS (m = 10) under the strong Wolfe search, and FIRE 2.0
+    with the Guenole 2020 preset and a 0.2 Angstrom per-atom cap, on
+    1, 2, 4, &#x2026; threads up to the physical cores.
+    The CSV lists the hardware, threads, N, median wall time, force calls,
+    iterations, final gradient norm, the largest coordinate deviation from
+    1 thread, and the parallel efficiency.
+    An untimed solve per pool checks that every L-BFGS step ran the line
+    search and met the strong Wolfe conditions.
+    CI runs a short smoke of it.
+-   The maturin package under `python/` builds `BFGS`, `LBFGS` and `FIRE` as ASE `Optimizer` subclasses.
+    `LBFGS` uses ASE's length control unless `eon_cap=True`.
+    The nanobind `rgmin.ase` classes released in 0.4.0 are unchanged.
+-   `Control::stop_norm` selects the norm that a `Solver` session compares to `gtol`.
+    It defaults to `StopNorm::Two`, so a default `Control` stops where it did.
+    `Solver::set_stop_norm` still replaces it on a live session.
+    `StopNorm::Rms` is `||g||_2 / sqrt(n)`, the `rms` convergence metric of eOn.
+    `Report::stop_norm` names the norm of `Report::grad_norm`, and drivers that run no session report `StopNorm::Two`.
+    C: `RGMIN_STOP_NORM_RMS` is 3 and `XTS_STOP_NORM_RMS` aliases it, at `abi_minor` 32.
+-   `Lbfgs::approx_wolfe` is an opt-in approximate Wolfe test for the rounding floor.
+    A positive value accepts a trial within that fraction of `abs(f)` of the start of a strong Wolfe search when the strong curvature test holds.
+    Zero, the default, keeps the strict search.
+    The eOn cap does not consult it. `LbfgsStep::Wolfe` and `Lbfgs::minimize_box` do.
+-   `Lbfgs::builder` sets the memory, the tolerance, and the step rule.
+    `Lbfgs::capped` and `Lbfgs::scaled` select the strong Wolfe search when the cap is not a positive finite length.
+-   `LbfgsPairs::push_rho` stores a pair with the caller's `rho` in place of `1 / (s · y)`, for an L-BFGS direction with a caller-supplied `H0`. The pair passes the curvature gate of `LbfgsPairs::push` and `Lbfgs::record` first, and a `rho` that is not finite and positive is declined, so a pair with non-positive curvature never enters the two-loop. `LbfgsPairs`, `Lbfgs::two_loop` and the eOn capped step share one two-loop, so the direction from a capped session's pairs is that session's step bit for bit. C: `rgmin_lbfgs_pairs_push_rho`, ABI minor 43. `rgmin_lbfgs_direction` keeps its signature and minor 38. C++: `rgmin::LbfgsPairs::push_rho`. Python: `LbfgsPairs.push(s, y, rho=None)`.
+-   `LbfgsPairs`, `lbfgs_direction`, and `Lbfgs::two_loop_h0` return the L-BFGS direction `-H g` from stored `(s, y)` pairs and a caller-supplied initial inverse Hessian. `H0` is a scalar, a diagonal, or a callback that applies `H0` to one vector. The call does not evaluate an objective. A scalar `H0` equal to the factor `Lbfgs::two_loop` multiplies by matches that direction bit for bit. An empty memory returns `-H0 g`. C: `rgmin_lbfgs_pairs_create`, `rgmin_lbfgs_direction`, and the xts aliases. C++: `rgmin::LbfgsPairs`. Python: `LbfgsPairs`, with `H0` a float, a NumPy array, or a callable. ABI minor 38.
+-   `LbfgsStep::Capped` drops the L-BFGS line search and shortens each two-loop step to a per-atom cap.
+    The initial inverse Hessian stays the Nocedal-Wright scale `(s·y)/(y·y)`.
+    `Solver::set_lbfgs_step` installs the rule, and `rgmin_solver_set_lbfgs_capped` is the C entry.
+    `abi_minor` 33.
+-   `ManifoldKind::Product` is the weighted Riemannian product of other kinds, with the metric `g = sum_i w_i g_i` for weights `w_i > 0`.
+    `ManifoldKind::product` builds it from `ProductFactor` values, each a kind, a packed length and a weight, and `ManifoldKind::power` is manopt's `powermanifold`; `Solver::set_product` and `Solver::set_power` select them.
+    Projection, retraction, transport, exponential, logarithm and parallel transport act per factor, a factor's gradient and Hessian are divided by its weight, and the distance is `sqrt(sum_i w_i d_i^2)`.
+    A session steps a weighted product in the chart `z_i = sqrt(w_i) x_i`, so steepest descent, L-BFGS and the Newton-CG trust region run on it unchanged, and the iterates do not depend on the unit of a factor whose weight carries that unit.
+    The exponential preconditioner, the Lindh model, `set_project_rigid` and the HiGHS box read raw coordinates and return `Error::ProductChart` on such a product.
+    `MwRigid` and `RigidQuotient` factors project with the session's masses and periodic flag.
+    `explanation/product-manifold` derives the geometry and compares it with manopt, Manopt.jl and Manifolds.jl, pymanopt and geomstats.
+-   `ManifoldKind::sphere_within(basis)` is the unit sphere of the span of the rows of `basis`, and `ManifoldKind::sphere_excluding(basis)` the unit sphere orthogonal to them, such as a unit normal that leaves a centre of mass in place.
+    Both are `SubspaceSphere`, with the projection `P_U - x x^T`, the metric-projection retraction, and the sphere's exponential, logarithm, distance, parallel transport and Hessian.
+    `Error::SubspaceBasis` reports an empty, non-finite or dependent basis, or excluded rows that span the whole space.
+-   `Manifold` gains manopt's `inner`, `norm`, `ehess2rhess`, `exp`, `log`, `dist`, `parallel_transport`, `parallel_transport_along`, `transport_is_isometric` and `typical_dist`.
+    Their defaults keep every kind as it was: the Euclidean metric, and `None` where no closed form is supplied.
+    Every kind but the multinomial and rigid kinds supplies its Riemannian Hessian, the sphere family, SO(3), SE(3), `Positive` and the linear kinds also their geodesics, and `Positive`, `Spd` and the doubly stochastic kinds expose the metrics their `egrad2rgrad` already used, as does the trait implementation of `RiemannianManifold`.
+    `reference/product-manifold` lists what each kind supplies.
+-   `ProductFactor::with_metric` gives a factor a caller's `TangentMetric` `G_x`, self-adjoint and positive definite on each tangent space, so that its part of the product metric is `w g(u, G_x v)`.
+    `egrad2rgrad` returns the factor's gradient times `(w G_x)^{-1}`, and `minimize_rtr` then has the iterates of manopt's truncated CG preconditioned by `(w G_x)^{-1}`.
+    Such a product has no exponential, logarithm, distance or parallel transport, and sessions refuse it with `Error::ProductTangentMetric`.
+-   `RiemannianManifold` is a Stiefel manifold `St(n, p)` with a QR or polar retraction, an SPD cone `SPD(p)` under the affine-invariant or log-Euclidean metric, or a product of them.
+    Each has projection, Riemannian gradient, retraction, exponential, SPD logarithm, transport, inner product and one gradient step on caller-owned column-major buffers.
+    C: `rgmin_manifold_handle_t` and the `rgmin_manifold_*` functions, ABI minor 41.
+    The C++ wrapper is `rgmin::Manifold`, and `xts_manifold_*` aliases the C entries.
+    Python: `rgmin.Stiefel`, `rgmin.SPD` and `rgmin.Product` on NumPy arrays.
+    `examples/tutorial_manifold_fit.py` is run in CI.
+-   `Solver::set_lbfgs_trust_radius` truncates the L-BFGS ray and updates the radius by Burdakov's Algorithm 1.
+    It is off by default. `set_lbfgs_trust` stays the eOn Newton-model radius.
+    The capped step stays the default until the radius is on, and the eOn fast path does not skip it.
+    C: `rgmin_solver_set_lbfgs_trust` and `rgmin_solver_lbfgs_trust_radius`, ABI minor 45.
+-   `Stepper::step` is the one-iteration seam a host such as rgsaddle calls on `Solver`.
+    `FireConfig::ase` is the ASE FIRE parameter set, and `Solver::set_fire_config` installs it.
+-   `SuppliedSearch` and `rgmin_linesearch` take a caller-supplied energy and gradient.
+    The search does not call an objective. Its trials match `LineSearch::search`.
+    ABI minor 37.
+-   `benches/ase_h2h.py` compares ASE 3.29 LBFGS, FIRE and BFGSLineSearch with rgmin capped L-BFGS, Wolfe L-BFGS, the geometry step and FIRE 2.0.
+    Every arm uses fmax 0.01 and maxstep 0.2 on the same LJ7, LJ13, LJ38 and Morse Pt256 starts.
+    The table is `benches/ase_h2h/results.md`.
+-   `lammps/` builds `min_style rgmin`, a LAMMPS plugin (`plugin load`, LAMMPS 22Jul2025 or later) that runs the rgmin `lbfgs`, `fire`, `fire2`, `sd` and `bb` sessions through the C ABI.
+    `minimize etol ftol maxiter maxeval` keeps its meaning: `ftol` is the force norm of `min_modify norm` over the full force after fixes, and `etol` is the relative energy test of `min_style cg`.
+    `min_modify method`, `memory`, `trust`, `linesearch`, `accept` and `istep` select and tune the session, and `dmax` is the per-atom step cap.
+    `fix box/relax`, per-atom extra degrees of freedom and unknown keywords stop with an error.
+    Under MPI every rank runs the same session on the full coordinate vector, and 1, 2 and 4 ranks take the same steps.
+    `howto/lammps-migration` and `reference/lammps-min-style` document the plugin, and `benches/lammps_minstyle.py` compares it with `cg`, `sd`, `fire` and `quickmin`.
+-   `lowest_eigenpairs` is block LOBPCG for the k lowest eigenpairs of a symmetric Hessian product (Knyazev 2001).
+    The seed is an n-by-k block. Each pair carries its residual and whether that residual met the tolerance.
+    `k = 0`, `k` above the dimension, and a non-finite value or product return an error.
+    C: `rgmin_lowest_eigenpairs`, `rgmin_eigenpair_t`, and `rgmin_eigen_options_t`.
+    The C++ wrapper is `rgmin::lowest_eigenpairs`, and `xts_lowest_eigenpairs` aliases the C entry.
+    `rgmin_lowest_eigenpairs` is ABI minor 39. `rgmin_lbfgs_direction` stays 38.
+-   `rgmin.lowest_eigenpairs` is the Python binding of block LOBPCG.
+    It takes a Hessian-vector callable and a seed block and returns NumPy arrays.
+    A pair that misses the tolerance raises `RuntimeError`.
+    `examples/tutorial_lowest_eigenpairs.py` is run in CI.
+-   `rgmin.optimize` is a drop-in for `ase.optimize` on the maturin session.
+    `BFGS`, `LBFGS`, `LBFGSLineSearch`, `FIRE` and `FIRE2` take ASE's constructor arguments and drive `self.optimizable`, so cell filters and `FixAtoms`, `FixedLine`, `FixCartesian` and `FixedPlane` work.
+    The other gradient methods of `Session` have ASE-style classes. Importing `rgmin` does not import ASE.
+    `Session` takes `h0`, `maxmove`, `preset`, `abc`, `accept` and `istep`, and can `push_pair`, `forget` and report `pair_count` and `steps`.
+    `Adam` takes `learning_rate` (default 0.02) as its step scale.
+    A restart file replays the recorded evaluations into a fresh session.
+-   `rgmin_last_error_message` is the borrowed string `rgmin_last_error` already returns.
+    `rgmin_solver_dim` and `rgmin_solver_steps` read a const session, including a null one as zero.
+    The C++ `Method` names `EonCg` and `PolakRibierePlus`. ABI minor 36.
+-   `rgmin_lowest_eigenpairs_ex` reports each pair's residual `||Hv − θv||` and a converged flag, and takes an optional preconditioner callback. A null preconditioner is the identity and matches `rgmin_lowest_eigenpairs` bit for bit. `rgmin_eigenpair_t` keeps the minor-39 layout. Python `lowest_eigenpairs` returns residuals and converged flags. `strict=False` returns those flags instead of raising `RuntimeError`. `precond` is a callable on an `(n, m)` block. ABI minor 42. Minor 40 is the union with the 0.5.2 C surface, and 41 is the manifold API.
+-   `rgmin_solver_set_power(solver, factor, block, count)` is `Solver::set_power` for the manifold tokens without shape parameters.
+    `xts.h` aliases it and `rgmin::Solver::set_power` wraps it. `abi_minor` 44.
+    Weighted products, subspace spheres, tangent metrics and gauges stay Rust only.
+-   `rtr::minimize_rtr_gauged` calls a gauge after every accepted step: a map to another representation of the same point, such as the pivot of a plane moved along the plane.
+    The step is accepted on the value before the move, and the moved point is evaluated afresh.
+    `Solver::run_gauged` calls the gauge before every session step but the first and rebases the session when it moves the point.
+-   `rtr::minimize_rtr` is the Riemannian trust region of Absil, Baker and Gallivan with Steihaug-Toint truncated CG, measured in `Manifold::inner`.
+    Its Hessian action is `ehess2rhess`, Weingarten term included, where the kind supplies one, and the projected Euclidean action otherwise.
+    `RtrOptions` takes the defaults of manopt's `trustregions`, and `RtrMin` returns the point, the value, the gradient norm and the outer, accepted and inner iteration counts.
+    `rtr::truncated_cg_riemannian` is one inner solve in the manifold metric, for a caller that accepts or rejects steps itself with `RtrRadius`.
+    `truncated_cg_projected` keeps the Euclidean inner product.
+-   `scripts/check_changelog.py` fails when `docs/newsfragments/` holds a fragment and the Unreleased section of `CHANGELOG.md` or `docs/orgmode/changelog.org` also holds a line.
+    A file there whose type `towncrier.toml` does not name fails the same way.
+    `towncrier build --draft` renders the fragments and changes no file.
+-   `towncrier.toml` reads the fragments in `docs/newsfragments/` again.
+    `towncrier build` writes them into `CHANGELOG.md` under the Unreleased
+    heading, above the newest release, with the six section types of Keep a
+    Changelog.
+-   FIRE 2.0 stops when consecutive non-positive-power steps exceed
+    `vdfmax`. The published schedule uses 2000, from Table 1 of Comput.
+    Mater. Sci. 175 (2020) 109584. The stopping step does not move.
+
+
+### Changed
+
+-   `rgmin_solver_create` opens a session with `RGMIN_ACCEPT_ENERGY`. In 0.5 it opened with `RGMIN_ACCEPT_NONE`. The Rust `Solver::new` default stays `Accept::None`. The default L-BFGS step is the eOn cap and runs no energy test under either policy, and line searches take the same value window under both. Under the energy policy a step that is not line-searched (BB, the Hessian steps) backtracks on a rise above 1e-8, a non-positive `istep` opens steepest descent, unpreconditioned nonlinear CG, BFGS, SR1, SR2 and BB with a unit-length step, and BFGS, SR1 and SR2 rescale their first step. To keep the 0.5 behaviour, call `rgmin_solver_set_accept(s, RGMIN_ACCEPT_NONE)` after `rgmin_solver_create`. The C++ `rgmin::Solver` follows the C default unless its configuration sets `accept`.
+-   A negative `maxmove` on `rgmin_control_t` leaves every step cap off, including the default per-atom cap. Zero keeps the defaults. A positive value is the Euclidean cap.
+-   SCG reductions stay in plain left-to-right order (`dot_ordered`), as released in 0.5.2. A positive finite `maxmove` also bounds every SCG trial. Other values leave that step unbounded.
+-   One-shot `minimize_method` keeps the line search the caller passes for L-BFGS, and `rgmin_minimize` keeps its Brent search.
+-   An interior point skips the bounds clip, and a Euclidean session keeps the gradient it already owns.
+    Polak-Ribiere forms `g · (g - g_old)` in the dot product.
+    A backtracking line search keeps its lowest trial without copying that vector.
+    FIRE 2.0 does not build the post-step force, which only FIRE 1.0 mixes.
+    L-BFGS reuses the curvature dots stored with each pair.
+    The Morse-chain iterates are unchanged.
+-   Every public configuration type is `#[non_exhaustive]` with chainable `with_*` setters, one per field, so a knob added later is not a breaking change.
+    `Control`, `NoiseFloor`, `EigenParams`, `ScgParams`, `ScgOptions`, `HighsOptions`, `HighsStep`, `ExpParams`, `LindhParams`, `FfParams`, `SlepcParams`, `EigenExaParams`, `DlaFutureParams`, `ElpaParams`, `EonCg`, `QuickMinOptions`, `FireConfig`, `TrustRegion`, `IrcTrust`, `RtrRadius`, `LindhSpec` and `Report` are built from `default()` or a named constructor (`NoiseFloor::new`, `TrustRegion::new`, `IrcTrust::new`, `RtrRadius::new`, `LindhSpec::new`, `FireConfig::ase`, `Report::new`); a struct literal outside the crate no longer compiles.
+    A setter for an `Option` field takes `impl Into<Option<T>>`: `Control::default().with_maxmove(0.2)` is `Some(0.2)`.
+    The result types (`LowestMode`, `Eigenpair`, `Eigenpairs`, `RestrictedStep`, `TcgResult`, `EonCgReport`, `LineOutcome`, `NoiseEstimate`, `ValueGradientNoise`, `Ode12rVerdict`, `ConstraintReport`, `ElpaSpectrum`) are non-exhaustive as well.
+    The parameterised variants of `Method`, `LineSearch`, `LbfgsStep`, `Restart` and `Conjugacy::Hybrid` are non-exhaustive; build them with `Method::lbfgs_with_memory`, `Method::diis_with_memory`, `Method::fire`, `Method::newton`, `Method::nlcg_with_restart`, `Method::adam_with`, `Method::pso_with`, `LineSearch::brent` / `backtracking` / `goldstein` / `wolfe`, `LbfgsStep::capped` / `scaled`, `Restart::njws_at` / `powell_at` and `Conjugacy::hybrid`, and match them with `..`.
+    `LbfgsStep::default()` is still the eOn cap at `EON_MAX_MOVE`.
+    Fallible entry points return `rgmin::Result`: `fire2_displacement` and `fire2_displacement_metric` stall with `Error::FireStalled` (the `Fire2Stalled` type is gone), `StiefelNp::new`, `Grassmann::new` and `Unitary::new` refuse a shape with `Error::ManifoldShape`, and `Vector::try_on` refuses a device with `Error::UnsupportedDevice` (the `UnsupportedDevice` type is gone).
+    The how-to "Configure a solver" documents the pattern.
+-   L-BFGS no longer line-searches by default.
+    The default step is the eOn cap: the longest atom moves at most `EON_MAX_MOVE` (0.2), the initial inverse Hessian is the Nocedal-Wright scale `(s·y)/(y·y)`, pairs are kept when the step is shortened, and a direction that is not descent clears the memory.
+    `LbfgsStep::Wolfe` and `rgmin_solver_set_lbfgs_wolfe` opt into the strong Wolfe search.
+    A non-positive cap passed to `rgmin_solver_set_lbfgs_capped` restores 0.2.
+    `abi_minor` 34.
+-   The contributing guide asks for a towncrier fragment instead of an edit
+    to `CHANGELOG.md`, and names the fragment types.
+    It lists the clippy commands that CI runs with warnings denied on Rust
+    1.88.0 and stable.
+    
+    The Unreleased sections stay empty, and `scripts/check_changelog.py` fails when a fragment is paired with an Unreleased line.
+-   The default L-BFGS step is the eOn line-search-free cap.
+    The first step probes curvature over 0.01.
+    A proposal at least as long as the cap clears the memory and steps along `H0` times the force.
+    `LbfgsStep::Scaled` keeps the shorten-and-retain rule.
+    FIRE 1.0 treats a zero power as downhill.
+-   The optional `readcon` feature takes readcon-core `=0.17.1` from crates.io instead of git `694e808`. The published crate's manifest matches that commit's, and the library sources the feature compiles are the same; the files that differ are behind readcon-core's `parallel` and `python` features, its tests, and its docs. A crate that depends on rgmin and on rgsaddle, which takes readcon-core from crates.io, now resolves a single readcon-core.
+-   The session sample of the quickstart runs the `Solver` until the
+    gradient norm drops below 1e-4, with `Accept::Energy`.
+    It used to take one step and check only that the energy was finite.
+    The list of manifolds moved out of the tutorial into a link to the
+    manifolds how-to.
+-   `Control` and `Report` each gain a public `stop_norm` field, and `StopNorm` gains the `Rms` variant.
+    Set it with `Control::with_stop_norm`; an exhaustive `match` on `StopNorm` needs an `Rms` arm.
+-   `ManifoldKind` is no longer `Copy`, since a product and a subspace sphere share their geometry through an `Arc`; clone it where a copy was implied.
+    `stiefel_p` and `as_str` take `&self`, and the new `Product` and `SubspaceSphere` variants extend exhaustive matches on the kind.
+
+
+### Fixed
+
+-   A Wolfe L-BFGS session with an explicit per-atom cap took the geometry step even after `set_geometry_step(false)`.
+    Its energy window could accept a rise, so the step met neither strong Wolfe condition.
+    Off now keeps the strong Wolfe search, with the cap scaling each trial.
+    Unset, the combination is still the geometry step.
+-   A backtracking or Goldstein `LineSearch` that ran out of trials returned its best point with the step length of its last trial.
+    It now reports the step that produced that point.
+-   An L-BFGS session step whose own pair failed the curvature test also dropped the pair before it.
+    It now keeps that pair.
+-   `minimize_scg`, `minimize_scg_exact` and `rgmin_minimize_scg` bound every trial step by a positive finite `Control::maxmove`, as that field documents.
+    Before, scaled conjugate gradient (SCG) ignored it.
+    The bound applies at the first trial and at each retry after a non-finite value.
+    Zero, negative, infinite and NaN values leave SCG unbounded.
+    Runs whose bound never binds give the same reports as before.
+    The comparison ratio of a bounded step divides by the damped model's change at that step, as in Nocedal and Wright eq. 4.4.
+    A short step therefore no longer halves the damping on an agreement as low as 0.375.
+    The page `explanation/step-bounds` derives the ratio and sets out what can and cannot fix the size of a bound on log-hyperparameters.
+-   How-to samples that did not compile now do.
+    The manifold sample defines its objective.
+    The HiGHS sample fills the rest of `HighsStep` from `Default`.
+    The intrinsic reaction coordinate (IRC) sample imports only what it uses.
+    The C++ sample calls `rgmin::minimize_fn` from `rgmin/optimize.hpp`.
+    The C samples include `rgmin.h`.
+-   `cargo cinstall` installs the hand-written `include/rgmin.h` and `dlpack/dlpack.h`.
+    The header compiles as C and as C++.
+    Version macros are `RGMIN_H_MAJOR`, `RGMIN_H_MINOR`, and `RGMIN_H_PATCH`.
+    `HighsInt` stays out of the public header.
+    Continuous integration (CI) installs into a prefix and compiles a C program and a C++ program against that header and the `rgmin` pkg-config file.
+-   The docs index and `reference/architecture` define the hourglass and its waist, the C ABI that C and C++ callers go through.
+    A figure that `docs/figures/architecture/draw_hourglass.py` draws from the headers and `src/ffi.rs` replaces the old text diagram.
+    The page gives the ABI version from `include/rgmin.h`, 1.29 with layout revision 4, instead of 1.9 with revision 2.
+-   The code of conduct, the security policy and the docs index name a contact, and the index links the issue tracker.
+-   A non-finite value or gradient is a refused answer in every line search and acceptance test.
+    It never counts as a decrease.
+    Every comparison against NaN is false, and `-inf` passes Armijo.
+    Before this fix, `Lbfgs::minimize` doubled its step into an unanswered region and could accept a NaN or `-inf` value as the minimum.
+    Now the strong Wolfe zoom bisects back.
+    A non-finite start ends `Lbfgs::minimize`, `minimize_watched` and `minimize_recognized` at `x0` with value `+inf` after one evaluation.
+    Before, they probed along a NaN direction.
+    Brent, backtracking, Goldstein and Wolfe `LineSearch` searches score such a trial `+inf`.
+    Given a non-finite start or direction, they return the start without probing.
+    These methods return `Error::Oracle` when the start is not finite: steepest descent, nonlinear CG, Broyden-Fletcher-Goldfarb-Shanno (BFGS), L-BFGS, SR1, SR2 and Adam.
+    So does a `Solver` step for every first-order method, BB and the fast inertial relaxation engine (FIRE) included.
+    Energy and nonmonotone acceptance require a finite trial.
+    A flat FIRE trial with no answer halves toward the start up to ten times, inside the clip box.
+    FIRE, when no halving answers, and the geometry L-BFGS fallback return `Error::Oracle` instead of stepping into a non-finite answer.
+    They leave `x`, the FIRE integrator and the L-BFGS curvature as they were, so a retry probes the same trial.
+    Through the C ABI these errors arrive as `RGMIN_INTERNAL_ERROR` with no NaN or clipped-to-the-bound coordinate sent to the callback.
+-   An L-BFGS `Solver` step under `Accept::None` records the caller's move as a curvature pair before its one trial.
+    A non-finite trial now takes that pair back, so the memory is as it was when the step returns `Error::Oracle`.
+    Before, each retry from the moved point recorded the same pair again.
+-   The contributing page now gives the docs export command that the workflow runs, `cd docs && emacs --batch -l export.el`.
+    Of the two commands it gave before, one failed and the other wrote nothing.
+-   On a curved manifold kind, a `Solver` step caps the tangent step and then retracts it, so every point it evaluates lies on the set.
+    Before, the acceptance trial retracted, capped the chord and clipped, and then scored that point off the set.
+    On the unit sphere with a 0.1 cap, steepest descent evaluated points 3.4e-2 off it, FIRE 6.2e-2 and FIRE 2.0 6.0e-3.
+    A retraction that moves farther than the cap shrinks the step and retracts again, so a step on the positive orthant keeps the cap.
+    A trial that the box clip would move is refused before the oracle sees it.
+    FIRE and the FIRE 2.0 rollback use the same order.
+    Dogleg on a curved kind steps in the tangent space, on the Hessian in an orthonormal basis of the tangent space, and its ratio compares the energy at the retracted point with that model.
+    Before, it accepted `x + p` with no retraction, 0.113 off the sphere for `f = -x_3 + |x|^2 / 2`.
+    On a curved kind the session no longer retracts and evaluates again after the step, except after the L-BFGS line search.
+    Steepest descent on the sphere takes one oracle call per step instead of two.
+    `Error::OffManifold` reports a FIRE step with no trial inside the box and the cap, and the C ABI returns it as `RGMIN_INVALID_PARAMETER`.
+    Flat kinds keep the old order and the old numbers.
+-   On a curved manifold kind, Newton-CG and Newton-PCG retract their trust-region step, so every point the objective sees lies on the set.
+    Before, they took `x + p`, and on the unit sphere with a 0.1 cap the worst evaluated point was 1.1e-1 off it.
+    CG now runs on the model `P H P + (I - P)` for the tangent projection `P` of the kind, and flat kinds keep `x + p`.
+    Where `P` is orthogonal, as on every curved kind but the three multinomial kinds, dogleg solves the same model.
+-   On a curved manifold kind, a `fire2` session projects its secant velocity onto the tangent space at the new point.
+    Before, the normal part of that velocity reached 5.0e-2 of the speed on the unit sphere with a 0.1 cap.
+-   The cyclic Jacobi eigensolver no longer squares a rotation parameter `theta` above `1 / eps`, with eps the machine epsilon.
+    Above that bound, the solver takes the tangent `t = 1 / (2 theta)`, the limit of the full formula.
+    The Linear Algebra Package (LAPACK) takes the same branch in its one-sided Jacobi routines.
+    The transition-state Broyden-Fletcher-Goldfarb-Shanno (TS-BFGS) update and the rational function optimization (RFO) step call this solver.
+    An off-diagonal entry below about 3.7e-155 times its diagonal gap made `theta^2` overflow.
+    With overflow trapped, the host stopped with the floating-point exception signal (SIGFPE); with the trap masked, the solver skipped the rotation.
+    Every result that was finite before is unchanged.
+-   The Exp pair weight and the μ sine probe call `libm` `exp` and
+    `sin`. The host math library does not agree between `x86_64` and
+    `aarch64`. A hash of those `f64` bits is locked in the test.
+-   A `Control::maxmove` or `Solver::set_maxmove` value that is not a positive finite length is no Euclidean cap on every path that reads it: the dogleg, Newton-CG and Newton-PCG trust ceilings in a session and in `minimize_method_hess`, `minimize_method_hvp` and `minimize_newton_cg`, the constrained trust step and clips, the FIRE fill of `Solver::run_fill`, and every step clip. Before, such a value pinned the session trust ceiling at the current radius, so the radius never grew, and pinned the `minimize_newton_cg` ceiling at its radius floor. `-inf` broke the constrained runs of steepest descent, nonlinear CG and QuickMin. The FIRE fill scaled a step by `cap / |step|`, so a negative cap reversed it and the run climbed, from 30.1 to 125 in six steps under `-1`. A negative or infinite value still turns the default per-atom cap off, and zero and NaN still keep it. The C `rgmin_solver_set_maxmove` reaches the same session paths and is fixed with them. The C signatures are unchanged.
+-   A zero iteration budget (`maxiter = 0`) now judges the start it was given. `Solver::run`, the `minimize_*` one-shots, `rgmin_minimize`, `rgmin_minimize_hess`, `rgmin_minimize_hvp`, `rgmin_minimize_eindir` and Python `minimize` evaluate `x` once, take no step, and report that value and gradient norm with `Tolerance` below `gtol`, `NoiseFloor` under the noise floor, else `Budget`. Before, `Solver::run` and Python `minimize` reported value 0 and gradient norm 0 (`Solver::run` with `Tolerance`) without an evaluation, and the FIRE, BB, QuickMin, ODE12r, DIIS, Newton-CG and dogleg one-shots reported `Budget` with an infinite gradient norm even at a stationary start. A positive budget also changed: `Solver::run` reports `Budget` instead of `Iterating` when it runs out, and `Solver::run` and those one-shots end on a step's `NoiseFloor` instead of stepping past it. The eOn CG report reads `converged` from the gradient it returns. `rgmin_minimize_scg` keeps `maxiter = 0` as no limit. The C signatures are unchanged.
+-   An L-BFGS session driven by the caller's own `Solver::step` loop (C `rgmin_solver_step`, `rgmin_solver_step_fg`, Python `Solver.step`) with no iteration budget (`maxiter = 0`) stops on a plateau the objective cannot resolve. After `max(n, 2)` consecutive accepted steps that move `x`, keep the value inside the objective roundoff window (`set_objective_roundoff`, else four epsilon relative) and keep the gradient norm within `sqrt(eps)` relative of the first of them while it is still at or above `gtol`, the step reports `Status::StepTolerance` (C `RGMIN_STOP_STEP_TOLERANCE`). Before, such a fit reported `Iterating` forever: on the default capped eOn step and on the strong Wolfe opt-in, whose approximate Wolfe test accepts steps of about `1e-10` with no measurable decrease. A single flat step, such as an overshoot, does not stop the fit. A positive `maxiter` reports what it did before, and `Solver::run`, `minimize_lbfgs` and the C and Python one-shots still read `maxiter = 0` as no steps. The C signature is unchanged.
+-   An ODE12r session step that no cap or bound shortened is judged at its own length `h`, and the next trial starts from the length the controller chose.
+    Before, the session recomputed the taken length as `h |x' - x| / |dx|` for every move, and that ratio rounds to a few ulps below `h` about as often as not.
+    An accepted move that rounded short then took the capped-move floor, so the next trial reused `h` in place of the shorter line-search or error-controlled length.
+    Whether a step was floored depended on rounding alone: a change in the last bits of the forces, such as the libm Exp weight, moved the step count of a run.
+    A capped or clipped move is judged and floored as before.
+-   An unconstrained Newton-CG or Newton-PCG `Solver::run` ends with the Riemannian gradient in its report.
+    It reported the Euclidean gradient that its difference products keep, so on a curved manifold a run that stopped on a vanishing Riemannian gradient reported the normal part of the Euclidean one.
+-   Links between docs pages and links to the Lean proofs open on the built
+    site.
+    They were `file:` links, which the export turns into links to `.rst`
+    files that the site does not serve.
+    Links between pages are now `:doc:` roles, and the Lean links go to the
+    files on GitHub.
+-   SCG with no iteration budget (`maxiter = 0`) stops on a flat plateau. After `max(n, 2)` consecutive accepted steps whose objective change passes `tol_func` and whose gradient norm never falls below its value at the first of them, it returns `Status::StepTolerance` (C `RGMIN_STOP_STEP_TOLERANCE`), or `Tolerance` or `NoiseFloor` when the gradient qualifies for those. Before, such a fit ran until `lambda_limit` and reported a gradient error, and it never returned when `lambda_limit` was at or above the internal damping cap of `1e100`. A single flat step, such as a Newton overshoot to a point of equal value, does not stop the fit. Fits with a positive `maxiter` follow the same trajectory as before. The C signature is unchanged.
+-   The FIRE fill step cap folds atom distances with iterators instead of an indexed `f64::max` loop.
+    rustc 1.93 and 1.94 (LLVM 21) segfault in LoopVectorizePass on that indexed loop, so `cargo build --release` failed there.
+    A non-positive or non-finite cap still leaves the trial alone.
+    The rescaled coordinates match the indexed loops bit for bit.
+-   The table of manifold tokens in the manifolds how-to renders again.
+    One row was a character short, so Sphinx dropped the whole table.
+    The table now lists every token that the Org page lists, `Positive`
+    included.
+-   The user docs describe the 0.6.0 code.
+    L-BFGS takes the eOn step by default, with a per-atom cap and no line search, and `LbfgsStep::Wolfe` opts into the strong Wolfe search.
+    A session's line search defaults to strong Wolfe for the methods that use one.
+    The install guide covers crates.io, git, cargo-c, Meson, both Python packages and the LAMMPS plugin, and its commands run as written.
+    The README, the reference pages and the contributing guide give the current ABI minor, methods, manifold kinds and CI rows.
+    The LAMMPS benchmark table names the commit and crate version it was measured at.
+    The Sphinx and rustdoc builds pass with warnings as errors.
+-   `Lbfgs::minimize_box` honors `ftol`, the same relative-decrease stop as `minimize`.
+    A short gradient, a NaN bound, an inverted bound, or a bound of the wrong length ends the call at `+inf` instead of panicking.
+-   `Solver::set_atom_maxmove` and the C `rgmin_solver_set_atom_maxmove` treat a non-finite value as no per-atom cap, the same as a non-positive one. Before, infinity was stored as the cap, so an L-BFGS session took it as its eOn per-atom cap and its next step failed with "capped L-BFGS: the cap is not positive" (C `RGMIN_INVALID_PARAMETER`); the session now falls back to 0.2, as it does for zero. The C++ `Solver::set_atom_maxmove` and the `atom_maxmove` and `maxstep` options of `SolverConfig` take the same call.
+-   `Solver::set_objective_roundoff` and `rgmin_solver_set_objective_roundoff` apply under every acceptance policy. The window used to hold only under `Accept::None`, so a C session, which opens with `RGMIN_ACCEPT_ENERGY`, dropped back to the four-epsilon window in its strong Wolfe search. A rise inside the configured window, such as `2^-24` at a value of 100 with a window of `1e-6`, was refused, and the step stayed at its start after the whole line-search budget. It is accepted again with two evaluations, as in 0.5. Manifold searches keep their own acceptance, and the `Accept::Energy` backtracking of a step that is not line-searched keeps its absolute `1e-8` rise. The C signature is unchanged.
+-   `cargo clippy --all-targets` with warnings denied passes on Rust 1.88.0 and 1.99.1.
+    It passes for each feature set that CI tests: the defaults, `capi`, `highs`, and all features.
+    Every fix keeps the solvers' behaviour, and no public signature changes.
+-   `lowest_eigenpair` returns the Lanczos `Result`.
+    An empty seed is `Error::Dim` instead of a panic that claimed Lanczos was not linked.
+-   `minimize_eon_cg` treats an `EonCg::max_move` that is not a positive finite length as no cap: neither the scalar clip nor the per-atom cap applies, and a step along non-positive curvature has length `EON_MAX_MOVE`. Before, a zero `max_move` left the run at its start, `-inf` turned the first step into NaN, and a negative finite `max_move` flipped the sign of the step at each clip, so a model step shorter than `-max_move` went uphill and a longer one was capped at that length. A positive finite `max_move` takes the same steps as before.
+-   `rgmin_solver_set_highs_callback` compiles when `capi` and `highs` are both on. It wraps the callback and its `user` pointer in `HighsCallback::new`, and a NULL callback clears it. The C signature is unchanged. `examples/compare_highs.rs` and the `highs` C tests build again.
+
+
+## 0.5.2 (2026-10-25)
+
+SCG reduces its dot products and norms in plain left-to-right order
+again, so its trajectory reproduces the reference C++ implementation to
+the parity tolerance; the fused SIMD kernels of 0.5.0 had moved the
+iterates by roundoff that grew along the trajectory.
+
+
+## 0.5.1 (2026-10-25)
+
+A negative `maxmove` on `rgmin_control_t` leaves every step cap off,
+the default per-atom cap included, so a one-shot minimizer or a session
+over hyperparameters or weights opts out without a session call. Zero
+keeps the defaults and a positive value is the Euclidean cap.
+
+
+## 0.5.0 (2026-10-25)
+
+Steihaug-Toint Newton-CG is `Method::NewtonCg` (`newton-cg`), and
+`Method::NewtonPcg` (`newton-pcg`) adds a rank-16 Nyström
+preconditioner rebuilt at the current point. `Solver::step` and
+`step_hess` run it with a forward-difference product; `Solver::step_hvp`
+and `minimize_method_hvp` take an analytic `H v`. The session counts
+`gradient_calls` and `hvp_calls` separately. The C ABI adds
+`RGMIN_NEWTON_CG`, `RGMIN_NEWTON_PCG`, `rgmin_method_from_name`,
+`rgmin_minimize_hvp`, `rgmin_solver_step_hvp` and the two counters;
+`Method::from_name` parses every method token. `abi_minor` 36.
+
+`Solver::set_geometry_step` (`rgmin_solver_set_geometry_step`) selects
+the capped Cartesian L-BFGS geometry step: eOn's L-BFGS with a
+finite-difference inverse curvature on a severely clipped start and
+`0.1 I` otherwise, `s·y / y·y` after that, a reset when curvature is
+negative, the step exceeds the per-atom cap or opposes the force, the
+probe clipped to the objective bounds, and an energy test with at most
+ten halvings before a short steepest step. An installed exponential
+preconditioner is that step's initial inverse Hessian and the metric of
+its fallbacks. The step is an explicit opt-in because every Cartesian
+session already carries the default per-atom cap.
+
+Newton and dogleg leave a first-order saddle: under the force tolerance,
+an analytic Hessian eigenvalue below the stationarity floor steps the
+geometry along that mode, scaled to the per-atom cap, at most four times
+per solve, and the dogleg radius restarts from the initial step. Dogleg
+grows its trust radius past a per-atom cap: Δ<sub>max</sub> is the Euclidean
+`maxmove` or eight times the current radius, and the boundary test uses
+the dogleg length before the cap.
+
+`cargo cinstall --features capi` installs the hand-written `rgmin.h`, the
+C++ wrappers and `dlpack/dlpack.h` with the `rgmin` pkg-config file. The
+header carries `RGMIN_H_MAJOR`, `RGMIN_H_MINOR` and `RGMIN_H_PATCH`,
+checked by `build.rs` against the crate version; `tests/cinstall/smoke.sh`
+compiles a C and a C++ program against an installed prefix.
+
+A Cartesian session and the one-shot minimizers start with a per-atom
+cap of 0.2. `set_atom_maxmove` replaces it; a non-positive value
+clears it. A positive Euclidean `maxmove`, with no per-atom call,
+leaves that default off. The clip is the largest per-atom
+displacement. ASE `maxstep` and eOn `max_move` are both 0.2.
+On the half-scaled seed-1 LJ38 packing, clearing the cap moves the
+first L-BFGS atom 256.0348909921298; the default reaches tolerance
+in 199 L-BFGS steps at -169.49430900932856 (pair 3.895343497108207)
+and 540 BFGS steps at -166.8029675390938 (pair 4.185205749883185).
+
+SR1 stores the direct Hessian and steps with dogleg, or the Cauchy
+point when that model is indefinite, inside a Nocedal-Wright trust
+region. SR2 is Powell's symmetric Broyden update in the same region.
+The one-shot SR path passes the per-atom cap into `sr_trust_limits`
+and clips the trial with `scale_step_atom`. A positive Euclidean
+`maxmove` leaves that default off.
+DIIS searches along the GDIIS image `sum c_i (x_i - α g_i)` when that
+direction is downhill. Adam scales the Kingma-Ba direction to unit
+max-atom length.
+
+Quick-min options (`QuickMinOptions`, `Solver::set_quickmin_options`,
+C `rgmin_solver_set_quickmin_variant` with `RGMIN_QUICKMIN_RGMIN`,
+`RGMIN_QUICKMIN_EON`, `RGMIN_QUICKMIN_PER_ATOM`, ABI minor 33).
+`eon()` is eOn's step: fixed `Δt` and no clamp rescale.
+`per_atom()` projects each atom on its own force: 645 force calls on
+LJ38 against 1344 for the default, 32.0 against 19.6 on Pt7.
+`curvature_cap` bounds `Δt` by `c / sqrt(|y| / |s|)`.
+
+`Method` is `#[non_exhaustive]`: a match outside rgmin needs a
+wildcard arm. This break ships with the next minor release, after
+which a new method is additive.
+
+
+## 0.4.0
+
+Python package `rgmin`: a free-threaded nanobind module `rgmin._core`
+(`Method`, `SolverConfig`, `Solver`, `Report`, `minimize`) and
+`rgmin.ase.Optimizer` with one rgmin iteration per `step`. ASE is an
+extra. The wheel is built with scikit-build-core, Corrosion, and
+`nanobind_add_module(_core FREE_THREADED ...)`.
+
+`rggate` (`bench/gate/`, pixi task `gate`) compares minimisers on
+censored paired starts. The reference for a start is explicit,
+otherwise the baseline on that same start.
+
+Contiguous vector kernels dispatch at runtime.
+`dot` and `axpy` accumulate with `f64::mul_add`, and the portable
+clone is the bit reference. The `simd` feature is on by default and
+compiles that loop with multiversion 0.9 (`x86_64+avx512f+fma` on
+rustc >= 1.89, `x86_64+avx2+fma`, `aarch64+sve`, `aarch64+neon`).
+`RGMIN_SIMD` selects a clone. The `par` feature folds contiguous
+chunks of 4096 and adds those totals from the first index upward.
+On this host the axpy wall ratio at n = 30000 had a Holm upper bound
+below 1, and no auto size was slower beyond its interval, so the
+clones are default. The pooled atomistic wall interval contained 1.
+Páll and Hess, Comput. Phys. Commun. 184, 2641 (2013),
+<https://doi.org/10.1016/j.cpc.2013.06.003>.
+Dröge et al., Softw. Pract. Exp. 53, 176 (2023),
+<https://doi.org/10.1002/spe.3075>.
+
+Nonlinear CG, with or without a metric, opens its line search with
+Nocedal-Wright equation 3.60 instead of `control.istep` on every step.
+The descent fallback runs in both cases. `Conjugacy::PolakRibierePlus`
+is a new variant of the exhaustive `Conjugacy` enum (`max(β_PR, 0)`).
+A replaced metric restarts the recurrence at steepest descent.
+
+Geometry preconditioners install through `Solver::set_precon` and
+C `rgmin_solver_set_precon` (ABI minor 32): Exp, Lindh, the bonded
+metric, or `select_precon`.
+
+ECnoise (`ecnoise`, `sample_noise`, `sample_gradient_noise`,
+`sample_gradient_noise_k`). Moré and Wild, SIAM J. Sci. Comput. 33,
+1292 (2011), <https://doi.org/10.1137/100786125>. The table uses
+`m + 1` samples at spacing `h` (default `m = 8`). `h` is the gap
+between samples, matching `ECnoise.m`, not the half-width of the
+stencil. `NoiseEstimate::declared` skips sampling. Gradient noise is
+the table on one counter-based projection of `g`. For any covariance
+`Σ`, `E[eps_g²] = tr(Σ) / n` because the direction is uniform on the
+sphere, so the noise in `||g||_2` is `sqrt(n)` times `eps_g`.
+`|f''|` and `|T|` follow Moré and Wild, ACM Trans. Math. Softw. 38,
+19 (2012), Algorithm 5.1,
+<https://doi.org/10.1145/2168773.2168777>, at their own spacing. The
+forward step and the gradient probe are clamped to
+`[max(1e-16, 4 ulp(max |x_i|)), 1]`. `NoiseFloor` stops at
+`c * sqrt(n_free) * eps_g` (default `c = 3`) with
+`Status::NoiseFloor` after the `gtol` test. `NoiseFloor` also
+carries `eps_f`. A line search that finds no trial whose decrease
+clears `c * eps_f` is the same stop and keeps the pre-step point.
+`sample_value_gradient_noise` reads both from one stencil.
+`Status::StepTolerance` is the SCG step and objective stop.
+
+`Report` gains `status` and `Control` gains `noise_floor`. Struct
+literals break. This ships with 0.4.0. The C ABI
+(`abi_minor` 31, `layout_revision` 3) adds `noise_eps`, `noise_c`,
+and `rgmin_stop_t stop` on the report.
+
+Pulay residual subspace (`Method::Diis`, C `RGMIN_DIIS`, ABI minor 30).
+Coefficients on the stored gradients sum to one and minimize the
+combined residual. `memory` 0 keeps 6 pairs. The step never line
+searches on the oracle value: one pair takes a steepest kick of
+length `istep`, and two or more pairs move to the combination.
+A kinetic preconditioner is not part of the step.
+
+Quick-min (`Method::QuickMin`, C `RGMIN_QUICKMIN`, ABI minor 29).
+The reference step projects the velocity onto the force when
+`v · F` is non-negative and sets the velocity to zero otherwise,
+then adds `Δt F` and moves by `Δt` times the updated velocity.
+The session caps the displacement and rescales the velocity to
+the step taken, grows and shrinks `Δt` with FIRE's factors (a
+zero power does not shrink it), and splits an atomic block from
+a cell block through `Solver::set_quickmin_cell`.
+
+Rigid-motion removal runs through one Eckart workspace per session
+(`rigid` module): the basis is ranked by column-pivoted QR, frozen
+coordinates keep the combinations that do not move them, a periodic
+axis drops the rotations, and the host can mark broken translations
+and rotations. `Solver::set_rigid_mode` selects `Off`, `Auto`,
+`Translation` or `TranslationRotation`; `set_project_rigid(true)` is
+`Auto`; `set_pbc_axes`, `set_frozen`, `set_broken_axes`,
+`set_rigid_mass_metric` and `set_rigid_mass_weighted` declare the
+molecule. The session projects the step, the L-BFGS pairs and each
+L-BFGS trial direction, the FIRE force and the FIRE velocity (the
+velocity in the momentum metric), and the dogleg direction; Lanczos
+can project inside the product (`lowest_mode_with`). A Cartesian force
+is not run through the mass metric. `align_rigid` aligns two geometries
+by the Horn / Coutsias quaternion; a periodic axis skips the rotation.
+`MwRigid` stores `q = sqrt(m) x`, the chart metric Euclidean in `q`, and
+one atom is a quotient with three translations. The C ABI exports the
+rigid workspace, `rgmin_rigid_project`, `rgmin_rigid_project_hessian`,
+`rgmin_rigid_align` and the solver setters; `rgmin.h` declares them,
+`xts.h` aliases them, and the C++ session wraps the setters.
+`abi_minor` 35.
+
+Tests cover frozen ranks, a slab, and quaternion alignment. The
+crate root exports `RigidWorkspace` and `align_rigid`.
+
+Tests check that the projector is idempotent and symmetric in
+the active metric, and that a rigid motion of the geometry moves
+the projected vector.
+
+`align_rigid` is Horn / Coutsias. Any periodic axis leaves the
+rotation at identity and shifts the mobile cloud onto the
+reference centroid.
+
+`project_out_rot_trans` borrows one shared workspace. It no
+longer builds a private Gram-Schmidt basis.
+
+`RigidWorkspace` projects a vector and replaces `H` with `P H P`.
+The caller owns the buffers. The workspace is reused after the
+first call at a given size.
+
+Frozen coordinates are zeroed before the Eckart rank. One pin
+keeps three rotations, two pins keep one axis, and three
+non-collinear pins give rank 0.
+
+The Eckart basis is ranked with column-pivoted QR. The tolerance
+is relative to the leading R diagonal. The six-by-six frozen
+overlap is diagonalized.
+
+Eckart helpers live in `rgmin::rigid`. `RigidMode` names Off, Auto,
+Translation, and TranslationRotation. Auto is the integer
+`set_project_rigid(1)` will mean. Eckart vectors are weighted in
+the active metric.
+
+`cargo cinstall` installs the hand-written `include/rgmin.h` and
+`dlpack/dlpack.h`. The header compiles as C and as C++. Version
+macros are `RGMIN_H_MAJOR`, `RGMIN_H_MINOR`, and `RGMIN_H_PATCH`.
+`HighsInt` stays out of the public header.
+
+The exponential preconditioner of Packwood et al., J. Chem. Phys.
+144, 164109 (2016)
+([10.1063/1.4947024](https://doi.org/10.1063/1.4947024))
+is `Solver::set_exp`. The caller supplies the neighbour list.
+L-BFGS uses `H0 = P^{-1}`. FIRE and nonlinear CG use `P` as the
+metric. A dense pair or Lindh matrix passed into the two-loop
+still wins. C: `rgmin_exp_t`, `rgmin_solver_set_exp`,
+`rgmin_solver_clear_exp`, `rgmin_solver_exp_mu`. The C++ session
+wraps those three as `set_exp`, `clear_exp`, and `exp_mu`.
+`abi_minor` 28.
+
+Newton and dogleg leave a first-order saddle. When the force is
+already under `gtol`, the report reads the analytic Hessian. The
+floor is max(abs(gtol), 1e-6, 1e-8 times the Frobenius norm of H).
+A lowest eigenvalue below minus that floor steps along the mode,
+scaled to the per-atom cap, at most four times. The dogleg radius
+restarts from the initial step. A converged report costs one extra
+Hessian.
+
+The docs export installs Org 9.7 or newer from GNU ELPA before
+ox-rst. Pull requests run the Org export and the Sphinx build.
+The Pages deploy stays on a push to `main` or `workflow_dispatch`.
+A pull request has its own concurrency group, so it does not
+cancel a deploy. `pages: write` and `id-token: write` belong to
+the deploy job; the workflow token stays read-only.
+
+CI runs on pushes and pull requests to `develop` as well as `main`,
+and installs numpy and scipy for the HiGHS reference tests.
+
+Capped Cartesian L-BFGS reserves the directional-curvature probe for a
+nominal step at least 64 times larger than the cap.  Ordinary starts
+use `H0 = 0.1 I` and five-value nonmonotone acceptance. An installed
+exponential preconditioner replaces that scalar seed, including those
+steepest fallbacks. Uncapped L-BFGS keeps the two-loop step and the
+Wolfe search. A HiGHS feasible set and a non-Euclidean manifold stay
+on that path.
+
+FIRE 2.0 follows Guénolé et al.'s semi-implicit update order,
+half-step-back uphill correction with a fresh corrected-point force,
+initial time-step delay, 2,000-step non-positive-power limit, and
+cap-consistent velocity. An installed exponential preconditioner uses
+`P` as the metric: power is `F · v`, and the kick and the mix use
+`P^{-1} F`.
+
+Steihaug-Toint Newton-CG is a session method: tokens `newton-cg`
+and `newton-pcg` (`RGMIN_NEWTON_CG` = 21, `RGMIN_NEWTON_PCG` = 22).
+Hessian access is a product, analytic from `rgmin_solver_step_hvp`
+/ `rgmin_minimize_hvp` and a one-gradient forward difference from
+`rgmin_solver_step`. `maxmove` caps the Euclidean trust radius; a
+per-atom cap clips the trial and the boundary test sees the
+pre-clip length. `rgmin_solver_gradient_calls` and
+`rgmin_solver_hvp_calls` count the two. `rgmin_method_from_name`
+parses the token. `abi_minor` 27. Steihaug 1983
+([10.1137/0720042](https://doi.org/10.1137/0720042));
+Nocedal and Wright, chapter 7.
+
+`rgmin_solver_set_box`: per-coordinate HiGHS box on `x + p`.
+A NULL side is unbounded. Same status as `set_highs` (0, or 1
+without the `highs` feature). `rgmin_solver_set_trust` is the
+L<sub>inf</sub> radius; `rgmin_solver_add_equality` /
+`rgmin_solver_clear_equalities` carry `a · p = rhs`.
+`HighsStep.lo` / `hi` are per-coordinate vectors (length 1 is
+uniform). `abi_minor` 22.
+
+Centered matrices (`centeredmatrix` /
+`RGMIN_MANIFOLD_CENTERED_MATRIX` = 22): manopt
+`centeredmatrixfactory`. Packed row-major `m n`. Projection is
+the centering operator (`X 1 = 0` by default, or
+`1^T X = 0`), retraction is `X + U` then center, transport is
+the identity. Not the sphere and not a 3N cluster. Tokens 7-10
+stay reserved. `abi_minor` 21.
+
+Positive orthant (`positive` / `RGMIN_MANIFOLD_POSITIVE` = 21):
+manopt `positivefactory`. Packed length `n`. Projection is the
+identity, retraction is `x odot exp(v oslash x)`, transport is
+the identity. Not the sphere and not a 3N cluster. Tokens 7-10
+stay reserved. `abi_minor` 20.
+
+Complex unit sphere (`spherecomplex` /
+`RGMIN_MANIFOLD_SPHERE_COMPLEX` = 20): manopt
+`spherecomplexfactory`. Interleaved `(re, im)`, length `2 n`.
+Projection is `v - Re(x^* v) x`, retraction is `(x+v)/||x+v||`,
+transport is projection at arrival. Not the real sphere and not
+`(S^1)^n`. Tokens 7-10 stay reserved. `abi_minor` 19.
+
+Symmetric doubly-stochastic matrices (`multinomialsymmetric` /
+`RGMIN_MANIFOLD_MULTINOMIAL_SYM` = 19): manopt
+`multinomialsymmetricfactory`. Packed row-major `n^2`,
+`n >= 2`. Fisher projection, Sinkhorn+symm retraction, transport at
+arrival. A 3N cluster is rejected. Tokens 7-10 stay reserved.
+`abi_minor` 18.
+
+Doubly-stochastic matrices (`multinomialdoublystochastic` /
+`RGMIN_MANIFOLD_MULTINOMIAL_DS` = 18): manopt
+`multinomialdoublystochasticfactory`. Packed row-major `n^2`,
+`n >= 2`. Fisher projection, Sinkhorn retraction, transport at
+arrival. A 3N cluster is rejected. Tokens 7-10 stay reserved.
+`abi_minor` 17.
+
+Constant singleton (`constant` / `RGMIN_MANIFOLD_CONSTANT` = 17):
+manopt `constantfactory`. Packed length `n`. Projection and
+transport are the zero tangent, retraction is the fixed point.
+A 3N cluster is rejected. Tokens 7-10 stay reserved.
+`abi_minor` 16.
+
+Complex Euclidean (`euclidean_complex` /
+`RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX` = 16): manopt
+`euclideancomplexfactory`. Interleaved `(re, im)`, length `2 n`.
+Projection is the identity, retraction is `x + v`, transport is
+the identity. A 3N cluster is rejected. Tokens 7-10 stay reserved.
+`abi_minor` 15.
+
+Skew-symmetric matrices (`skewsymmetric` /
+`RGMIN_MANIFOLD_SKEWSYMMETRIC` = 15): manopt `skewsymmetricfactory`.
+Packed row-major `n^2`, `n >= 2`. Projection is `multiskew`
+(`0.5 (A - A^T)`), retraction is `X + U`, transport is the identity.
+A 3N cluster is rejected.
+
+Symmetric matrices (`symmetric` / `RGMIN_MANIFOLD_SYMMETRIC` = 14):
+manopt `symmetricfactory`. Packed row-major `n^2`. Projection is
+symmetrization, retraction is `X + U`, transport is the identity.
+A 3N cluster is rejected. Stamp layout 4.
+
+`xts.h` declares the exported `rgmin_minimize` / `rgmin_solver_*`
+symbols; `xts_minimize` and `xts_solver_*` are macro aliases.
+
+L-BFGS session `Accept::None` takes the clipped two-loop
+direction. Wolfe line search stays on Energy / Nonmonotone.
+
+SCG C waist: closed `xts_conjugacy_t` on `xts_scg_params_t`
+(FR=0 .. FrPr=7, dest leaf order). `params==NULL` is Netlab
+Polak-Ribiere. Unknown codes are `RGMIN_INVALID_PARAMETER`.
+Stamp 1.13.3. Hybrid and Restart stay Rust-only.
+
+Typed lowest-mode waist: closed `EigensolverKind` (Lanczos=0
+through EigenExa=13, `schema/eigen.capnp`) and `EigenParams`
+(`nev`, `krylov`, `max_iter`, `tol`). No Text. C
+`rgmin_lowest_eigenpair` plus `rgmin_eigen_params_t`. Unlinked
+backends return `RGMIN_UNAVAILABLE`.
+
+Molecular manifolds: `rigid_quotient` is Sella Cartesian
+`R^{3N}/SE(3)` (`fix_translation` + `fix_rotation`);
+`mw_rigid` is the Page–McIver / Sella IRC Eckart metric on the
+same quotient (`rgmin_solver_set_masses`). SO(3) is length 9 and
+SE(3) is length 12; a 3N cluster is rejected rather than packed
+or prefix-interpreted. Periodic bulk sets
+`rgmin_solver_set_periodic`: Sella `proj_rot = false`, quotient
+`R^{3N}/T(3)`. Isolated stays `R^{3N}/SE(3)`. `abi_minor` 10.
+
+Opt-in `Lbfgs::minimize_box` and `Lbfgs::minimize_box_watched` relax inside a box `lower <= x <= upper` with the generalized Cauchy point and the subspace minimization of L-BFGS-B (Byrd, Lu, Nocedal and Zhu 1995).
+Each direction ends at the subspace minimizer from the Cauchy point, and the strong Wolfe search stops at the box.
+`Lbfgs::minimize` keeps the eOn cap. `LbfgsStep::Wolfe` remains opt-in.
+
+An interior point skips the bounds clip, and a Euclidean session keeps the gradient it already owns.
+Polak-Ribiere forms `g · (g - g_old)` in the dot product.
+A backtracking line search keeps its lowest trial without copying that vector.
+FIRE 2.0 does not build the post-step force, which only FIRE 1.0 mixes.
+L-BFGS reuses the curvature dots stored with each pair.
+The Morse-chain iterates are unchanged.
+
+The default L-BFGS step follows the eOn client, including the finite-difference curvature probe and `distance_reset`.
+A proposal at least as long as the cap clears the memory and steps along `H0` times the force.
+`LbfgsStep::Scaled` and `rgmin_solver_set_lbfgs_scaled` keep the previous shorten-and-retain rule.
+`Conjugacy::PolakRibierePlus` is SciPy's `max(0, β_PR)`.
+`Restart::powell` is the eOn conjugate-gradient restart at 0.5, and the method token is `eon-cg`.
+Hager-Zhang applies the CG<sub>DESCENT</sub> floor.
+FIRE 1.0 treats a zero power as downhill.
+The comparison is `bench/results.md`, with the raw rows in `bench/raw/`.
+`abi_minor` 35.
+
+L-BFGS does not line-search by default.
+The default step is the eOn cap: the longest atom moves at most `EON_MAX_MOVE` (0.2), `H0` is the Nocedal-Wright scale `(s · y) / (y · y)`, shortened steps keep their pairs, and a direction that is not descent clears the memory.
+`LbfgsStep::Wolfe` and `rgmin_solver_set_lbfgs_wolfe` opt into the strong Wolfe search.
+`abi_minor` 34.
+
+`benches/ase_h2h.py` compares ASE 3.29 LBFGS, FIRE and BFGSLineSearch with rgmin capped L-BFGS, Wolfe L-BFGS, the geometry step and FIRE 2.0.
+The starts are LJ7, LJ13, LJ38 and the periodic Morse cluster of 256 platinum atoms.
+Every arm uses fmax 0.01 and maxstep 0.2.
+The table is `benches/ase_h2h/results.md`.
+
+`LbfgsStep::Capped` is the atomistic L-BFGS step, and it is the default.
+It drops the line search.
+The two-loop step is shortened so the longest per-atom displacement is at most the caller's cap, and the initial inverse Hessian stays the Nocedal-Wright scale `(s · y) / (y · y)`.
+An empty memory steps along the force at that length.
+Pairs are kept when the step is shortened.
+`set_atom_maxmove` selects the geometry step only after `LbfgsStep::Wolfe`.
+`Solver::set_lbfgs_step` installs the rule on a Euclidean L-BFGS session.
+The C header declares `rgmin_solver_set_lbfgs_capped`, the C++ wrapper has `set_lbfgs_capped`, and `xts.h` aliases it.
+`abi_minor` 33.
+`cargo run --release --example lbfgs_capped` prints the force calls and the median wall time.
+records that run.
+On LJ7 and LJ13 at atomic force 0.01 the geometry step uses fewer evaluations at the same energy, and on the extended Rosenbrock function with four or more coordinates the value near 3.98 is a local minimum in the basin of `(-1, 1, ..., 1)`.
+
+`Lbfgs::ftol` is the opt-in relative-decrease stop of L-BFGS-B, and its default of zero turns it off.
+A line-search step from `f_k` to `f_{k+1}` ends `minimize`, `minimize_watched` and `minimize_recognized` when `f_k - f_{k+1} <= ftol * max(|f_k|, |f_{k+1}|, 1)`.
+`LBFGSB_FTOL` is the SciPy default, and measures what it saves.
+
+`Solver::set_distance_constraints` keeps atom pairs at fixed distances on every session method except particle swarm, under every `Accept` rule.
+`DistanceConstraints::at` takes the lengths from a geometry, and `DistanceConstraints::new` takes them as given.
+Each trial returns to the set through the Gauss-Seidel bond solver (SHAKE) or the linear constraint solver (LINCS).
+Masses from `with_masses` weight the corrections.
+An analytic SETTLE solves a rigid triangle such as three-site water.
+Tolerances default to the rounding floor, and the coupling of each block sets the LINCS order and the iteration budgets.
+A failure is a typed `ConstraintError` and leaves `x` as it was.
+The C ABI (minor 31), the C++ wrapper and the xts aliases carry the set.
+shows how to use it, and gives the equations.
+
+A backtracking or Goldstein line search that runs out of trials now reports the step that produced the point it returns.
+An L-BFGS session step that drops its own curvature pair now keeps the pair before it.
+
+`minimize_scg`, `minimize_scg_exact` and `rgmin_minimize_scg` bound every trial step by a positive finite `Control::maxmove`, as that field documents.
+Before, scaled conjugate gradient (SCG) ignored it.
+The bound applies at the first trial and at each retry after a non-finite value.
+Zero, negative, infinite and NaN values leave SCG unbounded.
+Runs whose bound never binds give the same reports as before.
+The comparison ratio of a bounded step divides by the damped model's change at that step, as in Nocedal and Wright eq. 4.4.
+A short step therefore no longer halves the damping on an agreement as low as 0.375.
+derives the ratio and sets out what can and cannot fix the size of a bound on log-hyperparameters.
+
+A default `meson install` of rgmin as the top-level project installs `librgmin.so` into `libdir`.
+`-Dwith_asv_helper=true` also builds and installs `librgmin_asv`, the timing helper that the asv suite loads.
+
+`benchmarks/minimize.py` is an airspeed velocity (asv) suite that times one `rgmin_minimize` call on a convex quadratic in 16 and 64 dimensions.
+`snakemake -c 1` calibrates an upper bound for each benchmark from repeated runs of `develop`.
+`snakemake -c 1 pr_gate` exits non-zero when a benchmark is slower than that bound, and `benchflow/README.md` describes the workflow.
+
+Under `Accept::None`, an L-BFGS trial on a curved kind that the box refuses returns `Error::OffManifold` instead of `Error::Oracle`.
+
+On a curved manifold kind, a `fire2` session projects its secant velocity onto the tangent space at the new point.
+
+On a curved manifold kind, Newton-CG and Newton-PCG retract their trust-region step, so every point the objective sees lies on the set.
+CG runs on the model `P H P + (I - P)` for the tangent projection `P` of the kind, and flat kinds keep `x + p`.
+
+On a curved manifold kind, a `Solver` step caps the tangent step and then retracts it, so every point it evaluates lies on the set.
+On the unit sphere with a 0.1 cap, steepest descent, FIRE, FIRE 2.0 and dogleg evaluated points up to 1.1e-1 off it before.
+Dogleg steps in the tangent space, and steepest descent and FIRE take one oracle call per step instead of two.
+A trial that the box clip would move is refused before the oracle sees it, and a FIRE step with no trial left returns `Error::OffManifold`.
+Flat kinds keep the old order and the old numbers.
+
+`Solver::set_fire_preset` selects the FIRE 2.0 parameters of Guenole et al. 2020 Table 1 on a `fire2` session.
+`Solver::set_fire_abc` turns on the accelerated bias-corrected (ABC) FIRE update of Echeverri Restrepo and Andric 2023, which ASE runs as `FIRE2(use_abc=True)`.
+Both are opt-in, and shows them.
+The C header `include/rgmin.h` declares `rgmin_solver_set_fire_preset` and `rgmin_solver_set_fire_abc`.
+`abi_minor` 30.
+
+`cargo cinstall` installs the hand-written `include/rgmin.h` and `dlpack/dlpack.h`.
+The header compiles as C and as C++.
+Version macros are `RGMIN_H_MAJOR`, `RGMIN_H_MINOR`, and `RGMIN_H_PATCH`.
+`HighsInt` stays out of the public header.
+
+How-to samples that did not compile now do.
+The manifold sample defines its objective.
+The HiGHS sample fills the rest of `HighsStep` from `Default`.
+The intrinsic reaction coordinate (IRC) sample imports only what it uses.
+The C++ sample calls `rgmin::minimize_fn` from `rgmin/optimize.hpp`.
+The C samples include `rgmin.h`.
+
+shows how to install the 0.5.2 release from crates.io or the `develop` branch.
+It gives the dependencies and features of each route, the C library through cargo-c, and the SciPy the HiGHS tests need.
+The README, the index and the quickstart point to it.
+
+The README opens with what rgmin does.
+It spells out each method name on first use, along with IRC and the C application binary interface (ABI) terms.
+
+The index and define the hourglass and its waist, the C ABI that C and C++ callers go through.
+`docs/figures/architecture/draw_hourglass.py` draws the layer figure from the headers and `src/ffi.rs`.
+The code of conduct, the security policy and the index name a contact, and the index links the issue tracker.
+
+The tutorial relaxes the Pt256 Morse fixture through a `Solver` session with limited-memory Broyden-Fletcher-Goldfarb-Shanno (BFGS), the fast inertial relaxation engine (FIRE) and FIRE 2.0.
+`examples/relax_morse.rs` is the program it runs.
+`docs/figures/relax-morse/` has the force-trace plot, the session diagram and the scripts that draw them.
+
+`CONTRIBUTING.md` names the issue tracker, the `develop` branch and the checks that continuous integration (CI) runs.
+It points to the contributing page for the rest.
+
+now gives the docs export command that the workflow runs, `cd docs && emacs --batch -l export.el`.
+Of the two commands it gave before, one failed and the other wrote nothing.
+
+gives a BibTeX entry from `CITATION.cff` through cffconvert.
+It takes the version from `cargo tree`, since the record names no version on `develop` and an older one on `main`.
+The README, the index and the Pt256 tutorial point to it.
+
+The docs export installs Org 9.7 or newer from the Emacs Lisp Package Archive (ELPA) of the GNU's Not Unix (GNU) project before ox-rst.
+Pull requests run the Org export and the Sphinx build.
+The Pages deploy stays on a push to `main` or `workflow_dispatch`.
+A pull request has its own concurrency group, so it does not cancel a deploy.
+`pages: write` and `id-token: write` belong to the deploy job; the workflow token stays read-only.
+
+CI runs on pushes and pull requests to `develop` as well as `main`, and installs numpy and scipy for the HiGHS reference tests.
+
+`Solver::set_stop_norm` selects the norm that every session stop test and `Report::grad_norm` use.
+`StopNorm::Two` is the default.
+`StopNorm::MaxAtom` is the largest per-atom norm (ASE `fmax`, eOn `max_atom`, LAMMPS `max`).
+`StopNorm::Inf` is the largest absolute component (eOn `max_component`, LAMMPS `inf`).
+`Report::grad` carries the gradient behind a session report.
+C: `rgmin_solver_set_stop_norm` and `rgmin_solver_report_gradient`.
+`abi_minor` 29.
+
+The exponential preconditioner of Packwood et al., J. Chem. Phys. 144, 164109 (2016) ([10.1063/1.4947024](https://doi.org/10.1063/1.4947024)) is `Solver::set_exp`.
+The caller supplies the neighbour list.
+L-BFGS uses `H0 = P^{-1}`.
+FIRE and nonlinear CG use `P` as the metric.
+A dense pair or Lindh matrix passed into the two-loop still wins.
+C: `rgmin_exp_t`, `rgmin_solver_set_exp`, `rgmin_solver_clear_exp`, `rgmin_solver_exp_mu`.
+The C++ session wraps those three as `set_exp`, `clear_exp`, and `exp_mu`.
+`abi_minor` 28.
+
+Capped Cartesian L-BFGS reserves the directional-curvature probe for a nominal step at least 64 times larger than the cap.
+Ordinary starts use `H0 = 0.1 I` and five-value nonmonotone acceptance.
+An installed exponential preconditioner replaces that scalar seed, including those steepest fallbacks.
+Uncapped L-BFGS keeps the two-loop step and the Wolfe search.
+A HiGHS feasible set and a non-Euclidean manifold stay on that path.
+
+FIRE 2.0 follows Guénolé et al.'s semi-implicit update order, half-step-back uphill correction with a fresh corrected-point force, initial time-step delay, 2,000-step non-positive-power limit, and cap-consistent velocity.
+An installed exponential preconditioner uses `P` as the metric: power is `F · v`, and the kick and the mix use `P^{-1} F`.
+
+Newton and dogleg leave a first-order saddle.
+When the force is already under `gtol`, the report reads the analytic Hessian.
+The floor is max(abs(gtol), 1e-6, 1e-8 times the Frobenius norm of H).
+A lowest eigenvalue below minus that floor steps along the mode, scaled to the per-atom cap, at most four times.
+The dogleg radius restarts from the initial step.
+A converged report costs one extra Hessian.
+
+Steihaug-Toint Newton-CG is a session method: tokens `newton-cg` and `newton-pcg` (`RGMIN_NEWTON_CG` = 21, `RGMIN_NEWTON_PCG` = 22).
+Hessian access is a product, analytic from `rgmin_solver_step_hvp` / `rgmin_minimize_hvp` and a one-gradient forward difference from `rgmin_solver_step`.
+`maxmove` caps the Euclidean trust radius.
+A per-atom cap clips the trial, and the boundary test uses the pre-clip length.
+`rgmin_solver_gradient_calls` and `rgmin_solver_hvp_calls` count the two.
+`rgmin_method_from_name` parses the token.
+`abi_minor` 27.
+Steihaug 1983 ([10.1137/0720042](https://doi.org/10.1137/0720042)); Nocedal and Wright, chapter 7.
+
+`rgmin_solver_set_box`: per-coordinate HiGHS box on `x + p`.
+A NULL side is unbounded.
+Same status as `set_highs` (0, or 1 without the `highs` feature).
+`rgmin_solver_set_trust` is the L<sub>inf</sub> radius; `rgmin_solver_add_equality` / `rgmin_solver_clear_equalities` carry `a · p = rhs`.
+`HighsStep.lo` / `hi` are per-coordinate vectors (length 1 is uniform).
+`abi_minor` 22.
+
+`xts.h` declares the exported `rgmin_minimize` / `rgmin_solver_*` symbols; `xts_minimize` and `xts_solver_*` are macro aliases.
+
+Centered matrices (`centeredmatrix` / `RGMIN_MANIFOLD_CENTERED_MATRIX` = 22): manopt `centeredmatrixfactory`.
+Packed row-major `m n`.
+Projection is the centering operator (`X 1 = 0` by default, or `1^T X = 0`), retraction is `X + U` then center, transport is the identity.
+Not the sphere and not a 3N cluster.
+Tokens 7-10 stay reserved.
+`abi_minor` 21.
+
+Positive orthant (`positive` / `RGMIN_MANIFOLD_POSITIVE` = 21): manopt `positivefactory`.
+Packed length `n`.
+Projection is the identity, retraction is `x odot exp(v oslash x)`, transport is the identity.
+Not the sphere and not a 3N cluster.
+Tokens 7-10 stay reserved.
+`abi_minor` 20.
+
+Complex unit sphere (`spherecomplex` / `RGMIN_MANIFOLD_SPHERE_COMPLEX` = 20): manopt `spherecomplexfactory`.
+Interleaved `(re, im)`, length `2 n`.
+Projection is `v - Re(x^* v) x`, retraction is `(x+v)/||x+v||`, transport is projection at arrival.
+Not the real sphere and not `(S^1)^n`.
+Tokens 7-10 stay reserved.
+`abi_minor` 19.
+
+Symmetric doubly-stochastic matrices (`multinomialsymmetric` / `RGMIN_MANIFOLD_MULTINOMIAL_SYM` = 19) and doubly-stochastic matrices (`multinomialdoublystochastic` / `RGMIN_MANIFOLD_MULTINOMIAL_DS` = 18): manopt `multinomialsymmetricfactory` and `multinomialdoublystochasticfactory`.
+Both are packed row-major `n^2`, `n >= 2`, with Fisher projection and transport at arrival.
+The retraction is Sinkhorn, and on the symmetric manifold it then symmetrizes.
+A 3N cluster is rejected.
+Tokens 7-10 stay reserved.
+`abi_minor` 18 and 17.
+
+Constant singleton (`constant` / `RGMIN_MANIFOLD_CONSTANT` = 17): manopt `constantfactory`.
+Packed length `n`.
+Projection and transport are the zero tangent, retraction is the fixed point.
+A 3N cluster is rejected.
+Tokens 7-10 stay reserved.
+`abi_minor` 16.
+
+Complex Euclidean (`euclidean_complex` / `RGMIN_MANIFOLD_EUCLIDEAN_COMPLEX` = 16): manopt `euclideancomplexfactory`.
+Interleaved `(re, im)`, length `2 n`.
+Projection is the identity, retraction is `x + v`, transport is the identity.
+A 3N cluster is rejected.
+Tokens 7-10 stay reserved.
+`abi_minor` 15.
+
+Skew-symmetric matrices (`skewsymmetric` / `RGMIN_MANIFOLD_SKEWSYMMETRIC` = 15) and symmetric matrices (`symmetric` / `RGMIN_MANIFOLD_SYMMETRIC` = 14): manopt `skewsymmetricfactory` and `symmetricfactory`.
+Both are packed row-major `n^2`, and the skew-symmetric one needs `n >= 2`.
+Projection is `multiskew` (`0.5 (A - A^T)`) or symmetrization, retraction is `X + U`, transport is the identity.
+A 3N cluster is rejected.
+The symmetric manifold raised the ABI layout revision to 4.
+
+L-BFGS session `Accept::None` takes the clipped two-loop direction.
+Wolfe line search stays on Energy / Nonmonotone.
+
+Scaled conjugate gradient (SCG) C waist: closed `xts_conjugacy_t` on `xts_scg_params_t` (FR=0 .. FrPr=7, dest leaf order).
+`params==NULL` is Netlab Polak-Ribiere.
+Unknown codes are `RGMIN_INVALID_PARAMETER`.
+The ABI version is 1.13.3.
+Hybrid and Restart stay Rust-only.
+
+Typed lowest-mode waist: closed `EigensolverKind` (Lanczos=0 through EigenExa=13, `schema/eigen.capnp`) and `EigenParams` (`nev`, `krylov`, `max_iter`, `tol`).
+No Text.
+C `rgmin_lowest_eigenpair` plus `rgmin_eigen_params_t`.
+Unlinked backends return `RGMIN_UNAVAILABLE`.
+
+Molecular manifolds: `rigid_quotient` is Sella Cartesian `R^{3N}/SE(3)` (`fix_translation` + `fix_rotation`); `mw_rigid` is the Page-McIver / Sella IRC Eckart metric on the same quotient (`rgmin_solver_set_masses`).
+SO(3) is length 9 and SE(3) is length 12; a 3N cluster is rejected rather than packed or prefix-interpreted.
+Periodic bulk sets `rgmin_solver_set_periodic`: Sella `proj_rot = false`, quotient `R^{3N}/T(3)`.
+Isolated stays `R^{3N}/SE(3)`.
+`abi_minor` 10.
+
+Beside the molecular manifolds, the embedded manopt tokens are Euclidean (default), sphere, SO(3), Stiefel `St(n,1)` and `St(n,p)` (`rgmin_solver_set_stiefel`), SE(3), Oblique token 11, Multinomial token 12.
+Reserved: 7 symmetric positive definite (SPD), 8 Grassmann, 9 Hyperbolic, 10 Poincare.
+Hourglass mark and the Diataxis book under `docs/orgmode/`.
+
+
+## 0.2.0
+
+`rgmin_solver_set_highs`: opt-in HiGHS feasible-set step.
+With a host Hessian this is the convex Newton QP `min 1/2 p^T P p + g^T p` and per-coordinate boxes.
+Without the `highs` feature the setter returns 1.
+eindir / rgpot / eOn share the same session.
+
+
+## 0.1.0
+
+Rust rewrite of the C++ xtensor tree (`0.0.1` on the previous `main`).
+Solvers live in Rust.
+C and C++ reach them through the `rgmin_solver_t` session API and `rgmin_minimize` over dlpk tensors.
+
+-   Session API: `create` / `step` / `step_hess` / `step_fg` / fused `evalgrad` / `forget` / `free`.
+-   Methods: L-BFGS, BFGS, SR1, SR2, shifted Newton, rational function optimization (RFO), eight nonlinear conjugate gradient (NLCG) conjugacies, steepest, Adam, particle swarm optimization (PSO), FIRE, FIRE 2.0, Barzilai-Borwein, Powell dogleg.
+-   Host Hessian policy: `qn_step` two-loop / Newton / RFO; pair `H0 = P^{-1}`.
+-   Accept: none / energy / nonmonotone.
+-   Per-atom maxmove and optional rigid-body projection.
+-   Optional `highs` feature: two-loop direction, HiGHS only for a feasible set (box, trust, equalities).
+
+The previous C++ `main` is unrelated history.
+This tag is the first Rust release.

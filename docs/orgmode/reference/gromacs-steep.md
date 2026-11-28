@@ -1,0 +1,166 @@
+
+
+# GROMACS steepest descent
+
+`Method::GromacsSteep` implements the update documented in the
+[GROMACS reference manual, Energy Minimization: Steepest Descent](https://manual.gromacs.org/current/reference-manual/algorithms/energy-minimization.html#steepest-descent):
+
+$$
+r_{n+1} = r_n + h_n F_n / \max_i |F_{n,i}|.
+$$
+
+The maximum is the largest Euclidean norm of one consecutive xyz atom
+triple. A trailing partial triple is one atom. A strict energy decrease
+accepts the trial and sets `h <- 1.2 h`. An equal or larger energy rejects
+the trial, keeps the old point and force, and sets `h <- shrink * h`.
+`GromacsSteepConfig` defaults `shrink` to 0.5.
+
+The implementation follows the state-swap structure and strict energy
+comparison in GROMACS 2025.4
+[do\_steep](https://github.com/gromacs/gromacs/blob/v2025.4/src/gromacs/mdrun/minimize.cpp#L3104).
+That function multiplies a rejected `ustep` by 0.5 (`minimize.cpp`
+line 3104) and an accepted one by 1.2 when `count > 0` (line 3092).
+The reference manual still says 0.2. `GromacsSteepConfig::with_shrink`
+and `Solver::set_gromacs_steep_config` select that factor, or any other
+finite value in `(0, 1)`. The Python `Session` keyword `shrink`
+does the same for `gromacs-steep`.
+
+
+## Stops and reports
+
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">condition</th>
+<th scope="col" class="org-left"><code>Status</code></th>
+<th scope="col" class="org-left">C ABI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">largest per-atom force is below <code>Control::gtol</code></td>
+<td class="org-left"><code>Tolerance</code></td>
+<td class="org-left"><code>RGMIN_STOP_TOLERANCE</code></td>
+</tr>
+
+<tr>
+<td class="org-left"><code>Control::maxiter</code> trials were attempted</td>
+<td class="org-left"><code>Budget</code></td>
+<td class="org-left"><code>RGMIN_STOP_BUDGET</code></td>
+</tr>
+
+<tr>
+<td class="org-left">the proposed displacement cannot change any coordinate, or it fell below rgmin's displacement floor</td>
+<td class="org-left"><code>MachinePrecision</code></td>
+<td class="org-left"><code>RGMIN_STOP_MACHINE_PRECISION</code></td>
+</tr>
+
+<tr>
+<td class="org-left">callback returned a non-finite value or gradient</td>
+<td class="org-left"><code>Error::Oracle</code></td>
+<td class="org-left"><code>RGMIN_INTERNAL_ERROR</code> (+ <code>rgmin_last_error</code>)</td>
+</tr>
+
+<tr>
+<td class="org-left">an explicit shrink budget ran out while the displacement was still at least the floor</td>
+<td class="org-left"><code>Error::Constraint</code></td>
+<td class="org-left"><code>RGMIN_CONSTRAINT_ERROR</code> (+ <code>rgmin_last_constraint_error</code>)</td>
+</tr>
+</tbody>
+</table>
+
+`Report::stop_norm` is `StopNorm::MaxAtom` by default for this method,
+even when the input `Control` names another norm. An explicit
+`Solver::set_stop_norm` call after construction overrides that default,
+the same as for any other method. Rejected trials count as steps.
+`Solver::gromacs_step_size` returns the displacement that the next trial
+will use.
+This differs from GROMACS `do_steep` in one place by design: a
+non-finite trial is an immediate oracle error here, where GROMACS
+refuses the trial and shrinks.
+
+
+## Session hooks
+
+The core state contains `h` and the 1.2 / `shrink` update. The session
+projects rigid motion from the force before normalization, applies an
+explicit per-atom or Euclidean `maxmove` cap to the proposed displacement,
+and uses the ordinary manifold, coordinate-bound, and holonomic-distance
+constraint placement. A constraint the trial cannot meet is a refused
+step: the old point is kept and `h` is multiplied by `shrink`, the
+same branch GROMACS takes by setting the trial energy to +infinity
+(`minimize.cpp` lines 3008-3009 and 3104).
+`GromacsSteepConfig::max_constraint_shrinks` bounds that run. The
+session derives its default from the actual `emstep` and shrink factor:
+the least `k` with `h * shrink^k` below `GROMACS_STEEP_MIN_USTEP`,
+rgmin's own displacement floor. GROMACS `do_steep` has no such floor.
+At the canonical `emstep = 0.01` and `shrink = 0.5`, that count is 34,
+and that default budget is the same rgmin safeguard. Crossing the
+floor stops with `Status::MachinePrecision` and keeps the last accepted
+point. An explicit budget that runs out while `h` is still at least
+the floor returns `Error::Constraint`. Zero returns that error on the
+first failure and does not shrink. A placement that meets the
+constraints restarts the count. The trial energy is tested only after
+those hooks,
+so an accepted step and its reported gradient describe the point the host
+receives.
+
+There is no implicit rgmin 0.2 per-atom cap: `h` is already the GROMACS
+maximum displacement. An explicit cap still applies.
+
+
+## GROMACS-unit mapping
+
+The Python `gromacs_mdp_options` layer converts:
+
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">MDP key</th>
+<th scope="col" class="org-left">default</th>
+<th scope="col" class="org-left">native option</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left"><code>emtol</code></td>
+<td class="org-left">10.0 kJ mol<sup>-1</sup> nm<sup>-1</sup></td>
+<td class="org-left"><code>gtol</code> in eV Å<sup>-1</sup></td>
+</tr>
+
+<tr>
+<td class="org-left"><code>emstep</code></td>
+<td class="org-left">0.01 nm</td>
+<td class="org-left"><code>istep</code> in Å</td>
+</tr>
+
+<tr>
+<td class="org-left"><code>nsteps</code></td>
+<td class="org-left">-1</td>
+<td class="org-left">no limit; otherwise <code>maxiter</code></td>
+</tr>
+</tbody>
+</table>
+
+The Rust stepper, C ABI, and C++ wrapper do no unit conversion.
+C and C++ expose both `shrink` and `max_constraint_shrinks` through `rgmin_solver_set_gromacs_steep` / `Solver::set_gromacs_steep`.
+`RGMIN_GROMACS_STEEP`, `RGMIN_STOP_MACHINE_PRECISION`, `rgmin_solver_set_gromacs_steep`, and `rgmin_gromacs_steep_max_constraint_shrinks` belong to ABI minor 52.
+`include/rgmin.h` names minor 72.

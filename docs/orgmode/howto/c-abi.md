@@ -1,0 +1,573 @@
+
+
+# C and C++ ABI
+
+Solvers live in Rust. Geometry hosts that call one outer iteration at
+a time hold an opaque `rgmin_solver_t`; scripts that want a one-shot
+solve still call `rgmin_minimize`. Every vector is a dlpk
+`DLManagedTensorVersioned` tensor.
+
+
+## Install
+
+```bash
+cargo cinstall --prefix=/usr/local --features capi
+```
+
+`cargo cinstall` comes from cargo-c ().
+That installs the hand-written `include/rgmin.h`, the C++ wrappers
+under `include/rgmin/` and `include/xts/`, and `dlpack/dlpack.h`.
+The pkg-config file is `rgmin`. A C or C++ file includes `rgmin.h`
+and links with `pkg-config --cflags --libs rgmin`. The crate version
+macros are `RGMIN_H_MAJOR`, `RGMIN_H_MINOR`, and `RGMIN_H_PATCH`.
+HiGHS `HighsInt` is not a type in this header. The constrained
+setters take `int32_t` and the closed `rgmin_highs_*` enums.
+
+Pass `--features capi`. The C symbols are compiled only with that
+feature. `cbindgen` output is not installed.
+
+
+## Start from the defaults
+
+Every struct a caller fills in has an initializer that returns the Rust
+defaults. A caller must start each struct from its initializer and
+assign only the fields it changes.
+
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Struct</th>
+<th scope="col" class="org-left">Initializer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left"><code>rgmin_control_t</code></td>
+<td class="org-left"><code>rgmin_control_default()</code></td>
+</tr>
+
+<tr>
+<td class="org-left"><code>rgmin_exp_t</code></td>
+<td class="org-left"><code>rgmin_exp_default()</code></td>
+</tr>
+
+<tr>
+<td class="org-left"><code>rgmin_scg_params_t</code></td>
+<td class="org-left"><code>rgmin_scg_params_default()</code></td>
+</tr>
+
+<tr>
+<td class="org-left"><code>rgmin_scg_options_t</code></td>
+<td class="org-left"><code>rgmin_scg_options_default()</code></td>
+</tr>
+
+<tr>
+<td class="org-left"><code>rgmin_eigen_params_t</code></td>
+<td class="org-left"><code>rgmin_eigen_params_default()</code></td>
+</tr>
+
+<tr>
+<td class="org-left"><code>rgmin_eigen_options_t</code></td>
+<td class="org-left"><code>rgmin_eigen_options_default()</code></td>
+</tr>
+
+<tr>
+<td class="org-left"><code>rgmin_rcg_options_t</code></td>
+<td class="org-left"><code>rgmin_rcg_options_default()</code></td>
+</tr>
+
+<tr>
+<td class="org-left"><code>rgmin_precon_t</code></td>
+<td class="org-left"><code>rgmin_precon_init(&amp;p, kind)</code></td>
+</tr>
+</tbody>
+</table>
+
+A field that a later revision adds then holds its default without a
+change to the caller. A struct declared without an initializer holds
+stack bytes in the fields the caller does not set, and a brace or
+designated initializer sets them to zero, which is not every field's
+default. A stray positive `noise_eps` turns the noise-floor stop on, and
+a session then stays at its start point. The `rgmin_*_default` functions
+are `abi_minor` 46, and `xts.h` names them `xts_*_default`.
+`rgmin_rcg_options_default` is `abi_minor` 65.
+
+
+## Control layout
+
+Layout revision 6 adds `require_convergence` to `rgmin_control_t`,
+which grows from 56 to 64 bytes on a 64-bit target, and `converged` to
+`rgmin_report_t`. A binary built against revision 5 passes the shorter
+struct, so each exported entry that takes a `rgmin_control_t` reads
+only the fields through `noise_c`, `require_convergence` keeps its
+default 0, and the report is written only through `stop`. The exported
+`rgmin_control_default` still returns the revision 5 struct.
+
+`rgmin.h` turns those names into inline functions that pass
+`sizeof(rgmin_control_t)` to a `_sized` symbol, such as
+`rgmin_minimize_opts_sized` and `rgmin_solver_create_sized`, and
+`rgmin_control_default` calls `rgmin_control_init(&c, sizeof c)`. A
+program built against this header has every field read and the whole
+report written without a source change. The size has the meaning of
+`rgmin_precon_t.struct_size`: `RGMIN_CONTROL_REVISION5_SIZE` is the
+revision 5 struct, a larger size than this build's struct leaves the
+extra bytes unread, and any other size returns
+`RGMIN_INVALID_PARAMETER` (a null session from
+`rgmin_solver_create_sized`) without a read. A caller that resolves
+symbols at run time calls the `_sized` names to have
+`require_convergence` read.
+
+Layout revision 7, at `abi_minor` 68, adds `noise_eps_f` after
+`require_convergence`, and the struct grows from 64 to 72 bytes on a
+64-bit target. `RGMIN_CONTROL_REVISION6_SIZE` is the revision 6 struct:
+an entry told that size reads the fields through `require_convergence`,
+writes the whole report, and leaves `noise_eps_f` at its default 0.
+`rgmin_control_init` fills any of the three layouts.
+
+`noise_eps_f` is the noise of the objective value, and a value that is
+not positive leaves the test off. With `c` the factor `noise_c`, a line
+search that finds no trial whose decrease clears `c * noise_eps_f`
+stops with `RGMIN_STOP_NOISE_FLOOR`, and so does a Newton-CG run
+(`rgmin_minimize_hvp`, `rgmin_minimize_hvp_precond`, `RGMIN_NEWTON_CG`,
+`RGMIN_NEWTON_PCG`) when a trust region trial is refused while the
+model predicts a reduction of at most `c * noise_eps_f`. The entry
+returns `RGMIN_SUCCESS` and writes the last accepted point to `x`.
+Without it, that Newton-CG run shrinks its radius to the floor and
+returns `RGMIN_INVALID_PARAMETER` with "trust region collapsed" in
+`rgmin_last_error`, and `x` stays at the start. Set it to a few units
+in the last place of the objective value when the value is large
+against the decrease a step can still make:
+
+```c
+rgmin_control_t ctrl = rgmin_control_default();
+ctrl.gtol = 1e-10;
+ctrl.noise_eps_f = 4.0 * DBL_EPSILON * fabs(value_at_start);
+```
+
+`report.converged` is 0 at that stop unless the gradient norm is below
+`gtol`, and `require_convergence` still returns `RGMIN_NOT_CONVERGED`.
+
+
+## Session (eOn / ASE `step`)
+
+```c
+#include "rgmin.h"
+
+rgmin_control_t ctrl = rgmin_control_default();
+ctrl.maxiter = 200;
+ctrl.gtol = 1e-8;
+ctrl.memory = 8;
+rgmin_solver_t *s = rgmin_solver_create(RGMIN_LBFGS, &ctrl, n);
+rgmin_report_t report;
+while (!done) {
+    rgmin_solver_set_maxmove(s, max_move);
+    rgmin_solver_set_qn_step(s, RGMIN_QN_NEWTON); /* or RGMIN_QN_LBFGS + P as H0 */
+    rgmin_solver_set_accept(s, RGMIN_ACCEPT_NONE);
+    rgmin_solver_step_hess_fg(s, evalgrad, hess, user, x, &report);
+}
+rgmin_solver_free(s);
+```
+
+`rgmin_precon_init` and `rgmin_solver_set_precon` install Exp, Lindh,
+the bonded metric, or the automatic choice. NaN `mu` estimates the
+energy scale on the next step. L-BFGS uses the matrix as H0. FIRE and
+nonlinear CG use it as a metric. `rgmin_solver_clear_precon` removes
+it. Morse bonds and FF torsions are Rust-only.
+
+`rgmin_solver_forget` drops pairs / conjugacy / moments. Newton and RFO
+use `rgmin_solver_step_hess_fg` (fused energy and gradient, one host
+potential call). Split `eval` / `grad` callbacks remain. `accept`
+is `none` (take the clipped step), `energy`, `nonmonotone`, or `step`
+(the clipped step with no line search, for a force that is not the
+gradient of the energy). `rgmin_solver_create` opens with `energy`.
+Callbacks are arguments of each step, not stored on the handle.
+
+`rgmin_solver_set_exp` installs the exponential preconditioner.
+`mu` NaN estimates the energy scale on the next step.
+`rgmin_solver_exp_mu` returns that scale, or NaN when none is
+installed. L-BFGS uses the factor as `H0`. FIRE and nonlinear CG
+use it as the metric. `rgmin_solver_clear_exp` drops it.
+`abi_minor` 28.
+
+A HiGHS feasible set is `rgmin_solver_set_highs` plus
+`rgmin_solver_set_box` (NULL side unbounded), optional
+`rgmin_solver_set_trust`, and `rgmin_solver_add_equality`. Each
+returns 0, or 1 when the build has no `highs` feature. Stamp
+1.22.4.
+
+`rgmin_solver_set_highs_time_limit` sets the seconds one HiGHS solve
+may run. A finite positive value is the limit, and zero or a negative
+value clears it. NaN or an infinite value returns 1 and leaves the
+limit as it was. `rgmin_solver_highs_timeouts` reads how many Hessian
+steps fell back after a solve reached that limit. Both are `abi_minor` 72.
+
+A Cartesian session starts with a per-atom cap of 0.2.
+`rgmin_solver_set_atom_maxmove` replaces it. A non-positive argument
+clears it. A positive `maxmove` on `rgmin_control_t`, with no call to
+that setter, is the Euclidean step limit and leaves the per-atom
+default off. A negative `maxmove` leaves every step cap off, including
+that default. Zero keeps the defaults. The cap is the largest per-atom
+displacement. The C++ `OptimizeControl.maxmove` is 0, so `optimize`
+keeps the per-atom default. ASE `Optimizer.defaults` `maxstep` is 0.2
+at tag 3.29.0
+(<https://gitlab.com/ase/ase/-/blob/3.29.0/ase/optimize/optimize.py>).
+eOn `max_move` is 0.2 Å
+(<https://henkelmanlab.org/eon/optimizer.html>); the schema field
+`OptimizerOptions.maxMove` is 0.2 at `4be157d4`
+(<https://github.com/TheochemUI/eOn/blob/4be157d43265af6b1140aaac0e52e42add62693f/schema/eon_params.capnp>).
+
+
+## One-shot
+
+```c
+#include "rgmin.h"
+
+rgmin_control_t ctrl = rgmin_control_default();
+ctrl.maxiter = 200;
+ctrl.gtol = 1e-8;
+ctrl.memory = 8;
+rgmin_report_t report;
+rgmin_status_t st = rgmin_minimize(eval, grad, user, x, &ctrl, RGMIN_LBFGS, &report);
+```
+
+A run that spends its budget, fails its line search, reaches line-search rounding, reaches machine
+precision, leaves a backward polish unmet or spends the evaluation budget still returns
+`RGMIN_SUCCESS`, with the stop in `rgmin_report_t.stop`. The one-shots
+whose names end in `_opts` add `error_on_unmet` and `backward_polish`
+before `out`. A
+nonzero `error_on_unmet` writes `x` and `out` for those six stops and
+then returns `RGMIN_UNMET_STOP`, so the host reads the report and still
+sees the run as unmet. `rgmin_minimize_eindir_opts` is the same for an
+`eindir_objective_t`:
+
+```c
+rgmin_status_t st = rgmin_minimize_eindir_opts(
+    objective, &stamp, x, &ctrl, RGMIN_LBFGS, /* error_on_unmet */ 1,
+    /* backward_polish */ 0, &report);
+if (st == RGMIN_UNMET_STOP) {
+    /* x holds the last iterate and report.stop names the unmet stop */
+}
+```
+
+`rgmin_minimize_eindir` is that call with both flags off. An eindir
+objective has no Hessian, so `backward_polish` does not change this
+entry. Its errors name the symbol the host called, in
+`rgmin_last_error`, from `abi_minor` 64. Check
+`rgmin_abi_stamp().abi_minor >= 64` before you rely on that.
+
+SCG takes the same one-shot shape.
+Conjugacy is a field on `rgmin_scg_params_t`, not a different entry point.
+Stamp is 1.72.7 (`xts_abi_compatible` still checks major and layout only).
+`rgmin_lowest_eigenpair` takes a typed `rgmin_eigen_params_t` (closed `rgmin_eigen_kind_t`, no string).
+Unlinked kinds return `RGMIN_UNAVAILABLE`.
+`rgmin_lowest_eigenpairs` is the block LOBPCG solver for the k lowest pairs (Knyazev 2001).
+`seed` and `modes_out` are row-major n-by-k.
+`rgmin_lowest_eigenpairs` is `abi_minor` 39.
+`rgmin_manifold_handle_t` is a Stiefel, SPD, rigid quotient or product manifold with column-major point buffers, `abi_minor` 41; see the manifold reference.
+`rgmin_manifold_rigid_quotient` is `abi_minor` 56.
+`rgmin_lowest_eigenpairs_ex` adds each residual and a converged flag, and an optional preconditioner (null is the identity).
+It is `abi_minor` 42.
+`rgmin_eigenpair_t` is unchanged.
+
+```c
+rgmin_scg_params_t params = rgmin_scg_params_default();
+params.conjugacy = RGMIN_CONJUGACY_LIU_STOREY; /* gpr_optim RgminScg.inl */
+rgmin_minimize_scg(eval, grad, curv, user, x, &ctrl, &params, &report);
+/* params == NULL is rgmin_scg_params_default(): Netlab Polak-Ribiere +
+   ScgParams::default + Restart::Never */
+```
+
+A non-CPU tensor returns `RGMIN_UNSUPPORTED_DEVICE`. The ABI does not
+change when a CUDA path lands.
+
+
+## L-BFGS direction with a caller `H0`
+
+A host that keeps its own step and wants only the two-loop direction
+holds an `rgmin_lbfgs_pairs_t`. The handle stores `(s, y)` pairs, oldest
+first, and never evaluates an objective.
+
+```c
+rgmin_lbfgs_pairs_t *pairs = rgmin_lbfgs_pairs_create(n, 10);
+int32_t stored = 0;
+rgmin_lbfgs_pairs_push(pairs, s, y, n, &stored);          /* rho = 1 / (s . y) */
+rgmin_lbfgs_pairs_push_rho(pairs, s, y, rho, n, &stored); /* the caller's rho */
+rgmin_lbfgs_direction(pairs, grad, h0_diag, NULL, NULL, dir, n); /* dir = -H g */
+rgmin_lbfgs_direction(pairs, grad, NULL, apply_h0, user, dir, n);
+rgmin_lbfgs_pairs_free(pairs);
+```
+
+Pass the diagonal of `H0` or a callback, not both and not neither. A
+diagonal whose entries are all `gamma` is `H0 = gamma I`. An empty
+memory writes `-H0 g`. `apply_h0(user, v, out, n)` writes `H0 v` and
+returns 0; any other value fails the call with
+`RGMIN_INVALID_PARAMETER`. It runs once per direction, on the residual
+of the backward loop that starts from `grad`, so the direction is
+`-H g` when the map is linear. It must not call back into the handle.
+
+`rgmin_lbfgs_pairs_push` declines a pair whose `s . y` is not finite or
+is at most `1e-8 ||s|| ||y||`, the test `Lbfgs::record` applies. It
+returns `RGMIN_SUCCESS` with `*stored` 0. `rgmin_lbfgs_pairs_push_rho`
+applies the same test and also declines a `rho` that is not finite and
+positive, so a pair with non-positive curvature never enters the
+two-loop. A length other than the handle's `n` is
+`RGMIN_INVALID_PARAMETER`, and `rgmin_last_error` names it.
+`capacity` 0 keeps ten pairs; a full memory drops the oldest.
+
+The direction is the Rust `LbfgsPairs::direction` and runs the
+recursion of the session step. The pairs a capped L-BFGS session holds,
+with a scalar `H0` equal to the session's, give that session's eOn step
+bit for bit. `rgmin_lbfgs_pairs_push` and `rgmin_lbfgs_direction` are
+`abi_minor` 38; `rgmin_lbfgs_pairs_push_rho` is `abi_minor` 43, so check
+`rgmin_abi_stamp().abi_minor >= 43` before calling it. C++ wraps the
+handle in `rgmin::LbfgsPairs` (`push`, `push_rho`, `direction_diagonal`,
+`direction_apply`), `xts.h` aliases each entry as `xts_lbfgs_*`, and
+Python takes `rgmin.LbfgsPairs.push(s, y, rho=None)`.
+
+
+## Stopping rules
+
+`rgmin_solver_set_etol(s, etol)` stops a session when the relative energy
+change between accepted steps falls below `etol`, the LAMMPS
+`minimize etol` test. `rgmin_solver_set_max_evals(s, n)` stops it after `n`
+objective evaluations, line-search trials included, the LAMMPS `maxeval`
+test. Both are off until set, and `rgmin_solver_clear_etol` and
+`rgmin_solver_clear_max_evals` turn them off again. `rgmin_solver_evals(s)`
+is the count the budget compares. The finished step reports
+`RGMIN_STOP_ENERGY_TOLERANCE` or `RGMIN_STOP_EVAL_BUDGET` in
+`rgmin_report_t.stop`. A negative or non-finite `etol`, a zero budget, a
+null session and an `etol` on a particle swarm session return
+`RGMIN_INVALID_PARAMETER`, leave the session as it was, and put the
+reason in `rgmin_last_error`. These are `abi_minor` 50, so check
+`rgmin_abi_stamp().abi_minor >= 50` first. `rgmin_control_t` keeps its
+layout and the one-shot `rgmin_minimize` calls carry no stops.
+has the formula and the SciPy and LAMMPS mapping.
+
+
+## Cautious Riemannian L-BFGS
+
+`rgmin_minimize_rlbfgs` runs Algorithm 2 of Huang, Absil, and Gallivan
+([10.1137/17M1127582](https://doi.org/10.1137/17M1127582))
+on a manifold token. Null `params` is `rgmin_rlbfgs_default`: memory 4,
+cautious slope `10^{-4}`, Armijo `10^{-4}`, backtrack `1/2`, 48 trials,
+and the relative gradient stop `10^{-6}`. The token uses the same
+default shapes as `rgmin_solver_set_manifold`. A positive
+`ctrl->maxmove` caps the ambient trial length. Zero leaves that cap
+off. `xts_minimize_rlbfgs` and `xts_rlbfgs_default` are the aliases.
+These are `abi_minor` 51. `rgmin_control_t` is unchanged, and the
+default Euclidean L-BFGS step stays the eOn cap.
+
+
+## Newton-CG under a caller preconditioner
+
+ABI minor 66 adds `rgmin_vec_precond_fn` and `rgmin_minimize_hvp_precond`, with `rgmin_minimize_hvp_precond_sized` behind it.
+Check `rgmin_abi_stamp().abi_minor >= 66` before using them.
+No struct changes, so the layout revision stays 6.
+
+`RGMIN_NEWTON_PCG` builds its own rank-16 Nystrom preconditioner at every outer step.
+`rgmin_minimize_hvp_precond` runs the trust-region Newton-CG minimizer under a preconditioner that you supply: `precond` applies `P^-1` to one residual of length `n`, and a null `precond` is the identity.
+The three callbacks are `evalgrad` (value and gradient in one call), `hvp` (the Hessian action, as `rgmin_minimize_hvp` takes it) and `precond`.
+One `user` pointer reaches all three.
+`P` takes no iterate and stays fixed for the solve, so it must be symmetric positive definite wherever the solve goes; keep any iterate-dependent state behind `user`.
+CG under any such `P` reaches the same step as plain CG, in fewer Hessian actions when `P` approximates the Hessian.
+
+```c
+#include "rgmin.h"
+
+rgmin_report_t report;
+rgmin_status_t st = rgmin_minimize_hvp_precond(
+    evalgrad, hvp, precond, user, x, &ctrl, 0, 0, &report);
+```
+
+`ctrl.istep` seeds the trust radius and `ctrl.maxmove` caps it.
+A callback that returns a status other than `RGMIN_SUCCESS` aborts the solve.
+Later callbacks do not run, `x` and `report` stay as they were, the entry returns that status, and `rgmin_last_error` names the callback.
+Negative curvature is not a failure: the step follows it to the trust boundary.
+
+The callback tensors point at solver storage and are valid for that call only.
+One outer iteration allocates 10 arrays of length `n` and one inner CG iteration allocates 2, the Hessian action and the preconditioner application, because the Rust `HessianVector` and `Preconditioner` traits return owned arrays.
+`xts_minimize_hvp_precond` and `xts_vec_precond_fn` are the aliases.
+
+
+## Riemannian conjugate gradients
+
+ABI minor 65 adds `RGMIN_RCG`, `rgmin_rcg_options_t`, `rgmin_rcg_options_default` and `rgmin_minimize_rcg`.
+Check `rgmin_abi_stamp().abi_minor >= 65` before using them.
+`rgmin_rcg_options_t` is a new struct and no existing struct changes, so the layout revision stays 6.
+
+`RGMIN_RCG` is a `rgmin_method_t` token.
+`rgmin_solver_create(RGMIN_RCG, &ctrl, n)` runs Riemannian CG as a session method, with PRP+ and the scaled transport, on the manifold that `rgmin_solver_set_manifold` selects.
+`rgmin_minimize_rcg` is the one-shot run on Euclidean space, and its options record selects the other coefficients.
+
+```c
+#include "rgmin.h"
+
+rgmin_rcg_options_t opts = rgmin_rcg_options_default();
+opts.beta = 2;       /* Hager-Zhang */
+opts.grad_tol = 1e-8;
+rgmin_report_t report;
+rgmin_status_t st = rgmin_minimize_rcg(eval, grad, user, x, &opts, &report);
+```
+
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-right" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Field</th>
+<th scope="col" class="org-left">Meaning</th>
+<th scope="col" class="org-right">Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left"><code>beta</code></td>
+<td class="org-left">0 Fletcher-Reeves, 1 PRP+, 2 Hager-Zhang</td>
+<td class="org-right">1</td>
+</tr>
+
+<tr>
+<td class="org-left"><code>transport</code></td>
+<td class="org-left">0 scaled, 1 identity</td>
+<td class="org-right">0</td>
+</tr>
+
+<tr>
+<td class="org-left"><code>linesearch</code></td>
+<td class="org-left">0 strong Wolfe, 1 Brent (<code>LineSearch::default</code>)</td>
+<td class="org-right">0</td>
+</tr>
+
+<tr>
+<td class="org-left"><code>grad_tol</code></td>
+<td class="org-left">Riemannian gradient norm that stops the run</td>
+<td class="org-right"><code>1e-5</code></td>
+</tr>
+
+<tr>
+<td class="org-left"><code>max_iter</code></td>
+<td class="org-left">Iteration cap</td>
+<td class="org-right">200</td>
+</tr>
+
+<tr>
+<td class="org-left"><code>initial_step</code></td>
+<td class="org-left">Length of the first trial displacement</td>
+<td class="org-right">1</td>
+</tr>
+</tbody>
+</table>
+
+`rgmin_rcg_options_default` returns the Rust `RcgOptions::default`, and a null `options` pointer selects the same record.
+PRP+ replaces a negative Polak-Ribiere coefficient by zero.
+The scaled transport shortens a transported vector that the transport made longer, back to its length before the transport.
+The strong Wolfe search has `c1 = 1e-4`, `c2 = 0.1` and at most 20 trials.
+`grad_tol` must be finite and not negative, and `initial_step` finite and positive.
+
+`x` is updated in place, and `report` is written on success.
+`report.converged` is nonzero when the final gradient norm is at most `grad_tol`, and `report.stop` is then `RGMIN_STOP_TOLERANCE`.
+A run that ends before `max_iter` without meeting `grad_tol` reports `RGMIN_STOP_STEP_TOLERANCE`, and one that spends `max_iter` reports `RGMIN_STOP_BUDGET`.
+A null `eval`, `grad`, `x` or `report`, an unknown tag, a tolerance or step that the record refuses, and a non-finite start return `RGMIN_INVALID_PARAMETER`.
+So does a line-search trial whose retraction slope cannot be resolved, `Error::RcgSlope` in Rust, which refuses the slope rather than accept its curvature.
+`x` is then left as it was, and `rgmin_last_error` names the reason.
+A panic inside the run returns `RGMIN_INTERNAL_ERROR`, and `rgmin_last_error` names `rgmin_minimize_rcg`.
+
+`xts.h` aliases the four names as `XTS_RCG`, `xts_rcg_options_t`, `xts_rcg_options_default` and `xts_minimize_rcg`.
+The C++ wrapper names the method `rgmin::Method::Rcg`.
+
+
+## Rigid quotient, trust region and projected modes
+
+ABI minor 56 adds five entries.
+Check `rgmin_abi_stamp().abi_minor >= 56` before calling them.
+`rgmin_control_t` is unchanged.
+
+`rgmin_manifold_rigid_quotient(n_atoms, periodic)` builds `R^{3N}/SE(3)` when `periodic` is 0 and `R^{3N}/T(3)` otherwise.
+The packed length is `3 * n_atoms`.
+Projection removes translations, and rotations as well when the quotient is `SE(3)`.
+`xts_manifold_rigid_quotient` is the alias.
+
+`rgmin_rtr_tcg_solve` is one Steihaug-Toint truncated CG step on the tangent space of any manifold handle, or in Euclidean space when the manifold pointer is null.
+The gradient and the Hessian action are the Euclidean ones.
+The model, the trust ball and the reported step length are in the metric of the manifold, so an SPD factor measures the step in its own metric.
+It stops on negative curvature, on the trust boundary, on the residual test, on the iteration budget, or on a zero projected gradient.
+A Hessian action that is not finite, or a failing callback, ends it at once with `RGMIN_INTERNAL_ERROR` and leaves the outputs alone.
+`rgmin_rtr_tcg_result_t` reports the model decrease, the step length in that metric, the stop code and the iteration count.
+
+`rgmin_rtr_radius_update` applies the Absil, Baker and Gallivan rule.
+The step is accepted when the ratio of actual to predicted decrease is above 1/10. The radius shrinks by 1/4 when the ratio is below 1/4, and it doubles, never past the supplied maximum, when the ratio is above 3/4 and the step lies on the trust boundary.
+A radius already above the maximum is clamped to it first.
+
+`rgmin_lowest_eigenpair_on_manifold` and `rgmin_lowest_eigenpairs_projected` solve the tangent-projected operator.
+Lanczos, Rayleigh-Ritz, Jacobi-Davidson, LOBPCG and the dimer project the seed, every operator and preconditioner action, and the returned mode; the block entry uses projected LOBPCG.
+PRIMME, libkrylov and SLEPc cannot honor a projector.
+With a non-null manifold they return `RGMIN_INVALID_PARAMETER` before any backend is called, whether or not it is linked, and a manifold that leaves no tangent direction returns the same status.
+Neither output is written on failure.
+A null manifold matches the unprojected entries.
+
+
+## C++
+
+```cpp
+#include <rgmin/optimize.hpp>
+
+rgmin::Control ctrl;
+auto report = rgmin::minimize_fn(eval, grad, user, x, ctrl,
+                                 rgmin::Method::Lbfgs);
+```
+
+`rgmin::Control` has its own defaults. The wrappers copy it over
+`rgmin_control_default()`, so a C field it lacks keeps its default.
+`<xts/optimize.hpp>` keeps the same names under `xts::optimize` for old hosts.
+xtensor callers include `xts/xtensor.hpp`, which adapts `xt::xarray` to
+the same `rgmin_minimize` entry. There is no solver in the header.
+
+
+## Manifold
+
+```c
+rgmin_solver_set_manifold(s, RGMIN_MANIFOLD_SPHERE);
+```
+
+Tokens: `RGMIN_MANIFOLD_EUCLIDEAN` (default), `RIGID_QUOTIENT`
+(`R^{3N}/SE(3)`, Sella Cartesian), `MW_RIGID` (Page–McIver /
+Sella IRC Eckart), `SPHERE`, `SO3` (length 9), `STIEFEL`
+(`St(n,1)`; `rgmin_solver_set_stiefel` for `p > 1`), `SE3`
+(length 12), `OBLIQUE` (token 11), `MULTINOMIAL` (token 12),
+`SYMMETRIC` (n² row-major), `SKEWSYMMETRIC` (token 15, n²
+row-major, `n >= 2`), `EUCLIDEAN_COMPLEX` (token 16, interleaved
+`(re, im)`, length `2 n`; `rgmin_solver_set_euclidean_complex`),
+`CONSTANT` (token 17, singleton of length `n`;
+`rgmin_solver_set_constant`), `MULTINOMIAL_DS` (token 18,
+n² doubly-stochastic; `rgmin_solver_set_multinomial_ds`),
+`MULTINOMIAL_SYM` (token 19, n² symmetric doubly-stochastic;
+`rgmin_solver_set_multinomial_sym`), `SPHERE_COMPLEX` (token 20,
+interleaved `(re, im)`, length `2 n`; `rgmin_solver_set_sphere_complex`),
+`POSITIVE` (token 21, packed length `n`; `rgmin_solver_set_positive`),
+`CENTERED_MATRIX` (token 22, packed `m n` row-major;
+`rgmin_solver_set_centered_matrix`), `SPD` (token 7, row-major `n^2`),
+`GRASSMANN` (token 8; `rgmin_solver_set_factor_shape`), `HYPERBOLIC`
+(token 9), `POINCARE` (token 10) and `UNITARY` (token 23, interleaved
+row-major `2 n^2`; `rgmin_solver_set_unitary`).
+No token is reserved. See
+.
+`rgmin_solver_set_masses` supplies N atomic masses for `MW_RIGID`.
+
+`rgmin_solver_set_power(s, factor, block, count)` (`abi_minor` 44) selects `count` unit-weight copies of a token without shape parameters, each of packed length `block`, as manopt's `powermanifold` does.
+It returns 1 and keeps the manifold for a null session, a token with shape parameters, a block the token cannot hold, or a count of zero.
+`MW_RIGID` copies read `rgmin_solver_set_masses` as one molecule reused on every copy or as every copy's masses in order.
+Weighted products of arbitrary factors are Rust only; lists them.

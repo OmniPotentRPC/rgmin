@@ -1,0 +1,59 @@
+
+
+# Measure CPU strong scaling
+
+The `strong_scale` example holds one system fixed and reruns it on
+rayon pools of 1, 2, 4, &#x2026; threads up to the physical core count.
+It needs the opt-in `par` feature, which runs the length-n vector
+algebra on the pool.
+The force evaluation runs on the same pool.
+
+```bash
+cargo run --release --features par --example strong_scale -- \
+  --cells 20 --repeats 5 > strong_scale.csv
+```
+
+The system is a perturbed periodic FCC crystal of 4 L<sup>3</sup> atoms, with
+L set by `--cells`.
+Each atom has one Morse bond to each of its 12 nearest neighbours,
+with the Pt parameters of the Morse tutorial.
+Every bond sits at the Morse minimum in the ideal lattice.
+Two methods run on every pool.
+The first is `lbfgs` with m = 10.
+Each step takes the two-loop direction and the strong Wolfe search,
+with c1 = 1e-4, c2 = 0.9 and at most 40 trials.
+The session sets `Accept::Energy` and clears the per-atom cap that a
+Cartesian session installs by default.
+A per-atom cap would bound every trial of the search, and
+`Accept::None` takes a single clipped trial.
+The second is `fire2` with `FirePreset::Guenole2020`.
+It has no line search; a 0.2 Angstrom per-atom cap scales each step.
+Each run stops when the largest per-atom force drops below
+0.01 eV/Angstrom.
+
+The CSV has one row per method and thread count.
+`hardware` is the CPU model name from `/proc/cpuinfo`, or the value
+of `--hardware`.
+`wall_s` is the median wall time over the repeats.
+`max_dev` is the largest coordinate difference from the first
+1-thread run.
+It is nonzero only where a parallel reduction changes the last bits.
+`efficiency` is the speedup over 1 thread divided by the thread count.
+The harness is CPU only, so the `gpu` column stays empty.
+`--max-threads` caps the thread counts.
+
+After the timed `lbfgs` repeats on each pool, one untimed solve
+checks the line search.
+It replays each step with `SuppliedSearch`, which makes the trials
+`LineSearch::search` makes on the same answers.
+A step counts when its oracle calls are the replay's trials, in order,
+and the replay accepts the session's point.
+It also counts the accepted steps that meet the strong Wolfe
+conditions.
+Both counts go to stderr.
+The example exits non-zero when a run does not converge or an `lbfgs`
+step fails either count.
+
+`docs/figures/strong-scaling/strong_scale_r11.csv` is one run with
+`--cells 20 --repeats 11` on an 8-core Xeon KVM guest.
+`strong_scale_r11.log` beside it holds the stderr of that run.

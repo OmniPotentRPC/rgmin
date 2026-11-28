@@ -1,0 +1,71 @@
+
+
+# Python
+
+The package under `python/` is the maturin binding. ASE is optional and imported when an optimizer is constructed.
+[Moving an ASE script](ase-migration.md) is the one-line import change and the differences from ASE.
+This package is not on PyPI. Build it from the repository root; it needs Rust 1.88 or newer:
+
+```bash
+python -m pip install './python[ase]'
+```
+
+```python
+from ase.build import molecule
+from ase.calculators.emt import EMT
+from rgmin import FIRE, LBFGS
+
+atoms = molecule("H2")
+atoms.calc = EMT()
+seen = []
+opt = LBFGS(atoms, trajectory="opt.traj", logfile=None)
+opt.attach(lambda: seen.append(atoms.get_potential_energy()))
+opt.run(fmax=0.05)
+FIRE(atoms, logfile=None).run(fmax=0.05, steps=20)
+```
+
+This binding's L-BFGS follows ASE's length control and keeps the pairs. `LBFGS(eon_cap=True)` selects the crate default, the line-search-free eOn cap. `LBFGS(use_line_search=True)`, or `LBFGSLineSearch`, selects rgmin's strong Wolfe search. Stubs live in `python/rgmin/*.pyi` and `py.typed` marks the package.
+
+`lowest_eigenpairs(hvp, x0_block)` returns values, vectors, residual norms, and a converged flag for each of the k lowest pairs. `hvp(x, v)` is `H(x) v`. `precond` applies `T` to a block. `strict=False` returns the flags instead of raising. is the short example, and continuous integration runs it.
+
+
+# Nanobind wheel
+
+PyPI has this wheel as `rgmin`: `python -m pip install 'rgmin[ase]'` installs it with ASE. lists the platforms and interpreters that have wheels.
+
+The repository root builds the same wheel with scikit-build-core. CMake fetches Corrosion 0.6.1 from GitHub and compiles the `capi` static library. It needs a C++17 compiler, CMake 3.15 or newer, Ninja, and Rust 1.88 or newer.
+
+From the repository root, `python -m pip install '.[ase,test]'` builds it with ASE and the test extras. Both wheels install a package named `rgmin`, so an environment holds one of them.
+
+`SolverConfig` checks every keyword once. An unknown name raises `ValueError` and lists the names that are accepted. `memory`, `maxiter`, `linesearch_maxiter`, and `extra_updates` have to be Python integers. Other numeric options have to be finite.
+
+A Cartesian solver starts with a per-atom cap of 0.2 (ASE `maxstep`, eOn `max_move`). `maxstep` or `atom_maxmove` replaces it. A non-positive value clears it. A positive `maxmove` is the Euclidean step limit and leaves the per-atom default off. A negative `maxmove` leaves every step cap off, including the default per-atom cap. Zero keeps the defaults. The cap is the largest per-atom displacement, not the norm of the whole step.
+
+`lbfgs` has two step rules. The default is the line-search-free eOn step. Its first step spends one extra calculator call on a finite-difference probe 0.01 along the force. The probe sets the initial inverse curvature and does not move the atoms. Later steps cost one call each. A step whose largest atom move exceeds `maxstep` is scaled down whole, as ASE does, so no atom moves farther than `maxstep`. A non-positive `maxstep` restores the eOn cap of 0.2, since this step always has a per-atom limit. `linesearch="wolfe"` opts into the strong Wolfe search instead, with `c1`, `c2`, and `linesearch_maxiter` as its constants. `maxstep` still bounds every atom move. The eOn step reads no other `linesearch` value, so `brent`, `backtracking`, and `goldstein` raise `ValueError` on `lbfgs`.
+
+```python
+from rgmin.ase import LBFGS
+
+LBFGS(atoms, logfile=None, maxstep=0.1).run(fmax=0.05)
+LBFGS(atoms, logfile=None, linesearch="wolfe").run(fmax=0.05)
+```
+
+`linesearch` is accepted only where the step reads it. `sd`, the conjugate-gradient methods, `adam`, and `diis` take `brent`, `backtracking`, `goldstein`, and `wolfe`. `bfgs` takes those and `ase`. `lbfgs` takes `wolfe` and `ase`. `accept="step"` takes each step without a line search, and FIRE, QuickMin, ODE12r, BB, SR1, SR2, PSO, Newton, RFO, dogleg, and Newton-CG never search a line. A `linesearch` on any of those raises `ValueError` and names the reason, rather than leaving the run unchanged. `rgmin.ase` takes `accept="step"` on a non-conservative optimizable (NEB, dimer, min-mode), so a `linesearch` there raises unless `accept` is `energy` or `nonmonotone`.
+
+`rgmin.ase.FIRE`, `LBFGS`, `CG`, and the other method classes are ASE optimizers. Each `step` is one rgmin iteration. `maxstep` is the per-atom cap in angstroms. The ASE classes pass it explicitly, and their default is 0.2. ASE calculators are not thread-safe. Each thread that builds an optimizer needs its own calculator. rgmin still guarantees a shareable config, one solver per thread, and an owned copy of the coordinates. The thread-safety page records the details.
+
+```python
+from ase.calculators.emt import EMT
+from rgmin.ase import FIRE
+
+atoms.calc = EMT()
+FIRE(atoms, logfile=None).run(fmax=0.05)
+```
+
+Newton, RFO, and dogleg need `hessian(x)`, a callable that returns the `(n, n)` matrix. A band or a min-mode run accepts the step rather than the energy. Pass `accept=` to choose the rule yourself.
+
+`h0` and `linesearch="ase"` are opt-in. `h0` scales the initial inverse Hessian of `bfgs` and `lbfgs`. `linesearch="ase"` runs a port of ASE's line search on those two methods, and `stpmax` bounds its step multiplier. Omitting both leaves the session defaults. A value the method would ignore raises `ValueError`.
+
+`restart` is refused, and `read` and `dump` raise `NotImplementedError`, except `BFGSLineSearch` and `LBFGSLineSearch`, which replay an rgmin evaluation log.
+
+C and C++ use `include/rgmin.h` and `include/rgmin/optimize.hpp`. has the short C programs: a session handle, and one `rgmin_minimize` call.

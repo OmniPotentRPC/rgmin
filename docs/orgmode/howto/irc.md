@@ -1,0 +1,58 @@
+
+
+# Constrain an IRC step to the mass-weighted sphere
+
+The inner Gonzalez&#x2013;Schlegel / Sella IRC step
+is not `ManifoldKind::Sphere` (the unit sphere about the origin).
+It is an equality on `MwRigid`:
+
+$$
+\|(s + d_1)\odot\sqrt{m}\| = dx.
+$$
+
+`IrcTrust` is that restricted step.
+`lowest_mode` is the matrix-free kick (one extremal Hessian
+pair from `H v`, not a full ELPA / SLATE spectrum)
+.
+Dispatch is the closed `EigensolverKind` in `schema/eigen.capnp`:
+Lanczos (default), Rayleigh-Ritz, Jacobi-Davidson, LOBPCG. PRIMME,
+SLEPc, ChASE, ELPA, ELPA2, SLATE, MAGMA, cuSOLVER, DLA-Future,
+and EigenExa return `Error::EigenUnavailable` until linked
+.
+There is no string key. The session that owns forward and reverse
+branches lives in
+[rgsaddle](https://github.com/OmniPotentRPC/rgsaddle) (`IrcSession`).
+
+
+## Rust
+
+```rust
+use ndarray::array;
+use rgmin::IrcTrust;
+
+let masses = [1.0, 16.0];
+let d1 = array![0.1, 0.0, 0.0, 0.0, 0.0, 0.0];
+let tr = IrcTrust::from_atom_masses(d1, &masses, 0.2);
+let s = array![0.5, 0.1, -0.2, 0.3, 0.0, 0.4];
+let p = tr.project(&s);
+assert!(tr.on_bound(&p, 1e-12));
+```
+
+The kick uses `lowest_eigenpair` (Lanczos) or `lowest_mode` with
+an `EigenParams` on a `HessianVector` (analytic or `FdHvp`).
+`lowest_eigenpairs` is the block form: the k lowest pairs from the
+same product, for an index-k search. Each pair carries its residual.
+`lowest_eigenpairs_precond` applies `T` to that residual block.
+`try_lowest_eigenpairs` and `try_lowest_eigenpairs_precond` are
+those solves when the product can fail: the first error is
+`Error::Host`, and nothing is evaluated after it.
+Default Krylov dimension is small. Do not form the dense Hessian
+just to pick the imaginary mode. Unlinked backends fail closed.
+
+
+## What this is not
+
+-   `ManifoldKind::Sphere` &#x2013; unit $S^{n-1}$ about 0.
+-   A full `heev` of a 3N Hessian. ELPA / SLATE belong behind
+    `n >= 512` and a Hessian that already exists. See the rgsaddle
+    MEP tutorial.
