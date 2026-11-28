@@ -64,6 +64,12 @@ cmake.version = ">=3.15"
 # cp314-cp314t or cp315-cp315t instead.
 wheel.py-api = "cp312"
 wheel.packages = ["python/rgmin"]
+# The inventory, its export, and the full text file are generated.
+sdist.exclude = [
+  "docs/orgmode/reference/public-api.org",
+  "docs/source/reference/public-api.rst",
+  "llms-full.txt",
+]
 
 # The wheel version is the crate's [package] version, the one that
 # rgmin.__version__ reports and that a v* release tag names.

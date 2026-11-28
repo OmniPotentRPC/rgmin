@@ -135,8 +135,8 @@ pub fn goldstein_upper(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> b
 ///
 /// Controls the step from below. `c` belongs in `(0, 0.5)`.
 ///
-/// Goldstein, *Multiplier and gradient methods*,
-/// <https://doi.org/10.1007/BF00927673>.
+/// Goldstein, *On Steepest Descent*,
+/// <https://doi.org/10.1137/0303013>.
 #[inline]
 pub fn goldstein_lower(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> bool {
     phi >= phi0 + (1.0 - c) * alpha * dphi0
@@ -146,8 +146,8 @@ pub fn goldstein_lower(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> b
 ///
 /// `φ(0) + (1-c) α φ'(0) <= φ(α) <= φ(0) + c α φ'(0)`.
 ///
-/// Goldstein, *Multiplier and gradient methods*,
-/// <https://doi.org/10.1007/BF00927673>.
+/// Goldstein, *On Steepest Descent*,
+/// <https://doi.org/10.1137/0303013>.
 #[inline]
 pub fn goldstein(phi: f64, phi0: f64, alpha: f64, dphi0: f64, c: f64) -> bool {
     armijo(phi, phi0, alpha, dphi0, c) && goldstein_lower(phi, phi0, alpha, dphi0, c)
