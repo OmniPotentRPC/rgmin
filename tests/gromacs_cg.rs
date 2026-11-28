@@ -5,8 +5,8 @@ use eindir_core::{Bounds, DifferentiableObjective, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, array};
 use rgmin::{
     Accept, ConstraintError, ConstraintSolver, Control, DistanceConstraints, Error,
-    GROMACS_CG_NSTCGSTEEP_DEFAULT, GromacsCgConfig, LineSearch, ManifoldKind, Method, NoiseFloor,
-    Oracle, Solver, Status, StopNorm, minimize_method,
+    GROMACS_CG_BETA_CAP, GROMACS_CG_NSTCGSTEEP_DEFAULT, GromacsCgConfig, LineSearch, ManifoldKind,
+    Method, NoiseFloor, Oracle, Solver, Status, StopNorm, minimize_method,
 };
 
 fn control(h: f64, gtol: f64, maxiter: usize) -> Control {
@@ -431,6 +431,66 @@ fn accept_step_follows_unscaled_polak_ribiere_direction() {
     assert_abs_diff_eq!(x[0], x2[0], epsilon = 1e-12);
     assert_abs_diff_eq!(x[1], x2[1], epsilon = 1e-12);
     assert_abs_diff_eq!(x[2], 0.0, epsilon = 1e-15);
+}
+
+// f = (x^2 + 4 y^2) / 2 from (1, 0.5, 0), istep 0.2. GROMACS `do_cg`
+// stores `p = f + beta * p` (minimize.cpp, the direction loop), which is
+// `dir = -g + beta * d`. Polak-Ribiere beta is
+// `g · (g - g_prev) / ||g_prev||^2`, and `|beta| > 5` restarts.
+// `Accept::Step` walks `istep` times the unit direction and does not put
+// `istep` on `-g` alone. `nstcgsteep` is 0 so the factor after step 0 is
+// that ratio. Steps 2 and 3 are the first two conjugate directions.
+#[test]
+fn accept_step_second_and_third_steps_follow_the_unscaled_gromacs_direction() {
+    let quad = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+        let energy = 0.5 * (x[0] * x[0] + 4.0 * x[1] * x[1]);
+        (energy, array![x[0], 4.0 * x[1], 0.0])
+    });
+    let istep = 0.2_f64;
+    let mut x = array![1.0_f64, 0.5, 0.0];
+    let mut solver = Solver::new(Method::GromacsCg, control(istep, 1e-14, 10), 3);
+    solver
+        .set_gromacs_cg_config(GromacsCgConfig::default().with_nstcgsteep(0))
+        .unwrap();
+    solver.set_accept(Accept::Step);
+
+    let g0 = array![1.0_f64, 2.0, 0.0];
+    let d0 = -&g0;
+    let u0 = &d0 / d0.dot(&d0).sqrt();
+    solver.step(&quad, &mut x).unwrap();
+    let x1 = array![1.0_f64, 0.5, 0.0] + istep * &u0;
+    assert_abs_diff_eq!(x[0], x1[0], epsilon = 1e-9);
+    assert_abs_diff_eq!(x[1], x1[1], epsilon = 1e-9);
+    assert_abs_diff_eq!(x[2], 0.0, epsilon = 1e-15);
+
+    let g1 = array![x1[0], 4.0 * x1[1], 0.0];
+    let beta1 = g1.dot(&(&g1 - &g0)) / g0.dot(&g0);
+    assert!(
+        beta1.abs() > 1e-3 && beta1.abs() <= GROMACS_CG_BETA_CAP,
+        "beta1 = {beta1}"
+    );
+    let d1 = -&g1 + beta1 * &d0;
+    let u1 = &d1 / d1.dot(&d1).sqrt();
+    let x2 = &x1 + &(istep * &u1);
+    solver.step(&quad, &mut x).unwrap();
+    assert_abs_diff_eq!(x[0], x2[0], epsilon = 1e-9);
+    assert_abs_diff_eq!(x[1], x2[1], epsilon = 1e-9);
+    assert_abs_diff_eq!(x[2], 0.0, epsilon = 1e-15);
+
+    let g2 = array![x2[0], 4.0 * x2[1], 0.0];
+    let beta2 = g2.dot(&(&g2 - &g1)) / g1.dot(&g1);
+    assert!(
+        beta2.abs() > 1e-3 && beta2.abs() <= GROMACS_CG_BETA_CAP,
+        "beta2 = {beta2}"
+    );
+    let d2 = -&g2 + beta2 * &d1;
+    let u2 = &d2 / d2.dot(&d2).sqrt();
+    let x3 = &x2 + &(istep * &u2);
+    solver.step(&quad, &mut x).unwrap();
+    assert_abs_diff_eq!(x[0], x3[0], epsilon = 1e-9);
+    assert_abs_diff_eq!(x[1], x3[1], epsilon = 1e-9);
+    assert_abs_diff_eq!(x[2], 0.0, epsilon = 1e-15);
+    assert_eq!(solver.nlcg_descent_fallbacks(), 0);
 }
 
 #[test]

@@ -8625,6 +8625,89 @@ mod tests {
         }
     }
 
+    /// `f = (x^2 + 4 y^2) / 2` from `(1, 0.5, 0)` with `istep = 0.2`.
+    /// The stored direction after each accepted step is GROMACS
+    /// `dir = -g + beta d`, and the next `Accept::Step` move is `istep`
+    /// times that unit vector. `beta` stays inside the cap, so a factor
+    /// of `istep` on `-g` alone would miss both later directions.
+    #[test]
+    fn gromacs_cg_accept_step_stores_unscaled_directions_through_step_three() {
+        let quad = Oracle::unbounded(3, |x: ArrayView1<f64>| {
+            let energy = 0.5 * (x[0] * x[0] + 4.0 * x[1] * x[1]);
+            let grad = array![x[0], 4.0 * x[1], 0.0];
+            (energy, grad)
+        });
+        let istep = 0.2;
+        let control = Control::default()
+            .with_istep(istep)
+            .with_gtol(1e-14)
+            .with_maxiter(10)
+            .with_maxmove(None);
+        let mut solver = Solver::new(Method::GromacsCg, control, 3);
+        solver
+            .set_gromacs_cg_config(GromacsCgConfig::default().with_nstcgsteep(0))
+            .unwrap();
+        solver.set_accept(Accept::Step);
+
+        let mut x = array![1.0, 0.5, 0.0];
+        let g0 = array![1.0, 2.0, 0.0];
+        let d0 = -&g0;
+        let (u0, _) = crate::gromacs::unit_direction_stable(d0.view());
+        let report = solver.step(&quad, &mut x).unwrap();
+        assert_eq!(report.status, Status::Iterating);
+        let x1 = array![1.0, 0.5, 0.0] + istep * &u0;
+        for (got, want) in x.iter().zip(x1.iter()) {
+            assert!((got - want).abs() < 1e-12, "x1 mismatch: {got} vs {want}");
+        }
+
+        let g1 = array![x1[0], 4.0 * x1[1], 0.0];
+        let beta1 = g1.dot(&(&g1 - &g0)) / g0.dot(&g0);
+        assert!(beta1.abs() > 1e-3 && beta1.abs() <= crate::gromacs::GROMACS_CG_BETA_CAP);
+        let d1 = -&g1 + beta1 * &d0;
+        let stored = match &solver.inner {
+            Inner::Nlcg { dir, .. } => dir.clone(),
+            _ => unreachable!("GROMACS cg uses Inner::Nlcg"),
+        };
+        for (got, want) in stored.iter().zip(d1.iter()) {
+            assert!(
+                (got - want).abs() < 1e-12,
+                "d1 mismatch: {stored:?} vs {d1:?}"
+            );
+        }
+
+        let (u1, _) = crate::gromacs::unit_direction_stable(d1.view());
+        let report = solver.step(&quad, &mut x).unwrap();
+        assert_eq!(report.status, Status::Iterating);
+        let x2 = &x1 + &(istep * &u1);
+        for (got, want) in x.iter().zip(x2.iter()) {
+            assert!((got - want).abs() < 1e-12, "x2 mismatch: {got} vs {want}");
+        }
+
+        let g2 = array![x2[0], 4.0 * x2[1], 0.0];
+        let beta2 = g2.dot(&(&g2 - &g1)) / g1.dot(&g1);
+        assert!(beta2.abs() > 1e-3 && beta2.abs() <= crate::gromacs::GROMACS_CG_BETA_CAP);
+        let d2 = -&g2 + beta2 * &d1;
+        let stored = match &solver.inner {
+            Inner::Nlcg { dir, .. } => dir.clone(),
+            _ => unreachable!("GROMACS cg uses Inner::Nlcg"),
+        };
+        for (got, want) in stored.iter().zip(d2.iter()) {
+            assert!(
+                (got - want).abs() < 1e-12,
+                "d2 mismatch: {stored:?} vs {d2:?}"
+            );
+        }
+
+        let (u2, _) = crate::gromacs::unit_direction_stable(d2.view());
+        let x3 = &x2 + &(istep * &u2);
+        let report = solver.step(&quad, &mut x).unwrap();
+        assert_eq!(report.status, Status::Iterating);
+        for (got, want) in x.iter().zip(x3.iter()) {
+            assert!((got - want).abs() < 1e-12, "x3 mismatch: {got} vs {want}");
+        }
+        assert_eq!(solver.nlcg_descent_fallbacks(), 0);
+    }
+
     #[test]
     fn gromacs_cg_set_objective_roundoff_preserves_downhill_rise_tolerance() {
         let mut solver = gromacs_cg_solver(0);
