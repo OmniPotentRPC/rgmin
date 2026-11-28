@@ -1037,11 +1037,21 @@ pub struct PcgConfig {
     pub rel_tol: f64,
     /// Maximum CG iterations.
     pub max_iter: usize,
+    /// Apply the operator once more at the solution and require the true
+    /// residual to meet `rel_tol`. Without it the recurrence residual decides
+    /// and [`PcgResult::rel_residual`] reports that one. Default `true`.
+    pub certify: bool,
+    /// Return the iterate reached, with [`PcgStatus::NonPositiveCurvature`]
+    /// or [`PcgStatus::IterationLimit`], where the solver would otherwise
+    /// refuse. Default `false`.
+    pub partial: bool,
 }
 
 with_setters!(PcgConfig {
     with_rel_tol => rel_tol: val f64,
     with_max_iter => max_iter: val usize,
+    with_certify => certify: val bool,
+    with_partial => partial: val bool,
 });
 
 impl Default for PcgConfig {
@@ -1049,8 +1059,23 @@ impl Default for PcgConfig {
         Self {
             rel_tol: 1e-8,
             max_iter: 1000,
+            certify: true,
+            partial: false,
         }
     }
+}
+
+/// How [`pcg_solve`] ended.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PcgStatus {
+    /// The residual met `rel_tol`.
+    Converged,
+    /// The iteration budget ended first. Only with [`PcgConfig::partial`].
+    IterationLimit,
+    /// A search direction had curvature `p^T A p` that is not positive and
+    /// finite, before the step along it. Only with [`PcgConfig::partial`].
+    NonPositiveCurvature,
 }
 
 /// Outcome of [`pcg_solve`].
@@ -1066,8 +1091,13 @@ pub struct PcgResult {
     pub iterations: usize,
     /// Total operator applications (including final true-residual certification).
     pub matvecs: usize,
-    /// Certified relative true residual `||b - A x||_2 / ||b||_2`.
+    /// Relative residual `||b - A x||_2 / ||b||_2`: the certified true
+    /// residual, or the recurrence residual of the last iterate when
+    /// [`PcgConfig::certify`] is off or the solve did not converge.
     pub rel_residual: f64,
+    /// How the solve ended. Always [`PcgStatus::Converged`] unless
+    /// [`PcgConfig::partial`] is set.
+    pub status: PcgStatus,
 }
 
 /// Preconditioned Conjugate Gradient for symmetric positive definite `A x = b`
@@ -1080,6 +1110,10 @@ pub struct PcgResult {
 /// Refuses non-positive curvature (`p^T A p <= 0`), non-positive preconditioner
 /// inner products (`r^T z <= 0`), non-finite outputs, or failure to meet the
 /// certified true residual `rel_tol` within `max_iter` steps.
+/// [`PcgConfig::partial`] turns the first and the last of these into a
+/// returned iterate with its [`PcgStatus`], and [`PcgConfig::certify`] set to
+/// `false` accepts the recurrence residual without the extra operator
+/// application.
 pub fn pcg_solve<F, P>(
     rhs: &[f64],
     op: &mut F,
@@ -1121,6 +1155,7 @@ where
             iterations: 0,
             matvecs: 0,
             rel_residual: 0.0,
+            status: PcgStatus::Converged,
         });
     }
 
@@ -1144,6 +1179,7 @@ where
 
     let mut ap = vec![0.0; n];
     let mut matvecs = 0usize;
+    let mut r_norm = b_norm;
 
     for iter in 1..=config.max_iter {
         ap.fill(0.0);
@@ -1157,6 +1193,15 @@ where
         }
         let pap = dot_slice(&p, &ap);
         if !(pap > 0.0 && pap.is_finite()) {
+            if config.partial {
+                return Ok(PcgResult {
+                    solution: x,
+                    iterations: iter - 1,
+                    matvecs,
+                    rel_residual: r_norm / b_norm,
+                    status: PcgStatus::NonPositiveCurvature,
+                });
+            }
             return Err(slq_err("PCG encountered non-positive operator curvature"));
         }
         let alpha = rz / pap;
@@ -1170,11 +1215,20 @@ where
         if !deflate_basis.is_empty() {
             project_out_basis(&mut r, &deflate_basis);
         }
-        let r_norm = norm2_slice(&r);
+        r_norm = norm2_slice(&r);
         if !r_norm.is_finite() {
             return Err(slq_err("PCG residual became non-finite"));
         }
         if r_norm <= config.rel_tol * b_norm {
+            if !config.certify {
+                return Ok(PcgResult {
+                    solution: x,
+                    iterations: iter,
+                    matvecs,
+                    rel_residual: r_norm / b_norm,
+                    status: PcgStatus::Converged,
+                });
+            }
             // Certify true residual explicitly.
             ap.fill(0.0);
             op(&x, &mut ap)?;
@@ -1197,9 +1251,11 @@ where
                     iterations: iter,
                     matvecs,
                     rel_residual: rel,
+                    status: PcgStatus::Converged,
                 });
             }
             // Replace drifted recurrence residual and continue.
+            r_norm = true_norm;
             r = true_r;
         }
 
@@ -1222,6 +1278,15 @@ where
         rz = rz_new;
     }
 
+    if config.partial {
+        return Ok(PcgResult {
+            solution: x,
+            iterations: config.max_iter,
+            matvecs,
+            rel_residual: r_norm / b_norm,
+            status: PcgStatus::IterationLimit,
+        });
+    }
     Err(slq_err(
         "PCG exhausted iteration budget before meeting rel_tol",
     ))
@@ -3022,6 +3087,7 @@ mod tests {
             PcgConfig {
                 rel_tol: 1e-12,
                 max_iter: 100,
+                ..PcgConfig::default()
             },
         )
         .expect("pcg");
@@ -3072,6 +3138,7 @@ mod tests {
                 PcgConfig {
                     rel_tol: 1e-10,
                     max_iter: 50,
+                    ..PcgConfig::default()
                 }
             )
             .is_err()
@@ -3814,6 +3881,84 @@ mod tests {
     }
 
     #[test]
+    fn pcg_partial_reports_the_iterate_and_why_it_stopped() {
+        let identity = |r: &[f64], z: &mut [f64]| -> Result<()> {
+            z.copy_from_slice(r);
+            Ok(())
+        };
+        // diag(1, 2, 3): three distinct eigenvalues need three iterations.
+        let mut spd = |x: &[f64], y: &mut [f64]| -> Result<()> {
+            for (i, (slot, &xi)) in y.iter_mut().zip(x).enumerate() {
+                *slot = (i + 1) as f64 * xi;
+            }
+            Ok(())
+        };
+        let rhs = [1.0, 1.0, 1.0];
+        let short = PcgConfig::default()
+            .with_rel_tol(1e-12)
+            .with_max_iter(1)
+            .with_partial(true);
+        let mut precond = identity;
+        let out = pcg_solve(&rhs, &mut spd, &mut precond, &[], short).expect("partial");
+        assert_eq!(out.status, PcgStatus::IterationLimit);
+        assert_eq!((out.iterations, out.matvecs), (1, 1));
+        // One steepest-descent step from zero: alpha = r.r / r.A r = 3 / 6.
+        assert_eq!(out.solution, vec![0.5, 0.5, 0.5]);
+        assert!(out.rel_residual > 1e-12);
+        let refused = pcg_solve(&rhs, &mut spd, &mut precond, &[], short.with_partial(false));
+        assert!(refused.is_err());
+
+        let mut indefinite = |x: &[f64], y: &mut [f64]| -> Result<()> {
+            y[0] = x[0];
+            y[1] = -x[1];
+            Ok(())
+        };
+        let out = pcg_solve(
+            &[0.0, 1.0],
+            &mut indefinite,
+            &mut precond,
+            &[],
+            PcgConfig::default().with_partial(true),
+        )
+        .expect("partial");
+        assert_eq!(out.status, PcgStatus::NonPositiveCurvature);
+        assert_eq!((out.iterations, out.matvecs), (0, 1));
+        assert_eq!(out.solution, vec![0.0, 0.0]);
+        assert_eq!(out.rel_residual, 1.0);
+    }
+
+    #[test]
+    fn pcg_without_certification_saves_one_operator_application() {
+        let mut precond = |r: &[f64], z: &mut [f64]| -> Result<()> {
+            z.copy_from_slice(r);
+            Ok(())
+        };
+        let mut spd = |x: &[f64], y: &mut [f64]| -> Result<()> {
+            for (i, (slot, &xi)) in y.iter_mut().zip(x).enumerate() {
+                *slot = (i + 1) as f64 * xi;
+            }
+            Ok(())
+        };
+        let rhs = [1.0, -2.0, 0.5];
+        let config = PcgConfig::default().with_rel_tol(1e-12);
+        let certified = pcg_solve(&rhs, &mut spd, &mut precond, &[], config).expect("certified");
+        let plain = pcg_solve(
+            &rhs,
+            &mut spd,
+            &mut precond,
+            &[],
+            config.with_certify(false),
+        )
+        .expect("plain");
+        assert_eq!(certified.status, PcgStatus::Converged);
+        assert_eq!(plain.status, PcgStatus::Converged);
+        assert_eq!(plain.iterations, certified.iterations);
+        assert_eq!(plain.matvecs + 1, certified.matvecs);
+        assert_eq!(plain.solution, certified.solution);
+        assert!(plain.rel_residual <= 1e-12);
+    }
+
+    #[test]
     fn pcg_validates_and_orthonormalizes_deflation() {
         let n = 6usize;
         let diag: Vec<f64> = (0..n).map(|i| 2.0 + i as f64).collect();
@@ -3828,6 +3973,7 @@ mod tests {
         let cfg = PcgConfig {
             rel_tol: 1e-12,
             max_iter: 40,
+            ..PcgConfig::default()
         };
         let mut nan = vec![1.0; n];
         nan[2] = f64::NAN;

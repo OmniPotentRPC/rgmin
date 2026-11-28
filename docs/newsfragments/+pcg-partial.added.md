@@ -1,0 +1,1 @@
+`pcg_solve` can return the iterate it reached instead of refusing: `PcgConfig::partial` reports `PcgStatus::NonPositiveCurvature` or `PcgStatus::IterationLimit` in the new `PcgResult::status`, and `PcgConfig::certify` set to `false` skips the operator application that certifies the true residual.
